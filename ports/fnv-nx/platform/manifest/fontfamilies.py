@@ -4,7 +4,7 @@
 Formats (the ones FreeType's sfnt and winfonts drivers read, which is what fc-scan and gdifont.cpp use):
   sfnt (TrueType/OpenType): `name` table, nameID 1 (family) and 16 (typographic family), platform 3 (UTF-16BE) and platform 1 (MacRoman = ASCII here)
   Windows font resource (.fon, NE or PE): every RT_FONT (type 8) resource is an FNT whose dfFace (u32 at +105) points at the NUL-terminated face name
-Assumption: Windows font formats as documented (OWNER 3).
+Assumption: Windows font formats as documented (ASM-003).
 """
 import struct
 

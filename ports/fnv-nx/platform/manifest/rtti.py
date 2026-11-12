@@ -12,7 +12,7 @@ A vtable is accepted when the word before it is a relocated pointer to a COL who
 whose type descriptor carries a decorated class name; the slots are the run of relocated words that point into code. Nothing here
 reads a name to decide anything: the decorated name is only a label for the reports; classes are identified by their TypeDescriptor
 address and bases by their TypeDescriptor addresses.
-Assumption (OWNER 1, the compiler is correct): the compiler emitted these structures as the ABI defines
+Assumption (ASM-001, the compiler is correct): the compiler emitted these structures as the ABI defines
 them; a vtable that fails the checks above is not a class vtable and is reported as `unknown` by `kind_of_word`.
 """
 import bisect
@@ -28,7 +28,7 @@ class Rtti:
                 continue
             td = mod.u32(r)
             o = None if td is None else td - mod.base
-            if o is None or not (0 < o < len(mod.img) - 12) or mod.img[o + 8:o + 11] != b".?A":
+            if o is None or not (0 < o < mod.size() - 12) or mod.data_at(td + 8, 3) != b".?A":  # a type descriptor is data
                 continue
             c = r - 12
             if c >= mod.base and mod.u32(c) == 0 and (c + 16) in rs and mod.u32(c + 4) is not None:
@@ -54,9 +54,8 @@ class Rtti:
             self.by_class.setdefault(td, {})[off] = v
 
     def name(self, td):
-        o = td + 8 - self.mod.base
-        e = self.mod.img.find(b"\0", o, o + 200)
-        return self.mod.img[o:e].decode("latin1") if e > o else "?"
+        z = self.mod.zstr(td + 8, 200)
+        return z.decode("latin1") if z else "?"
 
     def complete(self, v):
         """(type descriptor of the complete class, offset of this vtable inside the complete object)."""

@@ -38,8 +38,8 @@ class ImageError(Exception):
     """A malformed image, a facts directory that is not the pinned tree, or an image that is not the one the facts are of."""
 
 
-class CodeRead(Exception):
-    """A byte read of an address inside a run of the function facts: code is read through the decoder only."""
+class CodeRead(BaseException):
+    """A byte read of an address inside a run of the function facts: code is read through the decoder only. A BaseException on purpose: `except Exception` does not catch it, so a pass that reads code bytes stops red (L1 rule)."""
 
 
 def disasm(code, va, count=0):
@@ -196,6 +196,18 @@ class ImageRec:
         if va in self._ins[a]:
             return self._ins[a][va]
         raise CodeRead('%s: no decoded immediate or displacement at 0x%x' % (self.name, va))
+
+    def exports(self):
+        """[(key, rva | None, forwarder | None, ordinal)] of the export directory (modules.PE.exports); the export tables are data."""
+        return self._pe.exports()
+
+    def delay_dlls(self):
+        """The dll names of the delay-load directory, in directory order."""
+        return self._pe.delay_dll_names()
+
+    def import_dlls(self):
+        """The dll names of the import directory, in directory order, without repeats."""
+        return list(dict.fromkeys(d.lower() for d, _ in self._pe.import_directory()))
 
     def decode_at(self, va, count=1):
         """The first `count` instructions decoded at va."""

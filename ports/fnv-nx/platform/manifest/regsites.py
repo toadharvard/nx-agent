@@ -34,11 +34,11 @@ the class `unaccounted` and the row `dynamic`, with the instruction named). A st
 writer covering its first byte stores the constant 0. A handle opened into a field is the set of opens that store it; a NULL handle is
 dropped (Win32: invalid handle, no key accessed). Every other writer value keeps the row `dynamic`: the reason names the writer
 instruction (or the parameter / list element that is not bound).
-Assumptions: OWNER 1 (compiler correct: MSVC ABI, RTTI layout, thiscall, constructors return this), OWNER 3 (Win32 as documented: NULL
-handle, LPCSTR name arguments are inputs), OWNER 6 (no wild accesses: a pointer reaches only its object). The scope below is the existing
-one (REMOVE items owned by L5: function boundaries, forward-only control flow, complete code ranges, no computed code addresses). No new
-assumption; the ids in verify/ASSUMPTIONS.json are not yet on the trunk, so the OWNER numbers of CLAUDE.md are cited.
-Scope: as for pemanifest.py (function boundaries, forward-only control flow, no ebp slot written through a pointer);
+Assumptions: ASM-001 (compiler correct: MSVC ABI, RTTI layout, thiscall, constructors return this), ASM-003 (Win32 as documented: NULL
+handle, LPCSTR name arguments are inputs), ASM-006 (no wild accesses: a pointer reaches only its object). The scope below is the existing
+one (REMOVE items: ASM-013 complete code ranges, ASM-012 no computed code
+addresses). No other assumption; the registry is verify/ASSUMPTIONS.json.
+Scope: as for pemanifest.py (function boundaries from the function facts, forward-only control flow inside an entry, no ebp slot written through a pointer);
 stdcall/cdecl argument order (the first argument is the last push); a call through a function pointer other than a register loaded
 from the import slot, and a `jmp [slot]` thunk, is reported `dynamic` (reason `indirect`), never skipped; a global cell is not
 tracked.
@@ -51,17 +51,14 @@ row stops the pass. Output rows: module, site, api, root, subkey, value, status 
 Key-level rule (L5 lead, 2026-11-12): when the root and key path of a value access are static and the declared machine
 (declared_registry.tsv) declares no value under that key, the value name does not matter: a query answers ERROR_FILE_NOT_FOUND for
 every name and a set writes run-time hive state. The row is `static`, value `*`, reason `key-has-no-declared-values`. When a value
-is declared under the key the rule no longer applies and the row is dynamic again. No assumption beyond OWNER 3.
+is declared under the key the rule no longer applies and the row is dynamic again. No assumption beyond ASM-003.
 """
 import os, re, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import funcfacts
 from rtti import Rtti
 from regclass import Closure
-try:
-    import capstone
-    from capstone import x86_const as X
-except ImportError:  # the role table and gate_domain serve the generator without a disassembler; the pass itself needs it
-    capstone = X = None
+X = funcfacts.X
 
 # kind: open/create (out handle), read, write, enum, delete, info, close
 _BASE = {
@@ -154,23 +151,19 @@ def joins(a, b):
     return (m(a[0], b[0]), m(a[1], b[1]), a[2] if a[2] == b[2] else [])
 
 
-class Region:
-    """Decoded instructions of one function: from `start` up to the next function entry."""
+JOINED = []   # (module, site, entries) of every site whose entries give different rows (census)
 
-    def __init__(self, mod, start):
-        if capstone is None:
-            raise SystemExit("regsites: the capstone module is required for the registry-site pass")
-        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-        md.detail = True
-        o = start - mod.base
-        ins = list(md.disasm(mod.img[o:o + 0x10000], start))
-        end = None
-        for k, i in enumerate(ins[4:], 4):
-            if i.bytes[:3] == b"\x55\x8b\xec" or i.bytes[:2] == b"\x8b\xff" or \
-                    (i.bytes[:1] == b"\xcc" and k + 1 < len(ins) and ins[k + 1].bytes[:1] != b"\xcc" and ins[k + 1].address % 16 == 0):
-                end = i.address
-                break
-        self.ins = [i for i in ins if end is None or i.address < end]
+
+class Region:
+    """Decoded instructions of one entry of the function facts (funcfacts.py): the instructions of its runs, and its heads (the addresses
+    at which a flow starts from an unknown state)."""
+
+    def __init__(self, mod, entry):
+        ff = mod.ff
+        self.ins = ff.ins(entry)
+        if self.ins is None:
+            raise SystemExit("regsites: entry %x of %s has no decoded runs (%s)" % (entry, mod.name, ff.bad.get(entry)))
+        self.heads = ff.heads(entry)
 
 
 class Analyzer:
@@ -186,7 +179,7 @@ class Analyzer:
         return self.regions[start]
 
     def text(self, addr):
-        s = self.mod.cstr(addr)
+        s = self.mod.string_at(addr)
         return None if s is None else (s[2:] if s.startswith("L:") else s)
 
     def run(self, start, binds=None, track=(), this_bind=None, ev=None, results=None, cells=None):
@@ -241,10 +234,14 @@ class Analyzer:
                 reg[r] = v if op.size == 4 else UNK
                 fptr.pop(r, 0)
 
-        for i in self.region(start).ins:
+        region = self.region(start)
+        for i in region.ins:
             cur[0] = i
             ops = i.operands
-            if dead or i.address in saved:
+            if i.address in region.heads:   # a head: the state is unknown (top), whatever a forward jump saved
+                saved.pop(i.address, None)
+                reg, slots, pushes, fptr, dead = {}, {}, [], {}, False
+            elif dead or i.address in saved:
                 s = saved.pop(i.address, None)
                 reg, slots, pushes = (({}, {}, []) if s is None and dead else s if dead else joins(s, (reg, slots, pushes)))
                 fptr, dead = {}, False
@@ -437,40 +434,21 @@ class Analyzer:
         return (root, "\\".join(x for x in (path, sub) if x))
 
     def callers(self, target):
-        """Direct `call rel32` sites targeting `target`, each verified as a call instruction in its function's disassembly."""
+        """Direct `call rel32` sites targeting `target`, with each entry of the facts that contains the site (a decoded call instruction)."""
         if target not in self.callers_cache:
             mod, out = self.mod, []
-            for a, n in mod.code:
-                o0, k = a - mod.base, a - mod.base
-                while True:
-                    k = mod.img.find(b"\xe8", k, o0 + n - 4)
-                    if k < 0:
-                        break
-                    va = mod.base + k
-                    k += 1
-                    if (va + 5 + struct.unpack_from("<i", mod.img, k)[0]) & 0xffffffff != target:
-                        continue
-                    st = mod.func_start(va)
-                    if st is not None and any(i.address == va and i.mnemonic == "call" for i in self.region(st).ins):
-                        out.append((va, st))
+            for va in mod.ff.edges()[0].get(target, []) if mod.ff.ok else []:
+                out += [(va, st) for st in mod.entries_of(va)]
             self.callers_cache[target] = out
         return self.callers_cache[target]
 
     def entries_x(self, target):
         """Every reference to the entry of `target` other than a direct `call rel32`, over the whole image, as dicts
-        {kind: jmp|code|vtable|data, text, at, vtable, slot}: a `jmp rel32`, a relocated word in code (address taken), a relocated word
-        in data (a slot of an RTTI vtable, or another data word)."""
+        {kind: jmp|code|vtable|data, text, at, vtable, slot}: a decoded `jmp rel32` (funcfacts edges), a relocated word in code (address
+        taken), a relocated word in data (a slot of an RTTI vtable, or another data word)."""
         mod, out = self.mod, []
-        for a, n in mod.code:
-            o0, k = a - mod.base, a - mod.base
-            while True:
-                k = mod.img.find(b"\xe9", k, o0 + n - 4)
-                if k < 0:
-                    break
-                va = mod.base + k
-                k += 1
-                if (va + 5 + struct.unpack_from("<i", mod.img, k)[0]) & 0xffffffff == target:
-                    out.append({"kind": "jmp", "at": va, "text": "jmp from 0x%08x" % va})
+        for va in mod.ff.edges()[1].get(target, []) if mod.ff.ok else []:
+            out.append({"kind": "jmp", "at": va, "text": "jmp from 0x%08x" % va})
         for r in sorted(mod.targets().get(target, [])):
             if mod.in_code(r):
                 out.append({"kind": "code", "at": r, "text": "address word in code at 0x%08x" % r})
@@ -528,7 +506,7 @@ class Analyzer:
 
 def key_alts(an, v, depth=0):
     """[(root, path)] of a key argument | (None, reason). A NULL handle is dropped: Win32 documents ERROR_INVALID_HANDLE and no key is
-    accessed (OWNER 3). A handle opened by a call whose arguments were fields is ("H", api, args) and is resolved here, lazily."""
+    accessed (ASM-003). A handle opened by a call whose arguments were fields is ("H", api, args) and is resolved here, lazily."""
     a, why = an.alts(v)
     if a is None:
         return None, why
@@ -622,7 +600,7 @@ def rows_of(an, site, f, args, via=None):
             and not any((r.lower(), "\\".join(p for p in (pa, s) if p).lower()) in an.declared for r, pa in roots for s in subs)):
         # Key-level rule (L5 lead, 2026-11-12): the keys are static and none of them has a declared value, so a query answers
         # ERROR_FILE_NOT_FOUND whatever the value name is, and a set writes run-time hive state: the result does not depend on
-        # the name. Declared machine, OWNER 3 (Win32 as documented). When a value is declared under one of the keys the rule no
+        # the name. Declared machine, ASM-003 (Win32 as documented). When a value is declared under one of the keys the rule no
         # longer applies and the row is dynamic again.
         return [(site, f, r, "\\".join(p for p in (pa, s) if p), "*", "static", NO_VALUES, via)
                 for r, pa in roots for s in subs]
@@ -650,87 +628,98 @@ def regsites(mod, stats=None, declared=0):
     code, _ = mod.refs()
     an = Analyzer(mod, api)
     an.declared = declared_keys() if declared == 0 else declared  # None switches the key-level rule off
-    rows, seen_calls, done = [], set(), set()
+    def analyse_entry(st):
+        """Rows of the registry calls of one entry of the function facts."""
+        rows_e = []
+        calls, _ = an.run(st)
+        pend = []
+        for site, f, args in calls:
+            seen_calls.add(site)
+            if ROLES[f][5] == "close":
+                continue
+            refs = [args[k] for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None]
+            if any(v[0] in ("p", "t", "f", "g", "H") or (v[0] == "h" and v[2] is None) for v in refs):
+                pend.append((site, f, args))
+            else:
+                rows_e += rows_of(an, site, f, args)
+        if not pend:
+            return rows_e
+        ent, direct = an.entries_x(st), an.callers(st)
+        this_dep = lambda v: v[0] in ("t", "f", "g", "H")
+        fld = [(s, f, a) for s, f, a in pend if any(this_dep(a[k]) for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None)]
+        par = [x for x in pend if x not in fld]
+        got = []
+        if fld:
+            vts = [e for e in ent if e["kind"] == "vtable"]
+            others = [e["text"] for e in ent if e["kind"] != "vtable"] + ["call from 0x%08x" % va for va, _ in direct]
+            if not vts:
+                why = "this: the function is not a vtable slot, so the class of the receiver is not bound"
+            elif others:
+                why = "this: entered also through " + ", ".join(others) + ", whose receiver is not typed"
+            else:
+                why = None
+            if why:
+                got += [row for s, f, a in fld for row in rows_of(an, s, f, a, why)]
+            else:
+                want = {(s, f) for s, f, _ in fld}
+                for td, off in sorted({an.rtti().complete(e["vtable"]) for e in vts}):
+                    c2, _ = an.run(st, None, (), ("o", td, off))
+                    n = sum(len(an.closure().vcalls[w]) for w in {st})
+                    via = "receiver %s at offset %d; %d virtual call sites of this slot are in the closure of the class, the " \
+                          "arguments of calls through other receivers are not bound" % (an.rtti().name(td)[4:-2], off, n)
+                    got += [row for s, f, a in c2 if (s, f) in want for row in rows_of(an, s, f, a, via)]
+        if par:
+            if ent:
+                why = "entered also through " + ", ".join(e["text"] for e in ent) + "; the direct callers do not cover these entries"
+                got += [row for s, f, a in par for row in rows_of(an, s, f, a, why)]
+            else:
+                sets = an.arg_sets(st, 0)
+                if not sets:
+                    got += [row for s, f, a in par for row in rows_of(an, s, f, a, "no static callers")]
+                seen = set()
+                for va, p in sets:
+                    bind = {k: (p[-1 - k] if len(p) > k else NOPUSH) for k in range(8)}
+                    key = repr(sorted(bind.items()))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    c2, _ = an.run(st, bind)
+                    want = {(s, f) for s, f, _ in par}
+                    got += [row for s, f, a in c2 if (s, f) in want for row in rows_of(an, s, f, a, "via 0x%08x" % va)]
+        rows_e += got
+        if stats is not None:
+            stats.append({"func": st, "sites": len(pend), "direct": len(direct), "entries": [e["kind"] for e in ent],
+                          "resolved": bool(got) and all(r[5] == "static" for r in got)})
+        return rows_e
+
+    rows, seen_calls, done, by_entry = [], set(), set(), {}
     for slot in sorted(api):
         for ref in code.get(slot, []):
-            st = mod.func_start(ref)
-            if st is None:
-                rows.append((ref, api[slot], "dynamic", "dynamic", "dynamic", "dynamic", "no function boundary", None))
+            ents = mod.entries_of(ref)
+            if not ents:   # no entry of the facts contains the site (or the image has no facts): unresolved, never the nearest function
+                rows.append((ref, api[slot], "dynamic", "dynamic", "dynamic", "dynamic", "unresolved: " + mod.unresolved_why(ref), None))
                 continue
-            if st in done:
-                continue
-            done.add(st)
-            calls, _ = an.run(st)
-            pend = []
-            for site, f, args in calls:
-                seen_calls.add(site)
-                if ROLES[f][5] == "close":
+            for st in ents:
+                if st in done:
                     continue
-                refs = [args[k] for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None]
-                if any(v[0] in ("p", "t", "f", "g", "H") or (v[0] == "h" and v[2] is None) for v in refs):
-                    pend.append((site, f, args))
-                else:
-                    rows += rows_of(an, site, f, args)
-            if not pend:
-                continue
-            ent, direct = an.entries_x(st), an.callers(st)
-            this_dep = lambda v: v[0] in ("t", "f", "g", "H")
-            fld = [(s, f, a) for s, f, a in pend if any(this_dep(a[k]) for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None)]
-            par = [x for x in pend if x not in fld]
-            got = []
-            if fld:
-                vts = [e for e in ent if e["kind"] == "vtable"]
-                others = [e["text"] for e in ent if e["kind"] != "vtable"] + ["call from 0x%08x" % va for va, _ in direct]
-                if not vts:
-                    why = "this: the function is not a vtable slot, so the class of the receiver is not bound"
-                elif others:
-                    why = "this: entered also through " + ", ".join(others) + ", whose receiver is not typed"
-                else:
-                    why = None
-                if why:
-                    got += [row for s, f, a in fld for row in rows_of(an, s, f, a, why)]
-                else:
-                    want = {(s, f) for s, f, _ in fld}
-                    for td, off in sorted({an.rtti().complete(e["vtable"]) for e in vts}):
-                        c2, _ = an.run(st, None, (), ("o", td, off))
-                        n = sum(len(an.closure().vcalls[w]) for w in {st})
-                        via = "receiver %s at offset %d; %d virtual call sites of this slot are in the closure of the class, the " \
-                              "arguments of calls through other receivers are not bound" % (an.rtti().name(td)[4:-2], off, n)
-                        got += [row for s, f, a in c2 if (s, f) in want for row in rows_of(an, s, f, a, via)]
-            if par:
-                if ent:
-                    why = "entered also through " + ", ".join(e["text"] for e in ent) + "; the direct callers do not cover these entries"
-                    got += [row for s, f, a in par for row in rows_of(an, s, f, a, why)]
-                else:
-                    sets = an.arg_sets(st, 0)
-                    if not sets:
-                        got += [row for s, f, a in par for row in rows_of(an, s, f, a, "no static callers")]
-                    seen = set()
-                    for va, p in sets:
-                        bind = {k: (p[-1 - k] if len(p) > k else NOPUSH) for k in range(8)}
-                        key = repr(sorted(bind.items()))
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        c2, _ = an.run(st, bind)
-                        want = {(s, f) for s, f, _ in par}
-                        got += [row for s, f, a in c2 if (s, f) in want for row in rows_of(an, s, f, a, "via 0x%08x" % va)]
-            rows += got
-            if stats is not None:
-                stats.append({"func": st, "sites": len(pend), "direct": len(direct), "entries": [e["kind"] for e in ent],
-                              "resolved": bool(got) and all(r[5] == "static" for r in got)})
+                done.add(st)
+                by_entry[st] = analyse_entry(st)
+    agreed, conflicts = funcfacts.join(mod.ff, by_entry, lambda r: r[0])
+    rows += agreed
+    for site, entries, per in conflicts:   # the entries that contain the site disagree: the row is dynamic, the entries named
+        JOINED.append((mod.name, site, entries))
+        rows.append((site, next(iter(per.values()))[0][1], "dynamic", "dynamic", "dynamic", "dynamic",
+                     "the entries %s that contain the site give different rows" % ", ".join("%x" % e for e in entries), None))
     # a code reference to a registry slot that is not a call analysed above (thunk, stored pointer) is reported, not dropped
     for slot in sorted(api):
         for ref in code.get(slot, []):
-            st = mod.func_start(ref)
-            if st is None or ROLES[api[slot]][5] == "close":
+            if ROLES[api[slot]][5] == "close":
                 continue
-            ii = next((i for i in an.region(st).ins if i.address <= ref < i.address + i.size), None)
-            if ii is None:  # the reference lies outside the located function (a frameless thunk after another function)
-                rows.append((ref, api[slot], "dynamic", "dynamic", "dynamic", "dynamic", "indirect (outside function region)", None))
-            elif ii.address not in seen_calls and ii.address not in an.covered:
-                rows.append((ii.address, api[slot], "dynamic", "dynamic", "dynamic", "dynamic", "indirect (%s)" % ii.mnemonic, None))
-    return rows
+            for st in mod.entries_of(ref):
+                ii = next((i for i in an.region(st).ins if i.address <= ref < i.address + i.size), None)
+                if ii.address not in seen_calls and ii.address not in an.covered:
+                    rows.append((ii.address, api[slot], "dynamic", "dynamic", "dynamic", "dynamic", "indirect (%s)" % ii.mnemonic, None))
+    return list(dict.fromkeys(rows))
 
 
 def write(mods, out):

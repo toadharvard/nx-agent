@@ -14,7 +14,7 @@ Inputs are the pinned files of fnv-nx-build tools/fonts-wine9 (inputs/ and fonts
   Replacements     for every <alias binding="same"> of the alias conf with an <accept> list: (alias family, first accepted family that has a file in
                    <fonts-dir> by fontfamilies.py), in conf order, one row per alias family
 Refusals (exit 1): the row is absent or has fewer than the ten string fields; no substitute line is found; the fonts directory holds no font file.
-Assumptions: Wine 9.0 and fontconfig as documented (OWNER 3); the compiler is correct (OWNER 1).
+Assumptions: Wine 9.0 and fontconfig as documented (ASM-003); the compiler is correct (ASM-001).
 """
 import os
 import re

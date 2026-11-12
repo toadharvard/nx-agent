@@ -14,7 +14,7 @@ Usage: check_filesites.py
 import os, struct, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import pemanifest, filesites, fileset_classes
+import funcfacts, pemanifest, filesites, fileset_classes
 
 BASE = 0x400000
 IMP = {"CreateFileA": 0x403000, "DeleteFileA": 0x403004, "GetModuleFileNameA": 0x403008, "CreateDirectoryA": 0x40300c,
@@ -33,6 +33,8 @@ def build():
         cur[0] += (len(s) + 4) & ~3
         return a
 
+    runs = {}
+
     def asm(va, parts):
         b = bytearray()
         for p in parts:
@@ -45,6 +47,7 @@ def build():
             else:
                 b += bytes(p)
         put(va, bytes(b))
+        runs[va] = [(va, va + len(b))]
         put(va + len(b), b"\xcc" * ((-(va + len(b))) % 16 or 16))
 
     pro = [b"\x55\x8b\xec"]
@@ -66,10 +69,7 @@ def build():
     asm(0x4011d0, pro + [b"\x68", ("abs", s["nvapi.dll"])] + call("LoadLibraryA") + [b"\x5d\xc3"])
     asm(0x401210, pro + [b"\x68", ("abs", s["user32.dll"])] + call("LoadLibraryA") + [b"\x5d\xc3"])
     asm(0x401250, pro + cf([b"\x68", ("abs", s["CONOUT$"])]) + ret)
-    m = pemanifest.Mod.__new__(pemanifest.Mod)
-    m.name, m.base, m.img, m.relocs = "synth.exe", BASE, bytes(img), sorted(rel)
-    m.code = [(0x401000, 0x400)]
-    m.imports = [("kernel32.dll", n, a) for n, a in IMP.items()]
+    m = pemanifest.Mod.synthetic("synth.exe", BASE, img, rel, [("kernel32.dll", n, a) for n, a in IMP.items()], [(0x401000, 0x400)], runs)
     return m
 
 

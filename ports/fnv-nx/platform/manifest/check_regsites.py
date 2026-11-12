@@ -14,7 +14,7 @@ Usage: check_regsites.py [specs dir]   (with a Wine specs dir it also checks the
 import os, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import pemanifest, regsites
+import funcfacts, pemanifest, regsites
 
 BASE = 0x400000
 OPEN, QUERY, SETV, SAVE = 0x403000, 0x403004, 0x403008, 0x40300c
@@ -35,6 +35,8 @@ def build():
         cur[0] += (len(s) + 4) & ~3
         return a
 
+    runs = {}
+
     def asm(va, parts):
         b = bytearray()
         for p in parts:
@@ -47,6 +49,7 @@ def build():
             else:
                 b += bytes(p)
         put(va, bytes(b))
+        runs[va] = [(va, va + len(b))]
         put(va + len(b), b"\xcc" * ((-(va + len(b))) % 16 or 16))
 
     sw, val, n1, n2, cp = (string(x) for x in ("Software\\Synth\\Game", "Installed Path", "N1", "N2", "Control Panel\\X"))
@@ -138,10 +141,7 @@ def build():
     asm(0x4015c0, [b"\xe9", ("rel", 0x401580)])
     asm(0x4015e0, [b"\xb8", ("abs", 0x401580), b"\xc3"])
     asm(0x4013f0, [b"\xc3"])
-    m = pemanifest.Mod.__new__(pemanifest.Mod)
-    m.name, m.base, m.img, m.relocs = "synth.exe", BASE, bytes(img), sorted(rel)
-    m.code = [(0x401000, 0x800)]
-    m.imports = [("advapi32.dll", "RegOpenKeyA", OPEN), ("advapi32.dll", "RegQueryValueExA", QUERY), ("advapi32.dll", "RegSetValueExA", SETV)]
+    m = pemanifest.Mod.synthetic("synth.exe", BASE, img, rel, [("advapi32.dll", "RegOpenKeyA", OPEN), ("advapi32.dll", "RegQueryValueExA", QUERY), ("advapi32.dll", "RegSetValueExA", SETV)], [(0x401000, 0x800)], runs)
     return m
 
 
