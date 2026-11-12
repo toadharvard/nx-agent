@@ -73,5 +73,37 @@ bad, err = ga.judge(files, adm(dict(tool, path="other/verify"), doc), GATES, yes
 check("a root outside the port tree is refused", err and T + "/verify/a.py" in bad)
 bad, err = ga.judge([], adm(tool, doc), GATES, yes)
 check("an empty tree is certified", not bad and not err)
+# class test
+TG = list(ga.REQUIRED_TEST)
+troot = {"path": T + "/tests", "class": "test", "target": "guest", "gates": TG, "recipe": T + "/tests/build.json"}
+tf = [T + "/tests/t.cc"]
+bad, err = ga.judge(tf, adm(tool, doc, troot), GATES + TG, yes)
+check("a test root with its REQUIRED_TEST gates, a recipe and a target is certified (REQUIRED_PRODUCT is not asked of it)", not bad and not err)
+check("REQUIRED_TEST is the build family, doubles, oracle, stub, assumptions, legal, pure",
+      set(ga.REQUIRED_TEST) == {"build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure"}
+      and not set(ga.REQUIRED_TEST) >= set(ga.REQUIRED_PRODUCT))
+for g in TG:
+    bad, err = ga.judge(tf, adm(tool, doc, dict(troot, gates=[x for x in TG if x != g])), GATES + TG, yes)
+    check("a test root without gate %s is refused" % g, list(bad) == tf and any(g in e for e in err))
+bad, err = ga.judge(tf, adm(tool, doc, troot), GATES + [g for g in TG if g != "doubles"], yes)
+check("a test root cannot be admitted while the doubles gate has no file in gates.d", list(bad) == tf and any("doubles" in e for e in err))
+bad, err = ga.judge(tf, adm(tool, doc, {k: v for k, v in troot.items() if k != "target"}), GATES + TG, yes)
+check("a test root without a target is refused", list(bad) == tf and any("target" in e for e in err))
+bad, err = ga.judge(tf, adm(tool, doc, dict(troot, target="elsewhere")), GATES + TG, yes)
+check("a test root with an unknown target is refused", list(bad) == tf)
+bad, err = ga.judge(tf, adm(tool, doc, troot), GATES + TG, no)
+check("a test root whose recipe file does not exist is refused", list(bad) == tf and any("recipe" in e for e in err))
+bad, err = ga.judge(tf, adm(tool, doc, dict(troot, **{"class": "product"})), GATES + TG, yes)
+check("the same root as a product root is refused: it lacks REQUIRED_PRODUCT", list(bad) == tf)
+
+import json  # noqa: E402
+import tempfile  # noqa: E402
+import gate_build as gbd  # noqa: E402
+rp = tempfile.mkdtemp(prefix="admit-roots-")
+os.makedirs(rp + "/ports/fnv-nx/verify")
+json.dump({"roots": [{"path": T + "/p", "class": "product"}, {"path": T + "/t", "class": "test"}, {"path": T + "/v", "class": "tool"}]},
+          open(rp + "/ports/fnv-nx/verify/admit.json", "w"))
+check("the build family judges the product and the test roots; the other gates keep the product roots",
+      gbd.buildable_roots(rp) == [T + "/p", T + "/t"] and gbd.product_roots(rp) == [T + "/p"])
 print("%d failed" % fails)
 sys.exit(1 if fails else 0)

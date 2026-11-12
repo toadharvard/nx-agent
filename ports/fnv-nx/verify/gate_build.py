@@ -24,6 +24,11 @@ def product_roots(repo="."):
     return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] == "product")
 
 
+def buildable_roots(repo="."):
+    """The roots the build family (build, determinism, linkstrict, objstub) judges: the product roots and the test roots (admit class test)."""
+    return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] in ("product", "test"))
+
+
 NO_ROOT = "no product root (nothing to build yet)"
 
 
@@ -66,7 +71,7 @@ def main():
     roots = recipe.load_admit(repo)
     files = recipe.tracked(repo)
     try:
-        for root in product_roots(repo):
+        for root in buildable_roots(repo):
             rec = recipe.load_recipe(repo, roots, root)
             try:
                 res, out = ensure(root, cache, repo)
@@ -88,7 +93,7 @@ def main():
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     bad = sorted(set(items) - set(done))
-    detail = "; ".join(why) or ("%d units/ELF built from %d product roots" % (len(items), len(product_roots(repo))) if items else
+    detail = "; ".join(why) or ("%d units/ELF built from %d product and test roots" % (len(items), len(buildable_roots(repo))) if items else
                                 NO_ROOT)
     res = {"format": "fnvnx-gate/1", "name": "build", "status": "red" if why else "green", "universe": len(items),
            "certified": len(set(done) & set(items)), "uncertified": bad[:50], "detail": detail[:900]}
