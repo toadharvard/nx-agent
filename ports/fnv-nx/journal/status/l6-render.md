@@ -352,3 +352,4 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - aL as an ALU source is UNDEFINED (the docs allow aL only in relative addressing).
         - sincos follows the instruction's own page (.x/.y/.xy).
         - ARGS needs a draw-time rule; deferred until after the root (pause).
+- 08:51Z Orchestrator: trunk claude/fnv-nx-clean at 11187daf; candidate 83f7504f adds the -dU stage, and verdict v6 runs on it. w6 (session_01KmtZKQbpDKvc9qzXT9bLHX) rebases render/d3d9 onto 83f7504f, replacing 862b0708, and reports units built/red with the commit: doing.
