@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """d9s_shaders.py: distinct shaders and bound (VS, PS) pairs of a D9S1 stream (render/d3d9/gen/STREAM.md), streaming.
   python3 -I d9s_shaders.py [--spec d3d9_spec.json] OUTDIR STREAM.d9s
-OUTDIR gets <hash>.bin (key = fnvnx_shader_hash, FNV-1a 64 of the bytecode, 16 hex digits), pairs.tsv (vs ps draws first_frame) and stats.json.
+OUTDIR gets <key>.bin (key = SHA-256 of the bytecode, 64 hex digits), pairs.tsv (vs ps draws first_frame) and stats.json.
 Device state tracked per device object: Set{Vertex,Pixel}Shader (recorded instead of applied between Begin/EndStateBlock), CreateStateBlock
 (captures the current shader binding of its categories), Capture, Apply, Reset (state back to NULL). A draw with a NULL stage is fixed function
 for that stage: counted by kind, never a pair.  Exit codes: 0 ok, 2 malformed stream or a binding of an unknown object, 3 hash collision (same
@@ -17,12 +17,6 @@ PRESENTS = ("Present", "PresentEx")
 
 class StreamError(Exception): pass
 class CollisionError(Exception): pass
-
-
-def fnv1a64(b):
-    h = 0xCBF29CE484222325
-    for c in b: h = ((h ^ c) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return h
 
 
 def stage_of(bc):
@@ -129,9 +123,8 @@ def scan(data, spec, spec_sha=None):
             bc = ins["byte_code"]; stg = "vs" if role == "cvs" else "ps"
             if not ok: st["create_failed"] += 1; continue
             if stage_of(bc) != stg: raise StreamError(f"seq {seq - 1}: {m['name']} bytecode has stage {stage_of(bc)}")
-            sha = hashlib.sha256(bc).hexdigest(); h = fnv1a64(bc)
-            if h in shaders and shaders[h][2] != sha: raise CollisionError(f"hash {h:016x}: two bytecodes, SHA-256 {shaders[h][2]} and {sha}")
-            shaders.setdefault(h, (stg, bc, sha)); creates[(frame, stg)] += 1; st["creates_" + stg] += 1; first_create.setdefault(h, frame)
+            h = hashlib.sha256(bc).hexdigest()
+            shaders.setdefault(h, (stg, bc, h)); creates[(frame, stg)] += 1; st["creates_" + stg] += 1; first_create.setdefault(h, frame)
             objs[u32(outs["shader"])] = (stg, h)
         elif role in ("svs", "sps"):
             stg = "vs" if role == "svs" else "ps"; oid = u32(ins["pShader"])
@@ -181,13 +174,13 @@ def scan(data, spec, spec_sha=None):
 def write_out(outdir, stats, shaders, pairs, first_create):
     os.makedirs(outdir, exist_ok=True)
     for h, (stg, bc, sha) in shaders.items():
-        fn = os.path.join(outdir, f"{h:016x}.bin")
+        fn = os.path.join(outdir, f"{h}.bin")
         if os.path.exists(fn) and open(fn, "rb").read() != bc: raise CollisionError(f"{fn} exists with other content")
         open(fn, "wb").write(bc)
     with open(os.path.join(outdir, "pairs.tsv"), "w") as f:
         f.write("vs\tps\tdraws\tfirst_frame\n")
-        for (a, b), (c, fr) in sorted(pairs.items()): f.write(f"{a:016x}\t{b:016x}\t{c}\t{fr}\n")
-    stats = dict(stats, shaders={f"{h:016x}": {"stage": v[0], "size": len(v[1]), "sha256": v[2], "first_frame": first_create[h]} for h, v in sorted(shaders.items())})
+        for (a, b), (c, fr) in sorted(pairs.items()): f.write(f"{a}\t{b}\t{c}\t{fr}\n")
+    stats = dict(stats, shaders={h: {"stage": v[0], "size": len(v[1]), "sha256": v[2], "first_frame": first_create[h]} for h, v in sorted(shaders.items())})
     json.dump(stats, open(os.path.join(outdir, "stats.json"), "w"), indent=1, sort_keys=True)
 
 

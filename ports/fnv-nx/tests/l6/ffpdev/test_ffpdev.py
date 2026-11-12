@@ -62,7 +62,7 @@ def gens(tmp):
 CXX = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w"]
 
 
-def flags(tmp): return CXX + ["-I", INC, "-I", tmp, "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
+def flags(tmp): return CXX + ["-I", INC, "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-I", tmp, "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
 
 
 def src_of(name, tmp):
@@ -80,6 +80,7 @@ def build(tmp, jobs=3):
         o = os.path.join(tmp, s + ".o"); objs[s] = o
         if s.endswith(".c"): cmds.append(["gcc", "-m32", "-std=gnu11", "-O1", "-w", "-I", FFP, "-I", os.path.join(HERE, "ref"), "-c", src_of(s, tmp), "-o", o])
         else: cmds.append(flags(tmp) + ["-c", src_of(s, tmp), "-o", o])
+    objs["sha256"] = os.path.join(tmp, "sha256.o"); cmds.append(["gcc", "-m32", "-std=c99", "-O1", "-w", "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-c", os.path.join(ROOT, "lib", "sha256", "sha256.c"), "-o", os.path.join(tmp, "sha256.o")])
     fronts = sorted(f for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
     for f in fronts:
         o = os.path.join(tmp, "nx_" + f + ".o"); objs["nx_" + f] = o; cmds.append(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", os.path.join(FRONT, f), "-o", o])
@@ -185,7 +186,7 @@ def mut_build(base, tmp, rel, old, new, idx):
         fd = os.path.join(mdir, "ffp"); shutil.copytree(FFP, fd); shutil.copy(mp, os.path.join(fd, os.path.basename(rel))); g = os.path.join(mdir, "gen"); os.makedirs(g)
         r = sh([sys.executable, "-I", os.path.join(fd, "gen_glsl.py"), g])
         if r.returncode: return None, "gen_glsl: " + r.stderr[-300:]
-        o = os.path.join(mdir, "x.o"); r = sh(CXX + ["-I", INC, "-I", g, "-I", base["tmp"], "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE, "-c", os.path.join(DEV, "ffp_prog.cpp"), "-o", o])
+        o = os.path.join(mdir, "x.o"); r = sh(CXX + ["-I", INC, "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-I", g, "-I", base["tmp"], "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE, "-c", os.path.join(DEV, "ffp_prog.cpp"), "-o", o])
         if r.returncode: return None, "compile: " + r.stderr[-300:]
         objs["ffp_prog.cpp"] = o
     exe = os.path.join(mdir, "t"); r = sh(["g++", "-m32", "-no-pie", "-o", exe] + list(objs.values()) + ["-lm", "-Wl,--unresolved-symbols=ignore-all"])

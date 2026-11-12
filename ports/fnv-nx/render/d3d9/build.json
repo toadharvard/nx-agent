@@ -51,7 +51,8 @@
  "include": [
   "ports/fnv-nx/shim/include",
   "ports/fnv-nx/render/backend",
-  "ports/fnv-nx/render/shaders/include"
+  "ports/fnv-nx/render/shaders/include",
+  "ports/fnv-nx/lib/sha256/include"
  ],
  "units": "all",
  "generated": [

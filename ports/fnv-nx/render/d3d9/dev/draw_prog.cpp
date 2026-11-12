@@ -46,7 +46,7 @@ static uint32_t shader_prog(NxShaderCore* s, uint32_t stage, uint32_t variant, c
     uint32_t cb = (s->nbytes + 3u) & ~3u, bytes = (cb + nl + 4095u) & ~4095u; uint8_t* m = (uint8_t*)nxd3d_gpu_alloc(bytes); if (!m) { *hr = D3DERR_OUTOFVIDEOMEMORY; return 0; } memset(m, 0, bytes);
     memcpy(m, s->code, s->nbytes); memcpy(m + cb, l, nl);
     NxShaderD3D* d = (NxShaderD3D*)nxs_scratch(sizeof *d); memset(d, 0, sizeof *d);
-    d->bytecode = FNVNX_ADDR_(m); d->size = s->nbytes; d->stage = (uint8_t)stage; d->variant = (uint8_t)variant; d->hash = s->hash; d->link_pairs = FNVNX_ADDR_(m + cb); d->n_link_pairs = nl;
+    d->bytecode = FNVNX_ADDR_(m); d->size = s->nbytes; d->stage = (uint8_t)stage; d->variant = (uint8_t)variant; memcpy(d->key, s->key, sizeof d->key); d->link_pairs = FNVNX_ADDR_(m + cb); d->n_link_pairs = nl;
     uint64_t a[1] = {FNVNX_ADDR_(d)}, r = nxd3d_gpu_call(NXGPU_FN_SHADER_CREATE_D3D, a, 1); nxd3d_gpu_free(m);
     if (!nxs_ok(r) || r == 0 || r >= (1u << 16)) { *hr = D3DERR_DRIVERINTERNALERROR; return 0; }
     NxShaderProg& p = s->progs[s->nprogs++]; memset(&p, 0, sizeof p); p.variant = (uint8_t)variant; p.n_l = (uint8_t)nl; memcpy(p.l, l, nl); p.id = (uint32_t)r; return p.id;

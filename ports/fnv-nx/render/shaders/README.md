@@ -127,7 +127,7 @@ the slot of COLOR1) and lists ps_1_x `t#` among the PS inputs.
 `fnvnx_shader_translate(bytecode, n, opts, result)` -> `result.dksh`, `result.reflection_json`,
 optional `result.glsl`, `result.stats` (D3D slots, GLSL statements, Maxwell instructions, GPRs, code
 bytes: the baseline for any later backend). `fnvnx_shader_ctab` returns the constant table as structs.
-`fnvnx_shader_hash` = FNV-1a 64 of the bytecode (cache key). `fnvnx_dksh_validate` checks DKSH headers.
+The cache key is the SHA-256 of the bytecode (`fnvnx_sha256`, lib/sha256; hex name `fnvnx_shader_key_hex`). `fnvnx_dksh_validate` checks DKSH headers.
 SDP reader/writer: `include/fnvnx_sdp.h`, format in [`SDP.md`](SDP.md).
 
 ## Fixes to MojoShader in the patch (besides the profile)

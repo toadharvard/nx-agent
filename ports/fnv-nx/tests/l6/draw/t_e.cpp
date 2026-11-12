@@ -1,7 +1,8 @@
 // part e: program pairs: backend shader creation per (shader, variant bit, link set L) against the python reimplementation of the fnvnx_dk_layout.h rules (oracle.py write_e); lazy creation, caching, destruction.
 // Case lines: vs <hex> / ps <hex|ffp> / expect <variant> <pair codes of L> / end
 #include "t_common.h"
-static uint64_t fnv64(const std::vector<uint8_t>& b) { uint64_t h = 0xcbf29ce484222325ull; for (uint8_t x : b) { h ^= x; h *= 0x100000001b3ull; } return h; }
+#include "fnvnx_sha256.h"
+static bool key_of(const uint8_t* key, const std::vector<uint8_t>& b) { uint8_t k[32]; fnvnx_sha256(b.data(), b.size(), k); return !memcmp(key, k, 32); }
 void t_e() {
     t_part('e'); FILE* f = t_open("e.txt"); char line[8192]; int n = 0;
     while (f && fgets(line, sizeof line, f)) {
@@ -20,8 +21,8 @@ void t_e() {
         std::vector<const Call*> cr; for (auto& c : g_calls) if (c.fn == NXGPU_FN_SHADER_CREATE_D3D) cr.push_back(&c);
         bool ok = cr.size() == (ffp ? 1u : 2u) && t_count(NxOp_Draw) == 1;
         if (ok) {
-            const Call& cv = *cr[0]; ok = cv.sd.stage == 0 && cv.sd.variant == variant && cv.sd.n_link_pairs == L.size() && !memcmp(cv.l, L.data(), L.size()) && cv.sd.hash == fnv64(cv.code) && cv.code.size() == vs.size() * 4 && !memcmp(cv.code.data(), vs.data(), vs.size() * 4);
-            if (!ffp) { const Call& cp = *cr[1]; ok = ok && cp.sd.stage == 1 && cp.sd.variant == 0 && cp.sd.n_link_pairs == L.size() && !memcmp(cp.l, L.data(), L.size()) && cp.sd.hash == fnv64(cp.code) && cp.code.size() == ps.size() * 4 && !memcmp(cp.code.data(), ps.data(), ps.size() * 4); }
+            const Call& cv = *cr[0]; ok = cv.sd.stage == 0 && cv.sd.variant == variant && cv.sd.n_link_pairs == L.size() && !memcmp(cv.l, L.data(), L.size()) && key_of(cv.sd.key, cv.code) && cv.code.size() == vs.size() * 4 && !memcmp(cv.code.data(), vs.data(), vs.size() * 4);
+            if (!ffp) { const Call& cp = *cr[1]; ok = ok && cp.sd.stage == 1 && cp.sd.variant == 0 && cp.sd.n_link_pairs == L.size() && !memcmp(cp.l, L.data(), L.size()) && key_of(cp.sd.key, cp.code) && cp.code.size() == ps.size() * 4 && !memcmp(cp.code.data(), ps.data(), ps.size() * 4); }
         }
         if (ok) {   // the state names the created ids (vs, ps) and a second draw creates nothing
             const Ev* ds = t_nth(NxOp_DefineState, 0); ok = ds && ds->a[1] == cr[0]->ret && ds->a[2] == (ffp ? g_ffp_ps_id : cr[1]->ret);

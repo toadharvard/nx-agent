@@ -13,7 +13,7 @@ frames that each have >= 100 draw calls and, over the run, bind >= 50 distinct t
 (farm run of 783ec078, 4 recordings, 26,000 frames of boot, loading screens and the main menu): draws per frame never exceed 28 (median 4-19);
 a world cell has hundreds of draws per frame.  Per-frame draw percentiles are printed whatever the verdict.
 Exit 0 ok, 2 unreadable stream, 4 world not reached (with --require-world)."""
-import argparse, collections, json, os, re, struct, sys
+import argparse, collections, hashlib, json, os, re, struct, sys
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "cmp"))
@@ -26,10 +26,8 @@ FFP = ("SetFVF", "SetTransform", "MultiplyTransform", "SetLight", "LightEnable",
 FMT = {22: "X8R8G8B8", 21: "A8R8G8B8", 23: "R5G6B5", 24: "X1R5G5B5"}
 
 
-def fnv1a64(b):
-    h = 0xcbf29ce484222325
-    for c in b: h = ((h ^ c) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
-    return h
+def key_of(b):
+    return hashlib.sha256(bytes(b)).hexdigest()
 
 
 def load(data, spec):
@@ -63,7 +61,7 @@ def analyse(data, spec):
         if n.startswith("Create") and dev:
             if n in ("CreateVertexShader", "CreatePixelShader"):
                 k = "VS" if n == "CreateVertexShader" else "PS"; bc = byl["in:byte_code"].data; c["create_" + k] += 1; creates[k] += 1
-                h = fnv1a64(bc); hashes[k][h] += 1; first_hash_frame.setdefault((k, h), f)
+                h = key_of(bc); hashes[k][h] += 1; first_hash_frame.setdefault((k, h), f)
             else: c["create_other"] += 1; other_create_by_method[n] += 1
         if any(p["kind"] == "locked" for p in m["params"]):
             c["locks"] += 1; c["lock_bytes_in"] += sum(len(i.data) for i in r.items if i.label.startswith("lock:") and i.label.endswith(":data") and i.data)
@@ -134,7 +132,7 @@ def build(a, spec, window, world=WORLD_DEFAULT):
          "decode_error": a["err"], "threads": len(a["threads"]), "calls_per_thread": list(a["threads"].values()), "max_depth": max(a["depth"]) if a["depth"] else 0,
          "nested_records": sum(v for k, v in a["depth"].items() if k > 0),
          "creates": {"VS": a["creates"]["VS"], "PS": a["creates"]["PS"], "distinct_VS": len(a["hashes"]["VS"]), "distinct_PS": len(a["hashes"]["PS"]),
-                     "distinct_either": len(set(a["hashes"]["VS"]) | set(a["hashes"]["PS"])), "hash": "fnv1a64", "last_frame_with_create": cf[-1] if cf else None,
+                     "distinct_either": len(set(a["hashes"]["VS"]) | set(a["hashes"]["PS"])), "hash": "sha256", "last_frame_with_create": cf[-1] if cf else None,
                      "first_frame_with_create": cf[0] if cf else None, "frames_with_create": len(cf), "first_draw_frame": fd, "creates_from_first_draw_frame_on": after,
                      "window": [win[0], win[-1]] if win else None, "window_hist": dict(sorted(hist.items()))},
          "other_create_by_method": dict(a["other_create"]), "totals": dict(tot), "called": {f"{i or '(export)'}::{n}": v for (i, n), v in sorted(a["called"].items(), key=lambda kv: (str(kv[0][0]), kv[0][1]))},

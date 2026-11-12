@@ -2,8 +2,9 @@
 #include "shcache.h"
 #include <stdlib.h>
 #include <string.h>
+#include "fnvnx_sha256.h"
 
-typedef struct lent { shcache_key k; uint64_t lh; uint8_t *payload; size_t n; } lent;
+typedef struct lent { shcache_key k; uint8_t lk[SHCACHE_KEY_LEN]; uint8_t *payload; size_t n; } lent;
 struct shcache {
     const uint8_t *main; size_t main_n; uint32_t n_main;
     uint8_t build_id[SHCACHE_BUILD_ID_LEN];
@@ -12,17 +13,16 @@ struct shcache {
 };
 
 static uint32_t rd32(const uint8_t *p) { return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
-static uint64_t rd64(const uint8_t *p) { return rd32(p) | (uint64_t)rd32(p + 4) << 32; }
 static void wr32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
-static void wr64(uint8_t *p, uint64_t v) { wr32(p, (uint32_t)v); wr32(p + 4, (uint32_t)(v >> 32)); }
 
-/* order of the index: (code_hash, stage, flags, l_hash, code_len) */
-static int cmp(uint64_t h1, unsigned s1, uint32_t f1, uint64_t l1, uint32_t n1, uint64_t h2, unsigned s2, uint32_t f2, uint64_t l2, uint32_t n2)
+/* order of the index: (code_key, stage, flags, l_key, code_len), the keys compared as byte strings */
+static int cmp(const uint8_t *h1, unsigned s1, uint32_t f1, const uint8_t *l1, uint32_t n1, const uint8_t *h2, unsigned s2, uint32_t f2, const uint8_t *l2, uint32_t n2)
 {
-    if (h1 != h2) return h1 < h2 ? -1 : 1;
+    int r;
+    if ((r = memcmp(h1, h2, SHCACHE_KEY_LEN)) != 0) return r < 0 ? -1 : 1;
     if (s1 != s2) return s1 < s2 ? -1 : 1;
     if (f1 != f2) return f1 < f2 ? -1 : 1;
-    if (l1 != l2) return l1 < l2 ? -1 : 1;
+    if ((r = memcmp(l1, l2, SHCACHE_KEY_LEN)) != 0) return r < 0 ? -1 : 1;
     if (n1 != n2) return n1 < n2 ? -1 : 1;
     return 0;
 }
@@ -34,24 +34,31 @@ static int l_ok(const uint8_t *l, uint32_t n)             /* ascending, unique, 
 }
 static uint32_t round4(uint32_t v) { return (v + 3) & ~3u; }
 
+/* index entry fields (SHCACHE_INDEX_ENTRY bytes) */
+enum { E_CODE = 0, E_L = 32, E_LEN = 64, E_FLAGS = 68, E_STAGE = 72, E_NL = 73, E_BLOB = 76, E_SIZE = 80 };
+/* main header fields */
+enum { H_CNT = 24, H_INDEX = 28, H_BLOB = 32, H_SIZE = 36, H_BODY = 40, H_ZERO = 72 };
+
 static int main_valid(shcache *c, const uint8_t *b, size_t n, const uint8_t *build_id)
 {
-    uint32_t cnt, run, i; const uint8_t *prev = NULL;
+    uint32_t cnt, run, i; const uint8_t *prev = NULL; uint8_t body[SHCACHE_KEY_LEN];
     if (!b || n < SHCACHE_MAIN_HEADER || memcmp(b, "FNSC", 4) || rd32(b + 4) != SHCACHE_VERSION) return 0;
     if (build_id && memcmp(b + 8, build_id, SHCACHE_BUILD_ID_LEN)) return 0;
-    cnt = rd32(b + 24);
-    if (rd32(b + 28) != SHCACHE_MAIN_HEADER || (uint64_t)cnt * SHCACHE_INDEX_ENTRY + SHCACHE_MAIN_HEADER > n) return 0;
+    cnt = rd32(b + H_CNT);
+    if (rd32(b + H_INDEX) != SHCACHE_MAIN_HEADER || (uint64_t)cnt * SHCACHE_INDEX_ENTRY + SHCACHE_MAIN_HEADER > n) return 0;
     run = SHCACHE_MAIN_HEADER + cnt * SHCACHE_INDEX_ENTRY;
-    if (rd32(b + 32) != run || rd32(b + 36) != n || n > 0xFFFFFFFFu) return 0;
-    for (i = 48; i < 64; i++) if (b[i]) return 0;
-    if (rd64(b + 40) != shcache_hash64(b + SHCACHE_MAIN_HEADER, n - SHCACHE_MAIN_HEADER)) return 0;
+    if (rd32(b + H_BLOB) != run || rd32(b + H_SIZE) != n || n > 0xFFFFFFFFu) return 0;
+    for (i = H_ZERO; i < SHCACHE_MAIN_HEADER; i++) if (b[i]) return 0;
+    fnvnx_sha256(b + SHCACHE_MAIN_HEADER, n - SHCACHE_MAIN_HEADER, body);
+    if (memcmp(b + H_BODY, body, SHCACHE_KEY_LEN)) return 0;
     for (i = 0; i < cnt; i++) {
-        const uint8_t *e = b + SHCACHE_MAIN_HEADER + (size_t)i * SHCACHE_INDEX_ENTRY, *bl; uint32_t off = rd32(e + 28), sz = rd32(e + 32), nl = e[25];
-        if (e[24] > 1 || (rd32(e + 20) & ~SHCACHE_FLAGS_MASK) || nl > SHCACHE_MAX_L || e[26] || e[27]) return 0;
+        const uint8_t *e = b + SHCACHE_MAIN_HEADER + (size_t)i * SHCACHE_INDEX_ENTRY, *bl; uint32_t off = rd32(e + E_BLOB), sz = rd32(e + E_SIZE), nl = e[E_NL]; uint8_t lk[SHCACHE_KEY_LEN];
+        if (e[E_STAGE] > 1 || (rd32(e + E_FLAGS) & ~SHCACHE_FLAGS_MASK) || nl > SHCACHE_MAX_L || e[E_NL + 1] || e[E_NL + 2]) return 0;
         if (off != run || sz < round4(1 + nl) || (uint64_t)off + sz > n) return 0;
         bl = b + off;
-        if (bl[0] != nl || !l_ok(bl + 1, nl) || rd64(e + 8) != shcache_l_hash(bl + 1, nl)) return 0;
-        if (prev && cmp(rd64(prev), prev[24], rd32(prev + 20), rd64(prev + 8), rd32(prev + 16), rd64(e), e[24], rd32(e + 20), rd64(e + 8), rd32(e + 16)) >= 0) return 0;
+        shcache_l_key(bl + 1, nl, lk);
+        if (bl[0] != nl || !l_ok(bl + 1, nl) || memcmp(e + E_L, lk, SHCACHE_KEY_LEN)) return 0;
+        if (prev && cmp(prev + E_CODE, prev[E_STAGE], rd32(prev + E_FLAGS), prev + E_L, rd32(prev + E_LEN), e + E_CODE, e[E_STAGE], rd32(e + E_FLAGS), e + E_L, rd32(e + E_LEN)) >= 0) return 0;
         prev = e; run += sz;
     }
     if (run != n) return 0;
@@ -61,13 +68,14 @@ static int main_valid(shcache *c, const uint8_t *b, size_t n, const uint8_t *bui
 
 static int find_main(const shcache *c, const shcache_key *k, const uint8_t **pay, size_t *n)
 {
-    uint64_t lh = shcache_l_hash(k->l, k->n_l); uint32_t lo = 0, hi = c->n_main;
+    uint8_t lk[SHCACHE_KEY_LEN]; uint32_t lo = 0, hi = c->n_main;
+    shcache_l_key(k->l, k->n_l, lk);
     while (lo < hi) {
         uint32_t mid = lo + (hi - lo) / 2; const uint8_t *e = c->main + SHCACHE_MAIN_HEADER + (size_t)mid * SHCACHE_INDEX_ENTRY;
-        int r = cmp(rd64(e), e[24], rd32(e + 20), rd64(e + 8), rd32(e + 16), k->code_hash, k->stage, k->flags, lh, k->code_len);
+        int r = cmp(e + E_CODE, e[E_STAGE], rd32(e + E_FLAGS), e + E_L, rd32(e + E_LEN), k->code_key, k->stage, k->flags, lk, k->code_len);
         if (r < 0) lo = mid + 1; else if (r > 0) hi = mid;
         else {
-            const uint8_t *bl = c->main + rd32(e + 28); uint32_t sz = rd32(e + 32), pre = round4(1 + k->n_l);
+            const uint8_t *bl = c->main + rd32(e + E_BLOB); uint32_t sz = rd32(e + E_SIZE), pre = round4(1 + k->n_l);
             if (bl[0] != k->n_l || memcmp(bl + 1, k->l, k->n_l)) return 0;
             *pay = bl + pre; *n = sz - pre; return 1;
         }
@@ -77,10 +85,11 @@ static int find_main(const shcache *c, const shcache_key *k, const uint8_t **pay
 
 static int find_log(const shcache *c, const shcache_key *k, uint32_t *pos)   /* 1 found at *pos, else *pos = insertion point */
 {
-    uint64_t lh = shcache_l_hash(k->l, k->n_l); uint32_t lo = 0, hi = c->n_ents;
+    uint8_t lk[SHCACHE_KEY_LEN]; uint32_t lo = 0, hi = c->n_ents;
+    shcache_l_key(k->l, k->n_l, lk);
     while (lo < hi) {
         uint32_t mid = lo + (hi - lo) / 2; const lent *e = &c->ents[mid];
-        int r = cmp(e->k.code_hash, e->k.stage, e->k.flags, e->lh, e->k.code_len, k->code_hash, k->stage, k->flags, lh, k->code_len);
+        int r = cmp(e->k.code_key, e->k.stage, e->k.flags, e->lk, e->k.code_len, k->code_key, k->stage, k->flags, lk, k->code_len);
         if (r < 0) lo = mid + 1; else if (r > 0) hi = mid;
         else { *pos = mid; return e->k.n_l == k->n_l && !memcmp(e->k.l, k->l, k->n_l); }
     }
@@ -109,22 +118,23 @@ static int add_ent(shcache *c, const shcache_key *k, const void *payload, size_t
     if (!copy) return -1;
     if (n) memcpy(copy, payload, n);
     memmove(&c->ents[pos + 1], &c->ents[pos], (c->n_ents - pos) * sizeof(lent));
-    c->ents[pos].k = *k; c->ents[pos].lh = shcache_l_hash(k->l, k->n_l); c->ents[pos].payload = copy; c->ents[pos].n = n;
+    c->ents[pos].k = *k; shcache_l_key(k->l, k->n_l, c->ents[pos].lk); c->ents[pos].payload = copy; c->ents[pos].n = n;
     c->n_ents++;
     return 0;
 }
 
-#define REC_FIXED 30u                                       /* u32 len, u64 chk, u64 hash, u32 len, u32 flags, u8 stage, u8 n_l */
-static uint64_t rec_chk(const uint8_t *rec, uint32_t len) { uint8_t l4[4]; uint64_t h; wr32(l4, len); h = shcache_hash64(l4, 4);
-    { uint32_t i; for (i = 12; i < len; i++) { h ^= rec[i]; h *= 0x100000001B3ull; } } return h; }
+/* log record: u32 len (whole record), u8 chk[32] = SHA-256(record[R_KEY, len)), u8 code_key[32], u32 code_len, u32 flags, u8 stage, u8 n_l, u8 l[n_l], payload */
+enum { R_CHK = 4, R_KEY = 36, R_LEN = 68, R_FLAGS = 72, R_STAGE = 76, R_NL = 77 };
+#define REC_FIXED 78u
+static void rec_chk(const uint8_t *rec, uint32_t len, uint8_t out[SHCACHE_KEY_LEN]) { fnvnx_sha256(rec + R_KEY, (size_t)len - R_KEY, out); }   /* the record's range is fixed by len, so len is covered */
 
 size_t shcache_log_record(const shcache_key *k, const void *payload, size_t n, uint8_t *out, size_t cap)
 {
     size_t len = REC_FIXED + k->n_l + n;
     if (cap < len || len > 0xFFFFFFFFu) return 0;
-    wr32(out, (uint32_t)len); wr64(out + 12, k->code_hash); wr32(out + 20, k->code_len); wr32(out + 24, k->flags);
-    out[28] = k->stage; out[29] = k->n_l; memcpy(out + REC_FIXED, k->l, k->n_l); if (n) memcpy(out + REC_FIXED + k->n_l, payload, n);
-    wr64(out + 4, rec_chk(out, (uint32_t)len));
+    wr32(out, (uint32_t)len); memcpy(out + R_KEY, k->code_key, SHCACHE_KEY_LEN); wr32(out + R_LEN, k->code_len); wr32(out + R_FLAGS, k->flags);
+    out[R_STAGE] = k->stage; out[R_NL] = k->n_l; memcpy(out + REC_FIXED, k->l, k->n_l); if (n) memcpy(out + REC_FIXED + k->n_l, payload, n);
+    rec_chk(out, (uint32_t)len, out + R_CHK);
     return len;
 }
 
@@ -135,9 +145,11 @@ static void log_load(shcache *c, const uint8_t *b, size_t n, const uint8_t *buil
     if (build_id && memcmp(b + 8, build_id, SHCACHE_BUILD_ID_LEN)) return;
     c->info.log_valid_len = pos;
     while (n - pos >= REC_FIXED) {
-        const uint8_t *r = b + pos; uint32_t len = rd32(r), nl = r[29]; shcache_key k;
-        if (len < REC_FIXED + nl || len > n - pos || nl > SHCACHE_MAX_L || r[28] > 1 || rd64(r + 4) != rec_chk(r, len)) break;
-        if (shcache_key_make(&k, rd64(r + 12), rd32(r + 20), r[28], rd32(r + 24), r + REC_FIXED, nl) || k.flags != rd32(r + 24)) break;
+        const uint8_t *r = b + pos; uint32_t len = rd32(r), nl = r[R_NL]; shcache_key k; uint8_t chk[SHCACHE_KEY_LEN];
+        if (len < REC_FIXED + nl || len > n - pos || nl > SHCACHE_MAX_L || r[R_STAGE] > 1) break;
+        rec_chk(r, len, chk);
+        if (memcmp(r + R_CHK, chk, SHCACHE_KEY_LEN)) break;
+        if (shcache_key_make(&k, r + R_KEY, rd32(r + R_LEN), r[R_STAGE], rd32(r + R_FLAGS), r + REC_FIXED, nl) || k.flags != rd32(r + R_FLAGS)) break;
         if (memcmp(k.l, r + REC_FIXED, nl)) break;                        /* the stored L must already be canonical */
         { const uint8_t *p; size_t m; uint32_t pos2;
           if (find_main(c, &k, &p, &m) || find_log(c, &k, &pos2)) c->info.log_ignored++;

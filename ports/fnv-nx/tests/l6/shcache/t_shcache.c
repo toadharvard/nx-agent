@@ -7,13 +7,14 @@
  *   logflips MAIN LOG BID         for every byte i of LOG xored: "i log_entries log_valid_len"
  *   linkset                       exhaustive + random check of shcache_link_set against fnvnx_dk_assign
  *   verify MAIN BID DIR           every entry of DIR/entries.tsv (a shxlate output) is in MAIN with payload = pack(<id>.dksh, <id>.json): "CHECKS n FAIL f"
- *   keymake hash len stage flags lhex|-    "n_l lhex" or ERR       hash HEXBYTES  "fnv l_hash"
+ *   keymake hash len stage flags lhex|-    "n_l lhex" or ERR       hash HEXBYTES  "sha256 l_key" (hex)
  *   refl JSON SECTION             pairs of a reflection json: hex list or ERR     payload   pack/unpack round trip */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "shcache.h"
 #include "../../../render/shaders/include/fnvnx_dk_layout.h"
+#include "fnvnx_sha256.h"
 
 static int checks, fails;
 #define CHECK(c) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); } } while (0)
@@ -30,8 +31,9 @@ static size_t unhex(const char *s, uint8_t *o) { size_t n = 0; if (!strcmp(s, "-
 static void bid_of(const char *s, uint8_t *b) { memset(b, 0, 16); unhex(s, b); }
 static int mkkey(shcache_key *k, const char *h, const char *len, const char *st, const char *fl, const char *lx)
 {
-    uint8_t l[64]; size_t n = unhex(lx, l);
-    return shcache_key_make(k, strtoull(h, NULL, 16), (uint32_t)strtoul(len, NULL, 10), atoi(st), (uint32_t)strtoul(fl, NULL, 16), l, (uint32_t)n);
+    uint8_t l[64], ck[SHCACHE_KEY_LEN]; size_t n = unhex(lx, l);
+    if (strlen(h) != 2 * SHCACHE_KEY_LEN || unhex(h, ck) != SHCACHE_KEY_LEN) return -1;   /* the code key: 64 hex digits */
+    return shcache_key_make(k, ck, (uint32_t)strtoul(len, NULL, 10), atoi(st), (uint32_t)strtoul(fl, NULL, 16), l, (uint32_t)n);
 }
 static int file_sink(void *u, const void *b, size_t n) { return fwrite(b, 1, n, (FILE *)u) == n ? 0 : -1; }
 static int fail_sink(void *u, const void *b, size_t n) { (void)u; (void)b; (void)n; return -1; }
@@ -42,8 +44,8 @@ static int mode_lookup(char **a)
     shcache *c; bid_of(a[2], bid); c = shcache_open(m, mn, l, ln, bid);
     rows = (uint8_t *)realloc(rows, rn + 1); rows[rn] = 0;
     for (line = strtok_r((char *)rows, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
-        char h[40], len[20], st[8], fl[20], lx[100], px[200000]; shcache_key k; const void *p = NULL; size_t n = 0; int hit;
-        if (sscanf(line, "%39s %19s %7s %19s %99s %199999s", h, len, st, fl, lx, px) != 6) { CHECK(0); continue; }
+        char h[80], len[20], st[8], fl[20], lx[100], px[200000]; shcache_key k; const void *p = NULL; size_t n = 0; int hit;
+        if (sscanf(line, "%79s %19s %7s %19s %99s %199999s", h, len, st, fl, lx, px) != 6) { CHECK(0); continue; }
         CHECK(mkkey(&k, h, len, st, fl, lx) == 0);
         hit = shcache_lookup(c, &k, &p, &n);
         if (!strcmp(px, "MISS")) CHECK(!hit);
@@ -99,8 +101,8 @@ static int mode_verify(char **a)
     snprintf(path, sizeof path, "%s/entries.tsv", a[2]); tsv = (char *)slurp(path, &n); tsv = (char *)realloc(tsv, n + 1); tsv[n] = 0;
     line = strtok_r(tsv, "\n", &save);                                                         /* header */
     for (line = strtok_r(NULL, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
-        char id[96], h[24], st[4], fl[8], lx[100]; unsigned len; shcache_key k; size_t dn, jn; uint8_t *d, *j, *pk; const void *p = NULL; size_t pn = 0; int hit;
-        if (sscanf(line, "%95s %23s %u %3s %7s %99s", id, h, &len, st, fl, lx) != 6) { CHECK(0); continue; }
+        char id[96], h[80], st[4], fl[8], lx[100]; unsigned len; shcache_key k; size_t dn, jn; uint8_t *d, *j, *pk; const void *p = NULL; size_t pn = 0; int hit;
+        if (sscanf(line, "%95s %79s %u %3s %7s %99s", id, h, &len, st, fl, lx) != 6) { CHECK(0); continue; }
         { char len_s[24]; sprintf(len_s, "%u", len); CHECK(mkkey(&k, h, len_s, st[0] == 'p' ? "1" : "0", fl, lx) == 0); }
         snprintf(path, sizeof path, "%s/%s.dksh", a[2], id); d = slurp(path, &dn); snprintf(path, sizeof path, "%s/%s.json", a[2], id); j = slurp(path, &jn);
         pk = (uint8_t *)malloc(8 + dn + jn); pn = shcache_payload_pack(d, (uint32_t)dn, (const char *)j, (uint32_t)jn, pk, 8 + dn + jn);
@@ -161,7 +163,7 @@ static int mode_payload(void)
     size_t n = shcache_payload_pack(dk, 7, js, 8, out, sizeof out);
     CHECK(n == 8 + 7 + 8); CHECK(shcache_payload_unpack(out, n, &d, &dn, &j, &jn) == 0); CHECK(dn == 7 && jn == 8 && !memcmp(d, dk, 7) && !memcmp(j, js, 8));
     CHECK(shcache_payload_unpack(out, n - 1, &d, &dn, &j, &jn) == -1); CHECK(shcache_payload_unpack(out, 4, &d, &dn, &j, &jn) == -1); CHECK(shcache_payload_pack(dk, 7, js, 8, out, n - 1) == 0);
-    { shcache *c = shcache_open(NULL, 0, NULL, 0, NULL); shcache_key k; shcache_info in; CHECK(c != NULL); shcache_key_make(&k, 1, 2, 0, 0, NULL, 0);
+    { shcache *c = shcache_open(NULL, 0, NULL, 0, NULL); shcache_key k; shcache_info in; CHECK(c != NULL); { uint8_t ck[SHCACHE_KEY_LEN] = { 1 }; shcache_key_make(&k, ck, 2, 0, 0, NULL, 0); }
       CHECK(shcache_put(c, &k, "ab", 2, fail_sink, NULL) == -1);                        /* a sink failure stores nothing */
       { const void *p; size_t pn; CHECK(!shcache_lookup(c, &k, &p, &pn)); }
       shcache_get_info(c, &in); CHECK(!in.main_valid && in.log_entries == 0 && in.log_valid_len == 0); shcache_close(c); }
@@ -181,7 +183,7 @@ int main(int argc, char **argv)
     if (!strcmp(m, "verify") && argc == 5) return mode_verify(argv + 2);
     if (!strcmp(m, "payload")) return mode_payload();
     if (!strcmp(m, "keymake") && argc == 7) { shcache_key k; char o[80] = ""; int i; if (mkkey(&k, argv[2], argv[3], argv[4], argv[5], argv[6])) { puts("ERR"); return 0; } for (i = 0; i < k.n_l; i++) sprintf(o + 2 * i, "%02x", k.l[i]); printf("%u %s %u\n", k.n_l, o, k.flags); return 0; }
-    if (!strcmp(m, "hash") && argc == 3) { uint8_t b[4096]; size_t n = unhex(argv[2], b); printf("%016llx %016llx\n", (unsigned long long)shcache_hash64(b, n), (unsigned long long)shcache_l_hash(b, (uint32_t)n)); return 0; }
+    if (!strcmp(m, "hash") && argc == 3) { uint8_t b[4096]; size_t n = unhex(argv[2], b); uint8_t d[32], lk[32]; char dh[65], lh[65]; int i; fnvnx_sha256(b, n, d); shcache_l_key(b, (uint32_t)n, lk); for (i = 0; i < 32; i++) { sprintf(dh + 2 * i, "%02x", d[i]); sprintf(lh + 2 * i, "%02x", lk[i]); } printf("%s %s\n", dh, lh); return 0; }
     if (!strcmp(m, "refl") && argc == 4) { size_t n; uint8_t *j = slurp(argv[2], &n), p[300]; int r, i; j = (uint8_t *)realloc(j, n + 1); j[n] = 0; r = shcache_refl_pairs((char *)j, argv[3], p, sizeof p);
         if (r < 0) puts("ERR"); else { for (i = 0; i < r; i++) printf("%02x", p[i]); puts(""); } free(j); return 0; }
     fprintf(stderr, "bad usage\n"); return 2;

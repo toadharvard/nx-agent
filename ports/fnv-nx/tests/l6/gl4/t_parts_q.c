@@ -3,12 +3,13 @@
  *  every (VS, PS) pair of the classes links and draws c0 through the v3 path (UBO 0 = c, UBO 2 = driver block). */
 #include "t_common.h"
 #include "fnvnx_shaders.h"
+#include "fnvnx_sha256.h"
 #include "t_d3d.h"
 
 static const TD3d* find(const char* n) { for (uint32_t i = 0; i < sizeof k_d3d / sizeof k_d3d[0]; i++) if (!strcmp(k_d3d[i].name, n)) return &k_d3d[i]; return NULL; }
 static uint64_t create(const uint32_t* w, uint32_t bytes, uint32_t stage, uint32_t variant, const uint8_t* l, uint32_t nl, uint64_t hash_xor) {
     NxShaderD3D d; memset(&d, 0, sizeof d);
-    d.bytecode = (uint64_t)(uintptr_t)w; d.size = bytes; d.stage = (uint8_t)stage; d.variant = (uint8_t)variant; d.hash = fnvnx_shader_hash(w, bytes) ^ hash_xor;
+    d.bytecode = (uint64_t)(uintptr_t)w; d.size = bytes; d.stage = (uint8_t)stage; d.variant = (uint8_t)variant; fnvnx_sha256(w, bytes, d.key); d.key[0] ^= (uint8_t)hash_xor;
     d.link_pairs = (uint64_t)(uintptr_t)l; d.n_link_pairs = nl;
     return t_ext(NXGPU_FN_SHADER_CREATE_D3D, 1, (uint64_t)(uintptr_t)&d);
 }
@@ -83,7 +84,7 @@ void part_q(void) {
     uint32_t before = live_shaders(); const TD3d* p20 = find("ps_2_0"); const TD3d* v20 = find("vs_2_0");
     uint32_t garbage[16]; for (int i = 0; i < 16; i++) garbage[i] = 0x9e3779b9u * (uint32_t)(i + 1);
     uint32_t trunc[16]; memcpy(trunc, v20->w, v20->n * 4); uint32_t tn = v20->n - 1;
-    NxShaderD3D d; memset(&d, 0, sizeof d); d.bytecode = (uint64_t)(uintptr_t)v20->w; d.size = v20->n * 4; d.hash = fnvnx_shader_hash(v20->w, d.size);
+    NxShaderD3D d; memset(&d, 0, sizeof d); d.bytecode = (uint64_t)(uintptr_t)v20->w; d.size = v20->n * 4; fnvnx_sha256(v20->w, d.size, d.key);
     uint8_t unsorted[2] = {0x71, 0x20}, dup[2] = {0x20, 0x20}, hi[1] = {0xE0}, many[32]; for (int i = 0; i < 32; i++) many[i] = (uint8_t)i;
     struct { uint64_t r; const char* what; } bad[] = {
         {create(p20->w, p20->n * 4, 1, 0, NULL, 0, 1), "wrong hash"},
