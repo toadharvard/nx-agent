@@ -26,5 +26,10 @@ check("closure follows calls and tail jumps", callcensus.closure(facts, 16) == {
 check("the entry inside a function starts at the function containing it", callcensus.closure(facts, 20) == {16, 32, 48})
 facts["fn"]["48"] = fn(data=[(0, 4096)])
 check("a pointer table a reached function references adds every code pointer of its contiguous run", callcensus.closure(facts, 16) == {16, 32, 48, 64, 80})
+import types  # noqa: E402
+fk = types.SimpleNamespace(flat=[(20, 24, 20), (16, 20, 16)], _callers={}, callers=lambda v: [])
+f2 = {"fn": {"16": fn()}, "vft": {}, "ptrs": []}
+check("the range entry that starts at the entry point itself is in the closure (the PE entry is not a facts function start)",
+      20 in callcensus.closure(f2, 20, fk) and 16 in callcensus.closure(f2, 20, fk))
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

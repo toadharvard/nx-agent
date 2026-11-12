@@ -78,12 +78,13 @@ def closure(facts, entry, img=None):
             for site, how in sorted(sites):
                 for e in stab(site):
                     out.setdefault(e, set()).add(target)
-    seen, work = set(), [entry]
+    seen, work, seeds = set(), [entry], []
     if img is not None:
-        work += stab(entry_va)                 # the range entry that starts at the entry point itself
+        seeds = stab(entry_va)                 # the range entry that starts at the entry point itself
+        work += seeds
     while work:
         f = work.pop()
-        if f in seen or (f not in fn and f not in out):
+        if f in seen or (f not in fn and f not in out and f not in seeds):
             continue
         seen.add(f)
         v = fn.get(f) or dict(calls=[], tails=[], codeptrs=[], jt=[], vrefs=[], data=[])
