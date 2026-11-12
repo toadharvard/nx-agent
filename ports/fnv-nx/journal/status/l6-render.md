@@ -255,3 +255,13 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - w3b 57e2ce8 merged: L1 (link iff the 3 compiles, under C1-C3) and L2 (arg domains, with formulas).
         - Open: C1 for the FFP fragment partner; C2 cited from the pinned Mesa source instead of the GL minimum.
         - Next: sm_domain.py writes the job 3 enumeration list.
+- 04:30Z render/d3d9 trunk product root: w6 89973e4f (trunk 8cfbcdbf + w15 afa6b301). Sent to the orchestrator for MERGER and L5.
+    - Measured (shim as tool, scratch):
+        - render/d3d9: cold green, 70 objects; warm 0 stages.
+        - lib/sha256: equal to L4 20724246.
+        - ident_{handheld,docked}.bin: 1100 B each, in `outputs`.
+    - Verdict at ee1dccc8: red on named blockers.
+        - The headers generator-input rule (L1 w16).
+        - 9 gates absent from gates.json: abi, addr32, eh, exepin, forms, fpexact, namegate, order, r7.
+        - imports/machine facts for the new roots (L5/L1).
+        - Time 409.7 s on the red path (L1 to confirm).
