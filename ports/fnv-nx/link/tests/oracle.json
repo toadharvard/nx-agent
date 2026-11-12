@@ -113,6 +113,7 @@
    ]
   },
   "test_ice_poly_byvalue.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
@@ -137,6 +138,7 @@
    ]
   },
   "test_order_cont.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",

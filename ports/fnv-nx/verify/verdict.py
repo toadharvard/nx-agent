@@ -14,6 +14,10 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               Gate green iff exit 0, valid result, name equal, status green and certified == universe (completeness of
               certificates, not a run counter; certified > universe is invalid). Verdict green iff >=1 gate and all gates green.
               over_budget is reported only; it never changes the verdict.
+              With --cache, a GREEN gate result is stored under a key of (gate name, argv, tree, env id) and a gate whose key
+              is stored is not run (recomputed 0 in its row; otherwise 1 + the "recomputed" the gate reports). A gates file with
+              "warm_budget_s": B adds the gate "warm" (universe 2) after a green run: every gate again on the same cache; certified
+              parts: (1) nothing recomputed, (2) that rerun took at most B s. Verdict key "warm": {seconds, recomputed, budget_s}.
   store       --verdict V.json --verdicts VDIR   copy to VDIR/<tree>.json if self-consistent (red verdicts are stored too).
   merge       --repo R --into B --from REF --verdicts VDIR --gates GATES.json [--prev-verdict V.json] [--message-prefix T]
               Merge result computed with `git merge-tree --write-tree` (no worktree touched). Needs VDIR/<tree>.json: green, same
@@ -131,6 +135,41 @@ def _covers_verdict(g, st, u, present):
         return "red", "vacuous: universe 0 while admitted roots of class %s exist" % ",".join(seen)
     return st, ""
 
+def _gate_key(g, tree, env_id):
+    """Key of a gate's result: everything a gate may read (the TREE of the commit, the declared environment) and its own definition.
+    Not the commit: two commits with one tree (a no-op merge) are one input. A gate reads the checkout, which is the tree; a gate
+    that reads GATE_COMMIT itself is outside this contract (owner of gate rule: L1)."""
+    return hashlib.sha256(cas.canon({"format": "fnvnx-gate-cache/1", "gate": g["name"], "argv": g["argv"], "result": g["result"],
+                                     "tree": tree, "env_id": env_id})).hexdigest()
+
+def _gate_hit(cache, key, g, out):
+    """Copy the stored result file of a GREEN gate into OUT; True on a hit. A red result is never stored (it is recomputed)."""
+    try:
+        doc = json.load(open(os.path.join(cache, "gates", key + ".json")))
+        if doc["format"] != "fnvnx-gate-cache/1" or doc["key"] != key:
+            return False
+        with open(os.path.join(out, g["result"]), "w") as fh:
+            fh.write(doc["result"])
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+def _gate_store(cache, key, g, out):
+    d = os.path.join(cache, "gates")
+    os.makedirs(d, exist_ok=True)
+    dest = os.path.join(d, key + ".json")
+    tmp = "%s.tmp%d" % (dest, os.getpid())
+    with open(tmp, "w") as fh:
+        json.dump({"format": "fnvnx-gate-cache/1", "key": key, "result": open(os.path.join(out, g["result"])).read()}, fh)
+    os.replace(tmp, dest)
+
+def _own_recomputed(g, out):
+    """Units a gate reports as recomputed inside itself (result key "recomputed": test files run, stages built): added to its 1."""
+    try:
+        n = json.load(open(os.path.join(out, g["result"]))).get("recomputed", 0)
+        return n if type(n) is int and n >= 0 else 0
+    except (OSError, ValueError, AttributeError):
+        return 0
 
 def cmd_run(a):
     o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1, "--env-id": 1, "--cache": 1})
@@ -145,52 +184,93 @@ def cmd_run(a):
     tree = _git_ok(o["--repo"], "rev-parse", commit + "^{tree}")
     work = tempfile.mkdtemp(prefix="verdict-")
     wt = os.path.join(work, "wt")
-    _git_ok(o["--repo"], "worktree", "add", "--detach", wt, commit)
     genv = dict(os.environ, GATE_COMMIT=commit)
     genv.pop("GATE_CACHE", None)
+    cache = None
     if "--cache" in o:
-        genv["GATE_CACHE"] = os.path.abspath(o["--cache"])
-        os.makedirs(genv["GATE_CACHE"], exist_ok=True)
+        cache = genv["GATE_CACHE"] = os.path.abspath(o["--cache"])
+        os.makedirs(cache, exist_ok=True)
     detail = o["--out"] + ".detail"   # the gates' full findings outlive the temporary work directory: GATE_DETAIL/<gate> beside the verdict file
     shutil.rmtree(detail, ignore_errors=True)
-    res, t_all = [], time.time()
-    try:
-        present = _present_classes(wt)
+    _git_ok(o["--repo"], "worktree", "add", "--detach", wt, commit)
+    present = None
+
+    def run_pass(tag):
+        rows = []
         for g in gates:
-            out = os.path.join(work, "gate-%d" % len(res))
-            tmp = os.path.join(work, "tmp-%d" % len(res))
+            out = os.path.join(work, "%s-%d" % (tag, len(rows)))
+            tmp = os.path.join(work, "%s-tmp-%d" % (tag, len(rows)))
             os.makedirs(out)
             os.makedirs(tmp)
             t0 = time.time()
+            ck = _gate_key(g, tree, o.get("--env-id")) if cache else None
+            hit = _gate_hit(cache, ck, g, out) if cache else False
+            recomputed = 0
             try:
-                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp, GATE_DETAIL=os.path.join(detail, g["name"])),
-                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
-                st, u, c, why = _gate_result(g, out, rc)
+                if hit:   # a stored result is a green one that passed every check below on this tree: no run, no leak check
+                    st, u, c, why = _gate_result(g, out, 0)
+                else:
+                    rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp, GATE_DETAIL=os.path.join(detail, g["name"])),
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+                    st, u, c, why = _gate_result(g, out, rc)
+                    recomputed = 1 + _own_recomputed(g, out)
             except OSError as e:
                 st, u, c, why = "red", 0, 0, "cannot run: %s" % e
+                recomputed = 1
             left = sorted(os.listdir(tmp))
             shutil.rmtree(tmp, ignore_errors=True)   # removed on every outcome
-            # interpreter bytecode caches (`python -I` ignores PYTHONDONTWRITEBYTECODE) are source-validated, not gate output
-            dirty = [x for x in (l[3:] for l in _git(wt, "status", "--porcelain", "--ignored", "--untracked-files=all")[1].splitlines())
-                     if not (x.endswith(".pyc") and "/__pycache__/" in "/" + x)]
-            if left or dirty:
-                st = "red"
-                why = (why + "; " if why else "") + "gate left " + "; ".join(
-                    x for x in ("in its TMPDIR: " + ",".join(left[:20]) if left else "",
-                                "in the worktree: " + ",".join(dirty[:20]) if dirty else "") if x)
-                _git(wt, "clean", "-fdxq")
+            if not hit:
+                # interpreter bytecode caches (`python -I` ignores PYTHONDONTWRITEBYTECODE) are source-validated, not gate output
+                dirty = [x for x in (l[3:] for l in _git(wt, "status", "--porcelain", "--ignored", "--untracked-files=all")[1].splitlines())
+                         if not (x.endswith(".pyc") and "/__pycache__/" in "/" + x)]
+                if left or dirty:
+                    st = "red"
+                    why = (why + "; " if why else "") + "gate left " + "; ".join(
+                        x for x in ("in its TMPDIR: " + ",".join(left[:20]) if left else "",
+                                    "in the worktree: " + ",".join(dirty[:20]) if dirty else "") if x)
+                    _git(wt, "clean", "-fdxq")
             st2, why2 = _covers_verdict(g, st, u, present)
             if st2 != st:
                 st, why = st2, why2 if st == "green" else why + "; " + why2
-            res.append({"name": g["name"], "status": st, "universe": u, "certified": c,
-                        "seconds": round(time.time() - t0, 3), "reason": why})
+            if cache and not hit and st == "green" and c == u:
+                _gate_store(cache, ck, g, out)
+            rows.append({"name": g["name"], "status": st, "universe": u, "certified": c,
+                         "seconds": round(time.time() - t0, 3), "reason": why, "recomputed": recomputed})
+        return rows
+
+    t_all = time.time()
+    warm = None
+    try:
+        present = _present_classes(wt)
+        res = run_pass("gate")
+        total = round(time.time() - t_all, 3)
+        budget = spec.get("warm_budget_s")
+        if budget is not None and not (isinstance(budget, (int, float)) and not isinstance(budget, bool) and budget > 0):
+            raise Err("malformed gates file: warm_budget_s")
+        if budget is not None and cache and all(r["status"] == "green" and r["certified"] == r["universe"] for r in res):
+            # gate "warm" (VERDICT.md, budget): the no-change rerun of every gate, on the same cache, right now. Deterministic part:
+            # it recomputes nothing (every gate, stage, test and fact is found under a key that did not change). Wall-clock part:
+            # it takes at most B seconds.
+            t_w = time.time()
+            wrows = run_pass("warm")
+            wraw = time.time() - t_w
+            wsec = round(wraw, 3)
+            work_done = {r["name"]: r["recomputed"] for r in wrows if r["recomputed"]}
+            parts = [not work_done, wraw <= float(budget)]
+            why = "; ".join(x for x in (
+                "recomputed on a no-change rerun: " + ",".join("%s=%d" % kv for kv in sorted(work_done.items())) if work_done else "",
+                "warm rerun %.1fs > budget %.1fs" % (wsec, float(budget)) if not parts[1] else "") if x)
+            warm = {"seconds": wsec, "recomputed": sum(work_done.values()), "budget_s": float(budget)}
+            res.append({"name": "warm", "status": "green" if all(parts) else "red", "universe": 2, "certified": sum(parts),
+                        "seconds": wsec, "reason": why, "recomputed": 0})
     finally:
         _git(o["--repo"], "worktree", "remove", "--force", wt)
         shutil.rmtree(work, ignore_errors=True)
-    total = round(time.time() - t_all, 3)
     v = {"format": "fnvnx-verdict/1", "commit": commit, "tree": tree, "gates_sha256": _sha(o["--gates"]), "gates": res,
          "seconds": total, "over_budget": total > float(o.get("--budget-s", "300")),
          "verdict": "green" if res and all(r["status"] == "green" and r["certified"] == r["universe"] for r in res) else "red"}
+    if warm is not None:
+        v["warm"] = warm
     if "--env-id" in o:
         v["env_id"] = o["--env-id"]  # sha256 of the env.json the verdict was computed in (envcheck.py id)
     open(o["--out"], "wb").write(cas.canon(v) + b"\n")

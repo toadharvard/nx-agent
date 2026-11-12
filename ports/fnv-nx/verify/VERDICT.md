@@ -226,3 +226,15 @@ The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) a
 A product root with native or decomp C++ is compiled with all plugins (RECIPE.md, "Plugins"); a root whose C++ is all lifted
 (declared `cxx_origin` of its admit.json entry, consistency checked against the recipe) loads `fnvnx_ftoi` in mode lifted only. A missing plugin, a changed source or argument, or
 an undeclared origin makes the recipe invalid and the `build` gate red. Tests: `verify/tests/test_plugins.py`.
+
+## Budget and the warm rerun (gate `warm`)
+The incremental verdict is content-keyed at three levels, all in `GATE_CACHE` (`l1.py` gives `VDIR/cache`): a recipe stage (`unitstage.py`),
+a test file (`gate_tests.py`: key = the test, its view of the checkout without the other test files, env id, python, timeout; red results are
+cached too, a timeout never), and a whole gate result (`verdict.py`: key = gate, argv, tree, env id: the tree, not the commit, so a no-op merge stays warm; green results only).
+A gates file that declares `"warm_budget_s": B` makes `verdict.py run` add the gate `warm` after a green run: every gate is run again, right
+away, on the same cache, which is the no-change rerun. `warm` has two certified parts (universe 2), each red on its own:
+1. **Nothing recomputed.** In that rerun no gate, stage, test or fact is recomputed (`recomputed` of every row is 0; a gate that runs reports
+   1 plus the units it recomputed itself). A gate that cannot be found under an unchanged key, or whose key moves with the clock, is named.
+2. **Wall clock.** The rerun takes at most B seconds. warm_budget_s = 2.0 seconds (written here and as `WARM_BUDGET_S` in `gatesdir.py`, which puts it into the assembled gates document; a test keeps the two equal).
+   B = 2.0 s: the measured warm rerun is 0.0 s (all gate results found under their keys; 26 gates, commit 888a05b), the margin covers a slow disk. Measured at 888a05b: cold verdict 217 s wall, warm l1 verdict command 2.0 s wall (was 204 s and 5.4 s at e35b870).
+The whole-verdict bound of CLAUDE.md (5 min, `--budget-s`) stays and is still reported as `over_budget`. A red run does not evaluate `warm`.

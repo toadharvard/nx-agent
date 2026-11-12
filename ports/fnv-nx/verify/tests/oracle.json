@@ -26,6 +26,7 @@
    ]
   },
   "test_argorder.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## verify/gate_argorder.py",
@@ -36,6 +37,10 @@
    "subject": [
     "ports/fnv-nx/verify/gate_argorder.py",
     "ports/fnv-nx/verify/recipe.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_plugins.py",
+    "ports/fnv-nx/verify/tests/test_guest.py"
    ]
   },
   "test_boot.py": {
@@ -48,9 +53,13 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/boot.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_bootmachine.py"
    ]
   },
   "test_boot_job.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## farm/boot_job.sh",
@@ -72,9 +81,15 @@
     "ports/fnv-nx/farm/boot_job.sh",
     "ports/fnv-nx/verify/bootinputs.py",
     "ports/fnv-nx/verify/boot.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_bootmachine.py",
+    "ports/fnv-nx/verify/tests/test_bootgpu.py",
+    "ports/fnv-nx/verify/tests/test_boot.py"
    ]
   },
   "test_bootgpu.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## verify/bootgpu.py",
@@ -102,6 +117,10 @@
     "ports/fnv-nx/verify/boot.py",
     "ports/fnv-nx/verify/boothost.py",
     "ports/fnv-nx/verify/bootmachine.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_bootmachine.py",
+    "ports/fnv-nx/verify/tests/test_boot.py"
    ]
   },
   "test_bootinputs.py": {
@@ -223,6 +242,7 @@
    ]
   },
   "test_datamodel.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## verify/gate_datamodel.py",
@@ -233,6 +253,10 @@
    "subject": [
     "ports/fnv-nx/verify/gate_datamodel.py",
     "ports/fnv-nx/verify/recipe.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_plugins.py",
+    "ports/fnv-nx/verify/tests/test_guest.py"
    ]
   },
   "test_envcheck.py": {
@@ -337,6 +361,9 @@
     "ports/fnv-nx/verify/gate_imports.py",
     "ports/fnv-nx/contract/imports.py",
     "ports/fnv-nx/contract/bridgetable.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_recipe.py"
    ]
   },
   "test_gate_machine.py": {
@@ -355,6 +382,9 @@
    "subject": [
     "ports/fnv-nx/verify/gate_machine.py",
     "ports/fnv-nx/contract/hive.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_recipe.py"
    ]
   },
   "test_gate_pure.py": {
@@ -418,6 +448,7 @@
    ]
   },
   "test_guest.py": {
+   "net": true,
    "references": [
     {
      "anchor": "### Guest roots: the game's compiler (MSVCMODEL1)",
@@ -428,6 +459,9 @@
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/unitstage.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_plugins.py"
    ]
   },
   "test_icount.py": {
@@ -522,6 +556,9 @@
    "subject": [
     "ports/fnv-nx/verify/gate_linkstrict.py",
     "ports/fnv-nx/verify/verdict.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_recipe.py"
    ]
   },
   "test_n3wiring.py": {
@@ -562,6 +599,9 @@
     "ports/fnv-nx/verify/gate_objstub.py",
     "ports/fnv-nx/verify/a64access.cc",
     "ports/fnv-nx/verify/verdict.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_recipe.py"
    ]
   },
   "test_opentrace.py": {
@@ -614,6 +654,7 @@
    ]
   },
   "test_producers.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## verify/producers.py",
@@ -624,6 +665,9 @@
    "subject": [
     "ports/fnv-nx/verify/producers.py",
     "ports/fnv-nx/verify/gate_linkstrict.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_plugins.py"
    ]
   },
   "test_puregate.py": {
@@ -680,6 +724,9 @@
    ],
    "subject": [
     "ports/fnv-nx/farm/runner.sh"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_cas.py"
    ]
   },
   "test_runtime.py": {

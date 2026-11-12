@@ -22,6 +22,7 @@ DIR = TREE + "/verify/gates.d"
 ADMIT = TREE + "/verify/admit.json"
 FILE_FORMAT = "fnvnx-gatefile/1"
 FORMAT = "fnvnx-gates/1"
+WARM_BUDGET_S = 2.0   # B of gate `warm` (VERDICT.md, budget): the wall-clock bound of the no-change rerun; the assembled document carries it
 ROOT_CLASSES = ("doc", "tool", "ref", "test", "product-guest", "lifted", "host-product", "linked")
 
 
@@ -84,7 +85,7 @@ def parse_entry(name, text):
 
 def document(entries):
     """The gates document of a list of entries, sorted by name."""
-    return {"format": FORMAT, "gates": sorted(entries, key=lambda g: g["name"])}
+    return {"format": FORMAT, "warm_budget_s": WARM_BUDGET_S, "gates": sorted(entries, key=lambda g: g["name"])}
 
 
 def load_dir(path=DIR):
