@@ -137,28 +137,30 @@ def mini_pe(code):
     return bytes(h) + bytes(sec)
 
 
-def flags_repo(name, code, cache):
-    """A repo with the REAL gate_flags.py and its proof package, contract_inputs.json declaring externals exe (a PE holding CODE as the body of one entry), redist
-    and facts (ranges.tsv, universe.tsv of that entry at base 0x400000)."""
+def flags_repo(name, code, cache, extra_entries=()):
+    """A lifted root whose pack lifts the entry at 0x401800 (and EXTRA_ENTRIES), the REAL gate_flags.py with its proof package, and contract_inputs.json declaring
+    the externals exe (a PE holding CODE as the body of that entry), redist and facts (ranges.tsv, universe.tsv of the entry at base 0x400000)."""
     def pubfile(n, files):
         def pop(d):
             for k, v in files.items(): open(d + "/" + k, "wb").write(v)
         return ext(n, publish(name + "-" + n, pop), "/ext/" + n)
+    ent = 0x401800
+    rows = "".join("%08x\tL_%08x\tcode\n" % (a, a) for a in (ent,) + tuple(extra_entries))
+    pk = pubfile("pack", {"entries.tsv": rows.encode(), "gate_liftgen.json": b"{}"})
     exe = pubfile("exe", {"a.exe": mini_pe(code)})
     redist = pubfile("redist", {"README": b"none\n"})
-    ent = 0x401800
     facts = pubfile("facts", {"ranges.tsv": ("# base=0x400000\n%08x\t%x-%x\n" % (ent, ent, ent + len(code))).encode(),
                               "universe.tsv": ("# base=0x400000\n%08x\tdecomp\t%d\tptr\n" % (ent, len(code))).encode(), "msvc": b""})
     doc = {"format": "fnvnx-contract-inputs/1", "external": [exe, redist, facts], "exe": "exe/a.exe", "msvc": "facts/msvc", "universe": "facts/universe.tsv",
            "root_results": {"units": "units.json", "addrmap": "addrmap.tsv", "aliases": "aliases.ld"}, "ranges": {"exe": "facts/ranges.tsv", "module": "facts/%s/ranges.tsv"}}
-    repo = tp.make_repo(name, tp.REC, "native")
-    os.makedirs(os.path.join(repo, LIFT), exist_ok=True)
-    shutil.copyfile(os.path.join(REAL, LIFT, "gate_flags.py"), os.path.join(repo, LIFT, "gate_flags.py"))
+    repo = lifted_repo(name, BODIES["ordered"][0], pk)
+    for f in ("gate_flags.py",):
+        shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
     for pkg in ("proof", "fnvlift", "rt"):
         shutil.copytree(os.path.join(REAL, T + "lift/" + pkg), os.path.join(repo, T + "lift/" + pkg), ignore=shutil.ignore_patterns("__pycache__", "tests"))
     w(repo, T + "verify/contract_inputs.json", json.dumps(doc))
     git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "tools")
+    git(repo, "commit", "-q", "-m", "flags inputs")
     return repo
 
 
@@ -168,7 +170,7 @@ def main():
     cache = os.path.join(BASE, "cache")
     # --- no root of these kinds: universe 0, green, all three gates (a host root with C++ is no item either)
     host = tp.make_repo("host", tp.REC, "native")
-    for n in ("order", "addr32", "eh"):
+    for n in ("order", "addr32", "eh", "flags"):
         rc, r, o = gate(host, n, cache)
         check("%s: no lifted or native guest root: universe 0, green" % n, rc == 0 and r.get("status") == G and r["universe"] == 0, o)
     # --- lifted roots: order (order + align rows) and addr32 (addrwrap rows) by the rule of gate_order.py over every object of the root
@@ -203,11 +205,14 @@ def main():
     rc, r, o = gate(lifted_repo("e-red", BODIES["ordered"][0], pack_pub("pack3", drop=(0x400030,)), efact), "eh", cache)
     check("eh: a table target that is no lifted entry: red, 0/1", rc == 2 and r.get("status") == R and (r["certified"], r["universe"]) == (0, 1)
           and r["uncertified"], (rc, r, o))
-    # --- flags: the facts and the images, not a root. The body of the entry is real x86 code read by the real gate_flags.py
-    for nm, code, st, cu in (("f-green", "31c07400c3", G, (1, 1)), ("f-red", "7400c3", R, (0, 1))):
-        rc, r, o = gate(flags_repo(nm, bytes.fromhex(code), cache), "flags", cache)
+    # --- flags: judged per lifted root over the images whose code its pack lifts. The body of the entry is real x86 code read by the real gate_flags.py
+    for nm, code, extra, st, cu in (("f-green", "31c07400c3", (), G, (1, 1)), ("f-red", "7400c3", (), R, (0, 1)),
+                                    ("f-uncovered", "31c07400c3", (0x500000,), R, (1, 2))):
+        rc, r, o = gate(flags_repo(nm, bytes.fromhex(code), cache, extra), "flags", cache)
         check("flags: %s: %s %d/%d" % (nm, st, cu[0], cu[1]), rc == (0 if st == G else 2) and r.get("status") == st and (r["certified"], r["universe"]) == cu
               and "tool" not in str(r.get("uncertified")), (rc, r, o))
+    rc, r, o = gate(host, "flags", cache)
+    check("flags: no lifted or native guest root: universe 0, green", rc == 0 and r.get("status") == G and r["universe"] == 0, o)
     os.environ.pop("ARTIFACTS_URL")        # the native cases fetch the pinned compiler from the real artifacts repository
     # --- native guest roots: the plugin certificate (fnvnx_order for order, fnvnx_addr for addr32), no build needed to be red
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
