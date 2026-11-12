@@ -154,8 +154,11 @@ No trap paths. Whatever the x86 code does on the CPU, the lifted code does:
 - native frames in between: the entry and exit bridges link a native frame into the chain in both directions
   (a registration whose handler runs the native unwinder for that frame), so a throw crosses lifted and native
   frames in any order.
-Proof: every FuncInfo and scope table of the exe is parsed (`tools/ehtables.py`, 0 unparsed), (the unwind actions are compared with the x86 execution only by
-`test/` cases that exist; there is no per-function throw bench).
+Proof: every FuncInfo and scope table of every image is a dataflow fact over the decoded code (`tools/ehtables.py` on the flow engine `tools/ehflow.py`):
+ThrowInfo at each throw site through the callers' arguments (R1), callee-saved registers across calls only where the callee is proven to restore them (R2),
+the SEH scope table of a registration helper from the argument at every direct call site (R3), the table length as 1 + the largest constant trylevel stored (R4).
+A site no rule resolves is red in `gates/gate_eh.py` (never skipped), as is a table entry without a lifted landing. The unwind actions are compared with the x86 execution only by
+`test/` cases that exist; there is no per-function throw bench.
 
 ## Entries: the universe
 
