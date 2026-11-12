@@ -24,6 +24,20 @@
    "subject": [
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ]
+  },
+  "test_gate_fpexact.py": {
+   "references": [
+    {
+     "anchor": "## Classes of run-time failure and their gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/unitstage.py"
+   ]
   }
  }
 }

@@ -53,6 +53,13 @@ import sandbox  # noqa: E402
 import toolflags  # noqa: E402
 import unitview  # noqa: E402
 from unitview import UnitError, parse_deps  # noqa: E402,F401
+
+
+def sandbox_src(rel):
+    """The path of the source of unit REL inside the sandbox (the source root is mounted at /src): the one function that composes it. The CC
+    stage compiles the preprocessed text, whose first line marker names this path, so a plugin that reports the compiler's input (fnvnx_ftoi:
+    `unit`) reports exactly sandbox_src(unit)."""
+    return "/src/" + rel
 FORMAT = "fnvnx-unitstage/2"
 ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80"}
 # language options by the unit's suffix (what the driver itself does by suffix, made explicit so that the stage's input name does not matter):
@@ -187,12 +194,12 @@ class Build:
         """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
         ins = [(at, t if files is None else unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")],
                                                           self.cache)) for at, t in self.roots]
-        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, "/src/" + rel), self.cold)
+        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, sandbox_src(rel)), self.cold)
 
     def du(self, rel, files):
         """The macro-use fact of the unit: a `-dU` run on the same minimal view as the last PP run -> (key, result)."""
         ins = [(at, unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")], self.cache)) for at, t in self.roots]
-        key, res, _, _ = run_stage(self.store, self.doc("pu", rel, ins, self.lang(rel)[0] + DU_TAIL, "/src/" + rel), self.cold)
+        key, res, _, _ = run_stage(self.store, self.doc("pu", rel, ins, self.lang(rel)[0] + DU_TAIL, sandbox_src(rel)), self.cold)
         return key, res
 
     def stderr(self, res):
@@ -220,7 +227,7 @@ class Build:
         files, expect, ran = None, None, False
         try:
             hint = json.load(open(hint_path(self.store, rel)))
-            files = {r for r in (self.real(p, False) for p in hint) if r} | {"/src/" + rel}
+            files = {r for r in (self.real(p, False) for p in hint) if r} | {sandbox_src(rel)}
         except (OSError, ValueError, TypeError):
             pass
         while True:
@@ -276,8 +283,8 @@ class Build:
         """A .s unit: no preprocessing, one stage on the /src view that holds this file alone (every other name is a placeholder)."""
         real = unitview.resolve(self.store, self.roots[0][1], rel, self.cache)
         v = unitview.view(self.store, self.roots[0][1], [real], self.cache)
-        e["closure"], e["files"] = ["/src/" + real], 1
-        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], "/src/" + rel, inc=False), set())
+        e["closure"], e["files"] = [sandbox_src(real)], 1
+        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], sandbox_src(rel), inc=False), set())
 
 
 def build_cmd(a):
