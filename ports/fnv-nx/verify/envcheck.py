@@ -512,7 +512,7 @@ def snapshot(prev=None):
     def loads(roots, trees=()):
         for at in runtime.closure(sorted(roots), list(trees)):
             add(at)
-    py, mods = os.path.realpath(sys.executable), [os.path.dirname(__import__(PY_MODULES[m]).__file__) for m in sorted(PY_MODULES)]
+    py, mods = os.path.realpath(sys.executable), [str(metadata.distribution(m).locate_file(PY_MODULES[m])) for m in sorted(PY_MODULES)]   # the package directory of each pinned module
     dyn = sysconfig.get_config_var("DESTSHARED")
     roots = [py] + [f for d in [dyn] + mods for f in runtime.elf_files(d, runtime.ident(py))]
     loads(roots, [os.path.dirname(os.__file__), os.path.dirname(os.path.dirname(py))] + mods)
