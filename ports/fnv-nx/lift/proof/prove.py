@@ -19,7 +19,7 @@ import argparse, hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-from proof import universe, defects, rewrite, forms, enc_table, model_sail, backends
+from proof import universe, defects, rewrite, forms, model_sail, backends
 MODELS = {'model_sail': model_sail}      # the reference models --model can name
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
@@ -47,6 +47,7 @@ def items(forms, args):
     for k in keys:
         for b in real[k]: add(b, 'real', k)
         if not real[k]: out.append((k, 'real', None, b'', 0, 'no real encoding in result.json'))
+    from proof import enc_table  # lazy: keystone is reached only by the table mode, never by a shape stage
     for b in enc_table.encodings(): add(b, 'table')
     if args.only: out = [o for o in out if args.only in o[0] or args.only in o[3].hex()]
     return keys, out
