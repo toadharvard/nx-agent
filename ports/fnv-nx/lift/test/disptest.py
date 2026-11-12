@@ -4,8 +4,8 @@
 The pieces under test are the product's own files, compiled and linked as they are: rt/dispatch.c, rt/rt.c, rt/enter.cc (+ seh, unhandled, rcptab, x87, imp.cpp of
 the import re, table), toolchain/dispatch/fnvnx_dispatch.cc and toolchain/names/fnvnx_names.cc (the compiler plugins that rewrite the indirect calls of the native test
 code), tools/bridgegen.py (the bridges and their table, from the descriptors in the test object's own `.fnvnx.disp`), tools/dispgen.py (the tables).  The test
-defines no symbol of rt/ or of the generated bridges (checked below: defined(test) ∩ defined(product objects) = {}); it defines only the host boundary
-that the platform provides (the thread-local slot, the tick clock, memcpy/memset, the import natives `tc_*` that stand for native product code).
+defines no symbol of rt/ or of the generated bridges (checked below: defined(test) ∩ defined(product objects) = {}); it defines only
+the import natives `tc_*` and the native bodies `native_body`, `xnative` (native code under test, not product symbols); the platform's symbols (thread-local slot, clock, libc, fnvnx_call_fp) it does not define: undefined at link = BLOCKED.
 Guest code: hand-assembled x86 functions at 0x401000.. lifted by tools/fnvlift, called by native code through function pointers whose value is the exe address:
 each case is a native function (`tc_*`, an import of the guest root) that calls `fp(args)` through a pointer type with the call's own convention; the plugin turns the
 call into the cache + fnvnx_dispatch; the bridge marshals the arguments into the x86 frame; the result comes back in eax / edx:eax / ST0 or the hidden pointer.
@@ -13,16 +13,16 @@ Expected values are computed by hand from the x86 semantics (stated at each case
 import argparse, os, re, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE); FNV = os.path.dirname(LIFT)
 for p in ('bench', 'tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
-import fnvlift as L, instest, phf, impgen, dispgen, bridgegen
+import fnvlift as L, instest, phf, impgen, dispgen, bridgegen, exitgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 from unicorn import Uc, UcError, UC_ARCH_ARM64, UC_MODE_ARM
 from unicorn.arm64_const import UC_ARM64_REG_X0, UC_ARM64_REG_X30, UC_ARM64_REG_SP, UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_TPIDR_EL0
 from elftools.elf.elffile import ELFFile
 
 BASE, IAT, DATA, GSTACK, HSTACK, STOP, TEXT, TLS = 0x401000, 0x406000, 0x407000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000, 0x7d000000
-NATIVE_ADDR, NOWHERE = 0x403f00, 0x500000       # an exe address a native root defines (and the lifted table holds too); an address no table holds
+NATIVE_ADDR, NOWHERE, XN_ADDR = 0x403f00, 0x500000, 0x403f40       # an exe address a native root defines (and the lifted table holds too); an address no table holds
 CASES = ['this', 'fast', 'stdcdecl', 'q', 'fd', 'mem', 'a12', 'a8', 'hfa', 'hfa3', 'hfaret', 'ref', 'native', 'ud',
-         'uf', 'u1', 'vec', 'vec2', 'd4', 'al', 'bf', 'f4r', 'd4r', 'ct', 'ur', 'vr', 'fsw', 'frm']
+         'uf', 'u1', 'vec', 'vec2', 'd4', 'al', 'bf', 'f4r', 'd4r', 'ct', 'ur', 'vr', 'fsw', 'frm', 'xexit']
 BRIDGE = [('t.dll', 'tc_' + c, 'stdcall', 'i', '', 'tc_' + c, 'sym') for c in CASES]
 KEY = {r[1]: 0x00100000 + 16 * i for i, r in enumerate(sorted(BRIDGE, key=lambda r: (r[0], r[1])))}      # the key rule of tools/impgen.py
 SLOT = {r[1]: IAT + 4 * i for i, r in enumerate(BRIDGE)}
@@ -86,6 +86,11 @@ TARGETS = {
     'fsw': 'fnstsw ax; movzx eax, ax; ret',
     # 1.0f + 2^-60 as binary64 arithmetic under the host rounding mode, minus 1.0, stored as a float: 0 to nearest, 2^-52 rounding toward +infinity
     'frm': 'fld dword ptr [esp+4]; fadd dword ptr [esp+8]; fld1; fsubp st(1), st(0); fstp dword ptr [esp+12]; mov eax, dword ptr [esp+12]; ret',
+    # a LIFTED function calls an exe address whose body is NATIVE (its exit bridge X_<A>, tools/exitgen.py: the native body xnative(a) is called with the guest argument),
+    # and that native body calls a lifted function through DISPATCH1 (a bridge). The bridge must find the caller's guest registers saved by fnvl_native_enter: the callee frame is
+    # built below the caller's live esp (a stale esp overwrites the caller's frame) and ebx is the caller's, 0x30.   eax = (5 + ebx) + 0x1000
+    'xexit': 'mov ebx, 0x30; push 5; call 0x%x; add esp, 4; ret' % XN_ADDR,
+    'xcallee': 'mov eax, dword ptr [esp+4]; add eax, ebx; ret',
     # the same exe address has a lifted body too: native (rule 1) wins
     'native': 'mov eax, 0x2222; ret',
 }
@@ -162,6 +167,8 @@ u32 tc_hfaret(void) { F2 r = FP(F2 (CC("stack") *)(u32), @hfret@)(0); return (u3
 u32 tc_ref(void) { NT n(1, 20, 300); return FP(u32 (CC("stack") *)(NT), @ref@)(n); }
 /* rule 1: a native root defines the body of this exe address: it is called, not the lifted body at the same address */
 u32 native_body(u32 x) { return x + 0x1100; }
+u32 xnative(u32 a) { return FP(u32 (CC("stack") *)(u32), @xcallee@)(a) + 0x1000; }
+u32 tc_xexit(void) { return FP(u32 (CC("stack") *)(void), @xexit@)(); }
 u32 tc_native(void) { return FP(u32 (CC("stack") *)(u32), @native@)(0x11); }
 u32 tc_uf(void) { U1 u = { { 1.5f, 2.5f } }; return (u32)(int)(FP(float (CC("stack") *)(U1), @uf@)(u) * 10); }
 u32 tc_u1(void) { U2 u; u.x = 3.0f; return (u32)(int)(FP(float (CC("stack") *)(U2), @u1@)(u) * 10); }
@@ -239,18 +246,22 @@ def main():
     print('gen   %s entries %d' % ('equal' if ok else 'DIFF', len(ent))); bad = not ok
     texts = [L.lift(img, ad, sz, owns=owns)[0] for ad, sz, owns in ents.values()]
     flags = [f for f in instest.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-Werror=attributes')] + ['-Wno-attributes', '-I', LIFT + '/rt']
-    CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c', '-I', FNV + '/shim/include']
-    syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent})
+    CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c', '-I', FNV + '/shim/include']
+    syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent}); syms[XN_ADDR] = 'X_%08x' % XN_ADDR
     h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h))
     open(w + '/guest.cpp', 'w').write(L.PRELUDE + '\n'.join(texts)); open(w + '/native.cc', 'w').write(NATIVE)
     # the table of native bodies: rule 1's rows, `exe address <TAB> native symbol`
+    # the exit bridge of the native body of XN_ADDR (xnative, descriptor of its own type, cdecl: the caller pops) and its entry row for the lifted table
+    xrows, xerr = exitgen.parse_rows(['%08x\txnative\tstack:i:i\tcaller' % XN_ADDR])
+    assert not xerr, xerr
+    open(w + '/exits.cc', 'w').write(exitgen.generate(xrows))
     nat, nh = dispgen.table(['%08x\tnative_body\n' % NATIVE_ADDR], 'fnvnx_native'); open(w + '/ntab.S', 'w').write(nat)
     # plugins, built from the repo sources against the pinned compiler's plugin headers
     pdir = subprocess.run([cc('g++'), '-print-file-name=plugin'], capture_output=True, text=True).stdout.strip() + '/include'
     plug = []
     for n, src in (('fnvnx_names', 'names/fnvnx_names.cc'), ('fnvnx_dispatch', 'dispatch/fnvnx_dispatch.cc')):
         so = '%s/%s.so' % (w, n)
-        r = subprocess.run(['x86_64-linux-gnu-g++-13', '-shared', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-w', '-I' + pdir, '%s/toolchain/%s' % (FNV, src), '-o', so], capture_output=True, text=True)
+        r = subprocess.run(['x86_64-linux-gnu-g++-13', '-shared', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-I' + pdir, '%s/toolchain/%s' % (FNV, src), '-o', so], capture_output=True, text=True)
         if r.returncode: sys.exit('plugin %s: %s' % (n, r.stderr[:600]))
         plug.append('-fplugin=' + so)
     NF = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-ffreestanding', '-fno-exceptions', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c', '-I', FNV + '/shim/include']
@@ -264,7 +275,7 @@ def main():
     if r.returncode: sys.exit(1)
     jobs = [([cc('g++')] + flags + ['-x', 'c++'], w + '/guest.cpp'), ([cc('g++')] + flags + ['-x', 'c++'], w + '/imp.cpp'),
             ([cc('g++')] + flags + ['-x', 'c++'], LIFT + '/rt/enter.cc'), ([cc('g++')] + flags + ['-x', 'c++'], LIFT + '/rt/seh.cc'), ([cc('g++')] + flags + ['-x', 'c++'], LIFT + '/rt/unhandled.cc'),
-            ([cc('g++')] + NF + ['-x', 'c++'], w + '/bridges.cc'),
+            ([cc('g++')] + flags + ['-x', 'c++'], w + '/exits.cc'), ([cc('g++')] + NF + ['-x', 'c++'], w + '/bridges.cc'),
             ([cc('gcc')] + CF, LIFT + '/rt/rt.c'), ([cc('gcc')] + CF, LIFT + '/rt/dispatch.c'), ([cc('gcc')] + CF, LIFT + '/rt/rcptab.c'), ([cc('gcc')] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/x87.c'),
             ([cc('gcc')] + CF, w + '/tab.S'), ([cc('gcc')] + CF, w + '/ntab.S')]
     objs = [w + '/native.o']; prod = []
@@ -288,7 +299,7 @@ def main():
         sym = {x.name: x['st_value'] for x in e.get_section_by_name('.symtab').iter_symbols() if x.name}
     want = {'this': 25, 'fast': 107, 'stdcdecl': 7 + 12 + 7, 'q': ((0x01234567 ^ 0x89abcdef) + (2 ^ 0)) & 0xffffffff, 'fd': 375 * 4 // 4 * 1 + 0, 'mem': 7 + 8 + 9 + 10 + 11,
             'a12': 50607, 'a8': 9 + 18 * 1000, 'hfa': 4 * 10 + 5, 'hfa3': 7, 'hfaret': 6 + 225, 'ref': 321, 'native': 0x1111, 'ud': 0xC000001D ^ NOWHERE,
-            'uf': 40, 'u1': 60, 'vec': 10, 'vec2': 10, 'd4': 11, 'al': 13, 'bf': 40, 'f4r': 4321, 'vr': 4321, 'd4r': 4321, 'ct': 507, 'ur': 6 + 225, 'fsw': 0x20, 'frm': 0x25800000}
+            'uf': 40, 'u1': 60, 'vec': 10, 'vec2': 10, 'd4': 11, 'al': 13, 'bf': 40, 'f4r': 4321, 'vr': 4321, 'd4r': 4321, 'ct': 507, 'ur': 6 + 225, 'fsw': 0x20, 'frm': 0x25800000, 'xexit': 0x1035}
     want['fd'] = 15 * 100 + 6
     want['vr'] = 4321
     for name in CASES:

@@ -106,7 +106,7 @@ def main():
     plug = []
     for n, src in (('fnvnx_names', 'names/fnvnx_names.cc'), ('fnvnx_dispatch', 'dispatch/fnvnx_dispatch.cc')):
         so = '%s/%s.so' % (w, n)
-        run(['x86_64-linux-gnu-g++-13', '-shared', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-w', '-I' + pdir, '%s/toolchain/%s' % (FNV, src), '-o', so])
+        run(['x86_64-linux-gnu-g++-13', '-shared', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-I' + pdir, '%s/toolchain/%s' % (FNV, src), '-o', so])
         plug.append('-fplugin=' + so)
     decls = '\n'.join(t[1] for t in TYPES)
     call = ''.join('void c_a_%s(unsigned long p, %s x) { ((void (%s *)(%s))p)(x); }\n%s c_r_%s(unsigned long p) { return ((%s (%s *)(void))p)(); }\n'
@@ -114,7 +114,7 @@ def main():
     ref = ''.join('%s g_%s;\nextern "C" void __attribute__((noinline)) a_%s(%s x) { g_%s = x; }\nextern "C" %s __attribute__((noinline)) r_%s(void) { return g_%s; }\n' % (T, n, n, T, n, T, n, n) for n, d, T in TYPES)
     F = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-ffreestanding', '-fno-exceptions', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-Wno-attributes']
     open(w + '/ref.cc', 'w').write(decls + '\n' + ref)
-    run([cc('g++')] + F + ['-w', '-S', w + '/ref.cc', '-o', w + '/ref.s'])
+    run([cc('g++')] + F + ['-S', w + '/ref.cc', '-o', w + '/ref.s'])
     asm = open(w + '/ref.s').read()
     bad = 0
     def check(name, ok, info=''):

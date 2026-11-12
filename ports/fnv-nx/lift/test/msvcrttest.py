@@ -319,7 +319,7 @@ def main():
     img = Fake(P.code); starts = {P.addr[n] for n in P.order} | {l for _, l in labels}; img.entries = set(starts)
     texts = [L.lift(img, P.addr[n], SLOT, owns=P.owns[n])[0] for n in P.order] + [L.lift(img, a, SLOT, start=l, owns=[l])[0] for a, l in labels]
     flags = [f for f in instest.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', rt]
-    CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
+    CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c']
     CXXF = ['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++']; CCF = ['aarch64-linux-gnu-gcc'] + CF
     jobs = [(CXXF, rt + '/seh.cc'), (CXXF, rt + '/enter.cc'), (CXXF, rt + '/unhandled.cc')] + [(CXXF, rt + '/' + f) for f in RUNTIME] + \
            [(CCF, rt + '/rt.c'), (CCF, rt + '/rcptab.c'), (CCF + ['-I', rt], rt + '/x87.c'), (CCF + ['-fno-builtin'], rt + '/fmath.c')]
