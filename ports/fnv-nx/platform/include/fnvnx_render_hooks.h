@@ -31,7 +31,11 @@ enum NxEnvProfile : int { NX_ENV_HANDHELD = 0, NX_ENV_DOCKED = 1 };
 #else
 typedef enum NxEnvProfile { NX_ENV_HANDHELD = 0, NX_ENV_DOCKED = 1 } NxEnvProfile;
 #endif
-_Static_assert(sizeof(enum NxEnvProfile) == 4, "NxEnvProfile is 4 bytes");
+#ifdef __cplusplus
+static_assert(sizeof(NxEnvProfile) == 4, "NxEnvProfile is 4 bytes");
+#else
+_Static_assert(sizeof(NxEnvProfile) == 4, "NxEnvProfile is 4 bytes");
+#endif
 
 uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t *args, uint32_t nargs);
 void *nxd3d_gpu_alloc(size_t bytes);
