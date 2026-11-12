@@ -553,3 +553,9 @@ Answered: L3a w8 (py_modules in stage entry, pinned in env.json; lift/tools = on
 - objstub spec amended with L6: the op_cover pin is L6 0ae75213 (`id` column). error_abi kinds are `noreturn` | `flag` (+field), both checked from the definition. A root of the objstub class that does not declare error_abi is red at recipe load. Sent to w20.
 - Verdict budget: the warm selftests take 351.9 s of 361.6 s (L3a 4eefcdb1), and the trunk breaches the same way. Owner: w19 (a per-test key over its import closure + fixtures), after MERGER's 10 failures. ETA ~2–3 h (my estimate).
 - Ids: ASM-225..227 minted for L3a gate_eh (EH-completeness REMOVE). ASM-200..224 are used across the fnv-l* branches.
+
+## 09:05Z
+- w17 ff99b9ac: guest_flags.py done (it uses recipe.semantics_for, the test covers 3 languages). Verdict next, then MERGER after w22.
+- w18 ea0cb570: re-pinned (facts 2eeea27b, manifest 880555c with escape and writes; a missing escape row is red). Global counts on 6 images (d3dx9_31's closure row is unresolved): loadlib 25/33 certified, gpa 1/2, reach 0/3, with 11 open sites/refs (was 184). Blocked by L5 (producer rows that are not call VAs; missing dbghelp rows) and L3a (atimgpud 0x100092d4 not in a range; dataflow at exe da284a and atimgpud 0x10001608).
+- w20: objstub (A) binding is layout-derived: the table relocation at k*sizeof+offsetof from DWARF, not a source-macro `handler` column.
+- w6 (L3a): ASM-225/226/227 assigned for gate_eh.
