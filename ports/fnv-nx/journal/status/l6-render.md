@@ -344,3 +344,11 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - the gen_env input rule is checked on this line;
         - the ident outputs are declared.
       Status: doing.
+- 09:05Z Merged w3b 6e613dba (finished at the pause): the 189 failing rows fall in 9 classes, 0 unclassified.
+    - 46 DEFINED, Wine defects for the translator: the p0 predicate forms (28), dst/lit/expp into oFog/oPts (14), labels up to 2047 (4).
+    - 18 ARGS: texm3x3tex with a 2D bound texture, a draw-time state predicate.
+    - 125 UNDEFINED, under (d) by the form check at CreateShader: aL as ALU source 103, b# 3, mov a0 vs_2_0+ 3, sincos .xyz 6, and others. The shipped set holds 0 undefined forms.
+    - Lead decisions:
+        - aL as an ALU source is UNDEFINED (the docs allow aL only in relative addressing).
+        - sincos follows the instruction's own page (.x/.y/.xy).
+        - ARGS needs a draw-time rule; deferred until after the root (pause).
