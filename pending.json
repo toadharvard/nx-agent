@@ -1,0 +1,115 @@
+{
+ "format": "fnvnx-assumptions-pending/1",
+ "entries": [
+  {
+   "id": "ASM-206",
+   "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-ORDER"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: not compiler correctness: GCC is allowed to reorder. Closing rule: FPSR read through an operation the compiler must order (asm with FP operand dependency), then gate on objects",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-207",
+   "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-NATIVE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: item 29 fact (L3a, w7). Windows model at the import boundary: imports run under the caller's rounding mode, set on both paths if the census shows a non-nearest mode at any import call site, and the callee's FPSR cumulative bits are ORed into the guest sticky state if a sticky read is reachable after the return. Native bodies run under the guest FPCR.",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-209",
+   "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-STALE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the CPU value is defined (old bits); closing = write back on pop or prove no such read statically",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-219",
+   "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-START"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: rt/enter.cc:46 sets FCW/MXCSR at thread reset; remaining: a call-graph check that no other path starts a guest thread",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-220",
+   "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-CTX"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-300",
+   "text": "With --eip fixed: semantics is translation-invariant in eip.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-EIP"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: mode to delete; A-EIPRANGE (symbolic eip) is the only product path",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-301",
+   "text": "Decoding (operand structure, family) is a function of the shape: masked imm/disp fields never change it.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-SHAPEFAMILY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: same decoder-agreement gate, run on every occurrence (not the representative): operand structure of each occurrence equals that of its shape",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-303",
+   "text": "For shapes outside the Sail model (x87 control/state, cpuid, rdtsc, part of SIMD: 7 019 shapes have no DSL builder yet) the reference is a transcription of the SDM compared with the host.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-SDMREF"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: no SDM transcription is a reference (orchestrator 2026-11-12). Shapes outside ACL2 x86isa get a census: closure-unreachable shapes drop out, and the orchestrator decides the reachable ones; forms are derived from the pinned model only",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-304",
+   "text": "17 (mnemonic, undefined flag) pairs: the value the reference CPU produces is not yet pinned.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-UNDEFFLAGS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: flag-liveness gate over every image: an undefined flag carries no value, and any read reachable from one is red (rule L3b, built by L3a w5)",
+   "owner": "L3b+L3a"
+  },
+  {
+   "id": "ASM-329",
+   "text": "capstone decodes every x86 instruction of the universe to its true length, fields and operands.",
+   "used_by": [],
+   "aliases": [
+    "L3b:A-CAPSTONE-X86"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: capstone/keystone pinned by sha256 from the fnv-nx-build mirror (L3b w4) + w4's ACL2 cross-check of every certified shape",
+   "owner": "L3b"
+  }
+ ]
+}
