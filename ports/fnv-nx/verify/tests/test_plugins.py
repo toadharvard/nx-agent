@@ -145,6 +145,12 @@ def main():
     hw = disasm(ra, "_Z3hrwi")
     check("HARDREG: a global register variable is no memory: no ldar/stlr/dmb, no ICE", all(x not in hw for x in ("ldar", "stlr", "dmb")), hw)
     check("float -> int is _ftol: 0x80000000 for NaN and out of range", "#0x80000000" in f2i, f2i)
+    # fnvnx_ftoi rewrites every FIX_TRUNC_EXPR or fails the compile: a conversion it does not cover (here to __int128) fails the build
+    wide = make_repo("wide", REC, "native", {ROOT + "/c.cc": "__int128 w(double d) { return (__int128)d; }\n"})
+    rwd, _ = build(wide, "W")
+    check("double -> __int128 fails the build with an FTOI error naming both types", rwd["status"] == "red" and any(
+        "FTOI" in x and "double" in x and "__int128" in x for x in rwd["failure"]["stderr"]), rwd.get("failure"))
+    check("the ordinary conversions of the same root still compile", "#0x80000000" in f2i)
     # --- ORDER-CONT: a block-ending statement without a fall-through edge needs no fence; every resumption point begins with dmb ishld
     cont_src = (
         "#include <setjmp.h>\n"

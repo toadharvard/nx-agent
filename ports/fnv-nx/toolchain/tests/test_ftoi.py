@@ -56,6 +56,9 @@ def main():
             check('native: report holds the helper, 3 sites, and the builtin as the only finding',
                   j and j['format'] == 'fnvnx-f2i/1' and j['helpers'] == ['int helper(float)'] and j['sites'] == 3
                   and [(f['function'], f['kind']) for f in j['findings']] == [('long int lr(float)', 'builtin')], j)
+        r, _, _ = comp(td, 'wide', 'F2I_X\n__int128 w(double d) { return (__int128)d; }\n'.replace('F2I_X\n', ''), native=True)
+        check('native: double -> __int128 (a shape the rewrite does not cover) is a build error naming both types',
+              r.returncode != 0 and 'FTOI' in r.stderr and 'double' in r.stderr and '__int128' in r.stderr, r.stderr[-1500:])
         # --- lifted
         r, obj, j = comp(td, 'ok', OK)
         check('lifted: a conversion inside a helper builds', r.returncode == 0, r.stderr[-1500:])

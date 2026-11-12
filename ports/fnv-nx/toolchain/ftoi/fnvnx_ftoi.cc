@@ -180,10 +180,13 @@ struct ftoi_pass : gimple_opt_pass {
         }
         tree lhs = gimple_assign_lhs(stmt), x = gimple_assign_rhs1(stmt);
         tree it = TREE_TYPE(lhs), ft = TREE_TYPE(x);
+        // RULE (c): every FIX_TRUNC_EXPR of a function is rewritten here, or inside an fnvnx_f2i helper, or a compile error. A shape the
+        // rewrite does not cover (a vector, a floating type wider than 64 bits, an integer type wider than 64 bits) names its types and fails.
         if ((TREE_CODE(it) != INTEGER_TYPE && TREE_CODE(it) != ENUMERAL_TYPE) || !SCALAR_FLOAT_TYPE_P(ft) || TYPE_PRECISION(ft) > 64
             || TYPE_PRECISION(it) > 64) {
-          expanded_location l = expand_location(gimple_location(stmt));   // a conversion the rewrite does not cover (vector, wide)
+          expanded_location l = expand_location(gimple_location(stmt));
           findings.insert({name, l.file ? l.file : "", l.line, "conv"});
+          error_at(gimple_location(stmt), "FTOI: conversion %qT to %qT is not covered by the MSVC rewrite (vector, or a type wider than 64 bits)", ft, it);
           continue;
         }
         unsigned p = TYPE_PRECISION(it);
