@@ -53,6 +53,9 @@
    "-DSTDMETHODCALLTYPE=",
    "-std=gnu++20",
    "-DNDEBUG"
+  ],
+  "asm": [
+   "-mabi=ilp32"
   ]
  },
  "include": [
