@@ -689,3 +689,16 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - rebase onto 33c443b5 (branch w14-src2);
     - make the ldcheck tree-membership fix a separate first commit;
     - fix the test_recipe second-build miss {run:1, hit:10}, a key or hermeticity defect.
+
+## 2026-11-12 09:10 UTC
+- Selftests universe gap, reported by the orchestrator: toolchain/tests never ran.
+  - The fix goes to w19, after the cache item and ahead of w17.
+  - Rule: the selftests universe is derived from admit.json.
+  - It lands together with L2 w4 plugbuild.
+- Registry:
+  - New: ASM-232 (REMOVE, L3a), the fmath Ziv precision bound.
+  - Retired: ASM-231 (LOCK-SPLIT, a rule).
+  - w6 makes both changes in the int3 commit. The next free 2xx id is 233.
+- w14's ldcheck commit now also carries the link.script membership rule (script from a tree of an admitted tool root).
+  - L3a t16c 6b3cb220 is the acceptance check.
+- The A7 (ASM-029) and ret-predicate facts at d3dx9_31 0x61bb40 and d3dx9_38 0x769b11 are owned by L3a (orchestrator decision).
