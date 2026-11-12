@@ -98,6 +98,7 @@
    "id": "ASM-006",
    "text": "The exe makes no wild accesses: array indices are in bounds, guest accesses do not reach host pages.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -143,10 +144,12 @@
    "id": "ASM-009",
    "text": "The pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3, the published proof of the x86-TSO to Arm memory mapping.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/orch-assumptions.md",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
+    "ports/fnv-nx/verify/gate_assumptions.py",
+    "ports/fnv-nx/verify/puregate_policy.py"
    ],
    "aliases": [
     "L3b:A-SAILMODEL",
@@ -721,10 +724,7 @@
   {
    "id": "ASM-203",
    "text": "capstone group tags classify the instruction-set extension of a form correctly.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_cpufeat.py"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-302",
     "L3b:A-GROUPS"
@@ -736,18 +736,7 @@
   {
    "id": "ASM-204",
    "text": "No x87/SSE exception is ever unmasked (I-FPMASK); fwait and FP arithmetic never raise.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-002.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/journal/status/l3b-lift.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87.py",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/fnvlift/fpfacts.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/instest.py",
-    "ports/fnv-nx/lift/test/mmxtest.py",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-305",
     "L3b:A-FPMASK",
@@ -760,14 +749,7 @@
   {
    "id": "ASM-205",
    "text": "Test harness only: sticky flags not observed (I-FPSTICKY set in instest ASSUME).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/fpfacts.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/instest.py",
-    "ports/fnv-nx/lift/test/mmxtest.py",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-306",
     "L3b:A-FPSTICKY",
@@ -780,11 +762,7 @@
   {
    "id": "ASM-206",
    "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/fpflags.py"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-307",
     "L3b:A-ORDER"
@@ -796,10 +774,7 @@
   {
    "id": "ASM-207",
    "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-308",
     "L3b:A-NATIVE"
@@ -811,11 +786,7 @@
   {
    "id": "ASM-208",
    "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-309",
     "L3b:A-RESUME"
@@ -827,10 +798,7 @@
   {
    "id": "ASM-209",
    "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-310",
     "L3b:A-STALE"
@@ -842,13 +810,7 @@
   {
    "id": "ASM-210",
    "text": "fnsave stores the real indefinite for an empty register; fldenv/frstor treat an empty-tagged register per the tag only.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/instest_extra.py"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-311",
     "L3b:A-EMPTY"
@@ -860,11 +822,7 @@
   {
    "id": "ASM-211",
    "text": "ES (bit 7) and B (bit 15) of FSW are 0.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-312",
     "L3b:A-ES"
@@ -876,12 +834,7 @@
   {
    "id": "ASM-212",
    "text": "FDP after an instruction without memory operand is unchanged (SDM leaves it unspecified).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-313",
     "L3b:A-FDP"
@@ -893,12 +846,7 @@
   {
    "id": "ASM-213",
    "text": "FDS is DS whenever FDP != 0 (FS-relative operand reported with DS).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-314",
     "L3b:A-FDS"
@@ -910,11 +858,7 @@
   {
    "id": "ASM-214",
    "text": "FOP is recomputed from the opcode bytes at FIP when an image is written.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-315",
     "L3b:A-FOP"
@@ -926,11 +870,7 @@
   {
    "id": "ASM-215",
    "text": "Reserved bits of the fnstenv/fnsave image are 0.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-316",
     "L3b:A-RES"
@@ -942,13 +882,7 @@
   {
    "id": "ASM-216",
    "text": "fbld with a nibble above 9 gives the arithmetic sum nibble*10^i (SDM: undefined).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/rt/x87.c"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-317",
     "L3b:A-BCD"
@@ -960,10 +894,7 @@
   {
    "id": "ASM-217",
    "text": "Only instructions of the lifter decode transfer control (constant-address proof for lock/xchg within a block).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/journal/inbox/l3b-w3-r9.md"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-318",
     "L3b:A-DECODEFLOW"
@@ -976,7 +907,6 @@
    "id": "ASM-218",
    "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -990,10 +920,7 @@
   {
    "id": "ASM-219",
    "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-327",
     "L3b:A-START"
@@ -1005,11 +932,7 @@
   {
    "id": "ASM-220",
    "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/journal/status/l3b-lift.md",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-328",
     "L3b:A-CTX"
@@ -1021,12 +944,7 @@
   {
    "id": "ASM-300",
    "text": "With --eip fixed: semantics is translation-invariant in eip.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/proof/README.md",
-    "ports/fnv-nx/lift/proof/model_sail.py",
-    "ports/fnv-nx/lift/proof/shapeprove.py"
-   ],
+   "used_by": [],
    "aliases": [
     "L3b:A-EIP"
    ],
@@ -1037,9 +955,7 @@
   {
    "id": "ASM-301",
    "text": "Decoding (operand structure, family) is a function of the shape: masked imm/disp fields never change it.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
-   ],
+   "used_by": [],
    "aliases": [
     "L3b:A-SHAPEFAMILY"
    ],
@@ -1050,9 +966,7 @@
   {
    "id": "ASM-302",
    "text": "For shapes outside the Sail model (x87 control/state, cpuid, rdtsc, part of SIMD: 7 019 shapes have no DSL builder yet) the reference is a transcription of the SDM compared with the host.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-303",
     "L3b:A-SDMREF"
@@ -1064,9 +978,7 @@
   {
    "id": "ASM-303",
    "text": "17 (mnemonic, undefined flag) pairs: the value the reference CPU produces is not yet pinned.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
-   ],
+   "used_by": [],
    "aliases": [
     "ASM-304",
     "L3b:A-UNDEFFLAGS"
@@ -1079,7 +991,6 @@
    "id": "ASM-304",
    "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -1094,7 +1005,6 @@
    "id": "ASM-305",
    "text": "RCPSS/RSQRTSS are pure functions of the input bits: MXCSR does not influence them.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -1109,7 +1019,6 @@
    "id": "ASM-306",
    "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -1124,7 +1033,6 @@
    "id": "ASM-307",
    "text": "An object and its .f2i.json come from the same compile.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -1139,7 +1047,6 @@
    "id": "ASM-308",
    "text": "No float->int conversion of a C literal occurs in lifted code (GCC folds an out-of-range constant to the saturated value, not the x86 indefinite).",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -1153,9 +1060,7 @@
   {
    "id": "ASM-309",
    "text": "capstone decodes every x86 instruction of the universe to its true length, fields and operands.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
-   ],
+   "used_by": [],
    "aliases": [
     "L3b:A-CAPSTONE-X86"
    ],
@@ -1167,7 +1072,6 @@
    "id": "ASM-310",
    "text": "capstone decodes every AArch64 instruction of an object to its architectural id; unmarked sections are code from their start.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -1192,7 +1096,6 @@
    "id": "ASM-801",
    "text": "Every FIX_TRUNC_EXPR in a native unit is rewritten to _ftol/fistp semantics, sits in an fnvnx_f2i helper, or is a compile error (fnvnx_ftoi native rule (c), L2 w1 649a2960); native bodies compiled with fnvnx_ftoi are judged by this rule, not by the lifted-code half of fpexact.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [

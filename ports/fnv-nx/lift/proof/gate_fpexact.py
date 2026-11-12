@@ -22,8 +22,8 @@ executed on the hardware and compared bit for bit with the functions of rt/rcpta
   certificate equals the four FNVL_RCP_REF_* constants of rt/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
 A missing, unreadable or malformed certificate is a finding. Argument: the table functions are pure functions of 32 bits; the certificate
 states equality with the hardware on the whole domain for the exact source bytes whose hash it carries, on the reference identity; so the
-source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): A-RCPHOST (the certifying run was made by farm/rcpcert.sh on a CPU
-with the reference identity; the certificate's hash is kept in the store) and A-RCPPURE (RCPSS / RSQRTSS are pure functions of the input
+source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): ASM-304 (the certifying run was made by farm/rcpcert.sh on a CPU
+with the reference identity; the certificate's hash is kept in the store) and ASM-305 (RCPSS / RSQRTSS are pure functions of the input
 bits, independent of MXCSR).
 
 Check 2, every use goes through the table (item `rcp:<root>/<unit>`): an object contains no AArch64 reciprocal / reciprocal-square-root
@@ -35,7 +35,7 @@ definition), so an object without them cannot compute an rcp / rsqrt value excep
 table of rt/rcptab.c (or an exact division / square root). Soundness needs every instruction of the section to be decoded: the bytes of
 a section are code except the ranges the object marks as data with the AArch64 ELF mapping symbols ($d ... $x); bytes the decoder
 cannot decode in a code range are the finding `undecodable` (and make the item of check 3b uncertified as well). Registered
-assumption: A-CAPSTONE-A64 (capstone decodes an instruction to its architectural id; sections the object does not mark are code from their start).
+assumption: ASM-310 (capstone decodes an instruction to its architectural id; sections the object does not mark are code from their start).
 
 Check 3, float -> integer exactness (item `f2i:<root>/<unit>`). The x86 rule (cvt*2si, cvtt*, fist, fistp, fisttp): rounding by MXCSR.RC /
 FCW.RC (truncation for the cvtt* and fisttp forms); NaN and out-of-range give the integer indefinite (0x80000000, 0x8000,
@@ -66,9 +66,9 @@ object-level necessary condition:
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
   bodies. The helpers' own correctness (range guard, rounding mode, indefinite value) is not decided here: it is by review, and it is
   listed per object in the output (`helpers` of each result file are the analysed helper functions). Registered assumptions (ASSUMPTIONS.l3b.json), none new:
-  A-F2IHELPERS (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), A-F2IKEY (an object and its result file
-  come from the same compile: the recipe's stage key binds both), A-F2IASM (an inline asm without a float / vector operand and without an FP register
-  clobber does no conversion; 3b backs it up for units with no site), A-F2ICONST (no conversion of a C literal occurs in lifted code), A-F2INATIVE
+  ASM-306 (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), ASM-307 (an object and its result file
+  come from the same compile: the recipe's stage key binds both), ASM-218 (an inline asm without a float / vector operand and without an FP register
+  clobber does no conversion; 3b backs it up for units with no site), ASM-308 (no conversion of a C literal occurs in lifted code), ASM-801
   (native bodies compiled with the fnvnx_ftoi plugin are judged by the L2 rules, not here).
 
 Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
