@@ -391,7 +391,7 @@ for abi in ("ilp32", "lp64"):
     for val, ok in (("_ZL5g_mem+8", True), ("_ZL5g_mem+0x8", True), ("_ZL5g_mem+4", False), ("_ZL5g_mem", False)):
         items, finds = objstub.run_check([(ob, ob)], set(), {}, set(), None, None, 1, {20: ("m", "wine-9.0:a.c:f", "addr", val)})
         case("%s/wine: kind addr SYMBOL+OFFSET (local C++ static, section+addend resolved): row %s -> %s",
-              not finds if ok else {(n, k) for _, n, k, _ in finds} == {("_Z1fv", "wine-fixme-mismatch")}, finds, key=(abi, val, "certified" if ok else "mismatch"))
+              not finds if ok else {(n, k) for _, n, k, _ in finds} == {("_Z1fv", "wine-fixme-mismatch")}, finds, key=(abi, (abi, val, "certified" if ok else "mismatch")))
 # two ids on two paths (assembled: the paths branch on a register)
 ao = build(".text\n.global f\n.type f,%function\nf: stp x29,x30,[sp,-16]!\n cbz x0, 1f\n mov w0,5\n bl fnvnx_wine_fixme\n b 2f\n1: mov w0,6\n bl fnvnx_wine_fixme\n2: ldp x29,x30,[sp],16\n ret\n.size f,.-f\n", "ilp32", "s")
 oo = objstub.Obj(ao)

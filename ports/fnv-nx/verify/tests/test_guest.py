@@ -112,7 +112,7 @@ def main():
     case("the pin's semantic set has the ABI, FP and outline-atomics flags", all(f in recipe.SEMANTICS_FLAGS for f in (
         "-mabi=ilp32", "-fPIC", "-ftls-model=local-exec", "-ffp-contract=off", "-frounding-math", "-fshort-wchar", "-mno-outline-atomics", "-ffixed-x19")), recipe.SEMANTICS_FLAGS)
     # a guest build.json carries no semantic flag: refused in each flag list, whatever it is (an allow-list of the per-root classes, no list of semantic flags)
-    for f in ("-mabi=ilp32", "-march=armv8-a", "-mtune=cortex-a57", "-fPIC", "-fPIC", "-ftls-model=initial-exec", "-fsigned-char", "-funsigned-char", "-frounding-math",
+    for f in ("-mabi=ilp32", "-march=armv8-a", "-mtune=cortex-a57", "-fPIC", "-ftls-model=initial-exec", "-fsigned-char", "-funsigned-char", "-frounding-math",
               "-fshort-wchar", "-mno-outline-atomics", "-moutline-atomics", "-ffast-math", "-fno-exceptions", "-fno-devirtualize", "-Ofast", "-Wa,-mfoo", "-Wl,-x", "-Wp,-D"):
         for k in ("c", "cxx", "asm"):
             bad = guest_rec(ext)

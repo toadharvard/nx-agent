@@ -50,39 +50,39 @@ for ABI[0] in ("lp64", "ilp32"):
     b = build("int ext(void){return 2;}")
     k, items, _ = kinds([a, b])
     case("(b) a reference with one strong definition is certified; a weak undefined reference without a definition is `undefined`",
-          ("ext", "undefined") not in k and ("ext", "unresolved") not in k and ("wk", "undefined") in k and len(items) == 5, (k, items))
+          ("ext", "undefined") not in k and ("ext", "unresolved") not in k and ("wk", "undefined") in k and len(items) == 5, (k, items), key=ABI[0])
     d1, d2 = build("int dup(void){return 1;}\nint use(void);"), build("int dup(void){return 2;}")
     k, _, _ = kinds([d1, d2])
-    case("(b) two strong definitions of one symbol -> duplicate-strong", ("dup", "duplicate-strong") in k, k)
+    case("(b) two strong definitions of one symbol -> duplicate-strong", ("dup", "duplicate-strong") in k, k, key=ABI[0])
     w = build("__attribute__((weak)) int wd(void){return 1;}\nint wd2(void);\nint r(void){return wd();}", extra=["-DX"])
     r_ = build("int wd(void);\nint r(void){return wd();}")
     k, _, _ = kinds([w, r_])
-    case("(b) a weak definition without a strong one -> weak-only, and the reference to it is unresolved", ("wd", "weak-only") in k and ("wd", "unresolved") in k, k)
+    case("(b) a weak definition without a strong one -> weak-only, and the reference to it is unresolved", ("wd", "weak-only") in k and ("wd", "unresolved") in k, k, key=ABI[0])
     w2 = build("__attribute__((weak)) int wd(void){return 1;}")
     s2 = build("int wd(void){return 3;}")
     k, _, _ = kinds([w2, s2])
-    case("(b) a weak definition overridden by one strong definition is fine", not {x for x in k if x[0] == "wd"}, k)
+    case("(b) a weak definition overridden by one strong definition is fine", not {x for x in k if x[0] == "wd"}, k, key=ABI[0])
     c1 = build("int cm;", extra=["-fcommon"])
     k, _, _ = kinds([c1])
-    case("(b) a common symbol -> common", ("cm", "common") in k, k)
+    case("(b) a common symbol -> common", ("cm", "common") in k, k, key=ABI[0])
     i1 = build('static int impl(void){return 1;}\nint (*res(void))(void){return impl;}\nint ifn(void) __attribute__((ifunc("res")));')
     k, _, _ = kinds([i1])
-    case("(b) an IFUNC definition -> ifunc", ("ifn", "ifunc") in k, k)
+    case("(b) an IFUNC definition -> ifunc", ("ifn", "ifunc") in k, k, key=ABI[0])
     # (c) on symbol tuples: an alias stub (two contract names, one body) and the same body twice
     elf = {"x.elf": [("a", 0x1000, 8, 2, 1, 1), ("b", 0x1000, 8, 2, 1, 1), ("c", 0x2000, 8, 2, 1, 1), ("z", 0x3000, 0, 2, 1, 1)]}
     k, _, f = kinds([], elf, {("r", "x.elf"): [("a", "B1"), ("b", "B2"), ("c", "B3")]})
     case("(c) two contract names with different body ids on one address -> contract-alias on both, the third is fine",
-          {("contract:a", "contract-alias"), ("contract:b", "contract-alias")} <= k and ("contract:c", "contract-alias") not in k, k)
+          {("contract:a", "contract-alias"), ("contract:b", "contract-alias")} <= k and ("contract:c", "contract-alias") not in k, k, key=ABI[0])
     k, _, _ = kinds([], elf, {("r", "x.elf"): [("a", "B1"), ("b", "B1"), ("c", "B3")]})
-    case("(c) the same body id on one address is one body: green", not {x for x in k if x[0].startswith("contract:")}, k)
+    case("(c) the same body id on one address is one body: green", not {x for x in k if x[0].startswith("contract:")}, k, key=ABI[0])
     k, _, _ = kinds([], elf, {("r", "x.elf"): [("nope", "B1"), ("z", "B2")], ("q", None): [("a", "B1")]})
     case("(c) a name missing from the ELF, a name of size 0, a table with no ELF -> not certified",
-          {("contract:nope", "contract-undefined"), ("contract:z", "contract-undefined"), ("contract:a", "contract-no-elf")} <= k, k)
+          {("contract:nope", "contract-undefined"), ("contract:z", "contract-undefined"), ("contract:a", "contract-no-elf")} <= k, k, key=ABI[0])
     k, _, _ = kinds([], {"l.elf": [("loc", 0, 0, 0, 0, 0)]})
-    case("(a) a LOCAL undefined symbol (a target a relocation could name) is red", ("<elf>", "elf-undefined") in k, k)
+    case("(a) a LOCAL undefined symbol (a target a relocation could name) is red", ("<elf>", "elf-undefined") in k, k, key=ABI[0])
     k, _, _ = kinds([], {"u.elf": [("g", 0, 0, 0, 1, 0), ("h", 0, 0, 0, 2, 0), ("i", 0x10, 4, 10, 1, 1)]})
     case("(a) ELF with an undefined, a weak undefined and an IFUNC symbol; and one without .symtab", {("<elf>", "elf-undefined"), ("<elf>", "elf-weak-undefined"),
-          ("<elf>", "elf-ifunc")} <= k and ("<elf>", "elf-no-symtab") in kinds([], {"n.elf": None})[0], k)
+          ("<elf>", "elf-ifunc")} <= k and ("<elf>", "elf-no-symtab") in kinds([], {"n.elf": None})[0], k, key=ABI[0])
 
 
     # (b1) C++ vague linkage: COMDAT groups
@@ -92,31 +92,31 @@ for ABI[0] in ("lp64", "ilp32"):
     cc_ = build("int sq(int);\nint fc(int v) { return sq(v); }\n", "cc")
     k, items, _ = kinds([ca, cb, cc_])
     case("(b1) an inline function instantiated identically in two units is one definition: no weak-only, the reference is certified, the signature is an item",
-          not {x for x in k if x[0] == "_Z2sqi"} and ("<comdat>", "_Z2sqi") in {(i, n) for i, n in items}, (k, items))
+          not {x for x in k if x[0] == "_Z2sqi"} and ("<comdat>", "_Z2sqi") in {(i, n) for i, n in items}, (k, items), key=ABI[0])
     cd = build("#define K 2\n" + INL + "int fb(int v) { return sq(v) + 1; }\n", "cc")
     k, _, f = kinds([ca, cd, cc_])
     case("(b1) the same inline function with another macro value in one unit: comdat-differs on the signature, the symbol and the reference",
           {("_Z2sqi", "comdat-differs")} <= k and any(i == "<comdat>" and n == "_Z2sqi" and kd == "comdat-differs" for i, n, kd, _ in f)
-          and any(i == cc_ and n == "_Z2sqi" for i, n, _, _ in f), (k, f))
+          and any(i == cc_ and n == "_Z2sqi" for i, n, _, _ in f), (k, f), key=ABI[0])
     VT = "struct B { virtual ~B() {} virtual int f() { return 1; } };\nB *%s() { return new B; }\n"
     v1, v2 = build(VT % "mk1", "cc"), build(VT % "mk2", "cc")
     k, _, f = kinds([v1, v2])
     case("(b1) a class with a virtual destructor in two units: vtable, typeinfo and member groups are identical, no finding of vague linkage",
-          not {x for x in k if x[1] in ("weak-only", "comdat-differs")} and any(n == "_ZTV1B" for _, n, _, _ in f) is False, (k, f))
+          not {x for x in k if x[1] in ("weak-only", "comdat-differs")} and any(n == "_ZTV1B" for _, n, _, _ in f) is False, (k, f), key=ABI[0])
     v3 = build(VT.replace("return 1", "return 3") % "mk3", "cc")
     k, _, _ = kinds([v1, v3])
     case("(b1) the same class with another inline body: its member function and vtable group differ", {("_ZN1B1fEv", "comdat-differs"), ("<defs>", "_ZN1B1fEv")} & k
-          and ("_ZN1B1fEv", "comdat-differs") in k, k)
+          and ("_ZN1B1fEv", "comdat-differs") in k, k, key=ABI[0])
     SL = "const char *%s() { return \"zzzz-%s\"; }\n__attribute__((noinline)) inline const char *nm() { return \"hello\"; }\nconst char *u%s() { return nm(); }\n"
     s1, s2 = build(SL % ("p", "p", "1"), "cc"), build(SL % ("q", "q-longer", "2"), "cc")
     k, _, f = kinds([s1, s2])
-    case("(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)", not {x for x in k if x[1] == "comdat-differs"}, (k, f))
+    case("(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)", not {x for x in k if x[1] == "comdat-differs"}, (k, f), key=ABI[0])
     wk = build("__attribute__((weak)) int wk() { return 1; }\n", "cc")
     k, _, _ = kinds([wk])
-    case("(b1) a weak definition outside every COMDAT group stays weak-only in C++", ("wk", "weak-only") in k or ("_Z2wkv", "weak-only") in k, k)
+    case("(b1) a weak definition outside every COMDAT group stays weak-only in C++", ("wk", "weak-only") in k or ("_Z2wkv", "weak-only") in k, k, key=ABI[0])
     mem, grp = L.elf_comdat(ca)
     case("elf_comdat: signature -> digest, member section indices; no group in a C object", "_Z2sqi" in grp and mem and not any(L.elf_comdat(build("int x(void){return 1;}")))
-          , (mem, grp))
+          , (mem, grp), key=ABI[0])
     # (b2) script symbols
     ref = build("extern char __image_end[];\nchar *e(void) { return __image_end; }")
     elf_ok = {"r/x.elf": [("__image_end", 0x1000, 0, 0, 1, 1)]}
@@ -125,10 +125,10 @@ for ABI[0] in ("lp64", "ilp32"):
     for tag, el, bad in (("defined GLOBAL in the ELF of its root", elf_ok, False), ("defined only weak", elf_weak, True), ("not defined in the ELF", elf_none, True)):
         items, finds = L.judge({"r/o.o": L.elf_symbols(ref)}, el, {})
         case("(b2) a reference to a link-script symbol, %s: %s",
-              (("r/o.o", "__image_end", "undefined", finds[0][3] if finds else "") in finds) if bad else not finds, finds, key=(tag, "undefined" if bad else "certified"))
+              (("r/o.o", "__image_end", "undefined", finds[0][3] if finds else "") in finds) if bad else not finds, finds, key=(ABI[0], (tag, "undefined" if bad else "certified")))
     items, finds = L.judge({"r/o.o": L.elf_symbols(ref)}, elf_ok, {}, {})
     items2, finds2 = L.judge({"q/o.o": L.elf_symbols(ref)}, elf_ok, {})
-    case("(b2) the ELF of another root does not define it for this root's objects", not finds and any(n == "__image_end" for _, n, _, _ in finds2), finds2)
+    case("(b2) the ELF of another root does not define it for this root's objects", not finds and any(n == "__image_end" for _, n, _, _ in finds2), finds2, key=ABI[0])
 ABI[0] = "lp64"
 
 # gate on the toy root
