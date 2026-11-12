@@ -441,3 +441,17 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - w18 51e4809d: manifest pin 07d79c58 plus the escape table. Counts unchanged: LoadLibrary 20/23, gpa 0/2 certified, reach red (174 open GPA sites/refs). Verdict 556059a6 green, 422 s on a loaded host (measurement).
 - w18 f916f6ed: allocsites by return-flow closure, 203 sites over 5 images, 25 const; 27 allocators (7 pure, 20 mixed), 3 address-taken.
   - Open: the exe CRT malloc/new and the indirect callers. They need L3a points-to (memory-resident flow); dependency L3a.
+
+## 2026-11-12 04:40Z
+- **Trunk:** clean=407e93af (28 gates). Merged: L2 w4-clean, w12 hostapi (0d8f1c89, 2af0cbc7), w20-r objstub (571e1e2b, d816cf35), L2 w6-dyninit.
+- **MERGER reds:**
+  - w16 39fc3d7e (toy roots: pp:seed.c, linkstrict build-red on the trunk env without the GL packages). Sent back: reproduce on the trunk env, merge w14 + 407e93af, fixture class into the gates.d format.
+  - w19 b178859d (selftests 49/59): sent back to name the 10.
+  - w5 ea7e5ea6 and w10 4c5bcc2a (conflicts): replaced by w22 and by w14 10c85a41 respectively.
+- **New L1 order:** w22 → w14 → w17 → profile → w16 → w19; then L3a lift-gates and L3b.
+- **objstub class decision (L6, MojoShader table handlers):** an empty or constant handler is accepted only by one of three justifications:
+  - (a) structural no-op from the structured docs syntax record (0 operands, no destination);
+  - (b) coverage: a generated SM-op coverage entry names another emitter for every form (DCL, TEXM3xPAD);
+  - (c) unreachable: fnvnx_reach_violation with a certificate (RESERVED). Until then it is red.
+  - L6 generates the records and the coverage table; L1 objstub reads them.
+- L3b w2g-u 3aa17dad waits on w16's fixture class and on w22.
