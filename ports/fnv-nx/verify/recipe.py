@@ -364,6 +364,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
         return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root; required for kind pie, the default), kind pie|exe|shared, "
                 "`version_script` (a tracked file of the root: required for, and only for, kind shared), optionally roots, libs"]
     err = ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])] + emulation_flags(lk["flags"], kind)
+    rent = roots.get(root, {})
+    if rent.get("target") == "guest" and kind == "exe":
+        err.append("link.kind exe is a host executable: a guest root links a pie (the ILP32 guest image, emulation aarch64linux32)")
     deps = lk.get("roots", [])
     if not (isinstance(deps, list) and all(isinstance(d, str) for d in deps)):
         err.append("link.roots must be a list of repo paths of admitted product roots")
@@ -388,6 +391,8 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
                 continue
             if dv and dv not in variant_names(drec):
                 err.append("link.roots: %s has no variant %r" % (dr, dv))
+            elif dv and rent.get("class") != "test":
+                err.append("link.roots: %s is a variant: only a test root (class test) links a variant; a product image links base roots" % d)
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
     cyc = link_roots_cycle(root, roots, repo) if deps else None
@@ -1233,7 +1238,8 @@ def main(argv):
         repo = "."
         if argv[:1] == ["check"]:
             roots = load_admit(repo)
-            errs = check(load_recipe(repo, roots, opt["--root"]), opt["--root"], tracked(repo), roots, load_pin(repo), repo)
+            root, _ = split_spec(opt["--root"])   # the one place the spec is split: nothing below sees root@NAME
+            errs = check(load_recipe(repo, roots, opt["--root"]), root, tracked(repo), roots, load_pin(repo), repo)
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0
         res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"))
