@@ -15,7 +15,7 @@ LD=${LD:-aarch64-linux-gnu-ld}
 # guest: the game's data model and code generation (toolchain/guest/build.sh), freestanding, fixed address
 G=(-mabi=ilp32 -O2 -g -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-pic -fno-pie -fno-stack-protector -mno-outline-atomics
    -ftls-model=local-exec -fno-asynchronous-unwind-tables -fshort-wchar -frounding-math -Wall -Wno-unused-parameter
-   -I"$HERE/include" -I"$ROOT/toolchain/include" -I"$ROOT/platform/include" -iquote "$ROOT/shim/include"
+   -I"$HERE/include" -I"$ROOT/toolchain/include" -I"$ROOT/loader/include" -I"$ROOT/platform/include" -iquote "$ROOT/shim/include"
    -I"$ROOT/platform/crt")
 GXX=(-std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit)
 TSAN=(-fsanitize=thread)
@@ -26,6 +26,7 @@ cxx() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CXX "${GXX[@]}"
 for f in sync thread handles waitgraph platstat; do cxx "$ROOT/platform/win32/$f.cpp"; done
 for f in clock_real clock_rt; do cxx "$ROOT/platform/clock/$f.cpp"; done   # the clock interface (fnvnx_clock.h) the sync layer reads time through
 cc "$ROOT/platform/guest/os_guest.c"
+cc "$ROOT/platform/os/os_world.c"   # os_world_register/unregister (os_guest.c calls them; a platform root unit)
 cc "$ROOT/toolchain/guest/threads.c" -Wno-missing-field-initializers
 cc "$HERE/mlibc.c" -fno-builtin -fno-tree-loop-distribute-patterns -Wno-builtin-declaration-mismatch
 cc "$HERE/gstart.c"
