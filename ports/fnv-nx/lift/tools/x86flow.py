@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared x86-32 flow code for fpmodes.py / memclass.py: PE image, recursive-descent decoder with CFG, TOTAL esp/ebp tracking
+"""Shared x86-32 flow code for fpmodes.py: PE image, recursive-descent decoder with CFG, TOTAL esp/ebp tracking
 (symbolic callee pops solved from join/ret constraints; every instruction ends with a constant or a named reason), frame-address
 events, x87 stack-depth dataflow. No clocks, no entropy; every iteration order is sorted."""
 import os, struct, bisect, itertools
@@ -379,7 +379,7 @@ def conformance(F):
     ebp_ok: on every path to a `ret` / tail jump ebp holds its entry value: the value is saved by `push ebp` (or `mov [esp+k], ebp`) in a slot of known entry-relative
     coordinate and reloaded from that very slot (`pop ebp`, `leave` through a proven ebp, `mov ebp, [..]`); any other write of ebp loses it; a store to the slot kills the save.
     Lattice (eo, sv): eo = ebp holds the entry value, sv = coordinate of the save slot or None; join = (and, equal or None). Callees are not looked at here
-    (memclass closes both properties over the direct-call graph)."""
+    (the direct-call graph closes both properties: a caller treats its callee's result as that callee's own)."""
     if F.kind in FUNK:
         return True, True
     ends = [x for x in F.ins if mn(F.ins[x]) in ('ret', 'retf') or (mn(F.ins[x]) == 'jmp' and x in F.tails)]
