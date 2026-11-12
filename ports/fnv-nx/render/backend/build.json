@@ -35,10 +35,7 @@
   ],
   "asm": []
  },
- "include": [
-  "ports/fnv-nx/render/backend",
-  "ports/fnv-nx/render/backend/nx"
- ],
+ "include": [],
  "units": "all",
  "link": null,
  "external": [
