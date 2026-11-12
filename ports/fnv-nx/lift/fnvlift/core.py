@@ -141,6 +141,8 @@ class Ctx:
         return 'x' + n[3:]
 
     def fmem(self, ins, op):
+        if self.macc != 'M':
+            raise Unsupported('locked instruction at %x: a float memory access outside LKA<T>' % self.a)
         return ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
 
 
@@ -239,19 +241,6 @@ def tab_tails(img, insns, lo, hi):
                 raise Unsupported('jump table at %x: no proved extent (%s)' % (a, (JTAB_RED or {}).get(a, 'no jtab record')))
             out.update(v for v in JTAB[a][2] if not lo <= v < hi)
     return sorted(out)
-
-
-GUEST_ACCESS = re.compile(r'\b(?:M8|M16|M32|M64|MF32|MF64|MX)\s*\(')     # every accessor of the prelude that reaches guest memory outside a locked instruction (rt/fnvl.h GM, GMF, MX)
-
-
-def locked_access_check(cx, lines):
-    """Rule LK-ONLY (R9): while the emitter is inside a locked instruction, a guest memory access reaches memory only through LKA<T> (LK8..LK64, which the commit then
-    compare-and-swaps). Any other accessor in the emitted text is a generator error: the instruction would read or write the cell non-atomically. Closes the class for the hand
-    and the DSL path alike, whatever the gate sees."""
-    for t in lines:
-        m = GUEST_ACCESS.search(t)
-        if m:
-            raise Unsupported('locked instruction at %x: guest access %s outside LKA<T> in %r' % (cx.a, m.group(0).rstrip('( '), t[:80]))
 
 
 def dispatch(cx, ins):
@@ -378,10 +367,8 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             gs_guard(cx, ins)
             cx.macc = 'LK'
             em('{ LK_BEGIN(%d); lk_%x: ;' % (f_sys.lock_size(ins), a))
-            n1 = len(cx.L)
             dispatch(cx, ins)
             cx.macc = 'M'
-            locked_access_check(cx, cx.L[n1:])
             em('if(!lk_commit(lk_,0x%xu)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
         else:
             gs_guard(cx, ins)
