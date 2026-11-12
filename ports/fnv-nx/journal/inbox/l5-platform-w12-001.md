@@ -31,3 +31,9 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
 - Lead decision (c): a key-level rule. Static root+key with no declared value under it makes the value name irrelevant: row static, value `*`, reason `key-has-no-declared-values`. Declared hive has no value under HKLM root, so 0xc5d73c and 0xc5d8b7 are static.
 - Real exe (FalloutNV.exe + d3dx9_31/38, Galaxy as contract-only): 20 sites, 20 static, 0 dynamic. Private manifest commit: see lead message.
 - Synthetic cases in check_regsites.py: dynamic name under an empty static key (static), same under a key with a declared value (dynamic).
+
+## Update 2026-11-12: TEXT_ENTRY (36) Horizon host server
+- toolchain/host/host_textentry.inc (host_text_entry, libnx swkbd, mutex-serialised) + host_textconv.h (pure cut / UTF-16<->UTF-8, no libnx) + row `[FNVNX_PLAT_TEXT_ENTRY] = {5, pf_text_entry}` in host_platform.inc, include in host.c.
+- tests/s4/test_textconv.cpp runs the real host_textconv.h (27 checks pass in a stand-alone harness; the full s4 build needs the generated SDK header, not available here).
+- check_hostapi: TEXT_ENTRY violation gone; ACCESS_FAULT_HANDLER remains (L1/L4).
+- Not done: emulator-side (L4 boot machine) server, waiting for L4's answer on file and scenario-text format; the .inc itself is not compiled against libnx here (no libnx headers in this container).
