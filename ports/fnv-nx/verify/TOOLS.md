@@ -2022,3 +2022,27 @@ element by record_ok on its key, a scalar element by scalar_ok, an array by its 
 TYPE_SIZE_UNIT, element size times the declared extent; an incomplete array has no row, so it is absent).  certified_by is the union
 of the gate ids of the name, the type and `n1` (the address).
 ```
+
+## contract/globext_run.py
+
+```text
+globext_run - the global-extents fact of a build: certified objects, the universe, the probes (L2; library core + CLI).
+
+    globext_run.py --gcc PATH... --cl PATH... --units units.json --n1 n1.json --exe FalloutNV.exe
+                   --datamodel UNITS.txt --out DIR [--range LO HI] [--probe VA ...]       (inputs of the gates names and r7: link/unitpairs.py)
+
+Everything is read from the gates' own libraries and the contract stage outputs, never re-derived here:
+  name pairs   link/gate_names.rows        a (unit, symbol) is name-certified when its row has reason ''
+  records      link/gate_r7.rows           a (unit, key) is layout-certified when verdict `equal`; the abi gate's shared-layout item
+               (verify/gate_abi.read_objects: one layout in every unit that has the key) must hold too, else the key is not certified
+  scalars      --datamodel: the unit stems the datamodel gate certified (one per line; gate_datamodel.unit_why == []): every scalar
+               type of such a unit is certified by the msvcmodel ILP32 sizes
+  addresses    --n1 (contract/n1.py output): n1['sym'][(unit index, msvc name)], the unit index being the N of the cl object `u<N>.obj`;
+               one name with two different addresses over a source's units is rejected
+  universe     every data symbol (external class, defined in a non-code section) of the cl objects of the paired units, which n1 pins to
+               an address inside a non-code section of the exe (contract/exefacts.Image): counted per distinct address ("all")
+OUT/globext.txt (the fact), OUT/globext.audit (type, symbol, unit), OUT/globext.json (counts, rejected reasons by class, probes).
+Probe answer: the certified object containing the address, else the universe objects at it (name, units: a pinned data symbol that no
+gate certified), else `none certified`; a static (class 3) symbol of a cl object whose address n1 pins is reported as `internal`.
+Pure core: certify_all(); the CLI only reads files.
+```
