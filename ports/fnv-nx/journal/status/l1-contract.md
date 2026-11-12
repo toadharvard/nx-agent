@@ -548,3 +548,8 @@ Answered: L3a w8 (py_modules in stage entry, pinned in env.json; lift/tools = on
 - w22 71d8cafb: done, green 28/28, 286.9 s, envcheck OK on a fresh container. Next is MERGER. `patch` stays out of the verdict env; it is pinned in the toolchain-build profile.
 - w5 1f088b42: toolchain-build profile, 162 packages, all with sha256 (Ubuntu snapshot 20261110T000000Z), mirror tools/toolchain-debs 63d8ca65, profile id 11289d4f…. Accepted, except that the hand-added `dirname id ls cat` is red. It must be replaced by a full shell AST parse that covers $(..) and backticks, where a non-literal command name is red. Doing.
 - L3a item 16: merge order sent (w22 → w16-int with w14's py_modules → w17 pins).
+
+## 08:55Z
+- objstub spec amended with L6: the op_cover pin is L6 0ae75213 (`id` column). error_abi kinds are `noreturn` | `flag` (+field), both checked from the definition. A root of the objstub class that does not declare error_abi is red at recipe load. Sent to w20.
+- Verdict budget: the warm selftests take 351.9 s of 361.6 s (L3a 4eefcdb1), and the trunk breaches the same way. Owner: w19 (a per-test key over its import closure + fixtures), after MERGER's 10 failures. ETA ~2–3 h (my estimate).
+- Ids: ASM-225..227 minted for L3a gate_eh (EH-completeness REMOVE). ASM-200..224 are used across the fnv-l* branches.
