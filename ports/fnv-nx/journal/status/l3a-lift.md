@@ -183,3 +183,17 @@ Update 2026-11-12, at 698adefb:
   - w1 rebuilds the pack with the origin set when w17 lands. The current farm 1 run is labelled a measurement.
 - w3 d77f58ef, merged as 6bed89ae: tools/cli.py. Every entry point declares its usage. --help exits 0, a bad argument exits 2, and nothing undeclared reaches the file system. 11 tools were fixed: rcpgen had written the stray --help/g, and 10 others crashed or ran on --help. The lead spot-checked rcpgen and packcopy: rc 0 and 2, no files created.
 - w8 643c058e: item 16 has 3 of 5 drivers converted (citest, imptest, msvcrttest); 5 Unicorn harnesses remain. msvcrttest's 3 terminal cases run one invocation each, checked against terminal.json; asked of L4.
+
+## 09:00 update (head ba908b36)
+- L3b F1/F2 cb32e9e4 merged as ba908b36. proof/forms.py has one family of address functions (ea, ssa, esa, dsa), and an untagged access is refused.
+  - 0 raw load/store outside forms.py; the AST test passes here.
+  - Of the 19 817 int shape keys, 77 changed and were re-proved.
+  - Model defect: the pinned ACL2 x86-cmps computes [edi]-[esi]. L3b fixes it with a transcription of the master hunk (ASM-009), in one IR bump after w4's G1.
+- Orchestrator's base: claude/fnv-first-root-next 862b0708, not int2. Records go in with the commit that cites them.
+  - w6 builds int3 = 862b0708 + lift-gates + lead ba908b36 + w5-flags (doing).
+  - w4 makes an ASM-225 + pcsrc.py commit on 862b0708 (doing).
+  - w5 rebases the flags work onto 862b0708 (doing).
+- w5 30da5cec: gate_flags now reports reads and no-form rows separately, with an assertion that certified ≥ 0. binkw32's 4 entry-seeded reads are unknown-consumer 4 at the present facts.
+  - Next: a jump-table target's incoming flags come from the dispatching jmp.
+  - The 2 undefined-flag sites, 01441246 and 01457d65, go to L3b's rule.
+- w8: takes int2's instest.py; item 16 rebases onto int3.
