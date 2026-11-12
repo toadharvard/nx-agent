@@ -111,7 +111,7 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - w12 2901bc9 is green (36b24d9d, 261.9 s, 26 gates): hostapi with the wrapper rule widened and docstrings generated; sent to MERGER.
   - w16 5b0dd218 is green (3b88da89, 185.4 s, 24 gates): 3m mirror, fixtures and the `fixtures` gate. It rebases onto 7503d2fa, then goes to MERGER; `fixtures` goes into REQUIRED_PRODUCT.
   - w15 83053a54: tool-root refusal; objects.json check; archive members judged by linkstrict/objstub. Its variant run on a real root is blocked until the first product root lands (L5). New item: cross-root `outputs`/`uses` keyed by content hash (for L5 w13).
-  - New task 4l: w21 (session_01KmtZKTMwsfzMYETernKY5P, claude/fnv-l1-contract-w21) builds the `legal` gate (VA in the image ranges paired with a decomp name is red) and a census per layer. Status: doing.
+  - New task 4l: w21 (session_01KmtZKTZ76LhVoz6LLMqcHv (w21b; w21 archived, stuck pending), claude/fnv-l1-contract-w21) builds the `legal` gate (VA in the image ranges paired with a decomp name is red) and a census per layer. Status: doing.
 - 03:09Z w19 b178859 is green (222.5 s cold, warm 2 s; gate warm with B=2.0). Fixes asked: test determinism checked in the sandbox (testdet), not assumed; test deps declared as oracle `uses`, not taken from the AST or name strings; gate cache keyed by tree. L2 w4-clean 9be67297 is green (261.8 s) and with MERGER.
 - 03:11Z w20 5126d5b0 deletes onexit.c and its set: 278 lines in 49 files → 223 in 40 at 3fb7f9bc→5126d5b0, journal excluded; 121 of the remainder are newlib crt_symbols rows.
   - platform/crt keeps _onexit, __dllonexit, exit and _amsg_exit (imported by d3dx9_31/38); deleted atexit, doexit, _cexit and _c_exit (no importer).
@@ -241,3 +241,6 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - **ASM-043:** deleting it dropped L3b's capstone aliases. L3b mints ASM-329/330. The w10 gate adds three rules: ids are never reused (a `retired` list), a cited record cannot be removed, and a cited alias must resolve to a live record.
   - **rt/guest** (L5, product): crt0.s plus the runtime units. guest_pie.specs and build.sh are removed.
   - **MERGER order:** w10 → L3a lift-gates (ASM-200..202) → L3b unit.
+- 03:41Z:
+  - w21 never started (stuck pending), so it was archived and w21b (session_01KmtZKTZ76LhVoz6LLMqcHv) now does the legal gate plus census.
+  - w5's acceptance is now a fresh-container green with nothing installed by hand: setup, envcheck, verdict. Status: open. w13 had 25 dpkg errors at install_debs.
