@@ -52,8 +52,9 @@ def main():
     segs, sym = build(); bad = 0; PROC = (0x23, 0x1b, 0x23, 0x23, 0x3b, 0)       # ES CS SS DS FS GS of the process (fnvl_seg_init)
     A = 0x401000
     # code -> (NTSTATUS, ExceptionAddress, NumberParameters, Context.Eip)
-    ROWS = {1: (0xC0000094, A, 0, A), 5: (0xC0000095, A, 0, A), 3: (0x80000003, A, 1, A + 1), 4: (0xC000001D, A, 0, A), 6: (0xC0000096, A, 0, A), 7: (0xC000008C, A, 0, A),
-            8: (0xC0000095, A, 0, A + 1), 9: (0xC0000420, A, 0, A), 10: (0x80000004, A, 0, A), 11: (0xC000001E, A, 0, A)}
+    ROWS = {1: (0xC0000094, A, 0, A), 5: (0xC0000095, A, 0, A), 3: (0x80000003, A, 3, A), 4: (0xC000001D, A, 0, A), 6: (0xC0000096, A, 0, A), 7: (0xC000008C, A, 0, A),
+            8: (0xC0000095, A, 0, A + 1), 9: (0xC0000420, A, 0, A), 10: (0x80000004, A, 0, A), 11: (0xC000001E, A, 0, A),
+            12: (0x80000003, A + 3, 3, A + 2)}   # 3: int3 and 12: int 2d with eax = 0: Wine 9.0 unix/signal_i386.c trap_handler / handle_interrupt (rt/seh.cc cites them)
     for code, want in sorted(ROWS.items()):
         uc, rd = run(segs, sym, 'drv_raise', (code, A), PROC); rec = rd(rd(sym['g_rec'])[0], 5); ctx = rd(rd(sym['g_ctx'])[0] + 184)[0]; got = (rec[0], rec[3], rec[4], ctx)
         bad += got != want; print('fnvl_raise(%2d) %s %s' % (code, 'ok' if got == want else 'FAIL', ' '.join('%x' % x for x in got)))

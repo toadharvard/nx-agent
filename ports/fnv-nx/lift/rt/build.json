@@ -115,11 +115,6 @@
    "inputs": [
     "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
    ]
-  },
-  {
-   "name": "fnvnx_f2i_check",
-   "source": "ports/fnv-nx/toolchain/f2i_check/fnvnx_f2i_check.cc",
-   "args": {}
   }
  ],
  "external": [
