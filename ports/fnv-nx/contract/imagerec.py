@@ -144,22 +144,17 @@ class ImageRec:
     def _field(self, va):
         k = bisect.bisect_right(self._starts, va) - 1
         a, b = self._merged[k]
-        if a not in self._ins:
-            ins = list(disasm(self._pe.rd(a - self.base, b - a), a))
-            self._ins[a] = (ins, [i.address for i in ins])
-        ins, addrs = self._ins[a]
-        k = bisect.bisect_right(addrs, va) - 1
-        if k >= 0:
-            i = ins[k]
-            if i.address + i.size > va:
-                if i.disp_size == 4 and i.address + i.disp_offset == va:
-                    for op in i.operands:
-                        if op.type == X.X86_OP_MEM:
-                            return op.mem.disp & M32
-                if i.imm_size == 4 and i.address + i.imm_offset == va:
-                    for op in i.operands:
-                        if op.type == X.X86_OP_IMM:
-                            return op.imm & M32
+        if a not in self._ins:           # the 4-byte immediate and displacement fields of the decoded instructions of the merged run, {va: value}
+            f = {}
+            for i in disasm(self._pe.rd(a - self.base, b - a), a):
+                for op in i.operands:
+                    if op.type == X.X86_OP_MEM and i.disp_size == 4:
+                        f[i.address + i.disp_offset] = op.mem.disp & M32
+                    elif op.type == X.X86_OP_IMM and i.imm_size == 4:
+                        f[i.address + i.imm_offset] = op.imm & M32
+            self._ins[a] = f
+        if va in self._ins[a]:
+            return self._ins[a][va]
         raise CodeRead('%s: no decoded immediate or displacement at 0x%x' % (self.name, va))
 
     def decode_at(self, va, count=1):
