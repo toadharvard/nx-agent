@@ -144,3 +144,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - w16 369d5948 is green (92a5e9da, 218 s) and contains w15 fea3d99. It still has to merge aaa709c8 (env.json union) and add fixtures to REQUIRED_PRODUCT.
   - w3 (L3a): gate_pure's class is the import closure, not a directory name. w14 deletes any `tests`-name exemption.
   - L4 has the link-stage form for item 11 (guest test image).
+- 03:33Z w20 bce5dead deletes the xc runner class (xc.c, mkxctab, mkxcgen, dyninit_rewrite XC1, XC2, the boot.cpp xc capture), about 2300 lines together with 5126d5b0, plus the objstub tail-b/ICF rule. envcheck in its container fails on /usr/include, so MERGER runs the verdict. The ??__E bodies without a generator are handed to L2's static rule (the exe's own table and the exe's atexit).
