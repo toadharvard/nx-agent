@@ -5,16 +5,20 @@ HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.d
 h = lambda a: '0x%08x' % a
 
 def facts(base, n):
-    """one image at [base, base + 0x1000): a FuncInfo with an unwind action, a catch, a null action; a v4 scope with finally + except; a ThrowInfo; a continuation"""
+    """one image at [base, base + 0x1000): a FuncInfo with an unwind action, a catch, a null action, a stub; a v4 scope with finally + except (handler registered by a record);
+    a ThrowInfo with one resolved throw site and one rethrow; a continuation; every red class empty"""
     b = base
-    return {'text': [h(b), h(b + 0x1000)], 'failed_funcinfo': [], 'frame_handlers': {h(b + 0x10): 1}, 'frame_regs': {h(b + 0x18): h(b + 0x20)},
-            'funcinfo': [{'addr': h(b + 0x800), 'stubs': [h(b + 0x20)], 'unwind': [[-1, h(b + 0x30)], [0, 0]],
+    return {'text': [h(b), h(b + 0x1000)], 'failed_funcinfo': [], 'failed_throwinfo': [], 'thrower_escapes': [], 'seh_red': [], 'helpers': [{'addr': h(b + 0xc00), 'arg': 0, 'handlers': [h(b + 0x10)], 'frame_disp': -4, 'err': ''}],
+            'registrations': [{'site': h(b + 0xc10), 'handlers': [h(b + 0x10)], 'kind': 'inline', 'frame_disp': -4}],
+            'throw_sites': [{'site': h(b + 0xd00), 'tail': False, 'kind': 'const', 'tis': [h(b + 0xa00)], 'red': ''}, {'site': h(b + 0xd10), 'tail': False, 'kind': 'rethrow', 'tis': [], 'red': ''}],
+            'funcinfo': [{'addr': h(b + 0x800), 'stubs': [{'target': h(b + 0x20), 'live': True}], 'unwind': [[-1, h(b + 0x30)], [0, 0]],
                           'tries': [{'low': 0, 'high': 1, 'catchHigh': 2, 'handlers': [{'adj': 0, 'type': 0, 'disp': 0, 'addr': h(b + 0x40)}]}]}],
-            'scopes': [{'addr': h(b + 0x900), 'ver': 4, 'handler': h(b + 0x50), 'records': [[-2, 0, h(b + 0x60)], [0, h(b + 0x70), h(b + 0x80)]]}],
+            'scopes': [{'addr': h(b + 0x900), 'ver': 4, 'handler': h(b + 0x50), 'handlers': [h(b + 0x50)], 'frame_disp': -4, 'trylevel_max': 1, 'nonconst_stores': [], 'err': '',
+                        'records': [[-2, 0, h(b + 0x60)], [0, h(b + 0x70), h(b + 0x80)]]}],
             'throwinfo': [{'addr': h(b + 0xa00), 'attrs': 0, 'unwind': h(b + 0x90), 'types': [{'type': h(b + 0xb00), 'size': 4, 'copy': h(b + 0xa0)}, {'type': h(b + 0xb10), 'size': 4, 'copy': 0}]}],
             'conts': {h(b + 0xb0): h(b + 0x40)}}
 
-def targets(base): return [base + x for x in (0x10, 0x18, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xa0, 0xb0)]
+def targets(base): return [base + x for x in (0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xa0, 0xb0)]
 
 class T(unittest.TestCase):
     def setUp(self):
@@ -68,17 +72,39 @@ class T(unittest.TestCase):
         self.bases['third'] = 0x20000000; self.pack_write(images=2)       # three images of code, two facts files, gate_liftgen says 2
         self.facts_write(skip=('third',)); r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertIn('no image span', r['detail'])
     def test_empty_tables_green_failed_funcinfo_red(self):
-        def empty(n, J): J.update(funcinfo=[], scopes=[], throwinfo=[], frame_handlers={}, frame_regs={}, conts={})
+        def empty(n, J): J.update(funcinfo=[], scopes=[], throwinfo=[], registrations=[], helpers=[], throw_sites=[], conts={})
         self.pack_write(); self.facts_write(empty); r = self.run_gate(); self.assertEqual((r['status'], r['universe']), ('green', 0))
         def failed(n, J): J['failed_funcinfo'] = [{'addr': h(0x401000), 'err': 'size'}] if n == 'exe' else []
-        self.facts_write(failed); r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertIn('did not parse', r['detail'])
-    def test_unregistered_stub_red(self):
-        def f(n, J): J['frame_regs'] = {}
-        self.pack_write(extra=[0x400000 + 0x20]); self.facts_write(f); r = self.run_gate()       # even when the stub address happens to be an entry
-        self.assertEqual((r['status'], r['uncertified']), ('red', ['exe:00400800:stub[0].unregistered:00400020', 'mod:10000800:stub[0].unregistered:10000020']))
-    def test_scope_without_records_red(self):
-        def f(n, J): J['scopes'][0]['records'] = []
-        self.pack_write(); self.facts_write(f); r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertIn('no records', r['detail'])
+        self.facts_write(failed); r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertEqual(r['violations']['exe']['failed_funcinfo']['count'], 1)
+    def red(self, cls, mut, img='exe'):
+        def f(n, J):
+            if n == img: mut(J)
+        self.pack_write(); self.facts_write(f); r = self.run_gate()
+        self.assertEqual(r['status'], 'red'); self.assertEqual(list(r['violations']), [img]); self.assertEqual(list(r['violations'][img]), [cls]); return r
+    def test_throw_site_without_thrownfo_red(self):
+        r = self.red('throw_site', lambda J: J['throw_sites'].append({'site': h(0x400d20), 'tail': False, 'kind': 'red', 'tis': [], 'red': 'arg of an address-taken function'}))
+        self.assertEqual(r['violations']['exe']['throw_site']['count'], 1)
+    def test_failed_throwinfo_red(self): self.red('failed_throwinfo', lambda J: J['failed_throwinfo'].append({'site': h(0x400d00), 'ti': h(0x500000)}))
+    def test_thrower_escape_red(self): self.red('thrower_escapes', lambda J: J['thrower_escapes'].append(h(0x400e00)), 'mod')
+    def test_seh_red(self): self.red('seh_red', lambda J: J['seh_red'].append({'site': h(0x400c10), 'why': 'store of an unknown value to fs:[0]'}))
+    def test_helper_nonconst_red(self): self.red('helper', lambda J: J['helpers'][0].update(err='argument 0 not constant at 0x401234'))
+    def test_nonconst_trylevel_store_red(self): self.red('nonconst_stores', lambda J: J['scopes'][0]['nonconst_stores'].append(h(0x400950)))
+    def test_scope_length_vs_trylevel_red(self):
+        r = self.red('scope_len', lambda J: J['scopes'][0].update(trylevel_max=2))          # 2 records, but the largest stored level is 2: 3 needed
+        self.assertEqual(r['violations']['exe']['scope_len']['first'], ['0x00400900:2!=1+2'])
+    def test_scope_err_red(self): self.red('scope_err', lambda J: J['scopes'][0].update(err='frame register not derivable'))
+    def test_empty_scope_valid_without_levels(self):
+        def f(n, J): J['scopes'][0].update(records=[], trylevel_max=-1)
+        self.pack_write(); self.facts_write(f); self.assertEqual(self.run_gate()['status'], 'green')
+    def test_unlifted_registered_handler_red(self):
+        self.pack_write(drop={0x400000 + 0x10}); self.facts_write(); r = self.run_gate()
+        self.assertEqual((r['status'], r['uncertified']), ('red', ['exe:00400c10:frame_handler:00400010']))
+    def test_stub_target_needs_landing_red(self):
+        self.pack_write(drop={0x10000000 + 0x20}); self.facts_write(); r = self.run_gate()
+        self.assertEqual((r['status'], r['uncertified']), ('red', ['mod:10000800:stub[0].target:10000020']))
+    def test_missing_scope_len_key_red(self):
+        def f(n, J): del J['throw_sites']
+        self.pack_write(); self.facts_write(f); self.assertEqual(self.run_gate()['status'], 'red')
     def test_null_where_format_has_no_none_red(self):
         def f(n, J): J['funcinfo'][0]['tries'][0]['handlers'][0]['addr'] = 0
         self.pack_write(); self.facts_write(f); r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertIn('null', r['detail'])
