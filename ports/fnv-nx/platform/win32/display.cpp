@@ -18,6 +18,7 @@
  * BorderWidth 1, CaptionWidth 18, CaptionHeight 25, MenuWidth/Height 18, ScrollWidth/Height 17, SmCaptionWidth/Height
  * 17, PaddedBorderWidth 0, IconSpacing 75 px) and Wine's rules for what is derived from them. */
 #include "window_int.h"
+#include "font_faces.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -106,7 +107,8 @@ void font_metrics(void)
             memset(lf, 0, sizeof lf);
             lf[0] = heights[k]; lf[4] = 400;
             ((uint8_t *)lf)[21] = 1;   /* lfCharSet = DEFAULT_CHARSET */
-            memcpy(&lf[7], u"Tahoma", 14);
+            const char *face = w32_face_name(FACE_TAHOMA);
+            for (int c = 0; face[c]; c++) ((char16_t *)&lf[7])[c] = (char16_t)face[c];   /* LOGFONTW.lfFaceName */
             HFONT f = CreateFontIndirectW(lf);
             HGDIOBJ old = dc && f ? SelectObject(dc, f) : NULL;
             int32_t tm[15];

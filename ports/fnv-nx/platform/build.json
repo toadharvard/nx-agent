@@ -255,6 +255,20 @@
    "outputs": [
     "win32/registry_seed.gen.inc"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_fontmachine.py",
+   "args": [
+    "/ext/fonts/inputs/wine.inf.in",
+    "/ext/fonts/inputs/font.c",
+    "/ext/fonts/inputs/30-metric-aliases.conf",
+    "/ext/fonts/fonts",
+    "/out/win32/font_machine.gen.inc"
+   ],
+   "inputs": [],
+   "outputs": [
+    "win32/font_machine.gen.inc"
+   ]
   }
  ],
  "os_layer": [],
@@ -382,6 +396,14 @@
    "commit": "81a07888ce98832af73dd66e7685f08b0161be43",
    "tree_sha256": "65fa395b59dd0e023cea0c42cfb8802f4bc90f48f09d5ad98ff1def6d7206ea1",
    "at": "/ext/freetype"
+  },
+  {
+   "name": "fonts-wine9",
+   "repo": "fnv-nx-build",
+   "ref": "tools/fonts-wine9",
+   "commit": "099942c35ee21a2ff7ac50e4d13fed12cc173ad3",
+   "tree_sha256": "5af2f2cfc5dea618bd8a1a6952fdfcaec50efa47d68d74bc61758b16aa56953d",
+   "at": "/ext/fonts"
   }
  ],
  "sources": [
