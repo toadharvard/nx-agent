@@ -18,7 +18,7 @@ Rules (each violated precondition is a stage error that lists everything it foun
             that is not an i386 PE32 DLL (e.g. a 64-bit dll) is a stage error naming it; an image's imports are system dlls or images.
             `static` = in the exe's import closure; the others are loadable on demand (loader: fnvnx_module_load).
   order     The Windows rule for static imports: depth first over the import directories in directory order, a module is
-            initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency
+            initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency (ASM-003)
             cycle the module visited first is initialised last, i.e. an edge back to a module still being visited is not
             followed.  The table order is this order for the static modules, followed by the on-demand ones sorted by name; it is the mapping order, the init order and the TLS-index order (the
             Windows loader numbers TLS indices in map order, which differs; the number is private to the loader and the
@@ -56,6 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import declareddlls
 import dllkind
 import images
+import exepin
 import gatefile
 import iat
 
@@ -347,14 +348,13 @@ def exe_slots(exe):
 
 
 def run(exe_path, bridge_path, dirs, out, declared_path, loads=None):
-    with open(exe_path, 'rb') as fh:
-        exe = PE(fh.read(), os.path.basename(exe_path))
+    exe = PE(exepin.load_exe(exe_path), exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
     system = {r['dll'] for r in brows}
     wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
     mods = scan(dirs, system)
-    me = lower(os.path.basename(exe_path))
+    me = lower(exepin.NAME)
     _, kind = images.classify(exe_path, dirs, system, loads)     # the least set: reached through imports and resolved LoadLibrary names
     image = {n for n in mods if kind.get(n) == 'image'}
     declared_mods = {n: m for n, m in mods.items() if kind.get(n) == 'declared'}   # found, no bridge row, the declared machine cannot load them
@@ -427,7 +427,7 @@ def main():
             with open(a.loads) as fh:
                 loads = dllkind.read_loads(fh.read())
         text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, loads)
-    except (StageError, ValueError, OSError) as e:
+    except (StageError, ValueError, OSError, exepin.ExePinError) as e:
         sys.exit('modules: %s' % e)
     print(text)
     sys.exit(1 if bad else 0)

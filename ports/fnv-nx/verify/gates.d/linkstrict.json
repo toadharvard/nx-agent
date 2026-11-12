@@ -1,0 +1,16 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "linkstrict",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_linkstrict.py"
+ ],
+ "result": "linkstrict.json",
+ "covers": [
+  "test",
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

@@ -13,6 +13,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(HERE, '..', 'gate_disp.py')
 sys.path.insert(0, os.path.join(HERE, '..'))
+sys.path.append(os.path.join(HERE, '..', '..', 'verify'))
+import scratch
+scratch.install()
 import gate_disp
 
 fails = []

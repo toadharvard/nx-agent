@@ -135,6 +135,15 @@ def main():
     json.dump(d2, open(WORK + "/miss.json", "w"))
     p = sbx("run", "--store", STORE, WORK + "/miss.json")
     check("import of a module outside the runtime fails in the sandbox", p.returncode != 0 and '"rc":0' not in p.stdout.replace(" ", ""), p.stdout[-300:])
+    # a package that is installed on this machine but not declared (--site) is not part of the runtime: whatever else is installed is
+    # neither an input nor part of runtime_id (pip lives in the machine's dist-packages, like every pip/apt-installed package)
+    p = run(["python3", "-s", "-B", "-c", "import pip"], env={"PATH": os.environ["PATH"]})
+    check("probe: pip is installed on the host", p.returncode == 0)
+    d3 = json.load(open(run_doc))
+    d3["stage"], d3["argv"] = "rt-undeclared", d3["argv"][:-1] + ["/in/calc.py", "--mod", "pip"]
+    json.dump(d3, open(WORK + "/undecl.json", "w"))
+    p = sbx("run", "--store", STORE, WORK + "/undecl.json")
+    check("import of an installed but undeclared package fails in the sandbox", p.returncode != 0 and '"rc":0' not in p.stdout.replace(" ", ""), p.stdout[-300:])
     # site package (capstone is part of the declared environment: its absence is a failure, not a skip)
     if True:
         p = rt("python", "--store", STORE, "--python", real, "--site", "capstone", "-o", WORK + "/runtime-cs.json")

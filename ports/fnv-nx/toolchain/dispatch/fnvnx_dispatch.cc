@@ -254,7 +254,14 @@ struct dispatch_pass : gimple_opt_pass {
 
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
-  if (!plugin_default_version_check(ver, &gcc_version)) return 1;
+  if (!plugin_default_version_check(ver, &gcc_version)) {
+    error("%<fnvnx_dispatch%>: built for GCC %s, loaded by %s", gcc_version.basever, ver->basever);
+    return 1;
+  }
+  if (info->argc) {   /* no silent modes: this plugin has no options */
+    error("%<fnvnx_dispatch%>: unknown plugin argument %qs", info->argv[0].key);
+    return 1;
+  }
   register_pass_info p;
   p.pass = new dispatch_pass(g);
   p.reference_pass_name = "optimized";

@@ -29,16 +29,16 @@
    "name": "facts",
    "repo": "fnv-nx-build",
    "ref": "l3a-lift/facts",
-   "commit": "2eeea27bb12a7448c3ca4dc8ed710c4e9bc08ad1",
-   "tree_sha256": "885e7632cb71a8ffc634d2d489e632f6f6cd86c6a1f5bfcd442692ba280dc91d",
+   "commit": "a0f3d8eacc43d3472b8a6e7c8c1db73d8dcfe22e",
+   "tree_sha256": "2a5bd36e3cad0fbee15cf805604af9e6e2503692aace362fde562d2f216bb8dd",
    "at": "/ext/facts"
   },
   {
    "name": "manifest",
    "repo": "fnv-nx-build",
    "ref": "l5-platform/manifest",
-   "commit": "880555c6ab31c22a6f804312aaff5f99eb7c90ea",
-   "tree_sha256": "3a39f546cf59e7781038a85d1d69926232c0673bec3fdfecdd96e22c08ef1ea1",
+   "commit": "e15d385fe18385be64b1069fd42015605a048394",
+   "tree_sha256": "dc3bc608d86e859d5535b843fdac3a0af22d3b13ec532956d6f730746c5cc7ad",
    "at": "/ext/manifest"
   },
   {
@@ -50,6 +50,8 @@
    "at": "/ext/wine"
   }
  ],
+ "ehfacts": "facts",
+ "sites": "facts/sites.tsv",
  "exe": "exe/FalloutNV.exe",
  "msvc": "msvc/obj",
  "universe": "facts/universe.tsv",

@@ -6,7 +6,7 @@
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
@@ -22,7 +22,7 @@ whose symbol is global/weak and in the TERMINATOR SET (calls, tail calls, GOT/AD
 can be incomplete; a local symbol cannot be the library routine). `T2-noreturn-tail`: the last instruction is a direct BL (callee a symbol; control
 runs off the end after a call the compiler knew not to return), except a BL of `fnvnx_reach_violation` (reach rule below); another last instruction that can fall through (not RET, B, BR*, T1) is
 `fallthrough`. Reachability of a trap is NOT computed: presence anywhere in a function is a finding; every function is judged, so
-a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn
+a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
 class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
@@ -72,8 +72,7 @@ Wine 9.0 tree is the oracle class, not done. A row without a call site is no fin
 (D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
 applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
 V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
-`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact in DECL_FACTS (no-network, time-zone, registry), source `win-doc:<page>:<function>` or
-`wine-9.0:<path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
+`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact and the source prefixes are read from the table's own header line (`# fact: ...; source: ...`: no-network, time-zone, registry, no-galaxy; win-doc, wine-9.0, galaxy-sdk), source `PREFIX:<page or path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
 result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
 stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
 
@@ -82,7 +81,7 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction
+taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
 writes (a missed write of x0 would make a constant wrong).
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
@@ -258,8 +257,14 @@ def access(inf):
 
 
 def is_wine(w, rel, obj):
-    """True iff word w, with relocation rel (or None), is a BL of a citation function (WINE or DECL)."""
-    return bool(rel) and w >> 26 == 0b100101 and obj.syms[rel[0]][0] in CITE
+    """True iff word w, with relocation rel (or None), is a call of a citation function (WINE or DECL): a BL, or a tail B, which is the
+    same body as BL then RET (the compiler's choice of a sibling call is not a different class). See is_tail."""
+    return bool(rel) and w >> 26 in (0b100101, 0b000101) and obj.syms[rel[0]][0] in CITE
+
+
+def is_tail(w, rel, obj):
+    """True iff word w is a tail B of a citation function: a call after which the function returns (BL; RET)."""
+    return w >> 26 == 0b000101 and is_wine(w, rel, obj)
 
 
 def cfg(words, a, b, rels, obj):
@@ -282,9 +287,11 @@ def cfg(words, a, b, rels, obj):
             return None  # exclusive/ordered/CAS or LSE atomic
         if (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0 and not a <= o + 4 * sx((w >> 5) & 0x7FFFF, 19) < b:
             return None  # LDR literal outside the function
-        if o in rels and (w >> 26 == 0b000101 or w >> 24 == 0x54 or (w >> 25) & 63 in (0b011010, 0b011011) or (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0):
+        if o in rels and not is_tail(w, rels[o], obj) and (w >> 26 == 0b000101 or w >> 24 == 0x54 or (w >> 25) & 63 in (0b011010, 0b011011) or (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0):
             return None
-        if w >> 26 == 0b000101:  # B
+        if is_tail(w, rels.get(o), obj):  # tail B of WINE: the call, then RET
+            nxt = []
+        elif w >> 26 == 0b000101:  # B
             nxt = [o + 4 * sx(w & 0x3FFFFFF, 26)]
         elif w >> 24 == 0x54 or (w >> 25) & 63 == 0b011010:  # B.cond, CBZ/CBNZ
             nxt.append(o + 4 * sx((w >> 5) & 0x7FFFF, 19))
@@ -375,9 +382,10 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False):
     if live[a] and not wine:   # WINE: the input rule (v) is replaced by the result rule (the result must be constant, wine_sim)
         return None
     rets = [o for o in succ if not succ[o]]
+    fin = {o: step(o, words[o], ins[o], rels.get(o), obj, inf[o]) if is_tail(words[o], rels.get(o), obj) else ins[o] for o in rets}   # a tail B returns after the call
     res = {}
     for name, r in (("x0", 0), ("x1", 1), ("v0", 32)):
-        vals = {ins[o][r] for o in rets}
+        vals = {fin[o][r] for o in rets}
         res[name] = None if vals == {("E", r)} else sorted(vals)[0] if len(vals) == 1 and sorted(vals)[0][0] in "KA" else ("U",)
     return res
 
@@ -423,7 +431,7 @@ def constprop(words, a, b, rels, obj, dec, sites):
             out = step(o, w, ins[o], rels.get(o), obj, access(dec.get(o)))
             if w >> 26 == 0b100101 or isblr(w) or w >> 24 == 0xD4:
                 out = tuple(("I",) if k in CALLER_SAVED else v for k, v in enumerate(out))
-            for t in succ_of(w, o):
+            for t in ([] if is_tail(w, rels.get(o), obj) else succ_of(w, o)):   # a tail B of WINE returns after the call
                 if t in words and a <= t < b:
                     new = out if t not in ins else tuple(map(join, ins[t], out))
                     if new != ins.get(t):
@@ -491,7 +499,7 @@ def wine_sim(words, a, b, rels, obj, argn, zero):
     zero: that is the whole permitted use), ("S", k) (own-frame address), None (unknown: every other input, the registers clobbered by the call
     of WINE). Flags are four bits, each 0, 1 or None: comparing ARG with zero gives Z (and C, V) and leaves N unknown when ARG is non-zero; a
     branch or select that needs an unknown bit, any other instruction, any other use of ARG, a step budget of 4000: None (the function is
-    then not a simple body). The argument is a pointer: its low 32 bits (ILP32) or full register are tested alike (stated assumption)."""
+    then not a simple body). The argument is a pointer: its low 32 bits (ILP32) or full register are tested alike (stated assumption). (ASM-046)"""
     R, mem, fl, sp, o = [None] * 31, {}, [None] * 4, ("S", 0), a
     R[argn] = 0 if zero else ARG
     zarg = zero
@@ -567,6 +575,11 @@ def wine_sim(words, a, b, rels, obj, argn, zero):
                     raise SimFail
                 if z == (not (w >> 24) & 1):   # CBZ branches when zero, CBNZ when not
                     nxt = o + 4 * sx((w >> 5) & 0x7FFFF, 19)
+            elif is_tail(w, rels.get(o), obj):   # tail B of WINE = BL then RET
+                for r in CALLER_SAVED:
+                    if r < 31:
+                        R[r] = None
+                return None
             elif w >> 26 == 0b000101:
                 nxt = o + 4 * sx(w & 0x3FFFFFF, 26)
             elif w >> 24 == 0x54 and not w & 0x10:   # B.cond
@@ -680,7 +693,7 @@ def wine_path_id(words, a, b, sites):
         v = st[o]
         if o in sites:
             v = ("M",) if v != (0,) or sites[o] is None else (1, sites[o])
-        nxt = [t for t in succ_of(words[o], o) if a <= t < b]
+        nxt = [t for t in succ_of(words[o], o) if a <= t < b] if not (o in sites and words[o] >> 26 == 0b000101) else []   # a tail B at a site returns after the call
         if not nxt:
             ends.add(v)
         for t in nxt:
@@ -723,7 +736,7 @@ def check_obj(path, terms, os_layer):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
     "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe)."""
     o = Obj(path)
-    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}}
+    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "alias": {}}
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
     tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH,) + CITE}   # REACH is judged by the reach rule
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
@@ -744,7 +757,8 @@ def check_obj(path, terms, os_layer):
             if sz == 0 or a + sz > ssize or (last and a < last[1] and (a, a + sz) != last[:2]):
                 finds.append((name, "uncovered", "size 0, overlaps another function or leaves %s" % sname, None))
                 continue
-            if last and (a, a + sz) == last[:2]:  # alias of the previous symbol: same body, same findings
+            if last and (a, a + sz) == last[:2]:  # alias of the previous symbol (ICF, .set): one body, judged once, every name attached
+                extra["alias"].setdefault(last[3], []).append(name)
                 finds += [(name, k, d, v) for _, k, d, v in last[2]]
                 if last[3] in extra["wine_id"]:
                     extra["wine_id"][name] = extra["wine_id"][last[3]]
@@ -926,6 +940,11 @@ def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1):
     return res
 
 
+def names_of(r, name):
+    """The body's first name and every other name at the same address (ICF, aliases) of analysis R: one body, each name judged."""
+    return [name] + r.get("alias", {}).get(name, [])
+
+
 def judge(results, rows, facts, wine=None, declared=None):
     """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
@@ -978,17 +997,18 @@ def judge(results, rows, facts, wine=None, declared=None):
         if REACH in funcs and REACH not in exit_ok:
             out.append((oid, REACH, "reach-not-exit", "the definition does not end in a call through a pointer on every path"))
         for key, sym, pre in (("wine", WINE, "wine-fixme"), ("declared", DECL, "declared-machine")):
-            for name, off, c in r.get(key, []):
+            for name0, off, c in r.get(key, []):
                 if c is None:
-                    out.append((oid, name, pre + "-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (sym, off)))
-        for name, off, c in r["reach"]:
-            if c is None:
-                out.append((oid, name, "reach-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (REACH, off)))
-            elif facts is None:
-                out.append((oid, name, "reach-uncertified", "fact %d: no reach facts file of this verdict" % c))
-            elif c not in facts:
-                out.append((oid, name, "reach-uncertified", "fact %d is not in the reach facts" % c))
-            else:
+                    out += [(oid, name, pre + "-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (sym, off)) for name in names_of(r, name0)]
+        for name0, off, c in r["reach"]:
+            for name in names_of(r, name0):   # every name of the body carries the finding; the fact is used once
+                if c is None:
+                    out.append((oid, name, "reach-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (REACH, off)))
+                elif facts is None:
+                    out.append((oid, name, "reach-uncertified", "fact %d: no reach facts file of this verdict" % c))
+                elif c not in facts:
+                    out.append((oid, name, "reach-uncertified", "fact %d is not in the reach facts" % c))
+            if c is not None and facts is not None and c in facts:
                 used.add(c)
     for (oid, name), row in rows.items():
         if row[0] == "exit":
@@ -1083,24 +1103,40 @@ def _wine_row(f):
                  re.fullmatch(r"(-?[0-9]+|0x[0-9a-fA-F]+),(-?[0-9]+|0x[0-9a-fA-F]+)" if f[3][3:5] == "nz" else r"-?[0-9]+|0x[0-9a-fA-F]+", f[4])))
 
 
-DECL_FACTS = ("no-network", "time-zone", "registry")   # the declared-machine facts of CLAUDE.md ("The declared machine"); a fourth fact is a new owner decision
-DECL_SOURCE = r"(win-doc:[A-Za-z0-9_./#+-]+:[A-Za-z_][A-Za-z0-9_@]*|wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*)"
+DECL_HEADER_FACT = re.compile(r"# fact: ([a-z][a-z0-9-]*(?: \| [a-z][a-z0-9-]*)*)")
+DECL_HEADER_SOURCE = re.compile(r"# fact: .*?source: (.*?); kind")
+
+
+def declared_header(lines):
+    """The accepted facts and source prefixes are read from the table's own header line (`# fact: A | B ...; source: P1:<..>:<function> | P2:...;
+    kind ...`), so the table and the check cannot disagree. -> (set of facts, regex of a source). ValueError when there is no such line."""
+    for l in lines:
+        m, s = DECL_HEADER_FACT.match(l), DECL_HEADER_SOURCE.match(l)
+        if m and s:
+            prefixes = [re.match(r"([a-z][a-z0-9.-]*):<", x.strip()) for x in s.group(1).split(" | ")]
+            if not all(prefixes):
+                raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
+            body = r":[A-Za-z0-9_./#+-]+:[A-Za-z_][A-Za-z0-9_@]*"
+            return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + body for x in prefixes) + ")"
+    raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
 
 
 def read_declared_table(path):
     """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; lines starting with # are comments. fact is one of
-    DECL_FACTS. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
+    the facts of the table's header line. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
     `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against the documentation or a pinned Wine 9.0
     tree is the oracle class, not done here). id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their
     own. -> {id: (contract name, fact, source, kind, value)}. ValueError when missing or malformed."""
     if not os.path.exists(path):
         raise ValueError("declared machine table %s does not exist" % path)
     out = {}
-    for l in read_list(path):
+    lines = read_list(path)
+    facts, source = declared_header(lines)
+    for l in lines:
         if l.startswith("#"):
             continue
         f = l.split("\t")
-        ok = len(f) == 6 and f[4] != "branch" and f[2] in DECL_FACTS and re.fullmatch(DECL_SOURCE, f[3]) and \
+        ok = len(f) == 6 and f[4] != "branch" and f[2] in facts and re.fullmatch(source, f[3]) and \
             _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:])   # id, name, kind and value: the rules of the wine table, same columns
         if not ok or int(f[0]) in out:
             raise ValueError("bad or duplicate declared machine row in %s: %r" % (path, l[:80]))

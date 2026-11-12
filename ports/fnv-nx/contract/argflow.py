@@ -22,7 +22,7 @@ Rule.  Locations are a 32-bit register, a stack slot at byte offset s from esp, 
 the predecessors of an instruction backwards (all paths, a visited set of (instruction, location) closes loops), an
 instruction either leaves the location unchanged, moves it (mov reg,reg / mov reg,mem / push / pop / esp arithmetic, which
 shift s by the instruction's esp delta), or defines it.  Everything else is a break, reported with its address.
-Assumptions (stated, not measured): (A1) ebx, esi, edi, ebp survive a call (callee-saved); eax, ecx, edx do not; (A2) the
+Assumptions (stated, not measured): (A1) ebx, esi, edi, ebp survive a call (callee-saved); eax, ecx, edx do not; (A2) the (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017)
 outgoing-argument area and a frame slot whose address is never taken (no lea of it in the function) are written only by the
 instructions that name them; (A3) the only way code obtains a code address is a relocated word (no PIC); (A4) the facts'
 ranges contain every instruction of the function and every target of an indirect jump of the function is a relocated word

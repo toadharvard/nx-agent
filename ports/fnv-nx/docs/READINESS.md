@@ -193,7 +193,7 @@ at the 1.02 GHz retail clock and 720p handheld**. Below 30 fps is a fail. 45 fps
   - The renderer has a share of the frame, `render_perf.max_budget_fraction` (0.2, from RENDER_NATIVE.md 9.4). A
     level is met when the renderer fits its share of that level's frame.
   - A report without the fractions gives them from `frame_ms` (gate values), scaled from the lowest
-    `assumptions.clock_ghz`.
+    `assumptions.clock_ghz`. (ASM-024)
 - **GPU.** `perf.gpu.<config>` judges the efficiency-0.6 bound of the model's mix_hi frame against the levels.
   It is informative (`render_perf.gpu[].required`) until a console run measures the GPU.
 - **Whole frame (S15).** `perf.budget.<clock>` takes the scenario as the build is placed today (`perf.budget`), not a
@@ -251,7 +251,7 @@ verdicts"). `thresholds.json` `abi_explained_verdicts` lists the ones that expla
 - **Render perf (render machine).** `ports/fnv-nx/render/native/perf/report.json` on `claude/port-nsw-render`,
   else the copy merged into the checkout. The schema is `docs/RENDER_PERF.md` section 5.
   - The tool reads the summary block, at the top level or under `summary`: `{commit, per_draw_us, frame_ms: {main,
-    render}, assumptions: {ipc, clock_ghz}, targets_budget_fraction: {"30"|"45"|"60": {"1.02", "1.785"}}}`. A range
+    render}, assumptions: {ipc, clock_ghz}, targets_budget_fraction: {"30"|"45"|"60": {"1.02", "1.785"}}}`. A range (ASM-024)
     `{lo, hi, gate}` is read by its gate value (= hi).
   - The GPU model is `gpu.summary_ms.<mix>.<config>: {eff_1.0, eff_0.6}` (`handheld_540p_dynres` counts as
     handheld_540p).

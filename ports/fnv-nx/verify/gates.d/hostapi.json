@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "hostapi",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_hostapi.py"
+ ],
+ "result": "hostapi.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}
