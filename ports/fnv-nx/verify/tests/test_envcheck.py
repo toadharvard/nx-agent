@@ -265,6 +265,27 @@ d["profiles"][PN]["prerequisites"].append("not-in-programs")
 rc, out, err = ec("check", "--env", write(d, "pre.json"))
 check("a prerequisite that is not among the profile's programs is a mismatch", rc == 2 and "programs lack prerequisites ['not-in-programs']" in out, (rc, out))
 
+# read roots: the system headers a host root reads must belong to pinned packages
+rr = os.path.join(TD, "rrepo")
+os.makedirs(os.path.join(rr, "src"))
+open(os.path.join(rr, "src", "a.c"), "w").write("#include <stdio.h>\n#include <GL/gl.h>\nint main(void){return 0;}\n")
+rf = os.path.join(TD, "readroots.json")
+json.dump({"format": "fnvnx-readroots/1", "roots": [{"name": "t", "cwd": "src", "flags": ["-std=c11"], "sources": ["a.c"]},
+                                                  {"name": "absent", "cwd": "nosrc", "flags": [], "sources": ["x.c"]}]}, open(rf, "w"))
+envcheck.READROOTS = rf
+d = doc()
+bad = [b for b in envcheck.check(d, rr) if "read root" in b]
+check("read root: headers of pinned packages (stdio.h, GL/gl.h) pass; a root whose sources are absent is skipped", bad == [], bad)
+for pn in ("libgl-dev", "libglx-dev", "libegl-dev"):
+    d["packages"].pop(pn, None)
+bad = [b for b in envcheck.check(d, rr) if "read root" in b]
+check("read root: a header owned by a package that is not pinned is a mismatch naming root, file and package",
+      any("env: read root t reads /usr/include/GL/gl.h, owned by libgl-dev (not a package of env.json)" in b for b in bad), bad)
+open(os.path.join(rr, "src", "a.c"), "w").write("#include <no/such/header.h>\n")
+bad = [b for b in envcheck.check(doc(), rr) if "read root" in b]
+check("read root: a missing header is a mismatch", any("env: read root t:" in b and "no/such/header.h" in b for b in bad), bad)
+envcheck.READROOTS = os.path.join(VERIFY, "readroots.json")
+
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
 sys.exit(1 if FAILED else 0)

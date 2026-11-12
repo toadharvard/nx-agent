@@ -247,13 +247,15 @@ def _root_compilers(repo=None):
     return sorted(out)
 
 
+READROOTS = os.path.join(HERE, "readroots.json")
+
 def read_roots(repo):
     """[(root name, cwd, [system header path read], error or None)] for every root of verify/readroots.json whose cwd exists in REPO:
     `gcc -M` of the root's flags and sources (globs expanded in its cwd); a root whose sources are not all in the checkout is skipped. The headers are the dependencies under
     /usr (what the preprocessor read); an error is the first lines of gcc's diagnostics (a header that is not installed)."""
     import glob
     try:
-        roots = json.load(open(os.path.join(HERE, "readroots.json")))["roots"]
+        roots = json.load(open(READROOTS))["roots"]
     except (OSError, ValueError, KeyError):
         return []
     out = []
