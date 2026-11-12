@@ -120,7 +120,7 @@ Several native copies of one address: each is judged, the worst verdict stands.
 ```text
 gate_reach - certificates that a branch of a platform import body is unreachable (L1 CONTRACT, gate `reach`).
 
-    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe,ranges.tsv ... [--bridge bridge.tsv]
+    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe ... --facts DIR --facts-tree SHA [--bridge bridge.tsv]
                   [--out DIR/reach.tsv] [--facts-h reach_facts.h] [--facts-tsv reach.facts.tsv]
     gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
 

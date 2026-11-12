@@ -87,7 +87,6 @@ class Image:
         """rec: imagerec.ImageRec, the one input (no file is opened here; the ranges are the record's runs)."""
         self.rec = rec
         self.name = rec.name
-        self.pe = rec.pe
         self.base = rec.base
         self.exe_name = exe_name or rec.name
         self.ranges = rec.runs
@@ -102,7 +101,7 @@ class Image:
 
     # ---- bytes
     def sec_of(self, va):
-        for rva, vs, ro, rs, ch in self.pe.secs:
+        for rva, vs, ro, rs, ch in self.rec.secs:
             if self.base + rva <= va < self.base + rva + max(vs, rs):
                 return rva, vs, ro, rs, ch
         return None
@@ -113,7 +112,7 @@ class Image:
         return bool(s) and s == e and not s[4] & WRITE and va - self.base < s[0] + s[3]
 
     def word(self, va):
-        return struct.unpack('<I', self.pe.rd(va - self.base, 4))[0]
+        return self.rec.word(va)
 
     def cstr(self, va, wide=False):
         """The NUL-terminated string at va, or None (not printable ASCII / unterminated / in a writable section whose bytes the
@@ -125,7 +124,7 @@ class Image:
         ro = self.readonly(va, step)
         out, a = [], va
         while self.in_raw(a, step) and self.sec_of(a) == sec:
-            b = self.pe.rd(a - self.base, step)
+            b = self.rec.read(a, step)
             if wide:
                 if b[1]:
                     return None
@@ -149,7 +148,7 @@ class Image:
     def insn(self, va):
         i = self._ins.get(va)
         if i is None:
-            for i in imagerec.disasm(self.pe.rd(va - self.base, 16), va, 1):
+            for i in self.rec.decode_at(va):
                 break
             else:
                 i = False
@@ -176,7 +175,7 @@ class Image:
                 else:
                     merged.append([a, b])
             for a, b in merged:          # linear decode of the union of the ranges; no instruction object is kept
-                for i in imagerec.disasm(self.pe.rd(a - self.base, b - a), a):
+                for i in self.rec.decode_range(a, b):
                     if i.mnemonic in ('call', 'jmp') and i.operands[0].type == X.X86_OP_IMM:
                         self._callers.setdefault(i.operands[0].imm, set()).add((i.address, i.mnemonic))
         return sorted(self._callers.get(target, ()))
@@ -184,7 +183,7 @@ class Image:
     def reloc_values(self):
         """Sorted values of the relocated words of the image that point into it (code addresses, A3), computed once."""
         if self._relvals is None:
-            hi = self.base + self.pe.size_of_image if hasattr(self.pe, 'size_of_image') else 1 << 32
+            hi = self.base + self.rec.size_of_image
             vs = set()
             for r in self.relocs:
                 if self.in_raw(r, 4):

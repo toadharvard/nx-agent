@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gate_reach - certificates that a branch of a platform import body is unreachable (L1 CONTRACT, gate `reach`).
 
-    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe,ranges.tsv ... [--bridge bridge.tsv]
+    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe ... --facts DIR --facts-tree SHA [--bridge bridge.tsv]
                   [--out DIR/reach.tsv] [--facts-h reach_facts.h] [--facts-tsv reach.facts.tsv]
     gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
 
@@ -703,29 +703,25 @@ def main_objects(a):
     return 1 if red else 0
 
 
-def load_images(specs, stacks, info=None):
+def load_images(recs, stacks, info=None):
+    """recs: {name: imagerec.ImageRec} from imagerec.load_images (the pinned facts and images); -> ({name: argflow.Image}, meta rows)."""
     images, meta = {}, []
-    for spec in specs:
-        nm, rest = spec.split('=', 1)
-        pe, rg = rest.split(',')
-        with open(pe, 'rb') as fh:
-            pb = fh.read()
-        with open(rg, 'rb') as fh:
-            rb = fh.read()
-        img = argflow.Image(imagerec.ImageRec(pb, nm.lower(), imagerec.read_ranges(rb.decode())))
+    for nm, rec in sorted(recs.items()):
+        img = images[nm] = argflow.Image(rec)
         img.import_stack = stacks
         if info is not None:
             memfx.Memfx(img, info)
-        images[nm.lower()] = img
-        meta.append(dict(name=nm.lower(), pe=sha(pb), ranges=sha(rb)))
-    return images, sorted(meta, key=lambda m: m['name'])
+        meta.append(dict(name=nm, pe=rec.sha, ranges=rec.ranges_sha))
+    return images, meta
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--requests', required=True)
     ap.add_argument('--gpa')
-    ap.add_argument('--image', action='append', default=[], help='name=pe_path,ranges_path (the image set of the stage)')
+    ap.add_argument('--image', action='append', default=[], help='NAME=image path (the image set of the stage; its runs come from --facts)')
+    ap.add_argument('--facts', help='the facts directory (manifest.json, ranges)')
+    ap.add_argument('--facts-tree', help='tree_sha256 of the facts directory, the pin')
     ap.add_argument('--bridge')
     ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; worst letter counts)')
     ap.add_argument('--writes', help='per import argument write facts (memfx.ImportInfo); default: every pointer argument may be written')
@@ -758,7 +754,9 @@ def main(argv=None):
         with open(a.bridge) as fh:
             bt = fh.read()
         info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')
-    images, meta = load_images(a.image, stacks, info)
+    if not (a.facts and a.facts_tree):
+        ap.error('--facts and --facts-tree (the pin of the facts tree) are required with --image')
+    images, meta = load_images(imagerec.load_images(a.image, a.facts, a.facts_tree), stacks, info)
     with open(a.gpa) as fh:
         rows = read_gpa(fh.read())
     ctx = {'dispatchers': {}, 'loadlib': None}

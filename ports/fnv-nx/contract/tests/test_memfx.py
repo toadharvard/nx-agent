@@ -50,6 +50,14 @@ class Asm:
     def ret(self, n=0):            self.raw(0xc3) if n == 0 else self.raw(0xc2, n, 0)
 
 
+
+def reloc_size(b):
+    """The exact size of a base relocation table that is followed by zero padding."""
+    pos = 0
+    while pos + 8 <= len(b) and struct.unpack_from('<I', b, pos + 4)[0] >= 8:
+        pos += struct.unpack_from('<I', b, pos + 4)[0]
+    return pos
+
 def build(prog):
     a = Asm()
     prog(a)
@@ -104,7 +112,7 @@ def pe(secs, drel=()):
     struct.pack_into('<I', hdr, o + 92, 16)
     struct.pack_into('<II', hdr, o + 96 + 8, RD + 0x40, 40)
     relocsec = [s for s in secs if s[0] == b'.reloc'][0]
-    struct.pack_into('<II', hdr, o + 96 + 40, 0x5000, len(relocsec[2].rstrip(b'\0')))
+    struct.pack_into('<II', hdr, o + 96 + 40, 0x5000, reloc_size(relocsec[2]))
     sh = o + 224
     out, fo = bytearray(hdr), 0x400
     for i, (nm, rva, body, ch) in enumerate(secs):

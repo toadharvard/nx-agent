@@ -37,6 +37,14 @@ class Asm:
     def ret(self):                    self.raw(0xc3)
 
 
+
+def reloc_size(b):
+    """The exact size of a base relocation table that is followed by zero padding."""
+    pos = 0
+    while pos + 8 <= len(b) and struct.unpack_from('<I', b, pos + 4)[0] >= 8:
+        pos += struct.unpack_from('<I', b, pos + 4)[0]
+    return pos
+
 def build():
     a = Asm()
     a.func('f_const')                      # LoadLibraryA("mod.dll"); GetProcAddress(h, "Foo")
@@ -93,7 +101,7 @@ def build():
     struct.pack_into('<II', hdr, o + 56, 0x5000, 0x200)
     struct.pack_into('<I', hdr, o + 92, 16)
     struct.pack_into('<II', hdr, o + 96 + 8, RD + 0x10, 40)            # import directory
-    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, len(reloc))      # base relocations
+    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, reloc_size(reloc))      # base relocations
     sh = o + 224
     out, fo = bytearray(hdr), 0x200
     for i, (nm, rva, body, ch) in enumerate(secs):

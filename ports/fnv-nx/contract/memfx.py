@@ -141,11 +141,7 @@ class Scan:
                 merged.append([a, b])
         self.code = merged
         for a, b in merged:
-            try:
-                data = img.pe.rd(a - img.base, b - a)
-            except Exception:
-                continue
-            for i in imagerec.disasm(data, a):
+            for i in img.rec.decode_range(a, b):
                 self.nins += 1
                 self.one(i)
         starts = [a for a, b in merged]
@@ -881,13 +877,13 @@ class Memfx:
         for slot in img.imports:
             if slot < hi and slot + 4 > lo:
                 out.append('import slot %x' % slot)
-        pe = img.pe
+        pe = img.rec
         for k, (rva, size) in enumerate(pe.dirs):
             if size and k not in (5,) and img.base + rva < hi and img.base + rva + size > lo:
                 out.append('PE directory %d [%x,%x)' % (k, img.base + rva, img.base + rva + size))
         if len(pe.dirs) > 9 and pe.dirs[9][1]:
             try:
-                t = struct.unpack('<IIIIII', pe.rd(pe.dirs[9][0], 24))
+                t = struct.unpack('<IIIIII', pe.read(img.base + pe.dirs[9][0], 24))
                 if lo <= t[2] < hi:
                     out.append('TLS index %x' % t[2])
             except Exception:
@@ -959,7 +955,7 @@ class Memfx:
         return Verdict(not why, why, cnt)
 
     def exe_exports(self):
-        return self.img.pe.dirs[0][1] if self.img.pe.dirs else 0
+        return self.img.rec.dirs[0][1] if self.img.rec.dirs else 0
 
     # ---- case: a call between a store and a load through the pointer register R
     def origins(self, fn, at, reg, depth=0, seen=None):
