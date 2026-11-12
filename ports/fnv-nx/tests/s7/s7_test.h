@@ -74,4 +74,7 @@ struct s7_reg { s7_reg(s7_case *c) { c->next = s7_cases; s7_cases = c; } };
     static s7_reg reg_##n(&case_##n);                                                             \
     static void test_##n(void)
 
+#define TT_GUARD s7_thread_guard
+/* the thread start helpers (test_thread, ...) are in ../test_threads.h: a file that starts threads includes it after its Windows headers */
+
 #endif

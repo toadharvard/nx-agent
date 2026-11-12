@@ -713,7 +713,7 @@ TEST(nlk_escape_resource_enumeration)
     CHECK(EnumResourceNamesA(MOD, MI(10), E::ok, (LONG_PTR)&n));
     CHECK(n > 0);
     int n0 = n;
-    std::thread([&] { s4_thread_guard([&]() -> int { n = 0; CHECK(EnumResourceNamesA(MOD, MI(10), E::ok, (LONG_PTR)&n)); CHECK_EQ(n, n0); return 0; }, 1); }).join();
+    test_thread([&] { n = 0; CHECK(EnumResourceNamesA(MOD, MI(10), E::ok, (LONG_PTR)&n)); CHECK_EQ(n, n0); }).join();
     CHECK(FindResourceA(MOD, MI(180), MI(2)) != NULL);
     fnvnx_resource_set_image_for_test(MOD, NULL, 0);
 }

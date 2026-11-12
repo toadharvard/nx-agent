@@ -133,7 +133,7 @@ TEST(sync_abandoned_mutex)
 {
     HANDLE m = CreateMutexA(NULL, FALSE, NULL);
     HANDLE ev = CreateEventA(NULL, TRUE, FALSE, NULL);
-    HANDLE t = CreateThread(NULL, 0, exit_holding, m, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, exit_holding, m, 0, NULL);
     CHECK_EQ(WaitForSingleObject(t, 5000), WAIT_OBJECT_0);   /* thread handle: signalled when exited */
     HANDLE hs[2] = { ev, m };
     CHECK_EQ(WaitForMultipleObjects(2, hs, FALSE, 1000), WAIT_ABANDONED + 1);
@@ -168,7 +168,7 @@ TEST(sync_event_auto_releases_one)
     g_woken = 0;
     HANDLE t[3];
     for (int i = 0; i < 3; i++)
-        t[i] = CreateThread(NULL, 0, waiter, NULL, 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, waiter, NULL, 0, NULL);
     Sleep(100);
     SetEvent(g_ev);
     Sleep(150);
@@ -246,7 +246,7 @@ TEST(sync_mutex_semantics)
     HANDLE m = CreateMutexA(NULL, TRUE, NULL);
     CHECK(m != NULL);
     CHECK_EQ(WaitForSingleObject(m, 0), WAIT_OBJECT_0);   /* recursive: count 2 */
-    HANDLE t = CreateThread(NULL, 0, release_other, m, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, release_other, m, 0, NULL);
     CHECK_EQ(WaitForSingleObject(t, 5000), WAIT_OBJECT_0);
     DWORD code = 0;
     GetExitCodeThread(t, &code);
@@ -318,7 +318,7 @@ TEST(sync_critical_section)
     EnterCriticalSection(&g_cs);
     EnterCriticalSection(&g_cs);
     CHECK(TryEnterCriticalSection(&g_cs));
-    HANDLE t = CreateThread(NULL, 0, try_other, NULL, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, try_other, NULL, 0, NULL);
     CHECK_EQ(WaitForSingleObject(t, 5000), WAIT_OBJECT_0);
     DWORD code = 9;
     GetExitCodeThread(t, &code);
@@ -327,7 +327,7 @@ TEST(sync_critical_section)
     LeaveCriticalSection(&g_cs);
     LeaveCriticalSection(&g_cs);
     LeaveCriticalSection(&g_cs);
-    t = CreateThread(NULL, 0, try_other, NULL, 0, NULL);
+    t = test_CreateThread(NULL, 0, try_other, NULL, 0, NULL);
     CHECK_EQ(WaitForSingleObject(t, 5000), WAIT_OBJECT_0);
     GetExitCodeThread(t, &code);
     CHECK_EQ(code, 1);                      /* free again */
@@ -372,8 +372,8 @@ static DWORD inf_waiter(LPVOID flag)
 TEST(sync_infinite_blocks)
 {
     static volatile int f1, f2;
-    HANDLE a = CreateThread(NULL, 0, inf_sleeper, (void *)&f1, 0, NULL);
-    HANDLE b = CreateThread(NULL, 0, inf_waiter, (void *)&f2, 0, NULL);
+    HANDLE a = test_CreateThread(NULL, 0, inf_sleeper, (void *)&f1, 0, NULL);
+    HANDLE b = test_CreateThread(NULL, 0, inf_waiter, (void *)&f2, 0, NULL);
     CHECK_EQ(WaitForSingleObject(a, 100), WAIT_TIMEOUT);
     CHECK_EQ(WaitForSingleObject(b, 100), WAIT_TIMEOUT);
     CHECK_EQ(f1, 0);

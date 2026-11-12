@@ -26,13 +26,13 @@ static DWORD tid_reporter(LPVOID)
 TEST(conf_thread_id_and_pseudo_handle)
 {
     DWORD tid = 0;
-    HANDLE t = CreateThread(NULL, 0, tid_reporter, NULL, 0, &tid);
+    HANDLE t = test_CreateThread(NULL, 0, tid_reporter, NULL, 0, &tid);
     CHECK(t != NULL);
     CHECK(signalled(t));
     CHECK(tid != 0);
     CHECK_EQ((DWORD)ld(&c_tid_seen), tid);   /* lpThreadId is the id the thread sees */
     CHECK(tid != GetCurrentThreadId());
-    HANDLE t2 = CreateThread(NULL, 0, tid_reporter, NULL, 0, NULL);   /* lpThreadId may be NULL */
+    HANDLE t2 = test_CreateThread(NULL, 0, tid_reporter, NULL, 0, NULL);   /* lpThreadId may be NULL */
     CHECK(t2 != NULL);
     CHECK(signalled(t2));
     CHECK(GetCurrentThread() != t && GetCurrentThread() != NULL);      /* a pseudo handle, not a real one */
@@ -55,7 +55,7 @@ TEST(conf_thread_still_active_and_exit_code)
 {
     c_gate = CreateEventA(NULL, TRUE, FALSE, NULL);
     c_ran = 0;
-    HANDLE t = CreateThread(NULL, 0, gate_thread, (LPVOID)(uintptr_t)4242, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, gate_thread, (LPVOID)(uintptr_t)4242, 0, NULL);
     for (int i = 0; i < 500 && !ld(&c_ran); i++)
         Sleep(2);
     CHECK_EQ(ld(&c_ran), 1);
@@ -85,7 +85,7 @@ static DWORD set_ran(LPVOID)
 TEST(conf_thread_suspend_counts)
 {
     c_ran = 0;
-    HANDLE t = CreateThread(NULL, 0, set_ran, NULL, CREATE_SUSPENDED, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, set_ran, NULL, CREATE_SUSPENDED, NULL);
     CHECK(t != NULL);
     CHECK_EQ(SuspendThread(t), 1);   /* previous suspend count: created suspended = 1 */
     CHECK_EQ(ResumeThread(t), 2);    /* previous count; still suspended at 1 */
@@ -104,10 +104,10 @@ TEST(conf_thread_suspend_counts)
 TEST(conf_thread_stack_sizes)
 {
     c_ran = 0;
-    HANDLE t = CreateThread(NULL, 4096, set_ran, NULL, 0, NULL);   /* tiny reserve: the thread still runs */
+    HANDLE t = test_CreateThread(NULL, 4096, set_ran, NULL, 0, NULL);   /* tiny reserve: the thread still runs */
     CHECK(t != NULL && signalled(t));
     CloseHandle(t);
-    t = CreateThread(NULL, 8 * 1024 * 1024, set_ran, NULL, 0, NULL);
+    t = test_CreateThread(NULL, 8 * 1024 * 1024, set_ran, NULL, 0, NULL);
     CHECK(t != NULL && signalled(t));
     CloseHandle(t);
     CHECK_EQ(ld(&c_ran), 2);
@@ -118,7 +118,7 @@ TEST(conf_thread_handle_closed_while_running)
     c_gate = CreateEventA(NULL, TRUE, FALSE, NULL);
     c_ran = 0;
     for (int i = 0; i < 20; i++) {
-        HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+        HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
             WaitForSingleObject(c_gate, WAIT_MAX);
             InterlockedIncrement(&c_ran);
             return 0;
@@ -136,7 +136,7 @@ TEST(conf_thread_many_short_lived)
 {
     c_ran = 0;
     for (int i = 0; i < 300; i++) {
-        HANDLE t = CreateThread(NULL, 0, set_ran, NULL, 0, NULL);
+        HANDLE t = test_CreateThread(NULL, 0, set_ran, NULL, 0, NULL);
         if (!t) {
             CHECK(t != NULL);
             break;
@@ -152,13 +152,13 @@ static DWORD exit_with(LPVOID p) { ExitThread((DWORD)(uintptr_t)p); }
 
 TEST(conf_thread_exit_code_stillactive_and_zero)
 {
-    HANDLE t = CreateThread(NULL, 0, exit_with, (LPVOID)(uintptr_t)0, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, exit_with, (LPVOID)(uintptr_t)0, 0, NULL);
     DWORD code = 99;
     CHECK(signalled(t));
     CHECK(GetExitCodeThread(t, &code));
     CHECK_EQ(code, 0);
     CloseHandle(t);
-    t = CreateThread(NULL, 0, exit_with, (LPVOID)(uintptr_t)0xFFFFFFFEu, 0, NULL);
+    t = test_CreateThread(NULL, 0, exit_with, (LPVOID)(uintptr_t)0xFFFFFFFEu, 0, NULL);
     CHECK(signalled(t));
     CHECK(GetExitCodeThread(t, &code));
     CHECK_EQ(code, 0xFFFFFFFEu);
@@ -167,7 +167,7 @@ TEST(conf_thread_exit_code_stillactive_and_zero)
 
 TEST(conf_thread_priority_and_ideal_processor)
 {
-    HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD { return WaitForSingleObject(c_gate, WAIT_MAX); }, NULL,
+    HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD { return WaitForSingleObject(c_gate, WAIT_MAX); }, NULL,
                             CREATE_SUSPENDED, NULL);
     c_gate = CreateEventA(NULL, TRUE, FALSE, NULL);
     CHECK_EQ(GetThreadPriority(t), THREAD_PRIORITY_NORMAL);
@@ -284,7 +284,7 @@ TEST(conf_close_handle_while_waited)
 {
     c_h1 = CreateEventA(NULL, TRUE, FALSE, "Local\\s4conf-alive");
     HANDLE h2 = CreateEventA(NULL, TRUE, FALSE, "Local\\s4conf-alive");
-    HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD { return WaitForSingleObject(c_h1, WAIT_MAX); }, NULL, 0,
+    HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD { return WaitForSingleObject(c_h1, WAIT_MAX); }, NULL, 0,
                             NULL);
     Sleep(60);
     CHECK(CloseHandle(c_h1));   /* the waiter holds the object, not just the handle value */
@@ -332,7 +332,7 @@ TEST(conf_wait_finite_timeout_and_early_wake)
     CHECK(dt >= 75 && dt < 1500);
     /* signalled from another thread: the wait returns long before its timeout */
     c_gate = hs[1];
-    HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD { Sleep(30); SetEvent(c_gate); return 0; }, NULL, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD { Sleep(30); SetEvent(c_gate); return 0; }, NULL, 0, NULL);
     t0 = ms_now();
     CHECK_EQ(WaitForSingleObject(hs[1], 4000), WAIT_OBJECT_0);
     CHECK(ms_now() - t0 < 2000);
@@ -401,7 +401,7 @@ TEST(conf_wait_any_wakes_on_any_object)
         c_set[0] = CreateEventA(NULL, FALSE, FALSE, NULL);
         c_set[1] = CreateSemaphoreA(NULL, 0, 5, NULL);
         c_set[2] = CreateMutexA(NULL, TRUE, NULL);   /* owned by us, so unavailable to the waiter */
-        HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD { return WaitForMultipleObjects(3, c_set, FALSE, WAIT_MAX); },
+        HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD { return WaitForMultipleObjects(3, c_set, FALSE, WAIT_MAX); },
                                 NULL, 0, NULL);
         Sleep(40);
         if (round == 0)
@@ -442,7 +442,7 @@ TEST(conf_wait_all_blocks_until_last_object)
 {
     c_all[0] = CreateEventA(NULL, TRUE, FALSE, NULL);
     c_all[1] = CreateEventA(NULL, FALSE, FALSE, NULL);
-    HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD { return WaitForMultipleObjects(2, c_all, TRUE, WAIT_MAX); },
+    HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD { return WaitForMultipleObjects(2, c_all, TRUE, WAIT_MAX); },
                             NULL, 0, NULL);
     Sleep(40);
     SetEvent(c_all[0]);
@@ -463,7 +463,7 @@ TEST(conf_wait_all_with_thread_handles)
 {
     HANDLE t[3];
     for (int i = 0; i < 3; i++)
-        t[i] = CreateThread(NULL, 0, [](LPVOID) -> DWORD { Sleep(20); return 0; }, NULL, 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD { Sleep(20); return 0; }, NULL, 0, NULL);
     CHECK_EQ(WaitForMultipleObjects(3, t, TRUE, WAIT_MAX), WAIT_OBJECT_0);
     CHECK_EQ(WaitForMultipleObjects(3, t, FALSE, 0), WAIT_OBJECT_0);   /* handles stay signalled */
     for (int i = 0; i < 3; i++)
@@ -514,7 +514,7 @@ TEST(conf_semaphore_wakes_exactly_count_waiters)
     c_got = 0;
     HANDLE t[4];
     for (int i = 0; i < 4; i++)
-        t[i] = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+        t[i] = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
             if (WaitForSingleObject(c_sem, 700) == WAIT_OBJECT_0)
                 InterlockedIncrement(&c_got);
             return 0;
@@ -556,7 +556,7 @@ static DWORD mx_try(LPVOID)
 }
 static DWORD run_try(void)
 {
-    HANDLE t = CreateThread(NULL, 0, mx_try, NULL, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, mx_try, NULL, 0, NULL);
     DWORD code = 99;
     signalled(t);
     GetExitCodeThread(t, &code);
@@ -622,7 +622,7 @@ TEST(conf_mutex_abandoned_by_exiting_owner)
 {
     for (int mode = 0; mode < 3; mode++) {
         c_mx = mode == 2 ? NULL : CreateMutexA(NULL, FALSE, NULL);
-        HANDLE t = CreateThread(NULL, 0, mode == 0 ? mx_take_and_return : mode == 1 ? mx_take_and_exit : mx_create_owned_and_return,
+        HANDLE t = test_CreateThread(NULL, 0, mode == 0 ? mx_take_and_return : mode == 1 ? mx_take_and_exit : mx_create_owned_and_return,
                                 NULL, 0, NULL);
         CHECK(signalled(t));
         CloseHandle(t);
@@ -640,13 +640,13 @@ TEST(conf_mutex_abandoned_wakes_blocked_waiter)
 {
     c_mx = CreateMutexA(NULL, FALSE, NULL);
     c_gate = CreateEventA(NULL, TRUE, FALSE, NULL);
-    HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+    HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
         WaitForSingleObject(c_mx, WAIT_MAX);
         WaitForSingleObject(c_gate, WAIT_MAX);   /* holds the mutex until told to end */
         return 0;
     }, NULL, 0, NULL);
     Sleep(60);
-    HANDLE w = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+    HANDLE w = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
         return WaitForSingleObject(c_mx, WAIT_MAX);   /* blocks: the first thread owns the mutex */
     }, NULL, 0, NULL);
     Sleep(60);
@@ -663,13 +663,13 @@ TEST(conf_mutex_abandoned_wakes_blocked_waiter)
     /* WaitForMultipleObjects: the index of the abandoned mutex, offset from WAIT_ABANDONED_0 */
     c_mx = CreateMutexA(NULL, FALSE, NULL);
     c_mx2 = CreateEventA(NULL, TRUE, FALSE, NULL);
-    t = CreateThread(NULL, 0, mx_take_and_return, NULL, 0, NULL);
+    t = test_CreateThread(NULL, 0, mx_take_and_return, NULL, 0, NULL);
     CHECK(signalled(t));
     CloseHandle(t);
     HANDLE hs[2] = { c_mx2, c_mx };
     CHECK_EQ(WaitForMultipleObjects(2, hs, FALSE, 0), WAIT_ABANDONED + 1);
     ReleaseMutex(c_mx);
-    t = CreateThread(NULL, 0, mx_take_and_return, NULL, 0, NULL);
+    t = test_CreateThread(NULL, 0, mx_take_and_return, NULL, 0, NULL);
     CHECK(signalled(t));
     CloseHandle(t);
     SetEvent(c_mx2);
@@ -703,7 +703,7 @@ TEST(conf_critical_section_blocks_and_hands_off)
     c_have = CreateEventA(NULL, FALSE, FALSE, NULL);
     c_go = CreateEventA(NULL, FALSE, FALSE, NULL);
     c_ran = 0;
-    HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+    HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
         EnterCriticalSection(&c_cs);
         SetEvent(c_have);
         WaitForSingleObject(c_go, WAIT_MAX);
@@ -712,7 +712,7 @@ TEST(conf_critical_section_blocks_and_hands_off)
     }, NULL, 0, NULL);
     CHECK(signalled(c_have));
     CHECK(!TryEnterCriticalSection(&c_cs));       /* held by the other thread */
-    HANDLE u = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+    HANDLE u = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
         EnterCriticalSection(&c_cs);              /* blocks until the first thread leaves */
         InterlockedExchange(&c_ran, 1);
         LeaveCriticalSection(&c_cs);
@@ -780,7 +780,7 @@ TEST(conf_interlocked_cas_spinlock)
     c_spin = c_inside = c_violations = c_total = 0;
     HANDLE t[4];
     for (int i = 0; i < 4; i++)
-        t[i] = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+        t[i] = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
             for (int n = 0; n < 20000; n++) {
                 while (InterlockedCompareExchange(&c_spin, 1, 0) != 0)
                     SwitchToThread();
@@ -816,7 +816,7 @@ TEST(conf_tls_semantics)
     CHECK_EQ(GetLastError(), ERROR_SUCCESS);
     CHECK(TlsGetValue(s2) == NULL);                        /* slots are independent */
     c_ran = 0;
-    HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+    HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
         InterlockedExchange(&c_ran, TlsGetValue(c_slot) == NULL ? 1 : 2);   /* another thread starts with 0 */
         TlsSetValue(c_slot, (LPVOID)0x9999);
         return TlsGetValue(c_slot) == (LPVOID)0x9999 ? 0 : 1;
@@ -866,7 +866,7 @@ TEST(conf_stress_auto_reset_ping_pong)
     pp_a = CreateEventA(NULL, FALSE, FALSE, NULL);
     pp_b = CreateEventA(NULL, FALSE, FALSE, NULL);
     pp_fail = 0;
-    HANDLE t = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+    HANDLE t = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
         for (int i = 0; i < 3000; i++) {
             if (WaitForSingleObject(pp_a, WAIT_MAX) != WAIT_OBJECT_0) {
                 InterlockedIncrement(&pp_fail);
@@ -899,7 +899,7 @@ TEST(conf_stress_work_queue_stop_and_semaphore)
     q_done = 0;
     HANDLE t[3];
     for (int i = 0; i < 3; i++)
-        t[i] = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+        t[i] = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
             HANDLE hs[2] = { q_stop, q_sem };   /* stop first: it wins when both are signalled */
             for (;;) {
                 DWORD r = WaitForMultipleObjects(2, hs, FALSE, WAIT_MAX);
@@ -939,7 +939,7 @@ TEST(conf_stress_mutex_exclusion)
     static long plain;
     plain = 0;
     for (int i = 0; i < 4; i++)
-        t[i] = CreateThread(NULL, 0, [](LPVOID) -> DWORD {
+        t[i] = test_CreateThread(NULL, 0, [](LPVOID) -> DWORD {
             for (int n = 0; n < 5000; n++) {
                 if (WaitForSingleObject(m_mx, WAIT_MAX) != WAIT_OBJECT_0)
                     return 1;

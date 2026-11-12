@@ -10,6 +10,7 @@
 #include <dinput.h>
 #include <dsound.h>
 #include "fnvnx_win32_ext.h"
+#include "../test_threads.h"
 #include "../../platform/audio/backend.h"
 #include "../../platform/com/combridge.h"
 #include "../s4/host_boundary.h"
@@ -35,7 +36,7 @@ jmp_buf g_jb;
 bool clean() { return fnvnx_bnd_locks_held() == 0; }
 void on_other_thread(void (*f)(void))
 {
-    std::thread t(f);
+    test_thread t(f);
     t.join();
 }
 

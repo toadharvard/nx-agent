@@ -27,7 +27,7 @@ static DWORD idle_thread(LPVOID)
 
 static DWORD quick(LPVOID) { return 3; }
 
-static HANDLE spawn(void) { g_stop = 0; return CreateThread(NULL, 0, idle_thread, NULL, 0, NULL); }
+static HANDLE spawn(void) { g_stop = 0; return test_CreateThread(NULL, 0, idle_thread, NULL, 0, NULL); }
 static void reap(HANDLE h)
 {
     g_stop = 1;
@@ -40,7 +40,7 @@ static DWORD g_slot;
 static volatile int g_phase;        /* 0: set, 1: read after realloc, 2: done */
 static void *g_seen[3];
 static volatile int g_ready[3];
-static DWORD tls_worker_body(LPVOID p)
+static DWORD tls_worker(LPVOID p)
 {
     int n = (int)(intptr_t)p;
     CHECK(TlsSetValue(g_slot, (LPVOID)(uintptr_t)(0x100 + n)));
@@ -54,11 +54,6 @@ static DWORD tls_worker_body(LPVOID p)
     g_ready[n] = 2;
     return 0;
 }
-/* the CHECKs of this procedure end it, not the process: the harness guard (s4_test.h), the case fails at its join */
-static DWORD tls_worker(LPVOID p)
-{
-    return s4_thread_guard([&]() -> DWORD { return tls_worker_body(p); }, (DWORD)0xFA11);
-}
 
 static void tls_reuse(DWORD slot_filler_count)
 {
@@ -70,7 +65,7 @@ static void tls_reuse(DWORD slot_filler_count)
     for (int i = 0; i < 3; i++) {
         g_ready[i] = 0;
         g_seen[i] = (void *)1;
-        h[i] = CreateThread(NULL, 0, tls_worker, (LPVOID)(intptr_t)i, 0, NULL);
+        h[i] = test_CreateThread(NULL, 0, tls_worker, (LPVOID)(intptr_t)i, 0, NULL);
     }
     CHECK(TlsSetValue(g_slot, (LPVOID)0x55));
     for (int i = 0; i < 3; i++)
@@ -169,7 +164,7 @@ TEST(thread_contract_exit_code)
     CHECK(!GetExitCodeThread(NULL, &c));
     CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
     reap(h);
-    h = CreateThread(NULL, 0, quick, NULL, 0, NULL);
+    h = test_CreateThread(NULL, 0, quick, NULL, 0, NULL);
     WaitForSingleObject(h, 5000);
     CHECK(GetExitCodeThread(h, &c) && c == 3);
     CloseHandle(h);
@@ -264,16 +259,16 @@ TEST(thread_contract_create_flags)
     for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) {
         SetLastError(0);
         DWORD id = 0xdead;
-        CHECK(CreateThread(NULL, 0, quick, NULL, bad[i], &id) == NULL);
+        CHECK(test_CreateThread(NULL, 0, quick, NULL, bad[i], &id) == NULL);
         CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
         CHECK_EQ(id, 0xdead);
     }
-    HANDLE h = CreateThread(NULL, 4096, quick, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);   /* tid NULL ok */
+    HANDLE h = test_CreateThread(NULL, 4096, quick, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);   /* tid NULL ok */
     CHECK(h != NULL);
     CHECK_EQ(WaitForSingleObject(h, 5000), WAIT_OBJECT_0);
     CloseHandle(h);
     DWORD id = 0;
-    h = CreateThread(NULL, 0, quick, NULL, CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION, &id);
+    h = test_CreateThread(NULL, 0, quick, NULL, CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION, &id);
     CHECK(h != NULL && id != 0);
     CHECK_EQ(ResumeThread(h), 1);
     CHECK_EQ(WaitForSingleObject(h, 5000), WAIT_OBJECT_0);

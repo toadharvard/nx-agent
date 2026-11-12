@@ -287,7 +287,7 @@ static DWORD stack_probe(LPVOID out)
 static size_t thread_stack(SIZE_T req)
 {
     size_t got = 0;
-    HANDLE t = CreateThread(NULL, req, stack_probe, &got, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, req, stack_probe, &got, 0, NULL);
     if (!t)
         return 0;
     WaitForSingleObject(t, INFINITE);
