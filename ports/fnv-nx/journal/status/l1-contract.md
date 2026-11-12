@@ -908,3 +908,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - hostapi rule accepted: a service is used if any admitted root that includes the interface uses it. L5 w10 implements this in gate_hostapi and L1 reviews.
 - test_envcheck snapshot drift at 8f4790a2: w22 takes it on branch w22e, ahead of w22v.
   - Each diff line is classified as stale pin, snapshot-code bug, or unpinned machine state.
+- w22e: the env drift does not reproduce. On a fresh setup, snapshot = env.json at both 224af83e and 8f4790a2. Waiting for L5 w10's diff.
+- w22v, decided: fnvnx_assume_violation is called only from generated fnvnx_dom_<name>_check functions.
+  - Each check function sits in a unit that a declared generator stage outputs, with a literal OWNER id.
+  - A direct call from hand code is red. This gives polarity by construction.
+  - L5's errno compare chain moves to the generated check.
