@@ -270,3 +270,10 @@ Update 2026-11-12, at 698adefb:
   - L3b: ASM-320/321, ASM-801, ASM-331 (the SDM-prose reference A3).
   - L1's prose-only gate rule clears the 7 SMT blocks.
   - ehtables:268 (reloc consistency) waits on w7's PE table: the rule is sound only for images Windows may relocate.
+- Flags cause table (a0f3d8e, 07ff95cd): of 15 630 red reads, i no-form 10 582, ii undefined 2 037, iii entry 2 992 (all unknown-consumer, no jtab), iv call 17.
+  - The exe's 14 red reads:
+    - 10 zf-je reads after calls: rule = interprocedural flag summary (join over the callee's ret sites), to be implemented by w5;
+    - 2 adc cf at the class-3 data-pointer entries (w7's rule);
+    - 2 pushfd AF (the invariance proof).
+  - The no-form mnemonics on those paths are next (x87 fnstsw/sahf expected).
+- L1 w14 f4c04b92: lifted roots from a generated stage (cxx_origin {lifted_by, stage}). w8 applies it to the 3 test pairs (doing).
