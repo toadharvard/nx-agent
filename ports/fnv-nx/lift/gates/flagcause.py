@@ -22,8 +22,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gates import gate_flags as g
 
-E_, C_, U_, N_ = 1, 2, 4, 8
-PB0 = 4                                  # the producer bits start at bit 4 of a flag's field
+E_, C_, U_, N_, P_ = 1, 2, 4, 8, 16
+PB0 = 5                                  # origin bits E C U N, the PASS bit (the call summary), then the producer bits
 NF = g.NF
 Gl = {}
 
@@ -39,42 +39,28 @@ def wide(r, pb, W):
     return keep, add
 
 
-def _init(path, base, rows, entries, pb, seeded):
+def _init(path, base, rows, entries, pb, seeded, S=None):
     g.MEMO.clear()
-    Gl.update(img=g.Image(path, base), rows=rows, ents=entries, pb=pb, W=PB0 + len(pb), seeded=seeded)
+    Gl.update(img=g.Image(path, base), rows=rows, ents=entries, pb=pb, W=PB0 + len(pb), seeded=seeded, S=S if S is not None else {})
 
 
-def analyse(entry, ranges, st0, final):
-    """-> (contributions, red reads [(site, flag index, origin field, mnemonic)] when final)"""
+def _lay():
+    return g.Lay(Gl['W'], 4)
+
+
+def analyse(entry, ranges, st0, final, S):
+    """-> (contributions, red reads [(site, flag index, origin field, mnemonic)] when final); the flow is gate_flags.flow in the wide layout"""
     img, entries, pb, W = Gl['img'], Gl['ents'], Gl['pb'], Gl['W']
     ins = {}
     for lo, hi in ranges:
         for r in g.decode(img, lo, hi)[0]: ins[r[0]] = r
-    allc = sum(C_ << (W * k) for k in range(NF))
     wc = {}
-    state = {entry: st0} if entry in ins and st0 is not None else {}
-    work = [entry] if state else []
-    contrib = []
-    while work:
-        a = work.pop()
-        r = ins[a]
-        st = state[a]
-        kind, tgt, size = r[2], r[3], r[1]
+
+    def xf(a, r):
         w = wc.get(a)
         if w is None: w = wc[a] = wide(r, pb, W)
-        o = allc if kind == g.KCALL else (st & w[0]) | w[1]
-        if kind == g.KCALL and tgt is not None and tgt in entries and tgt not in ins: contrib.append((tgt, st))
-        succ = []
-        if kind in (g.KSEQ, g.KCALL, g.KJCC): succ.append(a + size)
-        if kind in (g.KJMP, g.KJCC) and tgt is not None: succ.append(tgt)
-        for s in succ:
-            if s not in ins:
-                if s in entries and kind != g.KCALL: contrib.append((s, o if s == a + size else st))
-                continue
-            n = state.get(s)
-            if n is None or n | o != n:
-                state[s] = o if n is None else n | o
-                work.append(s)
+        return w
+    state, contrib, _, _ = g.flow(ins, entry, st0, entries, xf, _lay(), S)
     red = []
     if final:
         fm = (1 << W) - 1
@@ -92,6 +78,25 @@ def analyse(entry, ranges, st0, final):
     return sorted(set(contrib)), red
 
 
+def _wsum(items):
+    img, rows, ents, pb, W, S = Gl['img'], Gl['rows'], Gl['ents'], Gl['pb'], Gl['W'], Gl['S']
+    out = []
+    for e in items:
+        ins = {}
+        for lo, hi in rows[e]:
+            for r in g.decode(img, lo, hi)[0]: ins[r[0]] = r
+        wc = {}
+
+        def xf(a, r):
+            w = wc.get(a)
+            if w is None: w = wc[a] = wide(r, pb, W)
+            return w
+        lay = _lay()
+        _, _, ret, deps = g.flow(ins, e, lay.allp, ents, xf, lay, S, bottom=True)
+        out.append((e, ret, deps))
+    return out
+
+
 def _w0(items):
     img, rows = Gl['img'], Gl['rows']
     out = []
@@ -107,7 +112,7 @@ def _w0(items):
 
 def _w(task):
     final, items = task
-    return [(e,) + analyse(e, Gl['rows'][e], st, final) for e, st in items]
+    return [(e,) + analyse(e, Gl['rows'][e], st, final, Gl['S']) for e, st in items]
 
 
 def pool(jobs, args):
@@ -138,8 +143,9 @@ def solve(path, base, rows, uni, jobs):
     pb = {m: i for i, m in enumerate(sorted(mnems))}
     W = PB0 + len(pb)
     alle = sum(E_ << (W * k) for k in range(NF))
-    p1 = pool(jobs, (path, base, rows, ents, pb, seed))
-    if p1 is None: _init(path, base, rows, ents, pb, seed)
+    S = g.solve_summaries(ents, jobs, lambda S: pool(jobs, (path, base, rows, ents, pb, seed, S)), _wsum, lambda S: _init(path, base, rows, ents, pb, seed, S))
+    p1 = pool(jobs, (path, base, rows, ents, pb, seed, S))
+    if p1 is None: _init(path, base, rows, ents, pb, seed, S)
     inst = {e: (alle if seed[e] else None) for e in rows}
     try:
         dirty = sorted(e for e in rows if inst[e] is not None)
