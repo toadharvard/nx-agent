@@ -38,5 +38,8 @@ class Certs:
 
 
 if __name__ == '__main__':
-    c = Certs(*sys.argv[1:2])
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import cli
+    (*cd,), _ = cli.parse('usage: formcert.py [CERTDIR]   count the certified forms of CERTDIR', sys.argv[1:], (0, 1))
+    c = Certs(*cd)
     print('certificate dir present: %s; forms with a certificate file %d, certified %d' % (c.present, len(c.ok), sum(c.ok.values())))

@@ -574,4 +574,7 @@ def main():
 
 
 if __name__ == '__main__':
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import cli
+    cli.parse('usage: fpmodes.py   x87/SSE control-mode facts of the exe (env FNVNX_FACTS)', sys.argv[1:], (0, 0))
     main()

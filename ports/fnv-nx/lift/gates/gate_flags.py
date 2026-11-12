@@ -311,7 +311,9 @@ def summary(ents, ntot, reads, bad, red):
 
 
 def main(argv):
-    path, facts = argv[0], argv[1]
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+    import cli
+    (path, facts), _ = cli.parse('usage: gate_flags.py IMAGE FACTS_DIR   env GATE_OUT, JOBS', argv, (2, 2))
     res = run(path, facts)
     s = summary(*res)
     red = res[4]
