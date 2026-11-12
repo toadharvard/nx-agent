@@ -1,0 +1,2935 @@
+diff --git a/fnvnx_sm_check.h b/fnvnx_sm_check.h
+new file mode 100644
+index 0000000..4ab658a
+--- /dev/null
++++ b/fnvnx_sm_check.h
+@@ -0,0 +1,75 @@
++/* fnv-nx: static totality proof of the SM1-3 translation (render/total/gate_d3d9total.py reads it).
++ *
++ * fnvnx_sm_rows.h (generated from render/shaders/total/sm_table.json by render/shaders/total/gen_sm_rows.py, copied next to this file by
++ * render/shaders/build.sh) lists every (stage, opcode value) command of the D3D9 SM1-3 contract.  Each row is checked here against the
++ * instruction table instructions[] of mojoshader.c, which is built from the INSTRUCTION / INSTRUCTION_STATE X-macro list of
++ * mojoshader_internal.h and carries, for every row, emit_<PROFILE>_<op> of every compiled profile (a missing emitter is a link error):
++ *   - the row's NAME is an enumerator built from that list (an unknown NAME is an undeclared identifier);
++ *   - the position of the NAME's entry in the list equals the opcode value (instructions[] is indexed by the opcode token), so a removed,
++ *     moved or RESERVED entry (a RESERVED entry has an empty emitter and fails only at run time) is a failed _Static_assert;
++ *   - the entry's shader-type mask contains the row's stage;
++ *   - comparison forms: the control value of the form equals the one the comparison tables of the glsl profile are indexed by;
++ *   - token-level commands (phase) take their token value from the row, the parser compares with it.
++ * Nothing here emits code: the generated GLSL is unchanged. */
++#ifndef FNVNX_SM_CHECK_H
++#define FNVNX_SM_CHECK_H
++
++/* comparison controls (D3DSHADER_COMPARISON): one table for the translator's operator strings and for the form rows. */
++#define FNVNX_CMP_TABLE(X) \
++    X(gt, 1, ">",  "greaterThan") \
++    X(eq, 2, "==", "equal") \
++    X(ge, 3, ">=", "greaterThanEqual") \
++    X(lt, 4, "<",  "lessThan") \
++    X(ne, 5, "!=", "notEqual") \
++    X(le, 6, "<=", "lessThanEqual")
++
++#ifdef FNVNX_SM_CHECK_PROOF
++#define FNVNX_CAT_(a, b) a##b
++#define FNVNX_CAT(a, b) FNVNX_CAT_(a, b)
++/* RESERVED repeats in the list: every occurrence gets its own enumerator name; a row can never name one (its names are not declared before). */
++#define FNVNX_OPIDX_RESERVED FNVNX_CAT(FNVNX_RSVIDX_, __COUNTER__)
++#define FNVNX_OPTYPE_RESERVED FNVNX_CAT(FNVNX_RSVTYPE_, __COUNTER__)
++
++enum
++{
++    FNVNX_OPIDX_ORIGIN,   /* the entry at position p of the list is FNVNX_OPIDX_ORIGIN + 1 + p (enumerators count up from here) */
++    #define INSTRUCTION_STATE(op, opstr, slots, a, t, w) FNVNX_OPIDX_##op,
++    #define INSTRUCTION(op, opstr, slots, a, t, w) FNVNX_OPIDX_##op,
++    #define MOJOSHADER_DO_INSTRUCTION_TABLE 1
++    #include "mojoshader_internal.h"
++    FNVNX_OPIDX_END_
++};
++
++enum
++{
++    #define INSTRUCTION_STATE(op, opstr, slots, a, t, w) FNVNX_OPTYPE_##op = (t),
++    #define INSTRUCTION(op, opstr, slots, a, t, w) FNVNX_OPTYPE_##op = (t),
++    #define MOJOSHADER_DO_INSTRUCTION_TABLE 1
++    #include "mojoshader_internal.h"
++    FNVNX_OPTYPE_END_
++};
++
++enum
++{
++    #define FNVNX_CMP_ENUM_(name, ctl, scalar, vector) FNVNX_CMPCTL_##name = (ctl),
++    FNVNX_CMP_TABLE(FNVNX_CMP_ENUM_)
++    #undef FNVNX_CMP_ENUM_
++    FNVNX_CMPCTL_END_
++};
++
++#define FNVNX_SM_OP(id, stage, value, NAME) \
++    _Static_assert(FNVNX_OPIDX_##NAME - FNVNX_OPIDX_ORIGIN - 1 == (value), id ": the instructions[] entry of NAME is not at the opcode value"); \
++    _Static_assert((FNVNX_OPTYPE_##NAME & (stage)) == (stage), id ": the stage is not in the shader-type mask of the instructions[] entry");
++
++#define FNVNX_SM_CMP(id, NAME, cmp, ctl) \
++    _Static_assert(FNVNX_CMPCTL_##cmp == (ctl), id ": comparison control differs from the comparison table of the translator");
++
++/* a token-level command (not an instructions[] entry): the parser takes the token value from its row, so the row is load-bearing. */
++#define FNVNX_SM_TOKEN(id, stage, NAME, value) enum { FNVNX_SM_TOKEN_##NAME = (value) };
++
++#include "fnvnx_sm_rows.h"
++
++#undef FNVNX_SM_OP
++#undef FNVNX_SM_CMP
++#endif  /* FNVNX_SM_CHECK_PROOF */
++#endif  /* FNVNX_SM_CHECK_H */
+diff --git a/mojoshader.c b/mojoshader.c
+index 486d7e0..e980603 100644
+--- a/mojoshader.c
++++ b/mojoshader.c
+@@ -334,6 +334,9 @@ static const struct { const char *from; const char *to; } profileMap[] =
+     { MOJOSHADER_PROFILE_GLSPIRV, MOJOSHADER_PROFILE_SPIRV },
+     { MOJOSHADER_PROFILE_GLSLES, MOJOSHADER_PROFILE_GLSL },
+     { MOJOSHADER_PROFILE_GLSLES3, MOJOSHADER_PROFILE_GLSL },
++#if SUPPORT_PROFILE_GLSLDK
++    { MOJOSHADER_PROFILE_GLSLDK, MOJOSHADER_PROFILE_GLSL },
++#endif
+     { MOJOSHADER_PROFILE_GLSL120, MOJOSHADER_PROFILE_GLSL },
+     { MOJOSHADER_PROFILE_NV2, MOJOSHADER_PROFILE_ARB1 },
+     { MOJOSHADER_PROFILE_NV3, MOJOSHADER_PROFILE_ARB1 },
+@@ -351,6 +354,17 @@ static const struct { const char *from; const char *to; } profileMap[] =
+      PROFILE_EMITTER_SPIRV(op) \
+ }
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: SM3 relative input/output addressing is accepted by the glsldk
++//  profile and by the bytecode profile (fnv-nx's front end and the test
++//  assembler's validation parse with it).
++static int fnvnx_relaxed(Context *ctx)
++{
++    return support_glsldk(ctx) || ((ctx->profile != NULL) &&
++           (strcmp(ctx->profile->name, MOJOSHADER_PROFILE_BYTECODE) == 0));
++} // fnvnx_relaxed
++#endif
++
+ static int parse_destination_token(Context *ctx, DestArgInfo *info)
+ {
+     // !!! FIXME: recheck against the spec for ranges (like RASTOUT values, etc).
+@@ -361,6 +375,7 @@ static int parse_destination_token(Context *ctx, DestArgInfo *info)
+     } // if
+ 
+     const uint32 token = SWAP32(*(ctx->tokens));
++    int desttoks = 1;  // fnv-nx: 2 with a relative-address token
+     const int reserved1 = (int) ((token >> 14) & 0x3); // bits 14 through 15
+     const int reserved2 = (int) ((token >> 31) & 0x1); // bit 31
+ 
+@@ -373,7 +388,13 @@ static int parse_destination_token(Context *ctx, DestArgInfo *info)
+     info->regtype = (RegisterType) (((token >> 28) & 0x7) | ((token >> 8) & 0x18));  // bits 28-30, 11-12
+ 
+     int writemask;
+-    if (isscalar(ctx, ctx->shader_type, info->regtype, info->regnum))
++    // fnv-nx: the predicate register p0 is a 4-component register in every model that has it (setp writes it by mask, the
++    //  predicate swizzle of a predicated instruction or of if/callnz/breakp names one component): never reduced to .x.
++    int dk_pred = 0;
++#if SUPPORT_PROFILE_GLSLDK
++    dk_pred = fnvnx_relaxed(ctx) && (info->regtype == REG_TYPE_PREDICATE);
++#endif
++    if (!dk_pred && isscalar(ctx, ctx->shader_type, info->regtype, info->regnum))
+         writemask = 0x1;  // just x.
+     else
+         writemask = info->orig_writemask;
+@@ -413,6 +434,30 @@ static int parse_destination_token(Context *ctx, DestArgInfo *info)
+             fail(ctx, "Relative addressing in non-vertex shader");
+         if (!shader_version_atleast(ctx, 3, 0))
+             fail(ctx, "Relative addressing in vertex shader version < 3.0");
++#if SUPPORT_PROFILE_GLSLDK
++        if (fnvnx_relaxed(ctx) && shader_version_atleast(ctx, 3, 0) &&
++            (info->regtype == REG_TYPE_OUTPUT) && (ctx->tokencount > 0))
++        {
++            // fnv-nx: vs_3_0 o[a0.c + n] / o[aL + n]. The relative-address
++            //  token follows, encoded as in a source parameter.
++            const uint32 reltoken = SWAP32(ctx->tokens[0]);
++            const int relswiz = (int) ((reltoken >> 16) & 0xFF);
++            info->relative_regnum = (int) (reltoken & 0x7ff);
++            info->relative_regtype = (RegisterType)
++                (((reltoken >> 28) & 0x7) | ((reltoken >> 8) & 0x18));
++            info->relative_component = (relswiz & 0x3);
++            if (((info->relative_regtype != REG_TYPE_ADDRESS) &&
++                 (info->relative_regtype != REG_TYPE_LOOP)) ||
++                (info->relative_regnum != 0))
++                fail(ctx, "invalid register for relative address");
++            ctx->have_relative_output_registers = 1;
++            set_used_register(ctx, info->relative_regtype, info->relative_regnum, 0);
++            adjust_token_position(ctx, 1);
++            desttoks = 2;
++        } // if
++        else
++#endif
++        {
+         if ((!ctx->ctab.have_ctab) && (!ctx->ignores_ctab))
+         {
+             // it's hard to do this efficiently without!
+@@ -422,6 +467,7 @@ static int parse_destination_token(Context *ctx, DestArgInfo *info)
+         // !!! FIXME: I don't have a shader that has a relative dest currently.
+         fail(ctx, "Relative addressing of dest tokens is unsupported");
+         return 2;
++        } // else
+     } // if
+ 
+     const int s = info->result_shift;
+@@ -453,9 +499,13 @@ static int parse_destination_token(Context *ctx, DestArgInfo *info)
+         fail(ctx, "Register type is out of range");
+ 
+     if (!isfail(ctx))
+-        set_used_register(ctx, info->regtype, info->regnum, 1);
++    {
++        RegisterList *r = set_used_register(ctx, info->regtype, info->regnum, 1);
++        if (r)  // fnv-nx: union of the write masks (glsldk vs < 3.0 colour saturation)
++            r->writemask |= info->writemask;
++    } // if
+ 
+-    return 1;
++    return desttoks;
+ } // parse_destination_token
+ 
+ 
+@@ -629,6 +679,20 @@ static int adjust_swizzle(const Context *ctx, const RegisterType regtype,
+ } // adjust_swizzle
+ 
+ 
++
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: the shader defs float constants (DEF comes before any instruction,
++//  so every def is known when an instruction's relative read is parsed).
++static int dk_has_float_defs(const Context *ctx)
++{
++    const ConstantsList *c;
++    for (c = ctx->constants; c != NULL; c = c->next)
++        if (c->constant.type == MOJOSHADER_UNIFORM_FLOAT)
++            return 1;
++    return 0;
++} // dk_has_float_defs
++#endif
++
+ static int parse_source_token(Context *ctx, SourceArgInfo *info)
+ {
+     int retval = 1;
+@@ -744,13 +808,31 @@ static int parse_source_token(Context *ctx, SourceArgInfo *info)
+ 
+         if (info->regtype == REG_TYPE_INPUT)
+         {
+-            if ( (shader_is_pixel(ctx)) || (!shader_version_atleast(ctx, 3, 0)) )
++            // fnv-nx: ps_3_0 allows v[aL + n] (glsldk only).
++            const int dk_ps3_loop = fnvnx_relaxed(ctx) && shader_is_pixel(ctx) &&
++                                    shader_version_atleast(ctx, 3, 0) &&
++                                    (info->relative_regtype == REG_TYPE_LOOP);
++            if ( ((shader_is_pixel(ctx)) || (!shader_version_atleast(ctx, 3, 0))) && !dk_ps3_loop )
+                 fail(ctx, "relative addressing of input registers not supported in this shader model");
+             ctx->have_relative_input_registers = 1;
+         } // if
+         else if (info->regtype == REG_TYPE_CONST)
+         {
+             // figure out what array we're in...
++#if SUPPORT_PROFILE_GLSLDK
++            if (support_glsldk(ctx))
++            {
++                // fnv-nx: the dk layout indexes the constant UBO by register,
++                //  so no CTAB array is needed, and none is used even when the
++                //  CTAB lists one: the CTAB is D3DX metadata, not part of the
++                //  D3D9 shader contract. c[a0 + n] reads c[0..N) of the stage
++                //  (N = 256 vs, 224 ps; fnvnx_dk_layout.h) by register.
++                ctx->glsldk_rel_const = 1;
++                info->relative_array = NULL;
++                set_used_register(ctx, info->relative_regtype, info->relative_regnum, 0);
++            } // if
++            else
++#endif
+             if (!ctx->ignores_ctab)
+             {
+                 if (!ctx->ctab.have_ctab)  // hard to do efficiently without!
+@@ -768,8 +850,36 @@ static int parse_source_token(Context *ctx, SourceArgInfo *info)
+                             break;  // match!
+                     } // for
+ 
++#if SUPPORT_PROFILE_GLSLDK
++                    if ((var == NULL) && support_glsldk(ctx))
++                    {
++                        // fnv-nx: c[a0 + n] outside every CTAB array (e.g. an
++                        //  instance array read past its declared size): the dk
++                        //  UBO holds all 256 registers, index it directly
++                        //  (with the def'd values overlaid, D3D9 semantics).
++                        ctx->glsldk_rel_const = 1;
++                        info->relative_array = NULL;
++                        set_used_register(ctx, info->relative_regtype, info->relative_regnum, 0);
++                    } // if
++                    else
++#endif
+                     if (var == NULL)
+                         fail(ctx, "relative addressing of indeterminate array");
++#if SUPPORT_PROFILE_GLSLDK
++                    else if (support_glsldk(ctx) && !var->constant && dk_has_float_defs(ctx))
++                    {
++                        // fnv-nx: c[a0 + n] inside a CTAB array of a shader
++                        //  that defs float constants: a0 can reach a def'd
++                        //  register past the array, and D3D9 relative reads
++                        //  see the def'd values (WineD3D and Nine load them
++                        //  into the constant file). By register, with the
++                        //  overlay, as outside every array.
++                        var->used = 1;
++                        ctx->glsldk_rel_const = 1;
++                        info->relative_array = NULL;
++                        set_used_register(ctx, info->relative_regtype, info->relative_regnum, 0);
++                    } // else if
++#endif
+                     else
+                     {
+                         var->used = 1;
+@@ -1092,7 +1202,7 @@ static int parse_args_DCL(Context *ctx)
+             const uint32 ttype = ((token >> 27) & 0xF);
+             if (!valid_texture_type(ttype))
+                 fail(ctx, "Unknown sampler texture type");
+-            reserved_mask = 0x0FFFFFFF;
++            reserved_mask = 0x7FFFFFF;  // fnv-nx: the type is bits 27-30, as in ps_3_0 (0x0FFFFFFF refused dcl_cube/dcl_volume)
+             ctx->dwords[0] = ttype;
+         } // else if
+         else
+@@ -1208,6 +1318,58 @@ static int parse_args_SINCOS(Context *ctx)
+ } // parse_args_SINCOS
+ 
+ 
++// fnv-nx: sgn has two forms (the sgn table row is a CONFLICT between the MS sgn page, 3 sources in every version, and vkd3d d3dbc.c,
++//  1 source in vs_3_0): src0 only, or src0 + two scratch temporaries whose contents after the instruction are undefined (we never write them).
++//  The form is read from the instruction token's length field (sm2+ encodes the token count): after the destination (+ its relative
++//  token) and the predicate token (moved last by parse_instruction_token), the remaining tokens are sources; a source token with the
++//  relative bit (13) is followed by one more token. One source -> DS, otherwise DSSS (the MS form).
++static int parse_args_SGN(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (fnvnx_relaxed(ctx) && shader_version_atleast(ctx, 2, 0) && (ctx->tokencount >= 2))
++    {
++        const uint32 dtok = SWAP32(ctx->tokens[0]);
++        uint32 pos = 1 + (((dtok & (1u << 13)) && shader_version_atleast(ctx, 3, 0)) ? 1 : 0);
++        const uint32 end = ctx->fnvnx_insttoks - (ctx->predicated ? 1 : 0);
++        uint32 nsrc = 0;
++        while ((pos < end) && (pos < ctx->tokencount))
++        {
++            const uint32 stok = SWAP32(ctx->tokens[pos]);
++            pos += 1 + (((stok & (1u << 13)) != 0) ? 1 : 0);
++            nsrc++;
++        } // while
++        if (nsrc == 1)
++            return parse_args_DS(ctx);
++    } // if
++    if (support_glsldk(ctx) || fnvnx_relaxed(ctx))
++    {
++        // The MS form: src1 and src2 are scratch temporaries the instruction writes (contents undefined afterwards), not reads: they
++        //  need no earlier write.
++        int retval = 1;
++        int i;
++        retval += parse_destination_token(ctx, &ctx->dest_arg);
++        for (i = 0; i < 3; i++)
++        {
++            if ((i > 0) && (ctx->tokencount > 0))
++            {
++                const uint32 t = SWAP32(ctx->tokens[0]);
++                const RegisterType rt = (RegisterType) (((t >> 28) & 0x7) | ((t >> 8) & 0x18));
++                if ((rt == REG_TYPE_TEMP) && (((t >> 13) & 1) == 0))
++                {
++                    RegisterList *r = set_used_register(ctx, REG_TYPE_TEMP, (int) (t & 0x7ff), 0);
++                    if (r != NULL)
++                        r->written = 1;
++                } // if
++            } // if
++            retval += parse_source_token(ctx, &ctx->source_args[i]);
++        } // for
++        return retval;
++    } // if
++#endif
++    return parse_args_DSSS(ctx);
++} // parse_args_SGN
++
++
+ static int parse_args_TEXCRD(Context *ctx)
+ {
+     // added extra register in ps_1_4.
+@@ -1372,14 +1534,10 @@ static void state_FRC(Context *ctx)
+ {
+     const DestArgInfo *dst = &ctx->dest_arg;
+ 
+-    if (dst->result_mod & MOD_SATURATE)  // according to msdn...
++    // fnv-nx: _sat is refused only in vertex shaders (the table's sat_except_vs: frc, sincos, texldl); a pixel shader's frc/sincos
++    //  accepts it. vs_1_1 frc takes any write mask (the table's x_y_xy_vs1 plus the full mask): fract() is per component.
++    if ((dst->result_mod & MOD_SATURATE) && (!fnvnx_relaxed(ctx) || shader_is_vertex(ctx)))
+         fail(ctx, "FRC destination can't use saturate modifier");
+-
+-    else if (!shader_version_atleast(ctx, 2, 0))
+-    {
+-        if (!writemask_y(dst->writemask) && !writemask_xy(dst->writemask))
+-            fail(ctx, "FRC writemask must be .y or .xy for shader model 1.x");
+-    } // else if
+ } // state_FRC
+ 
+ 
+@@ -1403,8 +1561,8 @@ static void srcarg_matrix_replicate(Context *ctx, const int idx,
+ static void state_M4X4(Context *ctx)
+ {
+     const DestArgInfo *info = &ctx->dest_arg;
+-    if (!writemask_xyzw(info->writemask))
+-        fail(ctx, "M4X4 writemask must be full");
++    if (!writemask_xyzw(info->writemask) && !(fnvnx_relaxed(ctx) && writemask_xyz(info->writemask)))
++        fail(ctx, "M4X4 writemask must be full");  // fnv-nx: .xyz too (table xyz_or_all; the w row dot is not computed into the dest)
+ 
+ // !!! FIXME: MSDN:
+ //The xyzw (default) mask is required for the destination register. Negate and swizzle modifiers are allowed for src0, but not for src1.
+@@ -1427,8 +1585,8 @@ static void state_M4X3(Context *ctx)
+ static void state_M3X4(Context *ctx)
+ {
+     const DestArgInfo *info = &ctx->dest_arg;
+-    if (!writemask_xyzw(info->writemask))
+-        fail(ctx, "M3X4 writemask must be .xyzw");
++    if (!writemask_xyzw(info->writemask) && !(fnvnx_relaxed(ctx) && writemask_xyz(info->writemask)))
++        fail(ctx, "M3X4 writemask must be .xyzw");  // fnv-nx: .xyz too (table xyz_or_all)
+ 
+ // !!! FIXME: MSDN stuff
+ 
+@@ -1482,9 +1640,12 @@ static void check_label_register(Context *ctx, int arg, const char *opcode)
+         failf(ctx, "%s with a non-label register specified", opcode);
+     if (!shader_version_atleast(ctx, 2, 0))
+         failf(ctx, "%s not supported in Shader Model 1", opcode);
+-    if ((shader_version_atleast(ctx, 2, 255)) && (regnum > 2047))
+-        fail(ctx, "label register number must be <= 2047");
+-    if (regnum > 15)
++    if (shader_version_atleast(ctx, 3, 0))
++    {
++        if (regnum > 2047)  // fnv-nx: sm3 allows l0..l2047 (upstream refused > 15 in every model)
++            fail(ctx, "label register number must be <= 2047");
++    } // if
++    else if (regnum > 15)
+         fail(ctx, "label register number must be <= 15");
+ } // check_label_register
+ 
+@@ -1690,13 +1851,15 @@ static void state_SINCOS(Context *ctx)
+ {
+     const DestArgInfo *dst = &ctx->dest_arg;
+     const int mask = dst->writemask;
+-    if (!writemask_x(mask) && !writemask_y(mask) && !writemask_xy(mask))
++    // fnv-nx: the MS vs masking page allows .xyz on sincos (the sincos page lists .x/.y/.xy; the table marks it a conflict): accepted,
++    //  the emitter writes (cos, sin, 0, 0) through the mask.
++    if (!writemask_x(mask) && !writemask_y(mask) && !writemask_xy(mask) && !(fnvnx_relaxed(ctx) && writemask_xyz(mask)))
+         fail(ctx, "SINCOS write mask must be .x or .y or .xy");
+ 
+     else if (!replicate_swizzle(ctx->source_args[0].swizzle))
+         fail(ctx, "SINCOS src0 must have replicate swizzle");
+ 
+-    else if (dst->result_mod & MOD_SATURATE)  // according to msdn...
++    else if ((dst->result_mod & MOD_SATURATE) && (!fnvnx_relaxed(ctx) || shader_is_vertex(ctx)))
+         fail(ctx, "SINCOS destination can't use saturate modifier");
+ 
+     // this opcode needs extra registers, with extra limitations, for <= sm2.
+@@ -1855,7 +2018,8 @@ static void state_TEXM3X2TEX(Context *ctx)
+     const TextureType ttype = (TextureType) (sreg ? sreg->index : 0);
+ 
+     // A samplermap might change this to something nonsensical.
+-    if (ttype != TEXTURE_TYPE_2D)
++    // fnv-nx: glsldk has no samplermap; the ps_1_x sampler type is data (the driver block's type word), not checked here.
++    if ((ttype != TEXTURE_TYPE_2D) && !fnvnx_relaxed(ctx))
+         fail(ctx, "TEXM3X2TEX needs a 2D sampler");
+ } // state_TEXM3X2TEX
+ 
+@@ -1893,7 +2057,7 @@ static void state_texm3x3(Context *ctx, const char *opcode, const int dims)
+     const TextureType ttype = (TextureType) (sreg ? sreg->index : 0);
+ 
+     // A samplermap might change this to something nonsensical.
+-    if ((ttype != TEXTURE_TYPE_VOLUME) && (ttype != TEXTURE_TYPE_CUBE))
++    if ((ttype != TEXTURE_TYPE_VOLUME) && (ttype != TEXTURE_TYPE_CUBE) && !fnvnx_relaxed(ctx))
+         failf(ctx, "%s needs a 3D or Cubemap sampler", opcode);
+ } // state_texm3x3
+ 
+@@ -1921,6 +2085,31 @@ static void state_TEXM3X3VSPEC(Context *ctx)
+     state_texm3x3(ctx, "TEXM3X3VSPEC", 3);
+ } // state_TEXM3X3VSPEC
+ 
++// fnv-nx: the ps_1_2/1_3 texture instructions MojoShader never had states for. They only register their sampler (the stage of the
++//  destination; its dimensionality is data, see emit_GLSL_sampler) and the texture-coordinate inputs they read.
++static void state_texreg(Context *ctx, const char *opcode, const int sampled)
++{
++    if (shader_version_atleast(ctx, 1, 4))
++        failf(ctx, "%s opcode not available after Shader Model 1.3", opcode);
++    state_texops(ctx, opcode, sampled ? 2 : 0, 0);
++} // state_texreg
++
++static void state_TEXREG2AR(Context *ctx) { state_texreg(ctx, "TEXREG2AR", 1); }
++static void state_TEXREG2GB(Context *ctx) { state_texreg(ctx, "TEXREG2GB", 1); }
++static void state_TEXREG2RGB(Context *ctx) { state_texreg(ctx, "TEXREG2RGB", 1); }
++static void state_TEXDP3TEX(Context *ctx) { state_texreg(ctx, "TEXDP3TEX", 1); }
++static void state_TEXDP3(Context *ctx) { state_texreg(ctx, "TEXDP3", 0); }
++
++static void state_TEXM3X2DEPTH(Context *ctx)
++{
++    if (shader_version_atleast(ctx, 1, 4))
++        fail(ctx, "TEXM3X2DEPTH opcode not available after Shader Model 1.3");
++    if (ctx->texm3x2pad_dst0 == -1)
++        fail(ctx, "TEXM3X2DEPTH opcode without matching TEXM3X2PAD");
++    state_texops(ctx, "TEXM3X2DEPTH", 0, 0);
++    ctx->reset_texmpad = 1;
++} // state_TEXM3X2DEPTH
++
+ 
+ static void state_TEXLD(Context *ctx)
+ {
+@@ -1946,7 +2135,8 @@ static void state_TEXLD(Context *ctx)
+         //    fail(ctx, "TEXLD src0 must be texture or temp register");
+         //else
+ 
+-        if (src0->src_mod != SRCMOD_NONE)
++        // fnv-nx: ps_3_0 allows source modifiers and swizzles on src0 (MS texld page: only src1 forbids them; ps_2_x: none on src0).
++        if ((src0->src_mod != SRCMOD_NONE) && !(fnvnx_relaxed(ctx) && shader_version_atleast(ctx, 3, 0)))
+             fail(ctx, "TEXLD src0 must have no modifiers");
+         else if (src1->regtype != REG_TYPE_SAMPLER)
+             fail(ctx, "TEXLD src1 must be sampler register");
+@@ -1975,6 +2165,8 @@ static void state_TEXLD(Context *ctx)
+     else if (shader_version_atleast(ctx, 1, 4))
+     {
+         // !!! FIXME: checks for ps_1_4 version here...
++        // fnv-nx: the sampler is the destination register number.
++        add_sampler(ctx, ctx->dest_arg.regnum, TEXTURE_TYPE_2D, 0);
+     } // else if
+ 
+     else
+@@ -2035,6 +2227,10 @@ static const Instruction instructions[] =
+     #include "mojoshader_internal.h"
+ };
+ 
++// fnv-nx: static totality proof of the SM1-3 table against fnvnx_sm_rows.h (fnvnx_sm_check.h).
++#define FNVNX_SM_CHECK_PROOF 1
++#include "fnvnx_sm_check.h"
++
+ 
+ // parse various token types...
+ 
+@@ -2085,8 +2281,32 @@ static int parse_instruction_token(Context *ctx)
+     ctx->instruction_controls = controls;
+     ctx->predicated = predicated;
+ 
++    // fnv-nx: D3D9 places the predicate token right after the destination
++    //  token (wined3d and vkd3d read dst, predicate, sources); parse_args()
++    //  below expects it last, so present a reordered copy of the tokens.
++    uint32 fnvnx_reorder[16];
++    if (predicated && (insttoks >= 3) && (insttoks < 16) && (ctx->tokencount > insttoks))
++    {
++        const uint32 dtok = SWAP32(ctx->tokens[1]);
++        const uint32 destlen = ((dtok & (1u << 13)) && shader_version_atleast(ctx, 3, 0)) ? 2 : 1;
++        if (destlen + 1 < insttoks)
++        {
++            uint32 i, o = 0;
++            fnvnx_reorder[o++] = ctx->tokens[0];
++            for (i = 0; i < destlen; i++)
++                fnvnx_reorder[o++] = ctx->tokens[1 + i];
++            for (i = destlen + 2; i <= insttoks; i++)
++                fnvnx_reorder[o++] = ctx->tokens[i];
++            fnvnx_reorder[o++] = ctx->tokens[1 + destlen];
++            ctx->tokens = fnvnx_reorder;
++        } // if
++    } // if
++
+     // Update the context with instruction's arguments.
+     adjust_token_position(ctx, 1);
++#if SUPPORT_PROFILE_GLSLDK
++    ctx->fnvnx_insttoks = insttoks;
++#endif
+     retval = instruction->parse_args(ctx);
+ 
+     if (predicated)
+@@ -2173,8 +2393,13 @@ static int parse_version_token(Context *ctx, const char *profilestr)
+ 
+     ctx->major_ver = major;
+     ctx->minor_ver = minor;
++#if 1  // fnv-nx: vs_1_0 / ps_1_0 (token 0x...0100) are the pre-release names of 1_1: the instruction set,
++       //  registers and declaration syntax of 1_1 apply (D3D9 has no separate 1_0 definition).
++    if ((major == 1) && (minor == 0))
++        ctx->minor_ver = 1;
++#endif
+ 
+-    if (!shader_version_supported(major, minor))
++    if (!shader_version_supported(major, ctx->minor_ver))
+     {
+         failf(ctx, "Shader Model %u.%u is currently unsupported.",
+                 (uint) major, (uint) minor);
+@@ -2868,7 +3093,7 @@ static int parse_end_token(Context *ctx)
+ static int parse_phase_token(Context *ctx)
+ {
+     // !!! FIXME: needs state; allow only one phase token per shader, I think?
+-    if (SWAP32(*(ctx->tokens)) != 0x0000FFFD) // phase token always 0x0000FFFD.
++    if (SWAP32(*(ctx->tokens)) != (uint32) FNVNX_SM_TOKEN_PHASE) // phase token always 0x0000FFFD (fnvnx_sm_rows.h).
+         return 0;  // not us, eat no tokens.
+ 
+     if ( (!shader_is_pixel(ctx)) || (!shader_version_exactly(ctx, 1, 4)) )
+@@ -3615,6 +3840,10 @@ static void process_definitions(Context *ctx)
+                 case REG_TYPE_TEMP:
+                 case REG_TYPE_LOOP:
+                 case REG_TYPE_LABEL:
++                    // fnv-nx: a ps_1_x t# (REG_TYPE_TEXTURE shares the number of the address register) is the interpolated texture
++                    //  coordinate of its stage, a pixel stage input like the declared ones: list it with them (reflection, link rule)
++                    if ((regtype == REG_TYPE_TEXTURE) && shader_is_pixel(ctx) && !shader_version_atleast(ctx, 2, 0))
++                        add_attribute_register(ctx, regtype, regnum, MOJOSHADER_USAGE_TEXCOORD, regnum, 0xF, 0);
+                     ctx->profile->global_emitter(ctx, regtype, regnum);
+                     break;
+ 
+diff --git a/mojoshader.h b/mojoshader.h
+index 5a89569..9fd1117 100644
+--- a/mojoshader.h
++++ b/mojoshader.h
+@@ -714,6 +714,31 @@ typedef struct MOJOSHADER_parseData
+  */
+ #define MOJOSHADER_PROFILE_GLSLES3 "glsles3"
+ 
++/*
++ * Profile string for deko3d (fnv-nx): GLSL 4.50 core, explicit layouts.
++ *  Float/int/bool constants live in std140 UBOs indexed by D3D register
++ *  (binding 0: vec4 c[256]; binding 1: ivec4 i[16] + bool b[16]),
++ *  a driver UBO at binding 2, samplers at binding = sampler register,
++ *  fixed attribute/varying locations by usage. See fnv-nx render/shaders.
++ */
++#define MOJOSHADER_PROFILE_GLSLDK "glsldk"
++
++/*
++ * glsldk locations for the NEXT MOJOSHADER_parse() on this thread (fnv-nx; the rule is fnvnx_dk_assign() in
++ *  render/shaders/include/fnvnx_dk_layout.h, computed by the caller). attrib/varying: 224 entries indexed
++ *  usage*16+index, -1 = not declared; copy: 224 entries, nonzero = the vertex shader also writes a varying copy
++ *  of POSITION0 / PSIZE0 at that pair's varying location. NULL (the default) = the canonical fixed table.
++ *  The tables are borrowed until MOJOSHADER_glsldkSetLocations(NULL, NULL, NULL).
++ */
++void MOJOSHADER_glsldkSetLocations(const signed char *attrib, const signed char *varying,
++                                   const unsigned char *copy);
++
++/*
++ * glsldk, vertex shaders, NEXT MOJOSHADER_parse() on this thread: nonzero = also write every varying slot 0..30 the shader and the link set
++ *  leave unwritten (README "Varying completion"); the default (0) writes only the completion the base rule needs.
++ */
++void MOJOSHADER_glsldkSetComplete(int complete);
++
+ /*
+  * Profile string for OpenGL ARB 1.0 shaders: GL_ARB_(vertex|fragment)_program.
+  */
+diff --git a/mojoshader_internal.h b/mojoshader_internal.h
+index c60dbec..e3fb764 100644
+--- a/mojoshader_internal.h
++++ b/mojoshader_internal.h
+@@ -187,6 +187,10 @@ typedef Uint64 uint64;
+ #define SUPPORT_PROFILE_GLSLES3 1
+ #endif
+ 
++#ifndef SUPPORT_PROFILE_GLSLDK
++#define SUPPORT_PROFILE_GLSLDK SUPPORT_PROFILE_GLSLES3
++#endif
++
+ #ifndef SUPPORT_PROFILE_ARB1
+ #define SUPPORT_PROFILE_ARB1 1
+ #endif
+@@ -560,6 +564,10 @@ typedef struct
+     int result_mod;
+     int result_shift;
+     RegisterType regtype;
++    // fnv-nx: vs_3_0 o[a0.c + n] / o[aL + n] (relative output addressing)
++    RegisterType relative_regtype;
++    int relative_regnum;
++    int relative_component;
+ } DestArgInfo;
+ 
+ // NOTE: This will NOT know a dcl_psize or dcl_fog output register should be
+@@ -708,7 +716,7 @@ INSTRUCTION_STATE(LABEL, "LABEL", 0, S, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION_STATE(DCL, "DCL", 0, DCL, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION_STATE(POW, "POW", 3, DSS, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION(CRS, "CRS", 2, DSS, MOJOSHADER_TYPE_ANY, 0xF)
+-INSTRUCTION(SGN, "SGN", 3, DSSS, MOJOSHADER_TYPE_ANY, 0xF)
++INSTRUCTION(SGN, "SGN", 3, SGN, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION(ABS, "ABS", 1, DS, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION(NRM, "NRM", 3, DS, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION_STATE(SINCOS, "SINCOS", 8, SINCOS, MOJOSHADER_TYPE_ANY, 0xF)
+@@ -743,8 +751,8 @@ INSTRUCTION_STATE(TEXKILL, "TEXKILL", 2, D, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXLD, "TEXLD", 1, TEXLD, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXBEM, "TEXBEM", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXBEML, "TEXBEML", 2, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+-INSTRUCTION(TEXREG2AR, "TEXREG2AR", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+-INSTRUCTION(TEXREG2GB, "TEXREG2GB", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
++INSTRUCTION_STATE(TEXREG2AR, "TEXREG2AR", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
++INSTRUCTION_STATE(TEXREG2GB, "TEXREG2GB", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXM3X2PAD, "TEXM3X2PAD", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXM3X2TEX, "TEXM3X2TEX", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXM3X3PAD, "TEXM3X3PAD", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+@@ -756,10 +764,10 @@ INSTRUCTION(EXPP, "EXPP", 1, DS, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION_STATE(LOGP, "LOGP", 1, DS, MOJOSHADER_TYPE_ANY, 0xF)
+ INSTRUCTION_STATE(CND, "CND", 1, DSSS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(DEF, "DEF", 0, DEF, MOJOSHADER_TYPE_ANY, 0xF)
+-INSTRUCTION(TEXREG2RGB, "TEXREG2RGB", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+-INSTRUCTION(TEXDP3TEX, "TEXDP3TEX", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+-INSTRUCTION(TEXM3X2DEPTH, "TEXM3X2DEPTH", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+-INSTRUCTION(TEXDP3, "TEXDP3", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
++INSTRUCTION_STATE(TEXREG2RGB, "TEXREG2RGB", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
++INSTRUCTION_STATE(TEXDP3TEX, "TEXDP3TEX", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
++INSTRUCTION_STATE(TEXM3X2DEPTH, "TEXM3X2DEPTH", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
++INSTRUCTION_STATE(TEXDP3, "TEXDP3", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(TEXM3X3, "TEXM3X3", 1, DS, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION(TEXDEPTH, "TEXDEPTH", 1, D, MOJOSHADER_TYPE_PIXEL, 0xF)
+ INSTRUCTION_STATE(CMP, "CMP", 1, DSSS, MOJOSHADER_TYPE_PIXEL, 0xF)
+diff --git a/profiles/mojoshader_profile.h b/profiles/mojoshader_profile.h
+index acf6c88..f60384c 100644
+--- a/profiles/mojoshader_profile.h
++++ b/profiles/mojoshader_profile.h
+@@ -160,6 +160,7 @@ typedef struct Context
+     int centroid_allowed;
+     CtabData ctab;
+     int have_relative_input_registers;
++    int have_relative_output_registers;  // fnv-nx (glsldk, vs_3_0)
+     int have_multi_color_outputs;
+     int determined_constants_arrays;
+     int predicated;
+@@ -199,6 +200,13 @@ typedef struct Context
+ #if SUPPORT_PROFILE_GLSLES3
+     int profile_supports_glsles3;
+ #endif
++#if SUPPORT_PROFILE_GLSLDK
++    int profile_supports_glsldk;
++    int glsldk_numerics_helpers;  // fnv-nx: dk_log/dk_rcp/dk_rsq/dk_nrm emitted
++    int glsldk_rel_const;         // fnv-nx: relative constant reads (by register, through dk_relc)
++    unsigned int glsldk_samp_decl;  // fnv-nx: ps_1_x stages whose three samplers + helper are emitted
++    unsigned int fnvnx_insttoks;    // fnv-nx: token count field of the instruction being parsed
++#endif
+ 
+ #if SUPPORT_PROFILE_METAL
+     int metal_need_header_common;
+@@ -245,6 +253,12 @@ typedef struct Context
+ #define support_glsles3(ctx) (0)
+ #endif
+ 
++#if SUPPORT_PROFILE_GLSLDK
++#define support_glsldk(ctx) ((ctx)->profile_supports_glsldk)
++#else
++#define support_glsldk(ctx) (0)
++#endif
++
+ #if SUPPORT_PROFILE_GLSLES
+ #define support_glsles(ctx) ((ctx)->profile_supports_glsles || support_glsles3(ctx))
+ #else
+diff --git a/profiles/mojoshader_profile_common.c b/profiles/mojoshader_profile_common.c
+index e456c07..878d552 100644
+--- a/profiles/mojoshader_profile_common.c
++++ b/profiles/mojoshader_profile_common.c
+@@ -9,6 +9,7 @@
+ 
+ #define __MOJOSHADER_INTERNAL__ 1
+ #include "mojoshader_profile.h"
++#include <math.h>  // fnv-nx: isnan/isinf in floatstr
+ 
+ #pragma GCC visibility push(hidden)
+ 
+@@ -181,6 +182,24 @@ void output_blank_line(Context *ctx)
+ void floatstr(Context *ctx, char *buf, size_t bufsize, float f,
+               int leavedecimal)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx))
++    {
++        // fnv-nx: exact literals. MOJOSHADER_printFloat prints 9 fixed
++        //  decimals (def c0, 1e-30 became 0.0; 1.2345678e-5 kept 5 digits)
++        //  and "inf"/"NaN", which are not GLSL.
++        if (isnan(f) || isinf(f))
++        {
++            union { float f; uint32 u; } v; v.f = f;
++            snprintf(buf, bufsize, "uintBitsToFloat(0x%08xu)", (uint) v.u);
++            return;
++        } // if
++        snprintf(buf, bufsize, "%.9g", f);
++        if (leavedecimal && !strpbrk(buf, ".eE"))
++            strcat(buf, ".0");
++        return;
++    } // if
++#endif
+     const size_t len = MOJOSHADER_printFloat(buf, bufsize, f);
+     if ((len+2) >= bufsize)
+         fail(ctx, "BUG: internal buffer is too small");
+diff --git a/profiles/mojoshader_profile_glsl.c b/profiles/mojoshader_profile_glsl.c
+index 319e3cb..e77f7cb 100644
+--- a/profiles/mojoshader_profile_glsl.c
++++ b/profiles/mojoshader_profile_glsl.c
+@@ -9,6 +9,7 @@
+ 
+ #define __MOJOSHADER_INTERNAL__ 1
+ #include "mojoshader_profile.h"
++#include "../fnvnx_sm_check.h"
+ 
+ #pragma GCC visibility push(hidden)
+ 
+@@ -27,6 +28,102 @@ static inline const char *get_GLSL_register_string(Context *ctx,
+     return get_D3D_register_string(ctx,regtype,regnum,regnum_str,regnum_size);
+ } // get_GLSL_register_string
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx deko3d profile: fixed locations so separately compiled stages and
++//  the D3D9 front end (vertex declarations) agree without linking.
++//  Keep in sync with render/shaders/include/fnvnx_dk_layout.h.
++static __thread const signed char *dk_tab_attrib, *dk_tab_varying;
++static __thread const unsigned char *dk_tab_copy;
++static __thread int dk_complete;
++
++void MOJOSHADER_glsldkSetLocations(const signed char *attrib, const signed char *varying,
++                                   const unsigned char *copy)
++{
++    dk_tab_attrib = attrib; dk_tab_varying = varying; dk_tab_copy = copy;
++} // MOJOSHADER_glsldkSetLocations
++
++void MOJOSHADER_glsldkSetComplete(int complete)
++{
++    dk_complete = complete;
++} // MOJOSHADER_glsldkSetComplete
++
++static int dk_attrib_location(Context *ctx, MOJOSHADER_usage usage, int index)
++{
++    // uam (like GL) has 16 vertex attributes: 0..15.
++    if (dk_tab_attrib != NULL)
++    {
++        const int loc = ((usage >= 0) && (usage < 14) && (index >= 0) && (index < 16)) ? dk_tab_attrib[usage * 16 + index] : -1;
++        if (loc >= 0)
++            return loc;
++        // not in the declared set (ps_1_x implicit t#/v#, always canonical): the canonical slot below
++    } // if
++    switch (usage)
++    {
++        case MOJOSHADER_USAGE_POSITION:     if (index == 0) return 0; break;
++        case MOJOSHADER_USAGE_BLENDWEIGHT:  if (index == 0) return 1; break;
++        case MOJOSHADER_USAGE_BLENDINDICES: if (index == 0) return 2; break;
++        case MOJOSHADER_USAGE_NORMAL:       if (index == 0) return 3; break;
++        case MOJOSHADER_USAGE_COLOR:        if (index < 2) return 4 + index; break;
++        case MOJOSHADER_USAGE_TEXCOORD:     if (index < 8) return 6 + index; break;
++        case MOJOSHADER_USAGE_TANGENT:      if (index == 0) return 14; break;
++        case MOJOSHADER_USAGE_BINORMAL:     if (index == 0) return 15; break;
++        default: break;
++    } // switch
++    failf(ctx, "glsldk: no attribute location for usage %d index %d", (int) usage, index);
++    return 15;
++} // dk_attrib_location
++
++// The canonical varying slot of a pair (fnvnx_dk_varying_location), -1 if it has none. Bijective onto 0..30.
++static int dk_canonical_varying(int usage, int index)
++{
++    switch (usage)
++    {
++        case MOJOSHADER_USAGE_COLOR:        if (index < 2) return index; break;
++        case MOJOSHADER_USAGE_TEXCOORD:     if (index < 16) return 2 + index; break;
++        case MOJOSHADER_USAGE_FOG:          if (index == 0) return 18; break;
++        case MOJOSHADER_USAGE_NORMAL:       if (index < 2) return 19 + index; break;
++        case MOJOSHADER_USAGE_TANGENT:      if (index == 0) return 21; break;
++        case MOJOSHADER_USAGE_BINORMAL:     if (index == 0) return 22; break;
++        case MOJOSHADER_USAGE_BLENDWEIGHT:  if (index == 0) return 23; break;
++        case MOJOSHADER_USAGE_BLENDINDICES: if (index == 0) return 24; break;
++        case MOJOSHADER_USAGE_POSITION:     if (index >= 1 && index < 4) return 24 + index; break;
++        case MOJOSHADER_USAGE_DEPTH:        if (index == 0) return 28; break;
++        case MOJOSHADER_USAGE_POINTSIZE:    if (index >= 1 && index < 3) return 28 + index; break;
++        default: break;
++    } // switch
++    return -1;
++} // dk_canonical_varying
++
++static int dk_varying_location(Context *ctx, MOJOSHADER_usage usage, int index)
++{
++    // uam: 31 generic varyings 0..30 (31 = clip vertex).
++    if (dk_tab_varying != NULL)
++    {
++        const int loc = ((usage >= 0) && (usage < 14) && (index >= 0) && (index < 16)) ? dk_tab_varying[usage * 16 + index] : -1;
++        if (loc >= 0)
++            return loc;
++        // not in the declared set (ps_1_x implicit t#/v#, always canonical): the canonical slot below
++    } // if
++    const int canon = dk_canonical_varying((int) usage, index);
++    if (canon >= 0)
++        return canon;
++    failf(ctx, "glsldk: no varying location for usage %d index %d", (int) usage, index);
++    return 31;
++} // dk_varying_location
++
++static void dk_layout(Context *ctx, char *buf, size_t len, int is_attrib,
++                      MOJOSHADER_usage usage, int index)
++{
++    if (!support_glsldk(ctx)) { buf[0] = '\0'; return; }
++    const int loc = is_attrib ? dk_attrib_location(ctx, usage, index)
++                              : dk_varying_location(ctx, usage, index);
++    snprintf(buf, len, "layout(location = %d) ", loc);
++} // dk_layout
++#endif
++
++char *make_GLSL_swizzle_string(char *swiz_str, const size_t strsize,
++                               const int swizzle, const int writemask);
++
+ const char *get_GLSL_uniform_type(Context *ctx, const RegisterType rtype)
+ {
+     switch (rtype)
+@@ -45,6 +142,17 @@ const char *get_GLSL_varname_in_buf(Context *ctx, RegisterType rt,
+                                     const size_t len)
+ {
+     char regnum_str[16];
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx) && (rt == REG_TYPE_LOOP))
++    {
++        // fnv-nx: aL read as a source operand is the innermost LOOP's counter
++        //  (declared per loop in emit_GLSL_LOOP, or the int parameter of a
++        //  subroutine called from a loop), replicated to xyzw as a float.
++        //  Nested loops restore the outer counter by GLSL block scope.
++        snprintf(buf, len, "vec4(float(aL))");
++        return buf;
++    } // if
++#endif
+     const char *regtype_str = get_GLSL_register_string(ctx, rt, regnum,
+                                               regnum_str, sizeof (regnum_str));
+     snprintf(buf,len,"%s_%s%s", ctx->shader_type_str, regtype_str, regnum_str);
+@@ -154,7 +262,7 @@ const char *make_GLSL_destarg_assign(Context *ctx, char *buf,
+     // CENTROID only allowed in DCL opcodes, which shouldn't come through here.
+     assert((arg->result_mod & MOD_CENTROID) == 0);
+ 
+-    if (ctx->predicated)
++    if (ctx->predicated && !support_glsldk(ctx))
+     {
+         fail(ctx, "predicated destinations unsupported");  // !!! FIXME
+         *buf = '\0';
+@@ -191,7 +299,30 @@ const char *make_GLSL_destarg_assign(Context *ctx, char *buf,
+                                                        sizeof (regnum_str));
+     char writemask_str[6];
+     size_t i = 0;
+-    const int scalar = isscalar(ctx, ctx->shader_type, arg->regtype, arg->regnum);
++    const int dk_reldst = support_glsldk(ctx) && arg->relative;
++    const int scalar = isscalar(ctx, ctx->shader_type, arg->regtype, arg->regnum) &&
++                       !(support_glsldk(ctx) && (arg->regtype == REG_TYPE_PREDICATE)) &&
++                       !dk_reldst;
++    char dstname[96];
++    if (dk_reldst)
++    {
++        // fnv-nx: vs_3_0 o[a0.c + n] / o[aL + n] -> the output array (see
++        //  emit_GLSL_attribute / dk_epilogue).
++        char rel[64];
++        if (arg->relative_regtype == REG_TYPE_LOOP)
++            snprintf(rel, sizeof (rel), "aL");
++        else
++        {
++            char a[64];
++            get_GLSL_varname_in_buf(ctx, arg->relative_regtype, arg->relative_regnum, a, sizeof (a));
++            snprintf(rel, sizeof (rel), "%s.%c", a, "xyzw"[arg->relative_component]);
++        } // else
++        snprintf(dstname, sizeof (dstname), "%s_o_arr[%d + %s]",
++                 ctx->shader_type_str, arg->regnum, rel);
++    } // if
++    else
++        snprintf(dstname, sizeof (dstname), "%s_%s%s", ctx->shader_type_str,
++                 regtype_str, regnum_str);
+     if (!scalar && !writemask_xyzw(arg->writemask))
+     {
+         writemask_str[i++] = '.';
+@@ -206,8 +337,31 @@ const char *make_GLSL_destarg_assign(Context *ctx, char *buf,
+     const char *leftparen = (need_parens) ? "(" : "";
+     const char *rightparen = (need_parens) ? ")" : "";
+ 
+-    snprintf(buf, buflen, "%s_%s%s%s = %s%s%s%s%s%s;",
+-             ctx->shader_type_str, regtype_str, regnum_str, writemask_str,
++    if (ctx->predicated)  // glsldk only, see above
++    {
++        const SourceArgInfo *p = &ctx->predicate_arg;
++        char pred[64];
++        get_GLSL_varname_in_buf(ctx, REG_TYPE_PREDICATE, p->regnum, pred, sizeof (pred));
++        char pswiz[8];
++        make_GLSL_swizzle_string(pswiz, sizeof (pswiz), p->swizzle, arg->writemask);
++        const int n = scalar ? 1 : vecsize_from_writemask(arg->writemask);
++        const int neg = (p->src_mod == SRCMOD_NOT);
++        char dst[128];
++        snprintf(dst, sizeof (dst), "%s%s", dstname, writemask_str);
++        if (n == 1)
++            snprintf(buf, buflen, "if (%s%s%s) %s = %s%s%s%s%s%s;",
++                     neg ? "!" : "", pred, pswiz, dst, clampleft, leftparen,
++                     operation, rightparen, result_shift_str, clampright);
++        else
++            snprintf(buf, buflen, "%s = mix(%s, %s%s%s%s%s%s, %s%s%s%s);",
++                     dst, dst, clampleft, leftparen, operation, rightparen,
++                     result_shift_str, clampright, neg ? "not(" : "", pred,
++                     pswiz, neg ? ")" : "");
++        return buf;
++    } // if
++
++    snprintf(buf, buflen, "%s%s = %s%s%s%s%s%s;",
++             dstname, writemask_str,
+              clampleft, leftparen, operation, rightparen, result_shift_str,
+              clampright);
+     // !!! FIXME: make sure the scratch buffer was large enough.
+@@ -345,7 +499,23 @@ const char *make_GLSL_srcarg_string(Context *ctx, const size_t idx,
+     if (arg->relative)
+     {
+         if (arg->regtype == REG_TYPE_INPUT)
++        {
+             regtype_str=get_GLSL_input_array_varname(ctx,(char*)alloca(64),64);
++            // fnv-nx: v[a0.c + n] starts at register n (upstream dropped n).
++            if (support_glsldk(ctx) && (arg->regnum != 0))
++                snprintf(rel_offset, sizeof (rel_offset), "%d + ", arg->regnum);
++        } // if
++#if SUPPORT_PROFILE_GLSLDK
++        else if (support_glsldk(ctx) && (arg->relative_array == NULL))
++        {
++            // fnv-nx: c[a0 + n] outside the CTAB arrays: by register, through
++            //  a helper that overlays the def'd constants (emit_GLSL_finalize).
++            char *f = (char *) alloca(64);
++            snprintf(f, 64, "%s_dk_relc", ctx->shader_type_str);
++            regtype_str = f;
++            snprintf(rel_offset, sizeof (rel_offset), "%d + ", arg->regnum);
++        } // else if
++#endif
+         else
+         {
+             assert(arg->regtype == REG_TYPE_CONST);
+@@ -378,6 +548,11 @@ const char *make_GLSL_srcarg_string(Context *ctx, const size_t idx,
+         } // else
+ 
+         rel_lbracket = "[";
++#if SUPPORT_PROFILE_GLSLDK
++        if (support_glsldk(ctx) && (arg->regtype == REG_TYPE_CONST) &&
++            (arg->relative_array == NULL))
++            rel_lbracket = "(";
++#endif
+ 
+         if (arg->relative_regtype == REG_TYPE_LOOP)
+         {
+@@ -395,11 +570,17 @@ const char *make_GLSL_srcarg_string(Context *ctx, const size_t idx,
+             rel_swizzle[1] = swizzle_channels[arg->relative_component];
+             rel_swizzle[2] = '\0';
+         } // else
+-        rel_rbracket = "]";
++        rel_rbracket = (rel_lbracket[0] == '(') ? ")" : "]";
+     } // if
+ 
+     char swiz_str[6] = { '\0' };
+-    if (!isscalar(ctx, ctx->shader_type, arg->regtype, arg->regnum))
++    int swizzle_it = !isscalar(ctx, ctx->shader_type, arg->regtype, arg->regnum);
++#if SUPPORT_PROFILE_GLSLDK
++    // fnv-nx: aL is the replicated vec4 above, so every writemask width works.
++    if (support_glsldk(ctx) && (arg->regtype == REG_TYPE_LOOP) && !arg->relative)
++        swizzle_it = 1;
++#endif
++    if (swizzle_it)
+     {
+         make_GLSL_swizzle_string(swiz_str, sizeof (swiz_str),
+                                  arg->swizzle, writemask);
+@@ -441,7 +622,10 @@ MAKE_GLSL_SRCARG_STRING_(vec2, 0x3)
+ 
+ const char *get_GLSL_comparison_string_scalar(Context *ctx)
+ {
+-    const char *comps[] = { "", ">", "==", ">=", "<", "!=", "<=" };
++    // fnv-nx: indexed by the comparison control; one table with the totality rows (fnvnx_sm_check.h).
++    #define FNVNX_CMP_SCALAR_(name, ctl, scalar, vector) [ctl] = scalar,
++    const char *comps[] = { [0] = "", FNVNX_CMP_TABLE(FNVNX_CMP_SCALAR_) };
++    #undef FNVNX_CMP_SCALAR_
+     if (ctx->instruction_controls >= STATICARRAYLEN(comps))
+     {
+         fail(ctx, "unknown comparison control");
+@@ -453,10 +637,9 @@ const char *get_GLSL_comparison_string_scalar(Context *ctx)
+ 
+ const char *get_GLSL_comparison_string_vector(Context *ctx)
+ {
+-    const char *comps[] = {
+-        "", "greaterThan", "equal", "greaterThanEqual", "lessThan",
+-        "notEqual", "lessThanEqual"
+-    };
++    #define FNVNX_CMP_VECTOR_(name, ctl, scalar, vector) [ctl] = vector,
++    const char *comps[] = { [0] = "", FNVNX_CMP_TABLE(FNVNX_CMP_VECTOR_) };
++    #undef FNVNX_CMP_VECTOR_
+ 
+     if (ctx->instruction_controls >= STATICARRAYLEN(comps))
+     {
+@@ -534,6 +717,51 @@ void emit_GLSL_start(Context *ctx, const char *profilestr)
+     } // else if
+     #endif
+ 
++    #if SUPPORT_PROFILE_GLSLDK
++    else if (strcmp(profilestr, MOJOSHADER_PROFILE_GLSLDK) == 0)
++    {
++        // Reuse the GLSL ES 3 paths (in/out, no gl_* varyings), plus layouts.
++        ctx->profile_supports_glsles3 = 1;
++        ctx->profile_supports_glsldk = 1;
++        push_output(ctx, &ctx->preflight);
++        output_line(ctx, "#version 450 core");
++        output_line(ctx, "#define texture2D texture");
++        output_line(ctx, "#define texture2DLod textureLod");
++        output_line(ctx, "#define texture2DProj textureProj");
++        output_line(ctx, "#define texture2DGrad textureGrad");
++        output_line(ctx, "#define texture2DProjGrad textureProjGrad");
++        output_line(ctx, "#define texture3D texture");
++        output_line(ctx, "#define texture3DProj textureProj");
++        output_line(ctx, "#define texture3DLod textureLod");
++        output_line(ctx, "#define texture3DGrad textureGrad");
++        output_line(ctx, "#define textureCube texture");
++        output_line(ctx, "#define textureCubeLod textureLod");
++        output_line(ctx, "#define textureCubeGrad textureGrad");
++        if (shader_is_vertex(ctx))
++        {
++            // posfix.xy: half-pixel offset in NDC (-1/w, +1/h), scaled by w.
++            // posfix.z:  y scale (-1 with DkDeviceFlags_OriginUpperLeft).
++            // pad.x: the default of the diffuse (COLOR0) components the vertex shader does not write, 1.0 when the pixel stage is
++            //  not ps_3_0 (ps_1_x, ps_2_x, fixed function) and 0.0 for ps_3_0 (dk_pad_varyings).
++            // clip[i]: the D3DTS clip plane i as SetClipPlane stored it (raw, clip space, planes 6 and 7 zero), as WineD3D 9.0 shader_glsl_clip_plane_uniform
++            //  for a programmable VS; point = (POINTSIZE, min, max) raw; min(max(x, min), max) is max when min > max, as WineD3D 9.0 get_pointsize_minmax + clamp.
++            output_line(ctx, "layout(std140, binding = 2) uniform vs_driver { vec4 vs_drv_posfix; vec4 vs_drv_pad; vec4 vs_drv_reserved[2]; vec4 vs_drv_clip[8]; vec4 vs_drv_point; };");
++            output_line(ctx, "out gl_PerVertex { vec4 gl_Position; float gl_PointSize; float gl_ClipDistance[8]; };");
++        } // if
++        else
++        {
++            // fog.x mode: 0 off, 1 vertex fog factor, 2 exp, 3 exp2, 4 linear
++            // fog.y start, fog.z end, fog.w density; alpha.x D3DCMPFUNC (0 off)
++            // texbem[2*stage]: bump matrix 00,01,10,11; [2*stage+1].xy lscale, loffset
++            output_line(ctx, "layout(std140, binding = 2) uniform ps_driver { vec4 ps_drv_fogcolor; vec4 ps_drv_fog; ivec4 ps_drv_alpha; vec4 ps_drv_alpharef; vec4 ps_drv_texbem[16]; uvec4 ps_drv_stype[2]; };");
++            // ps_drv_stype (byte offset 320): ps_1_x has no dcl, the sampler dimensionality is that of the texture bound at draw
++            //  time, so it is data: stage n's word is ps_drv_stype[n / 4][n % 4], 0 = 2D (sampler binding n), 1 = CUBE (8 + n),
++            //  2 = VOLUME (16 + n); a ps_1_x stage that samples declares all three samplers (emit_GLSL_sampler).
++        } // else
++        pop_output(ctx);
++    } // else if
++    #endif
++
+     #if SUPPORT_PROFILE_GLSLES3
+     else if (strcmp(profilestr, MOJOSHADER_PROFILE_GLSLES3) == 0)
+     {
+@@ -591,6 +819,258 @@ void emit_GLSL_start(Context *ctx, const char *profilestr)
+     ctx->indent++;
+ } // emit_GLSL_start
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// The pairs the vertex shader declares (mask & 0x10) and the components it writes (mask & 0xF), indexed usage*16+index; the built-ins
++//  POSITION0 / PSIZE0 included as PSIZE0 only when the shader writes oPts. At this point (end of the token stream) the DCLs are in
++//  ctx->attributes (vs_3_0 outputs), the implicit vs < 3.0 outputs only in ctx->used_registers (with the union of their write masks).
++static void dk_gather_outputs(Context *ctx, int *mask)
++{
++    const RegisterList *r;
++    int p;
++    for (p = 0; p < 224; p++)
++        mask[p] = 0;
++    for (r = (shader_version_atleast(ctx, 3, 0) ? ctx->attributes.next : ctx->used_registers.next); r != NULL; r = r->next)
++    {
++        int usage = (int) r->usage, index = r->index, m;
++        if (shader_version_atleast(ctx, 3, 0))
++        {
++            const RegisterList *u;
++            if (r->regtype != REG_TYPE_OUTPUT)
++                continue;
++            u = reglist_find(&ctx->used_registers, r->regtype, r->regnum);
++            m = ctx->have_relative_output_registers ? 0xF : (u ? (u->writemask & 0xF) : 0);
++        } // if
++        else
++        {
++            if (r->regtype == REG_TYPE_RASTOUT)
++            {
++                usage = (r->regnum == RASTOUT_TYPE_FOG) ? MOJOSHADER_USAGE_FOG :
++                        (r->regnum == RASTOUT_TYPE_POINT_SIZE) ? MOJOSHADER_USAGE_POINTSIZE : MOJOSHADER_USAGE_POSITION;
++                index = 0;  // oPos, oFog, oPts: index 0 of their usage
++            } // if
++            else if (r->regtype == REG_TYPE_ATTROUT) { usage = MOJOSHADER_USAGE_COLOR; index = r->regnum; }
++            else if (r->regtype == REG_TYPE_TEXCRDOUT) { usage = MOJOSHADER_USAGE_TEXCOORD; index = r->regnum; }
++            else
++                continue;
++            m = r->writemask & 0xF;
++        } // else
++        if ((usage < 0) || (usage > 13) || (index < 0) || (index > 15))
++            continue;
++        if ((index == 0) && (usage == MOJOSHADER_USAGE_POSITION))
++            continue;  // gl_Position
++        mask[usage * 16 + index] = m | 0x10;  // 0x10: the shader declares the pair
++    } // for
++
++} // dk_gather_outputs
++
++// fnv-nx: the vertex shader completes its interface (the "unwritten input" rule, README "Varying completion"). A pixel shader input
++//  (usage, index) that the vertex shader does not write is undefined in D3D9 (the MS register pages list "Defaults: None") and unlinked in
++//  GL; the project's reference profile, WineD3D 9.0, defines the value, per component:
++//   - diffuse (COLOR0): 1.0 for a pixel shader below 3.0 or fixed function (glsl_shader.c shader_glsl_generate_vs3_rasterizer_input_setup,
++//     the ps_major < 3 branch: ffp_varying_diffuse = vec4(1.0)), 0.0 for ps_3_0 (shader_glsl_setup_vs3_output: unwritten components = 0.0).
++//     A stage translated alone does not know the pair's pixel model: the device writes it into vs_drv_pad.x (data).
++//   - every other pair (specular, texture coordinates, fog (an unwritten oFog is 0.0, "fully fogged", the comment in
++//     shader_glsl_generate_vs_epilogue), the rest): 0.0.
++//  What is written (everything on the slots of dk_tab_varying, which holds the declarations and the link set L):
++//   - always: the components of a declared pair the shader leaves out (a scalar FOG / PSIZE register: none, its .x is the register), the
++//     pairs of L the shader does not declare (all components), and FOG0.x when the shader does not write it (ps < 3 reads the fog factor
++//     there, fnvnx_dk_layout.h FNVNX_DK_FOG_VARYING; its other components are never read).
++//   - with dk_complete (FNVNX_SHADER_VS_COMPLETE, a Create-time variant): every slot of 0..30 that is not yet written, with the default of the
++//     pair whose canonical slot it is, and the other components of FOG0. The slots 0..30 are exactly the canonical slots
++//     (dk_canonical_varying is a bijection), so no pixel stage whose inputs are canonical (or in L) can read an unwritten slot.
++//  The device picks the variant by the static rule fnvnx_dk_vs_needs_complete() (fnvnx_dk_layout.h); no run-time decision in the shader.
++static void dk_pad_varyings(Context *ctx)
++{
++    int owner[31];
++    int mask[224];
++    int s, p;
++    for (s = 0; s < 31; s++)
++        owner[s] = -1;
++
++    dk_gather_outputs(ctx, mask);
++
++    for (p = 0; p < 224; p++)  // the slot owners: the declaration set (+ L), or without a table the shader's own pairs at their canonical slots
++    {
++        const int loc = (dk_tab_varying != NULL) ? dk_tab_varying[p] : ((mask[p] & 0x10) ? dk_canonical_varying(p / 16, p % 16) : -1);
++        if ((loc >= 0) && (loc < 31))
++            owner[loc] = p;
++    } // for
++
++    for (s = 0; s < 31; s++)
++    {
++        int q = owner[s], m, k;
++        char val[24], lhs[48], comps[8];
++        if (q < 0)  // no pair owns the slot: the pair whose canonical slot it is
++        {
++            for (k = 0; k < 224; k++)
++                if (dk_canonical_varying(k / 16, k % 16) == s) { q = k; break; }
++        } // if
++        else if (dk_tab_copy && dk_tab_copy[q])
++            continue;  // a PS-read POSITION0 / PSIZE0: dk_cp_ below
++        if (q < 0)
++            continue;  // unreachable: the canonical map is onto 0..30
++        m = mask[q] & 0xF;
++        if (!(mask[q] & 0x10) && (owner[s] < 0) && !dk_complete && (q != MOJOSHADER_USAGE_FOG * 16))
++            continue;  // an unowned slot: only FOG0 without dk_complete
++        if (m == 0xF)
++            continue;
++        snprintf(val, sizeof (val), (q == MOJOSHADER_USAGE_COLOR * 16) ? "vs_drv_pad.x" : "0.0");
++        if (mask[q] & 0x10)  // declared by the shader (io_<usage>_<index>)
++            snprintf(lhs, sizeof (lhs), "io_%d_%d", q / 16, q % 16);
++        else
++        {
++            snprintf(lhs, sizeof (lhs), "dk_pad_%d", s);
++            push_output(ctx, &ctx->globals);
++            output_line(ctx, "layout(location = %d) out highp vec4 %s;", s, lhs);
++            pop_output(ctx);
++        } // else
++        {
++            size_t n = 0;
++            comps[n++] = '.';
++            for (k = 0; k < 4; k++)
++                if (!(m & (1 << k))) comps[n++] = "xyzw"[k];
++            comps[n] = '\0';
++        }
++        if (strlen(comps) == 5)
++            output_line(ctx, "%s = vec4(%s);", lhs, val);
++        else if (strlen(comps) == 2)
++            output_line(ctx, "%s%s = %s;", lhs, comps, val);
++        else
++            output_line(ctx, "%s%s = vec%d(%s);", lhs, comps, (int) strlen(comps) - 1, val);
++    } // for
++} // dk_pad_varyings
++
++static void dk_epilogue(Context *ctx)
++{
++    if (shader_is_vertex(ctx))
++    {
++        if (ctx->have_relative_output_registers)
++        {
++            const RegisterList *r;
++            for (r = ctx->attributes.next; r != NULL; r = r->next)
++            {
++                if (r->regtype != REG_TYPE_OUTPUT)
++                    continue;
++                const int sc = (r->usage == MOJOSHADER_USAGE_POINTSIZE) ||
++                               (r->usage == MOJOSHADER_USAGE_FOG);
++                output_line(ctx, "%s_dk_out%d = %s_o_arr[%d]%s;", ctx->shader_type_str,
++                            r->regnum, ctx->shader_type_str, r->regnum, sc ? ".x" : "");
++            } // for
++        } // if
++        if (!shader_version_atleast(ctx, 3, 0))
++        {
++            // D3D9 (and Nine) saturate vs < 3.0 oD0/oD1 (and oFog) per vertex.
++            //  These registers are write-only, so clamping once here equals
++            //  clamping every write.
++            static const struct { RegisterType t; int n; } sat[] = {
++                { REG_TYPE_ATTROUT, 0 }, { REG_TYPE_ATTROUT, 1 },
++                { REG_TYPE_RASTOUT, RASTOUT_TYPE_FOG }
++            };
++            size_t i;
++            for (i = 0; i < STATICARRAYLEN(sat); i++)
++            {
++                const RegisterList *r = reglist_find(&ctx->used_registers, sat[i].t, sat[i].n);
++                if (!r || !r->written)
++                    continue;
++                // only the components the shader writes (the rest stay undefined)
++                char v[64], m[6] = { '\0' };
++                get_GLSL_varname_in_buf(ctx, sat[i].t, sat[i].n, v, sizeof (v));
++                if ((sat[i].t != REG_TYPE_RASTOUT) && ((r->writemask & 0xF) != 0xF))
++                {
++                    size_t k = 0;
++                    m[k++] = '.';
++                    if (r->writemask & 1) m[k++] = 'x';
++                    if (r->writemask & 2) m[k++] = 'y';
++                    if (r->writemask & 4) m[k++] = 'z';
++                    if (r->writemask & 8) m[k++] = 'w';
++                    m[k] = '\0';
++                } // if
++                output_line(ctx, "%s%s = clamp(%s%s, 0.0, 1.0);", v, m, v, m);
++            } // for
++        } // if
++        dk_pad_varyings(ctx);
++        if (dk_tab_copy != NULL)
++        {
++            // fnv-nx: the linked pixel shader declares POSITION0 / PSIZE0 as an input: besides the built-in, write
++            //  the varying it reads (raw oPos / oPts, before the half-pixel and flip fix-ups).
++            static const struct { int usage; const char *expr; } cp[] = {
++                { MOJOSHADER_USAGE_POSITION, "gl_Position" }, { MOJOSHADER_USAGE_POINTSIZE, "vec4(gl_PointSize)" }
++            };
++            int dm[224];
++            size_t i;
++            dk_gather_outputs(ctx, dm);
++            for (i = 0; i < STATICARRAYLEN(cp); i++)
++            {
++                if (!dk_tab_copy[cp[i].usage * 16])
++                    continue;
++                char lay[32];
++                dk_layout(ctx, lay, sizeof (lay), 0, (MOJOSHADER_usage) cp[i].usage, 0);
++                push_output(ctx, &ctx->globals);
++                output_line(ctx, "%sout highp vec4 dk_cp_%d;", lay, cp[i].usage);
++                pop_output(ctx);
++                // a shader that does not write oPts leaves PSIZE0 at the unwritten default (0.0, as every pair; WineD3D 9.0
++                //  shader_glsl_setup_vs3_output) instead of the undefined gl_PointSize
++                output_line(ctx, "dk_cp_%d = %s;", cp[i].usage,
++                            ((cp[i].usage == MOJOSHADER_USAGE_POINTSIZE) && !(dm[cp[i].usage * 16] & 0x10)) ? "vec4(0.0)" : cp[i].expr);
++            } // for
++        } // if
++        // WineD3D 9.0 shader_glsl_generate_vs_epilogue: gl_ClipDistance[i] = dot(gl_Position, clip_planes[i]) (the raw oPos, before the fix-ups
++        //  below; the planes are stored without y inversion; the enabled planes are the GL state), and gl_PointSize = clamp(PSIZE or ffp_point.size [min(max()) here: defined for min > max],
++        //  size_min, size_max): the shader's own oPts / PSIZE output when it writes one, the POINTSIZE render state otherwise.
++        {
++            int dm[224];
++            dk_gather_outputs(ctx, dm);
++            output_line(ctx, "gl_PointSize = min(max(%s, vs_drv_point.y), vs_drv_point.z);",
++                        (dm[MOJOSHADER_USAGE_POINTSIZE * 16] & 0x10) ? "gl_PointSize" : "vs_drv_point.x");
++            output_line(ctx, "for (int dk_i = 0; dk_i < 8; dk_i++) gl_ClipDistance[dk_i] = dot(gl_Position, vs_drv_clip[dk_i]);");
++        }
++        output_line(ctx, "gl_Position.xy += vs_drv_posfix.xy * gl_Position.w;");
++        output_line(ctx, "gl_Position.y *= vs_drv_posfix.z;");
++    } // if
++    else if (shader_is_pixel(ctx) &&
++             reglist_find(&ctx->used_registers, REG_TYPE_COLOROUT, 0))
++    {
++        // D3D9 alpha test and (ps < 3.0) fixed-function fog, uniform branches.
++        //  The compare is branch-free: the outcome of a against ref is one bit
++        //  (1 less, 2 equal, 4 greater, 8 unordered), and D3DCMP_NEVER..ALWAYS
++        //  (1-8) select a nibble of 0xF6D43210 as the set of passing outcomes
++        //  (NOTEQUAL and ALWAYS pass a NaN alpha, like a != r and the default);
++        //  other values pass. A switch here costs ~47 more Maxwell instructions.
++        //  Each block sits in a preprocessor guard: libfnvnx_shaders compiles static
++        //  variants (FNVNX_SHADER_EPI_*) by defining DK_EPI_ALPHA / DK_EPI_FOG to 0 or 1.
++        output_line(ctx, "#if !defined(DK_EPI_ALPHA) || DK_EPI_ALPHA");
++        output_line(ctx, "if (ps_drv_alpha.x != 0) {");
++        ctx->indent++;
++        output_line(ctx, "float dk_a = ps_oC0.a; float dk_r = ps_drv_alpharef.x; uint dk_k = uint(ps_drv_alpha.x - 1);");
++        output_line(ctx, "uint dk_m = mix(15u, (0xF6D43210u >> (4u * (dk_k & 7u))) & 15u, dk_k < 8u);");
++        output_line(ctx, "uint dk_c = mix(mix(mix(8u, 4u, dk_a > dk_r), 2u, dk_a == dk_r), 1u, dk_a < dk_r);");
++        output_line(ctx, "bool dk_pass = (dk_m & dk_c) != 0u;");
++        output_line(ctx, "if (!dk_pass) discard;");
++        ctx->indent--;
++        output_line(ctx, "}");
++        output_line(ctx, "#endif");
++        if (!shader_version_atleast(ctx, 3, 0))
++        {
++            push_output(ctx, &ctx->globals);
++            output_line(ctx, "layout(location = 18) in highp vec4 dk_fog_in;");
++            pop_output(ctx);
++            output_line(ctx, "#if !defined(DK_EPI_FOG) || DK_EPI_FOG");
++            output_line(ctx, "if (ps_drv_fog.x != 0.0) {");
++            ctx->indent++;
++            output_line(ctx, "float dk_d = gl_FragCoord.z; float dk_f;");
++            output_line(ctx, "if (ps_drv_fog.x == 1.0) dk_f = dk_fog_in.x;");
++            output_line(ctx, "else if (ps_drv_fog.x == 2.0) dk_f = exp(-dk_d * ps_drv_fog.w);");
++            output_line(ctx, "else if (ps_drv_fog.x == 3.0) dk_f = exp(-(dk_d * ps_drv_fog.w) * (dk_d * ps_drv_fog.w));");
++            output_line(ctx, "else dk_f = (ps_drv_fog.z - dk_d) / (ps_drv_fog.z - ps_drv_fog.y);");
++            output_line(ctx, "ps_oC0.rgb = mix(ps_drv_fogcolor.rgb, ps_oC0.rgb, clamp(dk_f, 0.0, 1.0));");
++            ctx->indent--;
++            output_line(ctx, "}");
++            output_line(ctx, "#endif");
++        } // if
++    } // else if
++} // dk_epilogue
++#endif
++
+ void emit_GLSL_RET(Context *ctx);
+ void emit_GLSL_end(Context *ctx)
+ {
+@@ -646,6 +1126,94 @@ void output_GLSL_uniform_array(Context *ctx, const RegisterType regtype,
+     } // if
+ } // output_GLSL_uniform_array
+ 
++#if SUPPORT_PROFILE_GLSLDK
++static void dk_finalize_relative(Context *ctx)
++{
++    const char *t = ctx->shader_type_str;
++    if (ctx->have_relative_input_registers)
++    {
++        // vs_3_0 v[a0.c + n]: GLSL has no arrays of vertex inputs, copy them.
++        int i;
++        char line[2048];
++        const int n = shader_is_pixel(ctx) ? 10 : 16;  // ps_3_0 v0-v9, vs_3_0 v0-v15
++        size_t o = (size_t) snprintf(line, sizeof (line),
++                                     "vec4 vertex_input_array[%d] = vec4[%d](", n, n);
++        for (i = 0; i < n; i++)
++        {
++            char v[64] = "vec4(0.0, 0.0, 0.0, 1.0)";  // as Nine's v_consecutive (and GL's unbound attribute)
++            if (reglist_find(&ctx->attributes, REG_TYPE_INPUT, i))
++                get_GLSL_varname_in_buf(ctx, REG_TYPE_INPUT, i, v, sizeof (v));
++            o += (size_t) snprintf(line + o, sizeof (line) - o, "%s%s", v, (i < n - 1) ? ", " : ");");
++        } // for
++        push_output(ctx, &ctx->mainline_intro);
++        ctx->indent++;
++        output_line(ctx, "%s", line);
++        pop_output(ctx);
++    } // if
++    if (ctx->have_relative_output_registers)
++    {
++        push_output(ctx, &ctx->globals);
++        output_line(ctx, "vec4 %s_o_arr[12];", t);
++        pop_output(ctx);
++    } // if
++    if (ctx->glsldk_rel_const)
++    {
++        // A shader with relative constant reads uses its def'd values as
++        //  run-time values, not compile-time constants: WineD3D (the S16
++        //  reference) loads them into its constant uniforms for such a
++        //  shader (load_local_constsF), so the GLSL compiler cannot fold
++        //  them, and inexact folds such as x * 0.0 -> 0.0 or x + 0.0 -> x
++        //  would drop IEEE inf/NaN (S16 large sweep: NOLIGHT009, STLEAF000).
++        //  Each def register becomes a variable set at the start of main()
++        //  from its bits XOR the driver block's opaque zero (VS posfix.w,
++        //  PS alpha.y; fnvnx_dk_layout.h). The const declaration emitted by
++        //  emit_GLSL_DEF stays; the #define after it renames the uses.
++        ConstantsList *d;
++        for (d = ctx->constants; d != NULL; d = d->next)
++        {
++            if (d->constant.type != MOJOSHADER_UNIFORM_FLOAT)
++                continue;
++            const uint32 *u = (const uint32 *) d->constant.value.f;
++            char name[64];
++            get_GLSL_varname_in_buf(ctx, REG_TYPE_CONST, d->constant.index, name, sizeof (name));
++            push_output(ctx, &ctx->globals);
++            output_line(ctx, "vec4 %s_dk_rt;", name);
++            output_line(ctx, "#define %s %s_dk_rt", name, name);
++            pop_output(ctx);
++            push_output(ctx, &ctx->mainline_intro);
++            ctx->indent++;
++            output_line(ctx, "%s_dk_rt = uintBitsToFloat(uvec4(0x%08xu, 0x%08xu, 0x%08xu, 0x%08xu) ^ uvec4(%s));",
++                        name, (uint) u[0], (uint) u[1], (uint) u[2], (uint) u[3],
++                        shader_is_vertex(ctx) ? "floatBitsToUint(vs_drv_posfix.w)" : "uint(ps_drv_alpha.y)");
++            ctx->indent--;
++            pop_output(ctx);
++        } // for
++
++        // D3D9 relative reads see the def'd values (Nine and wined3d load
++        //  them into the constant file); out of range reads give 0.
++        push_output(ctx, &ctx->helpers);
++        output_line(ctx, "vec4 %s_dk_relc(int i)", t);
++        output_line(ctx, "{");
++        ctx->indent++;
++        ConstantsList *c;
++        for (c = ctx->constants; c != NULL; c = c->next)
++        {
++            if (c->constant.type != MOJOSHADER_UNIFORM_FLOAT)
++                continue;
++            const uint32 *u = (const uint32 *) c->constant.value.f;
++            output_line(ctx, "if (i == %d) return uintBitsToFloat(uvec4(0x%08xu, 0x%08xu, 0x%08xu, 0x%08xu));",
++                        c->constant.index, (uint) u[0], (uint) u[1], (uint) u[2], (uint) u[3]);
++        } // for
++        // c[0..N) of the stage: N = 256 (vs) / 224 (ps) (D3D9 caps, fnvnx_dk_layout.h); out of range reads 0
++        output_line(ctx, "return (uint(i) < %uu) ? %s_uniforms_vec4[i] : vec4(0.0);", shader_is_vertex(ctx) ? 256u : 224u, t);
++        ctx->indent--;
++        output_line(ctx, "}");
++        output_blank_line(ctx);
++        pop_output(ctx);
++    } // if
++} // dk_finalize_relative
++#endif
++
+ void emit_GLSL_finalize(Context *ctx)
+ {
+     // throw some blank lines around to make source more readable.
+@@ -657,13 +1225,47 @@ void emit_GLSL_finalize(Context *ctx)
+     //  an array for it at the start of main(). GLSL doesn't let you specify
+     //  arrays of attributes.
+     //vec4 blah_array[BIGGEST_ARRAY];
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx))
++        dk_finalize_relative(ctx);
++    else
++#endif
+     if (ctx->have_relative_input_registers) // !!! FIXME
+         fail(ctx, "Relative addressing of input registers not supported.");
+ 
+     push_output(ctx, &ctx->preflight);
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx))
++    {
++        // A subroutine may call one defined further down (call l1 inside l0's body, l0 < l1 in the stream): every label that is
++        //  called gets a prototype ahead of all definitions (its aL parameter as the definition has it, see emit_GLSL_LABEL).
++        RegisterList *lr;
++        for (lr = ctx->used_registers.next; lr != NULL; lr = lr->next)
++        {
++            if (lr->regtype != REG_TYPE_LABEL)
++                continue;
++            char ln[64];
++            get_GLSL_varname_in_buf(ctx, REG_TYPE_LABEL, lr->regnum, ln, sizeof (ln));
++            output_line(ctx, "void %s(%s);", ln, (lr->misc == 1) ? "int aL" : "");
++        } // for
++    } // if
++    if (support_glsldk(ctx))
++    {
++        const char *t = ctx->shader_type_str;
++        if ((ctx->uniform_float4_count > 0) || ctx->glsldk_rel_const)
++            output_line(ctx, "layout(std140, binding = 0) uniform %s_cbuf_f { vec4 %s_uniforms_vec4[256]; };", t, t);
++        if (ctx->uniform_int4_count > 0 || ctx->uniform_bool_count > 0)
++            output_line(ctx, "layout(std140, binding = 1) uniform %s_cbuf_ib { ivec4 %s_uniforms_ivec4[16]; bool %s_uniforms_bool[16]; };", t, t, t);
++    } // if
++    else
++    {
++#endif
+     output_GLSL_uniform_array(ctx, REG_TYPE_CONST, ctx->uniform_float4_count);
+     output_GLSL_uniform_array(ctx, REG_TYPE_CONSTINT, ctx->uniform_int4_count);
+     output_GLSL_uniform_array(ctx, REG_TYPE_CONSTBOOL, ctx->uniform_bool_count);
++#if SUPPORT_PROFILE_GLSLDK
++    } // else
++#endif
+ #ifdef MOJOSHADER_FLIP_RENDERTARGET
+     if (shader_is_vertex(ctx))
+         output_line(ctx, "uniform float vpFlip;");
+@@ -698,13 +1300,35 @@ void emit_GLSL_global(Context *ctx, RegisterType regtype, int regnum)
+ #else
+                     const int skipGLTexCoord = (regnum >= 4);
+ #endif
+-                    if (skipGLTexCoord)
++                    if (support_glsldk(ctx))
++                    {
++                        output_line(ctx, "layout(location = %d) in highp vec4 io_%i_%i;",
++                                    2 + regnum, MOJOSHADER_USAGE_TEXCOORD, regnum);
++                        output_line(ctx, "vec4 %s;", varname);
++                        push_output(ctx, &ctx->mainline_intro);
++                        ctx->indent++;
++                        output_line(ctx, "%s = io_%i_%i;", varname,
++                                    MOJOSHADER_USAGE_TEXCOORD, regnum);
++                        pop_output(ctx);
++                    } // if
++                    else if (skipGLTexCoord)
+                         output_line(ctx, "vec4 %s = io_%i_%i;",
+                                     varname, MOJOSHADER_USAGE_TEXCOORD, regnum);
+                     else
+                         output_line(ctx, "vec4 %s = gl_TexCoord[%d];",
+                                     varname, regnum);
+                 } // if
++                else if (support_glsldk(ctx) && !shader_version_atleast(ctx, 2, 0))
++                {
++                    output_line(ctx, "layout(location = %d) in highp vec4 io_%i_%i;",
++                                2 + regnum, MOJOSHADER_USAGE_TEXCOORD, regnum);
++                    output_line(ctx, "#define %s io_%i_%i", varname,
++                                MOJOSHADER_USAGE_TEXCOORD, regnum);
++                    if (1) { } // (upstream's gl_TexCoord branch below is dead here)
++                    else
++                        output_line(ctx, "vec4 %s = gl_TexCoord[%d];",
++                                    varname, regnum);
++                } // if
+             } // else if
+             break;
+         case REG_TYPE_PREDICATE:
+@@ -733,7 +1357,7 @@ void emit_GLSL_array(Context *ctx, VariableList *var)
+     // However, we need to #define the offset into the one, big array here,
+     //  and let dereferences use that #define.
+     const int base = var->index;
+-    const int glslbase = ctx->uniform_float4_count;
++    const int glslbase = support_glsldk(ctx) ? base : ctx->uniform_float4_count;
+     push_output(ctx, &ctx->globals);
+     output_line(ctx, "#define ARRAYBASE_%d %d", base, glslbase);
+     pop_output(ctx);
+@@ -746,10 +1370,8 @@ void emit_GLSL_const_array(Context *ctx, const ConstantsList *clist,
+     char varname[64];
+     get_GLSL_const_array_varname_in_buf(ctx,base,size,varname,sizeof(varname));
+ 
+-#if 0
+-    // !!! FIXME: fails on Nvidia's and Apple's GL, even with #version 120.
+-    // !!! FIXME:  (the 1.20 spec says it should work, though, I think...)
+-    if (support_glsl120(ctx))
++    // fnv-nx: GLSL 4.50 has const arrays (and uam has no default uniforms).
++    if (support_glsldk(ctx))
+     {
+         // GLSL 1.20 can do constant arrays.
+         const char *cstr = NULL;
+@@ -785,7 +1407,6 @@ void emit_GLSL_const_array(Context *ctx, const ConstantsList *clist,
+     } // if
+ 
+     else
+-#endif
+     {
+         // stock GLSL 1.0 can't do constant arrays, so make a uniform array
+         //  and have the OpenGL glue assign it at link time. Lame!
+@@ -823,6 +1444,8 @@ void emit_GLSL_uniform(Context *ctx, RegisterType regtype, int regnum,
+             index = ctx->uniform_bool_count;
+         else  // get_GLSL_uniform_array_varname() would have called fail().
+             assert(!(ctx->isfail));
++        if (support_glsldk(ctx))
++            index = regnum;
+ 
+         output_line(ctx, "#define %s %s[%d]", varname, name, index);
+     } // if
+@@ -849,8 +1472,109 @@ void emit_GLSL_uniform(Context *ctx, RegisterType regtype, int regnum,
+     pop_output(ctx);
+ } // emit_GLSL_uniform
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: ps_1_x. The sampler type is not in the bytecode (no dcl) and the CTAB is D3DX metadata, not part of the D3D9 contract, so
++//  the type is DATA: every stage that samples declares a 2D sampler at binding n, a cube at 8 + n and a volume at 16 + n (the numbering
++//  render/d3d9/ffp/ffp.frag.glsl uses) and a helper ps_dk_smpN(vec3) that selects by the stage's type word in the driver block.
++//  A 2D lookup uses c.xy; a cube / volume lookup c.xyz. Every texture instruction samples through that helper.
++static int dk_ps1x(Context *ctx)
++{
++    return support_glsldk(ctx) && shader_is_pixel(ctx) && !shader_version_atleast(ctx, 2, 0);
++} // dk_ps1x
++
++static void dk_ps1x_smp(Context *ctx, int stage, char *buf, size_t len)
++{
++    snprintf(buf, len, "ps_dk_smp%d", stage);
++} // dk_ps1x_smp
++
++// One component list entry per destination component x y z w, written through the destination write mask: "vecN(c..)" of the
++//  selected entries (a scalar for one), so the right-hand side always has the width of the masked destination.
++static void dk_mask_vec(Context *ctx, const char *comp[4], char *out, size_t len)
++{
++    const int mask = ctx->dest_arg.writemask;
++    char list[256] = { '\0' };
++    int n = 0, i;
++    for (i = 0; i < 4; i++)
++    {
++        if (mask & (1 << i))
++        {
++            const size_t o = strlen(list);
++            snprintf(list + o, sizeof (list) - o, "%s%s", n ? ", " : "", comp[i]);
++            n++;
++        } // if
++    } // for
++    if (n == 1)
++        snprintf(out, len, "%s", list);
++    else
++        snprintf(out, len, "vec%d(%s)", n, list);
++} // dk_mask_vec
++
++static void dk_emit_assign_vec(Context *ctx, const char *comp[4])
++{
++    char v[512], code[768];
++    dk_mask_vec(ctx, comp, v, sizeof (v));
++    make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s", v);
++    output_line(ctx, "%s", code);
++} // dk_emit_assign_vec
++
++// result = the stage's sample at coordinate `coord` (a vec3 expression), all four components
++static void dk_emit_sample(Context *ctx, const int stage, const char *coord)
++{
++    char fn[32]; dk_ps1x_smp(ctx, stage, fn, sizeof (fn));
++    char e[400]; snprintf(e, sizeof (e), "%s(%s)", fn, coord);
++    const char *c[4] = { NULL, NULL, NULL, NULL };
++    char sw[4][420]; int i;
++    for (i = 0; i < 4; i++) { snprintf(sw[i], sizeof (sw[i]), "%s.%c", e, "xyzw"[i]); c[i] = sw[i]; }
++    if (writemask_xyzw(ctx->dest_arg.writemask))
++    {
++        char code[768];
++        make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s", e);
++        output_line(ctx, "%s", code);
++    } // if
++    else
++        dk_emit_assign_vec(ctx, c);
++} // dk_emit_sample
++
++static const char *dk_texreg_name(Context *ctx, int rt, int rn, char *buf)
++{
++    return get_GLSL_varname_in_buf(ctx, (RegisterType) rt, rn, buf, 64);
++} // dk_texreg_name
++
++#endif
++
+ void emit_GLSL_sampler(Context *ctx,int stage,TextureType ttype,int tb)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        char var[64];
++        get_GLSL_varname_in_buf(ctx, REG_TYPE_SAMPLER, stage, var, sizeof (var));
++        if ((stage < 0) || (stage > 7))
++        {
++            fail(ctx, "ps_1_x sampler stage out of range");
++            return;
++        } // if
++        if ((ctx->glsldk_samp_decl & (1u << stage)) == 0)
++        {
++            ctx->glsldk_samp_decl |= (1u << stage);
++            push_output(ctx, &ctx->globals);
++            output_line(ctx, "layout(binding = %d) uniform sampler2D %s;", stage, var);
++            output_line(ctx, "layout(binding = %d) uniform samplerCube %s_cube;", 8 + stage, var);
++            output_line(ctx, "layout(binding = %d) uniform sampler3D %s_vol;", 16 + stage, var);
++            output_line(ctx, "vec4 ps_dk_smp%d(vec3 c)", stage);
++            output_line(ctx, "{");
++            output_line(ctx, "    uint t = ps_drv_stype[%d].%c;", stage >> 2, "xyzw"[stage & 3]);
++            output_line(ctx, "    if (t == 1u) return textureCube(%s_cube, c);", var);
++            output_line(ctx, "    if (t == 2u) return texture3D(%s_vol, c);", var);
++            output_line(ctx, "    return texture2D(%s, c.xy);", var);
++            output_line(ctx, "}");
++            output_line(ctx, "#define %s_texbem ps_drv_texbem[%d]", var, stage * 2);
++            output_line(ctx, "#define %s_texbeml ps_drv_texbem[%d]", var, stage * 2 + 1);
++            pop_output(ctx);
++        } // if
++        return;
++    } // if
++#endif
+     const char *type = "";
+     switch (ttype)
+     {
+@@ -864,8 +1588,16 @@ void emit_GLSL_sampler(Context *ctx,int stage,TextureType ttype,int tb)
+     get_GLSL_varname_in_buf(ctx, REG_TYPE_SAMPLER, stage, var, sizeof (var));
+ 
+     push_output(ctx, &ctx->globals);
++    if (support_glsldk(ctx))
++        output_line(ctx, "layout(binding = %d) uniform %s %s;", stage, type, var);
++    else
+     output_line(ctx, "uniform %s %s;", type, var);
+-    if (tb)  // This sampler used a ps_1_1 TEXBEM opcode?
++    if (tb && support_glsldk(ctx))
++    {
++        output_line(ctx, "#define %s_texbem ps_drv_texbem[%d]", var, stage * 2);
++        output_line(ctx, "#define %s_texbeml ps_drv_texbem[%d]", var, stage * 2 + 1);
++    } // if
++    else if (tb)  // This sampler used a ps_1_1 TEXBEM opcode?
+     {
+         char name[64];
+         const int index = ctx->uniform_float4_count;
+@@ -897,6 +1629,22 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+     if (index != 0)  // !!! FIXME: a lot of these MUST be zero.
+         snprintf(index_str, sizeof (index_str), "%u", (uint) index);
+ 
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx) && ctx->have_relative_output_registers &&
++        shader_is_vertex(ctx) && (regtype == REG_TYPE_OUTPUT))
++    {
++        // fnv-nx: with o[a0 + n] every output lives in vs_o_arr; dk_epilogue
++        //  copies vs_o_arr[n] to the real output (named vs_dk_outN here).
++        const int sc = (usage == MOJOSHADER_USAGE_POINTSIZE) ||
++                       (usage == MOJOSHADER_USAGE_FOG);
++        push_output(ctx, &ctx->globals);
++        output_line(ctx, "#define %s %s_o_arr[%d]%s", var,
++                    ctx->shader_type_str, regnum, sc ? ".x" : "");
++        pop_output(ctx);
++        snprintf(var, sizeof (var), "%s_dk_out%d", ctx->shader_type_str, regnum);
++    } // if
++#endif
++
+     if (shader_is_vertex(ctx))
+     {
+         if (support_glsles3(ctx))
+@@ -918,7 +1666,9 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+             if (regtype == REG_TYPE_RASTOUT)
+             {
+                 regtype = REG_TYPE_OUTPUT;
+-                index = regnum;
++                index = support_glsldk(ctx) ? 0 : regnum;
++                if (support_glsldk(ctx))
++                    index_str[0] = '\0';
+                 switch ((const RastOutType) regnum)
+                 {
+                     case RASTOUT_TYPE_POSITION:
+@@ -959,8 +1709,12 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+ 
+         if (regtype == REG_TYPE_INPUT)
+         {
++            char lay[32] = { '\0' };
++#if SUPPORT_PROFILE_GLSLDK
++            dk_layout(ctx, lay, sizeof (lay), 1, usage, index);
++#endif
+             push_output(ctx, &ctx->globals);
+-            output_line(ctx, "%s vec4 %s;", qualifier_in, var);
++            output_line(ctx, "%s%s vec4 %s;", lay, qualifier_in, var);
+             pop_output(ctx);
+         } // if
+ 
+@@ -984,7 +1738,17 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+                         push_output(ctx, &ctx->globals);
+ #if SUPPORT_PROFILE_GLSLES
+                         if (support_glsles(ctx))
+-                            output_line(ctx, "%s highp float io_%i_%i;", qualifier_out, usage, index);
++                        {
++                            char lay[32] = { '\0' };
++#if SUPPORT_PROFILE_GLSLDK
++                            dk_layout(ctx, lay, sizeof (lay), 0, usage, index);
++#endif
++                            // fnv-nx: the varying is a vec4 on both stages (the ps declares vec4); the scalar register is its .x
++                            output_line(ctx, "%s%s highp vec4 io_%i_%i;", lay, qualifier_out, usage, index);
++                            output_line(ctx, "#define %s io_%i_%i.x", var, usage, index);
++                            pop_output(ctx);
++                            return;
++                        }
+                         else
+ #endif
+                         output_line(ctx, "varying float io_%i_%i;", usage, index);
+@@ -1008,7 +1772,20 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+                         usage_str = "gl_FrontSecondaryColor";
+                     } // else if
+                     break;
+-                case MOJOSHADER_USAGE_FOG:
++                    case MOJOSHADER_USAGE_FOG:
++#if SUPPORT_PROFILE_GLSLDK
++                    if (support_glsldk(ctx) && (index == 0))
++                    {
++                        // vs < 3.0 oFog (and a vs_3_0 FOG0 output, which MojoShader
++                        //  also treats as scalar) is a scalar register; keep the
++                        //  varying a vec4 so it matches the ps side (location 18, .x).
++                        push_output(ctx, &ctx->globals);
++                        output_line(ctx, "layout(location = 18) out highp vec4 io_%i_0;", usage);
++                        output_line(ctx, "#define %s io_%i_0.x", var, usage);
++                        pop_output(ctx);
++                        return;
++                    } // if
++#endif
+ #if SUPPORT_PROFILE_GLSLES
+                     if (support_glsles(ctx))
+                         break; // GLSL ES does not have gl_FogFragCoord
+@@ -1022,7 +1799,13 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+                         push_output(ctx, &ctx->globals);
+ #if SUPPORT_PROFILE_GLSLES
+                         if (support_glsles(ctx))
+-                            output_line(ctx, "%s highp float io_%i_%i;", qualifier_out, usage, index);
++                        {
++                            char lay[32] = { '\0' };
++#if SUPPORT_PROFILE_GLSLDK
++                            dk_layout(ctx, lay, sizeof (lay), 0, usage, index);
++#endif
++                            output_line(ctx, "%s%s highp float io_%i_%i;", lay, qualifier_out, usage, index);
++                        }
+                         else
+ #endif
+                         output_line(ctx, "varying float io_%i_%i;", usage, index);
+@@ -1056,10 +1839,22 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+             {
+ #if SUPPORT_PROFILE_GLSLES
+                 if (support_glsles(ctx))
+-                    output_line(ctx, "%s highp vec4 io_%i_%i;", qualifier_out, usage, index);
++                {
++                    char lay[32] = { '\0' };
++#if SUPPORT_PROFILE_GLSLDK
++                    dk_layout(ctx, lay, sizeof (lay), 0, usage, index);
++#endif
++                    output_line(ctx, "%s%s highp vec4 io_%i_%i;", lay, qualifier_out, usage, index);
++                }
+                 else
+ #endif
+                 output_line(ctx, "varying vec4 io_%i_%i;", usage, index);
++#if SUPPORT_PROFILE_GLSLDK
++                // fnv-nx: FOG (and PSIZE) outputs are scalar registers; the varying stays a vec4 (the ps declares vec4)
++                if (support_glsldk(ctx) && ((usage == MOJOSHADER_USAGE_FOG) || (usage == MOJOSHADER_USAGE_POINTSIZE)))
++                    output_line(ctx, "#define %s io_%i_%i.x", var, usage, index);
++                else
++#endif
+                 output_line(ctx, "#define %s io_%i_%i", var, usage, index);
+             } // if
+             else
+@@ -1085,7 +1880,17 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+ 
+         // samplers DCLs get handled in emit_GLSL_sampler().
+ 
+-        if (flags & MOD_CENTROID)  // !!! FIXME
++        int dk_centroid = 0;
++        if ((flags & MOD_CENTROID) && support_glsldk(ctx))
++        {
++            // fnv-nx: D3D9 _centroid on a ps_2_x/ps_3_0 input dcl: the input
++            //  is read once with interpolateAtCentroid() (below). Same
++            //  sampling as a "centroid in" declaration, but Mesa's GL linker
++            //  (25.x, the V6n parity target) rejects some explicit-location
++            //  centroid inputs as having "no matching output".
++            dk_centroid = 1;
++        } // if
++        else if (flags & MOD_CENTROID)  // !!! FIXME
+         {
+             failf(ctx, "centroid unsupported in %s profile", ctx->profile->name);
+             return;
+@@ -1123,6 +1928,11 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+             usage_str = "gl_FragDepth";
+ 
+         // !!! FIXME: can you actualy have a texture register with COLOR usage?
++        else if (support_glsldk(ctx) && (regtype == REG_TYPE_TEXTURE) &&
++                 !shader_version_atleast(ctx, 2, 0))
++        {
++            return;  // ps_1_x t#: emit_GLSL_global()
++        } // else if
+         else if ((regtype == REG_TYPE_TEXTURE) || (regtype == REG_TYPE_INPUT))
+         {
+ #if SUPPORT_PROFILE_GLSLES
+@@ -1175,6 +1985,16 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+                 pop_output(ctx);
+                 return;
+             } // if
++            else if (mt == MISCTYPE_TYPE_POSITION && support_glsldk(ctx))
++            {
++                // D3D9 vPos: integer pixel centres, top-left origin
++                //  (deko3d device created with OriginUpperLeft).
++                push_output(ctx, &ctx->mainline_intro);
++                ctx->indent++;
++                output_line(ctx, "vec4 %s = vec4(gl_FragCoord.xy - vec2(0.5), gl_FragCoord.zw);", var);
++                pop_output(ctx);
++                return;
++            } // else if
+             else if (mt == MISCTYPE_TYPE_POSITION)
+             {
+                 push_output(ctx, &ctx->globals);
+@@ -1205,14 +2025,31 @@ void emit_GLSL_attribute(Context *ctx, RegisterType regtype, int regnum,
+         {
+ #if SUPPORT_PROFILE_GLSLES
+             if (support_glsles(ctx))
+-                output_line(ctx, "%s highp vec4 io_%i_%i;", qualifier_in, usage, index);
++            {
++                char lay[32] = { '\0' };
++#if SUPPORT_PROFILE_GLSLDK
++                dk_layout(ctx, lay, sizeof (lay), 0, usage, index);
++#endif
++                output_line(ctx, "%s%s highp vec4 io_%i_%i;", lay, qualifier_in, usage, index);
++            }
+             else
+ #endif
+             output_line(ctx, "varying vec4 io_%i_%i;", usage, index);
++            if (dk_centroid)
++            {
++                output_line(ctx, "vec4 %s;", var);
++                push_output(ctx, &ctx->mainline_intro);
++                ctx->indent++;
++                output_line(ctx, "%s = interpolateAtCentroid(io_%i_%i);", var, usage, index);
++                pop_output(ctx);
++            } // if
++            else
+             output_line(ctx, "#define %s io_%i_%i", var, usage, index);
+         } // if
+         else
+         {
++            if (dk_centroid)
++                fail(ctx, "centroid on a built-in input");
+             output_line(ctx, "#define %s %s%s%s%s", var, usage_str,
+                         arrayleft, index_str, arrayright);
+         } // else
+@@ -1234,7 +2071,18 @@ void emit_GLSL_MOV(Context *ctx)
+ {
+     char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
+     char code[128];
+-    make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s", src0);
++    if (support_glsldk(ctx) && shader_is_vertex(ctx) &&
++        (ctx->dest_arg.regtype == REG_TYPE_ADDRESS))
++    {
++        const int vecsize = vecsize_from_writemask(ctx->dest_arg.writemask);
++        if (vecsize == 1)
++            make_GLSL_destarg_assign(ctx, code, sizeof (code), "int(floor(%s))", src0);
++        else
++            make_GLSL_destarg_assign(ctx, code, sizeof (code), "ivec%d(floor(%s))", vecsize, src0);
++        output_line(ctx, "%s", code);
++        return;
++    } // if
++    make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s", src0);
+     output_line(ctx, "%s", code);
+ } // emit_GLSL_MOV
+ 
+@@ -1275,8 +2123,72 @@ void emit_GLSL_MUL(Context *ctx)
+     output_line(ctx, "%s", code);
+ } // emit_GLSL_MUL
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: D3D9 leaves rcp/rsq/log of 0 (and nrm of a zero vector) implementation-
++//  defined. Default: WineD3D's GLSL (wine 9, shader_glsl_*), the reference of the
++//  S16 sweeps, which render the original game under Wine: IEEE results,
++//    log(x) = log2(|x|)                       log(0) = -inf
++//    rcp(x) = 1/x                             rcp(+-0) = +-inf
++//    rsq(x) = 1/sqrt(|x|)                     rsq(0) = +inf
++//    nrm(v) = dot3(v) == 0 ? v : v * rsq(dot3(v))
++//  With DK_NUMERICS_NINE defined (FNVNX_SHADER_NUMERICS_NINE: V6n's oracle),
++//  Gallium Nine's (nine_shader.c, Mesa 20.1) on a driver without
++//  TGSI_MUL_ZERO_WINS (softpipe):
++//    log(x) = max(-FLT_MAX, log2(|x|))       log(0) = -FLT_MAX
++//    rcp(x) = clamp(1/x, -FLT_MAX/2, FLT_MAX/2)  rcp(+-0) = +-FLT_MAX/2
++//    rsq(x) = min(FLT_MAX, 1/sqrt(|x|))       rsq(0) = FLT_MAX
++//    nrm(v) = v * min(FLT_MAX, rsq(dot3(v)))   nrm(0) = 0
++//  min/max are written as TGSI's a < b ? a : b (NaN keeps the second operand),
++//  never as GLSL min()/max() whose NaN result is undefined.
++static void dk_numerics_helpers(Context *ctx)
++{
++    if (ctx->glsldk_numerics_helpers)
++        return;
++    ctx->glsldk_numerics_helpers = 1;
++    push_output(ctx, &ctx->helpers);
++    output_line(ctx, "const float dk_FLT_MAX = uintBitsToFloat(0x7f7fffffu);");
++    output_line(ctx, "const float dk_FLT_HALF = uintBitsToFloat(0x7effffffu);");
++    // Zero is tested explicitly: GPUs and llvmpipe evaluate inversesqrt(0) /
++    //  log2(0) through approximations whose result at 0 is not always +-inf.
++    //  Every test is a mix(a, b, bool) select (TGSI UCMP), not an if or ?:, which
++    //  Mesa's GLSL front end lowers to UIF blocks (branch + sync on Maxwell).
++    output_line(ctx, "#ifdef DK_NUMERICS_NINE");
++    output_line(ctx, "float dk_log(float x) { float a = abs(x); float t = log2(a); return mix(t, -dk_FLT_MAX, a == 0.0 || -dk_FLT_MAX > t); }");
++    output_line(ctx, "float dk_rcp(float x) { float t = 1.0 / x; t = mix(t, dk_FLT_HALF, dk_FLT_HALF < t); t = mix(t, -dk_FLT_HALF, -dk_FLT_HALF > t); return mix(t, uintBitsToFloat((floatBitsToUint(x) & 0x80000000u) | 0x7effffffu), x == 0.0); }");
++    output_line(ctx, "float dk_rsq(float x) { float a = abs(x); float t = inversesqrt(a); return mix(t, dk_FLT_MAX, a == 0.0 || dk_FLT_MAX < t); }");
++    output_line(ctx, "float dk_nrm(vec3 v) { float d = dot(v, v); float t = inversesqrt(d); return mix(t, dk_FLT_MAX, d == 0.0 || dk_FLT_MAX < t); }");
++    output_line(ctx, "#else");
++    output_line(ctx, "float dk_log(float x) { return log2(abs(x)); }");
++    output_line(ctx, "float dk_rcp(float x) { return 1.0 / x; }");
++    output_line(ctx, "float dk_rsq(float x) { return inversesqrt(abs(x)); }");
++    output_line(ctx, "float dk_nrm(vec3 v) { float d = dot(v, v); return mix(inversesqrt(d), 1.0, d == 0.0); }");
++    output_line(ctx, "#endif");
++    output_blank_line(ctx);
++    pop_output(ctx);
++} // dk_numerics_helpers
++
++static int dk_scalar_op(Context *ctx, const char *fn)
++{
++    if (!support_glsldk(ctx))
++        return 0;
++    dk_numerics_helpers(ctx);
++    const int vecsize = vecsize_from_writemask(ctx->dest_arg.writemask);
++    char cast[16] = { '\0' };
++    if (vecsize != 1)
++        snprintf(cast, sizeof (cast), "vec%d", vecsize);
++    char src0[64]; make_GLSL_srcarg_string_scalar(ctx, 0, src0, sizeof (src0));
++    char code[256];
++    make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s(%s(%s))", cast, fn, src0);
++    output_line(ctx, "%s", code);
++    return 1;
++} // dk_scalar_op
++#endif
++
+ void emit_GLSL_RCP(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_scalar_op(ctx, "dk_rcp")) return;
++#endif
+     const int vecsize = vecsize_from_writemask(ctx->dest_arg.writemask);
+     char cast[16] = { '\0' };
+     if (vecsize != 1)
+@@ -1290,6 +2202,9 @@ void emit_GLSL_RCP(Context *ctx)
+ 
+ void emit_GLSL_RSQ(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_scalar_op(ctx, "dk_rsq")) return;
++#endif
+     const int vecsize = vecsize_from_writemask(ctx->dest_arg.writemask);
+     char cast[16] = { '\0' };
+     if (vecsize != 1)
+@@ -1334,8 +2249,34 @@ void emit_GLSL_DP4(Context *ctx)
+     emit_GLSL_dotprod(ctx, src0, src1, "");
+ } // emit_GLSL_DP4
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: D3D9 min/max pseudo-code and TGSI's: dst = (a < b) ? a : b and
++//  (a > b) ? a : b, so a NaN operand yields the second one; GLSL min()/max()
++//  leave NaN undefined (Maxwell FMNMX drops it).
++static int dk_minmax(Context *ctx, const char *cmp_scalar, const char *cmp_vec)
++{
++    if (!support_glsldk(ctx))
++        return 0;
++    const int vecsize = vecsize_from_writemask(ctx->dest_arg.writemask);
++    char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
++    char src1[64]; make_GLSL_srcarg_string_masked(ctx, 1, src1, sizeof (src1));
++    char code[256];
++    if (vecsize == 1)
++        make_GLSL_destarg_assign(ctx, code, sizeof (code), "((%s %s %s) ? %s : %s)",
++                                 src0, cmp_scalar, src1, src0, src1);
++    else
++        make_GLSL_destarg_assign(ctx, code, sizeof (code), "mix(%s, %s, %s(%s, %s))",
++                                 src1, src0, cmp_vec, src0, src1);
++    output_line(ctx, "%s", code);
++    return 1;
++} // dk_minmax
++#endif
++
+ void emit_GLSL_MIN(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_minmax(ctx, "<", "lessThan")) return;
++#endif
+     char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
+     char src1[64]; make_GLSL_srcarg_string_masked(ctx, 1, src1, sizeof (src1));
+     char code[128];
+@@ -1345,6 +2286,9 @@ void emit_GLSL_MIN(Context *ctx)
+ 
+ void emit_GLSL_MAX(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_minmax(ctx, ">", "greaterThan")) return;
++#endif
+     char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
+     char src1[64]; make_GLSL_srcarg_string_masked(ctx, 1, src1, sizeof (src1));
+     char code[128];
+@@ -1403,6 +2347,9 @@ void emit_GLSL_EXP(Context *ctx)
+ 
+ void emit_GLSL_LOG(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_scalar_op(ctx, "dk_log")) return;  // log2(|x|), LOGP too
++#endif
+     char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
+     char code[128];
+     make_GLSL_destarg_assign(ctx, code, sizeof (code), "log2(%s)", src0);
+@@ -1419,6 +2366,19 @@ void emit_GLSL_LIT_helper(Context *ctx)
+     ctx->glsl_generated_lit_helper = 1;
+ 
+     push_output(ctx, &ctx->helpers);
++#if SUPPORT_PROFILE_GLSLDK
++    // fnv-nx: lit's z where D3D9's pseudo-code and the implementations part
++    //  (x == 0, y <= 0 with a negative exponent, a zero exponent): by default
++    //  WineD3D's (the S16 reference; wine 9 shader_glsl_lit), with
++    //  DK_NUMERICS_NINE the pseudo-code below (as Nine's TGSI LIT).
++    //  See dk_numerics_helpers.
++    if (support_glsldk(ctx))
++    {
++        output_line(ctx, "#ifndef DK_NUMERICS_NINE");
++        output_line(ctx, "vec4 LIT(const vec4 src) { return vec4(1.0, max(src.x, 0.0), src.w == 0.0 ? 0.0 : pow(max(0.0, src.y) * step(0.0, src.x), clamp(src.w, -128.0, 128.0)), 1.0); }");
++        output_line(ctx, "#else");
++    } // if
++#endif
+     output_line(ctx, "vec4 LIT(const vec4 src)");
+     output_line(ctx, "{"); ctx->indent++;
+     output_line(ctx,   "float power = clamp(src.w, -%s, %s);",maxp,maxp);
+@@ -1431,16 +2391,60 @@ void emit_GLSL_LIT_helper(Context *ctx)
+     output_line(ctx,   "}");
+     output_line(ctx,   "return retval;"); ctx->indent--;
+     output_line(ctx, "}");
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx))
++        output_line(ctx, "#endif");
++#endif
+     output_blank_line(ctx);
+     pop_output(ctx);
+ } // emit_GLSL_LIT_helper
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: an instruction whose result is a fixed vec4 (dst, lit) written through the destination write mask: the
++//  channels the mask names take the same channels of the result (D3D9: the write mask selects which result components
++//  are stored), and a scalar register (oFog, oPts, vs < 3.0 FOG/PSIZE) receives component x.
++static void dk_assign_vec4(Context *ctx, char *code, size_t len, const char *vec4expr)
++{
++    const DestArgInfo *arg = &ctx->dest_arg;
++    char op[200], sw[6] = { '\0' };
++    int scalar = isscalar(ctx, ctx->shader_type, arg->regtype, arg->regnum) &&
++                 (arg->regtype != REG_TYPE_PREDICATE) && !arg->relative;
++    if (!support_glsldk(ctx))
++    {
++        make_GLSL_destarg_assign(ctx, code, len, "%s", vec4expr);
++        return;
++    } // if
++    if (scalar)
++        snprintf(sw, sizeof (sw), ".x");
++    else if (!writemask_xyzw(arg->writemask))
++    {
++        size_t i = 0;
++        sw[i++] = '.';
++        if (arg->writemask0) sw[i++] = 'x';
++        if (arg->writemask1) sw[i++] = 'y';
++        if (arg->writemask2) sw[i++] = 'z';
++        if (arg->writemask3) sw[i++] = 'w';
++        sw[i] = '\0';
++    } // else if
++    if (sw[0] == '\0')
++        snprintf(op, sizeof (op), "%s", vec4expr);
++    else
++        snprintf(op, sizeof (op), "(%s)%s", vec4expr, sw);
++    make_GLSL_destarg_assign(ctx, code, len, "%s", op);
++} // dk_assign_vec4
++#endif
++
+ void emit_GLSL_LIT(Context *ctx)
+ {
+     char src0[64]; make_GLSL_srcarg_string_full(ctx, 0, src0, sizeof (src0));
+     char code[128];
+     emit_GLSL_LIT_helper(ctx);
++#if SUPPORT_PROFILE_GLSLDK
++    char ex[96]; snprintf(ex, sizeof (ex), "LIT(%s)", src0);
++    dk_assign_vec4(ctx, code, sizeof (code), ex);
++#else
+     make_GLSL_destarg_assign(ctx, code, sizeof (code), "LIT(%s)", src0);
++#endif
+     output_line(ctx, "%s", code);
+ } // emit_GLSL_LIT
+ 
+@@ -1453,9 +2457,14 @@ void emit_GLSL_DST(Context *ctx)
+     char src1_w[64]; make_GLSL_srcarg_string_w(ctx, 1, src1_w, sizeof (src1_w));
+ 
+     char code[128];
++#if SUPPORT_PROFILE_GLSLDK
++    char ex[200]; snprintf(ex, sizeof (ex), "vec4(1.0, %s * %s, %s, %s)", src0_y, src1_y, src0_z, src1_w);
++    dk_assign_vec4(ctx, code, sizeof (code), ex);
++#else
+     make_GLSL_destarg_assign(ctx, code, sizeof (code),
+                              "vec4(1.0, %s * %s, %s, %s)",
+                              src0_y, src1_y, src0_z, src1_w);
++#endif
+     output_line(ctx, "%s", code);
+ } // emit_GLSL_DST
+ 
+@@ -1478,8 +2487,37 @@ void emit_GLSL_FRC(Context *ctx)
+     output_line(ctx, "%s", code);
+ } // emit_GLSL_FRC
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: m4x4 / m3x4 with the .xyz write mask (MS: .xyzw or .xyz): component i of the result is the dot of src0 with matrix row i;
++//  the w row is not computed into the destination.
++static int dk_matrix_masked(Context *ctx, const int nrows, const int full)
++{
++    if (!support_glsldk(ctx))
++        return 0;
++    char s0[64]; char rows[4][64]; char e[4][200]; int i;
++    if (full) make_GLSL_srcarg_string_full(ctx, 0, s0, sizeof (s0)); else make_GLSL_srcarg_string_vec3(ctx, 0, s0, sizeof (s0));
++    for (i = 0; i < 4; i++)
++    {
++        if (i < nrows)
++        {
++            if (full) make_GLSL_srcarg_string_full(ctx, 1 + i, rows[i], sizeof (rows[i]));
++            else make_GLSL_srcarg_string_vec3(ctx, 1 + i, rows[i], sizeof (rows[i]));
++            snprintf(e[i], sizeof (e[i]), "dot(%s, %s)", s0, rows[i]);
++        } // if
++        else
++            snprintf(e[i], sizeof (e[i]), "0.0");
++    } // for
++    const char *c[4] = { e[0], e[1], e[2], e[3] };
++    dk_emit_assign_vec(ctx, c);
++    return 1;
++} // dk_matrix_masked
++#endif
++
+ void emit_GLSL_M4X4(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_matrix_masked(ctx, 4, 1)) return;
++#endif
+     char src0[64]; make_GLSL_srcarg_string_full(ctx, 0, src0, sizeof (src0));
+     char row0[64]; make_GLSL_srcarg_string_full(ctx, 1, row0, sizeof (row0));
+     char row1[64]; make_GLSL_srcarg_string_full(ctx, 2, row1, sizeof (row1));
+@@ -1507,6 +2545,9 @@ void emit_GLSL_M4X3(Context *ctx)
+ 
+ void emit_GLSL_M3X4(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_matrix_masked(ctx, 4, 0)) return;
++#endif
+     char src0[64]; make_GLSL_srcarg_string_vec3(ctx, 0, src0, sizeof (src0));
+     char row0[64]; make_GLSL_srcarg_string_vec3(ctx, 1, row0, sizeof (row0));
+     char row1[64]; make_GLSL_srcarg_string_vec3(ctx, 2, row1, sizeof (row1));
+@@ -1548,9 +2589,32 @@ void emit_GLSL_M3X2(Context *ctx)
+     output_line(ctx, "%s", code);
+ } // emit_GLSL_M3X2
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: the scalar condition of if / callnz / breakp. A constbool is the scalar; the predicate register is a bvec4 and the
++//  instruction names ONE component by a replicate swizzle (MS: p0.x .. p0.w, or p0) with an optional NOT modifier: "[!]p0.c".
++static void dk_cond_string(Context *ctx, const size_t idx, char *buf, const size_t len)
++{
++    const SourceArgInfo *a = &ctx->source_args[idx];
++    if (support_glsldk(ctx) && (a->regtype == REG_TYPE_PREDICATE))
++    {
++        char p[64];
++        get_GLSL_varname_in_buf(ctx, REG_TYPE_PREDICATE, a->regnum, p, sizeof (p));
++        snprintf(buf, len, "%s%s.%c", (a->src_mod == SRCMOD_NOT) ? "!" : "", p, "xyzw"[a->swizzle_x & 3]);
++        return;
++    } // if
++    make_GLSL_srcarg_string_scalar(ctx, idx, buf, len);
++} // dk_cond_string
++#endif
++
++// the GLSL name of the label a call / label instruction names ("vs_l17"): a label is not a vector, so it takes no swizzle
++static void dk_label_name(Context *ctx, const size_t idx, char *buf, const size_t len)
++{
++    get_GLSL_varname_in_buf(ctx, REG_TYPE_LABEL, ctx->source_args[idx].regnum, buf, len);
++} // dk_label_name
++
+ void emit_GLSL_CALL(Context *ctx)
+ {
+-    char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
++    char src0[64]; dk_label_name(ctx, 0, src0, sizeof (src0));
+     if (ctx->loops > 0)
+         output_line(ctx, "%s(aL);", src0);
+     else
+@@ -1561,8 +2625,13 @@ void emit_GLSL_CALLNZ(Context *ctx)
+ {
+     // !!! FIXME: if src1 is a constbool that's true, we can remove the
+     // !!! FIXME:  if. If it's false, we can make this a no-op.
+-    char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
+-    char src1[64]; make_GLSL_srcarg_string_masked(ctx, 1, src1, sizeof (src1));
++    char src0[64]; dk_label_name(ctx, 0, src0, sizeof (src0));
++    char src1[64];
++#if SUPPORT_PROFILE_GLSLDK
++    dk_cond_string(ctx, 1, src1, sizeof (src1));
++#else
++    make_GLSL_srcarg_string_masked(ctx, 1, src1, sizeof (src1));
++#endif
+ 
+     if (ctx->loops > 0)
+         output_line(ctx, "if (%s) { %s(aL); }", src1, src0);
+@@ -1577,6 +2646,17 @@ void emit_GLSL_LOOP(Context *ctx)
+     assert(ctx->source_args[0].regnum == 0);  // in case they add aL1 someday.
+     output_line(ctx, "{");
+     ctx->indent++;
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx))
++    {
++        // fnv-nx: D3D9 loop aL, i#: i#.x iterations, aL = i#.y + k * i#.z.
++        //  Upstream's aL < x + y bound is only right for step 1 (step 0 never
++        //  ends, step 2 runs too few times).
++        output_line(ctx, "for (int dk_k = 0, aL = %s.y; dk_k < %s.x; dk_k++, aL += %s.z) {", var, var, var);
++        ctx->indent++;
++        return;
++    } // if
++#endif
+     output_line(ctx, "const int aLend = %s.x + %s.y;", var, var);
+     output_line(ctx, "for (int aL = %s.y; aL < aLend; aL += %s.z) {", var, var);
+     ctx->indent++;
+@@ -1587,6 +2667,10 @@ void emit_GLSL_RET(Context *ctx)
+     // thankfully, the MSDN specs say a RET _has_ to end a function...no
+     //  early returns. So if you hit one, you know you can safely close
+     //  a high-level function.
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx) && (ctx->output == ctx->mainline))
++        dk_epilogue(ctx);
++#endif
+     ctx->indent--;
+     output_line(ctx, "}");
+     output_blank_line(ctx);
+@@ -1603,7 +2687,7 @@ void emit_GLSL_ENDLOOP(Context *ctx)
+ 
+ void emit_GLSL_LABEL(Context *ctx)
+ {
+-    char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
++    char src0[64]; dk_label_name(ctx, 0, src0, sizeof (src0));
+     const int label = ctx->source_args[0].regnum;
+     RegisterList *reg = reglist_find(&ctx->used_registers, REG_TYPE_LABEL, label);
+     assert(ctx->output == ctx->subroutines);  // not mainline, etc.
+@@ -1668,6 +2752,20 @@ void emit_GLSL_ABS(Context *ctx)
+ 
+ void emit_GLSL_NRM(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx))
++    {
++        // D3D9: 3-component length whatever the write mask (Nine: DP3, RSQ,
++        //  MIN FLT_MAX, MUL), so nrm(0) = 0 and dst.w = src.w * rsq.
++        dk_numerics_helpers(ctx);
++        char s[64]; make_GLSL_srcarg_string_masked(ctx, 0, s, sizeof (s));
++        char s3[64]; make_GLSL_srcarg_string_vec3(ctx, 0, s3, sizeof (s3));
++        char code[192];
++        make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s * dk_nrm(%s)", s, s3);
++        output_line(ctx, "%s", code);
++        return;
++    } // if
++#endif
+     char src0[64]; make_GLSL_srcarg_string_masked(ctx, 0, src0, sizeof (src0));
+     char code[128];
+     make_GLSL_destarg_assign(ctx, code, sizeof (code), "normalize(%s)", src0);
+@@ -1684,6 +2782,19 @@ void emit_GLSL_SINCOS(Context *ctx)
+     char src0[64]; make_GLSL_srcarg_string_scalar(ctx, 0, src0, sizeof (src0));
+     char code[128] = { '\0' };
+ 
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx))
++    {
++        // MS sincos page: dest.x = cos(src), dest.y = sin(src); z and w are undefined (the vs masking page allows .xyz): we
++        //  write 0 there, whatever the mask, so every mask yields a defined value.
++        char cs[96], sn[96];
++        snprintf(cs, sizeof (cs), "cos(%s)", src0);
++        snprintf(sn, sizeof (sn), "sin(%s)", src0);
++        const char *c[4] = { cs, sn, "0.0", "0.0" };
++        dk_emit_assign_vec(ctx, c);
++        return;
++    } // if
++#endif
+     if (writemask_x(mask))
+         make_GLSL_destarg_assign(ctx, code, sizeof (code), "cos(%s)", src0);
+     else if (writemask_y(mask))
+@@ -1719,7 +2830,12 @@ void emit_GLSL_ENDREP(Context *ctx)
+ 
+ void emit_GLSL_IF(Context *ctx)
+ {
+-    char src0[64]; make_GLSL_srcarg_string_scalar(ctx, 0, src0, sizeof (src0));
++    char src0[64];
++#if SUPPORT_PROFILE_GLSLDK
++    dk_cond_string(ctx, 0, src0, sizeof (src0));
++#else
++    make_GLSL_srcarg_string_scalar(ctx, 0, src0, sizeof (src0));
++#endif
+     output_line(ctx, "if (%s) {", src0);
+     ctx->indent++;
+ } // emit_GLSL_IF
+@@ -1801,11 +2917,36 @@ void emit_GLSL_DEFI(Context *ctx)
+     pop_output(ctx);
+ } // emit_GLSL_DEFI
+ 
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(TEXCRD)
++void emit_GLSL_TEXCRD(Context *ctx)
++{
++    // ps_1_4: dst = texture coordinate; _dz/_dw divide xy by z/w.
++    const SourceArgInfo *s = &ctx->source_args[0];
++    char src[64]; get_GLSL_srcarg_varname(ctx, 0, src, sizeof (src));
++    char expr[128];
++    if (s->src_mod == SRCMOD_DZ)
++        snprintf(expr, sizeof (expr), "vec4(%s.xy / %s.z, 1.0, 1.0)", src, src);
++    else if (s->src_mod == SRCMOD_DW)
++        snprintf(expr, sizeof (expr), "vec4(%s.xy / %s.w, 1.0, 1.0)", src, src);
++    else
++        snprintf(expr, sizeof (expr), "%s", src);
++    char mask[8]; make_GLSL_swizzle_string(mask, sizeof (mask), 0xE4, ctx->dest_arg.writemask);
++    char code[256];
++    make_GLSL_destarg_assign(ctx, code, sizeof (code), "(%s)%s", expr, mask);
++    output_line(ctx, "%s", code);
++} // emit_GLSL_TEXCRD
+ 
+ void emit_GLSL_TEXKILL(Context *ctx)
+ {
+     char dst[64]; get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
++#if SUPPORT_PROFILE_GLSLDK
++    // fnv-nx: ps_2_0 and later test all four components (WineD3D, and Nine's
++    //  KILL_IF); only ps_1_x's texkill looks at the texcoord's xyz.
++    if (support_glsldk(ctx) && shader_version_atleast(ctx, 2, 0))
++    {
++        output_line(ctx, "if (any(lessThan(%s, vec4(0.0)))) discard;", dst);
++        return;
++    } // if
++#endif
+     output_line(ctx, "if (any(lessThan(%s.xyz, vec3(0.0)))) discard;", dst);
+ } // emit_GLSL_TEXKILL
+ 
+@@ -1826,6 +2967,15 @@ void emit_GLSL_TEXLD(Context *ctx)
+         get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
+         get_GLSL_varname_in_buf(ctx, REG_TYPE_SAMPLER, info->regnum,
+                                 sampler, sizeof (sampler));
++#if SUPPORT_PROFILE_GLSLDK
++        if (dk_ps1x(ctx))
++        {
++            // ps_1_1..1_3 tex tN: tN = TextureSample(stage N, tN) (MS tex page); the type is the stage's type word.
++            char c[100]; snprintf(c, sizeof (c), "%s.xyz", dst);
++            dk_emit_sample(ctx, info->regnum, c);
++            return;
++        } // if
++#endif
+ 
+         if (ttype == TEXTURE_TYPE_2D)
+         {
+@@ -1854,8 +3004,45 @@ void emit_GLSL_TEXLD(Context *ctx)
+ 
+     else if (!shader_version_atleast(ctx, 2, 0))
+     {
+-        // ps_1_4 is different, too!
+-        fail(ctx, "TEXLD == Shader Model 1.4 unimplemented.");  // !!! FIXME
++        // ps_1_4: texld rN, tM|rM samples sampler N; _dz/_dw are projective.
++        const DestArgInfo *info = &ctx->dest_arg;
++        const SourceArgInfo *s = &ctx->source_args[0];
++        RegisterList *sreg = reglist_find(&ctx->samplers, REG_TYPE_SAMPLER, info->regnum);
++        const TextureType ttype = (TextureType) (sreg ? sreg->index : 0);
++        char sampler[64];
++        get_GLSL_varname_in_buf(ctx, REG_TYPE_SAMPLER, info->regnum, sampler, sizeof (sampler));
++        char src[64]; get_GLSL_srcarg_varname(ctx, 0, src, sizeof (src));
++        char code[256];
++#if SUPPORT_PROFILE_GLSLDK
++        if (dk_ps1x(ctx))
++        {
++            // ps_1_4 texld rN, src (MS texld ps_1_4 page): the lookup in stage N at the source's coordinates; _dz / _dw divide the
++            //  coordinates by the swizzled source's third component (texld r0, t0_dz = .xyz ; _dw = .xyw): (x/z, y/z) resp. (x/w, y/w);
++            //  a cube / volume type divides all three the same way.
++            SourceArgInfo *sa = &ctx->source_args[0];
++            const SourceMod mod = sa->src_mod;
++            char c[200], v3[100];
++            sa->src_mod = SRCMOD_NONE;
++            make_GLSL_srcarg_string_vec3(ctx, 0, v3, sizeof (v3));
++            sa->src_mod = mod;
++            if ((mod == SRCMOD_DZ) || (mod == SRCMOD_DW))
++                snprintf(c, sizeof (c), "(%s) / (%s).z", v3, v3);
++            else
++                snprintf(c, sizeof (c), "%s", v3);
++            dk_emit_sample(ctx, info->regnum, c);
++            return;
++        } // if
++#endif
++        if ((s->src_mod == SRCMOD_DZ) || (s->src_mod == SRCMOD_DW))
++            make_GLSL_destarg_assign(ctx, code, sizeof (code), "texture2DProj(%s, %s.xy%c)",
++                                     sampler, src, (s->src_mod == SRCMOD_DZ) ? 'z' : 'w');
++        else if (ttype == TEXTURE_TYPE_CUBE)
++            make_GLSL_destarg_assign(ctx, code, sizeof (code), "textureCube(%s, %s.xyz)", sampler, src);
++        else if (ttype == TEXTURE_TYPE_VOLUME)
++            make_GLSL_destarg_assign(ctx, code, sizeof (code), "texture3D(%s, %s.xyz)", sampler, src);
++        else
++            make_GLSL_destarg_assign(ctx, code, sizeof (code), "texture2D(%s, %s.xy)", sampler, src);
++        output_line(ctx, "%s", code);
+         return;
+     } // else if
+ 
+@@ -1898,9 +3085,22 @@ void emit_GLSL_TEXLD(Context *ctx)
+                 } // else
+                 break;
+             case TEXTURE_TYPE_CUBE:
+-                if (ctx->instruction_controls == CONTROL_TEXLDP)
+-                    fail(ctx, "TEXLDP on a cubemap");  // !!! FIXME: is this legal?
+                 funcname = "textureCube";
++                if (ctx->instruction_controls == CONTROL_TEXLDP)
++                {
++#if SUPPORT_PROFILE_GLSLDK
++                    if (support_glsldk(ctx))
++                    {
++                        // MS texldp page: the coordinate is divided by its w component first; GLSL has no projective
++                        //  cube lookup, so (x, y, z) / w is the direction.
++                        char full[64];
++                        make_GLSL_srcarg_string_full(ctx, 0, full, sizeof (full));
++                        snprintf(src0, sizeof (src0), "((%s).xyz / (%s).w)", full, full);
++                        break;
++                    } // if
++#endif
++                    fail(ctx, "TEXLDP on a cubemap");
++                } // if
+                 make_GLSL_srcarg_string_vec3(ctx, 0, src0, sizeof (src0));
+                 break;
+             case TEXTURE_TYPE_VOLUME:
+@@ -1935,6 +3135,10 @@ void emit_GLSL_TEXLD(Context *ctx)
+ } // emit_GLSL_TEXLD
+     
+ 
++// ---- fnv-nx: the ps_1_x texture instructions (glsldk) Formulas: MS D3D9 asm reference pages of the same names (cited per emitter).
++//  tN / rN registers are vec4 variables; a texture register holds its texture coordinate until an instruction overwrites it.
++//  Sampling goes through the per-stage helper ps_dk_smpN(vec3) of emit_GLSL_sampler (the dimensionality is the stage's type word).
++
+ void emit_GLSL_TEXBEM(Context *ctx)
+ {
+     DestArgInfo *info = &ctx->dest_arg;
+@@ -1947,6 +3151,18 @@ void emit_GLSL_TEXBEM(Context *ctx)
+     get_GLSL_varname_in_buf(ctx, REG_TYPE_SAMPLER, info->regnum,
+                             sampler, sizeof (sampler));
+ 
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // MS texbem page: u' = u + D3DTSS_BUMPENVMAT00 * src.r + MAT10 * src.g ; v' = v + MAT01 * src.r + MAT11 * src.g ;
++        //  result = TextureSample(stage, u', v'). texbem[2n] = (00, 01, 10, 11) of the destination's stage n (driver block).
++        char c[400];
++        snprintf(c, sizeof (c), "vec3(%s.x + (%s_texbem.x * %s.x) + (%s_texbem.z * %s.y), %s.y + (%s_texbem.y * %s.x) + (%s_texbem.w * %s.y), 0.0)",
++                 dst, sampler, src, sampler, src, dst, sampler, src, sampler, src);
++        dk_emit_sample(ctx, info->regnum, c);
++        return;
++    } // if
++#endif
+     make_GLSL_destarg_assign(ctx, code, sizeof (code),
+         "texture2D(%s, vec2(%s.x + (%s_texbem.x * %s.x) + (%s_texbem.z * %s.y),"
+         " %s.y + (%s_texbem.y * %s.x) + (%s_texbem.w * %s.y)))",
+@@ -1970,6 +3186,22 @@ void emit_GLSL_TEXBEML(Context *ctx)
+     get_GLSL_varname_in_buf(ctx, REG_TYPE_SAMPLER, info->regnum,
+                             sampler, sizeof (sampler));
+ 
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // MS texbeml page: as texbem, then t(n).rgba *= (src.b * D3DTSS_BUMPENVLSCALE) + D3DTSS_BUMPENVLOFFSET;
++        //  texbem[2n + 1] = (lscale, loffset, -, -).
++        char fn[32]; dk_ps1x_smp(ctx, info->regnum, fn, sizeof (fn));
++        char e[700];
++        snprintf(e, sizeof (e),
++                 "%s(vec3(%s.x + (%s_texbem.x * %s.x) + (%s_texbem.z * %s.y), %s.y + (%s_texbem.y * %s.x) + (%s_texbem.w * %s.y), 0.0))"
++                 " * ((%s.z * %s_texbeml.x) + %s_texbeml.y)",
++                 fn, dst, sampler, src, sampler, src, dst, sampler, src, sampler, src, src, sampler, sampler);
++        make_GLSL_destarg_assign(ctx, code, sizeof (code), "%s", e);
++        output_line(ctx, "%s", code);
++        return;
++    } // if
++#endif
+     make_GLSL_destarg_assign(ctx, code, sizeof (code),
+         "(texture2D(%s, vec2(%s.x + (%s_texbem.x * %s.x) + (%s_texbem.z * %s.y),"
+         " %s.y + (%s_texbem.y * %s.x) + (%s_texbem.w * %s.y)))) *"
+@@ -1982,8 +3214,145 @@ void emit_GLSL_TEXBEML(Context *ctx)
+     output_line(ctx, "%s", code);
+ } // emit_GLSL_TEXBEML
+ 
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(TEXREG2AR) // !!! FIXME
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(TEXREG2GB) // !!! FIXME
++#if SUPPORT_PROFILE_GLSLDK
++// texreg2ar / texreg2gb / texreg2rgb (MS pages of the same names): the source register's colour components are the texture
++//  coordinates of the destination's stage: (a, r), (g, b), (r, g, b).
++static void dk_texreg(Context *ctx, const char *coord_fmt)
++{
++    char src[64]; get_GLSL_srcarg_varname(ctx, 0, src, sizeof (src));
++    char c[200]; snprintf(c, sizeof (c), coord_fmt, src, src, src);
++    dk_emit_sample(ctx, ctx->dest_arg.regnum, c);
++} // dk_texreg
++#endif
++
++void emit_GLSL_TEXREG2AR(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx)) { dk_texreg(ctx, "vec3(%s.a, %s.r, 0.0)"); return; }
++#endif
++    fail(ctx, "TEXREG2AR unimplemented in this profile");
++} // emit_GLSL_TEXREG2AR
++
++void emit_GLSL_TEXREG2GB(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx)) { dk_texreg(ctx, "vec3(%s.g, %s.b, 0.0)"); return; }
++#endif
++    fail(ctx, "TEXREG2GB unimplemented in this profile");
++} // emit_GLSL_TEXREG2GB
++
++void emit_GLSL_TEXREG2RGB(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx)) { dk_texreg(ctx, "%s.rgb"); return; }
++#endif
++    fail(ctx, "TEXREG2RGB unimplemented in this profile");
++} // emit_GLSL_TEXREG2RGB
++
++void emit_GLSL_TEXDP3(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // MS texdp3 page: the dot product of the destination's texture coordinate (its xyz) and the source register's rgb,
++        //  replicated to all four components.
++        char dst[64]; get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
++        char src[64]; get_GLSL_srcarg_varname(ctx, 0, src, sizeof (src));
++        char d[160]; snprintf(d, sizeof (d), "dot(%s.xyz, %s.xyz)", dst, src);
++        const char *c[4] = { d, d, d, d };
++        dk_emit_assign_vec(ctx, c);
++        return;
++    } // if
++#endif
++    fail(ctx, "TEXDP3 unimplemented in this profile");
++} // emit_GLSL_TEXDP3
++
++void emit_GLSL_TEXDP3TEX(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // MS texdp3tex page: the same dot product is the coordinate of a 1D lookup in the destination's stage. D3D9 has no 1D
++        //  texture: the lookup is (dot, 0) in the stage's sampler (a height-1 2D texture), as WineD3D does.
++        char dst[64]; get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
++        char src[64]; get_GLSL_srcarg_varname(ctx, 0, src, sizeof (src));
++        char c[200]; snprintf(c, sizeof (c), "vec3(dot(%s.xyz, %s.xyz), 0.0, 0.0)", dst, src);
++        dk_emit_sample(ctx, ctx->dest_arg.regnum, c);
++        return;
++    } // if
++#endif
++    fail(ctx, "TEXDP3TEX unimplemented in this profile");
++} // emit_GLSL_TEXDP3TEX
++
++#if SUPPORT_PROFILE_GLSLDK
++// MS texdepth / texm3x2depth pages: depth = z / w with the pixel depth written to gl_FragDepth; when w == 0 the depth is 1.0.
++//  D3D depth is [0, 1] (the viewport range), so the quotient is clamped there.
++static void dk_emit_depth(Context *ctx, const char *z, const char *w)
++{
++    output_line(ctx, "{ float dk_z = %s; float dk_w = %s; gl_FragDepth = (dk_w == 0.0) ? 1.0 : clamp(dk_z / dk_w, 0.0, 1.0); }", z, w);
++} // dk_emit_depth
++#endif
++
++void emit_GLSL_TEXDEPTH(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx) || (support_glsldk(ctx) && shader_is_pixel(ctx)))
++    {
++        // texdepth r5: z = r5.r, w = r5.g. r5 is undefined after the instruction (MS), it is left unchanged.
++        char r5[64]; get_GLSL_destarg_varname(ctx, r5, sizeof (r5));
++        char z[80], w[80];
++        snprintf(z, sizeof (z), "%s.x", r5); snprintf(w, sizeof (w), "%s.y", r5);
++        dk_emit_depth(ctx, z, w);
++        return;
++    } // if
++#endif
++    fail(ctx, "TEXDEPTH unimplemented in this profile");
++} // emit_GLSL_TEXDEPTH
++
++void emit_GLSL_TEXM3X2DEPTH(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // texm3x2pad tA, tB ; texm3x2depth tC, tD: z = dot(tA.xyz, tB.xyz), w = dot(tC.xyz, tD.xyz). tC is undefined after the
++        //  instruction (MS), it is left unchanged.
++        if (ctx->texm3x2pad_src0 == -1)
++            return;
++        char a[64], b[64], c[64], d[64], z[160], w[160];
++        dk_texreg_name(ctx, REG_TYPE_TEXTURE, ctx->texm3x2pad_dst0, a);
++        dk_texreg_name(ctx, REG_TYPE_TEXTURE, ctx->texm3x2pad_src0, b);
++        get_GLSL_destarg_varname(ctx, c, sizeof (c));
++        get_GLSL_srcarg_varname(ctx, 0, d, sizeof (d));
++        snprintf(z, sizeof (z), "dot(%s.xyz, %s.xyz)", a, b);
++        snprintf(w, sizeof (w), "dot(%s.xyz, %s.xyz)", c, d);
++        dk_emit_depth(ctx, z, w);
++        return;
++    } // if
++#endif
++    fail(ctx, "TEXM3X2DEPTH unimplemented in this profile");
++} // emit_GLSL_TEXM3X2DEPTH
++
++void emit_GLSL_BEM(Context *ctx)
++{
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx) || (support_glsldk(ctx) && shader_is_pixel(ctx)))
++    {
++        // MS bem page (ps_1_4): dst.r = src0.r + D3DTSS_BUMPENVMAT00 * src1.r + MAT10 * src1.g ;
++        //  dst.g = src0.g + MAT01 * src1.r + MAT11 * src1.g, with the matrix of the stage whose number is the destination
++        //  register's. texbem[2n] = (00, 01, 10, 11) (driver block). Only r and g are written (write mask .rg).
++        char s0[64], s1[64], m[64], r[96], g[96];
++        get_GLSL_srcarg_varname(ctx, 0, s0, sizeof (s0));
++        get_GLSL_srcarg_varname(ctx, 1, s1, sizeof (s1));
++        snprintf(m, sizeof (m), "ps_drv_texbem[%d]", ctx->dest_arg.regnum * 2);
++        snprintf(r, sizeof (r), "%s.x + %s.x * %s.x + %s.z * %s.y", s0, m, s1, m, s1);
++        snprintf(g, sizeof (g), "%s.y + %s.y * %s.x + %s.w * %s.y", s0, m, s1, m, s1);
++        const char *c[4] = { r, g, "0.0", "0.0" };
++        dk_emit_assign_vec(ctx, c);
++        return;
++    } // if
++#endif
++    fail(ctx, "BEM unimplemented in this profile");
++} // emit_GLSL_BEM
+ 
+ 
+ void emit_GLSL_TEXM3X2PAD(Context *ctx)
+@@ -2015,6 +3384,16 @@ void emit_GLSL_TEXM3X2TEX(Context *ctx)
+                             src2, sizeof (src2));
+     get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
+ 
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // MS texm3x2tex page: (u, v) = (dot(tA, tB), dot(tC, tD)) of the pad and this instruction, sampled in the destination's stage
++        char c[300];
++        snprintf(c, sizeof (c), "vec3(dot(%s.xyz, %s.xyz), dot(%s.xyz, %s.xyz), 0.0)", src0, src1, src2, dst);
++        dk_emit_sample(ctx, info->regnum, c);
++        return;
++    } // if
++#endif
+     make_GLSL_destarg_assign(ctx, code, sizeof (code),
+         "texture2D(%s, vec2(dot(%s.xyz, %s.xyz), dot(%s.xyz, %s.xyz)))",
+         sampler, src0, src1, src2, dst);
+@@ -2027,6 +3406,20 @@ void emit_GLSL_TEXM3X3PAD(Context *ctx)
+     // no-op ... work happens in emit_GLSL_TEXM3X3*().
+ } // emit_GLSL_TEXM3X3PAD
+ 
++// the three row dot products of texm3x3tex/spec/vspec: (dot(row0, N0), dot(row1, N1), dot(row2, N)) of the two pads and the instruction
++static void dk_m3x3_rows(Context *ctx, char *out, size_t len, char *dstvar)
++{
++    char src0[64], src1[64], src2[64], src3[64], src4[64];
++    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_dst0, src0, sizeof (src0));
++    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_src0, src1, sizeof (src1));
++    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_dst1, src2, sizeof (src2));
++    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_src1, src3, sizeof (src3));
++    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->source_args[0].regnum, src4, sizeof (src4));
++    get_GLSL_destarg_varname(ctx, dstvar, 64);
++    snprintf(out, len, "vec3(dot(%s.xyz, %s.xyz), dot(%s.xyz, %s.xyz), dot(%s.xyz, %s.xyz))",
++             src0, src1, src2, src3, dstvar, src4);
++} // dk_m3x3_rows
++
+ void emit_GLSL_TEXM3X3TEX(Context *ctx)
+ {
+     if (ctx->texm3x3pad_src1 == -1)
+@@ -2058,6 +3451,17 @@ void emit_GLSL_TEXM3X3TEX(Context *ctx)
+                             src4, sizeof (src4));
+     get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
+ 
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // MS texm3x3tex page: the 3-vector (dot(row0, N0), dot(row1, N1), dot(row2, N)) is the lookup of the destination's stage
++        char rows[400], dv[64];
++        dk_m3x3_rows(ctx, rows, sizeof (rows), dv);
++        dk_emit_sample(ctx, info->regnum, rows);
++        return;
++    } // if
++#endif
++
+     RegisterList *sreg = reglist_find(&ctx->samplers, REG_TYPE_SAMPLER,
+                                       info->regnum);
+     const TextureType ttype = (TextureType) (sreg ? sreg->index : 0);
+@@ -2083,7 +3487,8 @@ void emit_GLSL_TEXM3X3SPEC_helper(Context *ctx)
+     push_output(ctx, &ctx->helpers);
+     output_line(ctx, "vec3 TEXM3X3SPEC_reflection(const vec3 normal, const vec3 eyeray)");
+     output_line(ctx, "{"); ctx->indent++;
+-    output_line(ctx,   "return (2.0 * ((normal * eyeray) / (normal * normal)) * normal) - eyeray;"); ctx->indent--;
++    // MS texm3x3spec / texm3x3vspec pages: R = 2 * (N.E) / (N.N) * N - E (upstream multiplied componentwise instead of dotting)
++    output_line(ctx,   "return (2.0 * (dot(normal, eyeray) / dot(normal, normal)) * normal) - eyeray;"); ctx->indent--;
+     output_line(ctx, "}");
+     output_blank_line(ctx);
+     pop_output(ctx);
+@@ -2095,55 +3500,21 @@ void emit_GLSL_TEXM3X3SPEC(Context *ctx)
+         return;
+ 
+     DestArgInfo *info = &ctx->dest_arg;
+-    char dst[64];
+-    char src0[64];
+-    char src1[64];
+-    char src2[64];
+-    char src3[64];
+-    char src4[64];
+-    char src5[64];
+-    char sampler[64];
+-    char code[512];
+-
+     emit_GLSL_TEXM3X3SPEC_helper(ctx);
+ 
+-    // !!! FIXME: this code counts on the register not having swizzles, etc.
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_SAMPLER, info->regnum,
+-                            sampler, sizeof (sampler));
+-
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_dst0,
+-                            src0, sizeof (src0));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_src0,
+-                            src1, sizeof (src1));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_dst1,
+-                            src2, sizeof (src2));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_src1,
+-                            src3, sizeof (src3));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->source_args[0].regnum,
+-                            src4, sizeof (src4));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->source_args[1].regnum,
+-                            src5, sizeof (src5));
+-    get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
+-
+-    RegisterList *sreg = reglist_find(&ctx->samplers, REG_TYPE_SAMPLER,
+-                                      info->regnum);
+-    const TextureType ttype = (TextureType) (sreg ? sreg->index : 0);
+-    const char *ttypestr = (ttype == TEXTURE_TYPE_CUBE) ? "Cube" : "3D";
+-
+-    make_GLSL_destarg_assign(ctx, code, sizeof (code),
+-        "texture%s(%s, "
+-            "TEXM3X3SPEC_reflection("
+-                "vec3("
+-                    "dot(%s.xyz, %s.xyz), "
+-                    "dot(%s.xyz, %s.xyz), "
+-                    "dot(%s.xyz, %s.xyz)"
+-                "),"
+-                "%s.xyz,"
+-            ")"
+-        ")",
+-        ttypestr, sampler, src0, src1, src2, src3, dst, src4, src5);
+-
+-    output_line(ctx, "%s", code);
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // MS texm3x3spec page: N = the three row dots, E = the constant register's xyz, lookup R(N, E) in the destination's stage
++        char rows[400], dv[64], e[64], c[500];
++        dk_m3x3_rows(ctx, rows, sizeof (rows), dv);
++        get_GLSL_srcarg_varname(ctx, 1, e, sizeof (e));
++        snprintf(c, sizeof (c), "TEXM3X3SPEC_reflection(%s, %s.xyz)", rows, e);
++        dk_emit_sample(ctx, info->regnum, c);
++        return;
++    } // if
++#endif
++    fail(ctx, "TEXM3X3SPEC unimplemented in this profile");
+ } // emit_GLSL_TEXM3X3SPEC
+ 
+ void emit_GLSL_TEXM3X3VSPEC(Context *ctx)
+@@ -2152,56 +3523,39 @@ void emit_GLSL_TEXM3X3VSPEC(Context *ctx)
+         return;
+ 
+     DestArgInfo *info = &ctx->dest_arg;
+-    char dst[64];
+-    char src0[64];
+-    char src1[64];
+-    char src2[64];
+-    char src3[64];
+-    char src4[64];
+-    char sampler[64];
+-    char code[512];
+-
+     emit_GLSL_TEXM3X3SPEC_helper(ctx);
+ 
+-    // !!! FIXME: this code counts on the register not having swizzles, etc.
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_SAMPLER, info->regnum,
+-                            sampler, sizeof (sampler));
+-
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_dst0,
+-                            src0, sizeof (src0));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_src0,
+-                            src1, sizeof (src1));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_dst1,
+-                            src2, sizeof (src2));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_src1,
+-                            src3, sizeof (src3));
+-    get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->source_args[0].regnum,
+-                            src4, sizeof (src4));
+-    get_GLSL_destarg_varname(ctx, dst, sizeof (dst));
+-
+-    RegisterList *sreg = reglist_find(&ctx->samplers, REG_TYPE_SAMPLER,
+-                                      info->regnum);
+-    const TextureType ttype = (TextureType) (sreg ? sreg->index : 0);
+-    const char *ttypestr = (ttype == TEXTURE_TYPE_CUBE) ? "Cube" : "3D";
+-
+-    make_GLSL_destarg_assign(ctx, code, sizeof (code),
+-        "texture%s(%s, "
+-            "TEXM3X3SPEC_reflection("
+-                "vec3("
+-                    "dot(%s.xyz, %s.xyz), "
+-                    "dot(%s.xyz, %s.xyz), "
+-                    "dot(%s.xyz, %s.xyz)"
+-                "), "
+-                "vec3(%s.w, %s.w, %s.w)"
+-            ")"
+-        ")",
+-        ttypestr, sampler, src0, src1, src2, src3, dst, src4, src0, src2, dst);
+-
+-    output_line(ctx, "%s", code);
++#if SUPPORT_PROFILE_GLSLDK
++    if (dk_ps1x(ctx))
++    {
++        // MS texm3x3vspec page: as texm3x3spec with the eye vector E = (tA.w, tB.w, tC.w) of the three texture coordinates
++        char rows[400], dv[64], src0[64], src2[64], c[600];
++        dk_m3x3_rows(ctx, rows, sizeof (rows), dv);
++        get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_dst0, src0, sizeof (src0));
++        get_GLSL_varname_in_buf(ctx, REG_TYPE_TEXTURE, ctx->texm3x3pad_dst1, src2, sizeof (src2));
++        snprintf(c, sizeof (c), "TEXM3X3SPEC_reflection(%s, vec3(%s.w, %s.w, %s.w))", rows, src0, src2, dv);
++        dk_emit_sample(ctx, info->regnum, c);
++        return;
++    } // if
++#endif
++    fail(ctx, "TEXM3X3VSPEC unimplemented in this profile");
+ } // emit_GLSL_TEXM3X3VSPEC
+ 
+ void emit_GLSL_EXPP(Context *ctx)
+ {
++#if SUPPORT_PROFILE_GLSLDK
++    if (support_glsldk(ctx) && !shader_version_atleast(ctx, 2, 0))
++    {
++        // vs_1_1 expp is TGSI EXP (Nine): (2^floor(x), x - floor(x), 2^x, 1).
++        char s[64]; make_GLSL_srcarg_string_scalar(ctx, 0, s, sizeof (s));
++        char mask[8]; make_GLSL_swizzle_string(mask, sizeof (mask), 0xE4, ctx->dest_arg.writemask);
++        char code[256];
++        make_GLSL_destarg_assign(ctx, code, sizeof (code),
++            "vec4(exp2(floor(%s)), %s - floor(%s), exp2(%s), 1.0)%s", s, s, s, s, mask);
++        output_line(ctx, "%s", code);
++        return;
++    } // if
++#endif
+     // !!! FIXME: msdn's asm docs don't list this opcode, I'll have to check the driver documentation.
+     emit_GLSL_EXP(ctx);  // I guess this is just partial precision EXP?
+ } // emit_GLSL_EXPP
+@@ -2287,10 +3641,6 @@ void emit_GLSL_DEF(Context *ctx)
+     pop_output(ctx);
+ } // emit_GLSL_DEF
+ 
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(TEXREG2RGB) // !!! FIXME
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(TEXDP3TEX) // !!! FIXME
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(TEXM3X2DEPTH) // !!! FIXME
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(TEXDP3) // !!! FIXME
+ 
+ void emit_GLSL_TEXM3X3(Context *ctx)
+ {
+@@ -2325,14 +3675,12 @@ void emit_GLSL_TEXM3X3(Context *ctx)
+     output_line(ctx, "%s", code);
+ } // emit_GLSL_TEXM3X3
+ 
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(TEXDEPTH) // !!! FIXME
+ 
+ void emit_GLSL_CMP(Context *ctx)
+ {
+     emit_GLSL_comparison_operations(ctx, ">= 0.0");
+ } // emit_GLSL_CMP
+ 
+-EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(BEM) // !!! FIXME
+ 
+ void emit_GLSL_DP2ADD(Context *ctx)
+ {
+@@ -2490,7 +3838,12 @@ void emit_GLSL_TEXLDL(Context *ctx)
+ 
+ void emit_GLSL_BREAKP(Context *ctx)
+ {
+-    char src0[64]; make_GLSL_srcarg_string_scalar(ctx, 0, src0, sizeof (src0));
++    char src0[64];
++#if SUPPORT_PROFILE_GLSLDK
++    dk_cond_string(ctx, 0, src0, sizeof (src0));
++#else
++    make_GLSL_srcarg_string_scalar(ctx, 0, src0, sizeof (src0));
++#endif
+     output_line(ctx, "if (%s) { break; }", src0);
+ } // emit_GLSL_BREAKP
+ 
