@@ -63,7 +63,7 @@ def build(sources, plugins=None, lifted=False, flags=(), link_script=None, asm_f
     plugs = [dict({'name': n, 'source': recipe.PLUGIN_SOURCES[n], 'args': dict(recipe.PLUGIN_ARGS[n])},
                   **({'inputs': recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES if n in names]
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
-           'flags': {'c': [], 'cxx': ['-O2'] + list(recipe.SEMANTICS_FLAGS) + list(flags), 'asm': list(asm_flags)}, 'include': [], 'units': 'all',
+           'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.WERROR_ATTR] + list(recipe.SEMANTICS_FLAGS) + list(flags), 'asm': list(asm_flags)}, 'include': [], 'units': 'all',
            'plugin_cxx': 'x86_64-linux-gnu-g++-13', 'plugins': plugs}
     asm_only = all(n.endswith(('.S', '.s')) for n in sources)
     if asm_only:
