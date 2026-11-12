@@ -47,6 +47,7 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
   - gate_pure cross-root imports (`imports:` in admit.json proposed);
   - z3 on the EXTERNAL list;
   - EMLINK in the unit view (w14, doing).
+- Orchestrator: under L1 w14 a product root can't be admitted while any REQUIRED_PRODUCT gate is missing from gates.json. Missing today: d3d9total, r7, namegate, abi, datamodel (L1 w17), order/eh/addr32 (L3a w6), exepin. forms and fpexact are ours, via w2g. This blocks every product root, dslemit included (w3t a1a996b1).
 
 ## Global numbers (as handed over; re-measured by the tasks above)
 
