@@ -5,8 +5,8 @@
 #                                [--gpu-branch <artifacts branch>]
 #
 # Steps:
-#  1 setup: what the stage needs (python3, git, the aarch64 binutils readelf/nm that icount.py spec runs, unicorn==2.1.4)
-#    is checked first; only what is missing is installed (apt-get, pip), and an install that fails fails the job
+#  1 setup: nothing is installed. verify/envcheck.py check (the verdict farms' own check of verify/env.json, or BOOT_ENV) runs first;
+#    a mismatch is an input error (rc 1, "set the host up with farm/setup_verdict_env.sh") before anything is fetched or published
 #  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
 #    them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
 #    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
@@ -85,31 +85,14 @@ mkdir -p "$FARM_HOME" "$WORK"
 NX_COMMIT=$(git -C "$SELF_DIR" rev-parse HEAD) || die "$SELF_DIR is not inside a git checkout (meta.json records its commit)"
 
 # 1. setup
-APT=()
-command -v python3 > /dev/null || APT+=(python3)
-command -v git > /dev/null || APT+=(git)
-{ command -v aarch64-linux-gnu-readelf > /dev/null && command -v aarch64-linux-gnu-nm > /dev/null; } || APT+=(binutils-aarch64-linux-gnu)
+ENVF=${BOOT_ENV:-$NX/verify/env.json}
+python3 -I "$NX/verify/envcheck.py" check --env "$ENVF" > "$WORK/envcheck.txt" 2>&1 || { sed 's/^/boot_job: /' "$WORK/envcheck.txt" >&2; die "input-error: the host does not match the declared environment ($ENVF); set the host up with farm/setup_verdict_env.sh"; }
 if [ -n "$GPU_BRANCH" ]; then   # the renderer's host packages are part of the declared environment (verify/env.json): required, never installed here
   for p in gcc libegl1 libegl-mesa0; do
-    want=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["packages"][sys.argv[2]])' "$NX/verify/env.json" "$p") || die "verify/env.json does not declare package $p"
+    want=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["packages"][sys.argv[2]])' "$ENVF" "$p") || die "input-error: $ENVF does not declare package $p"
     have=$(dpkg-query -W -f '${Version}' "$p" 2> /dev/null || true)
-    [ "$have" = "$want" ] || die "package $p=$want (verify/env.json) is required by --gpu-branch, found '${have:-none}'; set the host up with farm/setup_verdict_env.sh"
+    [ "$have" = "$want" ] || die "input-error: package $p=$want ($ENVF) is required by --gpu-branch, found '${have:-none}'; set the host up with farm/setup_verdict_env.sh"
   done
-fi
-unicorn_ok() { python3 -s -c 'import importlib.metadata as m, sys; sys.exit(0 if m.version("unicorn") == "2.1.4" else 1)' 2> /dev/null; }
-if [ ${#APT[@]} -gt 0 ] || ! unicorn_ok; then
-  if [ "$(id -u)" = 0 ]; then SUDO=(); else command -v sudo > /dev/null || die "packages are missing (${APT[*]:-unicorn==2.1.4}) and this user is not root and has no sudo"; SUDO=(sudo -n); fi
-  if [ ${#APT[@]} -gt 0 ]; then
-    log "apt-get install ${APT[*]}"
-    "${SUDO[@]}" apt-get update -q > /dev/null || die "apt-get update failed"
-    "${SUDO[@]}" apt-get install -y -q "${APT[@]}" > /dev/null || die "apt-get install ${APT[*]} failed"
-  fi
-  if ! unicorn_ok; then
-    python3 -m pip --version > /dev/null 2>&1 || { "${SUDO[@]}" apt-get install -y -q python3-pip > /dev/null || die "apt-get install python3-pip failed"; }
-    log "pip install unicorn==2.1.4"
-    "${SUDO[@]}" env PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install -q unicorn==2.1.4 > /dev/null || die "pip install unicorn==2.1.4 failed"
-    unicorn_ok || die "unicorn==2.1.4 is still not importable after pip install"
-  fi
 fi
 
 # 2. the guest branch
