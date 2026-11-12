@@ -23,7 +23,6 @@ COLORREF SetTextColor(HDC, COLORREF);
 int SetBkMode(HDC, int);
 BOOL ExtTextOutA(HDC, int, int, UINT, const RECT *, const char *, UINT, const int *);
 BOOL SetWindowPos(HWND, HWND, int, int, int, int, UINT);
-void fnvnx_gdi_set_font_dirs(const char *wine_fonts_dir, const char *host_fonts_dir, const char *registry_dir);
 }
 
 static MEMORY_BASIC_INFORMATION Q(const void *p)
@@ -185,10 +184,6 @@ TEST(rh_dc_formats_pitch)
 
 TEST(rh_dc_text)
 {
-    /* the font reference of the gdifont tests (FNVNX_FONT_REF / FNVNX_FONT_HOST) */
-    const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
-    if (!ref || !host) { printf("rh_dc_text: font reference not available\n"); CHECK(false); return; }
-    fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str());
     const int W = 40, H = 24;
     for (const Fmt &f : FMTS) {
         const size_t pitch = (size_t)W * f.bpp + 12;

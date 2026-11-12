@@ -38,3 +38,13 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
 - check_hostapi: TEXT_ENTRY violation gone; ACCESS_FAULT_HANDLER remains (L1/L4).
 - Not done: emulator-side (L4 boot machine) server, waiting for L4's answer on file and scenario-text format; the .inc itself is not compiled against libnx here (no libnx headers in this container).
 - Correction after checking the pinned libnx (tools/libnx, b156b477): the applet's cancel is MAKERESULT(Module_Libnx, LibnxError_LibAppletBadExit) (libapplet.c:138), not the bare enum; fixed in host_textentry.inc, header lines cited there. The .inc now passes `gcc -fsyntax-only` against the pinned libnx headers (newlib lock.h and arm_acle.h shimmed outside the repo for the check only).
+
+## fontfail + declared fonts (branch claude/fnv-l5-platform-w12-fontfail)
+- ASan/UBSan s4 build, fonts absent: the write past the buffer is in the TEST. gpa_font_unicode_ranges kept using an uninitialised FT_Face and
+  `want[0]` of an empty vector after a failed FT_New_Face (SEGV at test_gpa_names.cpp:685), and, when the set has no bitmap System font, passed
+  a 16-byte buffer to GetFontUnicodeRanges after the NULL query returned a larger size (put16 gdifont.cpp:759 via :1954, stack-buffer-overflow).
+  The product writes exactly the size it returned: the Win32 call has no count, so the caller's buffer is the contract. Fixed in the test:
+  REQUIRE (s4_test.h) returns on a failed precondition; the buffer is the NULL-query size.
+- Fonts are a declared input: `fnvnx_gdi_set_font_dirs` is deleted. The root defines `fnvnx_declared_fonts()` (fnvnx_win32_ext.h): boot.cpp
+  (sdmc:/switch/fnv/fonts/{wine,host,reg}: the layout is my choice, owner of the layout please confirm) and host_boundary.cpp (env FNVNX_FONT_REF /
+  FNVNX_FONT_HOST, stops loudly if missing). A root without it does not link. No unset state, no `wine ? wine : ""`.

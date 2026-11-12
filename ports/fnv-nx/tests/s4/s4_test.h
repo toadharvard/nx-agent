@@ -16,6 +16,16 @@ extern int s4_failures, s4_checks;
             fprintf(stderr, "  FAIL %s:%d: %s\n", __FILE__, __LINE__, #c);                        \
         }                                                                                         \
     } while (0)
+/* REQUIRE: a precondition of the rest of the test; on failure the test returns (nothing after it may use what it produced). */
+#define REQUIRE(c)                                                                                \
+    do {                                                                                          \
+        s4_checks++;                                                                              \
+        if (!(c)) {                                                                               \
+            s4_failures++;                                                                        \
+            fprintf(stderr, "  FAIL %s:%d: %s (precondition, test stops)\n", __FILE__, __LINE__, #c); \
+            return;                                                                               \
+        }                                                                                         \
+    } while (0)
 #define CHECK_EQ(a, b)                                                                            \
     do {                                                                                          \
         long long a_ = (long long)(a), b_ = (long long)(b);                                       \

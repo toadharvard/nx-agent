@@ -10,7 +10,6 @@
 
 extern "C" {
 void os_posix_set_docked(int);
-void fnvnx_gdi_set_font_dirs(const char *, const char *, const char *);
 void fnvnx_display_mode_changed(void);
 void fnvnx_registry_set_path(const char *host_path);
 void fnvnx_registry_reset_for_test(void);
@@ -278,8 +277,6 @@ TEST(display_change_message)
 
 TEST(display_metrics_table)
 {
-    { const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");   /* the font-derived rows need the platform fonts */
-      if (ref && host) fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str()); }
     const int CXMIN = 119 /* 91 + 4 * 7: Tahoma -13 px average width 7 */, MENUCHECK = 13 /* Tahoma -11 px: tmHeight 13 */;
     /* the expected table from the contract: Wine 9.0 reference window metrics; index -> value (W, H: the screen) */
     for (int d = 0; d <= 1; d++) {

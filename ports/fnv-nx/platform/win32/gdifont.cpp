@@ -6,7 +6,7 @@
  * GetGlyphOutline layouts. Layout of the structures is the guest's fixed 32-bit one (byte offsets, LOGFONTW = 92,
  * TEXTMETRICW = 60, GLYPHMETRICS = 20, CHARSETINFO = 32 bytes).
  *
- * Fonts come from three directories given once by fnvnx_gdi_set_font_dirs: the Wine fonts directory (the .fon
+ * Fonts come from three directories that the root declares (fnvnx_declared_fonts, fnvnx_win32_ext.h; no setter): the Wine fonts directory (the .fon
  * bitmap fonts of the registry and system lists, the TrueType files), the host fonts (every sfnt file below it,
  * what fontconfig lists in the reference) and the registry export directory (FontSubstitutes, Fonts, the hardware
  * profile Fonts key, Wine\Fonts\Replacements, CodePage\ACP, as .reg files).
@@ -92,7 +92,7 @@ struct Face {
 };
 struct Family { ustr name, second; std::vector<Face *> faces; };
 
-std::string g_wine_dir, g_host_dir, g_reg_dir;
+std::string g_wine_dir, g_host_dir, g_reg_dir;   /* copies of fnvnx_declared_fonts(), made once by load_all */
 std::vector<Family *> g_fam;
 bool g_loaded;
 FT_Library g_lib;
@@ -335,6 +335,8 @@ void load_all()
 {
     if (g_loaded) return;
     g_loaded = true;
+    const fnvnx_font_dirs *d = fnvnx_declared_fonts();   /* a declared input of the root: no setter, no unset state */
+    g_wine_dir = d->wine; g_host_dir = d->host; g_reg_dir = d->reg;
     if (!g_lib && FT_Init_FreeType(&g_lib)) return;
     for (const std::string &n : list_dir(g_reg_dir)) if (n.size() > 4 && n.substr(n.size() - 4) == ".reg") parse_reg(g_reg_dir + "/" + n);
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\CodePage")) if (kv.first == "ACP") g_acp = atoi(kv.second.c_str());
@@ -950,18 +952,6 @@ void lf_to_a(const LF &w, uint8_t *a)   /* LOGFONTA: the same 28 bytes, the face
 } // namespace
 
 /* ---- exports */
-extern "C" void fnvnx_gdi_set_font_dirs(const char *wine, const char *host, const char *reg)
-{
-    FL l;
-    for (RF *r : g_rf) { if (r->ft) FT_Done_Face(r->ft); delete r->data; delete r; }
-    g_rf.clear();
-    for (Family *f : g_fam) { for (Face *x : f->faces) delete x; delete f; }
-    g_fam.clear(); g_reg.clear(); g_subst.clear();
-    g_def_roman = g_def_modern = g_def_swiss = ustr();
-    g_wine_dir = wine ? wine : ""; g_host_dir = host ? host : ""; g_reg_dir = reg ? reg : "";
-    g_loaded = false;
-}
-
 extern "C" int GetObjectW(HGDIOBJ h, int cb, void *buf)
 {
     gdi_objinfo oi;

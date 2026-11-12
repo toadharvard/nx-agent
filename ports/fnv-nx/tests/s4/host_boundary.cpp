@@ -11,6 +11,27 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <string>
+#include "fnvnx_win32_ext.h"
+
+/* The declared fonts of the host tests (fnvnx_win32_ext.h): the reference environment's font set, the three directories named by
+ * FNVNX_FONT_REF (wine-fonts/usr/share/wine/fonts, reg) and FNVNX_FONT_HOST. They are an input of every test binary, like the
+ * registry hive: a run without them is not a run, so it stops here with the name of the missing input. */
+extern "C" const struct fnvnx_font_dirs *fnvnx_declared_fonts(void)
+{
+    static std::string wine, reg, host;
+    static fnvnx_font_dirs d;
+    if (!d.wine) {
+        const char *r = getenv("FNVNX_FONT_REF"), *h = getenv("FNVNX_FONT_HOST");
+        if (!r || !h) {
+            fprintf(stderr, "declared fonts missing: set FNVNX_FONT_REF and FNVNX_FONT_HOST (the reference font set)\n");
+            abort();
+        }
+        wine = std::string(r) + "/wine-fonts/usr/share/wine/fonts"; reg = std::string(r) + "/reg"; host = h;
+        d.wine = wine.c_str(); d.host = host.c_str(); d.reg = reg.c_str();
+    }
+    return &d;
+}
 
 uint32_t g_reach_last;
 int g_reach_count;

@@ -351,6 +351,14 @@ static const char *winmain_cmdline(void) {
     return p;
 }
 
+/* The declared fonts (platform/include/fnvnx_win32_ext.h): the player's card holds the reference font set beside the game, so a font is
+ * never missing at run time. Layout: sdmc:/switch/fnv/fonts/{wine,host,reg} = Wine 9.0 data directory, host fonts, registry exports. */
+struct fnvnx_font_dirs { const char *wine, *host, *reg; };
+extern "C" const fnvnx_font_dirs *fnvnx_declared_fonts(void) {
+    static const fnvnx_font_dirs d = { FNVNX_SD_DIR "/fonts/wine", FNVNX_SD_DIR "/fonts/host", FNVNX_SD_DIR "/fonts/reg" };
+    return &d;
+}
+
 extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers it over main (a Havok unit defines main) */
     printf("fnvnx boot: static initialisers done, %u trap hits (%u distinct)\n", g_trap_hits, g_trap_distinct);
     printf("fnvnx boot: guest image linked at %p, address map %u entries\n", (void *)fnvnx_guest_main, fnvnx_addrmap_count);
