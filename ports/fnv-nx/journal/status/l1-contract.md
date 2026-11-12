@@ -872,3 +872,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - New for w22 (branch w22v): stub-gate support for fnvnx_assume_violation (orchestrator decision).
   - A call is accepted only with an OWNER id, a generated domain table, and a guard that tests membership in it.
   - The first consumer is L5 errno under ASM-004.
+- w22b 6b122a79 is accepted and forwarded to the orchestrator: gate_assumptions is now prose-only, with one LEXER table and a total extension table.
+  - 33c443b5: green, 88/88 mentions, 80 entries.
+  - L3a e6c29df27: 6 real findings.
+  - 6d3a2800: 24 findings under both the old and new gate, all L5/hostabi prose. Sent to L5.
+- L5 is told w22v does fnvnx_assume_violation, with w9's errno site as the acceptance case.
