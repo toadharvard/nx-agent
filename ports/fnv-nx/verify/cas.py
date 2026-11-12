@@ -27,15 +27,15 @@ import shutil
 import stat
 import sys
 
-FORMAT = "fnvnx-tree/1"
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
+import treehash  # noqa: E402  (the one home of the tree-hash rule; stdlib only)
+
+FORMAT = treehash.FORMAT
 MAX_LINKS = 60000  # hard links one inode of the store serves (ext4: 65000); past it a replica is made
 
-class CasError(Exception):
-    pass
-
-def canon(obj):
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-                      allow_nan=False).encode("ascii")
+CasError = treehash.CasError
+canon = treehash.canon
+tree_hash = treehash.tree_hash
 
 def stage_key(doc):
     return hashlib.sha256(canon(doc)).hexdigest()
@@ -149,12 +149,6 @@ def ingest(path, store, exclude=()):
     data = canon(e)
     _put(store, "tree", hashlib.sha256(data).hexdigest() + ".json", data)
     return hashlib.sha256(data).hexdigest()
-
-def tree_hash(path, skip=()):
-    """The hash ingest(path, STORE) returns, computed without a store (nothing is written, so no mtime or object is involved).
-    SKIP: entry names left out wherever they occur (e.g. "__pycache__"); the result then differs from ingest's by design."""
-    e = _entry(path, "", None, set(), set(), frozenset(skip))
-    return e["h"] if e["t"] == "d" else hashlib.sha256(canon(e)).hexdigest()
 
 def manifest(h, store):
     p = os.path.join(store, "tree", h[:2], h + ".json")
