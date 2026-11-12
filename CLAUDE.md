@@ -122,6 +122,12 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - **Registry.** The hive holds exactly the keys that the exe and modules read, found statically from their call
     sites. Values come from the declared machine (for example `Installed Path` = the game directory). A key with no
     declared value is absent, the same as on a machine where nothing wrote it. No installer script is needed.
+  - **Installed, launcher run once (orchestrator decision, 2026-11-12).** The declared machine is a finished install
+    on which FalloutNVLauncher.exe has been run once for the declared adapter. `FalloutPrefs.ini` (and any other file
+    the launcher writes) is exactly what the launcher's own code writes from its preset files in gamedata for that
+    adapter, derived statically from the launcher's code and presets; no hand-written values. WinMain's launcher
+    gate therefore takes the "prefs present" path. Owner: platform (L5); the emulator (L4) mounts the result. If the
+    launcher or its presets are missing from gamedata, report it to the orchestrator.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -316,3 +322,14 @@ The owner's words: "Я запрещаю меня тревожить и прос�
   Stale, finished or duplicate sessions are archived without asking.
 - Nothing necessary is left undone for want of an answer: a blocked decision goes to the orchestrator, never to the owner.
 - No messages to the owner except milestones on the goal path (exe entry, WinMain, menu, first frame, Switch).
+
+## Owner order of 2026-11-11, 23:00: GOG Galaxy is not lifted (binding)
+
+The owner's words: "нахуя лифтить гэлакси... Ну нет доступа к нему. Похуй на него. Это как сокеты."
+
+- Galaxy.dll and GalaxyWrp.dll are not lifted. The declared machine has no Galaxy service, the same as it has no network.
+- Every Galaxy entry the exe or a module reaches answers the documented "Galaxy unavailable / not initialized / not
+  signed in" result of the Galaxy SDK, the same way network calls answer the documented "network down" error. It is a
+  declared-machine body (CLAUDE.md "The declared machine"), with the SDK documentation cited per function, not a stub.
+- Owner of the bodies: platform (L5). Lifting work on Galaxy stops; modules.tsv lists Galaxy as a declared-machine
+  module, not as a lifted one.
