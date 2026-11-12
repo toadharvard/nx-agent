@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 09:54Z Answered L3a and w8: rt/guest is admitted on the root at 4e61af19c (head e2152adf5), path unchanged. The 3 L3a guest-test roots merge e2152adf5 until the trunk has it.
 - 09:52Z w10 on root: merged 224af83e, rt/guest 03a374cb (admitted), and w9 f98ce8b5. Selftests imports, machine and link pass; 5 still running. The hostapi union rule is implemented, with 3 tests passing (L1 reviewing). The wire_errno stage moved into the hostabi root (one home). Pure 41/42 (was 29/37); the last item, imagerec pin check → cas, is solved by a stdlib-only contract/treehash.py as the one home (L1 reviews cas.py). Next: abi layout, 612 layout items to be split into internal-linkage fixes and others.
 - 09:50Z L1: envcheck drift does not reproduce on a fresh machine (w22: equal at 224af83e and 8f4790a2), so it is w10 local state; w10 sends the diff to w22 and reruns on a fresh setup_verdict_env.sh. The fnvnx_assume_violation form is decided: only a generated fnvnx_dom_<name>_check calls it; a direct call is red. w9 folds the errno table and the 10000+n decode into the generated check.
 - 09:47Z L1 accepted the hostapi union-over-includers rule (per interface, from PP read sets); w10 implements it in gate_hostapi with a two-root test, L1 reviews. test_envcheck goes to L1 w22.
