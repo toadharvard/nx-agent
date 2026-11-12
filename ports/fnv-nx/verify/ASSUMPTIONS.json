@@ -310,6 +310,7 @@
    "id": "ASM-008",
    "text": "Floating point is IEEE binary32/binary64.",
    "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -1248,7 +1249,8 @@
    "id": "ASM-218",
    "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
     "L3b:A-F2IASM"
@@ -1435,6 +1437,45 @@
    ],
    "status": "REMOVE",
    "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC×FTZ×DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-322",
+   "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2IHELPERS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "gate:fpexact",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-323",
+   "text": "An object and its .f2i.json come from the same compile.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2IKEY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: recipe cache key binds both once the plugin is a recipe stage",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-325",
+   "text": "No float->int conversion of a C literal occurs in lifted code (GCC folds an out-of-range constant to the saturated value, not the x86 indefinite).",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2ICONST"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: closable in the plugin: constant operand of a conversion = finding",
    "owner": "L3b"
   },
   {
