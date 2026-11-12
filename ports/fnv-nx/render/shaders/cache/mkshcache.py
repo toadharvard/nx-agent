@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""mkshcache.py: builds the shader cache file (format: shcache.h) from a directory of translations, deterministically
+(same entries -> byte-identical file, whatever the order they are listed in).
+  python3 -I mkshcache.py [--build-id HEX32 | --extra-input FILE...] TRANSLATED_DIR OUT.shc
+TRANSLATED_DIR/entries.tsv (written by shxlate): id code_hash code_len stage(v|p) flags l_hex(- = none); each id has <id>.dksh and <id>.json
+(reflection).  The payload of an entry is shcache_payload_pack(dksh, json).  Default build id: build_id() = SHA-256 over the translator sources
+(render/shaders/src, include, the two patches, build.sh, plus every --extra-input file, e.g. a local patch of the pinned uam) cut to 16 bytes: a different
+translator makes the file EMPTY at load, never stale."""
+import hashlib, os, struct, sys
+
+MAGIC, VERSION, FLAGS_MASK = b"FNSC", 1, (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5)
+HEADER, INDEX = 64, 36
+M64 = 0xFFFFFFFFFFFFFFFF
+
+
+def fnv1a64(b):
+    h = 0xCBF29CE484222325
+    for c in b: h = ((h ^ c) * 0x100000001B3) & M64
+    return h
+
+
+def l_hash(l): return (fnv1a64(l) or 1) if l else 0
+
+
+def check_l(l):
+    if len(l) > 31 or any(v // 16 > 13 for v in l) or any(a >= b for a, b in zip(l, l[1:])): raise ValueError("L must be ascending, unique, usage <= 13, <= 31 pairs")
+
+
+def pack_payload(dksh, json): return struct.pack("<II", len(dksh), len(json)) + dksh + json
+
+
+def build_id(root=None, extra=()):
+    root = root or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    h = hashlib.sha256()
+    for f in extra: h.update(b"extra\0" + hashlib.sha256(open(f, "rb").read()).digest())
+    for sub in ("src", "translator", "uam.patch", "build.sh"):
+        p = os.path.join(root, sub)
+        files = sorted(os.path.join(d, f) for d, _, fs in os.walk(p) for f in fs) if os.path.isdir(p) else [p]
+        for f in files:
+            h.update(os.path.relpath(f, root).encode() + b"\0" + hashlib.sha256(open(f, "rb").read()).digest())
+    return h.digest()[:16]
+
+
+def build(entries, bid):
+    """entries: iterable of (code_hash, code_len, stage 0|1, flags, l bytes, payload bytes). Returns the file bytes."""
+    es = []
+    for h, n, st, fl, l, pay in entries:
+        l = bytes(l); check_l(l)
+        if st not in (0, 1) or fl & ~FLAGS_MASK: raise ValueError("bad stage or flags")
+        es.append(((h, st, fl, l_hash(l), n), l, pay))
+    es.sort(key=lambda e: e[0])
+    for a, b in zip(es, es[1:]):
+        if a[0] == b[0]: raise ValueError("two entries with one key tuple %r (hash collision or duplicate)" % (a[0],))
+    idx, blobs = bytearray(), bytearray(); off = HEADER + INDEX * len(es)
+    for (h, st, fl, lh, n), l, pay in es:
+        b = bytes([len(l)]) + l; b += b"\0" * (-len(b) & 3); b += pay
+        idx += struct.pack("<QQIIBBBBII", h, lh, n, fl, st, len(l), 0, 0, off + len(blobs), len(b)); blobs += b
+    body = bytes(idx) + bytes(blobs); size = HEADER + len(body)
+    return MAGIC + struct.pack("<I", VERSION) + bid + struct.pack("<IIIIQ", len(es), HEADER, HEADER + len(idx), size, fnv1a64(body)) + b"\0" * 16 + body
+
+
+def parse(data):
+    """reader (for tests and tools): returns (build_id, [(code_hash, code_len, stage, flags, l, payload)]) or raises ValueError"""
+    if data[:4] != MAGIC or struct.unpack_from("<I", data, 4)[0] != VERSION: raise ValueError("magic or version")
+    cnt, io, bo, size, bh = struct.unpack_from("<IIIIQ", data, 24)
+    if size != len(data) or bh != fnv1a64(data[HEADER:]) or io != HEADER or bo != HEADER + cnt * INDEX or any(data[48:64]): raise ValueError("header")
+    out = []
+    for i in range(cnt):
+        h, lh, n, fl, st, nl, _, _, off, sz = struct.unpack_from("<QQIIBBBBII", data, HEADER + i * INDEX)
+        l = data[off + 1:off + 1 + nl]; pre = (1 + nl + 3) & ~3
+        if data[off] != nl or lh != l_hash(l) or off + sz > len(data): raise ValueError("entry %d" % i)
+        out.append((h, n, st, fl, bytes(l), data[off + pre:off + sz]))
+    return data[8:24], out
+
+
+def load_dir(d):
+    es = []
+    for ln in open(os.path.join(d, "entries.tsv")).read().splitlines()[1:]:
+        id_, h, n, st, fl, lx = ln.split("\t")[:6]
+        es.append((int(h, 16), int(n), 0 if st == "v" else 1, int(fl, 16), b"" if lx == "-" else bytes.fromhex(lx),
+                   pack_payload(open(os.path.join(d, id_ + ".dksh"), "rb").read(), open(os.path.join(d, id_ + ".json"), "rb").read())))
+    return es
+
+
+def main(argv):
+    bid, extra = None, []
+    while argv[:1] == ["--extra-input"]: extra.append(argv[1]); argv = argv[2:]
+    if argv[:1] == ["--build-id"]: bid, argv = bytes.fromhex(argv[1]), argv[2:]
+    if len(argv) != 2 or (bid is not None and len(bid) != 16): print(__doc__); return 2
+    data = build(load_dir(argv[0]), bid if bid is not None else build_id(extra=extra))
+    open(argv[1], "wb").write(data); print(f"{argv[1]}: {len(data)} bytes, {struct.unpack_from('<I', data, 24)[0]} entries")
+    return 0
+
+
+if __name__ == "__main__": sys.exit(main(sys.argv[1:]))

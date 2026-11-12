@@ -1,0 +1,274 @@
+diff --git a/ports/fnv-nx/docs/RENDER_NATIVE.md b/ports/fnv-nx/docs/RENDER_NATIVE.md
+index f35e8d3e..fa75530a 100644
+--- a/ports/fnv-nx/docs/RENDER_NATIVE.md
++++ b/ports/fnv-nx/docs/RENDER_NATIVE.md
+@@ -888,7 +888,7 @@ Marker). A reader skips an unknown opcode by its count. `NxOp_Marker` with tag `
+ **NXD9** (`render/native/capture/d3d9cap.h`; Python reference writer `tests/s6n/nxd9.py`). `nx_render d3d9` runs it
+ through the native D3D9 translator (`front/d3d9_state.h`, Nine 20.1 rules) and S6b's translated shaders into the GL
+ backend. **Choice:** shader translation is S6b's (`render/shaders`, MojoShader `glsldk` profile, layout contract
+-`render/shaders/include/fnvnx_dk_layout.h`); nx_render does not link it. The converter either embeds each shader's
++`render/shaders/translator/include/fnvnx_dk_layout.h`); nx_render does not link it. The converter either embeds each shader's
+ GLSL in its `VSH`/`PSH` record, or leaves it empty and passes `--shaders <dir>` holding `<hash %016llx>.glsl` as
+ `sdp2dksh -o <dir> --glsl shaderpackage*.sdp` writes them (hash = `fnvnx_shader_hash`, FNV-1a 64 of the bytecode).
+ 
+diff --git a/ports/fnv-nx/render/ASSUMPTIONS.md b/ports/fnv-nx/render/ASSUMPTIONS.md
+index b3ae9607..b88965de 100644
+--- a/ports/fnv-nx/render/ASSUMPTIONS.md
++++ b/ports/fnv-nx/render/ASSUMPTIONS.md
+@@ -144,7 +144,7 @@ Each of them is OPEN-GATE unless a gate covers it. O3 covers only documented Win
+ | 86 | render/shaders/README.md:172 | D3D9 hardware's `0 * anything = 0` is not implemented. | O8 | IEEE gives NaN for 0 * inf by owner decision. |
+ | 87 | render/shaders/README.md:174 | GLSL compilers may reassociate. | OPEN-GATE | L6A: O8 requires IEEE results of the source ops. Gate: `precise` on every emitted op or a pinned uam/Mesa option that forbids contraction and reassociation, checked on the translator output. |
+ | 88 | render/shaders/README.md:70 (+1: include/fnvnx_dk_layout.h:111) | uam and Maxwell limits: 16 vertex attributes, 31 generic varyings, with slot 31 for the clip vertex. | OPEN-GATE | L6A: a fact extracted by a script from the pinned uam source (nv_attributes.h, compiler_iface.cpp) and checked against the layout header's constants. |
+-| 89 | render/shaders/include/fnvnx_dk_layout.h:151 | `return -1; /* unreachable: see the proof */` after the location rule. | OPEN-GATE | L1/L6: either exhaustive enumeration over the finite domain (usage 0..13 × index 0..15 declaration sets up to 16/12 entries) as a fact, or fnvnx_reach_violation with a certificate. A prose proof is not a gate. |
++| 89 | render/shaders/translator/include/fnvnx_dk_layout.h:151 | `return -1; /* unreachable: see the proof */` after the location rule. | OPEN-GATE | L1/L6: either exhaustive enumeration over the finite domain (usage 0..13 × index 0..15 declaration sets up to 16/12 entries) as a fact, or fnvnx_reach_violation with a certificate. A prose proof is not a gate. |
+ | 90 | render/shaders/README.md:87 | A varying that the VS does not write has the value WineD3D 9.0 glsl_shader.c defines, where MS says "None". | OPEN-GATE | L6: a per-row citation of wine-9.0 (owner's Wine 9.0 decision). tests/l6/sm_link tests it on llvmpipe only (row 112). |
+ | 91 | render/shaders/README.md:139 | Known gaps: setp write masks, vs < 3.0 oFog/oPts indices, and the epilogue placement with subroutines. | OPEN-GATE | L6: one rule per gap, plus sm_fix cases; until then the d3d9total SM rows for these must be red. |
+ | 92 | render/shaders/README.md:145-150 | Centroid becomes interpolateAtCentroid because the Mesa 25 linker rejects `centroid in`; the deko3d IPA centroid bit was checked on one input. | OPEN-GATE | L6A: a check over every centroid declaration form in the translator output (DKSH IPA bit present), not one sample. |
+@@ -156,7 +156,7 @@ Each of them is OPEN-GATE unless a gate covers it. O3 covers only documented Win
+ | 98 | render/shaders/build.sh | meson > 1.3.2 is present, and the pinned uam and MojoShader build with it. | OPEN-GATE | L1: tool versions as verify/env.json inputs (together with row 80). |
+ | 99 | render/shaders/mkshcache.py:26 | A cache entry has at most 31 pairs, with usage ≤ 13. | O3 | D3DDECLUSAGE has 14 documented values (0..13). The 31 bound is row 88. |
+ | 100 | render/shaders/shxlate.c:6 | Translating the same bytecode twice gives byte-equal output. | GATE | The shxlate double-translation check (determinism). |
+-| 101 | render/shaders/include/fnvnx_shaders.h:85 | The translator API "never throws". | OPEN-GATE | L1: uam is C++. Gate: compile the API boundary noexcept, so that a std::bad_alloc becomes a std::terminate the EH gate sees, or prove that no throw site is reachable. |
++| 101 | render/shaders/translator/include/fnvnx_shaders.h:85 | The translator API "never throws". | OPEN-GATE | L1: uam is C++. Gate: compile the API boundary noexcept, so that a std::bad_alloc becomes a std::terminate the EH gate sees, or prove that no throw site is reachable. |
+ | 102 | render/shaders/total/README.md:31 | The encoder check covers 475 of 478 sampled rows. | OPEN-GATE | L6: check every row of sm_table.json; sampling is forbidden. |
+ | 103 | render/shaders/total/README.md | There are 4 source conflicts and 6 undetermined families, and 2 families are unreachable per the documentation. | OPEN-GATE | L6: one cited source per conflict; the unreachable families get a certificate. |
+ | 104 | render/shaders/total/README.md | vs_1_0 and ps_1_0 are undocumented and treated as 1_1. | OPEN-GATE | L6: a fact from the owner's SDP packages that no program uses version 1_0, or a cited source. |
+@@ -176,8 +176,8 @@ Entry points we use:
+ |---|---|---|---|---|
+ | 107 | render/total/externals.json | MojoShader parses every SM1-3 token stream per the documented token format. | OPEN-GATE | Partly a GATE: d3d9total checks the opcode values, stage masks and comparison controls (_Static_assert rows), and test_sm_total checks the universe rows. L6: totality of the parse over the token grammar (length fields, register types, modifiers) needs a grammar-derived exhaustive check. |
+ | 108 | render/shaders/README.md:34 | The emitted GLSL has the same semantics as the bytecode. | OPEN-GATE | L6: tested only on llvmpipe (sm_fix, sm_link, drawgl, none of them in gate_l6). Needs a per-opcode semantic rule table checked against the emitter, plus row 80. |
+-| 109 | render/shaders/mojoshader.patch:113 (+26 FIXME) | Upstream's validation is incomplete ("!!! FIXME: a lot of these MUST be zero"), and reserved bits are not checked. | OPEN-GATE | L6: our patch checks reserved bits per the documented token layout (O3), with a test per bit. |
+-| 110 | render/shaders/mojoshader.patch | The patched validation messages (M4X4/M3X4 .xyz, labels ≤ 2047, sincos) equal the documented rules. | O3 | Documented SM rules. A test per message exists in tests/s6b, which is not gated (row 80). |
++| 109 | render/shaders/translator/mojoshader.patch:113 (+26 FIXME) | Upstream's validation is incomplete ("!!! FIXME: a lot of these MUST be zero"), and reserved bits are not checked. | OPEN-GATE | L6: our patch checks reserved bits per the documented token layout (O3), with a test per bit. |
++| 110 | render/shaders/translator/mojoshader.patch | The patched validation messages (M4X4/M3X4 .xyz, labels ≤ 2047, sincos) equal the documented rules. | O3 | Documented SM rules. A test per message exists in tests/s6b, which is not gated (row 80). |
+ | 111 | render/shaders/build.sh | MojoShader and uam are memory-safe on every input. | O5 | Only if they are built with ASan/UBSan in the test runs. Discharge: the sanitizer build of libmojoshader/libuam in tests/l6/shcache. |
+ | 112 | render/shaders/README.md:21 (+1: uam.patch) | uam (Mesa nv50_ir) compiles the GLSL to correct Maxwell code; the patch fixed the one uninitialised `sched` read. | OPEN-GATE | L6A: not owner-class. Gate: DKSH validation (already done for structure) plus a console run of sm_fix. The uninitialised-read class is O5 under a sanitizer build (row 111). |
+ | 113 | render/shaders/build.sh (+1: README.md:23) | libuam and mojoshader_assembler are host-only and test-only, and are not linked into the product. | FACT | build.sh targets. Can be gated by the L1 link census of the product image. |
+diff --git a/ports/fnv-nx/render/d3d9/backend/build_gl4.sh b/ports/fnv-nx/render/d3d9/backend/build_gl4.sh
+index 5b4721de..6f891c86 100755
+--- a/ports/fnv-nx/render/d3d9/backend/build_gl4.sh
++++ b/ports/fnv-nx/render/d3d9/backend/build_gl4.sh
+@@ -3,7 +3,7 @@
+ #   usage: FNVNX_SHADERS_BUILD=DIR build_gl4.sh [out.so]      or      build_gl4.sh --shaders-build DIR [out.so]      (default out ./libnxgl4.so)
+ # REQUIRED input: the translator build directory (render/shaders/build.sh output: libfnvnx_shaders.a + CMakeCache.txt naming its deps). Missing = exit 2 with a message, nothing is built.
+ # Link line: gcc -std=c11 -Wall -Werror -Werror=switch-enum -O2 -fPIC -shared -I<backend> gl4_*.c nxgpu4_check.c <gl4_xlator.sh flags> -Wl,--version-script=libnxgl4.map -lEGL -lGL -lm
+-#   (translator flags = -I<render/shaders/include> libfnvnx_shaders.a libmojoshader.a libuam.a -lstdc++ -lm -lpthread)
++#   (translator flags = -I<render/shaders/translator/include> libfnvnx_shaders.a libmojoshader.a libuam.a -lstdc++ -lm -lpthread)
+ # Exports nxgl4_create, nxgl4_destroy, nxgl4_ext (the ext_call dispatch of module 10), nxgl4_last_error and
+ # nxgl4_shim_glsl. Leaves two symbols undefined for the embedder to provide (no -Wl,-z,defs):
+ #   void* nxgl4_guest_ptr(uint64_t addr, uint64_t size);   guest address -> host pointer
+diff --git a/ports/fnv-nx/render/d3d9/backend/gl4_xlator.sh b/ports/fnv-nx/render/d3d9/backend/gl4_xlator.sh
+index b3e890d4..15a4420c 100755
+--- a/ports/fnv-nx/render/d3d9/backend/gl4_xlator.sh
++++ b/ports/fnv-nx/render/d3d9/backend/gl4_xlator.sh
+@@ -1,7 +1,7 @@
+ #!/bin/sh
+ # The declared input of every libnxgl4 build: the translator build (render/shaders/build.sh: its FNVNX_SHADERS_BUILD directory, holding libfnvnx_shaders.a and CMakeCache.txt).
+ #   gl4_xlator.sh DIR_OR_EMPTY      prints the compile flag and the link libraries of the translator on one line (the build's one definition of the link line):
+-#       -I<render/shaders/include> <DIR>/libfnvnx_shaders.a <deps>/mojoshader/build/libmojoshader.a <deps>/uam/build/libuam.a -lstdc++ -lm -lpthread
++#       -I<render/shaders/translator/include> <DIR>/libfnvnx_shaders.a <deps>/mojoshader/build/libmojoshader.a <deps>/uam/build/libuam.a -lstdc++ -lm -lpthread
+ #   DIR empty or unusable: message on stderr, exit 2 (no build without the translator: the backend's SHADER_CREATE_D3D needs it).
+ here=$(cd "$(dirname "$0")" && pwd)
+ dir=$1
+@@ -13,4 +13,4 @@ deps=$(sed -n 's/^FNVNX_DEPS:[A-Z]*=//p' "$dir/CMakeCache.txt")
+ mojo=$deps/mojoshader/build/libmojoshader.a; uam=$deps/uam/build/libuam.a
+ [ -f "$mojo" ] || need "$mojo missing"
+ [ -f "$uam" ] || need "$uam missing"
+-echo "-I$here/../../shaders/include $dir/libfnvnx_shaders.a $mojo $uam -lstdc++ -lm -lpthread"
++echo "-I$here/../../shaders/translator/include $dir/libfnvnx_shaders.a $mojo $uam -lstdc++ -lm -lpthread"
+diff --git a/ports/fnv-nx/render/d3d9/backend/nxgpu4_shader.h b/ports/fnv-nx/render/d3d9/backend/nxgpu4_shader.h
+index db70939c..39c8e2c3 100644
+--- a/ports/fnv-nx/render/d3d9/backend/nxgpu4_shader.h
++++ b/ports/fnv-nx/render/d3d9/backend/nxgpu4_shader.h
+@@ -5,7 +5,7 @@
+  *   device validated the bytecode, so the device never asks for a shader the D3D9 validator rejects; it answers a 0 with D3DERR_DRIVERINTERNALERROR and records nothing).
+  *
+  *   bytecode / size  the D3D9 token stream (version token .. END), `link_pairs` n_link_pairs bytes of FNVNX_DK_PAIR codes (usage * 16 + index) ascending, unique = the link set L of
+- *                    render/shaders/include/fnvnx_dk_layout.h "Location rule" (fnvnx_shader_opts.link_pairs); n_link_pairs 0 = the stage alone (every pair of the draw is canonical).
++ *                    render/shaders/translator/include/fnvnx_dk_layout.h "Location rule" (fnvnx_shader_opts.link_pairs); n_link_pairs 0 = the stage alone (every pair of the draw is canonical).
+  *   stage            0 vertex, 1 pixel (must match the bytecode's version token)
+  *   variant          bit 0: vertex shader complete (FNVNX_SHADER_VS_COMPLETE; fnvnx_dk_vs_needs_complete), all other bits 0
+  *   hash             fnvnx_shader_hash(bytecode) (FNV-1a 64), the cache key's code hash
+diff --git a/ports/fnv-nx/render/d3d9/dev/README.md b/ports/fnv-nx/render/d3d9/dev/README.md
+index 70bc3e43..fda58403 100644
+--- a/ports/fnv-nx/render/d3d9/dev/README.md
++++ b/ports/fnv-nx/render/d3d9/dev/README.md
+@@ -37,7 +37,7 @@ light attenuation signs. Hooks the declaration / resource modules must define: `
+ Files: `draw_api` (the four Draw* methods of both device classes: validation = Wine 9.0 d3d9 device.c + the Windows rows of d3d9/tests/device.c test_draw_primitive, rules D1-D6 in its header), `draw_exec` (one draw: program pair -> layout -> textures / samplers -> buffer
+ mirrors -> pass -> `nxs_room` -> flush -> draw op), `draw_prim` (vertex-count formulas / NxPrim / instance count / D3DDECLTYPE as total switches), `draw_prog` (backend shader ids per (shader, variant, link set L) via `NXGPU_FN_SHADER_CREATE_D3D` of
+ `backend/nxgpu4_shader.h`, cached on the shader object, destroyed with it), `draw_layout` (NxVtxLayout4: unbound input = constant (0,0,0,0) stream, last element wins, instancing), `draw_ids` (process-global LRU tables of layout / state ids),
+-`draw_state` (passes with the NULL-format rules, render-state words, viewport / scissor / blend constant / depth bias, BindState), `draw_const` (UBO 0 / 1 / 2 byte-exact per `render/shaders/include/fnvnx_dk_layout.h`), `draw_tex` (sampler ids, texture
++`draw_state` (passes with the NULL-format rules, render-state words, viewport / scissor / blend constant / depth bias, BindState), `draw_const` (UBO 0 / 1 / 2 byte-exact per `render/shaders/translator/include/fnvnx_dk_layout.h`), `draw_tex` (sampler ids, texture
+ handles, sRGB view = image id + 1), `draw_bind` (vertex / index mirrors with the hazard rule, UP data through the segment payload, a block of its own above 128 KiB). `draw_ffp.h` declares the two functions of the fixed-function module (D5b), defined by `ffp_*.cpp` (rules F1 / F2 in `ffp_dev.h`, P1-P4 in `ffp_prog.cpp`, V1 / V2 / S1 / S2 in `ffp_sets.cpp`; programs embedded by `ffp/gen_glsl.py`, test `tests/l6/ffpdev`).
+ The one global stream keeps what it has bound (`g_nxb`): everything is emitted again when the pass epoch or the device changed, otherwise only what differs. Not carried to the backend (no field in the layout contract / ABI): user clip plane EQUATIONS (the enable
+ mask is in the state word) and point size / scale of programmable vertex shaders, a depth surface larger than the colour targets (backend pass rule), flat-shading variants of translated programs.
+diff --git a/ports/fnv-nx/render/d3d9/dev/draw_const.cpp b/ports/fnv-nx/render/d3d9/dev/draw_const.cpp
+index a97dd36d..f698afa6 100644
+--- a/ports/fnv-nx/render/d3d9/dev/draw_const.cpp
++++ b/ports/fnv-nx/render/d3d9/dev/draw_const.cpp
+@@ -1,4 +1,4 @@
+-// draw_const.cpp: the uniform blocks of a draw, byte-exact per render/shaders/include/fnvnx_dk_layout.h (per stage: UBO 0 = vec4 c[256] by register, UBO 1 = ivec4 i[16] at 16 * n and one uint per bool at 256 + 16 * n,
++// draw_const.cpp: the uniform blocks of a draw, byte-exact per render/shaders/translator/include/fnvnx_dk_layout.h (per stage: UBO 0 = vec4 c[256] by register, UBO 1 = ivec4 i[16] at 16 * n and one uint per bool at 256 + 16 * n,
+ // UBO 2 = the driver block) plus the blocks of the fixed-function module (draw_ffp.h, bound to the slots it names).
+ //  C1 UBO 0: the float registers Set*ShaderConstantF stored (immediate `def` constants are in the shader); the pixel block has 224 registers, c224..c255 are 0 ("0 outside"). UBO 1: the int registers, the bool registers as
+ //     0 / 1 (BOOL != 0 is true). Both are rebuilt when the VSCONST / PSCONST group is dirty or the stream is rebound in full, and bound when their bytes differ from what the stream holds.
+diff --git a/ports/fnv-nx/render/d3d9/dev/draw_core.h b/ports/fnv-nx/render/d3d9/dev/draw_core.h
+index 3b6640f9..9f72d25e 100644
+--- a/ports/fnv-nx/render/d3d9/dev/draw_core.h
++++ b/ports/fnv-nx/render/d3d9/dev/draw_core.h
+@@ -9,7 +9,7 @@
+ #include "draw_ffp.h"
+ #include "nxgpu4_shader.h"
+ #include "d3d9_state.h"
+-#include "../../shaders/include/fnvnx_dk_layout.h"
++#include "../../shaders/translator/include/fnvnx_dk_layout.h"
+ #include <string.h>
+ 
+ enum : uint32_t { NXD_STREAM_INDEXED = D3DSTREAMSOURCE_INDEXEDDATA, NXD_STREAM_INSTANCE = D3DSTREAMSOURCE_INSTANCEDATA, NXD_FREQ_MASK = 0x7FFFFFu };
+diff --git a/ports/fnv-nx/render/d3d9/dev/draw_prog.cpp b/ports/fnv-nx/render/d3d9/dev/draw_prog.cpp
+index ba871750..9cfbb0c5 100644
+--- a/ports/fnv-nx/render/d3d9/dev/draw_prog.cpp
++++ b/ports/fnv-nx/render/d3d9/dev/draw_prog.cpp
+@@ -1,5 +1,5 @@
+ // draw_prog.cpp: the program pair of a draw: backend shader ids of (vertex shader, pixel shader), the link set L, the VS variant bit, the vertex input signature.
+-// Rules (all from render/shaders/include/fnvnx_dk_layout.h and render/shaders/cache/shcache.h, restated here):
++// Rules (all from render/shaders/translator/include/fnvnx_dk_layout.h and render/shaders/cache/shcache.h, restated here):
+ //  P1 vertex inputs: the declared inputs of the VS (v<n> with their dcl (usage, index)); vs_1_x has no dcl: v<n> = the usage of the Shader Model 1 register table (v0 POSITION, v1 BLENDWEIGHT, v2 BLENDINDICES,
+ //     v3 NORMAL, v4 PSIZE, v5 COLOR0, v6 COLOR1, v7-v14 TEXCOORD0-7, v15 POSITION1: mojoshader.c shader_model_1_input_usage, which the translator uses). Location of input k = fnvnx_dk_assign(ATTRIB) over the set.
+ //  P2 L = the varying link set of the pair: (VS outputs without POSITION0 / PSIZE0) U (PS inputs), empty when every pair is canonical (fnvnx_dk_varying_location >= 0), else the set ascending (shcache_link_set).
+diff --git a/ports/fnv-nx/render/d3d9/dev/res_shader.cpp b/ports/fnv-nx/render/d3d9/dev/res_shader.cpp
+index c21127f4..bd8c1c16 100644
+--- a/ports/fnv-nx/render/d3d9/dev/res_shader.cpp
++++ b/ports/fnv-nx/render/d3d9/dev/res_shader.cpp
+@@ -3,7 +3,7 @@
+ // WINED3DERR_INVALIDCALL; wined3d_shader_get_byte_code: pData null -> size query; *size too small -> D3DERR_INVALIDCALL (MSDN says MOREDATA, Wine's comment: not actually true); copy leaves *size).
+ // Create*Shader: null byte_code / out pointer, no walkable END (spec sm_bytes), wrong stage word (a pixel blob to CreateVertexShader), any validator error (res_smcheck.cpp rules R1-R9) = D3DERR_INVALIDCALL.
+ // Allocation failure = E_OUTOFMEMORY (Wine d3d9 device.c d3d9_device_CreateVertexShader / CreatePixelShader, wined3d shader.c shader_init), nothing left behind.
+-// The hash is fnvnx_shader_hash (render/shaders/src/translate.c: FNV-1a 64 of the bytecode, offset 0xcbf29ce484222325, prime 0x100000001b3) re-implemented here: that TU links MojoShader (the translator
++// The hash is fnvnx_shader_hash (render/shaders/translator/src/translate.c: FNV-1a 64 of the bytecode, offset 0xcbf29ce484222325, prime 0x100000001b3) re-implemented here: that TU links MojoShader (the translator
+ // front end parse / reflection is MojoShader based: frontend.c needs mojoshader.h, so it cannot be linked into this freestanding object; the interface in res_sm.h is our own decoder's).
+ #include "res_core.h"
+ #include "d9impl.gen.h"
+diff --git a/ports/fnv-nx/render/d3d9/dev/res_sm.h b/ports/fnv-nx/render/d3d9/dev/res_sm.h
+index df27eec7..567f1807 100644
+--- a/ports/fnv-nx/render/d3d9/dev/res_sm.h
++++ b/ports/fnv-nx/render/d3d9/dev/res_sm.h
+@@ -18,7 +18,7 @@ struct NxSmIface {
+     uint32_t ci_mask, cb_mask;      // integer / boolean constant registers read (i<n>, b<n>) or defined
+     uint32_t def_f, def_i, def_b;   // number of def / defi / defb in the shader
+     uint32_t pair_set[7];           // bit (usage * 16 + index) = the (usage, index) pair is a varying of the stage: vertex = a written output (declared with dcl in sm3, written in sm < 3: oPos POSITION0, oFog FOG0, oPts PSIZE0, oD# COLOR#, oT# TEXCOORD#),
+-                                    // pixel = a read input (sm3 dcl'd v#; sm < 3 the t# / v# registers used or dcl'd: TEXCOORD# / COLOR#). vPos / vFace and oC / oDepth are not pairs. The mapping of mojoshader's attribute / output lists (render/shaders/src/frontend.c)
++                                    // pixel = a read input (sm3 dcl'd v#; sm < 3 the t# / v# registers used or dcl'd: TEXCOORD# / COLOR#). vPos / vFace and oC / oDepth are not pairs. The mapping of mojoshader's attribute / output lists (render/shaders/translator/src/frontend.c)
+ };
+ // The resumable scanner behind nx_sm_check (res_smcheck.cpp): the same rules, fed in pieces. A scan is exactly one call of nx_sm_check on the concatenation of its feeds:
+ // nx_sm_scan_feed returns the first violation (sticky) as soon as the instruction holding it is complete, 0 while the stream is legal so far; nx_sm_scan_end additionally requires the closing END (UNTERMINATED otherwise).
+diff --git a/ports/fnv-nx/render/d3d9/ffp/d9_epilogue.glsl b/ports/fnv-nx/render/d3d9/ffp/d9_epilogue.glsl
+index f6f5101d..f5ac3475 100644
+--- a/ports/fnv-nx/render/d3d9/ffp/d9_epilogue.glsl
++++ b/ports/fnv-nx/render/d3d9/ffp/d9_epilogue.glsl
+@@ -1,6 +1,6 @@
+ // d9_epilogue.glsl: the D3D9 pixel epilogue of the fixed-function pixel program: alpha test, then fog (the pixel stage is
+ // below ps_3_0, so the fixed-function stage always has the fog part), statement for statement what dk_epilogue of
+-// render/shaders/mojoshader.patch emits for a translated pixel shader, over the PS driver block of fnvnx_dk_layout.h
++// render/shaders/translator/mojoshader.patch emits for a translated pixel shader, over the PS driver block of fnvnx_dk_layout.h
+ // (UBO 2 of the pixel stage: vec4 fogcolor; vec4 fog (x mode 0 off / 1 vertex / 2 exp / 3 exp2 / 4 linear, y start, z end,
+ // w density); ivec4 alpha (x = D3DCMPFUNC, 0 = off); vec4 alpharef (x); the rest of the 352 bytes is not read here).
+ // The fog factor of the vertex stage is read at the canonical fog location 18 (.x). Included by ffp.frag.glsl.
+diff --git a/ports/fnv-nx/render/d3d9/ffp/ffp.frag.glsl b/ports/fnv-nx/render/d3d9/ffp/ffp.frag.glsl
+index 6a9709f3..cbe5772e 100644
+--- a/ports/fnv-nx/render/d3d9/ffp/ffp.frag.glsl
++++ b/ports/fnv-nx/render/d3d9/ffp/ffp.frag.glsl
+@@ -3,7 +3,7 @@
+ // NxFfpPsState (ffp_state.h, std140, UBO binding 3). Twin of ffp_ps_ref.c (same function names, same statements);
+ // semantic source for open points: WineD3D ffp fragment generator, deviations in README.md.
+ //
+-// Interface (render/shaders/include/fnvnx_dk_layout.h): varyings by fnvnx_dk_varying_location: COLOR0 diffuse = 0,
++// Interface (render/shaders/translator/include/fnvnx_dk_layout.h): varyings by fnvnx_dk_varying_location: COLOR0 diffuse = 0,
+ // COLOR1 specular = 1, TEXCOORDn = 2 + n (n = 0..7, all vec4). Fog factor at 18 is read by d9_epilogue.glsl.
+ // D3DRS_SHADEMODE = FLAT: the vertex stage and this program must both qualify locations 0 and 1 `flat`; build the
+ // program with NX_FFP_FLAT defined (nx-variants line below). Texcoord varyings are never flat.
+diff --git a/ports/fnv-nx/render/total/TRUNK.md b/ports/fnv-nx/render/total/TRUNK.md
+index 83ba871c..9b856d30 100644
+--- a/ports/fnv-nx/render/total/TRUNK.md
++++ b/ports/fnv-nx/render/total/TRUNK.md
+@@ -23,7 +23,7 @@ The gate reads only the git-tracked files of these paths (`git ls-files`). It co
+ - `render/d3d9/spec/d3d9_spec.json`
+ - `shim/include`
+ - `render/shaders/total/sm_table.json`, `gen_sm_rows.py`, `fnvnx_sm_rows.h`
+-- `render/shaders/mojoshader.patch`
++- `render/shaders/translator/mojoshader.patch`
+ - `render/shaders/build.sh` (`MOJO_PIN`)
+ - `render/total/externals.json`
+ 
+diff --git a/ports/fnv-nx/render/total/gate_d3d9total.py b/ports/fnv-nx/render/total/gate_d3d9total.py
+index b23341a0..ddcbf90d 100644
+--- a/ports/fnv-nx/render/total/gate_d3d9total.py
++++ b/ports/fnv-nx/render/total/gate_d3d9total.py
+@@ -41,7 +41,7 @@ REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
+ PORT_REL = os.path.relpath(PORT, REPO)
+ INPUTS = ["render/d3d9/front", "render/d3d9/backend", "render/d3d9/spec/d3d9_spec.json", "shim/include",
+           "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h",
+-          "render/shaders/mojoshader.patch", "render/shaders/build.sh", "render/total/externals.json"]
++          "render/shaders/translator/mojoshader.patch", "render/shaders/build.sh", "render/total/externals.json"]
+ GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
+ ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
+ STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
+diff --git a/ports/fnv-nx/render/total/tests/test_d3d9total.py b/ports/fnv-nx/render/total/tests/test_d3d9total.py
+index 880caa95..18dcdb77 100644
+--- a/ports/fnv-nx/render/total/tests/test_d3d9total.py
++++ b/ports/fnv-nx/render/total/tests/test_d3d9total.py
+@@ -147,7 +147,7 @@ def mut_table(regen):
+ 
+ 
+ def mut_patch(old, new):
+-    return lambda base: edit(base, "render/shaders/mojoshader.patch", lambda t: t.replace(old, new, 1))
++    return lambda base: edit(base, "render/shaders/translator/mojoshader.patch", lambda t: t.replace(old, new, 1))
+ 
+ 
+ def mut_untrack(rel):
+@@ -169,7 +169,7 @@ CASES["table-not-generated"] = (mut_table(False), SM_ALL, [])
+ CASES["table-wrong-opcode"] = (mut_table(True), SM_ALL, [])
+ CASES["pin-differs"] = (lambda b: edit(b, "render/shaders/build.sh", lambda t: t.replace("MOJO_PIN=ad5d", "MOJO_PIN=bd5d", 1)), SM_ALL, [])
+ CASES["tree-hash-wrong"] = (lambda b: edit(b, "render/total/externals.json", lambda t: re.sub(r'"tree_sha256": "(.)', lambda m: '"tree_sha256": "' + ("0" if m[1] != "0" else "1"), t)), SM_ALL, [])
+-CASES["patch-corrupt"] = (lambda b: edit(b, "render/shaders/mojoshader.patch", lambda t: t[:len(t) // 2].replace("\n+", "\n-", 3) + t[len(t) // 2:]), SM_ALL, [])
++CASES["patch-corrupt"] = (lambda b: edit(b, "render/shaders/translator/mojoshader.patch", lambda t: t[:len(t) // 2].replace("\n+", "\n-", 3) + t[len(t) // 2:]), SM_ALL, [])
+ CASES["value-assert-dead"] = (mut_patch(VALUE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
+ CASES["stage-assert-dead"] = (mut_patch(STAGE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
+ CASES["cmp-assert-dead"] = (mut_patch(CMP_ASSERT, "_Static_assert(1, id)"), SM_CMP, [])
+diff --git a/ports/fnv-nx/tests/l6/shcache/run_real.sh b/ports/fnv-nx/tests/l6/shcache/run_real.sh
+index 497faf6e..df6d64de 100755
+--- a/ports/fnv-nx/tests/l6/shcache/run_real.sh
++++ b/ports/fnv-nx/tests/l6/shcache/run_real.sh
+@@ -8,7 +8,7 @@ set -euo pipefail
+ W="${1:-/home/user/work/l6/shcache}"; R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; C="$R/render/shaders/cache"; N="$R/render/native"
+ B="$W/build"; O="$W/out"; D="$B/deps"; mkdir -p "$O"
+ LIBS="$B/host/libfnvnx_shaders.a $D/mojoshader/build/libmojoshader.a $D/uam/build/libuam.a -lm -lpthread"
+-gcc -O2 -std=gnu11 -I "$R/render/shaders/include" -I "$C" -c "$C/shxlate.c" -o "$B/shxlate.o"; gcc -O2 -std=gnu11 -c "$C/shcache_key.c" -o "$B/shcache_key.o"
++gcc -O2 -std=gnu11 -I "$R/render/shaders/translator/include" -I "$C" -c "$C/shxlate.c" -o "$B/shxlate.o"; gcc -O2 -std=gnu11 -c "$C/shcache_key.c" -o "$B/shcache_key.o"
+ g++ "$B/shxlate.o" "$B/shcache_key.o" $LIBS -o "$B/shxlate"
+ gcc -std=gnu11 -O1 -w -I "$R/render/d3d9/backend" -I "$N" -I "$N/gl" "$R/tests/l6/shcache/glcheck.c" "$N/gl/nxgl.c" -lEGL -ldl -lm -o "$B/glcheck"
+ for m in 64 32; do gcc -m$m -std=gnu11 -w -O1 -I "$C" "$R/tests/l6/shcache/t_shcache.c" "$C/shcache.c" "$C/shcache_key.c" -o "$B/t_shcache$m"; done
+diff --git a/ports/fnv-nx/tests/l6/shcache/t_shcache.c b/ports/fnv-nx/tests/l6/shcache/t_shcache.c
+index a319cebe..96077cfb 100644
+--- a/ports/fnv-nx/tests/l6/shcache/t_shcache.c
++++ b/ports/fnv-nx/tests/l6/shcache/t_shcache.c
+@@ -13,7 +13,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include "shcache.h"
+-#include "../../../render/shaders/include/fnvnx_dk_layout.h"
++#include "../../../render/shaders/translator/include/fnvnx_dk_layout.h"
+ 
+ static int checks, fails;
+ #define CHECK(c) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); } } while (0)
+diff --git a/ports/fnv-nx/tests/l6/sm_fix/test_layout.py b/ports/fnv-nx/tests/l6/sm_fix/test_layout.py
+index 43e6c053..57cfb652 100644
+--- a/ports/fnv-nx/tests/l6/sm_fix/test_layout.py
++++ b/ports/fnv-nx/tests/l6/sm_fix/test_layout.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""T-SM-LAYOUT: the location rule of render/shaders/include/fnvnx_dk_layout.h (class B of the SM totality gate).
++"""T-SM-LAYOUT: the location rule of render/shaders/translator/include/fnvnx_dk_layout.h (class B of the SM totality gate).
+ python3 -I tests/l6/sm_fix/test_layout.py [--build DIR]
+  (a) rule properties in C on the header itself: every (usage 0..13, index 0..15) is assignable alone; random legal declaration sets
+      (up to the slot limit) are injective, in range, and keep canonical slots; illegal sets are rejected.
