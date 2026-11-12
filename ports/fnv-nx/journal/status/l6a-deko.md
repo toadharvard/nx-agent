@@ -4,9 +4,9 @@ Updated 2026-11-12. Trunk read at claude/fnv-nx-clean e35b870a (2026-11-12). CLA
 
 ## Owner order 2026-11-12 08:37Z (via orchestrator): only the GL path runs
 The first frame comes from the GL backend in the emulator; deko3d is checked against it afterwards. Only the work that
-makes the GL backend root (render/gl4) build by the recipe runs: w6 (gl4 stated target flags on L1 w16 dbfaefeb; link on
+makes the GL backend root (render/gl4) build by the recipe runs: w6 (gl4 stated target flags; environment from the trunk bee3dbfc farm/ only, no hand installs; build base: the trunk if it carries isystem/specdefaults, asked L1; link on
 w15; A2-gl4 sha256 when lib/sha256 exists). Paused: w4 (dk root, last head fbd1c779: green on w16 dbfaefeb, 19/19,
-deterministic, undefined 86 = 74 dkabi + 9 libc + 3 hooks, TLS 0, hardening flags reverted; A1/A2-dk done), w5 (uam).
+deterministic, undefined 86 = 74 dkabi + 9 libc + 3 hooks, TLS 0, hardening flags reverted; measured on parked branch w16 with hand-installed python modules, so not a machinery result: remeasure on the trunk (env fix bee3dbfc) after the first frame; A1/A2-dk done), w5 (uam).
 A3 dk side paused; A3 gl4 side runs when L6 sends the link-failed field. GL is never deleted.
 
 ## Priority after the owner correction (6f549875: two backends)
