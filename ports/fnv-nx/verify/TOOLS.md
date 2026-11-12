@@ -2037,8 +2037,9 @@ Rule.  Run both compilers with the same arguments on the same null translation u
   macros   `-dM -E`: a macro the distribution defines and the reference does not  -> `-UNAME`   (_FORTIFY_SOURCE, _GLIBCXX_ASSERTIONS);
            a macro both define with different values                               -> `-DNAME=VALUE` of the reference;
            a macro only the reference defines                                      -> `-DNAME=VALUE`.
-Target choices (specdefaults.TARGET_FAMILIES: PIC/PIE, -mabi, -march/-mtune/-mcpu, -mcmodel) are the root's own: a root that states one drops the derived flags
-of that family (for_root); hardening is never a target choice.
+Two families. Forced: hardening and semantic defaults (always neutralised; a root may not set them). Target: the options of the driver's `-Q --help=target` plus the
+PIC/PIE options (specdefaults.is_target): NOT neutralised, the root must state each one whose distribution default differs from the reference, else
+`implicit target choice`. A token of the cc1 line is a spec default only where `-Q --help` does not report the option's effective value.
 The result is a function of the two reports only: sorted, no host state.  Applying it (recipe.py) is a stage keyed on both compilers; a root
 may not set an option of the result or its negation (`overlap`).  An option whose value text is a list ("[default]", "[disabled]|…") is read
 as a value only in the forms above; any other form is emitted as `-name=VALUE` taken verbatim from the reference.

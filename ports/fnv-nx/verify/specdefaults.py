@@ -19,8 +19,9 @@ Rule.  Run both compilers with the same arguments on the same null translation u
   macros   `-dM -E`: a macro the distribution defines and the reference does not  -> `-UNAME`   (_FORTIFY_SOURCE, _GLIBCXX_ASSERTIONS);
            a macro both define with different values                               -> `-DNAME=VALUE` of the reference;
            a macro only the reference defines                                      -> `-DNAME=VALUE`.
-Target choices (specdefaults.TARGET_FAMILIES: PIC/PIE, -mabi, -march/-mtune/-mcpu, -mcmodel) are the root's own: a root that states one drops the derived flags
-of that family (for_root); hardening is never a target choice.
+Two families. Forced: hardening and semantic defaults (always neutralised; a root may not set them). Target: the options of the driver's `-Q --help=target` plus the
+PIC/PIE options (specdefaults.is_target): NOT neutralised, the root must state each one whose distribution default differs from the reference, else
+`implicit target choice`. A token of the cc1 line is a spec default only where `-Q --help` does not report the option's effective value.
 The result is a function of the two reports only: sorted, no host state.  Applying it (recipe.py) is a stage keyed on both compilers; a root
 may not set an option of the result or its negation (`overlap`).  An option whose value text is a list ("[default]", "[disabled]|…") is read
 as a value only in the forms above; any other form is emitted as `-name=VALUE` taken verbatim from the reference.
@@ -150,27 +151,50 @@ def overlap(root_flags, derived):
     return r
 
 
-# Target choices (owner-side decision of the root's target, not hardening): a root may state them, and the derived flags of that family are
-# then dropped for the root (deko3d is position independent because the console loads its NRO at an address it does not choose; the guest
-# reference is ILP32 and non-PIC).  Hardening (stack protector, stack clash, FORTIFY, cf-protection) is never a target choice: it stays forced.
-TARGET_FAMILIES = {"pic": ("-fPIC", "-fpic", "-fPIE", "-fpie"), "abi": ("-mabi",), "arch": ("-march", "-mtune", "-mcpu"), "cmodel": ("-mcmodel",)}
+# Family (2), target and code-model choices: the options the driver's own `-Q --help=target` lists, plus the PIC/PIE code-generation options.  They are
+# NOT neutralised: where the distribution's default differs from the reference, the root must STATE the option (any value) in its flags, so no distribution
+# default applies silently and the root's choice is in its key.  Family (1), everything else (hardening, unwind tables, FORTIFY ...), is always neutralised and
+# a root may not set it.  The classification comes from the driver (target_names), never from a list kept by hand; only the PIC/PIE group is named here
+# because the driver does not list the generic code-generation options under `target`.
+PIC = ("-fPIC", "-fpic", "-fPIE", "-fpie")
 
 
-def family(flag):
-    """The target family of FLAG (either sign, any value), or None"""
+def norm(flag):
+    """-fno-X -> -fX, -mno-X -> -mX, a value dropped: the name of the option a flag sets"""
     base = flag.split("=", 1)[0]
     for p in ("-fno-", "-mno-"):
         if base.startswith(p):
-            base = "-" + base[1] + base[len(p):]
-    return next((n for n, ms in TARGET_FAMILIES.items() if base in ms), None)
+            return "-" + base[1] + base[len(p):]
+    return base
+
+
+def option_names(text):
+    """names of the options a `-Q --help=CLASS` report lists (normalised, `=VALUE` and `[..]` dropped)"""
+    out = set()
+    for line in text.splitlines():
+        m = re.match(r"^\s+(-[\w+-]+)", line)
+        if m:
+            out.add(norm(m.group(1)))
+    return out
+
+
+def is_target(flag, tnames):
+    return flag[:2] not in ("-U", "-D") and (norm(flag) in tnames or norm(flag) in PIC)
+
+
+def group(flag):
+    return set(PIC) if norm(flag) in PIC else {norm(flag)}
 
 
 def for_root(root_flags, derived):
-    """-> (derived flags that apply to a root stating ROOT_FLAGS, root flags that overlap them): the families the root states are the
-    root's own; the rest is forced and the root may not set it."""
-    own = {family(t) for t in root_flags} - {None}
-    kept = [d for d in derived if family(d) not in own]
-    return kept, overlap([t for t in root_flags if family(t) is None], kept)
+    """DERIVED {"forced": [...], "target": [...]} -> (flags that apply to the root, [reasons the root is red]).  Forced flags apply and the root may not set
+    them; for every target flag the root must state its option (any member of the PIC group for PIC/PIE) or it is an implicit target choice."""
+    stated = {norm(t) for t in root_flags}
+    err = ["implicit target choice: the distribution default of %s differs from the reference; the root states none of %s in its flags" % (
+        t, " ".join(sorted(group(t)))) for t in derived["target"] if not (stated & group(t))]
+    tn = {norm(t) for t in derived["target"]} | set(PIC)
+    err += ["%s sets an option the distribution compiler's spec default fixes" % t for t in overlap([t for t in root_flags if norm(t) not in tn], derived["forced"])]
+    return list(derived["forced"]), err
 
 
 LEVELS = ("-O0", "-O2")   # a spec default may depend on the optimisation level (_FORTIFY_SOURCE needs -O1 or more)
@@ -226,18 +250,24 @@ def accepts_by(cc, lang):
 
 
 def derive(ref_cc, dist_cc, lang="c"):
-    """-> sorted flag list for the distribution compiler DIST_CC against the reference REF_CC (both are driver paths).
-    Step 1: the option flags (help differences over every level of LEVELS; the flag form is the first the distribution compiler accepts).
-    Step 2: closure: with those flags the distribution compiler's help has no difference left (else SpecError: no rule closes it).
-    Step 3: the macros that still differ when the distribution compiler runs with the option flags (a macro that follows from an option,
-    like __PIE__, is a consequence, not a second rule)."""
+    """-> {"forced": [...], "target": [...]} for the distribution compiler DIST_CC against the reference REF_CC (driver paths); both lists sorted.
+    Step 1: the option flags: help differences over every level of LEVELS (the flag is the first spelling the distribution compiler accepts), and the
+    tokens of the distribution's own compiler command line that the reference's does not have, for options the help does not report (-fcf-protection).
+    Step 2: closure: with those flags the help of the distribution compiler has no difference left (else SpecError: no rule closes it).
+    Step 3: the macros that still differ with the option flags applied (a macro that follows from an option, like __PIE__, is a consequence).
+    A flag is `target` when its option is one the driver lists under `-Q --help=target` or a PIC/PIE option (see TARGET), else `forced`."""
     acc = accepts_by(dist_cc, lang)
     rh = {lv: parse_help(help_report(ref_cc, lv)) for lv in LEVELS}
+    dh = {lv: parse_help(help_report(dist_cc, lv)) for lv in LEVELS}
     rt = {lv: cc1_tokens(ref_cc, lang, lv) for lv in LEVELS}
-    out = {f for lv in LEVELS for f in derive_from(rh[lv], parse_help(help_report(dist_cc, lv)), {}, {}, acc)}
-    for lv in LEVELS:   # a token of the distribution's own command line that the reference's does not have
+    tnames = option_names(run(dist_cc, ["-Q", "--help=target"]).stdout)
+    out = {f for lv in LEVELS for f in derive_from(rh[lv], dh[lv], {}, {}, acc)}
+
+    def reported(t, lv):   # the help states this option's effective value: the help difference is authoritative (a default the target gives is no spec default)
+        return norm(t) in {norm(n) for h in (rh[lv], dh[lv]) for n, v in h.items() if v in ("[enabled]", "[disabled]")}
+    for lv in LEVELS:
         for t in sorted(cc1_tokens(dist_cc, lang, lv) - rt[lv]):
-            if not t.startswith(("-D", "-U")):
+            if not t.startswith(("-D", "-U")) and not reported(t, lv):
                 f = next((c for c in neutral(t) if acc(c)), None)
                 if f is None:
                     raise SpecError("%s: the spec default %s has no flag that undoes it" % (dist_cc, t))
@@ -245,7 +275,8 @@ def derive(ref_cc, dist_cc, lang="c"):
     opts = sorted(out)
     for lv in LEVELS:
         left = differing(rh[lv], parse_help(help_report(dist_cc, lv, opts)))
-        left_t = {t for t in cc1_tokens(dist_cc, lang, lv, opts) - rt[lv] - set(opts) if not t.startswith(("-D", "-U"))}
+        left_t = {t for t in cc1_tokens(dist_cc, lang, lv, opts) - rt[lv] - set(opts)
+                  if not t.startswith(("-D", "-U")) and not reported(t, lv) and not any(c in opts for c in neutral(t))}
         if left or left_t:
             raise SpecError("%s differs from %s after %s: %s" % (dist_cc, ref_cc, " ".join(opts), ", ".join(sorted(set(left) | left_t))))
     macros = set()
@@ -253,7 +284,7 @@ def derive(ref_cc, dist_cc, lang="c"):
         rm = parse_macros(macro_report(ref_cc, lang, lv))
         dm = parse_macros(macro_report(dist_cc, lang, lv, opts))
         macros |= set(derive_from({}, {}, rm, dm))
-    return sorted(set(opts) | macros)
+    return {"forced": sorted(macros | {f for f in opts if not is_target(f, tnames)}), "target": sorted(f for f in opts if is_target(f, tnames))}
 
 
 def main(argv):
@@ -267,7 +298,7 @@ def main(argv):
     d.add_argument("--out")
     a = ap.parse_args(argv)
     flags = derive(a.ref, a.distro, a.lang)
-    doc = {"format": FORMAT, "lang": a.lang, "flags": flags}
+    doc = {"format": FORMAT, "lang": a.lang, "forced": flags["forced"], "target": flags["target"]}
     if a.out:
         with open(a.out, "w") as f:
             json.dump(doc, f, sort_keys=True, indent=1)

@@ -28,7 +28,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `units`: must be `"all"`. A `.S` unit is preprocessed as its own stage like a C unit (its key covers exactly the headers it includes);
   a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
   compiled. A file that must not be compiled does not belong in the root; there is no `exclude`.
-- `generated`: python generators run as sandbox stages before compilation, in list order. `tool` is a tracked `.py` of an admitted tool or product
+- `generated`: python generators run as sandbox stages before compilation, in list order (declared `inputs` come from the root itself, a root of class tool or a root of class headers; any other class is refused). `tool` is a tracked `.py` of an admitted tool or product
   root (the whole root is mounted at `/tool`, the script at `/tool/<path in its root>`), `inputs` are tracked files or directories (repo-relative;
   mounted at `/in/<repo path>`; they may not nest), the generator writes ONLY `/out/<output>` (the set of produced files must equal `outputs`).
   Outputs are root-relative, never tracked files, and appear in the root's view for `include` and as units when named like a source.
@@ -177,7 +177,15 @@ compiled by a distribution driver (`compiler` `{cc, cxx}`) gets the flags that r
   are the first of every PP and CC command line, so they are in every key.
 - A root may not set an option of the derived set, of either sign, with any value, or of its family (`-fstack-protector-all` against
   `-fno-stack-protector`): the build is red at `specdefaults` naming the flag.
-- Target choices are the root's own: a root that states a flag of the family PIC/PIE (`-fPIC -fpic -fPIE -fpie`, either sign), `-mabi`, `-march/-mtune/-mcpu` or `-mcmodel` drops the derived flags of that family (a console NRO is position independent; the guest reference is not). Hardening (stack protector, stack clash, FORTIFY, cf-protection) is never a target choice and stays forced.
+- Two families. (1) Hardening and semantic defaults the distribution adds silently (stack protector, stack clash, FORTIFY, unwind tables, ...) are always
+  neutralised (`forced`), and a root may not set them. (2) Target and code-model choices are NOT neutralised: where the distribution's default differs from the
+  reference the root must STATE the option in its flags for every language it has units in (any value; for PIC/PIE any of `-fPIC -fpic -fPIE -fpie`), else the
+  build is red at `specdefaults` ("implicit target choice"): no distribution default applies silently and the root's choice is in its key. Family (2) is exactly
+  the options of the driver's `-Q --help=target` plus the PIC/PIE code-generation options; the classification is read from the driver, never listed by hand
+  (only the PIC/PIE group is named, because the driver does not list the generic code-generation options under `target`). Guest roots (external compiler)
+  are not affected: their family (2) comes from `flags.semantics`.
+- A token of the distribution's own compiler command line is a spec default only where `-Q --help` does not report the option's effective value (a default
+  the target itself gives, such as `-fasynchronous-unwind-tables` on aarch64, is no spec default); the help difference is authoritative.
 - A tree without `guest_compiler.json` has no reference and nothing to remove. A root with an external compiler (a guest root) is not affected:
   its compiler has no distribution spec.
 

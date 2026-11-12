@@ -98,6 +98,17 @@ def main():
     nest = {"path": T + "lay", "class": "tool", "gates": []}
     ne = recipe.check(REC(include=[T + "lay/include"]), TR.ROOT, [T + "lay/include/a.h", T + "lay/x.py"], {TR.ROOT: {"class": "product", "path": TR.ROOT}, T + "lay": nest, T + "lay/include": inner})
     check("recipe check: an include of a headers tree nested in a tool root is accepted (innermost root decides)", not any("not a headers tree" in x for x in ne), ne)
+    # a generator's declared inputs: own root, tool root, headers root; any other class is refused
+    gen = lambda p: REC(generated=[{"tool": T + "gen/gen.py", "args": [], "inputs": [p], "outputs": ["gen/gen.h"]}])  # noqa: E731
+    docr = {"path": T + "docs", "class": "doc", "gates": []}
+    prodr = {"path": T + "other", "class": "product", "target": "host", "gates": [], "recipe": T + "other/build.json"}
+    rg = TR.make_repo("h-gen", rec=gen(T + "hdr/h.h"), files=dict(FILES, **{"docs/x.txt": "x\n", "other/build.json": "{}", "other/y.txt": "y\n"}), roots=[HDR_ROOT, docr, prodr])
+    ad = recipe.load_admit(rg)
+    for what, p, ok in (("a headers root", T + "hdr/h.h", True), ("a tool root", T + "gen/gen.py", True), ("its own root", TR.ROOT + "/a.c", True),
+                        ("a doc root", T + "docs/x.txt", False), ("another product root", T + "other/y.txt", False)):
+        e = recipe.check(gen(p), TR.ROOT, recipe.tracked(rg), ad)
+        bad = [x for x in e if "generated[0].inputs" in x and "class" in x]
+        check("generator input from %s: %s" % (what, "accepted" if ok else "refused"), (not bad) if ok else bool(bad), e)
     print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
     return 1 if FAILED else 0
 
