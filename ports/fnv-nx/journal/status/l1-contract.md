@@ -228,3 +228,11 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - crt0.s moves into an L5 guest runtime product root. Test roots reach it through link.roots, and shared headers through the headers class.
   - w17 adds a no-__CHAR_UNSIGNED__ check per unit and an object-change count. There is no FMA instruction scan (orchestrator retracted it).
   - MERGER order: w16 → w10 → w14 → w19.
+- 03:38Z:
+  - **exepin** (w4/w8 03c699d0): green, 29 gates, 374.6 s cold. Merge allowed under the warm-budget rule.
+  - **w17 2ae56ebf:** all 8 plugins in every guest C and C++ stage.
+  - **-fno-exceptions:** decided by a static call-graph fact. Until that fact exists, exceptions stay on (orchestrator). -fsigned-char is explicitly in the set.
+  - **L3b w3a 326f2c8e:** L3b 300..308 (9 records), L3a 203..220 (18), L2 801 (1), with aliases; 77 registry entries. L3a confirmed.
+  - **L6 fmadd evidence:** 7 → 0 at c646a014, once -ffp-contract=off and the rest of the semantics set applied to C.
+  - **lib/sha256 admit entry with a host variant:** w15.
+  - **selftest timeout rule:** derived from a stored warm-runtime fact on the pinned host only (w19).
