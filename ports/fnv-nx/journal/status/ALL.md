@@ -13,6 +13,14 @@ Updated 2026-11-12 03:41Z. The hourly census of all sessions was taken at 03:36Z
 
 ## Blocker of goal step 1 (the first product root)
 
+**Critical chain (03:52Z):**
+1. L1 w5's toolchain-build env.json profile, which had never landed and is now top priority;
+2. L5 w14 builds tools/fnvnx-a64-msvcmodel13, the guest runtime with gcc 13.3's libstdc++ and a MANIFEST (2 farm runs, about 1 h);
+3. the platform root (w10 3bfa841, red at ini.cpp: gcc 15 libstdc++ headers do not parse under gcc 13) turns green;
+4. MERGER.
+
+Rule: CLAUDE.md trunk 6481968. A second red, the L2 `pi` N3 check missing constexpr template instances, is with L2.
+
 Required gates still missing on the trunk, with the MERGER queue in order:
 
 | Gate(s) | Head at MERGER | State |
