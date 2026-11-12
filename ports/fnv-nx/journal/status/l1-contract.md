@@ -33,11 +33,13 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 29b41938 (07862d5a
 | 3h | guest system headers = linked libc's (fnvnx-a64-msvcmodel newlib+libnx, -nostdinc); glibc cross headers refused in guest roots (L2/L5 socket units) | w4 | claude/fnv-l1-contract-w4 | queued (after w8 rebase) |
 | 3u | configure step: pinned cmake on writable patched tree; units = one declared target's compileGroups from CMake File API codemodel-v2; source-dir outputs as Rule B outputs (L6 MojoShader; patches deleting units = exclude list, refused) | w16 | claude/fnv-l1-contract-w16 | queued |
 | 3c | class follows where objects run: root reached via link.roots from a product image = product root with all product gates; tool root in link.roots refused (L6 translator) | w15 | claude/fnv-l1-contract-w15 | queued |
-| 1i | image set = least set from exe closed under imports + statically resolved LoadLibrary of reached code (not every dll file); atimgpud, d3dx9_31, gdffalloutnv: reached? then lifted (range facts L3a/L2); wine-specs 678c780e → declared_dlls.tsv, every Galaxy/ssce gap = wine (L5 bridge); gpa -I import fix | w18 | claude/fnv-l1-contract-w18 e999ed27 | doing |
+| 1i | image set = least set from exe closed under imports + statically resolved LoadLibrary of reached code (not every dll file); atimgpud, d3dx9_31, gdffalloutnv: reached? then lifted (L3a facts bc9f12d7: atimgpud 660 entries green, gdffalloutnv 322 green, d3dx9_31 18,945 entries codemap RED 270 undecodable runs, data-in-code rule L3a); wine-specs 678c780e → declared_dlls.tsv, every Galaxy/ssce gap = wine (L5 bridge); gpa -I import fix | w18 | claude/fnv-l1-contract-w18 e999ed27 | doing |
 | 1s | bootsock argument census (21 wsock32 exe sites → winsock.cpp → SOCK 16..26,30,31): proved value sets with fact chains, certificates for fnvnx_reach_violation; unresolved GPA/LoadLibrary reaching wsock32? (L4) | w18 | claude/fnv-l1-contract-w18 | queued after closure roles |
 | 3h2 | cross-root headers = admitted headers trees only (platform/include for fnvl_host.h, L3a lift/rt); include of another root's own tree refused | w16 | claude/fnv-l1-contract-w16 | with headers class |
 | 3z | distro compiler spec defaults neutralised by rule: flag set = diff(distro gcc, GNU msvcmodel gcc 13.3) of -Q --help and -dM; all distro-compiled roots (L6A dk root) | w16 | claude/fnv-l1-contract-w16 | queued |
-| 3q | one file per gate (gates.d/) so gate branches stop conflicting in gates.json/test_gates.py | - | - | after MERGER items 1-3 |
+| 3q | one file per gate (verify/gates.d/<name>.json, gates.json deleted, test_gates expected set from dir) + no vacuous green (gate declares `covers`; universe 0 with a covered admitted root = red) | w10 | claude/fnv-l1-contract-w10 | queued after DECL_FACTS |
+| 3j | gate_pure cross-root imports (admit.json `imports`), z3 on EXTERNAL list pinned (ASM-009) (L3b) | w14 | claude/fnv-l1-contract-w14 | queued |
+| 3t | tests needing game data declare the pinned gamedata external; absent = blocked: env (never green); test_boot_job dummy exe deleted | w4 (w8) | claude/fnv-l1-contract-w8 25977efc | doing |
 | 3x | fixture roots: per-unit gate + expected finding, never linked or in a universe (L3b forms/fpexact tests) | w16 | claude/fnv-l1-contract-w16 | queued |
 | 3w | recipe: failed_units 054d65c, -Werror=attributes 5171fae, envcheck before any stage 892c248 (L3a, L2) | w14 | claude/fnv-l1-contract-w14 b7df218 | done; L1 line pending |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
@@ -49,7 +51,7 @@ Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP i
 
 Assumptions (w10 a2bd503, code 2f1bbe2 on e35b870): gate GREEN, mentions 96/96; 52 records = 9 OWNER + 43 REMOVE (removed_by: gate 3, planned 18, no gate yet 22, OPEN 0); queued at MERGER. Next w10: objstub DECL_FACTS/DECL_SOURCE from declared_machine.tsv header (no-galaxy).
 
-MERGER serial queue: w16 b57061c8 → w14 2d8176a (EMLINK) → w17 cdc0041 (datamodel + ftoi (c)) → L2 w5 3b35851 → L2 w4 0f9e337 (order) → w10 a2bd503 → L6 w4 (d3d9total) → w5 → w8.
+MERGER serial queue: w16 885852ac (green 4043444, 171 s) → L2 w4 5380477 (fnvnx_order, no gate files) → w14 2d8176a (EMLINK) → w17 cdc0041 → L2 w5 77836bf → w10 a2bd503 → L6 w4 (d3d9total) → w5 → w8 25977efc. Gate-file conflicts resolved by union until gates.d lands (orchestrator).
 
 ## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
 
