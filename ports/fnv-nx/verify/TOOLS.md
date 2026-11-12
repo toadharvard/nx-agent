@@ -100,7 +100,7 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
    judged, the worst verdict stands.
 Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule) (ASM-050); the pristine cl symbol
-names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+names are the exe's contract (N1: byte-equal, one symbol map) (ASM-053); an external decorated name denotes one entity link-wide (ASM-054).
 Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 ```
 
@@ -271,7 +271,7 @@ Items of the universe and their certification:
   writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
                                   declared seed unit: no other code of the product makes a hive key
 generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
-duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions: regsites.tsv is complete over the exe and the
+duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions (ASM-051): regsites.tsv is complete over the exe and the
 modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
 code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).
 ```
@@ -357,7 +357,7 @@ A row is certified iff its body is proven by the symbol table of a build product
 Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
 only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
 no proven symbol), external (l3 or another owner's row that no other root defines).
-The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption: objects.json lists every global, weak
+The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption (ASM-052): objects.json lists every global, weak
 and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
 

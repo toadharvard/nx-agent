@@ -35,7 +35,7 @@ COFF symbol name of Y, and that name is decorated (`?...`). No row, an `unnamed:
 undecorated one (extern "C", every asm/x87/register CRT helper: `_ftol2`, `_CI*`, `_alloca_probe`, with no name table) is
 not provable: the caller is not N2. Proof: R5 derives convention, stack words, varargs and sret from the decorated name;
 byte-equality of the full names gives equality of all of them. Assumptions: the `names` plugin ran on every native unit
-(recipe rule: guest compiler plus plugins) (ASM-050); the pristine cl names are the exe's contract (N1).
+(recipe rule: guest compiler plus plugins) (ASM-050); the pristine cl names are the exe's contract (N1) (ASM-053).
 Gates: `n2_data`, `n2_call`, `n2_vcall`, `xc` (`contract/gate_data.py`, `gate_call.py`, `gate_vcall.py`, `gate_xc.py`;
 rows come from `contract/registry.py`; a function with a row is not N2 and becomes LIFTED in `bodysel`).
 

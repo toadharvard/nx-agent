@@ -727,6 +727,55 @@
    "status": "REMOVE",
    "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
    "owner": "L2"
+  },
+  {
+   "id": "ASM-051",
+   "text": "regsites.tsv is complete over the exe and the modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only code that reaches the hive, and the implementation creates no key by itself.",
+   "used_by": [
+    "ports/fnv-nx/contract/hive.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a gate that the key and value-name arguments of every Reg* call site are statically resolved (the class of gpa's dynamic-name rule)",
+   "owner": "L1+L5"
+  },
+  {
+   "id": "ASM-052",
+   "text": "objects.json lists every global, weak and unique symbol of every object of the root (recipe.symbols).",
+   "used_by": [
+    "ports/fnv-nx/contract/imports.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: recipe link check (w15) that objects.json equals the defined global and weak symbols read from the objects",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-053",
+   "text": "The pristine cl symbol names are the exe's contract (N1: byte-equal, one symbol map).",
+   "used_by": [
+    "ports/fnv-nx/contract/gate_call.py",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/RULES.md"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-054",
+   "text": "An external decorated name denotes one entity link-wide.",
+   "used_by": [
+    "ports/fnv-nx/contract/gate_call.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a link check that no decorated name has two definitions of different entities (the xc gate judges static initializers only and does not prove it)",
+   "owner": "L1"
   }
  ]
 }
