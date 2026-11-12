@@ -463,3 +463,10 @@ Update 2026-11-12, at 698adefb:
 - int3 8e40a0e54 = int3 + w5's invariance ecdcd89a.
   - test_gate_lift is all pass.
   - test_gate_flags has 1 red: pf_prove_no_form picked its "no Form" example by mnemonic (cpuid), and int3's forms now cover cpuid. That is measure-and-pick, so w5 derives the example from the real Form set by rule. Not parked.
+
+## 2026-11-12 10:22
+- int-l3a 380e3cde3 has none of int3's recipe fixes (901c3c54e..8e40a0e54), so the lift/rt and lift/pack reds are refused recipes. w20 is asked to merge int3 8e40a0e54. w8 triages the other roots.
+- L1 w19 derives the selftests universe from admit.json. lift/fnvlift, lift/test and lift/tools declare selftests and have no tests/ dir.
+  - Decision: each lift/test test file moves to the tests/ of the root it imports (static import graph; ambiguous cases go to the lead).
+  - lift/test keeps only harness and drops selftests, or is removed if empty.
+  - w6 on int3.
