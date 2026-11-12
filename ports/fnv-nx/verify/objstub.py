@@ -48,21 +48,15 @@ NOT PROVEN: that the pointer called is the host exit slot (the contract row says
 `fnvnx_reach_violation` is also `reach-not-exit` if its definition does not end that way.
 
 (A) ASSUME. `fnvnx_assume_violation(asm_id, value)` (C linkage; noreturn; like `fnvnx_reach_violation` its definition ends in the call through the
-host exit slot on every path, else `assume-not-exit`) is the exit of a branch that an ACCEPTED assumption (verify/ASSUMPTIONS.json status OWNER)
-makes unreachable. It is the second contract symbol of an assertion, not a trap path. A call is accepted iff all hold, per site:
-(a) w0 is a literal: an integer c (id `ASM-%03d` % c) or a pointer to a C string in a data section of the object (its text is the id),
-    and the record of that id has status OWNER (`assume-id-nonliteral`; `assume-id-not-owner`: REMOVE, missing or unknown id);
-(b)+(d) a conditional edge (B.cond, CBZ/CBNZ, TBZ/TBNZ) that EVERY path from the entry to the call takes (removing the edge makes the call
-    unreachable) belongs to a branch whose condition depends on the value argument (a label of x1) and on a symbol N (`assume-unguarded`);
-(c) at least one such N is a domain: a global or weak OBJECT symbol that an object of a unit defines which a GENERATOR stage of the root's
-    recipe outputs (`recipe.generated_outputs`; objstub.generated_domains), never a hand-written table (`assume-domain-not-generated`).
-The dependence is a forward may-dataflow on labels (assume_guards): x0-x7 start as argN; an instruction labels what it writes with the union of
-the labels of what it reads (the flags are one register, NZCV) and with `sym:N` when it carries a data relocation to N (any relocation kind but
-a branch); a call returns x0 with the labels of x0-x7 and clears the rest of the caller-saved set; memory is not tracked, so a spill drops
-labels (fewer accepted, never more). NOT DECIDED (stated, reported to the L1 lead): which of the two edges of the guard is the complement of
-the domain (the polarity), and that the table is read as a membership test: the rule proves that the call is controlled by the value and by
-the generated table, not that the branch is the complement of the table's total domain. Two guard edges joined by `or` (no single edge on every
-path) are `assume-unguarded` (red, the safe side). The result of the gate holds "assume_calls": {sites, accepted, red, by_id} over all objects.
+host exit slot on every path, else `assume-not-exit`) is the exit of a miss of a total domain that an ACCEPTED assumption (verify/ASSUMPTIONS.json
+status OWNER) declares. It is the second contract symbol of an assertion, not a trap path. Polarity holds by construction: the ONLY caller is a
+check function that a generator stage of the root's recipe writes (`fnvnx_dom_<name>[]` and `fnvnx_dom_<name>_check(v)`: hit returns v, miss
+calls ASSUME with the id the generator writes from its declared input); the generator is the one place the polarity is written and its test
+proves hit -> return, miss -> violation. A call is accepted iff, per site: (a) it lies in an object of a unit that a generator stage outputs
+(`recipe.generated_outputs`; else `assume-direct-call`: hand-written code never calls it); (b) w0 is a literal, an integer c (id `ASM-%03d` % c)
+or a pointer to a C string in a data section of the object (its text), and the record of that id has status OWNER (`assume-id-nonliteral`;
+`assume-id-not-owner`: REMOVE, missing or unknown). A reference that is not a call is `assume-address-taken`. The gate result holds
+"assume_calls": {sites, accepted, red, by_id} over all objects.
 
 (W) WINE FIXME. `fnvnx_wine_fixme(uint32_t id)` (C linkage, defined by the runtime's owner; writes one line and RETURNS) marks a body that
 does exactly what Wine 9.0's simplified implementation of an API does (nothing, or a fixed value). For V the BL of it is transparent: it
@@ -477,97 +471,6 @@ def assume_id(obj, v):
     return None
 
 
-def assume_guards(words, a, b, rels, obj, dec, sites):
-    """{site offset: [value labels, symbols]}: for every call site of ASSUME, the data-flow labels that guard it.
-    Labels (a forward may-dataflow, union at joins, over the CFG of constprop in which a call returns and clobbers the AAPCS64
-    caller-saved registers, and ASSUME/REACH calls end the path): x0-x7 start as \"arg0\"..\"arg7\"; an instruction writes to each register of its write
-    set (and to the flags when it writes NZCV) the union of the labels of its read set (and of the flags when it reads NZCV);
-    an instruction carrying a data relocation to symbol N adds \"sym:N\" to what it writes. Memory is not tracked (a spill drops the labels:
-    fewer sites are accepted, never more). A conditional branch (B.cond, CBZ/CBNZ, TBZ/TBNZ) has the labels of the flags / its register.
-    The site is guarded by the edge e of a conditional branch iff removing e makes the site unreachable from the entry (every path to
-    the site takes e). Result: the labels of x1 before the call (without sym:), and the sorted symbols N such that a dominating edge
-    belongs to a branch whose condition has \"sym:N\" and a label of x1 in common."""
-    nz = "nzcv"
-    def lab(w, st, flags, inf, rel):
-        r = set(x for x in inf["R"].split(",") if x)
-        out = set()
-        for n in r:
-            i = regidx(n)
-            if i is not None:
-                out |= st[i]
-        if nz in r:
-            out |= flags
-        if rel and w >> 26 not in (0b100101, 0b000101) and not (rel[1] in BRANCH[obj.w64]):
-            out.add("sym:" + obj.syms[rel[0]][0])
-        return frozenset(out)
-    empty = frozenset()
-    entry = tuple(frozenset({"arg%d" % i}) if i < 8 else empty for i in range(64))
-    ins, work = {a: (entry, empty)}, [a]
-    succ = {}
-    cond = lambda w: w >> 24 == 0x54 or (w >> 25) & 63 in (0b011010, 0b011011)
-    while work:
-        o = work.pop()
-        w, rel = words[o], rels.get(o)
-        st, flags = ins[o]
-        inf = dec.get(o)
-        if inf is None:
-            raise Unanalysable("LLVM does not decode the word")
-        L = lab(w, st, flags, inf, rel)
-        regs = list(st)
-        for n in (x for x in inf["W"].split(",") if x):
-            i = regidx(n)
-            if i is not None:
-                regs[i] = L
-        fl = L if nz in inf["W"].split(",") else flags
-        callee = rel and w >> 26 in (0b100101, 0b000101) and obj.syms[rel[0]][0]
-        nxt = [] if callee in (REACH, ASSUME) else succ_of(w, o)
-        if w >> 26 == 0b100101 or isblr(w):   # a call: x0 gets the labels of every argument register, the rest of the caller-saved set none
-            args = frozenset().union(*[st[i] for i in range(8)])
-            for k in CALLER_SAVED:
-                regs[k] = empty
-            regs[0] = args
-            fl = empty
-        out = (tuple(regs), fl)
-        succ[o] = [t for t in nxt if t in words and a <= t < b]
-        for t in succ[o]:
-            new = out if t not in ins else (tuple(x | y for x, y in zip(ins[t][0], out[0])), ins[t][1] | out[1])
-            if new != ins.get(t):
-                ins[t] = new
-                work.append(t)
-    def reach(cut):   # offsets reachable from the entry without the edge CUT = (from, to)
-        seen, wk = set(), [a]
-        while wk:
-            o = wk.pop()
-            if o in seen:
-                continue
-            seen.add(o)
-            wk += [t for t in succ.get(o, []) if (o, t) != cut]
-        return seen
-    res = {}
-    for x in sites:
-        if x not in ins:
-            res[x] = [[], []]
-            continue
-        val = {l for l in ins[x][0][1] if not l.startswith("sym:")}
-        syms = set()
-        for o, nx in succ.items():
-            w = words[o]
-            if not cond(w) or len(set(nx)) != 2 or o not in ins:
-                continue
-            st, flags = ins[o]
-            inf = dec.get(o)
-            if w >> 24 == 0x54:
-                c = flags
-            else:
-                c = st[w & 31]
-            if not c & val:
-                continue
-            if any(x not in reach((o, t)) for t in set(nx)):
-                syms |= {l[4:] for l in c if l.startswith("sym:")}
-        res[x] = [sorted(val), sorted(syms)]
-    return res
-
-
 class SimFail(Exception):
     pass
 
@@ -926,8 +829,7 @@ def check_obj(path, terms, os_layer):
                 if sites and sym == ASSUME:
                     dd = {x: dec.get(soff + x) for x in words}
                     cp = constprop(words, a, b, rel, o, dd, sites, raw=True)
-                    gd = assume_guards(words, a, b, rel, o, dd, sites)
-                    extra[key] += [[name, x - a, assume_id(o, cp[x]), gd[x][0], gd[x][1]] for x in sites]
+                    extra[key] += [[name, x - a, assume_id(o, cp[x])] for x in sites]
                 elif sites:
                     cp = constprop(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, sites)
                     extra[key] += [[name, x - a, cp[x]] for x in sites]
@@ -1076,38 +978,49 @@ def names_of(r, name):
     return [name] + r.get("alias", {}).get(name, [])
 
 
-def assume_verdict(aid, syms, registry, domains):
-    """None (the call of ASSUME is accepted) or (finding kind, reason): the rule of judge, per call site."""
+def assume_verdict(aid, generated, registry):
+    """None (the call of ASSUME is accepted) or (finding kind, reason): the rule of judge, per call site. GENERATED: the call lies in an
+    object of a unit that a generator stage of the root's recipe outputs."""
+    if not generated:
+        return "assume-direct-call", "hand-written code calls %s; only a generated check function may" % ASSUME
     if aid is None:
         return "assume-id-nonliteral", "the id passed to %s is not an integer or string literal" % ASSUME
     if registry.get(aid) != "OWNER":
         return "assume-id-not-owner", "%s is %s in verify/ASSUMPTIONS.json" % (aid, registry.get(aid, "not a record"))
-    if not syms:
-        return "assume-unguarded", "no conditional edge that every path takes, on the value and on a table, guards the call"
-    if not set(syms) & set(domains):
-        return "assume-domain-not-generated", "the guards depend on %s, none a generated table" % ", ".join(syms)
     return None
-
-
-def generated_domains(objs, generated):
-    """OBJS [(id, path)], GENERATED {ids of the units a generator stage of the recipe outputs} -> the names of the global/weak OBJECT symbols
-    those objects define: the total domains that ASSUME's guard may depend on. An object not in GENERATED contributes none."""
-    out = set()
-    for oid, path in objs:
-        if oid in generated:
-            out |= {x[0] for x in Obj(path, lite=True).syms if x[3] == 1 and x[4] in (1, 2) and 0 < x[5] < 0xFF00}
-    return out
 
 
 def assume_counts(results, assume):
     """{"sites": N, "accepted": N, "red": N, "by_id": {id: accepted}} over every call of ASSUME in RESULTS (None assume: nothing accepted)."""
-    registry, domains = assume if assume else ({}, set())
+    registry, gen = assume if assume else ({}, set())
     n = acc = 0
     by = {}
-    for r in results.values():
-        for _, _, aid, _, syms in r.get("assume", []):
+    for oid, r in results.items():
+        for _, _, aid in r.get("assume", []):
             n += 1
-            if not assume_verdict(aid, syms, registry, domains):
+            if not assume_verdict(aid, oid in gen, registry):
+                acc += 1
+                by[aid] = by.get(aid, 0) + 1
+    return {"sites": n, "accepted": acc, "red": n - acc, "by_id": dict(sorted(by.items()))}
+
+
+def judge(results, rows, facts, wine=None, declared=None, assume=None):
+    """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
+    -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
+    V: certified iff its row equals the result. indirect-noreturn-tail: certified iff every path ends in the tail and the function is
+    REACH or has a row of kind `exit`. A call of REACH: accepted iff w0 is a constant that is in FACTS; every fact needs a call site.
+    WINE (rows of wine_fixme.tsv, {id: (contract name, wine_ref, kind, value)}, None = empty): a function that calls it and is
+    otherwise V (kind WINE-V) is certified iff it passes exactly one id on every path, the id has a row and the result matches it.
+    ASSUME = ({assumption id: status}, {ids of the objects of generated units}), None = both empty: a call of fnvnx_assume_violation is accepted
+    iff it lies in an object of a unit that a generator stage of the root's recipe outputs (else assume-direct-call) and its first argument
+    is a literal id whose record is OWNER (assume-id-nonliteral, assume-id-not-owner). See (A) above."""
+    registry, gen = assume if assume else ({}, set())
+    n = acc = 0
+    by = {}
+    for oid, r in results.items():
+        for _, _, aid in r.get("assume", []):
+            n += 1
+            if not assume_verdict(aid, oid in gen, registry):
                 acc += 1
                 by[aid] = by.get(aid, 0) + 1
     return {"sites": n, "accepted": acc, "red": n - acc, "by_id": dict(sorted(by.items()))}
@@ -1125,7 +1038,7 @@ def judge(results, rows, facts, wine=None, declared=None, assume=None):
     call takes belongs to a branch whose condition depends on the call's value argument and on a symbol of the domain set, i.e. a global
     object of a unit that a generator stage of the root's recipe outputs (assume-unguarded: no such guard; assume-domain-not-generated: guards
     depend on tables, none of them generated). The domain set is the generated tables only: a hand-written table is red."""
-    registry, domains = assume if assume else ({}, set())
+    registry, gen = assume if assume else ({}, set())
     items, out, vflag, exited, used = [], [], set(), set(), set()
     wine = wine or {}
     for oid, r in results.items():
@@ -1171,9 +1084,9 @@ def judge(results, rows, facts, wine=None, declared=None, assume=None):
         for sym0, kind0 in ((REACH, "reach-not-exit"), (ASSUME, "assume-not-exit")):
             if sym0 in funcs and sym0 not in exit_ok:
                 out.append((oid, sym0, kind0, "the definition does not end in a call through a pointer on every path"))
-        for name0, off, aid, val, syms in r.get("assume", []):
+        for name0, off, aid in r.get("assume", []):
             for name in names_of(r, name0):
-                bad = assume_verdict(aid, syms, registry, domains)
+                bad = assume_verdict(aid, oid in gen, registry)
                 if bad:
                     out.append((oid, name, bad[0], "%s, at +0x%x of %s" % (bad[1], off, name)))
         for key, sym, pre in (("wine", WINE, "wine-fixme"), ("declared", DECL, "declared-machine")):

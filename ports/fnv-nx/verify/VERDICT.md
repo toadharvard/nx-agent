@@ -106,11 +106,10 @@ gates:
 - `fnvnx_reach_violation` itself is the one function, besides the process-exit import, whose body may end in the
   host exit slot.
 
-A branch that an accepted assumption makes unreachable goes to `fnvnx_assume_violation(asm_id, value)` (the same exit through the host
-slot). `objstub` accepts a call only if `asm_id` is a literal whose record in `ASSUMPTIONS.json` is OWNER, the call is controlled by a
-conditional edge that depends on the reported value and on a table a generator stage of the root's recipe outputs, and the table is a
-global object of such a unit; rule, red kinds and the stated limit (the polarity of the guard is not decided at the machine level): `objstub.py`
-(A). The first consumer is the L5 errno translation under ASM-004.
+A miss of a total domain that an accepted assumption declares goes to `fnvnx_assume_violation(asm_id, value)` (the same exit through the host
+slot). Its only caller is a check function a generator stage of the root's recipe writes (`fnvnx_dom_<name>_check`); `objstub` accepts a call
+only inside an object of such a generated unit with a literal `asm_id` whose record in `ASSUMPTIONS.json` is OWNER. A direct call from
+hand-written code is red. Rule: `objstub.py` (A). The first consumer is the L5 errno translation under ASM-004.
 
 ## State of the product gates
 
