@@ -126,3 +126,16 @@ Update 2026-11-12, at 698adefb:
 - Merged base int2 (lift-gates df9cb8d0 + lift b8172736, 7 conflicts resolved by stated rules): w6 (doing). w8's item 16 builds on int2. w8 extracts citest on w8-t16 meanwhile.
 - w7: a new facts invariant. Flow-reached bytes or dataflow-named sites outside ranges must be 0 over 7 images (L1 w18: atimgpud 0x100092d4; exe 0xda284a and atimgpud 0x10001608 covered). Doing, as part of the 7-image facts commit.
 - w4 9d71e6cd: premise F (fresh stack space) is conditional. Totals are reported as unconditional, cond:no_s4_arith, cond:fresh and open, over 7 images at 9d71e6cd on facts 2eeea27b (doing). REMOVE record for F requested from L1, owner L3a.
+
+## 08:45 update (head 7b10290c)
+- w3-i merged as 7b10290c.
+  - (a) Tools import their siblings from their own root. 25 of 25 entry points start under python3 -I; before the fix, 3 failed with ImportError. Only imports are tested; full runs are queued for w3.
+  - (b) lift/rt/build.json keeps only per-root flags: -O2, -Werror=attributes, -std=gnu++17, -DFNVNX_SDD=1. The admit.json "target" field is L1's.
+  - (d) modlift_closure_test is on farm 2 (3 h timeout).
+  - (c) The binkw32 liftgen --jtab run is in progress (doing, w3).
+- Farms (orchestrator):
+  - farm 1, session_01KmtZKU7i9iyCYMN5hkeoJW: lifted pack builds, from w1.
+  - farm 2, session_01KmtZKSeQ4EmE5d595KdsK1: idxrange (w2), pcsrc (w4), modlift_closure (lead).
+  - Plugin rule: claude/fnv-first-root-next 58c113f0.
+- The gate_eh ids are ASM-222/223/224, the orchestrator's. L1 withdrew 225..227. w6 renumbers on lift-gates and int2. L3b confirms ASM-006/009 = the w10 text; used_by is derived by the gate.
+- L1 order: L1 now works only on the budget, guest_flags, the toolchain profile and the first-root merge. The py_modules key (w14 62623608) and the pins (w17) wait until after that merge. So item 16's keystone/capstone stage waits on L1 (blocked).
