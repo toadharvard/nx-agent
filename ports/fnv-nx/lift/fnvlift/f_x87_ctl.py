@@ -115,7 +115,7 @@ def mmx_prepass(cx):
     """cx.mmx_ok = the addresses where the x87 register file is provably CANONICAL for MMX (every carrier an M80 image, TOP = 0, all tags valid: rt/fnvl_x87.h MMX_ENTER) on EVERY path.
     Forward must-dataflow, optimistic start, AND at joins. A non-EMMS MMX instruction establishes the state; EMMS (tags empty), any x87 instruction (changes carriers, TOP, tags), any call
     (the callee may run x87 code) and any entry from outside the straight flow (function start, address-taken labels, jump-table targets, other universe entries, instructions after a call)
-    leave or start it unknown. Proof: the state is established only by MMX_ENTER, and every instruction that can change the registers or enters from outside kills it (A-RESUME in rt/fnvl_x87.h
+    leave or start it unknown. Proof: the state is established only by MMX_ENTER, and every instruction that can change the registers or enters from outside kills it (ASM-208 in rt/fnvl_x87.h
     covers an exception handler that resumes inside the region)."""
     I = cx.insns
     from . import universe
@@ -304,10 +304,10 @@ def env(cx, ins, b0, g):
     recomputed from its contents by every store, SDM 8.1.7, so 00/01/10 carry no state); frstor also loads ST(0..7) as 80-bit images into M80 carriers; FIP and FDP are loaded into
     c->fip / c->fdp.
     STORES (fnstenv, fnsave): FCW, FSW (FSWV: TOP, C0..C3, C1, sticky bits), FTW from the register contents, FIP, FCS | FOP << 16, FDP, FDS from the last-instruction state (c->fip, c->fdp:
-    rt/fnvl_x87.h, SDM 8.1.8, assumptions A-FDP A-FDS A-FOP A-RES there); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
-    Assumptions: A-EMPTY a register that the image marks non-empty but whose carrier is empty holds the real indefinite (the value the tree gives every read of an empty register:
-    dyn_rd; an empty register keeps the 80-bit image it last held, fv_free, which an MMX read sees, but every x87 read of it gives the indefinite; fnsave writes the indefinite for an empty register too); A-ES the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending
-    in the model (invariant I-FPMASK, fnvlift/fpfacts.py: all exceptions masked, FSWV never reports them)."""
+    rt/fnvl_x87.h, SDM 8.1.8, assumptions ASM-212 ASM-213 ASM-214 ASM-215 there); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
+    Assumptions: ASM-210 a register that the image marks non-empty but whose carrier is empty holds the real indefinite (the value the tree gives every read of an empty register:
+    dyn_rd; an empty register keeps the 80-bit image it last held, fv_free, which an MMX read sees, but every x87 read of it gives the indefinite; fnsave writes the indefinite for an empty register too); ASM-211 the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending
+    in the model (invariant ASM-204, fnvlift/fpfacts.py: all exceptions masked, FSWV never reports them)."""
     if cx.xm == 's':
         raise X87Dyn()
     d32 = 0 if ins.prefix[2] == 0x66 else 1
