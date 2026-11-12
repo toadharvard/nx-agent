@@ -16,15 +16,26 @@
  * in one 64-bit store, so a reader never sees the key of one target with the entry of another. An address that is
  * no entry does not return. The hit path is a load, a compare, a branch and a shift.
  *
+ * A bridge is one function per descriptor, so it is not told which exe address it stands for. The call sequence
+ * therefore stores the address in the thread-local word `fnvnx_call_fp` (shim/include/fnvl_host.h) just before the call, on
+ * the hit path and the miss path alike; a bridge reads it first thing, a native body ignores it.
+ *
  * The descriptor is the call's shape for a bridge, a string `conv:ret:arg,arg,...`:
  *   conv   this   the first argument is the object, in ecx on x86 (a member function, MSVC's default)
  *                 (the object is listed among the arguments, first)
  *          fast   __fastcall: the first two integer arguments in ecx, edx
  *          stack  everything on the stack (__cdecl and __stdcall alike: the callee's own `ret N` tells them apart)
  *   ret    v | i (32-bit integer or pointer) | q (64-bit integer) | f | d | a<N> (an N-byte aggregate returned in
- *          registers) | m<N> (returned in memory the caller provides)
- *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h (a homogeneous
- *          floating-point aggregate) | s<N>r (passed as a reference to a copy)
+ *          general registers) | a<N>h<elt> (a homogeneous aggregate, elt = f d q h v8 v16 as the backend's part mode says, returned in
+ *          floating-point registers) | m<N> (returned in memory the caller provides); a trailing x on an `a` result: the AAPCS side
+ *          returns it in registers but the x86 callee returns it through the hidden pointer (a type that is not a POD, see msvc_pod)
+ *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h<elt> (a
+ *          homogeneous aggregate) | s<N>r (passed as a reference to a copy)
+ * (A homogeneous aggregate names its element type: {float, float} and {double} are both 8 bytes and travel in
+ * different registers, so the size alone does not say how a bridge receives or returns it.)
+ *
+ * The descriptors of a unit are the objects' own fact: section .fnvnx.disp (not loaded), one text line per distinct
+ * descriptor of the unit. lift/tools/bridgegen.py reads it from every object of every admitted root.
  * The convention is the declaration's own: CC1 keeps MSVC's __cdecl / __stdcall / __fastcall / __thiscall as the
  * type attribute fnvnx_cc (shim/include/fnvnx_compat.h), which the fnvnx_names plugin registers.
  *
@@ -42,6 +53,13 @@
 #include "gimple.h"
 #include "gimple-iterator.h"
 #include "ssa.h"
+#include "cp/cp-tree.h"
+#include "langhooks.h"
+/* ONE .so SERVES BOTH FRONT ENDS (rule CC1PLUS-SYMS, as in fnvnx_names.cc): what only cc1plus defines is weak, null under cc1, and used only behind
+ * fnv_cxx_fe(). This plugin reads the C++ front end's class declarations for one thing, msvc_pod; DECL_OVERLOADED_OPERATOR_IS reads ovl_op_info. */
+#define FNVNX_CXX_ONLY(sym) extern __typeof__(sym) sym __attribute__((weak))
+FNVNX_CXX_ONLY(ovl_op_info);
+static inline bool fnvnx_cxx_fe() { return !strncmp(lang_hooks.name, "GNU C++", 7); }
 #include "tree-ssanames.h"
 #include "tree-phinodes.h"
 #include "cfghooks.h"
@@ -55,7 +73,14 @@
 #include "cfgloop.h"
 #include "attribs.h"
 #include "builtins.h"
+#include "rtl.h"
+#include "target.h"
+#include "tm_p.h"            /* the backend's own prototypes (aarch64_init_cumulative_args, behind INIT_CUMULATIVE_ARGS) */
 #include "calls.h"
+#include "output.h"
+#include "langhooks.h"
+#include <string.h>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -75,6 +100,21 @@ static tree get_dispatch()
   return dispatch_decl;
 }
 
+/* The exe address of the call in progress, for a bridge: a bridge is one function per descriptor and gets only the
+ * call's own arguments, so the target travels in this thread-local word, which the call sequence stores
+ * immediately before the call (the platform defines it, platform/win32/thread.cpp; declared by shim/include/fnvl_host.h). */
+static tree fp_var;
+static tree get_fp_var()
+{
+  if (!fp_var) {
+    fp_var = build_decl(UNKNOWN_LOCATION, VAR_DECL, get_identifier("fnvnx_call_fp"), unsigned_type_node);
+    DECL_EXTERNAL(fp_var) = 1; TREE_PUBLIC(fp_var) = 1; DECL_ARTIFICIAL(fp_var) = 1; TREE_USED(fp_var) = 1;
+    set_decl_tls_model(fp_var, TLS_MODEL_INITIAL_EXEC);
+    varpool_node::get_create(fp_var);
+  }
+  return fp_var;
+}
+
 static tree new_site()
 {
   char name[64];
@@ -90,22 +130,73 @@ static tree new_site()
 
 /* ---- the call's shape */
 
-static bool hfa(tree t, tree *elt, int *n)
+/* Is `t` returned through the hidden pointer by the x86 callee? The rule is the one measured on the game's compiler (cl 15.00.30729.01, VC 2008 SP1,
+ * /FAs on 11 types, w4): the returned class itself is judged, never its members' types. It is NOT returned in registers if it has: a user-declared
+ * constructor, copy constructor, copy assignment operator or destructor; a virtual function; a base class; or a private or protected non-static data
+ * member (C++03 8.5.1: not an aggregate). Read from the C++ front end's own declarations of the class; every C++ front-end
+ * symbol used is declared weak at the top of this file and sits behind fnvnx_cxx_fe(). A C unit has no such type: its aggregate is a POD by the language. */
+static bool user_declared_special(tree t)
 {
-  if (SCALAR_FLOAT_TYPE_P(t)) {
-    if (*elt && TYPE_MAIN_VARIANT(*elt) != TYPE_MAIN_VARIANT(t)) return false;
-    *elt = t; return ++*n <= 4;
+  tree mv = TYPE_MAIN_VARIANT(t);
+  for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f)) {
+    if (TREE_CODE(f) != FUNCTION_DECL || DECL_ARTIFICIAL(f)) continue;
+    if (DECL_DESTRUCTOR_P(f)) return true;
+    /* the first declared parameter after `this` */
+    tree p = TYPE_ARG_TYPES(TREE_TYPE(f));
+    if (p && TREE_CODE(TREE_TYPE(f)) == METHOD_TYPE) p = TREE_CHAIN(p);
+    bool ref_to_self = p && p != void_list_node && TYPE_REF_P(TREE_VALUE(p)) && TYPE_MAIN_VARIANT(TREE_TYPE(TREE_VALUE(p))) == mv;
+    bool rest_default = ref_to_self;
+    if (ref_to_self) for (tree q = TREE_CHAIN(p); q && q != void_list_node; q = TREE_CHAIN(q)) if (!TREE_PURPOSE(q)) rest_default = false;
+    if (DECL_CONSTRUCTOR_P(f) && rest_default) return true;                       /* copy constructor */
+    if (DECL_OVERLOADED_OPERATOR_IS(f, NOP_EXPR) && ref_to_self) return true;     /* copy assignment (by reference; by value is the same rule) */
+    if (DECL_OVERLOADED_OPERATOR_IS(f, NOP_EXPR) && p && p != void_list_node && TYPE_MAIN_VARIANT(TREE_VALUE(p)) == mv) return true;
   }
-  if (TREE_CODE(t) == ARRAY_TYPE && TYPE_DOMAIN(t) && TYPE_MAX_VALUE(TYPE_DOMAIN(t)) && tree_fits_shwi_p(TYPE_MAX_VALUE(TYPE_DOMAIN(t)))) {
-    for (HOST_WIDE_INT i = 0; i <= tree_to_shwi(TYPE_MAX_VALUE(TYPE_DOMAIN(t))); i++)
-      if (!hfa(TREE_TYPE(t), elt, n)) return false;
-    return true;
-  }
-  if (TREE_CODE(t) != RECORD_TYPE) return false;
+  return false;
+}
+
+static bool msvc_pod(tree t)
+{
+  if (!fnvnx_cxx_fe()) return true;
+  while (TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
+  if (!CLASS_TYPE_P(t)) return true;
+  /* cl 15.00.30729.01 (VC 2008 SP1, measured by w4 on 11 types) looks at the returned class itself: a member's own type does not matter */
+  if (TYPE_HAS_USER_CONSTRUCTOR(t) || TYPE_POLYMORPHIC_P(t)) return false;
+  if (TYPE_BINFO(t) && BINFO_N_BASE_BINFOS(TYPE_BINFO(t)) > 0) return false;
+  if (user_declared_special(t)) return false;
+  /* C++03 8.5.1: a class with a private or protected non-static data member is not an aggregate */
   for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
-    if (TREE_CODE(f) == FIELD_DECL && !hfa(TREE_TYPE(f), elt, n)) return false;
+    if (TREE_CODE(f) == FIELD_DECL && (TREE_PRIVATE(f) || TREE_PROTECTED(f))) return false;
   return true;
 }
+
+/* How the target passes a value is asked of the pinned compiler's own backend, never classified here (ASM-001): pass_by_reference, then
+ * targetm.calls.function_arg on a fresh cumulative state (the argument is the first of the call), and for a result targetm.calls.function_value.
+ * The rtx says where the value lives: a REG or a PARALLEL of vector registers is a homogeneous aggregate, and the part mode names the element;
+ * general registers, or no register (the stack), are `g`. A part mode that has no element code is an error: no guess. */
+static bool elem_code(machine_mode m, std::string &c)
+{
+  if (m == SFmode) c = "hf"; else if (m == DFmode) c = "hd"; else if (m == TFmode) c = "hq"; else if (m == HFmode) c = "hh";
+  else if (VECTOR_MODE_P(m) && GET_MODE_SIZE(m).to_constant() == 8) c = "hv8";
+  else if (VECTOR_MODE_P(m) && GET_MODE_SIZE(m).to_constant() == 16) c = "hv16";
+  else return false;
+  return true;
+}
+
+/* "" (general registers or stack), or the element code of the vector registers rtx `r` lives in; false: a mode with no code */
+static bool reg_class(rtx r, std::string &c, location_t loc)
+{
+  c = "";
+  if (!r) return true;
+  rtx first = NULL_RTX;
+  if (GET_CODE(r) == PARALLEL) {
+    for (int i = 0; i < XVECLEN(r, 0); i++) { rtx e = XVECEXP(r, 0, i); if (GET_CODE(e) == EXPR_LIST) e = XEXP(e, 0); if (e && REG_P(e)) { first = e; break; } }
+  } else if (REG_P(r)) first = r;
+  if (!first || !FP_REGNUM_P(REGNO(first))) return true;
+  if (!elem_code(GET_MODE(first), c)) { error_at(loc, "DISPATCH1: the backend passes a value in vector registers of mode %s, which has no element code", GET_MODE_NAME(GET_MODE(first))); return false; }
+  return true;
+}
+
+static std::set<std::string> descs;                  /* every descriptor this unit uses: .fnvnx.disp */
 
 static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t loc)
 {
@@ -123,29 +214,52 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
     { error_at(loc, "DISPATCH1: type %qT in an indirect call has no shape", t); return false; }
   if (!TYPE_SIZE_UNIT(t) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { error_at(loc, "DISPATCH1: type %qT has no constant size", t); return false; }
   std::string n = std::to_string((unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t)));
-  if (ret) { out += (aggregate_value_p(t, fntype) ? "m" : "a") + n; return true; }
-  tree elt = NULL_TREE; int cnt = 0;
-  out += "s" + n + (TREE_ADDRESSABLE(t) || tree_to_uhwi(TYPE_SIZE_UNIT(t)) > 16 ? "r" : AGGREGATE_TYPE_P(t) && hfa(t, &elt, &cnt) && cnt ? "h" : "g");
+  machine_mode mode = TYPE_MODE(t);
+  std::string he;
+  if (ret) {
+    if (aggregate_value_p(t, fntype)) { out += "m" + n; return true; }
+    if (!reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
+    /* "x": the x86 callee returns it through the hidden pointer although the AAPCS side returns it in registers (a type that is not a POD) */
+    out += "a" + n + he + ((TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) && !msvc_pod(t) ? "x" : ""); return true;
+  }
+  CUMULATIVE_ARGS cum;
+  INIT_CUMULATIVE_ARGS(cum, fntype, NULL_RTX, NULL_TREE, 0);
+  cumulative_args_t pack = pack_cumulative_args(&cum);
+  function_arg_info arg(t, mode, true);
+  if (TREE_ADDRESSABLE(t) || targetm.calls.pass_by_reference(pack, arg)) { out += "s" + n + "r"; return true; }
+  if (!reg_class(targetm.calls.function_arg(pack, arg), he, loc)) return false;
+  out += "s" + n + (he.empty() ? "g" : he);
   return true;
 }
 
-static tree descriptor(gcall *call)
+/* conv of a function type: the declaration's own (fnvnx_cc), METHOD_TYPE is this */
+static const char *conv_of(tree ft)
 {
-  location_t loc = gimple_location(call);
+  const char *conv = TREE_CODE(ft) == METHOD_TYPE ? "this" : "stack";
+  if (tree a = lookup_attribute("fnvnx_cc", TYPE_ATTRIBUTES(ft))) {
+    const char *v = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
+    conv = !strcmp(v, "fast") ? "fast" : !strcmp(v, "this") ? "this" : "stack";
+  }
+  return conv;
+}
+
+static void need_names_plugin()
+{
   static bool checked;
   if (!checked) {
     checked = true;
     if (!lookup_attribute_spec(get_identifier("fnvnx_cc")))
       error("DISPATCH1: the fnvnx_names plugin is not loaded: the calling conventions of the declarations are lost");
   }
+}
+
+static tree descriptor(gcall *call)
+{
+  location_t loc = gimple_location(call);
+  need_names_plugin();
   tree ft = gimple_call_fntype(call);
   if (!ft) { error_at(loc, "DISPATCH1: an indirect call without a function type"); return NULL_TREE; }
-  const char *conv = TREE_CODE(ft) == METHOD_TYPE ? "this" : "stack";
-  if (tree a = lookup_attribute("fnvnx_cc", TYPE_ATTRIBUTES(ft))) {
-    const char *v = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
-    conv = !strcmp(v, "fast") ? "fast" : !strcmp(v, "this") ? "this" : "stack";
-  }
-  std::string d = std::string(conv) + ":";
+  std::string d = std::string(conv_of(ft)) + ":";
   if (!shape(TREE_TYPE(ft), true, ft, d, loc)) return NULL_TREE;
   d += ":";
   /* A parameter's type is the function type's (a class that is passed as a reference to a copy is still the
@@ -158,7 +272,58 @@ static tree descriptor(gcall *call)
     if (parm && parm != void_list_node) parm = TREE_CHAIN(parm);
     if (!shape(t, false, ft, d, loc)) return NULL_TREE;
   }
+  descs.insert(d);
   return build_string_literal(d.size() + 1, d.c_str());
+}
+
+/* The descriptor of a function DEFINITION, from its own type with the same shape() as the call sites (a native body
+ * that lifted code reaches through an exit bridge). The parameters are the declared ones: the list is the
+ * definition's own, `this` first for a method. */
+static bool def_descriptor(tree decl, std::string &d)
+{
+  location_t loc = DECL_SOURCE_LOCATION(decl);
+  tree ft = TREE_TYPE(decl);
+  d = std::string(conv_of(ft)) + ":";
+  if (!shape(TREE_TYPE(ft), true, ft, d, loc)) return false;
+  d += ":";
+  bool first = true;
+  for (tree parm = TYPE_ARG_TYPES(ft); parm && parm != void_list_node; parm = TREE_CHAIN(parm)) {
+    if (!first) d += ",";
+    first = false;
+    if (!shape(TREE_VALUE(parm), false, ft, d, loc)) return false;
+  }
+  return true;
+}
+
+static void emit_lines(const char *section, const std::set<std::string> &lines)
+{
+  if (lines.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t%s,\"\",%%progbits\n", section);
+  for (auto &d : lines) {
+    fprintf(asm_out_file, "\t.ascii\t\"");
+    for (char c : d) { if (c == '"' || c == '\\') fputc('\\', asm_out_file); fputc(c, asm_out_file); }
+    fprintf(asm_out_file, "\\n\"\n");
+  }
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
+/* .fnvnx.defdisp: `<asm name> <descriptor>\n` per emitted definition (any linkage, clones under their own asm name), sorted, unique.
+ * The exe address is not here: exitgen joins by asm name with .fnvnx.sympair and the bound exe VA. */
+static void finish_unit(void *, void *)
+{
+  emit_lines(".fnvnx.disp", descs);
+  need_names_plugin();
+  std::set<std::string> defs;
+  cgraph_node *node;
+  FOR_EACH_DEFINED_FUNCTION(node) {
+    tree decl = node->decl;
+    if (!node->alias && !node->thunk && !TREE_ASM_WRITTEN(decl)) continue;
+    std::string d;
+    if (!def_descriptor(decl, d)) continue;
+    const char *name = targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl)));
+    defs.insert(std::string(name) + " " + d);
+  }
+  emit_lines(".fnvnx.defdisp", defs);
 }
 
 static bool indirect_call(gimple *st)
@@ -226,6 +391,7 @@ static void rewrite(function *fun, gimple *st)
   add_phi_arg(phi, e1, hit_tail, loc); add_phi_arg(phi, e2, miss_tail, loc);
   tree target = make_ssa_name(TREE_TYPE(fp));
   gsi = gsi_for_stmt(st);
+  before(gimple_build_assign(get_fp_var(), k));
   before(gimple_build_assign(target, NOP_EXPR, e));
   gimple_call_set_fn(call, target);
   update_stmt(call);
@@ -268,5 +434,6 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   p.ref_pass_instance_number = 1;
   p.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &p);
+  register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
 }
