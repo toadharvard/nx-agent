@@ -32,6 +32,7 @@ ROOT = T + 'toy'
 TOOLCHAIN = os.path.normpath(os.path.join(HERE, '..'))
 STORE = os.environ.get('GATE_CACHE') or os.path.join(tempfile.gettempdir(), 'fnvnx-toolchain-tests-cache')
 STATS = {'run': 0, 'hit': 0}
+CXX_ONLY_FLAGS = ('-std=gnu++17', '-fno-sized-deallocation', '-fpermissive')   # the C++-only options cc1 warns about
 PRODUCT_FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fms-extensions', '-fshort-wchar', '-frounding-math', '-fsigned-char',
                  '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks', '-fcheck-new', '-fno-sized-deallocation',
                  '-fno-lifetime-dse', '-ffp-contract=off', '-fPIC', '-fpermissive', '-Wno-narrowing', '-march=armv8-a+crc+crypto',
@@ -84,6 +85,8 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
+    if not any(k.endswith(('.cc', '.cpp', '.cxx')) for k in fixtures):   # a root with a C++ unit declares its origin: a C fixture comes with one
+        fixtures = dict(fixtures, **{'zz_cxx.cpp': 'int zz_cxx() { return 0; }\n'})
     files = ({k: v for k, v in fixtures.items()} if native else {})
     for k, v in files.items():
         _w(repo, ROOT + '/' + k, v)
@@ -91,7 +94,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
            '    open("/out/" + n, "w").write(t)\n') % {'gen/' + k: v for k, v in fixtures.items()}
     _w(repo, T + 'gen/lift.py', gen)
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']},
-           'flags': {'c': [], 'cxx': list(flags), 'asm': []}, 'include': [], 'units': 'all', 'external': [ext],
+           'flags': {'c': [f for f in flags if f not in CXX_ONLY_FLAGS], 'cxx': list(flags), 'asm': []}, 'include': [], 'units': 'all', 'external': [ext],
            }
     if not native:
         rec['generated'] = [{'tool': T + 'gen/lift.py', 'args': [], 'inputs': [], 'outputs': ['gen/' + k for k in fixtures]}]

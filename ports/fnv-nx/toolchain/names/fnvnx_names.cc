@@ -45,6 +45,28 @@
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
+#include "langhooks.h"
+/* ONE .so SERVES BOTH FRONT ENDS: guest C units (cc1) load the same plugins as C++ units (cc1plus). GCC loads a plugin with RTLD_NOW, so
+ * every symbol the host does not export fails the load ("undefined symbol"); these exist only in cc1plus (variables and functions of cp/),
+ * so they are weak: null under cc1, where no C tree reaches them (every use is behind a C++-only tree or hook). Rule, checked by
+ * toolchain/tests/test_cc1.py: every plugin loads under cc1 and builds a C unit. */
+#define FNVNX_CXX_ONLY(sym) extern __typeof__(sym) sym __attribute__((weak))
+FNVNX_CXX_ONLY(cp_global_trees);
+FNVNX_CXX_ONLY(scope_chain);
+FNVNX_CXX_ONLY(ovl_op_info);
+FNVNX_CXX_ONLY(cp_type_quals);
+FNVNX_CXX_ONLY(binfo_for_vbase);
+FNVNX_CXX_ONLY(same_signature_p);
+FNVNX_CXX_ONLY(type_memfn_quals);
+FNVNX_CXX_ONLY(most_general_template);
+extern tree cp_build_qualified_type(tree, int, tsubst_flags_t) __attribute__((weak));   /* spelled out: __typeof__ would repeat the default argument */
+extern tree get_class_binding_direct(tree, tree, bool) __attribute__((weak));   /* spelled out: __typeof__ would repeat the default argument */
+FNVNX_CXX_ONLY(skip_artificial_parms_for);
+FNVNX_CXX_ONLY(get_innermost_template_args);
+FNVNX_CXX_ONLY(comptypes);
+FNVNX_CXX_ONLY(cp_walk_subtrees);
+FNVNX_CXX_ONLY(mangle_type_string);
+FNVNX_CXX_ONLY(uses_template_parms);
 #include "context.h"
 #include "stringpool.h"
 #include "attribs.h"
@@ -602,8 +624,24 @@ static bool cl_internal_p(tree d)
   return false;
 }
 
+/* The front end this unit is compiled by. A guest C unit loads the same plugin as a C++ unit (one .so, both front ends); the cp/ trees the
+ * C++ rules read do not exist in it. */
+static bool is_cxx() { return !strncmp(lang_hooks.name, "GNU C++", 7); }
+
+/* RULE (C): every external symbol of a C unit has C linkage, so its name is cl's C name for the declaration, c_name (the `extern "C"` rule
+ * below: `_f` cdecl, `_f@N` stdcall, `@f@N` fastcall, `_v` data; the convention is the declaration's own attribute). A C unit has no
+ * classes, namespaces, templates, overloads, vtables or local classes, so nothing else of this file applies to it. */
+static void name_c_decl(tree d, bool def)
+{
+  Row r; r.sym = asmname(d); r.def = def;
+  if (!DECL_NAME(d)) r.kind = "unnamed:no declaration";
+  else { r.ms = c_name(d); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data"; }
+  rows.push_back(r);
+}
+
 static void name_decl(tree d, bool def)
 {
+  if (!is_cxx()) { name_c_decl(d, def); return; }
   Row r; r.sym = asmname(d); r.def = def;
   M m;
   if (cl_internal_p(d) && !(VAR_P(d) && DECL_VTABLE_OR_VTT_P(d)) && !(VAR_P(d) && DECL_ARTIFICIAL(d))) {
@@ -833,7 +871,7 @@ static void finish_unit(void *, void *)
   /* the SDD2 slot functions: that plugin writes them as assembly in the object that defines the table, and they
    * are named only by the table's entries */
   varpool_node *v;
-  FOR_EACH_DEFINED_VARIABLE(v) {
+  if (is_cxx()) FOR_EACH_DEFINED_VARIABLE(v) {
     tree vt = v->decl, init = DECL_INITIAL(vt);
     if (!DECL_VTABLE_OR_VTT_P(vt) || !init || TREE_CODE(init) != CONSTRUCTOR) continue;
     unsigned HOST_WIDE_INT ix; tree val;
@@ -935,10 +973,12 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     return 1;
   }
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
-  register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
-  register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl, NULL);
-  register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type, NULL);
-  register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
+  if (is_cxx()) {   /* the C++ rules: class keys, parameter forms, local scopes, early names (SDD thunks, vftables) */
+    register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type, NULL);
+    register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
+  }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
 }

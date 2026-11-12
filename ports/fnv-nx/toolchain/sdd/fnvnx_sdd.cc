@@ -45,6 +45,19 @@
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
+/* ONE .so SERVES BOTH FRONT ENDS: guest C units (cc1) load the same plugins as C++ units (cc1plus). GCC loads a plugin with RTLD_NOW, so
+ * every symbol the host does not export fails the load ("undefined symbol"); these exist only in cc1plus (variables and functions of cp/),
+ * so they are weak: null under cc1, where no C tree reaches them (every use is behind a C++-only tree or hook). Rule, checked by
+ * toolchain/tests/test_cc1.py: every plugin loads under cc1 and builds a C unit. */
+#define FNVNX_CXX_ONLY(sym) extern __typeof__(sym) sym __attribute__((weak))
+FNVNX_CXX_ONLY(cp_global_trees);
+FNVNX_CXX_ONLY(scope_chain);
+FNVNX_CXX_ONLY(ovl_op_mapping);
+FNVNX_CXX_ONLY(ovl_op_info);
+FNVNX_CXX_ONLY(lookup_fnfields);
+FNVNX_CXX_ONLY(mangle_type_string);
+FNVNX_CXX_ONLY(comptypes);
+extern bool mark_used(tree, tsubst_flags_t) __attribute__((weak));   /* spelled out: __typeof__ would repeat the default argument */
 #include "context.h"
 #include "tree-pass.h"
 #include "function.h"
