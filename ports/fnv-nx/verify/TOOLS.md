@@ -1353,6 +1353,35 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
+## verify/gate_tlsmodel.py
+
+```text
+Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local reference of a guest object and of a linked guest output uses a
+TLS access model the loader supports, and one symbol is accessed with one model.
+    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
+Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
+objects plus the objects of the roots in its recipe's link.roots (the objects that one linked output is made of), and its linked ELF.
+Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
+NAME the ABI gives a relocation (R_AARCH64_P32_TLS..., R_AARCH64_TLS... for LP64), never a name of the program's text. A relocation is TLS when
+its type name has the family prefix TLS (after an optional P32_) or contains TPREL or DTPREL; the family is the ABI's:
+  TLSGD, TLSLD, TLSDESC (and the dynamic TLS_DTPMOD/TLS_DTPREL/TLS_TPREL/TLSDESC relocations of a linked output): dynamic TLS,
+  TLSIE: initial-exec, TLSLE (and TPREL/DTPREL link-time offsets): local-exec, any other TLS name: unclassified.
+Rules (a finding names the object, the symbol and the relocation):
+  (1) `dynamic-tls`: 0 relocations of the dynamic family, in objects and in the linked output. Loader fact (docs/RUNTIME.md, TLS): the loader gives
+      every thread a per-thread copy of the image template and has no dynamic TLS block (no __tls_get_addr, no TLS descriptors, no DTV).
+  (2) `le-outside`: a local-exec relocation names a symbol that the objects of the link group define (or a section-local symbol): an offset
+      from the thread pointer is only known for a symbol of the same linked output.
+  (3) `ie-required`: a symbol the group does not define (host TLS) must be reached by initial-exec; it is the same finding as (2) for a
+      local-exec relocation, and any other model is rule (1).
+  (4) `mixed-model`: one symbol referenced with initial-exec by one relocation and local-exec by another within a group. A declaration
+      `tls_model("initial-exec")` in a header makes every referencing unit use initial-exec; a unit that did not see it uses another model, so the
+      mixed use is exactly the defect. NOT COVERED (stated gap, owner L3a/L2): the attribute is not recorded in the ELF or in DWARF, so a symbol
+      declared initial-exec that EVERY unit references with local-exec is not seen; closing it needs the declaration as a fact (a plugin note).
+  (5) `unclassified`: a TLS relocation of a name outside the families above.
+Items: every object, every linked ELF, every TLS relocation (object, symbol, relocation name, section, offset). Certified = the items with no
+finding. Counts per relocation family over all roots are in `detail`. No guest root: universe 0, green.
+```
+
 ## verify/gate_argorder.py
 
 ```text
@@ -1389,8 +1418,8 @@ gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe
 Wrapper rule (class): a `FNVNX_PLAT_` identifier may appear only in the `#define FNVNX_PLAT_X <integer>` lines of hostapi.h and in unit files (.c/.cc/.cpp/.S) of the root. Any other includable file (a non-unit file under the root, under a recipe include directory, or in an external include tree) that names one is a red item (`wrapper use in PATH`), and so is a non-define use inside hostapi.h; with that the `-dU` position of a define does not matter.
 Gate `hostapi` (product class, in `gate_admit.REQUIRED_PRODUCT`). For every admitted product root that includes `fnvnx/hostapi.h`: the set of
 service numbers declared in the header (`#define FNVNX_PLAT_<NAME> <integer>`, read by token grammar; names with one number are aliases) equals
-the set of service numbers that some unit of the root expands. Evidence: `unit.ii` of the PP stage, which runs `-dU` (GCC lists exactly the
-macros the unit expands or tests). A used `FNVNX_PLAT_` name with an undeclared number or another value is red. Module ids (`FNVNX_EXT_*`,
+the set of service numbers that some unit of the root expands. Evidence: `unit.du` of the unit's macro-fact stage, which runs `-dU` on the PP
+stage's view (GCC lists exactly the macros the unit expands or tests); the CC input `unit.ii` is the plain preprocessed text. A used `FNVNX_PLAT_` name with an undeclared number or another value is red. Module ids (`FNVNX_EXT_*`,
 including `FNVNX_EXT_DK`, the machine model of deko3d below the product boundary) are no services and no items. No root that includes the
 header: universe 0, green, no exception list. Limit: a use in a function that no code reaches counts; reachability is the job of reach/reachlink.
 Run: `python3 -I ports/fnv-nx/verify/gate_hostapi.py [--header PATH]` (cwd = checkout root, env GATE_OUT).
@@ -1967,10 +1996,10 @@ recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", con
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
-Link: `link` = {script, output, flags, kind pie|exe, roots}. kind pie needs target guest, exe needs host; `roots` lists distinct admitted
+Link: `link` = {script, output, flags, kind pie|exe, roots}. a guest root cannot link kind exe; `roots` lists distinct admitted
 product roots of the same target (never the root itself) whose stored objects are declared inputs of the link stage (in its key); the
-image of a product root lists base roots only, a test root any root (a variant is a product root with `variant_of` in admit.json, checked by
-gate_admit.py: a base product root of the same target, no chain). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
+image of a product root lists base roots only, a test root any root (a variant is `root@NAME`, declared in the `variants` of the root's admit.json entry, checked by
+gate_admit.py: product roots only, `{NAME: {"target"?}}`). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
 refused in every link; linkstrict judges the linked output of every product and test root (no undefined symbol of any binding).
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
@@ -2113,7 +2142,7 @@ recompiled when nothing it reads changed.
     unitstage.py gcc-set --cxx /abs/g++       print the --exe/--tree arguments of `runtime.py tool` for that compiler
 RULE: what a preprocessor run reads is exactly (1) the CONTENT of the files it opens and (2) the EXISTENCE answers for the paths it
   probes (#include search, __has_include, __has_include_next). A stage is given both, exactly.
-  PP stage  `g++ FLAGS -E -dU -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
+  PP stage  `g++ FLAGS -E -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT` (the macro-use fact `-dU` is a stage of its own, unit.du), inputs: the tool runtime (runtime.py tool) and VIEWS
             of the source root (/src) and the include roots (/inc/0..), see unitview.py: every name of the real tree, real content
             only for the files of a set C (the closure), every other file a placeholder `#error fnvnx: file outside the declared
             closure`. The key is f(name trees, content of C, compiler, flags).
