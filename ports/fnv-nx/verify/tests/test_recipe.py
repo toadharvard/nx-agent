@@ -241,11 +241,17 @@ def main():
         # the key of a generated stage holds the installed-files digest of EVERY python module pinned in env.json (and mounts them all)
         pm = recipe.pinned_modules(two)
         check("every module pinned in env.json is listed with its installed-files digest and top-level names",
-              [m for m, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
-              and all(len(d) == 64 and tops for _, _, d, tops in pm), pm)
+              [m for m, _, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
+              and all(len(d) == 64 and tops and paths for _, _, d, tops, paths in pm), pm)
+        # the real pinned modules import inside a generate stage: gmpy2 and numpy keep their libraries in a sibling *.libs directory, which the mount
+        # takes from the RECORD (envcheck.record_files), not from the package directory
+        imp = "import gmpy2, numpy, z3, capstone, keystone, unicorn, pefile, elftools"
+        gi = make_repo("gi", gen_extra=imp + "|gmpy2.mpz(3) * 4")
+        rgi = recipe.build(gi, ROOT, BASE + "/gi-store", BASE + "/gi-out")
+        check("every pinned python module (gmpy2 and numpy with their sibling *.libs) imports inside a generate stage", rgi["status"] == "green", rgi.get("failure"))
         base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
         real = recipe.envcheck.wheel_digest
-        for target in [m for m, _, _, _ in pm]:
+        for target in [m for m, _, _, _, _ in pm]:
             recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
             try:
                 alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
