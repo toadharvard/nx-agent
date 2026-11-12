@@ -163,3 +163,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - w10 4c5bcc2 is green 27/27 (b4c35c53, 219.7 s). Its ASM-043/045 are existing REMOVE records (LLVM decoder, owner L4), deleted together with their citations by the replacing fact. w10 now rebases onto 8cfbcdbf.
   - crt0 is split by input section (.crt0 ax is 4 bytes; .crt0.hdr and .crt0.mod0 are a), so the loader contract is unchanged.
   - L3a's trace variant is withdrawn: the trace becomes a boot-machine observation.
+- 03:51Z: new gate `onedef` (w15), per image: (a) strong/weak defined in one root; (b) COMDAT from one source definition with equal bytes (ODR); (c) equal normalized function bytes from different definitions are red. Censuses over the platform and render roots come before MERGER. lib/sha256 is a product root (owner L4) with a guest build plus a host variant.
