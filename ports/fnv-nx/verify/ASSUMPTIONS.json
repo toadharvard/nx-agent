@@ -200,6 +200,7 @@
    "used_by": [
     "ports/fnv-nx/contract/iat.py",
     "ports/fnv-nx/contract/modules.py",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/gates/gate_eh.py",
     "ports/fnv-nx/lift/proof/README.md",
     "ports/fnv-nx/lift/tools/fpstate.py",

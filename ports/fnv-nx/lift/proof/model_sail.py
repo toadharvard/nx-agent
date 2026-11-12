@@ -319,7 +319,7 @@ def zext_add_pairs(terms):
     return pairs
 
 def eip_nowrap(terms, eip):
-    """rewrite of model terms under the domain eip < EIP_LIMIT (every query of a shape run assumes it): the 32-bit sum eip + K (K a small constant: the
+    """rewrite of model terms under the domain eip < EIP_LIMIT (it holds as a hypothesis of every query of a shape run): the 32-bit sum eip + K (K a small constant: the
     offsets of the bytes of ONE instruction) zero-extended to a wider sort equals the wide sum zext(eip) + K, because eip + K < 2^32 cannot wrap.
     Without it z3 cannot see that the fetch index (rip + offset) - code_base is a constant and bit-blasts the 128-bit shifts of code_bytes.
     Also the unconditional zext_add_pairs identity.  terms -> simplified terms with every `zero_extend(eip + K)` / `concat(0, eip + K)` replaced"""
