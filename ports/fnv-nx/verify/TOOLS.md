@@ -1349,6 +1349,10 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
 Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model.
 ```
 
+## verify/gate_doubles.py
+
+Gate `doubles` (class `test` of admit.json; owner order "no doubles in tests"). For every admitted TEST root (a recipe like a product root, built by `gate_build.ensure` with the same machinery): (global symbols, strong or weak, defined by the test root's own objects) ∩ (global symbols defined by the objects of every product root) = ∅, no allow-list. Symbols come from the stored objects' ELF `.symtab` (pyelftools). A defined symbol outside a COMDAT group is a test definition. A COMDAT instance (inline, template, vtable) counts only if its DWARF `decl_file` (through `DW_AT_specification` / `DW_AT_abstract_origin`) is a file of the test root (`/src` or an include directory of the recipe inside the root); an instance declared in a product or system header is not a test definition; a COMDAT symbol that a product root also defines and has no declaration file is the finding `no-decl-file` (red, never a guess). Findings `{id: "<test root>:<symbol>", code: double|no-decl-file|root}`, full list in `doubles.detail.json`; the result carries `test_roots`, `symbols_checked`, `doubles`. Universe: test symbols plus one per root that did not build; no test root: universe 0, green. Run: `python3 -I ports/fnv-nx/verify/gate_doubles.py` (cwd = checkout root, env GATE_OUT).
+
 ## verify/gate_objstub.py
 
 ```text

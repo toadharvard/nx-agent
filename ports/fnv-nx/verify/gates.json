@@ -294,6 +294,15 @@
     "ports/fnv-nx/render/total/gate_d3d9total.py"
    ],
    "result": "d3d9total.json"
+  },
+  {
+   "name": "doubles",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_doubles.py"
+   ],
+   "result": "doubles.json"
   }
  ]
 }
