@@ -64,6 +64,7 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
     roots, errors = [], []
     if admit.get("format") != "fnvnx-admit/1":
         errors.append("admit.json: format is not fnvnx-admit/1")
+    by_path = {r.get("path"): r for r in admit.get("roots", []) if isinstance(r, dict)}
     for r in admit.get("roots", []):
         path, cls, gates = r.get("path", ""), r.get("class"), r.get("gates", [])
         why = []
@@ -77,6 +78,11 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
                 why.append("a ref root has no recipe and names no gate (it has no units, no link and no outputs)")
             if cls == "test" and r.get("target") not in ("guest", "host"):
                 why.append('a test root declares "target": "guest" or "host"')
+            if "variant_of" in r:
+                base = by_path.get(r["variant_of"]) if isinstance(r["variant_of"], str) else None
+                if cls != "product" or not (base and base.get("class") == "product" and "variant_of" not in base
+                                            and base.get("target") == r.get("target")):
+                    why.append('"variant_of" is allowed on a product root only and names a BASE product root (no variant of a variant) of the same target')
             if cls in ("product", "test"):
                 rec = r.get("recipe", "")
                 if not rec.startswith(path + "/") or not exists(rec):
