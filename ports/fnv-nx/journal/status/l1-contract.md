@@ -60,8 +60,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 
 | Gate | Owner | Branch | Commit | MERGER |
 |---|---|---|---|---|
-| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | cca84bb (green 27/27, 223.8 s) | serial queue |
-| exepin | L1 | claude/fnv-l1-contract-w8 (w4 rebasing) | a6753733 | rebasing on f1059af7 |
+| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | c6726a2 (green 27/27, 236.1 s) | queued after w16 |
+| exepin | L1 | w4 (session_01KmtZKRkugvim1Bfui5aFTw) | head pending | next slot (priority) |
 | r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | 3b35851 (green 26 gates, 223.7 s) | queued |
 | namegate | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
 | abi | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
@@ -119,3 +119,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:13Z MERGER order for L1: exepin (w4, priority from the orchestrator: a required gate for product roots), w16, w17, w12. env.json conflicts resolved by union of disjoint pins (authorized).
 - 03:14Z w5 adds a new item: env.json profile toolchain-build (for L5 w14's guest runtime from source), with envcheck --profile, a chroot-only setup script, and the debs mirrored.
 - 03:15Z w15 3a6ec1b2: cross-root outputs/uses (test_uses 9/9; test_link 45/45 and test_recipe 53/53 at bcf281fb). Full verdict running. toolchain-build package list from L5 w14 forwarded to w5 (full closure plus sha256; pyelftools as a deb).
+- 03:17Z: w10 0371bf6 is green 27/27 (7767b55, 227.8 s; selftests 57/57) and with MERGER. w10's next item: root class `ref` plus oracle REF kinds `external` and `probe` (L6 asked). L3a (order, eh, addr32) and L3b (forms, fpexact) asked for MERGER heads or blockers.
