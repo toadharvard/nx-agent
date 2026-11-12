@@ -732,3 +732,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - 2 are L3a's, to be reworded or backticked: shapeprove.py:15, and the bare `assume` in prove.py.
   - 2 are L2's: f2i_check, closed by fpexact 3c.
   - 1 belongs to the orchestrator: ehtables.py:268.
+
+## 2026-11-12 09:30 UTC
+- The candidate moved to claude/fnv-next3b 6d3a2800, which contains 33c443b5.
+  - Rebasing onto it: w5, w14, w15, w16, w17, w18, w19 and w22.
+- w15 (branch w15c): per-target recipes (orchestrator ruling; blocks gl4).
+  - admit "recipe" may be {"guest","host"}.
+  - This is one mechanism with admit variants and the sanitizer variant.
+  - Header-home accepts an include only where a recipe exists for the includer's target.
+- w20: integration line int-l3a = 6d3a2800 + w14-src2 + w20-descs + L3a int3.
+  - It is for L3a lift/bridges and is not a trunk candidate.
+  - It is built after w14's head lands.
+- w14: also adds a check that the cross-root include lift/bridges → platform/include/fnvl_host.h is accepted for a guest root.
