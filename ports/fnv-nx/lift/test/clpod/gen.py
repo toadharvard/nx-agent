@@ -51,18 +51,33 @@ def klass(tag, feat, size):
     return pre + head + ' { ' + ' '.join(body) + ' };\n'
 
 
-def case_source(k, feat, depth, size):
+CONVS = ['cdecl', 'stdcall', 'fastcall', 'thiscall']
+
+
+def case_source(k, feat, depth, size, conv='cdecl'):
     t = klass('M' if depth != 'd0' else 'S', feat, size)
     if depth == 'd1': t += 'struct S { M m; };\n'
     if depth == 'd1a': t += 'struct S { M m[1]; };\n'
     if depth == 'd2': t += 'struct N { M m; };\nstruct S { N n; };\n'
-    return 'namespace N%d {\n%sS f();\nchar sz[sizeof(S)];\nvoid c1() { f(); }\nvoid c() { S x = f(); use(&x); }\n}\n' % (k, t)
+    if conv == 'thiscall':      # a method: `this` travels in ecx, the callee is X::f, called on a global (no local, no argument of c1)
+        return ('namespace N%d {\n%sstruct X { S f(); };\nextern X gx;\nchar sz[sizeof(S)];\nvoid c1() { gx.f(); }\nvoid c() { S x = gx.f(); use(&x); }\n}\n' % (k, t))
+    cc = '' if conv == 'cdecl' else '__%s ' % conv
+    return 'namespace N%d {\n%sS %sf();\nchar sz[sizeof(S)];\nvoid c1() { f(); }\nvoid c() { S x = f(); use(&x); }\n}\n' % (k, t, cc)
 
 
 def cases():
     out = [('PLAIN', 'd0', s) for s in SIZES]
     out += [(f, d, s) for f in FEATS[1:] for d in DEPTHS for s in SIZES]
     return out
+
+
+def conv_cases():
+    """the same matrix with the callee declared __stdcall, __fastcall and as a __thiscall method (X::f): 4-tuples (feature, depth, size, conv)"""
+    return [(f, d, s, c) for c in CONVS[1:] for f, d, s in cases()]
+
+
+def all_cases():
+    return [c + ('cdecl',) for c in cases()] + conv_cases()
 
 
 def instrs(lines):
@@ -77,30 +92,42 @@ def proc(asm, name, k):
     return list(instrs(m.group(0).split('\n'))) if m else None
 
 
-def primary(ins, k):
-    """REGS / HIDDEN by the whole-PROC push count of c1, or None (anything else)"""
+FRAME = r'DWORD PTR \S*\[(esp|ebp)'
+
+
+def tgt(k): return r'\?f@(?:X@)?N%d@@' % k       # the callee: ?f@N<k>@@... (free function) or ?f@X@N<k>@@... (method)
+
+
+def primary(ins, k, conv='cdecl'):
+    """REGS / HIDDEN by the whole-PROC structure of c1, or None (anything else). The hidden pointer is a pushed frame address (any convention), or for
+    __fastcall a frame address in ecx or edx (`lea ecx|edx, [frame]`, nothing pushed); for __thiscall `this` is in ecx (mov ecx, OFFSET gx), the pointer is pushed."""
     if ins is None: return None
-    ci = [i for i, l in enumerate(ins) if re.match(r'(call|jmp)\s+\?f@N%d@@' % k, l)]
+    ci = [i for i, l in enumerate(ins) if re.match(r'(call|jmp)\s+' + tgt(k), l)]
     if len(ci) != 1: return None
     pushes = [i for i, l in enumerate(ins) if re.match(r'push\b', l)]
+    if conv == 'fastcall':
+        regs = [i for i, l in enumerate(ins[:ci[0]]) if re.match(r'lea\s+(ecx|edx)\s*,\s*' + FRAME, l)]
+        if regs and not pushes and len(regs) == 1 and ins[ci[0]].startswith('call'): return 'HIDDEN'
+        if regs: return None
     if not pushes: return 'REGS'
     if len(pushes) != 1 or not ins[ci[0]].startswith('call') or pushes[0] > ci[0]: return None
     m = re.fullmatch(r'push\s+(\w+)', ins[pushes[0]])
     if not m: return None
     w = [l for l in ins[:pushes[0]] if re.match(r'(mov|lea|xor|add|sub)\s+%s\s*,' % m.group(1), l)]
-    return 'HIDDEN' if w and re.match(r'lea\s+%s\s*,\s*DWORD PTR \S*\[(esp|ebp)' % m.group(1), w[-1]) else None
+    return 'HIDDEN' if w and re.match(r'lea\s+%s\s*,\s*' % m.group(1) + FRAME, w[-1]) else None
 
 
-def classify(asm, k):
+def classify(asm, k, conv='cdecl'):
     """(primary, cross) or None: primary = the whole-PROC rule on c1; cross = HIDDEN/REGS when both readings of c agree, else DISAGREE"""
-    p = primary(proc(asm, 'c1', k), k)
+    p = primary(proc(asm, 'c1', k), k, conv)
     ins = proc(asm, 'c', k)
     if p is None or ins is None: return None
-    ci = [i for i, l in enumerate(ins) if re.match(r'call\s+\?f@N%d@@' % k, l)]
+    ci = [i for i, l in enumerate(ins) if re.match(r'call\s+' + tgt(k), l)]
     if len(ci) != 1: return None
     i = ci[0]
     pre = 'REGS'
-    j = i - 1
+    if conv == 'fastcall' and any(re.match(r'lea\s+(ecx|edx)\s*,\s*DWORD PTR (?:_x\$|\$T\d+)\[esp', l) for l in ins[:i]): pre = 'HIDDEN'
+    j = i - 1 if pre == 'REGS' else -1
     while j >= 0 and not re.match(r'push\s+\w+$', ins[j]): j -= 1       # the nearest push before the call
     if j >= 0:
         r = ins[j].split()[1]
@@ -123,7 +150,7 @@ def main():
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     env = dict(os.environ, WINEPREFIX=a.prefix, WINEARCH='win32', WINEDEBUG='-all')
-    allc = cases()
+    allc = all_cases()
     skipped = {}
     while True:
         keep = [i for i in range(len(allc)) if i not in skipped]
@@ -151,19 +178,19 @@ def main():
     wv = subprocess.run(['wine', '--version'], env=env, capture_output=True, text=True).stdout.strip()
     debs = open(a.wine_debs).read().rstrip('\n')
     rows, bad = [], 0
-    for i, (f, d, s) in enumerate(allc):
-        if i in skipped: rows.append('%s\t%s\t%d\t-\tSKIPPED\t-\t%s' % (f, d, s, skipped[i])); continue
+    for i, (f, d, s, cv) in enumerate(allc):
+        if i in skipped: rows.append('%s\t%s\t%d\t-\tSKIPPED\t-\t%s\t%s' % (f, d, s, skipped[i], cv)); continue
         sz = re.search(r'\?sz@N%d@@3PADA\s+DB\s+([0-9A-Fa-f]+)H DUP' % i, asm)
-        c = classify(asm, i)
-        if sz is None or c is None: rows.append('%s\t%s\t%d\t-\tUNREAD\t-\t-' % (f, d, s)); bad += 1; continue
+        c = classify(asm, i, cv)
+        if sz is None or c is None: rows.append('%s\t%s\t%d\t-\tUNREAD\t-\t-\t%s' % (f, d, s, cv)); bad += 1; continue
         ok = c[0] == c[1]; bad += not ok
-        rows.append('%s\t%s\t%d\t%d\t%s\t%s\t%s' % (f, d, s, int(sz.group(1), 16), c[0], c[1], '' if ok else 'INCONSISTENT'))
+        rows.append('%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s' % (f, d, s, int(sz.group(1), 16), c[0], c[1], '' if ok else 'INCONSISTENT', cv))
     hdr = ['# MEASUREMENT: cl under Wine; not yet a test reference (it needs the recipe stage keyed on a pinned wine deb profile and on cl by sha256)',
            '# toolchain: fnv-nx-build %s' % a.toolchain, '# cl: %s' % banner, '# cl.exe sha256: %s' % cl_sha, '# wine: %s' % wv,
            '# wine debs (dpkg-query -W):'] + ['#   ' + l for l in debs.split('\n')] + [
            '# rule (result): whole-PROC push count of c1 `void c1(){ f(); }`: no push or tail jmp => REGS; exactly one `push R` with R = `lea` of a frame address before the single call => HIDDEN; else UNREAD',
            '# post: cross-check on c (the result kept in a local): nearest push + where the result is stored; must equal result',
-           '# columns: feature depth size sizeof(S) result post flag']
+           '# columns: feature depth size sizeof(S) result post flag conv (cdecl rows first, then stdcall, fastcall, thiscall method X::f)']
     open(os.path.join(a.out, 'table.tsv'), 'w').write('\n'.join(hdr + rows) + '\n')
     n = lambda w: sum(1 for r in rows if r.split('\t')[4] == w)
     for r in rows:

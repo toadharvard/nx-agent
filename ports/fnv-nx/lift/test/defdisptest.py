@@ -95,6 +95,7 @@ def main():
     hdr = [l for l in open(tp).read().split('\n') if l.startswith('#')]
     check('table header: MEASUREMENT, cl 15.00.30729.01, cl.exe sha256, toolchain', len(hdr) >= 5 and 'MEASUREMENT' in hdr[0] and 'toolchain' in hdr[1] and '15.00.30729.01' in hdr[2] and 'sha256' in hdr[3], hdr[:4])
     trows = [l.split('\t') for l in open(tp).read().split('\n') if l and not l.startswith('#')]
+    trows = [r for r in trows if (r[7] if len(r) > 7 else 'cdecl') == 'cdecl']   # the stdcall/fastcall/thiscall rows (gen.py conv_cases) are measured by w4; the plugin rule for them follows the table
     allc = cg.cases()
     check('table rows == generator cases', [(r[0], r[1], int(r[2])) for r in trows] == allc, '%d rows, %d cases' % (len(trows), len(allc)))
     skipped = [r for r in trows if r[4] == 'SKIPPED']
