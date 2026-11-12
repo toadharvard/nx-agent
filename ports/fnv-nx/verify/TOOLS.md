@@ -1109,6 +1109,9 @@ Tree hash definition:
   Empty directories are kept. Nothing else (mtime, owner, mode other than exec) is part of the hash.
 ```
 
+## verify/closure_run.py
+`python3 -I closure_run.py MODULES.json TOOL.py [ARGS...]` runs a python tool exactly as `python3 -I TOOL.py ARGS` would (runpy.run_path as `__main__`) and writes the file of every module in sys.modules at exit, also after SystemExit or an exception, to MODULES.json. The runner of `gate_lift.run_tool`; the record is the input of `importclosure.check_modules` (runtime verification of the static closure).
+
 ## verify/coffnorm.py
 
 ```text
@@ -1680,6 +1683,33 @@ block at the resume pc counts that part twice), a count=/timer-limited slice tha
 the emulator's event counts (faults, budget slices, ...) as `events` and puts them in OUT.json; nothing else is
 approximate. Threads that switch at host calls (blocks ended by a branch to a host page) are exact.
 ```
+
+## verify/importclosure.py
+importclosure.py - the transitive import closure of a python tool, computed statically, and the cache key built on it (rule: a python tool stage's
+key covers every file the tool can load, never only its entry file). stdlib only; python3 -I.
+
+  import_closure(entry, repo, tracked, isolated=True, pinned=None) -> (files, findings)
+    ENTRY: repo-relative .py file. TRACKED: set of repo-relative files of the admitted roots (the only project files an import may resolve to).
+    FILES: sorted repo-relative .py files of the closure (ENTRY included). FINDINGS: sorted [(kind, file, line, detail)], each a red:
+      sys-path-dynamic  a change of sys.path that is not insert/append/extend of a CONSTANT path: constant = str literals, __file__, os.sep/pardir,
+                        os.path.join/dirname/abspath/realpath/normpath/basename of constants, `+` of constants, and a module-level NAME assigned exactly
+                        once to a constant (abspath/realpath need an absolute argument: relative ones depend on the working directory); site.addsitedir.
+      dynamic-import    __import__ / importlib.import_module with a non-literal name; any other use of importlib, runpy, imp; `import *` from a project module.
+      unresolved        an import that is not stdlib, not an env-pinned distribution and resolves to no TRACKED file.
+      ambiguous         one module name resolving to two different tracked files over the import path (no order is assumed).
+      shadows           a tracked file that has the name of a stdlib or env-pinned top-level module.
+      parse             a closure file that does not parse.
+    The import path: the directories of the constant sys.path additions found in ANY closure file (a union, to a fixpoint) and, when ISOLATED is False,
+    the script's directory (`python3 -I` puts no script directory on sys.path, so the gate runner passes True). Every Import/ImportFrom anywhere in a
+    file (also inside a function or a try) is followed; a relative import resolves from the importing file's directory.
+    STDLIB = sys.stdlib_module_names; PINNED = the top-level import names of the distributions pinned in env.json python.modules (pinned_imports).
+  closure_key(files, repo, env_id, data=()) -> sha256 hex: the content of every file of the closure, the stage's declared data inputs DATA
+    [(name, content hash)], the interpreter (sys.version) and the env id.
+  check_modules(modules, files, repo, pinned_files) -> [(kind, path)]: runtime verification. MODULES = the file of every module in sys.modules at exit
+    (closure_run.py records it). A module file outside closure ∪ stdlib ∪ env-pinned site-packages is `outside-closure`: the static closure was
+    incomplete in that run. It checks; it never selects.
+Not covered (stated): programs the tool starts as subprocesses (their files are declared inputs of the stage), files read as data, C extension modules of
+pinned distributions (the env id covers them), modules loaded in a forked worker only.
 
 ## verify/l1.py
 

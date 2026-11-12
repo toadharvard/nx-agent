@@ -33,7 +33,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import gate_argorder  # noqa: E402
 import gate_build  # noqa: E402
+import envcheck  # noqa: E402
 import gate_contract  # noqa: E402
+import importclosure  # noqa: E402
 import recipe  # noqa: E402
 
 GATES = ("order", "addr32", "eh", "flags")
@@ -57,9 +59,28 @@ def sha(path):
     return h.hexdigest()
 
 
+def _closure_ctx(repo):
+    """(tracked files of the admitted roots, pinned top-level imports, pinned files, env id) of the checkout REPO."""
+    roots = recipe.load_admit(repo)
+    tr = {f for f in recipe.tracked(repo) if any(recipe.under(f, r) for r in roots)}
+    env = os.path.join(repo, recipe.ENV_JSON)
+    with open(env) as f:
+        eid = envcheck.env_id(json.load(f))
+    return tr, importclosure.pinned_imports(env), importclosure.pinned_files(env), eid
+
+
 def run_tool(repo, cache, tool, args, outs, extra_key, env_extra=None):
-    """Run python3 -I TOOL ARGS with a GATE_OUT of its own -> {out name: result dict}; the results are cached by (tool hash, EXTRA_KEY)."""
-    key = hashlib.sha256(json.dumps([sha(os.path.join(repo, TOOLS, tool)), tool, extra_key], sort_keys=True).encode()).hexdigest()
+    """Run python3 -I TOOL ARGS with a GATE_OUT of its own -> {out name: result dict}. The results are cached by (the import closure of TOOL, EXTRA_KEY):
+    the key covers every file the tool can load (importclosure.import_closure, computed statically), the interpreter and the env id. A closure finding
+    makes every output red with the finding. The run goes through closure_run.py, which records sys.modules; a module file outside the closure,
+    the stdlib and the env-pinned distributions makes every output red naming it (the static closure was incomplete in that run)."""
+    red = lambda why: {o: {"status": "red", "universe": 1, "certified": 0, "uncertified": ["tool"], "detail": why[:900]} for o in outs}  # noqa: E731
+    tr, pin, pfiles, eid = _closure_ctx(repo)
+    entry = TOOLS.replace(os.sep, "/") + "/" + tool
+    files, finds = importclosure.import_closure(entry, repo, tr, isolated=True, pinned=pin)
+    if finds:
+        return red("%s import closure: " % tool + "; ".join("%s %s:%d %s" % f for f in finds[:6]))
+    key = hashlib.sha256(json.dumps([importclosure.closure_key(files, repo, eid), importclosure.file_sha(os.path.join(HERE, "closure_run.py")), tool, extra_key], sort_keys=True).encode()).hexdigest()
     cf = os.path.join(cache, "lift", key + ".json")
     if os.path.isfile(cf):
         return json.load(open(cf))
@@ -68,11 +89,16 @@ def run_tool(repo, cache, tool, args, outs, extra_key, env_extra=None):
         env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
         env.update(env_extra or {})
         env["GATE_OUT"] = tmp
-        p = subprocess.run([sys.executable, "-I", os.path.join(repo, TOOLS, tool)] + args, cwd=repo, env=env, capture_output=True, text=True)
+        mj = os.path.join(tmp, "modules.json.rec")
+        p = subprocess.run([sys.executable, "-I", os.path.join(HERE, "closure_run.py"), mj, os.path.join(repo, TOOLS, tool)] + args, cwd=repo, env=env,
+                           capture_output=True, text=True)
+        outside = importclosure.check_modules(json.load(open(mj)) if os.path.isfile(mj) else [], files, repo, pfiles)
         res = {}
         for o in outs:
             f = os.path.join(tmp, o + ".json")
-            if not os.path.isfile(f):
+            if outside:
+                res[o] = red("%s loaded modules outside its import closure: %s" % (tool, ", ".join(m for _, m in outside[:6])))[o]
+            elif not os.path.isfile(f):
                 res[o] = {"status": "red", "universe": 1, "certified": 0, "uncertified": ["tool"],
                           "detail": "%s exit %d, no %s.json: %s" % (tool, p.returncode, o, (p.stderr or p.stdout).strip()[-300:])}
             else:
