@@ -149,7 +149,7 @@ def main():
     check("lifted root, contract_inputs.json declares no sites: red, input missing", rc == 2 and r.get("status") == R and "no sites" in r["detail"], (rc, r))
     fx2 = publish("facts1", lambda d: facts_pub(d, "1 00401000\n"))
     rc, r, o = gate(lifted_repo("l-lockmiss", BODIES["ordered"][0], pack, {"ext": ext("facts", fx2, "/ext/facts"), "key": "facts", "sites": "facts/sites.tsv"}), "order", cache)
-    check("lifted root: a locked instruction of the facts with no .fnvl.sites record: red", rc == 2 and r.get("status") == R and "no .fnvl.sites record" in json.dumps(r), (rc, r))
+    check("lifted root: a locked instruction of the facts with no .fnvl.lk record: red", rc == 2 and r.get("status") == R and "no .fnvl.lk record" in json.dumps(r), (rc, r))
     for n in ("order", "addr32"):
         rc, r, o = gate(lifted_repo("l-noimg-" + n, BODIES["plain_store"][0], pack, efact, image=False), n, cache)
         check("lifted root that no image names: gate %s has universe 0, green" % n, rc == 0 and r.get("status") == G and r["universe"] == 0, (rc, r, o))

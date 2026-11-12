@@ -392,14 +392,14 @@ inc neg not or sbb sub xor xadd xchg) and for `xchg` with memory without a prefi
 total is 69 / 69 for the exe. No alignment is taken on trust for the 35: each takes the aligned or the split-lock path by the
 run-time test.
 
-### Locked instructions and FPU status instructions: the site ranges (`.fnvl.sites`, gate `order`)
+### Locked instructions and FPU status instructions: the site ranges (`.fnvl.lk`, `.fnvl.fsw`, gate `order`)
 
 The claim "every locked x86 instruction is an atomic read-modify-write" is judged on the compiled object, not on the emitter. A plain access with the right
 barriers satisfies the ordering rules and is not atomic, so the gate has to know which accesses belong to a locked instruction. The lifter emits per object
-the section `.fnvl.sites` (SHF_ALLOC, alignment 4): 16-byte records (kind and x86 address as plain words, host start, host end), the last two words R_AARCH64_P32_ABS32 relocations against the same executable section, the host pcs of the
-code of one instruction of the kind (1 = locked instruction, 2 = FPU status instruction; any other kind is red), whichever emitter path wrote it. gate_order requires every guest access inside a range to be an exclusive instruction
+the sections `.fnvl.lk` (locked instructions) and `.fnvl.fsw` (FPU status instructions), both SHF_ALLOC, alignment 4: 12-byte records (x86 address as a plain word, host start, host end), the last two words R_AARCH64_P32_ABS32 relocations against the same executable section, the host pcs of the
+code of one instruction of the section's kind, whichever emitter path wrote it. gate_order requires every guest access inside a range to be an exclusive instruction
 (ldaxr/ldaxp, stlxr/stlxp; no LSE on the A57) and the range to hold a load-exclusive and a store-exclusive; a malformed record is a red item. The universe
-of guest accesses stays every access of every object. Kind 2 (FSTSW, FNSTENV, FNSAVE): the range of a memory form contains exactly one guest store, the range of FSTSW AX none. Completeness is part of the same class: with `--sites FILE` (`contract_inputs.json` key `sites`; lines `1 HEXADDR` for every LOCK-prefixed instruction of the lifted universe and every xchg with a memory operand, `2 HEXADDR mem|ax` for every FPU status instruction) the records of each kind must equal the file's set of that kind, one row per address. Tests: tests/test_gate_order.py (`lock_*`, `sites_*`, `test_fsw_sites`: a plain RMW in a range is red, the exclusive pair green).
+of guest accesses stays every access of every object. `.fnvl.fsw` (FSTSW, FNSTENV, FNSAVE): the range of a memory form contains exactly one guest store, the range of FSTSW AX none. Completeness is part of the same class: with `--sites FILE` (`contract_inputs.json` key `sites`; lines `1 HEXADDR` for every LOCK-prefixed instruction of the lifted universe and every xchg with a memory operand, `2 HEXADDR mem|ax` for every FPU status instruction) every address of the file has at least one record of its section and every record's address is in the file, one row per address; several records of one address are legal (inner-entry re-lifts, asm duplication), overlapping ranges in a section are red. Tests: tests/test_gate_order.py (`lock_*`, `sites_*`, `test_fsw_sites`: a plain RMW in a range is red, the exclusive pair green).
 
 ## Open, not closed by this
 

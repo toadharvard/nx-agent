@@ -313,29 +313,25 @@ ASMCASES = {
     'asm_fall_into_next': ('mov x28,x0', R),
 }
 
-# the lock ranges (.fnvl.sites): body of f (labels s0/e0 bound a range), the records, the colour of `order`
-def LK(body, recs='.word 1, 0x401000, s0, e0'):
-    return '.text\n.globl f\n.type f,%function\nf:\n' + body + '\n.size f,.-f\n.section .fnvl.sites,"a"\n.balign 4\n' + recs + '\n'
+# the lock ranges (.fnvl.lk): body of f (labels s0/e0 bound a range), the records, the colour of `order`
+def LK(body, recs='.word 0x401000, s0, e0', sec='.fnvl.lk'):
+    return '.text\n.globl f\n.type f,%function\nf:\n' + body + '\n.size f,.-f\n.section ' + sec + ',"a"\n.balign 4\n' + recs + '\n'
 PAIR = 's0:\n1: ldaxr w0,[x19]\n add w0,w0,#1\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret'
 PLAIN = 's0:\n dmb ishld\n ldr w0,[x19]\n dmb ishld\n add w0,w0,#1\n dmb ishst\n str w0,[x19]\ne0:\n ret'
 LOCKCASES = {
-    'lock_exclusive_pair':    (PAIR, '.word 1, 0x401000, s0, e0', G),
-    'lock_plain_m32':         (PLAIN, '.word 1, 0x401000, s0, e0', R),                 # the old emitter: a plain RMW with the right barriers: certified by the ordering rules, not atomic
+    'lock_exclusive_pair':    (PAIR, '.word 0x401000, s0, e0', G),
+    'lock_plain_m32':         (PLAIN, '.word 0x401000, s0, e0', R),                 # the old emitter: a plain RMW with the right barriers: certified by the ordering rules, not atomic
     'lock_plain_no_record':   (PLAIN, '', G),                              # without a record the gate cannot know the instruction is locked (completeness: the exe's lock sites against the records)
-    'lock_ldar_stlr':         ('s0:\n ldar w0,[x19]\n add w0,w0,#1\n stlr w0,[x19]\ne0:\n ret', '.word 1, 0x401000, s0, e0', R),
-    'lock_load_only':         ('s0:\n ldaxr w0,[x19]\ne0:\n ret', '.word 1, 0x401000, s0, e0', R),
-    'lock_store_only':        ('s0:\n stlxr w1,w0,[x19]\ne0:\n ret', '.word 1, 0x401000, s0, e0', R),
-    'lock_call_inside':       ('s0:\n1: ldaxr w0,[x19]\n bl f\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word 1, 0x401000, s0, e0', R),
-    'lock_empty_range':       (PAIR, '.word 1, 0x401000, s0, s0', R),
-    'lock_reversed_range':    (PAIR, '.word 1, 0x401000, e0, s0', R),
-    'lock_overlap':           (PAIR, '.word 1, 0x401000, s0, e0\n.word 1, 0x401004, s0, e0', R),
-    'lock_record_unrelocated': (PAIR, '.word 1, 0x401000, 0, 0', R),
-    'lock_two_ranges_ok':     ('s0:\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\ns1:\n2: ldaxr w0,[x20]\n stlxr w1,w0,[x20]\n cbnz w1,2b\ne1:\n ret', '.word 1, 0x401000, s0, e0\n.word 1, 0x401010, s1, e1', G),
-    'sites_unknown_kind':      (PAIR, '.word 3, 0x401000, s0, e0', R),
-    'sites_kind_relocated':    (PAIR, '.word s0, 0x401000, s0, e0', R),
-    'sites_fsw_mem_one_store': ('dmb ishst\ns0:\n str w0,[x19]\ne0:\n ret', '.word 2, 0x401000, s0, e0', G),
-    'sites_fsw_ax_no_store':   ('s0:\n mov w0,w1\ne0:\n ret', '.word 2, 0x401000, s0, e0', G),
-    'lock_host_access_inside': ('s0:\n ldr w2,[x27,#4]\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word 1, 0x401000, s0, e0', G),
+    'lock_ldar_stlr':         ('s0:\n ldar w0,[x19]\n add w0,w0,#1\n stlr w0,[x19]\ne0:\n ret', '.word 0x401000, s0, e0', R),
+    'lock_load_only':         ('s0:\n ldaxr w0,[x19]\ne0:\n ret', '.word 0x401000, s0, e0', R),
+    'lock_store_only':        ('s0:\n stlxr w1,w0,[x19]\ne0:\n ret', '.word 0x401000, s0, e0', R),
+    'lock_call_inside':       ('s0:\n1: ldaxr w0,[x19]\n bl f\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word 0x401000, s0, e0', R),
+    'lock_empty_range':       (PAIR, '.word 0x401000, s0, s0', R),
+    'lock_reversed_range':    (PAIR, '.word 0x401000, e0, s0', R),
+    'lock_overlap':           (PAIR, '.word 0x401000, s0, e0\n.word 0x401004, s0, e0', R),
+    'lock_record_unrelocated': (PAIR, '.word 0x401000, 0, 0', R),
+    'lock_two_ranges_ok':     ('s0:\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\ns1:\n2: ldaxr w0,[x20]\n stlxr w1,w0,[x20]\n cbnz w1,2b\ne1:\n ret', '.word 0x401000, s0, e0\n.word 0x401010, s1, e1', G),
+    'lock_host_access_inside': ('s0:\n ldr w2,[x27,#4]\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word 0x401000, s0, e0', G),
 }
 
 
@@ -407,10 +403,10 @@ class T(unittest.TestCase):
         bad = lambda sites, ob=o: [(r[1], r[2]) for r in go.rows(rt, [ob], sites=sites)['order'] if r[0] == 'lock' and r[2]]
         self.assertEqual(bad(S({0x401000})), [])                                              # one record for the one locked instruction: green
         self.assertEqual([a for a, _ in bad(S({0x401000, 0x401008}))], ['00401008'])         # a lock-prefixed (or xchg mem) instruction without a record: red
-        self.assertIn('no .fnvl.sites record', bad(S({0x401000, 0x401008}))[0][1])
+        self.assertIn('no .fnvl.lk record', bad(S({0x401000, 0x401008}))[0][1])
         self.assertEqual([a for a, _ in bad(S(set()))], ['00401000'])                         # a record of an address that is no locked instruction: red
-        two = self.asm('lk2', LK('s0:\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\ns1:\n2: ldaxr w0,[x20]\n stlxr w1,w0,[x20]\n cbnz w1,2b\ne1:\n ret', '.word 1, 0x401000, s0, e0\n.word 1, 0x401000, s1, e1'))
-        self.assertIn('several .fnvl.sites lock records', bad(S({0x401000}), two)[0][1])                     # two records for one instruction: red
+        two = self.asm('lk2', LK('s0:\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\ns1:\n2: ldaxr w0,[x20]\n stlxr w1,w0,[x20]\n cbnz w1,2b\ne1:\n ret', '.word 0x401000, s0, e0\n.word 0x401000, s1, e1'))
+        self.assertEqual(bad(S({0x401000}), two), [])                                      # several records for one instruction (re-lifts, asm duplication): legal
         plain = self.asm('lkp', LK('ldr w0,[x19]\n ret', ''))
         self.assertEqual(bad(S({0x401000}), plain)[0][0], '00401000')                         # a locked instruction emitted without any section: red
         sites = os.path.join(self.root, 'sites.txt'); open(sites, 'w').write('# x\n1 00401000\n')
@@ -423,8 +419,8 @@ class T(unittest.TestCase):
     def test_fsw_sites(self):
         spec = importlib.util.spec_from_file_location('gate_order', GATE); go = importlib.util.module_from_spec(spec); sys.modules['gate_order'] = go; spec.loader.exec_module(go)
         os.environ['JOBS'] = '1'; rt = self.rt
-        def bad(body, fsw, recs='.word 2, 0x401000, s0, e0'):
-            o = self.asm('fsw%d' % abs(hash((body, recs, tuple(sorted(fsw.items()))))), LK(body, recs))
+        def bad(body, fsw, recs='.word 0x401000, s0, e0'):
+            o = self.asm('fsw%d' % abs(hash((body, recs, tuple(sorted(fsw.items()))))), LK(body, recs, '.fnvl.fsw'))
             return [(r[1], r[2]) for r in go.rows(rt, [o], sites={'lock': set(), 'fsw': fsw})['order'] if r[0] == 'fsw' and r[2]]
         ST = 'dmb ishst\ns0:\n str w0,[x19]\ne0:\n ret'; NO = 's0:\n mov w0,w1\ne0:\n ret'; TWO = 'dmb ishst\ns0:\n str w0,[x19]\n dmb ishst\n str w0,[x20]\ne0:\n ret'
         self.assertEqual(bad(ST, {0x401000: 'mem'}), [])                       # FSTSW m16 / FNSTENV / FNSAVE: exactly one guest store
@@ -432,9 +428,12 @@ class T(unittest.TestCase):
         self.assertIn('exactly one guest store', bad(NO, {0x401000: 'mem'})[0][1])
         self.assertIn('exactly one guest store', bad(TWO, {0x401000: 'mem'})[0][1])
         self.assertIn('FSTSW AX range contains', bad(ST, {0x401000: 'ax'})[0][1])
-        self.assertIn('no .fnvl.sites record', bad(ST, {0x401000: 'mem', 0x401004: 'ax'})[0][1])   # an FPU status instruction without a record
+        self.assertIn('no .fnvl.fsw record', bad(ST, {0x401000: 'mem', 0x401004: 'ax'})[0][1])   # an FPU status instruction without a record
         self.assertIn('is no FPU status instruction', bad(ST, {})[0][1])                          # a record of another address
         self.assertIn('unknown form', bad(ST, {0x401000: 'zz'})[0][1])
+        ST2 = 'dmb ishst\ns0:\n str w0,[x19]\ne0:\ndmb ishst\ns1:\n str w0,[x20]\ne1:\n ret'
+        self.assertEqual(bad(ST2, {0x401000: 'mem'}, '.word 0x401000, s0, e0\n.word 0x401000, s1, e1'), [])    # two records of one instruction, each judged
+        self.assertIn('exactly one guest store', bad('dmb ishst\ns0:\n str w0,[x19]\ne0:\ns1:\n mov w0,w1\ne1:\n ret', {0x401000: 'mem'}, '.word 0x401000, s0, e0\n.word 0x401000, s1, e1')[0][1])
     def test_counts(self):
         res = self.gate([self.asm('c1', FN.format(CASES['ordered_aligned'][0])), self.asm('c2', FN.format(CASES['plain_store'][0]))])
         self.assertEqual((res['order']['universe'], res['order']['certified'], len(res['order']['uncertified'])), (2, 1, 1))

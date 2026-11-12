@@ -96,18 +96,18 @@ lifted roots is given) and ASM-007 (ILP32). Rule (a) does not rest on the decode
 decided from the encoding's destination fields, and the decoder's operand view only adds writes (the union decides); the corpus
 test compares the two over every instruction class.
 
-Lock ranges (class B, docs/ORDERING.md "Locked instructions"). The lifter emits per object an ELF32 section `.fnvl.sites`: 12-byte records
+Lock ranges (class B, docs/ORDERING.md "Locked instructions"). The lifter emits per object an ELF32 section `.fnvl.lk`: 12-byte records
 (x86 address, start, end): start and end are 32-bit words with an R_AARCH64_P32_ABS32 relocation against an executable section (the host pcs of the code of one
 locked x86 instruction, [start, end)). Every record is an item of the order result and is red when it cannot be read, is empty, reversed,
 unaligned, outside the section or its $d ranges, overlaps the previous one, contains a call, or holds no load-exclusive and store-exclusive
 pair. Every guest access inside a range must be ldaxr/ldaxp or stlxr/stlxp of any size (the A57 has no LSE): a plain access, ldar or stlr
-there is red, whichever emitter wrote it. The universe of guest accesses is unchanged: every access of every object. Records are 16 bytes (four 32-bit words): the kind (a plain word), the x86
-address of the instruction (a plain word), then the host start and end (relocated as above). Kind 1 is a locked instruction (the range rules above); kind 2
-is an FPU status instruction (FSTSW, FNSTENV, FNSAVE): its range must contain exactly one guest store for the memory forms and none for FSTSW AX, the form
-being the facts'. An unknown kind is red. Completeness (--sites FILE, lines "1 HEXADDR" for every LOCK-prefixed instruction of the lifted universe and every
-xchg with a memory operand, "2 HEXADDR mem|ax" for every FPU status instruction, from the facts' shapes): the records of each kind of all the objects must
-equal the set of the file's lines of that kind. One row per address of either set; a missing record, a record of another address, or two records for one
-address is red.
+there is red, whichever emitter wrote it. The universe of guest accesses is unchanged: every access of every object. Records are 12 bytes (three 32-bit words): the x86 address of the
+instruction (a plain word), then the host start and end (relocated as above). Two sections have this layout: `.fnvl.lk` (locked instructions, the range rules
+above) and `.fnvl.fsw` (FPU status instructions FSTSW, FNSTENV, FNSAVE: a memory-form range contains exactly one guest store, an FSTSW AX range none, the form
+being the facts'). Several records of one x86 address are legal (inner-entry re-lifts, asm duplication) and each is judged; overlapping ranges inside one
+section are red. Completeness (--sites FILE, lines "1 HEXADDR" for every LOCK-prefixed instruction of the lifted universe and every xchg with a memory
+operand, "2 HEXADDR mem|ax" for every FPU status instruction, from the facts' shapes): every address of the file has at least one record of its section and
+every record's address is in the file. One row per address of either set.
 
 Exit 0 iff all three results are green."""
 import json
@@ -124,9 +124,10 @@ GATES = ('order', 'addrwrap', 'align')
 CLS = ('guest', 'cpu', 'frame', 'image')
 SP = 31
 NEG = -1 << 60
-R_P32_ABS32 = 1                       # R_AARCH64_P32_ABS32: the relocation of a pc in a .fnvl.sites record
-LOCKSEC = '.fnvl.sites'
+R_P32_ABS32 = 1                       # R_AARCH64_P32_ABS32: the relocation of a pc in a .fnvl.lk record
+LOCKSEC = '.fnvl.lk'
 KIND_LOCK, KIND_FSW = 1, 2
+SITESEC = {LOCKSEC: KIND_LOCK, '.fnvl.fsw': KIND_FSW}
 LOCKX = ('ldaxr', 'ldaxrb', 'ldaxrh', 'ldaxp', 'stlxr', 'stlxrb', 'stlxrh', 'stlxp')     # the exclusive instructions a lock range may hold
 R_PG_HI21, R_ADD_LO12 = 11, 12        # R_AARCH64_P32_ADR_PREL_PG_HI21, R_AARCH64_P32_ADD_ABS_LO12_NC
 R_GOT_LOAD = 27                      # R_AARCH64_P32_LD32_GOT_LO12_NC
@@ -167,25 +168,25 @@ def elf(path):
             for k in range(s[5] // 12):
                 off, info, add = struct.unpack_from('<IIi', b, s[4] + 12 * k)
                 y = syms.get(info >> 8)
-                if names[s[7]] == LOCKSEC: lkrel.append((off, info, add))
+                if names[s[7]] in SITESEC: lkrel.append((off, info, add, names[s[7]]))
                 drel.setdefault(s[7], {})[off] = (info & 0xff, bool(y and y[5]))
                 if s[7] not in out: continue         # the target: (section, offset, bytes from the target to the section end, the section is SHF_WRITE, section alignment)
                 out[s[7]][2][off] = (info & 0xff, (y[0], y[1] + add, y[2] - y[1] - add, y[3], y[4]) if y and 0 <= y[1] + add < y[2] else None, symname.get(info >> 8))
     lock, lkerr, lkall = {}, [], []          # {executable section index: [(lo, hi, record number, kind, x86 address)]}; the records that cannot be read; (kind, x86 address) of every readable record
     for i, h in enumerate(sh):
-        if names[i] != LOCKSEC: continue
-        if h[1] != 1 or h[5] % 16: lkerr.append('%s: not a PROGBITS section of 16-byte records' % LOCKSEC); continue
-        rel = {off: (info, add) for off, info, add in lkrel}
-        for r in range(h[5] // 16):
-            kind, x86 = struct.unpack_from('<II', b, h[4] + 16 * r); ends = []
-            for w in (8, 12):
-                got = rel.get(16 * r + w)
+        kind = SITESEC.get(names[i])
+        if kind is None: continue
+        if h[1] != 1 or h[5] % 12: lkerr.append('%s: not a PROGBITS section of 12-byte records' % names[i]); continue
+        rel = {off: (info, add) for off, info, add, sec in lkrel if sec == names[i]}
+        for r in range(h[5] // 12):
+            x86 = struct.unpack_from('<I', b, h[4] + 12 * r)[0]; ends = []
+            for w in (4, 8):
+                got = rel.get(12 * r + w)
                 y = syms.get(got[0] >> 8) if got else None
                 if not got or got[0] & 0xff != R_P32_ABS32 or not y or not y[5]: ends.append(None)
                 else: ends.append((y[0], y[1] + got[1]))
-            if 16 * r in rel or 16 * r + 4 in rel: lkerr.append('%s record %d: the kind and the x86 address must be plain words' % (LOCKSEC, r)); continue
-            if kind not in (KIND_LOCK, KIND_FSW): lkerr.append('%s record %d: unknown kind %d' % (LOCKSEC, r, kind)); continue
-            if None in ends or ends[0][0] != ends[1][0]: lkerr.append('%s record %d: a host pc of the record is not an R_AARCH64_P32_ABS32 against an executable section, or the two are in different sections' % (LOCKSEC, r))
+            if 12 * r in rel: lkerr.append('%s record %d: the x86 address must be a plain word' % (names[i], r)); continue
+            if None in ends or ends[0][0] != ends[1][0]: lkerr.append('%s record %d: a host pc of the record is not an R_AARCH64_P32_ABS32 against an executable section, or the two are in different sections' % (names[i], r))
             else: lock.setdefault(ends[0][0], []).append((ends[0][1], ends[1][1], r, kind, x86)); lkall.append((kind, x86))
     return [tuple(v) + (drel, deffunc, i, lock.get(i, []), lkerr if k == 0 else [], lkall if k == 0 else []) for k, (i, v) in enumerate(sorted(out.items()))] or [(None,) * 7 + (None, None, None, [], lkerr, lkall)]
 
@@ -530,7 +531,7 @@ def analyse(path):
     for sname, code, relocs, funcs, data, fsyms, drel, _deff, sidx, lkr, lkerr, lkall in elf(path):
         recs += lkall
 
-        for e in lkerr: tick('rule_violations'); tab['order'].setdefault((LOCKSEC, 0, e), [LOCKSEC, e])
+        for e in lkerr: tick('rule_violations'); tab['order'].setdefault(('.fnvl', 0, e), ['.fnvl', e])
         if sname is None: continue
         cur[0] = sname; cur[1] = fsyms
         L, badoff = decode(md, code, relocs, data)
@@ -858,7 +859,7 @@ def analyse(path):
                     else: red('order', ins, 'a plain guest store without dmb ishst after the last guest access or call')
                 sb = False
             for w in wait: red('order', w, 'a plain guest load without dmb ishld before the block end')
-        # lock ranges (.fnvl.sites, docs/ORDERING.md "Locked instructions"): the host-pc ranges of the code of the locked x86 instructions
+        # lock ranges (.fnvl.lk, docs/ORDERING.md "Locked instructions"): the host-pc ranges of the code of the locked x86 instructions
         iset = set(at); prev = 0
         for lo, hi, rec, kind, x86 in sorted(lkr):
             tick('lock_ranges'); ri = type('R', (), {'a': lo})()
@@ -901,21 +902,20 @@ def run(rtobj, lifted, asm=(), sites=None):
             recs += r['locks']; fswrecs.append(r['fsw'])
             for g in GATES: rows[g] += r['rows'][g]
             for k, v in r['n'].items(): n[k] = n.get(k, 0) + v
-    if sites is not None:      # completeness: one record per locked instruction and per FPU status instruction of the lifted universe, no record of another instruction
+    if sites is not None:      # completeness: at least one record per locked instruction and per FPU status instruction of the lifted universe (several are legal: inner-entry re-lifts, asm duplication), no record of another instruction
         locks, fswf = sites['lock'], sites['fsw']; have = {}
         for k, x in recs: have[(k, x)] = have.get((k, x), 0) + 1
         for x in sorted(set(locks) | {x for k, x in have if k == KIND_LOCK}):
-            why = '' if x in locks and have.get((KIND_LOCK, x)) == 1 else 'a locked instruction of the lifted universe with no %s record' % LOCKSEC if (KIND_LOCK, x) not in have else 'a %s lock record of an address that is no locked instruction of the lifted universe' % LOCKSEC if x not in locks else 'several %s lock records for one instruction' % LOCKSEC
+            why = '' if x in locks and have.get((KIND_LOCK, x)) else 'a locked instruction of the lifted universe with no %s record' % LOCKSEC if (KIND_LOCK, x) not in have else 'a %s lock record of an address that is no locked instruction of the lifted universe' % LOCKSEC if x not in locks else ''
             rows['order'].append(('lock', '%08x' % x, why))
         stores = {}
         for r in fswrecs:
             for x, k in r: stores.setdefault(x, []).append(k)
         for x in sorted(set(fswf) | {x for k, x in have if k == KIND_FSW}):
             form, ks = fswf.get(x), stores.get(x, [])
-            why = ('a FPU status instruction of the lifted universe with no %s record' % LOCKSEC if not ks else 'a %s FPU status record of an address that is no FPU status instruction of the lifted universe' % LOCKSEC if form is None else
-                   'several %s records for one FPU status instruction' % LOCKSEC if len(ks) != 1 else
-                   'a memory-form FPU status range must contain exactly one guest store, it has %d' % ks[0] if form == 'mem' and ks[0] != 1 else
-                   'an FSTSW AX range contains %d guest stores' % ks[0] if form == 'ax' and ks[0] else '' if form in ('mem', 'ax') else 'unknown form %r in the facts' % form)
+            why = ('an FPU status instruction of the lifted universe with no .fnvl.fsw record' if not ks else 'a .fnvl.fsw record of an address that is no FPU status instruction of the lifted universe' if form is None else
+                   'a memory-form FPU status range must contain exactly one guest store, a record has %d' % next(k for k in ks if k != 1) if form == 'mem' and any(k != 1 for k in ks) else
+                   'an FSTSW AX range contains %d guest stores' % next(k for k in ks if k) if form == 'ax' and any(ks) else '' if form in ('mem', 'ax') else 'unknown form %r in the facts' % form)
             rows['order'].append(('fsw', '%08x' % x, why))
         n['lock_sites'] = len(locks); n['lock_records'] = sum(1 for k, x in recs if k == KIND_LOCK); n['fsw_sites'] = len(fswf); n['fsw_records'] = sum(len(r) for r in fswrecs)
     return {g: sorted(v) for g, v in rows.items()}, n, len(files)
