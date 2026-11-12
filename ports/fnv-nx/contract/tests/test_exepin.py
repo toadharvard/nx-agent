@@ -81,6 +81,30 @@ with tempfile.TemporaryDirectory() as t:
     with contextlib.redirect_stderr(io.StringIO()):
         check('cli: wrong argument count -> 2', exepin.main([]) == 2)
 
+# the guest image set: exactly the pinned DLLs (names, sizes, hashes)
+im = {'a.dll': {'size': 10, 'sha256': 'a' * 64}, 'b.dll': {'size': 20, 'sha256': 'b' * 64}}
+row = lambda n, v: (n, v['size'], v['sha256'])
+
+
+def images_refused(found, pin=im):
+    try:
+        exepin.check_images(found, pin)
+    except exepin.ExePinError as e:
+        return str(e)
+    return None
+
+
+check('image set equal to the pin: accepted, in any order', images_refused([row('b.dll', im['b.dll']), row('a.dll', im['a.dll'])]) is None)
+m = images_refused([row('a.dll', im['a.dll'])])
+check('image missing from the derived set: refused naming it', m and 'b.dll: pinned image not in the derived set' in m, m)
+m = images_refused([row('a.dll', im['a.dll']), row('b.dll', im['b.dll']), row('c.dll', im['a.dll'])])
+check('extra image: refused naming it', m and 'c.dll: not a pinned image' in m, m)
+m = images_refused([row('a.dll', im['a.dll']), ('b.dll', 20, 'c' * 64)])
+check('other hash: refused with expected and actual', m and 'b.dll: expected' in m and 'c' * 64 in m, m)
+check('the real image pin holds the 7 DLLs incl. d3dx9_31, hashes only', len(exepin.IMAGES) == 7 and 'd3dx9_31.dll' in exepin.IMAGES
+      and exepin.IMAGES['d3dx9_31.dll']['sha256'].startswith('e2065619') and exepin.IMAGES['d3dx9_31.dll']['sha256'].endswith('78a5')
+      and all(set(v) == {'size', 'sha256'} for v in exepin.IMAGES.values()))
+
 check('the real pin has the published identity', exepin.PIN['size'] == 16084808 and len(exepin.PIN['sha256']) == 64
       and exepin.PIN['image_base'] == 0x400000)
 sys.exit(1 if fails else 0)
