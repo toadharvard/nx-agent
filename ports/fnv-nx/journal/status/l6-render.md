@@ -404,3 +404,7 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 - 09:16Z L1: 1c59bda9 is not an L1 head and is not taken as a base.
     - w16 is redoing commit 1 on next3b: generator inputs in the orchestrator's form, plus the header-root rule merged with L5's header-home rule.
     - render/d3d9 (w6 57051038) goes on the candidate together with it (waiting).
+- 09:15Z L1 decision: there is one form.
+    - Header homes are unit-less product roots (shim, render/shaders/translator, render/shaders/total). Any target may include them; they compile under the includer's flags.
+    - There is no `headers` class. Generator inputs are any declared tracked file of an admitted root.
+    - render/d3d9 lands with w16c commit 1 (waiting).
