@@ -5234,6 +5234,7 @@ vs_2_0|rel|mad.c[a0.x]@s0,s1,s2	ok
 vs_2_0|rel|c[a0.x]+c[aL]	ok			
 vs_2_0|srcreg|a0@mov.s0	ok			closed-world
 vs_2_0|srcreg|a0@add.s1	ok			closed-world
+vs_2_0|srcreg|b0@mov.s0	uam_fail	unclassified: glsl-compile: value of type bool cannot be assigned to variable of type vecN	glsl-compile: value of type bool cannot be assigned to variable of type vec4	closed-world
 vs_2_0|srcreg|i0@mov.s0	ok			closed-world
 vs_2_0|dstreg|a0@mov.dst	ok			closed-world
 vs_2_x|opcode|abs	ok			
@@ -6335,6 +6336,7 @@ vs_2_x|rel|mad.c[a0.x]@s0,s1,s2	ok
 vs_2_x|rel|c[a0.x]+c[aL]	ok			
 vs_2_x|srcreg|a0@mov.s0	ok			closed-world
 vs_2_x|srcreg|a0@add.s1	ok			closed-world
+vs_2_x|srcreg|b0@mov.s0	uam_fail	unclassified: glsl-compile: value of type bool cannot be assigned to variable of type vecN	glsl-compile: value of type bool cannot be assigned to variable of type vec4	closed-world
 vs_2_x|srcreg|i0@mov.s0	ok			closed-world
 vs_2_x|dstreg|a0@mov.dst	ok			closed-world
 vs_3_0|opcode|abs	ok			
@@ -7509,6 +7511,7 @@ vs_3_0|rel|o[aL+1]	ok
 vs_3_0|rel|o[aL+10]	ok			
 vs_3_0|srcreg|a0@mov.s0	ok			closed-world
 vs_3_0|srcreg|a0@add.s1	ok			closed-world
+vs_3_0|srcreg|b0@mov.s0	uam_fail	unclassified: glsl-compile: value of type bool cannot be assigned to variable of type vecN	glsl-compile: value of type bool cannot be assigned to variable of type vec4	closed-world
 vs_3_0|srcreg|i0@mov.s0	ok			closed-world
 vs_3_0|dstreg|a0@mov.dst	ok			closed-world
 vs_1_0|opcode|add	ok			closed-world
