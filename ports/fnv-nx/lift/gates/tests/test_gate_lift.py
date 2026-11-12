@@ -91,6 +91,8 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
     os.makedirs(os.path.join(repo, LIFT), exist_ok=True)
     for f in ("gate_order.py", "gate_eh.py"):
         shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
+    os.makedirs(os.path.join(repo, T + "lift/tools"), exist_ok=True)      # the entry points declare their argv with lift/tools/cli.py
+    shutil.copyfile(os.path.join(REAL, T + "lift/tools/cli.py"), os.path.join(repo, T + "lift/tools/cli.py"))
     if ehfacts is not None:
         doc = inputs_doc(ehfacts["ext"])
         if ehfacts["key"]:
@@ -160,6 +162,8 @@ def flags_repo(name, code, cache, extra_entries=()):
     repo = lifted_repo(name, BODIES["ordered"][0], pk)
     for f in ("gate_flags.py",):
         shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
+    os.makedirs(os.path.join(repo, T + "lift/tools"), exist_ok=True)
+    shutil.copyfile(os.path.join(REAL, T + "lift/tools/cli.py"), os.path.join(repo, T + "lift/tools/cli.py"))
     for pkg in ("proof", "fnvlift", "rt"):
         shutil.copytree(os.path.join(REAL, T + "lift/" + pkg), os.path.join(repo, T + "lift/" + pkg), ignore=shutil.ignore_patterns("__pycache__", "tests"))
     w(repo, T + "verify/contract_inputs.json", json.dumps(doc))
