@@ -1776,6 +1776,20 @@ below), member-unlisted (member of a restricted module outside its allow-list), 
 anything but .st_size/.st_mode), syntax / shell-unanalysable (not analysable).
 ```
 
+## verify/recipe_model.py
+
+```text
+recipe_model: the pure model of the one build (verify/recipe.py) and the manifest its gate leaves for the gates after it. File reads only: no stage, no
+sandbox, no store, no compiler. Importers: recipe.py (builds), gate_build.py (builds once, writes the manifest), every consumer gate (reads it).
+  - the admit.json / build.json / guest_compiler.json readers, the unit rule (units_of), the external and extension tables, RecipeError, BuildRed;
+  - quantify: the universe convention of every per-root gate;
+  - the build manifest "fnvnx-built/1", the hand-over from gate "build" to the gates that declare "needs": ["build"] in gates.json:
+        GATE_CACHE/built/<git tree>/manifest.json  {"format", "tree", "roots": {root: {"objects": <path of its objects.json>}},
+                                                     "externals": {name: <directory in GATE_CACHE/external-trees>}}
+    A consumer reads it with read_built(); it never builds and never calls the compiler. A missing manifest is an error the consumer reports (red), so a
+    gate that runs before "build" can not pass (verdict.py also refuses a gates.json that lists a consumer before its needs).
+```
+
 ## verify/recipe.py
 
 ```text
