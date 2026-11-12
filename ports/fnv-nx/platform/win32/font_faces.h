@@ -23,11 +23,15 @@
     FACE(LIBERATION_SANS, "Liberation Sans", "gdifont.cpp enum_fallback: sans serif") \
     FACE(BITSTREAM_VERA_SANS, "Bitstream Vera Sans", "gdifont.cpp enum_fallback: sans serif")
 
+/* An id is W32_FACE_BASE + the row's index: a value that no other constant of the platform equals, so the compiler cannot reuse a register that
+ * holds the same number for another purpose and hide the id from the census (the census reads the id from the argument register). */
+enum { W32_FACE_BASE = 0x46414300 };
 enum w32_face_id {
+    FACE__BEFORE_FIRST = W32_FACE_BASE - 1,
 #define W32_FACE_ENUM(id, name, where) FACE_##id,
     W32_FACES(W32_FACE_ENUM)
 #undef W32_FACE_ENUM
-    FACE_COUNT
+    FACE__END
 };
 
 #ifdef __cplusplus

@@ -9,5 +9,6 @@ extern "C" const char *w32_face_name(int id)
         W32_FACES(W32_FACE_NAME)
 #undef W32_FACE_NAME
     };
-    return (unsigned)id < sizeof names / sizeof names[0] ? names[id] : "";
+    unsigned i = (unsigned)id - (unsigned)W32_FACE_BASE;
+    return i < sizeof names / sizeof names[0] ? names[i] : "";
 }
