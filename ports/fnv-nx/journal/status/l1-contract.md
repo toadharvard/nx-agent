@@ -501,3 +501,29 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - One L1 integration line: w16 builds claude/fnv-l1-contract-w16-int = trunk 4fb048ec + w14 integration (w10, w15, keep-going, G) + w16 dbfaefeb, all conflicts resolved by L1. L6's render/d3d9 root and L2 w6 go on top.
 - L5 manifest 8be98a3: import_escape.tsv has a row for every bridge row (1553) and `?` = unresolved (1459 resolved, 94 `?`); the missing-row default is gone. w18 handles `?` as open.
   - Asked w15 for one manifest commit that also has call-VA dynsites and import_writes.tsv.
+
+## 2026-11-12 05:15Z check-in
+- **Trunk:** 4fb048ec.
+- **Heads:**
+
+  | Worker | Head |
+  |---|---|
+  | w10 | 6645c214 |
+  | w14 | 7bb954c9 |
+  | w15 | 402b50fd |
+  | w16 | 5c6bc6e1 |
+  | w17 | 39cc794a |
+  | w18 | 58736b62 |
+  | w19 | b178859d |
+  | w20-descs | f056dde1 |
+  | w22 | 1b686106 |
+  | w4 | e62cabf0 |
+  | w8 | 50e0b7be |
+
+- **w17:** interrupted to push guest_flags.py first (claude/fnv-l1-contract-w17-flags), the goal step 1 blocker. It was busy with the producer check.
+- **w21b:** stuck PENDING for 34 min, archived. The legal gate moves to w12 (idle) after the doubles gate.
+- **L6 records (9826ef37):** op_syntax / op_cover / op_reserved.
+  - msdocs-sm is accepted as a source, and wined3d's SM1 table as a second structured source (agree or red).
+  - New stub class: trap bodies, where every path reaches the root's declared error_abi failure function with no output effect. Goes to w20 with the table-handler check.
+- **ASM-501:** L5 agrees the platform root waits until the 7 passes read L3a's function facts.
+- **L3a range facts:** all 7 images are already in l3a-lift/facts 2eeea27b. w18 re-pins.
