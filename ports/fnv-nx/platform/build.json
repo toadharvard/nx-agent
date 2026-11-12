@@ -59,7 +59,7 @@
    "-fdata-sections",
    "-nostdinc",
    "-nostdinc++",
-   "-std=gnu++17",
+   "-std=gnu++20",
    "-DSTDMETHODCALLTYPE=",
    "-DFNVNX_PLATFORM_BUILD",
    "-Werror=attributes",
