@@ -4,6 +4,7 @@
     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
 One entry per gate in gates.json, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
+N3 (the static native-body criterion of the pi plugin's `.fnvnx.n3`) reaches bodysel through the `bind` stage (contract/bind.py: exe addresses of the objects' N3 rows through the N1 certificate, written as n3.tsv) and bodysel's `--n3`; a function without an `ok` N3 row is LIFTED.
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
 
@@ -165,13 +166,15 @@ def images_of(doc, ext):
     return have, lack
 
 
-def stages(w, doc, ext, rp):
-    """{stage: (argv, [files it writes])} with paths inside the work dir W (contract/verdict.py's arguments)."""
+def stages(w, doc, ext, rp, only=None):
+    """{stage: (argv, [files it writes])} with paths inside the work dir W (contract/verdict.py's arguments). ONLY: a stage name; the image set (it
+    reads the exe) is derived only for the stages that take it (gpa, reach, reachlink), so the other stages can be built without it."""
     P = lambda k: rp[k] if k in rp else P2(ext, doc[k])
     link = w + "/link"
     imgs = []
-    for name, pe, rg in images_of(doc, ext)[0]:
-        imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
+    if only is None or only in IMAGE_GATES:
+        for name, pe, rg in images_of(doc, ext)[0]:
+            imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {
@@ -184,7 +187,10 @@ def stages(w, doc, ext, rp):
         "rtti": (py("gate_rtti.py", "--objects", link + "/game", "--readelf", READELF), ["gate/rtti.json"]),
         "pcrel": (py("gate_pcrel.py", "--elf", link + "/guest/fnvnx.elf", "--objects", link + "/fixed", "--work", w + "/pcrel",
                      "--readelf", READELF, "--nm", NM), ["gate/pcrel.json"]),
-        "bodysel": (py("bodysel.py", "--universe", P("universe"), "--n1", w + "/n1.json", "--gates", w + "/gates", "--out", w + "/bodysel.tsv"),
+        "bind": (py("bind.py", "--obj", w + "/obj.json", "--n1", w + "/n1.json", "--units", rp["units"], "--out", w + "/bind.json", "--n3-out", w + "/n3.tsv"),
+                 ["bind.json", "n3.tsv"]),
+        "bodysel": (py("bodysel.py", "--universe", P("universe"), "--n1", w + "/n1.json", "--gates", w + "/gates", "--n3", w + "/n3.tsv",
+                       "--out", w + "/bodysel.tsv"),
                     ["bodysel.tsv", "gate/bodysel.json"]),
         "abs": (py("../link/gate_abs.py", "--inputs", w + "/inputs.rsp", "--elf", link + "/guest/fnvnx.elf"), ["gate/abs.json"]),
         "gpa": (py("gpa_names.py", "--sites", opt("dynsites") or "", *imgs, *bridge, "--out", w + "/gpa"), ["gpa/gpa_names.tsv", "gate/gpa.json"]),
@@ -199,13 +205,13 @@ def stages(w, doc, ext, rp):
     return st
 
 
-NEEDS = {"n1": ["n1"], "xunit": ["xunit"], "rtti": ["rtti"], "pcrel": ["pcrel"], "bodysel": ["exefacts", "n1", "objfacts", "registry", "bodysel"]}
+NEEDS = {"n1": ["n1"], "xunit": ["xunit"], "rtti": ["rtti"], "pcrel": ["pcrel"], "bodysel": ["exefacts", "n1", "objfacts", "registry", "bind", "bodysel"]}
 NEEDS.update({g: NEEDS["bodysel"] for g in REGISTRY})
 NEEDS.update({"abs": ["abs"], "disp": ["disp"], "gpa": ["gpa"], "reach": ["gpa", "reach"], "reachlink": ["gpa", "reach", "reachlink"]})
 
 
 def run_stage(name, w, doc, ext, rp):
-    argv, outs = stages(w, doc, ext, rp)[name]
+    argv, outs = stages(w, doc, ext, rp, name)[name]
     if all(os.path.isfile(os.path.join(w, o)) for o in outs):
         return
     gdir = os.path.join(w, "gate")

@@ -390,6 +390,20 @@
     "ports/fnv-nx/verify/verdict.py"
    ]
   },
+  "test_n3wiring.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_contract.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_contract.py",
+    "ports/fnv-nx/contract/bind.py",
+    "ports/fnv-nx/verify/gate_l2native.py"
+   ]
+  },
   "test_objstub.py": {
    "references": [
     {
