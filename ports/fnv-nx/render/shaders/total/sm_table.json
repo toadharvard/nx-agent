@@ -132,7 +132,7 @@
    "models": [
     "vs_2_x"
    ],
-   "src": "MS:dx9-graphics-reference-asm-vs-2-x (Number of Temporary Registers)"
+   "src": "MS:dx9-graphics-reference-asm-vs-2-x (section on the number of temp registers)"
   },
   "VS20Caps.Predication": {
    "feats": [
@@ -159,60 +159,7 @@
    "src": "MS:dx9-graphics-reference-asm-vs-2-x"
   }
  },
- "conflicts": [
-  {
-   "id": "ps:47",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
-   "vkd3d": [
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
-  },
-  {
-   "id": "ps:70",
-   "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
-   "vkd3d": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ]
-  },
-  {
-   "id": "vs:sgn@vs_3_0",
-   "kind": "operand_count",
-   "note": "MS sgn---vs syntax has 3 sources in all versions; vkd3d d3dbc.c: sgn has 1 source in 3_0; universe has both forms"
-  },
-  {
-   "id": "vs_3_0:v[a0.x]",
-   "kind": "legacy",
-   "note": "MS table says a0/aL, MS prose says aL only; wine allows any (reladdr flag)"
-  }
- ],
+ "conflicts": [],
  "env_default": {
   "arbitrary_swizzle": true,
   "dynamic_flow": true,
@@ -235,9 +182,9 @@
  },
  "excluded_models": {
   "ps_1_0": {
-   "creatable": "undetermined",
+   "creatable": "closed-world",
    "included_in_universe": true,
-   "source": "not in MS asm reference; see undetermined.vs1_0_ps1_0"
+   "source": "not in MS asm reference; see resolved.vs1_0_ps1_0 (R4)"
   },
   "ps_2_sw": {
    "creatable": false,
@@ -248,9 +195,9 @@
    "source": "MS:dx9-graphics-reference-asm-software-shaders: *_sw are 'only supported by software vertex processing and/or a reference device'; this device is a hardware (HAL-like) device"
   },
   "vs_1_0": {
-   "creatable": "undetermined",
+   "creatable": "closed-world",
    "included_in_universe": true,
-   "source": "not in MS asm reference; see undetermined.vs1_0_ps1_0"
+   "source": "not in MS asm reference; see resolved.vs1_0_ps1_0 (R4)"
   },
   "vs_2_sw": {
    "creatable": false,
@@ -324,16 +271,16 @@
    "kind": "opcode",
    "model": "vs_2_0",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "rep@temp-written-in-loop",
    "kind": "opcode",
    "model": "vs_2_0",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "call@label-used-in-and-out-of-loop",
@@ -444,16 +391,16 @@
    "kind": "opcode",
    "model": "vs_2_x",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "rep@temp-written-in-loop",
    "kind": "opcode",
    "model": "vs_2_x",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "call@label-used-in-and-out-of-loop",
@@ -572,16 +519,16 @@
    "kind": "opcode",
    "model": "vs_3_0",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "rep@temp-written-in-loop",
    "kind": "opcode",
    "model": "vs_3_0",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "call@label-used-in-and-out-of-loop",
@@ -603,9 +550,9 @@
    "feature": "v[a0.x]",
    "kind": "addr",
    "model": "vs_3_0",
-   "rule": "",
-   "source": "MS vs-registers-vs-3-0 table: v# RelAddr 'a0/aL'; MS vs-3-0 page 'Indexing Registers': v# indexed 'using the loop counter register (aL)'",
-   "status": "conflict"
+   "rule": "v# relative addressing only through aL in vs_3_0",
+   "source": "MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 ('Indexing Registers': v# indexed 'using the loop counter register (aL)'; the register table's 'a0/aL' RelAddr cell is the row summary; same-page prose wins, as for o#)",
+   "status": "illegal"
   },
   {
    "feature": "o[a0.x]",
@@ -1228,16 +1175,16 @@
    "kind": "opcode",
    "model": "ps_2_x",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "rep@temp-written-in-loop",
    "kind": "opcode",
    "model": "ps_2_x",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "call@label-used-in-and-out-of-loop",
@@ -1588,16 +1535,16 @@
    "kind": "opcode",
    "model": "ps_3_0",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "rep@temp-written-in-loop",
    "kind": "opcode",
    "model": "ps_3_0",
    "rule": "",
-   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
-   "status": "unreachable-doc"
+   "source": "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal",
+   "status": "legal"
   },
   {
    "feature": "call@label-used-in-and-out-of-loop",
@@ -5718,8 +5665,111 @@
   }
  },
  "ref_commits": {
-  "wine": "ref: refs/heads/master"
+  "vkd3d": "fnv-nx-build tools/vkd3d commit fd97ca35ae29a3f79b7a3467fe99d1a3b4e94643 tree_sha256 8ea2fb820f32b38bdb360b63d87f2802e3a9705bc39403b5837441a5a87382d9 (upstream https://gitlab.winehq.org/wine/vkd3d.git 0afe7d0aad6eabca21c208be609d3a5670e8ab41 (libs/vkd3d-shader/d3dbc.c only: the file sm_xref.py reads))",
+  "wine": "fnv-nx-build tools/wine-sm1 commit 0a52e82db01433f1b0363c52cf68920ba059a1b1 tree_sha256 70046f62058eb7c7addb664ce1e8438dacb68273abd4b23863e048e28addd530 (upstream https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/shader_sm1.c, dlls/d3dcompiler_43/asmparser.c: the files sm_xref.py reads))"
  },
+ "resolved": [
+  {
+   "id": "ps:47",
+   "kind": "opcode_models",
+   "ms": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "resolution": "legal models = vkd3d d3dbc.c range (a superset of the MS table, accepted by the wine decoder); the MS version table is a summary that is narrower than the token decoders; no source states the extra models illegal",
+   "rule": "R1",
+   "vkd3d": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "wine": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ]
+  },
+  {
+   "id": "ps:70",
+   "kind": "opcode_models",
+   "ms": [
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "resolution": "legal models = vkd3d d3dbc.c range (a superset of the MS table, accepted by the wine decoder); the MS version table is a summary that is narrower than the token decoders; no source states the extra models illegal",
+   "rule": "R1",
+   "vkd3d": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "wine": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ]
+  },
+  {
+   "evidence": "MS vs register tables list a0 R/W; wine asmparser.c allows; no page states it illegal as a source",
+   "id": "vs_a0_src",
+   "kind": "undetermined",
+   "resolution": "rows included (family_srcreg: a0 as ALU source, vs_1_1..vs_3_0). R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it",
+   "rule": "R4"
+  },
+  {
+   "evidence": "MS vs pages silent (the ps pages' flow-control-only wording is a ps page); wine asmparser.c vs_2/vs_3_reg_allowed list CONSTBOOL/CONSTINT as source types without a value rule",
+   "id": "vs_bi_alu",
+   "kind": "undetermined",
+   "resolution": "i# as ALU source: rows included (R4: R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it). b# as ALU source: NO rows (R5: a form whose result no source defines carries no translation obligation; the value a b# read yields as a float4 is stated by MS, wine and vkd3d nowhere; the translator emits a bool-to-vec4 assignment that uam rejects, 3 rows measured). Open item reported to the lead: b# source semantics need a source or an owner decision",
+   "rule": "R4+R5"
+  },
+  {
+   "evidence": "MS mova page says mova's dst must be a0; no page states mov-to-a0 illegal in vs_2_0+; mov-to-a0 is documented for vs_1_1",
+   "id": "mov_a0_vs2",
+   "kind": "undetermined",
+   "resolution": "rows included (mov to a0 in vs_2_0..vs_3_0). R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it",
+   "rule": "R4"
+  },
+  {
+   "evidence": "no MS asm page lists vs_1_0/ps_1_0 and none states them illegal; wine/vkd3d decoders carry ranges from 1_0 (ps texreg2gb {1,0}-{1,3})",
+   "id": "vs1_0_ps1_0",
+   "kind": "undetermined",
+   "resolution": "rows included as the 1_1 grammar (version token 1.0). R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it",
+   "rule": "R4"
+  },
+  {
+   "evidence": "MS states the uninitialised-read rule for ps_1_x only; the sm2/3 pages are silent",
+   "id": "temp_uninit_flow",
+   "kind": "undetermined",
+   "resolution": "rows included (read of a temp written only inside if/rep). R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it",
+   "rule": "R4"
+  },
+  {
+   "evidence": "MS vs masking page says single component for exp/expp/log/logp/pow/rcp/rsq; ps pages silent; the validator side of a full mask in vs is a CreateVertexShader fact",
+   "id": "rcp_mask",
+   "kind": "undetermined",
+   "resolution": "rows included (single-component masks plus the full mask). R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it",
+   "rule": "R4"
+  },
+  {
+   "evidence": "MS sgn---vs: one syntax line for all versions (no per-version operand count); wine shader_sm1.c {SGN,1,2,...(3,0)} and vkd3d d3dbc.c {SGN,1,1,{3,0}} both fix 3_0 at one source, and {2,0}-{2,1} at three. The token decoders are version-exact where the MS syntax line is not",
+   "id": "vs:sgn@vs_3_0",
+   "kind": "operand_count",
+   "resolution": "sgn in vs_3_0 has ONE source (dst, src0): the 3-source form is illegal in vs_3_0 (sm_illegal.tsv); vs_2_0/2_x keep dst,src0,src1,src2",
+   "rule": "R2"
+  },
+  {
+   "evidence": "MS vs-registers-vs-3-0: table cell 'a0/aL' vs the same page's prose 'the following register banks can be indexed, using the loop counter register (aL)': prose names the mechanism, the cell lists the column's register types (the same page gives o# 'aL' only, resolved the same way); wine decoder is unconstrained (silence)",
+   "id": "vs_3_0:v[a0.x]",
+   "kind": "legacy",
+   "resolution": "v[a0.x] is illegal in vs_3_0 (sm_illegal.tsv); v[aL+n] stays legal",
+   "rule": "R3"
+  }
+ ],
  "sampler_types": {
   "ps_2_0": [
    "2d",
@@ -5774,38 +5824,7 @@
    ".wzyx"
   ]
  },
- "undetermined": [
-  {
-   "id": "vs_a0_src",
-   "note": "a0 as a direct ALU source operand (vs_1_1..vs_3_0): MS lists a0 R/W; wine allows; no instruction page says it is a legal source. Excluded from universe.",
-   "rows": "excluded"
-  },
-  {
-   "id": "vs_bi_alu",
-   "note": "b#/i# as ALU source in vs: MS ps pages say flow-control-only, vs pages are silent. Excluded (same rule as ps).",
-   "rows": "excluded"
-  },
-  {
-   "id": "mov_a0_vs2",
-   "note": "mov to a0 (instead of mova) in vs_2_0+: MS mova page says dst must be a0; mov-to-a0 only documented for vs_1_1. Excluded.",
-   "rows": "excluded"
-  },
-  {
-   "id": "vs1_0_ps1_0",
-   "note": "vs_1_0/ps_1_0 via Create*Shader: not in any MS page of the D3D9 asm reference; wine d3d9 has no test, only d3d8. Included as 1_1 grammar (superset).",
-   "rows": "included"
-  },
-  {
-   "id": "temp_uninit_flow",
-   "note": "read of a temp written only inside if/rep: MS states the uninitialised-read validator rule for ps_1_x only; sm2/3 silent. Included.",
-   "rows": "included"
-  },
-  {
-   "id": "rcp_mask",
-   "note": "MS vs masking page: exp/expp/log/logp/pow/rcp/rsq need a single-component write mask; ps pages silent; universe uses single-component masks plus full mask. Included.",
-   "rows": "included"
-  }
- ],
+ "undetermined": [],
  "usage_source": "MS:dx9-graphics-reference-asm-dcl-usage-input-register---vs, dcl-usage---ps (D3DDECLUSAGE values, usage_index 0..15)",
  "usages": [
   "position",

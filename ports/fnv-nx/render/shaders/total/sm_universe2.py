@@ -127,9 +127,19 @@ def family_rel(u, m):
     if m == "vs_3_0":
         for off in (0, 1, 14): u.add(m, "rel", "v[aL+%d]" % off, shell(m, "defi i0, 4, 0, 1, 0\nloop aL, i0\nmov r0, v[aL + %d]\nendloop" % off, decls=["dcl_texcoord%d v%d" % (i, i) for i in range(1, 16)]))
         for off in (0, 1, 10): u.add(m, "rel", "o[aL+%d]" % off, shell(m, "defi i0, 4, 0, 1, 0\nloop aL, i0\nmov o[aL + %d], r0\nendloop" % off, decls=["dcl_texcoord%d o%d" % (i, i) for i in range(1, 12)]))
-        u.add(m, "rel", "v[a0.x]", shell(m, "mova a0, c0\nmov r0, v[a0.x]", decls=["dcl_texcoord1 v1"]), tg="conflict")
     if m == "ps_3_0":
         for off in (0, 1, 8): u.add(m, "rel", "v[aL+%d]" % off, shell(m, "defi i0, 4, 0, 1, 0\nloop aL, i0\nmov r0, v[aL + %d]\nendloop" % off, decls=["dcl_texcoord%d v%d" % (i, i) for i in range(0, 10)]))
 
+def family_vs_closed(u, m):
+    """R4 rows (table.resolved vs_a0_src / vs_bi_alu / mov_a0_vs2): forms no source states illegal"""
+    if m[0] != "v": return
+    v11 = m == "vs_1_1"
+    seta = "mov a0.x, c0.x\n" if v11 else "mova a0, c0\n"
+    u.add(m, "srcreg", "a0@mov.s0", shell(m, seta + "mov r0, a0.x"), tg="closed-world")
+    u.add(m, "srcreg", "a0@add.s1", shell(m, seta + "add r0, c0, a0.x"), tg="closed-world")
+    if v11: return
+    u.add(m, "srcreg", "i0@mov.s0", shell(m, "defi i0, 4, 0, 1, 0\nmov r0, i0"), tg="closed-world")
+    u.add(m, "dstreg", "a0@mov.dst", shell(m, "mov a0, c0\nmov r0, c[a0.x]"), tg="closed-world")
+
 def families(u, m):
-    for f in (family_dcl, family_sampler, family_ps1_tex, family_flow, family_const, family_rel): f(u, m)
+    for f in (family_dcl, family_sampler, family_ps1_tex, family_flow, family_const, family_rel, family_vs_closed): f(u, m)

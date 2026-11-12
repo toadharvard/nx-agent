@@ -5,7 +5,7 @@ S1 = "MS:dx9-graphics-reference-asm-"
 def legacy_rows(cdir, models, ops):
     sys.path.insert(0, os.path.abspath(cdir))
     import sm_cases
-    out, conf = [], []
+    out, conf, resolved = [], [], []
     def R(m, k, f, st, src, rule=""): out.append(dict(model=m, kind=k, feature=f, status=st, source=src, rule=rule))
     inmodel = lambda st, key, m: m in ops.get("%s:%s" % (st, key), {}).get("models", [])
     for m, k, f, text, lg in sm_cases.cases():
@@ -18,7 +18,7 @@ def legacy_rows(cdir, models, ops):
         elif f.startswith("call@label-used"): R(m, k, f, "legal", S1 + "vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)")
         elif f in ("callnz@p0", "if@p0"): R(m, k, f, "legal", ops["%s:%s" % (st, "callnz_pred" if f[0] == "c" else "if_pred")]["source"])
         elif f in ("if@temp-written-in-branch-only", "rep@temp-written-in-loop"):
-            R(m, k, f, "unreachable-doc", "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent")
+            R(m, k, f, "legal", "R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal")
         elif k == "srcmod" and base in ("abs", "absneg") and "texld" not in f:
             R(m, k, f, "illegal", S1 + "ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees", "source modifier %s not valid in %s" % (base, m))
         elif k == "srcmod" and base in ("bias", "biasneg", "sign", "signneg", "comp", "x2", "x2neg"):
@@ -42,9 +42,10 @@ def legacy_rows(cdir, models, ops):
         elif f == "c[a0.x+n]@aL-loop": R(m, k, f, "legal", S1 + "vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)")
         elif f == "o[a0.x]": R(m, k, f, "illegal", S1 + "vs-registers-vs-3-0 (o# RelAddr aL only)", "o# relative addressing only through aL")
         elif f == "v[a0.x]":
-            R(m, k, f, "conflict", "MS vs-registers-vs-3-0 table: v# RelAddr 'a0/aL'; MS vs-3-0 page 'Indexing Registers': v# indexed 'using the loop counter register (aL)'")
-            conf.append(dict(kind="legacy", id="vs_3_0:v[a0.x]", note="MS table says a0/aL, MS prose says aL only; wine allows any (reladdr flag)"))
+            R(m, k, f, "illegal", S1 + "vs-registers-vs-3-0 ('Indexing Registers': v# indexed 'using the loop counter register (aL)'; the register table's 'a0/aL' RelAddr cell is the row summary; same-page prose wins, as for o#)", "v# relative addressing only through aL in vs_3_0")
+            resolved.append(dict(kind="legacy", id="vs_3_0:v[a0.x]", rule="R3", resolution="v[a0.x] is illegal in vs_3_0 (sm_illegal.tsv); v[aL+n] stays legal",
+                                 evidence="MS vs-registers-vs-3-0: table cell 'a0/aL' vs the same page's prose 'the following register banks can be indexed, using the loop counter register (aL)': prose names the mechanism, the cell lists the column's register types (the same page gives o# 'aL' only, resolved the same way); wine decoder is unconstrained (silence)"))
         elif k == "usage":
             R(m, k, f, "legal", S1 + "dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15")
         else: R(m, k, f, "unreachable-doc", "no rule found for %s/%s" % (k, f))
-    return dict(rows=out, conflicts=conf)
+    return dict(rows=out, conflicts=conf, resolved=resolved)

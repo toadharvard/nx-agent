@@ -48,8 +48,6 @@ def family_ops(u, m):
     for name, e in ops_for(m):
         if e.get("tex") and ps1(m): continue                       # ps_1_x texture-addressing ops: universe2 (sampler types)
         u.op(m, "opcode", name, e, tg=tag(m, name))
-        if "s3" in e and m.endswith("3_0") and name == "sgn":     # MS sgn page: 3 operands in every version; vkd3d d3dbc.c: 1 source in vs_3_0
-            u.op(m, "opcode", name + "@3src", dict(e, s3=e["s"], tm3=e["tm"]), tg="conflict")
         if not alu(e) and e.get("d") not in ("Dr",): continue
         roles = shape_s(e, m)
         for i in srcs_idx(m, e):                                    # operand cross: register type per source slot
@@ -159,7 +157,7 @@ def rows():
     for alias, b in (("vs_1_0", "vs_1_1"), ("ps_1_0", "ps_1_1")):        # undetermined (table.excluded_models): version token 1.0 with the 1_1 grammar
         for r in base:
             if r["model"] == b and r["kind"] == "opcode":
-                u.add(alias, "opcode", r["feature"], alias + r["asm"][len(b):], None, "undet")
+                u.add(alias, "opcode", r["feature"], alias + r["asm"][len(b):], None, "closed-world")
     for r in u.rows:                                                   # ps_1_x type-dependent texture ops without a CTAB: translator input missing
         if r["kind"] == "ps1tex" and r["feature"].endswith("@ctab=none"):
             e = OPS["ps:" + r["feature"].split("@")[0]]
