@@ -99,9 +99,9 @@ GetUserDefaultLCID	C	LCID	void	0x0409	ENV:L1 user locale en-US (0x0409)		win32/e
 IsDebuggerPresent	C	BOOL	void	FALSE	ENV:P3 no debugger exists: IsDebuggerPresent = FALSE		win32/env_const.cpp
 FreeResource	C	BOOL	void *	FALSE	MSDN:FreeResource a 32-bit resource handle needs no freeing: the return value is zero		win32/env_const.cpp
 c_isleadbyte	C++	int	int	0	ENV:L1 the C locale and code page 1252 are single-byte: no lead bytes		crt/msvcrt_exports.cpp
-os_cpu_count	C	unsigned	void	3	ENV:P1 the application owns 3 processors (cores 0-2)		os/os_horizon.c
-os_vm_page_size	C	size_t	void	0x1000	ENV:P1 page size 4 KiB		os/os_horizon.c
-os_default_root	C	const char *	void	"sdmc:/switch/fnv"	ENV:F1 the root of drive C: is the port directory on the SD card		os/os_horizon.c
-os_fs_case_insensitive	C	int	void	1	ENV:F1 the SD card is FAT32/exFAT: names fold case		os/os_horizon.c
-os_tick_freq	C	uint64_t	void	10000000ull	ENV:L3 the platform timer runs at 10 MHz (os_ticks = monotonic ns / 100)		os/os_posix.c
-os_fs_case_insensitive	C	int	void	0	ENV:F1 the host file system makes no case-folding promise: the path mapper scans directories		os/os_posix.c
+os_cpu_count	C	unsigned	void	3	ENV:P1 the application owns 3 processors (cores 0-2)		../platform_host/os/os_horizon.c
+os_vm_page_size	C	size_t	void	0x1000	ENV:P1 page size 4 KiB		../platform_host/os/os_horizon.c
+os_default_root	C	const char *	void	"sdmc:/switch/fnv"	ENV:F1 the root of drive C: is the port directory on the SD card		../platform_host/os/os_horizon.c
+os_fs_case_insensitive	C	int	void	1	ENV:F1 the SD card is FAT32/exFAT: names fold case		../platform_host/os/os_horizon.c
+os_tick_freq	C	uint64_t	void	10000000ull	ENV:L3 the platform timer runs at 10 MHz (os_ticks = monotonic ns / 100)		../platform_host/os/os_posix.c
+os_fs_case_insensitive	C	int	void	0	ENV:F1 the host file system makes no case-folding promise: the path mapper scans directories		../platform_host/os/os_posix.c

@@ -103,7 +103,7 @@ typedef struct FnvnxHostApi {
                                       consumed) */
     uint64_t fs_dir_close;         /* (dir) -> 0; the id dies; an id that names no open directory: 0, nothing done */
 
-    /* ---- version 3: audio out and input (platform/audio, platform/input via toolchain/guest/platform_glue) */
+    /* ---- version 3: audio out and input (platform/audio, platform/input via platform/guest/platform_glue) */
     uint64_t audio_open;           /* (rate = 48000, period frames 1..8192) -> 0 or negative (int64 as u64); stereo PCM16.
                                       -1 rate != 48000 or period 0 or > 8192; -2 audren init failed; -3 driver create failed;
                                       -4 no memory for the pool; -5 renderer start failed. Already open: 0, arguments ignored */

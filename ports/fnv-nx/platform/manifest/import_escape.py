@@ -171,9 +171,6 @@ def find_sources(root, backend):
 
 
 GUEST_TRIPLE = 'arm64_32-apple-watchos'
-# platform/build_guest.sh HOST_SIDE: platform files that are on the host (LP64 / libnx), not in the guest archive
-HOST_SIDE = ('platform/input/input_horizon.cpp', 'platform/audio/backend_audren.c', 'platform/os/os_horizon.c',
-             'platform/os/os_posix.c', 'platform/win32/filemap_shared.cpp')
 
 
 def make_var(root, name):
@@ -187,7 +184,7 @@ def guest_product(root, tc, libnx_inc, triple):
     """The PRODUCT source set and flags of the guest (platform/build_guest.sh + toolchain/guest/build.sh), as clang jobs.
     -> (jobs [(source, full flag list)], triple description).
     Source set (exactly build_guest.sh): every .c/.cpp (maxdepth 1) of platform/{win32,crt,audio,input,boundary,com,os}
-    minus HOST_SIDE, platform/clock/{clock_rt,clock_real}.cpp (the product clock), toolchain/guest/{os_guest.c,platform_glue.cpp}, the FreeType sources of tests/s4/Makefile (FT_SRCS),
+    platform/clock/{clock_rt,clock_real}.cpp (the product clock), platform/guest/{os_guest.c,platform_glue.cpp}, the FreeType sources of tests/s4/Makefile (FT_SRCS),
     plus the guest runtime libfnvnx-guest.a (toolchain/guest: runtime.c threads.c fs.c section_guest.c tm.cpp): the guest
     image links all of them, so they are product code, not an unknown callee. Generated .inc/.gen files must exist
     (platform/build_guest.sh generates them; `make -C tests/s4 <ENV_GEN, ENVC_SRC .env_const.gen.inc, combridge.gen.cpp>`).
@@ -234,13 +231,13 @@ def guest_product(root, tc, libnx_inc, triple):
             continue
         for n in sorted(os.listdir(d)):
             s = os.path.join(d, n)
-            if n.endswith(('.c', '.cpp')) and os.path.isfile(s) and os.path.relpath(s, root) not in HOST_SIDE:
+            if n.endswith(('.c', '.cpp')) and os.path.isfile(s):
                 jobs.append((s, fl(s)))
     # the clock of the product (FNVNX_CLOCK=real, build_guest.sh default): clock_rt.cpp + clock_real.cpp, never virtual
     for n in ('clock_rt.cpp', 'clock_real.cpp'):
         jobs.append((P + '/clock/' + n, fl(n)))
     for n in ('os_guest.c', 'platform_glue.cpp'):
-        jobs.append((T + '/guest/' + n, fl(n)))
+        jobs.append((P + '/guest/' + n, fl(n)))
     ft_flags = [f if f != '-O2' else '-O1' for f in make_var(root, 'FT_CFLAGS')]
     ftb = [f for f in base if not f.startswith('-std')]
     for m in make_var(root, 'FT_SRCS'):
@@ -664,7 +661,7 @@ def main():
     ap.add_argument('--report', required=True)
     ap.add_argument('--work')
     ap.add_argument('--backend', choices=('horizon', 'guest', 'posix'), default='horizon',
-                    help='horizon: os_horizon.c + libnx (default); guest: toolchain/guest/os_guest.c (what toolchain/game/build.sh '
+                    help='horizon: os_horizon.c + libnx (default); guest: platform/guest/os_guest.c (what toolchain/game/build.sh '
                          'links: libnx is reached only through the FnvnxHostApi table); posix: host backend (fixture test)')
     ap.add_argument('--newlib', default=os.environ.get('FNVNX_NEWLIB', '/home/user/gd/newlib/newlib/libc'),
                     help='newlib libc directory (newlib/libc of the patched 4.6.0.20260123 tree) for the aarch64 backends')
@@ -868,9 +865,9 @@ def main():
     nptr = sum(1 for k, (l, v, w) in out.items() for i, p in enumerate(defs[rowinfo[k]]['params']) if p['type'] == 'ptr')
     with open(a.out, 'w') as f:
         f.write(HEADER)
-        f.write('# backend: %s%s\n' % (a.backend, {'horizon': ' (platform/os/os_horizon.c + libnx %s, target aarch64-none-elf LP64, newlib 4.6.0.20260123 headers)' % libnx_commit,
+        f.write('# backend: %s%s\n' % (a.backend, {'horizon': ' (platform_host/os/os_horizon.c + libnx %s, target aarch64-none-elf LP64, newlib 4.6.0.20260123 headers)' % libnx_commit,
                                                  'guest': ' (product source set of platform/build_guest.sh + the guest runtime toolchain/guest/{runtime,threads,fs,section_guest}.c, tm.cpp; target %s; libnx only through FnvnxHostApi)' % (target_desc if a.backend == 'guest' and not a.src else ''),
-                                                 'posix': ' (platform/os/os_posix.c, host x86-64)'}[a.backend] if not a.src else ' (explicit sources)'))
+                                                 'posix': ' (platform_host/os/os_posix.c, host x86-64)'}[a.backend] if not a.src else ' (explicit sources)'))
         f.write('# libnx commit: %s\n' % libnx_commit)
         f.write('# pipeline: clang-18 -O1 per file, llvm-link, volatile-clear, null-test-hide (%d tests), opt-18 -passes=\'%s\'\n' % (n_null, pipeline))
         for sym, idx, attrs, src in contracts:

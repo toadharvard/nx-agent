@@ -1,18 +1,18 @@
 /* os_posix.c - host backend of os.h (Linux; futex locks). Used for the host tests and as a reference for
  * os_horizon.c. Builds for x86-64 LP64 and for aarch64 ILP32 (syntax only, no ILP32 libc exists on hosts). */
 #define _GNU_SOURCE
-#include "os_clock.h"
-#include "os_shm.h"
+#include "../../platform/os/os_clock.h"
+#include "../../platform/os/os_shm.h"
 #include "fnvnx/hostapi.h"
 
 /* os_tick_freq, os_fs_case_insensitive: manifest/env_const.tsv */
-#include "env_const_posix.gen.inc"
+#include "../../platform/os/env_const_posix.gen.inc"
 
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include "os_world.h"
+#include "../../platform/os/os_world.h"
 #include <semaphore.h>
 #include <signal.h>
 #include <sched.h>
@@ -557,7 +557,7 @@ static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8])
     snprintf(abbr, 8, "%s", lt.tm_zone ? lt.tm_zone : "");
     return 0;
 }
-#include "os_tzrule.inc"
+#include "../../platform/os/os_tzrule.inc"
 
 /* ---- files */
 static int neg_errno(void)

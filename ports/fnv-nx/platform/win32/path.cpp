@@ -340,10 +340,9 @@ extern "C" void fnvnx_path_reset(const char *root)
     fnvnx_path_mount(W32_GAME_DIR, g_root);   /* the install is the root itself: <root>/FalloutNV.exe, <root>/Data */
     snprintf(h, sizeof h, "%s/user", g_root);
     fnvnx_path_mount(W32_USER_DIR, h);
-    /* the profile folders the game writes to must exist */
+    /* the profile folders Windows creates for a user (Documents, AppData/Local, Temp) exist; a game subdirectory of AppData/Local does not
+     (no static site creates it; the game creates what it needs). Documents/My Games/FalloutNV holds the declared FalloutPrefs.ini. */
     snprintf(h, sizeof h, "%s/user/Documents/My Games/FalloutNV", g_root);
-    mkdirs(h);
-    snprintf(h, sizeof h, "%s/user/AppData/Local/FalloutNV", g_root);
     mkdirs(h);
     snprintf(h, sizeof h, "%s/user/AppData/Local/Temp", g_root);   /* the TEMP/TMP directory of the environment */
     mkdirs(h);
