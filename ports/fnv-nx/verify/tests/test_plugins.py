@@ -275,6 +275,37 @@ def main():
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    # --- the stage form: the lifted C++ is made by a generated step of the root itself (no pack); exactly one of pack and stage
+    st = "gen:%s:0" % ROOT
+    srec = {k: v for k, v in lrec.items() if k != "external"}
+    sfiles = {T + "gen/lift.py": lift, ROOT + "/a.cc": None}
+    sg = make_repo("stagegood", srec, {"lifted_by": T + "gen/lift.py", "stage": st}, sfiles)
+    check("stage form: a lifted root made by one of its own generated steps is valid", errs(sg, srec) == [], errs(sg, srec))
+    lbad = dict(srec, plugins=[dict(P["fnvnx_ftoi"], args=dict(recipe.PLUGIN_ARGS["fnvnx_ftoi"]))])
+    check("stage form and pack form give the same flags: ftoi mode native is red in both",
+          any("arguments of a lifted root" in x for x in errs(sg, lbad)) and any("arguments of a lifted root" in x for x in errs(lrepo, dict(lrec, plugins=lbad["plugins"]))),
+          (errs(sg, lbad), errs(lrepo, dict(lrec, plugins=lbad["plugins"]))))
+    check("stage form: the plugin set rule is the pack form's (no ftoi: red)", any("does not load plugin fnvnx_ftoi" in x for x in errs(sg, dict(srec, plugins=[], plugin_cxx=None))))
+    both = make_repo("stageboth", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack", "stage": st}, sfiles)
+    check("both pack and stage: red", any("exactly one of pack and stage" in x for x in errs(both, lrec)), errs(both, lrec))
+    neither = make_repo("stageneither", srec, {"lifted_by": T + "gen/lift.py"}, sfiles)
+    check("neither pack nor stage: red", any("exactly one of pack and stage" in x for x in errs(neither, srec)), errs(neither, srec))
+    # --- tool-file membership is over the trees of an admitted root (admit.json trees), not the root path only
+    tt = T + "gen2tree/lift.py"
+    trec = dict(srec, generated=[dict(srec["generated"][0], tool=tt)])
+    tr = make_repo("treetool", trec, {"lifted_by": tt, "stage": st}, {tt: lift, T + "gen2/x.py": "", ROOT + "/a.cc": None},
+                   extra_roots=[{"path": T + "gen2", "class": "tool", "gates": [], "trees": [T + "gen2", T + "gen2tree"]}])
+    check("a tool file in a tree of an admitted tool root (not under the root path) is a valid lifted_by and generator tool", errs(tr, trec) == [], errs(tr, trec))
+    tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
+    check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
+    for what, name in (("an index past the steps", "gen:%s:1" % ROOT), ("another root's step", "gen:%s:0" % (ROOT + "x")), ("a free name", "lift")):
+        bs = make_repo("stagebad_" + what.replace(" ", "_").replace("'", ""), srec, {"lifted_by": T + "gen/lift.py", "stage": name}, sfiles)
+        check("stage naming %s is red" % what, any("is not a generated step" in x for x in errs(bs, srec)), errs(bs, srec))
+    other = dict(srec, generated=[{"tool": T + "gen/other.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}])
+    bo = make_repo("stageother", other, {"lifted_by": T + "gen/lift.py", "stage": st}, dict(sfiles, **{T + "gen/other.py": lift}))
+    check("stage whose step runs another tool than lifted_by is red", any("is not a generated step" in x for x in errs(bo, other)), errs(bo, other))
+    bt = make_repo("stagetool", srec, {"lifted_by": ROOT + "/lift.py", "stage": st}, {T + "gen/lift.py": lift, ROOT + "/lift.py": lift, ROOT + "/a.cc": None})
+    check("stage form: lifted_by in a non-tool root is red", any("is not a tracked .py of an admitted tool root" in x for x in errs(bt, srec)), errs(bt, srec))
     for what, tool in (("an untracked file", T + "gen/none.py"), ("a file that is not a .py", T + "gen/lift.txt"),
                        ("a file of the product root", ROOT + "/lift.py")):
         bad = make_repo("liftby_" + what.replace(" ", "_"), lrec, {"lifted_by": tool, "pack": "pack"}, {T + "gen/lift.py": lift, T + "gen/lift.txt": lift, ROOT + "/lift.py": lift, ROOT + "/a.cc": None})
