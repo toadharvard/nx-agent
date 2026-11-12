@@ -214,3 +214,17 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
     - -fPIE replaces -fPIC, unless a pack is linked -shared.
     - -fno-exceptions is undecided until w17 reports the global try/throw/catch count in the native guest sources.
   - **Evidence from L6:** the trunk sample's C flags have no semantics flags, and C unit ffp_vs_state.c had 7 fused multiply-adds (fmadd/fmsub) under the default -ffp-contract=fast.
+- 03:36Z: heads and assignments.
+
+  | Worker | Head | State | Next |
+  |---|---|---|---|
+  | w14 | b04f3ec7 | green, 295.9 s, 27 gates: imports/trees, entry universe, EMLINK, closure_key | rebase onto w10 (gates.d); then warm ensure() (L4: 54 variants take 63 s warm with 0 stages run) |
+  | w16 | de8ed638 | headers class plus gate, 28 gates; sent to MERGER | contract/include, then iat, then descs |
+  | w10 | 1638c742 | contains trunk 8cfbcdbf, gates.d with 29 gates; test class done | link.kind/roots as a real link-stage input |
+  | w12 | — | new item: doubles gate on a w10 base | — |
+  | w18 | 9f500ec5 | D3DX census: 6 sites, 2 reached; entry-range bug fixed (20487 functions) | — |
+
+  - Open counts: dynamic GetProcAddress (GPA) 12, LoadLibrary 3.
+  - crt0.s moves into an L5 guest runtime product root. Test roots reach it through link.roots, and shared headers through the headers class.
+  - w17 adds a no-__CHAR_UNSIGNED__ check per unit and an object-change count. There is no FMA instruction scan (orchestrator retracted it).
+  - MERGER order: w16 → w10 → w14 → w19.
