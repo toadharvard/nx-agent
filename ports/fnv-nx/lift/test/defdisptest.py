@@ -7,7 +7,8 @@
 (3) for every aggregate type of descclasstest.TYPES the definitions a_<n> (argument) and r_<n> (result) get a descriptor whose register class is the one the
     callee's own compiled body uses (descclasstest.ref_arg / ref_ret: the compiler as reference);
 (4) the hidden-pointer rule on results (msvc_pod): every case of podmatrix.py (9 features x depth 0/1/array x sizes 1,2,4,8,12) against the reference table
-    cl_pod_table.tsv (cl 15.00.30729.01 /FAs output with its toolchain commit); exit 3 (BLOCKED) while the table is absent.
+    cl_pod_table.tsv (the /FAs output of Microsoft cl 15.00.30729.01, Visual C++ 2008 SP1, toolchain/msvc9 of fnv-nx-build, commit in the table header; the rule itself
+    is stated from the MSVC documentation and the VC 2008 ABI in fnvnx_dispatch.cc, the table verifies it and defines nothing); exit 3 (BLOCKED) while the table is absent.
 Run: python3 -B lift/test/defdisptest.py [--cc <dir of aarch64-linux-gnu-g++>] [--work dir]   exit 0 on pass."""
 import argparse, os, re, subprocess, sys
 
