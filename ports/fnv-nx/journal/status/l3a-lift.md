@@ -197,3 +197,9 @@ Update 2026-11-12, at 698adefb:
   - Next: a jump-table target's incoming flags come from the dispatching jmp.
   - The 2 undefined-flag sites, 01441246 and 01457d65, go to L3b's rule.
 - w8: takes int2's instest.py; item 16 rebases onto int3.
+- gate_flags is L3a's gate for "every read of a flag bit has only defining reaching definitions" (agreed with L3b). w5 implements the two dataflow exceptions and classifies 01441246 and 01457d65 (doing).
+- Fact requests from L1 / L5 w15 (manifest e15d385):
+  - the extent of exe 1269a9c for the 10 dbghelp GPA rows: w2, idxrange (queued);
+  - the write set for exe 19345408/19345418: no writer in 7 images;
+  - the write set for d3dx9_38 [793b20+4]: only the ctor 56b74b writes it, so d3dx9_31 is reached.
+  - The two write-set facts are w4's, from pcsrc address sources, after its totals (queued).
