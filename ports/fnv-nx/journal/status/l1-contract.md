@@ -165,3 +165,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - L3a's trace variant is withdrawn: the trace becomes a boot-machine observation.
 - 03:51Z: new gate `onedef` (w15), per image: (a) strong/weak defined in one root; (b) COMDAT from one source definition with equal bytes (ODR); (c) equal normalized function bytes from different definitions are red. Censuses over the platform and render roots come before MERGER. lib/sha256 is a product root (owner L4) with a guest build plus a host variant.
 - 03:53Z w14's next item: gate_reach request kind closure_key (for L3a item 26). Premises: the closure fact, dispgen --closure, and 0 open dynamic sites. It is measurement-only until then.
+- 03:54Z onedef (c) dropped (body equality is a heuristic). Replaced by provenance: (c') each unit source belongs to one root, by sha256 and by path; (c'') a header's content appears under one path only.
