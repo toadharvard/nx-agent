@@ -277,32 +277,19 @@ void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /*
     }
 }
 
-/* ---- the declared machine's font registry (Wine 9.0, ANSI 1252 / OEM 437, 96 dpi). Every value is Wine's own, cited:
- *   nls_update_font_list row "Latin 1 (United States)" (dlls/win32u/font.c:344-346) as written by update_font_list (font.c:3150-3190) and add_font_list (font.c:2981);
- *   FontSubstitutes: loader/wine.inf.in:495-513 [Fonts] plus the row's shelldlg/tmsrmn values (font.c:3186-3187);
- *   Replacements: fontconfig-config 30-metric-aliases.conf <accept> of Arial, Courier New, Times New Roman, as win32u freetype.c adds them from FcConfigSubstitute.
- * The font files are exactly the pinned tools/fonts-wine9 mirror in one directory; nothing else is read. */
+/* ---- the declared machine's font registry (Wine 9.0, ANSI 1252 / OEM 437, 96 dpi). Every value is generated from Wine's own files by
+ * platform/manifest/gen_fontmachine.py (font.c nls_update_font_list row + update_font_list/add_font_list, wine.inf.in [Fonts] FontSubstitutes,
+ * fontconfig-config 30-metric-aliases.conf for Replacements; inputs pinned in fnv-nx-build tools/fonts-wine9); nothing here is typed by hand.
+ * The font files are exactly that mirror's fonts/ in one directory; nothing else is read. */
+#include "font_machine.gen.inc"
 void declare_machine()
 {
-    const char *nt = "hkey_local_machine\\software\\microsoft\\windows nt\\currentversion\\";
-    g_reg["hkey_local_machine\\system\\currentcontrolset\\control\\nls\\codepage"].push_back({ "ACP", "1252" });
-    auto &hw = g_reg["hkey_local_machine\\system\\currentcontrolset\\hardware profiles\\current\\software\\fonts"];
-    hw.push_back({ "OEMFONT.FON", "vgaoem.fon" }); hw.push_back({ "FIXEDFON.FON", "vgafix.fon" }); hw.push_back({ "FONTS.FON", "vgasys.fon" });
-    auto &fl = g_reg[std::string(nt) + "fonts"];
-    fl.push_back({ "Courier", "coure.fon" }); fl.push_back({ "MS Serif", "serife.fon" });
-    fl.push_back({ "MS Sans Serif", "sserife.fon" }); fl.push_back({ "Small Fonts", "smalle.fon" });
-    auto &fs = g_reg[std::string(nt) + "fontsubstitutes"];
-    static const char *const subst[][2] = {
-        { "MS Shell Dlg", "Tahoma" }, { "Tms Rmn", "Times New Roman" },
-        { "Arial Baltic,186", "Arial,186" }, { "Arial CE,238", "Arial,238" }, { "Arial CYR,204", "Arial,204" }, { "Arial Greek,161", "Arial,161" }, { "Arial TUR,162", "Arial,162" },
-        { "Courier New Baltic,186", "Courier New,186" }, { "Courier New CE,238", "Courier New,238" }, { "Courier New CYR,204", "Courier New,204" },
-        { "Courier New Greek,161", "Courier New,161" }, { "Courier New TUR,162", "Courier New,162" },
-        { "Helv", "MS Sans Serif" }, { "Helvetica", "Arial" }, { "MS Shell Dlg 2", "Tahoma" }, { "Times", "Times New Roman" },
-        { "Times New Roman Baltic,186", "Times New Roman,186" }, { "Times New Roman CE,238", "Times New Roman,238" }, { "Times New Roman CYR,204", "Times New Roman,204" },
-        { "Times New Roman Greek,161", "Times New Roman,161" }, { "Times New Roman TUR,162", "Times New Roman,162" } };
-    for (auto &r : subst) fs.push_back({ r[0], r[1] });
-    auto &rp = g_reg["hkey_current_user\\software\\wine\\fonts\\replacements"];
-    rp.push_back({ "Arial", "Liberation Sans" }); rp.push_back({ "Courier New", "Liberation Mono" }); rp.push_back({ "Times New Roman", "Liberation Serif" });
+    const std::string nt = "hkey_local_machine\\software\\microsoft\\windows nt\\currentversion\\";
+    g_reg["hkey_local_machine\\system\\currentcontrolset\\control\\nls\\codepage"].push_back({ "ACP", std::to_string(kAcp) });
+    for (auto &r : kHwFonts) g_reg["hkey_local_machine\\system\\currentcontrolset\\hardware profiles\\current\\software\\fonts"].push_back({ r[0], r[1] });
+    for (auto &r : kFontsKey) g_reg[nt + "fonts"].push_back({ r[0], r[1] });
+    for (auto &r : kSubst) g_reg[nt + "fontsubstitutes"].push_back({ r[0], r[1] });
+    for (auto &r : kReplace) g_reg["hkey_current_user\\software\\wine\\fonts\\replacements"].push_back({ r[0], r[1] });
 }
 const std::vector<std::pair<std::string, std::string>> &reg_key(const char *k)
 {

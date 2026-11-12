@@ -131,6 +131,11 @@ rm -f "$HERE/win32/registry_seed.gen.inc"
 make -s -C "$ROOT/tests/s4" REGSITES="$REGSITES" "$HERE/win32/registry_seed.gen.inc" \
     || { echo "build_guest: registry seed: gen_registry_seed.py refused the declared table"; exit 2; }
 [ -f "$HERE/win32/registry_seed.gen.inc" ] || { echo "build_guest: missing generated registry_seed.gen.inc"; exit 2; }
+# ---- the declared machine's font registry values, generated from the pinned fonts mirror (tools/fonts-wine9): FNVNX_FONTS = its fonts/
+[ -n "${FNVNX_FONTS:-}" ] && [ -d "$FNVNX_FONTS" ] || { echo "build_guest: FNVNX_FONTS (the tools/fonts-wine9 mirror's fonts directory) is missing"; exit 2; }
+rm -f "$HERE/win32/font_machine.gen.inc"
+make -s -C "$ROOT/tests/s4" FNVNX_FONTS="$FNVNX_FONTS" "$HERE/win32/font_machine.gen.inc" \
+    || { echo "build_guest: font machine: gen_fontmachine.py refused the mirror"; exit 2; }
 
 # ---- guest runtime
 if [ -z "${GUEST_RT:-}" ]; then

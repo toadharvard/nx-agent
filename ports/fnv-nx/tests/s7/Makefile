@@ -77,6 +77,11 @@ REG_DECL := $(P)/manifest/declared_registry.tsv
 $(P)/win32/registry_seed.gen.inc: $(REG_DECL) $(P)/manifest/gen_registry_seed.py $(P)/manifest/regsites.py $(REGSITES)
 	python3 -I $(P)/manifest/gen_registry_seed.py $(REGSITES) $(REG_DECL) $@
 $(OUT)/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
+# the declared machine's font registry values, generated from the pinned Wine 9.0 files of the fonts mirror (tools/fonts-wine9)
+FONTS_MIRROR ?= $(patsubst %/fonts,%,$(FNVNX_FONTS))
+$(P)/win32/font_machine.gen.inc: $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf
+	python3 -I $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf $(FNVNX_FONTS) $@
+$(OUT)/platform/win32/gdifont.cpp.o: $(P)/win32/font_machine.gen.inc
 
 # the declared FalloutPrefs.ini: the launcher gate's setting (PREFS_REQUIRED, the exe-derived private output of prefs_settings.py in the product
 # build; the tests use their own synthetic file) = the adapter Description in the render front end's identity images (IDENT_*; synthetic here)

@@ -11,3 +11,4 @@ platform/com/combridge.gen.cpp
 platform/com/combridge_exports.gen.cpp
 platform/com/combridge_if.gen.h
 platform/com/combridge_rows.tsv
+platform/**/font_machine.gen.inc
