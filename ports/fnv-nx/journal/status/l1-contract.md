@@ -783,3 +783,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - data_in_code.tsv pinned in the facts manifest.
   - ETA: w7's facts commit in about 90 min.
 - L5 w15 c7231594b is accepted: one reader, with funcfacts built on contract/imagerec. Condition: no reader may be usable before use_contract.
+
+## 2026-11-12 09:50 UTC
+- w5 92fdab81 accepted (runner totality): 54 program records, verdict green, 28 gates, 356.8 s (over budget: selftests).
+  - Rebased onto 6d3a2800 as a986429a.
+  - GL pins wait for gl4's admission and stay as measured data until then.
+  - Next: the wine profile.
+- L3a DIC (b) confirmed: R3 refuses an entry only by points-to proof. Until that proof exists, the entry stays a candidate.
