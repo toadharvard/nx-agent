@@ -24,11 +24,11 @@ def raises(what, rows, needle):
     fails.append(what + ': no error')
 
 
-def row(va, size, sym, image='exe', gates=('layout', 'namegate', 'abi')):
-    return {'image': image, 'va': va, 'size': size, 'certified_by': list(gates), 'type': 'T' + sym, 'symbol': sym, 'unit': 'u'}
+def row(va, size, sym, image='exe', gates=('layout', 'namegate', 'abi'), unit='u'):
+    return {'image': image, 'va': va, 'size': size, 'certified_by': list(gates), 'type': 'T' + sym, 'symbol': sym, 'unit': unit}
 
 
-rows = [row(0x2000, 8, 'b'), row(0x1000, 16, 'a'), row(0x10, 4, 'z', image='dll'), row(0x2000, 8, 'b')]
+rows = [row(0x2000, 8, 'b'), row(0x1000, 16, 'a'), row(0x10, 4, 'z', image='dll'), row(0x2000, 8, 'b', unit='v')]
 objs = globext.build(rows)
 check('sorted', [(o[0], o[1]) for o in objs], [('dll', 0x10), ('exe', 0x1000), ('exe', 0x2000)])
 check('fact', globext.fact_text(objs), 'dll 0x10 4 abi+layout+namegate\nexe 0x1000 16 abi+layout+namegate\nexe 0x2000 8 abi+layout+namegate\n')
@@ -45,6 +45,8 @@ raises('size 0', [row(1, 0, 'a')], 'bad va/size')
 raises('no gates', [row(1, 1, 'a', gates=())], 'certified_by')
 raises('space in gate', [row(1, 1, 'a', gates=('a b',))], 'certified_by')
 raises('missing', [{'image': 'exe'}], 'missing')
+check('units joined', globext.build(rows)[2][6], 'u,v')
+raises('same va, other size', [row(8, 4, 'a'), row(8, 8, 'a')], 'conflict')
 check('hex va', globext.build([row('0x20', 4, 'h')])[0][1], 0x20)
 
 with tempfile.TemporaryDirectory() as d:

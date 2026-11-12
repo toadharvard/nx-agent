@@ -1996,6 +1996,29 @@ not a row.
 Output fact, one line per object: `image va_start size certified_by` (hex va, decimal size, gate ids joined by '+',
 no spaces), sorted by image then va_start. The audit file holds `image va_start size type symbol unit`.
 A row with size < 1, a missing field, a non-hex-able va, or an empty certified_by is a ValueError. Two objects of
-one image whose ranges overlap are a ValueError naming both. Identical duplicate rows are one object.
+one image whose ranges overlap are a ValueError naming both. Rows of one (image, va) are one object when size, gates, type and symbol agree (units are joined with `,`), else a ValueError.
 --range prints the object count inside [LO, HI); --probe prints the object containing each VA, or `none certified`.
+```
+
+## contract/globext_rows.py
+
+```text
+globext_rows - the certified objects of one build, as the rows globext.py writes (L2).
+
+Pure functions; the inputs are the outputs of the gates, passed in, never read from the exe here.
+  parse_objects(data, where) -> [(asm, size, align, elem, itanium, flags)]     the `.fnvnx.objects` section (plugin fnvnx_layout)
+  certify(obj, objects, sympair, bind_sym, name_ok, record_ok, scalar_ok, unit) -> (rows, rejected)
+      obj        object basename (the key of bind_sym and name_ok)
+      objects    parse_objects rows of the object;  sympair  l2sections.parse_sympair rows of the object
+      bind_sym   {(obj, symbol): exe address}  bind.bind_all(...)['sym']: the VA from the msvc/exe facts (N1)
+      name_ok    {(obj, symbol): gate ids}     the asm <-> msvc name pairs the name gate certified
+      record_ok  {(obj, record key): gate ids} the record types the layout and abi gates certified
+      scalar_ok  {itanium type: gate ids}      the scalar types the data-model gate certified (a pointer is the type `P`)
+      rows       one dict per certified object, the input of globext.build (image `exe`)
+      rejected   [(symbol, reason)] for every object row that is not certified: nothing is guessed or filled in
+An object is certified only when ALL hold: a `data` `def` row of the sympair section names it (msvc name not empty), the name gate
+certified the pair, bind_sym has an address for it (an absolute-value pin, bit 32, is no address), and its type is certified: a record
+element by record_ok on its key, a scalar element by scalar_ok, an array by its element type (the array's size is the plugin's
+TYPE_SIZE_UNIT, element size times the declared extent; an incomplete array has no row, so it is absent).  certified_by is the union
+of the gate ids of the name, the type and `n1` (the address).
 ```

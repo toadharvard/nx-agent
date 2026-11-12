@@ -10,7 +10,7 @@ not a row.
 Output fact, one line per object: `image va_start size certified_by` (hex va, decimal size, gate ids joined by '+',
 no spaces), sorted by image then va_start. The audit file holds `image va_start size type symbol unit`.
 A row with size < 1, a missing field, a non-hex-able va, or an empty certified_by is a ValueError. Two objects of
-one image whose ranges overlap are a ValueError naming both. Identical duplicate rows are one object.
+one image whose ranges overlap are a ValueError naming both. Rows of one (image, va) are one object when size, gates, type and symbol agree (units are joined with `,`), else a ValueError.
 --range prints the object count inside [LO, HI); --probe prints the object containing each VA, or `none certified`.
 """
 import argparse, json, sys
@@ -37,7 +37,19 @@ def _row(r):
 
 def build(rows):
     """-> sorted list of (image, va, size, certified_by, type, symbol, unit); overlap is a ValueError."""
-    objs = sorted(set(_row(r) for r in rows))
+    byva = {}
+    for r in rows:
+        o = _row(r)
+        k = (o[0], o[1])
+        if k not in byva:
+            byva[k] = o
+            continue
+        p = byva[k]
+        if p[2:6] != o[2:6]:   # the same object in several units (an inline or COMDAT variable) must agree in everything but the unit
+            raise ValueError('conflict at %s %#x: %s (size %d, %s) and %s (size %d, %s)' % (o[0], o[1], p[5], p[2], p[4], o[5], o[2], o[4]))
+        if o[6] not in p[6].split(','):
+            byva[k] = p[:6] + (','.join(sorted(p[6].split(',') + [o[6]])),)
+    objs = sorted(byva.values())
     for a, b in zip(objs, objs[1:]):
         if a[0] == b[0] and b[1] < a[1] + a[2]:
             raise ValueError('overlap in %s: %s [%#x,%#x) and %s [%#x,%#x)' %
