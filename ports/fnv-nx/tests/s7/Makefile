@@ -109,7 +109,7 @@ $(OUT)/platform/clock/clock_virtual.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/s7_tests_vclock: $(VC_OBJS) $(FTLIB)
 	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
 vclock: com-spec-check $(OUT)/s7_tests_vclock
-	rm -rf $(OUT)/root-vclock && mkdir -p $(OUT)/root-vclock/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s7_tests_vclock vc_
+	rm -rf $(OUT)/root-vclock && mkdir -p $(OUT)/root-vclock/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s7_tests_vclock vc_
 
 # the spec is derived from the C++ declarations: it must be what the extractor writes now
 com-spec-check:
@@ -117,13 +117,13 @@ com-spec-check:
 		|| { echo "com_spec.json is not what platform/com/spec_extract.py derives from the headers (run it)"; exit 1; }
 
 test: com-spec-check $(OUT)/s7_tests
-	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
+	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
 
 # the same tests built static for AArch64 and run under qemu-aarch64
 qemu:
 	$(MAKE) --no-print-directory OUT=$(OUT)-a64 CC="aarch64-linux-gnu-gcc -static" CXX="aarch64-linux-gnu-g++ -static" \
 		$(OUT)-a64/s7_tests
-	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
+	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
 
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
