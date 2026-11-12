@@ -8,8 +8,6 @@ plan: every path changed under ports/fnv-nx/ is put in one class (CLASSES, first
 checks is the plan. A path no class names selects everything (unknown means unsafe). The checks:
   build    prepare, compile, link, guest, emulated boot (full_job.sh; prepare, compile and link are incremental)
   equiv    the MSVC equivalence gate (equiv_job.sh 1 of 1; the object cache recompiles only changed units)
-  fuzz     differential fuzzing (fuzz_job.sh 1 of 1; the verdict cache re-fuzzes only functions whose key changed)
-  audit    the overhead audit (audit_job.sh 1 of 1; the row cache re-measures only changed keys)
   replay   the cell sweep on cached reference captures (sweep_job.sh, SWEEP_CAPTURE=replay, the cover scenes)
   programs the shader-program sweep (sweep_job.sh's perm.py part), when the translator changed
   plat     R4's platform lane (plat_job.sh, tools/perf/PLAT.md; after build, on its build directory)
@@ -24,7 +22,7 @@ checks is the plan. A path no class names selects everything (unknown means unsa
            guest relinked with the watchdog and run under qemu-aarch64 (after build, on its build directory)
 The caches make each selected check cost what changed; the plan only skips checks that nothing can affect.
 A plan with "full" set needs the full farm run: a key that every cached result of a check depends on changed - the
-toolchain or the pins (FULL), a version constant (KEYS: difffuzz HARNESS, AUDIT_HARNESS, unitcache CACHE_V, the
+toolchain or the pins (FULL), a version constant (KEYS: unitcache CACHE_V, the
 capture store's FORMAT / REF_FORMAT / CAPTURE_V) or a capture-key input (CAPTURE_INPUTS). quick_job still runs the
 selected checks; the sharded farms refill the cold cache (the rule for when a full run is needed).
 
@@ -34,7 +32,7 @@ cells.tsv lines when the index holds them, else (id) alone.
 """
 import argparse, json, os, re, subprocess, sys
 
-ALL = ('build', 'equiv', 'fuzz', 'audit', 'replay', 'programs', 'threads', 'frames', 'mem', 'scenario', 'boottrace', 'plat')
+ALL = ('build', 'equiv', 'replay', 'programs', 'threads', 'frames', 'mem', 'scenario', 'boottrace', 'plat')
 # (regex on the path relative to ports/fnv-nx/, checks); first match wins
 CLASSES = [
     (r'^(docs/|journal/|JOURNAL\.md$|README\.md$|reports/)', ()),
@@ -54,15 +52,12 @@ CLASSES = [
     (r'^tools/compare/(wine_ref\.sh|ref_ini\.py|scenes\.json)$', ('replay', 'boottrace')),   # both references' Wine prefix
     (r'^tools/compare/', ('replay',)),                # the harness; a change to a capture-key input makes a new key
     (r'^tools/equiv/', ('equiv',)),
-    (r'^tools/difffuzz/', ('fuzz', 'audit')),         # the audit runs on the fuzz harness and its keys
     (r'^tools/perf/(frames\.py|FRAMES\.md|linfeed\.py)$', ('frames',)),
     (r'^tools/perf/(plat\.py|plat_autostart\.c|PLAT\.md)$', ('plat',)),
     (r'^tools/perf/(mem\.py|mem_wrap\.c|mem_autostart\.c|MEM\.md)$', ('mem',)),
-    (r'^tools/perf/', ('audit',)),
+    (r'^tools/perf/', ()),                            # models and reports: no check runs them
     (r'^tools/farm/(sweep_job|capstore)', ('replay',)),
     (r'^tools/farm/(equiv_job)', ('equiv',)),
-    (r'^tools/farm/(fuzz_job)', ('fuzz', 'audit')),
-    (r'^tools/farm/(audit_job)', ('audit',)),
     (r'^tools/farm/scenario_job', ('scenario',)),
     (r'^tools/scenario/', ('scenario',)),
     (r'^tools/farm/threads_job', ('threads',)),
@@ -78,7 +73,7 @@ CLASSES = [
     # fnvlink and the compile cache: this head's link and guest, so every check on them; never equiv (the MSVC
     # build of the prepared tree; order_check.py reads compile.sh's defaults but no check here runs it), never the
     # replay (nx_render on captures) - qk1 on aec30808 ran a cold equiv for 2.9 h on a link change
-    (r'^tools/link/', ('build', 'fuzz', 'audit', 'threads', 'frames', 'mem', 'plat', 'scenario')),
+    (r'^tools/link/', ('build', 'threads', 'frames', 'mem', 'plat', 'scenario')),
 ]
 # a change here invalidates every cached result of a check: quick_job runs it all (a full run on one machine is slow:
 # the farms' sharded run is the better tool)
@@ -96,8 +91,6 @@ COLD = [
 # version constants that are part of every key of one cache: a different value between base and head means that
 # cache is cold (the sharded farms refill it: the rule for a full run of that check)
 KEYS = [
-    ('tools/difffuzz/fnkeys.py', r"^HARNESS = '([^']*)'", 'fuzz and audit: difffuzz HARNESS'),
-    ('tools/perf/overhead_audit.py', r"^AUDIT_HARNESS = '([^']*)'", 'audit: AUDIT_HARNESS'),
     ('tools/equiv/unitcache.py', r"^CACHE_V = '([^']*)'", 'equivalence: unitcache CACHE_V'),
     ('tools/compare/capstore.py', r"^FORMAT = '([^']*)'", 'capture store: FORMAT (a new capture key)'),
     ('tools/compare/scene_stats.py', r"^REF_FORMAT = '([^']*)'", 'capture store: REF_FORMAT (a new capture key)'),
@@ -146,14 +139,11 @@ def plan(paths):
         for c, rx, w in COLD:
             if re.search(rx, p):
                 cold.setdefault(c, []).append('%s: %s' % (p, w))
-    # fuzz, audit and the boot need the link of this head; equiv only the prepared tree (build's prepare step)
+    # the boot needs the link of this head; equiv only the prepared tree (build's prepare step)
     # every change that rebuilds the guest can move the boot's first divergence
     if checks.get('build'):
         checks['boottrace'] = True
         why.setdefault('boottrace', []).append('(the guest is rebuilt)')
-    if checks.get('fuzz') or checks.get('audit'):
-        checks['build'] = True
-        why.setdefault('build', []).append('(fuzz/audit need this head\'s link)')
     return {'files': len(paths), 'checks': {c: bool(checks.get(c)) for c in ALL},
             'why': {c: sorted(set(v))[:20] for c, v in why.items()}, 'full': full,
             'cold': {c: v[:20] for c, v in cold.items() if checks.get(c)}}

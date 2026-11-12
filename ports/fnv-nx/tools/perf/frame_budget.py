@@ -47,7 +47,7 @@ informational), 60 fps stable (target_60: the worst frame at or under 16.7 ms, t
 Hotspots (docs/PERF.md 11.4): subsystem rows are the frame's items by subsystem and thread role (frameprof's
 per-subsystem median of measured frames when there are any, else the model: [E] unless every item is measured);
 function rows are frameprof's top functions of measured frames, else the model's hotspot_functions (A64
-instructions per call from dyncount [M] x calls per frame [E] = [E]); boot rows are the top functions of the
+instructions per call from a measured count [M] x calls per frame [E] = [E]); boot rows are the top functions of the
 profiled intervals before the main loop [M], with their device time instead of a frame share. Rows rank by mid
 instructions within their kind; the queue ranks the fixes by main-thread instructions saved (mid).
 """

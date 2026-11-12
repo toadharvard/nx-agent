@@ -11,7 +11,6 @@ libclang-18-dev headers (fnvcheck is built into the scratch dir given as argumen
    GCC AArch64 ILP32 on every record.
 4. the layout steps of run.sh (clang_pass.sh, layout_diff.py, layout_probe.py) and report.py on a one-unit tree of
    layouts.cpp.
-5. crosscheck.py attributes a site to the tagged function whose body contains it.
 6. toolchain/ftoi: the fnvnx_ftoi plugin's float -> integer conversions equal MSVC's x86 ones (ftoi/, qemu-aarch64).
 7. toolchain/order: MSVC memory ordering and argument order (order/run.py: code generation, args, multicore litmus).
 """
@@ -240,18 +239,6 @@ def ftoi(scratch):
     check(r.returncode == 0 and r.stdout.count('csel') >= 2, 'ftoi: ILP32 with the build flags (%s)' % r.stderr.strip()[-200:])
 
 
-def crosscheck():
-    """crosscheck.py: a site belongs to the function whose tagged, brace-matched body contains it"""
-    sys.path.insert(0, STATIC)
-    import crosscheck as cc
-    text = ('// @fnv 0x00401000\nint f(int a)\n{\n  const char *s = "}";\n  return a; // }\n}\n'
-            'struct Between { int x; };\n'
-            '// @fnv 0x00401010\nint g();\n'
-            '// @fnv 0x00401020\nvoid h() { /* { */ if (1) { } }\n')
-    spans = cc.function_spans(text)
-    check(spans == [(1, 6, 0x401000), (10, 11, 0x401020)], 'crosscheck function_spans %s' % spans)
-
-
 def main():
     scratch = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, 'out'))
     os.makedirs(scratch, exist_ok=True)
@@ -259,7 +246,6 @@ def main():
     check(r.returncode == 0, 'fnvcheck builds (%s)' % r.stderr.strip()[-300:])
     build_flags()
     facts(scratch)
-    crosscheck()
     ftoi(scratch)
     o = subprocess.run([sys.executable, os.path.join(HERE, 'order', 'run.py'), os.path.join(scratch, 'order')],
                        capture_output=True, text=True)

@@ -26,7 +26,7 @@ ref=""
 # FETCH_TREE_RECON=<id> (lib_job.sh job_inputs: the recon set this job prepares with, recon.sh's RECON_ID): a tree
 # prepared with another recon set is not this commit's tree today (T1: link 8111f58a's tree was prepared at 10:44,
 # before recon/ctor_719c00_registries_w1 and recon/d22_vtable_dtor existed). t/<commit12> with another recon fails
-# at once (it will not change); the rolling tree with another recon is not taken. Unset: not checked (fuzz_job.sh
+# at once (it will not change); the rolling tree with another recon is not taken. Unset: not checked
 # takes the tree its link was made on, whatever the recon).
 recon_ok() {   # recon_ok <ref>: the tree's meta.json recon matches FETCH_TREE_RECON (or it is not checked)
   [ -n "${FETCH_TREE_RECON+x}" ] || return 0

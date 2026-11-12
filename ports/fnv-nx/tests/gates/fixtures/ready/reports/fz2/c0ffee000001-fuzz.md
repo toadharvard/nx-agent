@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 00402000 | x87-precision | f32 | sub_402000 |
 
-## Causes by verdict class, cumulative (fnvnx-causes/1, tools/difffuzz/causes.py)
+## Causes by verdict class, cumulative (fnvnx-causes/1)
 
 | cause | class | owner | divergences | functions | worst of |
 |---|---|---|---:|---:|---:|

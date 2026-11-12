@@ -413,13 +413,13 @@ class ReadyTest(unittest.TestCase):
         card = self.world.run()
         rows = {(r['stage'], r['what'].split(' (')[0]): r for r in card['scorecard']}
         self.assertEqual([r['stage'] for r in card['scorecard']],
-                         ['compile', 'link', 'link', 'ABI', 'fuzz', 'fuzz', 'equivalence', 'boot', 'render parity',
+                         ['compile', 'link', 'link', 'ABI', 'fuzz', 'equivalence', 'boot', 'render parity',
                           'frame budget', 'frame budget'])
-        for r in card['scorecard'][:9]:
+        for r in card['scorecard'][:8]:
             self.assertEqual((r['gap'], r['status']), (0, 'done'), r)
             self.assertTrue(r['sources'], r)
         # the frame rows: 60 fps at 1.02 GHz (J-0150); the S15 budget fits (12.0 ms), the GPU model does not
-        fb, gpu = card['scorecard'][9], card['scorecard'][10]
+        fb, gpu = card['scorecard'][8], card['scorecard'][9]
         self.assertEqual((fb['value'], fb['target'], fb['unit'], fb['gap'], fb['status']), (12.0, 16.7, 'ms', 0, 'done'))
         self.assertEqual((gpu['value'], gpu['status']), (24.8, 'open'))
         self.assertAlmostEqual(gpu['gap'], 24.8 - 16.7, places=1)
@@ -746,7 +746,7 @@ class ReadyTest(unittest.TestCase):
         card = self.world.run()
         self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'no-data')
 
-    # ---- fnvnx-fuzz-summary/1 (tools/farm/fuzz_job.sh)
+    # ---- fnvnx-fuzz-summary/1
     def fuzz_summary(self, k, **kw):
         rel = 'reports/fz%d/%s-fuzz.md' % (k, C)
         s = dict(format='fnvnx-fuzz-summary/1', commit=C, shard=k, shards=2, status='complete',

@@ -358,7 +358,7 @@ def parse_static(text):
 
 
 def fuzz_summary(text):
-    """the report's ```json fnvnx-fuzz-summary``` block (tools/farm/fuzz_job.sh, the same object as the
+    """the report's ```json fnvnx-fuzz-summary``` block (the same object as the
     <head12>-fuzz.json beside it); None when absent, {} when present but unreadable"""
     m = re.search(r'^```json fnvnx-fuzz-summary\n(.*?)\n```', text or '', re.M | re.S)
     if not m:
@@ -373,7 +373,7 @@ def fuzz_summary(text):
 def parse_fuzz(text):
     m = re.search(r'^# fuzz \S+ shard (\d+)/(\d+)(.*)$', text, re.M)
     if not m or 'HARNESS BROKEN' in m.group(3):
-        return None         # a broken harness's verdicts are not meaningful (fuzz_job.sh says so in the title)
+        return None         # a broken harness's verdicts are not meaningful
     d = dict(k=int(m.group(1)), n=int(m.group(2)), catalogued=first(r'functions catalogued (\d+)', text),
              shard=first(r'in this shard (\d+)', text), no_native=first(r'no native object (\d+)', text),
              not_modelled=first(r'control flow not modelled[^)]*\) (\d+)', text),
@@ -407,7 +407,7 @@ def parse_fuzz(text):
 
 
 def causes_block(text):
-    """the ```json fnvnx-causes``` block of a fuzz report (S13b, tools/farm/fuzz_job.sh), or a fnvnx-causes/1 JSON
+    """the ```json fnvnx-causes``` block of a fuzz report (S13b), or a fnvnx-causes/1 JSON
     file (causes.py summary / merge); None when absent or unreadable"""
     i = (text or '').find('```json fnvnx-causes')
     if i >= 0:
@@ -596,14 +596,6 @@ def static_classifier(port):
 
 def static_verdicts(port):
     return static_classifier(port)[0]
-
-
-def fuzz_policy(port):
-    """cause -> (verdict class, owner, hard, why) of tools/difffuzz/causes.py POLICY (S13b); this checkout's policy
-    decides the class of every cause, as `causes.py merge` does. {} when the tool is absent"""
-    mod = load_module(port, os.path.join('tools', 'difffuzz', 'causes.py'), 'fnvnx_difffuzz_causes')
-    pol = getattr(mod, 'POLICY', None) if mod else None
-    return dict(pol) if isinstance(pol, dict) else {}
 
 
 # ------------------------------------------------------------------------------------------------- scorecard
@@ -1031,51 +1023,6 @@ class Card:
                       per_shard={str(k): [v, wo] for k, (v, wo) in per.items()})
         else:
             self.nodata('fuzz.coverage', 'Fuzz', 'S13 coverage', '>= 90 %', 'no fuzz report', rank=19)
-        self.s13_metric_gate(n)
-
-    def s13_metric_gate(self, n):
-        """S13's own convergence metric, tools/difffuzz/metric.py of this checkout (artifacts + not fuzzable +
-        unpublished shards, fnvnx-s13-metric/1), run on the artifacts repository; fixtures: <dir>/_s13_metric.json.
-        Informative: the hard divergences are fuzz.hard; this is the harness's distance from a complete campaign"""
-        title = 'S13 metric: artifact divergences + functions not fuzzable + unpublished shards (difffuzz/metric.py)'
-        m, why = None, None
-        if getattr(self.store, 'gitdir', None):
-            mod = load_module(self.port, os.path.join('tools', 'difffuzz', 'metric.py'), 'fnvnx_difffuzz_metric')
-            if mod is None:
-                why = 'no tools/difffuzz/metric.py in this checkout'
-            else:
-                try:
-                    m = mod.measure(self.store.gitdir, self.hist.repo, n)
-                except Exception as e:          # noqa: BLE001 - a broken tool must not hide the other gates
-                    why = 'metric.py failed: %s: %s' % (type(e).__name__, str(e)[:80])
-        else:
-            f = os.path.join(getattr(self.store, 'root', ''), '_s13_metric.json')
-            try:
-                m = json.loads(readf(f)) if os.path.isfile(f) else None
-            except ValueError:
-                m = None
-            why = None if m else 'no S13 metric (fixtures: _s13_metric.json)'
-        tot = dct(dct(m).get('totals'))
-        if not isinstance(tot.get('metric'), int):
-            self.nodata('fuzz.s13_metric', 'Fuzz', title, '0', why or 'metric.py gave no totals', rank=19,
-                        required=False)
-            return
-        shards = [s for s in dct(m).get('shards') or [] if isinstance(s, dict)]
-        srcs = [self.src('reports/fz%d' % s['shard'], '%s-fuzz.md' % s['good'], s['good'])
-                for s in shards if s.get('good')]
-        bad = [str(s.get('shard')) for s in shards if s.get('newest_status') != 'ok']
-        note = 'artifacts %s + not fuzzable %s (coverage %s %%) + unpublished shards %s%s; artifact causes: %s' % (
-            tot.get('artifacts'), tot.get('not_fuzzable'), tot.get('coverage'), tot.get('unpublished'),
-            ' (%s)' % ','.join(bad) if bad else '',
-            ', '.join('%s %s' % kv for kv in list(dct(m.get('artifact_causes')).items())[:6]) or '-')
-        tr = dct(self.th.get('fuzz_s13_metric'))
-        st = PASS if tot['metric'] == 0 else FAIL
-        if tr.get('trusted') is False:
-            # the value is shown, but a refuted tool decides nothing until its stream fixes it
-            st, note = NODATA, 'not trusted: %s; %s' % (tr.get('why') or 'refuted', note)
-        self.gate('fuzz.s13_metric', 'Fuzz', title, tot['metric'], '0', st, srcs,
-                  note, rank=19, required=False, terms={k: tot.get(k) for k in ('artifacts', 'not_fuzzable',
-                                                                                 'unpublished', 'coverage')})
 
     def fuzz_table_gate(self, shards, srcs, missing, n):
         """fuzz.hard from the reports' hard-divergence tables (reports without an fnvnx-causes block)"""
@@ -1127,20 +1074,16 @@ class Card:
 
     def fuzz_causes_gates(self, shards, n):
         """fuzz.hard from the S13b causes (fnvnx-causes/1): only causes whose class is real-bug or triage
-        (thresholds fuzz_hard_classes) count; by-design and artifact causes follow causes.py POLICY: not a
+        (thresholds fuzz_hard_classes) count; by-design and artifact causes are not a
         divergence of the port. Harness artifacts are shown as an informative gate (fuzz.artifacts, S13)"""
         got = self.fuzz_causes(shards)
         if not got:
             return False
         cs, covered, srcs, what = got
-        pol = fuzz_policy(self.port)
         hard_cls = set(self.th.get('fuzz_hard_classes', ['real-bug', 'triage']))
 
         def cls(cause, r):
-            # as causes.py policy(): a cause not in the table is triage; without the tool, the report's own class
-            if pol:
-                return (pol.get(cause) or ('triage',))[0]
-            return r.get('verdict') or 'triage'
+            return r.get('verdict') or 'triage'      # the class the report's causes block carries
         by = {}
         for cause, r in cs['causes'].items():
             c = cls(cause, r)
@@ -1153,7 +1096,7 @@ class Card:
         owners = {}
         for cause, r in cs['causes'].items():
             if cls(cause, r) in hard_cls:
-                o = (pol.get(cause) or (None, r.get('owner') or ('S13b' if pol else '?')))[1]
+                o = r.get('owner') or '?'
                 owners[o] = owners.get(o, 0) + (r.get('worst_of') or 0)
         top = sorted(((f, c) for b in (by.get(x, {}) for x in hard_cls) for c, f in b.get('causes', {}).items()),
                      key=lambda x: (-x[0], x[1]))[:6]
@@ -1167,12 +1110,12 @@ class Card:
         if nocov:
             note += '; shards not covered: %s' % ','.join(map(str, nocov))
         st = FAIL if hard_fn else PASS if not nocov else NODATA
-        self.gate('fuzz.hard', 'Fuzz', 'S13: functions with a real-bug or triage divergence (S13b causes)', hard_fn,
+        self.gate('fuzz.hard', 'Fuzz', 'S13: functions with a real-bug or triage divergence (causes block of the report)', hard_fn,
                   '0', st, srcs, note, rank=11, by_class={c: by[c]['functions'] for c in by}, owners=owners,
                   divergences=hard_div)
         art = by.get('artifact', dict(functions=0, divergences=0, causes={}))
         self.gate('fuzz.artifacts', 'Fuzz', 'S13: functions whose worst divergence is a harness artifact (S13 fixes)',
-                  art['functions'], '0', PASS if not art['functions'] else FAIL, srcs, 'not the port (causes.py POLICY); '
+                  art['functions'], '0', PASS if not art['functions'] else FAIL, srcs, 'not the port (the report\'s class); '
                   'by cause: %s' % ', '.join('%s %d' % (c, f) for c, f in sorted(art['causes'].items(),
                                                                                  key=lambda x: (-x[1], x[0]))[:6]),
                   rank=19, required=False)
@@ -1829,10 +1772,6 @@ def scorecard(gates, th):
     row('fuzz.hard', 'fuzz', 'hard divergences (real-bug + triage)' if fd is not None else 'functions with a hard divergence',
         ['fuzz.hard', 'fuzz.coverage'], fz, 0, fz,
         note='%s functions; coverage %s' % (ff, G['fuzz.coverage']['value'] if 'fuzz.coverage' in G else '-'))
-    sm = G.get('fuzz.s13_metric')
-    s13 = sm['value'] if sm and isinstance(sm.get('value'), int) else None
-    row('fuzz.s13', 'fuzz', 'S13 metric: artifacts + not fuzzable + unpublished shards (difffuzz/metric.py)',
-        ['fuzz.s13_metric'], s13, 0, s13 if sm and sm['status'] != NODATA else None, note=sm['note'] if sm else '')
     ec, en = val('equiv.code'), val('equiv.nobuild')
     eq = None if ec is None or en is None else ec + en
     row('equiv.diffs', 'equivalence', 'S11 diffs not by design (functions + units)', ['equiv.code', 'equiv.nobuild'], eq, 0, eq,

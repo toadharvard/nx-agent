@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tests/s2d - EQ difffuzz native-vslot-differs (S2d-vslot): tools/link/vtmetric.py's slot checker and its census of
+"""tests/s2d - EQ native-vslot-differs (S2d-vslot): tools/link/vtmetric.py's slot checker and its census of
 exe vftables no V row stands for, on hand-made fixtures (no exe, no game content).
 
     python3 -I tests/s2d/test_vslot_match.py

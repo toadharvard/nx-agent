@@ -15,7 +15,7 @@
 #            build/units.json is read.
 #   objects  the compile farms' objects of <commit> (fetch_objs.sh, c/<commit12>/<i>of<M>; $OBJ_SHARDS = M);
 #            $V1_OBJ_DIR instead. Used by the C1 sampler only; without them C1's sampler is skipped.
-#   msvc     the pristine decomp's MSVC 2008 objects, branch msvc/pristine/<decomp12> (as fuzz_job.sh); $V1_X86OBJ
+#   msvc     the pristine decomp's MSVC 2008 objects, branch msvc/pristine/<decomp12>; $V1_X86OBJ
 #            instead. Used by C3 only; without them C3 is skipped.
 #   ext      tools/fetch.sh's pinned checkouts in $V1_EXT (default $FARM_HOME/ext): the decomp's units.json (C3),
 #            sse2neon.

@@ -57,7 +57,7 @@
  "fuzz_by_design_causes": {
   "x87-precision": "result within tolerance of x87 80-bit intermediates; AArch64 has IEEE single/double only"
  },
- "_fuzz_by_design_doc": "used only for fuzz reports without an fnvnx-causes block; with one, tools/difffuzz/causes.py POLICY decides",
+ "_fuzz_by_design_doc": "used only for fuzz reports without an fnvnx-causes block; with one, the block's own classes decide",
  "fuzz_hard_classes": [
   "real-bug",
   "triage"
@@ -146,11 +146,6 @@
   "frame_fps": 60,
   "frame_clock": "stock",
   "gpu_config": "handheld_720p"
- },
- "fuzz_s13_metric": {
-  "_doc": "tools/difffuzz/metric.py as the scorecard's S13 row; trusted=false shows its value as no-data (set it to true once S13 fixes V1's findings)",
-  "trusted": false,
-  "why": "V1 refuted metric.py (M1-M3: a missing, FAILED-only or deadline-pending shard lowers the metric)"
  },
  "report_due_s": 43200,
  "_report_due_s_doc": "a pass whose source is behind the head and older than this (s, against the newest publish time) is overdue: stale, not a pass",

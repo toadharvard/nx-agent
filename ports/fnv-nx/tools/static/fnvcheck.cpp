@@ -856,7 +856,7 @@ struct Visitor : RecursiveASTVisitor<Visitor> {
   }
 
   // OUTARG-UNINIT: the first use of an uninitialized local hands its address to a call (`T x; f(&x); use(x);`, a
-  // buffer passed by decay, a member call on it). Not a port hazard - the callee writes it - but the difffuzz harness
+  // buffer passed by decay, a member call on it). Not a port hazard - the callee writes it - but the old fuzz harness
   // runs callees as stubs that do not write through pointer arguments (DIFFFUZZ.md, Limits): a divergence of such a
   // function that reads `x` is the harness's (S13 uninit-* causes).
   bool VisitDeclRefExpr(DeclRefExpr *DR) {

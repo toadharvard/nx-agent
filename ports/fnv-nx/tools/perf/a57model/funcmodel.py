@@ -2,7 +2,7 @@
 """funcmodel.py - static A57 price of named guest functions (docs/PERF.md 12.5): for each function, llvm-mca
 -mcpu=cortex-a57 over its body as one straight-line pass (every block once, in address order, branches not taken)
 and over each basic block as a loop body. Gives cycles per instruction (CPI) with its spread, which turns a function's
-measured instructions per call (dyncount, PERF.md 7 / 11.4) into cycles per call when no trace of it exists yet.
+measured instructions per call (measured, PERF.md 7 / 11.4) into cycles per call when no trace of it exists yet.
 
     funcmodel.py --elf fnvnx.elf FUNC... [--json OUT] [--mca-cache FILE]
     funcmodel.py --elf fnvnx.elf --rows rows.json [--json OUT]     rows: [{"id", "funcs": [...], "insns_per_call"}]

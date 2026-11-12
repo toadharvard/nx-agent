@@ -123,7 +123,7 @@ NAMES_SO=$(CXX=$CXX bash "$HERE/toolchain/names/build.sh" "$OUT/.names") \
   || { echo "compile.sh: the fnvnx_names plugin does not build" >&2; exit 2; }
 FLAGS+=(-fplugin="$NAMES_SO")
 # AB_FLAGS: extra flags appended after all of the above, so they win (e.g. -fstrict-aliasing against the parity set).
-# For A/B measurements only (tools/perf/unit_ab.sh, docs/PERF.md 11.8), never for a build that runs; unset = no
+# For A/B measurements only (docs/PERF.md 11.8), never for a build that runs; unset = no
 # change.
 if [ -n "${AB_FLAGS:-}" ]; then read -r -a _ab <<< "$AB_FLAGS"; FLAGS+=("${_ab[@]}"); fi
 # RACE=1 (D25 #7, tools/threads/README.md): the race-checker build. -fsanitize=thread only inserts __tsan_* calls

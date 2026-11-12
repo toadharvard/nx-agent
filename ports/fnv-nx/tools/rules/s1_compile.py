@@ -5871,7 +5871,7 @@ def r_empty_string_objects(path, text, stats):
 # placeholders `virtual void vNNN()`. Most only declare them; some write `{}` after them, an empty body that is no
 # function of the game: NiAVObject (magicprojectile.cpp) defines v000..v057 that way, so its native vtable names
 # `_ZN10NiAVObject4v003Ev`, a `ret`, where the exe's slot 3 is 0x00acbb70 (`xor eax, eax; ret`, a native function
-# of the address map) and virtual callers get whatever x0 held (EQ difffuzz records 0x00477560, 0x009abe40). A
+# of the address map) and virtual callers get whatever x0 held (EQ records 0x00477560, 0x009abe40). A
 # declared-only slot is a trap stub, which exe_slot_fill (fnvlink.py) binds to the exe slot's function; an empty
 # stand-in is not a trap, so the fill never looked at it. The body is dropped: `virtual void vNNN();`. Only the
 # placeholder names (v + three hex digits) with an empty void body; a named virtual with `{}` is the decomp's own

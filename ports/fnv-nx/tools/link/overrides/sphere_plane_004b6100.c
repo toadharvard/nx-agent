@@ -2,7 +2,7 @@
  * docs/PERF.md 11.6, tests/s15/simd/cull_test.c).
  *
  * The decomp calls the plane's distance 0x004b6160 (normal . center - constant), which calls the dot product
- * 0x004b6190: three frames per test, 38 A64 instructions (dyncount). Here the same float operations in the same
+ * 0x004b6190: three frames per test, 38 A64 instructions. Here the same float operations in the same
  * order: d = ((n.x c.x + n.y c.y) + n.z c.z) - k; 2 if d <= -r, else 1 if d >= r, else 0 (NaN: 0). Layouts: sphere
  * {center x, y, z; radius}, plane {normal x, y, z; constant}, 16 bytes each, ILP32 and x86 alike. The override
  * inlines copies of 0x004b6160 and 0x004b6190: an override or patch of either must update it too. */
