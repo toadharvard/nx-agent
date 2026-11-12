@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """modlift residual rule (item 22 b), checked on one real module: the residue is data (class 9, gate green) only when the closure is complete, i.e. every relocated in-span value is an entry (R3)
-AND pcsrc's s4 result (<facts>/<module>/pcsrc_s4.json) says 0 violations. No pcsrc file -> red 's4-unchecked' (never assumed green); violations > 0 -> red 's4-violation'.
+AND pcsrc's s4 result (<facts>/<module>/pcsrc_s4.json) says 0 violations. No pcsrc file -> red 's4-unchecked' (red until pcsrc says 0); violations > 0 -> red 's4-violation'.
     FNVNX_MODULES=.../modules.tsv FNVNX_MODDIRS=dir:dir modlift_closure_test.py [module=binkw32]       (exit 0 = all pass; needs the module's DLL, there is no skip)"""
 import os, subprocess, sys, tempfile, json
 HERE = os.path.dirname(os.path.abspath(__file__)); TOOL = os.path.join(os.path.dirname(HERE), 'tools', 'universe.py')

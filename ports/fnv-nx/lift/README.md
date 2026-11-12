@@ -98,7 +98,7 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
     remainder, stated plainly: the reference was transcribed from the SDM and exhaustively compared with the host
     where that is possible.
   - `table`: `rcp*`/`rsqrt*`: the 2^32 table of the reference CPU is the specification.
-  Assumption recorded: memory forms are proven for pre-states where the model raises no segment-limit fault; on the
+  Recorded as ASM-006 (A-SEGLIM): memory forms are proven for pre-states where the model raises no segment-limit fault; on the
   flat 4 GiB segments of the real process an address wraps modulo 2^32, which is what the lifted code does. `instest` (Unicorn) verifies; it
   prove nothing.
 - **R3, code map.** Every byte of `.text` of every lifted module is an instruction of an entry, alignment, or a

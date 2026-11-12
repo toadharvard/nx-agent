@@ -5,7 +5,7 @@
                  an incoming argument k of the caller is the union over EVERY direct call site (recursive, memoised; a cycle without a constant is red);
                  a caller whose address is taken or that is entered other than by a direct call is red (`throw_sites[].kind == 'red'`, `thrower_escapes`).
   Callee-saved (R2) ebx/esi/edi/ebp survive a call only where the callee is proven to restore them on every path to each ret (`preserves`), or is an import
-                 (Win32 as documented, ASSUMPTIONS.json 3); otherwise unknown.
+                 (Win32 as documented, ASM-003); otherwise unknown.
   SEH (R3)       registrations are the decoded stores of an esp-derived address to fs:[0]; the record is {next, handler, field, trylevel}. The handler is a constant; the scope
                  table is the constant `field` (plain, or xor-ed with a value independent of every argument), or, in a helper whose field is its incoming argument k,
                  the constant of argument k at every direct call site. A field that is neither (cookie, computed) yields no scope table.

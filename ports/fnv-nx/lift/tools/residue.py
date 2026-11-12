@@ -7,7 +7,7 @@ Residue = valid executable bytes that no entry body reaches and no PE directory 
   (s4) arithmetic on a value of s1..s3.
 Every indirect transfer lands in s1..s3 unless s4 happens, so the closure is complete iff every relocated in-span value is an entry (unent == 0) AND no s4 value reaches a control transfer. The s4
 check is pcsrc's (the typed-source rule extended from return addresses to relocated code values); its result is read from <facts dir>/pcsrc_s4.json {"s4_violations": n}. No file: s4 is UNCHECKED and
-the residue is red, never assumed green.
+the residue is red until checked.
 
 RULE: closure complete -> every residue byte is data (class DATA = 9, "data-unreached"); otherwise every residue byte is UNEXPLAINED (class 8 in modlift, 0 in codemap) with the closure reason.
 Nothing else decides a residue byte: the sweep below (decodes / undecodable / reloc-not-operand / no-end) is a breakdown printed for information and decides nothing."""
@@ -76,7 +76,7 @@ def pe_sources(M, u32, intext):
 
 def source_rows(cl, facts_dir, universe, exports, entry, tls, eh_addrs):
     """-> [(source, closed)] in SOURCES order. r3_reloc: every relocated in-span value is an entry; pcsrc: the pcsrc result of the image (gate_pcsrc.json) has no red row other than s4 (return-address / FIP /
-    FDP sources typed); export / tls / entry / eh: every such address is an entry of the universe (checked here, not assumed); no_s4_arith: pcsrc_s4.json exists and says 0 violations. A missing file is open."""
+    FDP sources typed); export / tls / entry / eh: every such address is an entry of the universe (checked here); no_s4_arith: pcsrc_s4.json exists and says 0 violations. A missing file is open."""
     f = os.path.join(facts_dir, 'gate_pcsrc.json'); pc = False
     if os.path.exists(f):
         r = json.load(open(f)); pc = r['red'] - r['s4_red'] == 0

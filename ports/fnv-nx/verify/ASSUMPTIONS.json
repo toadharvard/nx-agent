@@ -203,6 +203,8 @@
     "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/gates/gate_eh.py",
     "ports/fnv-nx/lift/proof/README.md",
+    "ports/fnv-nx/lift/tools/ehflow.py",
+    "ports/fnv-nx/lift/tools/ehtables.py",
     "ports/fnv-nx/lift/tools/fpstate.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
@@ -262,6 +264,7 @@
     "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/journal/inbox/l2-source-handoff-opus.md",
     "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/README.md",
     "ports/fnv-nx/lift/proof/README.md",
     "ports/fnv-nx/lift/proof/symcheck.py",
     "ports/fnv-nx/lift/tools/ehflow.py",

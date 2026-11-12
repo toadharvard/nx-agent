@@ -283,7 +283,7 @@ class Flow:
                     if m != IN[t]: IN[t] = m; work.append(t)
         return IN
 
-    # ---- imports: the declared machine's contract (L1 keys.tsv: calling convention and argument types of every imported function), Win32 as documented (ASSUMPTIONS.json 3):
+    # ---- imports: the declared machine's contract (L1 keys.tsv: calling convention and argument types of every imported function), Win32 as documented (ASM-003):
     # a function of the platform preserves ebx/esi/edi/ebp; a stdcall callee pops its arguments, a cdecl or vararg callee does not
     def import_effect(s, op):
         m = op.mem if op.type == cx.X86_OP_MEM else None

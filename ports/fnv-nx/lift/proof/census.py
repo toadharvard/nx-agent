@@ -13,7 +13,7 @@ The ranges are authoritative: exactly the listed byte ranges are decoded (each d
 not decode to whole instructions is an ERROR: it is listed in the header (`# undecodable lo-hi stopped_at=`), the instructions decoded before the
 failure are kept, and the exit status is 1.  A range outside the file's section data, or an instruction the shape rule cannot mask, aborts.
 The family is computed for EVERY decoded instruction (not for the first of its shape); a key that gets two families makes the census fail (ValueError listing the key, the families and the lowest address of each), so
-the family is a function of the key over the whole census by checking the finite set, not by an assumption; the representative encoding is decoded again and must give the same shape and family.  The form key is that of the REPRESENTATIVE (capstone names the predicate of cmpps/cmppd/cmpss/cmpsd by the
+the family is a function of the key over the whole census by checking the finite set; the representative encoding is decoded again and must give the same shape and family.  The form key is that of the REPRESENTATIVE (capstone names the predicate of cmpps/cmppd/cmpss/cmpsd by the
 value of the imm8, so the mnemonic of an occurrence is not a function of the shape; the representative has imm8 = 0)."""
 import hashlib
 import os
