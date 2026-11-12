@@ -107,6 +107,21 @@ _sp.run(["git", "-C", _repo, "add", "-A"], check=True)
 check("(i) a body in hostapi.h itself is red", "wrapper use in %s/inc/hostapi.h" % _r in g.foreign_uses(_repo, _rec, _r, "/nonexistent"))
 shutil.rmtree(_repo, ignore_errors=True)
 
+# stale names: a deleted name in an admitted file is red; the journal (history) and the registry are exempt
+ML, SF = "main" + "_loop", "SOCK" + "_FIRST"   # spelled in parts: this file is itself scanned
+_repo = tempfile.mkdtemp(prefix="gh-stale-")
+_t = "ports/fnv-nx"
+for rel, txt in {_t + "/verify/admit.json": json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": _t + "/verify", "class": "tool", "gates": []}, {"path": _t + "/journal", "class": "doc", "gates": []}]}),
+                 _t + "/verify/hostapi_holes.json": json.dumps({"names": [ML, SF]}), _t + "/verify/a.py": "x = 1  # h_" + ML + "\n",
+                 _t + "/verify/b.py": SF + "X = 1\nmainloop = 2\n", _t + "/journal/h.md": ML + " was deleted\n"}.items():
+    os.makedirs(os.path.dirname(os.path.join(_repo, rel)), exist_ok=True)
+    open(os.path.join(_repo, rel), "w").write(txt)
+subprocess.run(["git", "init", "-q", _repo], check=True)
+subprocess.run(["git", "-C", _repo, "add", "-A"], check=True)
+check("stale names: h_<name> in a tool file is red; <name>X, mainloop, the journal and the registry are not",
+      g.stale_names(_repo) == [ML + " in %s/verify/a.py" % _t], g.stale_names(_repo))
+shutil.rmtree(_repo, ignore_errors=True)
+
 # (ii) no range marker aliases a service; the 13 socket services are declared (the platform's sock_guest.c calls each of them)
 if real is not None:
     dr = g.declared(real)

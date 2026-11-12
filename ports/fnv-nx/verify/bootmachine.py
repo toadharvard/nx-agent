@@ -12,8 +12,7 @@ Rules:
    slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
    the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
-   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path, except the thread's own
-   FNVNX_PLAT_ACCESS_FAULT_HANDLER (5c).
+   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
    inside it and not given away before; addr gets RW memory holding the CONTENT of src, and [src, src+size) becomes
    unmapped for good (a later access ends the run with "fault"). addr: exactly there, wholly inside a plan["free"]
@@ -329,7 +328,7 @@ class Machine:
         self.calls, self.switches, self.slice_calls0, self.exit_code = 0, 0, 0, None
         self.fault, self.events, self.ext_missing, self.limit_hit = None, [], None, False
         self.mapped = []   # merged [lo, hi) ranges mapped by map_fixed
-        self.mf_live = {}   # addr -> (size, src) of every live map_fixed mapping (the kernel's own record, UNMAP_FIXED checks against it)
+        self.mf_live = {}   # addr -> (size, src) of every live map_fixed mapping (the kernel's own record)
         self.cb_thread, self.cb_console, self.line = None, None, bytearray()
         self.ret_pending, self.console_text = {}, []
         self.limit_instr, self.instr, self.icount, self.block_hook = limit_instructions, 0, None, False

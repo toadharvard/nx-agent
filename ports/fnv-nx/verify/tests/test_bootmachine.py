@@ -768,7 +768,7 @@ def parse_totality(path):
     assert len(names) == 13 and set(counts) == set(names), (names, counts)
     for f, n in zip(list(range(16, 27)) + [30, 31], names):
         rows[f] = (n, counts[n])
-    defs = {int(v): n for n, v in re.findall(r"#define FNVNX_PLAT_([A-Z_0-9]+) (\d+)u", txt) if n not in ("SOCK_FIRST", "SOCK_LAST")}
+    defs = {int(v): n for n, v in re.findall(r"#define FNVNX_PLAT_([A-Z_0-9]+) (\d+)u", txt)}
     assert {f: r[0] for f, r in rows.items()} == defs, "table rows and #define FNVNX_PLAT_* differ"
     st = txt[txt.index("typedef struct FnvnxHostApi {"):txt.index("} FnvnxHostApi;")]
     slots = re.findall(r"uint64_t (\w+);", st)[4:]   # after guest_base, guest_size, heap_base, heap_size

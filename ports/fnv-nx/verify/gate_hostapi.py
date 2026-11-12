@@ -5,8 +5,7 @@ Rule (owner order 2026-11-10/11: nothing that the product does not need, no plac
 that includes hostapi.h, {service numbers declared in the header} == {service numbers expanded by at least one unit of the root}.
 Declared: the header's own text (PATH, default ports/fnv-nx/toolchain/include/fnvnx/hostapi.h, else verify/tests/guest/hostapi.h of the
 trunk's fixture): every `#define FNVNX_PLAT_<NAME> <integer>` directive (a preprocessor directive read by its token grammar: #, define,
-identifier, one pp-number). A service is a NUMBER; names with the same number are aliases of one service (a range marker such as
-SOCK_FIRST / SOCK_LAST aliases the service it equals, so it adds no item and its own use counts as a use of that service number).
+identifier, one pp-number). A service is a NUMBER; names with the same number are aliases of one service.
 Used: the evidence is the PP stage result unit.ii of every unit of the root (found by pp_key in objects.json, as gate_objstub does). The PP
 stage runs `-dU` (unitstage.PP_TAIL): GCC then writes `#define NAME VALUE` for exactly the macros that the unit EXPANDS (or tests with
 defined/#ifdef); a name written in a comment, a string or an unexpanded #define is not there. A root includes hostapi.h iff some unit.ii has
@@ -14,6 +13,7 @@ a line marker (`# N "path"`) whose file name is hostapi.h. A used FNVNX_PLAT_ ma
 the header's, is a red item as well (the unit saw another header).
 Universe: one item per declared service number of each root that includes hostapi.h, plus one per undeclared use. Certified: declared and
 used. No product root, or none that includes hostapi.h: universe 0, green, no exception list (gate_build.quantify).
+Stale names: a name of verify/hostapi_holes.json (a deleted slot, service or marker) in any tracked file of an admitted root (journal/ and JOURNAL.md, the history, excepted) is a red item (`NAME in PATH`).
 Wrapper rule (class): a PREFIX identifier may appear only in the `#define PREFIX_X <integer>` lines of hostapi.h and in unit files (.c/.cc/.cpp/.S)
 of the root; any other file that can be #included (non-unit files under the root, the recipe's include directories, external include trees) that names
 one is a red item ("wrapper use"), and so is a non-define use in hostapi.h. So "expanded by a unit" means a call site of a unit and nothing a header
@@ -111,6 +111,30 @@ def foreign_uses(repo, rec, root, store):
     return sorted(set(bad))
 
 
+HOLES = "ports/fnv-nx/verify/hostapi_holes.json"
+HISTORY = ("ports/fnv-nx/journal", "ports/fnv-nx/JOURNAL.md", HOLES)   # records of what happened, and the registry itself
+
+
+def stale_names(repo):
+    """-> [str] "NAME in PATH" for every name of HOLES (deleted slots/services/markers) that occurs in a tracked file of an admitted root
+    outside HISTORY. RULE: a deleted name is gone from the tree, so no stale name survives its slot; the names are matched case-insensitively
+    where the neighbours are not letters or digits (so FNVNX_PLAT_NAME and h_name match)."""
+    import re
+    names = json.load(open(os.path.join(repo, HOLES)))["names"]
+    rx = re.compile(rb"(?<![A-Za-z0-9])(%s)(?![A-Za-z0-9])" % b"|".join(re.escape(n.encode()) for n in names), re.I)
+    admitted = [r["path"] for r in json.load(open(os.path.join(repo, recipe.ADMIT)))["roots"]]
+    out = set()
+    for f in recipe.tracked(repo):
+        if any(recipe.under(f, h) for h in HISTORY) or not any(recipe.under(f, a) for a in admitted):
+            continue
+        try:
+            t = open(os.path.join(repo, f), "rb").read()
+        except OSError:
+            continue
+        out |= {"%s in %s" % (m.group(1).decode(), f) for m in rx.finditer(t)}
+    return sorted(out)
+
+
 def includes_header(ii_text):
     """True iff the preprocessed text has a line marker for a file named hostapi.h"""
     for line in ii_text.splitlines():
@@ -170,6 +194,8 @@ def main(argv):
         roots = gate_build.product_roots(repo)
         header = header_text(repo, explicit) if roots else ""
         u, c, ids, detail = gate_build.quantify(repo, lambda r: root_judge(r, repo, cache, header))
+        st = stale_names(repo) if os.path.isfile(os.path.join(repo, HOLES)) else []
+        u, ids = u + len(st), st + ids
         status = "green" if u == c else "red"
     except (OSError, ValueError, KeyError) as e:
         u, c, ids, detail, status = 1, 0, ["input"], "input error: %s" % (str(e)[:300] or type(e).__name__), "red"

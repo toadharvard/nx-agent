@@ -710,9 +710,9 @@ Files: guest paths go through bootpath.BootPath (sdmc: prefix, case-folded compo
 stated in bootpath.py). BootPath(root) creates <root>/switch/fnv, as the device always has it.
 
 Host slots whose effect is not modelled (the observable contract is kept; see HOST SLOTS in the stage report):
- output_debug_string (kept in .debug, no sink), console_flush, main_loop (always 1), buttons_down (always 0),
+ output_debug_string (kept in .debug, no sink),
  thread_free, thread_set_priority / thread_set_cpu (recorded in .placement only, no placement effect),
- wall_time_us (fixed epoch + virtual ns), tz_offset_minutes (VC1's zone: UTC, 0), random64 (deterministic splitmix64, seed 0),
+ wall_time_us (fixed epoch + virtual ns), random64 (deterministic splitmix64, seed 0),
  memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
  dropped, submit sleeps the period in virtual time), pad_read (never connected, zeros), pad_vibrate, input_poll
  (no events), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
@@ -838,8 +838,7 @@ Rules:
    slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
    the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
-   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path, except the thread's own
-   FNVNX_PLAT_ACCESS_FAULT_HANDLER (5c).
+   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
    inside it and not given away before; addr gets RW memory holding the CONTENT of src, and [src, src+size) becomes
    unmapped for good (a later access ends the run with "fault"). addr: exactly there, wholly inside a plan["free"]
@@ -858,9 +857,8 @@ Rules:
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
    for every instant (utc_seconds is any int64: the declared machine's zone in the emulator is fixed UTC, CLAUDE.md "The declared machine", and UTC has one rule at every instant, so the stage's time service refuses nothing and -EOVERFLOW (-75) never comes from the stage);
-   tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
+   THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
-   ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
    DISPLAY_DOCKED (9) answers 1 for the constructor argument profile="docked", 0 for "handheld" (default). Thread and directory ids are table
    handles (IdTable: (generation << 16) | slot, at most 1024 live together); the stack count (n_stacks) is a limit of this machine, not of the header.
 5b. Platform service (module 11; always on). Totality at construction: every fn of PLATFORM_FNS
@@ -880,10 +878,6 @@ Rules:
    never picked; unknown tid NotFound 0x1359, a thread not started or ended BadInput 0x1759 (no kernel call, also for a THREAD_SELF record of such a thread); a thread (or the
    record of a thread) that is the CALLING thread: ResultBusy 0xF401, pause or resume; another live thread: pause of a paused one or resume of one that is not paused
    ResultInvalidState 0xFA01, else 0 (svcSetThreadActivity as Atmosphere's libmesosphere states it, source/svc/kern_svc_activity.cpp and KThread::SetActivity: svc::ResultBusy for the current thread, svc::ResultInvalidState for a pause of a paused or a resume of a not paused thread; a result is module | description << 9, module Kernel = 1, descriptions Busy 122, InvalidState 125 - libnx b156b4774fb2 nx/include/switch/result.h MAKERESULT, where 122 is spelled KernelError_AlreadyExists).
-5e. UNMAP_FIXED (fn 15, addr, size, src): the undo of exactly one earlier map_fixed. addr or src unaligned 0xCC01; size 0 / unaligned 0xCA01; (addr, size,
-   src) not exactly a live map_fixed mapping 0xD401 (so a second unmap refuses). Success: the range is unmapped (an access faults), the src heap block
-   is accessible RW again with the content the mapping had, and addr may be mapped again. A page of the range that is not RW is the header's
-   violated precondition: MachineError, which ends the run as a host-call fault (the contract defines no result).
 5d. Sections (module 11 fn 11..14, host_section.inc; errors are -(code) as u64, recorded as events section_*-refused with the
    positive code). A section is one anonymous mmap (zero, page aligned) kept alive for the machine's life; each view is
    uc.mem_map_ptr of that buffer at the view's address, so views share bytes. MAP checks in the host's order: size, alignment, id,
@@ -892,25 +886,13 @@ Rules:
    reservations and views (not a VM reservation). Views are RW guest memory but not guest-owned pages: VM_PROTECT / COMMIT /
    DECOMMIT of a range holding a view page and VM_RELEASE of a reservation holding one are refused 0xD401 (nothing done);
    map_fixed cannot land on one (refused by its own range rules). FREE kills the id at once, the pages live until the last view is
-   unmapped. The fault-handler frame may live in a view: a view is writable guest memory (rule 5c asks only that).
+   unmapped. 
 5d. TEXT_ENTRY (module 11 fn 36, args {max_len, init, init_n, out, n}; _plat_text_entry): the run's scenario `text_entries` (a list of
    strings, one consumed per successful call, in order). Checks as on the console: max_len 0 or > 500, out or n null -> -FNVNX_HE_BADINPUT, no
    text consumed. A text left -> 1, its UTF-16 units + NUL at out, *n = units; no text left (or no scenario) -> 0 (cancel, out and *n
    untouched). DIFFERENCE from the console, as the header says for the emulator: no human, so the answer comes from the scenario instead of
    always 0. A text of more than max_len units is a scenario error: the run ends, reason "scenario-error", extra["scenario"] = why (never
    truncated). A non-writable out / n on an answer of 1 is a host-call fault. Every call is an event {kind "text-entry", max_len, result}.
-5c. ACCESS_FAULT_HANDLER (module 11 fn 10, args {handler, stack_top}, result 0; handler 0 unregisters; stack_top must be 16-byte
-   aligned, >= 816 and < 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
-   UC_HOOK_MEM_INVALID: unmapped or protection, read/write/fetch) of a thread with a handler, not already inside it, is
-   delivered at once: the frame (FnvnxFaultFrame, 816 bytes) is written at stack_top - 816 from the exact register state at the
-   faulting instruction (pc = that instruction; pstate = NZCV only, bits 31..28), then x0 = frame, sp = frame, lr = a return stub
-   on the host page, pc = handler. reason is 0 (unmapped) or 1 (protection); 2 (alignment) is never produced: Unicorn raises no
-   alignment fault through the hook (an alignment trap ends the run as "uc-error"), so the machine cannot tell it. When the
-   handler returns to the stub: x0 == 0 loads x0..x30, sp, pc, NZCV, fpcr, fpsr, v0..v31 from the frame in guest memory and
-   resumes; x0 != 0 ends the run, reason "exit", exit_code x0. A fault of a thread inside its handler ends the run: reason
-   "fault", record with in_handler. A frame range that is not wholly guest memory the guest can write (not host page) ends the
-   run, reason "fault", kind "frame-unwritable". Each delivery is an event {kind "fault-handler", tid, access, reason, addr, pc}.
-   Faults of host calls on bad guest pointers ("host-access") are not thread faults and are not delivered.
 6. Bound and count: one UC_HOOK_BLOCK over the image region (installed only with limit_instructions or attach_icount)
    adds size/4 per block, feeds the Icount if attached, and stops at the first block boundary where the total >=
    limit_instructions: reason "limit", the same stop point on every run (the stopping block is counted).
@@ -1317,7 +1299,7 @@ gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe
 
 ## verify/gate_hostapi.py
 
-Wrapper rule (class): a `FNVNX_PLAT_` identifier may appear only in the `#define FNVNX_PLAT_X <integer>` lines of hostapi.h and in unit files (.c/.cc/.cpp/.S) of the root. Any other includable file (a non-unit file under the root, under a recipe include directory, or in an external include tree) that names one is a red item (`wrapper use in PATH`), and so is a non-define use inside hostapi.h; with that the `-dU` position of a define does not matter. The header has no range markers (SOCK_FIRST/LAST aliased services).
+Wrapper rule (class): a `FNVNX_PLAT_` identifier may appear only in the `#define FNVNX_PLAT_X <integer>` lines of hostapi.h and in unit files (.c/.cc/.cpp/.S) of the root. Any other includable file (a non-unit file under the root, under a recipe include directory, or in an external include tree) that names one is a red item (`wrapper use in PATH`), and so is a non-define use inside hostapi.h; with that the `-dU` position of a define does not matter.
 Gate `hostapi` (product class, in `gate_admit.REQUIRED_PRODUCT`). For every admitted product root that includes `fnvnx/hostapi.h`: the set of
 service numbers declared in the header (`#define FNVNX_PLAT_<NAME> <integer>`, read by token grammar; names with one number are aliases) equals
 the set of service numbers that some unit of the root expands. Evidence: `unit.ii` of the PP stage, which runs `-dU` (GCC lists exactly the
