@@ -55,3 +55,27 @@ MSVC-only names in rules/ (file:line, no analysis), core.py at this head:
 - core.py `''` row: _CxxThrowException (core.py:402)
 - s1_compile.py:1190 VA_PLATFORM_LAST: _vsnprintf, vsprintf_s, _vscprintf, _vsnprintf_s, _vswprintf
 - comments/doc only: core.py:824-844, s1_compile.py:3585-3590 (strcpy_s, _stricmp examples)
+
+## Construct table (a) rules/ (state at 54fd31ba; 7de63f1c is superseded and not on the branch)
+
+| construct | what it does | class | state at 54fd31ba |
+|---|---|---|---|
+| CRT_HEADERS / CRT_NAMES, library rows | name -> standard header that declares it for DECL1 | LIBRARY | kept |
+| CRT_HEADERS `"fnvnx_crt.h"` row | names declared by the shim's MSVC-prototype header | MSVC-ONLY | kept |
+| CRT_HEADERS `''` row (_CxxThrowException etc.) | names declared by fnvnx_compat.h | MSVC-ONLY | kept |
+| IOBUF_NAMES / IOBUF_MACRO | rewrite stdio prototypes on `_iobuf*` into fnvnx_iobuf*.h / `#define fopen fnvnx_iob_fopen` (native stdio standing in for the exe's) | BINDING | deleted |
+| DECL1-FOPEN, DECL1 iobuf branch | same rewrite inside r_platform_protos | BINDING | deleted |
+| DECL2 `_iobuf` entry | replaces the decomp's `struct _iobuf` by fnvnx_iobuf.h | BINDING | deleted |
+| MATH_NAMES, C_MATH_SIG, include graph / math_seen | choose the C math declaration for DECL1 | LIBRARY | kept |
+| DECL1 math / MATHNS / MATHKEEP | declare the libm function for the unit | LIBRARY | kept |
+| DECL1-STDABS | declare std::abs | LIBRARY | kept |
+| CONST_RESULT | const-correct strchr-family result conversion | LIBRARY | kept |
+| MATH1 (+OWN) | drop decomp copies of <math.h> overloads | LIBRARY | kept |
+| STD1 | `struct std {abs}` -> `#include <cmath>` | LIBRARY | kept |
+| VA_PLATFORM_LAST | va_list argument position of the vprintf family | LIBRARY | kept (vsprintf_s, _vsnprintf, _vscprintf, _vsnprintf_s, _vswprintf in it are MSVC-ONLY) |
+| cxx_copy_is_crt / _CRT_BINDINGS | maps a unit's namespace CRT spelling to the exe CRT function by units.json address | BINDING | deleted |
+| crt_inline_float + GAME1 float-return rewrite | reads crt_symbols.tsv `crt_inline` rows | BINDING | deleted |
+| GAME1 Win32 / math-C-linkage renames | rename a unit's own function that shares a platform name | LIBRARY | kept |
+| --crt-symbols / CTX['crt_symbols'] | the crt_symbols.tsv input | BINDING | deleted |
+
+Counts at 54fd31ba: 7 BINDING constructs deleted (IOBUF_*, DECL1-FOPEN+iobuf branch, DECL2 _iobuf, cxx_copy_is_crt, crt_inline_float+float-return, --crt-symbols; DECL1 iobuf and FOPEN counted once), 10 LIBRARY constructs kept (restored by not deleting them), 3 MSVC-ONLY kept. rules/tests: 7 files all PASS.
