@@ -723,3 +723,12 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Its only flags are the two ggc params.
   - Every gcstress unit must produce an object byte-equal to the normal build's.
   - It is a test variant only, and it lands with w19's selftests universe and L2 w4's plugbuild.
+
+## 2026-11-12 09:25 UTC
+- gate_assumptions findings at L3a e6c29df27: 10 in total.
+  - 6 are an L1 gate defect: code tokens and backticked words counted as mentions.
+    - w22 (session_01KmtZKQg3UUv7uNveDucFNR) is doing the fix on claude/fnv-l1-contract-w22b.
+    - The gate becomes prose-only, with one lexer per file kind and a total extension table.
+  - 2 are L3a's, to be reworded or backticked: shapeprove.py:15, and the bare `assume` in prove.py.
+  - 2 are L2's: f2i_check, closed by fpexact 3c.
+  - 1 belongs to the orchestrator: ehtables.py:268.
