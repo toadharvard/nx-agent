@@ -237,3 +237,9 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - Wine 9.0 + Mesa, two runs byte-equal. sm-linkprobe 82303d1c.
     - V=2099, P=4458, V×P=9.36M (~12 h). Not run: the texts depend on the compile args, so V×P is not a superset.
     - Next: w3b proves (L1) link = the 3 compiles and (L2) the finite compile-arg domain per shader. Then farm job 3 enumerates exactly that set. The farm adds the use_program column and the signature counts now.
+- 04:15Z w1b 27b90ad9 (measurement, borrowed lib/sha256).
+    - Every SUPPORT_PROFILE_* is explicit and census-checked: GLSLDK chain = 1, the other 9 = 0.
+    - 7 objects. objstub 268/277 certified, 9 findings:
+        - 7 MojoShader handlers whose empty bodies are their opcode's semantics (NOP, DCL, phase, TEXM3X?PAD, RESERVED, parse_args_NULL), sent to L1 as a class question with a proposed reference-record rule;
+        - fnvnx_shader_backends (ours), being examined;
+        - the borrowed lib/sha256.
