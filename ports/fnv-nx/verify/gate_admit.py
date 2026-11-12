@@ -7,7 +7,7 @@ Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item 
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
-  3. every gate the root names is a gate of verify/gates.json of this same tree;
+  3. every gate the root names is a gate file of verify/gates.d of this same tree;
   4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
      declared environment); the file exists.
 Classes:
@@ -15,7 +15,7 @@ Classes:
   tool     stage and verification tools: "selftests" required (their tests pass in the declared environment).
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
-           gates.json, so code enters the trunk only together with the gates that judge it.
+           gates.d, so code enters the trunk only together with the gates that judge it.
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
@@ -25,9 +25,11 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gatesdir  # noqa: E402
+
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-GATES = TREE + "/verify/gates.json"
 CLASSES = ("doc", "tool", "product")
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total, r7, namegate, argordergate, abi.
@@ -58,7 +60,7 @@ def judge(files, admit, gate_names, exists):
                 rec = r.get("recipe", "")
                 if not rec.startswith(path + "/") or not exists(rec):
                     why.append("recipe %r is not an existing file inside the root" % rec)
-        why += ["gate %s is not in gates.json" % g for g in gates if g not in gate_names]
+        why += ["gate %s is not a file of verify/gates.d" % g for g in gates if g not in gate_names]
         roots.append((path, why))
     paths = [p for p, _ in roots]
     for i, a in enumerate(paths):
@@ -82,8 +84,7 @@ def main():
     files = sorted(p for p in ls.decode("utf-8", "surrogateescape").split("\0") if p)
     with open(ADMIT) as f:
         admit = json.load(f)
-    with open(GATES) as f:
-        gate_names = [g["name"] for g in json.load(f)["gates"]]
+    gate_names = [g["name"] for g in gatesdir.load_dir().get("gates", [])]
     bad, errors = judge(files, admit, gate_names, os.path.isfile)
     red = bool(bad or errors)
     certified = 0 if errors else len(files) - len(bad)

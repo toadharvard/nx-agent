@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
+import gatesdir  # noqa: E402
 import sandbox  # noqa: E402
 
 BASE = "/root/l4/verdict-test"
@@ -64,7 +65,7 @@ def candidate(r, into="main", frm="feat"):
     tree = git(r, "merge-tree", "--write-tree", into, frm).splitlines()[0]
     return git(r, "commit-tree", tree, "-p", into, "-p", frm, "-m", "candidate"), tree
 
-def gate(name, status="green", universe=2, certified=2, rc=0, write="ok", uncertified=()):
+def gate(name, status="green", universe=2, certified=2, rc=0, write="ok", uncertified=(), covers=("tool",)):
     res = {"format": "fnvnx-gate/1", "name": name, "status": status, "universe": universe, "certified": certified,
            "uncertified": list(uncertified), "detail": "d"}
     code = "import os,sys\n"
@@ -73,7 +74,10 @@ def gate(name, status="green", universe=2, certified=2, rc=0, write="ok", uncert
     elif write == "bad":
         code += "open(os.path.join(os.environ['GATE_OUT'],'r.json'),'w').write('{nope')\n"
     code += "sys.exit(%d)\n" % rc
-    return {"name": name, "argv": [sys.executable, "-I", "-c", code], "result": "r.json"}
+    g = {"name": name, "argv": [sys.executable, "-I", "-c", code], "result": "r.json"}
+    if covers is not None:
+        g["covers"] = list(covers)
+    return g
 
 def gates_file(d, gates, fname="gates.json"):
     p = os.path.join(d, fname)
@@ -194,6 +198,36 @@ r = make_repo(); d = tmp("budget"); gp = gates_file(d, [gate("a")]); v = os.path
 rc, _, _ = run_verdict(r, head(r), gp, v, "--budget-s", "0")
 vj = json.load(open(v))
 check("over_budget reported, verdict stays green", rc == 0 and vj["over_budget"] is True and vj["verdict"] == "green", vj)
+
+# no vacuous green: `covers` and the universe-0 rule (gatesdir.py)
+def with_admit(roots):
+    r = make_repo()
+    p = os.path.join(r, gatesdir.ADMIT)
+    os.makedirs(os.path.dirname(p))
+    json.dump({"roots": roots}, open(p, "w"))
+    git(r, "add", "-A")
+    git(r, "commit", "-m", "admit")
+    return r
+
+def covers_case(name, roots, g, want, why=""):
+    r = with_admit(roots); d = tmp("covers"); gp = gates_file(d, [g]); v = os.path.join(d, "v.json")
+    rc, _, _ = run_verdict(r, head(r), gp, v)
+    gr = json.load(open(v))["gates"][0]
+    check("covers: " + name, gr["status"] == want and why in gr["reason"] and rc == (0 if want == "green" else 2), (rc, gr))
+
+GUEST = {"path": "ports/fnv-nx/platform", "class": "product", "target": "guest"}
+LIFTED = {"path": "ports/fnv-nx/pack", "class": "product", "target": "guest", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/liftall.py", "pack": "p"}}
+HOSTP = {"path": "ports/fnv-nx/render", "class": "product", "target": "host"}
+check("covers: root classes derive from admit.json", gatesdir.root_classes({"roots": [GUEST, LIFTED, HOSTP, {"path": "d", "class": "doc"}, {"path": "t", "class": "tool"}]})
+      == {"ports/fnv-nx/platform": "product-guest", "ports/fnv-nx/pack": "lifted", "ports/fnv-nx/render": "host-product", "d": "doc", "t": "tool"})
+covers_case("a covered class present with universe 0 is red", [GUEST], gate("g", universe=0, certified=0, covers=("product-guest",)), "red", "vacuous")
+covers_case("a covered class present with universe 0 is red (one of several classes)", [HOSTP], gate("g", universe=0, certified=0, covers=("product-guest", "host-product")), "red", "host-product")
+covers_case("a covered class present with a universe is green", [GUEST], gate("g", covers=("product-guest",)), "green")
+covers_case("no covered root and universe 0 is green", [GUEST], gate("g", universe=0, certified=0, covers=("lifted",)), "green")
+covers_case("no admit.json and universe 0 is green", [], gate("g", universe=0, certified=0, covers=("tool",)), "green")
+covers_case("a gate file without covers is red", [GUEST], gate("g", covers=None), "red", "covers")
+covers_case("an empty covers is red", [GUEST], gate("g", covers=()), "red", "covers")
+covers_case("an unknown class in covers is red", [GUEST], gate("g", covers=("everything",)), "red", "covers")
 
 # 4 provenance
 def prov_env():

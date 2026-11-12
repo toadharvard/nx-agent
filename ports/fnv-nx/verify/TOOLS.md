@@ -1155,7 +1155,7 @@ Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item 
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
-  3. every gate the root names is a gate of verify/gates.json of this same tree;
+  3. every gate the root names is a gate file of verify/gates.d of this same tree;
   4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
      declared environment); the file exists.
 Classes:
@@ -1163,7 +1163,7 @@ Classes:
   tool     stage and verification tools: "selftests" required (their tests pass in the declared environment).
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
-           gates.json, so code enters the trunk only together with the gates that judge it.
+           gates.d, so code enters the trunk only together with the gates that judge it.
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
@@ -1191,7 +1191,7 @@ gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothi
 Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
     python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
-One entry per gate in gates.json, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
+One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
@@ -1348,7 +1348,7 @@ Gate "oracle" (fnvnx-gate/1): every test names where its expected values come fr
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.json, DIR/tests/test_*.py, found by
+Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
 gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
@@ -1418,7 +1418,7 @@ The registry is certified iff ALL hold:
      the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
      exactly the owner's list, so a tenth OWNER entry without the owner's item is red;
   6. a REMOVE entry has an owner of LEADS (or two joined by +) and `removed_by` of one of the forms `gate:NAME` (NAME is a
-     gate of verify/gates.json), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
+     gate file of verify/gates.d), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
      (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
      (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
   7. id blocks: an id below 200 is free (the records that predate the blocks; L1 takes the free numbers below 200); an id from
@@ -1537,7 +1537,7 @@ approximate. Threads that switch at host calls (blocks ended by a branch to a ho
 ```text
 L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 4 blocked: env, 1 error.
   verdict  --repo R --commit C --verdicts VDIR [--budget-s 300]
-           verdict.py run with the gates file OF THAT COMMIT (ports/fnv-nx/verify/gates.json read from C's tree), then store.
+           verdict.py run with the gates file OF THAT COMMIT (the files of ports/fnv-nx/verify/gates.d read from C's tree, assembled by gatesdir.py), then store.
   merge    --repo R --into BRANCH --from REF --verdicts VDIR [--budget-s 300]
            Computes the merge tree as verdict.py merge does. If VDIR has no verdict for it, makes the merge commit object with
            commit-tree (no ref moves) to have something to check out, runs `verdict` on it and stores it. Then verdict.py merge

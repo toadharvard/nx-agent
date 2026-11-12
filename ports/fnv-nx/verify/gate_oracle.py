@@ -3,7 +3,7 @@
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.json, DIR/tests/test_*.py, found by
+Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
 gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
@@ -50,10 +50,10 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
 import gate_tests  # noqa: E402
+import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-GATES = TREE + "/verify/gates.json"
 PINS = TREE + "/verify/oracle_pins.json"
 FORMAT = "fnvnx-oracle/1"
 HEX = set("0123456789abcdef")
@@ -305,12 +305,12 @@ def main():
     out = os.environ["GATE_OUT"]
     ls = subprocess.run(["git", "ls-files", "-z", "--", TREE], capture_output=True, check=True).stdout
     tracked = set(p for p in ls.decode("utf-8", "surrogateescape").split("\0") if p)
-    gates = load(GATES) or {}
+    gates = gatesdir.load_dir_or_empty()
     argv = next((g["argv"] for g in gates.get("gates", []) if g.get("name") == "selftests"), None)
     errors = []
     files = []
     if argv is None:
-        errors.append("gates.json has no selftests gate: the universe is not defined")
+        errors.append("verify/gates.d has no selftests gate: the universe is not defined")
     else:
         files = gate_tests.universe(gate_tests.parse(argv[argv.index(TREE + "/verify/gate_tests.py") + 1:])[1])
     admit = load(ADMIT) or {}

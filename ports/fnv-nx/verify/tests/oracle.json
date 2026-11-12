@@ -353,7 +353,8 @@
    "subject": [
     "ports/fnv-nx/verify/gate_pure.py",
     "ports/fnv-nx/verify/gate_tests.py",
-    "ports/fnv-nx/verify/gates.json",
+    "ports/fnv-nx/verify/gates.d/selftests.json",
+    "ports/fnv-nx/verify/gatesdir.py",
     "ports/fnv-nx/verify/l1.py",
     "ports/fnv-nx/verify/env.json",
     "ports/fnv-nx/verify/puregate.py",

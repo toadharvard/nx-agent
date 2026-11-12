@@ -30,7 +30,7 @@ OWNER_TEXT = "# Owner\n\nOWNER, the only accepted ones:\n\n1. the compiler is co
 FILES = {
     "CLAUDE.md": OWNER_TEXT,
     T + "docs/a.md": "Uses %s %s %s here.\n" % (asm(1), asm(2), asm(10)),
-    T + "verify/gates.json": "{}",
+    T + "verify/gates.d/g.json": "{}",
 }
 TRACKED = set(FILES)
 
@@ -101,7 +101,7 @@ d["entries"][2]["used_by"] = [T + "docs/none.md"]
 check("used_by absent file is red", has(run(d)[0], "not a tracked file"), run(d)[0])
 
 d = base()
-d["entries"][2]["used_by"] = [T + "verify/gates.json"]
+d["entries"][2]["used_by"] = [T + "verify/gates.d/g.json"]
 check("used_by file that does not cite the id is red", has(run(d)[0], "does not cite"), run(d)[0])
 
 d = base()
@@ -197,14 +197,14 @@ check("no head, no items", G.owner_items("1. x\n") == [], "")
 check("two heads, no items", G.owner_items(OWNER_TEXT + OWNER_TEXT) == [], "")
 
 # whole gate in a temporary git tree
-GATES = json.dumps({"gates": [{"name": "g"}]})
+GATES = json.dumps({"format": "fnvnx-gatefile/1", "name": "g", "argv": ["x"], "result": "g.json", "covers": ["tool"]})
 ADMIT = json.dumps({"roots": [{"path": T + "journal", "record": True}]})
 
 
 def tree(extra=None, doc=None):
     td = tempfile.mkdtemp()
     files = dict(FILES)
-    files[T + "verify/gates.json"] = GATES
+    files[T + "verify/gates.d/g.json"] = GATES
     files[T + "verify/admit.json"] = ADMIT
     files[T + "verify/ASSUMPTIONS.json"] = json.dumps(doc if doc is not None else base())
     files[T + "journal/log.md"] = "An assumption in the append-only log.\n"

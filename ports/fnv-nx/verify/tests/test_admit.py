@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gate_admit.judge: every tracked file under exactly one root whose class has its required gates in gates.json."""
+"""gate_admit.judge: every tracked file under exactly one root whose class has its required gates in gates.d."""
 import os
 import sys
 
@@ -34,7 +34,7 @@ check("a file outside every root is uncertified", list(bad) == [T + "/platform/w
 bad, err = ga.judge(files, adm(dict(tool, gates=[]), doc), GATES, yes)
 check("a tool root without selftests is refused", list(bad) == [T + "/verify/a.py"] and err)
 bad, err = ga.judge(files, adm(dict(tool, gates=["selftests", "ghost"]), doc), GATES, yes)
-check("a named gate missing from gates.json is refused", bad and "ghost" in err[0])
+check("a named gate missing from gates.d is refused", bad and "ghost" in err[0])
 prod = {"path": T + "/platform", "class": "product", "recipe": T + "/platform/build.json",
         "gates": list(ga.REQUIRED["product"])}
 bad, err = ga.judge([T + "/platform/w.c"], adm(prod), GATES, yes)
@@ -52,7 +52,7 @@ for g in ga.REQUIRED["product"]:
     bad, err = ga.judge([T + "/platform/w.c"], adm(dict(prod, gates=[x for x in prod["gates"] if x != g])), every, yes)
     check("a product root lacking required gate %s is refused" % g, bad and any(g in e for e in err))
 bad, err = ga.judge([T + "/platform/w.c"], adm(prod), GATES + [g for g in ga.REQUIRED["product"] if g != "eh"], yes)
-check("a product root naming a gate absent from gates.json is refused", bad and any("eh" in e for e in err))
+check("a product root naming a gate absent from gates.d is refused", bad and any("eh" in e for e in err))
 bad, err = ga.judge(files, adm(tool, doc, {"path": T + "/verify/tests", "class": "doc", "gates": []}), GATES, yes)
 check("nested roots are an error", any("overlap" in e for e in err))
 bad, err = ga.judge(files, adm(dict(tool, **{"class": "misc"}), doc), GATES, yes)

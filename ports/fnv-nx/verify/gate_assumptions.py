@@ -28,7 +28,7 @@ The registry is certified iff ALL hold:
      the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
      exactly the owner's list, so a tenth OWNER entry without the owner's item is red;
   6. a REMOVE entry has an owner of LEADS (or two joined by +) and `removed_by` of one of the forms `gate:NAME` (NAME is a
-     gate of verify/gates.json), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
+     gate file of verify/gates.d), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
      (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
      (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
   7. id blocks: an id below 200 is free (the records that predate the blocks; L1 takes the free numbers below 200); an id from
@@ -54,10 +54,12 @@ import subprocess
 import sys
 import tokenize
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gatesdir  # noqa: E402
+
 TREE = "ports/fnv-nx"
 REGISTRY = TREE + "/verify/ASSUMPTIONS.json"
 ADMIT = TREE + "/verify/admit.json"
-GATES = TREE + "/verify/gates.json"
 FORMAT = "fnvnx-assumptions/1"
 OWNER_FILE = "CLAUDE.md"
 OWNER_HEAD = "OWNER, the only accepted ones:"
@@ -264,7 +266,7 @@ def judge_registry(doc, tracked, read, gate_names):
                             ok = True
                             count[form[:-1]] += 1
             if not ok:
-                err.append(w + "removed_by %r is not gate:NAME of gates.json, fact:PATH, planned: TEXT, no gate yet: TEXT or OPEN: TEXT" % (rb,))
+                err.append(w + "removed_by %r is not gate:NAME of a verify/gates.d file, fact:PATH, planned: TEXT, no gate yet: TEXT or OPEN: TEXT" % (rb,))
     for k in range(len(items)):
         if k not in taken:
             err.append("item %d of the owner's list has no OWNER entry" % (k + 1))
@@ -324,7 +326,7 @@ def main():
     scanned = [p for p in text_files if not p.endswith(".json")
                and not any(p == r or p.startswith(r + "/") for r in records)]
     doc = load(REGISTRY)
-    gates = load(GATES) or {}
+    gates = gatesdir.load_dir_or_empty()
     gate_names = set(g.get("name") for g in gates.get("gates", []) if isinstance(g, dict))
     errors, count = judge_registry(doc, tracked_all, read, gate_names)
     ids = set(e["id"] for e in doc["entries"] if isinstance(e, dict) and isinstance(e.get("id"), str)) \
