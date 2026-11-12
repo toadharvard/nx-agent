@@ -35,6 +35,7 @@
   {
    "tool": "ports/fnv-nx/render/shaders/total/gen_sm_rows.py",
    "args": [
+    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
     "/out/fnvnx_sm_rows.h"
    ],
    "inputs": [
