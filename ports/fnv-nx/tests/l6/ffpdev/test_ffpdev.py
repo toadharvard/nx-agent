@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """test_ffpdev.py: tests of the fixed-function module of the D3D9 device (render/d3d9/dev/ffp_*.cpp, D5b: nx_ffp_vs_program / nx_ffp_ps_program of draw_ffp.h).
-python3 -I tests/l6/ffpdev/test_ffpdev.py [--no-mutations] [--no-guest]      (FNVNX_SHADERS_DEPS=<deps dir of render/shaders/build.sh>: uam for the DKSH check and the guest build)
+python3 -I tests/l6/ffpdev/test_ffpdev.py [--no-mutations] [--no-guest]      (FNVNX_SHADERS_DEPS=<deps dir of render/shaders/build.sh> for the guest build)
  a  device state -> state-module inputs: a generated sweep of D3D9 device states (every enumerated render state value, every stage state over its domain, lights of all types / counts / sparse indices, 0-8 texture
     stages of every kind, vertex blending, texgen, matrices, random declarations) drives the device through its API; the blocks nx_ffp_vs_program / nx_ffp_ps_program hand out are compared byte for byte with the blocks the
     state modules produce from inputs python built from the same description (model.py), together with the program inputs / texture stages / varyings
  b  the same for every FVF combination (position field x LASTBETA x normal x psize x diffuse x specular x texture count)
  c  end to end on llvmpipe: FFP triangles through DrawPrimitiveUP vs the CPU references (ffp_vs_ref + ffp_ps_ref)
- d  program ids: creation, caching, destruction counts of the backend calls       e  the embedded programs (generated header == the GLSL sources, DKSH by uam) and the guest build before -> after
+ d  program ids: creation, caching, destruction counts of the backend calls       e  the embedded programs (generated header == the GLSL sources, key == sha256(blob)) and the guest build before -> after
  f  mutations.   Architecture: the device layer is -m32; the GL backend is LP64 (libnxgl4 in an RPC process, tests/l6/copy/server.c)."""
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.pat
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
 sys.path.insert(0, HERE)
 import model, gen  # noqa: E402
-D3D9 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3D9, "dev"); FFP = os.path.join(D3D9, "ffp"); GENDIR = os.path.join(D3D9, "gen"); ENV = os.path.join(D3D9, "env"); BACK = os.path.join(D3D9, "backend"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
+D3D9 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3D9, "dev"); FFP = os.path.join(D3D9, "ffp"); GENDIR = os.path.join(D3D9, "gen"); ENV = os.path.join(D3D9, "env"); BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.join(ROOT, "render", "backend")
 FRONT = os.path.join(D3D9, "front"); SPEC = os.path.join(D3D9, "spec", "d3d9_spec.json"); INC = os.path.join(ROOT, "shim", "include"); COPY = os.path.join(ROOT, "tests", "l6", "copy")
 LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]
 RES = ["res_buf.cpp", "res_fvf.cpp", "res_decl.cpp", "res_shader.cpp", "res_smcheck.cpp", "res_query.cpp", "res_fmt.cpp", "res_tex.cpp", "res_surf.cpp", "res_create.cpp"]
@@ -50,10 +50,10 @@ def build_server(tmp):
     return (out, "") if r.returncode == 0 else (None, r.stderr[-800:])
 
 
-def gens(tmp, uam=None):
+def gens(tmp):
     for cmd in ([sys.executable, "-I", os.path.join(GENDIR, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), tmp, SPEC],
                 [sys.executable, "-I", os.path.join(DEV, "res_smgen.py"), tmp, os.path.join(ROOT, "render", "shaders", "total", "sm_table.json"), os.path.join(os.path.dirname(SPEC), "d3d9_tables.py")],
-                [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp], [sys.executable, "-I", os.path.join(FFP, "gen_glsl.py"), tmp] + (["--uam", uam] if uam else [])):
+                [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp], [sys.executable, "-I", os.path.join(FFP, "gen_glsl.py"), tmp]):
         r = sh(cmd)
         if r.returncode: return r.stderr[-800:]
     return ""
@@ -96,21 +96,22 @@ def run(exe, data, server, arena, timeout=1500):
     return r, ps
 
 
-def embedded_check(tmp, uam):
-    """e: ffp_glsl.gen.h holds exactly the expanded GLSL sources (both variants); with uam, ffp_dksh.gen.h holds four DKSH images"""
+def embedded_check(tmp):
+    """e: ffp_glsl.gen.h holds exactly the expanded GLSL sources (both variants), each with its size and key == sha256(blob); no DKSH header exists"""
+    import hashlib
     sys.path.insert(0, FFP); import gen_glsl
-    txt = open(os.path.join(tmp, "ffp_glsl.gen.h")).read(); ok = True
-    for stage, f, _ in gen_glsl.SOURCES:
+    txt = open(os.path.join(tmp, "ffp_glsl.gen.h")).read(); ok = True; keys = True; sizes = True
+    for stage, f in gen_glsl.SOURCES:
         base = gen_glsl.expand(os.path.join(FFP, f)); ok &= "#include" not in base
         for vname, define in gen_glsl.VARIANTS:
-            m = re.search(r"nx_ffp_glsl_%s_%s\[\d+\] = \{([0-9,]+)\};" % (stage, vname), txt)
-            if not m or bytes(int(x) for x in m.group(1).split(",")) != gen_glsl.variant(base, define).encode(): ok = False
-    res = [("embedded GLSL == expanded sources (4 arrays)", ok)]
-    if uam:
-        d = os.path.join(tmp, "dk"); os.makedirs(d); r = sh([sys.executable, "-I", os.path.join(FFP, "gen_glsl.py"), d, "--uam", uam]); t = open(os.path.join(d, "ffp_dksh.gen.h")).read() if r.returncode == 0 else ""
-        sizes = [int(x) for x in re.findall(r"nx_ffp_dksh_\w+_size = (\d+);", t)]
-        res.append(("DKSH by uam: 4 images, each > 1 KiB, magic DKSH", r.returncode == 0 and len(sizes) == 4 and min(sizes) > 1024 and all(bytes(int(x) for x in m.split(",")[:4]) == b"DKSH" for m in re.findall(r"nx_ffp_dksh_\w+\[\d+\] = \{([0-9,]+)\};", t))))
-    return res
+            n = "nx_ffp_glsl_%s_%s" % (stage, vname)
+            m = re.search(r"%s\[\d+\] = \{([0-9,]+)\};" % n, txt); k = re.search(r"%s_key\[32\] = \{([0-9,]+)\};" % n, txt); z = re.search(r"%s_size = (\d+);" % n, txt)
+            blob = bytes(int(x) for x in m.group(1).split(",")) if m else None
+            if blob != gen_glsl.variant(base, define).encode(): ok = False
+            if not k or not blob or bytes(int(x) for x in k.group(1).split(",")) != hashlib.sha256(blob).digest(): keys = False
+            if not z or not blob or int(z.group(1)) != len(blob): sizes = False
+    return [("embedded GLSL == expanded sources (4 arrays)", ok), ("each key == sha256(blob) (4 keys of 32 bytes)", keys), ("each _size == blob length", sizes),
+            ("no DKSH header emitted", not os.path.exists(os.path.join(tmp, "ffp_dksh.gen.h")))]
 
 
 def guest_undefined(root, out_dir):
@@ -167,7 +168,7 @@ MUTS = [
     ("d", "dev/ffp_prog.cpp", "if (!f->ps[flat]) { uint32_t id", "if (true) { uint32_t id"),
     ("d", "dev/ffp_dev.cpp", "nxd3d_gpu_call(NXGPU_FN_SHADER_DESTROY, a, 1); nx_state_forget_shader(id);", "nx_state_forget_shader(id);"),
     ("d", "dev/ffp_dev.cpp", "if (d->getPrivateData(kRec, &c, &sz) == D3D_OK) { c->Release(); return c; }", "if (false) { c->Release(); return c; }"),
-    ("c", "dev/ffp_prog.cpp", "return flat ? Blob{nx_ffp_glsl_ps_flat, nx_ffp_glsl_ps_flat_size} : Blob{nx_ffp_glsl_ps_smooth, nx_ffp_glsl_ps_smooth_size};", "return flat ? Blob{nx_ffp_glsl_ps_smooth, nx_ffp_glsl_ps_smooth_size} : Blob{nx_ffp_glsl_ps_flat, nx_ffp_glsl_ps_flat_size};"),   # (the VS qualifier is not observable on GL: the pixel stage's qualifier decides)
+    ("c", "dev/ffp_prog.cpp", "return flat ? NXB_(ps, flat) : NXB_(ps, smooth);", "return flat ? NXB_(ps, smooth) : NXB_(ps, flat);"),   # (the VS qualifier is not observable on GL: the pixel stage's qualifier decides)
     ("c", "ffp/d9_epilogue.glsl", "if (ps_drv_fog.x == 1.0) dk_f = dk_fog_in.x;", "if (ps_drv_fog.x == 1.0) dk_f = 1.0;"),
     ("c", "ffp/ffp.vert.glsl", "gl_Position = vec4(clip.x + posfix.x * clip.w,", "gl_Position = vec4(-clip.x + posfix.x * clip.w,"),
 ]
@@ -192,9 +193,8 @@ def mut_build(base, tmp, rel, old, new, idx):
 
 
 def main():
-    tmp = tempfile.mkdtemp(prefix="d9ffpdev_"); data = os.path.join(tmp, "data"); os.makedirs(data); arena = os.path.join(tmp, "arena"); uam = None
+    tmp = tempfile.mkdtemp(prefix="d9ffpdev_"); data = os.path.join(tmp, "data"); os.makedirs(data); arena = os.path.join(tmp, "arena")
     deps = os.environ.get("FNVNX_SHADERS_DEPS")
-    if deps and os.access(os.path.join(deps, "uam", "build", "uam"), os.X_OK): uam = os.path.join(deps, "uam", "build", "uam")
     ok, got = locations_check(); print("ffp.vert.glsl attribute locations == the table of the sets (%s): %s" % (", ".join("%s %d" % kv for kv in sorted(got.items(), key=lambda kv: kv[1])), ok))
     if not ok: fails.append("locations")
     counts = write_cases(data)
@@ -208,10 +208,9 @@ def main():
         if p not in parts or parts[p][1] or not parts[p][0]: fails.append("%s: %s" % (p, parts.get(p)))
     print("PARTS: " + ", ".join("PART %s: %d checks, %d failed" % (p, parts[p][0], parts[p][1]) for p in sorted(parts)))
     if r.returncode and not fails: fails.append("exit %d %s" % (r.returncode, r.stderr[-300:]))
-    for what, good in embedded_check(tmp, uam):
+    for what, good in embedded_check(tmp):
         print("e: %s: %s" % (what, "ok" if good else "FAILED"));
         if not good: fails.append("e: " + what)
-    if uam is None: print("e: DKSH check skipped (no FNVNX_SHADERS_DEPS)")
     if "--no-guest" not in sys.argv:
         lines, good = guest_report(tmp)
         print("\n".join(lines))
