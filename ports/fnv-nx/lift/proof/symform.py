@@ -2,7 +2,7 @@
 """Symbolic DSL Forms of whole ENCODING SHAPES (shape.py): the immediate / displacement / relative-target bytes (and the instruction address eip) are
 DSL variables instead of constants.  No z3 is needed to build or hash one (the gate recomputes dsl_sha with `shape_sha(key)`).
 
-  symbuild(key)            -> SymForm(form, fields, assumptions): forms.build() run on an ADAPTER instruction whose immediate operands, memory displacement and
+  symbuild(key)            -> SymForm(form, fields, widths, imm_ops, disp_ops): forms.build() run on an ADAPTER instruction whose immediate operands, memory displacement and
                               address are DSL nodes (fnvlift/dsl.py: F('imm', w), F('disp', w), V('eip', 32)); forms*.py is not touched
   instantiate(sf, i, addr) -> the concrete Form of an instruction i of the shape (field bytes of i, address addr): substitution + constant folding
   canon(form)              -> serialization of the constant-folded Form; the LINK of the certificate is
