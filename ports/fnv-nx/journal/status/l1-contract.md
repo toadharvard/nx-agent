@@ -107,3 +107,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:02Z w15 5d6e42ea adds link_archives with members recorded, the objects.json symbol check and the tool-root refusal; test_link 42/42. Next: linkstrict/objstub read the members, full verdict. fea3d99 stays queued. contract/include paths are fnvnx/reach.h, declared.h and import_key.h, one declaration per extern (agreed with L5).
 - 03:03Z w17 c6726a2 is green: 27/27 gates, 236.1 s (gcc-13-plugin-dev pinned; host linkstrict rule (d)). It replaces cca84bb in the MERGER queue, ahead of the L6 translator. Later: symbol versions and keying by deb sha256.
 - 03:05Z w10 0371bf6: gates.d (27 files) with covers; contract gates cover [linked]. 26/27 gates, 167 s; selftests red 53/57 for lack of fnv-nx-build externals, rerunning with them attached. w20's second item: objstub judges a tail b to a cited log function as bl+ret, and ICF aliases once with all names (from L6 w6).
+- 03:07Z:
+  - w12 2901bc9 is green (36b24d9d, 261.9 s, 26 gates): hostapi with the wrapper rule widened and docstrings generated; sent to MERGER.
+  - w16 5b0dd218 is green (3b88da89, 185.4 s, 24 gates): 3m mirror, fixtures and the `fixtures` gate. It rebases onto 7503d2fa, then goes to MERGER; `fixtures` goes into REQUIRED_PRODUCT.
+  - w15 83053a54: tool-root refusal; objects.json check; archive members judged by linkstrict/objstub. Its variant run on a real root is blocked until the first product root lands (L5). New item: cross-root `outputs`/`uses` keyed by content hash (for L5 w13).
+  - New task 4l: w21 (session_01KmtZKTMwsfzMYETernKY5P, claude/fnv-l1-contract-w21) builds the `legal` gate (VA in the image ranges paired with a decomp name is red) and a census per layer. Status: doing.
