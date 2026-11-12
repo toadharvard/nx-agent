@@ -17,7 +17,7 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/render/backend",
+  "ports/fnv-nx/render/nxgpu",
   "ports/fnv-nx/render/shaders/translator/include"
  ],
  "units": "all",
