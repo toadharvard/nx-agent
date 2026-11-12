@@ -199,9 +199,9 @@ def main():
           and rt["failure"]["stage"] == "ld:" + ROOT and any("a.c" in x and "target" in x for x in rt["failure"]["stderr"]), err_text(rt))
 
     # (m) link.libs archive of an external: the members the linker pulls are recorded (and kept as objects); an unused member is not
-    def libpop(d):
+    def libpop(d, m1="int f_b(void) { return 21; }\n"):
         os.makedirs(d + "/lib")
-        for n, body in (("m1", "int f_b(void) { return 21; }\n"), ("m2", "int f_unused(void) { return 1; }\n")):
+        for n, body in (("m1", m1), ("m2", "int f_unused(void) { return 1; }\n")):
             open("%s/%s.c" % (d, n), "w").write(body)
             subprocess.run([CC, "-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-c", "-o", "%s/%s.o" % (d, n), "%s/%s.c" % (d, n)], check=True)
             os.remove("%s/%s.c" % (d, n))
@@ -224,6 +224,19 @@ def main():
     rc2, osr, _, oso = TR.gate(arepo, "objstub", BASE + "/gate-os", BASE + "/gate-cache")
     check("link.libs archive: linkstrict and objstub judge the pulled member as an object (their universe counts its symbols) and accept the root",
           rc_ == 0 and lsr and lsr["status"] == "green" and lsr["universe"] >= 3 and osr and osr["universe"] >= 1, (lsr, osr, lso[-300:], oso[-300:]))
+    # a pulled member that is a stub (a trap body) is red in objstub; one with an undefined symbol nothing defines is a red build (and so red gates)
+    def archive_repo(name, body):
+        c, h = TR.publish("tlib-" + name, lambda d: libpop(d, body))
+        x = dict(lx, name="tlib", ref=name, commit=c, tree_sha256=h)
+        return mk("archive-" + name, dict(arec, external=[x]), {"toy/b.c": None})
+    rstub = archive_repo("stub", "int f_b(void) { __builtin_trap(); }\n")
+    _, osr2, _, oso2 = TR.gate(rstub, "objstub", BASE + "/gate-os2", BASE + "/gate-cache2")
+    check("link.libs archive: a pulled member that is a stub (trap body) makes objstub red", build(rstub, SS)["status"] == "green" and osr2 and osr2["status"] == "red", (osr2, oso2[-300:]))
+    rund = archive_repo("undef", "int nowhere(void);\nint f_b(void) { return nowhere(); }\n")
+    rr2 = build(rund, SS)
+    _, lsr2, _, _ = TR.gate(rund, "linkstrict", BASE + "/gate-ls2", BASE + "/gate-cache2")
+    check("link.libs archive: a pulled member with an undefined symbol nothing defines: the link is red, and so is linkstrict",
+          rr2["status"] == "red" and lsr2 and lsr2["status"] == "red", (err_text(rr2), lsr2))
     # (n) the link check that objects.json equals the global and weak symbols read from the objects themselves (a second ELF reader: ldcheck's)
     o0 = rl["objects"][0]
     d0 = [d for d in rl["defined"] if d["object"] == o0["unit"]]
