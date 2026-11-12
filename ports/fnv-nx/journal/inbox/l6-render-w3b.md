@@ -318,3 +318,21 @@ Totals (sm_domain.py --nfix 2 --np2 1; at my branch head, 15791 shaders, distinc
 | 2 (Wine override) | 4,985,192,486,272 | 342,344 | 69,642 | 4.985e12 |
 | 1 (dcl only) | 118,694,016 | 342,344 | 69,642 | 119,036,360 + 69,642 = 119,106,002 |
 At 10 ms per item, 119.1 million items need 1.19 million core-seconds = about 83 h on 4 cores. Neither row fits the 12 h budget (about 17 million items).
+
+## Mesa citations re-based on the Ubuntu source package (lead addition)
+
+Package: mesa_25.2.8-0ubuntu0.24.04.4 (env.json:66,164), from archive.ubuntu.com pool/main/m/mesa.
+- mesa_25.2.8-0ubuntu0.24.04.4.dsc sha256 8703280401d59a28abc6503461e1cb167bffcd967c7cf8309f00749d125f406f
+- mesa_25.2.8.orig.tar.xz sha256 097842f3e49d996868b38688db87b006f7d4541e93ce86d2f341d8b3e7be7c93 (matches the .dsc Checksums-Sha256)
+- mesa_25.2.8-0ubuntu0.24.04.4.debian.tar.xz sha256 b2fe9e714f7824fb763b693ffd170ba9af3982a970273bc8bae6edf380f51af3 (matches the .dsc)
+debian/patches/series lists 7 patches (path_max, src_glx_dri_common.h, disable_ppc64el_assembly, anv mmap offset, CVE-2026-40393 pre1/1/2). The files they touch are: meson.build, src/compiler/nir/nir_functions.c, src/compiler/spirv/spirv_to_nir.c, src/glx/dri_common.h, src/intel/vulkan/anv_*, src/util/{meson.build,stack_array.h,tests/*}, src/vulkan/util/vk_util.h.
+No patch touches any cited file, so the orig tarball text is the shipped text. Files and sha256 in mesa-25.2.8/src (orig tarball):
+| file | sha256 | cited line |
+|---|---|---|
+| gallium/auxiliary/gallivm/lp_bld_limits.h | c7186c2a5346b7fb1fea67db0402744eb8fe20c320cc9a992c3d929c73e92f70 | 100 `caps->max_inputs = 32;` |
+| gallium/drivers/llvmpipe/lp_screen.c | a31224221b4eb4265f51daedd162bd832f882b03b16de319cd04f13c717bf9f8 | 124-134 (fragment uses gallivm_init_shader_caps), 214 `caps->npot_textures = true;` |
+| mesa/state_tracker/st_extensions.c | 846c964b685467570e466bc351074dd69166a4f205c40b2e7c3e4a8ee8c8a5cd | 266-267 MaxInputComponents = max_inputs * 4; 1078 `EXT_CAP(ARB_texture_non_power_of_two, npot_textures);` |
+| mesa/main/extensions_table.h | 45633c67aef600e268dc34e5b3f446d491df600b0438a391fac6fdb9ab35c020 | 174 ARB_texture_non_power_of_two, GLL + GLC |
+| mesa/main/get_hash_params.py | fbfe1229fe867e314885cf0a50935121048580f78b7707de0b4101583ec1824a | 428 MAX_FRAGMENT_INPUT_COMPONENTS |
+This also completes the np2 item (a): the llvmpipe cap npot_textures (lp_screen.c:214) is mapped to the GL extension at st_extensions.c:1078, and the extension table exposes it in both the legacy and core contexts (extensions_table.h:174).
+The earlier gitlab tag read is superseded; the two hashes I had computed (lp_bld_limits.h, st_extensions.c) are equal to these.
