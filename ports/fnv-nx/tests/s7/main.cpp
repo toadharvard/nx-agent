@@ -9,6 +9,9 @@
 extern "C" long CoInitializeEx(void *reserved, unsigned long model);   /* platform/win32/services.cpp */
 
 int s7_failures, s7_checks;
+pthread_t s7_case_thread;
+int s7_case_armed;
+__thread int s7_thread_guarded;
 s7_case *s7_cases;
 
 int main(int argc, char **argv)
@@ -29,7 +32,14 @@ int main(int argc, char **argv)
         if (only && !strstr(v[i]->name, only)) continue;
         int before = s7_failures;
         g_bnd_test = v[i]->name;
-        v[i]->fn();
+        s7_case_thread = pthread_self();
+        s7_case_armed = 1;
+        try {
+            v[i]->fn();
+        } catch (const s7_case_abort &) {
+            /* the failed CHECK has counted itself */
+        }
+        s7_case_armed = 0;
         if (fnvnx_bnd_locks_held()) {   /* see tests/s4/main.cpp */
             s7_failures++;
             printf("%s: returned with %u platform locks held\n", v[i]->name, fnvnx_bnd_locks_held());

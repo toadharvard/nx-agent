@@ -11,6 +11,9 @@
 #include <stdlib.h>
 
 int s4_failures, s4_checks;
+pthread_t s4_case_thread;
+int s4_case_armed;
+__thread int s4_thread_guarded;
 s4_case *s4_cases;
 
 static char g_root[1024];
@@ -98,7 +101,14 @@ int main(int argc, char **argv)
     int failed_cases = 0;
     for (i = 0; i < n; i++) {
         int before = s4_failures;
-        v[i]->fn();
+        s4_case_thread = pthread_self();
+        s4_case_armed = 1;
+        try {
+            v[i]->fn();
+        } catch (const s4_case_abort &) {
+            /* the failed CHECK has counted itself */
+        }
+        s4_case_armed = 0;
         int bad = s4_failures - before;
         failed_cases += bad != 0;
         printf("%-34s %s\n", v[i]->name, bad ? "FAIL" : "ok");

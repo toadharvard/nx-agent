@@ -206,7 +206,7 @@ TEST(gpa_fls_slot_limit)
 static DWORD g_slot_a, g_slot_b;
 static volatile int g_phase, g_ready;
 
-static DWORD fls_thread(LPVOID p)
+static DWORD fls_thread_body(LPVOID p)
 {
     uintptr_t n = (uintptr_t)p;
     SetLastError(0xdead);
@@ -221,6 +221,11 @@ static DWORD fls_thread(LPVOID p)
     if (n == 2)
         ExitThread(0);   /* the explicit exit runs the callbacks too */
     return 0;
+}
+/* the CHECKs of this procedure end it, not the process: the harness guard (s4_test.h), the case fails at its join */
+static DWORD fls_thread(LPVOID p)
+{
+    return s4_thread_guard([&]() -> DWORD { return fls_thread_body(p); }, (DWORD)0xFA11);
 }
 
 TEST(gpa_fls_threads)
