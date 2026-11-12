@@ -236,3 +236,12 @@ Update 2026-11-12, at 698adefb:
   - Open for the next facts commit: jtab_tables, the ranges invariant (L1's 3 sites), reloc consistency and unproven ptr candidates, pcsrc.run_facts (w4), and the 3 class-3 entries.
 - w5: the identity rule is replaced by a product invariance check (two runs, v=0/1). 01441246 is red until it lands. A read below ESP is red (ASM-003).
 - w8: b6324d18 (disp2) states the dispatch rule from the MSVC documentation and C++03; cl 15.00.30729.01 verifies it. defdisptest: 0 failed. test_plugins and test_cc1_plugins are queued on farm 2. The 144-case cl table is pending from w4.
+
+## 09:20 update (head a6b94e4c)
+- The trunk is 11187daf. The ASM-225 commit 7bd3abbd is in the candidate claude/fnv-first-root-next 83f7504f (verdict v6 running). w5 rebases the flags onto 83f7504f without the identity rule (doing).
+- w4 a3fcd7fc, the write-set census over 7 images on facts 2eeea27b: 1 893 456 stores = exact 38 925, stack 1 227 422, open or ranged 627 109, plus 8 240 import call sites.
+  - Both L5 facts are open by form. They close with a points-to over abstract objects, now on the path for w4 after the pcsrc counts.
+  - pcsrc so far: exe red 9 928 (s4 9 801, non-s4 127); d3dx9_31 and d3dx9_38 are running.
+- Facts a0f3d8e lacks jtab_tables (found by w3). w7's next commit (jtab, reloc consistency, unproven candidates, class-3 pointers, ranges invariant) is priority 1. Every consumer re-pins once, on it.
+- int3 84ac7e2be (w6): 35 files lost in the w5 merge were restored. gate_assumptions 51 → 32 findings, 81 entries. A word rule covers the SMT sense of "assume". The remaining blocks are listed for lead decisions. vd26 is running (doing).
+- The identity rule is withdrawn (L3b): 01441246 is red until the invariance proof lands.
