@@ -124,6 +124,7 @@ if ! step binutils; then
 	../binutils-$BINUTILS_VER/configure --prefix="$PREFIX" --target=$TARGET --disable-nls --disable-werror \
 		--disable-shared --disable-debug --enable-lto --enable-plugins --enable-poison-system-directories \
 		--enable-deterministic-archives --with-sysroot="$PREFIX/$TARGET"
+	make -j1 configure-host   # sub-configures share config.cache: serial, then the parallel build
 	make -j"$JOBS"
 	make install
 	cd ..; done_ binutils
