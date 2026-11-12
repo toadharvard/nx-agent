@@ -100,11 +100,12 @@ class Ranger:
 
 
 def run(rows, rg, out, image):
-    """rows: [(store_va, index_reg)] -> idxrange.tsv lines `store_va index_src lo hi why`; returns the counts (closed unconditional, closed cond:no_s4_arith, open)"""
+    """rows: [(store_va, index_reg)] -> idxrange.tsv lines `store_va index_src lo hi why`; returns the counts (closed, open)"""
     lines = []; k = u = c = 0
     for va, reg in rows:
         lo, hi, src, why = rg.index_range(va, FULL[reg])
         if lo is None: u += 1; lines.append('%08x\t%s\tunknown\tunknown\t%s' % (va, src, why))
         else: k += 1; c += why.startswith('cond:'); lines.append('%08x\t%s\t%08x\t%08x\t%s' % (va, src, lo, hi, why))
     open(out, 'w').write(''.join(l + '\n' for l in lines))
-    return k - c, c, u
+    print('IDXRANGE %s closed-unconditional=%d closed-cond:no_s4_arith=%d open=%d' % (image or 'exe', k - c, c, u), flush=True)
+    return k, u

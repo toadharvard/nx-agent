@@ -361,7 +361,7 @@ if IDX:
         except Exception: return None
     rg = idxrange.Ranger(insns, ins_at_x, lambda x: pmx.get(x, ()), lambda e: callers.get(e, ()), entry_of, pure_x, seeded_x, u8_x)
     rows = [(int(l.split('\t')[1], 16), l.split('\t')[4].strip()) for l in open(IDX).read().splitlines()[1:] if l.split('\t')[0] in (os.path.basename(EXE).lower(), NAME)]
-    print('IDXRANGE closed=%d cond=%d open=%d' % idxrange.run(rows, rg, OUTD + '/idxrange.tsv', NAME), flush=True)
+    print('IDXRANGE closed=%d open=%d' % idxrange.run(rows, rg, OUTD + '/idxrange.tsv', NAME), flush=True)
 NRN, NRI, NRB, NRR = codemap.exe_noreturn(U, eh.thrower)        # NORETURN: unreach what only flows after a call that never returns
 # ---- extents / features / output
 for v, ss in psites.items():
