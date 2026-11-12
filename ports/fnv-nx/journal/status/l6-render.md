@@ -165,3 +165,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - the lib/sha256 admit entry (L1 w15).
   - FINDING: the host test builds link with --unresolved-symbols=ignore-all, a stub class. w5 is counting the sites; the class has gone to L1 for a gate.
 - 03:36Z L2 w4 726ab21 fixed fnvnx_sdd VTSYM1 (L1 green on trunk 8cfbcdb). w6 is re-measuring the 48 vtable clones on render/d3d9.
+- 03:38Z VTSYM re-measured (w6 64474bd7, render/d3d9 at 9de5bdc3 + sdd 726ab210's plugin source).
+  - Vtable clones: 0 open (was 48). 48 distinct clone names are defined, 131 definitions, all in the same section, comdat group and binding as their vtable. The 19 names still undefined in some objects are defined in other objects of the set.
+  - Undefined closure over the 70 objects: 35 names (was 78).
+    - nxgpu ABI: 5;
+    - platform hooks: 4 (L5);
+    - guest runtime: 4 (fnvnx_dispatch and fnvnx_guest_invoke, L3a; fnvnx_import_key, L1; fnvnx_wine_fixme, L5);
+    - C++ runtime: 10;
+    - libc/libm: 12.
+  - objstub: 1784/1784.
