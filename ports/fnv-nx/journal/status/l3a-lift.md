@@ -304,3 +304,17 @@ Update 2026-11-12, at 698adefb:
 - The 3 exe class-3 entries: decided by the class-3 data-pointer rule, in the next facts commit.
 - int3 + w14-src cefa39a3: w6 merges it (6 gate files conflict; verify/gate_lift.py goes to L1). The link.script fix (a) has been asked of w14. w6 has L1's gate_assumptions edits (prove.py :15/:76, shapeprove.py:15).
 - Blocked: w7 waits on pcsrc.run_facts (w4, chased).
+
+## 2026-11-12 09:12
+- Next facts commit (w7, ETA about 90 min), in this order:
+  - the jtab regeneration for 8 images;
+  - the ranges invariant, with the 3 L1 sites;
+  - the reloc-consistency rule;
+  - the ptr-candidate refusal;
+  - the class-3 rule.
+  - The PE facts: the exe has no DYNAMIC_BASE, and all DLLs carry a .reloc. A misfit under proven flow is red in every class.
+  - Added for L5 (blocked): data_in_code.tsv per image, and the runs split around those ranges. L5 measured 16 714 relocated words in 1 452 runs over 6 images at a0f3d8e; the target is 0, each attributed to a rule.
+  - The gpa/loadlib A7 and ret-predicate facts come in the commit after.
+- ehtables.py:268: a real assumption. L1 has been asked for a REMOVE id; the removing fact is reloc-consistency plus data_in_code (w7). w6 cites the id.
+- w4: pcsrc.run_facts is 2b0797ff, sent to w7. The d3dx9 pcsrc runs are in progress; the points-to coding starts in parallel.
+- Bridges: L1 w20 builds claude/fnv-l1-contract-int-l3a (6d3a2800 + w14-src2 + w20-descs + int3). The cross-root include of fnvl_host.h is legal under the header-home rule.
