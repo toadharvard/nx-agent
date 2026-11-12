@@ -611,6 +611,7 @@
    "id": "ASM-029",
    "text": "The ARMv8 memory model matches the Cortex-A57.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/RULES.md"
    ],
    "aliases": [
@@ -1338,9 +1339,7 @@
   {
    "id": "ASM-800",
    "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l1-contract-018.md"
-   ],
+   "used_by": [],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
