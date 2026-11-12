@@ -121,3 +121,10 @@ Not carried from my work: render/shaders/build.sh and CMakeLists.txt stay in ren
 Removed from the branch (they stay on the lead branch until their roots exist after the first frame): render/shaders/{.gitignore, CMakeLists.txt, README.md, SDP.md, build.sh, uam.patch, cache/*, src/*}.
 The DKSH side (src/{dk.cpp, sdp.c, sdp2dksh.c, translate_dksh.c, dk_api.h}) includes "fnvnx_shaders.h" etc. through CMake's -I translator/include: on the lead branch they keep working unchanged
 (translator/include/ is the public API dir; translator/src/backend.h now includes "../include/fnvnx_shaders.h").
+
+## State at pause (L6 lead order: only the path runs)
+Branch claude/fnv-l6-render-w1b. Done and pushed: guest root (msvcmodel compiler, plugins, explicit SUPPORT_PROFILE set), mojoshader_prune.patch (reach census), mojoshader_sm.patch,
+fnvnx_shader_backend_names data symbol, tools/reach_census.py, tools/prune_collected.py, tools/fail_census.py, failure ABI field recorded in PATCHES.md (isfail).
+Measured on a scratch branch with borrowed lib/sha256 (not on this base): build green 7 objects, census 492 sections / 12 collected, objstub 268/276 (7 V MojoShader findings with L1).
+Unfinished: fail-site refinement (journal/inbox/l6-render-w1b-failcmp.tsv is a first-pass manual comparison, 151 (g) sites, direction per group open; 4 sites unreviewed);
+error_abi declaration (waits for L1 w20); the 9 ops' row translation (waits for L1 w10/w15 test roots); rebase onto a trunk with lib/sha256, w16, w17 and the 13 gates.
