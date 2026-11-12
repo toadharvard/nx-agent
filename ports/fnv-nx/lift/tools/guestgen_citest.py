@@ -65,7 +65,7 @@ SENT = [777.0, 888.0]
 
 
 def main():
-    out = sys.argv[1]
+    out = sys.argv[1]; os.makedirs(out, exist_ok=True)
     cases = []                      # (entry, vals, expected bits or None(NaN), errno, flagval, label)
     for n in ENT:
         ops = [[x] for x in VALS1[n]] if n not in TWO else [list(p) for p in VALS2[n]]
