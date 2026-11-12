@@ -160,6 +160,15 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   target otherwise, the guest rules (compiler external, data model) are judged on the effective target, and a variant with its own target has it in
   every stage key (`FNVNX_TARGET`). Sources stay the base root's. Every entry point resolves a `root@NAME` spec with `split_spec` once.
 
+  **One recipe per target.** A root whose units serve both targets (the console backend on the guest, the host's gl4 calling the same translator)
+  names a recipe per target in admit.json: `"recipe": {"guest": PATH, "host": PATH}` with `"target"` the base's (a plain string is the root's single
+  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe. It is one mechanism with
+  `variants`: `recipe.norm_entry` parses the dict to the string spelling plus `variants: {OTHER: {"target": OTHER, "recipe": PATH}}`, and that
+  spelling may be written in admit.json directly (it parses to the same structure). `entry_of` resolves the effective target and recipe path; the
+  pair `root@OTHER` is built, keyed (the variant name, `FNVNX_TARGET`, its own compiler and flags) and gated separately in `GATE_CACHE`. A per-target
+  recipe is a whole recipe with no variants of its own; its name may not also be a variant of the base recipe. Header home: an include into a
+  product root is accepted for the including root's target only if that root has a recipe for it (its own, or a per-target one).
+
 ## Variants
 `variants: {NAME: {"compiler": .., "flags": {..}}}`: one root built for several targets. A variant replaces only the keys it names (`compiler`, `flags`), the rest is
 the root's; its effective recipe is checked by every rule of `check()`. A (root, variant) pair is spelled `root@NAME` (`recipe.split_spec`; the implicit

@@ -147,6 +147,29 @@ def main():
     check("cold and warm build: warm runs no stage, objects equal", rw["stages"]["run"] == 0 and [o["sha256"] for o in rw["objects"]] == [
         o["sha256"] for o in ra["objects"]] == [o["sha256"] for o in rb["objects"]], (rw["stages"], ra["stages"]))
     print("TIME guest cold A %.1fs, cold B %.1fs, warm %.1fs" % (ta, tb, tw))
+    # per-target recipes: one root, one set of units, a recipe per target; the host recipe is a variant keyed by its target
+    pt = guest_repo("pt", rec, pin, files={ROOT + "/a.cc": src})
+    w(pt, ROOT + "/host.json", json.dumps(REC))
+    ad = json.load(open(os.path.join(pt, T + "verify/admit.json")))
+    for r in ad["roots"]:
+        if r["path"] == ROOT:
+            r["recipe"] = {"guest": ROOT + "/build.json", "host": ROOT + "/host.json"}
+    w(pt, T + "verify/admit.json", json.dumps(ad))
+    git(pt, "add", "-A")
+    git(pt, "commit", "-q", "-m", "per-target")
+    adm_pt = recipe.load_admit(pt)
+    check("per-target recipes: the pairs of the root are the guest base and root@host",
+          recipe.pairs_of(json.load(open(os.path.join(pt, ROOT + "/build.json"))), ROOT, adm_pt[ROOT]) == [ROOT, ROOT + "@host"], adm_pt[ROOT])
+    ept = recipe.check(rec, ROOT, recipe.tracked(pt), adm_pt, recipe.load_pin(pt), pt)
+    check("per-target recipes: the root and both recipes are valid together", ept == [], ept)
+    rg, _ = build(pt, "PTG")
+    rh = recipe.build(pt, ROOT + "@host", os.path.join(BASE, "PTH"), os.path.join(BASE, "out-PTH"))
+    check("per-target recipes: both targets build green from the same units", rg["status"] == "green" and rh["status"] == "green" and rh["root"] == ROOT + "@host"
+          and [o["unit"] for o in rg["objects"]] == [o["unit"] for o in rh["objects"]], (rg.get("failure"), rh.get("failure")))
+    check("per-target recipes: each target has its own keys and objects (compiler, flags and variant are in the key)",
+          not set(rg["stage_keys"]) & set(rh["stage_keys"]) and [o["sha256"] for o in rg["objects"]] != [o["sha256"] for o in rh["objects"]], "")
+    check("per-target recipes: the guest target is judged by the guest rules, the host target by none of them",
+          recipe.guest_errors(rec, ROOT, adm_pt, recipe.load_pin(pt)) == [] and recipe.guest_errors(REC, ROOT + "@host", adm_pt, recipe.load_pin(pt)) == [], "")
     o = next(x["object"] for x in ra["objects"] if x["unit"] == "a.cc")
     syms = subprocess.run(["aarch64-linux-gnu-nm", o], capture_output=True, text=True).stdout
     check("msvcmodel data model: size_t is unsigned int (mangled j)", "_Z2szj" in syms, syms)

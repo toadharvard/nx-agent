@@ -37,7 +37,9 @@ open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld, with
 # the FNXG header of crt0 at the first segment + 8 and the entry at the first segment. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = ".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
+CRT0 = (".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n"
+        ".section .crt0.hdr,\"a\",%progbits\n.align 2\n.global __fnvnx_guest_hdr\n__fnvnx_guest_hdr:\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
+        ".section .crt0.mod0,\"a\",%progbits\n.align 2\n.global __fnvnx_mod0\n__fnvnx_mod0:\n .ascii \"MOD0\"\n")
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
           "flags": {"c": ["-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
@@ -436,6 +438,19 @@ def main():
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # per-target recipes: the root hdr_other (the other target) with a recipe for this root's target too is a home; without it, none
+    both = recipe.norm_entry({"path": T + "hdr_other", "class": "product", "target": other, "recipe": {other: T + "hdr_other/b.json", own: T + "hdr_other/b2.json"}})
+    check("a per-target recipe {guest, host} parses to the base string plus a variant keyed by the other target",
+          both["recipe"] == T + "hdr_other/b.json" and both["variants"] == {own: {"target": own, "recipe": T + "hdr_other/b2.json"}}
+          and recipe.targets_of(both) == {own, other} and recipe.pairs_of({}, "r", both) == ["r", "r@" + own], both)
+    check("the spelling as a variant parses to the same structure",
+          recipe.norm_entry({"path": "x", "target": other, "recipe": "b.json", "variants": {own: {"target": own, "recipe": "b2.json"}}})["variants"]
+          == recipe.norm_entry({"path": "x", "target": other, "recipe": {other: "b.json", own: "b2.json"}})["variants"])
+    rr3 = dict(rr, **{T + "hdr_other": both})
+    pt = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_other"]), ROOT, rfiles, rr3, None, rk) if "lies in no admitted product root" in e]
+    check("an include into a root with a recipe for the including root's target is accepted", not pt, pt)
+    check("the same include without that recipe is rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("a plain-string recipe parses to itself", recipe.norm_entry({"path": "x", "target": own, "recipe": "b.json"}) == {"path": "x", "target": own, "recipe": "b.json"})
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]

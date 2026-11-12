@@ -68,6 +68,15 @@ def trees(r):
     return list(t) if isinstance(t, list) else [r.get("path", "")]
 
 
+def recipe_paths(r):
+    """The recipe files of an admit entry as written: its `recipe` path, or the paths of a {target: path} recipe, and the `recipe` of each entry
+    variant (a per-target recipe spelled as a variant)."""
+    rc = r.get("recipe")
+    out = list(rc.values()) if isinstance(rc, dict) else [rc] if rc else []
+    vs = r.get("variants")
+    return out + [v["recipe"] for v in vs.values() if isinstance(v, dict) and "recipe" in v] if isinstance(vs, dict) else out
+
+
 def imports_errors(roots):
     """Errors of the declared imports of ROOTS (list of admit root dicts): an unknown root, itself, a repeat, a cycle."""
     by = {r.get("path"): r for r in roots}
@@ -136,9 +145,15 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
             if cls == "test" and r.get("target") not in ("guest", "host"):
                 why.append('a test root declares "target": "guest" or "host"')
             if cls in ("product", "test"):
-                rec = r.get("recipe", "")
-                if not any(rec.startswith(t + "/") for t in trees(r)) or not exists(rec):
-                    why.append("recipe %r is not an existing file inside the root" % rec)
+                rc = r.get("recipe", "")
+                if isinstance(rc, dict):   # one recipe per target of the same units (recipe.norm_entry): both targets, the entry's target is one
+                    if not (set(rc) == {"guest", "host"} and r.get("target") in rc and len(set(rc.values())) == 2
+                            and not set(r.get("variants") or {}) & set(rc)):
+                        why.append('a recipe {"guest": PATH, "host": PATH} names both targets, two distinct files, the entry\'s "target" is one of them, '
+                                   "and no variant of the entry has a target's name")
+                for rec in recipe_paths(r) or [""]:
+                    if not isinstance(rec, str) or not any(rec.startswith(t + "/") for t in trees(r)) or not exists(rec):
+                        why.append("recipe %r is not an existing file inside the root" % (rec,))
         why += ["gate %s is not a file of verify/gates.d" % g for g in gates if g not in gate_names]
         roots.append((trees(r) if not why else [path], why))
     errors += imports_errors(admit.get("roots", []))

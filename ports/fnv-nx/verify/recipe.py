@@ -171,9 +171,39 @@ def under(p, d):
     return p == d or p.startswith(d + "/")
 
 
+def norm_entry(r):
+    """The one structure of an admit entry. `recipe` is a path (the root's recipe at its `target`), or {"guest": PATH, "host": PATH}: one recipe per
+    target of the same units, the entry's `target` selects the base. The dict spelling parses to the string spelling plus one `variants` entry per
+    other target, {TARGET: {"target": TARGET, "recipe": PATH}}: a per-target recipe is a variant keyed by its target, the same as the entry's own
+    `variants` (a sanitizer variant, a variant with another target). A malformed dict parses to no recipe (gate admit names it)."""
+    rc = r.get("recipe")
+    if not isinstance(rc, dict):
+        return r
+    out, tg = dict(r), r.get("target")
+    out["recipe"] = rc[tg] if isinstance(rc.get(tg), str) else ""
+    vs = dict(r["variants"]) if isinstance(r.get("variants"), dict) else {}
+    for k, p in rc.items():
+        if k != tg and k in GUEST_TARGETS and isinstance(p, str):
+            vs.setdefault(k, {"target": k, "recipe": p})
+    if vs:
+        out["variants"] = vs
+    return out
+
+
 def load_admit(repo="."):
     with open(os.path.join(repo, ADMIT)) as f:
-        return {r["path"]: r for r in json.load(f)["roots"]}
+        return {r["path"]: norm_entry(r) for r in json.load(f)["roots"]}
+
+
+def own_recipes(ent):
+    """{variant NAME: (target, recipe path)} of the variants of an admit entry that carry a recipe of their own (a per-target recipe)."""
+    vs = ent.get("variants") if isinstance(ent, dict) else None
+    return {n: (v.get("target"), v["recipe"]) for n, v in vs.items() if isinstance(v, dict) and isinstance(v.get("recipe"), str)} if isinstance(vs, dict) else {}
+
+
+def targets_of(ent):
+    """The targets a product root has a recipe for: its own and those of its per-target recipes."""
+    return {ent.get("target")} | {t for t, _ in own_recipes(ent).values()}
 
 
 def tracked(repo="."):
@@ -187,7 +217,7 @@ def split_spec(spec):
     return root, name
 
 
-ENTRY_VARIANT_KEYS = {"target"}
+ENTRY_VARIANT_KEYS = {"target", "recipe"}
 
 
 def entry_of(roots, spec):
@@ -211,21 +241,24 @@ def effective(rec, name):
     return out
 
 
-def variant_names(rec):
+def variant_names(rec, ent=None):
+    """The variants of a recipe REC, and of the admit entry ENT: its per-target recipes."""
     v = rec.get("variants") if isinstance(rec, dict) else None
-    return sorted(v) if isinstance(v, dict) else []
+    return sorted(set(v if isinstance(v, dict) else []) | set(own_recipes(ent or {})))
 
 
-def pairs_of(rec, root):
+def pairs_of(rec, root, ent=None):
     """Every (root, variant) pair spec of a recipe: the implicit one and one per declared variant."""
-    return [root] + ["%s@%s" % (root, n) for n in variant_names(rec)]
+    return [root] + ["%s@%s" % (root, n) for n in variant_names(rec, ent)]
 
 
 def load_recipe(repo, roots, spec):
     """The effective recipe of a root or of a 'root@NAME' pair."""
     root, name = split_spec(spec)
-    with open(os.path.join(repo, roots[root]["recipe"])) as f:
+    with open(os.path.join(repo, entry_of(roots, spec)["recipe"])) as f:
         rec = json.load(f)
+    if name in own_recipes(roots[root]):   # a per-target recipe is a whole recipe, with no variants of its own
+        return effective(rec, "")
     return effective(rec, name) if not name or name in variant_names(rec) else rec
 
 
@@ -421,7 +454,7 @@ def link_errors(lk, root, mine, roots, ext_names, repo, variant=""):
             except (OSError, ValueError, KeyError, AttributeError):
                 err.append("link.roots: the recipe of %s is unreadable" % d)
                 continue
-            if dv and dv not in variant_names(drec):
+            if dv and dv not in variant_names(drec, ent):
                 err.append("link.roots: %s has no variant %r" % (dr, dv))
             elif dv and rent.get("class") != "test":
                 err.append("link.roots: %s is a variant: only a test root (class test) links a variant; a product image links base roots" % d)
@@ -450,23 +483,25 @@ def link_errors(lk, root, mine, roots, ext_names, repo, variant=""):
 HEADER_EXTS = (".h", ".hh", ".hpp", ".hxx", ".inc")
 
 
-def header_dirs(rec, root, roots, repo="."):
-    """The repo include dirs that can supply a header to a product of ROOT's target: the `include` of REC, the `include` of the recipe of every
-    admitted product root of that target (read from REPO; a recipe that is not there adds none) and the `include/` dir of each such root."""
-    tg = roots[root].get("target")
+def header_dirs(rec, root, roots, repo=".", variant=""):
+    """The repo include dirs that can supply a header to a product of ROOT's target (at VARIANT: the variant's target): the `include` of REC, the
+    `include` of the recipe of every admitted product root that has a recipe for that target (its own or a per-target one; read from REPO; a
+    recipe that is not there adds none) and the `include/` dir of each such root."""
+    tg = entry_of(roots, root + "@" + variant if variant else root).get("target")
     dirs = set()
 
     def add(inc):
         dirs.update(d for d in inc if isinstance(d, str) and not d.startswith("/"))
     add(rec.get("include") if isinstance(rec.get("include"), list) else [])
     for p, r in roots.items():
-        if r.get("class") == "product" and r.get("target") == tg:
+        if r.get("class") == "product" and tg in targets_of(r):
             dirs.add(p + "/include")
-            try:
-                with open(os.path.join(repo, r["recipe"])) as f:
-                    add(json.load(f).get("include") or [])
-            except (OSError, ValueError, KeyError, TypeError, AttributeError):
-                pass
+            for path in [r["recipe"] if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]:
+                try:
+                    with open(os.path.join(repo, path)) as f:
+                        add(json.load(f).get("include") or [])
+                except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                    pass
     return sorted(dirs)
 
 
@@ -486,9 +521,23 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     own = roots.get(root, {}).get("variants")
     if own is not None and not variant:
         names = variant_names(rec) if isinstance(rec, dict) else []
-        if not (isinstance(own, dict) and all(n in names and isinstance(v, dict) and v and set(v) <= ENTRY_VARIANT_KEYS and v.get("target", "host") in GUEST_TARGETS
+        per = own_recipes(roots[root])
+        if not (isinstance(own, dict) and all((n in names or n in per) and isinstance(v, dict) and v and set(v) <= ENTRY_VARIANT_KEYS and v.get("target", "host") in GUEST_TARGETS
+                                              and ("recipe" not in v or v.get("target") in GUEST_TARGETS and v["target"] != roots[root].get("target"))
                                               for n, v in own.items())):
-            err.append('admit.json %s: variants must be {NAME: {"target": "guest"|"host"}} for variants the recipe declares' % root)
+            err.append('admit.json %s: variants must be {NAME: {"target": "guest"|"host"}} for variants the recipe declares, or {NAME: {"target": the other target, "recipe": PATH}} for a per-target recipe' % root)
+        err += ["admit.json %s: variant %s is declared by the recipe and by admit.json as a per-target recipe" % (root, n)
+                for n in sorted(set(per) & set(rec.get("variants") or {} if isinstance(rec, dict) else {}))]
+        for n, (t, path) in sorted(per.items()):   # a per-target recipe is a variant: every rule applies to it whole, with its own target
+            try:
+                with open(os.path.join(repo, path)) as f:
+                    prec = json.load(f)
+            except (OSError, ValueError):
+                err.append("variant %s: recipe %s is unreadable" % (n, path))
+                continue
+            if isinstance(prec, dict) and "variants" in prec:
+                err.append("variant %s: a per-target recipe declares no variants (its pair is one build)" % n)
+            err += ["variant %s: %s" % (n, e) for e in check(prec, root, files, roots, pin, repo, n)]
     err += ["missing key %r" % k for k in ("format", "compiler", "flags", "include", "units") if k not in rec]
     if rec.get("format") != FORMAT:
         err.append("format is not " + FORMAT)
@@ -534,23 +583,24 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             "-o", "-c", "-E", "-S", "-x") or t.startswith(("-I", "-M"))]
         err += ["flags.%s: %s loads or configures a plugin (use plugins)" % (k, t) for t in toks if t.startswith("-fplugin")]
     inc = rec.get("include")
+    tg = entry_of(roots, root + "@" + variant if variant else root).get("target")
     for d in inc if isinstance(inc, list) else err.append("include must be a list") or []:
         if isinstance(d, str) and any(under(d, a) for a in ats):
             continue
         if not rel_ok(d) or not any(under(d, r) for r in roots):
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
-        elif not any(under(d, r) and roots[r].get("class") == "product" and roots[r].get("target") == roots[root].get("target") for r in roots):
+        elif not any(under(d, r) and roots[r].get("class") == "product" and tg in targets_of(roots[r]) for r in roots):
             # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
             # the units that read them), never in a doc or tool root or a root of the other target
             err.append("include %r lies in no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
-                       % (d, roots[root].get("target")))
+                       % (d, tg))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
     # one name, one file, over the whole target: the include dirs of this recipe, of every admitted product root's recipe of the same target
     # and the `include/` dir of each such root; two files of one include-relative path in them make `#include <that/path>` depend on the
     # order of a -I list (the first wins, silently), or on which root builds: a header is in one home only
     home = {}
-    for d in header_dirs(rec, root, roots, repo):
+    for d in header_dirs(rec, root, roots, repo, variant):
         for f in files:
             if under(f, d) and f.endswith(HEADER_EXTS):
                 home.setdefault(f[len(d):].lstrip("/"), set()).add(f)
@@ -1353,7 +1403,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
     root = j.root
     with open(os.path.join(repo, j.roots[root]["recipe"])) as f:
         full = json.load(f)
-    if j.variant and j.variant not in variant_names(full):
+    if j.variant and j.variant not in variant_names(full, j.roots[root]):
         raise RecipeError(["root %s has no variant %r" % (root, j.variant)])
     errs = check(full, root, j.files, j.roots, load_pin(repo), repo)
     if errs:
