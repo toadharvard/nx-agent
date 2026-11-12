@@ -1,0 +1,12 @@
+{
+ "format": "fnvnx-external-ref/1",
+ "note": "The exe-VA tables that used to be patches/*.s1b, patches/units_renames.tsv and tools/equiv/explained.tsv are not in this public repository (docs/ARCHITECTURE.md, Legal). They live in the private fnv-nx-build repository. A script that reads them gets them as this external, materialised at the repository root (the tree holds ports/fnv-nx/patches/... and ports/fnv-nx/tools/equiv/... at their old relative paths, so no script changes its path).",
+ "external": {
+  "name": "va-tables",
+  "repo": "fnv-nx-build",
+  "ref": "data/l2-va-tables",
+  "commit": "a708b6e903324f8ee8126cb2abf7996454c0fa3b",
+  "tree_sha256": "e3cd1ec97dfeab83784a00f7ab99b2db6bf3d08f337a97f757fa01d34f213463",
+  "at": "/ext/va-tables"
+ }
+}
