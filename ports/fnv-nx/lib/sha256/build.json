@@ -7,8 +7,17 @@
  },
  "flags": {
   "c": [
-   "-O2",
    "-mabi=ilp32",
+   "-fms-extensions",
+   "-fshort-wchar",
+   "-frounding-math",
+   "-fsigned-char",
+   "-fno-strict-aliasing",
+   "-fwrapv",
+   "-fno-delete-null-pointer-checks",
+   "-fno-lifetime-dse",
+   "-ffp-contract=off",
+   "-O2",
    "-Werror=attributes",
    "-Wall",
    "-Wextra",
