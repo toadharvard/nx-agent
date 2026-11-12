@@ -1348,11 +1348,12 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
     repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
     with the pin's driver (the object was built by that tree, not by a name).
   unit item, all of: a CC stage document exists for the unit; its argv holds -mabi=ilp32; a C or C++ unit's argv holds every flag of the pin's
-    "flags"."required" (-mno-outline-atomics) and none of "flags"."forbidden" (-moutline-atomics); for a C++ unit of a native root also
-    every flag of the pin's "flags"."semantics" (guest_compiler.json, the one source recipe.SEMANTICS_FLAGS reads) and, for every plugin of recipe.GUEST_CXX_PLUGINS, the declared input /plug/<name> (a tree holding <name>.so) and the
-    argv flag -fplugin=/plug/<name>/<name>.so. A C++ unit of a lifted root needs no plugin (RECIPE.md: the lifter emits the order itself).
+    "flags"."required" (-mno-outline-atomics) and none of "flags"."forbidden" (-moutline-atomics); a C++ unit of a native root also
+    every flag of the pin's "flags"."semantics" (guest_compiler.json, the one source recipe.SEMANTICS_FLAGS reads); and EVERY C and C++ unit
+    of a guest root, any origin, holds all plugins of recipe.PLUGIN_SOURCES, each as the declared input /plug/<name> and the argv flag
+    -fplugin=/plug/<name>/<name>.so (a missing plugin is red; no exception list, no language declaration).
     The documents are the stage keys, so the object is the one these flags and inputs built.
-Does not cover (stated): C and assembler units are checked for -mabi=ilp32 only (the pin lists the semantics flags of C++).
+Does not cover (stated): assembler units are checked for -mabi=ilp32 only.
 Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model.
 ```
 

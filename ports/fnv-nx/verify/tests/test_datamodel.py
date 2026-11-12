@@ -44,15 +44,20 @@ def main():
     check("the semantics flags of the recipe rule are the pin's (one source)", tuple(pin["flags"]["semantics"]) == recipe.SEMANTICS_FLAGS and "-mabi=ilp32" in recipe.SEMANTICS_FLAGS)
     # the certificate of a unit, on a CC stage document (pure function of the document)
     doc = {"argv": [ext["at"] + "/bin/g", "-mabi=ilp32"] + list(recipe.SEMANTICS_FLAGS) + list(pin["flags"]["required"]) +
-           ["-fplugin=/plug/%s/%s.so" % (n, n) for n in recipe.GUEST_CXX_PLUGINS],
-           "inputs": [{"at": ext["at"], "tree": ext["tree_sha256"]}] + [{"at": "/plug/" + n, "tree": "t"} for n in recipe.GUEST_CXX_PLUGINS]}
+           ["-fplugin=/plug/%s/%s.so" % (n, n) for n in recipe.PLUGIN_SOURCES],
+           "inputs": [{"at": ext["at"], "tree": ext["tree_sha256"]}] + [{"at": "/plug/" + n, "tree": "t"} for n in recipe.PLUGIN_SOURCES]}
     check("complete CC document certifies a native C++ unit", gd.unit_why("a.cc", doc, True, pin) == [], gd.unit_why("a.cc", doc, True, pin))
     miss = copy.deepcopy(doc)
     miss["argv"] = [a for a in miss["argv"] if "fnvnx_ftoi" not in a]
     miss["inputs"] = [i for i in miss["inputs"] if i["at"] != "/plug/fnvnx_ftoi"]
     w = gd.unit_why("a.cc", miss, True, pin)
     check("C++ unit missing a plugin is red", len(w) == 2 and all("fnvnx_ftoi" in x for x in w), w)
-    check("lifted C++ unit needs no plugin", gd.unit_why("a.cc", miss, False, pin) == [] or all("plug" not in x for x in gd.unit_why("a.cc", miss, False, pin)))
+    wl = gd.unit_why("a.cc", miss, False, pin)
+    check("lifted C++ unit missing a plugin is red too (full set, any origin)", len(wl) == 2 and all("fnvnx_ftoi" in x for x in wl), wl)
+    missc = copy.deepcopy(miss)
+    check("C unit missing a plugin is red", len(gd.unit_why("a.c", missc, True, pin)) == 2, gd.unit_why("a.c", missc, True, pin))
+    check("C unit with the full set is green", gd.unit_why("a.c", doc, True, pin) == [], gd.unit_why("a.c", doc, True, pin))
+    check("every plugin of the set is required, one by one", all(len(gd.unit_why("a.c", dict(doc, argv=[x for x in doc["argv"] if "/%s/" % n not in x], inputs=[i for i in doc["inputs"] if i["at"] != "/plug/" + n]), True, pin)) == 2 for n in recipe.PLUGIN_SOURCES))
     noabi = copy.deepcopy(doc)
     noabi["argv"] = [a for a in noabi["argv"] if a != "-mabi=ilp32"]
     check("unit without -mabi=ilp32 is red", gd.unit_why("a.cc", noabi, True, pin) == ["argv lacks -mabi=ilp32"], gd.unit_why("a.cc", noabi, True, pin))

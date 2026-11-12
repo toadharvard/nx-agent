@@ -87,13 +87,16 @@ otherwise). `verify/samples/platform.build.json` is the sample recipe of the pla
 flags, `include` = the runtime's `c++/15.2.0`, its ilp32 target directory and `include`); `test_guest.py` checks it with `recipe.py check` and builds a unit
 that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15.2's libstdc++ headers only with `-std=gnu++20` (the sample's `flags.cxx`).
 
-### Gate rule: native and decomp C++ is compiled with both plugins; lifted C++ with none
+### Gate rule: every guest C and C++ unit is compiled with the full plugin set
 `admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
 `{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Missing declaration = invalid recipe = red `build`.
 - `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
-  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). Plugins are then not required.
+  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator).
+- every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with `PLUGIN_ARGS`, in that order: the
+  C and the C++ CC stage of the root load every one (`-fplugin=/plug/<n>/<n>.so`, `/plug/<n>` a declared input), so a plugin is in every unit key.
+  Gate `datamodel` reads this back from the CC stage documents; a unit lacking any plugin .so is red, with no language declaration and no exception list.
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)

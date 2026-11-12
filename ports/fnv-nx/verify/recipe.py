@@ -60,8 +60,6 @@ _T = TREE + "/toolchain/"
 PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
                   "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
-# The plugins the gate `datamodel` requires in the CC stage of every native guest C++ unit (RECIPE.md, "Gate rule"); a subset of PLUGIN_SOURCES.
-GUEST_CXX_PLUGINS = ("fnvnx_ftoi", "fnvnx_order")
 PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
@@ -368,6 +366,16 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
     cxx = [u for u in units if u.endswith(CXX_EXT)]
     ent = roots.get(root, {})
     origin = ent.get("cxx_origin")
+    # RULE (orchestrator, 2026-11-12): every guest CC stage, C and C++ alike and whatever the origin of the code, loads the FULL plugin set of
+    # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list.
+    if ent.get("target") == "guest" and any(u.endswith(CC_EXT + CXX_EXT) for u in units) and not (origin == "native" and cxx):
+        for n in sorted(PLUGIN_SOURCES):
+            if n not in loaded:
+                err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
+            elif loaded[n].get("args") != PLUGIN_ARGS[n]:
+                err.append("plugin %s: arguments must be %s, are %s" % (n, PLUGIN_ARGS[n], loaded[n].get("args")))
+        if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
+            err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
     if origin == "native":
@@ -653,7 +661,9 @@ class Job:
         if not used:
             return {}
         rtp, _ = self.toolrt(used)
-        self.built = self.plugins(ws) if any(k == "cxx" for k in kinds.values()) else []
+        guest = self.roots.get(self.root, {}).get("target") == "guest"
+        pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
+        self.built = self.plugins(ws) if any(k in pk for k in kinds.values()) else []
         builds = {}
         # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the
         # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
@@ -666,7 +676,7 @@ class Job:
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop
-            if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
+            if k in pk:   # plugins are loaded by the CC stage only, never by preprocessing (guest roots: C and C++ units; host roots: C++ only)
                 builds[k].cc_flags = [f for _, _, fl in self.built for f in fl]
                 builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built]
 
