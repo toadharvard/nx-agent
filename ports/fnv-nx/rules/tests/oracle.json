@@ -26,18 +26,6 @@
     "ports/fnv-nx/rules/s8_asm.py"
    ]
   },
-  "test_fixture_addrs.py": {
-   "references": [
-    {
-     "anchor": "## Legal",
-     "kind": "spec",
-     "path": "ports/fnv-nx/docs/ARCHITECTURE.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/rules/tests/support.py"
-   ]
-  },
   "test_harn1.py": {
    "references": [
     {

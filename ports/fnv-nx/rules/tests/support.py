@@ -78,28 +78,8 @@ def tree_hash(root):
 
 
 # FIXTURE ADDRESSES: a test fixture holds no address inside a guest image range (Legal: no public file pairs a guest VA with a decomp-derived
-# name).  Every fixture address lies in [SYNTH_BASE, SYNTH_LIMIT), below the exe's ImageBase; the guest images are placed at or above the exe's
-# ImageBase (contract/modules.py assign_bases: the exe, then every dll after the end of the exe image).  `image_ranges()` returns the real ranges
-# when the runner supplies them (env FNVNX_IMAGE_RANGES = a file of `lo hi` hexadecimal lines, written by the gate from the PE headers), and
-# `assert_outside` checks the synthetic window against them.
+# name; checked by gate_legal over every tracked file).  Fixture addresses lie in [SYNTH_BASE, SYNTH_LIMIT), below the exe's ImageBase: the guest
+# images are placed at or above it (contract/modules.py assign_bases).  Tests of the two rules that still key on a fixed exe window (s2_bodies
+# r_code_address_casts, s1_compile STATIC1) keep in-window addresses with synthetic names only, until those rules read the window from the image facts.
 SYNTH_BASE = 0x00000000
 SYNTH_LIMIT = 0x00400000      # exclusive: the lowest ImageBase of a guest image set of this port (the exe's)
-
-
-def image_ranges():
-    p = os.environ.get('FNVNX_IMAGE_RANGES')
-    if not p:
-        return []
-    with open(p) as f:
-        return [tuple(int(x, 16) for x in ln.split()) for ln in f if ln.strip() and not ln.startswith('#')]
-
-
-def assert_outside(lo=SYNTH_BASE, hi=SYNTH_LIMIT):
-    for a, b in image_ranges():
-        assert hi <= a or b <= lo, 'synthetic window %#x..%#x overlaps image range %#x..%#x' % (lo, hi, a, b)
-
-
-# Tests of rules that key on a fixed exe window (s2_bodies r_code_address_casts: code 0x00401000..0x00fdf000; s1_compile STATIC1: data
-# 0x00fdf000..0x02100000): their fixture addresses must lie in the rule's own window, so they cannot move to the synthetic window until the
-# rules read the window through an interface (reported to the L2 lead).  Their records hold synthetic names only.
-RULE_WINDOW_FILES = ('test_addrfn1.py',)

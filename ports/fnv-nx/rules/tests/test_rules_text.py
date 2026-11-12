@@ -734,8 +734,8 @@ check('ENUM2 gives enums with values >= 2^31 MSVC\'s int', got,
 _n = tempfile.mkdtemp()
 os.makedirs(os.path.join(_n, 'src')); os.makedirs(os.path.join(_n, 'build'))
 _json.dump({'units': [{'source': 'src/r.cpp', 'symbols': {
-    '_s_12': '0x011da904', '_s_iLastState': '0x011a081c', '_s_szName': '0x01080000', '_g_pInst': '0x011d96c0',   # FNVNX_ADDR_OK: STATIC1 reads the data window
-    '?g_pInst@@3PAUH@@A': '0x011d96c0', '?g_pInst@fnv_1@@3PAUH@@A': '0x011d96c0', '_s_kList': '0x011d0000'}}]},   # FNVNX_ADDR_OK: STATIC1 reads the data window
+    '_s_12': '0x011da904', '_s_iLastState': '0x011a081c', '_s_szName': '0x01080000', '_g_pInst': '0x011d96c0',
+    '?g_pInst@@3PAUH@@A': '0x011d96c0', '?g_pInst@fnv_1@@3PAUH@@A': '0x011d96c0', '_s_kList': '0x011d0000'}}]},
            open(os.path.join(_n, 'build', 'units.json'), 'w'))
 _src = ('struct H;\nstruct L { L(); };\nextern H* g_pInst;\nstatic H* g_pInst;\nnamespace fnv_1 {\nextern H* g_pInst;\n}\n'
         'namespace fnv_000012c0 {\nstatic float s_12;\nstatic int s_iLastState = 4;\n'
