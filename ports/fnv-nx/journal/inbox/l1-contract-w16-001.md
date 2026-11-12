@@ -20,3 +20,10 @@ claude/fnv-l1-contract-w15 was not pushed when I finished: nothing to merge from
 ## L1 line at my head
 `L1 red 8b9aff8ba135eec6a1d037e838eb192fc103f123 171.482s gates:23 over_budget:False` (the verdict's own id for the tree; commit under test 50036e3).
 Only red gate: selftests 49/51 (universe 51). Uncertified: test_argorder.py and test_guest.py. Cause is the environment of this cloud container, not the change: both fetch the guest compiler external by commit from the private fnv-nx-build (`fatal: could not read Username for 'https://github.com'`), which this session has no access to. A farm/orchestrator container with fnv-nx-build attached should show them green. Every other gate is green (admit 425/425, oracle 51/51, pure 35/35).
+
+## Update 2026-11-12: head dbfaefeb
+- Merged the trunk 0d8f1c89 and w5 c44308c0 (foreign-file rule). env.json is w5's (the trunk's lacks debs/wheel pins that w5's envcheck requires); my GL dev pins and the recomputed /usr/include are gone. gate_hostapi: evidence from the -dU side stage (unit.du), wrapper rule of the trunk kept.
+- Specdefaults is two-family (forced + target). Checked against the real msvcmodel reference b4057704 (c and c++, distro aarch64-linux-gnu-gcc-13): forced [-U_FORTIFY_SOURCE, -fno-stack-clash-protection, -fno-stack-protector], target [-fno-PIC, -fno-PIE]; a root stating -fPIE is green, one stating none is red "implicit target choice". No unwind-tables flag.
+- Generator `inputs` come only from the root itself or a root of class tool or headers (L6 w6).
+- Tests on this head, all pass: test_recipe, test_gates, test_fixtures, test_specdefaults, test_headers, test_gate_hostapi, test_unitstage, test_gate_machine, test_linkstrict (run locally with gmpy2/keystone/pefile removed from env.json, not committed; the container lacks them).
+- Open: item B (generated iat root, needs w15's link.roots), `configure` step kind.
