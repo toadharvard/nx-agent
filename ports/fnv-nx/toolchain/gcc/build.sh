@@ -145,7 +145,7 @@ if ! step gcc1; then
 		CXXFLAGS_FOR_TARGET="$TFLAGS -Wno-deprecated" LDFLAGS_FOR_TARGET="" \
 			../gcc-$GCC_VER/configure "${GCC_CONF[@]}"
 	fi
-	make -j1 configure-build configure-host   # sub-configures share config.cache: serial, then the parallel build
+	make -j1 $(sed -n 's/^\(configure-build-[a-z0-9-]*\):.*/\1/p' Makefile) configure-host   # sub-configures share config.cache: serial, then the parallel build
 	make -j"$JOBS" all-gcc
 	make install-gcc
 	cd ..; done_ gcc1
@@ -193,7 +193,7 @@ if ! step s2gcc1; then
 	rm -rf b-gcc13; mkdir -p b-gcc13; cd b-gcc13
 	CFLAGS_FOR_TARGET="$S2FLAGS" CXXFLAGS_FOR_TARGET="$S2FLAGS" LDFLAGS_FOR_TARGET="" \
 		../gcc-$GCC13_VER/configure "${GCC13_CONF[@]}"
-	make -j1 configure-build configure-host
+	make -j1 $(sed -n 's/^\(configure-build-[a-z0-9-]*\):.*/\1/p' Makefile) configure-host
 	make -j"$JOBS" all-gcc
 	make install-gcc
 	cd ..; done_ s2gcc1
