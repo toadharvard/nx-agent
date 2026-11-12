@@ -192,3 +192,12 @@ dispatcher text, in the key; the key contains `E` and the decode functions the f
 
 Cost: parsing the IR once (the IR sha already needs it), a dispatcher fold per distinct opcode/modrm.reg, and one hash per distinct closure; the closure
 shas are shared by the many shapes with one execute function.
+
+## 13. Open queue at the pause (w4, 2026-11-12), in the lead's order
+1. G2: imul|r32,m32,imm|69 timeouts (shapes 69050000000000000000, 69247200000000, 690c5600000000; 690000000000 proves with the default solver). Decide by a uniform solver rule, not a per-shape timeout.
+2. Census correction: pin = w7's next facts commit, universe from tools/lifted.py (b7b04616), DATA_CLASSES dropped; new branch l3b-lift/shapes-2.
+3. (B) selector output slot + pop/mov sreg Forms.
+4. (E) pinned queue artifact (QUEUE_REF).
+5. (K) closure-keyed certificates (§12), implement.
+6. Batched model-hunk IR bump: cmps order (G3), rol/ror count 0 and sar big-count CF (G1), enter + BCD six (D).
+Also open: G4 (shard 14/48, 27 keys fewer), (C) reached-site counts.
