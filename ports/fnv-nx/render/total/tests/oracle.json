@@ -2,6 +2,7 @@
  "format": "fnvnx-oracle/1",
  "tests": {
   "test_d3d9total.py": {
+   "net": true,
    "references": [
     {
      "anchor": "L1-L1589",

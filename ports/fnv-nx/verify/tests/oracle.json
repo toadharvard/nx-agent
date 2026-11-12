@@ -59,6 +59,7 @@
    ]
   },
   "test_boot_job.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## farm/boot_job.sh",
@@ -88,6 +89,7 @@
    ]
   },
   "test_bootgpu.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## verify/bootgpu.py",
@@ -240,6 +242,7 @@
    ]
   },
   "test_datamodel.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## verify/gate_datamodel.py",
@@ -250,6 +253,10 @@
    "subject": [
     "ports/fnv-nx/verify/gate_datamodel.py",
     "ports/fnv-nx/verify/recipe.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_plugins.py",
+    "ports/fnv-nx/verify/tests/test_guest.py"
    ]
   },
   "test_envcheck.py": {
@@ -541,6 +548,7 @@
    ]
   },
   "test_producers.py": {
+   "net": true,
    "references": [
     {
      "anchor": "## verify/producers.py",
@@ -551,6 +559,9 @@
    "subject": [
     "ports/fnv-nx/verify/producers.py",
     "ports/fnv-nx/verify/gate_linkstrict.py"
+   ],
+   "uses": [
+    "ports/fnv-nx/verify/tests/test_plugins.py"
    ]
   },
   "test_puregate.py": {
