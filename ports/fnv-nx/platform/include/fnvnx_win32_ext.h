@@ -257,8 +257,5 @@ void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook);
 
 #ifdef __cplusplus
 }
-/* the display mode for the renderer (display.cpp), C++ linkage as render/d3d9/dev/d3d9_adapter.h declares
- * `NxEnvProfile nx_env_profile();`: 1 docked (1080p), 0 handheld (720p); NxEnvProfile is an enum of that int */
-int nx_env_profile(void);
 #endif
 #endif
