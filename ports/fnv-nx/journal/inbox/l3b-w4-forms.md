@@ -145,3 +145,50 @@ Consequences: enter and the six BCD instructions are defined in master and take 
 model's flat-segment setting (A-FLAT) would need the same selectors-as-inputs treatment as push sreg; far call, ljmp ea, retf ca, salc are undefined in
 master too and stay escalated. mov sreg needs a read of the master mov defuns (not done). Not done in this note: mode coverage of the system rows and the
 exact master lines of load-far-pointer's descriptor path.
+
+## 12. (K) Design note: key a certificate by the closure of the IR, not the whole IR sha (w4)
+
+Today the certificate key is (shape key, shape_sha, IR sha256). Any model hunk (cmps order, rol count 0, ...) changes the IR sha and invalidates all
+~19,500 certificates, although a hunk in `x86-cmps` cannot change the semantics of `add`. The proposal: replace the IR sha by `closure_sha(enc)`,
+computed from the IR text only (no isla traces), and keep the IR sha as a coarse field of the record.
+
+**Rule.** For an encoding (its bytes, with prefix and modrm/sib structure fixed by the shape key):
+1. Parse the pinned IR (the Sail-to-IR output) into its top-level items: function definitions, `val` declarations, enum/struct/union types,
+   register declarations, let-bound constants.
+2. The dispatcher (`x86_fetch_decode_execute` and the opcode tables generated from inst-listing.lisp) is a decision tree over the opcode bytes. Fold it
+   on the encoding's literal prefix/opcode/modrm.reg bytes (the bytes the shape key fixes; the shape's field bytes stay symbolic and are never
+   inspected by the dispatcher by construction of the shape key, which is why they are fields). The result is the set `E` of execute-function entries
+   reachable under the encoding. This is constant folding on the IR dispatcher, not an execution.
+3. `C(enc)` = the least set containing `E`, the decode functions the folded path calls (prefix, modrm, sib, effective address, operand-size selection,
+   segment selection), closed under: calls (the IR has no indirect calls), reads of registers and globals (named registers; global lets), type definitions
+   used, and the undefined-value / flag helpers they call.
+4. `closure_sha(enc)` = sha256 of the concatenation, in name order, of the normalized text of every member of `C(enc)` (source line numbers and comments
+   stripped: the IR embeds locations, which a splice that keeps line counts would otherwise not hide) plus the model configuration that is in every key
+   today: isla version pin, the `-C` config, the `-I` initial constraints, `SEG`/`SEG_FREE`, `FAULT_OK`, segment_bases splice contents.
+5. The certificate key becomes (shape key, shape_sha, closure_sha). A hunk invalidates exactly the shapes whose `C(enc)` contains a changed definition.
+
+**Soundness (why nothing outside `C(enc)` can change the result).** The model post-state of the encoding is a function of the IR program
+restricted to what the dispatcher folds to and everything that program can reach. In Sail/IR there are four channels from one function to another:
+(a) calls: static names, so reachability is complete; (b) registers: a function reads or writes only registers it names, and a name is a static token,
+so the read/write set of `C(enc)` is the union of its members' names; a register changed by another function only matters through a write that is
+itself in `C(enc)`, or through the initial state, which is the configuration hashed above; (c) global lets and types: referenced by name; (d) the
+undefined-flag oracle: in isla `undefined` is a fresh symbolic value per occurrence, so it is a property of the function text, not of other functions;
+the `model_terms_sha` already covers the isla side. Decoder tables: the opcode tables are part of the dispatcher, which step 2 folds, so a change in the
+table entry of another opcode changes the dispatcher text but not the folded result for this encoding. The claim needs the folded result, not the
+dispatcher text, in the key; the key contains `E` and the decode functions the fold touches, and not the whole dispatcher.
+
+**What would break it.**
+- If step 2 is a heuristic (a regex on names) instead of a constant-folding of the dispatcher semantics: a wrongly small `C` silently keeps stale
+  certificates. It must be a fold with an explicit "unfoldable -> keep the whole dispatcher in C(enc)" fallback, which is a rule (over-approximation), not a skip.
+- Any indirect or dynamic reference (a name built at run time, a function in a table of values): none in the IR today; a checker must assert that no
+  function value escapes (static, from the IR).
+- Isla-side changes (version, config, loop unrolling, the SEG splice) that alter the result without changing IR text: they are in the key (step 4).
+- Source-position-dependent output: strip locations in the normalization or the key changes on harmless splices.
+- Soundness of the rule itself is a proof obligation, so test it as a differential, not a decision: for each real hunk, the set of shapes whose
+  isla-trace `model_terms_sha` changed must be a subset of the shapes the closure rule invalidates (the converse is allowed: over-invalidation).
+  A shape that changed but whose closure_sha did not is a rule bug and makes the build red.
+- A new ASSUMPTIONS id would be needed only if the closure rule is not a theorem about the IR; as above it is a static program-slicing argument over the pinned
+  IR, so it adds no assumption beyond ASM-009 (the IR is the model).
+
+Cost: parsing the IR once (the IR sha already needs it), a dispatcher fold per distinct opcode/modrm.reg, and one hash per distinct closure; the closure
+shas are shared by the many shapes with one execute function.
