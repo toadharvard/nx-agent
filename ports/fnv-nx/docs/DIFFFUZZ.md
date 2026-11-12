@@ -226,7 +226,7 @@ indirect call: 14,448 of 66,141 keys. Test: `tests/s13/test_d15.py` (9 checks).
 **difffuzz-16 (thread-local variables; catalog version 2).** The 835 functions with a native object the harness
 did not fuzz on link c0d6c71516f6 (coverage 98.76 %) all had SECREL relocations, 1,994 of them to 32 MSVC
 `__declspec(thread)` variables (memory contexts, allocator tags, per-thread script data). units.json gives those
-variables image addresses in the exe's .tls template, which starts at 0x01272000 (`?__tls_index@@3PAEA`), so a SECREL
+variables image addresses in the exe's .tls template, which starts at <va> (`?__tls_index@@3PAEA`), so a SECREL
 is the variable's offset from there (`coffobj.TLS_IMAGE_START`). On the oracle, fs:[0x2c] (`__tls_array`) points to a
 slot array in the TEB page whose slot 0 is a zeroed private block (`x86emu.TLS_*`, not compared, like the native
 `tpidr_el0` block), and `__tls_index` (0x0126fd98) is pinned to 0. Catalog rows carry `cv`; fuzz_job rebuilds a
