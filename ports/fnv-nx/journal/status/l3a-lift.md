@@ -355,3 +355,9 @@ Update 2026-11-12, at 698adefb:
   - w14 merge test 7424c1f5b: test_gate_lift all pass, flags 9/9, order and eh OK. gate_assumptions 132/143. It is superseded by int-l3a.
 - Being deleted on int3 (doubles): lift/proof/tests/test_formgate.py, test_fpexact.py and fakeext.py. test_rtroot will read the lifted flags through recipe.py.
 - Reported to L1: the run_tool key hashes only the gate file, not its import closure (cli.py), so a stale cached result is possible. Proposed rule: the key covers the tool root's tree.
+
+## 2026-11-12 09:29
+- Item 16 (w8): claude/fnv-l3a-lift-w8-t16e 6810a4e9f = t16c + disp2 on int-l3a 2d215f16a.
+  - recipe.py check: lifted test roots 3/3 valid (citest, imptest, msvcrttest); native roots 0/3, because link.script needs w14-src2 445e551d.
+  - w20 is re-merging int-l3a with 445e551d and the new int3 head. lift/bridges is in progress on t16e.
+- L3b agrees to the deletion of the 3 lift double tests. Their 83 tests (61 double sites) are being rewritten onto the real files on claude/fnv-l3b-lift-w2g-rewrite; that waits on L2 649a2960.
