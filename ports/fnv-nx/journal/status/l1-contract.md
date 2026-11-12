@@ -844,3 +844,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - L2 w4 gcstress 51f73739: the rule is agreed.
   - It must be expressed through w15c's single variant mechanism before it goes to the trunk.
   - Byte equality is checked over every unit built in the variant.
+- L5 w9: platform/manifest moves to ports/fnv-nx/manifest as its own tool root. Roots do not nest, and no carve-out mechanism is added.
