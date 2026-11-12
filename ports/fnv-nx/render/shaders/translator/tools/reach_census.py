@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """Reachability census of the translator root (measurement tool, not a build).
-usage: reach_census.py OBJDIR LD NM OUT.tsv
+usage: reach_census.py OBJDIR LD NM OUT.tsv [mojoshader_internal.h]
 Roots: the functions declared in include/fnvnx_shaders.h that some object defines. Graph: the relocation graph of the recipe's
 -ffunction-sections/-fdata-sections objects, i.e. `ld --gc-sections --print-gc-sections` with -u per root and no entry.
+With the header: every `#ifndef SUPPORT_PROFILE_*` macro of mojoshader_internal.h must be set explicitly in build.json flags.c (a new upstream
+profile cannot default to 1 unseen), else exit 1.
 Writes OUT.tsv: object<TAB>section<TAB>reached|collected. Prints the totals."""
 import os, re, subprocess, sys
 objdir, ld, nm, out = sys.argv[1:5]
+if len(sys.argv) > 5:
+    import json
+    macros = set(re.findall(r"#ifndef (SUPPORT_PROFILE_\w+)", open(sys.argv[5]).read()))
+    flags = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build.json")))["flags"]["c"]
+    setm = {f[2:].split("=")[0] for f in flags if f.startswith("-DSUPPORT_PROFILE_")}
+    if macros - setm: sys.exit("profile macros not set in build.json: %s" % sorted(macros - setm))
+    print("profile macros", len(macros), "all set; on:", sorted(m for m in macros if "-D%s=1" % m in flags))
 here = os.path.dirname(os.path.abspath(__file__))
 hdr = open(os.path.join(here, "..", "include", "fnvnx_shaders.h")).read()
 hdr = re.sub(r"/\*.*?\*/", "", hdr, flags=re.S)

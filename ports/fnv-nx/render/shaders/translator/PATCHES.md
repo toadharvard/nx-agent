@@ -24,3 +24,8 @@ and writes reach.tsv; `tools/prune_collected.py` deletes a file with no reached 
 collected function that the remaining code still calls (the compiler inlined all calls; the out-of-line copy is unreferenced) stays: the loop
 adds each undefined symbol of the pruned objects (a build fact) to the keep list until none is left (3 rounds). Census of the result:
 589 non-empty sections, 12 collected (the 12 inlined-only helpers). Measurement only, the build is `recipe.py`.
+
+Profile set (rule): every `SUPPORT_PROFILE_*` macro that `mojoshader_internal.h` defaults with `#ifndef` is set explicitly in build.json (13 today; `reach_census.py`
+checks this against the header, so a new upstream profile cannot default to 1 unseen). It is 1 exactly for the profiles the ABI produces and what they need to
+compile: GLSLDK (the profile `backend_mojoshader.c` requests) and its dependency chain GLSLES3, GLSLES, GLSL; 0 for all others (D3D, BYTECODE, HLSL, GLSL120,
+ARB1, ARB1_NV, METAL, SPIRV, GLSPIRV). Census after the prune (7 objects): 493 non-empty sections, 12 collected (inlined-only helpers, see above).
