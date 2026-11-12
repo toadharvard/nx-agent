@@ -9,7 +9,8 @@
     "ports/fnv-nx/verify/gate_pure.py",
     "ports/fnv-nx/contract",
     "ports/fnv-nx/link",
-    "ports/fnv-nx/rules"
+    "ports/fnv-nx/rules",
+    "ports/fnv-nx/lift"
    ],
    "result": "pure.json"
   },

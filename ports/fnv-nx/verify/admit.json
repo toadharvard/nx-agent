@@ -84,27 +84,6 @@
    ]
   },
   {
-   "path": "ports/fnv-nx/lift/rt/rcpref.h",
-   "class": "tool",
-   "gates": [
-    "selftests"
-   ]
-  },
-  {
-   "path": "ports/fnv-nx/lift/rt/rcptab.c",
-   "class": "tool",
-   "gates": [
-    "selftests"
-   ]
-  },
-  {
-   "path": "ports/fnv-nx/lift/rt/rcptab.cert.json",
-   "class": "tool",
-   "gates": [
-    "selftests"
-   ]
-  },
-  {
    "path": "ports/fnv-nx/lift/rt/x87.h",
    "class": "tool",
    "gates": [

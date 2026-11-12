@@ -1,6 +1,6 @@
-"""Tests of proof/gate_fpexact.py on synthetic objects (assembled / compiled here with aarch64-linux-gnu-as and -g++; nothing derived from
-game data): the certificate check, the reciprocal-estimate rule, the float -> integer rule (the GCC plugin toolchain/f2i_check/fnvnx_f2i_check.cc is
-built here with the host g++ against gcc-13-plugin-dev-aarch64-linux-gnu), the farm program tools/rcpcert.c's refusal on a non-reference CPU."""
+"""Tests of proof/gate_fpexact.py on synthetic objects (assembled here with aarch64-linux-gnu-as; nothing derived from game data): the certificate
+check on a synthetic table root, the reciprocal-estimate rule, the float -> integer rule on result files of the format fnvnx-f2i/1 (the plugin that
+writes them is L2's and is tested there)."""
 import atexit
 import hashlib
 import itertools
@@ -24,10 +24,15 @@ from proof import gate_fpexact as G
 WORK = tempfile.mkdtemp(prefix='fpexact-test-')       # the fixtures are written below it; removed at exit
 atexit.register(shutil.rmtree, WORK, ignore_errors=True)
 REPO = os.path.normpath(os.path.join(LIFT, '..', '..', '..'))    # this checkout
-PLUGIN_INC = os.environ.get('FNVNX_PLUGIN_INC', '/usr/lib/gcc-cross/aarch64-linux-gnu/13/plugin/include')   # declared input: gcc-13-plugin-dev-aarch64-linux-gnu
 _SEQ = itertools.count()
-NOSITES = json.dumps({'format': 'fnvnx-f2i/1', 'findings': [], 'helpers': [], 'sites': 0, 'unit': 'x'})
-CXX = ['aarch64-linux-gnu-g++', '-std=gnu++17', '-O2', '-c', '-w', '-mabi=ilp32', '-ffreestanding', '-fno-exceptions']
+
+
+def f2i(unit, findings=(), sites=0, helpers=()):
+    return json.dumps({'format': 'fnvnx-f2i/1', 'unit': unit, 'findings': list(findings), 'helpers': list(helpers), 'sites': sites})
+
+
+def nosites(unit):
+    return f2i(unit)
 
 
 class workdir:
@@ -64,34 +69,19 @@ def asm_object(d, name, text):
     return o
 
 
-def build_plugin(d):
-    so = os.path.join(d, 'fnvnx_f2i_check.so')
-    subprocess.check_call(['g++', '-shared', '-fPIC', '-fno-rtti', '-O1', '-std=gnu++17', '-I' + PLUGIN_INC, os.path.join(LIFT, '..', 'toolchain', 'f2i_check', 'fnvnx_f2i_check.cc'), '-o', so])
-    return so
-
-
-def cxx_object(d, name, src, so):
-    """compile src with the plugin; the result file lands next to the object"""
-    c = os.path.join(d, name + '.cpp')
-    put(c, src)
-    o = os.path.join(d, name + '.o')
-    subprocess.check_call(CXX + ['-fplugin=' + so, '-fplugin-arg-fnvnx_f2i_check-out=' + o + '.f2i.json', c, '-o', o])
-    return o
-
-
 class Cert(unittest.TestCase):
     def fake_lift(self, d, cert):
         rt = os.path.join(d, 'lift', 'rt')
         os.makedirs(rt)
-        for f in ('rcpref.h', 'rcptab.c'):
-            shutil.copyfile(os.path.join(LIFT, 'rt', f), os.path.join(rt, f))
+        put(rt + '/rcpref.h', '#define FNVL_RCP_REF_VENDOR "GenuineIntel"\n#define FNVL_RCP_REF_FAMILY 6\n#define FNVL_RCP_REF_MODEL 207\n#define FNVL_RCP_REF_STEPPING 2\n')
+        put(rt + '/rcptab.c', '/* synthetic table */\n')
         if cert is not None:
             c = {'cpu': {'family': 6, 'model': 207, 'stepping': 2, 'vendor': 'GenuineIntel'}, 'format': 'fnvnx-rcpcert/1',
                  'header_sha256': G.sha256_file(rt + '/rcpref.h'), 'mismatches': 0, 'rcp_stream_sha256': '0' * 64,
                  'rsqrt_stream_sha256': '1' * 64, 'source_sha256': G.sha256_file(rt + '/rcptab.c')}
             c.update(cert)
             put(rt + '/rcptab.cert.json', json.dumps(c))
-        return os.path.join(d, 'lift')
+        return rt
 
     def test_good(self):
         with workdir() as d:
@@ -106,7 +96,7 @@ class Cert(unittest.TestCase):
     def test_stale_source(self):
         with workdir() as d:
             lift = self.fake_lift(d, {})
-            put(lift + '/rt/rcptab.c', get(lift + '/rt/rcptab.c') + '\n')
+            put(lift + '/rcptab.c', get(lift + '/rcptab.c') + '\n')
             r = G.check_cert(lift)
             self.assertEqual(len(r), 1)
             self.assertIn('source_sha256', r[0])
@@ -114,7 +104,7 @@ class Cert(unittest.TestCase):
     def test_stale_header(self):
         with workdir() as d:
             lift = self.fake_lift(d, {})
-            put(lift + '/rt/rcpref.h', get(lift + '/rt/rcpref.h') + '\n')
+            put(lift + '/rcpref.h', get(lift + '/rcpref.h') + '\n')
             self.assertTrue(any('header_sha256' in x for x in G.check_cert(lift)))
 
     def test_mismatches(self):
@@ -135,11 +125,11 @@ class Cert(unittest.TestCase):
         """the identity compared is the header's constant: change the header (and the cert's header hash with it) and the old cpu is refused"""
         with workdir() as d:
             lift = self.fake_lift(d, {})
-            p = lift + '/rt/rcpref.h'
+            p = lift + '/rcpref.h'
             put(p, get(p).replace('FNVL_RCP_REF_MODEL 207', 'FNVL_RCP_REF_MODEL 208'))
-            c = json.loads(get(lift + '/rt/rcptab.cert.json'))
+            c = json.loads(get(lift + '/rcptab.cert.json'))
             c['header_sha256'] = G.sha256_file(p)
-            put(lift + '/rt/rcptab.cert.json', json.dumps(c))
+            put(lift + '/rcptab.cert.json', json.dumps(c))
             r = G.check_cert(lift)
             self.assertEqual(len(r), 1)
             self.assertIn('not the reference', r[0])
@@ -147,34 +137,16 @@ class Cert(unittest.TestCase):
     def test_malformed(self):
         with workdir() as d:
             lift = self.fake_lift(d, {})
-            put(lift + '/rt/rcptab.cert.json', '{"format": "fnvnx-rcpcert/1"}')
+            put(lift + '/rcptab.cert.json', '{"format": "fnvnx-rcpcert/1"}')
             self.assertIn('malformed', G.check_cert(lift)[0])
-            put(lift + '/rt/rcptab.cert.json', 'not json')
+            put(lift + '/rcptab.cert.json', 'not json')
             self.assertIn('malformed', G.check_cert(lift)[0])
 
     def test_header_must_define_four(self):
         with workdir() as d:
             lift = self.fake_lift(d, {})
-            put(lift + '/rt/rcpref.h', '#define FNVL_RCP_REF_FAMILY 6\n')
+            put(lift + '/rcpref.h', '#define FNVL_RCP_REF_FAMILY 6\n')
             self.assertIn('rcpref.h', G.check_cert(lift)[0])
-
-    def test_the_pinned_certificate(self):
-        """the certificate committed in this tree is valid for this tree's sources"""
-        self.assertEqual(G.check_cert(LIFT), [])
-
-    def test_farm_program_refuses_other_cpu(self):
-        """tools/rcpcert.c built against a header that names another CPU exits 2 and writes no certificate"""
-        with workdir() as d:
-            os.makedirs(d + '/tools')
-            os.makedirs(d + '/rt')
-            shutil.copyfile(os.path.join(LIFT, 'tools', 'rcpcert.c'), d + '/tools/rcpcert.c')
-            shutil.copyfile(os.path.join(LIFT, 'rt', 'rcptab.c'), d + '/rt/rcptab.c')
-            h = get(os.path.join(LIFT, 'rt', 'rcpref.h')).replace('FNVL_RCP_REF_STEPPING 2', 'FNVL_RCP_REF_STEPPING 15').replace('"GenuineIntel"', '"NoSuchVendor"')
-            put(d + '/rt/rcpref.h', h)
-            subprocess.check_call(['gcc', '-O2', '-msse2', '-pthread', '-o', d + '/c', d + '/tools/rcpcert.c', d + '/rt/rcptab.c'])
-            r = subprocess.run([d + '/c', '0' * 64, '0' * 64, d + '/out.json'], capture_output=True, text=True)
-            self.assertEqual(r.returncode, 2)
-            self.assertFalse(os.path.exists(d + '/out.json'))
 
 
 class Recip(unittest.TestCase):
@@ -210,133 +182,87 @@ class Recip(unittest.TestCase):
         r = self.scan('b 1f\n.word 0x0f0f0f0f\n1:\nfrecpe s0, s1')
         self.assertEqual([m for _, m in r['recip']], ['frecpe'])
 
+    def fake_rt(self, d):
+        return Cert().fake_lift(d, {})
+
     def test_gate_item_red(self):
         with workdir() as d:
             os.makedirs(d + '/objs/sub')
             asm_object(d + '/objs', 'ok', 'fadd s0, s1, s2')
             asm_object(d + '/objs/sub', 'bad', 'frsqrte s0, s1')
             for n in ('ok', 'sub/bad'):
-                put(d + '/objs/%s.o.f2i.json' % n, NOSITES)
-            items = G.judge_objects('R', [('ok.o', d + '/objs/ok.o'), ('sub/bad.o', d + '/objs/sub/bad.o')], LIFT, None)
-            self.assertEqual(sorted(k for k, v in items.items() if v and k != 'R:rcpcert'), ['rcp:R/sub/bad.o'])
-            self.assertEqual(sorted(items), ['R:forms', 'R:rcpcert', 'f2i:R/ok.o', 'f2i:R/sub/bad.o', 'rcp:R/ok.o', 'rcp:R/sub/bad.o'])
+                put(d + '/objs/%s.o.f2i.json' % n, nosites(n + '.o'))
+            items = G.judge_objects('R', [('ok.o', d + '/objs/ok.o'), ('sub/bad.o', d + '/objs/sub/bad.o')], None, None)
+            self.assertEqual(sorted(k for k, v in items.items() if v), ['rcp:R/sub/bad.o'])
+            self.assertEqual(sorted(items), ['R:forms', 'f2i:R/ok.o', 'f2i:R/sub/bad.o', 'rcp:R/ok.o', 'rcp:R/sub/bad.o'])
+            with_table = G.judge_objects('R', [], self.fake_rt(d), None)
+            self.assertEqual(sorted(with_table), ['R:forms', 'R:rcpcert'])
 
 
 class F2I(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        os.makedirs(WORK, exist_ok=True)
-        cls.pdir = os.path.join(WORK, 'fpexact_plugin')
-        shutil.rmtree(cls.pdir, ignore_errors=True)
-        os.makedirs(cls.pdir)
-        cls.so = build_plugin(cls.pdir)
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.pdir)
-
-    HELPER = ('#define F2I __attribute__((fnvnx_f2i))\n'
-              'typedef unsigned u32; typedef int s32;\n'
-              'F2I static inline u32 conv(double v){ double r=__builtin_trunc(v); if(!(r>=-2147483648.0&&r<=2147483647.0)) return 0x80000000u; return (u32)(s32)r; }\n'
-              'extern "C" u32 use1(double v){ return conv(v); }\n')
-
-    def judge(self, name, src):
+    def judge(self, unit, body, asm_text='fadd s0, s1, s2'):
         with workdir() as d:
-            o = cxx_object(d, name, src, self.so)
-            res = G.read_f2i(o)[0]
-            r = G.judge_object(name + '.o', o)
-            return res, r['f2i:' + name + '.o'], r['rcp:' + name + '.o']
+            o = asm_object(d, 'o', asm_text)
+            if body is not None:
+                put(o + '.f2i.json', body)
+            r = G.judge_object(unit, o, unit=unit)
+            return r['f2i:' + unit], r['rcp:' + unit]
 
-    def test_helper_only_is_green(self):
-        res, f2i, rcp = self.judge('good', self.HELPER)
-        self.assertEqual((f2i, rcp), ([], []))
-        self.assertEqual(res['helpers'], ['u32 conv(double)'])
-        self.assertGreater(res['sites'], 0)
+    def test_no_findings_is_green(self):
+        self.assertEqual(self.judge('a.o', f2i('a.o', sites=2, helpers=['u32 conv(double)'])), ([], []))
 
-    def test_bare_cast_is_red(self):
-        res, f2i, _ = self.judge('bare', self.HELPER + 'extern "C" s32 bare(double v){ return (s32)v; }\n')
-        self.assertEqual(len(f2i), 1)
-        self.assertIn('conv outside', f2i[0])
-        self.assertIn('bare', f2i[0])
+    def test_every_finding_kind_is_red(self):
+        for kind in ('conv', 'builtin', 'asm'):
+            f2, _ = self.judge('a.o', f2i('a.o', [{'function': 'bare', 'file': 'x.cpp', 'line': 7, 'kind': kind}], 1))
+            self.assertEqual(len(f2), 1, kind)
+            self.assertIn('%s outside' % kind, f2[0])
+            self.assertIn('bare', f2[0])
 
-    def test_implicit_and_compound_conversions_are_red(self):
-        _, f2i, _ = self.judge('impl', 'extern "C" int a(double v){ int r = v; return r; }\nextern "C" int b(double v, int x){ x += v; return x; }\n'
-                               'extern "C" long long c(float v){ return v; }\n')
-        self.assertEqual(len(f2i), 3)
+    def test_one_red_line_per_finding(self):
+        fs = [{'function': 'f%d' % i, 'file': 'x.cpp', 'line': i, 'kind': 'conv'} for i in range(3)]
+        self.assertEqual(len(self.judge('a.o', f2i('a.o', fs, 3))[0]), 3)
 
-    def test_rounding_builtins_are_red(self):
-        _, f2i, _ = self.judge('rnd', 'extern "C" long a(float v){ return __builtin_lrintf(v); }\nextern "C" long long b(double v){ return __builtin_llround(v); }\n'
-                               'extern "C" int c(double v){ return __builtin_ifloor(v); }\n')
-        self.assertEqual(len(f2i), 3)
-        self.assertTrue(all('builtin outside' in x for x in f2i))
-
-    def test_vector_conversion_is_red(self):
-        _, f2i, _ = self.judge('vec', 'typedef float v4 __attribute__((vector_size(16))); typedef int i4 __attribute__((vector_size(16)));\n'
-                               'extern "C" i4 a(v4 v){ return __builtin_convertvector(v, i4); }\n')
-        self.assertEqual(len(f2i), 1)
-
-    def test_asm_with_float_operand_is_red_and_plain_asm_is_not(self):
-        _, f2i, _ = self.judge('asm', 'extern "C" int a(float v){ int r; __asm__("fcvtzs %w0, %s1" : "=r"(r) : "w"(v)); return r; }\n'
-                               'extern "C" unsigned b(){ unsigned r; __asm__ volatile("mrs %0, fpcr" : "=r"(r)); return r; }\n'
-                               'extern "C" void c(){ __asm__ volatile("yield"); }\n')
-        self.assertEqual(len(f2i), 2)      # the asm with the float operand, and (3b) its FCVT in a unit with no conversion site
-        self.assertTrue(any('asm outside' in x for x in f2i) and any('no conversion site' in x for x in f2i))
-        self.assertEqual(sum('asm outside' in x for x in f2i), 1)
-
-    def test_inlined_helper_cannot_hide_a_bare_site(self):
-        """the helper inlined into a caller that also converts bare: only the bare site is a finding, at its own line"""
-        _, f2i, _ = self.judge('mix', self.HELPER + 'extern "C" u32 both(double v, double w){ return conv(v) + (u32)(s32)w; }\n')
-        self.assertEqual(len(f2i), 1)
-        self.assertIn('both', f2i[0])
-
-    def test_non_conversions_are_green(self):
-        _, f2i, rcp = self.judge('plain', 'extern "C" double a(int v){ return v; }\nextern "C" float b(double v){ return (float)v; }\n'
-                                 'extern "C" double c(double v){ return __builtin_trunc(v) + __builtin_floor(v); }\nextern "C" int d(double v){ return v < 3.0; }\n')
-        self.assertEqual((f2i, rcp), ([], []))
+    def test_unit_field_must_equal_the_unit(self):
+        f2, _ = self.judge('a.o', f2i('b.o'))
+        self.assertEqual(len(f2), 1)
+        self.assertIn("names the unit 'b.o', not 'a.o'", f2[0])
 
     def test_missing_result_file_is_red(self):
-        with workdir() as d:
-            o = asm_object(d, 'noresult', 'fadd s0, s1, s2')
-            f2i = G.judge_object('noresult.o', o)['f2i:noresult.o']
-            self.assertEqual(len(f2i), 1)
-            self.assertIn('no result file', f2i[0])
+        f2, _ = self.judge('a.o', None)
+        self.assertEqual(len(f2), 1)
+        self.assertIn('no result file', f2[0])
 
     def test_malformed_result_file_is_red(self):
-        with workdir() as d:
-            o = asm_object(d, 'bad', 'fadd s0, s1, s2')
-            for body in ('not json', '{"format": "fnvnx-f2i/1"}', '{"format": "other", "findings": [], "sites": 0, "helpers": []}'):
-                put(o + '.f2i.json', body)
-                f2i = G.judge_object('bad.o', o)['f2i:bad.o']
-                self.assertEqual(len(f2i), 1, body)
-                self.assertIn('malformed', f2i[0])
+        for body in ('not json', '{"format": "fnvnx-f2i/1"}', '{"format": "other", "findings": [], "sites": 0, "helpers": [], "unit": "a.o"}',
+                     '{"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}',
+                     '{"format": "fnvnx-f2i/1", "findings": [{"kind": "conv"}], "sites": 1, "helpers": [], "unit": "a.o"}'):
+            f2, _ = self.judge('a.o', body)
+            self.assertEqual(len(f2), 1, body)
+            self.assertIn('malformed', f2[0])
 
     def test_bare_fcvtzs_without_a_source_site_is_red(self):
         """3b: a conversion instruction in an object whose unit has no conversion site (an asm without FP operands, a .S file)"""
         for ins in ('fcvtzs w0, d0', 'fcvtzu x0, s1', 'fcvtns w0, s0', 'fcvtmu w0, d0', 'fcvtps x0, d0', 'fcvtas w0, s0', 'fcvtzs v0.4s, v1.4s', 'fcvtzs w0, d0, #3'):
-            with workdir() as d:
-                o = asm_object(d, 'fc', ins)
-                put(o + '.f2i.json', NOSITES)
-                f2i = G.judge_object('fc.o', o)['f2i:fc.o']
-                self.assertEqual(len(f2i), 1, ins)
-                self.assertIn('no conversion site', f2i[0])
+            f2, _ = self.judge('fc.o', nosites('fc.o'), ins)
+            self.assertEqual(len(f2), 1, ins)
+            self.assertIn('no conversion site', f2[0])
 
     def test_fjcvtzs(self):
-        with workdir() as d:
-            o = asm_object(d, 'fj', '.arch armv8.3-a\nfjcvtzs w0, d0')
-            put(o + '.f2i.json', NOSITES)
-            self.assertEqual(len(G.judge_object('fj.o', o)['f2i:fj.o']), 1)
+        f2, _ = self.judge('fj.o', nosites('fj.o'), '.arch armv8.3-a\nfjcvtzs w0, d0')
+        self.assertEqual(len(f2), 1)
 
     def test_conversion_instruction_with_a_site_passes_3b(self):
         with workdir() as d:
-            o = cxx_object(d, 'ok3b', self.HELPER, self.so)
-            self.assertTrue(G.scan_object(o)['fcvt'])       # the object really holds the conversion instruction the helper's site produced
-            self.assertEqual(G.judge_object('ok3b.o', o)['f2i:ok3b.o'], [])
+            o = asm_object(d, 'ok3b', 'fcvtzs w0, d0')
+            put(o + '.f2i.json', f2i('ok3b.o', sites=1, helpers=['conv']))
+            self.assertTrue(G.scan_object(o)['fcvt'])
+            self.assertEqual(G.judge_object('ok3b.o', o, unit='ok3b.o')['f2i:ok3b.o'], [])
 
     def test_undecodable_bytes_make_f2i_red_too(self):
         with workdir() as d:
             o = asm_object(d, 'u', '.inst 0x0f0f0f0f')
-            put(o + '.f2i.json', NOSITES)
-            r = G.judge_object('u.o', o)
+            put(o + '.f2i.json', nosites('u.o'))
+            r = G.judge_object('u.o', o, unit='u.o')
             self.assertEqual(len(r['f2i:u.o']), 1)
             self.assertEqual(len(r['rcp:u.o']), 1)
 
@@ -349,16 +275,16 @@ class Assembler(unittest.TestCase):
             self.assertEqual(len(G.judge_object('R/a.c', o)['f2i:R/a.c']), 1)           # a C unit without the file is a finding
             c = asm_object(d, 'c', 'fcvtzs w0, s0')
             self.assertEqual(len(G.judge_object('R/c.S', c, asm=True)['f2i:R/c.S']), 1)  # 3b: an instruction without a source site
-            self.assertEqual([k for k, v in G.judge_objects('R', [('a.S', o), ('a.c', o)], LIFT, None).items() if v and k != 'R:rcpcert'], ['f2i:R/a.c'])
+            self.assertEqual([k for k, v in G.judge_objects('R', [('a.S', o), ('a.c', o)], None, None).items() if v and k != 'R:rcpcert'], ['f2i:R/a.c'])
 
 
 class Dependency(unittest.TestCase):
     def test_forms_not_green_makes_the_item_red(self):
         with workdir() as d:
             o = asm_object(d, 'ok', 'fadd s0, s1, s2')
-            put(o + '.f2i.json', NOSITES)
-            self.assertEqual(G.judge_objects('R', [('ok.o', o)], LIFT, None)['R:forms'], [])
-            self.assertEqual(G.judge_objects('R', [('ok.o', o)], LIFT, 'forms: not green: x')['R:forms'], ['forms: not green: x'])
+            put(o + '.f2i.json', nosites('ok.o'))
+            self.assertEqual(G.judge_objects('R', [('ok.o', o)], None, None)['R:forms'], [])
+            self.assertEqual(G.judge_objects('R', [('ok.o', o)], None, 'forms: not green: x')['R:forms'], ['forms: not green: x'])
 
     def test_forms_reason_follows_the_gate_forms(self):
         with mock.patch.object(G.formgate, 'judge', return_value=(3, 3, [], 'fine')):
@@ -374,16 +300,16 @@ class Dependency(unittest.TestCase):
 
 class Roots(unittest.TestCase):
     """judge_root with the recipe's build replaced by a given objects.json result (the build needs the sandbox and the compiler mirror)"""
-    def judge(self, d, res, forms=None):
+    def judge(self, d, res, forms=None, repo='.'):
         with mock.patch.object(G.recipe, 'load_recipe', return_value={}), mock.patch.object(G.recipe, 'load_admit', return_value={}), \
                 mock.patch.object(G.gate_build, 'ensure', return_value=(res, d)):
-            return G.judge_root('X', '.', d, LIFT, lambda: forms)
+            return G.judge_root('X', repo, d, lambda: forms)
 
     def test_green(self):
         with workdir() as d:
             o = asm_object(d, 'a', 'fadd s0, s1, s2')
-            put(o + '.f2i.json', NOSITES)
-            self.assertEqual(self.judge(d, {'status': 'green', 'objects': [{'unit': 'a.o', 'object': o}]}), (4, 4, [], ''))
+            put(o + '.f2i.json', nosites('a.o'))
+            self.assertEqual(self.judge(d, {'status': 'green', 'objects': [{'unit': 'a.o', 'object': o}]}), (3, 3, [], ''))
 
     def test_red_items_sorted_and_named(self):
         with workdir() as d:
@@ -393,7 +319,21 @@ class Roots(unittest.TestCase):
                 o = asm_object(d, n.replace('/', '_'), 'frecpe s0, s1')
                 objs.append({'unit': n + '.o', 'object': o})
             r = self.judge(d, {'status': 'green', 'objects': objs}, forms='forms: not green: y')
-            self.assertEqual(r[:3], (6, 1, ['X:forms', 'f2i:X/a.o', 'f2i:X/z/b.o', 'rcp:X/a.o', 'rcp:X/z/b.o']))
+            self.assertEqual(r[:3], (5, 0, ['X:forms', 'f2i:X/a.o', 'f2i:X/z/b.o', 'rcp:X/a.o', 'rcp:X/z/b.o']))
+
+    def test_root_holding_the_table_gets_the_certificate_item(self):
+        """the item exists iff the root's directory holds rcptab.c, and its files are the root's own"""
+        with workdir() as d:
+            o = asm_object(d, 'a', 'fadd s0, s1, s2')
+            put(o + '.f2i.json', nosites('a.o'))
+            res = {'status': 'green', 'objects': [{'unit': 'a.o', 'object': o}]}
+            os.makedirs(d + '/repo')
+            rt = Cert().fake_lift(d + '/repo', {})
+            os.rename(rt, d + '/repo/X')
+            self.assertEqual(self.judge(d, res, repo=d + '/repo'), (4, 4, [], ''))
+            os.remove(d + '/repo/X/rcptab.cert.json')
+            r = self.judge(d, res, repo=d + '/repo')
+            self.assertEqual(r[:3], (4, 3, ['X:rcpcert']))
 
     def test_build_red_is_one_input_item(self):
         with workdir() as d:
