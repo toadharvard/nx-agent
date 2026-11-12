@@ -3,7 +3,7 @@
     citest.py [--work DIR] [--count]
 The guest entries (compiled with the lifted-code flags, test/instest.py FLAGS without the test-only flag) are driven DIRECTLY from a native `test_main` (a C++ driver compiled with the same flags: guest registers in x19..x27, `c` = struct cpu):
 for every case it fills the x87 stack through the runtime's own carriers (dyn_push), points the guest esp at a return address, calls the entry, and records stack depth, ST0..ST2, errno, the x87 exception bits,
-esp and c->ra. All of it runs as AArch64 ILP32 under Unicorn. The platform's `_errno` is a test double (a plain int, preset to 7 so "unchanged" is visible); nothing else of the platform is used.
+esp and c->ra. All of it runs as AArch64 ILP32 under Unicorn. errno is read through the platform's own `_errno` (preset to 7 so "unchanged" is visible); the test defines no platform or libc symbol, so it links only with the platform root (BLOCKED, exit 3, until then).
 Checks per entry: operand order of _CIatan2 / _CIpow / _CIfmod (ST1 first), stack depth before / after (one operand: unchanged; two operands: one less; deeper entries intact; full 8-deep stack), the value
 (correctly rounded vs MPFR / exact vs integer arithmetic) and the x87 exception bits, c->ra = the pushed return address and esp += 4, and the errno rule of rt/msvcrt_ci.cc for domain / range errors.
 --count prints the instructions executed per call (Unicorn basic-block hook, 4 bytes per instruction) for a few representative operands.
@@ -28,13 +28,9 @@ DRIVER = r'''
 extern "C" {
 ''' + ''.join('void fnvl_msvcrt_CI%s(void);\n' % n for n in ENT) + r'''
 }
+extern "C" int *_errno(void);      /* the platform's (platform/crt/heap.c): a product symbol, not defined here */
 typedef void (*fn_t)(void);
 static fn_t T[15] = { ''' + ', '.join('fnvl_msvcrt_CI' + n for n in ENT) + r''' };
-static int errno_v;
-extern "C" int *t_errno(void) { return &errno_v; }
-extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name) { return name[0] == '_' && name[1] == 'e' ? (void *)t_errno : 0; }                              /* test double of the platform's _errno (platform/crt/heap.c) */
-extern "C" void *memcpy(void *d, const void *s, unsigned long n) { char *a = (char *)d; const char *b = (const char *)s; while (n--) *a++ = *b++; return d; }
-extern "C" void *memset(void *d, int v, unsigned long n) { char *a = (char *)d; while (n--) *a++ = (char)v; return d; }
 struct Rec { u32 entry, depth, pad0, pad1; u64 v[8]; u32 depth_out, err, fex, esp_d, ra_out, pad2; u64 st[3]; };
 static struct cpu cpu0;
 extern "C" u32 test_main(Rec *r, u32 n) {
@@ -42,11 +38,11 @@ extern "C" u32 test_main(Rec *r, u32 n) {
   for (u32 i = 0; i < n; i++) {
     fnvl_x87_init();
     for (u32 k = 0; k < r[i].depth; k++) dyn_push(fv_f64(u2d(r[i].v[k])));
-    errno_v = 7; c->fex = 0;
+    *_errno() = 7; c->fex = 0;
     esp = 0x20000800u; M32(esp) = 0xAAAA0000u + i; c->ra = 0;
     T[r[i].entry]();
     u32 d = 0; for (u32 k = 0; k < 8; k++) if (c->fx[k].k) d++;
-    r[i].depth_out = d; r[i].err = (u32)errno_v; r[i].fex = c->fex; r[i].esp_d = esp - 0x20000800u; r[i].ra_out = c->ra;
+    r[i].depth_out = d; r[i].err = (u32)*_errno(); r[i].fex = c->fex; r[i].esp_d = esp - 0x20000800u; r[i].ra_out = c->ra;
     for (u32 k = 0; k < 3; k++) { fv *p = &c->fx[(c->ftop + k) & 7]; r[i].st[k] = p->k == 1 ? p->v : 0xDEADDEADDEADDEADull; }
   }
   return 0;
@@ -72,7 +68,9 @@ def build(w):
             if l.startswith('        U '): undef.add(l.split()[1])
     elf = w + '/ci.elf'
     r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % TEXT, '-e', 'test_main', '-o', elf] + objs, capture_output=True, text=True)
-    if r.returncode: sys.exit('link: ' + r.stderr[:800])
+    if r.returncode:
+        if 'undefined reference' in r.stderr: instest.blocked(r.stderr)
+        sys.exit('link: ' + r.stderr[:800])
     # undefined symbols of the guest entry object alone (what the lead's link has to provide): the platform's _errno + the runtime's
     ci = subprocess.run(['aarch64-linux-gnu-nm', '-u', w + '/msvcrt_ci.o'], capture_output=True, text=True).stdout.split()
     return elf, sorted(x for x in ci if x not in ('U',))

@@ -17,7 +17,7 @@ BASE, IAT, DATA, GSTACK, HSTACK, STOP, TEXT = 0x401000, 0x402000, 0x403000, 0x60
 BRIDGE = [  # dll, name, conv, ret, args, native symbol, bind
     ('t.dll', 'add2', 'stdcall', 'i', 'ii', 't_add2', 'sym'),
     ('t.dll', 'mul64', 'cdecl', 'q', 'iq', 't_mul64', 'sym'),
-    ('t.dll', 'half', 'cdecl', 'd', 'd', '-', 'lookup'),
+    ('t.dll', 'half', 'cdecl', 'd', 'd', 't_half', 'sym'),
     ('t.dll', 'each', 'stdcall', 'i', 'iii', 't_each', 'sym'),
     ('t.dll', 'call1', 'stdcall', 'i', 'ii', 't_call1', 'sym'),
     ('t.dll', 'meth', 'thiscall', 'i', 'i', 't_meth', 'sym'),
@@ -34,27 +34,21 @@ typedef unsigned int u32; typedef unsigned long long u64;
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 void fnvnx_guest_invoke(u32 addr, u32 ecx, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out);
 u32 fnvnx_lift_enter(u32 eip, u32 esp, u32 teb); int fnvnx_lift_imports_init(void);
-static void *slot; void **fnvl_host_tls_slot(void) { return &slot; }
-unsigned long long fnvl_host_ticks_ns(void) { return 0; }
-void *memcpy(void *d, const void *s, unsigned long n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
-void *memset(void *d, int v, unsigned long n) { char *a = d; while (n--) *a++ = (char)v; return d; }
 void fnvnx_guest_current(u32 *esp, u32 *teb);
 /* variadic: n fixed, then n guest stack words to add */
 u32 t_vsum(u32 n, u32 va) { u32 r = 0; for (u32 i = 0; i < n; i++) r += ((u32 *)(unsigned long)va)[i]; return r; }
 u32 t_add2(u32 a, u32 b) { u32 sp, teb; fnvnx_guest_current(&sp, &teb); return a + b + (teb != 0x50000000u) + (*(u32 *)(unsigned long)(sp + 4) != a); }      /* also checks fnvnx_guest_current: the esp of this call, the thread's TEB */
 u64 t_mul64(u32 a, u64 b) { return (u64)a * b; }
-static double t_half(double x) { return x * 0.5; }
+double t_half(double x) { return x * 0.5; }
 float t_fmix(float x, u32 k) { return x * (float)k; }
 u32 t_meth(u32 self, u32 a) { return *(u32 *)(unsigned long)self + a; }
 /* calls the guest callback cb(i, ctx) (stdcall) for i = 0..n-1 and sums the results */
 u32 t_each(u32 n, u32 cb, u32 ctx) { u32 s = 0; for (u32 i = 0; i < n; i++) { struct fnvnx_guest_ret r; u32 a[2] = { i, ctx }; fnvnx_guest_invoke(cb, 0, 2, a, 0, &r); s += r.eax; } return s; }
 /* calls the guest function cb(arg) once (cdecl or stdcall) */
 u32 t_call1(u32 cb, u32 arg) { struct fnvnx_guest_ret r; fnvnx_guest_invoke(cb, 0, 1, &arg, 0, &r); return r.eax + 1000; }
-static void (*backend)(u32, u32, u32, const u32 *); void fnvnx_win32_set_raise_backend(void (*f)(u32, u32, u32, const u32 *)) { backend = f; }
 /* a native body raises an exception (the platform's w32_raise); returns x + 1 when a handler continued execution */
-u32 t_boom(u32 x) { u32 a[1] = { x }; backend(0xE0000001u, 0, 1, a); return x + 1; }
-u32 UnhandledExceptionFilter(u32 p) { return 1; } void ExitProcess(u32 code) { for (;;) ; }
-void *fnvnx_win32_lookup_export(const char *dll, const char *name) { return name[0] == 'h' ? (void *)t_half : 0; }
+void w32_raise(u32 code, u32 flags, u32 nargs, const u32 *args);      /* the platform's own raise (product symbol, not defined here) */
+u32 t_boom(u32 x) { u32 a[1] = { x }; w32_raise(0xE0000001u, 0, 1, a); return x + 1; }
 u32 test_main(u32 eip, u32 esp, u32 teb, u32 *out)
 {
     out[0] = (u32)fnvnx_lift_imports_init();
@@ -143,7 +137,9 @@ def main():
         if r.returncode: sys.exit('compile %s: %s' % (src, r.stderr[:600]))
     elf = w + '/imp.elf'
     r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % TEXT, '-e', 'test_main', '-o', elf] + objs, capture_output=True, text=True)
-    if r.returncode: sys.exit('link: ' + r.stderr[:600])
+    if r.returncode:
+        if 'undefined reference' in r.stderr: instest.blocked(r.stderr)
+        sys.exit('link: ' + r.stderr[:600])
     with open(elf, 'rb') as fh:
         e = ELFFile(fh); segs = [(p['p_vaddr'], p.data(), p['p_memsz']) for p in e.iter_segments() if p['p_type'] == 'PT_LOAD']
         sym = {x.name: x['st_value'] for x in e.get_section_by_name('.symtab').iter_symbols() if x.name}

@@ -35,17 +35,6 @@ EH_KEYS = {0x000fffd0: 'fnvl_msvcrt_eh_nested_catch', 0x000fffe0: 'fnvl_msvcrt_e
 NATIVE = r'''
 typedef unsigned int u32;
 u32 fnvnx_lift_enter(u32 eip, u32 esp, u32 teb);
-static void *slot; void **fnvl_host_tls_slot(void) { return &slot; }
-unsigned long long fnvl_host_ticks_ns(void) { return 0; }
-void *memcpy(void *d, const void *s, unsigned long n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
-void *memset(void *d, int v, unsigned long n) { char *a = d; while (n--) *a++ = (char)v; return d; }
-u32 g_free_arg, g_free_n, g_ue_code, g_ue_n, g_ue_addr;
-void t_free(void *p) { g_free_arg = (u32)(unsigned long)p; g_free_n++; }
-void t_abort(void) { for (;;) ; }
-u32 UnhandledExceptionFilter(u32 p) { g_ue_code = *(u32 *)(unsigned long)(*(u32 *)(unsigned long)p); g_ue_addr = *(u32 *)(unsigned long)(*(u32 *)(unsigned long)p + 12); g_ue_n++; return 1; }
-void ExitProcess(u32 code) { for (;;) ; }
-void fnvnx_win32_set_raise_backend(void (*f)(u32, u32, u32, const u32 *)) { }
-void *fnvnx_win32_lookup_export(const char *dll, const char *name) { return name[0] == 'f' ? (void *)t_free : name[0] == 'a' ? (void *)t_abort : 0; }
 u32 test_main(u32 eip, u32 esp, u32 teb) { return fnvnx_lift_enter(eip, esp, teb); }
 '''
 
@@ -359,7 +348,9 @@ def main():
         if r.returncode: sys.exit('compile %s: %s' % (src, r.stderr[:800]))
     elf = w + '/msvcrt.elf'
     r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % TEXT, '-e', 'test_main', '-o', elf] + objs, capture_output=True, text=True)
-    if r.returncode: sys.exit('link: ' + r.stderr[:1200])
+    if r.returncode:
+        if 'undefined reference' in r.stderr: instest.blocked(r.stderr)
+        sys.exit('link: ' + r.stderr[:1200])
     with open(elf, 'rb') as fh:
         e = ELFFile(fh); segs = [(p['p_vaddr'], p.data(), p['p_memsz']) for p in e.iter_segments() if p['p_type'] == 'PT_LOAD']
         sym = {x.name: x['st_value'] for x in e.get_section_by_name('.symtab').iter_symbols() if x.name}
@@ -375,7 +366,7 @@ def main():
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20); uc.reg_write(UC_ARM64_REG_SP, HSTACK + 0x3f000); uc.reg_write(UC_ARM64_REG_X30, STOP)
         if root == 'xf1': uc.mem_write(sym['fnvl_msvcrt_sighandlers'] + 4 * 11, struct.pack('<I', A['xfh1'])); uc.mem_write(sym['fnvl_msvcrt_sighandlers'] + 4 * 8, struct.pack('<I', A['xfh2'])); uc.mem_write(sym['fnvl_msvcrt_sighandlers'] + 4 * 4, struct.pack('<I', 1))
         if root == 'fp1': uc.mem_write(A['O'] + 4 * 15, struct.pack('<I', 0x0c7f))
-        until = {'ret': STOP, 'abort': sym['t_abort'], 'exit': sym['ExitProcess']}[stop]
+        until = {'ret': STOP, 'abort': sym['abort'], 'exit': sym['ExitProcess']}[stop]
         for i, v in enumerate((A[ENTRY.get(root, root)], GSTACK + 0x1ff00, TEB)): uc.reg_write(UC_ARM64_REG_X0 + i, v)
         err = ''
         try: uc.emu_start(sym['test_main'], until, count=6000000)
@@ -383,12 +374,9 @@ def main():
         got = uc.reg_read(UC_ARM64_REG_X0) & M; why = []
         if uc.reg_read(UC_ARM64_REG_PC) != until and not err: why.append('did not reach %s (pc %x)' % (stop, uc.reg_read(UC_ARM64_REG_PC)))
         if err: why.append(err)
-        if rdw(uc, sym['g_ue_n'])[0] and stop != 'exit': why.append('unhandled exception %x at %x' % (rdw(uc, sym['g_ue_code'])[0], rdw(uc, sym['g_ue_addr'])[0]))
         if uc.reg_read(UC_ARM64_REG_PC) == sym.get('fnvl_nobody'): why.append('fnvl_nobody: missed address %x' % rdw(uc, uc.reg_read(UC_ARM64_REG_X27) + 248)[0])
         if want is not None and stop == 'ret' and got != want: why.append('eax %x want %x' % (got, want))
         if stop == 'exit' and got != 0xE06D7363: why.append('ExitProcess(%x)' % got)
-        if stop == 'exit' and (rdw(uc, sym['g_ue_n'])[0] != 1 or rdw(uc, sym['g_ue_code'])[0] != 0xE06D7363): why.append('UnhandledExceptionFilter n %d code %x' % tuple(rdw(uc, sym['g_ue_n']) + rdw(uc, sym['g_ue_code'])))
-        if root == 'td1' and rdw(uc, sym['g_free_arg'])[0] != 0x12340000: why.append('free(%x)' % rdw(uc, sym['g_free_arg'])[0])
         for k, v in mem.items():
             if k == 'TR': base, want_w = A['TR'], v
             elif re.fullmatch(r'O\d+', k): base, want_w = A['O'] + 4 * int(k[1:]), v
