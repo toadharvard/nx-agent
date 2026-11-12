@@ -487,3 +487,6 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - w4 G e62cabf0: recipe_model.py + fnvnx-built/1 manifest + gates.json `needs` order. Green 28/28 (cold 381 s). Into w14's integration head, without the held closure/MANIFEST commit.
 - L3a range facts for all 7 images (incl. atimgpud and d3dx9_31): L3a w7 (session_01KmtZKV5F6B2PqGD9piX26f), ETA about 1.5 h, after the R3 refinement. Blocks: gpa/reach/reachlink items for those images.
 - w18 4c1ccf7e: call-VA site validation in loadlib/gpa_names/gate_reach; a mixed file is red. Accepted as a rule. It waits for L5 w15's call-VA manifest; the old pin 2ac3091 is slot-ref.
+- w16 dbfaefeb (trunk 0d8f1c89 + w5 c44308c0 + 42e25b50): content accepted, with no GL pins.
+  - Held: the cause of MERGER's toy-root red (pp:seed.c) is not shown yet. It lands after w22 and w14.
+  - `patch` must be a pinned deb (w22).
