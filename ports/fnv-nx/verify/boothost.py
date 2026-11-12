@@ -13,6 +13,7 @@ Host slots whose effect is not modelled (the observable contract is kept; see HO
  dropped, submit sleeps the period in virtual time), pad_read / pad_vibrate / input_poll (the declared device states of a scenario, bootinput.py; none: nothing attached), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
  .messages, returns 0: the dialog is closed at once). The rest of module 11 (thread_activity, vm_*) is the machine's.
 """
+import errno
 import os
 import stat as S
 import struct
@@ -59,7 +60,13 @@ class Services:
 
     def path(self, addr):
         self.last_sd = self.cstr(addr)
+        self.last_ro = self.dp.read_only(self.last_sd)
         return self.dp.resolve(self.last_sd)
+
+    def _erofs(self, call, sd):
+        """a create/change/remove under a read-only declared input (bootpath.READ_ONLY): the call fails with EROFS"""
+        self.dp.fault(call, sd, errno.EROFS)
+        return neg(errno.EROFS)
 
     # -- v1
     def h_output_debug_string(self, s, n, *_):
@@ -185,6 +192,8 @@ class Services:
         fl |= (os.O_CREAT if flags & 4 else 0) | (os.O_EXCL if flags & 8 else 0) | (os.O_TRUNC if flags & 0x10 else 0)
         fl |= os.O_APPEND if flags & 0x20 else 0
         path, sd = self.path(p), self.last_sd
+        if self.last_ro and fl & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
+            return self._erofs("open", sd)
 
         def op():
             fd = os.open(path, fl, 0o666)
@@ -245,19 +254,27 @@ class Services:
 
     def h_fs_mkdir(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._erofs("mkdir", self.last_sd)
         return self._mutate(lambda: os.mkdir(path), "mkdir", self.last_sd)
 
     def h_fs_rmdir(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._erofs("rmdir", self.last_sd)
         return self._mutate(lambda: os.rmdir(path), "rmdir", self.last_sd)
 
     def h_fs_remove(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._erofs("remove", self.last_sd)
         return self._mutate(lambda: os.remove(path), "remove", self.last_sd)
 
     def h_fs_rename(self, a, b, *_):
-        pa, sa = self.path(a), self.last_sd
+        pa, sa, ra = self.path(a), self.last_sd, self.last_ro
         pb = self.path(b)
+        if ra or self.last_ro:
+            return self._erofs("rename", sa if ra else self.last_sd)
         return self._mutate(lambda: os.replace(pa, pb), "rename", sa)
 
     def h_fs_dir_open(self, p, *_):

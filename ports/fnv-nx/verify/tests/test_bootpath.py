@@ -149,5 +149,35 @@ for n, g in (("p3", None), ("p4", fresh("p4g"))):
     case("BootPath(%s) does not create user dir or FalloutPrefs.ini" % ("root, game" if g else "root"),
          not os.path.exists(u))
 
+# declared input: sdmc:/switch/fnv/fonts (bootpath.py PORT_NAMES, READ_ONLY): on the card's root in every mode, never in the game
+for tag, with_game in (("with game", True), ("without game", False)):
+    root = fresh("f1" if with_game else "f2")
+    game = fresh("f1g") if with_game else None
+    touch(root, "switch", "fnv", "fonts", "Sub", "LiberationSans-Regular.ttf")
+    if with_game:
+        touch(game, "fonts", "game-own.ttf")        # the game directory's own "fonts" must never be reached
+    bp = bootpath.BootPath(root, game)
+    want = os.path.join(root, "switch", "fnv", "fonts", "Sub", "LiberationSans-Regular.ttf")
+    case("fonts %s: resolves under root/switch/fnv/fonts" % tag, bp.resolve("sdmc:/switch/fnv/fonts/Sub/LiberationSans-Regular.ttf") == want,
+         bp.resolve("sdmc:/switch/fnv/fonts/Sub/LiberationSans-Regular.ttf"))
+    case("fonts %s: case-folded FONTS/SUB/..." % tag, bp.resolve("SDMC:/Switch/FNV/FONTS/SUB/liberationsans-regular.TTF") == want,
+         bp.resolve("SDMC:/Switch/FNV/FONTS/SUB/liberationsans-regular.TTF"))
+    case("fonts %s: backslashes and .. stay on the same file" % tag, bp.resolve("sdmc:\\switch\\fnv\\x\\..\\fonts\\Sub\\LiberationSans-Regular.ttf") == want)
+    if with_game:
+        case("fonts with game: the game's own fonts/ is not reached", bp.resolve("sdmc:/switch/fnv/fonts/game-own.ttf") ==
+             os.path.join(root, "switch", "fnv", "fonts", "game-own.ttf") and not os.path.exists(bp.resolve("sdmc:/switch/fnv/fonts/game-own.ttf")))
+        case("fonts with game: the alias mount fnvnx/game/fonts is the game's", bp.resolve("sdmc:/fnvnx/game/fonts/game-own.ttf") ==
+             os.path.join(game, "fonts", "game-own.ttf"))
+    case("fonts %s: read_only for the dir, below it, any case, ..-normalised" % tag,
+         all(bp.read_only(s) for s in ("sdmc:/switch/fnv/fonts", "/switch/fnv/fonts/Sub/x.ttf", "SDMC:/SWITCH/FNV/Fonts/new", "/a/../switch/fnv/fonts/q")))
+    case("fonts %s: read_only is false elsewhere (sibling, parent, game-side alias)" % tag,
+         not any(bp.read_only(s) for s in ("/switch/fnv", "/switch/fnv/fonts2", "/switch/fnv/user/fonts", "/fnvnx/game/fonts/x", "/fonts", "/switch")))
+
+# fonts alone in switch/fnv does not make it an install: no game -> the game dir stays root/fnvnx/game
+root = fresh("f3")
+touch(root, "switch", "fnv", "fonts", "a.ttf")
+bp = bootpath.BootPath(root)
+case("a card holding only fonts has no install in switch/fnv", bp.game == os.path.join(root, "fnvnx", "game"), bp.game)
+
 print("%d failed" % len(FAILED) if FAILED else "all %d passed" % N[0])
 sys.exit(1 if FAILED else 0)
