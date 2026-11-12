@@ -98,14 +98,14 @@
     "/ext/linuxerrno/asm-generic/errno.h",
     "--committed",
     "/in/ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h",
-    "--out",
-    "/out/win32/wire_errno.stamp"
+    "--unit",
+    "/out/os/gen/dom_errno.c"
    ],
    "inputs": [
     "ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h"
    ],
    "outputs": [
-    "win32/wire_errno.stamp"
+    "os/gen/dom_errno.c"
    ]
   },
   {
