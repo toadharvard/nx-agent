@@ -376,7 +376,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             em('{ LK_BEGIN(%d); lk_%x: ;' % (f_sys.lock_size(ins), a))
             dispatch(cx, ins)
             cx.macc = 'M'
-            em('if(!lk_commit(lk_)){ LK_RESTORE; goto lk_%x; } }' % a)
+            em('if(!lk_commit(lk_,0x%xu)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
         else:
             gs_guard(cx, ins)
             dispatch(cx, ins)

@@ -110,6 +110,10 @@ template<class F,class T> struct GMF { u32 a;      /* a float / double cell: the
    first and the last byte of the cell back to themselves with a byte compare-and-swap: a cell that is not readable and writable faults there, with the world running, and no
    access can fault while it is stopped. fnvl_host_world_stop / fnvl_host_world_resume are the L5 platform's (platform/os/os.h and os_world.c: stop / resume every other thread of the process, synchronously, under one global lock; resume is called on the thread that stopped). */
 extern "C" { void fnvl_host_world_stop(void); void fnvl_host_world_resume(void); }
+/* `.fnvl.lk` (one 12-byte record per locked instruction: x86 pc as a plain word, host start, host end as R_AARCH64_P32_ABS32 in the same section): the range is the
+   exclusive sequence of the aligned commit below, `ldaxr ... cbnz`, and is emitted by that ONE asm statement. The two labels and the record are text of the same asm, so the compiler
+   cannot place anything but the sequence between them: it treats the statement as one opaque, indivisible block (ASM-001). The `ldar` load, the body on the private copy and the
+   world-stop path lie outside it; the pc is the constant operand lk_commit(lk_, pc) that fnvlift/core.py passes. */
 #define FNVL_LK_(T, R, SUF, MASK, LAST, W) \
 template<> struct LKA<T> { \
   static __attribute__((always_inline)) T load(u32 a){ T o; \
@@ -122,11 +126,12 @@ template<> struct LKA<T> { \
       fnvl_host_world_stop(); \
       __asm__ volatile(FNVL_A_ "ldr" SUF " %" R "[o], [%x[a]]\ndmb ishld" : [o]"=&r"(o), [a]"+r"(a) : : "memory"); } \
     return o; } \
-  static __attribute__((always_inline)) bool commit(u32 a, T o, T n){ u32 ok, s; T v; \
+  static __attribute__((always_inline)) bool commit(u32 a, T o, T n, u32 pc){ u32 ok, s; T v; \
     if(sizeof(T)==1 || __builtin_expect(!(a & MASK), 1)) { \
       __asm__ volatile(FNVL_A_ "3: ldaxr" SUF " %" R "[v], [%x[a]]\ncmp %" R "[v], %" R "[o]\nb.ne 5f\nstlxr" SUF " %w[s], %" R "[n], [%x[a]]\ncbnz %w[s], 3b\n" \
+        "9:\n.pushsection .fnvl.lk,\"a\",%%progbits\n.balign 4\n.word %c[pc]\n.word 3b\n.word 9b\n.popsection\n" \
         "dmb ish\nmov %w[ok], 1\nb 2f\n5: mov %w[ok], 0\n2:" \
-        : [ok]"=&r"(ok), [a]"+r"(a), [s]"=&r"(s), [v]"=&r"(v) : [o]"r"((W)o), [n]"r"((W)n) : "memory", "cc"); \
+        : [ok]"=&r"(ok), [a]"+r"(a), [s]"=&r"(s), [v]"=&r"(v) : [o]"r"((W)o), [n]"r"((W)n), [pc]"i"(pc) : "memory", "cc"); \
       return ok; } \
     __asm__ volatile(FNVL_A_ "dmb ishst\nstr" SUF " %" R "[n], [%x[a]]\ndmb ish" : [a]"+r"(a) : [n]"r"((W)n) : "memory"); \
     fnvl_host_world_resume(); \
@@ -139,9 +144,9 @@ template<class T> struct LKS { u32 a; T o, n; u32 st; };
 template<class T> struct LKP { LKS<T> *s; u32 a;
   __attribute__((always_inline)) operator T() const { if(!s->st){ s->a=a; s->st=1; s->o=LKA<T>::load(a); s->n=s->o; } return s->n; }
   __attribute__((always_inline)) T operator=(T v) const { (void)(T)*this; s->n=v; return v; } };
-template<class T> static inline __attribute__((always_inline)) bool lk_commit(LKS<T> &s){
+template<class T> static inline __attribute__((always_inline)) bool lk_commit(LKS<T> &s, u32 pc){
   if(!s.st) return true;
-  bool ok=LKA<T>::commit(s.a,s.o,s.n);
+  bool ok=LKA<T>::commit(s.a,s.o,s.n,pc);
   if(!ok) s.st=0;
   return ok; }
 #define LK_BEGIN(n) LKS<u##n> lk_={0,0,0,0}; const u32 lkr_[8]={eax,ecx,edx,ebx,esp,ebp,esi,edi}, lkf_[6]={cf,zf,sf,of,pf,af}
