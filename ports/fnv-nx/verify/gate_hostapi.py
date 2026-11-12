@@ -3,7 +3,7 @@
     python3 -I gate_hostapi.py [--header PATH]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/hostapi.json
 Rule (owner order 2026-11-10/11: nothing that the product does not need, no placeholder behind a number): for every admitted product root
 that includes hostapi.h, {service numbers declared in the header} == {service numbers expanded by at least one unit of the root}.
-Declared: the header's own text (PATH, default ports/fnv-nx/toolchain/include/fnvnx/hostapi.h, else verify/tests/guest/hostapi.h of the
+Declared: the header's own text (PATH, default ports/fnv-nx/toolchain/include/fnvnx/hostapi.h, else tests/bootguest/hostapi.h of the
 trunk's fixture): every `#define FNVNX_PLAT_<NAME> <integer>` directive (a preprocessor directive read by its token grammar: #, define,
 identifier, one pp-number). A service is a NUMBER; names with the same number are aliases of one service (a range marker such as
 SOCK_FIRST / SOCK_LAST aliases the service it equals, so it adds no item and its own use counts as a use of that service number).
@@ -30,7 +30,7 @@ import unitstage  # noqa: E402
 
 PREFIX = "FNVNX_PLAT_"
 HEADER = "hostapi.h"
-DEFAULT_HEADERS = ("ports/fnv-nx/toolchain/include/fnvnx/hostapi.h", "ports/fnv-nx/verify/tests/guest/hostapi.h")
+DEFAULT_HEADERS = ("ports/fnv-nx/toolchain/include/fnvnx/hostapi.h", "ports/fnv-nx/tests/bootguest/hostapi.h")
 
 
 def number(tok):
