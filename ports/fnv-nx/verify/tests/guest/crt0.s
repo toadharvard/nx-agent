@@ -7,21 +7,27 @@
 // +16/+20/+24 are written by elf2nso.py from the ELF (a PIE cannot hold its link address in .text: an absolute
 // word there would need a text relocation).
 
+	// Input sections by the rule "data never in an ax section": .crt0 "ax" holds the entry branch only; the header words and the
+	// MOD0 block are "a". guest.ld places them first in .text, in this order, so the bytes and the layout are those of one section.
 	.section .crt0, "ax", %progbits
 	.global __fnvnx_guest_start
 	.type   __fnvnx_guest_start, %function
 	.align  2
 __fnvnx_guest_start:
 	b       __fnvnx_guest_entry                 // +0  entry, C (runtime.c)
-	.word   __fnvnx_mod0 - __fnvnx_guest_start  // +4  MOD0 offset, as every Horizon module
+	.size   __fnvnx_guest_start, . - __fnvnx_guest_start
+
+	.section .crt0.hdr, "a", %progbits
+	.align  2
+	.word   __fnvnx_mod0 - . + 4                // +4  MOD0 offset, as every Horizon module (this word is at +4 of the module)
 	.word   0x47584e46                          // +8  "FNXG"
 	.word   3                                   // +12 FNVNX_HOSTAPI_VERSION this guest was built for
 	.word   0                                   // +16 link address of the first segment (elf2nso)
 	.word   0                                   // +20 bytes to map, text..bss, page aligned (elf2nso)
 	.word   0                                   // +24 flags: bit 0 relocatable (ET_DYN: R_AARCH64_P32_RELATIVE)
 	.word   0                                   // +28 reserved
-	.size   __fnvnx_guest_start, . - __fnvnx_guest_start
 
+	.section .crt0.mod0, "a", %progbits
 	.align  2
 	.weak   _DYNAMIC                            // absent in the fixed-address (non-PIE) build
 	.global __fnvnx_mod0
