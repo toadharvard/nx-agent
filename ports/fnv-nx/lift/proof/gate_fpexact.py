@@ -355,10 +355,10 @@ def judge_objects(root, objs, image_dir, forms_ok, docs=None):
 
 def fixture_findings(root, items):
     """-> [{"id", "code"}] (RECIPE.md "Fixtures"): one per distinct code of each item: `rcp:<root>/<unit>` and `f2i:<root>/<unit>` give id `<root>/<unit>`;
-    `<root>:forms` and `<root>:rcpcert` give id `<root>`"""
+    `<root>:forms` and `<root>:rcpcert` give id `<root>/forms` and `<root>/rcpcert` (a finding id is under its root: gate_fixtures.py)"""
     out = set()
     for k, v in items.items():
-        i = k.split(":", 1)[1] if k.split(":", 1)[0] in ("rcp", "f2i") else root
+        i = k.split(":", 1)[1] if k.split(":", 1)[0] in ("rcp", "f2i") else root + "/" + k.split(":", 1)[1]
         out |= {(i, c) for c, _ in v}
     return [{"id": i, "code": c} for i, c in sorted(out)]
 
@@ -378,13 +378,13 @@ def judge_root(root, repo, cache, forms):
         rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
-        FINDINGS.append({"id": root, "code": "fpexact-inputs"})
+        FINDINGS.append({"id": root + "/inputs", "code": "fpexact-inputs"})
         return 1, 0, [root + ":inputs"], "invalid recipe: %s" % "; ".join(e.errors)[:300]
     except (OSError, KeyError, ValueError) as e:
-        FINDINGS.append({"id": root, "code": "fpexact-inputs"})
+        FINDINGS.append({"id": root + "/inputs", "code": "fpexact-inputs"})
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     if res["status"] == "red":
-        FINDINGS.append({"id": root, "code": "fpexact-build"})
+        FINDINGS.append({"id": root + "/build", "code": "fpexact-build"})
         return 1, 0, [root + ":inputs"], "root does not build (stage %s)" % res["failure"]["stage"]
     try:
         image = os.path.join(repo, root) if res.get("elf") else None
@@ -394,7 +394,7 @@ def judge_root(root, repo, cache, forms):
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
-        FINDINGS.append({"id": root, "code": "fpexact-inputs"})
+        FINDINGS.append({"id": root + "/inputs", "code": "fpexact-inputs"})
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     bad = sorted(k for k, v in items.items() if v)
     n = sum(len(items[k]) for k in bad)

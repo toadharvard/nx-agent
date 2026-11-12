@@ -197,7 +197,7 @@ FINDINGS = []     # the findings of the last judge() as {"id": "<root>[:<item>]"
 
 def judge(repo, cache, inputs=INPUTS, pins=PINS):
     """-> (universe, certified, uncertified ids, detail); never raises for an input problem. FINDINGS holds the coded findings: one per item that is not
-    certified, id `<root>` for a root (its pack or its shapes), `inputs` for the gate's own declared inputs"""
+    certified, id `<root>/shapes` (a finding id is under its root: gate_fixtures.py) for a root's pack or shapes, `inputs` for the gate's own declared inputs"""
     del FINDINGS[:]
     try:
         doc = load_inputs(inputs, pins)
@@ -212,7 +212,7 @@ def judge(repo, cache, inputs=INPUTS, pins=PINS):
         for root, ext in packs:
             if ext is None:
                 bad[root + ":shapes"] = "the recipe declares no external named by cxx_origin.pack"
-                FINDINGS.append({"id": root, "code": "forms-no-pack"})
+                FINDINGS.append({"id": root + "/shapes", "code": "forms-no-pack"})
                 continue
             try:
                 got = fetch([ext], cache)
@@ -220,7 +220,7 @@ def judge(repo, cache, inputs=INPUTS, pins=PINS):
                 fam.update({k: v for k, v in mine[root].items() if k not in fam})
             except Red as e:
                 bad[root + ":shapes"] = str(e)[:200]
-                FINDINGS.append({"id": root, "code": e.code})
+                FINDINGS.append({"id": root + "/shapes", "code": e.code})
     except Red as e:
         FINDINGS.append({"id": "inputs", "code": e.code})
         return 1, 0, ["inputs"], str(e)[:600]
@@ -235,7 +235,7 @@ def judge(repo, cache, inputs=INPUTS, pins=PINS):
         d = dsl_sha(k, md)
         nobuilder += d is None
         cert[k] = d is not None and d in certs.get(k, ())
-    FINDINGS.extend({"id": r, "code": "forms-uncertified"} for r in sorted(mine) if any(not cert[k] for k in mine[r]))
+    FINDINGS.extend({"id": r + "/shapes", "code": "forms-uncertified"} for r in sorted(mine) if any(not cert[k] for k in mine[r]))
     unc = [k for k in sorted(cert) if not cert[k]] + sorted(bad)
     byfam = ", ".join("%s %d/%d" % (f, sum(cert[k] for k in fam if fam[k] == f), sum(1 for k in fam if fam[k] == f)) for f in FAMILIES)
     why = "".join("; %s: %s" % (k, bad[k]) for k in sorted(bad))
