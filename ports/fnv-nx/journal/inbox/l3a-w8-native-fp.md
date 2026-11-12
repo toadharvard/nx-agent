@@ -45,3 +45,12 @@ Sources read: lift/rt/imp.h (fnvl_native_in/out), lift/rt/enter.cc (fp_park, fnv
 ## Removed_by (proposal for the registry)
 "fact: guest code and native bodies run under the guest FPCR/FPSR (G1, I), imports parked (H1); gate native_fpflags (readers unreachable without a clear); native root built with the rounding-mode flag".
 Open until native_fpflags exists and defects 1 and 2 are closed.
+
+## Corrections after the implementation (37e3f069)
+1. Defect 1 is fixed STATICALLY: rt/enter.cc has two entries by kind (fnvnx_guest_invoke = import callback, restores the parked state and re-parks; fnvnx_guest_invoke_regs = bridge from a native
+   body, leaves FPCR/FPSR alone). No run-time `parked` flag. Tests: disptest cases fsw, frm (fail with the old unconditional restore, pass now).
+2. The sticky flags are OWNED (rt/fnvl_x87.h): the live FPSR counts only while a family owns it; entering from outside, the owner is read from c->fex. So flags a native body raises matter only when
+   x87 or SSE is the owner at the moment, which narrows the native_fpflags gate (readers reachable while a family owns the FPSR across the native body).
+3. The lifted fistp reads c->fcw, not the host FPCR; only the lifted arithmetic uses the host rounding mode.
+4. A native body that calls a bridge needs the caller's guest registers (esp) in c->r[] first. Imports get them from fnvl_native_in (which also parks). A native-body entry needs the same register
+   save WITHOUT the park. That entry does not exist in the tree yet: it belongs to whoever emits native entries.
