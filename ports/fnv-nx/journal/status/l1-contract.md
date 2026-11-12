@@ -103,3 +103,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - New headers tree contract/include declares them (w16 A).
   - D3DX compile-site census per site → w18, for L6 w3b.
   - Dynamic GetProcAddress sites open: 12, so certificates don't count yet.
+- 03:01Z w17: -mno-outline-atomics becomes a required guest flag, because the declared Cortex-A57 has no LSE (from L2). A reference from a guest object to __aarch64_* outline helpers is red. Every CC key changes once.
