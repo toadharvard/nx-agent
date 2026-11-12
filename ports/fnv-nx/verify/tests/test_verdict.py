@@ -195,6 +195,16 @@ rc, _, _ = run_verdict(r, head(r), gp, v, "--budget-s", "0")
 vj = json.load(open(v))
 check("over_budget reported, verdict stays green", rc == 0 and vj["over_budget"] is True and vj["verdict"] == "green", vj)
 
+# "needs": a gate lists the gates whose results it reads; they must be listed before it
+r = make_repo()
+for nm, gs, ok in (("needed gate listed before: accepted", [gate("build"), dict(gate("c"), needs=["build"])], True),
+                   ("needed gate listed after: refused", [dict(gate("c"), needs=["build"]), gate("build")], False),
+                   ("needed gate unknown: refused", [dict(gate("c"), needs=["nope"])], False),
+                   ("needs not a list of names: refused", [gate("build"), dict(gate("c"), needs="build")], False)):
+    d = tmp("needs"); gp = gates_file(d, gs); v = os.path.join(d, "v.json")
+    rc, out, err = run_verdict(r, head(r), gp, v)
+    check("gates file, " + nm, (rc == 0) == ok and (ok or "needs" in err), (rc, out, err))
+
 # 4 provenance
 def prov_env():
     d = tmp("prov")

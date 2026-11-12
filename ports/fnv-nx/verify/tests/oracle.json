@@ -564,6 +564,18 @@
     "ports/fnv-nx/verify/verdict.py"
    ]
   },
+  "test_recipe_model.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe_model.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe_model.py"
+   ]
+  },
   "test_runner.py": {
    "references": [
     {

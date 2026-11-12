@@ -40,16 +40,15 @@ import runtime  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
 import unitstage  # noqa: E402
+import recipe_model  # noqa: E402
+from recipe_model import (TREE, ADMIT, GUEST_PIN, GUEST_TARGETS, EXT_KEYS, ARTIFACTS_URL, CC_EXT, CXX_EXT, ASM_EXT, RecipeError, BuildRed,  # noqa: E402,F401
+                          is_unit, rel_ok, under, load_admit, tracked, load_recipe, generated_outputs, units_of, load_pin, roots_target)
 
 FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
-TREE = "ports/fnv-nx"
-ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
         "plugins", "plugin_cxx"}
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
-GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
-GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
 # "Plugins"). The arguments are the MSVC semantics (evaluation order of arguments, objects, operators, assignments; enum conversion
 # an error as for cl). The other values the plugins accept (ltr, first, cpp17) exist for A/B measurements and are no product.
@@ -76,24 +75,11 @@ LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's 
 # section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings.
 PER_ROOT = re.compile(r"-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections")
 WERROR_ATTR = "-Werror=attributes"   # required in flags.c and flags.cxx of every guest root
-EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
 SBIND = {1: "GLOBAL", 2: "WEAK", 10: "UNIQUE"}
-ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
-CC_EXT, CXX_EXT, ASM_EXT = (".c",), (".cc", ".cpp", ".cxx"), (".s", ".S")
 LONG_R = ("unresolved-symbols", "allow-shlib-undefined", "noinhibit-exec", "defsym", "wrap", "allow-multiple-definition",
           "warn-unresolved-symbols")
-
-
-class RecipeError(Exception):
-    def __init__(self, errors):
-        Exception.__init__(self, "; ".join(errors))
-        self.errors = list(errors)
-
-
-class BuildRed(Exception):
-    pass
 
 
 class EnvBlocked(RecipeError):
@@ -141,52 +127,6 @@ def refused(tokens):
         if hit:
             bad.append(t)
     return bad
-
-
-def is_unit(p):
-    return p.endswith(CC_EXT + CXX_EXT + ASM_EXT)
-
-
-def rel_ok(p):
-    return isinstance(p, str) and p != "" and not p.startswith("/") and posixpath.normpath(p) == p and p != ".." \
-        and not p.startswith("../")
-
-
-def under(p, d):
-    return p == d or p.startswith(d + "/")
-
-
-def load_admit(repo="."):
-    with open(os.path.join(repo, ADMIT)) as f:
-        return {r["path"]: r for r in json.load(f)["roots"]}
-
-
-def tracked(repo="."):
-    out = subprocess.run(["git", "-C", repo, "ls-files", "-z", "--", TREE], capture_output=True, check=True).stdout
-    return sorted(p for p in out.decode("utf-8", "surrogateescape").split("\0") if p)
-
-
-def load_recipe(repo, roots, root):
-    with open(os.path.join(repo, roots[root]["recipe"])) as f:
-        return json.load(f)
-
-
-def generated_outputs(rec):
-    g = rec.get("generated")
-    return [o for x in (g if isinstance(g, list) else []) if isinstance(x, dict) and isinstance(x.get("outputs"), list)
-            for o in x["outputs"] if isinstance(o, str)]
-
-
-def units_of(rec, root, files):
-    """Sorted root-relative unit paths: tracked source files + generated outputs with a source name."""
-    mine = {f[len(root) + 1:] for f in files if under(f, root)}
-    return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
-
-
-def load_pin(repo="."):
-    """verify/guest_compiler.json of the checkout, or None when the tree has none."""
-    p = os.path.join(repo, GUEST_PIN)
-    return json.load(open(p)) if os.path.exists(p) else None
 
 
 def guest_errors(rec, root, roots, pin):

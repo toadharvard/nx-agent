@@ -113,6 +113,12 @@ def cmd_run(a):
         raise Err("malformed gates file")
     if len({g["name"] for g in gates}) != len(gates):
         raise Err("duplicate gate names")
+    seen = set()
+    for g in gates:   # "needs": the gates whose results this gate reads; they run earlier in the list (a consumer of the build manifest needs "build")
+        nd = g.get("needs", [])
+        if not (isinstance(nd, list) and all(isinstance(n, str) for n in nd)) or not set(nd) <= seen:
+            raise Err("gate %s needs %s: every needed gate must be listed before it" % (g["name"], nd))
+        seen.add(g["name"])
     commit = _git_ok(o["--repo"], "rev-parse", "--verify", o["--commit"] + "^{commit}")
     tree = _git_ok(o["--repo"], "rev-parse", commit + "^{tree}")
     work = tempfile.mkdtemp(prefix="verdict-")
