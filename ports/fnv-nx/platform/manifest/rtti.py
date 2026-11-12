@@ -12,7 +12,7 @@ A vtable is accepted when the word before it is a relocated pointer to a COL who
 whose type descriptor carries a decorated class name; the slots are the run of relocated words that point into code. Nothing here
 reads a name to decide anything: the decorated name is only a label for the reports; classes are identified by their TypeDescriptor
 address and bases by their TypeDescriptor addresses.
-Assumption (OWNER 3, the compiler is correct, id 1 of the CLAUDE.md list): the compiler emitted these structures as the ABI defines
+Assumption (OWNER 1, the compiler is correct): the compiler emitted these structures as the ABI defines
 them; a vtable that fails the checks above is not a class vtable and is reported as `unknown` by `kind_of_word`.
 """
 import bisect
@@ -46,6 +46,7 @@ class Rtti:
                     run.append(mod.u32(k))
                     k += 4
                 self.run[v] = run
+        self.chd_of = {td: chd for c, (td, off, chd) in self.col.items() if off == 0}
         self.starts = sorted(self.vt)
         self.by_class = {}  # complete class type descriptor -> {offset: vtable}
         for v, c in self.vt.items():
@@ -73,12 +74,11 @@ class Rtti:
 
     def bases(self, td):
         """[(base type descriptor, mdisp)] of a complete class (its own CHD; the first entry is the class itself)."""
-        mod = self.mod
-        for c, (t, off, chd) in self.col.items():
-            if t == td and off == 0:
-                n, arr = mod.u32(chd + 8), mod.u32(chd + 12)
-                return [(mod.u32(mod.u32(arr + 4 * k)), mod.u32(mod.u32(arr + 4 * k) + 8)) for k in range(n)]
-        return []
+        mod, chd = self.mod, self.chd_of.get(td)
+        if chd is None:
+            return []
+        n, arr = mod.u32(chd + 8), mod.u32(chd + 12)
+        return [(mod.u32(mod.u32(arr + 4 * k)), mod.u32(mod.u32(arr + 4 * k) + 8)) for k in range(n)]
 
     def derived_of(self, base_td):
         """Complete classes whose hierarchy contains `base_td` (including itself)."""

@@ -22,14 +22,22 @@ arguments pushed at every direct `call rel32` site that targets it (found by sca
 caller's disassembly) and the function is analysed again per caller binding, up to DEPTH levels of wrappers calling wrappers. What
 cannot be bound statically stays `dynamic` with the reason.
 Parameter rule (closes the set of callers): the binding of a parameter from the direct call sites is complete only when no other
-reference to the function exists. `entries` lists every other reference over the whole image: a `jmp rel32` to the entry, a relocated
-word in code (address taken by a push/mov), and a relocated word in data. A data word is classified by its run of relocated code
-pointers: the run start is the vtable and the position in the run is the slot. A function with any such reference is entered by a path
-that the direct-caller binding does not cover, so its rows stay `dynamic` and the reason names the reference.
-Field rule: a key or name read from a field of `this` or of a parameter is a ("f", base, d) value. It is resolved only by the set of
-all writers of that field for the objects that reach the function; the writers of a field are the stores at displacement d through
-objects of one class, and the receivers of a vtable slot are the objects whose vtable word is that vtable. The pass has no typing of
-receivers to classes, so the row stays `dynamic` and the reason names the field, the entry references and the two facts that are missing.
+reference to the function exists. `entries_x` lists every other reference over the whole image: a `jmp rel32` to the entry, a relocated
+word in code (address taken by a push/mov), and a relocated word in data, classified by the RTTI index (rtti.py) as a slot of a class
+vtable (vtable address and slot) or another data word. A function with any such reference is entered by a path that the direct-caller
+binding does not cover, so its parameters stay unbound and the row is `dynamic`, the reason naming the reference.
+Receiver rule (fields of `this`): when every entry of the function is a slot of an RTTI vtable and it has no direct caller, `this` is
+bound to the complete class and offset of those vtables (COL type descriptor and offset), per vtable. A field read from `this` is the
+set of values stored by all writers of that field of that class, found by the typed closure of regclass.py (constructors, vtable slots,
+typed calls and returns, global cells; the pointer flow is traced from the constructors, so a pointer that leaves the traced flow makes
+the class `unaccounted` and the row `dynamic`, with the instruction named). A string at an address inside the object is "" when every
+writer covering its first byte stores the constant 0. A handle opened into a field is the set of opens that store it; a NULL handle is
+dropped (Win32: invalid handle, no key accessed). Every other writer value keeps the row `dynamic`: the reason names the writer
+instruction (or the parameter / list element that is not bound).
+Assumptions: OWNER 1 (compiler correct: MSVC ABI, RTTI layout, thiscall, constructors return this), OWNER 3 (Win32 as documented: NULL
+handle, LPCSTR name arguments are inputs), OWNER 6 (no wild accesses: a pointer reaches only its object). The scope below is the existing
+one (REMOVE items owned by L5: function boundaries, forward-only control flow, complete code ranges, no computed code addresses). No new
+assumption; the ids in verify/ASSUMPTIONS.json are not yet on the trunk, so the OWNER numbers of CLAUDE.md are cited.
 Scope: as for pemanifest.py (function boundaries, forward-only control flow, no ebp slot written through a pointer);
 stdcall/cdecl argument order (the first argument is the last push); a call through a function pointer other than a register loaded
 from the import slot, and a `jmp [slot]` thunk, is reported `dynamic` (reason `indirect`), never skipped; a global cell is not
@@ -134,7 +142,11 @@ def joins(a, b):
     """State join at a control-flow merge: (regs, slots, pushes). Equal facts stay, anything else is unknown."""
     if a is None:
         return (dict(b[0]), dict(b[1]), list(b[2]))
-    m = lambda x, y: {k: (x[k] if x[k] == y[k] or (x[k][0] == "u" and y[k][0] == "u") else ("u", "join")) for k in x.keys() & y.keys()}
+    def why(v):
+        return Analyzer.describe(v) if v[0] in ("t", "p", "f", "g", "o", "H") else "string %r" % v[1] if v[0] == "s" else "constant" if v[0] == "c" else \
+            "buffer of the function" if v[0] == "a" else v[1] if v[0] == "u" else v[0]
+    m = lambda x, y: {k: (x[k] if x[k] == y[k] or (x[k][0] == "u" and y[k][0] == "u") else
+                          ("u", "join of %s and %s" % (why(x[k]), why(y[k])))) for k in x.keys() & y.keys()}
     return (m(a[0], b[0]), m(a[1], b[1]), a[2] if a[2] == b[2] else [])
 
 
@@ -263,7 +275,7 @@ class Analyzer:
                         for k, v in enumerate(args):
                             if typed(v) and k == ok:  # the out handle is written into the object: a writer of that field
                                 ev.append(("store", i.address, v, 0, 4, ("H", f, tuple(args))))
-                            elif typed(v):
+                            elif typed(v) and k not in (ROLES[f][2], ROLES[f][3]):  # name arguments are LPCSTR inputs (Win32 as documented)
                                 leak(i, "pointer passed to %s (argument %d)" % (f, k), v)
                 else:
                     if a.type == X.X86_OP_IMM and a.imm in track:
@@ -373,6 +385,12 @@ class Analyzer:
 
     @staticmethod
     def describe(v):
+        if v[0] == "o":
+            return "object of class 0x%08x at offset 0x%x" % (v[1], v[2])
+        if v[0] == "H":
+            return "handle opened by %s" % v[1]
+        if v[0] in ("c", "s", "a", "u"):
+            return "%s value" % v[0]
         if v[0] == "t":
             return "this"
         if v[0] == "p":
@@ -647,7 +665,9 @@ def regsites(mod, stats=None):
                     want = {(s, f) for s, f, _ in fld}
                     for td, off in sorted({an.rtti().complete(e["vtable"]) for e in vts}):
                         c2, _ = an.run(st, None, (), ("o", td, off))
-                        via = "receiver %s at offset %d" % (an.rtti().name(td)[4:-2], off)
+                        n = sum(len(an.closure().vcalls[w]) for w in {st})
+                        via = "receiver %s at offset %d; %d virtual call sites of this slot are in the closure of the class, the " \
+                              "arguments of calls through other receivers are not bound" % (an.rtti().name(td)[4:-2], off, n)
                         got += [row for s, f, a in c2 if (s, f) in want for row in rows_of(an, s, f, a, via)]
             if par:
                 if ent:
