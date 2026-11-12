@@ -1,0 +1,1148 @@
+model	kind	feature	status	detail	encoded_by
+vs_1_1	opcode	mov	ok		asm
+vs_1_1	opcode	add	ok		asm
+vs_1_1	opcode	sub	ok		asm
+vs_1_1	opcode	mad	ok		asm
+vs_1_1	opcode	mul	ok		asm
+vs_1_1	opcode	rcp	ok		asm
+vs_1_1	opcode	rsq	ok		asm
+vs_1_1	opcode	dp3	ok		asm
+vs_1_1	opcode	dp4	ok		asm
+vs_1_1	opcode	min	ok		asm
+vs_1_1	opcode	max	ok		asm
+vs_1_1	opcode	slt	ok		asm
+vs_1_1	opcode	sge	ok		asm
+vs_1_1	opcode	exp	ok		asm
+vs_1_1	opcode	log	ok		asm
+vs_1_1	opcode	lit	ok		asm
+vs_1_1	opcode	dst	ok		asm
+vs_1_1	opcode	frc	ok		asm
+vs_1_1	opcode	m4x4	ok		asm
+vs_1_1	opcode	m4x3	ok		asm
+vs_1_1	opcode	m3x4	ok		asm
+vs_1_1	opcode	m3x3	ok		asm
+vs_1_1	opcode	m3x2	ok		asm
+vs_1_1	opcode	expp	ok		asm
+vs_1_1	opcode	logp	ok		asm
+vs_1_1	opcode	nop	ok		asm
+vs_1_1	opcode	def	ok		asm
+vs_1_1	opcode	dcl	ok		asm
+vs_1_1	srcmod	neg@mov	ok		asm
+vs_1_1	srcmod	neg@mad.s2	ok		asm
+vs_1_1	usage	0:position0@input	ok		asm
+vs_1_1	usage	1:blendweight0@input	ok		asm
+vs_1_1	usage	2:blendindices0@input	ok		asm
+vs_1_1	usage	3:normal0@input	ok		asm
+vs_1_1	usage	4:psize0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 4 index 0;)		asm
+vs_1_1	usage	5:texcoord0@input	ok		asm
+vs_1_1	usage	6:tangent0@input	ok		asm
+vs_1_1	usage	7:binormal0@input	ok		asm
+vs_1_1	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 8 index 0;)		asm
+vs_1_1	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0039/x.asm:3: Expected usage index	hand
+vs_1_1	usage	10:color0@input	ok		asm
+vs_1_1	usage	11:fog0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 11 index 0;)		asm
+vs_1_1	usage	12:depth0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 12 index 0;)		asm
+vs_1_1	usage	13:sample0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 13 index 0;)		asm
+vs_1_1	regtype	v	ok		asm
+vs_1_1	regtype	c	ok		asm
+vs_1_1	regtype	r	ok		asm
+vs_1_1	regtype	a0	ok		asm
+vs_1_1	regtype	oFog	ok		asm
+vs_1_1	regtype	oPts	ok		asm
+vs_1_1	regtype	oD0	ok		asm
+vs_1_1	regtype	oD1	ok		asm
+vs_1_1	regtype	oT0	ok		asm
+vs_1_1	regtype	oT7	ok		asm
+vs_1_1	regtype	def	ok		asm
+vs_1_1	regtype	c_max=c95	ok		asm
+vs_1_1	regtype	r_max=r11	ok		asm
+vs_1_1	regtype	v_max=v15	ok		asm
+vs_1_1	addr	c[a0.x+n]	ok		asm
+vs_1_1	addr	c[a0.x]	ok		asm
+vs_1_1	addr	c[a0.x+n]@ctab-covering	ok		asm
+vs_1_1	addr	c[a0.x+n]@ctab-other-regs	ok		asm
+vs_1_1	addr	c[a0.x+n]@ctab-straddle	ok		asm
+vs_2_0	opcode	mov	ok		asm
+vs_2_0	opcode	add	ok		asm
+vs_2_0	opcode	sub	ok		asm
+vs_2_0	opcode	mad	ok		asm
+vs_2_0	opcode	mul	ok		asm
+vs_2_0	opcode	rcp	ok		asm
+vs_2_0	opcode	rsq	ok		asm
+vs_2_0	opcode	dp3	ok		asm
+vs_2_0	opcode	dp4	ok		asm
+vs_2_0	opcode	min	ok		asm
+vs_2_0	opcode	max	ok		asm
+vs_2_0	opcode	slt	ok		asm
+vs_2_0	opcode	sge	ok		asm
+vs_2_0	opcode	exp	ok		asm
+vs_2_0	opcode	log	ok		asm
+vs_2_0	opcode	lit	ok		asm
+vs_2_0	opcode	dst	ok		asm
+vs_2_0	opcode	frc	ok		asm
+vs_2_0	opcode	m4x4	ok		asm
+vs_2_0	opcode	m4x3	ok		asm
+vs_2_0	opcode	m3x4	ok		asm
+vs_2_0	opcode	m3x3	ok		asm
+vs_2_0	opcode	m3x2	ok		asm
+vs_2_0	opcode	expp	ok		asm
+vs_2_0	opcode	logp	ok		asm
+vs_2_0	opcode	nop	ok		asm
+vs_2_0	opcode	def	ok		asm
+vs_2_0	opcode	dcl	ok		asm
+vs_2_0	opcode	abs	ok		asm
+vs_2_0	opcode	crs	ok		asm
+vs_2_0	opcode	lrp	ok		asm
+vs_2_0	opcode	nrm	ok		asm
+vs_2_0	opcode	pow	ok		asm
+vs_2_0	opcode	sincos	ok		asm
+vs_2_0	opcode	sgn	ok		asm
+vs_2_0	opcode	mova	ok		asm
+vs_2_0	opcode	call	ok		asm
+vs_2_0	opcode	callnz	ok		asm
+vs_2_0	opcode	loop	ok		asm
+vs_2_0	opcode	endloop	ok		asm
+vs_2_0	opcode	rep	ok		asm
+vs_2_0	opcode	endrep	ok		asm
+vs_2_0	opcode	if	ok		asm
+vs_2_0	opcode	else	ok		asm
+vs_2_0	opcode	endif	ok		asm
+vs_2_0	opcode	label	ok		asm
+vs_2_0	opcode	ret	ok		asm
+vs_2_0	opcode	defb	ok		asm
+vs_2_0	opcode	defi	ok		asm
+vs_2_0	srcmod	neg@mov	ok		asm
+vs_2_0	srcmod	neg@mad.s2	ok		asm
+vs_2_0	srcmod	abs@mov	ok	legal=?	asm
+vs_2_0	srcmod	abs@mad.s2	ok	legal=?	asm
+vs_2_0	srcmod	absneg@mov	ok	legal=?	asm
+vs_2_0	srcmod	absneg@mad.s2	ok	legal=?	asm
+vs_2_0	srcmod	not	ok	legal=?	asm
+vs_2_0	dstmod	sat@mov	ok	legal=?	asm
+vs_2_0	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0120/x.asm:9: Partial precision result mod in non-pixel shader	hand
+vs_2_0	usage	0:position0@input	ok		asm
+vs_2_0	usage	1:blendweight0@input	ok		asm
+vs_2_0	usage	2:blendindices0@input	ok		asm
+vs_2_0	usage	3:normal0@input	ok		asm
+vs_2_0	usage	4:psize0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 4 index 0;)		asm
+vs_2_0	usage	5:texcoord0@input	ok		asm
+vs_2_0	usage	6:tangent0@input	ok		asm
+vs_2_0	usage	7:binormal0@input	ok		asm
+vs_2_0	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 8 index 0;)		asm
+vs_2_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0130/x.asm:3: Expected usage index	hand
+vs_2_0	usage	10:color0@input	ok		asm
+vs_2_0	usage	11:fog0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 11 index 0;)		asm
+vs_2_0	usage	12:depth0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 12 index 0;)		asm
+vs_2_0	usage	13:sample0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 13 index 0;)		asm
+vs_2_0	regtype	v	ok		asm
+vs_2_0	regtype	c	ok		asm
+vs_2_0	regtype	r	ok		asm
+vs_2_0	regtype	a0	ok		asm
+vs_2_0	regtype	oFog	ok		asm
+vs_2_0	regtype	oPts	ok		asm
+vs_2_0	regtype	oD0	ok		asm
+vs_2_0	regtype	oD1	ok		asm
+vs_2_0	regtype	oT0	ok		asm
+vs_2_0	regtype	oT7	ok		asm
+vs_2_0	regtype	b0	ok		asm
+vs_2_0	regtype	i0	ok		asm
+vs_2_0	regtype	aL	ok		asm
+vs_2_0	regtype	l0	ok		asm
+vs_2_0	regtype	b0:no-defb	ok		asm
+vs_2_0	regtype	i0:no-defi	ok		asm
+vs_2_0	regtype	def	ok		asm
+vs_2_0	regtype	c_max=c255	ok		asm
+vs_2_0	regtype	r_max=r11	ok		asm
+vs_2_0	regtype	v_max=v15	ok		asm
+vs_2_0	regtype	b15	ok		asm
+vs_2_0	regtype	i15	ok		asm
+vs_2_0	opcode	if@temp-written-in-branch-only	ok	legal=?	asm
+vs_2_0	opcode	rep@temp-written-in-loop	ok	legal=?	asm
+vs_2_0	opcode	call@label-used-in-and-out-of-loop	translate_fail(front end: CALL to this label must be wrapped in LOOP/ENDLOOP (pos 108))	legal=? asm: /home/user/work/l6/sm/cases/c0159/x.asm:12: CALL to this label must be wrapped in LOOP/ENDLOOP	hand
+vs_2_0	addr	c[a0.x+n]	ok		asm
+vs_2_0	addr	c[a0.x]	ok		asm
+vs_2_0	addr	c[aL+n]	ok		asm
+vs_2_0	addr	c[a0.x+n]@aL-loop	ok	legal=?	asm
+vs_2_0	addr	c[a0.x+n]@ctab-covering	ok		asm
+vs_2_0	addr	c[a0.x+n]@ctab-other-regs	ok		asm
+vs_2_0	addr	c[a0.x+n]@ctab-straddle	ok		asm
+vs_2_0	addr	c[aL+n]@ctab-other-regs	ok		asm
+vs_2_x	opcode	mov	ok		asm
+vs_2_x	opcode	add	ok		asm
+vs_2_x	opcode	sub	ok		asm
+vs_2_x	opcode	mad	ok		asm
+vs_2_x	opcode	mul	ok		asm
+vs_2_x	opcode	rcp	ok		asm
+vs_2_x	opcode	rsq	ok		asm
+vs_2_x	opcode	dp3	ok		asm
+vs_2_x	opcode	dp4	ok		asm
+vs_2_x	opcode	min	ok		asm
+vs_2_x	opcode	max	ok		asm
+vs_2_x	opcode	slt	ok		asm
+vs_2_x	opcode	sge	ok		asm
+vs_2_x	opcode	exp	ok		asm
+vs_2_x	opcode	log	ok		asm
+vs_2_x	opcode	lit	ok		asm
+vs_2_x	opcode	dst	ok		asm
+vs_2_x	opcode	frc	ok		asm
+vs_2_x	opcode	m4x4	ok		asm
+vs_2_x	opcode	m4x3	ok		asm
+vs_2_x	opcode	m3x4	ok		asm
+vs_2_x	opcode	m3x3	ok		asm
+vs_2_x	opcode	m3x2	ok		asm
+vs_2_x	opcode	expp	ok		asm
+vs_2_x	opcode	logp	ok		asm
+vs_2_x	opcode	nop	ok		asm
+vs_2_x	opcode	def	ok		asm
+vs_2_x	opcode	dcl	ok		asm
+vs_2_x	opcode	abs	ok		asm
+vs_2_x	opcode	crs	ok		asm
+vs_2_x	opcode	lrp	ok		asm
+vs_2_x	opcode	nrm	ok		asm
+vs_2_x	opcode	pow	ok		asm
+vs_2_x	opcode	sincos	ok		asm
+vs_2_x	opcode	sgn	ok		asm
+vs_2_x	opcode	mova	ok		asm
+vs_2_x	opcode	call	ok		asm
+vs_2_x	opcode	callnz	ok		asm
+vs_2_x	opcode	loop	ok		asm
+vs_2_x	opcode	endloop	ok		asm
+vs_2_x	opcode	rep	ok		asm
+vs_2_x	opcode	endrep	ok		asm
+vs_2_x	opcode	if	ok		asm
+vs_2_x	opcode	else	ok		asm
+vs_2_x	opcode	endif	ok		asm
+vs_2_x	opcode	label	ok		asm
+vs_2_x	opcode	ret	ok		asm
+vs_2_x	opcode	defb	ok		asm
+vs_2_x	opcode	defi	ok		asm
+vs_2_x	opcode	break	ok		asm
+vs_2_x	opcode	break_gt	ok		asm
+vs_2_x	opcode	breakp	ok		asm
+vs_2_x	opcode	setp_gt	ok		asm
+vs_2_x	opcode	if_gt	ok		asm
+vs_2_x	opcode	breakc	ok	legal=?	asm
+vs_2_x	srcmod	neg@mov	ok		asm
+vs_2_x	srcmod	neg@mad.s2	ok		asm
+vs_2_x	srcmod	abs@mov	ok	legal=?	asm
+vs_2_x	srcmod	abs@mad.s2	ok	legal=?	asm
+vs_2_x	srcmod	absneg@mov	ok	legal=?	asm
+vs_2_x	srcmod	absneg@mad.s2	ok	legal=?	asm
+vs_2_x	srcmod	not	ok	legal=?	asm
+vs_2_x	dstmod	sat@mov	ok	legal=?	asm
+vs_2_x	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0231/x.asm:9: Partial precision result mod in non-pixel shader	hand
+vs_2_x	usage	0:position0@input	ok		asm
+vs_2_x	usage	1:blendweight0@input	ok		asm
+vs_2_x	usage	2:blendindices0@input	ok		asm
+vs_2_x	usage	3:normal0@input	ok		asm
+vs_2_x	usage	4:psize0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 4 index 0;)		asm
+vs_2_x	usage	5:texcoord0@input	ok		asm
+vs_2_x	usage	6:tangent0@input	ok		asm
+vs_2_x	usage	7:binormal0@input	ok		asm
+vs_2_x	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 8 index 0;)		asm
+vs_2_x	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0241/x.asm:3: Expected usage index	hand
+vs_2_x	usage	10:color0@input	ok		asm
+vs_2_x	usage	11:fog0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 11 index 0;)		asm
+vs_2_x	usage	12:depth0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 12 index 0;)		asm
+vs_2_x	usage	13:sample0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 13 index 0;)		asm
+vs_2_x	regtype	v	ok		asm
+vs_2_x	regtype	c	ok		asm
+vs_2_x	regtype	r	ok		asm
+vs_2_x	regtype	a0	ok		asm
+vs_2_x	regtype	oFog	ok		asm
+vs_2_x	regtype	oPts	ok		asm
+vs_2_x	regtype	oD0	ok		asm
+vs_2_x	regtype	oD1	ok		asm
+vs_2_x	regtype	oT0	ok		asm
+vs_2_x	regtype	oT7	ok		asm
+vs_2_x	regtype	b0	ok		asm
+vs_2_x	regtype	i0	ok		asm
+vs_2_x	regtype	aL	ok		asm
+vs_2_x	regtype	l0	ok		asm
+vs_2_x	regtype	b0:no-defb	ok		asm
+vs_2_x	regtype	i0:no-defi	ok		asm
+vs_2_x	regtype	p0	ok		asm
+vs_2_x	regtype	p0:neg	ok		asm
+vs_2_x	regtype	p0:swz	ok		asm
+vs_2_x	regtype	def	ok		asm
+vs_2_x	opcode	if_gt	ok		asm
+vs_2_x	opcode	break_gt	ok		asm
+vs_2_x	opcode	setp_gt	ok		asm
+vs_2_x	opcode	if_lt	ok		asm
+vs_2_x	opcode	break_lt	ok		asm
+vs_2_x	opcode	setp_lt	ok		asm
+vs_2_x	opcode	if_ge	ok		asm
+vs_2_x	opcode	break_ge	ok		asm
+vs_2_x	opcode	setp_ge	ok		asm
+vs_2_x	opcode	if_le	ok		asm
+vs_2_x	opcode	break_le	ok		asm
+vs_2_x	opcode	setp_le	ok		asm
+vs_2_x	opcode	if_eq	ok		asm
+vs_2_x	opcode	break_eq	ok		asm
+vs_2_x	opcode	setp_eq	ok		asm
+vs_2_x	opcode	if_ne	ok		asm
+vs_2_x	opcode	break_ne	ok		asm
+vs_2_x	opcode	setp_ne	ok		asm
+vs_2_x	opcode	callnz@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:38(6): error: if-statement condition must be scalar boolean)	legal=?	asm
+vs_2_x	opcode	if@p0	ok	legal=?	asm
+vs_2_x	srcmod	not@if.p0	ok	legal=?	asm
+vs_2_x	regtype	c_max=c255	ok		asm
+vs_2_x	regtype	r_max=r11	ok		asm
+vs_2_x	regtype	v_max=v15	ok		asm
+vs_2_x	regtype	b15	ok		asm
+vs_2_x	regtype	i15	ok		asm
+vs_2_x	opcode	if@temp-written-in-branch-only	ok	legal=?	asm
+vs_2_x	opcode	rep@temp-written-in-loop	ok	legal=?	asm
+vs_2_x	opcode	call@label-used-in-and-out-of-loop	translate_fail(front end: CALL to this label must be wrapped in LOOP/ENDLOOP (pos 108))	legal=? asm: /home/user/work/l6/sm/cases/c0294/x.asm:12: CALL to this label must be wrapped in LOOP/ENDLOOP	hand
+vs_2_x	addr	c[a0.x+n]	ok		asm
+vs_2_x	addr	c[a0.x]	ok		asm
+vs_2_x	addr	c[aL+n]	ok		asm
+vs_2_x	addr	c[a0.x+n]@aL-loop	ok	legal=?	asm
+vs_2_x	addr	c[a0.x+n]@ctab-covering	ok		asm
+vs_2_x	addr	c[a0.x+n]@ctab-other-regs	ok		asm
+vs_2_x	addr	c[a0.x+n]@ctab-straddle	ok		asm
+vs_2_x	addr	c[aL+n]@ctab-other-regs	ok		asm
+vs_3_0	opcode	mov	ok		asm
+vs_3_0	opcode	add	ok		asm
+vs_3_0	opcode	sub	ok		asm
+vs_3_0	opcode	mad	ok		asm
+vs_3_0	opcode	mul	ok		asm
+vs_3_0	opcode	rcp	ok		asm
+vs_3_0	opcode	rsq	ok		asm
+vs_3_0	opcode	dp3	ok		asm
+vs_3_0	opcode	dp4	ok		asm
+vs_3_0	opcode	min	ok		asm
+vs_3_0	opcode	max	ok		asm
+vs_3_0	opcode	slt	ok		asm
+vs_3_0	opcode	sge	ok		asm
+vs_3_0	opcode	exp	ok		asm
+vs_3_0	opcode	log	ok		asm
+vs_3_0	opcode	lit	ok		asm
+vs_3_0	opcode	dst	ok		asm
+vs_3_0	opcode	frc	ok		asm
+vs_3_0	opcode	m4x4	ok		asm
+vs_3_0	opcode	m4x3	ok		asm
+vs_3_0	opcode	m3x4	ok		asm
+vs_3_0	opcode	m3x3	ok		asm
+vs_3_0	opcode	m3x2	ok		asm
+vs_3_0	opcode	expp	ok		asm
+vs_3_0	opcode	logp	ok		asm
+vs_3_0	opcode	nop	ok		asm
+vs_3_0	opcode	def	ok		asm
+vs_3_0	opcode	dcl	ok		asm
+vs_3_0	opcode	abs	ok		asm
+vs_3_0	opcode	crs	ok		asm
+vs_3_0	opcode	lrp	ok		asm
+vs_3_0	opcode	nrm	ok		asm
+vs_3_0	opcode	pow	ok		asm
+vs_3_0	opcode	sincos	ok		asm
+vs_3_0	opcode	sgn	ok		asm
+vs_3_0	opcode	mova	ok		asm
+vs_3_0	opcode	call	ok		asm
+vs_3_0	opcode	callnz	ok		asm
+vs_3_0	opcode	loop	ok		asm
+vs_3_0	opcode	endloop	ok		asm
+vs_3_0	opcode	rep	ok		asm
+vs_3_0	opcode	endrep	ok		asm
+vs_3_0	opcode	if	ok		asm
+vs_3_0	opcode	else	ok		asm
+vs_3_0	opcode	endif	ok		asm
+vs_3_0	opcode	label	ok		asm
+vs_3_0	opcode	ret	ok		asm
+vs_3_0	opcode	defb	ok		asm
+vs_3_0	opcode	defi	ok		asm
+vs_3_0	opcode	break	ok		asm
+vs_3_0	opcode	break_gt	ok		asm
+vs_3_0	opcode	breakp	ok		asm
+vs_3_0	opcode	setp_gt	ok		asm
+vs_3_0	opcode	if_gt	ok		asm
+vs_3_0	opcode	texldl	ok		asm
+vs_3_0	srcmod	neg@mov	ok		asm
+vs_3_0	srcmod	neg@mad.s2	ok		asm
+vs_3_0	srcmod	abs@mov	ok		asm
+vs_3_0	srcmod	abs@mad.s2	ok		asm
+vs_3_0	srcmod	absneg@mov	ok		asm
+vs_3_0	srcmod	absneg@mad.s2	ok		asm
+vs_3_0	srcmod	not	ok	legal=?	asm
+vs_3_0	dstmod	sat@mov	ok	legal=?	asm
+vs_3_0	dstmod	pp@mov	translate_fail(front end: Partial precision result mod in non-pixel shader (pos 84))	legal=? asm: /home/user/work/l6/sm/cases/c0366/x.asm:10: Partial precision result mod in non-pixel shader	hand
+vs_3_0	usage	0:position0@input	ok		asm
+vs_3_0	usage	1:blendweight0@input	ok		asm
+vs_3_0	usage	2:blendindices0@input	ok		asm
+vs_3_0	usage	3:normal0@input	ok		asm
+vs_3_0	usage	4:psize0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 4 index 0;)		asm
+vs_3_0	usage	5:texcoord0@input	ok		asm
+vs_3_0	usage	6:tangent0@input	ok		asm
+vs_3_0	usage	7:binormal0@input	ok		asm
+vs_3_0	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 8 index 0;)		asm
+vs_3_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 9 index 0;)	asm: /home/user/work/l6/sm/cases/c0376/x.asm:4: Expected usage index	hand
+vs_3_0	usage	10:color0@input	ok		asm
+vs_3_0	usage	11:fog0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 11 index 0;)		asm
+vs_3_0	usage	12:depth0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 12 index 0;)		asm
+vs_3_0	usage	13:sample0@input	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 13 index 0;)		asm
+vs_3_0	usage	0:position0@output	ok		asm
+vs_3_0	usage	1:blendweight0@output	ok	legal=?	asm
+vs_3_0	usage	2:blendindices0@output	ok	legal=?	asm
+vs_3_0	usage	3:normal0@output	ok	legal=?	asm
+vs_3_0	usage	4:psize0@output	ok		asm
+vs_3_0	usage	5:texcoord0@output	ok		asm
+vs_3_0	usage	6:tangent0@output	ok	legal=?	asm
+vs_3_0	usage	7:binormal0@output	ok	legal=?	asm
+vs_3_0	usage	8:tessfactor0@output	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 8 index 0;)		asm
+vs_3_0	usage	9:positiont0@output	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 9 index 0;)	legal=? asm: /home/user/work/l6/sm/cases/c0390/x.asm:4: Expected usage index	hand
+vs_3_0	usage	10:color0@output	ok		asm
+vs_3_0	usage	11:fog0@output	ok		asm
+vs_3_0	usage	12:depth0@output	ok		asm
+vs_3_0	usage	13:sample0@output	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 13 index 0;)		asm
+vs_3_0	usage	texcoord15@v15	translate_fail(mojoshader-glsldk: glsldk: no attribute location for usage 5 index 15;)		asm
+vs_3_0	usage	texcoord11@o11	ok		asm
+vs_3_0	sampler	2d:texldl	ok		asm
+vs_3_0	sampler	2d:s15	ok		asm
+vs_3_0	sampler	cube:texldl	translate_fail(front end: reserved bits in DCL dword aren't zero (pos 40))	asm: /home/user/work/l6/sm/cases/c0399/x.asm:6: reserved bits in DCL dword aren't zero	hand
+vs_3_0	sampler	cube:s15	translate_fail(front end: reserved bits in DCL dword aren't zero (pos 40))	asm: /home/user/work/l6/sm/cases/c0400/x.asm:6: reserved bits in DCL dword aren't zero	hand
+vs_3_0	sampler	volume:texldl	ok		asm
+vs_3_0	sampler	volume:s15	ok		asm
+vs_3_0	regtype	v	ok		asm
+vs_3_0	regtype	c	ok		asm
+vs_3_0	regtype	r	ok		asm
+vs_3_0	regtype	a0	ok		asm
+vs_3_0	regtype	o1	ok		asm
+vs_3_0	regtype	o11	ok		asm
+vs_3_0	regtype	b0	ok		asm
+vs_3_0	regtype	i0	ok		asm
+vs_3_0	regtype	aL	ok		asm
+vs_3_0	regtype	l0	ok		asm
+vs_3_0	regtype	b0:no-defb	ok		asm
+vs_3_0	regtype	i0:no-defi	ok		asm
+vs_3_0	regtype	p0	ok		asm
+vs_3_0	regtype	p0:neg	ok		asm
+vs_3_0	regtype	p0:swz	ok		asm
+vs_3_0	regtype	s0	ok		asm
+vs_3_0	regtype	def	ok		asm
+vs_3_0	opcode	if_gt	ok		asm
+vs_3_0	opcode	break_gt	ok		asm
+vs_3_0	opcode	setp_gt	ok		asm
+vs_3_0	opcode	if_lt	ok		asm
+vs_3_0	opcode	break_lt	ok		asm
+vs_3_0	opcode	setp_lt	ok		asm
+vs_3_0	opcode	if_ge	ok		asm
+vs_3_0	opcode	break_ge	ok		asm
+vs_3_0	opcode	setp_ge	ok		asm
+vs_3_0	opcode	if_le	ok		asm
+vs_3_0	opcode	break_le	ok		asm
+vs_3_0	opcode	setp_le	ok		asm
+vs_3_0	opcode	if_eq	ok		asm
+vs_3_0	opcode	break_eq	ok		asm
+vs_3_0	opcode	setp_eq	ok		asm
+vs_3_0	opcode	if_ne	ok		asm
+vs_3_0	opcode	break_ne	ok		asm
+vs_3_0	opcode	setp_ne	ok		asm
+vs_3_0	opcode	callnz@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:38(6): error: if-statement condition must be scalar boolean)	legal=?	asm
+vs_3_0	opcode	if@p0	ok	legal=?	asm
+vs_3_0	srcmod	not@if.p0	ok	legal=?	asm
+vs_3_0	regtype	c_max=c255	ok		asm
+vs_3_0	regtype	r_max=r31	ok		asm
+vs_3_0	regtype	v_max=v15	ok		asm
+vs_3_0	regtype	b15	ok		asm
+vs_3_0	regtype	i15	ok		asm
+vs_3_0	opcode	if@temp-written-in-branch-only	ok	legal=?	asm
+vs_3_0	opcode	rep@temp-written-in-loop	ok	legal=?	asm
+vs_3_0	opcode	call@label-used-in-and-out-of-loop	translate_fail(front end: CALL to this label must be wrapped in LOOP/ENDLOOP (pos 120))	legal=? asm: /home/user/work/l6/sm/cases/c0448/x.asm:13: CALL to this label must be wrapped in LOOP/ENDLOOP	hand
+vs_3_0	addr	c[a0.x+n]	ok		asm
+vs_3_0	addr	c[a0.x]	ok		asm
+vs_3_0	addr	c[aL+n]	ok		asm
+vs_3_0	addr	c[a0.x+n]@aL-loop	ok	legal=?	asm
+vs_3_0	addr	v[aL]	ok		asm
+vs_3_0	addr	v[aL+n]	ok		asm
+vs_3_0	addr	v[a0.x]	ok	legal=?	asm
+vs_3_0	addr	o[aL]	ok		asm
+vs_3_0	addr	o[a0.x]	ok	legal=?	asm
+vs_3_0	addr	c[a0.x+n]@ctab-covering	ok		asm
+vs_3_0	addr	c[a0.x+n]@ctab-other-regs	ok		asm
+vs_3_0	addr	c[a0.x+n]@ctab-straddle	ok		asm
+vs_3_0	addr	c[aL+n]@ctab-other-regs	ok		asm
+ps_1_1	opcode	add	ok		asm
+ps_1_1	opcode	sub	ok		asm
+ps_1_1	opcode	mad	ok		asm
+ps_1_1	opcode	mul	ok		asm
+ps_1_1	opcode	lrp	ok		asm
+ps_1_1	opcode	mov	ok		asm
+ps_1_1	opcode	dp3	ok		asm
+ps_1_1	opcode	cnd	ok	hand:substring not found	asm
+ps_1_1	opcode	nop	ok		asm
+ps_1_1	opcode	tex	ok		asm
+ps_1_1	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0472/x.asm:3: Unknown instruction 'texcoord'	hand
+ps_1_1	opcode	texkill	ok		asm
+ps_1_1	opcode	texbem	ok		asm
+ps_1_1	opcode	texbeml	ok		asm
+ps_1_1	opcode	texreg2ar	translate_fail(mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;)		asm
+ps_1_1	opcode	texreg2gb	translate_fail(mojoshader-glsldk: TEXREG2GB unimplemented in glsl profile;)		asm
+ps_1_1	opcode	texm3x2pad	ok		asm
+ps_1_1	opcode	texm3x2tex	ok		asm
+ps_1_1	opcode	texm3x3pad	ok		asm
+ps_1_1	opcode	texm3x3tex	ok		asm
+ps_1_1	opcode	texm3x3spec	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:42(144): error: syntax error, unexpected ')')		asm
+ps_1_1	opcode	texm3x3vspec	ok		asm
+ps_1_1	opcode	def	ok		asm
+ps_1_1	srcmod	neg@mov	ok		asm
+ps_1_1	srcmod	neg@mad.s2	ok		asm
+ps_1_1	srcmod	abs@mov	ok		asm
+ps_1_1	srcmod	abs@mad.s2	ok		asm
+ps_1_1	srcmod	absneg@mov	ok		asm
+ps_1_1	srcmod	absneg@mad.s2	ok		asm
+ps_1_1	srcmod	bias@mov	ok		asm
+ps_1_1	srcmod	bias@mad.s2	ok		asm
+ps_1_1	srcmod	biasneg@mov	ok		asm
+ps_1_1	srcmod	biasneg@mad.s2	ok		asm
+ps_1_1	srcmod	sign@mov	ok		asm
+ps_1_1	srcmod	sign@mad.s2	ok		asm
+ps_1_1	srcmod	signneg@mov	ok		asm
+ps_1_1	srcmod	signneg@mad.s2	ok		asm
+ps_1_1	srcmod	comp@mov	ok		asm
+ps_1_1	srcmod	comp@mad.s2	ok		asm
+ps_1_1	srcmod	x2@mov	ok		asm
+ps_1_1	srcmod	x2@mad.s2	ok		asm
+ps_1_1	srcmod	x2neg@mov	ok		asm
+ps_1_1	srcmod	x2neg@mad.s2	ok		asm
+ps_1_1	dstmod	sat@mov	ok		asm
+ps_1_1	dstmod	shift_x2	ok		asm
+ps_1_1	dstmod	shift_x4	ok		asm
+ps_1_1	dstmod	shift_x8	ok	legal=?	asm
+ps_1_1	dstmod	shift_d2	ok		asm
+ps_1_1	dstmod	shift_d4	ok		asm
+ps_1_1	dstmod	shift_d8	ok	legal=?	asm
+ps_1_1	regtype	v	ok		asm
+ps_1_1	regtype	c	ok		asm
+ps_1_1	regtype	r	ok		asm
+ps_1_1	regtype	t	ok		asm
+ps_1_1	regtype	def	ok		asm
+ps_1_1	regtype	c_max=c7	ok		asm
+ps_1_1	opcode	tex@ctab-cube-sampler	ok		asm
+ps_1_1	opcode	tex@ctab-volume-sampler	ok		asm
+ps_1_2	opcode	add	ok		asm
+ps_1_2	opcode	sub	ok		asm
+ps_1_2	opcode	mad	ok		asm
+ps_1_2	opcode	mul	ok		asm
+ps_1_2	opcode	lrp	ok		asm
+ps_1_2	opcode	mov	ok		asm
+ps_1_2	opcode	dp3	ok		asm
+ps_1_2	opcode	cnd	ok	hand:substring not found	asm
+ps_1_2	opcode	nop	ok		asm
+ps_1_2	opcode	tex	ok		asm
+ps_1_2	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0530/x.asm:3: Unknown instruction 'texcoord'	hand
+ps_1_2	opcode	texkill	ok		asm
+ps_1_2	opcode	texbem	ok		asm
+ps_1_2	opcode	texbeml	ok		asm
+ps_1_2	opcode	texreg2ar	translate_fail(mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;)		asm
+ps_1_2	opcode	texreg2gb	translate_fail(mojoshader-glsldk: TEXREG2GB unimplemented in glsl profile;)		asm
+ps_1_2	opcode	texm3x2pad	ok		asm
+ps_1_2	opcode	texm3x2tex	ok		asm
+ps_1_2	opcode	texm3x3pad	ok		asm
+ps_1_2	opcode	texm3x3tex	ok		asm
+ps_1_2	opcode	texm3x3spec	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:42(144): error: syntax error, unexpected ')')		asm
+ps_1_2	opcode	texm3x3vspec	ok		asm
+ps_1_2	opcode	def	ok		asm
+ps_1_2	opcode	cmp	ok		asm
+ps_1_2	opcode	dp4	ok		asm
+ps_1_2	opcode	texreg2rgb	translate_fail(mojoshader-glsldk: TEXREG2RGB unimplemented in glsl profile;)		asm
+ps_1_2	opcode	texdp3	translate_fail(mojoshader-glsldk: TEXDP3 unimplemented in glsl profile;)		asm
+ps_1_2	opcode	texdp3tex	translate_fail(mojoshader-glsldk: TEXDP3TEX unimplemented in glsl profile;)		asm
+ps_1_2	opcode	texm3x3	translate_fail(front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36))	asm: /home/user/work/l6/sm/cases/c0548/x.asm:8: TEXM3X3 needs a 3D or Cubemap sampler	hand
+ps_1_2	srcmod	neg@mov	ok		asm
+ps_1_2	srcmod	neg@mad.s2	ok		asm
+ps_1_2	srcmod	abs@mov	ok		asm
+ps_1_2	srcmod	abs@mad.s2	ok		asm
+ps_1_2	srcmod	absneg@mov	ok		asm
+ps_1_2	srcmod	absneg@mad.s2	ok		asm
+ps_1_2	srcmod	bias@mov	ok		asm
+ps_1_2	srcmod	bias@mad.s2	ok		asm
+ps_1_2	srcmod	biasneg@mov	ok		asm
+ps_1_2	srcmod	biasneg@mad.s2	ok		asm
+ps_1_2	srcmod	sign@mov	ok		asm
+ps_1_2	srcmod	sign@mad.s2	ok		asm
+ps_1_2	srcmod	signneg@mov	ok		asm
+ps_1_2	srcmod	signneg@mad.s2	ok		asm
+ps_1_2	srcmod	comp@mov	ok		asm
+ps_1_2	srcmod	comp@mad.s2	ok		asm
+ps_1_2	srcmod	x2@mov	ok		asm
+ps_1_2	srcmod	x2@mad.s2	ok		asm
+ps_1_2	srcmod	x2neg@mov	ok		asm
+ps_1_2	srcmod	x2neg@mad.s2	ok		asm
+ps_1_2	dstmod	sat@mov	ok		asm
+ps_1_2	dstmod	shift_x2	ok		asm
+ps_1_2	dstmod	shift_x4	ok		asm
+ps_1_2	dstmod	shift_x8	ok	legal=?	asm
+ps_1_2	dstmod	shift_d2	ok		asm
+ps_1_2	dstmod	shift_d4	ok		asm
+ps_1_2	dstmod	shift_d8	ok	legal=?	asm
+ps_1_2	regtype	v	ok		asm
+ps_1_2	regtype	c	ok		asm
+ps_1_2	regtype	r	ok		asm
+ps_1_2	regtype	t	ok		asm
+ps_1_2	regtype	def	ok		asm
+ps_1_2	regtype	c_max=c7	ok		asm
+ps_1_2	opcode	tex@ctab-cube-sampler	ok		asm
+ps_1_2	opcode	tex@ctab-volume-sampler	ok		asm
+ps_1_3	opcode	add	ok		asm
+ps_1_3	opcode	sub	ok		asm
+ps_1_3	opcode	mad	ok		asm
+ps_1_3	opcode	mul	ok		asm
+ps_1_3	opcode	lrp	ok		asm
+ps_1_3	opcode	mov	ok		asm
+ps_1_3	opcode	dp3	ok		asm
+ps_1_3	opcode	cnd	ok	hand:substring not found	asm
+ps_1_3	opcode	nop	ok		asm
+ps_1_3	opcode	tex	ok		asm
+ps_1_3	opcode	texcoord	ok	asm: /home/user/work/l6/sm/cases/c0594/x.asm:3: Unknown instruction 'texcoord'	hand
+ps_1_3	opcode	texkill	ok		asm
+ps_1_3	opcode	texbem	ok		asm
+ps_1_3	opcode	texbeml	ok		asm
+ps_1_3	opcode	texreg2ar	translate_fail(mojoshader-glsldk: TEXREG2AR unimplemented in glsl profile;)		asm
+ps_1_3	opcode	texreg2gb	translate_fail(mojoshader-glsldk: TEXREG2GB unimplemented in glsl profile;)		asm
+ps_1_3	opcode	texm3x2pad	ok		asm
+ps_1_3	opcode	texm3x2tex	ok		asm
+ps_1_3	opcode	texm3x3pad	ok		asm
+ps_1_3	opcode	texm3x3tex	ok		asm
+ps_1_3	opcode	texm3x3spec	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:42(144): error: syntax error, unexpected ')')		asm
+ps_1_3	opcode	texm3x3vspec	ok		asm
+ps_1_3	opcode	def	ok		asm
+ps_1_3	opcode	cmp	ok		asm
+ps_1_3	opcode	dp4	ok		asm
+ps_1_3	opcode	texreg2rgb	translate_fail(mojoshader-glsldk: TEXREG2RGB unimplemented in glsl profile;)		asm
+ps_1_3	opcode	texdp3	translate_fail(mojoshader-glsldk: TEXDP3 unimplemented in glsl profile;)		asm
+ps_1_3	opcode	texdp3tex	translate_fail(mojoshader-glsldk: TEXDP3TEX unimplemented in glsl profile;)		asm
+ps_1_3	opcode	texm3x3	translate_fail(front end: TEXM3X3 needs a 3D or Cubemap sampler (pos 36))	asm: /home/user/work/l6/sm/cases/c0612/x.asm:8: TEXM3X3 needs a 3D or Cubemap sampler	hand
+ps_1_3	opcode	texm3x2depth	translate_fail(mojoshader-glsldk: TEXM3X2DEPTH unimplemented in glsl profile;)		asm
+ps_1_3	srcmod	neg@mov	ok		asm
+ps_1_3	srcmod	neg@mad.s2	ok		asm
+ps_1_3	srcmod	abs@mov	ok		asm
+ps_1_3	srcmod	abs@mad.s2	ok		asm
+ps_1_3	srcmod	absneg@mov	ok		asm
+ps_1_3	srcmod	absneg@mad.s2	ok		asm
+ps_1_3	srcmod	bias@mov	ok		asm
+ps_1_3	srcmod	bias@mad.s2	ok		asm
+ps_1_3	srcmod	biasneg@mov	ok		asm
+ps_1_3	srcmod	biasneg@mad.s2	ok		asm
+ps_1_3	srcmod	sign@mov	ok		asm
+ps_1_3	srcmod	sign@mad.s2	ok		asm
+ps_1_3	srcmod	signneg@mov	ok		asm
+ps_1_3	srcmod	signneg@mad.s2	ok		asm
+ps_1_3	srcmod	comp@mov	ok		asm
+ps_1_3	srcmod	comp@mad.s2	ok		asm
+ps_1_3	srcmod	x2@mov	ok		asm
+ps_1_3	srcmod	x2@mad.s2	ok		asm
+ps_1_3	srcmod	x2neg@mov	ok		asm
+ps_1_3	srcmod	x2neg@mad.s2	ok		asm
+ps_1_3	dstmod	sat@mov	ok		asm
+ps_1_3	dstmod	shift_x2	ok		asm
+ps_1_3	dstmod	shift_x4	ok		asm
+ps_1_3	dstmod	shift_x8	ok	legal=?	asm
+ps_1_3	dstmod	shift_d2	ok		asm
+ps_1_3	dstmod	shift_d4	ok		asm
+ps_1_3	dstmod	shift_d8	ok	legal=?	asm
+ps_1_3	regtype	v	ok		asm
+ps_1_3	regtype	c	ok		asm
+ps_1_3	regtype	r	ok		asm
+ps_1_3	regtype	t	ok		asm
+ps_1_3	regtype	def	ok		asm
+ps_1_3	regtype	c_max=c7	ok		asm
+ps_1_3	opcode	tex@ctab-cube-sampler	ok		asm
+ps_1_3	opcode	tex@ctab-volume-sampler	ok		asm
+ps_1_4	opcode	add	ok		asm
+ps_1_4	opcode	sub	ok		asm
+ps_1_4	opcode	mad	ok		asm
+ps_1_4	opcode	mul	ok		asm
+ps_1_4	opcode	lrp	ok		asm
+ps_1_4	opcode	mov	ok		asm
+ps_1_4	opcode	dp3	ok		asm
+ps_1_4	opcode	dp4	ok		asm
+ps_1_4	opcode	cmp	ok		asm
+ps_1_4	opcode	cnd	ok	hand:substring not found	asm
+ps_1_4	opcode	nop	ok		asm
+ps_1_4	opcode	def	ok		asm
+ps_1_4	opcode	phase	ok		asm
+ps_1_4	opcode	texcrd	ok		asm
+ps_1_4	opcode	texld	ok		asm
+ps_1_4	opcode	texkill	ok		asm
+ps_1_4	opcode	texdepth	translate_fail(mojoshader-glsldk: TEXDEPTH unimplemented in glsl profile;)		asm
+ps_1_4	opcode	bem	translate_fail(mojoshader-glsldk: BEM unimplemented in glsl profile;)		asm
+ps_1_4	srcmod	neg@mov	ok		asm
+ps_1_4	srcmod	neg@mad.s2	ok		asm
+ps_1_4	srcmod	abs@mov	ok		asm
+ps_1_4	srcmod	abs@mad.s2	ok		asm
+ps_1_4	srcmod	absneg@mov	ok		asm
+ps_1_4	srcmod	absneg@mad.s2	ok		asm
+ps_1_4	srcmod	bias@mov	ok		asm
+ps_1_4	srcmod	bias@mad.s2	ok		asm
+ps_1_4	srcmod	biasneg@mov	ok		asm
+ps_1_4	srcmod	biasneg@mad.s2	ok		asm
+ps_1_4	srcmod	sign@mov	ok		asm
+ps_1_4	srcmod	sign@mad.s2	ok		asm
+ps_1_4	srcmod	signneg@mov	ok		asm
+ps_1_4	srcmod	signneg@mad.s2	ok		asm
+ps_1_4	srcmod	comp@mov	ok		asm
+ps_1_4	srcmod	comp@mad.s2	ok		asm
+ps_1_4	srcmod	x2@mov	ok		asm
+ps_1_4	srcmod	x2@mad.s2	ok		asm
+ps_1_4	srcmod	x2neg@mov	ok		asm
+ps_1_4	srcmod	x2neg@mad.s2	ok		asm
+ps_1_4	srcmod	dz	ok		asm
+ps_1_4	srcmod	dw	ok		asm
+ps_1_4	dstmod	sat@mov	ok		asm
+ps_1_4	dstmod	shift_x2	ok		asm
+ps_1_4	dstmod	shift_x4	ok		asm
+ps_1_4	dstmod	shift_x8	ok		asm
+ps_1_4	dstmod	shift_d2	ok		asm
+ps_1_4	dstmod	shift_d4	ok		asm
+ps_1_4	dstmod	shift_d8	ok		asm
+ps_1_4	regtype	v	ok		asm
+ps_1_4	regtype	c	ok		asm
+ps_1_4	regtype	r	ok		asm
+ps_1_4	regtype	t	ok		asm
+ps_1_4	regtype	r_as_texdst	ok		asm
+ps_1_4	regtype	def	ok		asm
+ps_1_4	regtype	c_max=c7	ok		asm
+ps_1_4	regtype	r_max=r5	ok		asm
+ps_1_4	opcode	texld@ctab-cube-sampler	ok		asm
+ps_1_4	opcode	texld@ctab-volume-sampler	ok		asm
+ps_2_0	opcode	abs	ok		asm
+ps_2_0	opcode	add	ok		asm
+ps_2_0	opcode	cmp	ok		asm
+ps_2_0	opcode	crs	ok		asm
+ps_2_0	opcode	dp2add	ok		asm
+ps_2_0	opcode	dp3	ok		asm
+ps_2_0	opcode	dp4	ok		asm
+ps_2_0	opcode	exp	ok		asm
+ps_2_0	opcode	frc	ok		asm
+ps_2_0	opcode	log	ok		asm
+ps_2_0	opcode	lrp	ok		asm
+ps_2_0	opcode	mad	ok		asm
+ps_2_0	opcode	max	ok		asm
+ps_2_0	opcode	min	ok		asm
+ps_2_0	opcode	mov	ok		asm
+ps_2_0	opcode	mul	ok		asm
+ps_2_0	opcode	nop	ok		asm
+ps_2_0	opcode	nrm	ok		asm
+ps_2_0	opcode	pow	ok		asm
+ps_2_0	opcode	rcp	ok		asm
+ps_2_0	opcode	rsq	ok		asm
+ps_2_0	opcode	sincos	ok		asm
+ps_2_0	opcode	sub	ok		asm
+ps_2_0	opcode	texkill	ok		asm
+ps_2_0	opcode	texld	ok		asm
+ps_2_0	opcode	texldp	ok		asm
+ps_2_0	opcode	texldb	ok		asm
+ps_2_0	opcode	dcl	ok		asm
+ps_2_0	opcode	def	ok		asm
+ps_2_0	opcode	lit	ok	legal=?	asm
+ps_2_0	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c0736/x.asm:8: opcode 'DST' not available in this shader type.	hand
+ps_2_0	opcode	expp	ok	legal=?	asm
+ps_2_0	opcode	logp	ok	legal=?	asm
+ps_2_0	opcode	sgn	ok	legal=?	asm
+ps_2_0	opcode	m4x4	ok	legal=?	asm
+ps_2_0	opcode	m4x3	ok	legal=?	asm
+ps_2_0	opcode	m3x4	ok	legal=?	asm
+ps_2_0	opcode	m3x3	ok	legal=?	asm
+ps_2_0	opcode	m3x2	ok	legal=?	asm
+ps_2_0	srcmod	neg@mov	ok		asm
+ps_2_0	srcmod	neg@mad.s2	ok		asm
+ps_2_0	srcmod	abs@mov	ok	legal=?	asm
+ps_2_0	srcmod	abs@mad.s2	ok	legal=?	asm
+ps_2_0	srcmod	absneg@mov	ok	legal=?	asm
+ps_2_0	srcmod	absneg@mad.s2	ok	legal=?	asm
+ps_2_0	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0751/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0752/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0753/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0754/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0755/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0756/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0757/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0758/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0759/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0760/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0761/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0762/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0763/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0764/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_0	dstmod	sat@mov	ok		asm
+ps_2_0	dstmod	sat@texld	ok		asm
+ps_2_0	dstmod	sat@add	ok		asm
+ps_2_0	dstmod	pp@mov	ok		asm
+ps_2_0	dstmod	pp@texld	ok		asm
+ps_2_0	dstmod	pp@add	ok		asm
+ps_2_0	dstmod	centroid@dcl_texcoord	ok	legal=?	asm
+ps_2_0	usage	dcl_t0	ok		asm
+ps_2_0	usage	dcl_t7	ok		asm
+ps_2_0	usage	dcl_v0	ok		asm
+ps_2_0	usage	dcl_v1	ok		asm
+ps_2_0	sampler	2d:texld	ok		asm
+ps_2_0	sampler	2d:texldp	ok		asm
+ps_2_0	sampler	2d:texldb	ok		asm
+ps_2_0	sampler	2d:s15	ok		asm
+ps_2_0	sampler	cube:texld	ok		asm
+ps_2_0	sampler	cube:texldp	translate_fail(mojoshader-glsldk: TEXLDP on a cubemap;)		asm
+ps_2_0	sampler	cube:texldb	ok		asm
+ps_2_0	sampler	cube:s15	ok		asm
+ps_2_0	sampler	volume:texld	ok		asm
+ps_2_0	sampler	volume:texldp	ok		asm
+ps_2_0	sampler	volume:texldb	ok		asm
+ps_2_0	sampler	volume:s15	ok		asm
+ps_2_0	regtype	r	ok		asm
+ps_2_0	regtype	c	ok		asm
+ps_2_0	regtype	s	ok		asm
+ps_2_0	regtype	v	ok		asm
+ps_2_0	regtype	t	ok		asm
+ps_2_0	regtype	oC0	ok		asm
+ps_2_0	regtype	oC1	ok		asm
+ps_2_0	regtype	oC2	ok		asm
+ps_2_0	regtype	oC3	ok		asm
+ps_2_0	regtype	oC0-3	ok		asm
+ps_2_0	regtype	oDepth	ok		asm
+ps_2_0	regtype	def	ok		asm
+ps_2_0	regtype	c_max=c31	ok		asm
+ps_2_0	regtype	r_max=r11	ok		asm
+ps_2_0	srcmod	neg@texld.coord	translate_fail(front end: TEXLD src0 must have no modifiers (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0802/x.asm:9: TEXLD src0 must have no modifiers	hand
+ps_2_0	srcmod	abs@texld.coord	translate_fail(front end: TEXLD src0 must have no modifiers (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0803/x.asm:9: TEXLD src0 must have no modifiers	hand
+ps_2_0	srcmod	swizzle@texld.coord	translate_fail(front end: TEXLD src0 must not swizzle (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0804/x.asm:9: TEXLD src0 must not swizzle	hand
+ps_2_0	srcmod	swizzle@texld.sampler-src	ok	legal=?	asm
+ps_2_x	opcode	abs	ok		asm
+ps_2_x	opcode	add	ok		asm
+ps_2_x	opcode	cmp	ok		asm
+ps_2_x	opcode	crs	ok		asm
+ps_2_x	opcode	dp2add	ok		asm
+ps_2_x	opcode	dp3	ok		asm
+ps_2_x	opcode	dp4	ok		asm
+ps_2_x	opcode	exp	ok		asm
+ps_2_x	opcode	frc	ok		asm
+ps_2_x	opcode	log	ok		asm
+ps_2_x	opcode	lrp	ok		asm
+ps_2_x	opcode	mad	ok		asm
+ps_2_x	opcode	max	ok		asm
+ps_2_x	opcode	min	ok		asm
+ps_2_x	opcode	mov	ok		asm
+ps_2_x	opcode	mul	ok		asm
+ps_2_x	opcode	nop	ok		asm
+ps_2_x	opcode	nrm	ok		asm
+ps_2_x	opcode	pow	ok		asm
+ps_2_x	opcode	rcp	ok		asm
+ps_2_x	opcode	rsq	ok		asm
+ps_2_x	opcode	sincos	ok		asm
+ps_2_x	opcode	sub	ok		asm
+ps_2_x	opcode	texkill	ok		asm
+ps_2_x	opcode	texld	ok		asm
+ps_2_x	opcode	texldp	ok		asm
+ps_2_x	opcode	texldb	ok		asm
+ps_2_x	opcode	dcl	ok		asm
+ps_2_x	opcode	def	ok		asm
+ps_2_x	opcode	dsx	ok		asm
+ps_2_x	opcode	dsy	ok		asm
+ps_2_x	opcode	texldd	ok		asm
+ps_2_x	opcode	setp_gt	ok		asm
+ps_2_x	opcode	breakp	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:37(6): error: if-statement condition must be scalar boolean)	asm: /home/user/work/l6/sm/cases/c0839/x.asm:11: Swizzle specified for scalar register	hand
+ps_2_x	opcode	break	ok		asm
+ps_2_x	opcode	break_gt	ok		asm
+ps_2_x	opcode	call	ok		asm
+ps_2_x	opcode	callnz	ok		asm
+ps_2_x	opcode	else	ok		asm
+ps_2_x	opcode	endif	ok		asm
+ps_2_x	opcode	endloop	ok		asm
+ps_2_x	opcode	endrep	ok		asm
+ps_2_x	opcode	if	ok		asm
+ps_2_x	opcode	if_gt	ok		asm
+ps_2_x	opcode	label	ok		asm
+ps_2_x	opcode	loop	ok		asm
+ps_2_x	opcode	rep	ok		asm
+ps_2_x	opcode	ret	ok		asm
+ps_2_x	opcode	defb	ok		asm
+ps_2_x	opcode	defi	ok		asm
+ps_2_x	opcode	lit	ok	legal=?	asm
+ps_2_x	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c0857/x.asm:8: opcode 'DST' not available in this shader type.	hand
+ps_2_x	opcode	expp	ok	legal=?	asm
+ps_2_x	opcode	logp	ok	legal=?	asm
+ps_2_x	opcode	sgn	ok	legal=?	asm
+ps_2_x	opcode	m4x4	ok	legal=?	asm
+ps_2_x	opcode	m4x3	ok	legal=?	asm
+ps_2_x	opcode	m3x4	ok	legal=?	asm
+ps_2_x	opcode	m3x3	ok	legal=?	asm
+ps_2_x	opcode	m3x2	ok	legal=?	asm
+ps_2_x	srcmod	neg@mov	ok		asm
+ps_2_x	srcmod	neg@mad.s2	ok		asm
+ps_2_x	srcmod	abs@mov	ok	legal=?	asm
+ps_2_x	srcmod	abs@mad.s2	ok	legal=?	asm
+ps_2_x	srcmod	absneg@mov	ok	legal=?	asm
+ps_2_x	srcmod	absneg@mad.s2	ok	legal=?	asm
+ps_2_x	srcmod	not	ok	legal=?	asm
+ps_2_x	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0873/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0874/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0875/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0876/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0877/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0878/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0879/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0880/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0881/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0882/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0883/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0884/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0885/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c0886/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_2_x	dstmod	sat@mov	ok		asm
+ps_2_x	dstmod	sat@texld	ok		asm
+ps_2_x	dstmod	sat@add	ok		asm
+ps_2_x	dstmod	pp@mov	ok		asm
+ps_2_x	dstmod	pp@texld	ok		asm
+ps_2_x	dstmod	pp@add	ok		asm
+ps_2_x	dstmod	centroid@dcl_texcoord	ok	legal=?	asm
+ps_2_x	usage	dcl_t0	ok		asm
+ps_2_x	usage	dcl_t7	ok		asm
+ps_2_x	usage	dcl_v0	ok		asm
+ps_2_x	usage	dcl_v1	ok		asm
+ps_2_x	sampler	2d:texld	ok		asm
+ps_2_x	sampler	2d:texldp	ok		asm
+ps_2_x	sampler	2d:texldb	ok		asm
+ps_2_x	sampler	2d:texldd	ok		asm
+ps_2_x	sampler	2d:s15	ok		asm
+ps_2_x	sampler	cube:texld	ok		asm
+ps_2_x	sampler	cube:texldp	translate_fail(mojoshader-glsldk: TEXLDP on a cubemap;)		asm
+ps_2_x	sampler	cube:texldb	ok		asm
+ps_2_x	sampler	cube:texldd	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:33(10): error: no function with name 'textureCubeGrad')		asm
+ps_2_x	sampler	cube:s15	ok		asm
+ps_2_x	sampler	volume:texld	ok		asm
+ps_2_x	sampler	volume:texldp	ok		asm
+ps_2_x	sampler	volume:texldb	ok		asm
+ps_2_x	sampler	volume:texldd	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:33(10): error: no function with name 'texture3DGrad')		asm
+ps_2_x	sampler	volume:s15	ok		asm
+ps_2_x	regtype	r	ok		asm
+ps_2_x	regtype	c	ok		asm
+ps_2_x	regtype	s	ok		asm
+ps_2_x	regtype	v	ok		asm
+ps_2_x	regtype	t	ok		asm
+ps_2_x	regtype	oC0	ok		asm
+ps_2_x	regtype	oC1	ok		asm
+ps_2_x	regtype	oC2	ok		asm
+ps_2_x	regtype	oC3	ok		asm
+ps_2_x	regtype	oC0-3	ok		asm
+ps_2_x	regtype	oDepth	ok		asm
+ps_2_x	regtype	def	ok		asm
+ps_2_x	regtype	b0	ok		asm
+ps_2_x	regtype	i0	ok		asm
+ps_2_x	regtype	aL	ok		asm
+ps_2_x	regtype	l0	ok		asm
+ps_2_x	regtype	p0	ok		asm
+ps_2_x	regtype	p0:neg	ok		asm
+ps_2_x	regtype	p0:swz	ok	asm: /home/user/work/l6/sm/cases/c0931/x.asm:8: Swizzle specified for scalar register	hand
+ps_2_x	opcode	if_gt	ok		asm
+ps_2_x	opcode	break_gt	ok		asm
+ps_2_x	opcode	setp_gt	ok		asm
+ps_2_x	opcode	if_lt	ok		asm
+ps_2_x	opcode	break_lt	ok		asm
+ps_2_x	opcode	setp_lt	ok		asm
+ps_2_x	opcode	if_ge	ok		asm
+ps_2_x	opcode	break_ge	ok		asm
+ps_2_x	opcode	setp_ge	ok		asm
+ps_2_x	opcode	if_le	ok		asm
+ps_2_x	opcode	break_le	ok		asm
+ps_2_x	opcode	setp_le	ok		asm
+ps_2_x	opcode	if_eq	ok		asm
+ps_2_x	opcode	break_eq	ok		asm
+ps_2_x	opcode	setp_eq	ok		asm
+ps_2_x	opcode	if_ne	ok		asm
+ps_2_x	opcode	break_ne	ok		asm
+ps_2_x	opcode	setp_ne	ok		asm
+ps_2_x	opcode	callnz@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:39(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0950/x.asm:8: Swizzle specified for scalar register	hand
+ps_2_x	opcode	if@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:34(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0951/x.asm:8: Swizzle specified for scalar register	hand
+ps_2_x	srcmod	not@if.p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:34(7): error: operand of `!' must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c0952/x.asm:8: Swizzle specified for scalar register	hand
+ps_2_x	regtype	c_max=c31	ok		asm
+ps_2_x	regtype	r_max=r11	ok		asm
+ps_2_x	regtype	b15	ok		asm
+ps_2_x	regtype	i15	ok		asm
+ps_2_x	srcmod	neg@texld.coord	translate_fail(front end: TEXLD src0 must have no modifiers (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0957/x.asm:9: TEXLD src0 must have no modifiers	hand
+ps_2_x	srcmod	abs@texld.coord	translate_fail(front end: TEXLD src0 must have no modifiers (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0958/x.asm:9: TEXLD src0 must have no modifiers	hand
+ps_2_x	srcmod	swizzle@texld.coord	translate_fail(front end: TEXLD src0 must not swizzle (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c0959/x.asm:9: TEXLD src0 must not swizzle	hand
+ps_2_x	srcmod	swizzle@texld.sampler-src	ok	legal=?	asm
+ps_2_x	opcode	if@temp-written-in-branch-only	ok	legal=?	asm
+ps_2_x	opcode	rep@temp-written-in-loop	ok	legal=?	asm
+ps_2_x	opcode	call@label-used-in-and-out-of-loop	translate_fail(front end: CALL to this label must be wrapped in LOOP/ENDLOOP (pos 96))	legal=? asm: /home/user/work/l6/sm/cases/c0963/x.asm:11: CALL to this label must be wrapped in LOOP/ENDLOOP	hand
+ps_2_x	addr	c[aL+n]	translate_fail(front end: Relative addressing in pixel shader version < 3.0 (pos 100))	legal=? asm: /home/user/work/l6/sm/cases/c0964/x.asm:10: Relative addressing in pixel shader version < 3.0	hand
+ps_3_0	opcode	abs	ok		asm
+ps_3_0	opcode	add	ok		asm
+ps_3_0	opcode	cmp	ok		asm
+ps_3_0	opcode	crs	ok		asm
+ps_3_0	opcode	dp2add	ok		asm
+ps_3_0	opcode	dp3	ok		asm
+ps_3_0	opcode	dp4	ok		asm
+ps_3_0	opcode	exp	ok		asm
+ps_3_0	opcode	frc	ok		asm
+ps_3_0	opcode	log	ok		asm
+ps_3_0	opcode	lrp	ok		asm
+ps_3_0	opcode	mad	ok		asm
+ps_3_0	opcode	max	ok		asm
+ps_3_0	opcode	min	ok		asm
+ps_3_0	opcode	mov	ok		asm
+ps_3_0	opcode	mul	ok		asm
+ps_3_0	opcode	nop	ok		asm
+ps_3_0	opcode	nrm	ok		asm
+ps_3_0	opcode	pow	ok		asm
+ps_3_0	opcode	rcp	ok		asm
+ps_3_0	opcode	rsq	ok		asm
+ps_3_0	opcode	sincos	ok		asm
+ps_3_0	opcode	sub	ok		asm
+ps_3_0	opcode	texkill	ok		asm
+ps_3_0	opcode	texld	ok		asm
+ps_3_0	opcode	texldp	ok		asm
+ps_3_0	opcode	texldb	ok		asm
+ps_3_0	opcode	dcl	ok		asm
+ps_3_0	opcode	def	ok		asm
+ps_3_0	opcode	dsx	ok		asm
+ps_3_0	opcode	dsy	ok		asm
+ps_3_0	opcode	texldd	ok		asm
+ps_3_0	opcode	setp_gt	ok		asm
+ps_3_0	opcode	breakp	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:36(6): error: if-statement condition must be scalar boolean)	asm: /home/user/work/l6/sm/cases/c0998/x.asm:11: Swizzle specified for scalar register	hand
+ps_3_0	opcode	break	ok		asm
+ps_3_0	opcode	break_gt	ok		asm
+ps_3_0	opcode	call	ok		asm
+ps_3_0	opcode	callnz	ok		asm
+ps_3_0	opcode	else	ok		asm
+ps_3_0	opcode	endif	ok		asm
+ps_3_0	opcode	endloop	ok		asm
+ps_3_0	opcode	endrep	ok		asm
+ps_3_0	opcode	if	ok		asm
+ps_3_0	opcode	if_gt	ok		asm
+ps_3_0	opcode	label	ok		asm
+ps_3_0	opcode	loop	ok		asm
+ps_3_0	opcode	rep	ok		asm
+ps_3_0	opcode	ret	ok		asm
+ps_3_0	opcode	defb	ok		asm
+ps_3_0	opcode	defi	ok		asm
+ps_3_0	opcode	texldl	ok		asm
+ps_3_0	opcode	lit	ok	legal=?	asm
+ps_3_0	opcode	dst	translate_fail(front end: opcode 'DST' not available in this shader type. (pos 52))	legal=? asm: /home/user/work/l6/sm/cases/c1017/x.asm:8: opcode 'DST' not available in this shader type.	hand
+ps_3_0	opcode	expp	ok	legal=?	asm
+ps_3_0	opcode	logp	ok	legal=?	asm
+ps_3_0	opcode	sgn	ok	legal=?	asm
+ps_3_0	opcode	m4x4	ok	legal=?	asm
+ps_3_0	opcode	m4x3	ok	legal=?	asm
+ps_3_0	opcode	m3x4	ok	legal=?	asm
+ps_3_0	opcode	m3x3	ok	legal=?	asm
+ps_3_0	opcode	m3x2	ok	legal=?	asm
+ps_3_0	srcmod	neg@mov	ok		asm
+ps_3_0	srcmod	neg@mad.s2	ok		asm
+ps_3_0	srcmod	abs@mov	ok		asm
+ps_3_0	srcmod	abs@mad.s2	ok		asm
+ps_3_0	srcmod	absneg@mov	ok		asm
+ps_3_0	srcmod	absneg@mad.s2	ok		asm
+ps_3_0	srcmod	not	ok	legal=?	asm
+ps_3_0	srcmod	bias@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1033/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	bias@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1034/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	biasneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1035/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	biasneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1036/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	sign@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1037/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	sign@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1038/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	signneg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1039/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	signneg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1040/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	comp@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1041/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	comp@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1042/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	x2@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1043/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	x2@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1044/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	x2neg@mov	translate_fail(front end: illegal source mod for this Shader Model. (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1045/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	srcmod	x2neg@mad.s2	translate_fail(front end: illegal source mod for this Shader Model. (pos 72))	legal=? asm: /home/user/work/l6/sm/cases/c1046/x.asm:0: illegal source mod for this Shader Model.	hand
+ps_3_0	dstmod	sat@mov	ok		asm
+ps_3_0	dstmod	sat@texld	ok		asm
+ps_3_0	dstmod	sat@add	ok		asm
+ps_3_0	dstmod	pp@mov	ok		asm
+ps_3_0	dstmod	pp@texld	ok		asm
+ps_3_0	dstmod	pp@add	ok		asm
+ps_3_0	dstmod	centroid@dcl_texcoord	ok		asm
+ps_3_0	usage	0:position0@input	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 0 index 0;)	legal=?	asm
+ps_3_0	usage	1:blendweight0@input	ok	legal=?	asm
+ps_3_0	usage	2:blendindices0@input	ok	legal=?	asm
+ps_3_0	usage	3:normal0@input	ok	legal=?	asm
+ps_3_0	usage	4:psize0@input	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 4 index 0;)	legal=?	asm
+ps_3_0	usage	5:texcoord0@input	ok		asm
+ps_3_0	usage	6:tangent0@input	ok	legal=?	asm
+ps_3_0	usage	7:binormal0@input	ok	legal=?	asm
+ps_3_0	usage	8:tessfactor0@input	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 8 index 0;)	legal=?	asm
+ps_3_0	usage	9:positiont0@input	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 9 index 0;)	legal=? asm: /home/user/work/l6/sm/cases/c1063/x.asm:2: Expected usage index	hand
+ps_3_0	usage	10:color0@input	ok		asm
+ps_3_0	usage	11:fog0@input	ok		asm
+ps_3_0	usage	12:depth0@input	ok	legal=?	asm
+ps_3_0	usage	13:sample0@input	translate_fail(mojoshader-glsldk: glsldk: no varying location for usage 13 index 0;)	legal=?	asm
+ps_3_0	usage	texcoord9@v9	ok		asm
+ps_3_0	sampler	2d:texld	ok		asm
+ps_3_0	sampler	2d:texldp	ok		asm
+ps_3_0	sampler	2d:texldb	ok		asm
+ps_3_0	sampler	2d:texldl	ok		asm
+ps_3_0	sampler	2d:texldd	ok		asm
+ps_3_0	sampler	2d:s15	ok		asm
+ps_3_0	sampler	cube:texld	ok		asm
+ps_3_0	sampler	cube:texldp	translate_fail(mojoshader-glsldk: TEXLDP on a cubemap;)		asm
+ps_3_0	sampler	cube:texldb	ok		asm
+ps_3_0	sampler	cube:texldl	ok		asm
+ps_3_0	sampler	cube:texldd	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:32(10): error: no function with name 'textureCubeGrad')		asm
+ps_3_0	sampler	cube:s15	ok		asm
+ps_3_0	sampler	volume:texld	ok		asm
+ps_3_0	sampler	volume:texldp	ok		asm
+ps_3_0	sampler	volume:texldb	ok		asm
+ps_3_0	sampler	volume:texldl	ok		asm
+ps_3_0	sampler	volume:texldd	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:32(10): error: no function with name 'texture3DGrad')		asm
+ps_3_0	sampler	volume:s15	ok		asm
+ps_3_0	regtype	r	ok		asm
+ps_3_0	regtype	c	ok		asm
+ps_3_0	regtype	s	ok		asm
+ps_3_0	regtype	v	ok		asm
+ps_3_0	regtype	oC0	ok		asm
+ps_3_0	regtype	oC1	ok		asm
+ps_3_0	regtype	oC2	ok		asm
+ps_3_0	regtype	oC3	ok		asm
+ps_3_0	regtype	oC0-3	ok		asm
+ps_3_0	regtype	oDepth	ok		asm
+ps_3_0	regtype	def	ok		asm
+ps_3_0	regtype	b0	ok		asm
+ps_3_0	regtype	i0	ok		asm
+ps_3_0	regtype	aL	ok		asm
+ps_3_0	regtype	l0	ok		asm
+ps_3_0	regtype	p0	ok		asm
+ps_3_0	regtype	p0:neg	ok		asm
+ps_3_0	regtype	p0:swz	ok	asm: /home/user/work/l6/sm/cases/c1104/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	regtype	vPos	ok		asm
+ps_3_0	regtype	vFace	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:32(2): error: value of type float cannot be assigned to variable of type vec4)		asm
+ps_3_0	regtype	v9	ok		asm
+ps_3_0	opcode	if_gt	ok		asm
+ps_3_0	opcode	break_gt	ok		asm
+ps_3_0	opcode	setp_gt	ok		asm
+ps_3_0	opcode	if_lt	ok		asm
+ps_3_0	opcode	break_lt	ok		asm
+ps_3_0	opcode	setp_lt	ok		asm
+ps_3_0	opcode	if_ge	ok		asm
+ps_3_0	opcode	break_ge	ok		asm
+ps_3_0	opcode	setp_ge	ok		asm
+ps_3_0	opcode	if_le	ok		asm
+ps_3_0	opcode	break_le	ok		asm
+ps_3_0	opcode	setp_le	ok		asm
+ps_3_0	opcode	if_eq	ok		asm
+ps_3_0	opcode	break_eq	ok		asm
+ps_3_0	opcode	setp_eq	ok		asm
+ps_3_0	opcode	if_ne	ok		asm
+ps_3_0	opcode	break_ne	ok		asm
+ps_3_0	opcode	setp_ne	ok		asm
+ps_3_0	opcode	callnz@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:38(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1126/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	opcode	if@p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:33(6): error: if-statement condition must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1127/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	srcmod	not@if.p0	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:33(7): error: operand of `!' must be scalar boolean)	legal=? asm: /home/user/work/l6/sm/cases/c1128/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	regtype	c_max=c223	ok		asm
+ps_3_0	regtype	r_max=r31	ok		asm
+ps_3_0	regtype	v_max=v9	ok		asm
+ps_3_0	regtype	b15	ok		asm
+ps_3_0	regtype	i15	ok		asm
+ps_3_0	regtype	vFace.x	uam_fail(uam: GLSL compile failed (diagnostics on stderr) :: 0:32(2): error: value of type float cannot be assigned to variable of type vec4)	asm: /home/user/work/l6/sm/cases/c1134/x.asm:8: Swizzle specified for scalar register	hand
+ps_3_0	regtype	vFace@cmp	ok		asm
+ps_3_0	regtype	vPos.xy	ok		asm
+ps_3_0	srcmod	neg@texld.coord	translate_fail(front end: TEXLD src0 must have no modifiers (pos 64))	asm: /home/user/work/l6/sm/cases/c1137/x.asm:9: TEXLD src0 must have no modifiers	hand
+ps_3_0	srcmod	abs@texld.coord	translate_fail(front end: TEXLD src0 must have no modifiers (pos 64))	legal=? asm: /home/user/work/l6/sm/cases/c1138/x.asm:9: TEXLD src0 must have no modifiers	hand
+ps_3_0	srcmod	swizzle@texld.coord	ok		asm
+ps_3_0	srcmod	swizzle@texld.sampler-src	ok	legal=?	asm
+ps_3_0	opcode	if@temp-written-in-branch-only	ok	legal=?	asm
+ps_3_0	opcode	rep@temp-written-in-loop	ok	legal=?	asm
+ps_3_0	opcode	call@label-used-in-and-out-of-loop	translate_fail(front end: CALL to this label must be wrapped in LOOP/ENDLOOP (pos 96))	legal=? asm: /home/user/work/l6/sm/cases/c1143/x.asm:11: CALL to this label must be wrapped in LOOP/ENDLOOP	hand
+ps_3_0	addr	c[aL+n]@ctab-other-regs	ok		asm
+ps_3_0	addr	c[aL+n]	ok		asm
+ps_3_0	addr	v[aL]	ok		asm

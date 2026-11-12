@@ -8,6 +8,96 @@
    "commit": "ad5dff84830c2863c841f4b1f4e3df78c705b383",
    "tree_sha256": "e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361",
    "at": "/mojoshader"
+  },
+  {
+   "name": "vkd3d",
+   "repo": "fnv-nx-build",
+   "ref": "tools/vkd3d",
+   "commit": "fd97ca35ae29a3f79b7a3467fe99d1a3b4e94643",
+   "tree_sha256": "8ea2fb820f32b38bdb360b63d87f2802e3a9705bc39403b5837441a5a87382d9",
+   "at": "/vkd3d",
+   "upstream": "https://gitlab.winehq.org/wine/vkd3d.git 0afe7d0aad6eabca21c208be609d3a5670e8ab41 (libs/vkd3d-shader/d3dbc.c only: the file sm_xref.py reads)",
+   "use": "render/shaders/total/sm_table.py (sm_xref vkd3d opcode tables), not a build input"
+  },
+  {
+   "name": "wine-sm1",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-sm1",
+   "commit": "0a52e82db01433f1b0363c52cf68920ba059a1b1",
+   "tree_sha256": "70046f62058eb7c7addb664ce1e8438dacb68273abd4b23863e048e28addd530",
+   "at": "/wine",
+   "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/shader_sm1.c, dlls/d3dcompiler_43/asmparser.c: the files sm_xref.py reads)",
+   "use": "render/shaders/total/sm_table.py, not a build input"
+  },
+  {
+   "name": "msdocs-sm",
+   "repo": "fnv-nx-build",
+   "ref": "tools/msdocs-sm",
+   "commit": "e18183f8c5536262d44677ab77398e320e970cfc",
+   "tree_sha256": "6bfddc8df0a32bd305edb2d486cd63df918775a0de4293b1f769c1130efad166",
+   "at": "/ms",
+   "upstream": "text rendering (learn.microsoft.com) of 172 pages of MicrosoftDocs/win32 desktop-src/direct3dhlsl, the D3D9 shader assembly reference; fetched 2026-11 by the L6 worker",
+   "use": "render/shaders/total/sm_table.py, not a build input"
+  },
+  {
+   "name": "wine-wined3d",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-wined3d",
+   "commit": "9fa10f835a288b72b28da6ea70bcb233793ef0fc",
+   "tree_sha256": "d5c1d2a96a627fadda5f3c162c0121d391d3562e78931b9017b2f74cb397ec29",
+   "at": "/wine-wined3d",
+   "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/glsl_shader.c, shader.c, shader_sm1.c, wined3d_private.h)",
+   "use": "reference implementation for translator semantics (owner decision: Wine 9.0 is the accepted reference), not a build input"
+  },
+  {
+   "name": "wine-9.0",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-9.0",
+   "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+   "tree_sha256": "3ac9a4a08e2692795769c34c62071796084c642ccca4e611684b1e79fe8b4e84",
+   "at": "/wine-9.0",
+   "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (the whole git tree, via github.com/wine-mirror/wine; MIRROR.md in the branch)",
+   "use": "citation source of the render tests and of verify/wine_fixme.tsv (wine-9.0:<path>:<line>), read-only, not a build input"
+  },
+  {
+   "name": "docs-d3d9",
+   "repo": "fnv-nx-build",
+   "ref": "tools/docs-d3d9",
+   "commit": "efe9ae7f753e2bb0a24ed4850063811d3a2bbc31",
+   "tree_sha256": "135b42600e94a2a7880edcf21b7c4be1159d7b9806f967b24a636702eca20588",
+   "at": "/docs-d3d9",
+   "upstream": "MicrosoftDocs/sdk-api @ 656e9656bfaef34dd29cd7ee9e1146aec17e924c (d3d9, d3d9caps, d3d9helper) and MicrosoftDocs/win32 @ bc82a65f74ef2c4f2f44a3d7db5f7cfebfdc3583 (desktop-src/direct3d9), 1987 pages + nist/ (FIPS 180-4 SHA-256 examples PDF and CAVP vectors SHA256ShortMsg/LongMsg/Monte, 129 byte-oriented vectors re-checked against hashlib: 0 mismatches), MANIFEST.tsv = URL, source commit, retrieval date 2026-11-12, sha256 per page. Not in either repository: the page of IDirect3DSwapChain9Ex::GetPresentStats",
+   "use": "citation source of the MS-class render tests, read-only, not a build input"
+  },
+  {
+   "name": "libnx",
+   "repo": "fnv-nx-build",
+   "ref": "tools/libnx",
+   "commit": "518bf11ad6a52149e43fbd0fa83b0087a430f446",
+   "tree_sha256": "28642e369e75dfe075aac6ee427a82ee9e0cbbe6941be36b0e977da3c96d9298",
+   "at": "/libnx",
+   "upstream": "switchbrew/libnx (pin by L6A)",
+   "use": "reference of the deko3d / libnx call contracts of the dk tests (external kind: pinned header + path)"
+  },
+  {
+   "name": "deko3d",
+   "repo": "fnv-nx-build",
+   "ref": "tools/deko3d-373bfd43d8b2",
+   "commit": "efc4858975273ddae82c03745e5c2d8b2bdda893",
+   "tree_sha256": "5a51dcc3f4b66baef807a77c18b80366fee145031946e3973b4adbd8ed32defe",
+   "at": "/deko3d",
+   "upstream": "devkitPro/deko3d (pin by L6A)",
+   "use": "reference of the deko3d call contracts of the dk tests (external kind: pinned header + path)"
+  },
+  {
+   "name": "envprobe-bin",
+   "repo": "fnv-nx-build",
+   "ref": "tools/envprobe-bin",
+   "commit": "594dedc222721bbc5291e6662f99de099e6e1194",
+   "tree_sha256": "d8df9324b68abe085118eaa8498a8b2ca923c527b2eb6d346493241adc76dfe6",
+   "at": "/envprobe-bin",
+   "upstream": "built by tests/l6/env/make_env.py + render/tools/rec/build.sh (i686-w64-mingw32 13.2.0-6ubuntu1+26.1, --no-insert-timestamp, DLL image base 0x10000000: byte-reproducible, two builds in different directories give one sha256) at claude/fnv-l6-render-farm-env; Wine 9.0~repack-4build3, Mesa llvmpipe 25.2.8; files: envprobe2.exe, d3d9.dll (recorder), ENV_PIN.txt, env_handheld.tsv, env_docked.tsv",
+   "use": "binaries that record render/d3d9/env/env_*.tsv (sha256 in ENV_PIN.txt); not a build input"
   }
  ]
 }
