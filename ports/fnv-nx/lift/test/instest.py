@@ -23,8 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STUBX = 'extern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 
-def blocked_on(what):
-    print('BLOCKED: needs ' + what); print('blocker: L4 shared model (boot machine) and the platform root; this test defines no clock'); sys.exit(3)
+TSC = tuple(int(re.search(r'#define FNVL_TSC_%s (\d+)u' % k, open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt', 'fnvl_abi.h')).read()).group(1)) for k in ('NUM', 'DEN'))
+
 def blocked(err):
     """Exit status 3 = BLOCKED. The platform and libc symbols (lookup_export, ExitProcess, UnhandledExceptionFilter, the raise backend, the TLS slot, the host clock, memcpy, memset)
     are product files: a test defines none of them (CLAUDE.md, no doubles in tests). An undefined one means the product root is not linkable yet."""
@@ -276,7 +276,7 @@ class Arm(World):
         for k, v in zip(GREG, r0): uc.reg_write(k, v)      # guest registers live in w19..w26, the cpu pointer in x27
         if E['base'] in ('popf', 'popfd'): s.ensure(r0[4], 4, False); uc.mem_write(r0[4], struct.pack('<I', st['stk']))
         uc.reg_write(UC_ARM64_REG_X27, CPU); uc.reg_write(UC_ARM64_REG_SP, ASTACK); uc.reg_write(UC_ARM64_REG_X30, RETPAD)
-        try: uc.emu_start(s.sym['L_%08x' % E['addr']], RETPAD, timeout=5000000, count=200000)
+        try: uc.emu_start(s.sym[('W_%08x' if E['base'] == 'rdtsc' else 'L_%08x') % E['addr']], RETPAD, timeout=5000000, count=200000)
         except UcError as e: return dict(fault='%s at %s' % (e, s.bad))
         pc = uc.reg_read(UC_ARM64_REG_PC)
         if s.ev is None and pc != RETPAD: return dict(fault='budget')
@@ -285,7 +285,8 @@ class Arm(World):
             s.ensure(r0[4], 4, False); eip = struct.unpack('<I', bytes(uc.mem_read(r0[4], 4)))[0] if E['base'] in ('ret', 'retn') else 'returned'
         else: eip = s.ev[1] if s.ev[0] not in ('fnvl_raise', 'fnvl_raise_av') or s.ev[2] == 2 else 'trap%d' % s.ev[2]
         ftop, fcw, fc = struct.unpack_from('<3I', b, 36); fxv = [struct.unpack_from('<QII', b, 256 + 16 * i) for i in range(8)]
-        return dict(regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 176)[0] & 0xcd5, eflx=struct.unpack_from('<I', b, 384)[0] & 0x240000, mem=s.written(), xmm=[int.from_bytes(b[48 + 16 * i:64 + 16 * i], 'little') for i in range(8)],
+        clk = struct.unpack('<2Q', bytes(uc.mem_read(CLKSLOT, 16))) if E['base'] == 'rdtsc' else None
+        return dict(clk=clk, regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 176)[0] & 0xcd5, eflx=struct.unpack_from('<I', b, 384)[0] & 0x240000, mem=s.written(), xmm=[int.from_bytes(b[48 + 16 * i:64 + 16 * i], 'little') for i in range(8)],
                     fp=dict(top=ftop & 7, fcw=fcw, cc=fc & 0x4500, valid=sum(1 << i for i in range(8) if fxv[i][2]), st=dict(enumerate(fxv)), wr=sorted(s.writes)),
                     mxcsr=struct.unpack_from('<I', b, 180)[0], mm=[img80(k, v, e)[0] for v, e, k in fxv], mme=[img80(k, v, e)[1] & 0xffff for v, e, k in fxv], mtop=ftop & 7, mvalid=sum(1 << i for i in range(8) if fxv[i][2]))
 def gen_state(E, i, att, xd=None):
@@ -393,13 +394,12 @@ def model_fix(E, st, o, c, X):
         import ctypes; out = (ctypes.c_uint32 * 4)(); G['cpum'].fnvl_cpuid(ctypes.c_uint32(st['regs'][0]), ctypes.c_uint32(st['regs'][1]), out)
         for ri, oi in ((0, 0), (3, 1), (1, 2), (2, 3)): o['regs'][ri] = out[oi]
     elif b == 'rdtsc':
-        # Owner decision: rdtsc reads the platform's monotonic timer; ticks = fnvl_rdtsc's conversion of fnvl_host_ticks_ns (rt/cpumodel.c). The clock is the PLATFORM's symbol, which runs on the
-        # L4 boot machine's shared model (no syscall exists under bare Unicorn); this test defines no clock. The model that runs the state returns c['clk'] = (ns read before, ns read after) of
-        # that clock; a run without it (bare Unicorn) is BLOCKED.
-        if 'clk' not in c: blocked_on('the L4 shared model clock (platform fnvl_host_ticks_ns) as c[\'clk\']')
+        # Owner decision: rdtsc reads the platform's monotonic timer; ticks = ns * FNVL_TSC_NUM / FNVL_TSC_DEN (rt/fnvl_abi.h, read here: one definition). The function is run inside a wrapper
+        # W_<addr> that reads the clock the runtime uses (fnvl_host_ticks_ns) before and after it and stores both (build(), run()): c['clk'] = (t0, t1). The clock is the platform's symbol
+        # (the L4 boot machine's virtual clock is its single time source), so the bracket is exact; under bare Unicorn the link has no such symbol and the test is BLOCKED.
         t = c['regs'][0] | c['regs'][2] << 32; lo, hi = c['clk']
-        conv = lambda ns: ns // 10 * 21 + ns % 10 * 21 // 10           # the definition in rt/cpumodel.c, restated: one multiplication by 21/10 on a monotonic clock
-        if not conv(lo) <= t <= conv(hi): return 'diff', 'rdtsc outside conv(ns) of the platform clock read before and after', '%x' % t, '[%x,%x]' % (conv(lo), conv(hi))
+        conv = lambda ns: ns // TSC[1] * TSC[0] + ns % TSC[1] * TSC[0] // TSC[1]
+        if not conv(lo) <= t <= conv(hi): return 'diff', 'rdtsc outside conv(ns) of the clock read before and after', '%x' % t, '[%x,%x]' % (conv(lo), conv(hi))
         if t < G.get('rdtsc_last', 0): return 'diff', 'rdtsc went backwards', '%x' % t, '%x' % G['rdtsc_last']
         G['rdtsc_last'] = t
         o['regs'][0], o['regs'][2] = c['regs'][0], c['regs'][2]
@@ -474,12 +474,16 @@ def compare(E, st, o, c, X):
     if o['xmm'] and o['xmm'] != c['xmm']:
         i = next(i for i in range(8) if o['xmm'][i] != c['xmm'][i]); return 'diff', 'xmm%d' % i, '%032x' % c['xmm'][i], '%032x' % o['xmm'][i]
     return ('x87-prec',) + prec if prec else ('equal', '', '', '')
+CLKSLOT = CPU + 0x300      # t0, t1 of the rdtsc bracket (past struct cpu)
+RDTSC_WRAP = ('\nextern "C" unsigned long long fnvl_host_ticks_ns(void);\n'
+              'extern "C" void W_%08x(void) { unsigned long long t0 = fnvl_host_ticks_ns(); L_%08x(); unsigned long long t1 = fnvl_host_ticks_ns(); '
+              '((volatile unsigned long long *)0x' + '%x' % CLKSLOT + ')[0] = t0; ((volatile unsigned long long *)0x' + '%x' % CLKSLOT + ')[1] = t1; }\n')
 def build(batch_id, items, work):
     """items [(addr, text)] -> (elf or None, {addr: reason}); failing functions are found from g++'s 'In function' lines, else by bisection"""
     env = dict(os.environ, LC_ALL='C'); bad = {}; objs = []; d = '%s/b%d' % (work, batch_id); os.makedirs(d, exist_ok=True)
     def comp(its):
         if not its: return
-        cpp = '%s/%d.cpp' % (d, len(objs)); o = cpp[:-4] + '.o'; open(cpp, 'w').write(G['L'].PRELUDE + STUBX + '\n'.join(t for a, t in its))
+        cpp = '%s/%d.cpp' % (d, len(objs)); o = cpp[:-4] + '.o'; open(cpp, 'w').write(G['L'].PRELUDE + STUBX + '\n'.join(t for a, t in its) + ''.join(RDTSC_WRAP % (a, a) for a, t in its if 'fnvl_rdtsc' in t))
         r = subprocess.run(['aarch64-linux-gnu-g++'] + FLAGS + [cpp, '-o', o], capture_output=True, text=True, env=env)
         if r.returncode == 0: objs.append(o); return
         why = {int(m.group(2), 16): re.findall(r'error: ([^\n]*)', r.stderr[m.start():])[:1] for m in re.finditer(r'In function [^\n]*?(L_([0-9a-f]{8}))', r.stderr)}

@@ -50,10 +50,10 @@ void fnvl_cpuid(u32 leaf, u32 sub, u32 o[4]) {
     case 4: if (sub < 4) for (i = 0; i < 4; i++) o[i] = L4[sub][i]; break;
     }
 }
-/* nominal TSC frequency of the model: 2.1 GHz (the host's "@ 2.10GHz"): ticks = ns * 21 / 10 (no 64-bit overflow for 27 years of uptime) */
+/* nominal TSC frequency of the model: ticks = ns * FNVL_TSC_NUM / FNVL_TSC_DEN (rt/fnvl_abi.h; 2.1 GHz; no 64-bit overflow for 27 years of uptime) */
 unsigned long long fnvl_rdtsc(void) {
     u64 ns = fnvl_host_ticks_ns();
-    return ns / 10 * 21 + ns % 10 * 21 / 10;
+    return ns / FNVL_TSC_DEN * FNVL_TSC_NUM + ns % FNVL_TSC_DEN * FNVL_TSC_NUM / FNVL_TSC_DEN;
 }
 
 /* msvcrt!_adjust_fdiv (a data export: the import slot holds the address of this object). The C runtime sets it to 1 at start-up on a CPU with the
