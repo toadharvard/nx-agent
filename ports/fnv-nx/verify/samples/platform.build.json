@@ -76,7 +76,10 @@
   {
    "name": "fnvnx_dispatch",
    "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
-   "args": {}
+   "args": {},
+   "inputs": [
+    "ports/fnv-nx/toolchain/cpweak.h"
+   ]
   },
   {
    "name": "fnvnx_addr",

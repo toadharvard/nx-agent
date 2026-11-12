@@ -63,7 +63,7 @@ PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "
 # The plugins the gate `datamodel` requires in the CC stage of every native guest C++ unit (RECIPE.md, "Gate rule"); a subset of PLUGIN_SOURCES.
 GUEST_CXX_PLUGINS = ("fnvnx_ftoi", "fnvnx_order")
 PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc", _T + "cpweak.h"], "fnvnx_names": [_T + "cpweak.h"], "fnvnx_sdd": [_T + "cpweak.h"],
-                 "fnvnx_pi": [_T + "cpweak.h"]}   # cpweak.h: the C++ front end's symbols are weak (docs/TOOLCHAIN.md, CC1PLUS-SYMS)
+                 "fnvnx_pi": [_T + "cpweak.h"], "fnvnx_dispatch": [_T + "cpweak.h"]}   # cpweak.h: the C++ front end's symbols are weak (docs/TOOLCHAIN.md, CC1PLUS-SYMS)
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
 # Flags of the game's C++ that fix its semantics (compile.sh); fnvnx_sdd needs -DFNVNX_SDD=1 and -fno-devirtualize.
