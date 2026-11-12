@@ -11,7 +11,7 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               Gate green iff exit 0, valid result, name equal, status green and certified == universe (completeness of
               certificates, not a run counter; certified > universe is invalid). Verdict green iff >=1 gate and all gates green.
               over_budget is reported only; it never changes the verdict.
-              With --cache, a GREEN gate result is stored under a key of (gate name, argv, commit, tree, env id) and a gate whose key
+              With --cache, a GREEN gate result is stored under a key of (gate name, argv, tree, env id) and a gate whose key
               is stored is not run (recomputed 0 in its row; otherwise 1 + the "recomputed" the gate reports). A gates file with
               "warm_budget_s": B adds the gate "warm" (universe 2) after a green run: every gate again on the same cache; certified
               parts: (1) nothing recomputed, (2) that rerun took at most B s. Verdict key "warm": {seconds, recomputed, budget_s}.
@@ -108,11 +108,12 @@ def _gate_result(g, out_dir, rc):
         return "red", u, c, "gate status red: " + r["detail"]
     return "green", u, c, ""
 
-def _gate_key(g, commit, tree, env_id):
-    """Key of a gate's result: everything a gate may read (the commit and its tree, the declared environment) and its own
-    definition. A gate is a deterministic function of these (the gate contract above); the key covers the gate, never the clock."""
+def _gate_key(g, tree, env_id):
+    """Key of a gate's result: everything a gate may read (the TREE of the commit, the declared environment) and its own definition.
+    Not the commit: two commits with one tree (a no-op merge) are one input. A gate reads the checkout, which is the tree; a gate
+    that reads GATE_COMMIT itself is outside this contract (owner of gate rule: L1)."""
     return hashlib.sha256(cas.canon({"format": "fnvnx-gate-cache/1", "gate": g["name"], "argv": g["argv"], "result": g["result"],
-                                     "commit": commit, "tree": tree, "env_id": env_id})).hexdigest()
+                                     "tree": tree, "env_id": env_id})).hexdigest()
 
 def _gate_hit(cache, key, g, out):
     """Copy the stored result file of a GREEN gate into OUT; True on a hit. A red result is never stored (it is recomputed)."""
@@ -176,7 +177,7 @@ def cmd_run(a):
             out = os.path.join(work, "%s-%d" % (tag, len(rows)))
             os.makedirs(out)
             t0 = time.time()
-            ck = _gate_key(g, commit, tree, o.get("--env-id")) if cache else None
+            ck = _gate_key(g, tree, o.get("--env-id")) if cache else None
             hit = _gate_hit(cache, ck, g, out) if cache else False
             recomputed = 0
             try:

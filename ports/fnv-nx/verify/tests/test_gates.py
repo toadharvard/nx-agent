@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for verify/gate_pure.py, verify/gate_tests.py, verify/gates.json and verify/l1.py.
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Uses temp git repositories."""
+import itertools
 import json
 import os
 import re
@@ -130,7 +131,7 @@ for n in ("test_z", "test_m", "test_a"):
     put(d, "verify/tests/%s.py" % n, "open(%r, 'a').write(%r + '\\n')\n" % (log, n))
 put(d, "link/tests/test_k.py", "open(%r, 'a').write('link\\n')\n" % log)
 rc, r, e = tests(d, ("verify", "link"))
-order = open(log).read().split()
+order = [k for k, _ in itertools.groupby(open(log).read().split())]   # every file ran twice (testdet), one after the other
 check("tests: deterministic order (directory argument order, then name)", rc == 0 and order == ["test_a", "test_m", "test_z", "link"]
       and r["universe"] == 4, (rc, order, r))
 
@@ -150,8 +151,8 @@ put(d, "verify/tests/test_leaves_fails.py", "import sys, tempfile\nopen(%r, 'a')
 rc, r, e = tests(d)
 left = open(log).read().split()
 check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed", rc != 0 and r["certified"] == 1
-      and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
-      and all(os.path.basename(os.path.dirname(x)).startswith("selftest-") for x in left), (rc, r, left))
+      and len(left) == 4 and not any(os.path.exists(x) for x in left)
+      and all(x.startswith("/nxroot/tmp/left-") for x in left), (rc, r, left))
 
 d = tmp("tests-env")
 put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os.environ if k.startswith('GATE_')] else 0)\n")
@@ -172,7 +173,7 @@ check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and 
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
       and dirs_pure == ["contract", "link", "rules", "lift"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift"]
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
-      and byname["selftests"]["argv"][:5] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "3"], spec)
+      and byname["selftests"]["argv"][:5] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "2"], spec)
 
 # ---- l1
 def l1(*a):
@@ -338,7 +339,9 @@ d = tmp("tests-cache")
 cache = os.path.join(d, "cache")
 RL = os.path.join(tmp("rl"), "ran.log")
 mk(d, test_a="open(%r, 'a').write('a\\n')\n" % RL, test_b="open(%r, 'a').write('b\\n')\n" % RL)
-ran = lambda: open(RL).read().split() if os.path.exists(RL) else []
+def ran():  # every cold execution runs twice (testdet): one entry per execution PAIR
+    got = open(RL).read().split() if os.path.exists(RL) else []
+    return sorted(k for k in set(got) for _ in range(got.count(k) // 2))
 kfiles = lambda: sorted(os.listdir(os.path.join(cache, "selftests"))) if os.path.isdir(os.path.join(cache, "selftests")) else []
 rc, r, e = tests_c(d, cache)
 check("tests cache: first run executes every file and stores one key per file", rc == 0 and sorted(ran()) == ["a", "b"]
@@ -355,7 +358,7 @@ rc, r, e = tests_c(d, cache)
 check("tests cache: an mtime change is not a change of content", r["recomputed"] == 0 and len(ran()) == 4, (r, ran()))
 mk(d, test_a="open(%r, 'a').write('a\\n')\n# changed\n" % RL)
 rc, r, e = tests_c(d, cache)
-check("tests cache: a changed test file reruns only itself", rc == 0 and ran()[4:] == ["a"] and r["recomputed"] == 1
+check("tests cache: a changed test file reruns only itself", rc == 0 and ran().count("a") == 3 and ran().count("b") == 2 and r["recomputed"] == 1
       and [f["cached"] for f in r["files"]] == [False, True], (r, ran()))
 rc, r, e = tests_c(d, cache)
 check("tests cache: and is then cached again", r["recomputed"] == 0 and len(ran()) == 5, (r, ran()))
@@ -376,14 +379,33 @@ rc, r, e = tests_c(d, cache)
 check("tests: a test runs in a view without the other test files", rc == 0 and r["universe"] == 3 and r["certified"] == 3, (rc, r, e))
 d = tmp("tests-cache-closure")
 cache = os.path.join(d, "cache")
-mk(d, test_p="pass\n", test_r="pass\n",
-   test_q="import os, sys\nsys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\nimport test_p\n")
+Q = "import os, sys\nsys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\nimport test_p\n"
+mk(d, test_p="pass\n", test_r="pass\n", test_q=Q, test_s=Q)
+put(d, "verify/tests/oracle.json", json.dumps({"format": "fnvnx-oracle/1", "tests": {"test_q.py": {"uses": ["verify/tests/test_p.py"]}}}))
 rc, r, e = tests_c(d, cache)
-check("tests cache: a test that imports a sibling test runs with it in its view", rc == 0 and r["certified"] == 3 and r["recomputed"] == 3, (rc, r, e))
+st = {f["name"][-9:]: f["status"] for f in r["files"]}
+check("tests: a declared sibling is in the view, an undeclared one is missing and the test is red",
+      st == {"test_p.py": "passed", "test_q.py": "passed", "test_r.py": "passed", "test_s.py": "failed"} and rc != 0, (rc, r, e))
 mk(d, test_p="pass\n# changed\n")
 rc, r, e = tests_c(d, cache)
-check("tests cache: a changed test reruns itself and the tests that import it, not the others",
-      rc == 0 and [(f["name"][-9:], f["cached"]) for f in r["files"]] == [("test_p.py", False), ("test_q.py", False), ("test_r.py", True)], (r, e))
+check("tests cache: a changed test reruns itself and the tests that declare it, not the others",
+      [(f["name"][-9:], f["cached"]) for f in r["files"]] == [("test_p.py", False), ("test_q.py", False), ("test_r.py", True), ("test_s.py", True)], (r, e))
+
+d = tmp("tests-det")
+cache = os.path.join(d, "cache")
+mk(d, test_ok="print('PASS x')\n", test_flaky="import random\nprint('PASS ' + str(random.random()))\n",
+   test_timing="import time\nprint('PASS t')\nprint('INFO %r' % time.time())\n")
+rc, r, e = tests_c(d, cache)
+check("testdet: a test whose PASS/FAIL record differs between its two runs is red and not cached; timing info is not the record",
+      rc != 0 and r["uncertified"] == ["verify/tests/test_flaky.py"] and r["testdet"]["nondeterministic"] == ["verify/tests/test_flaky.py"]
+      and "nondeterministic" in r["detail"] and len(os.listdir(os.path.join(cache, "selftests"))) == 2, (rc, r, e))
+
+d = tmp("tests-hermetic")
+mk(d, test_net="import socket, sys\ns = socket.socket()\ns.settimeout(2)\n"
+   "try:\n    s.connect(('1.1.1.1', 80))\nexcept OSError:\n    sys.exit(0)\nsys.exit(1)\n",
+   test_env="import os, sys\nsys.exit(0 if (os.environ.get('TZ'), os.environ.get('LC_ALL'), os.getcwd()) == ('UTC', 'C', '/nxroot/view') and not os.environ.get('HTTPS_PROXY') else 1)\n")
+rc, r, e = tests(d, extra=())
+check("tests: a test runs without network, with the fixed environment and the fixed cwd", rc == 0 and r["certified"] == 2, (rc, r, e))
 
 # env.json of the checkout is part of the key
 e1 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")
@@ -414,7 +436,7 @@ rc1, r1, _ = tests_c(d, cache)
 rc2, r2, _ = tests_c(d, cache)
 nlog = lambda: len(open(NL).read())
 check("tests cache: a failing file stays red from the cache with the same failure text, and is not rerun", rc1 != 0 and rc2 != 0
-      and nlog() == 1 and r2["recomputed"] == 0 and r2["uncertified"] == ["verify/tests/test_bad.py"] and r2["certified"] == 1
+      and nlog() == 2 and r2["recomputed"] == 0 and r2["uncertified"] == ["verify/tests/test_bad.py"] and r2["certified"] == 1
       and "boom-text" in r1["detail"] and r1["detail"].split("first failure")[1] == r2["detail"].split("first failure")[1], (r1, r2))
 put(d, "verify/tests/test_bad.py", "pass\n")
 rc3, r3, _ = tests_c(d, cache)

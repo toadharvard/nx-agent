@@ -15,9 +15,9 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   KEY(test) = sha256 over: the test's repo-relative path, the declared environment (envcheck id of the env.json next to this
   script), the python version string, the per-file timeout, and the VIEW HASH. The VIEW of a test is the checkout (the cwd of the gate,
   .git and __pycache__ left out) WITHOUT the other test files (DIR/tests/test_*.py of the universe) that the test does not name: the
-  test itself plus the test files in its closure, where the closure is taken over the AST: an imported module or a string constant
-  that equals the basename (without .py) of a test file puts every test file of that name in, transitively (a superset of what the
-  test can import; dynamic loading by a computed name is not in the view and fails the same way again, never silently).
+  test itself plus the test files its record in DIR/tests/oracle.json declares as "uses" (repo-relative paths of test files). A file the
+  test needs and did not declare is missing from its view, the test fails, and that is red: declarations are enforced, never
+  guessed. The record's "net": true says the test fetches content-pinned externals (commit + tree hash) and may use the network.
   View hash = sha256 over the sorted (relative path, executable bit, sha256 of content) of all files of the view.
   (The result cache directory, if it lies inside the checkout, is not part of the view.)
   The view is a git repository of its own (git init, one commit of the view with fixed identity and dates), so what git says in
@@ -50,7 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
 import envcheck  # noqa: E402
 
-CACHE_FORMAT = "fnvnx-selftests-cache/2"
+CACHE_FORMAT = "fnvnx-selftests-cache/3"
 TAIL = 2000
 
 def tree_files(root, exclude, skipdir=None):
@@ -71,37 +71,22 @@ def tree_files(root, exclude, skipdir=None):
                     out.append((rel, "x" if os.access(p, os.X_OK) else "-", hashlib.sha256(fh.read()).hexdigest()))
     return sorted(out)
 
-def test_closure(files):
-    """{test file: set of test files (itself included) it names, transitively}: modules imported and string constants equal to a
-    test file's basename, over the AST. Superset by construction: any name that could load a sibling test is a name here."""
-    by = {}
+def declared(files):
+    """{test file: (set of test files in its view, itself included, net flag)} from DIR/tests/oracle.json "uses" / "net".
+    A record without them means: no other test file, no network."""
+    out, docs = {}, {}
     for f in files:
-        by.setdefault(os.path.basename(f)[:-3], []).append(f)
-    direct = {}
-    for f in files:
-        names = set()
-        try:
-            tree = ast.parse(open(f, "rb").read())
-        except (OSError, SyntaxError, ValueError):
-            tree = None
-        for n in ast.walk(tree) if tree else ():
-            if isinstance(n, ast.Import):
-                names.update(a.name.split(".")[0] for a in n.names)
-            elif isinstance(n, ast.ImportFrom) and n.module:
-                names.add(n.module.split(".")[0])
-                names.update(a.name for a in n.names)
-            elif isinstance(n, ast.Constant) and isinstance(n.value, str):
-                names.add(n.value[:-3] if n.value.endswith(".py") else n.value)
-        direct[f] = {g for nm in names for g in by.get(nm, ())} | {f}
-    out = {}
-    for f in files:
-        seen, todo = set(), [f]
-        while todo:
-            g = todo.pop()
-            if g not in seen:
-                seen.add(g)
-                todo += list(direct[g])
-        out[f] = seen
+        d = os.path.dirname(f)
+        if d not in docs:
+            try:
+                docs[d] = json.load(open(os.path.join(d, "oracle.json")))["tests"]
+            except (OSError, ValueError, KeyError, TypeError):
+                docs[d] = {}
+        rec = docs[d].get(os.path.basename(f))
+        rec = rec if isinstance(rec, dict) else {}
+        uses = rec.get("uses", [])
+        uses = [u for u in uses if isinstance(u, str)] if isinstance(uses, list) else []
+        out[f] = ({f} | {os.path.normpath(u) for u in uses}, rec.get("net") is True)
     return out
 
 def view_hash(files, own):
@@ -133,32 +118,77 @@ def make_view(root, dst, exclude, skipdir=None):
             else:
                 shutil.copy2(p, q)
 
-def key_of(rel, files, timeout):
+def key_of(rel, files, timeout, net):
     env_json = os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")
     try:
         env = envcheck.env_id(json.load(open(env_json)))
     except (OSError, ValueError):
         env = "none"
     return hashlib.sha256(cas.canon({"format": CACHE_FORMAT, "test": rel, "view": view_hash(files, rel), "env": env,
-                                     "python": sys.version, "timeout": timeout})).hexdigest()
+                                     "python": sys.version, "timeout": timeout, "net": net, "run": RUN_ENV})).hexdigest()
 
-def run_one(root, rel, exclude, timeout, skipdir=None):
-    """(status, seconds, tail, ended): status passed|failed, TAIL the last bytes of output, ENDED False for a timeout."""
+# The fixed machine of a test run (part of every key): the test sees the view at VIEWDIR (fixed cwd) and a scratch at SCRATCH, in new
+# mount/pid/uts/ipc namespaces and, unless its record says "net", a new network namespace with only loopback. Environment: exactly this.
+ROOTDIR = "/nxroot"   # a tmpfs of the run: the parent of the view and of the scratch, so a test that writes to ".." writes there
+VIEWDIR, SCRATCH = ROOTDIR + "/view", ROOTDIR + "/tmp"
+RUN_ENV = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "TZ": "UTC", "LC_ALL": "C", "LANG": "C",
+           "PYTHONHASHSEED": "0", "HOME": SCRATCH, "TMPDIR": SCRATCH,
+           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@invalid", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@invalid"}
+NET_PASS = ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "GIT_SSL_CAINFO", "CURL_CA_BUNDLE",
+            "ARTIFACTS_URL")   # the channel of a net test, which fetches by exact commit and checks the tree hash
+
+# runs inside the new namespaces, as the test's parent: fixed mounts, loopback up (net namespace), fixed cwd, then the test
+LAUNCH = r"""
+import ctypes, fcntl, os, socket, struct, sys
+view, scratch, rel, net = sys.argv[1:5]
+libc = ctypes.CDLL(None, use_errno=True)
+os.makedirs("%s", exist_ok=True)
+if not os.path.ismount("%s") and libc.mount(b"tmpfs", b"%s", b"tmpfs", ctypes.c_ulong(0), None):   # nested in a run: its tmpfs is there
+    sys.exit("mount tmpfs: %%s" %% os.strerror(ctypes.get_errno()))
+for src, dst in ((view, "%s"), (scratch, "%s")):
+    os.makedirs(dst, exist_ok=True)
+    if libc.mount(src.encode(), dst.encode(), None, ctypes.c_ulong(4096 | 16384), None):
+        sys.exit("mount %%s: %%s" %% (dst, os.strerror(ctypes.get_errno())))
+if net == "0":
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    fcntl.ioctl(s, 0x8914, struct.pack("16sH14x", b"lo", 0) )  # placeholder replaced below
+os.chdir("%s")
+os.execv(sys.executable, [sys.executable, "-I", rel])
+""" % (ROOTDIR, ROOTDIR, ROOTDIR, VIEWDIR, SCRATCH, VIEWDIR)
+LAUNCH = LAUNCH.replace('fcntl.ioctl(s, 0x8914, struct.pack("16sH14x", b"lo", 0) )  # placeholder replaced below',
+                        'fl = struct.unpack("16sH14x", fcntl.ioctl(s, 0x8913, struct.pack("16sH14x", b"lo", 0)))[1]\n'
+                        '    fcntl.ioctl(s, 0x8914, struct.pack("16sH14x", b"lo", fl | 1))   # SIOCGIFFLAGS, SIOCSIFFLAGS: IFF_UP')
+
+def record_digest(data):
+    """sha256 of a test's RECORD: its PASS/FAIL case lines (the tests' protocol: one line per case, "PASS name" or "FAIL name  detail";
+    the detail after two blanks is diagnostics and is left out). The rest of the output (timings, scratch names, entropy
+    readings the tests print as information) is not the test's record."""
+    lines = []
+    for ln in data.decode("utf-8", "replace").splitlines():
+        if ln.startswith(("PASS ", "FAIL ")):
+            lines.append(ln.split("  ")[0] if ln.startswith("FAIL ") else ln)
+    return hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()   # a multiset: parallel cases print in any order
+
+def run_one(root, rel, exclude, timeout, skipdir=None, net=False):
+    """(status, seconds, tail, ended, digest): status passed|failed, TAIL the last bytes of output, DIGEST sha256 of its record (record_digest), ENDED
+    False for a timeout."""
     t0 = time.time()
-    # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
-    # would otherwise share this gate's result cache and outputs)
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
+    # a test file is not a gate: it sees none of the gate's environment (GATE_OUT / GATE_COMMIT / GATE_CACHE included)
+    env = dict(RUN_ENV)
+    if net:
+        env.update({k: os.environ[k] for k in NET_PASS if k in os.environ})
     # the file's scratch and its view: directories of its own, removed when the file ends, however it ends
     tmp = tempfile.mkdtemp(prefix="selftest-")
-    env["TMPDIR"] = tmp
-    view = os.path.join(tmp, "view")
-    out = os.path.join(tmp, "out.txt")
+    view, scratch, out = os.path.join(tmp, "view"), os.path.join(tmp, "scratch"), os.path.join(tmp, "out.txt")
+    os.mkdir(scratch)
+    cmd = ["unshare", "-m", "-p", "-u", "-i", "-f", "--kill-child"] + ([] if net else ["-n"]) + [
+        "--", sys.executable, "-I", "-c", LAUNCH, view, scratch, rel, "1" if net else "0"]
     try:
         make_view(root, view, exclude, skipdir)
         git_view(view)
         with open(out, "wb") as ofh:
-            p = subprocess.Popen([sys.executable, "-I", rel], cwd=view, stdin=subprocess.DEVNULL, stdout=ofh,
-                                 stderr=subprocess.STDOUT, start_new_session=True, env=env)
+            p = subprocess.Popen(cmd, cwd=view, stdin=subprocess.DEVNULL, stdout=ofh, stderr=subprocess.STDOUT,
+                                 start_new_session=True, env=env)
             try:
                 ok, ended = p.wait(timeout=timeout) == 0, True
             except subprocess.TimeoutExpired:
@@ -173,7 +203,7 @@ def run_one(root, rel, exclude, timeout, skipdir=None):
         tail = data[-TAIL:].decode("utf-8", "replace")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return ("passed" if ok else "failed"), round(time.time() - t0, 3), tail, ended
+    return ("passed" if ok else "failed"), round(time.time() - t0, 3), tail, ended, record_digest(data)
 
 def parse(argv):
     o = {"timeout": 300.0, "jobs": 1, "cache": os.environ.get("GATE_CACHE") or None}
@@ -220,7 +250,7 @@ def universe(dirs):
 def main(argv):
     o, dirs = parse(argv)
     files = universe(dirs)
-    clo = test_closure(files)
+    dec = declared(files)
     t0 = time.time()
     root = os.getcwd()
     keys, cdir = {}, None
@@ -229,32 +259,43 @@ def main(argv):
         cdir = os.path.join(o["cache"], "selftests")
         allf = tree_files(root, set(), skip)
         for f in files:
-            keys[f] = key_of(f, [r for r in allf if r[0] not in files or r[0] in clo[f]], o["timeout"])
+            keys[f] = key_of(f, [r for r in allf if r[0] not in files or r[0] in dec[f][0]], o["timeout"], dec[f][1])
 
     def one(f):
         if cdir:
             hit = load_hit(os.path.join(cdir, keys[f] + ".json"), keys[f])
             if hit:
-                return {"name": f, "seconds": 0.0, "status": hit["status"], "cached": True, "tail": hit["tail"]}
-        st, secs, tail, ended = run_one(root, f, set(files) - clo[f], o["timeout"], skip)
-        if cdir and ended:
+                return {"name": f, "seconds": 0.0, "status": hit["status"], "cached": True, "tail": hit["tail"], "det": False}
+        # testdet: a cold test is executed twice, at once, in fresh views; a difference in end status or record digest (PASS/FAIL case lines) is red
+        args = (root, f, set(files) - dec[f][0], o["timeout"], skip, dec[f][1])
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pair:
+            r1, r2 = list(pair.map(lambda _: run_one(*args), (0, 1)))
+        (st, secs, tail, ended, dg), (st2, _, tail2, ended2, dg2) = r1, r2
+        if ended and ended2 and (st, dg) != (st2, dg2):
+            diff = "run 1: %s %s; run 2: %s %s\n--- run 1 ---\n%s\n--- run 2 ---\n%s" % (st, dg[:12], st2, dg2[:12], tail[-400:], tail2[-400:])
+            return {"name": f, "seconds": secs, "status": "failed", "cached": False, "tail": "nondeterministic (testdet): " + diff, "det": True}
+        if cdir and ended and ended2:
             store(os.path.join(cdir, keys[f] + ".json"), keys[f], st, secs, tail)
-        return {"name": f, "seconds": secs, "status": st, "cached": False, "tail": tail}
+        return {"name": f, "seconds": secs, "status": st if ended and ended2 else "failed", "cached": False, "tail": tail, "det": False}
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=o["jobs"]) as ex:
         full = list(ex.map(one, files))
     rows = [{k: r[k] for k in ("name", "seconds", "status", "cached")} for r in full]
     ran = sum(1 for r in rows if not r["cached"])
+    nondet = [r["name"] for r in full if r["det"]]
     secs = time.time() - t0
     unc = [r["name"] for r in rows if r["status"] == "failed"]
     n = len(files) - len(unc)
     status = "green" if not unc else "red"
     note = ", %d run, %d cached" % (ran, len(rows) - ran)
     detail = ("%d of %d test files pass%s, %.1f s" % (n, len(files), note, secs)) if files else "no test files at this commit (nothing to certify yet)"
+    if nondet:
+        detail += "; nondeterministic: " + ",".join(nondet[:5])
     if unc:
         detail += "; first failure %s: %s" % (unc[0], next(r["tail"] for r in full if r["name"] == unc[0]).strip()[-300:])
     res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files), "certified": n,
-           "uncertified": unc[:50], "detail": detail, "files": rows, "recomputed": ran}
+           "uncertified": unc[:50], "detail": detail, "files": rows, "recomputed": ran,
+           "testdet": {"executed_twice": ran, "nondeterministic": nondet}}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "selftests.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

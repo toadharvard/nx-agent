@@ -22,7 +22,7 @@
     "-I",
     "ports/fnv-nx/verify/gate_tests.py",
     "--jobs",
-    "3",
+    "2",
     "ports/fnv-nx/verify",
     "ports/fnv-nx/farm",
     "ports/fnv-nx/contract",

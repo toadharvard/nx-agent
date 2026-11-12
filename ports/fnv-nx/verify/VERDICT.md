@@ -202,7 +202,7 @@ an undeclared origin makes the recipe invalid and the `build` gate red. Tests: `
 ## Budget and the warm rerun (gate `warm`)
 The incremental verdict is content-keyed at three levels, all in `GATE_CACHE` (`l1.py` gives `VDIR/cache`): a recipe stage (`unitstage.py`),
 a test file (`gate_tests.py`: key = the test, its view of the checkout without the other test files, env id, python, timeout; red results are
-cached too, a timeout never), and a whole gate result (`verdict.py`: key = gate, argv, commit, tree, env id; green results only).
+cached too, a timeout never), and a whole gate result (`verdict.py`: key = gate, argv, tree, env id: the tree, not the commit, so a no-op merge stays warm; green results only).
 A gates file that declares `"warm_budget_s": B` makes `verdict.py run` add the gate `warm` after a green run: every gate is run again, right
 away, on the same cache, which is the no-change rerun. `warm` has two certified parts (universe 2), each red on its own:
 1. **Nothing recomputed.** In that rerun no gate, stage, test or fact is recomputed (`recomputed` of every row is 0; a gate that runs reports

@@ -8,6 +8,9 @@ gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
   subject     the files under test (repo-relative).
+  uses        optional: the other test files (tracked DIR/tests/test_*.py) the test imports, transitively and listed in full. They are
+              the only test files in the test's view (gate_tests.py); an undeclared one is missing and the test is red.
+  net         optional bool: the test fetches content-pinned externals (commit + tree hash) and may use the network; else none.
   REF         one of (exactly these keys):
     {"kind": "wine-exe", "wine": "9.0", "exe_sha256": H64, "artifact": {"repo": "fnv-nx-build", "commit": H40,
      "tree_sha256": H64, "path": STR}}   a dump the game's exe produced under Wine 9.0: file `path` of that commit of
@@ -42,6 +45,7 @@ and compares the tracked files it opened with subject + references (verify/oracl
 import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -179,8 +183,13 @@ def judge_ref(ref, tracked, roots, pins, read, artifact):
 
 def judge_test(entry, tracked, roots, pins, read, artifact):
     """-> reason or None (rules 2-5)"""
-    if not isinstance(entry, dict) or set(entry) != {"subject", "references"}:
-        return "entry keys are not subject, references"
+    if not isinstance(entry, dict) or not {"subject", "references"} <= set(entry) <= {"subject", "references", "uses", "net"}:
+        return "entry keys are not subject, references (and optionally uses, net)"
+    uses = entry.get("uses", [])
+    if not isinstance(uses, list) or not all(isinstance(u, str) and u in tracked and re.match(r"^.*/tests/test_[^/]*\.py$", u) for u in uses):
+        return "uses is not a list of tracked test files (DIR/tests/test_*.py)"
+    if "net" in entry and not isinstance(entry["net"], bool):
+        return "net is not a boolean"
     subject, refs = entry["subject"], entry["references"]
     if not isinstance(subject, list) or not subject:
         return "subject is empty"
