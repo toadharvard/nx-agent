@@ -107,7 +107,6 @@
   }
  ],
  "link": {
-  "script": "ports/fnv-nx/link/guest.ld",
   "output": "bootguest.elf",
   "kind": "pie",
   "flags": [
@@ -117,14 +116,7 @@
   "roots": [
    "ports/fnv-nx/rt/guest",
    "ports/fnv-nx/platform"
-  ],
-  "libs": {
-   "external": "fnvnx-a64-msvcmodel",
-   "dirs": [],
-   "names": [],
-   "startfiles": [],
-   "endfiles": []
-  }
+  ]
  },
  "variants": {
   "m0": {
