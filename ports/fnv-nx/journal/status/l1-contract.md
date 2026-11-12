@@ -630,3 +630,9 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - L2: libpcre2 is already served by the trunk deb mirror. Any Wine-built cl table must use pinned Wine + cl via a profile and a generated stage.
 - Queued for after the merge: the `wine` profile (w5's resolver; seeds = Wine 9.0 + closure from the snapshot index; mirror tools/wine-debs), for L2's cl reference-table generated stage (cl from fnv-nx-build toolchain/msvc9 f26d2624). Until then L2's run is a measurement.
 - w14 0a5c8dd8 = 62623608 + w10 (variants form, tlsmodel); solo tests 0 FAIL; no verdict (stopped). This is the base for the post-merge rebase. Idle.
+
+## 10:30Z
+- Legal: the orchestrator redacted the 24 pairs (claude/fnv-legal-redact 1b918f47 on 862b0708); 5 fixture pairs remain in rules/tests/test_rules_text.py, which is with L2. That file is absent at 9a9e56c4, where w12's census ran. Stated limit of gate_legal: it checks the tree, not the history (removing pairs from the history needs a rewrite, which is forbidden here). Decision: orchestrator/owner.
+- w5 b639f528: verdict green (89a30704, 344.9 s). GL pins correction: header reads come from the recipe PP read sets in GATE_CACHE, not from build_gl4.sh or readroots.json. Runner totality comes first.
+- L3a item 16: lifted source from a generated stage (`source: {stage}` vs `pack`, exactly one). w14 is resumed for it → claude/fnv-l1-contract-w14-src. The link script is link/guest.ld.
+- Doubles finding: verify/tests/guest/guest.ld is a second guest link script (fixed, not PIE). Raised with L4; the rule is a single link script, checked as part of the doubles gate.
