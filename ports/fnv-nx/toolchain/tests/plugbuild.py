@@ -23,6 +23,9 @@ sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'verify'))
 import elfobj  # noqa: E402
 import recipe  # noqa: E402
+import sandbox  # noqa: E402
+import cas  # noqa: E402
+import glob  # noqa: E402
 
 T = 'ports/fnv-nx/'
 ROOT = T + 'toy'
@@ -35,6 +38,16 @@ PRODUCT_FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fms-extensions', '-fsho
                  '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics',
                  '-U_FORTIFY_SOURCE', '-fno-devirtualize']
 _N = [0]
+# guest plugins that recipe.PLUGIN_SOURCES does not (yet) list: name -> tracked source (the product list is L1's)
+EXTRA_SOURCES = {'fnvnx_f2i_check': T + 'toolchain/f2i_check/fnvnx_f2i_check.cc'}
+
+
+# plugins whose argument is not optional (the plugin is an error without it): short name -> arguments every use carries
+REQUIRED_ARGS = {'f2i_check': {'out': '/out/f2i.json'}}
+
+
+def source_of(name):
+    return recipe.PLUGIN_SOURCES.get(name) or EXTRA_SOURCES[name]
 
 
 def _git(repo, *a):
@@ -49,7 +62,7 @@ def _w(repo, rel, text):
 
 
 def _plugin(name, args):
-    p = {'name': name, 'source': recipe.PLUGIN_SOURCES[name], 'args': dict(args)}
+    p = {'name': name, 'source': source_of(name), 'args': dict(args)}
     if name in recipe.PLUGIN_INPUTS:
         p['inputs'] = recipe.PLUGIN_INPUTS[name]
     return p
@@ -65,7 +78,7 @@ def _recipe(tmp, plugins, fixtures, flags):
     ext = pin['external']
     plugins = [('fnvnx_' + n, a) for n, a in plugins]
     names = [n for n, _ in plugins]
-    for rel in sorted({recipe.PLUGIN_SOURCES[n] for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
+    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
@@ -95,7 +108,7 @@ def _recipe(tmp, plugins, fixtures, flags):
 
 
 def _trivial(tmp, names):
-    return _recipe(tmp, [(n, {}) for n in names], {'t.cpp': 'int t(int x) { return x; }\n'}, PRODUCT_FLAGS)
+    return _recipe(tmp, [(n, dict(REQUIRED_ARGS.get(n, {}))) for n in names], {'t.cpp': 'int t(int x) { return x; }\n'}, PRODUCT_FLAGS)
 
 
 def build(name, tmp, source=None):
@@ -107,12 +120,12 @@ def build(name, tmp, source=None):
     return next(p['path'] for p in res['plugins'] if p['name'] == 'fnvnx_' + name)
 
 
-def compile(src, out, plugins, flags=None, args=(), keep=None):
+def compile(src, out, plugins, flags=None, args=(), keep=None, files=None):
     """compile src to out (an object) through the recipe with the product flags and the plugins (paths of .so made by build()), in that
     order; `args` holds extra compiler flags and -fplugin-arg-<plugin>-<key>[=<value>] plugin arguments; -> CompletedProcess (the caller
     checks returncode: some tests expect an error, and then stderr is the recipe's failure diagnostics)"""
     names = [re.fullmatch(r'fnvnx_([a-z0-9_]+)\.so', os.path.basename(p)).group(1) for p in plugins]
-    pa = {n: {} for n in names}
+    pa = {n: dict(REQUIRED_ARGS.get(n, {})) for n in names}
     extra = []
     for a in args:
         m = re.fullmatch(r'-fplugin-arg-fnvnx_([a-z0-9_]+)-([a-z][a-z0-9-]*)(?:=(.*))?', a)
@@ -127,9 +140,25 @@ def compile(src, out, plugins, flags=None, args=(), keep=None):
             f = res['failure']
             return subprocess.CompletedProcess([], f.get('exit') or 1, '', '\n'.join(f.get('stderr') or []) + '\n' + json.dumps(f)[:600])
         shutil.copyfile(next(o['object'] for o in res['objects']), out)
+        if files is not None:
+            files.update({n: p for n, p in cc_files(res).items() if n != 'unit.o'})
         return subprocess.CompletedProcess([], 0, '', '')
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def cc_files(res):
+    """{file name: path in the store} of the /out tree of the CC stage(s) of the recipe result RES (the unit object and what a plugin wrote
+    next to it, e.g. out=/out/f2i.json): read from the store's stage documents and results, not by running anything"""
+    out = {}
+    for key in res['stage_keys']:
+        docs = glob.glob(os.path.join(STORE, 'stage-docs', '*', key + '.json')) or glob.glob(os.path.join(STORE, 'stage-docs', key + '.json'))
+        if not docs or not json.load(open(docs[0]))['stage'].startswith('cc:'):
+            continue
+        r = sandbox._load(STORE, key)
+        for n, e in cas.manifest(r['outputs']['/out'], STORE)['entries'].items():
+            out[n] = cas._obj(STORE, e)
+    return out
 
 
 def objdump(obj):
