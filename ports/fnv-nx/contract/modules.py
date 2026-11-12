@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """modules - the lifted PE modules of the exe's static import closure (L1 CONTRACT, loader contract M1).
 
-    modules.py --exe FalloutNV.exe --bridge bridge.tsv --declared declared_dlls.tsv --dir DIR [--dir DIR ...] --out-dir OUT
+    modules.py --exe FalloutNV.exe --bridge bridge.tsv --declared declared_dlls.tsv --root exe=DIR --root redist=DIR --out-dir OUT
 
 Rules (each violated precondition is a stage error that lists everything it found; nothing gets a made-up value):
 
   closure   Start at the exe's import directory.  A dll name (norm_dll of iat.py: ASCII lowercase, ".dll" when it has no '.')
             is a SYSTEM dll iff bridge.tsv has rows for it (the platform implements it natively); it is then not followed.
-            Any other dll must be a PE file named like it in one of the --dir directories (first directory in list order
+            Any other dll must be a PE file named like it in one of the declared file-set directories (dllkind.DECLARED_ROOTS: exe, then redist; first directory in that order
             that has one; file names compare ASCII case-insensitively; two files of one directory that differ only in case
             are an error); its own import directory is followed the same way.  A dll that is found nowhere is an error
             (all such dlls are listed).  Delay-load directories do not add modules (the exe's own delay-load helper binds
             them at run time).  A module is an i386 PE32 DLL image, SectionAlignment 4 KiB (what loader/src/pe.c accepts).
-  total     Base assignment and the table cover EVERY *.dll file of the --dir list that is not a system dll (a module loaded
+  total     Base assignment and the table cover EVERY *.dll file of the declared file set (dllkind.DECLARED_ROOTS) that is not a system dll (a module loaded
             later through LoadLibrary must already have its static base: lifted code is keyed by image address), not
             only the static closure; a file that is not an i386 PE32 DLL (e.g. a 64-bit dll) is a stage error naming it;
             the imports of the static modules must be system dlls or found modules (an on-demand module may import a dll nobody provides:
@@ -254,7 +254,7 @@ class Module:
 
 
 def find_file(dirs, name):
-    """The path of the first file in the first --dir that has it (case-insensitive name), or None."""
+    """The path of the first file in the first declared root that has it (case-insensitive name), or None."""
     for d in dirs:
         hits = [f for f in sorted(os.listdir(d)) if lower(f) == name and os.path.isfile(os.path.join(d, f))]
         if len(hits) > 1:
@@ -265,7 +265,7 @@ def find_file(dirs, name):
 
 
 def scan(dirs, system):
-    """Every *.dll file of the --dir list that is not a system dll: {lowercase name: Module}.  The first directory in list
+    """Every *.dll file of the declared file set that is not a system dll: {lowercase name: Module}.  The first directory in list
     order that has a name wins; a file that is not an i386 PE32 DLL image is an error naming it (all are listed)."""
     mods, errors = {}, []
     for d in dirs:
@@ -308,7 +308,7 @@ def closure(exe, system, mods, declared=frozenset()):
 
     visit([d for d, _ in exe.import_directory()])
     if missing:
-        raise StageError('module not found in any --dir: ' + ', '.join(sorted(missing)))
+        raise StageError('module not found in the declared file set: ' + ', '.join(sorted(missing)))
     for m in mods.values():
         m.static = m.name in seen
     return order + sorted((m for m in mods.values() if not m.static), key=lambda m: m.name)
@@ -346,7 +346,8 @@ def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
-def run(exe_path, bridge_path, dirs, out, declared_path):
+def run(exe_path, bridge_path, roots, out, declared_path):
+    dirs = [d for _, d in roots]        # roots: dllkind.declared_roots(...), the only list of the declared file-set directories
     with open(exe_path, 'rb') as fh:
         exe = PE(fh.read(), os.path.basename(exe_path))
     brows, _ = iat.bridge_rows(bridge_path)
@@ -389,7 +390,11 @@ def run(exe_path, bridge_path, dirs, out, declared_path):
     iat.write_table(os.path.join(out, 'iat.tsv'), rows)
     gatefile.write('iat', len(rows) + len(bad), len(rows), ['%08x %s!%s: %s' % b for b in bad],
                    '%d slots, %d without a value' % (len(rows) + len(bad), len(bad)))
-    summary = ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
+    bnamed, coll = dllkind.conflicts({n: [f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))] for n, d in roots}, system)
+    summary = ['declared file set %s; bridge-named files %d: %s; name collisions between roots %d: %s' % (
+        '+'.join(n for n, _ in roots), len(bnamed), ', '.join('%s(%s)' % (n, '+'.join(r)) for n, r in bnamed) or '-', len(coll),
+        ', '.join('%s(%s)' % (n, '+'.join(r)) for n, r in coll) or '-')]
+    summary += ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
     summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d static %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs, int(m.static))
                 for i, m in enumerate(order)]
     summary += ['declared %s (%s) sha256 %s missing imports: %s' % (n, k, h[:12], miss or '-') for n, k, h, _, miss in sorted(dec)]
@@ -415,12 +420,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--exe', required=True)
     ap.add_argument('--bridge', required=True)
-    ap.add_argument('--dir', action='append', required=True, help='where module files are looked for; first match in list order')
+    ap.add_argument('--root', action='append', required=True, metavar='NAME=DIR', help='a directory of the declared file set: one for each of dllkind.DECLARED_ROOTS')
     ap.add_argument('--declared', required=True, help='declared_dlls.tsv (contract/declareddlls.py): the dlls of the declared machine')
     ap.add_argument('--out-dir', required=True)
     a = ap.parse_args()
     try:
-        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared)
+        text, bad = run(a.exe, a.bridge, dllkind.declared_roots(dict(r.split('=', 1) for r in a.root)), a.out_dir, a.declared)
     except (StageError, ValueError, OSError) as e:
         sys.exit('modules: %s' % e)
     print(text)

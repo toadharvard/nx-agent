@@ -43,6 +43,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
+import dllkind  # noqa: E402
 import gate_build  # noqa: E402
 import iat  # noqa: E402
 import images  # noqa: E402
@@ -159,7 +160,7 @@ def images_of(doc, ext):
     bridge = set()          # a bridge dll is never an image (contract/dllkind.py): the dlls with rows in the declared bridge.tsv
     if doc.get("bridge"):
         bridge = {r["dll"] for r in iat.bridge_rows(P2(ext, doc["bridge"]))[0]}
-    for name, path in images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge):
+    for name, path in images.image_set(P2(ext, doc["exe"]), [d for _, d in dllkind.declared_roots({n: ext[n]["host"] for n in dllkind.DECLARED_ROOTS})], bridge):
         rel = doc["ranges"]["exe"] if name.endswith(".exe") else doc["ranges"]["module"] % name.rsplit(".", 1)[0]
         rg = P2(ext, rel)
         if os.path.isfile(rg):

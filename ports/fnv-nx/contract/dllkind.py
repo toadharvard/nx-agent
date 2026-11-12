@@ -11,7 +11,39 @@ first directory in list order, case-insensitive, two files of one directory that
             neither found nor bridged).  Its entries must be served by bridge rows; the walk does not continue through it.
   platform  a name that is neither FOUND nor in BRIDGE: a platform import of gate `imports` (owner L5), not a module.
 Reach: from the root's import directories (normal, then delay-load, in directory order), depth first through images only.
+DECLARED FILE SET (CLAUDE.md "DirectX redist installed"): the files the declared machine holds are the directories DECLARED_ROOTS, in this order: the game
+directory (contract_inputs.json external `exe`) and gamedata/redist (external `redist`, the DLLs the installer's DirectX redistributable puts in the declared
+system32). A class: every file of those directories, no name list. This is the only place that names them; images.py, modules.py and gate_contract
+take the directories from declared_roots(), nobody passes a directory list of their own. Two audit lists come with it and are reported, never decided here
+(conflicts()): a file of the set whose name has a bridge row (the bridge rule above applies: the platform serves it), and a name found in more than one root
+(the first root in DECLARED_ROOTS order is the one FOUND uses).
 Pure: the caller supplies imports_of(path) -> (normal names, delay-load names) and find(name) -> path | None."""
+
+
+DECLARED_ROOTS = ("exe", "redist")
+
+
+def declared_roots(hosts):
+    """hosts: {root name: host directory}.  -> [(name, directory)] of the declared file set in rule order.  The names must be exactly DECLARED_ROOTS."""
+    if sorted(hosts) != sorted(DECLARED_ROOTS):
+        raise ValueError("the declared file set is %s; got %s" % (", ".join(DECLARED_ROOTS), ", ".join(sorted(hosts)) or "nothing"))
+    return [(n, hosts[n]) for n in DECLARED_ROOTS]
+
+
+def conflicts(files, bridge):
+    """files: {root name: [file names of that root]}, bridge: the dll names that have bridge rows.
+    -> (bridge_named, collisions): bridge_named = sorted [(dll name, [roots])] of the *.dll files of the set that have a bridge row;
+    collisions = sorted [(dll name, [roots])] of the *.dll names found in more than one root (case-insensitive)."""
+    where = {}
+    for root, names in files.items():
+        for f in names:
+            n = f.lower()
+            if n.endswith(".dll") and root not in where.setdefault(n, []):
+                where[n].append(root)
+    order = {r: i for i, r in enumerate(DECLARED_ROOTS)}
+    key = lambda v: sorted(v, key=lambda r: order[r])
+    return (sorted((n, key(r)) for n, r in where.items() if n in bridge),
+            sorted((n, key(r)) for n, r in where.items() if len(r) > 1))
 
 
 def images_of(normal_imports, ok):

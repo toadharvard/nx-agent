@@ -129,5 +129,16 @@ try:
     check("declareddlls: a non-spec file is an error", False)
 except ValueError:
     check("declareddlls: a non-spec file is an error", True)
+import dllkind  # noqa: E402
+check("dllkind.declared_roots: the declared file set is exe then redist, whatever order the caller gives", dllkind.declared_roots({"redist": "/r", "exe": "/e"}) == [("exe", "/e"), ("redist", "/r")])
+for bad in ({"exe": "/e"}, {"exe": "/e", "redist": "/r", "extra": "/x"}):
+    try:
+        dllkind.declared_roots(bad)
+        check("dllkind.declared_roots: a missing or extra root is an error %s" % sorted(bad), False)
+    except ValueError:
+        check("dllkind.declared_roots: a missing or extra root is an error %s" % sorted(bad), True)
+bn, co = dllkind.conflicts({"exe": ["A.dll", "b.DLL", "x.ini"], "redist": ["B.dll", "c.dll", "d.txt"]}, {"a.dll", "c.dll", "zz.dll"})
+check("dllkind.conflicts: files of the set with a bridge row, with their roots", bn == [("a.dll", ["exe"]), ("c.dll", ["redist"])], bn)
+check("dllkind.conflicts: names found in more than one root (case-insensitive), roots in rule order", co == [("b.dll", ["exe", "redist"])], co)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)
