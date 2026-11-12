@@ -153,3 +153,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - crt0 FNXG header: no data in "ax" sections; it moves to its own "a" section placed first by guest.ld (crt0 owner).
   - Gate format for L2's 5 object gates: gates.d, objects from gate_build.ensure(); L2's `order` is renamed (it clashes with L3a's).
   - Trace variant for L3a via w15 variants. A product image may link only base variants (w15).
+- 03:45Z:
+  - w16 39fc3d7e (aaa709c8 merged, env.json union, fixtures required).
+  - w20 45daef38: the trunk already lacks the xc/onexit files; objstub W-rule only, test_objstub 239 pass / 11 env fail, same as trunk.
+  - w5 ea7e5ea6 is green 25/25: 134 debs from mirror 161a464b, sha256 134/134.
+  - New blocker: z3 files_sha256 depends on how pip installs, so envcheck fails in fresh containers. w5 fix: verify against the wheel's RECORD plus a mirrored wheel. MERGER runs the verdicts meanwhile.
