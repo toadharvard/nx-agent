@@ -225,7 +225,7 @@ M = {
     "a.md": "An assumption without an id.\n\nAn assumption with %s.\n\n- assumed here\n- ok %s assumed\n" % (asm(1), asm(10)),
     "b.md": "Assumption: %s is unknown.\n" % asm(999),
     "c.md": "no word at all\n",
-    "d.txt": "assumed\n",
+    "d.sh": "# assumed\n",
 }
 m, bad = G.judge_mentions(sorted(M), ids, lambda p: M[p])
 check("mentions counted", len(m) == 6, m)
@@ -234,7 +234,7 @@ check("block with a known id is certified", ("a.md", 3) not in bad and ("a.md", 
 check("unknown id in a mention is red", "not in the registry" in bad.get(("b.md", 1), ""), bad)
 check("block without the word is not a mention", all(f != "c.md" for f, _ in m), m)
 check("a list item is its own block", ("a.md", 5) in bad, bad)
-check("non-md text counts whole", ("d.txt", 1) in bad, bad)
+check("a shell comment is prose", ("d.sh", 1) in bad, bad)
 
 PY = '"""doc line\n\nA docstring paragraph with an assumption.\n"""\n\nassumption = "assumed"\n\n# comment about assumed %s\n\nx = 1  # assumes it\n' % asm(1)
 m, bad = G.judge_mentions(["p.py"], ids, lambda p: PY)
@@ -245,7 +245,43 @@ PY2 = 'name = "an assumption in a string"\nassumption = 1\n'
 m, bad = G.judge_mentions(["q.py"], ids, lambda p: PY2)
 check("python: code and string values hide nothing and show nothing", m == [], m)
 m, bad = G.judge_mentions(["r.py"], ids, lambda p: "def (:\n# assumed\n")
-check("python that does not parse is scanned whole", len(m) == 1, m)
+check("python that does not parse is red (lex-error), not scanned whole", m == [("r.py", 0)] and bad[("r.py", 0)].code == "lex-error", (m, bad))
+
+# lexers: for each class a mention in prose and a non-mention in code
+def mention(path, text):
+    mm, bb = G.judge_mentions([path], ids, lambda p: text)
+    return [ln for _, ln in mm]
+BT = "`"
+check("lexer python: comment, docstring are mentions", mention("x.py", '"""assume"""\n\n# assume\n') == [1, 3], "")
+check("lexer python: identifier, parameter, def, dict key, string, s.add(assume) are not mentions",
+      mention("x.py", 'def f(assume):\n    """doc"""\n    s.add(assume)\n    return {"assume": assume, "k": "an assumption"}\n') == [], "")
+check("lexer python: a backticked word in a docstring or comment is not a mention",
+      mention("x.py", '"""the %sassume%s flag"""\n# the %sassumed%s var\n' % (BT, BT, BT, BT)) == [], "")
+check("lexer python: a bare word in a docstring is a mention", mention("x.py", 'def f():\n\n    """we assume x"""\n') == [3], "")
+check("lexer python: a string that is not the first statement is not a docstring", mention("x.py", 'x = 1\n"assume"\n') == [], "")
+check("lexer c: // and /* */ comments are mentions", mention("x.c", "int a; // assume\n\n/* assumed */\n") == [1, 3], "")
+check("lexer c: identifier, string, char literal, digit separator, raw string are not mentions",
+      mention("x.cc", 'int assume = 1; const char *s = "assume // x"; char c = \'a\'; int n = 1\'000; auto r = R"x(assume /* )x";\nint assumed;\n') == [], "")
+check("lexer c: .inc is C", mention("x.inc", "/* assume */\n") == [1], "")
+check("lexer c: a backticked word in a comment is not a mention", mention("x.h", "// the %sassume%s flag\n" % (BT, BT)) == [], "")
+check("lexer c: an unterminated block comment is red", mention("x.h", "/* assume\n") == [0], "")
+check("lexer markdown: prose is a mention", mention("x.md", "we assume this\n") == [1], "")
+check("lexer markdown: a code fence and an inline code span are not mentions",
+      mention("x.md", "text\n\n```py\ndef f(assume):\n    pass\n```\n\nthe %sassume%s flag and %s%sassumed%s%s\n" % (BT, BT, BT, BT, BT, BT)) == [], "")
+check("lexer markdown: prose after a closed fence is a mention", mention("x.md", "```\nx\n```\n\nassumed\n") == [5], "")
+check("lexer shell: a # comment is a mention, a quoted # and a word are not",
+      mention("x.sh", 'echo "# assume"; assume=1\n\n# assume\n\necho $#assume\n') == [3], "")
+check("lexer shell: a heredoc body is not a comment", mention("x.sh", "cat <<EOF\n# assume\nEOF\n") == [], "")
+check("lexer toml: a # comment is a mention, a quoted value and a key are not", mention("x.toml", 'assume = "# assume"\n\n# assume\n') == [3], "")
+check("lexer shell: a here-string is not a heredoc", mention("x.sh", 'read x <<< "$a"\n\n# assume\n') == [3], "")
+check("lexer asm: a ; comment is a mention, a quoted ; and a label are not", mention("x.asm", 'db "a ; assume"\nassume: nop\n\n; assume\n') == [4], "")
+check("lexer sail: C comments, a type variable apostrophe is not a literal", mention("x.sail", "val f : forall 'n. bits('n) -> int // assume\n") == [1] and mention("x.sail", "val assume : bits('n)\n") == [], "")
+check("lexer data: json, tsv, txt are never prose", all(mention("x" + e, "assume\n") == [] for e in (".json", ".tsv", ".txt")), "")
+check("an extension not in the table is red and named", mention("x.zzz", "assume\n") == [0] and
+      "'.zzz'" in str(G.judge_mentions(["x.zzz"], ids, lambda p: "a")[1][("x.zzz", 0)]) and
+      G.judge_mentions(["x.zzz"], ids, lambda p: "a")[1][("x.zzz", 0)].code == "ext-unknown", "")
+check("a file with no extension is keyed by its name (.gitignore is in the table, Makefile is not)",
+      mention(".gitignore", "# assume\n") == [1] and mention("Makefile", "x\n") == [0], "")
 
 # stray ids
 S = {"a.json": '{"x": "%s"}' % asm(998), "b.md": "ok %s" % asm(1)}

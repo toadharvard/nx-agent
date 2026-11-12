@@ -15,8 +15,12 @@ bytes and is not data (suffix .json); a file of a root of verify/admit.json mark
 (its dated entries state what was said then; the owner forbids editing it) and is not scanned. CLAUDE.md (the owner's
 words) is read for the decisions, not scanned. A BLOCK is the unit of a text file: in a .md file a paragraph (lines up to a
 blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
-mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive); the prose of a .py file is
-its comments and docstrings (code and string values are not statements), of any other file the whole text. An item of the
+mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive). PROSE is defined by one lexer per
+file kind, chosen by the extension from the one table LEXER: python = COMMENT tokens and docstring STRING tokens (tokenize + ast); c, c++,
+headers, .inc, .ld, .s = // and /* */ comments (string and char literals skipped); markdown = text outside fenced code blocks; shell and toml =
+# comments (quoted strings and heredoc bodies skipped); asm = ; comments; sail = as c without char literals; data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
+backticked spans are dropped. Totality: a text file whose extension is not in the table, or that its lexer cannot read, is red (codes
+ext-unknown, lex-error); nothing is skipped silently. An item of the
 universe is (path, first line of the block). A mention is certified iff ALL hold:
   1. its raw block contains at least one id of the form ASM-NNN, for example ASM-001 (the compiler is correct);
   2. every id in it is the id of an entry of the registry.
@@ -87,28 +91,224 @@ ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"\s*\|")
 
 
+LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".sail": "sail", ".asm": "semi",
+         ".md": "markdown", ".sh": "shell", ".gitignore": "shell", ".toml": "toml",
+         ".json": "data", ".tsv": "data", ".txt": "data", ".expect": "data", ".patch": "data"}
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
+
+
+class LexError(Exception):
+    pass
+
+
+def suffix_of(path):
+    """the key of the one lexer table: the extension, or the whole name of a file with no extension (.gitignore)"""
+    base = os.path.basename(path)
+    return os.path.splitext(base)[1] or base
+
+
+def lexer_of(path):
+    return LEXER.get(suffix_of(path))
+
+
+def py_spans(body, lines, off):
+    """comments and docstrings of a Python file as (start, end) offsets, found with tokenize and ast (code and string values are not prose)"""
+    def at(row, col):
+        return off[row - 1] + col
+    try:
+        tree = ast.parse(body)
+        docs = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body \
+                    and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) \
+                    and isinstance(node.body[0].value.value, str):
+                v = node.body[0].value
+                # ast columns are UTF-8 byte offsets, tokenize columns are characters
+                c0 = len(lines[v.lineno - 1].encode()[:v.col_offset].decode())
+                c1 = len(lines[v.end_lineno - 1].encode()[:v.end_col_offset].decode())
+                docs.append((at(v.lineno, c0), at(v.end_lineno, c1)))
+        out = []
+        for tok in tokenize.generate_tokens(io.StringIO(body).readline):
+            st, en = at(*tok.start), at(*tok.end)
+            if tok.type == tokenize.COMMENT:
+                out.append((st, en))
+            elif tok.type == tokenize.STRING and any(d0 <= st and en <= d1 for d0, d1 in docs):
+                out.append((st, en))
+        return out
+    except (SyntaxError, ValueError, tokenize.TokenError) as e:
+        raise LexError("python: %s" % e)
+
+
+def c_spans(body, chars=True):
+    """// and /* */ comments of C and C++ (with string, char and raw string literals and digit separators skipped); CHARS false (Sail: an
+    apostrophe starts a type variable, not a literal) skips strings only"""
+    n, i, out = len(body), 0, []
+    while i < n:
+        ch = body[i]
+        nx = body[i + 1] if i + 1 < n else ""
+        if ch == "/" and nx == "/":
+            j = i
+            while j < n and body[j] != "\n":
+                j += 2 if body[j] == "\\" and j + 1 < n else 1   # a backslash continues a line comment
+            out.append((i, min(j, n)))
+            i = j
+        elif ch == "/" and nx == "*":
+            j = body.find("*/", i + 2)
+            if j < 0:
+                raise LexError("c: unterminated /* comment")
+            out.append((i, j + 2))
+            i = j + 2
+        elif ch == '"' or (ch == "'" and chars):
+            raw = ch == '"' and i > 0 and body[i - 1] == "R" and (i < 2 or body[i - 2] in "uUL8" or not (body[i - 2].isalnum() or body[i - 2] == "_"))
+            if raw:
+                m = re.compile(r'"([^()\\ \t\n]{0,16})\(').match(body, i)
+                if not m:
+                    raise LexError("c: bad raw string")
+                j = body.find(")" + m.group(1) + '"', m.end())
+                if j < 0:
+                    raise LexError("c: unterminated raw string")
+                i = j + len(m.group(1)) + 2
+                continue
+            j = i + 1
+            while j < n and body[j] != ch and body[j] != "\n":
+                j += 2 if body[j] == "\\" else 1
+            if j >= n or body[j] != ch:
+                raise LexError("c: unterminated %s literal" % ("string" if ch == '"' else "char"))
+            i = j + 1
+        elif ch.isdigit() and (i == 0 or not (body[i - 1].isalnum() or body[i - 1] == "_")):
+            j = i + 1                                             # a pp-number: digit separators are not char literals
+            while j < n and (body[j].isalnum() or body[j] in "_." or (body[j] == "'" and j + 1 < n and body[j + 1].isalnum())
+                             or (body[j] in "+-" and body[j - 1] in "eEpP")):
+                j += 1
+            i = j
+        else:
+            i += 1
+    return out
+
+
+def hash_spans(body, toml, mark="#"):
+    """# comments of shell and TOML (MARK ";" with TOML rules: assembler), with quoted strings (and heredoc bodies of shell) skipped"""
+    n, i, out = len(body), 0, []
+    heredocs = []
+    bol = True
+    while i < n:
+        ch = body[i]
+        if ch == "\n":
+            i += 1
+            bol = True
+            for tag, dash in heredocs:                              # the bodies of the heredocs opened on the line just ended
+                while i < n:
+                    j = body.find("\n", i)
+                    j = n if j < 0 else j
+                    line = body[i:j]
+                    i = min(j + 1, n)
+                    if (line.strip() if dash else line) == tag:
+                        break
+                else:
+                    raise LexError("shell: unterminated heredoc %s" % tag)
+            heredocs = []
+            continue
+        if ch == mark and (toml or bol or body[i - 1] in " \t;|&()"):
+            j = body.find("\n", i)
+            j = n if j < 0 else j
+            out.append((i, j))
+            i = j
+            continue
+        bol = bol and ch in " \t"
+        if ch == "\\" and not toml:
+            i += 2
+        elif ch in "'\"":
+            if toml and body.startswith(ch * 3, i):
+                j = body.find(ch * 3, i + 3)
+                if j < 0:
+                    raise LexError("toml: unterminated multi-line string")
+                i = j + 3
+                continue
+            j = i + 1
+            while j < n and body[j] != ch and not (toml and body[j] == "\n"):
+                j += 2 if body[j] == "\\" and ch == '"' else 1
+            if j >= n or body[j] != ch:
+                raise LexError("%s: unterminated quote" % ("toml" if toml else "shell"))
+            i = j + 1
+        elif not toml and body.startswith("<<<", i):
+            i += 3                                                  # a here-string, not a heredoc
+        elif not toml and body.startswith("<<", i):
+            m = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\?([A-Za-z_][A-Za-z_0-9]*))").match(body, i)
+            if m:
+                heredocs.append((m.group(2) or m.group(3) or m.group(4), m.group(1) == "-"))
+                i = m.end()
+            else:
+                i += 2
+        else:
+            i += 1
+    return out
+
+
+def md_spans(body):
+    """the text of a Markdown file outside fenced code blocks (the inline code spans are dropped for every lexer by strip_code)"""
+    out, pos, fence, start = [], 0, None, 0
+    for line in body.split("\n"):
+        end = pos + len(line)
+        m = re.match(r" {0,3}(`{3,}|~{3,})", line)
+        if fence is None:
+            if m:
+                if start < pos:
+                    out.append((start, pos))
+                fence = (m.group(1)[0], len(m.group(1)))
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1] and line.strip() == m.group(1):
+            fence = None
+            start = end + 1
+        pos = end + 1
+    if fence is None and start < len(body):
+        out.append((start, len(body)))
+    return out
+
+
+def strip_code(body, spans):
+    """the prose spans of one file: the comment spans of one run (only whitespace and at most one newline between) are one text; in every
+    text the backticked `...` spans are dropped, paragraph by paragraph. -> list of (start, end) offsets that remain prose"""
+    merged = []
+    for s, e in sorted(spans):
+        gap = body[merged[-1][1]:s] if merged else None
+        if merged and not gap.strip() and gap.count("\n") <= 1:
+            merged[-1] = (merged[-1][0], e)
+        else:
+            merged.append((s, e))
+    keep = []
+    for s, e in merged:
+        p = s
+        for para in re.split(r"(\n[ \t]*\n)", body[s:e]):
+            q = p + len(para)
+            a = p
+            for m in CODE_SPAN.finditer(para):
+                keep.append((a, p + m.start()))
+                a = p + m.end()
+            keep.append((a, q))
+            p = q
+    return keep
+
+
 def prose_lines(path, body):
-    """the lines of a file with everything that is not prose replaced by spaces (a mention is a statement in prose):
-    .py: only comments and docstrings remain (code, identifiers and string values are not statements); any other file: whole"""
+    """the lines of a file with everything that is not prose replaced by spaces (a mention is a statement in prose). Prose is defined by one
+    lexer per file kind (LEXER, by extension): python = COMMENT tokens and docstring STRING tokens; c = // and /* */ comments; markdown = the
+    text outside fenced code; shell and toml = # comments; data = none. In every prose span the backticked spans are dropped.
+    A suffix not in the table or a file the lexer cannot read raises LexError."""
+    kind = lexer_of(path)
+    if kind is None:
+        raise LexError("the extension %r has no lexer: add it to LEXER" % suffix_of(path))
     lines = body.split("\n")
-    if path.endswith(".py"):
-        keep = [[False] * len(ln) for ln in lines]
-        try:
-            for node in ast.walk(ast.parse(body)):
-                if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body \
-                        and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) \
-                        and isinstance(node.body[0].value.value, str):
-                    v = node.body[0].value
-                    for k in range(v.lineno - 1, v.end_lineno):
-                        keep[k] = [True] * len(lines[k])
-            for tok in tokenize.generate_tokens(io.StringIO(body).readline):
-                if tok.type == tokenize.COMMENT:
-                    r, c = tok.start[0] - 1, tok.start[1]
-                    keep[r][c:] = [True] * (len(lines[r]) - c)
-        except (SyntaxError, ValueError, tokenize.TokenError):
-            return lines
-        return ["".join(ch if k else " " for ch, k in zip(ln, kp)) for ln, kp in zip(lines, keep)]
-    return lines
+    off, o = [], 0
+    for ln in lines:
+        off.append(o)
+        o += len(ln) + 1
+    if kind == "data":
+        return [" " * len(ln) for ln in lines]
+    spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "sail": lambda: c_spans(body, False), "markdown": lambda: md_spans(body),
+             "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True), "semi": lambda: hash_spans(body, True, ";")}[kind]()
+    keep = bytearray(len(body))
+    for s, e in strip_code(body, spans):
+        keep[s:e] = b"\x01" * (e - s)
+    return "".join(ch if keep[k] or ch == "\n" else " " for k, ch in enumerate(body)).split("\n")
 
 
 def blocks(path, body):
@@ -149,7 +349,13 @@ def judge_mentions(files, ids, read):
     """files: scanned paths; ids: registry ids; read(path) -> text. -> (mentions [(path, line)], bad {(path, line): reason})"""
     mentions, bad = [], {}
     for f in files:
-        for line, text, prose in blocks(f, read(f)):
+        try:
+            bl = blocks(f, read(f))
+        except LexError as e:
+            mentions.append((f, 0))
+            bad[(f, 0)] = finding("ext-unknown" if lexer_of(f) is None else "lex-error", "%s:0" % f, "%s: %s" % (f, e))
+            continue
+        for line, text, prose in bl:
             if not WORD.search(prose):
                 continue
             mentions.append((f, line))
@@ -437,8 +643,7 @@ def main():
     # the owner's file is outside the tree: it is read, not scanned (it holds the owner's words)
     tracked_all = set(tracked) | {"CLAUDE.md"}
     scanned_all = [p for p in text_files if not any(p == r or p.startswith(r + "/") for r in records)]
-    scanned = [p for p in text_files if not p.endswith(".json")
-               and not any(p == r or p.startswith(r + "/") for r in records)]
+    scanned = scanned_all
     doc = load(REGISTRY)
     gates = gatesdir.load_dir_or_empty()
     gate_names = set(g.get("name") for g in gates.get("gates", []) if isinstance(g, dict))
