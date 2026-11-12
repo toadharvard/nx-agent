@@ -140,6 +140,53 @@ def main():
     rc, o, e = cli(args(elf59, "t3.json", table, manifest, "--text-entry", "x", "--text-entry", "yz"))
     td = json.load(open(os.path.join(d, "t3.json")))
     tb.case("--text-entry repeated: order kept", td["inputs"] == {"text_entry": ["x", "yz"]}, td["inputs"])
+    # --scenario (rule R-INPUT, bootinput.py): device states over virtual time, expect_events, scenario-error
+    elf91, elf90 = patched("h91.elf", 91), patched("h90.elf", 90)
+    sj = lambda n, doc: w(n, doc if isinstance(doc, str) else json.dumps(doc))   # noqa: E731
+    VIB = [{"kind": "pad-vibrate", "index": 0, "lo": "0x3f000000", "hi": "0x0"}, {"kind": "pad-vibrate", "index": 2, "lo": "0x3f800000"},
+           {"kind": "pad-vibrate", "index": 3}]
+    sc_ok = sj("s_ok.json", {"schema": "fnvnx-scenario/1", "expect_events": VIB})
+    rc, o, e = cli(args(elf91, "s1.json", table, manifest, "--scenario", sc_ok))
+    sd = json.load(open(os.path.join(d, "s1.json")))
+    tb.case("--scenario: expect_events equal to the recorded pad-vibrate events: exit 0, inputs hold the sha256 and the content",
+            rc == 0 and sd["run"]["reason"] == "exit" and sd["inputs"]["expect_events"] == {"diff": [], "ok": True}
+            and sd["inputs"]["scenario"]["content"] == open(sc_ok).read()
+            and sd["inputs"]["scenario"]["sha256"] == __import__("hashlib").sha256(open(sc_ok, "rb").read()).hexdigest()
+            and sd["inputs"]["text_entry"] == [], (rc, o, sd["inputs"]))
+    sc_bad = sj("s_bad.json", {"schema": "fnvnx-scenario/1", "expect_events": VIB[:2] + [{"kind": "pad-vibrate", "index": 1}]})
+    rc, o, e = cli(args(elf91, "s2.json", table, manifest, "--scenario", sc_bad))
+    sd = json.load(open(os.path.join(d, "s2.json")))
+    tb.case("--scenario: an expect_events difference fails the run (exit 2, the difference in OUT.json and on stdout)",
+            rc == 2 and sd["run"]["reason"] == "exit" and sd["inputs"]["expect_events"]["ok"] is False
+            and sd["inputs"]["expect_events"]["diff"] == ["event 2: index expected 1, recorded 3"] and "expect_events differ" in o, (rc, o, sd["inputs"]))
+    sc_rng = sj("s_rng.json", {"schema": "fnvnx-scenario/1", "states": [{"t_ns": 0, "dev": "pad", "index": 4}]})
+    rc, o, e = cli(args(elf91, "s3.json", table, manifest, "--scenario", sc_rng))
+    sd = json.load(open(os.path.join(d, "s3.json")))
+    tb.case("--scenario: an out-of-range value ends the run as scenario-error (exit 2), the guest never runs", rc == 2
+            and sd["run"]["reason"] == "scenario-error" and "outside 0..3" in sd["run"]["scenario"]
+            and not os.path.exists(os.path.join(d, "s3.console.txt")), (rc, sd["run"]))
+    sc_te = sj("s_te.json", {"schema": "fnvnx-scenario/1", "text_entries": ["\U0001F600"]})
+    rc, o, e = cli(args(elf59, "s4.json", table, manifest, "--scenario", sc_te))
+    sd = json.load(open(os.path.join(d, "s4.json")))
+    tb.case("--scenario text_entries: the guest gets the text as with --text-entry, recorded in inputs",
+            sd["run"]["reason"] == "exit" and sd["inputs"]["text_entry"] == ["\U0001F600"] and [x["result"] for x in sd["run"]["events"] if x["kind"] == "text-entry"] == [1], (rc, sd["inputs"]))
+    rc, o, e = cli(args(elf59, "s5.json", table, manifest, "--scenario", sc_te, "--text-entry", "x"))
+    sd = json.load(open(os.path.join(d, "s5.json")))
+    tb.case("--scenario text_entries together with --text-entry: scenario-error (exit 2)", rc == 2 and sd["run"]["reason"] == "scenario-error"
+            and "--text-entry" in sd["run"]["scenario"], (rc, sd["run"]))
+    rc, o, e = cli(args(elf90, "s6.json", table, manifest, "--scenario", sj("s_dock.json", {"schema": "fnvnx-scenario/1", "states": [
+        {"t_ns": 900_000_000, "dev": "docked", "value": 1}]}), "--profile", "handheld"))
+    sd = json.load(open(os.path.join(d, "s6.json")))
+    con = open(os.path.join(d, "s6.console.txt")).read()
+    tb.case("--scenario docked: DISPLAY_DOCKED 0 (the profile) before 900 ms and 1 after; no input-read events without --watch-log",
+            rc == 0 and "a-d60=0\n" in con and "k-d950=1\n" in con and "k-d1050=1\n" in con
+            and not [x for x in sd["run"]["events"] if x["kind"] == "input-read"], (rc, con[-200:]))
+    syms2 = w("syms2.txt", "marker\n")
+    rc, o, e = cli(args(elf90, "s7.json", table, manifest, "--scenario", sc_ok, "--watch-log", syms2))
+    sd = json.load(open(os.path.join(d, "s7.json")))
+    rd = [x for x in sd["run"]["events"] if x["kind"] == "input-read"]
+    tb.case("--scenario with --watch-log: one input-read event per device read (4 pad_read + 15 polls x 3 devices + 4 docked)",
+            rc == 2 and len(rd) == 4 + 45 + 4 and rd[0]["dev"] == "pad" and rd[0]["t_ns"] > 0, (rc, len(rd)))
     # --watch-log: the guest MODE 70 calls f(1) (recursing once into f(0)), g, f(0); the guest prints the SP of each entry
     elfw = os.path.join(d, "hw.elf")
     open(elfw, "wb").write(tb.build(70)[0])

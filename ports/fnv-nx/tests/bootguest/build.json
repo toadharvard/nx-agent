@@ -1444,6 +1444,58 @@
      "-O2"
     ]
    }
+  },
+  "m90": {
+   "flags": {
+    "c": [
+     "-mabi=ilp32",
+     "-march=armv8-a",
+     "-O2",
+     "-fPIE",
+     "-ffreestanding",
+     "-fno-builtin",
+     "-fno-stack-protector",
+     "-fvisibility=hidden",
+     "-mno-outline-atomics",
+     "-fno-asynchronous-unwind-tables",
+     "-fno-tree-loop-distribute-patterns",
+     "-Wall",
+     "-g",
+     "-DMODE=90"
+    ],
+    "cxx": [],
+    "asm": [
+     "-mabi=ilp32",
+     "-march=armv8-a",
+     "-O2"
+    ]
+   }
+  },
+  "m91": {
+   "flags": {
+    "c": [
+     "-mabi=ilp32",
+     "-march=armv8-a",
+     "-O2",
+     "-fPIE",
+     "-ffreestanding",
+     "-fno-builtin",
+     "-fno-stack-protector",
+     "-fvisibility=hidden",
+     "-mno-outline-atomics",
+     "-fno-asynchronous-unwind-tables",
+     "-fno-tree-loop-distribute-patterns",
+     "-Wall",
+     "-g",
+     "-DMODE=91"
+    ],
+    "cxx": [],
+    "asm": [
+     "-mabi=ilp32",
+     "-march=armv8-a",
+     "-O2"
+    ]
+   }
   }
  },
  "external": [
