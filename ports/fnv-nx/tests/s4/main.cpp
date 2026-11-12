@@ -5,6 +5,9 @@
 #include <stdlib.h>
 
 int s4_failures, s4_checks;
+jmp_buf s4_case_jmp;   /* a failed CHECK on the case's thread ends the case (s4_test.h) */
+pthread_t s4_case_thread;
+int s4_case_armed;
 s4_case *s4_cases;
 
 static char g_root[1024];
@@ -51,7 +54,12 @@ int main(int argc, char **argv)
             continue;
         int before = s4_failures;
         g_bnd_test = v[i]->name;
-        v[i]->fn();
+        if (setjmp(s4_case_jmp) == 0) {
+            s4_case_thread = pthread_self();
+            s4_case_armed = 1;
+            v[i]->fn();
+        }
+        s4_case_armed = 0;
         /* an import that returns to the game with a platform lock still held (a lock taken in one import and released in
          * another) would leave it counted on the test thread: the game's own locks (os_glock) are not counted */
         if (fnvnx_bnd_locks_held()) {
