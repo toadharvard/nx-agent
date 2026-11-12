@@ -60,7 +60,7 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 
 | Gate | Owner | Branch | Commit | MERGER |
 |---|---|---|---|---|
-| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | c6726a2 (green 27/27, 236.1 s) | queued after w16 |
+| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | aaa709c8 (merged, trunk) | done |
 | exepin | L1 | w4 (session_01KmtZKRkugvim1Bfui5aFTw) | head pending | next slot (priority) |
 | r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | 3b35851 (green 26 gates, 223.7 s) | queued |
 | namegate | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
@@ -127,3 +127,9 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - LoadLibrary sites: 23 in total, 20 closed, 3 open. (ii) is L5's import_escape n; (i) is the index bounds rule; (iii) is a field-sensitive data word.
   - Assumptions gate defect: bare ASM ids without records pass. w10 fixes it first. L3a is held until ASM-043/045 have records.
   - L3b w2g (forms, fpexact): ETA about 30 min.
+- 03:25Z trunk clean=aaa709c8 (w14 d6c72958, w18 7675fda5, w17 aaa709c8 merged).
+  - ASM-043/045 are removed by w5's Form-writes fact, not recorded (orchestrator correction).
+  - w20 13c3d951 adds the objstub tail-b and ICF rule; it rebases onto the trunk and runs the full objstub tests.
+  - EMLINK: w14 generalizes the store rule to all content.
+  - Generated `sources` (FreeType): assigned to w15.
+  - Pip stdin fix: w5. w16 rebases onto aaa709c8 with the pin union.
