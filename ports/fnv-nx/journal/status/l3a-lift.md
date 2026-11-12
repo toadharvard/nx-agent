@@ -389,3 +389,10 @@ Update 2026-11-12, at 698adefb:
 - gate_assumptions: 9 findings. 7 are solver-term, waiting on L1's lexer fix; 2 are f2i_check (L2).
 - ASM-234 lands in w7's facts-side commit together with its citing file.
 - The verdict on int-l3a 2d215f16a is running (w6).
+
+## 2026-11-12 09:41
+- L2's 3f85ad5aa (fpexact asm ranges) does not apply to int3, because its base predates the trunk gate_fpexact restoration. L2 is asked to rebase onto 901c3c54e as check 3d.
+- w6 on int3:
+  - drop -mabi=ilp32 from lift/pack/build.json (flags.semantics supplies it);
+  - point rt's include path from shim/include, which has no tracked file, to the header home.
+- Top-level asm (enter.cc, unhandled.cc): no change until L2 says whether 3d needs function-level asm.
