@@ -194,3 +194,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - Merged farm-env 17c3b933 as 4ab53430: the validator declaration is generated from shim d3d9.h; the probe PEs are byte-reproducible (envprobe-bin 594dedc2); the dumps are unchanged.
     - Merged w3b dfffc07: the uniform rule, and the link outcome is per (vs, ps) pair (wined3d's reorder shader). Farm job 2 is now keyed by pair over the full cross product of distinct GLSL texts; V, P and V×P are reported first.
     - New goal step 1 item: render/d3d9 becomes a trunk product root with ident_{handheld,docked}.bin declared as outputs, for L5 w13 `uses`. w6 (session_01KmtZKQbpDKvc9qzXT9bLHX) is on claude/fnv-l6-render-w6-root from trunk 8cfbcdbf: doing.
+- 03:47Z
+    - w3b c663781 merged: the (d) lookup is keyed by (vs, ps, reorder) text sha256; a missing key is a build error. Waiting on sm_link.tsv (farm).
+    - w5 admit at w1b 0013509c: 0 file errors over 459 files and 12 roots; red only for 13 gates absent from gates.json (abi, addr32, d3d9total, datamodel, eh, exepin, forms, fpexact, imports, machine, namegate, order, r7). lib/sha256_tests needs L1 w10's test class.
+    - w5 next: port the sha256 key onto w1b's translator root (claude/fnv-l6-render-w5-tkey), with gl4 calling `_glsl` (fix d).
+    - w6: lib/sha256 is a separate root (L4), and render/d3d9 compiles none of its units (orchestrator rule); L4 told.
