@@ -307,6 +307,19 @@ def main():
     finally:
         os.chdir(cwd)
     check("CLI: check and build of root@NAME resolve the spec at the boundary (valid recipe, green build of the variant)", rc_chk == 0 and rc_bld == 0, bo.getvalue()[-300:])
+    # per-variant target: the admit entry of a variant may declare its own; it inherits the base's otherwise
+    ra_ = recipe.load_admit(vrepo)
+    ents = [dict(e, target="guest", variants={"lp64": {"target": "host"}}) if e["path"] == VROOT else e for e in ra_.values()]
+    adm2 = {e["path"]: e for e in ents}
+    check("variant target: entry_of inherits the base's target, a variant's own replaces it, sources are the base's",
+          recipe.entry_of(adm2, VROOT)["target"] == "guest" and recipe.entry_of(adm2, VROOT + "@lp64")["target"] == "host"
+          and recipe.entry_of(adm2, VROOT + "@x86")["target"] == "guest" and recipe.entry_of(adm2, VROOT + "@lp64")["recipe"] == adm2[VROOT]["recipe"], "")
+    check("variant target: guest_errors judges the effective target (the host variant of a guest base needs no guest compiler; the base does)",
+          recipe.guest_errors(vlib, VROOT + "@lp64", adm2, None) == [] and recipe.guest_errors(vlib, VROOT, adm2, None) != []
+          and recipe.guest_errors(vlib, VROOT + "@x86", adm2, None) != [], "")
+    bad_adm = dict(adm2, **{VROOT: dict(adm2[VROOT], variants={"nope": {"target": "host"}, "lp64": {"target": "mars"}})})
+    eb = recipe.check(vlib, VROOT, recipe.tracked(vrepo), bad_adm, None, vrepo)
+    check("variant target: an admit variant entry for an undeclared variant or an unknown target is a check error", any("variants must be" in e for e in eb), eb)
     # the variant rule: a product image links base roots only; a variant is linked by a test root (class test) only
     ep = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo2 := mk("varprod", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))])),
                       recipe.load_admit(repo2), None, repo2)

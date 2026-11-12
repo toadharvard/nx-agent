@@ -63,7 +63,7 @@ def unit_why(u, doc, native, pin):
 def judge_root(root, repo, cache):
     """-> (universe, certified, ids, detail) of one root (gate_build.quantify convention)."""
     roots = recipe.load_admit(repo)
-    if roots[root].get("target") != "guest":
+    if recipe.entry_of(roots, root).get("target") != "guest":
         return 0, 0, [], "host root"
     pin, files = recipe.load_pin(repo), recipe.tracked(repo)
     rec = recipe.load_recipe(repo, roots, root)
@@ -76,7 +76,7 @@ def judge_root(root, repo, cache):
     units = [root + "/" + u for u in res.get("units", [])]
     if res["status"] != "green":
         return len(units) + 1, 0, [item] + units, "build %s" % res["status"]
-    native = roots[root].get("cxx_origin") == "native"
+    native = recipe.entry_of(roots, spec).get("cxx_origin") == "native"
     docs = cc_docs(os.path.join(cache, "store"), res)
     bad, why = [], []
     g = recipe.guest_errors(rec, root, roots, pin)
