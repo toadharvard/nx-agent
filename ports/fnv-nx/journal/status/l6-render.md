@@ -372,3 +372,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 - 09:00Z L1 decided one visibility rule (w16, together with the header-root rule): a generator input may be any tracked file that the root's compile may read, read-only and content-keyed; `uses` stays for generated files.
     - w6 4f5be583 accepted: duplicate admit entry removed; 2f1bac09 merged; d3d9 includes translator/include; gate_admit green 1041/1041, 25 roots.
     - w6 next: admit render/shaders/total as a unit-less guest product root (sm_table.json, sm_illegal.tsv, fnvnx_sm_rows.h); then rebuild render/d3d9 on w16's commit (doing).
+- 09:03Z Fixed 7e598a5a (on 2f1bac09): fnvnx_shaders.h declares fnvnx_shader_hash again.
+    - The defect: the merged header dropped it, so gl4 was red at 16/17 units (L6A).
+    - The one home is the union of what its includers use. The declaration leaves with the A2 pair.
+    - Checks: gate_admit green 662/662; recipe check valid.
+    - Candidate 33c443b5 holds 2f1bac09, and v7 is running on it.
