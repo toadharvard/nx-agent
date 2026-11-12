@@ -78,3 +78,14 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - Closing it needs a farm re-recording of env_{handheld,docked}.tsv: Wine 9.0 and Xvfb, 232251 queries x 2 profiles x 2 runs. It is off the first-frame path: the current dumps stay as generator input, identified by sha256 but not yet a probe reference. Asked the orchestrator for the farm slot.
   - Gap: IDirect3DSwapChain9Ex::GetPresentStats has no MS page in either upstream repo, so test_m1's clock rule rests on the Wine source alone.
 - 03:16Z Env-dump farm STARTED on the orchestrator's order (a non-reproducible generator input is a determinism defect on the boot path). Farm session_01KmtZKSSTwzATWBSyXQRW2Q, branch claude/fnv-l6-render-farm-env. Status: doing. The job: pinned mingw-w64 + Wine 9.0 + Xvfb; 232251 queries x 2 profiles x 2 runs; byte-equal runs, else report the differing queries as a class; publish to fnv-nx-build tools/envprobe-bin with commit + tree_sha256; list every differing query before swapping the input.
+- 03:19Z Hash census merged (w5 34b7b086, render/HASHES.md, measured at f66de58e).
+  - Census: 8 content-key sites use 64-bit FNV-1a. 5 of them are one function written five times (C: translate.c:13, res_shader.cpp:12, shcache_key.c:6; Python: 3). The ABI field NxShaderD3D.hash is 8 bytes.
+  - Lead decision (rule): every content key is sha256 of the content bytes, 32 bytes. A 64-bit non-cryptographic key can collide and select the wrong shader, a run-time failure with no gate.
+    - NxShaderD3D.hash becomes a 32-byte key, the same as NxShaderDesc.key.
+    - The shcache index and file names use the full digest.
+    - Python keeps hashlib.
+  - Implementation: one portable C99 function on both sides, fnvnx_sha256 (loader/src/sha256.c), reached through link.roots of ONE shared root, never copied. libnx sha256 is rejected because it needs ARMv8 crypto asm that L4 would have to emulate.
+  - Not keys, so they stay:
+    - draw_ids.cpp:14, a bucket index where every hit is confirmed by memcmp;
+    - the integrity checksums: the shcache body hash and rec_chk.
+  - Blocked: loader/ is not a recipe root. The owner of the shared sha256 root is asked of the orchestrator. The ABI change goes to L6A.
