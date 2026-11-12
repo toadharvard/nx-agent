@@ -11,11 +11,8 @@
   {"path": "ports/fnv-nx/lift/fnvlift", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/lift/gen", "class": "tool", "gates": ["pure", "selftests"], "imports": ["ports/fnv-nx/lift/fnvlift"], "entry": []},
   {"path": "ports/fnv-nx/lift/proof", "class": "tool", "gates": ["selftests"], "entry": []},
-  {"path": "ports/fnv-nx/lift/rt/rcpref.h", "class": "tool", "gates": ["selftests"], "entry": []},
-  {"path": "ports/fnv-nx/lift/rt/rcptab.c", "class": "tool", "gates": ["selftests"], "entry": []},
-  {"path": "ports/fnv-nx/lift/rt/rcptab.cert.json", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/lift/test/dsl_emit_test.py", "class": "tool", "gates": ["selftests"], "entry": []},
-  {"path": "ports/fnv-nx/lift/test/dslemit", "class": "product", "target": "guest", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/gen/gen_dslemit.py", "pack": "shapes"}, "recipe": "ports/fnv-nx/lift/test/dslemit/build.json", "gates": []},
+  {"path": "ports/fnv-nx/lift/test/dslemit", "class": "product", "target": "guest", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/gen/gen_dslemit.py", "pack": "shapes"}, "recipe": "ports/fnv-nx/lift/test/dslemit/build.json", "gates": ["objstub", "linkstrict", "determinism", "oracle", "n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel", "abs", "disp", "reach", "reachlink", "gpa", "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi", "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi"]},
   {"path": "ports/fnv-nx/lift/tools", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/toolchain", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/verify", "class": "tool", "gates": ["selftests"], "entry": []}
