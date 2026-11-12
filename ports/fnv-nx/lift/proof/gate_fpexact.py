@@ -533,8 +533,8 @@ def judge_object(oid, path, asm=False, unit=None):
     d, why = ({"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}, None) if asm else read_f2i(path)
     if d is None:
         f2i.append(why)
-    elif not asm and d["unit"] != unit:
-        f2i.append("result file names the unit %r, not %r" % (d["unit"], unit))
+    elif not asm and d["unit"] != "/src/" + unit:   # the CC stage compiles /src/<unit> (unitstage.py), the plugin names its main input file
+        f2i.append("result file names the unit %r, not %r" % (d["unit"], "/src/" + unit))
     else:
         f2i += ["%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]) for f in d["findings"] if f["kind"] != "builtin"]
         # a builtin finding (lround, a libm call) is IEEE under OWNER ASM-008: not red; conv and asm are

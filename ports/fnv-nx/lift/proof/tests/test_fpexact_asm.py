@@ -46,8 +46,9 @@ NEGATIVE = ['fmov w0, s1', 'fmov x0, d1', 'fmov x0, v1.d[1]', 'fmov s0, w1', 'sc
             'mrs x0, fpcr', 'fcmp s0, s1', 'fabs v0.4s, v1.4s', 'frecpe s0, s1', 'sqxtn v0.4h, v1.4s', 'addp v0.4s, v1.4s, v2.4s']
 
 
-def judge(path):
-    return G.judge_object('t/x.o', path)['f2i:t/x.o']
+def judge(path, unit=None):
+    u = unit or os.path.basename(path)[:-2]   # recipe layout: obj/<unit>.o
+    return G.judge_object('t/' + u, path, u.endswith(('.S', '.s')), u)['f2i:t/' + u]
 
 
 def sections(path):
@@ -203,7 +204,7 @@ class Negative(unittest.TestCase):
         p = os.path.join(d, 'mut_missing.o')
         open(p, 'wb').write(raw)
         open(os.path.join(d, 'mut_missing.f2i.json'), 'w').write(open(self.o['clean'][:-2] + '.f2i.json').read())
-        self.assertTrue(any('no section .fnvnx.asmrange' in x for x in judge(p)))
+        self.assertTrue(any('no section .fnvnx.asmrange' in x for x in judge(p, 'clean.cc')))
 
     def test_undecodable_word_is_a_finding(self):
         f = judge(self.o['bad'])
@@ -222,7 +223,7 @@ class Negative(unittest.TestCase):
         p = os.path.join(d, 'mut_bytes.o')
         open(p, 'wb').write(bytes(raw))
         open(os.path.join(d, 'mut_bytes.f2i.json'), 'w').write(open(o[:-2] + '.f2i.json').read())
-        self.assertTrue(any('asm range' in x and 'fcvtzs' in x for x in judge(p)), judge(p))
+        self.assertTrue(any('asm range' in x and 'fcvtzs' in x for x in judge(p, 'clean.cc')), judge(p, 'clean.cc'))
 
     def test_top_level_asm_is_a_finding(self):
         f = judge(self.o['top'])
