@@ -18,14 +18,23 @@
   - **Interprocedural.** An entry's incoming registers and argument slots are the join over its call-site states (pcsrc `feed` already
     does this for the code tags). An indirect call resolves through the points-to set of the call operand's code values and iterates
     with the dataflow until stable; an indirect call with a TOP operand, an export, an entry or an unknown caller gets TOP arguments.
-  - **Soundness of open stores.** Every instruction's transfer over-approximates the concrete semantics (a pure function of the pcsrc state
-    and the decoded instruction). So the concrete write set of the image is contained in the union over stores of gamma(address value).
-    A store whose address value is TOP is an OPEN store: it may write any cell, so every query is answered OPEN while the open count is
-    greater than 0. The number of open stores is the bound that the census already gives (627,109 by form); the points-to lowers it by
-    every store whose base register has a non-TOP value, and the final count is reported globally per image with the commit. Writes by
-    imports use the import manifest's write contract (L5): an import with no contract writes TOP through every pointer-valued argument, so it
-    is counted as open. Nothing is taken as closed: a query is PROVEN only with zero open stores or with the open stores' value sets
-    disjoint from the range, and OPEN otherwise.
+  - **Where TOP comes from (revised after review).** TOP arises only where no accepted fact bounds a value; every source is named and counted
+    per image:
+    1. OWNER 6 (no wild accesses, array indices in bounds): a value derived from object O by any arithmetic points into O, so non-constant
+       arithmetic gives (O, ANY), never TOP.
+    2. Relocation completeness (the no-PIC fact checked from the code; a REMOVE item): an image address originates only from a relocated word
+       or a relocated immediate. An unrelocated constant is not a pointer into the image; a deref of it is an access outside every object, which
+       OWNER 6 excludes. Integer constants that are not addresses stay integers (no object).
+    3. OWNER 3 (Win32 as documented): an import writes only through its pointer arguments into their objects, within the documented extent;
+       its returned pointers are a fresh object per call site (heap or handle) or a static object of the module for documented module data.
+       An import with no entry in the contract table is a GAP, counted per import, and is the only way an import writes TOP.
+    4. An indirect call whose operand set is unresolved calls the set of universe entries whose address escapes (R3's entry set), never an
+       unknown callee.
+    The remaining sources of TOP: the import-contract gaps (3) and values loaded from TOP cells (propagation). The TOP-store count and its
+    sources are reported per image with the commit.
+  - **Soundness.** Every instruction's transfer over-approximates the concrete semantics under facts 1-4, so the concrete write set is
+    contained in the union over stores of gamma(address value). A query [lo, hi) is PROVEN when no store whose set can contain the range
+    exists (exact writers listed); it is OPEN while a TOP store exists, and then it names the TOP stores and their sources.
   - **Termination.** The value lattice has finite height: O is finite (sections, relocated words, entries' slots, allocation sites),
     offsets are bounded by the object size or ANY, constants are a bounded set (collapsing to TOP above a fixed set size, a lattice
     widening, not a step cap), so every cell and register value can only grow a bounded number of times. The worklist algorithm
@@ -34,7 +43,7 @@
     The two stated queries become: (3) every store in 7 images with gamma meeting [0x1273000, +len) is listed, none by TOP; (1) the ctor
     store at 56b755/56b758 has gamma = { (static 793b20, +4) } from the callers' abs 793b20 and the static initializer word, and it is the
     only store with that cell in its gamma.
-* **premises** - none new (ASM-225 is the only open one used). It rests on ASM-225 (fresh stack space) for the entries that create one; those entries' results are labelled
+* **premises** - none new: OWNER 6, OWNER 3 and the relocation-completeness REMOVE item as listed above, and ASM-225 for fresh-space entries. It rests on ASM-225 (fresh stack space) for the entries that create one; those entries' results are labelled
   cond:fresh and a store inside a fresh space is not counted as a write to the old frame.
 * **next** - the four pcsrc counts for the 7 images at 9d71e6cd, run_facts to w7; then this design coded in tools/pointsto.py after the
   lead's review, run on the facts the moment w7 lands the next commit.
