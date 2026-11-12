@@ -80,7 +80,7 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     imp, _, ex = gen_extra.partition("|")
     w(repo, "gen/gen.py", GEN.replace("@IMPORT@", imp).replace("@EXTRA@", ex or "0"))
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
-    w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(VERIFY)), recipe.ENV_JSON)).read())   # the declared environment
+    w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), recipe.ENV_JSON)).read())   # the declared environment
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
         {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
         {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []}]}))

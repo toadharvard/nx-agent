@@ -828,7 +828,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
                 res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
     except BuildRed as r:
         fl = r.args[0].get("failed_units", [])
-        res.update(status="red", failure={k: v for k, v in r.args[0].items() if k in ("stage", "exit", "stderr")}, failed_units=fl)
+        res.update(status="red", failure={k: v for k, v in r.args[0].items() if k in ("stage", "exit", "stderr", "done")}, failed_units=fl)
     finally:
         shutil.rmtree(ws, ignore_errors=True)
     res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units, pp_keys=dict(sorted(j.ppkeys.items())))
