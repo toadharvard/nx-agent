@@ -31,7 +31,7 @@ import unitstage  # noqa: E402
 
 
 def root_check(root, repo, cache, jobs):
-    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)])"""
+    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, generated domain symbols, root-level findings [(id, name, kind, detail)])"""
     rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
     try:
         res, _ = gate_build.ensure(root, cache, repo)
@@ -50,25 +50,29 @@ def root_check(root, repo, cache, jobs):
             names |= set(objstub.unit_terminators(drv[lang], us, {"c": rec["flags"]["c"], "c++": rec["flags"]["cxx"]}, cache, jobs)[0])
     os_ids = {base + o["unit"] for o in res["objects"] if o["os_layer"]}
     rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs), rows, os_ids, []
+    gen = {base + u for u in recipe.generated_outputs(rec)}   # the units a generator stage of the recipe outputs: the domains of assume_violation
+    domains = objstub.generated_domains(objs, gen)
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs), rows, domains, []
 
 
 def main(argv):
     jobs = int(argv[argv.index("--jobs") + 1]) if "--jobs" in argv else os.cpu_count() or 1
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-objstub-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
-    items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.buildable_roots(repo)
+    items, finds, why, results, rows, roots, domains = [], [], "", {}, {}, gate_build.buildable_roots(repo), set()
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
-            r, w, _, fs = root_check(root, repo, cache, jobs)
+            r, w, dm, fs = root_check(root, repo, cache, jobs)
+            domains |= dm
             results.update(r)
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
-        its, fs = objstub.judge(results, rows, facts, wine, declared)
+        registry = {e["id"]: e["status"] for e in json.load(open(os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")))["entries"]}   # of the tree under test
+        its, fs = objstub.judge(results, rows, facts, wine, declared, (registry, domains))
         items, finds = items + its, finds + fs
     except (ValueError, KeyError, OSError) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
@@ -91,7 +95,8 @@ def main(argv):
         status, detail = "green", "%d functions in %d objects of %d roots, no trap path, no vacuous body" % (len(items), len(results), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
            "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
-           "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()}}
+           "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
+           "assume_calls": objstub.assume_counts(results, (registry, domains) if not why else None)}
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("objstub: %s %d/%d %s" % (status, cert, len(items), detail[:200]))
