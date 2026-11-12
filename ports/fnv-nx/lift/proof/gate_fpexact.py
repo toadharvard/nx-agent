@@ -486,7 +486,7 @@ def read_f2i(obj_path):
             f["function"], f["file"], f["line"], f["kind"]
         d["unit"]
         a = d["asm"]
-        if not isinstance(a["toplevel"], int) or not isinstance(a["emitted"], list) or not all(isinstance(n, str) for n in a["emitted"]) or not all(
+        if not isinstance(a["toplevel"], int) or not all(isinstance(a[k], list) and all(isinstance(n, str) for n in a[k]) for k in ("emitted", "cold")) or not all(
                 isinstance(v, list) and len(v) == 5 and all(isinstance(x, int) for x in v) for v in a["functions"].values()):
             raise ValueError("malformed asm accounting")
         return d, None
@@ -533,10 +533,10 @@ def decode_word(word, md, p2):
 COVER = {"bytes": 0, "words": 0, "hits": 0}   # check 3d coverage, over every object judged: complement bytes, words decoded, findings among them
 
 
-def scan_coverage(path, emitted, ranges):
+def scan_coverage(path, emitted, ranges, cold=()):
     """Check 3d, coverage: the universe is every SHF_EXECINSTR PROGBITS section of a C / C++ object, whatever its name. A byte is the compiler's iff it lies in
     [st_value, st_value + st_size) of an STT_FUNC symbol of that section named by a function the plugin recorded (EMITTED: the assembler names its final-pass hook saw,
-    from the compiler's own function list, with the partition `<name>.cold`); a recorded function with no sized STT_FUNC symbol is a finding. Every other byte that
+    from the compiler's own function list, with, iff the plugin recorded crtl->has_bb_partition for it, the sized `<name>.cold` symbol GCC 13.3 builds in final.cc:2178 / cgraphclones.cc:551: a missing one is a finding); a recorded function with no sized STT_FUNC symbol is a finding. Every other byte that
     no recorded asm range (RANGES: [(section index, lo, hi)]) covers is treated as asm bytes: it is decoded word by word with decode_word (fp_to_int / SVE / undecodable,
     padding included: the assembler's alignment nop and a zero word udf #0 are defined encodings), and a tail that is not 4-aligned is undecodable. -> [finding strings]"""
     out = []
@@ -552,11 +552,14 @@ def scan_coverage(path, emitted, ranges):
                 continue
             for sym in sec.iter_symbols():
                 n = sym.name
-                if sym["st_info"]["type"] == "STT_FUNC" and isinstance(sym["st_shndx"], int) and sym["st_size"] > 0 and (n in emitted or (n.endswith(".cold") and n[:-5] in emitted)):
+                if sym["st_info"]["type"] == "STT_FUNC" and isinstance(sym["st_shndx"], int) and sym["st_size"] > 0 and (n in emitted or (n.endswith(".cold") and n[:-5] in cold)):
                     syms.setdefault(sym["st_shndx"], []).append((sym["st_value"], sym["st_value"] + sym["st_size"]))
-                    sized.add(n[:-5] if n.endswith(".cold") and n not in emitted else n)
+                    sized.add(n)
         for n in sorted(emitted - sized):
             out.append("function %s was compiled but has no sized STT_FUNC symbol" % n)
+        for n in sorted(cold):   # the plugin recorded crtl->has_bb_partition: GCC 13.3 emits the sized STT_FUNC `<name>.cold` (final.cc:2178, cgraphclones.cc:551, varasm.cc:2015)
+            if n + ".cold" not in sized:
+                out.append("function %s has a cold partition but no sized STT_FUNC symbol %s.cold" % (n, n))
         for idx, sec in enumerate(elf.iter_sections()):
             if not sec["sh_flags"] & SHF_EXECINSTR or sec["sh_type"] != "SHT_PROGBITS":
                 continue
@@ -593,7 +596,7 @@ def check_3d(path, a):
     N, M, D, U = asm_totals(a, r["entries"])
     for k, v in (("N", N), ("M", M), ("D", D), ("U", U), ("units", 1), ("fcvt", r["fcvt"])):
         TOTALS3D[k] += v
-    out = list(r["findings"]) + scan_coverage(path, set(a["emitted"]), r["resolved"])
+    out = list(r["findings"]) + scan_coverage(path, set(a["emitted"]), r["resolved"], set(a["cold"]))
     if U:
         out.append("%d asm insn(s) reached final without a range (N=%d M=%d D=%d, entries in .fnvnx.asmrange %d)" % (U, N, M, D, r["entries"]))
     if r["toplevel"] != a["toplevel"]:

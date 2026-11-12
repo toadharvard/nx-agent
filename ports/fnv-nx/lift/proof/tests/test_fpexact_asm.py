@@ -179,6 +179,9 @@ class Negative(unittest.TestCase):
             # alignment filler between functions is a whole NOP word: not a finding
             'pad': 'extern "C" __attribute__((aligned(64))) int pa(int a){ return a + 1; }\n'
                    'extern "C" __attribute__((aligned(256))) int pb(int a){ return a + 2; }\n',
+            # a cold path (the recipe's -O2 does not partition on aarch64, so the function asks for -freorder-blocks-and-partition by attribute): GCC splits the function into .text and .text.unlikely (crtl->has_bb_partition), the cold part is the sized STT_FUNC cf.cold
+            'cold': 'extern "C" void cg1(int) __attribute__((noreturn, cold, noinline));\n'
+                    'extern "C" __attribute__((optimize("reorder-blocks-and-partition"))) int cf(int a){ if (__builtin_expect(a > 100, 0)) cg1(a); return a + 1; }\n',
             'bad': 'extern "C" void u(void){ __asm__ volatile(".inst 0xffffffff"); }\n',
             'cbare.c': 'int cf(void){ int r; __asm__ volatile("fcvtzu %w0, s2" : "=r"(r)); return r; }\n',
             'none': 'extern "C" int n(int a){ return a + 1; }\n',
@@ -247,6 +250,28 @@ class Negative(unittest.TestCase):
 
     def test_a_non_conversion_word_in_another_section_is_clean(self):
         self.assertEqual(judge(self.o['pushfmov']), [])
+
+    def test_cold_partition_is_a_recorded_fact_with_a_sized_symbol(self):
+        # the product flags do not partition by themselves (-freorder-blocks-and-partition is not in the recipe's flags and not a per-root flag), so the fixture asks
+        # for it by attribute: crtl->has_bb_partition is then set, GCC emits the sized STT_FUNC cf.cold, the plugin lists cf in `cold` and the gate accepts the extent.
+        import json
+        o = self.o['cold']
+        self.assertEqual(json.load(open(o[:-2] + '.f2i.json'))['asm']['cold'], ['cf'])
+        self.assertEqual(judge(o), [])
+        with open(o, 'rb') as fh:
+            cold = [x for x in ELFFile(fh).get_section_by_name('.symtab').iter_symbols() if x.name == 'cf.cold']
+        self.assertEqual(len(cold), 1)
+        self.assertGreater(cold[0]['st_size'], 0)
+
+    def test_a_recorded_cold_partition_without_its_symbol_is_a_finding(self):
+        import json
+        o = self.o['pad']
+        rep = json.load(open(o[:-2] + '.f2i.json'))
+        rep['asm']['cold'] = ['pa']
+        d = os.path.dirname(o)
+        open(os.path.join(d, 'mut_cold.o'), 'wb').write(open(o, 'rb').read())
+        json.dump(rep, open(os.path.join(d, 'mut_cold.f2i.json'), 'w'))
+        self.assertTrue(any('has a cold partition but no sized STT_FUNC symbol pa.cold' in x for x in judge(os.path.join(d, 'mut_cold.o'), 'pad.cc')))
 
     def test_alignment_filler_is_not_a_finding(self):
         self.assertEqual(judge(self.o['pad']), [])

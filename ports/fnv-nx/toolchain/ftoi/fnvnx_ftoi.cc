@@ -40,7 +40,7 @@
 // helpers), findings [{function, file, line, kind}] (what is outside a helper and is not rewritten: in lifted mode the errors, in native
 // mode the builtin and asm kinds, and a conv the rewrite does not cover), both sorted; asm (accounting for check 3c: functions
 // {assembler name: [GIMPLE asm at the first pass, GIMPLE asm given to the expander, asm insns right after expand, asm insns marked before
-// final, asm insns after final without markers]}, emitted [assembler names of the functions that reached final], toplevel (top-level asm statements of the unit; each has a range with function "<toplevel>")).
+// final, asm insns after final without markers]}, emitted [assembler names of the functions that reached final], cold [those with a cold partition, crtl->has_bb_partition], toplevel (top-level asm statements of the unit; each has a range with function "<toplevel>")).
 // Besides the report the plugin writes the section .fnvnx.asmrange into the object (see asm_mark_pass).
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -91,6 +91,10 @@ typedef std::tuple<std::string, int, int> locus_t;   // file, line, column of th
 struct asm_row { std::string func, b, e; locus_t loc; };
 static std::vector<asm_row> asm_rows;
 static std::set<std::string> emitted_fns;   // the functions that reached `final`: the compiler's own list of what it emitted from function bodies
+// Functions with a cold partition: crtl->has_bb_partition at `final`. The cold part is then a second STT_FUNC symbol that GCC 13.3 builds as
+// cold_function_name = clone_function_name (current_function_decl, "cold") (gcc/final.cc:2178, on NOTE_INSN_SWITCH_TEXT_SECTIONS; gcc/cgraphclones.cc:551 clone_function_name:
+// assembler name + symbol_suffix_separator() + "cold", i.e. `<name>.cold` on an ELF target) and sizes in assemble_end_function (gcc/varasm.cc:2015-2025, ASM_DECLARE_COLD_FUNCTION_SIZE).
+static std::set<std::string> cold_fns;
 static std::set<int> marker_names;   // the labels this plugin created: any asm insn at final without them around it is unrecorded
 static std::string fn_asm_name(function *fun) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl)); }
 static locus_t locus_of(location_t l) { expanded_location x = expand_location(l); return locus_t(x.file ? x.file : "", x.line, x.column); }
@@ -321,6 +325,7 @@ struct asm_mark_pass : rtl_opt_pass {
   unsigned int execute(function *fun) final override {
     std::string fn = fn_asm_name(fun);
     asm_count &c = asm_counts[fn];
+    if (crtl->has_bb_partition) cold_fns.insert(fn);   // read right before `final`: the flag is cleared after it
     std::vector<rtx_insn *> todo;
     for (rtx_insn *i = get_insns(); i; i = NEXT_INSN(i))
       if (asm_insn_p(i)) todo.push_back(i);
@@ -401,6 +406,8 @@ static void finish(void *, void *) {
   }
   fprintf(f, "}, \"emitted\": [");
   { bool ef = true; for (auto &n : emitted_fns) { if (!ef) fprintf(f, ", "); js(f, n); ef = false; } }
+  fprintf(f, "], \"cold\": [");
+  { bool cf = true; for (auto &n : cold_fns) { if (!cf) fprintf(f, ", "); js(f, n); cf = false; } }
   fprintf(f, "], \"toplevel\": %u}, \"findings\": [", toplevel);
   bool first = true;
   for (auto &t : findings) {
