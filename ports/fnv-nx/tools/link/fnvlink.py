@@ -3,7 +3,7 @@
 
     fnvlink.py resolve <units.json> <objects.tsv> <out dir> [--override <tsv>] [--override-lib <archive>]
                        [--extern-text <list>]
-                       [--crt-symbols <tsv|none>] [--imports <tsv|none>]
+                       [--imports <tsv|none>]
                                                               # mapping, address map, ABI report, bridges
                                                               # (S4's provider tables: platform/ of this tree)
                        [--units-renames <tsv|none>]           # S1b's patches/units_renames.tsv (default: this
@@ -92,6 +92,15 @@ ADDR_IN_NAME = re.compile(r'^(?:DAT|FUN|g|UNK|PTR)_([0-9a-f]{8})$')
 # symbol) stayed unresolved (top-down 10 / 11: a zero-filled data stub stood for the format string)
 STR_IN_NAME = re.compile(r'^str_([0-9a-f]{8})$')
 FUNC_SPANS = ([], [])   # sorted starts and their ends of units.json functions with a size (set by resolve)
+
+
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
 
 
 def inside_function(a):
@@ -365,7 +374,7 @@ ADDR_NAME = re.compile(r'^__fnv_[0-9a-f]{8}$')
 
 def provider_or_addr(a, native, providers):
     """The symbol generated code (exit thunks, stubs) calls for exe address a: `__fnv_<a>` where the native build
-    defines a, else S4's provider when crt_symbols.tsv has one, else `__fnv_<a>` (a visible trap) (R4 recon4-014)."""
+    defines a, else the import thunk's binding, else `__fnv_<a>` (a visible trap) (R4 recon4-014)."""
     if a not in native and a in (providers or {}):
         return providers[a][0]
     return ADDR_SYM % a
@@ -391,9 +400,9 @@ def reset_synth(out):
     return gone
 
 
-def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_symbols=None, imports=None, override_lib=None,
+def resolve(units_json, objects_tsv, out, override=None, extern_list=None, imports=None, override_lib=None,
             units_renames=None, exe=None):
-    """crt_symbols / imports: S4's platform/crt/crt_symbols.tsv and platform/win32/imports.tsv (None: the files of
+    """imports: S4's imports.tsv (None: the table of the FNVNX_TABLES directory, tools/tables.py; the file of
     this tree, 'none': not used). exe: the player's FalloutNV.exe (None: FNVNX_EXE / PLAYER_EXE, 'none': not used):
     its RTTI pairs each image vftable with its own class's native vtable (exevft.py)."""
     import time
@@ -714,12 +723,11 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     xexit_left = set()   # callback labels whose exe thunk has no native stand-in (they trap)
     exports = load_exports(EXPORTS if imports is None else (os.path.join(os.path.dirname(imports), 'exports.cpp')
                                                              if imports != 'none' else None))
-    providers, crt_classes = load_providers(CRT_SYMBOLS if crt_symbols is None else
-                                            (None if crt_symbols == 'none' else crt_symbols), exports)
-    import_syms = load_imports(IMPORTS if imports is None else (None if imports == 'none' else imports), exports)
+    providers = {}   # {address: (native symbol, text)}: the import thunks below (an import fact), no name-based table
+    import_syms = load_imports(_table('imports.tsv') if imports is None else (None if imports == 'none' else imports), exports)
     # import thunks (`jmp [IAT]`, 6 bytes) the decomp spells as functions calling the import: compiled, they lose or
     # retype the caller's arguments (S6c); their address binds to the import itself, like a provider
-    iat = load_iat(IMPORTS if imports is None else (None if imports == 'none' else imports))
+    iat = load_iat(_table('imports.tsv') if imports is None else (None if imports == 'none' else imports))
     thunks = find_import_thunks(native, units, iat, import_syms, gdef, gref, anydef, msvc, itanium)
     thunk_undef = collections.defaultdict(dict)   # source -> {thunk definition: import symbol}: the object's own
     for a, (sym, text) in thunks.items():         # calls follow (apply undefines, then renames them)
@@ -1866,11 +1874,6 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
     # ---- address map
     for a, names in load_extern_list(extern_list).items():
         extern_text.setdefault(a, set()).update(names)
-    for a, c in crt_classes.items():   # S4's table lists every referenced .text address without definition
-        if c in ('data', 'mid_data'):  # data symbols with a bogus "address": not code
-            extern_text.pop(a, None)
-        else:
-            extern_text.setdefault(a, set())
     amap_kinds, n_deldtor = write_addrmap(out, native, def_at, units, {**vmap, **vmo_vrows(vmo, vmap, exev_all)},
                                           extern_text, providers, cthis_rows, adj_rows, gdel_rows)
 
@@ -1932,7 +1935,7 @@ def resolve(units_json, objects_tsv, out, override=None, extern_list=None, crt_s
               % (byclass['ctor-dtor-alias'], byclass['ctor-dtor-trap'], len(xtraps),
                  sum(1 for w in xtraps.values() if w[1].startswith('reached')),
                  sum(1 for w in xtraps.values() if w[1].startswith('called')), byclass['unresolved-ctor-dtor']),
-              'CRT/library addresses with a provider (crt_symbols.tsv): %d, references bound to it: %d'
+              'addresses with a provider (import thunks): %d, references bound to it: %d'
               % (len(providers), byclass['provider']),
               'import references bound by IAT slot (imports.tsv + exports.cpp): %d of %d'
               % (stats['imports_bound'], byclass['import']),
@@ -5597,8 +5600,6 @@ def write_vtable_requests(out, real, objsyms, vnames, it, itanium, hand_req=None
 
 
 PORT = os.path.dirname(os.path.dirname(HERE))
-CRT_SYMBOLS = os.path.join(PORT, 'platform', 'crt', 'crt_symbols.tsv')
-IMPORTS = os.path.join(PORT, 'platform', 'win32', 'imports.tsv')
 EXPORTS = os.path.join(PORT, 'platform', 'win32', 'exports.cpp')
 IDENT = re.compile(r'^[A-Za-z_]\w*$')
 
@@ -5616,35 +5617,6 @@ def load_exports(path):
         for m in re.finditer(r'\{\s*"(\w+)",\s*"(\w+)",\s*\(void \*\)&(\w+)\s*\}', text):
             out[(m.group(1).lower(), m.group(2))] = m.group(3)
     return {k: v for k, v in out.items() if k[1] != 'f'}   # the macro definitions themselves
-
-
-def load_providers(crt_tsv, exports):
-    """platform/crt/crt_symbols.tsv (S4) -> ({address: (native symbol, provider text)} for the referenced .text
-    addresses a platform/library symbol implements, {address: class} of every row). Provider spellings: 'libc: f',
-    'platform/crt: f', 'fnvnx_f ...', 'fnvnx_ws2_* (see imports.tsv)' (the thunk's api through exports.cpp);
-    'implicit', 'needs body', 'none' and unidentified ones give no symbol."""
-    prov, classes = {}, {}
-    if not crt_tsv or not os.path.exists(crt_tsv):
-        return prov, classes
-    for line in open(crt_tsv, encoding='utf-8', errors='surrogateescape'):
-        f = line.rstrip('\n').split('\t')
-        if line.startswith('#') or len(f) < 6 or not re.match(r"^0x[0-9a-fA-F]+$", f[0]):
-            continue
-        a, cls, ident, p = int(f[0], 16), f[1], f[2], f[5].strip()
-        classes[a] = cls
-        sym = None
-        m = re.match(r'^(?:libc|libm|platform/crt|platform/win32): (\S+)', p)
-        if m and IDENT.match(m.group(1)):
-            sym = m.group(1)
-        elif p.startswith('fnvnx_ws2_'):
-            w = ident.split()
-            sym = exports.get(('ws2_32', w[1])) if len(w) == 2 and w[0] == 'ws2_32' else None
-        else:
-            m = re.match(r'^(fnvnx_\w+)(?:\s|$)', p)
-            sym = m.group(1) if m else None
-        if sym:
-            prov[a] = (sym, p)
-    return prov, classes
 
 
 def load_imports(imports_tsv, exports):
@@ -6996,13 +6968,13 @@ def main():
         argv, opts = [], {}
         it_ = iter(sys.argv[2:])
         for x in it_:
-            if x in ('--override', '--override-lib', '--extern-text', '--crt-symbols', '--imports', '--units-renames',
+            if x in ('--override', '--override-lib', '--extern-text', '--imports', '--units-renames',
                      '--exe'):
                 opts[x[2:].replace('-', '_')] = next(it_)
             else:
                 argv.append(x)
         resolve(*argv[:3], override=opts.get('override'), extern_list=opts.get('extern_text'),
-                crt_symbols=opts.get('crt_symbols'), imports=opts.get('imports'),
+                imports=opts.get('imports'),
                 units_renames=opts.get('units_renames'), override_lib=opts.get('override_lib'), exe=opts.get('exe'))
     elif cmd in ('probe', 'vtables'):
         jobs = int(sys.argv[4]) if len(sys.argv) > 4 else os.cpu_count()

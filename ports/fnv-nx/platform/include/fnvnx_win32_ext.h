@@ -57,6 +57,7 @@ void fnvnx_set_command_line(int argc, char **argv);
 /* the registry's first boot (platform/win32/registry_seed.cpp): when the hive file does not exist, makes it from the declared
  * machine's rows (platform/manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
 void fnvnx_registry_first_run(void);
+void fnvnx_declared_files_first_run(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
 BOOL fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */
@@ -256,8 +257,5 @@ void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook);
 
 #ifdef __cplusplus
 }
-/* the display mode for the renderer (display.cpp), C++ linkage as render/d3d9/dev/d3d9_adapter.h declares
- * `NxEnvProfile nx_env_profile();`: 1 docked (1080p), 0 handheld (720p); NxEnvProfile is an enum of that int */
-int nx_env_profile(void);
 #endif
 #endif

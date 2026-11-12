@@ -72,6 +72,15 @@ $(P)/win32/registry_seed.gen.inc: $(REG_DECL) $(P)/manifest/gen_registry_seed.py
 	python3 -I $(P)/manifest/gen_registry_seed.py $(REGSITES) $(REG_DECL) $@
 $(OUT)/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
 
+# the declared FalloutPrefs.ini: the launcher gate's setting (PREFS_REQUIRED, the exe-derived private output of prefs_settings.py in the product
+# build; the tests use their own synthetic file) = the adapter Description in the render front end's identity images (IDENT_*; synthetic here)
+PREFS_REQUIRED ?= $(ROOT)/tests/s4/declfiles_required_synth.tsv
+IDENT_HANDHELD ?= $(ROOT)/tests/s4/ident_synth_handheld.bin
+IDENT_DOCKED ?= $(ROOT)/tests/s4/ident_synth_docked.bin
+$(P)/win32/declared_files.gen.inc: $(PREFS_REQUIRED) $(IDENT_HANDHELD) $(IDENT_DOCKED) $(P)/manifest/gen_prefs_ini.py
+	python3 -I $(P)/manifest/gen_prefs_ini.py $(PREFS_REQUIRED) $@ --ident $(IDENT_HANDHELD) --ident $(IDENT_DOCKED)
+$(OUT)/platform/win32/declared_files.cpp.o: $(P)/win32/declared_files.gen.inc
+
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@

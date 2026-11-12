@@ -248,35 +248,6 @@ TEST(file_attributes_move_copy_dirs)
     CHECK(RemoveDirectoryA("Data\\NewDir"));
 }
 
-TEST(crt_file_wrappers)
-{
-    CreateDirectoryA("Data", NULL);
-    s4_write_file("Data\\crt.txt", "line1\r\nline2\r\n");
-    FILE *f = fnvnx_fopen("DATA\\Crt.TXT", "rt");
-    CHECK(f != NULL);
-    if (f) {
-        char b[32];
-        CHECK(fgets(b, sizeof b, f) != NULL);
-        CHECK_STR(b, "line1\r\n"); /* binary: text-mode CRLF translation is a known gap */
-        CHECK(_fseeki64(f, 0, SEEK_END) == 0);
-        CHECK_EQ(_ftelli64(f), 14);
-        fclose(f);
-    }
-    FILE *g = NULL;
-    CHECK_EQ(fnvnx_fopen_s(&g, "Data\\crt2.txt", "w"), 0);
-    if (g) {
-        fputs("x", g);
-        fclose(g);
-    }
-    CHECK_EQ(fnvnx_access("data\\crt2.TXT", 0), 0);
-    CHECK_EQ(fnvnx_access("data\\none.txt", 0), -1);
-    CHECK(MoveFileA("Data\\crt2.txt", "Data\\crt.txt") == 0); /* never replaces */
-    CHECK(MoveFileA("Data\\crt2.txt", "Data\\crt3.txt") != 0);
-    CHECK_EQ(fnvnx_remove("Data\\crt3.txt"), 0);
-    CHECK_EQ(fnvnx_mkdir("Data\\CrtDir"), 0);
-    CHECK_EQ(fnvnx_rmdir("Data\\crtdir"), 0);
-}
-
 /* NX1 check 5: the SD layout as the player copies it (sdmc:/switch/fnv = <root>: FalloutNV.exe and Data/ from a PC
  * install, any case), the game's own spellings of its files, and the profile directories it writes. */
 static void touch_host(const char *sub)

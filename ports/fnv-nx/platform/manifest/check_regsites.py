@@ -117,7 +117,7 @@ def build():
         method(va)
     asm(DUMMY, [b"\xc3"])
     # constructors (return this): A stores "FieldName" at +8, B stores its parameter, D calls A's constructor and stores "DerivedName",
-    # M has two vtables (offsets 0 and 8) and stores "MIName" at +0x10, E is created and its pointer is stored through an unknown base
+    # (all addresses here are of the synthetic image built by build(), not exe addresses) M has two vtables (offsets 0 and 8) and stores "MIName" at +0x10, E is created and its pointer is stored through an unknown base
     C_A, C_B, C_D, C_M, C_E = 0x401380, 0x4013a0, 0x4013c0, 0x401400, 0x401440
     asm(C_A, pro + [b"\x8b\xc1\xc7\x00", ("abs", VA), b"\xc7\x40\x08", ("abs", nm_a), b"\x5d\xc3"])
     asm(C_B, pro + [b"\x8b\xc1\xc7\x00", ("abs", VB), b"\x8b\x55\x08\x89\x50\x08\x5d\xc2\x04\x00"])

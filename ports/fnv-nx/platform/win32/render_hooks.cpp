@@ -1,6 +1,6 @@
 /* render_hooks.cpp - the platform side of the Direct3D 9 device layer's hook table (render/d3d9/dev/platform_hooks.tsv;
- * declarations: platform/include/fnvnx_render_hooks.h). nxd3d_gpu_call is not here: it is a link-time pair (guest:
- * toolchain/guest/platform_glue.cpp, host tests: tests/s4/host_gpu.cpp). */
+ * declarations: platform/include/fnvnx_render_hooks.h). nxd3d_gpu_call is not here: its definition is
+ * platform/guest/platform_glue.cpp. */
 #include "w32.h"
 #include "fnvnx_render_hooks.h"
 

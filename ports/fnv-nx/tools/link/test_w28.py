@@ -28,11 +28,12 @@ def check(cond, what):
 
 
 ex = fnvlink.load_exports(os.path.join(PORT, 'platform', 'win32', 'exports.cpp'))
-im = fnvlink.load_imports(os.path.join(PORT, 'platform', 'win32', 'imports.tsv'), ex)
+SYN = os.path.join(PORT, 'tests', 'imports_synth.tsv')   # synthetic IAT table: the real one is private (fnv-nx-build)
+im = fnvlink.load_imports(SYN, ex)
 check(im.get(0x00fdf2ec) == 'GetClassLongA', 'IAT 0x00fdf2ec -> GetClassLongA (top-down 3)')
 check(im.get(0x00fdf3d4) == 'D3DXSaveTextureToFileA', 'IAT 0x00fdf3d4 -> D3DXSaveTextureToFileA (top-down 25)')
 check(im.get(0x00fdf380) == 'fnvnx_ws2_fdisset', 'IAT 0x00fdf380 -> __WSAFDIsSet (top-down 102)')
-iat = fnvlink.load_iat(os.path.join(PORT, 'platform', 'win32', 'imports.tsv'))
+iat = fnvlink.load_iat(SYN)
 check(0x010c4cec not in iat and 0x010c4cec not in im and 0x010b7eb0 not in iat,
       'a `(not an IAT slot)` mislabel row is neither an IAT slot nor an import, so vftable_import binds it (5fd996a4 rank 12 Free)')
 check(0x00fdf2ec in iat, 'real IAT rows stay')

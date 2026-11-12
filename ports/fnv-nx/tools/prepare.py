@@ -372,7 +372,7 @@ CRT_NAMES = [n for v in CRT_HEADERS.values() for n in v.split()]
 # these that takes or returns _iobuf* is replaced by that header (its C++ overloads take _iobuf*). fopen has libc's
 # parameters, so no overload can return _iobuf*: its prototype is replaced by "fnvnx_iobuf_fopen.h", that header plus
 # `#define fopen fnvnx_iob_fopen` for the rest of the unit (fnvnx_iob_fopen is the provider of the CRT fopen that
-# units.json binds, platform/crt/crt_symbols.tsv; DECL1-FOPEN)
+# units.json binds, platform/crt/iob.c; DECL1-FOPEN)
 IOBUF_NAMES = set('''_fclose_nolock _fdopen _fileno _fseeki64 _fsopen _ftelli64 clearerr fclose feof ferror fflush fgetc
     fgetpos fgets fopen fopen_s fprintf fputc fputs fread fseek fsetpos ftell fwrite getc putc rewind setvbuf ungetc
     vfprintf __iob_func'''.split())
@@ -901,20 +901,6 @@ _DECO = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\
          re.compile(r'^_([A-Za-z_]\w*?)(?:@\d+)?$')]
 
 _CRT_BINDINGS = None
-# file -> math names whose GAME1 prototype there gets the float return type of the game function (see GAME1)
-_GAME_FLOAT_RET = {}
-
-def crt_inline_float():
-    """addresses of the game's out-of-line copies of MSVC's float math overloads (platform/crt/crt_symbols.tsv
-    `crt_inline` rows `name(float) -> namef`)"""
-    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'platform', 'crt', 'crt_symbols.tsv')
-    out = set()
-    if os.path.exists(here):
-        for line in open(here):
-            f = line.rstrip('\n').split('\t')
-            if len(f) > 2 and f[1] == 'crt_inline' and re.match(r'\w+\(float(?:, float)*\) -> \w+f\b', f[2]):
-                out.add(int(f[0], 16))
-    return out
 
 def cxx_copy_is_crt(path, name):
     """True when the unit of `path` binds a namespace-qualified C++ spelling of the CRT function `name`
@@ -982,7 +968,6 @@ def game_bound_names(path):
     others = {f: v[2] for f, v in graph.items() if v[2]}
     if others:
         names = set().union(*others.values())
-        float_ret = crt_inline_float()
         for u in units:
             syms = u.get('symbols', {})
             want = {n for n in names if '_' + n in syms}
@@ -994,7 +979,6 @@ def game_bound_names(path):
                 done.add(f)
                 for n in others.get(f, set()) & want:
                     bad.setdefault(u['source'], set()).add(n)
-                    if int(syms['_' + n], 16) in float_ret: _GAME_FLOAT_RET.setdefault(f, set()).add(n)
                 todo.extend(graph.get(f, ((),))[0])
     inc = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
     for src, names in bad.items():
@@ -1026,13 +1010,6 @@ def r_game_bound_names(path, text, stats):
         stats['GAME1'] += 1
     out.append(text[pos:])
     text = ''.join(out)
-    # `extern "C" double floor(float);` bound to the game's floor(float) (0x00406cc0): on x86 both return in st0, so
-    # the double declaration read the float result exactly; on AArch64 the function returns it in s0, so the
-    # prototype says float (the call converts it to double, the value the x86 caller read)
-    for n in _GAME_FLOAT_RET.get(key, ()):
-        text, k = re.subn(r'\bdouble(\s+(?:__cdecl\s+)?%s%s\s*\(\s*float\b[^(),]*\)\s*;)' % (GAME_PREFIX, n),
-                          r'float\1 /* fnv-nx GAME1: the game function returns float */', text)
-        stats['GAME1'] += k
     return text
 
 RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members, r_sse_qualified, r_game_bound_names,

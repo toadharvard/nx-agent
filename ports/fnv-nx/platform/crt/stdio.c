@@ -51,57 +51,11 @@ static int set_errno(int neg)
     return -1;
 }
 
-/* MSVC mode strings: r w a, '+', b/t, plus extensions (c n S R T D N, ",ccs=...") the target fopen rejects */
-static void clean_mode(const char *in, char *out)
-{
-    size_t o = 0;
-    for (const char *p = in; *p && *p != ',' && o < 6; p++)
-        if (strchr("rwa+b", *p))
-            out[o++] = *p;
-    if (!memchr(out, 'b', o) && o < 7)
-        out[o++] = 'b';
-    out[o] = 0;
-}
 
-FILE *fnvnx_fopen(const char *path, const char *mode)
-{
-    char host[HOST_MAX], m[8];
-    if (!map(path, host) || !mode) {
-        if (fnvnx_plat_on && path)
-            fnvnx_plat_open_failed(path, NULL, (unsigned)errno, PLAT_RA, "fopen");
-        return NULL;
-    }
-    clean_mode(mode, m);
-    FILE *f = fopen(host, m);
-    if (!f && fnvnx_plat_on)
-        fnvnx_plat_open_failed(path, host, (unsigned)errno, PLAT_RA, "fopen");
-    return f;
-}
 
-errno_t fnvnx_fopen_s(FILE **f, const char *path, const char *mode)
-{
-    if (!f)
-        return FNVNX_EINVAL;
-    *f = fnvnx_fopen(path, mode);
-    return *f ? 0 : errno;
-}
 
-FILE *fnvnx_fsopen(const char *path, const char *mode, int share)
-{
-    (void)share;
-    return fnvnx_fopen(path, mode);
-}
 
-int fnvnx_remove(const char *path)
-{
-    char host[HOST_MAX];
-    if (!map(path, host))
-        return -1;
-    int r = os_remove(host);
-    return r ? set_errno(r) : 0;
-}
 
-int fnvnx_unlink(const char *path) { return fnvnx_remove(path); }
 
 int fnvnx_access(const char *path, int mode)
 {
@@ -119,36 +73,8 @@ int fnvnx_access(const char *path, int mode)
     return 0;
 }
 
-errno_t fnvnx_access_s(const char *path, int mode) { return fnvnx_access(path, mode) ? errno : 0; }
 
-int fnvnx_mkdir(const char *path)
-{
-    char host[HOST_MAX];
-    if (!map(path, host))
-        return -1;
-    int r = os_mkdir(host);
-    return r ? set_errno(r) : 0;
-}
 
-int fnvnx_rmdir(const char *path)
-{
-    char host[HOST_MAX];
-    if (!map(path, host))
-        return -1;
-    int r = os_rmdir(host);
-    return r ? set_errno(r) : 0;
-}
 
-int fnvnx_chdir(const char *dir)
-{
-    if (!SetCurrentDirectoryA(dir)) {
-        errno = ENOENT;
-        return -1;
-    }
-    return 0;
-}
 
-int _fseeki64(FILE *f, long long off, int whence) { return fseeko(f, (off_t)off, whence); }
-long long _ftelli64(FILE *f) { return (long long)ftello(f); }
-int fnvnx_fileno(FILE *f) { return fileno(f); }
 

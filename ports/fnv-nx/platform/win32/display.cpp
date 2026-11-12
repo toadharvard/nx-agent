@@ -21,6 +21,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include "fnvnx_render_hooks.h"
 
 extern "C" {
 void fnvnx_set_display_size(int w, int h);
@@ -58,10 +59,8 @@ static int cur_docked(void)
 extern "C" int fnvnx_display_w(void) { return k_modes[cur_docked()].w; }
 extern "C" int fnvnx_display_h(void) { return k_modes[cur_docked()].h; }
 
-/* the render profile (render/d3d9/dev/d3d9_adapter.h: `enum NxEnvProfile { NX_ENV_HANDHELD = 0, NX_ENV_DOCKED = 1 };
- * NxEnvProfile nx_env_profile();`, C++ linkage; an enum without a fixed type returns in the same register as int,
- * and the mangled name does not contain the return type, so this definition is the renderer's symbol) */
-int nx_env_profile(void) { return cur_docked(); }
+/* the render profile (declared once, in fnvnx_render_hooks.h): docked is 1080p, handheld 720p */
+enum NxEnvProfile nx_env_profile(void) { return cur_docked() ? NX_ENV_DOCKED : NX_ENV_HANDHELD; }
 
 extern "C" void fnvnx_set_display_size(int w, int h)
 {

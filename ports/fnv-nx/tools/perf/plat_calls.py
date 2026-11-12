@@ -35,15 +35,23 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 P = os.path.dirname(os.path.dirname(HERE))
-IMPORTS = os.path.join(P, 'platform', 'win32', 'imports.tsv')
 FULL = {'kernel32!CreateFileA': 0}   # entries logged at every call (plat_wine.py)
 IMAGE = (0x00400000, 0x02100000)
 
 
-def imports(path=IMPORTS):
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
+
+
+def imports(path=None):
     """[(slot, dll, api, provider)] of the IAT slots imports.tsv lists (rows that are not a slot left out)"""
     out = []
-    for line in open(path):
+    for line in open(path or _table('imports.tsv')):
         if line.startswith('#') or not line.strip():
             continue
         f = line.rstrip('\n').split('\t')
