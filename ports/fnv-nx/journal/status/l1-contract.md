@@ -105,3 +105,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - Dynamic GetProcAddress sites open: 12, so certificates don't count yet.
 - 03:01Z w17: -mno-outline-atomics becomes a required guest flag, because the declared Cortex-A57 has no LSE (from L2). A reference from a guest object to __aarch64_* outline helpers is red. Every CC key changes once.
 - 03:02Z w15 5d6e42ea adds link_archives with members recorded, the objects.json symbol check and the tool-root refusal; test_link 42/42. Next: linkstrict/objstub read the members, full verdict. fea3d99 stays queued. contract/include paths are fnvnx/reach.h, declared.h and import_key.h, one declaration per extern (agreed with L5).
+- 03:03Z w17 c6726a2 is green: 27/27 gates, 236.1 s (gcc-13-plugin-dev pinned; host linkstrict rule (d)). It replaces cca84bb in the MERGER queue, ahead of the L6 translator. Later: symbol versions and keying by deb sha256.
