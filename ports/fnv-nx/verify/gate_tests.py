@@ -200,7 +200,9 @@ def run_one(root, rel, exclude, timeout, skipdir=None, net=False):
             p.wait()
         with open(out, "rb") as fh:
             data = fh.read()
-        tail = data[-TAIL:].decode("utf-8", "replace")
+        text = data.decode("utf-8", "replace")
+        fails = "\n".join(ln[:300] for ln in text.splitlines() if ln.startswith("FAIL "))[:TAIL // 2]
+        tail = (fails + "\n--- end of output ---\n" if fails else "") + text[-(TAIL - len(fails)) :] if fails else text[-TAIL:]
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return ("passed" if ok else "failed"), round(time.time() - t0, 3), tail, ended, record_digest(data)

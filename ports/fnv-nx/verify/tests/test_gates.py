@@ -164,7 +164,7 @@ spec = json.load(open(os.path.join(VERIFY, "gates.json")))
 byname = {g["name"]: g for g in spec["gates"]}
 CONTRACT = ["n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel", "abs", "disp", "reach", "reachlink", "gpa"]
 dirs_pure = [a.rsplit("/", 1)[-1] for a in byname["pure"]["argv"][3:]]
-dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
+dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][7:]]
 check("gates.json: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
 check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "build", "objstub", "linkstrict", "determinism"] + CONTRACT + ["argordergate", "imports", "machine"]
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_%s.py" % n] and byname[n]["result"] == n + ".json"
@@ -173,7 +173,7 @@ check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and 
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
       and dirs_pure == ["contract", "link", "rules", "lift"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift"]
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
-      and byname["selftests"]["argv"][:5] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "2"], spec)
+      and byname["selftests"]["argv"][:7] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "2", "--timeout-s", "900"], spec)
 
 # ---- l1
 def l1(*a):
