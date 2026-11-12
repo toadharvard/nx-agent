@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap/abort path or (V) a vacuous function.
-    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--declared-machine FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
+    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--declared-machine FILE] [--fail SYMBOL] [--op-cover FILE --op-syntax FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
@@ -84,6 +84,28 @@ when the file does not exist); a fact with no call site in the universe is `reac
 taken, in code or in data) is `reach-address-taken`. The write sets are the decoder's (LLVM defs); a register an instruction
 writes that they miss (x0, say) would make a constant wrong, and the Form-writes fact of L3a w5 is what replaces this reliance.
 
+(T-B) TRAP BODY. The root's recipe declares its failure function, `error_abi: {"fail": SYMBOL}` (`--fail`). A function is TRAP-SHAPED (trap_candidate)
+iff it calls exactly one symbol X (BL, or a tail B, with a branch relocation; X global, not a citation function, not REACH), and, with calls of
+X transparent, it is V by the vanalyse rules except for the input rule (stores only into the own frame, no other call, no indirect branch, no
+system word, no atomic, every memory access based on the frame; the arguments may be read), and EVERY path of it passes a call of X
+(every_path_calls). Its whole effect is then what X does. If X is the root's failure function the function is the finding `trap-body`: a body
+that only reports a failure is a stub. SUBSET (stated, like V): a body that reads memory outside its frame or calls anything else is not
+trap-shaped. The failure function itself is checked against its definition: defined exactly once as a global function of the root
+(`error-abi-undefined`, `error-abi-multiple`), no vacuous body (`error-abi-vacuous`), not itself trap-shaped (`error-abi-trap`). The analysis
+is per object and root-independent (the callee name is the fact, cached with the object); `judge` compares it with the root's symbol, so one
+cached object serves every root. The gate result holds "trap_body": the count.
+
+(H) EMPTY HANDLERS BY RECORDS. A table of handlers selects functions by their address stored in a data section (an instruction table). A V function
+(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE`; recipe
+`empty_handlers: {"cover": PATH, "syntax": PATH}`, tracked files; read_handler_records, an unparseable record is an error): (1) a row of op_cover.tsv
+(`slot id opnum op class covering evidence handler`) has handler == the function's symbol; (2) EVERY such row is justified: class a (the id is
+`sm:<key>` and every op_syntax row of the key is `ok` with 0 destination, 0 source, 0 other operands: the opcode has nothing to do), or class b
+(`covering` names symbols, each defined in the root and none a V body: another non-empty emitter carries the semantics); class c (the row is
+unreachable) is judged by the reach rule, so an empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a
+certificate); none and own justify nothing; (3) the function's address is stored in an allocated non-code section other than .eh_frame (its own
+object when it is local, any object of the root when it is global). Otherwise the finding V with the reason. The gate result holds
+"handler_justified": {a: n, b: n}.
+
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
 flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so
 the key is exact and a changed header does not invalidate objects that do not mention the new terminator. Constants rows and reach facts
@@ -154,6 +176,7 @@ class Obj:
         if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1 or struct.unpack_from("<HH", d, 16) != (1, 183):
             raise ValueError("%s: not a little-endian AArch64 ELF relocatable" % path)
         w64 = self.w64 = d[4] == 2
+        self.cite = CITE   # the functions a call of which is transparent for V (is_wine); trap_candidate adds the one callee under test
         shoff, = struct.unpack_from("<Q" if w64 else "<I", d, 0x28 if w64 else 0x20)
         shent, shnum, shstr = struct.unpack_from("<HHH", d, 0x3A if w64 else 0x2E)
         raw = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * shent) for i in range(shnum)]
@@ -259,7 +282,7 @@ def access(inf):
 def is_wine(w, rel, obj):
     """True iff word w, with relocation rel (or None), is a call of a citation function (WINE or DECL): a BL, or a tail B, which is the
     same body as BL then RET (the compiler's choice of a sibling call is not a different class). See is_tail."""
-    return bool(rel) and w >> 26 in (0b100101, 0b000101) and obj.syms[rel[0]][0] in CITE
+    return bool(rel) and w >> 26 in (0b100101, 0b000101) and obj.syms[rel[0]][0] in obj.cite
 
 
 def is_tail(w, rel, obj):
@@ -704,6 +727,46 @@ def wine_path_id(words, a, b, sites):
     return ends.pop()[1] if len(ends) == 1 and next(iter(ends))[0] == 1 else None
 
 
+def every_path_calls(words, a, b, sites):
+    """True iff EVERY path of the function [a,b) passes a call site of SITES (call offsets): forward dataflow with 0 (no call yet) / 1, join = 0
+    if either side is 0; every word with no successor (RET, BR, trap, a tail B at a site, which returns after the call) must hold 1."""
+    st, work, ends = {a: 0}, [a], set()
+    while work:
+        o = work.pop()
+        if o not in words:
+            return False
+        v = 1 if o in sites else st[o]
+        nxt = [t for t in succ_of(words[o], o) if a <= t < b] if not (o in sites and words[o] >> 26 == 0b000101) else []
+        if not nxt:
+            ends.add(v)
+        for t in nxt:
+            new = v if t not in st else min(st[t], v)
+            if new != st.get(t):
+                st[t] = new
+                work.append(t)
+    return ends == {1}
+
+
+def trap_candidate(words, a, b, rels, obj, dec):
+    """(T-B) The callee X of a TRAP-SHAPED body, or None. Trap-shaped: the function [a,b) calls exactly one symbol X (BL, or tail B, with a
+    branch relocation; not the citation functions and not REACH), and with calls of X transparent (is_wine over obj.cite + X) it is V by the
+    vanalyse rules (stores only into the own frame, no other call, no indirect branch, no system word, no atomic, every memory access based on
+    the frame; the arguments MAY be read, as in the wine case), and every path passes a call of X (every_path_calls). Then its whole effect is
+    what X does. Whether X is the root's failure function is judged by `judge` (the root's `error_abi`): the analysis is per object and
+    knows no root. A subset by construction (like V): a body that reads memory outside its frame, or calls anything else, is not trap-shaped."""
+    sy = {o: obj.syms[r[0]] for o, r in rels.items() if a <= o < b and r[1] in BRANCH[obj.w64] and words.get(o, 0) >> 26 in (0b100101, 0b000101)}
+    names = {t[0] for t in sy.values()}
+    if len(names) != 1 or any(t[4] == 0 for t in sy.values()) or names & set((REACH,) + CITE):   # one callee, a global symbol (the failure function is global)
+        return None
+    x, sites = next(iter(names)), set(sy)
+    obj.cite = CITE + (x,)
+    try:
+        v = vanalyse(words, a, b, rels, obj, dec, True)
+    finally:
+        obj.cite = CITE
+    return x if v is not None and every_path_calls(words, a, b, sites) else None
+
+
 def exit_tail(words, a, b):
     """True iff EVERY path of the function [a,b) ends in the same way: control leaves it only by falling off the end after the last
     word, which is a BLR (a call through a pointer, which the compiler knew not to return). So: the last word is BLR and reachable;
@@ -736,7 +799,7 @@ def check_obj(path, terms, os_layer):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
     "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe)."""
     o = Obj(path)
-    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "alias": {}}
+    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "alias": {}, "tb": {}, "globals": [], "dref": []}
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
     tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH,) + CITE}   # REACH is judged by the reach rule
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
@@ -760,6 +823,8 @@ def check_obj(path, terms, os_layer):
             if last and (a, a + sz) == last[:2]:  # alias of the previous symbol (ICF, .set): one body, judged once, every name attached
                 extra["alias"].setdefault(last[3], []).append(name)
                 finds += [(name, k, d, v) for _, k, d, v in last[2]]
+                if last[3] in extra["tb"]:
+                    extra["tb"][name] = extra["tb"][last[3]]
                 if last[3] in extra["wine_id"]:
                     extra["wine_id"][name] = extra["wine_id"][last[3]]
                     extra["wine_nz"][name] = extra["wine_nz"].get(last[3], {})
@@ -830,6 +895,13 @@ def check_obj(path, terms, os_layer):
                                (name, "declared-machine-in-real-body" if csyms == {DECL} else "wine-fixme-in-real-body", "the function calls %s and does more than a simplified body" % "/".join(sorted(csyms)), None))
                 elif v is not None:
                     fnd.append((name, "V", "result " + " ".join("%s=%s" % kv for kv in sorted(v.items())), vjson(v, o)))
+                else:   # (T-B) not V: a body whose whole effect is one call of a callee X (judged against the root's failure function)
+                    try:
+                        tb = trap_candidate(words, a, b, rel, o, {x: dec.get(soff + x) for x in words})
+                    except Unanalysable:
+                        tb = None
+                    if tb is not None:
+                        extra["tb"][name] = tb
             finds += fnd
             last = (a, b, fnd, name)
             cover.append((a, b))
@@ -851,6 +923,18 @@ def check_obj(path, terms, os_layer):
                         nm = "%s+0x%x" % (o.secs[tsec][0], off)
                         items.append(nm)
                         finds.append((nm, fkind, "reference to %s from a non-code section" % sym, None))
+    fdef = {}   # (section index, value) -> the names of the functions defined there
+    for sy in o.syms:
+        if sy[3] == 2 and 0 < sy[5] < 0xFF00:
+            fdef.setdefault((sy[5], sy[1]), []).append(sy[0])
+    extra["globals"] = sorted({sy[0] for sy in o.syms if sy[3] == 2 and sy[4] != 0 and 0 < sy[5] < 0xFF00})
+    dref = set()   # the functions a relocation of an allocated data section refers to (the address of the function is stored in data); .eh_frame
+    for tsec, rs in o.rela.items():   # describes functions for the unwinder and selects none, a non-allocated section (debug) is not loaded
+        if o.secs[tsec][2] & 2 and not o.secs[tsec][2] & 4 and o.secs[tsec][0] != ".eh_frame":
+            for off, (sidx, t, ad) in rs.items():
+                sy = o.syms[sidx]
+                dref |= set(fdef.get((sy[5], sy[1] + ad), ())) if 0 < sy[5] < 0xFF00 else ({sy[0]} if sy[0] else set())
+    extra["dref"] = sorted(dref)
     return items, finds, dict(extra, exit_ok=sorted(exit_ok))
 
 
@@ -945,15 +1029,98 @@ def names_of(r, name):
     return [name] + r.get("alias", {}).get(name, [])
 
 
-def judge(results, rows, facts, wine=None, declared=None):
+HCLASSES = ("a", "b", "c", "own", "none")
+
+
+def read_handler_records(cover_path, syntax_path):
+    """The records of the empty-handler justification (generated by the render owner from the translator's own source and the documentation):
+    op_cover.tsv `slot id opnum op class covering evidence handler` (one row per (slot, instruction-table row); handler = the symbol of the
+    handler that slot selects; covering = `-` or comma-separated symbols of the other emitters that carry the semantics) and op_syntax.tsv
+    `key opnum models n_dst n_src n_other syntax page page_sha256 status`. The columns are read by their header names (all required); any
+    other malformation is a ValueError (the gate is red: an unparseable record is not evidence). -> {"rows": {handler: [row dict]}, "syntax": {key: [(n_dst, n_src, n_other, status)]}}"""
+    def table(path, need):
+        ls = [l.rstrip("\n") for l in open(path) if l.strip() and not l.startswith("#")]
+        if not ls:
+            raise ValueError("%s: empty" % path)
+        head = ls[0].split("\t")
+        if any(c not in head for c in need) or len(set(head)) != len(head):
+            raise ValueError("%s: header %r lacks a required column of %s or repeats one" % (path, head, need))
+        out = []
+        for l in ls[1:]:
+            f = l.split("\t")
+            if len(f) != len(head):
+                raise ValueError("%s: row with %d fields, header has %d: %r" % (path, len(f), len(head), l[:80]))
+            out.append(dict(zip(head, f)))
+        return out
+    rows, seen = {}, set()
+    for r in table(cover_path, ("slot", "id", "opnum", "op", "class", "covering", "evidence", "handler")):
+        if r["class"] not in HCLASSES or not r["handler"] or not r["id"] or (r["slot"], r["id"]) in seen or not r["opnum"].lstrip("-").isdigit():
+            raise ValueError("%s: bad or duplicate row %r" % (cover_path, "\t".join(r.values())[:100]))
+        seen.add((r["slot"], r["id"]))
+        rows.setdefault(r["handler"], []).append(r)
+    syn = {}
+    for r in table(syntax_path, ("key", "n_dst", "n_src", "n_other", "status")):
+        if not (r["n_dst"].isdigit() and r["n_src"].isdigit() and r["n_other"].isdigit()) or not r["key"]:
+            raise ValueError("%s: bad row %r" % (syntax_path, "\t".join(r.values())[:100]))
+        syn.setdefault(r["key"], []).append((int(r["n_dst"]), int(r["n_src"]), int(r["n_other"]), r["status"]))
+    return {"rows": rows, "syntax": syn}
+
+
+def handler_ok(rec, name, oid, results, sibs, allv):
+    """(H) -> (True, "handler_a"|"handler_b") or (False, why). A V function NAME (empty or constant body) of object OID is certified iff
+    (1) the records name it: at least one row has handler == NAME; (2) every such row is justified: class a: the id is `sm:<key>` and every
+    op_syntax row of that key is `ok` with 0 destination, 0 source and 0 other operands (the opcode has no operand, so the body has nothing to
+    do); class b: `covering` names at least one symbol and every one is a function defined in the same object or global in an object of the
+    same root (SIBS: the object ids of the root), and none is V (the semantics is carried by a non-empty emitter); class c (unreachable: the
+    body must be a call of fnvnx_reach_violation with a certificate: the reach rule), none and own are not justifications; (3) the function's
+    address is stored in a non-code section (the instruction table selects it): its own object when the function is local, any object of the
+    root when it is global. A function that fails any of these is the finding V with the reason."""
+    rows = rec["rows"].get(name)
+    if not rows:
+        return False, "no record row names this handler"
+    kinds = set()
+    for r in rows:
+        c, key = r["class"], r["id"][3:] if r["id"].startswith("sm:") else None
+        if c == "a":
+            ss = rec["syntax"].get(key, []) if key else []
+            if not ss or any(x != (0, 0, 0, "ok") for x in ss):
+                return False, "row %s %s class a, but op_syntax has no 0-dst/0-src/0-other ok row for it" % (r["slot"], r["id"])
+        elif c == "b":
+            cov = [x for x in r["covering"].split(",") if x and x != "-"]
+            if not cov:
+                return False, "row %s %s class b names no covering emitter" % (r["slot"], r["id"])
+            for x in cov:
+                where = [o for o in [oid] + [o for o in sibs if o != oid] if x in results[o]["items"] and (o == oid or x in results[o]["globals"])]
+                if not where:
+                    return False, "row %s %s: covering emitter %s is not defined in the root" % (r["slot"], r["id"], x)
+                if any((o, x) in allv for o in where):
+                    return False, "row %s %s: covering emitter %s is itself a vacuous body" % (r["slot"], r["id"], x)
+        else:
+            return False, "row %s %s class %s: %s" % (r["slot"], r["id"], c, "the reach gate (fnvnx_reach_violation with a certificate) judges it, not an empty body" if c == "c" else "not a justification")
+        kinds.add("handler_" + c)
+    local = name not in results[oid]["globals"]
+    if not (name in results[oid]["dref"] or (not local and any(name in results[o]["dref"] for o in sibs))):
+        return False, "the function's address is not stored in a non-code section (no table selects it)"
+    return True, sorted(kinds)[0]
+
+
+def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None):
     """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
     V: certified iff its row equals the result. indirect-noreturn-tail: certified iff every path ends in the tail and the function is
     REACH or has a row of kind `exit`. A call of REACH: accepted iff w0 is a constant that is in FACTS; every fact needs a call site.
     WINE (rows of wine_fixme.tsv, {id: (contract name, wine_ref, kind, value)}, None = empty): a function that calls it and is
-    otherwise V (kind WINE-V) is certified iff it passes exactly one id on every path, the id has a row and the result matches it."""
+    otherwise V (kind WINE-V) is certified iff it passes exactly one id on every path, the id has a row and the result matches it.
+    FAILS {object id: the root's failure function `error_abi.fail`}: a function whose analysis says trap-shaped with callee == that symbol is
+    `trap-body`; the symbol itself must be defined once as a global function of the root and be no V and no trap body (`error-abi-*`).
+    HANDLERS {object id: records of read_handler_records}: a V function with no constants row is certified iff handler_ok (rule H).
+    STATS, a dict, receives the counts "trap_body", "handler_a", "handler_b"."""
     items, out, vflag, exited, used = [], [], set(), set(), set()
-    wine = wine or {}
+    wine, fails, handlers, stats = wine or {}, fails or {}, handlers or {}, stats if stats is not None else {}
+    allv = {(oid, n) for oid, r in results.items() for n, k, _, _ in r["finds"] if k == "V"}
+    root_of = {}   # records object -> the object ids that share it (one root)
+    for oid, hr in handlers.items():
+        root_of.setdefault(id(hr), []).append(oid)
     for oid, r in results.items():
         funcs = set(r["items"])
         wids = {}   # function -> constant ids it passes to WINE (all call sites)
@@ -968,6 +1135,12 @@ def judge(results, rows, facts, wine=None, declared=None):
                 vflag.add((oid, name))
                 if row and row[0] != "exit" and matches(row, v):
                     continue
+                if not row and oid in handlers:
+                    ok, why = handler_ok(handlers[oid], name, oid, results, root_of[id(handlers[oid])], allv)
+                    if ok:
+                        stats[why] = stats.get(why, 0) + 1
+                        continue
+                    detail += "; handler records: " + why
                 kind, detail = ("constants-mismatch", "row %s %s, analysis: %s" % (row[0], row[1], detail)) if row else (kind, detail + "; no constants row")
             elif kind in ("WINE-V", "wine-fixme-in-real-body") and any(wine.get(i, (0, 0, ""))[2] == "branch" for i in wids.get(name, ())):
                 # kind branch: a log on one branch of a real implementation (conformance of the branch is class 10, not this gate)
@@ -994,6 +1167,16 @@ def judge(results, rows, facts, wine=None, declared=None):
                     continue
                 detail += "; " + ("not every path ends in the tail" if name not in exit_ok else "no row of kind exit")
             out.append((oid, name, kind, detail))
+        fail = fails.get(oid)
+        for name, x in sorted(r["tb"].items()):   # (T-B) trap bodies of the root's failure function
+            if fail and x == fail and name != fail:
+                out.append((oid, name, "trap-body", "every path ends in a call of %s (error_abi.fail) and the body has no other effect" % fail))
+                stats["trap_body"] = stats.get("trap_body", 0) + 1
+        if fail and fail in r["items"] and fail in r["globals"]:
+            if (oid, fail) in allv:
+                out.append((oid, fail, "error-abi-vacuous", "the failure function %s is a vacuous body" % fail))
+            if r["tb"].get(fail) is not None:
+                out.append((oid, fail, "error-abi-trap", "the failure function %s is itself a trap-shaped body of %s" % (fail, r["tb"][fail])))
         if REACH in funcs and REACH not in exit_ok:
             out.append((oid, REACH, "reach-not-exit", "the definition does not end in a call through a pointer on every path"))
         for key, sym, pre in (("wine", WINE, "wine-fixme"), ("declared", DECL, "declared-machine")):
@@ -1020,9 +1203,21 @@ def judge(results, rows, facts, wine=None, declared=None):
     return items, sorted(set(out))
 
 
-def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None):
-    """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted)."""
-    return judge(analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs), rows, facts, wine, declared)
+def error_abi_findings(results, oids, fail):
+    """The root's failure function FAIL (recipe `error_abi.fail`) must be defined exactly once, as a global function, in the objects OIDS of the
+    root: else [("-", FAIL, error-abi-undefined | error-abi-multiple, detail)]. That it is no vacuous or trap-shaped body is judged by `judge`."""
+    defs = [o for o in oids if fail in results[o]["globals"]]
+    if len(defs) == 1:
+        return []
+    return [("-", fail, "error-abi-undefined" if not defs else "error-abi-multiple", "%d global definitions of the failure function %s in the root: %s" % (len(defs), fail, ", ".join(defs[:3])))]
+
+
+def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, fail=None, records=None, stats=None):
+    """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). FAIL: the failure function of the one root OBJS form;
+    RECORDS: read_handler_records of it."""
+    res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs)
+    items, finds = judge(res, rows, facts, wine, declared, {o: fail for o in res} if fail else None, {o: records for o in res} if records else None, stats)
+    return items, sorted(set(finds) | set(error_abi_findings(res, list(res), fail) if fail else ()))
 
 
 read_list = lambda path: [l.rstrip("\n") for l in open(path) if l.strip()]
@@ -1234,7 +1429,9 @@ def main(argv):
                                  read_facts(opt["--facts"][0]) if "--facts" in opt else None, opt.get("--cache", [None])[0],
                                  int(opt.get("--jobs", [os.cpu_count() or 1])[0]),
                                  read_wine_table(opt["--wine-fixme"][0]) if "--wine-fixme" in opt else None,
-                                 read_declared_table(opt["--declared-machine"][0]) if "--declared-machine" in opt else None)
+                                 read_declared_table(opt["--declared-machine"][0]) if "--declared-machine" in opt else None,
+                                 opt["--fail"][0] if "--fail" in opt else None,
+                                 read_handler_records(opt["--op-cover"][0], opt["--op-syntax"][0]) if "--op-cover" in opt else None)
         if "--json" in opt:
             json.dump({"functions": len(items), "findings": finds}, open(opt["--json"][0], "w"), sort_keys=True)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as e:

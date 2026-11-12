@@ -49,7 +49,7 @@ TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources", "forbid_sections"}
+        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -524,6 +524,16 @@ def check(rec, root, files, roots, pin=None, repo="."):
     fs = rec.get("forbid_sections")
     if fs is not None and not (isinstance(fs, list) and fs and all(isinstance(n, str) and re.fullmatch(r"\.[A-Za-z0-9._-]+", n) for n in fs)):
         err.append("forbid_sections must be a non-empty list of section names (.name)")
+    ea = rec.get("error_abi")
+    if ea is not None and not (isinstance(ea, dict) and set(ea) == {"fail"} and isinstance(ea["fail"], str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ea["fail"])):
+        err.append('error_abi must be {"fail": "<C symbol>"}: the root\'s one failure function (objstub judges its trap bodies)')
+    eh = rec.get("empty_handlers")
+    if eh is not None:
+        if not (isinstance(eh, dict) and set(eh) == {"cover", "syntax"}):
+            err.append('empty_handlers must be {"cover": PATH, "syntax": PATH} (the generated op_cover.tsv and op_syntax.tsv)')
+        else:
+            err += ["empty_handlers.%s %r is not a tracked file of the repository" % (k, p) for k, p in sorted(eh.items())
+                    if not (isinstance(p, str) and p in files and not p.startswith("/") and ".." not in p.split("/"))]
     sr = rec.get("sources")
     if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
         err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")

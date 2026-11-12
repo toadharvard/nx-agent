@@ -31,14 +31,15 @@ import unitstage  # noqa: E402
 
 
 def root_check(root, repo, cache, jobs):
-    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)])"""
+    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)],
+    the root's failure function (recipe error_abi.fail) or None, the root's handler records (recipe empty_handlers) or None)"""
     rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
-        return {}, {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])]
+        return {}, {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])], None, None
     if res["status"] == "red":
-        return {}, {}, set(), [("-", root, "build-red", "stage %s" % res["failure"]["stage"])]
+        return {}, {}, set(), [("-", root, "build-red", "stage %s" % res["failure"]["stage"])], None, None
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
@@ -50,25 +51,34 @@ def root_check(root, repo, cache, jobs):
             names |= set(objstub.unit_terminators(drv[lang], us, {"c": rec["flags"]["c"], "c++": rec["flags"]["cxx"]}, cache, jobs)[0])
     os_ids = {base + o["unit"] for o in res["objects"] if o["os_layer"]}
     rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs), rows, os_ids, []
+    eh = rec.get("empty_handlers")
+    records = objstub.read_handler_records(os.path.join(repo, eh["cover"]), os.path.join(repo, eh["syntax"])) if eh else None
+    fail = (rec.get("error_abi") or {}).get("fail")
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs), rows, os_ids, [], fail, records
 
 
 def main(argv):
     jobs = int(argv[argv.index("--jobs") + 1]) if "--jobs" in argv else os.cpu_count() or 1
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-objstub-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
+    stats = {}   # counts of the rule-H certifications and of the trap bodies
     items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.buildable_roots(repo)
+    fails, handlers = {}, {}   # {object id: the root's failure function}, {object id: the root's handler records}
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
-            r, w, _, fs = root_check(root, repo, cache, jobs)
+            r, w, _, fs, fail, records = root_check(root, repo, cache, jobs)
             results.update(r)
+            fails.update({o: fail for o in r} if fail else {})
+            handlers.update({o: records for o in r} if records else {})
+            if fail:
+                fs = fs + objstub.error_abi_findings(r, list(r), fail)
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
-        its, fs = objstub.judge(results, rows, facts, wine, declared)
+        its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats)
         items, finds = items + its, finds + fs
     except (ValueError, KeyError, OSError) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
@@ -91,7 +101,8 @@ def main(argv):
         status, detail = "green", "%d functions in %d objects of %d roots, no trap path, no vacuous body" % (len(items), len(results), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
            "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
-           "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()}}
+           "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
+           "trap_body": stats.get("trap_body", 0), "handler_justified": {k[8:]: v for k, v in sorted(stats.items()) if k.startswith("handler_")}}
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("objstub: %s %d/%d %s" % (status, cert, len(items), detail[:200]))

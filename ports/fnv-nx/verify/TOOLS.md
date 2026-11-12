@@ -1676,7 +1676,7 @@ Verdict green iff >= 1 gate, all green with certified == universe, and no stage 
 
 ```text
 objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap/abort path or (V) a vacuous function.
-    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
+    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--declared-machine FILE] [--fail SYMBOL] [--op-cover FILE --op-syntax FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
@@ -1745,6 +1745,13 @@ is not otherwise V is `wine-fixme-in-real-body`. A reference that is not a BL (a
 `wine-9.0:<path in the Wine source tree>:<function name>`: only the FORM is validated here; checking the reference against a pinned
 Wine 9.0 tree is the oracle class, not done. A row without a call site is no finding; the gate result counts call sites per id.
 
+(D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
+applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
+V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
+`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact and the source prefixes are read from the table's own header line (`# fact: ...; source: ...`: no-network, time-zone, registry, no-galaxy; win-doc, wine-9.0, galaxy-sdk), source `PREFIX:<page or path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
+result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
+stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
+
 (R) REACH. A call (BL, or B as a tail call, with a CALL26/JUMP26 relocation) of the symbol `fnvnx_reach_violation` is not a T2 and not a
 T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a constant of objstub's own forward constant propagation (the
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
@@ -1752,6 +1759,28 @@ fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, writt
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
 taken, in code or in data) is `reach-address-taken`. The write sets are the decoder's (LLVM defs); a register an instruction
 writes that they miss (x0, say) would make a constant wrong, and the Form-writes fact of L3a w5 is what replaces this reliance.
+
+(T-B) TRAP BODY. The root's recipe declares its failure function, `error_abi: {"fail": SYMBOL}` (`--fail`). A function is TRAP-SHAPED (trap_candidate)
+iff it calls exactly one symbol X (BL, or a tail B, with a branch relocation; X global, not a citation function, not REACH), and, with calls of
+X transparent, it is V by the vanalyse rules except for the input rule (stores only into the own frame, no other call, no indirect branch, no
+system word, no atomic, every memory access based on the frame; the arguments may be read), and EVERY path of it passes a call of X
+(every_path_calls). Its whole effect is then what X does. If X is the root's failure function the function is the finding `trap-body`: a body
+that only reports a failure is a stub. SUBSET (stated, like V): a body that reads memory outside its frame or calls anything else is not
+trap-shaped. The failure function itself is checked against its definition: defined exactly once as a global function of the root
+(`error-abi-undefined`, `error-abi-multiple`), no vacuous body (`error-abi-vacuous`), not itself trap-shaped (`error-abi-trap`). The analysis
+is per object and root-independent (the callee name is the fact, cached with the object); `judge` compares it with the root's symbol, so one
+cached object serves every root. The gate result holds "trap_body": the count.
+
+(H) EMPTY HANDLERS BY RECORDS. A table of handlers selects functions by their address stored in a data section (an instruction table). A V function
+(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE`; recipe
+`empty_handlers: {"cover": PATH, "syntax": PATH}`, tracked files; read_handler_records, an unparseable record is an error): (1) a row of op_cover.tsv
+(`slot id opnum op class covering evidence handler`) has handler == the function's symbol; (2) EVERY such row is justified: class a (the id is
+`sm:<key>` and every op_syntax row of the key is `ok` with 0 destination, 0 source, 0 other operands: the opcode has nothing to do), or class b
+(`covering` names symbols, each defined in the root and none a V body: another non-empty emitter carries the semantics); class c (the row is
+unreachable) is judged by the reach rule, so an empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a
+certificate); none and own justify nothing; (3) the function's address is stored in an allocated non-code section other than .eh_frame (its own
+object when it is local, any object of the root when it is global). Otherwise the finding V with the reason. The gate result holds
+"handler_justified": {a: n, b: n}.
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
 flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so

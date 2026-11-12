@@ -170,6 +170,13 @@ LF-terminated, ASCII; an absent section is no indirect call) into the sorted uni
 generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`),
 is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
 
+### `error_abi` and `empty_handlers` (objstub)
+`error_abi: {"fail": SYMBOL}` declares the root's one failure function. objstub (gate `objstub`, rule T-B) then makes a function whose every path
+ends in a call of it, with no other effect, the finding `trap-body`; SYMBOL must be defined once as a global function of the root and be no vacuous
+or trap-shaped body. `empty_handlers: {"cover": PATH, "syntax": PATH}` names the generated records (tracked repository files, op_cover.tsv with a
+`handler` column and op_syntax.tsv) by which an empty or constant handler selected by an instruction table is certified (rule H). Both are
+checked as keys here (a C symbol, tracked files) and judged in objstub.py; they are not inputs of any stage.
+
 ## Keep going
 
 A root build does not stop at the first red stage. Every unit whose declared inputs are all produced is built (and its objects land in the
