@@ -46,8 +46,11 @@ TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx"}
+        "plugins", "plugin_cxx", "sources", "isystem", "fixtures"}
+SOURCES_KEYS = {"external", "dir", "patches", "include"}
+HOST_PREFIX = "x86_64-linux-gnu-"   # the host drivers of env.json (a tool root's compiler)
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
+GATES = TREE + "/verify/gates.json"
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
@@ -174,7 +177,45 @@ def generated_outputs(rec):
 def units_of(rec, root, files):
     """Sorted root-relative unit paths: tracked source files + generated outputs with a source name."""
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
-    return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
+    return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u) and u not in fixtures_of(rec))
+
+
+def fixtures_of(rec):
+    """The fixture units of a recipe: root-relative names (a fixture is a unit that is built but is no unit of the product: see RECIPE.md)."""
+    fx = rec.get("fixtures") if isinstance(rec, dict) else None
+    return set(fx) if isinstance(fx, dict) else set()
+
+
+FIXTURE_KEYS = {"gate", "expect", "finding"}
+
+
+def fixture_errors(rec, root, mine, gen, repo):
+    """RULE (fixtures): `"fixtures": {UNIT: {"gate": G, "expect": "red", "finding": CODE}}`. UNIT is a tracked source file of the root (not a
+    generated output); G is a gate of verify/gates.json; the fixture is built like a unit but is never a unit of the product: it is in no link,
+    no os_layer, no generated input, no gate's universe (the gate `fixtures` judges it)."""
+    fx = rec.get("fixtures", {})
+    if not isinstance(fx, dict):
+        return ["fixtures must be an object {unit: {gate, expect, finding}}"]
+    err, gates = [], None
+    if repo is not None and os.path.exists(os.path.join(repo, GATES)):
+        gates = {g["name"] for g in json.load(open(os.path.join(repo, GATES)))["gates"]}
+    lk = rec.get("link") if isinstance(rec.get("link"), dict) else {}
+    named = set(rec.get("os_layer", []) if isinstance(rec.get("os_layer", []), list) else [])
+    named |= {t for t in lk.get("flags", []) if isinstance(t, str)} | {lk.get("script")}
+    for g in rec.get("generated", []) if isinstance(rec.get("generated", []), list) else []:
+        if isinstance(g, dict) and isinstance(g.get("inputs"), list):
+            named |= {i[len(root) + 1:] for i in g["inputs"] if isinstance(i, str) and i.startswith(root + "/")}
+    for u, f in fx.items():
+        if not (isinstance(u, str) and u in mine and is_unit(u) and u not in gen):
+            err.append("fixture %r is not a tracked source file of the root" % (u,))
+        elif u in named:
+            err.append("fixture %s is named in os_layer, the link or a generated input: a fixture never enters the product" % u)
+        if not (isinstance(f, dict) and set(f) == FIXTURE_KEYS and f["expect"] == "red" and all(isinstance(f[k], str) and f[k] for k in FIXTURE_KEYS)
+                and re.fullmatch(r"[a-z0-9_]+", f["gate"]) and re.fullmatch(r"[A-Za-z0-9_-]+", f["finding"])):
+            err.append("fixture %r needs exactly gate, expect (\"red\") and finding (a code)" % (u,))
+        elif gates is not None and f["gate"] not in gates:
+            err.append("fixture %s: %r is not a gate of %s" % (u, f["gate"], GATES))
+    return err
 
 
 def load_pin(repo="."):
@@ -212,8 +253,31 @@ def guest_errors(rec, root, roots, pin):
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
-def check(rec, root, files, roots, pin=None):
-    """Every problem of recipe REC of product root ROOT; roots {path: root entry}; PIN = load_pin(). -> [str] (empty = valid)."""
+def tool_roots(rec):
+    """The roots whose built executables the generated steps of REC run: [(root, output)] in list order."""
+    g = rec.get("generated")
+    return [(x["tool"].get("root"), x["tool"].get("output")) for x in (g if isinstance(g, list) else [])
+            if isinstance(x, dict) and isinstance(x.get("tool"), dict)]
+
+
+def cycle_errors(repo, roots, root, path=()):
+    """A cycle between roots through generated {tool: {root, output}} entries, found by a walk over the recipes of the checkout."""
+    if root in path:
+        return ["tool dependency cycle: %s" % " -> ".join(path[path.index(root):] + (root,))]
+    try:
+        rec = load_recipe(repo, roots, root)
+    except (KeyError, OSError, ValueError):
+        return []
+    out = []
+    for r, _ in tool_roots(rec) if isinstance(rec, dict) else []:
+        if isinstance(r, str) and r in roots:
+            out += cycle_errors(repo, roots, r, path + (root,))
+    return out
+
+
+def check(rec, root, files, roots, pin=None, repo=None):
+    """Every problem of recipe REC of root ROOT; roots {path: root entry}; PIN = load_pin(); REPO (optional) = the checkout, for the
+    checks that read other roots' recipes (tool dependency cycles, link.output of a tool root). -> [str] (empty = valid)."""
     if not isinstance(rec, dict):
         return ["recipe is not a JSON object"]
     err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
@@ -265,10 +329,21 @@ def check(rec, root, files, roots, pin=None):
     for d in inc if isinstance(inc, list) else err.append("include must be a list") or []:
         if isinstance(d, str) and any(under(d, a) for a in ats):
             continue
+        if rel_ok(d) and under(d, root):
+            err.append("include %s is inside the root; use a quoted relative include" % d)
+            continue
         if not rel_ok(d) or not any(under(d, r) for r in roots):
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
+        elif next(roots[r]["class"] for r in roots if under(d, r)) != "headers":
+            err.append("include %s is inside the tree of root %s, which is not a headers tree (only a headers tree or an external's path may be listed)" % (
+                d, next(r for r in roots if under(d, r))))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
+    err += sources_errors(rec, root, mine, names)
+    isys = rec.get("isystem", [])
+    for p in isys if isinstance(isys, list) else err.append("isystem must be a list") or []:
+        if not (isinstance(p, str) and posixpath.normpath(p) == p and any(under(p, a) for a in ats)):
+            err.append("isystem %r is not an absolute path inside an external's at (our own files keep their warnings)" % (p,))
     seen = set()
     for i, g in enumerate(rec.get("generated", []) if isinstance(rec.get("generated", []), list) else err.append("generated is not a list") or []):
         if not (isinstance(g, dict) and set(g) == {"tool", "args", "inputs", "outputs"}):
@@ -276,8 +351,16 @@ def check(rec, root, files, roots, pin=None):
             continue
         t, ins, outs = g["tool"], g["inputs"], g["outputs"]
         owner = next((r for r in roots if isinstance(t, str) and under(t, r)), None)
-        if not (isinstance(t, str) and t in files and t.endswith(".py") and owner and roots[owner]["class"] in ("tool", "product")):
-            err.append("generated[%d].tool %r is not a tracked .py file of an admitted tool or product root" % (i, t))
+        if isinstance(t, dict):
+            r, o = t.get("root"), t.get("output")
+            if not (set(t) == {"root", "output"} and isinstance(r, str) and isinstance(o, str) and r in roots and "recipe" in roots[r] and r != root):
+                err.append("generated[%d].tool %r must be {root: ANOTHER admitted root with a recipe, output: its link.output}" % (i, t))
+            elif repo is not None:
+                lk_ = (load_recipe(repo, roots, r) or {}).get("link")
+                if not (isinstance(lk_, dict) and lk_.get("output") == o):
+                    err.append("generated[%d].tool: %s has no link.output %r" % (i, r, o))
+        elif not (isinstance(t, str) and t in files and t.endswith(".py") and owner and roots[owner]["class"] in ("tool", "product")):
+            err.append("generated[%d].tool %r is not a tracked .py file of an admitted tool or product root, nor {root, output}" % (i, t))
         if not (isinstance(g["args"], list) and all(isinstance(a, str) for a in g["args"])):
             err.append("generated[%d].args must be strings" % i)
         if not (isinstance(ins, list) and all(rel_ok(p) and any(f == p or under(f, p) for f in files) for p in ins)):
@@ -293,6 +376,7 @@ def check(rec, root, files, roots, pin=None):
             if o in seen:
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
+    err += fixture_errors(rec, root, mine, seen, repo)
     units = set(units_of(rec, root, files))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
@@ -306,7 +390,15 @@ def check(rec, root, files, roots, pin=None):
         if c is not None and not (isinstance(c, str) and rel_ok(c) and (c in mine or c in seen)):
             err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
     lk = rec.get("link")
-    if lk is not None:
+    if lk is not None and roots.get(root, {}).get("class") == "tool":
+        if not (isinstance(lk, dict) and set(lk) == {"output", "flags"} and isinstance(lk["flags"], list)
+                and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str) and re.fullmatch(r"[A-Za-z0-9._-]+", lk["output"])):
+            err.append("link of a tool root must be {output: NAME, flags: [..]} (a static host executable: no script)")
+        else:
+            err += ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])]
+        if not (isinstance(comp, dict) and set(comp) == {"cc", "cxx"} and all(word(comp[k]) and comp[k].startswith(HOST_PREFIX) for k in comp)):
+            err.append("a tool root's compiler is the host driver pair %s*-gcc-13/g++-13 of env.json" % HOST_PREFIX)
+    elif lk is not None:
         if not (isinstance(lk, dict) and set(lk) == {"script", "output", "flags"} and isinstance(lk["flags"], list)
                 and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str)
                 and re.fullmatch(r"[A-Za-z0-9._-]+\.elf", lk["output"]) and rel_ok(lk["script"]) and lk["script"] in mine):
@@ -314,7 +406,46 @@ def check(rec, root, files, roots, pin=None):
         else:
             err += ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])]
     err += guest_errors(rec, root, roots, pin)
-    err += plugin_errors(rec, root, files, roots, units, names)
+    if roots.get(root, {}).get("class") == "tool":
+        err += ["tool root %s: %s is not allowed (host objects, no plugins)" % (root, k) for k in ("plugins", "plugin_cxx", "os_layer", "game", "constants", "contract_names")
+                if rec.get(k)]
+        if roots[root].get("cxx_origin") is not None:
+            err.append("admit.json %s: cxx_origin of a tool root" % root)
+    else:
+        err += plugin_errors(rec, root, files, roots, units, names)
+    if repo is not None:
+        err += cycle_errors(repo, roots, root)
+    return err
+
+
+def sources_errors(rec, root, mine, names):
+    """Rule A of RECIPE.md: "sources" [{external, dir, patches, include}]: units of the root come from externals' source trees (any class)."""
+    ss = rec.get("sources")
+    if ss is None:
+        return []
+    if not isinstance(ss, list):
+        return ["sources must be a list"]
+    err, seen = [], []
+    ok_dir = lambda p: isinstance(p, str) and (p == "." or rel_ok(p))  # noqa: E731
+    for i, s in enumerate(ss):
+        if not (isinstance(s, dict) and set(s) == SOURCES_KEYS):
+            err.append("sources[%d] needs exactly %s" % (i, ", ".join(sorted(SOURCES_KEYS))))
+            continue
+        d = s["dir"]
+        if s["external"] not in names:
+            err.append("sources[%d].external %r names no external" % (i, s["external"]))
+        elif s["external"] in seen:
+            err.append("sources[%d].external %r is used by another entry (one entry per external)" % (i, s["external"]))
+        seen.append(s["external"])
+        if not ok_dir(d):
+            err.append("sources[%d].dir %r is not a relative path inside the external (or .)" % (i, d))
+        pl = s["patches"]
+        if not (isinstance(pl, list) and all(isinstance(p, str) and rel_ok(p) and p.endswith(".patch") and p in mine for p in pl)) or (
+                isinstance(pl, list) and len(set(pl)) != len(pl)):
+            err.append("sources[%d].patches must be distinct tracked .patch files of the root (root-relative; [] for none)" % i)
+        inc = s["include"]
+        if not (isinstance(inc, list) and all(ok_dir(p) and (d == "." or under(p, d)) for p in inc)):
+            err.append("sources[%d].include must be directories inside sources[%d].dir of the patched tree" % (i, i))
     return err
 
 
@@ -457,12 +588,17 @@ def fetch_externals(exts, store, extcache, ws):
 
 
 class Job:
-    def __init__(self, repo, root, store, jobs, ext):
-        self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
+    def __init__(self, repo, root, store, jobs, ext, stack=()):
+        self.repo, self.root, self.store, self.jobs, self.extcache, self.stack = repo, root, store, jobs, ext, stack
+        self.src_inc, self.phys = [], {}
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = load_recipe(repo, self.roots, root)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
+
+    def rdir(self, ws):
+        """The root's own files, at their repo path inside the mirror tree ws/m (what the stages see as /src)."""
+        return os.path.join(ws, "m", self.root)
 
     def stage(self, doc):
         v = toolflags.check_doc(doc)
@@ -520,7 +656,7 @@ class Job:
                 # (the distribution's cross headers and binutils, pinned by env.json). They are declared inputs at their own paths.
                 host = self.hostpath(paths[0])
                 xs, ts = unitstage.gcc_set(host)
-                q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
+                q = lambda n: unitstage.prog(host, n)  # noqa: E731
                 out = lambda p: not any(under(p, e["host"]) for e in self.ext.values())  # noqa: E731
                 exes += [p for p in xs[1:] + [q("ld")] if os.path.isabs(p) and out(p)]
                 trees += sorted({r for t in ts for r in (t, os.path.realpath(t)) if out(r) and os.path.isdir(r)})
@@ -544,48 +680,130 @@ class Job:
         _copy(self.repo, files, base, d)
         return cas.ingest(d, self.store)
 
+    @staticmethod
+    def merge(*lists):
+        """Declared inputs of several runtimes as one list: an `at` that two of them hold must hold the same tree."""
+        by = {}
+        for i in (i for l in lists for i in l):
+            if by.setdefault(i["at"], i["tree"]) != i["tree"]:
+                raise BuildRed({"stage": "runtime", "exit": None, "stderr": ["input %s has two different trees" % i["at"]]})
+        return [{"at": a, "tree": t} for a, t in sorted(by.items())]
+
+    def patch(self, ws):
+        """Rule A (RECIPE.md "sources"): for every entry, stage patch:<root> (patch:<root>:<external> with several entries) copies the
+        external's tree and applies the entry's patches in list order with GNU patch -p1 (env.json), inside the sandbox. The patched tree is
+        materialized at WS/root/ext/<name>/ (the root's source view). -> sorted unit names "<external>:<path in the tree>" of every
+        *.c *.cc *.cpp *.cxx *.s *.S below `dir` of each patched tree (rule: all); self.phys maps a name to its path in the view."""
+        ss = self.rec.get("sources") or []
+        if not ss:
+            return []
+        _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
+        pt = os.path.join(ws, "ptool")
+        os.makedirs(pt)
+        shutil.copyfile(os.path.realpath("/usr/bin/patch"), os.path.join(pt, "patch"))
+        os.chmod(os.path.join(pt, "patch"), 0o755)
+        prt = self.cached_rt("tool-patch-" + hashlib.sha256(open(os.path.join(pt, "patch"), "rb").read()).hexdigest()[:16],
+                             lambda: runtime.build_tool(self.store, ["/ptool/patch"], [pt + "@/ptool"]))[1]
+        units = []
+        for s in ss:
+            e, name = self.ext[s["external"]], s["external"]
+            tmp = tempfile.mkdtemp(dir=ws)
+            script = self.ingest_files(tmp, "tool", [TREE + "/verify/patchtree.py"], TREE + "/verify")
+            pd = os.path.join(tmp, "patches")
+            os.makedirs(pd)
+            _copy(self.repo, [self.root + "/" + p for p in s["patches"]], self.root, pd)
+            env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
+            env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
+            ins = self.merge(py["inputs"], prt["inputs"], [{"at": e["at"], "tree": e["tree"]}],
+                             [{"at": "/tool", "tree": script}, {"at": "/patches", "tree": cas.ingest(pd, self.store)}])
+            doc = {"format": "fnvnx-stage/1", "stage": "patch:" + self.root + (":" + name if len(ss) > 1 else ""), "class": "build", "tool": "python",
+                   "cwd": "/work", "argv": [py["python"], "-s", "-B", "/tool/patchtree.py", e["at"], "/out"] + ["/patches/" + p for p in s["patches"]],
+                   "env": env, "inputs": ins, "outputs": ["/out"]}
+            res = self.stage(doc)[1]["outputs"]["/out"]
+            dest = os.path.join(self.rdir(ws), "ext", name)
+            if os.path.exists(dest):
+                raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["ext/%s is also a tracked path of the root" % name]})
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            cas.materialize(res, self.store, dest)
+            d = "" if s["dir"] == "." else s["dir"] + "/"
+            for r, x in cas.listing(res, self.store):
+                if x["t"] != "d" and r.startswith(d) and is_unit(r):
+                    units.append("%s:%s" % (name, r))
+                    self.phys["%s:%s" % (name, r)] = "ext/%s/%s" % (name, r)
+            self.src_inc += ["/src/%s/ext/%s/%s" % (self.root, name, i) if i != "." else "/src/%s/ext/%s" % (self.root, name) for i in s["include"]]
+        return sorted(units)
+
+    def host_tool(self, ws, tool):
+        """Rule B: the executable of root TOOL["root"] (its recipe's link.output), built first by this same build in the same store.
+        -> (sandbox dir AT, tool runtime) with the executable at AT/<output>: the stage declares a tree holding it, the loader closure
+        is resolved as for an external compiler (HOST@AT)."""
+        r, name = tool["root"], tool["output"]
+        if r in self.stack or r == self.root:
+            raise RecipeError(["tool dependency cycle: %s" % " -> ".join(self.stack + (self.root, r))])
+        sub = build(self.repo, r, self.store, os.path.join(ws, "tools", r.replace("/", "__")), self.jobs, self.extcache, self.stack + (self.root,))
+        self.keys |= set(sub["stage_keys"])
+        self.run, self.hit = self.run + sub["stages"]["run"], self.hit + sub["stages"]["hit"]
+        if sub["status"] != "green":
+            raise BuildRed(dict(sub["failure"], stage="tool %s: %s" % (r, sub["failure"]["stage"])))
+        exe = sub["elf"]["path"]
+        h = open(exe, "rb").read(20)
+        if not (h[:4] == b"\x7fELF" and h[4:6] == b"\x02\x01" and struct.unpack_from("<H", h, 18)[0] == 62):
+            raise BuildRed({"stage": "tool %s" % r, "exit": None, "stderr": ["%s is not an ELF64 little-endian x86-64 executable" % name]})
+        at = "/built/" + r.replace("/", "__")
+        d = os.path.join(ws, "built", r.replace("/", "__"))
+        os.makedirs(d)
+        shutil.copyfile(exe, os.path.join(d, name))
+        os.chmod(os.path.join(d, name), 0o755)
+        return at, runtime.build_tool(self.store, [at + "/" + name], ["%s@%s" % (d, at)])
+
     def generate(self, ws):
         if not self.rec.get("generated"):
             return
         _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
         xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
         for i, g in enumerate(self.rec["generated"]):
-            owner = next(r for r in self.roots if under(g["tool"], r))
+            is_exe = isinstance(g["tool"], dict)
             tmp = tempfile.mkdtemp(dir=ws)
-            ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin
+            if is_exe:
+                at, trt = self.host_tool(ws, g["tool"])
+                ins = list(self.merge(trt["inputs"], xin))
+            else:
+                owner = next(r for r in self.roots if under(g["tool"], r))
+                ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin
             for p in g["inputs"]:
                 sub = [f for f in self.files if f == p or under(f, p)]
                 ins.append({"at": "/in/" + p, "tree": cas.ingest(os.path.join(self.repo, p), self.store) if sub == [p] else
                             self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
-            env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-            env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
-            doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
-                   "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
-                   "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
+            if is_exe:
+                env = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": at}
+                doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "built", "cwd": "/work",
+                       "argv": [at + "/" + g["tool"]["output"]] + g["args"], "env": env, "inputs": sorted(ins, key=lambda x: x["at"]), "outputs": ["/out"]}
+            else:
+                env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
+                env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
+                doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
+                       "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
+                       "inputs": self.merge(py["inputs"], ins), "outputs": ["/out"]}
             res = self.stage(doc)[1]
             got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
             if got != sorted(g["outputs"]):
                 raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs %s differ from the declared %s" % (got, sorted(g["outputs"]))]})
             cas.materialize(res["outputs"]["/out"], self.store, os.path.join(tmp, "out"))
             for o in g["outputs"]:
-                os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
-                shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
+                os.makedirs(os.path.dirname(os.path.join(self.rdir(ws), o)), exist_ok=True)
+                shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(self.rdir(ws), o))
 
     def includes(self, ws):
         """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
         for a directory inside an external (a declared input of the tool runtime)."""
-        out, n = [], 0
+        out = []
         for d in self.rec["include"]:
             if any(under(d, e["at"]) for e in self.ext.values()):
                 out.append(d)
                 continue
-            if under(d, self.root):
-                host = os.path.join(ws, "root", d[len(self.root) + 1:])
-            else:
-                _copy(self.repo, [f for f in self.files if under(f, d)], "", os.path.join(ws, "inc"))
-                host = os.path.join(ws, "inc", d)
-            out.append("%s@/inc/%d" % (host, n))
-            n += 1
+            _copy(self.repo, [f for f in self.files if under(f, d)], "", os.path.join(ws, "m"))   # a directory of another admitted root: at its repo path in the mirror
+            out.append("/src/" + d)
+        out += self.src_inc   # directories of the patched source trees: sandbox paths inside the root's own /src view (one path per file)
         return out
 
     def plugins(self, ws):
@@ -609,8 +827,7 @@ class Job:
             exes, ts = unitstage.gcc_set(host)
             # a native driver prints a bare `as` / `ld` (it finds them on PATH): the binutils of env.json are /usr/bin/as and /usr/bin/ld;
             # linking a shared object also needs collect2 and ld, which gcc_set (compile only) does not list
-            q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
-            exes = [e if e.startswith("/") else "/usr/bin/" + e for e in exes + [q("collect2"), q("ld")]]
+            exes = exes + [unitstage.prog(host, "collect2"), unitstage.prog(host, "ld")]
             return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + trees))))
         rt = self.cached_rt("tool-plugin-" + hashlib.sha256(repr((host, pdir, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], make)[1]
         # A plugin is linked against nothing (its symbols come from the compiler that loads it): -nostdlib, with the startup files the
@@ -657,15 +874,16 @@ class Job:
             fp = os.path.join(ws, "flags-%s.json" % k)
             json.dump({"argv": rec["flags"][k]}, open(fp, "w"))
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
-                                                           src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
+                                                           src_root=os.path.join(ws, "m") + "@/src", prefix=self.root, include=self.includes(ws)))
             builds[k].cc_drop = drop
+            builds[k].iargs += [x for p in rec.get("isystem", []) for x in ("-isystem", p)]   # third-party headers: no warnings (GCC manual); PP only
             if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
                 builds[k].cc_flags = [f for _, _, fl in self.built for f in fl]
                 builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built]
 
         def one(u):
             try:
-                return u, builds[kinds[u]].unit(u)
+                return u, builds[kinds[u]].unit(self.phys.get(u, u))
             except (sandbox.SbxError, unitstage.UnitError) as e:
                 return u, {"status": "cc-failed", "failure": {"stage": getattr(e, "stage", "cc:" + u), "exit": None, "stderr": [str(e)[-300:]]}}
         res, failed = {}, {}
@@ -689,8 +907,7 @@ class Job:
 
     def link(self, ws, objs):
         lk, cc = self.rec["link"], self.drivers()[0]
-        pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
-        ld = posixpath.normpath(pn)
+        ld = unitstage.prog(self.hostpath(cc), "ld")
         if "external" in self.rec["compiler"]:
             e = self.ext[self.rec["compiler"]["external"]]
             ld = e["at"] + ld[len(e["host"]):] if ld.startswith(e["host"] + "/") else ld
@@ -710,6 +927,60 @@ class Job:
                "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": cas.ingest(od, self.store)},
                                                 {"at": "/ld", "tree": cas.ingest(sd, self.store)}], key=lambda i: i["at"])}
         return self.stage(doc)[1]["outputs"]["/out"]
+
+
+def link_host(self, ws, objs):
+    """Link of a tool root (class "tool"): a STATIC host executable. `ld` of the host driver (env.json) with the driver's own startup files
+    and libraries (crt1 crti crtbeginT ... crtend crtn, libstdc++ libm libgcc libgcc_eh libc, found by `-print-file-name`) as declared
+    inputs at /ldlibs (a linker-script library such as libm.a has its absolute member paths rewritten to /ldlibs); no loader, no shared
+    library. The result must be ELF64 little-endian x86-64 (BuildRed otherwise)."""
+    lk, cxx = self.rec["link"], "/usr/bin/" + self.rec["compiler"]["cxx"]
+    q = lambda *a: subprocess.run([cxx] + list(a), capture_output=True, text=True).stdout.strip()  # noqa: E731
+    ld = unitstage.prog(cxx, "ld")
+    rt = self.cached_rt("tool-ld-" + hashlib.sha256(ld.encode()).hexdigest()[:16], lambda: runtime.build_tool(self.store, [ld], []))[1]
+    od, ls = os.path.join(ws, "objs"), os.path.join(ws, "ldlibs")
+    os.makedirs(ls)
+    for u, o in objs.items():
+        os.makedirs(os.path.dirname(os.path.join(od, u + ".o")), exist_ok=True)
+        shutil.copyfile(cas._obj(self.store, cas.manifest(o, self.store)["entries"]["unit.o"]), os.path.join(od, u + ".o"))
+
+    def lib(name):
+        p = q("-print-file-name=" + name)
+        if not os.path.isabs(p):
+            raise BuildRed({"stage": "ld:" + self.root, "exit": None, "stderr": ["%s: no %s (libc6-dev / libstdc++-13-dev of env.json)" % (cxx, name)]})
+        d = os.path.join(ls, name)
+        if os.path.exists(d):
+            return
+        data = open(p, "rb").read()
+        if data[:2] != b"\x7fE" and data[:8] != b"!<arch>\n":   # a linker script: members by absolute path become members of /ldlibs
+            text = data.decode()
+            for m in sorted(set(re.findall(r"/[^\s()]+", re.sub(r"/\*.*?\*/", "", text, flags=re.S)))):
+                lib_abs(m)
+                text = text.replace(m, "/ldlibs/" + os.path.basename(m))
+            data = text.encode()
+        open(d, "wb").write(data)
+
+    def lib_abs(p):
+        d = os.path.join(ls, os.path.basename(p))
+        if not os.path.exists(d):
+            shutil.copyfile(p, d)
+    for n in ("crt1.o", "crti.o", "crtbeginT.o", "crtend.o", "crtn.o", "libstdc++.a", "libm.a", "libgcc.a", "libgcc_eh.a", "libc.a"):
+        lib(n)
+    argv = [ld, "--build-id=none", "-static", "-z", "noexecstack", "-o", "/out/" + lk["output"], "/ldlibs/crt1.o", "/ldlibs/crti.o",
+            "/ldlibs/crtbeginT.o"] + ["/objs/%s.o" % u for u in sorted(objs)] + lk["flags"] + [
+        "-L/ldlibs", "--start-group", "-lstdc++", "-lm", "-lgcc", "-lgcc_eh", "-lc", "--end-group", "/ldlibs/crtend.o", "/ldlibs/crtn.o"]
+    doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
+           "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
+           "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": cas.ingest(od, self.store)}, {"at": "/ldlibs", "tree": cas.ingest(ls, self.store)}],
+                            key=lambda i: i["at"])}
+    res = self.stage(doc)[1]["outputs"]["/out"]
+    h = open(cas._obj(self.store, cas.manifest(res, self.store)["entries"][lk["output"]]), "rb").read(20)
+    if not (h[:4] == b"\x7fELF" and h[4:6] == b"\x02\x01" and struct.unpack_from("<H", h, 18)[0] == 62):
+        raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["%s is not an ELF64 little-endian x86-64 executable" % lk["output"]]})
+    return res
+
+
+Job.link_host = link_host
 
 
 def host_compilers(rec, cache):
@@ -736,24 +1007,33 @@ def host_compilers(rec, cache):
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
-def build(repo, root, store, out, jobs=4, ext=None):
+def build(repo, root, store, out, jobs=4, ext=None, stack=()):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
-    j = Job(repo, root, store, jobs, ext or os.path.join(store, "external"))
-    errs = check(j.rec, root, j.files, j.roots, load_pin(repo))
+    j = Job(repo, root, store, jobs, ext or os.path.join(store, "external"), stack)
+    errs = check(j.rec, root, j.files, j.roots, load_pin(repo), repo)
     if errs:
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
     res = {"format": OBJ_FORMAT, "root": root, "objects": [], "elf": None, "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
-           "stage_keys": [], "status": "green"}
+           "stage_keys": [], "status": "green", "fixtures": []}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
     try:
-        _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
+        _copy(repo, [f for f in j.files if under(f, root)], root, j.rdir(ws))
         j.externals(ws)
+        src_units = j.patch(ws)
+        if src_units:
+            units = sorted(units + src_units)
+            if j.roots[root]["class"] != "tool":   # C++ units of the patched tree take the plugin rule of the root
+                errs = plugin_errors(j.rec, root, j.files, j.roots, set(units), {e["name"] for e in j.rec.get("external", [])})
+                if errs:
+                    raise RecipeError(errs)
         j.generate(ws)
-        objs, und = j.compile(ws, units), set()
+        fx = sorted(fixtures_of(j.rec))
+        allo, und = j.compile(ws, units + fx), set()
+        objs = {u: allo[u] for u in units}   # fixture objects never reach the link, the objects list or any gate's universe
         for n, t, _ in j.built:
             ent = cas.manifest(t, store)["entries"][n + ".so"]
             dest = os.path.join(out, "plugins", n + ".so")
@@ -770,14 +1050,20 @@ def build(repo, root, store, out, jobs=4, ext=None):
             und |= x
             res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
+        for u in fx:
+            dest = os.path.join(out, "fixtures", u + ".o")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            ent = cas.manifest(allo[u], store)["entries"]["unit.o"]
+            shutil.copyfile(cas._obj(store, ent), dest)
+            res["fixtures"].append(dict(j.rec["fixtures"][u], unit=u, object=os.path.abspath(dest), sha256=ent["h"], pp_key=j.ppkeys.pop(u, None)))
         if j.rec.get("link"):
             name = j.rec["link"]["output"]
-            ent = cas.manifest(j.link(ws, objs), store)["entries"][name]
+            ent = cas.manifest((j.link_host if j.roots[root]["class"] == "tool" else j.link)(ws, objs), store)["entries"][name]
             shutil.copyfile(cas._obj(store, ent), os.path.join(out, name))
             res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent["h"]}
         for key in ("constants", "contract_names"):
             if j.rec.get(key):
-                shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
+                shutil.copyfile(os.path.join(j.rdir(ws), j.rec[key]), os.path.join(out, key + ".tsv"))
                 res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
     except BuildRed as r:
         fl = r.args[0].get("failed_units", [])
@@ -800,7 +1086,7 @@ def main(argv):
         repo = "."
         if argv[:1] == ["check"]:
             roots = load_admit(repo)
-            errs = check(load_recipe(repo, roots, opt["--root"]), opt["--root"], tracked(repo), roots, load_pin(repo))
+            errs = check(load_recipe(repo, roots, opt["--root"]), opt["--root"], tracked(repo), roots, load_pin(repo), repo)
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0
         res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"))

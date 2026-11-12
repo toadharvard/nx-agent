@@ -88,6 +88,24 @@
    "result": "determinism.json"
   },
   {
+   "name": "fixtures",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_fixtures.py"
+   ],
+   "result": "fixtures.json"
+  },
+  {
+   "name": "headers",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_headers.py"
+   ],
+   "result": "headers.json"
+  },
+  {
    "name": "n1",
    "argv": [
     "python3",
