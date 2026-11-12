@@ -70,6 +70,37 @@ check('fxsave positive: FIP read', red == 0 and any(r[2] == 'fip' and r[3] == 'r
 # 10 plain ret consuming its own ra: no source
 red, res, rows = run([(0x1000, call(0x1000, 0x1100) + b'\xc3'), (0x1100, b'\xc3')])
 check('plain ret: no rows', red == 0 and not any(r[3] == 'read' for r in rows), rows)
+
+# ---- the lead's soundness conditions (item 18b)
+def run2(funcs, kinds, rd=None, rset=None):
+    text, ent, rng = build(funcs)
+    for a, k in kinds.items(): ent[a] = set(k)
+    d = tempfile.mkdtemp()
+    red, res = pcsrc.run(text, T0, ent, rng, d, 't', rd, rset)
+    return red, res, [l.rstrip('\n').split('\t') for l in open(d + '/pcsources.tsv') if not l.startswith('#')]
+# 12 a block entry (tail) is analysed in its parent's context: `push edi` in the parent, `pop edi; ret` in the block is NOT a return-address read
+parent = b'\x57' + b'\xe9' + (0x1100 - 0x1006).to_bytes(4, 'little')      # push edi; jmp 0x1100
+red, res, rows = run2([(0x1000, parent), (0x1100, b'\x5f\xc3')], {0x1000: {'call'}, 0x1100: {'tail'}})
+check('block in parent context: pop of the pushed edi is not ra', not any(r[3] == 'read' for r in rows) and red == 0, rows)
+# 13 a block with no visible predecessor starts with every slot possibly ra: a stack read is red
+red, res, rows = run2([(0x1100, b'\x8b\x44\x24\x04\x31\xc0\xc3')], {0x1100: {'eh-unwind'}})
+check('unseen-predecessor block: [esp+4] read is red', red >= 1 and any(r[3] == 'read-possible-ra' for r in rows), rows)
+# 14 jump table: the successors are case blocks of the parent; their pop is the parent's push
+tbl = 0x2000; blocks = [0x1100, 0x1108]
+words = {tbl: 0x1100, tbl + 4: 0x1108}
+par = b'\x57' + b'\xff\x24\x85' + tbl.to_bytes(4, 'little')       # push edi; jmp [eax*4+tbl]
+red, res, rows = run2([(0x1000, par), (0x1100, b'\x5f\xc3'), (0x1108, b'\x5f\xc3')], {0x1000: {'call'}, 0x1100: {'ptr'}, 0x1108: {'ptr'}}, rd=lambda a: words[a], rset=set(words))
+check('jump-table case blocks run in the parent context', red == 0 and not any(r[3] == 'read' for r in rows), rows)
+# 15 scratch at ret: dead iff every caller overwrites it first
+thunk_c = call(0x1000, 0x1100) + b'\x31\xc9\xc3'                                  # caller: call thunk; xor ecx,ecx; ret
+thunk = b'\xe8\x00\x00\x00\x00\x59\xc3'                                           # call $+5; pop ecx; ret: ecx holds a concrete pc value at ret
+red, res, rows = run2([(0x1000, thunk_c), (0x1100, thunk)], {0x1000: {'call'}, 0x1100: {'call'}})
+check('scratch dead: callers overwrite ecx', red == 0 and any(r[3] == 'scratch-dead' for r in rows), rows)
+thunk_c2 = call(0x1000, 0x1100) + b'\x89\xc8\xc3'                                  # caller reads ecx: mov eax,ecx
+red, res, rows = run2([(0x1000, thunk_c2), (0x1100, thunk)], {0x1000: {'call'}, 0x1100: {'call'}})
+check('scratch live: a caller reads ecx', red >= 1 and any(r[3] == 'passed' for r in rows), rows)
+red, res, rows = run2([(0x1000, thunk_c), (0x1100, thunk)], {0x1000: {'call'}, 0x1100: {'call', 'ptr'}})
+check('scratch with indirect callers stays red', red >= 1, rows)
 # 11 determinism
 a = run([(0x1000, call(0x1000, THUNK) + b'\xc3'), (THUNK, t)])[2]; b = run([(0x1000, call(0x1000, THUNK) + b'\xc3'), (THUNK, t)])[2]
 check('deterministic', a == b)
