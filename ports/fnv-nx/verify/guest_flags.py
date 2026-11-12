@@ -24,10 +24,10 @@ def flags_for(lang, cache, origin="native"):
     pin = json.load(open(os.path.join(HERE, "guest_compiler.json")))
     ext = pin["external"]
     os.makedirs(os.path.join(cache, "store"), exist_ok=True)
-    ws = tempfile.mkdtemp(prefix="gflags-")
-    got = recipe.fetch_externals([ext], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
-    pre = got[ext["name"]]["host"] + "/bin/aarch64-linux-gnu-"
-    return recipe.semantics_for(pre + ("g++" if lang == "c++" else "gcc"), KIND[lang], origin=origin)
+    with tempfile.TemporaryDirectory(prefix="gflags-") as ws:   # the checkout is scratch: nothing is left behind
+        got = recipe.fetch_externals([ext], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
+        pre = got[ext["name"]]["host"] + "/bin/aarch64-linux-gnu-"
+        return recipe.semantics_for(pre + ("g++" if lang == "c++" else "gcc"), KIND[lang], origin=origin)
 
 
 def main(argv=None):
