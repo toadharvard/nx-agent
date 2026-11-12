@@ -221,11 +221,22 @@ def finish(a):
 
 
 def recipe(ref, commit, tree):
-    """lift/pack/build.json: the flags are PACK_CXX_FLAGS (one source; test/instest.py imports them), the units are the fixed names."""
+    """lift/pack/build.json. The recipe is the one definition of the semantic flags (verify/guest_compiler.json flags.semantics, appended to every guest compile stage), so
+    the build.json holds only the per-root classes of PACK_CXX_FLAGS (recipe.PER_ROOT: -O, -W, -D, -std ...), and the plugins are the full set of recipe.PLUGIN_SOURCES in
+    load order with recipe.LIFTED_ARGS where it names a plugin (a lifted root: fnvnx_ftoi mode lifted), recipe.PLUGIN_ARGS otherwise; the units are the fixed names."""
+    sys.path.insert(0, os.path.join(LIFT, '..', 'verify'))
+    import recipe as R
+    keep = lambda fl: [f for f in fl if R.PER_ROOT.fullmatch(f)]
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
+    args = dict(R.PLUGIN_ARGS, **R.LIFTED_ARGS)
+    plugins = []
+    for n, src in R.PLUGIN_SOURCES.items():
+        pl = {'name': n, 'source': src, 'args': args[n]}
+        if R.PLUGIN_INPUTS.get(n): pl['inputs'] = list(R.PLUGIN_INPUTS[n])
+        plugins.append(pl)
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
-           'flags': {'c': list(PACK_C_FLAGS), 'cxx': list(PACK_CXX_FLAGS), 'asm': ['-mabi=ilp32', '-fPIC']},
-           'include': ['/ext/liftpack/inc'], 'units': 'all',
+           'flags': {'c': keep(PACK_C_FLAGS), 'cxx': keep(PACK_CXX_FLAGS), 'asm': []},
+           'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugin_cxx': 'x86_64-linux-gnu-g++-13', 'plugins': plugins,
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}

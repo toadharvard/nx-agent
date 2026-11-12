@@ -20,7 +20,7 @@
  },
  "include": [
   "ports/fnv-nx/lift/rt",
-  "ports/fnv-nx/shim/include"
+  "ports/fnv-nx/platform/include"
  ],
  "units": "all",
  "link": null,
