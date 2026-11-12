@@ -129,6 +129,7 @@ TEST(procenv_environment_roundtrip)
 /* 3. current directory: the game folder at start, relative paths resolve against it and follow a change */
 TEST(procenv_current_directory)
 {
+    CreateDirectoryA("Data", NULL);   /* the case's own state: the game directory's Data folder (other cases create it too) */
     char buf[260];
     CHECK_EQ(GetCurrentDirectoryA(sizeof buf, buf), 12);
     CHECK_STR(buf, "C:\\FalloutNV");

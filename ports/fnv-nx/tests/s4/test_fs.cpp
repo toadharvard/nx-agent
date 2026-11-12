@@ -84,6 +84,7 @@ TEST(cwd_and_full_path)
 
 TEST(file_create_dispositions_and_errors)
 {
+    CreateDirectoryA("Data", NULL);   /* the case's own state: the game directory's Data folder (other cases create it too) */
     DeleteFileA("Data\\disp.bin");
     HANDLE h = CreateFileA("Data\\disp.bin", GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
     CHECK(h != INVALID_HANDLE_VALUE);
@@ -113,6 +114,7 @@ TEST(file_create_dispositions_and_errors)
 
 TEST(file_read_write_seek)
 {
+    CreateDirectoryA("Data", NULL);   /* the case's own state: the game directory's Data folder (other cases create it too) */
     s4_write_file("Data\\rw.bin", "0123456789");
     HANDLE h = CreateFileA("Data\\rw.bin", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
     CHECK(h != INVALID_HANDLE_VALUE);
@@ -217,6 +219,7 @@ TEST(find_first_file)
 
 TEST(file_attributes_move_copy_dirs)
 {
+    CreateDirectoryA("Data", NULL);   /* the case's own state: the game directory's Data folder (other cases create it too) */
     CHECK_EQ(GetFileAttributesA("Data"), FILE_ATTRIBUTE_DIRECTORY);
     CHECK_EQ(GetFileAttributesA("Data\\nothing"), INVALID_FILE_ATTRIBUTES);
     CHECK_EQ(GetLastError(), ERROR_FILE_NOT_FOUND);
