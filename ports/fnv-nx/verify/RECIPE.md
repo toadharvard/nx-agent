@@ -24,6 +24,10 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `flags`: per language. Refused: `-I*` (use `include`), `-o -c -E -S -x -M*`, and the refusal set R below.
 - `include`: repo-relative directory inside an admitted root (tracked files, or generated outputs of this root), or an absolute path inside an
   external's `at`. Included files are inputs by content; a file the unit reads that is not in them does not exist for it.
+  Mirror (3m): the stages see ONE tree at `/src`, a mirror of the repo that holds only declared files: the root's own files (units, generated
+  outputs, patched external trees) at `/src/<root>/...` and each `include` directory at `/src/<its repo path>`, passed as `-I/src/<path>`. So
+  `"..."` and `../` resolve as in the source tree; a `../` that leaves the declared set names a file that does not exist (a compile error in the
+  PP stage), never a host file. A header has one path (`#pragma once` identity).
 - `units`: must be `"all"`. A `.S` unit is preprocessed as its own stage like a C unit (its key covers exactly the headers it includes);
   a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
   compiled. A file that must not be compiled does not belong in the root; there is no `exclude`.
@@ -51,18 +55,8 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   `ld`; `aarch64elf32` also links a static image). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
   the linked ELF is ELF32. LP64 is the default, with no flag.
 - `external`: content-pinned inputs (see below).
+- `sources`: units from an external's source tree (see "Sources and patches (rule A)"). Allowed for every class.
 - `plugins`, `plugin_cxx`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
-
-- `unit_flags`, `unit_facts`: per-unit flags of the CC stage (see "Per-unit flags").
-
-### Per-unit flags (`unit_flags`, `unit_facts`)
-`unit_flags` is `{unit: [flag]}` for C++ units under `game`; the only flag is `-fplugin-arg-fnvnx_pi-fpfast` (the pi plugin: this unit is built with
-/fp:fast, so its source does not fix the evaluation order of floating-point arguments). It enters the argv of that unit's CC stage, so it is in the CC
-key (the PP key is unchanged). `unit_facts` is a tracked file or generated output of the root, units.json: `{"units": [{"source": UNIT, "flags": [...]}]}`
-with `source` equal to the root-relative unit path. RULE: the flag stands on a unit iff its entry lists `/fp:fast`; a unit with no entry has no such
-fact (compile.sh: no entry, no argument). A mismatch in either direction, a fact for a source that is no game C++ unit, or a flag on a unit outside `game`
-is red (build stage `unit_facts`, before any compile). A native guest root that declares `game` must declare `unit_facts`. Assumption: units.json is
-generated from the exe/decomp facts, not written by hand. No other flag can be attached to a unit: a flag not derived from a fact has no place here.
 
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`)
 Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
@@ -99,6 +93,55 @@ headers pinned by env.json). The CC stage mounts the compiler external, the plug
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
   step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). Plugins are then not required.
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
+
+## Sources and patches (rule A)
+`"sources": [{"external": NAME, "dir": PATH, "patches": [P...], "include": [D...]}]`: the root's units come from the trees of externals. Any class of
+root with a recipe (guest product roots included: the same compiler, flags and plugins as for the root's own units).
+- One entry per external. `dir` is a directory of the external's tree (or `.`), `patches` are tracked `.patch` files of the root (root-relative,
+  distinct, may be empty), `include` are directories inside `dir` of the patched tree, passed as `-I/src/ext/<NAME>/<dir>` (the tree is mounted once, at
+  `/src/ext/<NAME>/`: a header has one path, so `#pragma once` identity holds).
+- Stage `patch:<root>` (`patch:<root>:<NAME>` with several entries; sandbox, python runtime + `patchtree.py`, GNU `patch` of env.json as a declared input
+  at `/ptool`) copies the external's tree and applies the patches in list order with `patch -p1 -F0 --no-backup-if-mismatch`. Its output tree is the
+  root's source view. A patch that does not apply cleanly makes the build red with that stage.
+- Unit rule stays `all`: every `*.c *.cc *.cpp *.cxx *.s *.S` of the patched tree under `dir` is a unit, named `<NAME>:<path in the tree>` in
+  `objects.json`, `units` and the gates (own units and external units never collide), plus the root's own tracked units. Keys are by content. There is no
+  exclude list: a file of upstream that must not be built is deleted by a patch (reviewed content).
+- A non-tool root with C++ units from a patched tree takes the plugin rule of `cxx_origin` after the stage (RecipeError otherwise).
+- `"isystem": [ABS...]`: absolute paths inside an external's `at` only (a tracked path is refused, so warnings stay on for every file of ours), passed as
+  `-isystem <path>` to the preprocessor stage (part of its key like `include`): GCC's treatment of third-party headers.
+- `include` never names a directory inside the root itself ("include <dir> is inside the root; use a quoted relative include"): the root's files are
+  mounted at `/src`, and a second path to the same file breaks `#pragma once` identity.
+- Programs the driver names bare (`-print-prog-name=as` of the host x86_64 driver prints `as`) are resolved as the driver does: the `programs:` list of
+  `-print-search-dirs` in order, then PATH of the stage (the driver's directory); the first executable file wins, none = red naming the program
+  (`unitstage.prog`, used for `as`, `ld`, `collect2` everywhere).
+### Tool roots (class "tool" with a recipe)
+A `tool` root of admit.json may name `"recipe"` and `"target": "host"`. Its compiler is the host driver pair `x86_64-linux-gnu-gcc-13` / `-g++-13`
+(env.json); no plugins, `cxx_origin`, `os_layer`, `game`, `constants`, `contract_names`. `link` is `{"output": NAME, "flags": [..]}` (no script):
+`ld -static` with the driver's own startup files and libraries as declared inputs at `/ldlibs` (found by `-print-file-name`; a linker-script library
+such as libm.a gets its member paths rewritten), the result is checked to be an ELF64 little-endian x86-64 executable. Tool roots are not
+product roots: they are built as dependencies (rule B), and their stages count in the dependent root's stage keys and determinism.
+
+## Built tools (rule B)
+`generated` entry with `"tool": {"root": R, "output": NAME}` (instead of a tracked `.py`): NAME is R's `link.output`, R an admitted root with a recipe, R is
+built first by the same build, in the same store (its stage keys and stage counts join the dependent root's). Stage `gen:<root>:<i>` (toolflags
+kind `built`) runs the executable at `/built/<R with / as __>/NAME`, whose loader closure is resolved as for an external compiler (`HOST@AT`).
+`args`, `inputs` (at `/in/<repo path>`) and `outputs` follow the python rule: it writes only `/out/<output>`, and the set of files it writes must
+equal `outputs` exactly (else red, naming both sets). A cycle between roots is a RecipeError. The outputs are part of the determinism gate's two cold builds.
+
+## Fixtures (`"fixtures"`)
+
+`"fixtures": {"<unit>": {"gate": "<gate>", "expect": "red", "finding": "<finding code>"}}`: a unit that is meant to be rejected by a gate, kept
+beside the code the gate protects so that the gate is known to bite.
+- `<unit>` is a tracked source file of the root (not a generated output). `gate` is a gate of `verify/gates.json`; `expect` is `"red"`.
+- recipe.py builds a fixture like any unit (same flags, same stages, in the same store). It is NOT a unit of the product: `units_of`, `objects`,
+  `defined`/`undefined`, `pp_keys` and the link never hold it; it is refused in `os_layer`, in the link's flags or script and in a generated input.
+  Its object is in `objects.json` under `fixtures` (`unit, gate, expect, finding, object, sha256, pp_key`).
+- Fixture mode: the gate `fixtures` (gate_fixtures.py) runs the named gate's own argv with env `GATE_FIXTURES=1`. Then `gate_build.ensure()` returns each root
+  with its fixture units as its only objects/units (`fixture_view`: no ELF, no constants), so every gate that takes its input from `ensure()` judges the
+  fixtures and nothing else. The gate writes its findings to its result file as `"findings": [{"id": "<root>/<unit>[:<symbol>]", "code": CODE}]`
+  (objstub does; a gate that does not is red for its fixtures).
+- A fixture passes iff its gate reports exactly the declared `finding` on that unit and no other finding there, and no finding on any other item. A fixture
+  that comes out green, or red with another or an additional finding, makes the gate `fixtures` (so the verdict) red. Universe: the fixtures of all roots.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,

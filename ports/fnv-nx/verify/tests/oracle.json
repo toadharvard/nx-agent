@@ -242,6 +242,25 @@
     "ports/fnv-nx/verify/a64access.cc"
    ]
   },
+  "test_fixtures.py": {
+   "references": [
+    {
+     "anchor": "## Fixtures (`\"fixtures\"`)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## verify/gate_objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/gate_fixtures.py",
+    "ports/fnv-nx/verify/gate_build.py"
+   ]
+  },
   "test_fpbound.py": {
    "references": [
     {
@@ -516,10 +535,21 @@
      "anchor": "## verify/unitstage.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## Sources and patches (rule A)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## Built tools (rule B)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
     }
    ],
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/patchtree.py",
     "ports/fnv-nx/verify/gate_build.py",
     "ports/fnv-nx/verify/unitstage.py",
     "ports/fnv-nx/verify/gate_determinism.py",
@@ -594,19 +624,6 @@
     "ports/fnv-nx/verify/toolflags_policy.py",
     "ports/fnv-nx/verify/puregate.py",
     "ports/fnv-nx/verify/puregate_policy.py"
-   ]
-  },
-  "test_unitflags.py": {
-   "references": [
-    {
-     "anchor": "### Per-unit flags (`unit_flags`, `unit_facts`)",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/RECIPE.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/recipe.py",
-    "ports/fnv-nx/verify/unitstage.py"
    ]
   },
   "test_unitstage.py": {

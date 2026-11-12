@@ -8,7 +8,7 @@ A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
   3. every gate the root names is a gate of verify/gates.json of this same tree;
-  4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
+  4. a product root (and a tool root that names one) names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
      declared environment); the file exists.
 Classes:
   doc      text for people: no gate required. Nothing in a doc root is compiled or run by a build.
@@ -54,7 +54,7 @@ def judge(files, admit, gate_names, exists):
             why.append("class %r is not one of %s" % (cls, ", ".join(CLASSES)))
         else:
             why += ["required gate %s not named" % g for g in REQUIRED[cls] if g not in gates]
-            if cls == "product":
+            if cls == "product" or (cls == "tool" and "recipe" in r):   # a tool root with a recipe (a host executable the build runs)
                 rec = r.get("recipe", "")
                 if not rec.startswith(path + "/") or not exists(rec):
                     why.append("recipe %r is not an existing file inside the root" % rec)
