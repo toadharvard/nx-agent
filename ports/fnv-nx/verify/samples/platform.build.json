@@ -9,33 +9,17 @@
   "c": [
    "-nostdinc",
    "-O2",
-   "-mabi=ilp32",
    "-Werror=attributes"
   ],
   "cxx": [
    "-nostdinc",
    "-nostdinc++",
    "-O2",
-   "-mabi=ilp32",
-   "-fms-extensions",
-   "-fshort-wchar",
-   "-frounding-math",
-   "-fsigned-char",
-   "-fno-strict-aliasing",
-   "-fwrapv",
-   "-fno-delete-null-pointer-checks",
-   "-fcheck-new",
-   "-fno-sized-deallocation",
-   "-fno-lifetime-dse",
-   "-ffp-contract=off",
    "-DFNVNX_SDD=1",
-   "-fno-devirtualize",
-   "-fno-reorder-blocks-and-partition",
    "-Werror=attributes"
   ],
   "asm": [
-   "-nostdinc",
-   "-mabi=ilp32"
+   "-nostdinc"
   ]
  },
  "include": [

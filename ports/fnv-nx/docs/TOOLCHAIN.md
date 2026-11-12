@@ -268,7 +268,7 @@ Failure signs: back to HOME / error at launch = NSO or NPDM rejected by ldr (che
 | v1 | debug string, sleep, exit, console, main loop, buttons, ticks |
 | threads | `thread_create/start/join/free/exit/yield/set_priority/set_cpu` (libnx threads running a guest entry) |
 | blocking | `wait_on_address`, `wake_address` (svcWaitForAddress / svcSignalToAddress) |
-| time, misc | `wall_time_us`, `tz_offset_minutes` (0, TODO), `random64`, `memory_info`, `cpu_count` |
+| time, misc | `wall_time_us`, `random64`, `memory_info`, `cpu_count` |
 | files | `fs_open/read/write/pread/pwrite/seek/truncate/sync/fstat/close/stat/mkdir/rmdir/remove/rename/dir_*` (host newlib over fsdev, paths `sdmc:/...`, results `-errno`) |
 | audio, input | `audio_open/submit/close` (audren voice, submit blocks = pacing), `pad_read`, `pad_vibrate`, `input_poll` (HID usage key events, mouse, touch) |
 | memory | `map_fixed(addr, size, src)`: svcMapMemory of a guest heap block at a fixed address (the S3 data image) |

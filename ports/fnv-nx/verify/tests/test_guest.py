@@ -20,9 +20,9 @@ def guest_rec(ext, rt, **kw):
     """A guest recipe: the compiler external, the runtime external, -nostdinc(++), -Werror=attributes and the include dirs of the compiler's own headers and the runtime's."""
     r = mut(compiler={"external": ext["name"], "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext, rt],
             include=[ext["at"] + "/lib/gcc/aarch64-linux-gnu/13/include", rt["at"] + "/include"], **kw)
-    r["flags"] = {"c": ["-nostdinc"], "cxx": ["-nostdinc", "-nostdinc++"] + r["flags"]["cxx"], "asm": ["-nostdinc"]}
-    if "flags" not in kw:   # every guest root carries -Werror=attributes in flags.c and flags.cxx
-        r["flags"] = dict(r["flags"], **{k: list(r["flags"][k]) + [recipe.WERROR_ATTR] for k in ("c", "cxx")})
+    if "flags" not in kw:   # every guest root carries -nostdinc(++) and -Werror=attributes; a guest build.json holds only per-root flags (recipe.PER_ROOT),
+        # every semantic flag comes from the pin and is appended by the recipe
+        r["flags"] = {"c": ["-nostdinc", "-O2", recipe.WERROR_ATTR], "cxx": ["-nostdinc", "-nostdinc++", "-O2", recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": ["-nostdinc"]}
     return r
 
 
@@ -134,11 +134,43 @@ def main():
     print("INFO pinned runtime %s: %s %s" % (rt["commit"][:8], rr["status"], "; ".join(f.get("stderr", []))[:300]))
     rt2, pin2, work, art = valid_runtime(ext, pin_real, good)
     rec = guest_rec(ext, rt2)
-    src = SRC + "void sz(decltype(sizeof 0) n) { (void)n; }\n#include <sys/socket.h>\nfnvnx_t use() { return sock(); }\n"
+    src = SRC + "void sz(decltype(sizeof 0) n) { (void)n; }\n"
     gr = guest_repo("gb", rec, pin2, files={ROOT + "/a.cc": src})
-    check("guest root with the real compiler and a valid runtime is valid", errs(gr, rec) == [], errs(gr, rec))
+    check("guest root with the real pin is valid", errs(gr, rec) == [], errs(gr, rec))
+    check("the pin's semantic set has the ABI, FP and outline-atomics flags", all(f in recipe.SEMANTICS_FLAGS for f in (
+        "-mabi=ilp32", "-fPIC", "-ftls-model=local-exec", "-ffp-contract=off", "-frounding-math", "-fshort-wchar", "-mno-outline-atomics", "-ffixed-x19")), recipe.SEMANTICS_FLAGS)
+    # a guest build.json carries no semantic flag: refused in each flag list, whatever it is (an allow-list of the per-root classes, no list of semantic flags)
+    for f in ("-mabi=ilp32", "-march=armv8-a", "-mtune=cortex-a57", "-fPIC", "-fPIC", "-ftls-model=initial-exec", "-fsigned-char", "-funsigned-char", "-frounding-math",
+              "-fshort-wchar", "-mno-outline-atomics", "-moutline-atomics", "-ffast-math", "-fno-exceptions", "-fno-devirtualize", "-Ofast", "-Wa,-mfoo", "-Wl,-x", "-Wp,-D"):
+        for k in ("c", "cxx", "asm"):
+            bad = guest_rec(ext, rt2)
+            bad["flags"][k] = bad["flags"][k] + [f]
+            check("guest root with %s in flags.%s is refused (not a per-root flag)" % (f, k), any("flags.%s: %s is not a per-root flag" % (k, f) in x for x in errs(gr, bad)), errs(gr, bad))
+    for f in ("-Wall", "-Werror=format", "-DX=1", "-std=gnu++20", "-O3", "-Os", "-g", "-g1", "-ffunction-sections", "-fdata-sections"):
+        for k in ("c", "cxx", "asm"):
+            ok = guest_rec(ext, rt2)
+            ok["flags"][k] = ok["flags"][k] + [f]
+            check("guest root with %s in flags.%s is accepted (per-root class)" % (f, k), not [x for x in errs(gr, ok) if "per-root" in x], errs(gr, ok))
+    # the recipe's semantic set per language is the driver's own answer: C drops what the driver says is C++-only; C++ and asm keep all
+    drv = lambda n: os.path.join(prefix, "bin/aarch64-linux-gnu-" + n)  # noqa: E731
+    sc, sx, sa = (recipe.semantics_for(drv(d), k) for d, k in (("gcc", "c"), ("g++", "cxx"), ("gcc", "asm")))
+    check("semantics_for: C++ and asm keep the whole set, C drops only what the driver says does not apply", sx == list(recipe.SEMANTICS_FLAGS) and sa == sx
+          and sc == [f for f in sx if f != "-fno-sized-deallocation"], (len(sc), len(sx), len(sa), set(sx) - set(sc)))
+    for k, d in (("c", "gcc"), ("cxx", "g++"), ("asm", "gcc")):   # the compiler's own statement of the data model under the recipe's flags
+        m = recipe.predefined(drv(d), k, recipe.semantics_for(drv(d), k))
+        check("predefined %s: size_t unsigned int, ptrdiff_t int, plain char signed" % k, m["__SIZE_TYPE__"] == "unsigned int" and m["__PTRDIFF_TYPE__"] == "int" and "__CHAR_UNSIGNED__" not in m, m.get("__SIZE_TYPE__"))
+    check("without -fsigned-char the compiler's plain char is unsigned (the gate's clause has something to catch)", "__CHAR_UNSIGNED__" in recipe.predefined(drv("gcc"), "c", ["-mabi=ilp32"]))
+    try:
+        recipe.semantics_for(drv("gcc"), "c", ["-mabi=ilp32", "-fnosuchflag"])
+        check("semantics_for: a flag the driver does not know is an error", False)
+    except recipe.BuildRed:
+        check("semantics_for: a flag the driver does not know is an error", True)
+
     ra, ta = build(gr, "GA")
-    check("guest root builds; <sys/socket.h> finds the runtime's sys/_types.h (no glibc header)", ra["status"] == "green", ra.get("failure"))
+    check("guest root builds on the external compiler", ra["status"] == "green", ra.get("failure"))
+    pl = recipe.plugin_languages(drv("gcc"), drv("g++"), {p["name"]: p["path"] for p in ra.get("plugins", [])})
+    check("plugin_languages: cc1plus loads all 8 plugins, cc1 those without C++-front-end symbols (fnvnx_sdd, pi, names, layout need cp_global_trees)",
+          pl["cxx"] == list(recipe.PLUGIN_SOURCES) and pl["c"] == ["fnvnx_ftoi", "fnvnx_order", "fnvnx_dispatch", "fnvnx_addr"], pl)
     if ra["status"] != "green":
         return
     gl = guest_repo("gl", rec, pin2, files={ROOT + "/a.cc": src, ROOT + "/glibc.cc": "#include </usr/aarch64-linux-gnu/include/bits/wordsize.h>\nint g() { return 1; }\n"})

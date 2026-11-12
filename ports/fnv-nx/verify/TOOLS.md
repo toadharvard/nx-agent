@@ -711,9 +711,9 @@ Files: guest paths go through bootpath.BootPath (sdmc: prefix, case-folded compo
 stated in bootpath.py). BootPath(root) creates <root>/switch/fnv, as the device always has it.
 
 Host slots whose effect is not modelled (the observable contract is kept; see HOST SLOTS in the stage report):
- output_debug_string (kept in .debug, no sink), console_flush, main_loop (always 1), buttons_down (always 0),
+ output_debug_string (kept in .debug, no sink),
  thread_free, thread_set_priority / thread_set_cpu (recorded in .placement only, no placement effect),
- wall_time_us (fixed epoch + virtual ns), tz_offset_minutes (VC1's zone: UTC, 0), random64 (deterministic splitmix64, seed 0),
+ wall_time_us (fixed epoch + virtual ns), random64 (deterministic splitmix64, seed 0),
  memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
  dropped, submit sleeps the period in virtual time), pad_read (never connected, zeros), pad_vibrate, input_poll
  (no events), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
@@ -839,8 +839,7 @@ Rules:
    slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
    the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
-   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path, except the thread's own
-   FNVNX_PLAT_ACCESS_FAULT_HANDLER (5c).
+   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
    inside it and not given away before; addr gets RW memory holding the CONTENT of src, and [src, src+size) becomes
    unmapped for good (a later access ends the run with "fault"). addr: exactly there, wholly inside a plan["free"]
@@ -854,14 +853,13 @@ Rules:
 5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
    NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 37 and up), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
-   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..26, 30, 31 are bootsock.py's model (a host with no network interface; its docstring lists every
+   ExtMissing ends the run. Module 11 serves fn 1..9, 11..14, 16..26, 30, 31, 34..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..26, 30, 31 are bootsock.py's model (the platform's sock_guest.c calls each of them; 27..29, 32, 33 and 10, 15 are holes answering FNVNX_EXT_NO_SERVICE) (a host with no network interface; its docstring lists every
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
    for every instant (utc_seconds is any int64: the declared machine's zone in the emulator is fixed UTC, CLAUDE.md "The declared machine", and UTC has one rule at every instant, so the stage's time service refuses nothing and -EOVERFLOW (-75) never comes from the stage);
-   tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
+   THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
-   ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
    DISPLAY_DOCKED (9) answers 1 for the constructor argument profile="docked", 0 for "handheld" (default). Thread and directory ids are table
    handles (IdTable: (generation << 16) | slot, at most 1024 live together); the stack count (n_stacks) is a limit of this machine, not of the header.
 5b. Platform service (module 11; always on). Totality at construction: every fn of PLATFORM_FNS
@@ -881,10 +879,6 @@ Rules:
    never picked; unknown tid NotFound 0x1359, a thread not started or ended BadInput 0x1759 (no kernel call, also for a THREAD_SELF record of such a thread); a thread (or the
    record of a thread) that is the CALLING thread: ResultBusy 0xF401, pause or resume; another live thread: pause of a paused one or resume of one that is not paused
    ResultInvalidState 0xFA01, else 0 (svcSetThreadActivity as Atmosphere's libmesosphere states it, source/svc/kern_svc_activity.cpp and KThread::SetActivity: svc::ResultBusy for the current thread, svc::ResultInvalidState for a pause of a paused or a resume of a not paused thread; a result is module | description << 9, module Kernel = 1, descriptions Busy 122, InvalidState 125 - libnx b156b4774fb2 nx/include/switch/result.h MAKERESULT, where 122 is spelled KernelError_AlreadyExists).
-5e. UNMAP_FIXED (fn 15, addr, size, src): the undo of exactly one earlier map_fixed. addr or src unaligned 0xCC01; size 0 / unaligned 0xCA01; (addr, size,
-   src) not exactly a live map_fixed mapping 0xD401 (so a second unmap refuses). Success: the range is unmapped (an access faults), the src heap block
-   is accessible RW again with the content the mapping had, and addr may be mapped again. A page of the range that is not RW is the header's
-   violated precondition: MachineError, which ends the run as a host-call fault (the contract defines no result).
 5d. Sections (module 11 fn 11..14, host_section.inc; errors are -(code) as u64, recorded as events section_*-refused with the
    positive code). A section is one anonymous mmap (zero, page aligned) kept alive for the machine's life; each view is
    uc.mem_map_ptr of that buffer at the view's address, so views share bytes. MAP checks in the host's order: size, alignment, id,
@@ -893,25 +887,13 @@ Rules:
    reservations and views (not a VM reservation). Views are RW guest memory but not guest-owned pages: VM_PROTECT / COMMIT /
    DECOMMIT of a range holding a view page and VM_RELEASE of a reservation holding one are refused 0xD401 (nothing done);
    map_fixed cannot land on one (refused by its own range rules). FREE kills the id at once, the pages live until the last view is
-   unmapped. The fault-handler frame may live in a view: a view is writable guest memory (rule 5c asks only that).
+   unmapped. 
 5d. TEXT_ENTRY (module 11 fn 36, args {max_len, init, init_n, out, n}; _plat_text_entry): the run's scenario `text_entries` (a list of
    strings, one consumed per successful call, in order). Checks as on the console: max_len 0 or > 500, out or n null -> -FNVNX_HE_BADINPUT, no
    text consumed. A text left -> 1, its UTF-16 units + NUL at out, *n = units; no text left (or no scenario) -> 0 (cancel, out and *n
    untouched). DIFFERENCE from the console, as the header says for the emulator: no human, so the answer comes from the scenario instead of
    always 0. A text of more than max_len units is a scenario error: the run ends, reason "scenario-error", extra["scenario"] = why (never
    truncated). A non-writable out / n on an answer of 1 is a host-call fault. Every call is an event {kind "text-entry", max_len, result}.
-5c. ACCESS_FAULT_HANDLER (module 11 fn 10, args {handler, stack_top}, result 0; handler 0 unregisters; stack_top must be 16-byte
-   aligned, >= 816 and < 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
-   UC_HOOK_MEM_INVALID: unmapped or protection, read/write/fetch) of a thread with a handler, not already inside it, is
-   delivered at once: the frame (FnvnxFaultFrame, 816 bytes) is written at stack_top - 816 from the exact register state at the
-   faulting instruction (pc = that instruction; pstate = NZCV only, bits 31..28), then x0 = frame, sp = frame, lr = a return stub
-   on the host page, pc = handler. reason is 0 (unmapped) or 1 (protection); 2 (alignment) is never produced: Unicorn raises no
-   alignment fault through the hook (an alignment trap ends the run as "uc-error"), so the machine cannot tell it. When the
-   handler returns to the stub: x0 == 0 loads x0..x30, sp, pc, NZCV, fpcr, fpsr, v0..v31 from the frame in guest memory and
-   resumes; x0 != 0 ends the run, reason "exit", exit_code x0. A fault of a thread inside its handler ends the run: reason
-   "fault", record with in_handler. A frame range that is not wholly guest memory the guest can write (not host page) ends the
-   run, reason "fault", kind "frame-unwritable". Each delivery is an event {kind "fault-handler", tid, access, reason, addr, pc}.
-   Faults of host calls on bad guest pointers ("host-access") are not thread faults and are not delivered.
 6. Bound and count: one UC_HOOK_BLOCK over the image region (installed only with limit_instructions or attach_icount)
    adds size/4 per block, feeds the Icount if attached, and stops at the first block boundary where the total >=
    limit_instructions: reason "limit", the same stop point on every run (the stopping block is counted).
@@ -1279,12 +1261,18 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       the root links no ELF), and two listed symbols with DIFFERENT body ids may not share one address (`contract-alias`: an alias stub
       that serves two contracts with one body). Two names with the same body id on one address are fine. A symbol listed twice with
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
+  (e) No guest object references a libgcc outline-atomics helper (__aarch64_{cas,swp,ldadd,ldclr,ldeor,ldset}<bytes>_<memory model>): the helpers
+      choose LSE or LL/SC through getauxval, which Horizon lacks, and the declared CPU (Cortex-A57) has no LSE, so guest roots build with
+      -mno-outline-atomics (a member of guest_compiler.json "flags"."semantics", appended by the recipe and read back by gate datamodel). Finding `outline-atomic`, per reference.
   (d) The host boundary (a root with "target": "host" in admit.json). A reference no object defines is certified iff its object belongs to
       a host root and its name is EXPORTED by the pinned host runtime: the defined GLOBAL/WEAK `.dynsym` names of the shared objects that
       dpkg lists for libc6, libgcc-s1 and libstdc++6 (verify/env.json pins their versions; envcheck checks them), a fact computed by
       gate_linkstrict.host_exports and cached by the content of those files (CACHE/hostexports). It mirrors newlib/libnx on the guest
       side: a guest root has no such set, and any other undefined name of a host root stays `undefined`. Not covered (stated): the
       fact is a cached read of the installed packages, not a sandbox stage; a symbol version is not compared, only the name.
+  (f) Flags of foreign objects (a guest root that links an ELF): what the link stage takes from externals (explicit paths, -l through -L) shows in its
+      DW_AT_producer the option set the pinned driver writes for the recipe's semantic set (producers.py): findings `flags-differ`, `no-producer`,
+      `asm-unproven`, `shared-input`, `no-link-stage`. Items: one per foreign object or archive member. Details and limits: producers.py.
 Universe = undefined references + defined global names + contract names + one `<elf>` per linked root (+ a root whose recipe is invalid or
 whose build is red, one uncertified item). Certified = the items with no finding. No product root: universe 0, green.
 NOT EXACT (stated): rule (b) is by name over the objects. A script symbol with hidden visibility (PROVIDE_HIDDEN) is LOCAL in the
@@ -1326,6 +1314,7 @@ gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe
 
 ## verify/gate_hostapi.py
 
+Wrapper rule (class): a `FNVNX_PLAT_` identifier may appear only in the `#define FNVNX_PLAT_X <integer>` lines of hostapi.h and in unit files (.c/.cc/.cpp/.S) of the root. Any other includable file (a non-unit file under the root, under a recipe include directory, or in an external include tree) that names one is a red item (`wrapper use in PATH`), and so is a non-define use inside hostapi.h; with that the `-dU` position of a define does not matter.
 Gate `hostapi` (product class, in `gate_admit.REQUIRED_PRODUCT`). For every admitted product root that includes `fnvnx/hostapi.h`: the set of
 service numbers declared in the header (`#define FNVNX_PLAT_<NAME> <integer>`, read by token grammar; names with one number are aliases) equals
 the set of service numbers that some unit of the root expands. Evidence: `unit.ii` of the PP stage, which runs `-dU` (GCC lists exactly the
@@ -1347,12 +1336,16 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
   compiler item: the build is green, the root's recipe compiler is the external of verify/guest_compiler.json (recipe.guest_errors: name,
     repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
     with the pin's driver (the object was built by that tree, not by a name).
-  unit item, all of: a CC stage document exists for the unit; its argv holds -mabi=ilp32; for a C++ unit of a native root also every flag of
-    recipe.SEMANTICS_FLAGS and, for every plugin of recipe.GUEST_CXX_PLUGINS, the declared input /plug/<name> (a tree holding <name>.so) and the
-    argv flag -fplugin=/plug/<name>/<name>.so. A C++ unit of a lifted root needs no plugin (RECIPE.md: the lifter emits the order itself).
+  unit item, all of: a CC stage document exists for the unit; under the recipe's flags the compiler's predefined macros (recipe.predefined, `-dM -E`)
+    say __SIZE_TYPE__ is unsigned int, __PTRDIFF_TYPE__ is int and __CHAR_UNSIGNED__ is undefined (the exe's data model, plain char signed); its argv holds the whole semantic set of the pin ("flags"."semantics", the one source
+    recipe.SEMANTICS_FLAGS reads) for the unit's language as ONE ordered run, exactly as recipe.semantics_for derives it from the pinned driver
+    (the set minus the flags the driver's own diagnostic says do not apply to that language; the gate re-runs that probe itself), and no other
+    -f/-m token except a stage's own (-fplugin, -frandom-seed, -ffile-prefix-map, -fpreprocessed) and the per-root class recipe.PER_ROOT; and
+    EVERY C and C++ unit of a guest root, any origin, holds every plugin of recipe.PLUGIN_SOURCES that its front end can load, each as the declared
+    input /plug/<name> and the argv flag -fplugin=/plug/<name>/<name>.so, and no plugin it cannot load. Loadable = needs no symbol that only the
+    other front end defines (recipe.plugin_languages: nm -D of cc1, cc1plus and the .so, re-derived by the gate from the built plugins: a static
+    fact of the ELF files; a plugin using C++-front-end symbols has no C instance). A missing loadable plugin is red; no name list, no exception list.
     The documents are the stage keys, so the object is the one these flags and inputs built.
-Does not cover (stated): the pin file declares no data-model flags of its own, so the flag set is -mabi=ilp32 for every unit plus
-recipe.SEMANTICS_FLAGS for native C++ (the constant of the recipe rule); C and assembler units are checked for -mabi=ilp32 only.
 Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model.
 ```
 
@@ -1717,6 +1710,25 @@ is not checked by this tool (at 0b9ad57: test_envcheck.py, test_gates.py, test_o
 A test passes iff it exits 0, undeclared and unopened are empty. The report states these facts per test; it ranks
 nothing and excuses nothing. Exit 0 iff every test passes, 2 otherwise, 1 on a usage or tool error.
 This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: it needs strace and runs every test.
+```
+
+## verify/producers.py
+
+```text
+producers.py - rule (f) of gate linkstrict: every object linked into one image was built with ONE semantic flag set.
+Own units are proven by their CC stage documents (gate datamodel: the whole set, in order, per language). What the recipe's link takes from an external
+(a prebuilt object or archive named in the link stage's argv, `-lNAME` through the `-L` directories of that argv) has no stage document of ours; its
+build is read from the object itself: the DW_AT_producer of each compile unit (`readelf --debug-dump=info --dwarf-depth=1`, which applies the
+relocations), the compiler's own record of the options it was run with.
+  EXPECTED, per language (c, cxx): the producer the pinned driver writes for a trivial unit of that language compiled with `-g` and
+  recipe.semantics_for(driver, language) (the set minus what the driver says does not apply), its option tokens minus the per-root classes
+  (recipe.PER_ROOT: -W*, -D*, -std=, -O*, -g*, -ffunction-sections, -fdata-sections). Nothing here is a flag list: the driver renders its own set.
+  A CU is certified iff its option tokens, minus the same per-root classes, equal the expected set of its language; otherwise `flags-differ`
+  (the extra and the missing tokens are the detail). A foreign object with no DW_AT_producer (built without -g) cannot show its flags: `no-producer`.
+  A foreign assembler CU (`GNU AS`) records no options: `asm-unproven`. A foreign shared object in the link: `shared-input`.
+Not covered (stated): every member of a foreign archive is read, not only the members the linker pulls in (conservative: an unused foreign member with
+other flags is a finding); the compiler version and language standard in the producer's head are not compared; an option the compiler does not record
+in the producer (-U_FORTIFY_SOURCE, preprocessor options) is not seen; own units are not read here (their stage documents are the proof).
 ```
 
 ## verify/puregate.py
