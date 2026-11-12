@@ -75,3 +75,11 @@ def tree_hash(root):
                 h.update(fh.read())
             h.update(b'\0')
     return h.hexdigest()
+
+
+# FIXTURE ADDRESSES: a test fixture holds no address inside a guest image range (Legal: no public file pairs a guest VA with a decomp-derived
+# name; checked by gate_legal over every tracked file).  Fixture addresses lie in [SYNTH_BASE, SYNTH_LIMIT), below the exe's ImageBase: the guest
+# images are placed at or above it (contract/modules.py assign_bases).  Tests of the two rules that still key on a fixed exe window (s2_bodies
+# r_code_address_casts, s1_compile STATIC1) keep in-window addresses with synthetic names only, until those rules read the window from the image facts.
+SYNTH_BASE = 0x00000000
+SYNTH_LIMIT = 0x00400000      # exclusive: the lowest ImageBase of a guest image set of this port (the exe's)
