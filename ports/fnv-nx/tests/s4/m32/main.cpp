@@ -72,8 +72,38 @@ static int iat(const char *path)
     return missing ? 1 : 0;
 }
 
+/* the harness proves its own rule before the first case: a failed CHECK throws only on the case's thread or inside s4_thread_guard; on a
+ * thread the platform started (an unguarded one) it stops the run */
+static void *s4_selftest_raw(void *p) { *(int *)p = s4_abort_here(); return NULL; }
+static void *s4_selftest_guarded(void *p)
+{
+    *(int *)p = s4_thread_guard([]() -> int { return s4_abort_here(); }, -1);
+    return NULL;
+}
+static int s4_harness_selftest(void)
+{
+    int raw = -1, guarded = -1;
+    pthread_t a, b;
+    if (pthread_create(&a, NULL, s4_selftest_raw, &raw) || pthread_create(&b, NULL, s4_selftest_guarded, &guarded))
+        return 1;
+    pthread_join(a, NULL);
+    pthread_join(b, NULL);
+    s4_case_thread = pthread_self();
+    s4_case_armed = 1;
+    int on_case = s4_abort_here();
+    s4_case_armed = 0;
+    int idle = s4_abort_here();
+    if (raw != 0 || guarded != 1 || on_case != 1 || idle != 0) {
+        fprintf(stderr, "harness selftest: raw=%d guarded=%d case=%d idle=%d (want 0 1 1 0)\n", raw, guarded, on_case, idle);
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (s4_harness_selftest())
+        return 2;
     const char *r = getenv("FNVNX_ROOT");
     snprintf(g_root, sizeof g_root, "%s", r && *r ? r : "./fnvnx-root");
     char cmd[1200];
