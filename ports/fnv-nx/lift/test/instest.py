@@ -21,11 +21,9 @@ from elftools.elf.elffile import ELFFile
 HERE = os.path.dirname(os.path.abspath(__file__))
 # a one-instruction test has no callee: a call/tail to another entry is an event of the test harness (fnvl_call), set here and nowhere in the prelude
 STUBX = 'extern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
-FLAGS = ('-mabi=ilp32 -std=gnu++17 -c -O2 -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing '
-         '-fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off '
-         '-fPIC -fpermissive -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection '
-         '-mno-outline-atomics -U_FORTIFY_SOURCE -ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-math-errno -fno-jump-tables -fno-ipa-ra -w '
-         '-DFNVL_FLAGS_IO -ffixed-x19 -ffixed-x20 -ffixed-x21 -ffixed-x22 -ffixed-x23 -ffixed-x24 -ffixed-x25 -ffixed-x26 -ffixed-x27').split()
+sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
+import liftgen   # tools/liftgen.py PACK_CXX_FLAGS: the ONE definition of the lifted-code flags (the pack recipe and every test compile with it)
+FLAGS = ['-c'] + liftgen.PACK_CXX_FLAGS + ['-DFNVL_FLAGS_IO']      # + the test's I/O hook and -c: they compile no product code differently
 HARN, HARN_END, CPU, ASTACK, RETPAD = 0xE0000000, 0xE2000000, 0xE1000000, 0xE1F00000, 0xE1FF0000
 HX = 0xE1E00000                  # x86 oracle harness page (inside the guarded range: a test access to it counts as a collision)
 FSB = 0x7FFDF000                 # fs base on both sides
