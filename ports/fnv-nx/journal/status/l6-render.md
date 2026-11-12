@@ -231,3 +231,9 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - objstub: 272/371 certified, 99 findings. Before the prune: 365/473, 108.
     - The remaining findings come from the BYTECODE profile, reached because SUPPORT_PROFILE_BYTECODE defaults to 1.
     - Rule given: every SUPPORT_PROFILE_* is set explicitly, 1 only for GLSL, and the macro list is checked against mojoshader_internal.h. parse_args_NULL is reviewed after the rule is applied.
+- 04:10Z Merged farm-env 7a0f2584 as 1b7c3c06: render/shaders/total/sm_link.tsv.
+    - Public rows: 7660 = 7471 ok, 179 compile-fail (so link-fail), 10 CreateShader refused. The outcome is the same for the minimal and the FFP partner.
+    - Shipped shaders: 15,791 compile and link in the canonical state.
+    - Wine 9.0 + Mesa, two runs byte-equal. sm-linkprobe 82303d1c.
+    - V=2099, P=4458, V×P=9.36M (~12 h). Not run: the texts depend on the compile args, so V×P is not a superset.
+    - Next: w3b proves (L1) link = the 3 compiles and (L2) the finite compile-arg domain per shader. Then farm job 3 enumerates exactly that set. The farm adds the use_program column and the signature counts now.
