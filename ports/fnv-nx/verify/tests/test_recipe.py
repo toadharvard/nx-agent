@@ -451,6 +451,13 @@ def main():
     check("an include into a root with a recipe for the including root's target is accepted", not pt, pt)
     check("the same include without that recipe is rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("a plain-string recipe parses to itself", recipe.norm_entry({"path": "x", "target": own, "recipe": "b.json"}) == {"path": "x", "target": own, "recipe": "b.json"})
+    # every per-target rule judges the effective entry: the plugin rule of a variant follows the variant's target, not the base's
+    noplug = dict(RECIPE, plugins=[])
+    pe = lambda tg, vt, var: [e for e in recipe.plugin_errors(noplug, ROOT, rfiles, {ROOT: dict(base_roots[ROOT], target=tg, variants={"v": {"target": vt}})}, ["a.cc"], [], var)  # noqa: E731
+                              if "does not load plugin" in e]
+    check("plugins: a guest root without plugins is red; its host variant is green; a host root's guest variant is red",
+          len(pe("guest", "host", "")) > 0 and pe("guest", "host", "v") == [] and pe("host", "guest", "") == [] and len(pe("host", "guest", "v")) > 0,
+          (len(pe("guest", "host", "")), pe("guest", "host", "v"), pe("host", "guest", ""), len(pe("host", "guest", "v"))))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]
