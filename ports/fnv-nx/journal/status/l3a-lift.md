@@ -406,3 +406,11 @@ Update 2026-11-12, at 698adefb:
   - proof that -mabi=ilp32 stays in the resolved pack flags (readelf ELF32 ILP32), per L3b's check;
   - lift tests compile with their own PACK_CXX_FLAGS list. That is a second flag source, so they move to the recipe's resolved flags.
 - Top-level asm: L2/L3b close it by class (the plugin brackets top-level asm, so every executable byte lies in a function or asm range). No conversion.
+
+## 2026-11-12 09:50
+- w8's env passes envcheck. Recipe builds on t16e 6a6c2d265:
+  - imptest/lifted green (3 objects);
+  - msvcrttest/lifted green (3 objects);
+  - citest/lifted red at its generate stage, because the gmpy2.libs mount is missing (an L1 class defect: the mount must cover the wheel's whole RECORD). Routed to L1.
+- ILP32 for lift/pack: flags.semantics on int3's base starts with -mabi=ilp32. w8 builds one pack unit for the readelf proof.
+- ASM-234: the record lands in w6's merge of w7-merge into int3, together with dic.py, its citing file. used_by is re-derived per id (ASM-233's status per L1's rule).
