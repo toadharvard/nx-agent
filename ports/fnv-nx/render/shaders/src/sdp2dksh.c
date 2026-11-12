@@ -18,6 +18,7 @@
 #include "fnvnx_sdp.h"
 #include "fnvnx_shaders.h"
 #include "fnvnx_dk_layout.h"
+#include "fnvnx_sha256.h"
 
 static uint8_t *slurp(const char *path, size_t *len)
 {
@@ -39,21 +40,21 @@ static int spit(const char *path, const void *p, size_t n)
 }
 
 typedef struct { const char *dir; uint32_t flags; int strict; FILE *index, *variants; int total, ok, fail, dup;
-                 uint64_t *seen; size_t nseen, capseen; } ctx_t;
+                 char (*seen)[FNVNX_SHADER_KEY_HEX]; size_t nseen, capseen; } ctx_t;   /* hex SHA-256 keys of the bytecodes seen */
 
-static int seen(ctx_t *c, uint64_t h)
+static int seen(ctx_t *c, const char *h)
 {
-    for (size_t i = 0; i < c->nseen; i++) if (c->seen[i] == h) return 1;
+    for (size_t i = 0; i < c->nseen; i++) if (!strcmp(c->seen[i], h)) return 1;
     if (c->nseen == c->capseen) {
         c->capseen = c->capseen ? c->capseen * 2 : 256;
-        c->seen = (uint64_t *)realloc(c->seen, c->capseen * sizeof(uint64_t));
+        c->seen = (char (*)[FNVNX_SHADER_KEY_HEX])realloc(c->seen, c->capseen * sizeof *c->seen);
     }
-    c->seen[c->nseen++] = h;
+    memcpy(c->seen[c->nseen++], h, FNVNX_SHADER_KEY_HEX);
     return 0;
 }
 
 /* the static epilogue variants of one pixel shader; none when its GLSL has no epilogue guard */
-static void variants(ctx_t *c, uint64_t h, const void *bc, size_t n)
+static void variants(ctx_t *c, const char *h, const void *bc, size_t n)
 {
     static const struct { const char *tag; uint32_t f; } v[] = {
         { "__e0", 0 }, { "__ea", FNVNX_SHADER_EPI_ALPHA }, { "__ef", FNVNX_SHADER_EPI_FOG } };
@@ -67,9 +68,9 @@ static void variants(ctx_t *c, uint64_t h, const void *bc, size_t n)
         fnvnx_shader_opts o = { (c->flags & ~FNVNX_SHADER_NO_DKSH) | FNVNX_SHADER_EPI_STATIC | v[i].f, NULL };
         fnvnx_shader_translate(bc, n, &o, &r);
         char path[4096];
-        if (r.dksh) { snprintf(path, sizeof path, "%s/%016llx%s.dksh", c->dir, (unsigned long long)h, v[i].tag); spit(path, r.dksh, r.dksh_size); }
-        if (r.glsl) { snprintf(path, sizeof path, "%s/%016llx%s.glsl", c->dir, (unsigned long long)h, v[i].tag); spit(path, r.glsl, strlen(r.glsl)); }
-        fprintf(c->variants, "%016llx\t%s\t%s\t%u\t%u\t%u\t%s\n", (unsigned long long)h, v[i].tag, r.ok ? "ok" : "fail",
+        if (r.dksh) { snprintf(path, sizeof path, "%s/%s%s.dksh", c->dir, h, v[i].tag); spit(path, r.dksh, r.dksh_size); }
+        if (r.glsl) { snprintf(path, sizeof path, "%s/%s%s.glsl", c->dir, h, v[i].tag); spit(path, r.glsl, strlen(r.glsl)); }
+        fprintf(c->variants, "%s\t%s\t%s\t%u\t%u\t%u\t%s\n", h, v[i].tag, r.ok ? "ok" : "fail",
                 r.stats.dk_instructions, r.stats.dk_gprs, r.stats.dk_code_size, r.ok ? "" : r.error);
         fnvnx_shader_result_free(&r);
     }
@@ -82,18 +83,18 @@ static void one(ctx_t *c, const char *pkg, const char *name, const void *bc, siz
     fnvnx_shader_opts o = { c->flags, NULL, g_nlink ? g_link : NULL, g_nlink };
     fnvnx_shader_result r;
     c->total++;
-    uint64_t h = fnvnx_shader_hash(bc, n);
+    uint8_t key[32]; char h[FNVNX_SHADER_KEY_HEX]; fnvnx_sha256(bc, n, key); fnvnx_shader_key_hex(key, h);
     int dup = seen(c, h);
     fnvnx_shader_translate(bc, n, &o, &r);
     char path[4096];
     if (!dup) {
-        if (r.dksh) { snprintf(path, sizeof path, "%s/%016llx.dksh", c->dir, (unsigned long long)h); spit(path, r.dksh, r.dksh_size); }
-        if (r.reflection_json) { snprintf(path, sizeof path, "%s/%016llx.json", c->dir, (unsigned long long)h); spit(path, r.reflection_json, strlen(r.reflection_json)); }
-        if (r.glsl) { snprintf(path, sizeof path, "%s/%016llx.glsl", c->dir, (unsigned long long)h); spit(path, r.glsl, strlen(r.glsl)); }
+        if (r.dksh) { snprintf(path, sizeof path, "%s/%s.dksh", c->dir, h); spit(path, r.dksh, r.dksh_size); }
+        if (r.reflection_json) { snprintf(path, sizeof path, "%s/%s.json", c->dir, h); spit(path, r.reflection_json, strlen(r.reflection_json)); }
+        if (r.glsl) { snprintf(path, sizeof path, "%s/%s.glsl", c->dir, h); spit(path, r.glsl, strlen(r.glsl)); }
     } else c->dup++;
     if (!dup && c->variants && r.ok && r.stage == FNVNX_STAGE_PIXEL) variants(c, h, bc, n);
     if (r.ok) c->ok++; else { c->fail++; fprintf(stderr, "FAIL %s:%s: %s\n", pkg, name, r.error); }
-    fprintf(c->index, "%016llx\t%s\t%s\t%s_%d_%d\t%s\t%u\t%u\t%u\t%u\t%u\t%s\n", (unsigned long long)h, pkg, name,
+    fprintf(c->index, "%s\t%s\t%s\t%s_%d_%d\t%s\t%u\t%u\t%u\t%u\t%u\t%s\n", h, pkg, name,
             r.stage == FNVNX_STAGE_VERTEX ? "vs" : r.stage == FNVNX_STAGE_PIXEL ? "ps" : "??", r.major, r.minor,
             r.ok ? "ok" : "fail", r.stats.d3d_instructions, r.stats.glsl_statements, r.stats.dk_instructions,
             r.stats.dk_gprs, r.stats.dk_code_size, r.ok ? "" : r.error);
@@ -104,11 +105,11 @@ static void ctab_one(const char *pkg, const char *name, const void *bc, size_t n
 {
     fnvnx_ctab_entry *e; char err[512];
     int k = fnvnx_shader_ctab(bc, n, &e, err, sizeof err);
-    unsigned long long h = (unsigned long long)fnvnx_shader_hash(bc, n);
-    if (k < 0) { printf("%s\t%s\t%016llx\terror\t%s\n", pkg, name, h, err); return; }
-    if (k == 0) printf("%s\t%s\t%016llx\t-\n", pkg, name, h);
+    uint8_t key[32]; char h[FNVNX_SHADER_KEY_HEX]; fnvnx_sha256(bc, n, key); fnvnx_shader_key_hex(key, h);
+    if (k < 0) { printf("%s\t%s\t%s\terror\t%s\n", pkg, name, h, err); return; }
+    if (k == 0) printf("%s\t%s\t%s\t-\n", pkg, name, h);
     for (int i = 0; i < k; i++)
-        printf("%s\t%s\t%016llx\t%s\t%s\t%u\t%u\t%s\t%s\t%u\t%u\t%u\n", pkg, name, h, e[i].name, e[i].set,
+        printf("%s\t%s\t%s\t%s\t%s\t%u\t%u\t%s\t%s\t%u\t%u\t%u\n", pkg, name, h, e[i].name, e[i].set,
                e[i].reg, e[i].count, e[i].cls, e[i].type, e[i].rows, e[i].columns, e[i].elements);
     free(e);
 }

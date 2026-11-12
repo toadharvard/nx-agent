@@ -53,16 +53,16 @@ def build(dev, tmp, jobs=8):
                 [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp]):
         r = sh(cmd)
         if r.returncode: return None, None, r.stderr[-800:]
-    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
+    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-I", tmp, "-I", dev, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
     jobs_ = [(os.path.join(NATIVE if s == "app_unk_native.cpp" else dev, s), s) for s in LIB + RES + GLUE + COPY] + [(os.path.join(tmp, s), s) for s in GENS + ["env_table.gen.cpp"]] + [(os.path.join(HERE, s), s) for s in TESTS]
-    cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in jobs_]
+    cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in jobs_] + [["gcc", "-m32", "-std=c99", "-O1", "-w", "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-c", os.path.join(ROOT, "lib", "sha256", "sha256.c"), "-o", os.path.join(tmp, "sha256.o")]]
     fronts = sorted(f for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
     for f in fronts: cmds.append(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", os.path.join(FRONT, f), "-o", os.path.join(tmp, "nx_" + f + ".o")])
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
         if r.returncode: return None, None, " ".join(c[-3:]) + "\n" + r.stderr[-1500:]
     prod = [os.path.join(tmp, n + ".o") for _, n in jobs_ if n in LIB + GENS + RES + GLUE + COPY]
-    link = [os.path.join(tmp, n + ".o") for _, n in jobs_] + [os.path.join(tmp, "nx_" + f + ".o") for f in fronts]
+    link = [os.path.join(tmp, n + ".o") for _, n in jobs_] + [os.path.join(tmp, "sha256.o")] + [os.path.join(tmp, "nx_" + f + ".o") for f in fronts]
     r = sh(["g++", "-m32", "-no-pie", "-o", os.path.join(tmp, "test_copy")] + link + ["-Wl,--unresolved-symbols=ignore-all"])
     return (os.path.join(tmp, "test_copy"), prod, "") if r.returncode == 0 else (None, None, r.stderr[-800:])
 
@@ -112,7 +112,7 @@ def mut_build(base, tmp, src_rel, old, new, idx):
     mroot = os.path.join(tmp, f"m{idx}"); os.makedirs(mroot, exist_ok=True); path = os.path.join(ROOT, "render", "d3d9", src_rel); txt = open(path).read()
     mp = os.path.join(mroot, os.path.basename(src_rel)); open(mp, "w").write(mutsrc.apply(txt, old, new, f"{src_rel} #{idx}")); o = os.path.join(mroot, "x.o"); objs = dict(base["objs"])
     if src_rel.startswith("dev/"):
-        r = sh(["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", base["gen"], "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE, "-c", mp, "-o", o]); key = os.path.basename(src_rel) + ".o"
+        r = sh(["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-I", base["gen"], "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE, "-c", mp, "-o", o]); key = os.path.basename(src_rel) + ".o"
     elif src_rel.startswith("front/"):
         r = sh(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", mp, "-o", o]); key = "nx_" + os.path.basename(src_rel) + ".o"
     else:   # env/env_rules.cpp.in: regenerate the table with the mutated rules

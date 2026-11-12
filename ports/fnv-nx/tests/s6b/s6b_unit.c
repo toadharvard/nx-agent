@@ -4,6 +4,7 @@
 #include <string.h>
 #include "fnvnx_sdp.h"
 #include "fnvnx_shaders.h"
+#include "fnvnx_sha256.h"
 
 static int fails, total;
 #define CHECK(c) do { total++; if (!(c)) { fails++; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
@@ -68,7 +69,8 @@ static void test_api(void)
     uint32_t vs[] = { 0xFFFE0101, 0x0000FFFF };                              /* vs_1_1, end */
     CHECK(fnvnx_shader_translate(vs, sizeof vs, &o, &r) == 0 && strstr(r.error, "backend"));
     fnvnx_shader_result_free(&r);
-    CHECK(fnvnx_shader_hash("a", 1) == 0xaf63dc4c8601ec8cull);               /* FNV-1a 64 reference */
+    { uint8_t k[32]; char hx[FNVNX_SHADER_KEY_HEX]; fnvnx_sha256("abc", 3, k); fnvnx_shader_key_hex(k, hx);
+      CHECK(!strcmp(hx, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")); }   /* FIPS 180-4 "abc" */
     CHECK(fnvnx_shader_backends()[0] && !strcmp(fnvnx_shader_backends()[0], "mojoshader-glsldk"));
 
     uint8_t d[512]; char err[128];

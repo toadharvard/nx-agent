@@ -8,10 +8,10 @@ set -euo pipefail
 W="${1:-/home/user/work/l6/shcache}"; R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; C="$R/render/shaders/cache"; N="$R/render/native"
 B="$W/build"; O="$W/out"; D="$B/deps"; mkdir -p "$O"
 LIBS="$B/host/libfnvnx_shaders.a $D/mojoshader/build/libmojoshader.a $D/uam/build/libuam.a -lm -lpthread"
-gcc -O2 -std=gnu11 -I "$R/render/shaders/include" -I "$C" -c "$C/shxlate.c" -o "$B/shxlate.o"; gcc -O2 -std=gnu11 -c "$C/shcache_key.c" -o "$B/shcache_key.o"
-g++ "$B/shxlate.o" "$B/shcache_key.o" $LIBS -o "$B/shxlate"
+gcc -O2 -std=gnu11 -I "$R/render/shaders/include" -I "$R/lib/sha256/include" -I "$C" -c "$C/shxlate.c" -o "$B/shxlate.o"; gcc -O2 -std=gnu11 -I "$R/lib/sha256/include" -c "$C/shcache_key.c" -o "$B/shcache_key.o"; gcc -O2 -std=c99 -I "$R/lib/sha256/include" -c "$R/lib/sha256/sha256.c" -o "$B/sha256.o"
+g++ "$B/shxlate.o" "$B/shcache_key.o" "$B/sha256.o" $LIBS -o "$B/shxlate"
 gcc -std=gnu11 -O1 -w -I "$R/render/gl4" -I "$R/render/backend" -I "$N" -I "$N/gl" "$R/tests/l6/shcache/glcheck.c" "$N/gl/nxgl.c" -lEGL -ldl -lm -o "$B/glcheck"
-for m in 64 32; do gcc -m$m -std=gnu11 -w -O1 -I "$C" "$R/tests/l6/shcache/t_shcache.c" "$C/shcache.c" "$C/shcache_key.c" -o "$B/t_shcache$m"; done
+for m in 64 32; do gcc -m$m -std=gnu11 -w -O1 -I "$C" -I "$R/lib/sha256/include" "$R/tests/l6/shcache/t_shcache.c" "$C/shcache.c" "$C/shcache_key.c" "$R/lib/sha256/sha256.c" -o "$B/t_shcache$m"; done
 spec_for() {   # the d3d9_spec.json a stream was recorded with (its sha256 is in the stream header): the current one or the one from git history
   local sha f c; sha="$(python3 -I -c "print(open('$1','rb').read(40)[8:].hex())")"; f="$W/spec/$sha.json"; mkdir -p "$W/spec"
   if [[ ! -f "$f" ]]; then for c in $(git -C "$R" log --format=%H -- render/d3d9/spec/d3d9_spec.json); do

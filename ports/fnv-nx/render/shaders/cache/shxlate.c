@@ -15,10 +15,11 @@
 #include <time.h>
 #include "fnvnx_shaders.h"
 #include "shcache.h"
+#include "fnvnx_sha256.h"
 
-typedef struct { uint64_t h; uint8_t *bc; size_t n; char *json; int stage; } Bin;
+typedef struct { char h[FNVNX_SHADER_KEY_HEX]; uint8_t *bc; size_t n; char *json; int stage; } Bin;
 typedef struct { int v, p; } Pair;
-typedef struct { uint64_t h; int bin, stage; uint8_t l[SHCACHE_MAX_L]; uint32_t nl; char id[80]; } Work;
+typedef struct { char h[FNVNX_SHADER_KEY_HEX]; int bin, stage; uint8_t l[SHCACHE_MAX_L]; uint32_t nl; char id[160]; } Work;
 
 static Bin *bins; static int nbins; static Pair *pairs; static int npairs; static Work *work; static int nwork;
 static FILE *fent, *ftim, *ffail; static const char *outdir; static int failures;
@@ -40,7 +41,7 @@ static int spit(const char *name, const char *ext, const void *p, size_t n)
     ok = fwrite(p, 1, n, f) == n; return (fclose(f) == 0 && ok) ? 0 : -1;
 }
 static int cmp_str(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
-static int find_bin(uint64_t h) { int i; for (i = 0; i < nbins; i++) if (bins[i].h == h) return i; return -1; }
+static int find_bin(const char *h) { int i; for (i = 0; i < nbins; i++) if (!strcmp(bins[i].h, h)) return i; return -1; }
 static void failed(const char *id, const char *why) { fprintf(ffail, "%s\t%s\n", id, why); failures++; }
 static double now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e6 + t.tv_nsec / 1e3; }
 
@@ -49,14 +50,16 @@ static int load_dir(const char *dir)
     DIR *d = opendir(dir); struct dirent *e; char **names = NULL; int nn = 0, i; char path[1024], line[256];
     FILE *f;
     if (!d) { fprintf(stderr, "shxlate: cannot open %s\n", dir); return -1; }
-    while ((e = readdir(d))) { size_t l = strlen(e->d_name); if (l == 20 && !strcmp(e->d_name + 16, ".bin")) { names = (char **)realloc(names, (nn + 1) * sizeof *names); names[nn++] = strdup(e->d_name); } }
+    while ((e = readdir(d))) { size_t l = strlen(e->d_name); if (l == 68 && !strcmp(e->d_name + 64, ".bin")) { names = (char **)realloc(names, (nn + 1) * sizeof *names); names[nn++] = strdup(e->d_name); } }
     closedir(d); qsort(names, nn, sizeof *names, cmp_str);
     for (i = 0; i < nn; i++) {
-        size_t n; uint64_t h = strtoull(names[i], NULL, 16); int k; uint8_t *bc;
+        size_t n; char h[FNVNX_SHADER_KEY_HEX], key_hex[FNVNX_SHADER_KEY_HEX]; uint8_t key[32]; int k; uint8_t *bc;
+        memcpy(h, names[i], 64); h[64] = 0;
         snprintf(path, sizeof path, "%s/%s", dir, names[i]); bc = slurp(path, &n);
-        if (!bc || shcache_hash64(bc, n) != h) { fprintf(stderr, "shxlate: %s is not its own hash\n", path); return -1; }
+        if (bc) { fnvnx_sha256(bc, n, key); fnvnx_shader_key_hex(key, key_hex); }
+        if (!bc || strcmp(key_hex, h)) { fprintf(stderr, "shxlate: %s is not its own hash\n", path); return -1; }
         if ((k = find_bin(h)) >= 0) { if (bins[k].n != n || memcmp(bins[k].bc, bc, n)) { fprintf(stderr, "shxlate: hash collision at %s\n", names[i]); return -1; } free(bc); }
-        else { bins = (Bin *)realloc(bins, (nbins + 1) * sizeof *bins); bins[nbins].h = h; bins[nbins].bc = bc; bins[nbins].n = n; bins[nbins].json = NULL; bins[nbins++].stage = -1; }
+        else { bins = (Bin *)realloc(bins, (nbins + 1) * sizeof *bins); memcpy(bins[nbins].h, h, sizeof h); bins[nbins].bc = bc; bins[nbins].n = n; bins[nbins].json = NULL; bins[nbins++].stage = -1; }
         free(names[i]);
     }
     free(names);
@@ -64,7 +67,7 @@ static int load_dir(const char *dir)
     if (!f) { fprintf(stderr, "shxlate: no %s\n", path); return -1; }
     if (!fgets(line, sizeof line, f)) return -1;
     while (fgets(line, sizeof line, f)) {
-        unsigned long long a, b; if (sscanf(line, "%llx %llx", &a, &b) != 2) return -1;
+        char a[FNVNX_SHADER_KEY_HEX], b[FNVNX_SHADER_KEY_HEX]; if (sscanf(line, "%64s %64s", a, b) != 2 || strlen(a) != 64 || strlen(b) != 64) return -1;
         pairs = (Pair *)realloc(pairs, (npairs + 1) * sizeof *pairs);
         { Pair *q = &pairs[npairs]; int vi = find_bin(a), pi = find_bin(b); if (vi < 0 || pi < 0) { fprintf(stderr, "shxlate: pair names an unknown shader\n"); return -1; } q->v = vi; q->p = pi; }
         npairs++;
@@ -78,8 +81,8 @@ static int cmp_work(const void *a, const void *b) { return strcmp(((const Work *
 static void add_work(int bin, uint32_t nl, const uint8_t *l)
 {
     int i; Work w; memset(&w, 0, sizeof w);
-    w.h = bins[bin].h; w.bin = bin; w.stage = bins[bin].stage; w.nl = nl; memcpy(w.l, l, nl);
-    snprintf(w.id, sizeof w.id, "%016llx-%c-0-", (unsigned long long)w.h, w.stage ? 'p' : 'v');
+    memcpy(w.h, bins[bin].h, sizeof w.h); w.bin = bin; w.stage = bins[bin].stage; w.nl = nl; memcpy(w.l, l, nl);
+    snprintf(w.id, sizeof w.id, "%s-%c-0-", w.h, w.stage ? 'p' : 'v');
     if (!nl) strcat(w.id, "n"); else for (i = 0; i < (int)nl; i++) sprintf(w.id + strlen(w.id), "%02x", l[i]);
     for (i = 0; i < nwork; i++) if (!strcmp(work[i].id, w.id)) return;
     work = (Work *)realloc(work, (nwork + 1) * sizeof *work); work[nwork++] = w;
@@ -100,7 +103,7 @@ static void do_work(const Work *w)
         uint32_t i;
         for (i = 0; i < w->nl; i++) sprintf(l + 2 * i, "%02x", w->l[i]);
         if (spit(w->id, "dksh", a.dksh, a.dksh_size) || spit(w->id, "json", a.reflection_json, strlen(a.reflection_json)) || spit(w->id, "glsl", a.glsl, strlen(a.glsl))) failed(w->id, "write error");
-        else fprintf(fent, "%s\t%016llx\t%zu\t%c\t0\t%s\t%zu\t%zu\t%zu\t%u\t%u\n", w->id, (unsigned long long)w->h, bn->n, w->stage ? 'p' : 'v', w->nl ? l : "-",
+        else fprintf(fent, "%s\t%s\t%zu\t%c\t0\t%s\t%zu\t%zu\t%zu\t%u\t%u\n", w->id, w->h, bn->n, w->stage ? 'p' : 'v', w->nl ? l : "-",
                      a.dksh_size, strlen(a.reflection_json), strlen(a.glsl), a.stats.d3d_instructions, a.stats.dk_instructions);
     }
     fnvnx_shader_result_free(&a); fnvnx_shader_result_free(&b);
@@ -122,7 +125,7 @@ int main(int argc, char **argv)
     /* pass 1: front end of every bytecode (stage, reflection); no uam */
     for (i = 0; i < nbins; i++) {
         fnvnx_shader_opts o; fnvnx_shader_result r; memset(&o, 0, sizeof o); o.flags = FNVNX_SHADER_NO_DKSH;
-        if (!fnvnx_shader_translate(bins[i].bc, bins[i].n, &o, &r)) { char id[40]; snprintf(id, sizeof id, "%016llx", (unsigned long long)bins[i].h); failed(id, r.error); }
+        if (!fnvnx_shader_translate(bins[i].bc, bins[i].n, &o, &r)) failed(bins[i].h, r.error);
         else { bins[i].stage = r.stage == FNVNX_STAGE_PIXEL; bins[i].json = strdup(r.reflection_json); }
         fnvnx_shader_result_free(&r);
     }
@@ -133,7 +136,7 @@ int main(int argc, char **argv)
         if (i && !cmp_pair(&pairs[i - 1], &pairs[i])) continue;                  /* the same pair in another recording */
         if (!v->json || !p->json || v->stage != 0 || p->stage != 1) { failed("pair", "a stage of the pair did not translate or is of the wrong stage"); continue; }
         if (shcache_link_key(v->json, p->json, l, &nl)) { failed("pair", "illegal link set"); continue; }
-        fprintf(flk, "%016llx\t%016llx\t", (unsigned long long)v->h, (unsigned long long)p->h);
+        fprintf(flk, "%s\t%s\t", v->h, p->h);
         if (!nl) fputs("-", flk); else for (k = 0; k < nl; k++) fprintf(flk, "%02x", l[k]);
         fputc('\n', flk);
         if (nl) { add_work(pairs[i].v, nl, l); add_work(pairs[i].p, nl, l); }

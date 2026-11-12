@@ -24,14 +24,14 @@ def build(dev, tmp, jobs=8):
                 [sys.executable, "-I", os.path.join(dev, "res_smgen.py"), tmp, os.path.join(TOT, "sm_table.json"), os.path.join(os.path.dirname(SPEC), "d3d9_tables.py")]):
         r = sh(cmd)
         if r.returncode: return None, None, r.stderr[-800:]
-    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", INC, "-I", tmp, "-I", HERE, "-I", dev]
+    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", INC, "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-I", tmp, "-I", HERE, "-I", dev]
     jobs_ = [(os.path.join(NATIVE if s == "app_unk_native.cpp" else dev, s), s) for s in LIB + RES] + [(os.path.join(tmp, s), s) for s in GENS] + [(os.path.join(HERE, s), s) for s in TESTS]
-    cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in jobs_]
+    cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in jobs_] + [["gcc", "-m32", "-std=c99", "-O1", "-w", "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-c", os.path.join(ROOT, "lib", "sha256", "sha256.c"), "-o", os.path.join(tmp, "sha256.o")]]
     cmds += [["gcc", "-m32", "-std=c11", "-w", "-I", BACKEND, "-I", NXB, "-I", FRONT, "-c", os.path.join(FRONT, c), "-o", os.path.join(tmp, "nxfront_" + c[:-2] + ".o")] for c in FRONT_C]
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
         if r.returncode: return None, None, " ".join(c[-3:]) + "\n" + r.stderr[-1500:]
-    prod = [os.path.join(tmp, n + ".o") for _, n in jobs_ if n in LIB + GENS + RES]
+    prod = [os.path.join(tmp, n + ".o") for _, n in jobs_ if n in LIB + GENS + RES] + [os.path.join(tmp, "sha256.o")]
     allo = prod + [os.path.join(tmp, n + ".o") for n in TESTS] + [os.path.join(tmp, "nxfront_" + c[:-2] + ".o") for c in FRONT_C]
     r = sh(["g++", "-m32", "-no-pie", "-o", os.path.join(tmp, "test_res")] + allo + ["-Wl,--unresolved-symbols=ignore-all"])
     return (os.path.join(tmp, "test_res"), prod, "") if r.returncode == 0 else (None, None, r.stderr[-800:])

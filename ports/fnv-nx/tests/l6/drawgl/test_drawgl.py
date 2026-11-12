@@ -20,7 +20,7 @@ fails = []
 def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-def flags(tmp): return fd.CXX + ["-I", HERE, "-I", INC, "-I", tmp, "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT]
+def flags(tmp): return fd.CXX + ["-I", HERE, "-I", INC, "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-I", tmp, "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT]
 
 
 def src_of(name, tmp):
@@ -38,6 +38,7 @@ def build(tmp, jobs=3):
         o = os.path.join(tmp, s + ".o"); objs[s] = o
         if s.endswith(".c"): cmds.append(["gcc", "-m32", "-std=gnu11", "-O1", "-w", "-I", FFP, "-c", src_of(s, tmp), "-o", o])
         else: cmds.append(flags(tmp) + ["-c", src_of(s, tmp), "-o", o])
+    objs["sha256"] = os.path.join(tmp, "sha256.o"); cmds.append(["gcc", "-m32", "-std=c99", "-O1", "-w", "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-c", os.path.join(ROOT, "lib", "sha256", "sha256.c"), "-o", os.path.join(tmp, "sha256.o")])
     for f in sorted(f for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c")):
         o = os.path.join(tmp, "nx_" + f + ".o"); objs["nx_" + f] = o; cmds.append(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", os.path.join(FRONT, f), "-o", o])
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))

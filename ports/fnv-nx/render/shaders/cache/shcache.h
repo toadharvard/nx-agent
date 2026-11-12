@@ -7,20 +7,20 @@
  * (flags and link set taken from K). A miss, and a cache that fails any check below, mean "translate now": that is a complete path,
  * never a failure. The cache never decides what a shader is; it can only return what the translator returned before.
  *
- * KEY = (bytecode hash = fnvnx_shader_hash, bytecode length, stage, variant flags, L).
+ * KEY = (bytecode key = SHA-256 of the bytecode (32 bytes), bytecode length, stage, variant flags, L).
  *   variant flags: ALL bits of fnvnx_shader_opts.flags (EPI_*, NUMERICS_NINE, VS_COMPLETE, FLAT_COLOR, and any added later) except FNVNX_SHADER_NONKEY_FLAGS
  *     (KEEP_GLSL / NO_DKSH: the cache holds complete translations, DKSH + reflection). The mask is the complement of that short list (fnvnx_shaders.h).
  *   L: the canonical varying link set (shcache_link_set) when the stage's locations depend on the draw's VS/PS pair, else empty: a
  *     stage-alone translation (link_pairs = NULL). The run-time caller passes L (sorted ascending, unique) as link_pairs unchanged.
- *   The 64-bit hash is the translator's own cache key; the stored length and the stored L (compared byte-wise) narrow it, and the builder
- *   refuses two different bytecodes with one hash (d9s_shaders.py compares SHA-256), so no shipped key is ambiguous.
+ *   The code key is the full SHA-256 digest (accepted assumption 2: SHA-256 is collision-resistant), so the key identifies the bytecode; the stored
+ *   length and the stored L (compared byte-wise) are part of the key as well.
  *
- * FILE (little-endian):  header 64 bytes: "FNSC", u32 version(1), u8 build_id[16], u32 entry_count, u32 index_off(64), u32 blob_off,
- *   u32 file_size, u64 body_hash (FNV-1a 64 of bytes [64, file_size)), 16 zero bytes.  index: entry_count x 36 bytes, strictly increasing by
- *   (code_hash, stage, flags, l_hash, code_len): u64 code_hash, u64 l_hash, u32 code_len, u32 flags, u8 stage, u8 n_l, u8 0, u8 0, u32 blob_off,
- *   u32 blob_size.  blob: u8 n_l, u8 l[n_l], zero pad to 4, then the payload.  Entries are laid out in index order, back to back.
- * LOG (append only): header "FNSL", u32 version, u8 build_id[16] (24 bytes); records u32 len (whole record), u64 fnv1a64(len bytes ++ body),
- *   body = u64 code_hash, u32 code_len, u32 flags, u8 stage, u8 n_l, u8 l[n_l], payload.  A record that is short, longer than the remaining
+ * FILE (little-endian):  header 80 bytes: "FNSC", u32 version(2), u8 build_id[16], u32 entry_count, u32 index_off(80), u32 blob_off,
+ *   u32 file_size, u8 body_key[32] (SHA-256 of bytes [80, file_size)), 8 zero bytes.  index: entry_count x 84 bytes, strictly increasing by
+ *   (code_key, stage, flags, l_key, code_len), the keys as byte strings: u8 code_key[32], u8 l_key[32] (SHA-256 of the L bytes, all zero for the empty set),
+ *   u32 code_len, u32 flags, u8 stage, u8 n_l, u8 0, u8 0, u32 blob_off, u32 blob_size.  blob: u8 n_l, u8 l[n_l], zero pad to 4, then the payload.  Entries are laid out in index order, back to back.
+ * LOG (append only): header "FNSL", u32 version, u8 build_id[16] (24 bytes); records u32 len (whole record), u8 chk[32] = SHA-256(body),
+ *   body = u8 code_key[32], u32 code_len, u32 flags, u8 stage, u8 n_l, u8 l[n_l], payload.  A record that is short, longer than the remaining
  *   bytes, fails its checksum or holds an illegal key ends the log: it and everything after it are ignored (torn write); shcache_info
  *   reports log_valid_len so the host can truncate before it appends again.
  * Any of: bad magic, other version, other build id, size mismatch, bad body_hash, index out of bounds or unsorted, nonzero reserved bytes
@@ -35,18 +35,19 @@
 extern "C" {
 #endif
 
-#define SHCACHE_VERSION 1
+#define SHCACHE_VERSION 2
+#define SHCACHE_KEY_LEN 32                 /* a SHA-256 digest */
 #define SHCACHE_BUILD_ID_LEN 16
 #define SHCACHE_MAX_L 31                 /* FNVNX_DK_VARYING_SLOTS */
 #define SHCACHE_STAGE_VERTEX 0
 #define SHCACHE_STAGE_PIXEL 1
 #define SHCACHE_FLAGS_MASK FNVNX_SHADER_KEY_FLAGS   /* every flag bit of the translator input except the declared non-key ones (fnvnx_shaders.h): derived, no list here */
-#define SHCACHE_MAIN_HEADER 64
-#define SHCACHE_INDEX_ENTRY 36
+#define SHCACHE_MAIN_HEADER 80
+#define SHCACHE_INDEX_ENTRY 84
 #define SHCACHE_LOG_HEADER 24
 
 typedef struct shcache_key {
-    uint64_t code_hash;                  /* fnvnx_shader_hash(bytecode) = shcache_hash64 */
+    uint8_t code_key[SHCACHE_KEY_LEN];   /* SHA-256 of the bytecode */
     uint32_t code_len;                   /* bytes of bytecode */
     uint32_t flags;                      /* masked by SHCACHE_FLAGS_MASK */
     uint8_t stage, n_l;
@@ -62,10 +63,9 @@ typedef struct shcache_info {
 } shcache_info;
 typedef int (*shcache_sink)(void *user, const void *bytes, size_t n);   /* append n bytes to the log file; 0 = ok */
 
-uint64_t shcache_hash64(const void *p, size_t n);                        /* FNV-1a 64: equals fnvnx_shader_hash */
-uint64_t shcache_l_hash(const uint8_t *l, uint32_t n_l);                 /* 0 for the empty set, else a nonzero FNV-1a 64 of the pairs */
+void shcache_l_key(const uint8_t *l, uint32_t n_l, uint8_t out[SHCACHE_KEY_LEN]);   /* all zero for the empty set, else SHA-256 of the pairs */
 /* canonicalises l (sorts, rejects duplicates, usage > 13, index > 15, more than SHCACHE_MAX_L); flags are masked. 0 or -1. */
-int shcache_key_make(shcache_key *k, uint64_t code_hash, uint32_t code_len, int stage, uint32_t flags, const uint8_t *l, uint32_t n_l);
+int shcache_key_make(shcache_key *k, const uint8_t code_key[SHCACHE_KEY_LEN], uint32_t code_len, int stage, uint32_t flags, const uint8_t *l, uint32_t n_l);
 
 /* The link set of a draw's pair, from the declared pairs (FNVNX_DK_PAIR) of the VS outputs and the PS inputs (vPos/vFace not included).
  * *n_l = 0 when every pair of L is canonical (fnvnx_dk_varying_location >= 0): the stage-alone translations are valid. Else l holds L sorted

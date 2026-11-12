@@ -10,8 +10,9 @@ set(MOJO ${FNVNX_DEPS}/mojoshader)
 set(UAM ${FNVNX_DEPS}/uam)
 
 add_library(fnvnx_shaders STATIC
-    src/sdp.c src/frontend.c src/backend_mojoshader.c src/translate.c src/dk.cpp)
-target_include_directories(fnvnx_shaders PUBLIC include PRIVATE src ${MOJO} ${UAM}/source)
+    src/sdp.c src/frontend.c src/backend_mojoshader.c src/translate.c src/dk.cpp
+    ../../lib/sha256/sha256.c)   # the content key: fnvnx_sha256, by path
+target_include_directories(fnvnx_shaders PUBLIC include ../../lib/sha256/include PRIVATE src ${MOJO} ${UAM}/source)
 target_link_libraries(fnvnx_shaders PUBLIC ${MOJO}/build/libmojoshader.a ${UAM}/build/libuam.a m pthread)
 
 add_executable(sdp2dksh src/sdp2dksh.c)

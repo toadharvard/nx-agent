@@ -1,7 +1,7 @@
 #!/bin/sh
 # The declared input of every libnxgl4 build: the translator build (render/shaders/build.sh: its FNVNX_SHADERS_BUILD directory, holding libfnvnx_shaders.a and CMakeCache.txt).
-#   gl4_xlator.sh DIR_OR_EMPTY      prints the compile flag and the link libraries of the translator on one line (the build's one definition of the link line):
-#       -I<render/shaders/include> <DIR>/libfnvnx_shaders.a <deps>/mojoshader/build/libmojoshader.a <deps>/uam/build/libuam.a -lstdc++ -lm -lpthread
+#   gl4_xlator.sh DIR_OR_EMPTY      prints the compile flags (translator include, lib/sha256 include) and the link libraries of the translator on one line (the build's one definition of the link line):
+#       -I<render/shaders/include> -I<lib/sha256/include> <DIR>/libfnvnx_shaders.a <deps>/mojoshader/build/libmojoshader.a <deps>/uam/build/libuam.a -lstdc++ -lm -lpthread
 #   DIR empty or unusable: message on stderr, exit 2 (no build without the translator: the backend's SHADER_CREATE_D3D needs it).
 here=$(cd "$(dirname "$0")" && pwd)
 dir=$1
@@ -13,4 +13,4 @@ deps=$(sed -n 's/^FNVNX_DEPS:[A-Z]*=//p' "$dir/CMakeCache.txt")
 mojo=$deps/mojoshader/build/libmojoshader.a; uam=$deps/uam/build/libuam.a
 [ -f "$mojo" ] || need "$mojo missing"
 [ -f "$uam" ] || need "$uam missing"
-echo "-I$here/../../shaders/include $dir/libfnvnx_shaders.a $mojo $uam -lstdc++ -lm -lpthread"
+echo "-I$here/../../shaders/include -I$here/../../lib/sha256/include $dir/libfnvnx_shaders.a $mojo $uam -lstdc++ -lm -lpthread"

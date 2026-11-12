@@ -1,0 +1,24 @@
+Reference tests of fnvnx_sha256 (accepted assumption 2: SHA-256 is correct; these check our implementation against the published vectors).
+
+nist.c   FIPS 180-4 examples ("abc", empty, 448-bit message, 1,000,000 x 'a') and the CAVP byte-oriented vector files
+         SHA256ShortMsg.rsp (65) and SHA256LongMsg.rsp (64): `nist FILE...`.
+monte.c  CAVP SHA256Monte.rsp (100 checkpoints, 1000 iterations each): `monte FILE`.
+
+Vector files: fnv-nx-build tools/docs-d3d9 commit efe9ae7f (NIST shabytetestvectors.zip, members
+shabytetestvectors/SHA256ShortMsg.rsp, SHA256LongMsg.rsp, SHA256Monte.rsp; listed in that mirror's manifest).
+Total: 4 + 65 + 64 + 100 = 233 vectors, 0 mismatches required.
+
+Host build (ASan/UBSan):
+  cc -O1 -fsanitize=address,undefined -Ilib/sha256/include lib/sha256_tests/nist.c lib/sha256/sha256.c -o nist
+  cc -O1 -fsanitize=address,undefined -Ilib/sha256/include lib/sha256_tests/monte.c lib/sha256/sha256.c -o monte
+It becomes a test root (class test, reference = the NIST files via the pinned external) when the test-root shape exists.
+
+Vectors are committed in vectors/ (public NIST CAVP data, SHAVS) with SHA256SUMS; they are byte-identical to the
+fnv-nx-build tools/docs-d3d9 efe9ae7f members. The Monte test follows SHAVS 6.4 (MD0 = Seed; per checkpoint A=B=C=MD, 1000 iterations of
+MD = SHA256(A||B||C), A=B, B=C, C=MD; the checkpoint MD seeds the next). The FIPS 180-4 examples are the ones of the standard (appendix B).
+Where it runs: no test root exists yet (L1 test-root shape); until then on the host as above. It needs an oracle record (reference kind: spec = FIPS 180-4 / CAVP).
+
+NOTE: lib/sha256 is guest only for now. The host and sanitizer variants wait for L1 (a target per variant, or a separate host root; the asan variant
+is guest ILP32 and needs the boot machine's shadow memory), and `variants` is added to build.json when w15 is in the trunk. The host ASan/UBSan build of
+the loader Makefile compiles ../lib/sha256/sha256.c by path in the meantime.
+This directory is its own root, apart from lib/sha256 so that the product root has one object. It becomes a root of class `test` (L1 w10) with link.roots = [lib/sha256] and no build.json until that class exists (no invented key); it runs as a guest test image on the boot machine and on the host when the host variant lands.

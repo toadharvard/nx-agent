@@ -1,21 +1,13 @@
 /* shcache_key.c - key construction, the link-set rule and the payload container of shcache.h. */
 #include "shcache.h"
 #include <string.h>
+#include "fnvnx_sha256.h"
 #include "../include/fnvnx_dk_layout.h"
 
-uint64_t shcache_hash64(const void *p, size_t n)
+void shcache_l_key(const uint8_t *l, uint32_t n_l, uint8_t out[SHCACHE_KEY_LEN])
 {
-    const uint8_t *b = (const uint8_t *)p; uint64_t h = 0xCBF29CE484222325ull;
-    while (n--) { h ^= *b++; h *= 0x100000001B3ull; }
-    return h;
-}
-
-uint64_t shcache_l_hash(const uint8_t *l, uint32_t n_l)
-{
-    uint64_t h;
-    if (!n_l) return 0;
-    h = shcache_hash64(l, n_l);
-    return h ? h : 1;
+    if (!n_l) { memset(out, 0, SHCACHE_KEY_LEN); return; }
+    fnvnx_sha256(l, n_l, out);
 }
 
 /* sorts ascending into out, checks legality (usage 0..13, <= SHCACHE_MAX_L, no duplicate); 0 or -1 */
@@ -33,11 +25,11 @@ static int canon(const uint8_t *in, uint32_t n, uint8_t *out)
     return 0;
 }
 
-int shcache_key_make(shcache_key *k, uint64_t code_hash, uint32_t code_len, int stage, uint32_t flags, const uint8_t *l, uint32_t n_l)
+int shcache_key_make(shcache_key *k, const uint8_t code_key[SHCACHE_KEY_LEN], uint32_t code_len, int stage, uint32_t flags, const uint8_t *l, uint32_t n_l)
 {
     memset(k, 0, sizeof *k);
     if ((stage != SHCACHE_STAGE_VERTEX && stage != SHCACHE_STAGE_PIXEL) || canon(l, n_l, k->l)) { memset(k, 0, sizeof *k); return -1; }
-    k->code_hash = code_hash; k->code_len = code_len; k->stage = (uint8_t)stage; k->flags = flags & SHCACHE_FLAGS_MASK; k->n_l = (uint8_t)n_l;
+    memcpy(k->code_key, code_key, SHCACHE_KEY_LEN); k->code_len = code_len; k->stage = (uint8_t)stage; k->flags = flags & SHCACHE_FLAGS_MASK; k->n_l = (uint8_t)n_l;
     return 0;
 }
 

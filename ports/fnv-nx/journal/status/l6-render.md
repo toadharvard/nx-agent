@@ -78,3 +78,124 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - Closing it needs a farm re-recording of env_{handheld,docked}.tsv: Wine 9.0 and Xvfb, 232251 queries x 2 profiles x 2 runs. It is off the first-frame path: the current dumps stay as generator input, identified by sha256 but not yet a probe reference. Asked the orchestrator for the farm slot.
   - Gap: IDirect3DSwapChain9Ex::GetPresentStats has no MS page in either upstream repo, so test_m1's clock rule rests on the Wine source alone.
 - 03:16Z Env-dump farm STARTED on the orchestrator's order (a non-reproducible generator input is a determinism defect on the boot path). Farm session_01KmtZKSSTwzATWBSyXQRW2Q, branch claude/fnv-l6-render-farm-env. Status: doing. The job: pinned mingw-w64 + Wine 9.0 + Xvfb; 232251 queries x 2 profiles x 2 runs; byte-equal runs, else report the differing queries as a class; publish to fnv-nx-build tools/envprobe-bin with commit + tree_sha256; list every differing query before swapping the input.
+- 03:19Z Hash census merged (w5 34b7b086, render/HASHES.md, measured at f66de58e).
+  - Census: 8 content-key sites use 64-bit FNV-1a. 5 of them are one function written five times (C: translate.c:13, res_shader.cpp:12, shcache_key.c:6; Python: 3). The ABI field NxShaderD3D.hash is 8 bytes.
+  - Lead decision (rule): every content key is sha256 of the content bytes, 32 bytes. A 64-bit non-cryptographic key can collide and select the wrong shader, a run-time failure with no gate.
+    - NxShaderD3D.hash becomes a 32-byte key, the same as NxShaderDesc.key.
+    - The shcache index and file names use the full digest.
+    - Python keeps hashlib.
+  - Implementation: one portable C99 function on both sides, fnvnx_sha256 (loader/src/sha256.c), reached through link.roots of ONE shared root, never copied. libnx sha256 is rejected because it needs ARMv8 crypto asm that L4 would have to emulate.
+  - Not keys, so they stay:
+    - draw_ids.cpp:14, a bucket index where every hit is confirmed by memcmp;
+    - the integrity checksums: the shcache body hash and rec_chk.
+  - Blocked: loader/ is not a recipe root. The owner of the shared sha256 root is asked of the orchestrator. The ABI change goes to L6A.
+- 03:20Z Orchestrator accepted the sha256 key rule (OWNER assumption 2).
+  - Shared root lib/sha256: owner L4, admitted by L1, class product, guest + host.
+  - w5 does phase 1: move fnvnx_sha256 there unchanged; the loader keeps building by path; NIST vectors pass. L4 reviews before it enters their branch.
+  - Phase 2 follows: the 8 key sites become calls into it, the 5 copies are deleted, and NxShaderD3D.hash becomes key[32] in one ABI commit with L6A.
+  - Asked L1: one root for two targets, and the gate clause for a renamed second copy.
+- 03:22Z Key ABI diff sent to L6A: NxShaderD3D.hash (u64) becomes key[32] = sha256(bytecode); the struct goes from 40 to 64 bytes, with offset asserts. dk takes the NXSP v2 D-table with byte compare (no sha256 needed); gl4 links lib/sha256. lib/sha256 review is L4 item 14 (session_01KmtZKUcrakBqKb1mC8iXp4): one definition across roots, the FIPS/CAVP vectors, guest/host/ASan variants, and a warm run of 0 stages.
+- 03:21Z L6A accepted the key diff (offsets 0/8/12/16/48/56/60, 64 bytes).
+  - The commit triple:
+    - ours: w5 phase 2 (render/d3d9, translator, shcache, Python), which does not touch render/backend;
+    - L6A w4: the nxgpu4_shader.h header plus the dk D-table;
+    - L6A w6: gl4_d3dshader.c:51 becomes fnvnx_sha256 + memcmp.
+  - Each side merges the other's.
+  - Blockers: lib/sha256 (L4 intake of w5 phase 1) and the L1 w15 variants/link.roots. onedef (L1 w15) catches renamed copies by exact equality of normalized bytes.
+- 03:24Z w5 lib/sha256 phase 1 (cc188cf9) reviewed by the lead. The move is right: the body is unchanged and the loader Makefile takes the file by path. Recipe: 1 object, cold 2 stages run, warm 2/2 hit. 133 NIST vectors pass (Short 65, Long 64, FIPS examples 4), 0 mismatches.
+  - Before L4 intake, w5 must:
+    - take render/d3d9's guest ABI flags exactly (missing: -ftls-model, -frounding-math, -fshort-wchar);
+    - run the CAVP Monte vectors;
+    - commit the NIST driver to lib/sha256/tests.
+  - The host variant needs L1 w15.
+  - Asked L1 for one shared guest ABI flag set, plus a gate that all objects of an image have the same ABI flags (DW_AT_producer).
+  - onedef (L1, revised): copies are caught by source provenance; body equality was dropped as a heuristic.
+- 03:26Z Code-generation flag mismatch across guest roots.
+  - render/d3d9's build.json differs from the trunk's platform set:
+    - it lacks -fwrapv, -fno-strict-aliasing, -fno-delete-null-pointer-checks, -ffp-contract=off (OWNER assumption 8, IEEE: no fmadd contraction), -fms-extensions, -fcheck-new, -fno-sized-deallocation and -fno-lifetime-dse;
+    - it has extra -march, -mtune, -fPIE, -ftls-model and -ffunction-sections.
+  - L1 rule (w17, session_01KmtZKQzN38LhJYh6sixhL1): one `flags.abi` in guest_compiler.json; an ABI flag in build.json is refused; a gate checks every object of an image for an identical set (DW_AT_producer). Asked L1 that the set be the whole code-generation semantics set.
+  - Interim:
+    - w6 aligns render/d3d9 to platform's set and measures (doing);
+    - w5 aligns lib/sha256 to platform's set;
+    - lib/sha256 phase 1 is not yet accepted (flags, committed NIST/Monte drivers, base-green build.json).
+- 03:27Z lib/sha256 phase 1 accepted by the lead and merged (w5 869b056a). L4 intake follows.
+  - lib/sha256 is 1 object. Its flags are the trunk platform set, derived by script. Recipe check is valid; cold build green; warm build 0 stages run.
+  - 233 NIST vectors, 0 mismatches (ASan/UBSan).
+  - The tests are in lib/sha256_tests; it becomes a class-test root when w10 lands.
+  - Host build: the loader Makefile is a known, unwidened gap until w15 lib/sha256@host.
+  - Phase 2 (the 8 key sites, NxShaderD3D key[32]): w5 on claude/fnv-l6-render-w5-key, doing.
+- 03:29Z w6 6986dead aligned render/d3d9 to platform's flags.
+  - Result: 70 objects; cold 155 stages run, 47.9 s; warm 155/155 hit, 3.1 s; objstub 1784/1784, 0 findings.
+  - FINDING: platform's flags.c has no semantics flags, so C units get the GNU C default -ffp-contract=fast and unsigned plain char on aarch64. 7 fmadd/fmsub contractions sit in ffp/ffp_vs_state.c.o, against OWNER assumption 8.
+  - Rule sent to L1 w17: one semantics set for every language.
+  - Interim: w6 sets render/d3d9's c (and lib/sha256's) to platform's cxx semantics minus the C++-only flags, recounts fmadd (expected 0), and lists signed-char-sensitive sites.
+- 03:30Z Env-dump farm result (session_01KmtZKSSTwzATWBSyXQRW2Q, branch head 32c2e0f7).
+  - env_handheld.tsv (ff340ae4) and env_docked.tsv (e1db357d): byte-equal over 4 runs each, and equal to the committed dumps (232,251 queries per profile).
+  - The mingw-w64, Wine 9.0 and Mesa packages are pinned in ENV_PIN. Published: fnv-nx-build tools/envprobe-bin d2b6916c (tree ac3c8ad2).
+  - Open (farm, doing):
+    - the probe binaries are not byte-reproducible (two builds give two sha256): find the cause and fix it;
+    - delete the tracked partial copy of shim d3d9.h (rec/d9_validator_compat.h) and generate it at build time instead.
+  - Merge after both.
+- 03:31Z b# ALU source (3 sm_table rows: vs_2_0, vs_2_x, vs_3_0 `mov r0, b0`), w3b at 65f7c6b.
+  - The proof of unreachability is not available. The precompiled set has 0 uses (15791 shaders), but D3DXCompileShader at be1387/be1b2e is reached with an open source value set, and 12 gpa + 3 LoadLibrary sites are open (L1 w18), so no certificate exists.
+  - Lead decision, per the orchestrator's rule (proof, otherwise Wine-observable behaviour): step 2 now, as a full implementation of the form whether or not it is reached.
+    - w3b traces Wine 9.0 (tools/wine-9.0 c8373ee4) from CreateVertexShader through GLSL compile/link to the draw, citing file:line, and implements exactly what it shows.
+    - It applies to the whole class of SM forms whose GLSL link fails, not only the 3 rows.
+- 03:32Z Merged w6 c646a014 (render/d3d9) and f8adf66b (lib/sha256): both on platform's semantics flags, C included. L1 w17 adopted the rule as one flags.semantics set for all languages.
+  - render/d3d9: 70 objects; cold 155 stages run, 34.3 s; warm 155/155 hit, 3.1 s; objstub 1784/1784, 0 findings. fmadd/fmsub/fnmadd/fnmsub over all 70 objects: 0 (it was 7).
+  - lib/sha256: cold green 1 object, warm 0 stages run; 233/233 NIST vectors pass.
+- 03:33Z b# trace (w3b 7b0fafc).
+  - In Wine 9.0, CreateVertexShader succeeds. At the draw, the GLSL link fails, validate_link only logs, glUseProgram(failed) is called, and the draw proceeds. The result is GL-defined: OpenGL 4.6 §7.3 leaves the previous program current.
+  - The lead proposed option (d) to the orchestrator:
+    - this behaviour, cited;
+    - a farm measures the class (link ok/failed per sm_table row and per sm_illegal form) as a reference fact.
+  - Blocked on: the orchestrator's decision. w3b is checking Wine's program tracking across draws.
+- 03:34Z Orchestrator accepted option (d) and the reference farm. Reachability is still checked first.
+  - w3b: per-row census of shipped-shader use over all 7553 sm_table rows, as the generated table render/shaders/total/sm_reach.tsv (doing). It implements (d) once the link table lands.
+  - Farm session_01KmtZKSSTwzATWBSyXQRW2Q, second job: Wine 9.0 + pinned Mesa link probe over all 7553 rows plus sm_illegal, run twice and byte-equal, published as fnv-nx-build tools/sm-linkprobe and render/shaders/total/sm_link.tsv. It is queued after its two open fixes.
+  - L6A: both backends keep the previously bound program when the program is link-failed; the ABI flag field comes with the table.
+  - L1: lib/sha256's admit entry and host test variant go to w15, taken from f8adf66b.
+- 03:36Z Key phase 2 (w5 claude/fnv-l6-render-w5-key 0974595b + 5af0fc9e).
+  - Every content key is sha256 now, and the five hash copies are deleted. NxShaderD3D grows from 40 to 64 bytes. The shader cache moves to format v2.
+  - The lead review is waiting on: the recipe build of render/d3d9 and the translator, and nm proof that the sha256 is single-defined and the deleted functions have no refs.
+  - Shared files (nxgpu4_shader.h, gl4_d3dshader.c) go to L6A to be taken byte-equal.
+  - Open:
+    - link.roots for render/d3d9 (link is null; L1 w15);
+    - the lib/sha256 admit entry (L1 w15).
+  - FINDING: the host test builds link with --unresolved-symbols=ignore-all, a stub class. w5 is counting the sites; the class has gone to L1 for a gate.
+- 03:36Z L2 w4 726ab21 fixed fnvnx_sdd VTSYM1 (L1 green on trunk 8cfbcdb). w6 is re-measuring the 48 vtable clones on render/d3d9.
+- 03:38Z VTSYM re-measured (w6 64474bd7, render/d3d9 at 9de5bdc3 + sdd 726ab210's plugin source).
+  - Vtable clones: 0 open (was 48). 48 distinct clone names are defined, 131 definitions, all in the same section, comdat group and binding as their vtable. The 19 names still undefined in some objects are defined in other objects of the set.
+  - Undefined closure over the 70 objects: 35 names (was 78).
+    - nxgpu ABI: 5;
+    - platform hooks: 4 (L5);
+    - guest runtime: 4 (fnvnx_dispatch and fnvnx_guest_invoke, L3a; fnvnx_import_key, L1; fnvnx_wine_fixme, L5);
+    - C++ runtime: 10;
+    - libc/libm: 12.
+  - objstub: 1784/1784.
+- 03:39Z Reach census merged (w3b aaf52b9: render/shaders/total/sm_reach.py generates sm_reach.tsv and sm_reach.json; measured at b6bb6c3).
+  - Set: 15,791 shipped shaders in 16 packages, all decoded.
+  - Of the 7553 sm_table rows: 1136 are used by at least 1 shipped shader. 6417 are used by none (2672 by model, 3745 within the shipped models). The 3 b# rows: 0 uses.
+  - "Used" is an over-approximation built from pooled atoms, so 0 is sound.
+  - Open, for the certificates only:
+    - the D3DX run-time path (L1 w18);
+    - the BSAs not scanned: Meshes, Textures, Textures2, Sound, Voices1, Music. They are large; a farm will name-scan their directory tables.
+  - Option (d) applies meanwhile, so neither item blocks the first frame.
+- 03:41Z merged w5 93a2c17e as 176db7f8 (sha256 content key, phase 2).
+    - NxShaderD3D.key[32] sits at offset 16; the struct is 64 bytes; offsets are asserted.
+    - The 5 FNV hash functions are gone. nm over all 71 objects: 0 definitions and 0 references.
+    - fnvnx_sha256 is defined only in lib/sha256.
+    - recipe render/d3d9: cold green, 70 objects; warm green, 0 stages run.
+    - objstub: green, 1785/1785 functions over 71 objects in 2 roots.
+    - The DOUBLES class: 22 `--unresolved-symbols=ignore-all` link commands in 16 scripts under tests/l6, 0 in render code (5d47e18d). Sent to L1.
+    - Open: gl4 calls `fnvnx_shader_translate_glsl` (no uam link). That function exists only on w1b's translator root (render/shaders/translator, w1b 0013509c, a trunk-based branch). The switch lands together with that root.
+- 03:45Z Three items.
+    - Merged farm-env 17c3b933 as 4ab53430: the validator declaration is generated from shim d3d9.h; the probe PEs are byte-reproducible (envprobe-bin 594dedc2); the dumps are unchanged.
+    - Merged w3b dfffc07: the uniform rule, and the link outcome is per (vs, ps) pair (wined3d's reorder shader). Farm job 2 is now keyed by pair over the full cross product of distinct GLSL texts; V, P and V×P are reported first.
+    - New goal step 1 item: render/d3d9 becomes a trunk product root with ident_{handheld,docked}.bin declared as outputs, for L5 w13 `uses`. w6 (session_01KmtZKQbpDKvc9qzXT9bLHX) is on claude/fnv-l6-render-w6-root from trunk 8cfbcdbf: doing.
+- 03:47Z
+    - w3b c663781 merged: the (d) lookup is keyed by (vs, ps, reorder) text sha256; a missing key is a build error. Waiting on sm_link.tsv (farm).
+    - w5 admit at w1b 0013509c: 0 file errors over 459 files and 12 roots; red only for 13 gates absent from gates.json (abi, addr32, d3d9total, datamodel, eh, exepin, forms, fpexact, imports, machine, namegate, order, r7). lib/sha256_tests needs L1 w10's test class.
+    - w5 next: port the sha256 key onto w1b's translator root (claude/fnv-l6-render-w5-tkey), with gl4 calling `_glsl` (fix d).
+    - w6: lib/sha256 is a separate root (L4), and render/d3d9 compiles none of its units (orchestrator rule); L4 told.
