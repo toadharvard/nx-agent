@@ -1003,6 +1003,32 @@
     ]
    }
   },
+  "m61": {
+   "flags": {
+    "c": [
+     "-mabi=ilp32",
+     "-march=armv8-a",
+     "-O2",
+     "-fPIE",
+     "-ffreestanding",
+     "-fno-builtin",
+     "-fno-stack-protector",
+     "-fvisibility=hidden",
+     "-mno-outline-atomics",
+     "-fno-asynchronous-unwind-tables",
+     "-fno-tree-loop-distribute-patterns",
+     "-Wall",
+     "-g",
+     "-DMODE=61"
+    ],
+    "cxx": [],
+    "asm": [
+     "-mabi=ilp32",
+     "-march=armv8-a",
+     "-O2"
+    ]
+   }
+  },
   "m70": {
    "flags": {
     "c": [
