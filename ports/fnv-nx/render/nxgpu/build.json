@@ -1,0 +1,22 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-std=c11",
+   "-Wall",
+   "-Werror",
+   "-Werror=switch-enum",
+   "-O2",
+   "-fPIC"
+  ],
+  "cxx": [],
+  "asm": []
+ },
+ "include": ["ports/fnv-nx/render/nxgpu"],
+ "units": "all",
+ "link": null
+}
