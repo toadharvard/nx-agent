@@ -35,7 +35,7 @@ STATS = {'run': 0, 'hit': 0}
 CXX_ONLY_FLAGS = ('-std=gnu++17', '-fno-sized-deallocation', '-fpermissive')   # the C++-only options cc1 warns about
 PRODUCT_FLAGS = ['-O2', '-Werror=attributes']   # per-root flags only; the semantic flags (-mabi=ilp32, -fms-extensions, ...) come from verify/guest_compiler.json
 _N = [0]
-# the plugins of a lifted root: fnvnx_ftoi in mode lifted is required (recipe.LIFTED_ARGS), the others are the test's choice
+# the plugins of a lifted root: fnvnx_ftoi in mode lifted is required (recipe.plugin_args), the others are the test's choice
 
 
 def source_of(name):
@@ -68,11 +68,11 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     _git(repo, 'init', '-q')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
     ext = pin['external']
-    # RULE of the recipe (guest root): the FULL plugin set in the fixed order with the arguments fixed by the root's origin (native: PLUGIN_ARGS, lifted: LIFTED_ARGS
-    # where it names a plugin). A test never picks a subset or an argument: PLUGINS holds [(name, extra args)] merged over the fixed ones (an extra argument is a
+    # RULE of the recipe (guest root): the FULL plugin set in the fixed order with the arguments fixed by the root's origin (recipe.plugin_args(origin): native, or lifted with
+    # fnvnx_ftoi in mode lifted). A test never picks a subset or an argument: PLUGINS holds [(name, extra args)] merged over the fixed ones (an extra argument is a
     # recipe error, which a test may expect); RAW takes the list as it stands (a test of the recipe's own validation).
     if not raw:
-        fixed = dict(recipe.PLUGIN_ARGS) if native else dict(recipe.PLUGIN_ARGS, **recipe.LIFTED_ARGS)
+        fixed = recipe.plugin_args('native' if native else {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'})
         extra = {'fnvnx_' + n: a for n, a in plugins}
         plugins = [(n[len('fnvnx_'):], dict(fixed[n], **extra.get(n, {}))) for n in recipe.PLUGIN_SOURCES]
     else:
