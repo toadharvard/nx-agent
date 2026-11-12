@@ -41,6 +41,7 @@ def root_check(root, repo, cache, jobs):
         return {}, {}, set(), [("-", root, "build-red", "stage %s" % res["failure"]["stage"])]
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
+    objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
     store, names = os.path.join(cache, "store"), set()
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
@@ -56,7 +57,7 @@ def main(argv):
     jobs = int(argv[argv.index("--jobs") + 1]) if "--jobs" in argv else os.cpu_count() or 1
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-objstub-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
-    items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.product_roots(repo)
+    items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.buildable_roots(repo)
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test

@@ -136,8 +136,8 @@ def main():
     ra, ta = build(gr, "GA")
     check("guest root builds on the external compiler", ra["status"] == "green", ra.get("failure"))
     pl = recipe.plugin_languages(drv("gcc"), drv("g++"), {p["name"]: p["path"] for p in ra.get("plugins", [])})
-    check("plugin_languages: cc1plus loads all 8 plugins, cc1 those without C++-front-end symbols (fnvnx_sdd, pi, names, layout need cp_global_trees)",
-          pl["cxx"] == list(recipe.PLUGIN_SOURCES) and pl["c"] == ["fnvnx_ftoi", "fnvnx_order", "fnvnx_dispatch", "fnvnx_addr"], pl)
+    check("plugin_languages: cc1plus and cc1 load all 8 plugins (the C++ front end's symbols are weak references, not load requirements: CC1PLUS-SYMS)",
+          pl["cxx"] == list(recipe.PLUGIN_SOURCES) and pl["c"] == list(recipe.PLUGIN_SOURCES), pl)
     if ra["status"] != "green":
         return
     rb, tb = build(gr, "GB")

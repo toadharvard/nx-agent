@@ -40,9 +40,9 @@ def main():
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     cache = os.environ.get("GATE_CACHE")
     ext = os.path.join(cache, "external") if cache else tempfile.mkdtemp(prefix="gate-det-ext-")   # the bare fetch cache is shared, stores are not
-    for root in gate_build.product_roots(repo):
+    for root in gate_build.buildable_roots(repo):
         rec = recipe.load_recipe(repo, roots, root)
-        pre = [root + "/" + u for u in recipe.units_of(rec, root, files)] if isinstance(rec, dict) else []
+        pre = [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files)] if isinstance(rec, dict) else []
         runs = []
         try:
             for n in range(2):

@@ -5,7 +5,8 @@ Universe: every unit of every product root of verify/admit.json (tracked sources
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
 Stages are cached by key in GATE_CACHE/store (a temp dir without GATE_CACHE); the result must not depend on the cache (determinism.py
-compares a warm and a cold build). Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
+compares a warm and a cold build). Keep going (RECIPE.md): a red root lists every red unit and stage and every blocked unit; all that was buildable is built and kept.
+Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
 read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE_CACHE/objects/<tree>/<root name>/objects.json (with
 obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json."""
@@ -21,7 +22,22 @@ import recipe  # noqa: E402
 
 
 def product_roots(repo="."):
-    return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] == "product")
+    """Every (root, variant) pair of the admitted product roots, spelled `root` (the implicit variant) or `root@NAME` (recipe.split_spec)."""
+    adm = recipe.load_admit(repo)
+    return sorted(s for p, r in adm.items() if r["class"] == "product" for s in recipe.pairs_of(_full(repo, r), p))
+
+
+def _full(repo, ent):
+    try:
+        with open(os.path.join(repo, ent["recipe"])) as f:
+            return json.load(f)
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def buildable_roots(repo="."):
+    """The roots the build family (build, determinism, linkstrict, objstub) judges: the product roots and the test roots (admit class test)."""
+    return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] in ("product", "test"))
 
 
 NO_ROOT = "no product root (nothing to build yet)"
@@ -66,18 +82,20 @@ def main():
     roots = recipe.load_admit(repo)
     files = recipe.tracked(repo)
     try:
-        for root in product_roots(repo):
+        for root in buildable_roots(repo):
             rec = recipe.load_recipe(repo, roots, root)
             try:
                 res, out = ensure(root, cache, repo)
             except recipe.RecipeError as e:
-                items += [root + "/" + u for u in recipe.units_of(rec, root, files) if isinstance(rec, dict)]
+                items += [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if isinstance(rec, dict)]
                 why.append("%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300]))
                 continue
             items += ids(root, res, rec)
             if res["status"] == "red":
                 f = res["failure"]
-                why.append("%s: stage %s exit %s: %s" % (root, f["stage"], f["exit"], " | ".join(f["stderr"][-3:])[:300]))
+                why.append("%s: stage %s exit %s: %s (%d red units, %d red stages, %d blocked)" % (
+                    root, f["stage"], f["exit"], " | ".join(f["stderr"][-3:])[:300], len(res.get("failed_units", [])), len(res.get("red_stages", [])),
+                    len(res.get("blocked", []))))
                 ok = res["objects"] and [o["unit"] for o in res["objects"]] or f.get("done", [])
                 done += [root + "/" + u for u in ok] + ([root + "/" + rec["link"]["output"]] if res["elf"] else [])
             else:
@@ -88,7 +106,7 @@ def main():
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     bad = sorted(set(items) - set(done))
-    detail = "; ".join(why) or ("%d units/ELF built from %d product roots" % (len(items), len(product_roots(repo))) if items else
+    detail = "; ".join(why) or ("%d units/ELF built from %d product and test roots" % (len(items), len(buildable_roots(repo))) if items else
                                 NO_ROOT)
     res = {"format": "fnvnx-gate/1", "name": "build", "status": "red" if why else "green", "universe": len(items),
            "certified": len(set(done) & set(items)), "uncertified": bad[:50], "detail": detail[:900]}

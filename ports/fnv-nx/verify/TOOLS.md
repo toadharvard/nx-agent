@@ -99,8 +99,8 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    by-value/sret shape the caller compiled against are the callee's exe contract.  A name that carries no types gives no such
    equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
    judged, the worst verdict stands.
-Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule); the pristine cl symbol
-names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule) (ASM-050); the pristine cl symbol
+names are the exe's contract (N1: byte-equal, one symbol map) (ASM-053); an external decorated name denotes one entity link-wide (ASM-054).
 Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 ```
 
@@ -143,6 +143,12 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              A further clause `ret != V on every path to the site` (V a number): on every control-flow path from that call to the
              site the result was compared with V by a still-valid copy and the path crossed the `!= V` edge of the deciding branch
              (argflow.result_predicate: cmp / test / inc idioms, flags not redefined; anything else is `ret-predicate` open).
+  closure_key  `dispatcher=NAME`  (dll `-`, name = the dispatcher symbol, arg_index 0): every value that reaches the dispatcher NAME (native
+             fnvnx_dispatch, lifted fnvl_dispatch) is a key of its table.  Inputs: --dispatcher NAME=ENTRIES,CLOSURE,SOURCES (ENTRIES: dispgen's
+             rows `addr<TAB>sym`; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
+             of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES) and --loadlib loadlib.tsv.  CERTIFIED iff (i) every
+             source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress / LoadLibrary site is open (the gpa
+             rows and loadlib.tsv).  While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -159,7 +165,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017, ASM-018, ASM-019)
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -172,13 +178,13 @@ that the facts' ranges contain every executed instruction of the images (A4).  T
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
 Outputs ($GATE_OUT, gatefile.py): reach.json (gate `reach`; universe = facts, certified = certified facts; uncertified ids
-`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids
+`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids (ASM-016)
 (all of them, sorted), reach.facts.tsv (`fact_id<TAB>sha256 of the certificate`, certified facts only, sorted by id).  --out: per
 fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<DLL>_<NAME>_<n> with n the 1-based position among
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
 
 Mode --objects (gate `reachlink`, the link side).  The universe is every reference to the ELF symbol fnvnx_reach_violation in the
-objects and archive members of the response file (one quoted path per line, ld.py's inputs.rsp), read from the relocation
+objects and archive members of the response file (one quoted path per line, a response file of the link, inputs.rsp), read from the relocation
 tables (sh_info of a SHT_RELA / SHT_REL names the section; no text).  A reference is green iff
   - it is a R_AARCH64_P32_CALL26 / JUMP26 in an executable section (any other reference, e.g. a pointer in data, lets w0 be
     anything: `reference-not-call`);
@@ -218,6 +224,23 @@ gatefile - the result file of a gate, in the shape the L4 merge verdict reads (v
 status is green exactly when certified == universe (completeness of certificates, not a run counter); `uncertified`
 is the first 50 of the sorted ids (strings), so the file is a function of its arguments.  Ids of game data are written
 to $GATE_OUT only, never committed.  The only environment variable read is the declared GATE_OUT.
+```
+
+## contract/exepin.py
+
+```text
+exepin - the one place that opens the player's FalloutNV.exe (L1 CONTRACT).
+
+    exepin.py FalloutNV.exe          exit 0 and one line if the file is the supported exe; exit 1 with expected / actual otherwise
+
+The supported exe is exactly one build: GOG 1.4.0.525(a).  Its identity is the PIN below: size, SHA-256 and the PE header fields that
+fix the image (machine, optional-header magic, image base).  Rule: every tool entry point that reads the exe gets its bytes from
+`load_exe`, and no other code opens the exe path (contract/tests/test_exepin.py proves the second half over the call structure of
+every tool).  `load_exe` checks the whole fingerprint before it returns a byte, so no fact is produced from another exe.  Another build
+needs its own pin and its own address remap; it is never accepted by loosening this check.
+
+Only the identity is published here (size, hash, standard PE fields); no content of the exe is.  `pin=` exists so that a selftest can
+exercise the acceptance path on a synthetic file; no tool passes it.
 ```
 
 ## contract/gpa_names.py
@@ -271,7 +294,7 @@ Items of the universe and their certification:
   writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
                                   declared seed unit: no other code of the product makes a hive key
 generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
-duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions: regsites.tsv is complete over the exe and the
+duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions (ASM-051): regsites.tsv is complete over the exe and the
 modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
 code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).
 ```
@@ -296,7 +319,7 @@ value the dispatcher of the lifted code maps to an entry.  Rule, total over the 
             from the ELF symbol).
 
 Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the first guest frame) below them.
-Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range
+Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
 
@@ -358,7 +381,7 @@ A row is certified iff its body is proven by the symbol table of a build product
 Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
 only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
 no proven symbol), external (l3 or another owner's row that no other root defines).
-The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption: objects.json lists every global, weak
+The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption (ASM-052): objects.json lists every global, weak
 and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
 
@@ -414,7 +437,7 @@ reaches memory only through an ESCAPE).  For a global, additionally (W1) no dire
 (exact for [disp]; [disp+idx*s] covers [disp, disp+max*s+size) when the index maximum is proven (and-mask, movzx, constant)
 and else the whole section), no relocated data word points into the section (that word is a pointer stored in memory: an
 ESCAPE of the section's closure), and the loader does not write L (base relocations, import slots, IAT / TLS-index of the
-PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a
+PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a (ASM-010, ASM-013, ASM-017, ASM-022)
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
@@ -577,6 +600,36 @@ script FAIL naming the package; another version is never installed: the fix is a
 Env: ENV_JSON (default verify/env.json next to this script's tree).
 ```
 
+## link/ldcheck.py
+
+```text
+ldcheck - the post stage of the guest ELF link (L1 CONTRACT); the sandbox stage `ldcheck:<root>` of verify/recipe.py runs it.
+
+    ldcheck.py --elf LINKED.elf --objs DIR --out DIR --name NAME.elf [--kind pie|exe|shared] [--version-script FILE] [--lib=SO ..]
+
+Kinds exe and shared (host images, RECIPE.md "Link") are judged by host mode: rules 1-2 on the symbol tables, no TEXTREL, an entry for exe, exported names
+of a shared object defined and global, undefined names only if a --lib shared library defines them (its .dynsym); no crt0 header words.
+
+verify/recipe.py links the guest ELF as the stage `ld:<root>` (fixed options, RECIPE.md "Link"): the root's objects and the objects of
+its `link.roots` whole, the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
+from ELF symbol tables only (no linker message, no map file, no name or text pattern), the rules of the former link/ld.py:
+  1. no undefined symbol in the output's `.symtab`;
+  2. every name the input objects reference or define (the symbol tables of every `*.o` below --objs, weak references included) is defined in the output;
+  3. no dynamic relocation but R_AARCH64_P32_RELATIVE (RELA entries without a symbol) or RELR words; no REL, JMPREL, TEXTREL table;
+  4. the PIE mark: DF_1_PIE in DT_FLAGS_1;
+  5. the crt0 header: the magic "FNXG" at the first PT_LOAD + 8 and the entry at the first PT_LOAD.
+The pull-in closure that ld.py modelled before the link is gone: the linker's own output symbol table is the witness, and a name the
+linker took or dropped differently from a model cannot make the output pass with an undefined reference.
+On success it writes the three words of the crt0 header into the ELF (the same rule as elf2nso.py `patch_guest_header`): +16 the link
+address of the first PT_LOAD, +20 the bytes from there to the end of the last PT_LOAD (memsz), page aligned, +24 bit 0 = relocatable (DF_1_PIE).
+Outputs in --out: NAME.elf (the final ELF; none when a rule fails) and the gate file `ld` ($GATE_OUT/ld.json, full id list in $GATE_OUT/ld.ids,
+GATE_OUT = --out): universe = the input names + the dynamic relocation entries (RELA entries, RELR words) + 2 (the PIE mark, the crt0 header);
+certified = those that hold.  Ids: `cover:<name>` (an input name the output does not define; `weak:<name>` when the inputs only reference it
+weakly: the linker resolves such a reference to 0 and drops it from the symbol table, so only the inputs' tables show it), `output-undefined:<name>`, `dynreloc:..`, `pie`,
+`header:..`.  Exit 1 on any id; the ids are printed on stderr, the summary line last.
+The ELF is exe-derived (lifted code): container and fnv-nx-build only.
+```
+
 ## link/gate_abs.py
 
 ```text
@@ -587,10 +640,10 @@ gate_abs - no input of the link refers to an absolute symbol (part of the L1 ver
 The guest is linked at base 0 and moved by the loader: a value that the linker takes for absolute (SHN_ABS) is not moved, and binutils turns such
 values into R_AARCH64_P32_RELATIVE entries with the absolute value as addend (a plain "add the slide" would corrupt them).  No absolute symbol
 may take part in the link: then every dynamic relocation is an image address and the guest's self-relocation moves all of them.
-The linker's command line carries no symbol definition (ld.py accepts only the emulation options), so an absolute symbol can come only from an
+The linker's command line carries no symbol definition (the recipe's link accepts only the emulation options), so an absolute symbol can come only from an
 input object or from the script, and both are in the universe below.
 Universe (no sampling): every relocation of every object and of every member of every archive named by --inputs (response files, one quoted
-path per line, as ld.py writes them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
+path per line, as the link's response file lists them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
 (relocs.py): no tool output, no text.
 Red items:
   - a relocation whose symbol is SHN_ABS in its own object                                  id `member:section+offset:symbol`
@@ -978,7 +1031,7 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 "ext-module-missing" naming the service. A guest address that is not readable / writable memory raises BadGuestMemory (a violated
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
-Stated assumptions (each is a fact of the stage's model, not of the header):
+Stated rules of the model (each is a fact of the stage's model, not of the header):
   A1 handle numbers (a rule of the model, deterministic): a new handle is the lowest number >= 3 that is not open (0..2 are stdio); a
      number is free again after its close. This is the descriptor rule of POSIX.1-2017 2.14 "File Descriptor Allocation" (the lowest
      number not open), which the bsd service's descriptors follow. Nothing above the host may depend on the number: the header says only
@@ -1040,6 +1093,9 @@ Content-addressed store and tree manifests (base of the hermetic build sandbox, 
 
 Layout: STORE/obj/<aa>/<sha256>      file contents, mode 0444, mtime 0
         STORE/obj/<aa>/<sha256>.x    same content with exec bit, mode 0555 (separate object)
+        STORE/obj/<aa>/<name>.r<n>   replica n >= 1 of an object: the same bytes and mode in a new inode, made when the inode before it
+                                     is full (MAX_LINKS names): an inode serves at most MAX_LINKS hard links (EMLINK of ext4 is closed
+                                     by rule), so materialize places any number of files of one content. Identity is unchanged.
         STORE/tree/<aa>/<hash>.json  canonical manifests (<aa> = first two hex digits)
 
 Tree hash definition:
@@ -1140,12 +1196,21 @@ Infinities/NaN from memory or from exact operands are exact. Division by an inte
 Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"]}.
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"], ["imports"], ["trees"], ["entry"]}.
+`entry` (class tool: required, may be empty): the stage entry points of the root, .py files inside its trees. gate_pure's universe is the
+import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
+`trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
+universe is their union, and its python is judged in one puregate run, so trees that import each other form ONE root with no
+file moved. Two roots never share or nest a tree. The root is named by "path" in `imports`.
+`imports` (a root's python cross-root imports): a list of paths of other admitted roots; "pure" (gate_pure.py) judges the root
+with its own directory and the parent directory of each imported root as import bases, so a root's python may import another
+root's modules only when it declares it. Each entry must be an admitted root other than the root itself, without repeats; the
+declared imports form no cycle (an error of the table: every file is uncertified).
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
-  3. every gate the root names is a gate of verify/gates.json of this same tree;
+  3. every gate the root names is a gate file of verify/gates.d of this same tree;
   4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
      declared environment); the file exists.
 Classes:
@@ -1153,11 +1218,15 @@ Classes:
   tool     stage and verification tools: "selftests" required (their tests pass in the declared environment).
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
-           gates.json, so code enters the trunk only together with the gates that judge it.
+           gates.d, so code enters the trunk only together with the gates that judge it.
+  ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
+           no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
+           test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
+           ones that read any root: pure, assumptions (and the Legal and stub gates where they exist).
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
-Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit).
+Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit). (ASM-041)
 ```
 
 ## verify/gate_build.py
@@ -1169,7 +1238,9 @@ Universe: every unit of every product root of verify/admit.json (tracked sources
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
 Stages are cached by key in GATE_CACHE/store (a temp dir without GATE_CACHE); the result must not depend on the cache (determinism.py
-compares a warm and a cold build). Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
+compares a warm and a cold build).
+Keep going (RECIPE.md): a red root lists every red unit and stage and every blocked unit; all that was buildable is built and kept.
+Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
 read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE_CACHE/objects/<tree>/<root name>/objects.json (with
 obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json.
@@ -1181,8 +1252,9 @@ gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothi
 Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
     python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
-One entry per gate in gates.json, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
+One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
+N3 (the static native-body criterion of the pi plugin's `.fnvnx.n3`) reaches bodysel through the `bind` stage (contract/bind.py: exe addresses of the objects' N3 rows through the N1 certificate, written as n3.tsv) and bodysel's `--n3`; a function without an `ok` N3 row is LIFTED.
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
 
@@ -1342,8 +1414,8 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
     (the set minus the flags the driver's own diagnostic says do not apply to that language; the gate re-runs that probe itself), and no other
     -f/-m token except a stage's own (-fplugin, -frandom-seed, -ffile-prefix-map, -fpreprocessed) and the per-root class recipe.PER_ROOT; and
     EVERY C and C++ unit of a guest root, any origin, holds every plugin of recipe.PLUGIN_SOURCES that its front end can load, each as the declared
-    input /plug/<name> and the argv flag -fplugin=/plug/<name>/<name>.so, and no plugin it cannot load. Loadable = needs no symbol that only the
-    other front end defines (recipe.plugin_languages: nm -D of cc1, cc1plus and the .so, re-derived by the gate from the built plugins: a static
+    input /plug/<name> and the argv flag -fplugin=/plug/<name>/<name>.so, and no plugin it cannot load. Loadable = has no strong undefined reference to a symbol that only the
+    other front end defines (a weak one resolves to null) (recipe.plugin_languages: nm -D of cc1, cc1plus and the .so, re-derived by the gate from the built plugins: a static
     fact of the ELF files; a plugin using C++-front-end symbols has no C instance). A missing loadable plugin is red; no name list, no exception list.
     The documents are the stage keys, so the object is the one these flags and inputs built.
 Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model.
@@ -1370,6 +1442,32 @@ are cached by (object sha256, os_layer flag, analysis version, the terminators t
 uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail.
 ```
 
+## verify/gate_exepin.py
+
+```text
+Gate "exepin" (fnvnx-gate/1): the player's exe is read in exactly one place, and only after its fingerprint matched.
+    python3 -I gate_exepin.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/exepin.json
+
+Rule (contract/exepin.py is the one place; its function `load_exe` checks size, SHA-256 and the PE header fields of the one
+supported build before it returns a byte). Universe: every tracked .py file below ports/fnv-nx outside a `tests` directory; an item is
+its repo-relative path. An item is certified iff no exe path flows to a file-reading call except through `load_exe`.
+Flow, computed from the syntax trees of all items together (call structure, not names of variables):
+  sources  an attribute `.exe` read in a file that declares the option `--exe` (add_argument('--exe', ...) is how a tool receives the
+           exe path), and a string constant that is `FalloutNV.exe` or ends in `/FalloutNV.exe` used as an expression (not a docstring);
+  spread   an expression is tainted if a sub-expression is; assignment taints the target name of the function; a tainted argument
+           taints the parameter of every def of the callee's name (class call -> `__init__`; methods without self); a tainted
+           `return` taints the call; fixpoint over all items;
+  sinks    open, io.open, os.open, Path / pathlib.Path (any construction), mmap.mmap, shutil.*, numpy fromfile/memmap, os.system /
+           os.popen / os.exec* / os.spawn*, subprocess.* - a call of these with a tainted argument is a violation, except that
+           a tainted element that directly follows the literal '--exe' in the call (the exe forwarded to another entry point,
+           which is itself an item of this gate) is allowed;
+  cut      a call of `load_exe` (exepin.load_exe): its result is bytes, the taint stops, and its body is not an item of the flow
+           (exepin.py is the one item allowed to open its own parameter: `load_exe` is the function named in the gate).
+A tool that gets the exe path any other way (not `--exe`, not the file name) is outside the rule: that is the stated assumption (ASM-102), and the
+sources are the only two ways the tools of this tree name the exe.
+Result: universe = items, certified = items without a violation, uncertified = the first 50 `path:line what`. Green iff all certified.
+```
+
 ## verify/gate_oracle.py
 
 ```text
@@ -1377,7 +1475,7 @@ Gate "oracle" (fnvnx-gate/1): every test names where its expected values come fr
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.json, DIR/tests/test_*.py, found by
+Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
 gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
@@ -1389,6 +1487,11 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
     {"kind": "spec", "path": PATH, "anchor": STR}   cited text: a tracked file and a place in it. `anchor` is a line
                                          range "L<m>-L<n>" (1 <= m <= n <= number of lines) or a whole line of the file
                                          that starts with "#" (a heading) and occurs exactly once
+    {"kind": "external", "name": NAME, "path": STR}   a file of an external that a recipe or the contract inputs pin (NAME is
+                                         its `name`, pinned to one commit and tree_sha256; fetched like a wine-exe artifact)
+    {"kind": "probe", "probe": {"external": NAME, "path": STR}, "platform": NAME, "dump_sha256": H64}   a probe program
+                                         (a file of a pinned external) run on the declared platform (a pinned external) whose dump
+                                         has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
 Rule. A test file is certified iff ALL hold:
@@ -1410,25 +1513,93 @@ Argument: an expected value "comes from the code under test" when its declared s
 through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text at a place that exists in a
 file, a contract table and a model, the last three outside everything the subject can load, and for product code never
 the product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
-Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and
+Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and (ASM-042)
 the test compares against the declared references. The after-merge verifier runs every test under verify/opentrace.py
 and compares the tracked files it opened with subject + references (verify/oraclecheck.py).
+```
+
+## verify/gate_assumptions.py
+
+```text
+Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
+(verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
+    python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json
+
+Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
+  {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
+  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
+    OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
+    REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
+    optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
+              branch enters with that branch's merge, and every rule below applies to every entry without exception.
+Universe: the MENTIONS of the tree. A text file is a tracked file below ports/fnv-nx that decodes as UTF-8 without NUL
+bytes and is not data (suffix .json); a file of a root of verify/admit.json marked "record": true is an append-only log
+(its dated entries state what was said then; the owner forbids editing it) and is not scanned. CLAUDE.md (the owner's
+words) is read for the decisions, not scanned. A BLOCK is the unit of a text file: in a .md file a paragraph (lines up to a
+blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
+mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive); the prose of a .py file is
+its comments and docstrings (code and string values are not statements), of any other file the whole text. An item of the
+universe is (path, first line of the block). A mention is certified iff ALL hold:
+  1. its raw block contains at least one id of the form ASM-NNN, for example ASM-001 (the compiler is correct);
+  2. every id in it is the id of an entry of the registry.
+The registry is certified iff ALL hold:
+  3. ids are unique and well formed, aliases are unique across entries, text is not empty;
+  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
+     place of reliance, so an entry nobody cites is dead and is red); 
+  5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
+     the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
+     exactly the owner's list, so a tenth OWNER entry without the owner's item is red;
+  6. a REMOVE entry has an owner of LEADS (or two joined by +) and `removed_by` of one of the forms `gate:NAME` (NAME is a
+     gate file of verify/gates.d), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
+     (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
+     (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
+  7. id ranges: the registry's `ranges` is {lead: [first, last]} for exactly L1, L3a, L3b, L4, L5, L6, L6A, L2, integers from 100,
+     pairwise disjoint (L1 100..199, L3a 200..299, L3b 300..399, L4 400..499, L5 500..599, L6 600..699, L6A 700..799, L2 800..899).
+     An id below 100 is a legacy id and exempt; an id from 100 lies in the range of the first lead named in its owner. An id
+     defined by two records and an alias claimed by two records are red. A record of a layer branch enters with the branch's merge
+     under its range, so ids never collide.
+  9. never reuse: the registry's `retired` lists {id, aliases} of every record that is no longer an entry. A live entry with a retired id
+     or a retired alias is red; a retired id or alias occurring in any scanned file (outside the registry) is red, so a record cannot be
+     removed while anything cites it, and a citation moves to the live record. The merge ratchet (verdict.py merge, ratchet_errors):
+     every id and alias that the base registry held, live or retired, is held by the new one, live or retired; a vanished id or alias
+     blocks the merge, the same mechanism as the dropped-gate ratchet.
+  8. findings: every red item is a finding with a code (entry-form, id-form, id-repeated, id-range, alias-claimed, used-by-*,
+     decision-*, owner-*, removed-by-form, ranges-form, mention-no-id, mention-unknown-id, stray-id, ...). stdout shows the first
+     20; the FULL list (every id and code, sorted, with the total per code) is written as JSON to GATE_DETAIL/assumptions.findings.json
+     (the verdict gives GATE_DETAIL = <verdict file>.detail/<gate>, kept beside the stored verdict), and the summary line names the path.
+And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
+not in the registry is red wherever it is written.
+Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a
+mention passes only if it names a registry entry, so a new assumption that is written with the word has an id, and an id has
+an entry (2, and the last rule); the entry has an owner decision or a named discharge (5, 6), and the files that rely on it
+cite it (4). The verdict is green only if certified == universe and the registry is certified. The accepted
+assumptions of the rule itself are ASM-001 (the compiler) and ASM-004 (the console), as for every gate.
+Limits of this rule (stated as ASM-001..009 do not cover them; they are what a gate over words can close): an assumption that
+is written without the words of the pattern is not seen (the rule closes the class "written with the word"; review closes the
+rest); a data file (.json) states values, the rule that reads it is the code or document that cites ids; the append-only
+logs are not scanned.
 ```
 
 ## verify/gate_pure.py
 
 ```text
-Gate "pure" (fnvnx-gate/1): every Python file of the stage-tool directories is accepted by puregate.
-    python3 -I gate_pure.py DIR...        run in the checkout root, env GATE_OUT (result dir); writes GATE_OUT/pure.json
-Universe: the items puregate checks below the existing DIRs given (a missing DIR contributes nothing): every .py file, and
-every shell file (a shell file is an item and is never certified: `shell-unanalysable`). An item is a repo-relative path.
-Certified: items with zero puregate violations. All DIRs are checked in ONE puregate run, so project imports resolve across them.
-uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0 (nothing to certify yet), said in "detail".
-The universe is the STAGE-TOOL directories only (contract link rules lift). verify/ and farm/ are NOT stage tools: the
-sandbox, the tracer and the farm scripts legitimately read the host (clock, processes, directory listings), so they are
-outside this gate; their correctness is the business of the "selftests" gate. Files below a directory named `tests` are test
-code, not stage tools: they are outside the universe too (the "selftests" gate runs them; they may use temp directories).
-Exit 0 iff the result is green.
+Gate "pure" (fnvnx-gate/1): every Python file a build stage can run is accepted by puregate.
+    python3 -I gate_pure.py        run in the checkout root, env GATE_OUT (result dir); writes GATE_OUT/pure.json
+Universe: the import closure, by puregate's own project-import resolution, of the STAGE ENTRY POINTS: (i) the `tool` scripts of the
+`generated` steps of every recipe (build.json) of an admitted root, and (ii) the `entry` list of every admitted tool root
+(verify/admit.json; required for class tool, may be empty). An item is a repo-relative .py path. A file reachable only from gate
+drivers (scripts the verdict runs on the host) is outside the universe: it is not a stage, and it may read the host. No directory name
+is special (a file in `tests/` is in the universe iff a stage imports it).
+Certified: items with zero puregate violations that import no HOST-READER module. Each admitted root that names gate "pure" is
+checked in its own puregate run: project imports resolve below the importing file's directory, the root's directories (`trees`) or their
+parents, or the parent directory of a root it DECLARES in admit.json `imports`. An import of a module of another root that is not declared is
+`import-unlisted` (red); a declared-import cycle, an unknown or repeated import is an error of admit.json (red). HOST-READER modules:
+every file below ports/fnv-nx/verify or ports/fnv-nx/farm (the sandbox, the recipe, the gate drivers, the farm scripts legitimately read
+the host: clock, processes, directory listings; their correctness is the business of the "selftests" gate); a universe file that
+imports one is uncertified, and so is a file that imports one that imports it (those are in the universe, so each is judged itself:
+a module that imports recipe or gate_build lies in verify/ or is red). An entry point or a reached file that is not in a root
+naming gate "pure" is uncertified (nothing judged it).
+uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green.
 ```
 
 ## verify/gate_tests.py
@@ -1515,7 +1686,7 @@ approximate. Threads that switch at host calls (blocks ended by a branch to a ho
 ```text
 L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 4 blocked: env, 1 error.
   verdict  --repo R --commit C --verdicts VDIR [--budget-s 300]
-           verdict.py run with the gates file OF THAT COMMIT (ports/fnv-nx/verify/gates.json read from C's tree), then store.
+           verdict.py run with the gates file OF THAT COMMIT (the files of ports/fnv-nx/verify/gates.d read from C's tree, assembled by gatesdir.py), then store.
   merge    --repo R --into BRANCH --from REF --verdicts VDIR [--budget-s 300]
            Computes the merge tree as verdict.py merge does. If VDIR has no verdict for it, makes the merge commit object with
            commit-tree (no ref moves) to have something to check out, runs `verdict` on it and stores it. Then verdict.py merge
@@ -1576,7 +1747,7 @@ objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
@@ -1592,7 +1763,7 @@ whose symbol is global/weak and in the TERMINATOR SET (calls, tail calls, GOT/AD
 can be incomplete; a local symbol cannot be the library routine). `T2-noreturn-tail`: the last instruction is a direct BL (callee a symbol; control
 runs off the end after a call the compiler knew not to return), except a BL of `fnvnx_reach_violation` (reach rule below); another last instruction that can fall through (not RET, B, BR*, T1) is
 `fallthrough`. Reachability of a trap is NOT computed: presence anywhere in a function is a finding; every function is judged, so
-a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn
+a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
 class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
@@ -1644,7 +1815,7 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction
+taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
 writes (a missed write of x0 would make a constant wrong).
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
@@ -1691,7 +1862,7 @@ Exit: 0 green, 2 red, 1 usage/tool error.
 ## verify/oraclecheck.py
 
 ```text
-oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true.
+oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true. (ASM-042)
     python3 -I oraclecheck.py [--jobs N] [--timeout-s N] --out REPORT.json [TEST...]      cwd = checkout root
 
 Runs each test file of the oracle universe (or the TESTs named, repo-relative) as `python3 -I FILE` under
@@ -1736,20 +1907,21 @@ in the producer (-U_FORTIFY_SOURCE, preprocessor options) is not seen; own units
 ```text
 puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a function of its declared inputs).
 
-    python3 -I puregate.py check PATH... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
+    python3 -I puregate.py check PATH... [--base DIR]... [--lib PATH]... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
     python3 -I puregate.py audit-stdlib                          check the PURE table (A-stdlib): a report, not a gate
 
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
-`file:line: RULE symbol`, at most 200 lines (JSON: all). Policy tables: puregate_policy.py (data only; rule classes there).
+`file:line: RULE symbol`, at most 200 lines (JSON: all, and `imports`: file -> project files). Policy tables: puregate_policy.py (data only; rule classes there).
 "Accepted" means: no Python code in the checked files can read an undeclared channel (clock, entropy, host identity,
-directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass.
+directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass. (ASM-032, ASM-033, ASM-034, ASM-035, ASM-036, ASM-037)
 Names resolve through import bindings with Python scoping; a name bound by an import and by anything else in one scope is
 `dynamic`; an escape of a module/class that carries rules (other than as an attribute base) is `dynamic`.
 Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host completion-order dynamic) plus
   import-unlisted  every import must be (a) PURE stdlib, (b) RESTRICTED stdlib (only allow-listed members, else the rule
                    of the member or `member-unlisted`), (c) PROJECT, (d) EXTERNAL (A-ext), or a banned module whose uses
                    are ruled. Project rule: `import a.b` / `from a.b import x` resolves a/b.py or a/b/__init__.py below
-                   the importing file's directory or a directory PATH; `from .m import x` below the importing file's
+                   the importing file's directory, a directory PATH or a `--base` DIR (`--lib` PATHs add files that may be
+                   resolved without checking them); `from .m import x` below the importing file's
                    directory (one level up per extra dot); `x` must be a submodule or (module a real file) a name in it.
                    The file must be among the checked files (a namespace directory counts only for submodules); a
                    checked file with the name of a listed module is ambiguous. Project modules are checked in the same
@@ -1779,7 +1951,7 @@ ASSUMPTIONS (named; what "accepted" does NOT prove):
 ## verify/puregate_policy.py
 
 ```text
-puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions).
+puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions). (ASM-032, ASM-033)
 
 Rule classes: clock (wall/monotonic time, file times), inode (inode/device/link identity), entropy (random, id, hash),
 unsorted-listing (directory order), unsorted-set (set iteration order), host (machine identity/load), completion-order
@@ -1795,9 +1967,14 @@ recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", con
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
+Link: `link` = {script, output, flags, kind pie|exe, roots}. kind pie needs target guest, exe needs host; `roots` lists distinct admitted
+product roots of the same target (never the root itself) whose stored objects are declared inputs of the link stage (in its key); the
+image of a product root lists base roots only, a test root any root (a variant is a product root with `variant_of` in admit.json, checked by
+gate_admit.py: a base product root of the same target, no chain). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
+refused in every link; linkstrict judges the linked output of every product and test root (no undefined symbol of any binding).
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
-name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link stage
-(`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
+name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
+`link.roots` whole, `link.libs` searched) and the post stage `ldcheck:<root>` (link/ldcheck.py). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
 RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
 RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
@@ -1810,7 +1987,7 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from A
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
 Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
   {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
-Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of
+Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose).
 ```
 
@@ -1914,14 +2091,14 @@ unreadable or a cycle: `response-file-unreadable`). Output `STAGE: RULE detail [
 Declared dependencies, NOT checked here: "no_date_time_macros": {"checked_by": NAME} names the stage/gate proving the sources
 use no __DATE__/__TIME__ (VC9 has no switch); "coff_normalize"/"pe_normalize": the consumer normalizes time stamps
 (verify/coffnorm.py); a python script must itself pass puregate.
-ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds
+ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds (ASM-038)
 documentation; the gate enforces the invocation, it does not prove the tool.
 ```
 
 ## verify/toolflags_policy.py
 
 ```text
-toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env.
+toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env. (ASM-038)
 Rows citing VC9 are UNVERIFIED (no VC9 here); GCC 13.3 / binutils 2.42 rows were checked against the installed --help.
 ```
 
@@ -1951,7 +2128,7 @@ Closure discovery (this runner, outside the sandbox, a pure function of stage re
   hashes); the accepted result is the run on the view of D. ARGUMENT that the hint never changes the result: the accepted run opened
   only files of D, all real, and saw the true name tree, so every include search and probe got the answer it gets on the real tree and
   every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
-  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
+  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a (ASM-040)
   #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
 Languages by suffix (LANG): .c gets `-x c` (PP) and `-x c -fpreprocessed` (CC); .S gets `-x assembler-with-cpp` and `-x assembler` (CC on the
   preprocessed text, the same two stages); .s has no PP stage (its CC stage reads the unit alone, a `.include` fails). `--include` may also be
@@ -1992,4 +2169,280 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               input equals or CONTAINS (cas.listing) an output root of a verification stage, or of a tainted build stage
               (transitively), is tainted. Exit 2 lists chains. Stage results: S/keys/<key>/result.json (sandbox.py).
   defect / defects   rule-defect queue: content-addressed JSON entries, verification-class data only.
+```
+
+## link/abi.py
+
+```text
+abi - gate `abi`: a reference and the definition it binds to have one calling contract on x86 and on AArch64 (L2 SOURCE, ABI1).
+
+    abi.py --obj obj.json                                         writes $GATE_OUT/abi.json, exit 0 iff green
+    abi.py --decl REF_MSVC_NAME DEF_MSVC_NAME                     prints the verdict of one pair (exit 0 iff equal contracts)
+
+RULE.  The Itanium symbol binds a reference in one object to the definition in another by name alone, and Itanium names carry neither the calling
+convention nor the return type.  The MSVC names the plugin writes into `.fnvnx.sympair` do.  For a symbol S with a definition row (the
+canonical definition: the first `def` row in object order) every other row of S (each `ref`, each further `def`) must have the same CONTRACT:
+  contract(name) = ( x86 locations: the (class, location) of every parameter, `this` first, a hidden result pointer for an aggregate result;
+                     x86 stack bytes the callee pops (symbolic over the classes);  x86 result location;
+                     AAPCS64 locations of the same parameters;  AAPCS64 result location )
+  parameter classes (abi_msvcname types): I8 B8(bool) I16 I32(int, long, enum) I64 P(pointer, reference, function pointer) MP(pointer to
+  member function) F32 F64 F80 AGG:<qualified name> (class, struct, union by value: identified by its MSVC qualified name, sizes unknown).
+  x86 (MSVC): thiscall `this` in ecx; fastcall the first two integer/pointer parameters of at most 4 bytes in ecx, edx; everything else on
+  the stack in 4-byte words (8 for 64-bit values; an aggregate of unknown size keeps all later offsets symbolic); stdcall, thiscall, fastcall
+  callee pops, cdecl caller pops.  AAPCS64: integers and pointers in x0..x7, floating point in v0..v7, then 8-byte slots; MP takes two registers.
+Certified iff the two contracts are equal; the verdict names the first differing component (cc/this, parameter count, parameter class,
+result, pop, variadic, aggregate, undecoded name).  Equal contracts mean every argument and the result travel in the same place on both machines,
+so no bridge exists to be generated: where the legacy model produced `bridge` / `manual` / `x86-inconsistent`, the pair is uncertified.
+UNIVERSE.  Every row that is a ref or a non-canonical def of a symbol that has a definition row somewhere in obj.json and is a function-kind row
+(func, ctor.*, dtor.*) with an MSVC name, or an `unnamed:` row; item id `object:symbol`.  An `unnamed:` row, or a row of a symbol whose canonical
+definition has no MSVC name, is uncertified (no contract can be compared).  Symbols with no definition row at all are linkstrict's business (class 3).  Rows of kind
+thunk/vtable/gcc/internal/data are outside (no function contract of the exe).
+PROOF.  Parameters are placed by the calling convention as a function of the ordered class list, so equal class lists under equal conventions
+give equal locations; the classes are read from the MSVC grammar (abi_msvcname), where equal types have equal text.  A by-value aggregate is
+the same type iff its qualified name is equal (provided by gate odr: equal `.fnvnx.layout` across all units per qualified name), so equal names pass the same bytes whatever the size.  A pair with differing aggregates,
+a variadic side, a bool/char result difference (GCC reads bit 0 of a bool) or an unparsable name is not proven and is uncertified.
+INPUT FACTS.  The MSVC names are the plugin's `.fnvnx.sympair` names, verified against cl's symbol tables by gate names; the same
+aggregate name is the same type in two units: provided by gate odr (equal `.fnvnx.layout` across all units per name).  Rule: MSVC returns every
+aggregate through a hidden pointer (small POD returned in eax:edx is not modelled: equal aggregate names make that irrelevant, differing ones
+are uncertified anyway).  Dropped from the legacy tool: the bridge generator (`emit_bridge`, `sequentialize`: a repair), `bool_from_int`,
+`ret_carry`, narrow-extension moves, `varargs_check` with `va_reads` from a run (`vacall`), `ecx_unused` from the pristine object, the
+source-text type spelling (`classify` by regex over declaration text), and `describe_shape` strings.
+```
+
+## link/abi_msvcname.py
+
+```text
+abi_msvcname - the Microsoft Visual C++ decorated-name grammar, parsed into the declaration it encodes (L2 SOURCE, ABI1).
+
+    parse(name) -> Decl                 ValueError('<name>: <what>') when the name is not in the grammar subset below
+    parse_qualified_type_name(text)     '.?AVFoo@Bar@@' (a TypeDescriptor name, as RTTI stores it) -> ('class'|'struct'|'union', qualified)
+
+This is a PARSE of a defined format (MSVC's decoration, VC 2008 era with the later `$$Q` and `_N`/`_W` letters), not a
+guess from the spelling: every character is consumed by a production or the name is rejected.  Nothing in it reads a
+word of the name as a hint; the identifiers are opaque fragments that are compared whole.
+
+What a name encodes (the facts the ABI rule needs):
+  * the scope, as a tuple of fragments, innermost LAST (`?f@Bar@Foo@@` -> ('Foo', 'Bar', 'f')); a fragment is a string or
+    ('tpl', name, args) for a template instance, ('op', code) for an operator / ctor / dtor name, ('anon',) for an
+    anonymous namespace;
+  * for a function: the access/kind letter (`member`, `static`, `virtual`, `thunk`), the `this` qualifiers, the calling
+    convention, the return type (None for a constructor, destructor), the parameter types, `varargs`;
+  * types as nested tuples: ('b', 'int') builtin; ('ptr', '*'|'&'|'&&', cv, pointee) pointer or reference (cv of the pointer
+    itself; the pointee carries its own); ('tag', 'class'|'struct'|'union'|'enum', qualified); ('arr', dims, element);
+    ('fn', cc, ret, params, varargs) a function type (only behind a pointer); ('memfn', qualified-class, cv, fn) a pointer
+    to member function.
+Back-references follow the grammar: a digit in a name position is the n-th simple name memorised so far (at most 10), a
+digit in a parameter position is the n-th parameter type memorised (at most 10; a type is memorised when its decoration is
+longer than one character).  A template argument list has its own name table, seeded with the template's own name.
+
+Supported: free and member functions (all access letters, static, virtual, `W`/`G`/`O` this-adjustor thunks), constructors,
+destructors, operators (kept as ('op', code)), data symbols (kind 'data', no further parse).  Template arguments: types,
+`$0` integer constants and `$D` template-parameter indexes.  Everything else (`$1` pointer constants, `$$V`, local scope
+`?1?`, `__ptr64` markers, ...) is a ValueError: the caller treats such a name as undecided, never as passed.
+Pure: str in, tuple out.
+```
+
+## link/gate_names.py
+
+```text
+gate_names - NAMES1: the MSVC names the fnvnx_names plugin gave to GCC's definitions, against cl's own symbol tables (L2 SOURCE).
+
+    gate_names.py --gcc PATH [--gcc PATH ...] --cl PATH [--cl PATH ...] [--units units.json]      (inputs: link/unitpairs.py)
+
+RULE.  The pairing `.fnvnx.sympair` of a GCC object of unit U says, for every symbol of the object that has a contract name, which
+MSVC decorated name it has.  MSVC's object of the same unit defines every entity that the unit's own text defines (the pristine
+objects are built /Gy, so a function is a definition or a COMDAT definition), so the name of such an entity must be a definition of
+cl's object of U.  A name that cl's object does not define is a wrong naming rule.  A row no rule named is a gap in the naming rules.
+UNIVERSE (nothing sampled, nothing skipped), per unit with a GCC object, in the order of the unit names:
+  1. every row of .fnvnx.sympair whose kind is one that has an MSVC name (func, data, ctor.c1, ctor.c2, dtor.d2, dtor.d1, dtor.d0,
+     dtor.sdd, dtor.sdd.thunk) and that is `def` of a symbol the object defines STRONGLY: binding GLOBAL (not weak, not unique), defined
+     in a section (not SHN_UNDEF/ABS/COMMON), not a section or file symbol, and the defining section is not in a COMDAT group
+     (SHF_GROUP).  Item id `unit:symbol`.
+  2. every row of .fnvnx.sympair whose kind is `unnamed:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
+  3. every row of .fnvnx.vtpair whose MSVC name is `unnamed:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
+  4. a GCC object that cannot be read (ELF, symbol table, a plugin section): one item `unit:error`.
+CERTIFIED: an item of class 1 whose MSVC name is `def`, `comdat` or `common` among the external symbols of at least one cl object of the
+unit (an unreadable one among them does not hide a proof in another; if none proves it, the item is red and says so).
+Red (listed): class 1 with no cl object for the unit, with an unreadable cl object, or with a name cl does not define; every item of
+classes 2, 3, 4.  The result is a function of the objects and the units list; ids sorted; zero items: green, universe 0 (detail says so).
+PROOF.  A strong GCC definition is emitted from the unit's own source text, not from an inline or template instantiation that the
+unit merely uses; so the entity has a definition in the unit's cl object, and that object's symbol table names it with the one decorated
+name.  If the table holds the plugin's name as a definition, the name is that of a definition of the same unit; if it does not, the
+naming rule is refuted for this item.  Classes 2 and 3 are decided by the rule's own totality: every extern symbol must be named.
+RULES AND INPUTS.  Rule (checked, class 1): a strong definition of a GCC object that has a naming kind is certified only when the cl
+object of the same unit defines the name; a GCC-only strong symbol with a naming kind is red, and the plugin gives GCC-only symbols the
+nameless kinds below (classes 2 and 3, red).  Scope of the check (a statement of what is read, not a claim beyond it): the check shows
+that the plugin's name is a definition of the same unit's cl object, not that it is the name of this very declaration (two definitions of
+one unit with swapped names would pass); the plugin's rules are verified by the object that cl wrote.  Input: the sections are the
+plugin's own output (contract/l2sections.py documents their format).
+NOT IN THE UNIVERSE (no class-closing rule is known, reported to the orchestrator; legacy namegate counted them only): rows of
+kind `thunk`, `vtable`, `gcc`, `internal` (no cl twin by the plugin's classification); `ref` rows and weak or COMDAT definitions of
+named kinds (cl emits an inline function, a vftable or a reference only where it chose to use it, so a name its object lacks proves
+nothing); vtpair rows with a name.  Pairing is by file stem (the `u<N>` rule of unitpairs.py with --units).
+```
+
+## link/gate_r7.py
+
+```text
+gate_r7 - R7 LAYOUT: does GCC give every record type exactly the layout cl gives it? (L2 SOURCE)
+
+    gate_r7.py --gcc PATH [--gcc PATH ...] --cl PATH [--cl PATH ...] [--units units.json]      (inputs: link/unitpairs.py)
+
+GCC side: section `.fnvnx.layout` of the GCC object (plugin fnvnx_layout; parsed by link/objsections.py): one line per complete record
+type of the unit.  cl side: the CodeView type records (`.debug$T`) of the unit's cl object built with /Z7 (read by link/codeview.py).
+Both are keyed by MSVC's decorated type name without the leading `.?A` (the "unique name" cl writes into every record; the plugin
+computes it by the symbol-name rules); the key is an exact string on both sides, nothing is normalised.
+UNIVERSE: every (unit, key) of every `.fnvnx.layout` line of every GCC object (a key once per unit); a GCC object that cannot be read or
+whose section does not parse is one item `unit:error`.  Item id `unit:key`.  The records only cl has are not in the universe: no
+GCC-built body can depend on a layout GCC never computed.
+CERTIFIED: the unit's cl object has exactly one definition of the key and every fact below is the same on both sides:
+  size; the set of named data members, each with byte offset (bit offset and width for a bit-field) and size; the bases (key, offset,
+  virtual or not); the vfptr (neither side introduces one).  Unnamed bit-fields are not compared (CodeView
+  does not list them); the members of an anonymous struct or union are the record's own on both sides.
+Every other item is red and listed with its reason: `differs` (the first difference), `undecided` (a fact the data cannot give), `only-gcc`
+(cl's debug info of the unit has no definition: no cl object, no CodeView, or no such key).  Undecided reasons, with the missing fact:
+  - the record introduces a vfptr (both sides): the offset of the vfptr is not in CodeView (LF_VFUNCTAB has a type and no offset); it is
+    not derived from the other offsets, which leave it undetermined
+  - the size of a member's type is outside what CodeView states (codeview.py: PRIM, member pointers)
+  - the key has several different definitions in the unit, in one cl object or between the cl objects of a source several units list
+    (the definitions of all of them are collected and identical ones count once; unnamed types share keys) or the plugin could not name the type (`nokey:`)
+  - the CodeView members or bases of the record could not be read
+A record with a virtual base differs by rule: cl lays it out with a vbptr and a vbtable, GCC with a vptr and vtable-held offsets; the
+two object models are different layouts and the native body would read the wrong ones.
+CLAIM.  Size, and each member's offset, size and type key, are the compilers' own data for the same source, compared exactly.  The
+alignment of a record is not part of the claim (cl's alignment is not in CodeView and is not compared).  The pairing key is defined as
+follows (a fact of the gate's inputs): the key of a type is the plugin's name for it in the `.fnvnx.layout` line and the CodeView unique
+name in the cl object; a key with several definitions in the unit is `undecided` (above).  Zero lines: green, universe 0 (detail says so).
+DROPPED from legacy r7: the alignment comparison and its natural-alignment derivation; the vfptr offset taken as 0 when no member starts there (a derivation CodeView does not support); sizes and
+alignments of the primitive types outside the scalar table (10, 12, 20 byte, 6 byte); pointer-to-member sizes taken from the pointer
+kind; equality of two multi-definition keys by comparing the two sets of records (now: undecided); `only-cl` records; the text match
+on reason strings that decided which member size was unknown; the verdict for a record whose members could not be read (it counted
+every GCC member as missing).
+```
+
+## link/odr.py
+
+```text
+odr - gate `odr`: the copies of every COMDAT group are identical across objects (L2 SOURCE, ABI1).
+
+    odr.py OBJ.o [OBJ.o ...]            writes $GATE_OUT/odr.json, exit 0 iff green, 1 red, 2 malformed input
+
+RULE.  A COMDAT group (an SHT_GROUP section whose flag word has GRP_COMDAT) is the compiler's statement "every translation unit that
+needs this entity emits this same definition; the linker keeps one".  The linker keeps one without looking at the others, so the
+statement is true iff all copies are the same definition.  The identity of a copy is its image as the linker would see it:
+the multiset over member sections of (section name, type, flags, alignment, entry size, bytes, relocations), where a relocation
+is (offset, type, addend, target) and the target is
+  * a symbol with a name (global, weak, undefined or local non-section symbol): the name, or, for a local symbol defined in
+    a member of the same group, (member name, value);
+  * a section symbol: of a member of the same group -> (member name); of a SHF_MERGE section -> the merged entity read at
+    the addend (cstring when SHF_STRINGS, else entsize bytes), the addend then being an address of this object and dropped;
+    of any other section -> OPAQUE: a section symbol has no size, so the extent of the entity it points at is not in the object;
+    the copy is then undecidable and its signature is uncertified (it is never passed).
+Relocation sections are found by sh_info (the section they apply to), never by name.
+UNIVERSE.  Every group signature (the name of the group's symbol) that occurs as a COMDAT group in two or more of the given objects.
+A signature in one object only has nothing to be compared with and is not in the universe.
+PROOF.  Green means all copies of every signature have equal identity and no copy has an opaque relocation; the identity includes every byte and every relocation of
+every member, so two copies with equal identity assemble to the same bytes with the same symbol references in any link.  A red item names the
+signature, the objects and the first difference.
+INPUT FACTS.  The objects are ELF relocatable objects of one target (the objects the verdict's link takes; a member or group the gate cannot parse is a red item with the reason, ValueError below); equal symbol names mean equal symbols (the linker's own rule for one link, which is what the verdict's link performs).
+```
+
+## verify/gate_abi.py
+
+```text
+Gate "abi" (fnvnx-gate/1, VERDICT.md class 8): a reference and the definition it binds to have one calling contract (rule, universe and proof:
+link/abi.py docstring RULE, UNIVERSE, PROOF).
+    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/abi.json
+Universe: the rows abi.py defines (abi.check), over the C++ objects of every admitted product root with "target": "guest" and "cxx_origin": "native"
+(objects from gate_build.ensure; the contract names are the plugin's `.fnvnx.sympair` of each object), plus the input facts abi.py's PROOF rests on, as items
+of the same gate:
+  odr    `odr` signatures (link/odr.py check): every COMDAT group present in two or more of the root's objects, copies identical (reported as `odr:<sig>`);
+  layout every `.fnvnx.layout` key (without a `nokey:` flag, whose key is not unique by construction) seen in two or more objects has one layout in all of
+         them (size, alignment, fields, bases, flags; `layout:<key>`): the same aggregate name is the same type in all units, which is what lets abi pass a
+         by-value aggregate by its name alone. (link/odr.py proves the COMDAT-copy fact only; this item closes the layout fact abi.py's PROOF names.)
+Red iff an item is uncertified, the root's build is not green, an object has no `.fnvnx.sympair` section or cannot be parsed (red item naming the object). A C++
+unit is an object of the root's recipe (recipe.CXX_EXT). No such root: universe 0, green.
+```
+
+## verify/gate_namegate.py
+
+```text
+Gate "namegate" (fnvnx-gate/1, VERDICT.md class 8): a native body that stands for an exe function carries that function's MSVC name, certified
+against the cl object of the same source (link/gate_names.py rows(): the plugin's name is a definition of the unit's cl object).
+    python3 -I gate_namegate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/namegate.json
+Universe: the rows of gate_names.rows() whose symbol bodysel selects as the NATIVE body of an exe function, in each admitted product root with
+"target": "guest", "cxx_origin": "native" and a `game` directory (the join and its inputs: gate_l2native.py). A root without `game`: universe 0 for it;
+no such root: universe 0, green. An uncertified row whose symbol bodysel turns LIFTED is outside the universe, not red.
+Certificate of a row: gate_names.rows() gives it an empty reason against the cl reference objects of the `msvc` external.
+Red iff a row of the universe is uncertified, or the root needs the bodysel verdict or the cl reference and they are missing (red item `<root>:inputs`
+naming the input; owner L1 for bodysel, L2 for the cl side), or the root's build is red.
+```
+
+## verify/gate_r7gate.py
+
+```text
+Gate "r7" (fnvnx-gate/1, VERDICT.md class 8): every type that a native exe-function body uses has the exe's layout, certified by link/gate_r7.py rows()
+against the cl /Z7 CodeView types of the same source.
+    python3 -I gate_r7gate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/r7.json
+Universe: the rows of gate_r7.rows() of the NATIVE-BEARING units (a unit with at least one symbol that bodysel selects as the native body of an exe function;
+the types such a body uses are among the unit's complete records), in each admitted product root with "target": "guest", "cxx_origin": "native" and a `game`
+directory (gate_l2native.py). A root without `game`: universe 0 for it; no such root: universe 0, green.
+Certificate of a row: its verdict is `equal` (size, members with offsets and sizes, bases, vfptr equal on both sides). Red iff a row of the universe is
+differs, undecided, only-gcc or error, or the bodysel verdict or the cl reference is missing (item `<root>:inputs` naming it; owner L1 for bodysel, L2 for
+the cl side), or the root's build is red.
+```
+
+## verify/gate_l2native.py
+
+```text
+gate_l2native - the shared part of the L2 per-root gates on the NATIVE bodies of the exe's functions (gates `namegate` and `r7`).
+Not a gate itself (gates.json names gate_namegate.py and gate_r7gate.py). Library only.
+
+Universe of those two gates (VERDICT.md class 8): the rows of link/gate_names.py rows() (resp. link/gate_r7.py rows()) that concern a native body of an
+exe function, in each admitted product root with "target": "guest", "cxx_origin": "native" and a `game` directory. A root without `game` has no
+exe-function bodies: universe 0 for it.
+The static facts of the join, all outputs of L1's own chain (gate_contract.chain, no new source):
+  - addrmap.tsv (the link stage's map): row (object basename, symbol) -> exe address. A symbol with no row has no exe address, so no exe function
+    stands on it. The object of the game unit UNIT (root-relative path) is `src_` + UNIT with `/` -> `_` + `.o` (gate_contract.assemble).
+  - bodysel.tsv (contract/bodysel.py, run by the chain): exe address -> native | lifted. A symbol is a NATIVE exe-function body iff its address is native.
+  - a unit is NATIVE-BEARING iff at least one of its symbols is a native exe-function body (r7 judges the types of the unit: the types a native body
+    uses are among the unit's complete records, `.fnvnx.layout`; nothing narrower is claimed).
+Inputs of the certificate: the root's game objects (staged as `<UNIT with / -> _>.o`, the stem convention of link/unitpairs.py), the cl reference objects
+`<msvc external>/obj/u<N>.obj` (the dir contract_inputs.json `msvc` names, the same one n1 reads) and the root's units.json. A missing input is a
+red item `<root>:inputs` naming it and its owner, never skipped. Stated limit: no `--n3` is passed by the bodysel stage of gate_contract.py yet, so
+bodysel gives no NATIVE and the universe is 0 until L1/L2 wire the N3 verdicts (reported, not worked around).
+```
+
+## link/exevft.py
+
+```text
+exevft - the vftables of the player's exe with their RTTI class hierarchy, and the exact adjustor thunks in their slots (L2 SOURCE, ABI1).
+
+    exevft.py --exe FalloutNV.exe [--out exevft.json]
+
+RULE.  An MSVC vftable is the word run that follows a relocated pointer to a complete object locator (COL).  The vftables
+and their slot runs are exefacts.rtti_vftables (L1's reader, reused, not re-parsed here).  This module adds what the COL
+points at and what the slots hold:
+  * hierarchy(img, col): COL (signature 0, vfptr offset, TypeDescriptor, ClassHierarchyDescriptor) -> the class's bases
+    [(TypeDescriptor name, mdisp, pdisp)] in the order of the BaseClassArray.  Checked as a structure: hierarchy signature
+    0, 1..127 bases, every BaseClassDescriptor inside the image with a TypeDescriptor name `.?A..`, the first base is the
+    class itself.  A violation is a ValueError naming the COL (the exe does not have the documented RTTI layout), never a
+    skipped entry.
+  * thunk(img, a): the function at `a` is an MSVC adjustor thunk iff its decoded instruction sequence is exactly
+    `[sub|add ecx, imm | lea ecx,[ecx+imm] | sub|add dword ptr [esp+4], imm]  jmp rel32`.  The instructions are decoded
+    (capstone) and their semantics read (ecx or the stacked this moves by `adj`, then a direct tail jump), so every
+    encoding of these instructions is one case.  Result Thunk(adj, target, stacked) with `this_new = this - adj`; a plain
+    `jmp` has adj 0.  Anything else is None: "not an exact thunk", which is a fact of the function, not a failure.
+  * chain(img, a): the thunks followed to a non-thunk: (total adj, final target, thunks passed); a cycle is a ValueError.
+  * entry_offsets(vfts): {function address: sorted COL offsets of every vftable that holds it directly}.
+UNIVERSE of the CLI: every vftable the exe's RTTI yields; each is emitted with name, COL offset, bases and, per slot, the
+address, its thunk chain (or null).  Output is canonical JSON (sorted keys, LF), a function of the exe bytes only.
+PROOF.  The hierarchy and thunk statements are decodes of bytes by the documented layouts and by instruction semantics;
+no name, string or count decides anything.
+INPUT FACT: the exe is a PE32 with COLs in .rdata and TypeDescriptors in .data (exefacts's precondition, read from the PE section table).
+Open (REMOVE, owner L1 exefacts): completeness of the RTTI scan is not yet a checked fact.  Open (REMOVE, owner L2): agreement of two
+independent decoders on every instruction of the set; after first frame.  Dropped from the legacy tool (heuristic or per-item): the D1/D0 slot-name
+regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `leaf_constant`, `string_at`, the vftable
+getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
+TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 ```

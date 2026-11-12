@@ -19,8 +19,8 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    by-value/sret shape the caller compiled against are the callee's exe contract.  A name that carries no types gives no such
    equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
    judged, the worst verdict stands.
-Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule); the pristine cl symbol
-names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule) (ASM-050); the pristine cl symbol
+names are the exe's contract (N1: byte-equal, one symbol map) (ASM-053); an external decorated name denotes one entity link-wide (ASM-054).
 Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 """
 import collections, re

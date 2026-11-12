@@ -3,7 +3,8 @@
     python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/linkstrict.json
 Roots come from verify/admit.json: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) and reads the ELF `.symtab` of
 its objects (relocatable) and of its linked ELF, never a name's text. Rules:
-  (a) a root that links an ELF: the ELF has no undefined symbol and no weak undefined symbol, no IFUNC, and a `.symtab` (item `<elf>`).
+  (a) a root that links an ELF (the linked output of every product and test root, whatever flags the link used): the ELF has no undefined
+      symbol of ANY binding (a relocation against an undefined symbol must name one, so none exists) and no weak undefined symbol, no IFUNC, and a `.symtab` (item `<elf>`).
   (b) across ALL product roots: every undefined symbol (global or weak) of every object is defined by exactly ONE object with a strong
       (GLOBAL, not common) definition, or by one COMDAT group family (b1), or by the link script (b2). Findings: `undefined` (no
       definition anywhere), `duplicate-strong` (two strong definitions), `weak-only` (a weak or UNIQUE definition outside any COMDAT
@@ -259,8 +260,8 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
             out.add((eid, "<elf>", "elf-no-symtab", "the linked ELF has no .symtab"))
             continue
         for name, val, size, typ, bind, shn in syms:
-            if shn == 0 and bind in (GLOBAL, WEAK, UNIQUE):
-                out.add((eid, "<elf>", "elf-undefined" if bind == GLOBAL else "elf-weak-undefined", name))
+            if shn == 0:   # any binding: a relocation against an undefined symbol needs one, so a linked ELF without one has no such relocation
+                out.add((eid, "<elf>", "elf-weak-undefined" if bind in (WEAK, UNIQUE) else "elf-undefined", name))
             if shn != 0 and typ == IFUNC:
                 out.add((eid, "<elf>", "elf-ifunc", name))
     for (rid, eid), rows in sorted(tables.items()):
@@ -312,10 +313,10 @@ def foreign_flags(root, res, cache, repo):
 def main():
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-linkstrict-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
-    items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.product_roots(repo), {}
+    items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.buildable_roots(repo), {}
     host, guest = None, []
     try:
-        hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "host"]
+        hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") in ("product", "test") and e.get("target") == "host"]
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
         guest = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "guest"]
         for root in roots:
@@ -327,6 +328,10 @@ def main():
             for o in res["objects"]:
                 objs[root + "/" + o["unit"]] = elf_symbols(o["object"]) or []
                 comdat[root + "/" + o["unit"]] = elf_comdat(o["object"])
+            for m in res.get("link_archives", []):     # the members ld pulled from an archive are objects of the link, judged like every other
+                mid = "%s/%s(%s)" % (root, m["archive"].lstrip("/"), m["member"])
+                objs[mid] = elf_symbols(m["object"]) or []
+                comdat[mid] = elf_comdat(m["object"])
             eid = root + "/" + os.path.basename(res["elf"]["path"]) if res["elf"] else None
             if eid:
                 elfs[eid] = elf_symbols(res["elf"]["path"])

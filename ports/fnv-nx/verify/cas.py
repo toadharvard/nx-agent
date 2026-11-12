@@ -3,6 +3,9 @@
 
 Layout: STORE/obj/<aa>/<sha256>      file contents, mode 0444, mtime 0
         STORE/obj/<aa>/<sha256>.x    same content with exec bit, mode 0555 (separate object)
+        STORE/obj/<aa>/<name>.r<n>   replica n >= 1 of an object: the same bytes and mode in a new inode, made when the inode before it
+                                     is full (MAX_LINKS names): an inode serves at most MAX_LINKS hard links (EMLINK of ext4 is closed
+                                     by rule), so materialize places any number of files of one content. Identity is unchanged.
         STORE/tree/<aa>/<hash>.json  canonical manifests (<aa> = first two hex digits)
 
 Tree hash definition:
@@ -16,13 +19,16 @@ Tree hash definition:
   Empty directories are kept. Nothing else (mtime, owner, mode other than exec) is part of the hash.
 """
 import errno
+import fcntl
 import hashlib
 import json
 import os
+import shutil
 import stat
 import sys
 
 FORMAT = "fnvnx-tree/1"
+MAX_LINKS = 60000  # hard links one inode of the store serves (ext4: 65000); past it a replica is made
 
 class CasError(Exception):
     pass
@@ -179,11 +185,41 @@ def listing(h, store):
 def _obj(store, e):
     return os.path.join(store, "obj", e["h"][:2], e["h"] + (".x" if e["x"] else ""))
 
+def _replica(src, n):
+    """Path of replica N of object SRC (N 0 is the object); a missing replica is a copy (a reflink where the filesystem has it)."""
+    r = src if n == 0 else "%s.r%d" % (src, n)
+    if n and not os.path.exists(r):
+        tmp = os.path.join(os.path.dirname(src), ".tmp-%d-%s" % (os.getpid(), os.urandom(6).hex()))
+        with open(src, "rb") as a, open(tmp, "wb") as b:
+            try:
+                fcntl.ioctl(b.fileno(), 0x40049409, a.fileno())  # FICLONE
+            except OSError:
+                shutil.copyfileobj(a, b)
+        os.chmod(tmp, os.stat(src).st_mode & 0o777)
+        os.utime(tmp, (0, 0))
+        _publish(tmp, r)
+    return r
+
+def _link_obj(src, dest):
+    """Hard-link the content of object SRC at DEST from the first replica whose inode has room (MAX_LINKS) and does not refuse."""
+    n = 0
+    while True:
+        r = _replica(src, n)
+        if os.stat(r).st_nlink < MAX_LINKS:
+            try:
+                return os.link(r, dest)
+            except FileExistsError:
+                raise
+            except OSError as ex:
+                if ex.errno != errno.EMLINK:
+                    raise
+        n += 1
+
 def _place(e, store, dest, dest_top):
     if e["t"] == "f":
         src = _obj(store, e)
         try:
-            os.link(src, dest)
+            _link_obj(src, dest)
         except OSError as ex:
             if ex.errno == errno.EXDEV:
                 raise CasError("cannot hardlink across filesystems: store %s -> dest %s" % (store, dest_top))

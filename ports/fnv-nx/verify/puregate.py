@@ -1,26 +1,25 @@
 #!/usr/bin/env python3 -I
 """puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a function of its declared inputs).
 
-    python3 -I puregate.py check PATH... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
+    python3 -I puregate.py check PATH... [--base DIR]... [--lib PATH]... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
     python3 -I puregate.py audit-stdlib                          check the PURE table (A-stdlib): a report, not a gate
 
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
-`file:line: RULE symbol`, at most 200 lines (JSON: all). Policy tables: puregate_policy.py (data only; rule classes there).
+`file:line: RULE symbol`, at most 200 lines (JSON: all, and `imports`: file -> project files). Policy tables: puregate_policy.py (data only; rule classes there).
 "Accepted" means: no Python code in the checked files can read an undeclared channel (clock, entropy, host identity,
-directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass.
+directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass. (ASM-032, ASM-033, ASM-034, ASM-035, ASM-036, ASM-037)
 Names resolve through import bindings with Python scoping; a name bound by an import and by anything else in one scope is
 `dynamic`; an escape of a module/class that carries rules (other than as an attribute base) is `dynamic`.
 Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host completion-order dynamic) plus
   import-unlisted  every import must be (a) PURE stdlib, (b) RESTRICTED stdlib (only allow-listed members, else the rule
                    of the member or `member-unlisted`), (c) PROJECT, (d) EXTERNAL (A-ext), or a banned module whose uses
                    are ruled. Project rule: `import a.b` / `from a.b import x` resolves a/b.py or a/b/__init__.py below
-                   the importing file's directory or a directory PATH; `from .m import x` below the importing file's
+                   the importing file's directory, a directory PATH or a `--base` DIR (`--lib` PATHs add files that may be
+                   resolved without checking them); `from .m import x` below the importing file's
                    directory (one level up per extra dot); `x` must be a submodule or (module a real file) a name in it.
                    The file must be among the checked files (a namespace directory counts only for submodules); a
                    checked file with the name of a listed module is ambiguous. Project modules are checked in the same
-                   run, reported under their own path. Import roots (`--import-roots DIR...`, table IMPORT_ROOTS of the
-                   policy): a module found there is allowed iff its file has no violation itself (its imports included);
-                   else `import-unlisted impure:MOD -> FILE: n violations (first ...)` at the importer; the file is not an item.
+                   run, reported under their own path.
   stat-result      os.stat/lstat/fstat or a .stat()/.lstat() method call: only as the value of `.st_size`/`.st_mode`.
   unsorted-set     set literal/comprehension/set()/frozenset() (also |,&,-,^ and union..copy of those) directly iterated,
                    unpacked, starred, or passed to list tuple enumerate iter map zip filter reversed, .join .extend
@@ -114,7 +113,7 @@ def sorted_call(c):
 class Analyzer:
     def __init__(self, final, src, proj):
         self.final, self.out, self.src, self.proj = final, [], src, proj  # pass 1 binds names; pass 2 checks uses
-        self.unproven, self.ext = 0, set()
+        self.unproven, self.ext, self.deps = 0, set(), set()  # deps: project files the imports resolve to
     def add(self, n, rule, sym):
         self.out.append((getattr(n, "lineno", 1), rule, sym))
     def go(self, n, sc):
@@ -165,8 +164,7 @@ class Analyzer:
             self.is_set(x.left, sc) or self.is_set(x.right, sc))
     def bad_imports(self, n):
         """Symbols of the imports of an Import/ImportFrom node that are outside the allow-list."""
-        files, roots, *imp = self.proj
-        imp = imp[0] if imp else None
+        files, roots = self.proj
         lvl, here, out = getattr(n, "level", 0), os.path.dirname(self.src), []
         ents = [(a.name, []) for a in n.names] if isinstance(n, ast.Import) else [
             (n.module or "", [a.name for a in n.names if a.name != "*"])]
@@ -178,14 +176,12 @@ class Analyzer:
             for b in bases:
                 hit = locate(files, b, parts) if parts or lvl else None
                 if hit is not None: break
+            if hit is not None: self.deps.update(f for f in [hit] + [locate(files, b, parts + [x]) for x in names] if f)
             if hit is None:
                 if lvl or not listed(mod, names): out.append("." * lvl + mod)
                 elif parts[0] in P.EXTERNAL: self.ext.add(parts[0])
             elif not lvl and listed(parts[0]): out.append("ambiguous:" + mod)
             else: out += [mod + "." + x for x in names if not hit and locate(files, b, parts + [x]) is None]
-            if hit and imp and hit in imp.files:  # a module of an import root: allowed iff that file is itself accepted
-                why = imp.verdict(hit)
-                if why: out.append("impure:%s -> %s" % (mod, why))
         return out
     def leaf(self, n, sc):
         if not self.final: return self.binder(n, sc)
@@ -307,20 +303,6 @@ class Analyzer:
 
 NOPROJ = (frozenset(), ())
 
-class ImportRoots:
-    """Files below the import roots (policy table IMPORT_ROOTS, each an admitted tool root): they resolve like project files but are
-    not items of the run. An import that resolves into one is allowed iff that file is itself accepted (no violation of its own,
-    which includes its own imports: transitive); else the importer gets `import-unlisted impure:MOD -> FILE: n violations (first)`.
-    A cycle is judged by the violations of its members. proj: the project context the files are analysed in (set by main)."""
-    def __init__(self, files): self.files, self.memo, self.proj = frozenset(files), {}, None
-    def verdict(self, f):
-        if f not in self.memo:
-            self.memo[f] = None
-            r = analyse(f, self.proj)
-            v = r[0] if r else []
-            self.memo[f] = ("%s: %d violations (first: line %d %s %s)" % (os.path.relpath(f), len(v), v[0][0], v[0][1], v[0][2])) if v else None
-        return self.memo[f]
-
 def scan(text, name, proj=NOPROJ):
     """([(line, rule, symbol)] sorted unique, set_iterations_unproven, external modules imported) of one Python source."""
     try:
@@ -333,8 +315,8 @@ def scan(text, name, proj=NOPROJ):
             for st in tree.body: a.go(st, root)
             out += a.out
     except (SyntaxError, ValueError, RecursionError, MemoryError) as e:
-        return [(getattr(e, "lineno", None) or 1, "syntax", type(e).__name__)], 0, []
-    return sorted(set(out)), a.unproven, sorted(a.ext)
+        return [(getattr(e, "lineno", None) or 1, "syntax", type(e).__name__)], 0, [], []
+    return sorted(set(out)), a.unproven, sorted(a.ext), sorted(a.deps)
 
 def check_source(text, name, proj=NOPROJ):
     """Return the sorted unique [(line, rule, symbol)] violations of one Python source text."""
@@ -356,9 +338,9 @@ def analyse(path, proj=NOPROJ):
     try:
         with open(path, "rb") as fh: data = fh.read()
         if path.endswith(".py"): return scan(data.decode("utf-8"), path, proj)
-        return ([(1, "shell-unanalysable", "shell")], 0, []) if is_shell(path, data[:256]) else None
+        return ([(1, "shell-unanalysable", "shell")], 0, [], []) if is_shell(path, data[:256]) else None
     except (OSError, UnicodeDecodeError) as e:
-        return ([(1, "syntax", type(e).__name__)], 0, []) if path.endswith(".py") else None
+        return ([(1, "syntax", type(e).__name__)], 0, [], []) if path.endswith(".py") else None
 
 def audit():
     """A-stdlib self-check: the gate's own deny rules over the sources of every PURE-table module of this interpreter."""
@@ -388,24 +370,19 @@ def main(argv):
         i = args.index("--json")
         js = args[i + 1]
         del args[i:i + 2]
-    iroots = []
-    if "--import-roots" in args:  # directories (table IMPORT_ROOTS) whose files are importable if accepted, not items
-        i = args.index("--import-roots")
-        j = next((k for k in range(i + 1, len(args)) if args[k].startswith("--")), len(args))
-        iroots = args[i + 1:j]
-        del args[i:j]
+    bases, libs = [], []
+    for opt, acc in (("--base", bases), ("--lib", libs)):
+        while opt in args[:-1]: acc.append(args.pop(args.index(opt) + 1)), args.remove(opt)
     paths = args[1:]
-    if args[:1] != ["check"] or not paths or any(not os.path.exists(p) for p in paths + iroots):
-        sys.stderr.write("usage: puregate.py check PATH... [--import-roots DIR...] [--json OUT.json] | audit-stdlib (PATHs must exist)\n")
+    if args[:1] != ["check"] or not paths or any(not os.path.exists(p) for p in paths + bases + libs):
+        sys.stderr.write("usage: puregate.py check PATH... [--base DIR]... [--lib PATH]... [--json OUT.json] | audit-stdlib (PATHs must exist)\n")
         return 1
-    files, seen, viol, by_rule, by_file, unproven, ext = [], [], [], {}, {}, {}, set()
+    files, seen, viol, by_rule, by_file, unproven, ext, graph = [], [], [], {}, {}, {}, set(), {}
     for p in paths: collect(p, files)
-    ifiles = []
-    for p in iroots: collect(p, ifiles)
-    imp = ImportRoots(norm(f) for f in ifiles if f.endswith(".py") and f not in files)
-    proj = (frozenset(norm(f) for f in files if f.endswith(".py")) | imp.files,
-            tuple(norm(p) for p in paths if os.path.isdir(p)) + tuple(norm(p) for p in iroots if os.path.isdir(p)), imp)
-    imp.proj = proj
+    lib = []  # --lib: files that project imports may resolve to; not checked here (their own run judges them)
+    for p in libs: collect(p, lib)
+    proj = (frozenset(norm(f) for f in files + lib if f.endswith(".py")),
+            tuple(norm(p) for p in paths if os.path.isdir(p)) + tuple(norm(b) for b in bases))
     for f in files:
         r = analyse(f, proj)
         if r is not None:
@@ -413,6 +390,7 @@ def main(argv):
             viol += [{"file": f, "line": ln, "rule": ru, "symbol": s} for ln, ru, s in r[0]]
             unproven[f] = r[1]
             ext.update(r[2])
+            graph[f] = r[3]
     for v in viol:
         for d, k in ((by_rule, v["rule"]), (by_file, v["file"])): d[k] = d.get(k, 0) + 1
     for v in viol[:200]: print("%s:%d: %s %s" % (v["file"], v["line"], v["rule"], v["symbol"]))
@@ -421,7 +399,7 @@ def main(argv):
         tool = hashlib.sha256(open(os.path.abspath(__file__), "rb").read()).hexdigest()
         doc = {"schema": "fnvnx-puregate/1", "tool": tool, "files": seen, "violations": viol, "counts_by_rule": by_rule,
                "counts_by_file": by_file, "set_iterations_unproven": total, "set_iterations_unproven_by_file": unproven,
-               "external_modules_assumed_pure": ext}
+               "external_modules_assumed_pure": ext, "imports": graph}
         with open(js, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(doc, indent=1, sort_keys=True) + "\n")
     detail = ", ".join("%s: %d" % (r, by_rule[r]) for r in sorted(by_rule)) or "none"

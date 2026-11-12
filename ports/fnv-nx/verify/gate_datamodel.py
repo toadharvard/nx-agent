@@ -15,8 +15,8 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
     (the set minus the flags the driver's own diagnostic says do not apply to that language; the gate re-runs that probe itself), and no other
     -f/-m token except a stage's own (-fplugin, -frandom-seed, -ffile-prefix-map, -fpreprocessed) and the per-root class recipe.PER_ROOT; and
     EVERY C and C++ unit of a guest root, any origin, holds every plugin of recipe.PLUGIN_SOURCES that its front end can load, each as the declared
-    input /plug/<name> and the argv flag -fplugin=/plug/<name>/<name>.so, and no plugin it cannot load. Loadable = needs no symbol that only the
-    other front end defines (recipe.plugin_languages: nm -D of cc1, cc1plus and the .so, re-derived by the gate from the built plugins: a static
+    input /plug/<name> and the argv flag -fplugin=/plug/<name>/<name>.so, and no plugin it cannot load. Loadable = has no strong undefined reference to a symbol that only the
+    other front end defines (a weak one resolves to null) (recipe.plugin_languages: nm -D of cc1, cc1plus and the .so, re-derived by the gate from the built plugins: a static
     fact of the ELF files; a plugin using C++-front-end symbols has no C instance). A missing loadable plugin is red; no name list, no exception list.
     The documents are the stage keys, so the object is the one these flags and inputs built.
 Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model."""

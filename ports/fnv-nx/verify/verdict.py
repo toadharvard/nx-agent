@@ -2,7 +2,7 @@
 """L4 verdict: gate certificates, merge gate, build/verification separation, rule-defect queue. stdlib only.
 Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 2 red/blocked, 3 merge conflict.
   run         --repo R --commit C --gates GATES.json --out V.json [--budget-s 300] [--env-id H] [--cache DIR]
-              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_COMMIT [+ GATE_CACHE]), in file order.
+              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_DETAIL (OUT.detail/<gate>, kept) + GATE_COMMIT [+ GATE_CACHE]), in file order.
               Gate contract for the environment: GATE_OUT (result directory), GATE_COMMIT (commit under test) and, when --cache is
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
@@ -38,6 +38,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import gate_assumptions  # noqa: E402
+import gatesdir  # noqa: E402
 import sandbox  # noqa: E402
 
 HEX = re.compile(r"^([0-9a-f]{40}|[0-9a-f]{64})$")
@@ -109,6 +111,27 @@ def _gate_result(g, out_dir, rc):
         return "red", u, c, "gate status red: " + r["detail"]
     return "green", u, c, ""
 
+def _present_classes(wt):
+    """The set of root classes of the admitted roots of the tree under test (gatesdir.root_classes); empty when admit.json is absent."""
+    try:
+        with open(os.path.join(wt, gatesdir.ADMIT), encoding="utf-8") as fh:
+            return set().union(*gatesdir.root_classes(json.load(fh), wt).values())
+    except (OSError, ValueError):
+        return set()
+
+
+def _covers_verdict(g, st, u, present):
+    """No vacuous green (gatesdir.py): a gate whose `covers` is missing or not a non-empty list of root classes is red, and a gate whose
+    universe is 0 while an admitted root of a covered class exists is red. Returns (status, reason or '')."""
+    cv = g.get("covers")
+    if not (isinstance(cv, list) and cv and all(c in gatesdir.ROOT_CLASSES for c in cv) and len(set(cv)) == len(cv)):
+        return "red", "gate file has no valid covers (a non-empty list of %s)" % "/".join(gatesdir.ROOT_CLASSES)
+    seen = sorted(set(cv) & present)
+    if st == "green" and u == 0 and seen:
+        return "red", "vacuous: universe 0 while admitted roots of class %s exist" % ",".join(seen)
+    return st, ""
+
+
 def cmd_run(a):
     o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1, "--env-id": 1, "--cache": 1})
     spec = _load(o["--gates"], "gates")
@@ -128,8 +151,11 @@ def cmd_run(a):
     if "--cache" in o:
         genv["GATE_CACHE"] = os.path.abspath(o["--cache"])
         os.makedirs(genv["GATE_CACHE"], exist_ok=True)
+    detail = o["--out"] + ".detail"   # the gates' full findings outlive the temporary work directory: GATE_DETAIL/<gate> beside the verdict file
+    shutil.rmtree(detail, ignore_errors=True)
     res, t_all = [], time.time()
     try:
+        present = _present_classes(wt)
         for g in gates:
             out = os.path.join(work, "gate-%d" % len(res))
             tmp = os.path.join(work, "tmp-%d" % len(res))
@@ -137,7 +163,7 @@ def cmd_run(a):
             os.makedirs(tmp)
             t0 = time.time()
             try:
-                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp),
+                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp, GATE_DETAIL=os.path.join(detail, g["name"])),
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
                 st, u, c, why = _gate_result(g, out, rc)
             except OSError as e:
@@ -153,6 +179,9 @@ def cmd_run(a):
                     x for x in ("in its TMPDIR: " + ",".join(left[:20]) if left else "",
                                 "in the worktree: " + ",".join(dirty[:20]) if dirty else "") if x)
                 _git(wt, "clean", "-fdxq")
+            st2, why2 = _covers_verdict(g, st, u, present)
+            if st2 != st:
+                st, why = st2, why2 if st == "green" else why + "; " + why2
             res.append({"name": g["name"], "status": st, "universe": u, "certified": c,
                         "seconds": round(time.time() - t0, 3), "reason": why})
     finally:
@@ -226,6 +255,17 @@ def cmd_merge(a):
         gone = sorted({g["name"] for g in prev["gates"]} - {g["name"] for g in v["gates"]})
         if gone:
             raise Err("blocked: ratchet, gate(s) removed since previous green verdict: " + ",".join(gone), 2)
+    # the registry ratchet: every id and alias the base registry held is still held, live or retired (gate_assumptions.ratchet_errors)
+    brc, btxt, _ = _git(repo, "show", old + ":" + gate_assumptions.REGISTRY)
+    if brc == 0:
+        nrc, ntxt, nerr = _git(repo, "show", tree + ":" + gate_assumptions.REGISTRY)
+        try:
+            lost = gate_assumptions.ratchet_errors(json.loads(btxt), json.loads(ntxt)) if nrc == 0 else \
+                [gate_assumptions.finding("ratchet-id", "registry", "the registry is missing from the merge tree")]
+        except ValueError:
+            lost = [gate_assumptions.finding("ratchet-id", "registry", "a registry is not JSON")]
+        if lost:
+            raise Err("blocked: ratchet, registry: " + "; ".join(str(x) for x in lost[:10]), 2)
     msg = "%smerge %s\n\nverdict: green, tree %s, gates %d\n" % (o.get("--message-prefix", ""), o["--from"], tree, len(v["gates"]))
     new = _git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp=msg)
     rc, _, err = (0, "", "") if "--base" in o else _git(repo, "update-ref", ref, new, old)

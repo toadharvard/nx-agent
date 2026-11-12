@@ -46,7 +46,8 @@
       "-fno-stack-protector",
       "-fno-stack-clash-protection",
       "-U_FORTIFY_SOURCE",
-      "-fno-math-errno"
+      "-fno-math-errno",
+      "-fno-reorder-blocks-and-partition"
     ]
   },
   "provenance": {

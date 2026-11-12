@@ -1,6 +1,42 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_abi.py": {
+   "references": [
+    {
+     "anchor": "## link/abi.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/abi.py"
+   ]
+  },
+  "test_abi_msvcname.py": {
+   "references": [
+    {
+     "anchor": "## link/abi_msvcname.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/abi_msvcname.py"
+   ]
+  },
+  "test_exevft.py": {
+   "references": [
+    {
+     "anchor": "## link/exevft.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/exevft.py"
+   ]
+  },
   "test_gate_abs.py": {
    "references": [
     {
@@ -11,6 +47,19 @@
    ],
    "subject": [
     "ports/fnv-nx/link/gate_abs.py"
+   ]
+  },
+  "test_gate_addr.py": {
+   "references": [
+    {
+     "anchor": "L1-L64",
+     "kind": "spec",
+     "path": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_addr.py",
+    "ports/fnv-nx/link/addrsec.py"
    ]
   },
   "test_gate_disp.py": {
@@ -25,6 +74,44 @@
     "ports/fnv-nx/link/gate_disp.py"
    ]
   },
+  "test_gate_names.py": {
+   "references": [
+    {
+     "anchor": "## link/gate_names.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_names.py"
+   ]
+  },
+  "test_gate_order.py": {
+   "references": [
+    {
+     "anchor": "### Object rules (checked on the code, not on the compiler flags)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/docs/ORDERING.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_order.py",
+    "ports/fnv-nx/link/a64order.py",
+    "ports/fnv-nx/link/framesec.py"
+   ]
+  },
+  "test_gate_r7.py": {
+   "references": [
+    {
+     "anchor": "## link/gate_r7.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_r7.py"
+   ]
+  },
   "test_ice_poly_byvalue.py": {
    "references": [
     {
@@ -37,6 +124,18 @@
     "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
    ]
   },
+  "test_odr.py": {
+   "references": [
+    {
+     "anchor": "## link/odr.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/odr.py"
+   ]
+  },
   "test_order_cont.py": {
    "references": [
     {
@@ -47,6 +146,42 @@
    ],
    "subject": [
     "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
+   ]
+  },
+  "test_thisadj.py": {
+   "references": [
+    {
+     "anchor": "### MSVC entries at a secondary base (`thisadj.py`, S2c-abi)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/docs/LINK.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/thisadj.py"
+   ]
+  },
+  "test_vslots.py": {
+   "references": [
+    {
+     "anchor": "## Vtable slots through the MSVC vftables (`vslots.py`, D12)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/docs/LINK.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/vslots.py"
+   ]
+  },
+  "test_vtables.py": {
+   "references": [
+    {
+     "anchor": "## Vtables (`vtables.py`, kind `V`, D7)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/docs/LINK.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/vtables.py"
    ]
   }
  }
