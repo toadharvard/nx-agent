@@ -15,7 +15,7 @@ RULE (per image; reached code = ranges.tsv; entries = universe.tsv; both are fac
             register at a call whose callee is unknown or writes it, a tail jump), a merge with a non-constant (add/sub of a register, mixed join), an escape of the
             address of the return slot, any unknown use (an instruction that reads the value in a form this rule does not type), a control target that is not an entry,
             a return address read in an entry that has callers the facts do not enumerate (an indirectly reached entry).
-  esp       callee-saved behaviour is not assumed. `esp-lost` counts the places where the tracked esp offset was lost (a call whose stack effect is not known, alloca):
+  esp       callee-saved behaviour is read from the callee code only. `esp-lost` counts the places where the tracked esp offset was lost (a call whose stack effect is not known, alloca):
             a read of the stack through a lost esp cannot be typed and is RED (`esp-lost-read`) only if the return-address slot of the entry is still live there.
 Output: <outdir>/pcsources.tsv (entry, site, source, consumer, detail; red rows marked RED) and gate_pcsrc.json. Deterministic (sorted iteration)."""
 import os, sys, json, bisect
@@ -624,7 +624,7 @@ def analyse_entry(img, e, mode='owner', force=False):
 
 
 def writes_of_unused(img, e, _memo={}):
-    """registers written by the entry e and by everything it calls directly (a pop that restores a register still counts as a write: callee-saved behaviour is not assumed).
+    """registers written by the entry e and by everything it calls directly (a pop that restores a register still counts as a write: callee-saved behaviour is read from the callee code only).
     None = a callee is unknown (an indirect call, a call outside the entries)."""
     key = (id(img), e)
     if key in _memo: return _memo[key]
