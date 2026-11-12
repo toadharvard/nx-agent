@@ -87,6 +87,7 @@ int plugin_is_GPL_compatible;
 
 struct facts { std::string verdict; std::set<std::string> types; bool emitted, mem; };
 static std::map<std::string, facts> early;       /* by assembler name of the function */
+static std::map<unsigned, std::set<std::string> > by_origin;   /* DECL_UID of DECL_ORIGIN -> early functions with that origin */
 static std::vector<std::string> lines;
 static std::set<std::string> all_thunks;          /* every thunk of the unit, listed before code generation */
 static std::set<std::string> thunk_rows;          /* thunks that went through the passes */
@@ -610,6 +611,7 @@ struct cfg_pass : gimple_opt_pass {
     f.mem = unproven_memory_read(fun);
     free_dominance_info(CDI_DOMINATORS);
     early[asmname(fn)] = f;
+    if (DECL_ORIGIN(fn) != fn) by_origin[DECL_UID(DECL_ORIGIN(fn))].insert(asmname(fn));
     return 0;
   }
 };
@@ -656,6 +658,20 @@ struct late_pass : gimple_opt_pass {
        initializer's own symbol has the file name in it, dots and all) */
     std::string name = asmname(fun->decl), clone;
     std::map<std::string, facts>::iterator e = early.find(name);
+    /* (1) an IPA clone (isra, constprop, ...): the callgraph records the function it was materialized from,
+       transitively (cgraph_node::former_clone_of). For a clone of a C++ constructor/destructor variant (C1/C2/D1/D2)
+       this is the variant itself, while the declaration's abstract origin skips it and names the abstract
+       maybe-in-charge function (C4/D4), which has no body of its own. */
+    if (e == early.end())
+      if (cgraph_node *cn = cgraph_node::get(fun->decl))
+        if (cn->former_clone_of && DECL_ASSEMBLER_NAME_SET_P(cn->former_clone_of)) {
+          std::string on = asmname(cn->former_clone_of);
+          if ((e = early.find(on)) != early.end()) {
+            clone = name.compare(0, on.size() + 1, on + ".") == 0 ? name.substr(on.size() + 1) : name;
+            name = on;
+          }
+        }
+    /* (2) a copy whose declaration names its origin (DECL_ABSTRACT_ORIGIN), walked up */
     for (tree o = fun->decl; e == early.end() && DECL_ABSTRACT_ORIGIN(o) && DECL_ABSTRACT_ORIGIN(o) != o
          && TREE_CODE(DECL_ABSTRACT_ORIGIN(o)) == FUNCTION_DECL;) {
       o = DECL_ABSTRACT_ORIGIN(o);
@@ -665,6 +681,18 @@ struct late_pass : gimple_opt_pass {
         clone = name.compare(0, on.size() + 1, on + ".") == 0 ? name.substr(on.size() + 1) : name;
         name = on;
       }
+    }
+    /* (3) a version clone (ipa-split `.part`) of a constructor/destructor variant: no callgraph link, and its
+       abstract origin is the variant's own origin, shared by C1/C2/C3. Candidates are the early functions with that
+       origin; the one it was copied from is the candidate whose assembler name, followed by ".", begins the
+       clone's (clone_function_name: original name, ".", suffix). Exactly one, else the error below. */
+    if (e == early.end()) {
+      std::map<unsigned, std::set<std::string> >::iterator c = by_origin.find(DECL_UID(DECL_ORIGIN(fun->decl)));
+      std::string hit; int n = 0;
+      if (c != by_origin.end())
+        for (std::set<std::string>::iterator i = c->second.begin(); i != c->second.end(); ++i)
+          if (name.compare(0, i->size() + 1, *i + ".") == 0) { hit = *i; n++; }
+      if (n == 1) { e = early.find(hit); clone = name.substr(hit.size() + 1); name = hit; }
     }
     if (e == early.end()) {
       /* a this-adjusting thunk: made by the compiler, an adjustment and a jump */
