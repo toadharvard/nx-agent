@@ -102,7 +102,7 @@ static void add_var(tree d)
 {
   if (!d || TREE_CODE(d) != VAR_DECL || !TREE_STATIC(d) || DECL_EXTERNAL(d)) return;
   if (DECL_HARD_REGISTER(d)) return;   /* a global register variable is no memory: no extent */
-  if (processing_template_decl || uses_template_parms(TREE_TYPE(d))) return;
+  if (fnvnx_cxx_fe() && (processing_template_decl || uses_template_parms(TREE_TYPE(d)))) return;   /* (cc1: no templates) */
   if (vars_set.insert(d).second) { vars.push_back(d); keep_vars = tree_cons(NULL_TREE, d, keep_vars); }
 }
 
@@ -283,7 +283,7 @@ static void emit_objects()
     tree e = type;
     while (TREE_CODE(e) == ARRAY_TYPE) e = TREE_TYPE(e);
     std::string elem = "-";
-    if (RECORD_OR_UNION_TYPE_P(e) && (CLASS_TYPE_P(e) || TREE_CODE(e) == UNION_TYPE) && COMPLETE_TYPE_P(e)) {
+    if (RECORD_OR_UNION_TYPE_P(e) && (!fnvnx_cxx_fe() || CLASS_TYPE_P(e) || TREE_CODE(e) == UNION_TYPE) && COMPLETE_TYPE_P(e)) {
       std::string why;
       elem = key_of(TYPE_MAIN_VARIANT(e), why);
     }
