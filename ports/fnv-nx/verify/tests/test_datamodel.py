@@ -41,7 +41,7 @@ def main():
     other = tg.guest_repo("d3", tg.guest_rec(dict(ext, commit="c" * 40)), pin)
     rc, r, o = gate(other, cache)
     check("guest root on another commit of the external: red", rc == 2 and ROOT + ":compiler" in r["uncertified"], r)
-    check("the semantics flags of the recipe rule are the pin's (one source)", tuple(pin["flags"]["semantics"]) == recipe.SEMANTICS_FLAGS and "-mabi=ilp32" in recipe.SEMANTICS_FLAGS
+    check("the semantics flags of the recipe rule are the pin's (one source)", tuple(pin["flags"]["semantics"]["common"]) == recipe.SEMANTICS_FLAGS and "-mabi=ilp32" in recipe.SEMANTICS_FLAGS
           and "-mno-outline-atomics" in recipe.SEMANTICS_FLAGS and "-ffp-contract=off" in recipe.SEMANTICS_FLAGS, pin["flags"])
     # the certificate of a unit, on a CC stage document (pure function of the document and the semantic set of the unit's language)
     sem = list(recipe.SEMANTICS_FLAGS)

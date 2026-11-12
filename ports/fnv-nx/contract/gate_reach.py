@@ -24,6 +24,12 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              A further clause `ret != V on every path to the site` (V a number): on every control-flow path from that call to the
              site the result was compared with V by a still-valid copy and the path crossed the `!= V` edge of the deciding branch
              (argflow.result_predicate: cmp / test / inc idioms, flags not redefined; anything else is `ret-predicate` open).
+  closure_key  `dispatcher=NAME`  (dll `-`, name = the dispatcher symbol, arg_index 0): every value that reaches the dispatcher NAME (native
+             fnvnx_dispatch, lifted fnvl_dispatch) is a key of its table.  Inputs: --dispatcher NAME=ENTRIES,CLOSURE,SOURCES (ENTRIES: dispgen's
+             rows `addr<TAB>sym`; with `dispatcher=NAME;miss=fallthrough` (a miss goes on to the next dispatcher) the check (ii) is the other way: every key is a closure address; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
+             of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES) and --loadlib loadlib.tsv.  CERTIFIED iff (i) every
+             source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress / LoadLibrary site is open (the gpa
+             rows and loadlib.tsv).  While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -40,7 +46,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017)
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -48,18 +54,18 @@ Proof argument: (a) says that the argument at every call that can execute is in 
 all paths of the function backwards, expands own parameters to every caller, and is closed or reports a break); (b) says that no
 call can execute that is not a static use of the slot (the only way to get an import's address other than its slot is
 GetProcAddress, G1; a forwarder chain between distinct dll names is not followed, G2); therefore no execution passes a value
-outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and
+outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-018, ASM-019)
 that the facts' ranges contain every executed instruction of the images (A4).  The certificate fixes the set of images by hash
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
 Outputs ($GATE_OUT, gatefile.py): reach.json (gate `reach`; universe = facts, certified = certified facts; uncertified ids
-`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids
+`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids (ASM-016)
 (all of them, sorted), reach.facts.tsv (`fact_id<TAB>sha256 of the certificate`, certified facts only, sorted by id).  --out: per
 fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<DLL>_<NAME>_<n> with n the 1-based position among
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
 
 Mode --objects (gate `reachlink`, the link side).  The universe is every reference to the ELF symbol fnvnx_reach_violation in the
-objects and archive members of the response file (one quoted path per line, ld.py's inputs.rsp), read from the relocation
+objects and archive members of the response file (one quoted path per line, a response file of the link, inputs.rsp), read from the relocation
 tables (sh_info of a SHT_RELA / SHT_REL names the section; no text).  A reference is green iff
   - it is a R_AARCH64_P32_CALL26 / JUMP26 in an executable section (any other reference, e.g. a pointer in data, lets w0 be
     anything: `reference-not-call`);
@@ -92,7 +98,9 @@ import relocs
 BASE_ASSUMPTIONS = ('A1', 'A2', 'A3', 'A4', 'A5', 'A6')
 BLOCKING = ('A7',)
 COLUMNS = ['request', 'dll', 'name', 'arg_index', 'kind', 'values', 'note']
-KINDS = {'imm_set': 'imm_set', 'imm_mask': 'imm_mask', 'result_of': 'result_of', 'handle_origin': 'result_of'}
+KINDS = {'imm_set': 'imm_set', 'imm_mask': 'imm_mask', 'result_of': 'result_of', 'handle_origin': 'result_of', 'closure_key': 'closure_key'}
+CLOSURE_SOURCES = ('r3_reloc', 'pcsrc', 'export', 'tls', 'entry', 'eh', 'no_s4_arith')  # the sources of a code address (the lift's item 22)
+MEASUREMENT = ('gpa-open', 'gpa-uncovered', 'gpa-ordinal-import', 'loadlib-open')  # reasons that only say `not valid yet`
 SYMBOL = 'fnvnx_reach_violation'
 M32 = 0xffffffff
 
@@ -135,6 +143,11 @@ def parse_values(kind, text):
         return {'forbidden': sorted({num(x) for x in vals})}
     if kind == 'imm_mask':
         return {'mask': num(text)}
+    if kind == 'closure_key':
+        head, _, tail = text.partition(';')
+        if not head.startswith('dispatcher=') or not head[11:].strip().isidentifier() or tail.strip() not in ('', 'miss=fallthrough'):
+            raise FormatError('closure_key values must be `dispatcher=NAME` or `dispatcher=NAME;miss=fallthrough`')
+        return {'dispatcher': head[11:].strip(), 'fallthrough': bool(tail.strip())}
     parts = [p.strip() for p in text.split(';') if p.strip()]
     if not parts or not parts[0].startswith('callee='):
         raise FormatError('result_of values must start with callee=')
@@ -171,7 +184,9 @@ def parse_requests(text):
         if f[4] not in KINDS:
             raise FormatError('unknown kind %r' % f[4])
         kind = KINDS[f[4]]
-        out.append(dict(request=f[0], dll=iat.norm_dll(f[1]), name=f[2], k=int(f[3], 10), kind=kind,
+        if kind == 'closure_key' and f[1] != '-':
+            raise FormatError('closure_key rows have dll `-`')
+        out.append(dict(request=f[0], dll=f[1] if kind == 'closure_key' else iat.norm_dll(f[1]), name=f[2], k=int(f[3], 10), kind=kind,
                         spec=parse_values(kind, f[5]), note=f[6] if len(f) > 6 else ''))
     out.sort(key=lambda r: (r['dll'], r['name'], r['k'], r['kind'], canon(r['spec'])))
     for i in range(1, len(out)):
@@ -340,8 +355,73 @@ def check_result_of(f, nm, img, call):
     f.sites.append(dict(image=nm, call='%x' % call, mode=mode, origins=out, **({'ret': rp} if rp else {})))
 
 
-def check_request(req, images, gpa_global, gpa_pairs):
+def read_rows(text):
+    return [l.split('\t') for l in text.split('\n') if l.strip() and not l.startswith('#')]
+
+
+def check_closure_key(f, gpa_global, ctx):
+    """closure_key: sources closed, closure subset of keys, no open dynamic load.  Records the digests of the three files."""
+    name = f.req['spec']['dispatcher']
+    d = ctx['dispatchers'].get(name)
+    if d is None:
+        f.fail('dispatcher-missing', name, '-', 'no --dispatcher %s=ENTRIES,CLOSURE,SOURCES' % name)
+        return
+    entries, closure, sources = d
+    keys = set()
+    for r in read_rows(entries):
+        try:
+            keys.add(int(r[0], 16))
+        except ValueError:
+            f.fail('entries-format', name, '-', 'row %r' % r[0][:20])
+    status = {}
+    for r in read_rows(sources):
+        if len(r) < 2:
+            f.fail('sources-format', name, '-', 'row %r' % r[0][:20])
+        else:
+            status[r[0]] = r[1]
+    for src in CLOSURE_SOURCES:
+        if status.get(src) != 'closed':
+            f.fail('source-open', name, src, 'source %s is %s' % (src, status.get(src, 'absent')))
+    miss, n = [], 0
+    for r in read_rows(closure):
+        try:
+            a = int(r[0], 16)
+        except ValueError:
+            f.fail('closure-format', name, '-', 'row %r' % r[0][:20])
+            continue
+        n += 1
+        if a not in keys:
+            miss.append(a)
+    if f.req['spec'].get('fallthrough'):  # a miss falls through to the next dispatcher: every key must be a closure address (the closure is judged there)
+        cl = set()
+        for r in read_rows(closure):
+            try:
+                cl.add(int(r[0], 16))
+            except ValueError:
+                pass
+        for a in sorted(keys - cl):
+            f.fail('key-outside-closure', name, '0x%x' % a, 'table key is not a closure address')
+        miss = []
+    for a in sorted(set(miss)):
+        f.fail('closure-missing', name, '0x%x' % a, 'closure address has no key')
+    if ctx.get('loadlib') is None:
+        f.fail('loadlib-open', name, '-', 'no --loadlib: the open dynamic loads are unknown')
+    else:
+        for r in read_rows(ctx['loadlib']):
+            if r[0] != 'module' and len(r) > 4 and r[4] != 'closed':
+                f.fail('loadlib-open', r[0], r[1], 'site is %s' % r[4])
+    f.examined = n
+    f.sites.append(dict(dispatcher=name, entries=sha(entries), closure=sha(closure), sources=sha(sources), keys=len(keys), closure_n=n,
+                        loadlib=sha(ctx['loadlib']) if ctx.get('loadlib') is not None else None))
+    for reason, nm, addr in gpa_global:
+        f.fail(reason, nm, addr)
+
+
+def check_request(req, images, gpa_global, gpa_pairs, ctx=None):
     f = Fact(req)
+    if req['kind'] == 'closure_key':
+        check_closure_key(f, gpa_global, ctx or {'dispatchers': {}})
+        return f
     for nm in sorted(images):
         img = images[nm]
         slots = sorted(s for s, (d, n) in img.imports.items() if n == req['name'] and iat.norm_dll(d) == req['dll'])
@@ -376,12 +456,12 @@ def certificate(f, imgmeta, gpa_digest):
                       images=imgmeta, gpa=gpa_digest, assumptions=list(BASE_ASSUMPTIONS) + sorted(f.assumptions), sites=sorted(f.sites, key=canon)))
 
 
-def run(reqs, images, imgmeta, gpa_rows):
+def run(reqs, images, imgmeta, gpa_rows, ctx=None):
     """-> (facts [Fact], certificates {id: sha256}); a fact is certified iff it has no reason."""
     g, pairs, dig = gpa_state(images, gpa_rows)
     facts, certs = [], {}
     for r in reqs:
-        f = check_request(r, images, g, pairs)
+        f = check_request(r, images, g, pairs, ctx)
         facts.append(f)
         if not f.reasons:
             certs[r['id']] = sha(certificate(f, imgmeta, dig))
@@ -406,6 +486,13 @@ def header(reqs):
              '#define FNVNX_REACH_FACT_COUNT %d' % len(reqs)]
     seq = {}
     for r in reqs:
+        if r['kind'] == 'closure_key':
+            lines.append('#define FNVNX_REACH_CLOSURE_KEY_%s %d   /* %s: every value reaching %s is a key of its table */' % (
+                macro_part(r['spec']['dispatcher']).upper(), r['id'], r['request'], r['name']))
+            own = 'FNVNX_' + macro_part(r['request'] if r['request'].startswith('REACH_') else 'REACH_' + r['request'])
+            if own != 'FNVNX_REACH_CLOSURE_KEY_' + macro_part(r['spec']['dispatcher']).upper():
+                lines.append('#define %s %d' % (own, r['id']))
+            continue
         key = (r['dll'], r['name'])
         seq[key] = seq.get(key, 0) + 1
         dll = r['dll'][:-4] if r['dll'].endswith('.dll') else r['dll']
@@ -423,7 +510,8 @@ def report_tsv(facts, certs):
         r = f.req
         rs = ['%s@%s:%s%s' % (a, b, c, ' (%s)' % f.detail[(a, b, c)] if (a, b, c) in f.detail else '') for a, b, c in sorted(f.reasons)]
         lines.append('\t'.join([str(r['id']), r['request'], '%s!%s' % (r['dll'], r['name']), str(r['k']), r['kind'],
-                                'certified' if r['id'] in certs else 'uncertified', str(f.examined), ' | '.join(rs) or '-']))
+                                'certified' if r['id'] in certs else 'measurement' if r['kind'] == 'closure_key' and f.reasons and all(a in MEASUREMENT for a, _, _ in f.reasons) else 'uncertified',
+                                str(f.examined), ' | '.join(rs) or '-']))
     return '\n'.join(lines) + '\n'
 
 
@@ -440,6 +528,9 @@ def gate(facts, certs, g, nimages):
     uf = sum(1 for f in facts if f.reasons)
     open_note = ('GetProcAddress is open in the image set (%d sites/refs): certificates are not valid yet' % len(g)) if g else \
         'GetProcAddress closed over the image set'
+    meas = sum(1 for f in facts if f.req['kind'] == 'closure_key' and f.reasons and all(a in MEASUREMENT for a, _, _ in f.reasons))
+    if meas:
+        open_note += '; %d closure_key facts are measurement only (open dynamic loads: not valid yet)' % meas
     detail = '%d facts, %d certified over %d images; %s' % (len(facts), len(facts) - uf, nimages, open_note)
     gatefile.write('reach', len(facts), len(facts) - uf, unc, detail)
     gateids.write_ids('reach', unc)
@@ -640,6 +731,8 @@ def main(argv=None):
     ap.add_argument('--out')
     ap.add_argument('--facts-h')
     ap.add_argument('--facts-tsv')
+    ap.add_argument('--dispatcher', action='append', default=[], help='NAME=entries.tsv,closure.tsv,sources.tsv (closure_key)')
+    ap.add_argument('--loadlib', help='loadlib.tsv (closure_key: its open sites)')
     ap.add_argument('--objects')
     ap.add_argument('--certified')
     a = ap.parse_args(argv)
@@ -667,7 +760,13 @@ def main(argv=None):
     images, meta = load_images(a.image, stacks, info)
     with open(a.gpa) as fh:
         rows = read_gpa(fh.read())
-    facts, certs, g = run(reqs, images, meta, rows)
+    ctx = {'dispatchers': {}, 'loadlib': None}
+    for dsp in a.dispatcher:
+        nm, rest = dsp.split('=', 1)
+        ctx['dispatchers'][nm] = tuple(open(p).read() for p in rest.split(','))
+    if a.loadlib:
+        ctx['loadlib'] = open(a.loadlib).read()
+    facts, certs, g = run(reqs, images, meta, rows, ctx)
     if a.out:
         write(a.out, report_tsv(facts, certs))
     if a.facts_h:

@@ -11,6 +11,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import gate_hostapi as g  # noqa: E402
+import scratch  # noqa: E402
+
+scratch.install()   # every mkdtemp is removed synchronously at exit
 
 FAILED = []
 

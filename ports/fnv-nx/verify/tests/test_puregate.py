@@ -7,6 +7,11 @@ import os
 import subprocess
 import sys
 import tempfile
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of this test lives here and is removed at exit
+atexit.register(shutil.rmtree, tempfile.tempdir, True)
 from textwrap import dedent
 
 HERE = os.path.dirname(os.path.abspath(__file__))

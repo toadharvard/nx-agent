@@ -17,8 +17,11 @@ python script on it. The sandbox has no host /usr, so the interpreter is a conte
      Libraries found inside an included tree need no input. Roots of the closure: the interpreter, every ELF file
      of the extension-module directory (sysconfig DESTSHARED) and of every --site package.
  (c) the standard library: the target interpreter runs once with `-s -B -c` under the stage environment (this is the builder,
-     not a stage) and reports sys.prefix, sys.exec_prefix, sys.path, sys.version. Every sys.path entry that exists is included
-     whole (directory = tree, zip = file), except directories named exactly `__pycache__` (stages run with -B, inputs read-only). A sys.path entry that is a symlink is kept as the symlink if it
+     not a stage) and reports sys.prefix, sys.exec_prefix, sys.path, sys.version, its stdlib/platstdlib directories and its third-party
+     directories (purelib, platlib, site.getsitepackages()). Every sys.path entry that exists and lies inside the stdlib directories is
+     included whole (directory = tree, zip = file), except directories named exactly `__pycache__` (stages run with -B, inputs read-only)
+     and the content of the third-party directories, which enters only through (d): what else is installed on the machine is not
+     declared, so it is neither an input nor part of runtime_id. A sys.path entry outside the stdlib directories is not included. A sys.path entry that is a symlink is kept as the symlink if it
      lies inside another entry (here site-packages -> dist-packages), else an error. Inputs nested in another input are dropped.
  (d) each --site PKG (top-level name): importlib.util.find_spec in the target with `-s` (user-site is off: not found = error).
      Its package directory (or module file) is covered by (c), or else added at its real path.
@@ -55,7 +58,10 @@ ENV = {"PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE"
 X86_64 = (2, 1, 62)  # EI_CLASS ELFCLASS64, EI_DATA ELFDATA2LSB, EM_X86_64
 DEFAULT_DIRS = ["/lib", "/usr/lib", "/lib64", "/usr/lib64"]
 INFO = ("import sys,os,json,sysconfig,importlib.util\n"
+        "import site,sysconfig as sc\n"
+        "P=sc.get_paths()\n"
         "r={'prefix':sys.prefix,'exec_prefix':sys.exec_prefix,'path':sys.path,'version':sys.version,"
+        "'stdlib':[P['stdlib'],P['platstdlib']],'third':[P['purelib'],P['platlib']]+site.getsitepackages(),"
         "'real':os.path.realpath(sys.executable),'dynload':sysconfig.get_config_var('DESTSHARED'),'sites':{}}\n"
         "for n in sys.argv[1:]:\n s=importlib.util.find_spec(n)\n"
         " r['sites'][n]=None if s is None else [s.origin,list(s.submodule_search_locations or [])]\n"
@@ -174,11 +180,19 @@ def elf_files(d, want):
     return sorted(os.path.join(r, f) for r, ds, fs in os.walk(d) if "__pycache__" not in r for f in fs
                   if is_elf(os.path.join(r, f)) and ident(os.path.join(r, f)) == want)
 
-def ingest_tree(d, store):
-    ex = []
-    for root, dirs, _ in os.walk(d):
+def ingest_tree(d, store, third=(), keep=()):
+    """Tree of D without __pycache__ and without the content of the THIRD directories (realpaths) inside it, except the paths KEEP
+    (realpaths of declared packages): a child of a third directory is left out unless it is, or lies on the way to, a kept path."""
+    ex, d = [], os.path.realpath(d)
+    for root, dirs, files in os.walk(d):
         ex += [os.path.relpath(os.path.join(root, x), d) for x in dirs if x == "__pycache__"]
         dirs[:] = [x for x in dirs if x != "__pycache__"]
+        if os.path.realpath(root) in third:
+            for x in dirs + files:
+                q = os.path.join(root, x)
+                if not any(under(k, q) or under(q, k) for k in keep):
+                    ex.append(os.path.relpath(q, d))
+            dirs[:] = [x for x in dirs if any(under(k, os.path.join(root, x)) or under(os.path.join(root, x), k) for k in keep)]
     return cas.ingest(d, store, ex)
 
 def build(store, python, sites):
@@ -188,8 +202,13 @@ def build(store, python, sites):
         raise RtError("cannot query %s: %s" % (real, p.stderr.strip()[-300:]))
     info = json.loads(p.stdout)
     want = ident(real)
-    trees = sorted({e for e in info["path"] if e.startswith("/") and os.path.lexists(e)})
-    extra, roots = {}, []
+    lib = [os.path.realpath(x) for x in info["stdlib"]]
+    third = {os.path.realpath(x) for x in info["third"]}
+    # the interpreter's own library only: a sys.path entry that is a third-party directory (site-/dist-packages, PYTHONPATH, .pth) or
+    # lies outside the stdlib directories is not part of the runtime; a declared --site package is (below)
+    trees = sorted({e for e in info["path"] if e.startswith("/") and os.path.lexists(e)
+                    and any(under(os.path.realpath(e), t) for t in lib) and not any(under(os.path.realpath(e), t) for t in third)})
+    extra, roots, keep = {}, [], []
     for n in sites:
         if "." in n or info["sites"][n] is None:
             raise RtError("--site %s: not a top-level module findable with -s (user-site is disabled)" % n)
@@ -198,7 +217,9 @@ def build(store, python, sites):
             if not loc or loc in ("built-in", "frozen"):
                 raise RtError("--site %s: no file location" % n)
             loc = os.path.realpath(loc)
-            if not any(under(loc, t) for t in trees):
+            if any(under(loc, os.path.realpath(t)) for t in trees):
+                keep.append(loc)
+            else:
                 extra[loc] = loc
             roots += elf_files(loc, want) if os.path.isdir(loc) else [loc] * (is_elf(loc) and ident(loc) == want)
     dyn = info["dynload"]
@@ -221,7 +242,7 @@ def build(store, python, sites):
     for a in src:
         if any(b != a and under(a, b) for b in src):
             raise RtError("inputs nest: %s" % a)
-    inputs = [{"at": at, "tree": ingest_tree(s, store) if os.path.isdir(s) else cas.ingest(s, store)} for at, s in sorted(src.items())]
+    inputs = [{"at": at, "tree": ingest_tree(s, store, third, keep) if os.path.isdir(s) else cas.ingest(s, store)} for at, s in sorted(src.items())]
     shutil.rmtree(stage_dir)
     return {"format": FORMAT, "python": real, "version": info["version"], "inputs": inputs, "env": dict(ENV),
             "runtime_id": cas.stage_key(inputs)}

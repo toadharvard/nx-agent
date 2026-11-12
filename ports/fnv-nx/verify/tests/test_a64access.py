@@ -1,7 +1,11 @@
 """a64access test: needs LLVM 18 development files (llvm-18-dev). FAILS, never skips, when they are absent."""
-import os, re, struct, subprocess, tempfile, unittest
+import os, re, struct, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+import scratch  # noqa: E402
+
+scratch.install()
 SRC = os.path.join(os.path.dirname(HERE), "a64access.cc")
 BUILD = ("g++ -std=c++17 -O1 $(llvm-config-18 --cxxflags) a64access.cc -o a64access "
          "$(llvm-config-18 --ldflags --libs aarch64 mc mcdisassembler support)")

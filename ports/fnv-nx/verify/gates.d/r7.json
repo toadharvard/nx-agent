@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "r7",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_r7gate.py"
+ ],
+ "result": "r7.json",
+ "covers": [
+  "product-guest"
+ ]
+}

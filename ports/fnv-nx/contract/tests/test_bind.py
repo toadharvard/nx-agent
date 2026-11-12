@@ -4,6 +4,9 @@ import json, os, subprocess, sys, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
+sys.path.insert(0, os.path.join(C, '..', 'verify'))
+import scratch
+scratch.install()
 import bind, store
 
 fails = []
@@ -104,7 +107,9 @@ check('object without rows needs no unit', r.returncode, 0)
 obj[('ghost.o', 'n3')] = [('_Zq', 'ok', (), '', ())]
 store.save(d + '/obj2.json', 'obj', obj)
 r = subprocess.run(cmd[:5] + [d + '/obj2.json'] + cmd[6:] + ['--out', d + '/b3.json'], capture_output=True, text=True)
-check('missing unit status', (r.returncode, 'ghost.o' in r.stderr), (1, True))
+check('object with rows and no unit: no error', r.returncode, 0)
+b3 = store.load(d + '/b3.json', 'bind')
+check('object with rows and no unit binds nothing', (b3['sym'], b3['vt'], b3['n3']), (b['sym'], b['vt'], b['n3']))
 
 for f in fails:
     print('FAIL', f)

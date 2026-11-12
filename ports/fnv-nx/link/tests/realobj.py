@@ -5,6 +5,7 @@ plugins = recipe.PLUGIN_SOURCES / PLUGIN_ARGS), exactly as verify/tests/test_plu
     objects(names)  -> {fixture stem: path of the produced .o}    (built once per process; the store is $GATE_CACHE, else a scratch store)
 The external compiler is fetched by the pin (commit + tree hash) from ARTIFACTS_URL; when it cannot be fetched this raises, never skips.
 """
+import atexit
 import json
 import os
 import shutil
@@ -23,6 +24,20 @@ T = 'ports/fnv-nx/'
 ROOT = T + 'toy'
 FIXDIR = os.path.join(HERE, 'fixtures')
 _cache = {}
+_scratch = []
+
+
+def _mk(prefix):
+    """A scratch directory that is removed when the process exits (objects() results stay valid until then): a caller leaves nothing in TMPDIR."""
+    d = tempfile.mkdtemp(prefix=prefix)
+    _scratch.append(d)
+    return d
+
+
+@atexit.register
+def _clean():
+    for d in _scratch:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def _git(repo, *a):
@@ -36,9 +51,13 @@ def _w(repo, rel, text):
 
 
 def _store():
-    d = os.environ.get('GATE_CACHE') or os.path.join(tempfile.gettempdir(), 'realobj-store')
-    os.makedirs(d, exist_ok=True)
-    return d
+    d = os.environ.get('GATE_CACHE')
+    if d:
+        os.makedirs(d, exist_ok=True)
+        return d
+    if 'store' not in _cache:
+        _cache['store'] = _mk('realobj-store-')
+    return _cache['store']
 
 
 def build(sources, plugins=None, lifted=False, flags=()):
@@ -46,7 +65,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     'failure' holding the stage, exit and the compiler's stderr tail).  PLUGINS: None = all of recipe.PLUGIN_SOURCES, else the names to load (a subset is refused: every guest root loads them all, RECIPE.md gate rule).  LIFTED: the toy root is a lifted-origin root (RECIPE.md): its C++ units are
     outputs of a `generated` step (gen/lift.py writes them) whose pack is an external served from a local git repo through ARTIFACTS_URL; the guest
     FLAGS: extra per-root C++ flags of the recipe (recipe.PER_ROOT: the semantic flags come from the guest compiler pin, the recipe appends them).  The guest compiler external is taken from the store's external cache (fetched by pin on the first native build)."""
-    base = tempfile.mkdtemp(prefix='realobj-')
+    base = _mk('realobj-')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
     ext = pin['external']
     names = list(recipe.PLUGIN_SOURCES) if plugins is None else list(plugins)
@@ -56,9 +75,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
                   **({'inputs': recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES if n in names]
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
            'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.SDD_DEFINE] + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
-           'plugin_cxx': 'x86_64-linux-gnu-g++-13', 'plugins': plugs}
+           'plugins': plugs}
     if not plugs:
-        rec.pop('plugin_cxx')
         rec.pop('plugins')
     repo = os.path.join(base, 'repo')
     os.makedirs(repo)
@@ -89,6 +107,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
         rec['external'] = [ext, {'name': 'pack', 'repo': 'fnv-nx-build', 'ref': 't', 'commit': commit, 'tree_sha256': tree, 'at': '/ext/pack'}]
         _w(repo, T + 'gen/lift.py', lift)
         root['cxx_origin'] = {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'}
+        # a lifted guest root loads the full set too; the origin fixes the arguments: recipe.LIFTED_ARGS where it names a plugin (fnvnx_ftoi lifted)
+        rec['plugins'] = [dict(p, args=dict(recipe.LIFTED_ARGS.get(p['name'], p['args']))) for p in plugs]
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():

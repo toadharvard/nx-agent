@@ -24,15 +24,18 @@ from capstone import x86_const as X
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import store
+import exepin
 
 VERSION = 8
 
 
 class Image:
-    """A PE32 image addressed by virtual address."""
+    """A PE32 image addressed by virtual address.  Image(path) reads the player's exe through exepin.load_exe (the pin is
+    checked before a byte is parsed); Image.parse(data) parses bytes that are already in hand (a test's synthetic PE), so
+    the one way a file becomes an Image is load_exe."""
 
-    def __init__(self, path):
-        self.d = d = open(path, 'rb').read()
+    def __init__(self, path, data=None):
+        self.d = d = exepin.load_exe(path) if data is None else bytes(data)
         self.sha256 = hashlib.sha256(d).hexdigest()
         pe = struct.unpack_from('<I', d, 0x3c)[0]
         nsec, = struct.unpack_from('<H', d, pe + 6)
@@ -52,6 +55,11 @@ class Image:
         self.rset = set(self.relocs)
         self.imports, self.iat = self._imports()
 
+
+    @classmethod
+    def parse(cls, data):
+        """The image of DATA (bytes of a PE32), with no file read and so no pin: for bytes a caller built itself."""
+        return cls(None, data)
     def sec(self, a):
         for va, vs, ro, rs, n in self._spans:
             if va <= a < va + vs:

@@ -50,6 +50,8 @@
    "at": "/ext/wine"
   }
  ],
+ "ehfacts": "facts",
+ "sites": "facts/sites.tsv",
  "exe": "exe/FalloutNV.exe",
  "msvc": "msvc/obj",
  "universe": "facts/universe.tsv",

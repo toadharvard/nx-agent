@@ -3,7 +3,7 @@
 PASS/FAIL line per case. Needs root (sandbox) and the compilers of verify/env.json. Scratch: mkdtemp, removed at exit.
 Cases: (a) the .so is byte-equal in two cold stores and a warm build runs no stage; (b) a volatile access is ldar/stlr; (c) float -> int is
 MSVC's _ftol (0x80000000 for NaN and out of range) where a root without the plugin has the bare fcvtzs; (d) the gate rule: a native C++
-root without a plugin is invalid (red build gate), a lifted root without plugins builds; the plugin is a declared input of the CC stage."""
+root without a plugin is invalid (red build gate), a lifted root builds with fnvnx_ftoi (mode lifted) alone and is red without it; the plugin is a declared input of the CC stage."""
 import atexit
 import copy
 import glob
@@ -22,9 +22,10 @@ REAL = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout ro
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 import recipe  # noqa: E402
+import scratch  # noqa: E402
 
+scratch.install()   # BASE and every other mkdtemp is removed synchronously at exit
 BASE = tempfile.mkdtemp(prefix="plugin-test-")
-atexit.register(lambda: subprocess.Popen(["rm", "-rf", BASE], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 FAILED = []
 T = "ports/fnv-nx/"
 ROOT = T + "toy"
@@ -34,7 +35,7 @@ P = {p["name"]: p for p in PLUGS}
 SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
        "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + list(recipe.SDD_FLAGS), "asm": []}, "include": [], "units": "all",
-       "plugin_cxx": "x86_64-linux-gnu-g++-13", "plugins": PLUGS}
+       "plugins": PLUGS}
 
 
 def check(name, ok, detail=""):
@@ -107,7 +108,7 @@ def main():
         r = mut(plugins=[p for p in PLUGS if p["name"] != gone])
         e = errs(repo, r)
         check("native root without %s is red" % gone, any("does not load plugin " + gone in x for x in e), e)
-    check("native root without plugins is red", len([x for x in errs(repo, mut(plugins=[], plugin_cxx=None)) if "does not load" in x]) == len(recipe.PLUGIN_SOURCES))
+    check("native root without plugins is red", len([x for x in errs(repo, mut(plugins=[])) if "does not load" in x]) == len(recipe.PLUGIN_SOURCES))
     r = mut(plugins=[dict(p, args=dict(p["args"], args="ltr")) if p["name"] == "fnvnx_order" else p for p in PLUGS])
     check("A/B-only argument value is red", any("arguments must be" in x for x in errs(repo, r)), errs(repo, r))
     check("plugin source outside the pinned file is red", any("source must be" in x or "not a tracked" in x for x in errs(
@@ -116,8 +117,8 @@ def main():
     check("native root without a semantics flag is red", any("lacks -fno-devirtualize" in x for x in errs(repo, mut(
         flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))
     check("-fplugin in flags is red", any("plugin" in x for x in errs(repo, mut(flags={"c": [], "cxx": ["-fplugin=/x.so"], "asm": []}))))
-    check("plugins without plugin_cxx is red", any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx=None))) or
-          any("plugin_cxx" in x for x in errs(repo, {k: v for k, v in REC.items() if k != "plugin_cxx"})))
+    check("a hand-typed plugin_cxx in a build.json is red (the plugin compiler is recipe.PLUGIN_CXX, derived from env.json)",
+          any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx="x86_64-linux-gnu-g++-13"))) and recipe.PLUGIN_CXX == "x86_64-linux-gnu-g++-13")
     nor = make_repo("noorigin", REC, None)
     check("C++ root with no cxx_origin is red", any("cxx_origin" in x for x in errs(nor, REC)), errs(nor, REC))
 
@@ -138,6 +139,10 @@ def main():
     secs = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", o], capture_output=True, text=True).stdout
     have = set(x for x in secs.split() if ".fnvnx" in x)
     check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout"} <= have, sorted(have))
+    check("addr plugin wrote .fnvnx.addr (symbol, seen, routed; seen == routed), no .cold section", ".fnvnx.addr" in have and not any(".cold" in x for x in secs.split()), sorted(have))
+    rows = subprocess.run(["aarch64-linux-gnu-objcopy", "-O", "binary", "--set-section-flags=.fnvnx.addr=alloc,load", "--only-section=.fnvnx.addr", o, "/dev/stdout"], capture_output=True, text=True).stdout.splitlines()
+    ok = bool(rows) and all(len(r.split("\t")) == 3 and r.split("\t")[1] == r.split("\t")[2] and r.split("\t")[1].isdigit() for r in rows) and "_Z2rdv" in [r.split("\t")[0] for r in rows]
+    check(".fnvnx.addr lines are <symbol>\\t<seen>\\t<routed> and name the unit's functions", ok, rows[:4])
     und = subprocess.run(["aarch64-linux-gnu-nm", "-u", o], capture_output=True, text=True).stdout
     check("dispatch plugin routes an indirect call through fnvnx_dispatch", "fnvnx_dispatch" in und, und)
     rd, wr_, f2i = disasm(ra, "_Z2rdv"), disasm(ra, "_Z2wri"), disasm(ra, "_Z3f2if")
@@ -146,6 +151,45 @@ def main():
     hw = disasm(ra, "_Z3hrwi")
     check("HARDREG: a global register variable is no memory: no ldar/stlr/dmb, no ICE", all(x not in hw for x in ("ldar", "stlr", "dmb")), hw)
     check("float -> int is _ftol: 0x80000000 for NaN and out of range", "#0x80000000" in f2i, f2i)
+    # fnvnx_ftoi rewrites every FIX_TRUNC_EXPR or fails the compile: a conversion it does not cover (here to __int128) fails the build
+    wide = make_repo("wide", REC, "native", {ROOT + "/c.cc": "__int128 w(double d) { return (__int128)d; }\n"})
+    rwd, _ = build(wide, "W")
+    check("double -> __int128 fails the build with an FTOI error naming both types", rwd["status"] == "red" and any(
+        "FTOI" in x and "double" in x and "__int128" in x for x in rwd["failure"]["stderr"]), rwd.get("failure"))
+    check("the ordinary conversions of the same root still compile", "#0x80000000" in f2i)
+    # --- ORDER-CONT: a block-ending statement without a fall-through edge needs no fence; every resumption point begins with dmb ishld
+    cont_src = (
+        "#include <setjmp.h>\n"
+        "struct NF { void *jb[5]; };\nstruct C { NF *nf; int v; };\n"
+        "void lj(C *c) { if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1); }\n"
+        "void thrower();\nint sj(void **b, int *p) { if (__builtin_setjmp(b)) return *p; thrower(); return 0; }\n"
+        "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
+        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[1]; }\n"
+        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; return 0; }\n")
+    crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
+    rc_, _ = build(crepo, "C")
+    check("ORDER-CONT: longjmp / setjmp / try-catch fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
+    if rc_["status"] == "green":
+        ob = next(x["object"] for x in rc_["objects"] if x["unit"] == "b.cc")
+        syms = {n.split()[-1] for n in subprocess.run(["aarch64-linux-gnu-nm", ob], capture_output=True, text=True).stdout.splitlines()}
+
+        def lines(sym):
+            sym = next((n for n in syms if sym in n and n.startswith("_Z")), sym)
+            return [x.split("\t", 2)[-1].strip() for x in disasm(rc_, sym, "b.cc").split("\n") if "\t" in x]
+        before_ldar = lambda ls: any("dmb\tishld" in x for x in ls) and next(i for i, x in enumerate(ls) if "dmb\tishld" in x) < max(i for i, x in enumerate(ls) if x.startswith("ldar"))  # noqa: E731
+        lj = lines("2ljP1C")
+        hl = lines("2hli")
+        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", not any("dmb" in x and "ishld" in x and False for x in hl) and any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
+        print("DISASM lj:", lj)
+        check("(i) noreturn __builtin_longjmp: no fence needed after it", any(x.startswith("br") or x.startswith("b ") or x.startswith("bl") or x.startswith("ldr") for x in lj) and lj, lj)
+        s2 = lines("2sjPPvPi")
+        check("(ii) __builtin_setjmp: dmb ishld at the receiver, before the load", before_ldar(s2), s2)
+        tc = lines("2tcPi")
+        check("(iii) catch landing pad: dmb ishld before the load in the catch", before_ldar(tc), tc)
+        s3 = lines("3sj2P")
+        i3 = [i for i, x in enumerate(s3) if "_setjmp" in x or "setjmp" in x]
+        print("DISASM sj2:", s3, "\nDISASM sj:", s2, "\nDISASM tc:", tc)
+        check("(iv) setjmp(): dmb ishld right after the call", bool(i3) and any("dmb" in x and "ishld" in x for x in s3[i3[0] + 1:i3[0] + 3]), s3)
     # the plugin is a declared input of the CC stage and its flags are in the stage document
     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
     cc = [d for d in docs if d["stage"] == "cc:a.cc"]
@@ -177,14 +221,19 @@ def main():
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
     lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
+            "plugins": [dict(P["fnvnx_ftoi"], args=dict(recipe.LIFTED_ARGS["fnvnx_ftoi"]))],
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
             "external": [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
-    lift = ('import os\nos.makedirs("/out/gen")\nopen("/out/gen/a.cc", "w").write(%r)\n' % SRC)
+    LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
+    lift = ('import os\nos.makedirs("/out/gen")\nopen("/out/gen/a.cc", "w").write(%r)\n' % LSRC)
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
-    check("lifted root without plugins is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
+    check("lifted root with fnvnx_ftoi in mode lifted is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
+    check("lifted root without fnvnx_ftoi is red", any("does not load plugin fnvnx_ftoi" in x for x in errs(lrepo, dict(lrec, plugins=[]))))
+    check("lifted root with fnvnx_ftoi in mode native is red", any("arguments of a lifted root" in x for x in errs(lrepo, dict(
+        lrec, plugins=[dict(P["fnvnx_ftoi"], args=dict(recipe.PLUGIN_ARGS["fnvnx_ftoi"]))]))))
     os.environ["ARTIFACTS_URL"] = ext
     rl, _ = build(lrepo, "L")
-    check("lifted root without plugins builds green", rl["status"] == "green" and not rl["plugins"], rl.get("failure"))
+    check("lifted root builds green with only fnvnx_ftoi (lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == ["fnvnx_ftoi"], rl.get("failure"))
     if rl["status"] == "green":
         check("without the plugin the conversion is the bare fcvtzs", "#0x80000000" not in disasm(rl, "_Z3f2if", "gen/a.cc") and "fcvtzs" in disasm(rl, "_Z3f2if", "gen/a.cc"))
     # --- the CC stage mounts no external but the compiler's: a new commit of another external re-runs PP only; CC cannot read it
@@ -226,6 +275,10 @@ def main():
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    for what, tool in (("an untracked file", T + "gen/none.py"), ("a file that is not a .py", T + "gen/lift.txt"),
+                       ("a file of the product root", ROOT + "/lift.py")):
+        bad = make_repo("liftby_" + what.replace(" ", "_"), lrec, {"lifted_by": tool, "pack": "pack"}, {T + "gen/lift.py": lift, T + "gen/lift.txt": lift, ROOT + "/lift.py": lift, ROOT + "/a.cc": None})
+        check("lifted_by naming %s is red" % what, any("is not a tracked .py of an admitted tool root" in x for x in errs(bad, lrec)), errs(bad, lrec))
 
 
 if __name__ == "__main__":
