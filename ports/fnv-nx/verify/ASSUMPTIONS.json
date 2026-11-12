@@ -974,20 +974,6 @@
   },
   {
    "id": "ASM-218",
-   "text": "A stack slot at a proved coordinate of a frame whose address does not escape is accessed by its thread only (class PLAIN).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
-   ],
-   "aliases": [
-    "ASM-319",
-    "L3b:A-STACKPRIVATE"
-   ],
-   "status": "REMOVE",
-   "removed_by": "deleted: no consumer since L3a c0d18b76; every guest access is GM/LKA",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-219",
    "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
@@ -1002,7 +988,7 @@
    "owner": "L3a"
   },
   {
-   "id": "ASM-220",
+   "id": "ASM-219",
    "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
@@ -1017,7 +1003,7 @@
    "owner": "L3a"
   },
   {
-   "id": "ASM-221",
+   "id": "ASM-220",
    "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
