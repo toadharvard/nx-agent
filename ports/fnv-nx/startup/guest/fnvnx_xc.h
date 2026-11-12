@@ -1,7 +1,7 @@
-/* fnvnx_xc.h - guest static initialization and termination (stream S10, docs/STARTUP.md).
+/* fnvnx_xc.h - guest static initialization (stream S10, docs/STARTUP.md).
  *
  * The original executable runs its C++ dynamic initializers from the MSVC CRT table __xc_a..__xc_z
- * (_initterm) and its atexit/_onexit handlers in LIFO order from doexit(). Natively:
+ * (_initterm). Natively:
  *
  *   initializers  one native function per original initializer, keyed by its original address, in a table
  *                 generated at link time (startup/tools/mkxctab.py -> fnvnx_xc_table, sorted by address).
@@ -9,10 +9,8 @@
  *                 exe's own objects (docs/STARTUP.md, "Why address order"). Mode IMAGE (exe mapped by S3):
  *                 run in the order of the image's own __xc table, captured before S3 rewrites code
  *                 pointers; the image only decides the order, the natives always come from fnvnx_xc_table.
- *   termination   one MSVC-style onexit table for the game (atexit, _onexit, the ??__F registrations made by
- *                 the generated initializers and, once S2 renames it in game objects, __cxa_atexit), run by
- *                 fnvnx_xc_doexit() with doexit() semantics before the platform's own exit (newlib exit:
- *                 its atexit list and .fini_array, i.e. the platform/library statics constructed earlier).
+ *   Destructors  the destructors the initializers register go through newlib's atexit, the one LIFO list that
+ *                 __cxa_atexit also uses.
  *
  * Portable C99 (+ GCC __atomic builtins); compiles for the ILP32 guest and for LP64 host tests.
  */
@@ -124,36 +122,6 @@ size_t fnvnx_xc_format_report(const fnvnx_xc_report *rep, char *buf, size_t cap)
  * else IMAGE mode with the captured slots. Group bounds come from the generated table. */
 int fnvnx_xc_run_initializers(const uint32_t *img_slots, uint32_t img_nslots, uint32_t flags,
                               const fnvnx_xc_hooks *hooks, fnvnx_xc_report *rep);
-
-/* ---- termination: MSVC onexit table + doexit() (onexit.c) ------------------------------------------- */
-
-/* _onexit: append f; returns f, or NULL when the table cannot grow. */
-fnvnx_pvfv fnvnx_xc_onexit(fnvnx_pvfv f);
-/* atexit: 0 on success, -1 on failure. The generated ??__E natives register their ??__F through this. */
-int fnvnx_xc_atexit(fnvnx_pvfv f);
-/* __cxa_atexit-compatible (for S2 to rename __cxa_atexit to in game objects): f(arg) at exit. */
-int fnvnx_xc_cxa_atexit(void (*f)(void *), void *arg, void *dso);
-
-/* doexit(code, quick, retcaller) as in the MSVC 2008 CRT:
- *   !quick:     call the registered handlers in reverse order of registration, each once; a handler may
- *               register more, which run next (the table is re-read after every call);
- *   retcaller:  return to the caller (_cexit, _c_exit); else call the exit hook (default: libc exit(code),
- *               which runs the platform's atexit list and .fini_array, then ends the process).
- * Calls nest like the CRT's: exit() from inside a handler runs the remaining handlers, then exits. */
-void fnvnx_xc_doexit(int code, int quick, int retcaller);
-void fnvnx_xc_exit(int code);   /* doexit(code, 0, 0): exit() */
-void fnvnx_xc_cexit(void);      /* doexit(0, 0, 1):    _cexit() */
-void fnvnx_xc_c_exit(void);     /* doexit(0, 1, 1):    _c_exit() */
-
-/* Process end after the game's handlers (default: exit from <stdlib.h>). Must not return. */
-void fnvnx_xc_set_exit_hook(void (*hook)(int code));
-/* Optional yield while spinning on the exit lock (another thread registering). Default: busy spin. */
-void fnvnx_xc_set_yield_hook(void (*yield)(void));
-/* Number of registered handlers / handlers not yet run. */
-uint32_t fnvnx_xc_onexit_count(void);
-uint32_t fnvnx_xc_onexit_pending(void);
-/* Tests only: forget every registration and the exit state. */
-void fnvnx_xc_onexit_reset(void);
 
 #ifdef __cplusplus
 }

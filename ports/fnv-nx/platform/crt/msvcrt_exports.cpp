@@ -977,7 +977,6 @@ void c_exit(int code)
             break;
         f();
     }
-    fnvnx_doexit(code, 0, 1); /* the exe's own table (startup/guest/onexit.c) when it is linked */
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
     os_exit_process(code);

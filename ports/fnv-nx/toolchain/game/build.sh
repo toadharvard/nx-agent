@@ -11,7 +11,7 @@
 # GUEST=pie (default): relocatable guest (guest_pie.specs, link base 0x30000000), the host places it after the
 # S10 reservation; GUEST=fixed: fixed address (guest.specs; FNVNX_GUEST_BASE, default 0x02100000 next to the
 # data window), the host must claim it (-DFNVNX_GUEST_RESERVE=<size printed below>). S10's startup objects
-# (xc.c, onexit.c) and the generated initializer table (mkxctab.py -> xctab.c) are linked as objects.
+# (xc.c) and the generated initializer table (mkxctab.py -> xctab.c) are linked as objects.
 set -euo pipefail
 : "${DEVKITPRO:?set DEVKITPRO}"
 S2=$(realpath "$1"); FIXED=$(realpath "$2"); OUT=$(mkdir -p "$3" && realpath "$3"); VORBIS=${4:-}
@@ -79,7 +79,7 @@ case " ${EXTRA_OBJS:-} " in
 	*libnxrender.a\ *) SRCS+=("$TC/game/native_device.cpp") ;;
 esac
 SRCS+=("$ROOT"/loader/src/*.c)
-# S10 startup: initializer runner and the MSVC onexit table, plus the generated table (as objects: xc.c
+# S10 startup: initializer runner, plus the generated table (as objects: xc.c
 # references the table weakly, an archive member would not be pulled)
 # XCGEN_EXE=<the owner's FalloutNV.exe>: natives for the exe initializers the decomp lacks (startup/tools/mkxcgen.py,
 # straight-line shapes translated from the exe; local output). They are weak __fnvnx_dyninit_<addr>, so mkxctab
@@ -96,7 +96,7 @@ fi
 python3 -I "$ROOT/startup/tools/mkxctab.py" --out "$OUT/xctab.c" --tsv "$OUT/xctab.tsv" --addrmap "$S2/addrmap.tsv" \
 	"$FIXED"/*.o "${XCGEN_OBJ[@]}" > "$OUT/mkxctab.log" 2>&1 || { tail -5 "$OUT/mkxctab.log"; exit 1; }
 tail -3 "$OUT/mkxctab.log"
-SRCS+=("$ROOT/startup/guest/xc.c" "$ROOT/startup/guest/onexit.c" "$OUT/xctab.c")
+SRCS+=("$ROOT/startup/guest/xc.c" "$OUT/xctab.c")
 for f in "${SRCS[@]}"; do
 	o="$OUT/obj/$(echo "${f#$ROOT/}" | sed "s|^$OUT/|out_|" | tr / _).o"
 	extra=""

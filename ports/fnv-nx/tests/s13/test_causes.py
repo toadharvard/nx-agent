@@ -689,7 +689,7 @@ def test_callflow():
         # dynamic initializer without the exit registration
         check(cf(early(['00401100', '00ec658f'], ['00401100']), symbol='??__Eg_x@@YAXXZ') == 'dyninit-no-atexit',
               'oracle registers a destructor, native initializer does not: dyninit-no-atexit')
-        causes.native_callees = lambda src, a: {'__fnv_00401100', 'fnvnx_xc_atexit'}
+        causes.native_callees = lambda src, a: {'__fnv_00401100', 'atexit'}
         check(cf(early(['00401100', '00ec658f'], ['00401100']), symbol='??__Eg_x@@YAXXZ') == 'native-early-exit',
               'native initializer registers it: stays native-early-exit')
         causes.native_callees = lambda src, a: {'__fnv_00401100'}

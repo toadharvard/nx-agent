@@ -20,7 +20,7 @@ map. Nothing derived from the decomp is committed: the tools write their output 
 | How often | model of ldr + kernel placement: 5.3 % of launches with the data window alone, 22-27 % once a 64 MiB guest range at `0x10000000` is required too (table below) |
 | Initializer order | original address order of the initializer group `.text$yc` = the order of the exe's `__xc` table for its own objects (evidence below); with the exe mapped, the image's own `__xc` table can drive the order instead (IMAGE mode, reports any difference) |
 | Natives per initializer | 10,926 plain initializer functions from S2's address map (kind F inside the group) + 6,265 `??__E` objects rewritten to `extern "C" __fnvnx_dyninit_<addr>` functions (`dyninit_rewrite.py`, prepare rule XC1): 17,191 = every function the decomp defines in the group |
-| Termination | one game onexit table with MSVC `doexit()` semantics (LIFO, registration during exit, nested exit, quick/retcaller), then libc `exit` for the platform's own statics and `.fini_array` |
+| Termination | newlib's `atexit` list (one LIFO list with `__cxa_atexit`) and `.fini_array`; no guest onexit table |
 
 ## 1. Address window reservation
 
@@ -197,7 +197,7 @@ copies to the same image address, GCC would construct each of those objects twic
   inside the group.
 * **`??__E` objects**: `startup/tools/dyninit_rewrite.py` (prepare rule XC1, `r_dyninit`) rewrites each tagged
   definition `T x(args);` / `T x;` of the generated units into `extern T x;` plus
-  `extern "C" void __fnvnx_dyninit_<E>(void) { ::new (&x) T(args); fnvnx_xc_atexit(__fnvnx_dynexit_<F>); }`
+  `extern "C" void __fnvnx_dyninit_<E>(void) { ::new (&x) T(args); atexit(__fnvnx_dynexit_<F>); }`
   and `extern "C" void __fnvnx_dynexit_<F>(void) { x.~T(); }`, tags kept on the functions they now describe.
   The object is no longer defined natively: it lives in the data image and S2 binds `x` by address (data
   class) in this unit as in every other. Copies in units that do not own the address become plain `extern`
@@ -229,32 +229,21 @@ slots between S3's mapping and its fixups], `fnvnx_xc_run_initializers`, `main`.
 
 ## 3. Termination
 
-The MSVC 2008 `doexit(code, quick, retcaller)` (crt0dat.c): under `_lockexit` (recursive), unless `quick`,
-walk the onexit table from the end, skip handlers already run, clear the slot, call it, and if the table
-changed continue from its new end (handlers registered during exit run next); then `__xp` and `__xt` (CRT
-only); then `ExitProcess` unless `retcaller`. `atexit`, `_onexit`, the `??__F` registrations and the guarded
-function-local statics all go into that one table.
-
-Natively (`startup/guest/onexit.c`): `fnvnx_xc_onexit` / `fnvnx_xc_atexit` / `fnvnx_xc_cxa_atexit` append to one
-growable table (static block of 64, then heap), and `fnvnx_xc_doexit` has the semantics above, including a
-nested `exit()` from a handler (the remaining handlers run once, the process ends once) and registrations
-after a completed exit (kept, never run). Lock: recursive spin lock owned by a thread-local token (optional
-yield hook). After the game's handlers the exit hook (default libc `exit`) runs newlib's own list and
-`.fini_array`: the platform and library statics, constructed before the game's, are destroyed after them, as
-the CRT's terminators ran after the onexit table. `fnvnx_xc_exit`, `fnvnx_xc_cexit` (`_cexit`) and
-`fnvnx_xc_c_exit` (`_c_exit`) are the usual entry points.
+The exe's CRT `doexit()` and its onexit table are the lifted exe's own code. Natively the destructors that the
+generated initializers register (`??__F`, as `__fnvnx_dynexit_<addr>`) and GCC's function-local statics go through
+newlib's `atexit` / `__cxa_atexit`, one LIFO list; `exit()` runs it and `.fini_array`. The guest defines no onexit
+table.
 
 ## 4. Integration points
 
 | Who | What |
 |---|---|
 | S5 host (`toolchain/host/host.c`) | `__libnx_initheap`: `used = fnvnx_reserve_early(guest_lo, guest_hi)` after `svcSetHeapSize`, guest heap size `-= used`. `main`: `fnvnx_reserve_late(log)` after console/log setup, before loading the guest. Guest loader: decompress into the claimed `guest` range, `fnvnx_reserve_remap_code("guest", own_process, size)`, then segment permissions. Set `fnvnx_guest_reserve_size` / `fnvnx_guest_link_base` to the real guest. Link `startup/host/reserve.c` + `reserve_nx.c`, include path `startup/host`. `as_name()` misreports 32-bit spaces (see §1); `fnvnx_reserve_address_space()` is correct. |
-| S5 guest runtime (`toolchain/guest/runtime.c`) | after `__libc_init_array()`: `fnvnx_xc_run_initializers(slots_or_NULL, n, 0, &hooks, &rep)` and log the report; after `main` returns: `fnvnx_xc_cexit()` (game handlers), then return to the host as now. Link `startup/guest/xc.c`, `onexit.c` and the generated `xctab.c` as objects, not from an archive: `xc.c` references the table weakly, and a weak reference does not pull an archive member (include path `startup/guest`). |
+| S5 guest runtime (`toolchain/guest/runtime.c`) | after `__libc_init_array()`: `fnvnx_xc_run_initializers(slots_or_NULL, n, 0, &hooks, &rep)` and log the report; after `main` returns: newlib `exit` as now. Link `startup/guest/xc.c` and the generated `xctab.c` as objects, not from an archive: `xc.c` references the table weakly, and a weak reference does not pull an archive member (include path `startup/guest`). |
 | S5 guest link | run `startup/tools/mkxctab.py --addrmap out/addrmap.tsv --objects objects.tsv --units build/units.json --out build/xctab.c` before the link. |
 | S3 loader | `map_fixed` on Horizon = `fnvnx_reserve_map_fixed` (through a host API slot). IMAGE mode: after mapping and before code-pointer fixups, `fnvnx_xc_locate` over `.rdata` (`text_lo/hi` from the section table, group from `fnvnx_xc_group_lo/hi`), copy the slots. |
 | S1 prepare | add `tools/rules/s10_startup.py`: `sys.path` += `startup/tools`; `from dyninit_rewrite import RULES` (rule XC1; it finds `build/units.json` above the source and only touches `src/generated/` files with `??__E` tags). |
-| S2 link | map `__fnvnx_dyninit_<addr>` and `__fnvnx_dynexit_<addr>` object symbols to their addresses as F entries (S3 then rewrites image `__xc` slots and `??__F` references to real natives). Rename `__cxa_atexit` to `fnvnx_xc_cxa_atexit` in game objects (not platform or libraries) so GCC's function-local static destructors share the game table; without it they run after all game handlers. |
-| S4 platform | `fnvnx_atexit` (CRT `atexit` 0x00ec658f) → `fnvnx_xc_atexit`; `_onexit` → `fnvnx_xc_onexit`; `fnvnx_doexit` → `fnvnx_xc_doexit`; `exit`/`_cexit`/`_c_exit`/`ExitProcess` paths of the game through them. |
+| S2 link | map `__fnvnx_dyninit_<addr>` and `__fnvnx_dynexit_<addr>` object symbols to their addresses as F entries (S3 then rewrites image `__xc` slots and `??__F` references to real natives). |
 
 ## 5. Tests
 
@@ -264,9 +253,7 @@ cross part):
 * `test_xc` (ASan/UBSan, 68 checks): table checks, ADDRESS order with two interleaved synthetic "units" whose
   initializers depend on each other, IMAGE order with NULL slots, a swapped pair, a missing native, a folded
   duplicate and a leftover, `fnvnx_xc_locate` on a synthetic `.rdata` (strings, a vftable, a decoy run,
-  library entries, inner padding, `__xi`), onexit LIFO across the three registration kinds, registration
-  during exit, nested exit, quick and retcaller, growth to 5,000 handlers, initializers registering their
-  destructors;
+  library entries, inner padding, `__xi`), the runner's table checks;
 * `test_reserve` (66 checks + the model): claim on free and occupied fake address spaces (TLS page in the
   window, host NSO in the text range), heap exhaustion, refused mapping, failed queries, misaligned ranges,
   late virtmem phase and a mapping that appears between the phases, release, `contains`, relaunch decisions

@@ -39,9 +39,8 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
 3. **apply** - `fnvlink.py apply out/ fixed/`: per object, objcopy adds the address symbols of its definitions,
    localizes duplicate strong names and turns natively defined variables into weak address symbols; then the
    undefined symbols are renamed (`elfsyms.rename_undefined`: objcopy `--redefine-syms` refuses several old names
-   for one new name, which is the normal case here). In game objects (units and their synthesized vtables, not
-   override/platform objects) `__cxa_atexit` becomes `fnvnx_xc_cxa_atexit`, so GCC's static destructors go into
-   the game's onexit table (STARTUP.md). Assembles `bridges.S`, compiles `addrmap.c`.
+   for one new name, which is the normal case here). GCC's static destructors keep newlib's own
+   `__cxa_atexit` (one LIFO list with `atexit`). Assembles `bridges.S`, compiles `addrmap.c`.
    Between two resolve runs, **probe** - `fnvlink.py probe out/ tree/` - measures the aggregates the ABI verdicts
    need (`probe_requests.tsv` -> `layouts.tsv`, section "Layouts"); the second resolve decides on bytes. The same
    step synthesizes the vtables and typeinfo no compiled object emits (`vtable_requests.tsv` -> `vtables/`, section

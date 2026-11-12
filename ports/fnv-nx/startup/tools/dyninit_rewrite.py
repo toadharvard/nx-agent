@@ -20,7 +20,7 @@ startup/tools/mkxctab.py collects into the initializer table and the guest runne
     extern "C" void __fnvnx_dynexit_00fc7a70(void) { fnvnx_dyn_destroy(g_011c3264); }
     // @fnv 0x00f35430
     extern "C" void __fnvnx_dyninit_00f35430(void) { ::new ((fnvnx_dyn_tag *)(void *)__builtin_addressof(g_011c3264))
-        GlobalObject_0040c150(g_011c3264_arg0, g_011c3264_arg1); fnvnx_xc_atexit(__fnvnx_dynexit_00fc7a70); }
+        GlobalObject_0040c150(g_011c3264_arg0, g_011c3264_arg1); atexit(__fnvnx_dynexit_00fc7a70); }
 
 The object itself is no longer defined natively: it lives in the data image (D3) and every reference,
 this unit's included, binds to its address (S2, data class). Copies of such definitions in flag-variant
@@ -50,7 +50,7 @@ PROLOGUE = (MARKER + 'one extern "C" function per original initializer (startup/
             'struct fnvnx_dyn_tag;\n'
             'inline void *operator new(decltype(sizeof 0), fnvnx_dyn_tag *p) noexcept { return p; }\n'
             'inline void operator delete(void *, fnvnx_dyn_tag *) noexcept {}\n'
-            'extern "C" int fnvnx_xc_atexit(void (*)(void));\n'
+            '#include <stdlib.h>\n'
             'template <class T> static inline void fnvnx_dyn_destroy(T &o) { o.~T(); }\n')
 
 
@@ -174,7 +174,7 @@ def rewrite(rel: str, text: str, index: Index, stats=None, report=None) -> str:
                 out.append('%s// @fnv 0x%08x' % (indent, f))
                 out.append('%sextern "C" void __fnvnx_dynexit_%08x(void) { fnvnx_dyn_destroy(%s); }' % (
                     indent, f, name))
-                reg = ' fnvnx_xc_atexit(__fnvnx_dynexit_%08x);' % f
+                reg = ' atexit(__fnvnx_dynexit_%08x);' % f
             out.append('%s// @fnv 0x%08x' % (indent, e))
             out.append('%sextern "C" void __fnvnx_dyninit_%08x(void) { ::new ((fnvnx_dyn_tag *)(void *)__builtin_addressof(%s)) %s;%s }'
                        % (indent, e, name, ctor, reg))

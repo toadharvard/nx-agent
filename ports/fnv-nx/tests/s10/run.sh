@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tests/s10/run.sh [out dir] - stream S10 (startup) tests. No game exe, decomp or hardware needed.
 #
-#   host:  test_xc (guest initializer runner + onexit table), test_reserve (address-window reservation
+#   host:  test_xc (guest initializer runner), test_reserve (address-window reservation
 #          planner, relaunch decision, ASLR collision model), test_tools.py (dyninit_rewrite.py + mkxctab.py
 #          end to end: rewrite a synthetic generated unit, compile it, generate the table, run it), all
 #          with ASan/UBSan;
@@ -17,7 +17,7 @@ SAN="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=
 WARN="-std=c11 -Wall -Wextra -Werror -O1 -g"
 
 echo "== host: test_xc"
-$CC $WARN $SAN -I"$ROOT/startup/guest" "$HERE/test_xc.c" "$ROOT/startup/guest/xc.c" "$ROOT/startup/guest/onexit.c" \
+$CC $WARN $SAN -I"$ROOT/startup/guest" "$HERE/test_xc.c" "$ROOT/startup/guest/xc.c" \
     -o "$OUT/test_xc"
 "$OUT/test_xc"
 
@@ -31,7 +31,7 @@ python3 -I "$HERE/test_tools.py" --out "$OUT/tools"
 if [ -n "${FNVNX_A64:-}" ]; then
     A64CC="$FNVNX_A64/bin/aarch64-none-elf-gcc"
     echo "== cross: startup/guest -mabi=ilp32 -Werror"
-    for f in xc onexit; do
+    for f in xc; do
         "$A64CC" -mabi=ilp32 -std=c11 -O2 -Wall -Wextra -Werror -ftls-model=local-exec -fno-pie \
             -I"$ROOT/startup/guest" -c "$ROOT/startup/guest/$f.c" -o "$OUT/$f.ilp32.o"
     done

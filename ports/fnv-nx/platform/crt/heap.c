@@ -1,5 +1,5 @@
 /* heap.c - MSVC heap extensions (_msize, _aligned_*) and small runtime entry points (_errno, _purecall,
- * atexit/doexit, clock). */
+ * clock). */
 #include "fnvnx_msvcrt.h"
 
 #include <errno.h>
@@ -94,50 +94,6 @@ void _invalid_parameter_noinfo(void)
 }
 
 void _purecall(void) { os_fatal("pure virtual function call"); }
-
-/* ---- termination. The game's handlers go into S10's single MSVC-style onexit table
- * (startup/guest/onexit.c: LIFO across atexit/_onexit/??__F/__cxa_atexit, registration during exit, nested
- * exit). Referenced weakly: without startup/ (the host tests) the libc atexit list stands in. */
-typedef void (*fnvnx_pvfv_)(void);
-extern int fnvnx_xc_atexit(fnvnx_pvfv_) __attribute__((weak));
-extern fnvnx_pvfv_ fnvnx_xc_onexit(fnvnx_pvfv_) __attribute__((weak));
-extern void fnvnx_xc_doexit(int code, int quick, int retcaller) __attribute__((weak));
-
-int fnvnx_atexit(void (*f)(void))
-{
-    if (fnvnx_xc_atexit)
-        return fnvnx_xc_atexit(f);
-    return f && atexit(f) == 0 ? 0 : -1;
-}
-
-_onexit_t _onexit(_onexit_t f)
-{
-    if (fnvnx_xc_onexit)
-        return (_onexit_t)fnvnx_xc_onexit((fnvnx_pvfv_)f);
-    return f && atexit((fnvnx_pvfv_)f) == 0 ? f : NULL; /* the handler's int result is ignored, as by MSVC */
-}
-
-/* doexit(code, quick, retcaller): quick skips the handlers; retcaller returns instead of ending the process */
-void fnvnx_doexit(int code, int quick, int retcaller)
-{
-    if (fnvnx_xc_doexit) {
-        fnvnx_xc_doexit(code, quick, retcaller);
-        return;
-    }
-    if (retcaller)
-        return;
-    if (quick)
-        os_exit_process(code);
-    exit(code);
-}
-
-void fnvnx_exit(int code) /* exit */
-{
-    fnvnx_doexit(code, 0, 0);
-    os_exit_process(code); /* not reached: doexit without retcaller ends the process */
-}
-void fnvnx_cexit(void) { fnvnx_doexit(0, 0, 1); }         /* _cexit: handlers, no process exit */
-void fnvnx_c_exit(void) { fnvnx_doexit(0, 1, 1); }        /* _c_exit: neither */
 
 /* clock(): MSVC counts wall time since process start, CLOCKS_PER_SEC = 1000 */
 static uint64_t g_start_ns;

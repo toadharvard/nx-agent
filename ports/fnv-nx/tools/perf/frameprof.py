@@ -72,7 +72,7 @@ NATIVE_RULES = [
     ('platform-crt', r'platform_crt|platform/crt|_fnv_crt'),
     ('platform-audio-input', r'platform_audio|platform_input'),
     ('loader', r'loader_src|loader/'),
-    ('startup-xc', r'startup_|/startup/|xctab|onexit'),
+    ('startup-xc', r'startup_|/startup/|xctab'),
     ('boot', r'game_boot|/boot\.cpp|boot\.o$'),
     ('guest-runtime', r'toolchain/guest|libfnvnx-guest|fnvnx_(lock|unlock|cond|thread)'),
     ('libc', r'libc\.a|libm\.a|newlib|^(mem|str)[a-z]+$'),

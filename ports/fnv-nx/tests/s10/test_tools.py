@@ -79,7 +79,7 @@ def test_rewrite(tree):
     check(a.startswith(dyninit_rewrite.MARKER), 'prologue marker')
     check('extern Logger g_a1;' in a and 'Logger g_a1(1);' not in a, 'object becomes extern')
     check('extern "C" void __fnvnx_dyninit_00f40010(void) { ::new ((fnvnx_dyn_tag *)(void *)__builtin_addressof(g_a1)) '
-          'Logger(1); fnvnx_xc_atexit(__fnvnx_dynexit_00fc8010); }' in a, 'dyninit with exit registration')
+          'Logger(1); atexit(__fnvnx_dynexit_00fc8010); }' in a, 'dyninit with exit registration')
     check('extern "C" void __fnvnx_dynexit_00fc8010(void) { fnvnx_dyn_destroy(g_a1); }' in a, 'dynexit')
     check('__builtin_addressof(g_a2)) Plain; }' in a and 'dynexit_' not in a.split('g_a2')[1].split('\n')[2],
           'T x; form, no exit for a trivial destructor')
@@ -166,7 +166,7 @@ def test_e2e(out, objs, xctab, cc, cxx):
     san = ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined', '-fno-omit-frame-pointer', '-g']
     inc = ['-I', os.path.join(ROOT, 'startup', 'guest')]
     cobjs = []
-    for src in (xctab, os.path.join(ROOT, 'startup/guest/xc.c'), os.path.join(ROOT, 'startup/guest/onexit.c'),
+    for src in (xctab, os.path.join(ROOT, 'startup/guest/xc.c'),
                 os.path.join(HERE, 'demo/storage.c'), os.path.join(HERE, 'demo/e2e_main.c')):
         o = os.path.join(out, os.path.basename(src) + '.e2e.o')
         run([cc, '-std=c11', '-O1', '-Wall', '-Wextra', '-Werror'] + san + inc + ['-c', src, '-o', o])

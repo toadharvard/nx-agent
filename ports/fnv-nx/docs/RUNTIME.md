@@ -881,13 +881,12 @@ built from a null message, vftable 0x010176f8, the allocators' overflow paths; h
 native type: S1 must first give its per-unit placeholder names (`CIdvException`, `ExceptionB07`,
 `IdvException`, `ExcQ`, `Exc59`) one class, then `fnvnx_eh_register_type<That>(0x01170384)`.
 
-### Termination (S10)
+### Termination
 
-`fnvnx_atexit` (`atexit`), `_onexit`, `fnvnx_doexit` (`doexit`), `fnvnx_exit` (`exit`, provider updated),
-`fnvnx_cexit` (`_cexit`), `fnvnx_c_exit` (`_c_exit`) forward to S10's game onexit table (`fnvnx_xc_atexit`,
-`fnvnx_xc_onexit`, `fnvnx_xc_doexit`, `startup/guest/onexit.c`) through weak references; without startup/ (the
-host tests) libc's `atexit`/`exit` stand in. `ExitProcess` (platform/win32) is unchanged: on Windows it does
-not run the exe's CRT onexit table either.
+The exe's own CRT (`atexit`, `doexit`, `exit`, `_cexit`, `_c_exit`, the onexit table) is the lifted exe's code; the
+platform defines no body for those addresses. The platform's msvcrt names that modules import by their import tables
+(`_onexit`, `__dllonexit`, `exit`, `_amsg_exit`: d3dx9_31.dll and d3dx9_38.dll) are in `msvcrt_exports.cpp`.
+Native C++ statics use newlib's `__cxa_atexit`. `ExitProcess` (platform/win32) is unchanged.
 
 ### Found in the decomp (for S1 / S2)
 

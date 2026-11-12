@@ -98,7 +98,6 @@
 0x00ec62f6	helper	_ftol2	n	8	1	fnvnx_ftol2 (operand passed) / rule
 0x00ec6370	crt	strcpy	n	9	18	libc: strcpy
 0x00ec6380	crt	strcat	n	5	7	libc: strcat
-0x00ec658f	crt	atexit	n	53	31	fnvnx_atexit (-> fnvnx_xc_atexit)
 0x00ec65a6	crt	strcpy_s	n	61	138	platform/crt: strcpy_s
 0x00ec67aa	crt	tolower	n	12	15	libc: tolower
 0x00ec68e4	crt	_stricmp	n	14	46	platform/crt: _stricmp
@@ -210,8 +209,6 @@
 0x00ecc7b0	crt	strncpy	n	4	5	libc: strncpy
 0x00ecc8e0	helper	_except_handler4	n	2	0	none: SEH not reproduced
 0x00eccbdc	crt	_getcwd(char*, int): NiPath current directory, buffer 260, result tested != NULL	i	1	1	fnvnx_getcwd
-0x00eccd99	crt	doexit	n	1	1	fnvnx_doexit (-> fnvnx_xc_doexit)
-0x00eccec5	crt	exit	n	3	27	fnvnx_exit (S10 onexit table, then libc exit)
 0x00eccf5d	crt	realloc	n	2	2	libc: realloc
 0x00ecd1c7	crt	malloc	n	2	65	libc: malloc
 0x00ecd291	crt	free	n	3	183	libc: free

@@ -1,4 +1,4 @@
-/* tests/s10/test_xc.c - host tests of the guest initializer runner and onexit table (startup/guest).
+/* tests/s10/test_xc.c - host tests of the guest initializer runner (startup/guest).
  *
  * Synthetic initializers placed at fake original addresses; no game code or data. Build and run through
  * tests/s10/run.sh (ASan/UBSan). */
@@ -173,116 +173,6 @@ static void test_locate(void) {
     }
 }
 
-/* ---- termination -------------------------------------------------------------------------------------- */
-static jmp_buf g_exit_jmp;
-static int g_exit_code = -1, g_exit_calls;
-static void test_exit_hook(int code) {
-    g_exit_code = code;
-    g_exit_calls++;
-    longjmp(g_exit_jmp, 1);
-}
-
-static void d1(void) { logc("d1 "); }
-static void d2(void) { logc("d2 "); }
-static void d3(void) { logc("d3 "); }
-static void d_registers(void) { logc("dr "); fnvnx_xc_atexit(d3); }
-static void d_exits(void) { logc("dx "); fnvnx_xc_exit(5); }
-static void arg_handler(void *p) { logc((const char *)p); }
-
-/* A generated ??__E native: construct, then register the ??__F native (docs/STARTUP.md). */
-static int g_constructed[3];
-static void f_obj0(void) { logc("~o0 "); g_constructed[0] = 0; }
-static void f_obj2(void) { logc("~o2 "); g_constructed[2] = 0; }
-static void e_obj0(void) { g_constructed[0] = 1; fnvnx_xc_atexit(f_obj0); }
-static void e_obj1(void) { g_constructed[1] = 1; } /* trivially destructible: no ??__F */
-static void e_obj2(void) { g_constructed[2] = 1; fnvnx_xc_atexit(f_obj2); }
-
-static int run_exit(int code, int quick, int retcaller) {
-    if (setjmp(g_exit_jmp) == 0) {
-        fnvnx_xc_doexit(code, quick, retcaller);
-        return 0; /* returned (retcaller) */
-    }
-    return 1;     /* left through the exit hook */
-}
-
-static void test_onexit(void) {
-    fnvnx_xc_set_exit_hook(test_exit_hook);
-
-    /* LIFO across atexit / _onexit / __cxa_atexit; exit hook gets the code */
-    fnvnx_xc_onexit_reset();
-    reset_log();
-    g_exit_calls = 0;
-    CHECK(fnvnx_xc_atexit(d1) == 0);
-    CHECK(fnvnx_xc_cxa_atexit(arg_handler, (void *)"c1 ", NULL) == 0);
-    CHECK(fnvnx_xc_onexit(d2) == d2);
-    CHECK(fnvnx_xc_onexit(NULL) == NULL && fnvnx_xc_cxa_atexit(NULL, NULL, NULL) == -1);
-    CHECK(fnvnx_xc_onexit_count() == 3 && fnvnx_xc_onexit_pending() == 3);
-    CHECK(run_exit(3, 0, 0) == 1);
-    CHECK(strcmp(g_log, "d2 c1 d1 ") == 0 && g_exit_code == 3 && g_exit_calls == 1);
-    CHECK(fnvnx_xc_onexit_pending() == 0);
-    /* after a full exit, registrations are kept but never run */
-    reset_log();
-    CHECK(fnvnx_xc_atexit(d1) == 0);
-    CHECK(run_exit(4, 0, 0) == 1 && g_log[0] == 0 && g_exit_code == 4);
-
-    /* a handler registering during exit: the new one runs next */
-    fnvnx_xc_onexit_reset();
-    reset_log();
-    fnvnx_xc_atexit(d1);
-    fnvnx_xc_atexit(d_registers);
-    fnvnx_xc_atexit(d2);
-    CHECK(run_exit(0, 0, 0) == 1);
-    CHECK(strcmp(g_log, "d2 dr d3 d1 ") == 0);
-
-    /* exit() from inside a handler: the remaining handlers run once, then the process ends once */
-    fnvnx_xc_onexit_reset();
-    reset_log();
-    g_exit_calls = 0;
-    fnvnx_xc_atexit(d1);
-    fnvnx_xc_atexit(d_exits);
-    fnvnx_xc_atexit(d2);
-    CHECK(run_exit(9, 0, 0) == 1);
-    CHECK(strcmp(g_log, "d2 dx d1 ") == 0 && g_exit_code == 5 && g_exit_calls == 1);
-
-    /* quick (_exit / _c_exit): no handlers; retcaller (_cexit): handlers run, control returns */
-    fnvnx_xc_onexit_reset();
-    reset_log();
-    fnvnx_xc_atexit(d1);
-    fnvnx_xc_atexit(d2);
-    CHECK(run_exit(0, 1, 1) == 0 && g_log[0] == 0 && fnvnx_xc_onexit_pending() == 2);
-    CHECK(run_exit(0, 0, 1) == 0 && strcmp(g_log, "d2 d1 ") == 0);
-    reset_log();
-    fnvnx_xc_cexit(); /* nothing left */
-    CHECK(g_log[0] == 0);
-    fnvnx_xc_atexit(d3); /* still accepted and run by the next exit */
-    CHECK(run_exit(2, 0, 0) == 1 && strcmp(g_log, "d3 ") == 0);
-
-    /* initializers that register destructors, run by the runner; shutdown destroys in reverse */
-    fnvnx_xc_onexit_reset();
-    reset_log();
-    const struct fnvnx_xc_entry objs[] = { { 0x00f50000u, e_obj0 }, { 0x00f50010u, e_obj1 }, { 0x00f50020u, e_obj2 } };
-    CHECK(fnvnx_xc_run_address_order(objs, 3, GLO, GHI, 0, NULL, NULL) == 0);
-    CHECK(g_constructed[0] && g_constructed[1] && g_constructed[2] && fnvnx_xc_onexit_count() == 2);
-    CHECK(run_exit(0, 0, 0) == 1 && strcmp(g_log, "~o2 ~o0 ") == 0 && !g_constructed[0] && !g_constructed[2]);
-
-    /* growth beyond the static block, order kept */
-    fnvnx_xc_onexit_reset();
-    static char names[5000][8];
-    static int order_ok;
-    order_ok = 1;
-    for (int i = 0; i < 5000; i++) {
-        snprintf(names[i], sizeof names[i], "%u", (unsigned)i & 0xFFFFu);
-        if (fnvnx_xc_cxa_atexit(arg_handler, names[i], NULL) != 0) order_ok = 0;
-    }
-    CHECK(order_ok && fnvnx_xc_onexit_count() == 5000);
-    reset_log();
-    CHECK(run_exit(0, 0, 1) == 0);
-    /* g_log keeps the first 4 KiB: the last registered (4999) must come first */
-    CHECK(strncmp(g_log, "49994998499749964995", 20) == 0);
-    CHECK(fnvnx_xc_onexit_pending() == 0);
-    fnvnx_xc_onexit_reset();
-}
-
 static void test_generated_entry_without_table(void) {
     /* this binary links no xctab.c: the weak table is empty */
     fnvnx_xc_report rep;
@@ -296,7 +186,6 @@ int main(void) {
     test_address_order();
     test_image_order();
     test_locate();
-    test_onexit();
     test_generated_entry_without_table();
     printf("test_xc: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

@@ -385,7 +385,7 @@ POLICY = {
                                                 '(exeempty.calls_after_noreturn)'),
     'dyninit-no-atexit': ('real-bug', 'S10', False, 'the dynamic initializer registers the object\'s destructor '
                                                     'with atexit in the exe; the native initializer does not '
-                                                    '(no fnvnx_xc_atexit): the destructor never runs at exit'),
+                                                    '(no atexit): the destructor never runs at exit'),
     'native-empty-body': ('real-bug', 'S1', True, 'the native function, or a decomp-local stand-in it calls for an '
                                                   'original function defined elsewhere, is an empty body (ret / '
                                                   'return constant) where the exe runs code that makes calls'),
@@ -1230,8 +1230,8 @@ def _calls_allocator(rec):
 # case and the native object (function bodies, which names it defines). Each rule needs its static facts; without
 # the object or the address map it does not fire.
 
-ATEXIT = 0x00ec658f                         # CRT _atexit (libcalls.EQUIV: fnvnx_xc_atexit / atexit)
-ATEXIT_NAMES = {'fnvnx_xc_atexit', 'fnvnx_xc_cxa_atexit', 'atexit', '__cxa_atexit'}
+ATEXIT = 0x00ec658f                         # CRT _atexit (libcalls.EQUIV: atexit)
+ATEXIT_NAMES = {'atexit', '__cxa_atexit'}
 DEALLOCATORS = {0x00401030, 0x00aa1460, 0x00aa4060, 0x00ecd291}    # delete, sized delete, Deallocate, CRT free
 CRT_TEXT = (0x00ec3000, 0x00ee0000)         # libcmt inside the exe's .text
 MATH = {'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'exp', 'log', 'log10', 'pow', 'fmod', 'sqrt', 'floor',

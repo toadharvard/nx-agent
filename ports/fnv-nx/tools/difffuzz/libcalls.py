@@ -86,8 +86,8 @@ A64_EXC_OBJ = 0x0b910100          # arm64emu.EXC_BASE + a header's room
 EQUIV = {'_Znwm': 0x00401000, '_Znwj': 0x00401000, '_Znam': 0x00401000, '_Znaj': 0x00401000,
          '_ZdlPv': 0x00401030, '_ZdlPvm': 0x00aa1460, '_ZdlPvj': 0x00aa1460, '_ZdaPv': 0x00401030,
          '_ZdaPvm': 0x00aa1460, '_ZdaPvj': 0x00aa1460, '__dynamic_cast': 0x00ec43fb,
-         # registration of a static destructor: CRT _atexit in the oracle, XC1's onexit table natively
-         'fnvnx_xc_atexit': 0x00ec658f, 'atexit': 0x00ec658f, 'fnvnx_xc_cxa_atexit': 0x00ec658f,
+         # registration of a static destructor: CRT _atexit in the oracle, newlib's atexit natively
+         'atexit': 0x00ec658f,
          # a throw: MSVC's _CxxThrowException(object, ThrowInfo), natively the platform's _CxxThrowException or the
          # Itanium throw / rethrow of a C++ `throw` GCC compiled (difffuzz-14); std::_Xlen = __throw_length_error
          # the decomp names the CRT's locking _fclose (0x00ec9907) `_fclose_nolock` at both of BSFile's call sites

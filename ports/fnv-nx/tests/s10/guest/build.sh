@@ -34,11 +34,11 @@ $PY "$ROOT/startup/tools/mkxctab.py" --out xctab.c --addrmap "$HERE/../demo/addr
 
 aarch64-none-elf-gcc $ARCH -c "$ROOT/toolchain/guest/crt0.s" -o crt0.o
 aarch64-none-elf-gcc $ARCH $CFLAGS -c "$ROOT/toolchain/guest/runtime.c" -o runtime.o
-for src in "$ROOT/startup/guest/xc.c" "$ROOT/startup/guest/onexit.c" "$HERE/../demo/storage.c" \
+for src in "$ROOT/startup/guest/xc.c" "$HERE/../demo/storage.c" \
            "$HERE/../demo/e2e_main.c" xctab.c; do
     aarch64-none-elf-gcc $ARCH $CFLAGS -std=c11 -c "$src" -o "$(basename "$src" .c).o"
 done
-aarch64-none-elf-gcc $ARCH -specs="$ROOT/toolchain/guest/guest.specs" crt0.o runtime.o xc.o onexit.o storage.o \
+aarch64-none-elf-gcc $ARCH -specs="$ROOT/toolchain/guest/guest.specs" crt0.o runtime.o xc.o storage.o \
     e2e_main.o xctab.o "${objs[@]}" -Wl,-Map,guest.map -o guest.elf
 $PY "$ROOT/toolchain/tools/elf2nso.py" guest.elf guest.nso
 echo "built $OUT/guest.nso"

@@ -401,8 +401,8 @@ loader decompresses into the claimed range and converts it with `fnvnx_reserve_r
 | `host.c` `as_name()` | stack region (32-bit spaces report the ASLR region as `[0x00200000, 4 GiB)`), or `fnvnx_reserve_address_space()` when linked. |
 | `host_v3.inc` `map_fixed` | inside a claimed range: `fnvnx_reserve_map_fixed` (zeroes, no memory needed); else the old svcMapMemory path. |
 | `boot.cpp` (S3 loader driver) | `map_fixed` goes to the host with no source block first; after mapping and before code-pointer fixups `fnvnx_xc_locate` over `.rdata` captures the image's `__xc` slots (IMAGE mode); trace mode maps the text range and the window as the two ranges S10 claims. |
-| `runtime.c` | after `__libc_init_array`: `fnvnx_xc_run_initializers(slots or NULL, ...)` + report; after `main`: `fnvnx_xc_cexit()`. Opt-in by the game boot defining `fnvnx_guest_xc_hooks` (S10's own e2e guest drives xc.c itself and still passes). |
-| game build | `startup/tools/mkxctab.py --addrmap ... <objects>` -> `xctab.c`; `xc.c`, `onexit.c`, `xctab.c` linked as objects. |
+| `runtime.c` | after `__libc_init_array`: `fnvnx_xc_run_initializers(slots or NULL, ...)` + report. Opt-in by the game boot defining `fnvnx_guest_xc_hooks` (S10's own e2e guest drives xc.c itself and still passes). |
+| game build | `startup/tools/mkxctab.py --addrmap ... <objects>` -> `xctab.c`; `xc.c`, `xctab.c` linked as objects. |
 | `tests/s5/hello/build.sh` | host links `startup/host/reserve.c` + `reserve_nx.c`; `HOST_DEFS` passes host build switches. |
 
 ### Emulated boot (`tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init`)
@@ -419,8 +419,7 @@ on. Result:
   in `RegisterFloatKeyOps` [orig 00a26e20] / `FUN_00a28cb0`: they fill `g_apfnA26E20CurvesCopy` and similar tables
   that a unit defines **in `.text`** (symbol type T, read-only after mapping): an S1/S2 fix (the table must be data);
 * 199 distinct unresolved symbols hit, 2,918 trap calls in total;
-* `main` reached; STOP: WinMain (0x0086a850) is not in the link; then `fnvnx_xc_cexit` runs the game's exit handlers
-  and faults in one on the empty image.
+* `main` reached; STOP: WinMain (0x0086a850) is not in the link; then newlib's exit list runs.
 
 ## 10. Round 4: S2c's fresh object set, WinMain entered (J-0032, J-0042 follow-up)
 
@@ -991,7 +990,7 @@ those vftables can a hand vptr into the image work at all.
 3. S10's `fnvnx_xc_run_initializers` (`runtime.c:202-210`): the game's initializers from `xctab.c`. The order is
    IMAGE when `boot.cpp:163` captured the image's `__xc` slots, else ADDRESS (the synth image has none).
 4. `fnvnx_guest_main` (`runtime.c:215` -> `boot.cpp:248`), then WinMain `__fnv_0086a850` (`boot.cpp:260`).
-5. After it returns: `fnvnx_xc_cexit` (`runtime.c:216`).
+5. After it returns: newlib `exit` (`runtime.c`).
 
 What that means for the INIT fix:
 - A native C++ static in a staging unit (rule XC1 rewrites only the 14 generated units) runs in step 2. That is after

@@ -156,15 +156,6 @@ void *_recalloc(void *, size_t, size_t);
 int *_errno(void);
 void _invalid_parameter_noinfo(void);
 void _purecall(void);
-/* atexit / _onexit / doexit / exit / _cexit / _c_exit go to S10's game onexit table (fnvnx_xc_*,
- * startup/guest/onexit.c) when it is linked; weak references, else libc atexit/exit */
-int fnvnx_atexit(void (*)(void));
-typedef int (*_onexit_t)(void);
-_onexit_t _onexit(_onexit_t);
-void fnvnx_doexit(int code, int quick, int retcaller);
-void fnvnx_exit(int code) __attribute__((noreturn));
-void fnvnx_cexit(void);
-void fnvnx_c_exit(void);
 unsigned int fnvnx_clock(void);             /* clock(): CLOCKS_PER_SEC 1000, wall time since start */
 int fnvnx_rand(void);                        /* MSVC LCG, RAND_MAX 0x7FFF, per thread */
 void fnvnx_srand(unsigned int);
