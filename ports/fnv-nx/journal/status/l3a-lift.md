@@ -252,3 +252,11 @@ Update 2026-11-12, at 698adefb:
   - An unresolved indirect call goes to the escaped universe entries.
   - TOP stores are reported per source. Coding starts after the pcsrc counts (queued).
 - int3 122ce8e18: 31 findings → 29 after the lead's decisions (status file a6b94e4c; flagcause citation removed). The SMT word rule and the inbox file of the rest are doing (w6).
+- int3 d1eb5fb5b: gate_assumptions 51 → 29. The lead decided the 28 blocks of journal/inbox/l3a-int3-assumption-blocks.md:
+  - 5 negations reworded to positive checks;
+  - 3 cite OWNER ids (ASM-003, ASM-006);
+  - 7 are SMT identifiers; L1 is asked for a prose-only gate rule (blocked, L1);
+  - 3 are L3b's (README A3, gate_fpexact);
+  - 2 are L2's (f2i_check);
+  - 5 real L3a assumptions: REMOVE ids requested from L1 (R1 unhandled CONTEXT, R2 IP-to-state consumer, R3 callee eax reads, R4 _XcptFilter code, R5 fmath table bound). The removal work is owned by L3a;
+  - LOCK-SPLIT's id was asked of L1.
