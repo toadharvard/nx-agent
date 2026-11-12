@@ -456,9 +456,9 @@ def tool_cases(SS, GC, ext_cache):
     roots, files = recipe.load_admit(ok), recipe.tracked(ok)
     t0 = tool_rec(ts)
     for what, rec, want in (("unknown sources key", dict(t0, sources=[dict(t0["sources"][0], x=1)]), "needs exactly"),
-                            ("patch that is not tracked", dict(t0, sources=[dict(t0["sources"][0], patches=["nope.patch"])]), "sources.patches"),
+                            ("patch that is not tracked", dict(t0, sources=[dict(t0["sources"][0], patches=["nope.patch"])]), "patches must be"),
                             ("sources.external unknown", dict(t0, sources=[dict(t0["sources"][0], external="zz")]), "names no external"),
-                            ("include outside dir", dict(t0, sources=[dict(t0["sources"][0], include=["other"])]), "sources.include"),
+                            ("include outside dir", dict(t0, sources=[dict(t0["sources"][0], include=["other"])]), "include must be"),
                             ("tool root with plugins", dict(t0, plugin_cxx="x"), "not allowed"),
                             ("tool link with a script", dict(t0, link={"script": "l.ld", "output": "mkhdr", "flags": []}), "link of a tool root"),
                             ("tool root with a target compiler", dict(t0, compiler={"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"}), "host driver")):
