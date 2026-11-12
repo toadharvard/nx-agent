@@ -174,3 +174,11 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - C++ runtime: 10;
     - libc/libm: 12.
   - objstub: 1784/1784.
+- 03:39Z Reach census merged (w3b aaf52b9: render/shaders/total/sm_reach.py generates sm_reach.tsv and sm_reach.json; measured at b6bb6c3).
+  - Set: 15,791 shipped shaders in 16 packages, all decoded.
+  - Of the 7553 sm_table rows: 1136 are used by at least 1 shipped shader. 6417 are used by none (2672 by model, 3745 within the shipped models). The 3 b# rows: 0 uses.
+  - "Used" is an over-approximation built from pooled atoms, so 0 is sound.
+  - Open, for the certificates only:
+    - the D3DX run-time path (L1 w18);
+    - the BSAs not scanned: Meshes, Textures, Textures2, Sound, Voices1, Music. They are large; a farm will name-scan their directory tables.
+  - Option (d) applies meanwhile, so neither item blocks the first frame.
