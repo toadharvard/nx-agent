@@ -244,3 +244,10 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:41Z:
   - w21 never started (stuck pending), so it was archived and w21b (session_01KmtZKTZ76LhVoz6LLMqcHv) now does the legal gate plus census.
   - w5's acceptance is now a fresh-container green with nothing installed by hand: setup, envcheck, verdict. Status: open. w13 had 25 dpkg errors at install_debs.
+- 03:44Z: **w18**, open LoadLibrary sites.
+  - Verdict: 9f500ec5 green (26 gates). memfx.edge_bound (dominating unsigned cmp) is at 37b24de3, which has no verdict yet.
+  - Results: of 127 indexed .data stores, 1 is closed and 126 stay unbounded. Open sites are unchanged: LoadLibrary 3, GPA 12.
+  - **Open class, reported to the orchestrator:** site (i) 0xda284c needs data object extents in the exe.
+    - OWNER-6 alone does not give them: interior references and negative in-bounds indices make "next referenced address" unsound. I withdrew that idea.
+    - Candidates: (a) extents from the decomp layout facts (L2), (b) value ranges from L3a, (c) a write-set fact for the cell.
+  - w18 now does (iii) 0x56b719 and records the raw fact for (i).
