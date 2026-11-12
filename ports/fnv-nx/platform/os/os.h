@@ -84,7 +84,7 @@ void os_show_message(const char *caption, const char *text);
  * init[0..init_n) (init NULL: empty). Returns 1: entered (out[0..*n) holds the text, out[*n] = 0, *n <= max_len; out has room for
  * max_len + 1 units), 0: the user cancelled (out and *n untouched), <0: -FNVNX_HE_BADINPUT (max_len 0 or above 500, out or n NULL)
  * or -(the applet's Horizon result): the caller treats it as fatal. The backend does no validation of the text: that is the caller's,
- * which calls again with init = the text it refused. The guest backend is toolchain/guest/os_guest.c; the host test backend
+ * which calls again with init = the text it refused. The guest backend is platform/guest/os_guest.c; the host test backend
  * (os_posix.c) plays a script the test fills, one entry per applet round, cut to max_len as the applet's field would. */
 int os_text_entry(unsigned max_len, const uint16_t *init, size_t init_n, uint16_t *out, size_t *n);
 /* host test backend only (os_posix.c): the script of what the user types, one entry per applet round; an empty script is a user who

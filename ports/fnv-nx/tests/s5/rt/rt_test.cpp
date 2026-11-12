@@ -201,7 +201,7 @@ static void test_files() {
 /* thread placement (toolchain/host/placement.h): roles at creation, priority/affinity of another thread through
  * its host id. The emulator's host places threads with the same table and prints them; rt/build.sh checks it. */
 static void *placed_fn(void *) { return (void *)7; }
-/* what toolchain/guest/os_guest.c os_cpu_boost() sends (the loading screen's CPU boost) */
+/* what platform/guest/os_guest.c os_cpu_boost() sends (the loading screen's CPU boost) */
 static uint64_t cpu_boost(uint64_t mode) {
     uint64_t arg[1] = {mode};
     return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_CPU_BOOST, FNVNX_ADDR(arg), 1);

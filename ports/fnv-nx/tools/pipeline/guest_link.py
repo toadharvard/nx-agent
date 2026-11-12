@@ -36,8 +36,8 @@ P = os.path.join(ROOT, 'platform')
 PINC = ['-I' + os.path.join(P, 'include'), '-iquote', os.path.join(ROOT, 'shim', 'include'),
         '-I' + os.path.join(ROOT, 'shim', 'include'), '-I' + os.path.join(P, 'crt'), '-I' + os.path.join(TCDIR, 'include')]
 # LP64 / libnx side of a platform module (runs in the host), not part of the guest
-HOST_SIDE = {'platform/input/input_horizon.cpp', 'platform/audio/backend_audren.c', 'platform/os/os_horizon.c',
-             'platform/os/os_posix.c'}
+HOST_SIDE = {'platform_host/input/input_horizon.cpp', 'platform_host/audio/backend_audren.c', 'platform_host/os/os_horizon.c',
+             'platform_host/os/os_posix.c'}
 
 
 def log(*a):
@@ -91,8 +91,8 @@ def main(argv):
             srcs += [os.path.join(d, n) for n in sorted(os.listdir(d)) if n.endswith(exts)]
     srcs += [os.path.join(P, 'clock', n) for n in ('clock_rt.cpp', 'clock_real.cpp')]   # the clock interface (the product's real clock)
     for n in ('os_guest.c', 'platform_glue.cpp'):            # S5's guest OS backend, when present
-        if os.path.isfile(os.path.join(g, n)):
-            srcs.append(os.path.join(g, n))
+        if os.path.isfile(os.path.join(P, 'guest', n)):
+            srcs.append(os.path.join(P, 'guest', n))
     ld = os.path.join(ROOT, 'loader', 'src')
     if os.path.isdir(ld):
         srcs += [os.path.join(ld, n) for n in sorted(os.listdir(ld)) if n.endswith('.c')]

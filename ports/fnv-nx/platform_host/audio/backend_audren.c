@@ -9,9 +9,9 @@
 #include <malloc.h>
 #include <string.h>
 
-#include "backend.h"
-#include "mixer.h"
-#include "../os/os.h"
+#include "../../platform/audio/backend.h"
+#include "../../platform/audio/mixer.h"
+#include "../../platform/os/os.h"
 
 #define NBUF 4
 

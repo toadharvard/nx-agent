@@ -5,8 +5,8 @@
  * FnvnxHostApi: threads are host threads with guest TLS, locks/condvars are the runtime's futex words, files
  * go to the host's newlib/fsdev. Paths are host paths ("sdmc:/...").
  */
-#include "../../platform/os/os_clock.h"
-#include "../../platform/os/os_world.h"
+#include "../os/os_clock.h"
+#include "../os/os_world.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -233,7 +233,7 @@ int32_t os_tz_offset_minutes(void) {
     char n[8];
     return tzr_at(os_wall_time_us() / 1000000, &off, &dst, n) ? 0 : off / 60;
 }
-#include "../../platform/os/os_tzrule.inc"
+#include "../os/os_tzrule.inc"
 
 /* ---- files: host fs calls return -errno, os.h wants -OS_E* (same numbers) */
 int os_file_open(const char *path, int flags) {

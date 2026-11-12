@@ -7,6 +7,7 @@
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ROOT := $(abspath $(HERE)/../..)
 P := $(ROOT)/platform
+HP := $(ROOT)/platform_host
 OUT ?= $(HERE)/build
 
 CC ?= gcc
@@ -16,10 +17,10 @@ FLAGS := -MMD -MP -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fs
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
-S4_C := $(P)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
+S4_C := $(HP)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 S4_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)
 S7_CXX := $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(P)/com/combridge_exports.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only (make ilp32)
-S7_HZ := $(P)/audio/backend_audren.c
+S7_HZ := $(HP)/audio/backend_audren.c
 TEST_CXX := $(wildcard $(HERE)/*.cpp) $(ROOT)/tests/s4/host_boundary.cpp
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
@@ -57,12 +58,12 @@ $(P)/win32/env_const.gen.inc: $(ENV_SRC)
 $(P)/crt/env_const.gen.inc: $(ENV_SRC)
 	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only crt/
 $(P)/os/env_const_posix.gen.inc: $(ENV_SRC)
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_posix.c
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only ../platform_host/os/os_posix.c
 $(P)/os/env_const_horizon.gen.inc: $(ENV_SRC)
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_horizon.c
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only ../platform_host/os/os_horizon.c
 $(OUT)/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 $(OUT)/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
-$(OUT)/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
+$(OUT)/platform_host/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 
 # the registry's first-boot rows: platform/manifest/declared_registry.tsv, checked against the static read sites (REGSITES, the exe-derived
 # private regsites.tsv of the product build; the tests use their own synthetic file) and generated into registry_seed.gen.inc
@@ -121,12 +122,12 @@ XFLAGS := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -fsyntax-only -frounding-math -Wall
           -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(ROOT)/ext/freetype/include -I$(ROOT)/loader/include -I$(ROOT)/toolchain/include
 ilp32: $(ENVC_INC) $(COMOUT)
 	@set -e; for f in $(S7_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done
-	@echo "ilp32 (libnx) platform/audio/backend_audren.c platform/input/input_horizon.cpp"
+	@echo "ilp32 (libnx) platform_host/audio/backend_audren.c platform_host/input/input_horizon.cpp"
 	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(ROOT)/tests/s4/ilp32-stubs -I$(LIBNX)/nx/include $(S7_HZ)
 	@$(XCXX) -std=gnu++17 $(XFLAGS) -D__SWITCH__ $(P)/input/xinput.cpp
 	@# libnx's C++ headers are not ILP32-clean (BITL enums): input_horizon.cpp sits on the LP64 side of the
 	@# boundary (its interface, input.h/os.h, is fixed-width C), so it is checked with the LP64 ABI.
-	@$(XCXX) -std=gnu++17 $(subst -mabi=ilp32,-mabi=lp64,$(XFLAGS)) -D__SWITCH__ -I$(ROOT)/tests/s4/ilp32-stubs -I$(LIBNX)/nx/include $(P)/input/input_horizon.cpp
+	@$(XCXX) -std=gnu++17 $(subst -mabi=ilp32,-mabi=lp64,$(XFLAGS)) -D__SWITCH__ -I$(ROOT)/tests/s4/ilp32-stubs -I$(LIBNX)/nx/include $(HP)/input/input_horizon.cpp
 	@echo "ilp32: all S7 sources parse"
 
 # the link maps of the S7 binaries, one TSV line each (platform/manifest/check_doubles.py); builds their objects
