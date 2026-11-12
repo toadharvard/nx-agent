@@ -55,8 +55,6 @@ def run(cases, work=WORK, tag=1000):
     bytes it stores with the SDM expectation; -> number of failures"""
     os.makedirs(work, exist_ok=True)
     img = XE.FImage('/home/user/game/FalloutNV.exe')
-    from fnvlift import fpfacts
-    fpfacts.ASSUME.update(('I-FPMASK', 'I-FPSTICKY'))
     T.G.update(L=fnvlift, img=img, work=work)
     T.runtime_objects(work, os.path.dirname(HERE))
     bad = 0
