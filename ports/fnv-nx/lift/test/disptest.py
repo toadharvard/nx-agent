@@ -19,9 +19,10 @@ from unicorn import Uc, UcError, UC_ARCH_ARM64, UC_MODE_ARM
 from unicorn.arm64_const import UC_ARM64_REG_X0, UC_ARM64_REG_X30, UC_ARM64_REG_SP, UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_TPIDR_EL0
 from elftools.elf.elffile import ELFFile
 
-BASE, IAT, DATA, GSTACK, HSTACK, STOP, TEXT, TLS = 0x401000, 0x402000, 0x403000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000, 0x7d000000
-NATIVE_ADDR, NOWHERE = 0x401f00, 0x500000       # an exe address a native root defines (and the lifted table holds too); an address no table holds
-CASES = ['this', 'fast', 'stdcdecl', 'q', 'fd', 'mem', 'a12', 'a8', 'hfa', 'hfa3', 'hfaret', 'ref', 'native', 'ud']
+BASE, IAT, DATA, GSTACK, HSTACK, STOP, TEXT, TLS = 0x401000, 0x406000, 0x407000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000, 0x7d000000
+NATIVE_ADDR, NOWHERE = 0x403f00, 0x500000       # an exe address a native root defines (and the lifted table holds too); an address no table holds
+CASES = ['this', 'fast', 'stdcdecl', 'q', 'fd', 'mem', 'a12', 'a8', 'hfa', 'hfa3', 'hfaret', 'ref', 'native', 'ud',
+         'uf', 'u1', 'vec', 'vec2', 'd4', 'al', 'bf', 'f4r', 'd4r', 'ct', 'ur', 'vr']
 BRIDGE = [('t.dll', 'tc_' + c, 'stdcall', 'i', '', 'tc_' + c, 'sym') for c in CASES]
 KEY = {r[1]: 0x00100000 + 16 * i for i, r in enumerate(sorted(BRIDGE, key=lambda r: (r[0], r[1])))}      # the key rule of tools/impgen.py
 SLOT = {r[1]: IAT + 4 * i for i, r in enumerate(BRIDGE)}
@@ -58,6 +59,29 @@ TARGETS = {
     'hfret': 'mov eax, 0x3fc00000; mov edx, 0x40100000; ret',
     # a class argument passed by value on the x86 stack (the AAPCS side passes the address of a copy): a + b + c
     'ref': 'mov eax, dword ptr [esp+4]; add eax, dword ptr [esp+8]; add eax, dword ptr [esp+12]; ret',
+    # DISPATCH1 classes of the backend (descriptor letters in parentheses). Arguments are the x86 stack words, results through edx:eax or the hidden pointer.
+    # union {float a[2]} (s8hf) and union {float x, y} (s4hf): GCC's AAPCS64 treats a union of floats as an HFA
+    'uf': 'fld dword ptr [esp+4]; fadd dword ptr [esp+8]; ret',
+    'u1': 'fld dword ptr [esp+4]; fadd st(0), st(0); ret',
+    # struct {float x4 vector} (s16hv16) and struct {2 x float2 vector} (s16hv8): four floats, summed
+    'vec': 'fld dword ptr [esp+4]; fadd dword ptr [esp+8]; fadd dword ptr [esp+12]; fadd dword ptr [esp+16]; ret',
+    'vec2': 'fld dword ptr [esp+4]; fadd dword ptr [esp+8]; fadd dword ptr [esp+12]; fadd dword ptr [esp+16]; ret',
+    # struct of four doubles (s32hd): summed
+    'd4': 'fld qword ptr [esp+4]; fadd qword ptr [esp+12]; fadd qword ptr [esp+20]; fadd qword ptr [esp+28]; ret',
+    # alignas(16) {float, float} (s16g): a + b
+    'al': 'fld dword ptr [esp+4]; fadd dword ptr [esp+8]; ret',
+    # {float; int : 0; float} (s8hf): a + b
+    'bf': 'fld dword ptr [esp+4]; fadd dword ptr [esp+8]; ret',
+    # results: F4 {1, 2, 3, 4} (a16hf) and HV {1, 2, 3, 4} (a16hv16): 16 bytes, the hidden pointer is the first stack word
+    'f4r': 'mov eax, dword ptr [esp+4]; mov dword ptr [eax], 0x3f800000; mov dword ptr [eax+4], 0x40000000; mov dword ptr [eax+8], 0x40400000; mov dword ptr [eax+12], 0x40800000; ret',
+    'vr': 'mov eax, dword ptr [esp+4]; mov dword ptr [eax], 0x3f800000; mov dword ptr [eax+4], 0x40000000; mov dword ptr [eax+8], 0x40400000; mov dword ptr [eax+12], 0x40800000; ret',
+    # D4 {1.0, 2.0, 3.0, 4.0} (a32hd): 32 bytes through the hidden pointer
+    'd4r': 'mov eax, dword ptr [esp+4]; mov dword ptr [eax], 0; mov dword ptr [eax+4], 0x3ff00000; mov dword ptr [eax+8], 0; mov dword ptr [eax+12], 0x40000000;'
+           'mov dword ptr [eax+16], 0; mov dword ptr [eax+20], 0x40080000; mov dword ptr [eax+24], 0; mov dword ptr [eax+28], 0x40100000; ret',
+    # a class with a constructor, 8 bytes (a8x): the AAPCS side returns it in x0, the x86 callee through the hidden pointer (not a POD): {5, 7}
+    'ct': 'mov eax, dword ptr [esp+4]; mov dword ptr [eax], 5; mov dword ptr [eax+4], 7; ret',
+    # union {float a[2]} as a result (a8hf): edx:eax = {1.5f, 2.25f}
+    'ur': 'mov eax, 0x3fc00000; mov edx, 0x40100000; ret',
     # the same exe address has a lifted body too: native (rule 1) wins
     'native': 'mov eax, 0x2222; ret',
 }
@@ -66,6 +90,7 @@ ADDR = {n: BASE + 0x80 * i for i, n in enumerate(ORDER)}
 ADDR['native'] = NATIVE_ADDR
 # the #UD root and the handler
 HANDLER = BASE + 0x80 * len(ORDER)
+ROOTS = HANDLER + 0x100
 
 NATIVE = r'''
 typedef unsigned int u32; typedef unsigned long long u64;
@@ -94,6 +119,10 @@ struct Obj { u32 a, b; };
 struct F2 { float a, b; }; struct D1 { double a; }; struct D3 { double a, b, c; };
 struct B20 { u32 v[5]; }; struct S12 { u32 a, b, c; }; struct S8 { u32 a, b; };
 struct NT { NT(const NT &o) : a(o.a), b(o.b), c(o.c) {} NT(u32 x, u32 y, u32 z) : a(x), b(y), c(z) {} u32 a, b, c; };
+union U1 { float a[2]; }; union U2 { float x, y; };
+typedef float v16f __attribute__((vector_size(16))); typedef float v8f __attribute__((vector_size(8)));
+struct HV { v16f v; }; struct HW { v8f v, w; }; struct D4 { double a, b, c, d; }; struct F4 { float a, b, c, d; };
+struct AL { alignas(16) float a; float b; }; struct BF { float a; int : 0; float b; }; struct CT { CT() : a(0), b(0) {} u32 a, b; };
 #define FP(T, A) ((T)(unsigned long)(A))
 /* every `tc_*` below is called by the guest root as a stdcall import without arguments; the value it returns is the case's result. The indirect calls are plain
    C++ calls through pointers whose value is an exe address: the plugin (and nothing written here) turns each into the cache + fnvnx_dispatch. */
@@ -137,6 +166,18 @@ u32 tc_ref(void) { NT n(1, 20, 300); return FP(u32 (CC("stack") *)(NT), @ref@)(n
 /* rule 1: a native root defines the body of this exe address: it is called, not the lifted body at the same address */
 u32 native_body(u32 x) { return x + 0x1100; }
 u32 tc_native(void) { return FP(u32 (CC("stack") *)(u32), @native@)(0x11); }
+u32 tc_uf(void) { U1 u = { { 1.5f, 2.5f } }; return (u32)(int)(FP(float (CC("stack") *)(U1), @uf@)(u) * 10); }
+u32 tc_u1(void) { U2 u; u.x = 3.0f; return (u32)(int)(FP(float (CC("stack") *)(U2), @u1@)(u) * 10); }
+u32 tc_vec(void) { HV h = { { 1, 2, 3, 4 } }; return (u32)(int)FP(float (CC("stack") *)(HV), @vec@)(h); }
+u32 tc_vec2(void) { HW h = { { 1, 2 }, { 3, 4 } }; return (u32)(int)FP(float (CC("stack") *)(HW), @vec2@)(h); }
+u32 tc_d4(void) { D4 d = { 1.5, 2.0, 3.5, 4.0 }; return (u32)(int)FP(double (CC("stack") *)(D4), @d4@)(d); }
+u32 tc_al(void) { AL x; x.a = 2.5f; x.b = 4.0f; return (u32)(int)(FP(float (CC("stack") *)(AL), @al@)(x) * 2); }
+u32 tc_bf(void) { BF x; x.a = 1.5f; x.b = 2.5f; return (u32)(int)(FP(float (CC("stack") *)(BF), @bf@)(x) * 10); }
+u32 tc_f4r(void) { F4 r = FP(F4 (CC("stack") *)(void), @f4r@)(); return (u32)(int)(r.a + r.b * 10 + r.c * 100 + r.d * 1000); }
+u32 tc_vr(void) { HV r = FP(HV (CC("stack") *)(void), @vr@)(); return (u32)(int)(r.v[0] + r.v[1] * 10 + r.v[2] * 100 + r.v[3] * 1000); }
+u32 tc_d4r(void) { D4 r = FP(D4 (CC("stack") *)(void), @d4r@)(); return (u32)(int)(r.a + r.b * 10 + r.c * 100 + r.d * 1000); }
+u32 tc_ct(void) { CT r = FP(CT (CC("stack") *)(void), @ct@)(); return r.a * 100 + r.b; }
+u32 tc_ur(void) { U1 r = FP(U1 (CC("stack") *)(void), @ur@)(); return (u32)(int)(r.a[0] * 4 + r.a[1] * 100); }
 /* rule 3: an address no table holds raises #UD there, through the guest's exception chain; the guest handler computes code ^ address */
 u32 tc_ud(void) { return FP(u32 (CC("stack") *)(void), @nowhere@)(); }
 }
@@ -155,7 +196,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--work', default='/home/user/l3work/disptest'); ap.add_argument('--cc', default=''); ap.add_argument('--trace', default=''); a = ap.parse_args()
     w = a.work; os.makedirs(w, exist_ok=True)
     cc = lambda t: (a.cc + '/' if a.cc else '') + 'aarch64-linux-gnu-' + t
-    code = bytearray(0x1000)
+    code = bytearray(0x4000)
     ks = Ks(KS_ARCH_X86, KS_MODE_32); ents = {}
     def put(name, addr, text):
         b = bytes(ks.asm(text, addr)[0]); assert len(b) <= 0x80, name
@@ -164,14 +205,14 @@ def main():
     S = lambda n: 'dword ptr [0x%x]' % SLOT['tc_' + n]
     # the root of the #UD case and its handler: the handler unwinds to the root's frame and continues at a label of the root (a non-local transfer, as RtlUnwind
     # and a catch continuation do; the native frames in between are discarded) with eax = ExceptionCode ^ ExceptionAddress; the root then returns it
-    udroot = BASE + 0x900 + 0x40 * CASES.index('ud')
+    udroot = ROOTS + 0x40 * CASES.index('ud')
     udtext = 'push 0x%x; push dword ptr fs:[0]; mov fs:[0], esp; call %s; mov eax, 0xdead; ret; nop; nop; nop; nop; ret' % (HANDLER, S('ud'))
     label = udroot + bytes(ks.asm(udtext, udroot)[0]).index(b'\x90\x90\x90\x90') + 4
     put('udh', HANDLER, 'mov ecx, dword ptr [esp+4]; mov eax, dword ptr [esp+8]; mov esp, eax; pop dword ptr fs:[0]; add esp, 4; mov eax, dword ptr [ecx]; xor eax, dword ptr [ecx+12];'
                         'mov edx, 0x%x; jmp edx' % label)
     roots = {}
     for i, c in enumerate(CASES):
-        ad = BASE + 0x900 + 0x40 * i
+        ad = ROOTS + 0x40 * i
         t = 'call %s; ret' % S(c)
         if c == 'ud': t = udtext
         put('root_' + c, ad, t); roots[c] = ad
@@ -228,8 +269,10 @@ def main():
         e = ELFFile(fh); segs = [(p['p_vaddr'], p.data(), p['p_memsz']) for p in e.iter_segments() if p['p_type'] == 'PT_LOAD']
         sym = {x.name: x['st_value'] for x in e.get_section_by_name('.symtab').iter_symbols() if x.name}
     want = {'this': 25, 'fast': 107, 'stdcdecl': 7 + 12 + 7, 'q': ((0x01234567 ^ 0x89abcdef) + (2 ^ 0)) & 0xffffffff, 'fd': 375 * 4 // 4 * 1 + 0, 'mem': 7 + 8 + 9 + 10 + 11,
-            'a12': 50607, 'a8': 9 + 18 * 1000, 'hfa': 4 * 10 + 5, 'hfa3': 7, 'hfaret': 6 + 225, 'ref': 321, 'native': 0x1111, 'ud': 0xC000001D ^ NOWHERE}
+            'a12': 50607, 'a8': 9 + 18 * 1000, 'hfa': 4 * 10 + 5, 'hfa3': 7, 'hfaret': 6 + 225, 'ref': 321, 'native': 0x1111, 'ud': 0xC000001D ^ NOWHERE,
+            'uf': 40, 'u1': 60, 'vec': 10, 'vec2': 10, 'd4': 11, 'al': 13, 'bf': 40, 'f4r': 4321, 'vr': 4321, 'd4r': 4321, 'ct': 507, 'ur': 6 + 225}
     want['fd'] = 15 * 100 + 6
+    want['vr'] = 4321
     for name in CASES:
         uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         lo = min(v for v, d, m in segs) & ~0xfff; hi = (max(v + m for v, d, m in segs) + 0xffff) & ~0xfff; uc.mem_map(lo, hi - lo)
