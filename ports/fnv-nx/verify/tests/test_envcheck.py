@@ -176,6 +176,12 @@ def mirror_doc(tree=MT, sha=hashlib.sha256(b"not a real deb\n").hexdigest(), wtr
                   "packages": {"no-such-pkg-x": {"version": "1", "file": "x_1_amd64.deb", "sha256": sha, "url": "u"}}},
                   "python": {"modules": {"fakemod-xyz": "1"}, "wheel_files": {"fakemod-xyz": "fakemod_xyz-1-py3-none-any.whl"},
                              "wheel_sha256": {"fakemod-xyz": wsha}}}, "m.json")
+def closure_doc(top_ver="1", pin_ver="1"):
+    d = json.load(open(mirror_doc()))
+    d["debs"]["packages"]["closure-only-pkg"] = dict(d["debs"]["packages"]["no-such-pkg-x"])   # a Depends-closure deb: pinned, not declared
+    d["debs"]["packages"]["no-such-pkg-x"]["version"] = pin_ver
+    d["packages"]["no-such-pkg-x"] = top_ver
+    return write(d, "c.json")
 IT = os.path.join(TD, "inst-tmp")
 os.makedirs(IT)
 def inst(path):
@@ -184,6 +190,13 @@ def inst(path):
     return p.returncode, p.stdout, p.stderr
 rc, out, err = inst(mirror_doc())
 check("install_mirror: right tree and sha256 -> 1 package from the mirror (dry)", rc == 0 and "1 packages, 1 installed from the mirror, 0 already present" in out and "1 modules, 1 installed from the mirror" in out, (rc, out, err))
+rc, out, err = inst(closure_doc())
+check("install_mirror: a closure-only deb (pinned, not declared) is checked against debs.packages -> 2 packages, no KeyError", rc == 0 and "2 packages, 2 installed from the mirror" in out and "Traceback" not in err, (rc, out, err))
+rc, out, err = inst(closure_doc(top_ver="2"))
+check("install_mirror: a declared version that disagrees with debs.packages -> exit 2 naming the package", rc == 2 and "packages.no-such-pkg-x is 2, debs.packages says 1" in err, (rc, out, err))
+d = json.load(open(mirror_doc())); d["packages"]["undeclared-pin"] = "1"
+rc, out, err = inst(write(d, "u.json"))
+check("install_mirror: a declared package with no deb pin -> exit 2", rc == 2 and "packages.undeclared-pin is 1, debs.packages says no pin" in err, (rc, out, err))
 rc, out, err = inst(mirror_doc(sha="0" * 64))
 check("install_mirror: a deb with another sha256 -> exit 2 naming the package, nothing installed", rc == 2 and "no-such-pkg-x: sha256 is" in err, (rc, out, err))
 rc, out, err = inst(mirror_doc(tree="0" * 64))
