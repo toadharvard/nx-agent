@@ -63,7 +63,7 @@ void fnvnx_declared_files_first_run(void);
  * directories are the Wine 9.0 data directory (the .fon bitmap fonts and the TrueType files), the host fonts (every sfnt file
  * below it) and the registry export directory (.reg files: Fonts, FontSubstitutes, hardware-profile Fonts, CodePage\ACP). There is
  * no setter and no unset state: GDI reads them when the first font is realised. */
-struct fnvnx_font_dirs { const char *wine, *host, *reg; };
+struct fnvnx_font_dirs { const char *dir; };   /* the one declared directory: exactly the fnv-nx-build tools/fonts-wine9 mirror */
 const struct fnvnx_font_dirs *fnvnx_declared_fonts(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
 BOOL fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);

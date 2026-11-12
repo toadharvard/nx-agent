@@ -9,6 +9,7 @@
  * Locking: g_ui_lock guards the tree, is never held across a window procedure call and is not recursive; the *_l
  * helpers expect it held. */
 #include "window_int.h"
+#include "font_faces.h"
 #include "fnvnx_boundary.h"
 
 #include <stdio.h>
@@ -2613,7 +2614,7 @@ void mb_icon(HDC dc, int kind, int x, int y)
     uint8_t lf[60];   /* LOGFONTA: 22 px bold */
     memset(lf, 0, sizeof lf);
     int32_t hgt = -22, wgt = 700;
-    memcpy(lf, &hgt, 4); memcpy(lf + 16, &wgt, 4); lf[23] = 1 /* DEFAULT_CHARSET */; memcpy(lf + 28, "Arial", 5);
+    memcpy(lf, &hgt, 4); memcpy(lf + 16, &wgt, 4); lf[23] = 1 /* DEFAULT_CHARSET */; { const char *face = w32_face_name(FACE_ARIAL); memcpy(lf + 28, face, strlen(face)); }   /* lfFaceName */
     HFONT f = CreateFontIndirectA(lf);
     HGDIOBJ old = f ? SelectObject(dc, f) : NULL;
     const char g[2] = { kind == 0x10 ? 'X' : kind == 0x20 ? '?' : kind == 0x30 ? '!' : 'i', 0 };

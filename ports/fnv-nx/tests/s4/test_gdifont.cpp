@@ -121,8 +121,9 @@ TEST(text_gdifont_reference)   /* named to run after heap_destroy_frees_all_and_
     printf("gdifont: FreeType %d.%d.%d\n", ma, mi, pa);
     CHECK(ma == 2 && mi == 13 && pa == 2);
     FT_Done_FreeType(lib);
-    scan_formats(wine);
-    scan_formats(host);
+    const char *declared = getenv("FNVNX_FONTS");   /* the declared set (tools/fonts-wine9): every file the platform can load must be a format FreeType here reads without libpng/zlib/bzip2/brotli */
+    CHECK(declared != nullptr);
+    if (declared) scan_formats(declared);
 
     FILE *f = fopen((r + "/fontdump.txt").c_str(), "r");
     if (!f) { printf("gdifont: reference not available\n"); CHECK(false); return; }

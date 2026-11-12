@@ -24,6 +24,7 @@ OUT ?= $(HERE)/build
 FT := $(ROOT)/ext/freetype
 FNVNX_FONT_REF ?= /home/user/gd/fontref
 FNVNX_FONT_HOST ?= /home/user/gd/fonts/deb/usr/share/fonts
+FNVNX_FONTS ?= /home/user/fonts-wine9/fonts
 FT_SRCS := base/ftsystem base/ftinit base/ftdebug base/ftbase base/ftbbox base/ftbdf base/ftbitmap base/ftcid \
     base/ftfstype base/ftgasp base/ftglyph base/ftgxval base/ftmm base/ftotval base/ftpatent base/ftpfr base/ftstroke \
     base/ftsynth base/fttype1 base/ftwinfnt autofit/autofit bdf/bdf cff/cff cid/type1cid pcf/pcf pfr/pfr psaux/psaux \
@@ -109,6 +110,12 @@ REG_DECL := $(P)/manifest/declared_registry.tsv
 $(P)/win32/registry_seed.gen.inc: $(REG_DECL) $(P)/manifest/gen_registry_seed.py $(P)/manifest/regsites.py $(REGSITES)
 	python3 -I $(P)/manifest/gen_registry_seed.py $(REGSITES) $(REG_DECL) $@
 $(OUT)/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
+# the declared machine's font registry values, generated from the pinned Wine 9.0 files of the fonts mirror (tools/fonts-wine9)
+FONTS_MIRROR ?= $(patsubst %/fonts,%,$(FNVNX_FONTS))
+$(P)/win32/font_machine.gen.inc: $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf
+	python3 -I $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf $(FNVNX_FONTS) $@
+$(OUT)/platform/win32/gdifont.cpp.o: $(P)/win32/font_machine.gen.inc
+$(OUT)-m32/platform/win32/gdifont.cpp.o: $(P)/win32/font_machine.gen.inc
 
 # the declared FalloutPrefs.ini: the launcher gate's setting (PREFS_REQUIRED, the exe-derived private output of prefs_settings.py in the product
 # build; the tests use their own synthetic file) = the adapter Description in the render front end's identity images (IDENT_*; synthetic here)
@@ -159,7 +166,7 @@ $(OUT)/platform/clock/clock_virtual.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/s4_tests_vclock: $(VC_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(VC_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 vclock: $(OUT)/s4_tests_vclock
-	rm -rf $(OUT)/root-vclock && FNVNX_TEST_ONLY=vc_ FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s4_tests_vclock
+	rm -rf $(OUT)/root-vclock && FNVNX_TEST_ONLY=vc_ FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s4_tests_vclock
 
 # ---- the same test objects linked with the product's file-mapping backend (platform/win32/filemap_private.cpp) instead of
 # filemap_shared.cpp, plus the test-only host implementation of the section services it calls (host_section.cpp); runs the vmp_ cases
@@ -168,7 +175,7 @@ $(OUT)/platform/win32/filemap_private.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/s4_tests_private: $(PRIV_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(PRIV_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 private: $(OUT)/s4_tests_private
-	rm -rf $(OUT)/root-private && FNVNX_TEST_ONLY=vmp_ FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-private $(OUT)/s4_tests_private
+	rm -rf $(OUT)/root-private && FNVNX_TEST_ONLY=vmp_ FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-private $(OUT)/s4_tests_private
 
 # every ext_call of the guest sources is a service of toolchain/include/fnvnx/hostapi.h with its declared argument count
 hostapi-check:
@@ -189,10 +196,11 @@ regsites-check:
 	python3 -I $(ROOT)/platform/manifest/check_filesites.py
 	python3 -I $(ROOT)/platform/manifest/check_macrodefs.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_registry.py
+	python3 -I $(ROOT)/platform/manifest/check_gen_fontmachine.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_prefs.py
 
 test: hostapi-check regsites-check $(OUT)/s4_tests
-	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
+	rm -rf $(OUT)/root && FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
 
 # ---- i386 (-m32) build: the ILP32 data model with a host libc. /usr/include/asm is the multilib packages' symlink,
 # missing when a cross compiler replaced them; the x86-64 asm headers serve i386 too.
@@ -232,17 +240,17 @@ $(M32OUT)/libfreetype.a: $(patsubst %,$(M32OUT)/freetype/%.o,$(FT_SRCS))
 $(M32OUT)/s4_m32: $(M32_OBJS) $(M32OUT)/libfreetype.a
 	$(CXX) -m32 -pthread $(M32_OBJS) $(M32OUT)/libfreetype.a -o $@ -lm
 m32: $(M32OUT)/s4_m32
-	rm -rf $(M32OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32
+	rm -rf $(M32OUT)/root && FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32
 iat: $(M32OUT)/s4_m32
 	@test -n "$(EXE)" || { echo "set EXE=<FalloutNV.exe>"; exit 2; }
 	python3 -I $(HERE)/iat/pe_imports.py "$(EXE)" > $(M32OUT)/imports.txt
-	rm -rf $(M32OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32 --iat $(M32OUT)/imports.txt
+	rm -rf $(M32OUT)/root && FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32 --iat $(M32OUT)/imports.txt
 
 # ---- the host tests built static for AArch64 and run under qemu-aarch64 (the device's ISA: atomics, float, signals)
 qemu:
 	$(MAKE) --no-print-directory OUT=$(OUT)-a64 CC="aarch64-linux-gnu-gcc -static" CXX="aarch64-linux-gnu-g++ -static" \
 		$(OUT)-a64/s4_tests
-	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s4_tests
+	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root && FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s4_tests
 
 # ---- device backends: the inventory (tests/s4/backends/backends.tsv, metric device-open) and the qemu-aarch64 tests
 # of the host-side pieces. With EXE=, the inventory is checked against every import of the exe.

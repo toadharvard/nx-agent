@@ -20,6 +20,7 @@ CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 # the declared fonts (platform/include/fnvnx_win32_ext.h): the reference font set, an input of every test binary (see tests/s4/Makefile)
 FNVNX_FONT_REF ?= /home/user/gd/fontref
 FNVNX_FONT_HOST ?= /home/user/gd/fonts/deb/usr/share/fonts
+FNVNX_FONTS ?= /home/user/fonts-wine9/fonts
 export FNVNX_FONT_REF FNVNX_FONT_HOST
 S4_C := $(HP)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 S4_CXX := $(HP)/win32/filemap_shared.cpp $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)
@@ -76,6 +77,11 @@ REG_DECL := $(P)/manifest/declared_registry.tsv
 $(P)/win32/registry_seed.gen.inc: $(REG_DECL) $(P)/manifest/gen_registry_seed.py $(P)/manifest/regsites.py $(REGSITES)
 	python3 -I $(P)/manifest/gen_registry_seed.py $(REGSITES) $(REG_DECL) $@
 $(OUT)/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
+# the declared machine's font registry values, generated from the pinned Wine 9.0 files of the fonts mirror (tools/fonts-wine9)
+FONTS_MIRROR ?= $(patsubst %/fonts,%,$(FNVNX_FONTS))
+$(P)/win32/font_machine.gen.inc: $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf
+	python3 -I $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf $(FNVNX_FONTS) $@
+$(OUT)/platform/win32/gdifont.cpp.o: $(P)/win32/font_machine.gen.inc
 
 # the declared FalloutPrefs.ini: the launcher gate's setting (PREFS_REQUIRED, the exe-derived private output of prefs_settings.py in the product
 # build; the tests use their own synthetic file) = the adapter Description in the render front end's identity images (IDENT_*; synthetic here)
@@ -116,7 +122,7 @@ $(OUT)/platform/clock/clock_virtual.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/s7_tests_vclock: $(VC_OBJS) $(FTLIB)
 	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
 vclock: com-spec-check $(OUT)/s7_tests_vclock
-	rm -rf $(OUT)/root-vclock && mkdir -p $(OUT)/root-vclock/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s7_tests_vclock vc_
+	rm -rf $(OUT)/root-vclock && mkdir -p $(OUT)/root-vclock/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s7_tests_vclock vc_
 
 # the spec is derived from the C++ declarations: it must be what the extractor writes now
 com-spec-check:
@@ -124,13 +130,13 @@ com-spec-check:
 		|| { echo "com_spec.json is not what platform/com/spec_extract.py derives from the headers (run it)"; exit 1; }
 
 test: com-spec-check $(OUT)/s7_tests
-	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
+	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
 
 # the same tests built static for AArch64 and run under qemu-aarch64
 qemu:
 	$(MAKE) --no-print-directory OUT=$(OUT)-a64 CC="aarch64-linux-gnu-gcc -static" CXX="aarch64-linux-gnu-g++ -static" \
 		$(OUT)-a64/s7_tests
-	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
+	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
 
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++

@@ -16,6 +16,7 @@
  * fontconfig-derived family fallbacks beyond Wine's three built-in names per family class. */
 #include "w32.h"
 #include "gdi_int.h"
+#include "font_faces.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -92,7 +93,7 @@ struct Face {
 };
 struct Family { ustr name, second; std::vector<Face *> faces; };
 
-std::string g_wine_dir, g_host_dir, g_reg_dir;   /* copies of fnvnx_declared_fonts(), made once by load_all */
+std::string g_wine_dir;   /* copy of fnvnx_declared_fonts()->dir, made once by load_all */
 std::vector<Family *> g_fam;
 bool g_loaded;
 FT_Library g_lib;
@@ -276,27 +277,19 @@ void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /*
     }
 }
 
-/* ---- registry export files (.reg, UTF-16LE) */
-void parse_reg(const std::string &path)
+/* ---- the declared machine's font registry (Wine 9.0, ANSI 1252 / OEM 437, 96 dpi). Every value is generated from Wine's own files by
+ * platform/manifest/gen_fontmachine.py (font.c nls_update_font_list row + update_font_list/add_font_list, wine.inf.in [Fonts] FontSubstitutes,
+ * fontconfig-config 30-metric-aliases.conf for Replacements; inputs pinned in fnv-nx-build tools/fonts-wine9); nothing here is typed by hand.
+ * The font files are exactly that mirror's fonts/ in one directory; nothing else is read. */
+#include "font_machine.gen.inc"
+void declare_machine()
 {
-    std::vector<uint8_t> d;
-    if (!read_file(path, d)) declared_input_broken("registry export listed by its directory is unreadable", path);
-    if (d.size() < 2) return;
-    std::string txt;
-    for (size_t i = 2; i + 1 < d.size(); i += 2) txt += d[i + 1] ? '?' : (char)d[i];
-    std::string key;
-    size_t p = 0;
-    while (p < txt.size()) {
-        size_t e = txt.find('\n', p);
-        std::string l = txt.substr(p, e == std::string::npos ? std::string::npos : e - p);
-        p = e == std::string::npos ? txt.size() : e + 1;
-        while (!l.empty() && l.back() == '\r') l.pop_back();
-        if (l.size() > 2 && l[0] == '[') { key = l.substr(1, l.size() - 2); for (char &c : key) c = (char)tolower((unsigned char)c); g_reg[key]; continue; }
-        size_t q = l.find("\"=\"");
-        if (l.size() < 6 || l[0] != '"' || q == std::string::npos || l.back() != '"') continue;
-        auto unesc = [](const std::string &s) { std::string r; for (size_t i = 0; i < s.size(); i++) { if (s[i] == '\\' && i + 1 < s.size()) i++; r += s[i]; } return r; };
-        g_reg[key].push_back({ unesc(l.substr(1, q - 1)), unesc(l.substr(q + 3, l.size() - q - 4)) });
-    }
+    const std::string nt = "hkey_local_machine\\software\\microsoft\\windows nt\\currentversion\\";
+    g_reg["hkey_local_machine\\system\\currentcontrolset\\control\\nls\\codepage"].push_back({ "ACP", std::to_string(kAcp) });
+    for (auto &r : kHwFonts) g_reg["hkey_local_machine\\system\\currentcontrolset\\hardware profiles\\current\\software\\fonts"].push_back({ r[0], r[1] });
+    for (auto &r : kFontsKey) g_reg[nt + "fonts"].push_back({ r[0], r[1] });
+    for (auto &r : kSubst) g_reg[nt + "fontsubstitutes"].push_back({ r[0], r[1] });
+    for (auto &r : kReplace) g_reg["hkey_current_user\\software\\wine\\fonts\\replacements"].push_back({ r[0], r[1] });
 }
 const std::vector<std::pair<std::string, std::string>> &reg_key(const char *k)
 {
@@ -318,25 +311,15 @@ std::vector<std::string> list_dir(const std::string &d)
     std::sort(v.begin(), v.end());
     return v;
 }
-void scan_host(const std::string &d)
-{
-    for (const std::string &n : list_dir(d)) {
-        std::string p = d + "/" + n;
-        os_stat_t st;
-        if (os_stat(p.c_str(), &st)) continue;
-        if (st.is_dir) { scan_host(p); continue; }
-        size_t dot = n.rfind('.');
-        std::string ext = dot == std::string::npos ? "" : n.substr(dot);
-        if (ext == ".ttf" || ext == ".ttc" || ext == ".otf") add_font_file(p, false, true);
-    }
-}
 bool is_full_name(const ustr &n) { for (Family *f : g_fam) for (Face *x : f->faces) if (x->scalable && !fcmp(x->full, n, 63)) return true; return false; }
 bool enum_fallback(int pf, int i, ustr *out)
 {
-    static const char *const fixed[3] = { "Courier New", "Liberation Mono", "Bitstream Vera Sans Mono" }, *const serif[3] = { "Times New Roman", "Liberation Serif", "Bitstream Vera Serif" },
-        *const sans[3] = { "Arial", "Liberation Sans", "Bitstream Vera Sans" };
     if (i >= 3) return false;
-    *out = widen(((pf & 1) || (pf & 0xf0) == 0x30) ? fixed[i] : (pf & 0xf0) == 0x10 ? serif[i] : sans[i]);
+    int fixed = (pf & 1) || (pf & 0xf0) == 0x30, serif = !fixed && (pf & 0xf0) == 0x10;
+    const char *n = fixed ? (i == 0 ? w32_face_name(FACE_COURIER_NEW) : i == 1 ? w32_face_name(FACE_LIBERATION_MONO) : w32_face_name(FACE_BITSTREAM_VERA_SANS_MONO))
+                  : serif ? (i == 0 ? w32_face_name(FACE_TIMES_NEW_ROMAN) : i == 1 ? w32_face_name(FACE_LIBERATION_SERIF) : w32_face_name(FACE_BITSTREAM_VERA_SERIF))
+                          : (i == 0 ? w32_face_name(FACE_ARIAL) : i == 1 ? w32_face_name(FACE_LIBERATION_SANS) : w32_face_name(FACE_BITSTREAM_VERA_SANS));
+    *out = widen(n);
     return true;
 }
 void set_default(int pf, ustr *def)
@@ -349,9 +332,9 @@ void load_all()
     if (g_loaded) return;
     g_loaded = true;
     const fnvnx_font_dirs *d = fnvnx_declared_fonts();   /* a declared input of the root: no setter, no unset state */
-    g_wine_dir = d->wine; g_host_dir = d->host; g_reg_dir = d->reg;
+    g_wine_dir = d->dir;
     if (!g_lib && FT_Init_FreeType(&g_lib)) declared_input_broken("FreeType does not start (FT_Init_FreeType: out of memory)", "libfreetype");
-    for (const std::string &n : list_dir(g_reg_dir)) if (n.size() > 4 && n.substr(n.size() - 4) == ".reg") parse_reg(g_reg_dir + "/" + n);
+    declare_machine();
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\CodePage")) if (kv.first == "ACP") g_acp = atoi(kv.second.c_str());
     auto sys = reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts");
     for (const char *k : { "FONTS.FON", "OEMFONT.FON", "FIXEDFON.FON" })   /* load_system_bitmap_fonts */
@@ -361,7 +344,6 @@ void load_all()
         if (!os_stat((g_wine_dir + "/" + n).c_str(), &st) && st.is_dir) continue;   /* Wine opens regular files only */
         add_font_file(g_wine_dir + "/" + n, false, true);
     }   /* the data directory */
-    scan_host(g_host_dir);                                                                          /* fontconfig's fonts */
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts")) {   /* load_registry_fonts */
         std::string v = kv.first;
         if (v.size() > 11 && v.compare(v.size() - 11, 11, " (TrueType)") == 0) v.resize(v.size() - 11);
@@ -691,8 +673,9 @@ bool get_tm(RF *f, TMW *out)
 bool stock_lf(int idx, LF *lf)
 {
     struct S { int idx, h, w, wt, cs, pf; const char *face; };
-    static const S t[] = { { 10, 12, 0, 400, OEM_CS, 0x31, "" }, { 11, 12, 0, 400, 0, 0x31, "Courier" }, { 12, 12, 0, 400, 0, 0x22, "MS Sans Serif" },
-        { 13, 16, 7, 700, 0, 0x22, "System" }, { 14, 16, 0, 700, 0, 0x22, "System" }, { 16, 16, 0, 400, 0, 0x31, "Courier" }, { 17, -11, 0, 400, 0, 0x22, "MS Shell Dlg" } };
+    const S t[] = { { 10, 12, 0, 400, OEM_CS, 0x31, "" }, { 11, 12, 0, 400, 0, 0x31, w32_face_name(FACE_COURIER) }, { 12, 12, 0, 400, 0, 0x22, w32_face_name(FACE_MS_SANS_SERIF) },
+        { 13, 16, 7, 700, 0, 0x22, w32_face_name(FACE_SYSTEM) }, { 14, 16, 0, 700, 0, 0x22, w32_face_name(FACE_SYSTEM) }, { 16, 16, 0, 400, 0, 0x31, w32_face_name(FACE_COURIER) },
+        { 17, -11, 0, 400, 0, 0x22, w32_face_name(FACE_MS_SHELL_DLG) } };
     for (const S &s : t) if (s.idx == idx) {
         memset(lf, 0, sizeof *lf);
         lf->h = s.h; lf->w = s.w; lf->weight = s.wt; lf->cs = (uint8_t)s.cs; lf->pf = (uint8_t)s.pf;
