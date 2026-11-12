@@ -16,7 +16,7 @@
   "cxx": [],
   "asm": []
  },
- "include": [],
+ "include": ["ports/fnv-nx/render/nxgpu"],
  "units": "all",
  "link": null
 }
