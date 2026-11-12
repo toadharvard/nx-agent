@@ -616,3 +616,7 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - A GL-path blocker in the candidate's machinery: unitstage.py PP `-E -dU` is fed to CC, and -dU drops #undef. render/gl4 gl4_gl.c fails "X redefined" (gl4 builds 16/17 units). w16 is resumed for the side-stage port alone, on 862b0708 → claude/fnv-l1-contract-w16-du — doing. Whether it goes in before or after the trunk merge is the orchestrator's call.
 - w17 ff99b9ac: verdict green (87bfe30c, 391.7 s, over budget = the base). The 2-item job is rebasing onto 862b0708; RECIPE.md states that the exe's MSVC EH/SEH stay lifted from its tables.
 - The orchestrator removes the legal decomp pairs itself, from w12's private path:line list.
+
+## 10:05Z
+- w12 legal, refinements 1+2: 24 decomp pairs in 11 files (from 68), over 617 files and 2270 VA records; source 2 = 55078 names. The orchestrator removes all 24. The zlib 1.2.1 pin (source 3) is queued for after the merge. The gate stays unmerged until then.
+- L5 w15 manifest e15d385: every site is a decoded call VA; 16 rows open. Requests sent to L3a: the 56b717 field flow (d3dx9_31 reach), the extent of global 1269a9c (10 dbghelp rows), a write-set fact for 9fea3c/9fea58. w18 re-pins after the merge.
