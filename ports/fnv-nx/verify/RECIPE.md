@@ -147,6 +147,14 @@ declarations of the platform's host API). It has no `recipe`/`target`, no unit f
   the admitted units whose PP stage read it (the stage's deps), and a header no unit reads is not certified (the detail gives the count). The code in a
   header is built into the objects of the units that include it, so objstub and the object gates judge it through those units.
 
+- Nesting: a headers tree may sit inside a root of another class (a layer keeps its shared headers in its own directory, for example
+  `contract/include` in the `contract` tool root); it owns its files, the outer root keeps the rest. Any other nesting is an overlap. `check()`
+  resolves an `include` path to its innermost root.
+- One declaration per symbol (gate `headers`): the compiler lists the declarations of every header of every headers tree and of every product root
+  (`gcc -fdump-ada-spec` on the header alone: a header must be self-contained, one that does not parse is red); a symbol declared in two different
+  header files is red (`declared-twice`, both places named). The owner of a symbol has its one header; every other root includes it.
+- A headers tree is admitted together with its first consumer: the gate certifies a header only through the units that read it.
+
 ## Fixtures (`"fixtures"`)
 
 `"fixtures": {"<unit>": {"gate": "<gate>", "expect": "red", "finding": "<finding code>"}}`: a unit that is meant to be rejected by a gate, kept
