@@ -26,7 +26,7 @@
 
 #include <new>
 #include <string>
-#include <unordered_map>
+#include <map>
 #include <vector>
 
 namespace {
@@ -53,17 +53,8 @@ template <class T> struct w32_alloc : std::allocator<T> {
 };
 typedef std::basic_string<char, std::char_traits<char>, w32_alloc<char>> pstring;
 template <class T> using pvec = std::vector<T, w32_alloc<T>>;
-struct phash {
-    size_t operator()(const pstring &s) const
-    {
-        size_t h = 2166136261u;
-        for (char c : s)
-            h = (h ^ (unsigned char)c) * 16777619u;
-        return h;
-    }
-};
-template <class V> using pmap = std::unordered_map<pstring, V, phash, std::equal_to<pstring>,
-                                                    w32_alloc<std::pair<const pstring, V>>>;
+template <class V> using pmap = std::map<pstring, V, std::less<pstring>,
+                                              w32_alloc<std::pair<const pstring, V>>>;
 template <class T> T *pnew()   /* a T on malloc */
 {
     void *m = malloc(sizeof(T));
