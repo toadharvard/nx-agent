@@ -94,12 +94,20 @@ static unsigned long calls_object_last, calls_operator, calls_prvalue_virtual, c
 
 // ---- what counts as shared memory
 
-// the object a function's result is constructed in when the ABI returns it in memory (an invisible-reference result, or an
-// aggregate returned through the hidden result pointer, x8 on AArch64): the caller's memory, which can be any object
-// (copy elision constructs the result in the final object), so a pointer dereference and never a frame variable
+// LOCAL: ordering exists only for memory another thread can observe. Two facts, both decided by the declaration alone:
+//  (1) a decl base that is not aliased (an automatic variable whose address is never taken, a gimple temporary, a
+//      parameter that is not addressable) is visible to one thread only: no access to it is ordered and its address is never
+//      taken (local_unshared);
+//  (2) a RESULT_DECL with DECL_BY_REFERENCE is the hidden result POINTER of the function (its type is the reference
+//      type; the object is at *<retval>): the decl itself is a value of this thread, never memory. Reading it (passing it
+//      on, `UVf::UVf (<retval>, x)`) is no load, and its address is never taken (&<retval> is the ICE in
+//      expand_expr_addr_expr_1). The result object is reached through MEM_REF / COMPONENT_REF on that pointer value, and
+//      those accesses are ordered as any indirect access.
+// Only a result that the ABI returns in memory without DECL_BY_REFERENCE (an aggregate through x8, memory_result) is an
+// object that is caller memory: the object a function's result is constructed in is the caller's memory, which can be any
+// object (copy elision constructs the result in the final object), so a pointer dereference and never a frame variable
 static bool memory_result(tree d) {
-  return TREE_CODE(d) == RESULT_DECL &&
-         (DECL_BY_REFERENCE(d) || aggregate_value_p(TREE_TYPE(d), current_function_decl));
+  return TREE_CODE(d) == RESULT_DECL && !DECL_BY_REFERENCE(d) && aggregate_value_p(TREE_TYPE(d), current_function_decl);
 }
 
 // HARDREG: an object whose DECL has a hard register (DECL_HARD_REGISTER: `register T v asm("xN")`, global or local) is a
@@ -221,8 +229,8 @@ static void order_single(gimple_stmt_iterator *gsi);
 // nothing on its other paths: every continuation of S starts at a resumption point or does not exist. No error path.
 // Proof: TSO orders a thread's accesses in program order; every program-order successor of S lies on the fall-through
 // edge or after a resumption point; each of those begins with the fence; extra fences on other incoming paths of a
-// resumption point only add order. Scope: native code that loads fnvnx_order. A longjmp or unwind into a frame of
-// lifted code relies on the lifter's own resumption fence (owner: L3a).
+// resumption point only add order. Scope: native code that loads fnvnx_order. Nonlocal entries land at native
+// receivers (which begin with the fence above), and every lifted access carries its own ordering (L3a, lifter rule R9).
 static void fence_after(gimple_stmt_iterator *gsi, enum memmodel m) {
   gimple *stmt = gsi_stmt(*gsi);
   if (stmt_ends_bb_p(stmt)) {
@@ -241,6 +249,15 @@ static bool resume_call_p(gimple *stmt) {
   if (gimple_call_flags(call) & ECF_RETURNS_TWICE) return true;
   tree fn = gimple_call_fndecl(call);
   return fn && fndecl_built_in_p(fn, BUILT_IN_SETJMP_RECEIVER);
+}
+
+// FENCE-MERGE: a resume fence is not inserted where the statement right next to it, in the same block with nothing between,
+// already is the identical acquire fence (dmb ishld): two equal fences in a row order exactly what one orders.
+static bool acquire_fence_p(gimple *stmt) {
+  gcall *call = stmt ? dyn_cast<gcall *>(stmt) : NULL;
+  if (!call || !gimple_call_builtin_p(call, BUILT_IN_ATOMIC_THREAD_FENCE)) return false;
+  tree m = gimple_call_arg(call, 0);
+  return TREE_CODE(m) == INTEGER_CST && tree_to_uhwi(m) == MEMMODEL_ACQUIRE;
 }
 
 // ORDER-CONT (2): the fence at every resumption point of the function. Run after the per-statement walk (the fences
@@ -270,12 +287,16 @@ static void add_resume_fences(function *fun) {
       if (!e) continue;
       gsi_insert_on_edge_immediate(e, fence(MEMMODEL_ACQUIRE));
     } else {
+      gimple_stmt_iterator nx = g;
+      gsi_next(&nx);
+      if (!gsi_end_p(nx) && acquire_fence_p(gsi_stmt(nx))) continue;   // FENCE-MERGE
       gsi_insert_after(&g, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);
     }
     cur->fence_resume++;
   }
   for (basic_block b : heads) {
     gimple_stmt_iterator g = gsi_after_labels(b);
+    if (!gsi_end_p(g) && acquire_fence_p(gsi_stmt(g))) continue;   // FENCE-MERGE
     gsi_insert_before(&g, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);
     cur->fence_resume++;
   }
