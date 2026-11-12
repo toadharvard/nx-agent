@@ -905,3 +905,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - fpexact 118/232: routed to L2 (whether the cause is ftoi plugin output or fpexact's reading of it).
   - Comdat identity in abi odr and linkstrict (4888/5783): new worker w23 (session_01KmtZKUfQdd8aKztUU7nZYk) on branch w23. One comdat_identity, shared with onedef.
   - Vacuous namegate, r7 and objstub: w20 on branch w20u. Universe derived from admit covers; a zero universe with a matching admitted root is red.
+- hostapi rule accepted: a service is used if any admitted root that includes the interface uses it. L5 w10 implements this in gate_hostapi and L1 reviews.
+- test_envcheck snapshot drift at 8f4790a2: w22 takes it on branch w22e, ahead of w22v.
+  - Each diff line is classified as stale pin, snapshot-code bug, or unpinned machine state.
