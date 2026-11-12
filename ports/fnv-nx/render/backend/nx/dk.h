@@ -132,8 +132,9 @@ void* nxdk_guest_ptr(uint64_t addr, uint64_t len);
 void nxdk_on_present(uint32_t frame);
 /* the install-time shader pack (translated.nxsp) read into memory: the bytes and their size, NULL when none is installed. No default: a build without the embedder does not link (dk_shader.c).
  * NXSP, all little-endian:
- *   header (32 bytes) "NXSP", u32 ver (1 or 2), u32 count, u32 idx_off, u32 data_off; v2 adds u32 gcount at byte 20 and u32 gidx_off at byte 24 (a v1 pack has gcount = 0,
- *                     bytes 20..31 of a v1 header are its pack id and are not read here)
+ *   header            v1: 32 bytes "NXSP", u32 ver (1 or 2), u32 count, u32 idx_off, u32 data_off, u8 pack_id[12] (bytes 20..31, not read here).
+ *                     v2: the same 32 bytes, pack id included, then u32 gcount at byte 32 and u32 gidx_off at byte 36: 40 bytes. A v1 pack has gcount = 0.
+ *                     Producer obligation of a v2 pack: idx_off, gidx_off and every row offset are >= 40 (the header is not part of any table or payload); a pack that breaks it is invalid.
  *   index (v1 rows)   count rows of 104 bytes at idx_off: name[48] family[24] variant[16] (NUL padded), u32 stage, u32 offset, u32 size, u32 crc32 of the DKSH at offset; the
  *                     D3D translation lookup (SHADER_CREATE_D3D: name = %016x of fnv1a64(bytecode), family "translated")
  *   G table (v2)      gcount rows of 52 bytes at gidx_off: u8 key[32]; u32 stage; u32 glsl_off; u32 glsl_size; u32 dksh_off; u32 dksh_size. Offsets are from the start of the pack,

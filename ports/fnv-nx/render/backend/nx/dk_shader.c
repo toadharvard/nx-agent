@@ -94,7 +94,7 @@ static uint8_t* copy_in(uint64_t a, uint64_t n) {
 /* K6: the pack of NXSP v2 (dk.h) is read and validated once, at the first use of a pack that is installed. state 0 = not read yet, 1 = valid, 2 = invalid (why = the reason, kept).
  * A pack that is not installed (NULL) is not cached: the embedder may install it later, and every call then reports the absence. */
 static struct { int state; const uint8_t* pk; uint64_t size; uint32_t gcount, gidx; const char* why; } g_pack;
-enum { GROW = 52 };
+enum { GROW = 52, V2_HDR = 40 };
 
 static const char* pack_validate(const uint8_t* pk, uint64_t psz, uint32_t* gcount, uint32_t* gidx) {
     *gcount = 0; *gidx = 0;
@@ -102,13 +102,15 @@ static const char* pack_validate(const uint8_t* pk, uint64_t psz, uint32_t* gcou
     uint32_t ver = rd32(pk + 4);
     if (ver != 1 && ver != 2) return "the NXSP version is neither 1 nor 2";
     if (ver == 1) return NULL;
-    uint32_t gc = rd32(pk + 20), gi = rd32(pk + 24);
-    if ((uint64_t)gi + (uint64_t)GROW * gc > psz) return "the G table is outside the pack";
+    if (psz < V2_HDR) return "an NXSP v2 pack is shorter than its 40-byte header";
+    uint32_t gc = rd32(pk + 32), gi = rd32(pk + 36);
+    if (rd32(pk + 12) < V2_HDR) return "the v1 index of an NXSP v2 pack starts inside the 40-byte header";
+    if (gi < V2_HDR || (uint64_t)gi + (uint64_t)GROW * gc > psz) return "the G table is inside the header or outside the pack";
     for (uint32_t i = 0; i < gc; i++) {
         const uint8_t* r = pk + gi + (uint64_t)i * GROW;   /* key[32] u32 stage, glsl_off, glsl_size, dksh_off, dksh_size */
         if (rd32(r + 32) > NxStage_Fragment) return "a G table row has a stage that is neither vertex nor fragment";
-        if ((uint64_t)rd32(r + 36) + rd32(r + 40) > psz) return "a G table row's GLSL is outside the pack";
-        if (!rd32(r + 48) || rd32(r + 48) > MAX_DKSH || (uint64_t)rd32(r + 44) + rd32(r + 48) > psz) return "a G table row's DKSH is empty, above 4 MiB or outside the pack";
+        if (rd32(r + 36) < V2_HDR || (uint64_t)rd32(r + 36) + rd32(r + 40) > psz) return "a G table row's GLSL is inside the header or outside the pack";
+        if (rd32(r + 44) < V2_HDR || !rd32(r + 48) || rd32(r + 48) > MAX_DKSH || (uint64_t)rd32(r + 44) + rd32(r + 48) > psz) return "a G table row's DKSH is empty, above 4 MiB or outside the pack";
         if (i && memcmp(r - GROW, r, 32) >= 0) return "the G table keys are not strictly ascending";
     }
     *gcount = gc; *gidx = gi;
