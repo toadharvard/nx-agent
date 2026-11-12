@@ -1,15 +1,113 @@
 {
  "format": "fnvnx-admit/1",
  "roots": [
-  {"path": "ports/fnv-nx/.gitignore", "class": "doc", "gates": []},
-  {"path": "ports/fnv-nx/JOURNAL.md", "class": "doc", "gates": []},
-  {"path": "ports/fnv-nx/README.md", "class": "doc", "gates": []},
-  {"path": "ports/fnv-nx/contract", "class": "tool", "gates": ["pure", "selftests"]},
-  {"path": "ports/fnv-nx/docs", "class": "doc", "gates": []},
-  {"path": "ports/fnv-nx/farm", "class": "tool", "gates": ["selftests"]},
-  {"path": "ports/fnv-nx/journal", "class": "doc", "gates": []},
-  {"path": "ports/fnv-nx/link", "class": "tool", "gates": ["pure", "selftests"]},
-  {"path": "ports/fnv-nx/toolchain", "class": "tool", "gates": ["selftests"]},
-  {"path": "ports/fnv-nx/verify", "class": "tool", "gates": ["selftests"]}
+  {
+   "path": "ports/fnv-nx/.gitignore",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/JOURNAL.md",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/README.md",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/contract",
+   "class": "tool",
+   "gates": [
+    "pure",
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/docs",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/farm",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/journal",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/lib/sha256",
+   "class": "product",
+   "target": "guest",
+   "gates": [
+    "objstub",
+    "linkstrict",
+    "determinism",
+    "oracle",
+    "n1",
+    "n2_data",
+    "n2_call",
+    "n2_vcall",
+    "xc",
+    "xunit",
+    "rtti",
+    "pcrel",
+    "bodysel",
+    "abs",
+    "disp",
+    "reach",
+    "reachlink",
+    "gpa",
+    "imports",
+    "forms",
+    "d3d9total",
+    "r7",
+    "namegate",
+    "argordergate",
+    "abi",
+    "datamodel",
+    "order",
+    "fpexact",
+    "eh",
+    "exepin",
+    "addr32",
+    "machine",
+    "hostapi"
+   ],
+   "recipe": "ports/fnv-nx/lib/sha256/build.json"
+  },
+  {
+   "path": "ports/fnv-nx/lib/sha256_tests",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/link",
+   "class": "tool",
+   "gates": [
+    "pure",
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/toolchain",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/verify",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  }
  ]
 }
