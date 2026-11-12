@@ -22,4 +22,4 @@ Test: tests/test_plugins.py (40/40): double -> __int128 fails the build with an 
 Not done: "flags" in guest_compiler.json (pin file is the lead's/w4's; the gate reads recipe.SEMANTICS_FLAGS).
 
 ## Numbers (commit of the verdict run: 05400e1, before the test_gates.py fix in the next commit)
-Verdict at c5b20de: 24 gates, 24 green, 191.2 s (the earlier red, selftests test_gates.py, was the missing `datamodel` entry; fixed). Tests: test_datamodel.py 9/9, test_gates.py 0 failed.
+Verdict at the head below (after the ftoi change): 24 gates, 24 green, 236.5 s. Tests: test_datamodel.py 9/9, test_plugins.py 40/40, test_gates.py 0 failed.
