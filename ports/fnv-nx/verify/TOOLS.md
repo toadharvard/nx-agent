@@ -1510,9 +1510,20 @@ The registry is certified iff ALL hold:
      gate file of verify/gates.d), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
      (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
      (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
-  7. id blocks: an id below 200 is free (the records that predate the blocks; L1 takes the free numbers below 200); an id from
-     200 lies in the block of the entry's owner lead (the first lead of a joint owner): L3a 2xx, L3b 3xx, L4 4xx, L5 5xx,
-     L6 6xx, L6A 7xx, L2 8xx. A record of a layer branch enters with the branch's merge under its block, so ids never collide.
+  7. id ranges: the registry's `ranges` is {lead: [first, last]} for exactly L1, L3a, L3b, L4, L5, L6, L6A, L2, integers from 100,
+     pairwise disjoint (L1 100..199, L3a 200..299, L3b 300..399, L4 400..499, L5 500..599, L6 600..699, L6A 700..799, L2 800..899).
+     An id below 100 is a legacy id and exempt; an id from 100 lies in the range of the first lead named in its owner. An id
+     defined by two records and an alias claimed by two records are red. A record of a layer branch enters with the branch's merge
+     under its range, so ids never collide.
+  9. never reuse: the registry's `retired` lists {id, aliases} of every record that is no longer an entry. A live entry with a retired id
+     or a retired alias is red; a retired id or alias occurring in any scanned file (outside the registry) is red, so a record cannot be
+     removed while anything cites it, and a citation moves to the live record. The merge ratchet (verdict.py merge, ratchet_errors):
+     every id and alias that the base registry held, live or retired, is held by the new one, live or retired; a vanished id or alias
+     blocks the merge, the same mechanism as the dropped-gate ratchet.
+  8. findings: every red item is a finding with a code (entry-form, id-form, id-repeated, id-range, alias-claimed, used-by-*,
+     decision-*, owner-*, removed-by-form, ranges-form, mention-no-id, mention-unknown-id, stray-id, ...). stdout shows the first
+     20; the FULL list (every id and code, sorted, with the total per code) is written as JSON to GATE_DETAIL/assumptions.findings.json
+     (the verdict gives GATE_DETAIL = <verdict file>.detail/<gate>, kept beside the stored verdict), and the summary line names the path.
 And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
 not in the registry is red wherever it is written.
 Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a
@@ -1693,8 +1704,8 @@ objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. The decoder is LLVM's AArch64
-instruction descriptions and disassembler; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
+instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
 one body. `uncovered`: size 0, a partial overlap or a range leaving the section, a code run of odd length, and executable bytes
@@ -1761,8 +1772,8 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. The write sets are the decoder's (LLVM defs); a register an instruction
-writes that they miss (x0, say) would make a constant wrong, and the Form-writes fact of L3a w5 is what replaces this reliance.
+taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
+writes (a missed write of x0 would make a constant wrong).
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
 flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so

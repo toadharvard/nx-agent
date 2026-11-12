@@ -1,5 +1,47 @@
 {
  "format": "fnvnx-assumptions/1",
+ "ranges": {
+  "L1": [
+   100,
+   199
+  ],
+  "L3a": [
+   200,
+   299
+  ],
+  "L3b": [
+   300,
+   399
+  ],
+  "L4": [
+   400,
+   499
+  ],
+  "L5": [
+   500,
+   599
+  ],
+  "L6": [
+   600,
+   699
+  ],
+  "L6A": [
+   700,
+   799
+  ],
+  "L2": [
+   800,
+   899
+  ]
+ },
+ "retired": [
+  {
+   "id": "ASM-021",
+   "aliases": [
+    "images dynamic names"
+   ]
+  }
+ ],
  "entries": [
   {
    "id": "ASM-001",
@@ -629,6 +671,25 @@
    "owner": "L4"
   },
   {
+   "id": "ASM-043",
+   "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub LLVM decoder",
+    "instrument decoder",
+    "L3b:A-CAPSTONE-X86",
+    "L3b:A-CAPSTONE-A64"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: agreement of independent decoders on every instruction (after the first frame)",
+   "owner": "L3b+L4",
+   "note": "Deferred until the first frame."
+  },
+  {
    "id": "ASM-044",
    "text": "Every terminating routine of the toolchain is declared noreturn in the headers given.",
    "used_by": [
@@ -641,6 +702,20 @@
    ],
    "status": "REMOVE",
    "removed_by": "no gate yet: the headers' noreturn declarations checked against the toolchain's terminating routines",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-045",
+   "text": "The decoder's write sets name every register an instruction writes.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub write sets"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the decoder's write sets checked against the architectural encoding of every instruction",
    "owner": "L4"
   },
   {
@@ -668,17 +743,6 @@
    "status": "REMOVE",
    "removed_by": "planned: gate datamodel (claude/fnv-l1-contract-w17) proves that every native C++ CC stage loads every required plugin, names included once w4's B2 adds it",
    "owner": "L1"
-  },
-  {
-   "id": "ASM-800",
-   "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
-   "used_by": [
-    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
-   ],
-   "aliases": [],
-   "status": "REMOVE",
-   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
-   "owner": "L2"
   },
   {
    "id": "ASM-051",
@@ -728,6 +792,95 @@
    "status": "REMOVE",
    "removed_by": "planned: a link check that no decorated name has two definitions of different entities (the xc gate judges static initializers only and does not prove it)",
    "owner": "L1"
+  },
+  {
+   "id": "ASM-200",
+   "text": "A callee in a hand-written assembler object preserves x19-x30 and sp and writes the caller's frame only through an address it was given (ORDERING A1 for .S).",
+   "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/gates/tests/test_gate_order.py"
+   ],
+   "aliases": [
+    "ORDERING:A1(.S)"
+   ],
+   "status": "REMOVE",
+   "removed_by": "fact:ports/fnv-nx/lift/gates/gate_order.py",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-201",
+   "text": "Guest memory is the mappings below 2^32 the loader made; the host stack, struct cpu and the lifted image are host mappings disjoint from them (ORDERING A2).",
+   "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/gates/tests/test_gate_order.py"
+   ],
+   "aliases": [
+    "ORDERING:A2"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the loader layout fact that every host mapping lies outside [0,2^32)",
+   "owner": "L3a+L4",
+   "note": "the loader layout is also L5's (guard zones, host mappings)"
+  },
+  {
+   "id": "ASM-202",
+   "text": "Every object linked into the lifted image is in the build manifest and is given to the gate (ORDERING closure, was A3).",
+   "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/gates/gate_order.py"
+   ],
+   "aliases": [
+    "ORDERING:A3"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the fnvnx-built/1 manifest lists every linked object; rules (a) and (b) of gate_order are checked on each",
+   "owner": "L3a+L1"
+  },
+  {
+   "id": "ASM-203",
+   "text": "Every FuncInfo of the exe and modules (x86-32 MSVC, VC8..VC10, no FH4) is reached from a decoded frame-handler stub `mov eax, imm32; jmp rel32`; a FuncInfo reached any other way is not enumerated by gate_eh (tools/ehtables.py).",
+   "used_by": [
+    "ports/fnv-nx/lift/gates/gate_eh.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a census of the FuncInfo magics (0x19930520/1/2) in the image's data, each required to be the imm32 of a decoded stub; an unreached one is red",
+   "owner": "L3a+L3b"
+  },
+  {
+   "id": "ASM-204",
+   "text": "Every ThrowInfo reaches `_CxxThrowException` as a call argument; a ThrowInfo reached through a stored pointer is not enumerated by gate_eh (thrower_escapes covers uses of the thrower, not the pointer's origin).",
+   "used_by": [
+    "ports/fnv-nx/lift/gates/gate_eh.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the throw-site facts resolve the ThrowInfo of every call of the thrower, and the data census of ThrowInfo objects is matched against the resolved set",
+   "owner": "L3a+L3b"
+  },
+  {
+   "id": "ASM-205",
+   "text": "Every catch funclet of the exe and modules returns its continuation by `mov eax, imm32(reloc); ret`; a funclet that returns it by another form is not enumerated by gate_eh.",
+   "used_by": [
+    "ports/fnv-nx/lift/gates/gate_eh.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: every catch funclet's return forms are classified from its decoded code; an unclassified form is red",
+   "owner": "L3a+L3b"
+  },
+  {
+   "id": "ASM-800",
+   "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
+   "used_by": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
+   "owner": "L2"
   }
  ]
 }

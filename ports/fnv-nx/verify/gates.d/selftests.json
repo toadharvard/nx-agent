@@ -13,6 +13,7 @@
   "ports/fnv-nx/link",
   "ports/fnv-nx/rules",
   "ports/fnv-nx/lift",
+  "ports/fnv-nx/lift/gates",
   "ports/fnv-nx/render/total"
  ],
  "result": "selftests.json",

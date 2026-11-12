@@ -58,7 +58,9 @@ PATHS = ("exe", "msvc", "universe")
 RESULTS = {"units": "the root's link stage", "addrmap": "the root's link stage", "aliases": "the root's link stage"}
 # inputs of the link-side gates; a key is required only by the gates that read it (a gate without its key is red, naming it and its owner)
 OPT_PATHS = {"reach_requests": ("reach, reachlink", "L5: platform manifest reach_requests.tsv"),
-             "dynsites": ("gpa", "L5: dynsites.tsv")}
+             "dynsites": ("gpa", "L5: dynsites.tsv"),
+             "ehfacts": ("eh (gate_lift.py)", "L3a: NAME[/path] of the external that holds ehtables.json of the exe and <module>/ehtables.json"),
+             "sites": ("order (gate_lift.py)", "L3a: NAME/path of the file of the sites of the lifted universe: \"1 HEXADDR\" for every locked instruction (every LOCK-prefixed instruction and every xchg with a memory operand), \"2 HEXADDR mem|ax\" for every FPU status instruction (FSTSW, FNSTENV, FNSAVE)")}
 OPT_KEYS = set(OPT_PATHS) | {"keys", "bridge"}
 CONTRACT_GATES = ("n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel")
 LINK_GATES = ("abs", "disp", "reach", "reachlink", "gpa")
@@ -98,9 +100,9 @@ def load_inputs(path):
         names = [e.get("name") for e in exts if isinstance(e, dict)]
         if len(set(names)) != len(names):
             err.append("external names are not unique")
-        for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge") if k in doc):
+        for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge", "ehfacts", "sites") if k in doc):
             v = doc.get(k)
-            if not isinstance(v, str) or "/" not in v or v.split("/", 1)[0] not in names or ".." in v.split("/"):
+            if not isinstance(v, str) or ("/" not in v and k != "ehfacts") or v.split("/", 1)[0] not in names or ".." in v.split("/"):
                 err.append("%s must be NAME/path inside a declared external" % k)
     rg = doc.get("ranges")
     if not (isinstance(rg, dict) and set(rg) == {"exe", "module"} and all(isinstance(v, str) and "/" in v and ".." not in v.split("/")

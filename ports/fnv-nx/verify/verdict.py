@@ -2,7 +2,7 @@
 """L4 verdict: gate certificates, merge gate, build/verification separation, rule-defect queue. stdlib only.
 Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 2 red/blocked, 3 merge conflict.
   run         --repo R --commit C --gates GATES.json --out V.json [--budget-s 300] [--env-id H] [--cache DIR]
-              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_COMMIT [+ GATE_CACHE]), in file order.
+              Runs each gate (argv, cwd = clean git worktree of C, env + GATE_OUT + GATE_DETAIL (OUT.detail/<gate>, kept) + GATE_COMMIT [+ GATE_CACHE]), in file order.
               Gate contract for the environment: GATE_OUT (result directory), GATE_COMMIT (commit under test) and, when --cache is
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
@@ -38,6 +38,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import gate_assumptions  # noqa: E402
 import gatesdir  # noqa: E402
 import sandbox  # noqa: E402
 
@@ -150,6 +151,8 @@ def cmd_run(a):
     if "--cache" in o:
         genv["GATE_CACHE"] = os.path.abspath(o["--cache"])
         os.makedirs(genv["GATE_CACHE"], exist_ok=True)
+    detail = o["--out"] + ".detail"   # the gates' full findings outlive the temporary work directory: GATE_DETAIL/<gate> beside the verdict file
+    shutil.rmtree(detail, ignore_errors=True)
     res, t_all = [], time.time()
     try:
         present = _present_classes(wt)
@@ -160,7 +163,7 @@ def cmd_run(a):
             os.makedirs(tmp)
             t0 = time.time()
             try:
-                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp),
+                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp, GATE_DETAIL=os.path.join(detail, g["name"])),
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
                 st, u, c, why = _gate_result(g, out, rc)
             except OSError as e:
@@ -252,6 +255,17 @@ def cmd_merge(a):
         gone = sorted({g["name"] for g in prev["gates"]} - {g["name"] for g in v["gates"]})
         if gone:
             raise Err("blocked: ratchet, gate(s) removed since previous green verdict: " + ",".join(gone), 2)
+    # the registry ratchet: every id and alias the base registry held is still held, live or retired (gate_assumptions.ratchet_errors)
+    brc, btxt, _ = _git(repo, "show", old + ":" + gate_assumptions.REGISTRY)
+    if brc == 0:
+        nrc, ntxt, nerr = _git(repo, "show", tree + ":" + gate_assumptions.REGISTRY)
+        try:
+            lost = gate_assumptions.ratchet_errors(json.loads(btxt), json.loads(ntxt)) if nrc == 0 else \
+                [gate_assumptions.finding("ratchet-id", "registry", "the registry is missing from the merge tree")]
+        except ValueError:
+            lost = [gate_assumptions.finding("ratchet-id", "registry", "a registry is not JSON")]
+        if lost:
+            raise Err("blocked: ratchet, registry: " + "; ".join(str(x) for x in lost[:10]), 2)
     msg = "%smerge %s\n\nverdict: green, tree %s, gates %d\n" % (o.get("--message-prefix", ""), o["--from"], tree, len(v["gates"]))
     new = _git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp=msg)
     rc, _, err = (0, "", "") if "--base" in o else _git(repo, "update-ref", ref, new, old)
