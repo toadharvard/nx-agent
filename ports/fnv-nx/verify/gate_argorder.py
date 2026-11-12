@@ -22,15 +22,15 @@ ORDER = "fnvnx_order"
 
 def native_guest(repo):
     roots = recipe.load_admit(repo)
-    return [r for r in gate_build.product_roots(repo) if roots[r].get("target") == "guest" and roots[r].get("cxx_origin") == "native"]
+    return [r for r in gate_build.product_roots(repo) if roots[recipe.split_spec(r)[0]].get("target") == "guest" and roots[recipe.split_spec(r)[0]].get("cxx_origin") == "native"]
 
 
 def judge_root(root, repo, cache):
     """-> (universe, certified, ids, detail) of one native guest root."""
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     rec = recipe.load_recipe(repo, roots, root)
-    cxx = sorted(root + "/" + u for u in recipe.units_of(rec, root, files) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
-    errs = recipe.check(rec, root, files, roots, recipe.load_pin(repo), repo)
+    cxx = sorted(root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
+    errs = recipe.check(rec, recipe.split_spec(root)[0], files, roots, recipe.load_pin(repo), repo)
     if errs:
         return len(cxx), 0, cxx, "invalid recipe: %s" % "; ".join(errs)[:300]
     names = [p["name"] for p in rec.get("plugins", [])]

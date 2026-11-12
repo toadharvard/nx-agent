@@ -44,7 +44,8 @@ FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx"}
+        "plugins", "plugin_cxx", "variants"}
+VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
@@ -137,9 +138,38 @@ def tracked(repo="."):
     return sorted(p for p in out.decode("utf-8", "surrogateescape").split("\0") if p)
 
 
-def load_recipe(repo, roots, root):
+def split_spec(spec):
+    """'root' -> (root, ''); 'root@NAME' -> (root, NAME): a (root, variant) pair spelled as one string."""
+    root, _, name = spec.partition("@")
+    return root, name
+
+
+def effective(rec, name):
+    """The recipe of variant NAME of REC: REC without `variants`, the keys the variant names replaced whole. '' is the implicit variant."""
+    if not isinstance(rec, dict):
+        return rec
+    out = {k: v for k, v in rec.items() if k != "variants"}
+    if name:
+        out.update(rec["variants"][name])
+    return out
+
+
+def variant_names(rec):
+    v = rec.get("variants") if isinstance(rec, dict) else None
+    return sorted(v) if isinstance(v, dict) else []
+
+
+def pairs_of(rec, root):
+    """Every (root, variant) pair spec of a recipe: the implicit one and one per declared variant."""
+    return [root] + ["%s@%s" % (root, n) for n in variant_names(rec)]
+
+
+def load_recipe(repo, roots, spec):
+    """The effective recipe of a root or of a 'root@NAME' pair."""
+    root, name = split_spec(spec)
     with open(os.path.join(repo, roots[root]["recipe"])) as f:
-        return json.load(f)
+        rec = json.load(f)
+    return effective(rec, name) if not name or name in variant_names(rec) else rec
 
 
 def generated_outputs(rec):
@@ -222,7 +252,7 @@ def link_roots_cycle(root, roots, repo, seen=()):
     lk = rec.get("link") if isinstance(rec, dict) else None
     for d in (lk.get("roots", []) if isinstance(lk, dict) and isinstance(lk.get("roots"), list) else []):
         if isinstance(d, str):
-            c = link_roots_cycle(d, roots, repo, tuple(seen) + (root,))
+            c = link_roots_cycle(split_spec(d)[0], roots, repo, tuple(seen) + (root,))
             if c:
                 return c
     return None
@@ -247,17 +277,21 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
     for i, d in enumerate(deps):
         if d in deps[:i]:
             err.append("link.roots: %s is listed twice" % d)
-        ent = roots.get(d)
-        if d == root:
+        dr, dv = split_spec(d)
+        ent = roots.get(dr)
+        if dr == root:
             err.append("link.roots: %s is the root itself" % d)
         elif not ent or ent.get("class") != "product":
             err.append("link.roots: %s is not an admitted product root" % d)
         else:
             try:
-                dl = json.load(open(os.path.join(repo, ent["recipe"]))).get("link")
+                drec = json.load(open(os.path.join(repo, ent["recipe"])))
+                dl = drec.get("link")
             except (OSError, ValueError, KeyError, AttributeError):
                 err.append("link.roots: the recipe of %s is unreadable" % d)
                 continue
+            if dv and dv not in variant_names(drec):
+                err.append("link.roots: %s has no variant %r" % (dr, dv))
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
     cyc = link_roots_cycle(root, roots, repo) if deps else None
@@ -286,6 +320,13 @@ def check(rec, root, files, roots, pin=None, repo="."):
     if not isinstance(rec, dict):
         return ["recipe is not a JSON object"]
     err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
+    vs = rec.get("variants")
+    if vs is not None:
+        if not (isinstance(vs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(v, dict) and v and set(v) <= VARIANT_KEYS
+                                              for n, v in vs.items())):
+            return err + ["variants must be {NAME: {compiler and/or flags}}: NAME letters, digits, _ . -; a variant replaces only the keys it names (%s)" % sorted(VARIANT_KEYS)]
+        for n in sorted(vs):    # every variant is a recipe of its own: all the rules apply to its effective form
+            err += ["variant %s: %s" % (n, e) for e in check(effective(rec, n), root, files, roots, pin, repo)]
     err += ["missing key %r" % k for k in ("format", "compiler", "flags", "include", "units") if k not in rec]
     if rec.get("format") != FORMAT:
         err.append("format is not " + FORMAT)
@@ -524,14 +565,17 @@ def fetch_externals(exts, store, extcache, ws):
 
 
 class Job:
-    def __init__(self, repo, root, store, jobs, ext):
+    def __init__(self, repo, spec, store, jobs, ext):
+        root, self.variant = split_spec(spec)
         self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
         self.roots, self.files = load_admit(repo), tracked(repo)
-        self.rec = load_recipe(repo, self.roots, root)
+        self.rec = load_recipe(repo, self.roots, spec)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
 
     def stage(self, doc):
+        if self.variant:     # the variant name is in every stage key (the implicit variant adds nothing: its keys are those of a root without variants)
+            doc["env"] = dict(doc["env"], FNVNX_VARIANT=self.variant)
         v = toolflags.check_doc(doc)
         if v:
             raise BuildRed({"stage": doc["stage"], "exit": None, "stderr": ["toolflags: %s %s" % (r, d) for r, d, _ in v][:20]})
@@ -589,6 +633,7 @@ class Job:
                 xs, ts = unitstage.gcc_set(host)
                 q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
                 out = lambda p: not any(under(p, e["host"]) for e in self.ext.values())  # noqa: E731
+                q = lambda n, _q=q: unitstage.prog(_q(n))  # noqa: E731
                 exes += [p for p in xs[1:] + [q("ld")] if os.path.isabs(p) and out(p)]
                 trees += sorted({r for t in ts for r in (t, os.path.realpath(t)) if out(r) and os.path.isdir(r)})
             else:
@@ -726,6 +771,7 @@ class Job:
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop
+            builds[k].variant = self.variant
             if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
                 builds[k].cc_flags = [f for _, _, fl in self.built for f in fl]
                 builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built]
@@ -760,7 +806,7 @@ class Job:
         tree of /objs)."""
         lk, cc = self.rec["link"], self.drivers()[0]
         pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
-        ld = posixpath.normpath(pn)
+        ld = unitstage.prog(posixpath.normpath(pn))
         if "external" in self.rec["compiler"]:
             e = self.ext[self.rec["compiler"]["external"]]
             ld = e["at"] + ld[len(e["host"]):] if ld.startswith(e["host"] + "/") else ld
@@ -877,12 +923,18 @@ def host_compilers(rec, cache):
 def build(repo, root, store, out, jobs=4, ext=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
-    j = Job(repo, root, store, jobs, ext or os.path.join(store, "external"))
-    errs = check(j.rec, root, j.files, j.roots, load_pin(repo), repo)
+    spec = root
+    j = Job(repo, spec, store, jobs, ext or os.path.join(store, "external"))
+    root = j.root
+    with open(os.path.join(repo, j.roots[root]["recipe"])) as f:
+        full = json.load(f)
+    if j.variant and j.variant not in variant_names(full):
+        raise RecipeError(["root %s has no variant %r" % (root, j.variant)])
+    errs = check(full, root, j.files, j.roots, load_pin(repo), repo)
     if errs:
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
-    res = {"format": OBJ_FORMAT, "root": root, "objects": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
+    res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
            "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)

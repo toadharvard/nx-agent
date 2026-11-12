@@ -94,7 +94,7 @@ Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.j
 ## Link: the guest ELF
 There is one way to link: the recipe key `link` (no other path runs a linker; link/ has no subprocess call). Every key below is validated by
 `check()` with all errors listed at once.
-- `link.roots`: `[repo paths of other admitted product roots]`. Each root's own recipe is built by the same machinery (content-keyed, cache hits in
+- `link.roots`: `[repo paths of other admitted product roots, or `root@NAME` pairs (Variants)]`. Each root's own recipe is built by the same machinery (content-keyed, cache hits in
   GATE_CACHE/store) and its objects are link inputs AFTER this root's own units, in the order of the list, each root's objects in unit order. An input
   root must be admitted, class product, with `link` null (so a cycle is impossible; `check()` names a cycle `A -> B -> A` anyway), listed once, not the
   root itself. A red input root makes this link red: stage `ld:<root>`, stderr names the input root and its failing stage.
@@ -117,6 +117,23 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 - `objects.json` of the linking root: `elf` {path, sha256} is the final ELF; `ld_gate` {"ld.json": {path, sha256}, "ld.ids": ..}; `link_roots` [{root, sha256, objects [{unit, object, sha256}]}]:
   the input roots in link order, their objects copied beside the result (out/link_roots/<root>/), the sha256 being the digest of the CONTENT of that root's objects.json (the file itself holds machine paths and cache
   counters; the digest is over the objects' sha256, symbol tables, stage keys, ELF and constants hashes), so a later gate sees exactly what was linked.
+
+- `link.kind`: `pie` (default, the guest: the rules above), `exe` (`-pie -z text -z now`, host executable, emulation `aarch64linux` or `elf_x86_64`, no
+  script required) or `shared` (`-shared -z text -z now`, `link.version_script` required and passed as `--version-script`; the output is `NAME.so`). ldcheck
+  of a non-pie kind checks from ELF symbol tables: every name the inputs define or reference is defined; no undefined symbol except those a
+  `link.libs.system` library defines (its `.dynsym` is read); no TEXTREL; a shared object's exported names (those the version script names) are defined and
+  global. `link.libs.system`: `[absolute paths of shared libraries of env.json packages]`, mounted as declared inputs at /syslib (their content is in the key).
+  `link.roots` works for every kind; a root needed by several images has `link` null and is built once per (root, variant).
+- Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
+  AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
+
+## Variants
+`variants: {NAME: {"compiler": .., "flags": {..}}}`: one root built for several targets. A variant replaces only the keys it names (`compiler`, `flags`), the rest is
+the root's; its effective recipe is checked by every rule of `check()`. A (root, variant) pair is spelled `root@NAME` (`recipe.split_spec`; the implicit
+variant is `root`). It is its own set of content-keyed stages: the variant name is in every stage key (env `FNVNX_VARIANT`, absent for the implicit variant, so
+a root without variants keeps its keys), its objects are stored at `GATE_CACHE/objects/<tree>/<root>@<NAME>/objects.json` and its `objects.json` has
+`root: "root@NAME"`. `link.roots` entries may be `root@NAME` (the variant must exist). The gates that quantify over product roots (`gate_build.product_roots`)
+quantify over the pairs: build, determinism, objstub, linkstrict, argorder, contract's per-root gates.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,

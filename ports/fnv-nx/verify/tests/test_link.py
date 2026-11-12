@@ -198,6 +198,52 @@ def main():
     check("a link whose objects have another target (LP64 objects, ILP32 emulation): red, naming the object", rt["status"] == "red"
           and rt["failure"]["stage"] == "ld:" + ROOT and any("a.c" in x and "target" in x for x in rt["failure"]["stderr"]), err_text(rt))
 
+    # (l) variants: one root, an aarch64 LP64 variant and an x86_64 variant, linked into two images; a wrong-target link is red
+    FL = ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"]
+    X86 = {"cc": "x86_64-linux-gnu-gcc-13", "cxx": "x86_64-linux-gnu-g++-13"}
+    VROOT = T + "vlib"
+    vlib = dict(LIB_REC, flags={"c": ["-mabi=ilp32", "-fPIE"] + FL[:0] + ["-O1", "-ffreestanding"], "cxx": [], "asm": []},
+                variants={"lp64": {"flags": {"c": FL, "cxx": [], "asm": []}}, "x86": {"compiler": X86, "flags": {"c": FL, "cxx": [], "asm": []}},
+                          "lp64b": {"flags": {"c": FL, "cxx": [], "asm": []}}})
+    VF = {"l.c": "int f_b(void) { return 14; }\n"}
+
+    def image(name, emu, roots, cc=None):
+        r = dict(host_rec("exe"), link={"output": name + ".exe", "kind": "exe", "flags": ["-m", emu], "roots": roots})
+        r.pop("constants", None)
+        if cc:
+            r["compiler"] = cc
+        return r
+    IMG = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None,
+           "toy/e.c": "int f_b(void);\nvoid _start(void) { f_b(); for (;;) ; }\n"}
+    IB, IC = T + "imgx", T + "imgbad"
+    vrepo = mk("variants", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG,
+              libs=[(VROOT, (vlib, VF)), (IB, (dict(image("imgx", "elf_x86_64", [VROOT + "@x86"], X86), flags={"c": FL, "cxx": [], "asm": []}), {"e.c": IMG["toy/e.c"]})),
+                    (IC, (image("imgbad", "aarch64linux", [VROOT + "@x86"]), {"e.c": IMG["toy/e.c"]}))])
+    ra = build(vrepo, SS)
+    check("variants: image A (aarch64 LP64) links the lp64 variant of the root; green, the input is listed as root@lp64", ra["status"] == "green"
+          and [x["root"] for x in ra["link_roots"]] == [VROOT + "@lp64"] and TR.elf_class(ra["elf"]["path"]) == 64, err_text(ra))
+    rx = recipe.build(vrepo, IB, SS, BASE + "/o-imgx")
+    check("variants: image B (x86_64) links the x86 variant of the same root; green, e_machine 62",
+          rx["status"] == "green" and open(rx["elf"]["path"], "rb").read()[18:20] == (62).to_bytes(2, "little"), err_text(rx))
+    rbad = recipe.build(vrepo, IC, SS, BASE + "/o-imgbad")
+    check("variants: a wrong-target link (x86_64 objects into an aarch64 image) is red, naming the object and both targets", rbad["status"] == "red"
+          and rbad["failure"]["stage"] == "ld:" + IC and any("l.c" in x and "target" in x for x in rbad["failure"]["stderr"]), err_text(rbad))
+    vl = recipe.build(vrepo, VROOT + "@lp64", SS, BASE + "/o-vl")
+    vb = recipe.build(vrepo, VROOT + "@lp64b", SS, BASE + "/o-vlb")
+    v0 = recipe.build(vrepo, VROOT, SS, BASE + "/o-v0")
+    check("variants: each (root, variant) is its own build: root, root@lp64, root@lp64b green with objects of their own; the root keeps its name in the key",
+          all(x["status"] == "green" for x in (vl, vb, v0)) and v0["root"] == VROOT and vl["root"] == VROOT + "@lp64"
+          and not set(vl["stage_keys"]) & set(vb["stage_keys"]) and not set(vl["stage_keys"]) & set(v0["stage_keys"]), (vl["stage_keys"][:2], vb["stage_keys"][:2]))
+    check("variants: two variants with the same effective recipe still differ in every stage key (the variant name is in the key)",
+          vl["objects"][0]["sha256"] == vb["objects"][0]["sha256"] and vl["stage_keys"] != vb["stage_keys"], "")
+    adm = recipe.load_admit(vrepo)
+    check("variants: the effective recipe replaces only the keys the variant names", recipe.load_recipe(vrepo, adm, VROOT + "@x86")["compiler"] == X86
+          and recipe.load_recipe(vrepo, adm, VROOT + "@x86")["include"] == vlib["include"] and "variants" not in recipe.load_recipe(vrepo, adm, VROOT), "")
+    ev = errs(image("toy", "aarch64linux", [VROOT + "@nope"]), [(VROOT, (vlib, VF))], "novariant")
+    check("variants: link.roots naming a variant the root does not declare is a check error", any("no variant" in e for e in ev), ev)
+    ev2 = recipe.check(dict(vlib, variants={"a b": {"flags": {}}, "c": {"link": {}}}), VROOT, recipe.tracked(vrepo), adm, None, vrepo)
+    check("variants: a bad name or a key other than compiler/flags is a check error", any("variants must be" in e for e in ev2), ev2)
+
     # (f) determinism: two cold builds, two stores, the same bytes
     c1 = recipe.build(repo, ROOT, BASE + "/cold1", BASE + "/oc1")
     c2 = recipe.build(repo, ROOT, BASE + "/cold2", BASE + "/oc2")

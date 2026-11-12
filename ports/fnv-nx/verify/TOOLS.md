@@ -519,7 +519,10 @@ Env: ENV_JSON (default verify/env.json next to this script's tree).
 ```text
 ldcheck - the post stage of the guest ELF link (L1 CONTRACT); the sandbox stage `ldcheck:<root>` of verify/recipe.py runs it.
 
-    ldcheck.py --elf LINKED.elf --objs DIR --out DIR --name NAME.elf
+    ldcheck.py --elf LINKED.elf --objs DIR --out DIR --name NAME.elf [--kind pie|exe|shared] [--version-script FILE] [--lib=SO ..]
+
+Kinds exe and shared (host images, RECIPE.md "Link") are judged by host mode: rules 1-2 on the symbol tables, no TEXTREL, an entry for exe, exported names
+of a shared object defined and global, undefined names only if a --lib shared library defines them (its .dynsym); no crt0 header words.
 
 verify/recipe.py links the guest ELF as the stage `ld:<root>` (fixed options, RECIPE.md "Link"): the root's objects and the objects of
 its `link.roots` whole, the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
