@@ -98,6 +98,16 @@
    "at": "/envprobe-bin",
    "upstream": "built by tests/l6/env/make_env.py + render/tools/rec/build.sh (i686-w64-mingw32 13.2.0-6ubuntu1+26.1, --no-insert-timestamp, DLL image base 0x10000000: byte-reproducible, two builds in different directories give one sha256) at claude/fnv-l6-render-farm-env; Wine 9.0~repack-4build3, Mesa llvmpipe 25.2.8; files: envprobe2.exe, d3d9.dll (recorder), ENV_PIN.txt, env_handheld.tsv, env_docked.tsv",
    "use": "binaries that record render/d3d9/env/env_*.tsv (sha256 in ENV_PIN.txt); not a build input"
+  },
+  {
+   "name": "sm-linkprobe",
+   "repo": "fnv-nx-build",
+   "ref": "tools/sm-linkprobe",
+   "commit": "82303d1c62ee8552137f96e33b117a75fcda2a1c",
+   "tree_sha256": "6debf9fc7c1e32804dc8ee798c3e771b8dcdd3f728b0e47e19d04fd4b63316e1",
+   "at": "/sm-linkprobe",
+   "upstream": "tests/l6/linkprobe/make_link.py + render/shaders/total/mk_linkprobe.py at claude/fnv-l6-render-farm-env; Wine 9.0~repack-4build3 + Mesa llvmpipe 25.2.8; inputs/ (public rows), private/ (shipped shaders gamedata/shaders b545961f: owner's data, private repo only), sm_link.tsv, linkprobe.exe, RUNLOG.txt",
+   "use": "reference table of wined3d 9.0 GLSL texts and link outcome per (vs, ps, reorder) item; not a build input"
   }
  ]
 }
