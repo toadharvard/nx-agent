@@ -93,3 +93,9 @@ Declaration (what I will write into build.json once the keys exist; it is NOT in
 
 - CORRECTION (lead, agreed with L1): the unit set and per-unit defines come from the CMake File API (codemodel-v2): target "mojoshader", its sources and compileGroups
   (defines, flags, includes), not from compile_commands.json (it has no target field). The configure step's outputs are the File API reply files and mojoshader_version.h.
+
+## Rebased onto L1 w16 b57061c8 (lead's order)
+The branch is rebuilt from origin/claude/fnv-l1-contract-w16 b57061c8: no copy of verify/. The only verify/ file touched is admit.json (2 entries: translator product/host/all gates, total tool). My L6 changes are replayed as files (render/shaders/** wholesale, the path fix-ups of the 53 files, tests/, docs/, journal note).
+w16's rules made three refusals, all fixed in render/shaders/translator/build.json: `sources` is a list; `include` inside the root is refused (the root's own files use quoted relative includes "../include/fnvnx_*.h", only the external's tree is in sources.include); generated inputs must be tracked (render/shaders/total/* came along with render/shaders).
+Build at this head (fresh stores, jobs 4): cold1 green 16 objects run 34 hit 0 7.8 s; cold2 green 16 objects run 34 hit 0 9.0 s; warm run 0 hit 34 0.17 s; the 16 .o files byte-identical. Object names are now `mojoshader:<path>.o` (units `<ext>:<path>`).
+Note: origin/claude/fnv-l1-contract-w16 is now 885852ac (after b57061c8).
