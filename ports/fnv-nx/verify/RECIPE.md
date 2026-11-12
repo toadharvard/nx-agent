@@ -48,6 +48,12 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   nonzero size, and two names with different body ids never share an address.
 - `link`: the guest ELF, null = no ELF. A link is the stage `ld:<root>` and the post stage `ldcheck:<root>` of the section "Link: the guest ELF"
   below; `flags` carries the emulation only, `roots` and `libs` are optional.
+  `kind` is `pie` (the ILP32 guest image, the default) or `exe`; a root of target guest cannot link an `exe`. `roots` lists distinct admitted `product`
+  roots of the same target, never the root itself; their stored objects are declared inputs of the link stage (so their content is in its key) and a
+  listed root is built without its own link. A root of class `product` lists base roots only; a root of class `test` lists any root, variants included
+  (`root@NAME`). A variant is one concept: `variants: {NAME: {"target"?}}` in the root's admit.json entry, its flags in the recipe's `variants`,
+  addressed as `root@NAME` (a sanitizer build is a flags variant of the same root). Whatever the flags, `linkstrict` judges the linked output: no
+  undefined symbol of any binding.
 - ABIs: the recipe names the ABI in its flags, and the build reads ELF32 and ELF64 AArch64 objects alike. ILP32 (the product): `-mabi=ilp32`
   in `flags.c`, `flags.cxx` and `flags.asm`, and `-m aarch64linux32` in `link.flags` (the emulation `gcc -mabi=ilp32 -###` passes to
   `ld`; it is required: a link is the ILP32 guest ELF). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
@@ -154,6 +160,11 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   `link.roots` works for every kind; a root needed by several images has `link` null and is built once per (root, variant).
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
+  `exe` is host only: a root of target guest links a `pie` (emulation `aarch64linux32`, the crt0 header), a guest test root included; a guest root with
+  kind `exe` is refused. A product image's `link.roots` name base roots only; a variant (`root@NAME`) is linked only by a root of class `test`.
+  The admit.json entry of a root may carry `variants`: {NAME: {"target": "guest"|"host"}} for variants the recipe declares; a variant inherits the base's
+  target otherwise, the guest rules (compiler external, data model) are judged on the effective target, and a variant with its own target has it in
+  every stage key (`FNVNX_TARGET`). Sources stay the base root's. Every entry point resolves a `root@NAME` spec with `split_spec` once.
 
 ## Variants
 `variants: {NAME: {"compiler": .., "flags": {..}}}`: one root built for several targets. A variant replaces only the keys it names (`compiler`, `flags`), the rest is
@@ -178,6 +189,13 @@ itself (a tracked file of it). Each listed file of a declared external is copied
 the unit's keys; the units are built with the root's own. Red (stage `sources:<root>`): a line that is not `<external>:<path>`, an external the recipe does
 not declare, a path that is no file inside the external (`..` included), a `.` path the root does not track. A changed list adds only the new units:
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
+
+## Python of the generated stages
+
+A `generated` step runs in the python runtime of the sandbox (the interpreter and its loader closure, content-addressed: `runtime_id` is in the
+key). Every python module pinned in `verify/env.json` (`python.modules`) is mounted in that runtime, at the content of its installed files, and
+the key of every generated stage also names each of them as `name==version:installed_files_sha256` (envcheck.wheel_digest: the files read from the
+disk, not the RECORD's claim). Changing one module's digest changes the key of every generated stage, and nothing else's.
 
 ## Keep going
 
