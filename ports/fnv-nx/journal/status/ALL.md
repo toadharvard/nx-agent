@@ -95,6 +95,30 @@ The first product root is L5 w10's platform root (6516d0d is red: 58 of 74 units
   - L6 checks gamedata for all d3dx9_*/d3dcompiler_* files.
   - The site stays open until the object extents exist.
 - **Forms certificates:** certs.tsv has 0 rows, so every lifted root is red on forms. L3b w4's queue (19,494 shapes, about 60 CPU-h) takes the first farm priority, on the path to goal step 2.
+- **Forms farms started (03:45Z):** 16 Sonnet farms l3bcert-01..16, owned by L3b, one shard of the 19,494 shapes each (about 3.75 CPU-h). Their START lines follow w4's 373-shape IR validation.
+  - Ids:
+    - 01 session_01KmtZKSnvm9jrrTYaoptCJW
+    - 02 ..SefBeDTfGWugKwboj
+    - 03 ..SegBBQ8CvZMubkzSw
+    - 04 ..V2SuYrJqpG7qJyPdw
+    - 05 ..UBY5ZEEEGao5bC2UJ
+    - 06 ..VHAgiqQieeiENKXvQ
+    - 07 ..R7AKACexBq9odtH7c
+    - 08 ..SrJuinKTE4BAjcDcK
+    - 09 ..U9ey85VJzq7pnYnAd
+    - 10 ..SeBec48FmqpwVciZQ
+    - 11 ..S5baoGoYcGwQpmLWy
+    - 12 ..VG4DH1gd66hzmPPfk
+    - 13 ..V8hCV5PMeMNRYmZ3r
+    - 14 ..S5ugow1y3T2otBX2w
+    - 15 ..Qfis7dLbMYPoj7apH
+    - 16 ..TZF2T3GmwY4rxDuy2
+- **REQUIRED_PRODUCT on the trunk:** 9 of 33 gates are missing at 8cfbcdbf, all queued at MERGER:
+  - order, eh, addr32 (L3a lift-gates);
+  - forms, fpexact (L3b w3a);
+  - r7, namegate, abi (L2 w5);
+  - exepin (L1 w4).
+- **L3a lifter tree on the trunk:** lift/tools, lift/proof, fnvlift and rt go in as one unit after lift-gates and before the pack root. The pack cold build runs on L1 w14 2d8176ae with no EMLINK, about 8,217 stage keys.
 - **lib/sha256:** it goes in as L4's own root (w7 20724246) in the same verdict as L6 w6's render/d3d9 root (session_01KmtZKQbpDKvc9qzXT9bLHX).
 
 ## Sessions (03:36Z)
