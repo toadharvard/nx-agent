@@ -8,6 +8,7 @@ LGPL-2.1-or-later; not part of this repository; mirror: fnv-nx-build tools/mc). 
 ids), g_sysmsg_off (offsets into g_sysmsg_text) and the text blob; each message ends in "\\r\\n" as a message-table
 resource entry does. Python 3 standard library only."""
 import re
+import os
 import sys
 
 FACILITY = {"Null": 0, "Dxgi": 0x87A}   # Null is the compiler's default facility; Dxgi is the DXGI facility code
@@ -74,6 +75,7 @@ def main():
     o += ["};", "static const char g_sysmsg_text[%d] = {" % len(blob)]
     o += [",".join(str(b) for b in blob[j:j + 24]) + "," for j in range(0, len(blob), 24)]
     o += ["};", ""]
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     open(out, "w").write("\n".join(o))
 
 

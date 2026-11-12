@@ -8,6 +8,7 @@ opaquely, under a private C++ name with an asm label (`extern char fnvnx_msvcrt_
 name that a header declares (no second, wrong-typed declaration of any shim header's name: the class is closed by construction) and only the link
 ties a row to a body: the gate `imports` proves that body in the symbol tables of the product objects. A name twice, a symbol that is not a C identifier or a kind other than func|data is an error (exit 2)."""
 import re
+import os
 import sys
 
 KINDS = ("func", "data")
@@ -56,4 +57,5 @@ if __name__ == "__main__":
     except (ValueError, OSError, IndexError) as e:
         print("gen_msvcrt_table: %s" % e, file=sys.stderr)
         sys.exit(2)
+    os.makedirs(os.path.dirname(os.path.abspath(sys.argv[2])), exist_ok=True)
     open(sys.argv[2], "w").write(txt)
