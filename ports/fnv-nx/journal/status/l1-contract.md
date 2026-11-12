@@ -810,3 +810,18 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Commit 1: generator inputs in the orchestrator's form, plus the header-root rule merged with L5's header-home rule.
   - Then fixtures, specdefaults, the covers derivation and the nesting refusal, as separate commits.
 - L6 was told not to take -int as a base.
+
+## 2026-11-12 10:05 UTC
+- w14 445e551d (w14-src2, on 6d3a2800) is accepted. It brings:
+  - one tool-tree helper, tool_file/tree_of, used for ldcheck, link.script, include and the generator tool;
+  - the header-home test;
+  - the crt0 fixture.
+  - Next for w14: the cache-miss cause.
+- w20 int-l3a 2d215f16a is accepted as a merge.
+  - It is to merge w14 445e551d next.
+  - Its verdict is blocked on the env, so w20 has been told to run setup_verdict_env.sh.
+- w10 census at 6d3a2800:
+  - 92 test files; 64 ast cases, all in 7 files; 85 files are script-style.
+  - Decision A′: a case is a test_* function, or a call to the single shared case() in verify/testcase.py, resolved through its import.
+  - All 85 script-style files are migrated to it mechanically.
+- Header homes have one form: unit-less product roots. w16's `headers` class is dropped (L6 confirmed it would be a second mechanism).
