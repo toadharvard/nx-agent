@@ -9,12 +9,14 @@ typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]
    3/4/5 I16/I32/I64 (v = the integer sign-extended to 64 bits), 6 M80 (v = significand, e = sign<<15|exp). rt/fnvl_x87.h */
 struct fv { u64 v; u32 e; u32 k; };
 struct fnvl_nframe;   /* rt/imp.h: one per live import entry of the thread (native frames between lifted frames) */
+#include "fnvl_abi.h"
 struct cpu { u32 r[8]; u32 fs; u32 ftop, fcw, fc; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm_unused[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; u32 eflags; u32 dr[6]; };   /* mxcsr (reset 0x1f80) is appended: SSE family (W6); mm_unused is the former separate MM register file, kept only so the offsets hold: mm0-7 ARE the significands of fx[0..7] (rt/fnvl_x87.h, MMX aliasing). r[] is only the save area of the
    entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README).
    x87 (W13): fx[8] are the PHYSICAL registers (carriers; k==0 is the empty tag), ftop the TOP, fcw the control word, fex the exception status bits that the host FPSR cannot
    hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). The pre-R8 double stack `st` and tag word `ftag` are deleted (nothing read them; the x87 state is fx/ftop/fcw/fex). eflags, fc (and dr, the debug registers Dr0 Dr1 Dr2 Dr3 Dr6 Dr7 of the CONTEXT):
    the state that a hardware-exception CONTEXT names and that is not a register of the lifted code: at every raise site the lifter flushes its flag and condition-bit locals into c->eflags / c->fc (RAISE_OUT)
    and reloads them after a continue (RAISE_IN); rt/seh.cc writes the CONTEXT from them and reads them back. */
+static_assert(__builtin_offsetof(struct cpu, ra) == FNVL_CPU_RA_OFF, "rt/fnvl_abi.h: FNVL_CPU_RA_OFF is the offset of struct cpu::ra");
 /* FNVL_FLAGS_IO (test/instest.py): the arithmetic flags, DF and the x87 condition bits also travel in c->fl / c->fc.
    fl: the EFLAGS bit positions (CF 0, PF 2, AF 4, ZF 6, SF 7, DF 10, OF 11); fc: C0 bit 8, C2 bit 10, C3 bit 14. */
 #ifdef FNVL_FLAGS_IO
@@ -40,7 +42,7 @@ register struct cpu *c asm("x27");
 #define FNVL_DEOVF 5
 #define FNVL_BP 3
 #define FNVL_UD 4
-extern "C" { void (*fnvl_dispatch(u32 image_addr))(void); void fnvl_raise(u32 code, u32 at);
+extern "C" { void (*fnvl_dispatch(u32 image_addr))(void);
              void fnvl_trace(u32 entry, u32 esp); }
 #define CALLX(h) L_##h()
 #ifdef FNVL_TRACE
@@ -211,19 +213,22 @@ static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=
 #define FNVL_BOUNDS 7
 #define FNVL_INTO 8
 #define FNVL_ASSERT 9
-extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void); void fnvl_raise_av(u32 access, u32 addr, u32 at); }
+extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void); }
+/* The hardware-raise entries of the runtime (rt/seh.cc) are declared ONLY here, inside namespace fnvl_rt, and only FNVL_RAISE / FNVL_RAISE_AV below name them: a lifted unit that calls the raw
+   fnvl_raise or fnvl_raise_av (no EFLAGS / C0 C2 C3 flush) does not find the name and is a compile error. They are the same C-linkage functions as the definitions in seh.cc. */
+namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_raise_av(u32 access, u32 addr, u32 at); } }
 /* EFLAGS image of pushfd: the arithmetic flags and DF of the lifted state, bit 1, IF (9) set, AC and ID from c->eflx, everything else 0.
    popfd loads CF PF AF ZF SF DF OF; AC and ID are kept in c->eflx; TF/IF/IOPL/NT/RF/VM/VIF/VIP changes are ignored (user mode cannot change them). */
 #define EFL_PUSH() ((u32)((cf&1)|2u|((pf&1)<<2)|((af&1)<<4)|((zf&1)<<6)|((sf&1)<<7)|0x200u|((df&1)<<10)|((of&1)<<11)|(c->eflx&0x240000u)))
 #define EFL_POP(v_) do{ u32 f_=(v_); cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c->eflx=f_&0x240000u; }while(0)
-/* RAISE_OUT / RAISE_IN: the flush rule of every explicit raise site (the sites that emit fnvl_raise / fnvl_raise_av: the lifter rewrites each call into FNVL_RAISE / FNVL_RAISE_AV).
+/* RAISE_OUT / RAISE_IN: the flush rule of every explicit raise site (the lifter emits only FNVL_RAISE / FNVL_RAISE_AV; the raw entries are not visible to a lifted unit).
    Everything the CONTEXT names that the lifted function keeps in locals goes to struct cpu before the call: EFLAGS (the pushfd image, EFL_PUSH) into c->eflags and the x87 condition bits
    C0 C2 C3 (FSW bits 8 10 14) into c->fc; the x87 stack and xmm state are flushed by the same sites (fnvlift f_x87_ctl.store, SYNC_X_OUT). After a continue the handler's EFLAGS and condition
    bits are loaded back (EFL_POP: the arithmetic flags and DF; AC and ID into c->eflx; the other bits cannot be changed by user mode). */
 #define RAISE_OUT do{ c->eflags=EFL_PUSH(); c->fc=((c0&1)<<8)|((c2&1)<<10)|((c3&1)<<14); }while(0)
 #define RAISE_IN do{ u32 ef_=c->eflags; EFL_POP(ef_); c0=(c->fc>>8)&1; c2=(c->fc>>10)&1; c3=(c->fc>>14)&1; }while(0)
-#define FNVL_RAISE(code, at) do{ RAISE_OUT; fnvl_raise(code, at); RAISE_IN; }while(0)
-#define FNVL_RAISE_AV(acc, addr, at) do{ RAISE_OUT; fnvl_raise_av(acc, addr, at); RAISE_IN; }while(0)
+#define FNVL_RAISE(code, at) do{ RAISE_OUT; fnvl_rt::fnvl_raise(code, at); RAISE_IN; }while(0)
+#define FNVL_RAISE_AV(acc, addr, at) do{ RAISE_OUT; fnvl_rt::fnvl_raise_av(acc, addr, at); RAISE_IN; }while(0)
 /* aam/aad/aaa/aas/daa/das are generated inline; segment selector values of a Win32 x86 user process (as in rt/seh.cc's CONTEXT) */
 #define SEL_CS 0x1bu
 #define SEL_DS 0x23u
@@ -235,6 +240,8 @@ extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void
 #define FNVL_STEP 10
 /* FNVL_LOCK 11  STATUS_INVALID_LOCK_SEQUENCE 0xC000001E: #UD of an instruction that has an F0 prefix among its bytes (KiTrap06Handler); at = the instruction, a fault. */
 #define FNVL_LOCK 11
+/* FNVL_DBGSRV 12  `int 0x2d` (the debug service), at = the instruction; the rule of Wine 9.0 handle_interrupt, rt/seh.cc fnvl_raise. */
+#define FNVL_DBGSRV 12
 /* Segment registers of the process model (rt/seh.cc CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
    (base = TEB, limit 0xFFF); the only descriptors a ring-3 load can reach are the three of the model GDT below, plus the null selector for ES/DS/FS/GS.
    SELK strips the RPL: it keeps the descriptor index and the TI bit (a TI=1 selector names the LDT, which a Win32 process has none of: always invalid). */

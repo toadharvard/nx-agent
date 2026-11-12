@@ -125,17 +125,17 @@ def imgpage(p):
         return bytes(b)
     return orig_imgpage(p)
 # expected `int imm8` rows (fnvlift/f_sys.py INT_VECTORS): vector -> substring of the generated C
-INT_EXPECT = {0x03: 'fnvl_raise(FNVL_BP,0x%xu)', 0x04: 'fnvl_raise(FNVL_INTO,0x%xu)', 0x05: 'fnvl_raise(FNVL_BOUNDS,0x%xu)', 0x2c: 'fnvl_raise(FNVL_ASSERT,0x%xu)',
-              0x2d: 'fnvl_raise(FNVL_BP,0x%xu)', 0x2e: 'fnvl_raise_av(0,0xffffffffu,0x%xu)', 0x06: 'fnvl_raise_av(0,0xffffffffu,0x%xu)', 0x29: 'fnvl_raise_av(0,0xffffffffu,0x%xu)'}
-INT_AT = {0x03: 1, 0x04: 1, 0x05: 0, 0x2c: 0, 0x2d: 1}
+INT_EXPECT = {0x03: 'FNVL_RAISE(FNVL_BP,0x%xu)', 0x04: 'FNVL_RAISE(FNVL_INTO,0x%xu)', 0x05: 'FNVL_RAISE(FNVL_BOUNDS,0x%xu)', 0x2c: 'FNVL_RAISE(FNVL_ASSERT,0x%xu)',
+              0x2d: 'FNVL_RAISE(FNVL_DBGSRV,0x%xu)', 0x2e: 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)', 0x06: 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)', 0x29: 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)'}
+INT_AT = {0x03: 0, 0x04: 1, 0x05: 0, 0x2c: 0, 0x2d: 0}
 A0 = 0x7d000000
-RAV = 'fnvl_raise_av(0,0xffffffffu,0x%xu)' % A0
-RPRIV = 'fnvl_raise(FNVL_PRIV,0x%xu)' % A0
-RUD = 'fnvl_raise(FNVL_UD,0x%xu)' % A0
-RLOCK = 'fnvl_raise(FNVL_LOCK,0x%xu)' % A0      # a #UD with an F0 byte among the first four bytes at Eip (KiTrap06Handler scans them all, not only the prefixes): STATUS_INVALID_LOCK_SEQUENCE
-GSAV = 'if(SELK(c->sel[SEG_GS])==0){ SYNC_OUT; REGS(); fnvl_raise_av(0,0xffffffffu,0x%xu)' % A0      # a gs: access with GS = the null selector: #GP(0)
-GPS = lambda i: 'if(!fnvl_seg_ok(%d,s)){ SYNC_OUT; REGS(); %s' % (i, 'fnvl_raise_av(0,0xffffffffu,0x%xu)' % A0)
-NORAISE = '\x00'      # marker: the text must raise nothing (no fnvl_raise(FNVL_*) / fnvl_raise_av; the stub event of falling off the one-instruction function is not a raise)
+RAV = 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)' % A0
+RPRIV = 'FNVL_RAISE(FNVL_PRIV,0x%xu)' % A0
+RUD = 'FNVL_RAISE(FNVL_UD,0x%xu)' % A0
+RLOCK = 'FNVL_RAISE(FNVL_LOCK,0x%xu)' % A0      # a #UD with an F0 byte among the first four bytes at Eip (KiTrap06Handler scans them all, not only the prefixes): STATUS_INVALID_LOCK_SEQUENCE
+GSAV = 'if(SELK(c->sel[SEG_GS])==0){ SYNC_OUT; REGS(); FNVL_RAISE_AV(0,0xffffffffu,0x%xu)' % A0      # a gs: access with GS = the null selector: #GP(0)
+GPS = lambda i: 'if(!fnvl_seg_ok(%d,s)){ SYNC_OUT; REGS(); %s' % (i, 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)' % A0)
+NORAISE = '\x00'      # marker: the text must raise nothing (no FNVL_RAISE(FNVL_*) / fnvl_raise_av; the stub event of falling off the one-instruction function is not a raise)
 # hex -> (what, substrings that must all occur; NORAISE: no raise of any kind). KiTrap0D rows (ReactOS traphdlr.c): privileged = F4; 0F 08 09 35 21 23 06 20 22 30 33; 0F 00 /2 (mask 38 == 10), 0F 00 18;
 # 0F 01 (mask 38 == 10), 18, 30; CLI STI and the I/O opcodes at CPL 3 > IOPL 0. Everything else that is a #GP(0) at CPL 3: access violation.
 CLASS_EXPECT = [
@@ -162,7 +162,7 @@ CLASS_EXPECT = [
     ('66ff2d78563412', 'jmp far m16:16', ['t=M16(ad), s=M16(ad+2u)']),
     ('cb', 'retf', ['s!=SEL_CS', 'esp+=8u', RAV]), ('ca0400', 'retf 4', ['esp+=12u']), ('66cb', 'retf (16-bit)', ['M16(esp)', 'esp+=4u']),
     ('cf', 'iretd', ['s!=SEL_CS', 'EFL_POP(fl);', 'esp+=12u', 'fl=M32(esp+8u)']), ('66cf', 'iret', ['esp+=6u', 'c->eflx']),
-    ('f1', 'int1 = #DB trap, next instruction', ['fnvl_raise(FNVL_STEP,0x%xu)' % (A0 + 1)]),
+    ('f1', 'int1 = #DB trap, next instruction', ['FNVL_RAISE(FNVL_STEP,0x%xu)' % (A0 + 1)]),
     ('6301', 'arpl [ecx],ax', ['zf=1', '&~3u']), ('0f02c1', 'lar eax,ecx', ['fnvl_gdt_hi(', '(hi&0x00ffff00u)', 'zf=1', NORAISE]), ('0f03c1', 'lsl eax,ecx', ['fnvl_gdt_limit(hi)']),
     ('0f00e0', 'verr ax', ['zf=hi!=0']), ('0f00e8', 'verw ax', ['!(hi&0x800u)']),
     ('0f0000', 'sldt [eax]', ['FNVL_LDTR_SEL']), ('0f0008', 'str [eax]', ['FNVL_TR_SEL']), ('0f01e0', 'smsw eax', ['FNVL_CR0']), ('0f0100', 'sgdt [eax]', ['FNVL_GDTR_LIMIT', 'FNVL_GDTR_BASE']),
@@ -190,7 +190,7 @@ CLASS_EXPECT = [
     ('c5e1e3c0', 'vpavgw', [RUD]), ('c4e171e300', 'vpavgw 3-byte VEX, memory', [RUD]), ('0f380000', 'pshufb', [RUD]), ('660f3a0f0000', 'palignr', [RUD]), ('f20f7c00', 'haddps', [RUD]), ('c4e272f7c1', 'sarx', [RUD]), ('62f17c4858c0', 'evex vaddps', [RUD]),
     ('db08', 'fisttp m32 (x87 opcode gated by SSE3: f_cpufeat)', [RUD]), ('dd08', 'fisttp m64 (SSE3)', [RUD]), ('df08', 'fisttp m16 (SSE3)', [RUD]), ('f20ff000', 'lddqu (SSE3: has an SSE handler, the CPUID-UD rule comes first; its opcode byte F0 is KiTrap06 lock-sequence data, like movbe above)', [RLOCK]),
     ('db18', 'fistp m32 (x87, no feature gate)', [NORAISE]), ('f30f6f00', 'movdqu (SSE2, in the model)', [NORAISE]), ('0f6f00', 'movq mm0,[eax] (MMX, in the model)', [NORAISE]), ('0f77', 'emms (MMX, in the model)', [NORAISE]),
-    ('c7f800000000', 'xbegin', [RUD]), ('0f0b', 'ud2', ['fnvl_raise(FNVL_UD,']), ('0f01d6', 'xtest', [RUD]), ('0faee0', 'ptwrite? (F3 0F AE /4 needs F3: this is 0F AE E0 = xsave-like #UD)', []),
+    ('c7f800000000', 'xbegin', [RUD]), ('0f0b', 'ud2', ['FNVL_RAISE(FNVL_UD,']), ('0f01d6', 'xtest', [RUD]), ('0faee0', 'ptwrite? (F3 0F AE /4 needs F3: this is 0F AE E0 = xsave-like #UD)', []),
 ]
 # reserved-NOP bytes capstone refuses: (hex, expected instruction length or None). Lengths cross-checked against the Unicorn oracle over the whole 0F 0D / 0F 18..1F ModRM grid (340 encodings, 0 mismatches).
 NOPGAP = [('0f1ed0', 3), ('0f1a20', 3), ('0f1b3800', 3), ('660f1c4004', 5), ('0f1b0500000000', 7), ('0f1d0424', 4), ('0f1d042500000000', 8), ('670f1c4000', 5), ('670f1c0600', 6), ('0f0d18', 3),
@@ -216,7 +216,7 @@ def class_tables(img):
         hx, _, tail = hx.partition('|'); raw = bytes.fromhex(hx); a = A0; fake[a] = raw + bytes.fromhex(tail) + b'\x90' * 8      # `fn|tail`: bytes after the function that the F0 scan of KiTrap06 still sees
         try: txt = fnvlift.lift(img, a, len(raw), strict=False)[0]
         except Exception as e: print('%-22s %-44s FAIL lift: %s' % (hx, what, e)); bad += 1; continue
-        miss = [x for x in subs if x != NORAISE and x not in txt] + (['no raise of any kind'] if NORAISE in subs and ('fnvl_raise(FNVL' in txt or 'fnvl_raise_av' in txt) else [])
+        miss = [x for x in subs if x != NORAISE and x not in txt] + (['no raise of any kind'] if NORAISE in subs and ('FNVL_RAISE(FNVL' in txt or 'fnvl_raise_av' in txt) else [])
         bad += bool(miss); print('%-22s %-44s %s' % (hx, what, 'ok' if not miss else 'FAIL missing/forbidden: %s' % miss))
     return bad
 # ---- X1: x87 environment loads, packed BCD, fstpnce, VEX (vpavgw) ----------------------------------------------------------------------------------------------------

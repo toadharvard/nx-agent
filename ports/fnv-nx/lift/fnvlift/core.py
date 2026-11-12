@@ -360,13 +360,13 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         else:
             gs_guard(cx, ins)
             dispatch(cx, ins)
-        if any('fnvl_raise(FNVL_UD,' in t for t in cx.L[n0:]) and 0xf0 in head4(a):      # KiTrap06Handler: a #UD with an F0 byte among the first four bytes at Eip is STATUS_INVALID_LOCK_SEQUENCE
-            cx.L[n0:] = [t.replace('fnvl_raise(FNVL_UD,', 'fnvl_raise(FNVL_LOCK,') for t in cx.L[n0:]]
+        if any('FNVL_RAISE(FNVL_UD,' in t for t in cx.L[n0:]) and 0xf0 in head4(a):      # KiTrap06Handler: a #UD with an F0 byte among the first four bytes at Eip is STATUS_INVALID_LOCK_SEQUENCE
+            cx.L[n0:] = [t.replace('FNVL_RAISE(FNVL_UD,', 'FNVL_RAISE(FNVL_LOCK,') for t in cx.L[n0:]]
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
                 em('goto %s;' % cx.lab(nxt))
             elif not strict:
-                em('SYNC_OUT; fnvl_raise(2,0x%xu); return;' % nxt)
+                em('SYNC_OUT; FNVL_RAISE(2,0x%xu); return;' % nxt)
             else:       # the successor is neither decoded here nor undecodable: control passes to it exactly like `jmp nxt` (one rule, f_flow.jump_out)
                 from . import f_flow
                 f_flow.jump_out(cx, nxt)
@@ -374,7 +374,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
-        em('%s: ; SYNC_OUT; REGS(); fnvl_raise(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_LOCK' if 0xf0 in head4(a) else 'FNVL_UD', a))
+        em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_LOCK' if 0xf0 in head4(a) else 'FNVL_UD', a))
     if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:
@@ -384,7 +384,6 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
     body = '\n'.join(cx.L)
     # R4 raise-site flush rule (rt/fnvl.h RAISE_OUT / RAISE_IN): every explicit call of the OS dispatcher flushes the EFLAGS and x87 condition-bit locals into struct cpu before it and reloads them after
-    body = body.replace('fnvl_raise_av(', 'FNVL_RAISE_AV(').replace('fnvl_raise(', 'FNVL_RAISE(')
     fl = 'SYNC_X_IN;' if 'sse' in kinds else ''
     body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
     body = body.replace('SYNC_IN;', 'SYNC_IN;' + fl)

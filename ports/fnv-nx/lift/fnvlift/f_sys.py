@@ -34,7 +34,7 @@ def site(cx, call, term=True, traps=False):
 
 
 def raise_code(cx, code, at=None):
-    site(cx, 'fnvl_raise(%s,0x%xu);' % (code, cx.a if at is None else at))
+    site(cx, 'FNVL_RAISE(%s,0x%xu);' % (code, cx.a if at is None else at))
 
 
 # int imm8 in a ring-3 Win32 process. Vector -> (what the process observes, confidence).
@@ -43,12 +43,12 @@ def raise_code(cx, code, at=None):
 #   4     `int 4` = into without the OF test: IDT[4] DPL 3, KiTrap04 -> STATUS_INTEGER_OVERFLOW 0xC0000095, a trap (as FNVL_INTO). Medium.
 #   5     IDT[5] (bound) DPL 3 on NT -> STATUS_ARRAY_BOUNDS_EXCEEDED 0xC000008C. Low (not sure of the gate DPL of vector 5).
 #   0x2c  KiRaiseAssertion, DPL 3 (DbgRaiseAssertionFailure): STATUS_ASSERTION_FAILURE 0xC0000420, Context.Eip rewound onto the int. Medium (Vista+ kernels).
-#   0x2d  KiDebugService, DPL 3 (DbgPrint/DbgBreakPoint services): a breakpoint, STATUS_BREAKPOINT, like vector 3. Low on the Eip details (the real kernel also
-#         skips the int3 byte that follows the int 2d idiom and passes eax/ecx/edx as ExceptionInformation; neither is modelled).
+#   0x3 / 0x2d  Wine 9.0 is the declared implementation (dlls/ntdll/unix/signal_i386.c): int3 = trap_handler TRAP_x86_BPTFLT + setup_raise_exception; int 2d = handle_interrupt case 0x2d.
+#         The row passes the address of the instruction itself (at = a); rt/seh.cc fnvl_raise holds the rules (FNVL_BP, FNVL_DBGSRV) with the citations.
 #   0x2e  the legacy system-service gate is DPL 3 on real NT, but a lifted process has no kernel behind it: it is the default row (AV). Low.
 #   other every other vector: the gate has DPL 0, so `int n` from ring 3 is #GP -> STATUS_ACCESS_VIOLATION, ExceptionInformation = {0, 0xFFFFFFFF}. This is also
 #         vector 0x29 (fast-fail does not exist on the reference OS version) and `int 6` (the only one in FalloutNV.exe). Medium (the rule is the task's).
-INT_VECTORS = {3: ('FNVL_BP', 1), 4: ('FNVL_INTO', 1), 5: ('FNVL_BOUNDS', 0), 0x2c: ('FNVL_ASSERT', 0), 0x2d: ('FNVL_BP', 1)}
+INT_VECTORS = {3: ('FNVL_BP', 0), 4: ('FNVL_INTO', 1), 5: ('FNVL_BOUNDS', 0), 0x2c: ('FNVL_ASSERT', 0), 0x2d: ('FNVL_DBGSRV', 0)}
 
 
 @op('int')
@@ -56,7 +56,7 @@ def h_int(cx, ins):
     v = cx.ops[0].imm & 0xff
     row = INT_VECTORS.get(v)
     if row is None:
-        site(cx, 'fnvl_raise_av(0,0xffffffffu,0x%xu);' % cx.a)
+        site(cx, 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu);' % cx.a)
     else:
         raise_code(cx, row[0], cx.a + row[1])
 
@@ -66,7 +66,7 @@ def h_into(cx, ins):
     cx.nonlocal_ = True
     cx.raises.add(cx.a)
     cx.raises.add(cx.nxt)
-    cx.em('if(of){ SYNC_OUT; REGS(); fnvl_raise(FNVL_INTO,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % cx.a)
+    cx.em('if(of){ SYNC_OUT; REGS(); FNVL_RAISE(FNVL_INTO,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % cx.a)
 
 
 @op('bound')
@@ -76,7 +76,7 @@ def h_bound(cx, ins):
     cx.nonlocal_ = True
     cx.raises.add(cx.a)
     ea = cx.ea(ins, ops[1])
-    cx.em('{ u32 ad=%s; s32 i=(s32)(s%d)%s; if(i<(s32)(s%d)M%d(ad)||i>(s32)(s%d)M%d(ad+%d)){ SYNC_OUT; REGS(); fnvl_raise(FNVL_BOUNDS,0x%xu); REGS(); SYNC_IN; goto nonlocal; } }' % (
+    cx.em('{ u32 ad=%s; s32 i=(s32)(s%d)%s; if(i<(s32)(s%d)M%d(ad)||i>(s32)(s%d)M%d(ad+%d)){ SYNC_OUT; REGS(); FNVL_RAISE(FNVL_BOUNDS,0x%xu); REGS(); SYNC_IN; goto nonlocal; } }' % (
         ea, s, cx.rd(ins, ops[0]), s, s, s, s, s // 8, cx.a))
 
 
@@ -114,14 +114,14 @@ def trap0d_privileged(b):
 
 def gp_av(cx):
     """an unconditional ring-3 #GP that Windows reports as an access violation {0, 0xFFFFFFFF} (a fault: Eip = the instruction)"""
-    site(cx, 'fnvl_raise_av(0,0xffffffffu,0x%xu);' % cx.a)
+    site(cx, 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu);' % cx.a)
 
 
 def gp_cond(cx, cond):
     """C `if` statement raising that #GP when `cond` holds (selector and far-transfer checks); nothing was modified yet when it fires"""
     cx.nonlocal_ = True
     cx.raises.add(cx.a)
-    return 'if(%s){ SYNC_OUT; REGS(); fnvl_raise_av(0,0xffffffffu,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % (cond, cx.a)
+    return 'if(%s){ SYNC_OUT; REGS(); FNVL_RAISE_AV(0,0xffffffffu,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % (cond, cx.a)
 
 
 def gp0(cx, ins):

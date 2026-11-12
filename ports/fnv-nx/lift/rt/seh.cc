@@ -38,6 +38,10 @@ static void zero(u32 p, u32 n) { for (u32 i = 0; i < n; i += 4) M32(p + i) = 0; 
 enum { CX_I386 = 0x10000, CX_CONTROL = 1, CX_INTEGER = 2, CX_SEGMENTS = 4, CX_FP = 8, CX_DEBUG = 0x10, CX_EXT = 0x20, CX_FULL = CX_CONTROL | CX_INTEGER | CX_SEGMENTS,
        CX_EXCEPTION = CX_I386 | CX_FULL | CX_DEBUG | CX_FP | CX_EXT,      /* 0x1003F: save_context / raise_exception_full_context */
        CX_CAPTURE = CX_I386 | CX_FULL };                                  /* 0x10007: RtlCaptureContext (RtlUnwind) */
+/* FXSAVE's MXCSR_MASK of the reference CPU (Intel SDM vol. 1, 11.6.6 "Guidelines for Writing to the MXCSR Register": the mask has every bit set that the CPU lets software set;
+   bit 6 DAZ is set when the CPU supports denormals-are-zeros, which every CPU with SSE2 and FXSR of the model does) -- derived from the model's cpuid leaf 1, so a change of the leaf is a build error here. */
+static_assert((FNVL_CPUID1_EDX >> 24 & 7u) == 7u, "FXSR (24), SSE (25), SSE2 (26) of cpuid leaf 1 EDX: the model has FXSAVE with MXCSR and DAZ");
+#define FNVL_MXCSR_MASK 0xffffu
 enum { C_DR = 4, C_EXT = 204, FS_SIZE = 112, XS_SIZE = 512 };           /* Dr0 Dr1 Dr2 Dr3 Dr6 Dr7 at 4; FLOATING_SAVE_AREA 112 bytes at 28; ExtendedRegisters[512] at 204 */
 enum { FS_CW = 0, FS_SW = 4, FS_TW = 8, FS_EO = 12, FS_ES = 16, FS_DO = 20, FS_DS = 24, FS_REG = 28, FS_CR0 = 108 };       /* FLOATING_SAVE_AREA */
 enum { X_FCW = 0, X_FSW = 2, X_FTW = 4, X_FOP = 6, X_FIP = 8, X_FCS = 12, X_FDP = 16, X_FDS = 20, X_MXCSR = 24, X_MXMASK = 28, X_ST = 32, X_XMM = 160 };   /* XSAVE_FORMAT (FXSAVE image) */
@@ -60,7 +64,7 @@ static void fx_capture(u8 *g) {
     u32 fsw = (c->ftop & 7) << 11 | (c->fc & 0x4500u) | fx_live() | (c->fex & FEX_X87), tag = 0, ip = c->fip, dp = c->fdp;
     for (u32 p = 0; p < 8; p++) if (c->fx[p].k) tag |= 1u << p;
     p16(g, X_FCW, c->fcw); p16(g, X_FSW, fsw); g[X_FTW] = (u8)tag; p16(g, X_FOP, fx_fop()); p32(g, X_FIP, ip); p16(g, X_FCS, ip ? c->sel[SEG_CS] : 0);
-    p32(g, X_FDP, dp); p16(g, X_FDS, dp ? c->sel[SEG_DS] : 0); p32(g, X_MXCSR, c->mxcsr | sse_live()); p32(g, X_MXMASK, 0xffffu);
+    p32(g, X_FDP, dp); p16(g, X_FDS, dp ? c->sel[SEG_DS] : 0); p32(g, X_MXCSR, c->mxcsr | sse_live()); p32(g, X_MXMASK, FNVL_MXCSR_MASK);
     for (u32 i = 0; i < 8; i++) { fnvl_f80 t = fv_x(c->fx[(c->ftop + i) & 7]); p64(g, X_ST + 16 * i, t.m); p16(g, X_ST + 16 * i + 8, t.se); }
     for (u32 i = 0; i < 8; i++) { p64(g, X_XMM + 16 * i, c->x[i].q[0]); p64(g, X_XMM + 16 * i + 8, c->x[i].q[1]); }
 }
@@ -122,12 +126,13 @@ static int ctx_segs_ok(u32 x, u32 fl) {
     if (fl & CX_CONTROL) { u32 cs = M32(x + C_CS); if (!(SELK(cs) == SELK(SEL_CS) && (cs & 3) == 3 && fnvl_seg_ok(SEG_SS, M32(x + C_SS)))) return 0; }
     return 1;
 }
-/* ContinueExecution: load what the CONTEXT's ContextFlags name (the handler may have changed it) into the guest state; c->ra = Context.Eip. A selector that the CPU would refuse to load (the #GP of the
-   segment load, reported like the lifter's own segment loads) is raised as an access violation at Context.Eip BEFORE anything is loaded; that raise's outcome (its handler's continue or non-local
-   transfer) is then the state, which the caller treats the same as a load */
+/* ContinueExecution: load what the CONTEXT's ContextFlags name (the handler may have changed it) into the guest state; c->ra = Context.Eip. A selector that the CPU refuses to load is Wine 9.0's
+   case of a bad segment in a restored frame: the CONTEXT is loaded as it is and the fault happens when the segment registers are loaded (dlls/ntdll/unix/signal_i386.c handle_syscall_fault, which reports
+   the exception with the frame being restored as its context; segv_handler: STATUS_ACCESS_VIOLATION, ExceptionInformation = {0, 0xffffffff} for a GDT selector). So the whole CONTEXT (selectors included) becomes
+   the state first, then the access violation is raised at Context.Eip with the loaded values as ITS context; what that raise does is the state. */
 static void ctx_restore(u32 x) {
     u32 fl = M32(x + C_FLAGS) & ~(u32)CX_I386;
-    if (!ctx_segs_ok(x, fl)) { fnvl_raise_av(0, 0xffffffffu, M32(x + C_EIP)); return; }
+    int segs_ok = ctx_segs_ok(x, fl);
     if (fl & CX_DEBUG) for (u32 i = 0; i < 6; i++) c->dr[i] = M32(x + C_DR + 4 * i);
     if (fl & (CX_FP | CX_EXT)) {
         u8 g[XS_SIZE];
@@ -140,6 +145,7 @@ static void ctx_restore(u32 x) {
     if (fl & CX_CONTROL) {
         ebp = M32(x + C_EBP); c->ra = M32(x + C_EIP); fnvl_seg_set(c, SEG_CS, M32(x + C_CS)); c->eflags = M32(x + C_EFL); esp = M32(x + C_ESP); fnvl_seg_set(c, SEG_SS, M32(x + C_SS));
     }
+    if (!segs_ok) fnvl_raise_av(0, 0xffffffffu, c->ra);
 }
 
 /* cdecl guest call of handler h(record, frame, context, dispatcher); -> 1 when it returned (disposition in *r, registers restored), 0 when it
@@ -184,9 +190,10 @@ int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 e
 }
 
 /* Hardware exception -> NTSTATUS record, a TOTAL switch over the codes of rt/fnvl.h (the lifter emits no other value; there is no default arm, so a code outside the list is not
-   turned into some status). Each row is what the Windows 7 kernel's trap handler reports (ReactOS traphdlr.c, a transcription of it):
+   turned into some status). Each row except BP and DBGSRV (Wine 9.0, cited at the cases) is what the Windows 7 kernel's trap handler reports (ReactOS traphdlr.c, a transcription of it):
      DE0 / DEOVF   #DE: STATUS_INTEGER_DIVIDE_BY_ZERO / quotient overflow = STATUS_INTEGER_OVERFLOW; fault, Eip = at, no parameters
-     BP            #BP trap (int3, `int 3`, `int 0x2d`): ExceptionAddress = at (the int3 byte), Context.Eip = at + 1, one parameter (0)
+     BP            int3: Wine 9.0 (see the case): ExceptionAddress = Context.Eip = at (the int3 byte), 3 parameters {0,0,0}
+     DBGSRV        `int 0x2d`: Wine 9.0 handle_interrupt (see the case): eax 1/3/4/5 continue at at + 3, otherwise STATUS_BREAKPOINT, ExceptionAddress = at + 3, Context.Eip = at + 2, parameters {eax, ecx, edx}
      UD            #UD: STATUS_ILLEGAL_INSTRUCTION, fault
      PRIV          #GP(0) of a privileged opcode (KiTrap0D table): STATUS_PRIVILEGED_INSTRUCTION, fault
      BOUNDS        STATUS_ARRAY_BOUNDS_EXCEEDED, fault
@@ -195,11 +202,15 @@ int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 e
      STEP          #DB trap (icebp): STATUS_SINGLE_STEP, at = the address of the NEXT instruction (ExceptionAddress = Context.Eip = at)
      LOCK          #UD with an F0 byte among the first 4 bytes at Eip (KiTrap06Handler): STATUS_INVALID_LOCK_SEQUENCE, fault */
 extern "C" void fnvl_raise(u32 code, u32 at) {
-    u32 sp = esp, eip = at, np = 0, nt = 0, info[2] = { 0, 0 };
+    u32 sp = esp, eip = at, addr = at, np = 0, nt = 0, info[3] = { 0, 0, 0 };
     switch (code) {
     case FNVL_DE0:    nt = 0xC0000094u; break;
     case FNVL_DEOVF:  nt = 0xC0000095u; break;
-    case FNVL_BP:     nt = 0x80000003u; eip = at + 1; np = 1; break;
+    case FNVL_BP:     nt = 0x80000003u; np = 3; break;          /* Wine 9.0 unix/signal_i386.c trap_handler TRAP_x86_BPTFLT: ExceptionAddress = the int3 byte (Eip - 1), 3 parameters {0,0,0}; setup_raise_exception: Context.Eip-- for EXCEPTION_BREAKPOINT, so Context.Eip = the int3 byte too */
+    case FNVL_DBGSRV:                                          /* Wine 9.0 unix/signal_i386.c handle_interrupt case 0x2d */
+        if (eax == 1 || eax == 3 || eax == 4 || eax == 5) { c->ra = at + 3; return; }     /* BREAKPOINT_PRINT / LOAD_SYMBOLS / UNLOAD_SYMBOLS / COMMAND_STRING: the service is done, execution continues 3 bytes on, no exception */
+        nt = 0x80000003u; addr = at + 3; eip = at + 2; np = 3; info[0] = eax; info[1] = ecx; info[2] = edx;    /* Eip += 3, ExceptionAddress = Eip, then setup_raise_exception's Context.Eip-- */
+        break;
     case FNVL_UD:     nt = 0xC000001Du; break;
     case FNVL_PRIV:   nt = 0xC0000096u; break;
     case FNVL_BOUNDS: nt = 0xC000008Cu; break;
@@ -209,7 +220,7 @@ extern "C" void fnvl_raise(u32 code, u32 at) {
     case FNVL_LOCK:   nt = 0xC000001Eu; break;
     }
     if (nt == 0) __builtin_unreachable();       /* not reached: every emitted code is a case above */
-    fnvl_raise_rec(nt, 0, at, np, info, eip, sp, CX_EXCEPTION, c->eflags);   /* hardware: EFLAGS as the lifted site flushed it (RAISE_OUT) */
+    fnvl_raise_rec(nt, 0, addr, np, info, eip, sp, CX_EXCEPTION, c->eflags);   /* hardware: EFLAGS as the lifted site flushed it (RAISE_OUT) */
 }
 
 /* a transfer to an address without a body (the dispatcher's miss, rt/rt.c): #UD at that address */
