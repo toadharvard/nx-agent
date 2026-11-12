@@ -7,16 +7,6 @@
  },
  "flags": {
   "c": [
-   "-mabi=ilp32",
-   "-fms-extensions",
-   "-fshort-wchar",
-   "-frounding-math",
-   "-fsigned-char",
-   "-fno-strict-aliasing",
-   "-fwrapv",
-   "-fno-delete-null-pointer-checks",
-   "-fno-lifetime-dse",
-   "-ffp-contract=off",
    "-O2",
    "-Werror=attributes",
    "-Wall",
@@ -29,12 +19,10 @@
   ],
   "cxx": [
    "-O2",
-   "-mabi=ilp32",
+   "-DFNVNX_SDD=1",
    "-Werror=attributes"
   ],
-  "asm": [
-   "-mabi=ilp32"
-  ]
+  "asm": []
  },
  "include": [
   "ports/fnv-nx/lib/sha256/include"
@@ -81,5 +69,56 @@
     "asm": []
    }
   }
- }
+ },
+ "plugin_cxx": "x86_64-linux-gnu-g++-13",
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi",
+   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_order",
+   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
+   "args": {
+    "args": "rtl",
+    "object": "msvc",
+    "operator": "rtl",
+    "assign": "msvc"
+   }
+  },
+  {
+   "name": "fnvnx_sdd",
+   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_pi",
+   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_dispatch",
+   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_addr",
+   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_names",
+   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_layout",
+   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
+   "args": {},
+   "inputs": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ]
+  }
+ ]
 }
