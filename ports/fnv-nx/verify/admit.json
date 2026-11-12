@@ -18,10 +18,28 @@
   },
   {
    "path": "ports/fnv-nx/contract",
+   "trees": [
+    "ports/fnv-nx/contract",
+    "ports/fnv-nx/link"
+   ],
    "class": "tool",
    "gates": [
     "pure",
     "selftests"
+   ],
+   "entry": [
+    "ports/fnv-nx/contract/exefacts.py",
+    "ports/fnv-nx/contract/n1.py",
+    "ports/fnv-nx/contract/objfacts.py",
+    "ports/fnv-nx/contract/registry.py",
+    "ports/fnv-nx/contract/gate_xunit.py",
+    "ports/fnv-nx/contract/gate_rtti.py",
+    "ports/fnv-nx/contract/gate_pcrel.py",
+    "ports/fnv-nx/contract/bodysel.py",
+    "ports/fnv-nx/link/gate_abs.py",
+    "ports/fnv-nx/contract/gpa_names.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/link/gate_disp.py"
    ]
   },
   {
@@ -34,7 +52,8 @@
    "class": "tool",
    "gates": [
     "selftests"
-   ]
+   ],
+   "entry": []
   },
   {
    "path": "ports/fnv-nx/journal",
@@ -45,44 +64,38 @@
    "path": "ports/fnv-nx/lift/fnvlift",
    "class": "tool",
    "gates": [
+    "pure",
     "selftests"
-   ]
-  },
-  {
-   "path": "ports/fnv-nx/lift/proof",
-   "class": "tool",
-   "gates": [
-    "selftests"
-   ]
+   ],
+   "trees": [
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/lift/proof"
+   ],
+   "entry": []
   },
   {
    "path": "ports/fnv-nx/lift/tools",
    "class": "tool",
    "gates": [
     "selftests"
-   ]
-  },
-  {
-   "path": "ports/fnv-nx/link",
-   "class": "tool",
-   "gates": [
-    "pure",
-    "selftests"
-   ]
+   ],
+   "entry": []
   },
   {
    "path": "ports/fnv-nx/toolchain",
    "class": "tool",
    "gates": [
     "selftests"
-   ]
+   ],
+   "entry": []
   },
   {
    "path": "ports/fnv-nx/verify",
    "class": "tool",
    "gates": [
     "selftests"
-   ]
+   ],
+   "entry": []
   }
  ]
 }
