@@ -386,6 +386,19 @@
     "ports/fnv-nx/verify/unitstage.py"
    ]
   },
+  "test_guest_flags.py": {
+   "references": [
+    {
+     "anchor": "## verify/guest_flags.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/guest_flags.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_icount.py": {
    "references": [
     {
