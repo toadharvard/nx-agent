@@ -40,7 +40,10 @@ writer (a copy of a longer string, a call that receives the address) leaves it u
 import collections
 import struct
 
-from capstone import x86_const as X
+try:
+    from capstone import x86_const as X
+except ImportError:  # the generators that only read regsites' role table import this module without a disassembler; the pass itself needs it
+    X = None
 
 MAXJOBS = 6000
 

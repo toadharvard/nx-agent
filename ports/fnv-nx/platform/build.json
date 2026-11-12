@@ -238,6 +238,20 @@
     "com/combridge_if.gen.h",
     "com/combridge_rows.tsv"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_registry_seed.py",
+   "args": [
+    "/ext/manifest/regsites.tsv",
+    "/in/ports/fnv-nx/platform/manifest/declared_registry.tsv",
+    "/out/win32/registry_seed.gen.inc"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/declared_registry.tsv"
+   ],
+   "outputs": [
+    "win32/registry_seed.gen.inc"
+   ]
   }
  ],
  "os_layer": [],
