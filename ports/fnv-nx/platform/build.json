@@ -31,7 +31,8 @@
    "-fdata-sections",
    "-nostdinc",
    "-std=gnu11",
-   "-Werror=attributes"
+   "-Werror=attributes",
+   "-DFT2_BUILD_LIBRARY"
   ],
   "cxx": [
    "-mabi=ilp32",
@@ -394,7 +395,32 @@
     "freetype/patches/05-delete-unbuilt-units.patch"
    ],
    "include": [
-    "include"
+    "include",
+    "src/autofit",
+    "src/base",
+    "src/bdf",
+    "src/bzip2",
+    "src/cache",
+    "src/cff",
+    "src/cid",
+    "src/gxvalid",
+    "src/gzip",
+    "src/lzw",
+    "src/otvalid",
+    "src/pcf",
+    "src/pfr",
+    "src/psaux",
+    "src/pshinter",
+    "src/psnames",
+    "src/raster",
+    "src/sdf",
+    "src/sfnt",
+    "src/smooth",
+    "src/svg",
+    "src/truetype",
+    "src/type1",
+    "src/type42",
+    "src/winfonts"
    ]
   }
  ]
