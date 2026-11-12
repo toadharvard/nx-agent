@@ -328,3 +328,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
       Status: doing.
     - Paused, each pushing its state: w1b (fail census), w3b (179-row classification), w5 (op_syntax and handler column), w4. The farm is released.
     - GL is untouched.
+- 08:55Z Results that finished before the pause (measurements).
+    - Merged w5 6e5b5783: op_syntax over 171 rows.
+        - 158 agree; 3 wine-only (closes the earlier red rows); 10 disagree, none blocking an a/c class (dcl convention ×5, defi, sincos ×2, sgn, texreg2gb range).
+        - op_cover has handler and covering symbols: 0 MISSING. nm was on a scratch build, so L1 w20 reruns it on the real root.
+    - w1b 1fb2e635: fail sites compared against the front-end validator (first pass, manual) over 253 sites.
+        - v 72, r 7, i 23, g 151.
+        - Clear translator defects: SRCMOD_DZ/DW unsupported (glsl.c:453/458); attribute and varying locations for usages > 8 (glsl.c:67/105, should use fnvnx_dk_assign); comment-block parse failures (26).
+        - The other (g) groups wait on msdocs-sm to decide whether the validator or the translator is at fault.
+        - Paused by owner order; resumes after the render/d3d9 root.
