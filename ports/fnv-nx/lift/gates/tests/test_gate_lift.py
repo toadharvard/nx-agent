@@ -91,6 +91,8 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
     os.makedirs(os.path.join(repo, LIFT), exist_ok=True)
     for f in ("gate_order.py", "gate_eh.py"):
         shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
+    os.makedirs(os.path.join(repo, T + "lift/tools"), exist_ok=True)   # the gates import cli from ../tools
+    shutil.copyfile(os.path.join(REAL, T + "lift/tools/cli.py"), os.path.join(repo, T + "lift/tools/cli.py"))
     if ehfacts is not None:
         doc = inputs_doc(ehfacts["ext"])
         if ehfacts["key"]:
