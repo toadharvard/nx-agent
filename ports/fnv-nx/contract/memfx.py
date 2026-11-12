@@ -36,8 +36,8 @@ may be written); no code outside the images (the loader, the OS) writes L except
 import bisect
 import struct
 
-import capstone
-from capstone import x86_const as X
+import imagerec
+from imagerec import X
 
 import argflow
 from argflow import rn
@@ -140,13 +140,12 @@ class Scan:
             else:
                 merged.append([a, b])
         self.code = merged
-        cs = img.cs
         for a, b in merged:
             try:
                 data = img.pe.rd(a - img.base, b - a)
             except Exception:
                 continue
-            for i in cs.disasm(data, a):
+            for i in imagerec.disasm(data, a):
                 self.nins += 1
                 self.one(i)
         starts = [a for a, b in merged]

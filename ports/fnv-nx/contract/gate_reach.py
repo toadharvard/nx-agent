@@ -88,6 +88,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'link'))
 import argflow
+import imagerec
 import gatefile
 import memfx
 import gateids
@@ -711,7 +712,7 @@ def load_images(specs, stacks, info=None):
             pb = fh.read()
         with open(rg, 'rb') as fh:
             rb = fh.read()
-        img = argflow.Image(pb, nm.lower(), argflow.read_ranges(rb.decode()))
+        img = argflow.Image(imagerec.ImageRec(pb, nm.lower(), imagerec.read_ranges(rb.decode())))
         img.import_stack = stacks
         if info is not None:
             memfx.Memfx(img, info)

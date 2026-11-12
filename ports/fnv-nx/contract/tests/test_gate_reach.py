@@ -10,6 +10,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 import argflow
+import imagerec
 import gate_reach
 import gpa_names
 
@@ -115,7 +116,7 @@ def image(fill, name):
     data, a = pe_of(fill)
     ranges = {s: [(s, e)] for s, e in a.funcs.values()}
     rtxt = ''.join('%x\t%x-%x\n' % (s, s, e) for s, (s, e) in sorted((s, (s, e)) for s, e in a.funcs.values()))
-    img = argflow.Image(data, name, ranges)
+    img = argflow.Image(imagerec.ImageRec(data, name, ranges))
     img.import_stack = gpa_names.import_stacks(BRIDGE)
     return img, dict(name=name, pe=gate_reach.sha(data), ranges=gate_reach.sha(rtxt))
 

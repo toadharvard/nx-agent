@@ -2,7 +2,7 @@
 """Synthetic check of gpa_names.py / argflow.py on a hand-assembled PE32 image (no game data)."""
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import argflow, gpa_names
+import argflow, gpa_names, imagerec
 
 BASE, TEXT, RD, DATA = 0x400000, 0x1000, 0x2000, 0x3000
 LL, GPA = BASE + RD, BASE + RD + 4            # IAT slots of LoadLibraryA, GetProcAddress
@@ -114,7 +114,7 @@ def check(name, got, want):
 
 data, a = build()
 ranges = {s: [(s, e)] for s, e in a.funcs.values() if s != a.funcs['thunk'][0]}
-img = argflow.Image(data, 'syn.exe', ranges)
+img = argflow.Image(imagerec.ImageRec(data, 'syn.exe', ranges))
 img.import_stack = gpa_names.import_stacks('dll\tname\tordinal\tconv\tret\targs\nkernel32.dll\tLoadLibraryA\t\tstdcall\ti\ti\nkernel32.dll\tGetProcAddress\t\tstdcall\ti\tii\n')
 
 

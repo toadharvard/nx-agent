@@ -2,7 +2,7 @@
 """Synthetic check of memfx.py (the may-write rule) and its use in argflow, on hand-assembled PE32 images (no game data)."""
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import argflow, memfx
+import argflow, memfx, imagerec
 
 BASE, TEXT, RD, DATA, DATA2 = 0x400000, 0x1000, 0x2000, 0x3000, 0x4000
 IMPS = ['LoadLibraryA', 'GetProcAddress', 'HeapFree', 'CloseHandle']
@@ -125,7 +125,7 @@ def check(name, got, want):
 
 def image(prog, drel=(), writes='', escape=None):
     secs, a = build(prog)
-    img = argflow.Image(pe(secs, drel), 'syn.exe', {s: [(s, e)] for s, e in a.funcs.values()})
+    img = argflow.Image(imagerec.ImageRec(pe(secs, drel), 'syn.exe', {s: [(s, e)] for s, e in a.funcs.values()}))
     bridge = 'dll\tname\tordinal\tconv\tret\targs\n' + ''.join('kernel32.dll\t%s\t\tstdcall\ti\t%s\n' % (n, 'i' * c) for n, c in
                                                           (('LoadLibraryA', 1), ('GetProcAddress', 2), ('HeapFree', 3), ('CloseHandle', 1)))
     esc = escape if escape is not None else 'dll\tname\tescape\nkernel32.dll\tLoadLibraryA\tn\nkernel32.dll\tGetProcAddress\tnn\n' \

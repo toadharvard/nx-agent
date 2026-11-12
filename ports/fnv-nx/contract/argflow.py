@@ -1,6 +1,6 @@
 """argflow - backward data-flow of one stdcall argument of a call site over the control-flow graph of its function (L1 CONTRACT).
 
-    img = Image(pe_bytes, name, ranges)            ranges: {entry: [(start, end)]} (code facts, absolute VAs at the preferred base)
+    img = Image(rec)                               rec: imagerec.ImageRec(pe_bytes, name, runs), runs {entry: [(start, end)]} (code facts, absolute VAs at the image base)
     derive_arg(img, call_va, k)     -> Result      value set of stdcall argument k (k = 0 is pushed last) at the call at call_va
     callee(img, call_va)            -> ('import', dll, name) | ('direct', va) | ('unknown', reason)
     imports_called(img, name)       -> every call site of an imported function (all forms below)
@@ -40,10 +40,8 @@ origin yields the image bytes plus the value stored by every writer of that dwor
 import bisect
 import struct
 
-import capstone
-from capstone import x86_const as X
-
-import modules
+import imagerec
+from imagerec import X
 
 PARENT = {}
 for _n in ('ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'):
@@ -85,32 +83,18 @@ class Result:
 
 
 class Image:
-    def __init__(self, data, name, ranges, exe_name=None):
-        self.name = name
-        self.pe = pe = modules.PE(data, name)
-        self.base = pe.base
-        self.exe_name = exe_name or name
-        self.ranges = ranges
-        self.relocs = set()
-        rva, size = pe.dirs[5]
-        blob, pos = pe.rd(rva, size) if size else b'', 0
-        while pos + 8 <= len(blob):
-            page, bsize = struct.unpack_from('<II', blob, pos)
-            if bsize < 8:
-                break
-            for k in range(8, bsize, 2):
-                e = struct.unpack_from('<H', blob, pos + k)[0]
-                if e >> 12 == 3:
-                    self.relocs.add(self.base + page + (e & 0xfff))
-            pos += bsize
-        self.imports = {}
-        for dll, items in pe.import_directory():
-            for slot, nm in items:
-                self.imports[self.base + slot] = (dll, nm)
-        self.cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-        self.cs.detail = True
+    def __init__(self, rec, exe_name=None):
+        """rec: imagerec.ImageRec, the one input (no file is opened here; the ranges are the record's runs)."""
+        self.rec = rec
+        self.name = rec.name
+        self.pe = rec.pe
+        self.base = rec.base
+        self.exe_name = exe_name or rec.name
+        self.ranges = rec.runs
+        self.relocs = rec.relocs
+        self.imports = rec.imports
         self._ins, self._funcs, self._ctx = {}, {}, None
-        self.flat = sorted((a, b, e) for e, rs in ranges.items() for a, b in rs)
+        self.flat = sorted((a, b, e) for e, rs in self.ranges.items() for a, b in rs)
         self._callers = None
         self._relvals = None
         self.mx = None              # memfx.Memfx: the may-write rule (None = writable memory is never constant)
@@ -165,7 +149,7 @@ class Image:
     def insn(self, va):
         i = self._ins.get(va)
         if i is None:
-            for i in self.cs.disasm(self.pe.rd(va - self.base, 16), va, 1):
+            for i in imagerec.disasm(self.pe.rd(va - self.base, 16), va, 1):
                 break
             else:
                 i = False
@@ -192,7 +176,7 @@ class Image:
                 else:
                     merged.append([a, b])
             for a, b in merged:          # linear decode of the union of the ranges; no instruction object is kept
-                for i in self.cs.disasm(self.pe.rd(a - self.base, b - a), a):
+                for i in imagerec.disasm(self.pe.rd(a - self.base, b - a), a):
                     if i.mnemonic in ('call', 'jmp') and i.operands[0].type == X.X86_OP_IMM:
                         self._callers.setdefault(i.operands[0].imm, set()).add((i.address, i.mnemonic))
         return sorted(self._callers.get(target, ()))
@@ -930,18 +914,6 @@ def forward_uses(img, fn, at, reg):
         for s in sorted(fn.succ[v]):
             work.append((s, frozenset(nh)))
     return sorted(set(calls)), sorted(set(open_))
-
-
-def read_ranges(text):
-    """ranges.tsv: `entry<TAB>start-end,start-end,...` (hex, absolute VAs); an entry with no bytes has no ranges."""
-    out = {}
-    for line in text.splitlines():
-        if not line or line[0] == '#':
-            continue
-        f = line.split('\t')
-        rs = [tuple(int(x, 16) for x in r.split('-')) for r in (f[1].split(',') if len(f) > 1 else []) if r]
-        out[int(f[0], 16)] = rs
-    return out
 
 
 def handle_origin(img, call_va, k, mem):

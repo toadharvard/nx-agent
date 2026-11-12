@@ -33,6 +33,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the gate runs it with -I: the script's directory is not on the path
 import argflow
+import imagerec
 import gatefile
 import iat
 import memfx
@@ -219,7 +220,7 @@ def main(argv=None):
         nm, rest = spec.split('=', 1)
         pe, rg = rest.split(',')
         with open(pe, 'rb') as fh, open(rg) as fr:
-            images[nm.lower()] = argflow.Image(fh.read(), nm.lower(), argflow.read_ranges(fr.read()))
+            images[nm.lower()] = argflow.Image(imagerec.ImageRec(fh.read(), nm.lower(), imagerec.read_ranges(fr.read())))
         images[nm.lower()].import_stack = stacks
     if not a.no_memfx:
         bt = open(a.bridge).read() if a.bridge else ''
