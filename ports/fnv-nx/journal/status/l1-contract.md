@@ -148,3 +148,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:36Z: a guest test root uses link.kind pie, not exe (L4 corrected; w15 fixes RECIPE.md and refuses guest+exe). Plugins declare languages; ftoi and order load for C guest units too, with required evidence (w17, from L3b). L2's w20 decisions: the first ELF lifts all ??__E bodies through the exe's atexit; dyninit_conv is deleted. L3b merges aaa709c8.
 - 03:38Z: w14 76130ea is the trunk plus the pure entry-point universe (the tests-name exemption deleted), plus the EMLINK replicas rule (a 70000-link test). test_gates was fixed in 803327b; verdict running. Full plugin set for C and C++ (order, ftoi, addr, dispatch, names, sdd, pi, layout): recipe by w17, cc1 support by L2 w1.
 - 03:40Z trunk clean=8cfbcdbf: 28 gates (L6 d3d9total), cold 302.9 s, over budget. Returned: w10 0371bf6 (real rebase, gates.d carrying 28 gates), w16 8d72015d (env.json). L1 order: w16 → w10 → w19 (speed: cold, warm and per-gate times).
+- 03:43Z:
+  - Class `test` in gate_admit, with its own required set (w10 item 2, for L4 item 11).
+  - crt0 FNXG header: no data in "ax" sections; it moves to its own "a" section placed first by guest.ld (crt0 owner).
+  - Gate format for L2's 5 object gates: gates.d, objects from gate_build.ensure(); L2's `order` is renamed (it clashes with L3a's).
+  - Trace variant for L3a via w15 variants. A product image may link only base variants (w15).
