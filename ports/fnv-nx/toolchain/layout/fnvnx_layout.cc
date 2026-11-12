@@ -277,6 +277,7 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
     error("%<fnvnx_layout%>: built for GCC %s, loaded by %s", gcc_version.basever, version->basever);
     return 1;
   }
+  if (!fnvnx_cxx_fe()) return 0;   /* cc1 (C): the key is MSVC's name of a C++ record; C has none of its trees (cpweak.h) */
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);

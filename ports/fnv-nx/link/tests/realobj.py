@@ -41,7 +41,7 @@ def _store():
     return d
 
 
-def build(sources, plugins=None, lifted=False, flags=()):
+def build(sources, plugins=None, lifted=False, flags=(), csources=None, cflags=()):
     """Build C++ SOURCES ({unit file name: text}) as a toy guest root of a temp git repo -> the recipe's result dict (status green or red, with
     'failure' holding the stage, exit and the compiler's stderr tail).  PLUGINS: None = all of recipe.PLUGIN_SOURCES, else the names to load (any subset
     needs LIFTED: a native root must load them all, RECIPE.md gate rule).  LIFTED: the toy root is a lifted-origin root (RECIPE.md): its C++ units are
@@ -56,7 +56,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     plugs = [dict({'name': n, 'source': recipe.PLUGIN_SOURCES[n], 'args': dict(recipe.PLUGIN_ARGS[n])},
                   **({'inputs': recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES if n in names]
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
-           'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2'] + list(recipe.SEMANTICS_FLAGS) + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
+           'flags': {'c': ['-O2', '-mabi=ilp32', '-fms-extensions', '-fshort-wchar', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv', '-ffp-contract=off'] + list(cflags) + [recipe.WERROR_ATTR], 'cxx': ['-O2'] + list(recipe.SEMANTICS_FLAGS) + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
            'plugin_cxx': 'x86_64-linux-gnu-g++-13', 'plugins': plugs}
     if not plugs:
         rec.pop('plugin_cxx')
@@ -95,6 +95,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
         for n, text in sources.items():
             _w(repo, ROOT + '/%s.cc' % n, text)
         root['cxx_origin'] = 'native'
+    for n, text in (csources or {}).items():   # C units: the CC stage of cc1 loads all plugins too
+        _w(repo, ROOT + '/%s.c' % n, text)
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
     _w(repo, T + 'verify/env.json', open(os.path.join(REAL, T + 'verify/env.json')).read())   # the declared machine: recipe.build checks it before any stage

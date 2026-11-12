@@ -62,7 +62,8 @@ PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
 # The plugins the gate `datamodel` requires in the CC stage of every native guest C++ unit (RECIPE.md, "Gate rule"); a subset of PLUGIN_SOURCES.
 GUEST_CXX_PLUGINS = ("fnvnx_ftoi", "fnvnx_order")
-PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
+PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc", _T + "cpweak.h"], "fnvnx_names": [_T + "cpweak.h"], "fnvnx_sdd": [_T + "cpweak.h"],
+                 "fnvnx_pi": [_T + "cpweak.h"]}   # cpweak.h: the C++ front end's symbols are weak (docs/TOOLCHAIN.md, CC1PLUS-SYMS)
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
 # Flags of the game's C++ that fix its semantics (compile.sh); fnvnx_sdd needs -DFNVNX_SDD=1 and -fno-devirtualize.
@@ -646,7 +647,7 @@ class Job:
         if not used:
             return {}
         rtp, _ = self.toolrt(used)
-        self.built = self.plugins(ws) if any(k == "cxx" for k in kinds.values()) else []
+        self.built = self.plugins(ws) if any(k in ("c", "cxx") for k in kinds.values()) else []
         builds = {}
         # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the
         # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
@@ -659,7 +660,7 @@ class Job:
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop
-            if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
+            if k in ("c", "cxx"):   # every guest CC stage, C (cc1) or C++ (cc1plus), loads all declared plugins (not preprocessing, not asm)
                 builds[k].cc_flags = [f for _, _, fl in self.built for f in fl]
                 builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built]
 

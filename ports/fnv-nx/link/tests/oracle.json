@@ -1,6 +1,19 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_cc1_plugins.py": {
+   "references": [
+    {
+     "anchor": "## One plugin binary for both front ends (CC1PLUS-SYMS, `toolchain/cpweak.h`)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/docs/TOOLCHAIN.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/cpweak.h",
+    "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc"
+   ]
+  },
   "test_gate_abs.py": {
    "references": [
     {

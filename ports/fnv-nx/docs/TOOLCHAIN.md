@@ -1190,3 +1190,17 @@ The new table lines, the faults the stub boot ran past to get there:
 * The host v2/v3 implementations (threads, wait/wake, files, audren, hid, map_fixed, ext_call) compile but have
   not run; the emulator's Python host stands in for them.
 * S4/S7 test suites have not been run inside the guest (dropped for the full-link priority).
+
+## One plugin binary for both front ends (CC1PLUS-SYMS, `toolchain/cpweak.h`)
+
+Every CC stage of a guest root, C (`cc1`) or C++ (`cc1plus`), loads all 8 plugins (`verify/recipe.py`, `Job.compile`). A plugin is loaded with
+`RTLD_NOW`: each undefined dynamic symbol must be exported by the compiler binary that loads it. Both front ends export the middle end; the symbols of
+`cp/cp-tree.h` (its global trees, `scope_chain`, the operator tables, the mangler, lookup, template and type predicates) are exported by `cc1plus` alone.
+
+Rule: a symbol of the C++ front end is declared weak (`toolchain/cpweak.h`, `#pragma weak`, after `cp/cp-tree.h`), so it is null under `cc1` and the
+real one under `cc1plus`. It is used only where the C++ front end's trees exist: `fnvnx_cxx_fe()` (the front end's `lang_hooks.name`) is tested once in
+`plugin_init` (names registers only its attributes, sdd and layout register nothing: C has no classes, vtables or C++ names) and at each C++-only call
+of `fnvnx_pi` (the Itanium type string of a record, the C++ callee and tree walkers, the C++ declaration flags); `fnvnx_pi`, `fnvnx_order`,
+`fnvnx_addr`, `fnvnx_dispatch` and `fnvnx_ftoi` apply their rules to C functions. Proof argument: a use of a C++-only symbol that is not in the list
+fails the load under `cc1` (an undefined symbol), so the CC stage of a C unit is red; the test builds a C unit and a C++ unit of one root with all
+plugins (`link/tests/test_cc1_plugins.py`). Assumptions: none new (the compiler is correct, ASSUMPTIONS.json OWNER 1).

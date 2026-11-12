@@ -45,6 +45,7 @@
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
+#include "../cpweak.h"
 #include "context.h"
 #include "stringpool.h"
 #include "attribs.h"
@@ -873,6 +874,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     return 1;
   }
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
+  if (!fnvnx_cxx_fe()) return 0;   /* cc1 (C): the attributes exist, the names are those of C++ trees (cpweak.h) */
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type, NULL);
