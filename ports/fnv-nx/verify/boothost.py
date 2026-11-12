@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""The host services of the boot stage: the 50 h_<slot> methods of the FnvnxHostApi v3 table. Policy (address space, scheduling, ext modules) lives in bootmachine.Machine; these
+"""The host services of the boot stage: the 46 h_<slot> methods of the FnvnxHostApi v3 table. Policy (address space, scheduling, ext modules) lives in bootmachine.Machine; these
 methods do the argument decoding and the host-side effect. A blocking call returns (wait spec, result when resumed).
 
 Files: guest paths go through bootpath.BootPath (sdmc: prefix, case-folded components, the game mounts; its rule is
 stated in bootpath.py). BootPath(root) creates <root>/switch/fnv, as the device always has it.
 
 Host slots whose effect is not modelled (the observable contract is kept; see HOST SLOTS in the stage report):
- output_debug_string (kept in .debug, no sink), console_flush, main_loop (always 1), buttons_down (always 0),
+ output_debug_string (kept in .debug, no sink),
  thread_free, thread_set_priority / thread_set_cpu (recorded in .placement only, no placement effect),
- wall_time_us (fixed epoch + virtual ns), tz_offset_minutes (VC1's zone: UTC, 0), random64 (deterministic splitmix64, seed 0),
+ wall_time_us (fixed epoch + virtual ns), random64 (deterministic splitmix64, seed 0),
  memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
  dropped, submit sleeps the period in virtual time), pad_read (never connected, zeros), pad_vibrate, input_poll
  (no events), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
@@ -74,15 +74,6 @@ class Services:
 
     def h_console_write(self, b, n, *_):
         return self.m.console_write(bytes(self.m.uc.mem_read(b, n)))
-
-    def h_console_flush(self, *_):
-        return 0
-
-    def h_main_loop(self, *_):
-        return 1
-
-    def h_buttons_down(self, *_):
-        return 0
 
     def h_system_tick(self, *_):
         return self.m.clock.read()
@@ -163,10 +154,6 @@ class Services:
 
     def h_wall_time_us(self, *_):
         return WALL_EPOCH_US + self.m.clock.now_ns() // 1000
-
-    def h_tz_offset_minutes(self, *_):
-        """hostapi.h: off_s / 60 (C division) of TZ_AT at this call's instant"""
-        return int(self.m.tz_at(self.h_wall_time_us() // 1_000_000)[0] / 60) & U64
 
     def h_random64(self, *_):
         """splitmix64 from seed 0 (the old driver used os.urandom, which no deterministic run can use)"""
