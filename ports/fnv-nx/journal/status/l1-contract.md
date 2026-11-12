@@ -13,17 +13,17 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` e35b870a (CLAUDE.m
 | 1d | merge queue: L5 imports + machine f15935a9 | L5 | claude/fnv-l5-platform-w4r 0533f920 | done (trunk f1059af7) |
 | 2 | incremental verdict speed (S0 cold, S1 no change, S2 comment header, S3 one .cc, S4 tool) + census of second build paths in verify/ | session_01KmtZKS82vxSbxtKufqbp4i | claude/fnv-l1-contract-w14 | doing |
 | 3s | goal step 3: guest ELF link through recipe.py (link.roots, link.libs, fixed PIE options, ldcheck post stage from ld.py; delete the out-of-recipe linker path) | session_01KmtZKRyNHyAGWeTxKmbdfZ | claude/fnv-l1-contract-w15 | doing |
-| 3r | recipe: Rule A (first, blocks platform root): "sources" list of patched externals, any root class incl. guest product (FreeType); Rule B (generated runs a root ELF) after first frame (uam/sdp2dksh are deko-only); host tool roots from patched external sources (uam, MojoShader) + generated steps that run a root's ELF (render FFP DKSH, L6/L6A) | session_01KmtZKRpuoHrhZqwnLDyQ8L | claude/fnv-l1-contract-w16 d91524a (Rule A+B; L1 red only on selftests needing fnv-nx-build; re-run) | doing |
+| 3r | recipe: Rule A (first, blocks platform root): "sources" list of patched externals, any root class incl. guest product (FreeType); Rule B (generated runs a root ELF) after first frame (uam/sdp2dksh are deko-only); host tool roots from patched external sources (uam, MojoShader) + generated steps that run a root's ELF (render FFP DKSH, L6/L6A) | session_01KmtZKRpuoHrhZqwnLDyQ8L | claude/fnv-l1-contract-w16 d91524a (Rule A+B; L1 red only on selftests needing fnv-nx-build) | queued at MERGER |
 | 4d | w11 no doubles in tests (objstub) | predecessor's local agent | claude/fnv-l1-contract-w11 d799a5c3 (WIP) | doing; move to a cloud worker when its agent stops |
 | 3b | recipe build judges every unit, failed_units listed (L3a lift/rt, pack 4098 units) | session_01KmtZKS82vxSbxtKufqbp4i (w14 item 2) | claude/fnv-l1-contract-w14 | queued after census |
 | 3k | link kinds pie/exe/shared (+version_script) for GL backend render/gl4; shared roots via link.roots; target "variants" (root@NAME; also the sanitizer variant) (L6A) | session_01KmtZKRyNHyAGWeTxKmbdfZ (w15) | claude/fnv-l1-contract-w15 | doing |
 | 3e | env.json pins: patch, libegl-dev, libgl-dev | session_01KmtZKRpuoHrhZqwnLDyQ8L (w16) | claude/fnv-l1-contract-w16 | doing |
 | 3a | recipe: bare prog name (as, ld) resolved like the driver (programs: list, then PATH); host x86_64 roots red today (L6A render/gl4) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3n | recipe check: include dir inside the root's own tree refused (#pragma once identity; L6) | w16 | claude/fnv-l1-contract-w16 | doing |
-| 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
+| 3i | (NOT done by w16 yet; first item now, L6A's only blocker) recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 1u | owner order 9e5856f0: Galaxy/GalaxyWrp not lifted. One rule for images.py+modules.py: guest image = found, no bridge row, closure resolves; else declared-machine module (kind declared, bodies = L5 bridge rows, not walked); rule contract/dllkind.py 568b67ab (images: exe, d3dx9_38, binkw32, libvorbis(file); Galaxy not reached; declared: galaxy, galaxywrp, ssce5432 (comdlg32 gap, L5)); mp4 0772c61 pushed (libvorbis 01ce0000, libvorbisfile 01e20000); next: declared_dlls.tsv from pinned Wine 9.0 dlls/*.spec, provider column, closure.tsv roles from dllkind, regenerate stale gpa/reach; item 2 green f31d416d at c7acc8c1 (194 s) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
 | 3f | link root over admitted roots of mixed cxx_origin (L3b product ELF/tests) | w15 | claude/fnv-l1-contract-w15 | doing |
-| 3p | PLUGIN_SOURCES built as hermetic stages incl. L2 f2i_check (attribute-registering plugin declared by every root using it) | w4 (B2) | claude/fnv-l1-contract-w4 | queued after runtime manifest |
+| 3p | PLUGIN_SOURCES (8) built as hermetic stages; f2i_check folded into fnvnx_ftoi by L2 w1 (PLUGIN_ARGS mode from cxx_origin, L2's edit) | w4 (B2) | claude/fnv-l1-contract-w4 | queued after runtime manifest |
 | 3l | link.libs: archives inside declared externals (newlib libc.a), pulled members judged by linkstrict+objstub (L3b) | w15 | claude/fnv-l1-contract-w15 | doing |
 | 3d | admit.json class "headers" (tracked tree, include-only, no units/gates; certified via PP reads; unit file inside refused) — L2 shim/include, 58/73 platform units wait | w16 | claude/fnv-l1-contract-w16 | TOP, doing |
 | 3m | include mounts at root-relative paths in one mirrored tree (`../` works; undeclared = missing) (L2, L5 platform root) | w16 | claude/fnv-l1-contract-w16 | queued (before 3x) |
@@ -38,13 +38,15 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` e35b870a (CLAUDE.m
 
 Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP inputs of admitted units (shim/include L2, loader include).
 
+Assumptions (w10 399e639 at 6066375): 48 records = 9 OWNER + 39 REMOVE; mentions 92/98 certified. The 6 trunk mentions (hive regsites, imports objects.json, unit_facts) and 2 gate_call clauses get L1 REMOVE records with named removing checks.
+
 ## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
 
 Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; imports, machine merged). No product root can be admitted until 0.
 
 | Gate | Owner | Branch | Commit | MERGER |
 |---|---|---|---|---|
-| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | - | doing |
+| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | 531ebbd (green 24/24 at c5b20de, 191 s) | queued |
 | exepin | L1 | claude/fnv-l1-contract-w8 (w4 rebasing) | a6753733 | rebasing on f1059af7 |
 | r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | - | doing |
 | namegate | L2 | claude/fnv-l2-source-w5 | - | doing |
