@@ -9,7 +9,7 @@ thunk, a register-loaded call) and, per use and argument k (0 = pushed last), ar
   closed   every leaf is an immediate value: the argument is one of those values on every path (argflow walks all paths of the
            function backwards and expands own parameters to every caller, or reports a break);
   open     a leaf is a string / a call result / an import slot, or the derivation broke: the argument is of class `any`.
-An escape of a slot (imports_called's open list) or an import of D by ordinal makes the import's rows open for all its arguments: its
+An import by ordinal is the bridge row of that ordinal. An escape of a slot (uses_of_slot_ref's open list) or an import of D by an ordinal no bridge row has makes the import's rows open for all its arguments: its
 uses are not all known.  Aggregate per (D, N, k): closed iff every use is closed; values = the union (hex, sorted).  A closed aggregate
 is the complete value set of the argument for the exe's own calls; any value outside it is excluded by a certificate (`excluded` rows
 of the --gpa/--loadlib check below), provided no dynamic path reaches D at all (below).
@@ -29,14 +29,14 @@ import iat
 
 
 def bridge_rows(path, dlls):
-    """[(dll, name, argc)] of the function rows of the bridge for the dlls, sorted."""
+    """[(dll, name, argc, ordinal text)] of the stdcall function rows of the bridge for the dlls, sorted."""
     rows, _ = iat.bridge_rows(path)
-    return sorted((iat.norm_dll(r['dll']), r['name'], len(r['args'])) for r in rows if iat.norm_dll(r['dll']) in dlls and r['conv'] == 'stdcall')
+    return sorted((iat.norm_dll(r['dll']), r['name'], len(r['args']), r['ordinal']) for r in rows if iat.norm_dll(r['dll']) in dlls and r['conv'] == 'stdcall')
 
 
-def uses(img, dll, name):
-    """([(ref, call)] of the uses of D!N in the image, [(va, why)] open items)."""
-    slots = sorted(s for s, (d, n) in img.imports.items() if n == name and iat.norm_dll(d) == dll)
+def uses(img, dll, name, ordinal=''):
+    """([(ref, call)] of the uses of D!N in the image, [(va, why)] open items).  An import by ordinal is the bridge row of that ordinal."""
+    slots = sorted(s for s, (d, n) in img.imports.items() if (n == name or (ordinal and n == '#' + ordinal)) and iat.norm_dll(d) == dll)
     out, open_ = [], []
     for ref in sorted(r for r in img.relocs if img.word(r) in slots):
         calls, o = argflow.uses_of_slot_ref(img, ref)
@@ -60,16 +60,17 @@ def leaves(res):
 def census(images, brows):
     """-> (rows, agg): rows per use and argument, agg {(dll, name, k): [closed, set of values, uses]}."""
     rows, agg = [], {}
-    for dll, name, argc in brows:
+    for dll, name, argc, ordinal in brows:
+        known = sorted(dict.fromkeys('#' + o for d, n, a, o in brows if d == dll and o))
         for nm in sorted(images):
             img = images[nm]
-            ul, open_ = uses(img, dll, name)
-            by_ordinal = [1 for s, (d, n) in sorted(img.imports.items()) if iat.norm_dll(d) == dll and str(n).startswith('#')]
+            ul, open_ = uses(img, dll, name, ordinal)
+            by_ordinal = [1 for s, (d, n) in sorted(img.imports.items()) if iat.norm_dll(d) == dll and str(n).startswith('#') and n not in known]
             for k in range(argc):
                 a = agg.setdefault((dll, name, k), [True, [], 0])
                 if open_ or by_ordinal:
                     a[0] = False
-                    rows.append((dll, name, argc, nm, 0, 0, k, 'open', [], [], ['%x %s' % x for x in open_] + ['import of %s by ordinal' % dll] * len(by_ordinal[:1])))
+                    rows.append((dll, name, argc, nm, 0, 0, k, 'open', [], [], ['%x %s' % x for x in open_] + ['import of %s by an ordinal no bridge row has' % dll] * len(by_ordinal[:1])))
                 for ref, call in ul:
                     c, vals, other, brk = leaves(argflow.derive_arg(img, call, k))
                     a[2] += 1

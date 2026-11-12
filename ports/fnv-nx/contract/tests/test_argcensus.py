@@ -52,7 +52,7 @@ open(bp, "w").write("dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n"
                     "wsock32.dll\tsend\t19\tstdcall\ti\tiiii\tf\tsym\nwsock32.dll\thtons\t9\tstdcall\ti\ti\tf\tsym\n"
                     "kernel32.dll\tSleep\t\tstdcall\ti\ti\tg\tsym\nwsock32.dll\tfoo\t99\tcdecl\ti\t\tf\tsym\n")
 check("bridge rows of the chosen dll: stdcall functions, argument count, sorted",
-      argcensus.bridge_rows(bp, ["wsock32.dll"]) == [("wsock32.dll", "htons", 1), ("wsock32.dll", "send", 4)], argcensus.bridge_rows(bp, ["wsock32.dll"]))
+      argcensus.bridge_rows(bp, ["wsock32.dll"]) == [("wsock32.dll", "htons", 1, "9"), ("wsock32.dll", "send", 4, "19")], argcensus.bridge_rows(bp, ["wsock32.dll"]))
 
 if FAILED:
     print("FAILED: %d" % len(FAILED))

@@ -397,7 +397,7 @@ thunk, a register-loaded call) and, per use and argument k (0 = pushed last), ar
   closed   every leaf is an immediate value: the argument is one of those values on every path (argflow walks all paths of the
            function backwards and expands own parameters to every caller, or reports a break);
   open     a leaf is a string / a call result / an import slot, or the derivation broke: the argument is of class `any`.
-An escape of a slot (imports_called's open list) or an import of D by ordinal makes the import's rows open for all its arguments: its
+An import by ordinal is the bridge row of that ordinal. An escape of a slot (uses_of_slot_ref's open list) or an import of D by an ordinal no bridge row has makes the import's rows open for all its arguments: its
 uses are not all known.  Aggregate per (D, N, k): closed iff every use is closed; values = the union (hex, sorted).  A closed aggregate
 is the complete value set of the argument for the exe's own calls; any value outside it is excluded by a certificate (`excluded` rows
 of the --gpa/--loadlib check below), provided no dynamic path reaches D at all (below).
