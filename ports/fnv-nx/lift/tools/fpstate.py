@@ -12,12 +12,12 @@ A1  FCW / MXCSR LOAD SITES.  A load is `fldcw m16`, `ldmxcsr m32`, `fninit`/`fin
     new = (cur & A) | O), or unknown (data dependent, aliased, argument of an entry, produced by a call).  REACHABLE SET R of control words: the least fixed point of
     R = {start} U {constants} U {t(r) : r in R, t a transform}; sound because a transform only ever applies to a value `fnstcw` stored earlier, which was the control word at that time
     and so is in R (induction on the number of loads).  Fields that can leave their start value are read off R.  An unknown load makes R unbounded: the facts say `unproven`.
-    Start values: thread entry (rt/enter.cc: FCW 0x027F, MXCSR 0x1F80, assumption A-START: every guest thread starts there).
+    Start values: thread entry (rt/enter.cc: FCW 0x027F, MXCSR 0x1F80, assumption ASM-219: every guest thread starts there).
 A2  READERS of sticky status: `fnstsw ax` (fpmodes.statclass: forward walk of the value through eax/ah/flags; cc-only = only C0-C3/TOP can influence anything), `fnstsw m16`, `fnstenv`,
     `fnsave`, `stmxcsr`, `fxsave` (the value escapes to memory: all bits observed), the imports _clearfp/_statusfp/_status87/_controlfp.  `fnclex` sites are listed.
 A3  OCCURRENCES: wait forms, MMX instructions, instructions whose CPUID feature the model (rt/cpumodel.c) does not have (fnvlift/f_cpufeat.py), with the handler that would take them.
-Assumptions: A-START above; A-SYS: an imported system function changes the x87/SSE control state only if it is one of the control imports above (the runtime implements the Win32/CRT
-surface, rt/imp.h); A-CTX: the CONTEXT image the runtime hands to guest SEH handlers is only read back by the runtime's own restore, which restores a snapshot of a state that was reachable."""
+Assumptions: ASM-219 above; ASM-003: an imported system function changes the x87/SSE control state only if it is one of the control imports above (the runtime implements the Win32/CRT
+surface, rt/imp.h); ASM-220: the CONTEXT image the runtime hands to guest SEH handlers is only read back by the runtime's own restore, which restores a snapshot of a state that was reachable."""
 import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 if __name__ == '__main__' and len(sys.argv) >= 4 and sys.argv[1] == 'scan':
@@ -319,7 +319,7 @@ def do_scan(exe, facts):
         f.write('module\t%s\nexe_sha256\t%s\nuniverse_md5\t%s\nI-FPMASK\t%s\tunknown_fcw=%d unknown_mxcsr=%d cleared_mask_bits=%s\nI-FPSTICKY\t%s\tobservers=%d\n' % (
             os.path.basename(exe), hashlib.sha256(open(exe, 'rb').read()).hexdigest(), hashlib.md5(raw).hexdigest(), 'holds' if mask_ok else 'unproven', unk_f, unk_m,
             ','.join(map(str, cleared)) or '-', 'holds' if stat_ok else 'unproven', nobs))
-    L.append('module invariants: I-FPMASK %s (unknown loads fcw %d mxcsr %d, mask bits clearable %s)  I-FPSTICKY %s (observers %d)' % ('holds' if mask_ok else 'unproven', unk_f, unk_m, cleared or '-', 'holds' if stat_ok else 'unproven', nobs))
+    L.append('module invariants: ASM-204 %s (unknown loads fcw %d mxcsr %d, mask bits clearable %s)  ASM-205 %s (observers %d)' % ('holds' if mask_ok else 'unproven', unk_f, unk_m, cleared or '-', 'holds' if stat_ok else 'unproven', nobs))
     print('\n'.join(L))
 
 
@@ -332,7 +332,7 @@ def do_combine(dirs):
             kv[f[0]] = f[1:]
         rows.append((d, kv))
     prog = {}
-    for inv in ('I-FPMASK', 'I-FPSTICKY'):
+    for inv in ('ASM-204', 'ASM-205'):
         holds = all(kv[inv][0] == 'holds' for d, kv in rows)
         prog[inv] = 'holds' if holds else 'unproven'
     for d, kv in rows:
