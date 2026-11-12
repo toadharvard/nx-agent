@@ -227,7 +227,7 @@ static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8]) {
     abbr[7] = 0;
     return 0;
 }
-int32_t os_tz_offset_minutes(void) {
+int32_t os_zone_offset_minutes(void) {
     int32_t off;
     int dst;
     char n[8];

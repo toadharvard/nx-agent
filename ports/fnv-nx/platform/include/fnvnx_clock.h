@@ -49,7 +49,7 @@ typedef struct {
     clk_tzdate_t dst_begin, dst_end;
     char std_name[8], dst_name[8];
 } clk_tzrule_t;                             /* the layout and meaning of os_tzrule_t (os_clock.h) */
-int32_t clk_tz_offset_minutes(void);        /* the offset at the present instant */
+int32_t clk_zone_offset_minutes(void);        /* the offset at the present instant */
 int clk_tz_rule(clk_tzrule_t *r);           /* 0, or < 0 when the platform has no zone data */
 
 /* ---- sleeping, waiting, and taking time from another thread */

@@ -237,9 +237,9 @@ extern "C" void GetSystemTimeAsFileTime(LPFILETIME ft) { w32_set_ft(ft, (ULONGLO
 extern "C" void GetSystemTime(LPSYSTEMTIME st) { ft_to_st(clk_read_filetime(), st); }
 
 /* the local time of a UTC FILETIME: wine-9.0:dlls/ntdll/time.c:RtlSystemTimeToLocalTime = utc - TimeZoneBias, the
- * bias of the declared machine's zone now (TZ_AT through clk_tz_offset_minutes: east positive, so minus the bias is
+ * bias of the declared machine's zone now (TZ_AT through clk_zone_offset_minutes: east positive, so minus the bias is
  * plus the offset); 64-bit wrapping */
-static int64_t ft_utc_to_local(int64_t utc) { return (int64_t)((uint64_t)utc + (uint64_t)((int64_t)clk_tz_offset_minutes() * 600000000ll)); }
+static int64_t ft_utc_to_local(int64_t utc) { return (int64_t)((uint64_t)utc + (uint64_t)((int64_t)clk_zone_offset_minutes() * 600000000ll)); }
 
 /* wine-9.0:dlls/kernelbase/file.c:GetLocalTime */
 extern "C" void GetLocalTime(LPSYSTEMTIME st) { ft_to_st(ft_utc_to_local(clk_read_filetime()), st); }
