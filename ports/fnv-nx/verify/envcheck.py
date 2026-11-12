@@ -81,14 +81,40 @@ def wheel_digest(dist):
     return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
 
 
-def tree_digest(d):
-    """sha256 of the sorted (relative path, size) listing of tree D."""
-    h = hashlib.sha256()
+def file_owners():
+    """{path: {dpkg package names}} from /var/lib/dpkg/info/*.list (arch qualifier dropped); a path owned by several packages has all of them."""
+    own = {}
+    info = "/var/lib/dpkg/info"
+    for f in os.listdir(info):
+        if f.endswith(".list"):
+            pk = f[:-5].split(":")[0]
+            for ln in open(os.path.join(info, f), encoding="utf-8", errors="replace"):
+                own.setdefault(ln.rstrip("\n"), set()).add(pk)
+    return own
+
+def pinned_set(names):
+    """The packages an environment owns: NAMES and their dependency closure."""
+    return set(names) | set(dep_closure(names))
+
+def tree_files(d, pinned=None, owners=None):
+    """(counted, foreign): the (relative path, size) entries of tree D. A path owned by dpkg packages none of which is in PINNED is `foreign`
+    (it comes from the container image, not from the declared packages) and is left out of the digest; unowned paths and paths of a pinned
+    package are counted. PINNED None: everything is counted."""
+    cnt, frn = [], []
     for r, ds, fs in sorted(os.walk(d)):
         ds.sort()
         for f in sorted(fs + [x for x in ds if os.path.islink(os.path.join(r, x))]):
             p = os.path.join(r, f)
-            h.update(("%s %d\n" % (os.path.relpath(p, d), os.lstat(p).st_size)).encode())
+            ent = ("%s %d\n" % (os.path.relpath(p, d), os.lstat(p).st_size))
+            o = owners.get(p) if (pinned is not None and owners) else None
+            (frn if o and not (o & pinned) else cnt).append((ent, p, o))
+    return cnt, frn
+
+def tree_digest(d, pinned=None, owners=None):
+    """sha256 of the sorted (relative path, size) listing of the counted files of tree D (see tree_files)."""
+    h = hashlib.sha256()
+    for ent, _, _ in tree_files(d, pinned, owners)[0]:
+        h.update(ent.encode())
     return h.hexdigest()
 
 def _os():
@@ -255,8 +281,9 @@ def check(doc, repo=None):
         if not (isinstance(f, str) and f.endswith(".whl") and "/" not in f):
             bad.append("env: python module %s: no wheel file name in python.wheel_files (setup installs from the mirror)" % m)
     bad += deb_pins(doc)
+    pinned, owners = pinned_set(doc["packages"]), file_owners()
     for t, dg in sorted(doc["trees"].items()):
-        cmp("tree " + t, dg[:12], (tree_digest(t) if os.path.isdir(t) else "missing")[:12])
+        cmp("tree " + t, dg[:12], (tree_digest(t, pinned, owners) if os.path.isdir(t) else "missing")[:12])
     own = None
     for prog in doc["programs"]:
         path = shutil.which(prog)
@@ -383,7 +410,7 @@ def snapshot(prev=None):
     for f in RENDER_FILES:
         add(f)
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
-            "uid": os.geteuid(), "trees": {t: tree_digest(t) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
+            "uid": os.geteuid(), "trees": {t: tree_digest(t, pinned_set(pk), file_owners()) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
                        "installed_files_sha256": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
                        "wheel_sha256": wheel_pins(prev)[0], "wheel_files": wheel_pins(prev)[1]},

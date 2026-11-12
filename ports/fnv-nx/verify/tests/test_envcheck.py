@@ -117,6 +117,21 @@ check("snapshot needs --from-code and -o", ec("snapshot")[0] != 0)
 # the plugin headers of the distro compilers of admitted roots (objstub builds its terminator plugin against them)
 sys.path.insert(0, VERIFY)
 import envcheck  # noqa: E402
+# foreign files: owned only by packages outside the pins -> listed, not in the digest; unowned and pinned-owner files count
+ft = os.path.join(TD, "ftree")
+os.makedirs(ft)
+for n in ("own.h", "foreign.h", "shared.h", "unowned.h"):
+    open(os.path.join(ft, n), "w").write(n)
+own_map = {os.path.join(ft, "own.h"): {"pinned"}, os.path.join(ft, "foreign.h"): {"outsider"},
+           os.path.join(ft, "shared.h"): {"outsider", "pinned"}}
+cnt, frn = envcheck.tree_files(ft, {"pinned"}, own_map)
+check("tree: a file owned only by an unpinned package is foreign, the rest counts",
+      [os.path.basename(p) for _, p, _ in frn] == ["foreign.h"] and len(cnt) == 3, (cnt, frn))
+d0 = envcheck.tree_digest(ft, {"pinned"}, own_map)
+open(os.path.join(ft, "foreign.h"), "w").write("changed foreign file of another size")
+check("tree digest ignores foreign files and sees counted ones",
+      envcheck.tree_digest(ft, {"pinned"}, own_map) == d0 and envcheck.tree_digest(ft) != d0)
+
 fr = os.path.join(TD, "fakerepo")
 os.makedirs(os.path.join(fr, "ports/fnv-nx/verify"))
 os.makedirs(os.path.join(fr, "ports/fnv-nx/hroot"))
