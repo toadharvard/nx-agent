@@ -790,3 +790,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - GL pins wait for gl4's admission and stay as measured data until then.
   - Next: the wine profile.
 - L3a DIC (b) confirmed: R3 refuses an entry only by points-to proof. Until that proof exists, the entry stays a candidate.
+
+## 2026-11-12 09:55 UTC
+- The orchestrator is fixing v7's red on next3b (base 8f4790a2):
+  - toy crt0 is read from the tree;
+  - unitless roots carry 0 items.
+  - Rebase of w12, w15, w17, w18 and w19 waits for its green head.
+- w10 (session_01KmtZKQZb21XFPG5GMjmjUp), branch w10o: gate_oracle per-case references.
+  - The case universe comes from ast.
+  - A census of script-style files comes before the rule.
+  - The tls item stays queued behind L2's `.fnvnx.tls`.
