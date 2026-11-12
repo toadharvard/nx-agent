@@ -845,3 +845,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - It must be expressed through w15c's single variant mechanism before it goes to the trunk.
   - Byte equality is checked over every unit built in the variant.
 - L5 w9: platform/manifest moves to ports/fnv-nx/manifest as its own tool root. Roots do not nest, and no carve-out mechanism is added.
+- w5 wine profile, interim 134e324d: i386 multiarch resolution added.
+  - Blocked by snapshot.ubuntu.com returning 503 (external); a poller is waiting.
+  - L2 is told to replace the unpinned apt block in setup_msvc.sh with the profile.
+- L3a: the site universe is the call sites in ranges. A dynsites row in unreached bytes is a stale row and is red.
