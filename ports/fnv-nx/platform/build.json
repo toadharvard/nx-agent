@@ -256,16 +256,10 @@
    "tool": "ports/fnv-nx/platform/freetype/gen_units.py",
    "args": [
     "/ext/freetype",
-    "/in/ports/fnv-nx/platform/freetype/modules.enable",
-    "/in/ports/fnv-nx/platform/freetype/options.enable",
-    "/in/ports/fnv-nx/platform/freetype/patches",
+    "/ext/freetype-debian/debian",
     "/out/freetype"
    ],
-   "inputs": [
-    "ports/fnv-nx/platform/freetype/modules.enable",
-    "ports/fnv-nx/platform/freetype/options.enable",
-    "ports/fnv-nx/platform/freetype/patches"
-   ],
+   "inputs": [],
    "outputs": [
     "freetype/units.list",
     "freetype/gen/include/freetype/config/ftmodule.h",
@@ -412,6 +406,14 @@
    "commit": "099942c35ee21a2ff7ac50e4d13fed12cc173ad3",
    "tree_sha256": "5af2f2cfc5dea618bd8a1a6952fdfcaec50efa47d68d74bc61758b16aa56953d",
    "at": "/ext/fonts"
+  },
+  {
+   "name": "freetype-debian",
+   "repo": "fnv-nx-build",
+   "ref": "tools/freetype-debian",
+   "commit": "7a4c65d2754f265193c2817b4d2f4ebd35bf299b",
+   "tree_sha256": "592d5a50c32ded42e580da46f0f6539993b485583efa4392a940ba95fd0134f5",
+   "at": "/ext/freetype-debian"
   }
  ],
  "sources": "freetype/units.list"
