@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Self-test of tools/gate_order.py on hand-written AArch64 ILP32 assembly (no game data).   python3 test/gate_order_test.py
-Each case is one function body; the gate must give the stated colour to each of its three results."""
+Each case is one function body; the gate must give the stated colour to each of its three results.
+The asm_* cases test object rule (c), which discharges ASM-200; the cpu_wform_* cases rely on ASM-007 and ASM-201."""
 import importlib.util, json, os, subprocess, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.dirname(HERE), 'tools', 'gate_order.py')
 AS = ['aarch64-linux-gnu-gcc', '-march=armv8.1-a', '-mabi=ilp32', '-c', '-x', 'assembler']

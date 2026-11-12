@@ -357,7 +357,7 @@ an X-form result with a proven bound below 2^32; so a guest register used as a b
   covers is red. In such an object a write of x19-x26 that this proof shows restores the entry value is not a guest-register write, so an
   X-form `ldp`/`ldr` restore is legal there; compiler objects keep rule (a).
 
-### Assumptions
+### Assumptions (ASM-001, ASM-007, ASM-200, ASM-201, ASM-202)
 
 * **A1 (calls).** For compiler output this is ASM-001 (OWNER 1, the compiler is correct): AAPCS64, a callee preserves x19-x30 and `sp`, and
   writes the caller's frame only through an address it was given; the objects are compiled with `-fno-ipa-ra`, so no caller relies on
@@ -373,7 +373,7 @@ an X-form result with a proven bound below 2^32; so a guest register used as a b
 
 A misaligned locked operation (`lock` forms and `xchg r, m` whose operand is not aligned to its size) is not atomic against a plain
 store to the same bytes if it only takes `fnvnx_split_lock`: the plain store can land between its load and its store. x86 excludes that,
-and no assumption about the program is made. The rule: the misaligned locked path stops the world. It calls `fnvl_host_world_stop`, runs the
+and nothing about the program is taken on trust. The rule: the misaligned locked path stops the world. It calls `fnvl_host_world_stop`, runs the
 read-modify-write with every other guest thread stopped, and calls `fnvl_host_world_resume`. The aligned and the byte paths are unchanged
 (`ldaxr`/`stlxr` loop, then `dmb ish`). The code arrives with L3b (`rt/fnvl.h`) and L5 (the host functions); until then
 `fnvnx_split_lock` is the path that this rule replaces, and it is not a certified one.
@@ -390,7 +390,7 @@ read-modify-write with every other guest thread stopped, and calls `fnvl_host_wo
 
 The lifter emits the compare-and-swap loop for all 18 lockable mnemonics (add adc and btc btr bts cmpxchg cmpxchg8b dec
 inc neg not or sbb sub xor xadd xchg) and for `xchg` with memory without a prefix; there is no other path, so CAS /
-total is 69 / 69 for the exe. No alignment is assumed for the 35: each takes the aligned or the split-lock path by the
+total is 69 / 69 for the exe. No alignment is taken on trust for the 35: each takes the aligned or the split-lock path by the
 run-time test.
 
 ## Open, not closed by this
