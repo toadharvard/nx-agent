@@ -277,7 +277,7 @@ static tree callee_of(tree t)
        body was already judged free by this same rule (its summary, memoized by DECL_UID, is made when its definition
        is finished, so a callee defined later, an indirect or virtual callee, or a recursive one has no summary and is an
        effect). Names are never looked at.
-   Assumption: the contract GCC itself relies on for const and pure (no store, no throw, termination); the arguments of
+   Assumption (ASM-001, ASM-005): the contract GCC itself relies on for const and pure (no store, no throw, termination); the arguments of
    a free call are walked by the same rule.
    What the rule decides: two arguments without an effect commute with each other (each only reads); the verdict
    `argorder` is for a call with two or more arguments that have one, whose relative order the exe's code fixes and no

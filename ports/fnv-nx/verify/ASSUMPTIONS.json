@@ -794,6 +794,17 @@
    "owner": "L1"
   },
   {
+   "id": "ASM-101",
+   "text": "The declaration `lifted_by` of a lifted root names the lifter (admit.json is reviewed); the gate proves only that no hand-written C++ sits in a lifted root.",
+   "used_by": [
+    "ports/fnv-nx/verify/RECIPE.md"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate admit checks that `lifted_by` is the path of the lifter tool liftall.py of an admitted tool root and that every generated step of the root runs it",
+   "owner": "L1"
+  },
+  {
    "id": "ASM-200",
    "text": "A callee in a hand-written assembler object preserves x19-x30 and sp and writes the caller's frame only through an address it was given (ORDERING A1 for .S).",
    "used_by": [
@@ -881,6 +892,19 @@
    "status": "REMOVE",
    "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
    "owner": "L2"
+  },
+  {
+   "id": "ASM-801",
+   "text": "No guest object, hence no guest pointer, lies within 64 KiB of address 0 or of 2^32 (fnvnx_addr rule C: a constant displacement folded into [zext(p), #d] equals the wrapped sum).",
+   "used_by": [
+    "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc"
+   ],
+   "aliases": [
+    "A-EDGE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a fact of the loader's layout (the first 64 KiB and everything from 0xc0000000 unmapped, guard zones), checked by the loader at start (L5), as ASM-020",
+   "owner": "L2+L5"
   }
  ]
 }

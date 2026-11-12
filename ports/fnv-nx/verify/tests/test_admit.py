@@ -98,6 +98,10 @@ check("the same root as a product root is refused: it lacks REQUIRED_PRODUCT", l
 
 import json  # noqa: E402
 import tempfile  # noqa: E402
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of this test lives here and is removed at exit
+atexit.register(shutil.rmtree, tempfile.tempdir, True)
 import gate_build as gbd  # noqa: E402
 rp = tempfile.mkdtemp(prefix="admit-roots-")
 os.makedirs(rp + "/ports/fnv-nx/verify")

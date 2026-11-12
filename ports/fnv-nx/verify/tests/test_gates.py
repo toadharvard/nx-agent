@@ -277,7 +277,7 @@ LEAKY = ("import json, os, sys\nk = sys.argv[1]\n"
          "           'detail': os.environ['TMPDIR']}, open(os.path.join(os.environ['GATE_OUT'], 'leaky.json'), 'w'))\n")
 def leaky_run(kind):
     r = small_repo(gates={"format": "fnvnx-gates/1", "gates": [
-        {"name": "leaky", "argv": ["python3", "-I", "ports/fnv-nx/verify/leaky.py", kind], "result": "leaky.json"}]},
+        {"name": "leaky", "argv": ["python3", "-I", "ports/fnv-nx/verify/leaky.py", kind], "result": "leaky.json", "covers": ["tool"]}]},
         link={"ports/fnv-nx/verify/leaky.py": LEAKY})
     vd = tmp("verdicts")
     rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)

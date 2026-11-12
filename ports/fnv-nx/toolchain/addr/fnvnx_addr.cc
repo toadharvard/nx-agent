@@ -23,13 +23,13 @@
  * folded into an addressing mode is `[zext(p), #d]` with |d| below 2^16 (the immediate field of the A64 loads and
  * stores), and that equals the wrapped sum whenever p + d does not cross 0 or 2^32 (assumption A-EDGE: no guest
  * object, hence no guest pointer, lies within 64 KiB of address 0 or of 2^32; the guest is a 32-bit Windows process
- * whose user space ends below 0xc0000000 and whose first 64 KiB are never mapped).
+ * whose user space ends below 0xc0000000 and whose first 64 KiB are never mapped) (ASM-801).
  *
  * Totality. Every assignment whose result is a pointer and whose operand computes it from an integer is of class
  * CONV or PLUS or has a constant operand; any other form that makes a pointer from a non-pointer value
  * (a TARGET_MEM_REF with an index, a result that cannot be rewritten) is a compile error. Memory operands that
  * are `MEM_REF[p + constant]` are covered by A-EDGE; ARRAY_REF with a variable index of a declared array is
- * in bounds by C++ semantics (assumption A-BOUNDS).
+ * in bounds by C++ semantics (assumption A-BOUNDS: native code is tested by ASan/UBSan, not proven, ASM-005).
  *
  * Verification (last GIMPLE point). After the rewrite the pass scans the function again: every statement of class
  * CONV must have an operand defined by an asm statement (or a constant), every statement of class PLUS must have a
