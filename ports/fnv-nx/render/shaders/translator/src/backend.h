@@ -15,7 +15,7 @@
 #define FNVNX_SHADERS_BACKEND_H
 #include <stddef.h>
 #include <stdint.h>
-#include "fnvnx_shaders.h"
+#include "../include/fnvnx_shaders.h"
 
 #ifdef __cplusplus
 extern "C" {

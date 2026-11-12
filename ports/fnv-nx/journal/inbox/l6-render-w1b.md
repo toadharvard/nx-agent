@@ -74,3 +74,28 @@ Root `ports/fnv-nx/render/shaders/translator` (class product, target host, link 
 - gen_sm_rows.py got a recipe form `TABLE OUT` (the sandbox mounts the tool read-only; it wrote next to itself).
 - Build (cold = fresh store, jobs 4): check "recipe valid"; cold1 green 16 objects, stages run 34 hit 0, 7.3 s; cold2 (fresh store) green 16 objects, run 34 hit 0, 5.9 s; warm (cold1 store) green, run 0 hit 34, 0.17 s.
   Determinism: the 16 .o files of cold1, cold2 and warm are byte-identical (diff -r); objects.json differs only in the out-dir path.
+
+## L1 answers Q1-Q3 (lead message): declaration of the MojoShader configure step, and what recipe.py must support
+Done now: admit.json: render/shaders/translator is class product, target host, all 32 REQUIRED_PRODUCT gates, link null. Include dirs: only translator/include.
+Not done (needs L1): mojoshader_units.patch stays until the step exists (deleting it now makes the unit set wrong: effects.c + 6 utils/*.c would build).
+Declaration (what I will write into build.json once the keys exist; it is NOT in build.json, no second path):
+- Step: `cmake -S <patched tree> -B /out/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON (not needed once the File API is used)
+  -DPROFILE_D3D=OFF -DPROFILE_HLSL=OFF -DPROFILE_ARB1=OFF -DPROFILE_ARB1_NV=OFF -DPROFILE_METAL=OFF -DPROFILE_SPIRV=OFF -DPROFILE_GLSPIRV=OFF -DPROFILE_GLSL120=OFF
+  -DPROFILE_GLSLES=ON -DPROFILE_GLSLES3=ON -DEFFECT_SUPPORT=OFF` (options declared once; the SUPPORT_PROFILE_*=0 defines then come from CMake itself, not from build.json flags).
+- Inputs: the PATCHED tree (stage patch:<root> output, i.e. mojoshader.patch applied), cmake from env.json, ninja or make, the host compiler for CMake's compiler checks.
+- Outputs: compile_commands.json and mojoshader_version.h. CMake WRITE_FILEs the header INTO THE SOURCE DIR (version -1, changeset "???" without .git): the step must run on a writable copy of the tree
+  and emit the header as an output at ext/mojoshader/mojoshader_version.h.
+- What recipe.py must do: (1) a generated-step kind `configure` (cmake pinned in env.json, runs in the sandbox, no network); (2) the unit set of `sources` = the units of compile_commands.json for the TARGET `mojoshader`
+  only (compile_commands also lists the utils/* programs and, with EFFECT_SUPPORT=ON, effects.c; target filter needed: either run `cmake --build --target mojoshader -n` / use the target's source list via the File API
+  `cmake -E` codemodel, or compile_commands entries restricted to files of the library target); (3) per-unit flags = the entry's defines (-D) taken from it; -O3/-fPIC come from the same entry.
+  Today's measured set: 13 units, flags `-O3 -DNDEBUG -fPIC -Wall` (+ -ggdb3 from Release on this CMake) + the 8 SUPPORT_PROFILE_*=0 defines.
+- fnvnx_sm_rows.h stays a rule-B generated step (gen_sm_rows.py); it is not a configure output.
+
+- CORRECTION (lead, agreed with L1): the unit set and per-unit defines come from the CMake File API (codemodel-v2): target "mojoshader", its sources and compileGroups
+  (defines, flags, includes), not from compile_commands.json (it has no target field). The configure step's outputs are the File API reply files and mojoshader_version.h.
+
+## Rebased onto L1 w16 b57061c8 (lead's order)
+The branch is rebuilt from origin/claude/fnv-l1-contract-w16 b57061c8: no copy of verify/. The only verify/ file touched is admit.json (2 entries: translator product/host/all gates, total tool). My L6 changes are replayed as files (render/shaders/** wholesale, the path fix-ups of the 53 files, tests/, docs/, journal note).
+w16's rules made three refusals, all fixed in render/shaders/translator/build.json: `sources` is a list; `include` inside the root is refused (the root's own files use quoted relative includes "../include/fnvnx_*.h", only the external's tree is in sources.include); generated inputs must be tracked (render/shaders/total/* came along with render/shaders).
+Build at this head (fresh stores, jobs 4): cold1 green 16 objects run 34 hit 0 7.8 s; cold2 green 16 objects run 34 hit 0 9.0 s; warm run 0 hit 34 0.17 s; the 16 .o files byte-identical. Object names are now `mojoshader:<path>.o` (units `<ext>:<path>`).
+Note: origin/claude/fnv-l1-contract-w16 is now 885852ac (after b57061c8).

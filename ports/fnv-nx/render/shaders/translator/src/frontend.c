@@ -17,7 +17,7 @@
 #include <string.h>
 #include "mojoshader.h"
 #include "backend.h"
-#include "fnvnx_dk_layout.h"
+#include "../include/fnvnx_dk_layout.h"
 
 typedef struct sb { char *p; size_t n, cap; } sb;
 static void sb_printf(sb *s, const char *fmt, ...)

@@ -39,6 +39,7 @@ if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if a != "--check"]
     if len(args) == 2:   # recipe step: TABLE OUT (the sandbox mounts this tool read-only)
         text = render(args[0])
+        os.makedirs(os.path.dirname(args[1]), exist_ok=True)
         open(args[1], "w").write(text)
         sys.exit(0)
     text = render()

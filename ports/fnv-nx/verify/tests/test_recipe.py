@@ -35,14 +35,14 @@ open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (
 '''
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
           "flags": {"c": ["-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
-          "include": [ROOT + "/inc", ROOT + "/gen"], "units": "all",
+          "include": [], "units": "all",
           "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}],
           "os_layer": ["os.S"], "constants": "constants.tsv",
           "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-e", "f_a"]}}
 FILES = {
-    "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
-    "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
-    "toy/c.c": '#include "toy.h"\nint f_c(int x) { return x + TOY; }\n',
+    "toy/a.c": '#include "inc/toy.h"\n#include "gen/gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
+    "toy/b.c": '#include "inc/toy.h"\nint f_b(void) { return TOY * 2; }\n',
+    "toy/c.c": '#include "inc/toy.h"\nint f_c(int x) { return x + TOY; }\n',
     "toy/os.S": ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
@@ -136,7 +136,7 @@ def elf_class(path):
 
 
 MINI = {"toy/b.c": None, "toy/c.c": None, "toy/os.S": None,
-        "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + (int)(STAMP % 1000003L); }\n'}
+        "toy/a.c": '#include "inc/toy.h"\n#include "gen/gen.h"\nint f_a(void) { return NCONST + TOY + (int)(STAMP % 1000003L); }\n'}
 MINI_ITEMS = {ROOT + "/a.c", ROOT + "/toy.elf"}
 CC_DRV, CXX_DRV = "/usr/bin/aarch64-linux-gnu-gcc-13", "/usr/bin/aarch64-linux-gnu-g++-13"
 
@@ -189,7 +189,7 @@ def main():
     commit, thash = publish("tiny", tiny)
     ex = {"name": "tiny", "repo": "fnv-nx-build", "ref": "tiny", "commit": commit, "tree_sha256": thash, "at": "/ext/tiny"}
     erec = mut(external=[ex], include=RECIPE["include"] + ["/ext/tiny/inc"])
-    ef = {"toy/b.c": '#include "toy.h"\n#include "ext.h"\nint f_b(void) { return TOY * 2 + EXTV; }\n'}
+    ef = {"toy/b.c": '#include "inc/toy.h"\n#include "ext.h"\nint f_b(void) { return TOY * 2 + EXTV; }\n'}
     futs = []
 
     def later(fn, *a):
@@ -285,7 +285,7 @@ def main():
     tcx = {"name": "tc", "repo": "fnv-nx-build", "ref": "tc", "commit": tcc, "tree_sha256": tct, "at": "/opt/tc"}
     crec = mut(external=[tcx], compiler={"external": "tc", "cc": CC_DRV[1:], "cxx": CXX_DRV[1:]})   # cxx names a path of the tree; no C++ unit uses it
     both = dict(crec, external=[tcx, ex], include=RECIPE["include"] + ["/ext/tiny/inc"], os_layer=[])
-    mini_a = '#include "toy.h"\n#include "ext.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + EXTV + (int)(STAMP % 1000003L); }\n'
+    mini_a = '#include "inc/toy.h"\n#include "ext.h"\n#include "gen/gen.h"\nint f_a(void) { return NCONST + TOY + EXTV + (int)(STAMP % 1000003L); }\n'
     later(check_tc_gate, make_repo("tc-mini", rec=both, files=dict(MINI, **{"toy/a.c": mini_a})), tcc, commit)
 
     # --- externals (fetched by commit from the bare repo)
@@ -367,6 +367,7 @@ def main():
     check("flags that change a stage's job rejected, all problems listed", len([e for e in errs(m)]) >= 2)
 
     later(tool_cases, SS, GC, ec)
+    later(rule_a_cases, SS, ec)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))
     for f in futs:
         f.result()
@@ -390,7 +391,7 @@ HOSTC = {"cc": "x86_64-linux-gnu-gcc-13", "cxx": "x86_64-linux-gnu-g++-13"}
 
 def tool_rec(ext, patch="p1.patch"):
     return {"format": "fnvnx-recipe/1", "compiler": HOSTC, "flags": {"c": ["-O1"], "cxx": [], "asm": []}, "include": [], "units": "all",
-            "sources": {"external": "ts", "dir": "src", "patches": [patch], "include": ["src"]}, "external": [ext],
+            "sources": [{"external": "ts", "dir": "src", "patches": [patch], "include": ["src"]}], "external": [ext],
             "link": {"output": "mkhdr", "flags": []}}
 
 
@@ -409,7 +410,7 @@ def tool_cases(SS, GC, ext_cache):
                                               for k, v in TS.items()])
     ts = {"name": "ts", "repo": "fnv-nx-build", "ref": "ts", "commit": commit, "tree_sha256": thash, "at": "/ext/ts"}
     hroot = {"path": HT, "class": "tool", "target": "host", "gates": [], "recipe": HT + "/build.json"}
-    a_unit = {"toy/a.c": '#include "v.h"\n_Static_assert(FROM_TOOL == 43, "patched cfg.h + helper.c without gone.c");\nint f_a(void) { return FROM_TOOL; }\n',
+    a_unit = {"toy/a.c": '#include "gen/v.h"\n_Static_assert(FROM_TOOL == 43, "patched cfg.h + helper.c without gone.c");\nint f_a(void) { return FROM_TOOL; }\n',
               "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/constants.tsv": None, "toy/link.ld": None,
               "htool/build.json": json.dumps(tool_rec(ts)), "htool/p1.patch": P_OK}
 
@@ -422,7 +423,7 @@ def tool_cases(SS, GC, ext_cache):
     # (a) rule A: the tool root alone: the patched tree is the source view (gone.c deleted by the patch, cfg.h changed), ELF64 x86-64 executable
     ra = recipe.build(ok, HT, SS, BASE + "/ta", ext=ext_cache)
     check("rule A: tool root with sources+patch builds a host executable from the patched external tree (units main.c, helper.c; gone.c deleted)",
-          ra["status"] == "green" and ra["units"] == ["ext/ts/src/helper.c", "ext/ts/src/main.c"] and ra["elf"]
+          ra["status"] == "green" and ra["units"] == ["ts:src/helper.c", "ts:src/main.c"] and ra["elf"]
           and open(ra["elf"]["path"], "rb").read(20)[4:6] == b"\x02\x01" and open(ra["elf"]["path"], "rb").read(20)[18] == 62, ra.get("failure"))
     ra2 = recipe.build(ok, HT, SS, BASE + "/ta2", ext=ext_cache)
     check("rule A: second build is all cache hits with the same executable and stage keys", ra2["stages"]["run"] == 0
@@ -433,7 +434,7 @@ def tool_cases(SS, GC, ext_cache):
           and rb["failure"]["exit"], rb.get("failure"))
     rbn = recipe.build(mk("rnopatch", gen_rec(), {"htool/p1.patch": ""}), HT, SS, BASE + "/tb2", ext=ext_cache)
     check("rule A: without the deleting patch the upstream file stays a unit (no exclude list): duplicate helper() is red at the link",
-          rbn["status"] == "red" and rbn["failure"]["stage"] == "ld:" + HT and "ext/ts/src/gone.c" in rbn["units"], rbn.get("failure"))
+          rbn["status"] == "red" and rbn["failure"]["stage"] == "ld:" + HT and "ts:src/gone.c" in rbn["units"], rbn.get("failure"))
     # (c) rule B: a product root runs (a)'s executable to produce a header that its unit includes
     rc = recipe.build(ok, ROOT, SS, BASE + "/tc", ext=ext_cache)
     check("rule B: generated step runs the executable of another root; its header reaches the unit (_Static_assert FROM_TOOL == 43)",
@@ -454,10 +455,10 @@ def tool_cases(SS, GC, ext_cache):
     check("rule B: a cycle between roots is an error", any("cycle" in e or "link.output" in e for e in cerr), cerr)
     roots, files = recipe.load_admit(ok), recipe.tracked(ok)
     t0 = tool_rec(ts)
-    for what, rec, want in (("unknown sources key", dict(t0, sources=dict(t0["sources"], x=1)), "sources needs"),
-                            ("patch that is not tracked", dict(t0, sources=dict(t0["sources"], patches=["nope.patch"])), "sources.patches"),
-                            ("sources.external unknown", dict(t0, sources=dict(t0["sources"], external="zz")), "names no external"),
-                            ("include outside dir", dict(t0, sources=dict(t0["sources"], include=["other"])), "sources.include"),
+    for what, rec, want in (("unknown sources key", dict(t0, sources=[dict(t0["sources"][0], x=1)]), "needs exactly"),
+                            ("patch that is not tracked", dict(t0, sources=[dict(t0["sources"][0], patches=["nope.patch"])]), "patches must be"),
+                            ("sources.external unknown", dict(t0, sources=[dict(t0["sources"][0], external="zz")]), "names no external"),
+                            ("include outside dir", dict(t0, sources=[dict(t0["sources"][0], include=["other"])]), "include must be"),
                             ("tool root with plugins", dict(t0, plugin_cxx="x"), "not allowed"),
                             ("tool link with a script", dict(t0, link={"script": "l.ld", "output": "mkhdr", "flags": []}), "link of a tool root"),
                             ("tool root with a target compiler", dict(t0, compiler={"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"}), "host driver")):
@@ -469,6 +470,66 @@ def tool_cases(SS, GC, ext_cache):
     print("INFO gate determinism over rule B toy (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("rule B: determinism gate green over the generated header and the object (tool built cold twice)", rc_ == 0 and g["status"] == "green"
           and g["universe"] == g["certified"] and g["universe"] >= 1, (g, txt))
+
+
+def rule_a_cases(SS, ext_cache):
+    """Rule A on a guest-style ILP32 root (own units + an external C library, the env.json aarch64 compiler: the private guest-compiler pin
+    is not available to every machine), -isystem for third-party headers, the program lookup of the host driver, the include-inside-root rule."""
+    def tree(files):
+        return lambda d: [(os.makedirs(os.path.dirname(os.path.join(d, k)), exist_ok=True), open(os.path.join(d, k), "w").write(v)) for k, v in files.items()]
+    c1, h1 = publish("clib", tree({"src/lib.c": '#include <lib.h>\nint lib_add(int a, int b) { return a + b; }\n', "include/lib.h": "int lib_add(int a, int b);\n",
+                                   "src/skip.c": "#error not built here\n"}))
+    cl = {"name": "clib", "repo": "fnv-nx-build", "ref": "clib", "commit": c1, "tree_sha256": h1, "at": "/ext/clib"}
+    only_c = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/constants.tsv": None, "toy/inc/toy.h": None}
+    rec = abi_rec("ilp32", dict(RECIPE, include=["/ext/clib/include"], external=[cl], os_layer=[], constants=None,
+                                sources=[{"external": "clib", "dir": "src", "patches": [], "include": []}],
+                                link={"script": "link.ld", "output": "own.elf", "flags": ["-e", "f_own"]}))
+    rec.pop("constants")
+    rec.pop("generated")
+    files = dict(only_c, **{"toy/own.c": '#include <lib.h>\nint f_own(void) { return lib_add(1, 2); }\n'})
+    # a file in the library tree is a unit by the rule "all" (no exclude list): the build is red, naming it, until a patch deletes it
+    rr = recipe.build(make_repo("ra-all", rec=rec, files=files), ROOT, SS, BASE + "/ra0", ext=ext_cache)
+    check("rule A: every source of the external tree is a unit (no exclude list): the unbuildable skip.c makes the build red", rr["status"] == "red"
+          and "clib:src/skip.c" in rr["failed_units"] and "clib:src/lib.c" not in rr["failed_units"], rr.get("failure"))
+    c2, h2 = publish("clib2", tree({"src/lib.c": '#include <lib.h>\nint lib_add(int a, int b) { return a + b; }\n', "include/lib.h": "int lib_add(int a, int b);\n"}))
+    cl2 = dict(cl, name="clib2", ref="clib2", commit=c2, tree_sha256=h2, at="/ext/clib2")
+    rec2 = json.loads(json.dumps(rec).replace("clib", "clib2").replace("clib22", "clib2"))
+    rec2["external"] = [cl2]
+    rg = recipe.build(make_repo("ra-ilp32", rec=rec2, files=files), ROOT, SS, BASE + "/ra1", ext=ext_cache)
+    check("rule A: ILP32 root with own units + an external C library: green, units own.c and clib2:src/lib.c, ELF32 objects and image",
+          rg["status"] == "green" and rg["units"] == ["clib2:src/lib.c", "own.c"] and rg["elf"] and {elf_class(o["object"]) for o in rg["objects"]} | {elf_class(rg["elf"]["path"])} == {32}
+          and any(x["symbol"] == "lib_add" and x["object"] == "clib2:src/lib.c" for x in rg["defined"]), rg.get("failure"))
+    rg2 = recipe.build(make_repo("ra-ilp32b", rec=rec2, files=files), ROOT, SS, BASE + "/ra2", ext=ext_cache)
+    check("rule A: guest-style root, second build is all cache hits, same stage keys", rg2["stages"]["run"] == 0 and rg2["stage_keys"] == rg["stage_keys"], rg2.get("stages"))
+    # -isystem: a warning in a third-party header under -Werror
+    c3, h3 = publish("wt", tree({"inc/w.h": "static inline int wf(int a) { return 0; }\n"}))
+    wt = {"name": "wt", "repo": "fnv-nx-build", "ref": "wt", "commit": c3, "tree_sha256": h3, "at": "/ext/wt"}
+    wfl = {"c": RECIPE["flags"]["c"] + ["-Wall", "-Wextra", "-Werror"], "cxx": [], "asm": []}
+    wf = {"toy/a.c": '#include <w.h>\nint f_a(void) { return wf(1); }\n'}
+    base = dict(RECIPE, external=[wt], flags=wfl, os_layer=[], generated=[], constants=None, link=None)
+    base.pop("constants")
+    base.pop("link")
+    rs = recipe.build(make_repo("rsys", rec=dict(base, isystem=["/ext/wt/inc"]), files=dict(only_c, **wf)), ROOT, SS, BASE + "/rs1", ext=ext_cache)
+    ri = recipe.build(make_repo("rinc", rec=dict(base, include=["/ext/wt/inc"]), files=dict(only_c, **wf)), ROOT, SS, BASE + "/rs2", ext=ext_cache)
+    check("isystem: -Werror with a warning in an external header is green under isystem and red under include", rs["status"] == "green"
+          and ri["status"] == "red" and ri["failure"]["stage"] == "cc:a.c" and any("unused parameter" in l for l in ri["failure"]["stderr"]), (rs["status"], rs.get("failure"), ri["status"], ri.get("failure")))
+    rk = make_repo("risys", rec=dict(base, isystem=["/ext/wt/inc", ROOT + "/inc"]), files=dict(only_c, **wf))
+    check("isystem: a path that is not inside an external's at (a tracked path) is refused", any("isystem" in e for e in recipe.check(
+        dict(base, isystem=[ROOT + "/inc"]), ROOT, recipe.tracked(rk), recipe.load_admit(rk))))
+    # a root's own directory as include: refused (one path per file: /src; #pragma once identity)
+    e1 = errs(mut(include=[ROOT + "/inc"]))
+    check("include inside the root is refused: use a quoted relative include", any("include %s/inc is inside the root; use a quoted relative include" % ROOT in e for e in e1), e1)
+    # the program lookup of the host driver: a bare `as` is found as the driver finds it; a missing program is an error naming it
+    hd = "/usr/bin/x86_64-linux-gnu-g++-13"
+    p = unitstage.prog(hd, "as")
+    check("host driver: bare `-print-prog-name=as` is resolved (programs: list, then PATH of the stage) to an executable file", os.path.isabs(p) and os.access(p, os.X_OK)
+          and os.path.basename(p) == "as" and unitstage.gcc_set(hd)[0][1] == p, p)
+    try:
+        unitstage.prog(hd, "no-such-program-xyz")
+        err = ""
+    except unitstage.UnitError as x:
+        err = str(x)
+    check("host driver: a program found nowhere is an error naming it", "no-such-program-xyz" in err, err)
 
 
 def check_tc_gate(repo, tcc, tiny):

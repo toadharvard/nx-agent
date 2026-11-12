@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "fnvnx_shaders.h"
+#include "../include/fnvnx_shaders.h"
 #include "backend.h"
 
 static const fnvnx_glsl_backend *const g_backends[] = { &fnvnx_backend_mojoshader_glsldk, NULL };
