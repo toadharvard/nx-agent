@@ -92,7 +92,7 @@ def c2(prefix, s2=None, gcc13='13.3.0'):
     print('C2 ok: -mabi=ilp32 -> "%s" (link fails), full flags -> "%s"' % (d1, d2))
 
 
-WIDE = ['wcslen', 'wcscpy', 'wcscmp', 'wmemcpy', 'wcschr']
+WIDE = ['wcslen', 'wcscpy', 'wcscmp', 'wmemcmp', 'wcschr']   # functions that read or write single wchar_t elements
 
 
 def member_asm(prefix, libc, name):
