@@ -19,15 +19,32 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 NX = os.path.dirname(VERIFY)
+REPO = os.path.dirname(os.path.dirname(NX))
 sys.path.insert(0, HERE)
 sys.path.insert(0, VERIFY)
 import boot  # noqa: E402
 import test_bootmachine as tb  # noqa: E402
 import test_bootgpu as tg  # noqa: E402
 
-JOB = os.path.join(NX, "farm", "boot_job.sh")
 SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
+
+
+def make_tree(name):
+    """A fixture tree: a temp git copy of the checkout the job runs from (envcheck reads admit.json and the recipes of the whole checkout). The
+    job reads verify/env.json and verify/boot_inputs.json only from its own tree, so a test that needs another pin or env file edits this
+    copy and runs this tree's farm/boot_job.sh. Returns the tree's ports/fnv-nx."""
+    top = os.path.join(SCRATCH, "tree-" + name)
+    shutil.copytree(REPO, top, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+    t = os.path.join(top, "ports", "fnv-nx")
+    subprocess.run(["git", "init", "-q", top], check=True)
+    subprocess.run(["git", "-C", top, "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", top, "-c", "user.name=t", "-c", "user.email=t@invalid", "commit", "-q", "-m", "fixture"], check=True)
+    return t
+
+
+TREE = make_tree("main")
+JOB = os.path.join(TREE, "farm", "boot_job.sh")
 LINE = "fnvnx-start: identity ok"
 TID = "ef" * 32
 # the contract's own formats (see verify/bootinputs.py): milestones.tsv has the exe_entry row only (the contract's row grammar); the loader console lines
@@ -47,7 +64,7 @@ def _exe():
     """the player's FalloutNV.exe: the pinned gamedata/exe input of verify/tests/inputs.json (the gate fetches it by commit + tree hash)"""
     with open(os.path.join(os.environ["FNVNX_INPUT_EXE"], "FalloutNV.exe"), "rb") as f:
         return f.read()
-PINS = os.path.join(SCRATCH, "boot_inputs.json")   # the declared-inputs pin file of the job: a fixture set (not the real fonts) in the test's bare repository
+PINS = os.path.join(TREE, "verify", "boot_inputs.json")   # the main fixture tree's pin file: a fixture set (not the real fonts) in the test's bare repository
 FONT_FILES = {"fonts/A.ttf": b"alpha", "fonts/Sub/B.ttf": b"bravo"}
 
 
@@ -81,12 +98,12 @@ def publish_branch(name, files):
     git("push", "-q", BARE, "%s:refs/heads/%s" % (name, name), cwd=work)
 
 
-def run_job(args, env_extra=None, game=GAME):
-    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8", "BOOT_INPUTS": PINS}
+def run_job(args, env_extra=None, game=GAME, tree=None):
+    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8"}
     if game:
         env["GAME_DIR"] = game
     env.update(env_extra or {})
-    r = subprocess.run(["bash", JOB, *args], env=env, capture_output=True, text=True)
+    r = subprocess.run(["bash", os.path.join(tree or TREE, "farm", "boot_job.sh"), *args], env=env, capture_output=True, text=True)
     return r.returncode, r.stdout, r.stderr
 
 
@@ -195,9 +212,9 @@ def main():
     n_pub = git("rev-parse", "refs/heads/l4-verify/boot/testid", cwd=BARE).strip()
     for what, pinfile in (("a wrong sums hash", ("w1", hashlib.sha256(fsums).hexdigest()[::-1], fcommit)),
                           ("a commit the repository does not have", ("w2", hashlib.sha256(fsums).hexdigest(), "1" * 40))):
-        bp = os.path.join(SCRATCH, pinfile[0] + ".json")
-        write_pins(bp, pinfile[1], pinfile[2])
-        rc3, out3, err3 = run_job(["testid"], {"BOOT_INPUTS": bp})
+        bt = make_tree(pinfile[0])
+        write_pins(os.path.join(bt, "verify", "boot_inputs.json"), pinfile[1], pinfile[2])
+        rc3, out3, err3 = run_job(["testid"], tree=bt)
         tb.case("declared input with %s: the job ends as input-error before the boot, nothing published" % what, rc3 == 1 and "input-error" in err3
                 and out3 == "" and git("rev-parse", "refs/heads/l4-verify/boot/testid", cwd=BARE).strip() == n_pub, (rc3, out3, err3[-300:]))
     rc2, out2, err2 = run_job(["testid"])
@@ -299,19 +316,18 @@ def main():
     tb.case("library that does not load: job fails", rc == 1 and "does not load" in err, (rc, err[-300:]))
     rc, out, err = run_job(["testid", "--gpu-branch", "-bad"], genv)
     tb.case("bad --gpu-branch value: job fails", rc == 1 and "--gpu-branch" in err, (rc, err[-300:]))
-    # nothing is installed: a host that does not match the declared environment is an input error before anything is fetched or published
-    bad = os.path.join(SCRATCH, "badenv")
-    os.makedirs(bad)
-    for tag, edit in (("a pinned program missing", lambda d: d["programs"].append("fnvnx-no-such-program")),
-                      ("a pinned python module missing", lambda d: d["python"]["modules"].__setitem__("fnvnx-no-such-module", "1.0"))):
-        doc = json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")))
-        edit(doc)
-        ef = os.path.join(bad, tag.replace(" ", "_") + ".json")
-        json.dump(doc, open(ef, "w"), sort_keys=True)
-        rc, out, err = run_job(["envbad"], {"BOOT_ENV": ef})
-        tb.case("%s: input error rc 1 naming setup_verdict_env.sh, nothing published" % tag,
-                rc == 1 and "input-error" in err and "setup_verdict_env.sh" in err and "envbad" not in git("ls-remote", BARE, check=False), (rc, err[-400:]))
-    src = open(JOB).read()
+    # nothing is installed: a host that does not match the declared environment ends the job as an input error before anything is
+    # fetched or published (the per-item mismatch cases are test_envcheck's; here one real envcheck mismatch, in a fixture tree)
+    et = make_tree("env")
+    ep = os.path.join(et, "verify", "env.json")
+    d = json.load(open(ep))
+    d["programs"].append("no-such-program-xyz")
+    json.dump(d, open(ep, "w"), sort_keys=True)
+    rc, out, err = run_job(["envbad"], tree=et)
+    tb.case("envcheck mismatch: input error rc 1 naming setup_verdict_env.sh, nothing fetched or published",
+            rc == 1 and "input-error" in err and "setup_verdict_env.sh" in err and "no-such-program-xyz" in err and out == ""
+            and "envbad" not in git("for-each-ref", "refs/heads", cwd=BARE), (rc, err[-400:]))
+    src = open(os.path.join(NX, "farm", "boot_job.sh")).read()
     tb.case("job text installs nothing", not any(w in src for w in ("apt-get install", "pip install", "sudo ")), None)
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
