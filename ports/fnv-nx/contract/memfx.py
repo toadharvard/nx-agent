@@ -190,6 +190,37 @@ class Scan:
         return any(r in self.img.relocs for r in range(i.address + 1, i.address + i.size - 3))
 
 
+UNSIGNED_JCC = {'ja': ('f', 0), 'jnbe': ('f', 0), 'jbe': ('t', 0), 'jna': ('t', 0),
+                'jae': ('f', -1), 'jnb': ('f', -1), 'jnc': ('f', -1), 'jb': ('t', -1), 'jnae': ('t', -1), 'jc': ('t', -1)}
+
+
+def edge_bound(fn, p, at, reg):
+    """The bound on `reg` that the edge p -> at gives: p is an unsigned conditional jump whose only predecessor is `cmp reg, imm`
+    (the flags of every path to p come from that compare), and the edge is the one on which the compare's unsigned relation holds
+    (jbe taken / ja not taken: reg <= imm; jb taken / jae not taken: reg <= imm - 1).  None if the edge gives no bound."""
+    i = fn.nodes[p]
+    ent = UNSIGNED_JCC.get(i.mnemonic)
+    if ent is None or i.operands[0].type != X.X86_OP_IMM:
+        return None
+    taken = i.operands[0].imm
+    fall = p + i.size
+    if taken == fall or at not in (taken, fall):
+        return None
+    cps = fn.pred[p]
+    if len(cps) != 1:
+        return None
+    c = fn.nodes[next(iter(cps))]
+    ops = c.operands
+    if c.mnemonic != 'cmp' or ops[0].type != X.X86_OP_REG or ops[0].size != 4 or rn(c, ops[0].reg) != reg \
+            or ops[1].type != X.X86_OP_IMM or (c.address + c.size - 4) in fn.img.relocs or ops[1].imm < 0:
+        return None
+    edge, adj = ent
+    if (edge == 't') != (at == taken):
+        return None
+    v = ops[1].imm + adj
+    return v if v >= 0 else None
+
+
 def umax(fn, at, reg, seen=None):
     """Largest unsigned value `reg` can hold before the instruction at `at` over all paths of fn, or None (unbounded)."""
     seen = seen if seen is not None else set()
@@ -207,6 +238,9 @@ def umax(fn, at, reg, seen=None):
             if i.mnemonic == 'call' and reg in argflow.CALLER_SAVED:
                 return None
             v = umax(fn, p, reg, seen)
+            eb = edge_bound(fn, p, at, reg)
+            if eb is not None:
+                v = eb if v is None else min(v, eb)
         else:
             ops = i.operands
             m = i.mnemonic

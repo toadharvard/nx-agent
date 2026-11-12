@@ -294,6 +294,24 @@ v = const(glob_prog(w_idx_bounded), G + 0x10, G + 0x14, writes=wi)
 check('indexed write, [G+0..G+0x10) bound excludes G+0x10', v.ok, True)
 
 
+def w_cmp(jcc, k):           # cmp eax,k ; jcc over the store ; mov [G + eax*4], ecx ; ret
+    def prog(a):
+        a.func('w'); a.raw(0x83, 0xf8, k, jcc, 7, 0x89, 0x0c, 0x85); a.rel.append(TEXT + len(a.b)); a.b += struct.pack('<I', G); a.ret(); a.end('w')
+    return prog
+
+
+v = const(glob_prog(w_cmp(0x77, 3)), G + 0x10, G + 0x14, writes=wi)
+check('cmp eax,3 ; ja over the store: the store runs with eax<=3, covers [G, G+0x10)', v.ok, True)
+v = const(glob_prog(w_cmp(0x77, 3)), G + 0x0c, G + 0x10, writes=wi)
+check('... and the last element is written', v.ok, False)
+v = const(glob_prog(w_cmp(0x73, 4)), G + 0x10, G + 0x14, writes=wi)
+check('cmp eax,4 ; jae over the store: eax<=3', v.ok, True)
+v = const(glob_prog(w_cmp(0x72, 3)), G + 0x100, G + 0x106, writes=wi)
+check('cmp eax,3 ; jb over the store: the store runs with eax>=3, no bound, the section is covered', v.ok, False)
+v = const(glob_prog(w_cmp(0x7f, 3)), G + 0x100, G + 0x106, writes=wi)
+check('a signed jump gives no bound', v.ok, False)
+
+
 def leak_prog(a):           # the address of a global kept in a data word
     a.func('rd'); a.push(G + 0x100); a.push(0); a.call_imp('GetProcAddress'); a.ret(); a.end('rd')
 
