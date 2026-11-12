@@ -11,10 +11,12 @@ Rule (the whole class, for every bridge row of a Win32 DLL):
        annotation does not say the callee keeps its hands off it: callback contexts, buffers an API keeps), a
        function pointer, an interface pointer, or a pointer with no annotation at all (reason `unannotated`).
   Letters are one per bridge `args` letter (a 64-bit argument is the one letter q). A vararg row carries the fixed slots
-  and the literal `*e`. A row with no documented prototype (not in the metadata, or a prototype whose slots do not
-  match the bridge `args`) is not written: a missing row means all-e (reason `unannotated`, listed in the report).
-  Rows of COM interfaces (`!I...`) and of the declared-machine and lifted modules have no ImplMap entry and are
-  therefore unannotated.
+  and the literal `*e`. A row with no slot has the empty string.
+  A row with no documented prototype pinned (not in the metadata, or a prototype whose slots do not match the bridge
+  `args`) is written with `?` in every slot: unresolved, neither n nor e, listed in the report. No letter is a default.
+  COM rows (`!Interface`): the interface's method at the bridge ordinal, accepted only when the metadata lists that
+  interface (names unique) with the same method name at that vtable slot (the vtable is the base interface's methods, then the
+  interface's own, as listed in the metadata); the slot 0 receiver is a pointer with no annotation: e.
 
 Source: Windows.Win32.winmd of microsoft/windows-rs at the pinned commit (its sha256 is checked and written to the
 header). Parsed with dnfile (ECMA-335 tables and signature blobs); the parser below decodes the signature blobs.
@@ -142,7 +144,9 @@ class Meta:
                 ti = self.by_name.get((str(r.TypeNamespace), str(r.TypeName)))
                 if ti is not None:
                     return self.typedef_type(ti, e == E_CLASS)
-            # System.* (Guid, Enum, ...): a by-value aggregate unless it is a class
+            if tag == 1 and str(self.typeref[idx - 1].TypeName) == 'Guid':
+                return ('aggregate', False, 16)               # System.Guid / GUID: the 16-byte struct
+            # other System.* types: a by-value aggregate of unknown size unless it is a class
             return ('object' if e == E_CLASS else 'aggregate', const, '?')
         if e in (E_ARRAY, E_SZARRAY):
             self.type(b)
@@ -184,8 +188,7 @@ class Meta:
                 fl = [f for f in td.FieldList if str(f.row.Name) == 'value__']
                 res = self.field_type(fl[0].row)
             else:
-                res = ('aggregate', False, '?')
-            res = res[:2] + (td,)                    # the size is computed when a by-value parameter needs it
+                res = ('aggregate', False, td)       # the size is computed when a by-value parameter needs it
         self.cache[key] = res
         return res
 
@@ -226,11 +229,25 @@ class Meta:
             return 8, 8
         if e == E_R4:
             return 4, 4
+        if e == E_ARRAY:                      # ECMA-335 II.23.2.13: element type, rank, sizes, lower bounds
+            w = self.width(b)
+            rank = b.comp()
+            sizes = [b.comp() for _ in range(b.comp())]
+            for _ in range(b.comp()):
+                b.comp()
+            if w is None or len(sizes) != rank:
+                return None
+            n = 1
+            for z in sizes:
+                n *= z
+            return w[0] * n, w[1]
         if e == E_VALUETYPE:
             coded = b.comp()
             tag, idx = coded & 3, coded >> 2
             if tag == 1:
                 r = self.typeref[idx - 1]
+                if str(r.TypeName) == 'Guid':
+                    return 16, 4
                 idx = self.by_name.get((str(r.TypeNamespace), str(r.TypeName)))
             elif tag != 0:
                 return None
@@ -301,17 +318,18 @@ def table(meta):
     return by_mod, by_name
 
 
-def row_letters(meta, rows, args, conv):
+def row_letters(meta, rows, args, conv, this=()):
     """letters of the documented prototype(s) in `rows`, or (None, reason). All rows must agree.
     Each parameter takes bridge letters until its stack width is reached (i, f = 1 slot; q, d = 2 slots); a scalar must
     match its letter exactly, a by-value aggregate of size s takes s/4 slots and classes n (a copy of a value)."""
     outs = set()
     for m in rows:
         cc, ret, ps = meta.method(m)
+        ps = list(this) + ps
         pos, letters, reasons, bad = 0, '', [], None
         for k, c, l, fin, fout in ps:
             if k == 'aggregate':
-                size = meta.size_of(l) if not isinstance(l, str) else None
+                size = l if isinstance(l, int) else meta.size_of(l) if not isinstance(l, str) else None
                 if size is None:
                     bad = 'aggregate of unknown size'
                     break
@@ -345,34 +363,95 @@ def row_letters(meta, rows, args, conv):
     return list(outs)[0]
 
 
+def interfaces(meta):
+    """{interface name: TypeDef row} of the metadata's COM interfaces; a name defined twice is dropped (ambiguous)"""
+    seen, dup = {}, set()
+    for r in meta.typedef:
+        if r.Flags.tdInterface:
+            n = str(r.TypeName)
+            if n in seen:
+                dup.add(n)
+            seen[n] = r
+    return {n: r for n, r in seen.items() if n not in dup}
+
+
+def base_of(meta, td):
+    """the base interface TypeDef of an interface (its InterfaceImpl row, resolved by namespace and name), or None"""
+    idx = meta.by_name[(str(td.TypeNamespace), str(td.TypeName))]
+    for r in meta.t.InterfaceImpl.rows:
+        if r.Class.row_index == idx:
+            i = r.Interface
+            if i.table is not None and i.table.name == 'TypeRef':
+                ref = meta.typeref[i.row_index - 1]
+                j = meta.by_name.get((str(ref.TypeNamespace), str(ref.TypeName)))
+            else:
+                j = i.row_index
+            return meta.typedef[j - 1] if j else None
+    return None
+
+
+def vtable(meta, td):
+    """The method rows of an interface in vtable order: the base interface's vtable, then its own methods. An interface
+    that lists the inherited methods itself (its own list begins with the base's method names, in order) is its own vtable."""
+    own = [x.row for x in td.MethodList]
+    base = base_of(meta, td)
+    if base is None:
+        return own
+    inherited = vtable(meta, base)
+    names = [str(m.Name) for m in inherited]
+    if [str(m.Name) for m in own[:len(names)]] == names:
+        return own
+    return inherited + own
+
+
+def com_method(meta, ifs, iface, name, ordinal):
+    """The documented method of `iface` at vtable slot `ordinal` with the bridge's name, or None when the interface is not documented
+    (names unique) or the method at that slot has another name."""
+    td = ifs.get(iface)
+    if td is None or not ordinal.isdigit():
+        return None
+    ms = vtable(meta, td)
+    i = int(ordinal)
+    if i >= len(ms) or str(ms[i].Name) != name:
+        return None
+    return ms[i]
+
+
 def generate(meta, bridge, commit, sha):
     by_mod, by_name = table(meta)
+    ifs = interfaces(meta)
     rows, report = [], []
     count = collections.Counter()
     for line in open(bridge, encoding='utf-8'):
         if line.startswith('#') or line.startswith('dll\t'):
             continue
         f = line.rstrip('\n').split('\t')
-        dll, name, conv, args = f[0], f[1], f[3], f[5]
+        dll, name, ordinal, conv, args = f[0], f[1], f[2], f[3], f[5]
+        this = []
         if dll.startswith('!'):
-            report.append((dll, name, 'unannotated', 'COM interface method'))
-            count['unannotated'] += 1
-            continue
-        if args and conv == 'data':
-            pass
-        cand = by_mod.get((dll.lower(), name))
-        how = 'exact'
+            m = com_method(meta, ifs, dll[1:], name, ordinal)
+            cand, how = ([m] if m is not None else []), 'com'
+            this = [('ptr', False, 'i', False, False)]   # the receiver: a pointer with no annotation
+        else:
+            cand = by_mod.get((dll.lower(), name))
+            how = 'exact'
+            if not cand:
+                alts = [m for mod, m in by_name.get(name, [])]
+                cand, how = alts, 'module-alias'
         if not cand:
-            alts = [m for mod, m in by_name.get(name, [])]
-            cand, how = alts, 'module-alias'
-        if not cand:
-            report.append((dll, name, 'unannotated', 'no documented prototype'))
-            count['unannotated'] += 1
+            if not args and conv != 'vararg':
+                rows.append((dll, name, ''))              # no slot: no pointer to classify
+                count['no-slot'] += 1
+            else:
+                rows.append((dll, name, '?' * len(args) + ('*?' if conv == 'vararg' else '')))
+                report.append((dll, name, 'unresolved', 'no documented prototype'))
+                count['unresolved'] += 1
             continue
-        letters, reasons = row_letters(meta, cand, args, conv)
+        letters, reasons = row_letters(meta, cand, args, conv, this)
         if letters is None:
-            report.append((dll, name, 'unannotated', reasons))
-            count['unannotated'] += 1
+            rows.append((dll, name, '?' * len(args) + ('*?' if conv == 'vararg' else '')))
+            report.append((dll, name, 'unresolved', reasons))
+            count['unresolved'] += 1
             continue
         rows.append((dll, name, letters))
         count[how] += 1
@@ -383,8 +462,10 @@ def generate(meta, bridge, commit, sha):
     out = ['# import_escape.tsv - per-argument pointer escape letters of the platform-layer imports, from the documented annotations',
            '# (generated by import_escape.py; rule in its docstring). One letter per bridge `args` letter (q = one letter).',
            '#   n = not a pointer, or a pointer annotated In, not Out, and const (the callee only reads it during the call);',
-           '#   e = every other pointer (Out, Inout, non-const In, function and interface pointers, unannotated).',
-           '#   Vararg: fixed slots then literal `*e`. A missing row means all-e (see the report: reason unannotated).',
+           '#   e = every other pointer of a documented prototype (Out, Inout, non-const In, function and interface pointers,',
+           '#       the receiver of a COM method, a pointer with no annotation: reason in the report);',
+           '#   ? = unresolved: no documented prototype is pinned for this row (the slot is neither n nor e; a consumer that needs it reports it).',
+           '#   Vararg: fixed slots then literal `*e` (`*?`). A row with no slot has the empty string.',
            '# source: Windows.Win32.winmd of microsoft/windows-rs commit %s, sha256 %s' % (commit, sha),
            'dll\tname\tescape']
     out += ['%s\t%s\t%s' % r for r in rows]
@@ -439,14 +520,14 @@ def main():
     if a.check:
         if open(a.out, encoding='utf-8').read() != text:
             sys.exit('import_escape.tsv differs from the regenerated table')
-        print('import_escape ok: %d rows' % (text.count('\n') - 7))
+        print('import_escape ok: %d rows' % (text.count('\n') - 9))
         return
     open(a.out, 'w', encoding='utf-8').write(text)
     with open(a.report, 'w', encoding='utf-8') as f:
         f.write('dll\tname\tclass\treason\n')
         for r in report:
             f.write('\t'.join(r) + '\n')
-    print('rows %d  %s' % (text.count('\n') - 7, dict(count)))
+    print('rows %d  %s' % (text.count('\n') - 9, dict(count)))
 
 
 if __name__ == '__main__':
