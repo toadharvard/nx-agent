@@ -37,7 +37,9 @@ open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld, with
 # the FNXG header of crt0 at the first segment + 8 and the entry at the first segment. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = ".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
+CRT0 = (".section .crt0,\"ax\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n"
+        ".section .crt0.hdr,\"a\",%progbits\n.align 2\n.global __fnvnx_guest_hdr\n__fnvnx_guest_hdr:\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
+        ".section .crt0.mod0,\"a\",%progbits\n.align 2\n.global __fnvnx_mod0\n__fnvnx_mod0:\n .word 0\n")   # the three sections of toolchain/guest/crt0.s
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
           "flags": {"c": ["-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
@@ -450,8 +452,14 @@ def main():
     check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys",
           [o["sha256"] for o in rc_x["objects"]] == [o["sha256"] for o in r1["objects"]] and rc_x["elf"]["sha256"] == r1["elf"]["sha256"]
           and set(rc_x["stage_keys"]).isdisjoint(r1["stage_keys"]), rc_x.get("failure"))
-    rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
-    check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], rc_y["stages"])
+    ran = []
+    _rs = recipe.unitstage.run_stage
+    recipe.unitstage.run_stage = lambda store, doc, *a, **k: (lambda r: (ran.append((doc["stage"], r[0][:12], r[2])) if r[2] == "run" else None) or r)(_rs(store, doc, *a, **k))
+    try:
+        rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
+    finally:
+        recipe.unitstage.run_stage = _rs
+    check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], (rc_y["stages"], ran))
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
     # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
@@ -465,6 +473,35 @@ def main():
     check("objects.json: the same defined and undefined symbols for LP64 and ILP32 (ELF32/ELF64 .symtab read by struct)",
           [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d64] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
           and r64["undefined"] == u and [o["sha256"] for o in r64["objects"]] != [o["sha256"] for o in r1["objects"]], (d64, r64["undefined"]))
+
+    # --- tool-file membership: the trees of an admitted tool root (admit.json trees), one definition for the ldcheck tools and link.script
+    xf = {"link/guest.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(), "other/x.ld": "/* under no root */\n"}
+
+    def tree_errs(name, trees, rec):
+        repo = os.path.join(BASE, name)
+        r = make_repo(name, rec=rec, files=xf)
+        am = json.load(open(os.path.join(repo, T + "verify/admit.json")))
+        am["roots"] = [x for x in am["roots"] if x["path"] != T + "link"]
+        for x in am["roots"]:
+            if x["path"] == T + "contract" and trees:
+                x["trees"] = [T + "contract", T + "link"]
+        open(os.path.join(repo, T + "verify/admit.json"), "w").write(json.dumps(am))
+        return recipe.check(rec, ROOT, recipe.tracked(r), recipe.load_admit(repo), None, repo)
+    e1 = tree_errs("tr1", True, RECIPE)
+    check("ldcheck tools in a tree (link/ of the tool root contract), not under a root path: green", e1 == [], e1)
+    e2 = tree_errs("tr2", False, RECIPE)
+    check("ldcheck tools under no admitted root nor tree: red", any("ldcheck stage needs" in e for e in e2), e2)
+    gl = T + "link/guest.ld"
+    ms = mut()
+    ms["link"]["script"] = gl
+    e3 = tree_errs("tr3", True, ms)
+    check("link.script in a tool tree (link/guest.ld): green", e3 == [], e3)
+    e4 = tree_errs("tr4", False, ms)
+    check("link.script in a file no tree names: red", any("link must be" in e for e in e4), e4)
+    mo = mut()
+    mo["link"]["script"] = T + "other/x.ld"
+    e5 = tree_errs("tr5", True, mo)
+    check("link.script outside every tree and the root: red", any("link must be" in e for e in e5), e5)
 
     # --- validation
     check("unknown key 'exclude' is a RecipeError", any("unknown key 'exclude'" in e for e in errs(mut(exclude=["a.c"]))))

@@ -55,7 +55,7 @@ def w(repo, rel, text):
     open(p, "w").write(text)
 
 
-def make_repo(name, rec, origin, files=None, extra_roots=()):
+def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
@@ -67,7 +67,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=()):
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
     w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
-    root = {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"}
+    root = {"path": ROOT, "class": "product", "target": target, "gates": [], "recipe": ROOT + "/build.json"}
     if origin is not None:
         root["cxx_origin"] = origin
     w(repo, T + "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
@@ -298,6 +298,16 @@ def main():
     check("a tool file in a tree of an admitted tool root (not under the root path) is a valid lifted_by and generator tool", errs(tr, trec) == [], errs(tr, trec))
     tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
     check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
+    # --- header home across roots: a lifted root includes the platform's header (L5 fnvl_host.h): green iff platform is a product root of its target
+    hh = T + "platform/include/fnvl_host.h"
+    hrec = dict(srec, include=[T + "platform/include"])
+    hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n"})
+    for tg, want in (("guest", False), ("host", True)):
+        hr = make_repo("hh_" + tg, hrec, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles,
+                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest", "gates": []}], target=tg)
+        he = [x for x in errs(hr, hrec) if "include" in x]
+        check("lifted root of target %s including platform/include (a guest product root): %s" % (tg, "red, the other target is no home" if want else "no include error"),
+              bool(he) == want and (not want or any("lies in no admitted product root" in x for x in he)), he)
     for what, name in (("an index past the steps", "gen:%s:1" % ROOT), ("another root's step", "gen:%s:0" % (ROOT + "x")), ("a free name", "lift")):
         bs = make_repo("stagebad_" + what.replace(" ", "_").replace("'", ""), srec, {"lifted_by": T + "gen/lift.py", "stage": name}, sfiles)
         check("stage naming %s is red" % what, any("is not a generated step" in x for x in errs(bs, srec)), errs(bs, srec))
