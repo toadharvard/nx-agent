@@ -16,13 +16,13 @@ static bool has(const char *s) { return g_lines.find(s) != std::string::npos; }
 /* an unimplemented stand-in, as platform code marks one (FNVNX_UNIMPL: the plat lane's D25 #3 count) */
 extern "C" __attribute__((noinline)) void *plat_test_unimpl(void)
 {
-    fnvnx_plat_note(FNVNX_PLAT_UNIMPL, __func__, FNVNX_PLAT_RA, 0);
+    fnvnx_plat_note(FNVNX_NOTE_UNIMPL, __func__, FNVNX_NOTE_RA, 0);
     return NULL;
 }
 
 TEST(plat_lane_opens_stubs_counts)
 {
-    unsigned long long d0[FNVNX_PLAT_NCLASS], c0[FNVNX_PLAT_NCLASS], d[FNVNX_PLAT_NCLASS], c[FNVNX_PLAT_NCLASS];
+    unsigned long long d0[FNVNX_NOTE_NCLASS], c0[FNVNX_NOTE_NCLASS], d[FNVNX_NOTE_NCLASS], c[FNVNX_NOTE_NCLASS];
     fnvnx_plat_start(sink);
     fnvnx_plat_counts(d0, c0);
     char cmd[1200];
@@ -38,22 +38,22 @@ TEST(plat_lane_opens_stubs_counts)
     CloseHandle(h);
     CHECK(CreateFileA("PlatData\\exists.txt", GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL) == INVALID_HANDLE_VALUE);
     fnvnx_plat_counts(d, c);
-    CHECK_EQ(d[FNVNX_PLAT_OPEN] - d0[FNVNX_PLAT_OPEN], 2ull);
+    CHECK_EQ(d[FNVNX_NOTE_OPEN] - d0[FNVNX_NOTE_OPEN], 2ull);
     CHECK(has("plat: open CreateFileA caller 0x"));
     CHECK(has(" bsa err 2 ci no path "));      /* ERROR_FILE_NOT_FOUND, the directory exists */
     CHECK(has(" esm err 3 ci nodir path "));   /* ERROR_PATH_NOT_FOUND */
     CHECK(!has("Missing - Meshes"));            /* no path is printed */
     /* stand-ins: an unimplemented entry (plat_test_unimpl)  */
     for (int i = 0; i < 3; i++) CHECK(plat_test_unimpl() == NULL);   /* one call site: one distinct entry, 3 calls */
-    fnvnx_plat_note(FNVNX_PLAT_DECODE, "decode_item", 0x1234, "decode -132");
-    fnvnx_plat_note(FNVNX_PLAT_INPUT, "fnvnx_hid_usage_to_dik", 0, "hid usage 112");
-    fnvnx_plat_note(FNVNX_PLAT_INPUT, "fnvnx_hid_usage_to_dik", 0, "hid usage 112");
+    fnvnx_plat_note(FNVNX_NOTE_DECODE, "decode_item", 0x1234, "decode -132");
+    fnvnx_plat_note(FNVNX_NOTE_INPUT, "fnvnx_hid_usage_to_dik", 0, "hid usage 112");
+    fnvnx_plat_note(FNVNX_NOTE_INPUT, "fnvnx_hid_usage_to_dik", 0, "hid usage 112");
     fnvnx_plat_counts(d, c);
-    CHECK_EQ(d[FNVNX_PLAT_UNIMPL] - d0[FNVNX_PLAT_UNIMPL], 1ull);
-    CHECK_EQ(c[FNVNX_PLAT_UNIMPL] - c0[FNVNX_PLAT_UNIMPL], 3ull);
-    CHECK_EQ(d[FNVNX_PLAT_DECODE] - d0[FNVNX_PLAT_DECODE], 1ull);
-    CHECK_EQ(d[FNVNX_PLAT_INPUT] - d0[FNVNX_PLAT_INPUT], 1ull);
-    CHECK_EQ(c[FNVNX_PLAT_INPUT] - c0[FNVNX_PLAT_INPUT], 2ull);
+    CHECK_EQ(d[FNVNX_NOTE_UNIMPL] - d0[FNVNX_NOTE_UNIMPL], 1ull);
+    CHECK_EQ(c[FNVNX_NOTE_UNIMPL] - c0[FNVNX_NOTE_UNIMPL], 3ull);
+    CHECK_EQ(d[FNVNX_NOTE_DECODE] - d0[FNVNX_NOTE_DECODE], 1ull);
+    CHECK_EQ(d[FNVNX_NOTE_INPUT] - d0[FNVNX_NOTE_INPUT], 1ull);
+    CHECK_EQ(c[FNVNX_NOTE_INPUT] - c0[FNVNX_NOTE_INPUT], 2ull);
     CHECK(has("plat: unimpl plat_test_unimpl caller 0x"));
     fnvnx_plat_flush();
     CHECK(has("plat: count unimpl plat_test_unimpl caller 0x"));
@@ -64,6 +64,6 @@ TEST(plat_lane_opens_stubs_counts)
     size_t before = g_lines.size();
     CHECK(plat_test_unimpl() == NULL);   /* off: nothing recorded */
     fnvnx_plat_counts(d, c);
-    CHECK_EQ(c[FNVNX_PLAT_UNIMPL] - c0[FNVNX_PLAT_UNIMPL], 3ull);
+    CHECK_EQ(c[FNVNX_NOTE_UNIMPL] - c0[FNVNX_NOTE_UNIMPL], 3ull);
     CHECK_EQ(g_lines.size(), before);
 }

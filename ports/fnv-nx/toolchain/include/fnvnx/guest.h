@@ -34,7 +34,7 @@ void fnvnx_cond_signal(volatile uint32_t *c);
 void fnvnx_cond_broadcast(volatile uint32_t *c);
 
 /* host file system: "sdmc:/..." style host paths; also reachable through newlib (fopen, open, stat, ...) */
-/* memory sections with shared views (hostapi.h FNVNX_PLAT_SECTION_*, toolchain/guest/section_guest.c). All return 0, or
+/* memory sections with shared views (hostapi.h SECTION_* services, toolchain/guest/section_guest.c). All return 0, or
  * -(FNVNX_SEC_E_* code), e.g. -0xD401; -0xFF when the host has no section service. Views are always read-write. */
 int fnvnx_section_create(uint32_t size, uint32_t *id);   /* zeroed backing, size a 4 KiB multiple */
 int fnvnx_section_map(uint32_t id, uint32_t offset, uint32_t size, uint32_t addr_hint, uint32_t *addr);   /* hint 0: host-chosen; else inside a VM reservation */

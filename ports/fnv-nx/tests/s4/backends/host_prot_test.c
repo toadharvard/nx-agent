@@ -1,5 +1,5 @@
-/* host_prot_test.c - VM_PROTECT, map_fixed and UNMAP_FIXED on guest-owned pages (toolchain/host/host_vm.inc: host_vm_protect,
- * h_map_fixed, h_unmap_fixed, host_win_adopt) executed under qemu-aarch64 against the kernel double kdouble.h, whose
+/* host_prot_test.c - VM_PROTECT and map_fixed on guest-owned pages (toolchain/host/host_vm.inc: host_vm_protect,
+ * h_map_fixed, host_win_adopt) executed under qemu-aarch64 against the kernel double kdouble.h, whose
  * svcSetMemoryPermission / svcUnmapProcessCodeMemory model the kernel as proven at host_vm.inc K1..K5 (None, R and RW on
  * AliasCodeData in uniform runs; Stack, SharedCode and the Code states refused; unmap in any permission). A page without permission
  * really faults here (probe). Test names (hostapi.h table): protect_args, protect_commit, protect_mapfixed, protect_window,
@@ -54,9 +54,7 @@ int main(void)
         T(h_map_fixed(g_alo + ARENA + 0x10000, 0x2000, (u64)(uintptr_t)c) == FNVNX_HE_ALREADY);   /* outside the arena: svcQueryMemory says heap */
         T(h_map_fixed(MF + 0x10000, 0x2000, s) == E_RANGE);                    /* src is not ordinary heap (it is locked): the kernel's result */
         T(heap_pages_in(H_LOCKED) == 4 && kstate(MF + 0x10000) == A_FREE);
-        T(h_unmap_fixed(MF, 0x4000, s) == 0 && kstate(MF) == A_FREE && heap_pages_in(H_LOCKED) == 0 && probe(s, 1));
-        t_free(c);
-        t_free(b);
+        t_free(c);   /* b stays locked: a map_fixed source is inaccessible for the rest of the process */
     }
 
     /* ---- protect_args: order of the checks: address, size, wrap, prot, ownership */
@@ -64,7 +62,7 @@ int main(void)
     T(host_vm_protect(0x1000, 0, 3) == FNVNX_HE_SIZE && host_vm_protect(0x1000, 0x800, 9) == FNVNX_HE_SIZE);
     T(host_vm_protect(~0ull - 0xFFF, 0x2000, 3) == FNVNX_HE_RANGE && host_vm_protect(0x1000, ~0ull - 0xFFF, 9) == FNVNX_HE_RANGE);   /* wraps beats prot */
     T(host_vm_protect(MF, 0x1000, 4) == FNVNX_HE_PERM && host_vm_protect(MF, 0x1000, W_) == FNVNX_HE_PERM && host_vm_protect(MF, 0x1000, 8) == FNVNX_HE_PERM && host_vm_protect(MF, 0x1000, ~0ull) == FNVNX_HE_PERM);   /* X and others */
-    T(host_vm_protect(MF, 0x1000, 3) == FNVNX_HE_RANGE);                        /* valid arguments, not guest memory */
+    T(host_vm_protect(MF + 0x300000, 0x1000, 3) == FNVNX_HE_RANGE);             /* valid arguments, not guest memory */
 
     /* ---- protect_commit: R, RW and none on committed pages; a range over several runs and extents */
     u64 resv = host_vm_reserve(0, 0x100000);
@@ -99,12 +97,7 @@ int main(void)
         T(runs(a, 0x8000) == 4);
         T(host_vm_commit(a, 0x1000) == FNVNX_HE_BADINPUT);                          /* not inside a reservation */
         T(host_vm_decommit(a, 0x1000) == FNVNX_HE_RANGE);                           /* a map_fixed page is not VM-committed memory */
-        T(h_unmap_fixed(a, 0x4000, s) == FNVNX_HE_RANGE && h_unmap_fixed(a, 0x8000, s + 0x1000) == FNVNX_HE_RANGE);   /* not exactly that call */
-        T(heap_pages_in(H_LOCKED) == L0 + 8 && h_unmap_fixed(a, 0x8000, s) == 0 && kstate(a) == A_FREE && heap_pages_in(H_LOCKED) == L0);   /* R, none and RW pages together */
-        T(probe(s, 1) && B(s)[0] == 0x5A && B(s)[0x7FFF] == 0x5A);               /* heap again with the contents */
-        T(h_unmap_fixed(a, 0x8000, s) == FNVNX_HE_RANGE);                           /* a second unmap of the same call */
-        T(host_vm_protect(a, 0x1000, RW_) == FNVNX_HE_RANGE);
-        t_free(b);
+        T(heap_pages_in(H_LOCKED) == L0 + 8);                                       /* R, none and RW pages together: the source stays locked */
     }
 
     /* ---- protect_not_owned: other guest-looking memory is refused before any svc: heap, a section backing, a view, the hole */
@@ -149,30 +142,13 @@ int main(void)
         T(CAN_READ(wlo) && !CAN_WRITE(wlo) && !CAN_READ(wlo + 0x2000) && CAN_WRITE(wlo + 0x3000));
         T(host_vm_protect(wlo - 0x1000, 0x2000, RW_) == FNVNX_HE_RANGE && host_vm_protect(whi - 0x1000, 0x2000, RW_) == FNVNX_HE_RANGE);   /* leaves the window */
         T(host_vm_decommit(wlo, 0x1000) == FNVNX_HE_RANGE);                      /* not VM memory */
-        /* map_fixed inside: read-write and zeroed whatever it was, src not looked at; unmap_fixed likewise */
+        /* map_fixed inside: read-write and zeroed whatever it was, src not looked at */
         B(wlo + 0x3000)[5] = 7;
         T(h_map_fixed(wlo, 0x4000, 0) == 0 && CAN_WRITE(wlo) && CAN_WRITE(wlo + 0x2000) && B(wlo + 0x3000)[5] == 0 && B(wlo)[0x100] == 0);
         T(h_map_fixed(wlo + 0x800, 0x1000, 0) == FNVNX_HE_BADINPUT && h_map_fixed(wlo, 0x80000, 0) == FNVNX_HE_BADINPUT);   /* unaligned; leaves the window: normal path needs a src */
         B(wlo + 0x1000)[0] = 9;
-        T(host_vm_protect(wlo + 0x1000, 0x1000, 0) == 0 && h_unmap_fixed(wlo, 0x4000, 0x123000) == 0 && CAN_WRITE(wlo + 0x1000) && B(wlo + 0x1000)[0] == 0);
-        T(h_unmap_fixed(wlo + 1, 0x1000, 0) == FNVNX_HE_ADDR && h_unmap_fixed(wlo, 0x1000, 0x123001) == FNVNX_HE_ADDR && h_unmap_fixed(wlo, 0, 0) == FNVNX_HE_SIZE);
+        T(host_vm_protect(wlo + 0x1000, 0x1000, 0) == 0 && h_map_fixed(wlo, 0x4000, 0x123000) == 0 && CAN_WRITE(wlo + 0x1000) && B(wlo + 0x1000)[0] == 0);
         T(kstate(wlo) == A_ALIAS_CODE_DATA && host_win_adopt(wlo + 0x100000, wlo + 0x110000, 0) != 0 );   /* a backing that is no heap: the kernel refuses */
-    }
-
-    /* ---- the map_fixed table: 512 live ranges, then NoMem */
-    {
-        static u64 srcs[FNVNX_MF_MAX];
-        void *b = t_memalign(PG, 0x1000 * (FNVNX_MF_MAX + 2));
-        T(b != NULL);
-        u64 s0 = (u64)(uintptr_t)b, base = g_alo + (80ull << 20);
-        int ok = 1;
-        for (int i = 0; i < FNVNX_MF_MAX; i++) { srcs[i] = s0 + (u64)i * 0x1000; ok &= h_map_fixed(base + (u64)i * 0x2000, 0x1000, srcs[i]) == 0; }
-        T(ok);
-        T(h_map_fixed(base + 0x400000, 0x1000, s0 + (u64)FNVNX_MF_MAX * 0x1000) == FNVNX_HE_NOMEM && kstate(base + 0x400000) == A_FREE);
-        T(h_unmap_fixed(base + 5 * 0x2000, 0x1000, srcs[5]) == 0 && h_map_fixed(base + 0x400000, 0x1000, s0 + (u64)FNVNX_MF_MAX * 0x1000) == 0);
-        for (int i = 0; i < FNVNX_MF_MAX; i++) if (i != 5) ok &= h_unmap_fixed(base + (u64)i * 0x2000, 0x1000, srcs[i]) == 0;
-        T(ok && h_unmap_fixed(base + 0x400000, 0x1000, s0 + (u64)FNVNX_MF_MAX * 0x1000) == 0);
-        T(g_free_while_locked == 0 && g_unmapcode_with_views == 0);
     }
 
     /* ---- a map_fixed page inside a reservation: the VM services do not take it */
@@ -182,8 +158,20 @@ int main(void)
         T(h_map_fixed(r + 0x4000, 0x1000, (u64)(uintptr_t)b) == 0);
         T(host_vm_commit(r, 0x8000) == FNVNX_HE_RANGE && host_vm_commit(r, 0x4000) == 0);
         T(host_vm_decommit(r, 0x8000) == FNVNX_HE_RANGE && host_vm_release(r) == FNVNX_HE_RANGE);
-        T(h_unmap_fixed(r + 0x4000, 0x1000, (u64)(uintptr_t)b) == 0 && host_vm_release(r) == 0);
-        t_free(b);
+    }
+    /* ---- the map_fixed table: FNVNX_MF_MAX live ranges (three are taken by the blocks above: mapfixed_args, protect_mapfixed, the
+     * reservation), then NoMem; a map_fixed range is never given back */
+    {
+        static u64 srcs[FNVNX_MF_MAX];
+        enum { USED = 3, FREE = FNVNX_MF_MAX - USED };
+        void *b = t_memalign(PG, 0x1000 * (FREE + 2));
+        T(b != NULL);
+        u64 s0 = (u64)(uintptr_t)b, base = g_alo + (80ull << 20);
+        int ok = 1;
+        for (int i = 0; i < FREE; i++) { srcs[i] = s0 + (u64)i * 0x1000; ok &= h_map_fixed(base + (u64)i * 0x2000, 0x1000, srcs[i]) == 0; }
+        T(ok);
+        T(h_map_fixed(base + 0x400000, 0x1000, s0 + (u64)FREE * 0x1000) == FNVNX_HE_NOMEM && kstate(base + 0x400000) == A_FREE);
+        T(g_free_while_locked == 0 && g_unmapcode_with_views == 0);
     }
     T(g_unmapcode_with_views == 0);
     printf("host_prot: %s\n", g_fail ? "FAIL" : "ok");

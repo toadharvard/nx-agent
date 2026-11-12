@@ -297,10 +297,6 @@ def main(argv):
             self.console += data
             return n
 
-        def h_main_loop(self, *_):
-            self.loops += 1
-            return 1 if self.loops <= total else 0
-
         def h_ext_call(self, module, fn, args, nargs, *_):
             if module != NINE_EXT_MODULE:
                 return EXT_NO_MODULE

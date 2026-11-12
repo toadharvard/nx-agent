@@ -52,11 +52,10 @@ HEAP_BASE_ALT = 0x34000000      # when the guest itself overlaps HEAP_BASE (not 
 RETURN_ADDR = HOST_PAGE + 0xFF0         # main thread returns here
 THREAD_END = HOST_PAGE + 0xFF8          # created threads return here
 TICK_FREQ = 19_200_000
-SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_flush", "main_loop",
-         "buttons_down", "system_tick", "system_tick_freq",
+SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "system_tick", "system_tick_freq",
          "thread_create", "thread_start", "thread_join", "thread_free", "thread_exit", "thread_yield",
          "thread_set_priority", "thread_set_cpu", "wait_on_address", "wake_address", "wall_time_us",
-         "tz_offset_minutes", "random64", "memory_info", "cpu_count",
+         "random64", "memory_info", "cpu_count",
          "fs_open", "fs_read", "fs_write", "fs_pread", "fs_pwrite", "fs_seek", "fs_truncate", "fs_sync",
          "fs_fstat", "fs_close", "fs_stat", "fs_mkdir", "fs_rmdir", "fs_remove", "fs_rename", "fs_dir_open",
          "fs_dir_next", "fs_dir_close",
@@ -433,15 +432,6 @@ class Emu(SanitizeMixin):
         self.console += self.uc.mem_read(b, n)
         return n
 
-    def h_console_flush(self, *_):
-        return 0
-
-    def h_main_loop(self, *_):
-        return 1
-
-    def h_buttons_down(self, *_):
-        return 0
-
     def h_system_tick(self, *_):
         self.tick += 1000
         return self.tick
@@ -544,9 +534,6 @@ class Emu(SanitizeMixin):
 
     def h_wall_time_us(self, *_):
         return 1_700_000_000_000_000 + self.now_ns() // 1000
-
-    def h_tz_offset_minutes(self, *_):
-        return 0
 
     def h_random64(self, *_):
         return int.from_bytes(os.urandom(8), "little")

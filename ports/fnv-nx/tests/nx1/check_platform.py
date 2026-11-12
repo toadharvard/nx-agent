@@ -7,7 +7,7 @@
            single Joy-Con, Pro Controller) with player 1 = handheld or No1, keyboard, mouse, touch, vibration for
            every style; the launcher reads any pad;
   audio    audren: initialised, the renderer started, closed again, the pump on the audio role;
-  applet   the applet pump (host_device.inc) starts with the guest, h_main_loop defers to it, its hook covers focus,
+  applet   the applet pump (host_device.inc) starts with the guest, its hook covers focus,
            resume, operation mode (docked 1080p / handheld 720p) and exit requests;
   exit     the pump takes appletLockExit (without it AM force-terminates on Close software and sends no exit request),
            every way out runs cleanup_for_exit, which releases it (boost off, override removed, log flushed): the guest's exit(), the
@@ -82,8 +82,6 @@ def check(run: bool) -> Checks:
 
     mainf = body(host, "main")
     c.ok("applet.pump_started", "pump_start()" in mainf, "host main does not start the applet pump")
-    c.ok("applet.main_loop", re.search(r'h_main_loop\(void\)\s*\{\s*return\s+g_pump_run', host) is not None,
-         "h_main_loop calls appletMainLoop next to the pump")
     hook = body(dev, "applet_hook")
     for k in ("OnFocusState", "OnResume", "OnOperationMode", "OnExitRequest"):
         c.ok(f"applet.hook.{k}", f"AppletHookType_{k}" in hook, f"the applet hook ignores {k}")
