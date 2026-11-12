@@ -94,7 +94,7 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
         if ehfacts["key"]:
             doc["ehfacts"] = ehfacts["key"]
         if ehfacts.get("sites"):
-            doc["locksites"] = ehfacts["sites"]
+            doc["sites"] = ehfacts["sites"]
         w(repo, T + "verify/contract_inputs.json", json.dumps(doc))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "tools")
@@ -132,9 +132,9 @@ def main():
     pk = publish("pack0", lambda d: open(d + "/pack.txt", "w").write("pack\n"))
     pack = ext("pack", pk, "/ext/pack")
     def facts_pub(d, sites=""):
-        json.dump(eh_facts(0x400000), open(d + "/ehtables.json", "w")); open(d + "/locksites.tsv", "w").write(sites)
+        json.dump(eh_facts(0x400000), open(d + "/ehtables.json", "w")); open(d + "/sites.tsv", "w").write(sites)
     fx = publish("facts0", facts_pub)
-    efact = {"ext": ext("facts", fx, "/ext/facts"), "key": "facts", "sites": "facts/locksites.tsv"}      # no locked instruction in the toy objects: no sites
+    efact = {"ext": ext("facts", fx, "/ext/facts"), "key": "facts", "sites": "facts/sites.tsv"}      # no locked instruction in the toy objects: no sites
     for case, (body, want_o, want_a) in sorted(BODIES.items()):
         repo = lifted_repo("l-" + case, body, pack, efact)
         for n, want in (("order", want_o), ("addr32", want_a)):
@@ -146,10 +146,10 @@ def main():
     rc, r, o = gate(lifted_repo("l-rt2", BODIES["ordered"][0], pack, efact, rts=(RT, RT)), "order", cache)
     check("image with two runtime definers: red", rc == 2 and r.get("status") == R and "2 objects" in r["detail"], (rc, r))
     rc, r, o = gate(lifted_repo("l-nosites", BODIES["ordered"][0], pack, dict(efact, sites=None)), "order", cache)
-    check("lifted root, contract_inputs.json declares no locksites: red, input missing", rc == 2 and r.get("status") == R and "no locksites" in r["detail"], (rc, r))
-    fx2 = publish("facts1", lambda d: facts_pub(d, "00401000\tlock add\n"))
-    rc, r, o = gate(lifted_repo("l-lockmiss", BODIES["ordered"][0], pack, {"ext": ext("facts", fx2, "/ext/facts"), "key": "facts", "sites": "facts/locksites.tsv"}), "order", cache)
-    check("lifted root: a locked instruction of the facts with no .fnvl.lk record: red", rc == 2 and r.get("status") == R and "no .fnvl.lk record" in json.dumps(r), (rc, r))
+    check("lifted root, contract_inputs.json declares no sites: red, input missing", rc == 2 and r.get("status") == R and "no sites" in r["detail"], (rc, r))
+    fx2 = publish("facts1", lambda d: facts_pub(d, "1 00401000\n"))
+    rc, r, o = gate(lifted_repo("l-lockmiss", BODIES["ordered"][0], pack, {"ext": ext("facts", fx2, "/ext/facts"), "key": "facts", "sites": "facts/sites.tsv"}), "order", cache)
+    check("lifted root: a locked instruction of the facts with no .fnvl.sites record: red", rc == 2 and r.get("status") == R and "no .fnvl.sites record" in json.dumps(r), (rc, r))
     for n in ("order", "addr32"):
         rc, r, o = gate(lifted_repo("l-noimg-" + n, BODIES["plain_store"][0], pack, efact, image=False), n, cache)
         check("lifted root that no image names: gate %s has universe 0, green" % n, rc == 0 and r.get("status") == G and r["universe"] == 0, (rc, r, o))

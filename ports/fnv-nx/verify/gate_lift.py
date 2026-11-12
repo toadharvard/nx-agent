@@ -131,11 +131,11 @@ def judge_image(gate, root, image, repo, cache):
                                           % (image, CPU_SYMBOL)) if not holders else \
             "input error: %d objects of the roots of image %s define %s: %s" % (len(holders), image, CPU_SYMBOL, ", ".join("%s:%s" % h for h in holders))
     doc = gate_contract.load_inputs(os.path.join(repo, gate_contract.INPUTS))
-    if not doc.get("locksites"):
-        return 1, 0, [image + ":inputs"], "input missing: %s declares no locksites (the hex x86 addresses of the locked instructions of the lifted universe; owner L3a)" % gate_contract.INPUTS
+    if not doc.get("sites"):
+        return 1, 0, [image + ":inputs"], "input missing: %s declares no sites (the file of the lock and FPU status instructions of the lifted universe, lines 1 HEXADDR and 2 HEXADDR mem|ax; owner L3a)" % gate_contract.INPUTS
     ws = tempfile.mkdtemp(prefix="gate-lift-locks-")
     try:
-        name, _, sub = doc["locksites"].partition("/")
+        name, _, sub = doc["sites"].partition("/")
         ex = recipe.fetch_externals(doc["external"], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
         sites = os.path.join(ex[name]["host"], sub)
         if not os.path.isfile(sites):
@@ -145,8 +145,8 @@ def judge_image(gate, root, image, repo, cache):
         rt = next(o for o in built[rtroot]["objects"] if o["unit"] == rtunit)
         objs = sorted((o for m in sorted({root, rtroot}) for o in built[m]["objects"]), key=lambda o: (o["unit"], o["sha256"]))
         judged = [o for o in objs if o is not rt]       # the runtime object only gives sizeof(struct cpu) (RTOBJ); gate_order's universe is the rest
-        r = run_tool(repo, cache, "gate_order.py", [rt["object"]] + [o["object"] for o in judged] + ["--locksites", sites], ("order", "addrwrap", "align"),
-                     [rt["sha256"], [o["sha256"] for o in judged], stree, doc["locksites"]], {"JOBS": "4"})
+        r = run_tool(repo, cache, "gate_order.py", [rt["object"]] + [o["object"] for o in judged] + ["--sites", sites], ("order", "addrwrap", "align"),
+                     [rt["sha256"], [o["sha256"] for o in judged], stree, doc["sites"]], {"JOBS": "4"})
     finally:
         shutil.rmtree(ws, ignore_errors=True)
     return fold(image, [r[g] for g in ROWS[gate]])
