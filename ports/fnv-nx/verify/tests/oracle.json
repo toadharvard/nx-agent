@@ -580,6 +580,19 @@
     "ports/fnv-nx/verify/unitstage.py"
    ]
   },
+  "test_producers.py": {
+   "references": [
+    {
+     "anchor": "## verify/producers.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/producers.py",
+    "ports/fnv-nx/verify/gate_linkstrict.py"
+   ]
+  },
   "test_puregate.py": {
    "references": [
     {
@@ -672,6 +685,18 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/sdcheck.py"
+   ]
+  },
+  "test_tlsmodel.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_tlsmodel.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_tlsmodel.py"
    ]
   },
   "test_toolflags.py": {
