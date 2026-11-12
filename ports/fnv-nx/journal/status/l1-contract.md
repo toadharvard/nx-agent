@@ -895,3 +895,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - total 1170 vs 1116: +54 files, which are the dist-info directories, gmpy2.libs/numpy.libs and top-level files
 - L3a w8 cherry-picked w18m onto t16e as 7cece903a. envcheck reports OK, and gen:citest/lifted:0 now imports gmpy2.
   - All 3 lifted guest-test roots build green: citest, imptest and msvcrttest.
+
+## 2026-11-12 10:40 UTC
+- L5 platform root verdict at 8f4790a2: 39 gates, 27 green, 12 red. Wall time 1542.6 s against a 300 s budget.
+- Owners for the non-L5 reds:
+  - Budget:
+    - selftests: w19.
+    - fpexact, determinism, abi, exepin: w5. First a per-gate cold/warm table, then keying fixes. A gate with unchanged inputs reads cached facts, and determinism is checked once per key.
+  - fpexact 118/232: routed to L2 (whether the cause is ftoi plugin output or fpexact's reading of it).
+  - Comdat identity in abi odr and linkstrict (4888/5783): new worker w23 (session_01KmtZKUfQdd8aKztUU7nZYk) on branch w23. One comdat_identity, shared with onedef.
+  - Vacuous namegate, r7 and objstub: w20 on branch w20u. Universe derived from admit covers; a zero universe with a matching admitted root is red.
