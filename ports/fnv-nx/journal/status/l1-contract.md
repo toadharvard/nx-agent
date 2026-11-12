@@ -455,3 +455,13 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - (c) unreachable: fnvnx_reach_violation with a certificate (RESERVED). Until then it is red.
   - L6 generates the records and the coverage table; L1 objstub reads them.
 - L3b w2g-u 3aa17dad waits on w16's fixture class and on w22.
+
+## 2026-11-12 04:45Z
+- w18: the manifest pin 07d79c5 is reverted (ad4e8126). L5's dynsites mixes call-VA and slot-ref site conventions.
+  - Rule: the site is the call-instruction VA only, at the producer (L5 w15). The consumer validates that each row decodes to a call of its slot or thunk, otherwise red; no conversion.
+  - GPA open on the last green pin, 12: atimgpud 10 (no range facts, L3a), exe 1 (write table, L5), d3dx9_38 1 (object extents, L2).
+- L2:
+  - the ftoi mode conflict with w17 is closed by one function, recipe.plugin_args(root) (lifted iff cxx_origin = lifted), assigned to w17;
+  - all 8 plugins load in cc1 (L2 w4 fada875);
+  - .fnvnx.disp is from L3a w8, under L2 review.
+- gmpy2 importers (lift/test/fmathtest.py, citest.py) sent to w17.
