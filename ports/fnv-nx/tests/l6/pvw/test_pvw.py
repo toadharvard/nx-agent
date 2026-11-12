@@ -25,7 +25,7 @@ def fl(tmp, dev): return ["g++", "-m32", "-msse2", "-mfpmath=sse", "-std=c++17",
 
 def gen(tmp, dev=DEV):
     os.makedirs(tmp, exist_ok=True)
-    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC],
+    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(GEN, "gen_wine_ids.py"), tmp], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC],
                 [sys.executable, "-I", os.path.join(dev, "res_smgen.py"), tmp, os.path.join(TOT, "sm_table.json"), os.path.join(os.path.dirname(SPEC), "d3d9_tables.py")], [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp]):
         r = sh(cmd)
         if r.returncode: return r.stderr[-800:]
@@ -111,14 +111,14 @@ def main():
                 ("a", *P("pvw_core.cpp", "wr(c, dp + 12, &o[3], 4, pos == D3DFVF_XYZ);", "")), ("a", *P("pvw_core.cpp", "if (fvf & D3DFVF_PSIZE) dp += 4;", "")), ("a", *P("pvw_core.cpp", "v * 255.0f + 0.5f", "v * 255.0f")),
                 ("a", *P("pvw_core.cpp", "o->r = o->g = o->b = o->a = mcs == 1 ? 1.0f : 0.0f;", "o->r = o->g = o->b = o->a = 0.0f;")), ("a", *P("pvw_light.cpp", "{-p.Direction.x, -p.Direction.y, -p.Direction.z, 0.0f}", "{p.Direction.x, p.Direction.y, p.Direction.z, 0.0f}")),
                 ("a", *P("pvw_light.cpp", "s.rs[D3DRS_RANGEFOGENABLE] ? 3 : 2", "s.rs[D3DRS_RANGEFOGENABLE] ? 2 : 3")), ("a", *P("pvw_light.cpp", "att = 1.0f / att;", "")), ("a", *P("pvw_light.cpp", "att /= t;", "att *= t;")),
-                ("b", *P("pvw_api.cpp", "if (decl) fnvnx_wine_fixme(PVW_FIXME_OUT_DECL);", "")), ("b", *P("pvw_core.cpp", "if (!(si.use_map >> PVW_FFP_POSITION & 1)) return D3DERR_INVALIDCALL;", "if (false) return D3DERR_INVALIDCALL;")),
+                ("b", *P("pvw_api.cpp", "if (decl) fnvnx_wine_fixme(NXW_d3d9_device_ProcessVertices);", "")), ("b", *P("pvw_core.cpp", "if (!(si.use_map >> PVW_FFP_POSITION & 1)) return D3DERR_INVALIDCALL;", "if (false) return D3DERR_INVALIDCALL;")),
                 ("a", *P("pvw_stream.cpp", "o.buf = static_cast", "if (si->use_map >> slot & 1) continue; o.buf = static_cast")), ("a", *P("pvw_core.cpp", "dst->lock((uint32_t)c.left", "dst->lock((uint32_t)c.left + 1")),
-                ("b", *P("pvw_core.cpp", "if (d->cur.rs[D3DRS_CLIPPING]) fnvnx_wine_fixme(PVW_FIXME_CLIPPING);", "")), ("b", *P("pvw_core.cpp", "if (off + n > e.buf->length) {", "if (off + n > e.buf->length + 1) {")),
+                ("b", *P("pvw_core.cpp", "if (d->cur.rs[D3DRS_CLIPPING]) fnvnx_wine_fixme(NXW_wined3d_device_process_vertices);", "")), ("b", *P("pvw_core.cpp", "if (off + n > e.buf->length) {", "if (off + n > e.buf->length + 1) {")),
                 ("a", *P("pvw_math.cpp", "if (fabsf(r[3][0]) > fabsf(r[2][0])) swp(&r[3], &r[2]);", "")), ("b", *P("pvw_api.cpp", "if (!dst || !nx_chk_obj(dst) || !nx_chk_obj(decl)) return D3DERR_INVALIDCALL;", "if (!dst) return D3DERR_INVALIDCALL;")),
-                ("a", *P("pvw_core.cpp", "if (!c.dry && !fx_normal) { fx_normal = true; fnvnx_wine_fixme(PVW_FIXME_DST_NORMAL); }", "")), ("a", *P("pvw_light.cpp", "ls->fog_mode = (uint8_t)(s.rs[D3DRS_FOGVERTEXMODE] & 3);", "ls->fog_mode = (uint8_t)(s.rs[D3DRS_FOGVERTEXMODE] & 1);"))]
-        muts += [("a", *P("pvw_light.cpp", "i < ls->n_par; i++, index++", "i < 0; i++, index++")), ("b", *P("pvw_light.cpp", "if (log_fixme) fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);", "")),
+                ("a", *P("pvw_core.cpp", "if (!c.dry && !fx_normal) { fx_normal = true; fnvnx_wine_fixme(NXW_process_vertices_strided); }", "")), ("a", *P("pvw_light.cpp", "ls->fog_mode = (uint8_t)(s.rs[D3DRS_FOGVERTEXMODE] & 3);", "ls->fog_mode = (uint8_t)(s.rs[D3DRS_FOGVERTEXMODE] & 1);"))]
+        muts += [("a", *P("pvw_light.cpp", "i < ls->n_par; i++, index++", "i < 0; i++, index++")), ("b", *P("pvw_light.cpp", "if (log_fixme) fnvnx_wine_fixme(NXW_init_transformed_lights);", "")),
                  ("b", *P("pvw_core.cpp", "si.e[k].buf->pool == (uint8_t)D3DPOOL_DEFAULT) return D3DERR_INVALIDCALL;", "si.e[k].buf->pool == (uint8_t)D3DPOOL_DEFAULT) continue;")),
-                 ("b", *P("pvw_light.cpp", "if (log_fixme) fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);", "fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);"))]
+                 ("b", *P("pvw_light.cpp", "if (log_fixme) fnvnx_wine_fixme(NXW_init_transformed_lights);", "fnvnx_wine_fixme(NXW_init_transformed_lights);"))]
         def one(i):
             part, f, old, new = muts[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__")); txt = open(os.path.join(mdev, f)).read()
             open(os.path.join(mdev, f), "w").write(mutsrc.apply(txt, old, new, f"{f} #{i}")); mt = os.path.join(tmp, f"m{i}"); mo = os.path.join(mt, "objs"); os.makedirs(mo, exist_ok=True)

@@ -20,7 +20,7 @@ def check(p, ok, msg=""):
 
 def build(dev, tmp):
     os.makedirs(tmp, exist_ok=True)
-    for cmd in (PY + [os.path.join(GEN, "gen_impl.py"), tmp, SPEC], PY + [os.path.join(dev, "state_model.py"), tmp, SPEC],
+    for cmd in (PY + [os.path.join(GEN, "gen_impl.py"), tmp, SPEC], PY + [os.path.join(GEN, "gen_wine_ids.py"), tmp], PY + [os.path.join(dev, "state_model.py"), tmp, SPEC],
                 PY + [os.path.join(dev, "res_smgen.py"), tmp, os.path.join(ROOT, "render", "shaders", "total", "sm_table.json"), os.path.join(D9, "spec", "d3d9_tables.py")], PY + [os.path.join(D9, "env", "gen_env.py"), tmp]):
         r = sh(cmd)
         if r.returncode: return None, r.stderr[-600:]
@@ -63,12 +63,12 @@ def main():
     und = sh(["nm", "-u", os.path.join(tmp, "n", "x1.o")]).stdout
     check("e", not re.search(r"nxd3d_alloc|malloc|_Znw|_Zna|calloc|nx_make|nx_alloc", und), und)
     # ---- g mutations
-    muts = [("fixme Create", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidatorCreate9);", ""), ("QI foreign iid", "*out = nullptr; return E_NOINTERFACE;", "*out = nullptr; return S_OK;"),
-            ("AddRef", "NX_WINE_FIXME_ShaderValidator_AddRef); return 2; }", "NX_WINE_FIXME_ShaderValidator_AddRef); return 1; }"),
-            ("Release", "NX_WINE_FIXME_ShaderValidator_Release); return 1; }", "NX_WINE_FIXME_ShaderValidator_Release); return 0; }"),
+    muts = [("fixme Create", "fnvnx_wine_fixme(NXW_Direct3DShaderValidatorCreate9);", ""), ("QI foreign iid", "*out = nullptr; return E_NOINTERFACE;", "*out = nullptr; return S_OK;"),
+            ("AddRef", "NXW_shader_validator_AddRef); return 2; }", "NXW_shader_validator_AddRef); return 1; }"),
+            ("Release", "NXW_shader_validator_Release); return 1; }", "NXW_shader_validator_Release); return 0; }"),
             ("QI IUnknown", "*out = nullptr; return E_NOINTERFACE;", "*out = nullptr; return E_NOINTERFACE;" .replace("E_NOINTERFACE;", "riid.Data1 == 0 ? S_OK : E_NOINTERFACE;")),
-            ("Begin result", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Begin); return S_OK;", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Begin); return E_FAIL;"),
-            ("Instruction result", "NX_WINE_FIXME_ShaderValidator_Instruction); return S_OK;", "NX_WINE_FIXME_ShaderValidator_Instruction); return E_FAIL;"),
+            ("Begin result", "fnvnx_wine_fixme(NXW_shader_validator_Begin); return S_OK;", "fnvnx_wine_fixme(NXW_shader_validator_Begin); return E_FAIL;"),
+            ("Instruction result", "NXW_shader_validator_Instruction); return S_OK;", "NXW_shader_validator_Instruction); return E_FAIL;"),
             ("End id", "ShaderValidator_End = 24", "ShaderValidator_End = 23"), ("object behind face", "return &g_mem.obj;", "return (IDirect3DShaderValidator9*)&g_mem;"),
             ("QI out null", "*out = nullptr; return E_NOINTERFACE;", "return E_NOINTERFACE;")]
     if "--no-mutations" not in sys.argv:

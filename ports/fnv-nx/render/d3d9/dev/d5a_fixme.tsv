@@ -1,2 +1,2 @@
-id	wine function	condition	body
-40	dlls/wined3d/stateblock.c wined3d_device_apply_stateblock (case WINED3D_RS_LASTPIXEL)	D3DRS_LASTPIXEL == FALSE at a draw; once per process (Wine: static bool warned)	nothing else: the draw is GL diamond-exit lines for both values (Wine state table has no WINED3D_RS_LASTPIXEL entry)
+# id	condition	body	(the Wine function of an id is its row in verify/wine_fixme.tsv; only the condition and multiplicity are written here)
+40	D3DRS_LASTPIXEL == FALSE at a draw; once per process (Wine: static bool warned)	nothing else: the draw is GL diamond-exit lines for both values (Wine state table has no WINED3D_RS_LASTPIXEL entry)

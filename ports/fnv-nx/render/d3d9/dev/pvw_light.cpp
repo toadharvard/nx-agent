@@ -1,7 +1,7 @@
 // pvw_light.cpp: the software lighting and fog of Wine 9.0 process_vertices_strided (device.c init_transformed_lights, light_set_vertex_data, compute_light, update_light_diffuse_specular, update_fog_factor,
 // wined3d_calculate_fog_factor). Re-implemented with Wine's binary32 operation order (no fused operations); transcendentals (sqrtf, powf, expf, cosf) are the platform libm's, which is correctly rounded by the owner's FP rule.
 // Facts taken from the d3d9 build of wined3d: legacy_lighting is false (d3d9_init passes no WINED3D_LEGACY_FFP_LIGHTING); lights are walked in ascending index order (Wine: red-black tree on the index), only ENABLED lights count (`enabled` is the
-// flag LightEnable set, also for lights beyond the hardware slot count), at most 32 are used, in the order directional, point, spot. PARALLELPOINT (type 4) is walked as Wine does; any other type (GLSPOT) gets Wine's FIXME (id PVW_FIXME_LIGHT_TYPE) and is skipped, as in init_transformed_lights.
+// flag LightEnable set, also for lights beyond the hardware slot count), at most 32 are used, in the order directional, point, spot. PARALLELPOINT (type 4) is walked as Wine does; any other type (GLSPOT) gets Wine's FIXME (id NXW_init_transformed_lights) and is skipped, as in init_transformed_lights.
 // The derived per-light vectors of wined3d_device_context_set_light (position, direction w = 0, directional direction NEGATED) are recomputed from the D3DLIGHT9 at each call: every light type sets exactly the vectors its software path reads, so Wine's stale
 // fields of a light that changed type are never read.
 #pragma GCC optimize("fp-contract=off")
@@ -30,7 +30,7 @@ void pvw_lights_init(PvLights* ls, const NxDeviceCore* d, bool compute_lighting,
     const D3DLIGHT9* act[PVW_MAX_LIGHTS]; uint32_t n = 0;
     for (uint32_t i = 0; i < d->lights.n && n < PVW_MAX_LIGHTS; i++) {
         const NxLightEnt& e = d->lights.a[i]; if (!e.enabled) continue;
-        if (e.light.Type == D3DLIGHT_DIRECTIONAL) ls->n_dir++; else if (e.light.Type == D3DLIGHT_POINT) ls->n_point++; else if (e.light.Type == D3DLIGHT_SPOT) ls->n_spot++; else if ((int)e.light.Type == PVW_LIGHT_PARALLELPOINT) ls->n_par++; else { if (log_fixme) fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE); continue; }   // Wine: FIXME("Unhandled light type")
+        if (e.light.Type == D3DLIGHT_DIRECTIONAL) ls->n_dir++; else if (e.light.Type == D3DLIGHT_POINT) ls->n_point++; else if (e.light.Type == D3DLIGHT_SPOT) ls->n_spot++; else if ((int)e.light.Type == PVW_LIGHT_PARALLELPOINT) ls->n_par++; else { if (log_fixme) fnvnx_wine_fixme(NXW_init_transformed_lights); continue; }   // Wine: FIXME("Unhandled light type")
         act[n++] = &e.light;
     }
     uint32_t idx = 0;

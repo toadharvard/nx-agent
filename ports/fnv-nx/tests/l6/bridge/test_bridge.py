@@ -18,7 +18,7 @@ def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **
 
 def main():
     fails = []; tmp = tempfile.mkdtemp(prefix="d9br_")
-    for cmd in (PY + [os.path.join(GEN, "gen_impl.py"), tmp, SPEC], PY + [os.path.join(DEV, "state_model.py"), tmp, SPEC], PY + [os.path.join(GEN, "gen_bridge.py"), tmp, SPEC],
+    for cmd in (PY + [os.path.join(GEN, "gen_impl.py"), tmp, SPEC], PY + [os.path.join(GEN, "gen_wine_ids.py"), tmp], PY + [os.path.join(DEV, "state_model.py"), tmp, SPEC], PY + [os.path.join(GEN, "gen_bridge.py"), tmp, SPEC],
                 PY + [os.path.join(ENV, "gen_env.py"), tmp]):
         r = sh(cmd)
         if r.returncode: print("GEN FAILED " + " ".join(cmd[2:3]) + "\n" + (r.stderr or r.stdout)[-800:]); return 1

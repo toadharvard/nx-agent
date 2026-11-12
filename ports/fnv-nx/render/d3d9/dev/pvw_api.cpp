@@ -12,7 +12,7 @@
 // symbol with two names and the gate, which pairs a call site with the first name of an alias range, would see the other name as a real body that has no id.)
 __attribute__((noinline)) static HRESULT process(NxDeviceCore* d, UINT s, UINT di, UINT n, IDirect3DVertexBuffer9* dst, IDirect3DVertexDeclaration9* decl) {
     if (!dst || !nx_chk_obj(dst) || !nx_chk_obj(decl)) return D3DERR_INVALIDCALL;
-    if (decl) fnvnx_wine_fixme(PVW_FIXME_OUT_DECL);
+    if (decl) fnvnx_wine_fixme(NXW_d3d9_device_ProcessVertices);
     return pvw_process(d, s, di, n, static_cast<NxBufCore*>(nx_obj_of((IUnknown*)dst)));
 }
 HRESULT STDMETHODCALLTYPE NxDevice9::ProcessVertices(UINT s, UINT di, UINT n, IDirect3DVertexBuffer9* dst, IDirect3DVertexDeclaration9* decl, DWORD) { return process(this, s, di, n, dst, decl); }

@@ -5,7 +5,7 @@
 // Addressing: the device methods with a swap chain index address the IMPLICIT chains only (Wine: implicit_swapchains = 1 here); GetNumberOfSwapChains = the implicit chain count (wined3d_device_get_swapchain_count: device->swapchain_count, the field set where the device creates its implicit chain); additional chains are reachable through their own interface.
 // Gamma: ramp per chain (task rule), the identity ramp before any Set, D3DSGR flags accepted and ignored (wined3d_swapchain_set_gamma_ramp: "Ignoring flags"); an index without a chain changes nothing.
 // Cursor (Wine: image copy at Set time, no AddRef of the surface; visible only with an image): A8R8G8B8, power-of-two size, not larger than the display mode, readable; composited by Present (dev_chain.cpp).
-// DECISIONS (doubt): SetCursorProperties reading a non-lockable surface = INVALIDCALL; SetDialogBoxMode: Wine returns WINED3D_OK always (contract_consts.tsv); one fixme per call (Wine logs only when disabling; every path passes exactly one id, L4 rule), id 46.
+// DECISIONS (doubt): SetCursorProperties reading a non-lockable surface = INVALIDCALL; SetDialogBoxMode: Wine returns WINED3D_OK always; one fixme per call (Wine logs only when disabling; every path passes exactly one id, L4 rule), id 46.
 #include "res_tex.h"
 #include "../gen/d9impl.gen.h"
 #include "dev_core.h"
@@ -79,7 +79,7 @@ static HRESULT d_end(NxObj* d) { NxDevLife* L = nx_life(d); if (!L->in_scene) re
     HRESULT STDMETHODCALLTYPE C::Present(const RECT* s, const RECT* d, HWND o, const RGNDATA*) { return d_present(this, s, d, o, 0); }                                                            \
     HRESULT STDMETHODCALLTYPE C::GetBackBuffer(UINT sc, UINT i, D3DBACKBUFFER_TYPE, IDirect3DSurface9** o) { return d_backbuffer(this, sc, i, o); }                                              \
     HRESULT STDMETHODCALLTYPE C::GetRasterStatus(UINT i, D3DRASTER_STATUS* r) { NxChainCore* c = implicit_chain(this, i); return c ? c->raster(r) : INV; }                                       \
-    HRESULT STDMETHODCALLTYPE C::SetDialogBoxMode(BOOL) { fnvnx_wine_fixme(NX_CF_SetDialogBoxMode); return D3D_OK; }                                                                                                                       \
+    HRESULT STDMETHODCALLTYPE C::SetDialogBoxMode(BOOL) { fnvnx_wine_fixme(NXW_wined3d_device_set_dialog_box_mode); return D3D_OK; }                                                                                                                       \
     void STDMETHODCALLTYPE C::SetGammaRamp(UINT i, DWORD, const D3DGAMMARAMP* r) { d_set_gamma(this, i, r); }                                                                                    \
     void STDMETHODCALLTYPE C::GetGammaRamp(UINT i, D3DGAMMARAMP* r) { d_get_gamma(this, i, r); }                                                                                                 \
     HRESULT STDMETHODCALLTYPE C::GetFrontBufferData(UINT i, IDirect3DSurface9* s) { NxChainCore* c = implicit_chain(this, i); return c ? c->frontbuffer_data(s) : INV; }                          \

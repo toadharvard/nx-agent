@@ -137,6 +137,19 @@
    "outputs": [
     "gen/ffp_glsl.gen.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/gen/gen_wine_ids.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/verify/wine_fixme.tsv"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify/wine_fixme.tsv"
+   ],
+   "outputs": [
+    "gen/wine_fixme_ids.gen.h"
+   ]
   }
  ],
  "plugin_cxx": "x86_64-linux-gnu-g++-13",

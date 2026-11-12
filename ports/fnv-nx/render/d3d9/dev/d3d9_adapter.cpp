@@ -44,7 +44,7 @@ static HRESULT a_luid(int p, UINT ad, LUID* o) { uint32_t lo; int32_t hi; if (!o
 // d3d9_RegisterSoftwareDevice -> wined3d_register_software_device (wine-9.0 wined3d/directx.c): `FIXME("wined3d %p, init_function %p stub!"); return WINED3D_OK;` = id 51; the answer is D3D_OK. A registered software device
 // changes nothing in the table: CheckDeviceType / GetDeviceCaps for D3DDEVTYPE_SW answer as recorded (the recording calls it before the first query).
 #define ENV_METHODS(C)                                                                                                                                                  \
-    HRESULT STDMETHODCALLTYPE C::RegisterSoftwareDevice(void*) { fnvnx_wine_fixme(NX_CF_RegisterSoftwareDevice); return D3D_OK; }                                                                                       \
+    HRESULT STDMETHODCALLTYPE C::RegisterSoftwareDevice(void*) { fnvnx_wine_fixme(NXW_wined3d_register_software_device); return D3D_OK; }                                                                                       \
     UINT STDMETHODCALLTYPE C::GetAdapterCount() { return a_count(prof(M(C, this))); }                                                                                   \
     HRESULT STDMETHODCALLTYPE C::GetAdapterIdentifier(UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER9* pIdentifier) { return a_ident(prof(M(C, this)), Adapter, Flags, pIdentifier); } \
     UINT STDMETHODCALLTYPE C::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format) { return a_mcount(prof(M(C, this)), Adapter, Format); }                                \

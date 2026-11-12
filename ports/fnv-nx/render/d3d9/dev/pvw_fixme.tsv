@@ -1,9 +1,9 @@
-id	name	wine_function	condition	multiplicity
-2	CLIPSTATUS_SET	d3d9 d3d9_device_SetClipStatus	always (owner: pv_exit.cpp)	per call
-3	CLIPSTATUS_GET	d3d9 d3d9_device_GetClipStatus	always (owner: pv_exit.cpp)	per call
-10	CLIPPING	wined3d_device_process_vertices	D3DRS_CLIPPING enabled ("Clipping is not implemented")	per call
-11	DST_NORMAL	process_vertices_strided	destination FVF has NORMAL ("Normal in destination not implemented")	per call (decision of the owner rule "one log line per call"; Wine logs once per process, closed)
-12	COLOUR_FORMAT	wined3d_format_get_colour	colour element type without a B8G8R8A8/R8G8B8A8/R16/R32 mapping	per call (decision of the owner rule "one log line per call"; Wine logs per vertex, closed)
-13	FVF_POSITION	wined3d_get_flexible_vertex_size	destination FVF position mask not in the known set	per call
-14	OUT_DECL	d3d9_device_ProcessVertices	declaration argument non-NULL ("Output vertex declaration not implemented yet")	per call
-15	LIGHT_TYPE	init_transformed_lights	enabled light of a type other than POINT/SPOT/DIRECTIONAL/PARALLELPOINT (GLSPOT) ("Unhandled light type")	per light and call
+# id	condition	multiplicity	(the Wine function of an id is its row in verify/wine_fixme.tsv; only the condition and multiplicity are written here)
+2	always (owner: pv_exit.cpp)	per call
+3	always (owner: pv_exit.cpp)	per call
+10	D3DRS_CLIPPING enabled ("Clipping is not implemented")	per call
+11	destination FVF has NORMAL ("Normal in destination not implemented")	per call (decision of the owner rule "one log line per call"; Wine logs once per process, closed)
+12	colour element type without a B8G8R8A8/R8G8B8A8/R16/R32 mapping	per call (decision of the owner rule "one log line per call"; Wine logs per vertex, closed)
+13	destination FVF position mask not in the known set	per call
+14	declaration argument non-NULL ("Output vertex declaration not implemented yet")	per call
+15	enabled light of a type other than POINT/SPOT/DIRECTIONAL/PARALLELPOINT (GLSPOT) ("Unhandled light type")	per light and call

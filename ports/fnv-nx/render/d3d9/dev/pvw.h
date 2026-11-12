@@ -31,6 +31,5 @@ struct PvElem { const NxBufCore* buf; uint64_t base; uint32_t stride, type; };  
 struct PvInfo { uint32_t use_map; PvElem e[PVW_FFP_COUNT]; };
 void pvw_stream_info(PvInfo* si, const NxDeviceCore* d, uint32_t start);   // wined3d_stream_info_from_declaration with the vertex shader hidden (fixed-function inputs only)
 enum { PVW_LIGHT_PARALLELPOINT = 4 };                            // WINED3D_LIGHT_PARALLELPOINT (GLSPOT = 5)
-enum { PVW_FIXME_CLIPPING = 10, PVW_FIXME_DST_NORMAL = 11, PVW_FIXME_COLOUR_FORMAT = 12, PVW_FIXME_FVF_POSITION = 13, PVW_FIXME_OUT_DECL = 14, PVW_FIXME_LIGHT_TYPE = 15 };   // rows of verify/wine_fixme.tsv
 HRESULT pvw_process(NxDeviceCore* d, UINT start, UINT dst_idx, UINT count, NxBufCore* dst);   // wined3d_device_process_vertices (after its FIXME for the declaration argument)
-extern "C" void fnvnx_wine_fixme(uint32_t id);                   // loader/include/fnvnx_reach.h: writes one line and returns
+#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of verify/wine_fixme.tsv

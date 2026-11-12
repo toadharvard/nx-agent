@@ -21,7 +21,7 @@ def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **
 def build(dev, tmp, with_ext=True, jobs=8):
     """regenerate from `dev` (+ gen_impl.py) into tmp, compile everything; returns (exe, product object list)"""
     os.makedirs(tmp, exist_ok=True)
-    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC]):
+    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(GEN, "gen_wine_ids.py"), tmp], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC]):
         r = sh(cmd)
         if r.returncode: return None, r.stderr[-800:]
     fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", INC, "-I", tmp, "-I", HERE, "-I", dev]

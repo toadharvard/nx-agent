@@ -16,7 +16,7 @@ Branch claude/fnv-l6-render-w6, base claude/fnv-l6-render-w5 (c7b4db7e). Commits
 
 ## Rules and what each closed
 
-R1, Wine 9.0 simplified bodies. Sources read from the wine-9.0 tag (raw files), not from memory. One `fnvnx_wine_fixme(id)` then Wine's result; rows 48-54 are in verify/wine_fixme.tsv (for L1, the table the gate reads) and in render/d3d9/dev/const_fixme.tsv (same rows):
+R1, Wine 9.0 simplified bodies. Sources read from the wine-9.0 tag (raw files), not from memory. One `fnvnx_wine_fixme(id)` then Wine's result; rows 48-54 are in verify/wine_fixme.tsv, the only table (round 2 below removed the copy in const_fixme.tsv):
 
 | id | contract name | wine_ref | kind, value |
 |---|---|---|---|
@@ -47,3 +47,16 @@ The existing host-g++ tests of render/d3d9 could NOT run in this container (they
 - tests/l6/copy: `PT` expectations 0, 0, INVALIDCALL; mutation text follows.
 - tests/l6/exports: `nx_d3d9_export_count` is an object.
 The product code of all of this is compiled by the recipe (green) and judged by objstub (green). Pre-existing, not touched: t_exports.cpp / t_x1.cpp define product-like symbols (doubles; w5's census lists them).
+
+## Round 2 (lead review of 8d20d51e)
+
+- One table. verify/wine_fixme.tsv is the only place of id, wine_ref, kind and value. Deleted: render/d3d9/dev/const_fixme.tsv and contract_consts.tsv (every row of it restated a wine_fixme row; the objstub `--constants` table is not used by render/d3d9: build.json has no `constants` key). pvw_fixme.tsv and d5a_fixme.tsv keep only the extra facts per id (condition, multiplicity / body); their name and Wine function columns are gone.
+- Ids in code are generated: `gen/gen_wine_ids.py` (a generated step of render/d3d9/build.json, input verify/wine_fixme.tsv) writes `gen/wine_fixme_ids.gen.h`, one `NXW_<wine function>` constant per row; `dev/const_fixme.h` includes it and holds only the `fnvnx_wine_fixme` declaration and `NX_WINE_FIXME_VOID`. All hand-written id enums (NX_CF_*, NX_WINE_FIXME_*, PVW_FIXME_*, D5A_FIXME_*) are replaced. A name without a row does not compile; the tool refuses two rows with the same Wine function name.
+- env/gen_env.py: the caps assertion now says what the code relies on (Wine 9.0 bodies, cited, rows 48-50). render/ASSUMPTIONS.md row 20 and QUEUE.md line 201 are closed.
+- Measurement after merging origin/claude/fnv-l6-render (ffp_prog.cpp is in): recipe build green, 70 objects; `objstub: green 1784/1784 1784 functions in 70 objects of 1 roots, no trap path, no vacuous body`. Local condition left: admit.json tool entries for the include roots (not committed).
+- Tests updated, still not run here (same reasons): every test that generates the gen directory now also runs gen_wine_ids.py; test_const reads rows 41-54 of verify/wine_fixme.tsv and checks the generated constants; its part c (contract_consts) is gone.
+
+## For L1: two objstub quirks (no gate change made)
+
+1. Tail call of a log. A function whose body is only `fnvnx_wine_fixme(id)` (void result) is compiled with the call as a tail `b`. objstub takes a branch to fnvnx_wine_fixme for a real body (class W, `wine-fixme-address-taken` / `wine-fixme-in-real-body`). Product rule used: `NX_WINE_FIXME_VOID(id)` = the call followed by an empty `asm volatile("" ::: "memory")` (no instruction, keeps `bl` + `ret`). The gate could accept a final `b fnvnx_wine_fixme` of a void function itself.
+2. Folded aliases. When the compiler folds two identical functions (-fipa-icf: here NxDevice9::ProcessVertices and NxDevice9Ex::ProcessVertices) into one body with two symbols, the `wine` call list names only the first symbol, so objstub judges the second as a real body with no id (`wine-fixme-in-real-body`; the `branch` exemption looks up ids per name). Product rule used: the body and its log live in one `noinline` function that the two methods call. The gate could attribute the call sites of an alias range to every name of the range.

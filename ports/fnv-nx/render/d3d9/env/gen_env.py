@@ -143,7 +143,7 @@ def derive(R, DEV):
     leaf = {n: (off, sz) for n, off, sz, k in envq.leaves(ST, "D3DCAPS9")}; capw = lambda img, n: int.from_bytes(img[leaf[n][0]:leaf[n][0] + leaf[n][1]], "little")
     T["DECLTYPES"] = capw(T["CAPS"][0], "DeclTypes")
     if capw(T["CAPS"][1], "DeclTypes") != T["DECLTYPES"]: die("DeclTypes is the same for every device type (nx_env_decltype_supported has no device argument)")
-    if capw(T["CAPS"][0], "DevCaps") & 0x01C00000: die("DevCaps has no RTPATCHES / RTPATCHHANDLEZERO / NPATCHES: DrawRectPatch / DrawTriPatch / DeletePatch are INVALIDCALL by rule (dev/copy_misc.cpp)")
+    if capw(T["CAPS"][0], "DevCaps") & 0x01C00000: die("DevCaps has no RTPATCHES / RTPATCHHANDLEZERO / NPATCHES: the device promises no higher-order surfaces, so the bodies of dev/copy_misc.cpp are Wine 9.0's (dlls/d3d9/device.c d3d9_device_DrawRectPatch / d3d9_device_DrawTriPatch: FIXME + D3D_OK, d3d9_device_DeletePatch: FIXME + D3DERR_INVALIDCALL; rows 48-50 of verify/wine_fixme.tsv) and a recording that reports patch caps needs a real implementation instead")
     if capw(T["CAPS"][0], "StretchRectFilterCaps") & ~0x03000300: die("StretchRectFilterCaps holds only MIN/MAG POINT/LINEAR bits (nxenv_stretch_filter)")
     T["STRETCHCAPS"] = capw(T["CAPS"][0], "StretchRectFilterCaps")
     T["QMASK"] = QMASK
