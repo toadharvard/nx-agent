@@ -3,8 +3,7 @@
     python3 -I gate_hostapi.py [--header PATH]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/hostapi.json
 Rule (owner order 2026-11-10/11: nothing that the product does not need, no placeholder behind a number): for every admitted product root
 that includes hostapi.h, {service numbers declared in the header} == {service numbers expanded by at least one unit of the root}.
-Declared: the header's own text (PATH, default ports/fnv-nx/toolchain/include/fnvnx/hostapi.h, else verify/tests/guest/hostapi.h of the
-trunk's fixture): every `#define FNVNX_PLAT_<NAME> <integer>` directive (a preprocessor directive read by its token grammar: #, define,
+Declared: the header's own text (PATH, default ports/fnv-nx/hostabi/include/fnvnx/hostapi.h, its one home; a missing file is an error): every `#define FNVNX_PLAT_<NAME> <integer>` directive (a preprocessor directive read by its token grammar: #, define,
 identifier, one pp-number). A service is a NUMBER; names with the same number are aliases of one service.
 Used: the evidence is the PP stage result unit.ii of every unit of the root (found by pp_key in objects.json, as gate_objstub does). The PP
 stage runs `-dU` (unitstage.PP_TAIL): GCC then writes `#define NAME VALUE` for exactly the macros that the unit EXPANDS (or tests with
@@ -35,7 +34,7 @@ import unitstage  # noqa: E402
 
 PREFIX = "FNVNX_PLAT_"
 HEADER = "hostapi.h"
-DEFAULT_HEADERS = ("ports/fnv-nx/toolchain/include/fnvnx/hostapi.h", "ports/fnv-nx/verify/tests/guest/hostapi.h")
+HOSTAPI_HEADER = "ports/fnv-nx/hostabi/include/fnvnx/hostapi.h"   # the one home (root hostabi/): a missing file is an error
 
 
 def number(tok):
@@ -162,10 +161,7 @@ def judge(decl, use):
 
 
 def header_text(repo, explicit):
-    for p in ([explicit] if explicit else list(DEFAULT_HEADERS)):
-        if os.path.isfile(os.path.join(repo, p)):
-            return open(os.path.join(repo, p)).read()
-    raise OSError("no hostapi.h at %s" % (explicit or " or ".join(DEFAULT_HEADERS)))
+    return open(os.path.join(repo, explicit or HOSTAPI_HEADER)).read()
 
 
 def root_judge(root, repo, cache, header):

@@ -12,7 +12,7 @@
  * Memory the platform or the loader got elsewhere is entered with fnvnx_win32_vm_note (flag F_FOREIGN: the OS
  * range is not ours to release); file views are entered by filemap.cpp through w32_vm_view_*. */
 #include "w32.h"
-#include "reach.h"
+#include "w32_reach.h"
 
 #include <malloc.h>
 #include <stdlib.h>

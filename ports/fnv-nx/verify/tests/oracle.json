@@ -138,7 +138,7 @@
    "references": [
     {
      "kind": "contract",
-     "path": "ports/fnv-nx/verify/tests/guest/hostapi.h"
+     "path": "ports/fnv-nx/hostabi/include/fnvnx/hostapi.h"
     },
     {
      "anchor": "## verify/bootmachine.py",

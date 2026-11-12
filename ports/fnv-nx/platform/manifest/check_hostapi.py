@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check_hostapi.py - the guest's ext_call uses against the declarations of toolchain/include/fnvnx/hostapi.h.
+"""check_hostapi.py - the guest's ext_call uses against the declarations of hostabi/include/fnvnx/hostapi.h.
 
 The header is the single source of the host-service numbering. Declared in it, machine-readably:
   * every service number:  `#define FNVNX_PLAT_<NAME> <number>u`  (FIRST/LAST are range markers, not services);
@@ -33,7 +33,7 @@ import os
 import re
 import sys
 
-HDR = "toolchain/include/fnvnx/hostapi.h"
+HDR = "hostabi/include/fnvnx/hostapi.h"
 HOST_PLAT = "toolchain/host/host_platform.inc"
 HOST_SOCK = "toolchain/host/host_sock.inc"
 SCAN = ["platform", "toolchain/guest"]

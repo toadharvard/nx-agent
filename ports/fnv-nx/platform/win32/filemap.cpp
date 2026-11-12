@@ -9,7 +9,7 @@
  * UnmapViewOfFile / FlushViewOfFile. A SEC_IMAGE section is laid out as the PE sections say (headers and sections at
  * their RVAs, zero fill, per-section page protection). */
 #include "filemap_backing.h"
-#include "reach.h"
+#include "w32_reach.h"
 
 #include <stdio.h>
 #include <stdlib.h>

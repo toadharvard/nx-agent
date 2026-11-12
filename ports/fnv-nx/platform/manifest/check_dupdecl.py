@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """check_dupdecl.py - MEASUREMENT, not the gate (the gate is L1's): counts top-level extern function and variable declarations by name over the platform, shim, loader and toolchain include trees and lists the names declared in more than one header. Regex-based (bodies skipped, extern "C" blocks transparent); run from ports/fnv-nx."""
 import re,sys,glob,collections,os
-dirs=['platform/include','shim/include','loader/include','toolchain/include']
+dirs=['platform/include','hostabi/include','shim/include','loader/include','toolchain/include']
 def strip(s):
     s=re.sub(r'/\*.*?\*/',' ',s,flags=re.S); s=re.sub(r'//[^\n]*',' ',s)
     s=re.sub(r'^\s*#.*?(?<!\\)\n','\n',s,flags=re.M)  # preprocessor lines (single-line; continuation handled below)

@@ -497,6 +497,16 @@ def check(rec, root, files, roots, pin=None, repo="."):
                        % (d, roots[root].get("target")))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
+    # one name, one file: two include dirs of a recipe that both hold a header of the same include-relative path make `#include <that/path>`
+    # depend on the order of the -I list (the first wins, silently): a header is in one home only
+    home = {}
+    for d in inc if isinstance(inc, list) else []:
+        if isinstance(d, str) and not any(under(d, a) for a in ats):
+            for f in files:
+                if under(f, d) and f.endswith((".h", ".hh", ".hpp", ".hxx", ".inc")):
+                    home.setdefault(f[len(d):].lstrip("/"), []).append(f)
+    err += ["header %r is in %d include dirs: %s (one home per header)" % (n, len(fs), ", ".join(sorted(fs)))
+            for n, fs in sorted(home.items()) if len(fs) > 1]
     seen = set()
     for i, g in enumerate(rec.get("generated", []) if isinstance(rec.get("generated", []), list) else err.append("generated is not a list") or []):
         if not (isinstance(g, dict) and set(g) == {"tool", "args", "inputs", "outputs"}):
