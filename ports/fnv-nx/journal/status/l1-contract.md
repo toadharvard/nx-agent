@@ -236,3 +236,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - **L6 fmadd evidence:** 7 → 0 at c646a014, once -ffp-contract=off and the rest of the semantics set applied to C.
   - **lib/sha256 admit entry with a host variant:** w15.
   - **selftest timeout rule:** derived from a stored warm-runtime fact on the pinned host only (w19).
+- 03:40Z:
+  - **closure_key** (w14): two ids, FNVNX_REACH_CLOSURE_KEY_NATIVE and _LIFTED. They are measurement-only until sources.tsv is closed, dispgen --closure is green, and open = 0. reach_facts.h is a recipe fact output that fnvnx/reach.h includes through `uses`.
+  - **ASM-043:** deleting it dropped L3b's capstone aliases. L3b mints ASM-329/330. The w10 gate adds three rules: ids are never reused (a `retired` list), a cited record cannot be removed, and a cited alias must resolve to a live record.
+  - **rt/guest** (L5, product): crt0.s plus the runtime units. guest_pie.specs and build.sh are removed.
+  - **MERGER order:** w10 → L3a lift-gates (ASM-200..202) → L3b unit.
