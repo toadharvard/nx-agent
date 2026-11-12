@@ -89,11 +89,11 @@ The first product root is L5 w10's platform root (6516d0d is red: 58 of 74 units
 - **FalloutPrefs inputs:** render/d3d9 becomes a product root (L6). Its `generated` stage declares ident_handheld.bin and ident_docked.bin as `outputs`. L5 w13 consumes them through `uses`, and declared_files.cpp stays off the platform root until then.
 - **MERGER order (L1):** w16 -> w10 6bcd7d2 (29/29) -> w14 c0f23a3f -> w15 afa6b301 (27/27, 291 s).
 
-- **d3dx9_31.dll (L1 w18):** d3dx9_38 calls LoadLibraryA on it at 0x56b708. The superset rule is accepted, and the branch taken depends on what gamedata holds:
-  - (A) present: it joins the image set as a may-load image (6 -> 7, pinned by exepin) and is lifted like d3dx9_38;
-  - (B) absent: the declared machine has no such module, and LoadLibrary returns NULL with ERROR_MOD_NOT_FOUND. The rule covers every name outside the declared file set and is owned by L5.
-  - L6 checks gamedata for all d3dx9_*/d3dcompiler_* files.
-  - The site stays open until the object extents exist.
+- **d3dx9_31.dll: decided (A).** It is in gamedata/redist c53729e (sha256 e2065619…78a5, from the OCT2006 cab); d3dcompiler_* is absent from all 16 gamedata heads.
+  - The declared machine has the DirectX redist installed: every gamedata/redist DLL is in the declared system32 (CLAUDE.md trunk b6a8e5d / integration 408680f).
+  - The image set goes 6 -> 7 (may-load closure, the sound superset). L1 pins it, L3a lifts it, and L5's modules.py takes redist as a class.
+  - "Join only if reachable" was rejected, because reachability is unproven. Site 0x56b708 stays open.
+- **PIE (L6A):** a target family that a root states (pie/pic) is exempt from forced distro-default neutralisation, and the hardening flags stay forced. deko3d stays PIE.
 - **Forms certificates:** certs.tsv has 0 rows, so every lifted root is red on forms. L3b w4's queue (19,494 shapes, about 60 CPU-h) takes the first farm priority, on the path to goal step 2.
 - **Forms farms started (03:45Z):** 16 Sonnet farms l3bcert-01..16, owned by L3b, one shard of the 19,494 shapes each (about 3.75 CPU-h). Their START lines follow w4's 373-shape IR validation.
   - Ids:
