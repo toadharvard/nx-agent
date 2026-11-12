@@ -121,3 +121,27 @@ FAILED(model-defect) (c1c000, d2c0, c0c000 reproduce it). The disagreement lies 
 the 8.5 model leaves OF undefined, the SDM and the Form leave all flags unchanged) and `sar-cf-big-count` (CF at count >= size). Master fixes rol/ror
 (rotates-spec.lisp:284-288 and :660-664, count 0 -> input flags). So the class is a model defect whose fix is a transcription patch of master's
 rotates-spec.lisp; the Form is not touched. These shapes carry FAILED(model-defect), not a certificate, until that patch is in the IR.
+
+## 11. (D) The ACL2 table of the model-gap classes (w4, read-only; no patch)
+
+Sources: ACL2 8.5 (acl2-85 checkout, the line numbers of the pinned model's family) and master 3ccb342c. Column "dispatch" = the function in
+machine/inst-listing.lisp (NIL = Opcode Unimplemented, which is what the pinned IR returns for every row below).
+
+| class | opcodes | 8.5 | master dispatch (inst-listing.lisp) | master defun (machine/instructions/...) | modes | descriptor load |
+|---|---|---|---|---|---|---|
+| pop sreg | 17, 1f, 07, 0f a1, 0f a9 | NIL (the defun is commented out, push-and-pop.lisp:617) | x86-pop-segment-register (:171, :214) | push-and-pop.lisp:581 | 32-bit (I64 = legacy) and 64 | yes: `get-segment-descriptor` (:642) then `load-segment-reg` (:670) |
+| les/lds/lfs/lgs/lss | c4, c5, 0f b2, b4, b5 | NIL | x86-load-far-pointer (:1417, :1426) | segmentation.lisp:693 | legacy | see its body (segment load) |
+| mov to/from sreg | 8c, 8e | NIL | x86-mov-Op/En-MR / -RM (:1055, :1064) | data-transfer family | all | to be read: the shared mov defuns |
+| far jmp indirect | ff /5 | NIL | x86-far-jmp-Op/En-D | jump-and-loop.lisp:375 (8.5: :390) | all | yes |
+| far jmp direct ea, far call 9a, far call ff /3 | ea, 9a, ff /3 | NIL | NIL (also in master: `'NIL`) | none | - | - |
+| retf | ca, cb | NIL | cb: x86-ret (:1481); ca: NIL | subroutine.lisp:337 | all | not for far (only the near path) |
+| enter | c8 | NIL | x86-enter (:1469) | subroutine.lisp:704 | all | no |
+| aaa aas aam aad daa das | 37, 3f, d4, d5, 27, 2f | NIL | x86-aaa/aas/aam/aad/daa/das (:326, :363, :1725, :1734, :252, :289) | bcd.lisp:53, :95, :141, :203, :262, :312 | legacy (I64) | no |
+| salc | d6 | #UD | not in the table | - | - | - |
+| system class (sldt, str, sgdt, sidt, smsw, mov cr, hlt, lgdt, lldt) | 0f 00, 0f 01, 0f 20.., f4 | `(:GP)` in this build | segmentation.lisp / system-level: sgdt :239, lgdt :123, lldt :448, ltr :56, lidt :331 | | | |
+
+Consequences: enter and the six BCD instructions are defined in master and take no descriptors: each is a transcription candidate like `segment_bases`
+(covered by ASM-009), each an IR-changing hunk. pop sreg and les/lds are defined in master only with the descriptor load (GDT read, hidden base) -- the
+model's flat-segment setting (A-FLAT) would need the same selectors-as-inputs treatment as push sreg; far call, ljmp ea, retf ca, salc are undefined in
+master too and stay escalated. mov sreg needs a read of the master mov defuns (not done). Not done in this note: mode coverage of the system rows and the
+exact master lines of load-far-pointer's descriptor path.
