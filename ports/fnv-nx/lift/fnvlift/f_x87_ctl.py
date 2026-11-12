@@ -313,7 +313,7 @@ def env(cx, ins, b0, g):
     d32 = 0 if ins.prefix[2] == 0x66 else 1
     a = cx.ea(ins, cx.ops[0])
     if g == 6:
-        cx.em(('FNSTENV(%s,%d,FSWV(c->ftop));' if b0 == 0xd9 else 'FNSAVE(%s,%d,FSWV(c->ftop));') % (a, d32))
+        cx.em(('FNSTENV(%s,%d,FSWV(c->ftop),0x%xu);' if b0 == 0xd9 else 'FNSAVE(%s,%d,FSWV(c->ftop),0x%xu);') % (a, d32, cx.a))
     else:
         cx.em(('FLDENV(%s,%d);' if b0 == 0xd9 else 'FRSTOR(%s,%d);') % (a, d32))
 
@@ -328,14 +328,14 @@ def ctl(cx, ins, b0, mr, g):
         elif b0 == 0xd9 and g == 7:
             em('M16(%s)=c->fcw;' % cx.ea(ins, cx.ops[0]))
         elif b0 == 0xdd and g == 7:
-            em('M16(%s)=FSWV(%s);' % (cx.ea(ins, cx.ops[0]), top))
+            em('FSW_ST16(%s,FSWV(%s),0x%xu);' % (cx.ea(ins, cx.ops[0]), top, cx.a))
         elif b0 in (0xd9, 0xdd) and g in (4, 6):
             env(cx, ins, b0, g)
         else:
             return False
         return True
     if b0 == 0xdf and mr == 0xe0:
-        em('eax=(eax&0xffff0000u)|FSWV(%s);' % top)
+        em('FSW_AX(FSWV(%s),0x%xu);' % (top, cx.a))
     elif b0 == 0xdb and mr == 0xe2:
         em('FNCLEX();')
     elif b0 == 0xdb and mr == 0xe3:
