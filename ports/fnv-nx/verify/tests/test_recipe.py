@@ -519,6 +519,17 @@ def rule_a_cases(SS, ext_cache):
     # a root's own directory as include: refused (one path per file: /src; #pragma once identity)
     e1 = errs(mut(include=[ROOT + "/inc"]))
     check("include inside the root is refused: use a quoted relative include", any("include %s/inc is inside the root; use a quoted relative include" % ROOT in e for e in e1), e1)
+    # 3m: include dirs are mounted at their repo paths in one mirrored tree; only declared files are visible
+    lib = {"path": T + "lib", "class": "tool", "gates": []}
+    mf = dict(only_c, **{"toy/a.c": '#include "a.h"\nint f_a(void) { return AV + BV; }\n', "lib/a/a.h": '#include "../b/b.h"\n#define AV 1\n',
+                         "lib/b/b.h": "#define BV 2\n", "lib/c/c.h": "#define CV 3\n"})
+    mrec = dict(base, include=[T + "lib/a", T + "lib/b"])
+    rm = recipe.build(make_repo("m3-ok", rec=mrec, files=mf, roots=[lib]), ROOT, SS, BASE + "/m3a", ext=ext_cache)
+    check("3m: ../b/b.h from one declared include dir into another declared dir builds", rm["status"] == "green" and rm["units"] == ["a.c"], rm.get("failure"))
+    mf2 = dict(mf, **{"lib/a/a.h": '#include "../c/c.h"\n#define AV 1\n#define BV 2\n'})
+    rn = recipe.build(make_repo("m3-bad", rec=mrec, files=mf2, roots=[lib]), ROOT, SS, BASE + "/m3b", ext=ext_cache)
+    check("3m: ../c/c.h into a directory that is not declared is a missing file (compile error), not a host file", rn["status"] == "red"
+          and rn["failure"]["stage"] == "pp:a.c" and any("c.h" in l for l in rn["failure"]["stderr"]), rn.get("failure"))
     # the program lookup of the host driver: a bare `as` is found as the driver finds it; a missing program is an error naming it
     hd = "/usr/bin/x86_64-linux-gnu-g++-13"
     p = unitstage.prog(hd, "as")

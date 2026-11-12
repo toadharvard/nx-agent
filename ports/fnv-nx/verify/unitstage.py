@@ -137,6 +137,7 @@ def run_stage(store, doc, cold):
 class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
+        self.prefix = getattr(a, "prefix", "") or ""   # repo path of the root inside the mirrored /src tree (units live at /src/PREFIX/UNIT)
         self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
         self.rt = json.load(open(a.toolrt))
@@ -165,6 +166,9 @@ class Build:
                 self.iargs.append("-I" + at)
         names = [(at, unitview.view(self.store, t, (), self.cache)) for at, t in self.roots]
         self.name_tree_id = hashlib.sha256(cas.canon(names)).hexdigest()
+
+    def sp(self, rel):
+        return "/src/" + (self.prefix + "/" if self.prefix else "") + rel
 
     def doc(self, kind, rel, inputs, tail, src, inc=True):
         seed = hashlib.sha256(rel.encode()).hexdigest()
@@ -195,7 +199,7 @@ class Build:
         """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
         ins = [(at, t if files is None else unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")],
                                                           self.cache)) for at, t in self.roots]
-        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, "/src/" + rel), self.cold)
+        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, self.sp(rel)), self.cold)
 
     def stderr(self, res):
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
@@ -222,7 +226,7 @@ class Build:
         files, expect, ran = None, None, False
         try:
             hint = json.load(open(hint_path(self.store, rel)))
-            files = {r for r in (self.real(p, False) for p in hint) if r} | {"/src/" + rel}
+            files = {r for r in (self.real(p, False) for p in hint) if r} | {self.sp(rel)}
         except (OSError, ValueError, TypeError):
             pass
         while True:
@@ -272,10 +276,10 @@ class Build:
 
     def assemble(self, e, rel):
         """A .s unit: no preprocessing, one stage on the /src view that holds this file alone (every other name is a placeholder)."""
-        real = unitview.resolve(self.store, self.roots[0][1], rel, self.cache)
+        real = unitview.resolve(self.store, self.roots[0][1], self.sp(rel)[5:], self.cache)
         v = unitview.view(self.store, self.roots[0][1], [real], self.cache)
         e["closure"], e["files"] = ["/src/" + real], 1
-        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], "/src/" + rel, inc=False), set())
+        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], self.sp(rel), inc=False), set())
 
 
 def build_cmd(a):
@@ -301,6 +305,7 @@ def main(argv):
         p.add_argument("--cxx")
         if argv[:1] == ["build"]:
             [p.add_argument("--" + n, required=True) for n in ("store", "toolrt", "src-root", "flags-file", "report")]
+            p.add_argument("--prefix", default="")
             p.add_argument("--include", action="append", default=[])
             p.add_argument("--unit", action="append", required=True)
             p.add_argument("--jobs", type=int, default=1)

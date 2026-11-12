@@ -24,6 +24,10 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `flags`: per language. Refused: `-I*` (use `include`), `-o -c -E -S -x -M*`, and the refusal set R below.
 - `include`: repo-relative directory inside an admitted root (tracked files, or generated outputs of this root), or an absolute path inside an
   external's `at`. Included files are inputs by content; a file the unit reads that is not in them does not exist for it.
+  Mirror (3m): the stages see ONE tree at `/src`, a mirror of the repo that holds only declared files: the root's own files (units, generated
+  outputs, patched external trees) at `/src/<root>/...` and each `include` directory at `/src/<its repo path>`, passed as `-I/src/<path>`. So
+  `"..."` and `../` resolve as in the source tree; a `../` that leaves the declared set names a file that does not exist (a compile error in the
+  PP stage), never a host file. A header has one path (`#pragma once` identity).
 - `units`: must be `"all"`. A `.S` unit is preprocessed as its own stage like a C unit (its key covers exactly the headers it includes);
   a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
   compiled. A file that must not be compiled does not belong in the root; there is no `exclude`.

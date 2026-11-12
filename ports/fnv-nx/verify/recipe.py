@@ -516,6 +516,10 @@ class Job:
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
 
+    def rdir(self, ws):
+        """The root's own files, at their repo path inside the mirror tree ws/m (what the stages see as /src)."""
+        return os.path.join(ws, "m", self.root)
+
     def stage(self, doc):
         v = toolflags.check_doc(doc)
         if v:
@@ -636,7 +640,7 @@ class Job:
                    "cwd": "/work", "argv": [py["python"], "-s", "-B", "/tool/patchtree.py", e["at"], "/out"] + ["/patches/" + p for p in s["patches"]],
                    "env": env, "inputs": ins, "outputs": ["/out"]}
             res = self.stage(doc)[1]["outputs"]["/out"]
-            dest = os.path.join(ws, "root", "ext", name)
+            dest = os.path.join(self.rdir(ws), "ext", name)
             if os.path.exists(dest):
                 raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["ext/%s is also a tracked path of the root" % name]})
             os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -646,7 +650,7 @@ class Job:
                 if x["t"] != "d" and r.startswith(d) and is_unit(r):
                     units.append("%s:%s" % (name, r))
                     self.phys["%s:%s" % (name, r)] = "ext/%s/%s" % (name, r)
-            self.src_inc += ["/src/ext/%s/%s" % (name, i) if i != "." else "/src/ext/" + name for i in s["include"]]
+            self.src_inc += ["/src/%s/ext/%s/%s" % (self.root, name, i) if i != "." else "/src/%s/ext/%s" % (self.root, name) for i in s["include"]]
         return sorted(units)
 
     def host_tool(self, ws, tool):
@@ -706,20 +710,19 @@ class Job:
                 raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs %s differ from the declared %s" % (got, sorted(g["outputs"]))]})
             cas.materialize(res["outputs"]["/out"], self.store, os.path.join(tmp, "out"))
             for o in g["outputs"]:
-                os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
-                shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
+                os.makedirs(os.path.dirname(os.path.join(self.rdir(ws), o)), exist_ok=True)
+                shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(self.rdir(ws), o))
 
     def includes(self, ws):
         """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
         for a directory inside an external (a declared input of the tool runtime)."""
-        out, n = [], 0
+        out = []
         for d in self.rec["include"]:
             if any(under(d, e["at"]) for e in self.ext.values()):
                 out.append(d)
                 continue
-            _copy(self.repo, [f for f in self.files if under(f, d)], "", os.path.join(ws, "inc"))   # a directory of another admitted root (not of this one)
-            out.append("%s@/inc/%d" % (os.path.join(ws, "inc", d), n))
-            n += 1
+            _copy(self.repo, [f for f in self.files if under(f, d)], "", os.path.join(ws, "m"))   # a directory of another admitted root: at its repo path in the mirror
+            out.append("/src/" + d)
         out += self.src_inc   # directories of the patched source trees: sandbox paths inside the root's own /src view (one path per file)
         return out
 
@@ -791,7 +794,7 @@ class Job:
             fp = os.path.join(ws, "flags-%s.json" % k)
             json.dump({"argv": rec["flags"][k]}, open(fp, "w"))
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
-                                                           src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
+                                                           src_root=os.path.join(ws, "m") + "@/src", prefix=self.root, include=self.includes(ws)))
             builds[k].cc_drop = drop
             builds[k].iargs += [x for p in rec.get("isystem", []) for x in ("-isystem", p)]   # third-party headers: no warnings (GCC manual); PP only
             if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
@@ -936,7 +939,7 @@ def build(repo, root, store, out, jobs=4, ext=None, stack=()):
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
     try:
-        _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
+        _copy(repo, [f for f in j.files if under(f, root)], root, j.rdir(ws))
         j.externals(ws)
         src_units = j.patch(ws)
         if src_units:
@@ -970,7 +973,7 @@ def build(repo, root, store, out, jobs=4, ext=None, stack=()):
             res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent["h"]}
         for key in ("constants", "contract_names"):
             if j.rec.get(key):
-                shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
+                shutil.copyfile(os.path.join(j.rdir(ws), j.rec[key]), os.path.join(out, key + ".tsv"))
                 res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
     except BuildRed as r:
         res.update(status="red", failure=r.args[0], failed_units=r.args[0].get("units", []))
