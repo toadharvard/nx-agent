@@ -134,3 +134,9 @@ the source's accesses in GCC's order, so at a race site it gives the source's be
 
 ## R14 ASSUMPTIONS (gate `assumptions`, VERDICT.md class 18)
 An assumption that a proof rests on is in `ASSUMPTIONS.json` with an id (ASM-NNN, for example ASM-001 for the compiler) and a status. OWNER: the owner accepted it in `CLAUDE.md` (the nine of the owner's list, ASM-001 to ASM-009). REMOVE: a gate, a fact or a planned work removes it, and one lead owns the work. Argument: a statement that rests on an assumption names its id; an id has exactly one entry; an OWNER entry exists only with the owner's words; so the set of assumptions is the set of entries, and nothing is assumed that the registry does not show. Assumption: none beyond the nine (ASM-001 to ASM-009); an assumption written without the words of the pattern is closed by review, not by the gate.
+
+## Host API header holds only what the product calls
+
+For every admitted product root that includes fnvnx/hostapi.h: services declared (numbers of `FNVNX_PLAT_*`) = services expanded by at least one
+unit (gate `hostapi`, TOOLS.md). Module ids (`FNVNX_EXT_*`) are not services; machine models below the product boundary are modules. A service
+with no caller is deleted, never kept as a number answering a placeholder.
