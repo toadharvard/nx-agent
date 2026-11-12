@@ -699,6 +699,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = load_recipe(repo, self.roots, spec)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
 
     def stage(self, doc):
@@ -827,6 +828,8 @@ class Job:
             try:
                 p.externals(pws)
                 p.generate(pws)
+                if p.red:   # the output this root uses is not produced
+                    raise BuildRed({"stage": "uses:" + u["root"], "exit": None, "stderr": ["producer %s is red: %s" % (u["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
                 path = os.path.join(pws, "root", p.rec["outputs"][u["output"]])
                 out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(path, self.store)})
             finally:
@@ -840,26 +843,35 @@ class Job:
         _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
         xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
         for i, g in enumerate(self.rec["generated"]):
-            owner = next(r for r in self.roots if under(g["tool"], r))
-            tmp = tempfile.mkdtemp(dir=ws)
-            ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin + self.use_inputs(ws)
-            for p in g["inputs"]:
-                sub = [f for f in self.files if f == p or under(f, p)]
-                ins.append({"at": "/in/" + p, "tree": cas.ingest(os.path.join(self.repo, p), self.store) if sub == [p] else
-                            self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
-            env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-            env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
-            doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
-                   "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
-                   "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
-            res = self.stage(doc)[1]
-            got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
-            if got != sorted(g["outputs"]):
-                raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs %s differ from the declared %s" % (got, sorted(g["outputs"]))]})
-            cas.materialize(res["outputs"]["/out"], self.store, os.path.join(tmp, "out"))
-            for o in g["outputs"]:
-                os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
-                shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
+            try:
+                self.generate_one(ws, i, g, py, xin)
+            except BuildRed as r:   # a red generator does not stop the others: its outputs are absent, and what needs them is blocked by it
+                f = dict(r.args[0])
+                self.red.append(f)
+                for o in g["outputs"]:
+                    self.blocked[o] = f["stage"]
+
+    def generate_one(self, ws, i, g, py, xin):
+        owner = next(r for r in self.roots if under(g["tool"], r))
+        tmp = tempfile.mkdtemp(dir=ws)
+        ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin + self.use_inputs(ws)
+        for p in g["inputs"]:
+            sub = [f for f in self.files if f == p or under(f, p)]
+            ins.append({"at": "/in/" + p, "tree": cas.ingest(os.path.join(self.repo, p), self.store) if sub == [p] else
+                        self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
+        env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
+        doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
+               "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
+               "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
+        res = self.stage(doc)[1]
+        got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
+        if got != sorted(g["outputs"]):
+            raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs %s differ from the declared %s" % (got, sorted(g["outputs"]))]})
+        cas.materialize(res["outputs"]["/out"], self.store, os.path.join(tmp, "out"))
+        for o in g["outputs"]:
+            os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
+            shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
 
     def includes(self, ws):
         """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
@@ -931,12 +943,29 @@ class Job:
 
     def compile(self, ws, units):
         rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
+        # KEEP GOING: a unit is built iff every input it declares is produced. A unit that is the output of a red generator, every unit
+        # when a `uses` producer is red, and the C++ units when a plugin is red, are blocked by that stage (recorded, never built, never hidden).
+        self.blocked.update({u: self.blocked[u] for u in units if u in self.blocked})
+        units = [u for u in units if u not in self.blocked]
         kinds = {u: ("c" if u.endswith(CC_EXT) else "cxx" if u.endswith(CXX_EXT) else "asm") for u in units}
         used = sorted({drv["c" if k == "asm" else k] for k in kinds.values()})
         if not used:
             return {}
         rtp, _ = self.toolrt(used)
-        self.built = self.plugins(ws) if any(k == "cxx" for k in kinds.values()) else []
+        try:
+            self.use_inputs(ws)
+        except BuildRed as r:
+            self.red.append(dict(r.args[0]))
+            self.blocked.update({u: r.args[0]["stage"] for u in units})
+            return {}
+        try:
+            self.built = self.plugins(ws) if any(k == "cxx" for k in kinds.values()) else []
+        except BuildRed as r:
+            self.red.append(dict(r.args[0]))
+            self.blocked.update({u: r.args[0]["stage"] for u, k in kinds.items() if k == "cxx"})
+            units = [u for u in units if u not in self.blocked]
+            kinds = {u: k for u, k in kinds.items() if u in units}
+            self.built = []
         builds = {}
         # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the
         # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
@@ -974,10 +1003,8 @@ class Job:
                 res[u] = e["object"]
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
-        if failed:   # in unit order (UNITS is sorted), so the first failure and the list are deterministic
-            fl = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
-            raise BuildRed(dict(fl[0], failed_units=fl, done=sorted(res)))
-        return res
+        self.failed = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
+        return res   # in unit order (UNITS is sorted), so the failures are deterministic
 
     def link(self, ws, groups):
         """Stage `ld:<root>`: the linker of the compiler with the options the rule fixes (RECIPE.md "Link"). GROUPS: [(label, [(unit, path of
@@ -1168,12 +1195,25 @@ def build(repo, root, store, out, jobs=4, ext=None):
            "link_archives": [], "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
+    all_units = units
     try:
         _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
-        j.externals(ws)
-        j.generate(ws)
-        units = sorted(set(units) | set(j.generated_sources(ws)))
-        objs, und = j.compile(ws, units), set()
+        # KEEP GOING (RECIPE.md "Keep going"): every unit whose declared inputs are produced is built; a red stage is recorded with its
+        # diagnostics, what needs its output is blocked by it and not run; the root is red if anything is red or blocked.
+        und, objs = set(), {}
+        try:
+            j.externals(ws)
+            try:
+                j.generate(ws)
+                units = sorted(set(units) | set(j.generated_sources(ws)))
+            except BuildRed as r:   # the list of externally sourced units is itself not produced
+                j.red.append(dict(r.args[0]))
+            objs = j.compile(ws, units)
+        except BuildRed as r:   # an external is not available: no stage of the root has its inputs
+            j.red.append(dict(r.args[0]))
+            j.blocked.update({u: r.args[0]["stage"] for u in units})
+        all_units, units = units, [u for u in units if u in objs]
+        res["objects"], res["failed_units"] = [], []
         for n, t, _ in j.built:
             ent = cas.manifest(t, store)["entries"][n + ".so"]
             dest = os.path.join(out, "plugins", n + ".so")
@@ -1190,62 +1230,74 @@ def build(repo, root, store, out, jobs=4, ext=None):
             und |= x
             res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
-        if j.rec.get("link"):
-            lk = j.rec["link"]
-            name = lk["output"]
-            groups = [("00-own", [(u, o["object"]) for u, o in zip(units, res["objects"])])]
-            res["link_roots"], defs = [], {}
-            for n, d in enumerate(lk.get("roots", [])):
-                try:
-                    r = build(repo, d, store, os.path.join(ws, "in", d.replace("/", "__")), jobs, j.extcache)
-                except RecipeError as x:
-                    raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["input root %s: invalid recipe: %s" % (d, x)][:20]})
-                j.keys |= set(r["stage_keys"])
-                j.run, j.hit = j.run + r["stages"]["run"], j.hit + r["stages"]["hit"]
-                if r["status"] == "red":
-                    f = r["failure"]
-                    raise BuildRed({"stage": "ld:" + root, "exit": f["exit"], "stderr": ["input root %s is red: stage %s" % (d, f["stage"])] + f["stderr"][-18:]})
-                kept = []     # the input root's objects stay beside this root's result (its own build directory is scratch)
-                for o in r["objects"]:
-                    dest = os.path.join(out, "link_roots", d.replace("/", "__"), o["unit"] + ".o")
-                    os.makedirs(os.path.dirname(dest), exist_ok=True)
-                    shutil.copyfile(o["object"], dest)
-                    kept.append({"unit": o["unit"], "object": os.path.abspath(dest), "sha256": o["sha256"]})
-                res["link_roots"].append({"root": d, "sha256": objects_digest(r), "objects": kept})
-                groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in kept]))
-                defs[groups[-1][0]] = r["defined"]
-            for lab, objs in groups:
-                bad = defined_mismatch(lab, res["defined"] if lab == "00-own" else defs[lab], objs)
-                if bad:
-                    raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": bad})
-            for lab, objs in groups:      # every linked object has the target of the link (ELF class, e_machine), read from its header
-                bad = [u for u, p in objs if object_target(p) != TARGETS[emulation_of(lk["flags"])]]
-                if bad:
-                    raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["%s: object %s has target (class, e_machine) %s, the link %s is %s" % (
-                        lab, u, object_target(dict(objs)[u]), emulation_of(lk["flags"]), TARGETS[emulation_of(lk["flags"])]) for u in bad[:20]]})
-            elf_tree, objs_tree, extra = j.link(ws, groups)
-            res["link_archives"] = j.archive_members(cas.manifest(elf_tree, store)["entries"], name, out)
-            fin = j.ldcheck(ws, elf_tree, objs_tree, extra)
-            ent = cas.manifest(fin, store)["entries"]
-            shutil.copyfile(cas._obj(store, ent[name]), os.path.join(out, name))
-            res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent[name]["h"]}
-            res["ld_gate"] = {}
-            for f in ("ld.json", "ld.ids"):
-                shutil.copyfile(cas._obj(store, ent[f]), os.path.join(out, f))
-                res["ld_gate"][f] = {"path": os.path.abspath(os.path.join(out, f)), "sha256": ent[f]["h"]}
+        if j.rec.get("link") and (j.red or j.blocked or j.failed):
+            j.blocked[j.rec["link"]["output"]] = (j.red or j.failed)[0]["stage"]
+        elif j.rec.get("link"):
+          try:
+              lk = j.rec["link"]
+              name = lk["output"]
+              groups = [("00-own", [(u, o["object"]) for u, o in zip(units, res["objects"])])]
+              res["link_roots"], defs = [], {}
+              for n, d in enumerate(lk.get("roots", [])):
+                  try:
+                      r = build(repo, d, store, os.path.join(ws, "in", d.replace("/", "__")), jobs, j.extcache)
+                  except RecipeError as x:
+                      raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["input root %s: invalid recipe: %s" % (d, x)][:20]})
+                  j.keys |= set(r["stage_keys"])
+                  j.run, j.hit = j.run + r["stages"]["run"], j.hit + r["stages"]["hit"]
+                  if r["status"] == "red":
+                      f = r["failure"]
+                      raise BuildRed({"stage": "ld:" + root, "exit": f["exit"], "stderr": ["input root %s is red: stage %s" % (d, f["stage"])] + f["stderr"][-18:]})
+                  kept = []     # the input root's objects stay beside this root's result (its own build directory is scratch)
+                  for o in r["objects"]:
+                      dest = os.path.join(out, "link_roots", d.replace("/", "__"), o["unit"] + ".o")
+                      os.makedirs(os.path.dirname(dest), exist_ok=True)
+                      shutil.copyfile(o["object"], dest)
+                      kept.append({"unit": o["unit"], "object": os.path.abspath(dest), "sha256": o["sha256"]})
+                  res["link_roots"].append({"root": d, "sha256": objects_digest(r), "objects": kept})
+                  groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in kept]))
+                  defs[groups[-1][0]] = r["defined"]
+              for lab, objs in groups:
+                  bad = defined_mismatch(lab, res["defined"] if lab == "00-own" else defs[lab], objs)
+                  if bad:
+                      raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": bad})
+              for lab, objs in groups:      # every linked object has the target of the link (ELF class, e_machine), read from its header
+                  bad = [u for u, p in objs if object_target(p) != TARGETS[emulation_of(lk["flags"])]]
+                  if bad:
+                      raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["%s: object %s has target (class, e_machine) %s, the link %s is %s" % (
+                          lab, u, object_target(dict(objs)[u]), emulation_of(lk["flags"]), TARGETS[emulation_of(lk["flags"])]) for u in bad[:20]]})
+              elf_tree, objs_tree, extra = j.link(ws, groups)
+              res["link_archives"] = j.archive_members(cas.manifest(elf_tree, store)["entries"], name, out)
+              fin = j.ldcheck(ws, elf_tree, objs_tree, extra)
+              ent = cas.manifest(fin, store)["entries"]
+              shutil.copyfile(cas._obj(store, ent[name]), os.path.join(out, name))
+              res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent[name]["h"]}
+              res["ld_gate"] = {}
+              for f in ("ld.json", "ld.ids"):
+                  shutil.copyfile(cas._obj(store, ent[f]), os.path.join(out, f))
+                  res["ld_gate"][f] = {"path": os.path.abspath(os.path.join(out, f)), "sha256": ent[f]["h"]}
+          except BuildRed as r:
+            j.red.append(dict(r.args[0]))
+            res["failed_units"].append({"unit": j.rec["link"]["output"], "stage": r.args[0]["stage"], "exit": r.args[0].get("exit"), "stderr": list(r.args[0]["stderr"])[-20:]})
         for key in ("constants", "contract_names"):
             if j.rec.get(key):
                 shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
                 res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
-    except BuildRed as r:
-        fl = r.args[0].get("failed_units", [])
-        res.update(status="red", failure={k: v for k, v in r.args[0].items() if k in ("stage", "exit", "stderr", "done")}, failed_units=fl)
+    except BuildRed as r:   # a stage of the root's own that is not keep-going (a constants file ...): red, nothing else known
+        j.red.append(dict(r.args[0]))
     except (sandbox.SbxError, OSError, cas.CasError, runtime.RtError, unitstage.UnitError) as e:
         # a store or sandbox failure (EMLINK, ENOSPC, EXDEV ...) is a red build naming its stage: objects.json is always written
         res.update(status="red", failed_units=[], failure={"stage": getattr(e, "stage", "store"), "exit": None, "stderr": [str(e)[-300:]]})
     finally:
         shutil.rmtree(ws, ignore_errors=True)
-    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units, pp_keys=dict(sorted(j.ppkeys.items())))
+    if j.red or j.failed or j.blocked:
+        first = (j.red or j.failed)[0] if (j.red or j.failed) else None
+        if first is None:   # blocked only: cannot happen (a block names a red stage); kept red and loud
+            first = {"stage": "blocked", "exit": None, "stderr": ["units blocked without a red stage"]}
+        res["failed_units"] = (res.get("failed_units") or []) + [f for f in j.failed if f not in res.get("failed_units", [])]
+        res["blocked"] = [{"unit": u, "blocked_by": b} for u, b in sorted(j.blocked.items())]
+        res.update(status="red", failure={k: v for k, v in first.items() if k in ("stage", "exit", "stderr")}, red_stages=[r["stage"] for r in j.red])
+    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=all_units, pp_keys=dict(sorted(j.ppkeys.items())))
     with open(os.path.join(out, "objects.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")

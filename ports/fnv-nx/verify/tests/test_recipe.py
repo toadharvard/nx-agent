@@ -234,7 +234,20 @@ def main():
               r1["status"] == "red" and [f["unit"] for f in fu] == ["b.c", "c.c"] and fu[0]["stage"] == "cc:b.c" and fu[1]["stage"] == "pp:c.c"
               and all(f["exit"] and 0 < len(f["stderr"]) <= 20 and set(f) == {"unit", "stage", "exit", "stderr"} for f in fu)
               and any("undeclared_b" in l for l in fu[0]["stderr"]) and any("missing_c.h" in l for l in fu[1]["stderr"])
-              and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and r1["objects"] == [], (fu, r1.get("failure")))
+              and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and [o["unit"] for o in r1["objects"]] == ["a.c"], (fu, r1.get("failure")))
+        # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
+        # built, the ELF is blocked, and the root is red naming the red stage.
+        kg = make_repo("kg", rec=dict(RECIPE, os_layer=[], generated=RECIPE["generated"] + [
+            {"tool": T + "gen/bad.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["bad.c"]}]),
+            files={"toy/os.S": None, "gen/bad.py": "import sys\nsys.stderr.write('generator went wrong\\n')\nsys.exit(3)\n"})
+        rk = recipe.build(kg, ROOT, BASE + "/kg-store", BASE + "/kg-out")
+        check("red generator: the other units are built, its output unit and the ELF are blocked by its stage, root red",
+              rk["status"] == "red" and rk["failure"]["stage"] == "gen:%s:1" % ROOT and any("generator went wrong" in l for l in rk["failure"]["stderr"])
+              and [o["unit"] for o in rk["objects"]] == ["a.c", "b.c", "c.c"] and rk["elf"] is None and rk["red_stages"] == ["gen:%s:1" % ROOT]
+              and rk["blocked"] == [{"unit": "bad.c", "blocked_by": "gen:%s:1" % ROOT}, {"unit": "toy.elf", "blocked_by": "gen:%s:1" % ROOT}]
+              and "bad.c" in rk["units"], (rk.get("failure"), rk.get("blocked"), [o["unit"] for o in rk["objects"]]))
+        ok_ = recipe.build(kg, ROOT, BASE + "/kg-store", BASE + "/kg-out2")
+        check("red generator: a second run is deterministic and the built objects are cache hits", ok_["blocked"] == rk["blocked"] and ok_["stages"]["run"] == 0, ok_["stages"])
         norm = lambda r: json.dumps({k: v for k, v in r.items() if k not in ("stages", "stage_keys")}, sort_keys=True).replace(BASE + "/two-out1", "O").replace(BASE + "/two-out2", "O")
         check("two cold runs of the failing root give the same objects.json", norm(r1) == norm(r2))
 

@@ -158,6 +158,17 @@ the unit's keys; the units are built with the root's own. Red (stage `sources:<r
 not declare, a path that is no file inside the external (`..` included), a `.` path the root does not track. A changed list adds only the new units:
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
 
+## Keep going
+
+A root build does not stop at the first red stage. Every unit whose declared inputs are all produced is built (and its objects land in the
+store as usual); a red stage is recorded with its stage name, exit and the last 20 diagnostic lines. Blocked, never run and never hidden:
+(i) a unit that is the output of a red generator, (ii) every unit of a root whose `uses` producer or whose external is red, (iii) the C++ units
+when a plugin stage is red, (iv) the ELF whenever anything is red or blocked (also when an input root of `link.roots` is red). A unit that
+includes a file a red generator did not produce fails in its own preprocessing stage and is listed with those diagnostics. The root is `red`
+if any unit or stage is red or blocked. `objects.json` of a red root: `objects` (the built units), `failed_units` ({unit, stage, exit, stderr}, in unit order),
+`blocked` ({unit, blocked_by: stage}, sorted by unit), `red_stages` (the stages that were red outside a unit), `failure` (the first red stage).
+`units` is always the whole universe.
+
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,
 `--defsym`, `--wrap`, `--allow-multiple-definition`, `--warn-unresolved-symbols`, `-z undefs`, `-z muldefs`. A token is refused when, with one or two
