@@ -226,3 +226,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 - 04:00Z w1b e2efc18d: the translator is a guest root (msvcmodel, plugins, semantics flags, no -fPIC).
     - Measurement with borrowed lib/sha256: recipe green, 16 objects; objstub red, 365/473 certified, 107 findings. The findings are unused MojoShader GL runtime and bytecode profile bodies.
     - Rule given: the root holds only code reachable from fnvnx_shaders.h. Reachability is the relocation graph (--gc-sections semantics) from reach_census.py. Unreachable files and functions are deleted, and 0 collected sections remain. A reached stub-like body is reported as a finding, not deleted.
+- 04:05Z w1b 51203535: reach-census prune (measurement: borrowed lib/sha256).
+    - Objects: 16 → 8. Collected sections: 125 → 12; those 12 are inlined-only helpers, kept by the fixpoint rule and dropped at the product link.
+    - objstub: 272/371 certified, 99 findings. Before the prune: 365/473, 108.
+    - The remaining findings come from the BYTECODE profile, reached because SUPPORT_PROFILE_BYTECODE defaults to 1.
+    - Rule given: every SUPPORT_PROFILE_* is set explicitly, 1 only for GLSL, and the macro list is checked against mojoshader_internal.h. parse_args_NULL is reviewed after the rule is applied.
