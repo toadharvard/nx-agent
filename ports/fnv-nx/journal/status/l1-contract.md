@@ -6,7 +6,7 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` e35b870a (CLAUDE.m
 
 | # | Task | Worker session | Branch | Status |
 |---|---|---|---|---|
-| 2p | TOP: PP view EMLINK at 4,098-unit pack (O(units×names) placeholder links): shared all-placeholder base per real tree + per-unit ro bind of closure objects; store errors = red verdict with stage; check on L3a pack 2 cold + warm | session_01KmtZKS82vxSbxtKufqbp4i (w14) | claude/fnv-l1-contract-w14 | doing |
+| 2p | TOP: PP view EMLINK at L3a lift/pack 4,098 units and L3b lift/test/dslemit 4,096 units (O(units×names) placeholder links): shared all-placeholder base per real tree + per-unit ro bind of closure objects; store errors = red verdict with stage; check on L3a pack 2 cold + warm | session_01KmtZKS82vxSbxtKufqbp4i (w14) | claude/fnv-l1-contract-w14 | doing |
 | 2c | selftests content-keyed (138-149 s of ~143 s warm verdict, w14 at e90a7e4; red results recomputed every run) + budget gate (no-change rerun recomputes 0; warm wall-clock ≤ B in VERDICT.md) | session_01KmtZKV6pbaGLooiWzXRtev (w19) | claude/fnv-l1-contract-w19 | doing |
 | 3y | guest roots refuse error-downgrading flags (-fpermissive, -w, -Wno-error*) (L3a) | w14 | claude/fnv-l1-contract-w14 | queued after EMLINK |
 | 1a | merge queue via MERGER: w8 exepin | session_01KmtZKRkugvim1Bfui5aFTw (w4 takes it over) | claude/fnv-l1-contract-w8 a6753733 | doing: w4 rebasing on f1059af7 |
