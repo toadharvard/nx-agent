@@ -71,7 +71,8 @@ def main(argv):
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
-        registry = {e["id"]: e["status"] for e in json.load(open(os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")))["entries"]}   # of the tree under test
+        rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every assume call is red
+        registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
         its, fs = objstub.judge(results, rows, facts, wine, declared, (registry, domains))
         items, finds = items + its, finds + fs
     except (ValueError, KeyError, OSError) as e:
