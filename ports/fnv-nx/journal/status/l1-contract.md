@@ -636,3 +636,5 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - w5 b639f528: verdict green (89a30704, 344.9 s). GL pins correction: header reads come from the recipe PP read sets in GATE_CACHE, not from build_gl4.sh or readroots.json. Runner totality comes first.
 - L3a item 16: lifted source from a generated stage (`source: {stage}` vs `pack`, exactly one). w14 is resumed for it → claude/fnv-l1-contract-w14-src. The link script is link/guest.ld.
 - Doubles finding: verify/tests/guest/guest.ld is a second guest link script (fixed, not PIE). Raised with L4; the rule is a single link script, checked as part of the doubles gate.
+- History decision (orchestrator, 2026-11-12): no rewrite before the first frame; gate_legal checks the tree only; the history is the orchestrator's open item. w12 records this as a stated limit in gate_legal.
+- L4 accepts the single link script rule: w6 deletes verify/tests/guest/guest.ld and tests/bootguest/guest.ld; the proof is `git ls-files '*.ld'` = link/guest.ld. Link-script identity in the doubles gate is queued for w12 after the merge.
