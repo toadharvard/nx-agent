@@ -28,6 +28,9 @@ Old workers w1, w2, w3 (session_01KmtZKSjF1rc6JAiuz1rvJg, _01KmtZKU6xzxGuGdkrtzw
 - tc-repro session_01KmtZKSzcic61GPMwx3wqug (fnvnx-a64-msvcmodel bit-for-bit rebuild; reports to L4 and L5): running.
 
 ## Open cross-layer items
+- Redist (w13 ee2a53f8, from trunk e39caa5a): DECLARED_ROOTS (exe, redist) in contract/dllkind.py; module table 7 = 4 static + 3 on demand, 0 overlaps; d3dx9_31 has a row (0x014b0000, 177 slots, 0 without provider). 1 collision, galaxywrp (resolved by the owner's Galaxy order); conflicts() is to name the rule per collision. Then MERGER.
+- TLS dispatch word: thread.cpp.o defines fnvnx_call_fp as TLS GLOBAL 4 in .tbss with 0 TLS relocations (definition only). The TLSIE check moves to the first lifted-pack object (asked of L3a).
+- msvcmodel13: L1 gave the toolchain-build profile to L1 w5 as top priority; the commit goes to L5 and w14.
 - Platform root census (w10, 3bfa841): 118 units (74 platform + 44 FreeType): 117 green, 1 red (ini.cpp, L2 pi N3, with the L2 lead). The link, warm build, verdict and readelf wait for the L2 fix.
 - Fonts (w12 35c8f5f9, -w12-fongate2): face names are spelled only in font_faces.cpp. Census by relocations: 18 requests, 14 faces, 0 unresolved; the exe and modules request 0. Rulings: enum_fallback = Wine 9.0's cited substitutes and fallback (invented faces deleted); declared files = mapped files of the pinned Wine package plus its dependency closure; the 20 extras removed; a gate on face-name literals in objects; next a mirror with sha256 pins.
 - TEXT_ENTRY 36 host server (swkbd): reassigned from w12 to w9 session_01KmtZKUMZLSvzv7uGGqu6Qw, branch -w9-swkbd; the host side goes through L4's shared input model. Status: doing.
