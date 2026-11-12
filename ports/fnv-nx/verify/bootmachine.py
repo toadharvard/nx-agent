@@ -429,6 +429,31 @@ class Machine:
                 cb(self.tid(), a, s, value & ((1 << 8 * s) - 1))
         self.uc.hook_add(UC_HOOK_MEM_WRITE, hit, begin=max(addr - 31, 0), end=addr + size - 1)
 
+    def watch_calls_into(self, lo, hi, cb):
+        """cb(tid, src, dst) for every call (BL or BLR, decoded from the instruction word at src) whose source lies outside [lo, hi) and whose
+        landing block dst lies inside it. Block hook over the image: a BL/BLR ends its translation block, so the block executed just before dst
+        is the caller's; a call is recognised by (1) the last word of that block being BL (0x94000000 / 0xFC000000 mask) or BLR
+        (0xD63F0000 / 0xFFFFFC1F mask), (2) lr = src + 4, which only a call sets, and (3) for BL, dst = src + 4 * imm26. A thread switch
+        resets the previous block."""
+        prev = [None]
+
+        def blk(uc, addr, size, _):
+            tid, p = self.tid(), prev[0]
+            prev[0] = (tid, addr, size)
+            if p is None or p[0] != tid or not lo <= addr < hi:
+                return
+            src = p[1] + p[2] - 4
+            if lo <= src < hi or uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF != src + 4:
+                return
+            w, = struct.unpack("<I", bytes(uc.mem_read(src, 4)))
+            if w & 0xFC000000 == 0x94000000:
+                imm = w & 0x3FFFFFF
+                if addr == (src + 4 * (imm - (1 << 26) if imm >> 25 else imm)) & 0xFFFFFFFF:
+                    cb(tid, src, addr)
+            elif w & 0xFFFFFC1F == 0xD63F0000:
+                cb(tid, src, addr)
+        self.uc.hook_add(UC_HOOK_BLOCK, blk, begin=self.image[0], end=self.image[1] - 1)
+
     def sp(self):
         """the guest SP of the running thread (valid inside a watch callback)"""
         return self.uc.reg_read(UC_ARM64_REG_SP)
