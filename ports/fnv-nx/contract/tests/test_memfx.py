@@ -3,6 +3,9 @@
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import argflow, memfx
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 BASE, TEXT, RD, DATA, DATA2 = 0x400000, 0x1000, 0x2000, 0x3000, 0x4000
 IMPS = ['LoadLibraryA', 'GetProcAddress', 'HeapFree', 'CloseHandle']
@@ -115,14 +118,7 @@ def pe(secs, drel=()):
     return bytes(out)
 
 
-fails = []
-
-
-def check(name, got, want):
-    if got != want:
-        fails.append('%s: got %r, want %r' % (name, got, want))
-
-
+fails = testcase.FAILED
 def image(prog, drel=(), writes='', escape=None):
     secs, a = build(prog)
     img = argflow.Image(pe(secs, drel), 'syn.exe', {s: [(s, e)] for s, e in a.funcs.values()})
@@ -178,9 +174,9 @@ def g_import(a):
     a.func('g'); a.push(G + 0x200); a.call_imp('CloseHandle'); a.ret(); a.end('g')
 
 
-check('private frame object, leaf callee', keeps(frame_prog(g_leaf), 'f', 'esi'), True)
-check('callee writes through the register that holds the frame address', keeps(frame_prog(g_param), 'f', 'esi'), False)
-check('callee writes through an unknown pointer, frame address never escapes', keeps(frame_prog(g_store_other), 'f', 'esi'), True)
+case('private frame object, leaf callee', got=keeps(frame_prog(g_leaf), 'f', 'esi'), want=True)
+case('callee writes through the register that holds the frame address', got=keeps(frame_prog(g_param), 'f', 'esi'), want=False)
+case('callee writes through an unknown pointer, frame address never escapes', got=keeps(frame_prog(g_store_other), 'f', 'esi'), want=True)
 
 
 def esc_prog(a):            # the frame address is stored to a global: it escapes
@@ -191,7 +187,7 @@ def esc_prog(a):            # the frame address is stored to a global: it escape
     a.call('g'); a.raw(0x8b, 0x06, 0x5e, 0xc9, 0xc3); a.end('f')
 
 
-check('frame address escaped to a global: a call through an unknown pointer may write', keeps(esc_prog, 'f', 'esi'), False)
+case('frame address escaped to a global: a call through an unknown pointer may write', got=keeps(esc_prog, 'f', 'esi'), want=False)
 
 
 def callee_passes(a):       # g(esi) passes its esi on to a callee that writes through it
@@ -200,7 +196,7 @@ def callee_passes(a):       # g(esi) passes its esi on to a callee that writes t
     a.func('g'); a.call('h'); a.ret(); a.end('g')
 
 
-check('frame address passed down two levels, written there', keeps(frame_prog(callee_passes), 'f', 'esi'), False)
+case('frame address passed down two levels, written there', got=keeps(frame_prog(callee_passes), 'f', 'esi'), want=False)
 
 
 def callee_rec(a):          # g and h call each other; neither writes
@@ -208,7 +204,7 @@ def callee_rec(a):          # g and h call each other; neither writes
     a.func('g'); a.raw(0x85, 0xc0, 0x74, 0x05); a.call('h'); a.ret(); a.end('g')
 
 
-check('recursion fixpoint, no write', keeps(frame_prog(callee_rec), 'f', 'esi'), True)
+case('recursion fixpoint, no write', got=keeps(frame_prog(callee_rec), 'f', 'esi'), want=True)
 
 
 def callee_rec_w(a):        # the recursion writes
@@ -216,7 +212,7 @@ def callee_rec_w(a):        # the recursion writes
     a.func('g'); a.raw(0x85, 0xc0, 0x74, 0x05); a.call('h'); a.ret(); a.end('g')
 
 
-check('recursion fixpoint, write inside the cycle', keeps(frame_prog(callee_rec_w), 'f', 'esi'), False)
+case('recursion fixpoint, write inside the cycle', got=keeps(frame_prog(callee_rec_w), 'f', 'esi'), want=False)
 
 
 def indirect_prog(a):       # call eax: the call target is not known
@@ -226,7 +222,7 @@ def indirect_prog(a):       # call eax: the call target is not known
     a.raw(0x8b, 0x06, 0x5e, 0xc9, 0xc3); a.end('f')
 
 
-check('indirect call receiving the tainted esi', keeps(indirect_prog, 'f', 'esi'), False)
+case('indirect call receiving the tainted esi', got=keeps(indirect_prog, 'f', 'esi'), want=False)
 
 
 def imp_prog(a):            # frame address passed to an import
@@ -236,11 +232,11 @@ def imp_prog(a):            # frame address passed to an import
     a.raw(0x8b, 0x06, 0x5e, 0xc9, 0xc3); a.end('f')
 
 
-check('frame address passed to an import with no write facts', keeps(imp_prog, 'f', 'esi'), False)
-check('... the import is declared to write through no argument', keeps(imp_prog, 'f', 'esi',
-                                                                       writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n'), True)
-check('... the import escapes the argument', keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
-                                                   escape='dll\tname\tescape\nkernel32.dll\tCloseHandle\te\n'), False)
+case('frame address passed to an import with no write facts', got=keeps(imp_prog, 'f', 'esi'), want=False)
+case('... the import is declared to write through no argument', got=keeps(imp_prog, 'f', 'esi',
+                                                                       writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n'), want=True)
+case('... the import escapes the argument', got=keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
+                                                   escape='dll\tname\tescape\nkernel32.dll\tCloseHandle\te\n'), want=False)
 
 
 # ---- globals
@@ -257,12 +253,12 @@ def const(prog, lo, hi, **kw):
 
 
 v = const(glob_prog(lambda a: None), G + 0x100, G + 0x106)
-check('global read only by pointers passed to a no-write import', (v.ok, [r for r in v.reasons if 'import' in r][:1] != []), (False, True))
+case('global read only by pointers passed to a no-write import', got=(v.ok, [r for r in v.reasons if 'import' in r][:1] != []), want=(False, True))
 v = const(glob_prog(lambda a: None), G + 0x100, G + 0x106, writes='dll\tname\twrites\nkernel32.dll\tGetProcAddress\tnn\n')
-check('global constant when the import writes nowhere', v.ok, True)
+case('global constant when the import writes nowhere', got=v.ok, want=True)
 v = const(glob_prog(lambda a: None), G + 0x100, G + 0x106, writes='dll\tname\twrites\nkernel32.dll\tGetProcAddress\tnn\n',
           escape='dll\tname\tescape\nkernel32.dll\tGetProcAddress\tee\n')
-check('global handed to an import that retains it', v.ok, False)
+case('global handed to an import that retains it', got=v.ok, want=False)
 
 
 def w_direct(a):
@@ -270,9 +266,9 @@ def w_direct(a):
 
 
 v = const(glob_prog(w_direct), G + 0x100, G + 0x106, writes='dll\tname\twrites\nkernel32.dll\tGetProcAddress\tnn\n')
-check('global written by another function directly', (v.ok, any('direct store' in r for r in v.reasons)), (False, True))
+case('global written by another function directly', got=(v.ok, any('direct store' in r for r in v.reasons)), want=(False, True))
 v = const(glob_prog(w_direct), G + 0x108, G + 0x10c, writes='dll\tname\twrites\nkernel32.dll\tGetProcAddress\tnn\n')
-check('a direct store elsewhere does not matter', v.ok, True)
+case('a direct store elsewhere does not matter', got=v.ok, want=True)
 
 
 def w_idx_unbounded(a):     # mov [G + eax*4], ecx with eax unknown (a parameter register)
@@ -285,13 +281,13 @@ def w_idx_bounded(a):       # and eax,3 ; mov [G + eax*4], ecx
 
 wi = 'dll\tname\twrites\nkernel32.dll\tGetProcAddress\tnn\n'
 v = const(glob_prog(w_idx_unbounded), G + 0x100, G + 0x106, writes=wi)
-check('indexed write, unbounded index covers the section', (v.ok, any('unbounded' in r for r in v.reasons)), (False, True))
+case('indexed write, unbounded index covers the section', got=(v.ok, any('unbounded' in r for r in v.reasons)), want=(False, True))
 v = const(glob_prog(w_idx_bounded), G + 0x100, G + 0x106, writes=wi)
-check('indexed write, proven bound does not reach the string', v.ok, True)
+case('indexed write, proven bound does not reach the string', got=v.ok, want=True)
 v = const(glob_prog(w_idx_bounded), G + 8, G + 12, writes=wi)
-check('indexed write, proven bound covers G+8..G+16', v.ok, False)
+case('indexed write, proven bound covers G+8..G+16', got=v.ok, want=False)
 v = const(glob_prog(w_idx_bounded), G + 0x10, G + 0x14, writes=wi)
-check('indexed write, [G+0..G+0x10) bound excludes G+0x10', v.ok, True)
+case('indexed write, [G+0..G+0x10) bound excludes G+0x10', got=v.ok, want=True)
 
 
 def leak_prog(a):           # the address of a global kept in a data word
@@ -300,7 +296,7 @@ def leak_prog(a):           # the address of a global kept in a data word
 
 img_, mx_, a_ = image(leak_prog, drel=[(DATA + 0x40, G + 0x20)], writes=wi)
 v = mx_.const_range(G + 0x100, G + 0x106)
-check('address leaked by a data relocation: not constant', (v.ok, any('data word' in r for r in v.reasons)), (False, True))
+case('address leaked by a data relocation: not constant', got=(v.ok, any('data word' in r for r in v.reasons)), want=(False, True))
 
 
 def ptrwrite_prog(a):       # the address is passed to a local function that writes through it
@@ -309,9 +305,9 @@ def ptrwrite_prog(a):       # the address is passed to a local function that wri
 
 
 v = const(ptrwrite_prog, G + 0x100, G + 0x106, writes=wi)
-check('global written through a pointer passed to a local function', (v.ok, any('write through a pointer' in r for r in v.reasons)), (False, True))
+case('global written through a pointer passed to a local function', got=(v.ok, any('write through a pointer' in r for r in v.reasons)), want=(False, True))
 v = const(ptrwrite_prog, G + 0x180, G + 0x184, writes=wi)
-check('exact pointer does not reach another address', (v.ok, v.reasons), (True, []))
+case('exact pointer does not reach another address', got=(v.ok, v.reasons), want=(True, []))
 
 
 def storeptr_prog(a):       # the address is stored to memory
@@ -320,11 +316,11 @@ def storeptr_prog(a):       # the address is stored to memory
 
 
 v = const(storeptr_prog, G + 0x100, G + 0x106, writes=wi)
-check('address stored to memory escapes', (v.ok, any('escape' in r for r in v.reasons)), (False, True))
+case('address stored to memory escapes', got=(v.ok, any('escape' in r for r in v.reasons)), want=(False, True))
 v = const(glob_prog(lambda a: None), BASE + RD, BASE + RD + 4, writes=wi)
-check('import slot is written by the loader', (v.ok, any('loader' in r for r in v.reasons)), (False, True))
+case('import slot is written by the loader', got=(v.ok, any('loader' in r for r in v.reasons)), want=(False, True))
 v = const(glob_prog(lambda a: None), BASE + TEXT + 0x300, BASE + TEXT + 0x304)
-check('read-only section is constant', v.ok, True)
+case('read-only section is constant', got=v.ok, want=True)
 
 # ---- argflow: A7 replaced by the rule: a CreateFile-style handle stored through a pointer register, loaded after a call
 def handle_prog(callee):
@@ -351,9 +347,9 @@ def origin(callee, mode):
     return ok
 
 
-check('handle through [esi] across a leaf call: rule closes', origin(g_leaf, 'rule'), True)
-check('handle through [esi] across a writing call: open', origin(g_param, 'rule'), False)
-check('handle through [esi]: strict (no call allowed) stays open', origin(g_leaf, 'strict'), False)
+case('handle through [esi] across a leaf call: rule closes', got=origin(g_leaf, 'rule'), want=True)
+case('handle through [esi] across a writing call: open', got=origin(g_param, 'rule'), want=False)
+case('handle through [esi]: strict (no call allowed) stays open', got=origin(g_leaf, 'strict'), want=False)
 
 if fails:
     print('FAIL\n' + '\n'.join(fails))

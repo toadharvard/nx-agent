@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Tests for verify/opentrace.py. Run: python3 -I ports/fnv-nx/verify/tests/test_opentrace.py"""
 import json, os, shutil, subprocess, sys, tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "opentrace.py")
 SYS = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]
 IGN = ["/proc", "/dev", "/sys"]
-FAILS = []
-
-
+FAILS = testcase.FAILED
 def ot(*args, cwd=None, env=None):
     e = dict(os.environ if env is None else env)
     return subprocess.run([sys.executable, "-I", TOOL, *args], cwd=cwd, env=e,
@@ -35,19 +36,6 @@ def report(t):
         return json.load(f)
 
 
-def case(name):
-    def deco(fn):
-        t = tempfile.mkdtemp(prefix="opentrace-test-")
-        try:
-            fn(t)
-            print("PASS " + name)
-        except Exception as ex:  # noqa
-            FAILS.append(name)
-            print("FAIL %s: %r" % (name, ex))
-        finally:
-            shutil.rmtree(t, ignore_errors=True)
-        return fn
-    return deco
 
 
 TRACE = r'''100 execve("/usr/bin/sh", ["sh"], 0x1 /* 3 vars */) = 0

@@ -12,15 +12,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import toolflags  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILED = []
+FAILED = testcase.FAILED
 TMP = tempfile.mkdtemp(prefix="toolflags-test-")
 
 
-def case(name, ok, info=""):
-    print("%s %s %s" % ("PASS" if ok else "FAIL", name, "" if ok else info))
-    if not ok:
-        FAILED.append(name)
 
 
 ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "1700000000", "COLUMNS": "80",
@@ -48,7 +47,7 @@ def rules(d, root=None):
 
 def expect(name, d, want, root=None):
     got = rules(d, root)
-    case(name, got == sorted(want), "want %s got %s" % (sorted(want), got))
+    case('expect', got == sorted(want), "want %s got %s" % (sorted(want), got), key=name)
 
 
 def env_with(**kw):

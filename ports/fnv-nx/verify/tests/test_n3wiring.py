@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_guest as tg
 import test_plugins as tp
-from test_plugins import BASE, ROOT, T, REAL, VERIFY, check
+from test_plugins import BASE, ROOT, T, REAL, VERIFY
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, os.path.join(REAL, T + "contract"))
 sys.path.insert(0, os.path.join(REAL, T + "link"))
@@ -28,6 +28,9 @@ import gate_r7  # noqa: E402
 import l2sections  # noqa: E402
 import store  # noqa: E402
 import test_l2gates as tl  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 G, H = "?g@@YAHH@Z", "?h@@YAHXZ"
 
@@ -72,8 +75,8 @@ def chain(tmp, a_obj, b_obj, tag, extra=None):
 
 def main():
     argv, _ = gc.stages("/w", {"exe": "x/exe", "msvc": "x/msvc", "universe": "x/u"}, {"x": {"host": "/h"}}, {"units": "/w/units.json"}, "bodysel")["bodysel"]
-    check("bodysel stage passes --n3 <w>/n3.tsv", "--n3" in argv and argv[argv.index("--n3") + 1] == "/w/n3.tsv", argv)
-    check("bodysel needs bind first", gc.NEEDS["bodysel"].index("bind") < gc.NEEDS["bodysel"].index("bodysel"), gc.NEEDS["bodysel"])
+    case("bodysel stage passes --n3 <w>/n3.tsv", "--n3" in argv and argv[argv.index("--n3") + 1] == "/w/n3.tsv", argv)
+    case("bodysel needs bind first", gc.NEEDS["bodysel"].index("bind") < gc.NEEDS["bodysel"].index("bodysel"), gc.NEEDS["bodysel"])
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     rec = tg.guest_rec(pin["external"])
     repo = tg.guest_repo("n3", rec, pin, files={ROOT + "/a.cc": tl.SRC_A, ROOT + "/b.cc": tl.SRC_B})
@@ -82,9 +85,9 @@ def main():
     tmp = os.path.join(BASE, "n3work")
     os.makedirs(tmp)
     a_n3 = l2sections.read(ob["a.cc"])["n3"]
-    check("the real object carries an N3 row for g", any(r[0] == tl.G_SYM and r[1] == "ok" for r in a_n3), a_n3)
+    case("the real object carries an N3 row for g", any(r[0] == tl.G_SYM and r[1] == "ok" for r in a_n3), a_n3)
     rows, out = chain(tmp, ob["a.cc"], ob["b.cc"], "good")
-    check("N1 + N3 ok: g and h are NATIVE in bodysel.tsv", rows.get(0x401000, ("",))[0] == "native" and rows.get(0x401010, ("",))[0] == "native", (rows, out))
+    case("N1 + N3 ok: g and h are NATIVE in bodysel.tsv", rows.get(0x401000, ("",))[0] == "native" and rows.get(0x401010, ("",))[0] == "native", (rows, out))
     verd = {a: v for a, (v, _) in rows.items()}
     amap = {("src_game_a.cc.o", tl.G_SYM): 0x401000, ("src_game_b.cc.o", tl.H_SYM): 0x401010}
     cld = os.path.join(tmp, "cl")
@@ -102,33 +105,33 @@ def main():
                           lambda x: x[2] == "equal", gate_r7.row_id)
         return n, r
     n, r = judge(ob["a.cc"], verd)
-    check("namegate universe > 0 on the native root, all certified", n[0] > 0 and n[0] == n[1], n)
-    check("r7 universe > 0 on the native root, all certified", r[0] > 0 and r[0] == r[1], r)
+    case("namegate universe > 0 on the native root, all certified", n[0] > 0 and n[0] == n[1], n)
+    case("r7 universe > 0 on the native root, all certified", r[0] > 0 and r[0] == r[1], r)
     # N3 violation: byte mutation of the fact (the verdict `ok` of g in the object's own .fnvnx.n3)
     m = tl.mutate(ob["a.cc"], tmp + "/a_n3.o", (tl.G_SYM + "\tok\t").encode(), (tl.G_SYM + "\tox\t").encode())
     rows2, out2 = chain(tmp, m, ob["b.cc"], "bad")
-    check("N3 violation (mutated verdict): g is LIFTED with the N3 reason", rows2.get(0x401000, ("",))[0] == "lifted" and "N3" in rows2[0x401000][1], (rows2, out2))
+    case("N3 violation (mutated verdict): g is LIFTED with the N3 reason", rows2.get(0x401000, ("",))[0] == "lifted" and "N3" in rows2[0x401000][1], (rows2, out2))
     inl = any(tl.G_SYM in r[2] for r in l2sections.read(ob["b.cc"])["n3"])
-    check("h is LIFTED iff it inlined g (N4)", (rows2.get(0x401010, ("",))[0] == "lifted") == inl, (rows2, inl))
+    case("h is LIFTED iff it inlined g (N4)", (rows2.get(0x401010, ("",))[0] == "lifted") == inl, (rows2, inl))
     verd2 = {a: v for a, (v, _) in rows2.items()}
     n2, r2 = judge(m, verd2)
     want = 0 if inl else 1
-    check("namegate universe shrinks to the native symbols only", n2[0] == want and n2[0] == n2[1], (n2, inl))
-    check("r7 universe: units without a native body leave it (0 if none)", r2[0] == (0 if inl else r[0] - 1) or r2[0] <= r[0], (r2, r, inl))
+    case("namegate universe shrinks to the native symbols only", n2[0] == want and n2[0] == n2[1], (n2, inl))
+    case("r7 universe: units without a native body leave it (0 if none)", r2[0] == (0 if inl else r[0] - 1) or r2[0] <= r[0], (r2, r, inl))
     # every body violates N3: nothing is native, both universes are 0 (the single-body case of the class)
     m2 = tl.mutate(ob["b.cc"], tmp + "/b_n3.o", (tl.H_SYM + "\tok\t").encode(), (tl.H_SYM + "\tox\t").encode())
     rows3, out3 = chain(tmp, m, m2, "bad2")
-    check("N3 violation in every body: no NATIVE row", all(v[0] == "lifted" for v in rows3.values()) and len(rows3) == 2, (rows3, out3))
+    case("N3 violation in every body: no NATIVE row", all(v[0] == "lifted" for v in rows3.values()) and len(rows3) == 2, (rows3, out3))
     objects = [{"unit": "game/a.cc", "object": m}, {"unit": "game/b.cc", "object": m2}]
     v3 = {a: v for a, (v, _) in rows3.items()}
     n3_ = L.judge_files("game", objects, cld, units, amap, v3, gate_names.rows, lambda r_, nt: L.select(r_, lambda x: x[0], lambda x: x[1], nt), lambda x: not x[3], gate_names.row_id)
     r3_ = L.judge_files("game", objects, cld, units, amap, v3, gate_r7.rows, lambda r_, nt: L.select_units(r_, lambda x: x[0], nt), lambda x: x[2] == "equal", gate_r7.row_id)
-    check("namegate and r7 universe 0 when every body is LIFTED", n3_[0] == 0 and r3_[0] == 0, (n3_, r3_))
+    case("namegate and r7 universe 0 when every body is LIFTED", n3_[0] == 0 and r3_[0] == 0, (n3_, r3_))
     # an object that carries N3 rows but is in no unit of units.json has no exe function: no error, no NATIVE row for it
     rows4, out4 = chain(tmp, ob["a.cc"], ob["b.cc"], "extra", extra=ob["a.cc"])
-    check("object with N3 rows and no unit: bind and bodysel run, rows unchanged (2 NATIVE)", rows4 == rows and all(v[0] == "native" for v in rows4.values()), (rows4, out4))
+    case("object with N3 rows and no unit: bind and bodysel run, rows unchanged (2 NATIVE)", rows4 == rows and all(v[0] == "native" for v in rows4.values()), (rows4, out4))
     rows5, out5 = chain(tmp, m, m2, "extra2", extra=ob["a.cc"])
-    check("a real ok N3 row of an object in no unit never makes a body NATIVE", all(v[0] == "lifted" for v in rows5.values()) and len(rows5) == 2, (rows5, out5))
+    case("a real ok N3 row of an object in no unit never makes a body NATIVE", all(v[0] == "lifted" for v in rows5.values()) and len(rows5) == 2, (rows5, out5))
 
 
 if __name__ == "__main__":

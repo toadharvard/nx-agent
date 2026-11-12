@@ -17,8 +17,11 @@ sys.path.append(os.path.join(HERE, '..', '..', 'verify'))
 import scratch
 scratch.install()
 import gate_disp
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-fails = []
+fails = testcase.FAILED
 TABLE = 0x2000      # fnvl_disp_table
 BODY = 0x1000       # first body; body i at BODY + 0x40 * i
 M = 0xffffffff
@@ -26,9 +29,6 @@ K1, K2, NB, TB = 0x9e3779b1, 0x85ebca6b, 4, 4       # 16 buckets, 16 slots
 GOFF, POFF = TABLE + (8 << TB), TABLE + (8 << TB) + (2 << NB)   # fnvl_g and fnvl_phf_params after the table
 
 
-def check(name, got, want):
-    if got != want:
-        fails.append('%s: got %r, want %r' % (name, got, want))
 
 
 def hslot(a, g, k1=K1, k2=K2, nb=NB, tb=TB):
@@ -143,80 +143,80 @@ def run(slots, entries=None, keys=None, extra_syms=(), entries_extra='', keys_he
 
 
 rc, g = run(table())
-check('green', (rc, g['status'], g['universe'], g['certified'], g['uncertified'], g['ids']), (0, 'green', 4, 4, [], []))
+case('green', got=(rc, g['status'], g['universe'], g['certified'], g['uncertified'], g['ids']), want=(0, 'green', 4, 4, [], []))
 # the lookup is the one of rt.c: every universe key hashes to its slot
-check('hash', all(table()[hslot(a, G_ALL)][0] == a for a in UNIVERSE), True)
+case('hash', got=all(table()[hslot(a, G_ALL)][0] == a for a in UNIVERSE), want=True)
 # a universe address without entry (and --missing is reporting only)
 ents = dict(NAMES)
 del ents[0x0040a000]
 rc, g = run(table(), entries=ents)
-check('no entry', (rc, g['status'], g['universe'], g['certified'], g['uncertified']), (1, 'red', 4, 3, ['0040a000:no-entry']))
+case('no entry', got=(rc, g['status'], g['universe'], g['certified'], g['uncertified']), want=(1, 'red', 4, 3, ['0040a000:no-entry']))
 rc, g = run(table(), entries=ents, missing=[0x0040a000, 0x00401000])
-check('--missing reports and certifies nothing', (rc, g['uncertified'], 'missing list 2: 1 without entry, 1 with an entry; without entry and not listed 0' in g['stdout']),
-      (1, ['0040a000:no-entry'], True))
+case('--missing reports and certifies nothing', got=(rc, g['uncertified'], 'missing list 2: 1 without entry, 1 with an entry; without entry and not listed 0' in g['stdout']),
+      want=(1, ['0040a000:no-entry'], True))
 rc, g = run(table(), entries=ents, missing=[])
-check('--missing: a gap not listed is reported', 'without entry and not listed 1' in g['stdout'], True)
+case('--missing: a gap not listed is reported', got='without entry and not listed 1' in g['stdout'], want=True)
 # an entry whose symbol the ELF does not define
 ents = dict(NAMES)
 ents[0x00401020] = 'L_deadbeef'
 rc, g = run(table(), entries=ents)
-check('undefined symbol', (rc, g['uncertified']), (1, ['00401020:symbol-undefined']))
+case('undefined symbol', got=(rc, g['uncertified']), want=(1, ['00401020:symbol-undefined']))
 # a slot that points at the wrong symbol (the body of another entry)
 rc, g = run(table({0x00401020: BODIES[0x00ff0000]}))
-check('wrong target', (rc, g['status'], g['certified'], g['uncertified'], g['ids']), (1, 'red', 3, ['00401020:wrong-target'], ['00401020:wrong-target']))
+case('wrong target', got=(rc, g['status'], g['certified'], g['uncertified'], g['ids']), want=(1, 'red', 3, ['00401020:wrong-target'], ['00401020:wrong-target']))
 # one byte off (a stored offset that is right modulo 2^32 only)
 slots = table()
 i = hslot(0x00401000, G_ALL)
 slots[i] = (slots[i][0], slots[i][1] + 1)
 rc, g = run(slots)
-check('off by one', (rc, g['uncertified']), (1, ['00401000:wrong-target']))
+case('off by one', got=(rc, g['uncertified']), want=(1, ['00401000:wrong-target']))
 # an extra key (an occupied slot whose key is not an address of the universe)
 rc, g = run(table(extra=[0x12345678]))
-check('extra key', (rc, g['status'], g['universe'], g['certified'], g['uncertified']), (1, 'red', 5, 4, ['12345678:extra-key']))
+case('extra key', got=(rc, g['status'], g['universe'], g['certified'], g['uncertified']), want=(1, 'red', 5, 4, ['12345678:extra-key']))
 # an empty slot (offset 0) is no key whatever its key says
 slots = table()
 j = next(i for i, (k, o) in enumerate(slots) if not o)
 slots[j] = (0x12345678, 0)
 rc, g = run(slots)
-check('empty slot with a key', (rc, g['status']), (0, 'green'))
+case('empty slot with a key', got=(rc, g['status']), want=(0, 'green'))
 # a duplicate key: the key of 0x00401000 also sits in an empty slot
 j = next(i for i, (k, o) in enumerate(table()) if not o)
 rc, g = run([(s if i != j else (0x00401000, BODIES[0x00401000] - TABLE)) for i, s in enumerate(table())])
-check('duplicate key', (rc, g['uncertified']), (1, ['00401000:duplicate-key']))
+case('duplicate key', got=(rc, g['uncertified']), want=(1, ['00401000:duplicate-key']))
 # a key whose slot is not the one the hash computes (the dispatcher would not find it)
 rc, g = run(table(place={0x00401020: j}))
-check('hash-miss', (rc, g['uncertified']), (1, ['00401020:hash-miss']))
+case('hash-miss', got=(rc, g['uncertified']), want=(1, ['00401020:hash-miss']))
 # a key in the universe with no slot at all
 rc, g = run(table(drop=[0x00ff0000]))
-check('no slot', (rc, g['uncertified']), (1, ['00ff0000:no-slot']))
+case('no slot', got=(rc, g['uncertified']), want=(1, ['00ff0000:no-slot']))
 # the stored parameters are not those the slots were placed with: the proof of the lookup fails for the keys it misplaces
 rc, g = run(table(), params=(K1, K2 ^ 0x10000, NB, TB))
-check('parameters do not match the table', (rc, g['status'], g['certified'] < 4, all(u.endswith(':hash-miss') for u in g['uncertified'])), (1, 'red', True, True))
+case('parameters do not match the table', got=(rc, g['status'], g['certified'] < 4, all(u.endswith(':hash-miss') for u in g['uncertified'])), want=(1, 'red', True, True))
 rc, g = run(table(), params=(K1 ^ 0x5a5a5a5a, K2, NB, TB))
-check('K1 differs', (rc, g['status']), (1, 'red'))
+case('K1 differs', got=(rc, g['status']), want=(1, 'red'))
 # sizes and parameters outside the table
 for name, kw in (('table size', dict(sizes=((8 << TB) - 8, 2 << NB, 16))), ('g size', dict(sizes=(8 << TB, (2 << NB) - 2, 16))),
                  ('params size', dict(sizes=(8 << TB, 2 << NB, 12))), ('NBITS 0', dict(params=(K1, K2, 0, TB))), ('TBITS 32', dict(params=(K1, K2, NB, 32))),
                  ('no params', dict(with_params=False))):
     rc, g = run(table(), **kw)
-    check('red: %s' % name, (rc, g['status'], g['certified'], g['uncertified'][:1]), (1, 'red', 0, ['00401000:no-table']))
+    case('red: %s', got=(rc, g['status'], g['certified'], g['uncertified'][:1]), want=(1, 'red', 0, ['00401000:no-table']), key=name)
 # --keys: the import key set; the symbols of the bodies are named by entries.tsv rows of kind import
 imp = [(k, v[0]) for k, v in sorted(IMPORTS.items())]
 xs = [('imp_a', 0x1800), ('imp_b', 0x1840)]
 irows = lambda names: ''.join('%08x\t%s\timport\n' % (k, n) for k, n in names)
 rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows(imp))
-check('keys green', (rc, g['status'], g['universe'], g['certified']), (0, 'green', 6, 6))
+case('keys green', got=(rc, g['status'], g['universe'], g['certified']), want=(0, 'green', 6, 6))
 rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows(imp[:1]))
-check('a key of --keys that no entries row names', (rc, g['uncertified']), (1, ['f0000002:no-entry']))
+case('a key of --keys that no entries row names', got=(rc, g['uncertified']), want=(1, ['f0000002:no-entry']))
 rc, g = run(table(extra=sorted(IMPORTS)), keys=imp, extra_syms=xs, entries_extra=irows([imp[0], (0xf0000002, 'imp_a')]))
-check('key names the wrong symbol', (rc, g['uncertified']), (1, ['f0000002:wrong-target']))
+case('key names the wrong symbol', got=(rc, g['uncertified']), want=(1, ['f0000002:wrong-target']))
 rc, g = run(table(), extra_syms=[('imp_a', 0x1800)], entries_extra='00401000\timp_a\tcode\n')
-check('entry conflict: two rows name two symbols', (rc, g['uncertified']), (1, ['00401000:entry-conflict']))
+case('entry conflict: two rows name two symbols', got=(rc, g['uncertified']), want=(1, ['00401000:entry-conflict']))
 # entries.tsv third column: kind import makes the row a key that is not a universe address
 ents = dict(NAMES)
 ents.update({0xf0000001: 'imp_a', 0xf0000002: 'imp_b'})
 rc, g = run(table(extra=sorted(IMPORTS)), entries={a: s for a, s in ents.items()}, extra_syms=xs)
-check('import rows without the kind column are not keys: the slots are extra keys', (rc, g['uncertified']), (1, ['f0000001:extra-key', 'f0000002:extra-key']))
+case('import rows without the kind column are not keys: the slots are extra keys', got=(rc, g['uncertified']), want=(1, ['f0000001:extra-key', 'f0000002:extra-key']))
 e = write('e2.tsv', ''.join('%08x\t%s\tcode\n' % (a, NAMES[a]) for a in sorted(NAMES)) + ''.join('%08x\t%s\timport\n' % (k, IMPORTS[k][0]) for k in sorted(IMPORTS)) +
           '# table_id abc123\n')
 # (run() writes its own entries file, so call the gate directly for the kind column)
@@ -235,14 +235,14 @@ def direct(*extra):
 
 
 rc, g = direct()
-check('kind import', (rc, g['status'], g['universe'], g['certified']), (0, 'green', 6, 6))
+case('kind import', got=(rc, g['status'], g['universe'], g['certified']), want=(0, 'green', 6, 6))
 # table_id: equal in entries.tsv and keys.tsv is green and counted, different is red
 k_same = write('k_same.tsv', '# table_id abc123\n')
 k_diff = write('k_diff.tsv', '# table_id fff999\n')
 rc, g = direct('--keys', k_same)
-check('table_id equal', (rc, g['status'], g['universe'], g['certified']), (0, 'green', 7, 7))
+case('table_id equal', got=(rc, g['status'], g['universe'], g['certified']), want=(0, 'green', 7, 7))
 rc, g = direct('--keys', k_diff)
-check('table_id differs', (rc, g['status'], g['uncertified']), (1, 'red', ['table_id']))
+case('table_id differs', got=(rc, g['status'], g['uncertified']), want=(1, 'red', ['table_id']))
 
 if fails:
     print('\n'.join(fails))

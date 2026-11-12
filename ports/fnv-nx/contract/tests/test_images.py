@@ -13,16 +13,11 @@ import scratch  # noqa: E402
 scratch.install()
 import images  # noqa: E402
 import modules  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILED = []
-
-
-def check(name, cond, extra=""):
-    print(("PASS " if cond else "FAIL ") + name + ("" if cond else "  " + str(extra)[:300]))
-    if not cond:
-        FAILED.append(name)
-
-
+FAILED = testcase.FAILED
 def pe(imports=(), delays=()):
     """A PE32 i386 image: one 4 KiB section at rva 0x1000 holding the import / delay-load directories and the names."""
     sec = bytearray(0x1000)
@@ -70,40 +65,41 @@ def tree(files):
 
 
 d = tree({"A.exe": pe(["B.DLL"]), "b.dll": pe(["C.dll", "kernel32.dll"])})
-check("A imports B, B imports missing C -> B is declared, not an image: {A}", [n for n, _ in images.image_set(d + "/A.exe", [d])] == ["a.exe"])
-check("... the declared B is reached but not walked", [n for n, _ in images.classify(d + "/A.exe", [d])[0]] == ["b.dll"]
+case("A imports B, B imports missing C -> B is declared, not an image: {A}", [n for n, _ in images.image_set(d + "/A.exe", [d])] == ["a.exe"])
+case("... the declared B is reached but not walked", [n for n, _ in images.classify(d + "/A.exe", [d])[0]] == ["b.dll"]
       and images.classify(d + "/A.exe", [d])[1] == {"b.dll": "declared", "c.dll": "platform", "kernel32.dll": "platform"}, images.classify(d + "/A.exe", [d])[1])
-check("C and kernel32 bridged -> B is an image again", [n for n, _ in images.image_set(d + "/A.exe", [d], {"c.dll", "kernel32.dll"})] == ["a.exe", "b.dll"])
+case("C and kernel32 bridged -> B is an image again", [n for n, _ in images.image_set(d + "/A.exe", [d], {"c.dll", "kernel32.dll"})] == ["a.exe", "b.dll"])
 dB = tree({"A.exe": pe(["B.DLL", "kernel32.dll"]), "b.dll": pe(["C.dll"]), "c.dll": pe(["kernel32.dll"])})
 kB = images.classify(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})
-check("a bridge dll with a found file is not an image and is not walked (c.dll is an image on its own, as a file of the directory, not through b)",
+case("a bridge dll with a found file is not an image and is not walked (c.dll is an image on its own, as a file of the directory, not through b)",
       [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})] == ["a.exe", "c.dll"]
       and kB[1]["b.dll"] == "bridge" and [n for n, _ in kB[0]] == ["c.dll"], kB[1])
-check("without the bridge row the same chain is images",
+case("without the bridge row the same chain is images",
       [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"kernel32.dll"})] == ["a.exe", "b.dll", "c.dll"])
-check("an image whose dependency is a declared dll is itself declared (closure, no named list)",
+case("an image whose dependency is a declared dll is itself declared (closure, no named list)",
       [n for n, _ in images.image_set(dB + "/A.exe", [dB], set())] == ["a.exe"]
       and images.classify(dB + "/A.exe", [dB], set())[1]["c.dll"] == "declared")
 d2 = tree({"A.exe": pe(["B"], ["D.dll"]), "b.DLL": pe(["A.exe"]), "d.dll": pe(["b"])})
-check("delay-load imports count, cycles end, names fold case and the .dll extension",
+case("delay-load imports count, cycles end, names fold case and the .dll extension",
       [n for n, _ in images.image_set(d2 + "/A.exe", [d2])] == ["a.exe", "b.dll", "d.dll"])
 d3, d4 = tree({"A.exe": pe(["x.dll"])}), tree({"X.dll": pe()})
-check("a dll in a later directory of the list is found", [n for n, _ in images.image_set(d3 + "/A.exe", [d3, d4])] == ["a.exe", "x.dll"])
+case("a dll in a later directory of the list is found", [n for n, _ in images.image_set(d3 + "/A.exe", [d3, d4])] == ["a.exe", "x.dll"])
 d5 = tree({"A.exe": pe(["y.dll"]), "y.dll": pe(), "Y.DLL": pe()})
+raised = None
 try:
     images.image_set(d5 + "/A.exe", [d5])
-    check("two files differing only in case are an error", False)
 except modules.StageError as e:
-    check("two files differing only in case are an error", "differ only in case" in str(e), e)
+    raised = e
+case("two files differing only in case are an error", raised is not None and ("diffraisedr only in casraised" in str(raised)), raised)
 import dllkind  # noqa: E402
-check("images_of: a cycle of images stays, a dll with an unresolved import and its dependents go",
+case("images_of: a cycle of images stays, a dll with an unresolved import and its dependents go",
       dllkind.images_of({"a.dll": ["b.dll"], "b.dll": ["a.dll", "k.dll"], "c.dll": ["a.dll"], "d.dll": ["x.dll"], "e.dll": ["d.dll"]}, {"k.dll"}) == {"a.dll", "b.dll", "c.dll"})
-check("images_of: the root's own name and bridge names satisfy an import", dllkind.images_of({"a.dll": ["exe.exe", "k.dll"]}, {"exe.exe", "k.dll"}) == {"a.dll"})
+case("images_of: the root's own name and bridge names satisfy an import", dllkind.images_of({"a.dll": ["exe.exe", "k.dll"]}, {"exe.exe", "k.dll"}) == {"a.dll"})
 dM = tree({"x.dll": pe(["kernel32.dll"]), "y.dll": pe(["nowhere.dll"]), "z.dll": pe(["y.dll"])})
 mods = modules.scan([dM], {"kernel32.dll"})
 img = dllkind.images_of({n: [images.iat.norm_dll(x) for x, _ in m.imports] for n, m in mods.items()}, {"kernel32.dll"})
-check("modules uses the same function: x is an image, y and its dependent z are declared", img == {"x.dll"}, img)
-check("modules.closure treats a declared dll as satisfied, not as a missing module",
+case("modules uses the same function: x is an image, y and its dependent z are declared", img == {"x.dll"}, img)
+case("modules.closure treats a declared dll as satisfied, not as a missing module",
       [m.name for m in modules.closure(modules.PE(pe(["x.dll", "y.dll"]), "e"), {"kernel32.dll"}, {"x.dll": mods["x.dll"]}, {"y.dll", "z.dll"})] == ["x.dll"])
 import types  # noqa: E402
 
@@ -118,20 +114,21 @@ modules.assign_bases(exe, a)
 before = {m.name: m.base for m in a}
 b = [fake("binkw32.dll", 0x68000), fake("libvorbis.dll", 0x133000), fake("libvorbisfile.dll", 0x1e000), fake("ssce5432.dll", 0x39000)]
 modules.assign_bases(exe, b)
-check("adding an image whose name sorts last moves no base", {m.name: m.base for m in b if m.name in before} == before)
+case("adding an image whose name sorts last moves no base", {m.name: m.base for m in b if m.name in before} == before)
 c = [fake("atimgpud.dll", 0x29000)] + [fake(m.name, m.pe.size_of_image) for m in a]
 modules.assign_bases(exe, c)
-check("adding an image whose name sorts first moves the later ones (bases are a function of the name order)", c[1].base != before["binkw32.dll"])
+case("adding an image whose name sorts first moves the later ones (bases are a function of the name order)", c[1].base != before["binkw32.dll"])
 import declareddlls  # noqa: E402
 sd = tempfile.mkdtemp(prefix="specs-")
 for n in ("msvcp110.spec", "comdlg32.spec"):
     open(os.path.join(sd, n), "w").write("@ stdcall X()\n")
-check("declareddlls: one row per spec file, sorted, name + .dll", [r[0] for r in declareddlls.derive(sd)] == ["comdlg32.dll", "msvcp110.dll"])
+case("declareddlls: one row per spec file, sorted, name + .dll", [r[0] for r in declareddlls.derive(sd)] == ["comdlg32.dll", "msvcp110.dll"])
 open(os.path.join(sd, "readme.txt"), "w").write("x")
+raised = None
 try:
     declareddlls.derive(sd)
-    check("declareddlls: a non-spec file is an error", False)
 except ValueError:
-    check("declareddlls: a non-spec file is an error", True)
+    raised = True
+case("declareddlls: a non-spec file is an error", raised is not None)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

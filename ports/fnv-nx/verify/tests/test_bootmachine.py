@@ -23,10 +23,13 @@ sys.path.insert(0, VERIFY)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="bm-")
 atexit.register(shutil.rmtree, TMP, ignore_errors=True)
-FAILED, N = [], [0]
+FAILED, N = testcase.FAILED, [0]
 CC = "aarch64-linux-gnu-gcc"
 CFLAGS = ["-mabi=ilp32", "-march=armv8-a", "-O2", "-fPIE", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fvisibility=hidden",
           "-mno-outline-atomics", "-fno-asynchronous-unwind-tables", "-fno-tree-loop-distribute-patterns", "-Wall",
@@ -776,11 +779,6 @@ def parse_totality(path):
     return rows, slots
 
 
-def case(name, cond, extra=""):
-    N[0] += 1
-    print(("ok   " if cond else "FAIL ") + name + ("" if cond else "  " + str(extra)[:400]))
-    if not cond:
-        FAILED.append(name)
 
 
 def sh(cmd):
@@ -876,7 +874,7 @@ def main():
                  ("protect-given-src", "d401"), ("protect-heap-none", "0"), ("protect-heap-rw", "0"),
                  ("heap-rw-works", "5"), ("protect-bad-size", "ca01"), ("protect-bad-addr", "cc01"), ("unprotect", "0"), ("tickdiff", "3e8"),
                  ("thread", "10000"), ("woken", "0"), ("flag", "4d"), ("pread", "8"), ("rand-calls-equal", "1")):
-        case("guest saw %s=%s" % (k, v), (k + "=" + v) in lines1, text)
+        case("guest saw %s=%s", (k + "=" + v) in lines1, text, key=(k, v))
     case("pread through fs_* (case-folded path)", "ABCDEFGH" in lines1, text)
     case("two threads, a context switch", r1["threads"] == 2 and r1["switches"] >= 2, r1)
     case("refusals recorded", [e["kind"] for e in r1["events"]] == ["map_fixed-refused"] * 6
@@ -1051,8 +1049,8 @@ def main():
               "tz-null-out": ne(14)}
     bad49 = {n: (k49.get(n), v) for n, v in want49.items() if k49.get(n) != v}
     case("sockets and TZ_AT (guest): every result the arguments fix with no socket open: errno classes, -EBADF for each handle-first service, "
-         "POLL waits its timeout in virtual time and answers POLLNVAL (%d values)" % len(want49), r49["reason"] == "exit" and not bad49
-         and "ebadf-bad" not in k49, (bad49, r49))
+         "POLL waits its timeout in virtual time and answers POLLNVAL (%d values)", r49["reason"] == "exit" and not bad49
+         and "ebadf-bad" not in k49, (bad49, r49), key=len(want49))
     r50, l50 = run(built[50][0], root)[:2]
     k50 = kv(l50)
     BI, NF = "1759", "1359"
@@ -1081,13 +1079,13 @@ def main():
               "finished": "1759", "me-pause": "f401", "me-resume": "f401", "me-zero": "1759", "rec-finished": "1759", "rec-finished-resume": "1759",
               "no-record": "1359"}
     case("THREAD_ACTIVITY: new / finished thread or record BadInput, resume of a running and pause of a paused thread 0xFA01, own record 0xF401, "
-         "unknown id NotFound (%d values)" % len(want55), r55["reason"] == "exit" and k55 == want55, (k55, r55))
+         "unknown id NotFound (%d values)", r55["reason"] == "exit" and k55 == want55, (k55, r55), key=len(want55))
     r56, l56 = run(built[56][0], root)[:2]
     k56 = kv(l56)
     want56 = {"h1": "3", "h2": "4", "close1": "0", "h3": "3", "getfl": "2", "setfl": "0", "getfl-nb": "802", "connect-ext": ne(101),
               "sendto-ext": ne(101), "recv-nb": ne(11), "bind-lo": "0", "close3": "0", "closed-getfl": ne(9), "tz-last": "0"}
     case("sockets (guest): handles, flag state, ENETUNREACH, loopback bind "
-         "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
+         "(%d values)", r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56), key=len(want56))
     sw = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire.h")).read()
     lst = lambda name: [int(v, 0) for v in re.findall(r"X\(\w+, (\w+)\)", re.search(r"#define " + name + r"\(X\)((?:[^\n]*\\\n)*[^\n]*)", sw).group(1))]
     nums = dict(re.findall(r"#define FNVNX_(WE_\w+|WEAI_\w+) (\d+)", sw))
@@ -1142,7 +1140,7 @@ def main():
                "alive-B": "55", "u-A": "0", "u-B-still": "55", "u-C": "0", "u-B": "0", "u-B-twice": E(0xD401),
                "release-R": "0", "B2-lowest": "1", "s2-id": "2"}
     bad = {n: (k.get(n), v) for n, v in ok_vals.items() if k.get(n) != v}
-    case("section: every create/map/unmap/free/interplay result as the header says (%d values)" % len(ok_vals), not bad, bad)
+    case("section: every create/map/unmap/free/interplay result as the header says (%d values)", not bad, bad, key=len(ok_vals))
     ev = [(e["kind"], e["result"]) for e in r30["events"]]
     want = [("section_create-refused", 0xCA01)] * 3 + [("section_map-refused", c) for c in (
         0xCA01, 0xCA01, 0xCA01, 0xCC01, 0xCC01, 0xE401, 0xE401, 0xD401, 0xD401, 0xDA01, 0xDA01, 0xDA01, 0xDA01, 0xDA01, 0xD401)]
@@ -1245,7 +1243,7 @@ def main():
               "reserve-above-4g": "0", "reserve-4g": "0"}
     bad = {n: (k.get(n), v) for n, v in want40.items() if k.get(n) != v}
     case("ext_call (guest): NO_MODULE / NO_SERVICE / BAD_NARGS are returned to the guest, nargs above UINT32_MAX counts as UINT32_MAX, "
-         "extra arguments ignored, sockets dispatch first: -EINVAL on wrong nargs (null array or not), BAD_NARGS on the exact count with a null array (%d values)" % len(want40), r40["reason"] == "exit" and not bad, (bad, r40))
+         "extra arguments ignored, sockets dispatch first: -EINVAL on wrong nargs (null array or not), BAD_NARGS on the exact count with a null array (%d values)", r40["reason"] == "exit" and not bad, (bad, r40), key=len(want40))
     # TEXT_ENTRY (36): scenario texts, in order; none left -> cancelled; a text longer than max_len is a scenario error (not truncated)
     r57, l57, _, _ = run(built[57][0], root, text_entries=["Ab\U0001F600", "x"])
     k = kv(l57)
@@ -1273,16 +1271,16 @@ def main():
             ok = False
         except bootmachine.MachineError:
             ok = True
-        case("TEXT_ENTRY: a scenario that is not a list of strings of Unicode scalars is a construction error: %r" % (bad_scn,), ok)
+        case("TEXT_ENTRY: a scenario that is not a list of strings of Unicode scalars is a construction error: %r", ok, key=(bad_scn,))
     # DISPLAY_DOCKED: the profile
     for prof, want in (("handheld", "0"), ("docked", "1")):
         rp, lp = run(built[40][0], root, profile=prof)[:2]
         k = kv(lp)
-        case("DISPLAY_DOCKED is %s for profile %s (any nargs, null array only with nargs 0)" % (want, prof),
+        case("DISPLAY_DOCKED is %s for profile %s (any nargs, null array only with nargs 0)",
              k.get("docked-n0-null") == want and k.get("docked-n3") == want and k.get("docked-ncap") == want
-             and k.get("docked-n1-null") == BADN, (prof, k))
+             and k.get("docked-n1-null") == BADN, (prof, k), key=(want, prof))
         re48 = run(built[48][0], root, profile=prof)[0]
-        case("DISPLAY_DOCKED through the exit code, profile %s" % prof, re48["reason"] == "exit" and re48["exit_code"] == int(want), re48)
+        case("DISPLAY_DOCKED through the exit code, profile %s", re48["reason"] == "exit" and re48["exit_code"] == int(want), re48, key=prof)
     svc41 = Ext9(root)
     Ext9.calls = []
     r41, l41 = run(built[41][0], root, svc=svc41)[:2]
@@ -1302,7 +1300,7 @@ def main():
               "w-ro": "0", "w-ro-read": "77", "w-none": "0", "w-rw": "0", "w-rw-keeps": "80", "mf": "0"}
     bad = {n: (k.get(n), v) for n, v in want44.items() if k.get(n) != v}
     case("VM_PROTECT: header check order, write-only 2 -> 0xD801, a span of two extents, the host window; DECOMMIT of R / no-access "
-         "extents (%d values)" % len(want44), r44["reason"] == "exit" and not bad, (bad, r44))
+         "extents (%d values)", r44["reason"] == "exit" and not bad, (bad, r44), key=len(want44))
 
     r45, l45 = run(built[45][0], root)[:2]
     k = kv(l45)
@@ -1313,8 +1311,8 @@ def main():
               "limit-occupied": "559"}
     bad = {n: (k.get(n), v) for n, v in want45.items() if k.get(n) != v}
     case("map_fixed: size 0 / wrap / misalignment 0x1759, the window zeroes and ignores src, src 0 / misaligned 0x1759, 512 live -> 0x559, "
-         "alias region 0xDA01, src not heap 0xD401 (%d values)" % len(want45),
-         r45["reason"] == "exit" and not bad, (bad, r45))
+         "alias region 0xDA01, src not heap 0xD401 (%d values)",
+         r45["reason"] == "exit" and not bad, (bad, r45), key=len(want45))
 
     r46, l46 = run(built[46][0], root)[:2]
     k = kv(l46)
@@ -1332,7 +1330,7 @@ def main():
     bad = {n: (k.get(n), v) for n, v in want46.items() if k.get(n) != v}
     case("ids: thread and directory ids are table handles (unknown / freed -> NotFound, never started -> BadInput, 1024 live together, "
          "a freed id never names anything again); dir_next cap 0 / cut; wait / wake alignment and readability; wake count above "
-         "0x7FFFFFFF wakes all (%d values)" % len(want46), r46["reason"] == "exit" and not bad, (bad, r46))
+         "0x7FFFFFFF wakes all (%d values)", r46["reason"] == "exit" and not bad, (bad, r46), key=len(want46))
     case("ids: thread_set_cpu with a negative spec changes nothing", run(built[46][0], root)[3].placement.get(1) == {"cpu": 2, "prio": 3},
          "")
 

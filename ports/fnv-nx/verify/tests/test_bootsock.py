@@ -9,8 +9,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import bootsock  # noqa: E402
 from bootsock import NotDetermined, BadGuestMemory, neg  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILED, N = [], [0]
+FAILED, N = testcase.FAILED, [0]
 SA, BUF, VAL, LEN, FD = 0x1000, 0x2000, 0x2800, 0x2900, 0x2A00
 V4, V6 = 2, 10
 
@@ -48,11 +51,6 @@ class Env:
         return VAL
 
 
-def case(name, ok, detail=""):
-    N[0] += 1
-    print(("ok   " if ok else "FAIL ") + name + ("" if ok else "  " + str(detail)))
-    if not ok:
-        FAILED.append(name)
 
 
 def res(f):
@@ -73,7 +71,7 @@ def table(title, rows):
         if got != want:
             fmt = lambda v: v if isinstance(v, str) else hex(v) if isinstance(v, int) else repr(v)
             bad.append((name, fmt(got), fmt(want)))
-    case("%s (%d cases)" % (title, len(rows)), not bad, bad)
+    case("%s (%d cases)", not bad, bad, key=(title, len(rows)))
 
 
 LO4, LO6 = b"\x7f\0\0\1", bytes(15) + b"\1"

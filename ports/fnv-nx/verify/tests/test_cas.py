@@ -12,9 +12,11 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import cas  # noqa: E402
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 ROOT = tempfile.mkdtemp(dir=os.path.expanduser("~"), prefix="cas-test-")
-FAILED = []
+FAILED = testcase.FAILED
 _n = [0]
 
 
@@ -50,18 +52,6 @@ def raises(fn, *a, **k):
     return False
 
 
-def case(name):
-    def deco(fn):
-        try:
-            ok = fn()
-            msg = ""
-        except Exception as e:  # noqa
-            ok, msg = False, " (%s: %s)" % (type(e).__name__, e)
-        print("%s %s%s" % ("PASS" if ok else "FAIL", name, msg))
-        if not ok:
-            FAILED.append(name)
-        return fn
-    return deco
 
 
 def store():

@@ -22,7 +22,10 @@ import cas  # noqa: E402
 import recipe  # noqa: E402
 import test_guest as tg  # noqa: E402
 import test_plugins as tp  # noqa: E402
-from test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
+from test_plugins import BASE, ROOT, T, git, w  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 LIFT = T + "lift/gates/"
 RT = ".data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n.text\n.globl fnvl_dispatch\n.type fnvl_dispatch,%function\nfnvl_dispatch: ret\n.size fnvl_dispatch,.-fnvl_dispatch\n"
@@ -176,7 +179,7 @@ def main():
     host = tp.make_repo("host", tp.REC, "native")
     for n in ("order", "addr32", "eh", "flags"):
         rc, r, o = gate(host, n, cache)
-        check("%s: no lifted or native guest root: universe 0, green" % n, rc == 0 and r.get("status") == G and r["universe"] == 0, o)
+        case("%s: no lifted or native guest root: universe 0, green", rc == 0 and r.get("status") == G and r["universe"] == 0, o, key=n)
     # --- lifted roots: order (order + align rows) and addr32 (addrwrap rows) by the rule of gate_order.py over every object of the root
     pk = publish("pack0", lambda d: open(d + "/pack.txt", "w").write("pack\n"))
     pack = ext("pack", pk, "/ext/pack")
@@ -184,24 +187,24 @@ def main():
         json.dump(eh_facts(0x400000), open(d + "/ehtables.json", "w")); open(d + "/sites.tsv", "w").write(sites)
     fx = publish("facts0", facts_pub)
     efact = {"ext": ext("facts", fx, "/ext/facts"), "key": "facts", "sites": "facts/sites.tsv"}      # no locked instruction in the toy objects: no sites
-    for case, (body, want_o, want_a) in sorted(BODIES.items()):
-        repo = lifted_repo("l-" + case, body, pack, efact)
+    for body_name, (body, want_o, want_a) in sorted(BODIES.items()):
+        repo = lifted_repo("l-" + body_name, body, pack, efact)
         for n, want in (("order", want_o), ("addr32", want_a)):
             rc, r, o = gate(repo, n, cache)
-            check("lifted %s: gate %s is %s" % (case, n, want), r.get("status") == want and (rc == 0) == (want == G) and r.get("universe", 0) >= 1
-                  and (want != G or r["certified"] == r["universe"]) and (want == G or r["uncertified"]), (rc, r, o))
+            case("lifted %s: gate %s is %s", r.get("status") == want and (rc == 0) == (want == G) and r.get("universe", 0) >= 1
+                  and (want != G or r["certified"] == r["universe"]) and (want == G or r["uncertified"]), (rc, r, o), key=(body_name, n, want))
     rc, r, o = gate(lifted_repo("l-rt", BODIES["ordered"][0], pack, efact, rts=()), "order", cache)
-    check("image without a runtime definer: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
+    case("image without a runtime definer: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
     rc, r, o = gate(lifted_repo("l-rt2", BODIES["ordered"][0], pack, efact, rts=(RT, RT)), "order", cache)
-    check("image with two runtime definers: red", rc == 2 and r.get("status") == R and "2 objects" in r["detail"], (rc, r))
+    case("image with two runtime definers: red", rc == 2 and r.get("status") == R and "2 objects" in r["detail"], (rc, r))
     rc, r, o = gate(lifted_repo("l-nosites", BODIES["ordered"][0], pack, dict(efact, sites=None)), "order", cache)
-    check("lifted root, contract_inputs.json declares no sites: red, input missing", rc == 2 and r.get("status") == R and "no sites" in r["detail"], (rc, r))
+    case("lifted root, contract_inputs.json declares no sites: red, input missing", rc == 2 and r.get("status") == R and "no sites" in r["detail"], (rc, r))
     fx2 = publish("facts1", lambda d: facts_pub(d, "1 00401000\n"))
     rc, r, o = gate(lifted_repo("l-lockmiss", BODIES["ordered"][0], pack, {"ext": ext("facts", fx2, "/ext/facts"), "key": "facts", "sites": "facts/sites.tsv"}), "order", cache)
-    check("lifted root: a locked instruction of the facts with no .fnvl.lk record: red", rc == 2 and r.get("status") == R and "no .fnvl.lk record" in json.dumps(r), (rc, r))
+    case("lifted root: a locked instruction of the facts with no .fnvl.lk record: red", rc == 2 and r.get("status") == R and "no .fnvl.lk record" in json.dumps(r), (rc, r))
     for n in ("order", "addr32"):
         rc, r, o = gate(lifted_repo("l-noimg-" + n, BODIES["plain_store"][0], pack, efact, image=False), n, cache)
-        check("lifted root that no image names: gate %s has universe 0, green" % n, rc == 0 and r.get("status") == G and r["universe"] == 0, (rc, r, o))
+        case("lifted root that no image names: gate %s has universe 0, green", rc == 0 and r.get("status") == G and r["universe"] == 0, (rc, r, o), key=n)
     # --- eh: the pack (external of the recipe) against the EH facts external named by contract_inputs.json `ehfacts`
     def pack_pub(name, drop=()):
         def pop(d):
@@ -210,20 +213,20 @@ def main():
             json.dump({"images": 1}, open(d + "/gate_liftgen.json", "w"))
         return ext("pack", publish(name, pop), "/ext/pack")
     rc, r, o = gate(lifted_repo("e-none", BODIES["ordered"][0], pack_pub("pack1"), dict(efact, key=None)), "eh", cache)
-    check("eh: contract_inputs.json declares no ehfacts: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
+    case("eh: contract_inputs.json declares no ehfacts: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
     rc, r, o = gate(lifted_repo("e-green", BODIES["ordered"][0], pack_pub("pack2"), efact), "eh", cache)
-    check("eh: every table target is a lifted entry: green, 1/1", rc == 0 and r.get("status") == G and (r["certified"], r["universe"]) == (1, 1), (rc, r, o))
+    case("eh: every table target is a lifted entry: green, 1/1", rc == 0 and r.get("status") == G and (r["certified"], r["universe"]) == (1, 1), (rc, r, o))
     rc, r, o = gate(lifted_repo("e-red", BODIES["ordered"][0], pack_pub("pack3", drop=(0x400030,)), efact), "eh", cache)
-    check("eh: a table target that is no lifted entry: red, 0/1", rc == 2 and r.get("status") == R and (r["certified"], r["universe"]) == (0, 1)
+    case("eh: a table target that is no lifted entry: red, 0/1", rc == 2 and r.get("status") == R and (r["certified"], r["universe"]) == (0, 1)
           and r["uncertified"], (rc, r, o))
     # --- flags: judged per lifted root over the images whose code its pack lifts. The body of the entry is real x86 code read by the real gate_flags.py
     for nm, code, extra, st, cu in (("f-green", "31c07400c3", (), G, (1, 1)), ("f-red", "7400c3", (), R, (0, 1)),
                                     ("f-uncovered", "31c07400c3", (0x500000,), R, (1, 2))):
         rc, r, o = gate(flags_repo(nm, bytes.fromhex(code), cache, extra), "flags", cache)
-        check("flags: %s: %s %d/%d" % (nm, st, cu[0], cu[1]), rc == (0 if st == G else 2) and r.get("status") == st and (r["certified"], r["universe"]) == cu
-              and "tool" not in str(r.get("uncertified")), (rc, r, o))
+        case("flags: %s: %s %d/%d", rc == (0 if st == G else 2) and r.get("status") == st and (r["certified"], r["universe"]) == cu
+              and "tool" not in str(r.get("uncertified")), (rc, r, o), key=(nm, st, cu[0], cu[1]))
     rc, r, o = gate(host, "flags", cache)
-    check("flags: no lifted or native guest root: universe 0, green", rc == 0 and r.get("status") == G and r["universe"] == 0, o)
+    case("flags: no lifted or native guest root: universe 0, green", rc == 0 and r.get("status") == G and r["universe"] == 0, o)
     os.environ.pop("ARTIFACTS_URL")        # the native cases fetch the pinned compiler from the real artifacts repository
     # --- native guest roots: the plugin certificate (fnvnx_order for order, fnvnx_addr for addr32), no build needed to be red
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
@@ -233,14 +236,14 @@ def main():
         nop["plugins"] = [p for p in nop["plugins"] if p["name"] != plug]
         g = tg.guest_repo("n-no-" + plug, nop, pin, files={ROOT + "/b.cc": "int b() { return 2; }\n"})
         rc, r, o = gate(g, n, cache)
-        check("native guest root without %s: gate %s red, units uncertified" % (plug, n), rc == 2 and r.get("status") == R and r["universe"] == 2
-              and r["certified"] == 0, (rc, r))
+        case("native guest root without %s: gate %s red, units uncertified", rc == 2 and r.get("status") == R and r["universe"] == 2
+              and r["certified"] == 0, (rc, r), key=(plug, n))
         g = tg.guest_repo("n-ok-" + n, rec, pin, files={ROOT + "/b.cc": "int b() { return 2; }\n"})
         rc, r, o = gate(g, n, cache)
-        check("native guest root on the pinned compiler: gate %s green, 2/2" % n, rc == 0 and r.get("status") == G and (r["certified"], r["universe"]) == (2, 2), (rc, r, o))
+        case("native guest root on the pinned compiler: gate %s green, 2/2", rc == 0 and r.get("status") == G and (r["certified"], r["universe"]) == (2, 2), (rc, r, o), key=n)
     g = tg.guest_repo("n-eh", rec, pin)
     rc, r, o = gate(g, "eh", cache)
-    check("native guest root: gate eh has no universe, green", rc == 0 and r.get("status") == G and r["universe"] == 0, (rc, r, o))
+    case("native guest root: gate eh has no universe, green", rc == 0 and r.get("status") == G and r["universe"] == 0, (rc, r, o))
 
 
 if __name__ == "__main__":

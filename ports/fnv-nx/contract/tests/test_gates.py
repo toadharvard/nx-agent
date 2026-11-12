@@ -4,15 +4,11 @@ import os, sys, shutil, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import gate_data, gate_call, gate_vcall, gate_xc
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-fails = []
-
-
-def check(what, got, want):
-    if got != want:
-        fails.append('%s: got %r want %r' % (what, got, want))
-
-
+fails = testcase.FAILED
 def fn(size=0x40, calls=(), tails=(), icalls=(), data=(), decomp=True):
     return dict(size=size, calls=[(0, t) for t in calls], tails=[(0, t) for t in tails], icalls=list(icalls),
                 data=[(0, d) for d in data], imports=[], decomp=decomp)
@@ -45,13 +41,13 @@ F['fn'][0x80] = fn(data=[0x1500]); O[('a', 0x80)] = ob()
 F['fn'][0x90] = fn(data=[0x1500]); O[('a', 0x90)] = ob()
 v, c = verdicts(gate_data.run(F, O, tmp))
 for k, n in (('none', 3), ('equal', 2), ('subset', 1), ('superset', 1), ('different', 2)):
-    check('data ' + k, c.get(k, 0), n)
-check('data cookie', c.get('cookie_refs_ignored'), 3)
-check('data fail 0x40', v.get(0x40), 'superset')
-check('data fail 0x70 worst of copies', v.get(0x70), 'different')
-check('data fail 0x50', v.get(0x50), 'different')
-check('data fail set', sorted(v), [0x40, 0x50, 0x70])
-check('data fail list', gate_data.run(F, O, tmp)['fail'], ['superset', 'different'])
+    case('data ', got=c.get(k, 0), want=n, key=k)
+case('data cookie', got=c.get('cookie_refs_ignored'), want=3)
+case('data fail 0x40', got=v.get(0x40), want='superset')
+case('data fail 0x70 worst of copies', got=v.get(0x70), want='different')
+case('data fail 0x50', got=v.get(0x50), want='different')
+case('data fail set', got=sorted(v), want=[0x40, 0x50, 0x70])
+case('data fail list', got=gate_data.run(F, O, tmp)['fail'], want=['superset', 'different'])
 
 # ---- call
 F = {'fn': {0x10: fn(), 0x20: fn(calls=[0x400100]), 0x30: fn(calls=[0x400100], tails=[0x400200]),
@@ -67,10 +63,10 @@ O = {('a', 'sympair'): SP, ('b', 'sympair'): SP,
      ('a', 0x80): ob(calls=[0x400100]), ('b', 0x80): ob(calls=[0x400300]), ('a', 0x11): ob()}
 v, c = verdicts(gate_call.run(F, O, tmp))
 for k, n in (('none', 1), ('equal', 2), ('subset', 2), ('superset', 1), ('different', 2)):
-    check('call ' + k, c.get(k, 0), n)
-check('call fail', sorted(v.items()), [(0x50, 'different'), (0x80, 'different')])
-check('call fail list', gate_call.run(F, O, tmp)['fail'], ['different', 'undeclared'])
-check('call declared', (c.get('declared'), c.get('undeclared', 0)), (8, 0))
+    case('call ', got=c.get(k, 0), want=n, key=k)
+case('call fail', got=sorted(v.items()), want=[(0x50, 'different'), (0x80, 'different')])
+case('call fail list', got=gate_call.run(F, O, tmp)['fail'], want=['different', 'undeclared'])
+case('call declared', got=(c.get('declared'), c.get('undeclared', 0)), want=(8, 0))
 
 # ---- vcall
 F = {'fn': {0x10: fn(icalls=[(0, 'mem', 'eax', 8), (0, 'mem', 'eax', 0x10)]),
@@ -83,19 +79,19 @@ O = {('a', 0x10): ob(vcall=[0x10, 8]), ('a', 0x20): ob(vcall=[0xc, 0x14]), ('a',
      ('a', 0x40): ob(vcall=[0x20]), ('a', 0x60): ob(vcall=[4])}
 v, c = verdicts(gate_vcall.run(F, O, tmp))
 for k, n in (('equal', 1), ('delta_0_or_4', 1), ('count_differs', 1), ('other', 1)):
-    check('vcall ' + k, c.get(k, 0), n)
-check('vcall delta key', c.get('delta:4'), 2)
-check('vcall fail', sorted(v.items()), [(0x40, 'other')])
-check('vcall fail list', gate_vcall.run(F, O, tmp)['fail'], ['other'])
+    case('vcall ', got=c.get(k, 0), want=n, key=k)
+case('vcall delta key', got=c.get('delta:4'), want=2)
+case('vcall fail', got=sorted(v.items()), want=[(0x40, 'other')])
+case('vcall fail list', got=gate_vcall.run(F, O, tmp)['fail'], want=['other'])
 
 # ---- xc
 F = {'fn': {0x400100: fn(), 0x400200: fn(decomp=True), 0x400300: fn(decomp=False)}, 'secs': secs,
      'xc': [0x400100, 0x400200, 0x400300]}
 O = {('a', 0x400100): ob(), ('b', 0x400100): ob(), ('a', 'ztv'): ob()}
 r = gate_xc.run(F, O, tmp)
-check('xc counts', dict(r['counts']), {'native': 1, 'missing_decomp': 1, 'missing_other': 1})
-check('xc rows', sorted((a, vv) for a, vv, _ in r['rows']), [(0x400200, 'missing_decomp'), (0x400300, 'missing_other')])
-check('xc fail', r['fail'], ['missing_decomp', 'missing_other'])
+case('xc counts', got=dict(r['counts']), want={'native': 1, 'missing_decomp': 1, 'missing_other': 1})
+case('xc rows', got=sorted((a, vv) for a, vv, _ in r['rows']), want=[(0x400200, 'missing_decomp'), (0x400300, 'missing_other')])
+case('xc fail', got=r['fail'], want=['missing_decomp', 'missing_other'])
 
 for f in fails:
     print('FAIL', f)

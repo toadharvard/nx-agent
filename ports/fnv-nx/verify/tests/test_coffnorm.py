@@ -12,7 +12,10 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "coffnorm.py")
 ROOT = tempfile.mkdtemp(prefix="coffnorm-test-")
-FAILED = []
+sys.path.insert(0, os.path.dirname(HERE))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
+FAILED = testcase.FAILED
 _n = [0]
 DATE0 = b"0" + b" " * 11
 
@@ -123,14 +126,6 @@ def mkar(objs):
             + member(b"//", b"long_member_name.obj/\n\0") + b"".join(member(n, d) for n, d in objs))
 
 
-def case(name, fn):
-    try:
-        ok, detail = fn()
-    except Exception as e:  # noqa: BLE001
-        ok, detail = False, "%s: %s" % (type(e).__name__, e)
-    print(("PASS " if ok else "FAIL ") + name + (" - " + str(detail) if detail and not ok else ""))
-    if not ok:
-        FAILED.append(name)
 
 
 def only_fields_change(data):
@@ -153,8 +148,8 @@ def idem(data):
 SAMPLES = {"obj": mkobj(), "bigobj": mkbig(), "import": mkimp(),
            "archive": mkar([(b"a.obj/", mkobj(1)), (b"/0", mkbig(2)), (b"i.obj/", mkimp(3))])}
 for _k, _v in SAMPLES.items():
-    case("only-fields-change-" + _k, lambda v=_v: only_fields_change(v))
-    case("idempotent-" + _k, lambda v=_v: idem(v))
+    case("only-fields-change", lambda v=_v: only_fields_change(v), key=_k)
+    case("idempotent", lambda v=_v: idem(v), key=_k)
 
 
 def t_obj_value():

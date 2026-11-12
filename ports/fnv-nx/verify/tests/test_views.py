@@ -19,9 +19,12 @@ import cas  # noqa: E402
 import sandbox  # noqa: E402
 import unitstage  # noqa: E402
 import unitview  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 ROOT = tempfile.mkdtemp(prefix="views-test-")
-FAILED = []
+FAILED = testcase.FAILED
 SCRIPT = r'''V=$1; cd "$V"
 echo "== names"; find . | sort
 echo "== files"; find . -type f | sort | while read f; do echo "-- $f"; cat "$f"; [ -x "$f" ] && echo "(exec)"; done
@@ -30,10 +33,6 @@ echo "== dotdot"; cat lnk/../x.h; cat lnk/z.h; cat lnk/../../top.h; cat lnk/../y
 '''
 
 
-def check(name, ok, detail=""):
-    print("%s %s%s" % ("PASS" if ok else "FAIL", name, (" -- " + str(detail)[:500]) if (detail and not ok) else ""), flush=True)
-    if not ok:
-        FAILED.append(name)
 
 
 def w(p, data, mode=0o644):
@@ -86,18 +85,18 @@ def main():
         cas.materialize(res["outputs"]["/out"], store, out)
     seen = open(out + "/res.txt").read() if res else ""
     want = host.stdout.replace(mat, "/v")
-    check("the sandbox ran the listing stage on the view", r.returncode == 0 and bool(res), r.stderr)
-    check("the tree a stage sees equals cas.materialize(view): names, contents, symlinks, exec bits, `..` through a symlinked directory",
+    case("the sandbox ran the listing stage on the view", r.returncode == 0 and bool(res), r.stderr)
+    case("the tree a stage sees equals cas.materialize(view): names, contents, symlinks, exec bits, `..` through a symlinked directory",
           seen == want and "(exec)" in seen and "lnk -> a/b" in seen and "#error fnvnx" in seen, (seen[:600], want[:600]))
     nm = int(open(out + "/mounts.txt").read().strip() or 0) if res else -1
-    check("O(real files) binds: one bind per real file (%d real files) and nothing per placeholder" % len(keep), nm == len(keep), nm)
-    check("no per-view placed tree is made", not os.path.exists(os.path.join(store, "placed", view)))
+    case("O(real files) binds: one bind per real file (%d real files) and nothing per placeholder", nm == len(keep), nm, key=len(keep))
+    case("no per-view placed tree is made", not os.path.exists(os.path.join(store, "placed", view)))
     # the base is the same for two views of one tree (content-addressed by the all-placeholder manifest)
     view2 = unitview.view(store, root, ["a/y.h"], cache)
     b1, _ = sandbox._split(store, view)
     b2, _ = sandbox._split(store, view2)
-    check("two views of one tree share one base; the base is the view with no real file", b1 == b2 == unitview.view(store, root, [], cache), (b1, b2))
-    check("the base directory is placed once and the second call reuses it", sandbox.placed_input(store, view)[0] == sandbox.placed_input(store, view2)[0])
+    case("two views of one tree share one base; the base is the view with no real file", b1 == b2 == unitview.view(store, root, [], cache), (b1, b2))
+    case("the base directory is placed once and the second call reuses it", sandbox.placed_input(store, view)[0] == sandbox.placed_input(store, view2)[0])
     # (3) a placeholder inode serves at most MAX_LINKS names
     old = sandbox.MAX_LINKS
     sandbox.MAX_LINKS = 3
@@ -112,7 +111,7 @@ def main():
         for n in os.listdir(d):
             st = os.lstat(os.path.join(d, n))
             inodes[st.st_ino] = st.st_nlink
-        check("10 placeholder names with MAX_LINKS 3: 4 inodes, none above 3 links, no bind", sorted(inodes.values()) == [1, 3, 3, 3] and not binds, (inodes, binds))
+        case("10 placeholder names with MAX_LINKS 3: 4 inodes, none above 3 links, no bind", sorted(inodes.values()) == [1, 3, 3, 3] and not binds, (inodes, binds))
     finally:
         sandbox.MAX_LINKS = old
     # (5) an OSError of the sandbox is a red stage naming the stage
@@ -128,7 +127,7 @@ def main():
             got = None
         except sandbox.SbxError as e:
             got = e
-        check("EMLINK of the sandbox is an SbxError naming the stage (a red stage, not a crash)",
+        case("EMLINK of the sandbox is an SbxError naming the stage (a red stage, not a crash)",
               got is not None and getattr(got, "stage", None) == "pp:some/unit.cc" and "pp:some/unit.cc" in str(got) and "Too many links" in str(got), got)
     finally:
         sandbox.execute = real_exec

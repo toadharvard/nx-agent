@@ -12,16 +12,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "contrac
 import gate_machine as G  # noqa: E402
 import hive  # noqa: E402
 import test_recipe as TR  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILED = []
-
-
-def check(name, ok, extra=""):
-    print(("PASS " if ok else "FAIL ") + name + ("" if ok else "  " + str(extra)[:500]))
-    if not ok:
-        FAILED.append(name)
-
-
+FAILED = testcase.FAILED
 os.environ["ARTIFACTS_URL"] = TR.BASE + "/artifacts.git"
 TR.subprocess.run(["git", "init", "-q", "--bare", TR.BASE + "/artifacts.git"], check=True)
 GC = TR.BASE + "/cache"
@@ -57,29 +52,29 @@ noroot = TR.make_repo("rg-noroot")
 TR.w(noroot, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "gen", "class": "tool", "gates": []}]}))
 TR.git(noroot, "commit", "-q", "-am", "no product root")
 rc, g, txt = run(noroot, "noroot")
-check("no product root: universe 0, green", rc == 0 and g["universe"] == 0 and g["status"] == "green", (g, txt))
+case("no product root: universe 0, green", rc == 0 and g["universe"] == 0 and g["status"] == "green", (g, txt))
 
 rc, g, txt = run(TR.make_repo("rg-empty"), "none")
-check("product root without registry.in.json: red", rc == 2 and g["status"] == "red" and g["universe"] == 1 and "registry.in.json" in g["detail"], (g, txt))
+case("product root without registry.in.json: red", rc == 2 and g["status"] == "red" and g["universe"] == 1 and "registry.in.json" in g["detail"], (g, txt))
 
 rc, g, txt = run(toy_repo("ok", SH + READ), "ok")
-check("green: declared row read, seed equal, only the seed unit writes", rc == 0 and g["status"] == "green" and g["universe"] == 3 == g["certified"], (g, txt))
+case("green: declared row read, seed equal, only the seed unit writes", rc == 0 and g["status"] == "green" and g["universe"] == 3 == g["certified"], (g, txt))
 
 rc, g, txt = run(toy_repo("dyn", SH + READ + DYN), "dyn")
-check("dynamic read site: red, a measurement build", rc == 2 and g["status"] == "red" and "MEASUREMENT" in g["detail"] and g["certified"] == 3 and g["universe"] == 4, (g, txt))
+case("dynamic read site: red, a measurement build", rc == 2 and g["status"] == "red" and "MEASUREMENT" in g["detail"] and g["certified"] == 3 and g["universe"] == 4, (g, txt))
 
 rc, g, txt = run(toy_repo("seed", SH + READ, seed="/* hand edited */\n"), "seed")
-check("seed include that differs from the generator output: red", rc == 2 and g["status"] == "red" and "seed-differs" in open(TR.BASE + "/o-seed/machine.ids").read(), (g, txt))
+case("seed include that differs from the generator output: red", rc == 2 and g["status"] == "red" and "seed-differs" in open(TR.BASE + "/o-seed/machine.ids").read(), (g, txt))
 
 rc, g, txt = run(toy_repo("foreign", SH + READ, unit="other.c"), "foreign")
-check("writer outside the seed unit: red", rc == 2 and g["status"] == "red" and "writer:seed.c\tforeign-writer" in open(TR.BASE + "/o-foreign/machine.ids").read(), (g, txt))
+case("writer outside the seed unit: red", rc == 2 and g["status"] == "red" and "writer:seed.c\tforeign-writer" in open(TR.BASE + "/o-foreign/machine.ids").read(), (g, txt))
 
 rc, g, txt = run(toy_repo("unread", SH, seed=""), "unread")
-check("declared row with no read site: red", rc == 2 and g["status"] == "red" and "no-read-site" in open(TR.BASE + "/o-unread/machine.ids").read(), (g, txt))
+case("declared row with no read site: red", rc == 2 and g["status"] == "red" and "no-read-site" in open(TR.BASE + "/o-unread/machine.ids").read(), (g, txt))
 
 for tag, kw in (("badkeys", {"decl_extra": {"bogus": 1}}), ("badext", {"decl_extra": {"external": "nonexistent"}}), ("badpath", {"decl_extra": {"sites": "nope.tsv"}})):
     rc, g, txt = run(toy_repo(tag, SH + READ, **kw), tag)
-    check("bad registry.in.json (%s) is red with the reason" % tag, rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
+    case("bad registry.in.json (%s) is red with the reason", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt), key=tag)
 
 print("%d failed" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

@@ -20,7 +20,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import support  # noqa: E402
-from support import check, tree_hash  # noqa: E402
+from support import tree_hash  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 PREPARE = os.path.join(support.RULES, 'prepare.py')
 W = tempfile.mkdtemp()
@@ -87,21 +90,21 @@ hashes = []
 for i, env in enumerate((CLEAN, CLEAN, CLEAN, POISON, POISON)):
     out = os.path.join(W, 'out%d' % i)
     p = run(out, env)
-    check('run %d exits 0' % i, p.stdout + p.stderr if p.returncode else 'ok', ['ok'])
+    case('run %d exits 0', got=p.stdout + p.stderr if p.returncode else 'ok', contains=['ok'], key=i)
     hashes.append(tree_hash(out))
-check('three runs, three hash seeds: one tree hash', str(len(set(hashes[:3]))), ['1'])
-check('poisoned environment: the same tree as the clean one', str(len(set(hashes))), ['1'])
+case('three runs, three hash seeds: one tree hash', got=str(len(set(hashes[:3]))), contains=['1'])
+case('poisoned environment: the same tree as the clean one', got=str(len(set(hashes))), contains=['1'])
 
 out0 = os.path.join(W, 'out0')
-check('src/a.cpp: the rules ran (ASM, SSE3, XC1)', open(os.path.join(out0, 'src', 'a.cpp')).read(),
-      ['__asm__("")', '((float*)&(v))[1]', '__fnvnx_dyninit_00000010', '__fnvnx_dynexit_00000020', 'int own_cl_only;'], ['m128_f32'])
-check('src/b.cpp: a copy of an initializer the unit does not own becomes an extern declaration', open(os.path.join(out0, 'src', 'b.cpp')).read(),
-      ['extern Holder g_obj;'], ['__fnvnx_dyninit'])
-check('other files copied byte for byte', 'same' if open(os.path.join(out0, 'include', 'blob.bin'), 'rb').read() == bytes(range(256))
-      and open(os.path.join(out0, 'third_party', 'z.c')).read() == 'int z;\n' else 'differs', ['same'])
-check('prepare_stats.tsv lists the rules', open(os.path.join(out0, 'prepare_stats.tsv')).read(), ['ASM-spans\t1 files', 'XC1\t1 files', 'SSE3\t'])
-check('build/units.json copied', 'same' if open(os.path.join(out0, 'build', 'units.json')).read() ==
-      open(os.path.join(DEC, 'build', 'units.json')).read() else 'differs', ['same'])
+case('src/a.cpp: the rules ran (ASM, SSE3, XC1)', got=open(os.path.join(out0, 'src', 'a.cpp')).read(),
+      contains=['__asm__("")', '((float*)&(v))[1]', '__fnvnx_dyninit_00000010', '__fnvnx_dynexit_00000020', 'int own_cl_only;'], lacks=['m128_f32'])
+case('src/b.cpp: a copy of an initializer the unit does not own becomes an extern declaration', got=open(os.path.join(out0, 'src', 'b.cpp')).read(),
+      contains=['extern Holder g_obj;'], lacks=['__fnvnx_dyninit'])
+case('other files copied byte for byte', got='same' if open(os.path.join(out0, 'include', 'blob.bin'), 'rb').read() == bytes(range(256))
+      and open(os.path.join(out0, 'third_party', 'z.c')).read() == 'int z;\n' else 'differs', contains=['same'])
+case('prepare_stats.tsv lists the rules', got=open(os.path.join(out0, 'prepare_stats.tsv')).read(), contains=['ASM-spans\t1 files', 'XC1\t1 files', 'SSE3\t'])
+case('build/units.json copied', got='same' if open(os.path.join(out0, 'build', 'units.json')).read() ==
+      open(os.path.join(DEC, 'build', 'units.json')).read() else 'differs', contains=['same'])
 
 # the checkout under another name, another working directory: the same tree
 DEC2 = os.path.join(W, 'other-name', 'checkout')
@@ -109,20 +112,20 @@ make_checkout(DEC2)
 other = os.path.join(W, 'out_other')
 elsewhere = tempfile.mkdtemp()
 p = run(other, CLEAN, dec=DEC2, cwd=elsewhere)
-check('another checkout path and working directory: the same tree', 'same' if tree_hash(other) == hashes[0] else 'differs ' + p.stderr, ['same'])
+case('another checkout path and working directory: the same tree', got='same' if tree_hash(other) == hashes[0] else 'differs ' + p.stderr, contains=['same'])
 
 # a changed input changes the output (the output depends on the argv inputs' content)
 open(HDR, 'w').write(support.WIN32_HEADER + 'int NewCall(void*);\n')
 p = run(os.path.join(W, 'out_hdr'), CLEAN)
-check('a changed input file is read (no memo, no cache)', 'ok' if p.returncode == 0 else p.stderr, ['ok'])
+case('a changed input file is read (no memo, no cache)', got='ok' if p.returncode == 0 else p.stderr, contains=['ok'])
 shutil.rmtree(os.path.join(W, 'memo'), ignore_errors=True)
 
 # the argv contract
 for name, args in (('no inputs', []), ('one directory', [DEC]), ('unknown option', [DEC, os.path.join(W, 'o'), '--skip', 'x'])):
     p = subprocess.run([sys.executable, '-I', PREPARE, *args], capture_output=True, text=True, env=CLEAN)
-    check('argv contract: %s refused (exit 2)' % name, str(p.returncode), ['2'])
+    case('argv contract: %s refused (exit 2)', got=str(p.returncode), contains=['2'], key=name)
 p = subprocess.run([sys.executable, '-I', PREPARE, DEC, os.path.join(W, 'o'), '--win32-header', HDR], capture_output=True, text=True, env=CLEAN)
-check('argv contract: --crt-symbols missing refused (exit 2)', str(p.returncode), ['2'])
+case('argv contract: --crt-symbols missing refused (exit 2)', got=str(p.returncode), contains=['2'])
 
 # the source of the tool names no environment and no skip list
 import re  # noqa: E402
@@ -134,7 +137,7 @@ for f in sorted(os.listdir(support.RULES)):
                     r'FNVNX_RECON', r'reccert', r'r2_vorder', r's1b_patches'):
             if re.search(pat, t):
                 bad.append('%s: %s' % (f, pat))
-check('no environment variable, skip list, dynamic import, clock copy or dropped machinery in the sources', '\n'.join(bad) or 'clean', ['clean'])
+case('no environment variable, skip list, dynamic import, clock copy or dropped machinery in the sources', got='\n'.join(bad) or 'clean', contains=['clean'])
 shutil.rmtree(W, ignore_errors=True)
 shutil.rmtree(elsewhere, ignore_errors=True)
-support.finish()
+sys.exit(testcase.finish())

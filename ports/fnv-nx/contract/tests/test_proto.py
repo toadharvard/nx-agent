@@ -3,59 +3,56 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import proto, bodysel
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-ok = True
 
 
-def check(name, got, want):
-    global ok
-    if got != want:
-        ok = False
-        print('FAIL', name, got, want)
 
 
 d = proto.declared('?f@C@@QAEHH@Z')
-check('thiscall', (d['kind'], d['cc'], d['words']), ('member', 'thiscall', 1))
+case('thiscall', got=(d['kind'], d['cc'], d['words']), want=('member', 'thiscall', 1))
 d = proto.declared('?g@@YAXXZ')
-check('cdecl void', (d['kind'], d['cc'], d['words']), ('free', 'cdecl', 0))
+case('cdecl void', got=(d['kind'], d['cc'], d['words']), want=('free', 'cdecl', 0))
 d = proto.declared('?h@@YGHHN@Z')
-check('stdcall int,double', (d['cc'], d['words']), ('stdcall', 3))
-check('data symbol', proto.declared('?x@@3HA'), None)
+case('stdcall int,double', got=(d['cc'], d['words']), want=('stdcall', 3))
+case('data symbol', got=proto.declared('?x@@3HA'), want=None)
 
 def sig(sym):
     d = proto.declared(sym)
     return (d['ret'], d['args'], d['regs'], d['words'], d['varargs'], d['sret']) if d else None
 
 
-check('void', sig('?a@@YAXXZ'), ('v', [], [], 0, False, False))
-check('int', sig('?b@@YAHH@Z'), ('i', ['i'], [''], 1, False, False))
-check('ptr ret', sig('?c@@YAPAHXZ')[0], 'i')
-check('ref ret', sig('?d@@YAAAHXZ')[0], 'i')
-check('bool ret', sig('?e@@YA_NXZ')[0], 'i')
-check('float ret', sig('?f@@YAMXZ')[0], 'f')
-check('double ret', sig('?g@@YANXZ')[0], 'd')
-check('int64 ret', sig('?h@@YA_JXZ')[0], 'q')
-check('uint64 ret', sig('?h@@YA_KXZ')[0], 'q')
-check('struct ret', sig('?i@@YA?AUPoint@@XZ'), ('m?', [], [], 0, False, True))
-check('class ret', sig('?i@@YA?AVBox@@H@Z')[0], 'm?')
-check('arg classes', sig('?j@@YAXH_JMN@Z'), ('v', ['i', 'q', 'f', 'd'], ['', '', '', ''], 6, False, False))
-check('struct arg', sig('?k@@YAXUPoint@@H@Z'), ('v', ['s?', 'i'], ['', ''], None, False, False))
-check('fastcall', sig('?m@@YIXHMPAHH@Z'), ('v', ['i', 'f', 'i', 'i'], ['ecx', '', 'edx', ''], 2, False, False))
-check('thiscall', sig('?n@Foo@@QAEHH_J@Z'), ('i', ['i', 'q'], ['', ''], 3, False, False))
-check('varargs', sig('?o@@YAHPBDZZ'), ('i', ['i'], [''], 1, True, False))
-check('fnptr arg', sig('?p@@YAXP6AHH@ZH@Z'), ('v', ['i', 'i'], ['', ''], 2, False, False))
-check('fnptr varargs arg', sig('?q@@YAXP6AHHZZH@Z')[1], ['i', 'i'])
-check('backref', sig('?r@@YAXPAH_J01@Z'), ('v', ['i', 'q', 'i', 'q'], ['', '', '', ''], 6, False, False))
-check('backref struct', sig('?s@@YAXUPoint@@0@Z')[1:4:2], (['s?', 's?'], None))
-check('template arg', sig('?t@@YAXV?$vec@H@@@Z')[1], ['s?'])
-check('template ptr arg', sig('?u@@YAXPAV?$vec@H@@H@Z')[1], ['i', 'i'])
-check('enum arg', sig('?v@@YAXW4Color@@@Z')[1], ['i'])
-check('backref after fnptr', sig('?w@@YAXP6AXH@ZH0@Z')[3], None)
-check('fastcall sret', sig('?x@@YI?AUPoint@@H@Z')[3], None)
-check('ctor', sig('??0Foo@@QAE@XZ')[:2], ('n', []))
-check('array ptr', sig('?y@@YAXPAY02HH@Z')[1], ['i', 'i'])
-check('lvalue ref', sig('?z@@YAXAAHH@Z')[1], ['i', 'i'])
-check('rvalue ref', sig('?z@@YAX$$QAHH@Z')[1], ['i', 'i'])
+case('void', got=sig('?a@@YAXXZ'), want=('v', [], [], 0, False, False))
+case('int', got=sig('?b@@YAHH@Z'), want=('i', ['i'], [''], 1, False, False))
+case('ptr ret', got=sig('?c@@YAPAHXZ')[0], want='i')
+case('ref ret', got=sig('?d@@YAAAHXZ')[0], want='i')
+case('bool ret', got=sig('?e@@YA_NXZ')[0], want='i')
+case('float ret', got=sig('?f@@YAMXZ')[0], want='f')
+case('double ret', got=sig('?g@@YANXZ')[0], want='d')
+case('int64 ret', got=sig('?h@@YA_JXZ')[0], want='q')
+case('uint64 ret', got=sig('?h@@YA_KXZ')[0], want='q')
+case('struct ret', got=sig('?i@@YA?AUPoint@@XZ'), want=('m?', [], [], 0, False, True))
+case('class ret', got=sig('?i@@YA?AVBox@@H@Z')[0], want='m?')
+case('arg classes', got=sig('?j@@YAXH_JMN@Z'), want=('v', ['i', 'q', 'f', 'd'], ['', '', '', ''], 6, False, False))
+case('struct arg', got=sig('?k@@YAXUPoint@@H@Z'), want=('v', ['s?', 'i'], ['', ''], None, False, False))
+case('fastcall', got=sig('?m@@YIXHMPAHH@Z'), want=('v', ['i', 'f', 'i', 'i'], ['ecx', '', 'edx', ''], 2, False, False))
+case('thiscall with int64 argument', got=sig('?n@Foo@@QAEHH_J@Z'), want=('i', ['i', 'q'], ['', ''], 3, False, False))
+case('varargs', got=sig('?o@@YAHPBDZZ'), want=('i', ['i'], [''], 1, True, False))
+case('fnptr arg', got=sig('?p@@YAXP6AHH@ZH@Z'), want=('v', ['i', 'i'], ['', ''], 2, False, False))
+case('fnptr varargs arg', got=sig('?q@@YAXP6AHHZZH@Z')[1], want=['i', 'i'])
+case('backref', got=sig('?r@@YAXPAH_J01@Z'), want=('v', ['i', 'q', 'i', 'q'], ['', '', '', ''], 6, False, False))
+case('backref struct', got=sig('?s@@YAXUPoint@@0@Z')[1:4:2], want=(['s?', 's?'], None))
+case('template arg', got=sig('?t@@YAXV?$vec@H@@@Z')[1], want=['s?'])
+case('template ptr arg', got=sig('?u@@YAXPAV?$vec@H@@H@Z')[1], want=['i', 'i'])
+case('enum arg', got=sig('?v@@YAXW4Color@@@Z')[1], want=['i'])
+case('backref after fnptr', got=sig('?w@@YAXP6AXH@ZH0@Z')[3], want=None)
+case('fastcall sret', got=sig('?x@@YI?AUPoint@@H@Z')[3], want=None)
+case('ctor', got=sig('??0Foo@@QAE@XZ')[:2], want=('n', []))
+case('array ptr', got=sig('?y@@YAXPAY02HH@Z')[1], want=['i', 'i'])
+case('lvalue ref', got=sig('?z@@YAXAAHH@Z')[1], want=['i', 'i'])
+case('rvalue ref', got=sig('?z@@YAX$$QAHH@Z')[1], want=['i', 'i'])
 
 universe = {0x10: 'decomp', 0x20: 'decomp', 0x30: 'decomp', 0x40: 'decomp', 0x50: 'decomp', 0x60: 'eh-unwind', 0x70: 'decomp', 0x80: 'decomp'}
 n1 = {'fn': {0x10: {'n1': True, 'why': '', 'sym': '?a@@YAXXZ'}, 0x20: {'n1': False, 'why': 'bytes differ'}, 0x30: {'n1': True, 'why': '', 'sym': '?b@@YAXXZ'},
@@ -63,13 +60,12 @@ n1 = {'fn': {0x10: {'n1': True, 'why': '', 'sym': '?a@@YAXXZ'}, 0x20: {'n1': Fal
              0x70: {'n1': True, 'why': '', 'sym': '??_EC@@UAEPAXI@Z'}, 0x80: {'n1': True, 'why': '', 'sym': '??_EC@@UAEPAXI@Z'}}}
 n3 = {0x10: ('ok', []), 0x30: ('ok', []), 0x40: ('ok', [0x50]), 0x50: ('variable shift', []), 0x70: ('ok', []), 0x80: ('ok+E', [])}
 out = bodysel.decide(universe, n1, {0x30: 'call different'}, n3)
-check('native', out[0x10], ['NATIVE', 'N1 N2 N3 N4'])
-check('n1', out[0x20][1], 'N1: bytes differ')
-check('n2', out[0x30][1], 'N2: gate call different')
-check('n4', out[0x40][1], 'N4: an inlined callee is not NATIVE')
-check('n3', out[0x50][1], 'N3: variable shift')
-check('outside', out[0x60][1], 'not a decomp function (eh-unwind)')
-check('vector dtor', out[0x70][1], 'N3: ??_E without the vector branch of __sdd')
-check('vector dtor ok', out[0x80][0], 'NATIVE')
-print('ok' if ok else 'FAILED')
-sys.exit(0 if ok else 1)
+case('native', got=out[0x10], want=['NATIVE', 'N1 N2 N3 N4'])
+case('n1', got=out[0x20][1], want='N1: bytes differ')
+case('n2', got=out[0x30][1], want='N2: gate call different')
+case('n4', got=out[0x40][1], want='N4: an inlined callee is not NATIVE')
+case('n3', got=out[0x50][1], want='N3: variable shift')
+case('outside', got=out[0x60][1], want='not a decomp function (eh-unwind)')
+case('vector dtor', got=out[0x70][1], want='N3: ??_E without the vector branch of __sdd')
+case('vector dtor ok', got=out[0x80][0], want='NATIVE')
+sys.exit(testcase.finish())

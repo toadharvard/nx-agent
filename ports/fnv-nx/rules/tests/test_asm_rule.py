@@ -14,9 +14,11 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import support  # noqa: E402
-from support import check  # noqa: E402
 import mscgate  # noqa: E402
 import s8_asm as M  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 
 def has_asm(s):
@@ -46,52 +48,53 @@ CASES = {
 for name, src in CASES.items():
     new, cnt = M.rewrite(name, src)
     if name == 'quoted-token-ignored':
-        check('%s: untouched' % name, 'same' if new == src and not cnt['spans'] else 'changed', ['same'])
+        case('%s: untouched', got='same' if new == src and not cnt['spans'] else 'changed', contains=['same'], key=name)
         continue
-    check('%s: at least one span' % name, str(cnt['spans']), [], ['0'])
+    case('%s: at least one span', got=str(cnt['spans']), contains=[], lacks=['0'], key=name)
     g = M.gcc_view(new)
-    check('%s: no __asm visible to GCC' % name, 'visible' if has_asm(g) else 'none', ['none'])
-    check('%s: the GCC view holds the empty asm statement' % name, g, ['__asm__("")'])
-    check('%s: no gcc leftover' % name, str(M.gcc_leftovers(new)), ['[]'])
-    check('%s: the cl view is the input (token stream)' % name,
-          'same' if M.tokens(M.gcc_view(new, msc=True)) == M.tokens(src) else 'differs', ['same'])
+    case('%s: no __asm visible to GCC', got='visible' if has_asm(g) else 'none', contains=['none'], key=name)
+    case('%s: the GCC view holds the empty asm statement', got=g, contains=['__asm__("")'], key=name)
+    case('%s: no gcc leftover', got=str(M.gcc_leftovers(new)), contains=['[]'], key=name)
+    case('%s: the cl view is the input (token stream)',
+          got='same' if M.tokens(M.gcc_view(new, msc=True)) == M.tokens(src) else 'differs', contains=['same'], key=name)
     for m in re.finditer(r'#ifdef _MSC_VER\n(.*?)\n#else\n', new, re.S):
-        check('%s: pristine branch verbatim' % name, 'yes' if m[1] in src else 'no', ['yes'])
-    check('%s: totality T1-T3' % name, str(M.totality_violations(name, src, new)), ['[]'])
-    check('%s: permitted form for the dual-compile gate' % name, '\n'.join(mscgate.judge(src, new)) or 'clean', ['clean'])
+        case('%s: pristine branch verbatim', got='yes' if m[1] in src else 'no', contains=['yes'], key=name)
+    case('%s: totality T1-T3', got=str(M.totality_violations(name, src, new)), contains=['[]'], key=name)
+    case('%s: permitted form for the dual-compile gate', got='\n'.join(mscgate.judge(src, new)) or 'clean', contains=['clean'], key=name)
 
 # a construct inside a conditional of the input: wrapped, the conditional kept, the gate accepts (the totality checker's views
 # blank every other conditional's directive lines, so T2/T3 are not asserted for it)
 _src = '#if SOMETHING\nvoid f() { __asm nop }\n#endif\n'
 _new, _ = M.rewrite('cond', _src)
-check('inside a decomp conditional: wrapped and accepted', _new + '\n' + ('\n'.join(mscgate.judge(_src, _new)) or 'clean'),
-      ['#if SOMETHING', '#ifdef _MSC_VER', '__asm__("")', 'clean'])
+case('inside a decomp conditional: wrapped and accepted', got=_new + '\n' + ('\n'.join(mscgate.judge(_src, _new)) or 'clean'),
+      contains=['#if SOMETHING', '#ifdef _MSC_VER', '__asm__("")', 'clean'])
 
 # specific shapes
-n, c = M.rewrite('t', CASES['stmt-run']); check('stmt-run is one construct', repr(dict(c)), ["'run': 1"], ["'block': 1"])
-n, c = M.rewrite('t', CASES['stmt-several-per-line']); check('several per line: one run', repr(dict(c)), ["'run': 1"])
+n, c = M.rewrite('t', CASES['stmt-run']); case('stmt-run is one construct', got=repr(dict(c)), contains=["'run': 1"], lacks=["'block': 1"])
+n, c = M.rewrite('t', CASES['stmt-several-per-line']); case('several per line: one run', got=repr(dict(c)), contains=["'run': 1"])
 n, c = M.rewrite('t', CASES['block-nested-braces-comments'])
-check('block ends at its own }', 'ok' if c['block'] == 1 and 'h();' in n.split('#else')[1].split('#endif')[1] else 'bad', ['ok'])
-n, c = M.rewrite('t', CASES['define-continuation']); check('define: block in a #define', repr(dict(c)), ["'define': 1", "'block': 1"])
-check('define emitted twice (cl and GCC branch)', str(n.count('#define RDT')), ['2'])
-n, c = M.rewrite('t', CASES['stmt-semicolon-comment']); check('a ; comment keeps __asm inside it', n.split('#endif')[1], ['g();'])
+case('block ends at its own }', got='ok' if c['block'] == 1 and 'h();' in n.split('#else')[1].split('#endif')[1] else 'bad', contains=['ok'])
+n, c = M.rewrite('t', CASES['define-continuation']); case('define: block in a #define', got=repr(dict(c)), contains=["'define': 1", "'block': 1"])
+case('define emitted twice (cl and GCC branch)', got=str(n.count('#define RDT')), contains=['2'])
+n, c = M.rewrite('t', CASES['stmt-semicolon-comment']); case('a ; comment keeps __asm inside it', got=n.split('#endif')[1], contains=['g();'])
 n, _ = M.rewrite('t', CASES['block'])
-check('#line after the span restores the numbering', n, ['#line 7'])
-check('a block opens with the cl branch', n[:40], ['int f(int x)\n{\n#ifdef _MSC_VER\n'])
+case('#line after the span restores the numbering', got=n, contains=['#line 7'])
+case('a block opens with the cl branch', got=n[:40], contains=['int f(int x)\n{\n#ifdef _MSC_VER\n'])
 
 # hard errors: the rule refuses what it cannot wrap (and says where)
 for name, bad in {'unclosed': 'void f() { __asm { mov eax, 1\n', 'directive-inside': 'void f()\n{\n __asm {\n#if 1\n nop\n#endif\n }\n}\n',
                   'asm-in-if': '#if __asm\n#endif\n'}.items():
     try:
         M.rewrite(name, bad)
-        check('%s: error raised' % name, 'no error', ['error'])
+        msg = 'no error'
     except M.ASMError as e:
-        check('%s: error raised' % name, 'error ' + str(e), ['error', name])
+        msg = 'error ' + str(e)
+    case('%s: error raised', got=msg, contains=['error', name] if msg != 'no error' else ['error'], key=name)
 st = Counter()
-check('a file without asm is untouched', 'same' if M.r_inline_asm('a.h', 'int x;\n', st) == 'int x;\n' and not st else 'changed', ['same'])
+case('a file without asm is untouched', got='same' if M.r_inline_asm('a.h', 'int x;\n', st) == 'int x;\n' and not st else 'changed', contains=['same'])
 st = Counter()
 M.r_inline_asm('a.cpp', CASES['two-functions'], st)
-check('rule counts', repr(sorted(st.items())), ["('ASM-spans', 2)"])
+case('rule counts', got=repr(sorted(st.items())), contains=["('ASM-spans', 2)"])
 
 # totality over a generated family: every combination of a prefix, a construct form and a suffix keeps T1-T3
 PRE = ['', 'int a;\n', '#define K 1\n', 'void p()\n{\n']
@@ -110,7 +113,7 @@ for p, c, s in itertools.product(PRE, CONS, SUF):
         continue
     if not M.totality_violations('gen', src, new) and not has_asm(M.gcc_view(new)) and not mscgate.judge(src, new):
         n_ok += 1
-check('generated family: every accepted rewrite is total (%d of %d accepted)' % (n_ok, n_all), 'ok' if n_ok > 0 else 'none', ['ok'])
+case('generated family: every accepted rewrite is total (%d of %d accepted)', got='ok' if n_ok > 0 else 'none', contains=['ok'], key=(n_ok, n_all))
 fails = 0
 for p, c, s in itertools.product(PRE, CONS, SUF):
     src = p + ('    ' if p.endswith('{\n') else '') + c + s
@@ -122,5 +125,5 @@ for p, c, s in itertools.product(PRE, CONS, SUF):
         continue
     if M.totality_violations('gen', src, new) or has_asm(M.gcc_view(new)) or mscgate.judge(src, new):
         fails += 1
-check('generated family: no violation', str(fails), ['0'])
-support.finish()
+case('generated family: no violation', got=str(fails), contains=['0'])
+sys.exit(testcase.finish())

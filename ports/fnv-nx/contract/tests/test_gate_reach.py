@@ -12,6 +12,9 @@ sys.path.insert(0, os.path.join(HERE, '..'))
 import argflow
 import gate_reach
 import gpa_names
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 BASE, TEXT, RD, DATA = 0x400000, 0x1000, 0x2000, 0x3000
 IMPORTS = ['LoadLibraryA', 'GetProcAddress', 'CreateFileMappingA', 'CreateFileA']
@@ -141,14 +144,7 @@ R_W = ('W', 'kernel32', 'CreateFileMappingA', '0', 'result_of',
 R_F = ('F', 'kernel32', 'CreateFileA', '1', 'imm_mask', '0x40000000', 'n')
 R_W2 = ('W', 'kernel32', 'CreateFileMappingA', '0', 'handle_origin', 'callee=kernel32!CreateFileA; arg2 & 2 == 0', 'n')
 
-fails = []
-
-
-def check(name, got, want):
-    if got != want:
-        fails.append('%s: got %r, want %r' % (name, got, want))
-
-
+fails = testcase.FAILED
 def go(rs, fills, skip=()):
     imgs, meta = {}, []
     for nm, fill in sorted(fills.items()):
@@ -173,7 +169,7 @@ def ok_img(a):
 
 
 facts, certs, g = go(reqs(R_H, R_P, R_F), dict(a=ok_img))
-check('certified imm', (reasons(facts), len(certs), g), ({'H': [], 'P': [], 'F': []}, 3, []))
+case('certified imm', got=(reasons(facts), len(certs), g), want=({'H': [], 'P': [], 'F': []}, 3, []))
 
 
 def bad_img(a):
@@ -181,9 +177,9 @@ def bad_img(a):
 
 
 facts, certs, g = go(reqs(R_H, R_P), dict(a=bad_img))
-check('forbidden', (reasons(facts), len(certs)), ({'H': ['forbidden-immediate'], 'P': ['forbidden-bits']}, 0))
+case('forbidden', got=(reasons(facts), len(certs)), want=({'H': ['forbidden-immediate'], 'P': ['forbidden-bits']}, 0))
 call_va = [c for c in argflow.imports_called(image(bad_img, 'a')[0], 'CreateFileMappingA')[0]][0]
-check('site named', sites(facts, 'H'), ['0x%x' % call_va])
+case('site named', got=sites(facts, 'H'), want=['0x%x' % call_va])
 
 
 def nonconst_img(a):
@@ -191,7 +187,7 @@ def nonconst_img(a):
 
 
 facts, certs, g = go(reqs(R_H), dict(a=nonconst_img))
-check('non-constant', reasons(facts), {'H': ['arg-open']})
+case('non-constant', got=reasons(facts), want={'H': ['arg-open']})
 
 
 def ret_img(a):
@@ -199,7 +195,7 @@ def ret_img(a):
 
 
 facts, certs, g = go(reqs(R_H), dict(a=ret_img))
-check('call result is not an immediate', reasons(facts), {'H': ['not-immediate']})
+case('call result is not an immediate', got=reasons(facts), want={'H': ['not-immediate']})
 
 # ---- GetProcAddress
 def gpa_hit_img(a):
@@ -208,7 +204,7 @@ def gpa_hit_img(a):
 
 
 facts, certs, g = go(reqs(R_H, R_P, R_F), dict(a=gpa_hit_img))
-check('gpa pair', (reasons(facts), len(certs)), ({'H': ['gpa-pair'], 'P': ['gpa-pair'], 'F': []}, 1))
+case('gpa pair', got=(reasons(facts), len(certs)), want=({'H': ['gpa-pair'], 'P': ['gpa-pair'], 'F': []}, 1))
 
 
 def gpa_open_img(a):
@@ -217,12 +213,12 @@ def gpa_open_img(a):
 
 
 facts, certs, g = go(reqs(R_H, R_P, R_F), dict(a=gpa_open_img))
-check('gpa open', (reasons(facts), len(certs), len(g)), ({'H': ['gpa-open'], 'P': ['gpa-open'], 'F': ['gpa-open']}, 0, 1))
+case('gpa open', got=(reasons(facts), len(certs), len(g)), want=({'H': ['gpa-open'], 'P': ['gpa-open'], 'F': ['gpa-open']}, 0, 1))
 res_ids = gate_reach.uncertified_ids(facts)
-check('ids format', res_ids[0].split(':')[:2], ['1', 'gpa-open'])
-check('ids tail', [x.split(':')[-2] for x in res_ids], ['a'] * 3)
+case('ids format', got=res_ids[0].split(':')[:2], want=['1', 'gpa-open'])
+case('ids tail', got=[x.split(':')[-2] for x in res_ids], want=['a'] * 3)
 facts, certs, g = go(reqs(R_H), dict(a=ok_img), skip={('a', r) for r in image(ok_img, 'a')[0].relocs if image(ok_img, 'a')[0].word(r) == GPA})
-check('gpa uncovered', reasons(facts), {'H': ['gpa-uncovered']})
+case('gpa uncovered', got=reasons(facts), want={'H': ['gpa-uncovered']})
 
 # ---- result_of
 def res_ok(a):
@@ -230,9 +226,9 @@ def res_ok(a):
 
 
 facts, certs, g = go(reqs(R_W), dict(a=res_ok))
-check('result_of proven', (reasons(facts), len(certs)), ({'W': []}, 1))
+case('result_of proven', got=(reasons(facts), len(certs)), want=({'W': []}, 1))
 facts, certs, g = go(reqs(R_W2), dict(a=res_ok))
-check('handle_origin spelling', (reasons(facts), len(certs)), ({'W': []}, 1))
+case('handle_origin spelling', got=(reasons(facts), len(certs)), want=({'W': []}, 1))
 
 
 def res_bad(a):
@@ -240,7 +236,7 @@ def res_bad(a):
 
 
 facts, certs, g = go(reqs(R_W), dict(a=res_bad))
-check('result_of broken (access)', reasons(facts), {'W': ['origin-violates']})
+case('result_of broken (access)', got=reasons(facts), want={'W': ['origin-violates']})
 
 
 def res_share(a):
@@ -248,7 +244,7 @@ def res_share(a):
 
 
 facts, certs, g = go(reqs(R_W), dict(a=res_share))
-check('result_of broken (share)', reasons(facts), {'W': ['origin-violates']})
+case('result_of broken (share)', got=reasons(facts), want={'W': ['origin-violates']})
 
 
 def res_other(a):
@@ -256,7 +252,7 @@ def res_other(a):
 
 
 facts, certs, g = go(reqs(R_W), dict(a=res_other))
-check('result_of wrong callee', reasons(facts), {'W': ['origin-not-in-set']})
+case('result_of wrong callee', got=reasons(facts), want={'W': ['origin-not-in-set']})
 
 
 def res_imm(a):
@@ -264,7 +260,7 @@ def res_imm(a):
 
 
 facts, certs, g = go(reqs(R_W), dict(a=res_imm))
-check('result_of immediate handle', reasons(facts), {'W': ['handle-open']})
+case('result_of immediate handle', got=reasons(facts), want={'W': ['handle-open']})
 
 
 def res_mem_strict(a):
@@ -273,7 +269,7 @@ def res_mem_strict(a):
 
 
 facts, certs, g = go(reqs(R_W), dict(a=res_mem_strict))
-check('result_of through memory, no call between', (reasons(facts), len(certs)), ({'W': []}, 1))
+case('result_of through memory, no call between', got=(reasons(facts), len(certs)), want=({'W': []}, 1))
 
 
 def res_mem_open(a):
@@ -283,27 +279,27 @@ def res_mem_open(a):
 
 
 facts, certs, g = go(reqs(R_W), dict(a=res_mem_open))
-check('result_of needs A7', (reasons(facts), len(certs)), ({'W': ['assumption:A7']}, 0))
+case('result_of needs A7', got=(reasons(facts), len(certs)), want=({'W': ['assumption:A7']}, 0))
 
 # ---- determinism and hashes
 rs1, rs2 = reqs(R_H, R_P, R_W, R_F), reqs(R_F, R_W, R_P, R_H)
-check('ids independent of row order', [(r['id'], r['request']) for r in rs1], [(r['id'], r['request']) for r in rs2])
-check('ids start at 1 in canonical order', [(r['id'], r['request'], r['k']) for r in rs1], [(1, 'F', 1), (2, 'H', 0), (3, 'W', 0), (4, 'P', 2)])
-check('table id', gate_reach.table_id(rs1), gate_reach.table_id(rs2))
+case('ids independent of row order', got=[(r['id'], r['request']) for r in rs1], want=[(r['id'], r['request']) for r in rs2])
+case('ids start at 1 in canonical order', got=[(r['id'], r['request'], r['k']) for r in rs1], want=[(1, 'F', 1), (2, 'H', 0), (3, 'W', 0), (4, 'P', 2)])
+case('table id', got=gate_reach.table_id(rs1), want=gate_reach.table_id(rs2))
 f1, c1, _ = go(reqs(R_H, R_P, R_F), dict(a=ok_img))
 f2, c2, _ = go(reqs(R_F, R_P, R_H), dict(a=ok_img))
-check('certificate hashes repeat', c1, c2)
+case('certificate hashes repeat', got=c1, want=c2)
 f3, c3, _ = go(reqs(R_H, R_P, R_F), dict(a=ok_img, b=res_imm))
-check('image set changes the hash', (set(c1) == set(c3), any(c1[i] == c3[i] for i in c1)), (True, False))
+case('image set changes the hash', got=(set(c1) == set(c3), any(c1[i] == c3[i] for i in c1)), want=(True, False))
 hdr = gate_reach.header(rs1)
 for want in ('#define FNVNX_REACH_KERNEL32_CreateFileMappingA_1 2', '#define FNVNX_REACH_KERNEL32_CreateFileMappingA_3 4',
              '#define FNVNX_REACH_KERNEL32_CreateFileA_1 1', 'FNVNX_REACH_TABLE_ID "' + gate_reach.table_id(rs1) + '"'):
-    check('header ' + want[:50], want in hdr, True)
-check('header deterministic', hdr, gate_reach.header(rs2))
+    case('header ', got=want in hdr, want=True, key=want[:50])
+case('header deterministic', got=hdr, want=gate_reach.header(rs2))
 for bad in ('H\tkernel32\tX\t0\tnope\t1\tn\n', 'H\tkernel32\tX\t0\timm_set\tzz\tn\n'):
     try:
         gate_reach.parse_requests('\t'.join(gate_reach.COLUMNS) + '\n' + bad)
-        check('bad row rejected', 'accepted', 'error')
+        case('bad row rejected', got='accepted', want='error')
     except gate_reach.FormatError:
         pass
 
@@ -314,10 +310,10 @@ facts, certs, g = go(reqs(R_H, R_P, R_F), dict(a=bad_img))
 gate_reach.gate(facts, certs, g, 1)
 with open(os.path.join(out, 'reach.json')) as fh:
     gj = fh.read()
-check('gate json', ('"status":"red"' in gj, '"universe":3' in gj, '"certified":1' in gj, '"name":"reach"' in gj), (True,) * 4)
+case('gate json', got=('"status":"red"' in gj, '"universe":3' in gj, '"certified":1' in gj, '"name":"reach"' in gj), want=(True,) * 4)
 with open(os.path.join(out, 'reach.facts.tsv')) as fh:
     ft = fh.read().split('\n')
-check('facts tsv only certified', [l.split('\t')[0] for l in ft if l], ['1'])
+case('facts tsv only certified', got=[l.split('\t')[0] for l in ft if l], want=['1'])
 shutil.rmtree(out)
 del os.environ['GATE_OUT']
 
@@ -342,44 +338,44 @@ else:
                         'int g(int x){ if(x) fnvnx_reach_violation(0x123456); return 2; }\n')
     ids = lambda paths, n, cert: gate_reach.link_check(paths, n, cert)
     uni, red = ids([good], 0x200000, {7, 0x123456})
-    check('link good', (uni, red), (2, []))
+    case('link good', got=(uni, red), want=(2, []))
     uni, red = ids([good], 0x200000, {7})
-    check('link uncertified', [r.split(':')[-1] for r in red], ['fact-not-certified'])
-    check('link uncertified names the site', red[0].startswith('good.o:.text+'), True)
+    case('link uncertified', got=[r.split(':')[-1] for r in red], want=['fact-not-certified'])
+    case('link uncertified names the site', got=red[0].startswith('good.o:.text+'), want=True)
     uni, red = ids([good], 100, {7, 0x123456})
-    check('link not in table', [r.split(':')[-1] for r in red], ['fact-not-in-table'])
+    case('link not in table', got=[r.split(':')[-1] for r in red], want=['fact-not-in-table'])
     reg = obj('reg', DECL + 'void h(unsigned a){ if(a>3) fnvnx_reach_violation(a+1); }\n')
-    check('link register argument', [r.split(':')[-1] for r in ids([reg], 100, {7})[1]], ['no-immediate'])
+    case('link register argument', got=[r.split(':')[-1] for r in ids([reg], 100, {7})[1]], want=['no-immediate'])
     ptr = obj('ptr', DECL + 'void (*fp)(unsigned) = fnvnx_reach_violation;\n')
-    check('link pointer reference', [r.split(':')[-1] for r in ids([ptr], 100, {7})[1]], ['reference-not-call'])
+    case('link pointer reference', got=[r.split(':')[-1] for r in ids([ptr], 100, {7})[1]], want=['reference-not-call'])
     sw = obj('sw', DECL + 'int s(int x){ static void *t[]={&&a,&&b}; goto *t[x&1]; a: return 1; b: fnvnx_reach_violation(7); }\n')
-    check('link switch table', [r.split(':')[-1] for r in ids([sw], 100, {7})[1]], ['indirect-jump'])
+    case('link switch table', got=[r.split(':')[-1] for r in ids([sw], 100, {7})[1]], want=['indirect-jump'])
     A = '.text\n.global a1\n.type a1,%function\n'
     lab = obj('lab', A + 'a1: mov w0,#7\n.Lx: bl fnvnx_reach_violation\n b .Lx\n', True)
-    check('link label before call', [r.split(':')[-1] for r in ids([lab], 100, {7})[1]], ['label'])
+    case('link label before call', got=[r.split(':')[-1] for r in ids([lab], 100, {7})[1]], want=['label'])
     lab2 = obj('lab2', A + 'a1: cbz w1,.Lx\n mov w0,#7\n mov w2,#1\n.Lx: bl fnvnx_reach_violation\n', True)
-    check('link label at the call', [r.split(':')[-1] for r in ids([lab2], 100, {7})[1]], ['label'])
+    case('link label at the call', got=[r.split(':')[-1] for r in ids([lab2], 100, {7})[1]], want=['label'])
     rew = obj('rew', A + 'a1: mov w0,#7\n mov w0,w1\n bl fnvnx_reach_violation\n', True)
-    check('link w0 rewritten', [r.split(':')[-1] for r in ids([rew], 100, {7})[1]], ['no-immediate'])
+    case('link w0 rewritten', got=[r.split(':')[-1] for r in ids([rew], 100, {7})[1]], want=['no-immediate'])
     cl = obj('cl', A + 'a1: mov w0,#7\n bl other\n bl fnvnx_reach_violation\n', True)
-    check('link call between', [r.split(':')[-1] for r in ids([cl], 100, {7})[1]], ['block-boundary'])
+    case('link call between', got=[r.split(':')[-1] for r in ids([cl], 100, {7})[1]], want=['block-boundary'])
     br = obj('br', A + 'a1: mov w0,#7\n cbz w1,.Lz\n bl fnvnx_reach_violation\n.Lz: ret\n', True)
-    check('link branch between', sorted(r.split(':')[-1] for r in ids([br], 100, {7})[1]), ['block-boundary'])
+    case('link branch between', got=sorted(r.split(':')[-1] for r in ids([br], 100, {7})[1]), want=['block-boundary'])
     jm = obj('jm', A + 'a1: mov w0,#7\n b fnvnx_reach_violation\n', True)
     ij = obj('ij', A + 'a1: mov w0,#7\n bl fnvnx_reach_violation\n br x1\n', True)
-    check('link indirect jump, no function size', [r.split(':')[-1] for r in ids([ij], 100, {7})[1]], ['indirect-jump'])
+    case('link indirect jump, no function size', got=[r.split(':')[-1] for r in ids([ij], 100, {7})[1]], want=['indirect-jump'])
     ij2 = obj('ij2', A + 'a1: mov w0,#7\n bl fnvnx_reach_violation\n.size a1,.-a1\n.global a2\n.type a2,%function\na2: br x1\n.size a2,.-a2\n', True)
-    check('link indirect jump in another function', ids([ij2], 100, {7}), (1, []))
-    check('link tail jump', ids([jm], 100, {7}), (1, []))
+    case('link indirect jump in another function', got=ids([ij2], 100, {7}), want=(1, []))
+    case('link tail jump', got=ids([jm], 100, {7}), want=(1, []))
     mk = obj('mk', A + 'a1: movz w0,#3\n movk w0,#1,lsl #16\n nop\n bl fnvnx_reach_violation\n', True)
-    check('link movz/movk', ids([mk], 0x20000, {0x10003}), (1, []))
-    check('link movz/movk value', [r.split(':')[-1] for r in ids([mk], 0x20000, {3})[1]], ['fact-not-certified'])
+    case('link movz/movk', got=ids([mk], 0x20000, {0x10003}), want=(1, []))
+    case('link movz/movk value', got=[r.split(':')[-1] for r in ids([mk], 0x20000, {3})[1]], want=['fact-not-certified'])
     if AR:
         arc = os.path.join(td, 'lib.a')
         subprocess.run([AR, 'rcs', arc, good, reg], check=True)
         uni, red = ids([arc], 100, {7})
-        check('link archive members', (uni, [r.split(':')[0] + ':' + r.split(':')[-1] for r in red]),
-              (3, ['lib.a(good.o):fact-not-in-table', 'lib.a(reg.o):no-immediate']))
+        case('link archive members', got=(uni, [r.split(':')[0] + ':' + r.split(':')[-1] for r in red]),
+              want=(3, ['lib.a(good.o):fact-not-in-table', 'lib.a(reg.o):no-immediate']))
         rsp = os.path.join(td, 'inputs.rsp')
         with open(rsp, 'w') as fh:
             fh.write('"%s"\n' % good)
@@ -389,7 +385,7 @@ else:
         with open(ct, 'w') as fh:
             fh.write('1\tabc\n')
         # id 1 is certified but the objects use 7 and 0x123456: both outside the one-row table
-        check('main --objects', gate_reach.main(['--objects', rsp, '--requests', rq, '--certified', ct]), 1)
+        case('main --objects', got=gate_reach.main(['--objects', rsp, '--requests', rq, '--certified', ct]), want=1)
     shutil.rmtree(td)
 
 # ---- closure_key: every value reaching a dispatcher is a key of its table
@@ -409,37 +405,37 @@ def ck(entries, closure, sources=SRC_OK, loadlib=LL_OK, rows=(CK,)):
 
 ENT = '00401000\tf1\n00401010\tf2\n'
 rs, facts, certs = ck(ENT, '00401000\n00401010\n')
-check('closure_key: everything closed is certified', (len(certs), reasons(facts)), (1, {'REACH_CLOSURE_KEY_LIFTED': []}))
+case('closure_key: everything closed is certified', got=(len(certs), reasons(facts)), want=(1, {'REACH_CLOSURE_KEY_LIFTED': []}))
 CKF = ('REACH_CLOSURE_KEY_NATIVE', '-', 'fnvnx_dispatch', '0', 'closure_key', 'dispatcher=native;miss=fallthrough', 'n')
 rs, facts, certs = ck(ENT, '00401000\n00401010\n00401020\n', rows=(CKF,))
-check('closure_key fallthrough: keys inside the closure are certified, closure addresses without a key are fine', (len(certs), reasons(facts)), (1, {'REACH_CLOSURE_KEY_NATIVE': []}))
+case('closure_key fallthrough: keys inside the closure are certified, closure addresses without a key are fine', got=(len(certs), reasons(facts)), want=(1, {'REACH_CLOSURE_KEY_NATIVE': []}))
 rs, facts, certs = ck(ENT, '00401000\n', rows=(CKF,))
-check('closure_key fallthrough: a key outside the closure is red', (certs, sorted(facts[0].reasons)), ({}, [('key-outside-closure', 'native', '0x401010')]))
+case('closure_key fallthrough: a key outside the closure is red', got=(certs, sorted(facts[0].reasons)), want=({}, [('key-outside-closure', 'native', '0x401010')]))
 rs, facts, certs = ck(ENT, '00401000\n00401020\n')
-check('closure_key: a closure address without a key is red', (certs, sorted(facts[0].reasons)), ({}, [('closure-missing', 'lifted', '0x401020')]))
+case('closure_key: a closure address without a key is red', got=(certs, sorted(facts[0].reasons)), want=({}, [('closure-missing', 'lifted', '0x401020')]))
 rs, facts, certs = ck(ENT, '00401000\n', sources=SRC_OK.replace('eh\tclosed', 'eh\topen'))
-check('closure_key: an open source of the closure is red', (certs, sorted(facts[0].reasons)), ({}, [('source-open', 'lifted', 'eh')]))
+case('closure_key: an open source of the closure is red', got=(certs, sorted(facts[0].reasons)), want=({}, [('source-open', 'lifted', 'eh')]))
 rs, facts, certs = ck(ENT, '00401000\n', sources=SRC_OK.replace('tls\tclosed\n', ''))
-check('closure_key: an absent source is red', sorted(facts[0].reasons), [('source-open', 'lifted', 'tls')])
+case('closure_key: an absent source is red', got=sorted(facts[0].reasons), want=[('source-open', 'lifted', 'tls')])
 rs, facts, certs = ck(ENT, '00401000\n', loadlib=LL_OPEN)
-check('closure_key: an open LoadLibrary site is measurement, never valid', (certs, sorted({r[0] for r in facts[0].reasons}),
-      gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5]), ({}, ['loadlib-open'], 'measurement'))
+case('closure_key: an open LoadLibrary site is measurement, never valid', got=(certs, sorted({r[0] for r in facts[0].reasons}),
+      gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5]), want=({}, ['loadlib-open'], 'measurement'))
 rs, facts, certs = ck(ENT, '00401020\n', loadlib=LL_OPEN)
-check('closure_key: a missing key with open loads stays red (uncertified), not measurement', gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5], 'uncertified')
+case('closure_key: a missing key with open loads stays red (uncertified), not measurement', got=gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5], want='uncertified')
 rs, facts, certs = ck(ENT, '00401000\n', loadlib=None)
-check('closure_key: no loadlib.tsv is open', sorted({r[0] for r in facts[0].reasons}), ['loadlib-open'])
+case('closure_key: no loadlib.tsv is open', got=sorted({r[0] for r in facts[0].reasons}), want=['loadlib-open'])
 rs, facts, certs = ck(ENT, '00401000\n', rows=(CK2,))
-check('closure_key: one id per dispatcher, names bound by --dispatcher', (len(certs), rs[0]['spec']), (1, {'dispatcher': 'native', 'fallthrough': False}))
+case('closure_key: one id per dispatcher, names bound by --dispatcher', got=(len(certs), rs[0]['spec']), want=(1, {'dispatcher': 'native', 'fallthrough': False}))
 rs = reqs(CK, CK2)
 facts, certs, g = gate_reach.run(rs, {}, [], [], {'dispatchers': {'native': (ENT, '00401000\n', SRC_OK)}, 'loadlib': LL_OK})
-check('closure_key: a dispatcher without inputs is red', (sorted(certs), [sorted(f.reasons)[0][0] for f in facts if f.reasons]), ([2], ['dispatcher-missing']))
+case('closure_key: a dispatcher without inputs is red', got=(sorted(certs), [sorted(f.reasons)[0][0] for f in facts if f.reasons]), want=([2], ['dispatcher-missing']))
 h = gate_reach.header(rs)
-check('closure_key: FNVNX_REACH_* macros, one id per dispatcher, each defined once', (h.count('#define FNVNX_REACH_CLOSURE_KEY_LIFTED 1 '), h.count('#define FNVNX_REACH_CLOSURE_KEY_NATIVE 2 '),
-      h.count('#define FNVNX_REACH_CLOSURE_KEY_LIFTED'), h.count('#define FNVNX_REACH_CLOSURE_KEY_NATIVE')), (1, 1, 1, 1))
+case('closure_key: FNVNX_REACH_* macros, one id per dispatcher, each defined once', got=(h.count('#define FNVNX_REACH_CLOSURE_KEY_LIFTED 1 '), h.count('#define FNVNX_REACH_CLOSURE_KEY_NATIVE 2 '),
+      h.count('#define FNVNX_REACH_CLOSURE_KEY_LIFTED'), h.count('#define FNVNX_REACH_CLOSURE_KEY_NATIVE')), want=(1, 1, 1, 1))
 for bad in (('X', 'k.dll', 'f', '0', 'closure_key', 'dispatcher=a', ''), ('X', '-', 'f', '0', 'closure_key', 'a', ''), ('X', '-', 'f', '0', 'closure_key', 'dispatcher=1 x', '')):
     try:
         reqs(bad)
-        check('closure_key: malformed row is an error %r' % (bad[1:],), 'parsed', 'error')
+        case('closure_key: malformed row is an error %r', got='parsed', want='error', key=(bad[1:],))
     except gate_reach.FormatError:
         pass
 

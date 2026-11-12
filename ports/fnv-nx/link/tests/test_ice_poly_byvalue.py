@@ -12,19 +12,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
 import realobj
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'verify'))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 SRC = open(os.path.join(realobj.FIXDIR, 'ice_poly_byvalue.cc')).read()
-fails = []
 
 
-def check(what, res):
-    if res['status'] != 'green':
-        fails.append('%s: %s' % (what, ' | '.join(l for l in res['failure']['stderr'] if 'internal compiler error' in l) or res['failure']))
+def ice_case(what, res):
+    return res['status'] == 'green', '%s' % (' | '.join(l for l in res['failure']['stderr'] if 'internal compiler error' in l) or res['failure'] if res['status'] != 'green' else '')
 
 
-check('all 8 plugins (native root)', realobj.build({'ice': SRC}))
-check('all 8 plugins (lifted-origin root)', realobj.build({'ice': SRC}, lifted=True))
-if fails:
-    print('\n'.join(fails))
-    sys.exit(1)
-print('ok')
+ok, why = ice_case('native', realobj.build({'ice': SRC}))
+case('all 8 plugins (native root)', ok, why)
+ok, why = ice_case('lifted', realobj.build({'ice': SRC}, lifted=True))
+case('all 8 plugins (lifted-origin root)', ok, why)
+sys.exit(testcase.finish())

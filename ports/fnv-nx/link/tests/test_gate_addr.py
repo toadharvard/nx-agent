@@ -20,18 +20,18 @@ sys.path.insert(0, os.path.join(HERE, '..', '..', 'contract'))
 import a64obj
 import addrsec
 import gate_addr
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 TOOL = os.path.join(HERE, '..', '..', 'toolchain', 'addr', 'fnvnx_addr.cc')
 CXX = 'aarch64-linux-gnu-g++-13'
 FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fwrapv', '-fno-strict-aliasing', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57',
          '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics', '-fno-exceptions', '-fno-rtti']
-fails = []
+fails = testcase.FAILED
 tmp = tempfile.mkdtemp(prefix='gate-addr-')
 
 
-def check(what, got, want):
-    if got != want:
-        fails.append('%s: got %r, want %r' % (what, got, want))
 
 
 def run(argv, **kw):
@@ -122,64 +122,64 @@ if plug:
     good = compile_cxx(SRC, 'good', plug)
     plain = compile_cxx(SRC, 'plain', None)
     rows = addrsec.read(good)
-    check('section present', rows is not None, True)
+    case('section present', got=rows is not None, want=True)
     byname = {s: (a, b) for s, a, b in rows or []}
-    check('r1 routed', byname.get('_Z2r1j', (0, 0))[0] >= 1 and byname['_Z2r1j'][0] == byname['_Z2r1j'][1], True)
-    check('r6 routed', byname.get('_Z2r6Pcj', (0, 0))[0] >= 1 and byname['_Z2r6Pcj'][0] == byname['_Z2r6Pcj'][1], True)
-    check('constant not counted', byname.get('_Z2r9v'), (0, 0))
-    check('every record seen == routed', all(a == b for _, a, b in rows or []), True)
-    check('sorted records', [s for s, _, _ in rows or []], sorted(s for s, _, _ in rows or []))
+    case('r1 routed', got=byname.get('_Z2r1j', (0, 0))[0] >= 1 and byname['_Z2r1j'][0] == byname['_Z2r1j'][1], want=True)
+    case('r6 routed', got=byname.get('_Z2r6Pcj', (0, 0))[0] >= 1 and byname['_Z2r6Pcj'][0] == byname['_Z2r6Pcj'][1], want=True)
+    case('constant not counted', got=byname.get('_Z2r9v'), want=(0, 0))
+    case('every record seen == routed', got=all(a == b for _, a, b in rows or []), want=True)
+    case('sorted records', got=[s for s, _, _ in rows or []], want=sorted(s for s, _, _ in rows or []))
     names = sorted(n for _, _, _, ns in a64obj.read(good).functions for n in ns)
-    check('record for every function symbol', sorted(set(names) - set(byname)), [])
-    check('thunk or alias record', any(n.startswith('_ZThn') for n in names) and byname.get(
-        [n for n in names if n.startswith('_ZThn')][0]), (0, 0))
+    case('record for every function symbol', got=sorted(set(names) - set(byname)), want=[])
+    case('thunk or alias record', got=any(n.startswith('_ZThn') for n in names) and byname.get(
+        [n for n in names if n.startswith('_ZThn')][0]), want=(0, 0))
     code = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', good]).stdout
     r1 = code.split('<_Z2r1j>:')[1].split('\n\n')[0]
-    check('r1 adds in 32 bits, no displacement addressing', ('add\tw' in r1) and ('#0x40]' not in r1), True)
+    case('r1 adds in 32 bits, no displacement addressing', got=('add\tw' in r1) and ('#0x40]' not in r1), want=True)
     r, j = gate(good)
-    check('green on plugin object', (r.returncode, j['status'], j['certified'] == j['universe']), (0, 'green', True))
+    case('green on plugin object', got=(r.returncode, j['status'], j['certified'] == j['universe']), want=(0, 'green', True))
     r, j = gate(plain)
-    check('no section: red', (r.returncode, j['status']), (2, 'red'))
-    check('no section: every function named', sorted(j['uncertified']), sorted([plain] + [plain + ':' + n for n in names]))
-    check('no section: object item named', plain in j['uncertified'], True)
+    case('no section: red', got=(r.returncode, j['status']), want=(2, 'red'))
+    case('no section: every function named', got=sorted(j['uncertified']), want=sorted([plain] + [plain + ':' + n for n in names]))
+    case('no section: object item named', got=plain in j['uncertified'], want=True)
 
 o = asm_obj('norec', ['fa', 'fb'], 'fa\\t0\\t0\\n')
 r, j = gate(o)
-check('function without a record', (r.returncode, j['uncertified']), (2, [o + ':fb']))
+case('function without a record', got=(r.returncode, j['uncertified']), want=(2, [o + ':fb']))
 o = asm_obj('two', ['fa'], 'fa\\t0\\t0\\nfa\\t0\\t0\\n')
 r, j = gate(o)
-check('two records', (r.returncode, j['uncertified']), (2, [o + ':fa']))
+case('two records', got=(r.returncode, j['uncertified']), want=(2, [o + ':fa']))
 o = asm_obj('skew', ['fa', 'fb'], 'fa\\t2\\t1\\nfb\\t1\\t1\\n')
 r, j = gate(o)
-check('seen != routed', (r.returncode, j['uncertified']), (2, [o + ':fa']))
+case('seen != routed', got=(r.returncode, j['uncertified']), want=(2, [o + ':fa']))
 for k, bad in enumerate(['fa\\t0\\n', 'fa\\t0\\t0', 'fa\\t-1\\t0\\n', 'fa\\t0\\t0\\t0\\n', '\\t0\\t0\\n', 'fa\\t0x1\\t0\\n']):
     o = asm_obj('mal%d' % k, ['fa', 'fb'], bad)
     r, j = gate(o)
-    check('malformed %r: all functions red' % bad, (r.returncode, sorted(j['uncertified'])), (2, sorted([o, o + ':fa', o + ':fb'])))
+    case('malformed %r: all functions red', got=(r.returncode, sorted(j['uncertified'])), want=(2, sorted([o, o + ':fa', o + ':fb'])), key=bad)
 o = asm_obj('ok', ['fa', 'fb'], 'fb\\t3\\t3\\nfa\\t0\\t0\\nzz\\t1\\t0\\n')
 r, j = gate(o)
-check('record of a non-function is ignored; green', (r.returncode, j['status'], j['universe']), (0, 'green', 4))
+case('record of a non-function is ignored; green', got=(r.returncode, j['status'], j['universe']), want=(0, 'green', 4))
 o = asm_obj('empty', [], '')
 r, j = gate(o)
-check('no functions, empty section: green', (r.returncode, j['status']), (0, 'green'))
+case('no functions, empty section: green', got=(r.returncode, j['status']), want=(0, 'green'))
 junk = os.path.join(tmp, 'junk.o')
 open(junk, 'wb').write(b'not an object')
 r, j = gate(junk)
-check('unreadable object', (r.returncode, j['uncertified']), (2, [junk]))
+case('unreadable object', got=(r.returncode, j['uncertified']), want=(2, [junk]))
 r1, j1 = gate(o, junk)
 r2, j2 = gate(junk, o)
-check('deterministic', j1, j2)
+case('deterministic', got=j1, want=j2)
 
 # layout
-check('GUARD equals the plugin LIMIT', ('LIMIT = 0x%x;' % gate_addr.GUARD) in open(TOOL).read(), True)
-check('layout item is certified with a good file', [x for x in gate_addr.rows([o], LAY) if x[1] == 'layout'], [('', 'layout', '')])
+case('GUARD equals the plugin LIMIT', got=('LIMIT = 0x%x;' % gate_addr.GUARD) in open(TOOL).read(), want=True)
+case('layout item is certified with a good file', got=[x for x in gate_addr.rows([o], LAY) if x[1] == 'layout'], want=[('', 'layout', '')])
 r, j = gate(layout=None)
-check('zero objects, no layout: universe 0, green', (r.returncode, j['status'], j['universe']), (0, 'green', 0))
+case('zero objects, no layout: universe 0, green', got=(r.returncode, j['status'], j['universe']), want=(0, 'green', 0))
 r, j = gate(layout=LAY)
-check('zero objects with layout: one item, green', (r.returncode, j['status'], j['universe']), (0, 'green', 1))
+case('zero objects with layout: one item, green', got=(r.returncode, j['status'], j['universe']), want=(0, 'green', 1))
 r, j = gate(o, layout=None)
-check('objects without layout: red on layout', (r.returncode, j['uncertified']), (2, ['layout']))
-check('missing layout file', gate_addr.layout_reason(os.path.join(tmp, 'absent.json'))[:14], 'layout: file: ')
+case('objects without layout: red on layout', got=(r.returncode, j['uncertified']), want=(2, ['layout']))
+case('missing layout file', got=gate_addr.layout_reason(os.path.join(tmp, 'absent.json'))[:14], want='layout: file: ')
 bad = [
     ('shape', 'not json', None, '{'),
     ('shape', 'trailing text', None, json.dumps(good_doc()) + ' x'),
@@ -191,7 +191,7 @@ bad = [
     ('shape', 'regions not a list', {'schema': 'fnvnx-layout/1', 'regions': {}}, None),
 ]
 for what, nm, doc, raw in bad:
-    check('layout %s: %s' % (what, nm), gate_addr.layout_reason(layout_file('b_' + nm.replace(' ', '_'), doc, raw)).startswith('layout: ' + what), True)
+    case('layout %s: %s', got=gate_addr.layout_reason(layout_file('b_' + nm.replace(' ', '_'), doc, raw)).startswith('layout: ' + what), want=True, key=(what, nm))
 
 
 def mut(f):
@@ -224,20 +224,20 @@ cases = [
         reg('g0', 0, 0x10000, '---', 'guard'), reg('image', 0x10000, 1 << 32, 'rw-')]}),
 ]
 for what, nm, doc in cases:
-    check('layout %s: %s' % (what, nm), gate_addr.layout_reason(layout_file('c_' + nm.replace(' ', '_'), doc)).startswith('layout: ' + what + ':'), True)
-check('layout unsorted regions still a partition', gate_addr.layout_reason(layout_file('uns', mut(lambda d: d['regions'].reverse()))), '')
-check('layout a guard larger than 0x10000 is fine', gate_addr.layout_reason(layout_file('big', {'schema': 'fnvnx-layout/1', 'regions': [
-    reg('g0', 0, 0x100000, '---', 'guard'), reg('image', 0x100000, 0xFFF00000, 'rw-'), reg('g1', 0xFFF00000, 1 << 32, '---', 'guard')]})), '')
+    case('layout in a hand-written table %s: %s', got=gate_addr.layout_reason(layout_file('c_' + nm.replace(' ', '_'), doc)).startswith('layout: ' + what + ':'), want=True, key=(what, nm))
+case('layout unsorted regions still a partition', got=gate_addr.layout_reason(layout_file('uns', mut(lambda d: d['regions'].reverse()))), want='')
+case('layout a guard larger than 0x10000 is fine', got=gate_addr.layout_reason(layout_file('big', {'schema': 'fnvnx-layout/1', 'regions': [
+    reg('g0', 0, 0x100000, '---', 'guard'), reg('image', 0x100000, 0xFFF00000, 'rw-'), reg('g1', 0xFFF00000, 1 << 32, '---', 'guard')]})), want='')
 r, j = gate(o, layout=layout_file('badgate', mut(lambda d: d['regions'][0].update(prot='rw-'))))
-check('gate red on a bad layout', (r.returncode, j['uncertified']), (2, ['layout']))
+case('gate red on a bad layout', got=(r.returncode, j['uncertified']), want=(2, ['layout']))
 # rows shape
 rs = gate_addr.rows([o], LAY)
-check('rows shape', rs, sorted(rs))
-check('rows tuples', all(len(x) == 3 and all(isinstance(y, str) for y in x) for x in rs), True)
-check('rows object item', ('empty', '', '') in rs, True)
+case('rows shape', got=rs, want=sorted(rs))
+case('rows tuples', got=all(len(x) == 3 and all(isinstance(y, str) for y in x) for x in rs), want=True)
+case('rows object item', got=('empty', '', '') in rs, want=True)
 try:
     gate_addr.rows([o, o], LAY)
-    check('duplicate stem raises', False, True)
+    case('duplicate stem raises', got=False, want=True)
 except ValueError:
     pass
 
@@ -251,15 +251,15 @@ int small(int* p) { return p[100]; }
 '''
     d = compile_cxx(dsrc, 'disp', plug)
     rr = {s: (a, b) for s, a, b in addrsec.read(d) or []}
-    check('big displacement routed', rr.get('_Z3bigP1S', (0, 1))[0] >= 1 and rr['_Z3bigP1S'][0] == rr['_Z3bigP1S'][1], True)
-    check('field-array index routed', rr.get('_Z3fldP1Sj', (0, 1))[0] >= 1 and rr['_Z3fldP1Sj'][0] == rr['_Z3fldP1Sj'][1], True)
-    check('small displacement not routed', rr.get('_Z5smallPi'), (0, 0))
+    case('big displacement routed', got=rr.get('_Z3bigP1S', (0, 1))[0] >= 1 and rr['_Z3bigP1S'][0] == rr['_Z3bigP1S'][1], want=True)
+    case('field-array index routed', got=rr.get('_Z3fldP1Sj', (0, 1))[0] >= 1 and rr['_Z3fldP1Sj'][0] == rr['_Z3fldP1Sj'][1], want=True)
+    case('small displacement not routed', got=rr.get('_Z5smallPi'), want=(0, 0))
     dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', d]).stdout
     for fn in ('_Z3bigP1S', '_Z3fldP1Sj'):
         body = dis.split('<%s>:' % fn)[1].split('\n\n')[0]
-        check('%s: no 64-bit add or uxtw' % fn, ('add\tx' in body) or ('uxtw' in body), False)
+        case('%s: no 64-bit add or uxtw', got=('add\tx' in body) or ('uxtw' in body), want=False, key=fn)
     rg, jg = gate(d)
-    check('gate green on the displacement object', (rg.returncode, jg['status']), (0, 'green'))
+    case('gate green on the displacement object', got=(rg.returncode, jg['status']), want=(0, 'green'))
 shutil.rmtree(tmp, ignore_errors=True)
 if fails:
     print('FAIL\n' + '\n'.join(fails))

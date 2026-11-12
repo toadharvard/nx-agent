@@ -11,16 +11,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import gate_oracle as G  # noqa: E402
 import scratch  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 scratch.install()
 
-fails = 0
 
 
-def check(name, ok, info=""):
-    global fails
-    print("%s %s%s" % ("PASS" if ok else "FAIL", name, "" if ok else "  " + repr(info)))
-    fails += 0 if ok else 1
 
 
 T = "ports/fnv-nx/"
@@ -81,26 +79,26 @@ def with_b(**kw):
 
 def bad_a(name, doc, word):
     r = run(doc)
-    check(name, set(r) == {D + "/test_a.py"} and word in r[D + "/test_a.py"], r)
+    case('bad_a', set(r) == {D + "/test_a.py"} and word in r[D + "/test_a.py"], r, key=name)
 
 
 def bad_b(name, doc, word):
     r = run(doc)
-    check(name, set(r) == {D + "/test_b.py"} and word in r[D + "/test_b.py"], r)
+    case('bad_b', set(r) == {D + "/test_b.py"} and word in r[D + "/test_b.py"], r, key=name)
 
 
-check("good declaration: all certified", run(GOOD) == {}, run(GOOD))
-check("no universe: nothing uncertified", G.judge([], {}, TRACKED, ROOTS, PINS, lambda p: SRC[p], None) == {})
+case("good declaration: all certified", run(GOOD) == {}, run(GOOD))
+case("no universe: nothing uncertified", G.judge([], {}, TRACKED, ROOTS, PINS, lambda p: SRC[p], None) == {})
 r = run(None)
-check("missing oracle.json: every test of the DIR uncertified", set(r) == set(FILES), r)
+case("missing oracle.json: every test of the DIR uncertified", set(r) == set(FILES), r)
 r = run(dict(GOOD, format="fnvnx-oracle/2"))
-check("wrong format: every test uncertified", set(r) == set(FILES), r)
+case("wrong format: every test uncertified", set(r) == set(FILES), r)
 r = run(dict(GOOD, note="x"))
-check("unknown top-level key: every test uncertified", set(r) == set(FILES), r)
+case("unknown top-level key: every test uncertified", set(r) == set(FILES), r)
 d = copy.deepcopy(GOOD)
 d["tests"]["test_gone.py"] = d["tests"]["test_a.py"]
 r = run(d)
-check("entry without a test file: every test uncertified", set(r) == set(FILES) and "test_gone.py" in r[FILES[0]], r)
+case("entry without a test file: every test uncertified", set(r) == set(FILES) and "test_gone.py" in r[FILES[0]], r)
 d = copy.deepcopy(GOOD)
 del d["tests"]["test_a.py"]
 bad_a("test without an entry", d, "no entry")
@@ -124,17 +122,17 @@ bad_a("spec anchor is not a heading of the file", with_a(references=[dict(SPEC, 
 bad_a("spec anchor is body text, not a heading", with_a(references=[dict(SPEC, anchor="Rule of the tool: sorted output.")]), "anchor")
 bad_a("spec heading that occurs twice", with_a(references=[{"kind": "spec", "path": T + "docs/SPEC.md", "anchor": "## Twice"}]), "anchor")
 bad_a("spec path untracked", with_a(references=[dict(SPEC, path=T + "docs/NONE.md")]), "not a tracked file")
-check("spec with a line range certified", run(with_a(references=[{"kind": "spec", "path": T + "docs/SPEC.md", "anchor": "L2-L3"}])) == {})
-check("spec with a one-line range certified", run(with_a(references=[{"kind": "spec", "path": T + "docs/SPEC.md", "anchor": "L5-L5"}])) == {})
+case("spec with a line range certified", run(with_a(references=[{"kind": "spec", "path": T + "docs/SPEC.md", "anchor": "L2-L3"}])) == {})
+case("spec with a one-line range certified", run(with_a(references=[{"kind": "spec", "path": T + "docs/SPEC.md", "anchor": "L5-L5"}])) == {})
 for bad in ("L0-L2", "L3-L2", "L2-L6", "L2", "L02-L3", "L2-L3x", "L-1-L2", 7):
     bad_a("spec line range %r refused" % (bad,), with_a(references=[{"kind": "spec", "path": T + "docs/SPEC.md", "anchor": bad}]), "anchor")
-check("spec heading in a doc root certified", run(with_a(references=[
+case("spec heading in a doc root certified", run(with_a(references=[
     {"kind": "spec", "path": T + "docs/SPEC.md", "anchor": "## 4.2 Rounding"}])) == {})
 bad_a("tool citing its own file", with_a(references=[{"kind": "spec", "path": T + "verify/tool.py", "anchor": "L1-L1"}]), "import closure")
 bad_a("tool citing a file it imports", with_a(references=[{"kind": "spec", "path": T + "verify/helper.py", "anchor": "L1-L1"}]),
       "import closure")
-check("model outside the closure certified", run(with_a(references=[{"kind": "model", "path": T + "verify/model.py"}])) == {})
-check("contract table certified", run(with_a(references=[{"kind": "contract", "path": T + "verify/table.tsv"}])) == {})
+case("model outside the closure certified", run(with_a(references=[{"kind": "model", "path": T + "verify/model.py"}])) == {})
+case("contract table certified", run(with_a(references=[{"kind": "contract", "path": T + "verify/table.tsv"}])) == {})
 bad_a("model is the subject", with_a(references=[{"kind": "model", "path": T + "verify/tool.py"}]), "import closure")
 bad_a("model imported by the subject", with_a(references=[{"kind": "model", "path": T + "verify/helper.py"}]), "import closure")
 bad_a("model imported through from-import of a package", with_a(references=[{"kind": "model", "path": T + "verify/pkg/deep.py"}]),
@@ -158,7 +156,7 @@ bad_b("artifact in another repository", with_b(references=[dict(WINE, artifact=d
 bad_b("artifact with a missing key", with_b(references=[dict(WINE, artifact={"repo": "fnv-nx-build"})]), "artifact keys")
 bad_b("wine-exe with an extra key", with_b(references=[dict(WINE, note="x")]), "wine-exe: keys")
 r = G.judge(FILES, {D: GOOD}, TRACKED, ROOTS, {}, lambda p: SRC[p], lambda c: ART[c])
-check("no pinned exe: wine-exe uncertified", set(r) == {D + "/test_b.py"}, r)
+case("no pinned exe: wine-exe uncertified", set(r) == {D + "/test_b.py"}, r)
 bad_b("product subject with a model only", with_b(references=[{"kind": "model", "path": T + "verify/model.py"}]),
       "no wine-exe or spec")
 bad_b("product subject with a contract only", with_b(references=[{"kind": "contract", "path": T + "verify/table.tsv"}]),
@@ -169,12 +167,12 @@ bad_b("product subject citing a text of the product root", with_b(references=[
     {"kind": "spec", "path": T + "game/ref.tsv", "anchor": "L1-L1"}]), "lies in a product root")
 bad_b("product subject with a table of the product root", with_b(references=[WINE, {"kind": "contract", "path": T + "game/ref.tsv"}]),
       "lies in a product root")
-check("product subject with a spec outside the product root certified", run(with_b(references=[
+case("product subject with a spec outside the product root certified", run(with_b(references=[
     {"kind": "spec", "path": T + "docs/SPEC.md", "anchor": "## 4.2 Rounding"}])) == {})
 
 # closure: every name python could load
 c, why = G.closure([T + "verify/tool.py"], TRACKED, lambda p: SRC[p])
-check("closure follows import and from-import", why is None and c == {T + "verify/tool.py", T + "verify/helper.py",
+case("closure follows import and from-import", why is None and c == {T + "verify/tool.py", T + "verify/helper.py",
                                                                        T + "verify/pkg/deep.py"}, (c, why))
 # the artifact fetch: a local repository stands in for the artifacts repository
 def git(d, *a):
@@ -200,19 +198,19 @@ import cas  # noqa: E402
 plain = os.path.join(ftmp, "plain")
 os.makedirs(os.path.join(plain, "ref"))
 open(os.path.join(plain, "ref", "x.bin"), "w").write("dump\n")
-check("fetch: tree hash of the commit and its files", tree == cas.tree_hash(plain) and files == {"ref/x.bin"}, (tree, files))
-check("fetch: the bare fetch is kept by commit", os.path.isdir(os.path.join(ftmp, "cache", commit)))
+case("fetch: tree hash of the commit and its files", tree == cas.tree_hash(plain) and files == {"ref/x.bin"}, (tree, files))
+case("fetch: the bare fetch is kept by commit", os.path.isdir(os.path.join(ftmp, "cache", commit)))
 t2, why = G.fetcher(os.path.join(ftmp, "cache"))("9" * 40)
-check("fetch: an unknown commit is an error, not a tree", t2 is None and isinstance(why, str) and why, (t2, why))
+case("fetch: an unknown commit is an error, not a tree", t2 is None and isinstance(why, str) and why, (t2, why))
 del os.environ["ARTIFACTS_URL"]
 
 # repeated key in oracle.json
 tmp = tempfile.mkdtemp(prefix="oracle-test-")
 p = os.path.join(tmp, "o.json")
 open(p, "w").write('{"format": "fnvnx-oracle/1", "tests": {"test_a.py": 1, "test_a.py": 2}}')
-check("repeated entry is not a declaration", G.load(p) is None)
+case("repeated entry is not a declaration", G.load(p) is None)
 open(p, "w").write("{")
-check("malformed json is not a declaration", G.load(p) is None)
+case("malformed json is not a declaration", G.load(p) is None)
 
 # the gate program on a synthetic checkout: one tool, one test, one spec reference
 root = os.path.join(tmp, "repo")
@@ -238,9 +236,9 @@ U = "ports/fnv-nx/"
 # oracle REF kinds external and probe; class ref
 EXT = {"kind": "external", "name": "probes", "path": "p/dump.bin"}
 PROBE = {"kind": "probe", "probe": {"external": "probes", "path": "p/probe.c"}, "platform": "wineplat", "dump_sha256": "9" * 64}
-check("external: pinned name and a file of it -> green", run(with_a(references=[EXT])) == {}, run(with_a(references=[EXT])))
-check("probe: probe source, platform and dump hash -> green", run(with_a(references=[PROBE])) == {}, run(with_a(references=[PROBE])))
-check("external + probe + spec together -> green", run(with_a(references=[SPEC, EXT, PROBE])) == {})
+case("external: pinned name and a file of it -> green", run(with_a(references=[EXT])) == {}, run(with_a(references=[EXT])))
+case("probe: probe source, platform and dump hash -> green", run(with_a(references=[PROBE])) == {}, run(with_a(references=[PROBE])))
+case("external + probe + spec together -> green", run(with_a(references=[SPEC, EXT, PROBE])) == {})
 bad_a("external: a name no recipe pins is red", with_a(references=[dict(EXT, name="nope")]), "not pinned")
 bad_a("external: a name pinned to two commits is red", with_a(references=[dict(EXT, name="twice")]), "more than one")
 bad_a("external: a path that is not a file of the external is red", with_a(references=[dict(EXT, path="p/none")]), "not a file")
@@ -256,7 +254,7 @@ bad_b("a product subject with only an external reference is red", d, "wine-exe o
 REFROOT = {"kind": "contract", "path": U + "refs/dump.tsv"}
 d = copy.deepcopy(GOOD)
 d["tests"]["test_b.py"]["references"] = [WINE, REFROOT]
-check("a product subject may cite a file of a ref root", run(d) == {}, run(d))
+case("a product subject may cite a file of a ref root", run(d) == {}, run(d))
 d = copy.deepcopy(GOOD)
 d["tests"]["test_b.py"]["references"] = [WINE, {"kind": "model", "path": U + "game/ref.tsv"}]
 bad_b("a record whose ref points into a product root stays red", d, "product root")
@@ -265,12 +263,12 @@ bad_a("a subject inside a ref root is red", with_a(subject=[U + "refs/dump.tsv"]
 GATE = os.path.join(os.path.dirname(HERE), "gate_oracle.py")
 rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_OUT=out)).returncode
 res = json.load(open(os.path.join(out, "oracle.json")))
-check("gate program: green, result in the gate format", rc == 0 and res["status"] == "green" and res["name"] == "oracle"
+case("gate program: green, result in the gate format", rc == 0 and res["status"] == "green" and res["name"] == "oracle"
       and res["format"] == "fnvnx-gate/1" and res["universe"] == res["certified"] == 1 and res["uncertified"] == []
       and res["references"] == {"spec": 1}, res)
 os.remove(os.path.join(root, T + "/x/tests/oracle.json"))
 rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_OUT=out)).returncode
 res = json.load(open(os.path.join(out, "oracle.json")))
-check("gate program: test without a declaration -> red, exit 2", rc == 2 and res["status"] == "red"
+case("gate program: test without a declaration -> red, exit 2", rc == 2 and res["status"] == "red"
       and res["uncertified"] == [T + "/x/tests/test_a.py"], res)
-sys.exit(1 if fails else 0)
+sys.exit(testcase.finish())

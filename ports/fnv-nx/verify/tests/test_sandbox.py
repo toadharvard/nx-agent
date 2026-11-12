@@ -13,10 +13,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 ROOT = tempfile.mkdtemp(dir="/root/l4/sbx-test" if os.path.isdir("/root/l4/sbx-test") else os.path.expanduser("~"),
                         prefix="sbx-")
-FAILED = []
+FAILED = testcase.FAILED
 _n = [0]
 PROBE_C = r'''
 #define _GNU_SOURCE
@@ -75,10 +78,6 @@ def fresh(name):
     return p
 
 
-def check(name, ok, detail=""):
-    print("%s %s%s" % ("PASS" if ok else "FAIL", name, (" -- " + detail) if (detail and not ok) else ""), flush=True)
-    if not ok:
-        FAILED.append(name)
 
 
 def sb(*args, env=None):
@@ -125,7 +124,7 @@ def main():
         print("FAIL prerequisites: need root, busybox, gcc")
         return 1
     import sandbox  # noqa: E402  (case 0: importable)
-    check("importable", hasattr(sandbox, "main"))
+    case("importable", hasattr(sandbox, "main"))
     bb = fresh("bb")
     shutil.copy(shutil.which("busybox"), os.path.join(bb, "busybox"))
     os.chmod(os.path.join(bb, "busybox"), 0o755)
@@ -147,7 +146,7 @@ def main():
     t0 = time.time()
     rc, res, err = run(store, st1)
     dt = time.time() - t0
-    check("1 stage runs, output hash == expected tree", rc == 0 and isinstance(res, dict) and
+    case("1 stage runs, output hash == expected tree", rc == 0 and isinstance(res, dict) and
           res["outputs"]["/out"] == cas.ingest(exp, store), "%s %s" % (rc, err[:300]))
     print("INFO one sandbox run of case 1: %.2f s" % dt)
 
@@ -160,7 +159,7 @@ def main():
     rc2 = sandbox.main(["run", "--store", store, ds])
     sandbox.launch = real
     r2 = run(store, ds)
-    check("2 second run is a HIT: nothing launched, same clock-dependent output",
+    case("2 second run is a HIT: nothing launched, same clock-dependent output",
           r1[0] == 0 and not calls and r2[1] == r1[1] and rc2 == 0, "calls=%d" % len(calls))
 
     # (3) isolation
@@ -178,16 +177,16 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     lines = open(os.path.join(d3, "o", "r")).read().split("\n") if rc == 0 else []
     kv = dict(l.split("=", 1) for l in lines if "=" in l)
     mounts_bad = [l for l in lines if l.startswith("EXISTS")]
-    check("3a host paths absent", rc == 0 and not mounts_bad, str(lines[:10]))
-    check("3b hostname fnvnx, pid 1, dev={null,zero,random,urandom,shm}, tmp writable",
+    case("3a host paths absent", rc == 0 and not mounts_bad, str(lines[:10]))
+    case("3b hostname fnvnx, pid 1, dev={null,zero,random,urandom,shm}, tmp writable",
           kv.get("hostname") == "fnvnx" and kv.get("pid") == "1" and kv.get("ls_dev") == "null random shm urandom zero " and kv.get("tmp") == "y",
           str(kv))
-    check("3c network: only down lo, nothing up, connect fails",
+    case("3c network: only down lo, nothing up, connect fails",
           kv.get("netdev") == "lo " and kv.get("ifup") == "[]" and kv.get("nc_rc_nonzero") != "0", str(kv))
-    check("3d root holds only declared dirs", kv.get("root", "").split() == ["bin", "dev", "out", "proc", "tmp", "work"], str(kv))
+    case("3d root holds only declared dirs", kv.get("root", "").split() == ["bin", "dev", "out", "proc", "tmp", "work"], str(kv))
     st3e = mkstage(store, "env", {"/bin": bb}, [], ["/bin/env"], env={"PATH": "/bin", "A": "1", "Z": "two words"})
     rc, res, err = run(store, st3e)
-    check("3e environment is exactly the declared one",
+    case("3e environment is exactly the declared one",
           rc == 0 and _sorted_hash(store, res["stdout"]) == sorted([b"PATH=/bin", b"A=1", b"Z=two words"]), str(res)[:300])
 
     # (4) inputs are read-only
@@ -196,7 +195,7 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
                      'chmod 777 /in/a 2>/dev/null && echo W3; (echo x > /in/d/new) 2>/dev/null && echo W4; '
                      'mount -o remount,rw /in/a 2>/dev/null && echo W5; echo done > /out/r'))
     rc, res, err = run(store, st4)
-    check("4 inputs read-only, CAS intact", rc == 0 and _text(store, res["stdout"]) == "" and cas.verify(store) == [],
+    case("4 inputs read-only, CAS intact", rc == 0 and _text(store, res["stdout"]) == "" and cas.verify(store) == [],
           "%s %r" % (rc, _text(store, res["stdout"]) if rc == 0 else err))
 
     # (5) key semantics
@@ -205,9 +204,9 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     ks = lambda inp, argv=("/bin/true",), env=None, at="/in/a": json.load(open(  # noqa: E731
         mkstage(store, "k", {at: inp}, ["/out"], list(argv), env)))
     base = sandbox.key_of(ks(h1))
-    check("5a key independent of host path and mtime", base == sandbox.key_of(ks(h2)))
+    case("5a key independent of host path and mtime", base == sandbox.key_of(ks(h2)))
     h3 = write(os.path.join(fresh("k3"), "a"), b"other")
-    check("5b key changes with content/argv/env/at",
+    case("5b key changes with content/argv/env/at",
           len({base, sandbox.key_of(ks(h3)), sandbox.key_of(ks(h1, ("/bin/false",))),
                sandbox.key_of(ks(h1, env={"PATH": "/x"})), sandbox.key_of(ks(h1, at="/in/b"))}) == 5)
 
@@ -215,16 +214,16 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     ds6 = mkstage(store, "det", {"/bin": bb, "/in/a": a}, ["/out"], sh("cat /in/a /in/a > /out/b"))
     run(store, ds6)
     rc, o, e = run(store, ds6, "--cold")
-    check("6 --cold on a deterministic stage: equal, exit 0", rc == 0, "%s %s" % (rc, e[:200]))
+    case("6 --cold on a deterministic stage: equal, exit 0", rc == 0, "%s %s" % (rc, e[:200]))
     rc, o, e = run(store, ds, "--cold")
-    check("7 --cold on a clock-reading stage: exit 3 naming the path", rc == 3 and "/out/t" in (o if isinstance(o, str) else "") + e,
+    case("7 --cold on a clock-reading stage: exit 3 naming the path", rc == 3 and "/out/t" in (o if isinstance(o, str) else "") + e,
           "%s %s %s" % (rc, str(o)[:100], e[:200]))
 
     # (8) failing command
     st8 = mkstage(store, "fail", {"/bin": bb}, ["/out"], sh("echo hi; echo err >&2; exit 7"))
     rc, res, err = run(store, st8)
     rc2, res2, _ = run(store, st8)
-    check("8 failing command: rc stored, HIT gives same rc", rc == 7 and rc2 == 7 and res["rc"] == 7 and res == res2
+    case("8 failing command: rc stored, HIT gives same rc", rc == 7 and rc2 == 7 and res["rc"] == 7 and res == res2
           and _text(store, res["stdout"]) == "hi\n" and _text(store, res["stderr"]) == "err\n", "%s %s" % (rc, rc2))
     # unsupported cases are errors (exit 1), nothing stored
     dj = json.load(open(st8))
@@ -232,7 +231,7 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     badp = os.path.join(fresh("doc"), "bad.json")
     json.dump(dj, open(badp, "w"))
     rc, o, e = run(store, badp)
-    check("8b nested input paths: exit 1, nothing stored", rc == 1 and "nest" in e, "%s %s" % (rc, e[:100]))
+    case("8b nested input paths: exit 1, nothing stored", rc == 1 and "nest" in e, "%s %s" % (rc, e[:100]))
 
     # (9) channel probes
     pst = mkstage(store, "probe", {"/bin": bb, "/p": probe}, ["/out"], sh("/p > /out/o"))
@@ -269,10 +268,10 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
         print("channel %s: %s (%s)" % (name, "OPEN" if is_open else "closed", ev))
         if is_open:
             opened.add(name)
-    check("9a getrandom returns ENOSYS", A["getrandom_rc"] == "-1 errno=38", A["getrandom_rc"])
-    check("9b no /dev/urandom, entropy files in /proc empty or absent",
+    case("9a getrandom returns ENOSYS", A["getrandom_rc"] == "-1 errno=38", A["getrandom_rc"])
+    case("9b no /dev/urandom, entropy files in /proc empty or absent",
           A["dev_urandom"].startswith("ERR") and A["proc_uuid"] in ("len0",) or A["proc_uuid"].startswith("ERR"), str(A))
-    check("9c measured OPEN set == result.json open_channels", opened == set(r_a[1]["open_channels"]),
+    case("9c measured OPEN set == result.json open_channels", opened == set(r_a[1]["open_channels"]),
           "%s vs %s" % (sorted(opened), r_a[1]["open_channels"]))
 
     # (10) a sandbox with zero host files: busybox only
@@ -280,7 +279,7 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     st10 = mkstage(store, "zero", {"/bin/busybox": os.path.join(bb, "busybox"), "/in/s.sh": s10}, ["/out"],
                    ["/bin/busybox", "sh", "/in/s.sh"], env={})
     rc, res, err = run(store, st10)
-    check("10 busybox-only sandbox runs a script, empty environment", rc == 0, "%s %s" % (rc, err[:200]))
+    case("10 busybox-only sandbox runs a script, empty environment", rc == 0, "%s %s" % (rc, err[:200]))
     # (11) one key executed by several threads of ONE process at once (a verdict gate builds units of one store in a thread pool): the
     # run directory and the result temp file must not be named by the pid alone (FileExistsError on out/0 was the symptom)
     import concurrent.futures
@@ -289,7 +288,7 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
         futs = [ex.submit(sandbox.execute, store, doc10, key10) for _ in range(6)]
         errs = [f.exception() for f in futs]
-    check("11 same key run by 6 threads of one process: no collision, equal results", not any(errs)
+    case("11 same key run by 6 threads of one process: no collision, equal results", not any(errs)
           and len({json.dumps(f.result(), sort_keys=True) for f in futs}) == 1, str(errs))
     return 1 if FAILED else 0
 

@@ -12,20 +12,15 @@ sys.path.insert(0, HERE)
 import gate_imports as G  # noqa: E402
 import test_recipe as TR  # noqa: E402
 import verdict  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILED = []
-
-
-def check(name, ok, extra=""):
-    print(("PASS " if ok else "FAIL ") + name + ("" if ok else "  " + str(extra)[:500]))
-    if not ok:
-        FAILED.append(name)
-
-
+FAILED = testcase.FAILED
 # symbols(): defined + referenced
 res = {"defined": [{"symbol": "a", "bind": "GLOBAL", "type": "FUNC", "object": "x.o"}, {"symbol": "a", "bind": "WEAK", "type": "FUNC", "object": "y.o"}],
        "undefined": ["b"]}
-check("symbols: defined entries and referenced names", G.symbols(res) == {"a": [("GLOBAL", "FUNC"), ("WEAK", "FUNC")], "b": [("UND", "NOTYPE")]}, G.symbols(res))
+case("symbols: defined entries and referenced names", G.symbols(res) == {"a": [("GLOBAL", "FUNC"), ("WEAK", "FUNC")], "b": [("UND", "NOTYPE")]}, G.symbols(res))
 
 os.environ["ARTIFACTS_URL"] = TR.BASE + "/artifacts.git"
 TR.subprocess.run(["git", "init", "-q", "--bare", TR.BASE + "/artifacts.git"], check=True)
@@ -41,10 +36,10 @@ def run(repo, tag):
 empty = TR.make_repo("im-empty")
 TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
 rc, g, txt, acc = run(empty, "none")
-check("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and g["status"] == "green" and acc[0] == "green", (g, txt))
+case("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and g["status"] == "green" and acc[0] == "green", (g, txt))
 
 rc, g, txt, acc = run(TR.make_repo("im-undeclared"), "undecl")
-check("product root without imports.in.json: red, one item", rc == 2 and g["status"] == "red" and g["universe"] == 1 and "imports.in.json" in g["detail"], (g, txt))
+case("product root without imports.in.json: red, one item", rc == 2 and g["status"] == "red" and g["universe"] == 1 and "imports.in.json" in g["detail"], (g, txt))
 
 SPEC = {"toy.spec": "1 stdcall f_a()\n2 stdcall f_b(long)\n3 stdcall f_c(long)\n", "msvcrt.spec": "1 cdecl memcpy(ptr ptr long)\n2 cdecl strlen(str)\n"}
 
@@ -71,28 +66,28 @@ def toy_repo(tag, names, table, decl_extra=None):
 # green: every import has a body in the toy objects (f_a, f_b, f_c global functions; the name table serves memcpy by f_b, strlen by f_c)
 repo = toy_repo("ok", "toy.dll\tf_a\ntoy.dll\tf_b\nmsvcrt.dll\tmemcpy\nmsvcrt.dll\tstrlen\n", "memcpy\tf_b\tfunc\nstrlen\tf_c\tfunc\n")
 rc, g, txt, acc = run(repo, "ok")
-check("green: sym and lookup rows proven by the objects.json of the build", rc == 0 and g["status"] == "green" and (g["universe"], g["certified"]) == (4, 4) and acc[0] == "green", (g, txt))
+case("green: sym and lookup rows proven by the objects.json of the build", rc == 0 and g["status"] == "green" and (g["universe"], g["certified"]) == (4, 4) and acc[0] == "green", (g, txt))
 
 # red: a name with no symbol (none), a lookup entry naming an undefined symbol (lookup-miss), an msvcrt name outside the table (lookup-miss)
 repo = toy_repo("bad", "toy.dll\tf_a\ntoy.dll\tf_c\nmsvcrt.dll\tmemcpy\nmsvcrt.dll\tstrlen\n", "memcpy\tno_such_symbol\tfunc\n")
 rc, g, txt, acc = run(repo, "bad")
 ids = open(TR.BASE + "/o-bad/imports.ids").read().split("\n") if os.path.exists(TR.BASE + "/o-bad/imports.ids") else []
-check("red: lookup entry without a proven symbol and an unserved msvcrt name", rc == 2 and g["status"] == "red" and g["universe"] == 4 and g["certified"] == 2
+case("red: lookup entry without a proven symbol and an unserved msvcrt name", rc == 2 and g["status"] == "red" and g["universe"] == 4 and g["certified"] == 2
       and ids[:2] == ["msvcrt.dll!memcpy\tlookup-miss", "msvcrt.dll!strlen\tlookup-miss"] and acc[0] == "red", (g, ids, txt))
 
 # red: a name table entry of the wrong kind (func entry naming an object) is lookup-miss; bad input is red with the reason
 repo = toy_repo("badtab", "msvcrt.dll\tmemcpy\n", "memcpy\tf_b\n")
 rc, g, txt, acc = run(repo, "badtab")
-check("bad name table is red with the reason", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
+case("bad name table is red with the reason", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 repo = toy_repo("badin", "toy.dll\tf_a\n", "", {"extra": ["missing.tsv"]})
 rc, g, txt, acc = run(repo, "badin")
-check("missing declared input is red", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
+case("missing declared input is red", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 repo = toy_repo("badext", "toy.dll\tf_a\n", "", {"external": "nonexistent"})
 rc, g, txt, acc = run(repo, "badext")
-check("declared external that the recipe lacks is red", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
+case("declared external that the recipe lacks is red", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 repo = toy_repo("badkeys", "toy.dll\tf_a\n", "", {"bogus": 1})
 rc, g, txt, acc = run(repo, "badkeys")
-check("imports.in.json with unknown keys is red", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
+case("imports.in.json with unknown keys is red", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 
 print("%d failed" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

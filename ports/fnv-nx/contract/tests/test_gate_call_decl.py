@@ -4,25 +4,21 @@ import os, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import gate_call
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-fails = []
-
-
-def check(what, got, want):
-    if got != want:
-        fails.append('%s: got %r want %r' % (what, got, want))
-
-
+fails = testcase.FAILED
 F_ADDR, C_ADDR, D_ADDR, X87, NOSYM, DATA = 0x400100, 0x400200, 0x400300, 0x400400, 0x400500, 0x500000
 N1 = {'fn': {F_ADDR: dict(n1=True, sym='?f@@YAXH@Z'), C_ADDR: dict(n1=True, sym='_cfun'),
              X87: dict(n1=True, sym='__ftol2'), D_ADDR: dict(n1=False, sym='?notn1@@YAXXZ')},
       'sym': {(0, '?f@@YAXH@Z'): F_ADDR, (3, '?g@@3HA'): DATA, (0, '_cfun'): C_ADDR, (1, '__ftol2'): X87,
               (0, '?abs@@3HA'): 1 << 32, (2, 5, '?static@@3HA'): NOSYM}}
 P = gate_call.pristine_names(N1)
-check('pristine fn', P.get(F_ADDR), frozenset(['?f@@YAXH@Z']))
-check('pristine data', P.get(DATA), frozenset(['?g@@3HA']))
-check('pristine skips non-N1 function', D_ADDR in P, False)
-check('pristine skips static and absolute pins', (NOSYM in P, 1 << 32 in P), (False, False))
+case('pristine fn', got=P.get(F_ADDR), want=frozenset(['?f@@YAXH@Z']))
+case('pristine data', got=P.get(DATA), want=frozenset(['?g@@3HA']))
+case('pristine skips non-N1 function', got=D_ADDR in P, want=False)
+case('pristine skips static and absolute pins', got=(NOSYM in P, 1 << 32 in P), want=(False, False))
 
 
 def run(row_sets, calls=(F_ADDR,), data=(), other=(), extra=(), cookie=0x9000):
@@ -40,52 +36,52 @@ REF_F = ('_Z1fi', '?f@@YAXH@Z', 'func', 'ref')
 
 # positive: ref row byte-equal to the pristine name; also zero edges, data edge, cookie, bridge address
 r, d = run([REF_F])
-check('pos rows', r['rows'], [])
-check('pos counts', (r['counts'].get('declared'), r['counts'].get('undeclared', 0)), (1, 0))
-check('pos zero edges (no section needed)', run(None, calls=())[0]['rows'], [])
-check('pos data edge', run([REF_F, ('g', '?g@@3HA', 'data', 'ref')], data=[DATA])[0]['rows'], [])
-check('pos cookie dropped', run([REF_F], data=[0x9000])[0]['rows'], [])
-check('pos bridge address', run([REF_F], calls=(F_ADDR,), other=['__fnvnx_br_00400100_21af1be5'])[0]['rows'], [])
-check('pos def row of another symbol ignored', run([REF_F, ('h', '?h@@YAXXZ', 'func', 'def')])[0]['rows'], [])
+case('pos rows', got=r['rows'], want=[])
+case('pos counts', got=(r['counts'].get('declared'), r['counts'].get('undeclared', 0)), want=(1, 0))
+case('pos zero edges (no section needed)', got=run(None, calls=())[0]['rows'], want=[])
+case('pos data edge', got=run([REF_F, ('g', '?g@@3HA', 'data', 'ref')], data=[DATA])[0]['rows'], want=[])
+case('pos cookie dropped', got=run([REF_F], data=[0x9000])[0]['rows'], want=[])
+case('pos bridge address', got=run([REF_F], calls=(F_ADDR,), other=['__fnvnx_br_00400100_21af1be5'])[0]['rows'], want=[])
+case('pos def row of another symbol ignored', got=run([REF_F, ('h', '?h@@YAXXZ', 'func', 'def')])[0]['rows'], want=[])
 
 # negatives, one per not-provable condition; the row is `undeclared`, fail lists it
 r, d = run(None)
-check('neg no section', len(d), 1)
-check('neg no section text', 'no .fnvnx.sympair section' in d[0], True)
+case('neg no section', got=len(d), want=1)
+case('neg no section text', got='no .fnvnx.sympair section' in d[0], want=True)
 r, d = run([])
-check('neg no ref row', ('no ref row has the pristine name' in d[0]) if d else None, True)
+case('neg no ref row', got=('no ref row has the pristine name' in d[0]) if d else None, want=True)
 r, d = run([('_Z1fi', '?f@@YAXH@Z', 'func', 'def')])
-check('neg def row only', len(d), 1)
+case('neg def row only', got=len(d), want=1)
 r, d = run([('_Z1fi', 'unnamed:lambda', 'unnamed:lambda', 'ref')])
-check('neg unnamed kind', len(d), 1)
+case('neg unnamed kind', got=len(d), want=1)
 r, d = run([('_Z1fi', '?f@@YAXH@Z', 'unnamed:lambda', 'ref')])
-check('neg unnamed kind with the pristine name', ('only an unnamed' in d[0]) if d else None, True)
+case('neg unnamed kind with the pristine name', got=('only an unnamed' in d[0]) if d else None, want=True)
 r, d = run([('_Z1fl', '?f@@YAXJ@Z', 'func', 'ref')])                  # (a)(c): declaration differs from the exe contract
-check('neg name mismatch', ('no ref row has the pristine name' in d[0]) if d else None, True)
+case('neg name mismatch', got=('no ref row has the pristine name' in d[0]) if d else None, want=True)
 r, d = run([('_Z1fi', '?f@@YAXH@Z', 'func', 'ref'), ('_Z1fl', '?f@@YAXJ@Z', 'func', 'ref')])
-check('pos extra mismatching row does not cover the edge', d, [])
+case('pos extra mismatching row does not cover the edge', got=d, want=[])
 r, d = run([('cfun', '_cfun', 'func', 'ref')], calls=(C_ADDR,))        # extern "C": undecorated pristine name
-check('neg undecorated pristine', ('undecorated' in d[0]) if d else None, True)
+case('neg undecorated pristine', got=('undecorated' in d[0]) if d else None, want=True)
 r, d = run([('ftol', '__ftol2', 'func', 'ref'), REF_F], calls=(X87,))  # x87 CRT helper, a row exists, still no types
-check('neg x87 helper', ('undecorated' in d[0]) if d else None, True)
+case('neg x87 helper', got=('undecorated' in d[0]) if d else None, want=True)
 r, d = run([REF_F], calls=(NOSYM,))
-check('neg no pristine symbol', ('no pristine COFF symbol' in d[0]) if d else None, True)
+case('neg no pristine symbol', got=('no pristine COFF symbol' in d[0]) if d else None, want=True)
 r, d = run([REF_F], calls=(D_ADDR,))
-check('neg non-N1 target has no pristine symbol', ('no pristine COFF symbol' in d[0]) if d else None, True)
+case('neg non-N1 target has no pristine symbol', got=('no pristine COFF symbol' in d[0]) if d else None, want=True)
 r, d = run([REF_F], data=[NOSYM])
-check('neg data edge without symbol', len(d), 1)
+case('neg data edge without symbol', got=len(d), want=1)
 r, d = run([REF_F, ('g', '?g@@3HA', 'data', 'ref')], calls=(F_ADDR, C_ADDR))   # one bad edge among good ones
-check('neg one bad edge among several', ('0x00400200' in d[0]) if d else None, True)
+case('neg one bad edge among several', got=('0x00400200' in d[0]) if d else None, want=True)
 r, d = run([REF_F], calls=(F_ADDR,), extra={('b', 0x10): ([], set(), {F_ADDR}, set(), [])})
-check('neg worst of several copies (object b has no section)', (len(d), d[0][:1] if d else None), (1, 'b'))
-check('fail list', r['fail'], ['different', 'undeclared'])
-check('row verdict', {v for _, v, _ in r['rows']}, {'undeclared'})
+case('neg worst of several copies (object b has no section)', got=(len(d), d[0][:1] if d else None), want=(1, 'b'))
+case('fail list', got=r['fail'], want=['different', 'undeclared'])
+case('row verdict', got={v for _, v, _ in r['rows']}, want={'undeclared'})
 r, d = run(None, calls=(0x400100,))
-check('row address is the exe function', [a for a, _, _ in r['rows']], [0x10])
+case('row address is the exe function', got=[a for a, _, _ in r['rows']], want=[0x10])
 # facts without `pristine` is a defect of the caller, not a verdict
 try:
     gate_call.run({'fn': {0x10: dict(size=1, calls=[], tails=[])}, 'secs': {}, 'xc': []}, {('a', 0x10): ([], set(), set(), set(), [])}, None)
-    check('missing facts[pristine]', 'no error', 'ValueError')
+    case('missing facts[pristine]', got='no error', want='ValueError')
 except ValueError:
     pass
 

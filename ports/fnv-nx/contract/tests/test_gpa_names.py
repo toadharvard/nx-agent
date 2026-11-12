@@ -3,6 +3,9 @@
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import argflow, gpa_names
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 BASE, TEXT, RD, DATA = 0x400000, 0x1000, 0x2000, 0x3000
 LL, GPA = BASE + RD, BASE + RD + 4            # IAT slots of LoadLibraryA, GetProcAddress
@@ -104,14 +107,7 @@ def build():
     return bytes(out), a
 
 
-fails = []
-
-
-def check(name, got, want):
-    if got != want:
-        fails.append('%s: got %r, want %r' % (name, got, want))
-
-
+fails = testcase.FAILED
 data, a = build()
 ranges = {s: [(s, e)] for s, e in a.funcs.values() if s != a.funcs['thunk'][0]}
 img = argflow.Image(data, 'syn.exe', ranges)
@@ -130,37 +126,37 @@ def pairs(fn, nth=0):
 
 
 d = pairs('f_const')
-check('const', (d['status'], sorted(d['pairs'])), ('closed', [('mod.dll', 'Foo')]))
+case('const', got=(d['status'], sorted(d['pairs'])), want=('closed', [('mod.dll', 'Foo')]))
 d = pairs('f_branch')
-check('branch', (d['status'], sorted(d['pairs'])), ('closed', [('mod.dll', 'Bar'), ('mod.dll', 'Foo')]))
+case('branch', got=(d['status'], sorted(d['pairs'])), want=('closed', [('mod.dll', 'Bar'), ('mod.dll', 'Foo')]))
 d = pairs('f_ord')
-check('ordinal', (d['status'], sorted(d['pairs'])), ('closed', [('mod.dll', '#5')]))
+case('ordinal', got=(d['status'], sorted(d['pairs'])), want=('closed', [('mod.dll', '#5')]))
 d = pairs('f_writable')
-check('writable string is open', d['status'], 'open')
+case('writable string is open', got=d['status'], want='open')
 d = pairs('f_reg')
-check('register call', (d['status'], sorted(d['pairs'])), ('closed', [('mod.dll', 'Foo')]))
+case('register call', got=(d['status'], sorted(d['pairs'])), want=('closed', [('mod.dll', 'Foo')]))
 d = pairs('f_escape')
-check('escape is open', d['status'], 'open')
+case('escape is open', got=d['status'], want='open')
 d = pairs('f_param')
-check('param names', sorted(n for _, n in d['pairs']), ['Bar', 'Foo'])
-check('param status', d['status'], 'closed')
+case('param names', got=sorted(n for _, n in d['pairs']), want=['Bar', 'Foo'])
+case('param status', got=d['status'], want='closed')
 d = pairs('f_taken')
-check('address-taken param is open', d['status'], 'open')
+case('address-taken param is open', got=d['status'], want='open')
 thunk_ref = a.funcs['thunk'][0] + 2
 d = gpa_names.derive_site(img, thunk_ref)
-check('unreached thunk', (d['status'], d['note'], d['pairs']), ('closed', 'unreached', set()))
+case('unreached thunk', got=(d['status'], d['note'], d['pairs']), want=('closed', 'unreached', set()))
 # cross-check: platform constant must be among the derived names
 res = [(('syn.exe', site_of('f_const', 0), 'GetProcAddress', 'mod.dll Foo'), pairs('f_const')),
        (('syn.exe', site_of('f_reg', 0), 'GetProcAddress', 'mod.dll Nope'), pairs('f_reg'))]
 ok, wide, unr, adj, bad = gpa_names.cross_check(res)
-check('cross-check', (ok, len(bad)), (1, 1))
+case('cross-check', got=(ok, len(bad)), want=(1, 1))
 # platform check
 have, names, mods = gpa_names.platform_pairs('dll\tname\nkernel32.dll\tFoo\n', [])
-check('platform missing', ('mod.dll', 'Foo') in gpa_names.check_platform(res, have, names, mods), True)
+case('platform missing', got=('mod.dll', 'Foo') in gpa_names.check_platform(res, have, names, mods), want=True)
 # argflow API: argument k of a call site
 call = site_of('f_const', 0) - 2
 r = argflow.derive_arg(img, call, 1)
-check('derive_arg', (r.closed, [(k, v[0]) for k, v, _ in r.sorted_leaves()]), (True, [('str', 'Foo')]))
+case('derive_arg', got=(r.closed, [(k, v[0]) for k, v, _ in r.sorted_leaves()]), want=(True, [('str', 'Foo')]))
 
 if fails:
     print('FAIL\n' + '\n'.join(fails))

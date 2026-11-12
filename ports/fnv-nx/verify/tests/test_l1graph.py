@@ -7,13 +7,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 PY = [sys.executable, "-I"]
 BASE = tempfile.mkdtemp(dir="/root/l4" if os.path.isdir("/root/l4") else None, prefix="l1graph-test-")
-FAILED = []
-
+FAILED = testcase.FAILED
 TOOL = """import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 NAME = %r
@@ -55,10 +57,6 @@ def write(name, universe, certified, ids, detail):
 FILES = {"exefacts": "exefacts.py", "n1": "n1.py", "objfacts": "objfacts.py", "registry": "registry.py", "bodysel": "bodysel.py",
          "proto": "proto.py"}
 
-def case(name, ok, detail=""):
-    print("%s %s %s" % ("PASS" if ok else "FAIL", name, "" if ok else detail))
-    if not ok:
-        FAILED.append(name)
 
 def sh(cmd):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

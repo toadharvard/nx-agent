@@ -13,18 +13,14 @@ sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', '
 import abi
 import abi_gaterun
 import store
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-fails = []
-
-
-def check(what, got, want):
-    if got != want:
-        fails.append('%s: got %r want %r' % (what, got, want))
-
-
+fails = testcase.FAILED
 def part(what, ref, dfn, text):
     got = abi.compare(ref, dfn)
-    check(what, got is not None and text in got, True) if text else check(what, got, None)
+    case('part', got=(got is not None and text in got) if text else got, want=True if text else None, key=what)
 
 
 part('identical', '?f@A@@QAEHH@Z', '?f@A@@QAEHH@Z', '')
@@ -51,11 +47,11 @@ part('undecoded', '?f@@YAXV?$A@$1?x@@@@Z', '?f@@YAXXZ', 'undecoded name')
 part('long double vs double', '?f@@YAXO@Z', '?f@@YAXN@Z', 'parameter 0 class F80 vs F64')
 part('aggregate result adds a hidden pointer', '?f@A@@QAE?AVB@@XZ', '?f@A@@QAE?AVB@@XZ', '')
 c = abi.contract('?f@A@@QAE?AVB@@H@Z')
-check('hidden result pointer after this', [x[0] for x in c.x86], ['P', 'P', 'I32'])
-check('this in ecx, the rest on the stack', [x[1] for x in c.x86][:2], ['ecx', ('stk', (0, ()))])
-check('a64: x registers', [x[1] for x in abi.contract('?f@@YAXHMN_J@Z').a64], [('x', 0), ('v', 0), ('v', 1), ('x', 1)])
-check('x86 stack words', [x[1] for x in abi.contract('?f@@YAXH_JN@Z').x86], [('stk', (0, ())), ('stk', (4, ())), ('stk', (12, ()))])
-check('callee pop only for callee-pop conventions', (abi.contract('?f@@YGXH@Z').pop, abi.contract('?f@@YAXH@Z').pop), (('I32',), ()))
+case('hidden result pointer after this', got=[x[0] for x in c.x86], want=['P', 'P', 'I32'])
+case('this in ecx, the rest on the stack', got=[x[1] for x in c.x86][:2], want=['ecx', ('stk', (0, ()))])
+case('a64: x registers', got=[x[1] for x in abi.contract('?f@@YAXHMN_J@Z').a64], want=[('x', 0), ('v', 0), ('v', 1), ('x', 1)])
+case('x86 stack words', got=[x[1] for x in abi.contract('?f@@YAXH_JN@Z').x86], want=[('stk', (0, ())), ('stk', (4, ())), ('stk', (12, ()))])
+case('callee pop only for callee-pop conventions', got=(abi.contract('?f@@YGXH@Z').pop, abi.contract('?f@@YAXH@Z').pop), want=(('I32',), ()))
 
 # the gate
 def row(sym, ms, kind='func', df='ref'):
@@ -73,28 +69,28 @@ def run(objs):
 rc, r = run({'a.o': [row('_Z1fi', '?f@@YAHH@Z', df='def'), row('_Z1gi', '?g@@YAXH@Z', df='ref')],
              'b.o': [row('_Z1fi', '?f@@YAHH@Z'), row('_Z1hv', '?h@@YAXXZ'), row('_ZTV1A', '', 'vtable', 'def')],
              'c.o': [row('_Z1fi', '?f@@YAHI@Z'), row('_Z1gi', '?g@@YAXH@Z', df='def')]})
-check('green: both refs of f, the ref of g; h has no definition and is out', (rc, r['universe'], r['certified'], r['status']), (0, 3, 3, 'green'))
+case('green: both refs of f, the ref of g; h has no definition and is out', got=(rc, r['universe'], r['certified'], r['status']), want=(0, 3, 3, 'green'))
 rc, r = run({'a.o': [row('_Z1fi', '?f@@YAHH@Z', df='def')], 'b.o': [row('_Z1fi', '?f@@YAXH@Z')], 'c.o': [row('_Z1fi', '?f@@YGHH@Z')]})
-check('red items are named', (rc, [u.split(' [')[0] for u in r['uncertified']]), (1, ['b.o:_Z1fi', 'c.o:_Z1fi']))
-check('reasons', ('result class VOID vs I32' in r['uncertified'][0], 'callee pops differ' in r['uncertified'][1]), (True, True))
+case('red items are named', got=(rc, [u.split(' [')[0] for u in r['uncertified']]), want=(1, ['b.o:_Z1fi', 'c.o:_Z1fi']))
+case('reasons', got=('result class VOID vs I32' in r['uncertified'][0], 'callee pops differ' in r['uncertified'][1]), want=(True, True))
 rc, r = run({'a.o': [row('_Z1fi', '?f@@YAHH@Z', df='def')], 'b.o': [row('_Z1fi', '?f@@YAHH@Z', df='def')]})
-check('a second definition is compared with the first', (rc, r['universe']), (0, 1))
+case('a second definition is compared with the first', got=(rc, r['universe']), want=(0, 1))
 rc, r = run({'a.o': [row('_Z1fi', '', 'unnamed:local', df='def')], 'b.o': [row('_Z1fi', '?f@@YAHH@Z')]})
-check('definition without a name', (rc, r['uncertified'][0].startswith('b.o:_Z1fi [definition in a.o has no MSVC name')), (1, True))
+case('definition without a name', got=(rc, r['uncertified'][0].startswith('b.o:_Z1fi [definition in a.o has no MSVC name')), want=(1, True))
 rc, r = run({'a.o': [row('_Z1fi', '?f@@YAHH@Z', df='def')], 'b.o': [row('_Z1fi', '', 'unnamed:why')]})
-check('reference without a name', (rc, 'the row has no MSVC name' in r['uncertified'][0]), (1, True))
+case('reference without a name', got=(rc, 'the row has no MSVC name' in r['uncertified'][0]), want=(1, True))
 rc, r = run({'a.o': [row('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'def')], 'b.o': [row('_ZN1AC1Ev', '?f@A@@QAEXXZ', 'func')]})
-check('kind mismatch', (rc, 'kind func vs the definition' in r['uncertified'][0]), (1, True))
+case('kind mismatch', got=(rc, 'kind func vs the definition' in r['uncertified'][0]), want=(1, True))
 rc, r = run({})
-check('empty is green with universe 0', (rc, r['universe'], r['status']), (0, 0, 'green'))
+case('empty is green with universe 0', got=(rc, r['universe'], r['status']), want=(0, 0, 'green'))
 d = tempfile.mkdtemp()
 bad = os.path.join(d, 'bad.json')
 open(bad, 'w').write('[]')
-check('malformed input is an error', abi.main(['--obj', bad]), 2)
+case('malformed input is an error', got=abi.main(['--obj', bad]), want=2)
 exe = [sys.executable, '-I', os.path.join(HERE, '..', 'abi.py')]
-check('cli equal', subprocess.run(exe + ['--decl', '?f@@YAHH@Z', '?f@@YAHI@Z'], capture_output=True).returncode, 0)
+case('cli equal', got=subprocess.run(exe + ['--decl', '?f@@YAHH@Z', '?f@@YAHI@Z'], capture_output=True).returncode, want=0)
 r = subprocess.run(exe + ['--decl', '?f@@YAHH@Z', '?f@@YAXH@Z'], capture_output=True, text=True)
-check('cli differ', (r.returncode, 'result class' in r.stdout), (1, True))
+case('cli differ', got=(r.returncode, 'result class' in r.stdout), want=(1, True))
 
 for f in fails:
     print('FAIL', f)

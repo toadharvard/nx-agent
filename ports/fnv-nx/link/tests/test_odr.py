@@ -15,15 +15,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]
 import abi_gaterun
 import odr
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 CXX = ['aarch64-linux-gnu-g++-13', '-mabi=ilp32', '-c', '-O0', '-ffreestanding', '-fno-exceptions', '-fno-rtti', '-fno-asynchronous-unwind-tables']
-fails = []
+fails = testcase.FAILED
 d = tempfile.mkdtemp()
 
 
-def check(what, got, want):
-    if got != want:
-        fails.append('%s: got %r want %r' % (what, got, want))
 
 
 def cc(name, src, opt='-O0'):
@@ -45,49 +45,49 @@ a = cc('a', BODY % (3, 'A'))
 b = cc('b', BODY % (3, 'B'))
 c = cc('c', BODY % (5, 'C'))
 rc, r = gate(a, b)
-check('identical inline copies', (rc, r['status'], r['universe']), (0, 'green', 1))
+case('identical inline copies', got=(rc, r['status'], r['universe']), want=(0, 'green', 1))
 rc, r = gate(a, b, c)
-check('differing constant is red and named', (rc, r['universe']), (1, 1))
-check('names the signature and the objects', ('_Z3inli' in r['uncertified'][0], 'c.o' in r['uncertified'][0], 'bytes differ' in r['uncertified'][0]), (True, True, True))
+case('differing constant is red and named', got=(rc, r['universe']), want=(1, 1))
+case('names the signature and the objects', got=('_Z3inli' in r['uncertified'][0], 'c.o' in r['uncertified'][0], 'bytes differ' in r['uncertified'][0]), want=(True, True, True))
 
 REL = 'extern int e1(int); extern int e2(int);\ninline int inl(int x) { return %s(x); }\nint use%s(int x) { return inl(x); }\n'
 rc, r = gate(cc('r1', REL % ('e1', 'A')), cc('r2', REL % ('e1', 'B')))
-check('same relocation target', rc, 0)
+case('same relocation target', got=rc, want=0)
 rc, r = gate(cc('r3', REL % ('e1', 'A')), cc('r4', REL % ('e2', 'B')))
-check('different relocation target', (rc, 'relocations differ' in r['uncertified'][0]), (1, True))
+case('different relocation target', got=(rc, 'relocations differ' in r['uncertified'][0]), want=(1, True))
 
 STR = 'extern int p(const char*);\ninline __attribute__((noinline)) int inl() { return p("%s"); }\nint use%s() { return inl(); }\n'
 rc, r = gate(cc('s1', STR % ('hello', 'A'), '-Os'), cc('s2', STR % ('hello', 'B'), '-Os'))
-check('same string in different objects', rc, 0)
+case('same string in different objects', got=rc, want=0)
 rc, r = gate(cc('s3', STR % ('hello', 'A'), '-Os'), cc('s4', STR % ('world', 'B'), '-Os'))
-check('different string is red', (rc, 'relocations differ' in r['uncertified'][0]), (1, True))
+case('different string is red', got=(rc, 'relocations differ' in r['uncertified'][0]), want=(1, True))
 rc, r = gate(cc('o1', STR % ('hello', 'A')), cc('o2', STR % ('hello', 'B')))
-check('string in a plain section is opaque, uncertified even when equal', (rc, 'not delimited' in r['uncertified'][0]), (1, True))
+case('string in a plain section is opaque, uncertified even when equal', got=(rc, 'not delimited' in r['uncertified'][0]), want=(1, True))
 
 INL = 'struct W { virtual int f() { return %d; } };\nint mk%s() { W w; return w.f(); }\n'
 w1 = cc('w1', INL % (1, 'A'))
 w2 = cc('w2', INL % (1, 'B'))
 w3 = cc('w3', INL % (2, 'C'))
 rc, r = gate(w1, w2)
-check('identical vtable groups', (rc, r['status']), (0, 'green'))
+case('identical vtable groups', got=(rc, r['status']), want=(0, 'green'))
 rc, r = gate(w1, w3)
-check('vtable group with a differing inline virtual', rc, 1)
+case('vtable group with a differing inline virtual', got=rc, want=1)
 
 lone = cc('lone', 'inline int only(int x) { return x + 1; }\nint useL(int x) { return only(x); }\n')
 rc, r = gate(lone, a)
-check('a signature in one object is not in the universe', (rc, r['universe']), (0, 0))
+case('a signature in one object is not in the universe', got=(rc, r['universe']), want=(0, 0))
 rc, r = gate(a)
-check('one object', (rc, r['universe']), (0, 0))
+case('one object', got=(rc, r['universe']), want=(0, 0))
 rc, r = gate(a, a)
-check('the same path twice is one copy', (rc, r['universe']), (0, 0))
+case('the same path twice is one copy', got=(rc, r['universe']), want=(0, 0))
 
 bad = os.path.join(d, 'bad.o')
 open(bad, 'wb').write(b'not an elf at all')
-check('malformed object', odr.main([a, bad]), 2)
-check('missing file', odr.main([os.path.join(d, 'nope.o')]), 2)
+case('malformed object', got=odr.main([a, bad]), want=2)
+case('missing file', got=odr.main([os.path.join(d, 'nope.o')]), want=2)
 ex = os.path.join(d, 'x.out')
 open(ex, 'wb').write(open(a, 'rb').read()[:20])
-check('truncated object', odr.main([a, ex]), 2)
+case('truncated object', got=odr.main([a, ex]), want=2)
 
 for f in fails:
     print('FAIL', f)

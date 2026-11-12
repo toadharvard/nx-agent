@@ -19,15 +19,11 @@ sys.path.insert(0, os.path.join(HERE, '..'))
 import gate_r7
 import synth
 from synth import member, bclass, vbclass, vfunctab, cstr, num
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-fails = []
-
-
-def check(what, got, want):
-    if got != want:
-        fails.append('%s: got %r, want %r' % (what, got, want))
-
-
+fails = testcase.FAILED
 INT, CHAR, UINT, REAL80 = 0x74, 0x10, 0x75, 0x42
 
 
@@ -151,41 +147,41 @@ try:
     g, c = fixture(tmp + '/a', GCC, synth.debug_object(SERIES))
     uni, red, cnt = gate_r7.check(g, c)
     keys = set(WANT)
-    check('universe is the set of GCC keys', uni, len(keys))
+    case('universe is the set of GCC keys', got=uni, want=len(keys))
     got = reds(red)
     want = {k: v for k, v in WANT.items() if v}
     for k in sorted(set(got) | set(want)):
-        check('verdict ' + k, got.get(k), want.get(k))
-    check('sorted', red, sorted(red))
-    check('certified count', uni - len(red), len([k for k, v in WANT.items() if not v]))
-    check('verdict counts', (cnt['equal'], cnt['differs'], cnt['undecided'], cnt['only-gcc']),
-          (len([k for k, v in WANT.items() if not v]), sum(1 for v in WANT.values() if v and v.startswith('differs')),
+        case('verdict ', got=got.get(k), want=want.get(k), key=k)
+    case('sorted', got=red, want=sorted(red))
+    case('certified count', got=uni - len(red), want=len([k for k, v in WANT.items() if not v]))
+    case('verdict counts', got=(cnt['equal'], cnt['differs'], cnt['undecided'], cnt['only-gcc']),
+          want=(len([k for k, v in WANT.items() if not v]), sum(1 for v in WANT.values() if v and v.startswith('differs')),
            sum(1 for v in WANT.values() if v and v.startswith('undecided')), 2))
 
     # no cl object / no CodeView / an unreadable cl object / a CodeView table that does not parse
     one = line('UPlain@@', 8, 4, 'a:0:4,b:4:1')
     g, c = fixture(tmp + '/n1', one, None)
-    check('no cl object', gate_r7.check(g, c)[:2], (1, ['u:UPlain@@: only-gcc: no cl object for the unit']))
+    case('no cl object', got=gate_r7.check(g, c)[:2], want=(1, ['u:UPlain@@: only-gcc: no cl object for the unit']))
     g, c = fixture(tmp + '/n2', one, synth.coff([dict(name=b'.text', chars=0x60500020, data=b'\xc3')], []))
-    check('no CodeView', gate_r7.check(g, c)[:2], (1, ['u:UPlain@@: only-gcc: the cl object has no CodeView types (.debug$T)']))
+    case('no CodeView', got=gate_r7.check(g, c)[:2], want=(1, ['u:UPlain@@: only-gcc: the cl object has no CodeView types (.debug$T)']))
     g, c = fixture(tmp + '/n3', one, b'junk junk junk')
-    check('unreadable cl object', (gate_r7.check(g, c)[0], gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable')), (1, True))
+    case('unreadable cl object', got=(gate_r7.check(g, c)[0], gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable')), want=(1, True))
     g, c = fixture(tmp + '/n4', one, synth.coff([dict(name=b'.debug$T', chars=0x40000040, data=struct.pack('<I', 3) + b'xxxx')], []))
-    check('bad signature', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
+    case('bad signature', got=gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), want=True)
     bad = synth.CV()
     bad.add(0x1505, b'\0\0')
     g, c = fixture(tmp + '/n5', one, synth.debug_object(bad))
-    check('truncated record', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
+    case('truncated record', got=gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), want=True)
     blob = synth.CV()
     blob.add(0x1505, b'\0' * 4)
     g, c = fixture(tmp + '/n6', one, synth.coff([dict(name=b'.debug$T', chars=0x40000040, data=blob.blob()[:-1])], []))
-    check('table cut inside a record', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
+    case('table cut inside a record', got=gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), want=True)
     # members that cannot be read: undecided, not "every member only in gcc"
     brk = synth.CV()
     fl = brk.add(0x1203, struct.pack('<H', 0x1fff) + b'\0' * 6)
     synth.record(brk, 's', 'UPlain@@', fl, 8)
     g, c = fixture(tmp + '/n7', one, synth.debug_object(brk))
-    check('unreadable members', gate_r7.check(g, c)[1], ['u:UPlain@@: undecided: CodeView: members: field leaf 0x1fff'])
+    case('unreadable members', got=gate_r7.check(g, c)[1], want=['u:UPlain@@: undecided: CodeView: members: field leaf 0x1fff'])
 
     # malformed GCC sections are errors (one item), never a pass
     for what, text in (('six fields', 'a\t1\t1\t\t\t\n'), ('bad size', 'a\tx\t1\t\t\t\t_Z\n'), ('bad field', 'a\t1\t1\tf:1\t\t\t_Z\n'),
@@ -194,24 +190,24 @@ try:
                        ('not UTF-8', b'a\t1\t1\t\t\t\t\xff\n')):
         g, c = fixture(tmp + '/m_' + what.replace(' ', '_'), text, synth.debug_object(SERIES))
         u, r, _ = gate_r7.check(g, c)
-        check('malformed ' + what, (u, len(r), r[0].startswith('u:error: ')), (1, 1, True))
+        case('malformed ', got=(u, len(r), r[0].startswith('u:error: ')), want=(1, 1, True), key=what)
     gj = tmp + '/gj'
     synth.write(gj, 'u.o', b'not an elf')
-    check('garbage GCC object', gate_r7.check([gj], [tmp + '/a/c'])[1][0][:9], 'u:error: ')
+    case('garbage GCC object', got=gate_r7.check([gj], [tmp + '/a/c'])[1][0][:9], want='u:error: ')
 
     # an object without the section, or with an empty one: empty universe
     ge = tmp + '/ge'
     synth.write(ge, 'u.o', synth.elf([('.text', b'\0', 6)], None))
-    check('absent section', gate_r7.check([ge], [tmp + '/a/c'])[:2], (0, []))
+    case('absent section', got=gate_r7.check([ge], [tmp + '/a/c'])[:2], want=(0, []))
     g, c = fixture(tmp + '/e1', b'', b'junk')
-    check('empty section (nothing is read)', gate_r7.check(g, c)[:2], (0, []))
+    case('empty section (nothing is read)', got=gate_r7.check(g, c)[:2], want=(0, []))
 
     # --units: cl object u1.obj is the unit `d/x.cpp`
     gu, cu = tmp + '/gu', tmp + '/cu'
     synth.write(gu, 'd_x.cpp.o', synth.elf([('.fnvnx.layout', one.encode(), 0)], None))
     synth.write(cu, 'u1.obj', synth.debug_object(SERIES))
     units = synth.write(tmp, 'units.json', json.dumps({'units': [{'source': 'q.cpp'}, {'source': 'd/x.cpp'}]}).encode())
-    check('units pairing', gate_r7.check([gu], [cu], units)[:2], (1, []))
+    case('units pairing', got=gate_r7.check([gu], [cu], units)[:2], want=(1, []))
 
     # a source listed by two units: the definitions of all its cl objects are collected
     def run_set(objs, text=one):
@@ -229,22 +225,22 @@ try:
     good, nocv = one_rec(8), synth.coff([dict(name=b'.text', chars=0x60500020, data=b'\xc3')], [])
     other = synth.CV()
     synth.record(other, 's', 'UOther@@', other.add(0x1203, synth.fieldlist(member(INT, 0, 'a'))), 4)
-    check('set: identical definitions count once', run_set([good, good]), (1, []))
-    check('set: one object lacks the key, the other has it', run_set([synth.debug_object(other), good]), (1, []))
-    check('set: one object without CodeView', run_set([nocv, good]), (1, []))
-    check('set: no CodeView in any', run_set([nocv, nocv]), (1, ['x.cpp:UPlain@@: only-gcc: the cl object has no CodeView types (.debug$T)']))
-    check('set: differing definitions are undecided', run_set([good, one_rec(12)]),
-          (1, ['x.cpp:UPlain@@: undecided: the key has 1 gcc and 2 cl different definitions in the unit']))
-    check('set: an unreadable object is red', run_set([good, b'junk'])[1][0].startswith('x.cpp:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
+    case('set: identical definitions count once', got=run_set([good, good]), want=(1, []))
+    case('set: one object lacks the key, the other has it', got=run_set([synth.debug_object(other), good]), want=(1, []))
+    case('set: one object without CodeView', got=run_set([nocv, good]), want=(1, []))
+    case('set: no CodeView in any', got=run_set([nocv, nocv]), want=(1, ['x.cpp:UPlain@@: only-gcc: the cl object has no CodeView types (.debug$T)']))
+    case('set: differing definitions are undecided', got=run_set([good, one_rec(12)]),
+          want=(1, ['x.cpp:UPlain@@: undecided: the key has 1 gcc and 2 cl different definitions in the unit']))
+    case('set: an unreadable object is red', got=run_set([good, b'junk'])[1][0].startswith('x.cpp:UPlain@@: undecided: a cl object of the unit is unreadable'), want=True)
 
     # rows(): (stem, key, verdict, reason)
     rr = gate_r7.rows([tmp + '/a/g/u.o'], [tmp + '/a/c/u.obj'])
-    check('rows count', len(rr), len(keys))
-    check('rows sorted', rr, sorted(rr))
-    check('rows shape', [r for r in rr if r[1] in ('UPlain@@', 'USizeBad@@', 'UNoCl@@')],
-          [('u', 'UNoCl@@', 'only-gcc', "cl's debug info of the unit has no definition of the type"), ('u', 'UPlain@@', 'equal', ''), ('u', 'USizeBad@@', 'differs', 'size gcc 12 cl 8')])
-    check('rows verdicts', sorted({r[2] for r in rr}), ['differs', 'equal', 'only-gcc', 'undecided'])
-    check('rows error', gate_r7.rows([tmp + '/gj/u.o'], [])[0][:3], ('u', '', 'error'))
+    case('rows count', got=len(rr), want=len(keys))
+    case('rows sorted', got=rr, want=sorted(rr))
+    case('rows shape', got=[r for r in rr if r[1] in ('UPlain@@', 'USizeBad@@', 'UNoCl@@')],
+          want=[('u', 'UNoCl@@', 'only-gcc', "cl's debug info of the unit has no definition of the type"), ('u', 'UPlain@@', 'equal', ''), ('u', 'USizeBad@@', 'differs', 'size gcc 12 cl 8')])
+    case('rows verdicts', got=sorted({r[2] for r in rr}), want=['differs', 'equal', 'only-gcc', 'undecided'])
+    case('rows error', got=gate_r7.rows([tmp + '/gj/u.o'], [])[0][:3], want=('u', '', 'error'))
 
     # the gate file and the exit status
     def go(g, c, out, extra=()):
@@ -253,18 +249,18 @@ try:
         with open(os.path.join(out, 'r7.json')) as fh:
             return p.returncode, json.load(fh), p.stdout
     rc, doc, out = go(tmp + '/a/g', tmp + '/a/c', tmp + '/o1')
-    check('red file', (rc, doc['format'], doc['name'], doc['status'], doc['universe'], doc['certified']),
-          (1, 'fnvnx-gate/1', 'r7', 'red', len(keys), len([k for k, v in WANT.items() if not v])))
-    check('red file lists at most 50, sorted', doc['uncertified'], sorted(doc['uncertified'])[:50])
-    check('detail', doc['detail'].startswith('r7: %d of %d records certified; ' % (len(keys) - len(want), len(keys))), True)
+    case('red file', got=(rc, doc['format'], doc['name'], doc['status'], doc['universe'], doc['certified']),
+          want=(1, 'fnvnx-gate/1', 'r7', 'red', len(keys), len([k for k, v in WANT.items() if not v])))
+    case('red file lists at most 50, sorted', got=doc['uncertified'], want=sorted(doc['uncertified'])[:50])
+    case('detail', got=doc['detail'].startswith('r7: %d of %d records certified; ' % (len(keys) - len(want), len(keys))), want=True)
     with open(tmp + '/o1/r7.ids') as fh:
-        check('ids file has all', len(fh.read().split('\n')) - 1, len(want))
+        case('ids file has all', got=len(fh.read().split('\n')) - 1, want=len(want))
     rc, doc, _ = go(gu, cu, tmp + '/o2', ['--units', units])
-    check('green file', (rc, doc['status'], doc['universe'], doc['certified'], doc['uncertified']), (0, 'green', 1, 1, []))
+    case('green file', got=(rc, doc['status'], doc['universe'], doc['certified'], doc['uncertified']), want=(0, 'green', 1, 1, []))
     rc, doc, _ = go(ge, tmp + '/a/c', tmp + '/o3')
-    check('empty file', (rc, doc['status'], doc['universe'], doc['certified']), (0, 'green', 0, 0))
+    case('empty file', got=(rc, doc['status'], doc['universe'], doc['certified']), want=(0, 'green', 0, 0))
     rc, doc, _ = go(tmp + '/missing', tmp + '/a/c', tmp + '/o4')
-    check('missing input', (rc, doc['status'], doc['universe'], doc['certified']), (1, 'red', 1, 0))
+    case('missing input', got=(rc, doc['status'], doc['universe'], doc['certified']), want=(1, 'red', 1, 0))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

@@ -7,19 +7,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GRAPH = os.path.join(os.path.dirname(HERE), "graph.py")
 BB = shutil.which("busybox")
 ROOT = tempfile.mkdtemp(dir="/root/l4/sbx-test" if os.path.isdir("/root/l4/sbx-test") else os.path.expanduser("~"), prefix="graph-")
-FAILED = []
+FAILED = testcase.FAILED
 _n = [0]
 SH = "B=/bin/busybox; "
 
-def case(name, ok, detail=""):
-    print("%s %s %s" % ("PASS" if ok else "FAIL", name, "" if ok else detail))
-    if not ok:
-        FAILED.append(name)
 
 def tmp(kind):
     _n[0] += 1
@@ -149,7 +148,7 @@ def t_invalid():
                          ("duplicate", [stage("a", "true"), stage("a", "true")])):
         st = tmp("store")
         p, r = run("run", st, graph({}, stages))
-        case("invalid graph (%s) exit 1, nothing ran" % what, p.returncode == 1 and not os.path.exists(os.path.join(st, "keys")), p.stderr[-200:])
+        case("invalid graph (%s) exit 1, nothing ran", p.returncode == 1 and not os.path.exists(os.path.join(st, "keys")), p.stderr[-200:], key=what)
 
 def t_cold():
     st, sa = tmp("store"), src("c\n")

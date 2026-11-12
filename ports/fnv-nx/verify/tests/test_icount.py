@@ -20,6 +20,9 @@ import icount  # noqa: E402
 from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs  # noqa: E402
 from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_MODE_ARM, Uc  # noqa: E402
 from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 AS, LD, OBJCOPY, NM = ("aarch64-linux-gnu-" + t for t in ("as", "ld", "objcopy", "nm"))
 ARCH = ".arch armv8.4-a+rcpc+lse+lor\n"
@@ -224,9 +227,6 @@ def flat(rep):
 results = []
 
 
-def case(name, ok, detail=""):
-    results.append(ok)
-    print(("PASS " if ok else "FAIL ") + name + (" - " + detail if detail and not ok else ""))
 
 
 def main():

@@ -23,6 +23,9 @@ PORT = os.path.normpath(os.path.join(TOTAL, "..", ".."))
 REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 sys.path.insert(0, TOTAL)
 import gate_d3d9total as G  # noqa: E402
+sys.path.insert(0, os.path.join(PORT, "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 SWITCHED = G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["SWITCHED"]
 OPS = json.load(open(os.path.join(PORT, "render", "shaders", "total", "sm_table.json")))["opcodes"]
@@ -30,7 +33,6 @@ SM_ALL = ["sm:" + k for k in sorted(OPS)]
 SM_OP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0]
 SM_CMP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0 and "cmp" in OPS[k]]
 SM_TOKEN = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] >= 0xFFF0]
-FAIL = []
 
 
 def git(cwd, *args):
@@ -177,31 +179,26 @@ CASES["token-not-consumed"] = (mut_patch("(uint32) FNVNX_SM_TOKEN_PHASE)", "(uin
 CASES["input-untracked"] = (mut_untrack("render/total/externals.json"), None, None)
 
 
-def check(name, cond, what):
-    if not cond:
-        FAIL.append("%s: %s" % (name, what))
-
-
-def case(tmp, cache, name):
+def scenario(tmp, cache, name):
     mutate, want, mismatch = CASES[name]
     base = scratch(os.path.join(tmp, re.sub(r"[^A-Za-z0-9]", "_", name)))
     mutate(base)
     rc, res = run_gate(base, cache)
-    check(name, rc == 2 and res["status"] == "red", "not red (rc %d, %s)" % (rc, res["detail"][:200]))
+    case("a mutation is red", rc == 2 and res["status"] == "red", "not red (rc %d, %s)" % (rc, res["detail"][:200]), key=name)
     if want is None:
-        check(name, res["certified"] == 0, "certified %d" % res["certified"])
+        case("a mutation of an input certifies nothing", res["certified"] == 0, "certified %d" % res["certified"], key=name)
         return
-    check(name, res["universe"] == 332, "universe %d" % res["universe"])
-    check(name, res["universe"] - res["certified"] == len(want), "uncertified %d, want %d (%s)" % (res["universe"] - res["certified"], len(want), res["detail"][:300]))
-    check(name, res["uncertified"] == sorted(want)[:50], "uncertified ids differ: %s" % res["uncertified"][:4])
-    check(name, res["parts"]["enums"]["info"].get("header_mismatch") == mismatch, "header mismatch %s" % res["parts"]["enums"]["info"].get("header_mismatch"))
+    case("the universe stays 332",res["universe"] == 332, "universe %d" % res["universe"], key=name)
+    case("the uncertified count is the expected one", res["universe"] - res["certified"] == len(want), "uncertified %d, want %d (%s)" % (res["universe"] - res["certified"], len(want), res["detail"][:300]), key=name)
+    case("the uncertified ids are the expected ones", res["uncertified"] == sorted(want)[:50], "uncertified ids differ: %s" % res["uncertified"][:4], key=name)
+    case("the header mismatch is the expected one", res["parts"]["enums"]["info"].get("header_mismatch") == mismatch, "header mismatch %s" % res["parts"]["enums"]["info"].get("header_mismatch"), key=name)
 
 
 def guarded(tmp, cache, name):
     try:
-        case(tmp, cache, name)
+        scenario(tmp, cache, name)
     except Exception as x:  # a mutation that cannot be applied or a gate that writes no result is a failed case
-        FAIL.append("%s: %s: %s" % (name, type(x).__name__, str(x)[:200]))
+        case("a mutation is applied and the gate writes a result", False, "%s: %s" % (type(x).__name__, str(x)[:200]), key=name)
 
 
 def tree_hash_vs_cas(tmp, cache):
@@ -217,7 +214,7 @@ def tree_hash_vs_cas(tmp, cache):
     cas = os.path.join(PORT, "verify", "cas.py")
     for d in (t, dest):
         r = subprocess.run([sys.executable, "-I", cas, "ingest", os.path.join(tmp, "store"), d], capture_output=True, text=True, check=True)
-        check("tree-hash", r.stdout.strip() == G.tree_hash(d), "%s: cas %s, gate %s" % (d, r.stdout.strip(), G.tree_hash(d)))
+        case("tree hash equals cas ingest", r.stdout.strip() == G.tree_hash(d), "%s: cas %s, gate %s" % (d, r.stdout.strip(), G.tree_hash(d)))
 
 
 def main():
@@ -227,18 +224,15 @@ def main():
         os.makedirs(cache)
         base = scratch(os.path.join(tmp, "base"))
         rc, res = run_gate(base, cache)      # also fills the cache before the parallel cases
-        check("base", rc == 0 and res["status"] == "green" and res["universe"] == 332 and res["certified"] == 332 and not res["uncertified"],
+        case("base is green 332 of 332", rc == 0 and res["status"] == "green" and res["universe"] == 332 and res["certified"] == 332 and not res["uncertified"],
               "rc %d %s" % (rc, res["detail"][:300]))
         tree_hash_vs_cas(tmp, cache)
         with ThreadPoolExecutor(4) as ex:
             list(ex.map(lambda n: guarded(tmp, cache, n), sorted(CASES)))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    for f in FAIL:
-        print("FAIL", f)
-    survived = {n for n in CASES for f in FAIL if f.startswith(n + ": ")}
-    print("test_d3d9total: base green 332 of 332; %d mutations, %d killed; %s" % (len(CASES), len(CASES) - len(survived), "PASS" if not FAIL else "FAIL"))
-    return 0 if not FAIL else 1
+    print("test_d3d9total: base green 332 of 332; %d mutations; %s" % (len(CASES), "FAIL" if testcase.FAILED else "PASS"))
+    return testcase.finish()
 
 
 if __name__ == "__main__":

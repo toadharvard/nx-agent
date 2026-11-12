@@ -16,19 +16,18 @@ sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 import gatesdir  # noqa: E402
 import sandbox  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 BASE = "/root/l4/verdict-test"
 os.makedirs(BASE, exist_ok=True)
 ROOT = tempfile.mkdtemp(dir=BASE, prefix="vd-")
 TOOL = os.path.join(VERIFY, "verdict.py")
-FAILED = []
+FAILED = testcase.FAILED
 ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
 _n = [0]
 
-def check(name, cond, extra=""):
-    print(("PASS " if cond else "FAIL ") + name + ("" if cond else "  " + str(extra)[:300]))
-    if not cond:
-        FAILED.append(name)
 
 def tmp(name):
     _n[0] += 1
@@ -93,7 +92,7 @@ def head(r, ref="main"):
 def blocked(name, r, rc_exp, args, word):
     before = head(r)
     rc, out, err = tool("merge", "--repo", r, "--into", "main", "--from", "feat", *args)
-    check(name, rc == rc_exp and head(r) == before and word in err, (rc, out, err))
+    case('merge', rc == rc_exp and head(r) == before and word in err, (rc, out, err), key=name)
 
 def prepared(gates, name="p"):
     r = make_repo()
@@ -110,17 +109,17 @@ def prepared(gates, name="p"):
 t0 = time.time()
 r, d, gp, c, tree, v, vd, rc = prepared([gate("a"), gate("b")], "green")
 vj = json.load(open(v))
-check("run green exit 0 and fields", rc == 0 and vj["verdict"] == "green" and vj["tree"] == tree and vj["commit"] == c
+case("run green exit 0 and fields", rc == 0 and vj["verdict"] == "green" and vj["tree"] == tree and vj["commit"] == c
       and len(vj["gates"]) == 2 and vj["gates_sha256"] == hashlib.sha256(open(gp, "rb").read()).hexdigest()
       and vj["over_budget"] is False, vj)
 rc2, _, e2 = tool("store", "--verdict", v, "--verdicts", vd)
-check("store green", rc2 == 0 and os.path.exists(os.path.join(vd, tree + ".json")), e2)
+case("store green", rc2 == 0 and os.path.exists(os.path.join(vd, tree + ".json")), e2)
 old = head(r)
 rc3, out3, e3 = tool("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--gates", gp)
 new = head(r)
 body = git(r, "log", "-1", "--format=%B", new)
 lines = body.rstrip("\n").split("\n")
-check("merge green moves branch, 2 parents, message = subject and the verdict line", rc3 == 0 and out3.strip() == new and new != old
+case("merge green moves branch, 2 parents, message = subject and the verdict line", rc3 == 0 and out3.strip() == new and new != old
       and git(r, "rev-parse", new + "^1") == old and git(r, "rev-parse", new + "^2") == head(r, "feat")
       and git(r, "rev-parse", new + "^{tree}") == tree
       and lines == ["merge feat", "", "verdict: green, tree %s, gates 2" % tree], (rc3, e3, body))
@@ -132,7 +131,7 @@ blocked("block: no verdict file", r, 2, ["--verdicts", vd, "--gates", gp], "no v
 
 r, d, gp, c, tree, v, vd, rc = prepared([gate("a"), gate("b", status="red")], "red")
 tool("store", "--verdict", v, "--verdicts", vd)
-check("red verdict stored", rc == 2 and os.path.exists(os.path.join(vd, tree + ".json")))
+case("red verdict stored", rc == 2 and os.path.exists(os.path.join(vd, tree + ".json")))
 blocked("block: red verdict", r, 2, ["--verdicts", vd, "--gates", gp], "red")
 
 r, d, gp, c, tree, v, vd, rc = prepared([gate("a")], "moved")
@@ -176,14 +175,14 @@ verdict._git = racing
 before_err = sys.stderr
 rcc = verdict.main(["merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--gates", gp])
 verdict._git = real
-check("block: concurrent ref change (CAS fails)", rcc == 2 and moved and head(r) == moved[0], (rcc, moved))
+case("block: concurrent ref change (CAS fails)", rcc == 2 and moved and head(r) == moved[0], (rcc, moved))
 
 # 3 gate result classes
 def red_case(name, g, exp):
     r, d, gp, c, tree, v, vd, rc = prepared([g], name)
     vj = json.load(open(v))
     gr = vj["gates"][0]
-    check("gate class: " + name, rc == 2 and vj["verdict"] == "red" and gr["status"] == "red" and exp in gr["reason"], (rc, vj))
+    case("gate class: ", rc == 2 and vj["verdict"] == "red" and gr["status"] == "red" and exp in gr["reason"], (rc, vj), key=name)
 red_case("missing file", gate("g", write="none"), "missing")
 red_case("bad json", gate("g", write="bad"), "invalid")
 red_case("exit nonzero with green", gate("g", rc=3), "exit")
@@ -192,12 +191,12 @@ red_case("certified > universe", gate("g", universe=1, certified=2), "certified"
 red_case("name mismatch", dict(gate("zz"), name="g"), "name")
 r = make_repo(); d = tmp("zero"); gp = gates_file(d, []); v = os.path.join(d, "v.json")
 rc, _, _ = run_verdict(r, head(r), gp, v)
-check("gate class: zero gates is red", rc == 2 and json.load(open(v))["verdict"] == "red")
+case("gate class: zero gates is red", rc == 2 and json.load(open(v))["verdict"] == "red")
 
 r = make_repo(); d = tmp("budget"); gp = gates_file(d, [gate("a")]); v = os.path.join(d, "v.json")
 rc, _, _ = run_verdict(r, head(r), gp, v, "--budget-s", "0")
 vj = json.load(open(v))
-check("over_budget reported, verdict stays green", rc == 0 and vj["over_budget"] is True and vj["verdict"] == "green", vj)
+case("over_budget reported, verdict stays green", rc == 0 and vj["over_budget"] is True and vj["verdict"] == "green", vj)
 
 # no vacuous green: `covers` and the universe-0 rule (gatesdir.py)
 def with_admit(roots):
@@ -213,12 +212,12 @@ def covers_case(name, roots, g, want, why=""):
     r = with_admit(roots); d = tmp("covers"); gp = gates_file(d, [g]); v = os.path.join(d, "v.json")
     rc, _, _ = run_verdict(r, head(r), gp, v)
     gr = json.load(open(v))["gates"][0]
-    check("covers: " + name, gr["status"] == want and why in gr["reason"] and rc == (0 if want == "green" else 2), (rc, gr))
+    case("covers: gate verdict", gr["status"] == want and why in gr["reason"] and rc == (0 if want == "green" else 2), (rc, gr), key=name)
 
 GUEST = {"path": "ports/fnv-nx/platform", "class": "product", "target": "guest"}
 LIFTED = {"path": "ports/fnv-nx/pack", "class": "product", "target": "guest", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/liftall.py", "pack": "p"}}
 HOSTP = {"path": "ports/fnv-nx/render", "class": "product", "target": "host"}
-check("covers: root classes derive from admit.json", gatesdir.root_classes({"roots": [GUEST, LIFTED, HOSTP, {"path": "d", "class": "doc"}, {"path": "t", "class": "tool"}]})
+case("covers: root classes derive from admit.json", gatesdir.root_classes({"roots": [GUEST, LIFTED, HOSTP, {"path": "d", "class": "doc"}, {"path": "t", "class": "tool"}]})
       == {"ports/fnv-nx/platform": {"product-guest"}, "ports/fnv-nx/pack": {"lifted"}, "ports/fnv-nx/render": {"host-product"}, "d": {"doc"}, "t": {"tool"}})
 def covers_linked(name, link, want):
     r = with_admit([HOSTP])
@@ -228,11 +227,11 @@ def covers_linked(name, link, want):
     d = tmp("covers"); gp = gates_file(d, [gate("g", universe=0, certified=0, covers=("linked",))]); v = os.path.join(d, "v.json")
     run_verdict(r, head(r), gp, v)
     gr = json.load(open(v))["gates"][0]
-    check("covers: " + name, gr["status"] == want, gr)
+    case("covers: linked gate verdict", gr["status"] == want, gr, key=name)
 covers_linked("a link-null host root is outside `linked`: universe 0 is green", None, "green")
 covers_linked("a host root with a link is `linked`: universe 0 is red", {"script": "l.ld"}, "red")
 REFR = {"path": "ports/fnv-nx/refs", "class": "ref"}
-check("covers: a ref root has the class ref", gatesdir.root_classes({"roots": [REFR]}) == {"ports/fnv-nx/refs": {"ref"}})
+case("covers: a ref root has the class ref", gatesdir.root_classes({"roots": [REFR]}) == {"ports/fnv-nx/refs": {"ref"}})
 covers_case("a ref root with universe 0 is red for a gate that covers ref", [REFR], gate("g", universe=0, certified=0, covers=("tool", "ref")), "red", "ref")
 covers_case("a ref root does not make a product-only gate vacuous", [REFR], gate("g", universe=0, certified=0, covers=("linked",)), "green")
 covers_case("a covered class present with universe 0 is red", [GUEST], gate("g", universe=0, certified=0, covers=("product-guest",)), "red", "vacuous")
@@ -277,11 +276,11 @@ src, b1, v1 = ing(d, store, {"s": "1"}), ing(d, store, {"b": "1"}), ing(d, store
 stage(d, store, docs, "b1", "build", [("/in", src)], b1)
 stage(d, store, docs, "v1", "verification", [("/in", b1)], v1)
 rc, out, err = tool("provenance", "--store", store, "--docs", docs)
-check("provenance: clean graph exit 0", rc == 0, (out, err))
+case("provenance: clean graph exit 0", rc == 0, (out, err))
 
 stage(d, store, docs, "b2", "build", [("/in", v1)], ing(d, store, {"b": "2"}))
 rc, out, err = tool("provenance", "--store", store, "--docs", docs)
-check("provenance: direct taint", rc == 2 and "b2" in out and "v1" in out and "/in" in out, (rc, out, err))
+case("provenance: direct taint", rc == 2 and "b2" in out and "v1" in out and "/in" in out, (rc, out, err))
 
 d, store, docs = prov_env()
 src, b1, v1 = ing(d, store, {"s": "1"}), ing(d, store, {"b": "1"}), ing(d, store, {"v": "1"})
@@ -290,7 +289,7 @@ stage(d, store, docs, "v1", "verification", [("/in", b1)], v1)
 wrap = ing(d, store, {"sub/dir/v": "1", "other": "x"})
 stage(d, store, docs, "b2", "build", [("/in", wrap)], ing(d, store, {"b": "2"}))
 rc, out, err = tool("provenance", "--store", store, "--docs", docs)
-check("provenance: taint through a subtree", rc == 2 and "b2" in out, (rc, out, err))
+case("provenance: taint through a subtree", rc == 2 and "b2" in out, (rc, out, err))
 
 d, store, docs = prov_env()
 src, b1, v1 = ing(d, store, {"s": "1"}), ing(d, store, {"b": "1"}), ing(d, store, {"v": "1"})
@@ -300,22 +299,23 @@ stage(d, store, docs, "v1", "verification", [("/in", b1)], v1)
 stage(d, store, docs, "b2", "build", [("/in", v1)], b2o)
 stage(d, store, docs, "b3", "build", [("/a", src), ("/b", ing(d, store, {"deep/x": "y", "deep/q/b": "2"}))], b3o)
 rc, out, err = tool("provenance", "--store", store, "--docs", docs)
-check("provenance: transitive taint through a build stage", rc == 2 and "b2" in out and "b3" in out and "b1 " not in out, (rc, out, err))
+case("provenance: transitive taint through a build stage", rc == 2 and "b2" in out and "b3" in out and "b1 " not in out, (rc, out, err))
 
 d, store, docs = prov_env()
 src, b1 = ing(d, store, {"s": "1"}), ing(d, store, {"b": "1"})
 stage(d, store, docs, "b1", None, [("/in", src)], b1)
 rc, out, err = tool("provenance", "--store", store, "--docs", docs)
-check("provenance: missing class exit 1", rc == 1 and "class" in err, (rc, out, err))
-check("sandbox: class field accepted, bad class rejected, part of key",
+case("provenance: missing class exit 1", rc == 1 and "class" in err, (rc, out, err))
+case("sandbox: class field accepted, bad class rejected, part of key",
       sandbox.check_doc(dict(json.load(open(os.path.join(docs, "b1.json"))), **{"class": "build"})) is None
       and sandbox.key_of(dict(json.load(open(os.path.join(docs, "b1.json"))), **{"class": "build"}))
       != sandbox.key_of(dict(json.load(open(os.path.join(docs, "b1.json"))), **{"class": "verification"})))
+raised = None
 try:
     sandbox.check_doc(dict(json.load(open(os.path.join(docs, "b1.json"))), **{"class": "x"}))
-    check("sandbox: bad class rejected", False)
 except sandbox.SbxError:
-    check("sandbox: bad class rejected", True)
+    raised = True
+case("sandbox: bad class rejected", raised is not None)
 
 # 5 defect queue
 d = tmp("defect"); q = os.path.join(d, "q"); ev = os.path.join(d, "ev.txt"); open(ev, "w").write("evidence\n")
@@ -327,7 +327,7 @@ files = sorted(os.listdir(q))
 ent = json.load(open(os.path.join(q, files[0])))
 cont_ok = all(f == hashlib.sha256(cas.canon(json.load(open(os.path.join(q, f))))).hexdigest() + ".json" for f in files)
 rcd, od, _ = tool("defects", "--queue", q)
-check("defect queue: idempotent, content-addressed, counts",
+case("defect queue: idempotent, content-addressed, counts",
       (rc1, rc2, rc3, rc4) == (0, 0, 0, 0) and len(files) == 3 and o1 == o2 and cont_ok
       and ent["format"] == "fnvnx-rule-defect/1" and ent["evidence_name"] == "ev.txt"
       and ent["evidence_sha256"] == hashlib.sha256(b"evidence\n").hexdigest()

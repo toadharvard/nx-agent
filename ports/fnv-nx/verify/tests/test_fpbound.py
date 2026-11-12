@@ -11,16 +11,11 @@ from fractions import Fraction as Fr
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import fpbound as fb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILS = []
-
-
-def case(name, ok, info=""):
-    print(("PASS " if ok else "FAIL ") + name + ((" " + info) if info else ""))
-    if not ok:
-        FAILS.append(name)
-
-
+FAILS = testcase.FAILED
 class Rng:
     """Fixed LCG (no random module)."""
     def __init__(self, seed):
@@ -228,9 +223,9 @@ def t_random():
             if r["ratio"]:
                 ratios.append(r["ratio"])
         stats[f.p] = ratios
-        case("soundness p=%d (2000 chains, %d unstable)" % (f.p, unst), viol == 0,
-             "violations=%d tightness_median=%.3g" % (viol, median(ratios)))
-        case("module rounding == test round_to p=%d" % f.p, sim == 0, "mismatches=%d" % sim)
+        case("soundness p=%d (2000 chains, %d unstable)", viol == 0,
+             "violations=%d tightness_median=%.3g" % (viol, median(ratios)), key=(f.p, unst))
+        case("module rounding == test round_to p=%d", sim == 0, "mismatches=%d" % sim, key=f.p)
     # (2) acceptance: f32 chain vs x87-64 chain never rejects
     cnt = {"accept": 0, "reject": 0, "unstable": 0}
     for ch in chains:
@@ -311,7 +306,7 @@ def t_stable():
         (sr(Fr(2 ** 128 - 2 ** 104), Fr(2 ** 102), fb.F32), True), (sr(1, None, fb.F32), False),
     ]
     bad = [i for i, (a, b) in enumerate(tab) if a is not b]
-    case("stable_compare/to_int/round truth tables (%d rows)" % len(tab), not bad, "bad_rows=%s" % bad)
+    case("stable_compare/to_int/round truth tables (%d rows)", not bad, "bad_rows=%s" % bad, key=len(tab))
 
 
 # ---------------------------------------------------------------- (5) unbounded, (6) special values
@@ -376,7 +371,7 @@ def main():
         try:
             t()
         except Exception as e:  # report as a failure, keep going
-            case(t.__name__, False, "exception %r" % (e,))
+            case('exception', False, "exception %r" % (e,), key=t.__name__)
     print("FAILED: %s" % FAILS if FAILS else "ALL PASS")
     return 1 if FAILS else 0
 

@@ -12,17 +12,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import bootlayout  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILED = []
+FAILED = testcase.FAILED
 N = [0]
 MB = 1 << 20
 
 
-def case(name, cond, extra=""):
-    N[0] += 1
-    print(("ok   " if cond else "FAIL ") + name + ("" if cond else "  " + str(extra)[:300]))
-    if not cond:
-        FAILED.append(name)
 
 
 def make_elf(ei_class=1, ei_data=1, machine=183, etype=3, flags1=0x08000000, relocs=((0x12200, 183, 0x1234),),
@@ -77,7 +75,7 @@ def main():
             ("crt0 size", dict(size=0x13000), ("size", "0x13000")),
             ("crt0 not relocatable", dict(cflags=0), ("flags", "0x0"))):
         ok, msg = raises(lambda kw=kw: bootlayout.parse_elf(make_elf(**kw)), *needles)
-        case("reject " + name, ok, msg)
+        case("reject ", ok, msg, key=name)
     ok, msg = raises(lambda: bootlayout.parse_elf(good[:40]), "ELF header")
     case("reject truncated", ok, msg)
 

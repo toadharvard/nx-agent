@@ -4,15 +4,11 @@ import os, shutil, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import l2sections as L
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-fails = []
-
-
-def check(what, got, want):
-    if got != want:
-        fails.append('%s: got %r want %r' % (what, got, want))
-
-
+fails = testcase.FAILED
 def err(what, fn, data, part):
     try:
         fn(data, 'o.o')
@@ -24,9 +20,9 @@ def err(what, fn, data, part):
 
 
 SP = b'_Z1fv\t?f@@YAXXZ\tfunc\tdef\n_ZTV1A\t\tvtable\tdef\n_ZN1AC1Ev\t??0A@@QAE@XZ\tctor.c1\tref\n_Z3gccv\t\tunnamed:local scope number\tdef\n'
-check('sympair', L.parse_sympair(SP, 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'func', 'def'), ('_ZTV1A', '', 'vtable', 'def'),
+case('sympair', got=L.parse_sympair(SP, 'o.o'), want=[('_Z1fv', '?f@@YAXXZ', 'func', 'def'), ('_ZTV1A', '', 'vtable', 'def'),
                                               ('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'ref'), ('_Z3gccv', '', 'unnamed:local scope number', 'def')])
-check('sympair empty', L.parse_sympair(b'', 'o.o'), [])
+case('sympair empty', got=L.parse_sympair(b'', 'o.o'), want=[])
 err('sympair 3 fields', L.parse_sympair, SP + b'a\tb\tfunc\n', 'line 5')
 err('sympair kind', L.parse_sympair, b'a\tb\tfunx\tdef\n', 'unknown kind')
 err('sympair unnamed no reason', L.parse_sympair, b'a\t\tunnamed:\tdef\n', 'unknown kind')
@@ -38,7 +34,7 @@ err('sympair blank line', L.parse_sympair, b'a\tb\tfunc\tdef\n\n', 'line 2')
 err('sympair utf8', L.parse_sympair, b'\xff\n', 'UTF-8')
 
 VT = b'_ZTV2D1\t8\t??_7D1@@6BB1@@@\t0\n_ZTV2D1\t24\tunnamed:why\t-4\n_ZTV1X\t8\t\t4\n'
-check('vtpair', L.parse_vtpair(VT, 'o.o'), [('_ZTV2D1', 8, '??_7D1@@6BB1@@@', 0), ('_ZTV2D1', 24, 'unnamed:why', -4), ('_ZTV1X', 8, '', 4)])
+case('vtpair', got=L.parse_vtpair(VT, 'o.o'), want=[('_ZTV2D1', 8, '??_7D1@@6BB1@@@', 0), ('_ZTV2D1', 24, 'unnamed:why', -4), ('_ZTV1X', 8, '', 4)])
 err('vtpair fields', L.parse_vtpair, b'a\t8\tb\n', 'line 1')
 err('vtpair offset', L.parse_vtpair, b'a\tx8\tb\t0\n', 'address point')
 err('vtpair vfptr', L.parse_vtpair, b'a\t8\tb\t\n', 'vfptr offset')
@@ -46,10 +42,10 @@ err('vtpair symbol', L.parse_vtpair, b'\t8\tb\t0\n', '_ZTV symbol')
 
 N3 = (b'_Z3topP1R\tok\t_ZL3midP1R,_ZL4leafP1R\t\t1R\n_ZL3midP1R\tok\t\tinline\t1R\n_Z2dvii\tdiv\n_ZL2cpii\tok\t\tconstprop.0\n'
       b'_ZN1AD2Ev\tok+E\t\tsdd\t\n_Z1gv\tok\t\talias\t1A,1B\n')
-check('n3', L.parse_n3(N3, 'o.o'), [('_Z3topP1R', 'ok', ('_ZL3midP1R', '_ZL4leafP1R'), '', ('1R',)), ('_ZL3midP1R', 'ok', (), 'inline', ('1R',)),
+case('n3', got=L.parse_n3(N3, 'o.o'), want=[('_Z3topP1R', 'ok', ('_ZL3midP1R', '_ZL4leafP1R'), '', ('1R',)), ('_ZL3midP1R', 'ok', (), 'inline', ('1R',)),
                                     ('_Z2dvii', 'div', (), '', ()), ('_ZL2cpii', 'ok', (), 'constprop.0', ()), ('_ZN1AD2Ev', 'ok+E', (), 'sdd', ()),
                                     ('_Z1gv', 'ok', (), 'alias', ('1A', '1B'))])
-check('n3 empty', L.parse_n3(b'', 'o.o'), [])
+case('n3 empty', got=L.parse_n3(b'', 'o.o'), want=[])
 err('n3 1 field', L.parse_n3, b'a\n', '1 fields')
 err('n3 6 fields', L.parse_n3, b'a\tok\t\t\t\tx\n', '6 fields')
 err('n3 verdict', L.parse_n3, b'a\t\n', 'verdict')
@@ -66,14 +62,14 @@ if gcc and oc:
         c, o, o2 = (os.path.join(td, x) for x in ('t.c', 't.o', 't2.o'))
         open(c, 'w').write('int f(void){return 1;}\n')
         subprocess.run([gcc, '-c', '-o', o, c], check=True)
-        check('read, no sections', L.read(o), dict(sympair=[], vtpair=[], n3=[]))
+        case('read, no sections', got=L.read(o), want=dict(sympair=[], vtpair=[], n3=[]))
         cmd = [oc]
         for name, data in (('sympair', SP), ('vtpair', VT), ('n3', N3)):
             p = os.path.join(td, name)
             open(p, 'wb').write(data)
             cmd.append('--add-section=.fnvnx.%s=%s' % (name, p))
         subprocess.run(cmd + [o, o2], check=True)
-        check('read', L.read(o2), dict(sympair=L.parse_sympair(SP, ''), vtpair=L.parse_vtpair(VT, ''), n3=L.parse_n3(N3, '')))
+        case('read', got=L.read(o2), want=dict(sympair=L.parse_sympair(SP, ''), vtpair=L.parse_vtpair(VT, ''), n3=L.parse_n3(N3, '')))
         p = os.path.join(td, 'bad')
         open(p, 'wb').write(b'x\n')
         subprocess.run([oc, '--add-section=.fnvnx.vtpair=' + p, o, os.path.join(td, 't3.o')], check=True)
@@ -81,7 +77,7 @@ if gcc and oc:
             L.read(os.path.join(td, 't3.o'))
             fails.append('read of a malformed section: no error')
         except ValueError as e:
-            check('read error names object and section', str(e).startswith('t3.o:.fnvnx.vtpair: line 1'), True)
+            case('read error names object and section', got=str(e).startswith('t3.o:.fnvnx.vtpair: line 1'), want=True)
 
 for f in fails:
     print('FAIL', f)

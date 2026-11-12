@@ -10,17 +10,15 @@ import tempfile
 VERIFY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, VERIFY)
 import bootpath  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="bp-")
 atexit.register(shutil.rmtree, TMP, ignore_errors=True)
-FAILED, N = [], [0]
+FAILED, N = testcase.FAILED, [0]
 
 
-def case(name, ok, detail=""):
-    N[0] += 1
-    print(("ok   " if ok else "FAIL ") + name + ("" if ok else "  " + str(detail)))
-    if not ok:
-        FAILED.append(name)
 
 
 def touch(*p):

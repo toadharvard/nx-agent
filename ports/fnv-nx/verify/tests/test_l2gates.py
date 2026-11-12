@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_guest as tg
 import test_plugins as tp
-from test_plugins import BASE, ROOT, T, REAL, VERIFY, check, git, w, REC
+from test_plugins import BASE, ROOT, T, REAL, VERIFY, git, w, REC
 
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, os.path.join(REAL, T + "link", "tests"))
@@ -24,6 +24,9 @@ import gate_build  # noqa: E402
 import gate_names  # noqa: E402
 import gate_r7  # noqa: E402
 import synth  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 GATES = {"abi": "gate_abi.py", "namegate": "gate_namegate.py", "r7": "gate_r7gate.py"}
 SRC_A = "struct P { int a; char b; };\nint g(int x) { P p; p.a = x; return p.a; }\n"
@@ -66,24 +69,24 @@ def main():
     host = tg.guest_repo("l1", REC, pin, target="host")
     for n in GATES:
         rc, r, o = gate(n, host, cache)
-        check("%s: no native guest root: universe 0, green" % n, rc == 0 and r["status"] == "green" and r["universe"] == 0, o)
+        case("%s: no native guest root: universe 0, green", rc == 0 and r["status"] == "green" and r["universe"] == 0, o, key=n)
     # --- the toy native guest root, real compiler
     repo = tg.guest_repo("l2", rec, pin, files={ROOT + "/a.cc": SRC_A, ROOT + "/b.cc": SRC_B})
     rc, r, o = gate("abi", repo, cache)
-    check("abi: native guest root on the pinned compiler: green, universe >= 1", rc == 0 and r["status"] == "green" and r["universe"] >= 1 and r["certified"] == r["universe"], (rc, r, o))
+    case("abi: native guest root on the pinned compiler: green, universe >= 1", rc == 0 and r["status"] == "green" and r["universe"] >= 1 and r["certified"] == r["universe"], (rc, r, o))
     res, _ = gate_build.ensure(ROOT, cache, repo)
     ob = {o["unit"]: o["object"] for o in res["objects"]}
     tmp = os.path.join(BASE, "mut")
     os.makedirs(tmp)
     objs = [("a.cc", ob["a.cc"]), ("b.cc", ob["b.cc"])]
     u, c, ids, d = gate_abi.judge_objects(objs)
-    check("abi: the real objects: all items certified", u >= 1 and u == c, (u, c, ids, d))
+    case("abi: the real objects: all items certified", u >= 1 and u == c, (u, c, ids, d))
     bm = mutate(ob["b.cc"], tmp + "/b_ms.o", b"?g@@YAHH@Z\tfunc\tref\n", b"?g@@YAHM@Z\tfunc\tref\n")
     u2, c2, ids2, d2 = gate_abi.judge_objects([objs[0], ("b.cc", bm)])
-    check("abi: byte mutation of the reference's contract name (int -> float parameter): red, names the row", c2 < u2 and any("b.cc:" + G_SYM in i for i in ids2), (u2, c2, ids2))
+    case("abi: byte mutation of the reference's contract name (int -> float parameter): red, names the row", c2 < u2 and any("b.cc:" + G_SYM in i for i in ids2), (u2, c2, ids2))
     bn = mutate(ob["b.cc"], tmp + "/b_nosec.o", b".fnvnx.sympair\x00", b".fnvnx.sympaiX\x00")
     u3, c3, ids3, d3 = gate_abi.judge_objects([objs[0], ("b.cc", bn)])
-    check("abi: object without .fnvnx.sympair: red, names the object", c3 < u3 and any(i.startswith("b.cc:sympair") for i in ids3), (u3, c3, ids3))
+    case("abi: object without .fnvnx.sympair: red, names the object", c3 < u3 and any(i.startswith("b.cc:sympair") for i in ids3), (u3, c3, ids3))
     # --- namegate / r7 on files: real GCC objects, cl reference side of the same source
     cld = os.path.join(tmp, "cl")
     os.makedirs(cld)
@@ -102,29 +105,29 @@ def main():
         return L.judge_files("game", objects, cld, units, am, verd, gate_r7.rows, lambda rows, nt: L.select_units(rows, lambda r: r[0], nt),
                              lambda r: r[2] == "equal", gate_r7.row_id)
     r1 = judge("namegate", ob["a.cc"], ob["b.cc"], nat)
-    check("namegate: native bodies g and h carry the cl names: 2/2", r1[:2] == (2, 2), r1)
+    case("namegate: native bodies g and h carry the cl names: 2/2", r1[:2] == (2, 2), r1)
     am_ = mutate(ob["a.cc"], tmp + "/a_ms.o", b"?g@@YAHH@Z\tfunc\tdef\n", b"?g@@YAHM@Z\tfunc\tdef\n")
     r2 = judge("namegate", am_, ob["b.cc"], nat)
-    check("namegate: byte mutation of the name of a native body: red, 1 uncertified", r2[0] == 2 and r2[1] == 1 and len(r2[2]) == 1 and "_Z1gi" in r2[2][0], r2)
+    case("namegate: byte mutation of the name of a native body: red, 1 uncertified", r2[0] == 2 and r2[1] == 1 and len(r2[2]) == 1 and "_Z1gi" in r2[2][0], r2)
     r3 = judge("namegate", am_, ob["b.cc"], {0x401000: "lifted", 0x401010: "native"})
-    check("namegate: the uncertified symbol is LIFTED: outside the universe, green", r3[:2] == (1, 1), r3)
+    case("namegate: the uncertified symbol is LIFTED: outside the universe, green", r3[:2] == (1, 1), r3)
     r4 = judge("namegate", am_, ob["b.cc"], nat, {("src_game_b.cc.o", H_SYM): 0x401010})
-    check("namegate: a symbol with no exe address is outside the universe", r4[:2] == (1, 1), r4)
+    case("namegate: a symbol with no exe address is outside the universe", r4[:2] == (1, 1), r4)
     q1 = judge("r7", ob["a.cc"], ob["b.cc"], nat)
-    check("r7: native-bearing unit a.cc: record UP@@ equal to cl's: 1/1", q1[:2] == (1, 1), q1)
+    case("r7: native-bearing unit a.cc: record UP@@ equal to cl's: 1/1", q1[:2] == (1, 1), q1)
     lm = mutate(ob["a.cc"], tmp + "/a_lay.o", b"UP@@\t8\t4\t", b"UP@@\t9\t4\t")
     q2 = judge("r7", lm, ob["b.cc"], nat)
-    check("r7: byte mutation of the record size: red, names the record", q2[0] == 1 and q2[1] == 0 and "UP@@" in q2[2][0], q2)
+    case("r7: byte mutation of the record size: red, names the record", q2[0] == 1 and q2[1] == 0 and "UP@@" in q2[2][0], q2)
     q3 = judge("r7", lm, ob["b.cc"], {0x401000: "lifted", 0x401010: "native"})
-    check("r7: the unit has no native body (a.cc lifted): outside the universe, green", q3[:2] == (0, 0), q3)
+    case("r7: the unit has no native body (a.cc lifted): outside the universe, green", q3[:2] == (0, 0), q3)
     # --- a root with `game` but no link: red naming the input; a root without `game`: universe 0
     withgame = dict(rec, game="game")
     gm = tg.guest_repo("l3", withgame, pin, files={ROOT + "/a.cc": SRC_A})
     for n in ("namegate", "r7"):
         rc, r, o = gate(n, gm, cache)
-        check("%s: root with game and no link result: red item <root>:inputs" % n, rc == 2 and r["uncertified"] == [ROOT + ":inputs"], (rc, r, o))
+        case("%s: root with game and no link result: red item <root>:inputs", rc == 2 and r["uncertified"] == [ROOT + ":inputs"], (rc, r, o), key=n)
         rc, r, o = gate(n, repo, cache)
-        check("%s: root without game: universe 0, green" % n, rc == 0 and r["universe"] == 0 and r["status"] == "green", (rc, r, o))
+        case("%s: root without game: universe 0, green", rc == 0 and r["universe"] == 0 and r["status"] == "green", (rc, r, o), key=n)
 
 
 if __name__ == "__main__":

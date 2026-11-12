@@ -11,15 +11,14 @@ VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import bootinputs as bi  # noqa: E402
 import boot  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILS = []
+FAILS = testcase.FAILED
 TID = "cd" * 32
 
 
-def case(name, ok, detail=""):
-    print(("PASS " if ok else "FAIL ") + name + ("" if ok else "  " + str(detail)))
-    if not ok:
-        FAILS.append(name)
 
 
 def raises(f, *a):
@@ -68,7 +67,7 @@ def main():
          r == [("exe", 0x400000, 0x1400000), ("aa.dll", 0x1400000, 0x1420000), ("zz.dll", 0x2000000, 0x2010000)], r)
     for k, t in (("no header", row("a.dll", "1000", "10") + "\n"), ("9 fields", H + "\na\tb\n"), ("bad hex", H + "\n" + row("a.dll", "xx", "10") + "\n"),
                  ("zero size", H + "\n" + row("a.dll", "1000", "0") + "\n"), ("stray comment", H + "\n# x\n")):
-        case("reserved error: " + k, good(raises(bi.reserved_rows, t, pe(0x400000, 0x1000))))
+        case("reserved error: ", good(raises(bi.reserved_rows, t, pe(0x400000, 0x1000))), key=k)
     case("reserved error: exe not PE", good(raises(bi.reserved_rows, txt, b"nope")))
     # keys
     ent = "000ffff0\trt_a\timport\n00100000\tI_1\timport\n00401000\tL_1\tcode\n# table_id " + TID + "\n"
@@ -107,7 +106,7 @@ def main():
                  ("exe_entry wrong name", (EXE.replace("exe_entry\texe_entry", "main\texe_entry") + TRAIL, run)),
                  ("exe_entry twice", (EXE.replace("exe_entry\texe_entry", "exe_entry2\texe_entry") + EXE + TRAIL, run)),
                  ("unknown kind", (EXE + ROW("x", "data", "00000001", "s") + TRAIL, run)), ("no exe_entry", (mu("a.dll") + TRAIL, run))):
-        case("milestones error: " + k, good(raises(bi.milestone_table, *a)))
+        case("milestones error: ", good(raises(bi.milestone_table, *a)), key=k)
     # the contract's row kinds: module_entry (static flag = the fifth field), winmain, import
     man = bi.bootmiles.load_manifest("00001000\tf1\tcode\n00002000\tf2\tcode\n00003000\tf3\tcode\n00100e40\tI_p\timport\n00100e50\tI_q\timport\n# table_id " + TID + "\n")
     EXE3 = ROW("exe_entry", "exe_entry", "00003000", "exe PE ImageBase+AddressOfEntryPoint")
@@ -129,7 +128,7 @@ def main():
                  ("import not Present", mt2.replace("d3d9.dll!Present", "d3d9.dll!Reset")), ("import dll twice", mt2.replace("idirect3ddevice9.dll", "d3d9.dll")),
                  ("import key twice", mt2.replace("00100e50", "00100e40")), ("import wrong source", mt2.replace("keys.tsv import key", "keys.tsv key")),
                  ("import not an import row", mt2.replace("00100e50", "00001000"))):
-        case("contract error: " + k, good(raises(bi.milestone_table, a, "", TID, None, man)))
+        case("contract error: ", good(raises(bi.milestone_table, a, "", TID, None, man)), key=k)
     # stage table
     st = "winmain any call 0x1000\nloaded all:x ret 0x2000\nloaded all:x retzero 0x3000 main-thread\n"
     t3 = bi.milestone_table(mt2, "", TID, st, man)

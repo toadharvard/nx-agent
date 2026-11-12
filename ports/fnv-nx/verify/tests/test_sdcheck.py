@@ -7,11 +7,14 @@ import subprocess
 import sys
 import tempfile
 import time
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "sdcheck.py")
 ROOT = tempfile.mkdtemp(dir=os.path.expanduser("~"), prefix="sdcheck-test-")
-FAILED = []
+FAILED = testcase.FAILED
 _n = [0]
 LAYOUT = {"game_root": "switch/fnv", "port_root": "", "writable": ["switch/fnv/user", "switch/fnv/logs"],
           "free_bytes_min": 1}
@@ -43,10 +46,6 @@ def run(*args):
     return r.returncode, r.stdout + r.stderr
 
 
-def case(name, ok, detail=""):
-    print("%s %s %s" % ("PASS" if ok else "FAIL", name, "" if ok else detail[:300]))
-    if not ok:
-        FAILED.append(name)
 
 
 def build(extra_game=(), fs="fat32", no_hash=False, layout=None, mutate=None):
@@ -78,7 +77,7 @@ def build(extra_game=(), fs="fat32", no_hash=False, layout=None, mutate=None):
 
 def expect(name, rc_want, words, **kw):
     rc, out, _ = build(**kw)
-    case(name, rc == rc_want and all(w in out for w in words), "rc=%d %s" % (rc, out[-300:]))
+    case('expect', rc == rc_want and all(w in out for w in words), "rc=%d %s" % (rc, out[-300:]), key=name)
 
 
 def main():
@@ -130,7 +129,7 @@ def main():
         json.dump(LAYOUT, open(d + "/l.json", "w"))
         rc, out = run("check", "--game", d + "/g.json", "--port", d + "/p.json", "--layout", d + "/l.json",
                       "--fs", fs, "--no-hash", sd)
-        case(label, rcm == 0 and rc == rc_want and all(w in out for w in words), "%d %d %s" % (rcm, rc, out[-300:]))
+        case('check', rcm == 0 and rc == rc_want and all(w in out for w in words), "%d %d %s" % (rcm, rc, out[-300:]), key=label)
         shutil.rmtree(d)
     expect("free space below minimum", 2, ["RED", "free space", "required 99999999999999", "found"],
            layout={"free_bytes_min": 99999999999999})

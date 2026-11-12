@@ -15,16 +15,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import bootmiles as bm  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILS = []
-
-
-def case(name, ok, detail=""):
-    print(("PASS " if ok else "FAIL ") + name + ("" if ok else "  " + str(detail)))
-    if not ok:
-        FAILS.append(name)
-
-
+FAILS = testcase.FAILED
 def raises(exc, f, *a):
     try:
         f(*a)
@@ -77,7 +72,7 @@ def table_cases():
     }
     for k, txt in bad.items():
         msg = raises(bm.TableError, bm.load_table, txt)
-        case("2 TableError: " + k, msg is not None and not msg.startswith("WRONG"), msg)
+        case("2 TableError: ", msg is not None and not msg.startswith("WRONG"), msg, key=k)
     msg = raises(bm.TableError, bm.load_table, "a any call 0x1\n\nb any bogus 0x1")
     case("2 TableError message carries the file line number", msg is not None and "line 3" in msg, msg)
     case("2 same group id under two names is fine", raises(bm.TableError, bm.load_table, "a all:g call 0x1\nb seq:g call 0x2") is None)
@@ -85,7 +80,7 @@ def table_cases():
     case("3 manifest parse", m[0x402000] == "L_402000" and len(m) == 6, m)
     for k, txt in {"dup addr": "1\ta\n1\tb", "dup sym": "1\ta\n2\ta", "no tab": "1 a", "bad hex": "zz\ta"}.items():
         msg = raises(bm.ManifestError, bm.load_manifest, txt)
-        case("3 ManifestError: " + k, msg is not None and not msg.startswith("WRONG"), msg)
+        case("3 ManifestError: ", msg is not None and not msg.startswith("WRONG"), msg, key=k)
 
 
 def resolve_cases():
@@ -231,7 +226,7 @@ def entries_cases():
                  ("addr in both kinds", "1000\tx\tcode\n1000\ty\timport\n"), ("symbol in both kinds", "1000\tx\tcode\n2000\tx\timport\n"),
                  ("bad table id", "1000\tx\tcode\n# table_id zz\n"), ("two table ids", "# table_id " + tid + "\n# table_id " + tid + "\n")):
         msg = raises(bm.ManifestError, bm.load_manifest, t)
-        case("E3 ManifestError: " + k, msg is not None and not msg.startswith("WRONG"), msg)
+        case("E3 ManifestError: ", msg is not None and not msg.startswith("WRONG"), msg, key=k)
     w = bm.resolve(bm.load_table("keycall any call 0xfff0\nexe any call 0x401000\n"), m, {"fnvl_rt_a": 0x100, "L_401000": 0x200}, 0x1000)
     case("E4 call on an import key resolves through the same table", w["pc"] == {0x1100: ["keycall#0"], 0x1200: ["exe#0"]}, w["pc"])
     msg = raises(bm.ResolveError, bm.resolve, bm.load_table("k any call 0xfff8\n"), m, {}, 0)

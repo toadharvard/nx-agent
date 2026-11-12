@@ -9,17 +9,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import realobj
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import testcase  # noqa: E402
+from testcase import case  # noqa: E402
 
-FAILED = []
-
-
-def check(name, ok, detail=''):
-    print('%s %s%s' % ('PASS' if ok else 'FAIL', name, (': ' + str(detail)[:700]) if detail and not ok else ''), flush=True)
-    if not ok:
-        FAILED.append(name)
-    return ok
-
-
+FAILED = testcase.FAILED
 SRC = {
     'cont': r'''
 #include <setjmp.h>
@@ -64,7 +58,7 @@ void nosink(const char *s) { std::string r(s); sink(&r); }
 
 def main():
     res = realobj.build(SRC)
-    if not check('all fixtures build on msvcmodel with the 8 plugins', res['status'] == 'green', res.get('failure')):
+    if not case('all fixtures build on msvcmodel with the 8 plugins', res['status'] == 'green', res.get('failure')):
         return
     objs = {os.path.splitext(o['unit'])[0]: o['object'] for o in res['objects']}
 
@@ -85,35 +79,35 @@ def main():
     # ORDER-CONT
     lj = lines('cont', '2ljP1C')
     br = [i for i, x in enumerate(lj) if x.split()[0] == 'br']
-    check('(i) noreturn longjmp after a load: compiles (no error); the noreturn path ends in br, nothing after it but padding',
+    case('(i) noreturn longjmp after a load: compiles (no error); the noreturn path ends in br, nothing after it but padding',
           bool(br) and all(x.split()[0] in ('nop', 'br') for x in lj[br[-1]:]), lj)
     s2 = lines('cont', '2sjPPvPi')
-    check('(ii) __builtin_setjmp: the receiver begins with dmb ishld, before the load', fence_before_ldar(s2), s2)
-    check('(ii) no two adjacent identical dmb ishld (FENCE-MERGE)', not any(a == b and a.startswith('dmb') and 'ishld' in a for a, b in zip(s2, s2[1:])), s2)
+    case('(ii) __builtin_setjmp: the receiver begins with dmb ishld, before the load', fence_before_ldar(s2), s2)
+    case('(ii) no two adjacent identical dmb ishld (FENCE-MERGE)', not any(a == b and a.startswith('dmb') and 'ishld' in a for a, b in zip(s2, s2[1:])), s2)
     tc = lines('cont', '2tcPi')
-    check('(iii) catch landing pad begins with dmb ishld, before the load', fence_before_ldar(tc), tc)
+    case('(iii) catch landing pad begins with dmb ishld, before the load', fence_before_ldar(tc), tc)
     s3 = lines('cont', '3sj2P')
     i3 = [i for i, x in enumerate(s3) if 'setjmp' in x]
-    check('(iv) setjmp(): dmb ishld right after the call', bool(i3) and any(x.startswith('dmb') and 'ishld' in x for x in s3[i3[0] + 1:i3[0] + 3]), s3)
+    case('(iv) setjmp(): dmb ishld right after the call', bool(i3) and any(x.startswith('dmb') and 'ishld' in x for x in s3[i3[0] + 1:i3[0] + 3]), s3)
     # HARDREG
     for frag in ('2hgi', '2hli'):
         ls = lines('hard', frag)
-        check('HARDREG %s: no ldar/stlr/dmb for a register object' % frag, not any(o in ('ldar', 'stlr', 'dmb') for o in ops(ls)), ls)
+        case('HARDREG %s: no ldar/stlr/dmb for a register object', not any(o in ('ldar', 'stlr', 'dmb') for o in ops(ls)), ls, key=frag)
     hp = lines('hard', '2hpi')
-    check('HARDREG: access through a register-held pointer stays ordered (stlr + ldar)', 'stlr' in ops(hp) and 'ldar' in ops(hp), hp)
+    case('HARDREG: access through a register-held pointer stays ordered (stlr + ldar)', 'stlr' in ops(hp) and 'ldar' in ops(hp), hp)
     # LOCAL
     ll = lines('local', '3loci')
-    check('LOCAL: a non-escaped local array has no ldar/stlr/dmb', not any(o in ('ldar', 'stlr', 'dmb') for o in ops(ll)), ll)
-    check('LOCAL: a global read is ldar', 'ldar' in ops(lines('local', '4globv')))
+    case('LOCAL: a non-escaped local array has no ldar/stlr/dmb', not any(o in ('ldar', 'stlr', 'dmb') for o in ops(ll)), ll)
+    case('LOCAL: a global read is ldar', 'ldar' in ops(lines('local', '4globv')))
     esc = lines('local', '3esci')
-    check('LOCAL: an address-taken local is still ordered (stlr and ldar)', 'stlr' in ops(esc) and 'ldar' in ops(esc), esc)
+    case('LOCAL: an address-taken local is still ordered (stlr and ldar)', 'stlr' in ops(esc) and 'ldar' in ops(esc), esc)
     mk = lines('local', '2mk1W')
-    check('LOCAL: a polymorphic by-value return builds (the by-reference result is a pointer value, no ICE)', bool(mk))
+    case('LOCAL: a polymorphic by-value return builds (the by-reference result is a pointer value, no ICE)', bool(mk))
     mb = lines('local', '3mkbi')
-    check('LOCAL: the store into a result returned through x8 is ordered (stlr through the pointer)', 'stlr' in ops(mb), mb)
-    check('a std::string copy builds', bool(lines('str', '2cp')))
+    case('LOCAL: the store into a result returned through x8 is ordered (stlr through the pointer)', 'stlr' in ops(mb), mb)
+    case('a std::string copy builds', bool(lines('str', '2cp')))
     for f in ('4ctor', '3cp2', '4fold', '6nosink'):   # w3's four cases (ini.cpp:124 shape)
-        check('std::string %s builds' % f, bool(lines('str', f)))
+        case('std::string %s builds', bool(lines('str', f)), key=f)
 
 
 if __name__ == '__main__':
