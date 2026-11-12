@@ -42,6 +42,9 @@ row stops the pass. Output rows: module, site, api, root, subkey, value, status 
 `site<-caller`.
 """
 import os, re, struct, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from rtti import Rtti
+from regclass import Closure
 try:
     import capstone
     from capstone import x86_const as X
@@ -159,6 +162,7 @@ class Analyzer:
         self.mod, self.rset, self.api, self.regions = mod, set(mod.relocs), apis, {}
         self.callers_cache = {}
         self.covered = set()
+        self._rtti = self._cl = None
 
     def region(self, start):
         if start not in self.regions:
@@ -169,13 +173,25 @@ class Analyzer:
         s = self.mod.cstr(addr)
         return None if s is None else (s[2:] if s.startswith("L:") else s)
 
-    def run(self, start, binds=None, track=()):
+    def run(self, start, binds=None, track=(), this_bind=None, ev=None, results=None, cells=None):
         """Flow over one function. Returns (calls, tracked): calls = [(site, api, args)] with args a list of values;
-        tracked = [(site, target, pushes)] for direct calls to an address in `track`."""
+        tracked = [(site, target, pushes)] for direct calls to an address in `track`.
+        Typed mode (the class closure of regclass.py): `this_bind` is the value of ecx at the entry (("o", class, offset)), `binds`
+        may hold typed parameter values, `results` = {call site: value of eax after the call}, `cells` = {data cell: value} read by
+        a plain `mov r,[cell]`. `ev` collects events: ("store", site, base, disp, size, value), ("cellstore", site, cell, value),
+        ("call", site, target, ecx, pushes), ("ret", site, eax), ("leak", site, text, pointer). A typed value ("o", class, offset) is
+        a pointer to byte `offset` of the complete object of that class; every instruction that would copy or use such a pointer in
+        a way this flow does not follow is reported as a leak, never dropped."""
         rset, binds = self.rset, binds or {}
-        reg, slots, pushes, saved, dead, fptr = {"ecx": ("t",)}, {}, [], {}, False, {}
+        results, cells = results or {}, cells or {}
+        reg, slots, pushes, saved, dead, fptr = {"ecx": this_bind or ("t",)}, {}, [], {}, False, {}
         calls, tracked = [], []
         cur = [None]
+        typed = lambda v: v[0] == "o"
+
+        def leak(i, why, v):
+            if ev is not None:
+                ev.append(("leak", i.address, why, v))
 
         def kd(op):
             if op.type == X.X86_OP_MEM and op.mem.index == 0 and op.mem.segment == 0 and op.mem.base == X.X86_REG_EBP:
@@ -192,8 +208,10 @@ class Analyzer:
             if k is None:
                 if op.type == X.X86_OP_MEM and op.mem.base != 0 and op.mem.index == 0 and op.mem.segment == 0 and op.size == 4:
                     b = reg.get(P.get(i.reg_name(op.mem.base), ""), UNK)
-                    if b[0] in ("t", "p", "f"):
+                    if b[0] in ("t", "p", "f", "o"):
                         return ("f", b, op.mem.disp)
+                if op.type == X.X86_OP_MEM and op.mem.base == 0 and op.mem.index == 0 and op.size == 4 and op.mem.disp in cells:
+                    return cells[op.mem.disp]
                 return ("u", "object field" if op.type == X.X86_OP_MEM and op.mem.base != 0 else "global cell")
             if k in slots:
                 return slots[k]
@@ -219,6 +237,8 @@ class Analyzer:
                 if t is not None and t > i.address:
                     saved[t] = joins(saved.get(t), (reg, slots, pushes))
                 dead = dead or i.mnemonic in ("jmp", "ret")
+                if ev is not None and i.mnemonic == "ret":
+                    ev.append(("ret", i.address, reg.get("eax", UNK)))
                 continue
             if i.mnemonic == "call":
                 a = ops[0]
@@ -237,14 +257,26 @@ class Analyzer:
                     pushes = pushes[:-n] if len(pushes) >= n else []
                     ok = ROLES[f][4]
                     if ok is not None and args[ok][0] == "a":
-                        slots[args[ok][1]] = ("h",) + self.open_result(f, args)
+                        slots[args[ok][1]] = ("H", f, tuple(args)) if any(a[0] in ("o", "f") for a in args) else \
+                            ("h",) + self.open_result(f, args)
+                    if ev is not None:
+                        for k, v in enumerate(args):
+                            if typed(v) and k == ok:  # the out handle is written into the object: a writer of that field
+                                ev.append(("store", i.address, v, 0, 4, ("H", f, tuple(args))))
+                            elif typed(v):
+                                leak(i, "pointer passed to %s (argument %d)" % (f, k), v)
                 else:
                     if a.type == X.X86_OP_IMM and a.imm in track:
                         tracked.append((i.address, a.imm, list(pushes)))
+                    if ev is not None:
+                        tv = ("imm", a.imm) if a.type == X.X86_OP_IMM else rd(a)
+                        ev.append(("call", i.address, tv, reg.get("ecx", UNK), list(pushes)))
                     pushes = []
                 for r in ("eax", "ecx", "edx"):
                     reg[r] = UNK
                     fptr.pop(r, 0)
+                if i.address in results:
+                    reg["eax"] = results[i.address]
                 continue
             if i.mnemonic == "push":
                 a = ops[0]
@@ -273,10 +305,29 @@ class Analyzer:
                     setreg(d, v)
                 elif kd(d) is not None:
                     slots[kd(d)] = v if d.size == 4 else UNK
+                elif ev is not None and d.type == X.X86_OP_MEM:
+                    b = reg.get(P.get(i.reg_name(d.mem.base), ""), UNK) if d.mem.base and d.mem.index == 0 and d.mem.segment == 0 else UNK
+                    if typed(b):
+                        ev.append(("store", i.address, b, d.mem.disp, d.size, v if d.size == 4 else (v if v[0] == "c" else UNK)))
+                        if typed(v):
+                            leak(i, "pointer stored into an object", v)
+                    elif d.mem.base == 0 and d.mem.index == 0 and d.mem.segment == 0:
+                        ev.append(("cellstore", i.address, d.mem.disp, v))
+                    elif typed(v):
+                        leak(i, "pointer stored through an untyped base", v)
+                    if s.type == X.X86_OP_REG and typed(v) and d.size != 4:
+                        leak(i, "pointer partially stored", v)
                 continue
             if i.mnemonic == "lea" and len(ops) == 2 and ops[0].type == X.X86_OP_REG:
                 s = ops[1]
                 b = reg.get(P.get(i.reg_name(s.mem.base), ""), UNK) if s.mem.base and s.mem.index == 0 and s.mem.segment == 0 else UNK
+                if typed(b) or (s.mem.index and typed(reg.get(P.get(i.reg_name(s.mem.index), ""), UNK))):
+                    if typed(b) and not s.mem.index:
+                        setreg(ops[0], ("o", b[1], b[2] + s.mem.disp))
+                    else:
+                        leak(i, "indexed address of an object", b if typed(b) else UNK)
+                        setreg(ops[0], UNK)
+                    continue
                 setreg(ops[0], ("a", s.mem.disp) if s.mem.base == X.X86_REG_EBP and s.mem.index == 0 else
                        ("g", b, s.mem.disp) if b[0] in ("t", "p", "f", "g") else ("u", "computed address"))
                 continue
@@ -284,11 +335,32 @@ class Analyzer:
                     and ops[0].reg == ops[1].reg:
                 setreg(ops[0], ("c", 0))
                 continue
+            if i.mnemonic in ("add", "sub") and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_IMM \
+                    and ops[0].size == 4 and typed(reg.get(P.get(i.reg_name(ops[0].reg), ""), UNK)):
+                v = reg[P[i.reg_name(ops[0].reg)]]
+                setreg(ops[0], ("o", v[1], v[2] + (ops[1].imm if i.mnemonic == "add" else -ops[1].imm)))
+                continue
             if i.mnemonic == "add" and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_IMM \
                     and ops[0].size == 4 and reg.get(P.get(i.reg_name(ops[0].reg), ""), UNK)[0] in ("t", "p", "f", "g"):
                 v = reg[P[i.reg_name(ops[0].reg)]]  # base + constant: an address inside the object
                 setreg(ops[0], ("g", v[1], v[2] + ops[1].imm) if v[0] == "g" else ("g", v, ops[1].imm))
                 continue
+            if ev is not None:
+                for op in ops:
+                    if op.type == X.X86_OP_REG and (op.access & 1) and i.mnemonic not in ("cmp", "test"):
+                        v = reg.get(P.get(i.reg_name(op.reg), ""), UNK)
+                        if typed(v):
+                            leak(i, "%s %s copies or combines a pointer" % (i.mnemonic, i.op_str), v)
+                    elif op.type == X.X86_OP_MEM:
+                        b = reg.get(P.get(i.reg_name(op.mem.base), ""), UNK) if op.mem.base else UNK
+                        if op.mem.index and typed(reg.get(P.get(i.reg_name(op.mem.index), ""), UNK)):
+                            leak(i, "%s %s indexes with a pointer" % (i.mnemonic, i.op_str), UNK)
+                        if typed(b) and (op.access & 2):
+                            ev.append(("store", i.address, b, op.mem.disp, op.size, ("u", "%s writes the field" % i.mnemonic)))
+                if i.mnemonic.split()[-1].startswith(("movs", "stos", "cmps", "scas", "lods", "rep")):
+                    for r in ("esi", "edi"):
+                        if typed(reg.get(r, UNK)):
+                            leak(i, "string instruction through a pointer", reg[r])
             for r in i.regs_access()[1]:
                 nm = P.get(i.reg_name(r))
                 if nm:
@@ -362,9 +434,10 @@ class Analyzer:
             self.callers_cache[target] = out
         return self.callers_cache[target]
 
-    def entries(self, target):
-        """Every reference to the entry of `target` other than a direct `call rel32`, over the whole image, as text:
-        a `jmp rel32`, a relocated word in code, a relocated word in data (vtable and slot by the run of relocated code pointers)."""
+    def entries_x(self, target):
+        """Every reference to the entry of `target` other than a direct `call rel32`, over the whole image, as dicts
+        {kind: jmp|code|vtable|data, text, at, vtable, slot}: a `jmp rel32`, a relocated word in code (address taken), a relocated word
+        in data (a slot of an RTTI vtable, or another data word)."""
         mod, out = self.mod, []
         for a, n in mod.code:
             o0, k = a - mod.base, a - mod.base
@@ -375,17 +448,42 @@ class Analyzer:
                 va = mod.base + k
                 k += 1
                 if (va + 5 + struct.unpack_from("<i", mod.img, k)[0]) & 0xffffffff == target:
-                    out.append("jmp from 0x%08x" % va)
-        rs = set(mod.relocs)
+                    out.append({"kind": "jmp", "at": va, "text": "jmp from 0x%08x" % va})
         for r in sorted(mod.targets().get(target, [])):
             if mod.in_code(r):
-                out.append("address word in code at 0x%08x" % r)
+                out.append({"kind": "code", "at": r, "text": "address word in code at 0x%08x" % r})
                 continue
-            b = r
-            while b - 4 in rs and mod.in_code(mod.u32(b - 4) or 0):
-                b -= 4
-            out.append("vtable 0x%08x slot %d (word 0x%08x)" % (b, (r - b) // 4, r))
+            kind, v, slot = self.rtti().word_kind(r)
+            if kind == "vtable":
+                out.append({"kind": "vtable", "at": r, "vtable": v, "slot": slot,
+                            "text": "vtable 0x%08x slot %d (word 0x%08x)" % (v, slot, r)})
+            else:
+                out.append({"kind": "data", "at": r, "text": "data word 0x%08x" % r})
         return out
+
+    def entries(self, target):
+        return [e["text"] for e in self.entries_x(target)]
+
+    def rtti(self):
+        if self._rtti is None:
+            self._rtti = Rtti(self.mod)
+        return self._rtti
+
+    def closure(self):
+        if self._cl is None:
+            self._cl = Closure(self, self.rtti())
+        return self._cl
+
+    def alts(self, v, depth=0):
+        """Alternatives of a value: (list of plain values | None, reason | None). A field of a typed object is the set of the values its
+        writers store (regclass.Closure.field); a parameter, a field of `this` of unknown class stays unbound."""
+        if v[0] == "f" and v[1][0] == "o":
+            return self.closure().field(v[1], v[2])
+        if v[0] in ("p", "t", "f", "g"):
+            return None, Analyzer.describe(v)
+        if v[0] == "u":
+            return None, v[1]
+        return [v], None
 
     def arg_sets(self, target, depth, chain=()):
         """[(call site, pushes)] of every direct call to `target`; pushes of a caller that is itself a wrapper are resolved
@@ -406,28 +504,101 @@ class Analyzer:
         return out
 
 
-def row_of(an, site, f, args, via=None):
+def key_alts(an, v, depth=0):
+    """[(root, path)] of a key argument | (None, reason). A NULL handle is dropped: Win32 documents ERROR_INVALID_HANDLE and no key is
+    accessed (OWNER 3). A handle opened by a call whose arguments were fields is ("H", api, args) and is resolved here, lazily."""
+    a, why = an.alts(v)
+    if a is None:
+        return None, why
+    out = []
+    for x in a:
+        if x[0] == "c":
+            if x[1] == 0:
+                continue
+            r = HKEY.get(x[1])
+            if r is None:
+                return None, "key constant 0x%x is not a root" % x[1]
+            out.append((r, ""))
+        elif x[0] == "h":
+            if x[1] is None or x[2] is None:
+                return None, "handle from a dynamic open"
+            out.append((x[1], x[2]))
+        elif x[0] == "H":
+            if depth > 4:
+                return None, "handle chain deeper than 4 opens"
+            role = ROLES[x[1]]
+            roots, why = key_alts(an, x[2][role[1]], depth + 1)
+            if roots is None:
+                return None, why
+            subs, why = name_alts(an, x[2][role[2]]) if role[2] is not None else ([""], None)
+            if subs is None:
+                return None, "subkey: " + why
+            out += [(r, "\\".join(p for p in (pa, s) if p)) for r, pa in roots for s in subs]
+        else:
+            return None, "not a key" if x[0] != "u" else x[1]
+    if not out:
+        return None, "the handle is never opened (only the NULL handle is stored)"
+    return list(dict.fromkeys(out)), None
+
+
+def name_alts(an, v):
+    """[string] of a name argument | (None, reason). A null pointer is the empty name (the key itself / the default value)."""
+    a, why = an.alts(v)
+    if a is None:
+        return None, why
+    out = []
+    for x in a:
+        if x[0] == "s":
+            out.append(x[1])
+        elif x[0] == "c" and x[1] == 0:
+            out.append("")
+        elif x[0] == "o":
+            ss, why = an.closure().string(x)
+            if ss is None:
+                return None, why
+            out += ss
+        elif x[0] == "a":
+            return None, "computed buffer"
+        else:
+            return None, x[1] if x[0] == "u" else "not a string"
+    return list(dict.fromkeys(out)), None
+
+
+def rows_of(an, site, f, args, via=None):
+    """Rows of one registry call: one `static` row per (root, key path, value name) of the full value set, or one `dynamic` row."""
     role = ROLES[f]
-    root, path, why = an.hkey_of(args[role[1]])
+    roots, why = key_alts(an, args[role[1]])
     reasons = [why] if why else []
-    sub = ""
+    subs = [""]
     if role[2] is not None:
-        sub, r = an.name_of(args[role[2]])
-        if sub is None:
+        subs, r = name_alts(an, args[role[2]])
+        if subs is None:
             reasons.append("subkey: " + r)
-    val = "-"
+    vals = ["-"]
     if role[3] is not None:
-        val, r = an.name_of(args[role[3]])
-        if val is None:
+        vals, r = name_alts(an, args[role[3]])
+        if vals is None:
             reasons.append("value: " + r)
     elif role[5] in ("read", "write") and role[2] is not None:
-        val = ""  # RegQueryValue/RegSetValue: the default value of the subkey
-    full = "\\".join(x for x in (path, sub) if x) if root and path is not None and sub is not None else None
-    return (site, f, root or "dynamic", full if full is not None else "dynamic", val if val is not None else "dynamic",
-            "dynamic" if reasons else "static", "; ".join(reasons), via)
+        vals = [""]  # RegQueryValue/RegSetValue: the default value of the subkey
+    if reasons:
+        one = lambda xs: xs[0] if xs and len(set(xs)) == 1 else "dynamic"
+        r0 = one([x[0] for x in roots]) if roots else "dynamic"
+        p0 = "dynamic"
+        if roots and len({x[1] for x in roots}) == 1 and subs:
+            p0 = "\\".join(p for p in (roots[0][1], subs[0]) if p) if len(subs) == 1 else "dynamic"
+        return [(site, f, r0, p0, one(vals) if vals else "dynamic", "dynamic", "; ".join(reasons), via)]
+    return [(site, f, r, "\\".join(p for p in (pa, s) if p), v, "static", "", via)
+            for r, pa in roots for s in subs for v in vals]
 
 
-def regsites(mod):
+def row_of(an, site, f, args, via=None):
+    return rows_of(an, site, f, args, via)[0]
+
+
+def regsites(mod, stats=None):
+    """Rows of every registry call of `mod`. `stats`, when given, receives one dict per function that passes a parameter, `this` or a
+    field into a registry call (a wrapper): {func, sites, direct, entries, resolved}."""
     api = {s: n for _, n, s in mod.imports if n in ROLES}
     if not api:
         return []
@@ -450,36 +621,56 @@ def regsites(mod):
                 if ROLES[f][5] == "close":
                     continue
                 refs = [args[k] for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None]
-                if any(v[0] in ("p", "t", "f", "g") or (v[0] == "h" and v[2] is None) for v in refs):
+                if any(v[0] in ("p", "t", "f", "g", "H") or (v[0] == "h" and v[2] is None) for v in refs):
                     pend.append((site, f, args))
                 else:
-                    rows.append(row_of(an, site, f, args))
+                    rows += rows_of(an, site, f, args)
             if not pend:
                 continue
-            ent = an.entries(st)
-            fld = [(s, f, a) for s, f, a in pend if any(a[k][0] in ("t", "f", "g") for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None)]
-            if ent or fld:
-                why = "entered also through " + ", ".join(ent) if ent else "no other entry"
-                if fld:
-                    why += "; the receivers of the entry are not typed to a class and the writers of the field are not closed"
+            ent, direct = an.entries_x(st), an.callers(st)
+            this_dep = lambda v: v[0] in ("t", "f", "g", "H")
+            fld = [(s, f, a) for s, f, a in pend if any(this_dep(a[k]) for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None)]
+            par = [x for x in pend if x not in fld]
+            got = []
+            if fld:
+                vts = [e for e in ent if e["kind"] == "vtable"]
+                others = [e["text"] for e in ent if e["kind"] != "vtable"] + ["call from 0x%08x" % va for va, _ in direct]
+                if not vts:
+                    why = "this: the function is not a vtable slot, so the class of the receiver is not bound"
+                elif others:
+                    why = "this: entered also through " + ", ".join(others) + ", whose receiver is not typed"
                 else:
-                    why += "; the direct callers do not cover these entries"
-                rows += [row_of(an, s, f, a, why) for s, f, a in pend]
-                continue
-            sets = an.arg_sets(st, 0)
-            if not sets:
-                rows += [row_of(an, s, f, a, "no static callers") for s, f, a in pend]
-                continue
-            seen = set()
-            for va, p in sets:
-                bind = {k: (p[-1 - k] if len(p) > k else NOPUSH) for k in range(8)}
-                key = repr(sorted(bind.items()))
-                if key in seen:
-                    continue
-                seen.add(key)
-                c2, _ = an.run(st, bind)
-                want = {(s, f) for s, f, _ in pend}
-                rows += [row_of(an, s, f, a, "via 0x%08x" % va) for s, f, a in c2 if (s, f) in want]
+                    why = None
+                if why:
+                    got += [row for s, f, a in fld for row in rows_of(an, s, f, a, why)]
+                else:
+                    want = {(s, f) for s, f, _ in fld}
+                    for td, off in sorted({an.rtti().complete(e["vtable"]) for e in vts}):
+                        c2, _ = an.run(st, None, (), ("o", td, off))
+                        via = "receiver %s at offset %d" % (an.rtti().name(td)[4:-2], off)
+                        got += [row for s, f, a in c2 if (s, f) in want for row in rows_of(an, s, f, a, via)]
+            if par:
+                if ent:
+                    why = "entered also through " + ", ".join(e["text"] for e in ent) + "; the direct callers do not cover these entries"
+                    got += [row for s, f, a in par for row in rows_of(an, s, f, a, why)]
+                else:
+                    sets = an.arg_sets(st, 0)
+                    if not sets:
+                        got += [row for s, f, a in par for row in rows_of(an, s, f, a, "no static callers")]
+                    seen = set()
+                    for va, p in sets:
+                        bind = {k: (p[-1 - k] if len(p) > k else NOPUSH) for k in range(8)}
+                        key = repr(sorted(bind.items()))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        c2, _ = an.run(st, bind)
+                        want = {(s, f) for s, f, _ in par}
+                        got += [row for s, f, a in c2 if (s, f) in want for row in rows_of(an, s, f, a, "via 0x%08x" % va)]
+            rows += got
+            if stats is not None:
+                stats.append({"func": st, "sites": len(pend), "direct": len(direct), "entries": [e["kind"] for e in ent],
+                              "resolved": bool(got) and all(r[5] == "static" for r in got)})
     # a code reference to a registry slot that is not a call analysed above (thunk, stored pointer) is reported, not dropped
     for slot in sorted(api):
         for ref in code.get(slot, []):
