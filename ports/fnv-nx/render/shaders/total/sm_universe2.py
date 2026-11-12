@@ -138,6 +138,7 @@ def family_vs_closed(u, m):
     u.add(m, "srcreg", "a0@mov.s0", shell(m, seta + "mov r0, a0.x"), tg="closed-world")
     u.add(m, "srcreg", "a0@add.s1", shell(m, seta + "add r0, c0, a0.x"), tg="closed-world")
     if v11: return
+    u.add(m, "srcreg", "b0@mov.s0", shell(m, "defb b0, true\nmov r0, b0"), tg="closed-world")
     u.add(m, "srcreg", "i0@mov.s0", shell(m, "defi i0, 4, 0, 1, 0\nmov r0, i0"), tg="closed-world")
     u.add(m, "dstreg", "a0@mov.dst", shell(m, "mov a0, c0\nmov r0, c[a0.x]"), tg="closed-world")
 

@@ -28,6 +28,16 @@
    "at": "/wine",
    "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/shader_sm1.c, dlls/d3dcompiler_43/asmparser.c: the files sm_xref.py reads)",
    "use": "render/shaders/total/sm_table.py, not a build input"
+  },
+  {
+   "name": "msdocs-sm",
+   "repo": "fnv-nx-build",
+   "ref": "tools/msdocs-sm",
+   "commit": "e18183f8c5536262d44677ab77398e320e970cfc",
+   "tree_sha256": "6bfddc8df0a32bd305edb2d486cd63df918775a0de4293b1f769c1130efad166",
+   "at": "/ms",
+   "upstream": "text rendering (learn.microsoft.com) of 172 pages of MicrosoftDocs/win32 desktop-src/direct3dhlsl, the D3D9 shader assembly reference; fetched 2026-11 by the L6 worker",
+   "use": "render/shaders/total/sm_table.py, not a build input"
   }
  ]
 }

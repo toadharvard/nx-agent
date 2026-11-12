@@ -103,7 +103,7 @@ def build(a):
     undet = []
     resolved += [
      dict(kind="undetermined", id="vs_a0_src", rule="R4", resolution="rows included (family_srcreg: a0 as ALU source, vs_1_1..vs_3_0). " + R4, evidence="MS vs register tables list a0 R/W; wine asmparser.c allows; no page states it illegal as a source"),
-     dict(kind="undetermined", id="vs_bi_alu", rule="R4+R5", resolution="i# as ALU source: rows included (R4: " + R4 + "). b# as ALU source: NO rows (R5: a form whose result no source defines carries no translation obligation; the value a b# read yields as a float4 is stated by MS, wine and vkd3d nowhere; the translator emits a bool-to-vec4 assignment that uam rejects, 3 rows measured). Open item reported to the lead: b# source semantics need a source or an owner decision", evidence="MS vs pages silent (the ps pages' flow-control-only wording is a ps page); wine asmparser.c vs_2/vs_3_reg_allowed list CONSTBOOL/CONSTINT as source types without a value rule"),
+     dict(kind="undetermined", id="vs_bi_alu", rule="R4", resolution="rows included: i# and b# as ALU sources in vs. " + R4 + " Translator item (not a universe item): a b# source is a SCALAR bool operand (vkd3d d3dbc.c: VSIR_DATA_BOOL, VSIR_DIMENSION_SCALAR in the CONSTBOOL case of the operand reader); the numeric value a vec4 ALU op reads from it is not defined by MS, wine or vkd3d, so the translator's bool-to-vec4 form (rejected by uam) needs that definition", evidence="MS vs-registers-vs-2-0/2-x/3-0: b# row (Constant Boolean Register, 16, R, 1 read port) carries no flow-control note; the ps pages' 'Only usable by a flow control instruction' note (ps-registers-ps-2-0/2-x) is on ps pages only; wine asmparser.c vs_2_reg_allowed/vs_3_reg_allowed list CONSTBOOL/CONSTINT as source register types with no instruction restriction; vkd3d d3dbc.c reads CONSTBOOL as an operand of any instruction"),
      dict(kind="undetermined", id="mov_a0_vs2", rule="R4", resolution="rows included (mov to a0 in vs_2_0..vs_3_0). " + R4, evidence="MS mova page says mova's dst must be a0; no page states mov-to-a0 illegal in vs_2_0+; mov-to-a0 is documented for vs_1_1"),
      dict(kind="undetermined", id="vs1_0_ps1_0", rule="R4", resolution="rows included as the 1_1 grammar (version token 1.0). " + R4, evidence="no MS asm page lists vs_1_0/ps_1_0 and none states them illegal; wine/vkd3d decoders carry ranges from 1_0 (ps texreg2gb {1,0}-{1,3})"),
      dict(kind="undetermined", id="temp_uninit_flow", rule="R4", resolution="rows included (read of a temp written only inside if/rep). " + R4, evidence="MS states the uninitialised-read rule for ps_1_x only; the sm2/3 pages are silent"),
@@ -117,7 +117,7 @@ def build(a):
     excl.update({m: dict(creatable="closed-world", included_in_universe=True, source="not in MS asm reference; see resolved.vs1_0_ps1_0 (R4)") for m in ("vs_1_0", "ps_1_0")})
     ill = []
     res = legacy_rows(a.legacy_dir, models, ops)
-    return dict(schema=1, ref_commits=dict(wine=a.wine_commit, vkd3d=a.vkd3d_commit), models=models, excluded_models=excl, opcodes=ops, srcmod_source=SRCMOD_SRC, sat_except_vs=SAT_EXCEPT_VS,
+    return dict(schema=1, ref_commits=dict(wine=a.wine_commit, vkd3d=a.vkd3d_commit, msdocs=a.docs_commit), models=models, excluded_models=excl, opcodes=ops, srcmod_source=SRCMOD_SRC, sat_except_vs=SAT_EXCEPT_VS,
                 usages=USAGES, usage_source=DCL_SRC, sampler_types={k: v for k, v in SAMPLER_TYPES.items()}, caps=CAPS, env_default=ENV_DEFAULT,
                 writemask=dict(general="any subset in xyzw order (MS ps-registers-modifiers-write-mask / vs-registers-modifiers-masking)",
                                vs_outputs={"oFog": ["", ".x"], "oPts": ["", ".x"], "oPos": [""], "oT": ["", ".x", ".xy", ".xyz"], "note": "oFog/oPts '.x' conflicts: vs page 'must use only one mask', ps page 'no explicit mask'"},
@@ -137,7 +137,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--docs", default=REF + "/ms/i"); ap.add_argument("--wine", default=REF + "/wine"); ap.add_argument("--vkd3d", default=REF + "/vkd3d")
     ap.add_argument("--legacy-dir", dest="legacy_dir", default=os.path.join(HERE, "../../total/census"))
-    a = ap.parse_args(); a.vkd3d_commit = pin_ext("vkd3d", a.vkd3d); a.wine_commit = pin_ext("wine-sm1", a.wine)
+    a = ap.parse_args(); a.docs_commit = pin_ext("msdocs-sm", a.docs); a.vkd3d_commit = pin_ext("vkd3d", a.vkd3d); a.wine_commit = pin_ext("wine-sm1", a.wine)
     T, regx = build(a)
     json.dump(T, open(os.path.join(HERE, "sm_table.json"), "w"), indent=1, sort_keys=True)
     leg = T["legacy"]

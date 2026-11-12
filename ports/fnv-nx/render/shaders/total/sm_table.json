@@ -5665,6 +5665,7 @@
   }
  },
  "ref_commits": {
+  "msdocs": "fnv-nx-build tools/msdocs-sm commit e18183f8c5536262d44677ab77398e320e970cfc tree_sha256 6bfddc8df0a32bd305edb2d486cd63df918775a0de4293b1f769c1130efad166 (upstream text rendering (learn.microsoft.com) of 172 pages of MicrosoftDocs/win32 desktop-src/direct3dhlsl, the D3D9 shader assembly reference; fetched 2026-11 by the L6 worker)",
   "vkd3d": "fnv-nx-build tools/vkd3d commit fd97ca35ae29a3f79b7a3467fe99d1a3b4e94643 tree_sha256 8ea2fb820f32b38bdb360b63d87f2802e3a9705bc39403b5837441a5a87382d9 (upstream https://gitlab.winehq.org/wine/vkd3d.git 0afe7d0aad6eabca21c208be609d3a5670e8ab41 (libs/vkd3d-shader/d3dbc.c only: the file sm_xref.py reads))",
   "wine": "fnv-nx-build tools/wine-sm1 commit 0a52e82db01433f1b0363c52cf68920ba059a1b1 tree_sha256 70046f62058eb7c7addb664ce1e8438dacb68273abd4b23863e048e28addd530 (upstream https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/shader_sm1.c, dlls/d3dcompiler_43/asmparser.c: the files sm_xref.py reads))"
  },
@@ -5721,11 +5722,11 @@
    "rule": "R4"
   },
   {
-   "evidence": "MS vs pages silent (the ps pages' flow-control-only wording is a ps page); wine asmparser.c vs_2/vs_3_reg_allowed list CONSTBOOL/CONSTINT as source types without a value rule",
+   "evidence": "MS vs-registers-vs-2-0/2-x/3-0: b# row (Constant Boolean Register, 16, R, 1 read port) carries no flow-control note; the ps pages' 'Only usable by a flow control instruction' note (ps-registers-ps-2-0/2-x) is on ps pages only; wine asmparser.c vs_2_reg_allowed/vs_3_reg_allowed list CONSTBOOL/CONSTINT as source register types with no instruction restriction; vkd3d d3dbc.c reads CONSTBOOL as an operand of any instruction",
    "id": "vs_bi_alu",
    "kind": "undetermined",
-   "resolution": "i# as ALU source: rows included (R4: R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it). b# as ALU source: NO rows (R5: a form whose result no source defines carries no translation obligation; the value a b# read yields as a float4 is stated by MS, wine and vkd3d nowhere; the translator emits a bool-to-vec4 assignment that uam rejects, 3 rows measured). Open item reported to the lead: b# source semantics need a source or an owner decision",
-   "rule": "R4+R5"
+   "resolution": "rows included: i# and b# as ALU sources in vs. R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it Translator item (not a universe item): a b# source is a SCALAR bool operand (vkd3d d3dbc.c: VSIR_DATA_BOOL, VSIR_DIMENSION_SCALAR in the CONSTBOOL case of the operand reader); the numeric value a vec4 ALU op reads from it is not defined by MS, wine or vkd3d, so the translator's bool-to-vec4 form (rejected by uam) needs that definition",
+   "rule": "R4"
   },
   {
    "evidence": "MS mova page says mova's dst must be a0; no page states mov-to-a0 illegal in vs_2_0+; mov-to-a0 is documented for vs_1_1",
