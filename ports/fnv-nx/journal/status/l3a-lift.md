@@ -265,3 +265,8 @@ Update 2026-11-12, at 698adefb:
   - Totals: 154 898 entries, 6 568 999 instructions, 573 267 flag reads, 15 630 red, 557 637 certified, 680 128 no-form rows, 3 919 undecodable ranges.
   - Red per image: exe 14, binkw32 1 (the cpuid probe), atimgpud 3, gdffalloutnv 2, libvorbis 9, libvorbisfile 3, d3dx9_31 4 355, d3dx9_38 11 243.
   - The d3dx9 counts wait on w7's next facts. Next: the cause table, the exe's 14 first.
+- int3 c482f3c4e: gate_assumptions 29 → 20. vd28 is running (doing).
+  - L1 minted ASM-226..231 (REMOVE, owner L3a): unhandled CONTEXT, IP-to-state consumer, callee eax reads, _XcptFilter code, fmath bound (+ fmathtest), LOCK-SPLIT.
+  - L3b: ASM-320/321, ASM-801, ASM-331 (the SDM-prose reference A3).
+  - L1's prose-only gate rule clears the 7 SMT blocks.
+  - ehtables:268 (reloc consistency) waits on w7's PE table: the rule is sound only for images Windows may relocate.
