@@ -20,6 +20,7 @@ from collections import Counter, defaultdict, deque
 from itertools import islice
 import capstone
 from capstone import x86 as cx
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I, which has no script directory on the path)
 import ehflow
 from ehflow import Flow, FULL, M32, St, sload, cset
 CALLEE_ORDER = ('ebx', 'esi', 'edi', 'ebp')
@@ -606,5 +607,5 @@ class EH(Flow):
         return L
 
 if __name__ == '__main__':
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import universe
+    import universe
 
