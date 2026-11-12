@@ -1,99 +1,814 @@
 {
- "format": "fnvnx-oracle/1",
+ "format": "fnvnx-oracle/2",
  "tests": {
   "test_abi.py": {
-   "references": [
-    {
+   "cases": {
+    "a second definition is compared with the first": [
+     "r1"
+    ],
+    "a64: x registers": [
+     "r1"
+    ],
+    "callee pop only for callee-pop conventions": [
+     "r1"
+    ],
+    "cli differ": [
+     "r1"
+    ],
+    "cli equal": [
+     "r1"
+    ],
+    "definition without a name": [
+     "r1"
+    ],
+    "empty is green with universe 0": [
+     "r1"
+    ],
+    "green: both refs of f, the ref of g; h has no definition and is out": [
+     "r1"
+    ],
+    "hidden result pointer after this": [
+     "r1"
+    ],
+    "kind mismatch": [
+     "r1"
+    ],
+    "malformed input is an error": [
+     "r1"
+    ],
+    "part": [
+     "r1"
+    ],
+    "reasons": [
+     "r1"
+    ],
+    "red items are named": [
+     "r1"
+    ],
+    "reference without a name": [
+     "r1"
+    ],
+    "this in ecx, the rest on the stack": [
+     "r1"
+    ],
+    "x86 stack words": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## link/abi.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/abi.py"
    ]
   },
   "test_abi_msvcname.py": {
-   "references": [
-    {
+   "cases": {
+    "64-bit integers": [
+     "r1"
+    ],
+    "adjustor thunk": [
+     "r1"
+    ],
+    "anonymous namespace": [
+     "r1"
+    ],
+    "bool": [
+     "r1"
+    ],
+    "class result and parameter back-reference": [
+     "r1"
+    ],
+    "ctor": [
+     "r1"
+    ],
+    "data symbol": [
+     "r1"
+    ],
+    "dtor virtual": [
+     "r1"
+    ],
+    "enum": [
+     "r1"
+    ],
+    "error text of %r": [
+     "r1"
+    ],
+    "function pointer": [
+     "r1"
+    ],
+    "member": [
+     "r1"
+    ],
+    "name back-reference": [
+     "r1"
+    ],
+    "pointer to array": [
+     "r1"
+    ],
+    "pointer to member function": [
+     "r1"
+    ],
+    "reference": [
+     "r1"
+    ],
+    "reference to template with pointer and int arguments": [
+     "r1"
+    ],
+    "rtti name": [
+     "r1"
+    ],
+    "rtti struct": [
+     "r1"
+    ],
+    "scalar deleting destructor name": [
+     "r1"
+    ],
+    "static, nested scope, void list": [
+     "r1"
+    ],
+    "template instance and its back-reference": [
+     "r1"
+    ],
+    "two kinds of parameter back-reference": [
+     "r1"
+    ],
+    "variadic cdecl": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## link/abi_msvcname.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/abi_msvcname.py"
    ]
   },
   "test_exevft.py": {
-   "references": [
-    {
+   "cases": {
+    "bad hierarchy names the COL": [
+     "r1"
+    ],
+    "bases": [
+     "r1"
+    ],
+    "chain": [
+     "r1"
+    ],
+    "chain of a non-thunk": [
+     "r1"
+    ],
+    "cli refuses an unpinned exe": [
+     "r1"
+    ],
+    "deterministic": [
+     "r1"
+    ],
+    "leaf": [
+     "r1"
+    ],
+    "loop message": [
+     "r1"
+    ],
+    "name and offset": [
+     "r1"
+    ],
+    "ordinary function": [
+     "r1"
+    ],
+    "outside the image": [
+     "r1"
+    ],
+    "slots": [
+     "r1"
+    ],
+    "stacked this": [
+     "r1"
+    ],
+    "t_plain only by the secondary": [
+     "r1"
+    ],
+    "t_sub8 is held by the primary and the secondary": [
+     "r1"
+    ],
+    "table format": [
+     "r1"
+    ],
+    "table plain slot": [
+     "r1"
+    ],
+    "table rows": [
+     "r1"
+    ],
+    "table thunk chain": [
+     "r1"
+    ],
+    "three vftables": [
+     "r1"
+    ],
+    "thunk": [
+     "r1"
+    ],
+    "two adjusts is not exact": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## link/exevft.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/exevft.py"
    ]
   },
   "test_gate_abs.py": {
-   "references": [
-    {
+   "cases": {
+    "abs names of the linked image": [
+     "r1"
+    ],
+    "absolute reference and definition": [
+     "r1"
+    ],
+    "archive member": [
+     "r1"
+    ],
+    "clean is green": [
+     "r1"
+    ],
+    "clean universe: 2 relocations + 3 defined symbols (f, g and the mapping symbol)": [
+     "r1"
+    ],
+    "definition is red": [
+     "r1"
+    ],
+    "exit status red": [
+     "r1"
+    ],
+    "gate file": [
+     "r1"
+    ],
+    "ids file": [
+     "r1"
+    ],
+    "reference to a name the image defines as absolute": [
+     "r1"
+    ],
+    "same input, nothing absolute in the image": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## link/gate_abs.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/gate_abs.py"
    ]
   },
   "test_gate_addr.py": {
-   "references": [
-    {
+   "cases": {
+    "%s: no 64-bit add or uxtw": [
+     "r1"
+    ],
+    "GUARD equals the plugin LIMIT": [
+     "r1"
+    ],
+    "big displacement routed": [
+     "r1"
+    ],
+    "constant not counted": [
+     "r1"
+    ],
+    "deterministic": [
+     "r1"
+    ],
+    "duplicate stem raises": [
+     "r1"
+    ],
+    "every record seen == routed": [
+     "r1"
+    ],
+    "field-array index routed": [
+     "r1"
+    ],
+    "function without a record": [
+     "r1"
+    ],
+    "gate green on the displacement object": [
+     "r1"
+    ],
+    "gate red on a bad layout": [
+     "r1"
+    ],
+    "green on plugin object": [
+     "r1"
+    ],
+    "layout %s: %s": [
+     "r1"
+    ],
+    "layout a guard larger than 0x10000 is fine": [
+     "r1"
+    ],
+    "layout in a hand-written table %s: %s": [
+     "r1"
+    ],
+    "layout item is certified with a good file": [
+     "r1"
+    ],
+    "layout unsorted regions still a partition": [
+     "r1"
+    ],
+    "malformed %r: all functions red": [
+     "r1"
+    ],
+    "missing layout file": [
+     "r1"
+    ],
+    "no functions, empty section: green": [
+     "r1"
+    ],
+    "no section: every function named": [
+     "r1"
+    ],
+    "no section: object item named": [
+     "r1"
+    ],
+    "no section: red": [
+     "r1"
+    ],
+    "objects without layout: red on layout": [
+     "r1"
+    ],
+    "r1 adds in 32 bits, no displacement addressing": [
+     "r1"
+    ],
+    "r1 routed": [
+     "r1"
+    ],
+    "r6 routed": [
+     "r1"
+    ],
+    "record for every function symbol": [
+     "r1"
+    ],
+    "record of a non-function is ignored; green": [
+     "r1"
+    ],
+    "rows object item": [
+     "r1"
+    ],
+    "rows shape": [
+     "r1"
+    ],
+    "rows tuples": [
+     "r1"
+    ],
+    "section present": [
+     "r1"
+    ],
+    "seen != routed": [
+     "r1"
+    ],
+    "small displacement not routed": [
+     "r1"
+    ],
+    "sorted records": [
+     "r1"
+    ],
+    "thunk or alias record": [
+     "r1"
+    ],
+    "two records": [
+     "r1"
+    ],
+    "unreadable object": [
+     "r1"
+    ],
+    "zero objects with layout: one item, green": [
+     "r1"
+    ],
+    "zero objects, no layout: universe 0, green": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "L1-L64",
      "kind": "spec",
      "path": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/gate_addr.py",
     "ports/fnv-nx/link/addrsec.py"
    ]
   },
   "test_gate_disp.py": {
-   "references": [
-    {
+   "cases": {
+    "--missing reports and certifies nothing": [
+     "r1"
+    ],
+    "--missing: a gap not listed is reported": [
+     "r1"
+    ],
+    "K1 differs": [
+     "r1"
+    ],
+    "a key of --keys that no entries row names": [
+     "r1"
+    ],
+    "duplicate key": [
+     "r1"
+    ],
+    "empty slot with a key": [
+     "r1"
+    ],
+    "entry conflict: two rows name two symbols": [
+     "r1"
+    ],
+    "extra key": [
+     "r1"
+    ],
+    "green": [
+     "r1"
+    ],
+    "hash": [
+     "r1"
+    ],
+    "hash-miss": [
+     "r1"
+    ],
+    "import rows without the kind column are not keys: the slots are extra keys": [
+     "r1"
+    ],
+    "key names the wrong symbol": [
+     "r1"
+    ],
+    "keys green": [
+     "r1"
+    ],
+    "kind import": [
+     "r1"
+    ],
+    "no entry": [
+     "r1"
+    ],
+    "no slot": [
+     "r1"
+    ],
+    "off by one": [
+     "r1"
+    ],
+    "parameters do not match the table": [
+     "r1"
+    ],
+    "red: %s": [
+     "r1"
+    ],
+    "table_id differs": [
+     "r1"
+    ],
+    "table_id equal": [
+     "r1"
+    ],
+    "undefined symbol": [
+     "r1"
+    ],
+    "wrong target": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## link/gate_disp.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/gate_disp.py"
    ]
   },
   "test_gate_names.py": {
-   "references": [
-    {
+   "cases": {
+    "all certified": [
+     "r1"
+    ],
+    "an unreadable one does not hide a proof": [
+     "r1"
+    ],
+    "deterministic": [
+     "r1"
+    ],
+    "doubly present .fnvnx.sympair": [
+     "r1"
+    ],
+    "elf64": [
+     "r1"
+    ],
+    "empty universe": [
+     "r1"
+    ],
+    "error ": [
+     "r1"
+    ],
+    "green": [
+     "r1"
+    ],
+    "green empty": [
+     "r1"
+    ],
+    "ids file": [
+     "r1"
+    ],
+    "missing input": [
+     "r1"
+    ],
+    "missing units file": [
+     "r1"
+    ],
+    "no cl object": [
+     "r1"
+    ],
+    "no units: stems differ": [
+     "r1"
+    ],
+    "outside the universe": [
+     "r1"
+    ],
+    "outside the universe 2": [
+     "r1"
+    ],
+    "pairs: the set, sorted by N": [
+     "r1"
+    ],
+    "red": [
+     "r1"
+    ],
+    "red exit": [
+     "r1"
+    ],
+    "red file": [
+     "r1"
+    ],
+    "rows certified": [
+     "r1"
+    ],
+    "rows count": [
+     "r1"
+    ],
+    "rows error": [
+     "r1"
+    ],
+    "rows error reason": [
+     "r1"
+    ],
+    "rows red": [
+     "r1"
+    ],
+    "rows sorted": [
+     "r1"
+    ],
+    "two .group sections": [
+     "r1"
+    ],
+    "two cl objects, none defines f (reason)": [
+     "r1"
+    ],
+    "two cl objects, the second defines": [
+     "r1"
+    ],
+    "undefined in cl": [
+     "r1"
+    ],
+    "units pairing": [
+     "r1"
+    ],
+    "universe": [
+     "r1"
+    ],
+    "unreadable and no proof": [
+     "r1"
+    ],
+    "unreadable cl red": [
+     "r1"
+    ],
+    "unreadable cl universe": [
+     "r1"
+    ],
+    "wrong name": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## link/gate_names.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/gate_names.py"
    ]
   },
   "test_gate_order.py": {
-   "references": [
-    {
+   "cases": {
+    "a pair store sizes 16 bytes": [
+     "r1"
+    ],
+    "access above the CFA (incoming stack argument) is not F": [
+     "r1"
+    ],
+    "aggregate load certified": [
+     "r1"
+    ],
+    "alias with another record": [
+     "r1"
+    ],
+    "alias with the same record": [
+     "r1"
+    ],
+    "alloca: its frame accesses are not F": [
+     "r1"
+    ],
+    "bad": [
+     "r1"
+    ],
+    "bit-field store certified": [
+     "r1"
+    ],
+    "by-value aggregate argument copy is an escape no record covers": [
+     "r1"
+    ],
+    "deterministic": [
+     "r1"
+    ],
+    "dynamic record: no frame access is F": [
+     "r1"
+    ],
+    "escape into a recorded slot is green": [
+     "r1"
+    ],
+    "escape of a slot the record lacks is red": [
+     "r1"
+    ],
+    "escaped array: certified": [
+     "r1"
+    ],
+    "escaped local: certified and ordered": [
+     "r1"
+    ],
+    "exact: dynamic sp": [
+     "r1"
+    ],
+    "exact: frame address of an unknown stack pointer": [
+     "r1"
+    ],
+    "exact: frame address out of every range": [
+     "r1"
+    ],
+    "exact: no frame pointer after overwrite": [
+     "r1"
+    ],
+    "exact: plain load": [
+     "r1"
+    ],
+    "exact: plain sp store to an escaped slot": [
+     "r1"
+    ],
+    "exact: plain store": [
+     "r1"
+    ],
+    "exact: plain x29 store to an escaped slot": [
+     "r1"
+    ],
+    "exact: second load after GOT": [
+     "r1"
+    ],
+    "exact: weak atomic": [
+     "r1"
+    ],
+    "function with a line is not": [
+     "r1"
+    ],
+    "function without a line is named": [
+     "r1"
+    ],
+    "function without a line: its frame accesses are not F either": [
+     "r1"
+    ],
+    "gate green": [
+     "r1"
+    ],
+    "gate lists the plain store": [
+     "r1"
+    ],
+    "gate on plugin object is red for the two documented functions": [
+     "r1"
+    ],
+    "gate red": [
+     "r1"
+    ],
+    "malformed section": [
+     "r1"
+    ],
+    "no plugin, no section: red": [
+     "r1"
+    ],
+    "no plugin: object item named": [
+     "r1"
+    ],
+    "no plugin: plain accesses to globals named": [
+     "r1"
+    ],
+    "no section: object and function": [
+     "r1"
+    ],
+    "non-escaped local: frame accesses certified": [
+     "r1"
+    ],
+    "ok functions certify": [
+     "r1"
+    ],
+    "only bad functions named": [
+     "r1"
+    ],
+    "only that store in the escaped twins": [
+     "r1"
+    ],
+    "parse empty": [
+     "r1"
+    ],
+    "parse lines": [
+     "r1"
+    ],
+    "plain store beside a recorded slot is F, onto it is not": [
+     "r1"
+    ],
+    "plugin output: red functions are exactly the documented ones": [
+     "r1"
+    ],
+    "plugin: the return slot store is preceded by dmb ish": [
+     "r1"
+    ],
+    "plugin: the writes to the escaped local are stlr": [
+     "r1"
+    ],
+    "record: alloca is dynamic": [
+     "r1"
+    ],
+    "record: escaped array": [
+     "r1"
+    ],
+    "record: escaped scalar": [
+     "r1"
+    ],
+    "record: every function has one line": [
+     "r1"
+    ],
+    "record: non-escaped local has none": [
+     "r1"
+    ],
+    "rules seen": [
+     "r1"
+    ],
+    "sret aggregate store certified": [
+     "r1"
+    ],
+    "two records for one function": [
+     "r1"
+    ],
+    "uncertified sorted": [
+     "r1"
+    ],
+    "undecodable word and size-0 symbol": [
+     "r1"
+    ],
+    "unreadable object": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "### Object rules (checked on the code, not on the compiler flags)",
      "kind": "spec",
      "path": "ports/fnv-nx/docs/ORDERING.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/gate_order.py",
     "ports/fnv-nx/link/a64order.py",
@@ -101,85 +816,381 @@
    ]
   },
   "test_gate_r7.py": {
-   "references": [
-    {
+   "cases": {
+    "absent section": [
+     "r1"
+    ],
+    "bad signature": [
+     "r1"
+    ],
+    "certified count": [
+     "r1"
+    ],
+    "detail": [
+     "r1"
+    ],
+    "empty file": [
+     "r1"
+    ],
+    "empty section (nothing is read)": [
+     "r1"
+    ],
+    "garbage GCC object": [
+     "r1"
+    ],
+    "green file": [
+     "r1"
+    ],
+    "ids file has all": [
+     "r1"
+    ],
+    "malformed ": [
+     "r1"
+    ],
+    "missing input": [
+     "r1"
+    ],
+    "no CodeView": [
+     "r1"
+    ],
+    "no cl object": [
+     "r1"
+    ],
+    "red file": [
+     "r1"
+    ],
+    "red file lists at most 50, sorted": [
+     "r1"
+    ],
+    "rows count": [
+     "r1"
+    ],
+    "rows error": [
+     "r1"
+    ],
+    "rows shape": [
+     "r1"
+    ],
+    "rows sorted": [
+     "r1"
+    ],
+    "rows verdicts": [
+     "r1"
+    ],
+    "set: an unreadable object is red": [
+     "r1"
+    ],
+    "set: differing definitions are undecided": [
+     "r1"
+    ],
+    "set: identical definitions count once": [
+     "r1"
+    ],
+    "set: no CodeView in any": [
+     "r1"
+    ],
+    "set: one object lacks the key, the other has it": [
+     "r1"
+    ],
+    "set: one object without CodeView": [
+     "r1"
+    ],
+    "sorted": [
+     "r1"
+    ],
+    "table cut inside a record": [
+     "r1"
+    ],
+    "truncated record": [
+     "r1"
+    ],
+    "units pairing": [
+     "r1"
+    ],
+    "universe is the set of GCC keys": [
+     "r1"
+    ],
+    "unreadable cl object": [
+     "r1"
+    ],
+    "unreadable members": [
+     "r1"
+    ],
+    "verdict ": [
+     "r1"
+    ],
+    "verdict counts": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## link/gate_r7.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/gate_r7.py"
    ]
   },
   "test_ice_poly_byvalue.py": {
-   "references": [
-    {
+   "cases": {
+    "all 8 plugins (lifted-origin root)": [
+     "r1"
+    ],
+    "all 8 plugins (native root)": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
      "kind": "spec",
      "path": "ports/fnv-nx/docs/ORDERING.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
    ]
   },
   "test_odr.py": {
-   "references": [
-    {
+   "cases": {
+    "a signature in one object is not in the universe": [
+     "r1"
+    ],
+    "different relocation target": [
+     "r1"
+    ],
+    "different string is red": [
+     "r1"
+    ],
+    "differing constant is red and named": [
+     "r1"
+    ],
+    "identical inline copies": [
+     "r1"
+    ],
+    "identical vtable groups": [
+     "r1"
+    ],
+    "malformed object": [
+     "r1"
+    ],
+    "missing file": [
+     "r1"
+    ],
+    "names the signature and the objects": [
+     "r1"
+    ],
+    "one object": [
+     "r1"
+    ],
+    "same relocation target": [
+     "r1"
+    ],
+    "same string in different objects": [
+     "r1"
+    ],
+    "string in a plain section is opaque, uncertified even when equal": [
+     "r1"
+    ],
+    "the same path twice is one copy": [
+     "r1"
+    ],
+    "truncated object": [
+     "r1"
+    ],
+    "vtable group with a differing inline virtual": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## link/odr.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/odr.py"
    ]
   },
   "test_order_cont.py": {
-   "references": [
-    {
+   "cases": {
+    "(i) noreturn longjmp after a load: compiles (no error); the noreturn path ends in br, nothing after it but padding": [
+     "r1"
+    ],
+    "(ii) __builtin_setjmp: the receiver begins with dmb ishld, before the load": [
+     "r1"
+    ],
+    "(ii) no two adjacent identical dmb ishld (FENCE-MERGE)": [
+     "r1"
+    ],
+    "(iii) catch landing pad begins with dmb ishld, before the load": [
+     "r1"
+    ],
+    "(iv) setjmp(): dmb ishld right after the call": [
+     "r1"
+    ],
+    "HARDREG %s: no ldar/stlr/dmb for a register object": [
+     "r1"
+    ],
+    "HARDREG: access through a register-held pointer stays ordered (stlr + ldar)": [
+     "r1"
+    ],
+    "LOCAL: a global read is ldar": [
+     "r1"
+    ],
+    "LOCAL: a non-escaped local array has no ldar/stlr/dmb": [
+     "r1"
+    ],
+    "LOCAL: a polymorphic by-value return builds (the by-reference result is a pointer value, no ICE)": [
+     "r1"
+    ],
+    "LOCAL: an address-taken local is still ordered (stlr and ldar)": [
+     "r1"
+    ],
+    "LOCAL: the store into a result returned through x8 is ordered (stlr through the pointer)": [
+     "r1"
+    ],
+    "a std::string copy builds": [
+     "r1"
+    ],
+    "all fixtures build on msvcmodel with the 8 plugins": [
+     "r1"
+    ],
+    "std::string %s builds": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
      "kind": "spec",
      "path": "ports/fnv-nx/docs/ORDERING.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
    ]
   },
   "test_thisadj.py": {
-   "references": [
-    {
+   "cases": {
+    "entry convention": [
+     "r1"
+    ],
+    "green": [
+     "r1"
+    ],
+    "malformed": [
+     "r1"
+    ],
+    "reason names both numbers": [
+     "r1"
+    ],
+    "thisadj": [
+     "r1"
+    ],
+    "unbound": [
+     "r1"
+    ],
+    "wrong thunk offset": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "### MSVC entries at a secondary base (`thisadj.py`, S2c-abi)",
      "kind": "spec",
      "path": "ports/fnv-nx/docs/LINK.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/thisadj.py"
    ]
   },
   "test_vslots.py": {
-   "references": [
-    {
+   "cases": {
+    "D1 slot is red when D0 is": [
+     "r1"
+    ],
+    "green": [
+     "r1"
+    ],
+    "malformed": [
+     "r1"
+    ],
+    "reason": [
+     "r1"
+    ],
+    "slot past the exe vftable": [
+     "r1"
+    ],
+    "unbound point: its slots": [
+     "r1"
+    ],
+    "vslots": [
+     "r1"
+    ],
+    "wrong callee address is named": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Vtable slots through the MSVC vftables (`vslots.py`, D12)",
      "kind": "spec",
      "path": "ports/fnv-nx/docs/LINK.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/vslots.py"
    ]
   },
   "test_vtables.py": {
-   "references": [
-    {
+   "cases": {
+    "destructor pair broken": [
+     "r1"
+    ],
+    "exe vftable of the class left unbound (V5)": [
+     "r1"
+    ],
+    "extra native slot": [
+     "r1"
+    ],
+    "green: exit and counts": [
+     "r1"
+    ],
+    "malformed obj": [
+     "r1"
+    ],
+    "missing exe": [
+     "r1"
+    ],
+    "missing row": [
+     "r1"
+    ],
+    "native offset disagrees": [
+     "r1"
+    ],
+    "unbound point": [
+     "r1"
+    ],
+    "unnamed point": [
+     "r1"
+    ],
+    "vtpair offset disagrees": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Vtables (`vtables.py`, kind `V`, D7)",
      "kind": "spec",
      "path": "ports/fnv-nx/docs/LINK.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/link/vtables.py"
    ]

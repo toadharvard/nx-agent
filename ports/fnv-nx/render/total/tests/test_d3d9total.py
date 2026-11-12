@@ -214,7 +214,7 @@ def tree_hash_vs_cas(tmp, cache):
     cas = os.path.join(PORT, "verify", "cas.py")
     for d in (t, dest):
         r = subprocess.run([sys.executable, "-I", cas, "ingest", os.path.join(tmp, "store"), d], capture_output=True, text=True, check=True)
-        case("tree hash equals cas ingest", r.stdout.strip() == G.tree_hash(d), "%s: cas %s, gate %s" % (d, r.stdout.strip(), G.tree_hash(d)))
+        case("tree hash equals cas ingest", r.stdout.strip() == G.tree_hash(d), "%s: cas %s, gate %s" % (d, r.stdout.strip(), G.tree_hash(d)), key=os.path.basename(d))
 
 
 def main():

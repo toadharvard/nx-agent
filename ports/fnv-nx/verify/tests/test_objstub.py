@@ -22,7 +22,7 @@ scratch.install()
 
 CC = "aarch64-linux-gnu-gcc"
 ROOT = tempfile.mkdtemp(prefix="objstub-")
-FAILED = []
+FAILED = testcase.FAILED
 N = [0]
 T0 = time.time()
 

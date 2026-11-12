@@ -90,7 +90,7 @@ try:
     images.image_set(d5 + "/A.exe", [d5])
 except modules.StageError as e:
     raised = e
-case("two files differing only in case are an error", raised is not None and ("diffraisedr only in casraised" in str(raised)), raised)
+case("two files differing only in case are an error", raised is not None and ("differ only in case" in str(raised)), raised)
 import dllkind  # noqa: E402
 case("images_of: a cycle of images stays, a dll with an unresolved import and its dependents go",
       dllkind.images_of({"a.dll": ["b.dll"], "b.dll": ["a.dll", "k.dll"], "c.dll": ["a.dll"], "d.dll": ["x.dll"], "e.dll": ["d.dll"]}, {"k.dll"}) == {"a.dll", "b.dll", "c.dll"})

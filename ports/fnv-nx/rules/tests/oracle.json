@@ -1,88 +1,936 @@
 {
- "format": "fnvnx-oracle/1",
+ "format": "fnvnx-oracle/2",
  "tests": {
   "test_addrfn1.py": {
-   "references": [
-    {
+   "cases": {
+    "AddrFn1.test_rule": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Rule table",
      "kind": "spec",
      "path": "ports/fnv-nx/rules/README.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/rules/s2_bodies.py",
     "ports/fnv-nx/rules/s1_compile.py"
    ]
   },
   "test_asm_rule.py": {
-   "references": [
-    {
+   "cases": {
+    "#line after the span restores the numbering": [
+     "r1"
+    ],
+    "%s: at least one span": [
+     "r1"
+    ],
+    "%s: error raised": [
+     "r1"
+    ],
+    "%s: no __asm visible to GCC": [
+     "r1"
+    ],
+    "%s: no gcc leftover": [
+     "r1"
+    ],
+    "%s: permitted form for the dual-compile gate": [
+     "r1"
+    ],
+    "%s: pristine branch verbatim": [
+     "r1"
+    ],
+    "%s: the GCC view holds the empty asm statement": [
+     "r1"
+    ],
+    "%s: the cl view is the input (token stream)": [
+     "r1"
+    ],
+    "%s: totality T1-T3": [
+     "r1"
+    ],
+    "%s: untouched": [
+     "r1"
+    ],
+    "a ; comment keeps __asm inside it": [
+     "r1"
+    ],
+    "a block opens with the cl branch": [
+     "r1"
+    ],
+    "a file without asm is untouched": [
+     "r1"
+    ],
+    "block ends at its own }": [
+     "r1"
+    ],
+    "define emitted twice (cl and GCC branch)": [
+     "r1"
+    ],
+    "define: block in a #define": [
+     "r1"
+    ],
+    "generated family: every accepted rewrite is total (%d of %d accepted)": [
+     "r1"
+    ],
+    "generated family: no violation": [
+     "r1"
+    ],
+    "inside a decomp conditional: wrapped and accepted": [
+     "r1"
+    ],
+    "rule counts": [
+     "r1"
+    ],
+    "several per line: one run": [
+     "r1"
+    ],
+    "stmt-run is one construct": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Rule table",
      "kind": "spec",
      "path": "ports/fnv-nx/rules/README.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/rules/s8_asm.py"
    ]
   },
   "test_harn1.py": {
-   "references": [
-    {
+   "cases": {
+    "Harn1.test_rule": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Rule table",
      "kind": "spec",
      "path": "ports/fnv-nx/rules/README.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/rules/s2_bodies.py"
    ]
   },
   "test_mscgate.py": {
-   "references": [
-    {
+   "cases": {
+    "#elif inside the group: refused": [
+     "r1"
+    ],
+    "#if !_MSC_VER style: refused": [
+     "r1"
+    ],
+    "#ifndef with only a GCC branch: refused": [
+     "r1"
+    ],
+    "ASM rule output \"%s\" accepted by the gate": [
+     "r1"
+    ],
+    "ASM rule output \"%s\" has only asm-form groups": [
+     "r1"
+    ],
+    "_MSC_VER in a string or comment is no condition": [
+     "r1"
+    ],
+    "a conditional on another macro is not judged": [
+     "r1"
+    ],
+    "a group of the input's header added beyond the input's count, without else: refused": [
+     "r1"
+    ],
+    "asm form in a comment-laden condition line accepted": [
+     "r1"
+    ],
+    "asm form with #ifdef accepted": [
+     "r1"
+    ],
+    "asm form with defined _MSC_VER accepted": [
+     "r1"
+    ],
+    "asm form with defined(_MSC_VER) accepted": [
+     "r1"
+    ],
+    "asm in a #define replacement list accepted": [
+     "r1"
+    ],
+    "asm marker inside a comment only: refused": [
+     "r1"
+    ],
+    "asm marker only in the cl branch: refused": [
+     "r1"
+    ],
+    "census by origin": [
+     "r1"
+    ],
+    "check_rule_edit names the rule": [
+     "r1"
+    ],
+    "check_rule_edit: an edit that adds nothing is clean": [
+     "r1"
+    ],
+    "check_tree lists the file": [
+     "r1"
+    ],
+    "else branch without the asm / lifted form: refused": [
+     "r1"
+    ],
+    "group closed by no #endif: refused": [
+     "r1"
+    ],
+    "input conditionals of any form are not judged": [
+     "r1"
+    ],
+    "input groups with a rule group of the same header added: only the permitted form may exceed the input": [
+     "r1"
+    ],
+    "lifted call form accepted": [
+     "r1"
+    ],
+    "lifted name without a call: refused": [
+     "r1"
+    ],
+    "no else branch (GCC sees nothing): refused": [
+     "r1"
+    ],
+    "non-empty asm string: refused": [
+     "r1"
+    ],
+    "prepare.prepare: ASM rule only, no violation": [
+     "r1"
+    ],
+    "prepare.prepare: a rule emitting a cl-only group is named": [
+     "r1"
+    ],
+    "prepare.prepare: the output holds the asm form": [
+     "r1"
+    ],
+    "swapped branches with !defined accepted": [
+     "r1"
+    ],
+    "swapped branches with #ifndef accepted": [
+     "r1"
+    ],
+    "version comparison: refused": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Dual-compile check (mscgate.py)",
      "kind": "spec",
      "path": "ports/fnv-nx/rules/README.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/rules/mscgate.py"
    ]
   },
   "test_pop2.py": {
-   "references": [
-    {
+   "cases": {
+    "MsvcSig.test_words": [
+     "r1"
+    ],
+    "Pop2.test_chains": [
+     "r1"
+    ],
+    "Pop2.test_idempotent_on_patched_text": [
+     "r1"
+    ],
+    "Pop2.test_inline_stand_in_receiver": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Rule table",
      "kind": "spec",
      "path": "ports/fnv-nx/rules/README.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/rules/s2_bodies.py",
     "ports/fnv-nx/rules/_msvcsig.py"
    ]
   },
   "test_prepare_pure.py": {
-   "references": [
-    {
+   "cases": {
+    "a changed input file is read (no memo, no cache)": [
+     "r1"
+    ],
+    "another checkout path and working directory: the same tree": [
+     "r1"
+    ],
+    "argv contract: %s refused (exit 2)": [
+     "r1"
+    ],
+    "argv contract: --crt-symbols missing refused (exit 2)": [
+     "r1"
+    ],
+    "build/units.json copied": [
+     "r1"
+    ],
+    "no environment variable, skip list, dynamic import, clock copy or dropped machinery in the sources": [
+     "r1"
+    ],
+    "other files copied byte for byte": [
+     "r1"
+    ],
+    "poisoned environment: the same tree as the clean one": [
+     "r1"
+    ],
+    "prepare_stats.tsv lists the rules": [
+     "r1"
+    ],
+    "run %d exits 0": [
+     "r1"
+    ],
+    "src/a.cpp: the rules ran (ASM, SSE3, XC1)": [
+     "r1"
+    ],
+    "src/b.cpp: a copy of an initializer the unit does not own becomes an extern declaration": [
+     "r1"
+    ],
+    "three runs, three hash seeds: one tree hash": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Tests (run from the checkout root, as `python3 -I rules/tests/test_X.py`)",
      "kind": "spec",
      "path": "ports/fnv-nx/rules/README.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/rules/prepare.py"
    ]
   },
   "test_rules_text.py": {
-   "references": [
-    {
+   "cases": {
+    "ADDR1 address of an intrinsic result after a pointer cast": [
+     "r1"
+    ],
+    "ADDR1 binary & with an intrinsic: unchanged": [
+     "r1"
+    ],
+    "ALIGN1 keeps the line count": [
+     "r1"
+    ],
+    "ALIGN1 moves align behind the class key of definitions and forward declarations": [
+     "r1"
+    ],
+    "ALLOC1 @fnv-tagged operator new kept": [
+     "r1"
+    ],
+    "ALLOC1 placement and debug forms kept": [
+     "r1"
+    ],
+    "ALLOC1 untagged file-scope operator new[] dropped": [
+     "r1"
+    ],
+    "ANON1 names an unnamed struct in a return type": [
+     "r1"
+    ],
+    "ANON2 converts the uses in a file that includes the member, only where they are that member": [
+     "r1"
+    ],
+    "ANON2 raw storage for a member with a destructor in an anonymous struct of a union": [
+     "r1"
+    ],
+    "ANON3 leaves a local anonymous union without an anonymous struct": [
+     "r1"
+    ],
+    "ANON3 puts a local anonymous union with an anonymous struct in a struct, same lines": [
+     "r1"
+    ],
+    "CALL1-NS a call qualified by a namespace with DECL1's using-declaration gets its casts": [
+     "r1"
+    ],
+    "CALL1-RET a returned Win32 call gets its pointer arguments cast": [
+     "r1"
+    ],
+    "COM1 leaves a unit without its own IUnknown alone": [
+     "r1"
+    ],
+    "COM1 leaves an IUnknown nested in a namespace alone": [
+     "r1"
+    ],
+    "COM1 renames the own IUnknown, its base use and sizeof": [
+     "r1"
+    ],
+    "COND1 `!x.f(a)` is bool already: untouched (V1 C3)": [
+     "r1"
+    ],
+    "COND1 a call returning int stays": [
+     "r1"
+    ],
+    "COND1 a class without a bool constructor (no ambiguity) stays": [
+     "r1"
+    ],
+    "COND1 an explicit G(bool): the conditional is bool, untouched (V1 C2)": [
+     "r1"
+    ],
+    "COND1 an operand that does not end in the call stays": [
+     "r1"
+    ],
+    "COND1 the literal of `? false :` becomes the gate class (MSVC's conversion)": [
+     "r1"
+    ],
+    "COPY1 casts to the base whose constructor also takes its own base by value": [
+     "r1"
+    ],
+    "COPY1 leaves a base with only its copy constructor": [
+     "r1"
+    ],
+    "CTOR1 a constructor definition after a comment ending in \".\" is not a call": [
+     "r1"
+    ],
+    "CTOR1 explicit constructor call of a template class": [
+     "r1"
+    ],
+    "DECL1 a <wchar.h> prototype becomes the header": [
+     "r1"
+    ],
+    "DECL1 declares the C math function itself (no <math.h> overloads), keeps a float overload of the decomp": [
+     "r1"
+    ],
+    "DECL1 drops a CRT prototype that ends in a // comment": [
+     "r1"
+    ],
+    "DECL1 drops a prototype whose head is on the line above": [
+     "r1"
+    ],
+    "DECL1 drops a prototype with several __declspec": [
+     "r1"
+    ],
+    "DECL1 drops the decomp's float overload where a unit includes <math.h>": [
+     "r1"
+    ],
+    "DECL1 keeps a namespace's extern \"C\" prototype of the C math function, header on top": [
+     "r1"
+    ],
+    "DECL1 reads the C signature through attribute SAL (commas inside [...])": [
+     "r1"
+    ],
+    "DECL1-CONV a stored handle result is converted to the decomp type; one passed on is not": [
+     "r1"
+    ],
+    "DECL1-FOPEN _iobuf fopen -> fnvnx_iobuf_fopen.h, same lines": [
+     "r1"
+    ],
+    "DECL1-FOPEN a fopen prototype without _iobuf is left alone": [
+     "r1"
+    ],
+    "DECL1-MATHNS counted": [
+     "r1"
+    ],
+    "DECL1-NSADL counted": [
+     "r1"
+    ],
+    "DECL1-NSADL: unqualified calls in the namespace keeping its own prototype are parenthesized": [
+     "r1"
+    ],
+    "DECL1-STDABS a std::abs prototype becomes fnvnx_cmath/std_abs.h": [
+     "r1"
+    ],
+    "DECL2 drops a _RTL_CRITICAL_SECTION_DEBUG copy named RTL_CRITICAL_SECTION, same lines": [
+     "r1"
+    ],
+    "DECL3 spells FILE as _iobuf and renames MSVC fpos_t, strings untouched": [
+     "r1"
+    ],
+    "DUPINT1-RET a call uses the result: untouched": [
+     "r1"
+    ],
+    "DUPINT1-RET a narrower integer parameter: untouched": [
+     "r1"
+    ],
+    "DUPINT1-RET other return type, results unused: later prototype dropped": [
+     "r1"
+    ],
+    "EBO1 a class with two empty bases starts its members at 1 (the base in another namespace ignored)": [
+     "r1"
+    ],
+    "EBO1 leaves a class without data and one with a non-empty base": [
+     "r1"
+    ],
+    "EBO2 FNVNX_EBO2 first in the empty base of a class introducing a vfptr": [
+     "r1"
+    ],
+    "EBO2 a base used as an object is left alone": [
+     "r1"
+    ],
+    "EBO2 a base with data: nothing": [
+     "r1"
+    ],
+    "EBO2 headers are left alone": [
+     "r1"
+    ],
+    "EBO2 no class introducing a vfptr: nothing": [
+     "r1"
+    ],
+    "EBO3 FNVNX_EBO2 first in an empty base that follows a base with data": [
+     "r1"
+    ],
+    "EBO3 a virtual base: nothing": [
+     "r1"
+    ],
+    "EBO3 an empty base used as an object is left alone": [
+     "r1"
+    ],
+    "EBO3 headers are left alone": [
+     "r1"
+    ],
+    "EBO3 the empty base first (or after a base of another file): nothing": [
+     "r1"
+    ],
+    "ELAB1 elaborated uses of a class named like a Win32 function": [
+     "r1"
+    ],
+    "ELAB1 renames a typedef named like a Win32 function": [
+     "r1"
+    ],
+    "ENUM1 a definition int cannot hold keeps its form": [
+     "r1"
+    ],
+    "ENUM1 opaque enum gets int as its base, and so does its definition": [
+     "r1"
+    ],
+    "ENUM2 gives enums with values >= 2^31 MSVC's int": [
+     "r1"
+    ],
+    "FINL1 a class named after a nested __declspec(align(16)) keeps it on its defined constructor": [
+     "r1"
+    ],
+    "FINL1 a class template's member defined out of class keeps it (the class, not the template parameter)": [
+     "r1"
+    ],
+    "FINL1 body-less declarations of functions the unit does not define lose __forceinline": [
+     "r1"
+    ],
+    "FINL1 defined ones keep it (const overload, out-of-class body, Pod overload)": [
+     "r1"
+    ],
+    "FINL1 headers are left alone": [
+     "r1"
+    ],
+    "FRIEND1 at the start of a file stays off the #include line": [
+     "r1"
+    ],
+    "FRIEND1 forward-declares a friend class declared nowhere before": [
+     "r1"
+    ],
+    "FRIEND1 keeps the line count": [
+     "r1"
+    ],
+    "FRIEND1 two declarations only (not T, Q, M, Z, P, R)": [
+     "r1"
+    ],
+    "GAME1 renames a C-linkage float math prototype the unit binds, with the game function's float return": [
+     "r1"
+    ],
+    "GOTO1 a typedef of an integer type is an integer scalar (const literal kept)": [
+     "r1"
+    ],
+    "GOTO1 also splits SSE vectors, const scalars (dropping their const) and pointers to const": [
+     "r1"
+    ],
+    "GOTO1 splits declarator lists declarator by declarator": [
+     "r1"
+    ],
+    "GOTO1 takes the scalar types from the unit's own typedefs, not from names (Hk is no typedef)": [
+     "r1"
+    ],
+    "GOTO1-CONST leaves a const integer literal no goto crosses, splits the rest": [
+     "r1"
+    ],
+    "GOTO1-CONST: a crossed const integer literal becomes static const (still a constant)": [
+     "r1"
+    ],
+    "GOTO2 (a) copies a const scalar reference to a by-value result": [
+     "r1"
+    ],
+    "GOTO2 (a) leaves a reference to a returned reference": [
+     "r1"
+    ],
+    "GOTO2 (a) the scalar is a typedef of the unit (typedef float Real)": [
+     "r1"
+    ],
+    "GOTO2 (b) closes the crossed scopes before the label": [
+     "r1"
+    ],
+    "GOTO2 (b) keeps a scope that is used after the label": [
+     "r1"
+    ],
+    "GOTO2 (c) clones a straight return tail into the crossing goto": [
+     "r1"
+    ],
+    "GOTO2 (c) does not clone a tail that names a local": [
+     "r1"
+    ],
+    "GOTO2 leaves declarations before the goto alone": [
+     "r1"
+    ],
+    "IFX1-SSE a dropped SSE prototype includes fnvnx_target_sse.h": [
+     "r1"
+    ],
+    "IFX1-SSE a kept body includes nothing": [
+     "r1"
+    ],
+    "INC1 spells an include as the local file is spelled": [
+     "r1"
+    ],
+    "INST1 leaves a member declared with unsigned int": [
+     "r1"
+    ],
+    "INST1 size_type from the class template of the qualifier's namespace (not the first `vector`)": [
+     "r1"
+    ],
+    "KEEP1 tag above an access label: FNVNX_KEEP after the label": [
+     "r1"
+    ],
+    "KEEP1 tag in front of a member initializer list: no FNVNX_KEEP": [
+     "r1"
+    ],
+    "KEEP1 tag in front of a statement: no FNVNX_KEEP": [
+     "r1"
+    ],
+    "LANE1 a lane's address stays": [
+     "r1"
+    ],
+    "LANE1 address of the lane array": [
+     "r1"
+    ],
+    "LEX1 MSVC token spellings": [
+     "r1"
+    ],
+    "LEX1 declarators and function types are not casts": [
+     "r1"
+    ],
+    "LEX1 functional casts to multi-word types": [
+     "r1"
+    ],
+    "LEX1 strings and comments untouched": [
+     "r1"
+    ],
+    "LINK1 C-linkage declarator list over two lines": [
+     "r1"
+    ],
+    "LINK1 a C-linkage function-pointer variable at file scope, any name; a function returning one stays": [
+     "r1"
+    ],
+    "MATH1 drops a decomp copy of float sqrt(float)": [
+     "r1"
+    ],
+    "MATH1 in a namespace of its own: the overload stays": [
+     "r1"
+    ],
+    "MATH1 in a namespace that takes the C fabs: the copy goes": [
+     "r1"
+    ],
+    "MATH1 next to the namespace's own extern \"C\" prototype: the copy stays (MSVC found it)": [
+     "r1"
+    ],
+    "MATH1-OWN the unit's own static sqrtf is renamed where <math.h> comes in": [
+     "r1"
+    ],
+    "MSCV1 a file that is no unit is left alone": [
+     "r1"
+    ],
+    "MSCV1 an rtm unit sees cl 15.00.21022 in code, #if lines and comments stay": [
+     "r1"
+    ],
+    "MSCV1 an sp1 unit sees cl 15.00.30729": [
+     "r1"
+    ],
+    "NEW1 plain unsigned size parameter -> size_t, unsigned long / short kept": [
+     "r1"
+    ],
+    "NEW1 size parameter -> size_t, reference parameter kept": [
+     "r1"
+    ],
+    "NEW4 operator new call alone: nothing": [
+     "r1"
+    ],
+    "NEW4 placement new use gets <new>": [
+     "r1"
+    ],
+    "NEW5 a class whose operator new has no body here: unchanged": [
+     "r1"
+    ],
+    "NEW5 a placement form with another second parameter: unchanged": [
+     "r1"
+    ],
+    "NEW5 a usual delete next to the placement form: unchanged": [
+     "r1"
+    ],
+    "NEW5 keeps the line count": [
+     "r1"
+    ],
+    "NEW5 no virtual destructor, or a base class: unchanged": [
+     "r1"
+    ],
+    "NEW5 placement-only delete + virtual dtor: global delete member": [
+     "r1"
+    ],
+    "NEW5 the class's own inline operator new gets the tag (no delete on a throwing constructor, V1 N2)": [
+     "r1"
+    ],
+    "NSCALL1 a class member of that name: untouched": [
+     "r1"
+    ],
+    "NSCALL1 the unit also binds the global spelling: untouched": [
+     "r1"
+    ],
+    "NSCALL1 unqualified calls of N's own CRT prototype -> N::name": [
+     "r1"
+    ],
+    "PTR1 ordered compares of a function / pointer with 0": [
+     "r1"
+    ],
+    "PTR1-DEREF leaves the compare of a pointee (int* p: *p <= 0 is signed), keeps pointer compares": [
+     "r1"
+    ],
+    "QUAD1 leaves a return type that is constructible from the class itself": [
+     "r1"
+    ],
+    "QUAD1 writes out the conversion to __m128 for a class built from __m128": [
+     "r1"
+    ],
+    "RCAST1 `//` inside a string literal does not hide the cast after it": [
+     "r1"
+    ],
+    "RCAST1 a cast operand and a declarator are left alone": [
+     "r1"
+    ],
+    "RCAST1 a reference cast spelled in a comment: untouched": [
+     "r1"
+    ],
+    "RCAST1 member operator call result": [
+     "r1"
+    ],
+    "RCAST1 reference cast of a member call result": [
+     "r1"
+    ],
+    "RCAST1 reference cast of a parenthesized expression": [
+     "r1"
+    ],
+    "RCAST1 reference cast of a plain lvalue untouched": [
+     "r1"
+    ],
+    "RCAST1 static_cast to a reference of an operator result": [
+     "r1"
+    ],
+    "RREF2 a const reference operator: unchanged": [
+     "r1"
+    ],
+    "RREF2 a temporary for a non-const reference operator parameter": [
+     "r1"
+    ],
+    "RSTR1 a plain local stays": [
+     "r1"
+    ],
+    "RSTR1 a use outside the declaring function stays": [
+     "r1"
+    ],
+    "RSTR1 restrict local passed to a const T& parameter": [
+     "r1"
+    ],
+    "SAL1 drops the attributes of the annotation classes": [
+     "r1"
+    ],
+    "SPEC3 qualifies the namespace types in a specialization body": [
+     "r1"
+    ],
+    "SPEC3 specialization of a namespace template: untouched": [
+     "r1"
+    ],
+    "SSE1 MSVC union initializer of a __m128": [
+     "r1"
+    ],
+    "SSE1 anonymous lane struct: left alone for a name also declared with another type": [
+     "r1"
+    ],
+    "SSE1 elaborated __m128 references": [
+     "r1"
+    ],
+    "SSE1 lane struct: left alone when the unit declares another member of that name": [
+     "r1"
+    ],
+    "SSE1 lanes that were members of a removed struct __m128: q.x -> element access": [
+     "r1"
+    ],
+    "SSE1 local struct __m128 removed": [
+     "r1"
+    ],
+    "SSE1 named lane struct of a removed local __m128: v.lanes.x -> element access": [
+     "r1"
+    ],
+    "SSE1 qualified elaborated __m128 references (`union ::__m128`)": [
+     "r1"
+    ],
+    "SSE2 drops (_mm_x)(...) prototypes, SSE4 unqualified using-declarations of intrinsics": [
+     "r1"
+    ],
+    "SSE2 drops `T(_mm_x)(...)` prototypes (no space before the parenthesized name)": [
+     "r1"
+    ],
+    "SSE2 drops a local intrinsic definition at namespace scope, same line count": [
+     "r1"
+    ],
+    "SSE2 drops each of several prototypes in one extern \"C\" block on one line": [
+     "r1"
+    ],
+    "SSE2 drops intrinsic prototypes with a typedef return type, keeps statements": [
+     "r1"
+    ],
+    "SSE3 __m64 members": [
+     "r1"
+    ],
+    "SSE3 element access behind a subscripted parenthesized operand": [
+     "r1"
+    ],
+    "SSE4 (_mm_x)( after a name keeps them apart": [
+     "r1"
+    ],
+    "STATIC1 an unsized array at file scope becomes a declaration, whatever its name; a sized one stays": [
+     "r1"
+    ],
+    "STATIC1 gives namespace statics bound by their plain name C linkage (image variables declared only)": [
+     "r1"
+    ],
+    "STD1 decomp struct std -> <cmath>": [
+     "r1"
+    ],
+    "STD1 other members: untouched": [
+     "r1"
+    ],
+    "STD2 POST hook renames the definition's recipe symbol only": [
+     "r1"
+    ],
+    "STD2 a member definition in a class scope is not at file scope": [
+     "r1"
+    ],
+    "STD2 a unit whose recipe has no std:: definition is untouched": [
+     "r1"
+    ],
+    "STD2 file-scope std:: definition the recipe decorates in std -> fnvnx_std_": [
+     "r1"
+    ],
+    "STL1 MSVC library internals get fnvnx_msvcstl.h": [
+     "r1"
+    ],
+    "STL1 a unit with its own copies: untouched": [
+     "r1"
+    ],
+    "STL2 includes fnvnx_vc9.h in place of the container headers, line count kept": [
+     "r1"
+    ],
+    "STL2 leaves a unit without the real container headers": [
+     "r1"
+    ],
+    "STL2 line count kept": [
+     "r1"
+    ],
+    "STL2 size_t in the unit's own namespace std is MSVC's (unsigned int)": [
+     "r1"
+    ],
+    "STL2 spells std / ::std / stdext as fnvnx_vc9 in code, not in comments, strings or nested names": [
+     "r1"
+    ],
+    "STR1 only char arrays of unknown bound, whatever their names": [
+     "r1"
+    ],
+    "STR1 rewrites only where the array is the declaration in scope": [
+     "r1"
+    ],
+    "TAIL1 names the last base without its access specifier": [
+     "r1"
+    ],
+    "TAIL1 no typename for a template base whose arguments (over two lines) hold the ::": [
+     "r1"
+    ],
+    "TAIL1 writes typename in front of a qualified (possibly dependent) base": [
+     "r1"
+    ],
+    "TAIL1-PACK under pack(1) / nested push 2: FNVNX_MSVC_BASE_END_PACK(N, base); after the pops the plain filler": [
+     "r1"
+    ],
+    "TPL1 a local declared with a template type keeps its name": [
+     "r1"
+    ],
+    "TPL1 base with nested template arguments": [
+     "r1"
+    ],
+    "TPL1 dependent base defined in an included header": [
+     "r1"
+    ],
+    "TPL1 non-dependent base: untouched": [
+     "r1"
+    ],
+    "TPL1 out-of-class explicit specialization of a header's template: untouched": [
+     "r1"
+    ],
+    "TPL1 out-of-class member of a class template from an included header": [
+     "r1"
+    ],
+    "TPL1 out-of-class member, the template's own parameter shadows nothing: params untouched": [
+     "r1"
+    ],
+    "TPL1 this-> for dependent base members": [
+     "r1"
+    ],
+    "TPL1-NESTED this-> for members of a sibling member class used as base in a class template": [
+     "r1"
+    ],
+    "TPL2 declares the primary, not the explicit specialization": [
+     "r1"
+    ],
+    "TPL2 forward-declares a namespace function template used earlier": [
+     "r1"
+    ],
+    "TPL2 never forward-declares an explicit specialization (template <>) ahead of its primary": [
+     "r1"
+    ],
+    "TPL3 (B) declares a namespace template called qualified before its definition": [
+     "r1"
+    ],
+    "TPL3 (B) leaves a signature that names a type not seen yet": [
+     "r1"
+    ],
+    "TYPN1 adds typename before a dependent library type member in a template argument": [
+     "r1"
+    ],
+    "TYPN1 leaves a non-dependent qualified name": [
+     "r1"
+    ],
+    "VA1 hand-built list becomes FNVNX_VA_HAND, the unparenthesised byte offset stays": [
+     "r1"
+    ],
+    "VA2 reads an enum through ... as the int it was passed as": [
+     "r1"
+    ],
+    "VFPAD1 puts FNVNX_VFPAD(member types) first in a no-base class with a vfptr (not D22's macro text, not pointers)": [
+     "r1"
+    ],
+    "scope head after a cut comment is a class": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Rule table",
      "kind": "spec",
      "path": "ports/fnv-nx/rules/README.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/rules/core.py",
     "ports/fnv-nx/rules/s1_compile.py"

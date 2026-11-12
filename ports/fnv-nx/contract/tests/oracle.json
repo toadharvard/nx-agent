@@ -1,100 +1,752 @@
 {
- "format": "fnvnx-oracle/1",
+ "format": "fnvnx-oracle/2",
  "tests": {
   "test_bind.py": {
-   "references": [
-    {
+   "cases": {
+    "addresses": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "bind content": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "bodysel shape": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "cli line": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "cli status": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "deterministic bytes": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "is_function_key": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "n3": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "n3 by address": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "n3 empty": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "n3 inline row not ok twice": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "n3 worst sorted, inlined of a bad row kept": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "n3.tsv": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "no msvc name": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "obj round trip with sections": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "object with rows and no unit binds nothing": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "object with rows and no unit: no error": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "object without rows needs no unit": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "unbound": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "unit index": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "unit scope": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "vt": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "vt repeated row": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "vt unbound": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/bind.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/store.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## contract/bodysel.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/bind.py",
     "ports/fnv-nx/contract/store.py",
     "ports/fnv-nx/contract/bodysel.py"
    ]
   },
-  "test_gate_call_decl.py": {
-   "references": [
-    {
-     "anchor": "## contract/gate_call.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## N2 prepare rules",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/RULES.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/contract/gate_call.py"
-   ]
-  },
   "test_exepin.py": {
-   "references": [
-    {
+   "cases": {
+    "PE field %s differs: refused naming it": [
+     "r1"
+    ],
+    "accept: bytes equal to the pinned identity are returned": [
+     "r1"
+    ],
+    "cli: other exe -> exit 1, message on stderr, nothing on stdout": [
+     "r1"
+    ],
+    "cli: wrong argument count -> 2": [
+     "r1"
+    ],
+    "directory: refused": [
+     "r1"
+    ],
+    "extra image: refused naming it": [
+     "r1"
+    ],
+    "image missing from the derived set: refused naming it": [
+     "r1"
+    ],
+    "image set equal to the pin: accepted, in any order": [
+     "r1"
+    ],
+    "missing file: refused": [
+     "r1"
+    ],
+    "no PE header: fields unreadable, refused": [
+     "r1"
+    ],
+    "other hash: refused with expected and actual": [
+     "r1"
+    ],
+    "real pin: expected and actual are named": [
+     "r1"
+    ],
+    "real pin: the synthetic file is refused": [
+     "r1"
+    ],
+    "same size, other bytes: sha256 refused, expected and actual": [
+     "r1"
+    ],
+    "size differs: refused with expected and actual": [
+     "r1"
+    ],
+    "symlink to the right file: accepted (the bytes are what is pinned)": [
+     "r1"
+    ],
+    "the real image pin holds the 7 DLLs incl. d3dx9_31, hashes only": [
+     "r1"
+    ],
+    "the real pin has the published identity": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/exepin.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/exepin.py"
    ]
   },
+  "test_gate_call_decl.py": {
+   "cases": {
+    "fail list": [
+     "r1",
+     "r2"
+    ],
+    "missing facts[pristine]": [
+     "r1",
+     "r2"
+    ],
+    "neg data edge without symbol": [
+     "r1",
+     "r2"
+    ],
+    "neg def row only": [
+     "r1",
+     "r2"
+    ],
+    "neg name mismatch": [
+     "r1",
+     "r2"
+    ],
+    "neg no pristine symbol": [
+     "r1",
+     "r2"
+    ],
+    "neg no ref row": [
+     "r1",
+     "r2"
+    ],
+    "neg no section": [
+     "r1",
+     "r2"
+    ],
+    "neg no section text": [
+     "r1",
+     "r2"
+    ],
+    "neg non-N1 target has no pristine symbol": [
+     "r1",
+     "r2"
+    ],
+    "neg one bad edge among several": [
+     "r1",
+     "r2"
+    ],
+    "neg undecorated pristine": [
+     "r1",
+     "r2"
+    ],
+    "neg unnamed kind": [
+     "r1",
+     "r2"
+    ],
+    "neg unnamed kind with the pristine name": [
+     "r1",
+     "r2"
+    ],
+    "neg worst of several copies (object b has no section)": [
+     "r1",
+     "r2"
+    ],
+    "neg x87 helper": [
+     "r1",
+     "r2"
+    ],
+    "pos bridge address": [
+     "r1",
+     "r2"
+    ],
+    "pos cookie dropped": [
+     "r1",
+     "r2"
+    ],
+    "pos counts": [
+     "r1",
+     "r2"
+    ],
+    "pos data edge": [
+     "r1",
+     "r2"
+    ],
+    "pos def row of another symbol ignored": [
+     "r1",
+     "r2"
+    ],
+    "pos extra mismatching row does not cover the edge": [
+     "r1",
+     "r2"
+    ],
+    "pos rows": [
+     "r1",
+     "r2"
+    ],
+    "pos zero edges (no section needed)": [
+     "r1",
+     "r2"
+    ],
+    "pristine data": [
+     "r1",
+     "r2"
+    ],
+    "pristine fn": [
+     "r1",
+     "r2"
+    ],
+    "pristine skips non-N1 function": [
+     "r1",
+     "r2"
+    ],
+    "pristine skips static and absolute pins": [
+     "r1",
+     "r2"
+    ],
+    "row address is the exe function": [
+     "r1",
+     "r2"
+    ],
+    "row verdict": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
+     "anchor": "## contract/gate_call.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    "r2": {
+     "anchor": "## N2 prepare rules",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RULES.md"
+    }
+   },
+   "subject": [
+    "ports/fnv-nx/contract/gate_call.py"
+   ]
+  },
   "test_gate_reach.py": {
-   "references": [
-    {
+   "cases": {
+    "bad row rejected": [
+     "r1",
+     "r2"
+    ],
+    "call result is not an immediate": [
+     "r1",
+     "r2"
+    ],
+    "certificate hashes repeat": [
+     "r1",
+     "r2"
+    ],
+    "certified imm": [
+     "r1",
+     "r2"
+    ],
+    "closure_key fallthrough: a key outside the closure is red": [
+     "r1",
+     "r2"
+    ],
+    "closure_key fallthrough: keys inside the closure are certified, closure addresses without a key are fine": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: FNVNX_REACH_* macros, one id per dispatcher, each defined once": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: a closure address without a key is red": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: a dispatcher without inputs is red": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: a missing key with open loads stays red (uncertified), not measurement": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: an absent source is red": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: an open LoadLibrary site is measurement, never valid": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: an open source of the closure is red": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: everything closed is certified": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: malformed row is an error %r": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: no loadlib.tsv is open": [
+     "r1",
+     "r2"
+    ],
+    "closure_key: one id per dispatcher, names bound by --dispatcher": [
+     "r1",
+     "r2"
+    ],
+    "facts tsv only certified": [
+     "r1",
+     "r2"
+    ],
+    "forbidden": [
+     "r1",
+     "r2"
+    ],
+    "gate json": [
+     "r1",
+     "r2"
+    ],
+    "gpa open": [
+     "r1",
+     "r2"
+    ],
+    "gpa pair": [
+     "r1",
+     "r2"
+    ],
+    "gpa uncovered": [
+     "r1",
+     "r2"
+    ],
+    "handle_origin spelling": [
+     "r1",
+     "r2"
+    ],
+    "header ": [
+     "r1",
+     "r2"
+    ],
+    "header deterministic": [
+     "r1",
+     "r2"
+    ],
+    "ids format": [
+     "r1",
+     "r2"
+    ],
+    "ids independent of row order": [
+     "r1",
+     "r2"
+    ],
+    "ids start at 1 in canonical order": [
+     "r1",
+     "r2"
+    ],
+    "ids tail": [
+     "r1",
+     "r2"
+    ],
+    "image set changes the hash": [
+     "r1",
+     "r2"
+    ],
+    "link archive members": [
+     "r1",
+     "r2"
+    ],
+    "link branch between": [
+     "r1",
+     "r2"
+    ],
+    "link call between": [
+     "r1",
+     "r2"
+    ],
+    "link good": [
+     "r1",
+     "r2"
+    ],
+    "link indirect jump in another function": [
+     "r1",
+     "r2"
+    ],
+    "link indirect jump, no function size": [
+     "r1",
+     "r2"
+    ],
+    "link label at the call": [
+     "r1",
+     "r2"
+    ],
+    "link label before call": [
+     "r1",
+     "r2"
+    ],
+    "link movz/movk": [
+     "r1",
+     "r2"
+    ],
+    "link movz/movk value": [
+     "r1",
+     "r2"
+    ],
+    "link not in table": [
+     "r1",
+     "r2"
+    ],
+    "link pointer reference": [
+     "r1",
+     "r2"
+    ],
+    "link register argument": [
+     "r1",
+     "r2"
+    ],
+    "link switch table": [
+     "r1",
+     "r2"
+    ],
+    "link tail jump": [
+     "r1",
+     "r2"
+    ],
+    "link uncertified": [
+     "r1",
+     "r2"
+    ],
+    "link uncertified names the site": [
+     "r1",
+     "r2"
+    ],
+    "link w0 rewritten": [
+     "r1",
+     "r2"
+    ],
+    "main --objects": [
+     "r1",
+     "r2"
+    ],
+    "non-constant": [
+     "r1",
+     "r2"
+    ],
+    "result_of broken (access)": [
+     "r1",
+     "r2"
+    ],
+    "result_of broken (share)": [
+     "r1",
+     "r2"
+    ],
+    "result_of immediate handle": [
+     "r1",
+     "r2"
+    ],
+    "result_of needs A7": [
+     "r1",
+     "r2"
+    ],
+    "result_of proven": [
+     "r1",
+     "r2"
+    ],
+    "result_of through memory, no call between": [
+     "r1",
+     "r2"
+    ],
+    "result_of wrong callee": [
+     "r1",
+     "r2"
+    ],
+    "site named": [
+     "r1",
+     "r2"
+    ],
+    "table id": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/gate_reach.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/gpa_names.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/gate_reach.py",
     "ports/fnv-nx/contract/gpa_names.py"
    ]
   },
   "test_gates.py": {
-   "references": [
-    {
+   "cases": {
+    "call ": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "call declared": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "call fail": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "call fail list": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "data ": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "data cookie": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "data fail 0x40": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "data fail 0x50": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "data fail 0x70 worst of copies": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "data fail list": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "data fail set": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vcall ": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vcall delta key": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vcall fail": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vcall fail list": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "xc counts": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "xc fail": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "xc rows": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/gate_data.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/gate_call.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## contract/gate_vcall.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r4": {
      "anchor": "## contract/gate_xc.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/gate_data.py",
     "ports/fnv-nx/contract/gate_call.py",
@@ -103,54 +755,241 @@
    ]
   },
   "test_gpa_names.py": {
-   "references": [
-    {
+   "cases": {
+    "address-taken param is open": [
+     "r1"
+    ],
+    "branch": [
+     "r1"
+    ],
+    "const": [
+     "r1"
+    ],
+    "cross-check": [
+     "r1"
+    ],
+    "derive_arg": [
+     "r1"
+    ],
+    "escape is open": [
+     "r1"
+    ],
+    "ordinal": [
+     "r1"
+    ],
+    "param names": [
+     "r1"
+    ],
+    "param status": [
+     "r1"
+    ],
+    "platform missing": [
+     "r1"
+    ],
+    "register call": [
+     "r1"
+    ],
+    "unreached thunk": [
+     "r1"
+    ],
+    "writable string is open": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/gpa_names.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/gpa_names.py"
    ]
   },
   "test_hive.py": {
-   "references": [
-    {
+   "cases": {
+    "generate refuses: ": [
+     "r1"
+    ],
+    "generate: REG_BINARY and REG_QWORD encode": [
+     "r1"
+    ],
+    "generate: deterministic": [
+     "r1"
+    ],
+    "generate: dword is 4 little-endian bytes, size 4": [
+     "r1"
+    ],
+    "generate: one entry per declared row, terminator": [
+     "r1"
+    ],
+    "generate: text keeps the game directory mark, size 0": [
+     "r1"
+    ],
+    "judge: a dynamic read site is class dynamic": [
+     "r1"
+    ],
+    "judge: a dynamic write site does not open a measurement": [
+     "r1"
+    ],
+    "judge: a key that is only written or opened is not read": [
+     "r1"
+    ],
+    "judge: any hive-writing API makes a writer (RegCreateKeyA)": [
+     "r1"
+    ],
+    "judge: declared row with no read site": [
+     "r1"
+    ],
+    "judge: foreign writer unit": [
+     "r1"
+    ],
+    "judge: green case (case-insensitive key match, seed equal, only the seed unit writes)": [
+     "r1"
+    ],
+    "judge: include drifted by one byte": [
+     "r1"
+    ],
+    "judge: the include cannot be generated while a row is unread (seed class names the generator)": [
+     "r1"
+    ],
+    "judge: universe is declared rows, seed, writers": [
+     "r1"
+    ],
+    "sites: api without a registry role is an error": [
+     "r1"
+    ],
+    "sites: bad status is an error": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/hive.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/hive.py"
    ]
   },
   "test_iat.py": {
-   "references": [
-    {
+   "cases": {
+    "bad": [
+     "r1"
+    ],
+    "by ordinal": [
+     "r1"
+    ],
+    "keys": [
+     "r1"
+    ],
+    "no bad": [
+     "r1"
+    ],
+    "rows": [
+     "r1"
+    ],
+    "sentinel outside keys": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/iat.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/iat.py"
    ]
   },
   "test_images.py": {
-   "references": [
-    {
+   "cases": {
+    "... the declared B is reached but not walked": [
+     "r1",
+     "r2"
+    ],
+    "A imports B, B imports missing C -> B is declared, not an image: {A}": [
+     "r1",
+     "r2"
+    ],
+    "C and kernel32 bridged -> B is an image again": [
+     "r1",
+     "r2"
+    ],
+    "a bridge dll with a found file is not an image and is not walked (c.dll is an image on its own, as a file of the directory, not through b)": [
+     "r1",
+     "r2"
+    ],
+    "a dll in a later directory of the list is found": [
+     "r1",
+     "r2"
+    ],
+    "adding an image whose name sorts first moves the later ones (bases are a function of the name order)": [
+     "r1",
+     "r2"
+    ],
+    "adding an image whose name sorts last moves no base": [
+     "r1",
+     "r2"
+    ],
+    "an image whose dependency is a declared dll is itself declared (closure, no named list)": [
+     "r1",
+     "r2"
+    ],
+    "declareddlls: a non-spec file is an error": [
+     "r1",
+     "r2"
+    ],
+    "declareddlls: one row per spec file, sorted, name + .dll": [
+     "r1",
+     "r2"
+    ],
+    "delay-load imports count, cycles end, names fold case and the .dll extension": [
+     "r1",
+     "r2"
+    ],
+    "images_of: a cycle of images stays, a dll with an unresolved import and its dependents go": [
+     "r1",
+     "r2"
+    ],
+    "images_of: the root's own name and bridge names satisfy an import": [
+     "r1",
+     "r2"
+    ],
+    "modules uses the same function: x is an image, y and its dependent z are declared": [
+     "r1",
+     "r2"
+    ],
+    "modules.closure treats a declared dll as satisfied, not as a missing module": [
+     "r1",
+     "r2"
+    ],
+    "two files differing only in case are an error": [
+     "r1",
+     "r2"
+    ],
+    "without the bridge row the same chain is images": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## The guest image set",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/VERDICT.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/images.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/declareddlls.py",
     "ports/fnv-nx/contract/dllkind.py",
@@ -158,96 +997,551 @@
    ]
   },
   "test_imports.py": {
-   "references": [
-    {
+   "cases": {
+    "derive: a name of the symbol table binds sym": [
+     "r1",
+     "r2"
+    ],
+    "derive: a spec forward is followed (signature of the target)": [
+     "r1",
+     "r2"
+    ],
+    "derive: data export binds data": [
+     "r1",
+     "r2"
+    ],
+    "derive: duplicate extra row is an error": [
+     "r1",
+     "r2"
+    ],
+    "derive: extra row added": [
+     "r1",
+     "r2"
+    ],
+    "derive: extra row with a bad column count is an error": [
+     "r1",
+     "r2"
+    ],
+    "derive: l3 symbol": [
+     "r1",
+     "r2"
+    ],
+    "derive: msvcrt name outside the table is none": [
+     "r1",
+     "r2"
+    ],
+    "derive: name in the table is lookup": [
+     "r1",
+     "r2"
+    ],
+    "derive: name missing from the spec is an error": [
+     "r1",
+     "r2"
+    ],
+    "derive: no errors": [
+     "r1",
+     "r2"
+    ],
+    "derive: sorted": [
+     "r1",
+     "r2"
+    ],
+    "derive: stub in the spec is an error": [
+     "r1",
+     "r2"
+    ],
+    "derive: va table": [
+     "r1",
+     "r2"
+    ],
+    "judge: UNIQUE counts as global": [
+     "r1",
+     "r2"
+    ],
+    "judge: every class of the synthetic table": [
+     "r1",
+     "r2"
+    ],
+    "judge: green case": [
+     "r1",
+     "r2"
+    ],
+    "judge: l3 defined weak elsewhere is external": [
+     "r1",
+     "r2"
+    ],
+    "judge: l3 provided by another root": [
+     "r1",
+     "r2"
+    ],
+    "judge: l3 without a providing root is external": [
+     "r1",
+     "r2"
+    ],
+    "judge: none (no symbol of that name anywhere)": [
+     "r1",
+     "r2"
+    ],
+    "judge: row of another owner certified by the other root": [
+     "r1",
+     "r2"
+    ],
+    "judge: row of another owner needs the other root": [
+     "r1",
+     "r2"
+    ],
+    "name table bad input %r is an error": [
+     "r1",
+     "r2"
+    ],
+    "name table: empty text is the empty table": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/imports.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/bridgetable.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/imports.py",
     "ports/fnv-nx/contract/bridgetable.py"
    ]
   },
   "test_l2sections.py": {
-   "references": [
-    {
+   "cases": {
+    "n3": [
+     "r1"
+    ],
+    "n3 empty": [
+     "r1"
+    ],
+    "read": [
+     "r1"
+    ],
+    "read error names object and section": [
+     "r1"
+    ],
+    "read, no sections": [
+     "r1"
+    ],
+    "sympair": [
+     "r1"
+    ],
+    "sympair empty": [
+     "r1"
+    ],
+    "vtpair": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/l2sections.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/l2sections.py"
    ]
   },
   "test_memfx.py": {
-   "references": [
-    {
+   "cases": {
+    "... the import escapes the argument": [
+     "r1"
+    ],
+    "... the import is declared to write through no argument": [
+     "r1"
+    ],
+    "a direct store elsewhere does not matter": [
+     "r1"
+    ],
+    "address leaked by a data relocation: not constant": [
+     "r1"
+    ],
+    "address stored to memory escapes": [
+     "r1"
+    ],
+    "callee writes through an unknown pointer, frame address never escapes": [
+     "r1"
+    ],
+    "callee writes through the register that holds the frame address": [
+     "r1"
+    ],
+    "exact pointer does not reach another address": [
+     "r1"
+    ],
+    "frame address escaped to a global: a call through an unknown pointer may write": [
+     "r1"
+    ],
+    "frame address passed down two levels, written there": [
+     "r1"
+    ],
+    "frame address passed to an import with no write facts": [
+     "r1"
+    ],
+    "global constant when the import writes nowhere": [
+     "r1"
+    ],
+    "global handed to an import that retains it": [
+     "r1"
+    ],
+    "global read only by pointers passed to a no-write import": [
+     "r1"
+    ],
+    "global written by another function directly": [
+     "r1"
+    ],
+    "global written through a pointer passed to a local function": [
+     "r1"
+    ],
+    "handle through [esi] across a leaf call: rule closes": [
+     "r1"
+    ],
+    "handle through [esi] across a writing call: open": [
+     "r1"
+    ],
+    "handle through [esi]: strict (no call allowed) stays open": [
+     "r1"
+    ],
+    "import slot is written by the loader": [
+     "r1"
+    ],
+    "indexed write, [G+0..G+0x10) bound excludes G+0x10": [
+     "r1"
+    ],
+    "indexed write, proven bound covers G+8..G+16": [
+     "r1"
+    ],
+    "indexed write, proven bound does not reach the string": [
+     "r1"
+    ],
+    "indexed write, unbounded index covers the section": [
+     "r1"
+    ],
+    "indirect call receiving the tainted esi": [
+     "r1"
+    ],
+    "private frame object, leaf callee": [
+     "r1"
+    ],
+    "read-only section is constant": [
+     "r1"
+    ],
+    "recursion fixpoint, no write": [
+     "r1"
+    ],
+    "recursion fixpoint, write inside the cycle": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/memfx.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/memfx.py"
    ]
   },
   "test_objmerge.py": {
-   "references": [
-    {
+   "cases": {
+    "bytes equal to a direct save of the union": [
+     "r1",
+     "r2"
+    ],
+    "duplicate exit": [
+     "r1",
+     "r2"
+    ],
+    "duplicate names the key": [
+     "r1",
+     "r2"
+    ],
+    "duplicate writes nothing": [
+     "r1",
+     "r2"
+    ],
+    "merge exit": [
+     "r1",
+     "r2"
+    ],
+    "round trip": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/objfacts_merge.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/store.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/objfacts_merge.py",
     "ports/fnv-nx/contract/store.py"
    ]
   },
   "test_proto.py": {
-   "references": [
-    {
+   "cases": {
+    "arg classes": [
+     "r1",
+     "r2"
+    ],
+    "array ptr": [
+     "r1",
+     "r2"
+    ],
+    "backref": [
+     "r1",
+     "r2"
+    ],
+    "backref after fnptr": [
+     "r1",
+     "r2"
+    ],
+    "backref struct": [
+     "r1",
+     "r2"
+    ],
+    "bool ret": [
+     "r1",
+     "r2"
+    ],
+    "cdecl void": [
+     "r1",
+     "r2"
+    ],
+    "class ret": [
+     "r1",
+     "r2"
+    ],
+    "ctor": [
+     "r1",
+     "r2"
+    ],
+    "data symbol": [
+     "r1",
+     "r2"
+    ],
+    "double ret": [
+     "r1",
+     "r2"
+    ],
+    "enum arg": [
+     "r1",
+     "r2"
+    ],
+    "fastcall": [
+     "r1",
+     "r2"
+    ],
+    "fastcall sret": [
+     "r1",
+     "r2"
+    ],
+    "float ret": [
+     "r1",
+     "r2"
+    ],
+    "fnptr arg": [
+     "r1",
+     "r2"
+    ],
+    "fnptr varargs arg": [
+     "r1",
+     "r2"
+    ],
+    "int": [
+     "r1",
+     "r2"
+    ],
+    "int64 ret": [
+     "r1",
+     "r2"
+    ],
+    "lvalue ref": [
+     "r1",
+     "r2"
+    ],
+    "n1": [
+     "r1",
+     "r2"
+    ],
+    "n2": [
+     "r1",
+     "r2"
+    ],
+    "n3": [
+     "r1",
+     "r2"
+    ],
+    "n4": [
+     "r1",
+     "r2"
+    ],
+    "native": [
+     "r1",
+     "r2"
+    ],
+    "outside": [
+     "r1",
+     "r2"
+    ],
+    "ptr ret": [
+     "r1",
+     "r2"
+    ],
+    "ref ret": [
+     "r1",
+     "r2"
+    ],
+    "rvalue ref": [
+     "r1",
+     "r2"
+    ],
+    "stdcall int,double": [
+     "r1",
+     "r2"
+    ],
+    "struct arg": [
+     "r1",
+     "r2"
+    ],
+    "struct ret": [
+     "r1",
+     "r2"
+    ],
+    "template arg": [
+     "r1",
+     "r2"
+    ],
+    "template ptr arg": [
+     "r1",
+     "r2"
+    ],
+    "thiscall": [
+     "r1",
+     "r2"
+    ],
+    "thiscall with int64 argument": [
+     "r1",
+     "r2"
+    ],
+    "uint64 ret": [
+     "r1",
+     "r2"
+    ],
+    "varargs": [
+     "r1",
+     "r2"
+    ],
+    "vector dtor": [
+     "r1",
+     "r2"
+    ],
+    "vector dtor ok": [
+     "r1",
+     "r2"
+    ],
+    "void": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/proto.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/bodysel.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/proto.py",
     "ports/fnv-nx/contract/bodysel.py"
    ]
   },
   "test_store.py": {
-   "references": [
-    {
+   "cases": {
+    "a TAB in a key is rejected": [
+     "r1",
+     "r2"
+    ],
+    "bytes do not depend on set or dict insertion order": [
+     "r1",
+     "r2"
+    ],
+    "facts round trip": [
+     "r1",
+     "r2"
+    ],
+    "gate file: green when certified == universe": [
+     "r1",
+     "r2"
+    ],
+    "gate file: shape, order and cap of 50": [
+     "r1",
+     "r2"
+    ],
+    "is_function_key tells function keys from section keys": [
+     "r1",
+     "r2"
+    ],
+    "n1 round trip": [
+     "r1",
+     "r2"
+    ],
+    "no gate output without GATE_OUT": [
+     "r1",
+     "r2"
+    ],
+    "obj round trip": [
+     "r1",
+     "r2"
+    ],
+    "section tables round trip": [
+     "r1",
+     "r2"
+    ],
+    "vtid round trip": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## contract/store.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/gatefile.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/contract/store.py",
     "ports/fnv-nx/contract/gatefile.py"

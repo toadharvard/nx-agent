@@ -23,7 +23,7 @@ from testcase import case  # noqa: E402
 
 scratch.install()
 ROOT = tempfile.mkdtemp(prefix="linkstrict-")
-FAILED, N, T0 = [], [0], time.time()
+FAILED, N, T0 = testcase.FAILED, [0], time.time()
 
 
 ABI = ["lp64"]

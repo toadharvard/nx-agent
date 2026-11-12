@@ -58,7 +58,7 @@ for name, src in CASES.items():
     case('%s: the cl view is the input (token stream)',
           got='same' if M.tokens(M.gcc_view(new, msc=True)) == M.tokens(src) else 'differs', contains=['same'], key=name)
     for m in re.finditer(r'#ifdef _MSC_VER\n(.*?)\n#else\n', new, re.S):
-        case('%s: pristine branch verbatim', got='yes' if m[1] in src else 'no', contains=['yes'], key=name)
+        case('%s: pristine branch verbatim', got='yes' if m[1] in src else 'no', contains=['yes'], key='%s@%d' % (name, m.start()))
     case('%s: totality T1-T3', got=str(M.totality_violations(name, src, new)), contains=['[]'], key=name)
     case('%s: permitted form for the dual-compile gate', got='\n'.join(mscgate.judge(src, new)) or 'clean', contains=['clean'], key=name)
 

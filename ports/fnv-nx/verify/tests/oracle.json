@@ -1,73 +1,475 @@
 {
- "format": "fnvnx-oracle/1",
+ "format": "fnvnx-oracle/2",
  "tests": {
   "test_a64access.py": {
-   "references": [
-    {
+   "cases": {
+    "A64Access.test_flags_and_control": [
+     "r1"
+    ],
+    "A64Access.test_known_wrong_in_capstone": [
+     "r1"
+    ],
+    "A64Access.test_mem_flags_agree_with_encoding_class": [
+     "r1"
+    ],
+    "A64Access.test_memory_operands": [
+     "r1"
+    ],
+    "A64Access.test_objdump_crosscheck": [
+     "r1"
+    ],
+    "A64Access.test_rmw_and_writeback": [
+     "r1"
+    ],
+    "A64Access.test_simd": [
+     "r1"
+    ],
+    "A64Access.test_sweep_report": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/a64access.cc",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/a64access.cc"
    ]
   },
   "test_admit.py": {
-   "references": [
-    {
+   "cases": {
+    "REQUIRED_TEST is the build family, doubles, oracle, stub, assumptions, legal, pure": [
+     "r1"
+    ],
+    "a file outside every root is uncertified": [
+     "r1"
+    ],
+    "a named gate missing from gates.d is refused": [
+     "r1"
+    ],
+    "a product root is refused while its gates do not exist": [
+     "r1"
+    ],
+    "a product root lacking required gate %s is refused": [
+     "r1"
+    ],
+    "a product root naming a gate absent from gates.d is refused": [
+     "r1"
+    ],
+    "a product root naming only some required gates is refused": [
+     "r1"
+    ],
+    "a product root whose recipe file is absent is refused": [
+     "r1"
+    ],
+    "a product root with every required gate and a recipe is admitted": [
+     "r1"
+    ],
+    "a ref root file that no oracle record points at is refused": [
+     "r1"
+    ],
+    "a ref root that names a gate is refused": [
+     "r1"
+    ],
+    "a ref root whose files are all references is certified": [
+     "r1"
+    ],
+    "a ref root with a recipe is refused (it is not a product root)": [
+     "r1"
+    ],
+    "a root outside the port tree is refused": [
+     "r1"
+    ],
+    "a test or a build.json in a ref root is refused even when cited": [
+     "r1"
+    ],
+    "a test root cannot be admitted while the doubles gate has no file in gates.d": [
+     "r1"
+    ],
+    "a test root whose recipe file does not exist is refused": [
+     "r1"
+    ],
+    "a test root with an unknown target is refused": [
+     "r1"
+    ],
+    "a test root with its REQUIRED_TEST gates, a recipe and a target is certified (REQUIRED_PRODUCT is not asked of it)": [
+     "r1"
+    ],
+    "a test root without a target is refused": [
+     "r1"
+    ],
+    "a test root without gate %s is refused": [
+     "r1"
+    ],
+    "a tool root without selftests is refused": [
+     "r1"
+    ],
+    "an empty tree is certified": [
+     "r1"
+    ],
+    "an unknown class is refused": [
+     "r1"
+    ],
+    "classes A-G are required of a product root": [
+     "r1"
+    ],
+    "nested roots are an error": [
+     "r1"
+    ],
+    "the build family judges the product and the test roots; the other gates keep the product roots": [
+     "r1"
+    ],
+    "the same root as a product root is refused: it lacks REQUIRED_PRODUCT": [
+     "r1"
+    ],
+    "two roots cover two files": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_admit.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_admit.py"
    ]
   },
   "test_argorder.py": {
-   "references": [
-    {
+   "cases": {
+    "native guest root on the pinned compiler: green, 2/2": [
+     "r1"
+    ],
+    "native guest root without fnvnx_order: red, units uncertified": [
+     "r1"
+    ],
+    "no guest root: universe 0, green": [
+     "r1"
+    ],
+    "plugins in another order: red": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_argorder.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_argorder.py",
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_boot.py": {
-   "references": [
-    {
+   "cases": {
+    "--limit-instructions: exit 0, reason limit, same total twice": [
+     "r1"
+    ],
+    "--profile %s: DISPLAY_DOCKED answers %d (exit code of the guest)": [
+     "r1"
+    ],
+    "--profile with another value is a usage error (exit 2)": [
+     "r1"
+    ],
+    "--text-entry TEXT: the guest gets the text, recorded in OUT.json inputs, one text-entry event": [
+     "r1"
+    ],
+    "--text-entry longer than the call's max_len: reason scenario-error, exit 2": [
+     "r1"
+    ],
+    "--text-entry repeated: order kept": [
+     "r1"
+    ],
+    "all milestones reached in table order": [
+     "r1"
+    ],
+    "bad manifest: exit 1": [
+     "r1"
+    ],
+    "clean run exits 0": [
+     "r1"
+    ],
+    "console text in the sibling file, hashed in OUT.json": [
+     "r1"
+    ],
+    "empty table: exit 1": [
+     "r1"
+    ],
+    "faulting guest: exit 2 with the fault record": [
+     "r1"
+    ],
+    "icount: per-interval sums equal the totals": [
+     "r1"
+    ],
+    "instruction totals strictly increasing": [
+     "r1"
+    ],
+    "manifest address missing: exit 1 listing it": [
+     "r1"
+    ],
+    "milestone log in order, nothing out of order": [
+     "r1"
+    ],
+    "no --text-entry: inputs record an empty list, the call is cancelled (0)": [
+     "r1"
+    ],
+    "reach-violation guest (exit 0x5200002A): exit 2, reason reach-violation, fact_id 42": [
+     "r1"
+    ],
+    "stdout summary line": [
+     "r1"
+    ],
+    "two full runs: byte-identical OUT.json and console": [
+     "r1"
+    ],
+    "unknown host name: exit 1, names listed": [
+     "r1"
+    ],
+    "watch_log: a non-function symbol (data) fails, naming it": [
+     "r1"
+    ],
+    "watch_log: f, f, g, f in machine order, seq from 0": [
+     "r1"
+    ],
+    "watch_log: pc is guest-relative and the same per symbol": [
+     "r1"
+    ],
+    "watch_log: sp equals what the guest printed at each entry; the recursive entry is 16 below": [
+     "r1"
+    ],
+    "watch_log: two names at one address give one entry per name, file order": [
+     "r1"
+    ],
+    "watch_log: unknown name fails the run before it starts, naming it": [
+     "r1"
+    ],
+    "without --watch-log the key is absent": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/boot.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/boot.py"
    ]
   },
   "test_boot_job.py": {
-   "references": [
-    {
+   "cases": {
+    "--gpu-branch: exit 0, final line carries presents=4": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "OUT.json gpu record, meta.json gpu fields": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "OUT.json is the boot result, spec.json has the lifted range and no softfloat class": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "a keys.tsv row that is not understood fails the job": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "bad --gpu-branch value: job fails": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "bad limit: job fails": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "bad profile: job fails": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "clean guest: exit 0, final line has every field": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "commit message is one line without a trailer": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "console file holds the guest's line": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "corrupt part: job fails naming the part, nothing published": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "faulting guest: boot rc 2 is a published result, job exit 0": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "final line values": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "frame files hold the library's output": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "game without FalloutNV.exe: job fails naming it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "guest in parts: joined, same result as the single file": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "library that does not load: job fails": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "limit and profile: reason limit, recorded in meta.json": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "meta.json keys and values": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "meta.json records the renderer pair": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "milestones: loader console line of run.txt reached in order, then exe-entry": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "missing branch: job fails naming it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "missing entries.tsv: job fails naming the file, nothing published": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "missing renderer branch: job fails": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "no session text anywhere": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "no stage branch: final line says stage_table=absent": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pair rule: %s: job fails naming it, nothing published": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "published commit id is the one reported": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "published: OUT.json, console, spec, meta and the first 3 frames (.rgba + .txt) only": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "published: exactly the four files": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "renderer branch without libnxgl4.so: job fails naming it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "second run republishes byte-equal OUT.json and console": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "setup: contract branches built": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "softfloat.tsv present: class in the spec, recorded": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "stage branch without stage.milestones: job fails naming it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "stage branch: rows appended after the contract's, final line names branch@commit": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "stage row on an address without a lifted entry: job fails naming the stage table": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## farm/boot_job.sh",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/bootinputs.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## verify/boot.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/farm/boot_job.sh",
     "ports/fnv-nx/verify/bootinputs.py",
@@ -75,28 +477,222 @@
    ]
   },
   "test_bootgpu.py": {
-   "references": [
-    {
+   "cases": {
+    "--frames without --gpu is a usage error": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "CLI --gpu run exits 0": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "CLI: frame files in --frames": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "CLI: gpu record in OUT.json": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "CLI: host events gpu-first-call and present reached": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "CLI: icount marks frame-1..3 only": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "CLI: two runs give byte-identical OUT.json": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "IMAGE_CREATE reads the guest descriptor and pixels and returns an id": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "IMAGE_READ writes the uploaded pixels back into the guest buffer: all 256 bytes equal": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "INFO: docked profile gives the swapchain 1920x1080 (NxInfo words 4, 5)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "INFO: magic, version 4, backend 2 (NXGL4_HOST.md section 3)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "PRESENT x4 returns 0 and calls nxgl4_on_present with NxPresent.frame 0..3": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "descriptor outside guest memory: BAD_CALL (NXGL4_HOST.md section 3 (d))": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "descriptor straddling two extents: BAD_CALL (the range is not wholly in one mapping)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "frame files: frame_%06u.rgba is the whole swapchain (w*h*4 bytes), .txt is 'w h\\n'": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "guest exits 0": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: an empty range inside a mapping, and exactly at its end, gets a pointer": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: an empty range outside every mapping is None": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: committed VM extent": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: heap block given away by map_fixed is None, a range over it too": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: heap range is a real host pointer onto the guest bytes": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: map_fixed range": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: range crossing two extents is None": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: read-only page is None": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: the host page is None": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: the host window and a stack are readable and writable": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: uncommitted/unmapped is None": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "host_ptr: writes through it reach the guest": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "report: library sha256 is the pin, presents 4, first call recorded": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "setup: the pinned libnxgl4.so fetched, tree_sha256 and sha256 verified": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "unknown fn 99: BAD_CALL (dispatch, NXGL4_HOST.md section 3)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "without --gpu: module 10 answers NO_MODULE": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/bootgpu.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/boot.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## verify/boothost.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r4": {
      "anchor": "## verify/bootmachine.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/bootgpu.py",
     "ports/fnv-nx/verify/boot.py",
@@ -105,57 +701,852 @@
    ]
   },
   "test_bootinputs.py": {
-   "references": [
-    {
+   "cases": {
+    "contract error: ": [
+     "r1",
+     "r2"
+    ],
+    "contract kinds: exe-entry, static module -> module-entry-<name> in file order, dynamic skipped, import rows -> ONE first-present any": [
+     "r1",
+     "r2"
+    ],
+    "contract kinds: winmain row -> milestone winmain (call) in file order": [
+     "r1",
+     "r2"
+    ],
+    "join: corrupt part": [
+     "r1",
+     "r2"
+    ],
+    "join: not a manifest": [
+     "r1",
+     "r2"
+    ],
+    "join: parts in manifest order": [
+     "r1",
+     "r2"
+    ],
+    "join: wrong order -> whole checksum mismatch": [
+     "r1",
+     "r2"
+    ],
+    "join: wrong whole sha": [
+     "r1",
+     "r2"
+    ],
+    "keys error: 7 columns": [
+     "r1",
+     "r2"
+    ],
+    "keys error: key not an import row": [
+     "r1",
+     "r2"
+    ],
+    "keys error: table id differs": [
+     "r1",
+     "r2"
+    ],
+    "keys error: unaligned key": [
+     "r1",
+     "r2"
+    ],
+    "keys: values": [
+     "r1",
+     "r2"
+    ],
+    "milestones error: ": [
+     "r1",
+     "r2"
+    ],
+    "milestones: console lines in order, then exe-entry": [
+     "r1",
+     "r2"
+    ],
+    "milestones: no run.txt -> exe-entry only": [
+     "r1",
+     "r2"
+    ],
+    "reserved error: ": [
+     "r1",
+     "r2"
+    ],
+    "reserved error: exe not PE": [
+     "r1",
+     "r2"
+    ],
+    "reserved: lo..hi from assigned_base+size_of_image, exe from its PE, sorted": [
+     "r1",
+     "r2"
+    ],
+    "stage error: a stage winmain next to the contract's winmain row (the contract does not win silently)": [
+     "r1",
+     "r2"
+    ],
+    "stage error: address of an import row is not code": [
+     "r1",
+     "r2"
+    ],
+    "stage error: address without a code entry": [
+     "r1",
+     "r2"
+    ],
+    "stage error: bootmiles rejects the table": [
+     "r1",
+     "r2"
+    ],
+    "stage error: name also from the contract": [
+     "r1",
+     "r2"
+    ],
+    "stage error: needs entries": [
+     "r1",
+     "r2"
+    ],
+    "stage table: appended after the contract rows": [
+     "r1",
+     "r2"
+    ],
+    "stage-table error: unknown kind": [
+     "r1",
+     "r2"
+    ],
+    "stage-table: data/store/regex dropped by class, listed": [
+     "r1",
+     "r2"
+    ],
+    "stage-table: group with a dropped part dropped whole": [
+     "r1",
+     "r2"
+    ],
+    "stage-table: kinds mapped, groups carried": [
+     "r1",
+     "r2"
+    ],
+    "stage-table: milestone without rows listed, kept ones not": [
+     "r1",
+     "r2"
+    ],
+    "stage-table: output loads in bootmiles": [
+     "r1",
+     "r2"
+    ],
+    "stage: host/sym/store parts are not address-checked": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/bootinputs.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/boot.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/bootinputs.py",
     "ports/fnv-nx/verify/boot.py"
    ]
   },
   "test_bootlayout.py": {
-   "references": [
-    {
+   "cases": {
+    "aligned outward": [
+     "r1"
+    ],
+    "base is the lowest candidate": [
+     "r1"
+    ],
+    "base skips reserved to next 64 KiB": [
+     "r1"
+    ],
+    "census: 183 only": [
+     "r1"
+    ],
+    "census: RELR ok": [
+     "r1"
+    ],
+    "census: foreign type": [
+     "r1"
+    ],
+    "census: non-empty JMPREL": [
+     "r1"
+    ],
+    "census: non-empty REL": [
+     "r1"
+    ],
+    "checks total": [
+     "r1"
+    ],
+    "cli: --keys mandatory": [
+     "r1"
+    ],
+    "cli: LayoutError exits 1": [
+     "r1"
+    ],
+    "cli: identical bytes, format": [
+     "r1"
+    ],
+    "fixed regions": [
+     "r1"
+    ],
+    "free verbatim": [
+     "r1"
+    ],
+    "good image: span, entry, loads": [
+     "r1"
+    ],
+    "heap beyond 4 GiB is an error": [
+     "r1"
+    ],
+    "heap onto reserved is an error": [
+     "r1"
+    ],
+    "image too large for gap": [
+     "r1"
+    ],
+    "overlapping reserved rows": [
+     "r1"
+    ],
+    "reject ": [
+     "r1"
+    ],
+    "reject truncated": [
+     "r1"
+    ],
+    "reserved below 0x10000": [
+     "r1"
+    ],
+    "unsorted reserved rows": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/bootlayout.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/bootlayout.py"
    ]
   },
   "test_bootmachine.py": {
-   "references": [
-    {
+   "cases": {
+    "46 slots, all resolved at construction": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "DISPLAY_DOCKED is %s for profile %s (any nargs, null array only with nargs 0)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "DISPLAY_DOCKED through the exit code, profile %s": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "POLL with nothing to wait for and timeout -1: the run ends as deadlock, never returns": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "TEXT_ENTRY (guest): max_len 0 / 501 / huge, out null, n null -> -FNVNX_HE_BADINPUT without consuming a text; the texts come in order as UTF-16 with a NUL and *n; none left -> 0 with out and *n untouched": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "TEXT_ENTRY with no scenario: every well-formed call is 0 (cancelled)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "TEXT_ENTRY: a scenario text longer than max_len ends the run as scenario-error (never truncated, the guest gets no result)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "TEXT_ENTRY: a scenario that is not a list of strings of Unicode scalars is a construction error: %r": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "TEXT_ENTRY: a text of exactly max_len units fits": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "TEXT_ENTRY: one host event per call with its signed result (5 refused calls -0x1759, then 1, 1, 0, 0)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "THREAD_ACTIVITY on the calling thread's own THREAD_SELF record: ResultBusy 0xF401 for pause and resume, the run goes on": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "THREAD_ACTIVITY: new / finished thread or record BadInput, resume of a running and pause of a paused thread 0xFA01, own record 0xF401, unknown id NotFound (%d values)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "THREAD_SELF (guest): a started record (start/join BadInput), distinct ids, free ends only the record, a paused-woken main thread stays off until resumed; start of a started or finished thread BadInput with state kept, activity of a new or finished thread BadInput": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "TZ_AT at INT64_MAX and INT64_MIN: the fixed UTC zone answers every instant": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "VM_PROTECT: header check order, write-only 2 -> 0xD801, a span of two extents, the host window; DECOMMIT of R / no-access extents (%d values)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "a header-defined platform fn nobody implements raises at construction": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "a registered ext module whose handler raises ExtMissing ends the run": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "a services object missing one slot raises at construction": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "audio_open / audio_submit / audio_close and pad_read index > 3 as the header states; sleep_ns above INT64_MAX sleeps INT64_MAX ns": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "console: self-relocated string pointers": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "deterministic: identical on_thread sequences": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "deterministic: identical run() dicts": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "every served non-socket fn of module 11 (1..9, 11..14, 34, 35, 36) resolves": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "exit code 0x52000000|fact_id is reason reach-violation with fact_id": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "exit code 7, reason exit": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "ext_call (guest): NO_MODULE / NO_SERVICE / BAD_NARGS are returned to the guest, nargs above UINT32_MAX counts as UINT32_MAX, extra arguments ignored, sockets dispatch first: -EINVAL on wrong nargs (null array or not), BAD_NARGS on the exact count with a null array (%d values)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "ext_call (guest): a registered module is called with its args; fn > UINT32_MAX is NO_SERVICE without calling it; nargs 0 gives []; a handler raising ExtMissing ends the run": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "fault record": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "guest saw %s=%s": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "header: 29 services of module 11 and 46 slots parsed": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "ids: thread and directory ids are table handles (unknown / freed -> NotFound, never started -> BadInput, 1024 live together, a freed id never names anything again); dir_next cap 0 / cut; wait / wake alignment and readability; wake count above 0x7FFFFFFF wakes all (%d values)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "ids: thread_set_cpu with a negative spec changes nothing": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "image-page protect refused and recorded": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "instr total equals Icount total": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "limit not reached: normal exit, run() equals the unbounded run": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "limit: reason limit, same stop point, with and without icount": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "limit_host_calls ends with reason limit": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "limit_instructions <= 0 is a construction error": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "machine's wire constants equal the fixture sockwire.h (errno numbers, AF and type lists, AI mask, EAI numbers, POLLNVAL)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "map_fixed: size 0 / wrap / misalignment 0x1759, the window zeroes and ignores src, src 0 / misaligned 0x1759, 512 live -> 0x559, alias region 0xDA01, src not heap 0xD401 (%d values)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "new modes: two identical runs give identical run() dicts": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "no ready thread, no deadline: deadlock with a wait report": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "nothing runs after the fault": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "nothing runs after the src fault": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "other non-zero exit codes stay ordinary exits (no fact_id)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "platform: a socket service with its exact nargs (no result in this environment) ends the run as ext-module-missing": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "platform: cpu_boost and message are the services'": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "platform: thread_activity: unknown id -> NotFound 0x1359, tid 0 -> BadInput 0x1759, new thread -> BadInput 0x1759, pause holds the worker, resume runs it": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "pread through fs_* (case-folded path)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "profile: anything but handheld / docked is a construction error": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "protected-none heap page: read faults at that address": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "refusals recorded": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "run() carries the whole console text": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section fns are served by the machine itself": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section: every create/map/unmap/free/interplay result as the header says (%d values)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section: later refusals are vm_*, map_fixed, section_map/unmap/free refusals with the codes": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section: refusals recorded in order (create, map errors)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section: run exits": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section: table limits (128 sections incl. deferred ones, 512 views, ids never reused)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section: threads share views (B reads A's write, main reads the thread's write)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section: two identical runs give identical run() dicts": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "section: unmapped view faults, the other view still works and writes": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs, BAD_NARGS on a null array and a value for zero arguments": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "services: every declared service is served by the machine (the sockets by Machine._sock), none extra": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "services: fn 0, 10, 15, 27..29, 32, 33 and 37.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "services: machine names and least nargs equal the header's rows (every row has its n; fn 10 is served by the console host too)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "services: served = 1..9, 11..26, 30, 31, 34..36 (29 of 29)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "sockets (guest): handles, flag state, ENETUNREACH, loopback bind (%d values)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "sockets and TZ_AT (guest): every result the arguments fix with no socket open: errno classes, -EBADF for each handle-first service, POLL waits its timeout in virtual time and answers POLLNVAL (%d values)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "the numbers 10, 15, 27..29, 32 and 33, which hostapi.h does not declare, answer NO_SERVICE (guest, any nargs)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "touching the given-away src block ends the run: fault": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "two threads, a context switch": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "virtual time moved by sleep (5 ms)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: VM_PROTECT on a committed page works, read-only reads, rw writes": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: VM_PROTECT on an uncommitted page: nonzero": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: VM_PROTECT with an X bit is refused": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: access to a reserved, uncommitted page: fault record": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: access to a wholly decommitted extent: fault": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: commit outside, past the end of, and of size 0 in a reservation fail": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: commit, write, decommit, recommit gives zeros": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: decommit of part of an extent zeroes it and it stays accessible (host_vm.inc)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: every refusal is an event with its result": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: hintless 128 MiB reserve is the lowest fitting 64 KiB multiple by the rule (plan with two image ranges)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: hints: overlap, inside the exe or a module range, above 4 GiB, image, size 0 fail; a hint in a gap or free address is exact (64 KiB rounded)": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: map_fixed over a committed page is occupied (AlreadyInitialized), over an uncommitted reserved page outside the alias-code region 0xDA01": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: recommit after decommit is RW and zero whatever the protection was": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: recommit of a committed page keeps its content": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: release frees the whole reservation; a non-base address is refused": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: reserve after release gives the same address": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: run exits 7": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: the second reserve (64 KiB) does not overlap the first and is the lowest fitting address": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: two identical runs give identical run() dicts": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "vm: write to a VM_PROTECT read-only committed page: fault": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "watch_pc fired once, main thread": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "watch_ret fired once with x0=42": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "watch_store saw the worker's store": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ],
+    "write to a read-only page ends the run: fault": [
+     "r1",
+     "r2",
+     "r3",
+     "r4"
+    ]
+   },
+   "refs": {
+    "r1": {
      "kind": "contract",
      "path": "ports/fnv-nx/hostabi/include/fnvnx/hostapi.h"
     },
-    {
+    "r2": {
      "anchor": "## verify/bootmachine.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## verify/boothost.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r4": {
      "anchor": "## verify/bootlayout.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/bootmachine.py",
     "ports/fnv-nx/verify/boothost.py",
@@ -163,91 +1554,532 @@
    ]
   },
   "test_bootmiles.py": {
-   "references": [
-    {
+   "cases": {
+    "1 parse: kinds, targets, groups, main-thread flag": [
+     "r1"
+    ],
+    "1 parse: names in first-appearance order": [
+     "r1"
+    ],
+    "10 main-thread part ignores other threads (and honours main_tid)": [
+     "r1"
+    ],
+    "10 plain part counts on any thread": [
+     "r1"
+    ],
+    "11 out-of-order for the later one only": [
+     "r1"
+    ],
+    "11 two milestones sharing one target: events fed in table order reach both in order": [
+     "r1"
+    ],
+    "11 unknown part id is an error": [
+     "r1"
+    ],
+    "12 CLI: exit 0, two runs byte-identical, format and biased pc": [
+     "r1"
+    ],
+    "12 CLI: sorted keys": [
+     "r1"
+    ],
+    "13 CLI: unresolved items -> exit 1 with the message, no output file": [
+     "r1"
+    ],
+    "14 CLI -h": [
+     "r1"
+    ],
+    "2 TableError message carries the file line number": [
+     "r1"
+    ],
+    "2 TableError: ": [
+     "r1"
+    ],
+    "2 same group id under two names is fine": [
+     "r1"
+    ],
+    "3 ManifestError: ": [
+     "r1"
+    ],
+    "3 manifest parse": [
+     "r1"
+    ],
+    "4 resolve: every part id exactly once": [
+     "r1"
+    ],
+    "4 resolve: pc watch points with bias": [
+     "r1"
+    ],
+    "4 resolve: ret (all three return kinds), store (not biased), host": [
+     "r1"
+    ],
+    "5 resolve error lists all missing items": [
+     "r1"
+    ],
+    "5 resolve error: manifest symbol missing from the ELF": [
+     "r1"
+    ],
+    "6 in-order reach: winmain, then menu on completing the all group": [
+     "r1"
+    ],
+    "6 last_reached": [
+     "r1"
+    ],
+    "6 state rows": [
+     "r1"
+    ],
+    "7 no retroactive credit; a new part event after prerequisites reaches it": [
+     "r1"
+    ],
+    "7 out-of-order hit is reported, not reached": [
+     "r1"
+    ],
+    "8 all group: any order": [
+     "r1"
+    ],
+    "9 seq group: a part before its predecessors does not count; order enforced": [
+     "r1"
+    ],
+    "E1 3-column entries: code map, import map, table id": [
+     "r1"
+    ],
+    "E2 2-column manifest has no imports and no id": [
+     "r1"
+    ],
+    "E3 ManifestError: ": [
+     "r1"
+    ],
+    "E4 call on an import key resolves through the same table": [
+     "r1"
+    ],
+    "E5 an address in neither map is unresolved": [
+     "r1"
+    ],
+    "L1 read_symtab: local names at two values are ambiguous, a repeated local at one value is kept": [
+     "r1"
+    ],
+    "L2 a global symbol wins over a local of the same name": [
+     "r1"
+    ],
+    "L3 a table row that needs an ambiguous name is reported as ambiguous with the values": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/bootmiles.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/bootmiles.py"
    ]
   },
   "test_bootpath.py": {
-   "references": [
-    {
+   "cases": {
+    ".. above the root clamps at the root": [
+     "r1"
+    ],
+    ".. cannot leave the game mount into the card": [
+     "r1"
+    ],
+    ".. inside the card": [
+     "r1"
+    ],
+    "backslash, dot, empty components": [
+     "r1"
+    ],
+    "cache stale before changed()": [
+     "r1"
+    ],
+    "case folded": [
+     "r1"
+    ],
+    "collision: exact spelling wins": [
+     "r1"
+    ],
+    "collision: sorted-first otherwise": [
+     "r1"
+    ],
+    "creates switch/fnv": [
+     "r1"
+    ],
+    "exact spelling kept for a missing path": [
+     "r1"
+    ],
+    "faults counted, mkdir EEXIST is none": [
+     "r1"
+    ],
+    "fresh listing after changed()": [
+     "r1"
+    ],
+    "game wins at fnvnx/game, case folded": [
+     "r1"
+    ],
+    "game wins at switch/fnv": [
+     "r1"
+    ],
+    "install on the card: game is switch/fnv": [
+     "r1"
+    ],
+    "missing path keeps given case": [
+     "r1"
+    ],
+    "mount dirs made on the card": [
+     "r1"
+    ],
+    "mount point itself": [
+     "r1"
+    ],
+    "no prefix": [
+     "r1"
+    ],
+    "only port entries: game is fnvnx/game": [
+     "r1"
+    ],
+    "outside the mounts: the card": [
+     "r1"
+    ],
+    "port entry stays on the card": [
+     "r1"
+    ],
+    "port prefix drive_* stays on the card": [
+     "r1"
+    ],
+    "prefix SDMC: any case": [
+     "r1"
+    ],
+    "prefix sdmc:": [
+     "r1"
+    ],
+    "stale listing": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/bootpath.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/bootpath.py"
    ]
   },
   "test_bootsock.py": {
-   "references": [
-    {
+   "cases": {
+    "%s (%d cases)": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/bootsock.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/bootsock.py"
    ]
   },
   "test_cas.py": {
-   "references": [
-    {
+   "cases": {
+    "1 equal content, different mtime/mode/order -> equal hash": [
+     "r1"
+    ],
+    "10 concurrent ingests leave valid store": [
+     "r1"
+    ],
+    "11 2000-file tree ingest + materialize": [
+     "r1"
+    ],
+    "2 content/rename/exec/symlink/empty dir each change hash": [
+     "r1"
+    ],
+    "3 materialize -> re-ingest same hash; mtimes 0; shared inodes": [
+     "r1"
+    ],
+    "4 materialize into existing dest errors": [
+     "r1"
+    ],
+    "5 fifo errors": [
+     "r1"
+    ],
+    "6 exclude leaves out exactly the named path": [
+     "r1"
+    ],
+    "7 diff added/removed/changed": [
+     "r1"
+    ],
+    "8 verify detects corrupted object": [
+     "r1"
+    ],
+    "9 stage_key order independent, value sensitive": [
+     "r1"
+    ],
+    "materialize: 70000 names of one blob are placed (the filesystem's own link cap is closed by rule)": [
+     "r1"
+    ],
+    "materialize: an inode serves at most MAX_LINKS names; a replica is made past it (same bytes, mode, identity)": [
+     "r1"
+    ],
+    "tree_hash equals ingest, ignores mtimes, skips named entries": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/cas.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/cas.py"
    ]
   },
   "test_coffnorm.py": {
-   "references": [
-    {
+   "cases": {
+    "archive-header-bytes": [
+     "r1"
+    ],
+    "archive-matches-gnu-ar-D": [
+     "r1"
+    ],
+    "archive-members-kept": [
+     "r1"
+    ],
+    "bigobj-import-offsets": [
+     "r1"
+    ],
+    "check-verdicts": [
+     "r1"
+    ],
+    "debug-sections": [
+     "r1"
+    ],
+    "idempotent": [
+     "r1"
+    ],
+    "not-in-place": [
+     "r1"
+    ],
+    "obj-value-and-bytes": [
+     "r1"
+    ],
+    "only-fields-change": [
+     "r1"
+    ],
+    "real-object-and-archive": [
+     "r1"
+    ],
+    "truncated-corrupt": [
+     "r1"
+    ],
+    "typeserver": [
+     "r1"
+    ],
+    "unknown-and-PE-rejected": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/coffnorm.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/coffnorm.py"
    ]
   },
   "test_datamodel.py": {
-   "references": [
-    {
+   "cases": {
+    "C unit that lacks a loadable plugin is red": [
+     "r1"
+    ],
+    "C unit that loads a plugin cc1 cannot load is red": [
+     "r1"
+    ],
+    "C unit with the plugins cc1 can load is green": [
+     "r1"
+    ],
+    "C++ unit missing a plugin is red": [
+     "r1"
+    ],
+    "a C document that still holds the C++-only flag is red": [
+     "r1"
+    ],
+    "a C document with the driver's C subset is green": [
+     "r1"
+    ],
+    "a foreign semantic flag %s is red": [
+     "r1"
+    ],
+    "complete CC document certifies a C++ unit": [
+     "r1"
+    ],
+    "every plugin of the set is required, one by one": [
+     "r1"
+    ],
+    "guest root on another commit of the external: red": [
+     "r1"
+    ],
+    "guest root on the stock g++: red, compiler item uncertified": [
+     "r1"
+    ],
+    "native guest root on the pinned compiler: green, compiler + C++, C and asm units": [
+     "r1"
+    ],
+    "no guest root: universe 0, green": [
+     "r1"
+    ],
+    "ptrdiff_t = long int is red": [
+     "r1"
+    ],
+    "size_t = long unsigned int is red": [
+     "r1"
+    ],
+    "the exe's data model macros certify a unit": [
+     "r1"
+    ],
+    "the semantic flags out of order are red": [
+     "r1"
+    ],
+    "the semantics flags of the recipe rule are the pin's (one source)": [
+     "r1"
+    ],
+    "unit without %s is red": [
+     "r1"
+    ],
+    "unit without -mabi=ilp32 is red": [
+     "r1"
+    ],
+    "unit without a CC document is red": [
+     "r1"
+    ],
+    "unsigned plain char is red": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_datamodel.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_datamodel.py",
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_envcheck.py": {
-   "references": [
-    {
+   "cases": {
+    "a root's distro compiler whose plugin headers are in no listed package is a mismatch; the committed env has none": [
+     "r1",
+     "r2"
+    ],
+    "check --json: env_id and no mismatches": [
+     "r1",
+     "r2"
+    ],
+    "check detects: ": [
+     "r1",
+     "r2"
+    ],
+    "check: this machine is the declared environment": [
+     "r1",
+     "r2"
+    ],
+    "env.json: format, programs owned, non-trivial package list": [
+     "r1",
+     "r2"
+    ],
+    "id: stable, = sha256 of the canonical file, independent of key order, changes with content": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: a closure-only deb (pinned, not declared) is checked against debs.packages -> 2 packages, no KeyError": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: a deb with another sha256 -> exit 2 naming the package, nothing installed": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: a declared package with no deb pin -> exit 2": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: a declared version that disagrees with debs.packages -> exit 2 naming the package": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: a mirror with another tree hash -> exit 2": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: a mirror with another wheels tree hash -> exit 2": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: a wheel with another sha256 -> exit 2 naming the module, pip never runs": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: it leaves nothing in its TMPDIR, on success and on every failure": [
+     "r1",
+     "r2"
+    ],
+    "install_mirror: right tree and sha256 -> 1 package from the mirror (dry)": [
+     "r1",
+     "r2"
+    ],
+    "root compilers: the distro drivers of admitted roots, an external compiler is none": [
+     "r1",
+     "r2"
+    ],
+    "setup --print: install_mirror.py (debs and wheels from the mirror, no apt, no PyPI), then envcheck check": [
+     "r1",
+     "r2"
+    ],
+    "setup script: bash -n": [
+     "r1",
+     "r2"
+    ],
+    "snapshot --from-code reproduces the committed env.json on this machine": [
+     "r1",
+     "r2"
+    ],
+    "snapshot needs --from-code and -o": [
+     "r1",
+     "r2"
+    ],
+    "tree digest ignores foreign files and sees counted ones": [
+     "r1",
+     "r2"
+    ],
+    "tree: a file owned only by an unpinned package is foreign, the rest counts": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/envcheck.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## farm/setup_verdict_env.sh",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/envcheck.py",
     "ports/fnv-nx/farm/setup_verdict_env.sh",
@@ -256,83 +2088,680 @@
    ]
   },
   "test_fpbound.py": {
-   "references": [
-    {
+   "cases": {
+    "NaN rules": [
+     "r1"
+    ],
+    "accept rule f32 vs x87-64 never rejects": [
+     "r1"
+    ],
+    "case_verdict combines stability": [
+     "r1"
+    ],
+    "div by interval containing 0 -> unbounded": [
+     "r1"
+    ],
+    "exception": [
+     "r1"
+    ],
+    "hand add exact": [
+     "r1"
+    ],
+    "hand add f32 tie": [
+     "r1"
+    ],
+    "hand constructors": [
+     "r1"
+    ],
+    "hand div errs": [
+     "r1"
+    ],
+    "hand mul errs": [
+     "r1"
+    ],
+    "hand mul f32 rounding": [
+     "r1"
+    ],
+    "hand neg/abs": [
+     "r1"
+    ],
+    "hand scale2": [
+     "r1"
+    ],
+    "hand sqrt errs": [
+     "r1"
+    ],
+    "hand sqrt(2) f32": [
+     "r1"
+    ],
+    "hand store narrower": [
+     "r1"
+    ],
+    "hand sub exact": [
+     "r1"
+    ],
+    "hand transc": [
+     "r1"
+    ],
+    "inf arithmetic": [
+     "r1"
+    ],
+    "inf rules": [
+     "r1"
+    ],
+    "module <= 300 lines": [
+     "r1"
+    ],
+    "module rounding == test round_to p=%d": [
+     "r1"
+    ],
+    "no float literals in module": [
+     "r1"
+    ],
+    "overflow interval -> unstable": [
+     "r1"
+    ],
+    "sensitivity: 2-ulp input perturbation rejected": [
+     "r1"
+    ],
+    "single op f32==f32 bit-equal, accepted": [
+     "r1"
+    ],
+    "soundness p=%d (2000 chains, %d unstable)": [
+     "r1"
+    ],
+    "sqrt interval reaching below 0 -> unbounded": [
+     "r1"
+    ],
+    "stable_compare/to_int/round truth tables (%d rows)": [
+     "r1"
+    ],
+    "stdlib-only imports": [
+     "r1"
+    ],
+    "subnormal results sound (f32)": [
+     "r1"
+    ],
+    "unbounded -> unstable verdict": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/fpbound.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/fpbound.py"
    ]
   },
   "test_gate_assumptions.py": {
-   "references": [
-    {
+   "cases": {
+    "a cited retired id and a cited retired alias are red, an uncited file is not": [
+     "r1"
+    ],
+    "a list item is its own block": [
+     "r1"
+    ],
+    "a live alias that is retired is red": [
+     "r1"
+    ],
+    "a malformed retired item is red": [
+     "r1"
+    ],
+    "a new entry with a retired id is red": [
+     "r1"
+    ],
+    "a pending key is red (the field is removed)": [
+     "r1"
+    ],
+    "a retired record is green": [
+     "r1"
+    ],
+    "alias of two entries is red": [
+     "r1"
+    ],
+    "an alias claimed by two records is red": [
+     "r1"
+    ],
+    "an id defined by two records is red": [
+     "r1"
+    ],
+    "bad owner is red": [
+     "r1"
+    ],
+    "block with a known id is certified": [
+     "r1"
+    ],
+    "block without id is red": [
+     "r1"
+    ],
+    "block without the word is not a mention": [
+     "r1"
+    ],
+    "dead entry is red": [
+     "r1"
+    ],
+    "findings file holds every finding, not a capped list": [
+     "r1"
+    ],
+    "findings file is sorted by code": [
+     "r1"
+    ],
+    "gate: a json file is data, not a mention": [
+     "r1"
+    ],
+    "gate: a mention of an id without an entry is red": [
+     "r1"
+    ],
+    "gate: a new mention with an id is green": [
+     "r1"
+    ],
+    "gate: a new mention without an id is red": [
+     "r1"
+    ],
+    "gate: a python comment is a mention": [
+     "r1"
+    ],
+    "gate: a recorded id in %s is green": [
+     "r1"
+    ],
+    "gate: a retired alias cited in the tree is red": [
+     "r1"
+    ],
+    "gate: a retired id cited in the tree is red": [
+     "r1"
+    ],
+    "gate: a retired id in the registry only is green": [
+     "r1"
+    ],
+    "gate: a stray id in a json file is red": [
+     "r1"
+    ],
+    "gate: a tenth OWNER entry is red": [
+     "r1"
+    ],
+    "gate: an unnumbered mention in a header of a unit-less product root is red (the universe is every tracked file, not units)": [
+     "r1"
+    ],
+    "gate: an unrecorded id in %s is red, the file is named": [
+     "r1"
+    ],
+    "gate: green tree, the log is not scanned": [
+     "r1"
+    ],
+    "gate: python code is not a mention": [
+     "r1"
+    ],
+    "id %d owner %s range %s": [
+     "r1"
+    ],
+    "joined owners are green": [
+     "r1"
+    ],
+    "malformed id is red": [
+     "r1"
+    ],
+    "mentions counted": [
+     "r1"
+    ],
+    "missing registry is red": [
+     "r1"
+    ],
+    "no head, no items": [
+     "r1"
+    ],
+    "non-md text counts whole": [
+     "r1"
+    ],
+    "owner L6A is green": [
+     "r1"
+    ],
+    "owner item without an entry is red": [
+     "r1"
+    ],
+    "owner items found": [
+     "r1"
+    ],
+    "owner quote not verbatim is red": [
+     "r1"
+    ],
+    "owner quote outside the list items is red": [
+     "r1"
+    ],
+    "python that does not parse is scanned whole": [
+     "r1"
+    ],
+    "python: a certified comment is green": [
+     "r1"
+    ],
+    "python: an uncertified docstring paragraph is red": [
+     "r1"
+    ],
+    "python: code and string values hide nothing and show nothing": [
+     "r1"
+    ],
+    "python: only comments and docstrings are prose": [
+     "r1"
+    ],
+    "ranges missing is red": [
+     "r1"
+    ],
+    "ranges with %s is red": [
+     "r1"
+    ],
+    "ratchet: a base without a registry holds nothing": [
+     "r1"
+    ],
+    "ratchet: a dropped alias is red": [
+     "r1"
+    ],
+    "ratchet: a vanished id is red": [
+     "r1"
+    ],
+    "ratchet: an alias that moved to retired is green": [
+     "r1"
+    ],
+    "ratchet: retiring the id and its aliases is green": [
+     "r1"
+    ],
+    "ratchet: same registry is green": [
+     "r1"
+    ],
+    "registry positive": [
+     "r1"
+    ],
+    "removed_by %r is green": [
+     "r1"
+    ],
+    "removed_by %r is red": [
+     "r1"
+    ],
+    "removed_by of a gate that does not exist is red": [
+     "r1"
+    ],
+    "repeated id is red": [
+     "r1"
+    ],
+    "repeated joined owner is red": [
+     "r1"
+    ],
+    "retired not a list is red": [
+     "r1"
+    ],
+    "retired twice is red": [
+     "r1"
+    ],
+    "stdout prints at most 20 findings and the summary names the file": [
+     "r1"
+    ],
+    "stray id in any text file is red": [
+     "r1"
+    ],
+    "tenth OWNER entry without the owner's item is red": [
+     "r1"
+    ],
+    "two heads, no items": [
+     "r1"
+    ],
+    "unknown id in a mention is red": [
+     "r1"
+    ],
+    "unknown key is red": [
+     "r1"
+    ],
+    "used_by absent file is red": [
+     "r1"
+    ],
+    "used_by file that does not cite the id is red": [
+     "r1"
+    ],
+    "used_by of a file that is not in the tree is red": [
+     "r1"
+    ],
+    "wrong format is red": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_assumptions.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_assumptions.py"
    ]
   },
   "test_gate_contract.py": {
-   "references": [
-    {
+   "cases": {
+    "%s: game but no link -> link gate universe 0, green": [
+     "r1"
+    ],
+    "%s: game but no link -> red naming the missing link": [
+     "r1"
+    ],
+    "%s: image root (link) without game -> red naming build.json": [
+     "r1"
+    ],
+    "%s: inputs without %s -> red naming it": [
+     "r1"
+    ],
+    "%s: no product root -> universe 0, green (convention of build/objstub)": [
+     "r1"
+    ],
+    "%s: root with neither game nor link -> green 0 (no inputs needed)": [
+     "r1"
+    ],
+    "%s: root without units/addrmap/aliases -> red naming them, owner L1 link stage": [
+     "r1"
+    ],
+    "%s: root, no inputs file -> red 1/0, item <root>:inputs": [
+     "r1"
+    ],
+    "a tool root is not in the universe": [
+     "r1"
+    ],
+    "disp: entries.tsv named when missing": [
+     "r1"
+    ],
+    "empty external": [
+     "r1"
+    ],
+    "extra key": [
+     "r1"
+    ],
+    "images key is gone (derived, no hand list)": [
+     "r1"
+    ],
+    "n2: all rows lifted is green": [
+     "r1"
+    ],
+    "n2: row not LIFTED is uncertified": [
+     "r1"
+    ],
+    "n2: row without a verdict is uncertified": [
+     "r1"
+    ],
+    "no inputs file is red with the missing input named": [
+     "r1"
+    ],
+    "not JSON": [
+     "r1"
+    ],
+    "optional keys accepted": [
+     "r1"
+    ],
+    "path escape": [
+     "r1"
+    ],
+    "quantify sums roots and names the red one": [
+     "r1"
+    ],
+    "quantify: no root -> 0, green, the convention detail": [
+     "r1"
+    ],
+    "quantify: two roots, one red": [
+     "r1"
+    ],
+    "ranges shape": [
+     "r1"
+    ],
+    "root key is gone (the universe is admit.json)": [
+     "r1"
+    ],
+    "root_results needs the three result names": [
+     "r1"
+    ],
+    "unknown external name": [
+     "r1"
+    ],
+    "unknown gate rejected": [
+     "r1"
+    ],
+    "valid inputs load": [
+     "r1"
+    ],
+    "wrong format": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_contract.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_contract.py"
    ]
   },
   "test_gate_exepin.py": {
-   "references": [
-    {
+   "cases": {
+    "a constructor that calls load_exe is certified": [
+     "r1"
+    ],
+    "a docstring or another name is not a source": [
+     "r1"
+    ],
+    "a file that does not parse is uncertified and an error": [
+     "r1"
+    ],
+    "a file without the --exe option has no source": [
+     "r1"
+    ],
+    "a path derived with os.path.* is still the exe path": [
+     "r1"
+    ],
+    "a tracked function returning the path taints its result": [
+     "r1"
+    ],
+    "forwarding after the literal '--exe' to another entry point is allowed": [
+     "r1"
+    ],
+    "forwarding through a list builder is allowed": [
+     "r1"
+    ],
+    "load_exe is the one way: certified": [
+     "r1"
+    ],
+    "open(a.exe) is refused": [
+     "r1"
+    ],
+    "same-named parameter of another function is not tainted": [
+     "r1"
+    ],
+    "subprocess with the exe path is refused": [
+     "r1"
+    ],
+    "the file name FalloutNV.exe joined and opened is refused": [
+     "r1"
+    ],
+    "through a constructor": [
+     "r1"
+    ],
+    "through a parameter of a function of another file (mod.f)": [
+     "r1"
+    ],
+    "through a parameter of a tracked function": [
+     "r1"
+    ],
+    "universe: tracked .py of the tree outside tests": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_exepin.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_exepin.py"
    ]
   },
   "test_gate_hostapi.py": {
-   "references": [
-    {
+   "cases": {
+    "(i) a body in hostapi.h itself is red": [
+     "r1"
+    ],
+    "(i) a macro-defined function is a wrapper use": [
+     "r1"
+    ],
+    "(i) a shim-style header with an inline wrapper is red; the unit's own use, hostapi.h's define and an unrelated header are not": [
+     "r1"
+    ],
+    "(i) a static inline wrapper expanding a service macro is a wrapper use (red)": [
+     "r1"
+    ],
+    "(i) declarations, comments and strings are not wrapper uses": [
+     "r1"
+    ],
+    "(i) the real header has no wrapper use": [
+     "r1"
+    ],
+    "(ii) a marker equal to no service is its own item and red while unused": [
+     "r1"
+    ],
+    "(ii) no *_FIRST / *_LAST marker is declared": [
+     "r1"
+    ],
+    "(ii) the socket services 16..26, 30, 31 are declared, one name each": [
+     "r1"
+    ],
+    "-dU lists the expanded FNVNX_PLAT_ macro and not the unexpanded one": [
+     "r1"
+    ],
+    "-dU unit.ii and plain unit.ii give the same object bytes": [
+     "r1"
+    ],
+    "CC of the %s unit.ii compiles (-fpreprocessed)": [
+     "r1"
+    ],
+    "PP %s runs": [
+     "r1"
+    ],
+    "alias use counts as use of the number": [
+     "r1"
+    ],
+    "all used green": [
+     "r1"
+    ],
+    "declared by number, aliases join": [
+     "r1"
+    ],
+    "includes_header": [
+     "r1"
+    ],
+    "module ids are no services": [
+     "r1"
+    ],
+    "number grammar": [
+     "r1"
+    ],
+    "stale names: h_<name> in a tool file is red; <name>X, mainloop, the journal and the registry are not": [
+     "r1"
+    ],
+    "undeclared use is red": [
+     "r1"
+    ],
+    "universe 0 green": [
+     "r1"
+    ],
+    "universe 0 needs no header": [
+     "r1"
+    ],
+    "unused service is red": [
+     "r1"
+    ],
+    "used reads -dU defines": [
+     "r1"
+    ],
+    "value mismatch is red": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_hostapi.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_hostapi.py"
    ]
   },
   "test_gate_imports.py": {
-   "references": [
-    {
+   "cases": {
+    "bad name table is red with the reason": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared external that the recipe lacks is red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "green: sym and lookup rows proven by the objects.json of the build": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "imports.in.json with unknown keys is red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "missing declared input is red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "no product root: universe 0, green, accepted by the verdict": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "product root without imports.in.json: red, one item": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "red: lookup entry without a proven symbol and an unserved msvcrt name": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "symbols: defined entries and referenced names": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_imports.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/imports.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## contract/bridgetable.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_imports.py",
     "ports/fnv-nx/contract/imports.py",
@@ -340,36 +2769,168 @@
    ]
   },
   "test_gate_machine.py": {
-   "references": [
-    {
+   "cases": {
+    "bad registry.in.json (%s) is red with the reason": [
+     "r1",
+     "r2"
+    ],
+    "declared row with no read site: red": [
+     "r1",
+     "r2"
+    ],
+    "dynamic read site: red, a measurement build": [
+     "r1",
+     "r2"
+    ],
+    "green: declared row read, seed equal, only the seed unit writes": [
+     "r1",
+     "r2"
+    ],
+    "no product root: universe 0, green": [
+     "r1",
+     "r2"
+    ],
+    "product root without registry.in.json: red": [
+     "r1",
+     "r2"
+    ],
+    "seed include that differs from the generator output: red": [
+     "r1",
+     "r2"
+    ],
+    "writer outside the seed unit: red": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_machine.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## contract/hive.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_machine.py",
     "ports/fnv-nx/contract/hive.py"
    ]
   },
   "test_gate_pure.py": {
-   "references": [
-    {
+   "cases": {
+    "a 3-cycle is an error and an acyclic chain is not": [
+     "r1",
+     "r2"
+    ],
+    "a clean tests/x.py imported by a stage is certified, a non-imported tests/y.py with a clock read is outside: green": [
+     "r1",
+     "r2"
+    ],
+    "a clock read in a file the generator reaches is red": [
+     "r1",
+     "r2"
+    ],
+    "a cycle of declared imports is an error": [
+     "r1",
+     "r2"
+    ],
+    "a declared import does not open the other roots: `import o` (root lift/other, not declared) is red": [
+     "r1",
+     "r2"
+    ],
+    "a file named tests/x.py that a stage imports is in the universe (and red for its clock read); not-imported files in tests/ or any directory are not": [
+     "r1",
+     "r2"
+    ],
+    "a file of the second tree is certified by the root": [
+     "r1",
+     "r2"
+    ],
+    "a gate driver in lift/ that imports recipe and is no entry point and imported by no stage is outside the universe: green": [
+     "r1",
+     "r2"
+    ],
+    "a generator tool of a recipe is an entry point: its closure is the universe": [
+     "r1",
+     "r2"
+    ],
+    "a moved file keeps its classification: the same driver one directory deeper and the entry renamed is still outside and green": [
+     "r1",
+     "r2"
+    ],
+    "a stage file importing verify/recipe with `imports` declared is red too (host reader)": [
+     "r1",
+     "r2"
+    ],
+    "a stage file importing verify/recipe without declaring it is red": [
+     "r1",
+     "r2"
+    ],
+    "an entry outside the root's trees or not .py is an error": [
+     "r1",
+     "r2"
+    ],
+    "an undeclared import of another root's module is red": [
+     "r1",
+     "r2"
+    ],
+    "an unknown root, a self import and a repeat are errors": [
+     "r1",
+     "r2"
+    ],
+    "entry is required for a tool root": [
+     "r1",
+     "r2"
+    ],
+    "imports that is not a list of strings is an error": [
+     "r1",
+     "r2"
+    ],
+    "judge reports the cycle as a root error of the table": [
+     "r1",
+     "r2"
+    ],
+    "the gate is red on a cycle of declared imports": [
+     "r1",
+     "r2"
+    ],
+    "the same import declared in admit.json imports is green; the closure holds g.py, m.py and __init__.py": [
+     "r1",
+     "r2"
+    ],
+    "the same two trees as two roots without declared imports are red": [
+     "r1",
+     "r2"
+    ],
+    "trees overlapping another root are an error": [
+     "r1",
+     "r2"
+    ],
+    "trees whose first is not path, or a single tree, are errors": [
+     "r1",
+     "r2"
+    ],
+    "two trees of one root that import each other are green (one puregate run)": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_pure.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/gate_admit.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_pure.py",
     "ports/fnv-nx/verify/gate_admit.py",
@@ -377,23 +2938,335 @@
    ]
   },
   "test_gates.py": {
-   "references": [
-    {
+   "cases": {
+    "gate tmpdir: a gate that leaves a file in its TMPDIR is red and the file is named": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gate tmpdir: a gate that leaves a file in the worktree is red and the file is named": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gate tmpdir: a gate that leaves nothing is green": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gates.d: contract gates run gate_contract.py --gate NAME": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gates.d: every gate file declares valid covers": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gates.d: format and the gates": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gates.d: no gates.json is tracked and every file is one gate named like it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 merge: a stored green verdict of another env_id does not count": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 merge: bootstrap merges on green": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 merge: dropping a gate is blocked by the ratchet": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 merge: env.json of the merge tree mismatches -> blocked: env, exit 4, ref and store untouched": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 merge: green merge in the declared environment": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 merge: red file in link/ is blocked, ref does not move": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 merge: second green merge, previous verdict used": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 verdict: commit without env.json -> blocked: env, exit 4": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 verdict: gates get GATE_CACHE=VDIR/cache; same tree again reuses the keyed selftests result": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 verdict: green line, stored by tree": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 verdict: mismatching env.json -> blocked: env, exit 4, no gate run, nothing stored": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 verdict: red file -> red, exit 2": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 verdict: stored verdict carries env_id of the commit's env.json": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "l1 verdict: the reason of an uncertified test (exit status, errno text) is in the stored verdict and the printed gate line": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: a gate driver that is no entry point is outside the universe": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: a shell file that no entry point imports is outside the universe": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: an entry point that does not exist is red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: clean entry points certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: files nobody imports (tests/) are outside the universe": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: no entry points -> green, universe 0": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: random -> red, path listed": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: the closure follows project imports": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "pure: uncertified capped at 50, sorted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "push: conflict -> exit 3, remote untouched": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "push: green -> remote main is the merge commit, parents (BASE, REF), local refs follow, line printed": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "push: local branch differs from the remote tip -> blocked, nothing moves": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "push: no --remote -> old behaviour, last line says local only": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "push: push to a nonexistent URL -> exit 6, nothing changed, green verdict kept": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "push: red verdict -> remote and local untouched": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "push: remote moved after the fetch -> exit 5, remote keeps the other commit, local untouched": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "push: retry after exit 5 merges onto the new tip and judges the new tree": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: --key-dirs content change (a dir that holds no tests) -> miss": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: a failing file is never certified from the cache; the key re-runs everything": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: a timeout is never cached as passed": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: an mtime change is not a change of content": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: another argv is another key": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: another env.json is another key": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: first run executes every file and stores one key": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: fixed file is a new key, passes, then is cached": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: new content in a key dir -> miss, everything re-runs": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: no --cache and no GATE_CACHE -> always runs": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: same key dirs and content again -> hit": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests cache: unchanged inputs -> certified without running": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests tmpdir: a clean test passes; a test leaving an entry in its TMPDIR is uncertified and names it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests tmpdir: a timeout kill is a failure with the reason, and its scratch is removed": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests tmpdir: after the run the gate's TMPDIR holds no new entry, whatever the outcomes": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests tmpdir: the exit status and the tail of the output (errno text) are the reason": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests: --jobs 3 runs files concurrently, reported in sorted order": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests: a test file does not see the gate's GATE_* variables": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests: deterministic order (directory argument order, then name)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests: no test files -> green, universe 0": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests: pass/fail counted, helper ignored": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests: per-file seconds in selftests.times.json": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests: the scratch a file leaves in its temporary directory is removed, passed or failed; the leak is uncertified and named": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "tests: timeout is a failure": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_pure.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/gate_tests.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## verify/l1.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_pure.py",
     "ports/fnv-nx/verify/gate_tests.py",
@@ -406,50 +3279,262 @@
    ]
   },
   "test_graph.py": {
-   "references": [
-    {
+   "cases": {
+    "--cold on a deterministic graph exits 0": [
+     "r1"
+    ],
+    "--cold on a wall-clock stage exits 3 and lists the stage": [
+     "r1"
+    ],
+    "--toolflags blocks a bad document, nothing runs": [
+     "r1"
+    ],
+    "chain content": [
+     "r1"
+    ],
+    "chain first run": [
+     "r1"
+    ],
+    "chain order and summary": [
+     "r1"
+    ],
+    "diamond runs": [
+     "r1"
+    ],
+    "failing producer: consumers not-run, independent branch runs, exit 2": [
+     "r1"
+    ],
+    "host path is not part of the key": [
+     "r1"
+    ],
+    "invalid graph (%s) exit 1, nothing ran": [
+     "r1"
+    ],
+    "jobs 1 at least 2 s": [
+     "r1"
+    ],
+    "keys after run equal the report": [
+     "r1"
+    ],
+    "keys and outputs independent of --jobs": [
+     "r1"
+    ],
+    "keys before any run: roots keyed, rest pending": [
+     "r1"
+    ],
+    "leaf-only source reruns only the leaf": [
+     "r1"
+    ],
+    "missing path fails the consumer": [
+     "r1"
+    ],
+    "path input selects a file": [
+     "r1"
+    ],
+    "root source reruns the whole cone": [
+     "r1"
+    ],
+    "second run all hits, near zero": [
+     "r1"
+    ],
+    "why names the changed input": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/graph.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/graph.py"
    ]
   },
   "test_guest.py": {
-   "references": [
-    {
+   "cases": {
+    "a guest root may leave the runtime out": [
+     "r1"
+    ],
+    "a recipe whose runtime external is not the pinned one is red": [
+     "r1"
+    ],
+    "cold and warm build: warm runs no stage, objects equal": [
+     "r1"
+    ],
+    "guest root builds on the external compiler": [
+     "r1"
+    ],
+    "guest root on another commit of the external is red": [
+     "r1"
+    ],
+    "guest root on another driver path is red": [
+     "r1"
+    ],
+    "guest root on another tree hash is red": [
+     "r1"
+    ],
+    "guest root on the pinned external compiler is valid": [
+     "r1"
+    ],
+    "guest root on the stock g++-13 is red": [
+     "r1"
+    ],
+    "guest root with %s in flags.%s is accepted (per-root class)": [
+     "r1"
+    ],
+    "guest root with %s in flags.%s is invalid": [
+     "r1"
+    ],
+    "guest root with %s in flags.%s is refused (not a per-root flag)": [
+     "r1"
+    ],
+    "guest root with -Werror=attributes in flags.c and flags.cxx has no attribute-flag error": [
+     "r1"
+    ],
+    "guest root with the real pin is valid": [
+     "r1"
+    ],
+    "guest root without -Werror=attributes in flags.%s is invalid": [
+     "r1"
+    ],
+    "guest root without guest_compiler.json is red": [
+     "r1"
+    ],
+    "host root may carry -fpermissive": [
+     "r1"
+    ],
+    "host root may use the distribution compiler": [
+     "r1"
+    ],
+    "host root needs no -Werror=attributes": [
+     "r1"
+    ],
+    "msvcmodel data model: size_t is unsigned int (mangled j)": [
+     "r1"
+    ],
+    "plugin_languages: cc1plus and cc1 load all 8 plugins (the C++ front end's symbols are weak references, not load requirements: CC1PLUS-SYMS)": [
+     "r1"
+    ],
+    "plugins are built against the external compiler's headers, .so deterministic (two cold stores)": [
+     "r1"
+    ],
+    "predefined %s: size_t unsigned int, ptrdiff_t int, plain char signed": [
+     "r1"
+    ],
+    "product root without target is red": [
+     "r1"
+    ],
+    "sample platform build.json is accepted by recipe check": [
+     "r1"
+    ],
+    "sample platform root builds a unit using the runtime's libstdc++ and newlib headers": [
+     "r1"
+    ],
+    "semantics_for: C++ and asm keep the whole set, C drops only what the driver says does not apply": [
+     "r1"
+    ],
+    "semantics_for: a flag the driver does not know is an error": [
+     "r1"
+    ],
+    "test_msvcmodel.py on the external": [
+     "r1"
+    ],
+    "the pin's semantic set has the ABI, FP and outline-atomics flags": [
+     "r1"
+    ],
+    "the pinned external is fetched by its commit and its tree hash matches": [
+     "r1"
+    ],
+    "volatile is ldar/stlr and float -> int is _ftol on the external compiler": [
+     "r1"
+    ],
+    "without -fsigned-char the compiler's plain char is unsigned (the gate's clause has something to catch)": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "### Guest roots: the game's compiler (MSVCMODEL1)",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/unitstage.py"
    ]
   },
   "test_icount.py": {
-   "references": [
-    {
+   "cases": {
+    "1 block-based total == single-step reference (per interval and thread)": [
+     "r1"
+    ],
+    "2 opcode class counts == reference == analytic; encoding masks vs assembled mnemonics": [
+     "r1"
+    ],
+    "3 range class and entry counts == analytic / reference": [
+     "r1"
+    ],
+    "4 per-thread and per-interval sums add up to the totals": [
+     "r1"
+    ],
+    "5 two runs give byte-identical OUT.json": [
+     "r1"
+    ],
+    "6 spec resolves a section and symbols, errors on a missing one": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/icount.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/icount.py"
    ]
   },
   "test_l1graph.py": {
-   "references": [
-    {
+   "cases": {
+    "make": [
+     "r1"
+    ],
+    "no host path inside the stage documents": [
+     "r1"
+    ],
+    "run: all six stages ran, toolflags clean": [
+     "r1"
+    ],
+    "runtime built": [
+     "r1"
+    ],
+    "second run: all hits": [
+     "r1"
+    ],
+    "tool edit: bodysel only": [
+     "r1"
+    ],
+    "tool edit: objfacts only, same output = consumers hit": [
+     "r1"
+    ],
+    "two host locations: identical keys": [
+     "r1"
+    ],
+    "verdict: red, lists the red gate": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/l1graph.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/l1graph.py",
     "ports/fnv-nx/verify/graph.py",
@@ -459,23 +3544,95 @@
    ]
   },
   "test_l2gates.py": {
-   "references": [
-    {
+   "cases": {
+    "%s: no native guest root: universe 0, green": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "%s: root with game and no link result: red item <root>:inputs": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "%s: root without game: universe 0, green": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "abi: byte mutation of the reference's contract name (int -> float parameter): red, names the row": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "abi: native guest root on the pinned compiler: green, universe >= 1": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "abi: object without .fnvnx.sympair: red, names the object": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "abi: the real objects: all items certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "namegate: a symbol with no exe address is outside the universe": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "namegate: byte mutation of the name of a native body: red, 1 uncertified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "namegate: native bodies g and h carry the cl names: 2/2": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "namegate: the uncertified symbol is LIFTED: outside the universe, green": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "r7: byte mutation of the record size: red, names the record": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "r7: native-bearing unit a.cc: record UP@@ equal to cl's: 1/1": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "r7: the unit has no native body (a.cc lifted): outside the universe, green": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_abi.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/gate_namegate.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## verify/gate_r7gate.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_abi.py",
     "ports/fnv-nx/verify/gate_namegate.py",
@@ -484,54 +3641,479 @@
    ]
   },
   "test_link.py": {
-   "references": [
-    {
+   "cases": {
+    "R_AARCH64_P32_ABS32 in .rodata: red (the linker refuses a read-only dynamic relocation, -z text), no ELF": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "a link whose objects have another target (LP64 objects, ILP32 emulation): red, naming the object": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "a missing FNXG magic: red at ldcheck:<root>, header id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "an input root that is red makes the link red: stage ld:<root> naming the red input root": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "crt0 header words written: +8 FNXG, +16 link base 0, +20 page aligned span, +24 flags 1 (PIE)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "kind exe: a host executable (ELF64, no script, entry set) links green; no crt0 header rule": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "kind shared needs a version_script, a pie needs a script, a pie takes aarch64linux32 only": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "kind shared: a name the version script exports that is not defined is red at ldcheck:<root>": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "kind shared: a shared object with a version script links green; the exported name is defined": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "kind shared: an undefined symbol no library defines is red at ldcheck:<root>": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "kind shared: link.libs.system defines the name through its .dynsym: green": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.flags: only the emulation; --gc-sections and -e are errors": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.flags: the emulation is required": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs archive: a pulled member that is a stub (trap body) makes objstub red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs archive: a pulled member with an undefined symbol nothing defines: the link is red, and so is linkstrict": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs archive: linkstrict and objstub judge the pulled member as an object (their universe counts its symbols) and accept the root": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs archive: the member the linker pulled (m1.o, for f_b) is recorded with archive path, archive sha256, member bytes sha256 and a kept object; the unused member m2.o is not": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs.external must name an external": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs: a directory outside the external is refused (an archive must lie inside a declared external)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs: a library that is not there is a red ld:<root>": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs: a malformed entry is an error": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.libs: a member of a guest library of an external is linked where an input needs it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.roots: a cycle is a check error, listing the cycle": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.roots: a root that links is no input root": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.roots: itself, a tool root and a duplicate are errors, all listed at once": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link.roots: two product roots, the second's objects are link inputs after the first's; green": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "link/ holds no subprocess call (the linker runs in the recipe's stage only)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "no crt0 header at all (no entry symbol): red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "objects.json lists the input root with the digest of its objects.json content and its linked objects (kept beside the result)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "objects.json vs objects: a symbol listed but not defined, and a defined one not listed, are both findings": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "objects.json vs objects: the recorded list equals what the object defines": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "second build: every stage a cache hit, same ELF, same input digest": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "the ELF defines f_a (own unit) before f_b (input root), crt0 at 0": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "the gate file `ld` is green and an output of the build": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "two cold builds (two stores): the same ELF bytes, objects and input digests": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "variants: a bad name or a key other than compiler/flags is a check error": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "variants: a wrong-target link (x86_64 objects into an aarch64 image) is red, naming the object and both targets": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "variants: each (root, variant) is its own build: root, root@lp64, root@lp64b green with objects of their own; the root keeps its name in the key": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "variants: image A (aarch64 LP64) links the lp64 variant of the root; green, the input is listed as root@lp64": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "variants: image B (x86_64) links the x86 variant of the same root; green, e_machine 62": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "variants: link.roots naming a variant the root does not declare is a check error": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "variants: the effective recipe replaces only the keys the variant names": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "variants: two variants with the same effective recipe still differ in every stage key (the variant name is in the key)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "weak undefined reference: red at ldcheck:<root>, naming it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "without the library the same undefined reference is red (ld)": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Link: the guest ELF",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     },
-    {
+    "r2": {
      "anchor": "## link/ldcheck.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## verify/recipe.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/link/ldcheck.py"
    ]
   },
   "test_linkstrict.py": {
-   "references": [
-    {
+   "cases": {
+    "(a) ELF with an undefined, a weak undefined and an IFUNC symbol; and one without .symtab": [
+     "r1",
+     "r2"
+    ],
+    "(a) a LOCAL undefined symbol (a target a relocation could name) is red": [
+     "r1",
+     "r2"
+    ],
+    "(b) a common symbol -> common": [
+     "r1",
+     "r2"
+    ],
+    "(b) a reference with one strong definition is certified; a weak undefined reference without a definition is `undefined`": [
+     "r1",
+     "r2"
+    ],
+    "(b) a weak definition overridden by one strong definition is fine": [
+     "r1",
+     "r2"
+    ],
+    "(b) a weak definition without a strong one -> weak-only, and the reference to it is unresolved": [
+     "r1",
+     "r2"
+    ],
+    "(b) an IFUNC definition -> ifunc": [
+     "r1",
+     "r2"
+    ],
+    "(b) two strong definitions of one symbol -> duplicate-strong": [
+     "r1",
+     "r2"
+    ],
+    "(b1) a class with a virtual destructor in two units: vtable, typeinfo and member groups are identical, no finding of vague linkage": [
+     "r1",
+     "r2"
+    ],
+    "(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)": [
+     "r1",
+     "r2"
+    ],
+    "(b1) a weak definition outside every COMDAT group stays weak-only in C++": [
+     "r1",
+     "r2"
+    ],
+    "(b1) an inline function instantiated identically in two units is one definition: no weak-only, the reference is certified, the signature is an item": [
+     "r1",
+     "r2"
+    ],
+    "(b1) the same class with another inline body: its member function and vtable group differ": [
+     "r1",
+     "r2"
+    ],
+    "(b1) the same inline function with another macro value in one unit: comdat-differs on the signature, the symbol and the reference": [
+     "r1",
+     "r2"
+    ],
+    "(b2) a reference to a link-script symbol, %s: %s": [
+     "r1",
+     "r2"
+    ],
+    "(b2) the ELF of another root does not define it for this root's objects": [
+     "r1",
+     "r2"
+    ],
+    "(c) a name missing from the ELF, a name of size 0, a table with no ELF -> not certified": [
+     "r1",
+     "r2"
+    ],
+    "(c) the same body id on one address is one body: green": [
+     "r1",
+     "r2"
+    ],
+    "(c) two contract names with different body ids on one address -> contract-alias on both, the third is fine": [
+     "r1",
+     "r2"
+    ],
+    "(d) an object of a host root: printf is certified (exported by the host runtime), the name nothing defines stays undefined": [
+     "r1",
+     "r2"
+    ],
+    "(d) host_exports: the pinned runtime's exports hold libc, libstdc++ and libgcc_s names and no local name": [
+     "r1",
+     "r2"
+    ],
+    "(d) the same object in a guest root (not a host prefix): printf is undefined too, no boundary": [
+     "r1",
+     "r2"
+    ],
+    "(d) without host roots the rule does not exist: printf and nothere are undefined": [
+     "r1",
+     "r2"
+    ],
+    "(e) a guest object compiled with -moutline-atomics references __aarch64_ldadd*: finding outline-atomic": [
+     "r1",
+     "r2"
+    ],
+    "(e) outside a guest root the clause does not apply (an undefined name only)": [
+     "r1",
+     "r2"
+    ],
+    "(e) the same code with -mno-outline-atomics: no reference, no finding": [
+     "r1",
+     "r2"
+    ],
+    "elf_comdat: signature -> digest, member section indices; no group in a C object": [
+     "r1",
+     "r2"
+    ],
+    "gate on a host-target root without a link: a reference to printf is certified, accepted": [
+     "r1",
+     "r2"
+    ],
+    "gate on a host-target root: a name the host runtime does not export is red": [
+     "r1",
+     "r2"
+    ],
+    "link script defines __image_end, the root links an ELF: the reference is certified": [
+     "r1",
+     "r2"
+    ],
+    "no product root: universe 0, green, accepted by the verdict": [
+     "r1",
+     "r2"
+    ],
+    "recipe key contract_names, alias stub with %s: %s": [
+     "r1",
+     "r2"
+    ],
+    "root without a link: an undefined reference (f_b, no definition anywhere) is red": [
+     "r1",
+     "r2"
+    ],
+    "the same objects, the recipe links no ELF: __image_end is undefined": [
+     "r1",
+     "r2"
+    ],
+    "toy root: every reference resolved, ELF closed: green, accepted (2 references + 5 definitions + the ELF)": [
+     "r1",
+     "r2"
+    ],
+    "toy root: green %d/%d and accepted": [
+     "r1",
+     "r2"
+    ],
+    "weak undefined symbol, root with a link: the link's ldcheck stage is red (the build), so is the gate": [
+     "r1",
+     "r2"
+    ],
+    "weak undefined symbol, root without a link: rule (b) on the object is red": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_linkstrict.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/verdict.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_linkstrict.py",
     "ports/fnv-nx/verify/verdict.py"
    ]
   },
   "test_n3wiring.py": {
-   "references": [
-    {
+   "cases": {
+    "N1 + N3 ok: g and h are NATIVE in bodysel.tsv": [
+     "r1"
+    ],
+    "N3 violation (mutated verdict): g is LIFTED with the N3 reason": [
+     "r1"
+    ],
+    "N3 violation in every body: no NATIVE row": [
+     "r1"
+    ],
+    "a real ok N3 row of an object in no unit never makes a body NATIVE": [
+     "r1"
+    ],
+    "bodysel needs bind first": [
+     "r1"
+    ],
+    "bodysel stage passes --n3 <w>/n3.tsv": [
+     "r1"
+    ],
+    "h is LIFTED iff it inlined g (N4)": [
+     "r1"
+    ],
+    "namegate and r7 universe 0 when every body is LIFTED": [
+     "r1"
+    ],
+    "namegate universe > 0 on the native root, all certified": [
+     "r1"
+    ],
+    "namegate universe shrinks to the native symbols only": [
+     "r1"
+    ],
+    "object with N3 rows and no unit: bind and bodysel run, rows unchanged (2 NATIVE)": [
+     "r1"
+    ],
+    "r7 universe > 0 on the native root, all certified": [
+     "r1"
+    ],
+    "r7 universe: units without a native body leave it (0 if none)": [
+     "r1"
+    ],
+    "the real object carries an N3 row for g": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_contract.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_contract.py",
     "ports/fnv-nx/contract/bind.py",
@@ -539,23 +4121,660 @@
    ]
   },
   "test_objstub.py": {
-   "references": [
-    {
+   "cases": {
+    "%s/wine: kind addr SYMBOL+OFFSET (local C++ static, section+addend resolved): row %s -> %s": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "%s/wine: kind addr: the symbol's address certifies, another symbol is wine-fixme-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "C++ unit has COMDAT groups, .text.startup, .text.unlikely, .text.hot": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "C++: a user noreturn function that is not nothrow is an unwinder by the compiler's flags, so a call in the middle is no finding (stated limit)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "C++: cleanup landing pads (_Unwind_Resume tail), throw, guards, thunks, startup/cold/hot, virtual destructors: only the two process-end calls are findings": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "C++: no T2-noreturn-tail anywhere (use, stat_local end in _Unwind_Resume; thrower ends in __cxa_throw)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "C++: without the unwinder entries the same objects are findings (the rule is what accepts them)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "CLI: clean object exit 0": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "CLI: findings printed sorted, exit 1, deterministic": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "ILP32 toy root (ELF32 objects, aarch64linux32 link): gate green 4/4, accepted by verdict": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "LLVM (a64access) decodes the same words as objdump": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "NOP padding between functions is not uncovered": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "STT_FUNC size 0 -> uncovered": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "V set": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "V: movi, csel, frame shuffle (certified), literal load, fmov imm": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "a fact without a call site: red reach-stale": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "a malformed facts file: red, input error": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "a row of one unit does not certify the other unit's function": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "alias pair (ICF) of a tail-b wine body, one id: both names certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "alias pair of a V body, a constants row for each name: both certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "alias pair of a V body, a row for one name only: the other name is red (V, no constants row)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "alias pair of a bl wine body: both names certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "alias pair with an id that is not a row: both names wine-fixme-unknown-id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "alias pair, a log call whose id is not a constant: the finding is on both names": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "alias pair: the log call is counted once (one body)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "asm udf/hlt/svc/undecodable": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "cache key changes with the os-layer flag and with a terminator the object references": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "cache key holds only the terminators the object mentions: another terminator set, same objects -> cache hit": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "cache key: terminators & names": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "cache: cold (3 processes) == cached == uncached serial; one json per object": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared table: a galaxy-sdk row with fact no-galaxy is accepted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared table: a row is red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared table: header comment and three valid rows (win-doc and wine-9.0 sources, three facts)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared table: malformed row rejected: %r": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared table: missing file is an error": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared table: no header line is an error": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared table: without no-galaxy in its header a galaxy row is red (table and check agree)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: a body that calls set_last_error and returns -1 is no V, no citation needed (not flagged today)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: a body that stores the error code (time-zone / last-error store) is no V (not flagged today)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: a call of the wine citation is not counted as declared": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: a wine citation does not read the declared table (id 31 only in declared_machine.tsv): wine-fixme-unknown-id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: address taken in code: declared-machine-address-taken": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: address taken in data: declared-machine-address-taken": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: call sites per id are counted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: citation id 31 and the row's value (ERROR_FILE_NOT_FOUND): certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: citation in a body that also stores to a global: declared-machine-in-real-body": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: declared and wine citation on different paths: no single table, declared-machine-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: empty table: declared-machine-unknown-id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: id not in declared_machine.tsv: declared-machine-unknown-id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: no-network row, SOCKET_ERROR-like value: certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: no-network row, the body returns 0 (success): declared-machine-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: non-constant id: declared-machine-nonconstant": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: the bare constant body (a registry read of an undeclared key) is V today, no citation: flagged V": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: the wine citation is unchanged next to it (row 5 of the wine table): certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: two citations on one path: declared-machine-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "declared: void row (WSACleanup, Wine 9.0 source): certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "exit: REACH definition ending in BLR is certified by itself; a row of kind exit certifies ex; no row -> indirect-noreturn-tail": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "exit: a definition of REACH that returns -> reach-not-exit": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "exit: a row on a function with a RET path (ex2) or code after the BLR (ex3, ex4 is the reverse) -> exit-mismatch, finding stays; ghost row too": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "frame-shuffling constant function certified by its row; counter result stays red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gate again with the cache: same result": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gate on the toy root (os_layer, constants row, terminators from its own units): green 4/4, accepted by verdict": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gate with no product root: universe 0, green, accepted by verdict": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "gate, wine_fixme table, case %s: expected %s": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "host root compiler x86_64-linux-gnu-gcc-13: the plugin builds against its own plugin headers and finds the noreturn function": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "literal pool under $d: no T finding, constant load is still V": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "loop / counter result / frame save V; store above frame and input read not V": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "matching rows certify (the float constant has no row kind and stays V)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "mismatch / non-V row / stale row -> constants-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "myabort -> T2 (and noreturn tail for g)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "no terminator set -> f not T2": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "not V: x8 store (ii/v), one-branch input use, cmp w0, caller-frame loads (iii)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "reach call in the toy root with no reach facts file: red reach-uncertified, REACH's own definition and the terminator exemption accepted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "reach: constant argument without a facts file -> reach-uncertified; no T2, no T2-noreturn-tail for the reach call": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "reach: constant propagation: two paths with different w0 -> not constant; a call clobbers w0 but a later move fixes it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "reach: facts 7, 65537 (MOVZ+MOVK), 9 certify every call site": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "reach: function pointer to the symbol -> reach-address-taken": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "reach: non-constant argument -> reach-nonconstant (also as a tail call)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "reach: unknown fact 65537 -> reach-uncertified, fact 5 without a call site -> reach-stale": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "rows are keyed (unit, symbol): two local `h` with different results are certified by their own rows": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "stdlib abort/exit -> T2, atexit not": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "stray bytes between functions -> uncovered": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "svc with --os-layer not flagged": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "terminator rule: process end only (terminate, abort, exit); unwinding and throwing are unwinders (~), the EH-resume builtin is one": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "terminators come from the headers the unit includes (stdlib.h via the unit's preprocessed text): abort -> T2 in f_c, nothing else red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "terminators: C++ set has mangled terminate": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "terminators: libc set": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "terminators: tiny header (and the EH-resume builtin as an unwinder)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "the plugin key depends on the root compiler: x86-64 distro gcc and the aarch64 compiler give different plugins": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "toy root without the constants row of f_b: red, names the function by unit path": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "trap -> T1": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine branch: branch id with a fixed-result id: wine-fixme-branch-mixed": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine branch: id in a real body: certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine branch: id in a vacuous body: wine-fixme-branch-in-vacuous-body": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine branch: non-branch id in a real body: wine-fixme-in-real-body": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine branch: two branch ids in one real body: certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine branch: unknown id in a real body stays a finding": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine table: header comment and a valid row": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine table: kind branch with value - parses, contract name may repeat": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine table: malformed row rejected: %r": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine table: missing file is an error": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine tail: a store before the tail call: wine-fixme-in-real-body": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine tail: a tail b of a function that is not cited is no wine body (a real body, no wine-* finding), as before": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine tail: a u32 row needs the result the tail call leaves in x0 (the callee's): wine-fixme-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine tail: assembled `mov w0,6; b fnvnx_wine_fixme`: certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine tail: compiler-made `b fnvnx_wine_fixme` (void row): certified like bl + ret": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine tail: id not in the table: wine-fixme-unknown-id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine tail: two ids on two paths: wine-fixme-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine u32nz1: a body that dereferences p: wine-fixme-in-real-body": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine u32nz1: arithmetic on p: not certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine u32nz1: p ? 0 : 0x8876086C certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine u32nz1: swapped row values: wine-fixme-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: address taken in code: wine-fixme-address-taken": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: address taken in data: wine-fixme-address-taken": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: another call in the body is a real body": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: call sites per id are counted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: empty table (the tree's header-only wine_fixme.tsv): wine-fixme-unknown-id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: id not in the table: wine-fixme-unknown-id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: log call in a function that also stores to a global: wine-fixme-in-real-body": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: log call with constant id 5 and the row's value: certified (no V, no call finding)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: non-constant id: wine-fixme-nonconstant": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: result differs from the row: wine-fixme-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: two different ids on two paths: no single id (wine_path_id None); one id on both paths: that id": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: two log calls on one path: not exactly one id: wine-fixme-mismatch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wine: void kind, log call only: certified": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "with the fact 42 in the facts file of the same tree: green": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/objstub.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/objstub_plugin.cc",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## verify/gate_objstub.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/objstub.py",
     "ports/fnv-nx/verify/objstub_plugin.cc",
@@ -565,103 +4784,1976 @@
    ]
   },
   "test_opentrace.py": {
-   "references": [
-    {
+   "cases": {
+    "check: fork+chdir+relative+unfinished+failed": [
+     "r1"
+    ],
+    "key: stable, changes with input content and env value": [
+     "r1"
+    ],
+    "run: child with cd + relative path resolves": [
+     "r1"
+    ],
+    "run: declared input + own output -> green": [
+     "r1"
+    ],
+    "run: pre-existing output read -> red stale": [
+     "r1"
+    ],
+    "run: undeclared read -> red outside": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/opentrace.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/opentrace.py"
    ]
   },
   "test_oracle.py": {
-   "references": [
-    {
+   "cases": {
+    "a product subject may cite a file of a ref root": [
+     "r1"
+    ],
+    "bad_a": [
+     "r1"
+    ],
+    "bad_b": [
+     "r1"
+    ],
+    "closure follows import and from-import": [
+     "r1"
+    ],
+    "contract table certified": [
+     "r1"
+    ],
+    "entry without a test file: every test uncertified": [
+     "r1"
+    ],
+    "external + probe + spec together -> green": [
+     "r1"
+    ],
+    "external: pinned name and a file of it -> green": [
+     "r1"
+    ],
+    "fetch: an unknown commit is an error, not a tree": [
+     "r1"
+    ],
+    "fetch: the bare fetch is kept by commit": [
+     "r1"
+    ],
+    "fetch: tree hash of the commit and its files": [
+     "r1"
+    ],
+    "gate program: green, result in the gate format": [
+     "r1"
+    ],
+    "gate program: test without a declaration -> red, exit 2": [
+     "r1"
+    ],
+    "good declaration: all certified": [
+     "r1"
+    ],
+    "malformed json is not a declaration": [
+     "r1"
+    ],
+    "missing oracle.json: every test of the DIR uncertified": [
+     "r1"
+    ],
+    "model outside the closure certified": [
+     "r1"
+    ],
+    "no pinned exe: wine-exe uncertified": [
+     "r1"
+    ],
+    "no universe: nothing uncertified": [
+     "r1"
+    ],
+    "probe: probe source, platform and dump hash -> green": [
+     "r1"
+    ],
+    "product subject with a spec outside the product root certified": [
+     "r1"
+    ],
+    "repeated entry is not a declaration": [
+     "r1"
+    ],
+    "spec heading in a doc root certified": [
+     "r1"
+    ],
+    "spec with a line range certified": [
+     "r1"
+    ],
+    "spec with a one-line range certified": [
+     "r1"
+    ],
+    "unknown top-level key: every test uncertified": [
+     "r1"
+    ],
+    "wrong format: every test uncertified": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/gate_oracle.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_oracle.py"
    ]
   },
   "test_oraclecheck.py": {
-   "references": [
-    {
+   "cases": {
+    "a reference the run opened is listed, not undeclared": [
+     "r1"
+    ],
+    "a subject file never opened is reported": [
+     "r1"
+    ],
+    "a tracked file outside the closure is undeclared": [
+     "r1"
+    ],
+    "no entry: every opened file outside the test dir is undeclared": [
+     "r1"
+    ],
+    "optimised pyc maps to its source": [
+     "r1"
+    ],
+    "other paths unchanged": [
+     "r1"
+    ],
+    "pyc maps to its source": [
+     "r1"
+    ],
+    "subject, its imports, the test and its fixtures: nothing undeclared": [
+     "r1"
+    ],
+    "trace: opened and executed tracked files, pyc as source, failures and outside paths dropped": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/oraclecheck.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/oraclecheck.py"
    ]
   },
   "test_plugins.py": {
-   "references": [
-    {
+   "cases": {
+    "(i) noreturn __builtin_longjmp: no fence needed after it": [
+     "r1"
+    ],
+    "(ii) __builtin_setjmp: dmb ishld at the receiver, before the load": [
+     "r1"
+    ],
+    "(iii) catch landing pad: dmb ishld before the load in the catch": [
+     "r1"
+    ],
+    "(iv) setjmp(): dmb ishld right after the call": [
+     "r1"
+    ],
+    "-fplugin in flags is red": [
+     "r1"
+    ],
+    ".fnvnx.addr lines are <symbol>\\t<seen>\\t<routed> and name the unit's functions": [
+     "r1"
+    ],
+    "A/B-only argument value is red": [
+     "r1"
+    ],
+    "C++ root with no cxx_origin is red": [
+     "r1"
+    ],
+    "CC cannot read an external (.incbin of its file fails)": [
+     "r1"
+    ],
+    "CC stage declares all plugins as inputs and loads them": [
+     "r1"
+    ],
+    "CC stage document holds no /ext/pack, a PP document does": [
+     "r1"
+    ],
+    "HARDREG: a global register variable is no memory: no ldar/stlr/dmb, no ICE": [
+     "r1"
+    ],
+    "HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered": [
+     "r1"
+    ],
+    "ORDER-CONT: longjmp / setjmp / try-catch fixtures compile with no error": [
+     "r1"
+    ],
+    "PP stage has no plugin": [
+     "r1"
+    ],
+    "addr plugin wrote .fnvnx.addr (symbol, seen, routed; seen == routed), no .cold section": [
+     "r1"
+    ],
+    "build gate is red for a native root without fnvnx_ftoi": [
+     "r1"
+    ],
+    "dispatch plugin routes an indirect call through fnvnx_dispatch": [
+     "r1"
+    ],
+    "double -> __int128 fails the build with an FTOI error naming both types": [
+     "r1"
+    ],
+    "external commit change: PP re-runs, CC runs nothing": [
+     "r1"
+    ],
+    "float -> int is _ftol: 0x80000000 for NaN and out of range": [
+     "r1"
+    ],
+    "lifted root builds green with only fnvnx_ftoi (lifted)": [
+     "r1"
+    ],
+    "lifted root naming no external is red": [
+     "r1"
+    ],
+    "lifted root with a tracked C++ unit is red": [
+     "r1"
+    ],
+    "lifted root with fnvnx_ftoi in mode lifted is valid": [
+     "r1"
+    ],
+    "lifted root with fnvnx_ftoi in mode native is red": [
+     "r1"
+    ],
+    "lifted root without fnvnx_ftoi is red": [
+     "r1"
+    ],
+    "lifted_by naming %s is red": [
+     "r1"
+    ],
+    "native root builds with the plugins": [
+     "r1"
+    ],
+    "native root with both plugins is valid": [
+     "r1"
+    ],
+    "native root without %s is red": [
+     "r1"
+    ],
+    "native root without a semantics flag is red": [
+     "r1"
+    ],
+    "native root without plugins is red": [
+     "r1"
+    ],
+    "pi, names and layout plugins wrote their sections": [
+     "r1"
+    ],
+    "plugin .so is byte-equal in two cold stores": [
+     "r1"
+    ],
+    "plugin source outside the pinned file is red": [
+     "r1"
+    ],
+    "plugins load in compile.sh order": [
+     "r1"
+    ],
+    "plugins out of load order are red": [
+     "r1"
+    ],
+    "plugins without plugin_cxx is red": [
+     "r1"
+    ],
+    "the .so on disk is the one hashed": [
+     "r1"
+    ],
+    "the ordinary conversions of the same root still compile": [
+     "r1"
+    ],
+    "volatile read is ldar": [
+     "r1"
+    ],
+    "volatile write is stlr": [
+     "r1"
+    ],
+    "warm build runs no stage (all hits, same objects)": [
+     "r1"
+    ],
+    "without the plugin the conversion is the bare fcvtzs": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/unitstage.py"
    ]
   },
   "test_producers.py": {
-   "references": [
-    {
+   "cases": {
+    "a C++ object does not satisfy the C set's absence of C++-only flags": [
+     "r1"
+    ],
+    "a C++ object is judged against the C++ set": [
+     "r1"
+    ],
+    "an assembler unit is unproven": [
+     "r1"
+    ],
+    "archive members are judged one by one": [
+     "r1"
+    ],
+    "compile %s": [
+     "r1"
+    ],
+    "cu_producers reads a plain object and an archive's members": [
+     "r1"
+    ],
+    "expected set: the semantic flags the compiler records, no -g/-O/-W/-D/-std": [
+     "r1"
+    ],
+    "foreign_items: findings are exactly the object with the missing flag (twice) and the shared object": [
+     "r1"
+    ],
+    "foreign_items: items are the archive members, the objects and the shared object": [
+     "r1"
+    ],
+    "judge: a C++ unit needs the C++ set": [
+     "r1"
+    ],
+    "judge: missing, extra, no producer, assembler, other compiler": [
+     "r1"
+    ],
+    "judge: producers with the expected options (per-root classes ignored) certify": [
+     "r1"
+    ],
+    "judge: the detail names the extra and the missing option": [
+     "r1"
+    ],
+    "link_inputs: explicit path, -l through -L (.a), shared object, own objects and unknown paths ignored": [
+     "r1"
+    ],
+    "real objects: the object built with the set is certified; a missing flag, a foreign flag and a no -g object are findings": [
+     "r1"
+    ],
+    "the missing flag is named": [
+     "r1"
+    ],
+    "the pinned external is fetched": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/producers.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/producers.py",
     "ports/fnv-nx/verify/gate_linkstrict.py"
    ]
   },
   "test_puregate.py": {
-   "references": [
-    {
+   "cases": {
+    "DirEntry.inode()": [
+     "r1",
+     "r2"
+    ],
+    "__hash__ call": [
+     "r1",
+     "r2"
+    ],
+    "__hash__ definition using id": [
+     "r1",
+     "r2"
+    ],
+    "cli: a given file resolves from the importing file's directory only": [
+     "r1",
+     "r2"
+    ],
+    "cli: audit-stdlib prints per module and a summary, exit 0": [
+     "r1",
+     "r2"
+    ],
+    "cli: clean exit 0": [
+     "r1",
+     "r2"
+    ],
+    "cli: dir walk sorted, shell + syntax reported, non-py ignored": [
+     "r1",
+     "r2"
+    ],
+    "cli: external modules listed in summary": [
+     "r1",
+     "r2"
+    ],
+    "cli: json schema, tool hash, counts": [
+     "r1",
+     "r2"
+    ],
+    "cli: json unproven + external fields": [
+     "r1",
+     "r2"
+    ],
+    "cli: missing path is usage error 1": [
+     "r1",
+     "r2"
+    ],
+    "cli: no path is usage error 1": [
+     "r1",
+     "r2"
+    ],
+    "cli: one shell violation per file": [
+     "r1",
+     "r2"
+    ],
+    "cli: project module outside the PATHs is import-unlisted": [
+     "r1",
+     "r2"
+    ],
+    "cli: project module violation reported under its own path": [
+     "r1",
+     "r2"
+    ],
+    "cli: root directory resolves imports of nested files": [
+     "r1",
+     "r2"
+    ],
+    "cli: several paths": [
+     "r1",
+     "r2"
+    ],
+    "cli: stdout capped at 200 violation lines, json has all": [
+     "r1",
+     "r2"
+    ],
+    "cli: summary line": [
+     "r1",
+     "r2"
+    ],
+    "cli: summary reports unproven and external": [
+     "r1",
+     "r2"
+    ],
+    "cli: unknown command is usage error 1": [
+     "r1",
+     "r2"
+    ],
+    "cli: violations exit 2, line format": [
+     "r1",
+     "r2"
+    ],
+    "clock attr ": [
+     "r1",
+     "r2"
+    ],
+    "clock date.today": [
+     "r1",
+     "r2"
+    ],
+    "clock datetime as dt": [
+     "r1",
+     "r2"
+    ],
+    "clock datetime.today": [
+     "r1",
+     "r2"
+    ],
+    "clock datetime.utcnow": [
+     "r1",
+     "r2"
+    ],
+    "clock from datetime import datetime": [
+     "r1",
+     "r2"
+    ],
+    "clock from os import path as p": [
+     "r1",
+     "r2"
+    ],
+    "clock from os.path import": [
+     "r1",
+     "r2"
+    ],
+    "clock from time import sleep clean": [
+     "r1",
+     "r2"
+    ],
+    "clock from-import": [
+     "r1",
+     "r2"
+    ],
+    "clock from-import-as": [
+     "r1",
+     "r2"
+    ],
+    "clock import os.path": [
+     "r1",
+     "r2"
+    ],
+    "clock import os.path as q": [
+     "r1",
+     "r2"
+    ],
+    "clock import-as": [
+     "r1",
+     "r2"
+    ],
+    "clock os.path.getmtime": [
+     "r1",
+     "r2"
+    ],
+    "clock posixpath": [
+     "r1",
+     "r2"
+    ],
+    "clock st_mtime attr": [
+     "r1",
+     "r2"
+    ],
+    "clock st_size clean": [
+     "r1",
+     "r2"
+    ],
+    "clock stat.ST_MTIME": [
+     "r1",
+     "r2"
+    ],
+    "clock time.sleep clean": [
+     "r1",
+     "r2"
+    ],
+    "clock time.time": [
+     "r1",
+     "r2"
+    ],
+    "clock time.time_ns": [
+     "r1",
+     "r2"
+    ],
+    "clock timedelta clean": [
+     "r1",
+     "r2"
+    ],
+    "clock utime None": [
+     "r1",
+     "r2"
+    ],
+    "clock utime no times": [
+     "r1",
+     "r2"
+    ],
+    "clock utime ns clean": [
+     "r1",
+     "r2"
+    ],
+    "clock utime times=None": [
+     "r1",
+     "r2"
+    ],
+    "clock utime tuple clean": [
+     "r1",
+     "r2"
+    ],
+    "clock utime variable times": [
+     "r1",
+     "r2"
+    ],
+    "completion SimpleQueue": [
+     "r1",
+     "r2"
+    ],
+    "completion as_completed": [
+     "r1",
+     "r2"
+    ],
+    "completion executor map clean": [
+     "r1",
+     "r2"
+    ],
+    "completion from-import": [
+     "r1",
+     "r2"
+    ],
+    "completion imap_unordered": [
+     "r1",
+     "r2"
+    ],
+    "completion multiprocessing.Queue": [
+     "r1",
+     "r2"
+    ],
+    "completion queue.Queue": [
+     "r1",
+     "r2"
+    ],
+    "completion wait": [
+     "r1",
+     "r2"
+    ],
+    "concurrent.futures executors": [
+     "r1",
+     "r2"
+    ],
+    "concurrent.futures unlisted": [
+     "r1",
+     "r2"
+    ],
+    "datetime constructors clean": [
+     "r1",
+     "r2"
+    ],
+    "datetime instance .now()": [
+     "r1",
+     "r2"
+    ],
+    "datetime instance .today()": [
+     "r1",
+     "r2"
+    ],
+    "datetime instance .utcnow()": [
+     "r1",
+     "r2"
+    ],
+    "dynamic ": [
+     "r1",
+     "r2"
+    ],
+    "dynamic alias module": [
+     "r1",
+     "r2"
+    ],
+    "dynamic alias via import-as": [
+     "r1",
+     "r2"
+    ],
+    "dynamic builtins module": [
+     "r1",
+     "r2"
+    ],
+    "dynamic class alias": [
+     "r1",
+     "r2"
+    ],
+    "dynamic delattr non-const": [
+     "r1",
+     "r2"
+    ],
+    "dynamic getattr alias": [
+     "r1",
+     "r2"
+    ],
+    "dynamic getattr const clean": [
+     "r1",
+     "r2"
+    ],
+    "dynamic getattr module const": [
+     "r1",
+     "r2"
+    ],
+    "dynamic getattr module non-const": [
+     "r1",
+     "r2"
+    ],
+    "dynamic getattr obj non-const": [
+     "r1",
+     "r2"
+    ],
+    "dynamic getattr st_mtime const": [
+     "r1",
+     "r2"
+    ],
+    "dynamic globals": [
+     "r1",
+     "r2"
+    ],
+    "dynamic importlib": [
+     "r1",
+     "r2"
+    ],
+    "dynamic locals": [
+     "r1",
+     "r2"
+    ],
+    "dynamic module as argument": [
+     "r1",
+     "r2"
+    ],
+    "dynamic module attr base clean": [
+     "r1",
+     "r2"
+    ],
+    "dynamic module in container": [
+     "r1",
+     "r2"
+    ],
+    "dynamic setattr non-const": [
+     "r1",
+     "r2"
+    ],
+    "dynamic star import": [
+     "r1",
+     "r2"
+    ],
+    "dynamic sys.modules": [
+     "r1",
+     "r2"
+    ],
+    "dynamic vars()": [
+     "r1",
+     "r2"
+    ],
+    "dynamic vars(x)": [
+     "r1",
+     "r2"
+    ],
+    "entropy hash()": [
+     "r1",
+     "r2"
+    ],
+    "entropy id()": [
+     "r1",
+     "r2"
+    ],
+    "entropy import alone clean": [
+     "r1",
+     "r2"
+    ],
+    "entropy module-level def id clean": [
+     "r1",
+     "r2"
+    ],
+    "entropy os.getrandom": [
+     "r1",
+     "r2"
+    ],
+    "entropy os.urandom": [
+     "r1",
+     "r2"
+    ],
+    "entropy random": [
+     "r1",
+     "r2"
+    ],
+    "entropy random Random class": [
+     "r1",
+     "r2"
+    ],
+    "entropy random from-import": [
+     "r1",
+     "r2"
+    ],
+    "entropy secrets": [
+     "r1",
+     "r2"
+    ],
+    "entropy shadowed id/hash clean": [
+     "r1",
+     "r2"
+    ],
+    "entropy tempfile": [
+     "r1",
+     "r2"
+    ],
+    "entropy uuid1": [
+     "r1",
+     "r2"
+    ],
+    "entropy uuid4": [
+     "r1",
+     "r2"
+    ],
+    "entropy uuid5 clean": [
+     "r1",
+     "r2"
+    ],
+    "external modules reported": [
+     "r1",
+     "r2"
+    ],
+    "frozenset call for": [
+     "r1",
+     "r2"
+    ],
+    "fstat result assigned": [
+     "r1",
+     "r2"
+    ],
+    "glob members": [
+     "r1",
+     "r2"
+    ],
+    "glob unlisted member": [
+     "r1",
+     "r2"
+    ],
+    "gzip non-constant mode": [
+     "r1",
+     "r2"
+    ],
+    "gzip splat arguments": [
+     "r1",
+     "r2"
+    ],
+    "gzip unlisted member": [
+     "r1",
+     "r2"
+    ],
+    "gzip.GzipFile fileobj without mode": [
+     "r1",
+     "r2"
+    ],
+    "gzip.GzipFile read clean": [
+     "r1",
+     "r2"
+    ],
+    "gzip.GzipFile write mtime=None": [
+     "r1",
+     "r2"
+    ],
+    "gzip.GzipFile write with mtime=0 clean": [
+     "r1",
+     "r2"
+    ],
+    "gzip.GzipFile write without mtime": [
+     "r1",
+     "r2"
+    ],
+    "gzip.compress with mtime=0 clean": [
+     "r1",
+     "r2"
+    ],
+    "gzip.compress without mtime": [
+     "r1",
+     "r2"
+    ],
+    "gzip.open append": [
+     "r1",
+     "r2"
+    ],
+    "gzip.open default read clean": [
+     "r1",
+     "r2"
+    ],
+    "gzip.open not called": [
+     "r1",
+     "r2"
+    ],
+    "gzip.open write": [
+     "r1",
+     "r2"
+    ],
+    "gzip.open write with mtime kw is still clock": [
+     "r1",
+     "r2"
+    ],
+    "host ": [
+     "r1",
+     "r2"
+    ],
+    "host /proc exact": [
+     "r1",
+     "r2"
+    ],
+    "host /proc/ path": [
+     "r1",
+     "r2"
+    ],
+    "host /process clean": [
+     "r1",
+     "r2"
+    ],
+    "host /sys exact": [
+     "r1",
+     "r2"
+    ],
+    "host /sys/ path": [
+     "r1",
+     "r2"
+    ],
+    "host getcwd/environ clean": [
+     "r1",
+     "r2"
+    ],
+    "host module ": [
+     "r1",
+     "r2"
+    ],
+    "host module from-import": [
+     "r1",
+     "r2"
+    ],
+    "host path in f-string": [
+     "r1",
+     "r2"
+    ],
+    "import banned module alone is clean": [
+     "r1",
+     "r2"
+    ],
+    "import external ": [
+     "r1",
+     "r2"
+    ],
+    "import project: found via given root": [
+     "r1",
+     "r2"
+    ],
+    "import project: from package import attribute": [
+     "r1",
+     "r2"
+    ],
+    "import project: from package import submodule": [
+     "r1",
+     "r2"
+    ],
+    "import project: from-import sibling": [
+     "r1",
+     "r2"
+    ],
+    "import project: import sibling": [
+     "r1",
+     "r2"
+    ],
+    "import project: names stay unruled": [
+     "r1",
+     "r2"
+    ],
+    "import project: namespace dir has no attributes": [
+     "r1",
+     "r2"
+    ],
+    "import project: not in the checked set": [
+     "r1",
+     "r2"
+    ],
+    "import project: other name unresolved": [
+     "r1",
+     "r2"
+    ],
+    "import project: package": [
+     "r1",
+     "r2"
+    ],
+    "import project: package module missing": [
+     "r1",
+     "r2"
+    ],
+    "import project: relative": [
+     "r1",
+     "r2"
+    ],
+    "import project: relative unresolved": [
+     "r1",
+     "r2"
+    ],
+    "import project: relative up": [
+     "r1",
+     "r2"
+    ],
+    "import project: shadowing a listed name is ambiguous": [
+     "r1",
+     "r2"
+    ],
+    "import pure ": [
+     "r1",
+     "r2"
+    ],
+    "import pure submodule": [
+     "r1",
+     "r2"
+    ],
+    "import restricted ": [
+     "r1",
+     "r2"
+    ],
+    "import restricted: from concurrent import futures": [
+     "r1",
+     "r2"
+    ],
+    "import star of unlisted also dynamic": [
+     "r1",
+     "r2"
+    ],
+    "import unlisted dotted": [
+     "r1",
+     "r2"
+    ],
+    "import unlisted from-import": [
+     "r1",
+     "r2"
+    ],
+    "import unlisted inside function": [
+     "r1",
+     "r2"
+    ],
+    "import unlisted module": [
+     "r1",
+     "r2"
+    ],
+    "import unlisted stdlib: ctypes": [
+     "r1",
+     "r2"
+    ],
+    "import unlisted stdlib: logging": [
+     "r1",
+     "r2"
+    ],
+    "import unlisted stdlib: operator": [
+     "r1",
+     "r2"
+    ],
+    "import unlisted stdlib: operator.attrgetter": [
+     "r1",
+     "r2"
+    ],
+    "inode attr ": [
+     "r1",
+     "r2"
+    ],
+    "inode negative": [
+     "r1",
+     "r2"
+    ],
+    "inode samefile": [
+     "r1",
+     "r2"
+    ],
+    "list literal clean": [
+     "r1",
+     "r2"
+    ],
+    "listing .glob method": [
+     "r1",
+     "r2"
+    ],
+    "listing .rglob method": [
+     "r1",
+     "r2"
+    ],
+    "listing for-loop": [
+     "r1",
+     "r2"
+    ],
+    "listing from-import sorted clean": [
+     "r1",
+     "r2"
+    ],
+    "listing glob sorted clean": [
+     "r1",
+     "r2"
+    ],
+    "listing glob.glob": [
+     "r1",
+     "r2"
+    ],
+    "listing glob.iglob": [
+     "r1",
+     "r2"
+    ],
+    "listing iterdir": [
+     "r1",
+     "r2"
+    ],
+    "listing key= not first positional": [
+     "r1",
+     "r2"
+    ],
+    "listing list()": [
+     "r1",
+     "r2"
+    ],
+    "listing method alias": [
+     "r1",
+     "r2"
+    ],
+    "listing method sorted clean": [
+     "r1",
+     "r2"
+    ],
+    "listing scandir": [
+     "r1",
+     "r2"
+    ],
+    "listing sorted clean": [
+     "r1",
+     "r2"
+    ],
+    "listing sorted reverse clean": [
+     "r1",
+     "r2"
+    ],
+    "listing sorted shadowed": [
+     "r1",
+     "r2"
+    ],
+    "lstat method result assigned": [
+     "r1",
+     "r2"
+    ],
+    "lstat result assigned": [
+     "r1",
+     "r2"
+    ],
+    "max key=id": [
+     "r1",
+     "r2"
+    ],
+    "min key=hash": [
+     "r1",
+     "r2"
+    ],
+    "multiprocessing Pool": [
+     "r1",
+     "r2"
+    ],
+    "multiprocessing unlisted": [
+     "r1",
+     "r2"
+    ],
+    "object.__hash__": [
+     "r1",
+     "r2"
+    ],
+    "os allowed members": [
+     "r1",
+     "r2"
+    ],
+    "os from-import member-unlisted": [
+     "r1",
+     "r2"
+    ],
+    "os.getloadavg keeps host": [
+     "r1",
+     "r2"
+    ],
+    "os.nice is member-unlisted": [
+     "r1",
+     "r2"
+    ],
+    "os.path members clean": [
+     "r1",
+     "r2"
+    ],
+    "os.system unlisted": [
+     "r1",
+     "r2"
+    ],
+    "pathlib classes": [
+     "r1",
+     "r2"
+    ],
+    "pathlib unlisted member": [
+     "r1",
+     "r2"
+    ],
+    "queue.LifoQueue unlisted": [
+     "r1",
+     "r2"
+    ],
+    "reflection attribute ": [
+     "r1",
+     "r2"
+    ],
+    "reflection dir shadowed clean": [
+     "r1",
+     "r2"
+    ],
+    "reflection dir()": [
+     "r1",
+     "r2"
+    ],
+    "reflection dir(x)": [
+     "r1",
+     "r2"
+    ],
+    "reflection getattr const __dict__": [
+     "r1",
+     "r2"
+    ],
+    "reflection type(x).__dict__": [
+     "r1",
+     "r2"
+    ],
+    "reflection vars(x)": [
+     "r1",
+     "r2"
+    ],
+    "resource.getrlimit unlisted": [
+     "r1",
+     "r2"
+    ],
+    "scope class-body name shadows only in class": [
+     "r1",
+     "r2"
+    ],
+    "scope comprehension var shadows": [
+     "r1",
+     "r2"
+    ],
+    "scope except-as shadows": [
+     "r1",
+     "r2"
+    ],
+    "scope for target shadows": [
+     "r1",
+     "r2"
+    ],
+    "scope from-import in nested": [
+     "r1",
+     "r2"
+    ],
+    "scope global rebind is ambiguous": [
+     "r1",
+     "r2"
+    ],
+    "scope import inside function": [
+     "r1",
+     "r2"
+    ],
+    "scope import inside function not leaked": [
+     "r1",
+     "r2"
+    ],
+    "scope import twice same target ok": [
+     "r1",
+     "r2"
+    ],
+    "scope lambda param shadows": [
+     "r1",
+     "r2"
+    ],
+    "scope local assignment shadows": [
+     "r1",
+     "r2"
+    ],
+    "scope module import seen in nested class method": [
+     "r1",
+     "r2"
+    ],
+    "scope nested function sees outer shadow": [
+     "r1",
+     "r2"
+    ],
+    "scope param shadow is local": [
+     "r1",
+     "r2"
+    ],
+    "scope param shadows": [
+     "r1",
+     "r2"
+    ],
+    "scope relative import is local": [
+     "r1",
+     "r2"
+    ],
+    "scope same-scope import+assign is ambiguous": [
+     "r1",
+     "r2"
+    ],
+    "scope walrus in comprehension binds outside": [
+     "r1",
+     "r2"
+    ],
+    "self: at most 410 lines (logic only; tables are in puregate_policy.py)": [
+     "r1",
+     "r2"
+    ],
+    "self: gate source passes the gate": [
+     "r1",
+     "r2"
+    ],
+    "self: policy module is tables only (no def/class)": [
+     "r1",
+     "r2"
+    ],
+    "self: policy tables pass the gate": [
+     "r1",
+     "r2"
+    ],
+    "set comp iterated": [
+     "r1",
+     "r2"
+    ],
+    "set literal for": [
+     "r1",
+     "r2"
+    ],
+    "set literal in comprehension": [
+     "r1",
+     "r2"
+    ],
+    "set sorted clean": [
+     "r1",
+     "r2"
+    ],
+    "set() call for": [
+     "r1",
+     "r2"
+    ],
+    "set: enumerate(set())": [
+     "r1",
+     "r2"
+    ],
+    "set: join(set())": [
+     "r1",
+     "r2"
+    ],
+    "set: len/min/max/in/any clean": [
+     "r1",
+     "r2"
+    ],
+    "set: list pop clean": [
+     "r1",
+     "r2"
+    ],
+    "set: list(frozenset())": [
+     "r1",
+     "r2"
+    ],
+    "set: list(set comprehension)": [
+     "r1",
+     "r2"
+    ],
+    "set: list(set literal)": [
+     "r1",
+     "r2"
+    ],
+    "set: list(set())": [
+     "r1",
+     "r2"
+    ],
+    "set: map over set": [
+     "r1",
+     "r2"
+    ],
+    "set: next(iter(set()))": [
+     "r1",
+     "r2"
+    ],
+    "set: operator result iterated": [
+     "r1",
+     "r2"
+    ],
+    "set: pop on set call": [
+     "r1",
+     "r2"
+    ],
+    "set: pop on set literal": [
+     "r1",
+     "r2"
+    ],
+    "set: shadowed list is clean": [
+     "r1",
+     "r2"
+    ],
+    "set: sorted set clean": [
+     "r1",
+     "r2"
+    ],
+    "set: star in call": [
+     "r1",
+     "r2"
+    ],
+    "set: star in list": [
+     "r1",
+     "r2"
+    ],
+    "set: tuple(set())": [
+     "r1",
+     "r2"
+    ],
+    "set: union method result listed": [
+     "r1",
+     "r2"
+    ],
+    "set: unpacking": [
+     "r1",
+     "r2"
+    ],
+    "set: variables stay assumption (A-hashseed)": [
+     "r1",
+     "r2"
+    ],
+    "set: yield from": [
+     "r1",
+     "r2"
+    ],
+    "shutil allowed members": [
+     "r1",
+     "r2"
+    ],
+    "shutil.copy unlisted": [
+     "r1",
+     "r2"
+    ],
+    "shutil.copy2 is clock": [
+     "r1",
+     "r2"
+    ],
+    "shutil.copystat is clock": [
+     "r1",
+     "r2"
+    ],
+    "shutil.copytree is clock": [
+     "r1",
+     "r2"
+    ],
+    "shutil.get_terminal_size is host": [
+     "r1",
+     "r2"
+    ],
+    "shutil.make_archive is clock": [
+     "r1",
+     "r2"
+    ],
+    "sorted key=id": [
+     "r1",
+     "r2"
+    ],
+    "stat entry method clean": [
+     "r1",
+     "r2"
+    ],
+    "stat from-import assigned": [
+     "r1",
+     "r2"
+    ],
+    "stat getsize/isfile family stays allowed": [
+     "r1",
+     "r2"
+    ],
+    "stat method result assigned": [
+     "r1",
+     "r2"
+    ],
+    "stat module name not a pure module escape": [
+     "r1",
+     "r2"
+    ],
+    "stat not called": [
+     "r1",
+     "r2"
+    ],
+    "stat other attribute": [
+     "r1",
+     "r2"
+    ],
+    "stat passed as function": [
+     "r1",
+     "r2"
+    ],
+    "stat result assigned": [
+     "r1",
+     "r2"
+    ],
+    "stat result indexed": [
+     "r1",
+     "r2"
+    ],
+    "stat result passed on": [
+     "r1",
+     "r2"
+    ],
+    "stat result unpacked": [
+     "r1",
+     "r2"
+    ],
+    "stat st_mtime is reported once as clock": [
+     "r1",
+     "r2"
+    ],
+    "stat st_size clean": [
+     "r1",
+     "r2"
+    ],
+    "subprocess all members": [
+     "r1",
+     "r2"
+    ],
+    "syntax error": [
+     "r1",
+     "r2"
+    ],
+    "sys allowed members": [
+     "r1",
+     "r2"
+    ],
+    "sys._getframe unlisted": [
+     "r1",
+     "r2"
+    ],
+    "sys.flags other attribute unlisted": [
+     "r1",
+     "r2"
+    ],
+    "sys.getrefcount unlisted": [
+     "r1",
+     "r2"
+    ],
+    "sys.getsizeof unlisted": [
+     "r1",
+     "r2"
+    ],
+    "sys.settrace unlisted": [
+     "r1",
+     "r2"
+    ],
+    "tarfile TarFile write": [
+     "r1",
+     "r2"
+    ],
+    "tarfile non-constant mode": [
+     "r1",
+     "r2"
+    ],
+    "tarfile read clean": [
+     "r1",
+     "r2"
+    ],
+    "tarfile write": [
+     "r1",
+     "r2"
+    ],
+    "threading members": [
+     "r1",
+     "r2"
+    ],
+    "threading.active_count unlisted": [
+     "r1",
+     "r2"
+    ],
+    "threading.enumerate unlisted": [
+     "r1",
+     "r2"
+    ],
+    "time.monotonic keeps clock": [
+     "r1",
+     "r2"
+    ],
+    "unlisted member dedup on deeper chain": [
+     "r1",
+     "r2"
+    ],
+    "unproven: a violation is not counted": [
+     "r1",
+     "r2"
+    ],
+    "unproven: attribute iteration counted": [
+     "r1",
+     "r2"
+    ],
+    "unproven: bare Name iteration counted": [
+     "r1",
+     "r2"
+    ],
+    "unproven: calls and literals not counted": [
+     "r1",
+     "r2"
+    ],
+    "unproven: comprehension counted": [
+     "r1",
+     "r2"
+    ],
+    "unproven: nested function counted once": [
+     "r1",
+     "r2"
+    ],
+    "uuid constructors": [
+     "r1",
+     "r2"
+    ],
+    "uuid.getnode unlisted": [
+     "r1",
+     "r2"
+    ],
+    "walk accepted: files.sort second": [
+     "r1",
+     "r2"
+    ],
+    "walk accepted: fwalk 4 targets": [
+     "r1",
+     "r2"
+    ],
+    "walk accepted: prune after sort": [
+     "r1",
+     "r2"
+    ],
+    "walk accepted: sorted(files)": [
+     "r1",
+     "r2"
+    ],
+    "walk rejected: bottom-up": [
+     "r1",
+     "r2"
+    ],
+    "walk rejected: dirs rebound": [
+     "r1",
+     "r2"
+    ],
+    "walk rejected: dirs.sort not first": [
+     "r1",
+     "r2"
+    ],
+    "walk rejected: files unsorted": [
+     "r1",
+     "r2"
+    ],
+    "walk rejected: files.sort third": [
+     "r1",
+     "r2"
+    ],
+    "walk rejected: list(os.walk)": [
+     "r1",
+     "r2"
+    ],
+    "walk rejected: no dirs.sort": [
+     "r1",
+     "r2"
+    ],
+    "zipfile append mode kw": [
+     "r1",
+     "r2"
+    ],
+    "zipfile non-constant mode": [
+     "r1",
+     "r2"
+    ],
+    "zipfile read clean": [
+     "r1",
+     "r2"
+    ],
+    "zipfile write": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/puregate.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/puregate_policy.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/puregate.py",
     "ports/fnv-nx/verify/puregate_policy.py"
    ]
   },
   "test_recipe.py": {
-   "references": [
-    {
+   "cases": {
+    "%s gate with no product root: universe 0, green": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "build gate green 5/5 (4 units + ELF), result accepted by verdict": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "build gate red names the failing unit; accepted by verdict._gate_result": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "commit not in the repository: red naming the external": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "contract_names that is no tracked file rejected, a tracked file accepted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "determinism gate green on the toy root, accepted by verdict": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external at an exact commit: fetched, tree hash verified, include dir inside it (-I of the external path) used": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external compiler at /opt/tc: toy root builds green (4 objects + ELF)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external compiler: second build is all cache hits": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external validation: %s": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external: a new store with the same cache ingests the checkout once and stores its own fact": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external: a warm build makes 0 ingests of the external and runs no git read-tree/checkout/fetch": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external: one fact per (commit, tree_sha256) in the store, one checkout per commit in the external cache": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "external: second build is all cache hits with identical objects and stage keys (cross-store equality: the determinism gate below)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "failing unit: build red, names stage and last stderr lines": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "flags that change a stage's job rejected, all problems listed": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "generated header reached the unit (a.c compiled against NCONST)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "generated output colliding with a tracked file rejected": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "generator embedding %s: determinism red, names the items that read it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "generator embedding %s: sandbox makes it constant, so two cold builds are equal (closed channel); without GATE_CACHE there is no warm build": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "include dir in a doc root rejected": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "include dir in a product root of the other target rejected": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "include dir in a product root of the same target accepted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "include dir in a tool root rejected": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "include dir outside admitted roots rejected": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "legit ld options are not refused": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "nothing is stored by a blocked build (no stage result, red or green, in the store; no objects.json)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "objects.json handed over at GATE_CACHE/objects/<tree>/<root>/ and in GATE_OUT/objects/": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "objects.json: defined symbols from .symtab (struct), undefined list": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "objects.json: the same defined and undefined symbols for LP64 and ILP32 (ELF32/ELF64 .symtab read by struct)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "one header in one include dir accepted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "os_layer entry that is no unit rejected": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "os_layer flag only on os.S": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "recipe.build on a mismatched env raises EnvBlocked naming the mismatch, before any stage": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "recipe.py build on a mismatched env prints `blocked: env` and exits 4, storing nothing": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "red generator: a second run is deterministic and the built objects are cache hits": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "red generator: the other units are built, its output unit and the ELF are blocked by its stage, root red": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "refusal set also through compile flags -Wl,": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "refusal set: link flags %s rejected": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "second build: every stage a cache hit": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "the same header in a root of the other target, or only once, is accepted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "toy root builds green with 4 objects and an ELF": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "toy root builds green: ILP32 objects and ELF are ELF32, the LP64 objects are ELF64 (and no ELF)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "two admitted roots of one target with fnvnx/x.h in include/ are red (naming both)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "two cold runs of the failing root give the same objects.json": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "two failing units of three: both listed with {unit, stage, exit, stderr}; failure = first in unit order": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "two include dirs holding the same include-relative header rejected, naming both files": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "two include dirs with different headers accepted": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "units other than all rejected": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "unknown key 'exclude' is a RecipeError": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "warm == cold (objects, ELF)": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wrong tree_sha256: no fact is stored for it": [
+     "r1",
+     "r2",
+     "r3"
+    ],
+    "wrong tree_sha256: red naming the external": [
+     "r1",
+     "r2",
+     "r3"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/recipe.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/gate_build.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r3": {
      "anchor": "## verify/unitstage.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/gate_build.py",
@@ -671,25 +6763,191 @@
    ]
   },
   "test_runner.py": {
-   "references": [
-    {
+   "cases": {
+    "a commit that is not 40 hex digits: exit 1": [
+     "r1"
+    ],
+    "a commit the repository does not have: exit 1": [
+     "r1"
+    ],
+    "a commit whose env.json this machine does not match: exit 1, envcheck named": [
+     "r1"
+    ],
+    "a job outside the table: exit 1": [
+     "r1"
+    ],
+    "commit: orphan, one message line": [
+     "r1"
+    ],
+    "no job: exit 1": [
+     "r1"
+    ],
+    "nothing published by the failed runs": [
+     "r1"
+    ],
+    "published files": [
+     "r1"
+    ],
+    "report.json": [
+     "r1"
+    ],
+    "the branch is the published commit": [
+     "r1"
+    ],
+    "the published result names the unopened subject": [
+     "r1"
+    ],
+    "the result is the checker's report of the named test": [
+     "r1"
+    ],
+    "the worktree of the run is removed": [
+     "r1"
+    ],
+    "true declaration: exit 0, final line": [
+     "r1"
+    ],
+    "untrue declaration: exit 2, violated=oraclecheck, published": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## farm/runner.sh",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/farm/runner.sh"
    ]
   },
   "test_runtime.py": {
-   "references": [
-    {
+   "cases": {
+    "%s computed 142 from three libraries": [
+     "r1"
+    ],
+    "%s runs in the sandbox with its libraries found through the mapped paths": [
+     "r1"
+    ],
+    "--cold twice: identical output hashes (hash seed pinned)": [
+     "r1"
+    ],
+    "HIT returns the same result": [
+     "r1"
+    ],
+    "PT_INTERP of another class: error": [
+     "r1"
+    ],
+    "RUNPATH naming the HOST location: error names object and name": [
+     "r1"
+    ],
+    "RUNPATH naming the HOST location: not taken from the host by accident": [
+     "r1"
+    ],
+    "build runtime (cold store)": [
+     "r1"
+    ],
+    "build runtime with --site capstone": [
+     "r1"
+    ],
+    "elf_files(want) leaves foreign-arch files out": [
+     "r1"
+    ],
+    "fixture: host-path RUNPATH binary": [
+     "r1"
+    ],
+    "host has no /opt/tc (the sandbox path exists only through the mapping)": [
+     "r1"
+    ],
+    "ident: x86-64 / i386 / big-endian / arm64 differ": [
+     "r1"
+    ],
+    "import capstone works inside the sandbox": [
+     "r1"
+    ],
+    "import of a module outside the runtime fails in the sandbox": [
+     "r1"
+    ],
+    "import of an installed but undeclared package fails in the sandbox": [
+     "r1"
+    ],
+    "loader closure (interpreter + extension modules) equals ldd (real files)": [
+     "r1"
+    ],
+    "missing library: error": [
+     "r1"
+    ],
+    "missing library: error names the object and the missing name": [
+     "r1"
+    ],
+    "no __pycache__ in the runtime": [
+     "r1"
+    ],
+    "no input nests in another": [
+     "r1"
+    ],
+    "only wrong-arch candidates: error": [
+     "r1"
+    ],
+    "only wrong-arch candidates: error names the library and the directories searched": [
+     "r1"
+    ],
+    "output carries computed values": [
+     "r1"
+    ],
+    "probe executable has the usual PT_INTERP": [
+     "r1"
+    ],
+    "probe module importable on the host": [
+     "r1"
+    ],
+    "probe: pip is installed on the host": [
+     "r1"
+    ],
+    "runtime.json shape": [
+     "r1"
+    ],
+    "runtime_id stable across two builds": [
+     "r1"
+    ],
+    "sandbox run rc 0": [
+     "r1"
+    ],
+    "stage argv/env": [
+     "r1"
+    ],
+    "stage document written": [
+     "r1"
+    ],
+    "stage passes toolflags": [
+     "r1"
+    ],
+    "the same document (with its \"tool\" key) is accepted by sandbox.check_doc; no second file": [
+     "r1"
+    ],
+    "tool runtime with --tree HOST@AT (%s, %s)": [
+     "r1"
+    ],
+    "toolchain fixture: driver (absolute + $ORIGIN RUNPATH) built": [
+     "r1"
+    ],
+    "toolchain fixture: drv-rpath (DT_RPATH) built": [
+     "r1"
+    ],
+    "toolchain fixture: lib%s built": [
+     "r1"
+    ],
+    "wrong-arch candidates earlier in the search order are skipped, the x86-64 one is chosen": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/runtime.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/runtime.py",
     "ports/fnv-nx/verify/toolflags.py",
@@ -697,42 +6955,177 @@
    ]
   },
   "test_sandbox.py": {
-   "references": [
-    {
+   "cases": {
+    "1 stage runs, output hash == expected tree": [
+     "r1"
+    ],
+    "10 busybox-only sandbox runs a script, empty environment": [
+     "r1"
+    ],
+    "11 same key run by 6 threads of one process: no collision, equal results": [
+     "r1"
+    ],
+    "2 second run is a HIT: nothing launched, same clock-dependent output": [
+     "r1"
+    ],
+    "3a host paths absent": [
+     "r1"
+    ],
+    "3b hostname fnvnx, pid 1, dev={null,zero,random,urandom,shm}, tmp writable": [
+     "r1"
+    ],
+    "3c network: only down lo, nothing up, connect fails": [
+     "r1"
+    ],
+    "3d root holds only declared dirs": [
+     "r1"
+    ],
+    "3e environment is exactly the declared one": [
+     "r1"
+    ],
+    "4 inputs read-only, CAS intact": [
+     "r1"
+    ],
+    "5a key independent of host path and mtime": [
+     "r1"
+    ],
+    "5b key changes with content/argv/env/at": [
+     "r1"
+    ],
+    "6 --cold on a deterministic stage: equal, exit 0": [
+     "r1"
+    ],
+    "7 --cold on a clock-reading stage: exit 3 naming the path": [
+     "r1"
+    ],
+    "8 failing command: rc stored, HIT gives same rc": [
+     "r1"
+    ],
+    "8b nested input paths: exit 1, nothing stored": [
+     "r1"
+    ],
+    "9a getrandom returns ENOSYS": [
+     "r1"
+    ],
+    "9b no /dev/urandom, entropy files in /proc empty or absent": [
+     "r1"
+    ],
+    "9c measured OPEN set == result.json open_channels": [
+     "r1"
+    ],
+    "importable": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/sandbox.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/sandbox.py"
    ]
   },
   "test_sdcheck.py": {
-   "references": [
-    {
+   "cases": {
+    "case-fold collision manifest error": [
+     "r1"
+    ],
+    "check": [
+     "r1"
+    ],
+    "emit-c compiles and lists all": [
+     "r1"
+    ],
+    "expect": [
+     "r1"
+    ],
+    "manifest deterministic": [
+     "r1"
+    ],
+    "name 255 units ok, 256 violation": [
+     "r1"
+    ],
+    "symlink error": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/sdcheck.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/sdcheck.py"
    ]
   },
   "test_toolflags.py": {
-   "references": [
-    {
+   "cases": {
+    "cli clean exit 0": [
+     "r1",
+     "r2"
+    ],
+    "cli line format": [
+     "r1",
+     "r2"
+    ],
+    "cli missing file exit 1": [
+     "r1",
+     "r2"
+    ],
+    "cli output deterministic": [
+     "r1",
+     "r2"
+    ],
+    "cli policy table": [
+     "r1",
+     "r2"
+    ],
+    "cli summary": [
+     "r1",
+     "r2"
+    ],
+    "cli unreadable document exit 1": [
+     "r1",
+     "r2"
+    ],
+    "cli usage exit 1": [
+     "r1",
+     "r2"
+    ],
+    "cli violations exit 2": [
+     "r1",
+     "r2"
+    ],
+    "expect": [
+     "r1",
+     "r2"
+    ],
+    "json schema": [
+     "r1",
+     "r2"
+    ],
+    "toolflags passes puregate": [
+     "r1",
+     "r2"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/toolflags.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     },
-    {
+    "r2": {
      "anchor": "## verify/toolflags_policy.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/toolflags.py",
     "ports/fnv-nx/verify/toolflags_policy.py",
@@ -741,50 +7134,340 @@
    ]
   },
   "test_unitstage.py": {
-   "references": [
-    {
+   "cases": {
+    "#include_next chain: both headers in the closure, object has both symbols": [
+     "r1"
+    ],
+    "-I of a path in no declared input is an error naming the path": [
+     "r1"
+    ],
+    "-I of an external path: header found there (covered by the declared input, not the closure), search order kept (/inc/0 a.h wins)": [
+     "r1"
+    ],
+    "-I of an external path: object computes XE + A_VAL from both": [
+     "r1"
+    ],
+    ".S closure is exactly the headers it includes": [
+     "r1"
+    ],
+    ".s with .include: reads nothing outside its own file, the assembler's error is the unit's error": [
+     "r1"
+    ],
+    "__DATE__ fails by -Werror=date-time (at the PP stage)": [
+     "r1"
+    ],
+    "__has_include, file absent: staged object == full-tree object (else branch)": [
+     "r1"
+    ],
+    "__has_include, file added later: name_tree_id, PP key and object change; staged == full-tree object": [
+     "r1"
+    ],
+    "__has_include_next, probed header absent: else branch == full tree": [
+     "r1"
+    ],
+    "__has_include_next, probed header added later: name tree, PP key, object change; == full tree": [
+     "r1"
+    ],
+    "a caller flag that violates toolflags is an error": [
+     "r1"
+    ],
+    "a genuine #error behind a placeholder: closure grows once, then the real error is reported": [
+     "r1"
+    ],
+    "a genuine #error is the unit's error, not looped (no hint: 1 iteration)": [
+     "r1"
+    ],
+    "a probed-only file is not read: it is not in the closure": [
+     "r1"
+    ],
+    "asm units: .S preprocessed in its own stage, .s assembled alone; all ok with symbols": [
+     "r1"
+    ],
+    "caller flags that change the stage's job are refused": [
+     "r1"
+    ],
+    "changed external content: PP and CC keys change (stage keys stay content-addressed)": [
+     "r1"
+    ],
+    "closure of a.cpp lists its files": [
+     "r1"
+    ],
+    "cold build ok": [
+     "r1"
+    ],
+    "comment-only edit of a read header: PP re-runs, CC is a HIT, object identical": [
+     "r1"
+    ],
+    "computed include, headers included twice: closure has each once, object == full-tree compile": [
+     "r1"
+    ],
+    "deleting a needed header: the compiler's own error is reported, nothing compiled": [
+     "r1"
+    ],
+    "editing a file no asm unit reads: every stage of the asm units is a HIT": [
+     "r1"
+    ],
+    "editing a header no unit reads: every PP stage and CC stage is a HIT": [
+     "r1"
+    ],
+    "editing a header read only through another header re-runs": [
+     "r1"
+    ],
+    "editing the #include_next target re-runs": [
+     "r1"
+    ],
+    "editing the included header: the two .S units re-run, the .s unit is a HIT": [
+     "r1"
+    ],
+    "exact hint: one PP iteration": [
+     "r1"
+    ],
+    "failed units leave no hint": [
+     "r1"
+    ],
+    "failure record keeps the last 20 lines of stderr": [
+     "r1"
+    ],
+    "force-included header is in the closure; CC needs no include root": [
+     "r1"
+    ],
+    "hint with extra files (and a missing one): after minimisation the same pp_key, 2 iterations": [
+     "r1"
+    ],
+    "macro-use fact: a stage of its own (unit.du from -dU); the CC input unit.ii is the plain preprocessed text (no #define/#undef line)": [
+     "r1"
+    ],
+    "name_tree_id is one value per build": [
+     "r1"
+    ],
+    "new file earlier in the search path: name tree changes, PP re-runs and picks it": [
+     "r1"
+    ],
+    "no hint: 2 PP iterations (full tree, then minimal view); cc runs": [
+     "r1"
+    ],
+    "parser: continuations": [
+     "r1"
+    ],
+    "parser: dedupes": [
+     "r1"
+    ],
+    "parser: doubled backslash before a space is a literal backslash then a separator": [
+     "r1"
+    ],
+    "parser: escaped space, hash, dollar": [
+     "r1"
+    ],
+    "parser: malformed rules are errors": [
+     "r1"
+    ],
+    "runtime.py tool builds the gcc runtime": [
+     "r1"
+    ],
+    "semantic edit of a read header: PP and CC re-run, object changes": [
+     "r1"
+    ],
+    "staged object == one-shot sandbox compile of the whole trees": [
+     "r1"
+    ],
+    "tool runtime with an external tree at /ext/x": [
+     "r1"
+    ],
+    "toolflags clean for every PP and CC document": [
+     "r1"
+    ],
+    "touching every mtime changes no key, all hit": [
+     "r1"
+    ],
+    "two cold runs: identical objects, keys": [
+     "r1"
+    ],
+    "unit.ii and unit.o hold no host path": [
+     "r1"
+    ],
+    "wrong hint (misses c.h): succeeds with >= 2 iterations, same keys and object as without": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/unitstage.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/unitstage.py",
     "ports/fnv-nx/verify/runtime.py"
    ]
   },
   "test_uses.py": {
-   "references": [
-    {
+   "cases": {
+    "a stage reading another root's file by path (generated input) is a check error pointing at `uses`": [
+     "r1"
+    ],
+    "outputs: a name that maps to no generated output of the root is a check error": [
+     "r1"
+    ],
+    "sources: a bad source is red (stage sources:<root>)": [
+     "r1"
+    ],
+    "sources: a changed list adds only the new unit: the other units keep their objects and their compile-stage keys (cache hits)": [
+     "r1"
+    ],
+    "sources: a name that is no generated output of the root is a check error": [
+     "r1"
+    ],
+    "sources: the unit listed by the generate stage (a file of an external) is compiled and linked: unit tsrc/src/s1.c, symbol s1_fn": [
+     "r1"
+    ],
+    "sources: the unit's keys include its content hash: another content of the same path has another preprocessing key and object": [
+     "r1"
+    ],
+    "uses: a cycle between distinct roots (uses of a root that uses this one) is a check error": [
+     "r1"
+    ],
+    "uses: a root that is not admitted is a check error": [
+     "r1"
+    ],
+    "uses: a second build is all cache hits with the same stage keys": [
+     "r1"
+    ],
+    "uses: an undeclared output is a check error": [
+     "r1"
+    ],
+    "uses: the consumer's generate stage reads both outputs of the producer at /uses/<root>/<name> (ident_handheld/docked), content visible: used_len_24": [
+     "r1"
+    ],
+    "uses: the producer's output changed (other bytes): the consumer's stage keys change": [
+     "r1"
+    ],
+    "uses: the producer's tool changed but its output is byte-identical: the consumer's stage keys do not change": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## Outputs and uses",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_verdict.py": {
-   "references": [
-    {
+   "cases": {
+    "block: concurrent ref change (CAS fails)": [
+     "r1"
+    ],
+    "covers: a ref root has the class ref": [
+     "r1"
+    ],
+    "covers: gate verdict": [
+     "r1"
+    ],
+    "covers: linked gate verdict": [
+     "r1"
+    ],
+    "covers: root classes derive from admit.json": [
+     "r1"
+    ],
+    "defect queue: idempotent, content-addressed, counts": [
+     "r1"
+    ],
+    "gate class: ": [
+     "r1"
+    ],
+    "gate class: zero gates is red": [
+     "r1"
+    ],
+    "merge": [
+     "r1"
+    ],
+    "merge green moves branch, 2 parents, message = subject and the verdict line": [
+     "r1"
+    ],
+    "over_budget reported, verdict stays green": [
+     "r1"
+    ],
+    "provenance: clean graph exit 0": [
+     "r1"
+    ],
+    "provenance: direct taint": [
+     "r1"
+    ],
+    "provenance: missing class exit 1": [
+     "r1"
+    ],
+    "provenance: taint through a subtree": [
+     "r1"
+    ],
+    "provenance: transitive taint through a build stage": [
+     "r1"
+    ],
+    "red verdict stored": [
+     "r1"
+    ],
+    "run green exit 0 and fields": [
+     "r1"
+    ],
+    "sandbox: bad class rejected": [
+     "r1"
+    ],
+    "sandbox: class field accepted, bad class rejected, part of key": [
+     "r1"
+    ],
+    "store green": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/verdict.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/verdict.py"
    ]
   },
   "test_views.py": {
-   "references": [
-    {
+   "cases": {
+    "10 placeholder names with MAX_LINKS 3: 4 inodes, none above 3 links, no bind": [
+     "r1"
+    ],
+    "EMLINK of the sandbox is an SbxError naming the stage (a red stage, not a crash)": [
+     "r1"
+    ],
+    "O(real files) binds: one bind per real file (%d real files) and nothing per placeholder": [
+     "r1"
+    ],
+    "no per-view placed tree is made": [
+     "r1"
+    ],
+    "the base directory is placed once and the second call reuses it": [
+     "r1"
+    ],
+    "the sandbox ran the listing stage on the view": [
+     "r1"
+    ],
+    "the tree a stage sees equals cas.materialize(view): names, contents, symlinks, exec bits, `..` through a symlinked directory": [
+     "r1"
+    ],
+    "two views of one tree share one base; the base is the view with no real file": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## verify/sandbox.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/sandbox.py",
     "ports/fnv-nx/verify/unitview.py",

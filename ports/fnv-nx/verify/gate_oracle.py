@@ -11,8 +11,8 @@ function verify/testcase.py, resolved through the file's import of it (`from tes
 testcase.case), never by the bare name. Red: a file with neither form (item FILE); a case whose first argument is not a str
 constant; a duplicate CASE in a file; any other binding of the name `case` (a local function named like the shared one). A
 case in a loop is one static case with `key=` (testcase.py): the static name is the literal.
-Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
-  {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "refs": {ID: REF}, "cases": {CASE: [ID...]}}}}
+Declaration: DIR/tests/oracle.json ("fnvnx-oracle/2"):
+  {"format": "fnvnx-oracle/2", "tests": {"test_x.py": {"subject": [PATH...], "refs": {ID: REF}, "cases": {CASE: [ID...]}}}}
   subject     the files under test (repo-relative).
   refs        the references of the file by id; cases maps EVERY case of the file (no more, no fewer) to the ids of its own
               references: a reference is owed per case, so a case without an entry is uncertified even when another case
@@ -73,7 +73,7 @@ import gatesdir  # noqa: E402
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 PINS = TREE + "/verify/oracle_pins.json"
-FORMAT = "fnvnx-oracle/1"
+FORMAT = "fnvnx-oracle/2"
 HEX = set("0123456789abcdef")
 TREE_KINDS = ("spec", "contract", "model")      # the kinds whose `path` is a tracked file of this tree
 

@@ -1,39 +1,189 @@
 {
- "format": "fnvnx-oracle/1",
+ "format": "fnvnx-oracle/2",
  "tests": {
   "test_gate_eh.py": {
-   "references": [
-    {
+   "cases": {
+    "T.test_each_field_counted_once": [
+     "r1"
+    ],
+    "T.test_empty_scope_valid_without_levels": [
+     "r1"
+    ],
+    "T.test_empty_tables_green_failed_funcinfo_red": [
+     "r1"
+    ],
+    "T.test_entries_beyond_50_truncated_sorted": [
+     "r1"
+    ],
+    "T.test_failed_throwinfo_red": [
+     "r1"
+    ],
+    "T.test_green": [
+     "r1"
+    ],
+    "T.test_helper_nonconst_red": [
+     "r1"
+    ],
+    "T.test_image_without_facts_even_if_count_matches": [
+     "r1"
+    ],
+    "T.test_missing_ehtables_red": [
+     "r1"
+    ],
+    "T.test_missing_exe_facts_red": [
+     "r1"
+    ],
+    "T.test_missing_key_red": [
+     "r1"
+    ],
+    "T.test_missing_scope_len_key_red": [
+     "r1"
+    ],
+    "T.test_missing_target_red": [
+     "r1"
+    ],
+    "T.test_non_code_kind_red": [
+     "r1"
+    ],
+    "T.test_nonconst_trylevel_store_red": [
+     "r1"
+    ],
+    "T.test_null_none_is_not_universe": [
+     "r1"
+    ],
+    "T.test_null_where_format_has_no_none_red": [
+     "r1"
+    ],
+    "T.test_scope_err_red": [
+     "r1"
+    ],
+    "T.test_scope_length_vs_trylevel_red": [
+     "r1"
+    ],
+    "T.test_seh_red": [
+     "r1"
+    ],
+    "T.test_stub_target_needs_landing_red": [
+     "r1"
+    ],
+    "T.test_throw_site_without_thrownfo_red": [
+     "r1"
+    ],
+    "T.test_thrower_escape_red": [
+     "r1"
+    ],
+    "T.test_unlifted_registered_handler_red": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## State of the product gates",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/VERDICT.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/lift/gates/gate_eh.py"
    ]
   },
   "test_gate_flags.py": {
-   "references": [
-    {
+   "cases": {
+    "Agree.test_agreement_rows": [
+     "r1"
+    ],
+    "T.test_cases": [
+     "r1"
+    ],
+    "T.test_class_of_reader": [
+     "r1"
+    ],
+    "T.test_decode_depends_on_the_range_only": [
+     "r1"
+    ],
+    "T.test_entry_consumer": [
+     "r1"
+    ],
+    "T.test_interprocedural": [
+     "r1"
+    ],
+    "T.test_summary_splits_reads_from_no_form_rows": [
+     "r1"
+    ],
+    "T.test_undecodable_range_reported": [
+     "r1"
+    ],
+    "T.test_universe_counts_reads": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## State of the product gates",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/VERDICT.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/lift/gates/gate_flags.py",
     "ports/fnv-nx/lift/proof/flagagree.py"
    ]
   },
   "test_gate_lift.py": {
-   "references": [
-    {
+   "cases": {
+    "%s: no lifted or native guest root: universe 0, green": [
+     "r1"
+    ],
+    "eh: a table target that is no lifted entry: red, 0/1": [
+     "r1"
+    ],
+    "eh: contract_inputs.json declares no ehfacts: red, input missing": [
+     "r1"
+    ],
+    "eh: every table target is a lifted entry: green, 1/1": [
+     "r1"
+    ],
+    "flags: %s: %s %d/%d": [
+     "r1"
+    ],
+    "flags: no lifted or native guest root: universe 0, green": [
+     "r1"
+    ],
+    "image with two runtime definers: red": [
+     "r1"
+    ],
+    "image without a runtime definer: red, input missing": [
+     "r1"
+    ],
+    "lifted %s: gate %s is %s": [
+     "r1"
+    ],
+    "lifted root that no image names: gate %s has universe 0, green": [
+     "r1"
+    ],
+    "lifted root, contract_inputs.json declares no sites: red, input missing": [
+     "r1"
+    ],
+    "lifted root: a locked instruction of the facts with no .fnvl.lk record: red": [
+     "r1"
+    ],
+    "native guest root on the pinned compiler: gate %s green, 2/2": [
+     "r1"
+    ],
+    "native guest root without %s: gate %s red, units uncertified": [
+     "r1"
+    ],
+    "native guest root: gate eh has no universe, green": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## State of the product gates",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/VERDICT.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/verify/gate_lift.py",
     "ports/fnv-nx/lift/gates/gate_order.py",
@@ -41,13 +191,66 @@
    ]
   },
   "test_gate_order.py": {
-   "references": [
-    {
+   "cases": {
+    "T.test_asm_cases": [
+     "r1"
+    ],
+    "T.test_asm_code_outside_func": [
+     "r1"
+    ],
+    "T.test_asm_rows": [
+     "r1"
+    ],
+    "T.test_asm_rule_needs_the_flag": [
+     "r1"
+    ],
+    "T.test_cases": [
+     "r1"
+    ],
+    "T.test_counts": [
+     "r1"
+    ],
+    "T.test_data_in_text_skipped_and_garbage_red": [
+     "r1"
+    ],
+    "T.test_dispatcher_must_be_defined_by_the_runtime_object": [
+     "r1"
+    ],
+    "T.test_encoding_destinations": [
+     "r1"
+    ],
+    "T.test_fsw_sites": [
+     "r1"
+    ],
+    "T.test_global_counts_reported": [
+     "r1"
+    ],
+    "T.test_lock_completeness": [
+     "r1"
+    ],
+    "T.test_lock_ranges": [
+     "r1"
+    ],
+    "T.test_lock_rows": [
+     "r1"
+    ],
+    "T.test_no_object_red": [
+     "r1"
+    ],
+    "T.test_rows": [
+     "r1"
+    ],
+    "T.test_runtime_object_is_not_judged": [
+     "r1"
+    ]
+   },
+   "refs": {
+    "r1": {
      "anchor": "## State of the product gates",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/VERDICT.md"
     }
-   ],
+   },
    "subject": [
     "ports/fnv-nx/lift/gates/gate_order.py"
    ]

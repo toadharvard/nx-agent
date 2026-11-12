@@ -10,6 +10,19 @@ TOOL = os.path.join(os.path.dirname(HERE), "opentrace.py")
 SYS = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]
 IGN = ["/proc", "/dev", "/sys"]
 FAILS = testcase.FAILED
+
+
+def with_tmp(fn):
+    def run():
+        t = tempfile.mkdtemp(prefix="opentrace-test-")
+        try:
+            fn(t)
+            return True
+        finally:
+            shutil.rmtree(t, ignore_errors=True)
+    return run
+
+
 def ot(*args, cwd=None, env=None):
     e = dict(os.environ if env is None else env)
     return subprocess.run([sys.executable, "-I", TOOL, *args], cwd=cwd, env=e,
@@ -61,6 +74,7 @@ TRACE = r'''100 execve("/usr/bin/sh", ["sh"], 0x1 /* 3 vars */) = 0
 
 
 @case("check: fork+chdir+relative+unfinished+failed")
+@with_tmp
 def _(t):
     write(t + "/tr.txt", TRACE)
     m = manifest(t)
@@ -97,6 +111,7 @@ def run(t, script, extra=(), cwd=None, env=None, **mk):
 
 
 @case("run: declared input + own output -> green")
+@with_tmp
 def _(t):
     p = run(t, GOOD)
     r = report(t)
@@ -106,6 +121,7 @@ def _(t):
 
 
 @case("run: undeclared read -> red outside")
+@with_tmp
 def _(t):
     write(t + "/secret.txt", "s")
     p = run(t, GOOD + '; cat "$3" >/dev/null', [t + "/secret.txt"])
@@ -116,6 +132,7 @@ def _(t):
 
 
 @case("run: pre-existing output read -> red stale")
+@with_tmp
 def _(t):
     write(t + "/out/old.txt", "old")
     p = run(t, GOOD + '; cat "$2/old.txt" >/dev/null')
@@ -125,6 +142,7 @@ def _(t):
 
 
 @case("key: stable, changes with input content and env value")
+@with_tmp
 def _(t):
     write(t + "/in/a.txt", "one")
     m = manifest(t, env=["ORDER_KEYS"])
@@ -140,6 +158,7 @@ def _(t):
 
 
 @case("run: child with cd + relative path resolves")
+@with_tmp
 def _(t):
     write(t + "/in/sub/keep", "")
     write(t + "/in/x", "x")
