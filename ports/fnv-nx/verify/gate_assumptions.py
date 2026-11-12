@@ -17,7 +17,7 @@ words) is read for the decisions, not scanned. A BLOCK is the unit of a text fil
 blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
 mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive). PROSE is defined by one lexer per
 file kind, chosen by the extension from the one table LEXER: python = COMMENT tokens and docstring STRING tokens (tokenize + ast); c, c++,
-headers, .ld, .s = // and /* */ comments (string and char literals skipped); markdown = text outside fenced code blocks; shell and toml =
+headers, .inc, .ld, .s = // and /* */ comments (string and char literals skipped); markdown = text outside fenced code blocks; shell and toml =
 # comments (quoted strings and heredoc bodies skipped); asm = ; comments; sail = as c without char literals; data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
 backticked spans are dropped. Totality: a text file whose extension is not in the table, or that its lexer cannot read, is red (codes
 ext-unknown, lex-error); nothing is skipped silently. An item of the
@@ -91,7 +91,7 @@ ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"\s*\|")
 
 
-LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".sail": "sail", ".asm": "semi",
+LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".sail": "sail", ".asm": "semi",
          ".md": "markdown", ".sh": "shell", ".gitignore": "shell", ".toml": "toml",
          ".json": "data", ".tsv": "data", ".txt": "data", ".expect": "data", ".patch": "data"}
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)

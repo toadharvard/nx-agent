@@ -262,6 +262,7 @@ check("lexer python: a string that is not the first statement is not a docstring
 check("lexer c: // and /* */ comments are mentions", mention("x.c", "int a; // assume\n\n/* assumed */\n") == [1, 3], "")
 check("lexer c: identifier, string, char literal, digit separator, raw string are not mentions",
       mention("x.cc", 'int assume = 1; const char *s = "assume // x"; char c = \'a\'; int n = 1\'000; auto r = R"x(assume /* )x";\nint assumed;\n') == [], "")
+check("lexer c: .inc is C", mention("x.inc", "/* assume */\n") == [1], "")
 check("lexer c: a backticked word in a comment is not a mention", mention("x.h", "// the %sassume%s flag\n" % (BT, BT)) == [], "")
 check("lexer c: an unterminated block comment is red", mention("x.h", "/* assume\n") == [0], "")
 check("lexer markdown: prose is a mention", mention("x.md", "we assume this\n") == [1], "")
