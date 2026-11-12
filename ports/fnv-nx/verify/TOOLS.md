@@ -2013,6 +2013,36 @@ repository); nothing here carries game data. FAT32 limit: a file may hold at mos
 "size >= 4 GiB - 1" is read as "size > 2^32 - 1": a file of exactly 2^32 - 1 bytes is representable).
 ```
 
+## verify/specdefaults.py
+
+```text
+specdefaults: the flags that make a distribution compiler behave as the reference compiler (RECIPE.md "Distribution spec defaults").
+
+    python3 -I specdefaults.py derive --ref CC --distro CC [--lang c|c++] [--out FILE.json]
+
+Why.  A distribution builds its GCC with a spec file that adds defaults the GNU release does not have: -fstack-protector-strong,
+-fstack-clash-protection, -fcf-protection, default PIE, and, in the preprocessor spec, -D_FORTIFY_SOURCE (and -D_GLIBCXX_ASSERTIONS).
+They change the code that comes out (a `__stack_chk_fail` or `__memcpy_chk` call that exists in no source).  The reference is the GNU GCC
+(the msvcmodel compiler of the guest root, built from the pinned GNU tarball without a distribution spec).  The rule is not a list of
+names: it is the DIFFERENCE of the two compilers' own reports.
+
+Rule.  Run both compilers with the same arguments on the same null translation unit and read their reports:
+  options  `-Q --help=common`, `=target`, `=optimizers` (one run each): every line `-name  VALUE`.  An option the two compilers report with different VALUEs, and the
+           distribution's own spelling is known (the reference has it too), is set to the reference's VALUE:
+             [enabled]  -> the option itself          (-fstack-clash-protection)
+             [disabled] -> its off form               (-fno-stack-protector; -fno-PIE; -mno-...)
+             =VALUE     -> `-name=VALUE`              (-fcf-protection=none)
+           An option only the distribution has cannot differ in effect from the reference (the reference does not know it): not emitted.
+  macros   `-dM -E`: a macro the distribution defines and the reference does not  -> `-UNAME`   (_FORTIFY_SOURCE, _GLIBCXX_ASSERTIONS);
+           a macro both define with different values                               -> `-DNAME=VALUE` of the reference;
+           a macro only the reference defines                                      -> `-DNAME=VALUE`.
+The result is a function of the two reports only: sorted, no host state.  Applying it (recipe.py) is a stage keyed on both compilers; a root
+may not set an option of the result or its negation (`overlap`).  An option whose value text is a list ("[default]", "[disabled]|…") is read
+as a value only in the forms above; any other form is emitted as `-name=VALUE` taken verbatim from the reference.
+Rests on the compiler being correct (item 1 of the owner's accepted list): `-Q --help` and `-dM -E` report every default of the compiler that changes
+code generation or the preprocessed text (GCC manual, Developer Options "-Q --help", Preprocessor Options "-dM").
+```
+
 ## verify/toolflags.py
 
 ```text

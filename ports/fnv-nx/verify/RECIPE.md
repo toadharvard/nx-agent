@@ -162,6 +162,24 @@ declarations of the platform's host API). It has no `recipe`/`target`, no unit f
   header files is red (`declared-twice`, both places named). The owner of a symbol has its one header; every other root includes it.
 - A headers tree is admitted together with its first consumer: the gate certifies a header only through the units that read it.
 
+## Distribution spec defaults
+
+A distribution builds its GCC with a spec that adds defaults the GNU release does not have (`-fstack-protector-strong`, `-fstack-clash-protection`,
+`-fcf-protection`, default PIE, `-D_FORTIFY_SOURCE`): they put `__stack_chk_fail` and `*_chk` calls into code that has none in its source. A root
+compiled by a distribution driver (`compiler` `{cc, cxx}`) gets the flags that remove them, relative to the reference compiler: the GNU GCC of
+`verify/guest_compiler.json` (the msvcmodel external, built without a distribution spec).
+- The set is derived, never listed: `specdefaults.py` compares the two compilers' own reports (`-Q --help=common|target|optimizers`, the `-###`
+  command line of the compiler proper, `-dM -E`, at `-O0` and `-O2`): an option the reference has in another state is set to the reference's state
+  (the first spelling the distribution compiler accepts: `-fno-stack-protector` for `-fstack-protector-strong`), a macro only the distribution
+  defines is `-U`, one that differs is `-D` of the reference's value; macros that follow from an option (`__PIE__`) are not a second rule. A
+  difference that no flag removes is a `SpecError`: the build is red at stage `specdefaults`, never skipped.
+- It is computed once per (environment, drivers, the reference's pin, the derivation code) and cached under `store/rt/specdefaults-*`; the flags
+  are the first of every PP and CC command line, so they are in every key.
+- A root may not set an option of the derived set, of either sign, with any value, or of its family (`-fstack-protector-all` against
+  `-fno-stack-protector`): the build is red at `specdefaults` naming the flag.
+- A tree without `guest_compiler.json` has no reference and nothing to remove. A root with an external compiler (a guest root) is not affected:
+  its compiler has no distribution spec.
+
 ## Fixtures (`"fixtures"`)
 
 ## Outputs and uses

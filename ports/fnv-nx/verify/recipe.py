@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import relocs  # noqa: E402
 import ldcheck  # noqa: E402
 import runtime  # noqa: E402
+import specdefaults  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
 import unitstage  # noqa: E402
@@ -743,6 +744,7 @@ class Job:
         self.rec = load_recipe(repo, self.roots, spec)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
+        self.spec = {}
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
 
     def stage(self, doc):
@@ -780,6 +782,35 @@ class Job:
             e = self.ext[c["external"]]
             return e["at"] + "/" + c["cc"], e["at"] + "/" + c["cxx"]
         return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
+
+    def spec_flags(self, ws):
+        """RULE (RECIPE.md "Distribution spec defaults"): a root compiled by a distribution driver gets the flags that remove the distribution's
+        spec defaults relative to the reference compiler (verify/guest_compiler.json: the GNU GCC of the msvcmodel external) -> {"c","cxx"}: flags.
+        They are derived by specdefaults.py from the two compilers' own reports, cached by (environment, drivers, the reference pin, the derivation
+        code), and they enter every PP and CC key as flags. A root may not set an option of the derived set (BuildRed `specdefaults`).
+        A tree without the pin has no reference: nothing to remove."""
+        c, pin = self.rec["compiler"], load_pin(self.repo)
+        if "external" in c or pin is None:
+            return {}
+        drv = {"c": "/usr/bin/" + c["cc"], "cxx": "/usr/bin/" + c["cxx"]}
+        env = envcheck.env_id(json.load(open(os.path.join(self.repo, ENV_JSON))))
+        tag = hashlib.sha256(repr((env, drv, pin["external"], pin["cc"], pin["cxx"],
+                                   hashlib.sha256(open(specdefaults.__file__, "rb").read()).hexdigest())).encode()).hexdigest()[:16]
+
+        def make():
+            ex = fetch_externals([pin["external"]], self.store, self.extcache, ws)[pin["external"]["name"]]
+            ref = {"c": os.path.join(ex["host"], pin["cc"]), "cxx": os.path.join(ex["host"], pin["cxx"])}
+            try:
+                return {k: specdefaults.derive(ref[k], drv[k], "c" if k == "c" else "c++") for k in ("c", "cxx")}
+            except specdefaults.SpecError as e:
+                raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": [str(e)[-300:]]})
+        derived = self.cached_rt("specdefaults-" + tag, make)[1]
+        fl = self.rec["flags"]
+        bad = ["flags.%s: %s sets an option the distribution compiler's spec default fixes (derived: %s)" % (k, t, " ".join(derived[k]))
+               for k in ("c", "cxx", "asm") for t in specdefaults.overlap(fl.get(k, []), derived["c" if k == "asm" else k])]
+        if bad:
+            raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": bad})
+        return {"c": derived["c"], "cxx": derived["cxx"], "asm": derived["c"]}
 
     def hostpath(self, p):
         for e in self.ext.values():
@@ -996,6 +1027,12 @@ class Job:
             return {}
         rtp, _ = self.toolrt(used)
         try:
+            self.spec = self.spec_flags(ws)
+        except BuildRed as r:
+            self.red.append(dict(r.args[0]))
+            self.blocked.update({u: r.args[0]["stage"] for u in units})
+            return {}
+        try:
             self.use_inputs(ws)
         except BuildRed as r:
             self.red.append(dict(r.args[0]))
@@ -1017,7 +1054,7 @@ class Job:
         drop = {e["at"] for n, e in self.ext.items() if n != cc}
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
-            json.dump({"argv": rec["flags"][k]}, open(fp, "w"))
+            json.dump({"argv": self.spec.get(k, []) + rec["flags"][k]}, open(fp, "w"))
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
