@@ -70,9 +70,17 @@ PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
 # fnvnx_ftoi is one plugin with two modes, chosen by the root's cxx_origin (no free choice): native C++ takes the MSVC rewrite, lifted C++ has
 # no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
 # PLUGIN_OUT of the CC stage's own /out; the recipe passes it, a build.json does not declare it.
-LIFTED_ARGS = {"fnvnx_ftoi": {"mode": "lifted"}}
 PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
+
+
+def plugin_args(origin):
+    """{plugin name: its fixed arguments} for a root whose declared `cxx_origin` is ORIGIN ("native", a {"lifted_by", "pack"} dict, or None): the ONE
+    place the expected arguments are decided, used by plugin_errors, the gates and the fold of L2. A function of the root's declared fact only, no second
+    table: PLUGIN_ARGS, with fnvnx_ftoi's `mode` = lifted iff the origin is a lifted declaration, else native (no separate table for lifted roots)."""
+    out = {n: dict(a) for n, a in PLUGIN_ARGS.items()}
+    out["fnvnx_ftoi"]["mode"] = "lifted" if isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"} else "native"
+    return out
 # The semantic flags of a guest root (data model, ABI, target, FP, aliasing, overflow, language model, calling convention): ONE ordered set, the
 # guest compiler pin's "flags"."semantics" (guest_compiler.json, next to this file). The RECIPE appends it to every guest compile stage, C, C++ and
 # assembler alike, minus what the pinned driver itself says does not apply to that language (semantics_for); a guest build.json carries none of them.
@@ -590,10 +598,9 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
     ent = roots.get(root, {})
     origin = ent.get("cxx_origin")
     # RULE (orchestrator, 2026-11-12): every guest CC stage, C and C++ alike and whatever the origin of the code, loads the FULL plugin set of
-    # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list. The arguments are fixed by the
-    # origin alone: a lifted root takes LIFTED_ARGS where it names a plugin (fnvnx_ftoi mode lifted), every other root PLUGIN_ARGS.
+    # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list.
+    want = plugin_args(origin)
     if ent.get("target") == "guest" and any(u.endswith(CC_EXT + CXX_EXT) for u in units) and not (origin == "native" and cxx):
-        want = dict(PLUGIN_ARGS, **LIFTED_ARGS) if isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"} else PLUGIN_ARGS
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
@@ -607,8 +614,8 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))
-            elif loaded[n].get("args") != PLUGIN_ARGS[n]:
-                err.append("plugin %s: arguments must be %s, are %s" % (n, PLUGIN_ARGS[n], loaded[n].get("args")))
+            elif loaded[n].get("args") != want[n]:
+                err.append("plugin %s: arguments must be %s, are %s" % (n, want[n], loaded[n].get("args")))
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
@@ -616,11 +623,12 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
         err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
     elif isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}:
         tool, pack = origin["lifted_by"], origin["pack"]
-        for n, a in LIFTED_ARGS.items():   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
+        # lifted C++ does its conversions in helpers: fnvnx_ftoi in mode lifted proves it; plugin_args(origin) already demands it (full set, mode lifted)
+        for n in ("fnvnx_ftoi",):
             if n not in loaded:
                 err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
-            elif loaded[n].get("args") != a:
-                err.append("plugin %s: arguments of a lifted root must be %s, are %s" % (n, a, loaded[n].get("args")))
+            elif loaded[n].get("args") != want[n]:
+                err.append("plugin %s: arguments of a lifted root must be %s, are %s" % (n, want[n], loaded[n].get("args")))
         mine = {f[len(root) + 1:] for f in files if under(f, root)}
         owner = next((r for r in roots if isinstance(tool, str) and under(tool, r)), None)
         if not (isinstance(tool, str) and tool in files and tool.endswith(".py") and owner and roots[owner]["class"] == "tool"):

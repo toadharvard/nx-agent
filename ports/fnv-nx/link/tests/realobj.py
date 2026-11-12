@@ -108,8 +108,9 @@ def build(sources, plugins=None, lifted=False, flags=()):
         rec['external'] = [ext, {'name': 'pack', 'repo': 'fnv-nx-build', 'ref': 't', 'commit': commit, 'tree_sha256': tree, 'at': '/ext/pack'}]
         _w(repo, T + 'gen/lift.py', lift)
         root['cxx_origin'] = {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'}
-        # a lifted guest root loads the full set too; the origin fixes the arguments: recipe.LIFTED_ARGS where it names a plugin (fnvnx_ftoi lifted)
-        rec['plugins'] = [dict(p, args=dict(recipe.LIFTED_ARGS.get(p['name'], p['args']))) for p in plugs]
+        # a lifted guest root loads the full set too; the origin fixes the arguments: recipe.plugin_args(origin) (fnvnx_ftoi mode lifted)
+        want = recipe.plugin_args(root['cxx_origin'])
+        rec['plugins'] = [dict(p, args=dict(want[p['name']])) for p in plugs]
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():
