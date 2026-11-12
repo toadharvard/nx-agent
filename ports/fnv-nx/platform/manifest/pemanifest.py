@@ -17,7 +17,7 @@ idiom) is a site like `call [slot]`. Per call: the name operand is the last push
 hmod operand is resolved by one local data-flow rule: a register or an ebp-slot holds the literal(s) of the LoadLibrary/GetModuleHandle
 calls whose result (eax) was copied into it, and anything else written to it (or its address taken with lea) makes it `dynamic`; the
 slot value is the union over all writes in the function. Output column hmod = `dynamic` or the comma list of module literals; the
-operand column then holds those literals + the name. Assumptions: the function starts at the nearest preceding `push ebp; mov ebp,esp`
+operand column then holds those literals + the name. Assumption ASM-501 (function boundaries and forward flow): the function starts at the nearest preceding `push ebp; mov ebp,esp`
 (hot-patch `mov edi,edi` before it allowed) or, when no prologue lies within the look-back, at the 16-aligned address after int3 linker padding, and ends at the next prologue; control flow is followed forward only (state saved at forward jumps, joined at their target, cleared after ret/jmp unless a jump targets the next address; back-edges assumed not to change a register used after the loop); no jump enters mid-instruction; an ebp slot is not written through
 another pointer (its address is never taken, checked). Without such a boundary every hmod is `dynamic`.
 Global cell: a data cell g is tracked like an ebp slot when every relocated reference to g in the image is a plain `[g]` operand (never lea, push imm or a stored pointer) and the references outside the function only read it, so every write to g is seen in the function. A cell failing this, and any object field (`[reg+disp]`), stays `dynamic`.

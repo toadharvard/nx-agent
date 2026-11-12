@@ -19,7 +19,7 @@ Derivation, no name list and no hand-written address:
      loaded by `fld dword [abs]`).
 A registration whose default cannot be recovered statically is reported with kind `none`; the constructors take the default
 as a mandatory argument and store it in the object, so the count of `none` rows measures this pass, not the exe.
-Assumptions (registry ids in verify/ASSUMPTIONS.json apply): function starts are `55 8B EC` after `CC` padding; linear decode.
+Assumption ASM-501 (function boundaries and forward flow: function starts are `55 8B EC` after `CC` padding; linear decode); the registry is verify/ASSUMPTIONS.json.
 """
 import bisect, re, struct, sys
 

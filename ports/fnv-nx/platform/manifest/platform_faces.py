@@ -12,7 +12,7 @@ Rule (mechanical, from the compiled objects only; no source text, no names of ca
   Font-API sites (CreateFont*/AddFontResource*/EnumFont*) are listed per object with the number of face requests in the same function; a
   function with a font-API site and no accessor request is `unresolved` (its face does not come from the table).
 Output: TSV rows kind, object, function, id, face. Faces are looked up in the X-macro table of font_faces.h.
-Assumptions: OWNER 1 (the compiler is correct): a call is a call and its first integer argument is in %edi (x86-64 SysV, the host build of the objects).
+Assumptions: ASM-001 (the compiler is correct): a call is a call and its first integer argument is in %edi (x86-64 SysV, the host build of the objects).
 Usage: platform_faces.py <font_faces.h> <out.tsv> <obj>...
 """
 import re, subprocess, sys

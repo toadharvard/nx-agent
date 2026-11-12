@@ -15,13 +15,17 @@
  * 0x800, 0, 0xC00, 0x1000, 0x1400) and the invariant locale 0x7F; any other LCID is not installed. Both use the
  * default sort (GUID 00000001-57ee-1e5c-00b4-d0000bb1e11e: no exception table, no compression table).
  *
- * ASSUMPTIONS that remain:
- *  R1 the installed code pages and locales are those above, not Wine's full set (CP_UNIXCP and all DBCS pages absent).
- *  R2 EnumSystemLocalesA lists the one en-US locale.
+ * Declared-machine values and Wine 9.0 behaviours that remain (each is decided by its source, none is a guess):
+ *  R1 the installed code pages and locales are those above, not Wine's full set (CP_UNIXCP and all DBCS pages absent): the
+ *     values of the declared machine.
+ *  R2 EnumSystemLocalesA lists the one en-US locale: the same declared machine.
  *  R3 arguments Wine does not check but cannot survive (GetStringType with cch < -1 or a NULL output buffer for
- *     cch > 0, LCMapString with dstlen > 0 and a NULL buffer) fail with ERROR_INVALID_PARAMETER.
- *  R4 LCMAP_HASH and LCMAP_SORTHANDLE return 0 without a last error, as Wine does (its unsupported cases).
- *  R5 user registry overrides of locale values do not exist (LOCALE_NOUSEROVERRIDE is implied). */
+ *     cch > 0, LCMapString with dstlen > 0 and a NULL buffer) fail with ERROR_INVALID_PARAMETER: the documented Windows
+ *     error for an invalid parameter (Win32 as documented, ASM-003).
+ *  R4 LCMAP_HASH and LCMAP_SORTHANDLE return 0 without a last error, as Wine 9.0 does (its unsupported cases; owner decision
+ *     2026-11-11, Wine 9.0 as an acceptable implementation).
+ *  R5 user registry overrides of locale values do not exist: the declared machine's hive holds only the keys the exe and
+ *     modules read, so LOCALE_NOUSEROVERRIDE is implied. */
 #include "w32.h"
 
 #include <stdint.h>
