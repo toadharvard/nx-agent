@@ -125,3 +125,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - The tests are in lib/sha256_tests; it becomes a class-test root when w10 lands.
   - Host build: the loader Makefile is a known, unwidened gap until w15 lib/sha256@host.
   - Phase 2 (the 8 key sites, NxShaderD3D key[32]): w5 on claude/fnv-l6-render-w5-key, doing.
+- 03:29Z w6 6986dead aligned render/d3d9 to platform's flags.
+  - Result: 70 objects; cold 155 stages run, 47.9 s; warm 155/155 hit, 3.1 s; objstub 1784/1784, 0 findings.
+  - FINDING: platform's flags.c has no semantics flags, so C units get the GNU C default -ffp-contract=fast and unsigned plain char on aarch64. 7 fmadd/fmsub contractions sit in ffp/ffp_vs_state.c.o, against OWNER assumption 8.
+  - Rule sent to L1 w17: one semantics set for every language.
+  - Interim: w6 sets render/d3d9's c (and lib/sha256's) to platform's cxx semantics minus the C++-only flags, recounts fmadd (expected 0), and lists signed-char-sensitive sites.
