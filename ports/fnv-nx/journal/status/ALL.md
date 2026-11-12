@@ -81,6 +81,14 @@ The first product root is L5 w10's platform root (6516d0d is red: 58 of 74 units
 
 - **Plugins per front end (L1 94b4c823, measured by w17):** cc1 cannot load layout, sdd, pi or names (a static ELF fact), so guest C units lack those checks. This is an open class owned by L2, and L1 reports the global count. -fPIC stays (D16, D9). EH stays on (22 native throw sites).
 
+- **s4 laundering (L3a item 22):** a code address laundered through memory after arithmetic.
+  - Rule: a whole-program points-to over abstract objects. Static words are exact per relocated word (R3); the stack is per frame; the heap is per allocation site.
+  - The work is scheduled after the first boot. Until then no_s4_arith stays OPEN and the certificates stay measurement-only.
+  - Escapes at 63cabce1: binkw32 1,318, libvorbis 970, libvorbisfile 782, atimgpud 512. Values reaching a jump target: 0. exe and d3dx9_38 are still being counted.
+  - There is one heap-object producer: L1 w18's allocation-site fact file, which also serves d3dx9_38 site (iii). L3a consumes it.
+- **FalloutPrefs inputs:** render/d3d9 becomes a product root (L6). Its `generated` stage declares ident_handheld.bin and ident_docked.bin as `outputs`. L5 w13 consumes them through `uses`, and declared_files.cpp stays off the platform root until then.
+- **MERGER order (L1):** w16 -> w10 6bcd7d2 (29/29) -> w14 c0f23a3f -> w15 afa6b301 (27/27, 291 s).
+
 ## Sessions (03:36Z)
 
 - All 8 leads and MERGER are active (each messaged within the last 10 min). Nothing was stopped by limits this hour.
