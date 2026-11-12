@@ -39,7 +39,7 @@ PRODUCT_FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fms-extensions', '-fsho
                  '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics',
                  '-U_FORTIFY_SOURCE', '-fno-devirtualize']
 _N = [0]
-# the plugins of a lifted root: fnvnx_ftoi in mode lifted is required (recipe.LIFTED_ARGS), the others are the test's choice
+# the plugins of a lifted root: fnvnx_ftoi in mode lifted is required (recipe.plugin_args), the others are the test's choice
 
 
 def source_of(name):
@@ -76,10 +76,10 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
         plugins = [(n[len('fnvnx_'):], a) for n, a in ((n, dict(recipe.PLUGIN_ARGS[n])) for n in recipe.PLUGIN_SOURCES)]
         flags = ['-O2'] + list(recipe.SEMANTICS_FLAGS) + [f for f in flags if f not in recipe.SEMANTICS_FLAGS and f != '-O2']
     plugins = [('fnvnx_' + n, a) for n, a in plugins]
-    if not native and not raw:   # the mode of fnvnx_ftoi is the root's, never a choice (recipe.LIFTED_ARGS)
-        plugins = [(n, dict(recipe.LIFTED_ARGS[n], **a) if n in recipe.LIFTED_ARGS else a) for n, a in plugins]
+    if not native and not raw:   # the mode of fnvnx_ftoi is the root's, never a choice (recipe.plugin_args)
+        plugins = [(n, dict(a, mode='lifted') if n == 'fnvnx_ftoi' else a) for n, a in plugins]
     if not native and lifted_ftoi and 'fnvnx_ftoi' not in [n for n, _ in plugins]:   # required by the lifted-root rule, loaded first as in the product order
-        plugins.insert(0, ('fnvnx_ftoi', dict(recipe.LIFTED_ARGS['fnvnx_ftoi'])))
+        plugins.insert(0, ('fnvnx_ftoi', dict(recipe.plugin_args('lifted')['fnvnx_ftoi'])))
     names = [n for n, _ in plugins]
     for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)

@@ -221,7 +221,7 @@ def main():
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
     lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
-            "plugins": [dict(P["fnvnx_ftoi"], args=dict(recipe.LIFTED_ARGS["fnvnx_ftoi"]))],
+            "plugins": [dict(P["fnvnx_ftoi"], args=dict(recipe.plugin_args("lifted")["fnvnx_ftoi"]))],
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
             "external": [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
     LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only

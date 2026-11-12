@@ -55,8 +55,8 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `plugins`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
-`fnvnx_ftoi` is one plugin, class C (float -> integer), two modes chosen by the root's `cxx_origin` and never declared freely: `PLUGIN_ARGS` has `mode=native`
-(the MSVC `_ftol` rewrite, skipped inside functions with `__attribute__((fnvnx_f2i))`, which the plugin registers), `LIFTED_ARGS` has `mode=lifted` (no rewrite; a
+`fnvnx_ftoi` is one plugin, class C (float -> integer), two modes chosen by the root's `cxx_origin` and never declared freely: `recipe.plugin_args(cxx_origin)` gives `mode=native`
+(the MSVC `_ftol` rewrite, skipped inside functions with `__attribute__((fnvnx_f2i))`, which the plugin registers), `mode=lifted` for a lifted origin (no rewrite; a
 conversion, conversion builtin or float-reading asm outside an `fnvnx_f2i` function is an error). The recipe adds `-fplugin-arg-fnvnx_ftoi-out=/out/unit.f2i.json` to every
 CC stage (`PLUGIN_OUT`); the report (`fnvnx-f2i/1`: sites, helpers, findings) is kept next to the object and listed in `objects.json` as `f2i` of the unit.
 Rule: a root that uses an attribute declares the plugin that registers it (guest roots compile with `-Werror=attributes`).
@@ -86,7 +86,7 @@ error). A guest build.json may carry only per-root classes (`recipe.PER_ROOT`): 
 keep in sync). `-DFNVNX_SDD=1` is per root (a native C++ root must hold it).
 Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
 compiler, for C and C++ alike, is the external compiler pinned in `verify/guest_compiler.json`
-(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx", "flags": {"semantics": {"common": [flag], "lifted_extra": [flag]}}}`; `flags.semantics` is the one source of `recipe.SEMANTICS_FLAGS` (`common`) and `recipe.SEMANTICS_LIFTED` (`common` + `lifted_extra`: `-ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables`, what lifted code is built under); `recipe.semantics_set(cxx_origin)` picks the set of a root by its declared origin, `recipe.semantics_for(driver, language, origin=)` derives the per-language set from it; `verify/guest_flags.py --lang L --origin native|lifted` prints it): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
+(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx", "flags": {"semantics": {"common": [flag], "lifted_extra": [flag]}}}`; `flags.semantics` is the one source of `recipe.SEMANTICS_FLAGS` (`common`) and `recipe.SEMANTICS_LIFTED` (`common` + `lifted_extra`: `-ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables`, what lifted code is built under). `-fno-exceptions` removes host C++ EH from lifted units only. The exe's MSVC C++ EH and SEH stay implemented by the lifter through the exe's own EH tables (owner order of 2026-11-10). Nothing in the lifted flag set changes that.; `recipe.semantics_set(cxx_origin)` picks the set of a root by its declared origin, `recipe.semantics_for(driver, language, origin=)` derives the per-language set from it; `verify/guest_flags.py --lang L --origin native|lifted` prints it): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
 (`tools/gcc-ilp32-msvcmodel`). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
 tree_sha256, at) with the pinned driver paths. The distribution g++-13 is the base the compiler is built from, never the compiler of guest code. A tree
 without the pin file has no valid guest root. The plugins are built against this compiler's own plugin headers (the plugin stage reads
@@ -108,8 +108,8 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
 - `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
-  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). The one plugin it must load is `fnvnx_ftoi` with `LIFTED_ARGS` (`mode=lifted`): no rewrite, and every float -> integer conversion outside an `fnvnx_f2i` function is a build error.
-- every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with `PLUGIN_ARGS` (a lifted root: `LIFTED_ARGS` for the plugins it names, so `fnvnx_ftoi` in mode lifted), in that order: the
+  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). The one plugin it must load is `fnvnx_ftoi` with `mode=lifted` (`plugin_args`): no rewrite, and every float -> integer conversion outside an `fnvnx_f2i` function is a build error.
+- every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with the arguments of `recipe.plugin_args(cxx_origin)` (the only source: `fnvnx_ftoi` in mode lifted for a lifted root), in that order: the
   C and the C++ CC stage of the root load every plugin their front end can load (`-fplugin=/plug/<n>/<n>.so`, `/plug/<n>` a declared input), so a
   plugin is in every unit key. Loadable = has no STRONG undefined reference to a symbol that only the other front end defines (`recipe.plugin_languages`: `nm -D` of cc1,
   cc1plus and the .so; a weak undefined reference resolves to null and is no load requirement). Every plugin declares the C++ front end's symbols weak

@@ -74,8 +74,8 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
            "flags": {"c": ["-mabi=ilp32"], "cxx": ["-mabi=ilp32", "-O1"], "asm": ["-mabi=ilp32"]}, "include": [], "units": "all",
            "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [ROOT + "/body.s"], "outputs": ["gen/lifted.cc"]}],
            "external": [pack],
-           # a lifted root loads exactly fnvnx_ftoi in mode lifted (recipe.LIFTED_ARGS), as every lifted root of the product does
-           "plugins": [dict(tp.P[n], args=dict(a)) for n, a in tp.recipe.LIFTED_ARGS.items()]}
+           # a lifted root loads exactly fnvnx_ftoi in mode lifted (recipe.plugin_args), as every lifted root of the product does
+           "plugins": [dict(tp.P["fnvnx_ftoi"], args=dict(tp.recipe.plugin_args("lifted")["fnvnx_ftoi"]))]}
     files = {T + "gen/lift.py": GEN, ROOT + "/body.s": body, ROOT + "/a.cc": None}
     rtroots = [T + "rt%d" % i for i in range(len(rts))]
     for r, text in zip(rtroots, rts):

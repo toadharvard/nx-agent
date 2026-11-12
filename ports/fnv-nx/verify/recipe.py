@@ -82,7 +82,6 @@ PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
 # fnvnx_ftoi is one plugin with two modes, chosen by the root's cxx_origin (no free choice): native C++ takes the MSVC rewrite, lifted C++ has
 # no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
 # PLUGIN_OUT of the CC stage's own /out; the recipe passes it, a build.json does not declare it.
-LIFTED_ARGS = {"fnvnx_ftoi": {"mode": "lifted"}}
 PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
 
@@ -102,10 +101,9 @@ def semantics_set(origin):
 def plugin_args(origin):
     """{plugin name: its fixed arguments} for a root whose declared `cxx_origin` is ORIGIN ("native", a {"lifted_by", "pack"} dict, or None): the ONE
     place the expected arguments are decided, used by plugin_errors, the gates and the fold of L2. A function of the root's declared fact only, no second
-    table: PLUGIN_ARGS, and for a lifted origin LIFTED_ARGS over the plugins it names (fnvnx_ftoi mode lifted; native otherwise)."""
+    table: PLUGIN_ARGS, with fnvnx_ftoi's `mode` = the origin's class (lifted or native). No separate table for lifted roots."""
     out = {n: dict(a) for n, a in PLUGIN_ARGS.items()}
-    if origin_class(origin) == "lifted":
-        out.update({n: dict(a) for n, a in LIFTED_ARGS.items()})
+    out["fnvnx_ftoi"]["mode"] = origin_class(origin)
     return out
 
 
@@ -651,7 +649,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
         err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
     elif isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}:
         tool, pack = origin["lifted_by"], origin["pack"]
-        for n, a in LIFTED_ARGS.items():   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
+        for n, a in [("fnvnx_ftoi", plugin_args(origin)["fnvnx_ftoi"])]:   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
             if n not in loaded:
                 err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
             elif loaded[n].get("args") != a:
