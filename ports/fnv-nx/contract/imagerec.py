@@ -52,20 +52,46 @@ def sha256_bytes(b):
 
 
 def _runs_of(text, name='ranges'):
-    """ranges.tsv text -> ({entry: [(start, end)]}, base from the `# base=` header or None); absolute VAs of the file's base."""
-    runs, base = {}, None
+    """ranges.tsv text -> ({entry: [(start, end)]}, base from the `# base=` header or None, {entries marked `candidate`}); absolute VAs of the
+    file's base. Row: `entry<TAB>start-end,start-end,...[<TAB>candidate]`."""
+    runs, base, cand = {}, None, set()
     for ln in text.splitlines():
         if ln.startswith('# base='):
             base = int(ln.split()[1][5:].rstrip(':'), 16)
             continue
         if not ln or ln[0] == '#':
             continue
-        e, _, r = ln.partition('\t')
+        f = ln.split('\t')
         try:
-            runs[int(e, 16)] = [tuple(int(x, 16) for x in p.split('-')) for p in r.split(',') if p]
+            e = int(f[0], 16)
+            runs[e] = [tuple(int(x, 16) for x in p.split('-')) for p in (f[1].split(',') if len(f) > 1 else []) if p]
         except ValueError:
             raise ImageError('%s: malformed line %r' % (name, ln[:60]))
-    return runs, base
+        if len(f) > 2:
+            if f[2] != 'candidate' or len(f) > 3:
+                raise ImageError('%s: malformed line %r (third column is `candidate` or absent)' % (name, ln[:60]))
+            cand.add(e)
+    return runs, base, cand
+
+
+def _data_of(text, name='data_in_code'):
+    """data_in_code.tsv text -> ([(start, end)] half-open absolute VAs of the file's base, base or None). Row: `start<TAB>end<TAB>kind<TAB>derivation`."""
+    out, base = [], None
+    for ln in text.splitlines():
+        if ln.startswith('# base='):
+            base = int(ln.split()[1][5:].rstrip(':'), 16)
+            continue
+        if not ln or ln[0] == '#':
+            continue
+        f = ln.split('\t')
+        try:
+            a, b = int(f[0], 16), int(f[1], 16)
+        except (ValueError, IndexError):
+            raise ImageError('%s: malformed line %r' % (name, ln[:60]))
+        if not a < b:
+            raise ImageError('%s: empty or reversed range %x-%x' % (name, a, b))
+        out.append((a, b))
+    return out, base
 
 
 class ImageRec:
@@ -73,7 +99,7 @@ class ImageRec:
     relocations), imports {slot va: (dll, name)}, runs {entry: [(start, end)]}, sha (of the image bytes) and facts (the reason an image has no
     function facts, or None). The bytes are private; they are read through read/word/decode_at/decode_range."""
 
-    def __init__(self, data, name, runs, facts=None):
+    def __init__(self, data, name, runs, facts=None, data_ranges=(), candidates=()):
         self._file = bytes(data)
         self.sha = sha256_bytes(self._file)
         self.name = name
@@ -85,7 +111,7 @@ class ImageRec:
         self.dirs = pe.dirs
         self.ranges_sha = None
         self._ins = {}
-        self._set_runs(runs)
+        self._set_runs(runs, data_ranges, candidates)
         self.relocs = set()
         rva, size = pe.dirs[5]
         blob = pe.rd(rva, size) if size else b''
@@ -109,8 +135,17 @@ class ImageRec:
             for slot, nm in items:
                 self.imports[self.base + slot] = (dll, nm)
 
-    def _set_runs(self, runs):
+    def _set_runs(self, runs, data_ranges=(), candidates=()):
+        """runs: code. data_ranges: data in code (half-open, jump tables). A data range that overlaps a run of a candidate entry wins over that
+        run; one that overlaps a run of any other entry is a contradictory fact (ImageError)."""
         self.runs = {e: [tuple(r) for r in rs] for e, rs in runs.items()}
+        self.candidates = set(candidates)
+        self.data = sorted((a, b) for a, b in data_ranges)
+        self._dstarts = [a for a, _ in self.data]
+        for da, db in self.data:
+            for e, rs in self.runs.items():
+                if e not in self.candidates and any(a < db and da < b for a, b in rs):
+                    raise ImageError('%s: data range %x-%x overlaps a run of entry %x, which is not a candidate' % (self.name, da, db, e))
         self.flat = sorted((a, b) for rs in self.runs.values() for a, b in rs)
         self._merged = []                   # the union of the runs: disjoint, ascending
         for a, b in self.flat:
@@ -127,15 +162,20 @@ class ImageRec:
         k = bisect.bisect_left(self._starts, va + n) - 1       # the last merged run that starts before va+n
         return k >= 0 and self._merged[k][1] > va
 
+    def in_data(self, va, n=1):
+        """True iff [va, va+n) lies inside one declared data range (data in code)."""
+        k = bisect.bisect_right(self._dstarts, va) - 1
+        return k >= 0 and va + n <= self.data[k][1] and self.data[k][0] <= va
+
     def read(self, va, n):
-        if self.in_run(va, n):
+        if not self.in_data(va, n) and self.in_run(va, n):
             raise CodeRead('%s: bytes at 0x%x+%d are inside a run of the function facts (code is read through the decoder)' % (self.name, va, n))
         return self._pe.rd(va - self.base, n)
 
     def word(self, va):
         """The little-endian 32-bit word at va. Inside a run only the relocated field of a decoded instruction (its immediate or
         displacement) is answered; any other read of code raises."""
-        if not self.in_run(va, 4):
+        if self.in_data(va, 4) or not self.in_run(va, 4):
             return struct.unpack('<I', self._pe.rd(va - self.base, 4))[0]
         if va not in self.relocs:
             raise CodeRead('%s: word at 0x%x is inside a run of the function facts and is not a relocated field' % (self.name, va))
@@ -206,12 +246,21 @@ def load(image_path, facts_dir, pin):
     if not rp.startswith(os.path.realpath(facts_dir) + os.sep):
         raise ImageError('%s: ranges path leaves the facts directory' % ent['ranges'])
     with open(rp) as fh:
-        runs, fb = _runs_of(fh.read(), ent['ranges'])
+        runs, fb, cand = _runs_of(fh.read(), ent['ranges'])
     if fb is None:
         raise ImageError('%s has no `# base=` header' % ent['ranges'])
+    dr = []
+    if 'data_in_code' in ent:     # data in code (jump tables) of the facts, in the same tree, rebased the same way
+        dp = os.path.realpath(os.path.join(facts_dir, ent['data_in_code']))
+        if not dp.startswith(os.path.realpath(facts_dir) + os.sep):
+            raise ImageError('%s: data path leaves the facts directory' % ent['data_in_code'])
+        with open(dp) as fh:
+            dr, db = _data_of(fh.read(), ent['data_in_code'])
+        if db != fb:
+            raise ImageError('%s: `# base=` %s differs from the ranges base %s' % (ent['data_in_code'], db, fb))
     rec = ImageRec(data, name, {}, None)
     d = rec.base - fb
-    rec._set_runs({e + d: [(a + d, b + d) for a, b in rs] for e, rs in runs.items()})
+    rec._set_runs({e + d: [(a + d, b + d) for a, b in rs] for e, rs in runs.items()}, [(a + d, b + d) for a, b in dr], {e + d for e in cand})
     rec.ranges_sha = sha256_bytes(open(rp, 'rb').read())
     return rec
 

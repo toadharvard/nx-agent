@@ -3,7 +3,7 @@
 
     relocs_in_runs.py --image NAME=path ... --facts DIR --facts-tree SHA [--list]
 
-For every image: the HIGHLOW relocations inside a run of the function facts (`in_run`), and of those the words that are NOT the immediate or the
+For every image: the HIGHLOW relocations inside a run of the function facts (`in_run`) and in no declared data range (data_in_code), and of those the words that are NOT the immediate or the
 displacement of a decoded instruction (imagerec.ImageRec.word raises CodeRead for them: bytes that are data, such as jump tables, inside a code
 run), with the merged runs that hold them. Exit 1 when any word is left; the acceptance of the data-in-code fact is 0 words for every image.
 --list prints every word as `image<TAB>va<TAB>run start<TAB>run end`.
@@ -20,7 +20,7 @@ import imagerec
 def census(rec):
     inrun, words = 0, []
     for r in sorted(rec.relocs):
-        if rec.in_run(r, 4):
+        if rec.in_run(r, 4) and not rec.in_data(r, 4):
             inrun += 1
             try:
                 rec.word(r)

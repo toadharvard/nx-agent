@@ -80,6 +80,24 @@ check('decode_at', [(i.mnemonic, i.size) for i in rec.decode_at(BASE + TEXT, 2)]
 check('decode_range', [i.mnemonic for i in rec.decode_range(BASE + TEXT, BASE + TEXT + 11)], ['push', 'mov', 'ret'])
 check('no runs: bytes readable', imagerec.ImageRec(pe(GOOD), 'a.exe', {}).word(BASE + TEXT + 1), BASE + RD + 8)
 
+# data in code (data_in_code.tsv): a read in a declared data range is answered as data; code stays refused
+T0 = BASE + TEXT
+d = imagerec.ImageRec(pe(GOOD), 'a.exe', {T0: [(T0, T0 + 11)]}, None, [(T0 + 1, T0 + 5)], {T0})        # candidate entry: data wins
+check('data range over a candidate run: read answered', d.read(T0 + 1, 4), pe(GOOD)[0x400 + 1:0x400 + 5])
+check('data range: word of a relocated field answered raw', d.word(T0 + 1), BASE + RD + 8)
+check('read straddling data and code refused', raises(imagerec.CodeRead, d.read, T0 + 3, 4) is not None, True)
+check('code outside the data range still refused', raises(imagerec.CodeRead, d.read, T0 + 6, 4) is not None, True)
+check('in_data', (d.in_data(T0 + 1, 4), d.in_data(T0, 4), d.in_data(T0 + 2, 4)), (True, False, False))
+e = imagerec.ImageRec(pe(GOOD), 'a.exe', {T0: [(T0, T0 + 11)]}, None, [(BASE + RD, BASE + RD + 4)], set())
+check('data range outside every run: fine, read answered', (e.in_data(BASE + RD, 4), e.read(BASE + RD, 4)), (True, bytes([0, 1, 2, 3])))
+check('data range over a run that is not a candidate: contradictory fact', raises(imagerec.ImageError, imagerec.ImageRec, pe(GOOD), 'a.exe',
+                                                                                  {T0: [(T0, T0 + 11)]}, None, [(T0 + 1, T0 + 5)], set()) is not None, True)
+check('parse: candidate column', imagerec._runs_of('# base=0x10:\n10\t10-20,30-40\tcandidate\n50\t50-60\n'),
+      ({0x10: [(0x10, 0x20), (0x30, 0x40)], 0x50: [(0x50, 0x60)]}, 0x10, {0x10}))
+check('parse: bad third column', raises(imagerec.ImageError, imagerec._runs_of, '# base=0x10:\n10\t10-20\tcand\n') is not None, True)
+check('parse: data ranges', imagerec._data_of('# base=0x10:\n20\t30\tjumptable\tjmp [eax*4+20] at 11\n'), ([(0x20, 0x30)], 0x10))
+check('parse: reversed data range', raises(imagerec.ImageError, imagerec._data_of, '20\t10\tx\ty\n') is not None, True)
+
 # malformed relocation directories are errors, never a silent stop
 bad = {'block size under 8': struct.pack('<II', TEXT, 4) + b'\0' * 8,
        'block size 0 (zero padding after a block)': GOOD + b'\0' * 8,
@@ -116,6 +134,17 @@ with tempfile.TemporaryDirectory() as t:
     imagerec._trees.clear()
     pin = put('0' * 64)
     check('load: image sha not the manifest\'s', raises(imagerec.ImageError, imagerec.load, img, facts, pin) is not None, True)
+    imagerec._trees.clear()
+    with open(os.path.join(facts, 'data_in_code.tsv'), 'w') as fh:
+        fh.write('# base=%x:\n%x\t%x\tjumptable\tx\n' % (0x10000, 0x10000 + TEXT + 1, 0x10000 + TEXT + 5))
+    with open(os.path.join(facts, 'ranges.tsv'), 'w') as fh:
+        fh.write('# base=%x:\n%x\t%x-%x\tcandidate\n' % (0x10000, 0x10000 + TEXT, 0x10000 + TEXT, 0x10000 + TEXT + 11))
+    json.dump({'format': 'fnvnx-liftfacts-manifest/1', 'images': [{'image': 'a.exe', 'sha256': hashlib.sha256(data).hexdigest(), 'ranges': 'ranges.tsv',
+                                                                    'data_in_code': 'data_in_code.tsv'}]}, open(os.path.join(facts, 'manifest.json'), 'w'))
+    r = imagerec.load(img, facts, {'tree_sha256': cas.tree_hash(facts)})
+    check('load: data range rebased, candidate entry', (r.data, r.candidates), ([(T0 + 1, T0 + 5)], {T0}))
+    check('load: word in the data range', r.word(T0 + 1), BASE + RD + 8)
+    imagerec._trees.clear()
     imagerec._trees.clear()
     json.dump({'format': 'fnvnx-liftfacts-manifest/1', 'images': []}, open(os.path.join(facts, 'manifest.json'), 'w'))
     pin = {'tree_sha256': cas.tree_hash(facts)}
