@@ -1,0 +1,244 @@
+file	line	function	class	reason (validator rule R1-R9 of res_smcheck.cpp, or what is missing)
+mojoshader_profile_common.c	205	floatstr	i	buffer/internal
+mojoshader_profile_common.c	490	get_D3D_register_string	v	R5 cls_of: unknown register type -> E_SRC_REG
+mojoshader_profile_glsl.c	67	dk_attrib_location	g	validator accepts vertex-input/varying usage x index (R5: usage<=13, idx<=15); translator tables cover 8 usages: translator defect, dk_assign is total per fnvnx_dk_layout.h
+mojoshader_profile_glsl.c	105	dk_varying_location	g	validator accepts vertex-input/varying usage x index (R5: usage<=13, idx<=15); translator tables cover 8 usages: translator defect, dk_assign is total per fnvnx_dk_layout.h
+mojoshader_profile_glsl.c	129	get_GLSL_uniform_type	i	BUG: path, translator state; needs own proof
+mojoshader_profile_glsl.c	212	get_GLSL_srcarg_varname	i	source_args index = translator state; <= operand count R4
+mojoshader_profile_glsl.c	262	make_GLSL_destarg_assign	i	guard !support_glsldk: unreachable for the only requested profile (ABI)
+mojoshader_profile_glsl.c	274	make_GLSL_destarg_assign	i	snprintf buffer size
+mojoshader_profile_glsl.c	403	make_GLSL_srcarg_string	i	source_args index = translator state; <= operand count R4
+mojoshader_profile_glsl.c	453	make_GLSL_srcarg_string	g	SRCMOD_DZ/DW "unsupported" (!!! FIXME): R6 accepts the modifier in models whose srcmods list has it: translator defect
+mojoshader_profile_glsl.c	458	make_GLSL_srcarg_string	g	SRCMOD_DZ/DW "unsupported" (!!! FIXME): R6 accepts the modifier in models whose srcmods list has it: translator defect
+mojoshader_profile_glsl.c	586	make_GLSL_srcarg_string	i	BUG: path, translator state; needs own proof
+mojoshader_profile_glsl.c	626	get_GLSL_comparison_string_scalar	g	instruction_controls (opcode token bits 16-23) are not checked by the validator
+mojoshader_profile_glsl.c	641	get_GLSL_comparison_string_vector	g	instruction_controls (opcode token bits 16-23) are not checked by the validator
+mojoshader_profile_glsl.c	692	emit_GLSL_start	i	profile / shader type argument: ABI passes GLSLDK + vs/ps (validated stage)
+mojoshader_profile_glsl.c	804	emit_GLSL_start	i	profile / shader type argument: ABI passes GLSLDK + vs/ps (validated stage)
+mojoshader_profile_glsl.c	1116	output_GLSL_uniform_array	i	BUG: path, translator state; needs own proof
+mojoshader_profile_glsl.c	1229	emit_GLSL_finalize	i	guard: non-glsldk profile branch (else of support_glsldk)
+mojoshader_profile_glsl.c	1340	emit_GLSL_global	i	BUG: path, translator state; needs own proof
+mojoshader_profile_glsl.c	1549	emit_GLSL_sampler	v	R5 index < table count (ps_1_x t0-t3)
+mojoshader_profile_glsl.c	1579	emit_GLSL_sampler	i	BUG: path, translator state; needs own proof
+mojoshader_profile_glsl.c	1865	emit_GLSL_attribute	v	R5 register class legal per stage (cls_of -1 or not in has_cls)
+mojoshader_profile_glsl.c	1890	emit_GLSL_attribute	g	dcl centroid flag: declare() does not check dcl flags/centroid placement
+mojoshader_profile_glsl.c	2008	emit_GLSL_attribute	i	BUG: path, translator state; needs own proof
+mojoshader_profile_glsl.c	2014	emit_GLSL_attribute	v	R5 register class legal per stage (cls_of -1 or not in has_cls)
+mojoshader_profile_glsl.c	2047	emit_GLSL_attribute	g	dcl centroid flag: declare() does not check dcl flags/centroid placement
+mojoshader_profile_glsl.c	2056	emit_GLSL_attribute	v	R5 register class legal per stage (cls_of -1 or not in has_cls)
+mojoshader_profile_glsl.c	2995	emit_GLSL_TEXLD	g	texture type of the sampler: TEXLD on a sampler without a declared type (undeclared/untyped sampler is not checked)
+mojoshader_profile_glsl.c	3055	emit_GLSL_TEXLD	g	texld/texldd/texldl sampler used without dcl_samplerType: validator does not check that the sampler was declared
+mojoshader_profile_glsl.c	3097	emit_GLSL_TEXLD	g	TEXLDP on a cube sampler: type/control combination not checked
+mojoshader_profile_glsl.c	3114	emit_GLSL_TEXLD	g	texture type of the sampler: TEXLD on a sampler without a declared type (undeclared/untyped sampler is not checked)
+mojoshader_profile_glsl.c	3718	emit_GLSL_TEXLDD	g	texld/texldd/texldl sampler used without dcl_samplerType: validator does not check that the sampler was declared
+mojoshader_profile_glsl.c	3743	emit_GLSL_TEXLDD	g	texture type of the sampler: TEXLD on a sampler without a declared type (undeclared/untyped sampler is not checked)
+mojoshader_profile_glsl.c	3798	emit_GLSL_TEXLDL	g	texld/texldd/texldl sampler used without dcl_samplerType: validator does not check that the sampler was declared
+mojoshader_profile_glsl.c	3817	emit_GLSL_TEXLDL	g	texture type of the sampler: TEXLD on a sampler without a declared type (undeclared/untyped sampler is not checked)
+mojoshader.c	373	parse_destination_token	v	R2/R4 E_LENGTH (`*i >= n`)
+mojoshader.c	426	parse_destination_token	g	reserved bits 14-15 of dst/src token: validator does not check them
+mojoshader.c	429	parse_destination_token	v	R2/R5 param(): bit 31 required (E_LENGTH)
+mojoshader.c	434	parse_destination_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	436	parse_destination_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	452	parse_destination_token	g	dst relative addressing needing CTAB / centroid_allowed (dcl state): validator does not model these
+mojoshader.c	464	parse_destination_token	g	dst relative addressing needing CTAB / centroid_allowed (dcl state): validator does not model these
+mojoshader.c	468	parse_destination_token	g	dst relative addressing needing CTAB / centroid_allowed (dcl state): validator does not model these
+mojoshader.c	477	parse_destination_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	479	parse_destination_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	481	parse_destination_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	487	parse_destination_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	493	parse_destination_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	495	parse_destination_token	g	dst relative addressing needing CTAB / centroid_allowed (dcl state): validator does not model these
+mojoshader.c	499	parse_destination_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	533	determine_constants_arrays	r	allocation result (item==NULL / retval!=NULL path): out-of-memory propagates
+mojoshader.c	702	parse_source_token	v	R2/R4 E_LENGTH (`*i >= n`)
+mojoshader.c	745	parse_source_token	v	R2/R5 param(): bit 31 required (E_LENGTH)
+mojoshader.c	748	parse_source_token	v	R2/R5 param(): bit 31 required (E_LENGTH)
+mojoshader.c	752	parse_source_token	v	R2/R4 E_LENGTH for the relative token (`*i >= n`)
+mojoshader.c	759	parse_source_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	783	parse_source_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	786	parse_source_token	g	relative-address token reserved bits / address register swizzle: validator checks only type bits (R8)
+mojoshader.c	794	parse_source_token	g	relative-address token reserved bits / address register swizzle: validator checks only type bits (R8)
+mojoshader.c	799	parse_source_token	g	relative-address token reserved bits / address register swizzle: validator checks only type bits (R8)
+mojoshader.c	802	parse_source_token	g	relative-address token reserved bits / address register swizzle: validator checks only type bits (R8)
+mojoshader.c	816	parse_source_token	v	R8 rel / R7 dstmods / R5 cls_of per model
+mojoshader.c	839	parse_source_token	g	CTAB / predicate / written-register state: not in validator
+mojoshader.c	867	parse_source_token	g	CTAB / predicate / written-register state: not in validator
+mojoshader.c	894	parse_source_token	g	CTAB / predicate / written-register state: not in validator
+mojoshader.c	917	parse_source_token	g	CTAB / predicate / written-register state: not in validator
+mojoshader.c	925	parse_source_token	g	CTAB / predicate / written-register state: not in validator
+mojoshader.c	930	parse_source_token	g	CTAB / predicate / written-register state: not in validator
+mojoshader.c	952	parse_source_token	g	CTAB / predicate / written-register state: not in validator
+mojoshader.c	964	parse_predicated_token	g	predicate token operand form: R9 checks only that p0 exists (swizzle/mod/relative not checked)
+mojoshader.c	966	parse_predicated_token	g	predicate token operand form: R9 checks only that p0 exists (swizzle/mod/relative not checked)
+mojoshader.c	968	parse_predicated_token	g	predicate token operand form: R9 checks only that p0 exists (swizzle/mod/relative not checked)
+mojoshader.c	970	parse_predicated_token	g	predicate token operand form: R9 checks only that p0 exists (swizzle/mod/relative not checked)
+mojoshader.c	986	parse_args_DEF	v	R5 declare(): def class must match (cl != want)
+mojoshader.c	988	parse_args_DEF	g	relative bit on def destination: declare() does not check bit 13
+mojoshader.c	1003	parse_args_DEFI	v	R5 declare(): def class must match (cl != want)
+mojoshader.c	1005	parse_args_DEFI	g	relative bit on def destination: declare() does not check bit 13
+mojoshader.c	1020	parse_args_DEFB	v	R5 declare(): def class must match (cl != want)
+mojoshader.c	1022	parse_args_DEFB	g	relative bit on def destination: declare() does not check bit 13
+mojoshader.c	1053	parse_args_DCL	v	R2/R5 param(): bit 31 required (E_LENGTH)
+mojoshader.c	1061	parse_args_DCL	g	dcl dst result_shift/relative: declare() does not check
+mojoshader.c	1063	parse_args_DCL	g	dcl dst result_shift/relative: declare() does not check
+mojoshader.c	1087	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1089	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1091	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1109	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1114	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1118	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1130	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1159	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1186	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1191	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1194	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1204	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1236	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1239	parse_args_DCL	g	dcl usage/type combos (misc registers, texture usages, sampler type, reserved mask): declare() checks usage<=13, sampler st 2..4, class, index only
+mojoshader.c	1418	state_DEF	g	def/dcl after first instruction (instruction_count != 0): ordering not checked
+mojoshader.c	1420	state_DEF	v	R5 declare(): class
+mojoshader.c	1443	state_DEFI	g	def/dcl after first instruction (instruction_count != 0): ordering not checked
+mojoshader.c	1445	state_DEFI	v	R5 declare(): class
+mojoshader.c	1469	state_DEFB	g	def/dcl after first instruction (instruction_count != 0): ordering not checked
+mojoshader.c	1471	state_DEFB	v	R5 declare(): class
+mojoshader.c	1499	state_DCL	g	def/dcl after first instruction (instruction_count != 0): ordering not checked
+mojoshader.c	1511	state_DCL	v	R5 declare(): usage > 13 -> E_DCL
+mojoshader.c	1520	state_DCL	v	R5 declare(): usage > 13 -> E_DCL
+mojoshader.c	1530	state_TEXCRD	v	R3 opcode exists in the model (table row models)
+mojoshader.c	1540	state_FRC	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1565	state_M4X4	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1578	state_M4X3	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1589	state_M3X4	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1600	state_M3X3	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1611	state_M3X2	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1628	state_RET	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1630	state_RET	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1640	check_label_register	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1642	check_label_register	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1646	check_label_register	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1649	check_label_register	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1655	state_LABEL	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1671	check_call_loop_wrappage	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1677	check_call_loop_wrappage	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1679	check_call_loop_wrappage	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1693	state_CALLNZ	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1701	state_MOVA	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1707	state_RCP	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1713	state_RSQ	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1719	state_LOOP	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1721	state_LOOP	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1730	state_ENDLOOP	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1738	state_BREAKP	g	flow-control operand register kind (breakp): not checked
+mojoshader.c	1740	state_BREAKP	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1742	state_BREAKP	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1748	state_BREAK	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1755	state_SETP	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1762	state_REP	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1773	state_ENDREP	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1790	state_CMP	g	ps_1_x/sm1 operand restrictions (cmp/cnd/sincos register constraints): not checked
+mojoshader.c	1798	state_CMP	g	ps_1_x/sm1 operand restrictions (cmp/cnd/sincos register constraints): not checked
+mojoshader.c	1816	state_CND	v	R3 opcode exists in the model (table row models)
+mojoshader.c	1825	state_CND	g	ps_1_x/sm1 operand restrictions (cmp/cnd/sincos register constraints): not checked
+mojoshader.c	1833	state_POW	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1835	state_POW	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1841	state_LOG	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1847	state_LOGP	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1857	state_SINCOS	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1860	state_SINCOS	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1863	state_SINCOS	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1873	state_SINCOS	g	ps_1_x/sm1 operand restrictions (cmp/cnd/sincos register constraints): not checked
+mojoshader.c	1879	state_SINCOS	g	ps_1_x/sm1 operand restrictions (cmp/cnd/sincos register constraints): not checked
+mojoshader.c	1887	state_IF	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1894	state_IFC	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1896	state_IFC	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1903	state_BREAKC	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1905	state_BREAKC	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	1907	state_BREAKC	g	flow-control nesting / operand-register kinds (loop, rep, label, call, setp, if): not checked (flow depth / nesting)
+mojoshader.c	1917	state_TEXKILL	g	write-mask / saturate legality: explicitly NOT checked by the validator
+mojoshader.c	1919	state_TEXKILL	v	R5 param(): destination T/Rr role or sampler role (want NXC_s)
+mojoshader.c	1933	state_texops	g	texture-op operand registers / pad pairing: not checked
+mojoshader.c	1935	state_texops	g	texture-op operand registers / pad pairing: not checked
+mojoshader.c	1937	state_texops	g	texture-op operand registers / pad pairing: not checked
+mojoshader.c	1970	state_texbem	v	R3 opcode exists in the model (table row models)
+mojoshader.c	1975	state_texbem	v	R3 opcode exists in the model (table row models)
+mojoshader.c	1999	state_TEXM3X2PAD	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2009	state_TEXM3X2TEX	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2011	state_TEXM3X2TEX	g	texture-op operand registers / pad pairing: not checked
+mojoshader.c	2023	state_TEXM3X2TEX	g	sampler type must match texm3x2tex / texm3x3 variant: not checked
+mojoshader.c	2029	state_TEXM3X3PAD	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2049	state_texm3x3	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2051	state_texm3x3	g	texture-op operand registers / pad pairing: not checked
+mojoshader.c	2061	state_texm3x3	g	sampler type must match texm3x2tex / texm3x3 variant: not checked
+mojoshader.c	2067	state_TEXM3X3	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2080	state_TEXM3X3SPEC	g	texture-op operand registers / pad pairing: not checked
+mojoshader.c	2093	state_texreg	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2106	state_TEXM3X2DEPTH	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2108	state_TEXM3X2DEPTH	g	texture-op operand registers / pad pairing: not checked
+mojoshader.c	2140	state_TEXLD	v	R5/R9 texld sampler operand / plain operand per sm_illegal
+mojoshader.c	2142	state_TEXLD	v	R5/R9 texld sampler operand / plain operand per sm_illegal
+mojoshader.c	2144	state_TEXLD	v	R5/R9 texld sampler operand / plain operand per sm_illegal
+mojoshader.c	2149	state_TEXLD	g	texld controls (opcode token bits 16-23) / destination: not checked
+mojoshader.c	2156	state_TEXLD	v	R5/R9 texld sampler operand / plain operand per sm_illegal
+mojoshader.c	2158	state_TEXLD	v	R5/R9 texld sampler operand / plain operand per sm_illegal
+mojoshader.c	2178	state_TEXLD	g	texld controls (opcode token bits 16-23) / destination: not checked
+mojoshader.c	2186	state_TEXLDL	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2188	state_TEXLDL	v	R5 param(): destination T/Rr role or sampler role (want NXC_s)
+mojoshader.c	2199	state_DP2ADD	g	replicate-swizzle requirement of scalar-source ops: swizzle form legality NOT checked
+mojoshader.c	2257	parse_instruction_token	g	opcode token bit 31 / coissue bit 30: not checked
+mojoshader.c	2261	parse_instruction_token	v	R3/R2/R4: opcode in model, length field vs table
+mojoshader.c	2269	parse_instruction_token	g	opcode token bit 31 / coissue bit 30: not checked
+mojoshader.c	2271	parse_instruction_token	v	R3 opcode exists in the model (table row models)
+mojoshader.c	2276	parse_instruction_token	v	R3/R2/R4: opcode in model, length field vs table
+mojoshader.c	2345	parse_instruction_token	v	R3/R2/R4: opcode in model, length field vs table
+mojoshader.c	2351	parse_instruction_token	v	R3/R2/R4: opcode in model, length field vs table
+mojoshader.c	2366	parse_version_token	v	R1 version token / model
+mojoshader.c	2390	parse_version_token	v	R1 version token / model
+mojoshader.c	2404	parse_version_token	v	R1 version token / model
+mojoshader.c	2453	parse_ctab_typeinfo	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2459	parse_ctab_typeinfo	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2474	parse_ctab_typeinfo	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2526	parse_constant_table	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2536	parse_constant_table	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2630	parse_constant_table	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2644	is_comment_token	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2674	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2692	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2720	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2737	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2749	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2758	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2759	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2760	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2777	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2783	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2812	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2828	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2846	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2864	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2909	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2922	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2939	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	2960	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	3001	parse_preshader	g	comment blocks (CTAB, preshader): the validator skips comments (R2); D3D9 ignores them; translator rejects malformed blocks
+mojoshader.c	3084	parse_end_token	v	R2 token walk (END, token count)
+mojoshader.c	3100	parse_phase_token	v	R3 opcode exists in the model (table row models)
+mojoshader.c	3116	parse_token	v	R2 token walk (END, token count)
+mojoshader.c	3130	parse_token	v	R2 token walk (END, token count)
+mojoshader.c	3216	build_context	i	translator argument (mainfn / profile): ABI-fixed
+mojoshader.c	3228	build_context	i	translator argument (mainfn / profile): ABI-fixed
+mojoshader.c	3386	build_uniforms	r	allocation result (item==NULL / retval!=NULL path): out-of-memory propagates
+mojoshader.c	3407	build_uniforms	r	allocation result (item==NULL / retval!=NULL path): out-of-memory propagates
+mojoshader.c	3443	build_constants	r	allocation result (item==NULL / retval!=NULL path): out-of-memory propagates
+mojoshader.c	3472	build_samplers	r	allocation result (item==NULL / retval!=NULL path): out-of-memory propagates
+mojoshader.c	3515	build_attributes	r	allocation result (item==NULL / retval!=NULL path): out-of-memory propagates
+mojoshader.c	3575	build_outputs	r	allocation result (item==NULL / retval!=NULL path): out-of-memory propagates
+mojoshader.c	3808	process_definitions	g	use of undefined register / ps_1_x texture register never written: not checked
+mojoshader.c	3887	process_definitions	g	use of undefined register / ps_1_x texture register never written: not checked
+mojoshader.c	3982	verify_swizzles	i	swizzle fields are 2-bit: cannot exceed 3
+mojoshader.c	3983	verify_swizzles	i	swizzle fields are 2-bit: cannot exceed 3
+mojoshader.c	3984	verify_swizzles	i	swizzle fields are 2-bit: cannot exceed 3
+mojoshader.c	3985	verify_swizzles	i	swizzle fields are 2-bit: cannot exceed 3
+mojoshader.c	4022	MOJOSHADER_parse	i	translator argument (mainfn / profile): ABI-fixed
+mojoshader.c	4051	MOJOSHADER_parse	i	token position vs count: translator state after validated R2 walk
+mojoshader.c	4073	MOJOSHADER_parse	i	token position vs count: translator state after validated R2 walk
+mojoshader.c	4088	MOJOSHADER_parse	g	use of undefined register / ps_1_x texture register never written: not checked
