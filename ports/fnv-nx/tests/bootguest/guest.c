@@ -1,38 +1,13 @@
 /* Guest images of the boot machine's tests (class test, ILP32 PIE FNXG). One source, one image per MODE (variant m<N> of build.json).
    The renderer guest of test_bootgpu is MODE 80/81 here (it was 50/51 there, which the base guest below already uses). */
 #include <stdint.h>
-#include "hostapi.h"
-const FnvnxHostApi *fnvnx_host;
+#include "fnvnx/hostapi.h"
 #define H (fnvnx_host)
-typedef struct { int32_t d_tag; uint32_t d_val; } Dyn;
-typedef struct { uint32_t o, i; int32_t a; } Rela;
-extern char __fnvnx_guest_start[] __attribute__((visibility("hidden")));   /* no GOT before relocation */
 static const char *const MSG[] = {"hello from the guest\n", "second line\n"};   /* needs RELATIVE relocations */
 static volatile uint32_t flag;
 static uint64_t H2(uint64_t f, uint64_t a, uint64_t b) { return fnvnx_hcall2(f, a, b); }
 static uint32_t slen(const char *s) { uint32_t n = 0; while (s[n]) n++; return n; }
 static void say(const char *s) { H2(H->console_write, FNVNX_ADDR(s), slen(s)); }
-static uint32_t mv(uint32_t v, uint32_t slide, uint32_t size) { return v < size ? v + slide : v; }
-static void relocate(uint32_t base) {
-    const uint32_t *hdr = (const uint32_t *)(uintptr_t)base;
-    const char *mod0 = (const char *)(uintptr_t)base + hdr[1];
-    const Dyn *d = (const Dyn *)(mod0 + ((const int32_t *)mod0)[1]);
-    uint32_t rela = 0, relasz = 0, relr = 0, relrsz = 0, size = hdr[5];
-    for (; d->d_tag; d++) {
-        if (d->d_tag == 7) rela = d->d_val + base; else if (d->d_tag == 8) relasz = d->d_val;
-        else if (d->d_tag == 36) relr = d->d_val + base; else if (d->d_tag == 35) relrsz = d->d_val;
-    }
-    for (uint32_t i = 0; i < relasz / 12; i++) {
-        const Rela *r = (const Rela *)(uintptr_t)rela + i;
-        if ((r->i & 0xFF) == 183) *(uint32_t *)(uintptr_t)(r->o + base) = mv((uint32_t)r->a, base, size);
-    }
-    uint32_t *w = 0;
-    for (uint32_t i = 0; i < relrsz / 4; i++) {
-        uint32_t e = ((const uint32_t *)(uintptr_t)relr)[i];
-        if (!(e & 1)) { w = (uint32_t *)(uintptr_t)(e + base); *w += base; w++; }
-        else { for (uint32_t b = e >> 1, k = 0; b; b >>= 1, k++) if (b & 1) w[k] += base; w += 31; }
-    }
-}
 __attribute__((noinline)) uint32_t marker(uint32_t x) { __asm__ volatile("" ::: "memory"); return x + 1; }
 static uint64_t worker(uint64_t arg) {
     H2(H->sleep_ns, 5000000, 0);
@@ -208,9 +183,7 @@ __attribute__((noinline)) void case_unwind_outer(void) {
     sink += game_b(1);
 }
 #endif
-uint64_t __fnvnx_guest_entry(uint64_t api) {
-    relocate((uint32_t)(uintptr_t)__fnvnx_guest_start);
-    fnvnx_host = (const FnvnxHostApi *)(uintptr_t)api;
+int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are set up before main */
     say(MSG[0]); say(MSG[1]);
 #if MODE == 70
     /* watch-log guest: fnvwl_f(n) recurses once per n, fnvwl_g is a leaf; each records its SP at its first instruction */

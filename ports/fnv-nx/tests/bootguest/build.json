@@ -7,1185 +7,87 @@
  },
  "flags": {
   "c": [
-   "-mabi=ilp32",
-   "-march=armv8-a",
    "-O2",
-   "-fPIE",
-   "-ffreestanding",
-   "-fno-builtin",
-   "-fno-stack-protector",
-   "-fvisibility=hidden",
-   "-mno-outline-atomics",
-   "-fno-asynchronous-unwind-tables",
-   "-fno-tree-loop-distribute-patterns",
-   "-Wall",
    "-g",
+   "-Wall",
+   "-Wextra",
+   "-Werror=attributes",
    "-DMODE=0"
   ],
-  "cxx": [],
-  "asm": [
-   "-mabi=ilp32",
-   "-march=armv8-a",
-   "-O2"
-  ]
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-Wall",
+   "-Wextra",
+   "-D__LINUX_ERRNO_EXTENSIONS__",
+   "-DFNVNX_SDD=1",
+   "-std=gnu++20",
+   "-Werror=attributes"
+  ],
+  "asm": []
  },
- "include": [],
+ "include": [
+  "ports/fnv-nx/hostabi/include",
+  "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
+  "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32",
+  "/ext/a64/aarch64-none-elf/include"
+ ],
  "units": "all",
- "link": {
-  "script": "guest.ld",
-  "output": "bootguest.elf",
-  "kind": "pie",
-  "flags": [
-   "-m",
-   "aarch64linux32"
-  ]
- },
- "variants": {
-  "m0": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=0"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
+ "plugin_cxx": "x86_64-linux-gnu-g++-13",
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi",
+   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+   "args": {
+    "mode": "native"
    }
   },
-  "m1": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=1"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
+  {
+   "name": "fnvnx_order",
+   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
+   "args": {
+    "args": "rtl",
+    "object": "msvc",
+    "operator": "rtl",
+    "assign": "msvc"
    }
   },
-  "m2": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=2"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
+  {
+   "name": "fnvnx_sdd",
+   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
+   "args": {}
   },
-  "m3": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=3"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
+  {
+   "name": "fnvnx_pi",
+   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
+   "args": {}
   },
-  "m4": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=4"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
+  {
+   "name": "fnvnx_dispatch",
+   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+   "args": {}
   },
-  "m5": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=5"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
+  {
+   "name": "fnvnx_addr",
+   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
+   "args": {}
   },
-  "m6": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=6"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
+  {
+   "name": "fnvnx_names",
+   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+   "args": {}
   },
-  "m7": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=7"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m8": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=8"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m9": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=9"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m10": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=10"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m11": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=11"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m30": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=30"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m31": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=31"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m32": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=32"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m34": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=34"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m35": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=35"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m36": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=36"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m40": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=40"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m41": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=41"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m42": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=42"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m44": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=44"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m45": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=45"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m46": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=46"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m47": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=47"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m48": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=48"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m49": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=49"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m50": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=50"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m51": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=51"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m52": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=52"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m53": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=53"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m54": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=54"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m55": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=55"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m56": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=56"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m57": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=57"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m58": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=58"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m59": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=59"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m61": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=61"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m70": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=70"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m80": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=80"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m81": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=81"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m90": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=90"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m91": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=91"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
-  },
-  "m92": {
-   "flags": {
-    "c": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2",
-     "-fPIE",
-     "-ffreestanding",
-     "-fno-builtin",
-     "-fno-stack-protector",
-     "-fvisibility=hidden",
-     "-mno-outline-atomics",
-     "-fno-asynchronous-unwind-tables",
-     "-fno-tree-loop-distribute-patterns",
-     "-Wall",
-     "-g",
-     "-DMODE=92"
-    ],
-    "cxx": [],
-    "asm": [
-     "-mabi=ilp32",
-     "-march=armv8-a",
-     "-O2"
-    ]
-   }
+  {
+   "name": "fnvnx_layout",
+   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
+   "args": {},
+   "inputs": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ]
   }
- },
+ ],
  "external": [
   {
    "name": "gcc-msvcmodel",
@@ -1194,6 +96,564 @@
    "commit": "b4057704c0babd012e466cc89181132e02542289",
    "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
    "at": "/ext/gcc"
+  },
+  {
+   "name": "fnvnx-a64-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/fnvnx-a64-msvcmodel",
+   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
+   "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
+   "at": "/ext/a64"
   }
- ]
+ ],
+ "link": {
+  "script": "ports/fnv-nx/link/guest.ld",
+  "output": "bootguest.elf",
+  "kind": "pie",
+  "flags": [
+   "-m",
+   "aarch64linux32"
+  ],
+  "roots": [
+   "ports/fnv-nx/rt/guest",
+   "ports/fnv-nx/platform"
+  ],
+  "libs": {
+   "external": "fnvnx-a64-msvcmodel",
+   "dirs": [],
+   "names": [],
+   "startfiles": [],
+   "endfiles": []
+  }
+ },
+ "variants": {
+  "m0": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=0"
+    ]
+   }
+  },
+  "m1": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=1"
+    ]
+   }
+  },
+  "m2": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=2"
+    ]
+   }
+  },
+  "m3": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=3"
+    ]
+   }
+  },
+  "m4": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=4"
+    ]
+   }
+  },
+  "m5": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=5"
+    ]
+   }
+  },
+  "m6": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=6"
+    ]
+   }
+  },
+  "m7": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=7"
+    ]
+   }
+  },
+  "m8": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=8"
+    ]
+   }
+  },
+  "m9": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=9"
+    ]
+   }
+  },
+  "m10": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=10"
+    ]
+   }
+  },
+  "m11": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=11"
+    ]
+   }
+  },
+  "m30": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=30"
+    ]
+   }
+  },
+  "m31": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=31"
+    ]
+   }
+  },
+  "m32": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=32"
+    ]
+   }
+  },
+  "m34": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=34"
+    ]
+   }
+  },
+  "m35": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=35"
+    ]
+   }
+  },
+  "m36": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=36"
+    ]
+   }
+  },
+  "m40": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=40"
+    ]
+   }
+  },
+  "m41": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=41"
+    ]
+   }
+  },
+  "m42": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=42"
+    ]
+   }
+  },
+  "m44": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=44"
+    ]
+   }
+  },
+  "m45": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=45"
+    ]
+   }
+  },
+  "m46": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=46"
+    ]
+   }
+  },
+  "m47": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=47"
+    ]
+   }
+  },
+  "m48": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=48"
+    ]
+   }
+  },
+  "m49": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=49"
+    ]
+   }
+  },
+  "m50": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=50"
+    ]
+   }
+  },
+  "m51": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=51"
+    ]
+   }
+  },
+  "m52": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=52"
+    ]
+   }
+  },
+  "m53": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=53"
+    ]
+   }
+  },
+  "m54": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=54"
+    ]
+   }
+  },
+  "m55": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=55"
+    ]
+   }
+  },
+  "m56": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=56"
+    ]
+   }
+  },
+  "m57": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=57"
+    ]
+   }
+  },
+  "m58": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=58"
+    ]
+   }
+  },
+  "m59": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=59"
+    ]
+   }
+  },
+  "m61": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=61"
+    ]
+   }
+  },
+  "m70": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=70"
+    ]
+   }
+  },
+  "m80": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=80"
+    ]
+   }
+  },
+  "m81": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=81"
+    ]
+   }
+  },
+  "m90": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=90"
+    ]
+   }
+  },
+  "m91": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=91"
+    ]
+   }
+  },
+  "m92": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=92"
+    ]
+   }
+  }
+ }
 }
