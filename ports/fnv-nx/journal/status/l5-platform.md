@@ -25,6 +25,7 @@ Branch names -w7/-w8 hold the predecessor's drafts (a2fe53fb regsites, 50956c3e 
 Old workers w1, w2, w3 (session_01KmtZKSjF1rc6JAiuz1rvJg, _01KmtZKU6xzxGuGdkrtzwNGD, _01KmtZKSqJdpbUBBzAcvizej): failed at start on a usage limit, never ran; archived.
 
 ## Farms reporting to L5
+- tc-msvcmodel13 session_01KmtZKSCAEKKBKGivPCNEdB (msvcmodel13 run 2; RUN lines from w14): waiting for the profile.
 - tc-repro session_01KmtZKSzcic61GPMwx3wqug (fnvnx-a64-msvcmodel bit-for-bit rebuild; reports to L4 and L5): running.
 
 ## Open cross-layer items
