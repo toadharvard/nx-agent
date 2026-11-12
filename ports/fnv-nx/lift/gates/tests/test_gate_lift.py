@@ -160,7 +160,11 @@ def flags_repo(name, code, cache, extra_entries=()):
     repo = lifted_repo(name, BODIES["ordered"][0], pk)
     for f in ("gate_flags.py",):
         shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
+<<<<<<< HEAD
     for pkg in ("proof", "fnvlift"):
+=======
+    for pkg in ("proof", "fnvlift", "rt"):
+>>>>>>> origin/claude/fnv-l3a-lift-int3
         shutil.copytree(os.path.join(REAL, T + "lift/" + pkg), os.path.join(repo, T + "lift/" + pkg), ignore=shutil.ignore_patterns("__pycache__", "tests"))
     w(repo, T + "verify/contract_inputs.json", json.dumps(doc))
     git(repo, "add", "-A")

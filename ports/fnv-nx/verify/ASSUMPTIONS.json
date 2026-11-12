@@ -48,6 +48,10 @@
    ]
   },
   {
+   "id": "ASM-231",
+   "aliases": []
+  },
+  {
    "id": "ASM-302",
    "aliases": []
   },
@@ -143,11 +147,27 @@
    "id": "ASM-001",
    "text": "The compiler is correct (the pinned msvcmodel GCC and the pinned toolchain).",
    "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
+    "ports/fnv-nx/journal/inbox/l2-source-handoff-opus.md",
+    "ports/fnv-nx/journal/inbox/orch-assumptions.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/gates/gate_flags.py",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/rt/fnvl.h",
+    "ports/fnv-nx/lift/tools/ehflow.py",
+    "ports/fnv-nx/link/a64order.py",
+    "ports/fnv-nx/link/gate_addr.py",
+    "ports/fnv-nx/link/gate_order.py",
+    "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+    "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+    "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
     "ports/fnv-nx/verify/MEMSAFE.md",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
+    "ports/fnv-nx/verify/gate_assumptions.py",
+    "ports/fnv-nx/verify/gatesdir.py"
    ],
    "aliases": [
     "L1:A2",
@@ -184,6 +204,13 @@
    "used_by": [
     "ports/fnv-nx/contract/iat.py",
     "ports/fnv-nx/contract/modules.py",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/README.md",
+    "ports/fnv-nx/lift/gates/gate_eh.py",
+    "ports/fnv-nx/lift/proof/README.md",
+    "ports/fnv-nx/lift/tools/ehflow.py",
+    "ports/fnv-nx/lift/tools/ehtables.py",
+    "ports/fnv-nx/lift/tools/fpstate.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -202,9 +229,11 @@
    "id": "ASM-004",
    "text": "The console's behaviour holds as assumed until a run on it.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
+    "ports/fnv-nx/verify/gate_assumptions.py",
+    "ports/fnv-nx/verify/gatesdir.py"
    ],
    "aliases": [
     "Horizon behaviour"
@@ -219,6 +248,7 @@
    "id": "ASM-005",
    "text": "Native code is tested by ASan/UBSan, not proven; external libraries (libc, libnx, FreeType, minimp3) are taken by their documentation.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/MEMSAFE.md",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
@@ -236,6 +266,17 @@
    "id": "ASM-006",
    "text": "The exe makes no wild accesses: array indices are in bounds, guest accesses do not reach host pages.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
+    "ports/fnv-nx/journal/inbox/l2-source-handoff-opus.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/proof/README.md",
+    "ports/fnv-nx/lift/proof/symcheck.py",
+    "ports/fnv-nx/lift/tools/ehflow.py",
+    "ports/fnv-nx/lift/tools/jtab.py",
+    "ports/fnv-nx/link/a64order.py",
+    "ports/fnv-nx/link/gate_addr.py",
+    "ports/fnv-nx/link/gate_order.py",
+    "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -253,6 +294,9 @@
    "id": "ASM-007",
    "text": "The address space is 32-bit, ILP32.",
    "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/gates/tests/test_gate_order.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [],
@@ -266,6 +310,7 @@
    "id": "ASM-008",
    "text": "Floating point is IEEE binary32/binary64.",
    "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -281,10 +326,14 @@
    "id": "ASM-009",
    "text": "The pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3, the published proof of the x86-TSO to Arm memory mapping.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/orch-assumptions.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/gates/gate_flags.py",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
+    "ports/fnv-nx/verify/gate_assumptions.py",
+    "ports/fnv-nx/verify/puregate_policy.py"
    ],
    "aliases": [
     "L3b:A-SAILMODEL",
@@ -353,6 +402,8 @@
     "ports/fnv-nx/contract/argflow.py",
     "ports/fnv-nx/contract/gate_reach.py",
     "ports/fnv-nx/contract/memfx.py",
+    "ports/fnv-nx/lift/proof/README.md",
+    "ports/fnv-nx/lift/proof/model_sail.py",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [
@@ -569,6 +620,7 @@
    "id": "ASM-029",
    "text": "The ARMv8 memory model matches the Cortex-A57.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/RULES.md"
    ],
    "aliases": [
@@ -770,6 +822,7 @@
    "id": "ASM-043",
    "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
    "used_by": [
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
@@ -833,6 +886,7 @@
    "text": "The `names` plugin ran on every native C++ unit (the recipe's guest-compiler/plugin rule).",
    "used_by": [
     "ports/fnv-nx/contract/gate_call.py",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
@@ -846,6 +900,7 @@
    "text": "regsites.tsv is complete over the exe and the modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only code that reaches the hive, and the implementation creates no key by itself.",
    "used_by": [
     "ports/fnv-nx/contract/hive.py",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [],
@@ -858,6 +913,7 @@
    "text": "objects.json lists every global, weak and unique symbol of every object of the root (recipe.symbols).",
    "used_by": [
     "ports/fnv-nx/contract/imports.py",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [],
@@ -870,8 +926,9 @@
    "text": "The pristine cl symbol names are the exe's contract (N1: byte-equal, one symbol map).",
    "used_by": [
     "ports/fnv-nx/contract/gate_call.py",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/RULES.md"
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [],
    "status": "REMOVE",
@@ -883,6 +940,7 @@
    "text": "An external decorated name denotes one entity link-wide.",
    "used_by": [
     "ports/fnv-nx/contract/gate_call.py",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [],
@@ -902,10 +960,24 @@
    "owner": "L1"
   },
   {
+   "id": "ASM-102",
+   "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/gate_exepin.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
+   "owner": "L1"
+  },
+  {
    "id": "ASM-200",
    "text": "A callee in a hand-written assembler object preserves x19-x30 and sp and writes the caller's frame only through an address it was given (ORDERING A1 for .S).",
    "used_by": [
     "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/gates/gate_order.py",
     "ports/fnv-nx/lift/gates/tests/test_gate_order.py"
    ],
@@ -921,6 +993,7 @@
    "text": "Guest memory is the mappings below 2^32 the loader made; the host stack, struct cpu and the lifted image are host mappings disjoint from them (ORDERING A2).",
    "used_by": [
     "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/gates/gate_order.py",
     "ports/fnv-nx/lift/gates/tests/test_gate_order.py"
    ],
@@ -937,7 +1010,9 @@
    "text": "Every object linked into the lifted image is in the build manifest and is given to the gate (ORDERING closure, was A3).",
    "used_by": [
     "ports/fnv-nx/docs/ORDERING.md",
-    "ports/fnv-nx/lift/gates/gate_order.py"
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/tools/jtab.py"
    ],
    "aliases": [
     "ORDERING:A3"
@@ -950,6 +1025,8 @@
    "id": "ASM-203",
    "text": "capstone group tags classify the instruction-set extension of a form correctly.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/fnvlift/f_cpufeat.py"
    ],
    "aliases": [
@@ -963,9 +1040,13 @@
    "id": "ASM-204",
    "text": "No x87/SSE exception is ever unmasked (I-FPMASK); fwait and FP arithmetic never raise.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/fnvlift/f_x87.py",
     "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/fnvlift/fpfacts.py"
+    "ports/fnv-nx/lift/fnvlift/fpfacts.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/tools/fpstate.py"
    ],
    "aliases": [
     "L3b:A-FPMASK",
@@ -979,7 +1060,10 @@
    "id": "ASM-205",
    "text": "The product keeps the x87 sticky flags (rt/fnvl_x87.h:32-37); the test harness injected them as not observed (I-FPSTICKY set in instest ASSUME).",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/fpfacts.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/fpfacts.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/tools/fpstate.py"
    ],
    "aliases": [
     "L3b:A-FPSTICKY",
@@ -990,10 +1074,45 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-206",
+   "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/test/fpflags.py"
+   ],
+   "aliases": [
+    "ASM-307",
+    "L3b:A-ORDER"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: not compiler correctness: GCC is allowed to reorder. Closing rule: FPSR read through an operation the compiler must order (asm with FP operand dependency), then gate on objects",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-207",
+   "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/journal/inbox/l3a-w8-native-fp.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-308",
+    "L3b:A-NATIVE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: rt/imp.h parks FPSR for import bodies; bridgegen (L3a w8) parks FPSR on every lifted->native transfer",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-208",
    "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
    ],
    "aliases": [
     "L3b:A-RESUME"
@@ -1003,10 +1122,28 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-209",
+   "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-310",
+    "L3b:A-STALE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the CPU value is defined (old bits); closing = write back on pop or prove no such read statically",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-210",
    "text": "fnsave stores the real indefinite for an empty register; fldenv/frstor treat an empty-tagged register per the tag only.",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/test/instest_extra.py"
    ],
    "aliases": [
     "L3b:A-EMPTY"
@@ -1019,7 +1156,9 @@
    "id": "ASM-211",
    "text": "ES (bit 7) and B (bit 15) of FSW are 0.",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
    ],
    "aliases": [
     "L3b:A-ES"
@@ -1032,7 +1171,9 @@
    "id": "ASM-212",
    "text": "FDP after an instruction without memory operand is unchanged (SDM leaves it unspecified).",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
    ],
    "aliases": [
     "L3b:A-FDP"
@@ -1045,7 +1186,10 @@
    "id": "ASM-213",
    "text": "FDS is DS whenever FDP != 0 (FS-relative operand reported with DS).",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/rt/seh.cc"
    ],
    "aliases": [
     "L3b:A-FDS"
@@ -1058,7 +1202,10 @@
    "id": "ASM-214",
    "text": "FOP is recomputed from the opcode bytes at FIP when an image is written.",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/rt/seh.cc"
    ],
    "aliases": [
     "L3b:A-FOP"
@@ -1071,7 +1218,9 @@
    "id": "ASM-215",
    "text": "Reserved bits of the fnstenv/fnsave image are 0.",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
    ],
    "aliases": [
     "L3b:A-RES"
@@ -1084,7 +1233,10 @@
    "id": "ASM-216",
    "text": "fbld with a nibble above 9 gives the arithmetic sum nibble*10^i (SDM: undefined).",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/f_x87.py"
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/rt/x87.c"
    ],
    "aliases": [
     "L3b:A-BCD"
@@ -1097,6 +1249,7 @@
    "id": "ASM-218",
    "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -1107,10 +1260,40 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-219",
+   "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-327",
+    "L3b:A-START"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: set by the runtime at thread entry (rt/enter.c); being verified against the code with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-220",
+   "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-328",
+    "L3b:A-CTX"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-221",
    "text": "The lowest index of a jump table is below 16: the table starts at most 16 dwords above the displacement (TAB_BIAS, fnvlift/core.py).",
    "used_by": [
-    "ports/fnv-nx/lift/fnvlift/core.py"
+    "ports/fnv-nx/journal/status/l3a-lift.md"
    ],
    "aliases": [],
    "status": "REMOVE",
@@ -1121,6 +1304,7 @@
    "id": "ASM-222",
    "text": "Every FuncInfo of the exe and modules (x86-32 MSVC, VC8..VC10, no FH4) is reached from a decoded frame-handler stub `mov eax, imm32; jmp rel32`; a FuncInfo reached any other way is not enumerated by gate_eh (tools/ehtables.py).",
    "used_by": [
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/gates/gate_eh.py"
    ],
    "aliases": [],
@@ -1154,11 +1338,79 @@
    "id": "ASM-225",
    "text": "Fresh stack space (premise F): when esp is loaded from a register that is not a known stack address (chkstk/alloca: esp = esp - size), the fresh space is disjoint from every tracked slot of the old frame: its accesses are below the new esp or inside the allocated block, and the new esp does not lie above a live tracked old slot (size >= 0, no wraparound, no access past the allocated size). A red-free pcsrc result of an entry that creates a fresh space holds under it (cond:fresh, listed as cond_fresh_list in gate_pcsrc.json).",
    "used_by": [
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/tools/pcsrc.py"
    ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the affine esp-minus-size domain plus the probe-loop relation (L3a w4)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-226",
+   "text": "A handler's change to the CONTEXT of an exception raised inside an import does not reach the native body.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/unhandled.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a static fact from the EH tables and flow that no reachable filter returning EXCEPTION_CONTINUE_EXECUTION for an import-raised exception writes CONTEXT",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-227",
+   "text": "Only the C++ frame handler reads the FuncInfo IP-to-state key list.",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/ehtables.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the consumer fact of the IP-to-state list from the points-to (L3a w4)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-228",
+   "text": "A callee does not read eax at a call.",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/fpmodes.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the callee read set from the code (pcsrc)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-229",
+   "text": "The ex argument of _XcptFilter equals the exception record's code.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/msvcrt_eh.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a call-site fact that every caller of _XcptFilter passes GetExceptionCode() of the same record",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-230",
+   "text": "The truncation error of the generated pi/ln2 table is within its stated bound.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fmath.c",
+    "ports/fnv-nx/lift/test/fmathtest.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the table generator checks the bound in exact rational arithmetic",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-232",
+   "text": "The precision of Ziv's strategy in rt/fmath.c never exceeds 2^15 limbs (4 MiB of mantissa).",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fmath.c"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a static bound on the precision schedule from the published worst cases for correct rounding of each function at binary32/binary64 (OWNER 9, published theorems), checked by the generator",
    "owner": "L3a"
   },
   {
@@ -1227,9 +1479,23 @@
    "owner": "L3b"
   },
   {
+   "id": "ASM-331",
+   "aliases": [
+    "L3a:A3"
+   ],
+   "status": "REMOVE",
+   "owner": "L3b",
+   "text": "The sdm-class reference (float->int E1, compare flag mapping E2, fnstsw/fldcw/fnstenv/fnsave/frstor, cpuid, rdtsc) was transcribed from SDM prose and compared with the host; prose transcription is not a formal source.",
+   "removed_by": "planned: each sdm-class mnemonic is certified against a formal source instead: E1/E2 and the SSE conversions against the K x86-64 semantics or ACL2 x86isa master (transcription, ASM-009 class); x87 control/state against ACL2 x86isa master where defined; cpuid and rdtsc are declared-machine facts (owner: one fixed reference CPU; reference cpuid answer, platform monotonic timer), not model semantics. Whatever has no formal source is reported to the orchestrator. Owner L3b, after the first frame unless it blocks the pack roots.",
+   "used_by": [
+    "ports/fnv-nx/lift/README.md"
+   ]
+  },
+  {
    "id": "ASM-801",
    "text": "Every FIX_TRUNC_EXPR in a native unit is rewritten to _ftol/fistp semantics, sits in an fnvnx_f2i helper, or is a compile error (fnvnx_ftoi native rule (c), L2 w1 649a2960); native bodies compiled with fnvnx_ftoi are judged by this rule, not by the lifted-code half of fpexact.",
    "used_by": [
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
@@ -1238,19 +1504,6 @@
    "status": "REMOVE",
    "removed_by": "gate:fpexact",
    "owner": "L2"
-  },
-  {
-   "id": "ASM-102",
-   "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/gate_exepin.py"
-   ],
-   "aliases": [],
-   "status": "REMOVE",
-   "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
-   "owner": "L1"
   },
   {
    "id": "ASM-803",

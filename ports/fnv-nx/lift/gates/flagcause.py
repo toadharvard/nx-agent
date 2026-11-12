@@ -7,7 +7,11 @@ instruction whose shape has no Form, which the gate passes through) and one prod
 The fixpoint is the one of gate_flags.solve, so the red reads are the same reads (a check: the count equals gate_flags'). Each red read gets exactly one cause,
 by this precedence:
   i    no-form   its state has the N bit: a no-form instruction lies between a producer and the read; item 23 may define the flag
+<<<<<<< HEAD
   ii   undef     else it has the U bit: a certified instruction leaves the flag architecturally undefined and a read of it follows (a fact of the Sail/x86isa model, ASM-009); counted by
+=======
+  ii   undef     else it has the U bit: a certified instruction leaves the flag architecturally undefined and a read of it follows; counted by
+>>>>>>> origin/claude/fnv-l3a-lift-int3
                  (mnemonic, flag) over all producers that reach it
   iii  entry     else it has the E bit: the read is reached by an entry with an unknown predecessor (flag ptr, a kind other than decomp/call/tail, or no
                  direct transfer); counted by the seed reason of its own entry when that entry is seeded, else `inherited` (through callers), and by the consumer

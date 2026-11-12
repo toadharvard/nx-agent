@@ -1,6 +1,6 @@
 """Arithmetic / logic / shift / bit / multiply / divide families (see forms.py)."""
-from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, load, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
-from proof.forms import Op, af, ea, handler, pzs, rd, undef, wr
+from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
+from proof.forms import Op, addoff, af, ea, handler, mload, pzs, rd, store_op, undef, wr
 
 UNDEF_LOGIC = 'AND/OR/XOR/TEST: "The state of the AF flag is undefined."'
 UNDEF_MUL = 'MUL/IMUL: "The SF, ZF, AF, and PF flags are undefined."'
@@ -85,14 +85,14 @@ def bt(c):
     if d.k == 'r': addr, bn, val = None, off & (w - 1), rd(d)
     else:
         addr = ea(d)
-        if s.k == 'r': addr = addr + sext(ashr(off, C(lg, w)), 32) * (w // 8)       # bit-string: signed offset selects the word
-        bn = off & (w - 1); val = load(addr, w)
+        if s.k == 'r': addr = addoff(addr, sext(ashr(off, C(lg, w)), 32) * (w // 8))       # bit-string: signed offset selects the word
+        bn = off & (w - 1); val = mload(addr, w)
     F.flag('cf', bit(lshr(val, bn), 0)); undef(F, ('of', 'sf', 'af', 'pf'), UNDEF_BT)
     msk = shl(C(1, w), bn)
     if c.m != 'bt':
         nv = {'bts': val | msk, 'btr': val & ~msk, 'btc': val ^ msk}[c.m]
         if addr is None: wr(F, d, nv)
-        else: F.store(addr, nv)
+        else: store_op(F, d, addr, nv)
 
 @handler('bsf', 'bsr')
 def bs(c):

@@ -542,7 +542,13 @@ def summary(ents, inst, res):
 
 
 def main(argv):
+<<<<<<< HEAD
     path, facts = argv[0], argv[1]
+=======
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+    import cli
+    (path, facts), _ = cli.parse('usage: gate_flags.py IMAGE FACTS_DIR   env GATE_OUT, JOBS', argv, (2, 2))
+>>>>>>> origin/claude/fnv-l3a-lift-int3
     base, rows = load_ranges(os.path.join(facts, 'ranges.tsv'))
     uni = load_universe(os.path.join(facts, 'universe.tsv'))
     ents = sorted(rows)

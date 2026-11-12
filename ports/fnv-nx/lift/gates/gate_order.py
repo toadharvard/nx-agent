@@ -934,6 +934,9 @@ def verdict(g, rws, n):
 
 
 def main(argv):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+    import cli
+    cli.parse('usage: gate_order.py IMAGE [OBJ...] [--asm FILE]... [--sites FILE]   memory-ordering completeness gate over the objects', argv, (1, 10**9), {'--asm': True, '--sites': True})
     objs, asm, k, locks = [], [], 1, None
     while k < len(argv):
         if argv[k] == '--asm': asm.append(argv[k + 1]); k += 2

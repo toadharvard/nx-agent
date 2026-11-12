@@ -16,15 +16,26 @@
  * in one 64-bit store, so a reader never sees the key of one target with the entry of another. An address that is
  * no entry does not return. The hit path is a load, a compare, a branch and a shift.
  *
+ * A bridge is one function per descriptor, so it is not told which exe address it stands for. The call sequence
+ * therefore stores the address in the thread-local word `fnvnx_call_fp` (shim/include/fnvl_host.h) just before the call, on
+ * the hit path and the miss path alike; a bridge reads it first thing, a native body ignores it.
+ *
  * The descriptor is the call's shape for a bridge, a string `conv:ret:arg,arg,...`:
  *   conv   this   the first argument is the object, in ecx on x86 (a member function, MSVC's default)
  *                 (the object is listed among the arguments, first)
  *          fast   __fastcall: the first two integer arguments in ecx, edx
  *          stack  everything on the stack (__cdecl and __stdcall alike: the callee's own `ret N` tells them apart)
  *   ret    v | i (32-bit integer or pointer) | q (64-bit integer) | f | d | a<N> (an N-byte aggregate returned in
- *          registers) | m<N> (returned in memory the caller provides)
- *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h (a homogeneous
- *          floating-point aggregate) | s<N>r (passed as a reference to a copy)
+ *          general registers) | a<N>h<elt> (a homogeneous aggregate, elt = f d q h v8 v16 as the backend's part mode says, returned in
+ *          floating-point registers) | m<N> (returned in memory the caller provides); a trailing x on an `a` result: the AAPCS side
+ *          returns it in registers but the x86 callee returns it through the hidden pointer (a type that is not a POD, see msvc_pod)
+ *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h<elt> (a
+ *          homogeneous aggregate) | s<N>r (passed as a reference to a copy)
+ * (A homogeneous aggregate names its element type: {float, float} and {double} are both 8 bytes and travel in
+ * different registers, so the size alone does not say how a bridge receives or returns it.)
+ *
+ * The descriptors of a unit are the objects' own fact: section .fnvnx.disp (not loaded), one text line per distinct
+ * descriptor of the unit. lift/tools/bridgegen.py reads it from every object of every admitted root.
  * The convention is the declaration's own: CC1 keeps MSVC's __cdecl / __stdcall / __fastcall / __thiscall as the
  * type attribute fnvnx_cc (shim/include/fnvnx_compat.h), which the fnvnx_names plugin registers.
  *
@@ -55,7 +66,15 @@
 #include "cfgloop.h"
 #include "attribs.h"
 #include "builtins.h"
+#include "rtl.h"
+#include "target.h"
+#include "tm_p.h"            /* the backend's own prototypes (aarch64_init_cumulative_args, behind INIT_CUMULATIVE_ARGS) */
 #include "calls.h"
+#include "output.h"
+#include "langhooks.h"
+#include <dlfcn.h>
+#include <string.h>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -75,6 +94,21 @@ static tree get_dispatch()
   return dispatch_decl;
 }
 
+/* The exe address of the call in progress, for a bridge: a bridge is one function per descriptor and gets only the
+ * call's own arguments, so the target travels in this thread-local word, which the call sequence stores
+ * immediately before the call (the platform defines it, platform/win32/thread.cpp; declared by shim/include/fnvl_host.h). */
+static tree fp_var;
+static tree get_fp_var()
+{
+  if (!fp_var) {
+    fp_var = build_decl(UNKNOWN_LOCATION, VAR_DECL, get_identifier("fnvnx_call_fp"), unsigned_type_node);
+    DECL_EXTERNAL(fp_var) = 1; TREE_PUBLIC(fp_var) = 1; DECL_ARTIFICIAL(fp_var) = 1; TREE_USED(fp_var) = 1;
+    set_decl_tls_model(fp_var, TLS_MODEL_INITIAL_EXEC);
+    varpool_node::get_create(fp_var);
+  }
+  return fp_var;
+}
+
 static tree new_site()
 {
   char name[64];
@@ -90,22 +124,47 @@ static tree new_site()
 
 /* ---- the call's shape */
 
-static bool hfa(tree t, tree *elt, int *n)
+/* Is `t` a POD type in the sense of the x86 convention's documentation (learn.microsoft.com, "Argument Passing and Naming Conventions": "Structures that are
+ * not PODs will not be returned in registers"; Agner Fog, Calling conventions, table 7: a constructor, a copy constructor, a destructor, virtual functions or
+ * inheritance make the result go through the hidden pointer)? The front end of C++ owns that predicate (cp/tree.cc pod_type_p); cc1 (C) has no such type, so the
+ * symbol is looked up at run time, only for a C++ unit, and a C unit's aggregate is a POD by the language. */
+static bool msvc_pod(tree t)
 {
-  if (SCALAR_FLOAT_TYPE_P(t)) {
-    if (*elt && TYPE_MAIN_VARIANT(*elt) != TYPE_MAIN_VARIANT(t)) return false;
-    *elt = t; return ++*n <= 4;
-  }
-  if (TREE_CODE(t) == ARRAY_TYPE && TYPE_DOMAIN(t) && TYPE_MAX_VALUE(TYPE_DOMAIN(t)) && tree_fits_shwi_p(TYPE_MAX_VALUE(TYPE_DOMAIN(t)))) {
-    for (HOST_WIDE_INT i = 0; i <= tree_to_shwi(TYPE_MAX_VALUE(TYPE_DOMAIN(t))); i++)
-      if (!hfa(TREE_TYPE(t), elt, n)) return false;
-    return true;
-  }
-  if (TREE_CODE(t) != RECORD_TYPE) return false;
-  for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
-    if (TREE_CODE(f) == FIELD_DECL && !hfa(TREE_TYPE(f), elt, n)) return false;
+  if (strncmp(lang_hooks.name, "GNU C++", 7)) return true;
+  static bool (*pod)(const_tree);
+  if (!pod) pod = (bool (*)(const_tree))dlsym(RTLD_DEFAULT, "_Z10pod_type_pPK9tree_node");
+  if (!pod) { error("DISPATCH1: the C++ front end does not export pod_type_p"); return true; }
+  return pod(t);
+}
+
+/* How the target passes a value is asked of the pinned compiler's own backend, never classified here (ASM-001): pass_by_reference, then
+ * targetm.calls.function_arg on a fresh cumulative state (the argument is the first of the call), and for a result targetm.calls.function_value.
+ * The rtx says where the value lives: a REG or a PARALLEL of vector registers is a homogeneous aggregate, and the part mode names the element;
+ * general registers, or no register (the stack), are `g`. A part mode that has no element code is an error: no guess. */
+static bool elem_code(machine_mode m, std::string &c)
+{
+  if (m == SFmode) c = "hf"; else if (m == DFmode) c = "hd"; else if (m == TFmode) c = "hq"; else if (m == HFmode) c = "hh";
+  else if (VECTOR_MODE_P(m) && GET_MODE_SIZE(m).to_constant() == 8) c = "hv8";
+  else if (VECTOR_MODE_P(m) && GET_MODE_SIZE(m).to_constant() == 16) c = "hv16";
+  else return false;
   return true;
 }
+
+/* "" (general registers or stack), or the element code of the vector registers rtx `r` lives in; false: a mode with no code */
+static bool reg_class(rtx r, std::string &c, location_t loc)
+{
+  c = "";
+  if (!r) return true;
+  rtx first = NULL_RTX;
+  if (GET_CODE(r) == PARALLEL) {
+    for (int i = 0; i < XVECLEN(r, 0); i++) { rtx e = XVECEXP(r, 0, i); if (GET_CODE(e) == EXPR_LIST) e = XEXP(e, 0); if (e && REG_P(e)) { first = e; break; } }
+  } else if (REG_P(r)) first = r;
+  if (!first || !FP_REGNUM_P(REGNO(first))) return true;
+  if (!elem_code(GET_MODE(first), c)) { error_at(loc, "DISPATCH1: the backend passes a value in vector registers of mode %s, which has no element code", GET_MODE_NAME(GET_MODE(first))); return false; }
+  return true;
+}
+
+static std::set<std::string> descs;                  /* every descriptor this unit uses: .fnvnx.disp */
 
 static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t loc)
 {
@@ -123,9 +182,21 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
     { error_at(loc, "DISPATCH1: type %qT in an indirect call has no shape", t); return false; }
   if (!TYPE_SIZE_UNIT(t) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { error_at(loc, "DISPATCH1: type %qT has no constant size", t); return false; }
   std::string n = std::to_string((unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t)));
-  if (ret) { out += (aggregate_value_p(t, fntype) ? "m" : "a") + n; return true; }
-  tree elt = NULL_TREE; int cnt = 0;
-  out += "s" + n + (TREE_ADDRESSABLE(t) || tree_to_uhwi(TYPE_SIZE_UNIT(t)) > 16 ? "r" : AGGREGATE_TYPE_P(t) && hfa(t, &elt, &cnt) && cnt ? "h" : "g");
+  machine_mode mode = TYPE_MODE(t);
+  std::string he;
+  if (ret) {
+    if (aggregate_value_p(t, fntype)) { out += "m" + n; return true; }
+    if (!reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
+    /* "x": the x86 callee returns it through the hidden pointer although the AAPCS side returns it in registers (a type that is not a POD) */
+    out += "a" + n + he + ((TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) && !msvc_pod(t) ? "x" : ""); return true;
+  }
+  CUMULATIVE_ARGS cum;
+  INIT_CUMULATIVE_ARGS(cum, fntype, NULL_RTX, NULL_TREE, 0);
+  cumulative_args_t pack = pack_cumulative_args(&cum);
+  function_arg_info arg(t, mode, true);
+  if (TREE_ADDRESSABLE(t) || targetm.calls.pass_by_reference(pack, arg)) { out += "s" + n + "r"; return true; }
+  if (!reg_class(targetm.calls.function_arg(pack, arg), he, loc)) return false;
+  out += "s" + n + (he.empty() ? "g" : he);
   return true;
 }
 
@@ -158,7 +229,16 @@ static tree descriptor(gcall *call)
     if (parm && parm != void_list_node) parm = TREE_CHAIN(parm);
     if (!shape(t, false, ft, d, loc)) return NULL_TREE;
   }
+  descs.insert(d);
   return build_string_literal(d.size() + 1, d.c_str());
+}
+
+static void finish_unit(void *, void *)
+{
+  if (descs.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.disp,\"\",%%progbits\n");
+  for (auto &d : descs) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", d.c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
 }
 
 static bool indirect_call(gimple *st)
@@ -226,6 +306,7 @@ static void rewrite(function *fun, gimple *st)
   add_phi_arg(phi, e1, hit_tail, loc); add_phi_arg(phi, e2, miss_tail, loc);
   tree target = make_ssa_name(TREE_TYPE(fp));
   gsi = gsi_for_stmt(st);
+  before(gimple_build_assign(get_fp_var(), k));
   before(gimple_build_assign(target, NOP_EXPR, e));
   gimple_call_set_fn(call, target);
   update_stmt(call);
@@ -268,5 +349,6 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   p.ref_pass_instance_number = 1;
   p.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &p);
+  register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
 }
