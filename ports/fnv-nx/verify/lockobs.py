@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Runner of rule R-LOCKOBS (journal/inbox/l4-verify-012.md): the platform-lock observation of a boot-machine run.
     python3 lockobs.py --out OUT.json --elf ELF --cases CASES.json [--report REPORT.json]
-Input: OUT.json of `boot.py run --watch-log SYMS` (watch_schema fnvnx-watch/2; SYMS lists os_lock, os_trylock ret, os_unlock, and every case runner
+The three lock function names default to the os.h API (os_lock, os_trylock, os_unlock) and are arguments (analyze(names=), --lock-syms): the runner is a
+pure function of (OUT.json, ELF symbols, cases, names). Input: OUT.json of `boot.py run --watch-log SYMS` (watch_schema fnvnx-watch/2; SYMS lists os_lock, os_trylock ret, os_unlock, and every case runner
 as `NAME ret`), the ELF (symbols, to map addresses), and the case expectations {"cases": [{"runner_sym": NAME, "violations": [{"dst": SYM|ADDR}
 | {"at": "return"}]}]}. Exit 0: every case's observed violations equal its declared ones and none lies outside a case; 2: a difference; 1: input error.
 
@@ -24,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bootmiles  # noqa: E402
 
-LOCK, TRYLOCK, UNLOCK = "os_lock", "os_trylock", "os_unlock"
+DEFAULT_NAMES = ("os_lock", "os_trylock", "os_unlock")   # the os.h API; the CLI keeps them as the defaults
 TRYLOCK_OK = 1   # os.h:42
 MASK = 0xFFFFFFFF
 
@@ -52,7 +53,8 @@ class Symtab:
         return self.addr[x]
 
 
-def analyze(doc, cases, syms):
+def analyze(doc, cases, syms, names=DEFAULT_NAMES):
+    LOCK, TRYLOCK, UNLOCK = names
     if doc.get("watch_schema") != "fnvnx-watch/2":
         raise InputError("OUT.json has no watch_log of schema fnvnx-watch/2 (run boot.py with --watch-log)")
     spec = doc["watch_spec"]
@@ -129,13 +131,18 @@ def main(argv=None):
     ap.add_argument("--elf", required=True)
     ap.add_argument("--cases", required=True)
     ap.add_argument("--report")
+    ap.add_argument("--lock-syms", default=",".join(DEFAULT_NAMES), metavar="LOCK,TRYLOCK,UNLOCK",
+                    help="the three watched function names (default os_lock,os_trylock,os_unlock; others only for a test of the record mechanism)")
     a = ap.parse_args(argv)
     try:
         with open(a.out) as f:
             doc = json.load(f)
         with open(a.cases) as f:
             cases = json.load(f)["cases"]
-        rep = analyze(doc, cases, Symtab(a.elf))
+        names = tuple(a.lock_syms.split(","))
+        if len(names) != 3:
+            raise InputError("--lock-syms wants three names")
+        rep = analyze(doc, cases, Symtab(a.elf), names)
     except (InputError, OSError, ValueError, KeyError, bootmiles.ElfError) as e:
         print("lockobs: input error: %s" % e, file=sys.stderr)
         return 1
