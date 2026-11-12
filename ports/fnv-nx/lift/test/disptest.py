@@ -2,7 +2,7 @@
 """DISPATCH1 runtime test: native indirect calls through fnvnx_dispatch (rt/dispatch.c), native bodies and bridges into lifted guest code.
     disptest.py [--work DIR] [--cc DIR_OF_COMPILER_BIN]
 The pieces under test are the product's own files, compiled and linked as they are: rt/dispatch.c, rt/rt.c, rt/enter.cc (+ seh, unhandled, rcptab, x87, imp.cpp of
-the import table), toolchain/dispatch/fnvnx_dispatch.cc and toolchain/names/fnvnx_names.cc (the compiler plugins that rewrite the indirect calls of the native test
+the import re, table), toolchain/dispatch/fnvnx_dispatch.cc and toolchain/names/fnvnx_names.cc (the compiler plugins that rewrite the indirect calls of the native test
 code), tools/bridgegen.py (the bridges and their table, from the descriptors in the test object's own `.fnvnx.disp`), tools/dispgen.py (the tables).  The test
 defines no symbol of rt/ or of the generated bridges (checked below: defined(test) ∩ defined(product objects) = {}); it defines only the host boundary
 that the platform provides (the thread-local slot, the tick clock, memcpy/memset, the import natives `tc_*` that stand for native product code).
@@ -10,7 +10,7 @@ Guest code: hand-assembled x86 functions at 0x401000.. lifted by tools/fnvlift, 
 each case is a native function (`tc_*`, an import of the guest root) that calls `fp(args)` through a pointer type with the call's own convention; the plugin turns the
 call into the cache + fnvnx_dispatch; the bridge marshals the arguments into the x86 frame; the result comes back in eax / edx:eax / ST0 or the hidden pointer.
 Expected values are computed by hand from the x86 semantics (stated at each case).  Run under Unicorn.  Prints one line per case; exit status 1 on any difference."""
-import argparse, os, struct, subprocess, sys
+import argparse, os, re, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE); FNV = os.path.dirname(LIFT)
 for p in ('bench', 'tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, instest, phf, impgen, dispgen, bridgegen
@@ -99,15 +99,8 @@ extern "C" {
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 u32 fnvnx_lift_enter(u32 eip, u32 esp, u32 teb); int fnvnx_lift_imports_init(void);
 void fnvnx_guest_current(u32 *esp, u32 *teb);
-/* the platform defines fnvnx_call_fp (platform/win32/thread.cpp, not linkable here yet): the one remaining double of this test, removed when the root links it */
-__thread unsigned int fnvnx_call_fp __attribute__((tls_model("initial-exec")));
-static void *slot; void **fnvl_host_tls_slot(void) { return &slot; }
-unsigned long long fnvl_host_ticks_ns(void) { return 0; }
 void *memcpy(void *d, const void *s, unsigned long n) { char *a = (char *)d; const char *b = (const char *)s; while (n--) *a++ = *b++; return d; }
 void *memset(void *d, int v, unsigned long n) { char *a = (char *)d; while (n--) *a++ = (char)v; return d; }
-static void (*backend)(u32, u32, u32, const u32 *); void fnvnx_win32_set_raise_backend(void (*f)(u32, u32, u32, const u32 *)) { backend = f; }
-u32 UnhandledExceptionFilter(u32 p) { return 1; } void ExitProcess(u32 code) { for (;;) ; }
-void *fnvnx_win32_lookup_export(const char *dll, const char *name) { return 0; }
 u32 test_main(u32 eip, u32 esp, u32 teb, u32 *out)
 {
     out[0] = (u32)fnvnx_lift_imports_init();
@@ -260,11 +253,15 @@ def main():
     # no double: no symbol the test object defines is defined by a product object
     def defs(o): return set(l.split()[-1] for l in subprocess.run(['aarch64-linux-gnu-nm', '--defined-only', '-g', o], capture_output=True, text=True).stdout.splitlines() if len(l.split()) == 3)
     dt = defs(w + '/native.o'); dp = set().union(*[defs(o) for o in prod if not o.endswith(('tab.o',))]) | defs(w + '/tab.o') | defs(w + '/ntab.o')
-    host = {'fnvl_host_tls_slot', 'fnvl_host_ticks_ns', 'memcpy', 'memset', 'fnvnx_win32_set_raise_backend', 'UnhandledExceptionFilter', 'ExitProcess', 'fnvnx_win32_lookup_export', 'test_main'}
-    dbl = sorted((dt & dp) - host); print('doubles %s' % ('none' if not dbl else 'DIFF ' + ' '.join(dbl))); bad |= bool(dbl)
+    dbl = sorted(dt & dp); print('doubles %s' % ('none' if not dbl else 'DIFF ' + ' '.join(dbl))); bad |= bool(dbl)
     elf = w + '/disp.elf'
     r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % TEXT, '-e', 'test_main', '-o', elf] + objs, capture_output=True, text=True)
-    if r.returncode: sys.exit('link: ' + r.stderr[:900])
+    if r.returncode:
+        und = sorted(set(re.findall(r"undefined reference to `([^']+)'", r.stderr)))
+        # the platform symbols the runtime calls are the platform root's (platform/win32/thread.cpp, platform/boundary/host_hooks.cpp, ...): this test defines none of them (no doubles),
+        # so until the platform root is linkable here it is BLOCKED, never green
+        if und: sys.exit(3 if print('BLOCKED: the platform root is not linked; undefined: ' + ' '.join(und)) is None else 3)
+        sys.exit('link: ' + r.stderr[:900])
     with open(elf, 'rb') as fh:
         e = ELFFile(fh); segs = [(p['p_vaddr'], p.data(), p['p_memsz']) for p in e.iter_segments() if p['p_type'] == 'PT_LOAD']
         sym = {x.name: x['st_value'] for x in e.get_section_by_name('.symtab').iter_symbols() if x.name}
