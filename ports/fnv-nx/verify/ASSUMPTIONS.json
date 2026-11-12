@@ -1033,7 +1033,7 @@
     "L3b:A-STACKPRIVATE"
    ],
    "status": "REMOVE",
-   "removed_by": "no gate yet: escape analysis to be restated by L3a; memclass removed",
+   "removed_by": "deleted: no consumer since L3a c0d18b76; every guest access is GM/LKA",
    "owner": "L3a"
   },
   {
