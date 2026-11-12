@@ -212,3 +212,7 @@ Update 2026-11-12, at 698adefb:
   - lift/rt is missing at 862b0708 (int3, w6);
   - link/ldcheck.py and py_modules (L1, after the first-root merge).
 - w8-disp 13a5a195: the MSVC return-in-registers POD predicate judges only the returned class; cl VC 2008 verifies it. Sent to L2.
+- w5 d5a90fed: the undefined-flag rule is in gate_flags, with an identity rule for opaque copies that the lead checked as sound.
+  - binkw32 (facts bc9f12d): red reads 7 → 6; certified 4 120/4 126; no-form rows 7 992. The cpuid probe 01441246 is green.
+  - All 6 remaining reads lie in 3 `ptr candidate` entries with reloc-misfits: 0144ddec, 01457d50, 0145e388.
+- New universe rule (w7, in the 7-image facts commit): a decoding is code only if every relocation in the span lands on an imm32/disp32 field. A misfit refuses the candidate (doing).
