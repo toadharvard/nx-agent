@@ -948,3 +948,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - fpexact 118/232: w22f (reader).
   - w17 builds the merged branch w17m = 224af83e + flags 7ecf2e25 + w22b 6b122a79, with one verdict; it reports to the orchestrator directly.
   - L3a accepted the closed test-placement rule and sent it to w6. Their t16g f0c65c004 has 7/7 test roots recipe-valid; its lib/sha256 row is to be replaced by w15c's.
+
+- 09:42 L5 news:
+  - The hostapi union rule is ae942a0a5 on claude/fnv-l5-platform-root. L1 has reviewed and accepted it; it goes to the trunk with L5's head.
+  - The dshow_filters.cpp vcvtq_s32_f32 finding moves to the MSVC ftoi form (L5 w10) after w22f.
+  - L5 w10 runs a warm verdict for the real platform-root red list once (d'), (b'), treehash and abi layout are in.
