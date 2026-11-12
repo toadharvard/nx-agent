@@ -10,8 +10,16 @@ Everything is read from the build's own outputs: objects.json `stage_keys`, then
 - A lifted root's C++ needs no plugin (RECIPE.md "Gate rule": the lifter emits the order itself). The pin declares no data-model flags, so the flag set is the recipe's own constant; C and assembler units are checked for `-mabi=ilp32` only.
 Tests (tests/test_datamodel.py, real pinned msvcmodel external, no doubles): no guest root green; stock g++ root red; wrong commit of the external red; unit missing a plugin red (pure check on a CC document); unit without `-mabi=ilp32` red; no CC document red; good root green 3/3 (compiler + 2 units).
 
-## Gate fpexact: not written, decision needed (sent to the lead)
-The native criterion "no float-to-int call other than the plugin's emitted ones" has no decidable definition from the build outputs: `fnvnx_ftoi` emits no calls (inline range check + bounded fcvtzs), writes no per-unit result (only a `verbose` inform, which PLUGIN_ARGS does not set), and leaves integers wider than 64 bits unrewritten (a libgcc `__fixdfti` stays possible). Options sent: (a) load-only criterion, (b) plugin writes a per-unit count, (c) plugin errors on any FIX_TRUNC_EXPR it did not rewrite (recommended). The rcp/rsqrt table (L1) and the lifted part (L3a) are not covered by any gate yet. REQUIRED_PRODUCT still names `fpexact`, so no product root can be admitted until it exists.
+## For L3b (fpexact, native part): the argument, per the lead's decision (c)
+`fnvnx_ftoi` (toolchain/ftoi/fnvnx_ftoi.cc) now rewrites every FIX_TRUNC_EXPR of a function or reports an `error_at` naming the source and target types, for every shape it does not cover: a vector or other non-integer target, a floating source wider than 64 bits, an integer target wider than 64 bits (the enum case already was an error). The pass is registered unconditionally at `plugin_init` and runs on every function after the CFG; a failed init or an error fails the CC stage.
+Therefore: if a unit's CC stage document holds the declared input `/plug/fnvnx_ftoi` and `-fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so` (the `datamodel` gate already checks exactly this for every native C++ unit, `gate_datamodel.unit_why`) and the stage succeeded, no unbounded float-to-int conversion written in that unit's source reaches its object. The criterion needs no object scan and no name list.
+Stated limits, not covered by this argument (for L3b to take or to assign):
+- FIX_TRUNC_EXPR that GCC creates after the pass (the pass runs once, right after the CFG; later folding such as a rounding builtin turned into a conversion). Not shown absent by the plugin. Needs either a second check pass late in the pipeline (L2, plugin) or an object-level rule.
+- Library conversions (lrint, lround, ...) are calls, not conversions; their semantics are the library's.
+- Constant-folded conversions (static initialisers) are compile-time values, not run-time.
+- Lifted code (L3a) and the rcp/rsqrt table (L1 reference-CPU table) have no gate yet.
+Test: tests/test_plugins.py (40/40): double -> __int128 fails the build with an FTOI error naming both types; the ordinary conversions of the same plugin still give the bounded form (0x80000000 case).
+Not done: "flags" in guest_compiler.json (pin file is the lead's/w4's; the gate reads recipe.SEMANTICS_FLAGS).
 
 ## Numbers (commit of the verdict run: 05400e1, before the test_gates.py fix in the next commit)
 Verdict at c5b20de: 24 gates, 24 green, 191.2 s (the earlier red, selftests test_gates.py, was the missing `datamodel` entry; fixed). Tests: test_datamodel.py 9/9, test_gates.py 0 failed.

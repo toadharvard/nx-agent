@@ -63,10 +63,22 @@ struct ftoi_pass : gimple_opt_pass {
         if (!is_gimple_assign(stmt) || gimple_assign_rhs_code(stmt) != FIX_TRUNC_EXPR) continue;
         tree lhs = gimple_assign_lhs(stmt), x = gimple_assign_rhs1(stmt);
         tree it = TREE_TYPE(lhs), ft = TREE_TYPE(x);
-        if (TREE_CODE(it) != INTEGER_TYPE && TREE_CODE(it) != ENUMERAL_TYPE) continue;
-        if (!SCALAR_FLOAT_TYPE_P(ft) || TYPE_PRECISION(ft) > 64) continue;
+        // RULE: every FIX_TRUNC_EXPR of the function is rewritten here or is a compile error, so a unit that this plugin compiled
+        // holds no unbounded float -> integer conversion (the load of the plugin is the proof, gate fpexact). A shape the rewrite does
+        // not cover (a vector, a floating type wider than 64 bits, an integer type wider than 64 bits) names its types and fails.
+        if (TREE_CODE(it) != INTEGER_TYPE && TREE_CODE(it) != ENUMERAL_TYPE) {
+          error_at(gimple_location(stmt), "FTOI: conversion %qT to %qT is not covered by the MSVC rewrite", ft, it);
+          continue;
+        }
+        if (!SCALAR_FLOAT_TYPE_P(ft) || TYPE_PRECISION(ft) > 64) {
+          error_at(gimple_location(stmt), "FTOI: conversion %qT to %qT is not covered by the MSVC rewrite (source wider than 64 bits)", ft, it);
+          continue;
+        }
         unsigned p = TYPE_PRECISION(it);
-        if (p > 64) continue;
+        if (p > 64) {
+          error_at(gimple_location(stmt), "FTOI: conversion %qT to %qT is not covered by the MSVC rewrite (target wider than 64 bits)", ft, it);
+          continue;
+        }
         // A floating value converted straight to an enum is not the exe's language: MSVC 2008 rejects it (C2440,
         // "conversions between enumeration and floating point values are no longer allowed"; tests/s12 ftoi_enum
         // has the compiler's own answer), so the exe's source named an integer type in between and that type chose
