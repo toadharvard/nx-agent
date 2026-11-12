@@ -66,7 +66,7 @@ class Img:
             if mer and a <= mer[-1][1]: mer[-1][1] = max(mer[-1][1], b)
             else: mer.append([a, b])
         self.mer = mer; self.ms = [a for a, b in mer]; self.cache = {}
-        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.rows = []; self.info = Counter()
+        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.rows = []; self.info = Counter()
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
@@ -135,6 +135,9 @@ def memkey(img, g, op, esp, regs):
 
 
 HALF = 1 << 23
+# PREMISE F (conditional, reported as cond_fresh_entries in gate_pcsrc.json, never assumed closed): when esp is loaded from a register that is not a known stack address (chkstk/alloca: esp = esp - size), the fresh space is
+# disjoint from every TRACKED slot of the old frame: its accesses are below the new esp, or inside the allocated block, and the new esp does not lie above a live tracked old slot (size >= 0 without wraparound; no access
+# past the allocated size). Not checked from the code (that needs the affine esp-minus-size domain with the probe-loop relation). A red-free result of an entry in img.fresh holds under F: conditional, like cond:no_s4_arith.
 
 
 def is_fresh(k):
@@ -143,8 +146,9 @@ def is_fresh(k):
     return k is not None and abs(k) >= HALF
 
 
-def new_fresh(esp, st):
+def new_fresh(esp, st, mark, e):
     """-> the esp of a fresh space (the base of the current fresh space if esp is already in one, else 1<<24); the stale slots of that space are dropped. Finite: one base per nesting, no growth in loops."""
+    mark.add(e)      # the result of this entry depends on premise F (see Img.fresh)
     base = ((esp + HALF) // (1 << 24)) * (1 << 24) if is_fresh(esp) else 1 << 24
     for k in [k for k in st if abs(k - base) < HALF]: st.pop(k)
     return base
@@ -385,7 +389,7 @@ def analyse_entry(img, e, mode='owner', force=False):
         elif mn == 'xchg' and len(ops) == 2 and ops[0].type == ops[1].type == X.X86_OP_REG and ops[0].size == 4 and 'esp' in (R32.get(ops[0].reg), R32.get(ops[1].reg)) and R32.get(ops[0].reg) != R32.get(ops[1].reg):
             n = R32[(ops[1] if R32.get(ops[0].reg) == 'esp' else ops[0]).reg]; v = regs.get(n); old = esp; al = None
             if tracked(v) or v == 'mix': consume(v, 'unknown-use', 'xchg esp', True)
-            esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else new_fresh(esp, st)
+            esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else new_fresh(esp, st, img.fresh, e)
             if old is not None: regs[n] = ('sp', old)
             else: regs.pop(n, None)
             succ = [nxt]
@@ -465,7 +469,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 if R32.get(d.reg) == 'esp' and d.size == 4:
                     v = regval(s) if s.type == X.X86_OP_REG else None; al = None
                     if tracked(v) or v == 'mix': consume(v, 'unknown-use', 'mov esp', True)
-                    esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else new_fresh(esp, st)
+                    esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else new_fresh(esp, st, img.fresh, e)
             elif d.type == X.X86_OP_MEM:
                 v = regval(s) if s.type == X.X86_OP_REG else None
                 key = memkey(img, g, d, esp, regs)
@@ -498,7 +502,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             if n == 'esp':
                 fr = False
                 if esp is not None and s.type == X.X86_OP_IMM: esp += s.imm if mn == 'add' else -s.imm
-                else: esp = new_fresh(esp, st); al = None; fr = True
+                else: esp = new_fresh(esp, st, img.fresh, e); al = None; fr = True
                 if not fr:
                     for k in [k for k in st if k < esp and is_fresh(k) == is_fresh(esp)]: st.pop(k)
             else:
@@ -793,7 +797,7 @@ def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None
     byc = Counter((r[2], r[3]) for r in rows); redc = Counter((r[2], r[3]) for r in red)
     sources = len({(r[1], r[2]) for r in rows if r[3] == 'read'})
     res = dict(schema='fnvnx-gate/1', name='l3.pcsrc.' + name, status='red' if red else 'green', sources=sources, rows=len(rows), red=len(red), by_class={'%s/%s' % k: n for k, n in sorted(byc.items())},
-               red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_target=sum(1 for r in red if r[2] == 's4' and not r[3].startswith('escape')), s4_escape_red=sum(1 for r in red if r[2] == 's4' and r[3].startswith('escape')), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], entries=len(entries), info=dict(img.info))
+               red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_target=sum(1 for r in red if r[2] == 's4' and not r[3].startswith('escape')), s4_escape_red=sum(1 for r in red if r[2] == 's4' and r[3].startswith('escape')), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], cond_fresh_entries=len(img.fresh), cond_fresh_list=['%08x' % x for x in sorted(img.fresh)], entries=len(entries), info=dict(img.info))
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
     json.dump({'s4_violations': res['s4_red']}, open(outdir + '/pcsrc_s4.json', 'w'), sort_keys=True)      # read by modlift's residual: no file = unchecked, N > 0 = violation
     return len(red), res
