@@ -68,7 +68,7 @@ def main():
         if r.returncode == 0:
             checks(obj)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_layout-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+        check('a plugin argument is an error: the recipe fixes them', r.returncode != 0 and 'arguments must be' in r.stderr and 'fnvnx_layout' in r.stderr, r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
