@@ -449,3 +449,7 @@ Update 2026-11-12, at 698adefb:
     2. the CRT context capture (exe 00ecf3c8, atimgpud 01412ad8/01422276, libvorbis 01ce3aff): the undefined AF leaves through a CONTEXT into a callee. By the orchestrator's decision, it is defined by L3b's per-(form, flag) reference-CPU cert.
   - w5 sends the global (form, flag) work list.
 - w4: pointsto.py v1 is written (TOP correction) and in its first smoke run on atimgpud. The pcsrc d3dx9 counts are still running.
+
+## 2026-11-12 10:08
+- cpuid Form (L3b, ETA about 2 h): (eax, ebx, ecx, edx) ← CPUREF(eax, ecx) from rt/cpumodel.c, everything else unchanged, certified against Sail with the leaf as an uninterpreted function. w5 wires it into invariance.py.
+- Undefined flags in proven code: L3b proposes refinement against the pinned model (ASM-009); a reference-CPU characterisation would be sampling. L3a endorses it with rule DEF0: one constant, 0, for every architecturally undefined flag output of every Form, with no per-pair table. This is sent to the orchestrator for a decision. w5 prepares the check over all Forms (emission ≠ 0 count); the emission is unchanged until accepted.
