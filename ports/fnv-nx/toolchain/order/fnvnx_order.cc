@@ -102,8 +102,17 @@ static bool memory_result(tree d) {
          (DECL_BY_REFERENCE(d) || aggregate_value_p(TREE_TYPE(d), current_function_decl));
 }
 
+// HARDREG: an object whose DECL has a hard register (DECL_HARD_REGISTER: `register T v asm("xN")`, global or local) is a
+// machine register: it has no memory location and no address. It is never a memory reference for this plugin: not
+// ordered, no address taken (taking one is the ICE in expand_expr_addr_expr_1). Every classification below (is_memory_ref,
+// local_unshared, the addressable marks) applies this one rule, so a component or element of such an object is plain too.
+static bool hard_register(tree base) {
+  return base && TREE_CODE(base) == VAR_DECL && DECL_HARD_REGISTER(base);
+}
+
 static bool local_unshared(tree base) {
   if (!base) return true;
+  if (hard_register(base)) return true;
   if (TREE_CODE(base) == VAR_DECL || TREE_CODE(base) == PARM_DECL || TREE_CODE(base) == RESULT_DECL)
     // a result or parameter passed by invisible reference is the object the caller named (a return slot: `g = f()`
     // may construct f's result in g itself): a pointer dereference, not a frame variable of this function
@@ -127,7 +136,7 @@ static bool is_memory_ref(tree t) {
     case BIT_FIELD_REF: case REALPART_EXPR: case IMAGPART_EXPR: case VIEW_CONVERT_EXPR:
       return true;
     case VAR_DECL:
-      return TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t);
+      return !hard_register(t) && (TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t));
     case RESULT_DECL:
       return memory_result(t);
     default:
@@ -180,7 +189,7 @@ static tree gimplify_to(tree e, gimple_seq *seq) {
 
 static tree address_of(tree ref, gimple_seq *seq) {
   tree base = get_base_address(ref);
-  if (base && DECL_P(base)) mark_addressable(base);
+  if (base && DECL_P(base) && !hard_register(base)) mark_addressable(base);
   return gimplify_to(build_fold_addr_expr(ref), seq);
 }
 
@@ -446,7 +455,7 @@ struct order_pass : gimple_opt_pass {
         tree lhs = call ? gimple_call_lhs(call) : NULL_TREE;
         if (!lhs || !aggregate_value_p(TREE_TYPE(lhs), gimple_call_fntype(call))) continue;
         tree base = get_base_address(lhs);
-        if (base && DECL_P(base) && local_unshared(base)) mark_addressable(base);
+        if (base && DECL_P(base) && !hard_register(base) && local_unshared(base)) mark_addressable(base);
       }
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);

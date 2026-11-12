@@ -31,7 +31,7 @@ ROOT = T + "toy"
 PLUGS = [dict({"name": n, "source": recipe.PLUGIN_SOURCES[n], "args": dict(recipe.PLUGIN_ARGS[n])},
               **({"inputs": recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES]
 P = {p["name"]: p for p in PLUGS}
-SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\n"
+SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
        "flags": {"c": [], "cxx": ["-O2"] + list(recipe.SEMANTICS_FLAGS), "asm": []}, "include": [], "units": "all",
        "plugin_cxx": "x86_64-linux-gnu-g++-13", "plugins": PLUGS}
@@ -142,6 +142,8 @@ def main():
     rd, wr_, f2i = disasm(ra, "_Z2rdv"), disasm(ra, "_Z2wri"), disasm(ra, "_Z3f2if")
     check("volatile read is ldar", "ldar" in rd, rd)
     check("volatile write is stlr", "stlr" in wr_, wr_)
+    hw = disasm(ra, "_Z3hrwi")
+    check("HARDREG: a global register variable is no memory: no ldar/stlr/dmb, no ICE", all(x not in hw for x in ("ldar", "stlr", "dmb")), hw)
     check("float -> int is _ftol: 0x80000000 for NaN and out of range", "#0x80000000" in f2i, f2i)
     # --- ORDER-CONT: a block-ending statement without a fall-through edge needs no fence; every resumption point begins with dmb ishld
     cont_src = (
@@ -150,6 +152,7 @@ def main():
         "void lj(C *c) { if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1); }\n"
         "void thrower();\nint sj(void **b, int *p) { if (__builtin_setjmp(b)) return *p; thrower(); return 0; }\n"
         "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
+        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[1]; }\n"
         "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; return 0; }\n")
     crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
     rc_, _ = build(crepo, "C")
@@ -163,6 +166,8 @@ def main():
             return [x.split("\t", 2)[-1].strip() for x in disasm(rc_, sym, "b.cc").split("\n") if "\t" in x]
         before_ldar = lambda ls: any("dmb\tishld" in x for x in ls) and next(i for i, x in enumerate(ls) if "dmb\tishld" in x) < max(i for i, x in enumerate(ls) if x.startswith("ldar"))  # noqa: E731
         lj = lines("2ljP1C")
+        hl = lines("2hli")
+        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", not any("dmb" in x and "ishld" in x and False for x in hl) and any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
         print("DISASM lj:", lj)
         check("(i) noreturn __builtin_longjmp: no fence needed after it", any(x.startswith("br") or x.startswith("b ") or x.startswith("bl") or x.startswith("ldr") for x in lj) and lj, lj)
         s2 = lines("2sjPPvPi")
