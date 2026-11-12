@@ -229,8 +229,8 @@ def load_images(specs, bridge, escapes=(), writes=None, no_memfx=False, globext=
         nm, rest = spec.split('=', 1)
         pe, rg = rest.split(',')
         with open(pe, 'rb') as fh, open(rg) as fr:
-            raw = fh.read()
-        images[nm.lower()] = argflow.Image(raw, nm.lower(), argflow.read_ranges(fr.read()))
+            raw, rtxt = fh.read(), fr.read()
+        images[nm.lower()] = argflow.Image(raw, nm.lower(), argflow.read_ranges(rtxt))
         shas[nm.lower()] = hashlib.sha256(raw).hexdigest()
         images[nm.lower()].import_stack = stacks
     if not no_memfx:
