@@ -427,3 +427,10 @@ Update 2026-11-12, at 698adefb:
 - int3 262f4d060 (w6): one flag source. liftgen.resolved_flags = recipe semantics + pack root flags. PACK_CXX/C_FLAGS are deleted, 13 test files moved, and 0 private lists remain.
 - BLOCKED, owner L1 w17: lift/pack codegen. The pin's flags.semantics lacks -ffreestanding, -fno-exceptions and -fno-asynchronous-unwind-tables (and -fno-unwind-tables), which are semantic for lifted code (L3's own EH). lift/pack is held: recipe-valid, but not to be merged as a product root until w17's origin-keyed semantics are on the base. L1 is asked to land w17 now.
 - w3: the -I proof moves to libvorbisfile (fast); the binkw32 runs continue in the background.
+
+## 2026-11-12 09:58
+- ILP32 proof (w8), on int3 90f52d98e:
+  - recipe.py build of a lift/pack unit is green; the object is ELF32 AArch64.
+  - The resolved argv leads with -mabi=ilp32, then the semantics, then 8 plugins with ftoi mode=lifted.
+- t30 on int-l3a 2d215f16a: test_gate_lift, flags, order and eh all pass. vd29 and vd30 are still running.
+- L1 w17 (7ecf2e25) is accepted and goes into the next candidate (ETA one verdict cycle). The pack hold lifts when it is on int3's base.
