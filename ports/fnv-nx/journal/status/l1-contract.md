@@ -622,3 +622,9 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - L5 w15 manifest e15d385: every site is a decoded call VA; 16 rows open. Requests sent to L3a: the 56b717 field flow (d3dx9_31 reach), the extent of global 1269a9c (10 dbghelp rows), a write-set fact for 9fea3c/9fea58. w18 re-pins after the merge.
 - w12: the decomp-only census is at fnv-nx-build l1-legal/census 4fcca230 (24 path:line ids, measured at nx-agent 9a9e56c4). Sent to the orchestrator for removal. Done; stopped.
 - L3a assigned L5 w15's three fact requests: the 1269a9c extent → w2 (idxrange); 56b717 + 9fea3c/58 → w4 as one write-set fact over 7 images (stores with open addresses keep it open). Blocked for L1 w18: waiting on L3a.
+
+## 10:15Z
+- -dU fix: the orchestrator made it itself (claude/fnv-du-stage 41c58415 on 862b0708), as the first commit after the trunk merge. w16's port is stopped.
+- The orchestrator is removing the 24 legal pairs itself.
+- w20 44bc3b66: objstub A/B + descs. Verdict red 916e0dc7, 348.5 s, 29 gates; the only red is `assumptions`, L2's and inherited. 0 admitted roots, so counts are 0. Three corrections sent: layout-derived join (no handler column, op_cover 0ae75213); error_abi kinds noreturn|flag, mandatory for table roots; trap shape by output effect only (the subset that excluded reads is dropped). Then it stops.
+- L2: libpcre2 is already served by the trunk deb mirror. Any Wine-built cl table must use pinned Wine + cl via a profile and a generated stage.
