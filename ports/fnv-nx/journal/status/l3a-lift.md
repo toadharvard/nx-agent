@@ -457,3 +457,9 @@ Update 2026-11-12, at 698adefb:
 - 10:12: companion rule DEFPRIOR. An architecturally undefined non-flag output (e.g. bsf/bsr dest with a zero source) keeps its prior value. It is a refinement certified with witness = pre-state, and it matches the reference CPUs. Sent to the orchestrator. w5's all-Forms check covers DEF0 and DEFPRIOR, counted separately; w4 (L3b) counts the class.
 - 10:14: the orchestrator accepted DEFPRIOR. The final set is DEF0 (flags) + DEFPRIOR (non-flag outputs); an uncovered undefined output is red. The basis is refinement of the pinned model only. w5 records it in lift/README.md with global counts.
 - cpuid cert: the pinned IR 70c8dc39 lacks cpuid (0f a2). L3b does closure-keyed certs plus one batched IR bump (ACL2 x86-cpuid), ETA 3-4 h. Global: 34 cpuid sites over 7 images, one shape key.
+
+## 2026-11-12 10:17
+- int-l3a 380e3cde3 (with w14-src2): the L1 verdict is red, 1136.7 s, 40 gates; the product roots don't build ("missing result file … build.json"). w8 triages per root build (with w6), with a table by root cause; L1 gate defects go to L1 by name. lift/pack is still held on w17.
+- int3 8e40a0e54 = int3 + w5's invariance ecdcd89a.
+  - test_gate_lift is all pass.
+  - test_gate_flags has 1 red: pf_prove_no_form picked its "no Form" example by mnemonic (cpuid), and int3's forms now cover cpuid. That is measure-and-pick, so w5 derives the example from the real Form set by rule. Not parked.
