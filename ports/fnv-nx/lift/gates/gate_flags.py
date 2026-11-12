@@ -376,36 +376,39 @@ def load_universe(path):
 
 _md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 _md.detail = True
-MEMO = {}          # address -> decoded instruction: valid for ONE image (cleared by the entry points that load an image)
+MEMO = {}          # (lo, hi) -> decode result: valid for ONE image (cleared by the entry points that load an image)
 
 
 def decode(img, lo, hi):
-    """-> ([(addr, size, kind, target, reads, keep, undef, cls, mnemonic, covered)], undecodable address or None)"""
+    """-> ([(addr, size, kind, target, reads, keep, undef, cls, mnemonic, covered)], undecodable address or None); a function of the bytes of [lo, hi) only
+    (the instructions are decoded linearly from lo, so two ranges that overlap with different alignment decode differently)"""
+    r = MEMO.get((lo, hi))
+    if r is not None: return r
     code = img.read(lo, hi)
-    if code is None: return [], lo
+    if code is None:
+        MEMO[(lo, hi)] = r = ([], lo)
+        return r
     out, a = [], lo
     for ins in _md.disasm(code, lo):
         if ins.address + ins.size > hi: break
-        r = MEMO.get(ins.address)
-        if r is None:
-            e = effect(ins)
-            tgt = None
-            op = ins.operands[0] if ins.operands else None
-            if ins.id in CALL_IDS:
-                kind = KCALL
-                tgt = op.imm if op is not None and op.type == X.X86_OP_IMM and ins.id == X.X86_INS_CALL else None
-            elif ins.id in END_IDS: kind = KEND
-            elif ins.id in JMP_IDS:
-                kind = KJMP if op is not None and op.type == X.X86_OP_IMM else KEND
-                tgt = op.imm if kind == KJMP else None
-            elif X.X86_GRP_JUMP in ins.groups or X.X86_GRP_BRANCH_RELATIVE in ins.groups:
-                kind = KJCC; tgt = op.imm if op is not None and op.type == X.X86_OP_IMM else None
-            else: kind = KSEQ
-            rd, keep, undef = e if e is not None else (0, FULL, 0)
-            r = MEMO[ins.address] = (ins.address, ins.size, kind, tgt, rd, keep, undef, classof(ins), ins.mnemonic, e is not None)
-        out.append(r)
+        e = effect(ins)
+        tgt = None
+        op = ins.operands[0] if ins.operands else None
+        if ins.id in CALL_IDS:
+            kind = KCALL
+            tgt = op.imm if op is not None and op.type == X.X86_OP_IMM and ins.id == X.X86_INS_CALL else None
+        elif ins.id in END_IDS: kind = KEND
+        elif ins.id in JMP_IDS:
+            kind = KJMP if op is not None and op.type == X.X86_OP_IMM else KEND
+            tgt = op.imm if kind == KJMP else None
+        elif X.X86_GRP_JUMP in ins.groups or X.X86_GRP_BRANCH_RELATIVE in ins.groups:
+            kind = KJCC; tgt = op.imm if op is not None and op.type == X.X86_OP_IMM else None
+        else: kind = KSEQ
+        rd, keep, undef = e if e is not None else (0, FULL, 0)
+        out.append((ins.address, ins.size, kind, tgt, rd, keep, undef, classof(ins), ins.mnemonic, e is not None))
         a = ins.address + ins.size
-    return out, (None if a == hi else a)
+    MEMO[(lo, hi)] = r = (out, (None if a == hi else a))
+    return r
 
 
 def analyse(img, entry, ranges, st0, entries=(), final=False):
@@ -416,7 +419,7 @@ def analyse(img, entry, ranges, st0, entries=(), final=False):
         rows, b = decode(img, lo, hi)
         if b is not None: bad += 1
         for r in rows: ins[r[0]] = r
-    state = {entry: st0} if entry in ins and st0 else {}
+    state = {entry: st0} if entry in ins and st0 is not None else {}
     work = [entry] if state else []
     contrib = []
     while work:
@@ -493,7 +496,7 @@ def solve(path, base, rows, uni, jobs=4):
             kind, fl = uni.get(e, ('decomp', ['ptr']))
             unknown = 'ptr' in fl or kind not in ('decomp', 'call', 'tail') or e not in preds
             inst[e] = ALL_E if unknown else None
-        dirty = sorted(e for e in rows if inst[e])
+        dirty = sorted(e for e in rows if inst[e] is not None)
         while dirty:
             nxt = {}
             for part in run([(False, [(e, inst[e]) for e in c]) for c in chunk(dirty)]):
@@ -505,7 +508,7 @@ def solve(path, base, rows, uni, jobs=4):
                             nxt[t] = True
             dirty = sorted(nxt)
         res = []
-        for part in run([(True, [(e, inst[e]) for e in c if inst[e]]) for c in chunk(sorted(rows))]):
+        for part in run([(True, [(e, inst[e]) for e in c if inst[e] is not None]) for c in chunk(sorted(rows))]):
             res += part
     finally:
         if pool is not None:

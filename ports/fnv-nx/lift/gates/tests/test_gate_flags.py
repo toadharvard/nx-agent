@@ -107,6 +107,16 @@ class T(unittest.TestCase):
         rows, reads, _ = red('7400 c3')
         self.assertEqual((len(rows), reads), (1, 1))
 
+    def test_decode_depends_on_the_range_only(self):
+        code = bytes.fromhex('b8c3c3c3c3 7400 c3'.replace(' ', ''))                        # mov eax,imm32 (c3 bytes) ; jz ; ret
+        fresh = []
+        for lo in (A, A + 1):
+            g.MEMO.clear(); fresh.append(g.decode(Img(code), lo, A + len(code)))
+        g.MEMO.clear()
+        both = [g.decode(Img(code), lo, A + len(code)) for lo in (A, A + 1)]               # the second range overlaps the first with another alignment
+        self.assertEqual(fresh, both)
+        self.assertNotEqual(both[0][0][1], both[1][0][1])
+
     def test_undecodable_range_reported(self):
         _, _, bad = red('39c0 0f', [(A, A + 3)])
         self.assertEqual(bad, 1)
@@ -142,6 +152,12 @@ class T(unittest.TestCase):
         inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x10: 'e8eb000000 c3', A + 0x100: '7400 c3'},
                           {A: ('export', ['-']), A + 0x10: ('export', ['-']), A + 0x100: ('call', ['-'])})
         self.assertEqual(red, [(A + 0x100, [('zf', 1, 'jcc')])])
+        # a callee reached with every flag defined is still judged, and still passes its own states on: B (state 0 from A) multiplies (ZF undefined) and calls C
+        inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x100: 'f7e1 e8f9000000 c3', A + 0x200: '7400 c3'},
+                          {A: ('export', ['-']), A + 0x100: ('call', ['-']), A + 0x200: ('call', ['-'])})
+        self.assertEqual(red, [(A + 0x200, [('zf', 4, 'jcc')])])
+        inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x100: 'e8fb000000 7400 c3'}, {A: ('export', ['-']), A + 0x100: ('call', ['-'])})
+        self.assertEqual(red, [(A + 0x100, [('zf', 2, 'jcc')])])
         # an entry with no direct predecessor is an unknown predecessor itself
         inst, red = solve({A: '7400 c3'}, {A: ('call', ['-'])})
         self.assertEqual(red, [(A, [('zf', 1, 'jcc')])])
