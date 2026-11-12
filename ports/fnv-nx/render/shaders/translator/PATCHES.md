@@ -29,3 +29,9 @@ Profile set (rule): every `SUPPORT_PROFILE_*` macro that `mojoshader_internal.h`
 checks this against the header, so a new upstream profile cannot default to 1 unseen). It is 1 exactly for the profiles the ABI produces and what they need to
 compile: GLSLDK (the profile `backend_mojoshader.c` requests) and its dependency chain GLSLES3, GLSLES, GLSL; 0 for all others (D3D, BYTECODE, HLSL, GLSL120,
 ARB1, ARB1_NV, METAL, SPIRV, GLSPIRV). Census after the prune (7 objects): 493 non-empty sections, 12 collected (inlined-only helpers, see above).
+
+## mojoshader_sm.patch
+Applied last. Deletes `EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC` (0 uses) and rewrites the ten `<OP> unimplemented in this profile` failures of the GLSL emitters
+of the ps_1_x opcodes (TEXREG2AR/GB/RGB, TEXDP3, TEXDP3TEX, TEXM3X2DEPTH, TEXDEPTH, BEM, TEXM3X3SPEC, TEXM3X3VSPEC) to "<OP> is not an instruction of this shader
+model (<models> only)". Rule: each opcode has a body for every shader model whose table row (sm_table.json `models`) contains it; outside those models the instruction
+does not exist and the documented validator result is an invalid shader, not a missing implementation.
