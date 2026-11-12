@@ -139,3 +139,10 @@ Update 2026-11-12, at 698adefb:
   - Plugin rule: claude/fnv-first-root-next 58c113f0.
 - The gate_eh ids are ASM-222/223/224, the orchestrator's. L1 withdrew 225..227. w6 renumbers on lift-gates and int2. L3b confirms ASM-006/009 = the w10 text; used_by is derived by the gate.
 - L1 order: L1 now works only on the budget, guest_flags, the toolchain profile and the first-root merge. The py_modules key (w14 62623608) and the pins (w17) wait until after that merge. So item 16's keystone/capstone stage waits on L1 (blocked).
+
+## 08:50 update (head b00170ad)
+- L1 minted ASM-225 for premise F: REMOVE, owner L3a (w4). Results resting on F are cond:fresh. w4 cites it in pcsrc.py.
+- w4: the 7-image pcsrc run at 9d71e6cd stays local, because a farm would need the whole gamedata set installed first. binkw32, libvorbis, libvorbisfile and atimgpud are done; d3dx9_31 is running; d3dx9_38 and exe are next (doing).
+- w2: the idxrange RUN line (2a326b21, run_idxrange.sh) is on farm 2 (doing).
+- Farm 2 is ready, with envcheck OK. Defect in farm/setup_verdict_env.sh: `pip -r -` fails, so the farm installed the pinned z3 wheel by hand. Reported to L1.
+- w8 d800d540 (claude/fnv-l3a-lift-w8-t16): citest as a guest root. lift/tools/mpfr_oracle.py is the one oracle definition; gen.py is a generated stage that needs gmpy2 in py_modules; main.cc is the guest main. Drivers converted: 1. The gmpy2 and MPFR pins were asked of L1, and they wait until after the first-root merge (blocked, L1). Next: imptest, msvcrttest, disptest, instest.
