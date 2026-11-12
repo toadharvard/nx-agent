@@ -31,7 +31,6 @@
    "-DFNVNX_SDD=1",
    "-fno-devirtualize",
    "-fno-reorder-blocks-and-partition",
-   "-std=gnu++20",
    "-Werror=attributes"
   ],
   "asm": [
