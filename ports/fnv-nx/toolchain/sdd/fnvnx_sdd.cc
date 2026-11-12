@@ -45,6 +45,7 @@
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
+#include "../cpweak.h"
 #include "context.h"
 #include "tree-pass.h"
 #include "function.h"
@@ -509,6 +510,7 @@ static void finish_unit(void *, void *)
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
   if (!plugin_default_version_check(ver, &gcc_version)) return 1;
+  if (!fnvnx_cxx_fe()) return 0;   /* cc1 (C): no classes, no vtables, no destructors: nothing to give a slot (cpweak.h) */
   register_pass_info pc;
   pc.pass = new calls_pass(g);
   pc.reference_pass_name = "ssa";

@@ -45,6 +45,7 @@
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
+#include "../cpweak.h"
 #include "context.h"
 #include "stringpool.h"
 #include "attribs.h"
@@ -517,6 +518,27 @@ static std::string c_name(tree d)
   return (c == 'G' ? "_" : "@") + n + "@" + std::to_string((unsigned long)bytes);
 }
 
+/* C (cc1): the same decorations for a C declaration. The declaration's own parameter list gives the bytes; an unprototyped
+ * `int f()` has none (cl compiling C: `_f@0`); a variadic function is cdecl whatever it says. C has no overloads, no scopes and no classes. */
+static std::string c_name_c(tree d)
+{
+  std::string n = IDENTIFIER_POINTER(DECL_NAME(d));
+  if (TREE_CODE(d) != FUNCTION_DECL) return "_" + n;
+  tree ft = TREE_TYPE(d);
+  const char *cv = M::convention(ft);
+  bool std_cc = cv && !strcmp(cv, "std"), fast_cc = cv && !strcmp(cv, "fast");
+  tree p = TYPE_ARG_TYPES(ft);
+  bool variadic = false;
+  if (p) { variadic = true; for (tree q = p; q; q = TREE_CHAIN(q)) if (q == void_list_node) variadic = false; }
+  if (variadic || (!std_cc && !fast_cc)) return "_" + n;
+  unsigned HOST_WIDE_INT bytes = 0;
+  for (; p && p != void_list_node; p = TREE_CHAIN(p)) {
+    HOST_WIDE_INT sz = int_size_in_bytes(TREE_VALUE(p));
+    bytes += sz < 0 ? 4 : (sz + 3) & ~(HOST_WIDE_INT)3;
+  }
+  return (std_cc ? "_" : "@") + n + "@" + std::to_string((unsigned long)bytes);
+}
+
 /* ---- rows */
 
 struct Row { std::string sym, ms, kind; bool def; };
@@ -526,6 +548,15 @@ static std::string asmname(tree d)
 {
   const char *s = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
   return s[0] == '*' ? s + 1 : s;
+}
+
+/* cc1: the row of a C declaration (kind func / data; an object the compiler made has no declaration: gcc) */
+static void name_decl_c(tree d, bool def)
+{
+  Row r; r.sym = asmname(d); r.def = def;
+  if (!DECL_NAME(d) || DECL_ARTIFICIAL(d)) r.kind = "gcc";
+  else { r.ms = c_name_c(d); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data"; }
+  rows.push_back(r);
 }
 
 /* cl gives a member function the user wrote in a function's local class internal linkage, and so everything
@@ -771,12 +802,14 @@ static void finish_unit(void *, void *)
     if (!def && !ref) continue;
     auto it = early.find(d);
     if (it != early.end()) { rows.push_back(it->second); rows.back().def = def; }
+    else if (!fnvnx_cxx_fe()) name_decl_c(d, def);
     else name_decl(d, def);
     emitted.insert(rows.back().sym);
   }
   /* the SDD2 slot functions: that plugin writes them as assembly in the object that defines the table, and they
    * are named only by the table's entries */
   varpool_node *v;
+  if (fnvnx_cxx_fe())
   FOR_EACH_DEFINED_VARIABLE(v) {
     tree vt = v->decl, init = DECL_INITIAL(vt);
     if (!DECL_VTABLE_OR_VTT_P(vt) || !init || TREE_CODE(init) != CONSTRUCTOR) continue;
@@ -873,6 +906,10 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     return 1;
   }
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
+  if (!fnvnx_cxx_fe()) {   /* cc1 (C): C names, no C++ trees (cpweak.h) */
+    register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
+    return 0;
+  }
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type, NULL);

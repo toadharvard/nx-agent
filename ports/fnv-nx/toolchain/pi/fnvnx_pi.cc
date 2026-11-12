@@ -59,6 +59,7 @@
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
+#include "../cpweak.h"
 #include "context.h"
 #include "stringpool.h"
 #include "attribs.h"
@@ -202,8 +203,17 @@ static void inlined_blocks(tree block, std::set<std::string> &out)
   }
 }
 
+static bool fe_cxx;   /* the C++ front end loaded the plugin (cpweak.h); under cc1 the C++-only trees and functions are never touched */
+
+/* the tree walk of the front end that loaded the plugin: the C++ one knows the C++ tree codes' subtrees, the generic one is all C has */
+static tree walk_dedup(tree *tp, walk_tree_fn fn, void *data)
+{
+  return fe_cxx ? cp_walk_tree_without_duplicates(tp, fn, data) : walk_tree_without_duplicates(tp, fn, data);
+}
+
 static void note_type(tree t, std::set<std::string> &types)
 {
+  if (!fe_cxx) return;   /* an Itanium type string names a C++ type; C has none */
   while (t && (POINTER_TYPE_P(t) || TREE_CODE(t) == ARRAY_TYPE)) t = TREE_TYPE(t);
   if (!t || !RECORD_OR_UNION_TYPE_P(t)) return;
   t = TYPE_MAIN_VARIANT(t);
@@ -257,7 +267,7 @@ static std::set<std::string> arg_unreadable;      /* functions (the declaration'
 /* the function a call or an aggregate-initializing call names, else null */
 static tree callee_of(tree t)
 {
-  if (TREE_CODE(t) == CALL_EXPR) return cp_get_callee_fndecl_nofold(t);
+  if (TREE_CODE(t) == CALL_EXPR) return fe_cxx ? cp_get_callee_fndecl_nofold(t) : get_callee_fndecl(t);
   tree f = AGGR_INIT_EXPR_FN(t);
   if (f && TREE_CODE(f) == ADDR_EXPR) f = TREE_OPERAND(f, 0);
   return f && TREE_CODE(f) == FUNCTION_DECL ? f : NULL_TREE;
@@ -329,7 +339,7 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
   for (size_t i = 0; i < args.size(); i++) {
     arg_effects e; e.other = false;
     if (args[i] && TREE_SIDE_EFFECTS(args[i])) {
-      cp_walk_tree_without_duplicates(&args[i], walk_effects, &e);
+      walk_dedup(&args[i], walk_effects, &e);
       if (e.other || e.calls.empty()) readable = false;
       for (size_t k = 0; k < e.calls.size(); k++) if (!seen.insert(e.calls[k]).second) readable = false;
     }
@@ -346,11 +356,11 @@ static void pre_genericize(void *gcc_data, void *)
   if (!fn || TREE_CODE(fn) != FUNCTION_DECL || !DECL_SAVED_TREE(fn)) return;
   std::string name = asmname(fn);
   call_count.clear(); fn_sites.clear();
-  cp_walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
+  walk_dedup(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
   /* the in-charge form of a constructor or destructor is never emitted: its clones (C1/C2, D0/D1/D2) are, and each
      clone with a body of its own comes here itself. The form is still walked: the verdict of its clones is looked
      up by its name (source_name). */
-  if (DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) return;
+  if (fe_cxx && DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) return;
   for (size_t i = 0; i < fn_sites.size(); i++)
     arg_sites.push_back(fn_sites[i].head + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
 }
@@ -416,7 +426,7 @@ static bool unproven_memory_read(function *fun)
 /* the symbol of the declaration a body was parsed under (a constructor / destructor variant: its declaration) */
 static std::string source_name(tree fn)
 {
-  if (DECL_LANG_SPECIFIC(fn) && DECL_CLONED_FUNCTION_P(fn)) fn = DECL_CLONED_FUNCTION(fn);
+  if (fe_cxx && DECL_LANG_SPECIFIC(fn) && DECL_CLONED_FUNCTION_P(fn)) fn = DECL_CLONED_FUNCTION(fn);
   return asmname(fn);
 }
 
@@ -540,7 +550,7 @@ struct late_pass : gimple_opt_pass {
     }
     if (e == early.end()) {
       /* a this-adjusting thunk: made by the compiler, an adjustment and a jump */
-      if (!DECL_LANG_SPECIFIC(fun->decl) || !DECL_THUNK_P(fun->decl))
+      if (!fe_cxx || !DECL_LANG_SPECIFIC(fun->decl) || !DECL_THUNK_P(fun->decl))
         { error("N3: function %qD is emitted but was never read early", fun->decl); return 0; }
       lines.push_back(name + "\\tok\\t" + join(inl) + "\\tthunk\\t");
       thunk_rows.insert(name);
@@ -643,6 +653,7 @@ static void register_attrs(void *, void *) { register_attribute(&lifted_attr); }
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
   if (!plugin_default_version_check(ver, &gcc_version)) return 1;
+  fe_cxx = fnvnx_cxx_fe();
   for (int i = 0; i < info->argc; i++)
     if (!strcmp(info->argv[i].key, "fpfast")) unit_fpfast = true;
   register_pass_info pc;
