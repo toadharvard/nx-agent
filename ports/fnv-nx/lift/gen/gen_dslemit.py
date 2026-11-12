@@ -68,7 +68,8 @@ def main():
         return cx
 
     def func(cx, ad):
-        return 'extern "C" void L_%08x(void)\n{ DECL; SYNC_IN; u32 fsb=c->fs; u32 E=esp;\nL_%08x: ;\n%s\nafter_tail: ; nonlocal: ; return;\n}\n' % (ad, ad, '\n'.join(cx.L))
+        decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))      # the callees, declared as fnvlift/core.py does for a lifted function
+        return '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN; u32 fsb=c->fs; u32 E=esp;\nL_%08x: ;\n%s\nafter_tail: ; nonlocal: ; return;\n}\n' % (decl, ad, ad, '\n'.join(cx.L))
 
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
     md.detail = True
