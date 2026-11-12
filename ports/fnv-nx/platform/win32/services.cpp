@@ -254,8 +254,11 @@ extern "C" HRESULT CoCreateGuid(GUID *g)
 }
 
 
-/* ---- steam_api / galaxywrp.dll: the public Steamworks contract in the state "Steam client not running"
- * (ENV_TRUTH M6). SteamAPI_Init fails every time (no client to connect to), SteamAPI_IsSteamRunning is false, every
+/* ---- steam_api / galaxywrp.dll: GOG Galaxy is not lifted (CLAUDE.md "Owner order of 2026-11-11, 23:00"): the declared machine has no
+ * Galaxy and no Steam service. Every name the exe or a module reaches in GalaxyWrp.dll / Galaxy.dll (platform/manifest/check_galaxy.py:
+ * the 11 Steamworks entries of the exe's galaxywrp.dll import) has a body here, the public Steamworks contract in the state "client not
+ * running / API not initialised" (ENV_TRUTH M6), with the documentation cited per function (the constant ones in
+ * manifest/env_const.tsv, the others at their definition). SteamAPI_Init fails every time (no client to connect to), SteamAPI_IsSteamRunning is false, every
  * interface accessor is NULL (no ISteam* object exists without a client), no callback is ever delivered (callbacks
  * come from the client), and the callback registration list is the real one: RegisterCallback adds an
  * (object, id) pair, UnregisterCallback removes all pairs of the object. */
@@ -267,7 +270,9 @@ static int g_steam_nregs, g_steam_cap;
  * the pipe to the client (HSteamPipe, 0 = none) is never opened. */
 static int g_steam_pipe;
 
-/* releases the pipe to the client and marks the API uninitialised; the registrations belong to their objects */
+/* SteamAPI_Shutdown. Steamworks SDK steam_api.h / doc/api/steam_api#SteamAPI_Shutdown: "Shuts down the Steamworks API, releasing the
+ * pointers and memory"; the call is valid in the uninitialised state (nothing to release). Releases the pipe to the client (none) and marks
+ * the API uninitialised; the registrations belong to their objects (they unregister themselves). */
 extern "C" void SteamAPI_Shutdown(void)
 {
     os_lock(&g_steam_lock);
@@ -275,7 +280,9 @@ extern "C" void SteamAPI_Shutdown(void)
     os_unlock(&g_steam_lock);
 }
 
-/* dispatches the callbacks the client queued on the pipe to the registered objects; without a pipe nothing is queued */
+/* SteamAPI_RunCallbacks. steam_api.h / doc/api/steam_api#SteamAPI_RunCallbacks: "Dispatches callbacks and call results to all of the
+ * registered listeners" - those come from the client over the pipe; without a pipe (SteamAPI_Init failed) nothing is queued, so nothing is
+ * dispatched and no registered object is touched. */
 extern "C" void SteamAPI_RunCallbacks(void)
 {
     os_lock(&g_steam_lock);
@@ -285,6 +292,9 @@ extern "C" void SteamAPI_RunCallbacks(void)
         return;
 }
 
+/* SteamAPI_RegisterCallback (steam_api.h, steam_api_internal.h CCallbackBase: the Steamworks callback registry, the function the
+ * STEAM_CALLBACK / CCallback<> constructors call): adds the (object, callback id) pair to the registry. The registry is independent of the
+ * connection to the client (the objects register before SteamAPI_Init is called), so it is the real list, not a constant. */
 extern "C" void SteamAPI_RegisterCallback(void *cb, int id)
 {
     os_lock(&g_steam_lock);
@@ -305,6 +315,8 @@ extern "C" void SteamAPI_RegisterCallback(void *cb, int id)
     os_unlock(&g_steam_lock);
 }
 
+/* SteamAPI_UnregisterCallback (steam_api.h; the CCallbackBase destructor calls it): removes every registration of the object; an object
+ * with none is a no-op. */
 extern "C" void SteamAPI_UnregisterCallback(void *cb)
 {
     os_lock(&g_steam_lock);
