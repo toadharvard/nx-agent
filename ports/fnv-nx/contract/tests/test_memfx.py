@@ -244,6 +244,9 @@ check('... the import escapes the argument', keeps(imp_prog, 'f', 'esi', writes=
 
 check('... an unresolved escape letter (?) is open, never read as n', keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
                                                    escape='dll\tname\tescape\nkernel32.dll\tCloseHandle\t?\n'), False)
+check('... a given table with no row for the import: open (no escape row), not all-e by default', keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
+                                                   escape='dll\tname\tescape\nkernel32.dll\tOther\tn\n'), False)
+check('... the reason names the missing row', memfx.ImportInfo('', ['dll\tname\tescape\nk.dll\tG\tn\n']).esc_letter(memfx.norm_imp('k.dll', 'F'), 0), '!')
 _ii = memfx.ImportInfo('', ['dll\tname\tescape\nk.dll\tF\tn\n', 'dll\tname\tescape\nk.dll\tF\t?\n'])
 check('two tables for one import: ? dominates the merge', _ii.esc_letter(memfx.norm_imp('k.dll', 'F'), 0), '?')
 

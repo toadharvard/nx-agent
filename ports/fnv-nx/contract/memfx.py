@@ -60,7 +60,7 @@ def norm_imp(dll, name):
 class ImportInfo:
     """Per import: bytes the callee removes, bridge argument letters, escape letters, and the write facts.
     escape: one letter per argument (n not captured, r may be returned, e escapes, ? the platform has not resolved it: neither n nor e,
-    open for every question with that reason, never read as n or e); no row = all e (an open reason naming the missing row).
+    open for every question with that reason, never read as n or e); no row = all e when no table was given; when a table was given a missing row is open, "no escape row for import X".
     writes: {(dll, name): letters} one per argument, n = never written through, w = may be written; no row = all w."""
 
     def __init__(self, bridge_text='', escape_texts=(), writes_text=''):
@@ -91,7 +91,9 @@ class ImportInfo:
 
     def esc_letter(self, k, idx):
         s = self.escape.get(k)
-        if s is None or idx >= len(s):
+        if s is None:
+            return '!' if self.escape else 'e'      # a table was given and has no row for the import: a manifest defect, red (not a default)
+        if idx >= len(s):
             return 'e'
         return s[idx]
 
@@ -763,7 +765,9 @@ class Closure:
                 self.imps[(va, key, idx)] = (mw, esc)
                 if mw:
                     self.fw.add(fn.entry)
-                if esc == '?':
+                if esc == '!':
+                    self.e(va, 'no escape row for import %s!%s' % key)
+                elif esc == '?':
                     self.e(va, 'argument %d of import %s!%s: the platform escape letter is unresolved (?)' % (idx, key[0], key[1]))
                 elif esc == 'e':
                     self.e(va, 'tainted argument %d of import %s!%s (platform escape letter %s)' % (idx, key[0], key[1], esc))
