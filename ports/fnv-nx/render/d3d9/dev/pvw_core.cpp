@@ -43,7 +43,7 @@ void get_colour(Ctx& c, uint32_t slot, uint32_t i, PvCol* o) {
         bool f = t <= D3DDECLTYPE_FLOAT4; uint32_t n = f ? t + 1 : t == D3DDECLTYPE_USHORT2N ? 2 : 4, sz = f ? 4 : 2; const uint8_t* p = rd(c, slot, i, n * sz); float v[4] = {def.r, def.g, def.b, def.a};
         for (uint32_t k = 0; k < n; k++) { if (f) memcpy(&v[k], p + 4 * k, 4); else { uint16_t u; memcpy(&u, p + 2 * k, 2); v[k] = u / 65535.0f; } }
         o->r = v[0]; o->g = v[1]; o->b = v[2]; o->a = v[3];
-    } else { *o = def; if (!c.dry && !c.fx_fmt) { c.fx_fmt = true; fnvnx_wine_fixme(PVW_FIXME_COLOUR_FORMAT); } }
+    } else { *o = def; if (!c.dry && !c.fx_fmt) { c.fx_fmt = true; fnvnx_wine_fixme(NXW_wined3d_format_get_colour); } }
 }
 // wined3d_colour_from_mcs: mcs 0 material, 1 COLOR1 (diffuse element, absent = white), 2 COLOR2 (specular element, absent = 0)
 void from_mcs(Ctx& c, uint32_t mcs, const D3DCOLORVALUE* mat, uint32_t i, PvCol* o) {
@@ -81,7 +81,7 @@ bool pass(Ctx& c) {
         if (fvf & D3DFVF_PSIZE) dp += 4;
         if (fvf & D3DFVF_NORMAL) {
             if (!(si.use_map >> PVW_FFP_NORMAL & 1)) { c.bad = true; return false; }          // M2
-            if (!c.dry && !fx_normal) { fx_normal = true; fnvnx_wine_fixme(PVW_FIXME_DST_NORMAL); }
+            if (!c.dry && !fx_normal) { fx_normal = true; fnvnx_wine_fixme(NXW_process_vertices_strided); }
             wr(c, dp, rd(c, PVW_FFP_NORMAL, i, 12), 12); dp += 12;
         }
         PvCol amb, dif, spc;
@@ -120,11 +120,11 @@ HRESULT pvw_process(NxDeviceCore* d, UINT start, UINT dst_idx, UINT count, NxBuf
     for (uint32_t k = 0; k < PVW_FFP_COUNT; k++)                                           // wined3d_device_context_map(READ) of each source: d3d9 gives MAP_R except for WRITEONLY buffers of D3DPOOL_DEFAULT -> E_INVALIDARG, ERR, WINED3DERR_INVALIDCALL
         if ((si.use_map >> k & 1) && si.e[k].buf && (si.e[k].buf->usage & D3DUSAGE_WRITEONLY) && si.e[k].buf->pool == (uint8_t)D3DPOOL_DEFAULT) return D3DERR_INVALIDCALL;
     if (!(si.use_map >> PVW_FFP_POSITION & 1)) return D3DERR_INVALIDCALL;                      // ERR "Source has no position mask"
-    if (d->cur.rs[D3DRS_CLIPPING]) fnvnx_wine_fixme(PVW_FIXME_CLIPPING);
+    if (d->cur.rs[D3DRS_CLIPPING]) fnvnx_wine_fixme(NXW_wined3d_device_process_vertices);
     uint32_t fvf = dst->fmt, ntex = (fvf & 0x0f00) >> 8, vs = 0, pm = fvf & 0x400e;            // wined3d_get_flexible_vertex_size
     vs += (fvf & D3DFVF_NORMAL ? 12 : 0) + (fvf & D3DFVF_DIFFUSE ? 4 : 0) + (fvf & D3DFVF_SPECULAR ? 4 : 0) + (fvf & D3DFVF_PSIZE ? 4 : 0);
     switch (pm) { case D3DFVF_XYZ: vs += 12; break; case D3DFVF_XYZRHW: case D3DFVF_XYZB1: case D3DFVF_XYZW: vs += 16; break; case D3DFVF_XYZB2: vs += 20; break; case D3DFVF_XYZB3: vs += 24; break;
-              case D3DFVF_XYZB4: vs += 28; break; case D3DFVF_XYZB5: vs += 32; break; default: fnvnx_wine_fixme(PVW_FIXME_FVF_POSITION); }
+              case D3DFVF_XYZB4: vs += 28; break; case D3DFVF_XYZB5: vs += 32; break; default: fnvnx_wine_fixme(NXW_wined3d_get_flexible_vertex_size); }
     for (uint32_t i = 0; i < ntex; i++) vs += tex_size(fvf, i) * 4;
     Ctx c; memset((void*)&c, 0, sizeof c); c.d = d; c.si = &si; c.dst = dst; c.count = count; c.dvf = fvf; c.left = (uint32_t)(dst_idx * vs); c.dry = true; c.maxend = c.left;
     if (!pass(c)) return D3DERR_INVALIDCALL;

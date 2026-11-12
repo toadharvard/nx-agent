@@ -22,7 +22,7 @@ def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **
 
 
 def gen(tmp):
-    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), tmp, SPEC],
+    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(GEN, "gen_wine_ids.py"), tmp], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), tmp, SPEC],
                 [sys.executable, "-I", os.path.join(DEV, "res_smgen.py"), tmp, os.path.join(TOT, "sm_table.json"), os.path.join(os.path.dirname(SPEC), "d3d9_tables.py")], [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp]):
         r = sh(cmd)
         if r.returncode: return r.stderr[-800:]

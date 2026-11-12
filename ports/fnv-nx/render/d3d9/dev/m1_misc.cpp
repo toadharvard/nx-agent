@@ -4,7 +4,7 @@
 //  state model (state_model.py), default 1 x 1, back to the default by Reset (every state does). Violations = D3DERR_INVALIDCALL (the page lists no failure code). The kernel is read only by sampling a D3DFMT_A1 texture with
 //  D3DTEXF_CONVOLUTIONMONO: A1 textures cannot exist here (see ComposeRects) and TextureFilterCaps lacks D3DPTFILTERCAPS_CONVOLUTIONMONO (ValidateDevice reports UNSUPPORTEDTEXTUREFILTER), so the state is not observable beyond Capture / Apply.
 // ComposeRects: wine-9.0 dlls/d3d9/device.c d3d9_device_ComposeRects is `FIXME("... stub!"); return E_NOTIMPL;` and looks at no argument: the body does exactly that, one fnvnx_wine_fixme(47) per call
-//  (const_fixme.tsv). (The earlier decision D3DERR_INVALIDCALL, from the proof that no D3DFMT_A1 surface exists, is replaced by the Wine rule: the result of the Wine function is the source.)
+//  (verify/wine_fixme.tsv). (The earlier decision D3DERR_INVALIDCALL, from the proof that no D3DFMT_A1 surface exists, is replaced by the Wine rule: the result of the Wine function is the source.)
 #include "res_tex.h"
 #include "../gen/d9impl.gen.h"
 #include "dev_core.h"
@@ -15,4 +15,4 @@ HRESULT STDMETHODCALLTYPE NxDevice9Ex::SetConvolutionMonoKernel(UINT w, UINT h, 
     if (w < 1 || w > M1_KERNEL_MAX || h < 1 || h > M1_KERNEL_MAX || rows || cols) return D3DERR_INVALIDCALL;
     uint32_t k[2] = {w, h}; put(NX_S_convk, &k[0]); put(NX_S_convk + 1, &k[1]); return D3D_OK;
 }
-HRESULT STDMETHODCALLTYPE NxDevice9Ex::ComposeRects(IDirect3DSurface9*, IDirect3DSurface9*, IDirect3DVertexBuffer9*, UINT, IDirect3DVertexBuffer9*, D3DCOMPOSERECTSOP, INT, INT) { fnvnx_wine_fixme(NX_CF_ComposeRects); return E_NOTIMPL; }
+HRESULT STDMETHODCALLTYPE NxDevice9Ex::ComposeRects(IDirect3DSurface9*, IDirect3DSurface9*, IDirect3DVertexBuffer9*, UINT, IDirect3DVertexBuffer9*, D3DCOMPOSERECTSOP, INT, INT) { fnvnx_wine_fixme(NXW_d3d9_device_ComposeRects); return E_NOTIMPL; }

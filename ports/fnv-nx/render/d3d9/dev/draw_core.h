@@ -62,10 +62,9 @@ struct NxBound {
     NxUboCache ubo[2][8];                                                  // [stage][slot]
     NxViewport vp; NxScissor sc; float blend[4], bias[2]; uint8_t vp_ok, sc_ok, blend_ok, bias_ok;
     uint32_t pass_epoch; bool pass_ok; NxTarget col[4]; uint32_t nc; NxTarget dep; bool has_dep;   // the pass this module began
-    bool fx_lastpixel;                                                     // D5A_FIXME_LASTPIXEL was logged (Wine: `static bool warned`)
+    bool fx_lastpixel;                                                     // NXW_wined3d_device_apply_stateblock was logged (Wine: `static bool warned`)
 };
-enum { D5A_FIXME_LASTPIXEL = 40 };   // rows of d5a_fixme.tsv (ids of verify/wine_fixme.tsv from 40 up)
-extern "C" void fnvnx_wine_fixme(uint32_t id);   // loader/include/fnvnx_reach.h: writes one line and returns
+#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of verify/wine_fixme.tsv
 extern NxBound g_nxb;
 void nx_draw_shutdown();   // returns the process-wide memory of the draw path (the constant-block caches of g_nxb, the zero block of draw_bind.cpp) and forgets what the stream had bound: platform teardown, tests (with nxs_shutdown)
 struct NxDrawDev : NxDevLifeBase { NxD3D9Latch latch; NxDrawDev() { nx_d3d9_latch_init(&latch); } };

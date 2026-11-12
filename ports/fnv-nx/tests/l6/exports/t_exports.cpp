@@ -3,7 +3,7 @@
 #include <string.h>
 #include <initializer_list>
 #include "d3d9_adapter.h"
-extern "C" { void* nx_d3d9_export(const char*); int nx_d3d9_export_count(void); const char* nx_d3d9_export_name(int); }
+extern "C" { void* nx_d3d9_export(const char*); extern const int nx_d3d9_export_count; const char* nx_d3d9_export_name(int); }
 // test-provided factory bodies (the product ones are d3d9_adapter.cpp): distinct marks show which body an export reaches
 IDirect3D9* nx_Direct3DCreate9(UINT sdk) { return (IDirect3D9*)(uintptr_t)(0x1000 + sdk); }
 HRESULT nx_Direct3DCreate9Ex(UINT sdk, IDirect3D9Ex** out) { *out = (IDirect3D9Ex*)(uintptr_t)(0x2000 + sdk); return (HRESULT)sdk; }
@@ -13,9 +13,9 @@ static int fails = 0, checks = 0;
 #define CHECK(c) do { checks++; if (!(c)) { fails++; printf("FAIL %s (line %d)\n", #c, __LINE__); } } while (0)
 template <class F> static F ex(const char* n) { return (F)nx_d3d9_export(n); }
 int main() {
-    for (int i = 0; i < nx_d3d9_export_count(); i++) { printf("EXPORT %s\n", nx_d3d9_export_name(i)); CHECK(nx_d3d9_export(nx_d3d9_export_name(i)) != nullptr); }
+    for (int i = 0; i < nx_d3d9_export_count; i++) { printf("EXPORT %s\n", nx_d3d9_export_name(i)); CHECK(nx_d3d9_export(nx_d3d9_export_name(i)) != nullptr); }
     CHECK(nx_d3d9_export(nullptr) == nullptr); CHECK(nx_d3d9_export("") == nullptr); CHECK(nx_d3d9_export("Direct3DCreate9E") == nullptr); CHECK(nx_d3d9_export("d3dperf_setoptions") == nullptr);
-    CHECK(nx_d3d9_export_name(-1) == nullptr); CHECK(nx_d3d9_export_name(nx_d3d9_export_count()) == nullptr);
+    CHECK(nx_d3d9_export_name(-1) == nullptr); CHECK(nx_d3d9_export_name(nx_d3d9_export_count) == nullptr);
     auto begin = ex<int (WINAPI*)(D3DCOLOR, LPCWSTR)>("D3DPERF_BeginEvent"); auto end = ex<int (WINAPI*)(void)>("D3DPERF_EndEvent");
     auto status = ex<DWORD (WINAPI*)(void)>("D3DPERF_GetStatus"); auto repeat = ex<BOOL (WINAPI*)(void)>("D3DPERF_QueryRepeatFrame");
     auto marker = ex<void (WINAPI*)(D3DCOLOR, LPCWSTR)>("D3DPERF_SetMarker"); auto region = ex<void (WINAPI*)(D3DCOLOR, LPCWSTR)>("D3DPERF_SetRegion");

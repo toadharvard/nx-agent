@@ -64,7 +64,7 @@ void nx_state_flush(NxDeviceCore* d, const NxDrawReq&, const NxProg& pr, const N
     const uint32_t* rs = s.rs;
     // S5 D3DRS_LASTPIXEL: Wine 9.0 wined3d_device_apply_stateblock logs "Last Pixel Drawing Disabled, not handled yet" once (static bool warned) when the state is FALSE and does nothing else
     //    (no GL state in the state table: lines are GL's diamond-exit lines for both values); same here, one line per process (g_nxb lives until nx_draw_shutdown).
-    if (!rs[D3DRS_LASTPIXEL] && !b.fx_lastpixel) { b.fx_lastpixel = true; fnvnx_wine_fixme(D5A_FIXME_LASTPIXEL); }
+    if (!rs[D3DRS_LASTPIXEL] && !b.fx_lastpixel) { b.fx_lastpixel = true; fnvnx_wine_fixme(NXW_wined3d_device_apply_stateblock); }
     st.w[3] = (rs[D3DRS_MULTISAMPLEANTIALIAS] != 0 ? 1ull << NXRS_M_MSAA : 0) | (rs[D3DRS_ANTIALIASEDLINEENABLE] != 0 ? 1ull << NXRS_M_AALINE : 0) | (rs[D3DRS_LASTPIXEL] != 0 ? 1ull << NXRS_M_LASTPIXEL : 0)   // S3
               | (rs[D3DRS_CLIPPING] == 0 ? 1ull << NXRS_M_NOCLIP : 0) | (uint64_t)rs[D3DRS_MULTISAMPLEMASK] << NXRS_M_SAMPLEMASK;
     for (uint32_t i = 0; i < ps.nc; i++) if (ps.csc[i]) { uint8_t m; nx_d3d9_rt_rule(ps.csc[i]->img->fmt, &m); st.w[0] &= ~(0xFull << NXRS_B_MASK(i)) | ((uint64_t)m << NXRS_B_MASK(i)); }

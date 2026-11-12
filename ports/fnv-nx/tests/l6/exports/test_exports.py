@@ -17,6 +17,7 @@ def sh(cmd): return subprocess.run(cmd, capture_output=True, text=True)
 def main():
     fails = []; tmp = tempfile.mkdtemp(prefix="d9exp_")
     r = sh([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC])
+    if r.returncode == 0: r = sh([sys.executable, "-I", os.path.join(GEN, "gen_wine_ids.py"), tmp])
     if r.returncode: print("GEN FAILED\n" + r.stderr[-800:]); return 1
     fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-Wall", "-Werror", "-Wno-unused", "-I", INC, "-I", tmp, "-I", DEV]
     obj = os.path.join(tmp, "d3d9_exports.o"); exe = os.path.join(tmp, "t_exports")

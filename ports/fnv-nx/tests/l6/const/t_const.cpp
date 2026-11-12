@@ -28,7 +28,7 @@ int main() {
     CALLV("D3DPERF_SetMarker", D3DPERF_SetMarker(0xff00ff00, kName)); CALLV("D3DPERF_SetMarker", D3DPERF_SetMarker(0, nullptr)); CALLV("D3DPERF_SetMarker", D3DPERF_SetMarker(0xffffffff, kName));
     CALLV("D3DPERF_SetOptions", D3DPERF_SetOptions(0)); CALLV("D3DPERF_SetOptions", D3DPERF_SetOptions(1)); CALLV("D3DPERF_SetOptions", D3DPERF_SetOptions(0xffffffff));
     CALLV("D3DPERF_SetRegion", D3DPERF_SetRegion(0xff00ff00, kName)); CALLV("D3DPERF_SetRegion", D3DPERF_SetRegion(0, nullptr)); CALLV("D3DPERF_SetRegion", D3DPERF_SetRegion(1, kName));
-    // no-id rows: Wine logs nothing, so nor do we; the event level is the real state next to them
+    // no-id rows: BeginEvent / EndEvent are real (the event level)
     CALL("D3DPERF_BeginEvent", D3DPERF_BeginEvent(0, kName)); CALL("D3DPERF_BeginEvent", D3DPERF_BeginEvent(0, nullptr)); CALL("D3DPERF_EndEvent", D3DPERF_EndEvent()); CALL("D3DPERF_EndEvent", D3DPERF_EndEvent());
     CALLV("DebugSetMute", DebugSetMute()); CALLV("DebugSetMute", DebugSetMute());
     B("Direct3DShaderValidatorCreate9"); IDirect3DShaderValidator9* v = Direct3DShaderValidatorCreate9(); E("Direct3DShaderValidatorCreate9", v != nullptr);
@@ -37,6 +37,13 @@ int main() {
     IDirect3D9* dx = t_d3d(false); D3DPRESENT_PARAMETERS pp = t_pp(); IDirect3DDevice9* d = t_dev(dx, &pp); if (!d) { printf("NODEV\n"); return 1; }
     IDirect3D9* dxe = t_d3d(true); D3DPRESENT_PARAMETERS pp2 = t_pp(); IDirect3DDevice9* de = t_dev(dxe, &pp2); if (!de) { printf("NODEV\n"); return 1; }
     dev_cases(d, "Dev9"); dev_cases(de, "Dev9Ex");
+    // ids 48-51: the patches of both device classes (odd handles and null pointers: Wine looks at nothing) and RegisterSoftwareDevice of both IDirect3D9 classes
+    { float seg[4] = {1, 1, 1, 1}; D3DRECTPATCH_INFO ri = {}; D3DTRIPATCH_INFO ti = {}; IDirect3DDevice9* ds[2] = {d, de}; const char* tg[2] = {"Dev9", "Dev9Ex"};
+      for (int k = 0; k < 2; k++) { std::string t = std::string(".") + tg[k];
+        CALL(("DrawRectPatch" + t).c_str(), ds[k]->DrawRectPatch(1, seg, &ri)); CALL(("DrawRectPatch" + t).c_str(), ds[k]->DrawRectPatch(0xffffffffu, nullptr, nullptr));
+        CALL(("DrawTriPatch" + t).c_str(), ds[k]->DrawTriPatch(1, seg, &ti)); CALL(("DrawTriPatch" + t).c_str(), ds[k]->DrawTriPatch(0, nullptr, nullptr));
+        CALL(("DeletePatch" + t).c_str(), ds[k]->DeletePatch(1)); CALL(("DeletePatch" + t).c_str(), ds[k]->DeletePatch(0xffffffffu));
+        IDirect3D9* ds3 = k ? dxe : dx; CALL(("RegisterSoftwareDevice" + t).c_str(), ds3->RegisterSoftwareDevice(nullptr)); CALL(("RegisterSoftwareDevice" + t).c_str(), ds3->RegisterSoftwareDevice((void*)0x1234)); } }
     IDirect3DDevice9Ex* e = static_cast<IDirect3DDevice9Ex*>(de);
     IDirect3DSurface9* s = nullptr; d->GetRenderTarget(0, &s); IDirect3DSurface9* s2 = nullptr; e->GetRenderTarget(0, &s2);
     IDirect3DVertexBuffer9* vb = nullptr; e->CreateVertexBuffer(64, 0, 0, D3DPOOL_DEFAULT, &vb, nullptr);

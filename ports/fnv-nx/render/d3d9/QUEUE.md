@@ -198,7 +198,7 @@ Gate `GATE_OUT=<dir> python3 -I ports/fnv-nx/render/total/gate_d3d9total.py` (1.
 Lead's run: copy ALL OK (a 189 533, b 3 767, c 72, d 75 checks by the worker's count), tex ALL OK incl. part h (format completeness per role, the hand pins are deleted). Guest build undefined 134 -> 41 in the working tree (includes D7's files in progress).
 - Format rule per role is in front_fmt.c / front_conv.c / front_rt.c (A2R10G10B10 native; A8, L8, R8G8B8, L6V5U5, X8L8V8U8 by exact storage conversion + write mask / sampler fixup; INDEX16/32 as R16 / R32F; NULL = pass without attachment; INST, RESZ, ATOC, NVDB not creatable).
 - Left without body, no complete contract: ProcessVertices; SetClipStatus / GetClipStatus (until the draw path defines the status).
-- TO RECHECK (lead): DrawRectPatch / DrawTriPatch / DeletePatch return D3DERR_INVALIDCALL because the env caps have no patch bits (Wine returns D3D_OK without drawing): constant-result functions need rows in contract_consts.tsv with the contract source, or a different rule.
+- DONE (l6-render-w6): DrawRectPatch / DrawTriPatch / DeletePatch are Wine 9.0's bodies (FIXME; D3D_OK, D3D_OK, D3DERR_INVALIDCALL), rows 48-50 of verify/wine_fixme.tsv.
 - Backend limits that make the device answer INVALIDCALL where Windows accepts (no rule yet): StretchRect into a multisampled destination; compressed <-> uncompressed StretchRect.
 - Bump formats: L6V5U5 / X8L8V8U8 are exact (RGBA32F storage, side word); the most negative code samples as -1 like -m (D3D9) and reads back as itself.
 - Owed by the draw path: flush before rewriting a bound buffer mirror, rebind on nxs_pass_epoch change; occlusion queries with real draws are untested.

@@ -4,6 +4,7 @@
 #include <new>
 #include "../gen/d9impl.gen.h"
 #include "d3d9_adapter.h"
+#include "const_fixme.h"
 #include "../gen/env_table.gen.h"
 
 static const GUID G_NXENV_PROFILE = { 0x6e78656e, 0x7670, 0x4d39, { 0x90, 0x01, 0x6e, 0x78, 0x65, 0x6e, 0x76, 0x70 } };
@@ -40,10 +41,10 @@ static HRESULT a_disp_ex(int p, UINT ad, D3DDISPLAYMODEEX* o, D3DDISPLAYROTATION
 }
 static HRESULT a_luid(int p, UINT ad, LUID* o) { uint32_t lo; int32_t hi; if (!o) return D3DERR_INVALIDCALL; HRESULT hr = (HRESULT)nxenv_luid(p, ad, &lo, &hi); if (SUCCEEDED(hr)) { o->LowPart = lo; o->HighPart = hi; } return hr; }
 
-// d3d9_RegisterSoftwareDevice: wined3d_register_software_device registers nothing and returns WINED3D_OK (wined3d/directx.c); the answer is D3D_OK. A registered software device
+// d3d9_RegisterSoftwareDevice -> wined3d_register_software_device (wine-9.0 wined3d/directx.c): `FIXME("wined3d %p, init_function %p stub!"); return WINED3D_OK;` = id 51; the answer is D3D_OK. A registered software device
 // changes nothing in the table: CheckDeviceType / GetDeviceCaps for D3DDEVTYPE_SW answer as recorded (the recording calls it before the first query).
 #define ENV_METHODS(C)                                                                                                                                                  \
-    HRESULT STDMETHODCALLTYPE C::RegisterSoftwareDevice(void*) { return D3D_OK; }                                                                                       \
+    HRESULT STDMETHODCALLTYPE C::RegisterSoftwareDevice(void*) { fnvnx_wine_fixme(NXW_wined3d_register_software_device); return D3D_OK; }                                                                                       \
     UINT STDMETHODCALLTYPE C::GetAdapterCount() { return a_count(prof(M(C, this))); }                                                                                   \
     HRESULT STDMETHODCALLTYPE C::GetAdapterIdentifier(UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER9* pIdentifier) { return a_ident(prof(M(C, this)), Adapter, Flags, pIdentifier); } \
     UINT STDMETHODCALLTYPE C::GetAdapterModeCount(UINT Adapter, D3DFORMAT Format) { return a_mcount(prof(M(C, this)), Adapter, Format); }                                \

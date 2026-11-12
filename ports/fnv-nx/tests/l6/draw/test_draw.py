@@ -31,7 +31,7 @@ def build(dev, tmp, jobs=8, base=None, only=None):
     """compile every source of the device in `dev` (+ generated, front, tests) into tmp; with base (a finished build dir) only the sources in `only` are recompiled; returns (exe, product objects) or (None, error)"""
     os.makedirs(tmp, exist_ok=True)
     if base is None:
-        for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC],
+        for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(GEN, "gen_wine_ids.py"), tmp], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC],
                     [sys.executable, "-I", os.path.join(dev, "res_smgen.py"), tmp, os.path.join(ROOT, "render", "shaders", "total", "sm_table.json"), os.path.join(os.path.dirname(SPEC), "d3d9_tables.py")],
                     [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp]):
             r = sh(cmd)
@@ -69,7 +69,7 @@ def guest_undefined(root, out):
 
 
 MUTS = [   # (part that must fail, file, old text, new text)
-    ("d", "draw_state.cpp", "fnvnx_wine_fixme(D5A_FIXME_LASTPIXEL);", "(void)0;"),
+    ("d", "draw_state.cpp", "fnvnx_wine_fixme(NXW_wined3d_device_apply_stateblock);", "(void)0;"),
     ("d", "draw_state.cpp", "!rs[D3DRS_LASTPIXEL] && !b.fx_lastpixel", "!b.fx_lastpixel"),
     ("b", "draw_prim.cpp", "case D3DPT_TRIANGLELIST: return n * 3;", "case D3DPT_TRIANGLELIST: return n * 2;"),
     ("b", "draw_prim.cpp", "case D3DPT_TRIANGLEFAN: return n + 2;", "case D3DPT_TRIANGLEFAN: return n + 1;"),

@@ -28,7 +28,7 @@ def check(ok, what):
 def build(tmp, genpy=None, tables_edit=None, tag="host"):
     """generate, compile and link hostenv; returns exe path or None"""
     g = os.path.join(tmp, "gen"); os.makedirs(g, exist_ok=True)
-    for cmd in ([sys.executable, "-I", genpy or os.path.join(ENV, "gen_env.py"), g], [sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), g, SPEC], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), g, SPEC]):   # state.gen.h: the device classes of d9impl.gen.h need it
+    for cmd in ([sys.executable, "-I", genpy or os.path.join(ENV, "gen_env.py"), g], [sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), g, SPEC], [sys.executable, "-I", os.path.join(GEN, "gen_wine_ids.py"), g], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), g, SPEC]):   # state.gen.h: the device classes of d9impl.gen.h need it
         r = sh(cmd)
         if r.returncode: print(r.stdout[-300:], r.stderr[-1500:]); return None
     open(g + "/envq.gen.h", "w").write(envq.emit()); open(g + "/envfmt.gen.h", "w").write(envq.emit_fmt())

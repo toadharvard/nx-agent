@@ -51,7 +51,7 @@ def build_server(tmp):
 
 
 def gens(tmp):
-    for cmd in ([sys.executable, "-I", os.path.join(GENDIR, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), tmp, SPEC],
+    for cmd in ([sys.executable, "-I", os.path.join(GENDIR, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(GENDIR, "gen_wine_ids.py"), tmp], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), tmp, SPEC],
                 [sys.executable, "-I", os.path.join(DEV, "res_smgen.py"), tmp, os.path.join(ROOT, "render", "shaders", "total", "sm_table.json"), os.path.join(os.path.dirname(SPEC), "d3d9_tables.py")],
                 [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp], [sys.executable, "-I", os.path.join(FFP, "gen_glsl.py"), tmp]):
         r = sh(cmd)

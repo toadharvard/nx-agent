@@ -38,7 +38,7 @@ def part(p, ok, what):
 
 def generate(tmp):
     os.makedirs(tmp, exist_ok=True)
-    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), tmp, SPEC],
+    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(GEN, "gen_wine_ids.py"), tmp], [sys.executable, "-I", os.path.join(DEV, "state_model.py"), tmp, SPEC],
                 [sys.executable, "-I", os.path.join(DEV, "res_smgen.py"), tmp, os.path.join(ROOT, "render", "shaders", "total", "sm_table.json"), os.path.join(D3, "spec", "d3d9_tables.py")],
                 [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp], [sys.executable, "-I", os.path.join(GEN, "gen_bridge.py"), tmp, SPEC]):
         r = sh(cmd)

@@ -9,10 +9,9 @@
 //
 // ProcessVertices is in pvw_api.cpp (task PVW).
 #include "../gen/d9impl.gen.h"
-extern "C" void fnvnx_wine_fixme(uint32_t id);                          // loader/include/fnvnx_reach.h: writes one line and returns
-enum : uint32_t { NX_WINE_FIXME_SetClipStatus = 2, NX_WINE_FIXME_GetClipStatus = 3 };   // verify/wine_fixme.tsv
+#include "const_fixme.h"   // fnvnx_wine_fixme and the NXW_ ids of verify/wine_fixme.tsv
 #define NX_PV_BODIES(C)                                                                                                                                            \
-    HRESULT STDMETHODCALLTYPE C::SetClipStatus(const D3DCLIPSTATUS9* s) { fnvnx_wine_fixme(NX_WINE_FIXME_SetClipStatus); return s ? D3D_OK : D3DERR_INVALIDCALL; } \
-    HRESULT STDMETHODCALLTYPE C::GetClipStatus(D3DCLIPSTATUS9* s) { fnvnx_wine_fixme(NX_WINE_FIXME_GetClipStatus); return s ? D3D_OK : D3DERR_INVALIDCALL; }      
+    HRESULT STDMETHODCALLTYPE C::SetClipStatus(const D3DCLIPSTATUS9* s) { fnvnx_wine_fixme(NXW_wined3d_device_set_clip_status); return s ? D3D_OK : D3DERR_INVALIDCALL; } \
+    HRESULT STDMETHODCALLTYPE C::GetClipStatus(D3DCLIPSTATUS9* s) { fnvnx_wine_fixme(NXW_wined3d_device_get_clip_status); return s ? D3D_OK : D3DERR_INVALIDCALL; }      
 NX_PV_BODIES(NxDevice9)
 NX_PV_BODIES(NxDevice9Ex)

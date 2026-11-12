@@ -48,7 +48,7 @@ def build_server(tmp):
 
 def build(dev, tmp, jobs=8):
     os.makedirs(tmp, exist_ok=True)
-    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC],
+    for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(GEN, "gen_wine_ids.py"), tmp], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC],
                 [sys.executable, "-I", os.path.join(dev, "res_smgen.py"), tmp, os.path.join(ROOT, "render", "shaders", "total", "sm_table.json"), os.path.join(os.path.dirname(SPEC), "d3d9_tables.py")],
                 [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp]):
         r = sh(cmd)
@@ -145,7 +145,7 @@ MUTS = [   # (part that must fail, file under render/d3d9, old, new)
     ("d", "dev/glue_buf.cpp", "memcpy((uint8_t*)b->gmem + lo, b->mem + lo, hi - lo);", "memcpy((uint8_t*)b->gmem + lo, b->mem + lo, 1);"),
     ("b", "front/front_rt.c", "d[i] = s[i * 4 + 3]; return n;", "d[i] = s[i * 4]; return n;"),
     ("a", "env/env_rules.cpp.in", "if (f == 2u) return (c & 0x02000200u) == 0x02000200u;", "if (f == 2u) return 0;"),
-    ("a", "dev/copy_misc.cpp", "DrawRectPatch(UINT, const float*, const D3DRECTPATCH_INFO*) { return D3DERR_INVALIDCALL; }", "DrawRectPatch(UINT, const float*, const D3DRECTPATCH_INFO*) { return D3D_OK; }"),
+    ("a", "dev/copy_misc.cpp", "DrawRectPatch(UINT, const float*, const D3DRECTPATCH_INFO*) { fnvnx_wine_fixme(NXW_d3d9_device_DrawRectPatch); return D3D_OK; }", "DrawRectPatch(UINT, const float*, const D3DRECTPATCH_INFO*) { fnvnx_wine_fixme(NXW_d3d9_device_DrawRectPatch); return D3DERR_INVALIDCALL; }"),
     ("a", "dev/copy_dc.cpp", "for (uint32_t i = 0; i < im->levels * im->faces; i++) if (im->sub[i].locked) return D3DERR_INVALIDCALL;", ""),
     ("a", "dev/copy_update.cpp", "if (si->pool != D3DPOOL_SYSTEMMEM || di->pool != D3DPOOL_DEFAULT ||", "if (si->pool != D3DPOOL_SYSTEMMEM || false ||"),
 ]

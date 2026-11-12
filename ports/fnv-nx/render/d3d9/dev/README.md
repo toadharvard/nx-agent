@@ -29,7 +29,7 @@ MultiplyTransform = matrix x current device value (MS), also while recording; pa
 ## M1 (m1_*.cpp, test tests/l6/m1)
 ValidateDevice (both classes) = `nx_m1_draw_legal(NxDeviceCore*)` (m1_validate.h: THE draw-legality predicate; rows V0-V4 in m1_validate.cpp, derived from the env caps image and the pipeline's own limits: MS result codes, Wine 9.0 wined3d_device_validate_device, the Windows rows of test_filter, Mesa Nine) + `*pNumPasses = 1`.
 The draw path does not call it yet: where it would (draw_api.cpp rule D1, before nx_draw_exec) and why that is the lead's decision are in m1_validate.h. GetPresentStats (m1_stats.cpp: V(c) = floor(c * R / f) clock rule over nxd3d_perf_counter, counters of the chain), SetConvolutionMonoKernel (state slots `convk`, recorded in pixel
-state blocks), ComposeRects (proved to be D3DERR_INVALIDCALL for every call: no D3DFMT_A1 surface exists here; contract_consts.tsv) are in m1_stats.cpp / m1_misc.cpp.
+state blocks), ComposeRects (proved to be D3DERR_INVALIDCALL for every call: no D3DFMT_A1 surface exists here; row 47 of verify/wine_fixme.tsv) are in m1_stats.cpp / m1_misc.cpp.
 ## Left out (no closing rule known; unimplemented = missing in the gate)
 SetClipStatus/GetClipStatus (the status is produced by the draw path; MS documents it for software processing only). Not validated, no documented rule: viewport/scissor extents vs the render target (MS: debug runtime), stream offset/stride limits,
 light attenuation signs. Hooks the declaration / resource modules must define: `nx_device_fvf_decl`, `nxd3d_preload` (undefined = link error). All Create*, Lock, draws, Clear, Present, Reset, StretchRect, IDirect3D9 caps: later tasks.
