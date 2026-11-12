@@ -1,0 +1,90 @@
+name	provider	status
+malloc	platform/crt/msvcrt_exports.cpp	TOTAL
+calloc	platform/crt/msvcrt_exports.cpp	TOTAL
+realloc	platform/crt/msvcrt_exports.cpp	TOTAL
+free	platform/crt/msvcrt_exports.cpp	TOTAL
+??2@YAPAXI@Z	platform/crt/msvcrt_exports.cpp	PARTIAL: no new-handler loop (_set_new_handler/_callnewh are not provided); returns NULL with errno ENOMEM when the heap is exhausted
+??3@YAXPAX@Z	platform/crt/msvcrt_exports.cpp	TOTAL
+_strdup	platform/crt/string.c	TOTAL
+_iob	platform/crt/iob.c (fnvnx_iob[20])	TOTAL
+__pioinfo	platform/crt/iob.c	PARTIAL: blocks 0..7 (256 descriptors, MAX_FD); osfile bits FOPEN FEOFLAG FAPPEND FDEV FTEXT only (no FPIPE/FNOINHERIT/FCRLF, pipech fixed 10); osfhnd is the os descriptor, not a Win32 HANDLE
+__badioinfo	platform/crt/iob.c	TOTAL
+fread	platform/crt/iob.c (fnvnx_iob_fread)	TOTAL
+fwrite	platform/crt/iob.c (fnvnx_iob_fwrite)	TOTAL
+fflush	platform/crt/iob.c (fnvnx_iob_fflush)	TOTAL
+_write	platform/crt/iob.c (fnvnx_write)	TOTAL
+_lseeki64	platform/crt/iob.c (fnvnx_lseeki64)	TOTAL
+_fileno	platform/crt/iob.c (fnvnx_iob_fileno)	TOTAL
+_isatty	platform/crt/iob.c (fnvnx_isatty)	TOTAL
+_tempnam	platform/crt/msvcrt_exports.cpp	TOTAL
+memcpy	libc	TOTAL
+memmove	libc	TOTAL
+memset	libc	TOTAL
+strncmp	libc	TOTAL
+strncpy	libc	TOTAL
+strchr	platform/crt/msvcrt_exports.cpp (libc strchr)	TOTAL
+strrchr	platform/crt/msvcrt_exports.cpp (libc strrchr)	TOTAL
+_stricmp	platform/crt/string.c	TOTAL
+_strnicmp	platform/crt/string.c	TOTAL
+wcslen	platform/crt/string.c (fnvnx_wcslen16)	TOTAL
+wcstombs	platform/crt/msvcrt_exports.cpp	TOTAL
+wctomb	platform/crt/msvcrt_exports.cpp	TOTAL
+isalnum	platform/crt/msvcrt_exports.cpp	TOTAL
+isalpha	platform/crt/msvcrt_exports.cpp	TOTAL
+isdigit	platform/crt/msvcrt_exports.cpp	TOTAL
+isspace	platform/crt/msvcrt_exports.cpp	TOTAL
+isxdigit	platform/crt/msvcrt_exports.cpp	TOTAL
+isleadbyte	platform/crt/msvcrt_exports.cpp	TOTAL
+iswalpha	platform/crt/msvcrt_exports.cpp	TOTAL
+iswdigit	platform/crt/msvcrt_exports.cpp	TOTAL
+iswpunct	platform/crt/msvcrt_exports.cpp	TOTAL
+iswspace	platform/crt/msvcrt_exports.cpp	TOTAL
+tolower	platform/crt/msvcrt_exports.cpp	TOTAL
+toupper	platform/crt/msvcrt_exports.cpp	TOTAL
+setlocale	platform/crt/msvcrt_exports.cpp	TOTAL
+sprintf	platform/crt/msvcrt_format.cpp (one engine over an argument source; translated callers: fnvnx_msvcrt_va_sprintf reads x86 stack words)	TOTAL except %a %z %j %t (print the letter); float digits: exact big-integer expansion, half up, as the reference msvcrt
+_snprintf	platform/crt/string.c + msvcrt_format.cpp (translated callers: fnvnx_msvcrt_va_snprintf)	TOTAL except: float digits as for sprintf
+_vsnprintf	platform/crt/msvcrt_format.cpp (fnvnx_msvcrt_va_vsnprintf: its va_list is a pointer to x86 stack words; native callers use _vsnprintf in string.c)	TOTAL except: float digits as for sprintf
+sscanf	platform/crt/msvcrt_format.cpp (translated callers: fnvnx_msvcrt_va_sscanf)	TOTAL; %f / strtod: exact big-integer decimal-to-binary, nearest even
+atof	platform/crt/msvcrt_exports.cpp	TOTAL
+atoi	platform/crt/msvcrt_exports.cpp	TOTAL
+atol	platform/crt/msvcrt_exports.cpp	TOTAL
+strtod	platform/crt/msvcrt_exports.cpp	TOTAL
+_itoa	platform/crt/string.c	TOTAL
+_ultoa	platform/crt/string.c	TOTAL
+qsort	platform/crt/msvcrt_exports.cpp	TOTAL
+rand	platform/crt/heap.c (fnvnx_rand)	TOTAL
+srand	platform/crt/heap.c (fnvnx_srand)	TOTAL
+_strdate	platform/crt/msvcrt_exports.cpp	TOTAL
+_strtime	platform/crt/msvcrt_exports.cpp	TOTAL
+_initterm	platform/crt/msvcrt_exports.cpp	TOTAL
+__dllonexit	platform/crt/msvcrt_exports.cpp	TOTAL
+_onexit	platform/crt/msvcrt_exports.cpp	TOTAL
+exit	platform/crt/msvcrt_exports.cpp	TOTAL
+abort	platform/crt/msvcrt_exports.cpp	TOTAL
+_amsg_exit	platform/crt/msvcrt_exports.cpp	TOTAL
+_purecall	platform/crt/msvcrt_exports.cpp	TOTAL
+_lock	platform/crt/msvcrt_exports.cpp	TOTAL
+_unlock	platform/crt/msvcrt_exports.cpp	TOTAL
+getenv	platform/crt/msvcrt_exports.cpp	TOTAL
+ceil	platform/crt/msvcrt_exports.cpp	TOTAL
+floor	platform/crt/msvcrt_exports.cpp	TOTAL
+modf	platform/crt/msvcrt_exports.cpp	TOTAL
+frexp	platform/crt/msvcrt_exports.cpp	TOTAL
+ldexp	platform/crt/msvcrt_exports.cpp	TOTAL
+_errno	platform/crt/heap.c	TOTAL
+__CxxFrameHandler	L3	not provided here (exception / FPU runtime, other owner)
+_CxxThrowException	L3	not provided here (exception / FPU runtime, other owner)
+_except_handler3	L3	not provided here (exception / FPU runtime, other owner)
+_setjmp3	L3	not provided here (exception / FPU runtime, other owner)
+longjmp	L3	not provided here (exception / FPU runtime, other owner)
+_XcptFilter	L3	not provided here (exception / FPU runtime, other owner)
+?terminate@@YAXXZ	L3	not provided here (exception / FPU runtime, other owner)
+??1type_info@@UAE@XZ	L3	not provided here (exception / FPU runtime, other owner)
+_CI*	L3	not provided here (exception / FPU runtime, other owner)
+_adjust_fdiv	L3	not provided here (exception / FPU runtime, other owner)
+_clearfp	L3	not provided here (exception / FPU runtime, other owner)
+_controlfp	L3	not provided here (exception / FPU runtime, other owner)
+_fpclass	L3	not provided here (exception / FPU runtime, other owner)
+_finite	L3	not provided here (exception / FPU runtime, other owner)
+_isnan	L3	not provided here (exception / FPU runtime, other owner)
