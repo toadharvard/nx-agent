@@ -839,6 +839,39 @@
    "owner": "L3a+L1"
   },
   {
+   "id": "ASM-203",
+   "text": "Every FuncInfo of the exe and modules (x86-32 MSVC, VC8..VC10, no FH4) is reached from a decoded frame-handler stub `mov eax, imm32; jmp rel32`; a FuncInfo reached any other way is not enumerated by gate_eh (tools/ehtables.py).",
+   "used_by": [
+    "ports/fnv-nx/lift/gates/gate_eh.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a census of the FuncInfo magics (0x19930520/1/2) in the image's data, each required to be the imm32 of a decoded stub; an unreached one is red",
+   "owner": "L3a+L3b"
+  },
+  {
+   "id": "ASM-204",
+   "text": "Every ThrowInfo reaches `_CxxThrowException` as a call argument; a ThrowInfo reached through a stored pointer is not enumerated by gate_eh (thrower_escapes covers uses of the thrower, not the pointer's origin).",
+   "used_by": [
+    "ports/fnv-nx/lift/gates/gate_eh.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the throw-site facts resolve the ThrowInfo of every call of the thrower, and the data census of ThrowInfo objects is matched against the resolved set",
+   "owner": "L3a+L3b"
+  },
+  {
+   "id": "ASM-205",
+   "text": "Every catch funclet of the exe and modules returns its continuation by `mov eax, imm32(reloc); ret`; a funclet that returns it by another form is not enumerated by gate_eh.",
+   "used_by": [
+    "ports/fnv-nx/lift/gates/gate_eh.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: every catch funclet's return forms are classified from its decoded code; an unclassified form is red",
+   "owner": "L3a+L3b"
+  },
+  {
    "id": "ASM-800",
    "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
    "used_by": [
