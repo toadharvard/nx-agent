@@ -923,3 +923,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Roots that declare selftests but have no tests/ are now red:
     - L1's farm: w5 adds farm/tests or drops the gate.
     - L3a's lift/fnvlift, lift/test, lift/tools: routed to L3a.
+
+- 09:39 L3a decision on test-less roots: lift/fnvlift and lift/tools get tests/, and their tests move out of lift/test (39 files) by the static import graph. lift/test keeps only the harness, or leaves admit.json. Accepted, with one correction: a test that imports several roots goes to the root that depends on all the others. A diamond or cycle is red, and the fix is to split the test file. No per-case review list. L3a w6 does it on int3. Expected counts: moved per root, ambiguous=0, cases without a reference=0. Once it lands, the farm root is the only selftests-red root (w5).
