@@ -281,3 +281,26 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - **L2 w4** makes layout, sdd, pi and names C-capable (weak cp_global_trees).
   - **w19** gets selftest result keying by content and test scratch moved out of /tmp.
   - **L3a w8 test doubles:** answered. The tool is w12's doubles gate. ExitProcess and the other import bodies are L5 product code, so tests must link L5 objects through link.roots.
+- 03:58Z: check-in.
+
+  | Worker | Head | State |
+  |---|---|---|
+  | w4 | 2cb48877 | datamodel test builds on a runtime pack with a valid manifest |
+  | w5 | d7cfe2a2 | 363/363 debs (160 declared plus Depends closure) from mirror 831869ea, 8/8 python modules hashed (trunk: 1 of 5), gcc-13-plugin-dev pinned and derived from root compilers; verdict running, fresh-container retest next |
+  | w14 | c0f23a3f | on w10; warm ensure 09b509e4 (0 ingests); closure_key LIFTED/NATIVE 2e71c913 |
+  | w16 | 0b0d08b3 | fixing toy roots on 8cfbcdbf; **-dU defect** (L6A): macro facts enter the CC input and all 19 render/backend objects change, so they become a side output; whole-root fixtures for L3b |
+  | w20-crt0 | c7f3b9d2 | verdict and proof requested |
+  | w10 | 6bcd7d25 | green |
+  | w15 | afa6b301 | green |
+  | w18 | 37b24de3 | — |
+  | w17 | 2ae56ebf | plugin languages fix pending |
+  | w19 | b178859d | 44 min old, asked for state |
+  | w12 | — | doubles branch not pushed yet |
+
+  - L4 lib/sha256 intake answered:
+    - no `lib` class;
+    - universe 0 for exe-facing gates;
+    - memcpy comes from the fnvnx-a64 newlib at the image link;
+    - selftest time goes to w19.
+  - L3a `flags` gate becomes gates.d/flags.json with covers ["lifted"].
+  - Guest C units without the layout, names, sdd and pi checks, in admitted roots: 0 at trunk 8cfbcdbf, because no guest root is admitted yet. render/d3d9 has C units (ffp/*.c), and they count once it is admitted. Owner of the open class: L2 (w4 cc1 port).
