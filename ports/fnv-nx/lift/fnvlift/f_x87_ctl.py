@@ -11,6 +11,7 @@ does not model (ffree, fincstp, fdecstp: X87Dyn from the handlers)."""
 import os
 from capstone import x86 as X
 from .core import X87Dyn, Unsupported
+from . import sites
 
 TAB = None
 DEFAULT = '/home/user/l3facts/fpmodes/depth.tsv'
@@ -327,14 +328,14 @@ def ctl(cx, ins, b0, mr, g):
             em('FLDCW(M16(%s));' % cx.ea(ins, cx.ops[0]))
         elif b0 == 0xd9 and g == 7:
             em('M16(%s)=c->fcw;' % cx.ea(ins, cx.ops[0]))
-        elif b0 == 0xdd and g == 7:
+        elif sites.fsw_form(b0, mr) == 'mem' and g == 7:       # FSTSW m16 (the site predicate is fnvlift/sites.py, shared with the `sites` facts)
             em('FSW_ST16(%s,FSWV(%s),0x%xu);' % (cx.ea(ins, cx.ops[0]), top, cx.a))
-        elif b0 in (0xd9, 0xdd) and g in (4, 6):
+        elif b0 in (0xd9, 0xdd) and g in (4, 6):            # FLDENV FRSTOR FNSTENV FNSAVE (g 6: sites.fsw_form 'mem')
             env(cx, ins, b0, g)
         else:
             return False
         return True
-    if b0 == 0xdf and mr == 0xe0:
+    if sites.fsw_form(b0, mr) == 'ax':
         em('FSW_AX(FSWV(%s),0x%xu);' % (top, cx.a))
     elif b0 == 0xdb and mr == 0xe2:
         em('FNCLEX();')
