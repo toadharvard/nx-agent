@@ -38,6 +38,8 @@ SECTIONS
 	.text :
 	{
 		KEEP (*(.crt0))
+		KEEP (*(.crt0.hdr))
+		KEEP (*(.crt0.mod0))
 		*(.text.unlikely .text.*_unlikely .text.unlikely.*)
 		*(.text.exit .text.exit.*)
 		*(.text.startup .text.startup.*)
