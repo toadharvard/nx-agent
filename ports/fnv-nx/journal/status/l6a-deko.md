@@ -2,6 +2,13 @@
 
 Updated 2026-11-12. Trunk read at claude/fnv-nx-clean e35b870a (2026-11-12). CLAUDE.md on this branch = trunk e35b870a. L1 w15 (559fc150) and w16 (d91524a3) not yet on the trunk.
 
+## Owner order 2026-11-12 08:37Z (via orchestrator): only the GL path runs
+The first frame comes from the GL backend in the emulator; deko3d is checked against it afterwards. Only the work that
+makes the GL backend root (render/gl4) build by the recipe runs: w6 (gl4 stated target flags on L1 w16 dbfaefeb; link on
+w15; A2-gl4 sha256 when lib/sha256 exists). Paused: w4 (dk root, last head fbd1c779: green on w16 dbfaefeb, 19/19,
+deterministic, undefined 86 = 74 dkabi + 9 libc + 3 hooks, TLS 0, hardening flags reverted; A1/A2-dk done), w5 (uam).
+A3 dk side paused; A3 gl4 side runs when L6 sends the link-failed field. GL is never deleted.
+
 ## Priority after the owner correction (6f549875: two backends)
 GL renders in the emulator; deko3d (this layer) is the console backend. On the first-frame path L6A has only item 1
 (the backend as an admitted product root, so the one build covers it). Items 2, 3, 3b, 2b wait until after the first
