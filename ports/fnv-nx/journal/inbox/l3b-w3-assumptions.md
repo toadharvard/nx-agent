@@ -4,7 +4,7 @@ Inputs: lift/ASSUMPTIONS.l3b.json on claude/fnv-l3b-lift (41 ids, checked by `gi
 registry verify/ASSUMPTIONS.json on claude/fnv-l1-contract-w10 (format fnvnx-assumptions/1, aliases written as `L3b:<id>`).
 
 ## Count (differs from the brief)
-- Already aliased in the registry: 12 L3b ids, not 13 (A-SAILMODEL, A-PROVER, A-TSO-MAP -> ASM-009; A-FLAT, A-SYS -> ASM-003; A-EIPRANGE -> ASM-013; A-SEGLIM, A-NOSTRADDLE -> ASM-006; A-CAPSTONE-X86, A-CAPSTONE-A64 -> ASM-043; A-IEEE-X87FLAGS -> ASM-008; A-CALLEE -> ASM-010 are the 13 named, which is 3+2+1+2+2+1+1 = 12 distinct ids: A-IEEE-X87FLAGS and A-CALLEE are the last two, the brief double-counted).
+- Already aliased in the registry: 12 L3b ids, not the 13 the brief says. The brief's own list has 12 ids (A-SAILMODEL, A-PROVER, A-TSO-MAP -> ASM-009; A-FLAT, A-SYS -> ASM-003; A-EIPRANGE -> ASM-013; A-SEGLIM, A-NOSTRADDLE -> ASM-006; A-CAPSTONE-X86, A-CAPSTONE-A64 -> ASM-043; A-IEEE-X87FLAGS -> ASM-008; A-CALLEE -> ASM-010), and the registry has exactly these 12 `L3b:` aliases.
 - To record: 41 - 12 = 29 records, plus I-FPMASK and I-FPSTICKY, which are the code names of A-FPMASK and A-FPSTICKY. They are aliases of those two entries.
 - Result: 31 ids = 2 aliases (I-FPMASK, I-FPSTICKY) + 29 REMOVE entries. 0 aliases to an existing ASM entry: no record's text says the same as an existing entry (checked against ASM-010..ASM-045), so rule (a) was not used for the 29. used_by sites: 84 (file x entry pairs).
 
