@@ -527,3 +527,19 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - New stub class: trap bodies, where every path reaches the root's declared error_abi failure function with no output effect. Goes to w20 with the table-handler check.
 - **ASM-501:** L5 agrees the platform root waits until the 7 passes read L3a's function facts.
 - **L3a range facts:** all 7 images are already in l3a-lift/facts 2eeea27b. w18 re-pins.
+
+## 2026-11-12 08:40Z — resumption after the account usage-limit stop (04:14–07:30Z)
+Trunk claude/fnv-nx-clean 4fb048ec (28 gates, 322 s). All L1 workers were stopped by 429 usage_limit; each was resumed with its current item:
+- w22 session_01KmtZKQg3UUv7uNveDucFNR: verdict on 71d8cafb, then fresh-container green → MERGER — doing
+- w17 session_01KmtZKQzN38LhJYh6sixhL1: guest_flags.py → claude/fnv-l1-contract-w17-flags (for L5 w14), then plugin_args, python pins — doing
+- w5 session_01KmtZKRw5sTxarSdSFC6Njj: toolchain-build profile (blocks L5 msvcmodel13) — doing
+- w16 session_01KmtZKRpuoHrhZqwnLDyQ8L: w16-int on w14 7bb954c9 + trunk 4fb048ec — doing
+- w14 session_01KmtZKS82vxSbxtKufqbp4i: generated-stage key (interpreter + installed_files_sha256) — doing
+- w18 session_01KmtZKQwjYFpEvoHtfEjCcb: re-pin to L5 manifest 880555c + L3a facts 2eeea27b; expected open 12 — doing
+- w20 session_01KmtZKSwpJXxijdPeaxppza: descs + objstub A/B joined on op_cover id — doing
+- w19 session_01KmtZKV6pbaGLooiWzXRtev: MERGER's 10 failures, content-keyed selftests — doing
+- w12 session_01KmtZKUQGJi3gKcTZcB8sr6: doubles gate + legal gate — doing
+- w4 session_01KmtZKRkugvim1Bfui5aFTw: 2cb48877 held (L5 runtime); foreign-file closure + G split — doing
+- w15 session_01KmtZKRyNHyAGWeTxKmbdfZ: onedef on w16-int — blocked (w16-int, L1)
+- w10 session_01KmtZKQZb21XFPG5GMjmjUp: tlsmodel reads .fnvnx.tls — blocked (L2 note)
+Answered: L3a w8 (py_modules in stage entry, pinned in env.json; lift/tools = one `tool` root); L6 (error_abi {fail} spec, objstub B, join on op_cover id exactly).
