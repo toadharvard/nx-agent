@@ -40,7 +40,7 @@ Red facts (an item no rule resolves is never skipped), per image, each counted i
   scope_len           len(records) != 1 + trylevel_max (R4: the table length is 1 + the largest constant trylevel stored; an empty table is valid iff no level >= 0 is stored)
   scope_err           a scope table that does not parse for its length, or whose frame register is not derivable
   failed_funcinfo     a FuncInfo that did not parse
-Enumeration completeness (tools/ehtables.py), the rule and its assumptions, stated rather than papered over:
+Enumeration completeness (tools/ehtables.py), the rule and its stated conditions, not papered over:
   FuncInfo  every decoded `mov eax, imm32; jmp rel32` whose imm32 is a relocated data address holding a FuncInfo magic (0x19930520/1/2) is a frame-handler
             stub; its FuncInfo is parsed with every bound checked. Complete under: every FuncInfo of an x86-32 MSVC image (VC8..VC10, no FH4) is reached
             from such a stub, and the stub is decoded code. Not closed by rule: a FuncInfo reached any other way.
@@ -49,8 +49,8 @@ Enumeration completeness (tools/ehtables.py), the rule and its assumptions, stat
             with a value independent of every argument, the cookie encoding) or the constant a helper's argument k carries at every direct call site.
   ThrowInfo see R1 above; not closed by rule: a ThrowInfo reached through a stored pointer rather than a call argument.
   cont      every `mov eax, imm32(reloc); ret` in the body of a catch funclet. Not closed: a funclet that returns the continuation by another form.
-Callee-saved registers across calls are not assumed (tools/ehflow.py): ebx/esi/edi/ebp survive a call only where the callee is proven (every ret restores them) or is a platform import (Win32 as
-documented, ASSUMPTIONS.json 3); the proofs are the facts `preserves`, counted globally by tools/ehtables.py.
+Callee-saved registers across calls are not taken as given (tools/ehflow.py): ebx/esi/edi/ebp survive a call only where the callee is proven (every ret restores them) or is a platform import (Win32 as
+documented, item 3 of the owner's accepted list in the registry); the proofs are the facts `preserves`, counted globally by tools/ehtables.py.
 Exit 0 iff green."""
 import json
 import os
