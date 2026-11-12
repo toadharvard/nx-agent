@@ -852,3 +852,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w14 2197f005 (on 6d3a2800): test totals are plugins 68/0, admit 0 fail, linkroots 0 fail, recipe 90 pass.
   - The cache miss is not reproduced yet. A diagnostic is in, and it passed 5/5.
   - Assigned: find the cause directly. Either a hermeticity gap (state shared across runs, to be traced with strace) or a store write/read race. Reproduce it with concurrent runs.
+- w16-fix d11a507e9:
+  - Generator inputs: accepted.
+  - The `headers` admit class: rejected again. Header roots stay unit-less product roots, checked from the PP read sets.
+  - Asked to split the rest into one commit per rule.
+- w9 c8801b277: the manifest move is accepted. Its verdict waits on setup_verdict_env.sh.
