@@ -41,7 +41,7 @@ def _parts(p):
 
 class BootPath:
     def __init__(self, root, game=None, read_only=()):
-        self.ro = [[c.lower() for c in _parts(m)] for m in read_only]
+        self.ro = [[c.casefold() for c in _parts(m)] for m in read_only]   # casefold, as resolve matches host entries
         sw = os.path.join(root, "switch", "fnv")
         inst = os.path.isdir(sw) and any(not (n.lower() in PORT_NAMES or n.lower().startswith(PORT_PREFIXES))
                                          for n in os.listdir(sw))
@@ -69,7 +69,7 @@ class BootPath:
         """true for a guest path at or below a read-only mount (case-folded, after the same normalisation as resolve)"""
         if sd.lower().startswith("sdmc:"):
             sd = sd[5:]
-        low = [c.lower() for c in _parts(sd)]
+        low = [c.casefold() for c in _parts(sd)]
         return any(low[:len(m)] == m for m in self.ro)
 
     def _names(self, d):

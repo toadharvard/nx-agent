@@ -65,9 +65,9 @@ class Services:
         return self.dp.resolve(self.last_sd)
 
     def _refuse(self, call, sd):
-        """a create/change/remove under a read-only declared input. L5 proved that nothing writes there, so a call is a failed static
-        fact: it is recorded as a fault (OUT.json declared_input_faults, boot.py ends the verdict failed) and answers EACCES, which the platform
-        maps to ERROR_ACCESS_DENIED (platform/win32/handles.cpp:208 w32_os_error: OS_EACCES -> ERROR_ACCESS_DENIED; os.h:160 OS_EACCES 13)"""
+        """a create/change/remove under a read-only declared input. L5 declares the mount read-only (L4 item 17); a call is recorded as a
+        fault (OUT.json declared_input_faults) and fails the verdict (boot.py), and answers EACCES, which the platform maps to
+        ERROR_ACCESS_DENIED (platform/win32/handles.cpp:208 w32_os_error: OS_EACCES -> ERROR_ACCESS_DENIED; os.h:160 OS_EACCES 13)"""
         self.declared_faults.append({"kind": "declared-input-write", "call": call, "sd": sd, "t_ns": self.m.clock.now_ns(), "tid": self.m.tid()})
         self.dp.fault(call, sd, errno.EACCES)
         return neg(errno.EACCES)
