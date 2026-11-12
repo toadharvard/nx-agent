@@ -5,8 +5,7 @@ Rule (owner order 2026-11-10/11: nothing that the product does not need, no plac
 that includes hostapi.h, {service numbers declared in the header} == {service numbers expanded by at least one unit of the root}.
 Declared: the header's own text (PATH, default ports/fnv-nx/toolchain/include/fnvnx/hostapi.h, else verify/tests/guest/hostapi.h of the
 trunk's fixture): every `#define FNVNX_PLAT_<NAME> <integer>` directive (a preprocessor directive read by its token grammar: #, define,
-identifier, one pp-number). A service is a NUMBER; names with the same number are aliases of one service (a range marker such as
-SOCK_FIRST / SOCK_LAST aliases the service it equals, so it adds no item and its own use counts as a use of that service number).
+identifier, one pp-number). A service is a NUMBER; names with the same number are aliases of one service.
 Used: the evidence is the PP stage result unit.ii of every unit of the root (found by pp_key in objects.json, as gate_objstub does); the macro uses come from the unit's
 macro-fact stage (du_key, a stage of its own) runs `-dU` (unitstage.DU_TAIL, output unit.du; CC never reads it): GCC then writes `#define NAME VALUE` for exactly the macros that the unit EXPANDS (or tests with
 defined/#ifdef); a name written in a comment, a string or an unexpanded #define is not there. A root includes hostapi.h iff some unit.ii has
