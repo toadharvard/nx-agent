@@ -273,7 +273,7 @@ def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
     out = run_isla(code, timeout, (tuple(rg), eip_sym))
     r = _post(code, pre, out, extra, z3.ULT(pre['eip'], z3.BitVecVal(EIP_LIMIT, 32)) if eip_sym else None)
     if eip_sym:                                      # terms of the dict, flattened, rewritten, put back
-        flat = [(k, None, v) for k, v in r.items() if not isinstance(v, dict) and k != 'domain'] + [(k, n, x) for k, v in r.items() if isinstance(v, dict) for n, x in v.items()]
+        flat = [(k, None, v) for k, v in r.items() if not isinstance(v, dict) and k not in ('domain', 'complete')] + [(k, n, x) for k, v in r.items() if isinstance(v, dict) for n, x in v.items()]
         new = eip_nowrap([x for *_, x in flat], pre['eip']); r2 = {k: ({} if isinstance(v, dict) else v) for k, v in r.items()}
         for (k, n, _), t in zip(flat, new):
             if n is None: r2[k] = t
