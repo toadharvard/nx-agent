@@ -484,3 +484,12 @@ Update 2026-11-12, at 698adefb:
     3. plugin_errors judges a host variant by its guest base root: an L1 gate defect, reported.
     4. Native test roots 0/3: rt/guest not admitted. Owner L5, asked.
 - DEF0 is in L3b's prover (w4 4a9eabc91). At the shapes pin, 3 850 int keys (360 131 sites) have undefined flags. w5 sends w4 the context bytes for the CRT sites.
+
+## 2026-11-12 10:30
+- int-l3a 55287b9f4 (w20) = w14-src2 4de423f0f + int3 8e40a0e54 + w8's 4 bridge files. test_recipe, admit, plugins and gate_lift pass; the verdict is not run.
+- rt/guest is admitted on L5 claude/fnv-l5-platform-root (head e2152adf5). w8 builds t16g = int-l3a 55287b9f4 + L5 e2152adf5, then checks the 7 test roots and builds lift/rt.
+- Selftests split (w6). Rule: direct imports.
+  - lift/tools/tests gets 13 files;
+  - lift/fnvlift/tests gets 6, plus the 2 mixed ones (module under test = fnvlift);
+  - lift/test keeps the instest harness and 14 others, and keeps selftests.
+  - "Reference" is per L1 w19's gate definition.
