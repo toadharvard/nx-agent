@@ -702,3 +702,14 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w14's ldcheck commit now also carries the link.script membership rule (script from a tree of an admitted tool root).
   - L3a t16c 6b3cb220 is the acceptance check.
 - The A7 (ASM-029) and ret-predicate facts at d3dx9_31 0x61bb40 and d3dx9_38 0x769b11 are owned by L3a (orchestrator decision).
+
+## 2026-11-12 09:15 UTC
+- w18 ed59a710 (w18b) is merged onto 33c443b5.
+  - Returned once: drop images_of's pinned=False mode so there is one pinned set; add a gate_lift test.
+- w15 7b5b98ce: content accepted (guest refusals, admit variants, the check CLI, gate onedef).
+  - Global count: onedef 10 items, 0 findings. Verdict: green, 39 gates, 438.8 s cold.
+  - Returned for three things:
+    - its base is 83f7504f, not 33c443b5;
+    - onedef also goes into REQUIRED_TEST;
+    - both verdicts are due, cold and warm, with warm inside the budget.
+- L5 w15 adds dynsites rows for d3dx9_31 and gdffalloutnv, pinned to facts a0f3d8e and loaded through imagerec.load.
