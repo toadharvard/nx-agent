@@ -16,7 +16,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "nx/state.h"
+#include "state.h"
 
 #ifdef __cplusplus
 extern "C" {
