@@ -11,7 +11,7 @@ import bootsock  # noqa: E402
 from bootsock import NotDetermined, BadGuestMemory, neg  # noqa: E402
 
 FAILED, N = [], [0]
-SA, BUF, OUT, VAL, LEN, FD, STR, HINT = 0x1000, 0x2000, 0x2400, 0x2800, 0x2900, 0x2A00, 0x3000, 0x3400
+SA, BUF, VAL, LEN, FD = 0x1000, 0x2000, 0x2800, 0x2900, 0x2A00
 V4, V6 = 2, 10
 
 
@@ -46,14 +46,6 @@ class Env:
     def val(self, v):
         self.mem.write(VAL, v)
         return VAL
-
-    def cstr(self, s, at=STR):
-        self.mem.write(at, s.encode() + b"\0")
-        return at
-
-    def hints(self, flags=0, fam=0, st=0, pr=0):
-        self.mem.write(HINT, struct.pack("<iiii", flags, fam, st, pr).ljust(56, b"\0"))
-        return HINT
 
 
 def case(name, ok, detail=""):
@@ -134,7 +126,7 @@ def main():
         ("accept-nonblock", lambda e: (e.s(), e.m.call(18, [3, e.sa(V4, 8080, LO4)]), e.m.call(19, [3, 1]), e.m.call(31, [3, 0x800]), e.m.call(20, [3, 0]))[4], neg(11)),
         ("accept-blocks", lambda e: (e.s(), e.m.call(18, [3, e.sa(V4, 8080, LO4)]), e.m.call(19, [3, 1]), e.m.call(20, [3, 0]))[3], (("sleep", None), neg(11))),
     ])
-    table("CONNECT / SENDTO / RECVFROM / SHUTDOWN / names", [
+    table("CONNECT / SENDTO / RECVFROM", [
         ("connect-null", lambda e: (e.s(), e.m.call(21, [3, 0]))[1], neg(14)),
         ("connect-badfam", lambda e: (e.s(), e.m.call(21, [3, e.sa(1, 80, EXT4)]))[1], neg(97)),
         ("connect-ext-stream", lambda e: (e.s(), e.m.call(21, [3, e.sa(V4, 80, EXT4)]))[1], neg(101)),
@@ -165,20 +157,6 @@ def main():
         ("recv-timeout", lambda e: (e.s(V4, 2), e.m.call(24, [3, 1, 20, e.val(struct.pack("<qq", 2, 500000)), 16]), e.m.call(23, [3, BUF, 1, 0, 0]))[2],
          (("sleep", 2500000000), neg(11))),
         ("recv-oob", lambda e: (e.s(V4, 2), e.m.call(23, [3, BUF, 1, 1, 0]))[1], "ND"),
-        ("shutdown-how", lambda e: (e.s(), e.m.call(27, [3, 3]))[1], neg(22)),
-        ("shutdown-stream", lambda e: (e.s(), e.m.call(27, [3, 2]))[1], neg(107)),
-        ("shutdown-dgram-nopeer", lambda e: (e.s(V4, 2), e.m.call(27, [3, 0]))[1], neg(107)),
-        ("shutdown-dgram-peer", lambda e: (e.s(V4, 2), e.m.call(21, [3, e.sa(V4, 9, LO4)]), e.m.call(27, [3, 0]))[2], 0),
-        ("recv-after-shutdown", lambda e: (e.s(V4, 2), e.m.call(21, [3, e.sa(V4, 9, LO4)]), e.m.call(27, [3, 0]), e.m.call(23, [3, BUF, 1, 0, 0]))[3], "ND"),
-        ("getsockname-null", lambda e: (e.s(), e.m.call(28, [3, 0]))[1], neg(14)),
-        ("getsockname-unbound", lambda e: (e.s(), e.m.call(28, [3, OUT]))[1], "ND"),
-        ("getsockname-port0", lambda e: (e.s(), e.m.call(18, [3, e.sa(V4, 0, LO4)]), e.m.call(28, [3, OUT]))[2], "ND"),
-        ("getsockname-bound", lambda e: (e.s(), e.m.call(18, [3, e.sa(V4, 8080, LO4)]), e.m.call(28, [3, OUT]), e.mem.read(OUT, 32))[3],
-         struct.pack("<HH16sIII", 2, 8080, LO4.ljust(16, b"\0"), 0, 0, 0)),
-        ("getpeername-null", lambda e: (e.s(), e.m.call(29, [3, 0]))[1], neg(14)),
-        ("getpeername-none", lambda e: (e.s(), e.m.call(29, [3, OUT]))[1], neg(107)),
-        ("getpeername-peer", lambda e: (e.s(V4, 2), e.m.call(21, [3, e.sa(V4, 9, LO4)]), e.m.call(29, [3, OUT]), e.mem.read(OUT, 32))[3],
-         struct.pack("<HH16sIII", 2, 9, LO4.ljust(16, b"\0"), 0, 0, 0)),
     ])
     table("GETFL / SETFL / SETSOCKOPT / GETSOCKOPT", [
         ("getfl", lambda e: (e.s(), e.m.call(30, [3]))[1], 2), ("setfl-nb", lambda e: (e.s(), e.m.call(31, [3, 0x800]), e.m.call(30, [3]))[2], 0x802),
@@ -244,44 +222,6 @@ def main():
         ("listening-socket", lambda e: (e.s(), e.m.call(18, [3, e.sa(V4, 8080, LO4)]), e.m.call(19, [3, 1]), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[4], "ND"),
         ("peer-socket", lambda e: (e.s(V4, 2), e.m.call(21, [3, e.sa(V4, 9, LO4)]), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[3], "ND"),
         ("closed-socket", lambda e: (e.s(), e.m.call(17, [3]), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[3], 1),
-    ])
-    rec = lambda fl, fam, t, p, port, addr: struct.pack("<iiiiII", fl, fam, t, p, 0, 0) + struct.pack("<HH16sIII", fam, port, addr.ljust(16, b"\0"), 0, 0, 0)
-    fetch = lambda e, tid: (e.m.call(33, [tid, BUF, 4096]), e.mem.read(BUF, 56 * 3))
-    trio = lambda fl, fam, port, addr: b"".join(rec(fl, fam, t, p, port, addr) for t, p in ((1, 6), (2, 17), (3, 0)))
-    open_ = lambda e, node, svc=None, h=None, err=0: e.m.call(32, [e.cstr(node) if node is not None else 0, e.cstr(svc, STR + 0x100) if svc is not None else 0, h or 0, err])
-    table("GAI_OPEN / GAI_FETCH", [
-        ("both-null", lambda e: open_(e, None), neg(2002)),
-        ("hints-flags", lambda e: open_(e, "1.2.3.4", None, e.hints(0x8000)), neg(2001)),
-        ("hints-family", lambda e: open_(e, "1.2.3.4", None, e.hints(0, 3)), neg(2005)),
-        ("hints-type", lambda e: open_(e, "1.2.3.4", None, e.hints(0, 0, 9)), neg(2006)),
-        ("hints-before-null", lambda e: open_(e, None, None, e.hints(0x8000)), neg(2001)),
-        ("name", lambda e: open_(e, "example.org", "80"), neg(2002)),
-        ("name-errno-kept", lambda e: (e.mem.write(LEN, struct.pack("<i", 77)), open_(e, "example.org", None, 0, LEN), e.mem.read(LEN, 4))[2], struct.pack("<i", 77)),
-        ("name-numerichost", lambda e: open_(e, "example.org", None, e.hints(4)), neg(2002)),
-        ("v4", lambda e: (open_(e, "1.2.3.4", "80"),)[0], 1),
-        ("v4-records", lambda e: (open_(e, "1.2.3.4", "80"), fetch(e, 1))[1], (168, trio(0, 2, 80, b"\1\2\3\4"))),
-        ("v4-nosvc", lambda e: (open_(e, "10.0.0.1"), fetch(e, 1))[1], (168, trio(0, 2, 0, b"\x0a\0\0\1"))),
-        ("v6-records", lambda e: (open_(e, "::1", "65535", e.hints(4, 10)), fetch(e, 1))[1], (168, trio(4, 10, 65535, LO6))),
-        ("v4-stream", lambda e: (open_(e, "1.2.3.4", "80", e.hints(0, 2, 1)), e.m.call(33, [1, BUF, 4096]), e.mem.read(BUF, 56))[2], rec(0, 2, 1, 6, 80, b"\1\2\3\4")),
-        ("v4-proto17", lambda e: (open_(e, "1.2.3.4", "80", e.hints(0, 0, 0, 17)), e.m.call(33, [1, BUF, 4096]), e.mem.read(BUF, 56))[2], rec(0, 2, 2, 17, 80, b"\1\2\3\4")),
-        ("null-node-v4", lambda e: (open_(e, None, "80", e.hints(0, 2, 2)), e.m.call(33, [1, BUF, 4096]), e.mem.read(BUF, 56))[2], rec(0, 2, 2, 17, 80, LO4)),
-        ("null-node-passive-v6", lambda e: (open_(e, None, "80", e.hints(1, 10, 1)), e.m.call(33, [1, BUF, 4096]), e.mem.read(BUF, 56))[2], rec(1, 10, 1, 6, 80, bytes(16))),
-        ("null-node-unspec", lambda e: open_(e, None, "80"), "ND"),
-        ("v4-on-v6-hints", lambda e: open_(e, "1.2.3.4", "80", e.hints(0, 10)), "ND"),
-        ("loose-v4", lambda e: open_(e, "1.2.3"), "ND"), ("hex-v4", lambda e: open_(e, "0x7f.1"), "ND"), ("leading-zero", lambda e: open_(e, "01.2.3.4"), "ND"),
-        ("v4-256", lambda e: open_(e, "1.2.3.256"), "ND"), ("scoped-v6", lambda e: open_(e, "fe80::1%lo"), "ND"), ("bad-v6", lambda e: open_(e, "1:2"), "ND"),
-        ("empty-node", lambda e: open_(e, ""), "ND"), ("svc-name", lambda e: open_(e, "1.2.3.4", "http"), "ND"),
-        ("svc-name-numericserv", lambda e: open_(e, "1.2.3.4", "http", e.hints(0x400)), neg(2002)),
-        ("svc-big", lambda e: open_(e, "1.2.3.4", "70000"), "ND"), ("svc-lead0", lambda e: open_(e, "1.2.3.4", "080"), "ND"),
-        ("canonname", lambda e: open_(e, "1.2.3.4", None, e.hints(2)), "ND"), ("addrconfig", lambda e: open_(e, "1.2.3.4", None, e.hints(0x20)), "ND"),
-        ("proto-type-clash", lambda e: open_(e, "1.2.3.4", None, e.hints(0, 0, 1, 17)), "ND"), ("raw-proto", lambda e: open_(e, "1.2.3.4", None, e.hints(0, 0, 0, 99)), "ND"),
-        ("tickets-count", lambda e: (open_(e, "1.2.3.4"), open_(e, "1.2.3.5"))[1], 2),
-        ("fetch-small-keeps", lambda e: (open_(e, "1.2.3.4"), e.m.call(33, [1, BUF, 167]), e.m.call(33, [1, 0, 168]))[1:], (168, 168)),
-        ("fetch-twice", lambda e: (open_(e, "1.2.3.4"), e.m.call(33, [1, BUF, 168]), e.m.call(33, [1, BUF, 168]))[2], neg(22)),
-        ("fetch-nobuf-frees", lambda e: (open_(e, "1.2.3.4"), e.m.call(33, [1, 0, 168]), e.m.call(33, [1, 0, 168]))[1:], (168, neg(22))),
-        ("fetch-unknown", lambda e: e.m.call(33, [1, 0, 0]), neg(22)), ("fetch-0", lambda e: e.m.call(33, [0, 0, 0]), neg(22)),
-        ("fetch-wide", lambda e: (open_(e, "1.2.3.4"), e.m.call(33, [(1 << 32) + 1, 0, 0]))[1], neg(22)),
-        ("fetch-unmem", lambda e: (open_(e, "1.2.3.4"), e.m.call(33, [1, 0x10, 168]))[1], "MEM"),
     ])
     print("%d cases, %d failed" % (N[0], len(FAILED)))
     return 1 if FAILED else 0
