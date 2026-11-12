@@ -25,8 +25,9 @@ def native_guest(repo):
     return [r for r in gate_build.product_roots(repo) if roots[r].get("target") == "guest" and roots[r].get("cxx_origin") == "native"]
 
 
-def judge_root(root, repo, cache):
-    """-> (universe, certified, ids, detail) of one native guest root."""
+def judge_root(root, repo, cache, plugin=ORDER):
+    """-> (universe, certified, ids, detail) of one native guest root. PLUGIN: the plugin whose certificate is judged (default fnvnx_order;
+    gate_lift.py asks for fnvnx_order (gate order) and fnvnx_addr (gate addr32), the same rule: a plugin of the rule's list, rule's arguments)."""
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     rec = recipe.load_recipe(repo, roots, root)
     cxx = sorted(root + "/" + u for u in recipe.units_of(rec, root, files) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
@@ -37,14 +38,14 @@ def judge_root(root, repo, cache):
     want = list(recipe.PLUGIN_SOURCES)
     if names != want:
         return len(cxx), 0, cxx, "plugins %s are not the rule's %s in the rule's order" % (names, want)
-    od = next(p for p in rec["plugins"] if p["name"] == ORDER)
-    if od["args"] != recipe.PLUGIN_ARGS[ORDER]:
-        return len(cxx), 0, cxx, "%s arguments %s are not the rule's %s" % (ORDER, od["args"], recipe.PLUGIN_ARGS[ORDER])
+    od = next(p for p in rec["plugins"] if p["name"] == plugin)
+    if od["args"] != recipe.PLUGIN_ARGS[plugin]:
+        return len(cxx), 0, cxx, "%s arguments %s are not the rule's %s" % (plugin, od["args"], recipe.PLUGIN_ARGS[plugin])
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
         return len(cxx), 0, cxx, "invalid recipe: %s" % "; ".join(e.errors)[:300]
-    if res["status"] != "green" or ORDER not in [p["name"] for p in res["plugins"]]:
+    if res["status"] != "green" or plugin not in [p["name"] for p in res["plugins"]]:
         return len(cxx), 0, cxx, "build %s, plugins %s" % (res["status"], [p["name"] for p in res["plugins"]])
     built = {root + "/" + o["unit"] for o in res["objects"]}
     bad = [u for u in cxx if u not in built]

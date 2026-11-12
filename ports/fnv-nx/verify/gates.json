@@ -27,7 +27,8 @@
     "ports/fnv-nx/contract",
     "ports/fnv-nx/link",
     "ports/fnv-nx/rules",
-    "ports/fnv-nx/lift"
+    "ports/fnv-nx/lift",
+    "ports/fnv-nx/lift/gates"
    ],
    "result": "selftests.json"
   },
@@ -247,6 +248,39 @@
     "ports/fnv-nx/verify/gate_argorder.py"
    ],
    "result": "argordergate.json"
+  },
+  {
+   "name": "order",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_lift.py",
+    "--gate",
+    "order"
+   ],
+   "result": "order.json"
+  },
+  {
+   "name": "addr32",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_lift.py",
+    "--gate",
+    "addr32"
+   ],
+   "result": "addr32.json"
+  },
+  {
+   "name": "eh",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_lift.py",
+    "--gate",
+    "eh"
+   ],
+   "result": "eh.json"
   }
  ]
 }

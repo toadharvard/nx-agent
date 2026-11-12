@@ -4,7 +4,7 @@ C++ FuncInfo (found via `mov eax, offset FuncInfo; jmp handler` stubs), SEH scop
 __SEH_prolog-style helper), ThrowInfo (second argument of every call of _CxxThrowException, resolved to a constant by in-block constant propagation). Used by universe.py, which supplies
 the descent state (tools/modlift.py supplies it for a module image read through pemod: the same parser, the module's rebased
 addresses); running this file runs the whole pipeline. Output: <facts>/ehtables.json (exe) and <facts>/<module>/ehtables.json, which
-tools/gate_eh.py reads. The JSON also carries the image's executable span `text` and the FuncInfo stubs that failed to parse
+lift/gates/gate_eh.py reads. The JSON also carries the image's executable span `text` and the FuncInfo stubs that failed to parse
 `failed_funcinfo`."""
 import os, re, sys, json, bisect
 from collections import Counter, defaultdict, deque
@@ -539,7 +539,7 @@ class EH:
                 'types': [{'type': h(ty), 'size': sz, 'copy': h(cp) if cp else 0} for _, ty, sz, cp, _ in t['types']]})
         J['conts'] = {h(k): h(v) for k, v in sorted(s.conts.items())}
         J['throw_sites'] = tsl; J['failed_throwinfo'] = tfail; J['throwers'] = [h(x) for x in s.throwers]; J['thrower_escapes'] = [h(x) for x in esc]
-        J['text'] = [h(X.T0), h(X.T1)]                        # [lo, hi): the executable span of this image (rebased for a module); tools/gate_eh.py assigns the pack's code entries to images by it
+        J['text'] = [h(X.T0), h(X.T1)]                        # [lo, hi): the executable span of this image (rebased for a module); lift/gates/gate_eh.py assigns the pack's code entries to images by it
         J['failed_funcinfo'] = [{'addr': h(k), 'err': v, 'live': fil[k]} for k, v in sorted(bad.items())]       # a frame-handler stub names a FuncInfo that did not parse: its entries are missing, the gate is red on any
         json.dump(J, open(X.outdir + '/ehtables.json', 'w'), indent=1, sort_keys=True)
         L = []; bm = Counter(r['magic'] for r in s.fi.values()); L.append('FuncInfo found %d parsed %d failed %d; by magic %s' % (len(s.fi), len(ok), len(bad), {h(k): v for k, v in sorted(bm.items())}))

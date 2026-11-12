@@ -42,6 +42,14 @@
    "gates": []
   },
   {
+   "path": "ports/fnv-nx/lift/gates",
+   "class": "tool",
+   "gates": [
+    "pure",
+    "selftests"
+   ]
+  },
+  {
    "path": "ports/fnv-nx/lift/pack",
    "class": "product",
    "gates": [

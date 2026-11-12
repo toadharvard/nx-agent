@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Self-test of tools/gate_eh.py on synthetic packs and synthetic ehtables.json (no game data).   python3 test/gate_eh_test.py"""
+"""Self-test of tools/gate_eh.py on synthetic packs and synthetic ehtables.json (no game data).   python3 -I tests/test_gate_eh.py"""
 import copy, json, os, subprocess, sys, tempfile, unittest
-HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.dirname(HERE), 'tools', 'gate_eh.py')
+HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.dirname(HERE), 'gate_eh.py')
 h = lambda a: '0x%08x' % a
 
 def facts(base, n):

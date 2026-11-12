@@ -275,7 +275,7 @@ not touched. `-fplugin-arg-fnvnx_order-uninit=keep` restores GCC's handling (A/B
 The lifted bodies (lift/) execute the exe's own x86 instructions, so they carry no source-level facts (no volatile, no
 key file). The rule is the x86-TSO one, per access, with no exception: **every access of guest memory is ordered, and
 every x86 `lock` instruction and every `xchg` with memory is one atomic read-modify-write followed by a full barrier.**
-It is stated on the compiled objects and checked there by `lift/tools/gate_order.py` (gates `order`, `addrwrap`,
+It is stated on the compiled objects and checked there by `lift/gates/gate_order.py` (gates `order`, `addrwrap`,
 `align`; self-test `lift/test/gate_order_test.py`).
 
 ### Accessors (lift/rt/fnvl.h)
