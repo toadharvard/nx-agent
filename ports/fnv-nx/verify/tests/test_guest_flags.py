@@ -17,6 +17,8 @@ TOOL = os.path.join(os.path.dirname(HERE), "guest_flags.py")
 
 
 def main():
+    check("plugin_args: one function of the declared origin, a copy of the fixed arguments", recipe.plugin_args("native") == recipe.PLUGIN_ARGS
+          and recipe.plugin_args({"lifted_by": "x.py", "pack": "p"}).keys() == recipe.PLUGIN_SOURCES.keys() and recipe.plugin_args(None) is not recipe.PLUGIN_ARGS)
     pin = json.load(open(os.path.join(os.path.dirname(HERE), "guest_compiler.json")))
     ext = pin["external"]
     try:
