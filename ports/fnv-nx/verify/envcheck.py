@@ -15,7 +15,7 @@ tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linu
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed content sha256 in python.wheels, see wheel_digest): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed content sha256 in python.wheels, see wheel_digest): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (platform/manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
 import argparse
 import csv
 import ctypes
@@ -43,7 +43,7 @@ CLANG_API = ["clang/AST/RecursiveASTVisitor.h", "clang/Frontend/FrontendPluginRe
 CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 --libdir`: what a clang plugin links / dlopens
 M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
 PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
-              "pyelftools": "elftools", "z3-solver": "z3"}   # distribution -> import name
+              "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
 def env_id(doc):
@@ -150,6 +150,9 @@ def check(doc):
         h = doc["python"].get("wheel_sha256", {}).get(m)
         if not (isinstance(h, str) and len(h) == 64 and all(c in "0123456789abcdef" for c in h)):
             bad.append("env: python module %s: no wheel sha256 in python.wheel_sha256 (setup installs by hash)" % m)
+        f = doc["python"].get("wheel_files", {}).get(m)
+        if not (isinstance(f, str) and f.endswith(".whl") and "/" not in f):
+            bad.append("env: python module %s: no wheel file name in python.wheel_files (setup installs from the mirror)" % m)
     bad += deb_pins(doc)
     for t, dg in sorted(doc["trees"].items()):
         cmp("tree " + t, dg[:12], (tree_digest(t) if os.path.isdir(t) else "missing")[:12])
@@ -181,8 +184,9 @@ def deb_pins(doc):
     if not isinstance(dp, dict) or not isinstance(dp.get("mirror"), dict) or not isinstance(dp.get("packages"), dict):
         return ["env: debs: missing (the deb mirror pin: debs.mirror and debs.packages)"]
     m = dp["mirror"]
-    if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)):
-        out.append("env: debs.mirror: needs repo, a 40-hex commit and a 64-hex tree_sha256")
+    if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)
+            and hx(m.get("wheels_tree_sha256"), 64)):
+        out.append("env: debs.mirror: needs repo, a 40-hex commit, a 64-hex tree_sha256 (debs/) and wheels_tree_sha256 (wheels/)")
     for p in sorted(set(doc["packages"]) ^ set(dp["packages"])):
         out.append("env: debs.packages: %s %s" % (p, "has no deb pin" if p in doc["packages"] else "is not in packages"))
     for p, e in sorted(dp["packages"].items()):
@@ -192,18 +196,19 @@ def deb_pins(doc):
     return out
 
 def wheel_pins(prev):
-    """python.wheel_sha256 of the new snapshot: the sha256 of each module's wheel FILE (what setup_verdict_env.sh installs with
-    pip --require-hashes). The installed package does not carry it, so it is taken from the previous env.json PREV for the same
-    version; a new module or version needs its hash added by hand from the index (a deliberate act), else this is an error."""
+    """(python.wheel_sha256, python.wheel_files) of the new snapshot: the sha256 and the file name of each module's wheel FILE (what
+    farm/install_debs.py installs from the mirror's wheels/ with pip --no-index --require-hashes). The installed package does not
+    carry them, so they are taken from the previous env.json PREV for the same version; a new module or version needs its wheel added
+    to the mirror and both entries written by hand (a deliberate act), else this is an error."""
     old = (prev or {}).get("python", {})
-    out = {}
+    sha, files = {}, {}
     for m in sorted(PY_MODULES):
-        h = old.get("wheel_sha256", {}).get(m)
-        if old.get("modules", {}).get(m) != metadata.version(m) or not h:
-            raise SystemExit("snapshot: %s %s: no wheel sha256 in the previous env.json for this version (add it: pip download %s==%s; sha256sum)"
-                             % (m, metadata.version(m), m, metadata.version(m)))
-        out[m] = h
-    return out
+        h, f = old.get("wheel_sha256", {}).get(m), old.get("wheel_files", {}).get(m)
+        if old.get("modules", {}).get(m) != metadata.version(m) or not h or not f:
+            raise SystemExit("snapshot: %s %s: no wheel sha256/file in the previous env.json for this version (add the wheel to the mirror: "
+                             "pip download --no-deps %s==%s; sha256sum)" % (m, metadata.version(m), m, metadata.version(m)))
+        sha[m], files[m] = h, f
+    return sha, files
 
 def snapshot(prev=None):
     import runtime
@@ -261,7 +266,7 @@ def snapshot(prev=None):
             "uid": os.geteuid(), "trees": {t: tree_digest(t) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
                        "wheels": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
-                       "wheel_sha256": wheel_pins(prev)},
+                       "wheel_sha256": wheel_pins(prev)[0], "wheel_files": wheel_pins(prev)[1]},
             "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
 
 def main(argv):

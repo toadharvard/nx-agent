@@ -43,7 +43,7 @@ d0 = doc()
 check("env.json: format, programs owned, non-trivial package list", d0["format"] == "fnvnx-env/1" and d0["uid"] == 0
       and d0["arch"] == "x86_64" and {"strace", "busybox", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-as"} <= set(d0["programs"])
       and {"busybox-static", "gcc-13-plugin-dev-aarch64-linux-gnu", "libc6-dev-arm64-cross", "strace"} <= set(d0["packages"])
-      and set(d0["python"]["modules"]) == {"capstone", "gmpy2", "keystone-engine", "numpy", "unicorn", "pyelftools", "z3-solver"}, d0["programs"])
+      and set(d0["python"]["modules"]) == {"capstone", "gmpy2", "keystone-engine", "numpy", "unicorn", "pyelftools", "z3-solver", "pefile"}, d0["programs"])
 
 def mutate(f):
     d = doc()
@@ -112,43 +112,46 @@ check("snapshot needs --from-code and -o", ec("snapshot")[0] != 0)
 check("setup script: bash -n", subprocess.run(["bash", "-n", SETUP]).returncode == 0)
 p = subprocess.run(["bash", SETUP, "--print"], capture_output=True, text=True)
 lines = p.stdout.splitlines()
-debs = [ln for ln in lines if "install_debs.py" in ln]
-pip = [ln for ln in lines if " pip install " in ln]
-check("setup --print: install_debs.py from the mirror (no apt), pip with every module==version by hash, then envcheck check",
-      p.returncode == 0 and len(debs) == 1 and lines[0] == debs[0] and debs[0].endswith("--env " + ENVF) and "apt" not in p.stdout.replace("--break-system-packages", "")
-      and len(pip) == 1 and "--break-system-packages" in pip[0]
-      and "--require-hashes" in pip[0].split() and "--no-deps" in pip[0].split()
-      and lines[lines.index("REQUIREMENTS:") + 1:-1] == ["%s==%s --hash=sha256:%s" % (m, v, d0["python"]["wheel_sha256"][m])
-                                                         for m, v in sorted(d0["python"]["modules"].items())]
-      and lines[-1].endswith("envcheck.py check --env " + ENVF), p.stdout[:300] + p.stderr)
+debs = [ln for ln in lines if "install_mirror.py" in ln]
+check("setup --print: install_mirror.py (debs and wheels from the mirror, no apt, no PyPI), then envcheck check",
+      p.returncode == 0 and len(debs) == 1 and lines[0] == debs[0] and debs[0].endswith("--env " + ENVF) and "apt" not in p.stdout
+      and "pip" not in p.stdout and lines[-1].endswith("envcheck.py check --env " + ENVF) and len(lines) == 2, p.stdout[:300] + p.stderr)
 # the run mode (real dpkg, real pip) is not run here: it changes the machine. Every farm runs it for real and ends with envcheck.
 
-# install_debs.py against a local mirror repo (ARTIFACTS_URL): checks tree hash and every sha256 BEFORE dpkg (--dry: dpkg never runs)
+# install_mirror.py against a local mirror repo (ARTIFACTS_URL): checks tree hash and every sha256 BEFORE dpkg (--dry: dpkg never runs)
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 MR = os.path.join(TD, "mirror")
 os.makedirs(os.path.join(MR, "debs"))
+os.makedirs(os.path.join(MR, "wheels"))
 open(os.path.join(MR, "debs", "x_1_amd64.deb"), "wb").write(b"not a real deb\n")
+open(os.path.join(MR, "wheels", "fakemod_xyz-1-py3-none-any.whl"), "wb").write(b"not a real wheel\n")
 gi = lambda *a: subprocess.run(["git", "-C", MR] + list(a), capture_output=True, text=True, check=True).stdout.strip()
 gi("init", "-q", "-b", "m"); gi("add", "-A"); gi("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "m")
-MC, MT = gi("rev-parse", "HEAD"), cas.tree_hash(os.path.join(MR, "debs"))
-def mirror_doc(tree=MT, sha=hashlib.sha256(b"not a real deb\n").hexdigest()):
-    return write({"packages": {"no-such-pkg-x": "1"}, "debs": {"mirror": {"repo": "r", "commit": MC, "tree_sha256": tree},
-                  "packages": {"no-such-pkg-x": {"version": "1", "file": "x_1_amd64.deb", "sha256": sha, "url": "u"}}}}, "m.json")
+MC, MT, WT = gi("rev-parse", "HEAD"), cas.tree_hash(os.path.join(MR, "debs")), cas.tree_hash(os.path.join(MR, "wheels"))
+def mirror_doc(tree=MT, sha=hashlib.sha256(b"not a real deb\n").hexdigest(), wtree=WT, wsha=hashlib.sha256(b"not a real wheel\n").hexdigest()):
+    return write({"packages": {"no-such-pkg-x": "1"}, "debs": {"mirror": {"repo": "r", "commit": MC, "tree_sha256": tree, "wheels_tree_sha256": wtree},
+                  "packages": {"no-such-pkg-x": {"version": "1", "file": "x_1_amd64.deb", "sha256": sha, "url": "u"}}},
+                  "python": {"modules": {"fakemod-xyz": "1"}, "wheel_files": {"fakemod-xyz": "fakemod_xyz-1-py3-none-any.whl"},
+                             "wheel_sha256": {"fakemod-xyz": wsha}}}, "m.json")
 IT = os.path.join(TD, "inst-tmp")
 os.makedirs(IT)
 def inst(path):
-    p = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(VERIFY), "farm", "install_debs.py"), "--env", path, "--dry"],
+    p = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(VERIFY), "farm", "install_mirror.py"), "--env", path, "--dry"],
                        capture_output=True, text=True, env=dict(os.environ, ARTIFACTS_URL="file://" + MR, TMPDIR=IT))
     return p.returncode, p.stdout, p.stderr
 rc, out, err = inst(mirror_doc())
-check("install_debs: right tree and sha256 -> 1 package from the mirror (dry)", rc == 0 and "1 packages, 1 installed from the mirror, 0 already present" in out, (rc, out, err))
+check("install_mirror: right tree and sha256 -> 1 package from the mirror (dry)", rc == 0 and "1 packages, 1 installed from the mirror, 0 already present" in out and "1 modules, 1 installed from the mirror" in out, (rc, out, err))
 rc, out, err = inst(mirror_doc(sha="0" * 64))
-check("install_debs: a deb with another sha256 -> exit 2 naming the package, nothing installed", rc == 2 and "no-such-pkg-x: sha256 is" in err, (rc, out, err))
+check("install_mirror: a deb with another sha256 -> exit 2 naming the package, nothing installed", rc == 2 and "no-such-pkg-x: sha256 is" in err, (rc, out, err))
 rc, out, err = inst(mirror_doc(tree="0" * 64))
 left = os.listdir(IT)
-check("install_debs: a mirror with another tree hash -> exit 2", rc == 2 and "tree_sha256 is" in err, (rc, out, err))
-check("install_debs: it leaves nothing in its TMPDIR, on success and on every failure", left == [], left)
+rc2, out2, err2 = inst(mirror_doc(wsha="0" * 64))
+check("install_mirror: a wheel with another sha256 -> exit 2 naming the module, pip never runs", rc2 == 2 and "fakemod-xyz: wheel sha256 is" in err2, (rc2, out2, err2))
+rc3, out3, err3 = inst(mirror_doc(wtree="0" * 64))
+check("install_mirror: a mirror with another wheels tree hash -> exit 2", rc3 == 2 and "wheels tree_sha256 is" in err3, (rc3, out3, err3))
+check("install_mirror: a mirror with another tree hash -> exit 2", rc == 2 and "tree_sha256 is" in err, (rc, out, err))
+check("install_mirror: it leaves nothing in its TMPDIR, on success and on every failure", left == [], left)
 
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
