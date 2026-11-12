@@ -124,8 +124,13 @@ def legacy(obj):
     ao = pb.section(obj, '.fnvnx.argorder').splitlines()
     # the last field: the call's number among the function's calls of that callee / how many there are
     wantao = ['_Z2o1v\\t_Z3twoii\\t_Z2gav|_Z2gbv\\t0/1', '_Z2o5R1W\\t_ZN1W1wEii\\t_ZN1W4selfEv|_Z2gav|\\t0/1',
-              '_ZN2KDD2Ev\\t_Z3twoii\\t_Z2gav|_Z2gbv\\t0/1']
+              '_ZN2KDD1Ev\\t_Z3twoii\\t_Z2gav|_Z2gbv\\t0/1', '_ZN2KDD2Ev\\t_Z3twoii\\t_Z2gav|_Z2gbv\\t0/1']
     check('argorder rows', [l.replace('\t', '\\t') for l in ao] == wantao, ao)
+    # ARGROWS-CLONE: a constructor/destructor clone's rows are its in-charge original's, one per emitted symbol (the alias D1 under its own name), whatever
+    # another plugin did to the clone's copy of the body (this object is built by the product's full set, order included)
+    emitted_kd = sorted(sym for (sym, kind), v in rows.items() if sym.startswith('_ZN2KDD') and v[1] == 'argorder')
+    check('every emitted clone of the destructor with an argorder verdict has exactly one argorder row, and no other symbol has one for it',
+          emitted_kd == sorted(l.split('\t')[0] for l in ao if l.startswith('_ZN2KD')) == ['_ZN2KDD1Ev', '_ZN2KDD2Ev'], (emitted_kd, ao))
     und = pb.undefined(obj)
     for w in ('fnvnx_seh_try', 'fnvnx_seh_except', 'fnvnx_seh_finally', '__debugbreak'):
         check('undefined reference to ' + w, w in und)

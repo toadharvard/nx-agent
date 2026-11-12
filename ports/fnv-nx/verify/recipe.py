@@ -414,6 +414,8 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
                 continue
             if dv and dv not in variant_names(drec):
                 err.append("link.roots: %s has no variant %r" % (dr, dv))
+            if dv == GCSTRESS_VARIANT:   # a stress object is a test of the compiler's plugins, never a part of an image
+                err.append("link.roots: %s: no product image links a %s object" % (dr, dv))
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
     cyc = link_roots_cycle(root, roots, repo) if deps else None
@@ -550,6 +552,8 @@ def check(rec, root, files, roots, pin=None, repo=".", variant="", base=None):
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
             if p not in files or not any(under(p, r) for r in roots)]
+    if variant == GCSTRESS_VARIANT and rec.get("link") is not None:
+        err.append("variant %s: no link: no product image holds a %s object" % (variant, variant))
     err += guest_errors(rec, root, roots, pin, variant, base)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err

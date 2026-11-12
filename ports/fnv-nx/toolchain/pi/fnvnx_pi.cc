@@ -95,6 +95,7 @@ static tree fnvnx_walk(tree *tp, walk_tree_fn f, void *data) { return walk_tree_
 #include "tree-dfa.h"
 #include "tree-cfg.h"
 #include "fold-const.h"
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
@@ -108,6 +109,8 @@ static std::map<unsigned, std::set<std::string> > by_origin;   /* DECL_UID of DE
 static std::vector<std::string> lines;
 static std::set<std::string> all_thunks;          /* every thunk of the unit, listed before code generation */
 static std::set<std::string> thunk_rows;          /* thunks that went through the passes */
+static std::multimap<std::string, std::string> cdtor_rows;   /* in-charge constructor/destructor -> its argorder rows, without the function's name */
+static std::map<std::string, std::string> emitted_abs;   /* emitted front-end clone (C1, C2, D0, D1, D2) -> the in-charge function it was cloned from */
 static std::map<std::string, std::string> emitted_rest;   /* emitted function -> "verdict\tinlined", for its aliases */
 
 static const char *asmname(tree d)
@@ -505,10 +508,17 @@ static void pre_genericize(void *gcc_data, void *)
   std::string name = asmname(fn);
   call_count.clear(); fn_sites.clear();
   fnvnx_walk(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
-  /* the in-charge form of a constructor or destructor is never emitted: its clones (C1/C2, D0/D1/D2) are, and each
-     clone with a body of its own comes here itself. The form is still walked: the verdict of its clones is looked
-     up by its name (source_name). */
-  if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) return;
+  /* ARGROWS-CLONE: the argorder facts of a front-end clone of a constructor or destructor (C1, C2, D0, D1, D2) are the facts of the function it
+     was cloned from (DECL_CLONED_FUNCTION), the in-charge form, which is never emitted. They are read here, on that function, and written
+     once per emitted symbol that was cloned from it (finish_unit), so they do not depend on what another plugin did to the clone's copy of the
+     body: the front end copies the body after this callback ran on the in-charge form, and a plugin loaded before pi that rewrites calls
+     has already changed that body when the clone's own callback comes (measured: the in-charge form shows its site, its clones show none). */
+  if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) {
+    for (size_t i = 0; i < fn_sites.size(); i++)
+      cdtor_rows.insert({name, fn_sites[i].head.substr(name.size() + 2) + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee])});
+    return;
+  }
+  if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_CLONED_FUNCTION_P(fn)) return;
   for (size_t i = 0; i < fn_sites.size(); i++)
     arg_sites.push_back(fn_sites[i].head + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
 }
@@ -731,6 +741,7 @@ struct late_pass : gimple_opt_pass {
     e->second.emitted = true;
     inl.erase(name);
     lines.push_back(name + "\\t" + e->second.verdict + "\\t" + join(inl) + "\\t" + clone + "\\t" + join(e->second.types));
+    if (clone.empty() && is_cxx() && DECL_LANG_SPECIFIC(fun->decl) && DECL_CLONED_FUNCTION_P(fun->decl)) emitted_abs[name] = asmname(DECL_CLONED_FUNCTION(fun->decl));
     if (clone.empty()) emitted_rest[name] = e->second.verdict + "\\t" + join(inl) + "\\talias\\t" + join(e->second.types);
     return 0;
   }
@@ -814,6 +825,19 @@ static void finish_unit(void *, void *)
       fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t\\tinline\\t%s\\n\"\n", e->first.c_str(), e->second.verdict.c_str(),
               join(e->second.types).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
+  /* ARGROWS-CLONE: one row per emitted symbol cloned from an in-charge function, an alias (D1 of D2) under its own name */
+  std::vector<std::string> crow;
+  std::map<std::string, std::string> src = emitted_abs;
+  FOR_EACH_FUNCTION(n)
+    if (n->alias && n->get_alias_target() && emitted_rest.count(asmname(n->ultimate_alias_target()->decl)) && is_cxx() && DECL_LANG_SPECIFIC(n->decl)
+        && DECL_CLONED_FUNCTION_P(n->decl))
+      src[asmname(n->decl)] = asmname(DECL_CLONED_FUNCTION(n->decl));
+  for (std::map<std::string, std::string>::iterator e = src.begin(); e != src.end(); ++e) {
+    std::pair<std::multimap<std::string, std::string>::iterator, std::multimap<std::string, std::string>::iterator> r = cdtor_rows.equal_range(e->second);
+    for (std::multimap<std::string, std::string>::iterator t = r.first; t != r.second; ++t) crow.push_back(e->first + "\\t" + t->second);
+  }
+  std::sort(crow.begin(), crow.end());
+  arg_sites.insert(arg_sites.end(), crow.begin(), crow.end());
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.argorder,\"\",%%progbits\n");
   for (size_t i = 0; i < arg_sites.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", arg_sites[i].c_str());
   fprintf(asm_out_file, "\t.popsection\n");
