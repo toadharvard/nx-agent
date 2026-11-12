@@ -1,0 +1,27 @@
+# Declared hooks of the guest link: symbols the platform archive references that are defined by another
+# component of the guest image (agreed contracts). One symbol per line; the comment names the provider.
+# A hook is listed only while the archive really references it. Do not add a symbol here to make the gate of
+# platform/build_guest.sh pass: an undefined symbol with no provider is reported to the orchestrator.
+#
+# Agreed contracts, not referenced by the platform archive yet (add the line when a platform source starts
+# to reference the symbol):
+#   fnvnx_import_by_key                    loader (L1)
+#   nx_d3d9_export                         render (L6)
+
+# Referenced by platform/boundary/boundary_guest.cpp (declarations: the loader's own headers, loader/include, included as they are;
+# the lifter runtime's two are declared in boundary_guest.cpp).
+# Loader (L1), branch claude/fnv-l1-contract, ports/fnv-nx/loader/include:
+fnvnx_import_key               # loader L1: fnvnx/import_key.h
+fnvnx_start_proc               # loader L1: fnvnx_start.h
+fnvnx_thread_block_create      # loader L1: fnvnx_start.h
+fnvnx_thread_block_free        # loader L1: fnvnx_start.h
+fnvnx_module_load              # loader L1: fnvnx_start.h
+fnvnx_module_unload            # loader L1: fnvnx_start.h
+fnvnx_modules_thread_attach    # loader L1: fnvnx_start.h
+fnvnx_modules_thread_detach    # loader L1: fnvnx_start.h
+fnvnx_modules_process_detach   # loader L1: fnvnx_start.h
+fnvnx_modules_disable_thread_calls  # loader L1: fnvnx_start.h
+# Lifter runtime (L3a), branch claude/fnv-l3a-lift, ports/fnv-nx/lift/rt/enter.c:
+fnvnx_lift_enter               # lifter runtime L3a (also declared by the loader's fnvnx_start.h)
+fnvnx_guest_invoke             # lifter runtime L3a
+fnvnx_guest_current            # lifter runtime L3a: the calling guest thread's esp and TEB (fnvnx_module_load needs them)

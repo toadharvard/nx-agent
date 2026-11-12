@@ -18,6 +18,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 GUEST_DIR = os.path.join(HERE, "guest")
+HOSTABI_DIR = os.path.join(os.path.dirname(os.path.dirname(VERIFY)), "hostabi", "include")   # hostapi.h, fnvnx/sockwire.h: their one home
 sys.path.insert(0, VERIFY)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
@@ -29,14 +30,14 @@ FAILED, N = [], [0]
 CC = "aarch64-linux-gnu-gcc"
 CFLAGS = ["-mabi=ilp32", "-march=armv8-a", "-O2", "-fPIE", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fvisibility=hidden",
           "-mno-outline-atomics", "-fno-asynchronous-unwind-tables", "-fno-tree-loop-distribute-patterns", "-Wall",
-          "-I" + GUEST_DIR]
+          "-I" + GUEST_DIR, "-I" + HOSTABI_DIR]
 LDFLAGS = ["-m", "aarch64elf32", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs",
            "--gc-sections", "-z", "max-page-size=0x1000", "--defsym=FNVNX_GUEST_BASE=0",
            "--require-defined=__fnvnx_guest_start"]
 
 GUEST = r'''
 #include <stdint.h>
-#include "hostapi.h"
+#include "fnvnx/hostapi.h"
 const FnvnxHostApi *fnvnx_host;
 #define H (fnvnx_host)
 typedef struct { int32_t d_tag; uint32_t d_val; } Dyn;
@@ -1087,7 +1088,7 @@ def main():
               "sendto-ext": ne(101), "recv-nb": ne(11), "bind-lo": "0", "close3": "0", "closed-getfl": ne(9), "tz-last": "0"}
     case("sockets (guest): handles, flag state, ENETUNREACH, loopback bind "
          "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
-    sw = open(os.path.join(GUEST_DIR, "fnvnx", "sockwire.h")).read()
+    sw = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire.h")).read()
     lst = lambda name: [int(v, 0) for v in re.findall(r"X\(\w+, (\w+)\)", re.search(r"#define " + name + r"\(X\)((?:[^\n]*\\\n)*[^\n]*)", sw).group(1))]
     nums = dict(re.findall(r"#define FNVNX_(WE_\w+|WEAI_\w+) (\d+)", sw))
     eai = dict(re.findall(r"X\(EAI_(\w+), (\d+)\)", sw))
@@ -1180,7 +1181,7 @@ def main():
          and r1["reason"] == "exit" and "fact_id" not in r1, r36)
 
     # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
-    rows, hslots = parse_totality(os.path.join(GUEST_DIR, "hostapi.h"))
+    rows, hslots = parse_totality(os.path.join(HOSTABI_DIR, "fnvnx", "hostapi.h"))
     SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36]
     mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root))
     case("header: 29 services of module 11 and 46 slots parsed", len(rows) == 29 and sorted(rows) == SERVED

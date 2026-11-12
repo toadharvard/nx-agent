@@ -463,6 +463,29 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
     return err
 
 
+HEADER_EXTS = (".h", ".hh", ".hpp", ".hxx", ".inc")
+
+
+def header_dirs(rec, root, roots, repo="."):
+    """The repo include dirs that can supply a header to a product of ROOT's target: the `include` of REC, the `include` of the recipe of every
+    admitted product root of that target (read from REPO; a recipe that is not there adds none) and the `include/` dir of each such root."""
+    tg = roots[root].get("target")
+    dirs = set()
+
+    def add(inc):
+        dirs.update(d for d in inc if isinstance(d, str) and not d.startswith("/"))
+    add(rec.get("include") if isinstance(rec.get("include"), list) else [])
+    for p, r in roots.items():
+        if r.get("class") == "product" and r.get("target") == tg:
+            dirs.add(p + "/include")
+            try:
+                with open(os.path.join(repo, r["recipe"])) as f:
+                    add(json.load(f).get("include") or [])
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                pass
+    return sorted(dirs)
+
+
 def check(rec, root, files, roots, pin=None, repo="."):
     """Every problem of recipe REC of product root ROOT; roots {path: root entry}; PIN = load_pin(); REPO: where the recipes of the
     roots of `link.roots` are read (their link null, no cycle). -> [str] (empty = valid)."""
@@ -526,8 +549,23 @@ def check(rec, root, files, roots, pin=None, repo="."):
             continue
         if not rel_ok(d) or not any(under(d, r) for r in roots):
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
+        elif not any(under(d, r) and roots[r].get("class") == "product" and roots[r].get("target") == roots[root].get("target") for r in roots):
+            # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
+            # the units that read them), never in a doc or tool root or a root of the other target
+            err.append("include %r lies in no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
+                       % (d, roots[root].get("target")))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
+    # one name, one file, over the whole target: the include dirs of this recipe, of every admitted product root's recipe of the same target
+    # and the `include/` dir of each such root; two files of one include-relative path in them make `#include <that/path>` depend on the
+    # order of a -I list (the first wins, silently), or on which root builds: a header is in one home only
+    home = {}
+    for d in header_dirs(rec, root, roots, repo):
+        for f in files:
+            if under(f, d) and f.endswith(HEADER_EXTS):
+                home.setdefault(f[len(d):].lstrip("/"), set()).add(f)
+    err += ["header %r is in %d homes: %s (one home per header)" % (n, len(fs), ", ".join(sorted(fs)))
+            for n, fs in sorted(home.items()) if len(fs) > 1]
     seen = set()
     for i, g in enumerate(rec.get("generated", []) if isinstance(rec.get("generated", []), list) else err.append("generated is not a list") or []):
         if not (isinstance(g, dict) and set(g) == {"tool", "args", "inputs", "outputs"}):
