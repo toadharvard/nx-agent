@@ -72,15 +72,13 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     _git(repo, 'init', '-q')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
     ext = pin['external']
-    if native:   # a native root loads every plugin with its fixed arguments (recipe.PLUGIN_ARGS) and the semantics flags
-        plugins = [(n[len('fnvnx_'):], a) for n, a in ((n, dict(recipe.PLUGIN_ARGS[n])) for n in recipe.PLUGIN_SOURCES)]
-        flags = ['-O2'] + [f for f in flags if f != '-O2']
+    flags = ['-O2', recipe.SDD_DEFINE] + [f for f in flags if f not in ('-O2', recipe.SDD_DEFINE)] if native else flags   # fnvnx_sdd's define is per root
     flags = [f for f in flags if recipe.PER_ROOT.fullmatch(f)]   # a guest build.json carries the per-root classes only: the semantic set is the recipe's (guest_compiler.json)
     plugins = [('fnvnx_' + n, a) for n, a in plugins]
-    if not native and not raw:   # the mode of fnvnx_ftoi is the root's, never a choice (recipe.plugin_args)
-        lifted_args = recipe.plugin_args({'lifted_by': T + 'gen/lift.py', 'pack': 'pack'})
-        plugins = [(n, dict(lifted_args[n], **a) if n == 'fnvnx_ftoi' else a) for n, a in plugins]
-    if not native and lifted_ftoi and 'fnvnx_ftoi' not in [n for n, _ in plugins]:   # required by the lifted-root rule, loaded first as in the product order
+    if not raw:   # every guest root loads the FULL set in the product order with recipe.plugin_args(origin): the arguments are the root's fact, never a test's choice
+        want = recipe.plugin_args('native' if native else {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'})
+        plugins = [(n, dict(want[n])) for n in recipe.PLUGIN_SOURCES]
+    elif not native and lifted_ftoi and 'fnvnx_ftoi' not in [n for n, _ in plugins]:   # required by the lifted-root rule, loaded first as in the product order
         plugins.insert(0, ('fnvnx_ftoi', dict(recipe.plugin_args({'lifted_by': T + 'gen/lift.py', 'pack': 'pack'})['fnvnx_ftoi'])))
     names = [n for n, _ in plugins]
     for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
