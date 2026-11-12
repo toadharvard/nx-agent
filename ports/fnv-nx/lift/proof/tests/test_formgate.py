@@ -38,7 +38,7 @@ def skip_cache(d, names):
 
 
 MD = shape.decoder()
-MODEL = 'e436ee6f79856a7ac9543400b7973dd1f0057410426f08b1e456c1d1c43e654a'
+MODEL = '70c8dc39cf64be4fe52d50f34ffd37eeefdc8bfa8162c5da8ffdd98d6b393eae'
 # encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fld st(1))
 GOOD = ['01c8', '31c0', '8b4510', '6a05', 'c3', '90']
 NOBUILD = ['d9c1']
@@ -135,6 +135,26 @@ class CertificationRule(unittest.TestCase):
         with workdir() as td:
             u, c, ids, _ = Fixture(td, GOOD, dsl_override='0' * 64).judge()
             self.assertEqual((u, c, len(ids)), (len(GOOD), 0, len(GOOD)))
+
+    def test_certificate_stale_after_a_dsl_edit_is_refused(self):
+        # certificates written under the current DSL; then the builder of ONE mnemonic (xor) changes: exactly the shapes of xor lose their certificate,
+        # the others (their Form did not change) stay certified.  The key of a certificate is (shape, shape_sha of the CURRENT Form, IR sha), nothing else.
+        from proof import forms
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD), []))
+            orig = forms.H['xor']
+
+            def edited(c):
+                orig(c)
+                c.F.undefined('df', 'edited')
+            forms.H['xor'] = edited
+            try:
+                u, c, ids, _ = f.judge()
+            finally:
+                forms.H['xor'] = orig
+            self.assertEqual((u, c, ids), (len(GOOD), len(GOOD) - 1, [key_of('31c0')[0]]))
+            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD), []))
 
     def test_wrong_model_sha_in_the_certificates_is_red(self):
         with workdir() as td:

@@ -1,6 +1,6 @@
 """Arithmetic / logic / shift / bit / multiply / divide families (see forms.py)."""
 from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, load, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
-from proof.forms import Op, af, ea, handler, pzs, rd, undef, wr
+from proof.forms import Op, af, ea, handler, pzs, rd, store_op, undef, wr
 
 UNDEF_LOGIC = 'AND/OR/XOR/TEST: "The state of the AF flag is undefined."'
 UNDEF_MUL = 'MUL/IMUL: "The SF, ZF, AF, and PF flags are undefined."'
@@ -92,7 +92,7 @@ def bt(c):
     if c.m != 'bt':
         nv = {'bts': val | msk, 'btr': val & ~msk, 'btc': val ^ msk}[c.m]
         if addr is None: wr(F, d, nv)
-        else: F.store(addr, nv)
+        else: store_op(F, d, addr, nv)
 
 @handler('bsf', 'bsr')
 def bs(c):
