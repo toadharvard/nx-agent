@@ -200,23 +200,34 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
   return true;
 }
 
-static tree descriptor(gcall *call)
+/* conv of a function type: the declaration's own (fnvnx_cc), METHOD_TYPE is this */
+static const char *conv_of(tree ft)
 {
-  location_t loc = gimple_location(call);
+  const char *conv = TREE_CODE(ft) == METHOD_TYPE ? "this" : "stack";
+  if (tree a = lookup_attribute("fnvnx_cc", TYPE_ATTRIBUTES(ft))) {
+    const char *v = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
+    conv = !strcmp(v, "fast") ? "fast" : !strcmp(v, "this") ? "this" : "stack";
+  }
+  return conv;
+}
+
+static void need_names_plugin()
+{
   static bool checked;
   if (!checked) {
     checked = true;
     if (!lookup_attribute_spec(get_identifier("fnvnx_cc")))
       error("DISPATCH1: the fnvnx_names plugin is not loaded: the calling conventions of the declarations are lost");
   }
+}
+
+static tree descriptor(gcall *call)
+{
+  location_t loc = gimple_location(call);
+  need_names_plugin();
   tree ft = gimple_call_fntype(call);
   if (!ft) { error_at(loc, "DISPATCH1: an indirect call without a function type"); return NULL_TREE; }
-  const char *conv = TREE_CODE(ft) == METHOD_TYPE ? "this" : "stack";
-  if (tree a = lookup_attribute("fnvnx_cc", TYPE_ATTRIBUTES(ft))) {
-    const char *v = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
-    conv = !strcmp(v, "fast") ? "fast" : !strcmp(v, "this") ? "this" : "stack";
-  }
-  std::string d = std::string(conv) + ":";
+  std::string d = std::string(conv_of(ft)) + ":";
   if (!shape(TREE_TYPE(ft), true, ft, d, loc)) return NULL_TREE;
   d += ":";
   /* A parameter's type is the function type's (a class that is passed as a reference to a copy is still the
@@ -233,12 +244,54 @@ static tree descriptor(gcall *call)
   return build_string_literal(d.size() + 1, d.c_str());
 }
 
+/* The descriptor of a function DEFINITION, from its own type with the same shape() as the call sites (a native body
+ * that lifted code reaches through an exit bridge). The parameters are the declared ones: the list is the
+ * definition's own, `this` first for a method. */
+static bool def_descriptor(tree decl, std::string &d)
+{
+  location_t loc = DECL_SOURCE_LOCATION(decl);
+  tree ft = TREE_TYPE(decl);
+  d = std::string(conv_of(ft)) + ":";
+  if (!shape(TREE_TYPE(ft), true, ft, d, loc)) return false;
+  d += ":";
+  bool first = true;
+  for (tree parm = TYPE_ARG_TYPES(ft); parm && parm != void_list_node; parm = TREE_CHAIN(parm)) {
+    if (!first) d += ",";
+    first = false;
+    if (!shape(TREE_VALUE(parm), false, ft, d, loc)) return false;
+  }
+  return true;
+}
+
+static void emit_lines(const char *section, const std::set<std::string> &lines)
+{
+  if (lines.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t%s,\"\",%%progbits\n", section);
+  for (auto &d : lines) {
+    fprintf(asm_out_file, "\t.ascii\t\"");
+    for (char c : d) { if (c == '"' || c == '\\') fputc('\\', asm_out_file); fputc(c, asm_out_file); }
+    fprintf(asm_out_file, "\\n\"\n");
+  }
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
+/* .fnvnx.defdisp: `<asm name> <descriptor>\n` per emitted definition (any linkage, clones under their own asm name), sorted, unique.
+ * The exe address is not here: exitgen joins by asm name with .fnvnx.sympair and the bound exe VA. */
 static void finish_unit(void *, void *)
 {
-  if (descs.empty()) return;
-  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.disp,\"\",%%progbits\n");
-  for (auto &d : descs) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", d.c_str());
-  fprintf(asm_out_file, "\t.popsection\n");
+  emit_lines(".fnvnx.disp", descs);
+  need_names_plugin();
+  std::set<std::string> defs;
+  cgraph_node *node;
+  FOR_EACH_DEFINED_FUNCTION(node) {
+    tree decl = node->decl;
+    if (!TREE_ASM_WRITTEN(decl) || node->alias || node->thunk) continue;
+    std::string d;
+    if (!def_descriptor(decl, d)) continue;
+    const char *name = targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl)));
+    defs.insert(std::string(name) + " " + d);
+  }
+  emit_lines(".fnvnx.defdisp", defs);
 }
 
 static bool indirect_call(gimple *st)
