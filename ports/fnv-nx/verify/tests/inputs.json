@@ -1,0 +1,8 @@
+{
+ "format": "fnvnx-selftest-inputs/1",
+ "tests": {
+  "test_boot_job.py": [
+   "exe"
+  ]
+ }
+}

@@ -24,6 +24,7 @@ from capstone import x86_const as X
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import store
+import exepin
 
 VERSION = 8
 
@@ -32,7 +33,7 @@ class Image:
     """A PE32 image addressed by virtual address."""
 
     def __init__(self, path):
-        self.d = d = open(path, 'rb').read()
+        self.d = d = exepin.load_exe(path)
         self.sha256 = hashlib.sha256(d).hexdigest()
         pe = struct.unpack_from('<I', d, 0x3c)[0]
         nsec, = struct.unpack_from('<H', d, pe + 6)

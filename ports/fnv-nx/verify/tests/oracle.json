@@ -291,6 +291,18 @@
     "ports/fnv-nx/verify/gate_contract.py"
    ]
   },
+  "test_gate_exepin.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_exepin.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_exepin.py"
+   ]
+  },
   "test_gate_hostapi.py": {
    "references": [
     {

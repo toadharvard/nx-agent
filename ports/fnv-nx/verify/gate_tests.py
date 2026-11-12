@@ -18,6 +18,9 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   records every file of the universe as passed, they are certified WITHOUT running (detail: `N of M pass, cached key <12 hex>`).
   Otherwise all files run and the per-file results are stored under KEY only when the run completed. All-or-nothing per key:
   no per-file dependency guessing; a failed file is never recorded as passed, a key with a failure re-runs everything.
+A test that needs game data declares it in DIR/tests/inputs.json ({"format": "fnvnx-selftest-inputs/1", "tests": {"test_x.py": ["exe"]}}); the names
+are externals of verify/contract_inputs.json (commit + tree_sha256, fetched like a recipe's external). The test gets FNVNX_INPUT_<NAME> = the checked-out
+directory. If the input cannot be fetched or its tree hash differs, the file's status is `blocked-env`: uncertified (the gate is red), never skipped.
 Result extra key "files": [{"name","seconds","status"[,"reason"]}] (status passed|failed|cached; reason of a failed file: exit status or
 timeout, names left in its TMPDIR, the exception/errno text and the tail of its output); same list in selftests.times.json.
 TMPDIR rule: each test file runs with TMPDIR = a fresh directory of its own under the gate's temporary directory. The gate removes it
@@ -43,9 +46,34 @@ import envcheck  # noqa: E402
 
 CACHE_FORMAT = "fnvnx-selftests-cache/1"
 
-def run_one(path, timeout, base, idx):
+PINS = "ports/fnv-nx/verify/contract_inputs.json"   # the pins of the declared inputs (the one registry of content-pinned fnv-nx-build inputs)
+
+def declared_inputs(path):
+    """{test file: [input names]} from DIR/tests/inputs.json ("fnvnx-selftest-inputs/1": {"tests": {"test_x.py": ["exe"]}}); {} if the file is absent."""
+    try:
+        doc = json.load(open(os.path.join(os.path.dirname(path), "inputs.json")))
+        return {n: list(v) for n, v in doc["tests"].items()}.get(os.path.basename(path), []) if doc["format"] == "fnvnx-selftest-inputs/1" else None
+    except OSError:
+        return []
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+def fetch_inputs(names, cache, ws):
+    """{FNVNX_INPUT_<NAME>: host dir} of the pinned externals NAMES (recipe.fetch_externals, commit + tree_sha256 checked), or a string: why not."""
+    import recipe
+    try:
+        pins = {e["name"]: e for e in json.load(open(PINS))["external"]}
+        ext = [pins[n] for n in names]
+        got = recipe.fetch_externals(ext, os.path.join(cache or ws, "store"), os.path.join(cache or ws, "external"), ws)
+    except recipe.BuildRed as x:
+        return "%s: %s" % (x.args[0].get("stage"), "; ".join(x.args[0].get("stderr", [])[-3:]))
+    except (OSError, ValueError, KeyError) as x:
+        return "inputs %s: %s" % (",".join(names), x)
+    return {"FNVNX_INPUT_" + n.upper(): got[n]["host"] for n in names}
+
+def run_one(path, timeout, base, idx, extra=None):
     """(passed, seconds, reason). The test runs with TMPDIR = its own directory BASE/tIDX, made here and removed here whatever the
-    outcome (exit, failure, timeout kill, exception): scratch cannot outlive a test. A test that leaves entries in it at exit is
+    outcome (exit, failure, timeout kill, exception); EXTRA: the FNVNX_INPUT_<NAME> variables of the declared inputs: scratch cannot outlive a test. A test that leaves entries in it at exit is
     uncertified ("leaked"). reason: "" when passed, else the exit status, the leaked names and the tail of the test's output."""
     t0 = time.time()
     tdir, logp = os.path.join(base, "t%d" % idx), os.path.join(base, "t%d.log" % idx)
@@ -55,6 +83,7 @@ def run_one(path, timeout, base, idx):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
     env["TMPDIR"] = tdir
     why = []
+    env.update(extra or {})
     try:
         with open(logp, "wb") as log:
             p = subprocess.Popen([sys.executable, "-I", path], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
@@ -177,24 +206,43 @@ def main(argv):
         note = ", cached key %s" % key[:12]
     else:
         base = tempfile.mkdtemp(prefix="selftests-")  # in the gate's own TMPDIR; removed below whatever happens
+        ws = os.path.join(base, "inputs")
+        os.mkdir(ws)
+
+        def one(a):
+            idx, f = a
+            names = declared_inputs(f)
+            if names is None:
+                return "failed", 0.0, "tests/inputs.json is not a valid fnvnx-selftest-inputs/1 file"
+            extra = None
+            if names:
+                got = fetch_inputs(names, o["cache"], ws)   # a test that needs game data declares it; no data here: blocked, never green, never skipped
+                if isinstance(got, str):
+                    return "blocked-env", 0.0, got
+                extra = got
+            ok, sec, why = run_one(f, o["timeout"], base, idx, extra)
+            return ("passed" if ok else "failed"), sec, why
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=o["jobs"]) as ex:
-                res = list(ex.map(lambda a: run_one(a[1], o["timeout"], base, a[0]), enumerate(files)))
+                res = list(ex.map(one, enumerate(files)))
         finally:
             shutil.rmtree(base, ignore_errors=True)
-        rows = [dict({"name": f, "seconds": s, "status": "passed" if ok else "failed"}, **({} if ok else {"reason": why}))
-                for f, (ok, s, why) in zip(files, res)]
+        rows = [dict({"name": f, "seconds": s, "status": st}, **({} if st == "passed" else {"reason": why}))
+                for f, (st, s, why) in zip(files, res)]
         note = ""
         if cpath:
             store(cpath, key, rows)
     secs = time.time() - t0
-    unc = [r["name"] for r in rows if r["status"] == "failed"]
+    unc = [r["name"] for r in rows if r["status"] in ("failed", "blocked-env")]
+    blocked = [r["name"] for r in rows if r["status"] == "blocked-env"]
     n = len(files) - len(unc)
     status = "green" if not unc else "red"
     detail = ("%d of %d test files pass%s, %.1f s" % (n, len(files), note, secs)) if files else "no test files at this commit (nothing to certify yet)"
+    if blocked:
+        detail += "; blocked: env (declared input not available) for " + ", ".join(blocked)
     res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files), "certified": n,
            "uncertified": unc[:50], "detail": detail, "files": rows,
-           "reasons": {r["name"]: r["reason"] for r in rows if r["status"] == "failed" and r.get("reason") and r["name"] in unc[:50]}}
+           "reasons": {r["name"]: r["reason"] for r in rows if r["status"] in ("failed", "blocked-env") and r.get("reason") and r["name"] in unc[:50]}}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "selftests.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

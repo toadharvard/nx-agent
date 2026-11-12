@@ -226,6 +226,23 @@ is the first 50 of the sorted ids (strings), so the file is a function of its ar
 to $GATE_OUT only, never committed.  The only environment variable read is the declared GATE_OUT.
 ```
 
+## contract/exepin.py
+
+```text
+exepin - the one place that opens the player's FalloutNV.exe (L1 CONTRACT).
+
+    exepin.py FalloutNV.exe          exit 0 and one line if the file is the supported exe; exit 1 with expected / actual otherwise
+
+The supported exe is exactly one build: GOG 1.4.0.525(a).  Its identity is the PIN below: size, SHA-256 and the PE header fields that
+fix the image (machine, optional-header magic, image base).  Rule: every tool entry point that reads the exe gets its bytes from
+`load_exe`, and no other code opens the exe path (contract/tests/test_exepin.py proves the second half over the call structure of
+every tool).  `load_exe` checks the whole fingerprint before it returns a byte, so no fact is produced from another exe.  Another build
+needs its own pin and its own address remap; it is never accepted by loosening this check.
+
+Only the identity is published here (size, hash, standard PE fields); no content of the exe is.  `pin=` exists so that a selftest can
+exercise the acceptance path on a synthetic file; no tool passes it.
+```
+
 ## contract/gpa_names.py
 
 ```text
@@ -1423,6 +1440,32 @@ Universe: every function of every object of every product root, every uncovered 
 red (one item `root`, uncertified). Certified: items with no finding. uncertified: the first 50 `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
 uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail.
+```
+
+## verify/gate_exepin.py
+
+```text
+Gate "exepin" (fnvnx-gate/1): the player's exe is read in exactly one place, and only after its fingerprint matched.
+    python3 -I gate_exepin.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/exepin.json
+
+Rule (contract/exepin.py is the one place; its function `load_exe` checks size, SHA-256 and the PE header fields of the one
+supported build before it returns a byte). Universe: every tracked .py file below ports/fnv-nx outside a `tests` directory; an item is
+its repo-relative path. An item is certified iff no exe path flows to a file-reading call except through `load_exe`.
+Flow, computed from the syntax trees of all items together (call structure, not names of variables):
+  sources  an attribute `.exe` read in a file that declares the option `--exe` (add_argument('--exe', ...) is how a tool receives the
+           exe path), and a string constant that is `FalloutNV.exe` or ends in `/FalloutNV.exe` used as an expression (not a docstring);
+  spread   an expression is tainted if a sub-expression is; assignment taints the target name of the function; a tainted argument
+           taints the parameter of every def of the callee's name (class call -> `__init__`; methods without self); a tainted
+           `return` taints the call; fixpoint over all items;
+  sinks    open, io.open, os.open, Path / pathlib.Path (any construction), mmap.mmap, shutil.*, numpy fromfile/memmap, os.system /
+           os.popen / os.exec* / os.spawn*, subprocess.* - a call of these with a tainted argument is a violation, except that
+           a tainted element that directly follows the literal '--exe' in the call (the exe forwarded to another entry point,
+           which is itself an item of this gate) is allowed;
+  cut      a call of `load_exe` (exepin.load_exe): its result is bytes, the taint stops, and its body is not an item of the flow
+           (exepin.py is the one item allowed to open its own parameter: `load_exe` is the function named in the gate).
+A tool that gets the exe path any other way (not `--exe`, not the file name) is outside the rule: that is the stated assumption, and the
+sources are the only two ways the tools of this tree name the exe.
+Result: universe = items, certified = items without a violation, uncertified = the first 50 `path:line what`. Green iff all certified.
 ```
 
 ## verify/gate_oracle.py

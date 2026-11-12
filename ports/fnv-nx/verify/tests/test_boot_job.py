@@ -43,18 +43,13 @@ FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+
 HOME = os.path.join(SCRATCH, "home")
 BARE = os.path.join(SCRATCH, "artifacts.git")
 GAME = os.path.join(SCRATCH, "game")
-def _pe():
-    b = bytearray(0x200)
-    b[:2] = b"MZ"
-    struct.pack_into("<I", b, 0x3C, 0x80)
-    b[0x80:0x84] = b"PE\0\0"
-    struct.pack_into("<H", b, 0x80 + 24, 0x10B)
-    struct.pack_into("<I", b, 0x80 + 24 + 28, 0x400000)
-    struct.pack_into("<I", b, 0x80 + 24 + 56, 0x100000)
-    return bytes(b)
+def _exe():
+    """the player's FalloutNV.exe: the pinned gamedata/exe input of verify/tests/inputs.json (the gate fetches it by commit + tree hash)"""
+    with open(os.path.join(os.environ["FNVNX_INPUT_EXE"], "FalloutNV.exe"), "rb") as f:
+        return f.read()
 
 
-EXE = _pe()
+EXE = _exe()
 
 
 def git(*args, cwd=None, check=True):
