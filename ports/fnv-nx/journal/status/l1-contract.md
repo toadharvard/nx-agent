@@ -268,3 +268,16 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
     - w18 builds the consumer now.
   - **w18 raw fact for (i):** the cell is 0x11b76d0. Of the 126 unbounded stores, all are in the same section; 5 have a base at or below the cell, 121 above.
   - **Assumptions gate (w10):** retired-id ratchet against the merge base; gate_admit.py:38 needs an id.
+- 03:56Z: new heads and routing.
+
+  | Worker | Head | State |
+  |---|---|---|
+  | w10 | 6bcd7d2 | green 29/29: ranges, owner rule, full findings file; registry 51 entries (9 OWNER, 42 REMOVE), 94/94 mentions; link.kind/roots re-sent to it |
+  | w15 | afa6b301 | green 27/27, 291.3 s: outputs/uses, generated sources, archive members judged |
+
+  - MERGER order: w16 → w10 → w14 → w15 → w19.
+  - **Extents for the exe:** L2 item 24 (w3, fnvnx-globext/1, certified objects only), sent to w18.
+  - **Extents for d3dx9_38:** no source; asked the orchestrator to assign one. w18's allocation-site rule is the candidate.
+  - **L2 w4** makes layout, sdd, pi and names C-capable (weak cp_global_trees).
+  - **w19** gets selftest result keying by content and test scratch moved out of /tmp.
+  - **L3a w8 test doubles:** answered. The tool is w12's doubles gate. ExitProcess and the other import bodies are L5 product code, so tests must link L5 objects through link.roots.
