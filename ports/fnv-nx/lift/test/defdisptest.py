@@ -93,18 +93,25 @@ def main():
     tp = os.path.join(HERE, 'cl_pod_table.tsv')
     if not os.path.exists(tp):
         print('defdisptest: BLOCKED: cl_pod_table.tsv is absent (the cl reference run of podmatrix.py --cl)'); sys.exit(3)
+    hdr = [l for l in open(tp).read().split('\n') if l.startswith('#')]
+    check('table header: MEASUREMENT, cl.exe sha256, toolchain commit', len(hdr) >= 3 and 'MEASUREMENT' in hdr[0] and 'sha256' in hdr[1] and 'commit' in hdr[2], hdr[:3])
     table = dict(l.split('\t') for l in open(tp).read().split('\n') if l and not l.startswith('#'))
     cs = [c[0] for c in podmatrix.cases()]
     check('table rows == matrix cases', set(table) == set(cs), 'only in the table %s, only in the matrix %s' % (sorted(set(table) - set(cs))[:5], sorted(set(cs) - set(table))[:5]))
     src = podmatrix.decls() + ''.join('extern %s g_%s;\nextern "C" %s r_%s() { return g_%s; }\n' % (n, n, n, n, n) for n in cs)
     got = rows(build(src, 'pod') or b'')
+    mism = 0
     for n in cs:
         d1 = got.get('r_' + n)
         if d1 is None or n not in table: check('result %s' % n, False, 'row %s, table %s' % (d1, table.get(n))); continue
         rt = d1.split(':')[1]
         size = int(re.match(r'[am](\d+)', rt).group(1))
         hidden = rt[0] == 'm' or rt.endswith('x') or size not in (1, 2, 4, 8)   # sizes that are no x86 register size: bridgegen's rule
-        check('result %s: cl %s' % (n, table[n]), hidden == (table[n] == 'hidden'), 'plugin row %s' % d1)
+        ok = hidden == (table[n] == 'hidden'); mism += not ok
+        check('result %s: cl %s' % (n, table[n]), ok, 'plugin %s (%s)' % ('hidden' if hidden else 'regs', d1))
+    ctl = [n for n in cs if n.split('_')[1] in podmatrix.CONTROLS]
+    check('controls (none, sm, mf) are regs in the table', all(table.get(n) == 'regs' or int(n.split('_')[2]) not in (1, 2, 4, 8) for n in ctl))
+    print('POD matrix: %d cases, %d mismatches plugin vs cl' % (len(cs), mism))
     # (3)
     decls = '\n'.join(t[1] for t in dc.TYPES)
     ref = ''.join('%s g_%s;\nextern "C" void __attribute__((noinline)) a_%s(%s x) { g_%s = x; }\nextern "C" %s __attribute__((noinline)) r_%s(void) { return g_%s; }\n' % (T, n, n, T, n, T, n, n) for n, d, T in dc.TYPES)
