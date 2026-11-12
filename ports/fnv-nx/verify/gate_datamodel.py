@@ -73,10 +73,10 @@ def judge_root(root, repo, cache):
     except recipe.RecipeError as e:
         us = [root + "/" + u for u in recipe.units_of(rec, root, files)] if isinstance(rec, dict) else []
         return len(us) + 1, 0, [item] + us, "invalid recipe: %s" % "; ".join(e.errors)[:300]
-    units = [root + "/" + u for u in res.get("units", [])]
+    units = [recipe.split_spec(root)[0] + "/" + u for u in res.get("units", [])]
     if res["status"] != "green":
         return len(units) + 1, 0, [item] + units, "build %s" % res["status"]
-    native = recipe.entry_of(roots, spec).get("cxx_origin") == "native"
+    native = recipe.entry_of(roots, root).get("cxx_origin") == "native"
     docs = cc_docs(os.path.join(cache, "store"), res)
     bad, why = [], []
     g = recipe.guest_errors(rec, root, roots, pin)
