@@ -1237,6 +1237,7 @@ Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary g
     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
 One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
+N3 (the static native-body criterion of the pi plugin's `.fnvnx.n3`) reaches bodysel through the `bind` stage (contract/bind.py: exe addresses of the objects' N3 rows through the N1 certificate, written as n3.tsv) and bodysel's `--n3`; a function without an `ok` N3 row is LIFTED.
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
 
@@ -2109,4 +2110,280 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               input equals or CONTAINS (cas.listing) an output root of a verification stage, or of a tainted build stage
               (transitively), is tainted. Exit 2 lists chains. Stage results: S/keys/<key>/result.json (sandbox.py).
   defect / defects   rule-defect queue: content-addressed JSON entries, verification-class data only.
+```
+
+## link/abi.py
+
+```text
+abi - gate `abi`: a reference and the definition it binds to have one calling contract on x86 and on AArch64 (L2 SOURCE, ABI1).
+
+    abi.py --obj obj.json                                         writes $GATE_OUT/abi.json, exit 0 iff green
+    abi.py --decl REF_MSVC_NAME DEF_MSVC_NAME                     prints the verdict of one pair (exit 0 iff equal contracts)
+
+RULE.  The Itanium symbol binds a reference in one object to the definition in another by name alone, and Itanium names carry neither the calling
+convention nor the return type.  The MSVC names the plugin writes into `.fnvnx.sympair` do.  For a symbol S with a definition row (the
+canonical definition: the first `def` row in object order) every other row of S (each `ref`, each further `def`) must have the same CONTRACT:
+  contract(name) = ( x86 locations: the (class, location) of every parameter, `this` first, a hidden result pointer for an aggregate result;
+                     x86 stack bytes the callee pops (symbolic over the classes);  x86 result location;
+                     AAPCS64 locations of the same parameters;  AAPCS64 result location )
+  parameter classes (abi_msvcname types): I8 B8(bool) I16 I32(int, long, enum) I64 P(pointer, reference, function pointer) MP(pointer to
+  member function) F32 F64 F80 AGG:<qualified name> (class, struct, union by value: identified by its MSVC qualified name, sizes unknown).
+  x86 (MSVC): thiscall `this` in ecx; fastcall the first two integer/pointer parameters of at most 4 bytes in ecx, edx; everything else on
+  the stack in 4-byte words (8 for 64-bit values; an aggregate of unknown size keeps all later offsets symbolic); stdcall, thiscall, fastcall
+  callee pops, cdecl caller pops.  AAPCS64: integers and pointers in x0..x7, floating point in v0..v7, then 8-byte slots; MP takes two registers.
+Certified iff the two contracts are equal; the verdict names the first differing component (cc/this, parameter count, parameter class,
+result, pop, variadic, aggregate, undecoded name).  Equal contracts mean every argument and the result travel in the same place on both machines,
+so no bridge exists to be generated: where the legacy model produced `bridge` / `manual` / `x86-inconsistent`, the pair is uncertified.
+UNIVERSE.  Every row that is a ref or a non-canonical def of a symbol that has a definition row somewhere in obj.json and is a function-kind row
+(func, ctor.*, dtor.*) with an MSVC name, or an `unnamed:` row; item id `object:symbol`.  An `unnamed:` row, or a row of a symbol whose canonical
+definition has no MSVC name, is uncertified (no contract can be compared).  Symbols with no definition row at all are linkstrict's business (class 3).  Rows of kind
+thunk/vtable/gcc/internal/data are outside (no function contract of the exe).
+PROOF.  Parameters are placed by the calling convention as a function of the ordered class list, so equal class lists under equal conventions
+give equal locations; the classes are read from the MSVC grammar (abi_msvcname), where equal types have equal text.  A by-value aggregate is
+the same type iff its qualified name is equal (provided by gate odr: equal `.fnvnx.layout` across all units per qualified name), so equal names pass the same bytes whatever the size.  A pair with differing aggregates,
+a variadic side, a bool/char result difference (GCC reads bit 0 of a bool) or an unparsable name is not proven and is uncertified.
+INPUT FACTS.  The MSVC names are the plugin's `.fnvnx.sympair` names, verified against cl's symbol tables by gate names; the same
+aggregate name is the same type in two units: provided by gate odr (equal `.fnvnx.layout` across all units per name).  Rule: MSVC returns every
+aggregate through a hidden pointer (small POD returned in eax:edx is not modelled: equal aggregate names make that irrelevant, differing ones
+are uncertified anyway).  Dropped from the legacy tool: the bridge generator (`emit_bridge`, `sequentialize`: a repair), `bool_from_int`,
+`ret_carry`, narrow-extension moves, `varargs_check` with `va_reads` from a run (`vacall`), `ecx_unused` from the pristine object, the
+source-text type spelling (`classify` by regex over declaration text), and `describe_shape` strings.
+```
+
+## link/abi_msvcname.py
+
+```text
+abi_msvcname - the Microsoft Visual C++ decorated-name grammar, parsed into the declaration it encodes (L2 SOURCE, ABI1).
+
+    parse(name) -> Decl                 ValueError('<name>: <what>') when the name is not in the grammar subset below
+    parse_qualified_type_name(text)     '.?AVFoo@Bar@@' (a TypeDescriptor name, as RTTI stores it) -> ('class'|'struct'|'union', qualified)
+
+This is a PARSE of a defined format (MSVC's decoration, VC 2008 era with the later `$$Q` and `_N`/`_W` letters), not a
+guess from the spelling: every character is consumed by a production or the name is rejected.  Nothing in it reads a
+word of the name as a hint; the identifiers are opaque fragments that are compared whole.
+
+What a name encodes (the facts the ABI rule needs):
+  * the scope, as a tuple of fragments, innermost LAST (`?f@Bar@Foo@@` -> ('Foo', 'Bar', 'f')); a fragment is a string or
+    ('tpl', name, args) for a template instance, ('op', code) for an operator / ctor / dtor name, ('anon',) for an
+    anonymous namespace;
+  * for a function: the access/kind letter (`member`, `static`, `virtual`, `thunk`), the `this` qualifiers, the calling
+    convention, the return type (None for a constructor, destructor), the parameter types, `varargs`;
+  * types as nested tuples: ('b', 'int') builtin; ('ptr', '*'|'&'|'&&', cv, pointee) pointer or reference (cv of the pointer
+    itself; the pointee carries its own); ('tag', 'class'|'struct'|'union'|'enum', qualified); ('arr', dims, element);
+    ('fn', cc, ret, params, varargs) a function type (only behind a pointer); ('memfn', qualified-class, cv, fn) a pointer
+    to member function.
+Back-references follow the grammar: a digit in a name position is the n-th simple name memorised so far (at most 10), a
+digit in a parameter position is the n-th parameter type memorised (at most 10; a type is memorised when its decoration is
+longer than one character).  A template argument list has its own name table, seeded with the template's own name.
+
+Supported: free and member functions (all access letters, static, virtual, `W`/`G`/`O` this-adjustor thunks), constructors,
+destructors, operators (kept as ('op', code)), data symbols (kind 'data', no further parse).  Template arguments: types,
+`$0` integer constants and `$D` template-parameter indexes.  Everything else (`$1` pointer constants, `$$V`, local scope
+`?1?`, `__ptr64` markers, ...) is a ValueError: the caller treats such a name as undecided, never as passed.
+Pure: str in, tuple out.
+```
+
+## link/gate_names.py
+
+```text
+gate_names - NAMES1: the MSVC names the fnvnx_names plugin gave to GCC's definitions, against cl's own symbol tables (L2 SOURCE).
+
+    gate_names.py --gcc PATH [--gcc PATH ...] --cl PATH [--cl PATH ...] [--units units.json]      (inputs: link/unitpairs.py)
+
+RULE.  The pairing `.fnvnx.sympair` of a GCC object of unit U says, for every symbol of the object that has a contract name, which
+MSVC decorated name it has.  MSVC's object of the same unit defines every entity that the unit's own text defines (the pristine
+objects are built /Gy, so a function is a definition or a COMDAT definition), so the name of such an entity must be a definition of
+cl's object of U.  A name that cl's object does not define is a wrong naming rule.  A row no rule named is a gap in the naming rules.
+UNIVERSE (nothing sampled, nothing skipped), per unit with a GCC object, in the order of the unit names:
+  1. every row of .fnvnx.sympair whose kind is one that has an MSVC name (func, data, ctor.c1, ctor.c2, dtor.d2, dtor.d1, dtor.d0,
+     dtor.sdd, dtor.sdd.thunk) and that is `def` of a symbol the object defines STRONGLY: binding GLOBAL (not weak, not unique), defined
+     in a section (not SHN_UNDEF/ABS/COMMON), not a section or file symbol, and the defining section is not in a COMDAT group
+     (SHF_GROUP).  Item id `unit:symbol`.
+  2. every row of .fnvnx.sympair whose kind is `unnamed:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
+  3. every row of .fnvnx.vtpair whose MSVC name is `unnamed:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
+  4. a GCC object that cannot be read (ELF, symbol table, a plugin section): one item `unit:error`.
+CERTIFIED: an item of class 1 whose MSVC name is `def`, `comdat` or `common` among the external symbols of at least one cl object of the
+unit (an unreadable one among them does not hide a proof in another; if none proves it, the item is red and says so).
+Red (listed): class 1 with no cl object for the unit, with an unreadable cl object, or with a name cl does not define; every item of
+classes 2, 3, 4.  The result is a function of the objects and the units list; ids sorted; zero items: green, universe 0 (detail says so).
+PROOF.  A strong GCC definition is emitted from the unit's own source text, not from an inline or template instantiation that the
+unit merely uses; so the entity has a definition in the unit's cl object, and that object's symbol table names it with the one decorated
+name.  If the table holds the plugin's name as a definition, the name is that of a definition of the same unit; if it does not, the
+naming rule is refuted for this item.  Classes 2 and 3 are decided by the rule's own totality: every extern symbol must be named.
+RULES AND INPUTS.  Rule (checked, class 1): a strong definition of a GCC object that has a naming kind is certified only when the cl
+object of the same unit defines the name; a GCC-only strong symbol with a naming kind is red, and the plugin gives GCC-only symbols the
+nameless kinds below (classes 2 and 3, red).  Scope of the check (a statement of what is read, not a claim beyond it): the check shows
+that the plugin's name is a definition of the same unit's cl object, not that it is the name of this very declaration (two definitions of
+one unit with swapped names would pass); the plugin's rules are verified by the object that cl wrote.  Input: the sections are the
+plugin's own output (contract/l2sections.py documents their format).
+NOT IN THE UNIVERSE (no class-closing rule is known, reported to the orchestrator; legacy namegate counted them only): rows of
+kind `thunk`, `vtable`, `gcc`, `internal` (no cl twin by the plugin's classification); `ref` rows and weak or COMDAT definitions of
+named kinds (cl emits an inline function, a vftable or a reference only where it chose to use it, so a name its object lacks proves
+nothing); vtpair rows with a name.  Pairing is by file stem (the `u<N>` rule of unitpairs.py with --units).
+```
+
+## link/gate_r7.py
+
+```text
+gate_r7 - R7 LAYOUT: does GCC give every record type exactly the layout cl gives it? (L2 SOURCE)
+
+    gate_r7.py --gcc PATH [--gcc PATH ...] --cl PATH [--cl PATH ...] [--units units.json]      (inputs: link/unitpairs.py)
+
+GCC side: section `.fnvnx.layout` of the GCC object (plugin fnvnx_layout; parsed by link/objsections.py): one line per complete record
+type of the unit.  cl side: the CodeView type records (`.debug$T`) of the unit's cl object built with /Z7 (read by link/codeview.py).
+Both are keyed by MSVC's decorated type name without the leading `.?A` (the "unique name" cl writes into every record; the plugin
+computes it by the symbol-name rules); the key is an exact string on both sides, nothing is normalised.
+UNIVERSE: every (unit, key) of every `.fnvnx.layout` line of every GCC object (a key once per unit); a GCC object that cannot be read or
+whose section does not parse is one item `unit:error`.  Item id `unit:key`.  The records only cl has are not in the universe: no
+GCC-built body can depend on a layout GCC never computed.
+CERTIFIED: the unit's cl object has exactly one definition of the key and every fact below is the same on both sides:
+  size; the set of named data members, each with byte offset (bit offset and width for a bit-field) and size; the bases (key, offset,
+  virtual or not); the vfptr (neither side introduces one).  Unnamed bit-fields are not compared (CodeView
+  does not list them); the members of an anonymous struct or union are the record's own on both sides.
+Every other item is red and listed with its reason: `differs` (the first difference), `undecided` (a fact the data cannot give), `only-gcc`
+(cl's debug info of the unit has no definition: no cl object, no CodeView, or no such key).  Undecided reasons, with the missing fact:
+  - the record introduces a vfptr (both sides): the offset of the vfptr is not in CodeView (LF_VFUNCTAB has a type and no offset); it is
+    not derived from the other offsets, which leave it undetermined
+  - the size of a member's type is outside what CodeView states (codeview.py: PRIM, member pointers)
+  - the key has several different definitions in the unit, in one cl object or between the cl objects of a source several units list
+    (the definitions of all of them are collected and identical ones count once; unnamed types share keys) or the plugin could not name the type (`nokey:`)
+  - the CodeView members or bases of the record could not be read
+A record with a virtual base differs by rule: cl lays it out with a vbptr and a vbtable, GCC with a vptr and vtable-held offsets; the
+two object models are different layouts and the native body would read the wrong ones.
+CLAIM.  Size, and each member's offset, size and type key, are the compilers' own data for the same source, compared exactly.  The
+alignment of a record is not part of the claim (cl's alignment is not in CodeView and is not compared).  The pairing key is defined as
+follows (a fact of the gate's inputs): the key of a type is the plugin's name for it in the `.fnvnx.layout` line and the CodeView unique
+name in the cl object; a key with several definitions in the unit is `undecided` (above).  Zero lines: green, universe 0 (detail says so).
+DROPPED from legacy r7: the alignment comparison and its natural-alignment derivation; the vfptr offset taken as 0 when no member starts there (a derivation CodeView does not support); sizes and
+alignments of the primitive types outside the scalar table (10, 12, 20 byte, 6 byte); pointer-to-member sizes taken from the pointer
+kind; equality of two multi-definition keys by comparing the two sets of records (now: undecided); `only-cl` records; the text match
+on reason strings that decided which member size was unknown; the verdict for a record whose members could not be read (it counted
+every GCC member as missing).
+```
+
+## link/odr.py
+
+```text
+odr - gate `odr`: the copies of every COMDAT group are identical across objects (L2 SOURCE, ABI1).
+
+    odr.py OBJ.o [OBJ.o ...]            writes $GATE_OUT/odr.json, exit 0 iff green, 1 red, 2 malformed input
+
+RULE.  A COMDAT group (an SHT_GROUP section whose flag word has GRP_COMDAT) is the compiler's statement "every translation unit that
+needs this entity emits this same definition; the linker keeps one".  The linker keeps one without looking at the others, so the
+statement is true iff all copies are the same definition.  The identity of a copy is its image as the linker would see it:
+the multiset over member sections of (section name, type, flags, alignment, entry size, bytes, relocations), where a relocation
+is (offset, type, addend, target) and the target is
+  * a symbol with a name (global, weak, undefined or local non-section symbol): the name, or, for a local symbol defined in
+    a member of the same group, (member name, value);
+  * a section symbol: of a member of the same group -> (member name); of a SHF_MERGE section -> the merged entity read at
+    the addend (cstring when SHF_STRINGS, else entsize bytes), the addend then being an address of this object and dropped;
+    of any other section -> OPAQUE: a section symbol has no size, so the extent of the entity it points at is not in the object;
+    the copy is then undecidable and its signature is uncertified (it is never passed).
+Relocation sections are found by sh_info (the section they apply to), never by name.
+UNIVERSE.  Every group signature (the name of the group's symbol) that occurs as a COMDAT group in two or more of the given objects.
+A signature in one object only has nothing to be compared with and is not in the universe.
+PROOF.  Green means all copies of every signature have equal identity and no copy has an opaque relocation; the identity includes every byte and every relocation of
+every member, so two copies with equal identity assemble to the same bytes with the same symbol references in any link.  A red item names the
+signature, the objects and the first difference.
+INPUT FACTS.  The objects are ELF relocatable objects of one target (the objects the verdict's link takes; a member or group the gate cannot parse is a red item with the reason, ValueError below); equal symbol names mean equal symbols (the linker's own rule for one link, which is what the verdict's link performs).
+```
+
+## verify/gate_abi.py
+
+```text
+Gate "abi" (fnvnx-gate/1, VERDICT.md class 8): a reference and the definition it binds to have one calling contract (rule, universe and proof:
+link/abi.py docstring RULE, UNIVERSE, PROOF).
+    python3 -I gate_abi.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/abi.json
+Universe: the rows abi.py defines (abi.check), over the C++ objects of every admitted product root with "target": "guest" and "cxx_origin": "native"
+(objects from gate_build.ensure; the contract names are the plugin's `.fnvnx.sympair` of each object), plus the input facts abi.py's PROOF rests on, as items
+of the same gate:
+  odr    `odr` signatures (link/odr.py check): every COMDAT group present in two or more of the root's objects, copies identical (reported as `odr:<sig>`);
+  layout every `.fnvnx.layout` key (without a `nokey:` flag, whose key is not unique by construction) seen in two or more objects has one layout in all of
+         them (size, alignment, fields, bases, flags; `layout:<key>`): the same aggregate name is the same type in all units, which is what lets abi pass a
+         by-value aggregate by its name alone. (link/odr.py proves the COMDAT-copy fact only; this item closes the layout fact abi.py's PROOF names.)
+Red iff an item is uncertified, the root's build is not green, an object has no `.fnvnx.sympair` section or cannot be parsed (red item naming the object). A C++
+unit is an object of the root's recipe (recipe.CXX_EXT). No such root: universe 0, green.
+```
+
+## verify/gate_namegate.py
+
+```text
+Gate "namegate" (fnvnx-gate/1, VERDICT.md class 8): a native body that stands for an exe function carries that function's MSVC name, certified
+against the cl object of the same source (link/gate_names.py rows(): the plugin's name is a definition of the unit's cl object).
+    python3 -I gate_namegate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/namegate.json
+Universe: the rows of gate_names.rows() whose symbol bodysel selects as the NATIVE body of an exe function, in each admitted product root with
+"target": "guest", "cxx_origin": "native" and a `game` directory (the join and its inputs: gate_l2native.py). A root without `game`: universe 0 for it;
+no such root: universe 0, green. An uncertified row whose symbol bodysel turns LIFTED is outside the universe, not red.
+Certificate of a row: gate_names.rows() gives it an empty reason against the cl reference objects of the `msvc` external.
+Red iff a row of the universe is uncertified, or the root needs the bodysel verdict or the cl reference and they are missing (red item `<root>:inputs`
+naming the input; owner L1 for bodysel, L2 for the cl side), or the root's build is red.
+```
+
+## verify/gate_r7gate.py
+
+```text
+Gate "r7" (fnvnx-gate/1, VERDICT.md class 8): every type that a native exe-function body uses has the exe's layout, certified by link/gate_r7.py rows()
+against the cl /Z7 CodeView types of the same source.
+    python3 -I gate_r7gate.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/r7.json
+Universe: the rows of gate_r7.rows() of the NATIVE-BEARING units (a unit with at least one symbol that bodysel selects as the native body of an exe function;
+the types such a body uses are among the unit's complete records), in each admitted product root with "target": "guest", "cxx_origin": "native" and a `game`
+directory (gate_l2native.py). A root without `game`: universe 0 for it; no such root: universe 0, green.
+Certificate of a row: its verdict is `equal` (size, members with offsets and sizes, bases, vfptr equal on both sides). Red iff a row of the universe is
+differs, undecided, only-gcc or error, or the bodysel verdict or the cl reference is missing (item `<root>:inputs` naming it; owner L1 for bodysel, L2 for
+the cl side), or the root's build is red.
+```
+
+## verify/gate_l2native.py
+
+```text
+gate_l2native - the shared part of the L2 per-root gates on the NATIVE bodies of the exe's functions (gates `namegate` and `r7`).
+Not a gate itself (gates.json names gate_namegate.py and gate_r7gate.py). Library only.
+
+Universe of those two gates (VERDICT.md class 8): the rows of link/gate_names.py rows() (resp. link/gate_r7.py rows()) that concern a native body of an
+exe function, in each admitted product root with "target": "guest", "cxx_origin": "native" and a `game` directory. A root without `game` has no
+exe-function bodies: universe 0 for it.
+The static facts of the join, all outputs of L1's own chain (gate_contract.chain, no new source):
+  - addrmap.tsv (the link stage's map): row (object basename, symbol) -> exe address. A symbol with no row has no exe address, so no exe function
+    stands on it. The object of the game unit UNIT (root-relative path) is `src_` + UNIT with `/` -> `_` + `.o` (gate_contract.assemble).
+  - bodysel.tsv (contract/bodysel.py, run by the chain): exe address -> native | lifted. A symbol is a NATIVE exe-function body iff its address is native.
+  - a unit is NATIVE-BEARING iff at least one of its symbols is a native exe-function body (r7 judges the types of the unit: the types a native body
+    uses are among the unit's complete records, `.fnvnx.layout`; nothing narrower is claimed).
+Inputs of the certificate: the root's game objects (staged as `<UNIT with / -> _>.o`, the stem convention of link/unitpairs.py), the cl reference objects
+`<msvc external>/obj/u<N>.obj` (the dir contract_inputs.json `msvc` names, the same one n1 reads) and the root's units.json. A missing input is a
+red item `<root>:inputs` naming it and its owner, never skipped. Stated limit: no `--n3` is passed by the bodysel stage of gate_contract.py yet, so
+bodysel gives no NATIVE and the universe is 0 until L1/L2 wire the N3 verdicts (reported, not worked around).
+```
+
+## link/exevft.py
+
+```text
+exevft - the vftables of the player's exe with their RTTI class hierarchy, and the exact adjustor thunks in their slots (L2 SOURCE, ABI1).
+
+    exevft.py --exe FalloutNV.exe [--out exevft.json]
+
+RULE.  An MSVC vftable is the word run that follows a relocated pointer to a complete object locator (COL).  The vftables
+and their slot runs are exefacts.rtti_vftables (L1's reader, reused, not re-parsed here).  This module adds what the COL
+points at and what the slots hold:
+  * hierarchy(img, col): COL (signature 0, vfptr offset, TypeDescriptor, ClassHierarchyDescriptor) -> the class's bases
+    [(TypeDescriptor name, mdisp, pdisp)] in the order of the BaseClassArray.  Checked as a structure: hierarchy signature
+    0, 1..127 bases, every BaseClassDescriptor inside the image with a TypeDescriptor name `.?A..`, the first base is the
+    class itself.  A violation is a ValueError naming the COL (the exe does not have the documented RTTI layout), never a
+    skipped entry.
+  * thunk(img, a): the function at `a` is an MSVC adjustor thunk iff its decoded instruction sequence is exactly
+    `[sub|add ecx, imm | lea ecx,[ecx+imm] | sub|add dword ptr [esp+4], imm]  jmp rel32`.  The instructions are decoded
+    (capstone) and their semantics read (ecx or the stacked this moves by `adj`, then a direct tail jump), so every
+    encoding of these instructions is one case.  Result Thunk(adj, target, stacked) with `this_new = this - adj`; a plain
+    `jmp` has adj 0.  Anything else is None: "not an exact thunk", which is a fact of the function, not a failure.
+  * chain(img, a): the thunks followed to a non-thunk: (total adj, final target, thunks passed); a cycle is a ValueError.
+  * entry_offsets(vfts): {function address: sorted COL offsets of every vftable that holds it directly}.
+UNIVERSE of the CLI: every vftable the exe's RTTI yields; each is emitted with name, COL offset, bases and, per slot, the
+address, its thunk chain (or null).  Output is canonical JSON (sorted keys, LF), a function of the exe bytes only.
+PROOF.  The hierarchy and thunk statements are decodes of bytes by the documented layouts and by instruction semantics;
+no name, string or count decides anything.
+INPUT FACT: the exe is a PE32 with COLs in .rdata and TypeDescriptors in .data (exefacts's precondition, read from the PE section table).
+Open (REMOVE, owner L1 exefacts): completeness of the RTTI scan is not yet a checked fact.  Open (REMOVE, owner L2): agreement of two
+independent decoders on every instruction of the set; after first frame.  Dropped from the legacy tool (heuristic or per-item): the D1/D0 slot-name
+regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `leaf_constant`, `string_at`, the vftable
+getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
+TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 ```

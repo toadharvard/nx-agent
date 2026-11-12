@@ -48,7 +48,7 @@ TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 CLASSES = ("doc", "tool", "product", "ref", "test")
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
-# the contract and link gates. Owned by other leads: imports, forms, d3d9total, r7, namegate, argordergate, abi.
+# the contract and link gates. Owned by other leads: imports, forms, d3d9total. L2's r7, namegate, argordergate, abi are wired.
 # Classes A-G of the owner's rule: datamodel, order, fpexact, eh, exepin, addr32, machine.
 REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
                     "n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel",

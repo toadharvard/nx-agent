@@ -1,6 +1,42 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_abi.py": {
+   "references": [
+    {
+     "anchor": "## link/abi.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/abi.py"
+   ]
+  },
+  "test_abi_msvcname.py": {
+   "references": [
+    {
+     "anchor": "## link/abi_msvcname.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/abi_msvcname.py"
+   ]
+  },
+  "test_exevft.py": {
+   "references": [
+    {
+     "anchor": "## link/exevft.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/exevft.py"
+   ]
+  },
   "test_gate_abs.py": {
    "references": [
     {
@@ -25,6 +61,30 @@
     "ports/fnv-nx/link/gate_disp.py"
    ]
   },
+  "test_gate_names.py": {
+   "references": [
+    {
+     "anchor": "## link/gate_names.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_names.py"
+   ]
+  },
+  "test_gate_r7.py": {
+   "references": [
+    {
+     "anchor": "## link/gate_r7.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_r7.py"
+   ]
+  },
   "test_ice_poly_byvalue.py": {
    "references": [
     {
@@ -35,6 +95,18 @@
    ],
    "subject": [
     "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
+   ]
+  },
+  "test_odr.py": {
+   "references": [
+    {
+     "anchor": "## link/odr.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/odr.py"
    ]
   },
   "test_order_cont.py": {

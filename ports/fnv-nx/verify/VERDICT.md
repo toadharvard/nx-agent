@@ -2,7 +2,7 @@
 
 Owner order of 2026-11-11: the trunk `claude/fnv-nx-clean` is green at every commit, and green means that what the
 compiler built does not fail at run time. This file states which classes of run-time failure exist, which gate
-closes each one statically, and where no rule is known. `gates.d` (one file per gate, assembled by `gatesdir.py`) is the list of gates that run; `admit.json` maps
+closes each one statically, and where no rule is known. `gates.json` is the list of gates that run; `admit.json` maps
 every directory of the trunk to the gates that judge it.
 
 ## How the trunk stays green
@@ -11,35 +11,34 @@ every directory of the trunk to the gates that judge it.
   every item of its universe is certified; there is no "not worse than before" and no allow-list.
 - **Admission rule (gate `admit`).** Every tracked file lies under exactly one root of `admit.json`. A root of class
   `product` (code compiled into the shipped binary) is admitted only if it names every required product gate and
-  those gates exist in `gates.d`. So code cannot enter the trunk before the gates that close its failure classes.
+  those gates exist in `gates.json`. So code cannot enter the trunk before the gates that close its failure classes.
 - Code that does not pass is not in the trunk. It lives on its lead's branch and returns as a whole directory, with
   its build recipe for the declared environment (`env.json`) and green gates.
 - Measurement builds (uncertified forms, for example) are made from lead branches. They never enter the trunk.
 
 ## Classes of run-time failure and their gates
 
-Status: **runs** = in `gates.d` now; **required** = named in `REQUIRED_PRODUCT` of `gate_admit.py` or required
+Status: **runs** = in `gates.json` now; **required** = named in `REQUIRED_PRODUCT` of `gate_admit.py` or required
 below, not written yet, so no product root can be admitted; **no rule** = reported to the orchestrator.
 
 | # | Class of run-time failure | Gate | Decides on | Owner | Status |
 |---|---|---|---|---|---|
 | 1 | Trap or abort path: a trap instruction or a call of a terminating routine outside the one exit through the host | `objstub` (T) | machine code of every function of the built objects | L4 | required |
 | 2 | No-op or fake success: a function with no store, no call and a result that depends on no input, not generated from contract data | `objstub` (V) | data flow over the machine code; the table of constant answers | L4 | required |
-| 3 | Unresolved or substitutable symbol: undefined, weak undefined, two contract names on one body | `linkstrict` | the linked ELF's symbol table and the link command; a host-target root's imports are the exports of the pinned host runtime (rule (d)); the objects a guest link takes from externals show the one semantic flag set in their DW_AT_producer (rule (f), `producers.py`; own units are proven by their stage documents in `datamodel`) | L1 | required |
+| 3 | Unresolved or substitutable symbol: undefined, weak undefined, two contract names on one body | `linkstrict` | the linked ELF's symbol table and the link command; a host-target root's imports are the exports of the pinned host runtime (rule (d)) | L1 | required |
 | 4 | Import without a body | `imports` | manifest of reachable imports against defined symbols | L5 | wired (per root, `gate_build.quantify`); a root without `imports.in.json` is red |
 | 5 | Code address without a dispatcher entry | `disp` (`link/gate_disp.py`; also `abs`, `link/gate_abs.py`) | dispatcher table against the R3 universe | L1 | wired, red until its inputs are declared |
 | 6 | x86 form without a certificate | `forms` | form universe against published proofs of the current DSL hash | L3b | required with the lift root |
 | 7 | D3D9 enum value or SM1-3 op without a translation | `d3d9total` | generated tables against the enum and op universes | L6 | required with the render root |
-| 8 | Layout or calling-contract mismatch of a native body | `n1`, `n2_data`, `n2_call`, `n2_vcall`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel` (`gate_contract.py`); R7 (`tools/equiv/r7.py`, L2) enters with L2's merge | exe facts against object facts | L1 | wired in `gates.d`; red until `contract_inputs.json` declares the exe-derived externals |
+| 8 | Layout or calling-contract mismatch of a native body | `n1`, `n2_data`, `n2_call`, `n2_vcall`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel` (`gate_contract.py`); R7 (`tools/equiv/r7.py`, L2) enters with L2's merge | exe facts against object facts | L1 | wired in `gates.json`; red until `contract_inputs.json` declares the exe-derived externals |
 | 9 | Non-deterministic build | `determinism` | two cold builds of every recipe in the sandbox, compared bit for bit | L4 | required |
 | 10 | Test that can pass on a wrong body: the expected value comes from the code under test | `oracle` | the declared reference of every test file (`tests/oracle.json`): a dump of the exe under Wine 9.0, a cited text, a contract table or an independent model, outside the import closure of the code under test | L4 | runs |
 | 14 | Memory fault in a hand-written native body: null or wild pointer, access out of bounds, stack exhaustion | none (verification) | AddressSanitizer and UndefinedBehaviorSanitizer in the stage runs and tests; the sound analyzer for information | L4 | covered by verification, not a required gate |
 | 15 | Hang or deadlock | none (verification) | the same stage runs and tests (AddressSanitizer and UndefinedBehaviorSanitizer; the sound analyzer for information) | L4 | covered by verification, not a required gate |
 | 17 | Memory exhaustion: an allocation path without a contract result | `oom` | not chosen yet | the owners of the code | after the first frame |
-| 18 | An assumption without an id and a status: a mention of an assumption that cites no entry of `verify/ASSUMPTIONS.json`, an entry without an owner decision or a named discharge, an id that is in no entry (ASM-001 to ASM-009 are the accepted ones) | `assumptions` (`gate_assumptions.py`) | the mentions of the tree against the registry; the registry against `CLAUDE.md` (OWNER) and a file of `gates.d` / the tracked files (REMOVE) | L1 | runs |
 | 16 | A branch treated as unreachable that can be reached | `reach`, `reachlink` (`contract/gate_reach.py`; writes `GATE_CACHE/reach/<tree>/reach.facts.tsv` for `objstub`) | call-graph facts of the exe and the modules; one certificate per `fact_id`; the references in the linked objects | L1 | wired, red until its inputs are declared |
 | 16 | A dynamic-name GetProcAddress site not statically resolved (the certificates are void) | `gpa` (`contract/gpa_names.py`) | argument flow into every GetProcAddress site | L1 | wired, red until its inputs are declared |
-| A | Data model: the product root is not built by the game's compiler (msvcmodel external, ILP32) with every plugin | `datamodel` | the root's compiler is the `msvcmodel` external, pinned by commit and `tree_sha256`; `fnvnx_order`, `fnvnx_ftoi`, `addr`, `dispatch`, `names`, `sdd`, `pi` are loaded declared inputs | L1 | runs (`verify/gate_datamodel.py`, w17): per guest root one item for the compiler pin plus one per unit, read from the CC stage documents (pin tree mounted, `-mabi=ilp32`, `recipe.SEMANTICS_FLAGS` for native C++, and all of `recipe.PLUGIN_SOURCES` as `/plug/<name>` inputs with `-fplugin` for every C and C++ unit); no guest root: universe 0, green |
+| A | Data model: the product root is not built by the game's compiler (msvcmodel external, ILP32) with every plugin | `datamodel` | the root's compiler is the `msvcmodel` external, pinned by commit and `tree_sha256`; `fnvnx_order`, `fnvnx_ftoi`, `addr`, `dispatch`, `names`, `sdd`, `pi` are loaded declared inputs | L1 | runs (`verify/gate_datamodel.py`, w17): per guest root one item for the compiler pin plus one per unit, read from the CC stage documents (pin tree mounted, `-mabi=ilp32`, `recipe.SEMANTICS_FLAGS` and `recipe.GUEST_CXX_PLUGINS` as `/plug/<name>` inputs with `-fplugin` for native C++); no guest root: universe 0, green |
 | B | Memory ordering (R9): x86 TSO or MSVC volatile compiled without acquire/release | `order` | native and decomp C++ through `fnvnx_order`; lifted C++ against the memory-ordering the lifter emits | L2, L3a | required |
 | C | Floating point not exact where the rule demands it: `_ftol`/`fistp`, NaN comparisons, the rcp/rsqrt table, cpuid | `fpexact` | every float-to-int site through `fnvnx_ftoi`; the table against the pinned reference CPU | L1, L3a | required; not yet written: the native part is open (the plugin writes no per-unit result and emits no calls, so "no other float-to-int call" has no decidable definition from the build outputs; question with the lead), the rcp/rsqrt table (L1) and the lifted part (L3a) are not covered |
 | D | C++ EH or SEH through lifted frames that does not match the exe's EH tables | `eh` | lifted frames against the exe's own EH tables | L3a, L3b | required |
@@ -108,15 +107,15 @@ gates:
 
 ## State of the product gates
 
-Run now (the files of `gates.d`, run in the order of their names; no gate reads another gate's result). With no admitted root of a class a gate covers, it is green with universe 0, which is what
-every merge pays today; with such a root and universe 0 it is red (`covers`, no vacuous green, `gatesdir.py`); with a product root each judges it (tested on a toy root, `tests/test_recipe.py` fixtures). Roots always come from
+Run now (in `gates.json`, after `admit`, in this order). With no product root in `admit.json` each is green with universe 0, which is what
+every merge pays today; with a product root each judges it (tested on a toy root, `tests/test_recipe.py` fixtures). Roots always come from
 `admit.json`, never from gate arguments. Shared state goes through `GATE_CACHE` (`gate_build.ensure`: stage store, `objects/<tree>/<root>`).
 
 - `build` (all roots build in the sandbox), `determinism` (two cold builds and the warm one equal bit for bit): class 9 and the precondition
   of the others.
 - `objstub` (classes 1, 2 and the reach rule of 16): `gate_objstub.py`, rules in `objstub.py`.
   - Terminator set derived from the recipe's compiler by a GCC plugin run over the preprocessed text of every unit (exactly the
-    declarations the compiler sees, headers included), cached per unit; assumption: a terminating routine is declared noreturn. (ASM-044)
+    declarations the compiler sees, headers included), cached per unit; assumption: a terminating routine is declared noreturn.
     A terminator ends the process. Unwinding is not: the EH-resume builtins of GCC's own EH lowering (`_Unwind_Resume`) and, in C++, a
     noreturn function that is not nothrow (`__cxa_throw`) are unwinders, so a landing pad or a `throw` is no class 1 finding
     (rule and limits: `objstub.py`). Objects are ELF32 (ILP32) or ELF64; both ABIs are tested.
@@ -126,7 +125,7 @@ every merge pays today; with such a root and universe 0 it is red (`covers`, no 
     unless `fnvnx_reach_violation` or an `exit` row, and then on every path.
   - Class 2 flags a function unless the analysis proves a call, an access outside its own frame, or an input register live at entry.
     Its register read and write sets come from LLVM 18's instruction descriptions (`a64access.cc`, built against the LLVM libraries);
-    nothing rests on the capstone decoder. The descriptions are LLVM's, and the memory operand fields
+    nothing rests on the capstone decoder. Remaining assumption: LLVM's descriptions are correct, and the memory operand fields
     (base, index, displacement, size) are derived by the encoding rules listed in `a64access.cc`.
   - Cost: per object cache by content; uncached objects in parallel processes (`--jobs`, default all cores). Measured numbers are in the
     report of the change that introduced the gate (30 MB of code in 64 objects: see `gate_objstub.py` history); a warm verdict re-reads only
@@ -139,8 +138,12 @@ every merge pays today; with such a root and universe 0 it is red (`covers`, no 
   is a definition when the root links an ELF and the ELF defines it GLOBAL. Both ABIs are tested.
 
 Required by `gate_admit.REQUIRED_PRODUCT`, so no product root is admitted without a result of each: `oracle` (10, L4, wired) and the gates written on
-their leads' branches that enter with those merges: `imports` (4; L5), `forms` (6; L3a/L3b, one copy to be chosen), `d3d9total` (7; L6), `r7`, `namegate`
-and the ABI tools (8; L2). `argordergate` (class 8, argument order; verify/gate_argorder.py, wired): the universe is the C++ units of the native guest roots (`target` guest, `cxx_origin` native), the certificate is the rule's plugin list in the rule's load order with `fnvnx_order` and its arguments, its .so in the build result (so in the CC-stage key of each unit) and the unit's object; no such root: universe 0, green. A name in `REQUIRED_PRODUCT` must also be a file of `gates.d` (admit rule 3), so the root stays out until the gate exists.
+their leads' branches that enter with those merges: `imports` (4; L5), `forms` (6; L3a/L3b, one copy to be chosen), `d3d9total` (7; L6); L2's `abi`, `namegate`, `r7` (8) are wired, below. L2 gates of class 8, owner L2, one `gates.json` entry each, per-root convention (no native guest root: universe 0, green):
+- `abi` (`verify/gate_abi.py`; rule `link/abi.py`): a reference and the definition it binds to have one calling contract. Universe: the rows `abi.py` defines, over the C++ objects of every native guest root, plus the input facts its proof rests on as items: every `odr` COMDAT signature in two or more objects and every shared `.fnvnx.layout` key (`layout:`). Red iff an item is uncertified, the build is not green, or an object lacks `.fnvnx.sympair` (red item naming the object). `abi` skips `.fnvnx.layout` rows with a `nokey:` flag in its `layout:<key>` items because such a row has no unique key. `r7` makes every `nokey` row red in each unit that has a native body, i.e. wherever native code can read the type; a unit with no native body is lifted and reads exe memory, not C++ layouts.
+- `namegate` (`verify/gate_namegate.py`; rule `link/gate_names.py`): a native body that stands for an exe function carries its MSVC name, certified against the cl object of the same source. Universe: the `rows()` whose symbol is the NATIVE body of an exe function, by the join `addrmap.tsv` (object, symbol -> address) with `bodysel.tsv` (address -> native/lifted); a symbol with no exe address or LIFTED is outside it. Red iff an item is uncertified or the root lacks the bodysel verdict (owner L1) or the cl reference objects (owner L2). A root without `game`: universe 0.
+- `r7` (`verify/gate_r7gate.py`; rule `link/gate_r7.py`): every type a native exe-function body uses has the exe's layout, certified against the cl /Z7 CodeView types. Universe: the `rows()` of the native-bearing units (a unit with at least one native exe-function body; its complete records bound the types the body uses). Red rule as `namegate`. Stated rule of the universe: **a row is in `r7` iff its unit has at least one native exe-function body** (a sound over-approximation: it is stricter than "the types a native body uses", never looser). `gate_r7.rows()` rows carry no symbol, so the per-body narrowing is not possible yet; once rows carry their symbol (type -> functions that use it), the universe can narrow to those types, after the first frame. A record whose key the plugin could not name (`nokey:`) is `undecided`, hence red, inside this universe.
+N3 is wired: the `bind` stage of `gate_contract.py` (contract/bind.py, from the pi plugin's `.fnvnx.n3` rows of the objects and the N1 certificate) writes `n3.tsv`, which the `bodysel` stage takes as `--n3`; a function with no N3 row or a non-`ok` verdict is LIFTED.
+`argordergate` (class 8, argument order; verify/gate_argorder.py, wired): the universe is the C++ units of the native guest roots (`target` guest, `cxx_origin` native), the certificate is the rule's plugin list in the rule's load order with `fnvnx_order` and its arguments, its .so in the build result (so in the CC-stage key of each unit) and the unit's object; no such root: universe 0, green. A name in `REQUIRED_PRODUCT` must also be a file of `gates.d` (admit rule 3), so the root stays out until the gate exists.
 **Universe rule of the per-root gates.** Every per-root gate (`build`, `objstub`, `linkstrict`, `determinism` and the 14 contract gates `n1`, `n2_*`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel`, `abs`, `disp`, `reach`, `reachlink`, `gpa`) quantifies over the admitted product roots of `admit.json` (contract gates through the one function `gate_build.quantify`), and with no product root its universe is 0 and it is green. Admission (`gate_admit` rule 3 plus `REQUIRED_PRODUCT`) is what forces every gate to exist and run on a root, and a root that is admitted but lacks objects, an ELF or an input is red with the reason, never skipped.
 
 **Universe rule of the per-root gates for roots that are not a game tree.** The contract gates have two kinds of items. The game gates (`n1`, `n2_data`, `n2_call`, `n2_vcall`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel`) judge the functions of the units under the root's `game` directory. The link gates (`abs`, `disp`, `reach`, `reachlink`, `gpa`) judge the root's linked guest ELF.
@@ -148,12 +151,7 @@ and the ABI tools (8; L2). `argordergate` (class 8, argument order; verify/gate_
 - `game` is required, and red when missing, exactly for a root whose link produces the guest image (`link` non-null: on the trunk the only link is the guest ELF; the recipe has no separate `kind`). A root with `game` and no link is red: its game units have no image to be judged on.
 - Argument that nothing escapes: every object of the product reaches the contract gates through the one image that links it. A non-image root's objects are judged on the image root that names it (`link.roots`; the field is not in the trunk's recipe yet, so the gate does not read it and the rule rests on `link` alone). An object that no image links is not part of the guest ELF, so it has no run-time role for the gates to cover, and an image root that links such objects is judged on them as its own units.
 
-The contract gates (class 8, plus the link-side `abs`, `disp`, `reach`, `reachlink`, `gpa`) run through `gate_contract.py --gate NAME`, one `gates.d` file each. Per-root inputs are outputs of the root's own build and link, read beside `objects.json` (`root_results` of `contract_inputs.json`): `units.json`, `addrmap.tsv`, `aliases.ld` and, for `disp`, `entries.tsv`; a file the link stage does not emit yet makes the gate red for that root naming it (owner: L1 link stage). The game's units are the directory `build.json` declares as `game` (no default). Shared inputs are the five true externals of fnv-nx-build (commit plus `tree_sha256`: `exe`, `redist`, `msvc`, `facts`, `manifest`), `reach_requests`, `dynsites`, optional `keys`, `bridge`, and `ranges` (where an image's range facts are). The image set of `gpa`, `reach`, `reachlink` is not an input: it is derived by the rule in the section "The guest image set" below. An image of the set without range facts is a reported red item of those gates (owner L3a/L5). `n2_*` and `xc` judge that every function they flag is turned into LIFTED by `bodysel`. Outputs of the chain are cached in `GATE_CACHE/contract/<key>`.
-
-## The assumption registry (class 18, gate `assumptions`; ASM-001 to ASM-009 accepted)
-
-`verify/ASSUMPTIONS.json` is the one list of what the work rests on without proof (ASM-001 to ASM-009 are the accepted ones; every other entry is REMOVE and has an owner who owes its discharge). Every id is ASM-NNN.
-Rule: a text of the tree that mentions an assumption (the words `assum...` and `допущени...`; in a .py file only in comments and docstrings) cites the ids it means, and every cited id has an entry. An OWNER entry quotes the owner's numbered item in `CLAUDE.md` verbatim and the OWNER set is exactly that list (ASM-001 to ASM-009), so nobody can add an accepted assumption. A REMOVE entry names `gate:NAME`, `fact:PATH`, `planned:`, `no gate yet:` or `OPEN:`, with the owner (ASM-010 and later; ids below 200 are free, from 200 an id lies in the block of the owner lead, the first of a joint owner: L3a 2xx, L3b 3xx, L4 4xx, L5 5xx, L6 6xx, L6A 7xx, L2 8xx); the verdict reports the counts of the last three. The registry holds exactly the entries that files of this tree rely on: an entry of an unmerged branch enters with that branch's merge. The rule and its limits are in `TOOLS.md`, section `gate_assumptions.py`. The append-only logs (`JOURNAL.md`, `journal/`) are not scanned.
+The contract gates (class 8, plus the link-side `abs`, `disp`, `reach`, `reachlink`, `gpa`) run through `gate_contract.py --gate NAME`, one `gates.json` entry each. Per-root inputs are outputs of the root's own build and link, read beside `objects.json` (`root_results` of `contract_inputs.json`): `units.json`, `addrmap.tsv`, `aliases.ld` and, for `disp`, `entries.tsv`; a file the link stage does not emit yet makes the gate red for that root naming it (owner: L1 link stage). The game's units are the directory `build.json` declares as `game` (no default). Shared inputs are the five true externals of fnv-nx-build (commit plus `tree_sha256`: `exe`, `redist`, `msvc`, `facts`, `manifest`), `reach_requests`, `dynsites`, optional `keys`, `bridge`, and `ranges` (where an image's range facts are). The image set of `gpa`, `reach`, `reachlink` is not an input: it is derived by the rule in the section "The guest image set" below. An image of the set without range facts is a reported red item of those gates (owner L3a/L5). `n2_*` and `xc` judge that every function they flag is turned into LIFTED by `bodysel`. Outputs of the chain are cached in `GATE_CACHE/contract/<key>`.
 
 ## The guest image set
 
@@ -181,7 +179,7 @@ the `gate_oracle.py` docstring. In short:
   of what python can load): a tool cannot cite itself. The stated rules of the tools are `verify/TOOLS.md`;
 - a test of product code needs a Wine dump or a cited text, and none of its references may lie in a product root.
 
-The pinned exe is `verify/oracle_pins.json`. Assumption: the declaration is true. It is checked by verification, not by the (ASM-042)
+The pinned exe is `verify/oracle_pins.json`. Assumption: the declaration is true. It is checked by verification, not by the
 gate: `verify/oraclecheck.py` runs every test under strace and compares the tracked files the run opened with the import
 closure of the subject plus the references (a file opened outside them, or a subject file never opened, fails the test's
 check). It is a job of the after-merge verifier.
@@ -192,19 +190,19 @@ Reported to the orchestrator; none of these is patched around.
 
 - **Classes 14 and 15** (memory faults, hangs): by the owner's revised decision of 2026-11-11 the memory-safe subset is suspended
   (the suspended design is `verify/MEMSAFE.md`). They are covered by verification, not by required gates: AddressSanitizer and
-  UndefinedBehaviorSanitizer in the stage runs and tests, and the sound analyzer for information. Recorded assumptions: native code is (ASM-005, ASM-006)
+  UndefinedBehaviorSanitizer in the stage runs and tests, and the sound analyzer for information. Recorded assumptions: native code is
   checked, not proved; a wild access of the game into host pages is not excluded by any gate.
 - **Class 17** (memory exhaustion: an allocation path without a contract result) has gate `oom`, owned by the owners of the code, to be
   written after the first frame.
 
-Accepted assumptions that cannot be removed (MASTER_PLAN4 section 4): (ASM-001, ASM-002, ASM-003, ASM-004, ASM-005, ASM-006, ASM-007, ASM-008, ASM-009)
+Accepted assumptions that cannot be removed (MASTER_PLAN4 section 4):
 
 - **A8: Win32 and D3D9 are given by documentation, not by a formal model.** A body that is not vacuous but
   implements its contract only in part is therefore closed by conformance evidence per function. Class 10 makes
   that evidence honest; it does not make it complete.
-- **Behaviour of the console** (Horizon, memory limits on hardware) stays an assumption until a run on the console. (ASM-004)
+- **Behaviour of the console** (Horizon, memory limits on hardware) stays an assumption until a run on the console.
 
-## Assumptions (ASM-001)
+## Assumptions
 
 The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) are defined in `RULES.md`.
 
