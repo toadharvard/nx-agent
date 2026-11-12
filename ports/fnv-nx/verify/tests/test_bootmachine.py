@@ -18,7 +18,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 GUEST_DIR = os.path.join(HERE, "guest")
-HOSTABI_DIR = os.path.join(os.path.dirname(os.path.dirname(VERIFY)), "hostabi", "include")   # hostapi.h, fnvnx/sockwire.h: their one home
+HOSTABI_DIR = os.path.join(os.path.dirname(VERIFY), "hostabi", "include")   # hostapi.h, fnvnx/sockwire.h: their one home
 sys.path.insert(0, VERIFY)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
