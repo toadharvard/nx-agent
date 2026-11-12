@@ -143,9 +143,10 @@ def main():
     # --scenario (rule R-INPUT, bootinput.py): device states over virtual time, expect_events, scenario-error
     elf91, elf90 = patched("h91.elf", 91), patched("h90.elf", 90)
     sj = lambda n, doc: w(n, doc if isinstance(doc, str) else json.dumps(doc))   # noqa: E731
-    VIB = [{"kind": "pad-vibrate", "index": 0, "lo": "0x3f000000", "hi": "0x0"}, {"kind": "pad-vibrate", "index": 2, "lo": "0x3f800000"},
-           {"kind": "pad-vibrate", "index": 3}]
-    sc_ok = sj("s_ok.json", {"schema": "fnvnx-scenario/1", "expect_events": VIB})
+    VIB = [{"kind": "pad-vibrate", "index": 0, "lo": "0x3f000000", "hi": "0x0"}, {"kind": "pad-vibrate", "index": 1},
+           {"kind": "pad-vibrate", "index": 2, "lo": "0x3f800000"}, {"kind": "pad-vibrate", "index": 3}]
+    PADS = [{"t_ns": t * 1_000_000, "dev": "pad", "index": i, "connected": c} for t, i, c in ((50, 0, 1), (120, 1, 1), (150, 2, 1), (250, 3, 1), (350, 3, 0))]
+    sc_ok = sj("s_ok.json", {"schema": "fnvnx-scenario/1", "states": PADS, "expect_events": VIB})
     rc, o, e = cli(args(elf91, "s1.json", table, manifest, "--scenario", sc_ok))
     sd = json.load(open(os.path.join(d, "s1.json")))
     tb.case("--scenario: expect_events equal to the recorded pad-vibrate events: exit 0, inputs hold the sha256 and the content",
@@ -153,12 +154,12 @@ def main():
             and sd["inputs"]["scenario"]["content"] == open(sc_ok).read()
             and sd["inputs"]["scenario"]["sha256"] == __import__("hashlib").sha256(open(sc_ok, "rb").read()).hexdigest()
             and sd["inputs"]["text_entry"] == [], (rc, o, sd["inputs"]))
-    sc_bad = sj("s_bad.json", {"schema": "fnvnx-scenario/1", "expect_events": VIB[:2] + [{"kind": "pad-vibrate", "index": 1}]})
+    sc_bad = sj("s_bad.json", {"schema": "fnvnx-scenario/1", "states": PADS, "expect_events": VIB[:3] + [{"kind": "pad-vibrate", "index": 1}]})
     rc, o, e = cli(args(elf91, "s2.json", table, manifest, "--scenario", sc_bad))
     sd = json.load(open(os.path.join(d, "s2.json")))
     tb.case("--scenario: an expect_events difference fails the run (exit 2, the difference in OUT.json and on stdout)",
             rc == 2 and sd["run"]["reason"] == "exit" and sd["inputs"]["expect_events"]["ok"] is False
-            and sd["inputs"]["expect_events"]["diff"] == ["event 2: index expected 1, recorded 3"] and "expect_events differ" in o, (rc, o, sd["inputs"]))
+            and sd["inputs"]["expect_events"]["diff"] == ["event 3: index expected 1, recorded 3"] and "expect_events differ" in o, (rc, o, sd["inputs"]))
     sc_rng = sj("s_rng.json", {"schema": "fnvnx-scenario/1", "states": [{"t_ns": 0, "dev": "pad", "index": 4}]})
     rc, o, e = cli(args(elf91, "s3.json", table, manifest, "--scenario", sc_rng))
     sd = json.load(open(os.path.join(d, "s3.json")))
