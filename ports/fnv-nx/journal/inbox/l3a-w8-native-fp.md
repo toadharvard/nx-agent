@@ -52,5 +52,7 @@ Open until native_fpflags exists and defects 1 and 2 are closed.
 2. The sticky flags are OWNED (rt/fnvl_x87.h): the live FPSR counts only while a family owns it; entering from outside, the owner is read from c->fex. So flags a native body raises matter only when
    x87 or SSE is the owner at the moment, which narrows the native_fpflags gate (readers reachable while a family owns the FPSR across the native body).
 3. The lifted fistp reads c->fcw, not the host FPCR; only the lifted arithmetic uses the host rounding mode.
-4. A native body that calls a bridge needs the caller's guest registers (esp) in c->r[] first. Imports get them from fnvl_native_in (which also parks). A native-body entry needs the same register
-   save WITHOUT the park. That entry does not exist in the tree yet: it belongs to whoever emits native entries.
+4. A native body that calls a bridge needs the caller's guest registers (esp) in c->r[] first. rt/imp.h now has ONE save, `fnvl_native_enter(nf)` (c->r[] from the guest registers, nframe linked) with
+   its pair `fnvl_native_leave(nf)`; `fnvl_native_in` = enter + park, `fnvl_native_out` = unpark + leave. An exit bridge into a native BODY of an exe address (README `X_<A>`) uses enter/leave and no park
+   (R-FP G1). That exit-bridge emitter does not exist in the tree yet (impgen emits only the import bridges I_<key>, which park); the disptest case that bridges back from a native body and
+   checks the caller's esp/registers needs it, so it waits for it (BLOCKED with the rest).

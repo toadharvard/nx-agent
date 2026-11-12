@@ -15,21 +15,29 @@
      loop goes on (README, control-transfer rule, case 1). The native frames in between are discarded without running native cleanup. */
 struct fnvl_nframe { struct fnvl_nframe *prev; u64 jb[5]; };     /* __builtin_setjmp stores 64-bit words (fp, resume pc, sp) whatever the pointer size */
 #define FNVL_SENT 0x000ffff0u      /* return address of a guest activation started by the runtime; below every key and every image */
+/* A transfer from lifted code into a native function: the caller's guest registers go to c->r[] (esp included) so that a bridge called from the native body
+   (fnvnx_guest_invoke_regs) finds them, and the frame is linked for non-local exits. FP is NOT touched: guest -> native-body is guest -> guest (rule R-FP, G1).
+   The ONE definition of the save; fnvl_native_in (an import entry) is this plus the park. */
+static inline __attribute__((always_inline)) void fnvl_native_enter(struct fnvl_nframe *nf)
+{
+    c->r[0] = eax; c->r[1] = ecx; c->r[2] = edx; c->r[3] = ebx; c->r[4] = esp; c->r[5] = ebp; c->r[6] = esi; c->r[7] = edi;
+    nf->prev = c->nf; c->nf = nf;
+}
 static inline __attribute__((always_inline)) void fnvl_native_in(struct fnvl_nframe *nf)
 {
     u64 a, b;
-    c->r[0] = eax; c->r[1] = ecx; c->r[2] = edx; c->r[3] = ebx; c->r[4] = esp; c->r[5] = ebp; c->r[6] = esi; c->r[7] = edi;
-    nf->prev = c->nf; c->nf = nf;
+    fnvl_native_enter(nf);
     __asm__ volatile("mrs %0, fpcr\n mrs %1, fpsr" : "=r"(a), "=r"(b));
     c->hfpcr = (u32)a; c->hfpsr = (u32)b;
     if (a) { a = 0; __asm__ volatile("msr fpcr, %0" :: "r"(a)); }
 }
+static inline __attribute__((always_inline)) void fnvl_native_leave(struct fnvl_nframe *nf) { c->nf = nf->prev; }
 static inline __attribute__((always_inline)) void fnvl_native_out(struct fnvl_nframe *nf)
 {
     u64 a = c->hfpcr, b = c->hfpsr;
     __asm__ volatile("msr fpsr, %0" :: "r"(b));
     if (a) __asm__ volatile("msr fpcr, %0" :: "r"(a));
-    c->nf = nf->prev;
+    fnvl_native_leave(nf);
 }
 /* x87 result of a native function: pushed as a binary64 carrier (the dynamic stack image every lifted call site syncs with) */
 static inline void fnvl_ret_st0(double d) { dyn_push(fv_f64(d)); }
