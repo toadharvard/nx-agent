@@ -62,7 +62,8 @@
    "-std=gnu++17",
    "-DSTDMETHODCALLTYPE=",
    "-DFNVNX_PLATFORM_BUILD",
-   "-Werror=attributes"
+   "-Werror=attributes",
+   "-fno-reorder-blocks-and-partition"
   ],
   "asm": [
    "-mabi=ilp32"
