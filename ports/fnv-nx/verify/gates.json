@@ -10,7 +10,8 @@
     "ports/fnv-nx/contract",
     "ports/fnv-nx/link",
     "ports/fnv-nx/rules",
-    "ports/fnv-nx/lift"
+    "ports/fnv-nx/lift",
+    "ports/fnv-nx/render/total"
    ],
    "result": "pure.json"
   },
@@ -28,7 +29,8 @@
     "ports/fnv-nx/link",
     "ports/fnv-nx/rules",
     "ports/fnv-nx/lift",
-    "ports/fnv-nx/lift/gates"
+    "ports/fnv-nx/lift/gates",
+    "ports/fnv-nx/render/total"
    ],
    "result": "selftests.json"
   },
@@ -248,6 +250,51 @@
     "ports/fnv-nx/verify/gate_argorder.py"
    ],
    "result": "argordergate.json"
+  },
+  {
+   "name": "imports",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_imports.py"
+   ],
+   "result": "imports.json"
+  },
+  {
+   "name": "machine",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_machine.py"
+   ],
+   "result": "machine.json"
+  },
+  {
+   "name": "hostapi",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_hostapi.py"
+   ],
+   "result": "hostapi.json"
+  },
+  {
+   "name": "datamodel",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_datamodel.py"
+   ],
+   "result": "datamodel.json"
+  },
+  {
+   "name": "d3d9total",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/render/total/gate_d3d9total.py"
+   ],
+   "result": "d3d9total.json"
   },
   {
    "name": "order",

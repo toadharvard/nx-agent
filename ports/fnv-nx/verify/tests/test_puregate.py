@@ -312,7 +312,7 @@ for m in "os os.path sys time datetime glob shutil subprocess pathlib concurrent
          "gzip zipfile tarfile".split():
     case("import restricted " + m, "import %s\n" % m, [])
 case("import restricted: from concurrent import futures", "from concurrent import futures\n", [])
-for m in ("capstone", "elftools", "unicorn", "mako"):
+for m in ("capstone", "elftools", "unicorn", "mako", "z3"):
     case("import external " + m, "import %s\nfrom %s.x import y\n" % (m, m), [])
 check("external modules reported", V("import capstone\n") == [] and not isinstance(U("import capstone\n"), str) and
       pg.scan("import capstone\nimport mako.x\nimport json\n", "t.py")[2] == ["capstone", "mako"], "")

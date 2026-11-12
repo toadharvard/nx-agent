@@ -222,6 +222,19 @@
     "ports/fnv-nx/verify/coffnorm.py"
    ]
   },
+  "test_datamodel.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_datamodel.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_datamodel.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_envcheck.py": {
    "references": [
     {
@@ -264,6 +277,60 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/gate_contract.py"
+   ]
+  },
+  "test_gate_hostapi.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_hostapi.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_hostapi.py"
+   ]
+  },
+  "test_gate_imports.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_imports.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/imports.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/bridgetable.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_imports.py",
+    "ports/fnv-nx/contract/imports.py",
+    "ports/fnv-nx/contract/bridgetable.py"
+   ]
+  },
+  "test_gate_machine.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_machine.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/hive.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_machine.py",
+    "ports/fnv-nx/contract/hive.py"
    ]
   },
   "test_gates.py": {
@@ -554,19 +621,6 @@
     "ports/fnv-nx/verify/puregate_policy.py"
    ]
   },
-  "test_unitflags.py": {
-   "references": [
-    {
-     "anchor": "### Per-unit flags (`unit_flags`, `unit_facts`)",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/RECIPE.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/recipe.py",
-    "ports/fnv-nx/verify/unitstage.py"
-   ]
-  },
   "test_unitstage.py": {
    "references": [
     {
@@ -590,6 +644,20 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
+  "test_views.py": {
+   "references": [
+    {
+     "anchor": "## verify/sandbox.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/sandbox.py",
+    "ports/fnv-nx/verify/unitview.py",
+    "ports/fnv-nx/verify/unitstage.py"
    ]
   }
  }

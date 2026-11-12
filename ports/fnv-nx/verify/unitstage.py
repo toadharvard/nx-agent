@@ -7,7 +7,7 @@ recompiled when nothing it reads changed.
     unitstage.py gcc-set --cxx /abs/g++       print the --exe/--tree arguments of `runtime.py tool` for that compiler
 RULE: what a preprocessor run reads is exactly (1) the CONTENT of the files it opens and (2) the EXISTENCE answers for the paths it
   probes (#include search, __has_include, __has_include_next). A stage is given both, exactly.
-  PP stage  `g++ FLAGS -E -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
+  PP stage  `g++ FLAGS -E -dU -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
             of the source root (/src) and the include roots (/inc/0..), see unitview.py: every name of the real tree, real content
             only for the files of a set C (the closure), every other file a placeholder `#error fnvnx: file outside the declared
             closure`. The key is f(name trees, content of C, compiler, flags).
@@ -58,7 +58,7 @@ ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "
 # (PP stage, CC stage). .s has no preprocessing: its CC stage reads the unit alone (a `.include` there fails: use .S and #include).
 LANG = {".c": (["-x", "c"], ["-x", "c", "-fpreprocessed"]), ".S": (["-x", "assembler-with-cpp"], ["-x", "assembler"]),
         ".s": ([], ["-x", "assembler"])}
-PP_TAIL = ["-E", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
+PP_TAIL = ["-E", "-dU", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
 
 
 def result_file(store, key, name):
@@ -104,7 +104,12 @@ def run_stage(store, doc, cold):
     if old is not None and not cold:
         return key, old, "hit", 0.0
     t0 = time.time()
-    res = sandbox.execute(store, doc, key)
+    try:
+        res = sandbox.execute(store, doc, key)
+    except OSError as e:   # EMLINK, ENOSPC, EXDEV ... of the store or the sandbox set-up: a red stage naming the stage, never a crash
+        x = sandbox.SbxError("stage %s: %s (errno %s)" % (doc["stage"], e.strerror or e, e.errno))
+        x.stage = doc["stage"]
+        raise x
     sec = time.time() - t0
     if old is None:
         sandbox._store_result(store, key, res)
@@ -117,7 +122,6 @@ class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
         self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
-        self.unit_cc_flags = {}   # {unit rel: [flag]}: per-unit flags of the CC stage (the recipe's unit_flags)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
         self.rt = json.load(open(a.toolrt))
         if self.cxx not in self.rt["exes"]:
@@ -145,7 +149,7 @@ class Build:
 
     def doc(self, kind, rel, inputs, tail, src, inc=True):
         seed = hashlib.sha256(rel.encode()).hexdigest()
-        argv = [self.cxx] + (self.iargs if inc else []) + self.flags + (self.cc_flags + self.unit_cc_flags.get(rel, []) if kind == "cc" else []) + ["-frandom-seed=" + seed, "-Werror=date-time"]
+        argv = [self.cxx] + (self.iargs if inc else []) + self.flags + (self.cc_flags if kind == "cc" else []) + ["-frandom-seed=" + seed, "-Werror=date-time"]
         argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
                "env": dict(ENV, PATH=os.path.dirname(self.cxx)), "outputs": ["/out"],
