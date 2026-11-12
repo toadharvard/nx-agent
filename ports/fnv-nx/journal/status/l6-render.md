@@ -199,3 +199,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - w5 admit at w1b 0013509c: 0 file errors over 459 files and 12 roots; red only for 13 gates absent from gates.json (abi, addr32, d3d9total, datamodel, eh, exepin, forms, fpexact, imports, machine, namegate, order, r7). lib/sha256_tests needs L1 w10's test class.
     - w5 next: port the sha256 key onto w1b's translator root (claude/fnv-l6-render-w5-tkey), with gl4 calling `_glsl` (fix d).
     - w6: lib/sha256 is a separate root (L4), and render/d3d9 compiles none of its units (orchestrator rule); L4 told.
+- 03:50Z
+    - The d3dx9 class in gamedata, over all 16 gamedata/* heads: d3dx9_31.dll and d3dx9_38.dll only, both on gamedata/redist c53729e; d3dcompiler_* is absent. Sent to the orchestrator and L1.
+    - w5 b622cbf8: the translator key is sha256 on w1b's root. Accepted; w1b (session_01KmtZKSPYqkKJ24Q6D7aBcE) merges it.
+        - recipe: cold 16 objects; warm 0 stages.
+        - nm: 0 old hashes.
+        - objstub pending: the container lacks the pinned env; w5 runs setup_verdict_env.sh.
+    - lib/sha256 trunk root = L4 20724246.
+        - w6 proves an empty diff against it.
+        - Open at L4: the trunk recipe refuses an include inside the root; the fix is include [] with a quoted relative include.
