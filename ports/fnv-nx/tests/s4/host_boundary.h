@@ -1,4 +1,4 @@
-/* host_boundary.h - the counters and test hooks of host_boundary.cpp (the host implementation of platform/include/fnvnx_boundary.h) */
+/* host_boundary.h - the counters and test hooks of host_boundary.cpp (the host implementation of shim/include/fnvnx_boundary.h) */
 #ifndef FNVNX_TESTS_HOST_BOUNDARY_H
 #define FNVNX_TESTS_HOST_BOUNDARY_H
 #include <stdint.h>

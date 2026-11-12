@@ -1,4 +1,4 @@
-/* test_boundary.cpp - the platform's boundary to the loader and the lifted-code runtime (platform/include/fnvnx_boundary.h,
+/* test_boundary.cpp - the platform's boundary to the loader and the lifted-code runtime (shim/include/fnvnx_boundary.h,
  * host implementation tests/s4/host_boundary.cpp): registered images (module table, PE exports by name / ordinal /
  * forwarder, resources, page map), the value of a system export, game threads, the exit-handler list. */
 #include "s4_test.h"

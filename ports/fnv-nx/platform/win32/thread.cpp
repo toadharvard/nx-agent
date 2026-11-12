@@ -1,7 +1,7 @@
 /* thread.cpp - threads, thread ids, last error, TlsAlloc slots, the image's implicit TLS and the fake TEB
  * behind __readfsdword. */
 #include "w32.h"
-#include "../include/fnvnx_boundary.h"
+#include "fnvnx_boundary.h"
 
 #include <stdio.h>
 #include <stdlib.h>

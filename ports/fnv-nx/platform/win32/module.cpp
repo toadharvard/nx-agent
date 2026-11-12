@@ -1,6 +1,6 @@
 /* module.cpp - modules, command line, process exit, debugging and small kernel32 helpers. */
 #include "w32.h"
-#include "../include/fnvnx_boundary.h"
+#include "fnvnx_boundary.h"
 
 #include <stdio.h>
 #include <stdlib.h>
