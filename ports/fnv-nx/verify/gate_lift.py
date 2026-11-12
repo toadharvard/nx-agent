@@ -133,8 +133,9 @@ def judge_image(gate, root, image, repo, cache):
     rtroot, rtunit = holders[0]
     rt = next(o for o in built[rtroot]["objects"] if o["unit"] == rtunit)
     objs = sorted((o for m in sorted({root, rtroot}) for o in built[m]["objects"]), key=lambda o: (o["unit"], o["sha256"]))
-    r = run_tool(repo, cache, "gate_order.py", [rt["object"]] + [o["object"] for o in objs], ("order", "addrwrap", "align"),
-                 [rt["sha256"], [o["sha256"] for o in objs]], {"JOBS": "4"})
+    judged = [o for o in objs if o is not rt]       # the runtime object only gives sizeof(struct cpu) (RTOBJ); gate_order's universe is the rest
+    r = run_tool(repo, cache, "gate_order.py", [rt["object"]] + [o["object"] for o in judged], ("order", "addrwrap", "align"),
+                 [rt["sha256"], [o["sha256"] for o in judged]], {"JOBS": "4"})
     return fold(image, [r[g] for g in ROWS[gate]])
 
 
