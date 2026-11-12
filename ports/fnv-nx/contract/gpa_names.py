@@ -198,10 +198,50 @@ def gate(results):
     return gatefile.write('gpa', len(dyn), len(dyn) - len(unc), unc, 'GetProcAddress dynamic sites with a derived name set')
 
 
+def specs_of(images_file):
+    """`name=pe,ranges` of the rows of loadlib.py's images.tsv that have range facts (the others are image-less: open rows)."""
+    out = []
+    with open(images_file) as fh:
+        for line in fh.read().splitlines()[1:]:
+            n, pe, rg = line.split('\t')
+            if rg != '-':
+                out.append('%s=%s,%s' % (n, pe, rg))
+    return out
+
+
+def members_of(images_file):
+    """The names of every member of the image set in loadlib.py's images.tsv (with or without range facts)."""
+    with open(images_file) as fh:
+        return [line.split('\t')[0] for line in fh.read().splitlines()[1:]]
+
+
+def load_images(specs, bridge, escapes=(), writes=None, no_memfx=False):
+    """{name (lower): argflow.Image} of `name=pe_path,ranges_path` specs, with the platform's import stacks and (unless no_memfx)
+    the may-write rule; shared by every contract tool that derives call arguments (gpa_names, loadlib)."""
+    stacks = {}
+    if bridge:
+        with open(bridge) as fh:
+            stacks = import_stacks(fh.read())
+    images = {}
+    for spec in specs:
+        nm, rest = spec.split('=', 1)
+        pe, rg = rest.split(',')
+        with open(pe, 'rb') as fh, open(rg) as fr:
+            images[nm.lower()] = argflow.Image(fh.read(), nm.lower(), argflow.read_ranges(fr.read()))
+        images[nm.lower()].import_stack = stacks
+    if not no_memfx:
+        bt = open(bridge).read() if bridge else ''
+        info = memfx.ImportInfo(bt, [open(p).read() for p in escapes], open(writes).read() if writes else '')
+        for nm in sorted(images):
+            memfx.Memfx(images[nm], info)
+    return images
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--sites', required=True)
-    ap.add_argument('--image', action='append', required=True, help='name=pe_path,ranges_path')
+    ap.add_argument('--image', action='append', default=[], help='name=pe_path,ranges_path')
+    ap.add_argument('--images-file', help='images.tsv of loadlib.py: the image set (the least set under imports and resolved LoadLibrary names)')
     ap.add_argument('--handle', action='append', default=[], help='name:0xVA of a CreateFileMapping call')
     ap.add_argument('--bridge')
     ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; the worst letter counts)')
@@ -210,24 +250,12 @@ def main(argv=None):
     ap.add_argument('--modules', help='modules.tsv (lifted modules provide their own names)')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
-    stacks = {}
-    if a.bridge:
-        with open(a.bridge) as fh:
-            stacks = import_stacks(fh.read())
-    images = {}
-    for spec in a.image:
-        nm, rest = spec.split('=', 1)
-        pe, rg = rest.split(',')
-        with open(pe, 'rb') as fh, open(rg) as fr:
-            images[nm.lower()] = argflow.Image(fh.read(), nm.lower(), argflow.read_ranges(fr.read()))
-        images[nm.lower()].import_stack = stacks
-    if not a.no_memfx:
-        bt = open(a.bridge).read() if a.bridge else ''
-        info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')
-        for im in images.values():
-            memfx.Memfx(im, info)
+    images = load_images(a.image + (specs_of(a.images_file) if a.images_file else []), a.bridge, a.escape, a.writes, a.no_memfx)
     with open(a.sites) as fh:
         rows = read_sites(fh.read())
+    if a.images_file:     # a dll that is no member of the image set is never loaded: its sites are not sites of the product
+        mem = members_of(a.images_file)
+        rows = [r for r in rows if r[0].lower() in mem]
     results = run(rows, images)
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, 'gpa_names.tsv'), 'w', newline='\n') as fh:

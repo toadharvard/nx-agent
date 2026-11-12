@@ -334,13 +334,54 @@ Rules fixed here (all three consumers use them through this file and importkey.c
 ```text
 images - the guest image set of the contract gates (L1 CONTRACT): one pure function, no hand list.
 
-RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
-modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
-given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
-or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
-further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
-the `gpa` gate, not of this rule (VERDICT.md).
-Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
+RULE (dllkind.py, shared with modules.py): the set is the least set that contains the exe and is closed under (i) the import directories
+of its members (normal and delay-load, in modules.PE's reading) and (ii) the LoadLibrary targets of its members whose names are statically
+resolved (LOADS, from loadlib.py: {image name: dll names}); a member is a guest image, and the walk does not continue through a bridge or
+declared dll.  A dll file reached by neither is in no image and gets no base.  A dll name (iat.norm_dll) is resolved case-insensitively
+against the files of the given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure
+resolves to guest images or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not
+images; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  A LoadLibrary site whose name is not
+resolved is open in the `loadlib` gate (VERDICT.md): it may add an image, so the set is final only when that gate is green.
+Order: the exe, then the images in discovery order (depth first, import directory, delay-load directory, then loaded names).
+```
+
+## contract/loadlib.py
+
+```text
+loadlib - the image set and the module names every LoadLibrary call of the images can load (L1 CONTRACT).
+
+    loadlib.py --exe E --dir D ... --ranges-exe R --ranges-module 'F/%s/ranges.tsv' --bridge bridge.tsv [--sites dynsites.tsv] --out DIR
+
+One rule over the facts of the images (the same argflow.Image and may-write rule as gpa_names.py):
+  site     every reference of an imported LoadLibraryA/W/ExA/ExW slot (argflow.uses_of_slot_ref: call [slot], call thunk, call reg
+           after mov reg,[slot]); its address is the relocated slot reference, the operand L5's dynsites.tsv names.
+  names    the value set of argument 0 of the calls that use the site (argflow.derive_arg): a string constant leaf is a name
+           (norm_dll'd); any other leaf, a break, or an escape of the slot reference makes the site open.  A closed site
+           loads exactly its names (a name no file answers makes LoadLibrary fail: no module).
+  set      images.image_set over the loads (fixpoint): members with range facts are derived once, their closed names enter the
+           walk and can add members; the set only grows.  A member without range facts has no row (its sites are unknown).
+Outputs: loadlib.tsv (module, site, calls, api, status closed|open, names, breaks), images.tsv (name, pe, ranges or '-'), and the
+gate file `loadlib`: universe = sites + disagreements, certified = closed sites.
+Agreement with L5's dynsites.tsv (--sites): the LoadLibrary rows of every module that has a derivation must be exactly the sites found
+here; a site in only one of the two lists is uncertified (the two finders are one rule or the gate is red).
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import argflow
+import gatefile
+import dllkind
+import gpa_names
+import iat
+import images
+
+
+def api_list():
+    return sorted(a for a in argflow.LOADERS if not a.startswith('GetModuleHandle'))
+
+
+def derive(img):
 ```
 
 ## contract/imports.py

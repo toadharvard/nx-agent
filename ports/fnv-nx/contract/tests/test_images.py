@@ -72,9 +72,16 @@ check("... the declared B is reached but not walked", [n for n, _ in images.clas
 check("C and kernel32 bridged -> B is an image again", [n for n, _ in images.image_set(d + "/A.exe", [d], {"c.dll", "kernel32.dll"})] == ["a.exe", "b.dll"])
 dB = tree({"A.exe": pe(["B.DLL", "kernel32.dll"]), "b.dll": pe(["C.dll"]), "c.dll": pe(["kernel32.dll"])})
 kB = images.classify(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})
-check("a bridge dll with a found file is not an image and is not walked (c.dll is an image on its own, as a file of the directory, not through b)",
-      [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})] == ["a.exe", "c.dll"]
-      and kB[1]["b.dll"] == "bridge" and [n for n, _ in kB[0]] == ["c.dll"], kB[1])
+check("a bridge dll with a found file is not an image and is not walked; c.dll is reached by no import and no resolved LoadLibrary name: no image, no base",
+      [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})] == ["a.exe"]
+      and kB[1]["b.dll"] == "bridge" and kB[0] == [], kB[1])
+check("a resolved LoadLibrary name of the exe adds that file as an image (and its imports); a name of an image not in the set adds nothing",
+      [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"}, {"a.exe": ["c.dll"]})] == ["a.exe", "c.dll"]
+      and [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"}, {"zzz.dll": ["c.dll"]})] == ["a.exe"])
+check("loads of a reached image are followed (the fixpoint of images through LoadLibrary targets)",
+      [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"kernel32.dll"}, {"b.dll": ["c.dll"], "c.dll": ["b.dll"]})] == ["a.exe", "b.dll", "c.dll"])
+check("dllkind.read_loads: closed rows give names, open rows none",
+      __import__("dllkind").read_loads("module\tsite\tcalls\tapi\tstatus\tnames\tbreaks\nx.dll\t0x1\t1\tLoadLibraryA\tclosed\ta.dll,b.dll\t-\nx.dll\t0x2\t2\tLoadLibraryA\topen\t-\tb\n") == {"x.dll": ["a.dll", "b.dll"]})
 check("without the bridge row the same chain is images",
       [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"kernel32.dll"})] == ["a.exe", "b.dll", "c.dll"])
 check("an image whose dependency is a declared dll is itself declared (closure, no named list)",

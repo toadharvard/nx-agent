@@ -90,7 +90,7 @@ class Image:
         self.pe = pe = modules.PE(data, name)
         self.base = pe.base
         self.exe_name = exe_name or name
-        self.ranges = ranges
+        self.ranges = ranges = rebased(ranges, self.base, name)
         self.relocs = set()
         rva, size = pe.dirs[5]
         blob, pos = pe.rd(rva, size) if size else b'', 0
@@ -932,15 +932,40 @@ def forward_uses(img, fn, at, reg):
     return sorted(set(calls)), sorted(set(open_))
 
 
+class Ranges(dict):
+    """{entry: [(start, end)]} of a ranges.tsv; .base = the load base its absolute VAs are at (the `# base=0x..` header), None if absent."""
+    base = None
+
+
 def read_ranges(text):
-    """ranges.tsv: `entry<TAB>start-end,start-end,...` (hex, absolute VAs); an entry with no bytes has no ranges."""
-    out = {}
+    """ranges.tsv: `entry<TAB>start-end,start-end,...` (hex, absolute VAs at the load base of the `# base=0x..` header line);
+    an entry with no bytes has no ranges."""
+    out = Ranges()
     for line in text.splitlines():
+        if line.startswith('# base=0x'):
+            out.base = int(line[len('# base=0x'):].split(':')[0], 16)
         if not line or line[0] == '#':
             continue
         f = line.split('\t')
         rs = [tuple(int(x, 16) for x in r.split('-')) for r in (f[1].split(',') if len(f) > 1 else []) if r]
         out[int(f[0], 16)] = rs
+    return out
+
+
+def rebased(ranges, pe_base, name):
+    """The facts of an image are at the load base the module table assigns (modules.tsv); the image's code, relocations and import
+    slots are read at its preferred base (PE.base), and the L5 manifest names sites there. One coordinate system: the facts shifted
+    by (preferred - assigned).  A fact outside 0 < VA is rejected (the header base and the image do not belong together)."""
+    b = getattr(ranges, 'base', None)
+    if b is None or b == pe_base:
+        return ranges
+    d = pe_base - b
+    out = Ranges()
+    out.base = pe_base
+    for e, rs in ranges.items():
+        if e + d < 0 or any(a + d < 0 for a, _ in rs):
+            raise ValueError('%s: ranges at base %x do not shift to preferred base %x' % (name, b, pe_base))
+        out[e + d] = [(a + d, z + d) for a, z in rs]
     return out
 
 

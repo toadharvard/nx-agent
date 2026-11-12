@@ -634,6 +634,7 @@ def main(argv=None):
     ap.add_argument('--requests', required=True)
     ap.add_argument('--gpa')
     ap.add_argument('--image', action='append', default=[], help='name=pe_path,ranges_path (the image set of the stage)')
+    ap.add_argument('--images-file', help='images.tsv of loadlib.py (instead of --image)')
     ap.add_argument('--bridge')
     ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; worst letter counts)')
     ap.add_argument('--writes', help='per import argument write facts (memfx.ImportInfo); default: every pointer argument may be written')
@@ -643,6 +644,8 @@ def main(argv=None):
     ap.add_argument('--objects')
     ap.add_argument('--certified')
     a = ap.parse_args(argv)
+    if a.images_file:
+        a.image = a.image + gpa_names.specs_of(a.images_file)
     try:
         if a.objects:
             if not a.certified:

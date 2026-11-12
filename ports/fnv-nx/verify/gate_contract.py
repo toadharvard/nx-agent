@@ -153,19 +153,15 @@ def py(script, *args):
     return [sys.executable, "-I", os.path.join(CONTRACT, script)] + list(args)
 
 
-def images_of(doc, ext):
-    """([(name, pe path, ranges path)] of the images that have range facts, [names without]) of contract.images.image_set."""
+def images_of(w):
+    """([names with range facts], [names without]) of the image set the `loadlib` stage wrote in the work dir W (contract/loadlib.py: the
+    least set under the exe's imports and its images' resolved LoadLibrary names); ([], []) before that stage ran."""
     have, lack = [], []
-    bridge = set()          # a bridge dll is never an image (contract/dllkind.py): the dlls with rows in the declared bridge.tsv
-    if doc.get("bridge"):
-        bridge = {r["dll"] for r in iat.bridge_rows(P2(ext, doc["bridge"]))[0]}
-    for name, path in images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge):
-        rel = doc["ranges"]["exe"] if name.endswith(".exe") else doc["ranges"]["module"] % name.rsplit(".", 1)[0]
-        rg = P2(ext, rel)
-        if os.path.isfile(rg):
-            have.append((name, path, rg))
-        else:
-            lack.append(name)
+    p = os.path.join(w, "loadlib", "images.tsv")
+    if os.path.isfile(p):
+        for ln in open(p).read().splitlines()[1:]:
+            f = ln.split("\t")
+            (lack if f[2] == "-" else have).append(f[0])
     return have, lack
 
 
@@ -173,9 +169,7 @@ def stages(w, doc, ext, rp):
     """{stage: (argv, [files it writes])} with paths inside the work dir W (contract/verdict.py's arguments)."""
     P = lambda k: rp[k] if k in rp else P2(ext, doc[k])
     link = w + "/link"
-    imgs = []
-    for name, pe, rg in images_of(doc, ext)[0]:
-        imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
+    imgs = ["--images-file", w + "/loadlib/images.tsv"]
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {
@@ -191,6 +185,9 @@ def stages(w, doc, ext, rp):
         "bodysel": (py("bodysel.py", "--universe", P("universe"), "--n1", w + "/n1.json", "--gates", w + "/gates", "--out", w + "/bodysel.tsv"),
                     ["bodysel.tsv", "gate/bodysel.json"]),
         "abs": (py("../link/gate_abs.py", "--inputs", w + "/inputs.rsp", "--elf", link + "/guest/fnvnx.elf"), ["gate/abs.json"]),
+        "loadlib": (py("loadlib.py", "--exe", P("exe"), "--dir", ext["exe"]["host"], "--dir", ext["redist"]["host"], "--ranges-exe", P2(ext, doc["ranges"]["exe"]),
+                       "--ranges-module", P2(ext, doc["ranges"]["module"]), *(["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []), *(["--sites", opt("dynsites")] if doc.get("dynsites") else []),
+                       "--out", w + "/loadlib"), ["loadlib/loadlib.tsv", "loadlib/images.tsv", "gate/loadlib.json"]),
         "gpa": (py("gpa_names.py", "--sites", opt("dynsites") or "", *imgs, *bridge, "--out", w + "/gpa"), ["gpa/gpa_names.tsv", "gate/gpa.json"]),
         "reach": (py("gate_reach.py", "--requests", opt("reach_requests") or "", "--gpa", w + "/gpa/gpa_names.tsv", *imgs, *bridge, "--out", w + "/reach/reach.tsv",
                      "--facts-tsv", w + "/reach/reach.facts.tsv"), ["reach/reach.facts.tsv", "gate/reach.json"]),
@@ -205,7 +202,7 @@ def stages(w, doc, ext, rp):
 
 NEEDS = {"n1": ["n1"], "xunit": ["xunit"], "rtti": ["rtti"], "pcrel": ["pcrel"], "bodysel": ["exefacts", "n1", "objfacts", "registry", "bodysel"]}
 NEEDS.update({g: NEEDS["bodysel"] for g in REGISTRY})
-NEEDS.update({"abs": ["abs"], "disp": ["disp"], "gpa": ["gpa"], "reach": ["gpa", "reach"], "reachlink": ["gpa", "reach", "reachlink"]})
+NEEDS.update({"abs": ["abs"], "disp": ["disp"], "gpa": ["loadlib", "gpa"], "reach": ["loadlib", "gpa", "reach"], "reachlink": ["loadlib", "gpa", "reach", "reachlink"]})
 
 
 def run_stage(name, w, doc, ext, rp):
@@ -302,8 +299,12 @@ def judge(gate, repo, cache, root):
         if gate not in REGISTRY:
             r = json.load(open(os.path.join(w, "gate", gate + ".json")))
             u, c, ids, detail = r["universe"], r["certified"], [root + ":" + i for i in r["uncertified"]], r["detail"]
+            if gate == "gpa":      # the LoadLibrary names decide the image set the derivation runs on: its sites and the agreement with dynsites count here
+                r2 = json.load(open(os.path.join(w, "gate", "loadlib.json")))
+                u, c, ids = u + r2["universe"], c + r2["certified"], ids + [root + ":" + i for i in r2["uncertified"]]
+                detail += "; loadlib: " + r2["detail"]
             if gate in IMAGE_GATES:                 # an image of the closure without range facts: a reported red item (the stage judged the rest)
-                lack = images_of(doc, ext)[1]
+                lack = images_of(w)[1]
                 u, ids = u + len(lack), ids + [root + ":" + n for n in lack]
                 detail += "".join("; %s has no range facts (owner L3a/L5)" % n for n in lack)
             return u, c, ids, detail

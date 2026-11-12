@@ -12,12 +12,11 @@ Rules (each violated precondition is a stage error that lists everything it foun
             are an error); its own import directory is followed the same way.  A dll that is found nowhere is an error
             (all such dlls are listed).  Delay-load directories do not add modules (the exe's own delay-load helper binds
             them at run time).  A module is an i386 PE32 DLL image, SectionAlignment 4 KiB (what loader/src/pe.c accepts).
-  total     Base assignment and the table cover EVERY *.dll file of the --dir list that is not a system dll (a module loaded
-            later through LoadLibrary must already have its static base: lifted code is keyed by image address), not
-            only the static closure; a file that is not an i386 PE32 DLL (e.g. a 64-bit dll) is a stage error naming it;
-            the imports of the static modules must be system dlls or found modules (an on-demand module may import a dll nobody provides:
-            its slots are reported as without provider and its LoadLibrary fails).  `static` = in the exe's closure; the others
-            are loadable on demand (loader: fnvnx_module_load).
+  least     Base assignment and the table cover the guest images of images.py: the exe's static closure and the dlls its members load
+            through LoadLibrary with a statically resolved name (--loads loadlib.tsv); a dll file reached by neither gets no base and no
+            row (lifted code is keyed by image address, so a module that can be loaded must already have its static base).  A file
+            that is not an i386 PE32 DLL (e.g. a 64-bit dll) is a stage error naming it; an image's imports are system dlls or images.
+            `static` = in the exe's import closure; the others are loadable on demand (loader: fnvnx_module_load).
   order     The Windows rule for static imports: depth first over the import directories in directory order, a module is
             initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency
             cycle the module visited first is initialised last, i.e. an edge back to a module still being visited is not
@@ -56,6 +55,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import declareddlls
 import dllkind
+import images
 import gatefile
 import iat
 
@@ -346,7 +346,7 @@ def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
-def run(exe_path, bridge_path, dirs, out, declared_path):
+def run(exe_path, bridge_path, dirs, out, declared_path, loads=None):
     with open(exe_path, 'rb') as fh:
         exe = PE(fh.read(), os.path.basename(exe_path))
     brows, _ = iat.bridge_rows(bridge_path)
@@ -355,8 +355,9 @@ def run(exe_path, bridge_path, dirs, out, declared_path):
     wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
     mods = scan(dirs, system)
     me = lower(os.path.basename(exe_path))
-    image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, system | {me})
-    declared_mods = {n: m for n, m in mods.items() if n not in image}   # found, no bridge row, the declared machine cannot load them
+    _, kind = images.classify(exe_path, dirs, system, loads)     # the least set: reached through imports and resolved LoadLibrary names
+    image = {n for n in mods if kind.get(n) == 'image'}
+    declared_mods = {n: m for n, m in mods.items() if kind.get(n) == 'declared'}   # found, no bridge row, the declared machine cannot load them
     order = closure(exe, system, {n: m for n, m in mods.items() if n in image}, set(declared_mods))
     end = assign_bases(exe, order)
     os.makedirs(os.path.join(out, 'exports'), exist_ok=True)
@@ -417,10 +418,15 @@ def main():
     ap.add_argument('--bridge', required=True)
     ap.add_argument('--dir', action='append', required=True, help='where module files are looked for; first match in list order')
     ap.add_argument('--declared', required=True, help='declared_dlls.tsv (contract/declareddlls.py): the dlls of the declared machine')
+    ap.add_argument('--loads', help='loadlib.tsv (contract/loadlib.py): the resolved LoadLibrary names of the images')
     ap.add_argument('--out-dir', required=True)
     a = ap.parse_args()
     try:
-        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared)
+        loads = {}
+        if a.loads:
+            with open(a.loads) as fh:
+                loads = dllkind.read_loads(fh.read())
+        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, loads)
     except (StageError, ValueError, OSError) as e:
         sys.exit('modules: %s' % e)
     print(text)
