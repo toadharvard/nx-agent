@@ -3,6 +3,7 @@
 
     python3 -I certs_build.py --id                                  the model id (first 12 hex of the pinned IR sha256)
     python3 -I certs_build.py --shards PATH [PATH ...] --out certs.tsv [--report FILE]
+    python3 -I certs_build.py --coverage SHAPES.tsv --shards PATH [PATH ...] [--out MISSING]   global coverage: every int key with a Form has one decided record at the current (shape_sha, IR sha); exit 1 and the list when keys are MISSING
     python3 -I certs_build.py --queue SHAPES.tsv [--shards PATH ...] --out QUEUE   the encodings that still need a proof (see below); prints `queue <id> <n>`
 PATH = a shapeprove_<K>_of_<N>.jsonl file or a directory searched (sorted, recursively) for such files.
 
@@ -135,9 +136,8 @@ def build(files):
     return [rows[k] for k in sorted(rows)], counts, status
 
 
-def queue(shapes_path, files):
-    """-> (queue id, [(key, shape_sha)] sorted): integer-family shapes of the shapes file with a symbolic Form and no valid certificate in the shards"""
-    proved, _, _ = scan(files)
+def forms_of(shapes_path):
+    """{shape key: current shape_sha}: the integer-family shapes of the shapes file that have a symbolic Form (the set the farms must cover)"""
     md = shape.decoder()
     out = {}
     with open(shapes_path) as fh:
@@ -154,11 +154,34 @@ def queue(shapes_path, files):
             except shape.ShapeError:
                 continue
             d = current_sha(ck)
-            if fam == 'int' and d is not None and proved.get(ck) != d:
+            if fam == 'int' and d is not None:
                 out[ck] = d
-    q = sorted(out.items())
+    return out
+
+
+def queue(shapes_path, files):
+    """-> (queue id, [(key, shape_sha)] sorted): integer-family shapes of the shapes file with a symbolic Form and no valid certificate in the shards"""
+    proved, _, _ = scan(files)
+    q = sorted((k, d) for k, d in forms_of(shapes_path).items() if proved.get(k) != d)
     h = hashlib.sha256(''.join('%s\t%s\n' % x for x in q).encode()).hexdigest()[:12]
     return h, q
+
+
+def coverage(shapes_path, files):
+    """GLOBAL coverage of the farm run, independent of how any farm split its queue: every shape key with a Form must have EXACTLY ONE decided result at (key, current shape_sha, pinned IR sha)
+    (several records of the same result are duplicates; two different results are `Refused` by scan).  -> (total, {result: n}, [keys with no record], duplicates)"""
+    model = pinned_model()
+    want = forms_of(shapes_path)
+    seen = {}
+    for f, i, r in records(files):
+        if r.get('shape') in want and r.get('model_sha') == model and r.get('dsl_sha') == want[r['shape']] and r.get('result') not in ('no-form', 'builder-branches-on-field', 'field-decode', 'decode'):
+            seen.setdefault(r['shape'], []).append(r['result'])
+    scan(files)                                                       # contradictions are refused
+    res = {}
+    for k, v in seen.items():
+        for x in set(v):
+            res[x] = res.get(x, 0) + 1
+    return len(want), res, sorted(k for k in want if k not in seen), sum(len(v) - 1 for v in seen.values())
 
 
 def main(argv):
@@ -168,10 +191,22 @@ def main(argv):
     ap.add_argument('--out')
     ap.add_argument('--queue')
     ap.add_argument('--report')
+    ap.add_argument('--coverage')
     a = ap.parse_args(argv)
     if a.id:
         sys.stdout.write(run_id() + '\n')
         return 0
+    if a.coverage:
+        try:
+            total, res, missing, dups = coverage(a.coverage, shard_files(a.shards or []))
+        except Refused as e:
+            sys.stderr.write('certs_build: REFUSED: %s\n' % e)
+            return 2
+        sys.stdout.write('coverage: %d keys with a Form; decided %d (%s); duplicate records %d; MISSING %d\n' % (total, total - len(missing), ' '.join('%s=%d' % x for x in sorted(res.items())), dups, len(missing)))
+        if a.out:
+            with open(a.out, 'w', newline='\n') as fh:
+                fh.writelines(k + '\n' for k in missing)
+        return 1 if missing else 0
     if a.queue:
         if not a.out:
             sys.stderr.write('certs_build: --queue SHAPES --out FILE\n')

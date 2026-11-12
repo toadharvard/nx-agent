@@ -122,6 +122,17 @@ class Aggregate(unittest.TestCase):
         self.assertEqual(self.run_main([self.d], o), 0)
         self.assertEqual(len(open(o).read().splitlines()), 2)
 
+    def test_coverage_is_global_and_independent_of_the_split(self):      # two farms with different queues (so different K-of-N splits) may overlap or leave a gap: the fold sees it
+        o = os.path.join(self.d, 'miss'); sf = self.shapes_file(KEYS)
+        a = self.write('shapeprove_1_of_2.jsonl', [rec(KEYS[0]), rec(KEYS[1], 'model-gap')])
+        self.assertEqual(certs_build.main(['--coverage', sf, '--shards', a, '--out', o]), 1)           # KEYS[2] has no record: MISSING
+        self.assertEqual(open(o).read().split(), [KEYS[2]])
+        b = self.write('shapeprove_2_of_3.jsonl', [rec(KEYS[1], 'model-gap'), rec(KEYS[2])])             # overlaps KEYS[1] (another split)
+        self.assertEqual(certs_build.main(['--coverage', sf, '--shards', a, b, '--out', o]), 0)
+        self.assertEqual(open(o).read(), '')
+        c = self.write('shapeprove_3_of_3.jsonl', [rec(KEYS[2], 'FAILED(dsl)')])                          # the same key proved and FAILED: refused
+        self.assertEqual(certs_build.main(['--coverage', sf, '--shards', a, b, c, '--out', o]), 2)
+
 
 if __name__ == '__main__':
     unittest.main()
