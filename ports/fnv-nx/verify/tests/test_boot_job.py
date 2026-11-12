@@ -65,18 +65,9 @@ def git(*args, cwd=None, check=True):
 
 
 def lifted_elf(mode):
-    """the guest of test_bootmachine.build(mode) with .text renamed to .text.fnvl (crt0 header patched as build() does)"""
-    renamed = os.path.join(SCRATCH, "g%d.fnvl.elf" % mode)
-    raw_path = tb.build(mode)[1]   # MODE 80: the renderer guest (real nxgpu calls)
-    subprocess.run(["aarch64-linux-gnu-objcopy", "--rename-section", ".text=.text.fnvl", raw_path, renamed], check=True)
-    data = bytearray(open(renamed, "rb").read())
-    phoff, phnum = struct.unpack_from("<I", data, 28)[0], struct.unpack_from("<H", data, 44)[0]
-    loads = [p for p in (struct.unpack_from("<8I", data, phoff + 32 * i) for i in range(phnum)) if p[0] == 1]
-    lo = min(p[3] for p in loads) // 4096 * 4096
-    hi = (max(p[3] + p[5] for p in loads) + 4095) // 4096 * 4096
-    first_x = next(p for p in loads if p[6] & 1)
-    struct.pack_into("<III", data, first_x[1] + 16, lo, hi - lo, 1)
-    return bytes(data)
+    """the guest image of MODE as the recipe builds it: the three fnvboot_* functions stand for lifted code and sit in the input section
+    .text.fnvl by their own source (tests/bootguest/guest.c); the crt0 header words are written by the recipe's ldcheck stage"""
+    return tb.build(mode)[0]
 
 
 def publish_branch(name, files):

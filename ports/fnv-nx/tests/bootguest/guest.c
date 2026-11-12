@@ -118,10 +118,11 @@ static uint64_t sec_worker(uint64_t arg) {
     H2(H->wake_address, FNVNX_ADDR(&sflag), 1);
     return 0;
 }
-/* boot-stage CLI test (MODE 6): three functions called in order; results 0, 1, 0 */
-__attribute__((noinline, used)) uint32_t fnvboot_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x - x; }
-__attribute__((noinline, used)) uint32_t fnvboot_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return (x | 1) & 1; }
-__attribute__((noinline, used)) uint32_t fnvboot_c(uint32_t x) { __asm__ volatile("" ::: "memory"); return x ^ x; }
+/* boot-stage CLI test (MODE 6): three functions called in order; results 0, 1, 0. They stand for the lifted code: input section .text.fnvl
+   (the job's icount spec reads the range `lifted` = section .text.fnvl; the link script places the section with the code) */
+__attribute__((noinline, used, section(".text.fnvl"))) uint32_t fnvboot_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x - x; }
+__attribute__((noinline, used, section(".text.fnvl"))) uint32_t fnvboot_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return (x | 1) & 1; }
+__attribute__((noinline, used, section(".text.fnvl"))) uint32_t fnvboot_c(uint32_t x) { __asm__ volatile("" ::: "memory"); return x ^ x; }
 uint64_t __fnvnx_guest_entry(uint64_t api) {
     relocate((uint32_t)(uintptr_t)__fnvnx_guest_start);
     fnvnx_host = (const FnvnxHostApi *)(uintptr_t)api;
