@@ -243,3 +243,10 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - 7 MojoShader handlers whose empty bodies are their opcode's semantics (NOP, DCL, phase, TEXM3X?PAD, RESERVED, parse_args_NULL), sent to L1 as a class question with a proposed reference-record rule;
         - fnvnx_shader_backends (ours), being examined;
         - the borrowed lib/sha256.
+- 04:20Z
+    - Merged farm-env 87c938ac as af919720.
+        - use_program = not_linked for exactly the 179 link-failed rows.
+        - Shipped set: 7,631 vs (443 distinct) and 8,160 ps (1,366 distinct). 146 vs output and 257 ps input signatures with masks. 0 ps_1_x.
+        - The farm is paused for job 3, which waits on w3b's L1/L2 lemmas.
+    - L1 accepted the empty-handler class through three generated justifications: (a) op_syntax from docs-d3d9 syntax lines, (b) op_cover emitter coverage (one table with w4's), (c) RESERVED as fnvnx_reach_violation with a certificate.
+        - w5 is generating them on claude/fnv-l6-render-w5-ops: doing.
