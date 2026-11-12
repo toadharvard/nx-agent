@@ -27,3 +27,16 @@ Hashes computed by cas.py ingest of `git archive` exports (no .git).
 - undefined-symbol set vs dkabi.tsv: not available (no object built).
 - dkabi.tsv publish to fnv-nx-build l6a/dkabi: not done (build red; the session has read access only to fnv-nx-build).
 - Plugin mechanism: exists in trunk recipe.py (plugins/plugin_cxx, 08f6ea3); not used, since the root has no C++ unit.
+
+## Update (branch head fbd1c779; supersedes the red results above)
+Everything above is history; the current state of the root is below. All numbers are global (19/19 units of render/backend).
+- Commits on top of the first report: aed30f4 NXSP v2 (G table), 2952e46 NxShaderD3D key[32] (size 64, offset asserts), 16893be NXSP v2 D table in dk_shader.c/dk.h (48-byte header, offsets >= 48, D rows 64 bytes, lookup by sha256 key with stage/variant/link/bytecode byte compare; fnv1a64, crc32, pack_find, the "%016llx" lookup and the variant/link refusal deleted; only ver 2 is read), fbd1c779 revert of the stack-protector/fortify flags.
+- Measured on a scratch merge of w16 dbfaefeb (merge b5e8f078, not pushed) with fbd1c779: specdefaults passes; two fresh stores, both green, 19 objects, stages run 38 hit 0; the 19 object sha256 are equal across the two runs and none equals the 885852ac run's (expected: different flags and w16 keys).
+- Undefined set: 183 raw, 97 defined in the root, 86 external = 74 dkabi.tsv rows + 9 libc (clock_gettime free malloc memcmp memcpy memset realloc snprintf vsnprintf; strcmp/strncmp left with pack_find) + 3 embedder hooks (nxdk_guest_ptr nxdk_on_present nxdk_shader_pack). No __*_chk and no __stack_chk_* names. TLS relocations and TLS symbols: 0.
+- build.json states no new target option: the specdefaults stage asked for none beyond -march=armv8-a+crc+crypto, -mtune=cortex-a57, -fPIE (as before); sources of those values: devkitA64 switch rules / build_dk.sh, per the lead.
+- L1 verdict (l1.py) was not rerun after these commits.
+- Not done: the shader producer (shaderpack.py, on claude/fnv-l6-render-w2b) still writes NXSP v1 and must write v2 with G and D tables; dkabi.tsv publication to fnv-nx-build l6a/dkabi stays with the lead. L6's variant bit 1 (FLAT) widens the D-table check to var <= 3 with a pixel shader refused when (var & 1); not applied, waits for L6's nxgpu4_shader.h.
+- Environment findings (L1's, files not edited by me):
+  1. The pip step of farm/setup_verdict_env.sh at 885852ac..de8ed638 failed (`pip install --require-hashes -r -`: "No such file or directory: '-'"). I installed z3-solver 5.4.1.0 with the sha256 of env.json from a requirements file: the same pinned wheel and hash.
+  2. At dbfaefeb the script goes through farm/install_mirror.py, which crashes with `KeyError: 'autoconf'` (line 63, `doc["packages"][name]`). The three python modules then missing (gmpy2 2.3.2, keystone-engine 0.9.2, pefile 2024.8.26) I installed with exact versions and the sha256 of env.json python.wheel_sha256 (--require-hashes --no-deps, from the package index, not the mirror); envcheck.py then reported OK. I did not compare installed-files hashes beyond envcheck's own check.
+- Status: deko3d work stopped by order; branch left at fbd1c779.
