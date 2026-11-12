@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gpa_names - the (module, name) pairs every GetProcAddress site of the images can ask for (L1 CONTRACT, import manifest).
 
-    gpa_names.py --sites dynsites.tsv --image NAME=pe[,ranges.tsv] ... [--bridge bridge.tsv] [--modules modules.tsv] --out DIR
+    gpa_names.py --sites dynsites.tsv --image NAME=pe ... --facts DIR --facts-tree SHA [--bridge bridge.tsv] [--modules modules.tsv] --out DIR
 
 Input rows (dynsites.tsv of L5: module, site, api, operand): `site` is the address of the relocated 4-byte slot operand (at
 the module's preferred base) of an instruction that reads the IAT slot of the import `api`.  Only api = GetProcAddress rows
@@ -33,6 +33,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the gate runs it with -I: the script's directory is not on the path
 import argflow
+import imagerec
 import gatefile
 import iat
 import memfx
@@ -201,7 +202,9 @@ def gate(results):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--sites', required=True)
-    ap.add_argument('--image', action='append', required=True, help='name=pe_path,ranges_path')
+    ap.add_argument('--image', action='append', required=True, help='NAME=image path (its runs come from --facts)')
+    ap.add_argument('--facts', required=True, help='the facts directory (manifest.json, ranges)')
+    ap.add_argument('--facts-tree', required=True, help='tree_sha256 of the facts directory, the pin')
     ap.add_argument('--handle', action='append', default=[], help='name:0xVA of a CreateFileMapping call')
     ap.add_argument('--bridge')
     ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; the worst letter counts)')
@@ -214,13 +217,9 @@ def main(argv=None):
     if a.bridge:
         with open(a.bridge) as fh:
             stacks = import_stacks(fh.read())
-    images = {}
-    for spec in a.image:
-        nm, rest = spec.split('=', 1)
-        pe, rg = rest.split(',')
-        with open(pe, 'rb') as fh, open(rg) as fr:
-            images[nm.lower()] = argflow.Image(fh.read(), nm.lower(), argflow.read_ranges(fr.read()))
-        images[nm.lower()].import_stack = stacks
+    images = {nm: argflow.Image(rec) for nm, rec in imagerec.load_images(a.image, a.facts, a.facts_tree).items()}
+    for im in images.values():
+        im.import_stack = stacks
     if not a.no_memfx:
         bt = open(a.bridge).read() if a.bridge else ''
         info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')

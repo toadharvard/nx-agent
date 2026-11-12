@@ -566,9 +566,9 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
             err = ERROR_INVALID_PARAMETER;   /* beyond what the section / view grants */
         for (size_t i = f; i <= l && !err && !reach; i++)
             if (g_pg[i].flags & F_ALIAS_FILE)
-                reach = REACH_KERNEL32_CreateFileMappingA_PROT;
+                reach = FNVNX_REACH_KERNEL32_CreateFileMappingA_PROT;
             else if (g_pg[i].flags & F_ALIAS_PF)
-                reach = REACH_KERNEL32_CreateFileMappingA_HFILE;
+                reach = FNVNX_REACH_KERNEL32_CreateFileMappingA_HFILE;
         if (!err && !reach && !(g_pg[f].flags & F_WATCH) && os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(prot)))
             err = ERROR_INVALID_PARAMETER;
         if (!err && !reach) {

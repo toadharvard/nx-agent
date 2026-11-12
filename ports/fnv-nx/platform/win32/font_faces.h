@@ -1,6 +1,6 @@
 /* font_faces.h - the faces that platform code requests, the one declared table (L5 declared machine).
  * The declared font set is the faces that the exe, its modules and the platform's own call sites can request, each mapped by Wine 9.0's
- * font mapper to the files Wine ships (platform/manifest/fontfaces.py, check_fontfaces.py). A platform call site names a face only by
+ * font mapper to the files Wine ships (manifest/fontfaces.py, check_fontfaces.py). A platform call site names a face only by
  * w32_face_name(FACE_x) with a constant id: the census reads those calls from the compiled objects (relocations of w32_face_name and
  * the immediate argument), so a face that is not in this table cannot be requested by the API of this layer.
  *   FACE(id, name, where the platform asks for it)                                                                                      */

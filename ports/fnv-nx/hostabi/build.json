@@ -16,6 +16,27 @@
   },
   "include": [],
   "units": "all",
+  "generated": [
+    {
+      "tool": "ports/fnv-nx/manifest/gen_wire_errno.py",
+      "args": [
+        "--libnx-convert",
+        "/ext/libnx/nx/source/runtime/devices/convert_errno.c",
+        "--newlib-errno",
+        "/ext/a64/aarch64-none-elf/include/sys/errno.h",
+        "--committed",
+        "/in/ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h",
+        "--out",
+        "/out/wire_errno.stamp"
+      ],
+      "inputs": [
+        "ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h"
+      ],
+      "outputs": [
+        "wire_errno.stamp"
+      ]
+    }
+  ],
   "external": [
     {
       "name": "gcc-msvcmodel",
@@ -24,6 +45,22 @@
       "commit": "b4057704c0babd012e466cc89181132e02542289",
       "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
       "at": "/ext/gcc"
+    },
+    {
+      "name": "fnvnx-a64-msvcmodel",
+      "repo": "fnv-nx-build",
+      "ref": "tools/fnvnx-a64-msvcmodel",
+      "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
+      "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
+      "at": "/ext/a64"
+    },
+    {
+      "name": "libnx",
+      "repo": "fnv-nx-build",
+      "ref": "tools/libnx",
+      "commit": "518bf11ad6a52149e43fbd0fa83b0087a430f446",
+      "tree_sha256": "28642e369e75dfe075aac6ee427a82ee9e0cbbe6941be36b0e977da3c96d9298",
+      "at": "/ext/libnx"
     }
   ]
 }

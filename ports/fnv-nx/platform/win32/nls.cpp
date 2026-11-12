@@ -15,7 +15,7 @@
  * 0x800, 0, 0xC00, 0x1000, 0x1400) and the invariant locale 0x7F; any other LCID is not installed. Both use the
  * default sort (GUID 00000001-57ee-1e5c-00b4-d0000bb1e11e: no exception table, no compression table).
  *
- * ASSUMPTIONS that remain:
+ * Declared-machine decisions (CLAUDE.md, the declared machine; Wine 9.0 as an acceptable implementation):
  *  R1 the installed code pages and locales are those above, not Wine's full set (CP_UNIXCP and all DBCS pages absent).
  *  R2 EnumSystemLocalesA lists the one en-US locale.
  *  R3 arguments Wine does not check but cannot survive (GetStringType with cch < -1 or a NULL output buffer for

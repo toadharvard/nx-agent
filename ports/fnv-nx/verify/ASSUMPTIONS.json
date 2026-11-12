@@ -1537,6 +1537,19 @@
    "status": "REMOVE",
    "removed_by": "planned: a gate reads the facts of rules/prepare.py, whose mscgate.check_rule_edit checks every edit of every rule at the moment it is made, so the whole-file count does not rest on it",
    "owner": "L2"
+  },
+  {
+   "id": "ASM-501",
+   "text": "The function boundaries and the forward control flow of the platform manifest passes: a function starts at a prologue pattern and ends at the next one, flow is followed forward only.",
+   "used_by": [
+    "ports/fnv-nx/manifest/funcfacts.py",
+    "ports/fnv-nx/manifest/check_funcfacts.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "fact:ports/fnv-nx/manifest/funcfacts.py",
+   "owner": "L5+L3a",
+   "note": "removed: the passes read the L3a function facts (facts.json pin); gate check_funcfacts.py keeps image bytes and code facts inside funcfacts.py. Enters the registry with the merge of the L5 manifest, the files of used_by being tracked there."
   }
  ]
 }

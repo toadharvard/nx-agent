@@ -185,7 +185,7 @@ int64_t clk_peek_filetime(void) { return EPOCH_FT + (int64_t)(t_now / Q); }
 
 /* The zone is not a property of the clock: it is the host's (TZ_AT; the emulator's host answers UTC, the posix test backend the scripted
  * zone). One source for the real and the virtual clock, no literal here. */
-int32_t clk_tz_offset_minutes(void) { return os_tz_offset_minutes(); }
+int32_t clk_zone_offset_minutes(void) { return os_zone_offset_minutes(); }
 int clk_tz_rule(clk_tzrule_t *r)
 {
     os_tzrule_t o;
