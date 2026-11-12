@@ -284,3 +284,7 @@ Update 2026-11-12, at 698adefb:
   - lift/rt not admitted (int3);
   - link.script outside the root (L1);
   - ldcheck tool-root check (L1, recipe.py:589).
+
+## 2026-11-12 09:05
+- w8 disptest on lift/bridges: blocked. The root does not exist yet, and its three base lines conflict in L1 files: w14-src, w20-descs (recipe.py/admit.json/RECIPE.md) and int3 (gate_lift.py). Owner: L1, asked for one merged line. The root design is accepted (a bridgegen stage `uses` descs, forbid_sections .fnvnx.disp). fnvl_host.h comes from L5's platform root through a cross-root include, not as a copy. w8 has moved on to the L2 cl-matrix comparison.
+- w8 done: gen.py stdcall/fastcall/thiscall rows d9c91cc0 (disp2), t16c 6b3cb220.
