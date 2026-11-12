@@ -58,3 +58,37 @@ Clean /home/user/l3work, toolchain built from tools/sail-mirror @33c9badb (verif
    (4 cores bound it at 4). That is a bound by arithmetic, not by a measurement of peak RSS.
 Not done: no publication run (PUBLISH=1) was made; no certs.tsv was rebuilt from these records (certs_build --shards on them is the next step; the
 formgate pin of certs.tsv must be updated then).
+
+## 6. The shape queue: scope and superset argument (w4, f46bf37d + this note)
+Source: fnv-nx-build branch l3b-lift/shapes @77524556d0ce5d10f22451870350caa2f66dd724. KEYS.tsv pins, per module, image_sha256, ranges_sha256, tool_sha256 (= sha256(proof/shape.py + proof/census.py))
+and the sha256 of its shapes.tsv; farm_shapeprove.sh refuses a mismatch. Modules (7 images): FalloutNV, atimgpud, binkw32, d3dx9_31, d3dx9_38, libvorbis, libvorbisfile. Each shapes.tsv = proof/census.py
+output: ONE row per shape key = proof/shape.py shape_key(instruction) over EVERY instruction of the recursive code ranges (ranges.tsv of the module facts), each distinct range decoded from its start.
+Union of the 7 modules (distinct shape keys, global): int 19 817, x87 2 175, simd 4 369, sys 139 = 26 500.
+Queue of farm_shapeprove.sh = the INT family only (shapeprove.py: "Integer family only (shape.family == 'int'); the other families have their own provers") that has a DSL Form and no valid cert:
+19 494 of the 19 817 int shapes at this commit (the other 323 have no builder yet or a builder precondition: no-form / builder-branches-on-field / field-decode, printed per class by shapeprove). x87 (2 175),
+simd (4 369) and sys (139) shapes are NOT in this queue: x87/simd have no run of the x86isa integer model (their own provers / the FP exactness gate), sys has the forms_sys builders of stage 2. Nothing of them is certified by the 19 494 run.
+Superset argument: every instruction the lifter emits is decoded from the same code ranges of the same images (the lifter's input is the ranges, the census decodes the ranges); a shape key is a function of the
+instruction's bytes (prefix, opcode, ModRM, SIB bytes kept; immediate, displacement and relative-target bytes masked), so the shape of every emitted instruction is a row of that module's shapes.tsv, hence in the
+union, by construction. It holds only while (1) the lifter's ranges = the census ranges (same ranges_sha256), (2) every range decodes: FalloutNV has `# undecodable 00e7c100-00e7c1d9 stopped_at=00e7c11c`, i.e. the
+shapes of instructions after 00e7c11c in that range are NOT in the universe (census exit status 1) - the ranges owner must resolve it or exclude the range from the lifter; I did not check whether the lift pack
+ranges contain it; (3) 'the family is a function of the shape' (census.py docstring Assumption, checked per shape by re-decoding the representative, not proved; no ASM id for it yet).
+Not certifiable yet (not failed): 75 bound shapes + 67ac (lodsb with 0x67) = model-gap 'Opcode Unimplemented in x86isa!' (model fact, case (b)); 671e (push ds) FAILED(dsl) = the sreg operand has no source variable (stage 2).
+
+## 7. BOUND census (w4; measured at l3b-lift/shapes @77524556, shape rows of proof/census.py; global over the 7 images)
+BOUND (opcode 62, ModRM mod != 11, form_key bound|r32,m64|62, + prefixed variants): 75 distinct shapes, 1 272 sites (an instruction address counted once per shape). Per module: FalloutNV 12 shapes / 30 sites,
+d3dx9_31 42 / 312, d3dx9_38 66 / 930 (shapes are shared between modules, so 75 is the union, not the sum), atimgpud, binkw32, libvorbis, libvorbisfile 0 / 0. Largest: 626500 (be\0) 263 sites d3dx9_38 / 102 d3dx9_31;
+626100 75 / 12; 626900 90 / 28; 626c6500 111 / 44; 6200 46 (d3dx9_38), 18 (FalloutNV). Indicator ONLY (not a rule): 105 of the 117 module-shape rows (FalloutNV 5 of 12, d3dx9_31 39 of 42, d3dx9_38 61 of 66) are made of printable-ASCII or
+NUL bytes only (62 65 00 = "be\0", 62 6c 65 00 = "ble\0"): the byte pattern of text decoded as code inside the census ranges. Reachability of each site is NOT decided here: that is the closure / call-graph rule's (sites per module are
+in the census rows: first_address is in shapes.tsv, the full site list needs census.py with the facts, which are private). Model fact: x86isa does not implement BOUND ('Opcode Unimplemented in x86isa!'), so no certificate is possible; DSL builder: forms_flow `bound`
+(fault kind 4, state unchanged otherwise), certificate-free until the orchestrator decides. Same class: 67ac (lodsb under 16-bit addressing) 1 shape: model 'Opcode Unimplemented'.
+
+## 8. forms_sys intake (w4, from L3a's e9124b30; measured at shapes @77524556)
+Taken byte for byte from L3a's commit: fnvlift/dsl.py (uf, swhen, FAULTS 1..11), fnvlift/f_sys.py (trap0d_privileged), proof/forms_sys.py. Hooks applied by hand (same hunks as bab6030): forms.build imports forms_sys,
+forms_move.mov routes CRn/DRn to forms_sys.privileged, symform.eip_dependence and normalize carry swhen. Builders: 11 handler functions in forms_sys (arpl, privileged [25 mnemonics + mov cr/dr], int, into, int1, sldt, str, smsw,
+sgdt/sidt, cpuid, rdtsc): 11 taken, 0 rewritten; bound stays mine, in forms_flow.
+shape_sha over the 19,817 int keys (before = 20422a8d, after = this tree): 19,494 same, 166 error in both, 157 new Form (arpl, keys 63xx), 0 changed. The sys-family shapes (139) are not in the int key list and had no Form before.
+Model answer, one representative encoding per class (27 encodings, prove_one on the 70c8dc39 IR): ALL 27 are model-gap. 'Opcode Unimplemented in x86isa!': arpl, int n, into, int1, cli, sti, in, out, ins, cpuid, rdtsc.
+'(:GP)' (the model dispatches these as a #GP fault): sldt, str, sgdt, sidt, smsw, mov cr, hlt, lldt/lgdt-class (0f00d0, 0f0130). So nothing in forms_sys is certifiable against the pinned model; the uf nodes
+(cpuid, rdtsc) have no model counterpart at all (the model does not implement either), so "uf matched to the model" has no answer: the declared machine's cpuid / platform timer are not a model fact.
+Fault kinds 4-11 in the model-faults table (prove.MODEL_FAULT): none. Kinds 4,5,6,8,9,10,11 correspond to no model message; kind 7 = :NON-WRITABLE-SEGMENT (CS store) only; 1 = DE. The Windows reporting of
+kinds 2-11 is the platform's (KiTrap0D / Wine 9.0), not the model's. A certificate for them needs another reference: L3b/orchestrator decision (no hand-written model hunk).

@@ -113,7 +113,7 @@ def handler(*names):
 
 def build(ins, addr):
     """Form for a decoded instruction at addr; key = form_key(ins).  Raises KeyError for mnemonics outside the covered set."""
-    from proof import forms_alu, forms_move, forms_flow      # noqa: F401  (register their handlers)
+    from proof import forms_alu, forms_move, forms_flow, forms_sys      # noqa: F401  (register their handlers)
     c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
     words = ins.mnemonic.split(); c.rep = words[0] if len(words) > 1 else ''; c.m = words[-1]
     c.ops = [Op(ins, o) for o in ins.operands]

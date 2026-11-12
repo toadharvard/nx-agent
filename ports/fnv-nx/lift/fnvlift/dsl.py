@@ -77,6 +77,11 @@ def concat(hi, lo): return mk('concat', hi.w + lo.w, (hi, lo))
 def load(addr, w):
     assert addr.w == 32 and w in (8, 16, 32)
     return mk('load', w, (addr,))
+def uf(name, w, *args):
+    """a value the reference machine model supplies (rt/cpumodel.c, the platform timer): a function of its arguments, named, of width w. z3: an uninterpreted function (a free 64-bit variable
+    without arguments); C: the runtime's own function (UF_C).  Two reads of the same name and arguments in one Form are one value (hash-consed): an instruction that needs the same
+    read twice (rdtsc's two halves) names it once."""
+    return mk('uf', w, tuple(_unwrap(a) for a in args), name)
 def msb(a): return extract(a, a.w - 1, a.w - 1)
 def bit(a, i): return extract(a, i, i)
 
@@ -110,6 +115,8 @@ def to_smt(n):
     elif o == 'sext': r = z3.SignExt(n.w - n.a[0].w, A[0])
     elif o == 'extract': r = z3.Extract(n.x[0], n.x[1], A[0])
     elif o == 'concat': r = z3.Concat(*A)
+    elif o == 'uf':
+        r = z3.BitVec('uf_' + n.x, n.w) if not A else z3.Function('uf_' + n.x, *[z3.BitVecSort(c.w) for c in n.a], z3.BitVecSort(n.w))(*A)
     elif o == 'load':
         m = mem_array(); bs = [z3.Select(m, A[0] + i) for i in range(n.w // 8)]
         r = z3.Concat(*reversed(bs)) if len(bs) > 1 else bs[0]
@@ -119,6 +126,8 @@ def to_smt(n):
 
 # ---------------------------------------------------------------- C backend
 def T(w): return 'u32' if w <= 32 else 'u64'
+UF_C = {'rdtsc': lambda: 'fnvl_rdtsc()',      # rt/fnvl.h: the platform's monotonic timer (owner decision: rdtsc reads the platform timer)
+        **{'cpuid%d' % i: (lambda leaf, sub, i=i: 'fnvl_cpuid_w(%s,%s,%d)' % (leaf, sub, i)) for i in range(4)}}      # rt/cpumodel.c: the one reference CPU's answer, word i of leaf/subleaf
 def K(v, w): return '%#x%s' % (v, 'u' if w <= 32 else 'ull')
 class Emit:
     macc = 'M'      # memory accessor prefix: M, or LK inside a locked instruction (core.Ctx.macc: the R9 atomic rule works on the private copy LK_BEGIN makes)
@@ -167,6 +176,7 @@ class Emit:
             return '((%s)%s)' % (t, e) if hi == sw - 1 else '((%s)(%s & %s))' % (t, e, M)
         if o == 'concat': return '((((%s)%s) << %d) | %s)' % (t, a[0], n.a[1].w, a[1])
         if o == 'load': return '((u32)%s%d(%s))' % (s.macc, w, a[0])
+        if o == 'uf': return UF_C[n.x](*a)
         raise ValueError(o)
 
 class InlineEmit(Emit):
@@ -192,23 +202,26 @@ template<class T> static inline T ashr_(T a, T c, unsigned w, T m) { T s = (a >>
 '''
 XIN = ('df', 'flo', 'fs_base', 'gs_base')          # other pre-state: DF (1 bit), the other EFLAGS bits (32, masked), segment bases
 SIG = ','.join('[[maybe_unused]] u32& ' + r for r in REGS + FLAGS + XIN) + ',u32& eip'
-FAULTS = {1: 'DE', 2: 'BP', 3: 'UD'}
+FAULTS = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BOUNDS', 5: 'INTO', 6: 'PRIV', 7: 'AV', 8: 'STEP', 9: 'ASSERT', 10: 'DBGSRV', 11: 'INTO_AT1'}
 INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32}
 
 class Form:
     def __init__(s, key, addr, size):
-        s.key, s.regs, s.flags, s.undef, s.stores, s.faults, s.addr = key, [], [], {}, [], [], addr     # addr: int, or a node (V('eip', 32)) for a form of a whole shape
+        s.key, s.regs, s.flags, s.undef, s.stores, s.faults, s.addr = key, [], [], {}, [], [], addr
+        s.swhen = {}      # index in stores -> 1-bit node: the store happens only when it holds (absent = unconditional)     # addr: int, or a node (V('eip', 32)) for a form of a whole shape
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
     def flag(s, name, v, when=None): assert v.w == 1 and name in FLAGS + ('df',); s.flags.append((name, v, when))
     def setflo(s, v): assert v.w == 32; s.flo = v
     def undefined(s, name, sdm): s.undef[name] = sdm
-    def store(s, addr, v): s.stores.append((addr, v))
+    def store(s, addr, v, when=None):
+        if when is not None: assert when.w == 1; s.swhen[len(s.stores)] = when
+        s.stores.append((addr, v))
     def fault(s, code, cond): assert cond.w == 1; s.faults.append((code, cond))
     def roots(s):
         return [v for _, v, _ in s.regs] + [w for _, _, w in s.regs if w is not None] + [v for _, v, _ in s.flags] + \
-               [w for _, _, w in s.flags if w is not None] + [x for st in s.stores for x in st] + [c for _, c in s.faults] + \
+               [w for _, _, w in s.flags if w is not None] + [x for st in s.stores for x in st] + [c for _, c in s.faults] + [s.swhen[i] for i in sorted(s.swhen)] + \
                ([s.flo] if s.flo is not None else []) + [s.eip]
     def serialize(s):
         """canonical DAG text (hash input of the certificates)"""
@@ -222,7 +235,7 @@ class Form:
         for r, v, w in s.regs: out.append('reg %s n%d %s' % (r, go(v), nw(w)))
         for f, v, w in s.flags: out.append('flag %s n%d %s' % (f, go(v), nw(w)))
         for f in sorted(s.undef): out.append('undef ' + f)
-        for a, v in s.stores: out.append('store n%d n%d' % (go(a), go(v)))
+        for i, (a, v) in enumerate(s.stores): out.append('store n%d n%d' % (go(a), go(v)) + (' when n%d' % go(s.swhen[i]) if i in s.swhen else ''))
         for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
         if s.flo is not None: out.append('flo n%d' % go(s.flo))
         out.append('eip n%d @%s' % (go(s.eip), '%x' % s.addr if isinstance(s.addr, int) else 'n%d' % go(s.addr)))
@@ -246,9 +259,10 @@ class Form:
             flags[f] = to_smt(v)
             if w is not None: defined[f] = to_smt(w) == 1
         mem = mem_array(); flo = to_smt(s.flo) if s.flo is not None else z3.BitVec('flo', 32)
-        for a, v in s.stores:
-            sv = to_smt(v)
-            for i in range(v.w // 8): mem = z3.Store(mem, to_smt(a) + i, z3.Extract(8 * i + 7, 8 * i, sv))
+        for k, (a, v) in enumerate(s.stores):
+            sv = to_smt(v); m2 = mem
+            for i in range(v.w // 8): m2 = z3.Store(m2, to_smt(a) + i, z3.Extract(8 * i + 7, 8 * i, sv))
+            mem = z3.If(to_smt(s.swhen[k]) == 1, m2, mem) if k in s.swhen else m2
         eip = to_smt(s.eip); ft = s.fault_term()
         if s.faults:
             nf = ft == 0; g = lambda new, old: z3.If(nf, new, old)
@@ -271,7 +285,7 @@ class Form:
         for r, v, w in s.regs: L.append('%s%s = %s;' % (cw(w), r, e.ref(v)))
         for f, v, w in s.flags: L.append('%s = %s;' % (f, e.ref(v)))     # `when` only bounds the proof obligation: v is a deterministic value (e.g. SHL CF for count >= size)
         if s.flo is not None: L.append(flo_fn(e.ref(s.flo)))
-        for a, v in s.stores: L.append('%s%d(%s) = %s;' % (macc, v.w, e.ref(a), e.ref(v)))
+        for k, (a, v) in enumerate(s.stores): L.append('%s%s%d(%s) = %s;' % (('if (%s) ' % e.ref(s.swhen[k])) if k in s.swhen else '', macc, v.w, e.ref(a), e.ref(v)))
         return L, e.ref
     def to_c(s, fname):
         e = Emit(s.roots()); L = []
@@ -283,6 +297,6 @@ class Form:
         for r, v, _ in s.regs: L.append('  %s = %s;' % (r, e.ref(v)))
         for f, v, _ in s.flags: L.append('  %s = %s;' % (f, e.ref(v)))
         if s.flo is not None: L.append('  flo = %s;' % e.ref(s.flo))
-        for a, v in s.stores: L.append('  M%d(%s) = %s;' % (v.w, e.ref(a), e.ref(v)))
+        for k, (a, v) in enumerate(s.stores): L.append('  %sM%d(%s) = %s;' % (('if (%s) ' % e.ref(s.swhen[k])) if k in s.swhen else '', v.w, e.ref(a), e.ref(v)))
         L.append('  eip = %s;\n  return 0;\n}' % e.ref(s.eip))
         return '\n'.join(L)
