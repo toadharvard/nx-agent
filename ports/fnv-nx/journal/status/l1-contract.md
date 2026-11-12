@@ -864,3 +864,11 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - L5 w10 (session_01KmtZKTMZZBSRk7vPjUsu95): 1e868c13 accepted. gate_reach gets a table-only mode, with write_facts_h as its one emitter. Its consumer, d5a8ae02, is accepted too.
   - reach_local.h is deleted.
   - The reach gate is still 0/3 certified.
+
+## 2026-11-12 10:30 UTC
+- The candidate is claude/fnv-next3b 224af83e, in verdict v8. It has the platform root and the orchestrator's verify fixes.
+- w17 7ecf2e25 is now a priority because it blocks L3a goal step 2 (lifted packs).
+  - w17 is merging 224af83e. I've asked the orchestrator to take it into the next candidate.
+- New for w22 (branch w22v): stub-gate support for fnvnx_assume_violation (orchestrator decision).
+  - A call is accepted only with an OWNER id, a generated domain table, and a guard that tests membership in it.
+  - The first consumer is L5 errno under ASM-004.
