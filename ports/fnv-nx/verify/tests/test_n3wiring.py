@@ -39,11 +39,13 @@ def run_stage(w, doc, ext, rp, name):
     return p, all(os.path.isfile(os.path.join(w, o)) for o in outs)
 
 
-def chain(tmp, a_obj, b_obj, tag):
+def chain(tmp, a_obj, b_obj, tag, extra=None):
     """bind + bodysel on the objects -> {symbol: verdict line} and the bodysel verdicts {address: native|lifted}."""
     w = os.path.join(tmp, tag)
     os.makedirs(w)
     ob = {"src_a.cc.o": a_obj, "src_b.cc.o": b_obj}
+    if extra:
+        ob["src_extra.cc.o"] = extra       # real N3/sympair rows, but the object is in no unit of units.json
     obj = {}
     for name, path in ob.items():
         for kind, rows in l2sections.read(path).items():
@@ -122,6 +124,11 @@ def main():
     n3_ = L.judge_files("game", objects, cld, units, amap, v3, gate_names.rows, lambda r_, nt: L.select(r_, lambda x: x[0], lambda x: x[1], nt), lambda x: not x[3], gate_names.row_id)
     r3_ = L.judge_files("game", objects, cld, units, amap, v3, gate_r7.rows, lambda r_, nt: L.select_units(r_, lambda x: x[0], nt), lambda x: x[2] == "equal", gate_r7.row_id)
     check("namegate and r7 universe 0 when every body is LIFTED", n3_[0] == 0 and r3_[0] == 0, (n3_, r3_))
+    # an object that carries N3 rows but is in no unit of units.json has no exe function: no error, no NATIVE row for it
+    rows4, out4 = chain(tmp, ob["a.cc"], ob["b.cc"], "extra", extra=ob["a.cc"])
+    check("object with N3 rows and no unit: bind and bodysel run, rows unchanged (2 NATIVE)", rows4 == rows and all(v[0] == "native" for v in rows4.values()), (rows4, out4))
+    rows5, out5 = chain(tmp, m, m2, "extra2", extra=ob["a.cc"])
+    check("a real ok N3 row of an object in no unit never makes a body NATIVE", all(v[0] == "lifted" for v in rows5.values()) and len(rows5) == 2, (rows5, out5))
 
 
 if __name__ == "__main__":

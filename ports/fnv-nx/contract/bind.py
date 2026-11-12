@@ -18,7 +18,7 @@ Pure functions; `unit_index` is the index of the object's unit in units.json (n1
       is 'inlined body without a verdict'.  Rows of one address (clones, aliases) combine: any non-ok verdict wins
       (the first in sorted order of the reasons), `ok+E` only when all rows say ok+E; inlined lists are unioned, sorted.
 The CLI binds every object of obj.json that has section rows (unit = the unit whose source.replace('/', '_') + '.o', or 'src_' + that, is
-the object's basename; such an object with no unit is an error; objects without rows, e.g. the link's zz_* helpers, need none) and writes store kind `bind`.
+the object's basename; such an object with no unit is not an error: it has no exe function, so it binds nothing and gets no verdict (never NATIVE); objects without rows, e.g. the link's zz_* helpers, need none) and writes store kind `bind`.
 """
 import argparse, collections, json, os, sys
 
@@ -96,6 +96,8 @@ def unit_indices(units, objects):
 
 def bind_all(obj, n1, units):
     objects = sorted({k[0] for k in obj if k[1] in ('sympair', 'vtpair', 'n3') and obj[k]})   # an object without rows binds nothing
+    known = {pre + un['source'].replace('/', '_') + '.o' for un in units['units'] for pre in ('', 'src_')}
+    objects = [o for o in objects if o in known]     # an object in no unit of units.json has no exe function (no N1 twin): it binds nothing
     ui = unit_indices(units, objects)
     res = dict(sym={}, vt={}, n3={}, unbound_sym=[], unbound_vt=[])
     for ob in objects:
