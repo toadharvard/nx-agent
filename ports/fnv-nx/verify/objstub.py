@@ -6,8 +6,8 @@
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. The decoder is LLVM's AArch64
-instruction descriptions and disassembler; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
+instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
 one body. `uncovered`: size 0, a partial overlap or a range leaving the section, a code run of odd length, and executable bytes
@@ -81,8 +81,8 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. The write sets are the decoder's (LLVM defs); a register an instruction
-writes that they miss (x0, say) would make a constant wrong, and the Form-writes fact of L3a w5 is what replaces this reliance.
+taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
+writes (a missed write of x0 would make a constant wrong).
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
 flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so

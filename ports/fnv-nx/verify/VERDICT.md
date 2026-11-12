@@ -126,7 +126,7 @@ every merge pays today; with such a root and universe 0 it is red (`covers`, no 
     unless `fnvnx_reach_violation` or an `exit` row, and then on every path.
   - Class 2 flags a function unless the analysis proves a call, an access outside its own frame, or an input register live at entry.
     Its register read and write sets come from LLVM 18's instruction descriptions (`a64access.cc`, built against the LLVM libraries);
-    nothing rests on the capstone decoder. The descriptions are LLVM's, and the memory operand fields
+    nothing rests on the capstone decoder. Remaining assumption: LLVM's descriptions are correct, and the memory operand fields (ASM-043)
     (base, index, displacement, size) are derived by the encoding rules listed in `a64access.cc`.
   - Cost: per object cache by content; uncached objects in parallel processes (`--jobs`, default all cores). Measured numbers are in the
     report of the change that introduced the gate (30 MB of code in 64 objects: see `gate_objstub.py` history); a warm verdict re-reads only

@@ -629,6 +629,25 @@
    "owner": "L4"
   },
   {
+   "id": "ASM-043",
+   "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub LLVM decoder",
+    "instrument decoder",
+    "L3b:A-CAPSTONE-X86",
+    "L3b:A-CAPSTONE-A64"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: agreement of independent decoders on every instruction (after the first frame)",
+   "owner": "L3b+L4",
+   "note": "Deferred until the first frame."
+  },
+  {
    "id": "ASM-044",
    "text": "Every terminating routine of the toolchain is declared noreturn in the headers given.",
    "used_by": [
@@ -641,6 +660,20 @@
    ],
    "status": "REMOVE",
    "removed_by": "no gate yet: the headers' noreturn declarations checked against the toolchain's terminating routines",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-045",
+   "text": "The decoder's write sets name every register an instruction writes.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub write sets"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the decoder's write sets checked against the architectural encoding of every instruction",
    "owner": "L4"
   },
   {
@@ -668,17 +701,6 @@
    "status": "REMOVE",
    "removed_by": "planned: gate datamodel (claude/fnv-l1-contract-w17) proves that every native C++ CC stage loads every required plugin, names included once w4's B2 adds it",
    "owner": "L1"
-  },
-  {
-   "id": "ASM-800",
-   "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
-   "used_by": [
-    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
-   ],
-   "aliases": [],
-   "status": "REMOVE",
-   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
-   "owner": "L2"
   },
   {
    "id": "ASM-051",
@@ -728,6 +750,17 @@
    "status": "REMOVE",
    "removed_by": "planned: a link check that no decorated name has two definitions of different entities (the xc gate judges static initializers only and does not prove it)",
    "owner": "L1"
+  },
+  {
+   "id": "ASM-800",
+   "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
+   "used_by": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
+   "owner": "L2"
   }
  ]
 }
