@@ -5,7 +5,7 @@ and two branches that add different gates never conflict. The verdict (l1.py) as
 document (format fnvnx-gates/1) of the commit under test; that document is a value in memory and in the verdict's temporary directory,
 never a tracked file.
 `covers` is the set of ROOT CLASSES the gate judges, declared from what the gate reads: a class is a predicate over root facts, not a list of
-roots. The classes of the admitted roots (verify/admit.json) are derived by one rule, root_classes: class doc -> doc; class tool -> tool; class ref -> ref (a reference root: gate_admit.py);
+roots. The classes of the admitted roots (verify/admit.json) are derived by one rule, root_classes: class doc -> doc; class tool -> tool; class ref -> ref (a reference root) and class test -> test (gate_admit.py);
 class product with "target": "host" -> host-product; product with a guest target whose "cxx_origin" is {"lifted_by", "pack"} -> lifted; any
 other product -> product-guest; and a product root whose build.json declares a link stage (`link` not null) is also `linked`. The contract
 gates cover `linked`: a link-null root is outside their universe (they judge a link), and the other gates still cover it. verdict.py judges a gate
@@ -22,7 +22,7 @@ DIR = TREE + "/verify/gates.d"
 ADMIT = TREE + "/verify/admit.json"
 FILE_FORMAT = "fnvnx-gatefile/1"
 FORMAT = "fnvnx-gates/1"
-ROOT_CLASSES = ("doc", "tool", "ref", "product-guest", "lifted", "host-product", "linked")
+ROOT_CLASSES = ("doc", "tool", "ref", "test", "product-guest", "lifted", "host-product", "linked")
 
 
 class Bad(ValueError):
@@ -32,7 +32,7 @@ class Bad(ValueError):
 def root_class(root):
     """The root class of one admit.json entry (see the module docstring)."""
     c = root.get("class")
-    if c in ("doc", "tool", "ref"):
+    if c in ("doc", "tool", "ref", "test"):
         return c
     if c != "product":
         return None

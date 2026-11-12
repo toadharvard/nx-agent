@@ -16,6 +16,9 @@ Classes:
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
            gates.d, so code enters the trunk only together with the gates that judge it.
+  test     tests linked against the real files of the product roots: REQUIRED_TEST gates (build, determinism, linkstrict, objstub, doubles,
+           oracle, stub, assumptions, legal, pure), a "recipe" like a product root and a "target"; never REQUIRED_PRODUCT. The gates of
+           REQUIRED_TEST that cover roots (build, determinism, linkstrict, objstub: gates.d `covers`) include class test.
   ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
            no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
            test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
@@ -34,7 +37,7 @@ import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-CLASSES = ("doc", "tool", "product", "ref")
+CLASSES = ("doc", "tool", "product", "ref", "test")
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total, r7, namegate, argordergate, abi.
 # Classes A-G of the owner's rule: datamodel, order, fpexact, eh, exepin, addr32, machine.
@@ -43,7 +46,11 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
                     "abs", "disp", "reach", "reachlink", "gpa",
                     "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi",
                     "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
-REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": ()}
+# A test root (class test) is a root that links the tests of the product against the product roots' real files (CLAUDE.md "no doubles in
+# tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
+# intersect symbols of the product roots it links = empty), an oracle record for every test, stub, assumptions, Legal and pure.
+REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure")
+REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
 
 
 def is_test_file(f):
@@ -68,7 +75,9 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
             why += ["required gate %s not named" % g for g in REQUIRED[cls] if g not in gates]
             if cls == "ref" and ("recipe" in r or "gates" in r and r["gates"]):
                 why.append("a ref root has no recipe and names no gate (it has no units, no link and no outputs)")
-            if cls == "product":
+            if cls == "test" and r.get("target") not in ("guest", "host"):
+                why.append('a test root declares "target": "guest" or "host"')
+            if cls in ("product", "test"):
                 rec = r.get("recipe", "")
                 if not rec.startswith(path + "/") or not exists(rec):
                     why.append("recipe %r is not an existing file inside the root" % rec)
