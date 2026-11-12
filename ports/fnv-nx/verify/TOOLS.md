@@ -125,7 +125,7 @@ gate_reach - certificates that a branch of a platform import body is unreachable
     gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
 
 Why.  A request that a Win32 import accepts by its documentation but the target cannot express leads, in the body of the platform
-import, to `fnvnx_reach_violation(fact_id)` (loader/include/fnvnx_reach.h).  The build is valid only if that call is unreachable
+import, to `fnvnx_reach_violation(fact_id)` (contract/include/fnvnx/reach.h).  The build is valid only if that call is unreachable
 for exactly the linked set of images.  Every fact_id has a certificate from this gate, produced from the machine code of the
 images; a referenced fact without a certificate makes the build red.  No hand-written list: the requests are data of the platform
 manifest (manifest/reach_requests.tsv, columns request dll name arg_index kind values note) and the images are an explicit --image
@@ -1424,6 +1424,9 @@ Certified: a file that the preprocessor stage of at least one unit of an admitte
 dependency list (deps.d of the stage result found by the pp_key of objects.json), so a header is certified through the units that include it, and
 those units' objects are judged by objstub and the other gates. A header no unit reads is not certified (uncertified lists them, <= 50, and the
 detail gives the count). A root whose build is red certifies nothing. No headers tree: universe 0, green.
+One declaration per symbol: the declarations of every header of every headers tree and of every product root are taken from the compiler
+(gcc -fdump-ada-spec on the header alone, so it must be self-contained: a header that does not parse is red), as (external name -> declaring
+file); a symbol declared in two different header files is red (`declared-twice`, listed with both places).
 ```
 
 ## verify/gate_oracle.py

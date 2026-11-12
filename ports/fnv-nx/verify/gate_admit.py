@@ -14,7 +14,9 @@ root's modules only when it declares it. Each entry must be an admitted root oth
 declared imports form no cycle (an error of the table: every file is uncertified).
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
-  1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
+  1. exactly one root owns it: the innermost root that contains it (a root is a directory prefix or one exact file path; roots do not
+     nest, with one exception: a headers tree may sit inside a root of another class and then owns its files, so that a layer
+     keeps its shared headers in its own directory);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
   3. every gate the root names is a gate file of verify/gates.d of this same tree;
   4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
