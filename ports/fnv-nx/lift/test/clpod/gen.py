@@ -13,13 +13,15 @@ Matrix. Feature (one at a time) x depth x size, plus plain aggregates as control
             d1a S has a member M[1]                          d2  S has a member N, N has a member M, M has the feature
   size      the data bytes of the feature class: 1 (char), 2 (short), 4 (int), 8 (2 int), 12 (3 int); REF adds a reference member, V a vptr, BN a base int:
             the size column is that nominal data size, `sizeof` is cl's own sizeof(S).
-Every case is a namespace Nk holding the types, `S f();`, `char sz[sizeof(S)];` and a caller `void c(){ S x = f(); use(&x); }`.
+Every case is a namespace Nk holding the types, `S f();`, `char sz[sizeof(S)];`, a caller `void c1(){ f(); }` (the primary signal: no local, no argument of its own) and a caller `void c(){ S x = f(); use(&x); }` (the cross-check).
 
-The one rule, applied to every case (no case is read by eye). In the caller's assembly (cl /O2 /FAs), look at the instruction right before `call ?f@Nk@@..`:
-  the nearest `push R` before the call, with R's last write `lea R, <a local of c: x or cl's temporary $Tn>`  =>  HIDDEN  (f takes no declared argument: the pushed address is the hidden first argument)
-  otherwise                                                                                                   =>  REGS    (the result comes back in eax/edx; a bare `push ecx` before the call only reserves x's stack slot)
-Cross-check column `post`: after the call and before the next call, HIDDEN loads through eax (`[eax`, the returned hidden pointer) or does not store from eax/edx at all (the callee built x in place); REGS stores from eax/edx/ax/al/dx/dl and does not load through eax. A case where the two disagree is
-listed as INCONSISTENT in the table and the generator exits 1.
+The primary rule, applied to every case by the structure of c1 (`void c1(){ f(); }`, f only declared, no declared argument, no local): count the `push` instructions of the whole PROC.
+  none, or a tail `jmp f` with none                                                       =>  REGS    (no argument is passed: the result comes back in eax/edx)
+  exactly one, `push R`, where R's last write before it is `lea R, DWORD PTR <name>[esp|ebp..]`, and it comes before the single `call f`  =>  HIDDEN  (the pushed address is the hidden first argument)
+  anything else (another push count, a push of something that is no frame address, not exactly one call or jmp to f)  =>  UNREAD, the case is named and the generator exits 1; no guess.
+Cross-check (column `post`): in c (which keeps the result alive in x) the nearest `push R` before the call whose R was written by `lea` of a local => hidden, else regs; and after the call
+the result is loaded through eax (`[eax`, hidden) or not stored from eax/edx at all, else stored from eax/edx (regs). The two readings of c must agree with each other and with the primary result;
+a disagreement is listed as INCONSISTENT in the table and the generator exits 1.
 A case cl refuses to compile is SKIPPED with cl's first error line.
 """
 import argparse, hashlib, os, re, subprocess, sys
@@ -54,7 +56,7 @@ def case_source(k, feat, depth, size):
     if depth == 'd1': t += 'struct S { M m; };\n'
     if depth == 'd1a': t += 'struct S { M m[1]; };\n'
     if depth == 'd2': t += 'struct N { M m; };\nstruct S { N n; };\n'
-    return 'namespace N%d {\n%sS f();\nchar sz[sizeof(S)];\nvoid c() { S x = f(); use(&x); }\n}\n' % (k, t)
+    return 'namespace N%d {\n%sS f();\nchar sz[sizeof(S)];\nvoid c1() { f(); }\nvoid c() { S x = f(); use(&x); }\n}\n' % (k, t)
 
 
 def cases():
@@ -70,10 +72,30 @@ def instrs(lines):
             yield l.strip()
 
 
-def classify(asm, k):
-    m = re.search(r'^\?c@N%d@@YAXXZ PROC.*?^\?c@N%d@@YAXXZ ENDP' % (k, k), asm, re.S | re.M)
+def proc(asm, name, k):
+    m = re.search(r'^\?%s@N%d@@YAXXZ PROC.*?^\?%s@N%d@@YAXXZ ENDP' % (name, k, name, k), asm, re.S | re.M)
+    return list(instrs(m.group(0).split('\n'))) if m else None
+
+
+def primary(ins, k):
+    """REGS / HIDDEN by the whole-PROC push count of c1, or None (anything else)"""
+    if ins is None: return None
+    ci = [i for i, l in enumerate(ins) if re.match(r'(call|jmp)\s+\?f@N%d@@' % k, l)]
+    if len(ci) != 1: return None
+    pushes = [i for i, l in enumerate(ins) if re.match(r'push\b', l)]
+    if not pushes: return 'REGS'
+    if len(pushes) != 1 or not ins[ci[0]].startswith('call') or pushes[0] > ci[0]: return None
+    m = re.fullmatch(r'push\s+(\w+)', ins[pushes[0]])
     if not m: return None
-    ins = list(instrs(m.group(0).split('\n')))
+    w = [l for l in ins[:pushes[0]] if re.match(r'(mov|lea|xor|add|sub)\s+%s\s*,' % m.group(1), l)]
+    return 'HIDDEN' if w and re.match(r'lea\s+%s\s*,\s*DWORD PTR \S*\[(esp|ebp)' % m.group(1), w[-1]) else None
+
+
+def classify(asm, k):
+    """(primary, cross) or None: primary = the whole-PROC rule on c1; cross = HIDDEN/REGS when both readings of c agree, else DISAGREE"""
+    p = primary(proc(asm, 'c1', k), k)
+    ins = proc(asm, 'c', k)
+    if p is None or ins is None: return None
     ci = [i for i, l in enumerate(ins) if re.match(r'call\s+\?f@N%d@@' % k, l)]
     if len(ci) != 1: return None
     i = ci[0]
@@ -91,7 +113,7 @@ def classify(asm, k):
     thru = any('[eax' in l for l in after)                                 # a load through the returned pointer
     stores = any(re.match(r'mov\s+[^,]*\[[^\]]*\]\s*,\s*(eax|edx|ax|dx|al|dl)\b', l) for l in after)
     post = 'HIDDEN' if thru or not stores else 'REGS'
-    return pre, post
+    return p, (pre if pre == post else 'DISAGREE')
 
 
 def main():
@@ -139,10 +161,13 @@ def main():
     hdr = ['# MEASUREMENT: cl under Wine; not yet a test reference (it needs the recipe stage keyed on a pinned wine deb profile and on cl by sha256)',
            '# toolchain: fnv-nx-build %s' % a.toolchain, '# cl: %s' % banner, '# cl.exe sha256: %s' % cl_sha, '# wine: %s' % wv,
            '# wine debs (dpkg-query -W):'] + ['#   ' + l for l in debs.split('\n')] + [
-           '# rule: HIDDEN iff the nearest `push R` before `call f` has R = `lea` of a local (f has no declared argument); post = where the result is stored after the call; they must agree',
+           '# rule (result): whole-PROC push count of c1 `void c1(){ f(); }`: no push or tail jmp => REGS; exactly one `push R` with R = `lea` of a frame address before the single call => HIDDEN; else UNREAD',
+           '# post: cross-check on c (the result kept in a local): nearest push + where the result is stored; must equal result',
            '# columns: feature depth size sizeof(S) result post flag']
     open(os.path.join(a.out, 'table.tsv'), 'w').write('\n'.join(hdr + rows) + '\n')
     n = lambda w: sum(1 for r in rows if r.split('\t')[4] == w)
+    for r in rows:
+        if r.split('\t')[4] == 'UNREAD': print('UNREAD case: ' + r, file=sys.stderr)
     print('cases %d: HIDDEN %d REGS %d SKIPPED %d UNREAD/INCONSISTENT %d' % (len(allc), n('HIDDEN'), n('REGS'), len(skipped), bad))
     sys.exit(1 if bad else 0)
 
