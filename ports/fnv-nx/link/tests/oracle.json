@@ -13,6 +13,19 @@
     "ports/fnv-nx/link/gate_abs.py"
    ]
   },
+  "test_gate_addr.py": {
+   "references": [
+    {
+     "anchor": "## link/gate_addr.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_addr.py",
+    "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc"
+   ]
+  },
   "test_gate_disp.py": {
    "references": [
     {
@@ -23,6 +36,84 @@
    ],
    "subject": [
     "ports/fnv-nx/link/gate_disp.py"
+   ]
+  },
+  "test_gate_names.py": {
+   "references": [
+    {
+     "anchor": "## link/gate_names.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_names.py"
+   ]
+  },
+  "test_gate_order.py": {
+   "references": [
+    {
+     "anchor": "## link/gate_order.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## toolchain/order/fnvnx_order.cc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_order.py",
+    "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
+   ]
+  },
+  "test_gate_r7.py": {
+   "references": [
+    {
+     "anchor": "## link/gate_r7.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/gate_r7.py"
+   ]
+  },
+  "test_ice_poly_byvalue.py": {
+   "references": [
+    {
+     "anchor": "## toolchain/order/fnvnx_order.cc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
+   ]
+  },
+  "test_odr.py": {
+   "references": [
+    {
+     "anchor": "## link/odr.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/odr.py"
+   ]
+  },
+  "test_order_cont.py": {
+   "references": [
+    {
+     "anchor": "## toolchain/order/fnvnx_order.cc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
    ]
   }
  }
