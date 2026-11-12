@@ -201,7 +201,7 @@ def consts(t):
         st.extend(e.children())
     return out
 
-def run_path(tag, trace, pre, seg_adj, fault=False, extra=None):
+def run_path(tag, trace, pre, fault=False, extra=None):
     env = Env(tag); P = Path(); P.pc = []; P.side = []
     his = {r: z3.BitVec(r + '_hi', 32) for r in GPR}
     rfl_other = z3.BitVec('rflags_other', 32)
@@ -211,6 +211,7 @@ def run_path(tag, trace, pre, seg_adj, fault=False, extra=None):
         bits.append(pre['flags'][fl[0]] if fl else z3.BitVecVal(1, 1) if i == 1 else z3.Extract(i, i, rfl_other))
     cur = {r: z3.Concat(his[r], pre['regs'][GPR[r]]) for r in GPR}
     cur['rflags'] = z3.Concat(*bits); cur['rip'] = z3.Concat(z3.BitVecVal(0, 32), pre['eip'])
+    cur['fs_base_reg'] = z3.BitVec('fs_base', 32); cur['gs_base_reg'] = z3.BitVec('gs_base', 32)      # the symbolic segment bases (sail_patches/segment_bases.sail): each access carries its own segment's base
     cur.update(extra or {})                          # shape runs: code_bytes / code_base are symbolic registers bound to terms over the field variables
     written = set(); mem = pre['mem']; P.reads = []
     for ev in sexp(trace)[1:]:
@@ -232,10 +233,10 @@ def run_path(tag, trace, pre, seg_adj, fault=False, extra=None):
             if r in cur and v is not None: cur[r] = env.ev(v); written.add(r)
             else: raise ModelGap('model writes register %s (outside the proved state)' % r)
         elif h == 'read-mem':
-            n = int(ev[4]); a = z3.Extract(31, 0, env.ev(ev[3])) + seg_adj
+            n = int(ev[4]); a = z3.Extract(31, 0, env.ev(ev[3]))
             env.v[ev[1]] = z3.Concat(*[z3.Select(mem, a + i) for i in reversed(range(n))]) if n > 1 else z3.Select(mem, a)
         elif h == 'write-mem':
-            n = int(ev[5]); a = z3.Extract(31, 0, env.ev(ev[3])) + seg_adj; d = env.ev(ev[4])
+            n = int(ev[5]); a = z3.Extract(31, 0, env.ev(ev[3])); d = env.ev(ev[4])
             for i in range(n): mem = z3.Store(mem, a + i, z3.Extract(8 * i + 7, 8 * i, d))
             env.v[ev[1]] = z3.BoolVal(True)
         else: raise ModelGap('unsupported isla event ' + h)
@@ -339,23 +340,23 @@ def _post(code, pre, out_err, extra, extra_assume=None):
         (ok if hdr and hdr.startswith('Result: (_ unit)') else bad).append((hdr, tr))
     if bad:
         msgs = isla_errors(err); first = bad[0][0] or ''
-        if ok and msgs and set(msgs) <= FAULT_OK and len(re.findall(r'Calling x86_', err)) == len(bad): faults = [tr for _, tr in bad]; bad = []
+        if (ok or getattr(FAULT_OK, 'declared', False)) and msgs and set(msgs) <= FAULT_OK and len(re.findall(r'Calling x86_', err)) == len(bad): faults = [tr for _, tr in bad]; bad = []
         else: faults = []
     else: faults = []
     if bad and extra is not None and (any((h or '').startswith('Error Timeout') for h, _ in bad) or 'hard timeout' in err): raise ModelTimeout(err[-120:].replace('\n', ' '))
     if bad:
         raise ModelGap('model exception on %d of %d paths: %s' % (len(bad), len(blocks), '; '.join(msgs[:2]) if msgs else first[:80]))
-    if not ok: raise ModelGap('isla returned no path: ' + err[-120:].replace('\n', ' '))
-    pfx = [b for b in code[:4] if b in (0x64, 0x65)]
-    seg_adj = z3.BitVecVal(0, 32) if not pfx else z3.BitVec('fs_base' if pfx[-1] == 0x64 else 'gs_base', 32)
+    if not ok and not faults: raise ModelGap('isla returned no path: ' + err[-120:].replace('\n', ' '))
     tagb = code.hex()
-    paths = [run_path('p%d' % i, tr, pre, seg_adj, False, extra) for i, (_, tr) in enumerate(ok)]
-    ret = {'regs': {r: merge(paths, lambda p: p.regs[r]) for r in pre['regs']}, 'flags': {f: merge(paths, lambda p: p.flags[f]) for f in FLAGBIT},
+    paths = [run_path('p%d' % i, tr, pre, False, extra) for i, (_, tr) in enumerate(ok)]
+    if not paths:       # every path of the model faults, with faults the form declares (prove.Perm): the model never completes, so there is no post state to compare (prove.py requires that the DSL then always faults)
+        ret = {'regs': dict(pre['regs']), 'flags': dict(pre['flags']), 'mem': pre['mem'], 'eip': pre['eip'], 'complete': False}
+    else: ret = {'regs': {r: merge(paths, lambda p: p.regs[r]) for r in pre['regs']}, 'flags': {f: merge(paths, lambda p: p.flags[f]) for f in FLAGBIT},
             'mem': merge(paths, lambda p: p.mem), 'eip': merge(paths, lambda p: p.eip)}
     asm = [s for p in paths for s in p.side]
     LAST.clear(); LAST.update(paths=len(ok), fault_paths=len(faults))
     side = list(asm); nofault = None
-    if faults: nofault = z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, seg_adj, True, extra).pc for i, tr in enumerate(faults)])); asm.append(nofault)
+    if faults: nofault = z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, True, extra).pc for i, tr in enumerate(faults)])); asm.append(nofault)
     if asm: ret['assume'] = z3.And(*asm)
     ret['side'] = z3.And(*side) if side else z3.BoolVal(True)       # closed constraints on free values (undefined / nondeterministic results): satisfiable for every pre-state iff satisfiable at all
     ret['nofault'] = nofault if nofault is not None else z3.BoolVal(True)       # the pre-state conditions under which the model does not fault

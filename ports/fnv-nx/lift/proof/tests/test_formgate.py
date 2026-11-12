@@ -38,7 +38,7 @@ def skip_cache(d, names):
 
 
 MD = shape.decoder()
-MODEL = 'e436ee6f79856a7ac9543400b7973dd1f0057410426f08b1e456c1d1c43e654a'
+MODEL = '70c8dc39cf64be4fe52d50f34ffd37eeefdc8bfa8162c5da8ffdd98d6b393eae'
 # encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fld st(1))
 GOOD = ['01c8', '31c0', '8b4510', '6a05', 'c3', '90']
 NOBUILD = ['d9c1']

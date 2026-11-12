@@ -11,6 +11,7 @@ from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc, 
 from capstone import x86 as X
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
+SEGPFX = {0x64: 'fs', 0x65: 'gs', 0x2e: 'cs', 0x26: None, 0x36: None, 0x3e: None}
 PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
 SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
 def form_key(ins):
@@ -37,7 +38,7 @@ class Op:
         else:
             m = o.mem; s.k = 'm'; s.base = ins.reg_name(m.base) if m.base else None
             s.index = ins.reg_name(m.index) if m.index else None; s.scale, s.disp = m.scale, m.disp
-            s.seg = {X.X86_REG_FS: 'fs', X.X86_REG_GS: 'gs'}.get(m.segment)
+            s.cseg = m.segment; s.seg = {X.X86_REG_FS: 'fs', X.X86_REG_GS: 'gs'}.get(m.segment)      # build() replaces seg by the one the decoded prefixes give
     @staticmethod
     def reg(name, w): o = Op.__new__(Op); o.k, o.name, o.w = 'r', name, w; return o
     def full(s):                     # (32-bit register, bit position) of a register operand
@@ -45,7 +46,7 @@ class Op:
         if s.w == 32: return n, 0
         if s.w == 16: return 'e' + n, 0
         return 'e' + n[0] + 'x', (8 if n[1] == 'h' else 0)
-def ea(op, esp=None):
+def ea(op, esp=None, seg=True):
     """effective address of a memory operand.  Address-size attribute 16 (prefix 0x67 in a 32-bit code segment, SDM Vol. 2 2.1.5 / Table 2-1, Vol. 1 3.7.5):
     the offset is base16 + index16 + disp, computed modulo 2^16 and zero-extended to 32 bits; the segment base is added after.  Capstone names the 16-bit
     registers (bx, bp, si, di): their values are the low words of ebx, ebp, esi, edi, so the sum of the 32-bit registers has the same low 16 bits."""
@@ -55,22 +56,26 @@ def ea(op, esp=None):
         if op.base: a = a + sub16(op.base)
         if op.index: a = a + sub16(op.index) * op.scale
         a = zext(trunc(a, 16), 32)
-        if op.seg: a = a + V(op.seg + '_base', 32)
+        if seg and op.seg in ('fs', 'gs'): a = a + V(op.seg + '_base', 32)
         return a
     sub = lambda n: esp if (n == 'esp' and esp is not None) else V(n, 32)
     a = C(op.disp, 32)
     if op.base: a = a + sub(op.base)
     if op.index: a = a + sub(op.index) * op.scale
-    if (op.base in R16) or (op.index in R16): a = zext(trunc(a, 16), 32)
-    if op.seg: a = a + V(op.seg + '_base', 32)
+    if seg and op.seg in ('fs', 'gs'): a = a + V(op.seg + '_base', 32)
     return a
 def rd(op, w=None):
     w = w or op.w
     if op.k == 'i': return C(op.val, w)
     if op.k == 'm': return load(ea(op), w)
     r, lo = op.full(); return extract(V(r, 32), lo + op.w - 1, lo)
+def store_op(F, op, addr, v):
+    """the one store of a memory operand.  SDM Vol. 3, 5.6 (data-segment write rule) and 3.4.5.1: a code segment is not writable, so a store whose effective segment is CS
+    (the 0x2e override, last prefix wins) raises #GP(0) -- Windows reports STATUS_ACCESS_VIOLATION -- before anything is written: fault code 5 (f_dsl FAULT), always."""
+    if op.seg == 'cs': F.fault(7, C(1, 1))
+    F.store(addr, v)
 def wr(F, op, v, when=None):
-    if op.k == 'm': return F.store(ea(op), v)
+    if op.k == 'm': return store_op(F, op, ea(op), v)
     r, lo = op.full(); old = F.cur(r)
     if op.w == 32: F.reg(r, v, when)
     elif lo == 0: F.reg(r, concat(extract(old, 31, op.w), v), when)
@@ -113,8 +118,14 @@ def build(ins, addr):
     words = ins.mnemonic.split(); c.rep = words[0] if len(words) > 1 else ''; c.m = words[-1]
     c.ops = [Op(ins, o) for o in ins.operands]
     raw = bytes(ins.bytes); i = 0; c.o16 = False; c.a16 = False
-    while raw[i] in PFX: c.o16 |= raw[i] == 0x66; c.a16 |= raw[i] == 0x67; i += 1
-    for o in c.ops: o.a16 = c.a16
+    sp = None                        # effective segment override: the LAST segment-override prefix byte wins (model: prefixes[seg] is overwritten by each one, SDM Vol. 2 2.1.1); 26 / 36 / 3e are flat like the default
+    while raw[i] in PFX:
+        c.o16 |= raw[i] == 0x66; c.a16 |= raw[i] == 0x67
+        if raw[i] in SEGPFX: sp = SEGPFX[raw[i]]
+        i += 1
+    for o in c.ops:
+        o.a16 = c.a16
+        if o.k == 'm': o.seg = None if o.cseg == X.X86_REG_ES else sp      # the string destination is ES:EDI whatever the override (SDM Vol. 2, MOVS / STOS / SCAS / CMPS)
     c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw
     fn = H.get(c.m)
     if fn is None and c.m[0] == 'j': fn = H['jcc']
