@@ -205,3 +205,12 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:30Z:
   - env gap found by L2. On 8cfbcdbf, the python modules capstone, pyelftools and unicorn are pinned by version only, with no hash. This is added to w5's scope: every module gets a wheel sha256 plus a RECORD hash, and envcheck refuses an unhashed one.
   - The id range rule is keyed by `minted_by`, not by owner. L3a-owned ASM-3xx ids keep their numbers, and ASM-200..202 are minted by L3a (w10).
+- 03:33Z:
+  - **Id ranges are checked against the owner** (orchestrator). L3b renumbers its L3a- and L2-owned records to 2xx and 8xx and keeps the old ids as aliases; the records merge together with w2g.
+  - **The L3a `flags` gate** (L3a w5 b7b04d53) is now required for class `lifted`, through w10's gates.d. Its universe is the 6 images.
+  - **flags.semantics decisions (w17):**
+    - One set for all languages. Per-language removal is read from the pinned driver's --help=<lang>.
+    - The set includes -ffixed-x19..x27, -fno-jump-tables, -fno-ipa-ra, -fno-devirtualize, -fno-builtin, the stack and fortify flags, and -ftls-model=local-exec.
+    - -fPIE replaces -fPIC, unless a pack is linked -shared.
+    - -fno-exceptions is undecided until w17 reports the global try/throw/catch count in the native guest sources.
+  - **Evidence from L6:** the trunk sample's C flags have no semantics flags, and C unit ffp_vs_state.c had 7 fused multiply-adds (fmadd/fmsub) under the default -ffp-contract=fast.
