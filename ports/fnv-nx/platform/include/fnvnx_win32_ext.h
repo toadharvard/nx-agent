@@ -57,6 +57,7 @@ void fnvnx_set_command_line(int argc, char **argv);
 /* the registry's first boot (platform/win32/registry_seed.cpp): when the hive file does not exist, makes it from the declared
  * machine's rows (platform/manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
 void fnvnx_registry_first_run(void);
+void fnvnx_declared_files_first_run(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
 BOOL fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */
