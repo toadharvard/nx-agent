@@ -11,7 +11,9 @@ those two modules is a reached name.
 Checks (one line per violation, exit 1): a reached name with no body; a body that is not reached; an alias of galaxy.dll or galaxywrp.dll
 other than the one to steam_api; a body without a row of env_const.tsv or a definition in services.cpp.
 The facts are a PATH ARGUMENT (the private exe-derived manifest directory of fnv-nx-build, branch l5-platform/manifest); none is embedded here.
-Usage: check_galaxy.py <manifest-dir> [--root ports/fnv-nx]
+--selftest: builds three fact directories in a temp dir from the real one and requires exit 1 on each: (a) a galaxy.dll import row for a name
+without a body, (b) a dynamic site whose operand names galaxy.dll and a function, (c) an import row removed so that a body is reached by nothing.
+Usage: check_galaxy.py <manifest-dir> [--root ports/fnv-nx] [--selftest]
 """
 import os
 import re
@@ -27,7 +29,41 @@ def rows(path):
     return [dict(zip(hdr, l.split("\t"))) for l in lines[1:] if l]
 
 
+def selftest(mdir, root):
+    import shutil
+    import tempfile
+    bad = 0
+    cases = {
+        "galaxy.dll import without a body": ("imports.tsv", "falloutnv.exe\tgalaxy.dll\tGalaxyAPI_Init\t0x1\t1\t0\n", None),
+        "dynamic site naming galaxy.dll": ("dynsites.tsv", "falloutnv.exe\t0x1\tGetProcAddress\tgalaxy.dll GalaxyAPI_Init\tgalaxy.dll\n", None),
+        "body reached by nothing": ("imports.tsv", "", "SteamApps"),
+    }
+    for what, (fname, add, drop) in cases.items():
+        d = tempfile.mkdtemp()
+        try:
+            for f in ("imports.tsv", "dynsites.tsv"):
+                shutil.copy(os.path.join(mdir, f), os.path.join(d, f))
+            path = os.path.join(d, fname)
+            text = open(path, encoding="utf-8").read()
+            if drop:
+                text = "\n".join(l for l in text.split("\n") if "\t" + drop + "\t" not in l)
+            open(path, "w", encoding="utf-8").write(text + add)
+            import io
+            import contextlib
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc = main(["check_galaxy.py", d, "--root", root])
+            print("selftest %-36s %s" % (what, "red (as required)" if rc == 1 else "NOT RED"))
+            bad += rc != 1
+        finally:
+            shutil.rmtree(d)
+    return 1 if bad else 0
+
+
 def main(argv):
+    if "--selftest" in argv and "--selftest-inner" not in argv:
+        argv = [a for a in argv if a != "--selftest"]
+        root = argv[argv.index("--root") + 1] if "--root" in argv else "."
+        return selftest(argv[1], root)
     if len(argv) < 2:
         sys.stderr.write(__doc__)
         return 2
