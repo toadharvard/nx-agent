@@ -591,3 +591,7 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 ## 09:35Z
 - w5 1f088b42: verdict green (fac7bc6e, 385.3 s cold, over budget = the base's selftests, owner w19). b639f528 replaces the hand list with a `shfmt --tojson` parse; shfmt 3.8.0-1 pinned (tools/verdict-debs a99dc930, 364 debs); a non-literal command is red; the 28 test_envcheck cases pass. Remaining: the runner set must be total (one classification record per scanned program, with the doc cited; no record = red). Then it stops; the GL pins wait.
 - L4: its line is rebuilt on the candidate 58c113f0 as claude/fnv-l4-verify-w6-r, without L1 copies.
+
+## 09:40Z
+- A correction: the trunk bee3dbfc env.json (from w22) already pins the python modules capstone 5.0.9, gmpy2 2.3.2, keystone-engine 0.9.2, numpy 2.5.3, pefile 2024.8.26, pyelftools 0.33, unicorn 2.1.4 and z3-solver 5.4.1.0 (wheel sha256 + installed_files_sha256). w17's pin item is therefore down to the derived EXTERNAL only. The MPFR/GMP that gmpy2 bundles are covered by its installed_files digest.
+- L4 owns farm/boot_job.sh. Rule: the job installs nothing and step 1 is envcheck; L4 w7 does it.
