@@ -344,7 +344,7 @@ def main():
     console61 = open(os.path.join(d, "d61.console.txt")).read() if rc in (0, 2) else ""
     f61 = d61.get("declared_input_faults", [])
     tb.case("declared-input write: the run still ends exit 0 by itself, the guest saw EACCES (-13)", d61.get("run", {}).get("reason") == "exit"
-            and d61["run"].get("exit_code") == 0 and "write-fonts" in console61 and "18446744073709551603" in console61, (d61.get("run"), console61))
+            and d61["run"].get("exit_code") == 0 and "write-fonts" in console61 and "write-fonts=fffffffffffffff3" in console61, (d61.get("run"), console61))
     tb.case("declared-input write: fault {kind, call, sd, t_ns, tid} in OUT.json, run.verdict failed, exit 2",
             rc == 2 and len(f61) == 1 and f61[0]["kind"] == "declared-input-write" and f61[0]["call"] == "open"
             and f61[0]["sd"] == "sdmc:/switch/fnv/fonts/New.ttf" and f61[0]["tid"] == 1 and f61[0]["t_ns"] > 0 and d61["run"].get("verdict") == "failed"
