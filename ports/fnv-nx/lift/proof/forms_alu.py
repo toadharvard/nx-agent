@@ -59,7 +59,7 @@ def shift(c):
         of = {'shl': msb(r) ^ cf, 'shr': msb(a), 'sar': C(0, 1)}[m]
         # SHL/SHR: CF is undefined when the masked count >= the operand size (SDM); SAR is defined for every count
         F.flag('cf', keep('cf', cf), when=ult(n32, w) if m != 'sar' else None); F.flag('of', keep('of', of), when=one)
-        F.undefined('af', UNDEF_SHAF); pzs(F, r, keep)
+        F.undefined('af', UNDEF_SHAF, when=nz); pzs(F, r, keep)      # AF undefined for a non-zero count; count 0: every flag unchanged (SDM)
     wr(F, d, r)
 
 @handler('rcl', 'rcr')
@@ -77,7 +77,7 @@ def shld(c):
     keep = lambda f, new: ite(nz, new, V(f, 1))
     if c.m == 'shld': r = shl(a, n) | lshr(b, C(32, 32) - n); cf = msb(shl(a, n - 1))
     else: r = lshr(a, n) | shl(b, C(32, 32) - n); cf = bit(lshr(a, n - 1), 0)
-    F.flag('cf', keep('cf', cf)); F.flag('of', keep('of', msb(r) ^ msb(a)), when=ult(n, 2)); F.undefined('af', UNDEF_SHAF); pzs(F, r, keep); wr(F, d, r)
+    F.flag('cf', keep('cf', cf)); F.flag('of', keep('of', msb(r) ^ msb(a)), when=ult(n, 2)); F.undefined('af', UNDEF_SHAF, when=nz); pzs(F, r, keep); wr(F, d, r)
 
 @handler('bt', 'bts', 'btr', 'btc')
 def bt(c):
@@ -99,6 +99,7 @@ def bs(c):
     F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; a = rd(s); r = C(0, w)
     for i in (range(w - 1, -1, -1) if c.m == 'bsf' else range(w)): r = ite(bit(a, i), C(i, w), r)
     z = eq(a, 0); F.flag('zf', z); undef(F, ('cf', 'of', 'sf', 'af', 'pf'), UNDEF_BS)
+    F.model_gap('BSF/BSR: with a zero source the destination is undefined and the flags other than ZF are undefined; the pinned model cannot state this refinement (L3b, batched IR bump)')
     wr(F, d, ite(z, rd(d), r), when=~z)
 
 @handler('xadd')

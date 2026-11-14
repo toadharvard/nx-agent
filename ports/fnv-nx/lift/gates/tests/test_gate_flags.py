@@ -254,6 +254,25 @@ class T(unittest.TestCase):
         self.assertEqual(red, [(A, [('zf', 1, 'jcc')])])
 
 
+class UndefWhen(unittest.TestCase):
+    """class rule: a flag the SDM table leaves undefined only under a condition is declared with Form.undefined(when=cond) and emitted as `cond ? 0 : prior`
+    (AF of shl/shr/sar/shld/shrd: undefined for a non-zero count, unchanged for count 0); an unconditional one stays `f = 0;`"""
+    def test_emission(self):
+        import capstone
+        from proof import forms
+        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
+
+        def lines(hx):
+            F = forms.build(next(md.disasm(bytes.fromhex(hx), 0x1000)), 0x1000)
+            return F, F.to_c_inline(lambda n: n, lambda k, c, r: '', lambda v: 'flo=%s;' % v)[0]
+        for hx in ('d3e0', 'd3e8', 'd3f8', '0fa5c8', '0fadc8', 'c1e003'):
+            F, L = lines(hx)
+            self.assertEqual(list(F.uwhen), ['af'], hx)
+            self.assertTrue(all(' ? 0 : in_af;' in l for l in L if l.startswith('af = ')), hx)
+        F, L = lines('21d8')                      # and: AF undefined for every operand value
+        self.assertEqual(F.uwhen, {}); self.assertIn('af = 0;', L)
+
+
 class Agree(unittest.TestCase):
     def test_agreement_rows(self):
         import flagagree

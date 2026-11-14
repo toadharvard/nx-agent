@@ -209,13 +209,20 @@ INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32, **{'sel_' + s: 16 for s
 class Form:
     def __init__(s, key, addr, size):
         s.key, s.regs, s.flags, s.undef, s.stores, s.faults, s.addr = key, [], [], {}, [], [], addr
+        s.gaps = []       # model gaps (texts): outputs whose refinement the pinned model cannot state yet; they are not proven by DEF0 (def_check counts them)
+        s.uwhen = {}      # flag name -> 1-bit node: the flag is undefined only when it holds (absent = unconditionally undefined); the emitted value is cond ? 0 : prior
         s.swhen = {}      # index in stores -> 1-bit node: the store happens only when it holds (absent = unconditional)     # addr: int, or a node (V('eip', 32)) for a form of a whole shape
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
     def flag(s, name, v, when=None): assert v.w == 1 and name in FLAGS + ('df',); s.flags.append((name, v, when))
     def setflo(s, v): assert v.w == 32; s.flo = v
-    def undefined(s, name, sdm): s.undef[name] = sdm
+    def undefined(s, name, sdm, when=None):
+        """the flag NAME is left undefined by the SDM (text SDM, cited). WHEN: a 1-bit node over the pre-state, stated as in the SDM flag table, under which the flag
+        is undefined; where it is false the flag keeps its prior value (the SDM leaves it unchanged). None = unconditionally undefined. The condition is not trusted:
+        the prover checks cond => model free (value 0 refines) and not cond => the model's value is the prior one."""
+        s.undef[name] = sdm
+        if when is not None: assert when.w == 1; s.uwhen[name] = when
     def flag_line(s, f, v, w, ref):
         """C text of one flag write. DEF0 (orchestrator, 2026-11-12): a flag output that the pinned model leaves free is the constant 0, so a write with `when` w is
         `w ? v : 0` (v is the value where the SDM defines it)"""
@@ -230,8 +237,12 @@ class Form:
         if when is not None: assert when.w == 1; s.swhen[len(s.stores)] = when
         s.stores.append((addr, v))
     def fault(s, code, cond): assert cond.w == 1; s.faults.append((code, cond))
+    def model_gap(s, text): s.gaps.append(text)
+    def undef_line(s, f, ref):
+        """C text of the DEF0 value of the undefined flag f: 0, or `cond ? 0 : prior` for a conditional one"""
+        return '%s = 0;' % f if f not in s.uwhen else '%s = %s ? 0 : %s;' % (f, ref(s.uwhen[f]), ref(V(f, 1)))
     def roots(s):
-        return [v for _, v, _ in s.regs] + [w for _, _, w in s.regs if w is not None] + [v for _, v, _ in s.flags] + \
+        return [x for f in sorted(s.uwhen) for x in (s.uwhen[f], V(f, 1))] + [v for _, v, _ in s.regs] + [w for _, _, w in s.regs if w is not None] + [v for _, v, _ in s.flags] + \
                [w for _, _, w in s.flags if w is not None] + [x for st in s.stores for x in st] + [c for _, c in s.faults] + [s.swhen[i] for i in sorted(s.swhen)] + \
                ([s.flo] if s.flo is not None else []) + [s.eip]
     def serialize(s):
@@ -245,7 +256,7 @@ class Form:
         nw = lambda w: 'n%d' % go(w) if w is not None else '-'
         for r, v, w in s.regs: out.append('reg %s n%d %s' % (r, go(v), nw(w)))
         for f, v, w in s.flags: out.append('flag %s n%d %s' % (f, go(v), nw(w)))
-        for f in sorted(s.undef): out.append('undef ' + f)
+        for f in sorted(s.undef): out.append('undef ' + f + (' when n%d' % go(s.uwhen[f]) if f in s.uwhen else ''))
         for i, (a, v) in enumerate(s.stores): out.append('store n%d n%d' % (go(a), go(v)) + (' when n%d' % go(s.swhen[i]) if i in s.swhen else ''))
         for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
         if s.flo is not None: out.append('flo n%d' % go(s.flo))
@@ -262,7 +273,7 @@ class Form:
         On a fault the state is unchanged and eip = the instruction address (fields are guarded by fault == 0)."""
         import z3
         regs = {r: z3.BitVec(r, 32) for r in REGS}; flags = {f: z3.BitVec(f, 1) for f in FLAGS + ('df',)}
-        defined = {f: z3.BoolVal(f not in s.undef) for f in flags}; rdef = {r: z3.BoolVal(True) for r in REGS}
+        defined = {f: (z3.BoolVal(f not in s.undef) if f not in s.uwhen else to_smt(s.uwhen[f]) == 0) for f in flags}; rdef = {r: z3.BoolVal(True) for r in REGS}
         for r, v, w in s.regs:
             regs[r] = to_smt(v)
             if w is not None: rdef[r] = to_smt(w) == 1
@@ -295,7 +306,7 @@ class Form:
         cw = lambda w: '' if w is None else 'if (%s) ' % e.ref(w)
         for r, v, w in s.regs: L.append('%s%s = %s;' % (cw(w), r, e.ref(v)))
         for f, v, w in s.flags: L.append(s.flag_line(f, v, w, e.ref))        # DEF0: a flag the model leaves free is the constant 0
-        for f in sorted(s.undef): L.append('%s = 0;' % f)                      # DEF0: a flag the Form declares undefined is the constant 0
+        for f in sorted(s.undef): L.append(s.undef_line(f, e.ref))             # DEF0: a flag the Form declares undefined is the constant 0
         if s.flo is not None: L.append(flo_fn(e.ref(s.flo)))
         for k, (a, v) in enumerate(s.stores): L.append('%s%s%d(%s) = %s;' % (('if (%s) ' % e.ref(s.swhen[k])) if k in s.swhen else '', macc, v.w, e.ref(a), e.ref(v)))
         return L, e.ref
@@ -308,7 +319,7 @@ class Form:
         for k, c in s.faults: L.append('  if (%s) { eip = %s; return %d; }' % (e.ref(c), K(s.addr, 32), k))
         for r, v, w in s.regs: L.append('  %s%s = %s;' % ('' if w is None else 'if (%s) ' % e.ref(w), r, e.ref(v)))      # DEFPRIOR: a register the model leaves free (`when` false) keeps its prior value
         for f, v, w in s.flags: L.append('  ' + s.flag_line(f, v, w, e.ref))
-        for f in sorted(s.undef): L.append('  %s = 0;' % f)
+        for f in sorted(s.undef): L.append('  ' + s.undef_line(f, e.ref))
         if s.flo is not None: L.append('  flo = %s;' % e.ref(s.flo))
         for k, (a, v) in enumerate(s.stores): L.append('  %sM%d(%s) = %s;' % (('if (%s) ' % e.ref(s.swhen[k])) if k in s.swhen else '', v.w, e.ref(a), e.ref(v)))
         L.append('  eip = %s;\n  return 0;\n}' % e.ref(s.eip))

@@ -34,12 +34,12 @@ def lines_of(F):
     return L
 
 
-def read_back(L, fl, rg):
+def read_back(L, fl, rg, uw=()):
     """-> mismatches of the emitted lines L against the free flags FL (DEF0) and free registers RG (DEFPRIOR)"""
     bad = []
     for f in fl:
         last = [l for l in L if l.startswith(f + ' = ')]
-        if not last or not (last[-1] == '%s = 0;' % f or last[-1].endswith(' : 0;')): bad.append('flag %s is not 0 where free: %s' % (f, last[-1] if last else 'no assignment'))
+        if not last or not (last[-1] == '%s = 0;' % f or last[-1].endswith(' : 0;') or (f in uw and re.match(r'^%s = .* \? 0 : .*;$' % f, last[-1]))): bad.append('flag %s is not 0 where free: %s' % (f, last[-1] if last else 'no assignment'))
     for r in rg:
         if not [l for l in L if l.startswith('if (') and (') %s = ' % r) in l]: bad.append('register %s is written unconditionally although free' % r)
     return bad
@@ -48,7 +48,7 @@ def read_back(L, fl, rg):
 def check_form(F):
     """-> (free flags, free registers, mismatches [text]) of one Form against its emitted lines"""
     fl, rg = F.undefined_outputs()
-    return fl, rg, read_back(lines_of(F), fl, rg)
+    return fl, rg, read_back(lines_of(F), fl, rg, F.uwhen)
 
 
 def universe(pairs):
@@ -77,13 +77,15 @@ def universe(pairs):
 
 def run(uni):
     res = dict(shapes=len(uni), sites=sum(v[1] for v in uni.values()), no_form=0, no_form_sites=0, forms=0, forms_sites=0, forms_with_free=0, forms_with_free_sites=0,
-               free_flag_outputs=0, free_flag_outputs_sites=0, free_reg_outputs=0, free_reg_outputs_sites=0, uncovered=0, mismatches=[])
+               free_flag_outputs=0, free_flag_outputs_sites=0, free_reg_outputs=0, free_reg_outputs_sites=0, uncovered=0, forms_with_when=0, forms_with_when_sites=0, model_gap_forms=0, model_gap_forms_sites=0, mismatches=[])
     for key, (ins, n) in sorted(uni.items(), key=lambda kv: str(kv[0])):
         try: F = forms.build(ins, 0x1000)
         except Exception:
             res['no_form'] += 1; res['no_form_sites'] += n
             continue
         res['forms'] += 1; res['forms_sites'] += n
+        if F.uwhen: res['forms_with_when'] += 1; res['forms_with_when_sites'] += n      # a flag undefined only under a condition of the SDM table (Form.undefined(when=))
+        if F.gaps: res['model_gap_forms'] += 1; res['model_gap_forms_sites'] += n         # the model's own gap (L3b, batched IR bump): not proven by the DEF0 rule
         fl, rg, bad = check_form(F)
         if fl or rg:
             res['forms_with_free'] += 1; res['forms_with_free_sites'] += n
