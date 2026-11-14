@@ -249,7 +249,7 @@ def main():
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c', '-I', FNV + '/shim/include']
     syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent}); syms[XN_ADDR] = 'X_%08x' % XN_ADDR
     h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h))
-    open(w + '/guest.cpp', 'w').write(L.PRELUDE + '\n'.join(texts)); open(w + '/native.cc', 'w').write(NATIVE)
+    open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + '\n'.join(texts)); open(w + '/native.cc', 'w').write(NATIVE)
     # the table of native bodies: rule 1's rows, `exe address <TAB> native symbol`
     # the exit bridge of the native body of XN_ADDR (xnative, descriptor of its own type, cdecl: the caller pops) and its entry row for the lifted table
     xrows, xerr = exitgen.parse_rows(['%08x\txnative\tstack:i:i\tcaller' % XN_ADDR])

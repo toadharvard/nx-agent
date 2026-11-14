@@ -1,0 +1,6 @@
+{
+ "format": "fnvnx-selftest-inputs/1",
+ "tests": {
+  "test_universe_r3_check.py": ["exe", "facts"]
+ }
+}
