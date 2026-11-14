@@ -10,14 +10,6 @@ static const fnvnx_glsl_backend *const g_backends[] = { &fnvnx_backend_mojoshade
 const char *const fnvnx_shader_backend_names[] = { "mojoshader-glsldk", NULL };
 
 
-uint64_t fnvnx_shader_hash(const void *bytecode, size_t n)
-{
-    const unsigned char *p = (const unsigned char *)bytecode;
-    uint64_t h = 0xcbf29ce484222325ull;   /* FNV-1a 64 */
-    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 0x100000001b3ull; }
-    return h;
-}
-
 static void glsl_stats(const char *g, fnvnx_shader_stats *st)
 {
     int in_main = 0, depth = 0;
