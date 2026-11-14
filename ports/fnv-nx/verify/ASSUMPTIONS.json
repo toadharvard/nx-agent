@@ -1256,7 +1256,7 @@
     "L3b:A-F2IASM"
    ],
    "status": "REMOVE",
-   "removed_by": "gate:fpexact",
+   "removed_by": "gate:fpexact (checks 3c/3d: recorded asm ranges, top-level brackets, coverage complement decoded)",
    "owner": "L3a"
   },
   {
