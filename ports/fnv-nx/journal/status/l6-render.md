@@ -537,3 +537,9 @@ Paused: w3b, w4, farm; no other work.
         - The bytecode profile is removed (BYTECODE=0 by the profile-request rule).
         - Precondition, checked statically: no emitter outside the definitions phase uses a location.
     - Combined with the TLS change; w1b is doing it.
+- 23:42Z w1b 79fdbef8d: translator TLS 0, done.
+    - Change: one nonnull MOJOSHADER_glsldkConfig through MOJOSHADER_parseGlsldk. Set* deleted.
+    - Mirror f3e0e8a3 (tree ef7f6409…c81cac).
+    - Guest and host: 0 STT_TLS, 0 TLS relocations, 0 __tls_get_addr. reach_census goes red on TLS (red path tested).
+    - Guest 8 objects in 23.5 s; host 8 objects in 7.0 s.
+    - Sent to L6A for the gl4 merge.
