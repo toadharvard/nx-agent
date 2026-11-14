@@ -55,7 +55,7 @@ def main():
     elf6, elf3, elf35 = patched("h6.elf", 6), patched("h3.elf", 3), patched("h35.elf", 35)
 
     def args(elf, out, tbl=table, man=manifest, *extra):
-        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", "--guest-root", tb.GUEST_DIR,
+        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", 
                 "--root", root, "--quantum", str(tb.QUANTUM), "--milestones", tbl, "--manifest", man, "--out", os.path.join(d, out), *extra]
 
     rc, o, e = cli(args(elf6, "a.json"))
@@ -316,7 +316,7 @@ def main():
 
     # the guest-visible side: writes under the mounted tree fail with EACCES through the real file handlers (bootpath.READ_ONLY)
     svc = boothost.Services(root, read_only=[p["mount"] for p in real])
-    mach = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc, app_cores=tb.APP_CORES, quantum=tb.QUANTUM)
+    mach = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc, quantum=tb.QUANTUM)
     page = tb.make_plan(open(elf6, "rb").read())["regions"]["host_page"]["lo"]
 
     def sd(path):
@@ -343,7 +343,7 @@ def main():
     os.makedirs(os.path.join(root2, "switch", "fnv", "fontss"))
     open(os.path.join(root2, "switch", "fnv", "fontss", "a.ttf"), "w").close()
     svc2 = boothost.Services(root2, read_only=["switch/fnv/fontss"])
-    mach2 = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc2, app_cores=tb.APP_CORES, quantum=tb.QUANTUM)
+    mach2 = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc2, quantum=tb.QUANTUM)
     mach2.uc.mem_write(page, "sdmc:/switch/fnv/FONT\u00df/a.ttf".encode() + b"\0")
     tb.case("casefold-only spelling of a mount: open for write is EACCES with a declared-input-write fault, the file is unchanged",
             svc2.h_fs_open(page, O_WRITE | O_TRUNC) == EACCES and [(f["kind"], f["call"]) for f in svc2.declared_faults] == [("declared-input-write", "open")]

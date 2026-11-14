@@ -25,7 +25,7 @@ instruction word, no names). A name that is absent or not STT_FUNC is an input e
 Without the option the key is absent.
 
 Cores: the machine is the declared N-core machine (bootmachine.py rule 3). --quantum N (required, no default) is the instructions per slice of a core's
-thread; OUT.json "machine" = {app_cores, cores, quantum} and run.cores = per-core {slices, instructions, switches, pairs}.
+thread; OUT.json "machine" = {app_cores, cores, quantum, unicorn} and run.cores = per-core {slices, instructions, switches, pairs}.
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
@@ -57,6 +57,8 @@ import os
 import re
 import sys
 import time
+
+import unicorn
 
 from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
 
@@ -288,9 +290,8 @@ def run(a):
             print("boot: reason=scenario-error %s" % e)
             return 2
     svc = boothost.Services(a.root, a.game, sc, watch_reads=wl is not None, read_only=ro)
-    app_cores = bootmachine.app_cores_of(a.guest_root)
     m = bootmachine.Machine(raw, plan, svc, limit_instructions=a.limit_instructions,
-                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, app_cores=app_cores, quantum=a.quantum)
+                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, quantum=a.quantum)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
 
@@ -397,7 +398,7 @@ def run(a):
     doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
            "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
            "milestone_log": log, "inputs": {"text_entry": list(text_entries)},
-           "machine": {"app_cores": app_cores, "cores": m.cores, "quantum": a.quantum}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
+           "machine": {"app_cores": bootmachine.APP_CORES, "cores": m.cores, "quantum": a.quantum, "unicorn": unicorn.__version__}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
     if declared:
         doc["inputs"]["declared"] = declared
     dif = svc.declared_faults   # a write under a declared input: L5's static fact is wrong, the verdict is failed whatever the guest did next
@@ -442,7 +443,6 @@ def main(argv=None):
     for opt in ("--elf", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
         sp.add_argument(opt, required=True)
     sp.add_argument("--heap-size", required=True, type=lambda s: int(s, 0))
-    sp.add_argument("--guest-root", required=True, help="directory of the guest product root the ELF was built from (its build.json flags give the application cores)")
     sp.add_argument("--game")
     sp.add_argument("--icount-spec")
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))

@@ -713,7 +713,7 @@ Register ids are normalised through MCRegisterInfo super-register chains to the 
 ```text
 The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions.
 
-  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --guest-root ROOTDIR --root SDROOT [--game DIR]
+  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
               --quantum N [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
@@ -737,7 +737,7 @@ merged, prot 1 R 2 W 4 X), pages ({name: {lo, sha256: per page, null unmapped}})
 never entered. Both options exist for bootstart.py (the loader's start rules S1..S8).
 
 Cores: the machine is the declared N-core machine (bootmachine.py rule 3). --quantum N (required, no default) is the instructions per slice of a core's
-thread; OUT.json "machine" = {app_cores, cores, quantum} and run.cores = per-core {slices, instructions, switches, pairs}.
+thread; OUT.json "machine" = {app_cores, cores, quantum, unicorn} and run.cores = per-core {slices, instructions, switches, pairs}.
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
@@ -900,8 +900,8 @@ Rules:
    host page / heap = the plan's regions. No relocation: the guest relocates itself. A segment outside the image region
    or sharing a page with another raises MachineError.
 2. Totality: all 50 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
-3. N cores, parallel progress in rounds (CLAUDE.md "The declared CPU"). N = popcount(app_cores) (the application cores of the guest root,
-   placement.h FNVNX_APP_CORES; cores = its set bits, ascending). Every thread lives on its ideal core for ever (thread_create's
+3. N cores, parallel progress in rounds (CLAUDE.md "The declared CPU"). N = popcount(FNVNX_APP_CORES) (placement.h, read by name:
+   the declared machine; cores = its set bits, ascending). Every thread lives on its ideal core for ever (thread_create's
    FNVNX_CPU_SPEC ideal, thread_set_cpu; the main thread FNVNX_DEFAULT_CORE): THREAD_CPU = ideal, there is no migration, the mask is not
    used for placement. Per core the ready thread of the highest priority runs (Win32 scale, signed, higher first), FIFO within equal
    priority (the order in which threads became ready; a thread that only used up its quantum keeps its place; thread_yield goes behind its
@@ -913,7 +913,9 @@ Rules:
    start of each core's turn, so it is a pure function of the machine's state: no wall clock, switch points repeat. Nothing ready on any
    core: the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report. run()["cores"] has the
    per-core numbers: {core: {"slices", "instructions", "switches", "pairs": {"from>to": n}}}; a switch is a core running another thread than
-   the one it ran last.
+   the one it ran last. quantum is a declared parameter of the instrument. The slice end is a function of the code's block extents and the
+   pinned Unicorn (env.json python.modules; its version is in OUT.json machine.unicorn), so switch points repeat for the same code and pin.
+   Memory ordering is proved by the plugin rule (R9, OWNER 9); the boot machine neither tests nor certifies it.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
    ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly

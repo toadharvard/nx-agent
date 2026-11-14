@@ -5,7 +5,7 @@ threads freeing a core, determinism, quantum independence for a race-free guest,
 The guests are small AArch64 programs encoded here word by word (no compiler, so the test runs wherever unicorn does): the ELF skeleton is
 test_bootlayout.make_elf (crt0 header, the three PT_LOADs), the code sits at the entry 0x1040, globals at 0x12400 (zero data of the RW
 segment). They are inputs of the machine, not stand-ins of any product file; the host calls go through the real FnvnxHostApi table and
-boothost.Services. N and the core set come from the guest root's flags (bootmachine.app_cores_of -> placement.h FNVNX_APP_CORES).
+boothost.Services. N and the core set come from placement.h FNVNX_APP_CORES, read by name (bootmachine.APP_CORES).
 Plain script: exit 0 on pass, one line per case."""
 import os
 import struct
@@ -23,7 +23,7 @@ import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 import test_bootlayout as tbl  # noqa: E402
 
-APP_CORES = bootmachine.app_cores_of(os.path.join(REPO, "ports", "fnv-nx", "tests", "bootguest"))
+APP_CORES = bootmachine.APP_CORES
 FAILS = []
 DATA = 0x12400               # globals: image-relative
 GAPI, CTR, CPU, LOGN, LOG, FLAG = DATA, DATA + 0x08, DATA + 0x28, DATA + 0x48, DATA + 0x80, DATA + 0x40
@@ -218,7 +218,7 @@ def make_plan(raw):
 
 def run(raw, quantum, root, limit=None, svc=None):
     svc = svc or boothost.Services(root)
-    m = bootmachine.Machine(raw, make_plan(raw), svc, app_cores=APP_CORES, quantum=quantum, limit_instructions=limit)
+    m = bootmachine.Machine(raw, make_plan(raw), svc, quantum=quantum, limit_instructions=limit)
     tids = []
     m.on_thread(tids.append)
     r = m.run()
@@ -310,17 +310,17 @@ def main():
         os.makedirs(root)
         N = bin(APP_CORES).count("1")
         cores = [c for c in range(32) if APP_CORES >> c & 1]
-        case("the declared machine has 3 cores 0..2 (placement.h FNVNX_APP_CORES of the guest root)", N == 3 and cores == [0, 1, 2], (hex(APP_CORES), cores))
+        case("the declared machine has 3 cores 0..2 (placement.h FNVNX_APP_CORES)", N == 3 and cores == [0, 1, 2], (hex(APP_CORES), cores))
         # quantum is required and positive
         raw = g_cores()
         for bad in (0, -1, 1.5, None, True):
             try:
-                bootmachine.Machine(raw, make_plan(raw), boothost.Services(root), app_cores=APP_CORES, quantum=bad)
+                bootmachine.Machine(raw, make_plan(raw), boothost.Services(root), quantum=bad)
                 case("quantum %r refused" % (bad,), False)
             except bootmachine.MachineError:
                 case("quantum %r refused" % (bad,), True)
         try:
-            bootmachine.Machine(raw, make_plan(raw), boothost.Services(root), app_cores=APP_CORES)
+            bootmachine.Machine(raw, make_plan(raw), boothost.Services(root))
             case("quantum has no default", False)
         except TypeError:
             case("quantum has no default", True)

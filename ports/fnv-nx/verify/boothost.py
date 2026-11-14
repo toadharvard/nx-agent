@@ -99,7 +99,7 @@ class Services:
         thread_create (cur None): FNVNX_CPU_SPEC(ideal, mask) only, ideal in mask, mask within the application cores. thread_set_cpu
         (cur = (ideal, mask)): additionally a plain core 0..63 (that core only); FNVNX_CPU_KEEP ideal and mask 0 keep the current value; the
         ideal core joins the mask; the result's mask must lie within the application cores."""
-        app = self.m.app_cores
+        app = bootmachine.APP_CORES
         if spec >> 63 == 0:   # not a spec: one core
             if cur is None or spec > 63 or spec >= 32 or not app >> spec & 1:
                 return None

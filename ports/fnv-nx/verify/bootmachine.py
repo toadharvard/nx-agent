@@ -8,8 +8,8 @@ Rules:
    host page / heap = the plan's regions. No relocation: the guest relocates itself. A segment outside the image region
    or sharing a page with another raises MachineError.
 2. Totality: all 46 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
-3. N cores, parallel progress in rounds (CLAUDE.md "The declared CPU"). N = popcount(app_cores) (the application cores of the guest root,
-   placement.h FNVNX_APP_CORES; cores = its set bits, ascending). Every thread lives on its ideal core for ever (thread_create's
+3. N cores, parallel progress in rounds (CLAUDE.md "The declared CPU"). N = popcount(FNVNX_APP_CORES) (placement.h, read by name:
+   the declared machine; cores = its set bits, ascending). Every thread lives on its ideal core for ever (thread_create's
    FNVNX_CPU_SPEC ideal, thread_set_cpu; the main thread FNVNX_DEFAULT_CORE): THREAD_CPU = ideal, there is no migration, the mask is not
    used for placement. Per core the ready thread of the highest priority runs (Win32 scale, signed, higher first), FIFO within equal
    priority (the order in which threads became ready; a thread that only used up its quantum keeps its place; thread_yield goes behind its
@@ -21,7 +21,9 @@ Rules:
    start of each core's turn, so it is a pure function of the machine's state: no wall clock, switch points repeat. Nothing ready on any
    core: the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report. run()["cores"] has the
    per-core numbers: {core: {"slices", "instructions", "switches", "pairs": {"from>to": n}}}; a switch is a core running another thread than
-   the one it ran last.
+   the one it ran last. quantum is a declared parameter of the instrument. The slice end is a function of the code's block extents and the
+   pinned Unicorn (env.json python.modules; its version is in OUT.json machine.unicorn), so switch points repeat for the same code and pin.
+   Memory ordering is proved by the plugin rule (R9, OWNER 9); the boot machine neither tests nor certifies it.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
    ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
@@ -154,22 +156,20 @@ WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and
 MAP_FIXED_MAX = 512
 FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = 0x0559, 0x1359
 # fnvnx/placement.h and hostapi.h (the tests read the numbers by name from the headers and compare)
-FNVNX_DEFAULT_CORE, FNVNX_APP_CORES, FNVNX_APP_CORES_CORE3, FNVNX_CPU_KEEP = 0, 0x7, 0xF, 0xFF
+FNVNX_DEFAULT_CORE, FNVNX_CPU_KEEP = 0, 0xFF
 
 
-def app_cores_of(root_dir, variant=None):
-    """the application cores of a guest root: FNVNX_APP_CORES_CORE3 when the C flags that recipe.py compiles the root with (build.json, the
-    variant's own flags when one is named) define FNVNX_CORE3_DEFAULT non-zero, else FNVNX_APP_CORES (placement.h)"""
-    with open(os.path.join(root_dir, "build.json")) as f:
-        b = json.load(f)
-    flags = ((b.get("variants") or {}).get(variant) or {}).get("flags") if variant else None
-    flags = flags or b.get("flags") or {}
-    on = False
-    for fl in list(flags.get("c", [])) + list(flags.get("cxx", [])):
-        m = re.fullmatch(r"-DFNVNX_CORE3_DEFAULT(?:=(.*))?", fl)
-        if m:
-            on = (m.group(1) or "1") not in ("0", "")
-    return FNVNX_APP_CORES_CORE3 if on else FNVNX_APP_CORES
+def header_define(name, header="placement.h"):
+    """the number of `#define NAME N` in hostabi/include/fnvnx/<header>, read by name: the one copy of the declared machine's numbers"""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hostabi", "include", "fnvnx", header)
+    with open(p) as f:
+        m = re.search(r"^#define\s+%s\s+(0[xX][0-9A-Fa-f]+|\d+)[uUlL]*\b" % re.escape(name), f.read(), re.M)
+    if not m:
+        raise MachineError("%s: no #define %s" % (header, name))
+    return int(m.group(1), 0)
+
+
+APP_CORES = header_define("FNVNX_APP_CORES")   # the declared machine's application cores (placement.h); N = popcount
 KERNEL_BUSY, KERNEL_INVALID_STATE = 0xF401, 0xFA01   # kernel results 1 | 122 << 9 (Busy), 1 | 125 << 9 (InvalidState); see the docstring
 SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
 SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512   # host_section.inc
@@ -292,11 +292,11 @@ class IdTable:
 
 class Machine:
     def __init__(self, elf_bytes, plan, services, clock=None, *, limit_host_calls=None, n_stacks=32,
-                 stack_size=0x40000, limit_instructions=None, profile="handheld", text_entries=None, app_cores, quantum):
+                 stack_size=0x40000, limit_instructions=None, profile="handheld", text_entries=None, quantum):
         if not isinstance(quantum, int) or isinstance(quantum, bool) or quantum <= 0:
             raise MachineError("quantum must be a positive integer (instructions per slice), got %r" % (quantum,))
         self.quantum = quantum   # instructions per slice (rule 3); a declared parameter of the run, no default
-        self.app_cores = app_cores   # FNVNX_APP_CORES, or FNVNX_APP_CORES_CORE3 when the guest root builds with FNVNX_CORE3_DEFAULT (app_cores_of)
+        self.app_cores = APP_CORES   # placement.h FNVNX_APP_CORES: the declared machine, nothing varies
         if profile not in ("handheld", "docked"):
             raise MachineError("profile must be 'handheld' or 'docked', got %r" % (profile,))
         self.profile = profile   # FNVNX_PLAT_DISPLAY_DOCKED: docked 1, handheld 0
@@ -368,7 +368,7 @@ class Machine:
         self.addr_of = {n: a for a, n in self.stubs.items()}
         self.threads, self.order, self.cur = {}, [], None
         self.calls, self.switches, self.exit_code = 0, 0, None
-        self.cores = [c for c in range(32) if app_cores >> c & 1]
+        self.cores = [c for c in range(32) if APP_CORES >> c & 1]
         self.core_stats = {c: {"slices": 0, "instructions": 0, "switches": 0, "pairs": {}} for c in self.cores}
         self.core_last = dict.fromkeys(self.cores)   # core -> tid it ran last
         self.rseq, self.slice_instr, self.slice_over = 0, 0, False

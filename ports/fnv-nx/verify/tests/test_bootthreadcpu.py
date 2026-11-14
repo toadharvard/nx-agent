@@ -41,11 +41,10 @@ def define(name):
 
 
 def main():
-    D, APP, APP3, KEEP, FN, BAD, NOTF = (define(n) for n in ("FNVNX_DEFAULT_CORE", "FNVNX_APP_CORES", "FNVNX_APP_CORES_CORE3", "FNVNX_CPU_KEEP",
+    D, APP, KEEP, FN, BAD, NOTF = (define(n) for n in ("FNVNX_DEFAULT_CORE", "FNVNX_APP_CORES", "FNVNX_CPU_KEEP",
                                                              "FNVNX_PLAT_THREAD_CPU", "FNVNX_HE_BADINPUT", "FNVNX_HE_NOTFOUND"))
-    case("headers: default core, app cores, KEEP, THREAD_CPU by name", None not in (D, APP, APP3, KEEP, FN) and FN == 38, (D, APP, APP3, KEEP, FN))
-    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.FNVNX_APP_CORES, bootmachine.FNVNX_APP_CORES_CORE3,
-                                                 bootmachine.FNVNX_CPU_KEEP) == (D, APP, APP3, KEEP))
+    case("headers: default core, app cores, KEEP, THREAD_CPU by name", None not in (D, APP, KEEP, FN) and FN == 38, (D, APP, KEEP, FN))
+    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.APP_CORES, bootmachine.FNVNX_CPU_KEEP) == (D, APP, KEEP))
     case("BADINPUT 0x1759 and NOTFOUND by name", BAD == bootmachine.LIBNX_BAD_INPUT and (NOTF or bootmachine.FNVNX_HE_NOTFOUND) == bootmachine.FNVNX_HE_NOTFOUND)
 
     def SPEC(ideal, mask):
@@ -55,9 +54,9 @@ def main():
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)]
     plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
 
-    def machine(app):
+    def machine():
         svc = boothost.Services(tempfile.mkdtemp(prefix="tc-"))
-        m = bootmachine.Machine(elf, plan, svc, app_cores=app, quantum=QUANTUM)
+        m = bootmachine.Machine(elf, plan, svc, quantum=QUANTUM)
         m.threads[1] = bootmachine.Thread(1)   # as run() starts main
         m.order, m.cur = [1], m.threads[1]
         return m, svc
@@ -71,14 +70,14 @@ def main():
     def create(svc, cpu):
         return svc.h_thread_create(0x1000, 0, 0x10000, 0, cpu)
 
-    for tag, app in (("app cores 0-2", APP), ("core 3 build", APP3)):
-        m, svc = machine(app)
+    for tag, app in (("app cores 0-2", APP),):
+        m, svc = machine()
         case("[%s] main starts at the default core, mask 1 << default; THREAD_CPU answers it" % tag,
              thread_cpu(m) == D and svc._placed(0) == {"ideal": D, "mask": 1 << D}, svc._placed(0))
         for c in range(4):
             before = len(m.threads)
             h = create(svc, SPEC(c, 1 << c))
-            ok = c < 3 or app == APP3
+            ok = app >> c & 1
             case("[%s] thread_create on core %d %s" % (tag, c, "is placed" if ok else "is refused (not an app core): id 0, nothing created"),
                  (h != 0 and len(m.threads) == before + 1) if ok else (h == 0 and len(m.threads) == before), (h, len(m.threads)))
             if ok:
@@ -116,29 +115,10 @@ def main():
         case("[%s] set_cpu mask outside the app cores -> BADINPUT, unchanged" % tag, svc.h_thread_set_cpu(0, SPEC(KEEP, 1 << 4)) == BAD
              and p() == keep)
         r3 = svc.h_thread_set_cpu(0, 3)
-        case("[%s] set_cpu plain core 3 %s" % (tag, "is accepted" if app == APP3 else "-> BADINPUT, unchanged"),
-             (r3 == 0 and p() == {"ideal": 3, "mask": 8}) if app == APP3 else (r3 == BAD and p() == keep), (r3, p()))
-        case("[%s] set_cpu ideal 3 joining the mask %s" % (tag, "is accepted" if app == APP3 else "-> BADINPUT"),
-             (svc.h_thread_set_cpu(0, SPEC(3, 0x3)) == 0 and p() == {"ideal": 3, "mask": 0xB}) if app == APP3
-             else svc.h_thread_set_cpu(0, SPEC(3, 0x3)) == BAD)
+        case("[%s] set_cpu plain core 3 (not an app core) -> BADINPUT, unchanged" % tag, r3 == BAD and p() == keep, (r3, p()))
+        case("[%s] set_cpu ideal 3 joining the mask -> BADINPUT" % tag, svc.h_thread_set_cpu(0, SPEC(3, 0x3)) == BAD)
         case("[%s] fn 39 -> NO_SERVICE (header bound)" % tag, thread_cpu(m) is not None and m.ext_call(11, 39, ARGS, 0) == 0xFFFFFFFFFFFFFF02)
 
-    # app_cores_of: the recipe's own flags
-    d = tempfile.mkdtemp(prefix="ac-")
-
-    def root(flags):
-        json.dump({"flags": flags}, open(os.path.join(d, "build.json"), "w"))
-        return bootmachine.app_cores_of(d)
-
-    case("app_cores_of: no define -> 0-2", root({"c": ["-O2"], "cxx": [], "asm": []}) == APP)
-    case("app_cores_of: -DFNVNX_CORE3_DEFAULT=1 -> with core 3", root({"c": ["-DFNVNX_CORE3_DEFAULT=1"], "cxx": [], "asm": []}) == APP3)
-    case("app_cores_of: -DFNVNX_CORE3_DEFAULT (bare) -> with core 3", root({"c": ["-DFNVNX_CORE3_DEFAULT"], "cxx": [], "asm": []}) == APP3)
-    case("app_cores_of: -DFNVNX_CORE3_DEFAULT=0 -> 0-2", root({"c": ["-DFNVNX_CORE3_DEFAULT=0"], "cxx": [], "asm": []}) == APP)
-    case("app_cores_of: the define in the cxx flags counts too", root({"c": [], "cxx": ["-DFNVNX_CORE3_DEFAULT=1"], "asm": []}) == APP3)
-    json.dump({"flags": {"c": [], "cxx": [], "asm": []}, "variants": {"v": {"flags": {"c": ["-DFNVNX_CORE3_DEFAULT=1"], "cxx": [], "asm": []}}}},
-              open(os.path.join(d, "build.json"), "w"))
-    case("app_cores_of: a named variant's own flags decide", bootmachine.app_cores_of(d, "v") == APP3 and bootmachine.app_cores_of(d) == APP)
-    case("the bootguest root builds without the core 3 opt-in", bootmachine.app_cores_of(os.path.join(REPO, "ports", "fnv-nx", "tests", "bootguest")) == APP)
     print("%d cases, %d failed" % (N[0], len(FAILED)))
     return 1 if FAILED else 0
 
