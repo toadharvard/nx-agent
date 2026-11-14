@@ -24,13 +24,13 @@ from proof import certs_build, symform  # noqa: E402
 
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument('universe'); ap.add_argument('shards', nargs='*'); ap.add_argument('--pack-commit', required=True)
-    ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); a = ap.parse_args(argv)
+    ap.add_argument('--prover-commit', required=True); ap.add_argument('--out', required=True); ap.add_argument('--noform'); a = ap.parse_args(argv)
     pin = certs_build.pinned_model()
-    fam, hdr = {}, []
+    fam, hdr, first = {}, [], {}
     with open(a.universe) as fh:
         for ln in fh:
             if ln[0] == '#': hdr.append(ln.rstrip('\n')); continue
-            p = ln.rstrip('\n').split('\t'); fam[p[0]] = (p[1], int(p[3]))
+            p = ln.rstrip('\n').split('\t'); fam[p[0]] = (p[1], int(p[3])); first[p[0]] = p[4]
     forms = certs_build.forms_of(a.universe)
     files = []
     for s in a.shards: files += sorted(glob.glob(os.path.join(s, '**', '*.jsonl'), recursive=True)) if os.path.isdir(s) else [s]
@@ -53,6 +53,8 @@ def main(argv):
              '# shards read: %d files, %d records' % (len(files), sum(1 for _ in certs_build.records(files)))]
     with open(a.out, 'w') as fh:
         fh.write('\n'.join(lines) + '\n' + ''.join('%s\t%s\n' % x for x in q))
+    if a.noform:
+        with open(a.noform, 'w') as fh: fh.write('# int shapes of the universe without a symbolic Form: shape_key<TAB>addresses<TAB>first_address\n' + ''.join('%s\t%d\t%s\n' % (k, fam[k][1], first[k]) for k in noform))
     sys.stdout.write('\n'.join(lines) + '\n'); return 0
 
 

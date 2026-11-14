@@ -249,6 +249,5 @@ No real encoding with a non-flag free value was found among 17 probed (shifts, s
 - formgate CLI tests: test_green_and_red_without_cache_and_without_z3 -> ModuleNotFoundError: No module named 'gatefile'; test_missing_pack_is_red_with_reason -> AssertionError 1 != 2 (returncode).  Both also fail without my change; cause: no trunk checkout in my container (verify/ missing); run them on a farm once.
 - Every record of the new prover stores obligations (OBLIGATIONS = ["def0"]) also when undef_flags is '-'.
 
-## 18. migration of the 2,409 old records (K + DEF0)
-`shapeprove.py --migrate OLD.jsonl --out DIR --shard I/6 --timeout 300` now adds K (model_fns/closure_sha) AND runs DEF0/DEFPRIOR on the cached isla run (prove_one def0_only); the field-equality proof is not redone (its checks are unchanged: prove.py differs from the old prover only by the DEF0 obligation; dsl_sha must equal the current Form's, else the record is left untouched). A failing DEF0 turns the record into FAILED(def0)/timeout, never proved.
-Checked: migrated record == fresh full run for c1e500/2.1.0.0 (both FAILED(def0), af, free 6) and 6 plain shapes proved with obligations ['def0']. ~6 s/record: one farm per old shard file (6 jobs, ~40 min each).
+## 18. queue v2 (lead decision): requeue in full
+No migration: the 6 old shards are superseded. Queue v2 = all 18,584 int shapes with a Form (queue_id 29f53c484d24, branch l3b-lift/queue/7b2faae276b2-99d6300abd64-v2, noform.tsv = the 166 int shapes without a Form). The --migrate DEF0 extension was dropped again (prove_one def0_only removed).
