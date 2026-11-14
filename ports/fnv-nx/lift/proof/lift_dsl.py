@@ -65,10 +65,24 @@ def de_code(n, ref):
     return e
 
 
+# The fault map: every fault code a Form can raise (dsl.FAULTS, the enum) -> (runtime code of rt/fnvl.h, the address the runtime is given relative to the instruction, trap).
+# Each row follows the runtime's own statement in rt/fnvl.h (the status, fault or trap, ExceptionAddress / Context.Eip) and Wine 9.0 dlls/ntdll/signal_i386.c
+# (segv_handler / trap handlers: TRAP_x86_DIVIDE -> STATUS_INTEGER_DIVIDE_BY_ZERO, TRAP_x86_BPTFLT -> STATUS_BREAKPOINT, TRAP_x86_OPNOEXT/ILLEGAL -> STATUS_ILLEGAL_INSTRUCTION,
+# TRAP_x86_BOUND -> STATUS_ARRAY_BOUNDS_EXCEEDED, TRAP_x86_OFLOW -> STATUS_INTEGER_OVERFLOW, privileged instruction (#GP from CLI/HLT/...) -> STATUS_PRIVILEGED_INSTRUCTION,
+# TRAP_x86_PROTFLT -> STATUS_ACCESS_VIOLATION, TRAP_x86_TRCTRAP -> STATUS_SINGLE_STEP). at: 'a' the instruction, 'nxt' the next instruction, 'a+1' the imm8 byte of a 2-byte int.
+FAULT_MAP = {2: ('FNVL_BP', 'a', True), 3: ('FNVL_UD', 'a', True), 4: ('FNVL_BOUNDS', 'a', False), 5: ('FNVL_INTO', 'a', True), 6: ('FNVL_PRIV', 'a', False),
+             7: ('AV', 'a', False), 8: ('FNVL_STEP', 'nxt', True), 9: ('FNVL_ASSERT', 'a', False), 10: ('FNVL_DBGSRV', 'a', False), 11: ('FNVL_INTO', 'a+1', True)}
+DE = 1        # #DE: the status (divide by zero or overflow) is chosen by the condition (de_code), a fault
+assert set(FAULT_MAP) | {DE} == set(dsl.FAULTS), 'a fault code of dsl.FAULTS has no row in FAULT_MAP: %s' % sorted(set(dsl.FAULTS) - set(FAULT_MAP) - {DE})
+
+
 def fault_fn(cx):
     def f(code, n, ref):
-        c = {1: lambda: de_code(n, ref), 2: lambda: 'FNVL_BP', 3: lambda: 'FNVL_UD', 4: lambda: 'FNVL_BOUNDS'}[code]()
-        st = f_flow.raise_site(cx, c, trap=code not in (1, 4))      # #DE and #BR are faults (Eip = the instruction); #BP / #UD report the address after it
+        if code == DE:
+            c, at, trap, av = de_code(n, ref), None, False, False
+        else:
+            c, w, trap = FAULT_MAP[code]; av = c == 'AV'; at = {'a': cx.a, 'nxt': cx.nxt, 'a+1': cx.a + 1}[w]
+        st = f_flow.raise_site(cx, c, trap=trap, at=at, av=av)
         if n.op == 'const' and n.x == 1:
             cx.term = True
             return st

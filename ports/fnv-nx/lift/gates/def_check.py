@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capstone
 from capstone import x86 as X
 
-from proof import forms, shape
+from proof import forms, shape, lift_dsl
 import gate_flags as g
 
 _FLAG = re.compile(r'^(cf|pf|af|zf|sf|of|df) = (.*);$')
@@ -77,13 +77,17 @@ def universe(pairs):
 
 def run(uni):
     res = dict(shapes=len(uni), sites=sum(v[1] for v in uni.values()), no_form=0, no_form_sites=0, forms=0, forms_sites=0, forms_with_free=0, forms_with_free_sites=0,
-               free_flag_outputs=0, free_flag_outputs_sites=0, free_reg_outputs=0, free_reg_outputs_sites=0, uncovered=0, forms_with_when=0, forms_with_when_sites=0, model_gap_forms=0, model_gap_forms_sites=0, mismatches=[])
+               free_flag_outputs=0, free_flag_outputs_sites=0, free_reg_outputs=0, free_reg_outputs_sites=0, uncovered=0, unmapped_fault_codes=[], by_mnemonic={}, forms_with_when=0, forms_with_when_sites=0, model_gap_forms=0, model_gap_forms_sites=0, mismatches=[])
     for key, (ins, n) in sorted(uni.items(), key=lambda kv: str(kv[0])):
         try: F = forms.build(ins, 0x1000)
         except Exception:
             res['no_form'] += 1; res['no_form_sites'] += n
             continue
         res['forms'] += 1; res['forms_sites'] += n
+        for k, _ in F.faults:
+            if k not in lift_dsl.FAULT_MAP and k != lift_dsl.DE: res['unmapped_fault_codes'].append(k)      # every fault code a Form raises has a row of the fault map
+        mn = res['by_mnemonic'].setdefault(ins.mnemonic.split()[-1], dict(forms=0, undef_unconditional=set(), undef_when=set(), write_when=set()))      # the table of 4a: where each free output comes from
+        mn['forms'] += 1; mn['undef_unconditional'] |= set(F.undef) - set(F.uwhen); mn['undef_when'] |= set(F.uwhen); mn['write_when'] |= {f for f, _, w in F.flags if w is not None}
         if F.uwhen: res['forms_with_when'] += 1; res['forms_with_when_sites'] += n      # a flag undefined only under a condition of the SDM table (Form.undefined(when=))
         if F.gaps: res['model_gap_forms'] += 1; res['model_gap_forms_sites'] += n         # the model's own gap (L3b, batched IR bump): not proven by the DEF0 rule
         fl, rg, bad = check_form(F)
@@ -99,7 +103,8 @@ def run(uni):
     res['uncertified'] = res['free_flag_outputs'] + res['free_reg_outputs']
     res['uncertified_sites'] = res['free_flag_outputs_sites'] + res['free_reg_outputs_sites']
     res['cert_owner'] = 'L3b'
-    res['status'] = 'green' if not res['uncovered'] and not res['uncertified'] else 'red'
+    res['by_mnemonic'] = {m: dict(forms=v['forms'], **{k: sorted(v[k]) for k in ('undef_unconditional', 'undef_when', 'write_when')}) for m, v in sorted(res['by_mnemonic'].items())}
+    res['status'] = 'green' if not res['uncovered'] and not res['unmapped_fault_codes'] and not res['uncertified'] else 'red'
     return res
 
 
