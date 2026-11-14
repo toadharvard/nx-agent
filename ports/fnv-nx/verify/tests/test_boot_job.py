@@ -285,14 +285,16 @@ def main():
     if rc == 0:
         files, msg, cm = published("l4-verify/boot/gpuid")
         fr = sorted(n for n in files if n.startswith("frames/"))
-        tb.case("published: OUT.json, console, spec, meta and every presented frame (.rgba + .txt)",
+        tb.case("published: OUT.json, console, spec, meta and every distinct frame (<key>.rgba + <key>.txt)",
                 sorted(n for n in files if "/" not in n) == ["OUT.console.txt", "OUT.json", "meta.json", "spec.json"]
-                and fr == ["frames/frame_%06u.%s" % (i, e) for i in range(4) for e in ("rgba", "txt")], sorted(files))
-        tb.case("frame files hold the library's output", files["frames/frame_000001.txt"] == b"1280 720\n"
-                and len(files["frames/frame_000001.rgba"]) == 1280 * 720 * 4, files.get("frames/frame_000001.txt"))
+                and fr == sorted("frames/%s.%s" % (k, e) for k in {f["sha256"] for f in json.loads(files["OUT.json"])["frames"]} for e in ("rgba", "txt")), sorted(files))
+        k0 = json.loads(files["OUT.json"])["frames"][0]["sha256"]
+        tb.case("frame files hold the library's output, named by their key", files["frames/%s.txt" % k0] == b"1280 720\n"
+                and len(files["frames/%s.rgba" % k0]) == 1280 * 720 * 4
+                and hashlib.sha256(files["frames/%s.txt" % k0] + files["frames/%s.rgba" % k0]).hexdigest() == k0, k0)
         doc, meta = json.loads(files["OUT.json"]), json.loads(files["meta.json"])
-        tb.case("OUT.json frames: a record for every present (4), an image pair published for each", [f["n"] for f in doc["frames"]] == [1, 2, 3, 4]
-                and len(fr) == 8, (doc.get("frames"), fr))
+        tb.case("OUT.json frames: a record for every present (4), one image pair published per distinct key", [f["n"] for f in doc["frames"]] == [1, 2, 3, 4]
+                and len(fr) == 2 * len({f["sha256"] for f in doc["frames"]}), (doc.get("frames"), fr))
         tb.case("OUT.json gpu record, meta.json gpu fields", doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"]
                 and meta["gpu_branch"] == GB
                 and meta["gpu_branch_commit"] == git("rev-parse", "refs/heads/" + GB, cwd=BARE).strip(), (doc.get("gpu"), meta))
