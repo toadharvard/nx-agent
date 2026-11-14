@@ -74,24 +74,5 @@
    "tree_sha256": "16f47d88caf0811c24b580b594c25db06d8ab037d5e96efd5d92bac4e13496de",
    "at": "/ext/linuxerrno"
   }
- ],
- "variants": {
-  "host": {
-   "compiler": {
-    "cc": "x86_64-linux-gnu-gcc-13",
-    "cxx": "x86_64-linux-gnu-g++-13"
-   },
-   "flags": {
-    "c": [
-     "-O2",
-     "-Werror=attributes"
-    ],
-    "cxx": [
-     "-O2",
-     "-Werror=attributes"
-    ],
-    "asm": []
-   }
-  }
- }
+ ]
 }

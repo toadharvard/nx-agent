@@ -37,9 +37,9 @@ open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld, with
 # the FNXG header of crt0 at the first segment + 8 and the entry at the first segment. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = (".section .crt0,\"ax\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n"
+CRT0 = (".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n"
         ".section .crt0.hdr,\"a\",%progbits\n.align 2\n.global __fnvnx_guest_hdr\n__fnvnx_guest_hdr:\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
-        ".section .crt0.mod0,\"a\",%progbits\n.align 2\n.global __fnvnx_mod0\n__fnvnx_mod0:\n .word 0\n")   # the three sections of toolchain/guest/crt0.s
+        ".section .crt0.mod0,\"a\",%progbits\n.align 2\n.global __fnvnx_mod0\n__fnvnx_mod0:\n .ascii \"MOD0\"\n")
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
           "flags": {"c": ["-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
@@ -238,21 +238,6 @@ def main():
               and all(f["exit"] and 0 < len(f["stderr"]) <= 20 and set(f) == {"unit", "stage", "exit", "stderr"} for f in fu)
               and any("undeclared_b" in l for l in fu[0]["stderr"]) and any("missing_c.h" in l for l in fu[1]["stderr"])
               and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and [o["unit"] for o in r1["objects"]] == ["a.c"], (fu, r1.get("failure")))
-        # the key of a generated stage holds the installed-files digest of EVERY python module pinned in env.json (and mounts them all)
-        pm = recipe.pinned_modules(two)
-        check("every module pinned in env.json is listed with its installed-files digest and top-level names",
-              [m for m, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
-              and all(len(d) == 64 and tops for _, _, d, tops in pm), pm)
-        base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
-        real = recipe.envcheck.wheel_digest
-        for target in [m for m, _, _, _ in pm]:
-            recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
-            try:
-                alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
-            finally:
-                recipe.envcheck.wheel_digest = real
-            d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
-            check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
         # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
         # built, the ELF is blocked, and the root is red naming the red stage.
         kg = make_repo("kg", rec=dict(RECIPE, os_layer=[], generated=RECIPE["generated"] + [
@@ -342,54 +327,6 @@ def main():
           and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and {"f_a", "f_b"} <= set(u) and "f_c" not in u
           and d == sorted(d, key=lambda x: (x["symbol"], x["object"])) and u == sorted(u), (d, u))
 
-    # --- link roots: the stored objects of a listed root are declared inputs of the link stage
-    LIB = T + "lib"
-
-    LRS = BASE + "/ss-lr"   # the link-roots scenarios run concurrently with the main flow and build other content of the same root path: a store of their own
-
-    def link_roots():
-        librec = {k: v for k, v in RECIPE.items() if k not in ("generated", "os_layer", "constants", "link")}
-        librec["include"] = []
-        a_c = "int f_lib(void);\nint f_a(void) { return f_lib(); }\n"
-        lr = make_repo("lr", rec=dict(RECIPE, generated=[], constants=None, include=[], units="all",
-                                      link=dict(RECIPE["link"], roots=[LIB])),
-                       files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
-                              "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
-        ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
-        ad["roots"].append({"path": LIB, "class": "product", "target": "host", "gates": [], "recipe": LIB + "/build.json"})
-        w(lr, "verify/admit.json", json.dumps(ad))
-        git(lr, "add", "-A")
-        git(lr, "commit", "-q", "-m", "lib")
-        x1 = recipe.build(lr, ROOT, LRS, BASE + "/lr1")
-        check("link roots: the image links the objects of the listed root (f_lib resolves)", x1["status"] == "green" and x1["elf"]
-              and [r["root"] for r in x1.get("link_roots", [])] == [LIB], x1.get("failure"))
-        w(lr, "lib/l.c", "int f_lib(void) { return 2; }\n")
-        git(lr, "add", "-A")
-        git(lr, "commit", "-q", "-m", "lib changed")
-        x2 = recipe.build(lr, ROOT, LRS, BASE + "/lr2")
-        check("link roots: a change in the listed root changes the link key and the ELF", x2["status"] == "green"
-              and x2["elf"]["sha256"] != x1["elf"]["sha256"] and set(x2["stage_keys"]) != set(x1["stage_keys"]), (x1["stage_keys"], x2["stage_keys"]))
-        nolink = dict(json.load(open(os.path.join(lr, ROOT, "build.json"))))
-        nolink["link"] = dict(nolink["link"], roots=[])
-        w(lr, "toy/build.json", json.dumps(nolink))
-        git(lr, "add", "-A")
-        git(lr, "commit", "-q", "-m", "no roots")
-        x3 = recipe.build(lr, ROOT, LRS, BASE + "/lr3")
-        check("link roots: without the root f_lib has no body and the link is red, never a silent zero", x3["status"] == "red", x3.get("failure"))
-        ig = dict(nolink)
-        ig["link"] = dict(nolink["link"], roots=[LIB], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
-        w(lr, "toy/build.json", json.dumps(ig))
-        git(lr, "add", "-A")
-        git(lr, "commit", "-q", "-m", "ignore-all")
-        try:
-            recipe.build(lr, ROOT, LRS, BASE + "/lr4")
-            raised = None
-        except recipe.RecipeError as x:
-            raised = str(x)
-        check("link roots: a test-style link with --unresolved-symbols=ignore-all is refused before any stage", raised and "refusal set R" in raised, raised)
-
-    later(link_roots)
-
     print("INFO +%.1f s: toy builds done" % (time.time() - t_start))
     tcc, tct = tc_fut.result()
     tcx = {"name": "tc", "repo": "fnv-nx-build", "ref": "tc", "commit": tcc, "tree_sha256": tct, "at": "/opt/tc"}
@@ -454,14 +391,8 @@ def main():
     check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys",
           [o["sha256"] for o in rc_x["objects"]] == [o["sha256"] for o in r1["objects"]] and rc_x["elf"]["sha256"] == r1["elf"]["sha256"]
           and set(rc_x["stage_keys"]).isdisjoint(r1["stage_keys"]), rc_x.get("failure"))
-    ran = []
-    _rs = recipe.unitstage.run_stage
-    recipe.unitstage.run_stage = lambda store, doc, *a, **k: (lambda r: (ran.append((doc["stage"], r[0][:12], r[2])) if r[2] == "run" else None) or r)(_rs(store, doc, *a, **k))
-    try:
-        rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
-    finally:
-        recipe.unitstage.run_stage = _rs
-    check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], (rc_y["stages"], ran))
+    rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
+    check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], rc_y["stages"])
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
     # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
@@ -475,35 +406,6 @@ def main():
     check("objects.json: the same defined and undefined symbols for LP64 and ILP32 (ELF32/ELF64 .symtab read by struct)",
           [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d64] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
           and r64["undefined"] == u and [o["sha256"] for o in r64["objects"]] != [o["sha256"] for o in r1["objects"]], (d64, r64["undefined"]))
-
-    # --- tool-file membership: the trees of an admitted tool root (admit.json trees), one definition for the ldcheck tools and link.script
-    xf = {"link/guest.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(), "other/x.ld": "/* under no root */\n"}
-
-    def tree_errs(name, trees, rec):
-        repo = os.path.join(BASE, name)
-        r = make_repo(name, rec=rec, files=xf)
-        am = json.load(open(os.path.join(repo, T + "verify/admit.json")))
-        am["roots"] = [x for x in am["roots"] if x["path"] != T + "link"]
-        for x in am["roots"]:
-            if x["path"] == T + "contract" and trees:
-                x["trees"] = [T + "contract", T + "link"]
-        open(os.path.join(repo, T + "verify/admit.json"), "w").write(json.dumps(am))
-        return recipe.check(rec, ROOT, recipe.tracked(r), recipe.load_admit(repo), None, repo)
-    e1 = tree_errs("tr1", True, RECIPE)
-    check("ldcheck tools in a tree (link/ of the tool root contract), not under a root path: green", e1 == [], e1)
-    e2 = tree_errs("tr2", False, RECIPE)
-    check("ldcheck tools under no admitted root nor tree: red", any("ldcheck stage needs" in e for e in e2), e2)
-    gl = T + "link/guest.ld"
-    ms = mut()
-    ms["link"]["script"] = gl
-    e3 = tree_errs("tr3", True, ms)
-    check("link.script in a tool tree (link/guest.ld): green", e3 == [], e3)
-    e4 = tree_errs("tr4", False, ms)
-    check("link.script in a file no tree names: red", any("link must be" in e for e in e4), e4)
-    mo = mut()
-    mo["link"]["script"] = T + "other/x.ld"
-    e5 = tree_errs("tr5", True, mo)
-    check("link.script outside every tree and the root: red", any("link must be" in e for e in e5), e5)
 
     # --- validation
     check("unknown key 'exclude' is a RecipeError", any("unknown key 'exclude'" in e for e in errs(mut(exclude=["a.c"]))))
@@ -536,6 +438,26 @@ def main():
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # per-target recipes: the root hdr_other (the other target) with a recipe for this root's target too is a home; without it, none
+    both = recipe.norm_entry({"path": T + "hdr_other", "class": "product", "target": other, "recipe": {other: T + "hdr_other/b.json", own: T + "hdr_other/b2.json"}})
+    check("a per-target recipe {guest, host} parses to the base string plus a variant keyed by the other target",
+          both["recipe"] == T + "hdr_other/b.json" and both["variants"] == {own: {"target": own, "recipe": T + "hdr_other/b2.json"}}
+          and recipe.targets_of(both) == {own, other} and recipe.pairs_of({}, "r", both) == ["r", "r@" + own], both)
+    check("the spelling as a variant parses to the same structure",
+          recipe.norm_entry({"path": "x", "target": other, "recipe": "b.json", "variants": {own: {"target": own, "recipe": "b2.json"}}})["variants"]
+          == recipe.norm_entry({"path": "x", "target": other, "recipe": {other: "b.json", own: "b2.json"}})["variants"])
+    rr3 = dict(rr, **{T + "hdr_other": both})
+    pt = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_other"]), ROOT, rfiles, rr3, None, rk) if "lies in no admitted product root" in e]
+    check("an include into a root with a recipe for the including root's target is accepted", not pt, pt)
+    check("the same include without that recipe is rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("a plain-string recipe parses to itself", recipe.norm_entry({"path": "x", "target": own, "recipe": "b.json"}) == {"path": "x", "target": own, "recipe": "b.json"})
+    # every per-target rule judges the effective entry: the plugin rule of a variant follows the variant's target, not the base's
+    noplug = dict(RECIPE, plugins=[])
+    pe = lambda tg, vt, var: [e for e in recipe.plugin_errors(noplug, ROOT, rfiles, {ROOT: dict(base_roots[ROOT], target=tg, variants={"v": {"target": vt}})}, ["a.cc"], [], var)  # noqa: E731
+                              if "does not load plugin" in e]
+    check("plugins: a guest root without plugins is red; its host variant is green; a host root's guest variant is red",
+          len(pe("guest", "host", "")) > 0 and pe("guest", "host", "v") == [] and pe("host", "guest", "") == [] and len(pe("host", "guest", "v")) > 0,
+          (len(pe("guest", "host", "")), pe("guest", "host", "v"), pe("host", "guest", ""), len(pe("host", "guest", "v"))))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]

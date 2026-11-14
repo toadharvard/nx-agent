@@ -88,7 +88,7 @@ signedness, `-fshort-wchar`, `-ffixed-x19..x27`), outline atomics, overflow, ali
 protection, jump tables, builtins, `-U_FORTIFY_SOURCE`. They are `flags.semantics` of `guest_compiler.json`, appended to every guest compile stage (C,
 C++, asm) in that order BEFORE the root's own flags, minus the flags the pinned driver itself says do not apply to that language (`recipe.semantics_for`:
 one run of the driver on an empty input; its diagnostic "command-line option 'X' is valid for C++/ObjC++ but not for C" is the rule; an unknown flag is an
-error). A guest build.json may carry only per-root classes (`recipe.PER_ROOT`): `-W*` (not `-Wa,` `-Wl,` `-Wp,`), `-D*`, `-std=*`, `-O0..3/s/g`,
+error). A guest build.json may carry only per-root classes (`recipe.PER_ROOT`): `--param` with `ggc-min-expand=N` / `ggc-min-heapsize=N` (the compiler's own collector knobs, no effect on the emitted code), `-W*` (not `-Wa,` `-Wl,` `-Wp,`), `-D*`, `-std=*`, `-O0..3/s/g`,
 `-g*`, `-ffunction-sections`, `-fdata-sections`; any other token is refused by `guest_errors` (an allow-list of classes, no list of semantic flags to
 keep in sync). `-DFNVNX_SDD=1` is per root (a native C++ root must hold it).
 Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
@@ -169,6 +169,15 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   The admit.json entry of a root may carry `variants`: {NAME: {"target": "guest"|"host"}} for variants the recipe declares; a variant inherits the base's
   target otherwise, the guest rules (compiler external, data model) are judged on the effective target, and a variant with its own target has it in
   every stage key (`FNVNX_TARGET`). Sources stay the base root's. Every entry point resolves a `root@NAME` spec with `split_spec` once.
+
+  **One recipe per target.** A root whose units serve both targets (the console backend on the guest, the host's gl4 calling the same translator)
+  names a recipe per target in admit.json: `"recipe": {"guest": PATH, "host": PATH}` with `"target"` the base's (a plain string is the root's single
+  target, as before). The units are the same for every target; compiler, flags and plugins come from each target's recipe. It is one mechanism with
+  `variants`: `recipe.norm_entry` parses the dict to the string spelling plus `variants: {OTHER: {"target": OTHER, "recipe": PATH}}`, and that
+  spelling may be written in admit.json directly (it parses to the same structure). `entry_of` resolves the effective target and recipe path; the
+  pair `root@OTHER` is built, keyed (the variant name, `FNVNX_TARGET`, its own compiler and flags) and gated separately in `GATE_CACHE`. A per-target
+  recipe is a whole recipe with no variants of its own; its name may not also be a variant of the base recipe. Header home: an include into a
+  product root is accepted for the including root's target only if that root has a recipe for it (its own, or a per-target one).
 
 ## Variants
 `variants: {NAME: {"compiler": .., "flags": {..}}}`: one root built for several targets. A variant replaces only the keys it names (`compiler`, `flags`), the rest is

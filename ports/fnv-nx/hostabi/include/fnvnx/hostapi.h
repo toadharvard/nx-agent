@@ -34,7 +34,9 @@ typedef struct FnvnxHostApi {
 
     uint64_t guest_base;           /* link (= load) address of the guest module (its .text) */
     uint64_t guest_size;           /* bytes mapped for the guest module, bss included */
-    uint64_t heap_base;            /* memory block given to the guest heap (newlib sbrk), 0 if none */
+    uint64_t heap_base;            /* memory block given to the guest heap (newlib sbrk): CONTRACT: heap_size > 0, heap_base + heap_size <= 4 GiB, and
+                                      [heap_base, heap_base + heap_size) disjoint from [guest_base, guest_base + guest_size). A table that breaks
+                                      it is invalid: the guest runtime returns FNVNX_GUEST_ERR_API (0xF0000002) to the host without starting. */
     uint64_t heap_size;
 
     uint64_t output_debug_string;  /* (str, len) -> Result of svcOutputDebugString */
