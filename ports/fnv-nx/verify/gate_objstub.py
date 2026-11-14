@@ -31,7 +31,7 @@ import unitstage  # noqa: E402
 
 
 def root_check(root, repo, cache, jobs):
-    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)],
+    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, ids of the objects of generated units, root-level findings [(id, name, kind, detail)],
     the root's `error_abi` (recipe) or None, the root's handler records (recipe empty_handlers) or None)"""
     roots = recipe.load_admit(repo)
     rec = recipe.load_recipe(repo, roots, root)
@@ -69,7 +69,8 @@ def root_check(root, repo, cache, jobs):
         n, ff = objstub.image_check(res["elf"]["path"], rec["errno_accessor"])
         image = {"bodies": n, "fixed_failure": len(ff)}
         finds = [(base + rec["link"]["output"], name, "fixed-failure", d) for name, d in ff]
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, os_ids, finds, abi, records, image
+    gen = {base + u for u in recipe.generated_outputs(rec)}   # the units a generator stage of the recipe outputs: the domains of assume_violation
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, gen, finds, abi, records, image
 
 
 def main(argv):
@@ -79,13 +80,15 @@ def main(argv):
     stats = {}   # counts of the rule-H certifications and of the trap bodies
     items, finds, why, results, rows, roots, image = [], [], "", {}, {}, gate_build.buildable_roots(repo), {}
     fails, handlers = {}, {}   # {object id: the root's error_abi}, {object id: the root's handler records}
+    gen_ids = set()
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
-            r, w, _, fs, abi, records, im = root_check(root, repo, cache, jobs)
+            r, w, gm, fs, abi, records, im = root_check(root, repo, cache, jobs)
             image = {k: image.get(k, 0) + v for k, v in im.items()}
+            gen_ids |= gm
             results.update(r)
             fails.update({o: abi for o in r} if abi else {})
             handlers.update({o: records for o in r} if records else {})
@@ -94,7 +97,9 @@ def main(argv):
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
-        its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats)
+        rp = os.path.join(repo, "ports/fnv-nx/verify/ASSUMPTIONS.json")   # of the tree under test; a tree without one has no OWNER id: every assume call is red
+        registry = {e["id"]: e["status"] for e in json.load(open(rp))["entries"]} if os.path.exists(rp) else {}
+        its, fs = objstub.judge(results, rows, facts, wine, declared, fails, handlers, stats, (registry, gen_ids))
         items, finds = items + its, finds + fs
     except (ValueError, KeyError, OSError) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
@@ -118,7 +123,8 @@ def main(argv):
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
            "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
            "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
-           "image": image, "trap_body": stats.get("trap_body", 0), "handler_justified": {k[8:]: v for k, v in sorted(stats.items()) if k.startswith("handler_")}}
+           "image": image, "trap_body": stats.get("trap_body", 0), "handler_justified": {k[8:]: v for k, v in sorted(stats.items()) if k.startswith("handler_")},
+           "assume_calls": objstub.assume_counts(results, (registry, gen_ids) if not why else None)}
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.findings.tsv"), "w") as fh:   # the whole list (the result JSON holds the first 50 ids)
         fh.write("object\tfunction\tkind\tdetail\n" + "".join("%s\t%s\t%s\t%s\n" % (o, n, k, d.replace("\t", " ").replace("\n", " ")) for o, n, k, d in sorted(finds)))
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:

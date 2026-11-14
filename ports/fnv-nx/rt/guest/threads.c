@@ -20,6 +20,7 @@
 
 #include "fnvnx/guest.h"
 #include "fnvnx/hostapi.h"
+#include "fnvnx/placement.h"
 
 #define HIDDEN __attribute__((visibility("hidden")))
 extern char __tdata_lma[] HIDDEN, __tdata_lma_end[] HIDDEN;
@@ -83,15 +84,31 @@ static uint64_t guest_thread_entry(uint64_t rec_addr) {
     return 0;
 }
 
+/* The one place where placement is computed (rule: guest only): every thread of the process is made here, so every caller (os_thread_create,
+ * __syscall_thread_create) is placed by fnvnx_place_ex with the per-process rotation counter. `cpu` is the caller's request (-1 default role,
+ * a core, FNVNX_THREAD_ROLE(r)); the host gets FNVNX_CPU_SPEC(ideal, mask) and the Win32-scale priority of the placed Horizon priority
+ * (0x2C - prio: the exact inverse of fnvnx_win32_to_horizon_prio on 0x1D..0x3B). */
+static unsigned g_place_seq;
+
 int fnvnx_thread_create(struct __pthread_t **out, void *(*fn)(void *), void *arg, size_t stack_size, int prio,
                         int cpu) {
+    int ideal, hprio;
+    uint32_t mask;
+    fnvnx_place_ex((uint64_t)(int64_t)cpu, __atomic_fetch_add(&g_place_seq, 1, __ATOMIC_RELAXED), prio, FNVNX_CORE3_DEFAULT, &ideal,
+                   &mask, &hprio);
+    /* Proof: for every reachable input hprio is in 0x1D..0x3B (a table priority, or fnvnx_win32_to_horizon_prio of a Win32 priority in
+     * -15..15, which is 0x2C - prio), so wprio = 0x2C - hprio is in -15..15 and the host's fnvnx_win32_to_horizon_prio(wprio) = 0x2C - wprio
+     * = hprio exactly: the round trip loses nothing and the clamps below never act. */
+    int wprio = 0x2C - hprio;
+    if (wprio < -15) wprio = -15;
+    if (wprio > 15) wprio = 15;
     struct __pthread_t *t = calloc(1, sizeof *t);
     if (!t) return ENOMEM;
     t->fn = fn; t->arg = arg;
     t->tid = __atomic_add_fetch(&g_next_tid, 1, __ATOMIC_RELAXED);
     if (!(t->tls_block = alloc_tls_block())) { free(t); return ENOMEM; }
     t->host_id = fnvnx_hcall5(fnvnx_host->thread_create, FNVNX_ADDR(guest_thread_entry), FNVNX_ADDR(t),
-                              stack_size ? stack_size : 0x40000, (uint64_t)(int64_t)prio, (uint64_t)(int64_t)cpu);
+                              stack_size ? stack_size : 0x40000, (uint64_t)(int64_t)wprio, FNVNX_CPU_SPEC(ideal, mask));
     if (!t->host_id) { free(t->tls_block); free(t); return EAGAIN; }
     *out = t;
     return 0;
@@ -120,6 +137,17 @@ void fnvnx_thread_exit(void *ret) {
 void fnvnx_yield(void) { fnvnx_hcall0(fnvnx_host->thread_yield); }
 /* libsysbase's weak sched_yield returns ENOSYS; std::this_thread::yield and spin loops need a real one. */
 int sched_yield(void) { fnvnx_yield(); return 0; }
+
+/* sched_getcpu (POSIX): the core the calling thread runs on, from the host service FNVNX_PLAT_THREAD_CPU (the Switch host: libnx
+ * svcGetCurrentProcessorNumber).  libsysbase's weak sched_getcpu is an unconditional ENOSYS and is replaced.  A host without the service
+ * answers a negative ext_call code: -1 with ENOSYS, POSIX's "not supported" for sched_getcpu, a result of the host's capability. */
+int sched_getcpu(void) {
+    if (!fnvnx_host->ext_call) { errno = ENOSYS; return -1; }
+    uint64_t none[1] = {0};
+    int64_t r = (int64_t)fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_CPU, FNVNX_ADDR(none), 0);
+    if (r < 0) { errno = ENOSYS; return -1; }
+    return (int)r;
+}
 
 /* newlib pthread hooks */
 int __syscall_thread_create(struct __pthread_t **thread, void *(*func)(void *), void *arg, void *stack_addr,
