@@ -198,7 +198,8 @@ def report(rows, uni, inst, res, seed, pb, W, jt=frozenset()):
                 c = consumer(e, uni, jt)
                 cons[c] = cons.get(c, 0) + 1
             else: cause['iv-call'] += 1
-    return {'red_reads': n, 'cause': cause, 'undef_pairs_by_read': dict(sorted(pairs.items())), 'entry_seed_reason': dict(sorted(own.items())), 'entry_consumer': dict(sorted(cons.items())),
+    return {'red_reads': n, 'cause': cause, 'def0_cert_pending': cause['ii-undef'],         # cause ii: DEF0 gives the bit the value 0; a read of it stays red until L3b's certificate of the (shape, flag) refinement exists
+             'undef_pairs_by_read': dict(sorted(pairs.items())), 'entry_seed_reason': dict(sorted(own.items())), 'entry_consumer': dict(sorted(cons.items())),
             'origin_letters': dict(sorted(combos.items())), 'producer_mnemonics': len(pb)}
 
 
