@@ -33,7 +33,7 @@ A_C = TR.HDR + '#include "toy.h"\nint f_b(void);\nint f_a(void) { return f_b() +
 BASE_FILES = {"toy/a.c": A_C, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/constants.tsv": None, "gen/gen.py": None}
 
 
-def mk(name, rec, files=None, libs=()):
+def mk(name, rec, files=None, libs=(), classes=None):
     """A repo of the toy root (recipe REC, FILES overriding the fixtures) and the extra product roots LIBS {path: (recipe, {file: text})}."""
     repo = TR.make_repo(name, rec=rec, files=dict(BASE_FILES, **(files or {})))
     admit = json.load(open(repo + "/" + TR.T + "verify/admit.json"))
@@ -42,6 +42,8 @@ def mk(name, rec, files=None, libs=()):
         TR.w(repo, path[len(T):] + "/build.json", json.dumps(r))
         for f, text in fs.items():
             TR.w(repo, path[len(T):] + "/" + f, text)
+    for x in admit["roots"]:
+        x["class"] = (classes or {}).get(x["path"], x["class"])
     admit["roots"].sort(key=lambda x: x["path"])
     TR.w(repo, "verify/admit.json", json.dumps(admit))
     TR.git(repo, "add", "-A")
@@ -265,7 +267,8 @@ def main():
     IB, IC = T + "imgx", T + "imgbad"
     vrepo = mk("variants", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG,
               libs=[(VROOT, (vlib, VF)), (IB, (dict(image("imgx", "elf_x86_64", [VROOT + "@x86"], X86), flags={"c": FL, "cxx": [], "asm": []}), {"e.c": IMG["toy/e.c"]})),
-                    (IC, (image("imgbad", "aarch64linux", [VROOT + "@x86"]), {"e.c": IMG["toy/e.c"]}))])
+                    (IC, (image("imgbad", "aarch64linux", [VROOT + "@x86"]), {"e.c": IMG["toy/e.c"]}))],
+              classes={ROOT: "test", IB: "test", IC: "test"})
     ra = build(vrepo, SS)
     check("variants: image A (aarch64 LP64) links the lp64 variant of the root; green, the input is listed as root@lp64", ra["status"] == "green"
           and [x["root"] for x in ra["link_roots"]] == [VROOT + "@lp64"] and TR.elf_class(ra["elf"]["path"]) == 64, err_text(ra))
@@ -290,6 +293,47 @@ def main():
     check("variants: link.roots naming a variant the root does not declare is a check error", any("no variant" in e for e in ev), ev)
     ev2 = recipe.check(dict(vlib, variants={"a b": {"flags": {}}, "c": {"link": {}}}), VROOT, recipe.tracked(vrepo), adm, None, vrepo)
     check("variants: a bad name or a key other than compiler/flags is a check error", any("variants must be" in e for e in ev2), ev2)
+
+    # the CLI resolves root@NAME once at the boundary: check, then a build, of a variant spec
+    import io
+    import contextlib
+    cwd = os.getcwd()
+    os.chdir(vrepo)
+    try:
+        bo = io.StringIO()
+        with contextlib.redirect_stdout(bo):
+            rc_chk = recipe.main(["check", "--root", VROOT + "@lp64"])
+            rc_bld = recipe.main(["build", "--root", VROOT + "@lp64", "--store", BASE + "/cli-store", "--out", BASE + "/cli-out"])
+    finally:
+        os.chdir(cwd)
+    check("CLI: check and build of root@NAME resolve the spec at the boundary (valid recipe, green build of the variant)", rc_chk == 0 and rc_bld == 0, bo.getvalue()[-300:])
+    # per-variant target: the admit entry of a variant may declare its own; it inherits the base's otherwise
+    ra_ = recipe.load_admit(vrepo)
+    ents = [dict(e, target="guest", variants={"lp64": {"target": "host"}}) if e["path"] == VROOT else e for e in ra_.values()]
+    adm2 = {e["path"]: e for e in ents}
+    check("variant target: entry_of inherits the base's target, a variant's own replaces it, sources are the base's",
+          recipe.entry_of(adm2, VROOT)["target"] == "guest" and recipe.entry_of(adm2, VROOT + "@lp64")["target"] == "host"
+          and recipe.entry_of(adm2, VROOT + "@x86")["target"] == "guest" and recipe.entry_of(adm2, VROOT + "@lp64")["recipe"] == adm2[VROOT]["recipe"], "")
+    check("variant target: guest_errors judges the effective target (the host variant of a guest base needs no guest compiler; the base does)",
+          recipe.guest_errors(vlib, VROOT + "@lp64", adm2, None) == [] and recipe.guest_errors(vlib, VROOT, adm2, None) != []
+          and recipe.guest_errors(vlib, VROOT + "@x86", adm2, None) != [], "")
+    bad_adm = dict(adm2, **{VROOT: dict(adm2[VROOT], variants={"nope": {"target": "host"}, "lp64": {"target": "mars"}})})
+    eb = recipe.check(vlib, VROOT, recipe.tracked(vrepo), bad_adm, None, vrepo)
+    check("variant target: an admit variant entry for an undeclared variant or an unknown target is a check error", any("variants must be" in e for e in eb), eb)
+    # the variant rule: a product image links base roots only; a variant is linked by a test root (class test) only
+    ep = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo2 := mk("varprod", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))])),
+                      recipe.load_admit(repo2), None, repo2)
+    check("variants: a product root linking root@NAME is red (only a test root links a variant)", any("is a variant" in e and "class test" in e for e in ep), ep)
+    repo3 = mk("vartest", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))], classes={ROOT: "test"})
+    et = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo3), recipe.load_admit(repo3), None, repo3)
+    check("variants: a test root linking root@NAME is green", not any("is a variant" in e for e in et), et)
+    # a guest root links a pie: kind exe is host only
+    TR.w(repo3, "verify/admit.json", json.dumps(dict(json.load(open(repo3 + "/" + T + "verify/admit.json")),
+         roots=[dict(x, target="guest") if x["path"] == ROOT else x for x in json.load(open(repo3 + "/" + T + "verify/admit.json"))["roots"]])))
+    TR.git(repo3, "add", "-A")
+    TR.git(repo3, "commit", "-q", "-m", "guest")
+    eg = recipe.check(image("toy", "aarch64linux", [VROOT]), ROOT, recipe.tracked(repo3), recipe.load_admit(repo3), None, repo3)
+    check("link.kind exe on a root of target guest is refused (a guest links a pie)", any("link.kind exe is a host executable" in e for e in eg), eg)
 
     # (f) determinism: two cold builds, two stores, the same bytes
     c1 = recipe.build(repo, ROOT, BASE + "/cold1", BASE + "/oc1")
