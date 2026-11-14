@@ -508,3 +508,10 @@ Paused: w3b, w4, farm; no other work.
 - 23:35Z L3b w3 oracle red on test_d3d9total.py: a merge defect on their branch.
     - The merge kept old-line 23e603b21's delete of shim/include/d3d9types.h.
     - Fix sent: restore it from next3b. Nothing changes in render.
+- 23:36Z w1b c4990859: run-time defect in the 708d3638 prune fixed by class rule.
+    - The defect: BYTECODE=0 compiled out the front end's parse profile.
+    - The rule: compiled-in profiles = the MOJOSHADER_PROFILE_* names src/*.c request, plus their dependency chain. reach_census goes red otherwise.
+    - New mirror pin 86682f7e (tree 96249b88…7c15).
+    - Guest 8 objects (24 s cold), host 8 objects (7.5 s cold); both green.
+    - Re-pin sent to w5 (sm_link) and L6A w6 (gl4).
+    - w1b next: the TLS census, then dk_* declared-set, then objstub per root.
