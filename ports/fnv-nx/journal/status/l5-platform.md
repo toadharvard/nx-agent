@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-15 02:05Z w24 iat.py 36713265: a data row whose native_symbol is - and that some image imports is now a stage error. On manifest 09fce9f9: 1553 rows, 4 data rows, 0 with -, so 0 objects owed by L5.
 - 11-15 02:00Z Declared CPU (orchestrator, integration 99285b5fe): 3 processors. The one value is FNVNX_APP_CORES 0x7 and FNVNX_NPROC 3 in hostabi placement.h; the core-3 opt-in is deleted. Every Win32 count and mask answer reads it, as do L3a cpuid and the L4 emulator. w10 does it after the root verdict (4.4).
 - 11-15 01:55Z w24 ffe3bc71 (with 6692eaa1): the loader and sha256 assumption rewords, gate 103/103 on its tree. w10 merges place 5ea8a3e4, w14-rt e13b57763, w24 ffe3bc71 and the manifest repin 9e4166ea, then one verdict.
 - 11-15 01:50Z w9 SetMapMode: the one call site of d3dx9_38 (0x56e8e7: push 1; call [0x401054]) passes MM_TEXT, a constant. code_refs 1 and data_refs 0 in imports.tsv 9e4166e, so the DC default holds; gdifont comment cites it (b0ea6fcf7). w9 is on the objstub triage.
