@@ -1204,7 +1204,8 @@ extern "C" HGDIOBJ GetCurrentObject(HDC hdc, UINT type)
  * import tables (manifest/imports.tsv of fnv-nx-build 9e4166e, all 7 images) lists SetWorldTransform, SetGraphicsMode, SetViewportOrg(Ex), SetWindowOrg(Ex),
  * SetTextCharacterExtra, SetTextJustification or SetLayout, and no dynamic GetProcAddress/LoadLibrary site of dynsites.tsv / sites_resolved.tsv at that commit
  * names one; the platform roots' own objects.json (verdict of 68ccd9cf, defined and undefined symbols) holds none of the eight either; a bridge row for one of
- * them would make this text wrong), window / viewport origins are 0, no inter-character
+ * them would make this text wrong), the mapping mode is MM_TEXT (the only SetMapMode reference of the image set, d3dx9_38 at 0x56e8e7 through IAT 0x401054, is
+ * a call whose mode argument is the constant 1 = MM_TEXT, the DC default; code_refs 1, data_refs 0 in manifest/imports.tsv of fnv-nx-build 9e4166e), window / viewport origins are 0, no inter-character
  * extra spacing and no justification (SetTextCharacterExtra / SetTextJustification keep their DC defaults, 0),
  * no layout mirroring, no clip region (drawing is clipped to the DC's surface and ETO_CLIPPED's rectangle).
  * Antialiasing rule (freetype_get_aa_flags): surfaces of <= 8 bpp and NONANTIALIASED_QUALITY draw monochrome
