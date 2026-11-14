@@ -3,6 +3,8 @@
 These instructions come from the owner of this repository. They apply to every Claude session and subagent that
 works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render machine and farms.
 
+**Map of the project:** `ports/fnv-nx/docs/ORCHESTRATION.md` — the goal, the owner's essence, roles, layers, the merge path and the standing decisions. Re-read it and this file after every compaction.
+
 ## The orchestrator speaks for the owner
 
 > Handoff of 2026-11-11: the work moved to another account. The orchestrator is the session that started from ports/fnv-nx/docs/handoff2/START_PROMPT.md, and its full context is ports/fnv-nx/docs/HANDOFF2.md. Session ids from earlier notes are dead.
@@ -137,6 +139,18 @@ The owner's words: "Транк никогда красный. Всегда зе�
     over that declared file set, a sound superset. That is why d3dx9_31.dll (OCT2006 cab, loaded by d3dx9_38 at 0x56b708)
     joins the set as a may-load image, 6 -> 7, pinned by exepin and lifted like d3dx9_38. A name outside the declared
     file set gets NULL / ERROR_MOD_NOT_FOUND (126), as Windows and Wine 9.0 return it.
+  - **The declared CPU (orchestrator decision, 2026-11-14).**
+    - Features: cpuid is the reference host's answer (lift/rt/cpumodel.c, CPUREF), restricted to the feature set
+      whose every instruction is lifted. That is MMX, SSE and SSE2; SSE3 and up, 3DNow and AVX are clear.
+    - An instruction of a cleared feature is #UD, as on a real CPU with that feature set. This is read from CPUREF,
+      not from a list.
+    - Every #UD shape site must be certified unreachable on the declared machine: dominated by the exe's own cpuid
+      test whose declared answer excludes it, with a call-graph certificate. If a site is not certified, the build is
+      red; the feature is then lifted or the site is reported.
+    - Processors: one count holds for the whole declared machine, 3. These are the console cores an application
+      gets, one thread each. cpuid leaf 1 EBX/HTT and leaf 4 (L3a), GetSystemInfo, GetLogicalProcessorInformation and
+      the affinity masks 0b111 (L5), and the emulator's core count (L4) all report it. Guest threads run in parallel
+      on these cores.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -399,11 +413,12 @@ The owner's words: "делегируй остаток работы аккура�
     - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
     - Undefined symbols get their owners from the closure:
       - `fnvnx_dispatch`: L3a's generated bridges;
-      - the process entry `main`: L5 `rt/guest`;
+      - the process entry `main`: L5's own root `rt/guest/main`, which only calls `fnvnx_loader_main()` (the L1 loader: map, imports, TLS, DllMain, TEB/stack, then `fnvnx_lift_enter(AddressOfEntryPoint)`). `fnvnx_lift_enter` (lift/rt) is the single bridge into lifted code, and there is no second entry path;
       - `fnvnx_import_key` / the IAT root: L1;
       - the pthread mutexes that libgcc's unwinder needs: L5, over its real threads.
-  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, main menu, first frame (GL in
-    the emulator). Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
+  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, first frame (GL in the
+    emulator: the GL backend's first present). The menu gets an input-scenario rule after the first frame; no
+    certified fact names it by role. Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
     thread.
   - **The boot machine's GL** comes from the recipe-built gl4 root, not from the prebuilt libnxgl4 @2f0427f5.
   - **One registry.** `render/ASSUMPTIONS.md` is merged into `verify/ASSUMPTIONS.json` or deleted.
@@ -419,3 +434,15 @@ The owner's words: "делегируй остаток работы аккура�
     - toolchain mirror reproducibility;
     - IKOS;
     - any census of numbers that did not change.
+- **Correctness never switches off a fast path (owner, 2026-11-14).** The owner's words: "Очень хотелось бы сразу классом
+  оптимизаций это закрывать. Иначе получится, что мы просто так ухудшили производительность и забили".
+  - A correctness rule is met by giving the fast path itself the exact semantics, by a rule over the whole class:
+    a plugin rewrite, an exact helper, or a proof of range. Turning the fast path off is not the way. That covers
+    SIMD, the vectorizer, an intrinsic, inline asm and a library's optimized path.
+  - A switch-off that a green trunk needs before the class rule exists is recorded in `verify/PERFDEBT.json`. Each
+    entry names the class rule that restores the fast path and its owner. The entry and the switch-off are deleted in
+    the same commit that lands the rule. PERFDEBT stays at 0 when the first frame is measured.
+  - First entry: `MINIMP3_NO_SIMD` (audio/dshow_filters.cpp, L5). The restoring rule is L2's: `fnvnx_ftoi` rewrites
+    every explicit target float→int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact. In range it
+    converts; out of range or NaN it gives x86 integer-indefinite (cvttps2dq semantics). Then fpexact certifies the
+    NEON path and the switch is removed.
