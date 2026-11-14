@@ -82,3 +82,4 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
   - (6) d3's 93 are closed by -fstack-reuse=none (L1 w24).
   Status: doing.
 - 2026-11-15 00:00 w3 exitgen: re-based onto L3a code. Base is a merge of int3 80cc1b885 and w8-disp2 9e6b7421. One parser (bridgegen.parse). exitgen joins .fnvnx.defdisp by asm name and fails hard on 0 rows, more than 1 differing row, or an unparsable descriptor. The sha goes to L3a through the orchestrator. Status: doing.
+- 2026-11-15 00:02 L1 w23 takes d1 (home-slot dominance) and the fenced library-call rule (Intel SDM 3 §8.2.4: only a string-op source, named by the order record field). Aggregate copies lowered field-wise are judged as plain accesses. w2 adds the record field `string-op` and sends its format to w23.
