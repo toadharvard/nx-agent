@@ -110,3 +110,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - w7 task G done: verify/bootstart.py checks loader S1..S8 against the boot trace (w7-f 39b9c6383). Reviewed and accepted: undecided is never pass. test_bootstart 56, test_bootinputs 75, test_icount 12, test_bootmiles 56, test_oracle 83, all PASS. test_boot needs a verdict host and is assigned to w6.
   - Open items: S4 data slots need the loader's binding table as a fact (asked L5). S5 module TLS needs module TLS facts (asked L1).
   - w7 task H (doing): stop mem capture at the S8 entry by rule, not by an instruction limit.
+- S4 fact: L5 says the owner is L1 (contract/iat.py, from bridge.tsv `data` rows). Asked L1 to publish (dll, name, kind, native_symbol) as an IAT-root build fact, plus the count of `-` data rows in the exe's closure (each one is an S4 fail and an L5 object to define).
