@@ -49,7 +49,7 @@ def main():
     # functions with a delete-expression of a virtual destructor: sites through the object's own slot, flags 1
     for fn, want in (('_Z5del_aP1A', 2), ('_Z6del_s2P2S2', 2), ('_Z5del_mP1M', 2)):
         ins = fns[fn]
-        ldar = [o for o, m, a in ins if m == 'ldar']
+        ldar = [o for o, m, a in ins if m == 'ldar' and a.startswith('w')]   # the 4-byte vptr and slot (the 8-byte ldar is dispatch's slot)
         plain4 = [o for o, m, a in ins if m == 'ldr' and a.startswith('w')]
         check(fn + ': two ordered loads (vptr, slot)', len(ldar) == want, ldar)
         check(fn + ': no plain 4-byte load', not plain4, plain4)
@@ -57,7 +57,7 @@ def main():
             check('%s+0x%x: certified by gate_order' % (fn, o), rows.get('%s+0x%x' % (fn, o)) == '', rows.get('%s+0x%x' % (fn, o)))
     # a virtual call (not a delete) keeps the loads the front end made before "cfg": ordered by fnvnx_order
     ins = fns['_Z6call_gP1A']
-    check('call_g: vptr and slot ordered', len([1 for o, m, a in ins if m == 'ldar']) == 2, ins)
+    check('call_g: vptr and slot ordered', len([1 for o, m, a in ins if m == 'ldar' and a.startswith('w')]) == 2, ins)
     # control: a function without a virtual call is certified whole
     ctl = {i: k for i, k in rows.items() if i.split('+')[0] == '_Z5plainPi'}
     check('control: plain() certified whole', ctl and not any(ctl.values()), ctl)
