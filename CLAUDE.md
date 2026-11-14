@@ -342,3 +342,31 @@ The owner's words: "нахуя лифтить гэлакси... Ну нет до
   declared-machine body (CLAUDE.md "The declared machine"), with the SDK documentation cited per function, not a stub.
 - Owner of the bodies: platform (L5). Lifting work on Galaxy stops; modules.tsv lists Galaxy as a declared-machine
   module, not as a lifted one.
+
+## Owner order of 2026-11-14: the full native port, correct by construction, quota only on the path (binding)
+
+The owner's words: "делегируй остаток работы аккуратно так, чтобы мы действительно двигались к полному нативному
+порту. Каждый шаг должен приближать нас по известным правилам описанным в проекте.", "мы не должны тратить квоту туда,
+куда нет смысла. Лишние суммаризации или бесконечные верификаторы всего на свете ни к чему. Только корректность по
+построению, закрываемая известным правилом." and "цели в 45/60 фпс остаются. Корректность тоже обязательна и
+незыблема. С редкими заранее просчитанными исключениями. Например, мы верим в корректность gcc."
+
+- **The goal is the full native port** on the Switch: the exe and its modules fully lifted, the native platform, the
+  D3D9 front end over the GL backend (the reference) and deko3d. The order of the steps is the one in "The goal comes
+  first".
+- **Every step is closed by a known rule.** A rule is known when it is written in this file, `verify/VERDICT.md`,
+  `verify/RECIPE.md` or MASTER_PLAN4, and the gate that checks it is in the L1 verdict. A step for which no known rule
+  exists is reported to the orchestrator; it is not improvised.
+- **Correctness is mandatory and unconditional.** The only exceptions are the OWNER records of
+  `verify/ASSUMPTIONS.json` (for example: the compiler is correct). They are decided in advance; none is added without
+  the owner.
+- **Performance targets stay:** 45 fps is the floor and 60 fps (the panel's rate) is the target, on the console's
+  1.02 GHz CPU. Correctness is never traded for speed. Speed work is measured from the first frame on. Until then no
+  design choice may close the way to the targets: no one-guest-thread-at-a-time, no interpreter or emulator on the
+  product path.
+- **Quota goes only to path steps.** Not spent on:
+  - summaries beyond the lead's own status file;
+  - censuses of numbers that did not change;
+  - new verifiers, gates or farms that do not block a path step;
+  - runs repeated on unchanged content (the verdict's cache answers them).
+  - One verdict per candidate. A lead updates its status file after each finished item; that is the report.
