@@ -29,6 +29,7 @@ OK = HELPER + 'int user(float f) { return helper(f) + 1; }\n'
 NATIVE = HELPER + 'int plain(float f) { return (int)f; }\nlong lr(float f) { return __builtin_lrintf(f); }\n'
 BAD_CAST = HELPER + 'int bad_cast(float f) { return (int)f; }\n'
 BAD_BUILTIN = HELPER + 'long bad_lround(float f) { return __builtin_lroundf(f); }\n'
+BAD_MD = HELPER + '#include <arm_neon.h>\nint32x4_t bad_md(float32x4_t v) { return vcvtq_s32_f32(v); }\n'
 BAD_ASM = HELPER + 'float bad_asm(float f) { asm volatile("" : "+w"(f)); return f; }\n'
 
 
@@ -194,6 +195,9 @@ def main():
             check('native: report holds the helper, 3 sites, and the builtin as the only finding',
                   j and j['format'] == 'fnvnx-f2i/1' and j['helpers'] == ['int helper(float)'] and j['sites'] == 3
                   and [(f['function'], f['kind']) for f in j['findings']] == [('long int lr(float)', 'builtin')], j)
+        r, _, j = comp(td, 'nat_md', BAD_MD, native=True)
+        check('native: a target float->int builtin (vcvtq_s32_f32) is a finding of kind mdbuiltin, not builtin',
+              r.returncode == 0 and j and [f['kind'] for f in j['findings']] == ['mdbuiltin'], (r.stderr[-800:], j))
         for name, text, tys in (
                 ('vec', 'typedef float v4sf __attribute__((vector_size(16)));\ntypedef int v4si __attribute__((vector_size(16)));\n'
                         'v4si cv(v4sf v) { return __builtin_convertvector(v, v4si); }\n', ('v4sf', 'v4si')),
@@ -247,7 +251,7 @@ def main():
             check('lifted: no rewrite (the helper is the bare fcvtzs)', 'fcvtzs' in helper and '#0x80000000' not in helper, helper)
             check('lifted: report holds the helper, one site, no finding',
                   j and j['helpers'] == ['int helper(float)'] and j['sites'] == 1 and j['findings'] == [], j)
-        for name, text, kind in (('cast', BAD_CAST, 'conv'), ('lround', BAD_BUILTIN, 'builtin'), ('asm', BAD_ASM, 'asm')):
+        for name, text, kind in (('cast', BAD_CAST, 'conv'), ('lround', BAD_BUILTIN, 'builtin'), ('target builtin', BAD_MD, 'mdbuiltin'), ('asm', BAD_ASM, 'asm')):
             r, _, _ = comp(td, 'bad_' + name, text)
             check('lifted: %s outside a helper is a build error' % name,
                   r.returncode != 0 and 'FTOI (lifted)' in r.stderr and '(%s)' % kind in r.stderr, r.stderr[-1500:])

@@ -34,15 +34,16 @@
 //              conv      a GIMPLE assign with FIX_TRUNC_EXPR (scalar or vector: every cast, implicit conversion and compound
 //                        assignment float -> integer, and __builtin_convertvector, which GCC lowers to it);
 //              builtin   a call of a conversion builtin of the lround/lrint/llround/llrint/iround/irint/{i,l,ll}{ceil,floor} families
-//                        (all three float widths), or IFN_VEC_CONVERT with a float operand and an integer result, or a target
-//                        (BUILT_IN_MD) builtin with a float-typed argument and an integer-typed (scalar or vector) result;
+//                        (all three float widths), or IFN_VEC_CONVERT with a float operand and an integer result;
+//              mdbuiltin a target (BUILT_IN_MD) builtin with a float-typed argument and an integer-typed (scalar or vector) result:
+//                        the machine's own conversion (saturating, NaN gives 0), not the semantics of a C type;
 //              asm       an inline asm that could read a float: a float, vector or complex-typed operand or an FP/SIMD register
 //                        clobber (asm_may_read_float).
 //            Types and GCC's function codes decide; no name, no text of source or assembly is looked at.
 // Report (-fplugin-arg-fnvnx_ftoi-out=FILE, required, both modes), JSON "fnvnx-f2i/1" for gate fpexact: unit (main input file), sites
-// (conversion sites, conv and builtin, seen in every analysed function, helpers included), helpers (printable names of the analysed
+// (conversion sites, conv, builtin and mdbuiltin, seen in every analysed function, helpers included), helpers (printable names of the analysed
 // helpers), findings [{function, file, line, kind}] (what is outside a helper and is not rewritten: in lifted mode the errors, in native
-// mode the builtin and asm kinds, and a conv the rewrite does not cover), both sorted.
+// mode the builtin, mdbuiltin and asm kinds, and a conv the rewrite does not cover), both sorted.
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "context.h"
@@ -276,7 +277,15 @@ struct ftoi_pass : gimple_opt_pass {
         const char *kind = NULL;
         bool conv = false;
         if (is_gimple_assign(stmt) && gimple_assign_rhs_code(stmt) == FIX_TRUNC_EXPR) { kind = "conv"; conv = true; }
-        else if (gcall *c = dyn_cast<gcall *>(stmt)) { if (conv_builtin(c)) { kind = "builtin"; conv = true; } }
+        else if (gcall *c = dyn_cast<gcall *>(stmt)) {
+          // kind by GCC's builtin class: the generic families (BUILT_IN_NORMAL, IFN_VEC_CONVERT) have the semantics of their C type; a
+          // target builtin (BUILT_IN_MD, for example the NEON vcvtq_s32_f32) has the machine's own (saturating, NaN to 0), which is not x86's
+          if (conv_builtin(c)) {
+            tree cf = gimple_call_fndecl(c);
+            kind = (cf && fndecl_built_in_p(cf) && DECL_BUILT_IN_CLASS(cf) == BUILT_IN_MD) ? "mdbuiltin" : "builtin";
+            conv = true;
+          }
+        }
         else if (gasm *as = dyn_cast<gasm *>(stmt)) { if (asm_may_read_float(as)) kind = "asm"; }
         if (!kind) continue;
         if (conv) sites++;
