@@ -205,9 +205,19 @@ def mem_kind(i):
 UNKNOWN_X = ('X', None)
 
 
+# THE TAG (the value type of the register lattice, one definition; every consumer handles every shape):
+#   None            the register holds no frame address (a register without an entry is None)
+#   'RO'            an address in a read-only section
+#   ('D', c)        the frame address CFA+c
+#   ('FP', c)       the frame pointer, x29 = CFA+c
+#   ('X', origins)  a value derived from several frame addresses: ORIGINS a sorted tuple of CFA offsets, or None when an origin is unknown
 def origins(t):
-    """the CFA offsets a derived tag comes from, or None"""
-    return (t[1],) if t[0] in ('D', 'FP') else t[1]
+    """the CFA offsets a tag comes from: a tuple (empty for None and 'RO'), or None when unknown (('X', None))"""
+    if t is None or t == 'RO':
+        return ()
+    if t[0] in ('D', 'FP'):
+        return (t[1],)
+    return t[1]
 
 
 def mkx(*tags):
@@ -479,15 +489,17 @@ class Func:
     def fact(self, k):
         return self.state[k] if self.state[k] is not None else (None, ())
 
-    def frame_cfa(self, i, sp, rg):
-        """CFA-relative offset of the first byte a plain memory instruction touches through the frame, or None"""
+    def frame_offsets(self, i, sp, rg):
+        """the CFA-relative offsets of the first byte a plain memory instruction touches through the frame, a tuple with one entry per origin of
+        the base (a derived tag ('X', origins) is judged for EVERY origin), or None when the base is not a frame address (no tag, RO) or its
+        origin is unknown (sp not static, ('X', None)): None is then never a certificate (frame_ok is False)."""
         b = _base(i)
         if i.mem is None or i.mem.index != 0 or b is None:
             return None
-        if b == SP:
-            return None if sp is None else sp + i.mem.disp
-        t = rg.get(b)
-        return t[1] + i.mem.disp if isinstance(t, tuple) else None
+        og = (sp,) if b == SP else origins(rg.get(b))
+        if not og or None in og:
+            return None
+        return tuple(c + i.mem.disp for c in og)
 
     def escape_sites(self, k, sp, rg):
         """[origins tuple, or None when unknown]: the frame addresses that instruction k hands out: stored, passed in x0-x8 to a
@@ -561,11 +573,11 @@ class Func:
         """rule F: the access is inside the function's own frame and overlaps no address-taken variable of the record"""
         if self.rec is None or self.rec == a64frame.DYNAMIC:
             return False
-        c = self.frame_cfa(i, sp, rg)
+        cs = self.frame_offsets(i, sp, rg)
         sz = acc_size(i)
-        if c is None or sz is None or c + sz > 0:
+        if cs is None or sz is None:
             return False
-        return not any(c < o + s and o < c + sz for o, s in self.rec)
+        return all(c + sz <= 0 and not any(c < o + s and o < c + sz for o, s in self.rec) for c in cs)
 
     def fences(self, res, cand):
         n = len(self.ins)
