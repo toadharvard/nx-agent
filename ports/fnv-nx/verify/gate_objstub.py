@@ -60,7 +60,7 @@ def root_check(root, repo, cache, jobs):
     os_ids = {base + o["unit"] for o in res["objects"] if o["os_layer"]}
     rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
     eh = rec.get("empty_handlers")
-    records = objstub.read_handler_records(os.path.join(repo, eh["cover"]), os.path.join(repo, eh["syntax"])) if eh else None
+    records = objstub.read_handler_records(recipe.resolve_foreign(root, eh["cover"], repo, cache, rec)[0], recipe.resolve_foreign(root, eh["syntax"], repo, cache, rec)[0]) if eh else None
     abi = rec.get("error_abi")
     probe = dict(abi or {}, tables=(eh or {}).get("tables", {})) if (abi or eh) else None
     image = {}
@@ -119,6 +119,8 @@ def main(argv):
            "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
            "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
            "image": image, "trap_body": stats.get("trap_body", 0), "handler_justified": {k[8:]: v for k, v in sorted(stats.items()) if k.startswith("handler_")}}
+    with open(os.path.join(os.environ["GATE_OUT"], "objstub.findings.tsv"), "w") as fh:   # the whole list (the result JSON holds the first 50 ids)
+        fh.write("object\tfunction\tkind\tdetail\n" + "".join("%s\t%s\t%s\t%s\n" % (o, n, k, d.replace("\t", " ").replace("\n", " ")) for o, n, k, d in sorted(finds)))
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("objstub: %s %d/%d %s" % (status, cert, len(items), detail[:200]))

@@ -633,10 +633,13 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append('empty_handlers must be {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE, "field": FIELD}}}: the generated op_cover.tsv and '
                        'op_syntax.tsv and, per slot, the instruction table (an array variable with DWARF) and the field of its entry that holds the handler')
         else:
-            err += ["empty_handlers.%s %r is not a file of an admitted root (the generated output of the root that produces it: admit.json)" % (k, eh[k])
-                    for k in ("cover", "syntax") if isinstance(eh[k], str) and not any(eh[k].startswith(r + "/") for r in roots if r != root)]
-            err += ["empty_handlers.%s %r is not a tracked file of the repository" % (k, eh[k]) for k in ("cover", "syntax")
-                    if not (isinstance(eh[k], str) and eh[k] in files and not eh[k].startswith("/") and ".." not in eh[k].split("/"))]
+            for k in ("cover", "syntax"):   # a bare path is a tracked file of ANOTHER admitted root (the generated outputs of the root that produces it); {external, path} is tree-checked by resolve_input
+                ref = eh[k]
+                if isinstance(ref, dict):
+                    if set(ref) != {"external", "path"} or ref.get("external") not in {e.get("name") for e in rec.get("external", []) if isinstance(e, dict)}:
+                        err.append("empty_handlers.%s %r must be {external: a declared external, path}" % (k, ref))
+                elif not isinstance(ref, str) or owner_root(ref, roots, root) is None or ref not in files:
+                    err.append("empty_handlers.%s %r is not a tracked file of an admitted root other than this one (resolve_input)" % (k, ref))
         if ea is None:
             err.append("a root with empty_handlers (table handlers) must declare error_abi")
     sr = rec.get("sources")
@@ -1431,6 +1434,23 @@ def exttree(e, cache):
 
 
 _EXT_CHECKED = set()
+
+
+def owner_root(path, roots, root):
+    """The admitted root other than ROOT that holds the repository path PATH (the longest admitted prefix), or None."""
+    own = [r for r in roots if r != root and path.startswith(r + "/")]
+    return max(own, key=len) if own else None
+
+
+def resolve_foreign(root, ref, repo=".", cache=None, rec=None):
+    """resolve_input for the fact file REF of ROOT's recipe: a repository path is read through resolve_input as a file of its owning root (owner_root), an
+    {external, path} through ROOT's own externals. -> (host path, ident)."""
+    if isinstance(ref, str):
+        own = owner_root(ref, load_admit(repo), root)
+        if own is None:
+            raise ValueError("%s: %r is not a file of an admitted root other than this one" % (root, ref))
+        return resolve_input(own, ref[len(own) + 1:], repo, cache)
+    return resolve_input(root, ref, repo, cache, rec)
 
 
 def resolve_input(root, ref, repo=".", cache=None, rec=None):

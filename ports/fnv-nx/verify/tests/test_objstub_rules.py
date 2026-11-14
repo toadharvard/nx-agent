@@ -292,5 +292,16 @@ e = errs(error_abi={"fail": "f", "kind": "noreturn"}, empty_handlers=dict(EH, co
 check("recipe: empty_handlers.cover outside every admitted root is a check error", any("admitted root" in x for x in e), e)
 e = errs(error_abi={"fail": "f", "kind": "noreturn"}, empty_handlers=dict(EH, cover=D + "/build.json"))
 check("recipe: empty_handlers.cover in the root's own tree is a check error (the facts come from another admitted root)", any("admitted root" in x for x in e), e)
+hp, ident = recipe.resolve_foreign(D, cov, REPO)
+check("resolve_foreign: a tracked file of another admitted root is read through resolve_input", os.path.isfile(hp) and ident.endswith("test_objstub.py"), (hp, ident))
+for what, ref in (("the root's own file", D + "/build.json"), ("a path outside every admitted root", "CLAUDE.md")):
+    try:
+        recipe.resolve_foreign(D, ref, REPO)
+        ok = False
+    except ValueError:
+        ok = True
+    check("resolve_foreign: %s is red" % what, ok)
+e = errs(error_abi={"fail": "f", "kind": "noreturn"}, empty_handlers=dict(EH, cover={"external": "undeclared", "path": "x"}))
+check("recipe: an {external, path} cover naming an undeclared external is a check error", any("declared external" in x for x in e), e)
 print("%d FAILED" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)
