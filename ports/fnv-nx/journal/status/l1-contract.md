@@ -975,3 +975,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 23:14 Ruling: gate input paths. One recipe.resolve_input(root, ref) resolves every path a gate reads from its input files: a bare string is a tracked file of the root, and {external, path} names a declared external of the root's recipe, checked against its tree_sha256. Everything else is red. No mirroring. This covers gate_imports (names, specs, extra, extra_other, name_table) and gate_machine (sites), and every other gate with path inputs (target: 0 opens outside resolve_input). L5 w10 implements it; L1 reviews it.
 
 - 23:17 Ruling: the first-party root import graph is a DAG over all admitted roots. It is checked statically with ast; a non-literal importlib call is red, and a cycle is red. It lives in gate_tests, one root_graph(admit) shared with the placement rule, owner w19. L3a broke its cycles by moving code (int3 d206ba904). Their test_root_graph.py becomes a case of the gate.
+
+- 23:19 L3a blockers on L1 (found by w8 at t16k 420a459ba):
+  1. The loader is not a product root. The 3 native test roots each lack the same 7 loader symbols, and loader/Makefile plus guest/build.sh are a second build path. NEW worker w24 (session_01KmtZKV7m9qpAdWS8274Mju) makes ports/fnv-nx/loader a recipe guest product root. It deletes the Makefile and build.sh, moves the host tests to the variant against the real units, and checks loader/src/sha256.c against lib/sha256 for one home.
+  2. lib/sha256: w15c 1cac0562 (pushed before the limit). w15 is resumed and merges it onto 141b07580 as w15d, with its verdict.
+  Green on t16k so far: lift/rt (12 objects) + the 3 lifted test roots.
