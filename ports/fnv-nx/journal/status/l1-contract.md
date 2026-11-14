@@ -1079,3 +1079,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w16c commit 1: the orchestrator agreed it goes ahead of w12. It went to L6's free worker w6 (session_01KmtZKQbpDKvc9qzXT9bLHX) on L1's spec, branch claude/fnv-l1-contract-w16c1, base 141b07580+1cac05621. Generator reads are declared resolve_input refs in the stage key; an undeclared read is red. L1 reviews.
 - w22f4 1c8974b53 is accepted (fact {source,itype,conv,lo,hi,nonan}, exact specified sets). It lands with L2 w1.
 - The libnxgl4 link items from the orchestrator: (a) system libs pinned by env.json and (b) the declared loader root go to w12h ldcheck; (c) the per-target variant goes to w15c RECIPE.md.
+- w20u 4d07c266a accepted: e997fc8e2 objstub failing unit is red, 2389651b8 recipe.unit_flags, 4d07c266a product-guest-exe. No game root is admitted on 141b07580, so namegate/r7 0/0. Platform objstub terminator phase: 55 red → pass; the analysis is super-linear on large objects and is being fixed by a stated bound (no size-based skip).
+- w22p 05fd4eaae .map lexer accepted. assumptions on L6 ee11286b6: 24 mention-no-id, render 0/24, all L5 (manifest 15, win32 6, hostabi/include 2, guest 1); forwarded to L5.
+- gate_oracle red for contract/tests/test_nativerows.py (no oracle.json entry; added by L3a 32bf31a8d): this is correct by rule. L3a adds the entry.
