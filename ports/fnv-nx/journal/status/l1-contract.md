@@ -1009,3 +1009,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The op_cover reader (rule A) is w20's commit 3. An empty body is accepted only by (a) op_syntax or (b) op_cover naming a non-empty emitter (chains closed). (c) must call fnvnx_reach_violation with a certified fact.
   - Acceptance: 7/7 judged, 0 stubs.
 - L4 4.1 needs w12g + w14-src2 merged. The resolution rule went to L4: one guest_errors on root@variant, plus w14's helper. It is part of w12's corrections; I asked the orchestrator whether w12 should move ahead of w15c's remainder.
+
+- 23:38 Orchestrator order changed: w15d (lib/sha256) → w12 (next free slot; brings the w12g + w14-src2 resolution for L4 4.1 and the ELF) → 1.7 w19 → w15c remainder → w16c → w16.
+- Queued after the first root, NOT in next3b: the selftests universe becomes every test file in the repo by one naming rule, and a test outside it is red. L3b found 34 test files under lift/: 20 neither run nor judged, plus 2 outside the naming. L3a/L3b give those 20 references or delete them first (owners in L3b w3 de29dfb60). Owner w19.
+- New ldcheck rule (L4): a weak-undefined symbol in any final guest image is red. The only exemption is a certified unreachable reference through fnvnx_reach_violation. Owner w12. L5 must define sched_getcpu (and sched_yield if missing) in rt/guest.
