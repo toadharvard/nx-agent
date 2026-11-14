@@ -5,13 +5,13 @@ The driver calls fnvl_raise(code, at) / fnvl_raise_av on a struct cpu laid out i
 driver, which keeps their addresses. Compared against hand-written rows (NTSTATUS, ExceptionAddress, number of parameters, Context.Eip): the Windows 7 trap handlers as ReactOS transcribes them
 (KiTrap00/01/03/04/05/06/0D, KiRaiseAssertion). Also: the segment selectors in the CONTEXT are the CURRENT ones (c->sel after fnvl_seg_set), FS load re-bases c->fs, and FNVL_GS_BASE() follows the GS selector."""
 import os, struct, subprocess, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE); sys.path.insert(0, HERE); sys.path.insert(0, LIFT)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, HERE); sys.path.insert(0, LIFT)
 import instest as T, fnvlift as L
 from unicorn import *
 from unicorn.arm64_const import *
 from elftools.elf.elffile import ELFFile
 W = '/home/user/l3work/sehcodes'; CPU, STK, FSB, RET, SEL = 0xE1000000, 0x10100000, 0x7FFDF000, 0xE1FF0000, 400
-DRV = L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '''
+DRV = L.prelude(os.path.join(LIFT, 'rt')) + '''
 extern "C" { u32 g_rec, g_ctx; u32 fnvl_os_unhandled(u32 r, u32 x){ g_rec=r; g_ctx=x; return 0; } void (*fnvl_dispatch(u32 a))(void){ return 0; }
   void drv_raise(u32 code, u32 at){ fnvl_rt::fnvl_raise(code, at); }
   void drv_av(u32 at){ fnvl_rt::fnvl_raise_av(0, 0xffffffffu, at); }

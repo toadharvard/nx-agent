@@ -7,7 +7,7 @@ The expected values are computed here from the SDM with the exact 80-bit images 
 exponent field, so the single-instruction rows of instest.py compare significands, TOP and tags against the oracle and the exponent against the SDM (mm_written). Initial memory is the harness's
 deterministic page generator; stores are read back as `changed bytes or the original byte`."""
 import os, sys, struct
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, LIFT)
 import instest as T
 import instest_extra as XE
 import fnvlift
@@ -56,7 +56,7 @@ def run(cases, work=WORK, tag=1000):
     os.makedirs(work, exist_ok=True)
     img = XE.FImage('/home/user/game/FalloutNV.exe')
     T.G.update(L=fnvlift, img=img, work=work)
-    T.runtime_objects(work, os.path.dirname(HERE))
+    T.runtime_objects(work, LIFT)
     bad = 0
     for k, case in enumerate(cases):
         name, raw, top, expect = case[:4]

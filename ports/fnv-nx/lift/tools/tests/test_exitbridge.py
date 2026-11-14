@@ -12,7 +12,7 @@ the pointer; nothing written past N bytes), and the esp after the return (the re
 Exit status 1 on any difference; 3 (BLOCKED) when the link has an undefined product symbol."""
 import argparse, os, random, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
-for p in ('tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
+for p in ('tools', 'tools/tests', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import bridgegen, exitgen
 
 M64 = (1 << 64) - 1

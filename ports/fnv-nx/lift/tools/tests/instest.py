@@ -18,10 +18,10 @@ from unicorn import *
 from unicorn.x86_const import *
 from unicorn.arm64_const import *
 from elftools.elf.elffile import ELFFile
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 # a one-instruction test has no callee: a call/tail to another entry is an event of the test harness (fnvl_call), set here and nowhere in the prelude
 STUBX = 'extern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
-sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
+sys.path.insert(0, os.path.join(LIFT, 'tools'))
 
 def blocked_on(what):
     print('BLOCKED: needs ' + what); print('blocker: L4 shared model (boot machine) and the platform root; this test defines no clock'); sys.exit(3)
@@ -464,7 +464,7 @@ def build(batch_id, items, work):
     env = dict(os.environ, LC_ALL='C'); bad = {}; objs = []; d = '%s/b%d' % (work, batch_id); os.makedirs(d, exist_ok=True)
     def comp(its):
         if not its: return
-        cpp = '%s/%d.cpp' % (d, len(objs)); o = cpp[:-4] + '.o'; open(cpp, 'w').write(G['L'].prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + STUBX + '\n'.join(t for a, t in its))
+        cpp = '%s/%d.cpp' % (d, len(objs)); o = cpp[:-4] + '.o'; open(cpp, 'w').write(G['L'].prelude(os.path.join(LIFT, 'rt')) + STUBX + '\n'.join(t for a, t in its))
         r = subprocess.run(['aarch64-linux-gnu-g++'] + FLAGS + [cpp, '-o', o], capture_output=True, text=True, env=env)
         if r.returncode == 0: objs.append(o); return
         why = {int(m.group(2), 16): re.findall(r'error: ([^\n]*)', r.stderr[m.start():])[:1] for m in re.finditer(r'In function [^\n]*?(L_([0-9a-f]{8}))', r.stderr)}
@@ -523,7 +523,7 @@ def runtime_objects(work, lifter):
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--n', type=int, default=8); A('--k', type=int, default=4); A('--jobs', type=int, default=3); A('--only'); A('--limit-forms', type=int)
-    A('--work', default='/home/user/l3work/instest'); A('--lifter', default=os.path.dirname(HERE))
+    A('--work', default='/home/user/l3work/instest'); A('--lifter', default=LIFT)
     A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--pack', default=os.environ.get('FNVNX_PACK', '/home/user/l3work/pack'))
     a = ap.parse_args(); t0 = time.time(); os.makedirs(a.work, exist_ok=True); sys.path.insert(0, a.lifter)
     import fnvlift as L, fnvlift.core
@@ -535,7 +535,7 @@ def main():
     runtime_objects(a.work, a.lifter)
     subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-o', a.work + '/cpumodel_host.so', os.path.join(a.lifter, 'rt', 'cpumodel.c')])      # fnvl_host_ticks_ns stays undefined (lazy-bound, cpuid never calls it)
     import ctypes; G['cpum'] = ctypes.CDLL(a.work + '/cpumodel_host.so')
-    open(a.work + '/off.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,fcw)==40&&offsetof(cpu,fc)==44&&offsetof(cpu,x)==48&&offsetof(cpu,fl)==176&&offsetof(cpu,mxcsr)==180&&offsetof(cpu,mm_unused)==184&&offsetof(cpu,ra)==248&&offsetof(cpu,fex)==252&&offsetof(cpu,fx)==256&&offsetof(cpu,eflx)==384&&offsetof(cpu,sel)==400&&offsetof(cpu,teb)==424&&offsetof(cpu,fip)==428&&offsetof(cpu,fdp)==432&&offsetof(cpu,eflags)==460&&offsetof(cpu,dr)==464&&sizeof(cpu)==488,"cpu layout");\n')
+    open(a.work + '/off.cpp', 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,fcw)==40&&offsetof(cpu,fc)==44&&offsetof(cpu,x)==48&&offsetof(cpu,fl)==176&&offsetof(cpu,mxcsr)==180&&offsetof(cpu,mm_unused)==184&&offsetof(cpu,ra)==248&&offsetof(cpu,fex)==252&&offsetof(cpu,fx)==256&&offsetof(cpu,eflx)==384&&offsetof(cpu,sel)==400&&offsetof(cpu,teb)==424&&offsetof(cpu,fip)==428&&offsetof(cpu,fdp)==432&&offsetof(cpu,eflags)==460&&offsetof(cpu,dr)==464&&sizeof(cpu)==488,"cpu layout");\n')
     subprocess.check_call(['aarch64-linux-gnu-g++'] + FLAGS + ['-fsyntax-only', a.work + '/off.cpp'])
     d = load_forms(a, None); forms = d['forms']; print('pack: %d forms' % len(forms), file=sys.stderr)
     keys = sorted(k for k in forms if not a.only or k.split('|')[0] in a.only.split(','))

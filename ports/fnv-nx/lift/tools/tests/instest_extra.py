@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""instest over SYNTHETIC integer/system encodings that the exe census does not contain (W14), through the same oracle/compare path as test/instest.py.
+"""instest over SYNTHETIC integer/system encodings that the exe census does not contain (W14), through the same oracle/compare path as tools/tests/instest.py.
     instest_extra.py [--only mn,mn] [--k 4] [--n 8] [--tables]
 The encodings are listed as hex strings below (one per form variant). Each is placed at its own fake address (0x7d000000 + n*0x20) in a patched Image.
 `--tables` instead checks the generated C of the `int imm8` vector table of fnvlift/f_sys.py against its documented rows (no oracle: Unicorn faults on all of them), and (W15) the class rules
@@ -8,7 +8,7 @@ model GDT, descriptor-table reads, hint NOPs, prefix-only variants, UD by absent
 not computed by the rule under test. No oracle: Unicorn has no OS, ring 3, Win32 selectors or model GDT.
 Everything exe-derived goes to /home/user/l3work/xinstest, never the repo."""
 import sys, os, struct
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 import instest as T
 from capstone import x86 as X
 import fnvlift

@@ -12,7 +12,7 @@ call into the cache + fnvnx_dispatch; the bridge marshals the arguments into the
 Expected values are computed by hand from the x86 semantics (stated at each case).  Run under Unicorn.  Prints one line per case; exit status 1 on any difference."""
 import argparse, os, re, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE)); FNV = os.path.dirname(LIFT)
-for p in ('bench', 'tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
+for p in ('bench', 'tools', 'tools/tests', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, instest, phf, impgen, dispgen, bridgegen, exitgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 from unicorn import Uc, UcError, UC_ARCH_ARM64, UC_MODE_ARM

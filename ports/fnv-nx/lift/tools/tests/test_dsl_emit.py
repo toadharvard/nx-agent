@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """f_dsl.emit_form (the C emitted from the proven DSL forms) over every instruction shape of FalloutNV.exe whose mnemonic the forms cover: each shape is
 decoded with zeroed immediate / displacement bytes (plus, for branches, a second copy with a non-zero relative target that lies outside the function),
-emitted as a one-instruction function and compiled (-fsyntax-only, the flags of test/instest.py (liftgen.resolved_flags)).  Prints `shapes N emitted N compiled N`, and
+emitted as a one-instruction function and compiled (-fsyntax-only, the flags of tools/tests/instest.py (liftgen.resolved_flags)).  Prints `shapes N emitted N compiled N`, and
 `undef-assigned P`: the number of (mnemonic, flag) pairs where a form declares the flag undefined (no assignment is emitted) and the hand handler
 assigns it.  Input: the shape census table shapes.tsv of the exe (exe-derived, first column = shape key; '#' lines ignored: /home/user/l3work/publish-shapes/FalloutNV/shapes.tsv, made by proof/census.py).
     dsl_emit_test.py [--shapes P] [--jobs 2] [--work DIR] [--pairs]"""
 import argparse, multiprocessing as mp, os, re, subprocess, sys, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
-LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'test'))   # instest: the shared harness of lift/test
+LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools', 'tests'))   # instest: the shared harness of tools/tests
 import capstone
 from capstone import x86 as X
 import fnvlift
