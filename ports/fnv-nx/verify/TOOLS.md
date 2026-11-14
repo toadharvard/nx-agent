@@ -1548,6 +1548,9 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
                                          has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
+Dangling keys: every key of every tracked oracle.json that lies in a directory named `tests` (any directory of the tree, whether or not its
+tests are in the universe above) must name a tracked file of that directory; a key that does not is one uncertified item, `DIR/tests/oracle.json:KEY`,
+which also counts in the universe; an oracle.json that is not a JSON object with a `tests` object is one such item (`DIR/tests/oracle.json`).
 Rule. A test file is certified iff ALL hold:
   1. its DIR's oracle.json is well formed and holds exactly one entry for it (an entry without a test file, an unknown
      key or a wrong format is an error of the DIR: none of its tests is certified);

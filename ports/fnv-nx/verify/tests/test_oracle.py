@@ -273,4 +273,15 @@ rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_O
 res = json.load(open(os.path.join(out, "oracle.json")))
 check("gate program: test without a declaration -> red, exit 2", rc == 2 and res["status"] == "red"
       and res["uncertified"] == [T + "/x/tests/test_a.py"], res)
+# dangling keys: every key of every tracked tests/oracle.json names a tracked file of its directory (the whole tree, not only the universe)
+TR_ = {"a/tests/oracle.json", "a/tests/test_ok.py", "b/tests/oracle.json", "b/tests/test_there.py", "c/notests/oracle.json"}
+DOCS = {"a/tests/oracle.json": '{"format": "fnvnx-oracle/1", "tests": {"test_ok.py": {}}}',
+        "b/tests/oracle.json": '{"format": "fnvnx-oracle/1", "tests": {"test_there.py": {}, "test_gone.py": {}, "test_gone2.py": {}}}',
+        "c/notests/oracle.json": "not json"}
+check("dangling: member keys are fine, missing keys are named with their oracle", G.dangling(TR_, DOCS.__getitem__)
+      == ["b/tests/oracle.json:test_gone.py", "b/tests/oracle.json:test_gone2.py"], G.dangling(TR_, DOCS.__getitem__))
+check("dangling: a file outside a tests directory is not an oracle declaration", G.dangling({"c/notests/oracle.json"}, DOCS.__getitem__) == [])
+check("dangling: an unparseable oracle.json in a tests directory is one item", G.dangling({"d/tests/oracle.json"}, lambda p: "{") == ["d/tests/oracle.json"])
+check("dangling: a tests value that is not an object is one item", G.dangling({"d/tests/oracle.json"}, lambda p: '{"tests": []}') == ["d/tests/oracle.json"])
+check("dangling: a tree with every key present has none", G.dangling({"a/tests/oracle.json", "a/tests/test_ok.py"}, DOCS.__getitem__) == [])
 sys.exit(1 if fails else 0)
