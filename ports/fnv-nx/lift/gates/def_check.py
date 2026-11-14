@@ -75,13 +75,37 @@ def universe(pairs):
     return out
 
 
+def lifted_by(ins):
+    """which builder of the lifter takes an instruction that has no Form: the mnemonic handler (OPS, by its module) or the first FALLBACK whose predicate holds
+    (the order of fnvlift.core.dispatch), else 'none' (a lift gap). The probe context carries what the predicates read."""
+    import types
+    from fnvlift import core, f_cpufeat, f_sys, f_sse, f_x87, f_int, f_string, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
+    m = ins.mnemonic.split()[-1]
+    cx = types.SimpleNamespace(m=m, ops=list(ins.operands), b0=ins.opcode[0], modrm=ins.modrm, pfx='')
+    try:
+        if f_cpufeat.missing(ins): return 'cpufeat-UD'
+    except Exception: pass
+    h = core.OPS.get(m)
+    if h is not None: return 'ops:' + h.__module__.split('.')[-1]
+    for pred, fn in core.FALLBACKS:
+        try: ok = pred(cx, ins)
+        except Exception: return 'undetermined'
+        if ok: return 'fallback:' + fn.__module__.split('.')[-1] + '.' + fn.__name__
+    return 'none'
+
+
 def run(uni):
     res = dict(shapes=len(uni), sites=sum(v[1] for v in uni.values()), no_form=0, no_form_sites=0, forms=0, forms_sites=0, forms_with_free=0, forms_with_free_sites=0,
-               free_flag_outputs=0, free_flag_outputs_sites=0, free_reg_outputs=0, free_reg_outputs_sites=0, uncovered=0, unmapped_fault_codes=[], by_mnemonic={}, forms_with_when=0, forms_with_when_sites=0, model_gap_forms=0, model_gap_forms_sites=0, mismatches=[])
+               free_flag_outputs=0, free_flag_outputs_sites=0, free_reg_outputs=0, free_reg_outputs_sites=0, uncovered=0, unmapped_fault_codes=[], by_mnemonic={}, no_form_by={}, forms_with_when=0, forms_with_when_sites=0, model_gap_forms=0, model_gap_forms_sites=0, mismatches=[])
     for key, (ins, n) in sorted(uni.items(), key=lambda kv: str(kv[0])):
         try: F = forms.build(ins, 0x1000)
-        except Exception:
+        except Exception as e:
             res['no_form'] += 1; res['no_form_sites'] += n
+            how = lifted_by(ins)
+            b = res['no_form_by'].setdefault(how, dict(shapes=0, sites=0, mnemonics={}))
+            b['shapes'] += 1; b['sites'] += n
+            mn = ins.mnemonic.split()[-1] + ('/16' if ins.mnemonic.split()[-1] in ('shld', 'shrd') and ins.operands[0].size == 2 else '') + ('' if isinstance(e, KeyError) else ' (%s)' % type(e).__name__)
+            b['mnemonics'][mn] = b['mnemonics'].get(mn, 0) + 1
             continue
         res['forms'] += 1; res['forms_sites'] += n
         for k, _ in F.faults:
