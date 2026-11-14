@@ -7,4 +7,4 @@ order	test < unconditional return < emitter call, in one function	yes
 emitter_use_sites	instruction emitters are called only in parse_instruction_token (count of `emitter(` / `->emitter[` in mojoshader.c)	1
 rows_opcode_string_0	table rows with opcode_string 0: 16 of 97; all named RESERVED; shader_types UNKNOWN	all
 second_rejection	(ctx->shader_type & instruction->shader_types) == 0 -> failf, MOJOSHADER_TYPE_UNKNOWN	mojoshader.c:2274
-glsl_body	emit_GLSL_RESERVED: empty (comment: fails in the state machine)	mojoshader_profile_glsl.c:3851
+glsl_body	emit_GLSL_RESERVED: empty (comment: fails in the state machine)	mojoshader_profile_glsl.c:3821
