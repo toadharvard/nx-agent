@@ -56,7 +56,7 @@ check("a report next to the object is not looked at (the old path obj + .f2i.jso
 check("unit mismatch (another unit's report): red f2i-report-unit", codes(report("other.json", recipe.sandbox_src("b.c"))) == ["f2i-report-unit"])
 check("the bare unit name is a mismatch (the plugin reports the sandbox path, nothing is stripped)", codes(report("bare.json", "a.c")) == ["f2i-report-unit"])
 check("a finding of the plugin: red f2i-conv", codes(report("fnd.json", recipe.sandbox_src("a.c"), [{"function": "g", "file": "a.c", "line": 3, "kind": "conv"}], 1)) == ["f2i-conv"])
-check("a generic builtin finding (lround family): not red, IEEE under ASM-008", codes(report("bi.json", recipe.sandbox_src("a.c"), [{"function": "g", "file": "a.c", "line": 3, "kind": "builtin"}], 1)) == [])
+check("a generic builtin finding (lround family) is red f2i-builtin: no kind is exempt", codes(report("bi.json", recipe.sandbox_src("a.c"), [{"function": "g", "file": "a.c", "line": 3, "kind": "builtin"}], 1)) == ["f2i-builtin"])
 check("a target builtin finding (NEON vcvtq_s32_f32, kind mdbuiltin) through the real reader: red f2i-mdbuiltin",
       codes(report("md.json", recipe.sandbox_src("a.c"), [{"function": "int32x4_t vcvtq_s32_f32(float32x4_t)", "file": "arm_neon.h", "line": 10310, "kind": "mdbuiltin"}], 1)) == ["f2i-mdbuiltin"])
 bad = os.path.join(TMP, "bad.json")

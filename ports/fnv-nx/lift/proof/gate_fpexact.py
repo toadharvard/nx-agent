@@ -281,7 +281,8 @@ def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
     """-> {item id: [(code, text)]} for `rcp:<oid>` and `f2i:<oid>`; the code is the finding class (fixture mode, RECIPE.md "Fixtures"). ASM: the unit is
     an assembler unit (.s / .S, the recipe's own kind): the compiler never builds GIMPLE for it, so the plugin has no file to write and no conversion
     site exists in its source: the result is the empty one (sites 0), and check 3b still makes any FCVT / FJCVTZS instruction of the object a finding.
-    F2I_PATH: the `f2i` of the object's row. A finding of kind builtin (lround, a libm call) is IEEE under OWNER ASM-008 and is not one; conv and asm are."""
+    F2I_PATH: the `f2i` of the object's row. Every finding of the plugin is a finding of the object, whatever its kind: no kind is exempt (the plugin rewrites every
+    conversion GIMPLE carries to the x86 semantics, so a site that remains in `findings` is unrewritten)."""
     scan = scan_object(path)
     rcp = [("rcp-estimate", "%s: %s in %s" % (oid, m, w)) for w, m in scan["recip"]]
     f2i = []
@@ -295,7 +296,7 @@ def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
         f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], recipe.sandbox_src(unit))))
     else:
         f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]))
-                for f in d["findings"] if f["kind"] != "builtin"]
+                for f in d["findings"]]
         if scan["fcvt"] and d["sites"] == 0:
             f2i.append(("fcvt-no-site", "%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1])))
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
