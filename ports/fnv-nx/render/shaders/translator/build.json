@@ -29,7 +29,9 @@
    "-DSUPPORT_PROFILE_METAL=0",
    "-DSUPPORT_PROFILE_SPIRV=0"
   ],
-  "cxx": ["-Werror=attributes"],
+  "cxx": [
+   "-Werror=attributes"
+  ],
   "asm": []
  },
  "include": [
@@ -84,7 +86,6 @@
    "at": "/ext/gcc"
   }
  ],
- "plugin_cxx": "x86_64-linux-gnu-g++-13",
  "plugins": [
   {
    "name": "fnvnx_ftoi",
