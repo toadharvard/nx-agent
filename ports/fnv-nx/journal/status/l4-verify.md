@@ -80,3 +80,4 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; session_01KmtZKURk
 | 4.3 boot GL from the recipe gl4 root; Mesa pin 25.2.8-0ubuntu0.24.04.4 confirmed (sent to L6) | - | blocked: L6A 3.7 gl4 root (render/gl4, libnxgl4.so from GATE_CACHE/store). Its link waits on L6 admitting the translator sources and on L1 (per-target variant in link.roots); compile half running on w15c |
 
 Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3 kept). lib/sha256 task A dropped from L4's queue (L6A 3.7 carries it). No boots of old-lineage ELFs.
+- 23:30Z orchestrator: main-menu = first entry of the certified N1 function that builds the main-menu UI object, after WinMain, followed by a GL present; L2 names it with its certificate and sends the row to L1 and L4. first-frame = GL backend's first present (accepted). 4.1 prepared on a local merge of L1 w12g, w14-src2, L5 w14-rt until they reach the candidate in plan order.
