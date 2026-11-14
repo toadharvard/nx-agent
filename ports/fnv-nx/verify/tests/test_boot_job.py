@@ -99,7 +99,7 @@ def publish_branch(name, files):
 
 
 def run_job(args, env_extra=None, game=GAME, tree=None):
-    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8"}
+    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8", "GATE_CACHE": os.path.join(HOME, "gate-cache")}
     if game:
         env["GAME_DIR"] = game
     env.update(env_extra or {})

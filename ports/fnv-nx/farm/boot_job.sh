@@ -92,6 +92,10 @@ NX_COMMIT=$(git -C "$SELF_DIR" rev-parse HEAD) || die "$SELF_DIR is not inside a
 
 # 1. setup
 ENVF=$NX/verify/env.json   # the declared inputs are read only from the tree the job runs from: verify/env.json, verify/boot_inputs.json (no variable redirects them)
+# GATE_CACHE (required input, no default): the verdict's own store (VDIR/cache). boot.py --gpu loads the recipe-built host runtime verify/bootrt from it
+# (bootgpu.py); nothing is compiled here and no other cache exists.
+[ -n "${GATE_CACHE:-}" ] || die "input-error: GATE_CACHE is not set (the verdict's cache; the host runtime verify/bootrt is built in it by recipe.py)"
+export GATE_CACHE
 python3 -I "$NX/verify/envcheck.py" check --env "$ENVF" > "$WORK/envcheck.txt" 2>&1 || { sed 's/^/boot_job: /' "$WORK/envcheck.txt" >&2; die "input-error: the host does not match the declared environment ($ENVF); set the host up with farm/setup_verdict_env.sh"; }
 if [ -n "$GPU_BRANCH" ]; then   # the renderer's host packages are part of the declared environment (verify/env.json): required, never installed here
   for p in gcc libegl1 libegl-mesa0; do
