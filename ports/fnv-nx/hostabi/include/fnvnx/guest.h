@@ -5,6 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Marks the image's entry symbol: the one declaration that carries it is the symbol the product ELF root defines for the process entry (a gate
+ * reads the token FNVNX_IMAGE_ENTRY in the preprocessed unit). It changes no semantics beyond the default symbol visibility. */
+#define FNVNX_IMAGE_ENTRY __attribute__((visibility("default")))
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -44,7 +48,7 @@ int fnvnx_section_free(uint32_t id);   /* deferred while views live */
 /* The exe's entry point. Defined ONLY by the product ELF root, generated from the exe's facts: a bridge to the lifted function at the PE
  * AddressOfEntryPoint (WinMainCRTStartup). Nothing else defines it; rt/guest's main() (rt/guest/main.c) calls it and returns its value to
  * the host. A PE entry of an EXE takes no argument; the PEB and the process environment come from the declared machine. */
-uint32_t fnvnx_exe_entry(void);
+FNVNX_IMAGE_ENTRY uint32_t fnvnx_exe_entry(void);
 
 #ifdef __cplusplus
 }
