@@ -29,6 +29,7 @@ import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 import gate_build  # noqa: E402
 
+APP_CORES = bootmachine.app_cores_of(GUEST_DIR)   # the application cores of the guest root's build flags (placement.h)
 TMP = tempfile.mkdtemp(prefix="bm-")
 atexit.register(shutil.rmtree, TMP, ignore_errors=True)
 GATE_CACHE = os.environ.get("GATE_CACHE") or os.path.join(TMP, "gate-cache")
@@ -108,7 +109,7 @@ def make_plan(elf_bytes):
 
 def run(elf_bytes, root, watch=None, svc=None, **kw):
     svc = svc or boothost.Services(root)
-    m = bootmachine.Machine(elf_bytes, make_plan(elf_bytes), svc, **kw)
+    m = bootmachine.Machine(elf_bytes, make_plan(elf_bytes), svc, **kw, app_cores=APP_CORES)
     lines, tids = [], []
     m.on_console(lines.append)
     m.on_thread(tids.append)
@@ -122,7 +123,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(30, 42), 44, 45, 46, 47, 48, *range(49, 58), 58, 59, 90, 91)}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(30, 42), 44, 45, 46, 47, 48, *range(49, 58), 58, 59, 60, 90, 91)}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -181,7 +182,7 @@ def main():
     # instruction bound: one block hook, deterministic stop, reuse of the Icount total
     def limited(limit, with_ic):
         svc = boothost.Services(root)
-        m = bootmachine.Machine(elf0, plan0, svc, limit_instructions=limit)
+        m = bootmachine.Machine(elf0, plan0, svc, limit_instructions=limit, app_cores=APP_CORES)
         ic = m.attach_icount(None, base) if with_ic else None
         return m.run(), ic, m.instr
 
@@ -195,7 +196,7 @@ def main():
     case("limit: reason limit, same stop point, with and without icount", la["reason"] == lb["reason"] == "limit"
         and la == lb and na == nb >= lim and na - lim < 64 and ica.report()["totals"]["all"]["total"] == na, (la, na, nb))
     try:
-        bootmachine.Machine(elf0, plan0, boothost.Services(root), limit_instructions=0)
+        bootmachine.Machine(elf0, plan0, boothost.Services(root), limit_instructions=0, app_cores=APP_CORES)
         ok = False
     except bootmachine.MachineError:
         ok = True
@@ -222,13 +223,13 @@ def main():
 
     n_slots = sum(1 for n in bootmachine.SLOTS if callable(getattr(boothost.Services, "h_" + n, None)))
     case("46 slots, all resolved at construction", len(bootmachine.SLOTS) == 46 == n_slots
-        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root)).handlers) == 46)
+        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES).handlers) == 46)
 
     class NoPad(boothost.Services):
         h_pad_read = None
 
     try:
-        bootmachine.Machine(elf0, plan0, NoPad(root))
+        bootmachine.Machine(elf0, plan0, NoPad(root), app_cores=APP_CORES)
         ok, msg = False, "no error"
     except bootmachine.MachineError as e:
         ok, msg = "h_pad_read" in str(e), str(e)
@@ -376,18 +377,18 @@ def main():
         plat_message = None
 
     try:
-        bootmachine.Machine(elf0, plan0, NoMsg(root))
+        bootmachine.Machine(elf0, plan0, NoMsg(root), app_cores=APP_CORES)
         ok, msg = False, "no error"
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every served non-socket fn of module 11 (1..9, 11..14, 34, 35, 36) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 10), *range(11, 15), 34, 35, 36])
+    case("every served non-socket fn of module 11 (1..9, 11..14, 34..38) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES).plat) == [*range(1, 10), *range(11, 15), *range(34, 39)])
 
     class NoSec(boothost.Services):
         plat_section_map = None
 
     try:
-        bootmachine.Machine(elf0, plan0, NoSec(root))   # services may override a fn; None means "not there": the machine's own serves it
+        bootmachine.Machine(elf0, plan0, NoSec(root), app_cores=APP_CORES)   # services may override a fn; None means "not there": the machine's own serves it
         ok = True
     except bootmachine.MachineError:
         ok = False
@@ -452,9 +453,9 @@ def main():
 
     # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
     rows, hslots = parse_totality(os.path.join(HOSTABI_DIR, "fnvnx", "hostapi.h"))
-    SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37]
-    mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root))
-    case("header: 30 services of module 11 and 46 slots parsed", len(rows) == 30 and sorted(rows) == SERVED
+    SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37, 38]
+    mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES)
+    case("header: 31 services of module 11 and 46 slots parsed", len(rows) == 31 and sorted(rows) == SERVED
          and len(hslots) == 46, (len(rows), len(hslots)))
     case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
          and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
@@ -498,7 +499,7 @@ def main():
          and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
          and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
     try:
-        bootmachine.Machine(elf0, plan0, boothost.Services(root), profile="tv")
+        bootmachine.Machine(elf0, plan0, boothost.Services(root), profile="tv", app_cores=APP_CORES)
         ok = False
     except bootmachine.MachineError:
         ok = True
@@ -537,9 +538,18 @@ def main():
     r59, l59 = run(built[59][0], root, text_entries=["\U0001F600"])[:2]
     k = kv(l59)
     case("TEXT_ENTRY: a text of exactly max_len units fits", r59["reason"] == "exit" and k == {"te-fit": "1", "te-fit-n": "2", "te-fit-u0": "d83d", "te-fit-u1": "de00", "te-fit-nul": "0"}, (r59["reason"], k))
+    # THREAD_CPU and the placement contract (MODE 60). Expected values by hand from hostapi.h / placement.h; the default core is read by name
+    DC = re.search(r"#define\s+FNVNX_DEFAULT_CORE\s+(\d+)", open(os.path.join(HOSTABI_DIR, "fnvnx", "placement.h")).read()).group(1)
+    r60, l60 = run(built[60][0], root)[:2]
+    k = kv(l60)
+    want60 = {"cpu-main": DC, "create-plain-core": "0", "create-minus1": "0", "create-ideal-not-in-mask": "0", "create-spec": "1", "set-core2": "0",
+              "cpu-after-set": "2", "set-core5": "1759", "cpu-unchanged": "2", "set-keep": "0", "cpu-kept": "2", "fn39": "ffffffffffffff02"}
+    bad = {n: (k.get(n), v) for n, v in want60.items() if k.get(n) != v}
+    case("THREAD_CPU: main at the default core, refused create forms give id 0, set_cpu applies / refuses, fn 39 NO_SERVICE (%d values)" % len(want60),
+         r60["reason"] == "exit" and not bad, (bad, r60["reason"]))
     for bad_scn in (["\ud800"], "abc", [b"x"]):
         try:
-            bootmachine.Machine(elf0, plan0, boothost.Services(root), text_entries=bad_scn)
+            bootmachine.Machine(elf0, plan0, boothost.Services(root), text_entries=bad_scn, app_cores=APP_CORES)
             ok = False
         except bootmachine.MachineError:
             ok = True
@@ -603,7 +613,7 @@ def main():
     case("ids: thread and directory ids are table handles (unknown / freed -> NotFound, never started -> BadInput, 1024 live together, "
          "a freed id never names anything again); dir_next cap 0 / cut; wait / wake alignment and readability; wake count above "
          "0x7FFFFFFF wakes all (%d values)" % len(want46), r46["reason"] == "exit" and not bad, (bad, r46))
-    case("ids: thread_set_cpu with a negative spec changes nothing", run(built[46][0], root)[3].placement.get(1) == {"cpu": 2, "prio": 3},
+    case("ids: thread_set_cpu with a negative spec changes nothing", run(built[46][0], root)[3].placement.get(1) == {"ideal": 2, "mask": 4, "prio": 3},
          "")
 
     r47, l47 = run(built[47][0], root)[:2]

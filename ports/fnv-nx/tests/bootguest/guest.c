@@ -2,6 +2,8 @@
    The renderer guest of test_bootgpu is MODE 80/81 here (it was 50/51 there, which the base guest below already uses). */
 #include <stdint.h>
 #include "fnvnx/hostapi.h"
+#include "fnvnx/placement.h"
+#define CPU_MAIN FNVNX_CPU_SPEC(FNVNX_DEFAULT_CORE, 1u << FNVNX_DEFAULT_CORE)   /* thread_create's cpu: a spec, ideal in mask */
 #define H (fnvnx_host)
 static const char *const MSG[] = {"hello from the guest\n", "second line\n"};   /* needs RELATIVE relocations */
 static volatile uint32_t flag;
@@ -342,7 +344,7 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("hint-ok-overlap", plat(4, 0x20010000, 0x10000, 0, 2));
     num("tact-nothread", plat(2, 99, 1, 0, 2));
     num("tact-tid0", plat(2, 0, 1, 0, 2));
-    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
+    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, CPU_MAIN);
     num("tact-new", plat(2, id, 1, 0, 2));
     fnvnx_hcall1(H->thread_start, id);
     num("tact-pause", plat(2, id, 1, 0, 2));
@@ -435,7 +437,7 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     g_v1 = SM(s, 0, 0, 0x2000); g_v2 = SM(s, 0, 0, 0x2000);
     W32(g_v1) = 0xA5A5;
     for (uint64_t k = 1; k <= 2; k++) {
-        uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(sec_worker), k, 0x10000, 0, ~0ull);
+        uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(sec_worker), k, 0x10000, 0, CPU_MAIN);
         fnvnx_hcall1(H->thread_start, id);
         while (sflag != k) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&sflag), k - 1, ~0ull);
         fnvnx_hcall1(H->thread_join, id);
@@ -575,8 +577,8 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
 #elif MODE == 46
     /* thread and directory ids, wait/wake */
 #define THR(f, a) fnvnx_hcall1(H->f, a)
-    uint64_t h1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
-    uint64_t h2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 78, 0x10000, 0, ~0ull);
+    uint64_t h1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, CPU_MAIN);
+    uint64_t h2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 78, 0x10000, 0, CPU_MAIN);
     num("h1-id", h1 != 0 && (h1 >> 16) != 0); num("h-distinct", h1 != h2);
     num("start-unknown", THR(thread_start, 0x12345)); num("start-zero", THR(thread_start, 0));
     num("join-unknown", THR(thread_join, 0x12345)); num("join-never-started", THR(thread_join, h2));
@@ -589,7 +591,7 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("join-freed", THR(thread_join, h1)); num("start-freed", THR(thread_start, h1));
     num("prio-freed", fnvnx_hcall2(H->thread_set_priority, h1, 1)); num("act-freed", plat(2, h1, 1, 0, 2));
     num("free-unknown", THR(thread_free, 0x12345));
-    uint64_t h3 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 79, 0x10000, 0, ~0ull);
+    uint64_t h3 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 79, 0x10000, 0, CPU_MAIN);
     num("h3-new-generation", h3 != h1 && h3 != h2 && (h3 >> 16) != (h1 >> 16));
     THR(thread_start, h3);
     num("free-running", THR(thread_free, h3));
@@ -614,8 +616,8 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("wake-unal", fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&flag) + 2, 1));
     num("wake-unmapped", fnvnx_hcall2(H->wake_address, 0x30000000, 1));
     num("wake-prot-none", fnvnx_hcall2(H->wake_address, H->heap_base + 0x320000, 1));
-    uint64_t w1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 1, 0x10000, 0, ~0ull);
-    uint64_t w2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 2, 0x10000, 0, ~0ull);
+    uint64_t w1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 1, 0x10000, 0, CPU_MAIN);
+    uint64_t w2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 2, 0x10000, 0, CPU_MAIN);
     THR(thread_start, w1); THR(thread_start, w2);
     fnvnx_hcall1(H->sleep_ns, 1000000);
     num("wake-all", fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&wf), 0x80000000ull));
@@ -624,9 +626,9 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     uint64_t cnt = 0, last = 0, x;
     while ((x = THR(fs_dir_open, FNVNX_ADDR("sdmc:/"))) != 0) { cnt++; last = x; }
     num("dirs-until-full", cnt);
-    num("thread-when-full", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull));
+    num("thread-when-full", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, CPU_MAIN));
     num("close-one", THR(fs_dir_close, last));
-    num("thread-after-close", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull) != 0);
+    num("thread-after-close", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, CPU_MAIN) != 0);
 #elif MODE == 47
     uint64_t b[8];
     for (int i = 0; i < 8; i++) b[i] = 0xABABABABABABABABull;
@@ -704,13 +706,13 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("self-free", fnvnx_hcall1(H->thread_free, s2));
     num("self-free-again", fnvnx_hcall1(H->thread_free, s2));
     num("self-use-freed", plat(2, s2, 0, 0, 2));
-    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(self_worker), s1, 0x10000, 0, ~0ull);
+    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(self_worker), s1, 0x10000, 0, CPU_MAIN);
     fnvnx_hcall1(H->thread_start, w);
     while (sflag2 == 0) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&sflag2), 0, ~0ull);
     mainran = 1;
     fnvnx_hcall1(H->thread_join, w);
     num("pause-by-worker", tcount);   /* 100 + pause result 0 + 10 * main-ran-while-paused 0 + 1000 * resume result 0 */
-    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, ~0ull);
+    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, CPU_MAIN);
     num("act-new", plat(2, c, 1, 0, 2));
     num("start", fnvnx_hcall1(H->thread_start, c));
     num("start-again", fnvnx_hcall1(H->thread_start, c));
@@ -738,8 +740,8 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     say("after the pause\n");
 #elif MODE == 55
     uint64_t me = plat(35, 0, 0, 0, 0);
-    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(rec_worker), 0, 0x10000, 0, ~0ull);
-    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, ~0ull);
+    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(rec_worker), 0, 0x10000, 0, CPU_MAIN);
+    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, CPU_MAIN);
     num("not-started-pause", plat(2, c, 1, 0, 2));
     fnvnx_hcall1(H->thread_start, c);
     num("resume-running", plat(2, c, 0, 0, 2));       /* not paused */
@@ -818,6 +820,17 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     static uint16_t ou[3] = {0x7777, 0x7777, 0x7777}; static uint32_t nn;
     num("te-fit", sk(36, 5, 2, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
     num("te-fit-n", nn); num("te-fit-u0", ou[0]); num("te-fit-u1", ou[1]); num("te-fit-nul", ou[2]);
+#elif MODE == 60
+    /* THREAD_CPU and the placement contract: the main thread starts at FNVNX_DEFAULT_CORE; refused creates give id 0; set_cpu */
+    num("cpu-main", plat(38, 0, 0, 0, 0));
+    num("create-plain-core", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, 1));
+    num("create-minus1", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull));
+    num("create-ideal-not-in-mask", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, FNVNX_CPU_SPEC(0, 0x6)));
+    num("create-spec", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, CPU_MAIN) != 0);
+    num("set-core2", fnvnx_hcall2(H->thread_set_cpu, 0, 2)); num("cpu-after-set", plat(38, 0, 0, 0, 0));
+    num("set-core5", fnvnx_hcall2(H->thread_set_cpu, 0, 5)); num("cpu-unchanged", plat(38, 0, 0, 0, 0));
+    num("set-keep", fnvnx_hcall2(H->thread_set_cpu, 0, FNVNX_CPU_SPEC(FNVNX_CPU_KEEP, 0))); num("cpu-kept", plat(38, 0, 0, 0, 0));
+    num("fn39", plat(39, 0, 0, 0, 0));
 #else
     num("marker", marker(41));
     volatile uint32_t *hp = (volatile uint32_t *)(uintptr_t)H->heap_base;
@@ -868,7 +881,7 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     p[0] = 9;
     uint64_t t1 = fnvnx_hcall0(H->system_tick), t2 = fnvnx_hcall0(H->system_tick);
     num("tickdiff", t2 - t1);
-    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
+    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, CPU_MAIN);
     num("thread", id);
     fnvnx_hcall1(H->thread_start, id);
     uint64_t r = 0;

@@ -712,7 +712,7 @@ Register ids are normalised through MCRegisterInfo super-register chains to the 
 ```text
 The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions.
 
-  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
+  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --guest-root ROOTDIR --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
               [--hc-slice N] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 

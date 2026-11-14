@@ -1218,6 +1218,31 @@
     ],
     "asm": []
    }
+  },
+  "m60": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Werror=attributes",
+     "-DMODE=60"
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
+   }
   }
  }
 }

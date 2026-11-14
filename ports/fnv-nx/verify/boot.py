@@ -150,7 +150,7 @@ def run(a):
     kw = {"hc_slice": a.hc_slice} if a.hc_slice else {}
     svc = boothost.Services(a.root, a.game, sc, watch_reads=wl is not None, read_only=ro)
     m = bootmachine.Machine(raw, plan, svc, limit_instructions=a.limit_instructions,
-                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, **kw)
+                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, app_cores=bootmachine.app_cores_of(a.guest_root), **kw)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
 
@@ -286,6 +286,7 @@ def main(argv=None):
     for opt in ("--elf", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
         sp.add_argument(opt, required=True)
     sp.add_argument("--heap-size", required=True, type=lambda s: int(s, 0))
+    sp.add_argument("--guest-root", required=True, help="directory of the guest product root the ELF was built from (its build.json flags give the application cores)")
     sp.add_argument("--game")
     sp.add_argument("--icount-spec")
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))

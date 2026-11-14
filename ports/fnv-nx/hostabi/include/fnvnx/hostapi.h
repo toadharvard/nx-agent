@@ -47,9 +47,11 @@ typedef struct FnvnxHostApi {
     /* ---- version 2: threads, address wait/wake, time, files ---- */
     uint64_t thread_create;        /* (entry, arg, stack_size, prio, cpu) -> host thread id (!= 0) or 0.
                                       The new thread calls the guest function entry(arg) (u64 arg) and ends
-                                      when it returns. prio: Win32 scale -15..15; cpu: -1 default placement,
-                                      0..63 that core only, FNVNX_THREAD_ROLE(r) the placement role r
-                                      (toolchain/host/placement.h). Not started. The id is a table handle
+                                      when it returns. prio: Win32 scale -15..15; cpu: FNVNX_CPU_SPEC(ideal, mask)
+                                      with ideal in mask and mask within FNVNX_APP_CORES (FNVNX_APP_CORES_CORE3 when the host is built with
+                                      FNVNX_CORE3_DEFAULT), else FNVNX_HE_BADINPUT and nothing is created (id 0). The placement is computed
+                                      only in the guest (fnvnx_place_ex, fnvnx/placement.h); the host takes the spec as given. The main thread
+                                      starts at FNVNX_DEFAULT_CORE, mask 1 << FNVNX_DEFAULT_CORE. Not started. The id is a table handle
                                       ((generation << 16) | slot, host_ids.inc), never an address; at most 1024
                                       live thread and directory ids together: 0 when the table is full. */
     uint64_t thread_start;         /* (id) -> 0 or Result; an id that names no live thread -> FNVNX_HE_NOTFOUND; a thread that is already
@@ -65,7 +67,8 @@ typedef struct FnvnxHostApi {
     uint64_t thread_set_cpu;       /* (id or 0 = self, spec) -> 0 or Result; unknown id -> FNVNX_HE_NOTFOUND;
                                       a negative spec (bits 40..62 set) -> 0, nothing changed. spec 0..63: that core only;
                                       FNVNX_CPU_SPEC(ideal, mask): ideal core (FNVNX_CPU_KEEP: keep) and
-                                      affinity mask (0: keep), the ideal core joins the mask */
+                                      affinity mask (0: keep), the ideal core joins the mask; the resulting ideal in the mask and the mask
+                                      within FNVNX_APP_CORES(_CORE3) (fnvnx/placement.h), else FNVNX_HE_BADINPUT, nothing changed */
     uint64_t wait_on_address;      /* (addr, expected u32, timeout_ns) -> 0 woken, 1 timed out, 2 value != expected
                                       (svcWaitForAddress WaitIfEqual; addr 4-aligned); timeout_ns above INT64_MAX waits
                                       forever; any other kernel result unchanged (0xCC01 addr not 4-aligned, 0xD401 addr
@@ -128,7 +131,7 @@ typedef struct FnvnxHostApi {
 
 /* ext_call results that belong to no service (all three are -255, -254, -253 as int64; no service answers one of them otherwise):
  *   NO_MODULE  the module number is >= 64 or no host module is registered under it
- *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 38 and up)
+ *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 39 and up)
  *   BAD_NARGS  module 11: fewer arguments than the service takes (the column "n" of the table below), or nargs > 0 with a null array */
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
 #define FNVNX_EXT_NO_SERVICE 0xFFFFFFFFFFFFFF02ull
@@ -261,69 +264,70 @@ typedef struct FnvnxHostApi {
  * The guest <-> host boundary is TOTAL: every service has one specified result for every input and one host implementation. Columns:
  * service, n = least nargs (fewer -> FNVNX_EXT_BAD_NARGS; extra arguments are ignored), results (numbers: FNVNX_HE_* above), host
  * implementation (toolchain/host/), unit tests (names `test:` in tests/s4/backends/<name>_test.c, run under qemu-aarch64 against the kernel double
- * kdouble.h; hostapi_total.py fails when a declared service has no row in host_platform.inc or a test name here is not in any test).
+ * kdouble.h; hostapi_total.py fails when a declared service has no row in or a test name here is not in any test).
  * Guest pointers (strings, buffers, FnvnxStat, ...) must be readable/writable guest memory: a host access that faults ends the process.
  * An id (thread, directory) is used by one thread at a time while it is freed (the guest's side of the contract).
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
- *   UINT32_MAX; host_ext.inc:h_ext_call, fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext (host_platform.inc, one row per service); fn 0, 10, 15, 27..29, 32, 33 and fn >= 38 -> NO_SERVICE (-254):
+ *   UINT32_MAX; fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
+ * module 11, platform_ext, one row per service; fn 0, 10, 15, 27..29, 32, 33 and fn >= 39 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
- *                            host_platform.inc:pf_cpu_boost,set_cpu_boost                                    test:cpu_boost
+ * test:cpu_boost
  *  2 THREAD_ACTIVITY    n=2  0 | the kernel's result | 0x1759 id 0, thread not started or finished | 0x1359 id names no live thread
  *                                                                                                              test:thread_activity test:thread_ids
- *                            host_platform.inc:pf_thread_activity, host_thread_activity.inc:host_thread_activity
  *  3 MESSAGE            n=2  0 after the dialog | the applet's Horizon result (null string = "")
- *                            host_message.inc:host_show_message                                              test:message
+ * test:message
  *  4 VM_RESERVE         n=2  address | 0 (size 0 / > 4 GiB, no slot, hint not free, no range)
- *                            host_vm.inc:host_vm_reserve                                                      test:vm_reserve
+ * test:vm_reserve
  *  5 VM_COMMIT          n=2  0 | 0x1759 (size 0, wraps, not inside one reservation) | 0xD401 (view or map_fixed page) | 0x0559 no memory | kernel
- *                            host_vm.inc:host_vm_commit                                                       test:vm_commit
+ * test:vm_commit
  *  6 VM_DECOMMIT        n=2  0 (size 0: nothing done) | 0xD401 (wraps, view or map_fixed page) | kernel
- *                            host_vm.inc:host_vm_decommit                                                     test:vm_decommit
+ * test:vm_decommit
  *  7 VM_RELEASE         n=1  0 | 0x1759 (not exactly a reservation's base) | decommit's results
- *                            host_vm.inc:host_vm_release                                                      test:vm_release
+ * test:vm_release
  *  8 VM_PROTECT         n=3  0 | 0xCC01 | 0xCA01 | 0xD401 (wraps, page not guest-owned) | 0xD801 (prot not 0, 1, 3) | kernel (partial: see above)
- *                            host_vm.inc:host_vm_protect, host_win_adopt                                      test:protect_args test:protect_commit
+ * test:protect_args test:protect_commit
  *                            test:protect_mapfixed test:protect_window test:protect_not_owned test:protect_partial_failure
  *  9 DISPLAY_DOCKED     n=0  1 docked | 0 handheld
- *                            host_platform.inc:pf_display_docked                                              test:display_docked
+ * test:display_docked
  * 11 SECTION_CREATE     n=1  id | -(0xCA01 | 0xCE01 | 0xD001 | kernel | 0x1359 no own-process handle)
  * 12 SECTION_MAP        n=4  address | -(0xCA01 | 0xCC01 | 0xE401 | 0xD401 | 0xCE01 | 0xDA01 | 0xD001 | kernel), the order of checks is in the text above
  * 13 SECTION_UNMAP      n=2  0 | -(0xD401 not exactly a view | kernel)
  * 14 SECTION_FREE       n=1  0 | -(0xE401 unknown id | kernel)
- *                            host_section.inc:host_section_create,_map,_unmap,_free                           test:host_section_test test:via_dispatch_section
+ * test:host_section_test test:via_dispatch_section
  * 16..26 30 31 SOCK_SOCKET SOCK_CLOSE SOCK_BIND SOCK_LISTEN SOCK_ACCEPT SOCK_CONNECT SOCK_SENDTO SOCK_RECVFROM SOCK_SETSOCKOPT SOCK_GETSOCKOPT
  *         SOCK_POLL SOCK_GETFL SOCK_SETFL   n = the count each service states (SOCK_SOCKET 3, CLOSE 1, BIND 2, LISTEN 2, ACCEPT 2, CONNECT 2, SENDTO 5, RECVFROM 5,
  *                            SETSOCKOPT 5, GETSOCKOPT 5, POLL 3, GETFL 1, SETFL 2)
- *                            value >= 0 | -(wire errno, sockwire.h). ORDER (host_platform.inc:platform_ext): a fn in 16..31 goes to host_sock_call BEFORE
+ *                            value >= 0 | -(wire errno, sockwire.h). ORDER: a fn in 16..31 goes to host_sock_call BEFORE
  *                            the generic nargs / null-array check, so for sockets "n" is the EXACT count: nargs != n (more or fewer, null array or not)
  *                            -> -FNVNX_WE_INVAL; nargs == n with a null array -> FNVNX_EXT_BAD_NARGS; no socket service reads a null array
- *                            host_sock.inc:host_sock_call (the platform lead's, verbatim)                      test:via_dispatch_sock test:total_declared
+ *                       test:via_dispatch_sock test:total_declared
  * 34 TZ_AT              n=2  0 | -14 (out null) | -75 (instant outside the time service's range)
- *                            host_platform.inc:pf_tz_at, host_v2.inc:host_tz_at (the platform lead's service)  test:tz_at
+ *    test:tz_at
  * 35 THREAD_SELF        n=0  thread id | 0 (no memory, id table full)
- *                            host_platform.inc:pf_thread_self                                                 test:thread_self
+ * test:thread_self
  * 36 TEXT_ENTRY         n=5  1 text entered | 0 cancelled | -FNVNX_HE_BADINPUT (max_len 0 or > 500, out or n null) | -(the applet's Horizon result)
- *                            host_textentry.inc:host_text_entry                                               test:text_entry
+ * test:text_entry
  * 37 UNMAP_RANGE       n=2  0 | 0x1759 (size 0, addr+size wraps, addr or size not 4 KiB aligned) | 0xD401 (the range is not inside a window the host
  *                            claimed at start, or a page of it was not mapped by map_fixed: nothing done)
- *                            host_platform.inc:pf_unmap_range, host_vm.inc:host_unmap_range                   test:unmap_range
+ *  test:unmap_range
+ * 38 THREAD_CPU        n=0  the index of a core in the calling thread's affinity mask, the one it runs on at the call; always succeeds
+ *  test:thread_cpu
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.
  *
  * FnvnxHostApi slots: the results are stated at each slot above. Host function (file) and tests; "-" = a direct libnx / newlib call
  * whose answer is that call's (Result or -errno) with no host logic of its own:
  *   output_debug_string h_output_debug_string (host.c) -; sleep_ns h_sleep_ns (host.c) -; exit h_exit (host.c) -; console_write,
  *   system_tick, system_tick_freq (host.c) -;
- *   thread_create, thread_start, thread_join, thread_free, thread_set_priority, thread_set_cpu (host_v2.inc, ids host_ids.inc)  test:thread_slots test:thread_ids;
- *   thread_exit, thread_yield (host_v2.inc) -;
- *   wait_on_address, wake_address (host_v2.inc)  test:wait_wake;
- *   wall_time_us, random64, memory_info (host_v2.inc) -; cpu_count (host_v2.inc)  test:thread_slots;
+ *   thread_create, thread_start, thread_join, thread_free, thread_set_priority, thread_set_cpu ( , ids )  test:thread_slots test:thread_ids;
+ *   thread_exit, thread_yield ( ) -;
+ *   wait_on_address, wake_address ( )  test:wait_wake;
+ *   wall_time_us, random64, memory_info ( ) -; cpu_count ( )  test:thread_slots;
  *   fs_open, fs_read, fs_write, fs_pread, fs_pwrite, fs_seek, fs_truncate, fs_sync, fs_fstat, fs_close, fs_stat, fs_mkdir, fs_rmdir, fs_remove,
- *   fs_rename (host_v2.inc)  test:fs_errors; fs_dir_open, fs_dir_next, fs_dir_close (host_v2.inc)  test:dir_slots;
- *   audio_open, audio_submit, audio_close, pad_read, pad_vibrate, input_poll (host_v3.inc)  test:test_audio test:test_pads test:test_events;
- *   map_fixed (host_vm.inc:h_map_fixed)  test:mapfixed_args test:protect_mapfixed test:protect_window;  ext_call (host_ext.inc)  test:total_ext.
+ *   fs_rename ( )  test:fs_errors; fs_dir_open, fs_dir_next, fs_dir_close ( )  test:dir_slots;
+ *   audio_open, audio_submit, audio_close, pad_read, pad_vibrate, input_poll ( )  test:test_audio test:test_pads test:test_events;
+ *   map_fixed ( )  test:mapfixed_args test:protect_mapfixed test:protect_window;  ext_call ( )  test:total_ext.
  * TOTALITY TABLE END */
 /* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..26, 30, 31; guest: platform/os/sock_guest.c, host:
  * toolchain/host/host_sock.inc; the wire constants and structs: fnvnx/sockwire.h). The rule: EVERY BSD-socket
@@ -432,27 +436,17 @@ typedef struct FnvnxHostApi {
  * or a page of it not mapped by map_fixed -> FNVNX_HE_RANGE, nothing done (no fake success). Else every page returns to the window's free
  * state (any protection VM_PROTECT gave it is dropped) and the next map_fixed of it yields fresh zeroed memory. No fault emulation. */
 #define FNVNX_PLAT_UNMAP_RANGE 37u
+/* THREAD_CPU () -> the index of a core in the calling thread's affinity mask, the one it runs on at the call (Switch:
+ * svcGetCurrentProcessorNumber). Each thread's (ideal, mask) is fnvnx_place_ex's at thread_create and thread_set_cpu's after
+ * (fnvnx/placement.h). A host with a deterministic thread model (the boot machine) answers the thread's current ideal core. Always
+ * succeeds. */
+#define FNVNX_PLAT_THREAD_CPU 38u
 typedef struct FnvnxTzAt {
     int32_t off_s;      /* local = UTC + off_s */
     uint32_t dst;       /* 1: daylight time at that instant */
     char abbr[8];       /* the zone's abbreviation then, NUL-terminated */
 } FnvnxTzAt;
 
-/* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
- * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
-enum {
-    FNVNX_ROLE_DEFAULT = 0,       /* game threads without a role of their own (Havok, ...) */
-    FNVNX_ROLE_MAIN = 1,          /* the main thread */
-    FNVNX_ROLE_AI_LINEAR_1 = 2,   /* AI Linear Task Thread (1) */
-    FNVNX_ROLE_AI_LINEAR_2 = 3,   /* AI Linear Task Thread 2 */
-    FNVNX_ROLE_RENDER_WORKER = 4, /* the renderer's worker (Gallium Nine's CSMT thread, a host pthread) */
-    FNVNX_ROLE_IO = 5,            /* IO and background loading (the Serialized IO Thread, ...) */
-    FNVNX_ROLE_AUDIO = 6,         /* audio (the platform's mixer pump, the game's LibAudioUpdate) */
-    FNVNX_ROLE_TASKLET = 7,       /* tasklet workers */
-    FNVNX_ROLE_LOADING = 8,       /* the loading screen (LoadingMenuThread): CPU boost while it runs */
-    FNVNX_ROLE_COUNT
-};
-#define FNVNX_THREAD_ROLE(r) (0x100u | (unsigned)(r))
 #define FNVNX_CPU_KEEP 0xFFu
 #define FNVNX_CPU_SPEC(ideal, mask) ((1ull << 63) | ((uint64_t)(uint32_t)(mask) << 8) | ((uint64_t)(ideal) & 0xFFu))
 /* Host side (LP64) only: register a handler for one module id (< 64); returns 0, or -1 if taken/out of range. */
