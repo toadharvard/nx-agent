@@ -30,9 +30,13 @@ eval "$($TOOLS/opam env --switch=sail)"; export PATH=$REMS/isla/isla-sail:$PATH
 [ -f "$MODEL/x86.ir" ] || make -C "$MODEL" x86.ir
 
 # proof IR: same file list as the model Makefile (PRELUDE_SAILS MODEL_SAILS MAIN_SAIL), plus the window registers first
-OUT=$WORK/sail/x86_proof; PATCHES="$HERE/sail_patches/rotate_count.sail $HERE/sail_patches/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail $HERE/sail_patches/cmps.sail $HERE/sail_patches/rol_count0.sail $HERE/sail_patches/sar_bigcount.sail $HERE/sail_patches/cpuid.sail $WORK/sail/gen/cpuid_dispatch.sail"
+OUT=$WORK/sail/x86_proof; PATCHES="$HERE/sail_patches/rotate_count.sail $HERE/sail_patches/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail"
 [ $STOCK = 1 ] && { OUT=${OUT}_stock; PATCHES=""; }
-mkdir -p "$WORK/sail/gen"; [ $STOCK = 1 ] || python3 "$HERE/sail_patches/cpuid_dispatch.py" "$MODEL" "$WORK/sail/gen/cpuid_dispatch.sail"       # the two-byte dispatch with arm 0F A2 -> x86_cpuid (ACL2 master inst-listing.lisp:9985)
+# BUMP=1: the next IR (not the pinned one; the farms never set it): transcriptions of ACL2 master hunks in sail_patches/bump/ (cmps, rol/ror count 0, ror CF, sar count >= size, cpuid + its dispatch arm)
+if [ "${BUMP:-0}" = 1 ] && [ $STOCK != 1 ]; then
+    B=$HERE/sail_patches/bump; OUT=$WORK/sail/x86_proof_bump; mkdir -p "$WORK/sail/gen"; python3 "$B/cpuid_dispatch.py" "$MODEL" "$WORK/sail/gen/cpuid_dispatch.sail"
+    PATCHES="$HERE/sail_patches/rotate_count.sail $B/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail $B/cmps.sail $B/rol_count0.sail $B/sar_bigcount.sail $B/cpuid.sail $WORK/sail/gen/cpuid_dispatch.sail"
+fi
 FILES="prelude.sail register_types.sail registers.sail register_accessors.sail opcode_ext.sail memory_accessors.sail init.sail config.sail logging.sail step.sail main.sail"
 newest=$(ls -t $PATCHES "$HERE/x86_fetch.sail" "$HERE/x86_code_regs.sail" $(for f in $FILES; do echo "$MODEL/$f"; done) "$MODEL"/../test-generation-patches/*.sail | head -1)
 if [ ! -f "$OUT.ir" ] || [ "$newest" -nt "$OUT.ir" ]; then

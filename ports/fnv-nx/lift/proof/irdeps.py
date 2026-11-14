@@ -15,6 +15,7 @@ By induction over the steps of the run: step 1 evaluates the entry function (in 
 model_fns (it was called in the run on IR) with equal text; every declaration it touches is in the closure, equal.  So the run on IR' is
 step for step the run on IR: the same trace, the same model post-state, the same certificate.  A hunk in a function the run never called
 cannot change it; a hunk in a called function changes its text, hence closure_sha, hence the shape is requeued.
+isla's --probe-all run explores every feasible path, so the trace is a function of the executed functions' text, the declarations it names and env.  An uncalled function can become called only through an edit to an executed function, and that edit changes the key.
 What would break it (each is part of the key or of the pins, never a decision): a change of the isla binary or its config (isla and the config
 are pinned by sail_pins.txt and x86.toml, ASM-009), of the -I inputs or the splice registers (model_sail.SEG, sym_constraint: the run's inputs
 are part of the shape key and of model_terms_sha), of the position comments of the IR (stripped by norm(): a splice that moves lines does not change the key),
