@@ -167,7 +167,12 @@ def main():
         st = {x["name"]: x["reached"] for x in doc["milestones"]}
         tb.case("CLI: host events gpu-first-call and present reached", st == {"first": True, "pres": True}, st)
         names = [iv["to"] for iv in doc["icount"]["intervals"]]
-        tb.case("CLI: icount marks frame-1..3 only", [n for n in names if n.startswith("frame")] == ["frame-1", "frame-2", "frame-3"], names)
+        tb.case("CLI: every present is an icount mark frame-1..4", [n for n in names if n.startswith("frame")] == ["frame-1", "frame-2", "frame-3", "frame-4"], names)
+        fr = doc.get("frames", [])
+        tb.case("CLI: OUT.json frames = one record per present: n 1..4, virtual t_ns not decreasing, per-thread instructions of the main thread",
+                [f["n"] for f in fr] == [1, 2, 3, 4] and all(set(f) == {"n", "t_ns", "per_tid"} for f in fr)
+                and [f["t_ns"] for f in fr] == sorted(f["t_ns"] for f in fr) and all(f["per_tid"].get("main", 0) > 0 for f in fr)
+                and sum(sum(f["per_tid"].values()) for f in fr) <= doc["icount"]["totals"]["all"]["total"], fr)
         tb.case("CLI: frame files in --frames", len(os.listdir(os.path.join(d, "fr0"))) == 8)
         tb.case("CLI: two runs give byte-identical OUT.json", open(os.path.join(d, "g0.json"), "rb").read()
                 == open(os.path.join(d, "g1.json"), "rb").read())

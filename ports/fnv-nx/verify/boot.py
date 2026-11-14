@@ -31,8 +31,15 @@ guest call of ext module 10); they only fire with --gpu. Any other host name is 
 
 Renderer: --gpu LIB registers ext module 10 and forwards it to the host library LIB (bootgpu.py); --frames DIR is its
 $NXGL4_FRAMES (the library writes frame_%06u.rgba/.txt there). The three GL variables for software rendering are set for it.
-Without --gpu module 10 is not registered (a guest call answers NO_MODULE). The first 3 presents are icount marks `frame-<n>`;
-OUT.json "gpu" = {library_sha256, presents, first_module10_call, last_error}.
+Without --gpu module 10 is not registered (a guest call answers NO_MODULE). EVERY present of the renderer is an icount mark `frame-<n>`
+(n from 1); OUT.json "gpu" = {library_sha256, presents, first_module10_call, last_error} and OUT.json "frames" = [{n, t_ns (virtual
+clock at the present), per_tid: {thread name: instructions}}] for every frame (Icount.frames(): frame n spans every interval after the
+one frame n-1 closed, up to its own mark; frame 1 starts at the start of the run). The record grows linearly with the frames; the block
+hook is not touched (a mark is O(1)). Only the first 3 frames are published as images (farm/boot_job.sh), the job's output size.
+Two "present" facts, not to be mixed: milestone first-present = the exe's own call of D3D9 Present (the contract's import:DLL!Present
+rows, `call` parts, observed in the guest); milestone first-frame = the first `present` host event of the GL backend (bootgpu on_present,
+the table row `first-frame any host present` that bootinputs.py milestones always generates; it needs --gpu). They are different
+milestones in the milestone log.
 """
 import argparse
 import hashlib
@@ -55,7 +62,6 @@ FORMAT = "fnvnx-boot/1"
 HOST_PREFIX = "console."
 HOST_EVENTS = ("present", "gpu-first-call")
 GPU_ENV = {"LIBGL_ALWAYS_SOFTWARE": "1", "GALLIUM_DRIVER": "llvmpipe", "EGL_PLATFORM": "surfaceless"}
-FRAME_MARKS = 3   # presents that get an icount mark; later ones are only counted
 INPUT_ERRORS = (bootdecl.InputError, bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
                 bootmiles.ElfError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
 
@@ -226,9 +232,7 @@ def run(a):
             os.environ.pop("NXGL4_FRAMES", None)
 
         def presented(frame):
-            n = gpu.presents
-            if n <= FRAME_MARKS:
-                ic.mark("frame-%d" % n)
+            ic.mark_frame(gpu.presents, m.clock.now_ns())   # every present is an icount mark and a frames record (O(1) here)
             for i in watch["host"].get("present", ()):
                 fire(i, m.tid())
         gpu = bootgpu.Gpu(a.gpu, m, a.profile, on_present=presented,
@@ -262,6 +266,7 @@ def run(a):
         doc["watch_spec"] = {"names": sorted(set(wl)), "ret": sorted(wl_ret)}
     if gpu:
         doc["gpu"] = gpu_report
+        doc["frames"] = ic.frames()
     with open(a.out, "w") as f:
         f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
     with open(os.path.splitext(a.out)[0] + ".console.txt", "w", encoding="utf-8") as f:

@@ -291,6 +291,8 @@ def main():
         tb.case("frame files hold the library's output", files["frames/frame_000001.txt"] == b"1280 720\n"
                 and len(files["frames/frame_000001.rgba"]) == 1280 * 720 * 4, files.get("frames/frame_000001.txt"))
         doc, meta = json.loads(files["OUT.json"]), json.loads(files["meta.json"])
+        tb.case("OUT.json frames: a record for every present (4), images published for the first 3 only", [f["n"] for f in doc["frames"]] == [1, 2, 3, 4]
+                and len(fr) == 6, (doc.get("frames"), fr))
         tb.case("OUT.json gpu record, meta.json gpu fields", doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"]
                 and meta["gpu_branch"] == GB
                 and meta["gpu_branch_commit"] == git("rev-parse", "refs/heads/" + GB, cwd=BARE).strip(), (doc.get("gpu"), meta))

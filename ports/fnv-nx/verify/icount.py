@@ -101,6 +101,7 @@ class Icount:
         self.events = {}
         self.slices = 0
         self.uc = None
+        self.frame_log = []               # (n, t_ns, index of the interval the frame mark closed), one per frame, in order
 
     # -- state changes (called by the emulator)
     def _open(self, frm, ooo):
@@ -129,6 +130,28 @@ class Icount:
         cur[1] = name
         cur[2] = cur[2] or bool(out_of_order)
         self._open(name, bool(out_of_order))
+
+    def mark_frame(self, n, t_ns):
+        """frame n was presented at virtual time t_ns: the mark `frame-<n>` plus one frame_log entry (O(1); the per-thread sums are made by frames())"""
+        if self.stopped is not None:
+            return
+        self.mark("frame-%d" % n)
+        self.frame_log.append((n, t_ns, len(self.intervals) - 2))
+
+    def frames(self):
+        """[{n, t_ns, per_tid: {thread name: instructions}}] for every frame, in order: frame n spans every interval after the one that
+        frame n-1 closed (the start of the run for the first frame) up to and including the one frame n closed, so milestone marks inside
+        a frame do not cut it and the spans of all frames are disjoint. Threads without an instruction in the span are left out."""
+        out, lo = [], 0
+        for n, t_ns, hi in self.frame_log:
+            per = {}
+            for iv in self.intervals[lo:hi + 1]:
+                for tid, c in iv[3].items():
+                    if c[0]:
+                        per[self.names[tid]] = per.get(self.names[tid], 0) + c[0]
+            out.append({"n": n, "t_ns": t_ns, "per_tid": per})
+            lo = hi + 1
+        return out
 
     def stop(self, reason, **events):
         """the run ended (idempotent: the first call counts); events: counts of the emulator's partial-block events"""
