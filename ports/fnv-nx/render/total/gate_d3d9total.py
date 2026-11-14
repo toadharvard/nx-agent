@@ -41,7 +41,7 @@ REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = os.path.relpath(PORT, REPO)
 INPUTS = ["render/d3d9/front", "render/d3d9/backend", "render/d3d9/spec/d3d9_spec.json", "shim/include",
           "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h",
-          "render/shaders/mojoshader.patch", "render/shaders/build.sh", "render/total/externals.json"]
+          "render/shaders/mojoshader.patch", "render/shaders/build.sh", "render/total/externals.json", "contract/treehash.py"]
 GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
@@ -101,30 +101,16 @@ def copy_tree(src, dst):
             shutil.copymode(s, d)
 
 
-# ---------------------------------------------------------------- tree hash (the definition of verify/cas.py; a test cross-checks it)
-def canon(obj):
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("ascii")
-
-
-def tree_entry(path):
-    m = os.lstat(path).st_mode
-    if stat.S_ISLNK(m):
-        return {"t": "l", "to": os.readlink(path)}
-    if stat.S_ISREG(m):
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for b in iter(lambda: f.read(1 << 20), b""):
-                h.update(b)
-        return {"t": "f", "h": h.hexdigest(), "x": 1 if m & 0o111 else 0}
-    if stat.S_ISDIR(m):
-        entries = {name: tree_entry(os.path.join(path, name)) for name in sorted(os.listdir(path))}
-        return {"t": "d", "h": hashlib.sha256(canon({"format": "fnvnx-tree/1", "entries": entries})).hexdigest()}
-    raise Red("unsupported file type: " + path)
+# ---------------------------------------------------------------- tree hash (the one home: contract/treehash.py; a test cross-checks it with cas)
+sys.path.insert(0, os.path.join(PORT, "contract"))
+import treehash  # noqa: E402
 
 
 def tree_hash(path):
-    e = tree_entry(path)
-    return e["h"] if e["t"] == "d" else hashlib.sha256(canon(e)).hexdigest()
+    try:
+        return treehash.tree_hash(path)
+    except treehash.CasError as e:
+        raise Red(str(e))
 
 
 # ---------------------------------------------------------------- declared inputs

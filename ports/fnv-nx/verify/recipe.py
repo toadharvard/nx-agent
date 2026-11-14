@@ -430,6 +430,14 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
 HEADER_EXTS = (".h", ".hh", ".hpp", ".hxx", ".inc")
 
 
+def include_dir(roots, root):
+    """The include/ dir of the admitted product root ROOT (a repo-relative path): the one place a root's own headers live, as header_dirs and
+    every user of a root's headers read it. ROOTS = load_admit(); a root that is not an admitted product root has none (ValueError)."""
+    if roots.get(root, {}).get("class") != "product":
+        raise ValueError("%s is not an admitted product root" % root)
+    return root + "/include"
+
+
 def header_dirs(rec, root, roots, repo="."):
     """The repo include dirs that can supply a header to a product of ROOT's target: the `include` of REC, the `include` of the recipe of every
     admitted product root of that target (read from REPO; a recipe that is not there adds none) and the `include/` dir of each such root."""
@@ -441,7 +449,7 @@ def header_dirs(rec, root, roots, repo="."):
     add(rec.get("include") if isinstance(rec.get("include"), list) else [])
     for p, r in roots.items():
         if r.get("class") == "product" and r.get("target") == tg:
-            dirs.add(p + "/include")
+            dirs.add(include_dir(roots, p))
             try:
                 with open(os.path.join(repo, r["recipe"])) as f:
                     add(json.load(f).get("include") or [])

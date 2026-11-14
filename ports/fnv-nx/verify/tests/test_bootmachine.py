@@ -18,8 +18,11 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 GUEST_DIR = os.path.join(HERE, "guest")
-HOSTABI_DIR = os.path.join(os.path.dirname(VERIFY), "hostabi", "include")   # hostapi.h, fnvnx/sockwire.h: their one home
 sys.path.insert(0, VERIFY)
+import recipe  # noqa: E402
+REPO = os.path.abspath(os.path.join(VERIFY, "..", "..", ".."))
+# hostapi.h, fnvnx/sockwire.h: the include dir of the hostabi root, read from admit.json by the recipe's own reader (never a literal path)
+HOSTABI_DIR = os.path.join(REPO, recipe.include_dir(recipe.load_admit(REPO), "ports/fnv-nx/hostabi"))
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
