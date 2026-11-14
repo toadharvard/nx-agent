@@ -591,3 +591,17 @@ Workers are capped at 3. Assignment by plan item:
   - The fault map is built from the enum, with codes ⊆ map checked; test_dsl_emit compiles 11574/11574.
   - def_check over 5 of 7 images (facts 163ec389): Forms 18572, free-output Forms 3828, DEF0 5895, DEFPRIOR 0, uncovered 0, when= 255; no_form 6464 shapes (544389 sites).
   - Open questions: OF of shifts and rotates at count > 1, 16-bit shld/shrd at count > 16, and the split of no_form by builder.
+
+## 2026-11-14 23:55 int3 b6f5e6fec / 5c89f9c5c
+- w6 b6f5e6fec:
+  - shld/shrd w=16 (count > 16: dest DEFPRIOR, flags DEF0, both with when=).
+  - cpufeat #UD is read from CPUREF: 339 shapes / 2601 sites over 5 images.
+  - sreg is implemented by hand handlers (#GP on an unknown selector); its Form waits for L3b's IR bump.
+  - bndldx is a NOP; its SDM anchor is pending (no pinned SDM text yet).
+- w8 f41da7e10, 5c89f9c5c:
+  - oracle 94/94, with test_nativerows certified through verify/TOOLS.md.
+  - The merge-defect sweep restored next3b's shim/include/d3d9types.h, verify/recipe.py and unitstage.py (sandbox_src).
+- Sent to the orchestrator:
+  - CPUREF's feature set (SSE2-era, implementation-defined) to record as a declared-machine fact;
+  - the logical-processor count: 1 in cpuid vs real parallelism. One count must hold for cpuid and L5.
+- test_census needs lift/tools/CODEMAP.md. Owner w7 (DIC), in the facts commit.
