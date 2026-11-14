@@ -247,6 +247,40 @@ def link_file(rec_file, root, mine, roots, files):
     return rec_file if rel_ok(rec_file) and tool_file(roots, files, rec_file) else None
 
 
+PROBE_SRC = "int main(void) { return 0; }\n"
+PROBE_FLAGS = ["-frandom-seed=guestlink", "-ffile-prefix-map=/probe=.", "-Werror=date-time"]   # the reproducibility flags every gcc stage carries (toolflags)
+
+
+def parse_driver_link(text, at):
+    """The link command of a driver's `-###` output TEXT (its last command line: the link) as the profile's libs: {dirs, names, startfiles, endfiles}, every path
+    inside the external mounted at AT, normalised and relative to it (the driver names them through its own bin/..). startfiles: the .o files before the
+    library group; endfiles: the .o files after it; dirs: the -L directories inside the external, in order, each once; names: the -l libraries in order of
+    appearance (the group's included). A `-L` or `.o` outside the external is not a guest runtime file and is not taken."""
+    line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]   # each command of -### follows its COLLECT_GCC_OPTIONS line
+    toks = [t.strip('"') for t in line.split()]
+    rel = lambda t: posixpath.normpath(t)[len(at) + 1:] if posixpath.normpath(t).startswith(at + "/") else None  # noqa: E731
+    out = {"dirs": [], "names": [], "startfiles": [], "endfiles": []}
+    seen_end = False
+    for t in toks:
+        if t.startswith("-L") and rel(t[2:]):
+            if rel(t[2:]) not in out["dirs"]:
+                out["dirs"].append(rel(t[2:]))
+        elif t.startswith("-l") and len(t) > 2:
+            out["names"].append(t[2:])
+        elif t == "--end-group":
+            seen_end = True
+        elif t.endswith(".o") and rel(t):
+            out["endfiles" if seen_end else "startfiles"].append(rel(t))
+    return out
+
+
+def onedef(objs, root_defined):
+    """The one-definition rule on the objects OBJS ({path: set of defined global/weak symbols}) of the runtime that the driver names: the paths whose
+    defined symbols meet ROOT_DEFINED (the symbols that the admitted guest product roots define), sorted. An object is excluded from the link iff
+    it defines a symbol a guest product root defines; no other reason excludes one."""
+    return sorted(p for p, d in objs.items() if d & set(root_defined))
+
+
 def load_guest_link(repo="."):
     """link/guest.json of the checkout, or None when the tree has none."""
     p = os.path.join(repo, GUEST_LINK)
@@ -1046,7 +1080,7 @@ class Job:
 
         def make():
             if "external" in c:
-                x = self.ext[c["external"]]
+                x = next((e for e in self.ext.values() if under(paths[0], e["at"])), self.ext[c["external"]])   # the external that holds the driver
                 exes, trees = paths, ["%s@%s" % (x["host"], x["at"])]
                 # What the external compiler itself names outside its tree (its own answers, as gcc_set asks a distribution compiler): the
                 # assembler and linker it is configured with, and the header directories of its search list, symlink targets included
@@ -1365,6 +1399,27 @@ class Job:
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
                "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}] + sysin, key=lambda i: i["at"])}
         return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
+
+    def link_probe(self, ws):
+        """Stage `drv:<root>`: the guest runtime's C++ driver (pin `runtime_driver`, inside the pinned runtime external) run with the guest semantic flags
+        (the common set: the profile is one fact for every guest link, native and lifted alike) and `-###` on the link of a one-line C++ file, hermetic (the driver prints the commands it would run; none is run).
+        -> (stderr text, the runtime external's mount point): the link command of the multilib the flags select."""
+        pin = load_pin(self.repo)
+        rt = pin["runtime"]
+        self.ext.update(fetch_externals([pin["external"], rt], self.store, self.extcache, ws))
+        drv = rt["at"] + "/" + pin["runtime_driver"]
+        flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
+        tr = self.toolrt([drv])[1]
+        pd = os.path.join(ws, "probe")
+        os.makedirs(pd)
+        with open(os.path.join(pd, "x.cc"), "w") as f:
+            f.write(PROBE_SRC)
+        argv = [drv] + list(flags) + PROBE_FLAGS + ["-pie", "-###", "/probe/x.cc", "-o", "/out/x.elf"]
+        doc = {"format": "fnvnx-stage/1", "stage": "drv:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
+               "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"],
+               "inputs": sorted(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], key=lambda i: i["at"])}
+        res = self.stage(doc)[1]
+        return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read(), rt["at"]
 
     def archive_members(self, ent, name, out):
         """The archive members the linker pulled (from its map), each with the member's bytes read from the archive (a file of an external or of an
