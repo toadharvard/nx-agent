@@ -47,9 +47,11 @@ typedef struct FnvnxHostApi {
     /* ---- version 2: threads, address wait/wake, time, files ---- */
     uint64_t thread_create;        /* (entry, arg, stack_size, prio, cpu) -> host thread id (!= 0) or 0.
                                       The new thread calls the guest function entry(arg) (u64 arg) and ends
-                                      when it returns. prio: Win32 scale -15..15; cpu: -1 default placement,
-                                      0..63 that core only, FNVNX_THREAD_ROLE(r) the placement role r
-                                      (toolchain/host/placement.h). Not started. The id is a table handle
+                                      when it returns. prio: Win32 scale -15..15; cpu: FNVNX_CPU_SPEC(ideal, mask)
+                                      with ideal in mask and mask within FNVNX_APP_CORES (FNVNX_APP_CORES_CORE3 when the host is built with
+                                      FNVNX_CORE3_DEFAULT), else FNVNX_HE_BADINPUT and nothing is created (id 0). The placement is computed
+                                      only in the guest (fnvnx_place_ex, fnvnx/placement.h); the host takes the spec as given. The main thread
+                                      starts at FNVNX_DEFAULT_CORE, mask 1 << FNVNX_DEFAULT_CORE. Not started. The id is a table handle
                                       ((generation << 16) | slot, host_ids.inc), never an address; at most 1024
                                       live thread and directory ids together: 0 when the table is full. */
     uint64_t thread_start;         /* (id) -> 0 or Result; an id that names no live thread -> FNVNX_HE_NOTFOUND; a thread that is already
@@ -65,7 +67,8 @@ typedef struct FnvnxHostApi {
     uint64_t thread_set_cpu;       /* (id or 0 = self, spec) -> 0 or Result; unknown id -> FNVNX_HE_NOTFOUND;
                                       a negative spec (bits 40..62 set) -> 0, nothing changed. spec 0..63: that core only;
                                       FNVNX_CPU_SPEC(ideal, mask): ideal core (FNVNX_CPU_KEEP: keep) and
-                                      affinity mask (0: keep), the ideal core joins the mask */
+                                      affinity mask (0: keep), the ideal core joins the mask; the resulting ideal in the mask and the mask
+                                      within FNVNX_APP_CORES(_CORE3) (fnvnx/placement.h), else FNVNX_HE_BADINPUT, nothing changed */
     uint64_t wait_on_address;      /* (addr, expected u32, timeout_ns) -> 0 woken, 1 timed out, 2 value != expected
                                       (svcWaitForAddress WaitIfEqual; addr 4-aligned); timeout_ns above INT64_MAX waits
                                       forever; any other kernel result unchanged (0xCC01 addr not 4-aligned, 0xD401 addr
@@ -128,7 +131,7 @@ typedef struct FnvnxHostApi {
 
 /* ext_call results that belong to no service (all three are -255, -254, -253 as int64; no service answers one of them otherwise):
  *   NO_MODULE  the module number is >= 64 or no host module is registered under it
- *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 38 and up)
+ *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 39 and up)
  *   BAD_NARGS  module 11: fewer arguments than the service takes (the column "n" of the table below), or nargs > 0 with a null array */
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
 #define FNVNX_EXT_NO_SERVICE 0xFFFFFFFFFFFFFF02ull
@@ -267,7 +270,7 @@ typedef struct FnvnxHostApi {
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
  *   UINT32_MAX; fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext, one row per service; fn 0, 10, 15, 27..29, 32, 33 and fn >= 38 -> NO_SERVICE (-254):
+ * module 11, platform_ext, one row per service; fn 0, 10, 15, 27..29, 32, 33 and fn >= 39 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  * test:cpu_boost
@@ -309,6 +312,8 @@ typedef struct FnvnxHostApi {
  * 37 UNMAP_RANGE       n=2  0 | 0x1759 (size 0, addr+size wraps, addr or size not 4 KiB aligned) | 0xD401 (the range is not inside a window the host
  *                            claimed at start, or a page of it was not mapped by map_fixed: nothing done)
  *  test:unmap_range
+ * 38 THREAD_CPU        n=0  the index of a core in the calling thread's affinity mask, the one it runs on at the call; always succeeds
+ *  test:thread_cpu
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.
  *
  * FnvnxHostApi slots: the results are stated at each slot above. Host function (file) and tests; "-" = a direct libnx / newlib call
@@ -431,27 +436,17 @@ typedef struct FnvnxHostApi {
  * or a page of it not mapped by map_fixed -> FNVNX_HE_RANGE, nothing done (no fake success). Else every page returns to the window's free
  * state (any protection VM_PROTECT gave it is dropped) and the next map_fixed of it yields fresh zeroed memory. No fault emulation. */
 #define FNVNX_PLAT_UNMAP_RANGE 37u
+/* THREAD_CPU () -> the index of a core in the calling thread's affinity mask, the one it runs on at the call (Switch:
+ * svcGetCurrentProcessorNumber). Each thread's (ideal, mask) is fnvnx_place_ex's at thread_create and thread_set_cpu's after
+ * (fnvnx/placement.h). A host with a deterministic thread model (the boot machine) answers the thread's current ideal core. Always
+ * succeeds. */
+#define FNVNX_PLAT_THREAD_CPU 38u
 typedef struct FnvnxTzAt {
     int32_t off_s;      /* local = UTC + off_s */
     uint32_t dst;       /* 1: daylight time at that instant */
     char abbr[8];       /* the zone's abbreviation then, NUL-terminated */
 } FnvnxTzAt;
 
-/* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
- * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
-enum {
-    FNVNX_ROLE_DEFAULT = 0,       /* game threads without a role of their own (Havok, ...) */
-    FNVNX_ROLE_MAIN = 1,          /* the main thread */
-    FNVNX_ROLE_AI_LINEAR_1 = 2,   /* AI Linear Task Thread (1) */
-    FNVNX_ROLE_AI_LINEAR_2 = 3,   /* AI Linear Task Thread 2 */
-    FNVNX_ROLE_RENDER_WORKER = 4, /* the renderer's worker (Gallium Nine's CSMT thread, a host pthread) */
-    FNVNX_ROLE_IO = 5,            /* IO and background loading (the Serialized IO Thread, ...) */
-    FNVNX_ROLE_AUDIO = 6,         /* audio (the platform's mixer pump, the game's LibAudioUpdate) */
-    FNVNX_ROLE_TASKLET = 7,       /* tasklet workers */
-    FNVNX_ROLE_LOADING = 8,       /* the loading screen (LoadingMenuThread): CPU boost while it runs */
-    FNVNX_ROLE_COUNT
-};
-#define FNVNX_THREAD_ROLE(r) (0x100u | (unsigned)(r))
 #define FNVNX_CPU_KEEP 0xFFu
 #define FNVNX_CPU_SPEC(ideal, mask) ((1ull << 63) | ((uint64_t)(uint32_t)(mask) << 8) | ((uint64_t)(ideal) & 0xFFu))
 /* Host side (LP64) only: register a handler for one module id (< 64); returns 0, or -1 if taken/out of range. */

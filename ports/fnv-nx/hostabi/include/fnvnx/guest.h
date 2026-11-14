@@ -41,6 +41,11 @@ int fnvnx_section_map(uint32_t id, uint32_t offset, uint32_t size, uint32_t addr
 int fnvnx_section_unmap(uint32_t addr, uint32_t size);   /* exactly a view */
 int fnvnx_section_free(uint32_t id);   /* deferred while views live */
 
+/* The exe's entry point. Defined ONLY by the product ELF root, generated from the exe's facts: a bridge to the lifted function at the PE
+ * AddressOfEntryPoint (WinMainCRTStartup). Nothing else defines it; rt/guest's main() (rt/guest/main.c) calls it and returns its value to
+ * the host. A PE entry of an EXE takes no argument; the PEB and the process environment come from the declared machine. */
+uint32_t fnvnx_exe_entry(void);
+
 #ifdef __cplusplus
 }
 #endif

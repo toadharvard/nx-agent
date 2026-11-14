@@ -15,6 +15,7 @@
 
 #include "fnvnx/guest.h"
 #include "fnvnx/hostapi.h"
+#include "fnvnx/placement.h"
 #include "fnvnx/sdlayout.h"
 
 static int64_t hs(uint64_t v) { return (int64_t)v; }

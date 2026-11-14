@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/time.h>
+#include <reent.h>
 #include <sys/iosupport.h>
 
 #include "fnvnx/hostapi.h"
@@ -43,10 +45,11 @@ extern char __tdata_lma[] HIDDEN, __tdata_lma_end[] HIDDEN;
 extern char __tls_start[] HIDDEN, __tls_tcb[] HIDDEN;
 extern char __end__[] HIDDEN;
 
+extern char **environ;   /* newlib's */
 const FnvnxHostApi *fnvnx_host;
 extern char *fake_heap_start, *fake_heap_end;
 
-int main(int argc, char **argv);
+int main(int argc, char **argv, char **envp);   /* main.c */
 void fnvnx_guest_fs_init(void);
 void __libc_init_array(void);
 
@@ -137,6 +140,34 @@ int __syscall_clock_gettime(clockid_t clock_id, struct timespec *tp) {
     return 0;
 }
 
+/* The three libsysbase hooks that libsysbase calls when they are defined (abort.o, assert.o, gettod.o: `if (&__syscall_X) __syscall_X(..)`,
+ * else its own fallback: abort -> _exit(1), assert -> abort, gettimeofday -> errno ENOSYS and -1).  libnx's newlib layer
+ * (runtime/newlib.c, libnx 518bf11a) defines only __syscall_gettod_r; abort and assert take libsysbase's path there.  Defining all three
+ * here keeps the image free of weak references:
+ *  __syscall_abort       libsysbase's own abort path, _exit(1): the process ends through the host exit slot (__syscall_exit) with code 1.
+ *  __syscall_assert_func newlib's __assert_func text (libc assert.c: `assertion "%s" failed: file "%s", line %d%s%s\n`, with
+ *                        ", function: " and the function when it is not null) to stderr; libsysbase's __assert_func then calls abort().
+ *  __syscall_gettod_r    libnx's body (newlib.c __syscall_gettod_r: tv_sec/tv_usec from the realtime clock, tz zero, return 0), read from the one
+ *                        realtime source, __syscall_clock_gettime(CLOCK_REALTIME): the host wall clock. */
+void __syscall_abort(void) { __syscall_exit(1); }
+
+void __syscall_assert_func(const char *file, int line, const char *func, const char *failedexpr) {
+    fiprintf(stderr, "assertion \"%s\" failed: file \"%s\", line %d%s%s\n", failedexpr, file, line, func ? ", function: " : "",
+             func ? func : "");
+}
+
+int __syscall_gettod_r(struct _reent *ptr, struct timeval *tp, struct timezone *tz) {
+    (void)ptr;
+    if (tp) {
+        struct timespec ts;
+        if (__syscall_clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
+        tp->tv_sec = ts.tv_sec;
+        tp->tv_usec = ts.tv_nsec / 1000;
+    }
+    if (tz) { tz->tz_minuteswest = 0; tz->tz_dsttime = 0; }
+    return 0;
+}
+
 /* newlib's register_fini (an init_array entry of __call_atexit.o) registers __libc_fini_array with atexit when the address of
  * __libc_fini is not null: the program's .fini_array (the destructors of its static objects) then runs at exit().  The guest
  * wants exactly that, so the marker is defined. */
@@ -220,7 +251,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     __libc_init_array();
     static char arg0[] = "fnvnx-guest";
     static char *argv[] = { arg0, NULL };
-    int rc = main(1, argv);
+    int rc = main(1, argv, environ);
     fflush(stdout);
 
     __asm__ volatile("msr tpidr_el0, %0" :: "r"(saved_tp) : "memory");
