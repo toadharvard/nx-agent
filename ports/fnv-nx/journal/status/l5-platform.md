@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-15 01:50Z w9 SetMapMode: the one call site of d3dx9_38 (0x56e8e7: push 1; call [0x401054]) passes MM_TEXT, a constant. code_refs 1 and data_refs 0 in imports.tsv 9e4166e, so the DC default holds; gdifont comment cites it (b0ea6fcf7). w9 is on the objstub triage.
 - 11-15 01:45Z w9 case 5 6e3889821: the 8 GDI setters plus SetLayout have 0 hits in objects.json and in every image call-site table. Next for w9: SetMapMode (d3dx9_38, IAT 0x401054) argument fact, then the objstub triage TSV with classes real, Wine, declared, delete or reach, grouped by file.
 - 11-15 01:40Z L1 objstub on root 141b07580 + w20u e1715323f is RED: 768 findings over 114 objects and 173 units (5163/5483 judged). T2 570, V 180, T2-noreturn-tail 9, reach 5, wine-fixme 4. Each gets a real, Wine-9.0-cited, declared-machine or certified-unreachable body, or is deleted. Waiting for the w20 list by file, then a split across workers.
 - 11-15 01:35Z The 24 assumption findings were measured on the L6 tree (stale copy). On root e76474afe the L5 tree has 0. The gate has 5 in total, all in the w24 loader and sha256 (L1 to fix; red on the root until it does). w9 goes to case 5.
