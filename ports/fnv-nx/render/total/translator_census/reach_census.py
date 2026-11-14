@@ -18,9 +18,24 @@ if len(sys.argv) > 5:
     asked = set()   # the profiles the root's own sources request by name (MOJOSHADER_PROFILE_X): each must be compiled in, or the request fails at run time
     for n in sorted(os.listdir(srcdir)):
         if n.endswith(".c"): asked |= set(re.findall(r"MOJOSHADER_PROFILE_(\w+)", open(os.path.join(srcdir, n)).read()))
+    if re.search(r"MOJOSHADER_parseGlsldk", "".join(open(os.path.join(srcdir, n)).read() for n in sorted(os.listdir(srcdir)) if n.endswith(".c"))): asked.add("GLSLDK")   # the dk entry names the profile
     off = sorted(x for x in asked if "-DSUPPORT_PROFILE_%s=1" % x not in flags)
     if off: sys.exit("profiles requested by src/*.c but not set to 1 in build.json: %s" % off)
     print("profile macros", len(macros), "all set; on:", sorted(m for m in macros if "-D%s=1" % m in flags))
+# TLS 0 (L6 rule: the per-call inputs of the translator are arguments, never global or thread-local state): no STT_TLS symbol and no TLS relocation
+#  in any object of OBJDIR, whatever the target (readelf -sW / -rW read both ELF classes and machines).
+tls = []
+for dp, dn, fn in os.walk(objdir):
+    dn.sort(); fn.sort()
+    for n in fn:
+        if not n.endswith(".o"): continue
+        p = os.path.join(dp, n)
+        syms = subprocess.run(["readelf", "-sW", p], capture_output=True, text=True, check=True).stdout.splitlines()
+        rels = subprocess.run(["readelf", "-rW", p], capture_output=True, text=True, check=True).stdout.splitlines()
+        tls += ["%s: STT_TLS %s" % (p, l.split()[7]) for l in syms if len(l.split()) > 7 and l.split()[3] == "TLS"]
+        tls += ["%s: %s" % (p, l.split()[2]) for l in rels if "TLS" in l.upper() and len(l.split()) > 2]
+if tls: sys.exit("thread-local state in the translator objects (%d): %s" % (len(tls), tls[:5]))
+print("TLS: 0 STT_TLS symbols, 0 TLS relocations in", objdir)
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.join(here, "..", "..", "shaders", "translator")   # the product root this tool measures
 hdr = open(os.path.join(root, "include", "fnvnx_shaders.h")).read()
