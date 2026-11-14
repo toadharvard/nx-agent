@@ -13,6 +13,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
+QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3)
 sys.path.insert(0, HERE)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
@@ -56,7 +57,7 @@ def main():
 
     def machine(app):
         svc = boothost.Services(tempfile.mkdtemp(prefix="tc-"))
-        m = bootmachine.Machine(elf, plan, svc, app_cores=app)
+        m = bootmachine.Machine(elf, plan, svc, app_cores=app, quantum=QUANTUM)
         m.threads[1] = bootmachine.Thread(1)   # as run() starts main
         m.order, m.cur = [1], m.threads[1]
         return m, svc

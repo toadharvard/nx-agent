@@ -510,7 +510,7 @@ Kinds (the explicit per-file encoding):
 ```text
 boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 
-  [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked]
+  [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
                                [--gpu-branch <artifacts branch>]
 
 Steps:
@@ -551,6 +551,7 @@ Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts;
 when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
+--quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py and recorded in meta.json (quantum).
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 ```
 
@@ -714,7 +715,7 @@ The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the mi
 
   boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --guest-root ROOTDIR --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              [--hc-slice N] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
+              --quantum N [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -734,6 +735,9 @@ State snapshot: --state-at SYM --state-request JSON ({"hash": [{name, lo, hi}], 
 "start_state" = {at, t_ns, regs (x0..x28 as w, x30 guest-relative, sp), runs ([lo, hi, prot] of the guest page table, adjacent equal runs
 merged, prot 1 R 2 W 4 X), pages ({name: {lo, sha256: per page, null unmapped}}), dump ({name: {addr, hex | null}})}; null when SYM was
 never entered. Both options exist for bootstart.py (the loader's start rules S1..S8).
+
+Cores: the machine is the declared N-core machine (bootmachine.py rule 3). --quantum N (required, no default) is the instructions per slice of a core's
+thread; OUT.json "machine" = {app_cores, cores, quantum} and run.cores = per-core {slices, instructions, switches, pairs}.
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
@@ -896,9 +900,20 @@ Rules:
    host page / heap = the plan's regions. No relocation: the guest relocates itself. A segment outside the image region
    or sharing a page with another raises MachineError.
 2. Totality: all 50 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
-3. One CPU. A thread switches only at a blocking host call and at a host call's return after `hc_slice` calls of its
-   slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
-   the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
+3. N cores, parallel progress in rounds (CLAUDE.md "The declared CPU"). N = popcount(app_cores) (the application cores of the guest root,
+   placement.h FNVNX_APP_CORES; cores = its set bits, ascending). Every thread lives on its ideal core for ever (thread_create's
+   FNVNX_CPU_SPEC ideal, thread_set_cpu; the main thread FNVNX_DEFAULT_CORE): THREAD_CPU = ideal, there is no migration, the mask is not
+   used for placement. Per core the ready thread of the highest priority runs (Win32 scale, signed, higher first), FIFO within equal
+   priority (the order in which threads became ready; a thread that only used up its quantum keeps its place; thread_yield goes behind its
+   equals). A round visits the cores 0..N-1 in order and gives each core's chosen thread one slice of `quantum` instructions: the machine's
+   own count (block size / 4 per image block, the one block hook), ended at the first block boundary at or after the quantum (the block that
+   would run next is not run and not counted, so every block is counted once and icount stays exact). A thread leaves its core only at a
+   blocking host call, its end, or, at the next round boundary, when a thread of higher priority on the same core is ready. quantum is a
+   required argument (no default); a different quantum changes interleavings, not what a race-free guest computes. The pick is made at the
+   start of each core's turn, so it is a pure function of the machine's state: no wall clock, switch points repeat. Nothing ready on any
+   core: the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report. run()["cores"] has the
+   per-core numbers: {core: {"slices", "instructions", "switches", "pairs": {"from>to": n}}}; a switch is a core running another thread than
+   the one it ran last.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
    ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly

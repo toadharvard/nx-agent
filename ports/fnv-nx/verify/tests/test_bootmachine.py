@@ -30,6 +30,7 @@ import bootmachine  # noqa: E402
 import gate_build  # noqa: E402
 
 APP_CORES = bootmachine.app_cores_of(GUEST_DIR)   # the application cores of the guest root's build flags (placement.h)
+QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 TMP = tempfile.mkdtemp(prefix="bm-")
 atexit.register(shutil.rmtree, TMP, ignore_errors=True)
 GATE_CACHE = os.environ.get("GATE_CACHE") or os.path.join(TMP, "gate-cache")
@@ -109,7 +110,7 @@ def make_plan(elf_bytes):
 
 def run(elf_bytes, root, watch=None, svc=None, **kw):
     svc = svc or boothost.Services(root)
-    m = bootmachine.Machine(elf_bytes, make_plan(elf_bytes), svc, **kw, app_cores=APP_CORES)
+    m = bootmachine.Machine(elf_bytes, make_plan(elf_bytes), svc, **kw, app_cores=APP_CORES, quantum=QUANTUM)
     lines, tids = [], []
     m.on_console(lines.append)
     m.on_thread(tids.append)
@@ -182,7 +183,7 @@ def main():
     # instruction bound: one block hook, deterministic stop, reuse of the Icount total
     def limited(limit, with_ic):
         svc = boothost.Services(root)
-        m = bootmachine.Machine(elf0, plan0, svc, limit_instructions=limit, app_cores=APP_CORES)
+        m = bootmachine.Machine(elf0, plan0, svc, limit_instructions=limit, app_cores=APP_CORES, quantum=QUANTUM)
         ic = m.attach_icount(None, base) if with_ic else None
         return m.run(), ic, m.instr
 
@@ -196,7 +197,7 @@ def main():
     case("limit: reason limit, same stop point, with and without icount", la["reason"] == lb["reason"] == "limit"
         and la == lb and na == nb >= lim and na - lim < 64 and ica.report()["totals"]["all"]["total"] == na, (la, na, nb))
     try:
-        bootmachine.Machine(elf0, plan0, boothost.Services(root), limit_instructions=0, app_cores=APP_CORES)
+        bootmachine.Machine(elf0, plan0, boothost.Services(root), limit_instructions=0, app_cores=APP_CORES, quantum=QUANTUM)
         ok = False
     except bootmachine.MachineError:
         ok = True
@@ -223,13 +224,13 @@ def main():
 
     n_slots = sum(1 for n in bootmachine.SLOTS if callable(getattr(boothost.Services, "h_" + n, None)))
     case("46 slots, all resolved at construction", len(bootmachine.SLOTS) == 46 == n_slots
-        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES).handlers) == 46)
+        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES, quantum=QUANTUM).handlers) == 46)
 
     class NoPad(boothost.Services):
         h_pad_read = None
 
     try:
-        bootmachine.Machine(elf0, plan0, NoPad(root), app_cores=APP_CORES)
+        bootmachine.Machine(elf0, plan0, NoPad(root), app_cores=APP_CORES, quantum=QUANTUM)
         ok, msg = False, "no error"
     except bootmachine.MachineError as e:
         ok, msg = "h_pad_read" in str(e), str(e)
@@ -377,18 +378,18 @@ def main():
         plat_message = None
 
     try:
-        bootmachine.Machine(elf0, plan0, NoMsg(root), app_cores=APP_CORES)
+        bootmachine.Machine(elf0, plan0, NoMsg(root), app_cores=APP_CORES, quantum=QUANTUM)
         ok, msg = False, "no error"
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every served non-socket fn of module 11 (1..9, 11..14, 34..38) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES).plat) == [*range(1, 10), *range(11, 15), *range(34, 39)])
+    case("every served non-socket fn of module 11 (1..9, 11..14, 34..38) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES, quantum=QUANTUM).plat) == [*range(1, 10), *range(11, 15), *range(34, 39)])
 
     class NoSec(boothost.Services):
         plat_section_map = None
 
     try:
-        bootmachine.Machine(elf0, plan0, NoSec(root), app_cores=APP_CORES)   # services may override a fn; None means "not there": the machine's own serves it
+        bootmachine.Machine(elf0, plan0, NoSec(root), app_cores=APP_CORES, quantum=QUANTUM)   # services may override a fn; None means "not there": the machine's own serves it
         ok = True
     except bootmachine.MachineError:
         ok = False
@@ -454,7 +455,7 @@ def main():
     # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
     rows, hslots = parse_totality(os.path.join(HOSTABI_DIR, "fnvnx", "hostapi.h"))
     SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37, 38]
-    mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES)
+    mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root), app_cores=APP_CORES, quantum=QUANTUM)
     case("header: 31 services of module 11 and 46 slots parsed", len(rows) == 31 and sorted(rows) == SERVED
          and len(hslots) == 46, (len(rows), len(hslots)))
     case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
@@ -499,7 +500,7 @@ def main():
          and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
          and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
     try:
-        bootmachine.Machine(elf0, plan0, boothost.Services(root), profile="tv", app_cores=APP_CORES)
+        bootmachine.Machine(elf0, plan0, boothost.Services(root), profile="tv", app_cores=APP_CORES, quantum=QUANTUM)
         ok = False
     except bootmachine.MachineError:
         ok = True
@@ -549,7 +550,7 @@ def main():
          r60["reason"] == "exit" and not bad, (bad, r60["reason"]))
     for bad_scn in (["\ud800"], "abc", [b"x"]):
         try:
-            bootmachine.Machine(elf0, plan0, boothost.Services(root), text_entries=bad_scn, app_cores=APP_CORES)
+            bootmachine.Machine(elf0, plan0, boothost.Services(root), text_entries=bad_scn, app_cores=APP_CORES, quantum=QUANTUM)
             ok = False
         except bootmachine.MachineError:
             ok = True

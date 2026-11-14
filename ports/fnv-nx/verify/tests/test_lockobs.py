@@ -41,7 +41,7 @@ def main():
     syms = w("syms.txt", "t_acquire\nt_try ret\nt_release\n" + "".join("%s ret\n" % r for r in RUNNERS))
 
     def boot_args(out, *extra):
-        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", "--guest-root", tb.GUEST_DIR, "--root", root,
+        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", "--guest-root", tb.GUEST_DIR, "--root", root, "--quantum", str(tb.QUANTUM),
                 "--milestones", table, "--manifest", manifest, "--out", os.path.join(d, out), *extra]
     rc, o, e = cli(boot_args("o92.json", "--watch-log", syms))
     assert rc in (0, 2) and os.path.exists(os.path.join(d, "o92.json")), (rc, o, e)

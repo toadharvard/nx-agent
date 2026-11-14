@@ -98,11 +98,15 @@ def publish_branch(name, files):
     git("push", "-q", BARE, "%s:refs/heads/%s" % (name, name), cwd=work)
 
 
+QUANTUM = 20000
+
+
 def run_job(args, env_extra=None, game=GAME, tree=None):
     env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8"}
     if game:
         env["GAME_DIR"] = game
     env.update(env_extra or {})
+    args = list(args) if "--quantum" in args else [*args, "--quantum", str(QUANTUM)]
     r = subprocess.run(["bash", os.path.join(tree or TREE, "farm", "boot_job.sh"), *args], env=env, capture_output=True, text=True)
     return r.returncode, r.stdout, r.stderr
 
@@ -193,9 +197,9 @@ def main():
     elf_commit = git("rev-parse", "refs/heads/l1-contract/elf/testid", cwd=BARE).strip()
     nx_commit = git("rev-parse", "HEAD", cwd=NX).strip()
     tb.case("meta.json keys and values", sorted(meta) == sorted(["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc",
-            "seconds", "limit_instructions", "profile", "host_cpu_model", "softfloat", "data_items"])
+            "seconds", "limit_instructions", "quantum", "profile", "host_cpu_model", "softfloat", "data_items"])
             and meta["elf_id"] == "testid" and meta["elf_branch_commit"] == elf_commit and meta["nx_agent_commit"] == nx_commit
-            and meta["exe_sha256"] == hashlib.sha256(EXE).hexdigest() and meta["boot_rc"] == 0 and meta["limit_instructions"] is None
+            and meta["exe_sha256"] == hashlib.sha256(EXE).hexdigest() and meta["boot_rc"] == 0 and meta["limit_instructions"] is None and meta["quantum"] == QUANTUM
             and meta["profile"] == "handheld" and meta["host_cpu_model"] and meta["softfloat"] == "absent", meta)
     tb.case("commit message is one line without a trailer", len(msg.rstrip("\n").splitlines()) == 1 and "Co-Authored-By" not in msg, msg)
     blob = b"\n".join(files.values()).decode(errors="replace") + msg
@@ -276,6 +280,10 @@ def main():
     tb.case("bad profile: job fails", rc == 1 and "--profile" in err, (rc, err[-400:]))
     rc, out, err = run_job(["testid", "--limit-instructions", "0"])
     tb.case("bad limit: job fails", rc == 1 and "--limit-instructions" in err, (rc, err[-400:]))
+    rc, out, err = run_job(["testid", "--quantum", "0"])
+    tb.case("bad quantum: job fails", rc == 1 and "--quantum" in err, (rc, err[-400:]))
+    r = subprocess.run(["bash", os.path.join(TREE, "farm", "boot_job.sh"), "testid"], env={"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "GAME_DIR": GAME, "LANG": "C.UTF-8"}, capture_output=True, text=True)
+    tb.case("no quantum: job fails (no default)", r.returncode == 1 and "--quantum" in r.stderr, (r.returncode, r.stderr[-400:]))
     # --- the renderer: --gpu-branch
     genv = {}   # the host packages come from the declared environment (verify/env.json); the job requires them and installs nothing
     rc, out, err = run_job(["gpuid", "--gpu-branch", GB], genv)
