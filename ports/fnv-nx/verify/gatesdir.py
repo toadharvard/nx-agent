@@ -22,7 +22,7 @@ DIR = TREE + "/verify/gates.d"
 ADMIT = TREE + "/verify/admit.json"
 FILE_FORMAT = "fnvnx-gatefile/1"
 FORMAT = "fnvnx-gates/1"
-ROOT_CLASSES = ("doc", "tool", "ref", "test", "product-guest", "lifted", "host-product", "linked", "import-provider", "registry-reader")
+ROOT_CLASSES = ("doc", "tool", "ref", "test", "product-guest", "product-guest-exe", "lifted", "host-product", "linked", "import-provider", "registry-reader")
 
 
 class Bad(ValueError):
@@ -59,8 +59,22 @@ def declares(repo, path, name):
     return os.path.isfile(os.path.join(repo, path, name))
 
 
+def has_exe_twin(repo, root):
+    """The root fact `exe twin`: the admitted root R is a native guest root whose build.json declares a `game` directory, i.e. its units are
+    the exe's own functions, which have cl twin objects (the pristine MSVC objects of the msvc external) to be compared with. A root without a `game`
+    directory has no exe function and no twin."""
+    if root.get("cxx_origin") != "native":
+        return False
+    try:
+        with open(os.path.join(repo, root["path"], "build.json"), encoding="utf-8") as fh:
+            g = json.load(fh).get("game")
+    except (OSError, ValueError, AttributeError):
+        return False
+    return isinstance(g, str) and bool(g)
+
+
 def root_classes(admit, repo=None):
-    """{root path: set of root classes} of a parsed admit.json: the one class of root_class, plus `linked` for a product root whose
+    """{root path: set of root classes} of a parsed admit.json: the one class of root_class, plus `product-guest-exe` for a native guest root with a `game` dir (an exe twin) and `linked` for a product root whose
     build.json (read under REPO) has a link stage. A class is a predicate over root facts, so a gate covers the roots that satisfy it."""
     out = {}
     for r in admit.get("roots", []):
@@ -74,6 +88,8 @@ def root_classes(admit, repo=None):
                     s.add("import-provider")
                 if declares(repo, r["path"], "registry.in.json"):
                     s.add("registry-reader")
+            if c == "product-guest" and repo is not None and has_exe_twin(repo, r):
+                s.add("product-guest-exe")
             out[r["path"]] = s
     return out
 

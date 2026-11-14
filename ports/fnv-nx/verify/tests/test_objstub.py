@@ -51,6 +51,20 @@ def row(sym, kind, val=""):
     return {sym: (kind, val, "ref")}
 
 
+# liveness of the input registers is a union (OR) over the successors: a loop converges (a sum of the masks never did; ftbbox.c ran > 30 min)
+import signal  # noqa: E402
+LOOPS = "int f(int n, int m) { int s = 0; for (int i = 0; i < n; i++) for (int j = 0; j < m; j++) { if ((i ^ j) & 1) s += i * j; else s -= j; } return s; }\n"
+signal.signal(signal.SIGALRM, lambda *a: (_ for _ in ()).throw(TimeoutError()))
+signal.alarm(120)
+try:
+    kinds(build(LOOPS, "lp64"))
+    kinds(build(LOOPS, "ilp32"))
+    done = True
+except TimeoutError:
+    done = False
+signal.alarm(0)
+check("a function with nested loops is analysed (liveness converges, LP64 and ILP32)", done)
+
 # terminator derivation: plugin on a tiny header and on the real libc headers
 tiny = os.path.join(ROOT, "tiny.h")
 open(tiny, "w").write("void myabort(void) __attribute__((noreturn));\nvoid fine(void);\n")
@@ -608,6 +622,23 @@ bad_ii = tf + ".bad.ii"
 open(bad_ii, "w").write("int f(void) { return +; }\n")
 tc = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-bad", bad_ii, "c")], {"c": []}, tempfile.mkdtemp(prefix="objstub-tc-"), 1)
 check("a unit the terminator plugin cannot process: a failure of that unit in the result (no exception)", tc[0] == [] and len(tc[2]) == 1 and tc[2][0][0] == "pk-bad", tc)
+
+# the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
+# the same image with a strong override is green, the weak body is not in the image)
+ERR = '#include "toy.h"\nint e;\nint *__errno(void) { return &e; }\n'
+WEAK = '#include "toy.h"\nint *__errno(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno() = 38; return -1; }\n'
+USE = '#include "toy.h"\nint sched_getcpu(void);\nint f_c(int x) { return x + TOY + sched_getcpu(); }\n'
+ri = TR.make_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK})
+rc, g, _, txt, st = gate(ri, ROOT + "/gi1", GC)
+check("image with a weak errno/-1 fallback: red fixed-failure, the function named under the image", rc == 2 and g["uncertified"] == [TR.ROOT + "/toy.elf:sched_getcpu"]
+      and "fixed-failure 1" in g["detail"] and g["image"]["fixed_failure"] == 1 and g["image"]["bodies"] > 0, (g, txt))
+rs = TR.make_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno(void);\nint sched_getcpu(void) { return *__errno() + 3; }\n'})
+rc, g, _, txt, st = gate(rs, ROOT + "/gi2", GC)
+check("the same image with a strong override: green, the weak body is not in the image", rc == 0 and g["image"]["fixed_failure"] == 0 and g["image"]["bodies"] > 0, (g, txt))
+rn2 = json.loads(json.dumps(TR.RECIPE)); del rn2["errno_accessor"]
+rd = TR.make_repo("os-image-noacc2", rec=rn2, files={"toy/constants.tsv": CONST})
+rc, g, _, txt, st = gate(rd, ROOT + "/gi3", GC)
+check("a linked root without errno_accessor is red (recipe-invalid), not silently unjudged", rc == 2 and "recipe-invalid" in g["detail"], (g, txt))
 
 # a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
 xt = tf + ".x86"
