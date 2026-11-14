@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-14 23:55Z L1 accepted resolve_input 4008c136, with one fix: a tracked-directory ref returns the tracked file list (git ls-files), and gates read only that; 2 tests. w10 does it before the verdict.
 - 11-14 23:53Z CLAUDE.md fast-path rule (20fe9510e): MINIMP3_NO_SIMD stays for a green trunk as the first verify/PERFDEBT.json entry (restoring rule: L2 fnvnx_ftoi lane-exact rewrite of the float-to-int builtins; owner L2). w10 adds the file in the root head.
 - 11-14 23:50Z w10 resolve_input 4008c136 (11/11 tests; imports + machine; 0 other opens; wine-specs specs/ = 668 files), with L1 for review. sse2neon is kept: fnvnx_compat.h is the lifted/decomp force-include; its 4 saturating cvt forms are reported to L2 for when those roots build. The libs rule moved to w14 (values from the msvcmodel13 tree). w10: the verdict next.
 - 11-14 23:45Z Path plan 2026-11-14 is binding (CLAUDE.md merged, 2dafc3af0). L5 items: 1.4 w10 (reds on 141b07580); 1.5 w14 (publish msvcmodel13 via a farm, repin and rebuild root, revert gcc-15-only changes); 3.5 rt/guest main (pthread already settled: libsysbase over threads.c hooks); 3.8 tests onto the recipe with 0 doubles, delete s4/s7 and build_guest.sh; 4.4 declared-machine stages. Workers active: w10, w14, w9 (import_argext for L3a w7). Max 3.
