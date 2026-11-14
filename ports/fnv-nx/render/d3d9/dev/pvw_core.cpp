@@ -10,7 +10,8 @@
 //  M1 every byte Wine would read or write must lie inside its buffer: sources at (u32)(start*stride) + stream offset + element offset + (u32)(i*stride) (Wine's unsigned arithmetic), sizes = what Wine reads (position 12, normal 12, colours by format, texcoords
 //     size*4); destination from (u32)(dst_idx*vertex_size). The one exception is the 4th float of an XYZ destination position, which Wine writes 4 bytes past the vertex (into the next vertex / padding): it is stored if it fits in the buffer, else dropped.
 //  M2 the destination FVF has NORMAL but the source has no normal element: Wine copies from an uninitialised stream-info element; here INVALIDCALL.
-// The 32 bit guest assumption: no address arithmetic of Wine wraps around 4 GiB inside a buffer of at most 1 GiB (the u32 products above are the only wraps modelled).
+// ASM-007 (verify/ASSUMPTIONS.json)
+// ASM-007 (the 32 bit guest): no address arithmetic of Wine wraps around 4 GiB inside a buffer of at most 1 GiB (the u32 products above are the only wraps modelled).
 #pragma GCC optimize("fp-contract=off")
 #include "pvw.h"
 #include <math.h>

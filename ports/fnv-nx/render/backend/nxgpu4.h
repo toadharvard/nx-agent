@@ -129,6 +129,7 @@ enum NxOp4 {
                            colorCount 0 with a depth target = a depth-only pass. Draw buffer i = target i; sRGB
                            writes go through the target's sRGB view (NXRS_R_SRGB). All targets must have the same
                            size at their level and the same sample count, layer and level must exist, colour
+                           // ASM-628 (verify/ASSUMPTIONS.json)
                            targets must be colour images and the depth target a depth image, and there must be
                            at least one target: else the submit is BAD_CALL before anything runs (the device
                            guarantees it; D3D9 requires it). No clear; the pass starts as NxOp_BeginPass does

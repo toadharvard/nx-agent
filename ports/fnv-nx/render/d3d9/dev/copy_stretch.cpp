@@ -1,5 +1,6 @@
 // StretchRect of both device classes. Sources: the Windows-validated tables of Wine 9.0 d3d9 tests visual.c (stretchrect_test error_condition_tests, test_depth_stencil_blit, test_multisample_stretch_rect),
 // d3d9/device.c d3d9_device_StretchRect + wined3d_device_context_blt (rect checks, depth rules, filters), Mesa Nine device9.c NineDevice9_StretchRect (the plain-surface rules), MS StretchRect remarks.
+// ASM-631 (verify/ASSUMPTIONS.json)
 // RULES (every violation = D3DERR_INVALIDCALL, checked in this order; one rule per bullet)
 //  S1 both surfaces are ours and of this device; both pools DEFAULT.
 //  S2 filter: NONE, POINT, LINEAR only, and POINT / LINEAR only when D3DCAPS9.StretchRectFilterCaps offers them (env table: nxenv_stretch_filter_ok). NONE and POINT are the point rule.

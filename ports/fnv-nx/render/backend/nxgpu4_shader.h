@@ -11,6 +11,7 @@
  *                    (FNVNX_SHADER_FLAT_COLOR: the COLOR0/COLOR1 interpolants are `flat`, first-vertex value; both stages of a draw carry the same bit); all other bits 0
  *   key              SHA-256 of the bytecode (fnvnx_sha256, lib/sha256; 32 bytes), the cache key's code key
  *   Every address is an address of memory from nxd3d_gpu_alloc (as every address of every call).
+ // ASM-629 (verify/ASSUMPTIONS.json)
  *   Implemented by gl4 (gl4_d3dshader.c): the same key (bytecode, stage, variant, L) returns the same id, once per create (each NXGPU_FN_SHADER_DESTROY takes one back; the last releases it).
  *   Reserved fields (pad, pad2) and the variant bits above bit 1 must be 0, a pixel stage has bit 0 clear, size is a multiple of 4: else 0.
  * NXGPU_FN_COUNT4 is unchanged (the v4 table), NXGPU_VERSION4 stays 4. */

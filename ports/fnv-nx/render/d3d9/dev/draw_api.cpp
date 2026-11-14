@@ -1,5 +1,6 @@
 // draw_api.cpp: DrawPrimitive, DrawIndexedPrimitive, DrawPrimitiveUP, DrawIndexedPrimitiveUP of NxDevice9 and NxDevice9Ex: validation and HRESULTs. One draw = draw_exec.cpp.
 // Sources: Wine 9.0 d3d9/device.c d3d9_device_DrawPrimitive / DrawIndexedPrimitive / DrawPrimitiveUP / DrawIndexedPrimitiveUP (checks and their order) and the rows of Wine's d3d9/tests/device.c
+// ASM-630 (verify/ASSUMPTIONS.json)
 // test_draw_primitive (the rows after "SetVertexDeclaration(device, NULL)") that are NOT todo_wine = validated on Windows.
 //  D1 no vertex declaration bound = D3DERR_INVALIDCALL, before anything else (Draw*: Wine; the stream and index bindings stay). The UP draws first test stride (0 = INVALIDCALL: Wine; Windows crashes there) and primitive count
 //     (0 = D3D_OK, nothing happens: Wine).

@@ -1,5 +1,6 @@
 // d3d9_adapter.cpp: NxDirect3D9 / NxDirect3D9Ex methods that are environment answers. Reference: Wine 9.0 dlls/d3d9/directx.c (the function named at each method).
 // The profile (handheld / docked) is chosen once at creation and kept as a private-data entry of the object (the class layout is fixed by the generated header;
+// ASM-636 (verify/ASSUMPTIONS.json)
 // IDirect3D9 has no SetPrivateData in its interface, so the entry is unreachable from the application).
 #include <new>
 #include "../gen/d9impl.gen.h"

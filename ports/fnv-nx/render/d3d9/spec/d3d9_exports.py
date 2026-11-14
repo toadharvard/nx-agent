@@ -1,3 +1,4 @@
+# ASM-640 (verify/ASSUMPTIONS.json)
 """d3d9_exports.py: the export table of d3d9.dll (all __stdcall on x86). Signatures are the public SDK ones where documented
 (Direct3DCreate9, Direct3DCreate9Ex, D3DPERF_*) and the ones read off the callers (DebugSetMute, Direct3DShaderValidatorCreate9: render/d3d9/dev/x1_validator.h); the rest is undocumented: nothing is guessed, `params` is left out."""
 

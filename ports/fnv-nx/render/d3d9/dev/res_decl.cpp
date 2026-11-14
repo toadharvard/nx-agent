@@ -1,5 +1,6 @@
 // NxVertexDeclaration9: CreateVertexDeclaration validation and GetDeclaration. Source: Wine 9.0 d3d9 vertexdeclaration.c convert_to_wined3d_declaration + vertexdeclaration_init,
 // wined3d vertexdeclaration.c vertexdeclaration_init; HRESULTs from Wine tests device.c test_vertex_declaration_alignment / test_unused_declaration_type (Windows-validated): E_FAIL.
+// ASM-633 (verify/ASSUMPTIONS.json)
 //  D1 the array ends at the first element with Stream == 0xFF (spec decl_bytes); END must be at index <= 126 (Wine's 128-count loop), else E_FAIL.
 //  D2 Type >= D3DDECLTYPE_UNUSED (17) = E_FAIL.  D3 for Stream < 16 (other streams are tessellator pseudo streams: no further checks): Offset must be a multiple of 4 (every type is
 //  4 bytes or larger: alignment = min(bytes, 4)), else E_FAIL; and the type must be supported by the environment (nx_env_decltype_supported, caps DeclTypes), else E_FAIL.

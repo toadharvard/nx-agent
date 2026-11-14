@@ -5,6 +5,7 @@
 #include "draw_core.h"
 
 bool nx_prim_valid(uint32_t t) { return t >= D3DPT_POINTLIST && t <= D3DPT_TRIANGLEFAN; }
+// ASM-634 (verify/ASSUMPTIONS.json)
 // UINT arithmetic like Wine (a count that overflows wraps); t must be valid
 uint32_t nx_prim_vertices(uint32_t t, uint32_t n) {
     switch ((D3DPRIMITIVETYPE)t) {

@@ -4,7 +4,8 @@
 //  PresentCount        = the count of successful presents of this chain ("Present ID of the last Present"); GetLastPresentCount reports the same number (SetDialogBoxMode, which MS says also increments it, is not wired: its own contract is open).
 //  PresentRefreshCount = the vblank counter V sampled when the last present returned (nxgpu4.h P5: a present with interval >= 1 returns at the blank where its frame becomes visible; interval 0 shows within the current blank interval); 0 before the first.
 //  SyncRefreshCount / SyncQPCTime = V of the QPC sample taken when GetPresentStats runs (the scheduler samples on request) and that sample. SyncGPUTime = 0 ("This value is not used").
-//  V(c) = floor(c * R / f): c the nxd3d_perf_counter value, f its frequency, R the refresh rate; ASSUMPTION (stated, platform fact): the counter and the display clock of NXGPU_FN_WAIT_VBLANK have one origin, so blank k is at c = k * f / R.
+// ASM-632 (verify/ASSUMPTIONS.json)
+//  V(c) = floor(c * R / f): c the nxd3d_perf_counter value, f its frequency, R the refresh rate; ASM-004 (platform fact): the counter and the display clock of NXGPU_FN_WAIT_VBLANK have one origin, so blank k is at c = k * f / R.
 #include "res_tex.h"
 #include "../gen/d9impl.gen.h"
 #include "dev_core.h"

@@ -8,7 +8,7 @@ packages (dpkg):
   wine:all 9.0~repack-4build3
   wine32:i386 9.0~repack-4build3
   xvfb:amd64 2:21.1.12-1ubuntu1.9
-host cpu (llvmpipe vector width follows it): Intel(R) Xeon(R) Processor @ 2.10GHz
+host cpu (llvmpipe vector width follows it): Intel(R) Xeon(R) Processor @ 2.10GHz (ASM-637)
 renderer: LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe (Mesa 25.2.8, LLVM 20.1.2 as the GL strings below say); Wine renderer = OpenGL (wined3d default)
 display: Xvfb <display> -screen 0 WxHx24 -nolisten tcp -noreset (no window manager, no RANDR mode list beyond the screen: one mode)
 emulated video memory: HKCU\Software\Wine\Direct3D\VideoMemorySize = 960 (MiB)
