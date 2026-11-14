@@ -12,7 +12,7 @@
 #    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
 #    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
 #    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
-#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present) + the loader's
+#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, MainMenu, import:*!Present; the table always gains first-frame = the GL backend's first present host event) + the loader's
 #    console lines of run.txt (when present) -> the bootmiles table; optional softfloat.syms or softfloat.tsv (one symbol
 #    per line). Every missing required file is listed and fails the job
 #  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
@@ -34,7 +34,7 @@
 # --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
 #    Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the versions of
 #    verify/env.json (installed by farm/setup_verdict_env.sh, never by this job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
-#    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
+#    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not (OUT.json "frames" has a record for every frame). meta.json gains gpu_branch and
 #    gpu_branch_commit, the final line gains presents=<n>.
 #    The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
 #    the bridge it was linked with (render: {branch, archive_sha256}); that branch's build.json archive_sha256 and its libfnvnx-d3d9.a
