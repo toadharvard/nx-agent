@@ -99,15 +99,15 @@ def store_op(F, op, addr, v, when=None):
     if op.seg == 'cs': F.fault(7, C(1, 1))
     mstore(F, addr, v, when)
 def wr(F, op, v, when=None):
-    if op.k == 'm': return store_op(F, op, ea(op), v)
+    if op.k == 'm': return store_op(F, op, ea(op), v, when)
     r, lo = op.full(); old = F.cur(r)
     if op.w == 32: F.reg(r, v, when)
     elif lo == 0: F.reg(r, concat(extract(old, 31, op.w), v), when)
     else: F.reg(r, concat(concat(extract(old, 31, 16), v), extract(old, 7, 0)), when)
 
-def pzs(F, r, g=lambda f, v: v):
+def pzs(F, r, g=lambda f, v: v, when=None):
     x = trunc(r, 8); x = x ^ (x >> 4); x = x ^ (x >> 2); x = x ^ (x >> 1)
-    F.flag('pf', g('pf', bit(x, 0) ^ 1)); F.flag('zf', g('zf', eq(r, 0))); F.flag('sf', g('sf', msb(r)))
+    F.flag('pf', g('pf', bit(x, 0) ^ 1), when=when); F.flag('zf', g('zf', eq(r, 0)), when=when); F.flag('sf', g('sf', msb(r)), when=when)
 def af(F, a, b, r): F.flag('af', bit(a ^ b ^ r, 4))
 def cond(cc):                        # condition code 0..15 as a 1-bit node over the pre-state flags
     f = {n: V(n, 1) for n in ('cf', 'pf', 'zf', 'sf', 'of')}

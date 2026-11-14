@@ -96,12 +96,18 @@ def lifted_by(ins):
 
 def run(uni):
     res = dict(shapes=len(uni), sites=sum(v[1] for v in uni.values()), no_form=0, no_form_sites=0, forms=0, forms_sites=0, forms_with_free=0, forms_with_free_sites=0,
-               free_flag_outputs=0, free_flag_outputs_sites=0, free_reg_outputs=0, free_reg_outputs_sites=0, uncovered=0, unmapped_fault_codes=[], by_mnemonic={}, no_form_by={}, forms_with_when=0, forms_with_when_sites=0, model_gap_forms=0, model_gap_forms_sites=0, mismatches=[])
+               free_flag_outputs=0, free_flag_outputs_sites=0, free_reg_outputs=0, free_reg_outputs_sites=0, uncovered=0, unmapped_fault_codes=[], by_mnemonic={}, no_form_by={}, cpufeat_gates={}, forms_with_when=0, forms_with_when_sites=0, model_gap_forms=0, model_gap_forms_sites=0, mismatches=[])
     for key, (ins, n) in sorted(uni.items(), key=lambda kv: str(kv[0])):
         try: F = forms.build(ins, 0x1000)
         except Exception as e:
             res['no_form'] += 1; res['no_form_sites'] += n
             how = lifted_by(ins)
+            if how == 'cpufeat-UD':
+                from fnvlift import f_cpufeat
+                for f, leaf, reg, bit, val in f_cpufeat.gates(ins):
+                    if not val:
+                        k = '%s: CPUID.%x.%s[%d] = %d' % (f, leaf, reg, bit, val); g = res['cpufeat_gates'].setdefault(k, dict(shapes=0, sites=0, mnemonics=[])); g['shapes'] += 1; g['sites'] += n
+                        if ins.mnemonic.split()[-1] not in g['mnemonics']: g['mnemonics'].append(ins.mnemonic.split()[-1])
             b = res['no_form_by'].setdefault(how, dict(shapes=0, sites=0, mnemonics={}))
             b['shapes'] += 1; b['sites'] += n
             mn = ins.mnemonic.split()[-1] + ('/16' if ins.mnemonic.split()[-1] in ('shld', 'shrd') and ins.operands[0].size == 2 else '') + ('' if isinstance(e, KeyError) else ' (%s)' % type(e).__name__)

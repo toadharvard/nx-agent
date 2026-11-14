@@ -73,11 +73,16 @@ def rotc(c):
 
 @handler('shld', 'shrd')
 def shld(c):
-    F, d, s = c.F, c.ops[0], c.ops[1]; assert d.w == 32; a, b = rd(d), rd(s); n = count(c, 2); nz = ~eq(n, 0)
+    """SHLD/SHRD (SDM Vol 2): the count is masked to 5 bits (0..31). Count 0: nothing changes. Count 1..w (w the operand size): result and CF computed, OF only for a 1-bit shift.
+    "If the count is greater than the operand size, the result [destination] and the flags are undefined" (a 16-bit operand with count 17..31): the destination keeps its prior
+    value (DEFPRIOR: the write has when = count <= w) and CF/OF/SF/ZF/PF are the constant 0 (DEF0: the writes have when = count <= w); AF is undefined for every non-zero count."""
+    F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; assert s.w == w and w in (16, 32); a, b = rd(d), rd(s); n32 = count(c, 2); n = trunc(n32, w) if w < 32 else n32; nz = ~eq(n32, 0)
+    ok = ult(n32, w + 1) if w < 32 else None                      # count <= operand size: the SDM defines result and flags (always true for w = 32: count <= 31)
     keep = lambda f, new: ite(nz, new, V(f, 1))
-    if c.m == 'shld': r = shl(a, n) | lshr(b, C(32, 32) - n); cf = msb(shl(a, n - 1))
-    else: r = lshr(a, n) | shl(b, C(32, 32) - n); cf = bit(lshr(a, n - 1), 0)
-    F.flag('cf', keep('cf', cf)); F.flag('of', keep('of', msb(r) ^ msb(a)), when=ult(n, 2)); F.undefined('af', UNDEF_SHAF, when=nz); pzs(F, r, keep); wr(F, d, r)
+    if c.m == 'shld': r = shl(a, n) | lshr(b, C(w, w) - n); cf = msb(shl(a, n - 1))
+    else: r = lshr(a, n) | shl(b, C(w, w) - n); cf = bit(lshr(a, n - 1), 0)
+    one = ult(n32, 2)
+    F.flag('cf', keep('cf', cf), when=ok); F.flag('of', keep('of', msb(r) ^ msb(a)), when=one); F.undefined('af', UNDEF_SHAF, when=nz); pzs(F, r, keep, ok); wr(F, d, r, ok)
 
 @handler('bt', 'bts', 'btr', 'btc')
 def bt(c):
