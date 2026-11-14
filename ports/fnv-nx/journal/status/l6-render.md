@@ -432,3 +432,6 @@ Paused: w3b, w4, farm; no other work.
     - objstub: 7 class-V findings in MojoShader (parse_args_NULL, DCL, NOP, RESERVED, TEXM3X2PAD, TEXM3X3PAD, phase); lib/sha256 and the own units have 0.
     - Next for w1b, in order: the host recipe (blocks 3.7/4.3); the rule-A facts (op_syntax/op_cover/op_reserved into render/shaders/total, RESERVED to fnvnx_reach_violation); then 4.6.
     - L1 is asked to land the rule-A reader in objstub (blocker of the 7, owner L1).
+- 23:24Z onedef header copy (L6A): render/d3d9/backend/nx/state.h duplicates render/nxgpu/nx/state.h, whose home is render/nxgpu.
+    - w6 deletes the copy and points d3d9total (INPUTS, :228), TRUNK.md:22 and d3d9_state.h:1 at the home; findings are checked identical before and after (doing).
+    - L6A adds render/nxgpu's guest recipe.
