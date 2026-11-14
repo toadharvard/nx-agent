@@ -32,7 +32,8 @@ import unitstage  # noqa: E402
 
 def root_check(root, repo, cache, jobs):
     """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)])"""
-    rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
+    roots = recipe.load_admit(repo)
+    rec = recipe.load_recipe(repo, roots, root)
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
@@ -49,7 +50,7 @@ def root_check(root, repo, cache, jobs):
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": rec["flags"]["c"], "c++": rec["flags"]["cxx"]}, cache, jobs)
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs)
             names |= set(ns)
             unit_of = {k: u for u, k in res["pp_keys"].items()}
             bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]
