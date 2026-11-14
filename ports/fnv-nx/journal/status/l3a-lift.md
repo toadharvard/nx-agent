@@ -534,3 +534,10 @@ Update 2026-11-12, at 698adefb:
 - int3 test lines: gate_lift, gate_flags (10), lock_only and ranges (5 records) all pass. ranges had a latent parser bug; it now parses by section header.
 - Blocked: the 3 native test roots stop at link. libgcc unwind-dw2-fde needs pthread_mutex_lock/unlock, and nothing defines them. Owner: L5 (rt/guest mutexes over its real threads). A single-thread libgcc is rejected.
 - Running: the builds of lift/rt, descs, bridges, the 3 lifted roots and lift/pack, then the guest tests against their references.
+
+## 2026-11-14 23:25 t16k 420a459ba (w8)
+- Green: lift/rt (12 objects), citest/lifted, imptest/lifted (3 objects), msvcrttest/lifted (3 objects).
+- Red: lift/descs, lift/bridges, lift/pack. The stale lib/sha256 recipe (L1 w15c) stops the producer chain.
+- The 3 native roots link with sysbase (L5's single library set, w10) and the pinned crti/crtn. 7 loader hooks stay undefined. Blocker: loader/ (claude/fnv-l1-contract) is built by a Makefile/build.sh, not as a product root. Sent to L1.
+- int3 d206ba904 (w6): the fnvlift↔proof and gates↔proof cycles are broken by moving code. L1 takes the acyclicity check into gate_tests (w19), and our test_root_graph is then deleted.
+- The 6 guest tests cannot run before the native roots link.
