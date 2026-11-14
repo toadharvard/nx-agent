@@ -50,7 +50,7 @@ def checks(obj):
         return m and pb.cstring(obj, m.group(1), int(m.group(2) or '0', 16))
     shapes = {'_Z2c1PFiiEi': 'stack:i:i', '_Z2c2P1Ai': 'this:i:i,i', '_Z2c3P1A': 'this:i:i,i',
               '_Z2d1PFviifE': 'fast:v:i,i,f', '_Z2d2PFxdxE': 'stack:q:d,q',
-              '_Z2d3PF2V3S_2P23BigcES_S0_S1_': 'stack:a12:s12h,s8g,s32r,i', '_Z2d4PF3Big2NTERS0_': 'stack:m32:s4r',
+              '_Z2d3PF2V3S_2P23BigcES_S0_S1_': 'stack:a12Hhf:s12hf,s8g,s32r,i', '_Z2d4PF3Big2NTERS0_': 'stack:a32Hm:s4r',
               '_Z2d5P1BMS_FifdE': 'this:i:i,f,d'}
     for f, want_d in shapes.items():
         check('%s: descriptor %s' % (f, want_d), desc(f) == want_d, repr(desc(f)))
