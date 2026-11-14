@@ -9,6 +9,9 @@ no timestamp).  Exe-derived: write it outside the repository (container, fnv-nx-
 """
 import argparse, hashlib, os, sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'contract'))
+import exepin
+
 
 def render(data):
     h = hashlib.sha256(data).digest()
@@ -23,8 +26,10 @@ def main():
     ap.add_argument('--exe', required=True)
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
-    with open(a.exe, 'rb') as f:
-        data = f.read()
+    try:
+        data = exepin.load_exe(a.exe)   # the one way the exe's bytes are read (exepin gate): the pin is checked first
+    except exepin.ExePinError as e:
+        sys.exit('mkidentity: %s' % e)
     if not 0 < len(data) < 1 << 32:
         sys.exit('mkidentity: %d bytes is not a file size the guest can hold' % len(data))
     with open(a.out, 'w') as f:
