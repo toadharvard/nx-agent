@@ -82,7 +82,7 @@ def git(repo, *a):
     return subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t"] + list(a), capture_output=True, text=True, check=True).stdout
 
 
-def make_repo(name, gen_extra="", rec=None, files=None):
+def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
@@ -101,7 +101,7 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
         {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
         {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
-        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}]}))
+        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -474,6 +474,7 @@ def main():
     m["flags"]["c"] = ["-Ifoo", "-o"]
     check("flags that change a stage's job rejected, all problems listed", len([e for e in errs(m)]) >= 2)
 
+    check_gen_reads(SS)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))
     for f in futs:
         f.result()
@@ -481,6 +482,56 @@ def main():
     print("INFO times: toy cold %.1f s, cached %.1f s; whole file %.1f s" % (cold, warm, time.time() - t_start))
     print("%d FAILED" % len(FAILED) if FAILED else "all passed")
     return 1 if FAILED else 0
+
+
+def check_gen_reads(SS):
+    """A generator stage reads, read-only, exactly its declared inputs, tracked files or directories of any admitted root (RECIPE.md "generated").
+    The stage key holds the content of each; an undeclared read, a write outside /out, an untracked file and `uses` on a plain file are red."""
+    OTH = T + "other"
+    ex = [{"path": OTH, "class": "doc", "gates": []}]
+    rd = 'import sys\nn = int(open("/in/%s/data.txt").read())\n' % OTH
+    wr = 'os.makedirs("/out/gen")\nopen("/out/gen/gen.h", "w").write("#define NCONST 1\\n#define STAMP %dL\\n" % (n - n))\n'
+    def rec_(ins=(OTH + "/data.txt",), **kw):
+        return dict(RECIPE, generated=[{"tool": T + "gen/xr.py", "args": [], "inputs": [ROOT + "/constants.tsv"] + list(ins),
+                                                      "outputs": ["gen/gen.h"]}], **kw)
+    def mk(name, body, data="5\n", ins=(OTH + "/data.txt",), **kw):
+        return make_repo(name, rec=rec_(ins, **kw), files={"gen/xr.py": "import os\n" + body, "other/data.txt": data,
+                                                           "other/secret.txt": "9\n"}, extra_roots=ex)
+    good = mk("xr", rd + wr)
+    roots, files = recipe.load_admit(good), recipe.tracked(good)
+    check("generator input in another admitted root (a doc root) is accepted by the check",
+          not [e for e in recipe.check(rec_(), ROOT, files, roots, None, good) if "generated" in e], recipe.check(rec_(), ROOT, files, roots, None, good))
+    check("generator input that lies in no admitted root is rejected",
+          any("lies in no admitted root" in e for e in recipe.check(rec_((T + "stray/x.txt",)), ROOT, files + [T + "stray/x.txt"], roots, None, good)))
+    r1 = recipe.build(good, ROOT, SS, BASE + "/xr-out1")
+    check("a declared read of another root's file builds", r1["status"] == "green" and len(r1["objects"]) == 4 and r1["elf"], r1.get("failure"))
+    g2 = mk("xr2", rd + wr, data="6\n")
+    r2 = recipe.build(g2, ROOT, SS, BASE + "/xr-out2")
+    k1, k2 = set(r1["stage_keys"]), set(r2["stage_keys"])
+    check("the content of a declared read is in the stage key: one byte changed, exactly the generator's key changes (its output is the same)",
+          r2["status"] == "green" and len(k1 - k2) == 1 == len(k2 - k1), (len(k1 - k2), len(k2 - k1)))
+    r3 = recipe.build(good, ROOT, SS, BASE + "/xr-out3")
+    check("the same content: the generator key is equal and the stage is a cache hit", set(r3["stage_keys"]) == k1 and r3["stages"]["run"] == 0, r3["stages"])
+    bad = mk("xr3", 'n = int(open("/in/%s/secret.txt").read())\n' % OTH + wr)
+    rb = recipe.build(bad, ROOT, SS, BASE + "/xr-out4")
+    check("an undeclared read is red, naming the stage and the path", rb["status"] == "red" and rb["failure"]["stage"] == "gen:%s:0" % ROOT
+          and any("secret.txt" in l for l in rb["failure"]["stderr"]), rb.get("failure"))
+    for i, (label, target) in enumerate((("a declared input", "/in/%s/new.txt" % OTH), ("the tool tree", "/tool/new.txt"), ("the work dir", "/work/new.txt"), ("tmp", "/tmp/new.txt"))):
+        wb = mk("xw%d" % i, rd + 'open("%s", "w").write("x")\n' % target + wr)
+        rw = recipe.build(wb, ROOT, SS, BASE + "/xw-out%d" % i)
+        check("a write to %s (outside the stage's /out) is red, naming the stage" % label,
+              rw["status"] == "red" and rw["failure"]["stage"] == "gen:%s:0" % ROOT, rw.get("failure"))
+    # a directory ref expands to its tracked files only
+    dr = mk("xd", 'names = sorted(os.listdir("/in/%s"))\nn = len(names)\nif names != ["data.txt", "secret.txt"]:\n    sys.stderr.write("saw %%r\\n" %% names)\n    sys.exit(7)\n' % OTH + wr, ins=(OTH,))
+    with open(os.path.join(dr, T + "other/untracked.txt"), "w") as f:
+        f.write("u\n")
+    rd_ = recipe.build(dr, ROOT, SS, BASE + "/xd-out")
+    check("an untracked file in a declared directory is not an input", rd_["status"] == "green", rd_.get("failure"))
+    # `uses` stays for the generated outputs of a root: a plain file of a root is not an output it declares
+    us = mk("xu", rd + wr, uses=[{"root": OTH, "output": "data.txt"}])
+    ur, uf = recipe.load_admit(us), recipe.tracked(us)
+    check("`uses` that names a plain (not generated) file is red",
+          any("uses" in e for e in recipe.check(rec_(uses=[{"root": OTH, "output": "data.txt"}]), ROOT, uf, ur, None, us)))
 
 
 def check_tc_gate(repo, tcc, tiny):
