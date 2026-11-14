@@ -95,9 +95,19 @@ static unsigned long calls_object_last, calls_operator, calls_prvalue_virtual, c
 // ---- what counts as shared memory
 
 // LOCAL: ordering exists only for memory another thread can observe. Two facts, both decided by the declaration alone:
-//  (1) a decl base that is not aliased (an automatic variable whose address is never taken, a gimple temporary, a
-//      parameter that is not addressable) is visible to one thread only: no access to it is ordered and its address is never
-//      taken (local_unshared);
+//  (1) a decl base that is not aliased (an automatic variable or parameter that no operand of this function's GIMPLE takes
+//      the address of, a gimple temporary) is visible to one thread only: no access to it is ordered and its address is never
+//      taken (local_unshared).  "Takes the address of" is decided on the GIMPLE of the function by address_taken_scan, NOT
+//      by TREE_ADDRESSABLE: the front end sets that flag whenever it formed `&x` at any point (for a trivial constructor or
+//      copy it later folds away: every aggregate local of C++ carries it), so it says nothing about a pointer that exists.
+//      PROOF.  A GIMPLE object that is neither static, external nor thread-local is named only by its own decl; another
+//      thread can reach it only through an address, and an address of a decl comes into being by exactly these operations:
+//      an ADDR_EXPR whose base is the decl (an rvalue operand: assignment, call argument, call function, static chain,
+//      constructor element, switch/cond/return operand; an ADDR_EXPR as the base of a MEM_REF/TARGET_MEM_REF is an access
+//      form, no pointer value); the hidden result pointer of a call whose result is returned in memory (aggregate_value_p)
+//      and whose lhs has the decl as base; an operand of an asm statement (a memory constraint takes the address implicitly).
+//      address_taken_scan collects the decls of all three over every statement; the scan covers every operand of every
+//      statement kind, so a decl outside the set has no pointer anywhere (ASM-001: the compiler's GIMPLE semantics).
 //  (2) a RESULT_DECL with DECL_BY_REFERENCE is the hidden result POINTER of the function (its type is the reference
 //      type; the object is at *<retval>): the decl itself is a value of this thread, never memory. Reading it (passing it
 //      on, `UVf::UVf (<retval>, x)`) is no load, and its address is never taken (&<retval> is the ICE in
@@ -118,13 +128,77 @@ static bool hard_register(tree base) {
   return base && TREE_CODE(base) == VAR_DECL && DECL_HARD_REGISTER(base);
 }
 
+// the decls whose address the function takes (see LOCAL above); valid between execute()'s scan and its end
+static std::set<tree> *addr_set;
+
+static void scan_operand(tree t, std::set<tree> &out) {
+  if (!t) return;
+  switch (TREE_CODE(t)) {
+    case ADDR_EXPR: {
+      tree b = get_base_address(TREE_OPERAND(t, 0));
+      if (b && DECL_P(b)) out.insert(b);
+      scan_operand(TREE_OPERAND(t, 0), out);
+      return;
+    }
+    case MEM_REF: case TARGET_MEM_REF: {
+      // MEM_REF[&x + c] is an access to x, not a pointer value: its ADDR_EXPR base takes no address
+      tree b = TREE_OPERAND(t, 0);
+      scan_operand(TREE_CODE(b) == ADDR_EXPR ? TREE_OPERAND(b, 0) : b, out);
+      for (int i = 1; i < TREE_OPERAND_LENGTH(t); i++) scan_operand(TREE_OPERAND(t, i), out);
+      return;
+    }
+    case CONSTRUCTOR: {
+      unsigned long i;
+      tree idx, val;
+      FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(t), i, idx, val) { scan_operand(idx, out); scan_operand(val, out); }
+      return;
+    }
+    case TREE_LIST:
+      for (; t; t = TREE_CHAIN(t)) scan_operand(TREE_VALUE(t), out);
+      return;
+    default:
+      if (EXPR_P(t) || handled_component_p(t))
+        for (int i = 0; i < TREE_OPERAND_LENGTH(t); i++) scan_operand(TREE_OPERAND(t, i), out);
+      return;
+  }
+}
+
+static void address_taken_scan(function *fun, std::set<tree> &out) {
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun)
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+      gimple *st = gsi_stmt(gsi);
+      for (unsigned i = 0; i < gimple_num_ops(st); i++) scan_operand(gimple_op(st, i), out);
+      if (gcall *call = dyn_cast<gcall *>(st)) {
+        scan_operand(gimple_call_chain(call), out);
+        tree lhs = gimple_call_lhs(call);
+        if (lhs && aggregate_value_p(TREE_TYPE(lhs), gimple_call_fntype(call))) {
+          tree b = get_base_address(lhs);
+          if (b && DECL_P(b)) out.insert(b);   // the hidden result pointer
+        }
+      } else if (gasm *as = dyn_cast<gasm *>(st)) {
+        auto asm_ops = [&](unsigned n, tree (*get)(const gasm *, unsigned)) {
+          for (unsigned i = 0; i < n; i++) {
+            tree v = TREE_VALUE(get(as, i));
+            tree b = get_base_address(v);
+            if (b && DECL_P(b)) out.insert(b);   // a memory constraint takes the address implicitly
+            scan_operand(v, out);
+          }
+        };
+        asm_ops(gimple_asm_noutputs(as), [](const gasm *a, unsigned i) { return gimple_asm_output_op(a, i); });
+        asm_ops(gimple_asm_ninputs(as), [](const gasm *a, unsigned i) { return gimple_asm_input_op(a, i); });
+      }
+    }
+}
+
 static bool local_unshared(tree base) {
   if (!base) return true;
   if (hard_register(base)) return true;
   if (TREE_CODE(base) == VAR_DECL || TREE_CODE(base) == PARM_DECL || TREE_CODE(base) == RESULT_DECL)
     // a result or parameter passed by invisible reference is the object the caller named (a return slot: `g = f()`
     // may construct f's result in g itself): a pointer dereference, not a frame variable of this function
-    return !memory_result(base) && !TREE_STATIC(base) && !DECL_EXTERNAL(base) && !TREE_ADDRESSABLE(base) && !DECL_THREAD_LOCAL_P(base);
+    return !memory_result(base) && !TREE_STATIC(base) && !DECL_EXTERNAL(base) && !DECL_THREAD_LOCAL_P(base) &&
+           !(addr_set ? addr_set->count(base) != 0 : TREE_ADDRESSABLE(base));
   if (TREE_CODE(base) == CONST_DECL || TREE_CODE(base) == STRING_CST) return true;
   return false;
 }
@@ -467,17 +541,15 @@ struct order_pass : gimple_opt_pass {
     counts c = {0, 0, 0, 0, 0};
     cur = &c;
     basic_block bb;
-    // a local that receives an aggregate returned in memory is the object whose address goes to the callee (the hidden
-    // result pointer): the callee may publish it (copy elision, NRVO), so it is addressable. Decided before any access is
-    // classified, so no earlier statement keeps a plain access to it.
-    FOR_EACH_BB_FN(bb, fun)
-      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
-        gcall *call = dyn_cast<gcall *>(gsi_stmt(gsi));
-        tree lhs = call ? gimple_call_lhs(call) : NULL_TREE;
-        if (!lhs || !aggregate_value_p(TREE_TYPE(lhs), gimple_call_fntype(call))) continue;
-        tree base = get_base_address(lhs);
-        if (base && DECL_P(base) && !hard_register(base) && local_unshared(base)) mark_addressable(base);
-      }
+    // the decls whose address this function takes (address_taken_scan: operands, the hidden result pointer of a call that
+    // returns in memory, asm operands) are the shared locals; they are made addressable before any access is classified, so no
+    // earlier statement keeps a plain access to them.  Every other local is unshared (local_unshared).
+    std::set<tree> taken;
+    address_taken_scan(fun, taken);
+    addr_set = &taken;
+    for (tree d : taken)
+      if ((VAR_P(d) || TREE_CODE(d) == PARM_DECL || TREE_CODE(d) == RESULT_DECL) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
+        mark_addressable(d);
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
     add_resume_fences(fun);
@@ -487,6 +559,7 @@ struct order_pass : gimple_opt_pass {
       inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores, %lu+%lu fenced, %lu resume fences",
              c.ldar, c.stlr, c.fence_ld, c.fence_st, c.fence_resume);
     cur = NULL;
+    addr_set = NULL;
     return 0;
   }
 };
