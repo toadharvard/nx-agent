@@ -72,6 +72,10 @@ verdict.
 | 4.5 | L3b+L3a | SEH continue restores the whole CONTEXT (A-CTX); EH/SEH conformance against the exe's tables and Wine 9.0 | decision "SEH continue" |
 | 4.6 | L6+L6A | sm_link over every shipped shader = 0 failures (179 fail + 10 refused at 2026-11-12); the link-failure branch → reach_violation | decision "Shaders" |
 
+**Before the Switch step:** 5.1, L5: the Switch host (toolchain/host: host_vm.inc, host_platform.inc and the rest, now
+only on the integration branch) becomes a recipe-built product root. hostapi_total judges every service against the
+admitted host roots: L4's boothost now, the Switch host from then on.
+
 **After the first frame:** deko3d harnesses and uam, vtnames/decomp, native CRT, toolchain mirror reproducibility,
 IKOS. Then speed toward 45 fps (floor) / 60 fps (target), then the Switch.
 
