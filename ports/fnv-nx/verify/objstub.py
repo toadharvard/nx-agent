@@ -1178,7 +1178,8 @@ def unit_terminators(cc, units, flags, cache, jobs):
     """Terminator set of a root = union over its C/C++ units of the noreturn declarations the compiler CC itself sees in the unit's
     preprocessed text (the plugin runs on unit.ii with the unit's flags: exactly the TU the compile stage compiles, headers included).
     UNITS [(pp_key, ii path, lang c|c++)]; FLAGS {lang: [..]}. Per unit cached CACHE/objstub/t-<key>.txt, key = pp_key (a hash of
-    the compiler, flags and every input of the preprocessor stage), the plugin hash, the language and the flags. -> (sorted names, sha256)."""
+    the compiler, flags and every input of the preprocessor stage), the plugin hash, the language and the flags.
+    -> (sorted names, sha256, failures [(pp_key, message)]): a unit the plugin cannot process is a failure of that unit, never an exception."""
     so, ph = plugin_so(cc, cache)
 
     def one(u):
@@ -1190,12 +1191,14 @@ def unit_terminators(cc, units, flags, cache, jobs):
                 r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt"] + flags[lang]
                                    + ["-x", lang, "-fpreprocessed", ii], capture_output=True, text=True)
                 if r.returncode or not os.path.exists(td + "/o.txt"):
-                    raise ValueError("terminator plugin failed on a preprocessed unit: " + r.stderr[-300:])
+                    errs = [l for l in r.stderr.splitlines() if "error" in l or "fatal" in l or "Segmentation" in l or "internal compiler" in l]
+                    return pk, None, "terminator plugin failed (exit %d): %s" % (r.returncode, " | ".join(errs[:3]) or r.stderr[-300:])
                 _atomic(cp, open(td + "/o.txt", "rb").read())
-        return read_list(cp)
+        return pk, read_list(cp), None
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
-        names = sorted({n for ns in ex.map(one, units) for n in ns})
-    return names, hashlib.sha256("\n".join(names).encode()).hexdigest()
+        got = list(ex.map(one, units))
+    names = sorted({n for _, ns, _ in got if ns for n in ns})
+    return names, hashlib.sha256("\n".join(names).encode()).hexdigest(), [(pk, e) for pk, _, e in got if e]
 
 def derive_terminators(cc, cflags, headers, lang, outp):
     """Build the plugin with the host g++, compile one TU that includes the headers, write the sorted names to outp."""
