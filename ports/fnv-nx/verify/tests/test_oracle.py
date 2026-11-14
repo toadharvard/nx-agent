@@ -271,8 +271,8 @@ check("gate program: green, result in the gate format", rc == 0 and res["status"
 os.remove(os.path.join(root, T + "/x/tests/oracle.json"))
 rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_OUT=out)).returncode
 res = json.load(open(os.path.join(out, "oracle.json")))
-check("gate program: test without a declaration -> red, exit 2", rc == 2 and res["status"] == "red"
-      and res["uncertified"] == [T + "/x/tests/test_a.py"], res)
+check("gate program: test without a declaration -> red, exit 2 (the declaration is still tracked but unreadable: one more item)", rc == 2 and res["status"] == "red"
+      and res["uncertified"] == [T + "/x/tests/test_a.py", T + "/x/tests/oracle.json"] and res["universe"] == 2, res)
 # dangling keys: every key of every tracked tests/oracle.json names a tracked file of its directory (the whole tree, not only the universe)
 TR_ = {"a/tests/oracle.json", "a/tests/test_ok.py", "b/tests/oracle.json", "b/tests/test_there.py", "c/notests/oracle.json"}
 DOCS = {"a/tests/oracle.json": '{"format": "fnvnx-oracle/1", "tests": {"test_ok.py": {}}}',
