@@ -19,3 +19,14 @@ Blocked by: (1) host-target variant mechanism (L1 w15c), (2) Mesa pin as externa
   Every stage x variant must compile (443 VS + 1,366 PS bytecodes).
 - Translator host variant is w1b's (render/shaders/translator@host on 141b07580 + L1 w15c 1cac05621); I link its objects.
 - Form id = sha256(VS)||sha256(PS)||L||variant bits; certificate per form id; gamedata/shaders external pinned b545961f + tree_sha256.
+
+## First measurement (MEASUREMENT ONLY, not a verdict) - translator w1b-root 79fdbef8d (mirror f3e0e8a3), host objects 8 + lib/sha256@host
+Environment: pinned Mesa 25.2.8-0ubuntu0.24.04.4 (env.json debs, envcheck OK), llvmpipe, EGL surfaceless, GL 4.5 core. Tool: scratch C programs
+outside the recipe (not the gate; the gate is the tool root still to be written). Universe: gamedata/shaders b545961f, 16 sdp, 15,791 entries,
+1,809 unique bytecodes (443 VS, 1,366 PS).
+- translate + per-stage compile: VS 4 variants (complete x flat) 443/443 each = 1,772/1,772; PS 20 variants (flat x 5 EPI x 2 numerics)
+  1,366/1,366 each = 27,320/27,320. Failures 0, refused 0.
+- link: signature classes by the emission grammar (textual declaration lists): 202 VS classes x 298 PS classes = 60,196 class pairs, VS complete variant
+  x PS base variant, one representative per class: 60,196 linked, 0 link failures, 0 compile failures.
+Not yet covered (so this is not the gate's number): the two-way signature read (Mesa interface query), the flat variant and link-set L in the link,
+the draw path's own complete-bit choice per pair, FFP stages, the backends' own GLSL rewrite. Earlier pins gave the same counts at c4990859.
