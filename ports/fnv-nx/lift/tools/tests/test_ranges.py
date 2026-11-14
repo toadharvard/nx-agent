@@ -28,7 +28,7 @@ def main():
     out = {}
     for sec, kind in (('.fnvl.lk', 1), ('.fnvl.fsw', 2)):
         rel = subprocess.run(['aarch64-linux-gnu-readelf', '-r', obj], capture_output=True, text=True, check=True).stdout
-        blk = re.search(r"Relocation section '\.rela%s'.*?\n\n" % re.escape(sec), rel, re.S)
+        blk = re.search(r"Relocation section '\.rela%s'.*?(?=\n\n|\Z)" % re.escape(sec), rel, re.S)   # the last section of the listing has no blank line after it
         rows = [l.split() for l in blk.group(0).splitlines() if 'P32_ABS' in l] if blk else []
         words = {int(r[0], 16): int(r[-1], 16) for r in rows}
         data = subprocess.run(['aarch64-linux-gnu-objcopy', '-O', 'binary', '--only-section=' + sec, obj, '/dev/stdout'], capture_output=True, check=True).stdout
