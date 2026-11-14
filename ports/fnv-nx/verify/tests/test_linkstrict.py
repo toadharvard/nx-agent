@@ -141,10 +141,21 @@ empty = TR.make_repo("ls-empty")
 TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
 (rc, g, _, txt), st = LS(empty, "e")
 check("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
+# The toy's items: references a.c->f_b; definitions f_a, f_b, f_c, os_svc; the ELF of a linked root. A linked root also carries the product's
+# crt0 (test_recipe.CRT0): its items are its GLOBAL/WEAK symbols (definitions and references), read from the assembled crt0 itself.
+def crt0_items():
+    d = TR.tempfile.mkdtemp(dir=TR.BASE)
+    open(d + "/c.S", "w").write(TR.CRT0)
+    TR.subprocess.run([TR.CC_DRV, "-mabi=ilp32", "-c", "-o", d + "/c.o", d + "/c.S"], check=True)
+    return len({(n, shn == 0) for n, val, size, typ, bind, shn in L.elf_symbols(d + "/c.o") if bind in (L.GLOBAL, L.WEAK)})
+
+
+N_NOLINK = 5
+N_LINK = N_NOLINK + 1 + crt0_items()
 repo = TR.make_repo("ls-toy")
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t1", GC)
-check("toy root: every reference resolved, ELF closed: green, accepted (2 references + 5 definitions + the ELF)", rc == 0 and g["universe"] == 8 == g["certified"]
+check("toy root: every reference resolved, ELF closed: green, accepted (the toy's items, crt0's and the ELF: %d)" % N_LINK, rc == 0 and g["universe"] == N_LINK == g["certified"]
       and st[0] == "green", (g, txt))
 print("INFO toy gate (incl. build) %.1f s" % (time.time() - t0))
 t0 = time.time()
@@ -171,7 +182,7 @@ for abi in ("ilp32", "lp64"):
     ABI[0] = abi
     t0 = time.time()
     (rc, g, _, txt), st = LS(TR.make_repo("ls-toy-" + abi, rec=TR.abi_rec(abi)), "ta" + abi, GC)
-    n = 8 if abi == "ilp32" else 7      # LP64: no ELF (a link is the ILP32 guest ELF)
+    n = N_LINK if abi == "ilp32" else N_NOLINK      # LP64: no ELF (a link is the ILP32 guest ELF), so no crt0
     check("toy root: green %d/%d and accepted" % (n, n), rc == 0 and g["universe"] == n == g["certified"] and st[0] == "green", (g, txt))
     print("INFO %s toy gate %.1f s" % (abi, time.time() - t0))
     IE = {"toy/a.c": TR.FILES["toy/a.c"].replace("int f_a(void) {", "extern char __image_end[];\nint f_a(void) { (void)*(volatile char *)__image_end;"),

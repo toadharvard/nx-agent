@@ -23,17 +23,17 @@ import s2_bodies   # noqa: E402
 
 SRC = '''extern "C" int stub_a(int);
 extern "C" int stub_b(int);
-int FUN_00401040(int a, int b);
+int FUN_00001040(int a, int b);
 int stub_caller(void);
 void* g_text = (void*)"int in_literal() {";
-// @fnv 0x00401040
-int FUN_00401040(int a, int b)
+// @fnv 0x00001040
+int FUN_00001040(int a, int b)
 {
     return a + b;
 }
 int stub_caller(void)
 {
-    return FUN_00401040(stub_a(1), stub_b(2));
+    return FUN_00001040(stub_a(1), stub_b(2));
 }
 extern "C" void __cdecl Entry_c(void)
 {
@@ -120,10 +120,10 @@ class Harn1(unittest.TestCase):
             os.makedirs(os.path.join(d, 'src'))
             units = {'units': [
                 {'source': 'src/a.cpp', 'flags': ['/O2'],
-                 'functions': [{'symbol': '?FUN_00401040@@YAHHH@Z', 'address': '0x00401040'}],
-                 'symbols': {'_stub_a': '0x00401080'}},
+                 'functions': [{'symbol': '?FUN_00001040@@YAHHH@Z', 'address': '0x00001040'}],
+                 'symbols': {'_stub_a': '0x00001080'}},
                 {'source': 'src/b.cpp', 'flags': ['/O2'], 'functions': [],
-                 'symbols': {'?Referenced@@YAHH@Z': '0x004010c0'}}]}
+                 'symbols': {'?Referenced@@YAHH@Z': '0x000010c0'}}]}
             with open(os.path.join(d, 'build', 'units.json'), 'w') as fh:
                 json.dump(units, fh)
             path = os.path.join(d, 'src', 'a.cpp')
@@ -140,7 +140,7 @@ class Harn1(unittest.TestCase):
                      'static void ns_caller()', 'static void UsesLate()', 'static void Late();',
                      'static void Late()\n', 'static void Blocky()', 'static int CallsForwarded(void)'):
             self.assertIn(made, out)
-        for kept in ('\nint FUN_00401040(int a, int b)\n', '    int Member(int k)', '\nint Referenced(int k)',
+        for kept in ('\nint FUN_00001040(int a, int b)\n', '    int Member(int k)', '\nint Referenced(int k)',
                      '\ninline int Inl(', '\nvoid Later2()\n', '\nint Over(int a)\n{', '\nint keep_caller(void)', 'int Forwarded(int, ...);\n#if', '\nint Forwarded(int a, ...)\n{',
                      'void in_comment()',
                      'extern "C" int stub_a(int);', '"int in_literal() {"'):

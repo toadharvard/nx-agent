@@ -98,6 +98,8 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - Every `fact_id` is produced only by the call-graph gate from the exe and module facts, and carries a certificate of unreachability. A missing certificate makes the build red. There are no hand-written lists.
   - It is an assertion of a proven build invariant, not a trap path. Inventing behaviour or leaving the symbol undefined stays forbidden.
   - Certificates count as valid only once every dynamic-name GetProcAddress site is statically resolved. Until then, the build is a measurement build.
+  - **Values outside an assumed domain (orchestrator decision, 2026-11-12).** A value that a generator-produced total domain does not cover, where the domain rests on an OWNER assumption (for example the errno set of the pinned libc under ASM-004), goes to `fnvnx_assume_violation(asm_id, value)`, beside `fnvnx_reach_violation`. It exits loudly through the host exit slot with the assumption id and the value.
+    - `asm_id` is a literal whose record in `verify/ASSUMPTIONS.json` is OWNER. A REMOVE id, a missing id, a non-literal id or a hand-written domain makes the build red. Owner of the gate: L1.
 - **Memory safety of hand-written native code (owner decision, 2026-11-11, revised the same day).**
   - The owner's words: "пока чтобы ничего не переписывал... можем пока что покрыть санитайзерами наш C++ код. Давай не будем извращаться... мы даже не добились того, чтобы это загрузилось."
   - No rewrite of the native code for now.

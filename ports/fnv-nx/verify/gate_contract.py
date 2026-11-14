@@ -158,15 +158,16 @@ def py(script, *args):
     return [sys.executable, "-I", os.path.join(CONTRACT, script)] + list(args)
 
 
-def images_of(doc, ext):
+def images_of(doc, ext, pinned=True):
     """([(name, pe path, ranges path)] of the images that have range facts, [names without]) of contract.images.image_set."""
     have, lack = [], []
     bridge = set()          # a bridge dll is never an image (contract/dllkind.py): the dlls with rows in the declared bridge.tsv
     if doc.get("bridge"):
         bridge = {r["dll"] for r in iat.bridge_rows(P2(ext, doc["bridge"]))[0]}
     found = images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge)
-    try:   # the declared machine's image set is the pinned one (contract/exepin.py IMAGES): digests of every guest image DLL
-        exepin.check_images([(n, os.path.getsize(p), hashlib.sha256(open(p, "rb").read()).hexdigest()) for n, p in found if not n.endswith(".exe")])
+    try:   # the declared machine's image set is the pinned one (PINNED=False: a judge that only reads the images the facts name; the pin is the contract gate's) (contract/exepin.py IMAGES): digests of every guest image DLL
+        if pinned:
+            exepin.check_images([(n, os.path.getsize(p), hashlib.sha256(open(p, "rb").read()).hexdigest()) for n, p in found if not n.endswith(".exe")])
     except exepin.ExePinError as e:
         raise Red(str(e))
     for name, path in found:
