@@ -1,6 +1,29 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_ehoracle.py": {
+   "references": [
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/except_i386.c"
+    },
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/cppexcept.h"
+    },
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/cpp.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/ehoracle.py",
+    "ports/fnv-nx/lift/proof/wine_pin.json"
+   ]
+  },
   "test_formgate.py": {
    "references": [
     {

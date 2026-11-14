@@ -1,0 +1,26 @@
+{
+ "format": "fnvnx-winepin/1",
+ "external": {"name": "wine-msvcrt", "repo": "fnv-nx-build", "ref": "tools/wine-9.0-msvcrt", "commit": "f3e6148c46ab9d1899a0bd54510ff3c33329eb68", "tree_sha256": "c229dfa72bf2b2bcebca83235fa4e1e1b369f9cc917e797e3bac254d1d38ffaf", "at": "/ext/wine-msvcrt"},
+ "source": "https://github.com/wine-mirror/wine tag wine-9.0",
+ "files": {
+  "dlls/msvcrt/cpp.c": "76c8a1fc3dcc7b603604ed071cf6b7bf078acd62d33ad405e1b8069bc2158edf",
+  "dlls/msvcrt/cppexcept.h": "25a5f42265b87e9eba9b610e7f1aabad2af73ee4eaa55029fc364b091b1f0c09",
+  "dlls/msvcrt/except_i386.c": "6bf4085b0074f95f58cf22922cd1429c31fee94c508776508af46acc1c918adf"
+ },
+ "rules": [
+  ["dlls/msvcrt/except_i386.c", 142, "#define TRYLEVEL_END (-1)"],
+  ["dlls/msvcrt/except_i386.c", 249, "find_caught_type( cxx_exception_type *exc_type,"],
+  ["dlls/msvcrt/except_i386.c", 305, "static void cxx_local_unwind( cxx_exception_frame* frame"],
+  ["dlls/msvcrt/except_i386.c", 330, "catch_function_nested_handler("],
+  ["dlls/msvcrt/except_i386.c", 374, "static inline void call_catch_block("],
+  ["dlls/msvcrt/except_i386.c", 555, "DWORD CDECL cxx_frame_handler( PEXCEPTION_RECORD rec, cxx_exception_frame* frame,"],
+  ["dlls/msvcrt/except_i386.c", 656, "__ASM_GLOBAL_FUNC( __CxxFrameHandler,"],
+  ["dlls/msvcrt/except_i386.c", 768, "static void msvcrt_local_unwind2("],
+  ["dlls/msvcrt/except_i386.c", 794, "static void msvcrt_local_unwind4("],
+  ["dlls/msvcrt/except_i386.c", 863, "int CDECL _except_handler3("],
+  ["dlls/msvcrt/except_i386.c", 932, "int CDECL _except_handler4_common("],
+  ["dlls/msvcrt/except_i386.c", 946, "FIXME: no cookie validation yet"],
+  ["dlls/msvcrt/cpp.c", 1020, "void WINAPI _CxxThrowException( void *object, const cxx_exception_type *type )"],
+  ["dlls/msvcrt/cppexcept.h", 26, "CXX_FRAME_MAGIC_VC6 0x19930520"]
+ ]
+}

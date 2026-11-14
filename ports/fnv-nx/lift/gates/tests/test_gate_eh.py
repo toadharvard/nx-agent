@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Self-test of gates/gate_eh.py on synthetic packs and synthetic ehtables.json (no game data).   python3 -I tests/test_gate_eh.py"""
-import copy, json, os, subprocess, sys, tempfile, unittest
+import copy, hashlib, json, os, subprocess, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.dirname(HERE), 'gate_eh.py')
 h = lambda a: '0x%08x' % a
 
@@ -43,6 +43,18 @@ class T(unittest.TestCase):
             p = self.fx + ('/ehtables.json' if name == 'exe' else '/' + name)
             if name != 'exe': os.makedirs(p, exist_ok=True); p += '/ehtables.json'
             json.dump(J, open(p, 'w'))
+        self.oracle_write()
+    def oracle_write(self, findings=None, mut=None):
+        """EHFACTS/ehoracle.json as the conformance oracle writes it for the facts now on disk (the gate binds it to the oracle, the Wine pin and each facts file by sha256)"""
+        proof = os.path.join(os.path.dirname(HERE), '..', 'proof')
+        sha = lambda q: hashlib.sha256(open(q, 'rb').read()).hexdigest()
+        imgs = []
+        for name in sorted(self.bases):
+            q = self.fx + ('/ehtables.json' if name == 'exe' else '/' + name + '/ehtables.json')
+            if os.path.isfile(q): imgs.append({'image': 'FalloutNV' if name == 'exe' else name, 'facts_sha256': sha(q), 'findings': list((findings or {}).get(name, []))})
+        R = {'format': 'fnvnx-ehoracle/1', 'oracle_sha256': sha(os.path.join(proof, 'ehoracle.py')), 'wine_sha256': json.load(open(os.path.join(proof, 'wine_pin.json')))['files'], 'images': imgs}
+        if mut: mut(R)
+        json.dump(R, open(self.fx + '/ehoracle.json', 'w'))
     def run_gate(self):
         r = subprocess.run([sys.executable, '-I', GATE, self.pack, self.fx], env=dict(os.environ, GATE_OUT=self.out), capture_output=True, text=True)
         res = json.load(open(self.out + '/eh.json')); self.assertEqual(res['format'], 'fnvnx-gate/1'); self.assertEqual(res['name'], 'eh')
@@ -115,5 +127,19 @@ class T(unittest.TestCase):
         def f(n, J): J['funcinfo'][0]['unwind'] = [[-1, h(0x500000 + 4 * i + (0 if n == 'exe' else 0x10000000))] for i in range(80)]
         self.pack_write(); self.facts_write(f); r = self.run_gate(); self.assertEqual(len(r['uncertified']), 50); self.assertEqual(r['uncertified'], sorted(r['uncertified']))
         self.assertEqual(r['status'], 'red')
+
+    def test_conformance_finding_is_red_per_image(self):
+        self.pack_write(); self.facts_write(); self.oracle_write({'mod': [{'kind': 'catch_address', 'site': '0x10000040'}]}); r = self.run_gate()
+        self.assertEqual(r['status'], 'red'); self.assertEqual(list(r['violations']), ['mod']); self.assertEqual(r['violations']['mod']['eh-conformance']['first'], ['catch_address:0x10000040'])
+    def test_no_oracle_report_red(self):
+        self.pack_write(); self.facts_write(); os.remove(self.fx + '/ehoracle.json'); r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertIn('no ehoracle.json', r['detail'])
+    def test_report_of_other_facts_red(self):
+        self.pack_write(); self.facts_write(); J = json.load(open(self.fx + '/ehtables.json')); J['conts'] = {}; json.dump(J, open(self.fx + '/ehtables.json', 'w'))
+        r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertIn('another ehtables.json', r['detail'])
+    def test_report_of_other_oracle_or_wine_red(self):
+        self.pack_write(); self.facts_write(); self.oracle_write(mut=lambda R: R.update(oracle_sha256='0' * 64)); r = self.run_gate(); self.assertIn('another ehoracle.py', r['detail'])
+        self.oracle_write(mut=lambda R: R['wine_sha256'].update({'dlls/msvcrt/cpp.c': '1' * 64})); r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertIn('Wine files', r['detail'])
+    def test_report_missing_an_image_red(self):
+        self.pack_write(); self.facts_write(); self.oracle_write(mut=lambda R: R['images'].pop()); r = self.run_gate(); self.assertEqual(r['status'], 'red'); self.assertIn('covers images', r['detail'])
 
 if __name__ == '__main__': unittest.main()

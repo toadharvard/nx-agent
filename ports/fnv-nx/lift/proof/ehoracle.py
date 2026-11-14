@@ -23,6 +23,7 @@ Findings: every difference between the oracle's table (parsed from the bytes) an
 global counts: tables, states, type entries, decision rows, and the number that agree.
 """
 import argparse
+import hashlib
 import json
 import os
 import struct
@@ -263,6 +264,233 @@ def seh_table(scope):
     return {lv: (seh_chain(scope['entries'], lv, end), seh_cleanup(scope['entries'], lv, end)) for lv in range(n)}
 
 
+# ---------------------------------------------------------------- the universe by rule: decoded code (capstone), the function spans of the facts as the decoding frame
+import re
+import capstone
+
+FH_NAMES = ('__CxxFrameHandler', '__CxxFrameHandler3', '__CxxFrameHandler4')     # the frame handlers a FuncInfo thunk may reach (cppexcept.h; except_i386.c:651-674)
+THROW_NAME = '_CxxThrowException'                                                  # cpp.c:1017-1050 (stdcall (object, throwinfo))
+CXX_EXCEPTION = 0xe06d7363                                                         # cppexcept.h:25
+_MD = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+_MD.skipdata = False
+
+
+def load_entries(path):
+    """facts universe.tsv: [(entry, extent)] (the function spans the lifter takes; the oracle only uses them as the frame it decodes in)."""
+    out = []
+    for ln in open(path):
+        if ln.startswith('#') or not ln.strip():
+            continue
+        c = ln.split('\t')
+        out.append((int(c[0], 16), int(c[2])))
+    return out
+
+
+def imports_of(img):
+    """{slot VA: name} of the image's import address table (ordinal imports: '#n')."""
+    out = {}
+    for d in getattr(img.pe, 'DIRECTORY_ENTRY_IMPORT', []):
+        for i in d.imports:
+            out[img.base + (i.address - img.pref)] = i.name.decode('latin1') if i.name else '#%d' % i.ordinal
+    return out
+
+
+def decode(img, a, n):
+    """the instructions of [a, a + n) decoded linearly: [(address, size, mnemonic, op_str)]."""
+    o = a - img.base
+    if o < 0 or o + n > img.size:
+        n = max(0, min(n, img.size - o))
+    return [(i.address, i.size, i.mnemonic, i.op_str) for i in _MD.disasm(bytes(img.mem[o:o + n]), a)]
+
+
+def decode_all(img, entries):
+    """{entry: instruction list} for the spans (each decoded once, in its own frame)."""
+    return {a: decode(img, a, n) for a, n in entries}
+
+
+_RE_IMM = re.compile(r'^0x[0-9a-f]+$')
+_RE_SLOT = re.compile(r'^dword ptr \[(0x[0-9a-f]+)\]$')
+
+
+def _imm(tok):
+    tok = tok.strip()
+    if re.match(r'^[0-9]+$', tok):
+        return int(tok)
+    return int(tok, 16) if _RE_IMM.match(tok) else None
+
+
+def thunk_sites(streams):
+    """every decoded adjacent pair `mov eax, imm32` ; `jmp T` (T direct, or `jmp [slot]`) -> [(site, imm, kind, T or slot)]."""
+    out = []
+    for ins in streams.values():
+        for k in range(len(ins) - 1):
+            a, b = ins[k], ins[k + 1]
+            if a[2] == 'mov' and a[1] == 5 and a[3].startswith('eax, ') and b[2] == 'jmp' and b[0] == a[0] + 5:
+                v = _imm(a[3][5:])
+                if v is None:
+                    continue
+                m = _RE_SLOT.match(b[3])
+                t = _imm(b[3])
+                if m:
+                    out.append((a[0], v, 'slot', int(m.group(1), 16)))
+                elif t is not None:
+                    out.append((a[0], v, 'direct', t))
+    return out
+
+
+def fh_target(img, t, kind, imps, stream_at):
+    """does the jump of a thunk reach a frame handler? -> (True, proof) | (False, why).  Rules, decided on decoded code:
+    (R-a) the target is `jmp [slot]` (or its body calls / jumps through a slot) and the slot's import name is a frame handler (the IAT carries the name: msvcrt / vcruntime);
+    (R-b) a static copy (the CRT linked in): the function stores the entry eax (the FuncInfo operand, __CxxFrameHandler's calling convention, except_i386.c:656-672 passes eax as
+          `descr`) in a local before it changes eax, and pushes that local as an argument of its first call (the descr parameter of the internal handler)."""
+    if kind == 'slot':
+        nm = imps.get(t)
+        return (nm in FH_NAMES, 'import ' + str(nm))
+    body = stream_at(t)
+    if not body:
+        return (False, 'no decoded body at target')
+    if body[0][2] == 'jmp':
+        m = _RE_SLOT.match(body[0][3])
+        if m:
+            nm = imps.get(int(m.group(1), 16))
+            return (nm in FH_NAMES, 'import ' + str(nm))
+    for ins in body:
+        if ins[2] in ('call', 'jmp'):
+            m = _RE_SLOT.match(ins[3])
+            if m and imps.get(int(m.group(1), 16)) in FH_NAMES:
+                return (True, 'calls import ' + imps[int(m.group(1), 16)])
+        if ins[2] == 'ret':
+            break
+    saved = None
+    for ins in body:
+        if ins[2] == 'call':
+            return (False, 'first call reached without passing the entry eax')
+        m = re.match(r'^dword ptr \[ebp - (0x[0-9a-f]+|[0-9]+)\], eax$', ins[3]) if ins[2] == 'mov' else None
+        if saved is None and m:
+            saved = m.group(1)
+            continue
+        if saved is None and ins[3].split(',')[0].strip() == 'eax' and ins[2] in ('mov', 'xor', 'lea', 'add', 'sub', 'and', 'or', 'pop'):
+            return (False, 'eax changed before it was saved')
+        if saved is not None and ins[2] == 'push' and ins[3] == 'dword ptr [ebp - %s]' % saved:
+            return (True, 'static copy: entry eax passed to the internal handler')
+    return (False, 'no pass-through of the entry eax')
+
+
+def throwers_of(img, streams, imps):
+    """-> (entries of static throwers, IAT slots of the thrower).  A static thrower builds a C++ exception record (ExceptionCode 0xe06d7363, cpp.c:1020-1046): it either
+    stores the immediate into the record (`mov [m], 0xe06d7363`: a store, not a compare) or copies a record template whose first dword is the code (`mov esi, T` ; rep movsd,
+    dword at T == 0xe06d7363).  Frame handlers only COMPARE the code (cmp / jne), so they are not throwers."""
+    slots = {s for s, n in imps.items() if n == THROW_NAME}
+    ents = set()
+    for a, ins in streams.items():
+        for k, i in enumerate(ins):
+            if i[2] == 'mov' and i[3].startswith('dword ptr [') and i[3].endswith(', 0xe06d7363'):
+                ents.add(a)
+            elif i[2] == 'mov' and i[3].startswith('esi, '):
+                v = _imm(i[3][5:])
+                if v is not None and img.inside(v + 3) and img.u32(v) == 0xe06d7363 and any(j[2] == 'rep movsd' for j in ins[k:k + 6]):
+                    ents.add(a)
+    for a, ins in streams.items():                                                 # a stub is a function whose whole body is `jmp [thunk slot]` / `jmp thrower`: calls to it are throw sites
+        if len(ins) == 1 and ins[0][2] == 'jmp':
+            m = _RE_SLOT.match(ins[0][3])
+            t = _imm(ins[0][3])
+            if (m and int(m.group(1), 16) in slots) or (t is not None and t in ents):
+                ents.add(a)
+    return ents, slots
+
+
+def throw_args(streams, ents, slots):
+    """every call (or tail jump) of the thrower -> [(site, ('const', v) | ('unresolved', why))]; the 2nd stack argument (arg 2 = ThrowInfo; arg 1 = the object).
+    A stub's own `jmp` is the stub's body, not a site.  A span that starts at a block boundary continues into every path that reaches the boundary: the fall-through
+    (the span that ends right before it, when it does not end in jmp / ret) and every decoded direct jmp / jcc whose target is the boundary (the instructions before the
+    branch in its span).  The ThrowInfo is the value when every path gives the same constant; any other case is unresolved (a call that targets the boundary is a function entry:
+    unresolved).  Paths are followed one boundary deep; anything deeper stays unresolved."""
+    srcs, calls = {}, set()
+    for a, ins in streams.items():
+        for m, i in enumerate(ins):
+            t = _imm(i[3]) if (i[2] == 'call' or i[2] == 'jmp' or i[2].startswith('j')) else None
+            if t is None:
+                continue
+            if i[2] == 'call':
+                calls.add(t)
+            else:
+                srcs.setdefault(t, []).append(ins[:m])
+    ends = {}
+    for a, ins in streams.items():
+        if ins:
+            ends.setdefault(ins[-1][0] + ins[-1][1], []).append(a)
+    stubs = {a for a, ins in streams.items() if len(ins) == 1 and ins[0][2] == 'jmp' and a in ents}
+    out = []
+    for a, ins in streams.items():
+        if a in stubs:
+            continue
+        paths = []
+        for pa in ends.get(a, []):
+            last = streams[pa][-1][2]
+            if last not in ('jmp', 'ret', 'retn') and not (last.startswith('j') and False):
+                paths.append(streams[pa])
+        paths += srcs.get(a, [])
+        for k, i in enumerate(ins):
+            if i[2] not in ('call', 'jmp'):
+                continue
+            t, m = _imm(i[3]), _RE_SLOT.match(i[3])
+            if not ((t is not None and t in ents) or (m and int(m.group(1), 16) in slots)):
+                continue
+            r = _resolve_arg2(ins, k)
+            if r[0] != 'const' and r[1] in ('start of span before the second push', 'register not set in the span'):
+                if a in calls or not paths:
+                    r = ('unresolved', 'span is a function entry or has no predecessor path')
+                else:
+                    rs = [_resolve_arg2(p + ins, k + len(p)) for p in paths]
+                    vals = {x[1] for x in rs if x[0] == 'const'}
+                    r = ('set', tuple(sorted(vals))) if all(x[0] == 'const' for x in rs) else ('unresolved', 'a path into the block does not resolve: %s' % sorted({str(x) for x in rs})[:2])
+                    if r[0] == 'set' and len(r[1]) == 1:
+                        r = ('const', r[1][0])
+            out.append((i[0], r))
+    return out
+
+
+def _resolve_arg2(ins, k):
+    pushes, j = 0, k - 1
+    while j >= 0:
+        m, op = ins[j][2], ins[j][3]
+        if m == 'push':
+            pushes += 1
+            if pushes == 2:
+                v = _imm(op)
+                if v is not None:
+                    return ('const', v)
+                if re.match(r'^e[a-d]x$|^e[sd]i$|^ebp$', op):
+                    return _resolve_reg(ins, j, op)
+                return ('unresolved', 'push %s' % op)
+        elif m in ('call', 'jmp', 'ret', 'add', 'sub', 'pop', 'leave') or m.startswith('j'):
+            if m in ('add', 'sub') and not op.startswith('esp'):
+                pass
+            elif m == 'pop' or m in ('add', 'sub'):
+                return ('unresolved', 'stack adjusted before the second push')
+            else:
+                return ('unresolved', 'control flow before the second push')
+        j -= 1
+    return ('unresolved', 'start of span before the second push')
+
+
+def _resolve_reg(ins, j, reg):
+    while j > 0:
+        j -= 1
+        m, op = ins[j][2], ins[j][3]
+        a = op.split(',')[0].strip()
+        if m in ('call', 'ret') or m.startswith('j') or m == 'jmp':
+            return ('unresolved', 'control flow before the register is set')
+        if a == reg or (m in ('mul', 'imul', 'div', 'idiv', 'cdq', 'cwde', 'xchg', 'rep movsd', 'lodsd') and reg in ('eax', 'edx')):
+            if m == 'mov':
+                v = _imm(op.split(',', 1)[1])
+                return ('const', v) if v is not None else ('unresolved', 'mov %s' % op)
+            if m == 'xor' and op.split(',')[1].strip() == reg:
+                return ('const', 0)
+            return ('unresolved', '%s %s' % (m, op))
+    return ('unresolved', 'register not set in the span')
+
+
 # ---------------------------------------------------------------- the lifter's side: facts -> the same structures
 def facts_descr(f):
     hx = lambda v: int(v, 16) if isinstance(v, str) else v
@@ -331,24 +559,52 @@ def candidates(img):
     return out
 
 
-def check_image(name, img, facts, throws_all, mangled_of):
+def check_image(name, img, facts, throws_all, mangled_of, entries):
     """-> report dict for one image: counts and findings."""
     rep = dict(image=name, base=img.base, relocs=img.relocs, tables=dict(funcinfo=0, scope=0, throwinfo=0), states=0, type_entries=0, rows=0, agree_rows=0,
                fields_checked=0, findings=[])
     F = rep['findings']
-    # FuncInfo: the union of the oracle's own candidates and the facts' addresses
-    cand = set(candidates(img))
+    # FuncInfo universe BY RULE: the eax operands of the frame-handler thunks (`mov eax, imm32 ; jmp T`, T reaching a frame handler, see fh_target)
+    streams = decode_all(img, entries)
+    imps = imports_of(img)
+    by_entry = streams
+
+    def stream_at(t):
+        return by_entry.get(t) or decode(img, t, 0x100)
+    sites, fh_cache, universe, proofs = thunk_sites(streams), {}, {}, {}
+    for site, imm, kind, t in sites:
+        key = (kind, t)
+        if key not in fh_cache:
+            fh_cache[key] = fh_target(img, t, kind, imps, stream_at)
+        ok, why = fh_cache[key]
+        if ok:
+            universe.setdefault(imm, []).append(site)
+            proofs[why] = proofs.get(why, 0) + 1
+        elif img.inside(imm, 4) and img.u32(imm) in (CXX_FRAME_MAGIC_VC6, CXX_FRAME_MAGIC_VC7, CXX_FRAME_MAGIC_VC8):
+            F.append(dict(kind='thunk_operand_funcinfo_target_not_frame_handler', site='0x%08x' % site, why=why))
+    rep['thunk_sites'] = len(sites)
+    rep['frame_handler_thunks'] = sum(len(v) for v in universe.values())
+    rep['frame_handler_proofs'] = proofs
+    cand = set(universe)
     fact_addrs = {hx(f['addr']): f for f in facts['funcinfo']}
-    rep['empty_descriptors_not_in_facts'] = []
     for a in sorted(cand - set(fact_addrs)):
-        d0 = parse_descr(img, a)
-        if not d0['unwind'] and not d0['tries']:
-            # no unwind entry and no tryblock: cxx_frame_handler returns ExceptionContinueSearch (:570-580) for every state and kind, the decision table is empty
-            rep['empty_descriptors_not_in_facts'].append('0x%08x' % a)
-        else:
-            F.append(dict(kind='funcinfo_not_in_facts', addr='0x%08x' % a))
+        F.append(dict(kind='funcinfo_not_in_facts', addr='0x%08x' % a))
     for a in sorted(set(fact_addrs) - cand):
         F.append(dict(kind='funcinfo_not_found_by_oracle', addr='0x%08x' % a))
+    # cross-check: the magic scan (a pattern, not a rule). A hit outside the universe needs a PROOF that no frame-handler thunk reaches it.
+    rep['magic_not_funcinfo'] = []
+    for a in candidates(img):
+        if a in cand:
+            continue
+        d0 = parse_descr(img, a)
+        if not proofs and not any(n in FH_NAMES for n in imps.values()):
+            proof = 'the image has no frame-handler thunk (no import of %s and no static copy)' % '/'.join(FH_NAMES)
+        elif not any(i[1] == a for i in sites):
+            proof = 'no `mov eax, imm32 ; jmp` thunk in the decoded spans names it'
+        else:
+            F.append(dict(kind='magic_hit_with_thunk_to_non_frame_handler', addr='0x%08x' % a))
+            continue
+        rep['magic_not_funcinfo'].append(dict(addr='0x%08x' % a, unwind=len(d0['unwind']), tries=len(d0['tries']), proof=proof))
     for a in sorted(cand & set(fact_addrs)):
         rep['tables']['funcinfo'] += 1
         try:
@@ -427,7 +683,34 @@ def check_image(name, img, facts, throws_all, mangled_of):
                 rep['agree_rows'] += 1
             else:
                 F.append(dict(kind='scope_decision', addr='0x%08x' % a, level=lv))
-        # the frame handler that registers the table must be a V3 / V4 handler of the right kind: recorded, not decided here (a code fact)
+        if ver == 4:                                                              # _except_handler4_common (:932-990): Wine 9.0 has NO cookie validation
+            rep['v4_tables'] = rep.get('v4_tables', 0) + 1                        # (:946 "/* FIXME: no cookie validation yet */", pinned in wine_pin.json); the header offsets are read, the decision is "not checked"
+            gs, eh = sc['header'][0], sc['header'][2]
+            rep['v4_gs_cookie_tables'] = rep.get('v4_gs_cookie_tables', 0) + (1 if gs != -2 else 0)
+            rep['v4_eh_cookie_tables'] = rep.get('v4_eh_cookie_tables', 0) + (1 if eh != -2 else 0)
+    # throw sites: every call (or tail jump) of the thrower, its ThrowInfo argument resolved on decoded code
+    ents, slots = throwers_of(img, streams, imps)
+    ta = throw_args(streams, ents, slots)
+    rep['throwers'] = dict(static=len(ents), import_slots=len(slots))
+    rep['throw_sites'] = len({x for x, _ in ta})
+    rep['throw_resolved'] = {}
+    rep['throw_unresolved'] = []
+    for site, r in ta:
+        if r[0] in ('const', 'set'):
+            rep['throw_resolved'][site] = tuple(r[1]) if r[0] == 'set' else (r[1],)
+        else:
+            rep['throw_unresolved'].append((site, r[1]))
+            F.append(dict(kind='throw_site_unresolved', site='0x%08x' % site, why=r[1]))
+    fsites = {hx(x['site']): (hx(x['ti']) if x['ti'] is not None else None) for x in facts['throw_sites']}
+    for site in sorted((set(rep['throw_resolved']) ^ set(fsites)) - set(x for x, _ in rep['throw_unresolved'])):
+        F.append(dict(kind='throw_site_set', site='0x%08x' % site, oracle=site in rep['throw_resolved'], lifter=site in fsites))
+    for site, tis in rep['throw_resolved'].items():
+        if site not in fsites:
+            continue
+        if fsites[site] is None:
+            F.append(dict(kind='lifter_throw_site_ti_unresolved', site='0x%08x' % site, oracle=['0x%08x' % x for x in tis]))   # the oracle resolves it (paths into a join), the lifter's facts do not
+        elif tis != (fsites[site],):
+            F.append(dict(kind='throw_site_ti', site='0x%08x' % site, oracle=['0x%08x' % x for x in tis], lifter='0x%08x' % fsites[site]))
     return rep
 
 
@@ -446,12 +729,36 @@ def selftest():
     assert seh_chain(e, 2, -1) == [(2, 0, 8), (1, 6, 7), (0, 0, 5)] and seh_cleanup(e, 2, -1) == [0x8, 0x5] and seh_chain(e, 5, -1) == TERMINATE
 
 
+def check_wine(wdir, pin_path=None):
+    """the pinned Wine 9.0 reference: every file's sha256 equals wine_pin.json, and every cited rule is at its line of that file (the text the oracle's rules are transcribed from).
+    -> (findings, {file: sha256})"""
+    pin = json.load(open(pin_path or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wine_pin.json')))
+    F, sh = [], {}
+    for f, want in sorted(pin['files'].items()):
+        try:
+            b = open(os.path.join(wdir, f), 'rb').read()
+        except OSError as e:
+            F.append(dict(kind='wine_file_missing', file=f, why=str(e)))
+            continue
+        sh[f] = hashlib.sha256(b).hexdigest()
+        if sh[f] != want:
+            F.append(dict(kind='wine_file_sha', file=f, have=sh[f], pinned=want))
+    for f, line, needle in pin['rules']:
+        if f not in sh:
+            continue
+        ls = open(os.path.join(wdir, f), 'rb').read().decode('latin1').split('\n')
+        if not (0 < line <= len(ls)) or needle not in ls[line - 1]:
+            F.append(dict(kind='wine_rule_citation', file=f, line=line, needle=needle))
+    return F, sh
+
+
 def main(argv):
     selftest()
     ap = argparse.ArgumentParser()
     ap.add_argument('--facts', required=True)
     ap.add_argument('--game', required=True)
     ap.add_argument('--redist', required=True)
+    ap.add_argument('--wine', required=True, help='the pinned Wine 9.0 tree (external of wine_pin.json)')
     ap.add_argument('--out')
     a = ap.parse_args(argv)
     images = [('FalloutNV', os.path.join(a.game, 'FalloutNV.exe'), os.path.join(a.facts, 'ehtables.json'))]
@@ -475,13 +782,36 @@ def main(argv):
             if img.inside(ptr + 8):
                 return img.cstr(ptr + 8).decode('latin1')
         return ''
-    reps = [check_image(name, img, facts, throws, mangled_of) for name, img, facts in loaded]
+    wf, wsha = check_wine(a.wine)
+    reps = []
+    for name, img, facts in loaded:
+        up = os.path.join(a.facts, 'universe.tsv') if name == 'FalloutNV' else os.path.join(a.facts, name, 'universe.tsv')
+        reps.append(check_image(name, img, facts, throws, mangled_of, load_entries(up)))
+    resolved = {x for r in reps for v in r['throw_resolved'].values() for x in v if x}
+    known = {t['addr'] for t in throws}
+    if resolved != known:
+        reps[0]['findings'].append(dict(kind='throwinfo_set', only_resolved=sorted('0x%08x' % x for x in resolved - known), only_tables=sorted('0x%08x' % x for x in known - resolved)))
     tot = dict(images=len(reps), funcinfo=sum(r['tables']['funcinfo'] for r in reps), scope=sum(r['tables']['scope'] for r in reps),
                throwinfo=sum(r['tables']['throwinfo'] for r in reps), states=sum(r['states'] for r in reps), type_entries=sum(r['type_entries'] for r in reps),
                rows=sum(r['rows'] for r in reps), agree_rows=sum(r['agree_rows'] for r in reps), fields_checked=sum(r['fields_checked'] for r in reps),
                findings=sum(len(r['findings']) for r in reps), exception_kinds=1 + len(throws))
-    tot['empty_descriptors_not_in_facts'] = sum(len(r['empty_descriptors_not_in_facts']) for r in reps)
-    out = dict(format='fnvnx-ehoracle/1', totals=tot, images=reps)
+    tot['magic_not_funcinfo'] = sum(len(r['magic_not_funcinfo']) for r in reps)
+    tot['thunk_sites'] = sum(r['thunk_sites'] for r in reps)
+    tot['frame_handler_thunks'] = sum(r['frame_handler_thunks'] for r in reps)
+    tot['throw_sites'] = sum(r['throw_sites'] for r in reps)
+    tot['throw_unresolved'] = sum(len(r['throw_unresolved']) for r in reps)
+    tot['throwinfo_resolved_distinct'] = len(resolved)
+    tot['v4_tables'] = sum(r.get('v4_tables', 0) for r in reps)
+    tot['v4_gs_cookie_tables'] = sum(r.get('v4_gs_cookie_tables', 0) for r in reps)
+    tot['v4_eh_cookie_tables'] = sum(r.get('v4_eh_cookie_tables', 0) for r in reps)
+    reps[0]['findings'].extend(wf)
+    for r, (name, path, fp) in zip(reps, images):                                  # the report is bound to the exact inputs it judged
+        r['image_sha256'] = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+        r['facts_sha256'] = hashlib.sha256(open(fp, 'rb').read()).hexdigest()
+    tot['wine_findings'] = len(wf)
+    tot['findings'] = sum(len(r['findings']) for r in reps)
+    out = dict(oracle_sha256=hashlib.sha256(open(os.path.abspath(__file__), 'rb').read()).hexdigest(), wine_sha256=wsha, format='fnvnx-ehoracle/1', totals=tot, images=reps,
+               v4_cookie_rule='Wine 9.0 except_i386.c _except_handler4_common (:932-990, FIXME at :946) performs NO GS / EH cookie validation ("FIXME: no cookie validation yet"); the header offsets are recorded per table, the decision rows do not depend on the cookie')
     if a.out:
         json.dump(out, open(a.out, 'w'), indent=1)
     for r in reps:
