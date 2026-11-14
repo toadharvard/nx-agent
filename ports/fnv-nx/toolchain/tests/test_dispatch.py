@@ -59,16 +59,19 @@ def checks(obj):
 def main():
     td = tempfile.mkdtemp(prefix='test-dispatch-')
     try:
-        so = [pb.build(n, td) for n in ('sdd', 'names', 'dispatch')]
+        so = [pb.build(n, td) for n in ('sdd', 'names', 'dispatch')]   # the .so of each: all 8 are loaded by every root
         out = os.path.join(td, 't.o')
         r = pb.compile(FIX, out, so)
         check('compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             checks(out)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_dispatch-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
-        r = pb.compile(FIX, os.path.join(td, 'y.o'), [so[0], so[2]])
-        check('without the names plugin the dispatcher says so', r.returncode != 0 and 'fnvnx_names plugin is not loaded' in r.stderr, r.stderr[:500])
+        check('a plugin argument is an error: the recipe fixes them', r.returncode != 0 and 'arguments must be' in r.stderr and 'fnvnx_dispatch' in r.stderr, r.stderr[:500])
+        try:   # the dispatcher needs the names plugin; by construction a guest root cannot omit it
+            pb._recipe(td, [('sdd', {}), ('dispatch', {})], {'t.cpp': 'int t();\n'}, pb.PRODUCT_FLAGS, raw=True)
+            check('a root without the names plugin is red', False)
+        except pb.recipe.RecipeError as e:
+            check('a root without the names plugin is red', any('fnvnx_names' in x for x in e.errors), e.errors)
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

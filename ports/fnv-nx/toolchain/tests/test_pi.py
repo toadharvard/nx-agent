@@ -176,18 +176,18 @@ def main():
     try:
         so = pb.build('pi', td)
         obj = os.path.join(td, 'pi.o')
-        r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), obj, [so], args=['-w'])
+        r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), obj, [so])
         check('pi.cpp compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             legacy(obj)
         obj = os.path.join(td, 'effect.o')
-        r = pb.compile(os.path.join(HERE, 'pi', 'effect.cpp'), obj, [so], args=['-w'])
+        r = pb.compile(os.path.join(HERE, 'pi', 'effect.cpp'), obj, [so])
         check('effect.cpp compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             effect(obj)
         for arg in ('mode=1', 'fpfast'):
-            r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), os.path.join(td, 'x.o'), [so], args=['-w', '-fplugin-arg-fnvnx_pi-' + arg])
-            check('unknown plugin argument %s is an error' % arg, r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+            r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), os.path.join(td, 'x.o'), [so], args=['-fplugin-arg-fnvnx_pi-' + arg])
+            check('a plugin argument (%s) is an error: the recipe fixes them' % arg, r.returncode != 0 and 'arguments must be' in r.stderr, r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
