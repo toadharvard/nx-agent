@@ -29,7 +29,8 @@ extern "C" {
 /* ---- process */
 void os_debug_print(const char *s);         /* one line to the debug log (stderr / svcOutputDebugString) */
 void os_exit_process(int code) __attribute__((noreturn));
-unsigned os_cpu_count(void);                /* cores the game may use */
+unsigned os_cpu_count(void);                /* the declared processor count (FNVNX_NPROC) */
+uint32_t os_cpu_mask(void);                 /* the declared affinity mask (FNVNX_APP_CORES) */
 uint32_t os_process_id(void);
 void os_memory_info(uint64_t *total_phys, uint64_t *avail_phys);
 uint32_t os_random32(void);                 /* non-cryptographic quality is enough */

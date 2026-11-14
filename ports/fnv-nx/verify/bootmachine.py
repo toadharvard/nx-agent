@@ -96,7 +96,7 @@ REACH_VIOLATION = 0x52   # top byte of a guest exit code 0x52000000 | fact_id: a
 SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "system_tick", "system_tick_freq",
          "thread_create", "thread_start", "thread_join", "thread_free", "thread_exit", "thread_yield",
          "thread_set_priority", "thread_set_cpu", "wait_on_address", "wake_address", "wall_time_us",
-         "random64", "memory_info", "cpu_count",
+         "random64", "memory_info",
          "fs_open", "fs_read", "fs_write", "fs_pread", "fs_pwrite", "fs_seek", "fs_truncate", "fs_sync",
          "fs_fstat", "fs_close", "fs_stat", "fs_mkdir", "fs_rmdir", "fs_remove", "fs_rename", "fs_dir_open",
          "fs_dir_next", "fs_dir_close",
