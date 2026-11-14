@@ -521,3 +521,9 @@ Paused: w3b, w4, farm; no other work.
     - Mirror 532cbebc (tree c9b1f0d7…24fd4).
     - guest 8 / host 8 objects green.
     - Next: TLS census (first), then objstub per root, then rule-A (c) with w20's fnvnx_reach.h fact id.
+- 23:39Z TLS census (w1b, 38ffed282): 5 STT_TLS symbols, all in mojoshader_profile_glsl.c.o.
+    - They are `static __thread`, :30-33, holding the per-call dk tables, complete and flat.
+    - Guest relocations are local-exec; host relocations are local-dynamic (__tls_get_addr).
+    - Decision (rule): per-call translator inputs are arguments. They move into the parse context as one nonnull dk config, and the 5 variables are deleted.
+    - Result: 0 TLS on both targets. reach_census goes red on any TLS symbol or relocation. No guest-TLS model is needed for the translator.
+    - w1b is doing it (7th patch).
