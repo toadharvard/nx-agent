@@ -97,7 +97,7 @@ ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"\s*\|")
 
 
-LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".glsl": "c", ".sail": "sail", ".asm": "semi",
+LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".glsl": "c", ".map": "c", ".sail": "sail", ".asm": "semi",
          ".md": "markdown", ".sh": "shell", ".gitignore": "shell", ".toml": "toml",
          ".json": "data", ".tsv": "data", ".txt": "data", ".expect": "data", ".patch": "data"}
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
