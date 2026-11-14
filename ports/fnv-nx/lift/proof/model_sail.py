@@ -47,7 +47,7 @@ def ir_sha():
     if _irsha is None: _irsha = hashlib.sha256(open(IR, 'rb').read()).hexdigest()
     return _irsha
 
-EIP_LIMIT = 0xfffffff0       # symbolic-eip runs: the instruction (at most 16 bytes) lies below 2^32 (assumption ASM-013)
+EIP_LIMIT = 0xfffffff0       # symbolic-eip runs: the instruction (at most 16 bytes) lies below 2^32 (assumption A-EIPRANGE)
 
 def sym_constraint(code, ranges, eip_sym):
     """isla --reset-constraint text of a shape run: the instruction bytes outside `ranges` (the symbolic field byte ranges (off, size)) are the bytes of
@@ -64,27 +64,55 @@ SEG_FREE = tuple(x for i, x in enumerate(SEG) if x != 'seg_visibles=[#x002b; 6]'
 SYMSEL = False      # set by prove.prove_one: the Form reads the segment selectors (sel_*), so the six selectors of the initial state are free (isla gives each element a fresh symbol) instead of the literal 0x2b
 SELREG = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # isla prints the register seg_visibles (vector(6, dec, bits(16))) as (_ vec v0 .. v5), element i = rt/fnvl.h SEG_* i (checked: push ds / es / gs proved only in this order)
 
+def run_env_sha():
+    """sha256 of everything besides the IR text that determines an isla run (K, irdeps.py): the isla config, the pinned isla (sail_pins rows isla and isla-cargo-lock), the register inputs of the run (SEG, sym_constraint's text), the linearized
+    functions, the address / eip window and the cache-key version"""
+    h = hashlib.sha256()
+    h.update(open(CFG, 'rb').read())
+    with open(os.path.join(HERE, 'sail_pins.txt')) as fh:
+        for ln in fh:
+            f = ln.split()
+            if f and f[0] in ('isla', 'isla-cargo-lock', 'isla-vendor'): h.update(('|'.join(f) + '\n').encode())
+    import inspect
+    h.update(repr((SEG, SEG_FREE, LINEARIZE, EIP_LIMIT, ADDR, 'v1', inspect.getsource(sym_constraint))).encode())
+    return h.hexdigest()
+
+def closure_sha(fns):
+    """K key of a run: irdeps.closure_sha over the pinned IR file for the executed functions `fns` (LAST['fns'])"""
+    from proof import irdeps
+    return irdeps.sha_of_file(IR, fns, run_env_sha())
+
+FNS = []     # the functions the last run_isla executed (isla call events), sorted; K
+PROBE_LINE = re.compile(r'^\[\x1b\[\d+m\d+\s+\x1b\[0m\]: ')
+ERRCALL = re.compile(r'^\[\x1b\[\d+m\d+\s+\x1b\[0m\]: Calling x86_(?:fault|model_error)<')
+CALLING = re.compile(r'\]: Calling (\S+?)\(', re.M)
+
 def run_isla(code, timeout=600, sym=None):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
     if not os.path.exists(IR): raise RuntimeError('missing %s: run ports/fnv-nx/farm/sail_build.sh' % IR)
-    args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
+    args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])     # the cache key (kept: old outputs stay valid); the run itself probes every call, see below
     cons = sym_constraint(code, *sym) if sym else ''
     key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []) + ([cons] if sym else []))).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)
-    if os.path.exists(base + '.out') and os.path.exists(base + '.err'): return open(base + '.out').read(), open(base + '.err').read()
+    if all(os.path.exists(base + e) for e in ('.out', '.err', '.fns')):
+        with open(base + '.fns') as fh: FNS.clear(); FNS.extend(fh.read().split())
+        with open(base + '.out') as fo, open(base + '.err') as fe: return fo.read(), fe.read()
     if sym:
         regs = [] if sym[1] else ['-I', 'code_base=#x%012x' % ADDR, '-I', 'rip=#x%016x' % ADDR]
         regs += ['--reset-constraint', cons]
     else: regs = ['-I', 'code_base=#x%012x' % ADDR, '-I', 'code_bytes=#x' + code.ljust(16, b'\0')[::-1].hex(), '-I', 'rip=#x%016x' % ADDR]
-    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', str(timeout), 'x86_fetch_decode_execute', '()'] + regs + args + ['-D', 'p', '--traces', '--error-traces', '-s']
+    run_args = list(SEG_FREE if SYMSEL else SEG) + ['--probe-all'] + sum([['-L', f] for f in LINEARIZE], [])           # --probe-all only logs: every call event "Calling NAME(" names a function the run executed (K, irdeps.py)
+    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', str(timeout), 'x86_fetch_decode_execute', '()'] + regs + run_args + ['-D', 'p', '--traces', '--error-traces', '-s']
     env = dict(os.environ, LD_LIBRARY_PATH=Z3LIB + ':' + os.environ.get('LD_LIBRARY_PATH', ''))
     try: r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout + 20)     # isla's own --timeout is not honoured while z3 is busy
     except subprocess.TimeoutExpired:
         return 'Error Timeout\n(trace\n  (write-reg |Final result| nil (_ poison)))\n', 'hard timeout %ds\n' % (timeout + 20)
     if r.returncode not in (0, 1): raise RuntimeError('isla failed (%d): %s' % (r.returncode, r.stderr[-400:]))
-    open(base + '.out.tmp', 'w').write(r.stdout); open(base + '.err.tmp', 'w').write(r.stderr)
-    os.replace(base + '.err.tmp', base + '.err'); os.replace(base + '.out.tmp', base + '.out')
-    return r.stdout, r.stderr
+    fns = sorted(set(CALLING.findall(r.stderr))); FNS.clear(); FNS.extend(fns)
+    err = '\n'.join(l for l in r.stderr.split('\n') if not PROBE_LINE.match(l) or ERRCALL.match(l))             # the probe log is ~4 MB: keep the error-function calls (isla_errors, _post) and the non-probe lines
+    open(base + '.out.tmp', 'w').write(r.stdout); open(base + '.err.tmp', 'w').write(err); open(base + '.fns.tmp', 'w').write('\n'.join(fns) + '\n')
+    os.replace(base + '.err.tmp', base + '.err'); os.replace(base + '.out.tmp', base + '.out'); os.replace(base + '.fns.tmp', base + '.fns')
+    return r.stdout, err
 
 # ---------------------------------------------------------------------------------------------- s-expressions
 TOK = re.compile(r'\(|\)|\|[^|]*\||"[^"]*"|[^\s()]+')
@@ -271,7 +299,7 @@ def model_post(code, pre):
 def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
     """model_post for a whole encoding shape: `code` = representative bytes, fields = {name: (offset, size) | None} (imm / disp byte ranges), the bytes of
     the fields are the z3 variables fld_<name> (BitVec 8*size), eip is pre['eip'] (a variable when eip_sym: then code_base = rip = pre['eip'] and the
-    assumption eip < EIP_LIMIT (ASM-013) is part of `assume`; otherwise the constant 0x401000, assumption A-EIP in the certificate)"""
+    assumption eip < EIP_LIMIT (A-EIPRANGE) is part of `assume`; otherwise the constant 0x401000, assumption A-EIP in the certificate)"""
     rg = [(o, n) for o, n in (f for f in fields.values() if f)]; var = {nm: z3.BitVec('fld_' + nm, 8 * f[1]) for nm, f in fields.items() if f}
     byte = {}
     for nm, (o, n) in ((nm, f) for nm, f in fields.items() if f):
@@ -319,7 +347,7 @@ def zext_add_pairs(terms):
     return pairs
 
 def eip_nowrap(terms, eip):
-    """rewrite of model terms under the domain eip < EIP_LIMIT (it holds as a hypothesis of every query of a shape run): the 32-bit sum eip + K (K a small constant: the
+    """rewrite of model terms under the domain eip < EIP_LIMIT (every query of a shape run assumes it): the 32-bit sum eip + K (K a small constant: the
     offsets of the bytes of ONE instruction) zero-extended to a wider sort equals the wide sum zext(eip) + K, because eip + K < 2^32 cannot wrap.
     Without it z3 cannot see that the fetch index (rip + offset) - code_base is a constant and bit-blasts the 128-bit shifts of code_bytes.
     Also the unconditional zext_add_pairs identity.  terms -> simplified terms with every `zero_extend(eip + K)` / `concat(0, eip + K)` replaced"""
@@ -362,7 +390,7 @@ def _post(code, pre, out_err, extra, extra_assume=None):
     else: ret = {'regs': {r: merge(paths, lambda p: p.regs[r]) for r in pre['regs']}, 'flags': {f: merge(paths, lambda p: p.flags[f]) for f in FLAGBIT},
             'mem': merge(paths, lambda p: p.mem), 'eip': merge(paths, lambda p: p.eip)}
     asm = [s for p in paths for s in p.side]
-    LAST.clear(); LAST.update(paths=len(ok), fault_paths=len(faults))
+    LAST.clear(); LAST.update(paths=len(ok), fault_paths=len(faults), fns=list(FNS))
     side = list(asm); nofault = None
     if faults: nofault = z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, True, extra).pc for i, tr in enumerate(faults)])); asm.append(nofault)
     if asm: ret['assume'] = z3.And(*asm)

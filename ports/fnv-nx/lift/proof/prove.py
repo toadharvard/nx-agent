@@ -12,8 +12,8 @@ Reference model plug-in: a module of the MODELS table below (proof/model_sail.py
   ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': post-state Array, 'eip': BV32, optional 'assume': Bool (pre-states the model is defined on)}
   Other pre-state names shared with the model by name: fs_base, gs_base (BV32), rflags_other (BV32; DF = bit 10) which prove.py maps onto the DSL inputs df / flo.
   A model that cannot express the instruction raises an exception whose class is named ModelGap (result model-gap).
-Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) `assume` => DSL does not fault, and (2) for forms
-  without a memory operand, DSL does not fault => `assume` (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
+Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) assume => DSL does not fault, and (2) for forms
+  without a memory operand, DSL does not fault => assume (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
 Unobserved: the model interface returns neither DF nor the other EFLAGS bits; a form writing them is certified on its other fields only and reported model-gap."""
 import argparse, hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -25,7 +25,8 @@ ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 RFO = z3.BitVec('rflags_other', 32)
 SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RFO & 0xFFFFF328)]    # DSL inputs df / flo = bits of the model's free rflags_other
-SEVERITY = ['FAILED(dsl)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
+OBLIGATIONS = ('def0',)      # what a record of this prover certifies beyond the field equalities; certs_build refuses a record without it (stale-obligations)
+SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
 
 MODEL_FAULT = {1: r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
                7: r':NON-WRITABLE-SEGMENT$'}                                # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
@@ -73,7 +74,7 @@ def post_of(F):
     return r
 
 def check(conds, assume, args):
-    """`assume` AND (c1 OR ... OR cn) is checked as the n queries `assume` AND ci, one after the other (a complete case split of the disjunction: the disjunction is unsat iff
+    """assume AND (c1 OR ... OR cn) is checked as the n queries assume AND ci, one after the other (a complete case split of the disjunction: the disjunction is unsat iff
     every ci is; a sat ci gives a model of the whole).  Each query is much smaller than the disjunction (one register / flag / the memory), which the solver
     decides in seconds where the disjunction takes minutes.  -> (sat, solver with the model) | (unknown, s) at the first query that times out | (unsat, s)"""
     s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(assume)
@@ -89,6 +90,83 @@ def _nodes(roots):
         n = st.pop()
         if id(n) in seen: continue
         seen.add(id(n)); yield n; st.extend(n.a)
+
+FREE = re.compile(r'^[pf]\d+_')     # the fresh constants of a model path (model_sail.Env.fresh: tag_name): isla's undefined / nondeterministic values; every other constant is pre-state or a shape field
+def _free(terms):
+    """{name: z3 constant} of the model's fresh (undefined / nondeterministic) constants in the terms"""
+    out, seen, st = {}, set(), list(terms)
+    while st:
+        e = st.pop()
+        if e.get_id() in seen: continue
+        seen.add(e.get_id())
+        if z3.is_const(e) and e.decl().kind() == z3.Z3_OP_UNINTERPRETED and FREE.match(e.decl().name()): out[e.decl().name()] = e
+        st.extend(e.children())
+    return out
+
+def _zero(c): return z3.BoolVal(False) if c.sort().kind() == z3.Z3_BOOL_SORT else z3.BitVecVal(0, c.sort().size())
+
+def def0(M, D, flags, assume_d, side, args, extra, pre=None):
+    """DEF0 + DEFPRIOR (owner / orchestrator / L3a, 2026-11-12).  The lifter writes the constant 0 to every flag the Form declares architecturally undefined (DEF0) and leaves a non-flag register the Form
+    declares undefined at its pre-state value (DEFPRIOR).  Certified as a refinement of the pinned model: the model's undefined values (the fresh constants of its paths) are free, and every one gets exactly
+    ONE witness by the outputs it feeds:
+      * feeds flag outputs only           -> 0 (DEF0);
+      * feeds exactly one output, a 32-bit-or-narrower register r and no flag -> the low bits of r's pre-state value (DEFPRIOR);
+      * anything else (feeds several outputs, mem, eip, an address; a boolean or wider constant) -> no witness: its own CLASS, reported (shape, outputs, free names), never chosen for.
+    Obligations: for each flag in the Form's undefined set whose free values all have a witness, model[witness] == 0 (forall query); for each register the Form declares undefined whose free values all have
+    a witness, model[witness] == the lifted value (forall).  A flag / register the model DEFINES and that disagrees is a mismatch (sat).  The witness must satisfy the model's side constraints.
+    extra['def0'] = {'undef_flags', 'witness': 0, 'free', 'nonflag_free': [outputs whose term mentions a free value and are NOT proved under DEFPRIOR], 'defprior': [registers proved under DEFPRIOR],
+                     'classes': [{'class': 'multi'|'mem'|'eip'|'sort', 'outputs': [...], 'free': [...]}]}"""
+    pre = PRE if pre is None else pre
+    und = [f for f in flags if z3.is_false(z3.simplify(D['defined'][f]))]
+    outs = {('r', r): M['regs'][r] for r in M['regs']}
+    outs.update({('f', f): M['flags'][f] for f in flags}); outs[('m', 'mem')] = M['mem']; outs[('e', 'eip')] = M['eip']
+    users, free = {}, _free(list(outs.values()) + [side])
+    for o, t in outs.items():
+        for n in _free([t]): users.setdefault(n, set()).add(o)
+    wit, classes, prior = {}, [], {}
+    for n, c in sorted(free.items()):
+        u = users.get(n, set())
+        if all(k == 'f' for k, _ in u): wit[n] = _zero(c)                                           # flags only (or the side constraint only): DEF0
+        elif len(u) == 1 and next(iter(u))[0] == 'r' and c.sort().kind() == z3.Z3_BV_SORT and c.sort().size() <= 32:
+            r = next(iter(u))[1]; w = c.sort().size()
+            wit[n] = z3.Extract(w - 1, 0, pre['regs'][r]) if w < 32 else pre['regs'][r]; prior.setdefault(r, []).append(n)   # DEFPRIOR
+        else:
+            kind = 'multi' if len(u) > 1 else 'mem' if next(iter(u))[0] == 'm' else 'eip' if next(iter(u))[0] == 'e' else 'sort'
+            classes.append({'class': kind, 'outputs': sorted(r for _, r in u), 'free': [n]})
+    bad = users_of(users, [n for cl in classes for n in cl['free']])                                  # outputs that mention a free value without a witness
+    nonflag_all = {r for k, r in users_all(users) if k != 'f'}
+    extra['def0'] = {'undef_flags': und, 'witness': 0, 'free': len(free), 'nonflag_free': sorted(nonflag_all), 'defprior': [], 'classes': classes}
+    if not und and not prior: return 'proved', ''
+    ws = list(wit.items()); sub = [(free[n], v) for n, v in ws]
+    sw = z3.substitute(side, *sub) if sub else side
+    r, _ = check([z3.Not(sw)], z3.BoolVal(True), args)
+    if r != z3.unsat: return 'FAILED(def0)', 'the witness (0 for flags, the pre-state value for a register) does not satisfy the side constraints of the model on its undefined values: %s' % r
+    aw = z3.substitute(assume_d, *sub) if sub else assume_d
+    for f in und:
+        if ('f', f) in bad: continue                                                                # its free value has no witness: a class, reported
+        mw = z3.substitute(M['flags'][f], *sub) if sub else M['flags'][f]
+        r, sv = check([mw != 0], aw, args)
+        if r == z3.unsat: continue
+        ce = ''
+        if r == z3.sat:
+            mo = sv.model(); ce = ' CE: ' + ' '.join('%s=%s' % (k, mo.eval(v, model_completion=True)) for k, v in [(q, pre['regs'][q]) for q in ('eax', 'ecx')] + [(q, pre['flags'][q]) for q in FLAGS])
+        return ('FAILED(def0)' if r == z3.sat else 'timeout'), 'DEF0 flag %s: model[free := 0] %s the lifted 0 (%s)%s' % (f, 'differs from' if r == z3.sat else 'unknown against', r, ce)
+    proved = []
+    for rg in sorted(prior):
+        if ('r', rg) in bad: continue
+        mw = z3.substitute(M['regs'][rg], *sub)
+        r, _ = check([mw != D['regs'][rg]], aw, args)
+        if r == z3.unsat: proved.append(rg); continue
+        return ('FAILED(def0)' if r == z3.sat else 'timeout'), 'DEFPRIOR register %s: model[free := pre-state %s] %s the lifted value (%s)' % (rg, rg, 'differs from' if r == z3.sat else 'unknown against', r)
+    extra['def0']['defprior'] = proved
+    extra['def0']['nonflag_free'] = sorted(nonflag_all - set(proved))
+    return 'proved', ''
+
+def users_of(users, names):
+    return {o for n in names for o in users.get(n, ())}
+
+def users_all(users):
+    return {o for u in users.values() for o in u}
 
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
@@ -139,6 +217,8 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
         if not has_mem and nofault is not None and z3.Solver().check(side) != z3.sat: r2 = z3.unknown       # exists free values with `side` (closed): one satisfiability check
         extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem else r2)
         if r1 != z3.unsat or r2 != z3.unsat: return 'FAILED(dsl)', 'fault condition differs: ' + extra['fault_checks'], extra
+    d0, dnote = def0(M, D, FLAGS, assume_d, side, args, extra, pre)      # DEF0: every architecturally undefined flag output is 0 in the lifted body; prove model[free := 0] == lifted
+    if d0 != 'proved': return d0, dnote, extra
     if F.writes_unobserved(): return 'model-gap', 'post-state of df / other EFLAGS bits is not exposed by the model interface (other fields proved)', extra
     return 'proved', '', extra
 
@@ -157,7 +237,7 @@ def prove(args):
         e['enc'].append((res, b.hex())); note and e['notes'].append('%s: %s' % (b.hex(), note[:230]))
         json.dump(dict(form=key, encoding=b.hex(), result=res, dsl_sha256=F.sha(), z3=z3.get_version_string(), model=args.model, note=note, **extra),
                   open(os.path.join(args.cert, '%s_%s.json' % (re.sub(r'[^\w-]', '_', key), b.hex())), 'w'))
-    tot = {k: 0 for k in ('proved', 'FAILED(dsl)', 'FAILED(model-defect)', 'model-gap', 'timeout')}; status = {}; missing = []
+    tot = {k: 0 for k in ('proved', 'FAILED(dsl)', 'FAILED(def0)', 'FAILED(model-defect)', 'model-gap', 'timeout')}; status = {}; missing = []
     for key in order:
         e = per[key]
         if not e['builds']: missing.append(key); res = 'no-form'
@@ -178,7 +258,7 @@ def prove(args):
     json.dump({'schema': 'fnvnx-gate/1', 'name': 'l3.forms.int', 'status': 'green' if not (tot['FAILED(dsl)'] or tot['timeout'] or [k for k in scope if k in missing]) else 'red',
                'universe': order, 'certified': cert, 'uncertified': [k for k in order if k not in cert], 'status_by_key': status},
               open(os.path.join(args.cert, 'gate_forms.json'), 'w'), indent=1)
-    return tot['FAILED(dsl)'] + tot['timeout']
+    return tot['FAILED(dsl)'] + tot['FAILED(def0)'] + tot['timeout']
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(); ap.add_argument('--model', choices=sorted(MODELS)); ap.add_argument('--backends', action='store_true'); ap.add_argument('--only')
