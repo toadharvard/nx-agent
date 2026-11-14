@@ -452,3 +452,8 @@ Paused: w3b, w4, farm; no other work.
     - Blocked on the host variant (w1b on L1 w15c) and on the Mesa pin's form as a recipe input (question to L4).
     - Meanwhile w5 writes the signature argument and the static variant universe (doing).
     - L1 w22 fixes the assumptions LEXER for .glsl/.in.
+- 23:27Z w1b 52da601e accepted (4.6 step 1): mirror tools/mojoshader-glsldk a8bc72b0 (tree 9e2f5927…622b63), 5th patch mojoshader_classes.patch; cold 7 objects 23.7 s, admit 927/927.
+    - Class closed: comment blocks are metadata, a block that does not parse is dropped whole (26 failures).
+    - Class closed: SRCMOD_DZ/DW as-is outside texld/texcrd (Wine 9.0 glsl_shader.c:2597).
+    - Order to w1b: (1) host variant first (L1 w15c per-target recipe, nm proof of translate_glsl); (2) dk_*_location: declared-set rule, the tables are a required argument built only by fnvnx_dk_assign, failf deleted, undeclared-register read is a validator rejection; (3) the 151 g rows go into res_smcheck in render/d3d9, held until w6's root lands; meanwhile rule-A facts with L1 w20.
+    - No 179+10 number is claimed until the host variant and the shaders are inputs.
