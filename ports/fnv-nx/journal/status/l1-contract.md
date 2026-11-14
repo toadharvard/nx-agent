@@ -985,3 +985,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Active: w23 (1.1 comdat_identity), w20 (1.2 the namegate/r7/objstub universe + objstub exit 2), w22 (1.3 w22f2 fpexact reader).
   - Held: w19 (1.7 warm verdict ≤300 s, next). Its answers are accepted: direct entries of listed directories in the key; stale declarations red; gate keys by declared reads come first; one import resolver in verify/pyimports.py. Also held: w15 (3.1 w15d), w24 (loader root, proposed to the orchestrator as 3.1b).
   - Order when slots free: 1.7 → 3.1 (w15d/w15c, w12, w16c) → 3.2 w16 IAT; 1.5 w4 takes a slot when L5 publishes the MANIFEST.
+
+- 23:24 Orchestrator added plan item 2.0 (ahead of 3.1): loader/ as a product root, Makefile and build.sh deleted; the acyclic root graph in gate_tests; w15c's lib/sha256 part lands first.
+  - Slot order (3 max): 1.1/1.2/1.3 now → w15 sha256-only commit (small, unblocks L3a descs/bridges/pack) → 1.7 w19 → 2.0 w24 loader → 3.1 → 3.2.
+  - w19 is held at claude/fnv-l1-contract-w19-cache (reads v3 on e3a6a92). Untraceable tests: 2 ptrace (test_order_cont, test_ice_poly_byvalue) + 6 failing on their own.
