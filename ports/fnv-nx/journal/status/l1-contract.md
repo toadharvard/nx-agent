@@ -1053,3 +1053,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The rule fix w22f3 9894b5988: the kind is "mdbuiltin" iff DECL_BUILT_IN_CLASS == BUILT_IN_MD, and it is red. It is with L2 for review and a declared-env test_ftoi.py run.
   - Open class question to L2: is the "builtin" exemption closed for conversions with an unspecified out-of-range result (lrint/lround, IFN_VEC_CONVERT)? Proposed: exempt only conversions that are fully specified, otherwise MSVC semantics or red.
 - w24 ec006784: PERFDEBT entry PD-LOADER-SHA256-ISA (owner L1); test_gate_assumptions 0 fails. Still waiting on UNMAP_FIXED.
+
+- 00:02 L5 422b4bd6 (claude/fnv-l5-platform-root): FNVNX_PLAT_UNMAP_RANGE = 37 (UNMAP_FIXED is a retired name). The contract: 0 on success, 0x1759 for a bad argument, 0xD401 outside the window or not mapped. w24 84624983 is merged there whole; hostabi, loader 9 units and lib/sha256 green on L5's side. w24 merges 422b4bd6, then builds, runs nm on the 7 symbols and the verdict, and reports to L3a w8.
