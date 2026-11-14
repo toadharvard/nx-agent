@@ -348,8 +348,15 @@ Rules fixed here (all three consumers use them through this file and importkey.c
              the same bridge.tsv in one link; the stage key of all three includes the SHA-256 of bridge.tsv, and
              keys.tsv and import_keys.c each carry it (`table_id`) so the gate can check they come from one input.
   data row   a bridge row of conv `data` whose native_symbol is a C identifier is a table row of kind data (value =
-             address of the native object).  A data row with native_symbol `-` has no native object: it is left out of
-             the table (the lookup returns 0 = the platform does not provide it) and counted in the stdout line.
+             address of the native object).  A data row with native_symbol `-` has no native object.  If an image of
+             modules.tsv imports it (an import slot of the exe's facts, or of any module's imports/<name>.tsv, by name or
+             by the ordinal of the row) it is a stage error naming dll!name: the slot would be unbound at start.  If no
+             image imports it, it stays outside the table (the lookup returns 0) and is counted in the stdout line.
+             The imports of every module are an input (--module-imports, one per --module, the same name set): a rule
+             over "every image" is not computed over a subset.
+  --data-out iat_data.tsv  `# table_id <sha256 of bridge.tsv>` (the table_id of keys.tsv and import_keys.c), then one row per data
+                        row of the table, in the order of import_keys.c: dll, name, ordinal, kind (`data`), native_symbol.
+                        The build fact L4's rule S4 reads; the address of each native_symbol is in the ELF symtab.
 ```
 
 ## contract/images.py

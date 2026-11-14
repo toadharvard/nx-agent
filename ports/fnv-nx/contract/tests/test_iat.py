@@ -43,6 +43,35 @@ try:
     fails.append('one ordinal with two names accepted')
 except ValueError:
     pass
+# data rows: the `-` rule, and iat_data.tsv against import_keys.c
+def brow(dll, name, conv, sym, ordinal=''):
+    return {'dll': iat.norm_dll(dll), 'name': name, 'ordinal': ordinal, 'conv': conv, 'ret': '', 'args': '', 'native_symbol': sym, 'bind': ''}
+
+
+db = [brow('kernel32.dll', 'Sleep', 'stdcall', 'x'), brow('msvcrt.dll', '_iob', 'data', 'fnvnx_iob'), brow('msvcrt.dll', '_fmode', 'data', '-'),
+      brow('msvcrt.dll', '_commode', 'data', '-', '7'), brow('ntdll.dll', 'Qdata', 'data', 'fnvnx_q', '5')]
+imp = iat.imported_set(db, [('KERNEL32', 'Sleep'), ('msvcrt.dll', '_iob')])
+text, drows, left = iat.c_source(db, 'T' * 64, imp)
+check('unimported `-` data rows are left out of the table', sorted(r['name'] for r in left), ['_commode', '_fmode'])
+check('... and absent from import_keys.c', '_fmode' in text or '_commode' in text, False)
+check('data rows of the table, sorted by (dll, name)', [r['name'] for r in drows], ['_iob', 'Qdata'])
+try:
+    iat.c_source(db, 'T' * 64, iat.imported_set(db, [('msvcrt.dll', '_fmode')]))
+    fails.append('an imported `-` data row accepted')
+except ValueError as e:
+    check('an imported `-` data row is red and names dll!name', 'msvcrt.dll!_fmode' in str(e) and '_commode' not in str(e), True)
+try:
+    iat.c_source(db, 'T' * 64, iat.imported_set(db, [('msvcrt.dll', '#7')]))
+    fails.append('a `-` data row imported by ordinal accepted')
+except ValueError as e:
+    check('a `-` data row imported by its ordinal is red', 'msvcrt.dll!_commode' in str(e), True)
+dt = iat.data_tsv(drows, 'T' * 64)
+check('iat_data.tsv: table_id line, then dll name ordinal kind native_symbol', dt.splitlines(),
+      ['# table_id ' + 'T' * 64] + ['%s\t%s\t%s\tdata\t%s' % (r['dll'], r['name'], r['ordinal'], r['native_symbol']) for r in drows])
+import re
+c_syms = re.findall(r'FNVNX_IMPORT_DATA, \(uintptr_t\)&(\w+)\}', text)
+check('iat_data.tsv rows = the data entries of import_keys.c, same order', [l.split('\t')[4] for l in dt.splitlines()[1:]], c_syms)
+check('the table_id of both is the one given', ('"%s"' % ('T' * 64) in text, dt.splitlines()[0].endswith('T' * 64)), (True, True))
 for f in fails:
     print('FAIL', f)
 print('ok' if not fails else 'FAILED %d' % len(fails))
