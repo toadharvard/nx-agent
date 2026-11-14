@@ -55,8 +55,8 @@
     "gcc",
     "sysbase"
    ],
-   "startfiles": [],
-   "endfiles": []
+   "startfiles": ["lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crti.o"],
+   "endfiles": ["lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtn.o"]
   }
  },
  "plugins": [
