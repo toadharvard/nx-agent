@@ -141,3 +141,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Follow-up for w7: N = FNVNX_NPROC and main = FNVNX_DEFAULT_CORE by name.
 - L5 root 99c9fedc0 (ec9e4eb0a: FNVNX_NPROC, host slot cpu_count removed) replaces 0cdafb322 in w6's base. w6 then merges w7-i. Told w10 to cherry-pick d228e59d8 (fn 38) for check_hostapi.
 - w7 task K (S4/S5 onto L1 w24 facts) is running, on w7-k off eafa4fd97.
+- PRIORITY: the next candidate waits on the boot machine's THREAD_CPU row against L5 root 99c9fedc0. w10's cherry-pick of d228e59d8 conflicted in 10 files. w6 is building claude/fnv-l4-verify-w6-t38 off 99c9fedc0 with only row 38, its body and FNVNX_APP_CORES app cores (doing). Commit to be sent to L5 and the orchestrator.
