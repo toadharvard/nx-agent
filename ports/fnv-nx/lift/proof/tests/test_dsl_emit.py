@@ -11,7 +11,8 @@ LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, LIFT); sys.pat
 import capstone
 from capstone import x86 as X
 import fnvlift
-from fnvlift import core, f_dsl
+from fnvlift import core
+from proof import lift_dsl as f_dsl
 import instest
 
 BASE, STEP = 0x400000, 0x100
@@ -63,7 +64,7 @@ def collect(pk):
             out.append((a, s + ('+' if vi else ''), func(cx, a)))
             F = f_dsl.forms.build(ins, a)
             hx = mkctx(ins, a)
-            try: core.dispatch(hx, ins) if core.EMIT == '' else None
+            try: core.dispatch(hx, ins) if core.EMIT is None else None
             except core.Unsupported: hx.L = []                    # no hand handler for this instruction: nothing assigned
             t = '\n'.join(hx.L)
             for f in F.undef:

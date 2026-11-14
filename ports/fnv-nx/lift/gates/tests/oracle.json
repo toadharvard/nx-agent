@@ -23,7 +23,7 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/gates/gate_flags.py",
-    "ports/fnv-nx/lift/proof/flagagree.py"
+    "ports/fnv-nx/lift/gates/flagagree.py"
    ]
   },
   "test_gate_lift.py": {

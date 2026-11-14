@@ -1,7 +1,8 @@
-"""Instruction handlers generated from the proven DSL forms (R2: one source for the proof and for the shipped code).
+"""Instruction handlers generated from the proven DSL forms (R2: one source for the proof and for the shipped code). Lives in proof/ (the root that holds the Forms; the root graph is
+acyclic, proof above fnvlift): the lifter takes it as a function, core.set_emit(proof.lift_dsl.emit_form).
 
 emit_form(cx, ins) builds the Form of the instruction (proof/forms.py: the same object the SMT proofs are about) and emits its C inline through
-Form.to_c_inline (fnvlift/dsl.py).  core.dispatch calls it first for every instruction when core.EMIT is "dsl" (core.set_emit); it returns SKIP for an instruction the
+Form.to_c_inline (fnvlift/dsl.py).  core.dispatch calls it first for every instruction when an emitter is set (core.set_emit); it returns SKIP for an instruction the
 forms do not cover (their mnemonics, or a register operand that is not a general register: xmm/mm/segment), which then goes to the hand handlers.
 
 One block per instruction:  `{ snapshots of the pre-state; const temporaries (every load, shared sub-expressions); faults; register writes;
@@ -17,9 +18,9 @@ Control transfer is derived from the Form's eip node by structure: constant == n
 (the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,
 loop*, and the step repeat of rep string forms, whose eip is `ite(more, this address, next)`: a goto to the instruction's own label); any other
 expression (indirect jmp / call, ret) -> f_flow.jmp_indirect / call_xfer / ret_xfer with the C text of the node, the kind chosen by the mnemonic."""
-from .core import CC, SKIP, SUB, Unsupported
-from . import f_flow
-from . import dsl
+from fnvlift.core import CC, SKIP, SUB, Unsupported
+from fnvlift import f_flow
+from fnvlift import dsl
 
 from proof import forms, forms_alu, forms_flow, forms_move             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 

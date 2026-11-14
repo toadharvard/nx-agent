@@ -8,7 +8,8 @@ import os, re, subprocess, sys
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools'))
 import fnvlift as L, liftgen
-from fnvlift import core, f_dsl, dsl
+from fnvlift import core, dsl
+from proof import lift_dsl as f_dsl
 from fnvlift.core import Unsupported
 from fnvlift.image import Image
 
@@ -31,11 +32,11 @@ def compiles(body):
 
 def lift_bytes(code, emit):
     img = Image.from_bytes(code, 0x401000)
-    core.set_emit(emit)
+    core.set_emit(f_dsl.emit_form if emit == 'dsl' else None)
     try:
         return L.lift(img, 0x401000, len(code))[0]
     finally:
-        core.set_emit('')
+        core.set_emit(None)
 
 
 def raises(fn):
