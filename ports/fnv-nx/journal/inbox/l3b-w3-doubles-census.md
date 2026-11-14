@@ -55,3 +55,14 @@ Owner rule: the owner of the module the test calls (read from its imports and to
 | lift/tools/tests/test_root_graph.py | graph | L3a |
 | lift/tools/tests/test_universe_r3_check.py | fnvlift | L3a |
 Per owner: L3a 17, L3b 2, shared 1.
+
+## (c) status of the L3b-owned rows, 2026-11-14 (marks: P = certified with an independent reference, D = deleted, naming the covering gate; B = blocked, reason)
+No file was deleted and no oracle.json entry was added in this step: none of the rows below has a reference that is independent of the code under test, and a coverage claim for a deletion needs the lead's confirmation of the gate.
+| file | mark | reason |
+|---|---|---|
+| lift/tools/tests/test_dsl_emit.py | D proposed | compile-only check of the emitted C of every exe shape; covered by the product build of lift/pack (every lifted unit is compiled by recipe.py) plus gate `forms` (the DSL forms certified per shape key). Needs the lead's yes before deletion: the "undef-assigned" count it prints is a report, not an assertion. |
+| lift/tools/tests/test_lifted_vs_shapes.py | B | compares tools/lifted.py with liftgen's own shapes_K.tsv: code against code, no independent reference; needs FNVNX_EXE and a census file. Candidate cover: gates `forms` / `reach` (covers "lifted"); the lead names which. |
+| lift/tools/tests/test_lock_only.py | B (shared with L3a) | rule LK-ONLY: positive half is covered by the lift/pack build; the negative half (emitter raises on a locked add, a plain accessor inside LK_BEGIN fails to compile) has no gate; needs a reference of the rule (spec: rt/fnvl.h LK macros) from L3a. |
+| lift/tools/tests/sehcodes.py | B | real rt objects leave 18 symbols undefined (platform, pack dispatcher tables): needs the product ELF on verify/bootmachine.py (w6's runner). Reference exists (ReactOS KiTrap / Wine 9.0 signal_i386.c). |
+| lift/test/modlift_closure_test.py | B | fake gate outputs are doubles; needs the real module DLL and a real pcsrc run; no gates.d entry covers l3.codemap.<mod>. |
+Files outside the naming (instest, instest_extra, mmxtest, citest, x87dyn in lift/tools/tests, x87test in lift/test): Unicorn instruction tests, B until the forms certificates cover every shape key they use (group (b)).
