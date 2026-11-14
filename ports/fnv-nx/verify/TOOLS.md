@@ -1353,6 +1353,30 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
+## verify/gate_onedef.py
+
+```text
+Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
+    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
+Rules (by symbol tables and file content, never by a name's text):
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
+      definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
+      the linker's choice between them would pick a body by link order.
+  (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
+      member sections (bytes, flags, alignment and relocations by offset, type, addend and target: gate_linkstrict.elf_comdat), else
+      `comdat-differs` (flags, plugins or a body differ: an ODR violation). Instances of one group inside ONE root need no comparison.
+      NOT EXACT (stated): this compares what the linker sees. "The same source definition" (same decl_file/decl_line) needs DWARF
+      `DW_AT_decl_file/line`, and the objects of a recipe carry no debug info (flags are the root's -O/-W/-std only): until a recipe
+      builds them with `-g1`-class line tables, a cross-root COMDAT group whose digests are equal is accepted on equal bytes alone.
+  (c') Every translation-unit source file (.c .cc .cpp .cxx .s .S) of a product root is a unit of exactly ONE root: the content sha256 of a unit
+      must not be the content of a unit of another root (`unit-copy`), and a path is a unit of one root only (`unit-path`).
+  (c'') Headers are shared by include, never copied: a tracked header (.h .hh .hpp .hxx .inc .inl) whose content sha256 appears under two
+      paths of the admitted roots is `header-copy` for every copy. Externals are pinned trees, outside this clause; generated outputs are
+      not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
+Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
+no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
+```
+
 ## verify/gate_argorder.py
 
 ```text
