@@ -37,6 +37,7 @@ static __thread int t_scoped;
 static __thread int t_in_sync;
 
 /* ---- pumps */
+namespace {   // TU-local type: internal linkage (the other clock backend defines its own clk_pump)
 struct clk_pump {
     clk_pump *next;
     clk_pump_fn render, after;
@@ -44,6 +45,7 @@ struct clk_pump {
     uint32_t rate, period;
     uint64_t t0, n_done;
 };
+}   // namespace
 static os_lock_t g_dev_lock;       /* one device period at a time, in the order of their instants */
 static clk_pump *g_pumps;
 

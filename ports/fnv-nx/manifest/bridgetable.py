@@ -125,9 +125,7 @@ def read_name_table(path):
     """{msvcrt name: (symbol, kind)} from platform/crt/msvcrt_names.tsv (name TAB symbol TAB func|data), the table the msvcrt lookup is generated from."""
     out = {}
     lines = open(path, encoding="latin1").read().split("\n")
-    if lines[0] != "name\tsymbol\tkind":
-        raise ValueError("%s: bad header" % path)
-    for line in lines[1:]:
+    for line in lines:
         if not line:
             continue
         f = line.split("\t")

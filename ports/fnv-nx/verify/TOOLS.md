@@ -1380,6 +1380,28 @@ Rules (a finding names the object, the symbol and the relocation):
   (5) `unclassified`: a TLS relocation of a name outside the families above.
 Items: every object, every linked ELF, every TLS relocation (object, symbol, relocation name, section, offset). Certified = the items with no
 finding. Counts per relocation family over all roots are in `detail`. No guest root: universe 0, green.
+## verify/gate_onedef.py
+
+```text
+Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
+    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
+Rules (by symbol tables and file content, never by a name's text):
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
+      definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
+      the linker's choice between them would pick a body by link order.
+  (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
+      member sections (bytes, flags, alignment and relocations by offset, type, addend and target: gate_linkstrict.elf_comdat), else
+      `comdat-differs` (flags, plugins or a body differ: an ODR violation). Instances of one group inside ONE root need no comparison.
+      NOT EXACT (stated): this compares what the linker sees. "The same source definition" (same decl_file/decl_line) needs DWARF
+      `DW_AT_decl_file/line`, and the objects of a recipe carry no debug info (flags are the root's -O/-W/-std only): until a recipe
+      builds them with `-g1`-class line tables, a cross-root COMDAT group whose digests are equal is accepted on equal bytes alone.
+  (c') Every translation-unit source file (.c .cc .cpp .cxx .s .S) of a product root is a unit of exactly ONE root: the content sha256 of a unit
+      must not be the content of a unit of another root (`unit-copy`), and a path is a unit of one root only (`unit-path`).
+  (c'') Headers are shared by include, never copied: a tracked header (.h .hh .hpp .hxx .inc .inl) whose content sha256 appears under two
+      paths of the admitted roots is `header-copy` for every copy. Externals are pinned trees, outside this clause; generated outputs are
+      not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
+Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
+no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
 ```
 
 ## verify/gate_argorder.py
@@ -1550,6 +1572,8 @@ and compares the tracked files it opened with subject + references (verify/oracl
 ## verify/gate_assumptions.py
 
 ```text
+Perf debt: verify/PERFDEBT.json (fnvnx-perfdebt/1) lists switched-off fast paths, each with id, fast_path, rule, owner (a layer); the report gives
+perfdebt.open; first_frame true makes any open entry red.
 Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
 (verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
     python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json
