@@ -121,6 +121,17 @@ void fnvnx_yield(void) { fnvnx_hcall0(fnvnx_host->thread_yield); }
 /* libsysbase's weak sched_yield returns ENOSYS; std::this_thread::yield and spin loops need a real one. */
 int sched_yield(void) { fnvnx_yield(); return 0; }
 
+/* sched_getcpu (POSIX): the core the calling thread runs on, from the host service FNVNX_PLAT_THREAD_CPU (the Switch host: libnx
+ * svcGetCurrentProcessorNumber).  libsysbase's weak sched_getcpu is an unconditional ENOSYS and is replaced.  A host without the service
+ * answers a negative ext_call code: -1 with ENOSYS, POSIX's "not supported" for sched_getcpu, a result of the host's capability. */
+int sched_getcpu(void) {
+    if (!fnvnx_host->ext_call) { errno = ENOSYS; return -1; }
+    uint64_t none[1] = {0};
+    int64_t r = (int64_t)fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_CPU, FNVNX_ADDR(none), 0);
+    if (r < 0) { errno = ENOSYS; return -1; }
+    return (int)r;
+}
+
 /* newlib pthread hooks */
 int __syscall_thread_create(struct __pthread_t **thread, void *(*func)(void *), void *arg, void *stack_addr,
                             size_t stack_size) {

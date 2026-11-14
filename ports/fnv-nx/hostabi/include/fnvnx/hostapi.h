@@ -267,7 +267,7 @@ typedef struct FnvnxHostApi {
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
  *   UINT32_MAX; fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext, one row per service; fn 0, 10, 15, 27..29, 32, 33 and fn >= 38 -> NO_SERVICE (-254):
+ * module 11, platform_ext, one row per service; fn 0, 10, 15, 27..29, 32, 33 and fn >= 39 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  * test:cpu_boost
@@ -309,6 +309,8 @@ typedef struct FnvnxHostApi {
  * 37 UNMAP_RANGE       n=2  0 | 0x1759 (size 0, addr+size wraps, addr or size not 4 KiB aligned) | 0xD401 (the range is not inside a window the host
  *                            claimed at start, or a page of it was not mapped by map_fixed: nothing done)
  *  test:unmap_range
+ * 38 THREAD_CPU        n=0  the core index the calling thread runs on (svcGetCurrentProcessorNumber), no failure
+ *  test:thread_cpu
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.
  *
  * FnvnxHostApi slots: the results are stated at each slot above. Host function (file) and tests; "-" = a direct libnx / newlib call
@@ -431,6 +433,12 @@ typedef struct FnvnxHostApi {
  * or a page of it not mapped by map_fixed -> FNVNX_HE_RANGE, nothing done (no fake success). Else every page returns to the window's free
  * state (any protection VM_PROTECT gave it is dropped) and the next map_fixed of it yields fresh zeroed memory. No fault emulation. */
 #define FNVNX_PLAT_UNMAP_RANGE 37u
+/* THREAD_CPU () -> the index (0..3) of the CPU core the CALLING thread runs on at the instant of the call; always succeeds. The Switch host's
+ * body is libnx svcGetCurrentProcessorNumber (svc.h: "Gets the CPU core the calling thread runs on"); the boot machine answers the core its
+ * own thread model runs that guest thread on. The value is advisory by nature (the scheduler may move the thread at once): it is the answer
+ * POSIX sched_getcpu documents ("the number of the CPU on which the calling thread is currently executing"), which rt/guest's sched_getcpu
+ * returns. */
+#define FNVNX_PLAT_THREAD_CPU 38u
 typedef struct FnvnxTzAt {
     int32_t off_s;      /* local = UTC + off_s */
     uint32_t dst;       /* 1: daylight time at that instant */
