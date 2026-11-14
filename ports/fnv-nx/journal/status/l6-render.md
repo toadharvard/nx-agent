@@ -435,3 +435,7 @@ Paused: w3b, w4, farm; no other work.
 - 23:24Z onedef header copy (L6A): render/d3d9/backend/nx/state.h duplicates render/nxgpu/nx/state.h, whose home is render/nxgpu.
     - w6 deletes the copy and points d3d9total (INPUTS, :228), TRUNK.md:22 and d3d9_state.h:1 at the home; findings are checked identical before and after (doing).
     - L6A adds render/nxgpu's guest recipe.
+- 23:25Z L1: the rule-A reader lands in objstub as L1 w20's third commit (session_01KmtZKSwpJXxijdPeaxppza).
+    - The join is (id, handler), read from the generated outputs of render/shaders/total.
+    - A (b) emitter must be non-empty; an empty (c) is red.
+    - Acceptance: translator objstub 7/7 judged, 0 stubs. w1b agrees the fields with w20.
