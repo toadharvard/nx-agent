@@ -552,3 +552,8 @@ Workers are capped at 3. Assignment by plan item:
 - Stopped (capped): w5 (DEF0 done; handed to w6), w4 (pointsto v1 and pcsrc counts, off the path now), w3 (binkw32 jtab goes into w1's relift).
 - Blockers: the loader as a product root (L1 w24); lib/sha256 recipe (L1 w15d, ETA ~23:55).
 - w5 DEF0 counts at facts a0f3d8e on the 83f base: Forms 17276, with free outputs 3444, DEF0 5270, DEFPRIOR 0, uncovered 0. Not yet re-measured on int3.
+- Stop states, with commits:
+  - w5: claude/fnv-l3a-lift-w5-def0-int3r 2daa52e62. Gate tests 11/11 + 3/3 pass; def_check reports free outputs as uncertified and red, owner L3b. w6 merges it and measures the counts.
+  - w3: claude/fnv-l3a-lift-w3-i d77f58ef. libvorbisfile -I reproducibility is 10/10 at f12c75b9d; that is 1 of 8 images, not a global result.
+  - w4: claude/fnv-l3a-lift-w4 10226a84. pointsto v1 is a draft, not wired to a gate; the pcsrc global counts were never finished.
+  - w1: holding at claude/fnv-l3a-lift-w1 d6235c0f5.
