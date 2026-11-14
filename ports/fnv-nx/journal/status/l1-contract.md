@@ -1076,3 +1076,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - .map lexer (render/gl4/libnxgl4.map, from L6): assigned to w22 on w22p.
 - TLS census from L2 w2 at cdb4473d0: 114 objects, 84 accesses all LE, 21 variables, 0 outside records. The tlsmodel gate is queued.
 - w16c commit 1 blocks the L6 d3d9 and translator roots. Proposed to the orchestrator: it takes the next free slot, ahead of w12.
+- w16c commit 1: the orchestrator agreed it goes ahead of w12. It went to L6's free worker w6 (session_01KmtZKQbpDKvc9qzXT9bLHX) on L1's spec, branch claude/fnv-l1-contract-w16c1, base 141b07580+1cac05621. Generator reads are declared resolve_input refs in the stage key; an undeclared read is red. L1 reviews.
+- w22f4 1c8974b53 is accepted (fact {source,itype,conv,lo,hi,nonan}, exact specified sets). It lands with L2 w1.
+- The libnxgl4 link items from the orchestrator: (a) system libs pinned by env.json and (b) the declared loader root go to w12h ldcheck; (c) the per-target variant goes to w15c RECIPE.md.
