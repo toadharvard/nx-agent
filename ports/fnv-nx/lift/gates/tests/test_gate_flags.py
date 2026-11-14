@@ -132,6 +132,8 @@ class T(unittest.TestCase):
                         n += 1; free += bool(fl or rg)
         self.assertGreater(n, 100)
         self.assertGreater(free, 0)
+        r = dc.run({('k', None): [next(g._md.disasm(bytes.fromhex('f7e1'), A)), 7]})        # mul ecx: flags with free outputs
+        self.assertGreater(r['uncertified'], 0); self.assertEqual(r['status'], 'red'); self.assertEqual(r['cert_owner'], 'L3b')
         self.assertEqual(dc.read_back(['cf = 1;'], ['cf'], []), ['flag cf is not 0 where free: cf = 1;'])
         self.assertEqual(dc.read_back(['cf = 0;', 'eax = x;'], ['cf'], ['eax']), ['register eax is written unconditionally although free'])
         self.assertEqual(dc.read_back(['cf = (n1) ? n2 : 0;', 'if (n3) eax = n4;'], ['cf'], ['eax']), [])

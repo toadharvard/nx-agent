@@ -11,7 +11,7 @@ range facts (the same decoding as gate_flags.py); an instruction whose shape has
 CHECK. For each shape with a Form, the C lines the lifter emits for it (Form.to_c_inline, the one emitter) are read back: for every free flag the LAST assignment of
 the flag is `f = 0;` or `f = <when> ? <value> : 0;`; for every free register the assignment is guarded `if (<when>) r = ...;`. A line that does not match is a mismatch.
 Counts (global over the shapes and, weighted, over the instruction sites): forms, forms with free outputs, free flag outputs (DEF0), free non-flag outputs
-(DEFPRIOR), flag outputs the emission changed (a flag write with `when`, or an undefined flag, that did not hold 0 before DEF0), uncovered, mismatches."""
+(DEFPRIOR), uncertified (every free output until L3b's certificate of its (shape, output) refinement is in: red, owner L3b), flag outputs the emission changed (a flag write with `when`, or an undefined flag, that did not hold 0 before DEF0), uncovered, mismatches."""
 import json
 import os
 import re
@@ -92,7 +92,12 @@ def run(uni):
         for b in bad:
             res['uncovered'] += 1
             if len(res['mismatches']) < 50: res['mismatches'].append('%s: %s' % (ins.mnemonic + ' ' + ins.op_str, b))
-    res['status'] = 'green' if not res['uncovered'] else 'red'
+    # CERTIFICATES. The refinement of each (shape, output) is certified by L3b; no certificate input exists yet, so every free output is uncertified and the gate is
+    # red for it (never a label): status is green only when uncovered == 0 and uncertified == 0.
+    res['uncertified'] = res['free_flag_outputs'] + res['free_reg_outputs']
+    res['uncertified_sites'] = res['free_flag_outputs_sites'] + res['free_reg_outputs_sites']
+    res['cert_owner'] = 'L3b'
+    res['status'] = 'green' if not res['uncovered'] and not res['uncertified'] else 'red'
     return res
 
 
