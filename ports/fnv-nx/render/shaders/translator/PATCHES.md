@@ -12,7 +12,7 @@ the pinned tree of `tools/mojoshader` ad5dff84830c2863c841f4b1f4e3df78c705b383 (
    does not parse is dropped whole (errors and partial symbols removed, the instruction stream untouched), as D3D9 and Wine 9.0 skip comment tokens;
    (b) SRCMOD_DZ/DW outside texld/texcrd use the register as is (Wine 9.0 glsl_shader.c shader_glsl_gen_modifier :2597).
 
-The tree of branch `tools/mojoshader-glsldk` commit 86682f7e has tree_sha256 96249b88d1d1678e6a039c2303527e3458a8c6bca9904804c7aa0a3ca08a7c15. The unit list is
+The tree of branch `tools/mojoshader-glsldk` commit 532cbebc has tree_sha256 c9b1f0d704f1c0fd9edd5c6dafab755931ee751fbe62a08b3de0439076724fd4. The unit list is
 generated (render/total/translator_gen/gen_sources.py): every .c file of the external.
 
 ## mojoshader_units.patch
@@ -44,3 +44,17 @@ An earlier version set BYTECODE=0 from the census alone, which compiled the requ
 "Profile 'bytecode' is unknown or unsupported". `reach_census.py` now reads the requested names from src/*.c and exits 1 unless each is `=1` in build.json.
 The prune was re-derived with BYTECODE=1 (`derivation/mojoshader_prune.patch`, loop result: 6 collected inlined-only helpers kept: get_GLSL_destarg_varname,
 get_GLSL_srcarg_varname, get_GLSL_uniform_type, out_of_memory, output_GLSL_uniform_array, ver_ui32). The tree of the mirror is the pin in build.json.
+
+## 6th patch: the declared-set rule (`derivation/mojoshader_declared.patch`)
+`dk_attrib_location` / `dk_varying_location` read the front end's tables and nothing else: no canonical fallback, no `failf`. `MOJOSHADER_glsldkSetLocations`
+takes the three tables as required arguments (`nonnull`), built only by `fnvnx_dk_assign`, and a glsldk parse is entered only after that call (single call site,
+`backend_mojoshader.c`). Why no lookup misses: the tables hold the DECLARED set, which `compute_locations` (frontend.c) builds from the parse's own
+`attributes` / `outputs` (ps_1_x implicit t#/v# included: measured on ps_1_1 `tex t0`, `mov r0, v0`: locations 2 and 0, never -1) plus the link set; a register read
+without a declaration is a validator rejection (res_smcheck, class list of item 4.6). (superseded by the 7th patch pin below)
+
+## 7th patch: the configuration is an argument (`derivation/mojoshader_dkconfig.patch`)
+Rule: the per-call inputs of the translator are arguments, never global or thread-local state. The five `__thread` variables of the glsldk profile
+(location tables, complete, flat) are one `MOJOSHADER_glsldkConfig`, passed to `MOJOSHADER_parseGlsldk(const MOJOSHADER_glsldkConfig *dk /* nonnull */, ...)`
+and read by the profile from its Context (`ctx->dk`). `MOJOSHADER_glsldkSetLocations/SetComplete/SetFlat` are deleted. The glsldk profile is reachable only
+through that entry: `MOJOSHADER_parse` answers "unknown or unsupported" for the name. Closing check: `reach_census.py` exits 1 on any STT_TLS symbol or TLS
+relocation in an object of the translator root, guest or host. Mirror pin: commit f3e0e8a3, tree_sha256 ef7f6409…, see build.json.
