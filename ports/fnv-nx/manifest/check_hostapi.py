@@ -18,9 +18,9 @@ Checks (exit 1 with one line per violation):
      wrapper is a wrapper). At every use the service is a header name, the module is a FNVNX_EXT_ name (never a number), the
      count is an integer literal equal to the header's count of that service, and a service is never a literal number;
   C. no scanned file defines a name the header defines;
-  D. the host's served set equals the declared set: the services the host answers are the rows `[FNVNX_PLAT_<NAME>] = {n, handler}` of
-     g_plat (toolchain/host/host_platform.inc) and the `case FNVNX_PLAT_SOCK_<NAME>: return n;` of host_sock_nargs
-     (toolchain/host/host_sock.inc). Every declared service that the header counts has exactly one server with the header's count; a served
+  D. the host's served set equals the declared set. The hosts are the admitted roots of verify/admit.json with "serves": "hostapi" (none: red);
+     the services a host answers are the rows `[FNVNX_PLAT_<NAME>] = {n, handler}` and the `case FNVNX_PLAT_SOCK_<NAME>: return n;` of its C files,
+     and the module-level {fn: (name, n)} tables of its Python files. Every declared service that the header counts has exactly one server with the header's count; a served
      name the header does not declare, or a declared (counted) service with no server, fails. A host file never serves by a numeric range
      (FNVNX_PLAT_SOCK_FIRST / _LAST): every number outside the declared set answers NO_SERVICE by the table's own default.
   E. the identifiers FNVNX_PLAT_* appear only in hostapi.h's own defines and in unit files (.c, .cpp, and the .inc files a unit includes):
@@ -29,13 +29,13 @@ Checks (exit 1 with one line per violation):
 Calls on a module other than FNVNX_EXT_PLATFORM (the GPU module) are not services of the table; only their module must be a name.
 Usage: check_hostapi.py [--root ports/fnv-nx] [--selftest]
 """
+import ast
+import json
 import os
 import re
 import sys
 
 HDR = "hostabi/include/fnvnx/hostapi.h"
-HOST_PLAT = "toolchain/host/host_platform.inc"
-HOST_SOCK = "toolchain/host/host_sock.inc"
 SCAN = ["platform", "rt/guest"]
 EXTS = (".c", ".cpp", ".h", ".inc", ".hpp", ".cc")
 NOT_SERVED = set()   # services the header declares without a count are exactly those whose table row says NOT SERVED
@@ -250,6 +250,34 @@ def line_of(code, pos):
     return code.count("\n", 0, pos) + 1
 
 
+def host_roots(root):
+    """Roots of the tree that serve the host services: the rows of verify/admit.json with "serves": "hostapi" (a host is declared there, never
+    named in this checker or the header). -> paths relative to ROOT."""
+    with open(os.path.join(root, "verify", "admit.json")) as f:
+        rows = json.load(f)["roots"]
+    pre = "ports/fnv-nx/"
+    return [r["path"][len(pre):] if r["path"].startswith(pre) else r["path"] for r in rows if r.get("serves") == "hostapi"]
+
+
+def py_service_tables(path):
+    """[(NAME, nargs, line)] of the service tables of a Python host file: a module-level dict whose keys are all ints and whose values are all
+    (str, int) tuples ({fn: (name, least nargs)}); the structure is the rule, no table is named. NAME is the upper-cased entry name."""
+    try:
+        tree = ast.parse(open(path).read())
+    except (OSError, SyntaxError):
+        return []
+    out = []
+    for n in tree.body:
+        d = n.value if isinstance(n, (ast.Assign, ast.AnnAssign)) else None
+        if not (isinstance(d, ast.Dict) and d.keys and all(isinstance(k, ast.Constant) and isinstance(k.value, int) for k in d.keys)):
+            continue
+        ok = all(isinstance(v, ast.Tuple) and len(v.elts) == 2 and isinstance(v.elts[0], ast.Constant) and isinstance(v.elts[0].value, str)
+                 and isinstance(v.elts[1], ast.Constant) and isinstance(v.elts[1].value, int) for v in d.values)
+        if ok:
+            out += [(v.elts[0].value.upper(), v.elts[1].value, v.lineno) for v in d.values]
+    return out
+
+
 def main(argv):
     root = "."
     selftest = False
@@ -416,17 +444,25 @@ def main(argv):
         if name in served:
             errs.append("%s: %s is served twice (also %s)" % (where, name, served[name][0]))
         served[name] = (where, k)
-    for fname, pat in ((HOST_PLAT, r"\[FNVNX_PLAT_([A-Z0-9_]+)\]\s*=\s*\{\s*(\d+)\s*,"),
-                       (HOST_SOCK, r"case\s+FNVNX_PLAT_([A-Z0-9_]+)\s*:\s*return\s+(\d+)\s*;")):
-        try:
-            hc = strip_comments(open(os.path.join(root, fname), errors="replace").read())
-        except OSError:
-            errs.append("%s: host dispatch file missing" % fname)
-            continue
-        if re.search(r"\bFNVNX_PLAT_SOCK_(FIRST|LAST)\b", hc):
-            errs.append("%s: serves by a numeric range (FNVNX_PLAT_SOCK_FIRST/LAST); serve the declared names" % fname)
-        for m in re.finditer(pat, hc):
-            serve(m.group(1), int(m.group(2)), "%s:%d" % (fname, line_of(hc, m.start())))
+    hosts = host_roots(root)
+    if not hosts:
+        errs.append("verify/admit.json declares no host root (a root with \"serves\": \"hostapi\"): no host serves the declared services")
+    for hroot in hosts:
+        for dp, dn, fn in os.walk(os.path.join(root, hroot)):
+            dn[:] = [x for x in sorted(dn) if x not in ("build", "out", ".git", "__pycache__", "tests")]
+            for f in sorted(fn):
+                path = os.path.join(dp, f)
+                where = os.path.relpath(path, root)
+                if f.endswith(".py"):
+                    for name, k, line in py_service_tables(path):
+                        serve(name, k, "%s:%d" % (where, line))
+                elif f.endswith((".c", ".cc", ".cpp", ".inc", ".h")):
+                    hc = strip_comments(open(path, errors="replace").read())
+                    if re.search(r"\bFNVNX_PLAT_SOCK_(FIRST|LAST)\b", hc):
+                        errs.append("%s: serves by a numeric range (FNVNX_PLAT_SOCK_FIRST/LAST); serve the declared names" % where)
+                    for pat in (r"\[FNVNX_PLAT_([A-Z0-9_]+)\]\s*=\s*\{\s*(\d+)\s*,", r"case\s+FNVNX_PLAT_([A-Z0-9_]+)\s*:\s*return\s+(\d+)\s*;"):
+                        for m in re.finditer(pat, hc):
+                            serve(m.group(1), int(m.group(2)), "%s:%d" % (where, line_of(hc, m.start())))
     for name, (where, k) in sorted(served.items()):
         if name not in svc:
             errs.append("%s: serves %s, which hostapi.h does not declare" % (where, name))
