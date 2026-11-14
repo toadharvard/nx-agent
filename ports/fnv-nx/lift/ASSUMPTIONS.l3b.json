@@ -76,7 +76,7 @@
   {
    "id": "A-UNDEFFLAGS",
    "area": "forms",
-   "file": "lift/fnvlift/f_dsl.py",
+   "file": "lift/proof/lift_dsl.py",
    "statement": "17 (mnemonic, undefined flag) pairs: the value the reference CPU produces is not yet pinned.",
    "disposition": "open: needs the reference-CPU table (same host as rcp), then a fact"
   },

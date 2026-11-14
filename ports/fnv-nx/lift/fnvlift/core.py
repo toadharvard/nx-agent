@@ -202,14 +202,14 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     return insns, tables, taken, bad
 
 
-EMIT = ''      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment)
+EMIT = None   # the emitter of integer instructions from the proven DSL forms (proof/lift_dsl.py emit_form(cx, ins) -> None | SKIP), called before the hand handlers; None = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment); fnvlift imports nothing from proof
 
 
-def set_emit(mode):
+def set_emit(fn):
     global EMIT
-    if mode not in ('', 'dsl'):
-        raise ValueError('emit mode %r (want "dsl" or "")' % (mode,))
-    EMIT = mode
+    if fn is not None and not callable(fn):
+        raise ValueError('emit %r (want a function or None)' % (fn,))
+    EMIT = fn
 
 
 JTAB = None      # facts of tools/jtab.py: {site: (lo, hi, targets)} from the `jtab_tables` records of ehtables.json; set by set_jtab()
@@ -248,10 +248,8 @@ def dispatch(cx, ins):
     if f_cpufeat.missing(ins):         # CPUID-UD rule (f_cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
         f_sys.ud_site(cx)
         return
-    if EMIT == 'dsl':
-        from . import f_dsl
-        if f_dsl.emit_form(cx, ins) is not SKIP:
-            return
+    if EMIT is not None and EMIT(cx, ins) is not SKIP:
+        return
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
         return

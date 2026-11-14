@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Agreement of the lifter's flag semantics with the decoder's flag table (item 21, rule 4), per (mnemonic, flag), over the encoding shapes of an image.
-    python3 -I proof/flagagree.py IMAGE FACTS_DIR        env GATE_OUT; writes GATE_OUT/flags_agree.json; exit 0 iff no row disagrees
+    python3 -I gates/flagagree.py IMAGE FACTS_DIR        env GATE_OUT; writes GATE_OUT/flags_agree.json; exit 0 iff no row disagrees
 Both sides are classified per flag into: def (the instruction writes a defined value), undef (the SDM leaves it undefined: the Form's `undefined()`, the decoder's
 UNDEFINED), none (the flag is not touched), cond (a count in cl: any of the others); the flags an instruction reads are compared too (row `reads`). The Form side
 is gate_flags.form_effect of the Form that the lifter emits from (proof/forms.build, the DSL of fnvlift/dsl.py), the single source of the gate; the decoder
@@ -15,8 +15,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
-from gates import gate_flags as g
+sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, HERE)
+import gate_flags as g
 from proof import forms, shape
 X = g.X
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate R3 (exe universe):  universe_r3_check.py [FACTS_DIR]   (default env FNVNX_FACTS_OUT or /home/user/l3facts; exe env FNVNX_EXE)
+"""Gate R3 (exe universe):  universe_r3_check.py [FACTS_DIR]   (default: the declared input facts; the exe: the declared input exe, FNVNX_EXE overrides it with the image under test)
 Recomputes from the exe alone the set of relocated pointer targets in executable sections (PE .reloc HIGHLOW fixups whose stored value lies
 in an executable section) and checks (a) every target is an entry of universe.tsv; (b) gate_codemap.json is green and codemap.tsv classifies
 every byte of the executable sections exactly once (contiguous runs, no UNEXPLAINED); (c) closure under direct targets: lifting every entry with fnvlift
@@ -9,7 +9,8 @@ import os, sys, re, multiprocessing as mp
 from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 import json, pemod
-EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
+EXE = os.environ.get('FNVNX_EXE') or os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe')   # FNVNX_EXE: the image under test (modules_check sets it to a module); else the exe. The declared inputs of this test (inputs.json): gamedata/exe and l3a-lift/facts, commit + tree_sha256 pinned in verify/contract_inputs.json
+os.environ['FNVNX_EXE'] = EXE
 def lift_part(arg):
     """worker: lift entries[k::n] -> (missing target -> number of entries naming it, reason class -> count, entries lifted, direct targets seen)"""
     fd, k, n = arg; os.environ['FNVNX_UNIVERSE'] = fd + '/universe.tsv'; sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
@@ -37,8 +38,8 @@ def check_c(fd, ix):
     print('(c) direct targets (calls, jumps, fall-throughs) the lifter routed to the dispatcher because they are not entries: %d distinct (%d references), inside executable sections: %d %s' % (len(ne), sum(ne.values()), len(nin), ' '.join('%08x' % v for v in nin[:6])))
     return miss + Counter(dict.fromkeys(nin, 1))
 def main():
-    fd = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts')
-    M = pemod.load(os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); xs = [(a, a + z) for n, a, z, ro in M.xs]
+    fd = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else os.environ['FNVNX_INPUT_FACTS']
+    M = pemod.load(EXE); xs = [(a, a + z) for n, a, z, ro in M.xs]
     ix = lambda v: any(a <= v < b for a, b in xs)
     tg = {M.u32(r) for r in (pemod.relocs(M) or ())}; tg = {v for v in tg if ix(v)}
     ent = {int(l.split('\t')[0], 16) for l in open(fd + '/universe.tsv') if l.strip() and not l.startswith('#')}

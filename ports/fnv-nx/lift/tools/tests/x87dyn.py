@@ -2,7 +2,7 @@
 """x87 dynamic stack: the cases the QEMU oracle of instest.py cannot judge (it does not model stack faults): push on a full stack, use of an empty slot.
 The masked x87 answer is the real indefinite plus IE+SF in the status word; checked on single lifted instructions (dynamic variant, Unicorn AArch64)."""
 import os, struct, subprocess, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); RT = os.path.join(os.path.dirname(HERE), 'rt'); sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE)); RT = os.path.join(LIFT, 'rt'); sys.path.insert(0, HERE); sys.path.insert(0, LIFT)
 import instest as T, fnvlift as L
 EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe'); WORK = '/home/user/l3work/x87dyn'
 IND = (0xC000000000000000, 0xFFFF, 6)
@@ -13,7 +13,7 @@ def find(img, funcs, pred):
 def main():
     os.makedirs(WORK, exist_ok=True); img = L.Image(EXE); T.G.update(L=L, img=img, work=WORK)
     funcs = sorted((int(x.split('\t')[0], 16), int(x.split('\t')[1])) for x in open(os.environ.get('FNVNX_FUNCS', '/home/user/l3facts2/funcs.tsv')) if x[0] != '#')
-    T.runtime_objects(WORK, os.path.dirname(HERE))      # rt.o fmath.o rcptab.o x87.o hostticks.o cpumodel.o: the one build of the runtime objects every test link needs (instest.py)
+    T.runtime_objects(WORK, LIFT)      # rt.o fmath.o rcptab.o x87.o hostticks.o cpumodel.o: the one build of the runtime objects every test link needs (instest.py)
     mem = lambda b0, g: lambda i: i.opcode[0] == b0 and i.modrm < 0xc0 and i.modrm >> 3 & 7 == g
     # (name, instruction, depth, TOP, expected TOP after, expected ST0 carrier or None, expected 8 stored bytes or None)
     cases = [('fld m32, full stack', mem(0xd9, 0), 8, 0, 7, IND, None), ('fstp m64, empty stack', mem(0xdd, 3), 0, 0, 1, None, 0xFFF8000000000000),

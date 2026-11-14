@@ -11,8 +11,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 import capstone, z3
 from capstone import x86 as X
-from fnvlift import core, f_dsl
-core.set_emit('dsl')
+from fnvlift import core
+from proof import lift_dsl as f_dsl
+core.set_emit(f_dsl.emit_form)
 from fnvlift.dsl import to_smt
 from proof import forms
 

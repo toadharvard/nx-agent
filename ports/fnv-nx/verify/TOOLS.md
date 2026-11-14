@@ -443,6 +443,15 @@ platform implementation writes through a pointer argument only when ImportInfo s
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
 ```
 
+## contract/nativerows.py
+The rows of the native dispatch table: for every exe address whose body is native (bodysel verdict `native`), the one symbol a native root defines for it.
+`nativerows.py --obj obj.json --bind bind.json --bodysel bodysel.tsv --out native.tsv`; `native.tsv` is `address(8 hex)<TAB>symbol`, sorted by address.
+Rule, total over the native addresses: exactly one defined symbol of the objects carries the address (a `def` row of `.fnvnx.sympair`, function kinds, with the
+address bind.json gave it) gives its row; none, or several different symbols for one address (both constructor variants), is an error that lists every such
+address, because the table has no rule to choose between bodies. A symbol defined in several objects (inline functions) counts once. The output is a function
+of the three input files only. `lift/tools/dispgen.py --prefix fnvnx_native --allow-empty` turns the rows into the table `fnvnx_native_disp_table`, which
+`fnvnx_dispatch` consults first.
+
 ## contract/objfacts_merge.py
 
 ```text

@@ -14,7 +14,7 @@ import gmpy2
 from fractions import Fraction
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RT = os.path.join(HERE, '..', 'rt')
+RT = os.path.join(HERE, '..', '..', 'rt')
 WORK = os.environ.get('FMATH_WORK', '/home/user/l3work/fmath')
 gmpy2.get_context().precision = 400
 gmpy2.get_context().emax = 1 << 40

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Link check of the shape certificate, EXHAUSTIVE over the instruction instances of the image:
     for every instance i (bytes, address) of integer-family shape S:   canon(forms.build(i, addr)) == canon(symbuild(S)[fields := bytes of i, eip := addr])
-canon = serialization of the Form after constant folding (symform.py).  The lifter keeps building concrete Forms (fnvlift/f_dsl.py), so this equality is what
+canon = serialization of the Form after constant folding (symform.py).  The lifter keeps building concrete Forms (proof/lift_dsl.py), so this equality is what
 turns "the symbolic Form of shape S is proved against the Sail model for all field values" into "the Form the lifter emits for i is proved".
   symcheck.py --image EXE --ranges ranges.tsv [--proc K/N] [--out FILE] [--limit M]
 Universe: the union of the half-open ranges of ranges.tsv (entry <TAB> start-end ...), linear sweep per range, instances de-duplicated by (address, bytes).

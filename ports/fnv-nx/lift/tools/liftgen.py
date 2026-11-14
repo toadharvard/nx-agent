@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 BATCH = 60
-ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of test/instest.py
+ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of tools/tests/instest.py
 NBUCKET = 4096
 # The flags of lifted C++: the recipe's (verify/guest_compiler.json flags.semantics + lift/pack/build.json), resolved by resolved_flags() for every test that compiles pack code. No flag that turns an error into a warning or silences one.
 PACK_ROOT_FLAGS = {'c': ['-Werror=attributes'], 'cxx': ['-std=gnu++17', '-O2', '-Werror=attributes'], 'asm': []}   # the per-root classes of the pack (recipe.PER_ROOT); the semantic flags are the pin's, never listed here
