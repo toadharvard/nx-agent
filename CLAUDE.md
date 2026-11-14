@@ -139,6 +139,18 @@ The owner's words: "Транк никогда красный. Всегда зе�
     over that declared file set, a sound superset. That is why d3dx9_31.dll (OCT2006 cab, loaded by d3dx9_38 at 0x56b708)
     joins the set as a may-load image, 6 -> 7, pinned by exepin and lifted like d3dx9_38. A name outside the declared
     file set gets NULL / ERROR_MOD_NOT_FOUND (126), as Windows and Wine 9.0 return it.
+  - **The declared CPU (orchestrator decision, 2026-11-14).**
+    - Features: cpuid is the reference host's answer (lift/rt/cpumodel.c, CPUREF), restricted to the feature set
+      whose every instruction is lifted. That is MMX, SSE and SSE2; SSE3 and up, 3DNow and AVX are clear.
+    - An instruction of a cleared feature is #UD, as on a real CPU with that feature set. This is read from CPUREF,
+      not from a list.
+    - Every #UD shape site must be certified unreachable on the declared machine: dominated by the exe's own cpuid
+      test whose declared answer excludes it, with a call-graph certificate. If a site is not certified, the build is
+      red; the feature is then lifted or the site is reported.
+    - Processors: one count holds for the whole declared machine, 3. These are the console cores an application
+      gets, one thread each. cpuid leaf 1 EBX/HTT and leaf 4 (L3a), GetSystemInfo, GetLogicalProcessorInformation and
+      the affinity masks 0b111 (L5), and the emulator's core count (L4) all report it. Guest threads run in parallel
+      on these cores.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
