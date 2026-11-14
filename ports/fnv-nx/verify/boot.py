@@ -35,7 +35,8 @@ Without --gpu module 10 is not registered (a guest call answers NO_MODULE). EVER
 (n from 1); OUT.json "gpu" = {library_sha256, presents, first_module10_call, last_error} and OUT.json "frames" = [{n, t_ns (virtual
 clock at the present), per_tid: {thread name: instructions}}] for every frame (Icount.frames(): frame n spans every interval after the
 one frame n-1 closed, up to its own mark; frame 1 starts at the start of the run). The record grows linearly with the frames; the block
-hook is not touched (a mark is O(1)). Only the first 3 frames are published as images (farm/boot_job.sh), the job's output size.
+hook is not touched (a mark is O(1)). Every present is also dumped as an image: the library writes frame_%06u.rgba + .txt (width x height x 4 bytes + "w h\n") into --frames for each present, and
+farm/boot_job.sh publishes all of them.
 Two "present" facts, not to be mixed: milestone first-present = the exe's own call of D3D9 Present (the contract's import:DLL!Present
 rows, `call` parts, observed in the guest); milestone first-frame = the first `present` host event of the GL backend (bootgpu on_present,
 the table row `first-frame any host present` that bootinputs.py milestones always generates; it needs --gpu). They are different

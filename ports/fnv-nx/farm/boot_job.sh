@@ -12,7 +12,7 @@
 #    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
 #    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
 #    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
-#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, MainMenu, import:*!Present; the table always gains first-frame = the GL backend's first present host event) + the loader's
+#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present; the table always gains first-frame = the GL backend's first present host event) + the loader's
 #    console lines of run.txt (when present) -> the bootmiles table; optional softfloat.syms or softfloat.tsv (one symbol
 #    per line). Every missing required file is listed and fails the job
 #  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
@@ -33,8 +33,10 @@
 #  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
 # --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
 #    Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the versions of
-#    verify/env.json (installed by farm/setup_verdict_env.sh, never by this job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
-#    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not (OUT.json "frames" has a record for every frame). meta.json gains gpu_branch and
+#    verify/env.json (installed by farm/setup_verdict_env.sh, never by this job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. EVERY
+#    presented frame (frame_%06u.rgba + .txt, written by the library for each present) is published under frames/ with the result. Size: one frame
+#    is width x height x 4 bytes (1280x720 handheld = 3.7 MB, 1920x1080 docked = 8.3 MB) plus a few bytes of .txt; the job does not cap the frame
+#    count, a publish over a store limit is reported to L4, not trimmed. OUT.json "frames" has a record for every frame. meta.json gains gpu_branch and
 #    gpu_branch_commit, the final line gains presents=<n>.
 #    The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
 #    the bridge it was linked with (render: {branch, archive_sha256}); that branch's build.json archive_sha256 and its libfnvnx-d3d9.a
@@ -267,13 +269,19 @@ IDX=$(mktemp -u "$WORK/index.XXXXXX")
 for f in OUT.json OUT.console.txt spec.json meta.json; do
   GIT_INDEX_FILE=$IDX GITA update-index --add --cacheinfo "100644,$(GITA hash-object -w "$WORK/$f"),$f" || die "cannot stage $f"
 done
-if [ -n "$GPU_LIB" ]; then   # the first 3 frames only (lexical order = present order)
-  for r in $(cd "$FRAMES" && ls frame_*.rgba 2> /dev/null | sort | head -3); do
-    for f in "$r" "${r%.rgba}.txt"; do
-      [ -f "$FRAMES/$f" ] || die "frame file $f is missing next to $r"
-      GIT_INDEX_FILE=$IDX GITA update-index --add --cacheinfo "100644,$(GITA hash-object -w "$FRAMES/$f"),frames/$f" || die "cannot stage $f"
-    done
-  done
+if [ -n "$GPU_LIB" ]; then   # EVERY frame the renderer dumped (frame_%06u.rgba + .txt, one pair per present), staged in one batch
+  (cd "$FRAMES" && ls frame_*.rgba 2> /dev/null | sort) > "$WORK/frames.lst" || true
+  while read -r r; do [ -f "$FRAMES/${r%.rgba}.txt" ] || die "frame file ${r%.rgba}.txt is missing next to $r"; done < "$WORK/frames.lst"
+  if [ -s "$WORK/frames.lst" ]; then
+    : > "$WORK/frames.paths"; : > "$WORK/frames.names"
+    while read -r r; do
+      printf '%s\n%s\n' "$FRAMES/$r" "$FRAMES/${r%.rgba}.txt" >> "$WORK/frames.paths"
+      printf '%s\n%s\n' "$r" "${r%.rgba}.txt" >> "$WORK/frames.names"
+    done < "$WORK/frames.lst"
+    GITA hash-object -w --stdin-paths < "$WORK/frames.paths" > "$WORK/frames.sha" || die "cannot store the frame files"
+    paste -d '\t' "$WORK/frames.sha" "$WORK/frames.names" | awk -F '\t' '{printf "100644 %s\tframes/%s\n", $1, $2}' \
+      | GIT_INDEX_FILE=$IDX GITA update-index --add --index-info || die "cannot stage the frame files"
+  fi
 fi
 TREE=$(GIT_INDEX_FILE=$IDX GITA write-tree) || die "write-tree failed"; rm -f "$IDX"
 MSG=$(printf 'boot %s: rc %s reason %s last %s instr %s' "$ELF_ID" "$RC" "$REASON" "$LAST" "$INSTR")

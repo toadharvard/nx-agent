@@ -122,22 +122,11 @@ def main():
     tw = bi.bootmiles.load_table(bi.milestone_table(mt2w, "", TID, None, man))
     case("contract kinds: winmain row -> milestone winmain (call) in file order", [m["name"] for m in tw.milestones] == ["exe-entry", "module-entry-a.dll", "winmain", "first-present", "first-frame"]
          and tw.milestones[2]["parts"][0]["target"] == 0x1000)
-    MM = ROW("MainMenu", "mainmenu", "00002000", "n1.json N1 function ?MainMenu@@YAXXZ")
-    mt2m = EXE3 + mu("a.dll") + WM + MM + PR("d3d9.dll", "00100e40") + TRAIL
-    tm = bi.bootmiles.load_table(bi.milestone_table(mt2m, "", TID, None, man))
-    case("contract kinds: mainmenu row -> milestone main-menu (call) in file order, after winmain; first-frame is the last generated row",
-         [m["name"] for m in tm.milestones] == ["exe-entry", "module-entry-a.dll", "winmain", "main-menu", "first-present", "first-frame"]
-         and [(p["kind"], p["target"]) for p in tm.milestones[3]["parts"]] == [("call", 0x2000)]
-         and [(p["kind"], p["target"]) for p in tm.milestones[5]["parts"]] == [("host", "present")])
     for k, a in (("module flag 2", mt2.replace("assigned_base+entry_rva\t1", "assigned_base+entry_rva\t2")), ("module without flag", EXE3 + mu("a.dll", extra=None) + TRAIL),
                  ("module twice", mt2.replace(TRAIL, "") + mu("a.dll") + TRAIL), ("bad module name", EXE3 + mu("x y") + TRAIL),
                  ("module wrong source", mt2.replace("modules.tsv assigned_base+entry_rva", "modules.tsv base")), ("module empty name", EXE3 + mu("") + TRAIL),
                  ("winmain twice", mt2w.replace(TRAIL, "") + WM + TRAIL), ("winmain wrong name", mt2w.replace("WinMain\t", "Main\t")),
                  ("winmain bare source", mt2w.replace("n1.json N1 function ?WinMain@@YGHPAUHINSTANCE__@@0PADH@Z", "n1.json N1 function ")),
-                 ("mainmenu twice", mt2m.replace(TRAIL, "") + MM + TRAIL), ("mainmenu wrong name", mt2m.replace("MainMenu\t", "Menu\t")),
-                 ("mainmenu bare source", mt2m.replace("n1.json N1 function ?MainMenu@@YAXXZ", "n1.json N1 function ")),
-                 ("mainmenu wrong source", mt2m.replace("n1.json N1 function ?MainMenu@@YAXXZ", "N1 function ?MainMenu@@YAXXZ")),
-                 ("mainmenu fifth field", mt2m.replace("?MainMenu@@YAXXZ\n", "?MainMenu@@YAXXZ\t1\n")),
                  ("import not Present", mt2.replace("d3d9.dll!Present", "d3d9.dll!Reset")), ("import dll twice", mt2.replace("idirect3ddevice9.dll", "d3d9.dll")),
                  ("import key twice", mt2.replace("00100e50", "00100e40")), ("import wrong source", mt2.replace("keys.tsv import key", "keys.tsv key")),
                  ("import not an import row", mt2.replace("00100e50", "00001000"))):
@@ -150,7 +139,6 @@ def main():
     case("stage error: name also from the contract", good(sterr("exe-entry any call 0x1000\n")))
     case("stage error: a stage winmain next to the contract's winmain row (the contract does not win silently)",
          good(raises(bi.milestone_table, mt2w, "", TID, st, man)))
-    case("stage error: a stage main-menu next to the contract's mainmenu row", good(raises(bi.milestone_table, mt2m, "", TID, "main-menu any call 0x1000\n", man)))
     case("stage error: a stage first-frame (the generated row owns the name)", good(sterr("first-frame any host present\n")))
     case("stage error: address without a code entry", good(sterr("w any call 0x4000\n")))
     case("stage error: address of an import row is not code", good(sterr("w any call 0x100e40\n")))
