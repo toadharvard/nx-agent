@@ -408,3 +408,17 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - Header homes are unit-less product roots (shim, render/shaders/translator, render/shaders/total). Any target may include them; they compile under the includer's flags.
     - There is no `headers` class. Generator inputs are any declared tracked file of an admitted root.
     - render/d3d9 lands with w16c commit 1 (waiting).
+
+## 2026-11-14 path plan (ALL.md "Path plan 2026-11-14", CLAUDE.md "Owner order of 2026-11-14"; merged here at 4d23274a9)
+
+Base: candidate claude/fnv-next3b 141b07580. At most 3 workers.
+
+| Item | Task | Worker | Branch | Status |
+|---|---|---|---|---|
+| 3.6a | translator root green on 141b07580; header byte-equal to 2f1bac09 (fnvnx_shader_hash removed, A2) | w1b session_01KmtZKSPYqkKJ24Q6D7aBcE | claude/fnv-l6-render-w1b-root (from afa93e610) | doing |
+| 3.6b | render/d3d9 root on 141b07580 (revert 7e598a5a hunk); builds after L1 w16c commit 1 | w6 session_01KmtZKQbpDKvc9qzXT9bLHX | claude/fnv-l6-render-w6-root (from 57051038) | doing; build blocked by L1 w16c |
+| 3.6d | render/ASSUMPTIONS.md (232 lines) into verify/ASSUMPTIONS.json (OWNER-ref / REMOVE ASM-6xx / discharged), file deleted | w6 (item B while waiting) | same | doing |
+| 3.6c | doubles 26 files / 88 symbols (86405ed1) and 22 ignore-all link commands (5d47e18d) -> 0, as class-test roots on link.roots | w5 session_01KmtZKS7moRHazN3AonGwXJ | claude/fnv-l6-render-w5-doubles | doing |
+| 4.6 | sm_link over every shipped shader = 0 failures (179 fail + 10 refused at 2026-11-12); defects closed by class (v 72, r 7, i 23, g 151 at 24b76f32) | w1b after 3.6a | claude/fnv-l6-render-w1b-root | queued after 3.6a |
+
+Paused: w3b, w4, farm; no other work.
