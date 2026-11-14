@@ -536,7 +536,7 @@ Steps:
  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
 --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-   Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the
+   Mesa llvmpipe). The job fetches it, requires the packages libegl1 and libegl-mesa0 at the
    versions of verify/env.json (installed by farm/setup_verdict_env.sh, never by the job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
    gpu_branch_commit, the final line gains presents=<n>.
@@ -755,8 +755,9 @@ The renderer of the boot stage: ext module 10 (the guest's GPU calls) forwarded 
 The library exports nxgl4_create(width, height, err, errlen), nxgl4_destroy, nxgl4_ext(fn, args, nargs) and nxgl4_last_error, and
 leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range -> host pointer; NULL when the range is not wholly inside
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
-this file builds a tiny C shim once per process (the two symbols forwarding to function pointers set through nxgl4_shim_set), loads
-it RTLD_GLOBAL, then loads the library. The shim needs the host gcc. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
+this file loads the recipe product of the host-target root verify/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
+no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
+nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation / fnvnx_assume_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
 The library's host packages (libegl1, libegl-mesa0 and what they pull: libglvnd0, mesa-libgallium, libllvm20, ...) are part of the declared
 environment (verify/env.json, derived by envcheck.py snapshot from RENDER_LIBS/RENDER_FILES); nothing installs them at test or job time.

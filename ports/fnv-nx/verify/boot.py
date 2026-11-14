@@ -380,55 +380,66 @@ def run(a):
             ic.mark_frame(gpu.presents, m.clock.now_ns(), {"sha256": store_frame(a.frames, frame)} if a.frames else None)
             for i in watch["host"].get("present", ()):
                 fire(i, m.tid())
-        gpu = bootgpu.Gpu(a.gpu, m, a.profile, on_present=presented,
+        def host_exit(code):   # fnvnx_reach_violation / fnvnx_assume_violation in a host object (bootrt): the run ends here, OUT.json as for any end
+            rc = finish(m.host_exit(code), gpu.report())
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(rc)
+        gpu = bootgpu.Gpu(a.gpu, m, a.profile, on_present=presented, on_exit=host_exit,
                           on_first_call=lambda: [fire(i, m.tid()) for i in watch["host"].get("gpu-first-call", ())])
+
+    def finish(r, gpu_report):
+        """the end of a run: icount, OUT.json, the console file, the summary line; the process's exit code"""
+        ic.stop(r["reason"])
+        console = r.pop("console")
+        rep = ic.report()
+        doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
+               "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
+               "milestone_log": log, "inputs": {"text_entry": list(text_entries)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
+        if declared:
+            doc["inputs"]["declared"] = declared
+        dif = svc.declared_faults   # a write under a declared input: L5's static fact is wrong, the verdict is failed whatever the guest did next
+        if dif:
+            doc["declared_input_faults"] = dif
+            doc["run"]["verdict"] = "failed"
+        if sc:
+            doc["inputs"]["scenario"] = {"sha256": sc.sha256, "content": sc.text}
+        diff = sc.check_expect(r["events"]) if sc else []
+        if sc:
+            doc["inputs"]["expect_events"] = {"ok": not diff, "diff": diff}
+        if wl is not None:
+            doc["watch_log"] = wlog
+            doc["watch_schema"] = "fnvnx-watch/2"
+            doc["watch_spec"] = {"names": sorted(set(wl)), "ret": sorted(wl_ret)}
+        if a.state_at:
+            doc["start_state"] = state[0] if state else None   # null: the symbol was never entered
+        if gpu:
+            doc["gpu"] = gpu_report
+            doc["frames"] = ic.frames()
+        with open(a.out, "w") as f:
+            f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
+        with open(os.path.splitext(a.out)[0] + ".console.txt", "w", encoding="utf-8") as f:
+            f.write(console)
+        tot = rep["totals"]
+        print("boot: reason=%s last=%s instr=%d main=%d threads=%d vns=%d wall=%.1f" % (
+            r["reason"], prog.last_reached() or "none", tot["all"]["total"], tot.get("1", {"total": 0})["total"],
+            r["threads"], r["virtual_ns"], time.time() - t0))
+        if diff:
+            print("boot: expect_events differ: %s" % "; ".join(diff))
+            return 2
+        if dif:
+            print("boot: declared_input_faults=%d first=%s %s" % (len(dif), dif[0]["call"], dif[0]["sd"]))
+            return 2
+        return 0 if r["reason"] == "limit" or (r["reason"] == "exit" and r["exit_code"] == 0) else 2
+
+    gpu_report = None
     try:
         r = m.run()
     finally:
         if gpu:
             gpu_report = gpu.report()
             gpu.close()
-    ic.stop(r["reason"])
-    console = r.pop("console")
-    rep = ic.report()
-    doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
-           "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
-           "milestone_log": log, "inputs": {"text_entry": list(text_entries)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
-    if declared:
-        doc["inputs"]["declared"] = declared
-    dif = svc.declared_faults   # a write under a declared input: L5's static fact is wrong, the verdict is failed whatever the guest did next
-    if dif:
-        doc["declared_input_faults"] = dif
-        doc["run"]["verdict"] = "failed"
-    if sc:
-        doc["inputs"]["scenario"] = {"sha256": sc.sha256, "content": sc.text}
-    diff = sc.check_expect(r["events"]) if sc else []
-    if sc:
-        doc["inputs"]["expect_events"] = {"ok": not diff, "diff": diff}
-    if wl is not None:
-        doc["watch_log"] = wlog
-        doc["watch_schema"] = "fnvnx-watch/2"
-        doc["watch_spec"] = {"names": sorted(set(wl)), "ret": sorted(wl_ret)}
-    if a.state_at:
-        doc["start_state"] = state[0] if state else None   # null: the symbol was never entered
-    if gpu:
-        doc["gpu"] = gpu_report
-        doc["frames"] = ic.frames()
-    with open(a.out, "w") as f:
-        f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
-    with open(os.path.splitext(a.out)[0] + ".console.txt", "w", encoding="utf-8") as f:
-        f.write(console)
-    tot = rep["totals"]
-    print("boot: reason=%s last=%s instr=%d main=%d threads=%d vns=%d wall=%.1f" % (
-        r["reason"], prog.last_reached() or "none", tot["all"]["total"], tot.get("1", {"total": 0})["total"],
-        r["threads"], r["virtual_ns"], time.time() - t0))
-    if diff:
-        print("boot: expect_events differ: %s" % "; ".join(diff))
-        return 2
-    if dif:
-        print("boot: declared_input_faults=%d first=%s %s" % (len(dif), dif[0]["call"], dif[0]["sd"]))
-        return 2
-    return 0 if r["reason"] == "limit" or (r["reason"] == "exit" and r["exit_code"] == 0) else 2
+    return finish(r, gpu_report)
 
 
 def main(argv=None):

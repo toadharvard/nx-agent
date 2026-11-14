@@ -5,30 +5,24 @@
 The library exports nxgl4_create(width, height, err, errlen), nxgl4_destroy, nxgl4_ext(fn, args, nargs) and nxgl4_last_error, and
 leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range -> host pointer; NULL when the range is not wholly inside
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
-this file builds a tiny C shim once per process (the two symbols forwarding to function pointers set through nxgl4_shim_set), loads
-it RTLD_GLOBAL, then loads the library. The shim needs the host gcc. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
+this file loads the recipe product of the host-target root verify/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
+no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
+nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation / fnvnx_assume_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
 """
-import atexit
 import ctypes
 import hashlib
 import os
-import shutil
-import subprocess
-import tempfile
+import re
+import sys
 
-SHIM_C = r"""
-#include <stdint.h>
-static void *(*g_ptr)(uint64_t, uint64_t);
-static void (*g_present)(uint32_t);
-void nxgl4_shim_set(void *(*ptr)(uint64_t, uint64_t), void (*present)(uint32_t)) { g_ptr = ptr; g_present = present; }
-void *nxgl4_guest_ptr(uint64_t addr, uint64_t size) { return g_ptr ? g_ptr(addr, size) : (void *)0; }
-void nxgl4_on_present(uint32_t frame) { if (g_present) g_present(frame); }
-"""
 SIZES = {"handheld": (1280, 720), "docked": (1920, 1080)}   # the swapchain image of the profile (docked 1080p, handheld 720p)
 MODULE = 10
 PTR_CB = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64)
 PRESENT_CB = ctypes.CFUNCTYPE(None, ctypes.c_uint32)
+EXIT_CB = ctypes.CFUNCTYPE(None, ctypes.c_uint32)
+BOOTRT_ROOT = "ports/fnv-nx/verify/bootrt"   # the host-target recipe root that defines the embedder symbols (admit.json)
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _shim = {}
 
 
@@ -36,26 +30,34 @@ class GpuError(Exception):
     pass
 
 
-def _load_shim():
-    """build (once per process, into a temp dir) and load the callback shim with RTLD_GLOBAL"""
+def bootrt_path(gate_cache=None):
+    """the path of libnxgl4rt.so built by recipe.py from BOOTRT_ROOT in the verdict's own store ($GATE_CACHE, the same cache the other recipe
+    products come from); a missing cache variable or a red build is an input error"""
+    cache = gate_cache or os.environ.get("GATE_CACHE")
+    if not cache:
+        raise GpuError("GATE_CACHE is not set: the embedder symbols are the recipe product of %s, built in the verdict's store" % BOOTRT_ROOT)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import gate_build
+    res, _out = gate_build.ensure(BOOTRT_ROOT, cache, REPO)
+    if res.get("status") != "green" or not res.get("elf"):
+        raise GpuError("%s is not green: %s" % (BOOTRT_ROOT, (res.get("failure") or {}).get("stage", res.get("status"))))
+    return res["elf"]["path"]
+
+
+def _load_shim(gate_cache=None):
+    """load the recipe-built embedder library (bootrt) once per process with RTLD_GLOBAL; typed"""
     if "lib" not in _shim:
-        d = tempfile.mkdtemp(prefix="nxgl4-shim-")
-        atexit.register(shutil.rmtree, d, ignore_errors=True)
-        src, so = os.path.join(d, "shim.c"), os.path.join(d, "libnxgl4shim.so")
-        with open(src, "w") as f:
-            f.write(SHIM_C)
-        r = subprocess.run(["gcc", "-O2", "-fPIC", "-shared", src, "-o", so], capture_output=True, text=True)
-        if r.returncode:
-            raise GpuError("cannot build the callback shim with gcc: %s" % r.stderr.strip())
-        lib = ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
-        lib.nxgl4_shim_set.argtypes, lib.nxgl4_shim_set.restype = [PTR_CB, PRESENT_CB], None
+        lib = ctypes.CDLL(bootrt_path(gate_cache), mode=ctypes.RTLD_GLOBAL)
+        lib.nxgl4_shim_set.argtypes, lib.nxgl4_shim_set.restype = [PTR_CB, PRESENT_CB, EXIT_CB], None
+        lib.fnvnx_reach_violation.argtypes, lib.fnvnx_reach_violation.restype = [ctypes.c_uint32], None
+        lib.fnvnx_assume_violation.argtypes, lib.fnvnx_assume_violation.restype = [ctypes.c_uint32, ctypes.c_uint64], None
         _shim["lib"] = lib
     return _shim["lib"]
 
 
-def load(path):
+def load(path, gate_cache=None):
     """load the shim and then the library at `path` (the shim's symbols must exist before it); the library's functions typed"""
-    shim = _load_shim()
+    shim = _load_shim(gate_cache)
     try:
         lib = ctypes.CDLL(os.path.abspath(path))
     except OSError as e:
@@ -72,14 +74,16 @@ def load(path):
 class Gpu:
     """one renderer library bound to one machine; at most one live Gpu per process (the library holds one GL context)"""
 
-    def __init__(self, path, machine, profile="handheld", on_present=None, on_first_call=None):
+    def __init__(self, path, machine, profile="handheld", on_present=None, on_first_call=None, on_exit=None):
         if profile not in SIZES:
             raise GpuError("profile must be handheld or docked, got %r" % (profile,))
         with open(path, "rb") as f:
             self.sha256 = hashlib.sha256(f.read()).hexdigest()
         self.m, self.presents, self.first_call, self.hook_present, self.hook_first = machine, 0, None, on_present, on_first_call
         shim, self.lib = load(path)
-        self._cbs = (PTR_CB(self._guest_ptr), PRESENT_CB(self._present))   # alive as long as the library may call them
+        # on_exit(code): a host object ended the process through fnvnx_reach_violation / fnvnx_assume_violation with the full 32-bit code; it
+        # ends the process itself. None registers no exit callback: the violation then ends the process with status 1 after its log line.
+        self._cbs = (PTR_CB(self._guest_ptr), PRESENT_CB(self._present), EXIT_CB(on_exit) if on_exit else EXIT_CB())   # alive as long as the library may call them
         shim.nxgl4_shim_set(*self._cbs)
         lib = self.lib
         err = ctypes.create_string_buffer(256)
