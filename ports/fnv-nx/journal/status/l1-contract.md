@@ -1064,3 +1064,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The trunk a5c8f427 and the candidate 141b07580 env.json debs hold Mesa 25.2.8-0ubuntu0.24.04.4 with sha256 and snapshot. The integration branch's env.json lacks it; the orchestrator was asked to sync.
   - Rule: the env.json debs entry is the one pin, with no external or mirror. The gate-result key includes the env id. A recipe stage that uses a deb declares it (its sha256 is in the stage key), and an undeclared deb is red. The correction went to L6 w5.
 - L5 w14 weak-definition census of runtime 00e3d42a: 4947 names / 5371 entries, of which 5366 are libstdc++ COMDAT (real). Of the 5 non-COMDAT: sched_yield and sched_getcpu are fixed-failure and overridden in rt/guest (getcpu through a new hostabi service THREAD_CPU); _sbrk_r is real (conditional ENOMEM); __call_exitprocs and __stdio_exit_handler are trivial and real.
+- 00:12 w22f4 be02d26cd (the fpexact gate side, fnvnx-f2i/2): the form is accepted. Two fixes:
+  1. the gate computes the bounds from the record's target type and kind, never from report fields;
+  2. a range fact must carry nonan (GCC frange), or the site is red.
+  The final field set goes to L2 w1. It lands together with w1's rewrite.
