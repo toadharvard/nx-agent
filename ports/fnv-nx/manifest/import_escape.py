@@ -49,9 +49,9 @@ WIDTH = {E_BOOL: 1, E_I1: 1, E_U1: 1, E_CHAR: 2, E_I2: 2, E_U2: 2, E_I4: 4, E_U4
 
 
 # The string pointer typedefs that the Windows Data Types documentation defines as a pointer to a NUL-terminated string of 8-bit /
-# 16-bit characters (kind str8 / str16), and the ones it defines as a double-NUL-terminated list (str8nn / str16nn).
+# 16-bit characters (kind str8 / str16; BSTR: documented as a length-prefixed, NUL-terminated OLECHAR string), and the ones it defines as a double-NUL-terminated list (str8nn / str16nn).
 STRINGS = {'PSTR': 8, 'LPSTR': 8, 'PCSTR': 8, 'LPCSTR': 8, 'PTSTR': 8, 'LPTSTR': 8, 'PCTSTR': 8, 'LPCTSTR': 8, 'PSZ': 8, 'PCSZ': 8,
-           'PWSTR': 16, 'LPWSTR': 16, 'PCWSTR': 16, 'LPCWSTR': 16, 'LPOLESTR': 16, 'LPCOLESTR': 16,
+           'PWSTR': 16, 'BSTR': 16, 'LPWSTR': 16, 'PCWSTR': 16, 'LPCWSTR': 16, 'LPOLESTR': 16, 'LPCOLESTR': 16,
            'PZZSTR': 8, 'PCZZSTR': 8, 'PZZTSTR': 8, 'PCZZTSTR': 8, 'PZZWSTR': 16, 'PCZZWSTR': 16}
 STRINGS_NN = {'PZZSTR', 'PCZZSTR', 'PZZTSTR', 'PCZZTSTR', 'PZZWSTR', 'PCZZWSTR'}
 
