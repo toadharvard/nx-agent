@@ -36,9 +36,9 @@ def checks(obj):
         check('%s: no indirect call without a site check' % f,
               len(re.findall(r'[0-9a-f]+: [0-9a-f]+ (?:blr|br) x\d+', b)) == n and len(re.findall(r'[0-9a-f]+: [0-9a-f]+ cmp w\d+, w\d+', b)) >= n, b)
     c1 = body(dis, '_Z2c1PFiiEi')
-    check('hit path: ONE 64-bit load of the site, compare the low half of that register, branch, shift the register',
-          re.search(r'ldr x(\d+), \[x\d+\] [0-9a-f]+: R_AARCH64_P32_LDST64_ABS_LO12_NC \.bss.*? cmp w0, w\1 [0-9a-f]+: [0-9a-f]+ b\.ne .*? lsr x\d+, x\1, #32', c1.replace('\n', ' '))
-          and len(re.findall(r'R_AARCH64_P32_LDST64_ABS_LO12_NC \.bss', c1)) == 1, c1)
+    check('hit path: ONE 64-bit acquire load (ldar: the slot is shared memory, R9) of the site, compare the low half of that register, branch, shift the register',
+          re.search(r'ldar x(\d+), \[x\d+\].*? cmp (?:w0, w\1|w\1, w0) [0-9a-f]+: [0-9a-f]+ b\.ne .*? lsr x\d+, x\1, #32', c1.replace('\n', ' '))
+          and len(re.findall(r'ldar x\d+, \[x\d+\]', c1)) == 1 and len(re.findall(r'R_AARCH64_P32_ADD_ABS_LO12_NC \.bss', c1)) == 1, c1)
     c6 = body(dis, '_Z2c6i')
     check('a direct call is untouched', calls(c6, '_Z6directi') == 1 and 'fnvnx_dispatch' not in c6, c6)
     n = sum(calls(body(dis, f)) for f in dis)
