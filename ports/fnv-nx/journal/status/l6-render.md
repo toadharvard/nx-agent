@@ -570,3 +570,6 @@ Paused: w3b, w4, farm; no other work.
     - TLS 0. Guest and host 7 objects each.
     - objstub, guest roots: 284 items, 7 findings (was 375/97).
     - Head sent to L6A and w5. Next: gate_admit, then rule-A for the 7.
+- 23:52Z w1b 819716297: gate_admit 941/941 over 25 roots.
+    - Rule-A (c): the RESERVED body calls fnvnx_reach_violation from <fnvnx/reach.h> (hostabi). Its fact is request class `shader_opcode` from op_reserved.tsv, which L1 w20 implements in gate_reach.
+    - Blocked on w20, owner L1.
