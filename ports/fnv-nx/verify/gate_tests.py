@@ -48,6 +48,7 @@ import hashlib
 import json
 import os
 import shutil
+import re
 import signal
 import subprocess
 import sys
@@ -105,24 +106,43 @@ def tree_files(root, exclude, skipdir=None):
     return sorted(out)
 
 def declared_reads(files):
-    """{test file: (set of files, set of dirs) of its declared reads} from DIR/tests/reads.json ("fnvnx-selftest-reads/1": {"tests": {"test_x.py":
-    ["path", "dir/", ...]}}: a path without a trailing slash is a file of the view, with one an (at least empty) directory); a test without a record is
-    absent from the result and gets the whole checkout view. The record is written by tracereads.py and ENFORCED by the view: a file the test
-    reads and the record does not list is not there."""
+    """{test file: {"files": set, "listed": set, "dirs": set}} from DIR/tests/reads.json ("fnvnx-selftest-reads/3": {"tests": {"test_x.py": {"files": [...],
+    "listed": [...], "dirs": [...]}}}). files: repo-relative files the test opens, stats or executes, present with their content; listed: directories it
+    LISTED (glob, walk, listdir, the import path scan); dirs: directories it only stat'ed. A listing is a read of the directory: expand() puts EVERY
+    entry the directory has in the checkout into the view and the key (a file entry that is not a read file as an empty file, since a listing returns names
+    only; a sub-directory as a directory), so an entry added or removed changes the key. A test without a record gets the whole checkout view. The record is
+    written by tracereads.py and ENFORCED twice: the view holds nothing else, and a cold run is audited under strace for a lookup of a checkout path outside
+    it (red, "undeclared read")."""
     out, docs = {}, {}
     for f in files:
         d = os.path.dirname(f)
         if d not in docs:
             try:
                 doc = json.load(open(os.path.join(d, "reads.json")))
-                docs[d] = doc["tests"] if doc["format"] == "fnvnx-selftest-reads/1" else {}
+                docs[d] = doc["tests"] if doc["format"] == "fnvnx-selftest-reads/3" else {}
             except (OSError, ValueError, KeyError, TypeError):
                 docs[d] = {}
         rec = docs[d].get(os.path.basename(f))
-        if isinstance(rec, list):
-            rec = [os.path.normpath(x) for x in rec if isinstance(x, str)]
-            out[f] = ({x for x in rec if x not in ("", ".")}, {os.path.normpath(x) for x in map(str, docs[d][os.path.basename(f)]) if x.endswith("/")})
+        if isinstance(rec, dict):
+            out[f] = {k: {os.path.normpath(x) for x in rec.get(k, []) if isinstance(x, str) and x not in ("", ".")} for k in ("files", "listed", "dirs")}
     return out
+
+def expand(root, files, rec, skipdir=None):
+    """(files, names, dirs) of a record against the checkout ROOT: FILES, the empty-file NAMES and the DIRS of its listings (see declared_reads)."""
+    names, dirs = set(), set(rec["dirs"])
+    for d in rec["listed"]:
+        dirs.add(d)
+        try:
+            ents = sorted(os.listdir(os.path.join(root, d)))
+        except OSError:
+            continue
+        for e in ents:
+            p = os.path.join(root, d, e)
+            if e in (".git", "__pycache__") or os.path.abspath(p) == skipdir:
+                continue
+            (dirs if os.path.isdir(p) and not os.path.islink(p) else names).add(os.path.join(d, e))
+    files = set(files) | rec["files"]
+    return files, names - files, dirs
 
 def declared(files):
     """{test file: (set of test files in its view, itself included, net flag)} from DIR/tests/oracle.json "uses" / "net".
@@ -157,8 +177,11 @@ def git_view(view):
 
 def make_view(root, dst, exclude, skipdir=None, keep=None):
     """Private copy of the checkout without .git, __pycache__ and the EXCLUDE files: exactly the files tree_files hashes. KEEP = (files, dirs):
-    only those files, plus the (empty at least) directories."""
+    only those files, the NAMES as empty files, and the directories."""
     if keep is not None:
+        for rel in sorted(keep[1]):
+            os.makedirs(os.path.join(dst, os.path.dirname(rel)), exist_ok=True)
+            open(os.path.join(dst, rel), "wb").close()
         for rel in sorted(keep[0]):
             p = os.path.join(root, rel)
             if os.path.isfile(p) or os.path.islink(p):
@@ -167,7 +190,7 @@ def make_view(root, dst, exclude, skipdir=None, keep=None):
                     os.symlink(os.readlink(p), os.path.join(dst, rel))
                 else:
                     shutil.copy2(p, os.path.join(dst, rel))
-        for rel in sorted(keep[1]):
+        for rel in sorted(keep[2]):
             os.makedirs(os.path.join(dst, rel), exist_ok=True)
         return
     for d, dirs, names in os.walk(root):
@@ -238,10 +261,62 @@ def record_digest(data):
             lines.append(ln.split("  ")[0] if ln.startswith("FAIL ") else ln)
     return hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()   # a multiset: parallel cases print in any order
 
+STQ = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+def lookups(text):
+    """[(syscall, path under VIEWDIR as a checkout-relative path, ok, listed)] of a strace -f -y log (listed: a directory opened)."""
+    out, pend = [], {}
+    for ln in text.splitlines():
+        m = re.match(r"(\d+)\s+(.*)$", ln)
+        if not m:
+            continue
+        pid, rest = m.groups()
+        if rest.endswith("<unfinished ...>"):
+            pend[pid] = rest[:-len("<unfinished ...>")]
+            continue
+        r = re.match(r"<\.\.\. (\w+) resumed>(.*)$", rest)
+        if r:
+            if pid not in pend:
+                continue
+            rest = pend.pop(pid) + r.group(2)
+        c = re.match(r"(\w+)\((.*)\)\s+=\s+(-?\d+)", rest, re.S)
+        if not c:
+            continue
+        name, args, ret = c.groups()
+        q = STQ.search(args)
+        if not q or name == "chdir" or not q.group(1):
+            continue
+        d = re.search(r"\d+<([^>]*)>", args[:q.start()])
+        path = q.group(1).encode().decode("unicode_escape", "replace")
+        p = os.path.normpath(path if path.startswith("/") else os.path.join(d.group(1) if d else VIEWDIR, path))
+        if p == VIEWDIR or not p.startswith(VIEWDIR + "/"):
+            continue
+        rel = os.path.relpath(p, VIEWDIR)
+        if ".git" in rel.split(os.sep) or "__pycache__" in rel.split(os.sep):
+            continue
+        out.append((name, rel, int(ret) >= 0, name in ("openat", "open") and "O_DIRECTORY" in args))
+    return out
+
+def undeclared(root, keep, text):
+    """The checkout paths the run looked up and the view did not have: lookups that failed although the checkout holds the path, outside the
+    declared files, names and dirs (and not below a declared dir that was only created empty by a listing)."""
+    have = keep[0] | keep[1] | keep[2]
+    bad = set()
+    for name, rel, ok, _ in lookups(text):
+        if ok or rel in have:
+            continue
+        if os.path.lexists(os.path.join(root, rel)):
+            bad.add(rel)
+    return sorted(bad)
+
 def run_one(root, rel, exclude, timeout, skipdir=None, net=False, extra=None, keep=None, trace=None):
     """(status, seconds, tail, ended, digest): status passed|failed, TAIL the last bytes of output, DIGEST sha256 of its record (record_digest), ENDED
     False for a timeout."""
     t0 = time.time()
+    audit = keep is not None and trace is None   # a cold run on a declared view is traced: a lookup outside the declaration is red
+    if audit:
+        fd, trace = tempfile.mkstemp(prefix="audit-")
+        os.close(fd)
     # a test file is not a gate: it sees none of the gate's environment (GATE_OUT / GATE_COMMIT / GATE_CACHE included)
     env = dict(RUN_ENV)
     if net:
@@ -251,6 +326,7 @@ def run_one(root, rel, exclude, timeout, skipdir=None, net=False, extra=None, ke
     tmp = tempfile.mkdtemp(prefix="selftest-")
     view, scratch, out = os.path.join(tmp, "view"), os.path.join(tmp, "scratch"), os.path.join(tmp, "out.txt")
     os.mkdir(scratch)
+    bad = []
     cmd = ["unshare", "-m", "-p", "-u", "-i", "-f", "--kill-child"] + ([] if net else ["-n"]) + [
         "--", sys.executable, "-I", "-c", LAUNCH, view, scratch, rel, "1" if net else "0"] + ([os.path.join(tmp, "trace.log")] if trace else [])
     try:
@@ -283,7 +359,15 @@ def run_one(root, rel, exclude, timeout, skipdir=None, net=False, extra=None, ke
     finally:
         if trace:
             shutil.copy(os.path.join(tmp, "trace.log"), trace)
+            if audit:
+                bad = undeclared(root, keep, open(trace, errors="replace").read())
+                os.unlink(trace)
         shutil.rmtree(tmp, ignore_errors=True)
+    if bad:   # the declaration is stale: red, never re-traced here (tracereads.py is the declared step that rewrites it)
+        ok = False
+        line = "FAIL undeclared read  %s" % ", ".join(bad[:8])
+        data += ("\n" + line + "\n").encode()
+        tail = line + "\n--- end of output ---\n" + tail
     return ("passed" if ok else "failed"), round(time.time() - t0, 3), tail, ended, record_digest(data)
 
 def parse(argv):
@@ -349,7 +433,8 @@ def universe(dirs):
     return files
 
 def main(argv):
-    keep_of = lambda f: ({f} | dec[f][0] | rds[f][0], rds[f][1])   # noqa: E731  the view of a test with declared reads: those, its own file and its `uses`
+    # the view of a test with declared reads: those, its own file, its `uses` and the entries of its listed directories -> (files, names, dirs)
+    keep_of = lambda f: expand(root, {f} | dec[f][0], rds[f], skip)   # noqa: E731
     o, dirs = parse(argv)
     if dirs:
         print("gate_tests.py takes no directory: the universe is the admitted selftests roots (verify/admit.json)", file=sys.stderr)
@@ -366,7 +451,7 @@ def main(argv):
         allf = tree_files(root, set(), skip)
         for f in files:
             keys[f] = key_of(f, [r for r in allf if (r[0] in keep_of(f)[0] if f in rds else r[0] not in files or r[0] in dec[f][0])],
-                             o["timeout"], dec[f][1], keep_of(f)[1] if f in rds else ())
+                             o["timeout"], dec[f][1], (sorted(keep_of(f)[1]), sorted(keep_of(f)[2])) if f in rds else ())
 
     base = tempfile.mkdtemp(prefix="selftests-")   # in the gate's own TMPDIR; removed below whatever happens
     ws = os.path.join(base, "inputs")

@@ -515,6 +515,45 @@ check("testdet: a test whose PASS/FAIL record differs between its two runs is re
       rc != 0 and r["uncertified"] == ["verify/tests/test_flaky.py"] and r["testdet"]["nondeterministic"] == ["verify/tests/test_flaky.py"]
       and "nondeterministic" in r["detail"] and len(os.listdir(os.path.join(cache, "selftests"))) == 2, (rc, r, e))
 
+# declared reads (tracereads.py -> reads.json): the view of a test is its reads; a listing is a read of the directory
+d = tmp("tests-reads")
+cache = os.path.join(d, "cache")
+for n in "abc":
+    put(d, "verify/data/%s.txt" % n, n + "\n")
+put(d, "verify/other.txt", "o\n")
+mk(d, test_glob="import glob, os\nn = sorted(os.path.basename(x) for x in glob.glob('verify/data/*'))\n"
+   "print('PASS listing', n)\nopen('verify/data/a.txt').read()\nraise SystemExit(0 if n == ['a.txt', 'b.txt', 'c.txt'] else 1)\n",
+   test_other="open('verify/other.txt').read()\n")
+declare(d)
+p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "tracereads.py"), "--jobs", "2"], cwd=d, capture_output=True, text=True)
+rec = json.load(open(os.path.join(d, "verify/tests/reads.json")))["tests"] if os.path.exists(os.path.join(d, "verify/tests/reads.json")) else {}
+check("reads: tracereads.py records the files read and the directories listed", p.returncode == 0
+      and "verify/data/a.txt" in rec["test_glob.py"]["files"] and "verify/data" in rec["test_glob.py"]["listed"]
+      and "verify/data/b.txt" not in rec["test_glob.py"]["files"] and rec["test_other.py"]["files"] == ["verify/other.txt", "verify/tests/test_other.py"], (p.stdout, p.stderr, rec))
+p2 = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "tracereads.py"), "--check"], cwd=d, capture_output=True, text=True)
+check("reads: --check is green when the committed records equal a fresh trace", p2.returncode == 0, (p2.stdout, p2.stderr))
+rc, r, e = tests_c(d, cache)
+check("reads: a glob test sees the full directory in its view", rc == 0 and r["certified"] == 2 and r["recomputed"] == 2, (rc, r, e))
+put(d, "verify/data/b.txt", "changed, listed but never read\n")
+put(d, "docs/README.md", "docs-only edit\n")
+rc, r, e = tests_c(d, cache)
+check("reads: a docs-only edit and an edit of a listed-but-unread file rerun nothing", rc == 0 and r["recomputed"] == 0, (rc, r, e))
+put(d, "verify/data/a.txt", "a changed\n")
+rc, r, e = tests_c(d, cache)
+st = {f["name"][-12:]: f["cached"] for f in r["files"]}
+check("reads: an edit of a read file reruns exactly the tests that read it", rc == 0 and r["recomputed"] == 1
+      and st == {"test_glob.py": False, "test_other.py": True}, (rc, r, e))
+put(d, "verify/data/d.txt", "d\n")
+rc, r, e = tests_c(d, cache)
+st = {f["name"][-12:]: (f["cached"], f["status"]) for f in r["files"]}
+check("reads: an entry added to a listed directory changes the key and the listing the test sees", rc != 0
+      and st == {"test_glob.py": (False, "failed"), "test_other.py": (True, "passed")}, (rc, r, e))
+mk(d, test_other="open('verify/other.txt').read()\nopen('verify/data/a.txt').read()\n")
+rc, r, e = tests_c(d, cache)
+row = [f for f in r["files"] if f["name"].endswith("test_other.py")][0]
+check("reads: a read outside the declaration is red, named, and never re-traced", row["status"] == "failed"
+      and "undeclared read" in row["reason"] and "verify/data/a.txt" in row["reason"], (rc, r, e))
+
 d = tmp("tests-hermetic")
 mk(d, test_net="import socket, sys\ns = socket.socket()\ns.settimeout(2)\n"
    "try:\n    s.connect(('1.1.1.1', 80))\nexcept OSError:\n    sys.exit(0)\nsys.exit(1)\n",
