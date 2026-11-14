@@ -570,3 +570,8 @@ Workers are capped at 3. Assignment by plan item:
   - w6: imp, msvcrt, exitbridge, disp.
   - L3b w3: sehcodes, test_gate_lift, modlift_closure_test.
   - The 6 Unicorn instruction tests (instest, instest_extra, mmxtest, citest, x87dyn, x87test) are replaced by certified gate forms and deleted once their shape keys are certified. No second harness.
+
+## 2026-11-14 23:40 SEH CONTEXT (item 4.5) with L3b w9 8a661c5
+- The table has 70 fields: 48 round-trip, 14 ignored by Wine too, 8 defects in our restore.
+- Agreed: struct cpu gets appended fields (full FSW with ES/B by SDM rule, FOP/FCS/FDS, EFLAGS NT). Owner w6, queued after 2.5.
+- RF/TF and Dr0-7 are one class, "guest-written debug-trap state", closed by a site-value fact. It is the same analysis as 2.5's masked-exceptions fact, so w6 produces both, with global counts per image and class. Undecided sites go to reach_violation under the certificate rule.
