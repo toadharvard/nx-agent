@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-15 01:40Z L1 objstub on root 141b07580 + w20u e1715323f is RED: 768 findings over 114 objects and 173 units (5163/5483 judged). T2 570, V 180, T2-noreturn-tail 9, reach 5, wine-fixme 4. Each gets a real, Wine-9.0-cited, declared-machine or certified-unreachable body, or is deleted. Waiting for the w20 list by file, then a split across workers.
 - 11-15 01:35Z The 24 assumption findings were measured on the L6 tree (stale copy). On root e76474afe the L5 tree has 0. The gate has 5 in total, all in the w24 loader and sha256 (L1 to fix; red on the root until it does). w9 goes to case 5.
 - 11-15 01:30Z w9 BSTR is str16: manifest 9e4166ea, tree bfbbcea7, generator 79966c6d7. str16 41, ref 380. Sent to L3a for w7. w10 repins the root to it before the verdict. w9 takes the assumption mentions next, then case 5.
 - 11-15 01:25Z L4 S4 (IAT data slots): the binding fact is L1 contract/iat.py, from bridge.tsv conv data rows to native_symbol, giving the generated import_keys.c. L4 asks L1 to publish the rows; data rows with - are L5 objects to define (count pending).
