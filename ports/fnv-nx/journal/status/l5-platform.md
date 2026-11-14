@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-14 23:57Z w14 resumed: the msvcmodel13 e/f pair restarted (C2 ldscripts bug fixed in e5091e0d1; C1, C3-C7 were green), about 35 min in the background in its container. It is allowed to finish, because it was already started; later long rebuilds go to a farm. Then the repin with the libs entry, and the gcc-15 reverts.
 - 11-14 23:55Z L1 accepted resolve_input 4008c136, with one fix: a tracked-directory ref returns the tracked file list (git ls-files), and gates read only that; 2 tests. w10 does it before the verdict.
 - 11-14 23:53Z CLAUDE.md fast-path rule (20fe9510e): MINIMP3_NO_SIMD stays for a green trunk as the first verify/PERFDEBT.json entry (restoring rule: L2 fnvnx_ftoi lane-exact rewrite of the float-to-int builtins; owner L2). w10 adds the file in the root head.
 - 11-14 23:50Z w10 resolve_input 4008c136 (11/11 tests; imports + machine; 0 other opens; wine-specs specs/ = 668 files), with L1 for review. sse2neon is kept: fnvnx_compat.h is the lifted/decomp force-include; its 4 saturating cvt forms are reported to L2 for when those roots build. The libs rule moved to w14 (values from the msvcmodel13 tree). w10: the verdict next.
