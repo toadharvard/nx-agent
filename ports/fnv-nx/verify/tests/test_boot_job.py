@@ -285,14 +285,14 @@ def main():
     if rc == 0:
         files, msg, cm = published("l4-verify/boot/gpuid")
         fr = sorted(n for n in files if n.startswith("frames/"))
-        tb.case("published: OUT.json, console, spec, meta and the first 3 frames (.rgba + .txt) only",
+        tb.case("published: OUT.json, console, spec, meta and every presented frame (.rgba + .txt)",
                 sorted(n for n in files if "/" not in n) == ["OUT.console.txt", "OUT.json", "meta.json", "spec.json"]
-                and fr == ["frames/frame_%06u.%s" % (i, e) for i in range(3) for e in ("rgba", "txt")], sorted(files))
+                and fr == ["frames/frame_%06u.%s" % (i, e) for i in range(4) for e in ("rgba", "txt")], sorted(files))
         tb.case("frame files hold the library's output", files["frames/frame_000001.txt"] == b"1280 720\n"
                 and len(files["frames/frame_000001.rgba"]) == 1280 * 720 * 4, files.get("frames/frame_000001.txt"))
         doc, meta = json.loads(files["OUT.json"]), json.loads(files["meta.json"])
-        tb.case("OUT.json frames: a record for every present (4), images published for the first 3 only", [f["n"] for f in doc["frames"]] == [1, 2, 3, 4]
-                and len(fr) == 6, (doc.get("frames"), fr))
+        tb.case("OUT.json frames: a record for every present (4), an image pair published for each", [f["n"] for f in doc["frames"]] == [1, 2, 3, 4]
+                and len(fr) == 8, (doc.get("frames"), fr))
         tb.case("OUT.json gpu record, meta.json gpu fields", doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"]
                 and meta["gpu_branch"] == GB
                 and meta["gpu_branch_commit"] == git("rev-parse", "refs/heads/" + GB, cwd=BARE).strip(), (doc.get("gpu"), meta))

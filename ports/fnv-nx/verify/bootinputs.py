@@ -37,11 +37,6 @@ row or line a converter does not understand is an InputError carrying the file l
                                         WinMain <TAB> winmain <TAB> ADDR <TAB> n1.json N1 function SYMBOL     at most once -> milestone
                                                                                        winmain (call). A stage-table milestone `winmain` then
                                                                                        is an error (the contract does not win silently).
-                                        MainMenu <TAB> mainmenu <TAB> ADDR <TAB> n1.json N1 function SYMBOL   at most once -> milestone
-                                                                                       main-menu (call). A stage-table milestone `main-menu`
-                                                                                       then is an error. SYMBOL is the N1 function that
-                                                                                       marks the main menu: L2's N1 table says which, never
-                                                                                       this tool.
                                         import:DLL!Present <TAB> import <TAB> KEY <TAB> keys.tsv import key   one or more (DLL unique) -> ONE
                                                                                        milestone first-present, group any, one `call` part
                                                                                        per KEY; every KEY must be an import row of entries.tsv
@@ -318,14 +313,12 @@ def milestone_table(milestones_text, run_text, entries_id=None, stage_text=None,
         seen.add(name)
         if kind in SOURCES and src != SOURCES[kind]:
             raise InputError(f"line {no}: {kind} row: the source text must be {SOURCES[kind]!r}, got {src!r}")
-        if kind in ("exe_entry", "winmain", "mainmenu", "import") and extra is not None:
+        if kind in ("exe_entry", "winmain", "import") and extra is not None:
             raise InputError(f"line {no}: {kind} row has no fifth field")
         if kind == "exe_entry" and name == "exe_entry":
             body.append(("exe-entry", value))
         elif kind == "winmain" and name == "WinMain" and src.startswith("n1.json N1 function ") and len(src) > 20:
             body.append(("winmain", value))
-        elif kind == "mainmenu" and name == "MainMenu" and src.startswith("n1.json N1 function ") and len(src) > 20:
-            body.append(("main-menu", value))
         elif kind == "module_entry" and name.startswith("module_entry:"):
             mod = name[len("module_entry:"):]
             if not mod or any(c not in NAME_CHARS for c in mod):
@@ -348,7 +341,7 @@ def milestone_table(milestones_text, run_text, entries_id=None, stage_text=None,
                 body.append(None)
         else:
             raise InputError(f"line {no}: row {name!r} of kind {kind!r} is not understood "
-                             "(exe_entry, module_entry:NAME, WinMain/winmain, MainMenu/mainmenu, import:DLL!Present/import)")
+                             "(exe_entry, module_entry:NAME, WinMain/winmain, import:DLL!Present/import)")
     if sum(1 for it in body if it and it[0] == "exe-entry") != 1:
         raise InputError("milestones.tsv: want exactly one exe_entry row")
     for item in body:
