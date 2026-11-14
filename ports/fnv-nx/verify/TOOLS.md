@@ -443,6 +443,24 @@ platform implementation writes through a pointer argument only when ImportInfo s
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
 ```
 
+## contract/modules.py
+
+```text
+modules - the module table of the guest (L1 CONTRACT), and, from the same PE reading, the facts the loader's start rules compare.
+
+TLS directory facts (tls.tsv, tls/<name>.bin; rule S5 of the loader, read by L4's bootstart.py).  Universe: the exe, then every image of
+modules.tsv whose has_tls column is 1 (data directory 9 has a nonzero size), sorted by name; so the DLL rows of tls.tsv number exactly the
+has_tls = 1 rows of modules.tsv.  The directory is IMAGE_TLS_DIRECTORY32 (StartAddressOfRawData, EndAddressOfRawData, AddressOfIndex,
+AddressOfCallBacks, SizeOfZeroFill, Characteristics), read raw: the four addresses are VAs at the PREFERRED base.
+Columns: name, load_index (as in modules.tsv; empty for the exe), start_va, end_va, index_va, callbacks_va (hex, raw), template_rva (start_va
+- preferred base, hex), template_size (end - start, decimal), zero_fill (SizeOfZeroFill, decimal), align (the IMAGE_SCN_ALIGN field of
+Characteristics, bits 20-23, the field itself: 0 stays 0), template_sha256, callbacks (;-list of the RVAs of the callback array up to its null word;
+empty when AddressOfCallBacks is 0 or the first word is 0).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
+then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
+array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
+Test: contract/tests/test_modules.py on synthetic PE images built by the test.
+```
+
 ## contract/objfacts_merge.py
 
 ```text
@@ -1545,6 +1563,8 @@ and compares the tracked files it opened with subject + references (verify/oracl
 ## verify/gate_assumptions.py
 
 ```text
+Perf debt: verify/PERFDEBT.json (fnvnx-perfdebt/1) lists switched-off fast paths, each with id, fast_path, rule, owner (a layer); the report gives
+perfdebt.open; first_frame true makes any open entry red.
 Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
 (verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
     python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json

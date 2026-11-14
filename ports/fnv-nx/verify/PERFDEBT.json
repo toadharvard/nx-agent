@@ -1,13 +1,18 @@
 {
- "format": "fnvnx-perfdebt/1",
  "entries": [
   {
-   "switch": "MINIMP3_NO_SIMD",
-   "site": "ports/fnv-nx/platform/audio/dshow_filters.cpp (made unconditional by commit 6aa648f7)",
-   "fast_path": "minimp3's NEON mp3d_scale_pcm",
-   "restoring_rule": "fnvnx_ftoi rewrites every explicit target float->int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact: in range it converts; out of range or NaN it gives the x86 integer indefinite (cvttps2dq). fpexact then certifies the NEON path.",
+   "fast_path": "ARMv8 SHA-256 instructions in lib/sha256",
+   "id": "PD-LOADER-SHA256-ISA",
+   "owner": "L1",
+   "rule": "lib/sha256 selects the ISA body by the declared reference CPU's features (one home)"
+  },
+  {
+   "fast_path": "minimp3's NEON mp3d_scale_pcm (MINIMP3_NO_SIMD, ports/fnv-nx/platform/audio/dshow_filters.cpp, commit 6aa648f7)",
+   "id": "PD-MINIMP3-NEON",
    "owner": "L2",
-   "removal": "the switch and this entry are deleted in the same commit that lands the rule"
+   "rule": "fnvnx_ftoi rewrites every explicit target float->int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact: in range it converts; out of range or NaN it gives the x86 integer indefinite (cvttps2dq). fpexact then certifies the NEON path."
   }
- ]
+ ],
+ "first_frame": false,
+ "format": "fnvnx-perfdebt/1"
 }
