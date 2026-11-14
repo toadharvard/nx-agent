@@ -425,3 +425,38 @@ class PT:
         for site, kind, toks, t in self.stores:
             c['top' if t else 'static-any' if any(o is not None and o[0] == 'S' and cc is None for o, cc in toks) else 'static' if any(o is not None and o[0] == 'S' for o, cc in toks) else 'frame/heap' if toks else 'none'] += 1
         return dict(stores=len(self.stores), by_class=dict(c), int_stores=self.int_stores, import_gaps=dict(self.gaps), passes=self.passes)
+
+
+def load_image(pe, facts):
+    """-> (pcsrc.Img with its summaries, M): the PE image `pe` (the stored file, preferred base) with the facts' universe.tsv / ranges.tsv; the driver of the dataflow"""
+    import pemod
+    nb = None
+    for l in open(os.path.join(facts, 'universe.tsv')):
+        if l.startswith('#') and 'base=' in l: nb = int(l.split('base=')[1].split(':')[0].split()[0], 16); break
+    M = pemod.load(pe, nb)             # the facts speak the load base of the image (modlift); the exe's is its preferred base
+    nm, va, sz, ro = M.xs[0]; text = M.d[ro:ro + sz]
+    ent, rg = {}, []
+    for l in open(os.path.join(facts, 'universe.tsv')):
+        if l[0] == '#' or not l.strip(): continue
+        f = l.rstrip('\n').split('\t'); ent[int(f[0], 16)] = set(f[1].split(','))
+    for l in open(os.path.join(facts, 'ranges.tsv')):
+        if l[0] == '#' or not l.strip(): continue
+        for r in l.rstrip('\n').split('\t')[1].split(','):
+            if '-' in r: a, b = r.split('-'); rg.append((int(a, 16), int(b, 16)))
+    img = pcsrc.Img(bytes(text), va, ent, rg, M.u32, set(pemod.relocs(M) or ()))
+    pcsrc.analyse(img, ent, {})
+    return img, M
+
+
+def main(argv):
+    import json, time
+    if len(argv) != 2: print('usage: pointsto.py IMAGE FACTS_DIR', file=sys.stderr); return 2
+    t0 = time.time(); img, M = load_image(argv[0], argv[1]); t1 = time.time()
+    import pemod
+    imp = pemod.imports(M)
+    pt = PT(img, M, img.summ, imp).run()
+    r = pt.report(); r['seconds_pcsrc'] = round(t1 - t0, 1); r['seconds_pointsto'] = round(time.time() - t1, 1)
+    print(json.dumps(r, sort_keys=True)); return 0
+
+
+if __name__ == '__main__': sys.exit(main(sys.argv[1:]))
