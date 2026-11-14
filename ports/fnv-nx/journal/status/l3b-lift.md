@@ -82,3 +82,5 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 | memclass plain accesses | analysis only; emission deleted (every access ordered) | 26ab4c2 |
 | assumption records open | 12 of 41 | brief 2026-11-11 |
 | A-FPMASK sites unproven | 55 / 830 | brief 2026-11-11 |
+
+- 2026-11-14 23:35: K accepted (w4 a5063e58f, closure over executed fns; migrate 2,409 later by farm). (E) queue still open, sole w4 item. w9 f12fc303 accepted (RF/TF under debug-trap fact); round-trip test waits for product ELF on bootmachine; w9 on 4g static EH/SEH oracle. Awaiting L3a struct cpu sha.
