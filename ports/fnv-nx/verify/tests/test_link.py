@@ -112,7 +112,7 @@ def main():
     W = {"toy/w.c": 'extern void wf(void) __attribute__((weak));\nvoid f_w(void) { if (wf) wf(); }\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rw = build(mk("weak", main_rec(), W), SS)
     check("weak undefined reference: red at ldcheck:<root>, naming it", rw["status"] == "red" and rw["failure"]["stage"] == "ldcheck:" + ROOT
-          and any("weak:wf" in x for x in rw["failure"]["stderr"]) and rw["elf"] is None, err_text(rw))
+          and any("weak-undefined:wf" in x for x in rw["failure"]["stderr"]) and rw["elf"] is None, err_text(rw))
     # (c) an R_AARCH64_P32_ABS32 in .rodata of a position independent link
     A = {"toy/r.c": '__asm__(".section .rodata\\n.balign 4\\n.word f_b\\n.text\\n");\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rr = build(mk("abs32", main_rec(), A), SS)

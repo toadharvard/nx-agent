@@ -520,6 +520,18 @@
     "ports/fnv-nx/verify/gate_l2native.py"
    ]
   },
+  "test_ldcheck.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/ldcheck.py"
+   ]
+  },
   "test_link.py": {
    "references": [
     {

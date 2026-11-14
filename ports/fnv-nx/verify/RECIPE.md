@@ -146,8 +146,9 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   -z max-page-size=0x1000 -z common-page-size=0x1000`, then the emulation from `link.flags` (`-m aarch64linux32`, `-EL`, `-X` only), `-T script`.
   `--build-id=none` (not the driver's sha1) is the recipe's own rule for determinism. The refusal set R stays.
 - Post stage `ldcheck:<root>` (link/ldcheck.py, a pure python tool of the python runtime like `generated`; inputs: the linked ELF and the input objects): from
-  ELF symbol tables only it checks the rules of the former ld.py: no undefined symbol in the output; every name the inputs reference or define (weak
-  references included: the linker resolves an undefined weak to 0 and drops it) is defined in the output; no dynamic relocation but
+  ELF symbol tables only it checks the rules of the former ld.py: no undefined symbol in the output; every name the inputs reference or define is defined in the
+  output; a WEAK undefined reference (STB_WEAK, SHN_UNDEF: in the output's symbol table, or dropped by the linker, which resolves it to 0) that the output does
+  not define is red, id `weak-undefined:<name> <- <objects that reference it>`, with no exception list (a weak reference that the output defines is fine); no dynamic relocation but
   R_AARCH64_P32_RELATIVE or RELR (no REL, JMPREL, TEXTREL table); the PIE mark (DF_1_PIE); the FNXG magic at the first PT_LOAD + 8 and the entry at the
   first PT_LOAD. Then it writes the crt0 header words +16 (link address), +20 (page aligned span), +24 (bit 0: relocatable) and outputs the final ELF and the
   gate file `ld` (`ld.json`, `ld.ids`). A failed rule is a red build, stage `ldcheck:<root>`, stderr: one `ldcheck: <id>` line per finding.
