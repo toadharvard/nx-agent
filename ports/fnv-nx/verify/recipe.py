@@ -1346,6 +1346,48 @@ def exttree(e, cache):
     return dest
 
 
+_EXT_CHECKED = set()
+
+
+def resolve_input(root, ref, repo=".", cache=None, rec=None):
+    """THE reader of a path named by an input file of a gate (imports.in.json, registry.in.json, ...); no gate opens one itself.
+    REF is a bare string (a tracked file or directory of ROOT) or {"external": NAME, "path": P}: NAME must be an `external` of ROOT's recipe,
+    its tree is mounted from the pinned commit and checked against its tree_sha256. Red (ValueError) for: an undeclared external, a path that
+    is absolute or leaves the tree (.. or a symlink), a missing path, an untracked path, a tree_sha256 mismatch.
+    -> (host path, ident); IDENT is "tree_sha256:path" of an external, "root/path" of a tracked file: the gate key takes it."""
+    if isinstance(ref, str):
+        base, p, kind = os.path.join(repo, root), ref, None
+    elif isinstance(ref, dict) and set(ref) == {"external", "path"} and all(isinstance(v, str) for v in ref.values()):
+        kind, p = ref["external"], ref["path"]
+        if rec is None:
+            rec = load_recipe(repo, load_admit(repo), root)
+        e = next((x for x in rec.get("external", []) if x["name"] == kind), None)
+        if e is None:
+            raise ValueError("%s: input %r names the external %r, which the root's recipe does not declare" % (root, ref, kind))
+        if cache is None:
+            raise ValueError("%s: input %r needs the gate cache to mount the external" % (root, ref))
+        base = exttree(e, cache)
+        if (cache, e["commit"]) not in _EXT_CHECKED:
+            if cas.ingest(base, os.path.join(cache, "store")) != e["tree_sha256"]:
+                raise ValueError("external %r: tree_sha256 differs from the checkout" % kind)
+            _EXT_CHECKED.add((cache, e["commit"]))
+    else:
+        raise ValueError("%s: input %r is neither a path nor {external, path}" % (root, ref))
+    if not p or os.path.isabs(p) or ".." in p.split("/"):
+        raise ValueError("%s: input path %r is absolute or leaves the tree" % (root, p))
+    full = os.path.join(base, p)
+    if not os.path.realpath(full).startswith(os.path.realpath(base) + os.sep):
+        raise ValueError("%s: input path %r leaves the tree (symlink)" % (root, p))
+    if not os.path.exists(full):
+        raise ValueError("%s: input path %r does not exist" % (root, p))
+    if kind is None:
+        rel = posixpath.join(root, p)
+        if not subprocess.run(["git", "-C", repo, "ls-files", "--error-unmatch", "--", rel], capture_output=True).returncode == 0:
+            raise ValueError("%s: input path %r is not tracked" % (root, p))
+        return full, rel
+    return full, "%s:%s" % (e["tree_sha256"], p)
+
+
 def host_compilers(rec, cache):
     """Host paths of the recipe's (cc, cxx): /usr/bin/NAME, or the paths inside the external compiler tree, checked out (by exact commit,
     from the bare fetch the build made in CACHE/external) into CACHE/exttree/<commit>. For gates that run the compiler on the host
