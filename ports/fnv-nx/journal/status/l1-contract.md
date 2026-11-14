@@ -1020,3 +1020,12 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - A host per-target variant of the translator is allowed (comes with w15c).
   - Certificates are a hermetic recipe stage in GATE_CACHE, keyed by the shaders tree, translator objects and the Mesa pin; no VDIR directory. Mesa must be a pinned external.
 - gate_assumptions LEXER gap (L6 w6 532f139f, 4 findings): .glsl → the C lexer; a .in file takes the lexer of its inner extension, and one with no known inner extension is red. Owner w22, in the PERFDEBT commit.
+
+- 23:47 w24 loader root, claude/fnv-l1-contract-w24 84624983 (141b07580 + w15d 2cd66e3c): RED, 8/9 units built; 6/7 symbols defined.
+  - fnvnx_start_proc is in guest/boot.c, the one red unit. It needs host service FNVNX_PLAT_UNMAP_FIXED, which hostapi.h lacks; it is the inverse of map_fixed. Routed: L5 adds the hostapi service and Switch body, L4 adds the boot-machine body. No placeholder.
+  - Done:
+    - the Makefile, build.sh and e2e doubles deleted;
+    - the duplicate reach.c deleted;
+    - one header home in loader/include (4 copies deleted from platform/include);
+    - sha256 → lib/sha256 (the ISA variant becomes a PERFDEBT entry, owner L1);
+    - host/ and synth/ tests deleted (doubles); the start rules move to the L4 boot milestones.
