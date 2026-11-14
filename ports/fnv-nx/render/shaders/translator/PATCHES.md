@@ -50,7 +50,7 @@ get_GLSL_srcarg_varname, get_GLSL_uniform_type, out_of_memory, output_GLSL_unifo
 takes the three tables as required arguments (`nonnull`), built only by `fnvnx_dk_assign`, and a glsldk parse is entered only after that call (single call site,
 `backend_mojoshader.c`). Why no lookup misses: the tables hold the DECLARED set, which `compute_locations` (frontend.c) builds from the parse's own
 `attributes` / `outputs` (ps_1_x implicit t#/v# included: measured on ps_1_1 `tex t0`, `mov r0, v0`: locations 2 and 0, never -1) plus the link set; a register read
-without a declaration is a validator rejection (res_smcheck, class list of item 4.6). (superseded by the 7th patch pin below)
+without a declaration is a validator rejection (res_smcheck, class list of item 4.6). (superseded by the pins below)
 
 ## 7th patch: the configuration is an argument (`derivation/mojoshader_dkconfig.patch`)
 Rule: the per-call inputs of the translator are arguments, never global or thread-local state. The five `__thread` variables of the glsldk profile
@@ -58,3 +58,19 @@ Rule: the per-call inputs of the translator are arguments, never global or threa
 and read by the profile from its Context (`ctx->dk`). `MOJOSHADER_glsldkSetLocations/SetComplete/SetFlat` are deleted. The glsldk profile is reachable only
 through that entry: `MOJOSHADER_parse` answers "unknown or unsupported" for the name. Closing check: `reach_census.py` exits 1 on any STT_TLS symbol or TLS
 relocation in an object of the translator root, guest or host. Mirror pin: commit f3e0e8a3, tree_sha256 ef7f6409…, see build.json.
+
+## 8th patch: one parse (`derivation/mojoshader_oneparse.patch`; `git apply` handles the deleted file)
+Rule: everything that depends on the COMPLETE register set is emitted in the definitions phase; the instruction phase emits only references to it.
+- The locations are computed once, at the start of the definitions phase (`dk_locate`, mojoshader.c, before the attribute emitters), when every instruction is parsed
+  and `ctx->attributes` is complete (the ps_1_x implicit t#/v# included). They are an OUTPUT of the parse (`MOJOSHADER_glsldkConfig.attrib/varying/copy`, caller-owned arrays);
+  the input is the link set. The rule is `fnvnx_dk_assign()` of `include/fnvnx_dk_layout.h` (the include path of both recipes), registers are classified by type, not by name.
+- The epilogue (padding of the declared and linked varyings, the POSITION0/PSIZE0 copies, position fix-ups, alpha test, fog) is a function `void dk_epilogue()` defined by
+  `emit_GLSL_finalize` into the helpers buffer (GLSL 4.50 sec. 6.1: defined before the call; helpers precede subroutines and main). main's RET emits only the call.
+  This also closes a defect of the earlier two-pass code: an output written only inside a subroutine that follows main's RET was unknown to the epilogue (no padding of its
+  other components, and a stray `dk_pad_N` declared at the same location). Test: vs_2_0 with `mov oT1.x` only inside `label l0` after main's `ret`: before, `dk_pad_3` at
+  location 3 next to `io_5_1` at 3; now `io_5_1.yzw = vec3(0.0);` in `dk_epilogue()` and no `dk_pad_3`.
+- No second parse: the front end (frontend.c) calls `MOJOSHADER_parseGlsldk` once and reads the reflection and the GLSL (`pd->output`) from it. The generic
+  `MOJOSHADER_parse` and the bytecode profile unit are deleted; `SUPPORT_PROFILE_BYTECODE=0` follows from the profile-request rule of reach_census.
+- Check (reach_census.py, red otherwise): every read of the configuration goes through `dk_cfg()` (never inlined); in the relocation graph of the profile object only
+  `emit_GLSL_attribute` and `emit_GLSL_finalize` reach it, no other `emit_GLSL_*` root (94) does; TLS 0.
+Mirror pin: commit 6e7f1791, tree_sha256 af453ab9…, see build.json.

@@ -17,7 +17,7 @@
    "-fdata-sections",
    "-DSUPPORT_PROFILE_ARB1=0",
    "-DSUPPORT_PROFILE_ARB1_NV=0",
-   "-DSUPPORT_PROFILE_BYTECODE=1",
+   "-DSUPPORT_PROFILE_BYTECODE=0",
    "-DSUPPORT_PROFILE_D3D=0",
    "-DSUPPORT_PROFILE_GLSL=1",
    "-DSUPPORT_PROFILE_GLSL120=0",
@@ -37,6 +37,7 @@
  "include": [
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/render/shaders/translator/gen",
+  "ports/fnv-nx/render/shaders/translator/include",
   "/ext/mojoshader",
   "/ext/mojoshader/profiles"
  ],
@@ -73,8 +74,8 @@
    "name": "mojoshader",
    "repo": "fnv-nx-build",
    "ref": "tools/mojoshader-glsldk",
-   "commit": "f3e0e8a3e0c12ee225a1a3fc520620934d2375ef",
-   "tree_sha256": "ef7f640915d65100ebb3fb16968c9910dd43fdb7e31aecddb48e4524f7c81cac",
+   "commit": "6e7f17919b962b9a6c44a249f5b68b6611f127b9",
+   "tree_sha256": "af453ab90c1dc2a88616c43362af09c31f4f1e90d090851105b11d4ff5f5bb8a",
    "at": "/ext/mojoshader"
   },
   {

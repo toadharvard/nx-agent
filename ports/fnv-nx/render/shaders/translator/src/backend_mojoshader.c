@@ -1,26 +1,16 @@
-/* backend_mojoshader.c - GLSL backend: MojoShader with the "glsldk" profile (mojoshader.patch). */
-#include <stdio.h>
+/* backend_mojoshader.c - GLSL backend: the GLSL text of the front end's one MojoShader parse (profile "glsldk", derivation/mojoshader_*.patch). */
 #include <stdlib.h>
 #include <string.h>
 #include "mojoshader.h"
 #include "backend.h"
 
-static char *mojo_emit(const void *bc, size_t n, const fnvnx_reflection *refl, char *err, size_t errlen)
+static char *mojo_emit(const fnvnx_reflection *refl, char *err, size_t errlen)
 {
-    const MOJOSHADER_glsldkConfig dk = { refl->attrib_loc, refl->varying_loc, refl->copy, refl->vs_complete, refl->flat_color };
-    const MOJOSHADER_parseData *pd = MOJOSHADER_parseGlsldk(&dk, "main",
-        (const unsigned char *)bc, (unsigned int)n, NULL, 0, NULL, 0, NULL, NULL, NULL);
-    if (!pd) { snprintf(err, errlen, "out of memory"); return NULL; }
-    if (pd->error_count > 0) {
-        size_t k = (size_t)snprintf(err, errlen, "mojoshader-glsldk:");
-        for (int i = 0; i < pd->error_count && k < errlen; i++)
-            k += (size_t)snprintf(err + k, errlen - k, " %s;", pd->errors[i].error);
-        MOJOSHADER_freeParseData(pd);
-        return NULL;
-    }
+    const MOJOSHADER_parseData *pd = (const MOJOSHADER_parseData *)refl->frontend_parse;
     char *out = (char *)malloc((size_t)pd->output_len + 1);
-    if (out) { memcpy(out, pd->output, (size_t)pd->output_len); out[pd->output_len] = 0; }
-    MOJOSHADER_freeParseData(pd);
+    if (!out) { memcpy(err, "out of memory", errlen < 14 ? errlen : 14); return NULL; }
+    memcpy(out, pd->output, (size_t)pd->output_len);
+    out[pd->output_len] = 0;
     return out;
 }
 
