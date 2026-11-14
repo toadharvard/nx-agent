@@ -77,6 +77,6 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; session_01KmtZKURk
 | 4.1 bootguest on rt/guest with link/guest.json; images define no product symbol (fnvnx_host) | w6 session_01KmtZKSWZWnNyxn2dMg6oFE | doing: merge L1 w12g 65a7d01c + L1 w14-src2 088f079a + L5 w14-rt onto w6-r 11ac61ed; then recipe check, cold/warm build, nm ∩ = ∅, boot test counts. None of the three is on the trunk a5c8f427 yet |
 | 4.2 prep: milestone observables (exe-entry and WinMain exist; first-frame = GL backend's first present; main-menu row kind; every frame per-thread instructions in OUT.json "frames") | w7 session_01KmtZKSVNKxeFQnmt4i24aF | doing (claude/fnv-l4-verify-w7-f). main-menu address: blocked, fact owner L2 (N1 table), asked via orchestrator; contract row emitted by L1 link/milestones.py |
 | 4.2 boot of the product ELF | - | blocked: the ELF (3.4 L3a) |
-| 4.3 boot GL from the recipe gl4 root; Mesa pin 25.2.8-0ubuntu0.24.04.4 confirmed | - | blocked: L6A 3.7 gl4 root |
+| 4.3 boot GL from the recipe gl4 root; Mesa pin 25.2.8-0ubuntu0.24.04.4 confirmed (sent to L6) | - | blocked: L6A 3.7 gl4 root (render/gl4, libnxgl4.so from GATE_CACHE/store). Its link waits on L6 admitting the translator sources and on L1 (per-target variant in link.roots); compile half running on w15c |
 
 Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3 kept). lib/sha256 task A dropped from L4's queue (L6A 3.7 carries it). No boots of old-lineage ELFs.
