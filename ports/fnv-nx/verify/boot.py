@@ -51,10 +51,11 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 
-from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0
+from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3
 
 import bootinput
 import bootdecl
@@ -126,23 +127,102 @@ def _plan(a, raw):
     return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, n_stacks=a.threads)
 
 
+MEM_SPEC = re.compile(r"^(x[0-7])((?:->(?:0x[0-9a-fA-F]+|[0-9]+))*):(0x[0-9a-fA-F]+|[0-9]+)$")
+MEM_MAX = 1 << 16
+
+
+def parse_mem_spec(spec):
+    """`REG(->OFF)*:LEN` -> (reg index, [offsets], len). The address is the 32-bit value of REG (x0..x7); each `->OFF` loads the 32-bit
+    little-endian word at address+OFF and takes it as the new address; LEN bytes (at most 65536) are read there"""
+    m = MEM_SPEC.match(spec)
+    if not m:
+        raise bootmiles.ResolveError("--watch-log: memory spec %r is not REG(->OFF)*:LEN with REG x0..x7" % spec)
+    offs = [int(t, 0) for t in m.group(2).split("->")[1:]]
+    n = int(m.group(3), 0)
+    if not 0 < n <= MEM_MAX:
+        raise bootmiles.ResolveError("--watch-log: memory spec %r: LEN must be 1..%d" % (spec, MEM_MAX))
+    return int(m.group(1)[1:]), offs, n
+
+
 def _watch_names(path, syms):
-    """-> (names in file order, the names marked `ret`); a line is `NAME` or `NAME ret`"""
-    names, rets = [], set()
+    """-> (names in file order, the names marked `ret`, {name: [memory specs]}); a line is `NAME [ret] [mem SPEC...]`"""
+    names, rets, mems = [], set(), {}
     with open(path) as f:
         for line in f:
             t = line.split("#", 1)[0].split()
             if not t:
                 continue
-            if len(t) > 2 or (len(t) == 2 and t[1] != "ret"):
-                raise bootmiles.ResolveError("--watch-log: a line is `NAME` or `NAME ret`, got: %s" % line.strip())
+            rest = t[1:]
+            ret = bool(rest) and rest[0] == "ret"
+            if ret:
+                rest = rest[1:]
+            if rest and (rest[0] != "mem" or len(rest) < 2):
+                raise bootmiles.ResolveError("--watch-log: a line is `NAME [ret] [mem SPEC...]`, got: %s" % line.strip())
+            for spec in rest[1:]:
+                parse_mem_spec(spec)
             names.append(t[0])
-            if len(t) == 2:
+            if ret:
                 rets.add(t[0])
+            if rest:
+                mems.setdefault(t[0], []).extend(rest[1:])
     bad = [n for n in names if n not in syms or n not in syms.funcs]
     if bad:
         raise bootmiles.ResolveError("--watch-log: not a function symbol of the ELF: %s" % ", ".join(sorted(set(bad))))
-    return names, rets
+    return names, rets, mems
+
+
+def read_chain(m, regs, spec):
+    """the bytes `spec` (parse_mem_spec) names, or None when a page on the way is not mapped"""
+    reg, offs, n = spec
+    addr = regs[reg] & 0xFFFFFFFF
+    for o in offs:
+        w = m.peek((addr + o) & 0xFFFFFFFF, 4)
+        if w is None:
+            return None
+        addr = int.from_bytes(w, "little")
+    return m.peek(addr, n)
+
+
+def load_state_request(path):
+    """the snapshot request: {"hash": [{"name", "lo", "hi"}], "dump": [{"name", "addr", "len"}]}, every number an integer (hex strings allowed)"""
+    with open(path) as f:
+        d = json.load(f)
+    if not isinstance(d, dict) or set(d) - {"hash", "dump"}:
+        raise bootmiles.ResolveError("--state-request: an object with keys hash and dump only")
+    out = {"hash": [], "dump": []}
+    for k, fields in (("hash", ("lo", "hi")), ("dump", ("addr", "len"))):
+        for e in d.get(k, ()):
+            if not isinstance(e, dict) or set(e) != {"name", *fields} or not isinstance(e["name"], str):
+                raise bootmiles.ResolveError("--state-request: %s entries are {name, %s}" % (k, ", ".join(fields)))
+            v = {f: int(e[f], 0) if isinstance(e[f], str) else e[f] for f in fields}
+            if not all(isinstance(x, int) and 0 <= x <= 0xFFFFFFFF for x in v.values()):
+                raise bootmiles.ResolveError("--state-request: %s %s: 32-bit integers" % (k, e["name"]))
+            if k == "hash" and not v["lo"] < v["hi"]:
+                raise bootmiles.ResolveError("--state-request: hash %s: lo < hi" % e["name"])
+            if k == "dump" and not 0 < v["len"] <= MEM_MAX * 16:
+                raise bootmiles.ResolveError("--state-request: dump %s: len 1..%d" % (e["name"], MEM_MAX * 16))
+            out[k].append(dict(v, name=e["name"]))
+    return out
+
+
+def take_state(m, req, at, base):
+    """the machine's state when `at` is entered: registers, the page table, the sha256 of every page of each hash range (null: unmapped) and
+    the raw bytes of each dump range (null: unmapped). Everything is read by the observer, protection ignored"""
+    regs = {"x%d" % i: m.uc.reg_read(UC_ARM64_REG_X0 + i) & 0xFFFFFFFF for i in range(29)}
+    regs["x30"] = (m.uc.reg_read(UC_ARM64_REG_LR) - base) & 0xFFFFFFFF
+    regs["sp"] = m.sp()
+    pages = {}
+    for h in req["hash"]:
+        out = []
+        for a in range(h["lo"] // 4096 * 4096, (h["hi"] + 4095) // 4096 * 4096, 4096):
+            b = m.peek(a, 4096)
+            out.append(hashlib.sha256(b).hexdigest() if b is not None else None)
+        pages[h["name"]] = {"lo": h["lo"] // 4096 * 4096, "sha256": out}
+    dump = {}
+    for d in req["dump"]:
+        b = m.peek(d["addr"], d["len"])
+        dump[d["name"]] = {"addr": d["addr"], "hex": b.hex() if b is not None else None}
+    return {"at": at, "t_ns": m.clock.now_ns(), "regs": regs, "runs": m.page_runs(), "pages": pages, "dump": dump}
 
 
 def run(a):
@@ -162,7 +242,13 @@ def run(a):
     syms = bootmiles.read_symtab(a.elf)
     watch = bootmiles.resolve(table, manifest, syms, base)
     host = _host_lines(watch["host"])
-    wl, wl_ret = _watch_names(a.watch_log, syms) if a.watch_log else (None, set())
+    wl, wl_ret, wl_mem = _watch_names(a.watch_log, syms) if a.watch_log else (None, set(), {})
+    state_req = load_state_request(a.state_request) if a.state_request else None
+    if bool(a.state_at) != bool(a.state_request):
+        raise bootmiles.ResolveError("--state-at and --state-request go together")
+    if a.state_at and (a.state_at not in syms or a.state_at not in syms.funcs):
+        raise bootmiles.ResolveError("--state-at: not a function symbol of the ELF: %s" % a.state_at)
+    state = []
     sc, text_entries = None, a.text_entry
     if a.scenario:
         try:
@@ -234,7 +320,13 @@ def run(a):
         def logged(tid, pc, name=name):
             unwind(tid)
             x0, x30 = m.uc.reg_read(UC_ARM64_REG_X0), m.uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF
-            rec(tid, "call", sym=name, pc=pc - base, sp=m.sp(), x0=x0, x30=(x30 - base) & 0xFFFFFFFF)
+            regs = [m.uc.reg_read(r) & 0xFFFFFFFF for r in (UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3)]
+            extra = {}
+            if name in wl_mem:   # a name with a `mem` capture also records its first four argument registers (w0..w3)
+                extra["args"] = regs
+                extra["mem"] = {spec: (lambda b: b.hex() if b is not None else None)(read_chain(m, regs, parse_mem_spec(spec)))
+                                for spec in wl_mem[name]}
+            rec(tid, "call", sym=name, pc=pc - base, sp=m.sp(), x0=x0, x30=(x30 - base) & 0xFFFFFFFF, **extra)
             if name in wl_ret:
                 frames.setdefault(tid, []).append({"sym": name, "pc": pc - base, "sp": m.sp(), "ret": x30, "x0": x0, "x30": (x30 - base) & 0xFFFFFFFF})
                 if x30 not in rets_hooked:
@@ -247,6 +339,11 @@ def run(a):
             unwind(tid)
             rec(tid, "game-entry", pc=dst - base, sp=m.sp(), src=src - base, dst=dst - base)
         m.watch_calls_into(lo + base, lo + base + size, entered)
+    if a.state_at:
+        def at_state(tid, pc):
+            if not state:
+                state.append(take_state(m, state_req, a.state_at, base))
+        m.watch_pc(syms[a.state_at] + base, at_state)
     m.on_console(lambda line: [fire(i, m.tid()) for i in host.get(line, ())])
     gpu = None
     if a.gpu:
@@ -290,6 +387,8 @@ def run(a):
         doc["watch_log"] = wlog
         doc["watch_schema"] = "fnvnx-watch/2"
         doc["watch_spec"] = {"names": sorted(set(wl)), "ret": sorted(wl_ret)}
+    if a.state_at:
+        doc["start_state"] = state[0] if state else None   # null: the symbol was never entered
     if gpu:
         doc["gpu"] = gpu_report
         doc["frames"] = ic.frames()
@@ -330,6 +429,9 @@ def main(argv=None):
     sp.add_argument("--profile", choices=("handheld", "docked"), default="handheld",
                     help="what FNVNX_PLAT_DISPLAY_DOCKED answers: docked 1, handheld 0 (default handheld)")
     sp.add_argument("--watch-log", metavar="SYMS", help="text file of ELF function names (NAME or NAME ret); OUT.json gets watch_log (fnvnx-watch/2), every hit of each")
+    sp.add_argument("--state-at", metavar="SYM", help="ELF function: when it is first entered OUT.json start_state gets the registers, the page table, the page "
+                    "hashes and the dumps of --state-request (the observation of the loader's start rules, bootstart.py)")
+    sp.add_argument("--state-request", metavar="JSON", help="what the snapshot hashes and dumps: {hash: [{name, lo, hi}], dump: [{name, addr, len}]}")
     sp.add_argument("--scenario", metavar="FILE", help="device states over virtual time, schema fnvnx-scenario/1 (bootinput.py, rule R-INPUT)")
     sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "

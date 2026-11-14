@@ -428,6 +428,24 @@ class Machine:
         except (AttributeError, UcError):
             pass
 
+    def page_runs(self):
+        """the guest page table as [lo, hi, prot] runs in address order, adjacent runs of equal prot merged; prot is the unicorn bit set the
+        pages really carry now (1 R, 2 W, 4 X); a page the machine has not mapped is in no run"""
+        runs = []
+        for lo, hi, pr in sorted((b, e + 1, p) for b, e, p in self.uc.mem_regions()):
+            if runs and runs[-1][1] == lo and runs[-1][2] == pr:
+                runs[-1][1] = hi
+            else:
+                runs.append([lo, hi, pr])
+        return runs
+
+    def peek(self, addr, size):
+        """bytes of guest memory whatever the page protection says (the observer reads, the guest does not); None when a page is unmapped"""
+        try:
+            return bytes(self.uc.mem_read(addr, size))
+        except UcError:
+            return None
+
     def watch_pc(self, addr, cb):
         """cb(tid, pc) each time the instruction at addr is about to execute"""
         self._hook_at(addr, lambda uc, a, s, _: cb(self.tid(), a))

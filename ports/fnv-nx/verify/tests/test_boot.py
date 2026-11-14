@@ -224,6 +224,22 @@ def main():
     rc, o, e = cli(args(elfw, "w4.json", table, manifest, "--watch-log", w("syms4.txt", "wl_n\n")))
     tb.case("watch_log: a non-function symbol (data) fails, naming it", rc == 1 and "wl_n" in e, (rc, e))
 
+    # --state-at: the observer's snapshot at the first entry of a function (bootstart.py's start_state)
+    gsp = wl[2]["sp"]   # the sp at the entry of fnvwl_g in the run above
+    req = w("req.json", json.dumps({"hash": [{"name": "stack", "lo": gsp & ~4095, "hi": (gsp & ~4095) + 4096}], "dump": [{"name": "top", "addr": gsp, "len": 16}]}))
+    rc, o, e = cli(args(elfw, "st1.json", table, manifest, "--state-at", "fnvwl_g", "--state-request", req))
+    st1 = json.load(open(os.path.join(d, "st1.json"))).get("start_state") or {}
+    runs = st1.get("runs", [])
+    tb.case("--state-at: start_state at the first entry of the function: sp, sorted merged runs, page hash and dump of the stack page",
+            rc == 0 and st1.get("at") == "fnvwl_g" and st1["regs"]["sp"] == gsp
+            and all(a[1] <= b[0] and (a[1] < b[0] or a[2] != b[2]) for a, b in zip(runs, runs[1:])) and all(0 <= r[2] <= 7 and r[0] < r[1] for r in runs)
+            and len(st1["pages"]["stack"]["sha256"]) == 1 and st1["pages"]["stack"]["sha256"][0] is not None
+            and len(st1["dump"]["top"]["hex"]) == 32 and any(r[0] <= gsp < r[1] and r[2] & 3 == 3 for r in runs), (rc, e, st1))
+    rc, o, e = cli(args(elfw, "st2.json", table, manifest, "--state-at", "fnvwl_g"))
+    tb.case("--state-at without --state-request fails before the run", rc == 1 and "go together" in e and not os.path.exists(os.path.join(d, "st2.json")), (rc, e))
+    rc, o, e = cli(args(elfw, "st3.json", table, manifest, "--state-at", "no_such_fn", "--state-request", req))
+    tb.case("--state-at: not a function symbol fails, naming it", rc == 1 and "no_such_fn" in e, (rc, e))
+
     # -- declared inputs (bootdecl.py, --declared-inputs): a small fixture set made here (not real fonts), pinned like boot_inputs.json
     def unlock(top):
         for dp, dn, fn in os.walk(top):
