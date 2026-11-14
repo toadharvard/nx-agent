@@ -1,0 +1,49 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-Wextra",
+   "-Werror",
+   "-std=gnu99",
+   "-fPIC"
+  ],
+  "cxx": [
+   "-Werror=attributes",
+   "-fPIC"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/render/shaders/translator/include",
+  "ports/fnv-nx/lib/sha256/include"
+ ],
+ "units": "all",
+ "external": [],
+ "link": {
+  "kind": "exe",
+  "output": "sm_link_check.exe",
+  "flags": [
+   "-m",
+   "elf_x86_64"
+  ],
+  "roots": [
+   "ports/fnv-nx/render/shaders/translator@host",
+   "ports/fnv-nx/lib/sha256@host"
+  ],
+  "libs": {
+   "system": [
+    "/usr/lib/x86_64-linux-gnu/libEGL.so.1",
+    "/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0",
+    "/usr/lib/x86_64-linux-gnu/libm.so.6",
+    "/usr/lib/x86_64-linux-gnu/libc.so.6"
+   ]
+  }
+ }
+}
