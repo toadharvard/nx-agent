@@ -87,7 +87,7 @@ def main():
     case("range crossing the upper edge -> RANGE", call(FN, HI - P, 2 * P) == RNG)
     case("range crossing the lower edge -> RANGE", call(FN, LO - P, 2 * P) == RNG)
     case("a long range over the whole mapped run", m.map_fixed(0x1000000, 64 * P, 0) == 0 and call(FN, 0x1000000, 64 * P) == 0)
-    case("fn 38 -> NO_SERVICE", call(38, 0, 0) == NOSVC and NOSVC is not None, (NOSVC,))
+    case("fn 39 -> NO_SERVICE (38 is THREAD_CPU)", call(39, 0, 0) == NOSVC and NOSVC is not None, (NOSVC,))
     print("%d cases, %d failed" % (N[0], len(FAILED)))
     return 1 if FAILED else 0
 
