@@ -555,3 +555,9 @@ Paused: w3b, w4, farm; no other work.
         - a harness on the real translator with a vs_3_0 output written in a subroutine;
         - sm_link over the shader set.
     - w1b is doing it.
+- 23:51Z 4.6 sm_link first measurement (w5 c5d57cb98; not a verdict).
+    - Translator w1b 79fdbef8d; Mesa 25.2.8-0ubuntu0.24.04.4 llvmpipe; universe b545961f, 1,809 unique (443 VS / 1,366 PS).
+    - Translate and compile: VS 1,772/1,772, PS 27,320/27,320, 0 failures, 0 refused.
+    - Link: 202 × 298 classes = 60,196 pairs, 0 failures.
+    - Not yet covered: the two-way signature check, flat × L × complete, FFP, the backend-rewritten GLSL.
+    - Next (w5): tool root, generator stage, gates.d/sm_link.json.
