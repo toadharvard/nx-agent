@@ -12,12 +12,6 @@
    "-ffunction-sections",
    "-fdata-sections",
    "-std=gnu99",
-   "-Wall",
-   "-Wextra",
-   "-Wshadow",
-   "-Wconversion",
-   "-Wno-sign-conversion",
-   "-Werror",
    "-Werror=attributes"
   ],
   "cxx": [
