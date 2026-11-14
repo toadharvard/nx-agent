@@ -40,13 +40,6 @@ tree_hash = treehash.tree_hash
 def stage_key(doc):
     return hashlib.sha256(canon(doc)).hexdigest()
 
-def _text(s, what):
-    try:
-        s.encode("utf-8")
-    except UnicodeEncodeError:
-        raise CasError("non-UTF-8 %s: %r" % (what, s))
-    return s
-
 def _publish(tmp, final):
     """Atomically give tmp its final name unless it exists already (never replaces)."""
     try:
@@ -73,12 +66,6 @@ def _put(store, kind, name, data=None, mode=0o444):
 
 def _ingest_file(path, store, x):
     st = os.lstat(path)
-    if store is None:  # hash only: nothing is written
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for b in iter(lambda: f.read(1 << 20), b""):
-                h.update(b)
-        return h.hexdigest()
     d = os.path.join(store, "obj")
     os.makedirs(d, exist_ok=True)
     tmp = os.path.join(d, ".tmp-%d-%s" % (os.getpid(), os.urandom(6).hex()))
@@ -113,35 +100,21 @@ def _ingest_file(path, store, x):
             os.unlink(tmp)
         raise
 
-def _entry(path, rel, store, excl, used, skip=()):
-    st = os.lstat(path)
-    m = st.st_mode
-    if stat.S_ISLNK(m):
-        return {"t": "l", "to": _text(os.readlink(path), "link text: " + path)}
-    if stat.S_ISREG(m):
-        x = 1 if m & 0o111 else 0
-        return {"t": "f", "h": _ingest_file(path, store, x), "x": x}
-    if stat.S_ISDIR(m):
-        entries = {}
-        for name in sorted(os.listdir(path)):
-            r = rel + "/" + name if rel else name
-            if r in excl:
-                used.add(r)
-                continue
-            if name in skip:
-                continue
-            entries[_text(name, "file name in " + path)] = _entry(os.path.join(path, name), r, store, excl, used, skip)
-        data = canon({"format": FORMAT, "entries": entries})
-        h = hashlib.sha256(data).hexdigest()
-        if store is not None:
-            _put(store, "tree", h + ".json", data)
-        return {"t": "d", "h": h}
-    raise CasError("unsupported file type (not file/dir/symlink): %s" % path)
+class _StoreVisitor(treehash.Visitor):
+    """the one traversal (treehash.walk) plus the store writes"""
+    def __init__(self, store):
+        self.store = store
+
+    def file_hash(self, path, x):
+        return _ingest_file(path, self.store, x)
+
+    def tree(self, h, data):
+        _put(self.store, "tree", h + ".json", data)
 
 def ingest(path, store, exclude=()):
     excl = set(exclude)
     used = set()
-    e = _entry(path, "", store, excl, used)
+    e = treehash.walk(path, _StoreVisitor(store), "", excl, used)
     if excl - used:
         raise CasError("exclude paths not found: %s" % sorted(excl - used))
     if e["t"] == "d":
