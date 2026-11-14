@@ -581,3 +581,13 @@ Workers are capped at 3. Assignment by plan item:
 - Class rule: F.undefined(when=cond), with cond cited from the SDM; emission is cond ? 0 : prior. The prover checks both sides, so the condition is not trusted.
 - Owner w6, moved ahead of the rest of 2.2 because w1's relift must carry correct DEF0.
 - bsf/bsr with a zero source stay model gaps until the IR bump (L3b).
+
+## 2026-11-14 23:50 process entry decided; the loader root is ready
+- Loader root: L1 w24 claude/fnv-l1-contract-w24 528394ba, 9/9 units green. w8 adds it to link.roots.
+- One entry path: rt/guest main (L5) → fnvnx_loader_main (boot.c's main, renamed by w24) → map/imports/TLS/DllMain/TEB → fnvnx_start_enter → fnvnx_lift_enter(AddressOfEntryPoint), defined by lift/rt.
+  - fnvnx_exe_entry is withdrawn as a second path into the entry point.
+  - main.c moves to its own root rt/guest/main, so test roots link rt/guest without it (the recipe has no exclude).
+- int3 60980045d (w6):
+  - The fault map is built from the enum, with codes ⊆ map checked; test_dsl_emit compiles 11574/11574.
+  - def_check over 5 of 7 images (facts 163ec389): Forms 18572, free-output Forms 3828, DEF0 5895, DEFPRIOR 0, uncovered 0, when= 255; no_form 6464 shapes (544389 sites).
+  - Open questions: OF of shifts and rotates at count > 1, 16-bit shld/shrd at count > 16, and the split of no_form by builder.
