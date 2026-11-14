@@ -415,7 +415,7 @@ Base: candidate claude/fnv-next3b 141b07580. At most 3 workers.
 
 | Item | Task | Worker | Branch | Status |
 |---|---|---|---|---|
-| 3.6a | translator root green on 141b07580; header byte-equal to 2f1bac09 (fnvnx_shader_hash removed, A2) | w1b session_01KmtZKSPYqkKJ24Q6D7aBcE | claude/fnv-l6-render-w1b-root (from afa93e610) | doing |
+| 3.6a (first: blocks gl4 3.7 and boot GL 4.3) | translator root with its sources (3 own + 13 MojoShader units), per target: guest + host recipe (RECIPE.md "One recipe per target", L1 w15c 1cac05621) on 141b07580; header byte-equal to 2f1bac09 (fnvnx_shader_hash removed, A2) | w1b session_01KmtZKSPYqkKJ24Q6D7aBcE | claude/fnv-l6-render-w1b-root (from afa93e610) | doing |
 | 3.6b | render/d3d9 root on 141b07580 (revert 7e598a5a hunk); builds after L1 w16c commit 1 | w6 session_01KmtZKQbpDKvc9qzXT9bLHX | claude/fnv-l6-render-w6-root (from 57051038) | doing; build blocked by L1 w16c |
 | 3.6d | render/ASSUMPTIONS.md (232 lines) into verify/ASSUMPTIONS.json (OWNER-ref / REMOVE ASM-6xx / discharged), file deleted | w6 (item B while waiting) | same | doing |
 | 3.6c | doubles 26 files / 88 symbols (86405ed1) and 22 ignore-all link commands (5d47e18d) -> 0, as class-test roots on link.roots | w5 session_01KmtZKS7moRHazN3AonGwXJ | claude/fnv-l6-render-w5-doubles | doing |
