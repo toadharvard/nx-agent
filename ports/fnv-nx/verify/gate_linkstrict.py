@@ -109,12 +109,13 @@ def _sections(path):
 
 
 def elf_comdat(path):
-    """COMDAT groups of an ELF relocatable (b1 of the module docstring) -> (member, groups, undecidable). MEMBER {section index of a member of a
+    """COMDAT groups of an ELF relocatable (b1 of the module docstring) -> (member, groups, undecidable, resolved names, defs). MEMBER {section index of a member of a
     GRP_COMDAT group: signature}; GROUPS {signature: digest of the copy's identity}; UNDECIDABLE {signature: [(object, section, offset, why)]}.
     The identity is link/comdat.py comdat_identity, the ONE definition of "the same COMDAT definition" (also used by gates odr/abi and onedef).
     A signature that occurs twice in one object keeps both copies in one digest."""
-    ids, member = comdat_id.copies(path)
-    return member, {s: i.digest for s, i in ids.items()}, {s: i.undecidable for s, i in ids.items() if i.undecidable}
+    ids, member, defs = comdat_id.copies(path)
+    return (member, {s: i.digest for s, i in ids.items()}, {s: i.undecidable for s, i in ids.items() if i.undecidable},
+            frozenset(n for i in ids.values() for n in i.resolved), defs)
 
 
 OUTLINE = re.compile(r"__aarch64_(cas|swp|ldadd|ldclr|ldeor|ldset)[0-9]+_(relax|acq|rel|acq_rel|sync)")   # libgcc's outline-atomics ABI: __aarch64_<op><bytes>_<memory model>
@@ -198,6 +199,11 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
         und = {n for n, val, size, typ, bind, shn in syms or [] if shn == 0}
         script[eid] = {n for n, val, size, typ, bind, shn in syms or [] if shn != 0 and n not in und and (
             bind == GLOBAL or (bind == LOCAL and typ == NOTYPE and n not in objnames))}
+    uniq = comdat_id.name_not_unique({oid: (c[1], c[3], c[4]) for oid, c in comdat.items() if len(c) > 4})
+    for name in sorted({n for c in comdat.values() if len(c) > 4 for n in c[3]}):
+        items.append(("<resolved>", name))
+        if name in uniq:
+            out.add(("<resolved>", name, "name-resolved-not-unique", uniq[name][:300]))
     for name, ds in sorted(defs.items()):
         items.append(("<defs>", name))
         strong = [d for d in ds if d[1] == GLOBAL and d[2] != COMMON]

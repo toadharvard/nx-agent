@@ -67,20 +67,33 @@ INGRP = (".section .text.sigA,\"axG\",@progbits,sigA,comdat\n.weak sigA\n.type s
 st, (uni, red), g, txt = run({"toy/x1.cc": asm(INGRP), "toy/x2.cc": asm(INGRP)})
 check("relocation by a section symbol inside the group: green", st == "green" and "sigA" in uni and not red and g["status"] == "green", (uni, red, g, txt))
 
-# 4. a section symbol outside the group resolves to the ONE global symbol defined there (its name); no such symbol: identity-undecidable
+# 4. a section symbol outside the group resolves to the ONE global/weak symbol defined there (its name); none: identity-undecidable
 HEAD = ".section .text.sigB,\"axG\",@progbits,sigB,comdat\n.weak sigB\n.type sigB,%function\nsigB:\n adrp x0, .Lout\n add x0, x0, :lo12:.Lout\n ret\n"
+SIGC = ".section .text.sigC,\"axG\",@progbits,sigC,comdat\n.weak sigC\n.type sigC,%function\nsigC:\n.Lout: ret\n"
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(HEAD + SIGC), "toy/x2.cc": asm(HEAD + SIGC)})
+check("a section symbol into ANOTHER group, one weak symbol at that offset, identical in both objects: green, the name is a fact (unique across identical copies)",
+      st == "green" and "name:sigC" in uni and "sigB" in uni and not red and g["status"] == "green", (st, uni, red, g, txt))
 DATA = ".data\n.balign 4\n.word 7\n"
 one = lambda g: HEAD + DATA + ".globl %s\n%s:\n.Lout: .word 9\n" % (g, g)
-st, (uni, red), g, txt = run({"toy/x1.cc": asm(one("gv")), "toy/x2.cc": asm(one("gv").replace(".word 7", ".word 8"))})
-check("a section symbol outside the group, one global symbol at that offset in each copy, the same name: green (other data of the section is not the copy's)",
-      st == "green" and "sigB" in uni and not red, (st, uni, red))
-st, (uni, red), g, txt = run({"toy/x1.cc": asm(one("gv1")), "toy/x2.cc": asm(one("gv2")).replace("gv2", "gv2")})
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(one("gv")), "toy/x2.cc": asm(one("gv"))})
+check("... the name defined outside any COMDAT group by two objects: red `name-resolved target not unique` (odr and linkstrict)",
+      "not unique" in red.get("name:gv", "") and "name-resolved-not-unique" in g["detail"], (red, g, txt))
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(one("gv1")), "toy/x2.cc": asm(one("gv2"))})
 check("... the same relocation naming two different symbols: the copies differ (red, both objects named)",
-      any("x1.cc" in r and "x2.cc" in r for r in red.values()) and "identity-undecidable" not in "".join(red.values()), (uni, red))
+      "x1.cc" in red.get("sigB", "") and "x2.cc" in red["sigB"], (uni, red))
 st, (uni, red), g, txt = run({"toy/x1.cc": asm(HEAD + DATA + ".Lout: .word 9\n"), "toy/x2.cc": asm(HEAD + DATA + ".Lout: .word 9\n")})
 check("a section symbol outside the group with no symbol there: odr red, identity-undecidable, names object/section/offset",
       any(r.startswith("identity-undecidable") and "x1.cc" in r and ".data" in r and "offset 4" in r for r in red.values()), (uni, red))
 check("... linkstrict: identity-undecidable", g["status"] == "red" and "identity-undecidable" in g["detail"], (g, txt))
+
+# 4b. the symbols a group defines are part of its identity: same bytes, another size or visibility is another definition
+SYM = lambda extra: (".section .text.sigD,\"axG\",@progbits,sigD,comdat\n.weak sigD\n" + extra + ".type sigD,%function\nsigD: ret\n")
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(SYM("") + ".size sigD, 4\n"), "toy/x2.cc": asm(SYM("") + ".size sigD, 4\n")})
+check("same bytes, same symbols: green", "sigD" in uni and not red, (uni, red))
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(SYM("") + ".size sigD, 4\n"), "toy/x2.cc": asm(SYM("") + ".size sigD, 8\n")})
+check("same bytes, another st_size: red, both digests named", "sigD" in red and "x1.cc" in red["sigD"] and "x2.cc" in red["sigD"], (uni, red))
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(SYM("") + ".size sigD, 4\n"), "toy/x2.cc": asm(SYM(".hidden sigD\n") + ".size sigD, 4\n")})
+check("same bytes, a hidden against a default signature: red; linkstrict comdat-differs", "sigD" in red and "comdat-differs" in g["detail"], (uni, red, g))
 
 # 5. typeinfo and DW.ref groups (exceptions + RTTI need the unwinder symbols: only the typeinfo of an object is compared, nothing is linked to run)
 TI = "struct S { virtual ~S(); virtual int f(); };\nint use%s(S* s) { return s->f(); }\nstruct P : S { int f() { return 1; } };\nint t%s(S* s) { return dynamic_cast<P*>(s) != 0; }\n"

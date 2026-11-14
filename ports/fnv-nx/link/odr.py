@@ -29,15 +29,16 @@ NAME = 'odr'
 
 
 def copies(path):
-    """{signature: comdat.Identity} of the COMDAT groups of one object; ValueError on malformed input."""
-    return comdat.copies(path)[0]
+    """({signature: comdat.Identity}, {global/weak name: signature or None}) of one object; ValueError on malformed input."""
+    ids, _, defs = comdat.copies(path)
+    return ids, defs
 
 
 def check(paths):
-    """-> (universe ids, {id: reason})"""
+    """-> (universe ids, {id: reason}).  Items: `<sig>` per signature in two or more objects; `name:<n>` per name a section-symbol target was resolved to."""
     per = {p: copies(p) for p in sorted(set(paths))}
     sigs = {}
-    for p, c in per.items():
+    for p, (c, _) in per.items():
         for s, fp in c.items():
             sigs.setdefault(s, []).append((p, fp))
     universe, red = [], {}
@@ -54,6 +55,11 @@ def check(paths):
             if not comdat.same(f, f0):
                 red[s] = 'copies in %s (%s) and %s (%s) differ: %s' % (p0, f0.digest[:12], p, f.digest[:12], comdat.first_difference(f0, f))
                 break
+    bad = comdat.name_not_unique({p: ({s: i.digest for s, i in c.items()}, {n for i in c.values() for n in i.resolved}, d) for p, (c, d) in per.items()})
+    for n in sorted({n for c, _ in per.values() for i in c.values() for n in i.resolved}):
+        universe.append('name:' + n)
+        if n in bad:
+            red['name:' + n] = bad[n]
     return universe, red
 
 
