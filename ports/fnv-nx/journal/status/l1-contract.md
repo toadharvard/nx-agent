@@ -1004,3 +1004,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   New RECIPE rule (with w15c): a product image of target T may link a root's per-target variant of target T. A flags variant stays test-only, and a product link to one is red.
 
 - 23:33 Orchestrator: w16c commit 1 goes straight to L6 (session_01KmtZKRq7TGNHj6H8m8jpAZ) for the render/d3d9 root when it lands (queued after w12). The main-menu milestone: L2 sends the certified N1 row for link/milestones.py.
+
+- 23:36 L6 translator root is green on 141b07580 (w1b 21d03915, 7 objects). objstub finds 7 empty class-V MojoShader handlers.
+  - The op_cover reader (rule A) is w20's commit 3. An empty body is accepted only by (a) op_syntax or (b) op_cover naming a non-empty emitter (chains closed). (c) must call fnvnx_reach_violation with a certified fact.
+  - Acceptance: 7/7 judged, 0 stubs.
+- L4 4.1 needs w12g + w14-src2 merged. The resolution rule went to L4: one guest_errors on root@variant, plus w14's helper. It is part of w12's corrections; I asked the orchestrator whether w12 should move ahead of w15c's remainder.
