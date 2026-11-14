@@ -486,3 +486,13 @@ Paused: w3b, w4, farm; no other work.
         - whether EPI reaches a declaration is decided by the emission grammar;
         - Mesa is a pinned fnv-nx-build mirror (L4).
     - Next: the tool root and the first measurement on the w1b 708d3638 host variant.
+- 23:32Z w6 ee11286b6 (claude/fnv-l6-render-w6-root): base next3b, plus L6A 64c8851d, plus w1b 708d3638.
+    - render/backend root dropped; render/d3d9 now reads render/nxgpu.
+    - render/shaders/total stays a unit-less product root (L1 header-home decision).
+    - gate_admit 1092/1092 over 27 roots. d3d9total 332/332, identical before and after.
+    - lib/sha256: cold 41.9 s, warm 3.2 s.
+    - render/d3d9 and the translator are red only at the check: generator reads into total/shim, which wait on L1 w16c commit 1 (asked).
+    - render/nxgpu/build.guest.json plugin_cxx is rejected by next3b recipe.py (L6A, asked).
+    - libnxgl4.map has a lexer gap (L1, asked).
+- 23:32Z L6A a262c8ae: gl4w15c takes the translator, deterministic 7/7. gl4's undefined set closes except for system and link-rule items.
+    - Open: TLS. mojoshader_profile_glsl.c.o references __tls_get_addr. w1b takes the STT_TLS census of guest and host; the guest TLS model is a class rule with L5/L4. The guest translator links into the product ELF through render/d3d9.
