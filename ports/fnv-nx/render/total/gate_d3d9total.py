@@ -102,7 +102,7 @@ def copy_tree(src, dst):
 
 
 # ---------------------------------------------------------------- tree hash (the one home: contract/treehash.py; a test cross-checks it with cas)
-sys.path.insert(0, os.path.join(PORT, "contract"))
+sys.path.append(os.path.join(PORT, "contract"))
 import treehash  # noqa: E402
 
 

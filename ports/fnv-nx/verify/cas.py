@@ -27,7 +27,7 @@ import shutil
 import stat
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
 import treehash  # noqa: E402  (the one home of the tree-hash rule; stdlib only)
 
 FORMAT = treehash.FORMAT
