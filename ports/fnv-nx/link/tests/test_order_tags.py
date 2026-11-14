@@ -76,6 +76,20 @@ acc = {k: v for k, v in rows.items() if k.startswith('f+0x')}
 check('unknown origin: the access is not certified as frame', bool(acc) and all(v for v in acc.values()), True)
 rows, o = scan('fp', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'ldr w0, [x29, #16]', 'ldp x29, x30, [sp], #32', 'ret'])
 check('frame pointer shape scanned', 'f' in rows and not rows[''], True)
+# rule KC: a frame size held in a register (mov xN,#imm; sub sp,sp,xN) keeps the stack pointer known, so a frame access after it is F
+rows, o = scan('kc', ['stp x29, x30, [sp, #-16]!', 'mov x29, sp', 'mov x12, #0x4060', 'sub sp, sp, x12', 'str w0, [sp, #8]', 'ldr w1, [sp, #8]',
+                      'add sp, sp, x12', 'ldp x29, x30, [sp], #16', 'ret'])
+check('KC: constant frame size, every access certified', {k: v for k, v in rows.items() if v}, {})
+rows, o = scan('kcunk', ['stp x29, x30, [sp, #-16]!', 'mov x29, sp', 'sub sp, sp, x12', 'str w0, [sp, #8]', 'ldp x29, x30, [sp], #16', 'ret'])
+check('KC: a frame size in an unknown register is not certified', bool(rows.get('f+0xc', '')), True)
+# rule BR: a tail-call `br` with sp == CFA is an exit (the access after the epilogue is certified); a br inside a frame is a jump to every instruction
+rows, o = scan('brtail', ['ldar x16, [x0]', 'br x16'])
+check('BR: tail call, no red row', {k: v for k, v in rows.items() if v}, {})
+rows, o = scan('brin', ['sub sp, sp, #16', 'ldar x16, [x0]', 'br x16', 'str w0, [sp, #4]', 'add sp, sp, #16', 'ret'])
+check('BR: br inside a frame scanned without an exception', 'f' in rows, True)
+# rule LP: code reached only by an unwind edge (after a call, no other edge) keeps the call's stack pointer
+rows, o = scan('lp', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'bl g', 'ldp x29, x30, [sp], #32', 'ret', 'str w0, [sp, #8]', 'ldp x29, x30, [sp], #32', 'ret'])
+check('LP: landing pad keeps sp, its frame access certified', {k: v for k, v in rows.items() if v}, {})
 # a crash of the scan is a red row naming the object, never an exception
 orig = A.scan
 A.scan = lambda p: (_ for _ in ()).throw(TypeError('can only concatenate tuple (not "int") to tuple'))
