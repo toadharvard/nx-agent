@@ -42,7 +42,13 @@ def pre_state(eip_sym):
     p = {'regs': {r: z3.BitVec(r, 32) for r in prove.REGS}, 'flags': {f: z3.BitVec(f, 1) for f in prove.FLAGS}, 'mem': z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8))}
     p['eip'] = z3.BitVec('eip', 32) if eip_sym else z3.BitVecVal(model_sail.ADDR, 32); return p
 
+def fns_fields():
+    """K: the functions the model run executed and the closure_sha over them (irdeps.py); absent when no isla run happened"""
+    fns = model_sail.LAST.get('fns')
+    return {'model_fns': fns, 'closure_sha': model_sail.closure_sha(fns)} if fns else {}
+
 def one(key, args):
+    model_sail.LAST.clear()
     rec = {'shape': key, 'model_sha': model_sail.ir_sha(), 'eip_mode': args.eip}
     def fin(result, note='', **kw):
         rec.update(result=result, note=note[:300], split='none', **kw); return rec
@@ -64,14 +70,27 @@ def one(key, args):
     if model_sail.LAST.get('fault_paths'): asm.append('A-SEGLIM')
     ids = res[len('FAILED(model-defect:'):-1].split(',') if res.startswith('FAILED(model-defect:') else []
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
-               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), obligations=list(prove.OBLIGATIONS), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'))
+               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), obligations=list(prove.OBLIGATIONS), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
+
+def migrate(rec, args):
+    """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the
+    same key) and add model_fns + closure_sha.  The proof is not redone: the run that is repeated is the run the proof used."""
+    if rec.get('closure_sha') or rec.get('model_sha') != model_sail.ir_sha() or rec.get('result') != 'proved': return rec
+    rep, fields = symform.parse_key(rec['shape']); eip_sym = rec.get('eip_mode', 'sym') == 'sym'
+    model_sail.LAST.clear(); model_sail.model_post_shape(rep, fields, pre_state(eip_sym), eip_sym, int(args.timeout))
+    return dict(rec, **fns_fields())
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=True); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
+    ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=False, default=None); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
     ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
-    ap.add_argument('--only'); ap.add_argument('--limit', type=int)
+    ap.add_argument('--only'); ap.add_argument('--migrate', metavar='JSONL', help='K: copy the records of JSONL (a shard of this model) to the shard file, adding model_fns / closure_sha to the proved ones'); ap.add_argument('--limit', type=int)
     a = ap.parse_args(); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
+    if a.migrate:
+        with open(a.migrate) as fi, open(path, 'a') as out:
+            for ln in fi:
+                if ln.strip(): out.write(json.dumps(migrate(json.loads(ln), a), sort_keys=True) + '\n'); out.flush()
+        return 0
     keys, bad = load_shapes(a.shapes); keys = keys[::a.slice]
     if a.only: keys = [x for x in keys if a.only in x]
     mine = [x for i, x in enumerate(keys) if i % n == k - 1][:a.limit]

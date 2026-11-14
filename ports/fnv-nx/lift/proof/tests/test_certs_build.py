@@ -81,6 +81,15 @@ class Aggregate(unittest.TestCase):
         self.assertEqual(rows[0][6:], ['def0', 'af', '0', '2', 'edx'])
         self.assertEqual(rows[1][6:], ['def0', '-', '0', '0', '-'])
 
+    def test_closure_key_keeps_a_record_valid_across_an_ir_change(self):
+        fns = ['bool_to_bits', 'zf_spec']
+        r = dict(rec(KEYS[0], model='0' * 64), model_fns=fns, closure_sha=certs_build.model_sail.closure_sha(fns))
+        self.assertTrue(certs_build.model_valid(r, MODEL))
+        self.assertFalse(certs_build.model_valid(dict(r, closure_sha='1' * 64), MODEL))
+        self.assertFalse(certs_build.model_valid(rec(KEYS[0], model='0' * 64), MODEL))                     # no closure: only the IR sha it was proved against counts
+        o = os.path.join(self.d, 'o'); a = self.write('shapeprove_1_of_1.jsonl', [r])
+        self.assertEqual(self.run_main([a], o), 0); self.assertEqual(len(open(o).read().splitlines()), 2)
+
     def test_refusals(self):
         o = os.path.join(self.d, 'o')
         a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[0], 'FAILED(dsl)')])

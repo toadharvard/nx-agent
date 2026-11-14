@@ -33,7 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import prove, shape, symform  # noqa: E402
+from proof import model_sail, prove, shape, symform  # noqa: E402
 
 HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\n'
 
@@ -91,6 +91,18 @@ def current_sha(key, cache=_SHA):
     return cache[key]
 
 
+_ir_ok = {}
+def model_valid(r, model):
+    """K: a record is valid for the pinned model iff it was proved against it (model_sha), or its closure_sha (the definitions the isla run executed + the run environment) is unchanged
+    on the pinned IR (irdeps.py: the run is then step for step the same, so the shape's certificate is the same)"""
+    if r.get('model_sha') == model: return True
+    fns, want = r.get('model_fns'), r.get('closure_sha')
+    if not fns or not want: return False
+    if model not in _ir_ok: _ir_ok[model] = model_sail.ir_sha() == model
+    if not _ir_ok[model]: raise Refused('the IR file %s is not the pinned model %s' % (model_sail.IR, model))
+    return model_sail.closure_sha(fns) == want
+
+
 def scan(files):
     """-> (proved {key: (dsl_sha, ...)} valid certificates, counts {result or 'stale-dsl'/'stale-model': n}, status {(key, dsl, model): best result}).
     Records that do not match (shape, current shape_sha, pinned IR) are counted stale and ignored.  Raises Refused on a contradiction."""
@@ -106,7 +118,7 @@ def scan(files):
             counts[res] = counts.get(res, 0) + 1
             continue                                            # no obligation ran: no Form, no model sha
         key = r['shape']
-        if r.get('model_sha') != model:
+        if not model_valid(r, model):
             counts['stale-model'] = counts.get('stale-model', 0) + 1
             continue
         if r.get('obligations') != list(prove.OBLIGATIONS):          # a record of a prover that did not check DEF0 (every undefined flag = 0) certifies less than this one
