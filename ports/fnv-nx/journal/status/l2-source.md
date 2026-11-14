@@ -72,3 +72,12 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
 - 2026-11-14 23:55 P1 w1 ftoivec: done (713aeee8b on L5 0cdafb322; head a44acb71f). Platform root: 115 objects, 39 f2i sites, 39 rewritten (conv-scalar 38, mdbuiltin 1), 0 ranged, 0 helper, 0 findings, read by read_f2i @1c8974b53. MINIMP3_NO_SIMD, PD-MINIMP3-NEON and the sse2neon guard deleted. Verdict: from w22's paired candidate. Value run: blocked on L4 4.1. a44acb71f (platform/build.json sha256 include) routed to L5 through the orchestrator. w1 on standby.
 - 2026-11-14 23:55 L1 w24 takes -fstack-reuse=none and the stack-growth numbers (after its current loader items).
 - 2026-11-14 23:55 w3 → 2.7 exitgen: full a<N><X><Y> grammar plus a hard error on a missing defdisp row (branch claude/fnv-l2-source-w3-exitgen). Status: doing.
+- 2026-11-14 23:58 3.3 CLOSED (orchestrator rule: "DirectX redist installed", may-load superset). The 2 undecided LoadLibrary sites (exe 0xda284a G=0x11b76d0; d3dx9_38 0x56b717 G=0x793b24) are superset-handled: the handle may be any image of the declared set, or NULL/126. GetProcAddress: 0 of 135 open, so the reach certificates are valid. Pins: exe 0948da1e, facts a0f3d8ea, manifest e15d385f. No /Z7 rebuild.
+- 2026-11-14 23:58 w2 order d/e residual @c5449b0c9 (84 judgeable objects): d=356, e=329. Decisions:
+  - (1) atomics raised to the x86 mapping;
+  - (2) order placed after the last GIMPLE fold (cited from passes.def);
+  - (3) remaining mem*/str* builtins redirected to library calls bracketed by fences (-fno-builtin and size-based lowering both rejected);
+  - (4) aggregate copies with a shared side lowered field-wise, ordered (closes d2's 78; the fence form with plain stores is not TSO-correct);
+  - (5) d1's 168 go to L1 as the gate dominance rule;
+  - (6) d3's 93 are closed by -fstack-reuse=none (L1 w24).
+  Status: doing.
