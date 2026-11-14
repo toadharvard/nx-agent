@@ -1,7 +1,7 @@
 # w6: reference table of the L3a selftests (item c), int3 at the commit that holds this file
 
 Columns: test | subject | assertion | independent reference candidate | status (P = pinned and checkable now, C = candidate, needs a pin or a checker, N = none independent: the test compares the subject with itself)
-Total 37 test files in lift roots (fnvlift 3, gates 5, proof 12 incl. rtroot, tools 16 + root_graph, counted by ls */tests/test_*.py at the commit); 0 oracle entries written by this note (see the end).
+Total 34 test files in lift roots (fnvlift 3, gates 4, proof 12, tools 15 + root_graph = 34 rows, counted by ls */tests/test_*.py at the commit); 0 oracle entries written by this note (see the end).
 
 | test | subject | assertion | candidate reference | st |
 |---|---|---|---|---|
