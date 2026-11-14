@@ -1037,3 +1037,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w22p: 979151403 (PERFDEBT in gate_assumptions) and 841114c4b (.glsl / .in lexers); test_gate_assumptions 0 fails. Verdict and the L6 532f139f rerun are running.
 - L2 w2 .fnvnx.tls cdb4473d0 published (toolchain/ftoi/TLS.md). The L1 tlsmodel gate is queued (worker cap).
 - sm_link: L6 w5 writes gates.d/sm_link.json; L1 reviews. Certificates are a recipe stage in GATE_CACHE. The signature-class pairing needs every Mesa cross-stage check cited from source; otherwise exhaustive.
+
+- 23:53 UNMAP_FIXED: L5 w10 adds the service, its Switch body and w24's header moves; L4 w6 adds the boot-machine body with 4 test cases.
+  - S1..S8 move to L4 4.2 trace assertions, taken from loader/include/fnvnx_start.h. The old startcheck.c is at 55fbbb9d3.
+  - w24 admit row: 34 gates, admit green 935/935. PERFDEBT entry: w24 merges w22p 979151403 for the format.
+  - Found: unitstage.py:150/157 pass externals' include dirs as -I rather than -isystem. Queued for w15.
+  - w22p lexer on L6 532f139f: render findings 0/24; the remaining 24 are L5's.
