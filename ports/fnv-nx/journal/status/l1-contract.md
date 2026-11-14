@@ -1029,3 +1029,11 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - one header home in loader/include (4 copies deleted from platform/include);
     - sha256 → lib/sha256 (the ISA variant becomes a PERFDEBT entry, owner L1);
     - host/ and synth/ tests deleted (doubles); the start rules move to the L4 boot milestones.
+
+- 23:50 w22f2 88c960b5d (fe0dd64ae onto 141b07580): verdict RED, 969.5 s, over budget.
+  - fpexact 232/232, but the expected real finding (dshow_filters vcvtq_s32_f32) is gone. Held until it is explained: is the unit's row/report read, and is the call in the PP output? Plus a test that an intrinsic fixture is red through the real reader.
+  - Other reds are the same as the base: abi 887/1887, assumptions 88/112, hostapi 25/41, imports 0/1, machine 0/1, linkstrict 4888/5783, namegate/r7 vacuous, objstub exit 2, pure 29/37, selftests 89/93 (4 boot tests: g.c compile, L5 1.4).
+- w22v 8d715b0e6: RED, 944.9 s, the same reds.
+- w22p: 979151403 (PERFDEBT in gate_assumptions) and 841114c4b (.glsl / .in lexers); test_gate_assumptions 0 fails. Verdict and the L6 532f139f rerun are running.
+- L2 w2 .fnvnx.tls cdb4473d0 published (toolchain/ftoi/TLS.md). The L1 tlsmodel gate is queued (worker cap).
+- sm_link: L6 w5 writes gates.d/sm_link.json; L1 reviews. Certificates are a recipe stage in GATE_CACHE. The signature-class pairing needs every Mesa cross-stage check cited from source; otherwise exhaustive.
