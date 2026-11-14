@@ -100,6 +100,10 @@ static inline void fnvnx_shader_key_hex(const uint8_t key[32], char out[FNVNX_SH
     out[64] = 0;
 }
 
+/* FNV-1a 64 of the bytecode: the `hash` of the nxgpu4 shader descriptor (render/backend/nxgpu4_shader.h), which gl4 (gl4_d3dshader.c) checks.
+ * Declared here because the translator defines it; it leaves together with the descriptor's hash in the A2 pair (key[32] + fnvnx_sha256). */
+uint64_t fnvnx_shader_hash(const void *bytecode, size_t n);
+
 /* GLSL half (the GL path; no uam, no DKSH): front end -> GLSL backend. Returns result->ok; the GLSL is always in result->glsl. */
 int fnvnx_shader_translate_glsl(const void *d3d_bytecode, size_t n, const fnvnx_shader_opts *opts,
                                 fnvnx_shader_result *result);
