@@ -575,3 +575,9 @@ Workers are capped at 3. Assignment by plan item:
 - The table has 70 fields: 48 round-trip, 14 ignored by Wine too, 8 defects in our restore.
 - Agreed: struct cpu gets appended fields (full FSW with ES/B by SDM rule, FOP/FCS/FDS, EFLAGS NT). Owner w6, queued after 2.5.
 - RF/TF and Dr0-7 are one class, "guest-written debug-trap state", closed by a site-value fact. It is the same analysis as 2.5's masked-exceptions fact, so w6 produces both, with global counts per image and class. Undecided sites go to reach_violation under the certificate rule.
+
+## 2026-11-14 23:45 DEF0 defect: conditionally undefined flags
+- L3b's w4 prover (9d25bb24f) fails shl/shr/sar cl and shld/shrd cl on AF at count 0. Our DSL declared AF unconditionally undefined, so DEF0 wrote 0 where the CPU keeps the prior value.
+- Class rule: F.undefined(when=cond), with cond cited from the SDM; emission is cond ? 0 : prior. The prover checks both sides, so the condition is not trusted.
+- Owner w6, moved ahead of the rest of 2.2 because w1's relift must carry correct DEF0.
+- bsf/bsr with a zero source stay model gaps until the IR bump (L3b).
