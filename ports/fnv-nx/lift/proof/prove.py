@@ -168,7 +168,7 @@ def users_of(users, names):
 def users_all(users):
     return {o for u in users.values() for o in u}
 
-def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
+def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None, def0_only=False):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
     post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
     pre = PRE if pre is None else pre
@@ -188,6 +188,10 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     dm, mm = z3.Select(D['mem'], probe), z3.Select(M['mem'], probe)
     diffs += [('mem', dm, mm, dm != mm), ('eip', D['eip'], M['eip'], D['eip'] != M['eip'])]
     extra = {'model_sha256': hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest(), 'fault_checks': ''}
+    if def0_only:                                                # migration of a record whose other obligations were proved by the same checks (shapeprove.migrate): only DEF0 / DEFPRIOR is run
+        if not complete: return 'proved', '', extra
+        d0, dnote = def0(M, D, FLAGS, assume_d, side, args, extra, pre)
+        return d0, dnote, extra
     if not complete:                                             # every model path faults (a declared fault, prove.Perm): nothing to compare, but the DSL must fault in every pre-state of the domain
         r0, _ = check([D['fault'] == 0], domain, args); extra['fault_checks'] = 'model never completes => DSL faults in every state: %s' % r0
         return ('proved', '', extra) if r0 == z3.unsat else ('timeout', '', extra) if r0 != z3.sat else ('FAILED(dsl)', 'the model faults on every path, the DSL does not: ' + extra['fault_checks'], extra)

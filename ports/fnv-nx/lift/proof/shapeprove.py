@@ -73,12 +73,23 @@ def one(key, args):
                model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), obligations=list(prove.OBLIGATIONS), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
 
 def migrate(rec, args):
-    """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the
-    same key) and add model_fns + closure_sha.  The proof is not redone: the run that is repeated is the run the proof used."""
-    if rec.get('closure_sha') or rec.get('model_sha') != model_sail.ir_sha() or rec.get('result') != 'proved': return rec
-    rep, fields = symform.parse_key(rec['shape']); eip_sym = rec.get('eip_mode', 'sym') == 'sym'
-    model_sail.LAST.clear(); model_sail.model_post_shape(rep, fields, pre_state(eip_sym), eip_sym, int(args.timeout))
-    return dict(rec, **fns_fields())
+    """Migration of a record of this model (model_sha = the pinned IR, result proved) made by a prover without K and/or without DEF0.  The field-equality proof is not redone (its checks are
+    unchanged since: prove.py differs only by the DEF0 obligation; the record's dsl_sha is the current Form's); the isla run of the shape is repeated (cached by the same key, deterministic) and
+    (1) adds model_fns + closure_sha (K), (2) runs the missing obligation DEF0 / DEFPRIOR on that run (prove.prove_one def0_only) and adds obligations / def0.  A record whose DEF0 fails or times
+    out becomes that result (FAILED(def0) / timeout), never a proved one."""
+    if rec.get('result') != 'proved' or rec.get('model_sha') != model_sail.ir_sha(): return rec
+    if rec.get('closure_sha') and rec.get('obligations') == list(prove.OBLIGATIONS): return rec
+    key = rec['shape']; model_sail.LAST.clear()
+    try: sf = symform.symbuild(key)
+    except Exception: return rec                               # no Form any more: stays as it is (certs_build: stale)
+    if sf.form.sha() != rec.get('dsl_sha'): return rec         # another Form: the old proof is not about it
+    rep, fields = symform.parse_key(key); eip_sym = rec.get('eip_mode', 'sym') == 'sym'; pre = pre_state(eip_sym)
+    F = sf.form if eip_sym else symform.normalize(sf.form, {'eip': model_sail.ADDR})
+    res, note, extra = prove.prove_one(model_sail, F, rep, sf.form.key, args, pre=pre, fields={k: v for k, v in fields.items() if v},
+                                       model=lambda: model_sail.model_post_shape(rep, fields, pre, eip_sym, int(args.timeout)), def0_only=True)
+    out = dict(rec, def0=extra.get('def0'), obligations=list(prove.OBLIGATIONS), **fns_fields())
+    if res != 'proved': out.update(result=res, note=note[:300])
+    return out
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=False, default=None); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
