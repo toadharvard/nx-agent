@@ -70,6 +70,17 @@ class Aggregate(unittest.TestCase):
             self.assertEqual(self.run_main([a], o), 0)
             self.assertEqual([ln.split('\t')[0] for ln in open(o).read().splitlines()[1:]], [KEYS[1]])
 
+    def test_def0_columns_and_stale_defprior(self):
+        o = os.path.join(self.d, 'o')
+        d_old = dict(rec(KEYS[0]), def0={'undef_flags': ['af'], 'witness': 0, 'free': 2, 'nonflag_free': ['eax']})          # before DEFPRIOR: listed only
+        d_new = dict(rec(KEYS[1]), def0={'undef_flags': ['af'], 'witness': 0, 'free': 2, 'nonflag_free': ['edx'], 'defprior': ['eax'], 'classes': []})
+        a = self.write('shapeprove_1_of_1.jsonl', [d_old, d_new, rec(KEYS[2])])
+        self.assertEqual(self.run_main([a], o), 0)
+        rows = [ln.split('\t') for ln in open(o).read().splitlines()[1:]]
+        self.assertEqual([r[0] for r in rows], [KEYS[1], KEYS[2]])
+        self.assertEqual(rows[0][6:], ['def0', 'af', '0', '2', 'edx'])
+        self.assertEqual(rows[1][6:], ['def0', '-', '0', '0', '-'])
+
     def test_refusals(self):
         o = os.path.join(self.d, 'o')
         a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[0], 'FAILED(dsl)')])

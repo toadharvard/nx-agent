@@ -112,6 +112,10 @@ def scan(files):
         if r.get('obligations') != list(prove.OBLIGATIONS):          # a record of a prover that did not check DEF0 (every undefined flag = 0) certifies less than this one
             counts['stale-obligations'] = counts.get('stale-obligations', 0) + 1
             continue
+        d0r = r.get('def0') or {}
+        if d0r.get('nonflag_free') and 'defprior' not in d0r:          # a record of a prover before DEFPRIOR: its non-flag free outputs were only listed, never proved or classified
+            counts['stale-defprior'] = counts.get('stale-defprior', 0) + 1
+            continue
         if r.get('dsl_sha') is None or r.get('dsl_sha') != current_sha(key):
             counts['stale-dsl'] = counts.get('stale-dsl', 0) + 1
             continue
