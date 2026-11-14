@@ -1043,3 +1043,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - w24 admit row: 34 gates, admit green 935/935. PERFDEBT entry: w24 merges w22p 979151403 for the format.
   - Found: unitstage.py:150/157 pass externals' include dirs as -I rather than -isystem. Queued for w15.
   - w22p lexer on L6 532f139f: render findings 0/24; the remaining 24 are L5's.
+
+- 23:56 L5 correction: sched_yield and sched_getcpu are weak DEFINITIONS in libsysbase, not weak-undefined. Over the pinned archives there are 44 weak-undefined names; rt/guest defines 35. Open: 3 __syscall_* (L5 w14 defines them), _ZGTtnaj (fixed), and zoneinfo_dir_override (only if tzdb.o is linked).
+- Ruling: the stub gate judges every body of the final linked image, runtime archive members included. A fixed-failure archive fallback is red unless it is certified unreachable or is a cited declared-machine answer. A strong override removes it. Owner w20, objstub commit 4.
