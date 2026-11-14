@@ -34,9 +34,12 @@
 # --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
 #    Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the versions of
 #    verify/env.json (installed by farm/setup_verdict_env.sh, never by this job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. EVERY
-#    presented frame (frame_%06u.rgba + .txt, written by the library for each present) is published under frames/ with the result. Size: one frame
-#    is width x height x 4 bytes (1280x720 handheld = 3.7 MB, 1920x1080 docked = 8.3 MB) plus a few bytes of .txt; the job does not cap the frame
-#    count, a publish over a store limit is reported to L4, not trimmed. OUT.json "frames" has a record for every frame. meta.json gains gpu_branch and
+#    presented frame is published, losslessly, by content (no cap, no sampling): boot.py stores each distinct frame once as <key>.rgba + <key>.txt
+#    in the frames directory (key = sha256 of the .txt bytes followed by the .rgba bytes; a repeated identical frame, such as a static menu, is the
+#    same file), and the job publishes every file there under frames/ with the result. OUT.json "frames" has a record for every frame (n, t_ns,
+#    per_tid, sha256 = its key), so n frames with d distinct images are n records and d file pairs. Size: one distinct frame is width x height x 4
+#    bytes (1280x720 handheld = 3.7 MB, 1920x1080 docked = 8.3 MB) plus a few bytes of .txt; a publish over a store limit is reported to L4, not
+#    trimmed. meta.json gains gpu_branch and
 #    gpu_branch_commit, the final line gains presents=<n>.
 #    The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
 #    the bridge it was linked with (render: {branch, archive_sha256}); that branch's build.json archive_sha256 and its libfnvnx-d3d9.a
@@ -269,8 +272,8 @@ IDX=$(mktemp -u "$WORK/index.XXXXXX")
 for f in OUT.json OUT.console.txt spec.json meta.json; do
   GIT_INDEX_FILE=$IDX GITA update-index --add --cacheinfo "100644,$(GITA hash-object -w "$WORK/$f"),$f" || die "cannot stage $f"
 done
-if [ -n "$GPU_LIB" ]; then   # EVERY frame the renderer dumped (frame_%06u.rgba + .txt, one pair per present), staged in one batch
-  (cd "$FRAMES" && ls frame_*.rgba 2> /dev/null | sort) > "$WORK/frames.lst" || true
+if [ -n "$GPU_LIB" ]; then   # EVERY distinct frame the renderer dumped (<key>.rgba + <key>.txt, boot.py store_frame), staged in one batch
+  (cd "$FRAMES" && ls *.rgba 2> /dev/null | sort) > "$WORK/frames.lst" || true
   while read -r r; do [ -f "$FRAMES/${r%.rgba}.txt" ] || die "frame file ${r%.rgba}.txt is missing next to $r"; done < "$WORK/frames.lst"
   if [ -s "$WORK/frames.lst" ]; then
     : > "$WORK/frames.paths"; : > "$WORK/frames.names"

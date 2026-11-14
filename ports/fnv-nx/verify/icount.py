@@ -101,7 +101,9 @@ class Icount:
         self.events = {}
         self.slices = 0
         self.uc = None
-        self.frame_log = []               # (n, t_ns, index of the interval the frame mark closed), one per frame, in order
+        self.frame_log = []               # (n, t_ns, {tid: instructions since the previous frame}, extra), one per frame, in order
+        self.closed = {}                  # tid -> instructions of the closed intervals (running total, for mark_frame)
+        self.last_frame_total = {}        # tid -> the total at the previous frame
 
     # -- state changes (called by the emulator)
     def _open(self, frm, ooo):
@@ -127,30 +129,34 @@ class Icount:
         if self.stopped is not None:
             return
         cur = self.intervals[-1]
+        for tid, c in cur[3].items():
+            self.closed[tid] = self.closed.get(tid, 0) + c[0]
         cur[1] = name
         cur[2] = cur[2] or bool(out_of_order)
         self._open(name, bool(out_of_order))
 
-    def mark_frame(self, n, t_ns):
-        """frame n was presented at virtual time t_ns: the mark `frame-<n>` plus one frame_log entry (O(1); the per-thread sums are made by frames())"""
+    def mark_frame(self, n, t_ns, extra=None):
+        """frame n was presented at virtual time t_ns. A frame does NOT open an interval (the intervals are the milestones' only): the
+        per-thread instructions since the previous frame are taken from running totals (closed intervals + the open one), O(threads) per
+        frame and independent of the frame count; the block hook is not touched. `extra` is merged into the frame's record."""
         if self.stopped is not None:
             return
-        self.mark("frame-%d" % n)
-        self.frame_log.append((n, t_ns, len(self.intervals) - 2))
+        tot = dict(self.closed)
+        for tid, c in self.intervals[-1][3].items():
+            tot[tid] = tot.get(tid, 0) + c[0]
+        per = {tid: v - self.last_frame_total.get(tid, 0) for tid, v in tot.items() if v != self.last_frame_total.get(tid, 0)}
+        self.last_frame_total = tot
+        self.frame_log.append((n, t_ns, per, dict(extra or {})))
 
     def frames(self):
-        """[{n, t_ns, per_tid: {thread name: instructions}}] for every frame, in order: frame n spans every interval after the one that
-        frame n-1 closed (the start of the run for the first frame) up to and including the one frame n closed, so milestone marks inside
-        a frame do not cut it and the spans of all frames are disjoint. Threads without an instruction in the span are left out."""
-        out, lo = [], 0
-        for n, t_ns, hi in self.frame_log:
-            per = {}
-            for iv in self.intervals[lo:hi + 1]:
-                for tid, c in iv[3].items():
-                    if c[0]:
-                        per[self.names[tid]] = per.get(self.names[tid], 0) + c[0]
-            out.append({"n": n, "t_ns": t_ns, "per_tid": per})
-            lo = hi + 1
+        """[{n, t_ns, per_tid: {thread name: instructions}, **extra}] for every frame, in order: frame n counts every instruction since
+        frame n-1 (since the start of the run for the first frame), whatever milestones lie in between, so the spans of the frames are
+        disjoint. Threads without an instruction in the span are left out."""
+        out = []
+        for n, t_ns, per, extra in self.frame_log:
+            rec = {"n": n, "t_ns": t_ns, "per_tid": {self.names[t]: v for t, v in sorted(per.items())}}
+            rec.update(extra)
+            out.append(rec)
         return out
 
     def stop(self, reason, **events):

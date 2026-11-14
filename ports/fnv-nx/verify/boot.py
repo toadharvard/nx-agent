@@ -31,12 +31,14 @@ guest call of ext module 10); they only fire with --gpu. Any other host name is 
 
 Renderer: --gpu LIB registers ext module 10 and forwards it to the host library LIB (bootgpu.py); --frames DIR is its
 $NXGL4_FRAMES (the library writes frame_%06u.rgba/.txt there). The three GL variables for software rendering are set for it.
-Without --gpu module 10 is not registered (a guest call answers NO_MODULE). EVERY present of the renderer is an icount mark `frame-<n>`
-(n from 1); OUT.json "gpu" = {library_sha256, presents, first_module10_call, last_error} and OUT.json "frames" = [{n, t_ns (virtual
-clock at the present), per_tid: {thread name: instructions}}] for every frame (Icount.frames(): frame n spans every interval after the
-one frame n-1 closed, up to its own mark; frame 1 starts at the start of the run). The record grows linearly with the frames; the block
-hook is not touched (a mark is O(1)). Every present is also dumped as an image: the library writes frame_%06u.rgba + .txt (width x height x 4 bytes + "w h\n") into --frames for each present, and
-farm/boot_job.sh publishes all of them.
+Without --gpu module 10 is not registered (a guest call answers NO_MODULE). EVERY present of the renderer is a record of OUT.json "frames" = [{n (from 1), t_ns (virtual clock
+at the present), per_tid: {thread name: instructions}, sha256 (with --frames)}] (Icount.frames(): frame n counts every instruction since
+frame n-1, frame 1 since the start of the run). A frame is NOT an icount interval: the icount intervals are the milestones' only, the
+per-frame counts live only in "frames" (running totals, O(threads) per frame; the block hook is not touched). OUT.json "gpu" =
+{library_sha256, presents, first_module10_call, last_error}. Every present is also dumped as an image, losslessly and by content (no cap, no sampling): the library writes frame_%06u.rgba + .txt
+(width x height x 4 bytes + "w h\n") into --frames for each present, and store_frame() turns the pair at once into --frames/<key>.rgba +
+<key>.txt with key = sha256(.txt bytes followed by .rgba bytes) (the size is part of the identity); a key already there is the same frame and
+is not stored again (a static menu is one file). Each frames record carries its "sha256" = key. farm/boot_job.sh publishes every distinct file.
 Two "present" facts, not to be mixed: milestone first-present = the exe's own call of D3D9 Present (the contract's import:DLL!Present
 rows, `call` parts, observed in the guest); milestone first-frame = the first `present` host event of the GL backend (bootgpu on_present,
 the table row `first-frame any host present` that bootinputs.py milestones always generates; it needs --gpu). They are different
@@ -65,6 +67,26 @@ HOST_EVENTS = ("present", "gpu-first-call")
 GPU_ENV = {"LIBGL_ALWAYS_SOFTWARE": "1", "GALLIUM_DRIVER": "llvmpipe", "EGL_PLATFORM": "surfaceless"}
 INPUT_ERRORS = (bootdecl.InputError, bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
                 bootmiles.ElfError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
+
+
+def store_frame(directory, frame):
+    """The content-addressed frame store: the library's frame_%06u.rgba + .txt of the present just made (it writes them before it calls
+    nxgl4_on_present) become <key>.rgba + <key>.txt, key = sha256(.txt bytes followed by .rgba bytes), so a frame is identified with its size.
+    A key already in the store means the same frame: the library's files are deleted, nothing is written twice. Returns the key."""
+    base = os.path.join(directory, "frame_%06u" % frame)
+    with open(base + ".rgba", "rb") as f:
+        rgba = f.read()
+    with open(base + ".txt", "rb") as f:
+        txt = f.read()
+    key = hashlib.sha256(txt + rgba).hexdigest()
+    dst = os.path.join(directory, key)
+    if os.path.exists(dst + ".rgba"):
+        os.remove(base + ".rgba")
+        os.remove(base + ".txt")
+    else:
+        os.replace(base + ".txt", dst + ".txt")
+        os.replace(base + ".rgba", dst + ".rgba")
+    return key
 
 
 def console_part(line):
@@ -233,7 +255,7 @@ def run(a):
             os.environ.pop("NXGL4_FRAMES", None)
 
         def presented(frame):
-            ic.mark_frame(gpu.presents, m.clock.now_ns())   # every present is an icount mark and a frames record (O(1) here)
+            ic.mark_frame(gpu.presents, m.clock.now_ns(), {"sha256": store_frame(a.frames, frame)} if a.frames else None)
             for i in watch["host"].get("present", ()):
                 fire(i, m.tid())
         gpu = bootgpu.Gpu(a.gpu, m, a.profile, on_present=presented,

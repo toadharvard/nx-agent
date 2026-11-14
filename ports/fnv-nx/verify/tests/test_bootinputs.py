@@ -161,6 +161,31 @@ def main():
          and "# dropped-milestone: winmain" not in ol and "# dropped-milestone: m" not in ol, ot)
     case("stage-table: output loads in bootmiles", [m["name"] for m in bi.bootmiles.load_table(ot).milestones] == ["winmain", "r", "m", "k"], ot)
     case("stage-table error: unknown kind", good(raises(bi.stage_table, "a call2 0x1\n")) and good(raises(bi.stage_table, "a any call zz\n")))
+    # boot.store_frame: the content-addressed frame store (every presented frame, once per distinct content)
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        def lib_writes(n, rgba, txt=b"2 2\n"):   # what the renderer library leaves for present n
+            open(os.path.join(d, "frame_%06u.rgba" % n), "wb").write(rgba)
+            open(os.path.join(d, "frame_%06u.txt" % n), "wb").write(txt)
+        A, B = bytes(range(16)), bytes(range(1, 17))
+        keys = []
+        for n, (rgba, txt) in enumerate([(A, b"2 2\n"), (A, b"2 2\n"), (B, b"2 2\n"), (A, b"2 2\n"), (A, b"4 1\n")]):
+            lib_writes(n, rgba, txt)
+            keys.append(boot.store_frame(d, n))
+        h = lambda txt, rgba: hashlib.sha256(txt + rgba).hexdigest()
+        case("store_frame: key = sha256(.txt bytes + .rgba bytes); repeated identical frames give the same key, distinct ones distinct keys, "
+             "the same pixels with another size is another frame",
+             keys == [h(b"2 2\n", A), h(b"2 2\n", A), h(b"2 2\n", B), h(b"2 2\n", A), h(b"4 1\n", A)] and len(set(keys)) == 3, keys)
+        case("store_frame: 5 presents, 3 distinct frames -> 3 file pairs and nothing of the library's names left",
+             sorted(os.listdir(d)) == sorted(k + e for k in set(keys) for e in (".rgba", ".txt")), sorted(os.listdir(d)))
+        case("store_frame: the stored files hold the frame's bytes", open(os.path.join(d, keys[2] + ".rgba"), "rb").read() == B
+             and open(os.path.join(d, keys[4] + ".txt"), "rb").read() == b"4 1\n")
+        try:
+            boot.store_frame(d, 99)
+            miss = False
+        except OSError:
+            miss = True   # boot.py's INPUT_ERRORS holds OSError
+        case("store_frame: a missing library file is an error, nothing is invented", miss and sorted(os.listdir(d)) == sorted(k + e for k in set(keys) for e in (".rgba", ".txt")))
     print("%s: %d failed" % ("FAIL" if FAILS else "PASS", len(FAILS)))
     return 1 if FAILS else 0
 
