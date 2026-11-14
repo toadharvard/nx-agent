@@ -1068,3 +1068,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   1. the gate computes the bounds from the record's target type and kind, never from report fields;
   2. a range fact must carry nonan (GCC frange), or the site is red.
   The final field set goes to L2 w1. It lands together with w1's rewrite.
+- 00:13 L5 accepted the image-entry ruling: w14 adds FNVNX_IMAGE_ENTRY on fnvnx_exe_entry in hostabi guest.h (the only marked declaration) and sends w20 the commit. After the L5 series there are 0 fixed-failure runtime weak definitions; _sbrk_r's heap_size>0 becomes a host contract fact. The libnx/libm bodies are left to w20's final-image objstub (commit 4).
