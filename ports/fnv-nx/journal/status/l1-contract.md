@@ -1111,3 +1111,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - gate_order D1 (home-slot stores, 168) and D2 (fenced libc calls from string ops, SDM 3 §8.2.4) go to w23.
 - sm_link form (a): a test/host root render/shaders/sm_link linking the translator@host and lib/sha256@host variants. A `run` stage kind and a {stage} resolve_input ref go to L6 w6 after w16c1.
 - w20u 547d55dd7 (linked-image fixed-failure) accepted. errno access is derived by a probe stage (call or TLS); undecodable bodies are red; exemptions are image_unreachable (gate_reach over the final image) and declared_machine rows by symbol.
+- w24 d895bb829 accepted: the imports and machine classes are evaluated in the gates. A conservative gpa term (a root referencing GetProcAddress or LoadLibrary is a registry-reader) is to be added. PD-LOADER-SHA256-ISA rule corrected per the orchestrator: compile-time Arm feature set per target, one home, no cpuid.
+- w20 item 5 blocker: the doubles gate exists only on w11. Take stage 1 (07510902d, 001306f06), not the unfinished d799a5c3f, plus the L5 marker (guest.h, 0b297489f). New w20 order: corrections, 6a, 5, 6, pydoubles.
