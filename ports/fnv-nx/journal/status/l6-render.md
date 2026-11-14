@@ -502,3 +502,9 @@ Paused: w3b, w4, farm; no other work.
     - render/d3d9: only the 3 generator-input errors remain (L1 w16c commit 1).
     - d3d9total 332/332.
     - w6 waits on w16c.
+- 23:35Z L1 accepted: w6 writes L1 w16c commit 1, the generator-input rule.
+    - Branch claude/fnv-l1-contract-w16c1, base 141b07580 + w15c 1cac05621. Spec from L1, L1 reviews.
+    - Acceptance: render/d3d9 and the translator check valid at 68c66df37.
+- 23:35Z L3b w3 oracle red on test_d3d9total.py: a merge defect on their branch.
+    - The merge kept old-line 23e603b21's delete of shim/include/d3d9types.h.
+    - Fix sent: restore it from next3b. Nothing changes in render.
