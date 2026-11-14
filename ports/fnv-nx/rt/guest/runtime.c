@@ -22,6 +22,7 @@
 #include <reent.h>
 #include <sys/iosupport.h>
 
+#include "fnvnx/guest.h"
 #include "fnvnx/hostapi.h"
 
 #define HIDDEN __attribute__((visibility("hidden")))
@@ -49,7 +50,7 @@ extern char **environ;   /* newlib's */
 const FnvnxHostApi *fnvnx_host;
 extern char *fake_heap_start, *fake_heap_end;
 
-int main(int argc, char **argv, char **envp);   /* main.c */
+/* main: rt/guest_main/main.c (hostabi guest.h declares it); the loader's start sequence, then the exe */
 void fnvnx_guest_fs_init(void);
 void __libc_init_array(void);
 
