@@ -1101,7 +1101,7 @@ class Job:
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
-               "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
+               "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
         res = self.stage(doc)[1]
         got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
         if got != sorted(g["outputs"]):
