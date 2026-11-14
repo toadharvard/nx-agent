@@ -74,7 +74,7 @@ def wine_rows(wine):
     """{(stage, opnum): [(dst, src, lo, hi, line)]} of the opcode tables of wined3d shader_sm1.c (the structured source: dst count, param count,
     min/max version). src = param count - dst count. 0 / -1 for a version = unbounded."""
     text = open(os.path.join(wine, WINE_FILE)).read()
-    en = {m.group(1): int(m.group(2), 16) for m in re.finditer(r"WINED3D_SM1_OP_(\w+)\s*=\s*(0x[0-9a-fA-F]+)", text)}
+    en = {m[1]: int(m[2], 16) for m in re.finditer(r"WINED3D_SM1_OP_(\w+)\s*=\s*(0x[0-9a-fA-F]+)", text)}
     out = {}
     for st, tab in (("vs", "vs_opcode_table"), ("ps", "ps_opcode_table")):
         a = text.index(tab + "[]")
@@ -82,9 +82,9 @@ def wine_rows(wine):
         for m in WROW.finditer(text, a, b):
             def ver(x):
                 k = re.match(r"WINED3D_SHADER_VERSION\((\d),\s*(\d)\)", x.strip())
-                return (int(k.group(1)), int(k.group(2))) if k else None
+                return (int(k[1]), int(k[2])) if k else None
             ln = text.count("\n", 0, m.start()) + 1
-            out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)) - int(m.group(2)), ver(m.group(4)), ver(m.group(5)), ln))
+            out.setdefault((st, en[m[1]]), []).append((int(m[2]), int(m[3]) - int(m[2]), ver(m[4]), ver(m[5]), ln))
     return out
 
 
@@ -99,7 +99,7 @@ def page_rows(pages, table):
         if not m:
             out.append((key, e.get("opnum", ""), models, "", "", "", "", "", "", "unparsed:no page in source"))
             continue
-        page = m.group(1) + ".txt"
+        page = m[1] + ".txt"
         path = os.path.join(pages, page)
         if not os.path.isfile(path):
             out.append((key, e["opnum"], models, "", "", "", "", page, "", "unparsed:page missing"))

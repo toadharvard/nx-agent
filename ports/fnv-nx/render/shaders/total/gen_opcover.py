@@ -35,8 +35,8 @@ ROW = re.compile(r'^INSTRUCTION(_STATE)?\((\w+),\s*(0|"[^"]*"),\s*(\d+),\s*(\w+)
 
 
 def strip_comments(s):
-    s = re.sub(r"/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m.group(0)), s, flags=re.S)
-    return re.sub(r"//[^\n]*", lambda m: " " * len(m.group(0)), s)
+    s = re.sub(r"/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m[0]), s, flags=re.S)
+    return re.sub(r"//[^\n]*", lambda m: " " * len(m[0]), s)
 
 
 def body_of(src, name_re):
@@ -56,14 +56,14 @@ def body_of(src, name_re):
                 depth -= 1
                 if depth == 0: break
             j += 1
-        out[m.group(1)] = (src[i + 1:j], src.count("\n", 0, m.start()) + 1)
+        out[m[1]] = (src[i + 1:j], src.count("\n", 0, m.start()) + 1)
     return out
 
 
 def load(tree):
     ints = open(os.path.join(tree, "mojoshader_internal.h")).read()
     t0 = ints.index("#if MOJOSHADER_DO_INSTRUCTION_TABLE")
-    table = [(m.group(2), m.group(3), int(m.group(4)), m.group(5), bool(m.group(1))) for m in ROW.finditer(ints[t0:ints.index("#undef MOJOSHADER_DO_INSTRUCTION_TABLE", t0)])]
+    table = [(m[2], m[3], int(m[4]), m[5], bool(m[1])) for m in ROW.finditer(ints[t0:ints.index("#undef MOJOSHADER_DO_INSTRUCTION_TABLE", t0)])]
     msrc = open(os.path.join(tree, "mojoshader.c")).read()
     glsl = open(os.path.join(tree, "profiles", "mojoshader_profile_glsl.c")).read()
     return table, msrc, glsl
@@ -106,7 +106,7 @@ def main(argv):
     # DEFINE_PROFILE order <-> Profile struct order: hook name H -> emit_GLSL_<suffix>
     ph = open(os.path.join(tree, "profiles", "mojoshader_profile.h")).read()
     fields = re.findall(r"^\s*emit_\w+\s+(\w+)_emitter;", strip_comments(ph), re.M)
-    macro = re.search(r"#define DEFINE_PROFILE\(prof\)\s*\{(.*?)\n\},", msrc_raw, re.S).group(1)
+    macro = re.search(r"#define DEFINE_PROFILE\(prof\)\s*\{(.*?)\n\},", msrc_raw, re.S)[1]
     toks = re.findall(r"emit_##prof##_(\w+),", macro)
     hook_fn = {f: "emit_GLSL_" + s for f, s in zip(fields, toks)}
     if len(fields) != len(toks):

@@ -8,7 +8,7 @@ def in_range(m, lo, hi):
     v = vtuple(m); return (lo is None or v >= lo) and (hi is None or v <= hi)
 
 def _enum(src, prefix):
-    return {m.group(1): int(m.group(2), 16) for m in re.finditer(prefix + r"OP_(\w+)\s*=\s*(0x[0-9a-fA-F]+)", src)}
+    return {m[1]: int(m[2], 16) for m in re.finditer(prefix + r"OP_(\w+)\s*=\s*(0x[0-9a-fA-F]+)", src)}
 
 def wine_ops(root):
     """-> {(stage, opcode_number): [(ndst, nsrc, lo, hi)]}"""
@@ -20,8 +20,8 @@ def wine_ops(root):
         for m in re.finditer(r"\{WINED3D_SM1_OP_(\w+),\s*(\d+),\s*(\d+),\s*\w+,\s*(WINED3D_SHADER_VERSION\(\d,\s*\d\)|0),\s*(WINED3D_SHADER_VERSION\(\d,\s*\d\)|-1|0)\s*\}", body):
             def ver(x):
                 x = x.strip(); k = re.match(r"WINED3D_SHADER_VERSION\((\d),\s*(\d)\)", x)
-                return (int(k.group(1)), int(k.group(2))) if k else None
-            out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)) - int(m.group(2)), ver(m.group(4)), ver(m.group(5))))
+                return (int(k[1]), int(k[2])) if k else None
+            out.setdefault((st, en[m[1]]), []).append((int(m[2]), int(m[3]) - int(m[2]), ver(m[4]), ver(m[5])))
     return out, en
 
 def vkd3d_ops(root):
@@ -31,9 +31,9 @@ def vkd3d_ops(root):
     for st, tab in (("vs", "vs_opcode_table"), ("ps", "ps_opcode_table")):
         body = s[s.index("struct vkd3d_sm1_opcode_info %s[]" % tab):]; body = body[:body.index("};")]
         for m in re.finditer(r"\{VKD3D_SM1_OP_(\w+),\s*(\d+),\s*(\d+),\s*\"(\w+)\",\s*\w+(?:,\s*\{(\d),\s*(\d)\})?(?:,\s*\{(\d),\s*(\d)\})?\}", body):
-            lo = (int(m.group(5)), int(m.group(6))) if m.group(5) else None
-            hi = (int(m.group(7)), int(m.group(8))) if m.group(7) else None
-            out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)), lo, hi))
+            lo = (int(m[5]), int(m[6])) if m[5] else None
+            hi = (int(m[7]), int(m[8])) if m[7] else None
+            out.setdefault((st, en[m[1]]), []).append((int(m[2]), int(m[3]), lo, hi))
     return out, en
 
 def models_of(entries, stage):
@@ -48,9 +48,9 @@ def wine_regs(root):
     out = {}
     for m in re.finditer(r"allowed_reg_type (\w+_reg_allowed)\[\] =\s*\{(.*?)\};", s, re.S):
         d = {}
-        for r in re.finditer(r"\{ *BWRITERSPR_(\w+),\s*(~0u|\d+),\s*(TRUE|FALSE) *\}", m.group(2)):
-            d[REGNAME[r.group(1)]] = (None if r.group(2) == "~0u" else int(r.group(2)), r.group(3) == "TRUE")
-        out[m.group(1)] = d
+        for r in re.finditer(r"\{ *BWRITERSPR_(\w+),\s*(~0u|\d+),\s*(TRUE|FALSE) *\}", m[2]):
+            d[REGNAME[r[1]]] = (None if r[2] == "~0u" else int(r[2]), r[3] == "TRUE")
+        out[m[1]] = d
     return out
 WINE_TABLE = {"vs_1_1": "vs_1_reg_allowed", "vs_2_0": "vs_2_reg_allowed", "vs_2_x": "vs_2_reg_allowed", "vs_3_0": "vs_3_reg_allowed",
               "ps_1_1": "ps_1_0123_reg_allowed", "ps_1_2": "ps_1_0123_reg_allowed", "ps_1_3": "ps_1_0123_reg_allowed",
