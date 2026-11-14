@@ -19,8 +19,11 @@ FIX = os.path.join(HERE, 'sdd', 'sdd.cpp')
 
 
 def slot_loads(obj, sym):
-    """byte offsets of the loads `ldr wN, [xM, #off]` / `[xM]` that are followed by `mov x16, ...` (the tail-call through a slot), i.e. table slots"""
-    return [int(o or '0', 0) for o in re.findall(r'ldr w\d+, \[x\d+(?:, #(-?(?:0x)?[0-9a-f]+))?\] mov x16,', pb.insns(obj, sym))]
+    """byte offsets of the slot loads of the virtual calls and deletes of SYM: every call loads the vptr and then the slot, both as
+    `ldar w, [x]` (R9: sdd and fnvnx_order create them ordered); the slot load is the second of each pair, its offset the `add` right before it"""
+    s = pb.insns(obj, sym)
+    ms = list(re.finditer(r'(?:add x(\d+), x\d+, #(0x[0-9a-f]+|\d+) )?ldar w\d+, \[x(\d+)\]', s))
+    return [int(m.group(2), 0) if m.group(1) and m.group(1) == m.group(3) else 0 for m in ms[1::2]]
 
 
 def relocs_in(obj, sym):
@@ -47,8 +50,8 @@ def checks(obj):
     check('pointer to virtual member: comparison', re.search(r'cmp w0, #0x8\b', ins('_Z2eqM1AFivE')))
     check('pointer to virtual member: template argument', slot_loads(obj, '_Z5use_tP1A') == [8])
     check('instantiated class template', slot_loads(obj, '_Z6use_ttP2TTIiE') == [4] and slot_loads(obj, '_Z6del_ttP2TTIiE') == [0])
-    uj = re.findall(r'ldr w\d+, \[x\d+, #(\d+)\]', ins('_Z5use_jP1J'))
-    check('inline member bodies: g() slot 2, J::w() slot 3', uj == ['8', '12'], str(uj))
+    uj = slot_loads(obj, '_Z5use_jP1J')
+    check('inline member bodies: g() slot 2, J::w() slot 3', uj == [8, 12], str(uj))
     ap8, ap36, tv = syms['_ZTV1M.fnvnx_ap8'], syms['_ZTV1M.fnvnx_ap36'], syms['_ZTV1M']
     check('address points: own symbols', ap8['value'] == tv['value'] + 8 and ap36['value'] == tv['value'] + 36 and ap8['sec'] == ap36['sec'] == tv['sec'],
           str((ap8, ap36, tv)))
