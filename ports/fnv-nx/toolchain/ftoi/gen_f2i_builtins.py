@@ -1,57 +1,76 @@
 #!/usr/bin/env python3
 """gen_f2i_builtins.py - writes f2i_builtins.inc, the table of fnvnx_ftoi.cc: every AArch64 target builtin of GCC 13.3.0 that converts a
-floating-point value (scalar or vector lanes) to an integer, with its rounding. Source: gcc/config/aarch64/aarch64-simd-builtins.def and
-iterators.md of the sha256-pinned GNU tarball gcc-13.3.0 (the same one toolchain/msvcmodel/build.sh builds the game's compiler from).
+floating-point value (scalar or vector lanes) to an integer, with its rounding. Source: gcc/config/aarch64/aarch64-simd-builtins.def,
+aarch64-builtins.cc and iterators.md of the sha256-pinned GNU tarball gcc-13.3.0 (the one toolchain/msvcmodel/build.sh builds the game's
+compiler from).
 
   gen_f2i_builtins.py GCC_SRC_DIR [--check]      GCC_SRC_DIR holds gcc/config/aarch64/ of the tarball; --check compares, never writes
 
-The class is the .def's own: a row is in it iff the machinery that registers the row (aarch64-builtins.cc, aarch64_init_simd_builtin_functions)
-builds a builtin that implements one of the patterns `l<fcvt_pattern><su_optab><float mode><int mode>2` (aarch64-simd.md:3055, the vector forms,
-and the scalar forms of aarch64.md) or `fix_trunc<float mode><int mode>2`; the rounding is iterators.md's own `fcvt_pattern` attribute
-(btrunc, round, ceil, floor, frintn). Signedness is the row's qualifier (UNOP signed result, UNOPUS unsigned result). A row's registered name is
-"__builtin_aarch64_" + row name + int mode (aarch64-builtins.cc:1481, d->name = row name + the .def's mode argument), expanded here exactly as the
-.def's iterators BUILTIN_GPI / BUILTIN_GPI_I16 (iterators.md:30, :33) do: si,di / hi,si,di. Output rows: registered name, rounding, signedness,
-the .def line. The plugin resolves each registered name to its DECL_MD_FUNCTION_CODE once at plugin start (the table of codes is GCC's) and
-checks the decl's type; a code is never taken from a name in the user's source.
+The class is the .def's own: a row is in it iff the machinery that registers it (aarch64-builtins.cc, aarch64_init_simd_builtin_functions)
+builds a builtin for one of the conversion patterns
+  l<fcvt_pattern><su_optab><float mode><int mode>2      (aarch64-simd.md:3055 vectors; aarch64.md scalars)   rows l{btrunc,round,ceil,floor,frintn}[u]
+  fix[uns]_trunc<float mode><int mode>2                                                                     rows fix_trunc*, fixuns_trunc*
+  fcvtz<s|u><float mode>3 (fixed point, a shift-immediate operand)                                          rows fcvtzs*, fcvtzu*
+The rounding is iterators.md's own `fcvt_pattern` attribute (btrunc, round, ceil, floor, frintn) and the pattern name for the other two (truncation).
+The registered name is "__builtin_aarch64_" + row name + the .def's mode argument (aarch64-builtins.cc:1481) with "_" + the type signature appended
+when an operand is unsigned (:1478, :1432): the signature has one letter per operand of the row's qualifier array (the TYPES_* macro of the row):
+u for qualifier_unsigned, p for poly, else s. The iterators BUILTIN_GPI, BUILTIN_GPI_I16, BUILTIN_VHSDF_HSDF expand to the modes of iterators.md's
+define_mode_iterator of the same name (geniterators.sh does exactly that). Output rows: registered name, rounding, unsigned result, shift operand
+(fixed point), .def line. The plugin resolves each registered name to its DECL_MD_FUNCTION_CODE once, at plugin start; a code is never taken from
+a name in the user's source.
 """
 import re, sys, os
 ROUND = {"btrunc": "TRUNC", "round": "AWAY", "ceil": "CEIL", "floor": "FLOOR", "frintn": "EVEN"}
-ITER = {"GPI": ["si", "di"], "GPI_I16": ["hi", "si", "di"]}
-ROW = re.compile(r"^\s*(VAR1|BUILTIN_GPI_I16|BUILTIN_GPI)\s*\((UNOPUS|UNOP),\s*(\w+),\s*\d+,\s*\w+(?:,\s*(\w+))?\)")
+
+
+def iterators(d):
+    t = re.sub(r";[^\n]*", "", open(os.path.join(d, "iterators.md")).read())
+    out = {}
+    for m in re.finditer(r"\(define_mode_iterator\s+(\w+)\s*\[(.*?)\]\s*\)", t, re.S):
+        out[m.group(1)] = [x.lower() for x in re.findall(r'\(\s*(\w+)\s+"[^"]*"\s*\)|(\w+)', m.group(2)) for x in x if x]
+    return out
+
+
+def qualifiers(d):
+    t = open(os.path.join(d, "aarch64-builtins.cc")).read()
+    arrays = {m.group(1): re.findall(r"qualifier_(\w+)", m.group(2))
+              for m in re.finditer(r"(aarch64_types_\w+_qualifiers)\[SIMD_MAX_BUILTIN_ARGS\]\s*=\s*\{(.*?)\};", t, re.S)}
+    return {m.group(1): arrays[m.group(2)] for m in re.finditer(r"#define TYPES_(\w+) \((aarch64_types_\w+_qualifiers)\)", t)}
 
 
 def rows(d):
-    pat = open(os.path.join(d, "iterators.md")).read()
-    m = re.search(r'\(define_int_attr fcvt_pattern \[(.*?)\]\)', pat, re.S)
-    attr = re.findall(r'\(UNSPEC_FRIN\w+ "(\w+)"\)', m.group(1))
+    attr = re.findall(r'\(UNSPEC_FRIN\w+ "(\w+)"\)', re.search(r'\(define_int_attr fcvt_pattern \[(.*?)\]\)', open(os.path.join(d, "iterators.md")).read(), re.S).group(1))
     assert sorted(attr) == sorted(ROUND), attr           # the iterators.md attribute is exactly the rounding set
+    its, quals = iterators(d), qualifiers(d)
+    row = re.compile(r"^\s*(VAR1|BUILTIN_\w+)\s*\((\w+),\s*(\w+),\s*\d+,\s*\w+(?:,\s*(\w+))?\)")
     out = []
     for n, line in enumerate(open(os.path.join(d, "aarch64-simd-builtins.def")), 1):
-        r = ROW.match(line)
+        r = row.match(line)
         if not r:
             continue
-        kind, q, base, mode = r.groups()
-        m2 = re.fullmatch(r"l(btrunc|round|ceil|floor|frintn)(u?)((?:v\d+)?[sdh][fi])", base) if base.startswith("l") else None
-        m3 = re.fullmatch(r"fix(uns)?_trunc([sdh]f)", base)
-        if m2:
-            rd, uns = ROUND[m2.group(1)], m2.group(2) == "u"
-        elif m3:
-            rd, uns = "TRUNC", bool(m3.group(1))
+        kind, ty, base, mode = r.groups()
+        if base.startswith("l") and re.fullmatch(r"l(btrunc|round|ceil|floor|frintn)u?(v\d+)?[sdh]f", base):
+            rd = ROUND[re.match(r"l(btrunc|round|ceil|floor|frintn)", base).group(1)]
+        elif re.fullmatch(r"fix(uns)?_trunc[sdh]f", base) or re.fullmatch(r"fcvtz[su]((v\d+)?[sdh]f)?", base):
+            rd = "TRUNC"
         else:
             continue
-        # the tail of a pattern name: a vector float mode (v2sf ...) or a scalar float mode (hf, sf, df): a float source, so the row is a conversion
-        assert (q == "UNOPUS") == uns, (n, line)         # the qualifier and the pattern agree
-        modes = [mode] if kind == "VAR1" else ITER[kind.replace("BUILTIN_", "")]
+        q = quals[ty]
+        sig = "".join("u" if x == "unsigned" else "p" if x == "poly" else "s" for x in q)
+        uns = q[0] == "unsigned"
+        shift = "immediate" in q or "maybe_immediate" in q
+        modes = [mode] if kind == "VAR1" else its[kind[len("BUILTIN_"):]]
         for md in modes:
-            out.append(("__builtin_aarch64_" + base + md, rd, uns, n))
+            nm = "__builtin_aarch64_" + base + md + ("_" + sig if "u" in sig or "p" in sig else "")
+            out.append((nm, rd, uns, shift, n))
     return out
 
 
 def text(d):
-    t = ["// generated by gen_f2i_builtins.py from gcc-13.3.0 gcc/config/aarch64/aarch64-simd-builtins.def and iterators.md; do not edit",
-         "// {registered builtin name, rounding, unsigned result, .def line}"]
-    for nm, rd, uns, n in rows(d):
-        t.append('{"%s", RND_%s, %s, %d},' % (nm, rd, "true" if uns else "false", n))
+    t = ["// generated by gen_f2i_builtins.py from gcc-13.3.0 gcc/config/aarch64/{aarch64-simd-builtins.def,aarch64-builtins.cc,iterators.md}; do not edit",
+         "// {registered builtin name, rounding, unsigned result, fixed-point shift operand, .def line}"]
+    for nm, rd, uns, sh, n in rows(d):
+        t.append('{"%s", RND_%s, %s, %s, %d},' % (nm, rd, "true" if uns else "false", "true" if sh else "false", n))
     return "\n".join(t) + "\n"
 
 
