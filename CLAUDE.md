@@ -419,3 +419,15 @@ The owner's words: "делегируй остаток работы аккура�
     - toolchain mirror reproducibility;
     - IKOS;
     - any census of numbers that did not change.
+- **Correctness never switches off a fast path (owner, 2026-11-14).** The owner's words: "Очень хотелось бы сразу классом
+  оптимизаций это закрывать. Иначе получится, что мы просто так ухудшили производительность и забили".
+  - A correctness rule is met by giving the fast path itself the exact semantics, by a rule over the whole class:
+    a plugin rewrite, an exact helper, or a proof of range. Turning the fast path off is not the way. That covers
+    SIMD, the vectorizer, an intrinsic, inline asm and a library's optimized path.
+  - A switch-off that a green trunk needs before the class rule exists is recorded in `verify/PERFDEBT.json`. Each
+    entry names the class rule that restores the fast path and its owner. The entry and the switch-off are deleted in
+    the same commit that lands the rule. PERFDEBT stays at 0 when the first frame is measured.
+  - First entry: `MINIMP3_NO_SIMD` (audio/dshow_filters.cpp, L5). The restoring rule is L2's: `fnvnx_ftoi` rewrites
+    every explicit target float→int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact. In range it
+    converts; out of range or NaN it gives x86 integer-indefinite (cvttps2dq semantics). Then fpexact certifies the
+    NEON path and the switch is removed.
