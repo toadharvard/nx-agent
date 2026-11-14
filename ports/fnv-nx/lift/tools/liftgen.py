@@ -32,7 +32,7 @@ def resolved_flags(driver='aarch64-linux-gnu-g++', kind='cxx'):
     sys.path.insert(0, os.path.join(LIFT, '..', 'verify'))
     import recipe as R
     rec = json.load(open(os.path.join(LIFT, 'pack', 'build.json')))
-    return R.semantics_for(driver, kind) + list(rec['flags'][kind])
+    return R.semantics_for(driver, kind, origin='lifted') + list(rec['flags'][kind])
 ROOT = 'ports/fnv-nx/lift/pack'
 EH_KEYS = ((0x000fffd0, 'fnvl_msvcrt_eh_nested_catch'), (0x000fffe0, 'fnvl_msvcrt_eh_nested_collide'))    # rt/msvcrt.h FNVL_EH_KEY_*: the two handlers the msvcrt EH runtime registers on fs:[0]
 G = {}
@@ -231,12 +231,12 @@ def finish(a):
 def recipe(ref, commit, tree):
     """lift/pack/build.json. The recipe is the one definition of the semantic flags (verify/guest_compiler.json flags.semantics, appended to every guest compile stage), so
     the build.json holds only the per-root classes (PACK_ROOT_FLAGS; recipe.PER_ROOT: -O, -W, -D, -std ...), and the plugins are the full set of recipe.PLUGIN_SOURCES in
-    load order with recipe.LIFTED_ARGS where it names a plugin (a lifted root: fnvnx_ftoi mode lifted), recipe.PLUGIN_ARGS otherwise; the units are the fixed names."""
+    load order with recipe.plugin_args(origin) of the pack's declared lifted origin (fnvnx_ftoi mode lifted); the units are the fixed names."""
     sys.path.insert(0, os.path.join(LIFT, '..', 'verify'))
     import recipe as R
     keep = lambda fl: [f for f in fl if R.PER_ROOT.fullmatch(f)]
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
-    args = dict(R.PLUGIN_ARGS, **R.LIFTED_ARGS)
+    args = R.plugin_args('lifted')
     plugins = []
     for n, src in R.PLUGIN_SOURCES.items():
         pl = {'name': n, 'source': src, 'args': args[n]}
@@ -244,7 +244,7 @@ def recipe(ref, commit, tree):
         plugins.append(pl)
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
-           'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugin_cxx': 'x86_64-linux-gnu-g++-13', 'plugins': plugins,
+           'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
