@@ -212,6 +212,38 @@ k, f = jh([oh], cover=cglob, tables={"emit": TB["emit"]})
 check("H: the same handler with no table anywhere in the root is red", ("emit_glob", "V") in k, f)
 k, f = jh(otab)
 check("H: a handler with a real body (emit_mov) raises nothing", all(n != "emit_mov" for n, _ in k), f)
+# the `handler` column (the render owner's generated join key) is a claim checked against the object: it must agree with the table, and name a defined function
+COVER_H = "slot\tid\topnum\top\thandler\tclass\tcovering\tevidence\n"
+HC = ("emit\tsm:ps:nop\t0\tNOP\temit_nop\ta\t-\tev\nemit\tsm:ps:dcl\t1\tDCL\temit_dcl\tb\temit_mov\tev\nemit\tsm:ps:nop\t4\tNOP2\temit_nop\ta\t-\tev\n"
+      + "".join("args\tsm:ps:nop\t%d\tNOP\tparse_args_null\ta\t-\tev\n" % i for i in range(5)))
+
+
+def jhh(cover, **kw):
+    N[0] += 1
+    r = objstub.read_handler_records(write("hc%d.tsv" % N[0], COVER_H + cover), write("hs%d.tsv" % N[0], SYN_HEAD + GOOD_S))
+    return judged(otab, records=r, tables=TB, **kw)
+
+
+k, f = jhh(HC)
+check("H: rows with a handler column that agrees with the table and names defined functions certify as without it", {n for n, kk in k if kk == "V"} == {"emit_pad", "emit_orphan"}
+      and not [x for x in f if x[2] == "handler-missing"], f)
+k, f = jhh(HC.replace("NOP\temit_nop\ta", "NOP\temit_mov\ta", 1))
+check("H: a row whose handler column names another function than the table entry holds is red", ("emit_nop", "V") in k and any("names handler" in x[3] for x in f if x[1] == "emit_nop"), f)
+k, f = jhh(HC.replace("DCL\temit_dcl", "DCL\tMISSING:emit_dcl"))
+check("H: a MISSING row is the finding handler-missing", any(x[2] == "handler-missing" for x in f), f)
+k, f = jhh(HC.replace("DCL\temit_dcl", "DCL\temit_ghost"))
+check("H: a row whose handler is not a function of the objects is the finding handler-missing", any(x[2] == "handler-missing" and "emit_ghost" in x[3] for x in f), f)
+k, f = jhh(HC.replace("NOP\temit_nop\ta", "NOP\temit_nop+emit_mov\ta", 1))
+check("H: a `+` clone list that contains the table's function is accepted", ("emit_nop", "V") not in k, f)
+# class c: an empty handler is red; the handler that calls fnvnx_reach_violation with a certified fact is the reach gate's and is green
+RT = TABLE.replace("int emit_orphan", "void fnvnx_reach_violation(unsigned) __attribute__((noreturn));\nstatic void emit_res(void *c) { (void)c; fnvnx_reach_violation(5); }\nint emit_orphan").replace(
+    "{\"nop2\", emit_nop, parse_args_null} };", "{\"nop2\", emit_nop, parse_args_null}, {\"res\", emit_res, parse_args_null} };")
+ores = build(RT, flags=G)
+CR = HC + "emit\ttable:RESERVED\t5\tRESERVED\temit_res\tc\t-\tev\nargs\ttable:RESERVED\t5\tRESERVED\tparse_args_null\tc\t-\tev\n"
+k, f = judged(ores, records=objstub.read_handler_records(write("cr.tsv", COVER_H + CR), write("cr-s.tsv", SYN_HEAD + GOOD_S)), tables=TB, facts={5})
+check("H: a class c handler that calls fnvnx_reach_violation with a certified fact is not a vacuous body", ("emit_res", "V") not in k, f)
+k, f = jh(otab, cover=GOOD_C.replace("emit\tsm:ps:nop\t0\tNOP\ta", "emit\ttable:RESERVED\t0\tRESERVED\tc"))
+check("H: a class c handler with an empty body is red", ("emit_nop", "V") in k, f)
 # records that do not parse are an error, not evidence
 for what, cover, syn, hdr in (("a class outside a|b|c|own|none", GOOD_C.replace("\ta\t-\tev", "\tz\t-\tev", 1), GOOD_S, None),
                               ("a row with a missing field", GOOD_C + "emit\tsm:x\t1\n", GOOD_S, None),
@@ -256,5 +288,9 @@ for what, kw in (("error_abi with another key", {"error_abi": {"fail": "f", "kin
                  ("empty_handlers with a path outside the repository", {"error_abi": {"fail": "f", "kind": "noreturn"}, "empty_handlers": dict(EH, syntax="../x.tsv")})):
     e = errs(**kw)
     check("recipe: %s is a check error" % what, any("error_abi" in x or "empty_handlers" in x for x in e), e)
+e = errs(error_abi={"fail": "f", "kind": "noreturn"}, empty_handlers=dict(EH, cover="CLAUDE.md"))
+check("recipe: empty_handlers.cover outside every admitted root is a check error", any("admitted root" in x for x in e), e)
+e = errs(error_abi={"fail": "f", "kind": "noreturn"}, empty_handlers=dict(EH, cover=D + "/build.json"))
+check("recipe: empty_handlers.cover in the root's own tree is a check error (the facts come from another admitted root)", any("admitted root" in x for x in e), e)
 print("%d FAILED" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

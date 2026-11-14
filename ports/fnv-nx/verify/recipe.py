@@ -628,6 +628,8 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append('empty_handlers must be {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE, "field": FIELD}}}: the generated op_cover.tsv and '
                        'op_syntax.tsv and, per slot, the instruction table (an array variable with DWARF) and the field of its entry that holds the handler')
         else:
+            err += ["empty_handlers.%s %r is not a file of an admitted root (the generated output of the root that produces it: admit.json)" % (k, eh[k])
+                    for k in ("cover", "syntax") if isinstance(eh[k], str) and not any(eh[k].startswith(r + "/") for r in roots if r != root)]
             err += ["empty_handlers.%s %r is not a tracked file of the repository" % (k, eh[k]) for k in ("cover", "syntax")
                     if not (isinstance(eh[k], str) and eh[k] in files and not eh[k].startswith("/") and ".." not in eh[k].split("/"))]
         if ea is None:
