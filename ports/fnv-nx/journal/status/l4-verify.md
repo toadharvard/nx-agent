@@ -134,3 +134,10 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - w6 6073fefe1: assume_violation removed (bootrt defines 4 symbols; test_bootrt 8 cases). Its symbol list still came from a scratch compile; that report crossed my correction, so the recipe build output is the one that counts. The include-rule answer (hostabi host variant) is with w6.
 - w6: 228ac3cfe (hostabi host variant) and 2c094147d (boot_job GATE_CACHE required). bootrt is still red: (1) this lineage's recipe.py does not count a declared variant as an include home (asked L1); (2) hostabi's generator manifest/gen_wire_errno.py is missing on this lineage (asked L5 which commit carries it). test_boot_job not yet run.
 - bootrt unblock plan, sent to w6 (doing): rebase w6-r onto L1 w15c 1cac05621 (per-target recipes 59c99074f) and merge L5 platform-root 0cdafb322 (hostabi + manifest/ as one unit, replacing the stale 422b4bd6). hostabi's host recipe goes into admit.json in per-target form, header-only. L1 named e76474afe as L5's head, but L5's own 0cdafb322 is taken. L5 a44acb71f follows.
+- w7 task I done (w7-i eafa4fd97), reviewed and accepted:
+  - N cores, ideal-core placement, priority/FIFO per core, rounds of Q instructions at block boundaries; Q required, recorded in OUT.json machine{} and meta.json; per-core stats in run.cores.
+  - test_bootcores 24 PASS; bootstart 63, bootinputs 75, icount 12, bootmiles 56, oracle 83 PASS.
+  - Not run (need the verdict host): boot, bootmachine, boot_job, bootgpu, bootheap, bootunmap, bootthreadcpu, lockobs. Assigned to w6.
+  - Follow-up for w7: N = FNVNX_NPROC and main = FNVNX_DEFAULT_CORE by name.
+- L5 root 99c9fedc0 (ec9e4eb0a: FNVNX_NPROC, host slot cpu_count removed) replaces 0cdafb322 in w6's base. w6 then merges w7-i. Told w10 to cherry-pick d228e59d8 (fn 38) for check_hostapi.
+- w7 task K (S4/S5 onto L1 w24 facts) is running, on w7-k off eafa4fd97.
