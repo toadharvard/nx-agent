@@ -69,3 +69,14 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; session_01KmtZKURk
 - 09:25Z w6-r 855c7d5e on rt/guest 03a374cb: bootguest moved (crt0/hostapi/sockwire copies and hand-written entry/relocate/fnvnx_host deleted; HOSTABI_DIR; build.json on rt/guest+platform link.roots, 44 variants). recipe check red on 3 L1 items, sent: link.script must be a root file (recipe.py:379; rule: allow a tracked file of an admitted tool root), under() :541 defect, the lib set's source (one fact of the product link). rt/guest cold build running for the nm list.
 - 09:28Z rt/guest 03a374cb built by w6 through recipe.py (verdict env): cold 19 run/0 hit, warm 0 run/19 hit, green; global symbol list sent to L5 w14. bootguest's own names (marker, fnvboot_*, t_acquire/t_try/t_release, main) are not among them; the full intersection against rt/guest+platform waits on L1's link.script rule.
 - 09:30Z L1: link script + libs become one fact link/guest.json (L1 w12 on 6d3a2800); guest roots declare neither (declaring is red); libs from the fnvnx-a64 external via the same profile for product and tests; ldcheck under() fix = L1 w14 w14-src2 on 6d3a2800. w6 waits for both, then drops link.script/libs from bootguest/build.json and rebases.
+
+## Path plan 2026-11-14 (binding; integration branch 21b10f1aa; CLAUDE.md merged at fa0390bd)
+
+| item | worker | status |
+|---|---|---|
+| 4.1 bootguest on rt/guest with link/guest.json; images define no product symbol (fnvnx_host) | w6 session_01KmtZKSWZWnNyxn2dMg6oFE | doing: merge L1 w12g 65a7d01c + L1 w14-src2 088f079a + L5 w14-rt onto w6-r 11ac61ed; then recipe check, cold/warm build, nm ∩ = ∅, boot test counts. None of the three is on the trunk a5c8f427 yet |
+| 4.2 prep: milestone observables (exe-entry and WinMain exist; first-frame = GL backend's first present; main-menu row kind; every frame per-thread instructions in OUT.json "frames") | w7 session_01KmtZKSVNKxeFQnmt4i24aF | doing (claude/fnv-l4-verify-w7-f). main-menu address: blocked, fact owner L2 (N1 table), asked via orchestrator; contract row emitted by L1 link/milestones.py |
+| 4.2 boot of the product ELF | - | blocked: the ELF (3.4 L3a) |
+| 4.3 boot GL from the recipe gl4 root; Mesa pin 25.2.8-0ubuntu0.24.04.4 confirmed | - | blocked: L6A 3.7 gl4 root |
+
+Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3 kept). lib/sha256 task A dropped from L4's queue (L6A 3.7 carries it). No boots of old-lineage ELFs.
