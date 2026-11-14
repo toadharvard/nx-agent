@@ -49,7 +49,7 @@ typedef struct FnvnxHostApi {
                                       The new thread calls the guest function entry(arg) (u64 arg) and ends
                                       when it returns. prio: Win32 scale -15..15; cpu: -1 default placement,
                                       0..63 that core only, FNVNX_THREAD_ROLE(r) the placement role r
-                                      (toolchain/host/placement.h). Not started. The id is a table handle
+                                      (fnvnx/placement.h). Not started. The id is a table handle
                                       ((generation << 16) | slot, host_ids.inc), never an address; at most 1024
                                       live thread and directory ids together: 0 when the table is full. */
     uint64_t thread_start;         /* (id) -> 0 or Result; an id that names no live thread -> FNVNX_HE_NOTFOUND; a thread that is already
@@ -309,7 +309,7 @@ typedef struct FnvnxHostApi {
  * 37 UNMAP_RANGE       n=2  0 | 0x1759 (size 0, addr+size wraps, addr or size not 4 KiB aligned) | 0xD401 (the range is not inside a window the host
  *                            claimed at start, or a page of it was not mapped by map_fixed: nothing done)
  *  test:unmap_range
- * 38 THREAD_CPU        n=0  the core index the calling thread runs on (svcGetCurrentProcessorNumber), no failure
+ * 38 THREAD_CPU        n=0  the index of a core in the calling thread's affinity mask, the one it runs on at the call; always succeeds
  *  test:thread_cpu
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.
  *
@@ -433,11 +433,10 @@ typedef struct FnvnxHostApi {
  * or a page of it not mapped by map_fixed -> FNVNX_HE_RANGE, nothing done (no fake success). Else every page returns to the window's free
  * state (any protection VM_PROTECT gave it is dropped) and the next map_fixed of it yields fresh zeroed memory. No fault emulation. */
 #define FNVNX_PLAT_UNMAP_RANGE 37u
-/* THREAD_CPU () -> the index (0..3) of the CPU core the CALLING thread runs on at the instant of the call; always succeeds. The Switch host's
- * body is libnx svcGetCurrentProcessorNumber (svc.h: "Gets the CPU core the calling thread runs on"); the boot machine answers the core its
- * own thread model runs that guest thread on. The value is advisory by nature (the scheduler may move the thread at once): it is the answer
- * POSIX sched_getcpu documents ("the number of the CPU on which the calling thread is currently executing"), which rt/guest's sched_getcpu
- * returns. */
+/* THREAD_CPU () -> the index of a core in the calling thread's affinity mask, the one it runs on at the call (Switch:
+ * svcGetCurrentProcessorNumber). Each thread's (ideal, mask) is fnvnx_place_ex's at thread_create and thread_set_cpu's after
+ * (fnvnx/placement.h). A host with a deterministic thread model (the boot machine) answers the thread's current ideal core. Always
+ * succeeds. */
 #define FNVNX_PLAT_THREAD_CPU 38u
 typedef struct FnvnxTzAt {
     int32_t off_s;      /* local = UTC + off_s */
@@ -445,8 +444,8 @@ typedef struct FnvnxTzAt {
     char abbr[8];       /* the zone's abbreviation then, NUL-terminated */
 } FnvnxTzAt;
 
-/* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
- * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
+/* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the table of
+ * fnvnx/placement.h gives each an ideal core, an affinity mask and a priority. */
 enum {
     FNVNX_ROLE_DEFAULT = 0,       /* game threads without a role of their own (Havok, ...) */
     FNVNX_ROLE_MAIN = 1,          /* the main thread */
