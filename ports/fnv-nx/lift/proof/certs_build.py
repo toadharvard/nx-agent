@@ -35,7 +35,10 @@ LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
 from proof import prove, shape, symform  # noqa: E402
 
-HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\n'
+HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\n'
+
+def _lst(x):
+    return ','.join(x) if x else '-'
 
 
 class Refused(Exception):
@@ -95,7 +98,7 @@ def scan(files):
     with open(os.path.join(HERE, 'formgate_inputs.json')) as fh:
         if json.load(fh)['model_sha256'] != model:
             raise Refused('formgate_inputs.json model_sha256 differs from the x86_proof.ir pin of sail_pins.txt')
-    proved, counts, status = {}, {}, {}
+    proved, counts, status, info = {}, {}, {}, {}
     for f, i, r in records(files):
         where = '%s:%d' % (f, i)
         res = r.get('result')
@@ -121,21 +124,23 @@ def scan(files):
             status[k3] = res
         if ok:
             proved[key] = r['dsl_sha']
-    return proved, counts, status
+            d0 = r.get('def0') or {}
+            info[key] = (_lst(r.get('obligations')), _lst(d0.get('undef_flags')), str(d0.get('witness', 0)), str(d0.get('free', 0)), _lst(d0.get('nonflag_free')))
+    return proved, counts, status, info
 
 
 def build(files):
     """-> (sorted rows, counts of results, notes).  Raises Refused."""
     model = pinned_model()
     md = shape.decoder()
-    proved, counts, status = scan(files)
+    proved, counts, status, info = scan(files)
     rows = {}
     for key, dsl in proved.items():
         rep = shape.rep_bytes(key)
         ins = list(md.disasm(rep, shape.ADDR))
         if len(ins) != 1 or ins[0].size != len(rep) or shape.shape_key(ins[0]) != key:
             raise Refused('the representative of %s is not the shape' % key)
-        rows[key] = '%s\t%s\t%s\t%s\tsail\tproved\n' % (key, shape.family(ins[0]), dsl, model)
+        rows[key] = '%s\t%s\t%s\t%s\tsail\tproved\t%s\n' % ((key, shape.family(ins[0]), dsl, model) + ('\t'.join(info[key]),))
     return [rows[k] for k in sorted(rows)], counts, status
 
 
@@ -164,7 +169,7 @@ def forms_of(shapes_path):
 
 def queue(shapes_path, files):
     """-> (queue id, [(key, shape_sha)] sorted): integer-family shapes of the shapes file with a symbolic Form and no valid certificate in the shards"""
-    proved, _, _ = scan(files)
+    proved, _, _, _ = scan(files)
     q = sorted((k, d) for k, d in forms_of(shapes_path).items() if proved.get(k) != d)
     h = hashlib.sha256(''.join('%s\t%s\n' % x for x in q).encode()).hexdigest()[:12]
     return h, q

@@ -10,7 +10,7 @@ Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); cert
 
 Universe: the ENCODING SHAPES of the lifted pack, whole: the rows `shape_key<TAB>family<TAB>count` of shapes.tsv (sorted by key, unique, family in
 int x87 simd sys) inside the external `liftpack`; the generate driver of the pack writes it with proof/shape.py:shape_key. The gate has no decoder
-of the exe and no census of its own. A shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result) has a row with
+of the exe and no census of its own. A shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result obligations undef_flags def0_witness def0_free nonflag_free) has a row with
 the same shape key, the dsl_sha that the CURRENT code gives (symform.shape_sha(key): sha256 of the symbolic Form, immediate / displacement /
 relative-target fields as variables; the same function the prover writes the field with; none when the shape has no symbolic Form: then the shape
 is uncertified), the pinned model_sha256 and result == proved. The hash binds the certificate to the builder code (forms*.py, dsl.py, symform.py)
@@ -158,14 +158,17 @@ def load_shapes(path):
     return out
 
 
+OBLIGATIONS = ("def0",)      # = prove.OBLIGATIONS (test_formgate checks it; this module imports no SMT solver): a row certifies only what the current prover checks
+
+
 def load_certs(path, model_sha):
     """{shape: set of dsl_sha} of the rows that are proofs against the pinned model"""
     ok = {}
     for r in rows(path):
-        if len(r) != 6:
+        if len(r) != 11:
             raise Red("certs.tsv: bad row %r" % "\t".join(r)[:100])
-        key, _, dsl, model, ref, res = r
-        if res == "proved" and model == model_sha and ref in REFERENCES:
+        key, _, dsl, model, ref, res, obl = r[:7]
+        if res == "proved" and model == model_sha and ref in REFERENCES and obl == ",".join(OBLIGATIONS):
             ok.setdefault(key, set()).add(dsl)
     return ok
 

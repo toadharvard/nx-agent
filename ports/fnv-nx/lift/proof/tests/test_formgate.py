@@ -61,7 +61,7 @@ class Fixture:
         for k, f in self.keys:
             if certs_for is not None and k not in certs_for:
                 continue
-            rows.append('%s\t%s\t%s\t%s\tsail\t%s\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result))
+            rows.append('%s\t%s\t%s\t%s\tsail\t%s\tdef0\t-\t0\t0\t-\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result))
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
         os.makedirs(os.path.join(td, 'art'), exist_ok=True)
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
@@ -307,6 +307,12 @@ class Cli(unittest.TestCase):
     def test_arguments_are_refused(self):
         r = subprocess.run([sys.executable, '-I', os.path.join(PROOF, 'formgate.py'), '--shapes', 'x'], capture_output=True, text=True, env={'GATE_OUT': '/'})
         self.assertEqual(r.returncode, 1)
+
+
+class ObligationsPin(unittest.TestCase):
+    def test_formgate_obligations_are_the_provers(self):
+        from proof import prove
+        self.assertEqual(formgate.OBLIGATIONS, prove.OBLIGATIONS)
 
 
 if __name__ == '__main__':

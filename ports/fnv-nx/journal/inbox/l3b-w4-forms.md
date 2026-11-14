@@ -201,3 +201,23 @@ shas are shared by the many shapes with one execute function.
 5. (K) closure-keyed certificates (§12), implement.
 6. Batched model-hunk IR bump: cmps order (G3), rol/ror count 0 and sar big-count CF (G1), enter + BCD six (D).
 Also open: G4 (shard 14/48, 27 keys fewer), (C) reached-site counts.
+
+## 14. Certificate input of gate_flags for DEF0 (w4, 2026-11-14)
+
+Until now certs.tsv carried six columns and no DEF0 data (def0 lived only in the shard jsonl records). It now carries 11, tab separated, one row per proved shape:
+
+| # | column | content |
+|---|---|---|
+| 1 | shape_key | shape key |
+| 2 | family | `int` |
+| 3 | dsl_sha | `symform.shape_sha(shape)` |
+| 4 | model_sha | pinned IR sha256 (ASM-009; from K on: closure_sha, §12) |
+| 5 | reference | `sail` |
+| 6 | result | `proved` (only proved rows are written) |
+| 7 | obligations | comma list of what the record certifies beyond the field equalities = `prove.OBLIGATIONS` = `def0` today. certs_build drops a record without it (`stale-obligations`); formgate treats a row whose list differs as uncertified |
+| 8 | undef_flags | flags the Form declares architecturally undefined (comma list, `-` if none). DEF0 certifies, for exactly these flags, that model[free := 0] == the constant 0 the lifter writes |
+| 9 | def0_witness | `0`: the value given to every free (undefined) model constant of the flag outputs |
+| 10 | def0_free | number of free model constants of the run (all outputs and side constraint) |
+| 11 | nonflag_free | non-flag outputs (register names, `mem`, `eip`) whose model term mentions a free value (comma list, `-` if none). Today a list only: DEFPRIOR (next item) turns it into "proved under DEFPRIOR" or FAILED |
+
+Rule for gate_flags: an output flag f of a site whose shape row has `f` in undef_flags is certified DEF0 (the lifted 0 refines the model); a flag in the Form's defined set is certified by the field equality, not by DEF0; a shape not in certs.tsv is uncertified. A non-empty nonflag_free is not certified by this record until DEFPRIOR lands. Per-record shard form (shapeprove_*.jsonl): `def0 = {undef_flags, witness, free, nonflag_free}`, `obligations = ["def0"]`.
