@@ -71,7 +71,7 @@ def toy_repo(tag, names, table, decl_extra=None):
     commit, thash = TR.publish("im-" + tag, manifest(names))
     ex = {"name": "manifest", "repo": "fnv-nx-build", "ref": "im-" + tag, "commit": commit, "tree_sha256": thash, "at": "/ext/manifest"}
     rec = dict(TR.RECIPE, external=[ex])
-    decl = {"format": "fnvnx-imports-in/1", "external": "manifest", "names": "sys_names.tsv", "specs": "specs", "extra": [], "extra_other": [],
+    decl = {"format": "fnvnx-imports-in/1", "names": {"external": "manifest", "path": "sys_names.tsv"}, "specs": {"external": "manifest", "path": "specs"}, "extra": [], "extra_other": [],
             "name_table": "msvcrt_names.tsv"}
     decl.update(decl_extra or {})
     return TR.make_repo("im-" + tag, rec=rec, files={"toy/imports.in.json": json.dumps(decl), "toy/msvcrt_names.tsv": table})
@@ -93,10 +93,10 @@ check("red: lookup entry without a proven symbol and an unserved msvcrt name", r
 repo = toy_repo("badtab", "msvcrt.dll\tmemcpy\n", "memcpy\tf_b\n")
 rc, g, txt, acc = run(repo, "badtab")
 check("bad name table is red with the reason", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
-repo = toy_repo("badin", "toy.dll\tf_a\n", "", {"extra": ["missing.tsv"]})
+repo = toy_repo("badin", "toy.dll\tf_a\n", "", {"extra": [{"external": "manifest", "path": "missing.tsv"}]})
 rc, g, txt, acc = run(repo, "badin")
 check("missing declared input is red", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
-repo = toy_repo("badext", "toy.dll\tf_a\n", "", {"external": "nonexistent"})
+repo = toy_repo("badext", "toy.dll\tf_a\n", "", {"names": {"external": "nonexistent", "path": "sys_names.tsv"}})
 rc, g, txt, acc = run(repo, "badext")
 check("declared external that the recipe lacks is red", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 repo = toy_repo("badkeys", "toy.dll\tf_a\n", "", {"bogus": 1})

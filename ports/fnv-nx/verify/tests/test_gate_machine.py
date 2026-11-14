@@ -43,7 +43,7 @@ def toy_repo(tag, sites, declared=DECL, seed=None, unit="seed.c", writers=None, 
     commit, thash = TR.publish("rg-" + tag, lambda d: open(d + "/regsites.tsv", "w").write(sites))
     ex = {"name": "manifest", "repo": "fnv-nx-build", "ref": "rg-" + tag, "commit": commit, "tree_sha256": thash, "at": "/ext/manifest"}
     rec = dict(TR.RECIPE, external=[ex])
-    decl = {"format": "fnvnx-registry-in/1", "external": "manifest", "sites": "regsites.tsv", "declared": "declared.tsv", "seed": "seed.inc",
+    decl = {"format": "fnvnx-registry-in/1", "sites": {"external": "manifest", "path": "regsites.tsv"}, "declared": "declared.tsv", "seed": "seed.inc",
             "seed_unit": unit}
     decl.update(decl_extra or {})
     files = {"toy/registry.in.json": json.dumps(decl), "toy/declared.tsv": declared,
@@ -77,7 +77,7 @@ check("writer outside the seed unit: red", rc == 2 and g["status"] == "red" and 
 rc, g, txt = run(toy_repo("unread", SH, seed=""), "unread")
 check("declared row with no read site: red", rc == 2 and g["status"] == "red" and "no-read-site" in open(TR.BASE + "/o-unread/machine.ids").read(), (g, txt))
 
-for tag, kw in (("badkeys", {"decl_extra": {"bogus": 1}}), ("badext", {"decl_extra": {"external": "nonexistent"}}), ("badpath", {"decl_extra": {"sites": "nope.tsv"}})):
+for tag, kw in (("badkeys", {"decl_extra": {"bogus": 1}}), ("badext", {"decl_extra": {"sites": {"external": "nonexistent", "path": "regsites.tsv"}}}), ("badpath", {"decl_extra": {"sites": {"external": "manifest", "path": "nope.tsv"}}})):
     rc, g, txt = run(toy_repo(tag, SH + READ, **kw), tag)
     check("bad registry.in.json (%s) is red with the reason" % tag, rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 
