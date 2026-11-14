@@ -447,3 +447,8 @@ Paused: w3b, w4, farm; no other work.
 - 23:27Z Header homes: render/backend (w6 root) is a second, older home of the nxgpu headers; 3 of its 4 differ from render/nxgpu@eb482552.
     - w6 drops the render/backend root and points render/d3d9 at render/nxgpu once L6A's 3.7 head lands (option a).
     - L5's 24 assumption mentions are fixed on its line (9614b11d).
+- 23:28Z sm_link (w5 a6197ced2).
+    - L1 conventions: gates.d/sm_link.json; certificates are content-keyed recipe-stage outputs in GATE_CACHE.
+    - Blocked on the host variant (w1b on L1 w15c) and on the Mesa pin's form as a recipe input (question to L4).
+    - Meanwhile w5 writes the signature argument and the static variant universe (doing).
+    - L1 w22 fixes the assumptions LEXER for .glsl/.in.
