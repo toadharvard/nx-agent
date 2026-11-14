@@ -56,6 +56,18 @@ INPUT FACTS AND RULES.
          the object the address points into; this is what lets a derived frame address (tag X) be judged by its origins.
  STACK   input fact: an sp/x29-relative access with an immediate offset lies in the thread's own stack frame; the frame size is
          the CFA-relative sp that this gate computes from the instructions (FRAME FACTS above).
+ BR      rule: an indirect `br xN` at sp == CFA (the frame already popped), with N not x30 and no relocation or ADR into the function's own
+         range, leaves the function (a tail call): no edge, and x0-x8 escape as at a call. Any other `br` may go to any instruction: it gets an
+         edge to every instruction (promoted until the fixpoint is stable). Soundness: with sp == CFA the callee's frame is the caller's caller's, the
+         function has no further instruction to run; a `br` that is not provably such an exit is over-approximated by all targets.
+ LP      rule: an instruction that no edge reaches in the function is entered with the state of the call that unwinds to it (a landing pad:
+         callee-saved registers and sp as at the call). The entries are the unreached instructions and every unreached source SCC, found by Tarjan.
+         Soundness: control reaches an instruction only by an edge of the CFG or by an unwind from a call (the only transfer not shown by an
+         instruction); an unwind restores sp to the frame of the function that catches, so sp is the call's sp, and x19-x28 are callee-saved.
+ KC      rule: `movz`/`movk`/`movn`/`mov` with an immediate give a register the constant tag ('K', v); `sub|add sp, sp, xN` with xN of that tag changes sp by
+         v. Soundness: the tag is the exact value of the register on every path that reaches the instruction (a join of different values drops it); a
+         constant is not an address, so it never counts as a frame-derived value.
+ D       rule (dominance; the prologue home-slot store is its forward form): see Func.unshared.
  ROBND   input fact: a load through a read-only base register plus an index stays inside the object; the read-only sections and
          their objects are those of objects.json (the object's section table, flags without SHF_WRITE and PT_GNU_RELRO).
  RUN     part of rule R9 (docs/ORDERING.md, "Everything else is ordered", aggregates on the dmb fence path): the loads of one run
