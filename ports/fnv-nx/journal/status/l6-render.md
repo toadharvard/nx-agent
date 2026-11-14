@@ -474,3 +474,15 @@ Paused: w3b, w4, farm; no other work.
     - The certificates are a hermetic generator stage, keyed by the shaders tree b545961f, translator@host and the Mesa pin. They are stored in GATE_CACHE/store.
     - The argument must list every cross-stage check from the Mesa source, with the counts of classes and pairs.
     - Mesa is a declared pinned external (w5).
+- 23:29Z L6A 64c8851d (claude/fnv-l6a-deko-w6-gl4w15c) landed.
+    - render/nxgpu holds the 3 ABI headers plus state.h, with host and guest recipes. nxgpu@guest builds 1/1 green.
+    - d3d9total reads render/nxgpu: 332/332, identical findings.
+    - w6 task: rebase onto it, remove the render/backend root, point render/d3d9 at render/nxgpu, merge w1b 708d3638, then build cold and warm (doing).
+- 23:29Z w5 5119a412f SM_LINK_RULE.md draft accepted.
+    - The Mesa 25.2.8 linker is NIR-based (gl_nir_*). The Ubuntu patches leave it untouched.
+    - The signature is D+U+B+S+C, read two ways. Of the 13 cross-stage checks, all are functions of the signatures.
+    - Decided:
+        - the FFP programs are in the universe, from the generator's own state key;
+        - whether EPI reaches a declaration is decided by the emission grammar;
+        - Mesa is a pinned fnv-nx-build mirror (L4).
+    - Next: the tool root and the first measurement on the w1b 708d3638 host variant.
