@@ -34,14 +34,12 @@ n = len([l for l in open("/in/ports/fnv-nx/toy/constants.tsv") if l.strip()])
 os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
 '''
-# The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
-# the product's own crt0 (toolchain/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
-# FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_guest_entry, the entry every
-# guest program defines (in the product, runtime.c); the toy's program entry is f_a. The header is OS-layer code (os.S, an os_layer unit);
+# The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld, with
+# the FNXG header of crt0 at the first segment + 8 and the entry at the first segment. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = (open(os.path.join(VERIFY, "..", "toolchain", "guest", "crt0.s")).read()
-        + "\n.text\n.global __fnvnx_guest_entry\n.set __fnvnx_guest_entry, f_a\n")
-OS_NOLINK = ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n"
+CRT0 = (".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n"
+        ".section .crt0.hdr,\"a\",%progbits\n.align 2\n.global __fnvnx_guest_hdr\n__fnvnx_guest_hdr:\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
+        ".section .crt0.mod0,\"a\",%progbits\n.align 2\n.global __fnvnx_mod0\n__fnvnx_mod0:\n .ascii \"MOD0\"\n")
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
           "flags": {"c": ["-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
@@ -54,7 +52,7 @@ FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
     "toy/c.c": '#include "toy.h"\nint f_c(int x) { return x + TOY; }\n',
-    "toy/os.S": CRT0 + OS_NOLINK,
+    "toy/os.S": CRT0 + ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
     "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
@@ -86,10 +84,7 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    fs = dict(FILES, **(files or {}))
-    if (rec or RECIPE).get("link") is None and "toy/os.S" not in (files or {}):
-        fs["toy/os.S"] = OS_NOLINK   # crt0 is the entry of a link (guest.ld): a root that links no ELF carries no crt0
-    for k, v in fs.items():
+    for k, v in dict(FILES, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     for f in LINK_TOOLS:
@@ -401,7 +396,7 @@ def main():
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
     # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
-    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64"), files={"toy/os.S": FILES["toy/os.S"]}), ROOT, SS, BASE + "/out64")
+    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64")), ROOT, SS, BASE + "/out64")
     print("INFO toy LP64 build %.1f s, stages %s" % (time.time() - t0, r64.get("stages")))
     check("toy root builds green: ILP32 objects and ELF are ELF32, the LP64 objects are ELF64 (and no ELF)",
           r64["status"] == "green" and len(r64["objects"]) == 4 and r64["elf"] is None
@@ -443,6 +438,26 @@ def main():
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # per-target recipes: the root hdr_other (the other target) with a recipe for this root's target too is a home; without it, none
+    both = recipe.norm_entry({"path": T + "hdr_other", "class": "product", "target": other, "recipe": {other: T + "hdr_other/b.json", own: T + "hdr_other/b2.json"}})
+    check("a per-target recipe {guest, host} parses to the base string plus a variant keyed by the other target",
+          both["recipe"] == T + "hdr_other/b.json" and both["variants"] == {own: {"target": own, "recipe": T + "hdr_other/b2.json"}}
+          and recipe.targets_of(both) == {own, other} and recipe.pairs_of({}, "r", both) == ["r", "r@" + own], both)
+    check("the spelling as a variant parses to the same structure",
+          recipe.norm_entry({"path": "x", "target": other, "recipe": "b.json", "variants": {own: {"target": own, "recipe": "b2.json"}}})["variants"]
+          == recipe.norm_entry({"path": "x", "target": other, "recipe": {other: "b.json", own: "b2.json"}})["variants"])
+    rr3 = dict(rr, **{T + "hdr_other": both})
+    pt = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_other"]), ROOT, rfiles, rr3, None, rk) if "lies in no admitted product root" in e]
+    check("an include into a root with a recipe for the including root's target is accepted", not pt, pt)
+    check("the same include without that recipe is rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("a plain-string recipe parses to itself", recipe.norm_entry({"path": "x", "target": own, "recipe": "b.json"}) == {"path": "x", "target": own, "recipe": "b.json"})
+    # every per-target rule judges the effective entry: the plugin rule of a variant follows the variant's target, not the base's
+    noplug = dict(RECIPE, plugins=[])
+    pe = lambda tg, vt, var: [e for e in recipe.plugin_errors(noplug, ROOT, rfiles, {ROOT: dict(base_roots[ROOT], target=tg, variants={"v": {"target": vt}})}, ["a.cc"], [], var)  # noqa: E731
+                              if "does not load plugin" in e]
+    check("plugins: a guest root without plugins is red; its host variant is green; a host root's guest variant is red",
+          len(pe("guest", "host", "")) > 0 and pe("guest", "host", "v") == [] and pe("host", "guest", "") == [] and len(pe("host", "guest", "v")) > 0,
+          (len(pe("guest", "host", "")), pe("guest", "host", "v"), pe("host", "guest", ""), len(pe("host", "guest", "v"))))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]

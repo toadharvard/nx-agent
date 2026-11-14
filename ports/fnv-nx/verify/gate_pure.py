@@ -60,8 +60,7 @@ def entries(roots):
     out, errs = set(), []
     for r in roots:
         out |= {os.path.normpath(e) for e in r.get("entry", []) if isinstance(e, str)}
-        rec = r.get("recipe")
-        if rec:
+        for rec in gate_admit.recipe_paths(r):
             try:
                 for g in json.load(open(rec)).get("generated", []):
                     out.add(os.path.normpath(g["tool"]))
