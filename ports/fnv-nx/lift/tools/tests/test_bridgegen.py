@@ -3,10 +3,10 @@
 output: R/g,h copy the registers into the result; H/m pass the result's address as the x86 hidden pointer and return it; H/g,h the same, the native
 registers being the local's value; R/m load eax:edx into a temporary returned through x8 (the local). Each combination has its own expectation, the rejects
 (a size that is no x86 register size with X = R, a hidden pointer under fast for 1, 2, 4, 8 bytes, the old m<N> / trailing x forms) are build errors.
-Run: python3 -B lift/test/bridgegentest.py   exit 0 on pass."""
+Run: python3 -B lift/tools/tests/test_bridgegen.py   exit 0 on pass."""
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
+sys.path.insert(0, os.path.join(HERE, '..'))
 import bridgegen
 
 bad = 0

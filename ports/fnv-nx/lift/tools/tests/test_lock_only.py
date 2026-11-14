@@ -5,7 +5,7 @@
   locked add) raises at the emitter; a plain accessor of every kind inside LK_BEGIN fails to compile. The accessor list is read from rt/fnvl.h (every `#define M..(a)` that is a guest accessor).
   Needs aarch64-linux-gnu-g++.   lock_only_test.py [--work DIR]"""
 import os, re, subprocess, sys
-LIFT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools'))
 import fnvlift as L, liftgen
 from fnvlift import core, f_dsl, dsl

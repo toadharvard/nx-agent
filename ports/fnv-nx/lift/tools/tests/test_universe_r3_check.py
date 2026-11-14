@@ -7,12 +7,12 @@ every byte of the executable sections exactly once (contiguous runs, no UNEXPLAI
 (entries whose lift raises Unsupported are counted by reason class and do not enter (c); --no-c skips it). Prints counts only. Exit 0 iff all hold."""
 import os, sys, re, multiprocessing as mp
 from collections import Counter
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'tools'))
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.dirname(HERE))
 import json, pemod
 EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
 def lift_part(arg):
     """worker: lift entries[k::n] -> (missing target -> number of entries naming it, reason class -> count, entries lifted, direct targets seen)"""
-    fd, k, n = arg; os.environ['FNVNX_UNIVERSE'] = fd + '/universe.tsv'; sys.path.insert(0, os.path.dirname(HERE))
+    fd, k, n = arg; os.environ['FNVNX_UNIVERSE'] = fd + '/universe.tsv'; sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
     import fnvlift as L
     img = L.Image(EXE); ent = [int(l.split('\t')[0], 16) for l in open(fd + '/universe.tsv') if l.strip() and not l.startswith('#')]; es = set(ent)
     miss = Counter(); why = Counter(); ne = Counter(); ok = seen = 0

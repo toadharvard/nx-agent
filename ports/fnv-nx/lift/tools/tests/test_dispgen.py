@@ -5,7 +5,7 @@ finds every key (its symbol) and sends every other address to fnvl_nobody.
 The lookup is rt.c fnvl_dispatch() re-read from the generated assembly text: i = ((a ^ g[(a*k1) >> (32-nbits)]) * k2) >> (32-tbits); a slot hits iff its key == a and its
 offset != 0. Prints one line per check; exit status 1 on any failure."""
 import os, random, subprocess, sys, tempfile
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
 import dispgen, phf
 M = 0xffffffff

@@ -10,7 +10,7 @@ Per module (file located by name, sha256 and size checked against modules.tsv; t
     L1's exports/<name>.tsv, the entry point (entry_rva) is an entry, and so is every TLS callback.
 Globally: no address is an entry of two images. Prints counts only. Exit 0 iff all hold."""
 import os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, LIFT); sys.path.insert(0, HERE)
 import pemod
 MODS = ['d3dx9_38.dll', 'binkw32.dll', 'libvorbis.dll', 'libvorbisfile.dll', 'd3dx9_31.dll', 'atimgpud.dll']

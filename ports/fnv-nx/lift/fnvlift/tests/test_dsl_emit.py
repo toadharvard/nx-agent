@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """f_dsl.emit_form (the C emitted from the proven DSL forms) over every instruction shape of FalloutNV.exe whose mnemonic the forms cover: each shape is
 decoded with zeroed immediate / displacement bytes (plus, for branches, a second copy with a non-zero relative target that lies outside the function),
-emitted as a one-instruction function and compiled (-fsyntax-only, the flags of test/instest.py).  Prints `shapes N emitted N compiled N`, and
+emitted as a one-instruction function and compiled (-fsyntax-only, the flags of test/instest.py (liftgen.resolved_flags)).  Prints `shapes N emitted N compiled N`, and
 `undef-assigned P`: the number of (mnemonic, flag) pairs where a form declares the flag undefined (no assignment is emitted) and the hand handler
 assigns it.  Input: the shape census table shapes.tsv of the exe (exe-derived, first column = shape key; '#' lines ignored: /home/user/l3work/publish-shapes/FalloutNV/shapes.tsv, made by proof/census.py).
     dsl_emit_test.py [--shapes P] [--jobs 2] [--work DIR] [--pairs]"""
 import argparse, multiprocessing as mp, os, re, subprocess, sys, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, HERE)
+LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'test'))   # instest: the shared harness of lift/test
 import capstone
 from capstone import x86 as X
 import fnvlift
@@ -86,7 +86,7 @@ def main():
     a = ap.parse_args(); os.makedirs(a.work, exist_ok=True)
     out, bad, undef = collect(a.shapes)
     chunks = [out[i:i + 300] for i in range(0, len(out), 300)]
-    with mp.Pool(a.jobs) as p: res = p.map(compile_tu, [(k, fnvlift.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')), c, a.work) for k, c in enumerate(chunks)])
+    with mp.Pool(a.jobs) as p: res = p.map(compile_tu, [(k, fnvlift.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'rt')), c, a.work) for k, c in enumerate(chunks)])
     ok = sum(r[0] for r in res); fails = [f for r in res for f in r[1]]
     nshapes = len(out) + len(bad)
     print('(%d of them the second, outside-target copy of a branch)' % sum(1 for f in out if f[1].endswith('+')))

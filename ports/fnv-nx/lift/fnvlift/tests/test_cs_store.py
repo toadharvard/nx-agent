@@ -3,7 +3,7 @@
 dlls/ntdll/signal_i386.c segv_handler, case TRAP_x86_PROTFLT); a load through CS is legal and emits no guard. Every write-capable form is covered by the operand's capstone access, not by a list.
     cs_store_test.py     (exit 0 = all pass)"""
 import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import capstone
 from fnvlift import core
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True

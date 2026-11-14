@@ -11,7 +11,7 @@ written here, from the documents, not from the generator: the fingerprint of the
 the pointer; nothing written past N bytes), and the esp after the return (the return address and the callee-popped stack words, or the return address alone for cdecl).
 Exit status 1 on any difference; 3 (BLOCKED) when the link has an undefined product symbol."""
 import argparse, os, random, struct, subprocess, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 for p in ('tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import bridgegen, exitgen
 

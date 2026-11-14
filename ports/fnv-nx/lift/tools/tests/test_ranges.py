@@ -2,7 +2,7 @@
 the exclusive sequence (kind 1: ldaxr .. cbnz) or the one store / the one bfxil (kind 2). Needs aarch64-linux-gnu-g++ (flags of the pack without the plugin attribute error).
     ranges_test.py [--work DIR]"""
 import os, re, subprocess, sys
-LIFT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools'))
 import fnvlift as L, liftgen
 

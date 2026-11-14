@@ -2,7 +2,7 @@
 (FSW_ST16 / FSW_AX / FNSTENV / FNSAVE) iff sites.site says status-word instruction, with the same form, and for every locked-instruction shape iff `lock_state` says locked (LK_BEGIN ... lk_commit).
     sites_test.py"""
 import os, sys
-LIFT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT)
 import capstone
 import fnvlift as L

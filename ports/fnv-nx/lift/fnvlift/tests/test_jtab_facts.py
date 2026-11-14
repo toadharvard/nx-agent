@@ -1,6 +1,6 @@
 """core.tab_tails takes jump-table slots only from the jtab_tables facts: positive (slots outside the range), negative (no record, red site, no facts -> Unsupported)."""
 import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from fnvlift import core
 from fnvlift.core import Unsupported
 
