@@ -6,10 +6,10 @@ The symbol column is a text census (a definition found by pattern in the test te
 with the rewrite. Counts are over the whole set.
 
 ## The set
-- 50 python files in lift test dirs (lift/*/tests/*.py, lift/test/*.py); 34 are tests/test_*.py (fnvlift 3, gates 5, proof 11, tools 15) and 1 more test (lift/test/import_reads_no_rt_test.py,
-  lift/test/modlift_closure_test.py are outside the gate naming); the remaining files are helpers of those tests.
-- selftests universe under lift: DIRs `lift`, `lift/proof`, `lift/gates`: 14 test files (proof 11 + gates 3 of 5 where the gate lists them; lift/tools/tests and lift/fnvlift/tests are NOT selftests DIRs, so
-  their 18 test files are neither run nor judged by oracle today).
+- 50 python files in lift test dirs (lift/*/tests/*.py, lift/test/*.py); 34 are tests/test_*.py (fnvlift 3, gates 4, proof 10, tools 17); lift/test/import_reads_no_rt_test.py and
+  lift/test/modlift_closure_test.py are 2 more tests outside the gate naming; the remaining files are helpers of those tests.
+- selftests universe under lift: DIRs `lift`, `lift/proof`, `lift/gates`: 14 test files (proof 10 + gates 4; lift/tools/tests and lift/fnvlift/tests are NOT selftests DIRs, so
+  their 20 test files are neither run nor judged by oracle today).
 
 ## Doubles, by kind
 1. Runs code under Unicorn (import unicorn): 11 files.
