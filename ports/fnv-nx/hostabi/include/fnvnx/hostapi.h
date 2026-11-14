@@ -98,7 +98,7 @@ typedef struct FnvnxHostApi {
                                       consumed) */
     uint64_t fs_dir_close;         /* (dir) -> 0; the id dies; an id that names no open directory: 0, nothing done */
 
-    /* ---- version 3: audio out and input (platform/audio, platform/input via toolchain/guest/platform_glue) */
+    /* ---- version 3: audio out and input (platform/audio, platform/input via platform/guest/platform_glue) */
     uint64_t audio_open;           /* (rate = 48000, period frames 1..8192) -> 0 or negative (int64 as u64); stereo PCM16.
                                       -1 rate != 48000 or period 0 or > 8192; -2 audren init failed; -3 driver create failed;
                                       -4 no memory for the pool; -5 renderer start failed. Already open: 0, arguments ignored */
@@ -330,7 +330,7 @@ typedef struct FnvnxHostApi {
  *    space, as for fs_read); 0 is the null pointer where "or 0" is said.
  *  - Result: an int64 in a uint64, value >= 0, or -errno with errno a WIRE number (sockwire.h FNVNX_WIRE_ERRNO_LIST,
  *    the Linux numbers). The guest translates wire errno into newlib's and the host translates its own into the wire
- *    ones, both by name, so nothing depends on two systems' errno numbers agreeing (a host errno that is not in the list is -EIO).
+ *    ones, both by name, so nothing assumes that two systems' errno numbers agree (a host errno that is not in the list is -EIO).
  *    Where a service below says "the platform's answer", the host passes the call to the console's bsd service (libnx) with the
  *    constants translated by name and returns its outcome: 0 / a count / a descriptor, or -(that errno mapped through the list),
  *    i.e. any value of FNVNX_WIRE_ERRNO_LIST the bsd service can produce; the host adds only the answers the service names. FNVNX_EXT_NO_MODULE is what a host

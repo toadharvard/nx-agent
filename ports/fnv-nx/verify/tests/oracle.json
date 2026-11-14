@@ -138,7 +138,7 @@
    "references": [
     {
      "kind": "contract",
-     "path": "ports/fnv-nx/verify/tests/guest/hostapi.h"
+     "path": "ports/fnv-nx/hostabi/include/fnvnx/hostapi.h"
     },
     {
      "anchor": "## verify/bootmachine.py",
@@ -428,6 +428,19 @@
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
+  "test_guest_flags.py": {
+   "references": [
+    {
+     "anchor": "## verify/guest_flags.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/guest_flags.py",
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_icount.py": {

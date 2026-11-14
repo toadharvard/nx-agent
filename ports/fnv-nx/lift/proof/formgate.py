@@ -52,7 +52,10 @@ HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class Red(Exception):
-    """a declared input is missing or invalid: the gate is red with this reason"""
+    """a declared input is missing or invalid: the gate is red with this reason; CODE is the finding class (fixtures, RECIPE.md "Fixtures")"""
+    def __init__(self, msg, code="forms-inputs"):
+        super().__init__(msg)
+        self.code = code
 
 
 def rows(path):
@@ -119,24 +122,30 @@ def fetch(exts, cache):
         return recipe.fetch_externals(exts, os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
     except recipe.BuildRed as e:
         f = e.args[0]
-        raise Red("external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]))
+        raise Red("external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]), "forms-fetch")
 
 
 def path_in(ext, name, rel, what):
     p = os.path.join(ext[name]["host"], rel)
     if not os.path.isfile(p):
-        raise Red("%s: %s is missing from external %s" % (what, rel, name))
+        raise Red("%s: %s is missing from external %s" % (what, rel, name), "forms-missing-shapes" if what == "pack" else "forms-certs-missing")
     return p
 
 
 def lifted_roots(repo):
     """-> [(root, pack external entry or None)] of the admitted product roots declared `cxx_origin` {"lifted_by", "pack"}, by path"""
     roots = recipe.load_admit(repo)
+    only = os.environ.get("GATE_ONLY_ROOT")      # a whole-root fixture (RECIPE.md "Fixtures"): the gate runs on that root alone
     out = []
     for path in sorted(roots):
         r = roots[path]
         o = r.get("cxx_origin")
-        if r.get("class") != "product" or not (isinstance(o, dict) and "pack" in o):
+        if only:
+            if path != only or r.get("class") not in ("product", "fixture"):
+                continue
+        elif r.get("class") != "product":
+            continue
+        if not (isinstance(o, dict) and "pack" in o):
             continue
         try:
             exts = recipe.load_recipe(repo, roots, path).get("external", [])
@@ -161,13 +170,13 @@ def load_shapes(path):
     out, last = {}, None
     for r in rows(path):
         if len(r) != 3 or r[1] not in FAMILIES or not r[2].isdigit():
-            raise Red("shapes.tsv: bad row %r" % "\t".join(r)[:100])
+            raise Red("shapes.tsv: bad row %r" % "\t".join(r)[:100], "forms-bad-shapes")
         if last is not None and r[0] <= last:
-            raise Red("shapes.tsv: not sorted by key, or a key twice, at %r" % r[0][:100])
+            raise Red("shapes.tsv: not sorted by key, or a key twice, at %r" % r[0][:100], "forms-bad-shapes")
         last = r[0]
         out[r[0]] = r[1]
     if not out:
-        raise Red("shapes.tsv: no shapes (a pack has entries)")
+        raise Red("shapes.tsv: no shapes (a pack has entries)", "forms-bad-shapes")
     return out
 
 
@@ -183,8 +192,13 @@ def load_certs(path, model_sha):
     return ok
 
 
+FINDINGS = []     # the findings of the last judge() as {"id": "<root>[:<item>]" or "inputs", "code": CODE}; written to forms.json (RECIPE.md "Fixtures")
+
+
 def judge(repo, cache, inputs=INPUTS, pins=PINS):
-    """-> (universe, certified, uncertified ids, detail); never raises for an input problem"""
+    """-> (universe, certified, uncertified ids, detail); never raises for an input problem. FINDINGS holds the coded findings: one per item that is not
+    certified, id `<root>/shapes` (a finding id is under its root: gate_fixtures.py) for a root's pack or shapes, `inputs` for the gate's own declared inputs"""
+    del FINDINGS[:]
     try:
         doc = load_inputs(inputs, pins)
         packs = lifted_roots(repo)
@@ -194,19 +208,24 @@ def judge(repo, cache, inputs=INPUTS, pins=PINS):
         cext = fetch([e for e in doc["external"] if e["name"] == cname], cache)
         certs_path = path_in(cext, cname, crel, "certs")
         certs = load_certs(certs_path, doc["model_sha256"])
-        fam, bad = {}, {}
+        fam, bad, mine = {}, {}, {}
         for root, ext in packs:
             if ext is None:
                 bad[root + ":shapes"] = "the recipe declares no external named by cxx_origin.pack"
+                FINDINGS.append({"id": root + "/shapes", "code": "forms-no-pack"})
                 continue
             try:
                 got = fetch([ext], cache)
-                fam.update({k: v for k, v in load_shapes(path_in(got, ext["name"], "shapes.tsv", "pack")).items() if k not in fam})
+                mine[root] = load_shapes(path_in(got, ext["name"], "shapes.tsv", "pack"))
+                fam.update({k: v for k, v in mine[root].items() if k not in fam})
             except Red as e:
                 bad[root + ":shapes"] = str(e)[:200]
+                FINDINGS.append({"id": root + "/shapes", "code": e.code})
     except Red as e:
+        FINDINGS.append({"id": "inputs", "code": e.code})
         return 1, 0, ["inputs"], str(e)[:600]
     except (OSError, ValueError) as e:
+        FINDINGS.append({"id": "inputs", "code": "forms-inputs"})
         return 1, 0, ["inputs"], "inputs: %s" % (str(e)[:300] or type(e).__name__)
     finally:
         shutil.rmtree(os.path.join(cache, "ws"), ignore_errors=True)     # the checkouts of the externals (the CAS store keeps the content)
@@ -216,6 +235,7 @@ def judge(repo, cache, inputs=INPUTS, pins=PINS):
         d = dsl_sha(k, md)
         nobuilder += d is None
         cert[k] = d is not None and d in certs.get(k, ())
+    FINDINGS.extend({"id": r + "/shapes", "code": "forms-uncertified"} for r in sorted(mine) if any(not cert[k] for k in mine[r]))
     unc = [k for k in sorted(cert) if not cert[k]] + sorted(bad)
     byfam = ", ".join("%s %d/%d" % (f, sum(cert[k] for k in fam if fam[k] == f), sum(1 for k in fam if fam[k] == f)) for f in FAMILIES)
     why = "".join("; %s: %s" % (k, bad[k]) for k in sorted(bad))
@@ -233,7 +253,14 @@ def main(argv):
     cache = cache_dir(os.environ)
     os.makedirs(cache, exist_ok=True)
     u, c, ids, detail = judge(".", cache)
-    gatefile.write(NAME, u, c, ids, detail)
+    path = gatefile.write(NAME, u, c, ids, detail)
+    if path:     # the coded findings (fixtures, RECIPE.md "Fixtures"); also in normal mode: a whole-root fixture is judged in normal mode
+        with open(path) as fh:
+            r = json.load(fh)
+        r["findings"] = FINDINGS
+        with open(path, "w", newline="\n") as fh:
+            json.dump(r, fh, sort_keys=True, separators=(",", ":"))
+            fh.write("\n")
     st = "green" if u == c else "red"
     sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, detail[:200]))
     return 0 if st == "green" else 2

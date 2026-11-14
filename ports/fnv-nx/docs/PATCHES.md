@@ -346,7 +346,7 @@ stays unresolved (S2's trap) until the exe's vftable gives the address. No slot 
 
 | vftable | class | slots without a function in the decomp | evidence for the bound slots |
 |---|---|---|---|
-| `0x010a2528` | BSNiAllocator (ctor 0x00aa2230) | 7 (InitHolder's no-argument call), 8, 9 | bsniallocator.cpp 0x00aa2240..0x00aa24a0, called through slots 1-6 with these signatures in nimemorydefines.cpp |
+| `<va>` | BSNiAllocator (ctor <va>) | 7 (InitHolder's no-argument call), 8, 9 | bsniallocator.cpp <va>..<va>, called through slots 1-6 with these signatures in nimemorydefines.cpp |
 | `0x010a24fc` | NiStandardAllocator (FUN_00aa2200) | 0 (scalar deleting destructor), 9 | nistandardallocator.cpp (360 source path of 0x00aa3090..0x00aa3560): 1-6 in slot order with BSNiAllocator's signatures, 3 calls 1 and 2 itself; 7 = 0x00aa3430 creates the small-object allocator (Initialize), 8 = 0x00aa3460 deletes it (Shutdown) |
 | `0x0109bf4c` | A660A0Map, the NiStream loader map DAT_011f4784 (FUN_00a660a0) | 1-6: KeyToHashIndex, IsKeysEqual, SetValue, ClearValue, NewItem, DeleteItem (Gamebryo's NiTMapBase order; SetAt 0x00a642a0 calls 1-3) | slot 0 only, the destructor the decomp declares; no unit binds 0x0109bf4c with more slots, and the decomp's string-map slot functions belong to other vftables |
 | `0x0101772c`, `0x0104e6ac`, `0x01082ed8`, FUN_004de530's | INISettingCollection-like setting collections | all ten (no traps added; S5) | none yet: the decomp's interface is the 10-slot INISettingCollection of `src/bsmain/setting_declarations.h`: 0 scalar deleting destructor, 1 Add, 2 Remove, 3 GetViewerStrings, 4 WriteSetting, 5 ReadSetting, 6 Open, 7 Close, 8 WriteAllSettings, 9 ReadAllSettings |

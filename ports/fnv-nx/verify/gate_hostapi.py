@@ -3,11 +3,10 @@
     python3 -I gate_hostapi.py [--header PATH]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/hostapi.json
 Rule (owner order 2026-11-10/11: nothing that the product does not need, no placeholder behind a number): for every admitted product root
 that includes hostapi.h, {service numbers declared in the header} == {service numbers expanded by at least one unit of the root}.
-Declared: the header's own text (PATH, default ports/fnv-nx/toolchain/include/fnvnx/hostapi.h, else verify/tests/guest/hostapi.h of the
-trunk's fixture): every `#define FNVNX_PLAT_<NAME> <integer>` directive (a preprocessor directive read by its token grammar: #, define,
+Declared: the header's own text (PATH, default ports/fnv-nx/hostabi/include/fnvnx/hostapi.h, its one home; a missing file is an error): every `#define FNVNX_PLAT_<NAME> <integer>` directive (a preprocessor directive read by its token grammar: #, define,
 identifier, one pp-number). A service is a NUMBER; names with the same number are aliases of one service.
-Used: the evidence is the PP stage result unit.ii of every unit of the root (found by pp_key in objects.json, as gate_objstub does). The PP
-stage runs `-dU` (unitstage.PP_TAIL): GCC then writes `#define NAME VALUE` for exactly the macros that the unit EXPANDS (or tests with
+Used: the evidence is the PP stage result unit.ii of every unit of the root (found by pp_key in objects.json, as gate_objstub does); the macro uses come
+from the unit's macro-fact stage (du_key, a stage of its own, `-dU`: unitstage.DU_TAIL, output unit.du; CC never reads it): GCC then writes `#define NAME VALUE` for exactly the macros that the unit EXPANDS (or tests with
 defined/#ifdef); a name written in a comment, a string or an unexpanded #define is not there. A root includes hostapi.h iff some unit.ii has
 a line marker (`# N "path"`) whose file name is hostapi.h. A used FNVNX_PLAT_ macro whose number is not declared, or whose value differs from
 the header's, is a red item as well (the unit saw another header).
@@ -35,7 +34,7 @@ import unitstage  # noqa: E402
 
 PREFIX = "FNVNX_PLAT_"
 HEADER = "hostapi.h"
-DEFAULT_HEADERS = ("ports/fnv-nx/toolchain/include/fnvnx/hostapi.h", "ports/fnv-nx/verify/tests/guest/hostapi.h")
+HOSTAPI_HEADER = "ports/fnv-nx/hostabi/include/fnvnx/hostapi.h"   # the one home (root hostabi/): a missing file is an error
 
 
 def number(tok):
@@ -162,10 +161,7 @@ def judge(decl, use):
 
 
 def header_text(repo, explicit):
-    for p in ([explicit] if explicit else list(DEFAULT_HEADERS)):
-        if os.path.isfile(os.path.join(repo, p)):
-            return open(os.path.join(repo, p)).read()
-    raise OSError("no hostapi.h at %s" % (explicit or " or ".join(DEFAULT_HEADERS)))
+    return open(os.path.join(repo, explicit or HOSTAPI_HEADER)).read()
 
 
 def root_judge(root, repo, cache, header):
@@ -177,9 +173,10 @@ def root_judge(root, repo, cache, header):
         return 1, 0, [root + ":build-red"], "stage %s" % res["failure"]["stage"]
     store = os.path.join(cache, "store")
     iis = [open(unitstage.result_file(store, k, "unit.ii"), errors="replace").read() for _, k in sorted(res["pp_keys"].items())]
+    dus = [open(unitstage.result_file(store, k, "unit.du"), errors="replace").read() for _, k in sorted(res["du_keys"].items())]
     if not any(includes_header(t) for t in iis):
         return 0, 0, [], "does not include %s" % HEADER
-    u, c, ids = judge(declared(header), used(iis))
+    u, c, ids = judge(declared(header), used(dus))
     w = ["wrapper use %s line %d" % (n, l) for l, n in wrapper_uses(header)]
     w += foreign_uses(repo, recipe.load_recipe(repo, recipe.load_admit(repo), root), root, store)
     u, ids = u + len(w), ids + w

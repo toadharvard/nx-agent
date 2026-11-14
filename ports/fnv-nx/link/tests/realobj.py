@@ -75,9 +75,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
                   **({'inputs': recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES if n in names]
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
            'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.SDD_DEFINE] + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
-           'plugin_cxx': 'x86_64-linux-gnu-g++-13', 'plugins': plugs}
+           'plugins': plugs}
     if not plugs:
-        rec.pop('plugin_cxx')
         rec.pop('plugins')
     repo = os.path.join(base, 'repo')
     os.makedirs(repo)
@@ -108,8 +107,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
         rec['external'] = [ext, {'name': 'pack', 'repo': 'fnv-nx-build', 'ref': 't', 'commit': commit, 'tree_sha256': tree, 'at': '/ext/pack'}]
         _w(repo, T + 'gen/lift.py', lift)
         root['cxx_origin'] = {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'}
-        # a lifted guest root loads the full set too; the origin fixes the arguments: recipe.LIFTED_ARGS where it names a plugin (fnvnx_ftoi lifted)
-        rec['plugins'] = [dict(p, args=dict(recipe.LIFTED_ARGS.get(p['name'], p['args']))) for p in plugs]
+        # a lifted guest root loads the full set too; the origin fixes the arguments: recipe.plugin_args
+        rec['plugins'] = [dict(p, args=dict(recipe.plugin_args('lifted')[p['name']])) for p in plugs]
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():

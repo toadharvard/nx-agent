@@ -86,11 +86,7 @@ check("(i) a macro-defined function is a wrapper use", g.wrapper_uses("#define C
 clean = "/* FNVNX_PLAT_B in a comment */\n#define FNVNX_PLAT_A 1u // FNVNX_PLAT_B\n#define FNVNX_PLAT_B 2u\nconst char *s = \"FNVNX_PLAT_B\";\n"
 check("(i) declarations, comments and strings are not wrapper uses", g.wrapper_uses(clean) == [], g.wrapper_uses(clean))
 real = None
-for p_ in g.DEFAULT_HEADERS:
-    q = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), p_)
-    if os.path.isfile(q):
-        real = open(q).read()
-        break
+real = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), g.HOSTAPI_HEADER)).read()
 check("(i) the real header has no wrapper use", real is not None and g.wrapper_uses(real) == [], g.wrapper_uses(real or ""))
 # (i) class rule: a FNVNX_PLAT_ identifier only in hostapi.h's #define lines and in unit files of the root; a shim-style header is red
 import subprocess as _sp
@@ -137,7 +133,9 @@ check("(ii) a marker equal to no service is its own item and red while unused", 
 
 # universe 0 on a checkout without admitted roots: green, no exception list
 out = tempfile.mkdtemp(prefix="gh-")
-repo = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
+repo = tempfile.mkdtemp(prefix="gh-repo-")   # a checkout whose admit.json admits no root
+os.makedirs(os.path.join(repo, os.path.dirname(g.recipe.ADMIT)))
+json.dump({"format": "fnvnx-admit/1", "roots": []}, open(os.path.join(repo, g.recipe.ADMIT), "w"))
 env = dict(os.environ, GATE_OUT=out)
 r = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_hostapi.py")], cwd=repo, env=env, capture_output=True, text=True)
 res = json.load(open(os.path.join(out, "hostapi.json"))) if os.path.exists(os.path.join(out, "hostapi.json")) else {}

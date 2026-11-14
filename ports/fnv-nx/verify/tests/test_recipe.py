@@ -34,10 +34,14 @@ n = len([l for l in open("/in/ports/fnv-nx/toy/constants.tsv") if l.strip()])
 os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
 '''
-# The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld, with
-# the FNXG header of crt0 at the first segment + 8 and the entry at the first segment. The header is OS-layer code (os.S, an os_layer unit);
+# The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
+# the product's own crt0 (toolchain/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
+# FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_guest_entry, the entry every
+# guest program defines (in the product, runtime.c); the toy's program entry is f_a. The header is OS-layer code (os.S, an os_layer unit);
 # HDR is the same as one assembler statement for the roots that have no os.S (MINI).
-CRT0 = ".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
+CRT0 = (open(os.path.join(VERIFY, "..", "toolchain", "guest", "crt0.s")).read()
+        + "\n.text\n.global __fnvnx_guest_entry\n.set __fnvnx_guest_entry, f_a\n")
+OS_NOLINK = ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n"
 HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
           "flags": {"c": ["-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
@@ -50,7 +54,7 @@ FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
     "toy/c.c": '#include "toy.h"\nint f_c(int x) { return x + TOY; }\n',
-    "toy/os.S": CRT0 + ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
+    "toy/os.S": CRT0 + OS_NOLINK,
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
     "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
@@ -82,7 +86,10 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for k, v in dict(FILES, **(files or {})).items():
+    fs = dict(FILES, **(files or {}))
+    if (rec or RECIPE).get("link") is None and "toy/os.S" not in (files or {}):
+        fs["toy/os.S"] = OS_NOLINK   # crt0 is the entry of a link (guest.ld): a root that links no ELF carries no crt0
+    for k, v in fs.items():
         if v is not None:
             w(repo, k, v)
     for f in LINK_TOOLS:
@@ -394,7 +401,7 @@ def main():
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
     # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
-    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64")), ROOT, SS, BASE + "/out64")
+    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64"), files={"toy/os.S": FILES["toy/os.S"]}), ROOT, SS, BASE + "/out64")
     print("INFO toy LP64 build %.1f s, stages %s" % (time.time() - t0, r64.get("stages")))
     check("toy root builds green: ILP32 objects and ELF are ELF32, the LP64 objects are ELF64 (and no ELF)",
           r64["status"] == "green" and len(r64["objects"]) == 4 and r64["elf"] is None
@@ -419,6 +426,44 @@ def main():
     check("refusal set also through compile flags -Wl,", any("refusal set" in e for e in errs(m)))
     check("legit ld options are not refused", not recipe.refused(["-e", "f_a", "--gc-sections", "-z", "noexecstack", "-Map=x", "--entry=x", "-Ttext=0"]))
     check("include dir outside admitted roots rejected", any("include" in e for e in errs(mut(include=["/etc", "../x"]))))
+    # one home per header: the include dir lies in an admitted product root of the recipe root's own target
+    rk = os.path.join(BASE, "ck")
+    base_roots = recipe.load_admit(rk)
+    own = base_roots[ROOT].get("target")
+    other = "host" if own != "host" else "guest"
+    extra = {T + "hdr_prod": {"path": T + "hdr_prod", "class": "product", "target": own},
+             T + "hdr_other": {"path": T + "hdr_other", "class": "product", "target": other},
+             T + "hdr_tool": {"path": T + "hdr_tool", "class": "tool"}, T + "hdr_doc": {"path": T + "hdr_doc", "class": "doc"}}
+    rr = dict(base_roots, **extra)
+    rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")]
+
+    def home(d):
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted product root" in e]
+    check("include dir in a product root of the same target accepted", not home("hdr_prod"), home("hdr_prod"))
+    check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
+    check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
+    rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
+    rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]
+
+    def dups(dirs, files_):
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + dirs), ROOT, files_, rr2, None, rk) if "one home per header" in e]
+    check("one header in one include dir accepted", not dups([T + "hdr_prod"], rf2), dups([T + "hdr_prod"], rf2))
+    check("two include dirs holding the same include-relative header rejected, naming both files",
+          len(dups([T + "hdr_prod", T + "hdr_prod2"], rf2)) == 1 and T + "hdr_prod/h.h" in dups([T + "hdr_prod", T + "hdr_prod2"], rf2)[0]
+          and T + "hdr_prod2/h.h" in dups([T + "hdr_prod", T + "hdr_prod2"], rf2)[0])
+    check("two include dirs with different headers accepted", not dups([T + "hdr_prod", T + "hdr_prod2"], rfiles + [T + "hdr_prod2/g.h"]))
+    # across the whole target: two admitted guest roots with their own include/ dirs holding fnvnx/x.h, neither in this recipe's include
+    cr = dict(rr, **{T + "cr1": {"path": T + "cr1", "class": "product", "target": own}, T + "cr2": {"path": T + "cr2", "class": "product", "target": own},
+                     T + "cr3": {"path": T + "cr3", "class": "product", "target": other}})
+    crf = rfiles + [T + "cr1/include/fnvnx/x.h", T + "cr2/include/fnvnx/x.h", T + "cr3/include/fnvnx/x.h"]
+
+    def cross(roots_, files_):
+        return [e for e in recipe.check(mut(), ROOT, files_, roots_, None, rk) if "one home per header" in e]
+    check("two admitted roots of one target with fnvnx/x.h in include/ are red (naming both)", len(cross(cr, crf)) == 1 and T + "cr1/include/fnvnx/x.h" in cross(cr, crf)[0]
+          and T + "cr2/include/fnvnx/x.h" in cross(cr, crf)[0] and T + "cr3/include/fnvnx/x.h" not in cross(cr, crf)[0], cross(cr, crf))
+    check("the same header in a root of the other target, or only once, is accepted", not cross(cr, [f for f in crf if "cr2" not in f]), cross(cr, [f for f in crf if "cr2" not in f]))
     m = mut()
     m["generated"][0]["outputs"] = ["a.c"]
     check("generated output colliding with a tracked file rejected", any("also a tracked file" in e for e in errs(m)))
