@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-15 00:02Z L1 w24 loader root blocked on a host service, FNVNX_PLAT_UNMAP_FIXED (FreeLibrary path). w10 adds it to hostapi.h (the inverse of map_fixed: check, then return to free; documented error otherwise) with the Switch body, takes w24 loader/ and the header one-home deletions, and sends L4 the number for the boot machine.
 - 11-14 23:59Z L1 ldcheck rule: a weak-undefined symbol in a final guest image is red. libsysbase references sched_yield and sched_getcpu with no definition in any root. w14 (during the e/f run) defines every such weak undefined, derived from the runtime archives, in rt/guest over libnx svc (citing svc.h). It also proposes the one definition of main (3.5).
 - 11-14 23:57Z w14 resumed: the msvcmodel13 e/f pair restarted (C2 ldscripts bug fixed in e5091e0d1; C1, C3-C7 were green), about 35 min in the background in its container. It is allowed to finish, because it was already started; later long rebuilds go to a farm. Then the repin with the libs entry, and the gcc-15 reverts.
 - 11-14 23:55Z L1 accepted resolve_input 4008c136, with one fix: a tracked-directory ref returns the tracked file list (git ls-files), and gates read only that; 2 tests. w10 does it before the verdict.
