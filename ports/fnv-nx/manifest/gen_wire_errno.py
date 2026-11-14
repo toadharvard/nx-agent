@@ -89,7 +89,7 @@ def generate(convert_text, newlib_text, base_text, errno_text):
             "#define FNVNX_ERRNO_UNKNOWN_OFFSET 10000\n"
             "#define FNVNX_WIRE_ERRNO_LIST(X) \\\n%s\n"
             "#define FNVNX_WIRE_ERRNO_UNNAMED(X) \\\n%s\n"
-            "int fnvnx_dom_errno_check(int v);          /* v when it is a wire number of LIST or UNNAMED, else the OWNER-assumption exit */\n"
+            "int fnvnx_dom_errno_check(int v);          /* v when it is a wire number of LIST or UNNAMED, else the ASM-004 exit */\n"
             "int fnvnx_wire_from_host_errno(int e);     /* the wire number of a host errno (by name, or the libnx encoding 10000 + n), else the exit */\n"
             ) % (nlx, ndom, len(named), decoded, len(unnamed), fmt([(a, b) for a, b, _ in named]), fmt(unnamed))
 
