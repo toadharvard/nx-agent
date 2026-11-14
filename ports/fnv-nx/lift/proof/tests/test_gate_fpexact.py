@@ -38,10 +38,24 @@ open(os.path.join(TMP, "a.c"), "w").write("int f(int x) { return x + 1; }\n")
 subprocess.run(["aarch64-linux-gnu-gcc", "-mabi=ilp32", "-O2", "-c", os.path.join(TMP, "a.c"), "-o", obj], check=True, capture_output=True)
 
 
-def report(name, unit, findings=(), sites=0):
+def report(name, unit, findings=(), sites=None, ranged=(), rewritten=0, helper=0, extra=None):
     p = os.path.join(TMP, name)
-    json.dump({"format": "fnvnx-f2i/1", "unit": unit, "sites": sites, "helpers": [], "findings": list(findings)}, open(p, "w"))
+    findings, ranged = list(findings), list(ranged)
+    d = {"format": "fnvnx-f2i/2", "unit": unit, "helpers": [], "findings": findings, "ranged": ranged, "rewritten": rewritten, "helper": helper,
+         "sites": rewritten + len(ranged) + helper + len(findings) if sites is None else sites}
+    d.update(extra or {})
+    json.dump(d, open(p, "w"))
     return p
+
+
+def site(kind, **kw):
+    d = {"function": "g", "file": "a.c", "line": 3, "kind": kind}
+    d.update(kw)
+    return d
+
+
+def fact(lo, hi, blo, bhi):
+    return {"source": "gcc-range", "lo": lo, "hi": hi, "bound_lo": blo, "bound_hi": bhi}
 
 
 def codes(f2i_path, unit="a.c"):
@@ -55,10 +69,24 @@ check("row naming a missing file: red f2i-report-missing", codes(os.path.join(TM
 check("a report next to the object is not looked at (the old path obj + .f2i.json)", (open(obj + ".f2i.json", "w").write(open(good).read()) or True) and codes(None) == ["f2i-report-missing"])
 check("unit mismatch (another unit's report): red f2i-report-unit", codes(report("other.json", recipe.sandbox_src("b.c"))) == ["f2i-report-unit"])
 check("the bare unit name is a mismatch (the plugin reports the sandbox path, nothing is stripped)", codes(report("bare.json", "a.c")) == ["f2i-report-unit"])
-check("a finding of the plugin: red f2i-conv", codes(report("fnd.json", recipe.sandbox_src("a.c"), [{"function": "g", "file": "a.c", "line": 3, "kind": "conv"}], 1)) == ["f2i-conv"])
-check("a generic builtin finding (lround family) is red f2i-builtin: no kind is exempt", codes(report("bi.json", recipe.sandbox_src("a.c"), [{"function": "g", "file": "a.c", "line": 3, "kind": "builtin"}], 1)) == ["f2i-builtin"])
-check("a target builtin finding (NEON vcvtq_s32_f32, kind mdbuiltin) through the real reader: red f2i-mdbuiltin",
-      codes(report("md.json", recipe.sandbox_src("a.c"), [{"function": "int32x4_t vcvtq_s32_f32(float32x4_t)", "file": "arm_neon.h", "line": 10310, "kind": "mdbuiltin"}], 1)) == ["f2i-mdbuiltin"])
+check("a finding of the plugin: red f2i-conv-scalar", codes(report("fnd.json", recipe.sandbox_src("a.c"), [site("conv-scalar")])) == ["f2i-conv-scalar"])
+SRC = recipe.sandbox_src("a.c")
+for kind in ("conv-scalar", "conv-vector", "builtin", "mdbuiltin", "asm"):
+    check("an unrewritten site of kind %s is red f2i-%s (no kind is exempt)" % (kind, kind), codes(report("k_%s.json" % kind, SRC, [site(kind)])) == ["f2i-" + kind])
+check("rewritten sites (counted) are green", codes(report("rw.json", SRC, rewritten=3)) == [])
+check("rewritten sites listed per site, count matching: green", codes(report("rw2.json", SRC, rewritten=2, extra={"rewrites": [site("conv-scalar"), site("builtin")]})) == [])
+check("rewrites listed with a count that differs: red (malformed)", codes(report("rw3.json", SRC, rewritten=2, extra={"rewrites": [site("conv-scalar")]})) == ["f2i-report-missing"])
+check("a helper site is green", codes(report("hp.json", SRC, helper=2)) == [])
+check("a range-proven site (bound_lo < lo, hi < bound_hi) is green", codes(report("rg.json", SRC, ranged=[site("conv-scalar", fact=fact(0, 100, -2147483648, 2147483648))])) == [])
+check("a ranged site whose range reaches the bound is red f2i-range", codes(report("rg2.json", SRC, ranged=[site("conv-scalar", fact=fact(0, 2147483648, -2147483648, 2147483648))])) == ["f2i-range"])
+check("a ranged site whose lo equals bound_lo is red f2i-range", codes(report("rg3.json", SRC, ranged=[site("conv-vector", fact=fact(-2147483648, 5, -2147483648, 2147483648))])) == ["f2i-range"])
+check("a ranged site with a non-real bound is red (malformed)", codes(report("rg4.json", SRC, ranged=[site("conv-scalar", fact=fact(0, "1", -5, 5))])) == ["f2i-report-missing"])
+check("a ranged site with a missing fact is red (malformed)", codes(report("rg5.json", SRC, ranged=[site("conv-scalar")])) == ["f2i-report-missing"])
+check("a ranged site with a fact of another source is red (malformed)", codes(report("rg6.json", SRC, ranged=[site("conv-scalar", fact=dict(fact(0, 1, -5, 5), source="flag"))])) == ["f2i-report-missing"])
+check("counts that do not add up are red (malformed)", codes(report("cnt.json", SRC, sites=4, rewritten=3)) == ["f2i-report-missing"])
+check("a /1 report is red (malformed)", codes(report("v1.json", SRC, extra={"format": "fnvnx-f2i/1"})) == ["f2i-report-missing"])
+check("a kind that is not one of the five is red (malformed)", codes(report("kk.json", SRC, [site("conv")])) == ["f2i-report-missing"])
+check("a range-proven site with a finding beside it: only the finding is red", codes(report("mix.json", SRC, [site("mdbuiltin")], ranged=[site("conv-scalar", fact=fact(0, 1, -5, 5))])) == ["f2i-mdbuiltin"])
 bad = os.path.join(TMP, "bad.json")
 open(bad, "w").write("{")
 check("malformed report: red f2i-report-missing", codes(bad) == ["f2i-report-missing"])

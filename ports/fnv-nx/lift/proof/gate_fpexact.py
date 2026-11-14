@@ -51,8 +51,8 @@ object-level necessary condition:
       irint / {i,l,ll}{ceil,floor} builtin families; IFN_VEC_CONVERT; target builtins with a float argument and an integer result; inline asm with a
       float / vector operand or an FP register clobber) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in rt/fnvl_x87.h, on the
       helpers sse_f2i and fv_i), right after the CFG is built, before early inlining and every optimisation, so inlining a helper into its callers
-      cannot hide a site and no transformation adds one. It writes `<unit>.f2i.json` (format fnvnx-f2i/1: unit, sites, helpers, findings = sorted
-      {function, file, line, kind: conv|builtin|asm}) into the CC stage's /out; the recipe records its path as the `f2i` field of the object's row in objects.json (obj/<unit>.f2i.json).
+      cannot hide a site and no transformation adds one. It writes `<unit>.f2i.json` (format fnvnx-f2i/2: unit, helpers, counts sites = rewritten + len(ranged) + helper + len(findings), findings = sorted
+      unrewritten sites {function, file, line, kind: conv-scalar|conv-vector|builtin|mdbuiltin|asm}, ranged = sites left as they are because GCC's range fact proves the operand in range, {..., fact {source gcc-range, lo, hi, bound_lo, bound_hi}}, checked by the gate as reals bound_lo < lo and hi < bound_hi) into the CC stage's /out; the recipe records its path as the `f2i` field of the object's row in objects.json (obj/<unit>.f2i.json).
       Rule: every object row has `f2i` naming an existing result file, its `unit` field equals recipe.sandbox_src(unit) (the plugin reports the compiler's
       input as the stage was given it: the one function that composes the path of a unit's source in the sandbox, also used by the stage), and
       `findings` == []; a row without `f2i`, a missing or malformed file, another unit, or any finding is a finding of the object.
@@ -258,8 +258,20 @@ def symbols_of(path):
     return dfn, ref
 
 
+F2I_FORMAT = "fnvnx-f2i/2"
+F2I_KINDS = ("conv-scalar", "conv-vector", "builtin", "mdbuiltin", "asm")
+
+
+def _real(x):
+    """x is a JSON number (not a bool, not NaN): an int or a float; an infinity is a real bound the check below handles"""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and x == x
+
+
 def read_f2i(p):
-    """P: the `f2i` field of the object's row (None if the row has none) -> (result dict or None, problem string or None) of the plugin's file"""
+    """P: the `f2i` field of the object's row (None if the row has none) -> (result dict or None, problem string or None) of the plugin's file.
+    Format fnvnx-f2i/2: unit, helpers [names], sites, rewritten, helper (ints), findings [{function,file,line,kind}], ranged [{function,file,line,kind,fact}],
+    optional rewrites [{function,file,line,kind}]; kind in F2I_KINDS; fact = {source "gcc-range", lo, hi, bound_lo, bound_hi} (reals). The counts must add up:
+    sites == rewritten + len(ranged) + helper + len(findings); with `rewrites` present, len(rewrites) == rewritten."""
     if not p:
         return None, "the object's row in objects.json has no f2i (the plugin's result file)"
     if not os.path.isfile(p):
@@ -267,14 +279,36 @@ def read_f2i(p):
     try:
         with open(p) as fh:
             d = json.load(fh)
-        if d["format"] != "fnvnx-f2i/1" or not isinstance(d["findings"], list) or not isinstance(d["sites"], int) or not isinstance(d["helpers"], list):
-            raise ValueError("not a fnvnx-f2i/1 result")
-        for f in d["findings"]:
-            f["function"], f["file"], f["line"], f["kind"]
+        if d["format"] != F2I_FORMAT or not isinstance(d["helpers"], list):
+            raise ValueError("not a %s result" % F2I_FORMAT)
+        for k in ("sites", "rewritten", "helper"):
+            if not isinstance(d[k], int) or isinstance(d[k], bool) or d[k] < 0:
+                raise ValueError("%s is not a count" % k)
+        for k in ("findings", "ranged") + (("rewrites",) if "rewrites" in d else ()):
+            if not isinstance(d[k], list):
+                raise ValueError("%s is not a list" % k)
+            for f in d[k]:
+                f["function"], f["file"], f["line"]
+                if f["kind"] not in F2I_KINDS:
+                    raise ValueError("kind %r is not one of %s" % (f["kind"], ", ".join(F2I_KINDS)))
+        for f in d["ranged"]:
+            fa = f["fact"]
+            if not isinstance(fa, dict) or fa.get("source") != "gcc-range" or not all(_real(fa.get(k)) for k in ("lo", "hi", "bound_lo", "bound_hi")):
+                raise ValueError("a ranged site has no range fact of source gcc-range with real lo, hi, bound_lo, bound_hi")
         d["unit"]
+        if d["sites"] != d["rewritten"] + len(d["ranged"]) + d["helper"] + len(d["findings"]):
+            raise ValueError("sites %d != rewritten %d + ranged %d + helper %d + findings %d" % (d["sites"], d["rewritten"], len(d["ranged"]), d["helper"], len(d["findings"])))
+        if "rewrites" in d and len(d["rewrites"]) != d["rewritten"]:
+            raise ValueError("rewrites lists %d sites, rewritten is %d" % (len(d["rewrites"]), d["rewritten"]))
         return d, None
     except (OSError, ValueError, KeyError, TypeError) as e:
         return None, "result file %s unreadable or malformed: %s" % (os.path.basename(p), str(e)[:150] or type(e).__name__)
+
+
+def range_proven(f):
+    """a ranged site is green only if its own fact proves the operand in range, checked here as reals: bound_lo < lo and hi < bound_hi"""
+    fa = f["fact"]
+    return fa["bound_lo"] < fa["lo"] and fa["hi"] < fa["bound_hi"]
 
 
 def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
@@ -289,14 +323,16 @@ def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
     und = [("undecodable", "undecodable bytes at %s" % w) for w in scan["undecodable"]]
     rcp += und
     f2i += und
-    d, why = ({"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}, None) if asm else read_f2i(f2i_path)
+    d, why = ({"format": F2I_FORMAT, "findings": [], "ranged": [], "sites": 0, "rewritten": 0, "helper": 0, "helpers": []}, None) if asm else read_f2i(f2i_path)
     if d is None:
         f2i.append(("f2i-report-missing", why))
     elif not asm and d["unit"] != recipe.sandbox_src(unit):
         f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], recipe.sandbox_src(unit))))
     else:
-        f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]))
+        f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper, not rewritten" % (f["file"], f["line"], f["function"], f["kind"]))
                 for f in d["findings"]]
+        f2i += [("f2i-range", "%s:%s in %s: %s site whose range fact does not prove the operand in range (%r)" % (f["file"], f["line"], f["function"], f["kind"], f["fact"]))
+                for f in d["ranged"] if not range_proven(f)]
         if scan["fcvt"] and d["sites"] == 0:
             f2i.append(("fcvt-no-site", "%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1])))
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
@@ -408,7 +444,15 @@ def judge_root(root, repo, cache, forms):
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     bad = sorted(k for k, v in items.items() if v)
     n = sum(len(items[k]) for k in bad)
-    return len(items), len(items) - len(bad), bad, ("%d findings in %d items; first: %s" % (n, len(bad), items[bad[0]][0][:200])) if bad else ""
+    kinds = {}
+    for k in bad:
+        for c, _ in coded[k]:
+            if c.startswith("f2i-") and c[4:] in F2I_KINDS + ("range",):
+                u = k.split(":", 1)[1]
+                kinds.setdefault(c[4:], {}).setdefault(u, 0)
+                kinds[c[4:]][u] += 1
+    by = "; remaining sites by kind: " + ", ".join("%s %d (%s)" % (c, sum(v.values()), ", ".join("%s %d" % kv for kv in sorted(v.items()))) for c, v in sorted(kinds.items())) if kinds else ""
+    return len(items), len(items) - len(bad), bad, ("%d findings in %d items; first: %s%s" % (n, len(bad), items[bad[0]][0][:200], by)) if bad else ""
 
 
 def main(argv):
