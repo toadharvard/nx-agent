@@ -1,6 +1,6 @@
 # fnv-nx overall status (orchestrator session_01KmtZKRGpFka9ShREBTYbTx)
 
-Updated 2026-11-12 03:41Z. The hourly census of all sessions was taken at 03:36Z; the trigger fired at 03:39Z, and only the lead reports since then were added.
+Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 03:41Z. The hourly census of all sessions was taken at 03:36Z; the trigger fired at 03:39Z, and only the lead reports since then were added.
 
 - Trunk `claude/fnv-nx-clean` is at 8cfbcdbf: 28 gates and 0 product roots.
   - Merged since 02:40Z:
@@ -10,6 +10,70 @@ Updated 2026-11-12 03:41Z. The hourly census of all sessions was taken at 03:36Z
     - L6 w4 (d3d9total, 8cfbcdbf).
   - The last verdict took 302.9 s cold. Budget rule (L1, accepted): 300 s gates the warm incremental verdict on the pinned farm host, and cold time is reported only. The open defect is that warm ensure() takes 63 s with 0 stages run, and a docs-only change took 303 s. w19 must show per-gate times, and a gate that re-runs without a changed declared input is red.
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
+
+
+## Path plan 2026-11-14 (binding; rules in CLAUDE.md "Owner order of 2026-11-14" and its decisions)
+
+All work resumed at 2026-11-14 23:00Z on the candidate `claude/fnv-next3b` 141b07580. That is 224af83e plus L1
+w17m 4ee6cc10 plus CLAUDE.md. Its verdict v9 is running. The trunk is a5c8f427 (38 gates). The platform root is not
+on it yet. The last full verdict, v8 at 224af83e, gave 27/39 green. Numbers come from the lead status files of
+2026-11-12, unless a line says otherwise.
+
+Every item is a step on the path, closed by a known rule. A lead runs at most 3 workers at a time, all on its items
+below. Nothing else runs.
+
+**Step 1: the first root on the trunk** (platform, msvcmodel13, all plugins). Merged through `l1.py merge` on a green
+verdict.
+
+| # | Owner | Item | Rule / done when |
+|---|---|---|---|
+| 1.1 | L1 | w23 comdat_identity (linkstrict 4888/5783, abi odr, onedef) | identity modulo normalised relocations; undecidable is red |
+| 1.2 | L1 | w20u: the namegate/r7/objstub universe from admit covers. w20: objstub exit 2 | universe 0 with an admitted root is red; a gate crash is a finding |
+| 1.3 | L1 | w22f2: the fpexact reader | expected 113 clean + 1 (mp3, see 1.6) |
+| 1.4 | L5 | w10: assumptions, hostapi, abi layout, imports/machine inputs, boot selftests' HOSTABI from the recipe | gates green on 141b07580 |
+| 1.5 | L5 | w14: publish tools/fnvnx-a64-msvcmodel13 (farm). L1 w4 checks the MANIFEST. Rebuild the platform root on it; revert source changes made only for gcc 15 (ini.cpp std::map, unless a rule names it) | root built on msvcmodel13 |
+| 1.6 | L2 | w1: MINIMP3_NO_SIMD unconditional | native code holds no explicit target float→int intrinsic; global builtin findings over the platform root = 0 |
+| 1.7 | L1 | w19: warm verdict ≤ 300 s on the trunk | the build is always fast |
+
+**Step 2: the lifted packs as roots.**
+
+| # | Owner | Item | Rule / done when |
+|---|---|---|---|
+| 2.1 | L3a | w8 t16k: build lift/pack, lift/rt, bridges and the 7 test roots; run the 6 guest tests against references | recipe store only |
+| 2.2 | L3a | w6: break the fnvlift↔proof cycle and gate that the root graph is acyclic; independent references for the 21 moved tests (rows with none go to L1); the 8 build-path defects onto recipe.py with declared externals | 0 stock-g++ runs, 0 undeclared inputs |
+| 2.3 | L3a | w1: the product relift of all 7 images (shapes.tsv, the SEH batch, DEF0/DEFPRIOR, origin flags). Publish its shape-key list to L3b at once | one pack, every image |
+| 2.4 | L3a | w7: the facts commit (jtab, ranges, reloc consistency, data_in_code) | removes ASM-233 |
+| 2.5 | L3a | synchronous x86 exceptions emitted at their instruction; the masked-exceptions fact over every fldcw/ldmxcsr/fldenv/frstor/fxrstor site | decision "Hardware exceptions" |
+| 2.6 | L3b | certify the pack's shape set: the remaining int shapes on farms; certified builders for x87, SIMD and sys; w4 cpuid and DEF0 in the prover | pack forms ⊆ certified (2,370 / 19,494 int at 2026-11-12) |
+| 2.7 | L2 | plugin census over the relift pack (global finding count); review of the dispatch/defdisp plugin for the bridges; top-level asm bracketed as recorded ranges | 0 findings |
+| 2.8 | L3b | lift test doubles 9/35 → 0, with L3a w6; delete the Unicorn harnesses once replaced | test ∩ product symbols = ∅ |
+
+**Step 3: the ELF.**
+
+| # | Owner | Item | Rule / done when |
+|---|---|---|---|
+| 3.1 | L1 | w12 link/guest.json; w15 link root and onedef; w15c per-target recipes; w16c generator inputs and the header-root rule | one recipe per target |
+| 3.2 | L1 | w16: the IAT root (`fnvnx_import_key`) | closes the render undefined names |
+| 3.3 | L2 | w2 .fnvnx.tls (L1 tlsmodel); w3 extents (open GPA 12 / LoadLibrary 3 sites) | reach certificates count once every dynamic site is resolved |
+| 3.4 | L3a | the product ELF root, with a worker; bridges → `fnvnx_dispatch`; exitgen | undefined closure = ∅ |
+| 3.5 | L5 | rt/guest: `main` process entry; pthread mutexes over real threads (libgcc unwind) | 3 native test roots link |
+| 3.6 | L6 | w1b translator root; w6 render/d3d9 root (after 3.1 w16c); doubles 26/88 and the 22 ignore-all link commands → 0; render/ASSUMPTIONS.md into the registry | stub/doubles gates 0 |
+| 3.7 | L6A | w6 gl4 root (after w15c, with lib/sha256 57051038, eb482552, b83b7309) | recipe-built libnxgl4 |
+| 3.8 | L5 | tests onto the recipe with 0 doubles (5 files/87 symbols); delete s4/s7 Makefiles and build_guest.sh | one build |
+
+**Step 4: boot → exe entry → WinMain → menu → first frame (GL in the emulator).**
+
+| # | Owner | Item | Rule / done when |
+|---|---|---|---|
+| 4.1 | L4 | w6: bootguest on rt/guest with link/guest.json; its images stop defining the product's fnvnx_host | no doubles |
+| 4.2 | L4 | boot the product ELF. Milestones: exe entry, WinMain, menu, first frame; instructions per frame per thread | observable in the trace |
+| 4.3 | L4+L6A | the boot machine's GL from the gl4 root (not the prebuilt @2f0427f5); confirm the Mesa 25.2.8 pin for L6 | one GL |
+| 4.4 | L5 | registry and FalloutPrefs generated stages, declared fonts, Galaxy bodies, Winsock network down, LoadLibrary 126 | declared machine |
+| 4.5 | L3b+L3a | SEH continue restores the whole CONTEXT (A-CTX); EH/SEH conformance against the exe's tables and Wine 9.0 | decision "SEH continue" |
+| 4.6 | L6+L6A | sm_link over every shipped shader = 0 failures (179 fail + 10 refused at 2026-11-12); the link-failure branch → reach_violation | decision "Shaders" |
+
+**After the first frame:** deko3d harnesses and uam, vtnames/decomp, native CRT, toolchain mirror reproducibility,
+IKOS. Then speed toward 45 fps (floor) / 60 fps (target), then the Switch.
 
 ## Blocker of goal step 1 (the first product root)
 

@@ -370,3 +370,52 @@ The owner's words: "делегируй остаток работы аккура�
   - new verifiers, gates or farms that do not block a path step;
   - runs repeated on unchanged content (the verdict's cache answers them).
   - One verdict per candidate. A lead updates its status file after each finished item; that is the report.
+- **Orchestrator decisions of 2026-11-14 (path plan).** The tasks and their order are in
+  `ports/fnv-nx/journal/status/ALL.md`, section "Path plan 2026-11-14", on the integration branch.
+  - **Guest runtime first.** The platform root enters the trunk only when it is built against
+    `tools/fnvnx-a64-msvcmodel13`, with its MANIFEST checked by the recipe. A build against the gcc 15 libstdc++ of
+    fnvnx-a64 is a measurement. A source change made only so that the gcc 15 headers parse is reverted once
+    msvcmodel13 is in.
+  - **Shape certificates by the pack's own universe.** L3b certifies the shape keys that the product pack uses. L3a
+    publishes that list with the relift. The work does not wait for the pack root to be admitted. The pack root enters
+    the trunk when its forms are a subset of the certified ones. x87, SIMD and system shapes get certified builders from
+    the same prover (the Sail model, ASM-009 / OWNER 9).
+  - **Hardware exceptions in lifted code.**
+    - Under OWNER 6 an access fault does not occur in normal operation, so there is no asynchronous fault recovery.
+    - Every other x86 exception the exe can raise is synchronous at a known instruction: #DE of div/idiv, int3,
+      int n, ud2, into, bound, and x87/SSE exceptions only when unmasked. The lifter emits the check there and raises
+      through the SEH path, with the precise CONTEXT of that instruction.
+    - It is a fact that every fldcw, ldmxcsr, fldenv, frstor and fxrstor site keeps the exceptions masked. A site the
+      facts cannot decide is reported to the orchestrator.
+  - **SEH continue restores the whole CONTEXT** that the record's ContextFlags names: integer, control, FloatSave and
+    the extended registers. This is how Windows documents it (OWNER 3) and how Wine 9.0 implements it.
+  - **Shaders.**
+    - The game's shaders are a static set from its gamedata. The translator's link check (`sm_link`) over that whole
+      set is a gate at 0 failures.
+    - The backends' link-failure branch becomes `fnvnx_reach_violation`, with that gate's certificate as its fact.
+      So neither GL nor deko3d has a run-time link-failure path.
+  - **The product ELF root.**
+    - Owner: L3a, with a worker.
+    - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
+    - Undefined symbols get their owners from the closure:
+      - `fnvnx_dispatch`: L3a's generated bridges;
+      - the process entry `main`: L5 `rt/guest`;
+      - `fnvnx_import_key` / the IAT root: L1;
+      - the pthread mutexes that libgcc's unwinder needs: L5, over its real threads.
+  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, main menu, first frame (GL in
+    the emulator). Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
+    thread.
+  - **The boot machine's GL** comes from the recipe-built gl4 root, not from the prebuilt libnxgl4 @2f0427f5.
+  - **One registry.** `render/ASSUMPTIONS.md` is merged into `verify/ASSUMPTIONS.json` or deleted.
+  - **Second build paths.** No new run goes through them. Each is deleted once its root is on the recipe:
+    - the L5 host Makefiles s4/s7 and `build_guest.sh`;
+    - the loader Makefile;
+    - the unpinned apt in `farm/boot_job.sh`;
+    - the lift tests' Unicorn harnesses.
+  - **Off the path until the first frame:**
+    - the deko3d harnesses and the uam work;
+    - vtnames and decomp C++;
+    - the native CRT;
+    - toolchain mirror reproducibility;
+    - IKOS;
+    - any census of numbers that did not change.
