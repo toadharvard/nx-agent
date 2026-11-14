@@ -40,10 +40,14 @@
 //              asm       an inline asm that could read a float: a float, vector or complex-typed operand or an FP/SIMD register
 //                        clobber (asm_may_read_float).
 //            Types and GCC's function codes decide; no name, no text of source or assembly is looked at.
-// Report (-fplugin-arg-fnvnx_ftoi-out=FILE, required, both modes), JSON "fnvnx-f2i/1" for gate fpexact: unit (main input file), sites
-// (conversion sites, conv, builtin and mdbuiltin, seen in every analysed function, helpers included), helpers (printable names of the analysed
-// helpers), findings [{function, file, line, kind}] (what is outside a helper and is not rewritten: in lifted mode the errors, in native
-// mode the builtin, mdbuiltin and asm kinds, and a conv the rewrite does not cover), both sorted.
+// Report (-fplugin-arg-fnvnx_ftoi-out=FILE, required, both modes), JSON "fnvnx-f2i/2" for gate fpexact: unit (main input file); sites (every
+// site seen in every analysed function, helpers included: conversions, builtins, mdbuiltins and asm), rewritten (sites rewritten here), helper
+// (sites inside fnvnx_f2i functions), helpers (their printable names), ranged (always empty: every site is rewritten, none is left on a GCC range
+// fact), rewrites and findings [{function, file, line, kind}] (what is outside a helper and not rewritten: in lifted mode the errors, in native
+// mode a site the rewrite does not cover, which is also a compile error), all sorted; sites == rewritten + len(ranged) + helper + len(findings).
+// kind: conv-scalar | conv-vector (FIX_TRUNC_EXPR by its operand; IFN_VEC_CONVERT is conv-vector) | builtin | mdbuiltin | asm. The extra fields of a
+// rewrite ("how": what/rounding, "code": the AArch64 function code of a target builtin) are for the human reader.
+#include <vector>
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "context.h"
@@ -66,6 +70,7 @@
 #include "target.h"
 #include "output.h"
 #include "config/aarch64/aarch64-protos.h"
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <set>
@@ -78,9 +83,9 @@ static bool verbose;
 static bool lifted;
 static unsigned long total;
 static std::string outpath;
-static unsigned long sites;
+static unsigned long sites, helper_sites;
 static std::set<std::string> helpers;
-static std::set<std::tuple<std::string, std::string, int, std::string>> findings;   // function, file, line, kind
+static std::vector<std::tuple<std::string, std::string, int, std::string>> findings;   // function, file, line, report kind (one per site: a site is counted once)
 
 static bool is_int_like(tree t) {
   if (!t) return false;
@@ -292,7 +297,7 @@ static tree sel_const(tree it, unsigned P, bool vec) {   // the indefinite: bit 
   return vec ? build_vector_from_val(it, c) : c;
 }
 
-static std::set<std::tuple<std::string, std::string, int, std::string, std::string, unsigned>> rewritten;   // function, file, line, kind, "what/round", code
+static std::vector<std::tuple<std::string, std::string, int, std::string, std::string, unsigned>> rewritten;   // function, file, line, kind, "what/round", code
 
 // rewrite the statement STMT (at GSI) per the RULE; false if the site is not covered
 static bool rewrite(gimple_stmt_iterator *gsi, gimple *stmt, tree x, tree lhs, const Conv &cv) {
@@ -456,11 +461,15 @@ struct ftoi_pass : gimple_opt_pass {
         }
         else if (gasm *as = dyn_cast<gasm *>(stmt)) { if (asm_may_read_float(as)) kind = "asm"; }
         if (!kind) continue;
-        if (conv) sites++;
-        if (helper) continue;
+        // the report kind of the site (fnvnx-f2i/2): a conversion is scalar or vector by its operand, a builtin by its class
+        const char *rk = kind;
+        if (!strcmp(kind, "conv")) rk = VECTOR_TYPE_P(TREE_TYPE(gimple_assign_rhs1(stmt))) ? "conv-vector" : "conv-scalar";
+        else if (gcall *vc = dyn_cast<gcall *>(stmt)) { if (gimple_call_internal_p(vc) && gimple_call_internal_fn(vc) == IFN_VEC_CONVERT) rk = "conv-vector"; }
+        sites++;   // every site: conversions, builtins and asm; sites == rewritten + ranged + helper + findings
+        if (helper) { helper_sites++; continue; }
         if (lifted) {
           expanded_location l = expand_location(gimple_location(stmt));
-          findings.insert({name, l.file ? l.file : "", l.line, kind});
+          findings.push_back({name, l.file ? l.file : "", l.line, rk});
           error_at(gimple_location(stmt), "FTOI (lifted): a float -> integer conversion (%s) outside a function carrying fnvnx_f2i", kind);
           continue;
         }
@@ -472,7 +481,7 @@ struct ftoi_pass : gimple_opt_pass {
           expanded_location l = expand_location(gimple_location(stmt));
           if (cls == CLS_OK) {
             if (rewrite(&gsi, stmt, cx, clhs, cv)) {
-              rewritten.insert({name, l.file ? l.file : "", l.line, kind, std::string(cv.what) + "/" + rnd_name[cv.rnd], cv.code});
+              rewritten.push_back({name, l.file ? l.file : "", l.line, rk, std::string(cv.what) + "/" + rnd_name[cv.rnd], cv.code});
               n++;
               continue;
             }
@@ -480,14 +489,14 @@ struct ftoi_pass : gimple_opt_pass {
             cls = CLS_ERROR;
           }
           if (cls == CLS_ERROR) {
-            findings.insert({name, l.file ? l.file : "", l.line, kind});
+            findings.push_back({name, l.file ? l.file : "", l.line, rk});
             error_at(gimple_location(stmt), "FTOI: %s", why);
             continue;
           }
         }
         if (strcmp(kind, "conv")) {   // native: the other builtins and asm are not rewritten
           expanded_location l = expand_location(gimple_location(stmt));
-          findings.insert({name, l.file ? l.file : "", l.line, kind});
+          findings.push_back({name, l.file ? l.file : "", l.line, rk});
           // __builtin_convertvector is a vector float -> integer conversion (IFN_VEC_CONVERT at this point of the pipeline): the same
           // shape as a vector FIX_TRUNC_EXPR, which the rewrite does not cover, so rule (c) makes it a compile error too.
           if (gcall *c = dyn_cast<gcall *>(stmt))
@@ -503,7 +512,7 @@ struct ftoi_pass : gimple_opt_pass {
         if ((TREE_CODE(it) != INTEGER_TYPE && TREE_CODE(it) != ENUMERAL_TYPE) || !SCALAR_FLOAT_TYPE_P(ft) || TYPE_PRECISION(ft) > 64
             || TYPE_PRECISION(it) > 64) {
           expanded_location l = expand_location(gimple_location(stmt));
-          findings.insert({name, l.file ? l.file : "", l.line, "conv"});
+          findings.push_back({name, l.file ? l.file : "", l.line, VECTOR_TYPE_P(it) ? "conv-vector" : "conv-scalar"});
           error_at(gimple_location(stmt), "FTOI: conversion %qT to %qT is not covered by the MSVC rewrite (vector, or a type wider than 64 bits)", ft, it);
           continue;
         }
@@ -513,6 +522,7 @@ struct ftoi_pass : gimple_opt_pass {
         // has the compiler's own answer), so the exe's source named an integer type in between and that type chose
         // the conversion. A text that omits it does not say which, and nothing here picks one.
         if (TREE_CODE(it) == ENUMERAL_TYPE) {
+          { expanded_location l = expand_location(gimple_location(stmt)); findings.push_back({name, l.file ? l.file : "", l.line, rk}); }
           error_at(gimple_location(stmt), "FTOI: %qT to enum %qT without the integer type in between (MSVC C2440)", ft, it);
           continue;
         }
@@ -544,6 +554,7 @@ struct ftoi_pass : gimple_opt_pass {
         gimple_seq_add_stmt(&seq, gimple_build_assign(r, COND_EXPR, ok, t, TYPE_MIN_VALUE(st)));
         gsi_insert_seq_before(&gsi, seq, GSI_SAME_STMT);
         gimple_assign_set_rhs_with_ops(&gsi, NOP_EXPR, r);
+        { expanded_location l = expand_location(gimple_location(stmt)); rewritten.push_back({name, l.file ? l.file : "", l.line, rk, "msvc/ftol", 0}); }
         n++;
       }
     }
@@ -568,6 +579,8 @@ static void finish(void *, void *) {
   if (verbose) inform(UNKNOWN_LOCATION, "%<fnvnx_ftoi%>: %lu conversions in this unit", total);
   FILE *f = fopen(outpath.c_str(), "w");
   if (!f) { error("%<fnvnx_ftoi%>: cannot write %s", outpath.c_str()); return; }
+  std::sort(findings.begin(), findings.end());
+  std::sort(rewritten.begin(), rewritten.end());
   fprintf(f, "{\"findings\": [");
   bool first = true;
   for (auto &t : findings) {
@@ -577,10 +590,10 @@ static void finish(void *, void *) {
     fprintf(f, ", \"line\": %d}", std::get<2>(t));
     first = false;
   }
-  fprintf(f, "], \"format\": \"fnvnx-f2i/1\", \"helpers\": [");
+  fprintf(f, "], \"format\": \"fnvnx-f2i/2\", \"helper\": %lu, \"helpers\": [", helper_sites);
   first = true;
   for (auto &h : helpers) { if (!first) fprintf(f, ", "); js(f, h); first = false; }
-  fprintf(f, "], \"rewritten\": [");
+  fprintf(f, "], \"ranged\": [], \"rewrites\": [");
   first = true;
   for (auto &t : rewritten) {
     fprintf(f, "%s{\"code\": %u, \"file\": ", first ? "" : ", ", std::get<5>(t)); js(f, std::get<1>(t));
@@ -590,7 +603,7 @@ static void finish(void *, void *) {
     fprintf(f, ", \"line\": %d}", std::get<2>(t));
     first = false;
   }
-  fprintf(f, "], \"sites\": %lu, \"unit\": ", sites);
+  fprintf(f, "], \"rewritten\": %zu, \"sites\": %lu, \"unit\": ", rewritten.size(), sites);
   js(f, main_input_filename ? main_input_filename : "");
   fprintf(f, "}\n");
   fclose(f);
