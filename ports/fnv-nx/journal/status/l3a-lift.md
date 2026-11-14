@@ -605,3 +605,9 @@ Workers are capped at 3. Assignment by plan item:
   - CPUREF's feature set (SSE2-era, implementation-defined) to record as a declared-machine fact;
   - the logical-processor count: 1 in cpuid vs real parallelism. One count must hold for cpuid and L5.
 - test_census needs lift/tools/CODEMAP.md. Owner w7 (DIC), in the facts commit.
+
+## 2026-11-15 00:00 declared CPU (CLAUDE.md 99285b5fe, merged 23dc061fc)
+- w8 44fab5e34 (int3): cpumodel has 3 processors (leaf 1 EBX[23:16]=3 + HTT; leaf 4 cores−1=2, L3 shared by 3). formgate_real, gate_flags and gate_lift pass.
+- recipe check: int3 5c89f9c5c 6/6, t16k 11dcdf688 14/14 valid. loader (9 objects) and lib/sha256 (1 object) built. descs, bridges, pack and the native roots are building.
+- test_rtroot is red on t16k (pin semantics vs the recipe flags); w8 is finding the cause.
+- #UD certificate (w6, facts 163ec389, 5 of 7 images): 2601 sites (3DNow 2574 in d3dx9_38, SSE3 26, AVX 1) over 99 entries, 86 reached only through pointers. Orchestrator rule: a cell is decided when every writer depends only on cpuid/IPFP and constants, and its contents are evaluated under CPUREF. It is built as ctlstate on w4's points-to, the same analysis as the 59 undecided exe control-word writers. The gate stays red until it lands.
