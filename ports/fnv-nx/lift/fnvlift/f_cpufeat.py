@@ -1,6 +1,6 @@
 """CPUID-gated instruction forms (task C4a / B4): ONE table, ONE rule.
 
-THE RULE (CPUID-UD). The reference CPU model advertises exactly the feature bits that rt/cpumodel.c returns (leaf 1 EDX 0x078bfbff, ECX 0; leaf 0x80000001 EDX 0x00100000, ECX 0; no leaf 7).
+THE RULE (CPUID-UD). The reference CPU model advertises exactly the feature bits that rt/cpumodel.c returns (leaf 1 EDX 0x178bfbff (HTT kept for the 3-processor EBX count), ECX 0; leaf 0x80000001 EDX 0x00100000, ECX 0; no leaf 7).
 An instruction whose required feature set is not a subset of those bits raises #UD, exactly like `ud2` (SDM Vol 2, "Exceptions" section of every instruction: "#UD  If CPUID feature flag
 <X> is 0" / "If the LOCK prefix ..."; for the x87 FISTTP: SDM Vol 2 FISTTP, "IA-32 Architecture Compatibility: ... #UD if CPUID.01H:ECX.SSE3[bit 0] = 0"). The check is made in core.dispatch
 BEFORE any handler of any family runs, so no handler (x87, SSE, MMX, integer) can implement a form that the model's own CPUID denies.
