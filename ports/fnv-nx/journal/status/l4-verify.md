@@ -121,3 +121,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Each thread on its ideal core; per core, highest priority first, FIFO.
   - All cores advance in deterministic rounds of Q instructions; Q is a declared parameter, recorded in OUT.json and the key.
   - Design sent to the orchestrator, along with asking for the count's single source. The FNVNX_APP_CORES_CORE3 (4-core) variant conflicts with "one count, 3", so that went to the orchestrator to settle with L5.
+- w6: w7's F/G/H cherry-picked onto w6-r 6936114cc (reviewed, accepted). Runnable set all green: bootstart 63, bootinputs 75, bootmiles 56, icount 12, oracle 83, bootsock 6, bootthreadcpu 73, unmap 28, heap 13, path 54, layout 32.
+- Orchestrator approved the 3-core design. N comes from placement.h FNVNX_NPROC 3 (static-asserted against FNVNX_APP_CORES 0x7; L5 w10 sends the commit). The CORE3 opt-in is deleted by L5. Q is an instrument parameter with no registry entry; the boot doc states that memory ordering is proved by R9 / OWNER 9, not by boots. Forwarded to w7 (task I, base 6936114cc). farm/boot_job.sh --guest-root waits on w7-i's decision.
