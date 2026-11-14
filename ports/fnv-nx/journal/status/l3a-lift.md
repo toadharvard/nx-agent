@@ -541,3 +541,14 @@ Update 2026-11-12, at 698adefb:
 - The 3 native roots link with sysbase (L5's single library set, w10) and the pinned crti/crtn. 7 loader hooks stay undefined. Blocker: loader/ (claude/fnv-l1-contract) is built by a Makefile/build.sh, not as a product root. Sent to L1.
 - int3 d206ba904 (w6): the fnvlift↔proof and gates↔proof cycles are broken by moving code. L1 takes the acyclicity check into gate_tests (w19), and our test_root_graph is then deleted.
 - The 6 guest tests cannot run before the native roots link.
+
+## 2026-11-14 23:30 path plan 2026-11-14 (integration 21b10f1aa; CLAUDE.md merged at ccee6a5fd)
+Workers are capped at 3. Assignment by plan item:
+- Active:
+  - w8: 2.1 t16k, then 3.4, the product ELF root (undefined closure ∅; L1 link/guest.json).
+  - w6: 2.2 (acyclic graph done at d206ba904; instest, references, 8 build-path defects), then the DEF0/DEFPRIOR merge from w5, then 2.5 synchronous exceptions and the masked-exceptions fact.
+  - w7: 2.4 facts commit, then stops.
+- Queued: w1, 2.3 product relift of 7 images. It starts on w7's facts commit, and its shape-key list goes to L3b at once.
+- Stopped (capped): w5 (DEF0 done; handed to w6), w4 (pointsto v1 and pcsrc counts, off the path now), w3 (binkw32 jtab goes into w1's relift).
+- Blockers: the loader as a product root (L1 w24); lib/sha256 recipe (L1 w15d, ETA ~23:55).
+- w5 DEF0 counts at facts a0f3d8e on the 83f base: Forms 17276, with free outputs 3444, DEF0 5270, DEFPRIOR 0, uncovered 0. Not yet re-measured on int3.
