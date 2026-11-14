@@ -5,6 +5,16 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 
 ## Tasks
 
+## Path plan 2026-11-14 (binding; integration 21b10f1aa)
+
+Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
+
+| # | Item | Worker | Branch | Status |
+|---|---|---|---|---|
+| 2.6 | Certify the pack's shape set. Universe = pack l3a-lift/pack/7b2faae276b2 @ 7ef692b5 until L3a's relift publishes its list. Steps: pinned queue artifact; int keys on farms; x87/SIMD/sys builders; cpuid; DEF0/DEFPRIOR | w4 session_01KmtZKSmVSGEpAznLZh6oF7; farms 05/07 | claude/fnv-l3b-lift-w4 | doing: queue artifact (E) first; farms round 2b on 4a9eabc9 |
+| 2.8 | Lift test doubles 9/35 -> 0, with L3a w6; Unicorn harnesses deleted once replaced | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3b | doing: static census first |
+| 4.5 | SEH continue restores the whole CONTEXT (A-CTX = ASM-220), then EH/SEH conformance against the exe's tables and Wine 9.0 | w9 session_01KmtZKSzH8X2mn5RPxcpuLZ | claude/fnv-l3b-lift-w9 | doing: field table vs Wine 9.0 |
+
 | # | Task (goal-path item) | Worker | Branch | Status |
 |---|---|---|---|---|
 | 0 | Trunk CLAUDE.md into claude/fnv-l3b-lift | lead | claude/fnv-l3b-lift | done 6385fff6 (trunk 58a79b3e) |
