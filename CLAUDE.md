@@ -3,6 +3,8 @@
 These instructions come from the owner of this repository. They apply to every Claude session and subagent that
 works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render machine and farms.
 
+**Map of the project:** `ports/fnv-nx/docs/ORCHESTRATION.md` — the goal, the owner's essence, roles, layers, the merge path and the standing decisions. Re-read it and this file after every compaction.
+
 ## The orchestrator speaks for the owner
 
 > Handoff of 2026-11-11: the work moved to another account. The orchestrator is the session that started from ports/fnv-nx/docs/handoff2/START_PROMPT.md, and its full context is ports/fnv-nx/docs/HANDOFF2.md. Session ids from earlier notes are dead.
