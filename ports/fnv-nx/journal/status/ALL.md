@@ -54,7 +54,7 @@ verdict.
 |---|---|---|---|
 | 3.1 | L1 | w12 link/guest.json; w15 link root and onedef; w15c per-target recipes; w16c generator inputs and the header-root rule | one recipe per target |
 | 3.2 | L1 | w16: the IAT root (`fnvnx_import_key`) | closes the render undefined names |
-| 3.3 | L2 | w2 .fnvnx.tls (L1 tlsmodel); w3 extents (open GPA 12 / LoadLibrary 3 sites) | reach certificates count once every dynamic site is resolved |
+| 3.3 | L2 | w2 .fnvnx.tls (L1 tlsmodel); w3 extents. Open sites: GetProcAddress 0 of 135 and LoadLibrary 2 of 36 (exe 0xda284a, d3dx9_38 0x56b717), at facts a0f3d8ea / manifest e15d385f, measured 2026-11-14. Rule: a dominating index compare bounds the indexed store | reach certificates count once every dynamic site is resolved |
 | 3.4 | L3a | the product ELF root, with a worker; bridges → `fnvnx_dispatch`; exitgen | undefined closure = ∅ |
 | 3.5 | L5 | rt/guest: `main` process entry; pthread mutexes over real threads (libgcc unwind) | 3 native test roots link |
 | 3.6 | L6 | w1b translator root; w6 render/d3d9 root (after 3.1 w16c); doubles 26/88 and the 22 ignore-all link commands → 0; render/ASSUMPTIONS.md into the registry | stub/doubles gates 0 |
