@@ -8,7 +8,7 @@ One block per instruction:  `{ snapshots of the pre-state; const temporaries (ev
 flag writes; stores; control transfer }`, i.e. the Form's parallel semantics: all expressions read the pre-state, effects commit in the Form's order.
 Mapping of the Form's state to the lifter's:  eax..edi, cf pf af zf sf of df = the C registers / function-local flag values (0 or 1);
 fs_base = `fsb`; flo (the other EFLAGS bits) = c->eflx | IF (EFL_PUSH/EFL_POP keep AC and ID there; user mode has IF set);
-memory = M8/M16/M32 (core's macros).  A flag a form declares undefined gets no assignment; a write with `when` is conditional.
+memory = M8/M16/M32 (core's macros).  DEF0: a flag a form declares undefined is assigned 0, and a flag write with `when` w is `w ? v : 0`; DEFPRIOR: a register write with `when` is conditional, so a register the model leaves free keeps its prior value.
 
 Faults (Form.faults) raise through f_flow.raise_site like int3/ud2 and the hand div: code 1 (#DE) is FNVL_DE0 when the failing disjunct is the
 divisor-zero test `eq(x, 0)` and FNVL_DEOVF otherwise (the quotient overflow); 2 = FNVL_BP, 3 = FNVL_UD, 4 = FNVL_BOUNDS (#BR, bound; a fault like #DE).

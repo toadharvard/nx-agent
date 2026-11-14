@@ -216,6 +216,16 @@ class Form:
     def flag(s, name, v, when=None): assert v.w == 1 and name in FLAGS + ('df',); s.flags.append((name, v, when))
     def setflo(s, v): assert v.w == 32; s.flo = v
     def undefined(s, name, sdm): s.undef[name] = sdm
+    def flag_line(s, f, v, w, ref):
+        """C text of one flag write. DEF0 (orchestrator, 2026-11-12): a flag output that the pinned model leaves free is the constant 0, so a write with `when` w is
+        `w ? v : 0` (v is the value where the SDM defines it)"""
+        return '%s = %s;' % (f, ref(v)) if w is None else '%s = %s ? %s : 0;' % (f, ref(w), ref(v))
+    def undefined_outputs(s):
+        """-> (flag outputs the model leaves free, non-flag outputs the model leaves free): the flags of `undef` and of a write with `when`; the registers of a
+        write with `when`. DEF0 gives the flags the value 0, DEFPRIOR gives the registers their pre-state value."""
+        fl = sorted(set(s.undef) | {f for f, _, w in s.flags if w is not None})
+        rg = sorted({r for r, _, w in s.regs if w is not None})
+        return fl, rg
     def store(s, addr, v, when=None):
         if when is not None: assert when.w == 1; s.swhen[len(s.stores)] = when
         s.stores.append((addr, v))
@@ -275,7 +285,7 @@ class Form:
         """C lines of ONE instruction to be placed inside a block of a lifted function: -> (lines, ref) where ref(node) is the C text of a node
         usable AFTER the lines (a named temporary or an expression over the `in_` snapshots).  Order = the Form's: snapshots of the used pre-state
         (varc(name) -> the C expression of a pre-state variable), temporaries for loads and shared sub-expressions (and the `force`d nodes), faults
-        (fault_fn(code, cond_node, ref) -> C line), register writes, flag writes (unconditional, also with `when`; an undefined flag gets none),
+        (fault_fn(code, cond_node, ref) -> C line), register writes, flag writes (DEF0: a write with `when` w is `w ? v : 0`, a flag the Form declares undefined is 0),
         the other-EFLAGS write (flo_fn(ref of the value) -> C line), stores.  The eip node is not emitted: the caller derives the control transfer from it."""
         e = InlineEmit(s.roots(), force); e.macc = macc; L = []
         for u in sorted(e.used): L.append('const u32 in_%s = %s;' % (u, varc(u)))
@@ -284,7 +294,8 @@ class Form:
         for k, c in s.faults: L.append(fault_fn(k, c, e.ref))
         cw = lambda w: '' if w is None else 'if (%s) ' % e.ref(w)
         for r, v, w in s.regs: L.append('%s%s = %s;' % (cw(w), r, e.ref(v)))
-        for f, v, w in s.flags: L.append('%s = %s;' % (f, e.ref(v)))     # `when` only bounds the proof obligation: v is a deterministic value (e.g. SHL CF for count >= size)
+        for f, v, w in s.flags: L.append(s.flag_line(f, v, w, e.ref))        # DEF0: a flag the model leaves free is the constant 0
+        for f in sorted(s.undef): L.append('%s = 0;' % f)                      # DEF0: a flag the Form declares undefined is the constant 0
         if s.flo is not None: L.append(flo_fn(e.ref(s.flo)))
         for k, (a, v) in enumerate(s.stores): L.append('%s%s%d(%s) = %s;' % (('if (%s) ' % e.ref(s.swhen[k])) if k in s.swhen else '', macc, v.w, e.ref(a), e.ref(v)))
         return L, e.ref
@@ -295,8 +306,9 @@ class Form:
         for n in e.order:
             if n.u in e.names: L.append('  const %s %s = %s;' % (T(n.w), e.names[n.u], e.ex(n)))
         for k, c in s.faults: L.append('  if (%s) { eip = %s; return %d; }' % (e.ref(c), K(s.addr, 32), k))
-        for r, v, _ in s.regs: L.append('  %s = %s;' % (r, e.ref(v)))
-        for f, v, _ in s.flags: L.append('  %s = %s;' % (f, e.ref(v)))
+        for r, v, w in s.regs: L.append('  %s%s = %s;' % ('' if w is None else 'if (%s) ' % e.ref(w), r, e.ref(v)))      # DEFPRIOR: a register the model leaves free (`when` false) keeps its prior value
+        for f, v, w in s.flags: L.append('  ' + s.flag_line(f, v, w, e.ref))
+        for f in sorted(s.undef): L.append('  %s = 0;' % f)
         if s.flo is not None: L.append('  flo = %s;' % e.ref(s.flo))
         for k, (a, v) in enumerate(s.stores): L.append('  %sM%d(%s) = %s;' % (('if (%s) ' % e.ref(s.swhen[k])) if k in s.swhen else '', v.w, e.ref(a), e.ref(v)))
         L.append('  eip = %s;\n  return 0;\n}' % e.ref(s.eip))
