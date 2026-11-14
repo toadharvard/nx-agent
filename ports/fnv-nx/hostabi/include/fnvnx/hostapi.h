@@ -50,8 +50,7 @@ typedef struct FnvnxHostApi {
     uint64_t thread_create;        /* (entry, arg, stack_size, prio, cpu) -> host thread id (!= 0) or 0.
                                       The new thread calls the guest function entry(arg) (u64 arg) and ends
                                       when it returns. prio: Win32 scale -15..15; cpu: FNVNX_CPU_SPEC(ideal, mask)
-                                      with ideal in mask and mask within FNVNX_APP_CORES (FNVNX_APP_CORES_CORE3 when the host is built with
-                                      FNVNX_CORE3_DEFAULT), else FNVNX_HE_BADINPUT and nothing is created (id 0). The placement is computed
+                                      with ideal in mask and mask within FNVNX_APP_CORES, else FNVNX_HE_BADINPUT and nothing is created (id 0). The placement is computed
                                       only in the guest (fnvnx_place_ex, fnvnx/placement.h); the host takes the spec as given. The main thread
                                       starts at FNVNX_DEFAULT_CORE, mask 1 << FNVNX_DEFAULT_CORE. Not started. The id is a table handle
                                       ((generation << 16) | slot, host_ids.inc), never an address; at most 1024
@@ -70,7 +69,7 @@ typedef struct FnvnxHostApi {
                                       a negative spec (bits 40..62 set) -> 0, nothing changed. spec 0..63: that core only;
                                       FNVNX_CPU_SPEC(ideal, mask): ideal core (FNVNX_CPU_KEEP: keep) and
                                       affinity mask (0: keep), the ideal core joins the mask; the resulting ideal in the mask and the mask
-                                      within FNVNX_APP_CORES(_CORE3) (fnvnx/placement.h), else FNVNX_HE_BADINPUT, nothing changed */
+                                      within FNVNX_APP_CORES (fnvnx/placement.h), else FNVNX_HE_BADINPUT, nothing changed */
     uint64_t wait_on_address;      /* (addr, expected u32, timeout_ns) -> 0 woken, 1 timed out, 2 value != expected
                                       (svcWaitForAddress WaitIfEqual; addr 4-aligned); timeout_ns above INT64_MAX waits
                                       forever; any other kernel result unchanged (0xCC01 addr not 4-aligned, 0xD401 addr
@@ -80,7 +79,6 @@ typedef struct FnvnxHostApi {
     uint64_t wall_time_us;         /* () -> microseconds since 1970 UTC */
     uint64_t random64;             /* () -> random u64 */
     uint64_t memory_info;          /* (FnvnxMemInfo *) -> 0 (avail_phys = 0 when used > total) */
-    uint64_t cpu_count;            /* () -> cores the game may use: 3 (application cores 0-2), 4 with the platform config core3=1 */
     uint64_t fs_open;              /* (path, OS_O_* flags) -> fd >= 0, or -errno (int64 as u64) */
     uint64_t fs_read;              /* (fd, buf, n) -> bytes or -errno */
     uint64_t fs_write;             /* (fd, buf, n) -> bytes or -errno */
@@ -325,7 +323,7 @@ typedef struct FnvnxHostApi {
  *   thread_create, thread_start, thread_join, thread_free, thread_set_priority, thread_set_cpu ( , ids )  test:thread_slots test:thread_ids;
  *   thread_exit, thread_yield ( ) -;
  *   wait_on_address, wake_address ( )  test:wait_wake;
- *   wall_time_us, random64, memory_info ( ) -; cpu_count ( )  test:thread_slots;
+ *   wall_time_us, random64, memory_info ( ) -;
  *   fs_open, fs_read, fs_write, fs_pread, fs_pwrite, fs_seek, fs_truncate, fs_sync, fs_fstat, fs_close, fs_stat, fs_mkdir, fs_rmdir, fs_remove,
  *   fs_rename ( )  test:fs_errors; fs_dir_open, fs_dir_next, fs_dir_close ( )  test:dir_slots;
  *   audio_open, audio_submit, audio_close, pad_read, pad_vibrate, input_poll ( )  test:test_audio test:test_pads test:test_events;
@@ -488,11 +486,11 @@ typedef struct FnvnxMemInfo {
 } FnvnxMemInfo;
 
 #if defined(__cplusplus)
-static_assert(sizeof(FnvnxHostApi) == 0x1A0, "FnvnxHostApi layout");
+static_assert(sizeof(FnvnxHostApi) == 0x198, "FnvnxHostApi layout");
 static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(FnvnxInputEvent) == 24,
                "shared struct layout");
 #else
-_Static_assert(sizeof(FnvnxHostApi) == 0x1A0, "FnvnxHostApi layout");
+_Static_assert(sizeof(FnvnxHostApi) == 0x198, "FnvnxHostApi layout");
 _Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(FnvnxInputEvent) == 24,
                "shared struct layout");
 #endif

@@ -541,7 +541,7 @@ extern "C" BOOL SetThreadPriorityBoost(HANDLE h, BOOL disable)
 
 extern "C" DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask)
 {
-    DWORD_PTR all = ((DWORD_PTR)1 << os_cpu_count()) - 1;
+    DWORD_PTR all = os_cpu_mask();
     if (!(mask & all))
         return 0;
     if (h == W32_PSEUDO_THREAD)

@@ -48,6 +48,33 @@ SCALAR32 = {E_BOOL, E_CHAR, E_I1, E_U1, E_I2, E_U2, E_I4, E_U4, E_I, E_U}
 WIDTH = {E_BOOL: 1, E_I1: 1, E_U1: 1, E_CHAR: 2, E_I2: 2, E_U2: 2, E_I4: 4, E_U4: 4, E_I: 4, E_U: 4}   # ILP32 guest
 
 
+# The string pointer typedefs that the Windows Data Types documentation defines as a pointer to a NUL-terminated string of 8-bit /
+# 16-bit characters (kind str8 / str16; BSTR: documented as a length-prefixed, NUL-terminated OLECHAR string), and the ones it defines as a double-NUL-terminated list (str8nn / str16nn).
+STRINGS = {'PSTR': 8, 'LPSTR': 8, 'PCSTR': 8, 'LPCSTR': 8, 'PTSTR': 8, 'LPTSTR': 8, 'PCTSTR': 8, 'LPCTSTR': 8, 'PSZ': 8, 'PCSZ': 8,
+           'PWSTR': 16, 'BSTR': 16, 'LPWSTR': 16, 'PCWSTR': 16, 'LPCWSTR': 16, 'LPOLESTR': 16, 'LPCOLESTR': 16,
+           'PZZSTR': 8, 'PCZZSTR': 8, 'PZZTSTR': 8, 'PCZZTSTR': 8, 'PZZWSTR': 16, 'PCZZWSTR': 16}
+STRINGS_NN = {'PZZSTR', 'PCZZSTR', 'PZZTSTR', 'PCZZTSTR', 'PZZWSTR', 'PCZZWSTR'}
+
+
+def named_args(blob):
+    """named arguments {name: value} of a custom attribute value blob that has no fixed arguments (ECMA-335 II.23.3)"""
+    b = Blob(blob)
+    assert b.u8() == 1 and b.u8() == 0, 'attribute prolog'
+    out = {}
+    n = b.u8() | (b.u8() << 8)
+    for _ in range(n):
+        assert b.u8() in (0x53, 0x54), 'named argument kind'
+        t = b.u8()
+        name = bytes(b.b[b.i + 1:b.i + 1 + b.b[b.i]]).decode()
+        b.i += 1 + len(name)
+        size = {E_BOOL: 1, E_I1: 1, E_U1: 1, E_I2: 2, E_U2: 2, E_I4: 4, E_U4: 4, E_I8: 8, E_U8: 8}[t]
+        v = int.from_bytes(b.b[b.i:b.i + size], 'little')
+        b.i += size
+        out[name] = bool(v) if t == E_BOOL else v
+    return out
+
+
+
 class Blob:
     def __init__(self, b):
         self.b, self.i = bytes(b), 0
@@ -269,6 +296,300 @@ class Meta:
     def type_skip(self, b):
         self.type(b)
 
+    # ---- argument extents (import_argext.tsv) --------------------------------------------------------------------------
+    def resolve(self, coded):
+        """TypeDef index of a TypeDefOrRef coded index (a TypeRef is resolved by namespace and name), 'Guid', or None"""
+        tag, idx = coded & 3, coded >> 2
+        if tag == 0:
+            return idx
+        if tag == 1:
+            r = self.typeref[idx - 1]
+            if str(r.TypeName) == 'Guid':
+                return 'Guid'
+            return self.by_name.get((str(r.TypeNamespace), str(r.TypeName)))
+        return None
+
+    def param_attrs(self):
+        """{Param row index: {attribute name: {named field: value}}} of the documented parameter annotations"""
+        if getattr(self, '_pattrs', None) is not None:
+            return self._pattrs
+        out = collections.defaultdict(dict)
+        for ca in self.t.CustomAttribute.rows:
+            if ca.Parent.table is None or ca.Parent.table.name != 'Param':
+                continue
+            name = str(ca.Type.row.Class.row.TypeName)
+            name = name[:-len('Attribute')] if name.endswith('Attribute') else name
+            out[ca.Parent.row_index][name] = named_args(bytes(ca.Value.value))
+        self._pattrs = out
+        return out
+
+    def packing(self, idx):
+        """(PackingSize, ClassSize) of TypeDef idx from the ClassLayout table; (0, 0) when it has no row"""
+        if getattr(self, '_clayout', None) is None:
+            self._clayout = {r.Parent.row_index: (r.PackingSize, r.ClassSize) for r in self.t.ClassLayout.rows}
+        return self._clayout.get(idx, (0, 0))
+
+    def offsets(self):
+        if getattr(self, '_flayout', None) is None:
+            self._flayout = {r.Field.row_index: r.Offset for r in self.t.FieldLayout.rows}
+        return self._flayout
+
+    def type_layout(self, b):
+        """(size, alignment) of the next encoded field type under the x86 32-bit (ILP32) layout: 8-byte integers and doubles
+        align 8, pointers are 4. None: not encodable here (the caller reports it)."""
+        while True:
+            e = b.u8()
+            if e in (E_CMOD_REQD, E_CMOD_OPT):
+                b.comp()
+                continue
+            break
+        if e in WIDTH:
+            return WIDTH[e], WIDTH[e]
+        if e in (E_I8, E_U8, E_R8):
+            return 8, 8
+        if e == E_R4:
+            return 4, 4
+        if e in (E_PTR, E_BYREF):
+            self.type(b)
+            return 4, 4
+        if e in (E_FNPTR, E_STRING, E_OBJECT, E_CLASS):
+            if e == E_CLASS:
+                b.comp()
+            return 4, 4
+        if e == E_ARRAY:
+            w = self.type_layout(b)
+            rank = b.comp()
+            sizes = [b.comp() for _ in range(b.comp())]
+            for _ in range(b.comp()):
+                b.comp()
+            if w is None or len(sizes) != rank:
+                return None
+            n = 1
+            for z in sizes:
+                n *= z
+            return w[0] * n, w[1]
+        if e == E_VALUETYPE:
+            idx = self.resolve(b.comp())
+            if idx == 'Guid':
+                return 16, 4
+            return None if idx is None else self.layout(idx)
+        return None
+
+    def layout(self, idx):
+        """(size, alignment) of the struct, union, enum or native typedef TypeDef idx under the x86 32-bit layout.
+        Field alignment is min(natural, Pack) when the type has a [StructLayout] Pack, else natural; an explicit layout
+        (a union) takes the field offsets of the FieldLayout table; the size is rounded to the alignment and is at least
+        the ClassSize. None when a field type is not encodable."""
+        key = ('layout', idx)
+        if key in self.cache:
+            return self.cache[key]
+        td = self.typedef[idx - 1]
+        res = None
+        if td.Flags.tdInterface:
+            res = (4, 4)
+        elif idx in self.native:
+            res = self.type_layout(Blob_of_field(td.FieldList[0].row))
+        else:
+            ext = td.Extends.row if td.Extends is not None and td.Extends.row is not None else None
+            en = str(getattr(ext, 'TypeName', ''))
+            if en == 'MulticastDelegate':
+                res = (4, 4)
+            elif en == 'Enum':
+                res = self.type_layout(Blob_of_field(td.FieldList[0].row))
+            else:
+                pack, csize = self.packing(idx)
+                explicit = bool(td.Flags.tdExplicitLayout)
+                offs = self.offsets()
+                total, align, ok = 0, 1, True
+                for f in td.FieldList:
+                    if f.row.Flags.fdStatic:
+                        continue
+                    b = Blob(f.row.Signature.value)
+                    b.u8()
+                    w = self.type_layout(b)
+                    if w is None:
+                        ok = False
+                        break
+                    sz, al = w
+                    if pack:
+                        al = min(al, pack)
+                    align = max(align, al)
+                    if explicit:
+                        total = max(total, offs.get(f.row_index, 0) + sz)
+                    else:
+                        total = (total + al - 1) // al * al + sz
+                if ok:
+                    total = max((total + align - 1) // align * align, csize)
+                    res = (total, align)
+        self.cache[key] = res
+        return res
+
+    def pointee(self, b):
+        """Describe the type a pointer points to (the blob is after the PTR byte):
+        ('void',) | ('scalar', size) | ('ptr',) | ('struct', size) | ('iface',) | ('?', reason)"""
+        while True:
+            e = b.u8()
+            if e in (E_CMOD_REQD, E_CMOD_OPT):
+                b.comp()
+                continue
+            break
+        if e == E_VOID:
+            return ('void',)
+        if e in (E_PTR, E_BYREF, E_FNPTR, E_STRING, E_OBJECT):
+            if e in (E_PTR, E_BYREF):
+                self.type(b)
+            return ('ptr',)
+        if e == E_CLASS:
+            b.comp()
+            return ('iface',)
+        if e in WIDTH or e in (E_I8, E_U8, E_R4, E_R8):
+            return ('scalar', WIDTH.get(e) or (4 if e == E_R4 else 8))
+        if e == E_VALUETYPE:
+            idx = self.resolve(b.comp())
+            if idx == 'Guid':
+                return ('struct', 16)
+            if idx is None:
+                return ('?', 'unresolved type reference')
+            td = self.typedef[idx - 1]
+            if td.Flags.tdInterface:
+                return ('iface',)
+            if idx in self.native:
+                fb = Blob_of_field(td.FieldList[0].row)
+                if str(td.TypeName) in STRINGS:
+                    return ('ptr',)                       # a pointer to a string pointer
+                return self.pointee(fb)
+            ext = td.Extends.row if td.Extends is not None and td.Extends.row is not None else None
+            en = str(getattr(ext, 'TypeName', ''))
+            if en == 'MulticastDelegate':
+                return ('ptr',)
+            if en == 'Enum':
+                w = self.layout(idx)
+                return ('scalar', w[0]) if w else ('?', 'enum layout')
+            w = self.layout(idx)
+            if not w:
+                return ('?', 'struct layout of %s not encodable' % td.TypeName)
+            fs = [f.row for f in td.FieldList if not f.row.Flags.fdStatic]
+            handle = len(fs) == 1 and bytes(fs[0].Signature.value) == b'\x06\x08'      # the DECLARE_HANDLE shape: one int field
+            return ('struct', w[0], handle)
+        return ('?', 'element type 0x%x' % e)
+
+    def ext_type(self, b):
+        """What one parameter's type says about the extent of what it points to:
+        ('n',) not a pointer | ('str', bits) PSTR/PCSTR/PWSTR/PCWSTR | ('ptr', pointee) | ('iface',) | ('opaque',)"""
+        while True:
+            e = b.u8()
+            if e in (E_CMOD_REQD, E_CMOD_OPT):
+                b.comp()
+                continue
+            break
+        if e in (E_PTR, E_BYREF):
+            return ('ptr', self.pointee(b))
+        if e in WIDTH or e in (E_I8, E_U8, E_R4, E_R8):
+            return ('n',)
+        if e in (E_FNPTR, E_STRING, E_OBJECT):
+            return ('opaque',)
+        if e == E_CLASS:
+            b.comp()
+            return ('iface',)
+        if e == E_VALUETYPE:
+            idx = self.resolve(b.comp())
+            if idx == 'Guid':
+                return ('n',)
+            if idx is None:
+                return ('?', 'unresolved type reference')
+            td = self.typedef[idx - 1]
+            if td.Flags.tdInterface:
+                return ('iface',)
+            if idx in self.native:
+                name = str(td.TypeName)
+                if name in STRINGS:
+                    return ('str', STRINGS[name], name in STRINGS_NN)
+                d = self.ext_type(Blob_of_field(td.FieldList[0].row))
+                if d[0] == 'ptr' and d[1][0] == 'struct' and d[1][2]:
+                    return ('opaque',)               # a handle type: a native typedef of a pointer to a DECLARE_HANDLE struct
+                return d
+            ext = td.Extends.row if td.Extends is not None and td.Extends.row is not None else None
+            en = str(getattr(ext, 'TypeName', ''))
+            if en == 'MulticastDelegate':
+                return ('opaque',)
+            return ('n',)                                     # an enum or a struct by value: a copy
+        return ('?', 'element type 0x%x' % e)
+
+    def method_ext(self, m):
+        """[(kind, extent spec)] per declared parameter of a MethodDef. The extent spec is a string, or ('arg', j, mult, deref)
+        with j the declared parameter index; None kind means unresolved (reason in the extent)."""
+        b = Blob(m.Signature.value)
+        cc = b.u8()
+        if cc & 0x10:
+            b.comp()
+        n = b.comp()
+        self.type(b)                                          # the return type
+        attrs = self.param_attrs()
+        seq = {}
+        for p in m.ParamList:
+            if p.row.Sequence:
+                seq[p.row.Sequence] = attrs.get(p.row_index, {})
+        out = []
+        for i in range(n):
+            if b.b[b.i] == E_SENTINEL:
+                break
+            out.append(self.ext_param(self.ext_type(b), seq.get(i + 1, {})))
+        return out
+
+    def ext_param(self, d, at):
+        """(kind, extent spec) of a parameter from its decoded type `d` and its annotations `at`"""
+        if d[0] == '?':
+            return ('?', d[1])
+        if d[0] == 'n':
+            return ('n', '-')
+        if d[0] == 'iface':
+            return ('iface', '-')
+        if d[0] == 'opaque':
+            return ('opaque', '-')
+        if 'Buffer' in at:
+            a = at['Buffer']
+            elem = 1
+            if d[0] == 'ptr':
+                p = d[1]
+                if p[0] == '?':
+                    return ('?', p[1])
+                elem = {'void': None, 'scalar': p[1] if p[0] == 'scalar' else 0, 'ptr': 4, 'struct': p[1] if p[0] == 'struct' else 0,
+                        'iface': 4}[p[0]]
+            elif d[0] == 'str':
+                elem = d[1] // 8
+            if 'CountParamIndex' in a:
+                deref = bool(a.get('Dereference'))
+                if a.get('Bytes'):
+                    return ('buf', ('arg', a['CountParamIndex'], 1, deref))
+                return ('buf', ('arg', a['CountParamIndex'], elem if elem is not None else '?', deref))
+            if 'CountConst' in a:
+                if a.get('Bytes'):
+                    return ('buf', str(a['CountConst']))
+                if elem is None:
+                    return ('buf', '%d*?' % a['CountConst'])
+                return ('buf', str(a['CountConst'] * elem))
+            return ('?', 'Buffer annotation without a count')
+        if d[0] == 'str':
+            nn = 'NullNullTerminated' in at or d[2]
+            return ('str%d%s' % (d[1], 'nn' if nn else ''), 'nul')
+        p = d[1]
+        if p[0] == '?':
+            return ('?', p[1])
+        if 'NullNullTerminated' in at or 'NullTerminated' in at:
+            nn = 'NullNullTerminated' in at
+            if p[0] == 'scalar' and p[1] in (1, 2):
+                return ('str%d%s' % (p[1] * 8, 'nn' if nn else ''), 'nul')
+            return ('nulterm', 'nul')                         # a NUL-terminated array of other elements
+        if p[0] == 'void':
+            return ('opaque', '-')
+        if p[0] == 'iface':
+            return ('iface', '-')
+        if p[0] == 'struct':
+            return ('struct', str(p[1]))
+        if p[0] == 'scalar':
+            return ('ref', str(p[1]))
+        return ('ref', '4')                                   # a pointer to a pointer
+
     def method(self, m):
         """(conv, ret, [(kind, const, letters, in, out)]) of a MethodDef"""
         b = Blob(m.Signature.value)
@@ -324,45 +645,53 @@ def table(meta):
     return by_mod, by_name
 
 
+def walk(meta, ps, args):
+    """The slot rule: each parameter takes bridge letters until its stack width is reached (i, f = 1 slot; q, d = 2 slots);
+    a scalar must match its letter exactly, a by-value aggregate of size s takes s/4 slots. Returns ([(start, count, is_aggregate)
+    per parameter], None) or (None, reason)."""
+    pos, slots = 0, []
+    for k, c, l, fin, fout in ps:
+        if k == 'aggregate':
+            size = l if isinstance(l, int) else meta.size_of(l) if not isinstance(l, str) else None
+            if size is None:
+                return None, 'aggregate of unknown size'
+            need, start = (size + 3) // 4, pos
+            while need > 0 and pos < len(args):
+                need -= 2 if args[pos] in 'qd' else 1
+                pos += 1
+            if need != 0 or pos == start:
+                return None, 'aggregate slots do not fit the bridge args'
+            slots.append((start, pos - start, True))
+            continue
+        if pos >= len(args) or args[pos] != l:
+            return None, 'slots do not match the bridge args %s' % args
+        slots.append((pos, 1, False))
+        pos += 1
+    if pos != len(args):
+        return None, 'slots do not match the bridge args %s' % args
+    return slots, None
+
+
 def row_letters(meta, rows, args, conv, this=(), writes=False):
     """letters of the documented prototype(s) in `rows`, or (None, reason). All rows must agree.
-    Each parameter takes bridge letters until its stack width is reached (i, f = 1 slot; q, d = 2 slots); a scalar must
-    match its letter exactly, a by-value aggregate of size s takes s/4 slots and classes n (a copy of a value)."""
+    Slots follow walk(); a by-value aggregate classes n (a copy of a value)."""
     outs = set()
     for m in rows:
         cc, ret, ps = meta.method(m)
         ps = list(this) + ps
-        pos, letters, reasons, bad = 0, '', [], None
-        for k, c, l, fin, fout in ps:
-            if k == 'aggregate':
-                size = l if isinstance(l, int) else meta.size_of(l) if not isinstance(l, str) else None
-                if size is None:
-                    bad = 'aggregate of unknown size'
-                    break
-                need, take = (size + 3) // 4, ''
-                while need > 0 and pos < len(args):
-                    w = 2 if args[pos] in 'qd' else 1
-                    need -= w
-                    take += args[pos]
-                    pos += 1
-                if need != 0 or not take:
-                    bad = 'aggregate slots do not fit the bridge args'
-                    break
-                letters += 'n' * len(take)
-                reasons += [''] * len(take)
-                continue
-            if pos >= len(args) or args[pos] != l:
-                bad = 'slots do not match the bridge args %s' % args
-                break
-            pos += 1
-            ch, why = classify((k, c, l, fin, fout), writes)
-            letters += ch
-            reasons.append(why)
-        if bad is None and pos != len(args):
-            bad = 'slots do not match the bridge args %s' % args
+        slots, bad = walk(meta, ps, args)
         if bad:
             outs.add((None, bad))
             continue
+        letters, reasons = '', []
+        for p, (start, n, agg) in zip(ps, slots):
+            if agg:
+                letters += 'n' * n
+                reasons += [''] * n
+                continue
+            ch, why = classify(p, writes)
+            letters += ch
+            reasons.append(why)
         outs.add((letters + (('*w' if writes else '*e') if conv == 'vararg' else ''), tuple(reasons)))
     if len(outs) != 1:
         return None, 'prototypes disagree'
@@ -488,6 +817,103 @@ def generate(meta, bridge, commit, sha, writes=False):
     return '\n'.join(out) + '\n', report, count
 
 
+def row_argext(meta, rows, args, conv, this=()):
+    """[(slot, kind, extent)] of the documented prototype(s) in `rows`, or (None, reason). All rows must agree.
+    Slots follow walk(), the same slot rule as the escape letters; a by-value aggregate is `n` in each of its slots; the receiver
+    of a COM method is slot 0 of kind iface; a vararg tail is one row with slot `*` and kind `va`."""
+    outs = set()
+    for m in rows:
+        cc, ret, ps = meta.method(m)
+        full = list(this) + ps
+        slots, bad = walk(meta, full, args)
+        if bad:
+            outs.add((None, bad))
+            continue
+        ext = ([('iface', '-')] if this else []) + meta.method_ext(m)
+        if len(ext) != len(full):
+            outs.add((None, 'prototype parameter count'))
+            continue
+        res = []
+        for (start, n, agg), (kind, spec) in zip(slots, ext):
+            if agg:
+                res += [(start + i, 'n', '-') for i in range(n)]
+                continue
+            if isinstance(spec, tuple):
+                j = spec[1] + len(this)
+                if j >= len(slots):
+                    outs.add((None, 'count parameter index %d out of range' % spec[1]))
+                    break
+                spec = '%sarg:%d%s' % ('*' if spec[3] else '', slots[j][0], '*%s' % spec[2] if spec[2] != 1 else '')
+            if kind == '?':
+                outs.add((None, spec))
+                break
+            res.append((start, kind, spec))
+        else:
+            if conv == 'vararg':
+                res.append(('*', 'va', '-'))
+            outs.add(tuple(res))
+    if len(outs) != 1:
+        return None, 'prototypes disagree'
+    r = list(outs)[0]
+    if r and r[0] is None:
+        return None, r[1]
+    return list(r), None
+
+
+def generate_argext(meta, bridge, commit, sha):
+    """import_argext.tsv text, report rows and counts by kind (one row per bridge slot)"""
+    by_mod, by_name = table(meta)
+    ifs = interfaces(meta)
+    rows, report = [], []
+    count = collections.Counter()
+    for line in open(bridge, encoding='utf-8'):
+        if line.startswith('#') or line.startswith('dll\t'):
+            continue
+        f = line.rstrip('\n').split('\t')
+        dll, name, ordinal, conv, args = f[0], f[1], f[2], f[3], f[5]
+        this = []
+        if dll.startswith('!'):
+            m = com_method(meta, ifs, dll[1:], name, ordinal)
+            cand = [m] if m is not None else []
+            this = [('ptr', False, 'i', False, False)]
+        else:
+            cand = by_mod.get((dll.lower(), name))
+            if not cand:
+                cand = [m for mod, m in by_name.get(name, [])]
+        res, why = row_argext(meta, cand, args, conv, this) if cand else (None, 'no documented prototype')
+        if res is None:
+            nslots = len(args)
+            if not nslots and conv != 'vararg':
+                continue
+            res = [(i, '?', '-') for i in range(nslots)] + ([('*', '?', '-')] if conv == 'vararg' else [])
+            report.append((dll, name, 'unresolved', why))
+        for slot, kind, extent in res:
+            rows.append((dll, name, slot, kind, extent))
+            count[kind] += 1
+    rows.sort(key=lambda r: (r[0], r[1], 1 << 30 if r[2] == '*' else r[2]))
+    out = ['# import_argext.tsv - per-argument kind and extent of the pointees of the platform-layer imports, from the documented annotations',
+           '# (generated by import_escape.py --argext; same source, same slot rule as import_escape.tsv). One row per bridge `args` letter (slot, 0-based,',
+           '# a 64-bit argument is one slot; a by-value aggregate is kind n in each of its slots). A row with no slot has no row here.',
+           '# kind (what the argument points to):',
+           '#   str8 str16   PSTR PCSTR LPSTR ... / PWSTR PCWSTR LPWSTR ... (the documented string typedefs, or a one-byte / two-byte pointee annotated NullTerminated): extent nul',
+           '#   str8nn str16nn   the PZZ* typedefs or NullNullTerminated (a list of strings ended by an empty one): extent nul',
+           '#   struct   a pointer to a struct or union: extent = its size in bytes under the x86 32-bit layout (field alignment, [StructLayout]',
+           '#            Pack, nested structs, fixed arrays, explicit-layout offsets), computed from the metadata type table',
+           '#   buf      a [Buffer] annotation: extent arg:<slot> (a size in bytes held in that slot), arg:<slot>*<elem size> (an element count),',
+           '#            a number (a fixed size in bytes); a leading `*` (*arg:<slot>) means the count is read through the pointer in that slot;',
+           '#            an element size `?` (arg:<slot>*?, <n>*?) is a count of elements of a void* buffer: the documentation gives no unit',
+           '#   ref      a pointer to a scalar or pointer with no Buffer annotation: extent = the size in bytes of one element',
+           '#            (the pointee is at least one element; a documented array carries a Buffer annotation)',
+           '#   nulterm  a NUL-terminated array of elements that are not characters: extent nul',
+           '#   iface    a COM interface pointer (and the receiver, slot 0 of every COM method): extent -',
+           '#   opaque   void*, a handle (a native typedef of a pointer to a DECLARE_HANDLE struct), a function pointer: extent -',
+           '#   n        not a pointer;  va  the variadic tail (slot `*`): types not in the prototype;  ?  no pinned prototype (same rows as escape `?`)',
+           '# source: Windows.Win32.winmd of microsoft/windows-rs commit %s, sha256 %s' % (commit, sha),
+           'dll\tname\tslot\tkind\textent']
+    out += ['%s\t%s\t%s\t%s\t%s' % r for r in rows]
+    return '\n'.join(out) + '\n', report, count
+
+
 def sha_of(path):
     return funcfacts.sha256_file(path)
 
@@ -520,6 +946,7 @@ def main():
     ap.add_argument('--report')
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--selftest', action='store_true')
+    ap.add_argument('--argext', action='store_true', help='kind and extent of each pointee (import_argext.tsv)')
     ap.add_argument('--writes', action='store_true', help='write letters (import_writes.tsv) instead of escape letters')
     a = ap.parse_args()
     import os
@@ -532,7 +959,10 @@ def main():
     if a.selftest:
         selftest(meta)
         return
-    text, report, count = generate(meta, a.bridge, a.commit, sha, a.writes)
+    if a.argext:
+        text, report, count = generate_argext(meta, a.bridge, a.commit, sha)
+    else:
+        text, report, count = generate(meta, a.bridge, a.commit, sha, a.writes)
     nrows = sum(1 for l in text.splitlines() if l and l[0] != '#') - 1
     if a.check:
         if open(a.out, encoding='utf-8').read() != text:
