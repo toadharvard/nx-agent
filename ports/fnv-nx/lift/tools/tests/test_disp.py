@@ -10,7 +10,7 @@ Guest code: hand-assembled x86 functions at 0x401000.. lifted by tools/fnvlift, 
 each case is a native function (`tc_*`, an import of the guest root) that calls `fp(args)` through a pointer type with the call's own convention; the plugin turns the
 call into the cache + fnvnx_dispatch; the bridge marshals the arguments into the x86 frame; the result comes back in eax / edx:eax / ST0 or the hidden pointer.
 Expected values are computed by hand from the x86 semantics (stated at each case).  Run under Unicorn.  Prints one line per case; exit status 1 on any difference."""
-import argparse, os, re, shutil, struct, subprocess, sys
+import argparse, os, re, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE)); FNV = os.path.dirname(LIFT)
 for p in ('bench', 'tools', 'tools/tests', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, instest, phf, impgen, dispgen, bridgegen, exitgen
@@ -245,6 +245,8 @@ def main():
     ok = len(ent) == len(BRIDGE) and not blocked and not hit and not absent
     print('gen   %s entries %d' % ('equal' if ok else 'DIFF', len(ent))); bad = not ok
     texts = [L.lift(img, ad, sz, owns=owns)[0] for ad, sz, owns in ents.values()]
+    flags = [f for f in instest.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-Werror=attributes')] + ['-Wno-attributes', '-I', LIFT + '/rt']
+    CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c', '-I', FNV + '/shim/include']
     syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent}); syms[XN_ADDR] = 'X_%08x' % XN_ADDR
     h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h))
     open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + '\n'.join(texts)); open(w + '/native.cc', 'w').write(NATIVE)
@@ -254,24 +256,35 @@ def main():
     assert not xerr, xerr
     open(w + '/exits.cc', 'w').write(exitgen.generate(xrows))
     nat, nh = dispgen.table(['%08x\tnative_body\n' % NATIVE_ADDR], 'fnvnx_native'); open(w + '/ntab.S', 'w').write(nat)
-    import guestbuild      # every unit is compiled through verify/recipe.py (the pinned compiler, the plugins of the product roots): the test's own native units as a native root, the lifted units and the generated exits as a lifted root, the runtime from the real lift/rt root
-    SHIM = ['ports/fnv-nx/shim/include']
-    nat = guestbuild.build({'native.cc': open(w + '/native.cc').read()}, 'native', include=SHIM)
-    shutil.copyfile(nat['native.cc'], w + '/native.o')
+    # plugins, built from the repo sources against the pinned compiler's plugin headers
+    pdir = subprocess.run([cc('g++'), '-print-file-name=plugin'], capture_output=True, text=True).stdout.strip() + '/include'
+    plug = []
+    for n, src in (('fnvnx_names', 'names/fnvnx_names.cc'), ('fnvnx_dispatch', 'dispatch/fnvnx_dispatch.cc')):
+        so = '%s/%s.so' % (w, n)
+        r = subprocess.run(['x86_64-linux-gnu-g++-13', '-shared', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-I' + pdir, '%s/toolchain/%s' % (FNV, src), '-o', so], capture_output=True, text=True)
+        if r.returncode: sys.exit('plugin %s: %s' % (n, r.stderr[:600]))
+        plug.append('-fplugin=' + so)
+    NF = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-ffreestanding', '-fno-exceptions', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c', '-I', FNV + '/shim/include']
+    def build(cmd, src, o):
+        r = subprocess.run(cmd + [src, '-o', o], capture_output=True, text=True)
+        if r.returncode: sys.exit('compile %s: %s' % (src, r.stderr[:800]))
+    build([cc('g++')] + NF + plug, w + '/native.cc', w + '/native.o')
     # the descriptors come from the test object's own fact section; the bridges and their table are generated from them
     r = subprocess.run([sys.executable, LIFT + '/tools/bridgegen.py', '--obj', w + '/native.o', '--out', w + '/bridges.cc', '--map', w + '/bridges.tsv'], capture_output=True, text=True)
     print('bridgegen: ' + (r.stdout.strip() or r.stderr.strip()))
     if r.returncode: sys.exit(1)
-    lif = guestbuild.build({n: open(w + '/' + n).read() for n in ('guest.cpp', 'imp.cpp', 'exits.cc')}, 'lifted', include=SHIM)
-    nat2 = guestbuild.build({'bridges.cc': open(w + '/bridges.cc').read(), 'tab.S': open(w + '/tab.S').read(), 'ntab.S': open(w + '/ntab.S').read()}, 'native', include=SHIM)
-    rt = guestbuild.rt_objects()
-    named = [lif['guest.cpp'], lif['imp.cpp']] + [rt[n] for n in ('enter.cc', 'seh.cc', 'unhandled.cc')] + [lif['exits.cc'], nat2['bridges.cc']] + [rt[n] for n in ('rt.c', 'dispatch.c', 'rcptab.c', 'x87.c')] + [nat2['tab.S'], nat2['ntab.S']]
-    objs = [w + '/native.o'] + named; prod = []
-    for k, o in enumerate(named):
-        q = '%s/p%02d.o' % (w, k); shutil.copyfile(o, q); prod.append(q)
+    jobs = [([cc('g++')] + flags + ['-x', 'c++'], w + '/guest.cpp'), ([cc('g++')] + flags + ['-x', 'c++'], w + '/imp.cpp'),
+            ([cc('g++')] + flags + ['-x', 'c++'], LIFT + '/rt/enter.cc'), ([cc('g++')] + flags + ['-x', 'c++'], LIFT + '/rt/seh.cc'), ([cc('g++')] + flags + ['-x', 'c++'], LIFT + '/rt/unhandled.cc'),
+            ([cc('g++')] + flags + ['-x', 'c++'], w + '/exits.cc'), ([cc('g++')] + NF + ['-x', 'c++'], w + '/bridges.cc'),
+            ([cc('gcc')] + CF, LIFT + '/rt/rt.c'), ([cc('gcc')] + CF, LIFT + '/rt/dispatch.c'), ([cc('gcc')] + CF, LIFT + '/rt/rcptab.c'), ([cc('gcc')] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/x87.c'),
+            ([cc('gcc')] + CF, w + '/tab.S'), ([cc('gcc')] + CF, w + '/ntab.S')]
+    objs = [w + '/native.o']; prod = []
+    for cmd, src in jobs:
+        o = '%s/%s.o' % (w, os.path.basename(src).rsplit('.', 1)[0]); objs.append(o); prod.append(o)
+        build(cmd, src, o)
     # no double: no symbol the test object defines is defined by a product object
-    def defs(o): return set(l.split()[-1] for l in subprocess.run(['aarch64-linux-gnu-nm', '--defined-only', '-g', o], capture_output=True, text=True).stdout.splitlines() if len(l.split()) == 3 and l.split()[1] not in 'vVwW')      # strong definitions: a weak/linkonce symbol (the EH personality reference DW.ref.*) is no double
-    dt = defs(w + '/native.o'); dp = set().union(*[defs(o) for o in prod])
+    def defs(o): return set(l.split()[-1] for l in subprocess.run(['aarch64-linux-gnu-nm', '--defined-only', '-g', o], capture_output=True, text=True).stdout.splitlines() if len(l.split()) == 3)
+    dt = defs(w + '/native.o'); dp = set().union(*[defs(o) for o in prod if not o.endswith(('tab.o',))]) | defs(w + '/tab.o') | defs(w + '/ntab.o')
     dbl = sorted(dt & dp); print('doubles %s' % ('none' if not dbl else 'DIFF ' + ' '.join(dbl))); bad |= bool(dbl)
     elf = w + '/disp.elf'
     r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % TEXT, '-e', 'test_main', '-o', elf] + objs, capture_output=True, text=True)

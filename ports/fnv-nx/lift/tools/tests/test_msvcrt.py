@@ -318,9 +318,16 @@ def main():
     labels = [(P.addr[n], l) for n in P.order for l in P.owns[n]]
     img = Fake(P.code); starts = {P.addr[n] for n in P.order} | {l for _, l in labels}; img.entries = set(starts)
     texts = [L.lift(img, P.addr[n], SLOT, owns=P.owns[n])[0] for n in P.order] + [L.lift(img, a, SLOT, start=l, owns=[l])[0] for a, l in labels]
-    import guestbuild      # every unit is compiled through verify/recipe.py (the pinned compiler and the plugins): the real lift/rt root's objects, the lifted units as a lifted root, the test's own C and assembler as a native root
-    rto = guestbuild.rt_objects()
-    objs = [rto[n] for n in ['seh.cc', 'enter.cc', 'unhandled.cc'] + RUNTIME + ['rt.c', 'rcptab.c', 'x87.c', 'fmath.c']]
+    flags = [f for f in instest.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', rt]
+    CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c']
+    CXXF = ['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++']; CCF = ['aarch64-linux-gnu-gcc'] + CF
+    jobs = [(CXXF, rt + '/seh.cc'), (CXXF, rt + '/enter.cc'), (CXXF, rt + '/unhandled.cc')] + [(CXXF, rt + '/' + f) for f in RUNTIME] + \
+           [(CCF, rt + '/rt.c'), (CCF, rt + '/rcptab.c'), (CCF + ['-I', rt], rt + '/x87.c'), (CCF + ['-fno-builtin'], rt + '/fmath.c')]
+    objs = []
+    for cmd, src in jobs:
+        o = '%s/%s.o' % (w, os.path.basename(src).rsplit('.', 1)[0]); objs.append(o)
+        r = subprocess.run(cmd + [src, '-o', o], capture_output=True, text=True)
+        if r.returncode: sys.exit('compile %s: %s' % (src, r.stderr[:800]))
     rtdef = set()
     for o in objs:
         for l in subprocess.run(['aarch64-linux-gnu-nm', '-g', '--defined-only', o], capture_output=True, text=True).stdout.splitlines():
@@ -335,9 +342,10 @@ def main():
     assert {n: k for k, s, d, n, b in ent} == {r[1]: KEY[r[1]] for r in BRIDGE}
     open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'rt')) + '\n'.join(texts)); open(w + '/native.c', 'w').write(NATIVE)
     hh = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, hh))
-    lifted = guestbuild.build({n: open(w + '/' + n).read() for n in ('guest.cpp', 'imp.cpp')}, 'lifted', {'cxx': ['-DFNVL_FLAGS_IO']})
-    nat = guestbuild.build({n: open(w + '/' + n).read() for n in ('tab.S', 'native.c')}, 'native')
-    objs += [lifted['guest.cpp'], lifted['imp.cpp'], nat['tab.S'], nat['native.c']]
+    for cmd, src in [(CXXF, w + '/guest.cpp'), (CXXF, w + '/imp.cpp'), (CCF, w + '/tab.S'), (CCF, w + '/native.c')]:
+        o = '%s/%s.o' % (w, os.path.basename(src).rsplit('.', 1)[0]); objs.append(o)
+        r = subprocess.run(cmd + [src, '-o', o], capture_output=True, text=True)
+        if r.returncode: sys.exit('compile %s: %s' % (src, r.stderr[:800]))
     elf = w + '/msvcrt.elf'
     r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % TEXT, '-e', 'test_main', '-o', elf] + objs, capture_output=True, text=True)
     if r.returncode:
