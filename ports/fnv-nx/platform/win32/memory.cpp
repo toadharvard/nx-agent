@@ -1160,9 +1160,8 @@ extern "C" void GetSystemInfo(LPSYSTEM_INFO si)
     si->dwPageSize = PAGE;
     si->lpMinimumApplicationAddress = (LPVOID)(uintptr_t)0x00010000u;
     si->lpMaximumApplicationAddress = (LPVOID)(uintptr_t)0x7FFEFFFFu;
-    unsigned n = os_cpu_count();
-    si->dwActiveProcessorMask = ((DWORD_PTR)1 << n) - 1;
-    si->dwNumberOfProcessors = n;
+    si->dwActiveProcessorMask = os_cpu_mask();
+    si->dwNumberOfProcessors = os_cpu_count();
     si->dwProcessorType = 586; /* PROCESSOR_INTEL_PENTIUM */
     si->dwAllocationGranularity = GRAN;
     si->wProcessorLevel = 6;

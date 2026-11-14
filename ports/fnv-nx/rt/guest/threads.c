@@ -94,7 +94,7 @@ int fnvnx_thread_create(struct __pthread_t **out, void *(*fn)(void *), void *arg
                         int cpu) {
     int ideal, hprio;
     uint32_t mask;
-    fnvnx_place_ex((uint64_t)(int64_t)cpu, __atomic_fetch_add(&g_place_seq, 1, __ATOMIC_RELAXED), prio, FNVNX_CORE3_DEFAULT, &ideal,
+    fnvnx_place_ex((uint64_t)(int64_t)cpu, __atomic_fetch_add(&g_place_seq, 1, __ATOMIC_RELAXED), prio, &ideal,
                    &mask, &hprio);
     /* Proof: for every reachable input hprio is in 0x1D..0x3B (a table priority, or fnvnx_win32_to_horizon_prio of a Win32 priority in
      * -15..15, which is 0x2C - prio), so wprio = 0x2C - hprio is in -15..15 and the host's fnvnx_win32_to_horizon_prio(wprio) = 0x2C - wprio
