@@ -116,6 +116,28 @@ if UNCOVERED is not None:
 
 
 class T(unittest.TestCase):
+    def test_def0_defpior_emission(self):
+        """DEF0 / DEFPRIOR (def_check.py): the lines the real emitter produces for the Forms of every opcode-space instruction that has a Form satisfy the rules, and
+        the read-back is not vacuous: it reports a free flag that is not 0 and a free register that is written unconditionally"""
+        import def_check as dc
+        n = free = 0
+        for pre in (b'', b'\x0f'):
+            for op in range(256):
+                for modrm in (0x00, 0xc0, 0xc8, 0x40):
+                    code = pre + bytes([op, modrm]) + bytes(8)
+                    for i in list(g._md.disasm(code, A))[:1]:
+                        if g.effect(i) is None: continue
+                        fl, rg, bad = dc.check_form(g.forms.build(i, A))
+                        self.assertEqual(bad, [], i.mnemonic + ' ' + i.op_str)
+                        n += 1; free += bool(fl or rg)
+        self.assertGreater(n, 100)
+        self.assertGreater(free, 0)
+        r = dc.run({('k', None): [next(g._md.disasm(bytes.fromhex('f7e1'), A)), 7]})        # mul ecx: flags with free outputs
+        self.assertGreater(r['uncertified'], 0); self.assertEqual(r['status'], 'red'); self.assertEqual(r['cert_owner'], 'L3b')
+        self.assertEqual(dc.read_back(['cf = 1;'], ['cf'], []), ['flag cf is not 0 where free: cf = 1;'])
+        self.assertEqual(dc.read_back(['cf = 0;', 'eax = x;'], ['cf'], ['eax']), ['register eax is written unconditionally although free'])
+        self.assertEqual(dc.read_back(['cf = (n1) ? n2 : 0;', 'if (n3) eax = n4;'], ['cf'], ['eax']), [])
+
     def test_form_set_gap(self):
         """the no-Form cases above exist only while the Form set has a gap; when it has none, no decodable encoding is uncovered"""
         self.assertEqual(UNCOVERED is None, all(g.effect(i) is not None for pre in (b'', b'\\x0f') for op in range(256) for i in list(g._md.disasm(pre + bytes([op]) + bytes(8), A))[:1] if i.mnemonic))
