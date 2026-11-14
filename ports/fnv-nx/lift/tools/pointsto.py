@@ -28,9 +28,19 @@ U = frozenset([UNK]); TOPSET = frozenset([TOP])
 R32 = pcsrc.R32
 
 
+_NORM = {}
+
+
 def norm(ts):
     """widen a token set: per object more than WIDTH offsets -> ANY; more than WIDTH integer constants -> the arbitrary integer; TOP absorbs nothing (kept as a token)"""
     if len(ts) <= WIDTH: return ts
+    r = _NORM.get(ts)
+    if r is None:
+        r = _NORM[ts] = _norm(ts)           # pure function of the set: memoised (the same wide sets are joined millions of times)
+    return r
+
+
+def _norm(ts):
     byo = defaultdict(set)
     for o, c in ts: byo[o].add(c)
     out = set()
@@ -44,7 +54,8 @@ def norm(ts):
 
 def join(a, b):
     if a is None: return b
-    if b is None or a == b: return a
+    if b is None or a is b or b <= a: return a
+    if a <= b: return b
     return norm(a | b)
 
 
