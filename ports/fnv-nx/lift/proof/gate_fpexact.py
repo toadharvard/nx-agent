@@ -6,7 +6,8 @@ No argument is read. Universe convention of the object-level gates (gate_build.q
 roots of verify/admit.json; each root is built or taken from the cache by gate_build.ensure (GATE_CACHE, else GATE_OUT/fpexact-cache) and its
 objects (objects.json "objects") are judged; no product root: universe 0, green. The loader modules (gate_build, recipe) are imported from
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
-All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]) and `read_f2i` (the plugin's file of one object).
+All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]), `read_f2i_paths` (objects.json -> {unit: the plugin's file of
+its object}: the `f2i` field of the object's row, the single place where the recipe records the path) and `read_f2i` (that file).
 The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcpref.h, rcptab.c, rcptab.cert.json): the item
 `<image>:rcpcert` exists per linked image (a root with a link stage) iff another object of the image references a symbol that the object compiled from the unit rcptab.c defines (symbol tables of the objects: the link resolves exactly those references); no image, or no such reference: no item (universe 0 for check 1).
 
@@ -51,9 +52,10 @@ object-level necessary condition:
       float / vector operand or an FP register clobber) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in rt/fnvl_x87.h, on the
       helpers sse_f2i and fv_i), right after the CFG is built, before early inlining and every optimisation, so inlining a helper into its callers
       cannot hide a site and no transformation adds one. It writes `<unit>.f2i.json` (format fnvnx-f2i/1: unit, sites, helpers, findings = sorted
-      {function, file, line, kind: conv|builtin|asm}) into the CC stage's /out; the recipe keeps it as obj/<unit>.o.f2i.json next to the object.
-      Rule: every object has its result file, its `unit` field equals the unit of objects.json, and `findings` == []; a missing or malformed file,
-      another unit, or any finding is a finding of the object.
+      {function, file, line, kind: conv|builtin|asm}) into the CC stage's /out; the recipe records its path as the `f2i` field of the object's row in objects.json (obj/<unit>.f2i.json).
+      Rule: every object row has `f2i` naming an existing result file, its `unit` field equals recipe.sandbox_src(unit) (the plugin reports the compiler's
+      input as the stage was given it: the one function that composes the path of a unit's source in the sandbox, also used by the stage), and
+      `findings` == []; a row without `f2i`, a missing or malformed file, another unit, or any finding is a finding of the object.
   3c (native C++ unit) a unit of a root whose cxx_origin is native needs, in its CC stage document (gate_datamodel.cc_docs, the one reader), the declared
       input /plug/fnvnx_ftoi and the argv flag -fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so: the compile ran the plugin that rewrites or rejects every
       conversion. A lifted root's units need no plugin (the lifter emits the conversions through the helpers); their f2i file is judged by 3a.
@@ -116,8 +118,13 @@ def sha256_file(path):
 
 def read_inputs(res):
     """-> [(unit, absolute object path)] sorted by unit, from the objects.json dict RES of one root (the recipe's result). The one place the object
-    input is read. The plugin's file of an object is found by read_f2i next to it."""
+    input is read. The plugin's file of an object is named by read_f2i_paths."""
     return sorted((o["unit"], o["object"]) for o in res["objects"])
+
+
+def read_f2i_paths(res):
+    """-> {unit: path of the plugin's result file, or None when the row has no `f2i`}: the `f2i` field of each row of objects.json "objects"."""
+    return {o["unit"]: o.get("f2i") for o in res["objects"]}
 
 
 def read_ref(rt):
@@ -251,11 +258,12 @@ def symbols_of(path):
     return dfn, ref
 
 
-def read_f2i(obj_path):
-    """-> (result dict or None, problem string or None) of the plugin's file next to the object"""
-    p = obj_path + ".f2i.json"
+def read_f2i(p):
+    """P: the `f2i` field of the object's row (None if the row has none) -> (result dict or None, problem string or None) of the plugin's file"""
+    if not p:
+        return None, "the object's row in objects.json has no f2i (the plugin's result file)"
     if not os.path.isfile(p):
-        return None, "no result file %s of the plugin" % os.path.basename(p)
+        return None, "the f2i of the object's row names a missing file %s" % os.path.basename(p)
     try:
         with open(p) as fh:
             d = json.load(fh)
@@ -269,22 +277,22 @@ def read_f2i(obj_path):
         return None, "result file %s unreadable or malformed: %s" % (os.path.basename(p), str(e)[:150] or type(e).__name__)
 
 
-def judge_object_coded(oid, path, asm=False, unit=None):
+def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
     """-> {item id: [(code, text)]} for `rcp:<oid>` and `f2i:<oid>`; the code is the finding class (fixture mode, RECIPE.md "Fixtures"). ASM: the unit is
     an assembler unit (.s / .S, the recipe's own kind): the compiler never builds GIMPLE for it, so the plugin has no file to write and no conversion
     site exists in its source: the result is the empty one (sites 0), and check 3b still makes any FCVT / FJCVTZS instruction of the object a finding.
-    A finding of kind builtin (lround, a libm call) is IEEE under OWNER ASM-008 and is not one; conv and asm are."""
+    F2I_PATH: the `f2i` of the object's row. A finding of kind builtin (lround, a libm call) is IEEE under OWNER ASM-008 and is not one; conv and asm are."""
     scan = scan_object(path)
     rcp = [("rcp-estimate", "%s: %s in %s" % (oid, m, w)) for w, m in scan["recip"]]
     f2i = []
     und = [("undecodable", "undecodable bytes at %s" % w) for w in scan["undecodable"]]
     rcp += und
     f2i += und
-    d, why = ({"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}, None) if asm else read_f2i(path)
+    d, why = ({"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}, None) if asm else read_f2i(f2i_path)
     if d is None:
         f2i.append(("f2i-report-missing", why))
-    elif not asm and d["unit"] != unit:
-        f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], unit)))
+    elif not asm and d["unit"] != recipe.sandbox_src(unit):
+        f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], recipe.sandbox_src(unit))))
     else:
         f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]))
                 for f in d["findings"] if f["kind"] != "builtin"]
@@ -293,9 +301,9 @@ def judge_object_coded(oid, path, asm=False, unit=None):
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
 
 
-def judge_object(oid, path, asm=False, unit=None):
+def judge_object(oid, path, asm=False, unit=None, f2i_path=None):
     """-> {item id: [finding strings]}, see judge_object_coded"""
-    return {k: [t for _, t in v] for k, v in judge_object_coded(oid, path, asm, unit).items()}
+    return {k: [t for _, t in v] for k, v in judge_object_coded(oid, path, asm, unit, f2i_path).items()}
 
 
 FTOI = "fnvnx_ftoi"
@@ -333,24 +341,25 @@ def table_item(objs, image_dir):
     return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
 
 
-def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None):
+def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None):
     """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the
-    gate forms), DOCS ({unit: CC document} of a native root; None: lifted root)."""
+    gate forms), DOCS ({unit: CC document} of a native root; None: lifted root), F2I ({unit: the `f2i` of the row}, read_f2i_paths; a unit without an entry
+    has none)."""
     items = {root + ":forms": [("forms-not-green", forms_ok)] if forms_ok else []}
     cert = table_item(objs, image_dir)
     if cert is not None:
         items[root + ":rcpcert"] = [("rcpcert", t) for t in cert]
     for unit, path in objs:
-        r = judge_object_coded(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
+        r = judge_object_coded(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit, (f2i or {}).get(unit))
         if docs is not None and unit.endswith(recipe.CXX_EXT):
             r["f2i:" + root + "/" + unit] += [("ftoi-plugin-missing", t) for t in ftoi_why(docs.get(unit))]
         items.update(r)
     return items
 
 
-def judge_objects(root, objs, image_dir, forms_ok, docs=None):
+def judge_objects(root, objs, image_dir, forms_ok, docs=None, f2i=None):
     """-> {item id: [findings]}, see judge_objects_coded"""
-    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs).items()}
+    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs, f2i).items()}
 
 
 def fixture_findings(root, items):
@@ -390,7 +399,7 @@ def judge_root(root, repo, cache, forms):
         image = os.path.join(repo, root) if res.get("elf") else None
         native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
         docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs)
+        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs, read_f2i_paths(res))
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
