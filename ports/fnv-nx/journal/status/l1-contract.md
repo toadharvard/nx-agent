@@ -1069,3 +1069,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   2. a range fact must carry nonan (GCC frange), or the site is red.
   The final field set goes to L2 w1. It lands together with w1's rewrite.
 - 00:13 L5 accepted the image-entry ruling: w14 adds FNVNX_IMAGE_ENTRY on fnvnx_exe_entry in hostabi guest.h (the only marked declaration) and sends w20 the commit. After the L5 series there are 0 fixed-failure runtime weak definitions; _sbrk_r's heap_size>0 becomes a host contract fact. The libnx/libm bodies are left to w20's final-image objstub (commit 4).
+
+## 2026-11-14 23:40
+- namegate/r7 ruling to w20: a new covers class `product-guest-exe`, derived from root facts (a `game` dir plus an exe twin). Platform is judged by objstub and the other product-guest gates. Vacuous-universe red stays.
+- gate_order crash (link/a64order.py:490 frame_cfa, tuple+int, 10/114 platform objects at 141b07580; L2 w2 found it): assigned to w23 after w23r. The lattice is total; an undecidable frame address is red, never an exception.
+- .map lexer (render/gl4/libnxgl4.map, from L6): assigned to w22 on w22p.
+- TLS census from L2 w2 at cdb4473d0: 114 objects, 84 accesses all LE, 21 variables, 0 outside records. The tlsmodel gate is queued.
+- w16c commit 1 blocks the L6 d3d9 and translator roots. Proposed to the orchestrator: it takes the next free slot, ahead of w12.
