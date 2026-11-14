@@ -41,7 +41,22 @@
    "ports/fnv-nx/lift/rt",
    "ports/fnv-nx/rt/guest",
    "ports/fnv-nx/platform"
-  ]
+  ],
+  "libs": {
+   "external": "fnvnx-a64-msvcmodel",
+   "dirs": [
+    "aarch64-none-elf/lib/ilp32/pic",
+    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic"
+   ],
+   "names": [
+    "stdc++",
+    "c",
+    "m",
+    "gcc"
+   ],
+   "startfiles": [],
+   "endfiles": []
+  }
  },
  "plugin_cxx": "x86_64-linux-gnu-g++-13",
  "plugins": [
@@ -104,6 +119,14 @@
    "commit": "b4057704c0babd012e466cc89181132e02542289",
    "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
    "at": "/ext/gcc"
+  },
+  {
+   "name": "fnvnx-a64-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/fnvnx-a64-msvcmodel",
+   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
+   "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
+   "at": "/ext/a64"
   }
  ]
 }

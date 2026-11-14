@@ -282,9 +282,9 @@ static tree descriptor(gcall *call)
 /* The descriptor of a function DEFINITION, from its own type with the same shape() as the call sites (a native body
  * that lifted code reaches through an exit bridge). The parameters are the declared ones: the list is the
  * definition's own, `this` first for a method. */
-static bool def_descriptor(tree decl, std::string &d)
+static bool def_descriptor(tree decl, std::string &d, bool quiet_mode)
 {
-  struct quiet { quiet() { shape_quiet++; } ~quiet() { shape_quiet--; } } q_;
+  struct quiet { bool on; quiet(bool o) : on(o) { if (on) shape_quiet++; } ~quiet() { if (on) shape_quiet--; } } q_(quiet_mode);
   location_t loc = DECL_SOURCE_LOCATION(decl);
   tree ft = TREE_TYPE(decl);
   d = std::string(conv_of(ft)) + ":";
@@ -323,7 +323,15 @@ static void finish_unit(void *, void *)
     tree decl = node->decl;
     if (!node->alias && !node->thunk && !TREE_ASM_WRITTEN(decl)) continue;
     std::string d;
-    if (!def_descriptor(decl, d)) continue;
+    if (!def_descriptor(decl, d, true)) {
+      /* Rule: a definition without a shape has no row and no diagnostic only when its address is provably not taken:
+       * a static (not TREE_PUBLIC) function whose cgraph node is not address_taken, so no indirect call can reach it. Any
+       * other definition (external linkage, or address taken: a callback, a table entry) is reachable through an
+       * indirect call from lifted code and must have a row: the shape error is reported at the definition. */
+      if (!TREE_PUBLIC(decl) && !node->address_taken) continue;
+      def_descriptor(decl, d, false);
+      continue;
+    }
     const char *name = targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl)));
     defs.insert(std::string(name) + " " + d);
   }
