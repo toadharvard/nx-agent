@@ -1,5 +1,5 @@
 /* bootrt: the symbols the boot machine gives the host-target objects it loads (the renderer library libnxgl4.so, translator@host objects):
- * the embedder callbacks nxgl4_guest_ptr / nxgl4_on_present and the two proven-unreachable assertions of hostabi/include/fnvnx/reach.h.
+ * the embedder callbacks nxgl4_guest_ptr / nxgl4_on_present and the proven-unreachable assertion fnvnx_reach_violation of hostabi/include/fnvnx/reach.h (fnvnx_assume_violation is not defined here: no gate certifies its facts).
  * Freestanding: no libc, the process's only calls are the write and exit_group system calls of Linux x86-64.
  * nxgl4_shim_set registers (guest ptr, present, exit) callbacks; the exit callback receives the full 32-bit exit code and ends the process (the boot
  * machine writes OUT.json first). A violation with no exit callback ends the process with status 1 after its log line: a library loaded outside the
@@ -59,15 +59,4 @@ void fnvnx_reach_violation(uint32_t fact_id) {
     *p++ = '\n';
     log_line(b, (int)(p - b));
     leave(FNVNX_REACH_EXIT | (fact_id & 0xFFFFFFu));
-}
-
-void fnvnx_assume_violation(uint32_t asm_id, uint64_t value) {
-    char b[96], *p = b;
-    p = str(p, "fnvnx-assume id=");
-    p = hex(p, asm_id, 8);
-    p = str(p, " value=0x");
-    p = hex(p, value, 16);
-    *p++ = '\n';
-    log_line(b, (int)(p - b));
-    leave(FNVNX_ASSUME_EXIT | (asm_id & 0xFFu) << 16 | (uint32_t)(value & 0xFFFF));
 }

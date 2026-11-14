@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""bootrt (verify/bootrt, recipe root of target host): the embedder symbols of the boot machine's host objects and the two proven-unreachable
-assertions of hostabi/include/fnvnx/reach.h. The library is the recipe product in GATE_CACHE (gate_build.ensure, the verdict's own store). A violation
+"""bootrt (verify/bootrt, recipe root of target host): the embedder symbols of the boot machine's host objects and the proven-unreachable
+assertion fnvnx_reach_violation of hostabi/include/fnvnx/reach.h. The library is the recipe product in GATE_CACHE (gate_build.ensure, the verdict's own store). A violation
 ends the process, so each case runs in a child python: it loads the library through bootgpu, registers an exit callback that writes the code it
 receives to a file, and calls the violation. Exit 0 on pass."""
 import json
@@ -32,17 +32,14 @@ import ctypes, json, os, sys
 sys.path.insert(0, %(verify)r)
 import bootgpu
 lib = bootgpu._load_shim(%(cache)r)
-mode, which, out = sys.argv[1], sys.argv[2], sys.argv[3]
+mode, out = sys.argv[1], sys.argv[2]
 def ex(code):
     open(out, "w").write(json.dumps({"code": code}))
     os._exit(2)
 cbs = (bootgpu.PTR_CB(lambda a, s: 0), bootgpu.PRESENT_CB(lambda f: None), bootgpu.EXIT_CB(ex) if mode == "cb" else bootgpu.EXIT_CB())
 lib.nxgl4_shim_set(*cbs)
-if which == "reach":
-    lib.fnvnx_reach_violation(0xABCDEF)
-else:
-    lib.fnvnx_assume_violation(4, 0x123456789ABC)
-os._exit(77)   # never reached: both are noreturn
+lib.fnvnx_reach_violation(0xABCDEF)
+os._exit(77)   # never reached: noreturn
 """
 
 
@@ -59,8 +56,8 @@ def define(name):
 
 
 def main():
-    REACH, ASSUME = define("FNVNX_REACH_EXIT"), define("FNVNX_ASSUME_EXIT")
-    case("machine constants equal reach.h (top bytes)", (bootmachine.REACH_VIOLATION, bootmachine.ASSUME_VIOLATION) == (REACH >> 24, ASSUME >> 24))
+    REACH = define("FNVNX_REACH_EXIT")
+    case("machine constant equals reach.h (top byte)", bootmachine.REACH_VIOLATION == REACH >> 24)
     res, _ = gate_build.ensure(bootgpu.BOOTRT_ROOT, GATE_CACHE, REPO)
     case("bootrt builds green through recipe.py", res.get("status") == "green" and res.get("elf"), res.get("failure"))
     if res.get("status") != "green":
@@ -70,30 +67,23 @@ def main():
     case("bootgpu finds the same product in GATE_CACHE", bootgpu.bootrt_path(GATE_CACHE) == so)
     nm = subprocess.run(["nm", "-D", "--defined-only", so], capture_output=True, text=True).stdout.split("\n")
     defined = sorted(l.split()[-1] for l in nm if l.strip())
-    case("defined symbols: exactly the five", defined == sorted(["fnvnx_assume_violation", "fnvnx_reach_violation", "nxgl4_guest_ptr", "nxgl4_on_present",
-                                                                 "nxgl4_shim_set"]), defined)
+    case("defined symbols: exactly the four", defined == sorted(["fnvnx_reach_violation", "nxgl4_guest_ptr", "nxgl4_on_present", "nxgl4_shim_set"]), defined)
     child = os.path.join(TMP, "child.py")
     open(child, "w").write(CHILD % {"verify": VERIFY, "cache": GATE_CACHE})
 
-    def run(mode, which):
+    def run(mode):
         out = os.path.join(TMP, "code.json")
         if os.path.exists(out):
             os.remove(out)
-        r = subprocess.run([sys.executable, "-s", child, mode, which, out], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, "-s", child, mode, out], capture_output=True, text=True)
         code = json.load(open(out))["code"] if os.path.exists(out) else None
         return r.returncode, r.stderr, code
 
-    rc, err, code = run("cb", "reach")
+    rc, err, code = run("cb")
     case("reach: one log line, the exit callback gets 0x52000000 | fact_id (full 32 bits)", err == "fnvnx-reach fact=0xabcdef\n" and code == REACH | 0xABCDEF
          and rc == 2, (rc, err, code))
-    rc, err, code = run("cb", "assume")
-    case("assume: one log line with the id and the full value, the callback gets 0x53000000 | id << 16 | (value & 0xFFFF)",
-         err == "fnvnx-assume id=00000004 value=0x0000123456789abc\n" and code == ASSUME | 4 << 16 | 0x9ABC and rc == 2, (rc, err, code))
-    rc, err, code = run("nocb", "reach")
+    rc, err, code = run("nocb")
     case("reach with no exit callback: the log line, then status 1", err == "fnvnx-reach fact=0xabcdef\n" and rc == 1 and code is None, (rc, err, code))
-    rc, err, code = run("nocb", "assume")
-    case("assume with no exit callback: the log line, then status 1", err == "fnvnx-assume id=00000004 value=0x0000123456789abc\n" and rc == 1
-         and code is None, (rc, err, code))
 
     # the machine's side: the run record of a host-object exit, full width, as run() would classify a guest's exit
     elf = make_elf()
@@ -102,9 +92,6 @@ def main():
     r = m.host_exit(REACH | 0xABCDEF)
     case("host_exit reach: reason reach-violation, fact_id, exit_code in full", r["reason"] == "reach-violation" and r["fact_id"] == 0xABCDEF
          and r["exit_code"] == REACH | 0xABCDEF, r)
-    r = m.host_exit(ASSUME | 4 << 16 | 0x9ABC)
-    case("host_exit assume: reason assume-violation, asm_id, value16, exit_code in full", r["reason"] == "assume-violation" and r["asm_id"] == 4
-         and r["value16"] == 0x9ABC and r["exit_code"] == ASSUME | 4 << 16 | 0x9ABC, r)
     r = m.host_exit(0)
     case("host_exit 0 / an ordinary code stays reason exit", r["reason"] == "exit" and r["exit_code"] == 0)
     print("%d cases, %d failed" % (N[0], len(FAILED)))

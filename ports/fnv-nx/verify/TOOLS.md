@@ -757,7 +757,7 @@ leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range ->
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
 this file loads the recipe product of the host-target root verify/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
 no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
-nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation / fnvnx_assume_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
+nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
 The library's host packages (libegl1, libegl-mesa0 and what they pull: libglvnd0, mesa-libgallium, libllvm20, ...) are part of the declared
 environment (verify/env.json, derived by envcheck.py snapshot from RENDER_LIBS/RENDER_FILES); nothing installs them at test or job time.

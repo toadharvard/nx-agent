@@ -7,7 +7,7 @@ leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range ->
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
 this file loads the recipe product of the host-target root verify/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
 no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
-nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation / fnvnx_assume_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
+nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
 """
 import ctypes
@@ -50,7 +50,6 @@ def _load_shim(gate_cache=None):
         lib = ctypes.CDLL(bootrt_path(gate_cache), mode=ctypes.RTLD_GLOBAL)
         lib.nxgl4_shim_set.argtypes, lib.nxgl4_shim_set.restype = [PTR_CB, PRESENT_CB, EXIT_CB], None
         lib.fnvnx_reach_violation.argtypes, lib.fnvnx_reach_violation.restype = [ctypes.c_uint32], None
-        lib.fnvnx_assume_violation.argtypes, lib.fnvnx_assume_violation.restype = [ctypes.c_uint32, ctypes.c_uint64], None
         _shim["lib"] = lib
     return _shim["lib"]
 
@@ -81,7 +80,7 @@ class Gpu:
             self.sha256 = hashlib.sha256(f.read()).hexdigest()
         self.m, self.presents, self.first_call, self.hook_present, self.hook_first = machine, 0, None, on_present, on_first_call
         shim, self.lib = load(path)
-        # on_exit(code): a host object ended the process through fnvnx_reach_violation / fnvnx_assume_violation with the full 32-bit code; it
+        # on_exit(code): a host object ended the process through fnvnx_reach_violation with the full 32-bit code; it
         # ends the process itself. None registers no exit callback: the violation then ends the process with status 1 after its log line.
         self._cbs = (PTR_CB(self._guest_ptr), PRESENT_CB(self._present), EXIT_CB(on_exit) if on_exit else EXIT_CB())   # alive as long as the library may call them
         shim.nxgl4_shim_set(*self._cbs)

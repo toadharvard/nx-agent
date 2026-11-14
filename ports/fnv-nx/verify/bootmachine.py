@@ -96,7 +96,6 @@ import icount
 
 PAGE, U64 = 0x1000, (1 << 64) - 1
 REACH_VIOLATION = 0x52   # top byte of a guest exit code 0x52000000 | fact_id: a build invariant was violated (fnvnx_reach_violation)
-ASSUME_VIOLATION = 0x53   # top byte of 0x53000000 | asm_id << 16 | (value & 0xFFFF): a branch unreachable under an owner assumption (fnvnx_assume_violation)
 SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "system_tick", "system_tick_freq",
          "thread_create", "thread_start", "thread_join", "thread_free", "thread_exit", "thread_yield",
          "thread_set_priority", "thread_set_cpu", "wait_on_address", "wake_address", "wall_time_us",
@@ -1170,12 +1169,10 @@ class Machine:
         return self._result(reason, extra)
 
     def _exit_class(self):
-        """the run's end by the exit code: ("exit", {}), or the reach / assume violation with its numbers (the codes of fnvnx/reach.h)"""
+        """the run's end by the exit code: ("exit", {}), or the reach violation with its fact_id (the codes of fnvnx/reach.h)"""
         c = self.exit_code
         if c >> 24 == REACH_VIOLATION:   # fnvnx_reach_violation(fact_id): exit code 0x52000000 | fact_id
             return "reach-violation", {"fact_id": c & 0xFFFFFF}
-        if c >> 24 == ASSUME_VIOLATION:   # fnvnx_assume_violation(asm_id, value): 0x53000000 | asm_id << 16 | (value & 0xFFFF)
-            return "assume-violation", {"asm_id": c >> 16 & 0xFF, "value16": c & 0xFFFF}
         return "exit", {}
 
     def _result(self, reason, extra):
@@ -1188,8 +1185,7 @@ class Machine:
         return r
 
     def host_exit(self, code):
-        """a host-target object (the renderer library) ended the process through the exit slot of the host runtime (bootrt: fnvnx_reach_violation /
-        fnvnx_assume_violation) with `code`: the run's record as run() would return it for a guest that exited with that code"""
+        """a host-target object (the renderer library) ended the process through the exit slot of the host runtime (bootrt: fnvnx_reach_violation) with `code`: the run's record as run() would return it for a guest that exited with that code"""
         self.exit_code = code
         reason, extra = self._exit_class()
         return self._result(reason, extra)

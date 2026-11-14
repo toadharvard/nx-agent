@@ -380,7 +380,7 @@ def run(a):
             ic.mark_frame(gpu.presents, m.clock.now_ns(), {"sha256": store_frame(a.frames, frame)} if a.frames else None)
             for i in watch["host"].get("present", ()):
                 fire(i, m.tid())
-        def host_exit(code):   # fnvnx_reach_violation / fnvnx_assume_violation in a host object (bootrt): the run ends here, OUT.json as for any end
+        def host_exit(code):   # fnvnx_reach_violation in a host object (bootrt): the run ends here, OUT.json as for any end
             rc = finish(m.host_exit(code), gpu.report())
             sys.stdout.flush()
             sys.stderr.flush()
