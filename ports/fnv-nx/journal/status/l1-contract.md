@@ -1055,3 +1055,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w24 ec006784: PERFDEBT entry PD-LOADER-SHA256-ISA (owner L1); test_gate_assumptions 0 fails. Still waiting on UNMAP_FIXED.
 
 - 00:02 L5 422b4bd6 (claude/fnv-l5-platform-root): FNVNX_PLAT_UNMAP_RANGE = 37 (UNMAP_FIXED is a retired name). The contract: 0 on success, 0x1759 for a bad argument, 0xD401 outside the window or not mapped. w24 84624983 is merged there whole; hostabi, loader 9 units and lib/sha256 green on L5's side. w24 merges 422b4bd6, then builds, runs nm on the 7 symbols and the verdict, and reports to L3a w8.
+
+- 00:04 L2 ruling on float→int conversions: exempt only when C fully specifies the result for every operand. Every other conversion gets x86 semantics by L2 w1's ftoivec rewrite (scalar, vector/IFN_VEC_CONVERT, the lrint/lround family, BUILT_IN_MD), unless a range fact proves its operand in range. The gate_fpexact "builtin" exemption is deleted, and the gate certifies 0 unrewritten sites outside the fnvnx_f2i helpers. The gate side (w22f4) lands together with L2 w1's commit. w1 also runs test_ftoi.py on 9894b5988 in its declared env.
