@@ -439,3 +439,11 @@ Paused: w3b, w4, farm; no other work.
     - The join is (id, handler), read from the generated outputs of render/shaders/total.
     - A (b) emitter must be non-empty; an empty (c) is red.
     - Acceptance: translator objstub 7/7 judged, 0 stubs. w1b agrees the fields with w20.
+- 23:27Z 4.6 sm_link gate design (w5), decided.
+    - Universe: every unique shader bytecode (gamedata/shaders b545961f: 443 VS + 1,366 PS) across every variant the d3d9 front can produce, taken statically.
+    - Every stage compiles under the pinned Mesa.
+    - Pairs are linked per interface-signature class. The signature comes from Mesa's program-interface query, with a written argument that each cross-stage linker check is a function of the two signatures (GLSL 4.60 and Mesa source cited); otherwise exhaustive.
+    - Certificate: one file per form id. Translator: render/shaders/translator@host (w1b). gates.d registration asked of L1.
+- 23:27Z Header homes: render/backend (w6 root) is a second, older home of the nxgpu headers; 3 of its 4 differ from render/nxgpu@eb482552.
+    - w6 drops the render/backend root and points render/d3d9 at render/nxgpu once L6A's 3.7 head lands (option a).
+    - L5's 24 assumption mentions are fixed on its line (9614b11d).
