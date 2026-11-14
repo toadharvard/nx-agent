@@ -45,10 +45,11 @@ extern char __tdata_lma[] HIDDEN, __tdata_lma_end[] HIDDEN;
 extern char __tls_start[] HIDDEN, __tls_tcb[] HIDDEN;
 extern char __end__[] HIDDEN;
 
+extern char **environ;   /* newlib's */
 const FnvnxHostApi *fnvnx_host;
 extern char *fake_heap_start, *fake_heap_end;
 
-int main(int argc, char **argv);
+int main(int argc, char **argv, char **envp);   /* main.c */
 void fnvnx_guest_fs_init(void);
 void __libc_init_array(void);
 
@@ -250,7 +251,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     __libc_init_array();
     static char arg0[] = "fnvnx-guest";
     static char *argv[] = { arg0, NULL };
-    int rc = main(1, argv);
+    int rc = main(1, argv, environ);
     fflush(stdout);
 
     __asm__ volatile("msr tpidr_el0, %0" :: "r"(saved_tp) : "memory");
