@@ -81,6 +81,7 @@ for kind in ("conv-scalar", "conv-vector", "builtin", "mdbuiltin", "asm"):
     check("an unrewritten site of kind %s is red f2i-%s (no kind is exempt)" % (kind, kind), codes(report("k_%s.json" % kind, SRC, [site(kind)])) == ["f2i-" + kind])
 check("rewritten sites (counted) are green", codes(report("rw.json", SRC, rewritten=3)) == [])
 check("rewritten sites listed per site, count matching: green", codes(report("rw2.json", SRC, rewritten=2, extra={"rewrites": [site("conv-scalar"), site("builtin")]})) == [])
+check("extra keys in the entries of rewrites (how, code) are accepted", codes(report("rw4.json", SRC, rewritten=2, extra={"rewrites": [site("conv-scalar", how="msvc/ftol", code=0), site("conv-vector", how="md/trunc", code=1234)]})) == [])
 check("rewrites listed with a count that differs: red (malformed)", codes(report("rw3.json", SRC, rewritten=2, extra={"rewrites": [site("conv-scalar")]})) == ["f2i-report-missing"])
 check("a helper site is green", codes(report("hp.json", SRC, helper=2)) == [])
 check("a ranged site with a missing fact is red (malformed)", codes(report("rg5.json", SRC, ranged=[site("conv-scalar")])) == ["f2i-report-missing"])
