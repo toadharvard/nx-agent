@@ -33,11 +33,7 @@ TOOLCHAIN = os.path.normpath(os.path.join(HERE, '..'))
 STORE = os.environ.get('GATE_CACHE') or os.path.join(tempfile.gettempdir(), 'fnvnx-toolchain-tests-cache')
 STATS = {'run': 0, 'hit': 0}
 CXX_ONLY_FLAGS = ('-std=gnu++17', '-fno-sized-deallocation', '-fpermissive')   # the C++-only options cc1 warns about
-PRODUCT_FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fms-extensions', '-fshort-wchar', '-frounding-math', '-fsigned-char',
-                 '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks', '-fcheck-new', '-fno-sized-deallocation',
-                 '-fno-lifetime-dse', '-ffp-contract=off', '-fPIC', '-fpermissive', '-Wno-narrowing', '-march=armv8-a+crc+crypto',
-                 '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics',
-                 '-U_FORTIFY_SOURCE', '-fno-devirtualize']
+PRODUCT_FLAGS = ['-O2', '-Werror=attributes']   # per-root flags only; the semantic flags (-mabi=ilp32, -fms-extensions, ...) come from verify/guest_compiler.json
 _N = [0]
 # the plugins of a lifted root: fnvnx_ftoi in mode lifted is required (recipe.plugin_args), the others are the test's choice
 
@@ -64,7 +60,7 @@ def _plugin(name, args):
     return p
 
 
-def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=False):
+def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=False, variant=''):
     """build the toy guest root: plugins [(name, {key: value})] in load order, fixtures {unit file name: text}; -> (objects.json dict, out dir)"""
     _N[0] += 1
     repo = os.path.join(tmp, 'toy%d' % _N[0])
@@ -72,14 +68,17 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     _git(repo, 'init', '-q')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
     ext = pin['external']
-    if native:   # a native root loads every plugin with its fixed arguments (recipe.PLUGIN_ARGS) and the semantics flags
-        plugins = [(n[len('fnvnx_'):], a) for n, a in ((n, dict(recipe.PLUGIN_ARGS[n])) for n in recipe.PLUGIN_SOURCES)]
-        flags = ['-O2'] + list(recipe.SEMANTICS_FLAGS) + [f for f in flags if f not in recipe.SEMANTICS_FLAGS and f != '-O2']
+    # RULE of the recipe (guest root): the FULL plugin set in the fixed order with the arguments fixed by the root's origin (recipe.plugin_args(origin): native, or lifted with
+    # fnvnx_ftoi in mode lifted). A test never picks a subset or an argument: PLUGINS holds [(name, extra args)] merged over the fixed ones (an extra argument is a
+    # recipe error, which a test may expect); RAW takes the list as it stands (a test of the recipe's own validation).
+    if not raw:
+        fixed = recipe.plugin_args('native' if native else {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'})
+        extra = {'fnvnx_' + n: a for n, a in plugins}
+        plugins = [(n[len('fnvnx_'):], dict(fixed[n], **extra.get(n, {}))) for n in recipe.PLUGIN_SOURCES]
+    else:
+        lifted_ftoi = False
+    flags = ['-O2', '-Werror=attributes', '-DFNVNX_SDD=1'] + [f for f in flags if f not in ('-O2', '-Werror=attributes', '-DFNVNX_SDD=1')]
     plugins = [('fnvnx_' + n, a) for n, a in plugins]
-    if not native and not raw:   # the mode of fnvnx_ftoi is the root's, never a choice (recipe.plugin_args)
-        plugins = [(n, dict(a, mode='lifted') if n == 'fnvnx_ftoi' else a) for n, a in plugins]
-    if not native and lifted_ftoi and 'fnvnx_ftoi' not in [n for n, _ in plugins]:   # required by the lifted-root rule, loaded first as in the product order
-        plugins.insert(0, ('fnvnx_ftoi', dict(recipe.plugin_args('lifted')['fnvnx_ftoi'])))
     names = [n for n, _ in plugins]
     for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
@@ -96,11 +95,15 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']},
            'flags': {'c': [f for f in flags if f not in CXX_ONLY_FLAGS], 'cxx': list(flags), 'asm': []}, 'include': [], 'units': 'all', 'external': [ext],
            }
+    if variant:   # the recipe's declared variant: the root's flags plus its own parameters (verify/recipe.py GCSTRESS_*), built as ROOT@VARIANT
+        assert variant == recipe.GCSTRESS_VARIANT, variant
+        rec['variants'] = {variant: {'flags': {k: v + recipe.GCSTRESS_FLAGS for k, v in rec['flags'].items()}}}
     if not native:
         rec['generated'] = [{'tool': T + 'gen/lift.py', 'args': [], 'inputs': [], 'outputs': ['gen/' + k for k in fixtures]}]
     if plugins:
         rec['plugins'] = [_plugin(n, a) for n, a in plugins]
     _w(repo, ROOT + '/build.json', json.dumps(rec))
+    _w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
     _w(repo, T + 'verify/admit.json', json.dumps({'format': 'fnvnx-admit/1', 'roots': [
         {'path': ROOT, 'class': 'product', 'target': 'guest', 'gates': [], 'recipe': ROOT + '/build.json',
          'cxx_origin': 'native' if native else {'lifted_by': T + 'gen/lift.py', 'pack': ext['name']}},
@@ -110,26 +113,26 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     _git(repo, 'commit', '-q', '-m', 'toy')
     out = os.path.join(tmp, 'out%d' % _N[0])
     os.makedirs(STORE, exist_ok=True)
-    res = recipe.build(repo, ROOT, STORE, out)
+    res = recipe.build(repo, ROOT + ('@' + variant if variant else ''), STORE, out)
     STATS['run'] += res['stages']['run']
     STATS['hit'] += res['stages']['hit']
     return res, out
 
 
 def _trivial(tmp, names):
-    return _recipe(tmp, [(n, {}) for n in names], {'t.cpp': 'int t(int x) { return x; }\n'}, PRODUCT_FLAGS)
+    return _recipe(tmp, [], {'t.cpp': 'int t(int x) { return x; }\n'}, PRODUCT_FLAGS)
 
 
 def build(name, tmp, source=None):
     """-> path of the plugin's .so out of the recipe's plugin:<name> stage (the plugin's name is the file's base name), or raises
     AssertionError with the diagnostics. Only the tracked source is built (SOURCE is not accepted: one source, the recipe's)."""
     assert source is None, 'the recipe builds the tracked source only'
-    res, _ = _trivial(tmp, [name])
+    res, _ = _trivial(tmp, [])   # the root loads the full set: the .so of NAME is one of its plugin stages
     assert res['status'] == 'green', 'plugin %s does not build: %s' % (name, json.dumps(res.get('failure'))[-1500:])
     return next(p['path'] for p in res['plugins'] if p['name'] == 'fnvnx_' + name)
 
 
-def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, native=False):
+def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, native=False, variant=''):
     """compile src to out (an object) through the recipe with the product flags and the plugins (paths of .so made by build()), in that
     order; `args` holds extra compiler flags and -fplugin-arg-<plugin>-<key>[=<value>] plugin arguments; -> CompletedProcess (the caller
     checks returncode: some tests expect an error, and then stderr is the recipe's failure diagnostics)"""
@@ -144,7 +147,10 @@ def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, nativ
             extra.append(a)
     tmp = tempfile.mkdtemp(prefix='plugbuild-')
     try:
-        res, odir = _recipe(tmp, [(n, pa[n]) for n in names], {os.path.basename(src): open(src).read()}, (PRODUCT_FLAGS if flags is None else flags) + extra, native)
+        try:   # the plugin list of a root is the recipe's full set; PLUGINS only names the ones a test gives arguments to
+            res, odir = _recipe(tmp, [(n, pa[n]) for n in names if pa[n]], {os.path.basename(src): open(src).read()}, (PRODUCT_FLAGS if flags is None else flags) + extra, native, variant=variant)
+        except recipe.RecipeError as e:
+            return subprocess.CompletedProcess([], 2, '', '\n'.join(e.errors))
         if res['status'] != 'green':
             f = res['failure']
             return subprocess.CompletedProcess([], f.get('exit') or 1, '', '\n'.join(f.get('stderr') or []) + '\n' + json.dumps(f)[:600])
