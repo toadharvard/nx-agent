@@ -2,6 +2,7 @@
  * render/native/gl/nxgl.h): "#version 460..." -> "#version 450 core", "binding = n" -> "binding = stage * 16 + n",
  * uniform block names get a per-stage suffix, and the vertex stage's main is wrapped to negate gl_Position.y. */
 #include "gl4.h"
+#include "fnvnx_sha256.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,7 +116,11 @@ uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage) {
 uint64_t gl4_api_shader_create(uint64_t a) {
     const NxShaderDesc* d = (const NxShaderDesc*)nxgl4_guest_ptr(a, sizeof *d);
     if (!d || !d->glsl || !d->glsl_size) return 0;
-    return gl4_shader_from_glsl((const char*)nxgl4_guest_ptr(d->glsl, d->glsl_size), d->glsl_size, d->stage);
+    const char* src = (const char*)nxgl4_guest_ptr(d->glsl, d->glsl_size);
+    if (!src) return 0;
+    uint8_t k[32]; fnvnx_sha256(src, d->glsl_size, k);
+    if (memcmp(k, d->key, 32)) { gl4_err("shader_create: key is not the sha256 of the glsl"); return 0; }
+    return gl4_shader_from_glsl(src, d->glsl_size, d->stage);
 }
 
 /* Programs are cached by (vs, ps). Destroying a shader deletes the programs built from it and bumps progEpoch: a
