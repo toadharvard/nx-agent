@@ -528,3 +528,12 @@ Paused: w3b, w4, farm; no other work.
     - Result: 0 TLS on both targets. reach_census goes red on any TLS symbol or relocation. No guest-TLS model is needed for the translator.
     - w1b is doing it (7th patch).
 - 23:40Z Orchestrator confirmed the translator TLS rule (it overrides its earlier 'no MojoShader change' line to L6A).
+- 23:41Z w1b 5a93bdbd6 objstub, guest roots: 375 items, 97 class-V findings.
+    - 90 are the parse-only bytecode profile; 7 are glsl.
+    - op_cover is identical.
+    - Decision on the 90, a single-pass rule:
+        - Locations appear only in declarations, which are emitted in the definitions phase after the whole parse.
+        - compute_locations runs there from ctx's own lists plus the dk config's link set.
+        - The bytecode profile is removed (BYTECODE=0 by the profile-request rule).
+        - Precondition, checked statically: no emitter outside the definitions phase uses a location.
+    - Combined with the TLS change; w1b is doing it.
