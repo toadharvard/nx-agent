@@ -557,3 +557,16 @@ Workers are capped at 3. Assignment by plan item:
   - w3: claude/fnv-l3a-lift-w3-i d77f58ef. libvorbisfile -I reproducibility is 10/10 at f12c75b9d; that is 1 of 8 images, not a global result.
   - w4: claude/fnv-l3a-lift-w4 10226a84. pointsto v1 is a draft, not wired to a gate; the pcsrc global counts were never finished.
   - w1: holding at claude/fnv-l3a-lift-w1 d6235c0f5.
+
+## 2026-11-14 23:35 int3 62b8a2c39 (w6) and the item 2.8 split with L3b
+- int3 commits:
+  - 0e8692e85: instest and 6 others moved to lift/tools/tests; lift/test keeps 9 files.
+  - 62b8a2c39: reference table, 34 rows (fnvlift 3, gates 4, proof 10, tools 17). 9 rows have pinned, checkable sources; oracle entries for them follow in one commit, and the other 25 stay red with their gap named.
+  - universe_r3_check reads declared exe+facts and passes (67370 targets, 0 missing).
+- Decisions:
+  - modules.tsv becomes a recipe generated stage from contract/modules.py over the declared inputs; the home-path defaults are removed.
+  - imp, msvcrt, exitbridge and disp take their objects from admitted test roots only (w8 builds them) and run on verify/bootmachine.py. No temp-repo build and no Unicorn; they stay red until then.
+- Item 2.8 is split with L3b:
+  - w6: imp, msvcrt, exitbridge, disp.
+  - L3b w3: sehcodes, test_gate_lift, modlift_closure_test.
+  - The 6 Unicorn instruction tests (instest, instest_extra, mmxtest, citest, x87dyn, x87test) are replaced by certified gate forms and deleted once their shape keys are certified. No second harness.
