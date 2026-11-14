@@ -1116,11 +1116,13 @@ Served per service (everything else listed here as NOT answered):
 ```text
 The loader's start rules S1..S8 (loader/include/fnvnx_start.h) as assertions over the boot machine's trace of the REAL image.
 
-  bootstart.py request --exe FalloutNV.exe --iat iat.tsv --watch-out W.txt --state-out S.json
+  bootstart.py request --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv [--tls tls.tsv] --watch-out W.txt --state-out S.json
       the two observation requests the exe's own PE and the contract's iat.tsv imply: the --watch-log file (fnvnx_lift_enter with the
       memory it needs) and the --state-request file (hashes of every page of the image range, dumps of the import slots and the TLS
       index word); run boot.py with  --watch-log W.txt --state-at fnvnx_start_enter --state-request S.json
-  bootstart.py check --out OUT.json --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv --sha256 HEX [--json VERDICT.json]
+  bootstart.py check --out OUT.json --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv --sha256 HEX [--tls tls.tsv] [--iat-data iat_data.tsv --elf GUEST.elf]
+                     [--json VERDICT.json]
+      --tls is required when the exe or a module has a TLS directory, --iat-data and --elf when iat.tsv has data slots (exit 1 otherwise)
       one verdict per rule; exit 0 iff every rule is "pass"
 
 A verdict is pass, fail or undecided. fail: the trace contradicts the rule. undecided: the rule's value is not in the supplied facts
@@ -1131,8 +1133,9 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
   S2 PE headers      no "fnvnx-start: PE headers" line, "image mapped" present; the PE parses (sections in rva order inside SizeOfImage) E console.txt
   S3 map             every page of [ImageBase, +SizeOfImage): sha256 = headers / section bytes / zero (min(raw,virt) bytes, rest 0),
                      except the import slots and the TLS index word (S4, S5); every page mapped                                    N start_state.pages, runs
-  S4 imports         every slot of iat.tsv holds its value (key or module export); data slots: a mapped RW address; slot set = the PE's  N start_state.dump
-  S5 TLS             index word 0; main thread block vec[0] = block, block = template + zero fill at the alignment; callbacks and entry
+  S4 imports         every slot of iat.tsv holds its value (key or module export); data slots: the ELF address of the native_symbol of iat_data.tsv (table_id = the ELF's); slot set = the PE's  N start_state.dump
+  S5 TLS             per image of tls.tsv (exe: slot 0; static DLLs: their load_index): index word = the slot, main thread vec[slot] = block, block =
+                     sha-checked template + zero fill at the alignment; the exe's callbacks and entry
                      in executable sections                                                                       N start_state.dump, watch_log mem
   S6 protection      every page of the image range: headers R, section R/W by its characteristics, never X, claimed gaps none           N start_state.runs
   S7 thread block    TEB +0 -1, +4 stack base, +8 limit, +0x18 self, +0x2c vector; guard page none, stack RW of SizeOfStackReserve; the
@@ -1140,6 +1143,9 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
   S8 enter           the first exe-range fnvnx_lift_enter calls on one thread: the TLS callbacks (image_base, 1, 0) in list order, then
                      the entry (0, 0, 0); esp = (stack_base - 16) & ~15 holding the sentinel; console "enter <entry>"       N watch_log args, mem
 Rules no observation can decide are listed in the verdicts as undecided, with the reason.
+S5 details: align is the IMAGE_SCN_ALIGN field of the TLS Characteristics (0 = byte alignment, n = 1 << (n-1)); an image of tls.tsv without a load_index (a
+dynamic image) has no start state and is only fact-checked (sha256 of its template); a block longer than 65536 bytes is compared up to that length and
+the verdict is undecided (the watch log reads at most boot.py MEM_MAX bytes). Two rows on one vector slot (the exe's slot is 0) fail.
 ```
 
 ## verify/cas.py
