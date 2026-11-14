@@ -1380,9 +1380,10 @@ class Job:
             # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names
             yd = os.path.join(ws, "syslib")
             os.makedirs(yd)
+            bad = envcheck.system_lib_errors(lb["system"], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners())
+            if bad:
+                raise BuildRed({"stage": "ld:" + self.root, "exit": None, "stderr": ["link.libs.system: %s" % b for b in bad]})
             for p in lb["system"]:
-                if not os.path.isfile(p):
-                    raise BuildRed({"stage": "ld:" + self.root, "exit": None, "stderr": ["link.libs.system: %s is not a file of this machine (env.json packages)" % p]})
                 shutil.copyfile(os.path.realpath(p), os.path.join(yd, os.path.basename(p)))
             sysin = [{"at": "/syslib", "tree": cas.ingest(yd, self.store)}]
             search, post = ["-L/syslib"], ["/syslib/" + os.path.basename(p) for p in lb["system"]]

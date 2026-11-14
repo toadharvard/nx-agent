@@ -787,6 +787,18 @@
     "ports/fnv-nx/verify/sdcheck.py"
    ]
   },
+  "test_systemlibs.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/envcheck.py"
+   ]
+  },
   "test_tlsmodel.py": {
    "references": [
     {
