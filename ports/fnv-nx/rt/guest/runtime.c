@@ -22,6 +22,7 @@
 #include <reent.h>
 #include <sys/iosupport.h>
 
+#include "fnvnx/guest.h"
 #include "fnvnx/hostapi.h"
 
 #define HIDDEN __attribute__((visibility("hidden")))
@@ -49,7 +50,7 @@ extern char **environ;   /* newlib's */
 const FnvnxHostApi *fnvnx_host;
 extern char *fake_heap_start, *fake_heap_end;
 
-int main(int argc, char **argv, char **envp);   /* main.c */
+/* main: rt/guest_main/main.c (hostabi guest.h declares it); the loader's start sequence, then the exe */
 void fnvnx_guest_fs_init(void);
 void __libc_init_array(void);
 
@@ -213,6 +214,10 @@ static int api_ok(const FnvnxHostApi *a, uintptr_t base) {
     const uint64_t *slot = &a->guest_base, *end = (const uint64_t *)(a + 1);
     for (; slot < end; slot++)
         if (*slot >> 32) return 0; /* a 32-bit address space keeps every address below 4 GiB */
+    /* The heap window is part of the contract (hostapi.h heap_base/heap_size): non-empty, inside the 32-bit address space, and disjoint
+     * from the guest image [guest_base, guest_base + guest_size).  A table that breaks it is an invalid table: GUEST_ERR_API. */
+    if (a->heap_size == 0 || a->heap_base + a->heap_size > ((uint64_t)1 << 32)) return 0;
+    if (a->heap_base < a->guest_base + a->guest_size && a->guest_base < a->heap_base + a->heap_size) return 0;
     return 1;
 }
 
@@ -237,12 +242,9 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     __asm__ volatile("mrs %0, tpidr_el0" : "=r"(saved_tp));
     __asm__ volatile("msr tpidr_el0, %0" :: "r"((uint64_t)(uintptr_t)__tls_tcb) : "memory");
 
-    if (fnvnx_host->heap_size) {
-        fake_heap_start = (char *)(uintptr_t)fnvnx_host->heap_base;
-        fake_heap_end = fake_heap_start + (uintptr_t)fnvnx_host->heap_size;
-    } else {
-        fake_heap_start = fake_heap_end = __end__; /* no heap: malloc fails cleanly */
-    }
+    /* api_ok proved the window: heap_size > 0, inside 32 bits, disjoint from the image. */
+    fake_heap_start = (char *)(uintptr_t)fnvnx_host->heap_base;
+    fake_heap_end = fake_heap_start + (uintptr_t)fnvnx_host->heap_size;
     devoptab_list[STD_OUT] = &dotab_hostcon;
     devoptab_list[STD_ERR] = &dotab_hostcon;
     setvbuf(stdout, NULL, _IONBF, 0);
