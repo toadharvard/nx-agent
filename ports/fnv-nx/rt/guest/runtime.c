@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/time.h>
+#include <reent.h>
 #include <sys/iosupport.h>
 
 #include "fnvnx/hostapi.h"
@@ -134,6 +136,34 @@ int __syscall_clock_gettime(clockid_t clock_id, struct timespec *tp) {
     uint64_t t = fnvnx_hcall0(fnvnx_host->system_tick), f = fnvnx_hcall0(fnvnx_host->system_tick_freq);
     tp->tv_sec = (time_t)(t / f);
     tp->tv_nsec = (long)((t % f) * 1000000000ull / f);
+    return 0;
+}
+
+/* The three libsysbase hooks that libsysbase calls when they are defined (abort.o, assert.o, gettod.o: `if (&__syscall_X) __syscall_X(..)`,
+ * else its own fallback: abort -> _exit(1), assert -> abort, gettimeofday -> errno ENOSYS and -1).  libnx's newlib layer
+ * (runtime/newlib.c, libnx 518bf11a) defines only __syscall_gettod_r; abort and assert take libsysbase's path there.  Defining all three
+ * here keeps the image free of weak references:
+ *  __syscall_abort       libsysbase's own abort path, _exit(1): the process ends through the host exit slot (__syscall_exit) with code 1.
+ *  __syscall_assert_func newlib's __assert_func text (libc assert.c: `assertion "%s" failed: file "%s", line %d%s%s\n`, with
+ *                        ", function: " and the function when it is not null) to stderr; libsysbase's __assert_func then calls abort().
+ *  __syscall_gettod_r    libnx's body (newlib.c __syscall_gettod_r: tv_sec/tv_usec from the realtime clock, tz zero, return 0), read from the one
+ *                        realtime source, __syscall_clock_gettime(CLOCK_REALTIME): the host wall clock. */
+void __syscall_abort(void) { __syscall_exit(1); }
+
+void __syscall_assert_func(const char *file, int line, const char *func, const char *failedexpr) {
+    fiprintf(stderr, "assertion \"%s\" failed: file \"%s\", line %d%s%s\n", failedexpr, file, line, func ? ", function: " : "",
+             func ? func : "");
+}
+
+int __syscall_gettod_r(struct _reent *ptr, struct timeval *tp, struct timezone *tz) {
+    (void)ptr;
+    if (tp) {
+        struct timespec ts;
+        if (__syscall_clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
+        tp->tv_sec = ts.tv_sec;
+        tp->tv_usec = ts.tv_nsec / 1000;
+    }
+    if (tz) { tz->tz_minuteswest = 0; tz->tz_dsttime = 0; }
     return 0;
 }
 
