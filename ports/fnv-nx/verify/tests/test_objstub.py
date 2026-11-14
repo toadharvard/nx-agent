@@ -51,6 +51,20 @@ def row(sym, kind, val=""):
     return {sym: (kind, val, "ref")}
 
 
+# liveness of the input registers is a union (OR) over the successors: a loop converges (a sum of the masks never did; ftbbox.c ran > 30 min)
+import signal  # noqa: E402
+LOOPS = "int f(int n, int m) { int s = 0; for (int i = 0; i < n; i++) for (int j = 0; j < m; j++) { if ((i ^ j) & 1) s += i * j; else s -= j; } return s; }\n"
+signal.signal(signal.SIGALRM, lambda *a: (_ for _ in ()).throw(TimeoutError()))
+signal.alarm(120)
+try:
+    kinds(build(LOOPS, "lp64"))
+    kinds(build(LOOPS, "ilp32"))
+    done = True
+except TimeoutError:
+    done = False
+signal.alarm(0)
+check("a function with nested loops is analysed (liveness converges, LP64 and ILP32)", done)
+
 # terminator derivation: plugin on a tiny header and on the real libc headers
 tiny = os.path.join(ROOT, "tiny.h")
 open(tiny, "w").write("void myabort(void) __attribute__((noreturn));\nvoid fine(void);\n")

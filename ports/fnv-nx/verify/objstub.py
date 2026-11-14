@@ -105,7 +105,9 @@ of x0; addr: canonical address; x1 and v0 unwritten); a row that matches nothing
 import atexit
 import bisect
 import concurrent.futures
+import functools
 import hashlib
+import operator
 import json
 import multiprocessing
 import os
@@ -376,7 +378,7 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False):
     while ch:
         ch = False
         for o in sorted(succ, reverse=True):
-            n = (inf[o][0] & INP) | (sum(live[s] for s in set(succ[o])) & ~inf[o][1])
+            n = (inf[o][0] & INP) | (functools.reduce(operator.or_, (live[s] for s in set(succ[o])), 0) & ~inf[o][1])
             if n != live[o]:
                 live[o], ch = n, True
     if live[a] and not wine:   # WINE: the input rule (v) is replaced by the result rule (the result must be constant, wine_sim)
