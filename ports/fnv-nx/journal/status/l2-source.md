@@ -85,3 +85,12 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
 - 2026-11-15 00:02 L1 w23 takes d1 (home-slot dominance) and the fenced library-call rule (Intel SDM 3 §8.2.4: only a string-op source, named by the order record field). Aggregate copies lowered field-wise are judged as plain accesses. w2 adds the record field `string-op` and sends its format to w23.
 - 2026-11-15 00:05 w1 → gate_order frame facts (L1 ask; w23 @0db1931: 114 objects, 179,017 accesses, 17,371 uncertified). (a) per-variable ranges, with `dynamic` only for real alloca or VLA; (f) args:N; (g) frame rows for sdd thunks. Branch claude/fnv-l2-source-w1-frame. Status: doing.
 - 2026-11-15 00:08 2.7 w3 exitgen: done, db2449a75 (on f8455fb9d = int3 + disp2). test_exitgen_defdisp 16/16. Routed to L3a through the orchestrator, along with L3a's stock-g++ lift/rt test path, which must go. Next for w3: one plugbuild.py (w1's 713aeee8b plus objdump()) and the full toolchain/tests run.
+- 2026-11-15 00:12 w2 a71a46b76: the re-point rule is accepted. Every builtin with a possibly-shared pointer operand becomes a call to its library declaration, before any fold; it replaces the pass move. sdd GOT relocations under -fPIC are the product form.
+  Next for w2:
+  - fences plus the `string-op` record field on every re-pointed call;
+  - builtins with no library name: generated from builtins.def, each memory-free or a compile error;
+  - aggregate copies folded by the front end: lowered field-wise, ordered;
+  - the fold set generated from the pinned tarball;
+  - atomics;
+  - the census by class over 114 objects;
+  - the readonly record to w23.
