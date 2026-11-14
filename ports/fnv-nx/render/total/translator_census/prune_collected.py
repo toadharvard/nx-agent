@@ -19,8 +19,8 @@ allobj = []
 for d, _, fs in os.walk(objdir):
     for f in fs:
         if f.endswith(".o"): allobj.append(os.path.relpath(os.path.join(d, f), objdir))
-def src(o):  # "mojoshader:profiles/x.c.o" -> tree path
-    return o.split(":", 1)[1][:-2] if o.startswith("mojoshader:") else None
+def src(o):  # "mojoshader/profiles/x.c.o" (the unit mojoshader/<path> of the external) -> tree path
+    return o[len("mojoshader/"):-2] if o.startswith("mojoshader/") else None
 for o in sorted(allobj):
     p = src(o)
     if not p: continue

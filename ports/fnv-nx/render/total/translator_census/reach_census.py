@@ -14,6 +14,12 @@ if len(sys.argv) > 5:
     flags = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shaders", "translator", "build.json")))["flags"]["c"]
     setm = {f[2:].split("=")[0] for f in flags if f.startswith("-DSUPPORT_PROFILE_")}
     if macros - setm: sys.exit("profile macros not set in build.json: %s" % sorted(macros - setm))
+    srcdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shaders", "translator", "src")
+    asked = set()   # the profiles the root's own sources request by name (MOJOSHADER_PROFILE_X): each must be compiled in, or the request fails at run time
+    for n in sorted(os.listdir(srcdir)):
+        if n.endswith(".c"): asked |= set(re.findall(r"MOJOSHADER_PROFILE_(\w+)", open(os.path.join(srcdir, n)).read()))
+    off = sorted(x for x in asked if "-DSUPPORT_PROFILE_%s=1" % x not in flags)
+    if off: sys.exit("profiles requested by src/*.c but not set to 1 in build.json: %s" % off)
     print("profile macros", len(macros), "all set; on:", sorted(m for m in macros if "-D%s=1" % m in flags))
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.join(here, "..", "..", "shaders", "translator")   # the product root this tool measures
