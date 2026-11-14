@@ -324,6 +324,9 @@ class Func:
         self.words = sorted([i.off for i in self.ins] + self.undec)
 
     # -- control flow
+    _forming = None
+    _reach = None
+
     def build(self):
         n = len(self.ins)
         succ = [set() for _ in range(n)]
@@ -691,6 +694,8 @@ class Func:
                 res[i.off] = ('ordered', 'O')
             elif self.frame_ok(i, sp, rg):
                 res[i.off] = ('frame', 'F')
+            elif self.unshared(k, i, sp, rg):
+                res[i.off] = ('unshared', 'D')
             elif mk == 'load' and reloc is not None and reloc.type in R_LINKER_LOAD:
                 res[i.off] = ('linker', 'L')
             elif mk == 'load' and reloc is not None and reloc.type in R_DIRECT_LOAD and target_ro(self.o, reloc):
@@ -721,6 +726,61 @@ class Func:
         if cs is None or sz is None:
             return False
         return all(c + sz <= 0 and not any(c < o + s and o < c + sz for o, s in self.rec) for c in cs)
+
+    def forming(self):
+        """{k: origins tuple, or None for an unknown origin}: the instructions after which a register holds a frame address (an `add`/`sub`/`mov` from sp, x29 or a
+        frame-derived register), by the post state of the instruction, cached"""
+        if self._forming is None:
+            self._forming = {}
+            for k, st in enumerate(self.state):
+                if st is None:
+                    continue
+                post = dict(self.transfer(k, st)[1])
+                og = set()
+                for r in self.ins[k].wr:
+                    t = post.get(r)
+                    if r != SP and is_frame(t):
+                        o = origins(t)
+                        og = None if (o is None or og is None) else og | set(o)
+                        if og is None:
+                            break
+                if og is None or og:
+                    self._forming[k] = None if og is None else tuple(sorted(og))
+        return self._forming
+
+    def reaches(self, rng):
+        """the set of instructions CFG-reachable (one or more edges, loops included) from an instruction that forms an address inside the range (o, s)
+        (end included: a one-past-the-end pointer), or from one whose origin is unknown"""
+        key = rng
+        if self._reach is None:
+            self._reach = {}
+        if key not in self._reach:
+            o, s = rng
+            seeds = [k for k, og in self.forming().items() if og is None or any(o <= c <= o + s for c in og)]
+            seen = set()
+            work = list(seeds)
+            while work:
+                k = work.pop()
+                for t in self.succ[k]:
+                    if t not in seen:
+                        seen.add(t)
+                        work.append(t)
+            self._reach[key] = seen
+        return self._reach[key]
+
+    def unshared(self, k, i, sp, rg):
+        """rule D (dominance; the forward form of it is the prologue home-slot store): a frame access that overlaps recorded variables is unshared, and so
+        needs no order, iff for every recorded range it overlaps no instruction that forms an address inside that range can reach it in the CFG.
+        Soundness: another thread can observe a frame object only through an address of it; before the first address-forming instruction on every path no
+        such address exists (the frame is the thread's own: STACK), and a loop back edge from a forming instruction to the access is a path from it."""
+        if self.rec is None or self.rec == a64frame.DYNAMIC:
+            return False
+        cs = self.frame_offsets(i, sp, rg)
+        sz = acc_size(i)
+        if cs is None or sz is None or not all(c + sz <= 0 for c in cs):
+            return False
+        ov = {r for r in self.rec for c in cs if c < r[0] + r[1] and r[0] < c + sz}
+        return bool(ov) and not any(k in self.reaches(r) for r in ov)
 
     def fences(self, res, cand):
         n = len(self.ins)
