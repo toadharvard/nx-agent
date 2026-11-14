@@ -6,7 +6,7 @@ Updated 2026-11-12. Trunk read at claude/fnv-nx-clean e35b870a (2026-11-12). CLA
 
 | item | task | worker | status |
 |---|---|---|---|
-| 3.7 | gl4 root on L1 w15c 1cac0562 (per-target recipes) + lib/sha256 57051038 {guest, host} + translator build.host.json + eb482552 + b83b7309 | w6 session_01KmtZKQxwicx7EEmsGzNneG -> claude/fnv-l6a-deko-w6-gl4w15c | doing |
+| 3.7 | gl4 root on L1 w15c 1cac0562 (per-target recipes) + lib/sha256 57051038 {guest, host} + translator build.host.json + eb482552 + b83b7309 | w6 session_01KmtZKQxwicx7EEmsGzNneG -> claude/fnv-l6a-deko-w6-gl4w15c | done 64c8851d, sent to the candidate: commits 973539f6 (lib/sha256 {guest,host}, translator host recipe), 5f459b89 (=eb482552), cf1989ed (=b83b7309), bc313fd6 (onedef header-copy: d3d9 copy of state.h deleted, d3d9total reads render/nxgpu, 332/332 identical), 6d5f3318 (render/nxgpu guest recipe), 64c8851d (L6's ABI headers byte-equal; gl4 accepts FLAT bit 1, SHADER_CREATE refuses key != sha256(glsl)); 2 fresh builds deterministic: gl4 17/17, nxgpu 1/1, nxgpu@guest 1/1, lib/sha256 1/1 + @host 1/1, translator@host 0 units; onedef 210/210, admit 943/943, d3d9total 332/332; gl4 externals outside its roots: 8 EGL + 23 libc + 2 hooks + _GLOBAL_OFFSET_TABLE_ + 2 translator (link gap: translator sources not admitted, L6) |
 | 4.3 | boot machine libnxgl4 from the gl4 root (with L4) | — | blocked: translator root has 0 units on w15c (L6: admit w1b sources), and RECIPE.md w15c refuses per-target variants in a product image's link.roots (L1: raised 2026-11-14) |
 | 4.6 | link-failure branch -> fnvnx_reach_violation with L6's sm_link certificate (closes A3) | — | blocked by L6 (sm_link gate + certificate) |
 
