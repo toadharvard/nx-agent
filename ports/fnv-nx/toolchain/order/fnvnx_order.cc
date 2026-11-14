@@ -615,6 +615,7 @@ struct frame_pass : rtl_opt_pass {
     std::string line;
     bool dynamic = fun->calls_alloca || fun->calls_setjmp || fun->has_nonlocal_label;
     std::vector<std::pair<long, long> > rs;
+    std::string dbg;
     auto one = [&](tree v) {
       if (!VAR_P(v) && TREE_CODE(v) != PARM_DECL) return;
       if (TREE_STATIC(v) || DECL_EXTERNAL(v) || !TREE_ADDRESSABLE(v)) return;
@@ -622,12 +623,20 @@ struct frame_pass : rtl_opt_pass {
       if (!m || !MEM_P(m)) return;
       long off;
       tree sz = DECL_SIZE_UNIT(v);
-      if (!sz || !tree_fits_uhwi_p(sz) || !slot_offset(XEXP(m, 0), &off)) { dynamic = true; return; }
+      if (!sz || !tree_fits_uhwi_p(sz) || !slot_offset(XEXP(m, 0), &off)) {
+        dynamic = true;
+        rtx a = XEXP(m, 0);
+        std::string d = std::string(GET_RTX_NAME(GET_CODE(a)));
+        if (GET_CODE(a) == PLUS) d += std::string("(") + GET_RTX_NAME(GET_CODE(XEXP(a, 0))) + (REG_P(XEXP(a, 0)) ? std::to_string(REGNO(XEXP(a, 0))) : "") + "," + GET_RTX_NAME(GET_CODE(XEXP(a, 1))) + ")";
+        if (REG_P(a)) d += std::to_string(REGNO(a));
+        dbg += (sz ? "" : "nosz ") + std::string(TREE_CODE(v) == PARM_DECL ? "parm " : "var ") + d + ";";
+        return;
+      }
       rs.push_back(std::make_pair(off, (long)tree_to_uhwi(sz)));
     };
     for (tree v : frame_vars[fun->decl]) one(v);
     for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) one(p);
-    if (dynamic) line = "dynamic";
+    if (dynamic) line = "dynamic DBG " + dbg + " calls_alloca=" + std::to_string(fun->calls_alloca) + " setjmp=" + std::to_string(fun->calls_setjmp);
     else {
       std::sort(rs.begin(), rs.end());
       for (auto &r : rs) line += (line.empty() ? "" : " ") + std::to_string(r.first) + ":" + std::to_string(r.second);
