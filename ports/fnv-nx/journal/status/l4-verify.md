@@ -147,3 +147,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - Orchestrator plan: the t38 row goes to L5, and L1 cand1 picks it up. After cand1 is green, one L4 branch on cand1: bootrt first (closes the run-time gcc path), then w7-i, then the S1..S8 checker and the rest.
 - THREAD_CPU row done: claude/fnv-l4-verify-w6-t38 d1c363d6e on L5 99c9fedc0, sent to w10 and L5. check_hostapi 31/31, 0 differences. bootthreadcpu 35, bootunmap 28, bootlayout 32, bootpath 26, bootsock 6, boot 30 PASS.
 - Red on root 99c9fedc0, independent of t38: test_bootmachine, because verify/tests/guest g.c:584 uses FnvnxWireAddrinfo, which the root's hostabi lacks. w6 is fixing it as a second t38 commit (doing).
+- w7 task K done (w7-k 08ff9dfab), reviewed and accepted. S4: slot = image base + ELF symbol of native_symbol, table_id checked against the ELF's fnvnx_import_table_id. S5: every tls.tsv row, template from bin + sha256, cross-checked against modules.tsv and the PE. New inputs: --tls, --iat-data, --elf. test_bootstart 86 PASS; oracle 83, bootinputs 75, bootcores 24 PASS.
+  - Sent to L1: load_index collides with the exe's slot 0 (Windows: exe 0, DLLs from 1 in load order); publish align resolved in bytes; confirm the table-id symbol name.
+  - w7 task L (doing): start-state dumps capture the whole block, so a size limit never yields undecided.
