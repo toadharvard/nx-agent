@@ -999,3 +999,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 
 - 23:30 L5 resolve_input 4008c136 reviewed: accepted with one fix. A tracked-directory ref returns only the tracked files under it (git ls-files), so untracked files are never read. 2 gates use it, with 0 opens outside it. Its ident becomes a declared read in w19's gate keys (1.7).
 - PERFDEBT.json (integration 20fe9510e): the check goes into the existing assumptions gate. The file parses, every entry has a rule and an owner, and it must be 0 at the first-frame milestone. No new gate. Owner w22, after w22f2.
+
+- 23:32 The orchestrator gave L1 5 slots: w23 (1.1), w20 (1.2), w22 (1.3), w24 (2.0 loader root, started), w15d (the lib/sha256 recipe first, then the rest of w15c). After them: 1.7 w19 → w15c → w12 → w16c → w16 IAT; w4 takes a slot when the MANIFEST appears.
+  New RECIPE rule (with w15c): a product image of target T may link a root's per-target variant of target T. A flags variant stays test-only, and a product link to one is red.
