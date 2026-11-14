@@ -71,7 +71,8 @@ def check_doc(doc):
           and isinstance(doc.get("argv"), list) and doc["argv"] and all(isinstance(a, str) for a in doc["argv"])
           and doc["argv"][0].startswith("/") and isinstance(doc.get("cwd"), str) and doc["cwd"].startswith("/")
           and isinstance(doc.get("env"), dict) and isinstance(doc.get("inputs"), list)
-          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool", "ro_root"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and doc.get("ro_root", False) in (True, False)
           and doc.get("class", "build") in ("build", "verification"))
     if not ok:
         raise SbxError("malformed stage document")
@@ -103,6 +104,7 @@ def _seccomp():
     _c(libc.prctl(22, 2, ctypes.c_char_p(fprog)), "seccomp")
 
 def _setup_root(doc, root, run, srcs):
+    ro_flag = MS_RDONLY if doc.get("ro_root") else 0   # a stage with "ro_root": every write outside its outputs fails (EROFS)
     _mount(None, "/", None, MS_REC | MS_PRIVATE)
     _mount("tmpfs", root, "tmpfs", 0, "mode=755")
     for n, i in enumerate(doc["inputs"]):
@@ -131,17 +133,19 @@ def _setup_root(doc, root, run, srcs):
         open(root + "/dev/" + f, "w").close()
         _bind_ro("/dev/" + f, root + "/dev/" + f, ro=False)
     os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing)
-    _mount("tmpfs", root + "/dev/shm", "tmpfs", 0, "mode=1777")
+    _mount("tmpfs", root + "/dev/shm", "tmpfs", ro_flag, "mode=1777")
     for f in ("urandom", "random"):   # a constant: entropy read from a device is a function of the sandbox version
         with open(root + "/dev/" + f, "wb") as g:
             for n in range(32768):
                 g.write(hashlib.sha256(b"fnvnx-sandbox-urandom/1:%d" % n).digest())
         os.chmod(root + "/dev/" + f, 0o444)
-    _mount("tmpfs", root + "/tmp", "tmpfs", 0, "mode=1777")
+    _mount("tmpfs", root + "/tmp", "tmpfs", ro_flag, "mode=1777")
     _c(libc.syscall(155, root.encode(), (root + "/oldroot").encode()), "pivot_root")
     os.chdir("/")
     _c(libc.umount2(b"/oldroot", 2), "umount old root")
     os.rmdir("/oldroot")
+    if doc.get("ro_root"):   # the root tmpfs (cwd, the parents of the input mounts) read-only; the outputs, bound rw, stay the only writable paths
+        _mount(None, "/", None, MS_BIND | MS_REMOUNT | MS_RDONLY)
 
 def _pid1(doc, root, run, logs, errfd, srcs):
     try:
