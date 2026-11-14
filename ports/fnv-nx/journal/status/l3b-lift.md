@@ -84,3 +84,5 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 | A-FPMASK sites unproven | 55 / 830 | brief 2026-11-11 |
 
 - 2026-11-14 23:35: K accepted (w4 a5063e58f, closure over executed fns; migrate 2,409 later by farm). (E) queue still open, sole w4 item. w9 f12fc303 accepted (RF/TF under debug-trap fact); round-trip test waits for product ELF on bootmachine; w9 on 4g static EH/SEH oracle. Awaiting L3a struct cpu sha.
+- 2026-11-14 23:40: 4g w9 34fec49e EH/SEH oracle (Wine 9.0 except_i386.c rules): 8 images, 4,643 FuncInfo, 218 scope tables, 11 ThrowInfo, 235,261/235,261 decision rows agree, 0 findings. Next (w9): universe by frame-handler thunks (magic scan as cross-check), throw-site ThrowInfo resolution, V4 cookie, gate_eh wiring + pinned Wine external. rt/msvcrt_eh.cc vs oracle -> product ELF (step 3).
+- 2026-11-14 23:38: 2.8 w3 695ca62c7 (merge w4 a5063e58f): gate_oracle 96/107; 9 lift files decided P/D by rule (see inbox w3), 2 foreign reported to L1/L6.
