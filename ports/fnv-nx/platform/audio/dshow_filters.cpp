@@ -15,9 +15,6 @@
 #include "dshow_int.h"
 
 #define MINIMP3_IMPLEMENTATION
-#define MINIMP3_NO_SIMD   /* the library's scalar path on every target: its NEON path converts float to int with the target intrinsic vcvtq_s32_f32
-                           (saturating), where every float-to-int of native code goes through the certified f2i form (the MSVC _ftol class);
-                           the scalar path's conversions are plain casts, which the fnvnx_ftoi plugin handles */
 #define MINIMP3_NO_STDIO
 #include "minimp3_ex.h"
 
