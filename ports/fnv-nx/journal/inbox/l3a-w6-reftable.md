@@ -42,3 +42,6 @@ Total 34 test files in lift roots (fnvlift 3, gates 4, proof 10, tools 17 incl. 
 
 ## What I wrote in oracle.json files
 Nothing in this note. gates/tests/oracle.json holds the four gate tests with the reference VERDICT.md "## State of the product gates" (kind spec): that is a contract of the gate with itself, rows N. I did not add entries for the P rows because each needs the anchor form of the checkable source (what the oracle checker accepts as "pinned": the Sail pin, the z3 pin, env.json compiler, readelf) and I could not find that form written on int3; tell me the accepted `kind`/`anchor` for them (or point me at the checker on the w19 branch) and I add the 9 P rows in one commit.
+
+## bndldx anchor (w6, 2026-11-14)
+B: no pinned SDM text (w3 confirms none in repo or oracle externals). Executes as NOP by f_sys class 4 (SDM Vol 2 A.4 Table A-6 as cited there, unverified against text). Lead raises pinning.
