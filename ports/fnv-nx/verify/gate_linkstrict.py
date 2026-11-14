@@ -187,7 +187,7 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
     bad = {}
     for sig, c in sorted(copies.items()):
         items.append(("<comdat>", sig))
-        if sig in undec:
+        if sig in undec and len(c) > 1:       # one copy has nothing to be the same as: undecidable only matters where copies meet
             u = undec[sig][0]
             out.add(("<comdat>", sig, "identity-undecidable", "object %s section %s offset %d: %s" % u))
         elif len(set(c.values())) > 1:
@@ -208,7 +208,7 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
         items.append(("<defs>", name))
         strong = [d for d in ds if d[1] == GLOBAL and d[2] != COMMON]
         cdef = [d for d in ds if d[4] is not None]
-        differs = any(len(set(copies[d[4]].values())) > 1 or d[4] in undec for d in cdef)
+        differs = any(len(set(copies[d[4]].values())) > 1 or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef)
         for kind, why in (("common", any(d[2] == COMMON for d in ds)), ("ifunc", any(d[3] == IFUNC for d in ds)),
                           ("duplicate-strong", len(strong) > 1), ("comdat-differs", differs and not strong),
                           ("weak-only", not strong and not any(d[2] == COMMON for d in ds) and (not cdef or any(d[4] is None for d in ds)))):

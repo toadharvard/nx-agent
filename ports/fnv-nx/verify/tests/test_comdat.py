@@ -86,6 +86,9 @@ check("a section symbol outside the group with no symbol there: odr red, identit
       any(r.startswith("identity-undecidable") and "x1.cc" in r and ".data" in r and "offset 4" in r for r in red.values()), (uni, red))
 check("... linkstrict: identity-undecidable", g["status"] == "red" and "identity-undecidable" in g["detail"], (g, txt))
 
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(HEAD + DATA + ".Lout: .word 9\n")})
+check("... the same group in ONE object only: nothing to compare, not red", "sigB" not in uni and g["status"] == "green", (uni, red, g, txt))
+
 # 4b. the symbols a group defines are part of its identity: same bytes, another size or visibility is another definition
 SYM = lambda extra: (".section .text.sigD,\"axG\",@progbits,sigD,comdat\n.weak sigD\n" + extra + ".type sigD,%function\nsigD: ret\n")
 st, (uni, red), g, txt = run({"toy/x1.cc": asm(SYM("") + ".size sigD, 4\n"), "toy/x2.cc": asm(SYM("") + ".size sigD, 4\n")})
