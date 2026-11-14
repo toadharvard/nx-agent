@@ -36,6 +36,43 @@ for dp, dn, fn in os.walk(objdir):
         tls += ["%s: %s" % (p, l.split()[2]) for l in rels if "TLS" in l.upper() and len(l.split()) > 2]
 if tls: sys.exit("thread-local state in the translator objects (%d): %s" % (len(tls), tls[:5]))
 print("TLS: 0 STT_TLS symbols, 0 TLS relocations in", objdir)
+# Phase rule (L6): everything that reads the glsldk configuration (the locations the parse computes at the start of the definitions phase) is reached
+#  only from the definitions-phase emitters emit_GLSL_attribute and emit_GLSL_finalize. Every read goes through dk_cfg() (never inlined, mojoshader_profile_glsl.c),
+#  so the relocation graph of that object shows who reads it: no other emit_GLSL_* function (instruction emitters, start, end, global, array, sampler,
+#  uniform, const_array) may reach dk_cfg, and the check is not vacuous: both definitions-phase emitters reach it.
+def dk_norm(x):   # the function a section / symbol belongs to: GCC clones and splits (.isra.N, .constprop.N, .part.N, .cold, .text.unlikely.) are the same function
+    for pre in (".text.", "unlikely.", "startup.", "hot."):
+        if x.startswith(pre): x = x[len(pre):]
+    return x.split(".")[0]
+
+def dk_phase(objdir):
+    p = os.path.join(objdir, "mojoshader", "profiles", "mojoshader_profile_glsl.c.o")
+    sec = None; edges = {}; defined = set()
+    for l in subprocess.run(["readelf", "-rW", p], capture_output=True, text=True, check=True).stdout.splitlines():
+        if l.startswith("Relocation section"): sec = None   # a non-text section (.rela.eh_frame) names every function: not an edge
+        m = re.match(r"Relocation section '\.rela?\.text\.([^']+)'", l)
+        if m: sec = dk_norm(m[1]); edges.setdefault(sec, set()); continue
+        w = l.split()
+        if sec and len(w) >= 5 and re.match(r"[0-9a-f]+$", w[0]):
+            edges[sec].add(dk_norm(w[4]))
+    for l in subprocess.run(["readelf", "-sW", p], capture_output=True, text=True, check=True).stdout.splitlines():
+        w = l.split()
+        if len(w) > 7 and w[3] == "FUNC" and w[6] != "UND": defined.add(dk_norm(w[7]))
+    def reach(roots):
+        seen = set(); todo = list(roots)
+        while todo:
+            x = todo.pop()
+            if x in seen: continue
+            seen.add(x); todo += sorted(edges.get(x, ()))
+        return seen
+    defn = {"emit_GLSL_attribute", "emit_GLSL_finalize"}
+    inst = sorted(x for x in defined if x.startswith("emit_GLSL_") and x not in defn)
+    bad = [x for x in inst if "dk_cfg" in reach([x])]
+    miss = sorted(x for x in defn if "dk_cfg" not in reach([x]))
+    if bad or miss or "dk_cfg" not in defined:
+        sys.exit("dk phase rule violated in %s: emitters reaching dk_cfg %s; definitions-phase emitters not reaching it %s" % (p, bad, miss))
+    print("dk phase: %d other emit_GLSL_* roots reach dk_cfg: 0; emit_GLSL_attribute and emit_GLSL_finalize reach it" % len(inst))
+dk_phase(objdir)
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.join(here, "..", "..", "shaders", "translator")   # the product root this tool measures
 hdr = open(os.path.join(root, "include", "fnvnx_shaders.h")).read()
