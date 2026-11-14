@@ -505,3 +505,9 @@ Update 2026-11-12, at 698adefb:
   - lift/rt builds green: 12 objects.
   - The native test roots are building.
 - Dispatch-plugin def-descriptor fix (no row for a shapeless definition): not accepted as stated, because a native definition whose address escapes would get no row. Tightened rule: no row only when address_taken is false (static); otherwise DISPATCH1 stays an error. w8 adds the 2 cases.
+
+## 2026-11-14 23:10 (resumed after the usage limit; path only)
+- The candidate claude/fnv-next3b 141b07580 carries L1 w17's lifted flags (7ecf2e25), so the lift/pack hold can lift.
+- w6: merge 141b07580 into int3 (a3e8f7e4f, which has the selftests split: 13 files to lift/tools/tests, 8 to lift/fnvlift/tests). Show the lifted flags in the resolved pack argv, then the rt/pack checks.
+- w8: t16k = 141b07580 + int3 + the t16h commits. Then the tightened def-descriptor rule, builds of lift/pack (product root), lift/rt and the 7 test roots, and the 6 guest tests against references.
+- w5: the pf_prove_no_form fix and DEF0/DEFPRIOR. w7: the facts commit status was requested.
