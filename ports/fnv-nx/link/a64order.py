@@ -137,10 +137,14 @@ HINT = _ids('PRFM', 'PRFUM')
 LITERAL = _ids('LDR', 'LDRSW')
 END = _ids('ERET', 'ERETAA', 'ERETAB', 'BRK', 'UDF', 'HLT', 'DCPS1', 'DCPS2', 'DCPS3')
 COPY_MOV = _ids('MOV')
+MOVK_ID = _ids('MOVK')
+MOVN_ID = _ids('MOVN')
+MOVIMM = COPY_MOV | _ids('MOVZ') | MOVK_ID | MOVN_ID
 UBFX = _ids('UBFX')
 ADD = _ids('ADD')
 SUB = _ids('SUB')
 ADRP = _ids('ADRP')
+ADR_ID = next(iter(_ids('ADR')))
 B_, CBZ_ = K.ARM64_INS_B, _ids('CBZ', 'CBNZ', 'TBZ', 'TBNZ')
 CC_UNCOND = (0, K.ARM64_CC_AL)
 
@@ -205,16 +209,32 @@ def mem_kind(i):
 UNKNOWN_X = ('X', None)
 
 
+# THE TAG (the value type of the register lattice, one definition; every consumer handles every shape):
+#   None            the register holds no frame address (a register without an entry is None)
+#   'RO'            an address in a read-only section
+#   ('D', c)        the frame address CFA+c
+#   ('FP', c)       the frame pointer, x29 = CFA+c
+#   ('X', origins)  a value derived from several frame addresses: ORIGINS a sorted tuple of CFA offsets, or None when an origin is unknown
+#   ('K', v)        the integer constant v (mov/movz/movk): not an address, it only lets `sub sp, sp, xN` be a known frame size (rule KC)
 def origins(t):
-    """the CFA offsets a derived tag comes from, or None"""
-    return (t[1],) if t[0] in ('D', 'FP') else t[1]
+    """the CFA offsets a tag comes from: a tuple (empty for None and 'RO'), or None when unknown (('X', None))"""
+    if t is None or t == 'RO' or t[0] == 'K':
+        return ()
+    if t[0] in ('D', 'FP'):
+        return (t[1],)
+    return t[1]
+
+
+def is_frame(t):
+    """Does the tag T hold a frame address (D, FP or X)?"""
+    return isinstance(t, tuple) and t[0] in ('D', 'FP', 'X')
 
 
 def mkx(*tags):
     """the tag of a value derived from several tagged values (None and RO entries do not count)"""
     og = set()
     for t in tags:
-        if t in (None, 'RO'):
+        if not is_frame(t):
             continue
         o = origins(t)
         if o is None:
@@ -309,6 +329,9 @@ class Func:
         succ = [set() for _ in range(n)]
         self.ctl = [ctl(i) for i in self.ins]
         self.exits = [False] * n
+        self.ij = [k for k in range(n) if self.ctl[k] == 'ijmp']
+        self.promoted = set()      # the `br xN` that are not tail calls: they may go to every instruction of the function (see tail_call)
+        self.local_targets = self.has_local_targets()
         nxt = lambda k: self.pos.get(self.ins[k].off + 4)   # noqa: E731
         for k, i in enumerate(self.ins):
             c = self.ctl[k]
@@ -322,13 +345,21 @@ class Func:
                 else:
                     succ[k].add(self.pos[tgt])
             if c == 'ijmp':
-                succ[k].update(range(n))
                 self.exits[k] = True
+        self.succ0 = succ
+        self.edges()
+
+    def edges(self):
+        """succ, pred and orphans from the direct edges plus, for each promoted `br`, an edge to every instruction"""
+        n = len(self.ins)
+        succ = [set(s) for s in self.succ0]
+        for k in self.promoted:
+            succ[k].update(range(n))
         pred = [set() for _ in range(n)]
         for k in range(n):
             for s in succ[k]:
                 pred[s].add(k)
-        orphans = [k for k in range(1, n) if not pred[k]]
+        orphans = self.entries(succ, pred)
         for k in range(n):
             if self.ctl[k] == 'call':
                 succ[k].update(orphans)
@@ -338,6 +369,99 @@ class Func:
             for s in self.succ[k]:
                 self.pred[s].add(k)
         self.orphans = set(orphans)
+
+    @staticmethod
+    def entries(succ, pred):
+        """The instructions the unwinder may enter (landing pads): the instructions no edge reaches, and, of the code that the entry (instruction 0)
+        and those do not reach, every instruction of a SOURCE strongly connected component (a cycle nothing outside jumps into: the unwinder enters
+        it at one of its instructions, which one is not known).  Rule LP.  SOUNDNESS: control reaches an instruction only by an edge of the
+        graph or by the unwinder's transfer to a landing pad; an instruction reached by no path from instruction 0 or from a landing pad is
+        reached from a source component, whose entry is some instruction of it.  The facts of these instructions are those at a call (sp and the
+        callee-saved tags: the unwinder restores the frame of the call site), which dataflow gives them as for any orphan."""
+        n = len(succ)
+        orph = {k for k in range(1, n) if not pred[k]}
+        while True:
+            seen, stack = set(), [0] + sorted(orph) if n else []
+            while stack:
+                k = stack.pop()
+                if k in seen:
+                    continue
+                seen.add(k)
+                stack.extend(succ[k])
+            rest = [k for k in range(n) if k not in seen]
+            if not rest:
+                return sorted(orph)
+            rs = set(rest)
+            index, low, on, st, comp, c = {}, {}, set(), [], {}, 0
+            for r0 in rest:                  # iterative Tarjan over the unreached part
+                if r0 in index:
+                    continue
+                work = [(r0, iter(sorted(succ[r0])))]
+                index[r0] = low[r0] = len(index)
+                st.append(r0)
+                on.add(r0)
+                while work:
+                    v, it = work[-1]
+                    adv = False
+                    for w in it:
+                        if w not in rs:
+                            continue
+                        if w not in index:
+                            index[w] = low[w] = len(index)
+                            st.append(w)
+                            on.add(w)
+                            work.append((w, iter(sorted(succ[w]))))
+                            adv = True
+                            break
+                        if w in on:
+                            low[v] = min(low[v], index[w])
+                    if adv:
+                        continue
+                    work.pop()
+                    if work:
+                        low[work[-1][0]] = min(low[work[-1][0]], low[v])
+                    if low[v] == index[v]:
+                        while True:
+                            w = st.pop()
+                            on.discard(w)
+                            comp[w] = c
+                            if w == v:
+                                break
+                        c += 1
+            hasin = {comp[w] for v in rest for w in succ[v] if w in rs and comp[w] != comp[v]}
+            orph.update(v for v in rest if comp[v] not in hasin)
+
+    def has_local_targets(self):
+        """Is a code address of this function's body (other than its entry) materialised anywhere in the object?  By a relocation whose target
+        lies inside [a, b) of the section (a jump table entry, a label address in data or in a literal) or an `adr` of an address inside it
+        (an assembler-resolved label).  The only ways to hold a code address are a relocation, adr/adrp, and the link register set by a call
+        (`br x30` is excluded in tail_call)."""
+        for si, rels in self.o.relocs.items():
+            sec = self.o.sections[si]
+            if not sec.flags & a64obj.SHF_ALLOC or sec.name == '.eh_frame':   # debug info and the unwind tables are not read by the program's code
+                continue                                                      # (the unwinder's jumps are the landing-pad edges of orphans)
+            for off, r in rels.items():
+                y = self.o.symbols[r.sym]
+                if y.shndx == self.shndx and self.a < y.value + r.addend < self.b:
+                    return True
+        for i in self.ins:
+            if i.id == ADR_ID:
+                t = [o.imm for o in i.ops if o.type == K.ARM64_OP_IMM]
+                if t and self.a < t[0] < self.b:
+                    return True
+        return False
+
+    def tail_call(self, k, sp):
+        """Rule BR (the indirect `br xN` at instruction k, with the stack pointer SP as the dataflow knows it): a tail call iff
+        sp == CFA (the frame is popped: sp 0 after the epilogue, or a function without a frame), the target register is not the link register,
+        and no code address inside this function (other than its entry) is materialised anywhere in the object (has_local_targets).
+        SOUNDNESS: a `br` to an address inside the function needs that address in a register; the registers get a code address only from a
+        relocation, adr/adrp (both excluded by has_local_targets) or the link register (excluded); every other value is a data value or an
+        address of another function, so with sp == CFA the jump leaves the function with the frame popped, which is an exit like `ret`: no
+        successor inside, the argument registers x0-x7 are the callee's arguments (escapes as at a call).  Anything else may go to every
+        instruction: the old rule, the accesses stay red unless another rule certifies them."""
+        reg = [REG.get(o.reg) for o in self.ins[k].ops if o.type == K.ARM64_OP_REG]
+        return sp == 0 and not self.local_targets and reg and reg[0] != 30
 
     # -- facts. State = (sp, regs). sp: the stack pointer as a CFA-relative offset (an int, 0 at entry) or None (dynamic).
     # regs: sorted ((reg, tag)): tag 'RO' (an address in a read-only section), ('D', c) (the frame address CFA+c computed
@@ -351,6 +475,15 @@ class Func:
         o = i.ops[k]
         sh = o.shift.value if o.shift.type != 0 else 0
         return o.imm << sh
+
+    @staticmethod
+    def _const(o, rg):
+        """Rule KC: the value of a plain register operand (no shift, no extend) that holds a known constant, else None"""
+        if o.type == K.ARM64_OP_REG and o.shift.type == 0 and o.ext == 0 and o.reg in REG:
+            t = rg.get(REG[o.reg])
+            if isinstance(t, tuple) and t[0] == 'K':
+                return t[1]
+        return None
 
     def _val(self, reg, sp, rg):
         """the tag a register holds as a source: SP reads as the frame address CFA+sp"""
@@ -371,7 +504,7 @@ class Func:
         dst = REG[i.ops[0].reg] if i.ops and i.ops[0].type == K.ARM64_OP_REG and i.ops[0].reg in REG else None
         tag = None
         newsp = sp
-        derived_read = any(self._val(r, sp, rg) not in (None, 'RO') for r in sorted(set(i.rd)) if r in rg or r == SP)
+        derived_read = any(is_frame(self._val(r, sp, rg)) for r in sorted(set(i.rd)) if r in rg or r == SP)
         if mk is not None:
             if SP in wr:   # pre or post index write back of the stack pointer
                 if i.mem.index == 0 and sp is not None:
@@ -384,10 +517,10 @@ class Func:
                 tag = 'RO'
         elif i.id in (ADD | SUB) and len(i.ops) >= 3 and dst is not None and src:
             s0 = self._val(src[0], sp, rg)
-            imm = self._imm(i, 2) if i.ops[2].type == K.ARM64_OP_IMM else None
+            imm = self._imm(i, 2) if i.ops[2].type == K.ARM64_OP_IMM else self._const(i.ops[2], rg)
             sign = 1 if i.id in ADD else -1
             ro = [s for s in src if rg.get(s) == 'RO']
-            if s0 is not None and s0 != 'RO':
+            if is_frame(s0):
                 if imm is not None and s0[0] != 'X':
                     kind, cv = s0
                     tag = (('FP' if (kind == 'FP' and dst == 29) else 'D'), cv + sign * imm)
@@ -400,10 +533,20 @@ class Func:
                 else:
                     tag = mkx(s0, *[self._val(s, sp, rg) for s in src[1:]])
             elif i.id in ADD and len(ro) == 1 and not (len(src) == 2 and src[0] == src[1]) and not any(
-                    self._val(s, sp, rg) not in (None, 'RO') for s in src[1:]):
+                    is_frame(self._val(s, sp, rg)) for s in src[1:]):
                 tag = 'RO'
-            elif imm is None and any(self._val(s, sp, rg) not in (None, 'RO') for s in src[1:]):
+            elif imm is None and any(is_frame(self._val(s, sp, rg)) for s in src[1:]):
                 tag = mkx(*[self._val(s, sp, rg) for s in src[1:]])
+        elif i.id in MOVIMM and dst is not None and len(i.ops) >= 2 and i.ops[1].type == K.ARM64_OP_IMM and dst != SP:
+            sh = i.ops[1].shift.value if i.ops[1].shift.type != 0 else 0
+            v = i.ops[1].imm << sh
+            if i.id in MOVK_ID:   # movk: the 16 bits at sh replaced in a known constant
+                old = rg.get(dst)
+                v = ((old[1] & ~(0xffff << sh)) | ((i.ops[1].imm & 0xffff) << sh)) if isinstance(old, tuple) and old[0] == 'K' else None
+            elif i.id in MOVN_ID:
+                v = ~v
+            if v is not None:
+                tag = ('K', v & (0xffffffff if _MD.reg_name(i.ops[0].reg)[:1] == 'w' else 0xffffffffffffffff))
         elif i.id in COPY_MOV and len(i.ops) == 2 and i.ops[1].type == K.ARM64_OP_REG and dst is not None:
             s0 = self._val(REG.get(i.ops[1].reg), sp, rg)
             if s0 is not None:
@@ -446,12 +589,22 @@ class Func:
             if ta == tb:
                 out[r] = ta
                 continue
-            ds = [t for t in (ta, tb) if t not in (None, 'RO')]
+            ds = [t for t in (ta, tb) if is_frame(t)]
             if ds:   # a frame address on one path: the merged register may hold it
                 out[r] = mkx(*ds)
         return (a[0] if a[0] == b[0] else None, tuple(sorted(out.items(), key=lambda t: t[0])))
 
     def dataflow(self):
+        """the fixpoint of the facts; a `br` that tail_call does not accept is promoted to every instruction and the fixpoint redone, until none is promoted"""
+        while True:
+            self.flow()
+            bad = [k for k in self.ij if k not in self.promoted and self.state[k] is not None and not self.tail_call(k, self.state[k][0])]
+            if not bad:
+                return
+            self.promoted.update(bad)
+            self.edges()
+
+    def flow(self):
         n = len(self.ins)
         self.state = [None] * n
         if not n:
@@ -479,15 +632,17 @@ class Func:
     def fact(self, k):
         return self.state[k] if self.state[k] is not None else (None, ())
 
-    def frame_cfa(self, i, sp, rg):
-        """CFA-relative offset of the first byte a plain memory instruction touches through the frame, or None"""
+    def frame_offsets(self, i, sp, rg):
+        """the CFA-relative offsets of the first byte a plain memory instruction touches through the frame, a tuple with one entry per origin of
+        the base (a derived tag ('X', origins) is judged for EVERY origin), or None when the base is not a frame address (no tag, RO) or its
+        origin is unknown (sp not static, ('X', None)): None is then never a certificate (frame_ok is False)."""
         b = _base(i)
         if i.mem is None or i.mem.index != 0 or b is None:
             return None
-        if b == SP:
-            return None if sp is None else sp + i.mem.disp
-        t = rg.get(b)
-        return t[1] + i.mem.disp if isinstance(t, tuple) else None
+        og = (sp,) if b == SP else origins(rg.get(b))
+        if not og or None in og:
+            return None
+        return tuple(c + i.mem.disp for c in og)
 
     def escape_sites(self, k, sp, rg):
         """[origins tuple, or None when unknown]: the frame addresses that instruction k hands out: stored, passed in x0-x8 to a
@@ -508,7 +663,7 @@ class Func:
                 take(r)
         if mk is not None and i.mem is not None and i.mem.index != 0:
             take(REG.get(i.mem.index))
-        if self.ctl[k] == 'call':   # the callee may read any argument register (a return or a tail jump pops the frame: a
+        if self.ctl[k] == 'call' or (self.ctl[k] == 'ijmp' and k not in self.promoted):   # the callee may read any argument register (a return or a tail jump pops the frame: a
             for r in range(0, 9):    # frame address it carries dangles, it names no live slot)
                 take(r)
         return out
@@ -561,11 +716,11 @@ class Func:
         """rule F: the access is inside the function's own frame and overlaps no address-taken variable of the record"""
         if self.rec is None or self.rec == a64frame.DYNAMIC:
             return False
-        c = self.frame_cfa(i, sp, rg)
+        cs = self.frame_offsets(i, sp, rg)
         sz = acc_size(i)
-        if c is None or sz is None or c + sz > 0:
+        if cs is None or sz is None:
             return False
-        return not any(c < o + s and o < c + sz for o, s in self.rec)
+        return all(c + sz <= 0 and not any(c < o + s and o < c + sz for o, s in self.rec) for c in cs)
 
     def fences(self, res, cand):
         n = len(self.ins)
