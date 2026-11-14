@@ -511,3 +511,18 @@ Update 2026-11-12, at 698adefb:
 - w6: merge 141b07580 into int3 (a3e8f7e4f, which has the selftests split: 13 files to lift/tools/tests, 8 to lift/fnvlift/tests). Show the lifted flags in the resolved pack argv, then the rt/pack checks.
 - w8: t16k = 141b07580 + int3 + the t16h commits. Then the tightened def-descriptor rule, builds of lift/pack (product root), lift/rt and the 7 test roots, and the 6 guest tests against references.
 - w5: the pf_prove_no_form fix and DEF0/DEFPRIOR. w7: the facts commit status was requested.
+
+## 2026-11-14 23:20 int3 ec3509b19 (w6): lift/pack can lift
+- ec3509b19 = a3e8f7e4f + closed-rule moves + w5 2aedc634 + merge of next3b 141b07580 + recipe adaptation. recipe.py: lift/rt valid, lift/pack valid. plugin_cxx removed; plugin args from recipe.plugin_args('lifted').
+- The resolved lift/pack flags have 42 tokens from one source (flags.semantics, origin=lifted): -mabi=ilp32 first, -ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables, then only -std=gnu++17 -O2 -Werror=attributes. The hold on lift/pack is lifted.
+- Selftests at ec3509b19 (global): lift/tools/tests 15, lift/fnvlift/tests 6, red 4 (fnvlift↔proof import cycle), lift/test 16.
+  - Decision: break the cycle (fnvlift must not import proof; the edge proof→fnvlift.dsl stays). The acyclic root graph becomes a check.
+  - instest goes to tools by the rule.
+- References: 21/21 moved tests have no oracle.json entry. w6 gives a table of the independent source per test; "none" rows go to L1. No invented references.
+- Baseline: 8/21 moved tests fail, the same as in the old layout. Causes:
+  - 3 use stock g++ without plugins (a second build path); they move to recipe.py.
+  - 1 has a missing PRELUDE import.
+  - 3 use undeclared inputs (a home path, FalloutNV.exe); these become externals.
+  - 1 has an argv defect.
+  - Owner: w6.
+- w8 builds t16k on ec3509b19.
