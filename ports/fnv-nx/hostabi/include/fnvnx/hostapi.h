@@ -128,7 +128,7 @@ typedef struct FnvnxHostApi {
 
 /* ext_call results that belong to no service (all three are -255, -254, -253 as int64; no service answers one of them otherwise):
  *   NO_MODULE  the module number is >= 64 or no host module is registered under it
- *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 38 and up)
+ *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 39 and up)
  *   BAD_NARGS  module 11: fewer arguments than the service takes (the column "n" of the table below), or nargs > 0 with a null array */
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
 #define FNVNX_EXT_NO_SERVICE 0xFFFFFFFFFFFFFF02ull
