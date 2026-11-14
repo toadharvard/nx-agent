@@ -99,7 +99,7 @@ def model_valid(r, model):
     fns, want = r.get('model_fns'), r.get('closure_sha')
     if not fns or not want: return False
     if model not in _ir_ok: _ir_ok[model] = model_sail.ir_sha() == model
-    if not _ir_ok[model]: raise Refused('the IR file %s is not the pinned model %s' % (model_sail.IR, model))
+    if not _ir_ok[model]: raise Refused('the IR file %s is not the pinned model %s' % (model_sail.ir_file(), model))
     return model_sail.closure_sha(fns) == want
 
 

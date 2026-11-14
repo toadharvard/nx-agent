@@ -267,7 +267,7 @@ class InputsRed(unittest.TestCase):
         with open(formgate.INPUTS) as fh:
             doc = json.load(fh)
         self.assertEqual(doc['model_sha256'], formgate.model_pin())
-        self.assertEqual([e['name'] for e in doc['external']], ['certs'])
+        self.assertEqual([e['name'] for e in doc['external']], ['certs', 'x86ir'])
         with workdir() as td:
             u, c, ids, detail = formgate.judge(td)
         self.assertEqual((u, c, ids, detail), (1, 0, ['inputs'], 'inputs: external liftpack not declared'))

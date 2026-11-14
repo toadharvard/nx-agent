@@ -29,7 +29,7 @@ class Closure(unittest.TestCase):
     def setUpClass(cls):
         r, _, _ = run('85c0')
         cls.fns = list(model_sail.LAST['fns'])
-        cls.text = open(model_sail.IR).read()
+        cls.text = open(model_sail.ir_file()).read()
         cls.ir = irdeps.IR(cls.text)
         cls.base = irdeps.closure_sha(cls.ir, cls.fns, 'e')
         cls.found, _ = irdeps.resolve(cls.ir, cls.fns)

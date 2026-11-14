@@ -67,6 +67,19 @@
     "ports/fnv-nx/lift/proof/formgate.py"
    ]
   },
+  "test_model_patches.py": {
+   "references": [
+    {
+     "anchor": "L2-L5",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/model_patch_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms.py",
+    "ports/fnv-nx/lift/proof/prove.py"
+   ]
+  },
   "test_rewrite.py": {
    "references": [
     {
