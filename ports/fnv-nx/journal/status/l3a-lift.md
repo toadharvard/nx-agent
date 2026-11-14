@@ -526,3 +526,11 @@ Update 2026-11-12, at 698adefb:
   - 1 has an argv defect.
   - Owner: w6.
 - w8 builds t16k on ec3509b19.
+
+## 2026-11-14 23:20 t16k acd4c7500 (w8)
+- t16k = t16j + next3b 141b07580 + int3 ec3509b19.
+- recipe.py marks 12/12 roots valid: lift/bridges, lift/descs, lift/rt, lift/pack, platform, rt/guest, and the 3 lifted and 3 native test roots.
+- Tightened defdisp rule (b0198f906): no row only when the definition is not public and its address is not taken; every other shapeless definition is DISPATCH1. defdisptest: 245/245 green, plus 3 new cases.
+- int3 test lines: gate_lift, gate_flags (10), lock_only and ranges (5 records) all pass. ranges had a latent parser bug; it now parses by section header.
+- Blocked: the 3 native test roots stop at link. libgcc unwind-dw2-fde needs pthread_mutex_lock/unlock, and nothing defines them. Owner: L5 (rt/guest mutexes over its real threads). A single-thread libgcc is rejected.
+- Running: the builds of lift/rt, descs, bridges, the 3 lifted roots and lift/pack, then the guest tests against their references.
