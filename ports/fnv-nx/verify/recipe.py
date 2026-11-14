@@ -822,8 +822,10 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         elif any(a != b and under(a, b) for a in ins for b in ins):
             err.append("generated[%d].inputs nest" % i)
         for p in ins if isinstance(ins, list) else []:
-            if isinstance(p, str) and not under(p, root) and not any(tree_of({r: roots[r]}, p) and roots[r]["class"] == "tool" for r in roots):
-                err.append("generated[%d].inputs: %s is a file of another root: take it through `uses` (the producer's declared output), not by path" % (i, p))
+            # a generator reads, read-only, exactly its declared inputs: a tracked file or directory (git ls-files, checked above) that lies in an
+            # admitted root, this root or another. Its content enters the stage key; `uses` stays the way to take a GENERATED output of a root.
+            if isinstance(p, str) and not any(under(p, r) for r in roots):
+                err.append("generated[%d].inputs: %s lies in no admitted root" % (i, p))
         if not (isinstance(outs, list) and outs and all(rel_ok(o) for o in outs)):
             err.append("generated[%d].outputs must be a non-empty list of root-relative paths" % i)
             continue
