@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-15 02:20Z Gen-input census (w16c1 check 94519abb1): 17 stages over 6 recipes, 0 errors; 11 tracked reads, all declared. 17 external reads are keyed by the root-wide /ext mount (a sound superset); per-stage externals would be an L1 schema decision. No root change; verdict on 0cdafb322 is running. Declared-CPU edit queued after it.
 - 11-15 02:15Z L1 generator-input rule (w16c1): every gen stage declares what it reads in resolve_input form. Platform stages gen_wire_errno, gen_nls and gen_winerr read /ext files with inputs []; w10 declares them as a class over all L5 roots, before the verdict.
 - 11-15 02:10Z L1: the fnvnx_assume_violation gate is in the assumptions gate (w22); the generator stage gen_wire_errno to dom_errno.c over pinned externals is already wired. hostabi gets a header-only host variant in build.json for L4 bootrt (L4 w6 commit on w6-r), taken at the next merge.
 - 11-15 02:05Z w24 iat.py 36713265: a data row whose native_symbol is - and that some image imports is now a stage error. On manifest 09fce9f9: 1553 rows, 4 data rows, 0 with -, so 0 objects owed by L5.
