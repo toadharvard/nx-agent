@@ -1,24 +1,18 @@
 {
- "format": "fnvnx-perfdebt/1",
  "entries": [
   {
-   "switch": "MINIMP3_NO_SIMD",
-   "site": "ports/fnv-nx/platform/audio/dshow_filters.cpp (made unconditional by commit 6aa648f7)",
-   "fast_path": "minimp3's NEON mp3d_scale_pcm",
-   "restoring_rule": "fnvnx_ftoi rewrites every explicit target float->int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact: in range it converts; out of range or NaN it gives the x86 integer indefinite (cvttps2dq). fpexact then certifies the NEON path.",
-   "owner": "L2",
-   "removal": "the switch and this entry are deleted in the same commit that lands the rule"
+   "fast_path": "ARMv8 SHA-256 instructions in lib/sha256",
+   "id": "PD-LOADER-SHA256-ISA",
+   "owner": "L1",
+   "rule": "lib/sha256 selects the ISA body by the declared reference CPU's features (one home)"
   },
   {
-   "switch": "lifted guest accesses all ordered (ldar/stlr); plain emission removed",
-   "site": "ports/fnv-nx/lift (the lifter's memory-access emission, R9 (b): every guest load is ldar, every guest store is stlr)",
-   "fast_path": "plain ldr/str (and ldp/stp, and the vectorizer's free scheduling) for guest memory accesses",
-   "restoring_rule": "An access whose cell is proven thread-private is emitted as plain ldr/str; every other access stays ordered (ldar/stlr). A cell is thread-private iff it is (1) a stack slot of the accessing function's frame whose address does not escape, or (2) a cell that no other thread can reach. Both are decided by the one points-to/write-set model (w4's pointsto.py, the one that also serves DIC and the cpufeat certificates), over all images and the declared host boundary. Escape means the address flows to a global cell, a heap cell, another frame's escaping cell, a thread-start or callback argument, or any import argument (the platform's native code is another observer). A cell the model cannot decide is not thread-private. Undecided stays ordered: it is the sound side.",
-   "proof": "x86-TSO to Arm: the published mapping proof (OWNER 9) requires ldar/stlr only to preserve, for other threads, the order of accesses to locations they can access. For a thread-private cell, no access by another thread exists by definition (in every execution, since the points-to over-approximates every address the program can form; wild accesses are excluded by OWNER 6). So no other thread can observe the order of its accesses relative to anything. Within the accessing thread, Arm keeps per-location coherence and program-order semantics for a single thread (a single-threaded execution sees its own accesses in program order: Arm ARM B2, the single-copy and per-location coherence and dependency rules). The thread's own values are therefore identical to the ordered emission. The TSO behaviour of every cell another thread can reach is unchanged, because those accesses stay ordered. Hence the set of observable behaviours is unchanged: TSO is preserved by construction.",
-   "assumptions": "OWNER 6 (no wild accesses), OWNER 9 (the pinned formal tools and the published x86-TSO to Arm mapping); no new assumption",
+   "fast_path": "plain ldr/str (and ldp/stp, the vectorizer's free scheduling) for guest memory accesses; the lifter emits every guest load as ldar and every guest store as stlr",
+   "id": "PD-LIFT-ORDERED",
    "owner": "L3a",
-   "when": "after the product relift (2.3), before the first frame is measured",
-   "removal": "the all-ordered switch and this entry are deleted in the same commit that lands the rule"
+   "rule": "An access whose cell is proven thread-private is emitted as plain ldr/str; every other access stays ordered (ldar/stlr). A cell is thread-private iff it is (1) a stack slot of the accessing function's frame whose address does not escape, or (2) a cell that no other thread can reach. Both are decided by the one points-to/write-set model (w4's pointsto.py, the one that also serves DIC and the cpufeat certificates), over all images and the declared host boundary. Escape means the address flows to a global cell, a heap cell, another frame's escaping cell, a thread-start or callback argument, or any import argument (the platform's native code is another observer). A cell the model cannot decide is not thread-private. Undecided stays ordered: it is the sound side. Proof: x86-TSO to Arm: the published mapping proof (OWNER 9) requires ldar/stlr only to preserve, for other threads, the order of accesses to locations they can access. For a thread-private cell, no access by another thread exists by definition (in every execution, since the points-to over-approximates every address the program can form; wild accesses are excluded by OWNER 6). So no other thread can observe the order of its accesses relative to anything. Within the accessing thread, Arm keeps per-location coherence and program-order semantics for a single thread (a single-threaded execution sees its own accesses in program order: Arm ARM B2, the single-copy and per-location coherence and dependency rules). The thread's own values are therefore identical to the ordered emission. The TSO behaviour of every cell another thread can reach is unchanged, because those accesses stay ordered. Hence the set of observable behaviours is unchanged: TSO is preserved by construction. When: after the product relift (2.3), before the first frame is measured."
   }
- ]
+ ],
+ "first_frame": false,
+ "format": "fnvnx-perfdebt/1"
 }
