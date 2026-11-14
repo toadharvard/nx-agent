@@ -297,11 +297,20 @@ GATES = json.dumps({"format": "fnvnx-gatefile/1", "name": "g", "argv": ["x"], "r
 ADMIT = json.dumps({"roots": [{"path": T + "journal", "record": True}]})
 
 
+PD0 = {"format": "fnvnx-perfdebt/1", "first_frame": False, "entries": []}
+PDE = {"id": "MINIMP3_NO_SIMD", "fast_path": "minimp3 SIMD decode", "rule": "fnvnx_ftoi lane-exact float to int", "owner": "L5"}
+
+
+def pd(first=False, *entries):
+    return {"format": "fnvnx-perfdebt/1", "first_frame": first, "entries": list(entries)}
+
+
 def tree(extra=None, doc=None):
     td = tempfile.mkdtemp()
     files = dict(FILES)
     files[T + "verify/gates.d/g.json"] = GATES
     files[T + "verify/admit.json"] = ADMIT
+    files[T + "verify/PERFDEBT.json"] = json.dumps(PD0)
     files[T + "verify/ASSUMPTIONS.json"] = json.dumps(doc if doc is not None else base())
     files[T + "journal/log.md"] = "An assumption in the append-only log.\n"
     files.update(extra or {})
@@ -384,6 +393,33 @@ check("findings file holds every finding, not a capped list", ok and doc["total"
 check("findings file is sorted by code", ok and [f["code"] for f in doc["findings"]] == sorted(f["code"] for f in doc["findings"]), "")
 check("stdout prints at most 20 findings and the summary names the file", r.returncode == 2 and fp in r.stdout and
       r.stdout.count("\n  ") <= 22, r.stdout[-300:])
+
+# PERFDEBT
+PDF = T + "verify/PERFDEBT.json"
+rc, res = gate(tree())
+check("perfdebt: empty file is green, open count 0", rc == 0 and res["perfdebt"] == {"open": 0, "first_frame": False}, (rc, res))
+rc, res = gate(tree({PDF: json.dumps(pd(False, PDE))}))
+check("perfdebt: a complete open entry is green and counted", rc == 0 and res["perfdebt"]["open"] == 1 and "perfdebt: 1 open" in res["detail"], (rc, res))
+for name, mut, code in (("no rule", {"rule": ""}, "has no rule"), ("rule missing", {"rule": None}, "has no rule"),
+                        ("no fast path", {"fast_path": " "}, "has no fast_path"), ("no owner", {"owner": None}, "owner is not a layer"),
+                        ("owner not a layer", {"owner": "L9"}, "owner is not a layer"), ("no id", {"id": ""}, "has no id"),
+                        ("unknown field", {"note": "x"}, "unknown fields")):
+    e = dict(PDE); e.update(mut); e = {k: v for k, v in e.items() if v is not None}
+    rc, res = gate(tree({PDF: json.dumps(pd(False, e))}))
+    check("perfdebt: entry with %s is red (%s)" % (name, code), rc == 2 and res["status"] == "red" and has(res["errors"], code), (rc, res["errors"]))
+rc, res = gate(tree({PDF: json.dumps(pd(False, PDE, PDE))}))
+check("perfdebt: a repeated id is red", rc == 2 and has(res["errors"], "used twice"), (rc, res["errors"]))
+rc, res = gate(tree({PDF: json.dumps(pd(True, PDE))}))
+check("perfdebt: an open entry with first_frame set is red", rc == 2 and has(res["errors"], "first_frame set"), (rc, res["errors"]))
+rc, res = gate(tree({PDF: json.dumps(pd(True))}))
+check("perfdebt: first_frame set and no entries is green", rc == 0 and res["perfdebt"] == {"open": 0, "first_frame": True}, (rc, res))
+rc, res = gate(tree({PDF: json.dumps(dict(pd(False), first_frame="no"))}))
+check("perfdebt: first_frame not a boolean is red", rc == 2 and has(res["errors"], "first_frame"), (rc, res["errors"]))
+rc, res = gate(tree({PDF: "{not json"}))
+check("perfdebt: an unparseable file is red", rc == 2 and has(res["errors"], "is missing or is not a JSON object"), (rc, res["errors"]))
+td = tree(); os.remove(os.path.join(td, PDF)); subprocess.run(["git", "rm", "-q", "--cached", PDF], cwd=td, check=True)
+rc, res = gate(td)
+check("perfdebt: a missing file is red", rc == 2 and has(res["errors"], "is missing or is not a JSON object"), (rc, res["errors"]))
 
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)

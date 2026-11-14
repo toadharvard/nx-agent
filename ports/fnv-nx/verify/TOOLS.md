@@ -1521,6 +1521,8 @@ and compares the tracked files it opened with subject + references (verify/oracl
 ## verify/gate_assumptions.py
 
 ```text
+Perf debt: verify/PERFDEBT.json (fnvnx-perfdebt/1) lists switched-off fast paths, each with id, fast_path, rule, owner (a layer); the report gives
+perfdebt.open; first_frame true makes any open entry red.
 Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
 (verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
     python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json
