@@ -55,7 +55,7 @@ def main():
     elf6, elf3, elf35 = patched("h6.elf", 6), patched("h3.elf", 3), patched("h35.elf", 35)
 
     def args(elf, out, tbl=table, man=manifest, *extra):
-        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000",
+        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", "--guest-root", tb.GUEST_DIR,
                 "--root", root, "--milestones", tbl, "--manifest", man, "--out", os.path.join(d, out), *extra]
 
     rc, o, e = cli(args(elf6, "a.json"))
