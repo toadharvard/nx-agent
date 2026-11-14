@@ -1,9 +1,8 @@
-// PATCH (i): ROR carry flag for masked counts >= 2 is the most significant bit of the result.
-// SDM vol. 2, ROR: "the CF flag receives a copy of the bit that was shifted from one end to the other", i.e. for ROR
-// (bits leave at the least-significant end and enter at the most-significant end) CF = MSB of the result.
-// Original model line (rotates_spec.sail, in the `_ =>` arm of ror_spec_8/16/32/64; the `1 =>` arm already uses the msb):
-//   let cf : bits(1) = result[0 .. 0];
-// The functions below are the originals with exactly that line changed to the msb of the result.
+// PATCH (i): ror_spec_8/16/32/64.  Two hunks, both now TRANSCRIPTIONS of ACL2 books/projects/x86isa/machine/instructions/rotates-spec.lisp at acl2 master 3ccb342c88bd3b815856f4bbc336382287934405 (ASM-009):
+//   (a) masked count 0: no flag affected, none undefined (G1; master rotates-spec.lisp:662-665 `(0 ;; No flags are affected when the masked count is 0 ... (mv input-rflags 0))`; the pinned
+//       ACL2 8.5 translation returned the undefined flag OF here);
+//   (b) the `_ =>` arm: CF = MSB of the result (master :709-717 `(cf ;; CF = MSB of the result. (mbe :logic (logbit ,size-1 result) ...))`; the pinned translation had result[0 .. 0]).
+// Original model line of (b) (rotates_spec.sail): let cf : bits(1) = result[0 .. 0]; the `1 =>` arm already uses the msb.
 
 val ror_spec_8 : (bits(8), bits(6), rflagsbits) -> (bits(8), rflagsbits, rflagsbits)
 
@@ -12,8 +11,7 @@ function ror_spec_8 (dst, src, input_rflags) = {
     let (output_rflags, undefined_flags) : (rflagsbits, rflagsbits) = {
         match src {
           0 => {
-              let undefined_flags : rflagsbits = [Mk_rflagsbits(0x00000000) with of = 0b1];
-              (input_rflags, undefined_flags)
+              (input_rflags, Mk_rflagsbits(0x00000000))
           },
           1 => {
               let cf : bits(1) = logbit(7, result);
@@ -39,8 +37,7 @@ function ror_spec_16 (dst, src, input_rflags) = {
     let (output_rflags, undefined_flags) : (rflagsbits, rflagsbits) = {
         match src {
           0 => {
-              let undefined_flags : rflagsbits = [Mk_rflagsbits(0x00000000) with of = 0b1];
-              (input_rflags, undefined_flags)
+              (input_rflags, Mk_rflagsbits(0x00000000))
           },
           1 => {
               let cf : bits(1) = logbit(15, result);
@@ -66,8 +63,7 @@ function ror_spec_32 (dst, src, input_rflags) = {
     let (output_rflags, undefined_flags) : (rflagsbits, rflagsbits) = {
         match src {
           0 => {
-              let undefined_flags : rflagsbits = [Mk_rflagsbits(0x00000000) with of = 0b1];
-              (input_rflags, undefined_flags)
+              (input_rflags, Mk_rflagsbits(0x00000000))
           },
           1 => {
               let cf : bits(1) = logbit(31, result);
@@ -93,8 +89,7 @@ function ror_spec_64 (dst, src, input_rflags) = {
     let (output_rflags, undefined_flags) : (rflagsbits, rflagsbits) = {
         match src {
           0 => {
-              let undefined_flags : rflagsbits = [Mk_rflagsbits(0x00000000) with of = 0b1];
-              (input_rflags, undefined_flags)
+              (input_rflags, Mk_rflagsbits(0x00000000))
           },
           1 => {
               let cf : bits(1) = logbit(63, result);
