@@ -515,3 +515,9 @@ Paused: w3b, w4, farm; no other work.
     - Guest 8 objects (24 s cold), host 8 objects (7.5 s cold); both green.
     - Re-pin sent to w5 (sm_link) and L6A w6 (gl4).
     - w1b next: the TLS census, then dk_* declared-set, then objstub per root.
+- 23:38Z w1b 38ffed282: dk_attrib/varying_location declared-set rule. Done.
+    - The tables are required (nonnull); the fallback and both failf are deleted.
+    - The ps_1_x implicit pairs are in the set.
+    - Mirror 532cbebc (tree c9b1f0d7…24fd4).
+    - guest 8 / host 8 objects green.
+    - Next: TLS census (first), then objstub per root, then rule-A (c) with w20's fnvnx_reach.h fact id.
