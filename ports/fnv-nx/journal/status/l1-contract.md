@@ -996,3 +996,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - tlsmodel (L1) will make these red: model ≠ LE; a TLS relocation outside every record; a non-TLSLE relocation in a record; a missing section; PT_TLS layout ≠ the definition records.
   - The gate is coded once L2 publishes the layout doc.
 - L3a w8 holds 3.4 (product ELF root). It is pointed to w12g 65a7d01c for the link/guest.json shape (values not final) and is waiting for w24's loader root.
+
+- 23:30 L5 resolve_input 4008c136 reviewed: accepted with one fix. A tracked-directory ref returns only the tracked files under it (git ls-files), so untracked files are never read. 2 gates use it, with 0 opens outside it. Its ident becomes a declared read in w19's gate keys (1.7).
+- PERFDEBT.json (integration 20fe9510e): the check goes into the existing assumptions gate. The file parses, every entry has a rule and an owner, and it must be 0 at the first-frame milestone. No new gate. Owner w22, after w22f2.
