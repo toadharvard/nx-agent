@@ -1,0 +1,120 @@
+diff --git a/mojoshader.h b/mojoshader.h
+--- a/mojoshader.h
++++ b/mojoshader.h
+@@ -727,11 +727,12 @@
+  * glsldk locations for the NEXT MOJOSHADER_parse() on this thread (fnv-nx; the rule is fnvnx_dk_assign() in
+  *  render/shaders/translator/include/fnvnx_dk_layout.h, computed by the caller). attrib/varying: 224 entries indexed
+  *  usage*16+index, -1 = not declared; copy: 224 entries, nonzero = the vertex shader also writes a varying copy
+- *  of POSITION0 / PSIZE0 at that pair's varying location. NULL (the default) = the canonical fixed table.
+- *  The tables are borrowed until MOJOSHADER_glsldkSetLocations(NULL, NULL, NULL).
++ *  of POSITION0 / PSIZE0 at that pair's varying location. The tables are required (no default table) and hold the
++ *  DECLARED set: every pair the parse asks a location for (a DCL, or the fixed t#/v# pairs of ps_1_x) is in it, placed by fnvnx_dk_assign.
++ *  They are borrowed until the next call; a glsldk parse is entered only after a call.
+  */
+ void MOJOSHADER_glsldkSetLocations(const signed char *attrib, const signed char *varying,
+-                                   const unsigned char *copy);
++                                   const unsigned char *copy) __attribute__((nonnull));
+ 
+ /*
+  * glsldk, vertex shaders, NEXT MOJOSHADER_parse() on this thread: nonzero = also write every varying slot 0..30 the shader and the link set
+diff --git a/profiles/mojoshader_profile_glsl.c b/profiles/mojoshader_profile_glsl.c
+--- a/profiles/mojoshader_profile_glsl.c
++++ b/profiles/mojoshader_profile_glsl.c
+@@ -35,6 +35,7 @@
+ void MOJOSHADER_glsldkSetLocations(const signed char *attrib, const signed char *varying,
+                                    const unsigned char *copy)
+ {
++    // required: the tables are the front end's fnvnx_dk_assign result (the declared set), never NULL (nonnull in mojoshader.h)
+     dk_tab_attrib = attrib; dk_tab_varying = varying; dk_tab_copy = copy;
+ } // MOJOSHADER_glsldkSetLocations
+ 
+@@ -48,30 +49,12 @@
+     dk_flat = flat;
+ } // MOJOSHADER_glsldkSetFlat
+ 
+-static int dk_attrib_location(Context *ctx, MOJOSHADER_usage usage, int index)
++// The location of a declared vertex input: the front end's declared set, placed by fnvnx_dk_assign (the ONE rule, fnvnx_dk_layout.h).
++//  The parser asks only for registers it declares (a DCL, or the fixed t#/v# pairs of ps_1_x, which fnvnx_dk_assign adds to the declared set
++//  by the same rule), so every lookup is a member of the set; a register read without a declaration is rejected by the validator before this runs.
++static int dk_attrib_location(MOJOSHADER_usage usage, int index)
+ {
+-    // uam (like GL) has 16 vertex attributes: 0..15.
+-    if (dk_tab_attrib != NULL)
+-    {
+-        const int loc = ((usage >= 0) && (usage < 14) && (index >= 0) && (index < 16)) ? dk_tab_attrib[usage * 16 + index] : -1;
+-        if (loc >= 0)
+-            return loc;
+-        // not in the declared set (ps_1_x implicit t#/v#, always canonical): the canonical slot below
+-    } // if
+-    switch (usage)
+-    {
+-        case MOJOSHADER_USAGE_POSITION:     if (index == 0) return 0; break;
+-        case MOJOSHADER_USAGE_BLENDWEIGHT:  if (index == 0) return 1; break;
+-        case MOJOSHADER_USAGE_BLENDINDICES: if (index == 0) return 2; break;
+-        case MOJOSHADER_USAGE_NORMAL:       if (index == 0) return 3; break;
+-        case MOJOSHADER_USAGE_COLOR:        if (index < 2) return 4 + index; break;
+-        case MOJOSHADER_USAGE_TEXCOORD:     if (index < 8) return 6 + index; break;
+-        case MOJOSHADER_USAGE_TANGENT:      if (index == 0) return 14; break;
+-        case MOJOSHADER_USAGE_BINORMAL:     if (index == 0) return 15; break;
+-        default: break;
+-    } // switch
+-    failf(ctx, "glsldk: no attribute location for usage %d index %d", (int) usage, index);
+-    return 15;
++    return dk_tab_attrib[(int) usage * 16 + index];
+ } // dk_attrib_location
+ 
+ // The canonical varying slot of a pair (fnvnx_dk_varying_location), -1 if it has none. Bijective onto 0..30.
+@@ -95,29 +78,17 @@
+     return -1;
+ } // dk_canonical_varying
+ 
+-static int dk_varying_location(Context *ctx, MOJOSHADER_usage usage, int index)
++static int dk_varying_location(MOJOSHADER_usage usage, int index)
+ {
+-    // uam: 31 generic varyings 0..30 (31 = clip vertex).
+-    if (dk_tab_varying != NULL)
+-    {
+-        const int loc = ((usage >= 0) && (usage < 14) && (index >= 0) && (index < 16)) ? dk_tab_varying[usage * 16 + index] : -1;
+-        if (loc >= 0)
+-            return loc;
+-        // not in the declared set (ps_1_x implicit t#/v#, always canonical): the canonical slot below
+-    } // if
+-    const int canon = dk_canonical_varying((int) usage, index);
+-    if (canon >= 0)
+-        return canon;
+-    failf(ctx, "glsldk: no varying location for usage %d index %d", (int) usage, index);
+-    return 31;
++    return dk_tab_varying[(int) usage * 16 + index];
+ } // dk_varying_location
+ 
+ static void dk_layout(Context *ctx, char *buf, size_t len, int is_attrib,
+                       MOJOSHADER_usage usage, int index)
+ {
+     if (!support_glsldk(ctx)) { buf[0] = '\0'; return; }
+-    const int loc = is_attrib ? dk_attrib_location(ctx, usage, index)
+-                              : dk_varying_location(ctx, usage, index);
++    const int loc = is_attrib ? dk_attrib_location(usage, index)
++                              : dk_varying_location(usage, index);
+     // D3DSHADE_FLAT: the COLOR varyings (never the vertex attributes) take the provoking vertex (Wine 9.0 state_shademode: GL_FLAT shades the colours only).
+     const int flat = !is_attrib && dk_flat && (usage == MOJOSHADER_USAGE_COLOR);
+     snprintf(buf, len, "layout(location = %d) %s", loc, flat ? "flat " : "");
+@@ -890,9 +861,9 @@
+ 
+     dk_gather_outputs(ctx, mask);
+ 
+-    for (p = 0; p < 224; p++)  // the slot owners: the declaration set (+ L), or without a table the shader's own pairs at their canonical slots
++    for (p = 0; p < 224; p++)  // the slot owners: the declaration set (+ L)
+     {
+-        const int loc = (dk_tab_varying != NULL) ? dk_tab_varying[p] : ((mask[p] & 0x10) ? dk_canonical_varying(p / 16, p % 16) : -1);
++        const int loc = dk_tab_varying[p];
+         if ((loc >= 0) && (loc < 31))
+             owner[loc] = p;
+     } // for
+@@ -990,7 +961,6 @@
+             } // for
+         } // if
+         dk_pad_varyings(ctx);
+-        if (dk_tab_copy != NULL)
+         {
+             // fnv-nx: the linked pixel shader declares POSITION0 / PSIZE0 as an input: besides the built-in, write
+             //  the varying it reads (raw oPos / oPts, before the half-pixel and flip fix-ups).
