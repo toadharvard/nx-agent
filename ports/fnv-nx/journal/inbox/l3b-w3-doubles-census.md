@@ -66,3 +66,16 @@ No file was deleted and no oracle.json entry was added in this step: none of the
 | lift/tools/tests/sehcodes.py | B | real rt objects leave 18 symbols undefined (platform, pack dispatcher tables): needs the product ELF on verify/bootmachine.py (w6's runner). Reference exists (ReactOS KiTrap / Wine 9.0 signal_i386.c). |
 | lift/test/modlift_closure_test.py | B | fake gate outputs are doubles; needs the real module DLL and a real pcsrc run; no gates.d entry covers l3.codemap.<mod>. |
 Files outside the naming (instest, instest_extra, mmxtest, citest, x87dyn in lift/tools/tests, x87test in lift/test): Unicorn instruction tests, B until the forms certificates cover every shape key they use (group (b)).
+
+## (b) shape-key mapping of the Unicorn instruction tests (read-only), 2026-11-14
+Universe = shapes.tsv of the 7 images of the packs (fnv-nx-build shapes external; key function proof/shape.py:shape_key): 26500 keys = int 19817, simd 4369, x87 2175, sys 139.
+Certificates = certs.tsv at the commit pinned by lift/proof/formgate_inputs.json (fnv-nx-build 16ca5eb9, int3 e36079cd3): 0 rows. Certified per family: int 0/19817, simd 0/4369, x87 0/2175, sys 0/139. So no Unicorn test can be deleted yet.
+| test | encodings | keys / family | certified |
+|---|---|---|---|
+| instest.py | every form of the pack (its own forms table, all exe + module shapes) | the whole universe: 26500 (int 19817, simd 4369, x87 2175, sys 139) | 0 |
+| instest_extra.py | 192 hex strings written in the file (synthetic encodings outside the exe census) | 175 keys: int 82, sys 67, simd 17, x87 9 (those 175 are in addition to the census universe unless a key coincides) | 0 |
+| mmxtest.py | multi-instruction x87/MMX sequences (SDM vol 1 9.2) | simd+x87 keys of the sequences; a sequence property (TOP/tag/exponent aliasing), not a per-shape property: a shape certificate does not cover it | 0 |
+| x87dyn.py | single x87 instructions on a full / empty stack (stack faults) | x87; a stack-state property, not covered by per-shape certificates | 0 |
+| x87test.py | rt/x87.c operations vs softfloat | no shape keys (runtime library, not forms) | n/a |
+| citest.py | the 15 msvcrt _CI* entries (rt/msvcrt_ci.cc, rt/fmath.c) | no shape keys (runtime entries) | n/a |
+Reading: the instest family (instest, instest_extra) is what the forms certificates replace, key by key, once certs.tsv has rows (int first; simd/x87 wait for the certified builders, plan item 2.6). mmxtest, x87dyn (state properties of the runtime) and x87test, citest (runtime library) are not shape-key tests: their replacement is a reference-judged test of rt/x87.c and rt/msvcrt_ci.cc on the boot machine, not certificates.
