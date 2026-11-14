@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check: the lifted set of tools/lifted.py equals what liftgen lifted, byte for byte at the census: the per-shape counts of lifted() are exactly
-the rows of liftgen's shapes_K.tsv of the same image (K = 0, one shard).
-    FNVNX_EXE=IMAGE FNVNX_BASE=.. FNVNX_UNIVERSE=universe.tsv python3 -I lifted_vs_shapes.py SHAPES_0.tsv EMIT JTAB      (EMIT: '' or dsl, as liftgen --emit; JTAB: ehtables.json or '')
+the rows of liftgen's shapes_0.tsv of the same image (one shard, K = 0 of N = 1, no jump-table facts, emit '').
+Inputs (inputs.json): the exe and the facts of fnv-nx-build (the universe); the shapes file is generated here into TMPDIR by liftgen.shard, the same step the product runs.
 The proof is liftgen's own output: the shapes file is written by liftgen through lifted.lift_with_instructions, lifted() runs the same step again and counts
 shape_key/family of the instructions it yields (decoded again from the image bytes at (va, length))."""
 import collections, os, sys
@@ -12,9 +12,21 @@ import fnvlift as L, lifted
 from proof import shape
 
 
-def main(argv):
-    shapes, emit, jtab = argv[0], argv[1], argv[2] or None
-    img = L.Image(os.environ['FNVNX_EXE'])
+def main():
+    import argparse, tempfile, liftgen
+    exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
+    os.environ['FNVNX_EXE'] = exe; os.environ['FNVNX_UNIVERSE'] = facts + '/universe.tsv'
+    emit, jtab = '', None
+    out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
+    try:
+        liftgen.shard(argparse.Namespace(shard='0/1', out=out, jobs=os.cpu_count() or 1, exe=exe, emit=emit, jtab=jtab))
+        return compare(shapes, exe, emit, jtab)
+    finally:
+        import shutil; shutil.rmtree(out, ignore_errors=True)
+
+
+def compare(shapes, exe, emit, jtab):
+    img = L.Image(exe)
     got = lifted.lifted(img, os.environ['FNVNX_UNIVERSE'], emit, jtab)
     cnt = collections.Counter(); n = 0
     for va, ln in got:
@@ -35,4 +47,4 @@ def main(argv):
 
 
 if __name__ == '__main__':
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())
