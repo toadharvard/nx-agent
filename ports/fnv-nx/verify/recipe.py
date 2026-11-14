@@ -1354,7 +1354,7 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
     REF is a bare string (a tracked file or directory of ROOT) or {"external": NAME, "path": P}: NAME must be an `external` of ROOT's recipe,
     its tree is mounted from the pinned commit and checked against its tree_sha256. Red (ValueError) for: an undeclared external, a path that
     is absolute or leaves the tree (.. or a symlink), a missing path, an untracked path, a tree_sha256 mismatch.
-    -> (host path, ident); IDENT is "tree_sha256:path" of an external, "root/path" of a tracked file: the gate key takes it."""
+    -> (host path, ident, files); FILES is None for a file or an external path, and for a bare directory the sorted repo-relative TRACKED files under it (a gate reads only those); IDENT is "tree_sha256:path" of an external, "root/path" of a tracked file: the gate key takes it."""
     if isinstance(ref, str):
         base, p, kind = os.path.join(repo, root), ref, None
     elif isinstance(ref, dict) and set(ref) == {"external", "path"} and all(isinstance(v, str) for v in ref.values()):
@@ -1382,10 +1382,14 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
         raise ValueError("%s: input path %r does not exist" % (root, p))
     if kind is None:
         rel = posixpath.join(root, p)
-        if not subprocess.run(["git", "-C", repo, "ls-files", "--error-unmatch", "--", rel], capture_output=True).returncode == 0:
-            raise ValueError("%s: input path %r is not tracked" % (root, p))
-        return full, rel
-    return full, "%s:%s" % (e["tree_sha256"], p)
+        out = subprocess.run(["git", "-C", repo, "ls-files", "-z", "--", rel], capture_output=True)
+        tracked = sorted(x for x in out.stdout.decode().split("\0") if x)
+        if out.returncode != 0 or not tracked:
+            raise ValueError("%s: input path %r is not tracked (a directory needs at least one tracked file)" % (root, p))
+        if os.path.isdir(full):   # a tracked directory is its tracked files only: an untracked file inside is an undeclared input
+            return full, rel, tracked
+        return full, rel, None
+    return full, "%s:%s" % (e["tree_sha256"], p), None
 
 
 def host_compilers(rec, cache):
