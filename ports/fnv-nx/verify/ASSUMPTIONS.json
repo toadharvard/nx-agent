@@ -1633,7 +1633,7 @@
    "id": "ASM-628",
    "text": "The pass rule at NxDraw is stated as \"D3D9 requires it\", without a cited document.",
    "used_by": [
-    "ports/fnv-nx/render/backend/nxgpu4.h"
+    "ports/fnv-nx/render/nxgpu/nxgpu4.h"
    ],
    "aliases": [
     "L6:census#37"
@@ -1646,7 +1646,7 @@
    "id": "ASM-629",
    "text": "Reserved fields of the shader ABI structures must be 0.",
    "used_by": [
-    "ports/fnv-nx/render/backend/nxgpu4_shader.h"
+    "ports/fnv-nx/render/nxgpu/nxgpu4_shader.h"
    ],
    "aliases": [
     "L6:census#38"

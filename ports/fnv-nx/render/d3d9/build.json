@@ -25,7 +25,7 @@
  },
  "include": [
   "ports/fnv-nx/shim/include",
-  "ports/fnv-nx/render/backend",
+  "ports/fnv-nx/render/nxgpu",
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/lib/sha256/include"
  ],
