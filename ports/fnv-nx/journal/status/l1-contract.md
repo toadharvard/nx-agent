@@ -1092,3 +1092,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w24 ffe3bc71 accepted: 6692eaa1 assumptions loader 0 (rewordings; tree 103/103), ffe3bc71 lib/sha256 cites ASM-002, 4cc629d7 tls.tsv plus tls/<name>.bin (exe row extra; real-exe count not measured, as there is no gamedata in the container). Next: iat_data.tsv and the `-` rule.
 - w22p verdict on 841114c4b: RED 961.5 s, the same red set and counts as the base (no new red). w22 is idle until L2 w1 lands, then runs the paired fpexact candidate.
 - w12: GO on w12h (corrections, w14-src2 merge, weak-undefined, system libs, declared loader).
+- Rule-A (c) reach facts (from L6 w1b): the header is hostabi/include/fnvnx/reach.h. Definitions are per image runtime: guest platstat.cpp:96 (L5), host asked of L4. gate_reach gets a request union over admitted roots plus a new kind `shader_opcode`, certified over the gamedata shader set. This is w20 item 6.
