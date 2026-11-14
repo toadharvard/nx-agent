@@ -252,7 +252,7 @@ def main():
     open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + '\n'.join(texts)); open(w + '/native.cc', 'w').write(NATIVE)
     # the table of native bodies: rule 1's rows, `exe address <TAB> native symbol`
     # the exit bridge of the native body of XN_ADDR (xnative, descriptor of its own type, cdecl: the caller pops) and its entry row for the lifted table
-    xrows, xerr = exitgen.parse_rows(['%08x\txnative\tstack:i:i\tcaller' % XN_ADDR])
+    xrows, xerr = exitgen.parse_rows(['%08x\txnative\tcaller' % XN_ADDR], {'xnative': {'stack:i:i'}})
     assert not xerr, xerr
     open(w + '/exits.cc', 'w').write(exitgen.generate(xrows))
     nat, nh = dispgen.table(['%08x\tnative_body\n' % NATIVE_ADDR], 'fnvnx_native'); open(w + '/ntab.S', 'w').write(nat)

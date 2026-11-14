@@ -25,10 +25,17 @@
  *                 (the object is listed among the arguments, first)
  *          fast   __fastcall: the first two integer arguments in ecx, edx
  *          stack  everything on the stack (__cdecl and __stdcall alike: the callee's own `ret N` tells them apart)
- *   ret    v | i (32-bit integer or pointer) | q (64-bit integer) | f | d | a<N> (an N-byte aggregate returned in
- *          general registers) | a<N>h<elt> (a homogeneous aggregate, elt = f d q h v8 v16 as the backend's part mode says, returned in
- *          floating-point registers) | m<N> (returned in memory the caller provides); a trailing x on an `a` result: the AAPCS side
- *          returns it in registers but the x86 callee returns it through the hidden pointer (a type that is not a POD, see msvc_pod)
+ *   ret    v | i (32-bit integer or pointer) | q (64-bit integer) | f | d | an aggregate  a<N><X><Y>
+ *            the x86 callee and the native (AAPCS64) body choose how they pass the result independently, and the descriptor carries both choices:
+ *          X  R  the x86 callee returns it in registers (eax / edx:eax): msvc_pod holds and N is 1, 2, 4 or 8 (Microsoft x86 convention; Agner Fog,
+ *                Calling conventions, table 7)
+ *             H  the x86 callee returns it through the hidden pointer on the stack
+ *          Y  g  the native body returns it in general registers (x0, x1)
+ *             h<elt>  in floating-point registers, a homogeneous aggregate, elt = f d q h v8 v16 as the backend's part mode says
+ *             m  in memory the caller provides (x8): targetm.calls.function_value / aggregate_value_p of the pinned compiler
+ *          The four combinations are the four bridge actions: R/g,h copy the registers; H/m pass the pointer through; H/g,h store the native registers
+ *          through the x86 pointer; R/m pass a temporary through x8 and load eax:edx from it.
+ *   BNF    ret := "v" | "i" | "q" | "f" | "d" | "a" N X Y ;  X := "R" | "H" ;  Y := "g" | "m" | "h" elt ;  N := digit+
  *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h<elt> (a
  *          homogeneous aggregate) | s<N>r (passed as a reference to a copy)
  * (A homogeneous aggregate names its element type: {float, float} and {double} are both 8 bytes and travel in
@@ -53,6 +60,13 @@
 #include "gimple.h"
 #include "gimple-iterator.h"
 #include "ssa.h"
+#include "cp/cp-tree.h"
+#include "langhooks.h"
+/* ONE .so SERVES BOTH FRONT ENDS (rule CC1PLUS-SYMS, as in fnvnx_names.cc): what only cc1plus defines is weak, null under cc1, and used only behind
+ * fnv_cxx_fe(). This plugin reads the C++ front end's class declarations for one thing, msvc_pod; DECL_OVERLOADED_OPERATOR_IS reads ovl_op_info. */
+#define FNVNX_CXX_ONLY(sym) extern __typeof__(sym) sym __attribute__((weak))
+FNVNX_CXX_ONLY(ovl_op_info);
+static inline bool fnvnx_cxx_fe() { return !strncmp(lang_hooks.name, "GNU C++", 7); }
 #include "tree-ssanames.h"
 #include "tree-phinodes.h"
 #include "cfghooks.h"
@@ -72,7 +86,6 @@
 #include "calls.h"
 #include "output.h"
 #include "langhooks.h"
-#include <dlfcn.h>
 #include <string.h>
 #include <set>
 #include <string>
@@ -124,17 +137,28 @@ static tree new_site()
 
 /* ---- the call's shape */
 
-/* Is `t` a POD type in the sense of the x86 convention's documentation (learn.microsoft.com, "Argument Passing and Naming Conventions": "Structures that are
- * not PODs will not be returned in registers"; Agner Fog, Calling conventions, table 7: a constructor, a copy constructor, a destructor, virtual functions or
- * inheritance make the result go through the hidden pointer)? The front end of C++ owns that predicate (cp/tree.cc pod_type_p); cc1 (C) has no such type, so the
- * symbol is looked up at run time, only for a C++ unit, and a C unit's aggregate is a POD by the language. */
+/* Is `t` returned through the hidden pointer by the x86 callee? The statement is the convention's own ("Structures that are not PODs will not be
+ * returned in registers", learn.microsoft.com, Argument Passing and Naming Conventions; the C++03 aggregate of ISO/IEC 14882:2003 8.5.1 and 9/4 that
+ * VC9 uses; Agner Fog, Calling conventions, table 7), and the VC 2008 reading of it that cl 15.00.30729.01 shows on all 245 cases of
+ * lift/test/clpod (table.tsv, a MEASUREMENT; the table verifies the rule, it does not define it) splits the properties in two:
+ *   own (the returned class only): a user-declared constructor (copy constructor included), a base class, a private or protected non-static
+ *                                             data member (the class is not an aggregate);
+ *   propagated through members (the front end's own class flags, named at the use): a non-trivial copy assignment, a non-trivial destructor,
+ *                                             a vptr, a reference member.
+ * Read from the C++ front end's own declarations of the class; every C++ front-end symbol used is declared weak at the top of this file and sits
+ * behind fnvnx_cxx_fe(). A C unit has no such type: its aggregate is a POD by the language. */
 static bool msvc_pod(tree t)
 {
-  if (strncmp(lang_hooks.name, "GNU C++", 7)) return true;
-  static bool (*pod)(const_tree);
-  if (!pod) pod = (bool (*)(const_tree))dlsym(RTLD_DEFAULT, "_Z10pod_type_pPK9tree_node");
-  if (!pod) { error("DISPATCH1: the C++ front end does not export pod_type_p"); return true; }
-  return pod(t);
+  if (!fnvnx_cxx_fe()) return true;
+  while (TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
+  if (!CLASS_TYPE_P(t)) return true;
+  if (TYPE_HAS_USER_CONSTRUCTOR(t)) return false;                                      /* a user constructor, copy constructor included */
+  if (TYPE_BINFO(t) && BINFO_N_BASE_BINFOS(TYPE_BINFO(t)) > 0) return false;           /* a base class */
+  for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
+    if (TREE_CODE(f) == FIELD_DECL && (TREE_PRIVATE(f) || TREE_PROTECTED(f))) return false;   /* not an aggregate */
+  /* the front end propagates these through the members itself (finish_struct): TYPE_HAS_COMPLEX_COPY_ASSIGN (a user or non-trivial copy assignment,
+   * also implied by a member), TYPE_HAS_NONTRIVIAL_DESTRUCTOR, TYPE_POLYMORPHIC_P (a vptr), CLASSTYPE_REF_FIELDS_NEED_INIT (a reference member) */
+  return !(TYPE_HAS_COMPLEX_COPY_ASSIGN(t) || TYPE_HAS_NONTRIVIAL_DESTRUCTOR(t) || TYPE_POLYMORPHIC_P(t) || CLASSTYPE_REF_FIELDS_NEED_INIT(t));
 }
 
 /* How the target passes a value is asked of the pinned compiler's own backend, never classified here (ASM-001): pass_by_reference, then
@@ -166,6 +190,8 @@ static bool reg_class(rtx r, std::string &c, location_t loc)
 
 static std::set<std::string> descs;                  /* every descriptor this unit uses: .fnvnx.disp */
 
+static const char *conv_of(tree ft);
+
 static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t loc)
 {
   if (VOID_TYPE_P(t)) { out += "v"; return ret; }
@@ -185,10 +211,14 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
   machine_mode mode = TYPE_MODE(t);
   std::string he;
   if (ret) {
-    if (aggregate_value_p(t, fntype)) { out += "m" + n; return true; }
-    if (!reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
-    /* "x": the x86 callee returns it through the hidden pointer although the AAPCS side returns it in registers (a type that is not a POD) */
-    out += "a" + n + he + ((TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) && !msvc_pod(t) ? "x" : ""); return true;
+    bool nat_mem = aggregate_value_p(t, fntype);
+    if (!nat_mem && !reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
+    unsigned long sz = (unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t));
+    bool pod = !(TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) || msvc_pod(t);
+    bool x86_reg = pod && (sz == 1 || sz == 2 || sz == 4 || sz == 8);
+    /* a hidden pointer for a non-POD under __fastcall is in a register that no document names (Agner Fog, table 7): no descriptor, no guess */
+    if (!x86_reg && !pod && !strcmp(conv_of(fntype), "fast")) { error_at(loc, "DISPATCH1: type %qT is a non-POD result under __fastcall: the register of the hidden pointer is not documented", t); return false; }
+    out += "a" + n + (x86_reg ? "R" : "H") + (nat_mem ? "m" : he.empty() ? "g" : he); return true;
   }
   CUMULATIVE_ARGS cum;
   INIT_CUMULATIVE_ARGS(cum, fntype, NULL_RTX, NULL_TREE, 0);
@@ -200,23 +230,34 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
   return true;
 }
 
-static tree descriptor(gcall *call)
+/* conv of a function type: the declaration's own (fnvnx_cc), METHOD_TYPE is this */
+static const char *conv_of(tree ft)
 {
-  location_t loc = gimple_location(call);
+  const char *conv = TREE_CODE(ft) == METHOD_TYPE ? "this" : "stack";
+  if (tree a = lookup_attribute("fnvnx_cc", TYPE_ATTRIBUTES(ft))) {
+    const char *v = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
+    conv = !strcmp(v, "fast") ? "fast" : !strcmp(v, "this") ? "this" : "stack";
+  }
+  return conv;
+}
+
+static void need_names_plugin()
+{
   static bool checked;
   if (!checked) {
     checked = true;
     if (!lookup_attribute_spec(get_identifier("fnvnx_cc")))
       error("DISPATCH1: the fnvnx_names plugin is not loaded: the calling conventions of the declarations are lost");
   }
+}
+
+static tree descriptor(gcall *call)
+{
+  location_t loc = gimple_location(call);
+  need_names_plugin();
   tree ft = gimple_call_fntype(call);
   if (!ft) { error_at(loc, "DISPATCH1: an indirect call without a function type"); return NULL_TREE; }
-  const char *conv = TREE_CODE(ft) == METHOD_TYPE ? "this" : "stack";
-  if (tree a = lookup_attribute("fnvnx_cc", TYPE_ATTRIBUTES(ft))) {
-    const char *v = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
-    conv = !strcmp(v, "fast") ? "fast" : !strcmp(v, "this") ? "this" : "stack";
-  }
-  std::string d = std::string(conv) + ":";
+  std::string d = std::string(conv_of(ft)) + ":";
   if (!shape(TREE_TYPE(ft), true, ft, d, loc)) return NULL_TREE;
   d += ":";
   /* A parameter's type is the function type's (a class that is passed as a reference to a copy is still the
@@ -233,12 +274,54 @@ static tree descriptor(gcall *call)
   return build_string_literal(d.size() + 1, d.c_str());
 }
 
+/* The descriptor of a function DEFINITION, from its own type with the same shape() as the call sites (a native body
+ * that lifted code reaches through an exit bridge). The parameters are the declared ones: the list is the
+ * definition's own, `this` first for a method. */
+static bool def_descriptor(tree decl, std::string &d)
+{
+  location_t loc = DECL_SOURCE_LOCATION(decl);
+  tree ft = TREE_TYPE(decl);
+  d = std::string(conv_of(ft)) + ":";
+  if (!shape(TREE_TYPE(ft), true, ft, d, loc)) return false;
+  d += ":";
+  bool first = true;
+  for (tree parm = TYPE_ARG_TYPES(ft); parm && parm != void_list_node; parm = TREE_CHAIN(parm)) {
+    if (!first) d += ",";
+    first = false;
+    if (!shape(TREE_VALUE(parm), false, ft, d, loc)) return false;
+  }
+  return true;
+}
+
+static void emit_lines(const char *section, const std::set<std::string> &lines)
+{
+  if (lines.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t%s,\"\",%%progbits\n", section);
+  for (auto &d : lines) {
+    fprintf(asm_out_file, "\t.ascii\t\"");
+    for (char c : d) { if (c == '"' || c == '\\') fputc('\\', asm_out_file); fputc(c, asm_out_file); }
+    fprintf(asm_out_file, "\\n\"\n");
+  }
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
+/* .fnvnx.defdisp: `<asm name> <descriptor>\n` per emitted definition (any linkage, clones under their own asm name), sorted, unique.
+ * The exe address is not here: exitgen joins by asm name with .fnvnx.sympair and the bound exe VA. */
 static void finish_unit(void *, void *)
 {
-  if (descs.empty()) return;
-  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.disp,\"\",%%progbits\n");
-  for (auto &d : descs) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", d.c_str());
-  fprintf(asm_out_file, "\t.popsection\n");
+  emit_lines(".fnvnx.disp", descs);
+  need_names_plugin();
+  std::set<std::string> defs;
+  cgraph_node *node;
+  FOR_EACH_DEFINED_FUNCTION(node) {
+    tree decl = node->decl;
+    if (!node->alias && !node->thunk && !TREE_ASM_WRITTEN(decl)) continue;
+    std::string d;
+    if (!def_descriptor(decl, d)) continue;
+    const char *name = targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl)));
+    defs.insert(std::string(name) + " " + d);
+  }
+  emit_lines(".fnvnx.defdisp", defs);
 }
 
 static bool indirect_call(gimple *st)

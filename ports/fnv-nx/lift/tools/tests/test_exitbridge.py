@@ -17,7 +17,7 @@ import bridgegen, exitgen
 
 M64 = (1 << 64) - 1
 FNV0, FNVP = 1469598103934665603, 1099511628211
-RETS = ['v', 'i', 'q', 'f', 'd', 'a1', 'a2', 'a4', 'a8', 'a12', 'a16', 'a8hf', 'a16hd', 'a12hf', 'a4hf', 'm20', 'm4', 'a8x', 'a4x', 'a16x']
+RETS = ['v', 'i', 'q', 'f', 'd', 'a1Rg', 'a2Rg', 'a4Rg', 'a8Rg', 'a12Hg', 'a16Hg', 'a8Rhf', 'a16Hhd', 'a12Hhf', 'a4Rhf', 'a20Hm', 'a4Hm', 'a8Hg', 'a4Hg', 'a16Hg']
 ARGS = ['i', 'q', 'f', 'd', 's4g', 's8g', 's12g', 's16g', 's3g', 's8hf', 's16hf', 's16hd', 's8hd', 's20r', 's5r']
 
 
@@ -27,9 +27,9 @@ def descs():
     for r in RETS: out.append('stack:%s:' % r)
     for a in ARGS: out.append('stack:i:%s' % a)
     for a in ARGS: out.append('stack:v:i,%s,i' % a)
-    out += ['this:%s:i,q,f,d,s12g' % r for r in ('v', 'i', 'q', 'f', 'd', 'a8', 'a12', 'a8hf', 'm20', 'a8x')]
+    out += ['this:%s:i,q,f,d,s12g' % r for r in ('v', 'i', 'q', 'f', 'd', 'a8Rg', 'a12Hg', 'a8Rhf', 'a20Hm', 'a8Hg')]
     out += ['this:i:i', 'this:v:i,s8hd,s3g', 'this:q:i,i,i']
-    out += ['fast:%s:i,q,i,d,i,s8g' % r for r in ('v', 'i', 'q', 'f', 'd', 'a8', 'a12', 'a8hf', 'a16')]
+    out += ['fast:%s:i,q,i,d,i,s8g' % r for r in ('v', 'i', 'q', 'f', 'd', 'a8Rg', 'a12Hg', 'a8Rhf', 'a16Hg')]
     out += ['fast:i:i,i', 'fast:i:q,i,i', 'fast:v:f,i,d,i', 'fast:i:s8g,i,i,i', 'fast:i:i', 'fast:v:']
     return out
 
@@ -98,25 +98,48 @@ def native(k, desc):
     return 'extern "C" %s tn_%d(%s) { %s %s }\n' % (rt, k, ', '.join(ps) or 'void', ' '.join(body), tail)
 
 
+def dd_of(lines):
+    """the defdisp table of rows that carry their descriptor (4 columns): {symbol: {descriptor}}"""
+    t = {}
+    for ln in lines:
+        f = ln.rstrip('\n').split('\t')
+        if len(f) == 4 and f[2]: t.setdefault(f[1], set()).add(f[2])
+    return t
+
+
 def units_part():
     bad = 0
     def check(name, ok):
         nonlocal bad
         print('%-78s %s' % (name, 'ok' if ok else 'FAIL')); bad += not ok
     good = ['00401000\tf1\tstack:i:i\tcaller', '00401010\tf2\tthis:i:i,q\tcallee', '00401020\tf3\tfast:v:i,i\tcallee']
-    rows, err = exitgen.parse_rows(good)
+    rows, err = exitgen.parse_rows(good, dd_of(good))
     check('good rows: 3 rows, no error', len(rows) == 3 and not err)
-    cases = [('no descriptor', ['00401000\tf1\t\tcaller'], 'no descriptor'), ('no pop', ['00401000\tf1\tstack:i:i\t'], 'pop is'), ('a pop that is neither', ['00401000\tf1\tstack:i:i\tboth'], 'pop is'),
+    cases = [('no defdisp row for the symbol', ['00401000\tf1\t\tcaller'], 'no .fnvnx.defdisp row'), ('no pop', ['00401000\tf1\tstack:i:i\t'], 'pop is'), ('a pop that is neither', ['00401000\tf1\tstack:i:i\tboth'], 'pop is'),
              ('a descriptor outside the grammar', ['00401000\tf1\tpascal:i:i\tcaller'], 'descriptor'), ('a duplicate address', good + ['00401000\tf9\tstack:i:i\tcaller'], 'twice'),
-             ('a duplicate symbol', good + ['00402000\tf1\tstack:i:i\tcaller'], 'two addresses'), ('a hidden pointer under fast', ['00401000\tf1\tfast:m20:i\tcallee'], 'not documented'),
+             ('a duplicate symbol', good + ['00402000\tf1\tstack:i:i\tcaller'], 'two addresses'), ('a hidden pointer under fast', ['00401000\tf1\tfast:a8Hg:i\tcallee'], 'not documented'),
              ('fast with caller-pop', ['00401000\tf1\tfast:i:i\tcaller'], 'pops its own'), ('a non-hex address', ['zz\tf1\tstack:i:i\tcaller'], 'not a hex'), ('a short row', ['00401000\tf1'], 'a row is')]
     for name, lines, key in cases:
-        rows, err = exitgen.parse_rows(lines)
+        rows, err = exitgen.parse_rows(lines, dd_of(lines))
         check('error: ' + name, bool(err) and any(key in e for e in err))
-    rows, err = exitgen.parse_rows(['00401000\tf1\t\tcaller', '00401010\tf2\tpascal:i:i\tcaller', '00401020\tf3\tstack:i:i\tcaller'])
+    l3 = ['00401000\tf1\t\tcaller', '00401010\tf2\tpascal:i:i\tcaller', '00401020\tf3\tstack:i:i\tcaller']
+    rows, err = exitgen.parse_rows(l3, dd_of(l3))
     check('every bad row is listed (2 of 3), the good one is kept', len(err) == 2 and len(rows) == 1)
+    # the descriptor is the object's defdisp row, joined by the symbol (3-column rows)
+    t3 = ['00401000\tf1\tcaller', '00401010\tf2\tcallee']
+    rows, err = exitgen.parse_rows(t3, {'f1': {'stack:i:i'}, 'f2': {'this:i:i,q'}})
+    check('3-column rows take the descriptor from defdisp', not err and [r[2] for r in rows] == ['stack:i:i', 'this:i:i,q'])
+    rows, err = exitgen.parse_rows(t3, {'f1': {'stack:i:i'}})
+    check('error: a symbol with no defdisp row is named', len(err) == 1 and 'f2' in err[0] and 'no .fnvnx.defdisp row' in err[0] and len(rows) == 1)
+    rows, err = exitgen.parse_rows(t3, {'f1': {'stack:i:i', 'stack:i:q'}, 'f2': {'this:i:i,q'}})
+    check('error: two differing defdisp rows are listed', len(err) == 1 and 'f1' in err[0] and 'differing' in err[0] and 'stack:i:q' in err[0])
+    rows, err = exitgen.parse_rows(t3, {'f1': {'stack:a8Qg:i'}, 'f2': {'this:i:i,q'}})
+    check('error: a defdisp row outside the grammar is named', len(err) == 1 and 'f1' in err[0] and 'bad return class' in err[0])
+    rows, err = exitgen.parse_rows(['00401000\tf1\tstack:i:i\tcaller'], {'f1': {'stack:i:q'}})
+    check('error: a carried descriptor that differs from the defdisp row', len(err) == 1 and 'defdisp row says' in err[0])
+    check('defdisp_table: byte-identical rows of several objects are one row', exitgen.defdisp_table([('f', 'stack:i:i'), ('f', 'stack:i:i'), ('g', 'stack:v:')]) == {'f': {'stack:i:i'}, 'g': {'stack:v:'}})
     r = subprocess.run([sys.executable, '-I', os.path.join(LIFT, 'tools', 'exitgen.py'), '--rows', '/dev/null', '--out', '/dev/null'], capture_output=True, text=True, env={})
-    check('command line: an empty row list generates an empty file, exit 0', r.returncode == 0)
+    check('command line: --obj is required', r.returncode != 0 and '--obj' in r.stderr)
     return bad
 
 
@@ -136,7 +159,7 @@ def main():
         conv = d.split(':')[0]
         pops[k] = 'callee' if conv in ('this', 'fast') else ('callee' if k % 2 else 'caller')       # both pops for the stack convention
         rows.append('%08x\ttn_%d\t%s\t%s' % (0x401000 + 16 * k, k, d, pops[k]))
-    rr, err = exitgen.parse_rows(rows)
+    rr, err = exitgen.parse_rows(rows, dd_of(rows))
     if err: sys.exit('exitgen rejected the matrix:\n' + '\n'.join(err))
     open(w + '/exits.cc', 'w').write(exitgen.generate(rr))
     open(w + '/natives.cpp', 'w').write(NATIVE_HEAD + bridgegen.types(sorted(set(ds))) + ''.join(native(k, d) for k, d in enumerate(ds)))

@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """The exit-bridge generator: one X_<A> per exe address A that a native root defines and lifted code reaches (README "Every address has both entries").
 
-    exitgen.py --rows NATIVE.tsv --out exits.cc [--entries entries.tsv]
+    exitgen.py --rows NATIVE.tsv --obj OBJ [--obj OBJ ...] --out exits.cc [--entries entries.tsv]
 
-NATIVE.tsv: `address(hex)<TAB>native symbol<TAB>descriptor<TAB>pop` per line (`#` lines and blank lines ignored). The address and symbol are the rows of
-contract/nativerows.py (the native bodies bound to exe addresses); the descriptor is the SAME grammar and the SAME parser as DISPATCH1's bridges
-(tools/bridgegen.py: `conv:ret:args`, the descriptor class of the native's own function type, from the L2 plugin's facts); pop is `callee` or `caller`: who removes the
-stack words on return (the exe's `ret N` of A: stdcall/thiscall/fastcall callee, cdecl caller; a fact of the exe, not of the descriptor).
-RULE: a row with no descriptor or no pop, a descriptor outside the grammar, a duplicate address or symbol, a descriptor the x86 convention does not define (bridgegen.parse:
-a hidden result pointer under `fast`) is a BUILD ERROR listing every such row; nothing is generated.
+NATIVE.tsv: `address(hex)<TAB>native symbol<TAB>pop` per line (`#` lines and blank lines ignored). The address and symbol are the rows of
+contract/nativerows.py (the native bodies bound to exe addresses); pop is `callee` or `caller`: who removes the stack words on return (the exe's `ret N` of A:
+stdcall/thiscall/fastcall callee, cdecl caller; a fact of the exe, not of the descriptor). The descriptor is NOT an input of the rows: it is the object's own fact,
+the row of the section `.fnvnx.defdisp` of the --obj objects (`<asm name> <descriptor>`, written by toolchain/dispatch/fnvnx_dispatch.cc from the definition's own
+type with the same shape() as the call sites), joined to the row by the symbol (the asm name). The grammar is DISPATCH1's, parsed by the one parser,
+bridgegen.parse (`conv:ret:args`, ret := v|i|q|f|d|a<N><X><Y>, see bridgegen.py). A row that still carries a descriptor (4 columns, the descriptor before pop) must
+equal the defdisp row.
+RULE: byte-identical defdisp rows of several objects (COMDAT / inline) are one row. A symbol with no defdisp row, with more than one differing row, or whose
+descriptor does not parse, a descriptor that disagrees with the row's own, a pop that is neither callee nor caller, a duplicate address or symbol, a descriptor the
+x86 convention does not define (bridgegen.parse: a hidden result pointer under `fast` for a register size) is a BUILD ERROR listing every such row by name; nothing is
+generated. There is no default row and no fallback.
 
 X_<A> is bridgegen's bridge in the opposite direction. It runs in the lifted state (guest registers in w19..w26, c in x27) and is entered like every lifted function: the return
 address is at [esp]. It
@@ -38,25 +43,56 @@ static inline double bitsd(u64 u) { union { double f; u64 u; } t; t.u = u; retur
 '''
 
 
-def parse_rows(lines):
-    """-> ([(addr, symbol, desc, pop)], [error strings])."""
+def read_defdisp(path):
+    """The rows of the section `.fnvnx.defdisp` of one object (the fact toolchain/dispatch/fnvnx_dispatch.cc writes: `<asm name> <descriptor>\\n` per emitted
+    definition) -> [(name, descriptor)]. A row that is not `name<space>descriptor` is an error."""
+    from elftools.elf.elffile import ELFFile
+    with open(path, 'rb') as fh:
+        s = ELFFile(fh).get_section_by_name('.fnvnx.defdisp')
+        data = s.data() if s is not None else b''
+    if data and data[-1:] != b'\n': raise ValueError('%s: .fnvnx.defdisp: no final LF' % path)
+    out = []
+    for x in data.decode('ascii').split('\n'):
+        if not x: continue
+        p = x.split(' ')
+        if len(p) != 2 or not p[0] or not p[1]: raise ValueError('%s: .fnvnx.defdisp: a row is `asm name<space>descriptor`: %r' % (path, x))
+        out.append((p[0], p[1]))
+    return out
+
+
+def defdisp_table(rows):
+    """[(name, descriptor)] of every object -> {name: set(descriptor)}. Byte-identical rows (a COMDAT / inline function defined in several objects) are one row."""
+    t = {}
+    for n, d in rows: t.setdefault(n, set()).add(d)
+    return t
+
+
+def parse_rows(lines, defdisp):
+    """-> ([(addr, symbol, desc, pop)], [error strings]).  The descriptor of a row is the object's own defdisp row of the symbol (an asm name), never an input of
+    NATIVE.tsv: a symbol with no row, with more than one differing row, or whose row does not parse is an error naming it; a row that also carries a descriptor
+    (4 columns) must equal the defdisp row."""
     rows, bad, seen_a, seen_s = [], [], {}, {}
     for n, ln in enumerate(lines, 1):
         ln = ln.rstrip('\n')
         if not ln.strip() or ln.startswith('#'): continue
         f = ln.split('\t')
-        if len(f) < 4 or not f[0] or not f[1]: bad.append('line %d: a row is `address<TAB>symbol<TAB>descriptor<TAB>pop`' % n); continue
+        if len(f) not in (3, 4) or not f[0] or not f[1]: bad.append('line %d: a row is `address<TAB>symbol<TAB>pop` (or with the descriptor before pop)' % n); continue
         try: a = int(f[0], 16)
         except ValueError: bad.append('line %d: %r is not a hex address' % (n, f[0])); continue
-        if not f[2]: bad.append('%08x %s: no descriptor' % (a, f[1])); continue
-        if f[3] not in ('callee', 'caller'): bad.append('%08x %s: pop is `callee` or `caller`, not %r' % (a, f[1], f[3])); continue
-        try: conv, ret, args, reg_ret = bridgegen.parse(f[2])
-        except ValueError as e: bad.append('%08x %s: descriptor %r: %s' % (a, f[1], f[2], e)); continue
-        if conv == 'fast' and f[3] == 'caller': bad.append('%08x %s: a __fastcall function pops its own stack words (pop callee)' % (a, f[1])); continue
+        pop = f[-1]
+        if pop not in ('callee', 'caller'): bad.append('%08x %s: pop is `callee` or `caller`, not %r' % (a, f[1], pop)); continue
+        ds = defdisp.get(f[1], ())
+        if not ds: bad.append('%08x %s: no .fnvnx.defdisp row for the symbol' % (a, f[1])); continue
+        if len(ds) > 1: bad.append('%08x %s: %d differing .fnvnx.defdisp rows: %s' % (a, f[1], len(ds), ' | '.join(sorted(ds)))); continue
+        desc = next(iter(ds))
+        if len(f) == 4 and f[2] != desc: bad.append('%08x %s: the row says descriptor %r, the .fnvnx.defdisp row says %r' % (a, f[1], f[2], desc)); continue
+        try: conv, ret, args, reg_ret = bridgegen.parse(desc)
+        except ValueError as e: bad.append('%08x %s: descriptor %r: %s' % (a, f[1], desc, e)); continue
+        if conv == 'fast' and pop == 'caller': bad.append('%08x %s: a __fastcall function pops its own stack words (pop callee)' % (a, f[1])); continue
         if a in seen_a: bad.append('%08x: twice in the list (%s, %s)' % (a, seen_a[a], f[1])); continue
         if f[1] in seen_s: bad.append('symbol %s: two addresses (%08x, %08x)' % (f[1], seen_s[f[1]], a)); continue
         seen_a[a] = f[1]; seen_s[f[1]] = a
-        rows.append((a, f[1], f[2], f[3]))
+        rows.append((a, f[1], desc, pop))
     return sorted(rows), bad
 
 
@@ -115,15 +151,19 @@ def generate(rows):
 
 
 def main(argv):
-    rows_f = out = ent = None; i = 0
+    rows_f = out = ent = None; objs = []; i = 0
     while i < len(argv):
+        if i + 1 >= len(argv): sys.exit('usage: exitgen.py --rows NATIVE.tsv --obj OBJ [--obj OBJ ...] --out exits.cc [--entries entries.tsv]')
         if argv[i] == '--rows': rows_f = argv[i + 1]
+        elif argv[i] == '--obj': objs.append(argv[i + 1])
         elif argv[i] == '--out': out = argv[i + 1]
         elif argv[i] == '--entries': ent = argv[i + 1]
-        else: sys.exit('usage: exitgen.py --rows NATIVE.tsv --out exits.cc [--entries entries.tsv]')
+        else: sys.exit('usage: exitgen.py --rows NATIVE.tsv --obj OBJ [--obj OBJ ...] --out exits.cc [--entries entries.tsv]')
         i += 2
-    if not rows_f or not out: sys.exit('exitgen: --rows and --out are required')
-    with open(rows_f) as f: rows, bad = parse_rows(f)
+    if not rows_f or not out or not objs: sys.exit('exitgen: --rows, --obj and --out are required')
+    try: dd = defdisp_table([r for o in objs for r in read_defdisp(o)])
+    except ValueError as e: sys.exit('exitgen: ' + str(e))
+    with open(rows_f) as f: rows, bad = parse_rows(f, dd)
     if bad: sys.exit('exitgen: %d native rows have no exit bridge:\n%s' % (len(bad), '\n'.join(bad)))
     with open(out, 'w', newline='') as f: f.write(generate(rows))
     if ent:
