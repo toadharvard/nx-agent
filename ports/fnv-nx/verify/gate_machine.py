@@ -9,7 +9,7 @@ Roots come only from verify/admit.json (class product). A root DECLARES its hive
    "seed_unit": the recipe unit that applies the seed (the only unit allowed to reference a hive-writing API)}
 Universe, classes and certification: contract/hive.py. Writers are read from the objects of the build (recipe.symbols per object: undefined
 names). A dynamic site (root, key or value not statically resolved) is class `dynamic`: the gate is red and its detail says MEASUREMENT, as the reach
-gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item, unless it is header-only (gate_build.unitless): 0 items). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green."""
+gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item, unless it is header-only (gate_build.unitless): 0 items, or outside the class `registry-reader`: its build's symbol table defines and references no registry API (hive_names): 0 items; a root that has one enters the class and is the one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green."""
 import json
 import os
 import shutil
@@ -27,6 +27,13 @@ import hive  # noqa: E402
 import recipe  # noqa: E402
 
 IN_KEYS = {"format", "sites", "declared", "seed", "seed_unit"}
+
+
+def hive_names(res):
+    """The registry APIs (hive.ROLES: Reg*/SH* names, A and W) a root's build defines or references, by its symbol table: the class fact
+    registry-reader. A root with none can read no key by a static call."""
+    names = {d["symbol"] for d in res["defined"]} | set(res["undefined"])
+    return sorted(names & set(hive.ROLES))
 
 
 def refs_of(res):
@@ -54,7 +61,16 @@ def judge_root(root, repo, cache, admit, bad):
         if not os.path.isfile(p):
             if gate_build.unitless(root, cache, repo):
                 return 0, 0, [], "header-only root: no code, so no hive (by construction)"
-            return 1, 0, [root + ":registry.in.json"], "declares no registry.in.json (the root's hive is undeclared)"
+            try:
+                built = gate_build.ensure(root, cache, repo)[0]
+                if built["status"] == "red":
+                    raise ValueError("build red at stage %s" % built["failure"]["stage"])
+            except (ValueError, KeyError, OSError, subprocess.CalledProcessError, cas.CasError, recipe.RecipeError) as e:
+                return 1, 0, [root + ":registry.in.json"], "declares no registry.in.json, and the class registry-reader cannot be decided: %s" % (str(e)[:200] or type(e).__name__)
+            hit = hive_names(built)
+            if not hit:
+                return 0, 0, [], "outside the class registry-reader: neither defines nor references a registry API"
+            return 1, 0, [root + ":registry.in.json"], "uses the registry API %s and declares no registry.in.json" % ",".join(hit[:3])
         with open(p) as f:
             decl = json.load(f)
         built = gate_build.ensure(root, cache, repo)[0]
