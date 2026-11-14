@@ -64,6 +64,7 @@ KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_laye
         "plugins", "variants", "outputs", "uses", "sources"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
+GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
@@ -246,6 +247,39 @@ def link_file(rec_file, root, mine, roots, files):
     return rec_file if rel_ok(rec_file) and tool_file(roots, files, rec_file) else None
 
 
+def load_guest_link(repo="."):
+    """link/guest.json of the checkout, or None when the tree has none."""
+    p = os.path.join(repo, GUEST_LINK)
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def guest_link_errors(prof, pin, files, roots):
+    """Problems of the guest link profile PROF (load_guest_link): exactly {script, libs}; `script` a tracked file under a tree of an admitted tool root
+    (tool_file); `libs` {external, dirs, names, startfiles, endfiles} of LIBS_KEYS whose external is the pinned runtime of PIN (no hand path)."""
+    if not isinstance(prof, dict) or set(prof) != {"script", "libs"}:
+        return ["%s must be {script, libs}" % GUEST_LINK]
+    sc, lb, err = prof["script"], prof["libs"], []
+    full = TREE + "/" + sc if isinstance(sc, str) and rel_ok(sc) else None
+    if not (full and tool_file(roots, files, full)):
+        err.append("%s: script %r is not a tracked file of an admitted tool root (a path inside %s)" % (GUEST_LINK, sc, TREE))
+    paths = lambda k: isinstance(lb.get(k), list) and all(rel_ok(x) for x in lb[k])  # noqa: E731
+    if not (isinstance(lb, dict) and set(lb) == LIBS_KEYS and paths("dirs") and paths("startfiles") and paths("endfiles")
+            and isinstance(lb.get("names"), list) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", n) for n in lb["names"])):
+        err.append("%s: libs must be {external, dirs, names, startfiles, endfiles} (paths inside the external)" % GUEST_LINK)
+    elif not (isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) and lb["external"] == pin["runtime"].get("name")):
+        err.append("%s: libs.external %r is not the pinned runtime external of %s" % (GUEST_LINK, lb["external"], GUEST_PIN))
+    return err
+
+
+def with_guest_link(rec, root, roots, repo):
+    """The recipe a guest root is BUILT with: its `link` gets script (by repo path, a tool-tree file) and libs from the guest link profile.
+    A host root, a root without link, or a checkout without a profile: REC unchanged."""
+    lk, prof = rec.get("link"), load_guest_link(repo)
+    if not (isinstance(lk, dict) and prof and roots.get(root, {}).get("target") == "guest"):
+        return rec
+    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs=prof["libs"]))
+
+
 def load_admit(repo="."):
     with open(os.path.join(repo, ADMIT)) as f:
         return {r["path"]: r for r in json.load(f)["roots"]}
@@ -322,7 +356,19 @@ def load_pin(repo="."):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
-def guest_errors(rec, spec, roots, pin):
+def guest_link_part(rec, root, pin, prof, files, roots):
+    """The link of a guest root (part of guest_errors): script and libs are the profile's (link/guest.json), one fact for every guest link."""
+    lk = rec.get("link")
+    if not isinstance(lk, dict):
+        return []
+    bad = ["link.%s is declared: script and libs of a guest link come from %s" % (k, GUEST_LINK) for k in ("script", "libs") if k in lk]
+    bad += guest_link_errors(prof, pin, files, roots) if prof is not None else ["%s is missing" % GUEST_LINK]
+    if isinstance(prof, dict) and isinstance(prof.get("libs"), dict) and prof["libs"].get("external") not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
+        bad.append("the runtime external %r of %s is not declared in external" % (prof["libs"].get("external"), GUEST_LINK))
+    return ["guest root %s: %s" % (root, b) for b in bad]
+
+
+def guest_errors(rec, spec, roots, pin, prof=None, files=()):
     """The admit.json entry of a product root declares "target": "guest" (the game's code: compiled by the game's compiler) or "host".
     A guest root's compiler is the external of verify/guest_compiler.json, exactly (name, commit, tree, mount point, driver paths): the
     distribution's g++-13 is not the compiler of guest code, for C and C++ alike (one compiler key serves both)."""
@@ -334,9 +380,10 @@ def guest_errors(rec, spec, roots, pin):
         return []
     if not isinstance(pin, dict) or not isinstance(pin.get("external"), dict):
         return ["guest root %s: %s is missing or has no external" % (root, GUEST_PIN)]
+    lb = guest_link_part(rec, root, pin, prof, files, roots)
     c = rec.get("compiler")
     if not (isinstance(c, dict) and set(c) == {"external", "cc", "cxx"}):
-        return ["guest root %s: compiler must be the external compiler %r (not a distribution driver)" % (root, pin["external"].get("name"))]
+        return lb + ["guest root %s: compiler must be the external compiler %r (not a distribution driver)" % (root, pin["external"].get("name"))]
     ex = next((e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == c["external"]), None)
     bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
     rt = pin.get("runtime")   # the guest's libc/libstdc++ external: when a recipe declares it (by name), it is the pinned one, exactly
@@ -354,7 +401,7 @@ def guest_errors(rec, spec, roots, pin):
     # a flag that downgrades an error to a warning (or silences it) lets a diagnostic a rule relies on vanish
     bad += ["flags.%s: %s downgrades an error (forbidden)" % (k, f) for k in ("c", "cxx", "asm") for f in (fl.get(k) if isinstance(fl.get(k), list) else [])
             if isinstance(f, str) and (f in ("-fpermissive", "-w", "-Wno-error") or f.startswith("-Wno-error="))]
-    return ["guest root %s: %s" % (root, b) for b in bad]
+    return lb + ["guest root %s: %s" % (root, b) for b in bad]
 
 
 LINK_KEYS = {"output", "flags"}
@@ -463,11 +510,12 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant=""):
     """Problems of the `link` key: {script, output, flags} and optionally `roots` (admitted product roots whose objects are link inputs after
     the root's own, in list order) and `libs` ({external, dirs, names, startfiles, endfiles}: the guest libraries inside an external)."""
     kind = lk.get("kind", "pie") if isinstance(lk, dict) else None
+    guest = entry_of(roots, root + "@" + variant if variant else root).get("target") == "guest"   # script and libs of a guest link are the profile's
     if not (isinstance(lk, dict) and LINK_KEYS <= set(lk) <= LINK_KEYS | LINK_OPT and isinstance(lk["flags"], list)
             and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str) and kind in KINDS
             and re.fullmatch(r"[A-Za-z0-9._-]+\.(elf|so|exe)", lk["output"])
             and all(k not in lk or link_file(lk[k], root, mine, roots, files) for k in ("script", "version_script"))
-            and ("script" in lk or kind != "pie") and ("version_script" in lk) == (kind == "shared")):
+            and ("script" in lk or kind != "pie" or guest) and ("version_script" in lk) == (kind == "shared")):
         return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root, or of a tree of an admitted tool root; required for kind pie, the default), kind pie|exe|shared, "
                 "`version_script` (a tracked file of the root or of a tool tree: required for, and only for, kind shared), optionally roots, libs"]
     err = ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])] + emulation_flags(lk["flags"], kind)
@@ -508,7 +556,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant=""):
     if cyc and any(d in cyc for d in [split_spec(x)[0] for x in deps]):
         err.append("link.roots: cycle %s" % " -> ".join(cyc))
     lb = lk.get("libs")
-    if isinstance(lb, dict) and set(lb) == {"system"}:
+    if guest:
+        pass     # guest_errors reports a declared script or libs and checks the profile
+    elif isinstance(lb, dict) and set(lb) == {"system"}:
         sysl = lb["system"]
         if not (isinstance(sysl, list) and sysl and all(isinstance(p, str) and p.startswith("/") and posixpath.normpath(p) == p for p in sysl)):
             err.append("link.libs.system must be a non-empty list of absolute normalised paths of the shared libraries of env.json packages")
@@ -682,7 +732,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
             if not tool_file(roots, files, p)]
-    err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin)
+    err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin, load_guest_link(repo), files)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err
 
@@ -936,7 +986,7 @@ class Job:
         root, self.variant = split_spec(spec)
         self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
         self.roots, self.files = load_admit(repo), tracked(repo)
-        self.rec = load_recipe(repo, self.roots, spec)
+        self.rec = with_guest_link(load_recipe(repo, self.roots, spec), root, self.roots, repo)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
