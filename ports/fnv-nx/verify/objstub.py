@@ -116,6 +116,15 @@ empty body is not accepted for it (the body must be a call of fnvnx_reach_violat
 finding V with the reason. The gate result holds "handler_justified": {a: n, b: n}. The records carry no handler name: a name copied from source text
 would need its own proof, the layout of the object is the proof.
 
+(I) IMAGE. For a root with a link stage the gate also reads the FINAL ELF (image_check): every STT_FUNC symbol with a size in an executable section of the image
+is a body, so a weak definition that a strong one replaced is not in the image and is not judged, and the archive members the linker pulled are judged as
+they stand. A body is FIXED-FAILURE iff, by the V rules with the root's `errno_accessor` (recipe: the function the libc errno macro calls) transparent, it
+stores only constants through the pointer that a call of the accessor returned (at least one such store), reads nothing but its own frame, and returns one
+constant on every path: its whole effect is `errno = K1; return K2`. Finding `fixed-failure` (id <root>/<link output>, name the function). Stated limits: a constant
+return without an errno store is the V class (a constants row); an errno held in a thread register or inlined (no call of the accessor) is not seen; a body with a
+data island or another call is not judged by this class (cfg has no result); exemptions (a call-graph certificate of unreachability per function, a declared-machine
+citation per function for an archive body) have no fact form yet and are not accepted.
+
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
 flag, the terminators the object's own symbols mention, the probe = the root's error_abi and empty_handlers.tables): the analysis reads the terminator set only through the object's symbol names, so
 the key is exact and a changed header does not invalidate objects that do not mention the new terminator. Constants rows and reach facts
@@ -366,7 +375,7 @@ def step(off, w, st, rel, obj, inf):
         elif (w & 0x1F000000) == 0x10000000:  # ADR/ADRP: known only when relocated
             new[rd_] = ("A", obj.canon(rel[0], rel[2])) if rel else ("I",)
         elif (w >> 24) & 0x1F == 0b01010 and (w >> 29) & 3 == 1 and rn == 31 and not (w >> 21) & 1 and (w >> 10) & 63 == 0 and (w >> 22) & 3 == 0:
-            new[rd_] = g(rm) if sf or g(rm)[0] == "K" else ("I",)  # orr rd, zr, rm = mov
+            new[rd_] = g(rm) if sf or g(rm)[0] == "K" or (g(rm) == ("N",) and not getattr(obj, "w64", True)) else ("I",)  # orr rd, zr, rm = mov (ILP32: the 32-bit mov of a pointer keeps it)
     except Fail:
         pass
     for i in range(64):
@@ -375,6 +384,8 @@ def step(off, w, st, rel, obj, inf):
     for i, v in new.items():
         if i < 31 or spdst:
             regs[i] = v
+    if w >> 26 == 0b100101 and rel and obj.syms[rel[0]][0] == getattr(obj, "errno_fn", None):   # BL of the errno accessor: x0 is the errno pointer
+        regs[0] = ("N",)
     if inf[3] is not None and inf[2][0] is not None:  # base register writeback
         b = st[inf[2][0]]
         regs[inf[2][0]] = ("S", b[1] + inf[3]) if b[0] == "S" else ("I",)
@@ -410,20 +421,31 @@ def is_load(w):
     return g in (0b101, 0b111) and (w >> 22) & 1 == 1 and not (g == 0b111 and (w >> 24) & 3 == 0 and (w >> 21) & 1 and (w >> 10) & 3 == 0)
 
 
-def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False):
+def is_const_store(w):
+    """A single-register store (STR/STUR/STRB/STRH, immediate forms, not SIMD, not unprivileged, not exclusive/ordered) of the integer register Rt."""
+    return (w >> 27) & 7 == 0b111 and not (w >> 26) & 1 and not (w >> 22) & 1 and (
+        (w >> 24) & 3 == 1 or ((w >> 24) & 3 == 0 and not (w >> 21) & 1 and (w >> 10) & 3 != 2))
+
+
+def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False, errno_ok=False):
     """-> {'x0'|'x1'|'v0': None (never written) | ('K',c) | ('A',addr) | ('U',)} if the function is V (no proof of dependence or
     effect), else None. Non-vacuity proofs: cfg() (i, iv), a memory access whose base is not provably the own frame (ii, iii), an
     input register live at entry (v). LOADS_OK (the trap shape (T-B), which is defined by output effect alone): a load from any address
-    is not an effect, only stores must be based on the own frame. Raises Unanalysable."""
+    is not an effect, only stores must be based on the own frame. ERRNO_OK (the image rule, fixed-failure): a store of a constant through the errno
+    pointer (x0 after a call of obj.errno_fn, the value N) is no effect that makes the body non-vacuous; it is counted in obj.errno_stores. Raises Unanalysable."""
     fl = _flow(words, a, b, rels, obj, dec)
     if fl is None:
         return None
     succ, inf, ins = fl
+    obj.errno_stores = 0
     for o, (r, w, mem, wb) in inf.items():  # (ii)/(iii): the base must be provably the own frame (below the entry sp)
         if mem:
             base, index, disp, size = mem
             v = ins[o][base] if base is not None else ("I",)
             if loads_ok and is_load(words[o]):
+                continue
+            if errno_ok and v == ("N",) and is_const_store(words[o]) and index is None and (words[o] & 31 == 31 or ins[o][words[o] & 31][0] == "K"):
+                obj.errno_stores += 1
                 continue
             if not ((v[0] == "S" and (index is not None or (disp is not None and size is not None and v[1] + disp + size <= 0))) or (base == 31 and v[0] != "S")):
                 return None
@@ -825,6 +847,81 @@ def exit_tail(words, a, b):
                 return False
             work.append(t)
     return last in seen
+
+
+class Image:
+    """The final linked ELF (ET_EXEC or ET_DYN, ELF32 ILP32 or ELF64, AArch64): the object-like view that step/cfg/vanalyse read. syms [(name, value, size,
+    type, bind, shndx)] holds the symbol table of the image and one entry per direct-branch target (the callee symbol of a synthesized relocation);
+    functions are the STT_FUNC symbols of sized, executable sections, by virtual address."""
+
+    def __init__(self, path, errno_fn):
+        d = self.data = open(path, "rb").read()
+        if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1 or struct.unpack_from("<HH", d, 16)[1] != 183 or struct.unpack_from("<H", d, 16)[0] not in (2, 3):
+            raise ValueError("%s: not a little-endian AArch64 ELF executable or shared object" % path)
+        w64 = self.w64 = d[4] == 2
+        shoff, = struct.unpack_from("<Q" if w64 else "<I", d, 0x28 if w64 else 0x20)
+        shent, shnum, shstr = struct.unpack_from("<HHH", d, 0x3A if w64 else 0x2E)
+        self.secs = []   # (type, flags, addr, off, size, link)
+        for i in range(shnum):
+            r = struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * shent)
+            self.secs.append((r[1], r[2], r[3], r[4], r[5], r[6]) if w64 else (r[1], r[2], r[3], r[4], r[5], r[6]))
+        self.cite, self.errno_fn, self.syms, self.errno_stores = (errno_fn,), errno_fn, [], 0
+        tab = [i for i, t in enumerate(self.secs) if t[0] == 2]
+        if len(tab) != 1:
+            raise ValueError("%s: the image has no symbol table (or several): its function bodies cannot be read" % path)
+        t = self.secs[tab[0]]
+        for e in struct.iter_unpack("<IBBHQQ" if w64 else "<IIIBBH", d[t[3]:t[3] + t[4]]):
+            n, v, sz, inf, shn = (e[0], e[4], e[5], e[1], e[3]) if w64 else (e[0], e[1], e[2], e[3], e[5])
+            self.syms.append((self.cstr(self.secs[t[5]][3], n), v, sz, inf & 15, inf >> 4, shn))
+
+    def cstr(self, off, n):
+        return self.data[off + n:self.data.index(b"\0", off + n)].decode("latin-1")
+
+
+def image_check(path, errno_fn):
+    """The functions of the final image that are FIXED-FAILURE bodies -> (number of bodies, [(name, detail)]). Every STT_FUNC symbol of an executable section of
+    the image with a size is a body (a symbol the linker did not keep, a weak definition replaced by a strong one, is not in the image and is not judged);
+    equal ranges are one body, every name judged. A body is FIXED-FAILURE iff, by the vanalyse rules with the errno accessor ERRNO_FN transparent: it reads no
+    memory but the own frame, its only stores outside the frame are stores of constants through the pointer that a call of ERRNO_FN returned (at least one),
+    and every path returns the same constant. Its whole effect is `errno = K1; return K2`: it does what no implementation does. Stated limits: a
+    constant return with no errno store is the V class (a constants row), not this class; an errno kept in a thread register (no accessor call) is not seen;
+    a function with a data island or a call other than ERRNO_FN is not judged here (cfg has no result)."""
+    im = Image(path, errno_fn)
+    funcs = sorted({(s[1], s[2], s[0], s[5]) for s in im.syms if s[3] == 2 and s[2] > 0 and 0 < s[5] < len(im.secs) and im.secs[s[5]][1] & 4})
+    at = {}
+    for v, sz, n, _ in funcs:
+        at.setdefault(v, []).append(n)
+    out, bodies, done, base = [], 0, {}, list(im.syms)
+    for v, sz, n, shn in funcs:
+        bodies += 1
+        if (v, sz) in done:
+            out += [(n, d) for _, d in done[(v, sz)]]
+            continue
+        sec = im.secs[shn]
+        fo = sec[3] + v - sec[2]
+        if sz % 4 or fo < 0 or fo + sz > len(im.data):
+            done[(v, sz)] = []
+            continue
+        words = {v + i: struct.unpack_from("<I", im.data, fo + i)[0] for i in range(0, sz, 4)}
+        dec = {k - fo + v: x for k, x in decode(im.data, [(fo, fo + sz)]).items()}
+        rels, syms = {}, list(base)
+        for o, w in words.items():
+            if w >> 26 in (0b100101, 0b000101):
+                t = o + 4 * sx(w & 0x3FFFFFF, 26)
+                if w >> 26 == 0b100101 or not v <= t < v + sz:
+                    nm = errno_fn if errno_fn in at.get(t, []) else (at[t][0] if t in at else "?%x" % t)
+                    syms.append((nm, t, 0, 2, 1, 0))
+                    rels[o] = (len(syms) - 1, (283 if im.w64 else 21) if w >> 26 == 0b100101 else (282 if im.w64 else 20), 0)
+        im.syms = syms
+        try:
+            r = vanalyse(words, v, v + sz, rels, im, dec, True, False, True)
+        except Unanalysable:
+            r = None
+        im.syms = base
+        ok = r is not None and im.errno_stores > 0 and isinstance(r["x0"], tuple) and r["x0"][0] == "K"
+        done[(v, sz)] = [(n, "stores a constant through the errno pointer (%s) and returns the constant %d: a fixed failure" % (errno_fn, r["x0"][1]))] if ok else []
+        out += [(n, d) for _, d in done[(v, sz)]]
+    return bodies, out
 
 
 READELF = "aarch64-linux-gnu-readelf"   # the pinned binutils (env.json): the one reader of DWARF here

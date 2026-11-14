@@ -190,6 +190,9 @@ LF-terminated, ASCII; an absent section is no indirect call) into the sorted uni
 generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`),
 is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
 
+### `errno_accessor` (objstub)
+`errno_accessor: SYMBOL` is required of every root with a link stage: the function that the libc `errno` macro calls (it returns the address of errno). objstub reads the final ELF through it (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image).
+
 ### `error_abi` and `empty_handlers` (objstub)
 `error_abi` declares the root's one failure function and how its definition signals failure: `{"fail": SYMBOL, "kind": "noreturn"}` (the definition does
 not return) or `{"fail": SYMBOL, "kind": "flag", "flag": FIELD}` (the definition stores a nonzero constant to the member FIELD of the structure its first
