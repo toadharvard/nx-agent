@@ -561,3 +561,12 @@ Paused: w3b, w4, farm; no other work.
     - Link: 202 × 298 classes = 60,196 pairs, 0 failures.
     - Not yet covered: the two-way signature check, flat × L × complete, FFP, the backend-rewritten GLSL.
     - Next (w5): tool root, generator stage, gates.d/sm_link.json.
+- 23:52Z w1b 819716297: one-parse rule done (8th patch, mirror 6e7f1791, tree af453ab9…5bb8a).
+    - Locations are computed in dk_locate at the start of the definitions phase.
+    - dk_epilogue() is defined at finalize; main's RET emits only the call.
+    - The bytecode profile, the generic parse and the pre-parse are deleted.
+    - Phase check: a call-graph check in reach_census. Only attribute and finalize reach dk_cfg; the red path is tested.
+    - Defect harness: vs_2_0 oT1 written in a subroutine. Before: two outputs at location 3. Now: correct.
+    - TLS 0. Guest and host 7 objects each.
+    - objstub, guest roots: 284 items, 7 findings (was 375/97).
+    - Head sent to L6A and w5. Next: gate_admit, then rule-A for the 7.
