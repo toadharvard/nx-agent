@@ -1014,3 +1014,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - Queued after the first root, NOT in next3b: the selftests universe becomes every test file in the repo by one naming rule, and a test outside it is red. L3b found 34 test files under lift/: 20 neither run nor judged, plus 2 outside the naming. L3a/L3b give those 20 references or delete them first (owners in L3b w3 de29dfb60). Owner w19.
 - New ldcheck rule (L4): a weak-undefined symbol in any final guest image is red. The only exemption is a certified unreachable reference through fnvnx_reach_violation. Owner w12. L5 must define sched_getcpu (and sched_yield if missing) in rt/guest.
 - 23:40 L5 w14 takes the definitions. Every weak-undefined symbol in the pinned runtime archives that no root defines gets a body in rt/guest. The set is derived from nm, with libnx svc.h cited per function: sched_yield → svcSleepThread(YieldType_WithoutCoreMigration), sched_getcpu → svcGetCurrentProcessorNumber.
+
+- 23:43 Answers to the sm_link gate (L6 w5, plan 4.6):
+  - It registers as gates.d/sm_link.json, covers product-guest.
+  - A host per-target variant of the translator is allowed (comes with w15c).
+  - Certificates are a hermetic recipe stage in GATE_CACHE, keyed by the shaders tree, translator objects and the Mesa pin; no VDIR directory. Mesa must be a pinned external.
+- gate_assumptions LEXER gap (L6 w6 532f139f, 4 findings): .glsl → the C lexer; a .in file takes the lexer of its inner extension, and one with no known inner extension is red. Owner w22, in the PERFDEBT commit.
