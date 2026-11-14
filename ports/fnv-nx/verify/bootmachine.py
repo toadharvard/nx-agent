@@ -291,6 +291,12 @@ class Machine:
         self.regions = sorted(reg.values())
         if any(lo < WINDOW[1] and WINDOW[0] < hi for lo, hi in self.regions):
             raise MachineError("a plan region overlaps the host window 0x%x..0x%x" % WINDOW)
+        hlo, hhi = reg["heap"]   # the heap contract (host fact): non-empty, page-aligned, inside ILP32, disjoint from image, stacks and host page
+        if not hlo < hhi or hlo % PAGE or hhi % PAGE or hhi > 1 << 32:
+            raise MachineError("heap 0x%x..0x%x is empty, not 4 KiB aligned or ends beyond 4 GiB" % (hlo, hhi))
+        for n in ("image", "stacks", "host_page"):
+            if hlo < reg[n][1] and reg[n][0] < hhi:
+                raise MachineError("heap 0x%x..0x%x overlaps %s 0x%x..0x%x" % (hlo, hhi, n, reg[n][0], reg[n][1]))
         self.sections, self.views, self.sec_next = {}, {}, 1   # id -> Section dict; view addr -> view dict; next id (never reused)
         self.vm_resv, self.vm_pages, self.vm_ext = {}, set(), []   # base -> size; committed page addresses; extents [lo, hi): one per commit gap (host_vm.inc)
         self.ext = {int(n[4:]): getattr(services, n) for n in dir(services) if n.startswith("ext_") and n[4:].isdigit()}
