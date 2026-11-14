@@ -989,3 +989,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 23:24 Orchestrator added plan item 2.0 (ahead of 3.1): loader/ as a product root, Makefile and build.sh deleted; the acyclic root graph in gate_tests; w15c's lib/sha256 part lands first.
   - Slot order (3 max): 1.1/1.2/1.3 now → w15 sha256-only commit (small, unblocks L3a descs/bridges/pack) → 1.7 w19 → 2.0 w24 loader → 3.1 → 3.2.
   - w19 is held at claude/fnv-l1-contract-w19-cache (reads v3 on e3a6a92). Untraceable tests: 2 ptrace (test_order_cont, test_ice_poly_byvalue) + 6 failing on their own.
+
+- 23:27 .fnvnx.tls format given to L2 w2 (plan 3.3):
+  - It uses the asmrange encoding family. Access records: begin, end, name, model enum, function, file, line. Definition records: name, size, align, .tdata/.tbss.
+  - There is no JSON report; the gate reads relocations from the object itself.
+  - tlsmodel (L1) will make these red: model ≠ LE; a TLS relocation outside every record; a non-TLSLE relocation in a record; a missing section; PT_TLS layout ≠ the definition records.
+  - The gate is coded once L2 publishes the layout doc.
+- L3a w8 holds 3.4 (product ELF root). It is pointed to w12g 65a7d01c for the link/guest.json shape (values not final) and is waiting for w24's loader root.
