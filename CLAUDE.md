@@ -402,8 +402,9 @@ The owner's words: "делегируй остаток работы аккура�
       - the process entry `main`: L5 `rt/guest`;
       - `fnvnx_import_key` / the IAT root: L1;
       - the pthread mutexes that libgcc's unwinder needs: L5, over its real threads.
-  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, main menu, first frame (GL in
-    the emulator). Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
+  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, first frame (GL in the
+    emulator: the GL backend's first present). The menu gets an input-scenario rule after the first frame; no
+    certified fact names it by role. Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
     thread.
   - **The boot machine's GL** comes from the recipe-built gl4 root, not from the prebuilt libnxgl4 @2f0427f5.
   - **One registry.** `render/ASSUMPTIONS.md` is merged into `verify/ASSUMPTIONS.json` or deleted.

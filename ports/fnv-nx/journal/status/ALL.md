@@ -66,7 +66,7 @@ verdict.
 | # | Owner | Item | Rule / done when |
 |---|---|---|---|
 | 4.1 | L4 | w6: bootguest on rt/guest with link/guest.json; its images stop defining the product's fnvnx_host | no doubles |
-| 4.2 | L4 | boot the product ELF. Milestones: exe entry, WinMain, menu, first frame; instructions per frame per thread | observable in the trace |
+| 4.2 | L4 | boot the product ELF. Milestones: exe entry, WinMain, first frame (the GL backend's first present); instructions per frame per thread; every frame dumped as an image. The menu milestone gets an input-scenario rule after the first frame, because N1 certifies identity, not role (decision 2026-11-14) | observable in the trace |
 | 4.3 | L4+L6A | the boot machine's GL from the gl4 root (not the prebuilt @2f0427f5); confirm the Mesa 25.2.8 pin for L6 | one GL |
 | 4.4 | L5 | registry and FalloutPrefs generated stages, declared fonts, Galaxy bodies, Winsock network down, LoadLibrary 126 | declared machine |
 | 4.5 | L3b+L3a | SEH continue restores the whole CONTEXT (A-CTX); EH/SEH conformance against the exe's tables and Wine 9.0 | decision "SEH continue" |
