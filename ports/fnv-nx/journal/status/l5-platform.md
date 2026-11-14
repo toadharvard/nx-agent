@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-15 01:30Z w9 BSTR is str16: manifest 9e4166ea, tree bfbbcea7, generator 79966c6d7. str16 41, ref 380. Sent to L3a for w7. w10 repins the root to it before the verdict. w9 takes the assumption mentions next, then case 5.
 - 11-15 01:25Z L4 S4 (IAT data slots): the binding fact is L1 contract/iat.py, from bridge.tsv conv data rows to native_symbol, giving the generated import_keys.c. L4 asks L1 to publish the rows; data rows with - are L5 objects to define (count pending).
 - 11-15 01:20Z w14 e13b57763: new root rt/guest_main, a sibling because gate_admit rejects overlapping trees, with main returning fnvnx_loader_main(). FNVNX_IMAGE_ENTRY marks main in guest.h, and fnvnx_exe_entry is removed. Recipe check is valid for both roots; the recipe build is not run yet (L4 w6 or w10 builds it).
 - 11-15 01:15Z w10 5ea8a3e4: placement is computed only in the guest, at the one host thread_create site (rt/guest threads.c:107). The census is 1 site, 2 entries and 8 os_thread_create callers. thread_create and thread_set_cpu check ideal in mask, inside app-cores, else BADINPUT. The rt/guest recipe build is green (6 units). Next is the place branch into the root, then one verdict.
