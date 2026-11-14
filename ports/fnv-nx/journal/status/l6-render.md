@@ -496,3 +496,9 @@ Paused: w3b, w4, farm; no other work.
     - libnxgl4.map has a lexer gap (L1, asked).
 - 23:32Z L6A a262c8ae: gl4w15c takes the translator, deterministic 7/7. gl4's undefined set closes except for system and link-rule items.
     - Open: TLS. mojoshader_profile_glsl.c.o references __tls_get_addr. w1b takes the STT_TLS census of guest and host; the guest TLS model is a class rule with L5/L4. The guest translator links into the product ELF through render/d3d9.
+- 23:33Z w6 68c66df37: merged L6A a262c8ae.
+    - gate_admit 1087/1087 over 27 roots.
+    - render/nxgpu recipe check valid.
+    - render/d3d9: only the 3 generator-input errors remain (L1 w16c commit 1).
+    - d3d9total 332/332.
+    - w6 waits on w16c.
