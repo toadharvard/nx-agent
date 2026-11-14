@@ -47,9 +47,11 @@ typedef struct FnvnxHostApi {
     /* ---- version 2: threads, address wait/wake, time, files ---- */
     uint64_t thread_create;        /* (entry, arg, stack_size, prio, cpu) -> host thread id (!= 0) or 0.
                                       The new thread calls the guest function entry(arg) (u64 arg) and ends
-                                      when it returns. prio: Win32 scale -15..15; cpu: -1 default placement,
-                                      0..63 that core only, FNVNX_THREAD_ROLE(r) the placement role r
-                                      (fnvnx/placement.h). Not started. The id is a table handle
+                                      when it returns. prio: Win32 scale -15..15; cpu: FNVNX_CPU_SPEC(ideal, mask)
+                                      with ideal in mask and mask within FNVNX_APP_CORES (FNVNX_APP_CORES_CORE3 when the host is built with
+                                      FNVNX_CORE3_DEFAULT), else FNVNX_HE_BADINPUT and nothing is created (id 0). The placement is computed
+                                      only in the guest (fnvnx_place_ex, fnvnx/placement.h); the host takes the spec as given. The main thread
+                                      starts at FNVNX_DEFAULT_CORE, mask 1 << FNVNX_DEFAULT_CORE. Not started. The id is a table handle
                                       ((generation << 16) | slot, host_ids.inc), never an address; at most 1024
                                       live thread and directory ids together: 0 when the table is full. */
     uint64_t thread_start;         /* (id) -> 0 or Result; an id that names no live thread -> FNVNX_HE_NOTFOUND; a thread that is already
@@ -65,7 +67,8 @@ typedef struct FnvnxHostApi {
     uint64_t thread_set_cpu;       /* (id or 0 = self, spec) -> 0 or Result; unknown id -> FNVNX_HE_NOTFOUND;
                                       a negative spec (bits 40..62 set) -> 0, nothing changed. spec 0..63: that core only;
                                       FNVNX_CPU_SPEC(ideal, mask): ideal core (FNVNX_CPU_KEEP: keep) and
-                                      affinity mask (0: keep), the ideal core joins the mask */
+                                      affinity mask (0: keep), the ideal core joins the mask; the resulting ideal in the mask and the mask
+                                      within FNVNX_APP_CORES(_CORE3) (fnvnx/placement.h), else FNVNX_HE_BADINPUT, nothing changed */
     uint64_t wait_on_address;      /* (addr, expected u32, timeout_ns) -> 0 woken, 1 timed out, 2 value != expected
                                       (svcWaitForAddress WaitIfEqual; addr 4-aligned); timeout_ns above INT64_MAX waits
                                       forever; any other kernel result unchanged (0xCC01 addr not 4-aligned, 0xD401 addr
@@ -444,21 +447,6 @@ typedef struct FnvnxTzAt {
     char abbr[8];       /* the zone's abbreviation then, NUL-terminated */
 } FnvnxTzAt;
 
-/* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the table of
- * fnvnx/placement.h gives each an ideal core, an affinity mask and a priority. */
-enum {
-    FNVNX_ROLE_DEFAULT = 0,       /* game threads without a role of their own (Havok, ...) */
-    FNVNX_ROLE_MAIN = 1,          /* the main thread */
-    FNVNX_ROLE_AI_LINEAR_1 = 2,   /* AI Linear Task Thread (1) */
-    FNVNX_ROLE_AI_LINEAR_2 = 3,   /* AI Linear Task Thread 2 */
-    FNVNX_ROLE_RENDER_WORKER = 4, /* the renderer's worker (Gallium Nine's CSMT thread, a host pthread) */
-    FNVNX_ROLE_IO = 5,            /* IO and background loading (the Serialized IO Thread, ...) */
-    FNVNX_ROLE_AUDIO = 6,         /* audio (the platform's mixer pump, the game's LibAudioUpdate) */
-    FNVNX_ROLE_TASKLET = 7,       /* tasklet workers */
-    FNVNX_ROLE_LOADING = 8,       /* the loading screen (LoadingMenuThread): CPU boost while it runs */
-    FNVNX_ROLE_COUNT
-};
-#define FNVNX_THREAD_ROLE(r) (0x100u | (unsigned)(r))
 #define FNVNX_CPU_KEEP 0xFFu
 #define FNVNX_CPU_SPEC(ideal, mask) ((1ull << 63) | ((uint64_t)(uint32_t)(mask) << 8) | ((uint64_t)(ideal) & 0xFFu))
 /* Host side (LP64) only: register a handler for one module id (< 64); returns 0, or -1 if taken/out of range. */
