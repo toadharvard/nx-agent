@@ -222,8 +222,8 @@ def main():
     case("limit_host_calls ends with reason limit", rl["reason"] == "limit" and rl["host_calls"] == 3, rl)
 
     n_slots = sum(1 for n in bootmachine.SLOTS if callable(getattr(boothost.Services, "h_" + n, None)))
-    case("46 slots, all resolved at construction", len(bootmachine.SLOTS) == 46 == n_slots
-        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root), quantum=QUANTUM).handlers) == 46)
+    case("45 slots, all resolved at construction", len(bootmachine.SLOTS) == 45 == n_slots
+        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root), quantum=QUANTUM).handlers) == 45)
 
     class NoPad(boothost.Services):
         h_pad_read = None
@@ -361,17 +361,16 @@ def main():
          "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
     sw = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire.h")).read()
     lst = lambda name: [int(v, 0) for v in re.findall(r"X\(\w+, (\w+)\)", re.search(r"#define " + name + r"\(X\)((?:[^\n]*\\\n)*[^\n]*)", sw).group(1))]
-    nums = dict(re.findall(r"#define FNVNX_(WE_\w+|WEAI_\w+) (\d+)", sw))
-    eai = dict(re.findall(r"X\(EAI_(\w+), (\d+)\)", sw))
-    case("machine's wire constants equal the fixture sockwire.h (errno numbers, AF and type lists, AI mask, EAI numbers, POLLNVAL)",
+    nums = dict(re.findall(r"#define FNVNX_(WE_\w+) (\d+)", sw))
+    swe = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire_errno.h")).read()   # the generated errno list (manifest/gen_wire_errno.py)
+    errs = dict(re.findall(r"X\((E\w+), (\d+)\)", swe))
+    case("machine's wire constants equal the hostabi headers (errno numbers, AF and type lists, POLLNVAL; the getaddrinfo services are not in the ABI)",
          tuple(lst("FNVNX_WIRE_AF_LIST")) == bootmachine.WIRE_AF and tuple(lst("FNVNX_WIRE_SOCKTYPE_LIST")) == bootmachine.WIRE_SOCKTYPE
-         and functools.reduce(lambda x, y: x | y, lst("FNVNX_WIRE_AI_LIST")) == bootmachine.WIRE_AI_MASK
-         and int(nums["WE_INVAL"]) == bootmachine.WE_INVAL and int(nums["WE_FAULT"]) == bootmachine.WE_FAULT
-         and int(nums["WE_OVERFLOW"]) == bootmachine.WE_OVERFLOW
-         and (int(eai["BADFLAGS"]), int(eai["NONAME"]), int(eai["FAMILY"]), int(eai["SOCKTYPE"])) == (
-             bootmachine.WEAI_BADFLAGS, bootmachine.WEAI_NONAME, bootmachine.WEAI_FAMILY, bootmachine.WEAI_SOCKTYPE)
-         and "X(EBADF, 9)" in sw and "X(EAFNOSUPPORT, 97)" in sw and int(re.search(r"FNVNX_WPOLLNVAL (0x\w+)", sw).group(1), 16) == bootmachine.WPOLLNVAL,
-         (nums, eai))
+         and int(nums["WE_INVAL"]) == bootmachine.WE_INVAL
+         and (int(errs["EFAULT"]), int(errs["EOVERFLOW"]), int(errs["EBADF"]), int(errs["EAFNOSUPPORT"])) == (
+             bootmachine.WE_FAULT, bootmachine.WE_OVERFLOW, bootmachine.WE_BADF, bootmachine.WE_AFNOSUPPORT)
+         and int(re.search(r"FNVNX_WPOLLNVAL (0x\w+)", sw).group(1), 16) == bootmachine.WPOLLNVAL,
+         (nums, errs.get("EFAULT")))
 
     class NoMsg(boothost.Services):
         plat_message = None
@@ -382,7 +381,7 @@ def main():
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every served non-socket fn of module 11 (1..9, 11..14, 34..38) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root), quantum=QUANTUM).plat) == [*range(1, 10), *range(11, 15), *range(34, 39)])
+    case("every served non-socket fn of module 11 (1..9, 11..14, 34..38) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root), quantum=QUANTUM).plat) == [*range(1, 10), *range(11, 15), 34, 35, 36, 37, 38])
 
     class NoSec(boothost.Services):
         plat_section_map = None
@@ -455,8 +454,8 @@ def main():
     rows, hslots = parse_totality(os.path.join(HOSTABI_DIR, "fnvnx", "hostapi.h"))
     SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37, 38]
     mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root), quantum=QUANTUM)
-    case("header: 31 services of module 11 and 46 slots parsed", len(rows) == 31 and sorted(rows) == SERVED
-         and len(hslots) == 46, (len(rows), len(hslots)))
+    case("header: 31 services of module 11 and 45 slots parsed", len(rows) == 31 and sorted(rows) == SERVED
+         and len(hslots) == 45, (len(rows), len(hslots)))
     case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
          and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
     served_decl = {f for f in rows if f in mach0.plat or f in bootmachine.SOCK_SERVICES}
@@ -494,8 +493,8 @@ def main():
             bad[nm] = "null array with nargs > 0"
     case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs, BAD_NARGS on a null array and a value for zero arguments",
          not bad, bad)
-    case("services: fn 0, 10, 15, 27..29, 32, 33 and 37.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
-         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 10, 15, 27, 28, 29, 32, 33, 37, 39, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
+    case("services: fn 0, 10, 15, 27..29, 32, 33 and 39.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
+         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 10, 15, 27, 28, 29, 32, 33, 39, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
          and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
          and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
     try:
@@ -508,7 +507,7 @@ def main():
     r40, l40 = run(built[40][0], root)[:2]
     k = kv(l40)
     NOMOD, NOSVC, BADN, EINVAL = "ffffffffffffff01", "ffffffffffffff02", "ffffffffffffff03", "ffffffffffffffea"
-    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn37": NOSVC, "te-n4": BADN, "te-null-array": BADN, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
+    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn39": NOSVC, "te-n4": BADN, "te-null-array": BADN, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
               "sock-null-array-n0": EINVAL, "sock-null-array-exact": BADN, "fn0-null-array": NOSVC,
               "fn-u32max": NOSVC, "fn-above-u32": NOSVC, "fn10-nargs1": NOSVC, "vm-reserve-n1": BADN, "null-array": BADN,
               "docked-n0-null": "0", "docked-n1-null": BADN, "docked-n3": "0", "docked-ncap": "0", "boost-extra-args": "0",
