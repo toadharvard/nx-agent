@@ -422,3 +422,7 @@ Base: candidate claude/fnv-next3b 141b07580. At most 3 workers.
 | 4.6 | sm_link over every shipped shader = 0 failures (179 fail + 10 refused at 2026-11-12); defects closed by class (v 72, r 7, i 23, g 151 at 24b76f32) | w1b after 3.6a | claude/fnv-l6-render-w1b-root | queued after 3.6a |
 
 Paused: w3b, w4, farm; no other work.
+- 23:21Z L4, item 4.3: the Mesa pin is confirmed as env.json mesa-libgallium and libegl-mesa0 25.2.8-0ubuntu0.24.04.4 (snapshot 20261110T000000Z).
+    - L6 cites against the Ubuntu source package mesa_25.2.8-0ubuntu0.24.04.4.
+    - Upstream 25.2.8 counts as a citation only for files that debian/patches leave untouched. This matches the farm's 821f2764 citations.
+    - The boot GL moves to the recipe-built gl4 root after 3.7.
