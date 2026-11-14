@@ -73,8 +73,8 @@
    "name": "mojoshader",
    "repo": "fnv-nx-build",
    "ref": "tools/mojoshader-glsldk",
-   "commit": "9e6b092854b71a745925b2f309c8f1b89e93f8e9",
-   "tree_sha256": "98017403c029196ec3f2d2cd681d443c35fd1ff60eefeebb3bfe586a889ae978",
+   "commit": "a8bc72b06b02536048f0380a6b785dfbf0fd75c2",
+   "tree_sha256": "9e2f5927aa4b3e8b49231a832d6d2aa4f2603f37c317212506a9cc873c622b63",
    "at": "/ext/mojoshader"
   },
   {

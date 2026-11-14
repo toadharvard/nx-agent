@@ -1,12 +1,19 @@
-# render/shaders/patches: tracked patches that make "all files of the patched external tree" the unit set
+# render/shaders/translator: how the mojoshader external is derived
 
-Applied in this order on the pinned trees of fnv-nx-build (git archive of the pin, no .git):
+The recipe takes MojoShader as the external `mojoshader` = fnv-nx-build branch `tools/mojoshader-glsldk`, pinned in build.json by commit and
+tree_sha256 (verify/cas.py ingest). The recipe has no patch step, so the tree is the result of the patches below, applied in this order (`git apply`) to
+the pinned tree of `tools/mojoshader` ad5dff84830c2863c841f4b1f4e3df78c705b383 (tree_sha256 e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361):
 
-| external | pin | tree_sha256 (verify/cas.py ingest) | patches, in order |
-|---|---|---|---|
-| mojoshader | `tools/mojoshader` ad5dff84830c2863c841f4b1f4e3df78c705b383 | e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361 | `derivation/mojoshader.patch`, `translator/mojoshader_units.patch`, `translator/mojoshader_prune.patch` |
+1. `derivation/mojoshader.patch` (glsldk profile, FLAT_COLOR via MOJOSHADER_glsldkSetFlat, the SM1-3 totality header)
+2. `derivation/mojoshader_units.patch`
+3. `derivation/mojoshader_prune.patch` (reach census, below)
+4. `derivation/mojoshader_sm.patch`
+5. `derivation/mojoshader_classes.patch` (class rules of the sm_link census, item 4.6): (a) comment blocks (CTAB, preshader) are metadata: a block that
+   does not parse is dropped whole (errors and partial symbols removed, the instruction stream untouched), as D3D9 and Wine 9.0 skip comment tokens;
+   (b) SRCMOD_DZ/DW outside texld/texcrd use the register as is (Wine 9.0 glsl_shader.c shader_glsl_gen_modifier :2597).
 
-Patched trees (cas.py ingest, measured at the commit of this note): mojoshader after both patches 7af1fe43..., uam after the three patches 4e16a499...
+The tree of branch `tools/mojoshader-glsldk` commit a8bc72b0 has tree_sha256 9e2f5927aa4b3e8b49231a832d6d2aa4f2603f37c317212506a9cc873c622b63. The unit list is
+generated (render/total/translator_gen/gen_sources.py): every .c file of the external.
 
 ## mojoshader_units.patch
 Deletes the files the CMake profile set of build.sh does not build: `mojoshader_effects.c` (EFFECT_SUPPORT=OFF) and the six `utils/*.c`
