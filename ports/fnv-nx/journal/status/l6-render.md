@@ -527,3 +527,4 @@ Paused: w3b, w4, farm; no other work.
     - Decision (rule): per-call translator inputs are arguments. They move into the parse context as one nonnull dk config, and the 5 variables are deleted.
     - Result: 0 TLS on both targets. reach_census goes red on any TLS symbol or relocation. No guest-TLS model is needed for the translator.
     - w1b is doing it (7th patch).
+- 23:40Z Orchestrator confirmed the translator TLS rule (it overrides its earlier 'no MojoShader change' line to L6A).
