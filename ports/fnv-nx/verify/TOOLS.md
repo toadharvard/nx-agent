@@ -726,9 +726,10 @@ Watch log: --watch-log SYMS (text file, one ELF symbol per line, # starts a comm
 first instruction: OUT.json "watch_log" = [{"seq", "tid", "sym", "pc" (guest-relative), "sp"}], seq from 0 in machine order, no
 sampling, no cap, two names at one address in file order. A name that is absent or not STT_FUNC is an input error naming it.
 Without the option the key is absent.
-Memory at a watched call: a line `NAME [ret] [mem SPEC...]`, SPEC = `REG(->OFF)*:LEN` (REG x0..x7 as a 32-bit address; each `->OFF` loads the
+Memory at a watched call: a line `NAME [ret] [mem SPEC... [until REG=VALUE]]`, SPEC = `REG(->OFF)*:LEN` (REG x0..x7 as a 32-bit address; each `->OFF` loads the
 32-bit word at address+OFF and takes it as the address; LEN 1..65536 bytes are read there, protection ignored). A name with `mem` records
 also "args" = [w0, w1, w2, w3] and "mem" = {SPEC: hex | null (a page on the way unmapped)}; other records keep their keys.
+`until REG=VALUE` (REG x0..x7): the first call whose REG equals VALUE is the last one recorded with "mem"; later calls of the name carry "args" only.
 State snapshot: --state-at SYM --state-request JSON ({"hash": [{name, lo, hi}], "dump": [{name, addr, len}]}): when SYM is first entered OUT.json
 "start_state" = {at, t_ns, regs (x0..x28 as w, x30 guest-relative, sp), runs ([lo, hi, prot] of the guest page table, adjacent equal runs
 merged, prot 1 R 2 W 4 X), pages ({name: {lo, sha256: per page, null unmapped}}), dump ({name: {addr, hex | null}})}; null when SYM was

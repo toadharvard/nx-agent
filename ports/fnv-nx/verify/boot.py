@@ -144,9 +144,18 @@ def parse_mem_spec(spec):
     return int(m.group(1)[1:]), offs, n
 
 
+def parse_until(tok):
+    """`REG=VALUE` (REG x0..x7, VALUE an integer) -> (reg index, value)"""
+    m = re.match(r"^x([0-7])=(0x[0-9a-fA-F]+|[0-9]+)$", tok)
+    if not m:
+        raise bootmiles.ResolveError("--watch-log: `until` needs REG=VALUE with REG x0..x7, got %r" % tok)
+    return int(m.group(1)), int(m.group(2), 0)
+
+
 def _watch_names(path, syms):
-    """-> (names in file order, the names marked `ret`, {name: [memory specs]}); a line is `NAME [ret] [mem SPEC...]`"""
-    names, rets, mems = [], set(), {}
+    """-> (names in file order, the names marked `ret`, {name: [memory specs]}, {name: (reg, value)}); a line is
+    `NAME [ret] [mem SPEC... [until REG=VALUE]]`: after the first call whose register REG (32-bit) equals VALUE, the name records no more `mem`"""
+    names, rets, mems, untils = [], set(), {}, {}
     with open(path) as f:
         for line in f:
             t = line.split("#", 1)[0].split()
@@ -156,8 +165,15 @@ def _watch_names(path, syms):
             ret = bool(rest) and rest[0] == "ret"
             if ret:
                 rest = rest[1:]
+            until = None
+            if "until" in rest:
+                k = rest.index("until")
+                if k < 2 or len(rest) != k + 2:
+                    raise bootmiles.ResolveError("--watch-log: a line is `NAME [ret] [mem SPEC... [until REG=VALUE]]`, got: %s" % line.strip())
+                until = parse_until(rest[k + 1])
+                rest = rest[:k]
             if rest and (rest[0] != "mem" or len(rest) < 2):
-                raise bootmiles.ResolveError("--watch-log: a line is `NAME [ret] [mem SPEC...]`, got: %s" % line.strip())
+                raise bootmiles.ResolveError("--watch-log: a line is `NAME [ret] [mem SPEC... [until REG=VALUE]]`, got: %s" % line.strip())
             for spec in rest[1:]:
                 parse_mem_spec(spec)
             names.append(t[0])
@@ -165,10 +181,12 @@ def _watch_names(path, syms):
                 rets.add(t[0])
             if rest:
                 mems.setdefault(t[0], []).extend(rest[1:])
+            if until:
+                untils[t[0]] = until
     bad = [n for n in names if n not in syms or n not in syms.funcs]
     if bad:
         raise bootmiles.ResolveError("--watch-log: not a function symbol of the ELF: %s" % ", ".join(sorted(set(bad))))
-    return names, rets, mems
+    return names, rets, mems, untils
 
 
 def read_chain(m, regs, spec):
@@ -242,7 +260,8 @@ def run(a):
     syms = bootmiles.read_symtab(a.elf)
     watch = bootmiles.resolve(table, manifest, syms, base)
     host = _host_lines(watch["host"])
-    wl, wl_ret, wl_mem = _watch_names(a.watch_log, syms) if a.watch_log else (None, set(), {})
+    wl, wl_ret, wl_mem, wl_until = _watch_names(a.watch_log, syms) if a.watch_log else (None, set(), {}, {})
+    mem_off = set()   # names whose `until` condition has been met
     state_req = load_state_request(a.state_request) if a.state_request else None
     if bool(a.state_at) != bool(a.state_request):
         raise bootmiles.ResolveError("--state-at and --state-request go together")
@@ -324,6 +343,9 @@ def run(a):
             extra = {}
             if name in wl_mem:   # a name with a `mem` capture also records its first four argument registers (w0..w3)
                 extra["args"] = regs
+            if name in wl_mem and name not in mem_off:
+                if name in wl_until and regs[wl_until[name][0]] == wl_until[name][1]:
+                    mem_off.add(name)   # this call is the last one captured
                 extra["mem"] = {spec: (lambda b: b.hex() if b is not None else None)(read_chain(m, regs, parse_mem_spec(spec)))
                                 for spec in wl_mem[name]}
             rec(tid, "call", sym=name, pc=pc - base, sp=m.sp(), x0=x0, x30=(x30 - base) & 0xFFFFFFFF, **extra)

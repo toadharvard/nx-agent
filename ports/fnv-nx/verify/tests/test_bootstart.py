@@ -115,7 +115,15 @@ def main():
     case("request: iat run dumped, tls index dumped, lift_enter watch with the block spec",
          bs.request(pe, IAT)[1]["dump"] == [{"name": "iat:00402060", "addr": 0x402060, "len": 8}, {"name": "tls_index", "addr": 0x4020E0, "len": 4}]
          and "x2->0x2c->0:16" in bs.request(pe, IAT)[0], bs.request(pe, IAT))
-    case("request specs parse in boot.py's grammar", all(boot.parse_mem_spec(s) for s in bs.request(pe, IAT)[0].split()[-4:] if ":" in s))
+    import tempfile
+    with tempfile.TemporaryDirectory() as td0:
+        class Sy(dict):
+            funcs = {bs.LIFT}
+        wf0 = os.path.join(td0, "w.txt")
+        open(wf0, "w").write(bs.request(pe, IAT)[0])
+        rq = boot._watch_names(wf0, Sy({bs.LIFT: 1}))
+        case("the generated watch file parses in boot.py's grammar, with the until of the entry", rq[0] == [bs.LIFT] and len(rq[2][bs.LIFT]) == 4 and rq[3] == {bs.LIFT: (0, 0x401000)}, rq)
+    case("request: mem capture ends at the entry call (until x0 = ImageBase + entry RVA)", bs.request(pe, IAT)[0].rstrip().endswith("until x0=0x00401000"))
     d, c = good()
     r = run(d, c)
     case("good trace: every rule passes", all(v.verdict() == "pass" for v in r.values()), {k: (v.fail, v.undec) for k, v in r.items() if v.verdict() != "pass"})
@@ -211,6 +219,10 @@ def main():
     case("S8 fail: esp is not (stack_base - 16) & ~15", only("S8", d, c)[0] == "fail")
     case("S8 fail: no enter line", only("S8", good()[0], "   fnvnx-start: identity ok\n")[0] == "fail")
     d, c = good()
+    d["watch_log"].append({"seq": 3, "tid": 2, "t_ns": 9, "kind": "call", "sym": bs.LIFT, "pc": 0, "sp": 0, "x0": 0x401500, "x30": 0, "args": [0x401500, 0x30000000, 0x30001000, 0]})
+    r = run(d, c)
+    case("a run past the entry: later lift_enter records carry args and no mem, every rule still passes", all(v.verdict() == "pass" for v in r.values()), {k: v.fail for k, v in r.items()})
+    d, c = good()
     del d["watch_log"][2]
     case("S8 fail: the entry is never called", only("S8", d, c)[0] == "fail")
     # boot.py's grammar of the new observation requests
@@ -228,9 +240,13 @@ def main():
         sy = Syms(f=1, g=2)
         wf = os.path.join(td, "w.txt")
         open(wf, "w").write("f ret mem x1:16 x2->4:8\ng\n# c\nf mem x0:4\n")
-        names, rets, mems = boot._watch_names(wf, sy)
+        names, rets, mems, _u = boot._watch_names(wf, sy)
         case("watch grammar: NAME [ret] [mem SPEC...]", names == ["f", "g", "f"] and rets == {"f"} and mems == {"f": ["x1:16", "x2->4:8", "x0:4"]}, (names, rets, mems))
-        for k, line in (("mem without spec", "f mem\n"), ("junk word", "f xyz\n"), ("bad spec", "f mem x9:1\n"), ("unknown name", "h\n")):
+        open(wf, "w").write("f mem x0:4 until x0=0x401000\ng\n")
+        r4 = boot._watch_names(wf, sy)
+        case("watch grammar: until REG=VALUE", r4[2] == {"f": ["x0:4"]} and r4[3] == {"f": (0, 0x401000)}, r4)
+        for k, line in (("until without mem", "f until x0=1\n"), ("until bad reg", "f mem x0:4 until x9=1\n"), ("until bad value", "f mem x0:4 until x0=zz\n"),
+                        ("until trailing token", "f mem x0:4 until x0=1 x1:4\n"), ("mem without spec", "f mem\n"), ("junk word", "f xyz\n"), ("bad spec", "f mem x9:1\n"), ("unknown name", "h\n")):
             open(wf, "w").write(line)
             try:
                 boot._watch_names(wf, sy)

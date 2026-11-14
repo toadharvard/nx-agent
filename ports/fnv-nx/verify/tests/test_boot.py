@@ -224,6 +224,12 @@ def main():
     rc, o, e = cli(args(elfw, "w4.json", table, manifest, "--watch-log", w("syms4.txt", "wl_n\n")))
     tb.case("watch_log: a non-function symbol (data) fails, naming it", rc == 1 and "wl_n" in e, (rc, e))
 
+    # `until`: the mem capture ends after the call whose register equals the value; args stay on every record
+    rc, o, e = cli(args(elfw, "u1.json", table, manifest, "--watch-log", w("syms_u.txt", "fnvwl_f mem x0:4 until x0=0\n")))
+    u1 = json.load(open(os.path.join(d, "u1.json"))).get("watch_log", [])
+    tb.case("watch_log mem ... until x0=0: records up to and including the first f(0) carry mem, the later f(0) carries args only",
+            rc == 0 and [x["args"][0] for x in u1] == [1, 0, 0] and ["mem" in x for x in u1] == [True, True, False]
+            and all(len(x["args"]) == 4 for x in u1), (rc, e, u1))
     # --state-at: the observer's snapshot at the first entry of a function (bootstart.py's start_state)
     gsp = wl[2]["sp"]   # the sp at the entry of fnvwl_g in the run above
     req = w("req.json", json.dumps({"hash": [{"name": "stack", "lo": gsp & ~4095, "hi": (gsp & ~4095) + 4096}], "dump": [{"name": "top", "addr": gsp, "len": 16}]}))
