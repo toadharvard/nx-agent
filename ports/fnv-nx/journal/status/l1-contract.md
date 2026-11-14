@@ -1002,3 +1002,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 
 - 23:32 The orchestrator gave L1 5 slots: w23 (1.1), w20 (1.2), w22 (1.3), w24 (2.0 loader root, started), w15d (the lib/sha256 recipe first, then the rest of w15c). After them: 1.7 w19 → w15c → w12 → w16c → w16 IAT; w4 takes a slot when the MANIFEST appears.
   New RECIPE rule (with w15c): a product image of target T may link a root's per-target variant of target T. A flags variant stays test-only, and a product link to one is red.
+
+- 23:33 Orchestrator: w16c commit 1 goes straight to L6 (session_01KmtZKRq7TGNHj6H8m8jpAZ) for the render/d3d9 root when it lands (queued after w12). The main-menu milestone: L2 sends the certified N1 row for link/milestones.py.
