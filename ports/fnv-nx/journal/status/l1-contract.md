@@ -971,3 +971,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - w22f2: fpexact reader fe0dd64ae (reviewed, with the row["f2i"] path and recipe.sandbox_src).
   - w22, w20 and w23 were idle on the limit and have been resumed. The L5 1f37eb85 verdict job is dropped (off-path).
   - L2 w1 adds `internal_linkage` to the layout fact (claude/fnv-l2-source-w1-layoutlink). The TU-qualified key comes after w23r, as its own commit.
+
+- 23:14 Ruling: gate input paths. One recipe.resolve_input(root, ref) resolves every path a gate reads from its input files: a bare string is a tracked file of the root, and {external, path} names a declared external of the root's recipe, checked against its tree_sha256. Everything else is red. No mirroring. This covers gate_imports (names, specs, extra, extra_other, name_table) and gate_machine (sites), and every other gate with path inputs (target: 0 opens outside resolve_input). L5 w10 implements it; L1 reviews it.
