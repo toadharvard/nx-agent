@@ -38,16 +38,23 @@ def root_check(root, repo, cache, jobs):
     except recipe.RecipeError as e:
         return {}, {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])]
     if res["status"] == "red":
-        return {}, {}, set(), [("-", root, "build-red", "stage %s" % res["failure"]["stage"])]
+        f = res["failure"]
+        return {}, {}, set(), [("-", f["stage"].split(":", 1)[-1] if ":" in f["stage"] else root, "build-red",
+                                "root %s stage %s: %s" % (root, f["stage"], " ".join(f.get("stderr") or [])[:160])[:300])]
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
-    store, names = os.path.join(cache, "store"), set()
+    store, names, bad = os.path.join(cache, "store"), set(), []
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            names |= set(objstub.unit_terminators(drv[lang], us, {"c": rec["flags"]["c"], "c++": rec["flags"]["cxx"]}, cache, jobs)[0])
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": rec["flags"]["c"], "c++": rec["flags"]["cxx"]}, cache, jobs)
+            names |= set(ns)
+            unit_of = {k: u for u, k in res["pp_keys"].items()}
+            bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]
+    if bad:   # the terminator set of the root is incomplete: its objects cannot be judged, each failing unit is a finding
+        return {}, {}, set(), bad
     os_ids = {base + o["unit"] for o in res["objects"] if o["os_layer"]}
     rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
     return objstub.analyse_all(objs, names, os_ids, cache, jobs), rows, os_ids, []
