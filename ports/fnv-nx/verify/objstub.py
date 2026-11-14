@@ -53,8 +53,8 @@ status OWNER) declares. It is the second contract symbol of an assertion, not a 
 check function that a generator stage of the root's recipe writes (`fnvnx_dom_<name>[]` and `fnvnx_dom_<name>_check(v)`: hit returns v, miss
 calls ASSUME with the id the generator writes from its declared input); the generator is the one place the polarity is written and its test
 proves hit -> return, miss -> violation. A call is accepted iff, per site: (a) it lies in an object of a unit that a generator stage outputs
-(`recipe.generated_outputs`; else `assume-direct-call`: hand-written code never calls it); (b) w0 is a literal, an integer c (id `ASM-%03d` % c)
-or a pointer to a C string in a data section of the object (its text), and the record of that id has status OWNER (`assume-id-nonliteral`;
+(`recipe.generated_outputs`; else `assume-direct-call`: hand-written code never calls it); (b) w0 is an integer constant c decided in the object
+(the same constant on every path to the call; id `ASM-%03d` % c; a string or any computed value is not accepted), and the record of that id has status OWNER (`assume-id-nonliteral`;
 `assume-id-not-owner`: REMOVE, missing or unknown). A reference that is not a call is `assume-address-taken`. The gate result holds
 "assume_calls": {sites, accepted, red, by_id} over all objects.
 
@@ -457,17 +457,11 @@ def constprop(words, a, b, rels, obj, dec, sites, raw=False):
 
 
 def assume_id(obj, v):
-    """The assumption id passed to ASSUME as w0, V = the abstract value of x0 before the call ([\"K\", c] / [\"A\", canon] / other / None):
-    an integer literal c is the id \"ASM-%03d\" % c, a literal C string at a relocated address is its text; anything else is None (not a literal)."""
+    """The assumption id passed to ASSUME as w0 (uint32_t asm_id, hostabi/include/fnvnx/reach.h), V = the abstract value of x0 before the call
+    ([\"K\", c] or other or None): a constant c decided in the object (the dataflow of constprop: the same on every path to the call) is the id
+    \"ASM-%03d\" % c; anything else, a pointer included, is None (not a literal). No other form is accepted."""
     if v and v[0] == "K" and isinstance(v[1], int):
         return "ASM-%03d" % (v[1] & 0xFFFFFFFF)
-    if v and v[0] == "A" and isinstance(v[1], (tuple, list)) and len(v[1]) == 3 and v[1][0] == "sec":
-        sec, off = v[1][1], v[1][2]
-        if 0 < sec < len(obj.secs) and obj.secs[sec][1] == 1 and not obj.secs[sec][2] & 4 and 0 <= off < obj.secs[sec][4]:
-            beg = obj.secs[sec][3] + off
-            end = obj.data.find(b"\0", beg, obj.secs[sec][3] + obj.secs[sec][4])
-            if end > beg:
-                return obj.data[beg:end].decode("latin-1")
     return None
 
 
@@ -1013,31 +1007,7 @@ def judge(results, rows, facts, wine=None, declared=None, assume=None):
     otherwise V (kind WINE-V) is certified iff it passes exactly one id on every path, the id has a row and the result matches it.
     ASSUME = ({assumption id: status}, {ids of the objects of generated units}), None = both empty: a call of fnvnx_assume_violation is accepted
     iff it lies in an object of a unit that a generator stage of the root's recipe outputs (else assume-direct-call) and its first argument
-    is a literal id whose record is OWNER (assume-id-nonliteral, assume-id-not-owner). See (A) above."""
-    registry, gen = assume if assume else ({}, set())
-    n = acc = 0
-    by = {}
-    for oid, r in results.items():
-        for _, _, aid in r.get("assume", []):
-            n += 1
-            if not assume_verdict(aid, oid in gen, registry):
-                acc += 1
-                by[aid] = by.get(aid, 0) + 1
-    return {"sites": n, "accepted": acc, "red": n - acc, "by_id": dict(sorted(by.items()))}
-
-
-def judge(results, rows, facts, wine=None, declared=None, assume=None):
-    """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
-    -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
-    V: certified iff its row equals the result. indirect-noreturn-tail: certified iff every path ends in the tail and the function is
-    REACH or has a row of kind `exit`. A call of REACH: accepted iff w0 is a constant that is in FACTS; every fact needs a call site.
-    WINE (rows of wine_fixme.tsv, {id: (contract name, wine_ref, kind, value)}, None = empty): a function that calls it and is
-    otherwise V (kind WINE-V) is certified iff it passes exactly one id on every path, the id has a row and the result matches it.
-    ASSUME (ASSUME = ({assumption id: status}, {domain symbol}), None = both empty): a call of fnvnx_assume_violation is accepted iff its first
-    argument is a literal id whose record is OWNER (assume-id-nonliteral, assume-id-not-owner) and a conditional edge that every path to the
-    call takes belongs to a branch whose condition depends on the call's value argument and on a symbol of the domain set, i.e. a global
-    object of a unit that a generator stage of the root's recipe outputs (assume-unguarded: no such guard; assume-domain-not-generated: guards
-    depend on tables, none of them generated). The domain set is the generated tables only: a hand-written table is red."""
+    is a literal id whose record is OWNER (assume-id-nonliteral, assume-id-not-owner); see (A) above and assume_verdict."""
     registry, gen = assume if assume else ({}, set())
     items, out, vflag, exited, used = [], [], set(), set(), set()
     wine = wine or {}

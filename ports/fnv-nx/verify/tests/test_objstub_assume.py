@@ -49,9 +49,9 @@ for abi in ("ilp32", "lp64"):
     T = lambda s: "%s: %s" % (abi, s)
     k, c = run(CHECK % "4", abi)
     check(T("generated check function, integer id of an OWNER record: accepted"), not k and c == {"sites": 1, "accepted": 1, "red": 0, "by_id": {"ASM-004": 1}}, (k, c))
-    for lit, want in (("ASM-004", set()), ("ASM-001", {("fnvnx_dom_errno_check", "assume-id-not-owner")}), ("ASM-999", {("fnvnx_dom_errno_check", "assume-id-not-owner")})):
+    for lit in ("ASM-004", "ASM-001"):
         k, c = run(CHECK % ('(unsigned)(unsigned long)"%s"' % lit), abi)
-        check(T("string literal id %s: %s" % (lit, "accepted" if not want else "assume-id-not-owner")), k == want, k)
+        check(T("a pointer to a string %s as the id is not a literal: assume-id-nonliteral" % lit), k == {("fnvnx_dom_errno_check", "assume-id-nonliteral")}, k)
     k, c = run(CHECK % "1", abi)
     check(T("id of a REMOVE record: assume-id-not-owner"), k == {("fnvnx_dom_errno_check", "assume-id-not-owner")} and c["red"] == 1, k)
     k, c = run(CHECK % "77", abi)
