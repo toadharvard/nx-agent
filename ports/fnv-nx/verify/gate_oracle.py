@@ -357,8 +357,9 @@ def external_pins(admit_roots):
                 pins.setdefault(e["name"], set()).add((e["commit"], e["tree_sha256"]))
     add((load(TREE + "/verify/contract_inputs.json") or {}).get("external"))
     for r in admit_roots:
-        if r.get("class") == "product" and isinstance(r.get("recipe"), str):
-            add((load(r["recipe"]) or {}).get("external"))
+        if r.get("class") == "product":
+            for p in gate_admit.recipe_paths(r):
+                add((load(p) or {}).get("external"))
     return pins
 
 
