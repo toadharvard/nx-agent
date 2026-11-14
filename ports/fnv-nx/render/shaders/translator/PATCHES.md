@@ -12,7 +12,7 @@ the pinned tree of `tools/mojoshader` ad5dff84830c2863c841f4b1f4e3df78c705b383 (
    does not parse is dropped whole (errors and partial symbols removed, the instruction stream untouched), as D3D9 and Wine 9.0 skip comment tokens;
    (b) SRCMOD_DZ/DW outside texld/texcrd use the register as is (Wine 9.0 glsl_shader.c shader_glsl_gen_modifier :2597).
 
-The tree of branch `tools/mojoshader-glsldk` commit a8bc72b0 has tree_sha256 9e2f5927aa4b3e8b49231a832d6d2aa4f2603f37c317212506a9cc873c622b63. The unit list is
+The tree of branch `tools/mojoshader-glsldk` commit 86682f7e has tree_sha256 96249b88d1d1678e6a039c2303527e3458a8c6bca9904804c7aa0a3ca08a7c15. The unit list is
 generated (render/total/translator_gen/gen_sources.py): every .c file of the external.
 
 ## mojoshader_units.patch
@@ -36,3 +36,11 @@ Profile set (rule): every `SUPPORT_PROFILE_*` macro that `mojoshader_internal.h`
 checks this against the header, so a new upstream profile cannot default to 1 unseen). It is 1 exactly for the profiles the ABI produces and what they need to
 compile: GLSLDK (the profile `backend_mojoshader.c` requests) and its dependency chain GLSLES3, GLSLES, GLSL; 0 for all others (D3D, BYTECODE, HLSL, GLSL120,
 ARB1, ARB1_NV, METAL, SPIRV, GLSPIRV). Census after the prune (7 objects): 493 non-empty sections, 12 collected (inlined-only helpers, see above).
+
+## Profile set, corrected rule (BYTECODE)
+The profiles compiled in are exactly those the root's own sources REQUEST by name, plus their dependency chain: `backend_mojoshader.c` asks for
+MOJOSHADER_PROFILE_GLSLDK (needs GLSLES3, GLSLES, GLSL) and `frontend.c` asks for MOJOSHADER_PROFILE_BYTECODE (the parse profile of the front end).
+An earlier version set BYTECODE=0 from the census alone, which compiled the request out: every translation failed at run time with
+"Profile 'bytecode' is unknown or unsupported". `reach_census.py` now reads the requested names from src/*.c and exits 1 unless each is `=1` in build.json.
+The prune was re-derived with BYTECODE=1 (`derivation/mojoshader_prune.patch`, loop result: 6 collected inlined-only helpers kept: get_GLSL_destarg_varname,
+get_GLSL_srcarg_varname, get_GLSL_uniform_type, out_of_memory, output_GLSL_uniform_array, ver_ui32). The tree of the mirror is the pin in build.json.
