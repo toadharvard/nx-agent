@@ -427,3 +427,8 @@ Paused: w3b, w4, farm; no other work.
     - L6 cites against the Ubuntu source package mesa_25.2.8-0ubuntu0.24.04.4.
     - Upstream 25.2.8 counts as a citation only for files that debian/patches leave untouched. This matches the farm's 821f2764 citations.
     - The boot GL moves to the recipe-built gl4 root after 3.7.
+- 23:23Z 3.6a guest: w1b 21d03915 on 141b07580 is green.
+    - 7 objects; cold 35.3 s / 24 stages, warm 2.6 s / 24 hits; gate_admit 926/926; header byte-equal to 2f1bac09; fnvnx_shader_hash removed.
+    - objstub: 7 class-V findings in MojoShader (parse_args_NULL, DCL, NOP, RESERVED, TEXM3X2PAD, TEXM3X3PAD, phase); lib/sha256 and the own units have 0.
+    - Next for w1b, in order: the host recipe (blocks 3.7/4.3); the rule-A facts (op_syntax/op_cover/op_reserved into render/shaders/total, RESERVED to fnvnx_reach_violation); then 4.6.
+    - L1 is asked to land the rule-A reader in objstub (blocker of the 7, owner L1).
