@@ -959,3 +959,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Correction sent: one traversal, walk(root, visit), used by both tree_hash and cas ingest, so they agree by construction rather than by a test.
   - New L1 class (abi): 7 of 612 shared layouts are uncertified as "same key in two TUs", because the names plugin mangles every anonymous namespace as ?A0x00000000. Rule: an internal-linkage entity has no cross-TU identity, so its key is qualified by the TU. Linkage comes from a compiler bit in the layout fact (type_internal_linkage), never from the name. Owners: L1 w23 (gate) + L2 (fact bit).
   - w22 runs a warm verdict of 1f37eb85 for L5 on its fresh, pinned machine. w10's machine has GL dev packages outside the pin and the purge was denied there.
+
+- 11-14 23:12 Resumed after the usage limit.
+  - The candidate is claude/fnv-next3b 141b07580 (224af83e + w17m 4ee6cc10 + CLAUDE.md d6391ae69). Verdict v9 is running at the orchestrator.
+  - L1 queue (critical path only, each one its own commit on 141b07580 with its verdict line):
+    - w23r comdat_identity: 9493def2c/1fbd993c5/83761d38f to be rebased. Review asks for:
+      1. the group's defined symbols (value, size, type, binding, visibility) in the identity;
+      2. the name-resolved-target case made a fact through onedef's definition table, red when the name is not unique.
+    - w20u: namegate, r7 and objstub universe from admit covers.
+    - w20: objstub exit 2 → finding.
+    - w22f2: fpexact reader fe0dd64ae (reviewed, with the row["f2i"] path and recipe.sandbox_src).
+  - w22, w20 and w23 were idle on the limit and have been resumed. The L5 1f37eb85 verdict job is dropped (off-path).
+  - L2 w1 adds `internal_linkage` to the layout fact (claude/fnv-l2-source-w1-layoutlink). The TU-qualified key comes after w23r, as its own commit.
