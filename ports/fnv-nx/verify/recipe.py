@@ -48,8 +48,20 @@ FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
+
+def _plugin_cxx():
+    """The host driver that builds the plugins, DERIVED from env.json: the pinned package `g++-N-x86-64-linux-gnu` (exactly one) provides
+    `/usr/bin/x86_64-linux-gnu-g++-N`, the GCC of the same major version as the guest compiler (13). Nothing hand-typed in a build.json."""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
+        pk = [m.group(1) for k in json.load(f)["packages"] for m in [re.fullmatch(r"g\+\+-(\d+)-x86-64-linux-gnu", k)] if m]
+    if len(pk) != 1:
+        raise RuntimeError("env.json must pin exactly one g++-N-x86-64-linux-gnu, has %s" % pk)
+    return "x86_64-linux-gnu-g++-" + pk[0]
+
+
+PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources"}
+        "plugins", "variants", "outputs", "uses", "sources"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -70,14 +82,38 @@ PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
 # fnvnx_ftoi is one plugin with two modes, chosen by the root's cxx_origin (no free choice): native C++ takes the MSVC rewrite, lifted C++ has
 # no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
 # PLUGIN_OUT of the CC stage's own /out; the recipe passes it, a build.json does not declare it.
-LIFTED_ARGS = {"fnvnx_ftoi": {"mode": "lifted"}}
 PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
+
+
+def origin_class(origin):
+    """"lifted" iff the declared `cxx_origin` ORIGIN is a lifted declaration ({"lifted_by", "pack"}), else "native" (also for no origin): the one
+    place the origin's class is read (the class name "lifted" itself is accepted, for the CLI); plugin_args and semantics_set are functions of it."""
+    return "lifted" if origin == "lifted" or (isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}) else "native"
+
+
+def semantics_set(origin):
+    """The semantic flag set (before the per-language drop of semantics_for) of a root with `cxx_origin` ORIGIN: SEMANTICS_LIFTED for a lifted
+    root, SEMANTICS_FLAGS for every other."""
+    return SEMANTICS_LIFTED if origin_class(origin) == "lifted" else SEMANTICS_FLAGS
+
+
+def plugin_args(origin):
+    """{plugin name: its fixed arguments} for a root whose declared `cxx_origin` is ORIGIN ("native", a {"lifted_by", "pack"} dict, or None): the ONE
+    place the expected arguments are decided, used by plugin_errors, the gates and the fold of L2. A function of the root's declared fact only, no second
+    table: PLUGIN_ARGS, with fnvnx_ftoi's `mode` = the origin's class (lifted or native). No separate table for lifted roots."""
+    out = {n: dict(a) for n, a in PLUGIN_ARGS.items()}
+    out["fnvnx_ftoi"]["mode"] = origin_class(origin)
+    return out
+
+
 # The semantic flags of a guest root (data model, ABI, target, FP, aliasing, overflow, language model, calling convention): ONE ordered set, the
 # guest compiler pin's "flags"."semantics" (guest_compiler.json, next to this file). The RECIPE appends it to every guest compile stage, C, C++ and
 # assembler alike, minus what the pinned driver itself says does not apply to that language (semantics_for); a guest build.json carries none of them.
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compiler.json")) as _f:
-    SEMANTICS_FLAGS = tuple(json.load(_f)["flags"]["semantics"])
+    _sem = json.load(_f)["flags"]["semantics"]
+SEMANTICS_FLAGS = tuple(_sem["common"])   # every guest root (native, decomp, lifted)
+SEMANTICS_LIFTED = SEMANTICS_FLAGS + tuple(_sem["lifted_extra"])   # a root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under
 SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
 SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
@@ -696,19 +732,16 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
         if not all(re.fullmatch("[a-z][a-z0-9-]*", k) for k in p["args"]):
             err.append("plugin %s: argument names must be [a-z][a-z0-9-]*" % n)
         loaded[n] = p
-    px = rec.get("plugin_cxx")
-    if pl and not (isinstance(px, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", px)):
-        err.append("plugins need plugin_cxx: the driver under /usr/bin (env.json) that builds them, of the same GCC version as compiler.cxx")
-    elif not pl and px is not None:
-        err.append("plugin_cxx without plugins")
+    if "plugin_cxx" in rec:
+        err.append("plugin_cxx is not declared in a build.json: the plugin compiler is recipe.PLUGIN_CXX (%s), derived from env.json" % PLUGIN_CXX)
     cxx = [u for u in units if u.endswith(CXX_EXT)]
     ent = entry_of(roots, root + "@" + variant if variant else root)
     origin = ent.get("cxx_origin")
     # RULE (orchestrator, 2026-11-12): every guest CC stage, C and C++ alike and whatever the origin of the code, loads the FULL plugin set of
     # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list. The arguments are fixed by the
-    # origin alone: a lifted root takes LIFTED_ARGS where it names a plugin (fnvnx_ftoi mode lifted), every other root PLUGIN_ARGS.
+    # origin alone, by the one function plugin_args.
+    want = plugin_args(origin)
     if ent.get("target") == "guest" and any(u.endswith(CC_EXT + CXX_EXT) for u in units) and not (origin == "native" and cxx):
-        want = dict(PLUGIN_ARGS, **LIFTED_ARGS) if isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"} else PLUGIN_ARGS
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
@@ -722,8 +755,8 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))
-            elif loaded[n].get("args") != PLUGIN_ARGS[n]:
-                err.append("plugin %s: arguments must be %s, are %s" % (n, PLUGIN_ARGS[n], loaded[n].get("args")))
+            elif loaded[n].get("args") != want[n]:
+                err.append("plugin %s: arguments must be %s, are %s" % (n, want[n], loaded[n].get("args")))
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
@@ -731,7 +764,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
         err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
     elif isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}:
         tool, pack = origin["lifted_by"], origin["pack"]
-        for n, a in LIFTED_ARGS.items():   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
+        for n, a in [("fnvnx_ftoi", plugin_args(origin)["fnvnx_ftoi"])]:   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
             if n not in loaded:
                 err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
             elif loaded[n].get("args") != a:
@@ -876,11 +909,13 @@ def predefined(driver, kind, flags):
     return {l.split(" ", 2)[1]: (l.split(" ", 2) + [""])[2] for l in r.stdout.splitlines() if l.startswith("#define ")}
 
 
-def semantics_for(driver, kind, flags=SEMANTICS_FLAGS):
+def semantics_for(driver, kind, flags=None, origin=None):
     """The semantic flags the pinned DRIVER (host path) applies to a unit of KIND ("c", "cxx", "asm"), in their order: FLAGS minus every flag that
     the driver itself says does not apply to that language (its diagnostic "command-line option 'X' is valid for C++/ObjC++ but not for C", read
     from one run on an empty input in the driver's -x language). Nothing is decided by a name here; a flag the driver does not know is an error
-    (an unrecognised option makes the run fail: BuildRed), never dropped."""
+    (an unrecognised option makes the run fail: BuildRed), never dropped. FLAGS defaults to the set of the root's ORIGIN (semantics_set: the
+    `cxx_origin` declaration of the root; None = native)."""
+    flags = semantics_set(origin) if flags is None else flags
     r = subprocess.run([driver, "-x", LANG_X[kind], "-E", "-o", "/dev/null"] + list(flags) + ["/dev/null"], capture_output=True, text=True,
                        env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
     if r.returncode:
@@ -1093,12 +1128,12 @@ class Job:
 
     def plugins(self, ws):
         """Build every plugin of the recipe as a hermetic stage -> [(name, tree of its /out, argv flags)]. The stage runs the host driver
-        `plugin_cxx` (env.json) on the plugin source and the plugin headers of the target compiler (`compiler.cxx -print-file-name=plugin`),
+        `PLUGIN_CXX` (derived from env.json) on the plugin source and the plugin headers of the target compiler (`compiler.cxx -print-file-name=plugin`),
         so its key is f(source content, host compiler, flags, headers). The .so is in the store; each CC stage declares it as an input."""
         pl = self.rec.get("plugins", [])
         if not pl:
             return []
-        host = "/usr/bin/" + self.rec["plugin_cxx"]
+        host = "/usr/bin/" + PLUGIN_CXX
         cxx = self.hostpath(self.drivers()[1])
         pdir = subprocess.run([cxx, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
         if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
@@ -1182,7 +1217,7 @@ class Job:
         drop = {e["at"] for n, e in self.ext.items() if n != cc}
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
-            sem = semantics_for(self.hostpath(drv["c" if k == "asm" else k]), k) if guest else []   # the recipe's flags: semantics first, then the root's own
+            sem = semantics_for(self.hostpath(drv["c" if k == "asm" else k]), k, origin=self.roots[self.root].get("cxx_origin")) if guest else []   # the recipe's flags: semantics first, then the root's own
             json.dump({"argv": sem + rec["flags"][k]}, open(fp, "w"))
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
