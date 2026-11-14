@@ -13,21 +13,45 @@
     "ports/fnv-nx/lift/proof/codeuniverse.py"
    ]
   },
-  "test_formgate_real.py": {
+  "test_formgate.py": {
    "references": [
     {
-     "anchor": "L66-L66",
+     "anchor": "L31-L31",
      "kind": "spec",
-     "path": "ports/fnv-nx/lift/proof/sail_pins.txt"
+     "path": "ports/fnv-nx/verify/VERDICT.md"
     },
     {
-     "anchor": "L14-L14",
+     "anchor": "## External inputs",
      "kind": "spec",
-     "path": "ports/fnv-nx/lift/proof/formgate_inputs.json"
+     "path": "ports/fnv-nx/verify/RECIPE.md"
     }
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/formgate.py"
+   ]
+  },
+  "test_rtroot.py": {
+   "references": [
+    {
+     "anchor": "### Guest roots: the game's compiler (MSVCMODEL1)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/rt/build.json"
+   ]
+  },
+  "test_shape.py": {
+   "references": [
+    {
+     "anchor": "L4-L13",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_shape_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/shape.py"
    ]
   }
  }

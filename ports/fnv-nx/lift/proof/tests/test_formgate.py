@@ -13,6 +13,7 @@ PROOF = os.path.join(HERE, '..')
 LIFT = os.path.join(PROOF, '..')
 sys.path.insert(0, HERE)
 sys.path.insert(0, LIFT)
+sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext
 from proof import formgate, shape
 import recipe
