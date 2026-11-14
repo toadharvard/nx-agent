@@ -204,8 +204,9 @@ def request(pe, iat):
     t = tls_dir(pe)
     if t:
         specs.append("x2->0x2c->0:%d" % (t["size"] + t["zero"]))
-    watch = "# bootstart.py request: the loader's guest entries; mem = [esp] words, the TEB head, TLS vector slot 0, the exe's TLS block\n%s mem %s\n" % (
-        LIFT, " ".join(specs))
+    watch = ("# bootstart.py request: the loader's guest entries; mem = [esp] words, the TEB head, TLS vector slot 0, the exe's TLS block, captured up to and\n"
+             "# including the call of the exe entry (S8: ImageBase + AddressOfEntryPoint); later calls record args only\n%s mem %s until x0=0x%08x\n" % (
+                 LIFT, " ".join(specs), pe["base"] + pe["entry_rva"]))
     dump = [{"name": n, "addr": a, "len": l} for n, a, l in iat_dumps([r[0] for r in iat])]
     if t:
         dump.append({"name": "tls_index", "addr": t["index_va"], "len": 4})
