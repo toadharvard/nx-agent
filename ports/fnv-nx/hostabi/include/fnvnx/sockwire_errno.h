@@ -25,5 +25,5 @@
     X(ERESTART, 85) X(EUCLEAN, 117) X(ENOTNAM, 118) X(ENAVAIL, 119) X(EISNAM, 120) X(EREMOTEIO, 121) \
     X(EMEDIUMTYPE, 124) X(ENOKEY, 126) X(EKEYEXPIRED, 127) X(EKEYREVOKED, 128) X(EKEYREJECTED, 129) X(ERFKILL, 132) \
     X(EHWPOISON, 133)
-int fnvnx_dom_errno_check(int v);          /* v when it is a wire number of LIST or UNNAMED, else the OWNER-assumption exit */
+int fnvnx_dom_errno_check(int v);          /* v when it is a wire number of LIST or UNNAMED, else the ASM-004 exit */
 int fnvnx_wire_from_host_errno(int e);     /* the wire number of a host errno (by name, or the libnx encoding 10000 + n), else the exit */

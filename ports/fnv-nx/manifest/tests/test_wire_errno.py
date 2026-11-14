@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory() as d:
     assert "X(EPERM, 1) X(EAGAIN, 2) X(EZERO, 3)" in t                       # the libnx name where non-zero, else the Linux name the libc has
     assert "UNNAMED(X) \\\n    X(EGONE, 4)" in t and "X(EALIAS" not in t      # no libc name: unnamed; an alias is not a second number
     assert "4 Linux numbers" in t and "2 numbers reach the host as 10000" in t
-    assert "FNVNX_ERRNO_UNKNOWN_OFFSET 10000" in t and "int fnvnx_wire_from_host_errno(int e);" in t and "fnvnx_assume_violation" not in t.replace("OWNER-assumption exit", "")
+    assert "FNVNX_ERRNO_UNKNOWN_OFFSET 10000" in t and "int fnvnx_wire_from_host_errno(int e);" in t and "fnvnx_assume_violation" not in t
     # the generated unit: the array, the cases of the check and the Linux numbers are one set; the miss is the exit with the literal OWNER id 4
     assert run("--unit", fs["u"]).returncode == 0
     u = open(fs["u"]).read()
