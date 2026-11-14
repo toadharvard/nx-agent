@@ -4,9 +4,8 @@
 #ifndef FNVL_ABI_H
 #define FNVL_ABI_H
 #define FNVL_CPU_RA_OFF 248u     /* offsetof(struct cpu, ra): the address of a missed dispatch travels here (rt/rt.c fnvl_dispatch) */
-/* The reference CPU's cpuid leaf 1 (rt/cpumodel.c answers it from here; rt/seh.cc derives the FXSAVE MXCSR_MASK from it). EDX bit 24 FXSR, bit 25 SSE, bit 26 SSE2; ECX 0: no SSE3, no AVX. The declared machine has 3 processors, one thread each: EBX[23:16] = 3 (maximum addressable IDs for logical processors in the package), valid because EDX bit 28 (HTT) is set (Intel SDM Vol 2A, CPUID leaf 1: the field is valid only when HTT is set). */
+/* The reference CPU's cpuid leaf 1 (rt/cpumodel.c answers it from here; rt/seh.cc derives the FXSAVE MXCSR_MASK from it). EDX bit 24 FXSR, bit 25 SSE, bit 26 SSE2; ECX 0: no SSE3, no AVX. EDX bit 28 (HTT) is set: the declared machine has FNVNX_NPROC processors and rt/cpumodel.c's leaf 1 EBX[23:16] (valid only when HTT is set, Intel SDM Vol 2A, CPUID leaf 1) derives from hostabi/include/fnvnx/placement.h. */
 #define FNVL_CPUID1_EAX 0x000c06f2u
-#define FNVL_CPUID1_EBX 0x00030800u
 #define FNVL_CPUID1_ECX 0x00000000u
 #define FNVL_CPUID1_EDX 0x178bfbffu
 #endif
