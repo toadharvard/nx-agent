@@ -227,7 +227,7 @@ static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8]) {
     abbr[7] = 0;
     return 0;
 }
-int32_t os_tz_offset_minutes(void) {
+int32_t os_zone_offset_minutes(void) {
     int32_t off;
     int dst;
     char n[8];
@@ -306,7 +306,7 @@ void os_dir_close(os_dir *d) {
 /* FAT32/exFAT on the SD card fold case, but that is a property of Horizon's fs, not checked on hardware yet (NX1):
  * probe it once with the guest's own file. guest.nso found under its exact name but not as GUEST.NSO -> case-sensitive,
  * and path.cpp resolves every component against the directory (slower, correct). Without guest.nso under the root
- * (the emulator's sdmc tree) the SD behaviour is assumed. */
+ * (the emulator's sdmc tree) folds is 1: the case folding of the console's FAT, ASM-004. */
 int os_fs_case_insensitive(void) {
     static int folds = -1;
     if (folds < 0) {

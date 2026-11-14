@@ -131,6 +131,17 @@ dm = g.declared("#define FNVNX_PLAT_X 1u\n#define FNVNX_PLAT_X_LAST 5u\n")
 u, c, ids = g.judge(dm, {"FNVNX_PLAT_X": 1})
 check("(ii) a marker equal to no service is its own item and red while unused", (u, c) == (2, 1) and ids == ["unused service 5 (FNVNX_PLAT_X_LAST)"], (u, c, ids))
 
+# the universe is per interface, over the union of its includers: two roots that use different halves are both green; a service no root uses is red
+du = g.declared("#define FNVNX_PLAT_A 1u\n#define FNVNX_PLAT_B 2u\n#define FNVNX_PLAT_C 3u\n#define FNVNX_PLAT_D 4u\n")
+half1 = ("r1", {"FNVNX_PLAT_A": 1, "FNVNX_PLAT_B": 2})
+half2 = ("r2", {"FNVNX_PLAT_C": 3, "FNVNX_PLAT_D": 4})
+u, c, ids = g.union_judge(du, [half1, half2])
+check("union: two roots, each using a different half, are both green", (u, c, ids) == (4, 4, []), (u, c, ids))
+u, c, ids = g.union_judge(du, [half1])
+check("union: a service that no admitted root uses is red", (u, c) == (4, 2) and ids == ["unused service 3 (FNVNX_PLAT_C)", "unused service 4 (FNVNX_PLAT_D)"], (u, c, ids))
+u, c, ids = g.union_judge(du, [half1, ("r2", {"FNVNX_PLAT_C": 3, "FNVNX_PLAT_D": 4, "FNVNX_PLAT_Z": 9})])
+check("union: an undeclared use in any root is red", u == 5 and c == 4 and "undeclared FNVNX_PLAT_Z=9" in ids, (u, c, ids))
+
 # universe 0 on a checkout without admitted roots: green, no exception list
 out = tempfile.mkdtemp(prefix="gh-")
 repo = tempfile.mkdtemp(prefix="gh-repo-")   # a checkout whose admit.json admits no root

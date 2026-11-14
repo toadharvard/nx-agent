@@ -11,7 +11,7 @@
  * when its precondition does not hold; nothing has a fallback value. A failed start leaves the process in an
  * undefined state: the caller exits (nothing is unmapped).
  *
- * Hook contract: fnvnx_os.read/map_fixed/unmap_fixed/protect/alloc/free/log/alloc_va/free_va/register_image are all required. map_fixed returns
+ * Hook contract: fnvnx_os.read/map_fixed/unmap_range/protect/alloc/free/log/alloc_va/free_va/register_image are all required. map_fixed returns
  * zero-filled read-write memory at exactly addr (the `prot` argument is the final protection, applied later by
  * protect); it fails if any of it is in use. Host address = guest VA + cfg.bias (0 on the target).
  * Little-endian host, 32-bit guest VAs (uint32_t), C99. */
@@ -157,7 +157,7 @@ int fnvnx_module_load(fnvnx_proc *p, uint32_t teb, uint32_t esp, const char *nam
  *     order (importers before the modules they import), each preceded by its TLS callbacks with the same reason as for every
  *     other detach (one rule: TLS callbacks, then DllMain; an on-demand module has no TLS directory, so none), all on the
  *     calling guest thread (fnvnx_lift_enter below `esp`); the DllMain results are ignored (Windows ignores them). Then the
- *     pages of every unloaded module are released through os->unmap_fixed (exactly the ranges map_fixed gave: headers,
+ *     pages of every unloaded module are released through os->unmap_range (exactly the ranges map_fixed gave: headers,
  *     sections and claimed gaps), the module leaves the image list and the initialisation order, and its table row is
  *     unloaded again: a later fnvnx_module_load of the name reads and maps the file afresh (fresh data, DllMain attach
  *     again). The platform drops its record of an unloaded image (the images listing no longer has it); a module that is

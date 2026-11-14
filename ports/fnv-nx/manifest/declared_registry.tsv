@@ -1,0 +1,12 @@
+# The declared machine's registry (owner rule): the hive holds exactly the keys the exe and the modules read, found statically
+# from their call sites (regsites.tsv, manifest/regsites.py), with the values of the declared machine. A key or value
+# with no row here is absent (ERROR_FILE_NOT_FOUND), as on a machine where nothing wrote it. No row is invented: each one names
+# where its value comes from, and gen_registry_seed.py refuses a row that no static read site of the exe or a module reads.
+# Wine-9.0-populated system keys that the modules read (Direct3D flags) have no row yet; they are listed
+# by the generator's --uncovered report.
+# Columns: root, key, value name, type, data, source. root is a HKEY_* name as in regsites.tsv. type: REG_SZ, REG_EXPAND_SZ
+# (text; {game_dir} = the game directory with its trailing backslash, the file layer's W32_GAME_DIR), REG_DWORD, REG_QWORD
+# (decimal or 0x), REG_BINARY, REG_MULTI_SZ (hex pairs).
+root	key	name	type	data	source
+HKEY_LOCAL_MACHINE	Software\Bethesda Softworks\FalloutNV	Installed Path	REG_SZ	{game_dir}	declared machine: the install directory of the game, the directory the file layer serves as W32_GAME_DIR
+HKEY_CURRENT_USER	Control Panel\Mouse	MouseSensitivity	REG_SZ	10	wine-9.0:dlls/win32u/sysparams.c:4422 (UINT_ENTRY MOUSESPEED, MOUSE_KEY, "MouseSensitivity", default 10) with init_uint_entry:3838 (stored as REG_SZ text "10")

@@ -509,9 +509,9 @@ int fnvnx_module_unload(fnvnx_proc *p, uint32_t teb, uint32_t esp, uint32_t base
         fnvnx_loaded *L = &p->mod[victims[i]];
         unsigned j, ok = 1;
         for (j = 0; j < L->img.nmapped; j++)
-            if (p->os->unmap_fixed(p->os->ctx, (uintptr_t)L->img.map[j].va + p->cfg.bias, L->img.map[j].size)) ok = 0;
+            if (p->os->unmap_range(p->os->ctx, (uintptr_t)L->img.map[j].va + p->cfg.bias, L->img.map[j].size)) ok = 0;
         for (j = 0; j < L->ngap; j++)
-            if (p->os->unmap_fixed(p->os->ctx, (uintptr_t)L->gap[j].va + p->cfg.bias, L->gap[j].size)) ok = 0;
+            if (p->os->unmap_range(p->os->ctx, (uintptr_t)L->gap[j].va + p->cfg.bias, L->gap[j].size)) ok = 0;
         if (ok) {
             memset(L, 0, sizeof *L);
         } else {

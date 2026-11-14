@@ -520,6 +520,14 @@ def link_errors(lk, root, mine, roots, ext_names, repo, variant=""):
 HEADER_EXTS = (".h", ".hh", ".hpp", ".hxx", ".inc")
 
 
+def include_dir(roots, root):
+    """The include/ dir of the admitted product root ROOT (a repo-relative path): the one place a root's own headers live, as header_dirs and
+    every user of a root's headers read it. ROOTS = load_admit(); a root that is not an admitted product root has none (ValueError)."""
+    if roots.get(root, {}).get("class") != "product":
+        raise ValueError("%s is not an admitted product root" % root)
+    return root + "/include"
+
+
 def header_dirs(rec, root, roots, repo=".", variant=""):
     """The repo include dirs that can supply a header to a product of ROOT's target (at VARIANT: the variant's target): the `include` of REC, the
     `include` of the recipe of every admitted product root that has a recipe for that target (its own or a per-target one; read from REPO; a
@@ -532,7 +540,7 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
     add(rec.get("include") if isinstance(rec.get("include"), list) else [])
     for p, r in roots.items():
         if r.get("class") == "product" and tg in targets_of(r):
-            dirs.add(p + "/include")
+            dirs.add(include_dir(roots, p))
             for path in [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]:
                 try:
                     with open(os.path.join(repo, path)) as f:
@@ -1416,6 +1424,52 @@ def exttree(e, cache):
         except OSError:
             shutil.rmtree(tmp, ignore_errors=True)
     return dest
+
+
+_EXT_CHECKED = set()
+
+
+def resolve_input(root, ref, repo=".", cache=None, rec=None):
+    """THE reader of a path named by an input file of a gate (imports.in.json, registry.in.json, ...); no gate opens one itself.
+    REF is a bare string (a tracked file or directory of ROOT) or {"external": NAME, "path": P}: NAME must be an `external` of ROOT's recipe,
+    its tree is mounted from the pinned commit and checked against its tree_sha256. Red (ValueError) for: an undeclared external, a path that
+    is absolute or leaves the tree (.. or a symlink), a missing path, an untracked path, a tree_sha256 mismatch.
+    -> (host path, ident, files); FILES is None for a file or an external path, and for a bare directory the sorted repo-relative TRACKED files under it (a gate reads only those); IDENT is "tree_sha256:path" of an external, "root/path" of a tracked file: the gate key takes it."""
+    if isinstance(ref, str):
+        base, p, kind = os.path.join(repo, root), ref, None
+    elif isinstance(ref, dict) and set(ref) == {"external", "path"} and all(isinstance(v, str) for v in ref.values()):
+        kind, p = ref["external"], ref["path"]
+        if rec is None:
+            rec = load_recipe(repo, load_admit(repo), root)
+        e = next((x for x in rec.get("external", []) if x["name"] == kind), None)
+        if e is None:
+            raise ValueError("%s: input %r names the external %r, which the root's recipe does not declare" % (root, ref, kind))
+        if cache is None:
+            raise ValueError("%s: input %r needs the gate cache to mount the external" % (root, ref))
+        base = exttree(e, cache)
+        if (cache, e["commit"]) not in _EXT_CHECKED:
+            if cas.ingest(base, os.path.join(cache, "store")) != e["tree_sha256"]:
+                raise ValueError("external %r: tree_sha256 differs from the checkout" % kind)
+            _EXT_CHECKED.add((cache, e["commit"]))
+    else:
+        raise ValueError("%s: input %r is neither a path nor {external, path}" % (root, ref))
+    if not p or os.path.isabs(p) or ".." in p.split("/"):
+        raise ValueError("%s: input path %r is absolute or leaves the tree" % (root, p))
+    full = os.path.join(base, p)
+    if not os.path.realpath(full).startswith(os.path.realpath(base) + os.sep):
+        raise ValueError("%s: input path %r leaves the tree (symlink)" % (root, p))
+    if not os.path.exists(full):
+        raise ValueError("%s: input path %r does not exist" % (root, p))
+    if kind is None:
+        rel = posixpath.join(root, p)
+        out = subprocess.run(["git", "-C", repo, "ls-files", "-z", "--", rel], capture_output=True)
+        tracked = sorted(x for x in out.stdout.decode().split("\0") if x)
+        if out.returncode != 0 or not tracked:
+            raise ValueError("%s: input path %r is not tracked (a directory needs at least one tracked file)" % (root, p))
+        if os.path.isdir(full):   # a tracked directory is its tracked files only: an untracked file inside is an undeclared input
+            return full, rel, tracked
+        return full, rel, None
+    return full, "%s:%s" % (e["tree_sha256"], p), None
 
 
 def host_compilers(rec, cache):

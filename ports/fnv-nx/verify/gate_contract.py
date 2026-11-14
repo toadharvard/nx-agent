@@ -188,7 +188,9 @@ def stages(w, doc, ext, rp, only=None):
     imgs = []
     if only is None or only in IMAGE_GATES:
         for name, pe, rg in images_of(doc, ext)[0]:
-            imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
+            imgs += ["--image", "%s=%s" % (name, pe)]
+        fx = ext[doc["ranges"]["exe"].split("/", 1)[0]]     # the facts external: contract/imagerec.py checks its tree_sha256 and the images' sha256
+        imgs += ["--facts", fx["host"], "--facts-tree", fx["tree"]]
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {

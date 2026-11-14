@@ -128,7 +128,7 @@ typedef struct FnvnxHostApi {
 
 /* ext_call results that belong to no service (all three are -255, -254, -253 as int64; no service answers one of them otherwise):
  *   NO_MODULE  the module number is >= 64 or no host module is registered under it
- *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 37 and up)
+ *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 38 and up)
  *   BAD_NARGS  module 11: fewer arguments than the service takes (the column "n" of the table below), or nargs > 0 with a null array */
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
 #define FNVNX_EXT_NO_SERVICE 0xFFFFFFFFFFFFFF02ull
@@ -267,7 +267,7 @@ typedef struct FnvnxHostApi {
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
  *   UINT32_MAX; host_ext.inc:h_ext_call, fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext (host_platform.inc, one row per service); fn 0, 10, 15, 27..29, 32, 33 and fn >= 37 -> NO_SERVICE (-254):
+ * module 11, platform_ext (host_platform.inc, one row per service); fn 0, 10, 15, 27..29, 32, 33 and fn >= 38 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  *                            host_platform.inc:pf_cpu_boost,set_cpu_boost                                    test:cpu_boost
@@ -307,6 +307,9 @@ typedef struct FnvnxHostApi {
  *                            host_platform.inc:pf_thread_self                                                 test:thread_self
  * 36 TEXT_ENTRY         n=5  1 text entered | 0 cancelled | -FNVNX_HE_BADINPUT (max_len 0 or > 500, out or n null) | -(the applet's Horizon result)
  *                            host_textentry.inc:host_text_entry                                               test:text_entry
+ * 37 UNMAP_RANGE       n=2  0 | 0x1759 (size 0, addr+size wraps, addr or size not 4 KiB aligned) | 0xD401 (the range is not inside a window the host
+ *                            claimed at start, or a page of it was not mapped by map_fixed: nothing done)
+ *                            host_platform.inc:pf_unmap_range, host_vm.inc:host_unmap_range                   test:unmap_range
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.
  *
  * FnvnxHostApi slots: the results are stated at each slot above. Host function (file) and tests; "-" = a direct libnx / newlib call
@@ -330,7 +333,7 @@ typedef struct FnvnxHostApi {
  *    space, as for fs_read); 0 is the null pointer where "or 0" is said.
  *  - Result: an int64 in a uint64, value >= 0, or -errno with errno a WIRE number (sockwire.h FNVNX_WIRE_ERRNO_LIST,
  *    the Linux numbers). The guest translates wire errno into newlib's and the host translates its own into the wire
- *    ones, both by name, so nothing assumes that two systems' errno numbers agree (a host errno that is not in the list is -EIO).
+ *    ones, both by name, so nothing depends on two systems' errno numbers agreeing (a host errno outside the generated list ends the process: fnvnx_assume_violation, ASM-004; a number libnx returns as 10000 + n is the number n).
  *    Where a service below says "the platform's answer", the host passes the call to the console's bsd service (libnx) with the
  *    constants translated by name and returns its outcome: 0 / a count / a descriptor, or -(that errno mapped through the list),
  *    i.e. any value of FNVNX_WIRE_ERRNO_LIST the bsd service can produce; the host adds only the answers the service names. FNVNX_EXT_NO_MODULE is what a host
@@ -423,6 +426,12 @@ typedef struct FnvnxHostApi {
  * (cancelled, out and *n untouched). Argument checks are the same as on the console. */
 #define FNVNX_PLAT_TEXT_ENTRY 36u
 #define FNVNX_TEXT_ENTRY_MAX 500u
+/* UNMAP_RANGE (addr, size) -> 0 | FNVNX_HE_BADINPUT | FNVNX_HE_RANGE. The inverse of map_fixed for a range the host claimed at start
+ * (the windows listed at map_fixed): VirtualFree / UnmapViewOfFile of the image and data window (docs/STARTUP.md, DATAIMAGE.md). Checks in
+ * this order: size 0, addr+size wraps, addr or size not 4 KiB aligned -> FNVNX_HE_BADINPUT; [addr, addr+size) not inside a claimed window,
+ * or a page of it not mapped by map_fixed -> FNVNX_HE_RANGE, nothing done (no fake success). Else every page returns to the window's free
+ * state (any protection VM_PROTECT gave it is dropped) and the next map_fixed of it yields fresh zeroed memory. No fault emulation. */
+#define FNVNX_PLAT_UNMAP_RANGE 37u
 typedef struct FnvnxTzAt {
     int32_t off_s;      /* local = UTC + off_s */
     uint32_t dst;       /* 1: daylight time at that instant */
