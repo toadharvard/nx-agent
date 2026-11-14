@@ -58,7 +58,6 @@
    "endfiles": []
   }
  },
- "plugin_cxx": "x86_64-linux-gnu-g++-13",
  "plugins": [
   {
    "name": "fnvnx_ftoi",

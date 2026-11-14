@@ -38,7 +38,6 @@
     "/ext/a64/aarch64-none-elf/include"
   ],
   "units": "all",
-  "plugin_cxx": "x86_64-linux-gnu-g++-13",
   "plugins": [
     {
       "name": "fnvnx_ftoi",
