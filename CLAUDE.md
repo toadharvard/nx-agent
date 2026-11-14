@@ -401,7 +401,7 @@ The owner's words: "делегируй остаток работы аккура�
     - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
     - Undefined symbols get their owners from the closure:
       - `fnvnx_dispatch`: L3a's generated bridges;
-      - the process entry `main`: L5 `rt/guest`;
+      - the process entry `main`: L5's own root `rt/guest/main`, which only calls `fnvnx_loader_main()` (the L1 loader: map, imports, TLS, DllMain, TEB/stack, then `fnvnx_lift_enter(AddressOfEntryPoint)`). `fnvnx_lift_enter` (lift/rt) is the single bridge into lifted code, and there is no second entry path;
       - `fnvnx_import_key` / the IAT root: L1;
       - the pthread mutexes that libgcc's unwinder needs: L5, over its real threads.
   - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, first frame (GL in the
