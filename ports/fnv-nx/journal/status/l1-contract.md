@@ -980,3 +980,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   1. The loader is not a product root. The 3 native test roots each lack the same 7 loader symbols, and loader/Makefile plus guest/build.sh are a second build path. NEW worker w24 (session_01KmtZKV7m9qpAdWS8274Mju) makes ports/fnv-nx/loader a recipe guest product root. It deletes the Makefile and build.sh, moves the host tests to the variant against the real units, and checks loader/src/sha256.c against lib/sha256 for one home.
   2. lib/sha256: w15c 1cac0562 (pushed before the limit). w15 is resumed and merges it onto 141b07580 as w15d, with its verdict.
   Green on t16k so far: lift/rt (12 objects) + the 3 lifted test roots.
+
+- 23:22 Path plan 2026-11-14 (ALL.md at 21b10f1aa) is binding; CLAUDE.md merged from the integration branch. L1 runs at most 3 workers.
+  - Active: w23 (1.1 comdat_identity), w20 (1.2 the namegate/r7/objstub universe + objstub exit 2), w22 (1.3 w22f2 fpexact reader).
+  - Held: w19 (1.7 warm verdict ≤300 s, next). Its answers are accepted: direct entries of listed directories in the key; stale declarations red; gate keys by declared reads come first; one import resolver in verify/pyimports.py. Also held: w15 (3.1 w15d), w24 (loader root, proposed to the orchestrator as 3.1b).
+  - Order when slots free: 1.7 → 3.1 (w15d/w15c, w12, w16c) → 3.2 w16 IAT; 1.5 w4 takes a slot when L5 publishes the MANIFEST.
