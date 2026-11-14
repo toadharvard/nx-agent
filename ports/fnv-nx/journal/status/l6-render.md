@@ -457,3 +457,20 @@ Paused: w3b, w4, farm; no other work.
     - Class closed: SRCMOD_DZ/DW as-is outside texld/texcrd (Wine 9.0 glsl_shader.c:2597).
     - Order to w1b: (1) host variant first (L1 w15c per-target recipe, nm proof of translate_glsl); (2) dk_*_location: declared-set rule, the tables are a required argument built only by fnvnx_dk_assign, failf deleted, undeclared-register read is a validator rejection; (3) the 151 g rows go into res_smcheck in render/d3d9, held until w6's root lands; meanwhile rule-A facts with L1 w20.
     - No 179+10 number is claimed until the host variant and the shaders are inputs.
+- 23:28Z 3.6 translator root per target: done (w1b 708d3638, next3b 141b07580 + L1 w15c 1cac05621).
+    - Both targets: recipe valid, gate_admit green, 0 red units.
+    - translator@host: 7 objects, cold 6.7 s, warm 2.1 s (16/16 hit).
+    - lib/sha256@host: 1 object, cold 3.1 s, warm 2.1 s.
+    - Guest: 7 objects, cold 23.7 s.
+    - nm on the host objects: T fnvnx_shader_translate_glsl and T fnvnx_shader_result_free.
+    - Sent to the orchestrator and L6A w6 (gl4 3.7, boot GL 4.3).
+    - Open: objstub on the host pair waits for L1 w20's x86-64 reader. The full objstub input is red on the platform root (L5, crt/iob.c).
+- 23:28Z render/backend ABI.
+    - L6A: render/nxgpu takes w6 532f139f's three headers byte-equal: key[32], FLAT bit 1, ASM-628/629.
+    - gl4 gets 2 fixes in L6A's 3.7 commit: it accepts variant bit 1, and SHADER_CREATE checks the key.
+    - render/backend is dropped after that head.
+- 23:28Z Assumptions on 532f139f, with L1 w22p 841114c4b: render findings 0. The 24 remaining are L5's.
+- 23:28Z sm_link conventions (L1).
+    - The certificates are a hermetic generator stage, keyed by the shaders tree b545961f, translator@host and the Mesa pin. They are stored in GATE_CACHE/store.
+    - The argument must list every cross-stage check from the Mesa source, with the counts of classes and pairs.
+    - Mesa is a declared pinned external (w5).
