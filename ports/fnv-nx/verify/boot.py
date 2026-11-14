@@ -38,7 +38,10 @@ per-frame counts live only in "frames" (running totals, O(threads) per frame; th
 {library_sha256, presents, first_module10_call, last_error}. Every present is also dumped as an image, losslessly and by content (no cap, no sampling): the library writes frame_%06u.rgba + .txt
 (width x height x 4 bytes + "w h\n") into --frames for each present, and store_frame() turns the pair at once into --frames/<key>.rgba +
 <key>.txt with key = sha256(.txt bytes followed by .rgba bytes) (the size is part of the identity); a key already there is the same frame and
-is not stored again (a static menu is one file). Each frames record carries its "sha256" = key. farm/boot_job.sh publishes every distinct file.
+is not stored again (a static menu is one file).
+Requirement on the gl4 root (item 4.3; L6A keeps it for the deko3d backend too): the renderer writes the frame_%06u.rgba/.txt pair COMPLETELY
+before it calls nxgl4_on_present(frame) (render/gl4/gl4_present.c: "called after the image is complete ... after the files are written");
+store_frame() reads the pair inside that callback and relies on it. Each frames record carries its "sha256" = key. farm/boot_job.sh publishes every distinct file.
 Two "present" facts, not to be mixed: milestone first-present = the exe's own call of D3D9 Present (the contract's import:DLL!Present
 rows, `call` parts, observed in the guest); milestone first-frame = the first `present` host event of the GL backend (bootgpu on_present,
 the table row `first-frame any host present` that bootinputs.py milestones always generates; it needs --gpu). They are different
