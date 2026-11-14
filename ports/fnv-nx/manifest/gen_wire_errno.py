@@ -21,7 +21,7 @@ committed header (--committed with --out STAMP); the platform root emits the C u
 the generated text must equal the committed header (else exit 1). With --unit the C unit of the domain checks is
 written (fnvnx_dom_errno[], fnvnx_dom_errno_check, fnvnx_wire_from_host_errno): hand code calls the checks only (L1: a direct call of
 fnvnx_assume_violation is red)."""
-import re, sys
+import os, re, sys
 
 
 def table(text):
@@ -118,12 +118,14 @@ def main(argv):
     text = generate(open(a["--libnx-convert"]).read(), open(a["--newlib-errno"]).read(),
                     open(a["--linux-errno-base"]).read(), open(a["--linux-errno"]).read())
     if "--unit" in a:
+        os.makedirs(os.path.dirname(os.path.abspath(a["--unit"])), exist_ok=True)   # the output dir is the generator's to create
         open(a["--unit"], "w").write(unit(open(a["--libnx-convert"]).read(), open(a["--newlib-errno"]).read(),
                                           open(a["--linux-errno-base"]).read(), open(a["--linux-errno"]).read()))
     if "--committed" in a:
         if open(a["--committed"]).read() != text:
             sys.exit("gen_wire_errno: %s differs from the list regenerated from the pinned externals" % a["--committed"])
     if "--out" in a:
+        os.makedirs(os.path.dirname(os.path.abspath(a["--out"])), exist_ok=True)
         open(a["--out"], "w").write(text)
 
 
