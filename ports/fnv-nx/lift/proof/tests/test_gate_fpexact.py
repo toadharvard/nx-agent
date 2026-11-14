@@ -54,8 +54,14 @@ def site(kind, **kw):
     return d
 
 
-def fact(lo, hi, blo, bhi):
-    return {"source": "gcc-range", "lo": lo, "hi": hi, "bound_lo": blo, "bound_hi": bhi}
+def fact(lo, hi, itype="i32", conv="trunc", nonan=True, **kw):
+    d = {"source": "gcc-range", "itype": itype, "conv": conv, "lo": lo, "hi": hi, "nonan": nonan}
+    d.update(kw)
+    return d
+
+
+def rng(f):
+    return codes(report("rg_%d.json" % len(os.listdir(TMP)), recipe.sandbox_src("a.c"), ranged=[site("conv-scalar", fact=f)]))
 
 
 def codes(f2i_path, unit="a.c"):
@@ -77,16 +83,41 @@ check("rewritten sites (counted) are green", codes(report("rw.json", SRC, rewrit
 check("rewritten sites listed per site, count matching: green", codes(report("rw2.json", SRC, rewritten=2, extra={"rewrites": [site("conv-scalar"), site("builtin")]})) == [])
 check("rewrites listed with a count that differs: red (malformed)", codes(report("rw3.json", SRC, rewritten=2, extra={"rewrites": [site("conv-scalar")]})) == ["f2i-report-missing"])
 check("a helper site is green", codes(report("hp.json", SRC, helper=2)) == [])
-check("a range-proven site (bound_lo < lo, hi < bound_hi) is green", codes(report("rg.json", SRC, ranged=[site("conv-scalar", fact=fact(0, 100, -2147483648, 2147483648))])) == [])
-check("a ranged site whose range reaches the bound is red f2i-range", codes(report("rg2.json", SRC, ranged=[site("conv-scalar", fact=fact(0, 2147483648, -2147483648, 2147483648))])) == ["f2i-range"])
-check("a ranged site whose lo equals bound_lo is red f2i-range", codes(report("rg3.json", SRC, ranged=[site("conv-vector", fact=fact(-2147483648, 5, -2147483648, 2147483648))])) == ["f2i-range"])
-check("a ranged site with a non-real bound is red (malformed)", codes(report("rg4.json", SRC, ranged=[site("conv-scalar", fact=fact(0, "1", -5, 5))])) == ["f2i-report-missing"])
 check("a ranged site with a missing fact is red (malformed)", codes(report("rg5.json", SRC, ranged=[site("conv-scalar")])) == ["f2i-report-missing"])
-check("a ranged site with a fact of another source is red (malformed)", codes(report("rg6.json", SRC, ranged=[site("conv-scalar", fact=dict(fact(0, 1, -5, 5), source="flag"))])) == ["f2i-report-missing"])
+# range facts: the gate computes the specified set from itype and conv; the report carries no bound
+M31, M32, M63, M64 = 2 ** 31, 2 ** 32, 2 ** 63, 2 ** 64
+cases = [
+    ("trunc i32 inside", fact(-2147483648.5, 2147483647.5), []), ("trunc i32 at -2^31-1 (excluded)", fact(-M31 - 1, 5), ["f2i-range"]),
+    ("trunc i32 hi = 2^31 (excluded)", fact(0, M31), ["f2i-range"]), ("trunc i32 hi just under 2^31", fact(0, 2147483647.9999998), []),
+    ("trunc u32 lo -0.5 inside", fact(-0.5, 4294967295.5, "u32"), []), ("trunc u32 lo -1 excluded", fact(-1, 5, "u32"), ["f2i-range"]),
+    ("trunc u32 hi 2^32 excluded", fact(0, M32, "u32"), ["f2i-range"]), ("floor i32 lo = -2^31 included", fact(-M31, 5, conv="floor"), []),
+    ("floor i32 lo below -2^31", fact(-M31 - 0.5, 5, conv="floor"), ["f2i-range"]), ("floor i32 hi 2^31 excluded", fact(0, M31, conv="floor"), ["f2i-range"]),
+    ("floor i32 hi 2^31-0.5 included", fact(0, M31 - 0.5, conv="floor"), []), ("ceil i32 hi = 2^31-1 included", fact(0, M31 - 1, conv="ceil"), []),
+    ("ceil i32 hi 2^31-0.5 excluded", fact(0, M31 - 0.5, conv="ceil"), ["f2i-range"]), ("ceil i32 lo -2^31 - 0.5 included", fact(-M31 - 0.5, 0, conv="ceil"), []),
+    ("ceil i32 lo -2^31-1 excluded", fact(-M31 - 1, 0, conv="ceil"), ["f2i-range"]), ("round i32 hi 2^31-0.5 excluded", fact(0, M31 - 0.5, conv="round"), ["f2i-range"]),
+    ("round i32 hi 2^31-0.75 included", fact(0, M31 - 0.75, conv="round"), []), ("round i32 lo -2^31-0.5 excluded", fact(-M31 - 0.5, 0, conv="round"), ["f2i-range"]),
+    ("round i32 lo -2^31-0.25 included", fact(-M31 - 0.25, 0, conv="round"), []), ("rint i32 inside [mn, mx]", fact(-M31, M31 - 1, conv="rint"), []),
+    ("rint i32 hi 2^31-0.5 excluded (rounding up gives 2^31)", fact(0, M31 - 0.5, conv="rint"), ["f2i-range"]),
+    ("rint i32 lo -2^31-0.5 excluded (rounding down gives -2^31-1)", fact(-M31 - 0.5, 0, conv="rint"), ["f2i-range"]),
+    ("trunc i64 inside", fact(-1e18, 1e18, "i64"), []), ("trunc i64 hi 2^63 excluded", fact(0, M63, "i64"), ["f2i-range"]),
+    ("trunc u64 hi 2^64 excluded", fact(0, M64, "u64"), ["f2i-range"]), ("trunc i8 hi 128 excluded", fact(0, 128, "i8"), ["f2i-range"]),
+    ("trunc i8 hi 127.5 included", fact(0, 127.5, "i8"), []), ("trunc u8 lo -1 excluded", fact(-1, 0, "u8"), ["f2i-range"]),
+    ("trunc i16 inside", fact(-32768, 32767, "i16"), []), ("trunc u16 hi 65536 excluded", fact(0, 65536, "u16"), ["f2i-range"]),
+    ("nonan false is red", fact(0, 1, nonan=False), ["f2i-range"]), ("lo > hi is red", fact(5, 1), ["f2i-range"]),
+]
+for name, f, want in cases:
+    check("range fact: %s -> %s" % (name, want or "green"), rng(f) == want, rng(f))
+for name, f in (("nonan missing", {k: v for k, v in fact(0, 1).items() if k != "nonan"}), ("nonan not a boolean", fact(0, 1, nonan="true")),
+                ("a bound in the report", fact(0, 1, bound_lo=-5, bound_hi=5)), ("source flag", fact(0, 1, source="flag")),
+                ("itype outside the table", fact(0, 1, itype="i128")), ("conv outside the table", fact(0, 1, conv="nearest")),
+                ("non-real lo", fact("0", 1)), ("bool lo", fact(True, 1))):
+    check("range fact: %s is malformed, red" % name, rng(f) == ["f2i-report-missing"], rng(f))
+check("range fact: a ranged site with no fact is malformed, red", codes(report("nofact.json", recipe.sandbox_src("a.c"), ranged=[site("conv-scalar")])) == ["f2i-report-missing"])
+check("specified_set trunc i32 is the open interval (-2^31-1, 2^31)", G.specified_set("i32", "trunc") == (-M31 - 1, True, M31, True))
 check("counts that do not add up are red (malformed)", codes(report("cnt.json", SRC, sites=4, rewritten=3)) == ["f2i-report-missing"])
 check("a /1 report is red (malformed)", codes(report("v1.json", SRC, extra={"format": "fnvnx-f2i/1"})) == ["f2i-report-missing"])
 check("a kind that is not one of the five is red (malformed)", codes(report("kk.json", SRC, [site("conv")])) == ["f2i-report-missing"])
-check("a range-proven site with a finding beside it: only the finding is red", codes(report("mix.json", SRC, [site("mdbuiltin")], ranged=[site("conv-scalar", fact=fact(0, 1, -5, 5))])) == ["f2i-mdbuiltin"])
+check("a range-proven site with a finding beside it: only the finding is red", codes(report("mix.json", SRC, [site("mdbuiltin")], ranged=[site("conv-scalar", fact=fact(0, 1))])) == ["f2i-mdbuiltin"])
 bad = os.path.join(TMP, "bad.json")
 open(bad, "w").write("{")
 check("malformed report: red f2i-report-missing", codes(bad) == ["f2i-report-missing"])

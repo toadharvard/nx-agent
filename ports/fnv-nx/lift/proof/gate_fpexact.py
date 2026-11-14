@@ -52,7 +52,7 @@ object-level necessary condition:
       float / vector operand or an FP register clobber) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in rt/fnvl_x87.h, on the
       helpers sse_f2i and fv_i), right after the CFG is built, before early inlining and every optimisation, so inlining a helper into its callers
       cannot hide a site and no transformation adds one. It writes `<unit>.f2i.json` (format fnvnx-f2i/2: unit, helpers, counts sites = rewritten + len(ranged) + helper + len(findings), findings = sorted
-      unrewritten sites {function, file, line, kind: conv-scalar|conv-vector|builtin|mdbuiltin|asm}, ranged = sites left as they are because GCC's range fact proves the operand in range, {..., fact {source gcc-range, lo, hi, bound_lo, bound_hi}}, checked by the gate as reals bound_lo < lo and hi < bound_hi) into the CC stage's /out; the recipe records its path as the `f2i` field of the object's row in objects.json (obj/<unit>.f2i.json).
+      unrewritten sites {function, file, line, kind: conv-scalar|conv-vector|builtin|mdbuiltin|asm}, ranged = sites left as they are because GCC's range fact proves the operand in range, {..., fact {source gcc-range, itype i8..u64, conv trunc|rint|round|floor|ceil, lo, hi, nonan}}: green only with nonan true and [lo, hi] inside the set where the conversion is specified, computed by the gate from itype and conv (specified_set), never from the report) into the CC stage's /out; the recipe records its path as the `f2i` field of the object's row in objects.json (obj/<unit>.f2i.json).
       Rule: every object row has `f2i` naming an existing result file, its `unit` field equals recipe.sandbox_src(unit) (the plugin reports the compiler's
       input as the stage was given it: the one function that composes the path of a unit's source in the sandbox, also used by the stage), and
       `findings` == []; a row without `f2i`, a missing or malformed file, another unit, or any finding is a finding of the object.
@@ -78,6 +78,7 @@ build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, r
 uncertified: the first 50 ids sorted. Exit 0 iff green."""
 import hashlib
 import json
+from fractions import Fraction
 import os
 import re
 import sys
@@ -270,7 +271,7 @@ def _real(x):
 def read_f2i(p):
     """P: the `f2i` field of the object's row (None if the row has none) -> (result dict or None, problem string or None) of the plugin's file.
     Format fnvnx-f2i/2: unit, helpers [names], sites, rewritten, helper (ints), findings [{function,file,line,kind}], ranged [{function,file,line,kind,fact}],
-    optional rewrites [{function,file,line,kind}]; kind in F2I_KINDS; fact = {source "gcc-range", lo, hi, bound_lo, bound_hi} (reals). The counts must add up:
+    optional rewrites [{function,file,line,kind}]; kind in F2I_KINDS; fact = {source "gcc-range", itype, conv, lo, hi, nonan} (no bounds: the gate computes them). The counts must add up:
     sites == rewritten + len(ranged) + helper + len(findings); with `rewrites` present, len(rewrites) == rewritten."""
     if not p:
         return None, "the object's row in objects.json has no f2i (the plugin's result file)"
@@ -293,8 +294,10 @@ def read_f2i(p):
                     raise ValueError("kind %r is not one of %s" % (f["kind"], ", ".join(F2I_KINDS)))
         for f in d["ranged"]:
             fa = f["fact"]
-            if not isinstance(fa, dict) or fa.get("source") != "gcc-range" or not all(_real(fa.get(k)) for k in ("lo", "hi", "bound_lo", "bound_hi")):
-                raise ValueError("a ranged site has no range fact of source gcc-range with real lo, hi, bound_lo, bound_hi")
+            if not isinstance(fa, dict) or set(fa) != {"source", "itype", "conv", "lo", "hi", "nonan"} or fa["source"] != "gcc-range":
+                raise ValueError("a ranged site's fact is not exactly {source gcc-range, itype, conv, lo, hi, nonan}")
+            if fa["itype"] not in ITYPES or fa["conv"] not in CONVS or not _real(fa["lo"]) or not _real(fa["hi"]) or not isinstance(fa["nonan"], bool):
+                raise ValueError("a ranged site's fact has an itype outside %s, a conv outside %s, a non-real lo / hi or a non-boolean nonan" % (", ".join(ITYPES), ", ".join(CONVS)))
         d["unit"]
         if d["sites"] != d["rewritten"] + len(d["ranged"]) + d["helper"] + len(d["findings"]):
             raise ValueError("sites %d != rewritten %d + ranged %d + helper %d + findings %d" % (d["sites"], d["rewritten"], len(d["ranged"]), d["helper"], len(d["findings"])))
@@ -305,10 +308,34 @@ def read_f2i(p):
         return None, "result file %s unreadable or malformed: %s" % (os.path.basename(p), str(e)[:150] or type(e).__name__)
 
 
+ITYPES = ("i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64")
+CONVS = ("trunc", "rint", "round", "floor", "ceil")
+
+
+def specified_set(itype, conv):
+    """-> (lo, lo_open, hi, hi_open) with Fractions: the operands x whose conversion is specified, that is whose result is representable in ITYPE, computed
+    from the conversion alone (never read from a report). With [mn, mx] the integer range of ITYPE:
+      trunc  trunc(x) in [mn, mx]            x in (mn-1, mx+1)
+      floor  floor(x) in [mn, mx]            x in [mn, mx+1)
+      ceil   ceil(x) in [mn, mx]             x in (mn-1, mx]
+      round  round-half-away(x) in [mn, mx]  x in (mn-1/2, mx+1/2)
+      rint   the dynamic rounding mode, so the intersection over all four modes: x in [mn, mx]  (nearest: [mn-1/2, mx+1/2), up: (mn-1, mx], down: [mn, mx+1), zero: (mn-1, mx+1))"""
+    bits = int(itype[1:])
+    mn, mx = (-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if itype[0] == "i" else (0, (1 << bits) - 1)
+    h = Fraction(1, 2)
+    return {"trunc": (mn - 1, True, mx + 1, True), "floor": (mn, False, mx + 1, True), "ceil": (mn - 1, True, mx, False),
+            "round": (mn - h, True, mx + h, True), "rint": (mn, False, mx, False)}[conv]
+
+
 def range_proven(f):
-    """a ranged site is green only if its own fact proves the operand in range, checked here as reals: bound_lo < lo and hi < bound_hi"""
+    """a ranged site is green only if its fact (GCC's range of the operand, known not NaN) lies wholly inside the set where the conversion is specified, which
+    the gate computes from the itype and conv of the fact: nonan true, and lo, hi (exact Fractions of the JSON numbers) inside specified_set"""
     fa = f["fact"]
-    return fa["bound_lo"] < fa["lo"] and fa["hi"] < fa["bound_hi"]
+    if fa["nonan"] is not True:
+        return False
+    lo, lo_open, hi, hi_open = specified_set(fa["itype"], fa["conv"])
+    a, b = Fraction(fa["lo"]), Fraction(fa["hi"])
+    return a <= b and (a > lo if lo_open else a >= lo) and (b < hi if hi_open else b <= hi)
 
 
 def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
@@ -331,7 +358,7 @@ def judge_object_coded(oid, path, asm=False, unit=None, f2i_path=None):
     else:
         f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper, not rewritten" % (f["file"], f["line"], f["function"], f["kind"]))
                 for f in d["findings"]]
-        f2i += [("f2i-range", "%s:%s in %s: %s site whose range fact does not prove the operand in range (%r)" % (f["file"], f["line"], f["function"], f["kind"], f["fact"]))
+        f2i += [("f2i-range", "%s:%s in %s: %s site whose range fact does not prove the operand in the specified range (%r)" % (f["file"], f["line"], f["function"], f["kind"], f["fact"]))
                 for f in d["ranged"] if not range_proven(f)]
         if scan["fcvt"] and d["sites"] == 0:
             f2i.append(("fcvt-no-site", "%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1])))
