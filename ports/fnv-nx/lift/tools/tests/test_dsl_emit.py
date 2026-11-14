@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """f_dsl.emit_form (the C emitted from the proven DSL forms) over every instruction shape of FalloutNV.exe whose mnemonic the forms cover: each shape is
 decoded with zeroed immediate / displacement bytes (plus, for branches, a second copy with a non-zero relative target that lies outside the function),
-emitted as a one-instruction function and compiled (-fsyntax-only, the flags of tools/tests/instest.py (liftgen.resolved_flags)).  Prints `shapes N emitted N compiled N`, and
+emitted as a one-instruction function and compiled by verify/recipe.py as units of a lifted root (guestbuild.py: the pinned compiler, all plugins). Prints `shapes N emitted N compiled N`, and
 `undef-assigned P`: the number of (mnemonic, flag) pairs where a form declares the flag undefined (no assignment is emitted) and the hand handler
-assigns it.  Input: the shape census table shapes.tsv of the exe (exe-derived, first column = shape key; '#' lines ignored: /home/user/l3work/publish-shapes/FalloutNV/shapes.tsv, made by proof/census.py).
-    dsl_emit_test.py [--shapes P] [--jobs 2] [--work DIR] [--pairs]"""
+assigns it.  Inputs (inputs.json): the exe and the facts of fnv-nx-build; the shape census is made here by proof/census.py, the product's step.
+    test_dsl_emit.py [--pairs]"""
 import argparse, multiprocessing as mp, os, re, subprocess, sys, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools', 'tests'))   # instest: the shared harness of tools/tests
@@ -13,7 +13,6 @@ from capstone import x86 as X
 import fnvlift
 from fnvlift import core
 from proof import lift_dsl as f_dsl
-import instest
 
 BASE, STEP = 0x400000, 0x100
 
@@ -72,22 +71,21 @@ def collect(pk):
     return out, bad, undef
 
 
-def compile_tu(arg):
-    k, prel, fs, work = arg
-    p = '%s/tu%d.cpp' % (work, k); open(p, 'w').write(prel + '\n' + ''.join(f[2] for f in fs))
-    r = subprocess.run(['aarch64-linux-gnu-g++'] + [x for x in instest.FLAGS if x != '-c'] + ['-fsyntax-only', p], capture_output=True, text=True)
-    if r.returncode == 0: return len(fs), []
-    names = set(re.findall(r"In function '[^']*L_([0-9a-f]{8})", r.stderr)) or {'%08x' % f[0] for f in fs}
-    return len(fs) - len(names), [(n, [l for l in r.stderr.splitlines() if 'error' in l][:1]) for n in sorted(names)]
-
-
 def main():
+    import tempfile, guestbuild
     ap = argparse.ArgumentParser(); A = ap.add_argument
-    A('--shapes', default='/home/user/l3work/publish-shapes/FalloutNV/shapes.tsv'); A('--jobs', type=int, default=2); A('--work', default='/home/user/l3work/dsl_emit_test'); A('--pairs', action='store_true')
-    a = ap.parse_args(); os.makedirs(a.work, exist_ok=True)
-    out, bad, undef = collect(a.shapes)
+    A('--pairs', action='store_true')
+    a = ap.parse_args()
+    exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']      # the declared inputs of this test (inputs.json)
+    work = tempfile.mkdtemp(); shp = work + '/shapes.tsv'
+    r = subprocess.run([sys.executable, '-I', os.path.join(LIFT, 'proof', 'census.py'), exe, facts, shp], capture_output=True, text=True)      # the census step of the product (proof/census.py)
+    if r.returncode not in (0, 1) or not os.path.exists(shp): sys.exit('census: ' + (r.stdout + r.stderr)[-600:])      # exit 1 = a range of the facts that does not decode to whole instructions (listed in the census header; the census gate's finding, not this test's); the shapes of the other instructions are complete
+    out, bad, undef = collect(shp)
     chunks = [out[i:i + 300] for i in range(0, len(out), 300)]
-    with mp.Pool(a.jobs) as p: res = p.map(compile_tu, [(k, fnvlift.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'rt')), c, a.work) for k, c in enumerate(chunks)])
+    prel = fnvlift.prelude(os.path.join(LIFT, 'rt'))
+    units = {'tu%d.cpp' % k: prel + '\n' + ''.join(f[2] for f in c) for k, c in enumerate(chunks)}
+    try: guestbuild.build(units, 'lifted', {'cxx': ['-O0']}); res = [(len(c), []) for c in chunks]      # every chunk is a unit of a lifted root: compiled by the recipe with the pinned compiler and plugins
+    except RuntimeError as e: res = [(0, [('build', [str(e)[:600]])])]
     ok = sum(r[0] for r in res); fails = [f for r in res for f in r[1]]
     nshapes = len(out) + len(bad)
     print('(%d of them the second, outside-target copy of a branch)' % sum(1 for f in out if f[1].endswith('+')))
@@ -97,6 +95,7 @@ def main():
     pairs = sorted((m, f) for m, fs in undef.items() for f in fs)
     print('undef-assigned %d' % len(pairs))
     if a.pairs: print(' '.join('%s:%s' % p for p in pairs))
+    import shutil; shutil.rmtree(work, ignore_errors=True)
     sys.exit(0 if nshapes == len(out) == ok else 1)
 
 
