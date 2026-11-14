@@ -452,9 +452,9 @@ def main():
 
     # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
     rows, hslots = parse_totality(os.path.join(HOSTABI_DIR, "fnvnx", "hostapi.h"))
-    SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36]
+    SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37]
     mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root))
-    case("header: 29 services of module 11 and 46 slots parsed", len(rows) == 29 and sorted(rows) == SERVED
+    case("header: 30 services of module 11 and 46 slots parsed", len(rows) == 30 and sorted(rows) == SERVED
          and len(hslots) == 46, (len(rows), len(hslots)))
     case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
          and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
