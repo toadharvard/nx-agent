@@ -6,19 +6,26 @@
  },
  "flags": {
   "c": [
-   "-std=c11",
-   "-Wall",
-   "-Werror",
-   "-Werror=switch-enum",
    "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-Wextra",
+   "-Wshadow",
+   "-Wconversion",
+   "-Wno-sign-conversion",
+   "-Werror",
+   "-std=c99",
    "-fPIC"
   ],
-  "cxx": [],
+  "cxx": [
+   "-Werror=attributes",
+   "-fPIC"
+  ],
   "asm": []
  },
  "include": [
   "ports/fnv-nx/lib/sha256/include"
  ],
  "units": "all",
- "link": null
+ "external": []
 }
