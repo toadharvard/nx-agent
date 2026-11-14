@@ -116,6 +116,12 @@ empty body is not accepted for it (the body must be a call of fnvnx_reach_violat
 finding V with the reason. The gate result holds "handler_justified": {a: n, b: n}. The records carry no handler name: a name copied from source text
 would need its own proof, the layout of the object is the proof.
 
+COST. Decoding: one decoder run per section (per function for the image), and a run is fed only the bytes of its ranges, so the decode cost of an
+object is linear in its code size (an earlier version fed the whole object to every run: quadratic in sections). The per-function analyses
+are independent of each other and of the object size; each is a worklist fixed point over the function's own words (liveness: a 32-bit mask per
+word, monotone OR). No object and no function is skipped by size or by -g: the work is the same rule on every object. Measured at eba704601 +
+this change, platform root, 114 objects, warm cache: total 49 s, maximum 8.9 s (com/combridge.gen.cpp, 2.8 MB, 1011 sections).
+
 (I) IMAGE. For a root with a link stage the gate also reads the FINAL ELF (image_check): every STT_FUNC symbol with a size in an executable section of the image
 is a body, so a weak definition that a strong one replaced is not in the image and is not judged, and the archive members the linker pulled are judged as
 they stand. A body is FIXED-FAILURE iff, by the V rules with the root's `errno_accessor` (recipe: the function the libc errno macro calls) transparent, it
@@ -225,8 +231,13 @@ class Obj:
         return next((("sec", s[5], s[1]) for s in self.syms if s[0] == name and 0 < s[5] < 0xFF00 and s[3] != 3), (name, 0))
 
 def decode(data, ranges):
-    """{byte offset in data: info} for every word of the ranges [(start, end)]; info = None for a word LLVM rejects, else
-    {"op", "R", "W", "MEM", "KIND"} as printed by a64access."""
+    """{byte offset in the file: info} for every word of the ranges [(start, end)] (file offsets); info = None for a word LLVM rejects, else
+    {"op", "R", "W", "MEM", "KIND"} as printed by a64access.  Only the bytes from min(start) to max(end) are given to the decoder (the cost
+    of a call is linear in what it decodes, never in the size of the object: one call per section or function must not copy the whole file)."""
+    if ranges:
+        lo, hi = min(r[0] for r in ranges), max(r[1] for r in ranges)
+        if lo or hi < len(data):
+            return {k + lo: x for k, x in decode(data[lo:hi], [(a - lo, b - lo) for a, b in ranges]).items()}
     args = [x for r in ranges for x in map(str, r)]
     if not args:
         return {}
