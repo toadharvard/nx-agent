@@ -36,7 +36,9 @@ def main():
     d = pb.objdump(obj)
     for fn in ('ps2pi', 'ps_pi32', 'ps_pi16', 'ps_pi8', 'ss2si', 'ss_si32'):
         check('%s: the object holds the rule\'s compare and select' % fn, pb.rule_form(d.get(fn, [])), '\n'.join(d.get(fn, []))[:600])
-    check('the 6 functions are all in the report as rewritten', len({f['function'] for f in j['rewrites']}) >= 6, json.dumps(j['rewrites'])[:600])
+    # the pass runs before inlining: the sites sit in the always_inline NEON wrappers sse2neon calls (vcvtnq_s32_f32 ...), and each of them is rewritten
+    check('the target builtins the forms reach are rewritten, none left (kinds: %s)' % sorted({f['kind'] for f in j['rewrites']}),
+          j['rewritten'] >= 1 and not j['findings'] and all(f['kind'] == 'mdbuiltin' or f['kind'].startswith('conv') or f['kind'] == 'builtin' for f in j['rewrites']), json.dumps(j['rewrites'])[:400])
     drv = os.path.join(td, 'values_sse2neon.cpp')
     subprocess.run([sys.executable, '-I', os.path.join(HERE, 'ftoi_values', 'gen_values.py'), 'sse2neon', drv], check=True)
     r2, _, _ = tf.comp(td, 'values_s2n', open(drv).read(), native=True)
