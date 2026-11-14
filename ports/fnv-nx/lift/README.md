@@ -142,6 +142,15 @@ Everything that depends on the machine follows one fixed model, the same at ever
   fnv-nx-build.
 - `cpuid`: the fixed answer of the reference CPU. `rdtsc`: the platform's monotonic timer.
 
+### Undefined outputs: DEF0 and DEFPRIOR (orchestrator, 2026-11-12)
+
+- **DEF0:** a flag output that the pinned Sail model leaves free (the flags of a Form's `undef`, and a flag write whose `when` can be false) is the constant 0 in the emitted code.
+- **DEFPRIOR:** a free non-flag output (a register write whose `when` can be false) keeps its pre-state value: the emitted write is conditional on `when`.
+- **Basis:** refinement of the pinned model only. The model allows any value for a free output, so 0 / the pre-state value is one of its behaviours. Matching a reference CPU is not part of the proof. Certificates per (shape, output) are L3b's.
+- **No third rule:** a free output that neither rule covers is `uncovered` and the check is red. The one emitter is `Form.to_c_inline` (and `to_c`); hand handlers are not covered.
+- **Check:** `lift/gates/def_check.py` reads back the emitted lines of every Form (all decoded shapes of the images); test: `test_def0_defpior_emission` in `lift/gates/tests/test_gate_flags.py`.
+- **Global counts:** see the report of the commit that introduced this section (Forms with free outputs, DEF0 flag outputs, DEFPRIOR outputs, uncovered 0).
+
 ## Faults and exceptions (owner order 2026-11-10)
 
 No trap paths. Whatever the x86 code does on the CPU, the lifted code does:
