@@ -15,9 +15,7 @@
 #include "dshow_int.h"
 
 #define MINIMP3_IMPLEMENTATION
-#if !defined(__aarch64__)
-#define MINIMP3_NO_SIMD   /* x86 hosts: the shim owns the SSE headers; AArch64 (the device) keeps NEON */
-#endif
+#define MINIMP3_NO_SIMD   /* no target FP->int intrinsic in native code: minimp3's scalar path uses C casts, which fnvnx_ftoi rewrites (fpexact) */
 #define MINIMP3_NO_STDIO
 #include "minimp3_ex.h"
 
