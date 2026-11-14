@@ -4,7 +4,7 @@
    "fast_path": "ARMv8 SHA-256 instructions in lib/sha256",
    "id": "PD-LOADER-SHA256-ISA",
    "owner": "L1",
-   "rule": "lib/sha256 selects the ISA body by the declared reference CPU's features (one home)"
+   "rule": "lib/sha256 is native Arm code (Cortex-A57 with the Crypto extension, and the aarch64 host): the x86 reference CPU and cpuid do not apply to it. Its ISA body is selected at compile time by the target's declared Arm feature set, one value per recipe target written once in that target's build flags (for the console target -march=armv8-a+crypto); no runtime detection. The debt closes when the crypto body is selected by that rule."
   },
   {
    "fast_path": "plain ldr/str (and ldp/stp, the vectorizer's free scheduling) for guest memory accesses; the lifter emits every guest load as ldar and every guest store as stlr",
