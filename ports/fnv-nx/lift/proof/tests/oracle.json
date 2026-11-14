@@ -67,6 +67,19 @@
     "ports/fnv-nx/lift/proof/formgate.py"
    ]
   },
+  "test_irdeps.py": {
+   "references": [
+    {
+     "anchor": "## Certificate key K (closure rule)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/irdeps.py",
+    "ports/fnv-nx/lift/proof/model_sail.py"
+   ]
+  },
   "test_model_patches.py": {
    "references": [
     {

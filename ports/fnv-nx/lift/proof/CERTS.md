@@ -30,3 +30,21 @@ Nothing else enters: no run id, no hash of the DSL sources. A DSL edit voids exa
 
 ## Gate rule (formgate.py)
 The gate applies the same key rule to the rows: a row that went stale after it was written is refused. A shape is certified iff a row of the current `dsl_sha` and the pinned `model_sha` with result `proved` and the full obligation list exists.
+
+## Certificate key K (closure rule)
+
+1. Executed set. The isla run of shape S, under the pinned env E (x86.toml, isla pin, SEG/LINEARIZE/sym_constraint source), explores every feasible symbolic path. F(S) is the set of model functions that run calls on any path.
+2. Key. K(S) = sha256 over:
+   - the text of every function in F(S), sorted by name;
+   - every declaration that text names: types, registers, extern vals;
+   - the isla builtins used;
+   - E.
+   Source positions are excluded.
+3. Invariance (by induction over run steps). Each step is a function of the text of the function being executed, the declarations it names and E. So the trace, and with it the verdict, is a function of K(S)'s inputs. An edit to a function outside F(S) cannot change the trace. For such a function to become called, a function in F(S) would have to be edited, and that changes K(S).
+4. Validity. A record is valid iff model_sha == the pinned IR, or recomputing K over the record's model_fns on the pinned IR gives the record's closure_sha. The IR file must hash to the pin. Otherwise the record is REFUSED.
+5. Test obligations:
+   - an edit in an executed function changes K;
+   - an edit in an uncalled function keeps K;
+   - a position-only change keeps K;
+   - a change to E changes K;
+   - an IR that does not match the pin is REFUSED.
