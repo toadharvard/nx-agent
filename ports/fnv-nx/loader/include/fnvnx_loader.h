@@ -14,6 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "fnvnx_sha256.h" /* the one SHA-256 of fnv-nx: lib/sha256 */
 
 #ifdef __cplusplus
 extern "C" {
@@ -119,8 +120,6 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file, uint32_t file
 /* File offset of [rva, rva+size) if it lies in a section's raw data (or in the headers). */
 int fnvnx_pe_rva_to_off(const fnvnx_pe *pe, uint32_t rva, uint32_t size, uint32_t *off);
 int fnvnx_pe_read_rva(const fnvnx_pe *pe, const fnvnx_os *os, uint32_t rva, void *dst, uint32_t size);
-
-void fnvnx_sha256(const void *data, size_t size, uint8_t out[32]);
 
 /* ---- image mapping ---------------------------------------------------------------------------------------- */
 
