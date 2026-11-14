@@ -40,7 +40,9 @@
    "ports/fnv-nx/lift/tests/guest/imptest/lifted",
    "ports/fnv-nx/lift/rt",
    "ports/fnv-nx/rt/guest",
-   "ports/fnv-nx/platform"
+   "ports/fnv-nx/platform",
+   "ports/fnv-nx/loader",
+   "ports/fnv-nx/lib/sha256"
   ],
   "libs": {
    "external": "fnvnx-a64-msvcmodel",
@@ -55,8 +57,12 @@
     "gcc",
     "sysbase"
    ],
-   "startfiles": ["lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crti.o"],
-   "endfiles": ["lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtn.o"]
+   "startfiles": [
+    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crti.o"
+   ],
+   "endfiles": [
+    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtn.o"
+   ]
   }
  },
  "plugins": [
