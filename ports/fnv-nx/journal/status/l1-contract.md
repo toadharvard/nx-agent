@@ -1102,3 +1102,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - gate_order at L2 c5449b0c9: crash 10 → 30 objects; 17939 uncertified over 84 objects (a 11290, b 5542, c 368, d 356, e 329, f 36, g 18). The dominance (CFG reachability) and readonly (SHF_WRITE clear) facts go to w23.
 - Cap correction: active L1 workers are w23, w20, w24, w15 and w12 (5). w22 is held: the assume_violation gate and the paired fpexact run start when a slot frees or L2 w1 lands. L5 confirmed the assume wiring: gen_wire_errno.py is a gen stage over pinned errno headers, its only caller is os/gen/dom_errno.c, and the definition is at platstat.cpp:105.
 - -fstack-reuse=none (orchestrator A, from L2; closes 93 class-d accesses) is queued to w24 after (c)/(d), with three stack numbers before it lands.
+- bootrt include rule: hostabi gets a host variant (header-only); the include rule is unchanged. L4 w6 commits it; L5 is informed.
