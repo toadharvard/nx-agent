@@ -394,6 +394,29 @@ check("findings file is sorted by code", ok and [f["code"] for f in doc["finding
 check("stdout prints at most 20 findings and the summary names the file", r.returncode == 2 and fp in r.stdout and
       r.stdout.count("\n  ") <= 22, r.stdout[-300:])
 
+# lexer table: .glsl and templates
+rc, res = gate(tree({T + "shader/a.glsl": "// An assumption nobody numbered.\nvoid main() {}\n"}))
+check("lexer: a .glsl comment mention with no id is red as uncertified", rc == 2 and res["uncertified"] == [T + "shader/a.glsl:1"], (rc, res))
+rc, res = gate(tree({T + "shader/a.glsl": "// An assumption, %s.\n" % asm(1)}))
+check("lexer: a .glsl comment mention with an id is green", rc == 0 and res["certified"] == 1, (rc, res))
+rc, res = gate(tree({T + "inc/a.h.in": "/* An assumption nobody numbered. */\n"}))
+check("lexer: a .h.in file is lexed as C", rc == 2 and res["uncertified"] == [T + "inc/a.h.in:1"], (rc, res))
+rc, res = gate(tree({T + "inc/a.py.in": "x = 1  # An assumption nobody numbered.\n"}))
+check("lexer: a .py.in file is lexed as python", rc == 2 and res["uncertified"] == [T + "inc/a.py.in:1"], (rc, res))
+rc, res = gate(tree({T + "inc/x.in": "plain\n"}))
+check("lexer: a bare x.in is red (ext-unknown)", rc == 2 and has(list(res["reasons"].values()), "no lexer"), (rc, res))
+rc, res = gate(tree({T + "inc/x.zzz.in": "plain\n"}))
+check("lexer: a .in with an unknown inner extension is red", rc == 2 and has(list(res["reasons"].values()), "no lexer"), (rc, res))
+
+rc, res = gate(tree({T + "render/gl4/x.map": "/* An assumption nobody numbered. */\n{ global: foo; local: *; };\n"}))
+check("lexer: a .map (ld version script) comment mention with no id is red as uncertified", rc == 2 and res["uncertified"] == [T + "render/gl4/x.map:1"], (rc, res))
+rc, res = gate(tree({T + "render/gl4/x.map": "/* An assumption, %s. */\n{ global: foo; local: *; };\n" % asm(1)}))
+check("lexer: a .map comment mention with an id is green", rc == 0 and res["certified"] == 1, (rc, res))
+rc, res = gate(tree({T + "render/gl4/x.map": "{ global: \"assumption\"; local: *; };\n"}))
+check("lexer: a quoted string in a .map is code, not a mention", rc == 0 and res["universe"] == 0, (rc, res))
+rc, res = gate(tree({T + "render/gl4/x.zzz": "plain\n"}))
+check("lexer: an extension with no lexer stays red", rc == 2 and has(list(res["reasons"].values()), "no lexer"), (rc, res))
+
 # PERFDEBT
 PDF = T + "verify/PERFDEBT.json"
 rc, res = gate(tree())
