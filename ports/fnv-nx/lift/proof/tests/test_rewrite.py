@@ -8,6 +8,9 @@ import z3
 from proof import rewrite, model_sail
 
 
+ROWS = {r.split('\t')[0]: r.rstrip('\n').split('\t')[2:] for r in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'smtlib_bv_rows.tsv')) if r[0] != '#' and r.strip()}     # parameters: SMT-LIB FixedSizeBitVectors (tests/smtlib_bv_rows.tsv)
+
+
 def equal(a, b):
     s = z3.Solver()
     s.add(a != b)
@@ -17,12 +20,12 @@ def equal(a, b):
 class Rewrites(unittest.TestCase):
     def test_pow2_mul(self):
         x = z3.BitVec('x', 16)
-        for k in (1, 3, 8, 15):
+        for k in map(int, ROWS['pow2_mul']):
             t = x * (1 << k)
             r = rewrite.pow2_mul(t)
             self.assertNotEqual(r.decl().kind(), z3.Z3_OP_BMUL)
             self.assertTrue(equal(t, r))
-        self.assertEqual(rewrite.pow2_mul(x * 3).decl().kind(), z3.Z3_OP_BMUL)
+        self.assertEqual(rewrite.pow2_mul(x * int(ROWS['pow2_mul_not'][0])).decl().kind(), z3.Z3_OP_BMUL)
 
     def test_urem_def(self):
         a, b = z3.BitVec('a', 8), z3.BitVec('b', 8)
@@ -41,12 +44,12 @@ class Rewrites(unittest.TestCase):
 
     def test_zext_add(self):
         e = z3.BitVec('e', 8)
-        t = z3.ZeroExt(16, z3.ZeroExt(8, e) + 5)
+        t = z3.ZeroExt(16, z3.ZeroExt(8, e) + int(ROWS['zext_add'][0]))
         pairs = model_sail.zext_add_pairs([t])
         self.assertEqual(len(pairs), 1)
         (old, new), = pairs.values()
         self.assertTrue(equal(old, new))
-        wrap = z3.ZeroExt(8, z3.ZeroExt(8, e) + 0xFFFF)      # constant too large: the sum can wrap, no rewrite
+        wrap = z3.ZeroExt(8, z3.ZeroExt(8, e) + int(ROWS['zext_add'][1]))      # constant too large: the sum can wrap, no rewrite
         self.assertEqual(model_sail.zext_add_pairs([wrap]), {})
 
 

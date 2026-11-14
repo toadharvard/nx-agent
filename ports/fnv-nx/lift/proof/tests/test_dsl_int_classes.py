@@ -57,11 +57,10 @@ r, t = emit('65678b00')                     # mov eax, gs:[bx+si]
 check('gs + 16-bit addressing: both', 'FNVL_GS_BASE()' in t)
 
 # ---- 16-bit addressing: z3 evaluation of the effective address against base+index+disp mod 2^16
+ROWS = [r.rstrip('\n').split('\t') for r in open(os.path.join(HERE, 'sdm_int_rows.tsv')) if r[0] != '#' and r.strip()]       # expected values: SDM, tests/sdm_int_rows.tsv
+REG = {'bx': 0, 'bp': 1, 'si': 3, 'di': 4}           # index into (b, c, d, s, i) below
 rng = random.Random(7)
-for hx, f in (('678b00', lambda b, c, d, s, i: b + s), ('678b01', lambda b, c, d, s, i: b + i), ('678b02', lambda b, c, d, s, i: c + s), ('678b03', lambda b, c, d, s, i: c + i),
-              ('678b04', lambda b, c, d, s, i: s), ('678b05', lambda b, c, d, s, i: i), ('678b07', lambda b, c, d, s, i: b),
-              ('678b4010', lambda b, c, d, s, i: b + s + 0x10), ('678b4610', lambda b, c, d, s, i: c + 0x10), ('678b40f0', lambda b, c, d, s, i: b + s - 0x10),
-              ('678b803412', lambda b, c, d, s, i: b + s + 0x1234), ('678b80f0ff', lambda b, c, d, s, i: b + s - 0x10)):
+for _, hx, _cite, terms, disp in (r for r in ROWS if r[0] == 'ea16'):
     F = forms.build(ins(hx), A0)
     ea = F.regs[0][1]                                    # eax <- load(ea, 32): the address is the first operand of the load node
     ld = ea
@@ -72,7 +71,8 @@ for hx, f in (('678b00', lambda b, c, d, s, i: b + s), ('678b01', lambda b, c, d
         b, c, d, s, i = (rng.getrandbits(32) for _ in range(5))
         env = {'ebx': (b, 32), 'ebp': (c, 32), 'edx': (d, 32), 'esi': (s, 32), 'edi': (i, 32)}
         got = ev(to_smt(ld.a[0]), env)
-        want = f(b & 0xffff, c & 0xffff, d, s & 0xffff, i & 0xffff) & 0xffff
+        val = {'bx': b, 'bp': c, 'si': s, 'di': i}
+        want = (sum(val[t] & 0xffff for t in terms.split('+')) + int(disp)) & 0xffff
         ok &= got == want
     check('67 %s: address = sum of 16-bit halves mod 2^16' % hx, ok)
 
@@ -100,6 +100,10 @@ F, P, E = run('59', 0x1000, [(0x1000, 0xdeadbeef, 4)])             # negative: p
 check('59 pop ecx still esp+4 and loads a dword', E(P['regs']['esp']).as_long() == 0x1004 and E(P['regs']['ecx']).as_long() == 0xdeadbeef)
 F, P, E = run('51', 0x1000, [])
 check('51 push ecx still esp-4', E(P['regs']['esp']).as_long() == 0x0ffc)
+
+for _, hx, _cite, delta in (r for r in ROWS if r[0] == 'stack'):         # the esp delta of every row of the SDM table
+    F, P, E = run(hx, 0x1000, [(0x1000, 0xdeadbeef, 4)])
+    check('%s: esp delta %s (SDM)' % (hx, delta), E(P['regs']['esp']).as_long() == 0x1000 + int(delta))
 
 # ---- negative: an unknown pre-state variable is still an emitter error
 cx = core.Ctx(A0, 1, {}, {}, [])
