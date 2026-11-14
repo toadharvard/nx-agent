@@ -1046,3 +1046,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 
 - 23:56 L5 correction: sched_yield and sched_getcpu are weak DEFINITIONS in libsysbase, not weak-undefined. Over the pinned archives there are 44 weak-undefined names; rt/guest defines 35. Open: 3 __syscall_* (L5 w14 defines them), _ZGTtnaj (fixed), and zoneinfo_dir_override (only if tzdb.o is linked).
 - Ruling: the stub gate judges every body of the final linked image, runtime archive members included. A fixed-failure archive fallback is red unless it is certified unreachable or is a cited declared-machine answer. A strong override removes it. Owner w20, objstub commit 4.
+
+- 00:00 fpexact explained.
+  - gate_fpexact.py:290 (b8946063a) exempts every "builtin" finding, and the plugin labels BUILT_IN_MD target builtins "builtin". So vcvtq_s32_f32 (through minimp3_ex.h NEON) was never judged.
+  - The reader fix w22f2 88c960b5d was forwarded to the orchestrator: RED, 969.5 s, fpexact 232/232 because of the defect.
+  - The rule fix w22f3 9894b5988: the kind is "mdbuiltin" iff DECL_BUILT_IN_CLASS == BUILT_IN_MD, and it is red. It is with L2 for review and a declared-env test_ftoi.py run.
+  - Open class question to L2: is the "builtin" exemption closed for conversions with an unspecified out-of-range result (lrint/lround, IFN_VEC_CONVERT)? Proposed: exempt only conversions that are fully specified, otherwise MSVC semantics or red.
+- w24 ec006784: PERFDEBT entry PD-LOADER-SHA256-ISA (owner L1); test_gate_assumptions 0 fails. Still waiting on UNMAP_FIXED.
