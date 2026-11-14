@@ -543,3 +543,15 @@ Paused: w3b, w4, farm; no other work.
     - Guest and host: 0 STT_TLS, 0 TLS relocations, 0 __tls_get_addr. reach_census goes red on TLS (red path tested).
     - Guest 8 objects in 23.5 s; host 8 objects in 7.0 s.
     - Sent to L6A for the gl4 merge.
+- 23:44Z w1b found that the single-pass precondition fails. dk_epilogue (:893) runs from main's RET in the instruction phase. It reads the output list, which can still miss outputs written only in a subroutine after main's RET.
+    - This is a latent defect in today's code too.
+    - Decision, as a rule: everything that depends on the complete register set is emitted in the definitions phase.
+        - main's RET emits only `dk_epilogue();`.
+        - The declarations and the body of dk_epilogue go into globals at finalize.
+        - compute_locations runs once there.
+        - The bytecode profile and the front end's pre-parse are deleted.
+    - Checks:
+        - a static check that no instruction-phase emitter reads the locations;
+        - a harness on the real translator with a vs_3_0 output written in a subroutine;
+        - sm_link over the shader set.
+    - w1b is doing it.
