@@ -304,7 +304,8 @@ code that reaches the hive, and the implementation creates no key by itself (the
 ```text
 iat - the value the loader writes in every import slot of an image (L1 CONTRACT, loader contract with L3 and L5).
 
-    iat.py --facts facts.json --bridge bridge.tsv [--module name.dll=exports.tsv ...] --out iat.tsv
+    iat.py --facts facts.json --bridge bridge.tsv --module name.dll=exports.tsv ... --module-imports name.dll=imports.tsv ... --out iat.tsv
+    iat.py --check ...   tool mode: no --module needed, never writes keys.tsv, import_keys.c or iat_data.tsv
 
 Image code pointers are not rewritten and `call [slot]` is an ordinary indirect call, so a slot must hold a 32-bit
 value the dispatcher of the lifted code maps to an entry.  Rule, total over the image's import directory:
@@ -322,6 +323,10 @@ Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the fir
 Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
+
+A stage that writes a product file (keys.tsv, import_keys.c, iat_data.tsv) passes --module and --module-imports for every
+image of modules.tsv; without --module it is a stage error, because the import set of every image is an input.  Only
+`--check` runs without them, and then no product file is written.
 
 A slot without a provider, an export the module does not have, a dll that is both a module and a bridge dll: the
 stage fails and lists them (gate `iat`: universe = slots, certified = slots with a value).  Output rows:

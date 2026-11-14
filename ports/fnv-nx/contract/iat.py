@@ -283,7 +283,13 @@ def main():
     ap.add_argument('--c-out', help='import_keys.c for loader/src/importkey.c')
     ap.add_argument('--data-out', help='iat_data.tsv: the data rows of the table (build fact of the loader start rule S4)')
     ap.add_argument('--module-imports', action='append', default=[], help='name.dll=imports.tsv (modules.py): that module\'s own import slots; one per --module')
+    ap.add_argument('--check', action='store_true', help='tool mode: no --module needed, and no product file (keys.tsv, import_keys.c, iat_data.tsv) is written')
     a = ap.parse_args()
+    products = [f for f, v in (('--keys-out', a.keys_out), ('--c-out', a.c_out), ('--data-out', a.data_out)) if v]
+    if a.check and products:
+        sys.exit('iat: --check never writes a product file (%s)' % ', '.join(products))
+    if not a.check and not a.module:
+        sys.exit('iat: a stage without --module and --module-imports for every image of modules.tsv is an error (the import set of every image is an input); --check is the tool mode')
     try:
         brows, table_id = bridge_rows(a.bridge)
         bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
@@ -295,7 +301,9 @@ def main():
         for m in a.module_imports:
             name, path = m.split('=', 1)
             mimports[norm_dll(name)] = read_imports_tsv(path)
-        if set(mimports) != set(raw) or len(a.module_imports) != len(mimports):
+        if not a.check and not a.module_imports:
+            raise ValueError('--module-imports is missing: one per --module')
+        if (not a.check or a.module_imports) and (set(mimports) != set(raw) or len(a.module_imports) != len(mimports)):
             raise ValueError('--module-imports must name exactly the modules of --module (each once): the rule over every image needs every import slot; have %s, want %s'
                              % (sorted(mimports), sorted(raw)))
         exe = [(d, n) for d, n in store.load(a.facts, 'facts')['imports'].values()]
