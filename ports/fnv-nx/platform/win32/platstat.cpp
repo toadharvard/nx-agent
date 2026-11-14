@@ -101,6 +101,15 @@ extern "C" void fnvnx_reach_violation(uint32_t fact_id)
     os_exit_process((int)(FNVNX_REACH_EXIT | fact_id));
 }
 
+/* The one assertion of an OWNER assumption (ASM-001..009, reach.h): the line carries the id and the value, the exit code the id and the low 16 bits. */
+extern "C" void fnvnx_assume_violation(uint32_t asm_id, uint64_t value)
+{
+    char l[64];
+    snprintf(l, sizeof l, "assume violation ASM-%03u value %llu", (unsigned)asm_id, (unsigned long long)value);
+    emit(l);
+    os_exit_process((int)(FNVNX_ASSUME_EXIT | (asm_id & 0xFFu) << 16 | (uint32_t)(value & 0xFFFFu)));
+}
+
 extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail)
 {
     if (!fnvnx_plat_on || cls < 0 || cls >= FNVNX_NOTE_NCLASS || !name)

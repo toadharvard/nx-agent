@@ -548,8 +548,8 @@ for what in ("empty",):
 GC = ROOT + "/gcache"
 repo = TR.make_repo("os-toy", files={"toy/constants.tsv": CONST})
 rc, g, secs, txt, st = gate(repo, ROOT + "/g1", GC)
-# the toy's functions: f_a, f_b, f_c, os_svc, plus the functions of the product's crt0 the toy links (toolchain/guest/crt0.s, %function symbols)
-NTOY = 4 + len(re.findall(r"^\s*\.type\s+\S+,\s*%function", open(os.path.join(os.path.dirname(HERE), "..", "toolchain", "guest", "crt0.s")).read(), re.M))
+# the toy's functions: f_a, f_b, f_c, os_svc, plus the functions of the product's crt0 the toy links (rt/guest/crt0.s, %function symbols)
+NTOY = 4 + len(re.findall(r"^\s*\.type\s+\S+,\s*%function", open(os.path.join(os.path.dirname(HERE), "..", "rt", "guest", "crt0.s")).read(), re.M))
 check("gate on the toy root (os_layer, constants row, terminators from its own units): green NTOY/NTOY, accepted by verdict",
       rc == 0 and g["universe"] == NTOY == g["certified"] and st[0] == "green", (g, txt))
 print("INFO toy gate cold (with build) %.1f s" % secs)
@@ -598,6 +598,16 @@ print("INFO ILP32 toy gate warm %.1f s" % secs)
 r32r = TR.make_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
 rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
 check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
+
+# a failing unit is a red finding of that unit, never a gate crash (exit 2 from an exception)
+rb = TR.make_repo("os-buildred", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": "int f_c(int x) { return x +; }\n"})
+rc, g, _, txt, st = gate(rb, ROOT + "/gbr", GC)
+check("a build-red unit: red finding build-red naming the unit, not an input error", rc == 2 and g["status"] == "red" and "build-red" in g["detail"]
+      and "input error" not in g["detail"] and any(u.endswith("c.c") for u in g["uncertified"]), (g, txt))
+bad_ii = tf + ".bad.ii"
+open(bad_ii, "w").write("int f(void) { return +; }\n")
+tc = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-bad", bad_ii, "c")], {"c": []}, tempfile.mkdtemp(prefix="objstub-tc-"), 1)
+check("a unit the terminator plugin cannot process: a failure of that unit in the result (no exception)", tc[0] == [] and len(tc[2]) == 1 and tc[2][0][0] == "pk-bad", tc)
 
 # a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
 xt = tf + ".x86"

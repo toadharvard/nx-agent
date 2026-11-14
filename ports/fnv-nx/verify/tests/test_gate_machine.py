@@ -43,7 +43,7 @@ def toy_repo(tag, sites, declared=DECL, seed=None, unit="seed.c", writers=None, 
     commit, thash = TR.publish("rg-" + tag, lambda d: open(d + "/regsites.tsv", "w").write(sites))
     ex = {"name": "manifest", "repo": "fnv-nx-build", "ref": "rg-" + tag, "commit": commit, "tree_sha256": thash, "at": "/ext/manifest"}
     rec = dict(TR.RECIPE, external=[ex])
-    decl = {"format": "fnvnx-registry-in/1", "external": "manifest", "sites": "regsites.tsv", "declared": "declared.tsv", "seed": "seed.inc",
+    decl = {"format": "fnvnx-registry-in/1", "sites": {"external": "manifest", "path": "regsites.tsv"}, "declared": "declared.tsv", "seed": "seed.inc",
             "seed_unit": unit}
     decl.update(decl_extra or {})
     files = {"toy/registry.in.json": json.dumps(decl), "toy/declared.tsv": declared,
@@ -59,8 +59,17 @@ TR.git(noroot, "commit", "-q", "-am", "no product root")
 rc, g, txt = run(noroot, "noroot")
 check("no product root: universe 0, green", rc == 0 and g["universe"] == 0 and g["status"] == "green", (g, txt))
 
+# class registry-reader (a fact of the build's symbol table): a root with no registry.in.json that neither defines nor references a registry API is
+# outside the class (0 items); one that references or defines one enters it and is the one red item.
 rc, g, txt = run(TR.make_repo("rg-empty"), "none")
-check("product root without registry.in.json: red", rc == 2 and g["status"] == "red" and g["universe"] == 1 and "registry.in.json" in g["detail"], (g, txt))
+check("non-member: product root with no registry API and no registry.in.json is outside the class, 0 items", rc == 0 and g["status"] == "green" and g["universe"] == 0, (g, txt))
+rc, g, txt = run(TR.make_repo("rg-enter", files={"toy/regapi.c": "int RegSetValueExA(void) { return 1; }\n"}), "enter")
+check("a root that enters the class (defines RegSetValueExA) without registry.in.json: the one red item",
+      rc == 2 and g["status"] == "red" and g["universe"] == 1 and "registry.in.json" in g["detail"] and "RegSetValueExA" in g["detail"], (g, txt))
+NOLINK = {"format": "fnvnx-recipe/1", "compiler": TR.RECIPE["compiler"], "flags": TR.RECIPE["flags"], "include": [TR.ROOT + "/inc"], "units": "all", "link": None}
+rc, g, txt = run(TR.make_repo("rg-ref", rec=NOLINK, files={"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None, "toy/constants.tsv": None,
+                                                         "toy/regref.c": "int RegQueryValueExW(void);\nint use_it(void) { return RegQueryValueExW(); }\n"}), "ref")
+check("a root that only references RegQueryValueExW (undefined) is a member too", rc == 2 and g["universe"] == 1 and "RegQueryValueExW" in g["detail"], (g, txt))
 
 rc, g, txt = run(toy_repo("ok", SH + READ), "ok")
 check("green: declared row read, seed equal, only the seed unit writes", rc == 0 and g["status"] == "green" and g["universe"] == 3 == g["certified"], (g, txt))
@@ -77,7 +86,7 @@ check("writer outside the seed unit: red", rc == 2 and g["status"] == "red" and 
 rc, g, txt = run(toy_repo("unread", SH, seed=""), "unread")
 check("declared row with no read site: red", rc == 2 and g["status"] == "red" and "no-read-site" in open(TR.BASE + "/o-unread/machine.ids").read(), (g, txt))
 
-for tag, kw in (("badkeys", {"decl_extra": {"bogus": 1}}), ("badext", {"decl_extra": {"external": "nonexistent"}}), ("badpath", {"decl_extra": {"sites": "nope.tsv"}})):
+for tag, kw in (("badkeys", {"decl_extra": {"bogus": 1}}), ("badext", {"decl_extra": {"sites": {"external": "nonexistent", "path": "regsites.tsv"}}}), ("badpath", {"decl_extra": {"sites": {"external": "manifest", "path": "nope.tsv"}}})):
     rc, g, txt = run(toy_repo(tag, SH + READ, **kw), tag)
     check("bad registry.in.json (%s) is red with the reason" % tag, rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 

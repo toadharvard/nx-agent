@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the msvcrt lookup table from msvcrt_names.tsv (name TAB symbol TAB func|data).
+"""Generate the msvcrt lookup table from msvcrt_names.tsv (name TAB symbol TAB func|data, no header line).
 
   gen_msvcrt_table.py msvcrt_names.tsv out.cpp      (run with python3 -I)
 
@@ -17,9 +17,7 @@ KINDS = ("func", "data")
 def read(text):
     rows, seen = [], set()
     lines = text.split("\n")
-    if lines[0] != "name\tsymbol\tkind":
-        raise ValueError("bad header")
-    for i, ln in enumerate(lines[1:], 2):
+    for i, ln in enumerate(lines, 1):
         if not ln:
             continue
         f = ln.split("\t")
