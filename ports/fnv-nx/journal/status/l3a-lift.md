@@ -1134,3 +1134,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:47 base3 428d94d9e: cpufeat in, all roots valid.
   - L3b v3 is 54/54. L3b needs one L3a commit, so w8 builds the next base3 head: base3 + w7 simd 9c97f84b + w12 paths bf89c7b36. Form.sha must be unchanged over 4290 SIMD and 18,649 integer keys.
   - The toolchain is still cand2 (720fe5403), waiting on the L1 cand3 head.
+- 22:51 base3 d7c7a822f: w7 simd 9c97f84bc + w12 paths bf89c7b36 + cpufeat c02c82812d49 (/2 table).
+  - Regression found and fixed: w7's line sent segment mov/push/pop and CRn/DRn moves to h_default (#UD). h_segshapes now handles them by the f_sys rows.
+  - Rule: h_default emits #UD only for a decided #UD (ud-class by f_cpufeat, or an undefined encoding); any other shape is a lift error. The census runs over the merged FACTS.
+  - rcptab.c is reverted to its certified bytes (d2a3920e…).
+  - The Form.sha check against 99b0218fd is pending (w13's harness), and gates L3b's merge.
