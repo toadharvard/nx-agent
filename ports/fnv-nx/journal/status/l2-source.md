@@ -200,3 +200,4 @@ After the first frame:
   - Compare: GCC's layout records (patched cc1plus) against MSVC's CodeView from the pristine /Z7 objects, for every class with an empty base subobject at any depth, by rule.
   - Cross-check against w7's full BCD set.
   - Numbers to report: selected, checked, mismatches (target 0), with commits.
+- 2026-11-15 00:57 L3a w7: RTTI BCD facts delivered to w3 (fnv-nx-build l3a-lift/rtti-bcd c11deaf35, tree fa3a313f…): 3,269 COLs, 2,683 classes, 18,630 BCDs, 15 virtual-base BCDs, 0 malformed.
