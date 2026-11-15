@@ -131,7 +131,8 @@ class Citations(unittest.TestCase):
         with open(os.path.join(os.path.dirname(HERE), 'x87spec.py'), encoding='utf-8') as fh: src = fh.read()
         want = set('SDM %s:%s' % k for k in re.findall(r'SDM (1|2A|2B|2C|2D|3A):(T\d+-\d+|\d+(?:\.\d+)*|[A-Za-z][A-Za-z0-9]*)', src))
         self.assertEqual(want, set(r[0] for r in tab))
-        self.assertEqual([r for r in tab if '?' in r[1] + r[2]], [])
+        self.assertEqual([r for r in tab if not r[1].isdigit()], [])                              # the key is the PDF page index
+        self.assertEqual([r for r in tab if r[2] and not r[2].startswith('Vol. ')], [])            # a printed page is read text or empty
 def snap(o, nd, n=2):
     """(TOP, FSW, ST(0..n-1) patterns) of the spec result with the nondeterministic variables set: nd = [(var, value)]"""
     s = o.s
@@ -198,5 +199,31 @@ class Constants(unittest.TestCase):
             half = Fraction(2) ** (e - 53)                                                                        # half the spacing of the 53-bit grid
             k = v / half; dist = abs(k - round(k)) * half
             self.assertGreater(dist, Fraction(1, 10 ** 100), name)
+class DslView(unittest.TestCase):
+    """the L3a DSL names and widths (fnvlift/dsl.py XW) and fault kinds (dsl.FAULTS 12..18, Wine 9.0 get_fpu_code order IE/SF, DE, ZE, OE, UE, PE)"""
+    def test_widths(self):
+        d = X.to_dsl(state([1.5, 2.0]))
+        for k, w in X.DSL_WIDTH.items(): self.assertEqual(d[k].size(), w, k)
+        self.assertEqual(sorted(d), sorted(X.DSL_WIDTH))
+    def test_roundtrip(self):
+        s = state([1.5, -2.0, 0.0]); d = X.to_dsl(s); s2 = X.from_dsl(d)
+        for f in X.St.FIELDS:
+            if f != 'R': self.assertEqual(val(getattr(s, f)), val(getattr(s2, f)), f)
+        for i in range(8): self.assertEqual(val(z3.Select(s.R, K(i, 3))), val(z3.Select(s2.R, K(i, 3))), i)
+        self.assertTrue(val(X.dsl_pre(d)))
+        self.assertEqual(val(d['fsw'] & K(7 << 11, 16)), 0)                                      # fsw carries no TOP
+        self.assertEqual(val(d['ftop']), 5)
+    def test_pre_rejects_non_binary64(self):
+        d = X.to_dsl(state([1.0])); d['fr%d' % 7] = K(0x3FFF8000000000000001, 80)                  # 1 + 2^-63: not a binary64 value, register 7 is ST(0)
+        self.assertFalse(val(X.dsl_pre(d)))
+        d['ftag'] = d['ftag'] | K(3 << 14, 16)                                                      # an empty register is unconstrained
+        self.assertTrue(val(X.dsl_pre(d)))
+    def test_fault_kinds(self):
+        self.assertEqual((X.FLT_IE, X.FLT_DE, X.FLT_ZE, X.FLT_OE, X.FLT_UE, X.FLT_PE, X.FLT_SF), (12, 13, 14, 15, 16, 17, 18))
+        fdiv_st0 = ('d8', 'reg', 6, None)                                                            # FDIV ST(0), ST(i)
+        self.assertEqual(val(X.fault_kind(run(fdiv_st0, state([1.0, 0.0], fcw=0x037B), i=1))), X.FLT_ZE)    # 1/0, ZE unmasked (SDM 1:8.5.3)
+        self.assertEqual(val(X.fault_kind(run(fdiv_st0, state([1.0, 0.0], fcw=0x037F), i=1))), 0)           # masked
+        self.assertEqual(val(X.fault_kind(run(('d8', 'reg', 0, None), state([], fcw=0x037E), i=1))), X.FLT_SF)   # FADD on an empty stack: IE with SF
+        self.assertEqual(val(X.fault_kind(run(fdiv_st0, state([0.0, 0.0], fcw=0x037A), i=1))), X.FLT_IE)       # 0/0: IE wins over ZE (Wine order), a pure IE
 if __name__ == '__main__':
     unittest.main()

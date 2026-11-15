@@ -167,9 +167,12 @@ class St:
     here the register format), tag (SDM 1:8.1.7), fsw, fcw, and the pointers of SDM 1:8.1.8, 8.1.9."""
     FIELDS = ("R", "tag", "fsw", "fcw", "fip", "fcs", "fdp", "fds", "fop")
 
+    TRANSIENT = ("sfr",)      # not architectural: 'this instruction raised a stack fault' (SF newly reported); finish() moves it to Out.sf_raised
+
     def __init__(self, **kw):
         for f in self.FIELDS:
             setattr(self, f, kw[f])
+        self.sfr = kw.get("sfr", z3.BoolVal(False))
 
     @staticmethod
     def fresh(name):
@@ -180,13 +183,13 @@ class St:
                   fds=z3.BitVec(name + ".fds", 16), fop=z3.BitVec(name + ".fop", 11))
 
     def copy(self, **kw):
-        d = {f: getattr(self, f) for f in self.FIELDS}
+        d = {f: getattr(self, f) for f in self.FIELDS + self.TRANSIENT}
         d.update(kw)
         return St(**d)
 
     @staticmethod
     def ite(c, a, b):
-        return St(**{f: If(c, getattr(a, f), getattr(b, f)) for f in St.FIELDS})
+        return St(**{f: If(c, getattr(a, f), getattr(b, f)) for f in St.FIELDS + St.TRANSIENT})
 
     @staticmethod
     def after_finit(r):
@@ -394,6 +397,9 @@ class Out:
         self.undef = undef if undef is not None else K(0, 16)
         self.mem_undef = mem_undef
         self.trap = z3.BoolVal(False)
+        self.raised = K(0, 6)           # the exception flags this instruction raised (IE DE ZE OE UE PE), set by finish()
+        self.sf_raised = z3.BoolVal(False)   # it raised a stack fault (the SF flag together with IE)
+        self.fcw_in = None              # the control word it ran under
         self.nd = []                    # free variables of the SDM's implementation-dependent choices (module docstring 'Nondeterminism')
         self.nd_pre = z3.BoolVal(True)  # the admissible range of those variables
 
@@ -424,7 +430,9 @@ def finish(s_in, s_out, newflags, mem=None, extra_pre=None, ou_pre=False, abort_
         pre = And(pre, Not(And(Extract(OE, OE, newflags) == K(1, 1), Not(masked(fcw, OM)))),
                   Not(And(Extract(UE, UE, newflags) == K(1, 1), Not(masked(fcw, UM)))))
     wr = Not(abort) if mem is not None else z3.BoolVal(False)
-    return Out(s_fin, mem=mem, wr=wr, pre=pre)
+    o = Out(s_fin.copy(sfr=z3.BoolVal(False)), mem=mem, wr=wr, pre=pre)
+    o.raised, o.sf_raised, o.fcw_in = newflags, s_out.sfr, fcw
+    return o
 
 
 def cc_copy(src, dst):
@@ -452,7 +460,7 @@ def stack_fault_state(s, overflow):
     the flag vector); C1 = 1 for overflow, 0 for underflow (SDM 1:8.5.1.1 and 1:8.1.3.2)."""
     f = set_sf(s.fsw)
     f = cc(f, c1=overflow if isinstance(overflow, z3.BoolRef) else z3.BoolVal(overflow))
-    return s.copy(fsw=f)
+    return s.copy(fsw=f, sfr=z3.BoolVal(True))
 
 
 # --- the fcom/fcomi condition codes -----------------------------------------------------------
@@ -1841,6 +1849,71 @@ REGISTRY = _mk()
 # goes to the orchestrator.
 CLEARED_UD = {("d9", "reg", 3, None): "D9 D8+i (FSTP1; no SDM page)",
               ("df", "reg", 0, None): "DF C0+i (FFREEP; not in the SDM)"}
+
+
+# --------------------------------------------------------------------------------------------
+# Part (iii).  The L3a DSL view of the state and of the faults (fnvlift/dsl.py XW, FAULTS; L3a int3 d935ecda), so that a Form is checked
+# against the spec without a renaming layer.
+#   DSL name        width   spec state
+#   fr0..fr7        80      physical register i: to_m80(R[i]) (exact widening of the register format); from_m80 in the other direction
+#   ftop            3       TOP, bits 11..13 of the status word
+#   ftag            16      the tag word, 2 bits per PHYSICAL register (00 valid 01 zero 10 special 11 empty)
+#   fcw             16      the control word
+#   fsw             16      the status word WITHOUT TOP (bits 11..13 zero): the exception flags, SF, ES, C0..C3 (C1 included), B
+#   fip fdp         32      FIP, FDP
+#   fop             11      FOP
+#   fcs fds         16      FCS, FDS
+# The register values are binary64 patterns here (OWNER 8: m80 loads round to binary64, stores widen exactly); an 80-bit DSL register is related
+# to the spec register only where it is a binary64 value: dsl_pre.
+# --------------------------------------------------------------------------------------------
+DSL_WIDTH = {**{"fr%d" % i: 80 for i in range(8)}, "ftop": 3, "ftag": 16, "fcw": 16, "fsw": 16, "fip": 32, "fdp": 32, "fop": 11,
+             "fcs": 16, "fds": 16}
+TOP_FIELD_MASK = 7 << TOP_LO
+
+
+def from_dsl(d):
+    """St from the DSL pre-state d (dict by the names above).  Physical register i holds from_m80(fr<i>)."""
+    r = z3.K(z3.BitVecSort(3), K(0, 64))
+    for i in range(8):
+        r = z3.Store(r, K(i, 3), from_m80(d["fr%d" % i]))
+    fsw = (d["fsw"] & K(~TOP_FIELD_MASK & 0xFFFF, 16)) | (ZeroExt(13, d["ftop"]) << K(TOP_LO, 16))
+    return St(R=r, tag=d["ftag"], fsw=fsw, fcw=d["fcw"], fip=d["fip"], fcs=d["fcs"], fdp=d["fdp"], fds=d["fds"], fop=d["fop"])
+
+
+def to_dsl(s):
+    """The DSL post-state of St s: dict by the names above."""
+    d = {"fr%d" % i: to_m80(z3.Select(s.R, K(i, 3))) for i in range(8)}
+    d.update(ftop=top(s), ftag=s.tag, fcw=s.fcw, fsw=s.fsw & K(~TOP_FIELD_MASK & 0xFFFF, 16), fip=s.fip, fdp=s.fdp, fop=s.fop,
+             fcs=s.fcs, fds=s.fds)
+    return d
+
+
+def dsl_pre(d):
+    """Bool: the DSL pre-state is one the spec relates to: every non-empty register is a supported m80 encoding (SDM 1:8.2.2) that is a binary64
+    value (to_m80(from_m80(fr)) == fr; an empty register keeps whatever bits it holds and is not constrained), and fsw has no TOP bits."""
+    c = Extract(TOP_HI, TOP_LO, d["fsw"]) == K(0, 3)
+    for i in range(8):
+        reg = d["fr%d" % i]
+        empty = Extract(2 * i + 1, 2 * i, d["ftag"]) == K(TAG_EMPTY, 2)
+        c = And(c, Or(empty, And(supported_m80(reg), to_m80(from_m80(reg)) == reg)))
+    return c
+
+
+# DSL fault kinds (fnvlift/dsl.py FAULTS 12..18): one kind per NTSTATUS, in the order of Wine 9.0 get_fpu_code (dlls/ntdll/unix/signal_i386.c):
+# IE (with SF: STACK_CHECK), then DE, ZE, OE, UE, PE; a fault is raised for the first UNMASKED one.
+FLT_IE, FLT_DE, FLT_ZE, FLT_OE, FLT_UE, FLT_PE, FLT_SF = 12, 13, 14, 15, 16, 17, 18
+
+
+def fault_kind(o):
+    """8-bit kind of the unmasked x87 exception that instruction result o raises (0 = none): FLT_SF when the unmasked IE is a stack fault
+    (SDM 1:8.5.1.1 raises IE with SF), FLT_IE otherwise, then FLT_DE, FLT_ZE, FLT_OE, FLT_UE, FLT_PE.  The unmasked state effects are the spec's
+    (finish: unmasked IE/DE/ZE abort, an unmasked PE stores the result and then signals, an unmasked OE/UE of a register result is excluded by
+    precondition).  A waiting instruction with a pending unmasked exception traps first (Out.trap) and raises FLT_IE/FLT_SF from the pending flags;
+    that case is the trap's, not this kind's."""
+    u = o.raised & ~Extract(5, 0, o.fcw_in)
+    def has(b): return Extract(b, b, u) == K(1, 1)
+    return If(has(IE), If(o.sf_raised, K(FLT_SF, 8), K(FLT_IE, 8)), If(has(DE), K(FLT_DE, 8), If(has(ZE), K(FLT_ZE, 8),
+           If(has(OE), K(FLT_OE, 8), If(has(UE), K(FLT_UE, 8), If(has(PE), K(FLT_PE, 8), K(0, 8)))))))
 
 
 def execute(key, s, m=None, i=None, ef=None):
