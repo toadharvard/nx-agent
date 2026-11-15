@@ -179,22 +179,8 @@
  },
  "tss_io_bitmap": {
   "exception": "EXCEPTION_PRIV_INSTRUCTION",
-  "opcodes": [
-   108,
-   109,
-   110,
-   111,
-   228,
-   229,
-   230,
-   231,
-   236,
-   237,
-   238,
-   239
-  ],
   "ports_permitted": [],
-  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for in/out/ins/outs (opcodes ['0x6c', '0x6d', '0x6e', '0x6f', '0xe4', '0xe5', '0xe6', '0xe7', '0xec', '0xed', '0xee', '0xef']) with no per-port test, i.e. a Win32 user process has no permitted port; the documentation names the TSS I/O map (WDK 7.1 ks386.inc TssIoMapBase = 0x66, PrIopmOffset = 0x6E) and the exception (MSDN EXCEPTION_PRIV_INSTRUCTION: an instruction not allowed in the current machine mode) but states no permitted port for a user process, so it does not contradict Wine (precedence 2); with IOPL 0 (row eflags) every such instruction at CPL 3 is #GP(0), delivered as that exception",
+  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for every in/out/ins/outs form with no per-port test (the instruction set is L3b's sdm_priv_rows.tsv, iopl class, not restated here), i.e. a Win32 user process has no permitted port; the documentation names the TSS I/O map (WDK 7.1 ks386.inc TssIoMapBase = 0x66, PrIopmOffset = 0x6E) and the exception (MSDN EXCEPTION_PRIV_INSTRUCTION: an instruction not allowed in the current machine mode) but states no permitted port for a user process, so it does not contradict Wine (precedence 2); with IOPL 0 (row eflags) every such instruction at CPL 3 is #GP(0), delivered as that exception",
   "value": "no port permitted"
  }
 }
