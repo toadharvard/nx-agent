@@ -1235,3 +1235,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - 1714 shared-overlap accesses: address-taken locals. L2 decides between ordering all of them and a per-variable `escapes` fact from GCC's points-to solution (preferred, keeps the fast path).
   - 500 nonframe plain accesses: order-plugin misses. w23 splits them by instruction shape for L2.
   - 83 tag-X and 71 tag-D accesses outside the ranges: w23 traces the cause.
+- w23: the 154 tag-X/D accesses are the address-taken class too, giving 1868 (L2) + 500 nonframe (L2) = all 2368 uncertified.
+- Next for w23: send the 500 split to L2. Then REQUIRED_TEST: stub renamed objstub, doubles from w20 item 5, legal out of the per-root list (whole-tree gate). Then legal rule L1: no tracked file's sha256 in the private artifact manifest (hashes only).
+- Reported to the orchestrator for after the first frame: the legal classes "embedded content" and "VA→name pairing" have no gate.
