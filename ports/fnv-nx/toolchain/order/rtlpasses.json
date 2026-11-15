@@ -1,0 +1,246 @@
+{
+ "rows": [
+  {
+   "pass": "pass_cse",
+   "class": "refuses",
+   "reason": "hash_rtx sets do_not_record for a volatile MEM (2386) and for UNSPEC_VOLATILE (2431); cse_insn does no table lookup for such a source (4780), does not enter it (5693) and, for a volatile destination, invalidates it and does no further processing (5636). The insn itself is not deleted or rewritten by cse_insn on those paths",
+   "files": {
+    "cse.cc": "0fa170751662249a448bebfb26c94970ae9bcc5e56783a409139266144787f8b"
+   },
+   "cites": [
+    {
+     "file": "cse.cc",
+     "line": 2386,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "cse.cc",
+     "line": 2431,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "cse.cc",
+     "line": 4780,
+     "ident": "src_volatile"
+    },
+    {
+     "file": "cse.cc",
+     "line": 5636,
+     "ident": "do_not_record"
+    },
+    {
+     "file": "cse.cc",
+     "line": 5693,
+     "ident": "src_volatile"
+    }
+   ]
+  },
+  {
+   "pass": "pass_cse_after_global_opts",
+   "class": "refuses",
+   "reason": "hash_rtx sets do_not_record for a volatile MEM (2386) and for UNSPEC_VOLATILE (2431); cse_insn does no table lookup for such a source (4780), does not enter it (5693) and, for a volatile destination, invalidates it and does no further processing (5636). The insn itself is not deleted or rewritten by cse_insn on those paths",
+   "files": {
+    "cse.cc": "0fa170751662249a448bebfb26c94970ae9bcc5e56783a409139266144787f8b"
+   },
+   "cites": [
+    {
+     "file": "cse.cc",
+     "line": 2386,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "cse.cc",
+     "line": 2431,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "cse.cc",
+     "line": 4780,
+     "ident": "src_volatile"
+    },
+    {
+     "file": "cse.cc",
+     "line": 5636,
+     "ident": "do_not_record"
+    },
+    {
+     "file": "cse.cc",
+     "line": 5693,
+     "ident": "src_volatile"
+    }
+   ]
+  },
+  {
+   "pass": "pass_cse2",
+   "class": "refuses",
+   "reason": "hash_rtx sets do_not_record for a volatile MEM (2386) and for UNSPEC_VOLATILE (2431); cse_insn does no table lookup for such a source (4780), does not enter it (5693) and, for a volatile destination, invalidates it and does no further processing (5636). The insn itself is not deleted or rewritten by cse_insn on those paths",
+   "files": {
+    "cse.cc": "0fa170751662249a448bebfb26c94970ae9bcc5e56783a409139266144787f8b"
+   },
+   "cites": [
+    {
+     "file": "cse.cc",
+     "line": 2386,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "cse.cc",
+     "line": 2431,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "cse.cc",
+     "line": 4780,
+     "ident": "src_volatile"
+    },
+    {
+     "file": "cse.cc",
+     "line": 5636,
+     "ident": "do_not_record"
+    },
+    {
+     "file": "cse.cc",
+     "line": 5693,
+     "ident": "src_volatile"
+    }
+   ]
+  },
+  {
+   "pass": "pass_rtl_pre",
+   "class": "refuses",
+   "reason": "insert_expr_in_table drops any expression whose hash_expr (a call of cse.cc hash_rtx, 2386/2431) set do_not_record_p, so an expression with a volatile MEM or UNSPEC_VOLATILE is neither a PRE nor a hoist candidate",
+   "files": {
+    "gcse.cc": "c43ff44e88c564b8f94a2fd43167b9c4fad7a6582625c13f88d97c8ef39827bb",
+    "cse.cc": "0fa170751662249a448bebfb26c94970ae9bcc5e56783a409139266144787f8b"
+   },
+   "cites": [
+    {
+     "file": "gcse.cc",
+     "line": 1091,
+     "ident": "hash_rtx"
+    },
+    {
+     "file": "gcse.cc",
+     "line": 1132,
+     "ident": "do_not_record_p"
+    },
+    {
+     "file": "cse.cc",
+     "line": 2386,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "cse.cc",
+     "line": 2431,
+     "ident": "UNSPEC_VOLATILE"
+    }
+   ]
+  },
+  {
+   "pass": "pass_rtl_hoist",
+   "class": "refuses",
+   "reason": "insert_expr_in_table drops any expression whose hash_expr (a call of cse.cc hash_rtx, 2386/2431) set do_not_record_p, so an expression with a volatile MEM or UNSPEC_VOLATILE is neither a PRE nor a hoist candidate",
+   "files": {
+    "gcse.cc": "c43ff44e88c564b8f94a2fd43167b9c4fad7a6582625c13f88d97c8ef39827bb",
+    "cse.cc": "0fa170751662249a448bebfb26c94970ae9bcc5e56783a409139266144787f8b"
+   },
+   "cites": [
+    {
+     "file": "gcse.cc",
+     "line": 1091,
+     "ident": "hash_rtx"
+    },
+    {
+     "file": "gcse.cc",
+     "line": 1132,
+     "ident": "do_not_record_p"
+    },
+    {
+     "file": "cse.cc",
+     "line": 2386,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "cse.cc",
+     "line": 2431,
+     "ident": "UNSPEC_VOLATILE"
+    }
+   ]
+  },
+  {
+   "pass": "pass_lower_subreg",
+   "class": "refuses",
+   "reason": "can_decompose_p returns false for a volatile MEM (316); a source with side effects (an UNSPEC_VOLATILE has them, rtlanal.cc side_effects_p) or a destination with side effects goes through a temporary register instead of being decomposed (1020, 1053)",
+   "files": {
+    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744"
+   },
+   "cites": [
+    {
+     "file": "lower-subreg.cc",
+     "line": 316,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "lower-subreg.cc",
+     "line": 1020,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "lower-subreg.cc",
+     "line": 1053,
+     "ident": "side_effects_p"
+    }
+   ]
+  },
+  {
+   "pass": "pass_lower_subreg2",
+   "class": "refuses",
+   "reason": "can_decompose_p returns false for a volatile MEM (316); a source with side effects (an UNSPEC_VOLATILE has them, rtlanal.cc side_effects_p) or a destination with side effects goes through a temporary register instead of being decomposed (1020, 1053)",
+   "files": {
+    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744"
+   },
+   "cites": [
+    {
+     "file": "lower-subreg.cc",
+     "line": 316,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "lower-subreg.cc",
+     "line": 1020,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "lower-subreg.cc",
+     "line": 1053,
+     "ident": "side_effects_p"
+    }
+   ]
+  },
+  {
+   "pass": "pass_lower_subreg3",
+   "class": "refuses",
+   "reason": "can_decompose_p returns false for a volatile MEM (316); a source with side effects (an UNSPEC_VOLATILE has them, rtlanal.cc side_effects_p) or a destination with side effects goes through a temporary register instead of being decomposed (1020, 1053)",
+   "files": {
+    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744"
+   },
+   "cites": [
+    {
+     "file": "lower-subreg.cc",
+     "line": 316,
+     "ident": "MEM_VOLATILE_P"
+    },
+    {
+     "file": "lower-subreg.cc",
+     "line": 1020,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "lower-subreg.cc",
+     "line": 1053,
+     "ident": "side_effects_p"
+    }
+   ]
+  }
+ ]
+}
