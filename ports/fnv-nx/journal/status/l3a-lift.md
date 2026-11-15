@@ -1096,3 +1096,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Both are sent to the L1 lead.
   - GSCERTS removal: base3 7abf794a6.
   - bottleneck: the exe facts memory growth (w7); L1's pack-from-uses change.
+- 22:20 L5 gs row landed: claude/fnv-l5-platform-w17 @ ad3af10c5. selectors.gs = 0, from the 7601 kernel and PDB (KeContextToKframes stores 0 to SegGs for cs 0x1b), together with null_seg_access.
+  - w8 merges it into base3. The 24 `mov m16, gs` reads become ordinary code; gs-prefixed operands raise the null_seg row.
+  - The gs residue is only the data-decoded operands, which w7's universe rule removes.
