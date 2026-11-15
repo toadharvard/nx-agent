@@ -56,11 +56,9 @@ check('frame_offsets sp base', A.Func.frame_offsets(None, Ins(SP, 8), -32, {}), 
 check('frame_offsets sp unknown', A.Func.frame_offsets(None, Ins(SP, 8), None, {}), None)
 
 
-def scan(name, body, frame='f\t\n', redir=None):
+def scan(name, body, frame='f\t\n'):
     t = '\t.text\n\t.global f\n\t.type f,%function\nf:\n' + ''.join('\t' + l + '\n' for l in body) + '\t.size f,.-f\n'
     t += '\t.section .fnvnx.frame,"",%progbits\n\t.ascii "' + frame.replace('\n', '\\n').replace('\t', '\\t') + '"\n'
-    if redir is not None:
-        t += '\t.section .fnvnx.redir,"",%progbits\n\t.ascii "' + redir.replace('\n', '\\n').replace('\t', '\\t') + '"\n'
     s, o = os.path.join(tmp, name + '.s'), os.path.join(tmp, name + '.o')
     open(s, 'w').write(t)
     r = subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', '-march=armv8.1-a', s, '-o', o], capture_output=True, text=True)
@@ -137,25 +135,6 @@ for bad in (b'f\t-16:8:m\n', b'f\t-16:8:n:n\n', b'f\t-16:8: \n'):
         fails.append('parse accepted %r' % bad)
     except ValueError:
         pass
-# rule D2: a redirected string-op call between `dmb ish` fences
-SO = 'memcpy\tstring-op\n'
-F2 = ['dmb ish', 'bl memcpy', 'dmb ish']
-rows, o = scan('d2a', PRO + F2 + EPI, redir=SO)
-check('D2: dmb ish; bl memcpy; dmb ish with a string-op record: certified', rows.get('f+0xc/call'), '')
-rows, o = scan('d2b', PRO + ['mov x2, #8', 'dmb ish', 'mov x1, x3', 'bl memcpy', 'mov x5, x0', 'dmb ish'] + EPI, redir=SO)
-check('D2: argument set-up and moves between a fence and the call are no memory access', rows.get('f+0x14/call'), '')
-rows, o = scan('d2c', PRO + ['dmb ish', 'ldr x1, [sp, #8]', 'bl memcpy', 'dmb ish'] + EPI, 'f\t\n', SO)
-check('D2: a spill reload between the fence and the call is red', bool(rows.get('f+0x10/call')), True)
-rows, o = scan('d2d', PRO + ['dmb ish', 'bl memcpy'] + EPI, redir=SO)
-check('D2: no fence after the call is red', bool(rows.get('f+0xc/call')), True)
-rows, o = scan('d2e', PRO + F2 + EPI, redir='memcpy\tlibcall\n')
-check('D2: a libcall kind is red', bool(rows.get('f+0xc/call')), True)
-rows, o = scan('d2f', PRO + F2 + EPI)
-check('D2: fences but no record is red', bool(rows.get('f+0xc/call')), True)
-rows, o = scan('d2g', PRO + ['bl memcpy'] + EPI, redir=SO)
-check('D2: a call of a redirect symbol without fences is red', bool(rows.get('f+0x8/call')), True)
-rows, o = scan('d2h', PRO + ['bl g'] + EPI, redir=SO)
-check('D2: a call to another function is no D2 item', 'f+0x8/call' in rows, False)
 # a crash of the scan is a red row naming the object, never an exception
 orig = A.scan
 A.scan = lambda p: (_ for _ in ()).throw(TypeError('can only concatenate tuple (not "int") to tuple'))

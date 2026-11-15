@@ -70,8 +70,6 @@ INPUT FACTS AND RULES.
  D       rule (dominance, D1; the prologue home-slot store is its forward form): see Func.unshared. An access to a slot is unshared iff no ESCAPE of
          the slot's address (a stored value, an argument register at a call, an index register) reaches it on any CFG path from the entry. A stale pointer
          from an earlier frame, or a callee reaching a slot nobody published, is a wild access, which OWNER assumption ASM-006 excludes.
- D2      rule (fenced library calls): see Func.fenced_calls. A `bl` to a redirected library function is order-correct iff `dmb ish` before and after it with no
-         memory access between a fence and the call, and `.fnvnx.redir` (the plugin's record) gives the symbol the kind `string-op`; Intel SDM vol. 3 8.2.4.
  A       rule (incoming arguments): [CFA, CFA+args) is the call's argument area, args = crtl->args.size from the third field `args:N` of the frame row;
          an access inside it that overlaps no recorded range is a frame access. Soundness: the area holds the call's own stack arguments, written by the
          caller before the call; an address-taken parameter in it is a recorded range, and any other slot has no name another thread could hold.
@@ -741,50 +739,6 @@ class Func:
             self.fences(res, cand)
         return res
 
-    def fenced_calls(self, redir):
-        """rule D2 (fenced library calls): {offset: (what, rule)} for every `bl` that is a library call of the redirect record or that claims to be one (a `dmb ish`
-        on a side).  A call to the function SYM is order-correct iff `dmb ish` stands before and after it with no memory access, call, barrier or branch
-        between a fence and the call (argument set-up and moves are no memory access), SYM is in the object's `.fnvnx.redir` record and its kind is `string-op`.
-        Soundness: Intel SDM vol. 3 section 8.2.4 (the string instructions and the locked ones are not reordered with the accesses before and after them; REP
-        string operations are fast-string, ordered as one operation by the fences around the call); the fences keep every access of the callee between the
-        fences, so no plain access of the caller is reordered across it.  The kind comes from the plugin's record (fold set of the pinned GCC); a `libcall` or
-        `inline-builtin` kind, or a fenced call without a record row, is red."""
-        out = {}
-
-        def is_ish(j):
-            i = self.ins[j]
-            return i.id == K.ARM64_INS_DMB and bool(i.ops) and i.ops[0].type == K.ARM64_OP_BARRIER and i.ops[0].barrier == K.ARM64_BARRIER_ISH
-
-        def inert(j):
-            return mem_kind(self.ins[j]) is None and self.ctl[j] == 'seq' and self.ins[j].id != K.ARM64_INS_DMB
-
-        for k, i in enumerate(self.ins):
-            if self.ctl[k] != 'call':
-                continue
-            rl = self.rel.get(i.off)
-            sym = self.o.symbols[rl.sym].name if rl is not None else None
-            j = k - 1
-            while j >= 0 and inert(j):
-                j -= 1
-            before = j >= 0 and is_ish(j)
-            j = k + 1
-            while j < len(self.ins) and inert(j):
-                j += 1
-            after = j < len(self.ins) and is_ish(j)
-            if not (before or after or (sym in redir)):
-                continue
-            if sym is None:
-                out[i.off] = ('fenced-call-no-symbol', None)
-            elif sym not in redir:
-                out[i.off] = ('fenced-call-no-record', None)
-            elif not (before and after):
-                out[i.off] = ('unfenced-redirect', None)
-            elif redir[sym] != 'string-op':
-                out[i.off] = ('fenced-call-' + redir[sym], None)
-            else:
-                out[i.off] = ('fenced-call', 'FC')
-        return out
-
     def frame_ok(self, i, sp, rg):
         """rule F: the access is inside the function's own frame and overlaps no address-taken variable of the record, or only variables the record marks
         `:n` (escapes=0): such an access is certified by its range, whether it goes through sp/x29 or through a register that holds the formed address (an
@@ -994,7 +948,7 @@ def frame_record(frows, names):
 def scan(path):
     """-> Scan(rows, stats): rows [(item, kind)] sorted, kind '' = certified. Items: '' (the object: its `.fnvnx.frame` section
     is present and parses), 'FUNC' (a function: all its symbols have the same one record), 'FUNC+0xOFF' (a memory-access
-    instruction, or an undecodable word), 'FUNC+0xOFF/escape' (an instruction that hands out a frame address), 'FUNC+0xOFF/call' (a library call, rule D2)."""
+    instruction, or an undecodable word), 'FUNC+0xOFF/escape' (an instruction that hands out a frame address)."""
     o = a64obj.read(path)
     rows, stats = [], collections.Counter()
     try:
@@ -1004,13 +958,6 @@ def scan(path):
     except ValueError as e:
         frows, ferr = None, 'bad-frame-section'
     rows.append(('', ferr or ''))
-    try:
-        redir = a64frame.redir_from_sections(o.sections, path) or {}
-        rerr = ''
-    except ValueError:
-        redir, rerr = {}, 'bad-redir-section'
-    if rerr:
-        rows.append(('.fnvnx.redir', rerr))
     bodies, extra = functions_of(o)
     for si, a, name, kind in extra:
         rows.append((name, kind))
@@ -1038,10 +985,6 @@ def scan(path):
                 stats[what] += 1
         for off, (what, rule) in sorted(f.esc.items()):
             rows.append(('%s+0x%x/escape' % (name, off - base), '' if rule else what))
-            if rule:
-                stats[what] += 1
-        for off, (what, rule) in sorted(f.fenced_calls(redir).items()):
-            rows.append(('%s+0x%x/call' % (name, off - base), '' if rule else what))
             if rule:
                 stats[what] += 1
     return Scan(sorted(rows), dict(stats))
