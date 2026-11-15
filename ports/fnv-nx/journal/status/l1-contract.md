@@ -1449,3 +1449,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - New gate `rtasm`, wired by w23: the runtime .S/.s objects are certified by a class (D1, before threads, kernel call, atomic) from L2's access facts. Any other access is red.
   - PD-RT-STRING-ORDERED belongs to L2.
   - cand2 takes CLAUDE.md from 46d376fa5.
+- 01:05 **w12 loader generated tables (w12L2 a7c657f56).** Accepted.
+  - The externals equal the contract_inputs pins, under a test.
+  - Chain: declareddlls → modules (modules.c, import_keys.c via iat.c_source), plus mkidentity, which moves to contract/.
+  - Still open: delete iat.py's CLI if nothing runs it (one path). The bootguest undefined set is a farm build, and w12 then assigns an owner to each symbol.
+- 01:05 **w22.** New item: `runtime_cflags` (-DPREFER_SIZE_OVER_SPEED) in the one guest compiler record. The farm and L2 read it from there.
