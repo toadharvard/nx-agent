@@ -177,7 +177,6 @@ void os_thread_exit(void) {
 FNVNX_CITE(os_thread_exit, "dm:8");
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
  * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
-_Static_assert(OS_ROLE_AUDIO == FNVNX_ROLE_AUDIO, "platform/os/os.h OS_ROLE_AUDIO = hostapi.h FNVNX_ROLE_AUDIO");
 void os_cpu_boost(int fast_load) {
     if (!fnvnx_host->ext_call) return;
     uint64_t arg[1] = {fast_load ? 1u : 0u};

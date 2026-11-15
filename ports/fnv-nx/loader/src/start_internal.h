@@ -2,9 +2,8 @@
 #define FNVNX_START_INTERNAL_H
 /* Per-image steps shared by src/start.c (the exe: S1..S8) and src/modules.c (the lifted PE modules: M2..M4). */
 #include "fnvnx_start.h"
+#include "fnvnx/hostvm.h"
 #include "internal.h"
-
-#define FNVNX_PAGE 0x1000u
 
 uint8_t *fnvnx_gptr(const fnvnx_proc *p, uint32_t va);
 unsigned fnvnx_scn_prot(uint32_t characteristics);

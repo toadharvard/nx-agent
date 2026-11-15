@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "fnvnx_sha256.h" /* the one SHA-256 of fnv-nx: lib/sha256 */
+#include "fnvnx/import_key.h" /* FNVNX_BY_NAME: the one definition */
 
 #ifdef __cplusplus
 extern "C" {
@@ -168,8 +169,6 @@ int fnvnx_image_finalize(fnvnx_image *img, const fnvnx_os *os);
 void fnvnx_image_release(fnvnx_image *img, const fnvnx_os *os);   /* frees the reloc list only */
 
 /* ---- imports ---------------------------------------------------------------------------------------------- */
-
-#define FNVNX_BY_NAME 0xffffffffu
 
 /* Rule S4 (src/start.c): the import slots of the regular import table (by name and by ordinal) get the value of
  * `resolve(ctx, dll, name, ordinal)` (name NULL and ordinal set for an ordinal import, else ordinal ==
