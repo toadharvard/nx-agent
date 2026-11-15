@@ -994,3 +994,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - lift/bridges is red from an L1 contract tool: l2sections.py opens /tool/../toolchain/names/sympair_kinds.inc, a path that leaves its mount. Sent to L1 w12: declare the file as an input, and have the abspath gate / require_under reject `..` escapes.
   - The liftsrc cold build is restarted (it does not wait on bridges). w8 freed 11 GB of stale recipe temps.
 - 22:26 w7: the 5 small images are green at the e7b12ab35 tree (branch head b9261cd85). Cold, --jobs 1: atimgpud 19 s, binkw32 43 s, gdffalloutnv 13 s, libvorbis 35 s, libvorbisfile 21 s. Next: the 3 farm stores, store-merge, lift/facts.
+- 22:33 The exe facts farm is RED at e7b12ab35: gen:factsimg/exe:1, round 0 exits 1 (454 s, no OOM). There are 17 JTAB_RED lines: 14 unbounded index registers and 3 non-relocated table words (00da4f39, 00da60ab, 00dc1c82).
+  - Sent to w7. First establish how facts 6944080 handled these sites. If it was green, the merge lost something and is fixed until the exe reproduces 6944080. Otherwise this is a gap in the jump-table rule: the classes are reported and a class rule proposed, with no site list.
+  - The farm waits for the fixed commit.
+- bottleneck: the exe jump-table red (w7); the d3dx9 farms; lift/bridges l2sections (L1 w12).
