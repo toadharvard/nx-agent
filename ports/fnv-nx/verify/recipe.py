@@ -992,7 +992,7 @@ def include_closure(inc, root, roots, repo, tg, variant_rec=None):
                 except (OSError, ValueError, AttributeError):
                     continue
                 for m in more:
-                    if isinstance(m, str) and not m.startswith("/") and m not in seen:
+                    if isinstance(m, str) and not m.startswith("/") and m not in seen and os.path.isdir(os.path.join(repo, m)):   # a directory of the checkout: P's generated output is no header of P's (another root's output enters only through `uses`)
                         seen.add(m)
                         out.append(m)
                         todo.append(m)
