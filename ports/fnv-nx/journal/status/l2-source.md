@@ -521,3 +521,7 @@ After the first frame:
   - The gate checks every row of every product unit against S29.
   - It lands with the cand3 pin, on w2's branch; the gate kind is `fact` (w15).
 - 2026-11-15 20:33Z: The cand2 and cand3 pin is built from plugins b9f6b3a69; its stamp 03eacf9d8c6932cd equals 41beb64ff's (checked). The pin goes to L1, w15 and w12. Plugins are frozen until cand2 merges.
+- 2026-11-15 20:36Z: S29 for cand3 is at b571977cb on claude/fnv-l2-s29-case (w2), not built yet.
+  - msvcmodel.patch adds the event PLUGIN_FNVNX_COOKIE from build_new_1 and build_vec_delete_1.
+  - The names plugin writes `.fnvnx.cookie` rows in every C++ unit.
+  - test_cookie's expected rows are to be cited from S29's recorded cl 15.00 output. An over-aligned case without recorded output is undecided and gets reported.
