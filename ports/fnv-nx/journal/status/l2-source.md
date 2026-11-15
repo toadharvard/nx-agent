@@ -253,3 +253,16 @@ After the first frame:
 - w3 600a33ec4: S29's check is now the structured test record (toolchain/tests/test_ldbl.py, id "model"), validated by gen.py rule C1; DATAMODEL.json regenerated. The DM cases S09, S13, S14, S16, S23 and S31 need the built cc1plus, and the farm's phase A runs them. The /Z7 pin is msvc/z7/8f324ecde2a7, with no gap. S23 (b) has gone to the farm: doing.
 - HOST1 (from L5, objstub reach-not-exit red). The cause: DISPATCH1 rewrote the host calls of hostapi.h, whose targets are FnvnxHostApi slots, not dispatcher keys. The rule: a type attribute `fnvnx_host` on the slot type `fnvnx_hslot`. A call whose callee comes from a load of an `fnvnx_host` field, through conversions only, is a host-ABI call and is not rewritten. Any other use of such a value, and any store into such a field, is a compile error. The hcallN helpers become macros over the slot (L5 w9). Worker: w3, on claude/fnv-l2-source-w4-host. Doing.
 - w1 (session_01KmtZKTcvH46vVSGgeKTGru) is stopped under the budget order. The RTL table is parked at b3d104b7b, 39 of 92 passes classified; batch 3 is unreviewed and waits until after the first frame. The measurement of the 322 frame-class cases moves to w2's census. Active workers: w2 (order) and w3 (S23 (b), HOST1).
+- w2, sddorder (merges w1 1355ea6b6): the late-order move is done.
+  - Deleted: address_taken_scan, the non-SSA branch and the parameter copy. PROP_ssa is set.
+  - Four class fixes:
+    - the escapes fact honours fnspec/noescape (va_start in dshow.cpp:746 was the only builtin that reached the RTL-only error);
+    - an in-place copy into an unshared destination;
+    - a component ref of an SSA value is not memory;
+    - BIT_FIELD_REF of shared memory becomes an acquire load of the aligned block.
+  - Census over 109 of 114 platform objects, 89 of them scanned: 61,314 certified, 1,572 uncertified, frame-escape-unrecorded 102, frame-escape-unknown 99.
+  - Blockers sent to L1:
+    - the parse_frame form (`:n`, `args:N`);
+    - frame_cfa crashing on 20 objects;
+    - boundary_guest.cpp PP missing fnvnx_sha256.h, which leaves 5 objects unbuilt.
+  - Next: split the 1,572 into gate-side (constant frame offset lost: L1) and plugin-side (GIMPLE cause groups; I rule on them). The exact head sha is pending from w2.
