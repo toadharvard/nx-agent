@@ -242,9 +242,9 @@ def recipe(ref, commit, tree, dest=None):
                           'inputs': [], 'outputs': ['imp.cpp', 'imp_entries.tsv', 'imp_blocked.tsv']},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '/out/entries.tsv'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:1', 'path': 'imp_entries.tsv'}], 'outputs': ['entries.tsv']},
-                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '/stage/entries.tsv', '/out/disp.cc'],
-                          'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.cc']}],
-           'outputs': {'ENTRIES': 'entries.tsv'},
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '--rows', '/out/disp_rows.tsv', '/stage/entries.tsv', '/out/disp.cc'],
+                          'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.cc', 'disp_rows.tsv']}],
+           'outputs': {'ENTRIES': 'entries.tsv', 'DISP_ROWS': 'disp_rows.tsv'},
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
     dest = dest or os.path.join(LIFT, 'pack', 'build.json')

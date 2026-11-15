@@ -108,12 +108,15 @@
    "args": [
     "--prefix",
     "fnvnx_native",
+    "--rows",
+    "/out/native_disp_rows.tsv",
     "/uses/ports/fnv-nx/contract/facts/native",
     "/out/native_disp.cc"
    ],
    "inputs": [],
    "outputs": [
-    "native_disp.cc"
+    "native_disp.cc",
+    "native_disp_rows.tsv"
    ]
   }
  ],
@@ -128,6 +131,7 @@
   }
  ],
  "outputs": {
-  "GEN": "gen"
+  "GEN": "gen",
+  "NATIVE_DISP_ROWS": "native_disp_rows.tsv"
  }
 }
