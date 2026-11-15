@@ -214,10 +214,64 @@ static void record_readonly(tree t, tree base) {
   ro_lines.insert(std::string(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(base))) + buf);
 }
 
+// READ-ONLY BY PROVENANCE. An access through a pointer (MEM[p]) is an access of a read-only object when every value p can hold
+// is derived, by copy, conversion, pointer arithmetic, a selection or a PHI, from the address of a read-only object (readonly_object)
+// or of a string literal. Proof: C++ [expr.add]/OWNER 6 (array indices in bounds): arithmetic on a pointer into an object stays in
+// that object, so the access reads that object, and nothing writes it. The set of SSA names is the least fixed point (a cycle through
+// its own pointer arithmetic adds no origin). A parameter, a load, a call result or a constant has no such origin: false. The objects
+// reached go to the readonly record, which the gate checks against the section flags of the linked object.
+static bool ptr_readonly(tree p, std::set<tree> &seen, std::set<tree> &decls) {
+  if (TREE_CODE(p) == ADDR_EXPR) {
+    tree b = ref_base(TREE_OPERAND(p, 0));
+    if (!b) return false;
+    if (TREE_CODE(b) == STRING_CST) return true;
+    if (readonly_object(b)) { decls.insert(b); return true; }
+    if (TREE_CODE(b) == MEM_REF || TREE_CODE(b) == TARGET_MEM_REF) return ptr_readonly(TREE_OPERAND(b, 0), seen, decls);
+    return false;
+  }
+  if (TREE_CODE(p) != SSA_NAME) return false;
+  if (seen.count(p)) return true;
+  seen.insert(p);
+  if (SSA_NAME_IS_DEFAULT_DEF(p)) return false;
+  gimple *d = SSA_NAME_DEF_STMT(p);
+  if (gphi *ph = dyn_cast<gphi *>(d)) {
+    for (unsigned i = 0; i < gimple_phi_num_args(ph); i++)
+      if (!ptr_readonly(gimple_phi_arg_def(ph, i), seen, decls)) return false;
+    return true;
+  }
+  gassign *a = dyn_cast<gassign *>(d);
+  if (!a) return false;
+  switch (gimple_assign_rhs_code(a)) {
+    case SSA_NAME: case ADDR_EXPR: case NOP_EXPR: case CONVERT_EXPR: case POINTER_PLUS_EXPR:
+      return ptr_readonly(gimple_assign_rhs1(a), seen, decls);
+    case COND_EXPR:
+      return ptr_readonly(gimple_assign_rhs2(a), seen, decls) && ptr_readonly(gimple_assign_rhs3(a), seen, decls);
+    default:
+      return false;
+  }
+}
+
+static bool readonly_derived(tree base, std::set<tree> *out) {
+  if (!base || (TREE_CODE(base) != MEM_REF && TREE_CODE(base) != TARGET_MEM_REF)) return false;
+  std::set<tree> seen, decls;
+  if (!ptr_readonly(TREE_OPERAND(base, 0), seen, decls)) return false;
+  if (out) out->insert(decls.begin(), decls.end());
+  return true;
+}
+
+static void record_readonly_whole(tree base) {
+  tree dsz = DECL_SIZE_UNIT(base);
+  char buf[64];
+  snprintf(buf, sizeof buf, "\t0:%ld", (long)(dsz && tree_fits_shwi_p(dsz) ? tree_to_shwi(dsz) : -1));
+  ro_lines.insert(std::string(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(base))) + buf);
+}
+
 static bool shared_ordered(tree t) {
   if (!t || !is_memory_ref(t)) return false;
   tree base = ref_base(t);
   if (readonly_object(base)) { record_readonly(t, base); return false; }
+  std::set<tree> ds;
+  if (readonly_derived(base, &ds)) { for (tree d : ds) record_readonly_whole(d); return false; }
   return !local_unshared(base);
 }
 
@@ -298,6 +352,97 @@ static tree to_bits(tree v, tree ity, gimple_seq *seq) {
 
 
 static counts *cur;   // the counters of the function being ordered
+
+// BIT-FIELD SPAN (a bit-field with no usable allocation unit). stor-layout.cc finish_bitfield_representative returns no representative
+// for a packed or overlapping field, and the representative may be an integer that is not naturally aligned. The access is then the
+// byte span that holds the field's bits: get_inner_reference's (bitpos, bitsize) rounded out to whole bytes. The span is read and written
+// as ordered chunks in increasing address order, each chunk the widest of 8/4/2/1 bytes whose address is provably aligned to its size
+// (alignment of the base object, or a byte when the offset is variable); a packed field therefore becomes a run of ordered byte accesses.
+// x86 guarantees no atomicity for a misaligned or packed access (SDM 8.1.1 names aligned accesses only), so program-order chunk accesses,
+// each ldar/stlr, order it at least as strongly as the x86 access. The chunks are gathered into one integer (little-endian) of 8..128 bits.
+struct bf_span { tree ptr; HOST_WIDE_INT off, nbytes, sz; unsigned align; };
+
+static bool bitfield_span(tree t, gimple_seq *seq, bf_span *r) {
+  if (TREE_CODE(t) != COMPONENT_REF) return false;
+  poly_int64 bitsize, bitpos;
+  tree off;
+  machine_mode mode;
+  int unsignedp, reversep, volatilep;
+  tree inner = get_inner_reference(t, &bitsize, &bitpos, &off, &mode, &unsignedp, &reversep, &volatilep);
+  HOST_WIDE_INT bp, bs;
+  if (reversep || !bitpos.is_constant(&bp) || !bitsize.is_constant(&bs) || bp < 0 || bs <= 0 || bs > 64) return false;
+  HOST_WIDE_INT lo = bp / BITS_PER_UNIT, end = (bp + bs + BITS_PER_UNIT - 1) / BITS_PER_UNIT;
+  r->nbytes = end - lo;
+  r->off = bp - lo * BITS_PER_UNIT;
+  r->sz = bs;
+  if (r->nbytes > 16) return false;
+  unsigned al = off ? BITS_PER_UNIT : get_object_alignment(inner);
+  if (al < BITS_PER_UNIT) al = BITS_PER_UNIT;
+  if (al > 64 * BITS_PER_UNIT) al = 64 * BITS_PER_UNIT;
+  while (al > BITS_PER_UNIT && (lo * BITS_PER_UNIT) % al) al /= 2;   // the alignment of the span's first byte
+  r->align = al;
+  tree a = address_of(inner, seq);
+  if (off) a = gimplify_to(fold_build_pointer_plus(a, fold_convert(sizetype, off)), seq);
+  if (lo) a = gimplify_to(fold_build_pointer_plus_hwi(a, lo), seq);
+  r->ptr = a;
+  return true;
+}
+
+// the chunk size index (0..3: 1/2/4/8 bytes) at byte k of the span, with `left` bytes to go
+static int span_chunk(const bf_span &s, HOST_WIDE_INT k, HOST_WIDE_INT left) {
+  unsigned a = s.align;   // the alignment of the chunk's address: the span's, reduced by the offset k
+  while (a > BITS_PER_UNIT && (k * BITS_PER_UNIT) % a) a /= 2;
+  for (int i = 3; i > 0; i--)
+    if (((HOST_WIDE_INT)1 << i) <= left && a >= (unsigned)(((HOST_WIDE_INT)1 << i) * BITS_PER_UNIT)) return i;
+  return 0;
+}
+
+static tree span_acc_type(const bf_span &s) {
+  unsigned w = 8;
+  while (w < (unsigned)s.nbytes * BITS_PER_UNIT) w *= 2;
+  return build_nonstandard_integer_type(w, 1);
+}
+
+// the span as one integer: ordered acquire loads of its chunks, joined little-endian
+static tree span_load(const bf_span &s, gimple_seq *seq, location_t loc, counts &c) {
+  tree acc_t = span_acc_type(s), acc = NULL_TREE;
+  for (HOST_WIDE_INT k = 0; k < s.nbytes;) {
+    int i = span_chunk(s, k, s.nbytes - k);
+    tree p = k ? gimplify_to(fold_build_pointer_plus_hwi(s.ptr, k), seq) : s.ptr;
+    tree bits = make_ssa_name(uint_type(i));
+    gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + i)), 2, p,
+                                    build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
+    gimple_call_set_lhs(call, bits);
+    gimple_set_location(call, loc);
+    gimple_seq_add_stmt(seq, call);
+    tree v = gimplify_to(fold_convert(acc_t, bits), seq);
+    if (k) v = gimplify_to(fold_build2(LSHIFT_EXPR, acc_t, v, build_int_cst(integer_type_node, k * BITS_PER_UNIT)), seq);
+    acc = acc ? gimplify_to(fold_build2(BIT_IOR_EXPR, acc_t, acc, v), seq) : v;
+    c.ldar++;
+    k += (HOST_WIDE_INT)1 << i;
+  }
+  return acc;
+}
+
+// the chunks of an integer back to the span: ordered release stores in increasing address order; the last one is returned, not
+// added to seq (the caller replaces the original statement with it)
+static gcall *span_store(const bf_span &s, tree acc, gimple_seq *seq, location_t loc, counts &c) {
+  tree acc_t = span_acc_type(s);
+  gcall *last = NULL;
+  for (HOST_WIDE_INT k = 0; k < s.nbytes;) {
+    int i = span_chunk(s, k, s.nbytes - k);
+    if (last) { gimple_seq_add_stmt(seq, last); last = NULL; }
+    tree p = k ? gimplify_to(fold_build_pointer_plus_hwi(s.ptr, k), seq) : s.ptr;
+    tree v = k ? gimplify_to(fold_build2(RSHIFT_EXPR, acc_t, acc, build_int_cst(integer_type_node, k * BITS_PER_UNIT)), seq) : acc;
+    v = gimplify_to(fold_convert(uint_type(i), v), seq);
+    last = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_STORE_1 + i)), 3, p, v,
+                             build_int_cst(integer_type_node, MEMMODEL_RELEASE));
+    gimple_set_location(last, loc);
+    c.stlr++;
+    k += (HOST_WIDE_INT)1 << i;
+  }
+  return last;
+}
 
 // totality (R9): `ref = ...` / `... = ref` forms ordered scalar-wise where expressible, fenced otherwise
 static void order_single(gimple_stmt_iterator *gsi);
@@ -921,7 +1066,26 @@ static void order_single(gimple_stmt_iterator *gsi) {
     location_t loc = gimple_location(stmt);
     if (ld && bitfield_ref(rhs)) {
       if (!bitfield_unit(rhs, &ur, &off, &sz)) {
-        error_at(loc, "fnvnx_order: a shared bit-field access without a usable allocation unit (representative)");
+        // no representative (packed), or one that is no ldar unit: the byte span of the field (bitfield_span)
+        bf_span sp;
+        gimple_seq seq = NULL;
+        if (!bitfield_span(rhs, &seq, &sp)) {
+          error_at(loc, "fnvnx_order: a shared bit-field access whose byte span cannot be formed (reverse storage order or a span over 16 bytes)");
+          return;
+        }
+        tree acc = span_load(sp, &seq, loc, c);
+        tree bty = build_nonstandard_integer_type(sp.sz, TYPE_UNSIGNED(TREE_TYPE(rhs)));
+        tree fld = make_ssa_name(bty);
+        gimple_seq_add_stmt(&seq, gimple_build_assign(fld, build3(BIT_FIELD_REF, bty, acc, bitsize_int(sp.sz), bitsize_int(sp.off))));
+        gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+        tree bv = useless_type_conversion_p(TREE_TYPE(lhs), bty) ? (tree)fld : build1(NOP_EXPR, TREE_TYPE(lhs), fld);
+        if (!is_gimple_reg(lhs) && !is_gimple_val(bv)) {
+          tree rv = make_ssa_name(TREE_TYPE(lhs));
+          gsi_insert_before(gsi, gimple_build_assign(rv, bv), GSI_SAME_STMT);
+          bv = rv;
+        }
+        gimple_assign_set_rhs_from_tree(gsi, bv);
+        update_stmt(gsi_stmt(*gsi));
         return;
       }
       int ui = atomic_index(ur);
@@ -949,7 +1113,21 @@ static void order_single(gimple_stmt_iterator *gsi) {
       return;
     }
     if (!bitfield_unit(lhs, &ur, &off, &sz)) {
-      error_at(loc, "fnvnx_order: a shared bit-field access without a usable allocation unit (representative)");
+      bf_span sp;
+      gimple_seq seq = NULL;
+      if (!bitfield_span(lhs, &seq, &sp)) {
+        error_at(loc, "fnvnx_order: a shared bit-field access whose byte span cannot be formed (reverse storage order or a span over 16 bytes)");
+        return;
+      }
+      tree acc_t = span_acc_type(sp);
+      tree old = span_load(sp, &seq, loc, c);
+      tree bty = build_nonstandard_integer_type(sp.sz, 1);
+      tree v1 = gimplify_to(fold_convert(bty, rhs), &seq);
+      tree nw = make_ssa_name(acc_t);
+      gimple_seq_add_stmt(&seq, gimple_build_assign(nw, BIT_INSERT_EXPR, old, v1, bitsize_int(sp.off)));
+      gcall *last = span_store(sp, nw, &seq, loc, c);
+      gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+      gsi_replace(gsi, last, false);
       return;
     }
     int ui = atomic_index(ur);
@@ -1011,6 +1189,7 @@ static bool ordt_visit(gimple *stmt, tree, tree op, void *data) {
   } else if (base && (TREE_CODE(base) == MEM_REF || TREE_CODE(base) == TARGET_MEM_REF)) {
     tree p = TREE_OPERAND(base, 0);
     if (x->gen) why = 0;
+    else if (readonly_derived(base, NULL)) why = 1;
     else if (TREE_CODE(p) == SSA_NAME && SSA_NAME_IS_DEFAULT_DEF(p) && SSA_NAME_VAR(p) && TREE_CODE(SSA_NAME_VAR(p)) == PARM_DECL &&
              DECL_BY_REFERENCE(SSA_NAME_VAR(p)))
       why = 2;

@@ -252,6 +252,17 @@ int agg() { S l = gs2; return l.a + l.e; }
 void stb() { gb.b = 3; }
 int ldb() { return gb.b; }
 int cpy() { gs = gs2; return g; }
+struct __attribute__((packed)) PB { unsigned first:24; unsigned cat:8; unsigned short delta; };
+PB gpb[4];
+static const PB cpb[] = {{1,2,3},{4,5,6},{7,8,9},{3,3,3},{1,1,1}};
+int pbl(int m) { return gpb[m].first; }
+void pbs(int m) { gpb[m].first = 7; }
+static inline int pbis(unsigned u, const PB* t, int n) {
+  const PB* b = t;
+  while (n > 0) { int mid = n / 2; const PB* p = b + mid; if (u > p->first + p->delta) { b = p + 1; n -= mid + 1; } else n = mid; }
+  return b->cat;
+}
+int pbc(unsigned u) { return pbis(u, cpb, 5); }
 void takes(S s);
 void pass() { takes(gs); }
 char* dyn(int n) { char* p = (char*)__builtin_alloca(n); sink(p); p[1] = 2; return p; }
@@ -280,6 +291,16 @@ if plug:
     check('escaped array: certified', not any(k.startswith('_Z4esc2v') for k in rs), True)
     check('sret aggregate store certified', not any(k.startswith('_Z3retv') for k in rs), True)
     check('aggregate load certified', not any(k.startswith('_Z3aggv') or k.startswith('_Z3cpyv') for k in rs), True)
+    check('packed bit-field (no representative): load, store and the read-only table walk certify',
+          [k for k in rs if k.startswith(('_Z3pbli', '_Z3pbsi', '_Z3pbcj'))], [])
+    dis0 = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
+    pbl = dis0.split('<_Z3pbli>:')[1].split('\n\n')[0]
+    pbs = dis0.split('<_Z3pbsi>:')[1].split('\n\n')[0]
+    pbc = dis0.split('<_Z3pbcj>:')[1].split('\n\n')[0]
+    check('packed bit-field load: its 3 bytes are ldarb in address order, no plain load of the field', (pbl.count('ldarb'), 'ldr\tw' in pbl), (3, False))
+    check('packed bit-field store: read-modify-write of the 3 bytes, release byte stores', (pbs.count('ldarb'), pbs.count('stlrb')), (3, 3))
+    check('table walk through a derived pointer: read-only by provenance, no ordered access', ('ldar' in pbc, 'stlr' in pbc), (False, False))
+    check('the walk records the table in .fnvnx.ro', '_ZL3cpb' in run(['aarch64-linux-gnu-readelf', '-p', '.fnvnx.ro', po]).stdout, True)
     check('bit-field store certified', not any(k.startswith('_Z3stbv') or k.startswith('_Z3ldbv') for k in rs), True)
     dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
     esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]
