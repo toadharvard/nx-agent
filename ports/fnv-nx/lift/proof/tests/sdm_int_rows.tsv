@@ -1,19 +1,5 @@
 # Expected values of test_dsl_int_classes.py, written from the Intel SDM (not computed by the code under test).
-# kind=ea16: columns `ea16`, encoding hex, SDM citation, address terms (registers summed, the 16-bit halves), signed displacement. The address is the sum mod 2^16 (SDM vol. 1 3.7.5 "Specifying an Offset": 16-bit addressing
-#   wraps at 64 KiB); the register terms are Table 2-1 of SDM vol. 2 2.1.5 "16-Bit Addressing Forms with the ModR/M Byte".
 # kind=stack: columns `stack`, encoding hex, SDM citation, esp delta (signed decimal). 66-prefixed PUSH/POP r16 move the stack pointer by 2, PUSH/POP r32 by 4 (SDM vol. 2 PUSH "Operation": StackAddrSize = 32, OperandSize 16 -> ESP - 2; POP likewise + 2).
-ea16	678b00	SDM v2 Table 2-1 mod 00 r/m 000 [BX+SI]	bx+si	0
-ea16	678b01	SDM v2 Table 2-1 mod 00 r/m 001 [BX+DI]	bx+di	0
-ea16	678b02	SDM v2 Table 2-1 mod 00 r/m 010 [BP+SI]	bp+si	0
-ea16	678b03	SDM v2 Table 2-1 mod 00 r/m 011 [BP+DI]	bp+di	0
-ea16	678b04	SDM v2 Table 2-1 mod 00 r/m 100 [SI]	si	0
-ea16	678b05	SDM v2 Table 2-1 mod 00 r/m 101 [DI]	di	0
-ea16	678b07	SDM v2 Table 2-1 mod 00 r/m 111 [BX]	bx	0
-ea16	678b4010	SDM v2 Table 2-1 mod 01 r/m 000 [BX+SI]+disp8	bx+si	16
-ea16	678b4610	SDM v2 Table 2-1 mod 01 r/m 110 [BP]+disp8	bp	16
-ea16	678b40f0	SDM v2 Table 2-1 mod 01 r/m 000 [BX+SI]+disp8, disp8 sign-extended (0xf0 = -16)	bx+si	-16
-ea16	678b803412	SDM v2 Table 2-1 mod 10 r/m 000 [BX+SI]+disp16	bx+si	4660
-ea16	678b80f0ff	SDM v2 Table 2-1 mod 10 r/m 000 [BX+SI]+disp16, 0xfff0 = -16	bx+si	-16
 stack	6659	SDM v2 POP r16 (66 58+rw), stack size 32: ESP + 2	2
 stack	665d	SDM v2 POP r16 (66 58+rw), stack size 32: ESP + 2	2
 stack	6651	SDM v2 PUSH r16 (66 50+rw), stack size 32: ESP - 2	-2

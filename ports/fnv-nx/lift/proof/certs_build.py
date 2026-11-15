@@ -11,7 +11,7 @@ CERTIFICATE KEY RULE (one rule, per encoding, independent of the shard, the run 
 shape iff ALL THREE match
     shape key   = the key of the record's shape,
     shape_sha   = symform.shape_sha(key) = the sha256 of the symbolic Form that the CURRENT DSL builds for that shape (record field dsl_sha),
-    IR sha256   = the pinned x86_proof.ir sha256 (proof/sail_pins.txt; record field model_sha)
+    IR sha256   = the pinned x86_proof.ir sha256 (the file of the external x86ir of formgate_inputs.json; record field model_sha)
 and result == proved.  Nothing else enters: no run id, no hash of the DSL sources.  A DSL edit therefore voids exactly the certificates of the shapes whose
 Form changed (their shape_sha differs); a record that does not match is STALE: it is ignored (counted in the output line), it is never a refusal, it can
 not become a row.  proof/formgate.py applies the same test to the rows (the same symform.shape_sha), so a row that went stale after it was written is
@@ -19,7 +19,7 @@ refused there too.
 Only proved shapes get a row (one row per proved shape: formgate counts nothing else).  The run is REFUSED (exit 2, no output file) when the records
 are contradictory: the same current (shape, shape_sha, IR sha) is `proved` in one record and FAILED(...) in another.
 Row: shape_key, family, dsl_sha (= symform.shape_sha(shape)), model_sha, `sail`, `proved`.
-(The link between the symbolic Form and the lifter's concrete Forms is proof/symcheck.py, over every instance of the image; it is not part of a certificate.)
+(The link between the symbolic Form and the lifter's concrete Forms is proof/symcheck.py, over every instance of the pack's instrs.tsv, run by gate forms; it is not part of a certificate.)
 Rows are unique and sorted; the output depends on the set of records only (not on shard order, file names or time).  Needs capstone; no z3, no clock.
 
 --queue: the shapes of SHAPES.tsv (family int, a symbolic Form exists) that have NO valid certificate in the shards, sorted; the farm proves exactly these
@@ -46,12 +46,8 @@ class Refused(Exception):
 
 
 def pinned_model():
-    with open(os.path.join(HERE, 'sail_pins.txt')) as fh:
-        for ln in fh:
-            f = ln.split()
-            if len(f) == 4 and f[0] == 'x86_proof.ir':
-                return f[3]
-    raise Refused('no x86_proof.ir pin in sail_pins.txt')
+    """the sha256 of the pinned IR: DERIVED from the file of the declared external `x86ir` (formgate_inputs.json, the one place the IR is pinned), never typed"""
+    return model_sail.ir_sha()
 
 
 def run_id():
@@ -124,9 +120,6 @@ def scan(files):
     """-> (proved {key: (dsl_sha, ...)} valid certificates, counts {result or 'stale-dsl'/'stale-model': n}, status {(key, dsl, model): best result}).
     Records that do not match (shape, current shape_sha, pinned IR) are counted stale and ignored.  Raises Refused on a contradiction."""
     model = pinned_model()
-    with open(os.path.join(HERE, 'formgate_inputs.json')) as fh:
-        if json.load(fh)['model_sha256'] != model:
-            raise Refused('formgate_inputs.json model_sha256 differs from the x86_proof.ir pin of sail_pins.txt')
     proved, counts, status, info = {}, {}, {}, {}
     for f, i, r in records(files):
         where = '%s:%d' % (f, i)
@@ -233,6 +226,7 @@ def coverage(shapes_path, files):
 def main(argv):
     ap = argparse.ArgumentParser(prog='certs_build')
     ap.add_argument('--id', action='store_true')
+    ap.add_argument('--model-sha', action='store_true', help='the full sha256 of the pinned IR (the file of the external x86ir)')
     ap.add_argument('--shards', nargs='+')
     ap.add_argument('--out')
     ap.add_argument('--queue')
@@ -241,6 +235,9 @@ def main(argv):
     ap.add_argument('--ir', action='append', default=[], help='an IR file (hashed to its sha) that a record of another model_sha was proved against')
     a = ap.parse_args(argv)
     for f in a.ir: add_ir(f)
+    if a.model_sha:
+        sys.stdout.write(pinned_model() + '\n')
+        return 0
     if a.id:
         sys.stdout.write(run_id() + '\n')
         return 0

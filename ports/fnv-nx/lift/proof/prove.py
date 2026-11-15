@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
-"""Gate for the DSL forms (fnvlift/dsl.py, proof/forms*.py).  Two independent checks:
-  prove.py --model MODULE   per encoding: exists a pre-state with DSL post-state != reference post-state;  unsat = proved.  One line per FORM KEY
-                            (all its encodings: the real ones of instest/result.json plus enc_table.py), then totals and gate_forms.json.
-  prove.py --backends       emitted C++ (g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined) agrees with the z3 term on N inputs (backends.py).
-Options: --only SUBSTR  --n 1000  --cert DIR  --timeout SEC  --all   (a deliberately broken copy of forms*.py is proved by running the prove.py of a copy of the tree)
-Result per key: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout  (worst over its encodings in that order of severity).
+"""The obligations of one shape against the reference model, as a library: shapeprove.py is the one prover (one per shape key, over the pinned IR) and calls prove_one().
+Per encoding: exists a pre-state with DSL post-state != reference post-state; unsat = proved (the obligations: field equalities, DEF0 for the undefined flags, fault conditions).
+(The key-by-key table mode, `--backends` and their encoding tables were deleted: by-construction row rule 3, one path.)
+Result: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout.
 Reference model plug-in: a module of the MODELS table below (proof/model_sail.py) with one function
     model_post(code: bytes, pre: dict) -> dict
   pre  = {'regs': {'eax'..'edi': z3 BitVec(name,32)}, 'flags': {'cf','pf','af','zf','sf','of': z3 BitVec(name,1)},
           'mem': z3 Array(BV32->BV8) named 'mem', 'eip': BitVecVal(0x401000,32)}      (code is ONE instruction)
-  ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': post-state Array, 'eip': BV32, optional 'assume': Bool (pre-states the model is defined on)}
+  ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': post-state Array, 'eip': BV32, optional `assume`: Bool (pre-states the model is defined on)}
   Other pre-state names shared with the model by name: fs_base, gs_base (BV32), rflags_other (BV32; DF = bit 10) which prove.py maps onto the DSL inputs df / flo.
   A model that cannot express the instruction raises an exception whose class is named ModelGap (result model-gap).
 Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) assume => DSL does not fault, and (2) for forms
   without a memory operand, DSL does not fault => assume (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
 Unobserved: the model interface returns neither DF nor the other EFLAGS bits; a form writing them is certified on its other fields only and reported model-gap."""
-import argparse, hashlib, json, os, re, sys
+import hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-from proof import universe, defects, rewrite, forms, model_sail, backends
+from proof import defects, rewrite, forms, model_sail
 MODELS = {'model_sail': model_sail}      # the reference models --model can name
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
@@ -28,30 +25,14 @@ SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RF
 OBLIGATIONS = ('def0',)      # what a record of this prover certifies beyond the field equalities; certs_build refuses a record without it (stale-obligations)
 SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
 
-MODEL_FAULT = {1: r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
-               7: r':NON-WRITABLE-SEGMENT$'}                                # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
+MODEL_FAULT_BY_NAME = {'DE': r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
+                       'AV': r':NON-WRITABLE-SEGMENT$'}                     # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
+from fnvlift import dsl as _dsl
+MODEL_FAULT = {k: MODEL_FAULT_BY_NAME[n] for k, n in _dsl.FAULTS.items() if n in MODEL_FAULT_BY_NAME}      # the kind numbers are the DSL's (dsl.FAULTS), the model's messages are keyed by kind name
 class Perm(set):                      # tolerated model faults of a form: exactly the messages of the fault codes that the form declares (a fault the DSL does not declare stays a model-gap)
     declared = True
     def __init__(self, base, codes): super().__init__(base); self.rx = '|'.join(MODEL_FAULT.get(c, r'(?!)') for c in sorted(codes))
     def __ge__(self, other): return all(re.match(self.rx, m) or m in self for m in other)
-
-def items(forms, args):
-    """[(key, source, F or None, bytes, width, error)] : real encodings of every in-scope key, then enc_table.py extras"""
-    cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; keys, real = universe.load(); out = []
-    def add(b, src, key=None):
-        ins = list(cs.disasm(b, ADDR))
-        if len(ins) != 1 or ins[0].size != len(b): out.append((key or '?', src, None, b, 0, 'decode')); return
-        k = forms.form_key(ins[0]); w = ins[0].operands[0].size * 8 if ins[0].operands and ins[0].operands[0].size else 32
-        if key and k != key: out.append((key, src, None, b, w, 'key mismatch ' + k)); return
-        try: out.append((k, src, forms.build(ins[0], ADDR), b, w, None))
-        except (KeyError, AssertionError) as e: out.append((k, src, None, b, w, 'no form: %r' % (e,)))
-    for k in keys:
-        for b in real[k]: add(b, 'real', k)
-        if not real[k]: out.append((k, 'real', None, b'', 0, 'no real encoding in result.json'))
-    from proof import enc_table  # lazy: keystone is reached only by the table mode, never by a shape stage
-    for b in enc_table.encodings(): add(b, 'table')
-    if args.only: out = [o for o in out if args.only in o[0] or args.only in o[3].hex()]
-    return keys, out
 
 def zser(terms):
     ids, out = {}, []
@@ -256,51 +237,3 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     if d0 != 'proved': return d0, dnote, extra
     if F.writes_unobserved(): return 'model-gap', 'post-state of df / other EFLAGS bits is not exposed by the model interface (other fields proved)', extra
     return ('agree-except-declared' if extra_declared else 'proved'), '', extra
-
-def prove(args):
-    mod = MODELS[args.model]; os.makedirs(args.cert, exist_ok=True)
-    base_keys, its = items(forms, args); per = {}; order = []
-    for key, src, F, b, w, err in its:
-        e = per.setdefault(key, {'src': src, 'enc': [], 'builds': 0, 'w': w, 'notes': []})
-        if key not in order: order.append(key)
-        if F is None: e['notes'].append('%s %s: %s' % (b.hex(), src, err)); continue
-        e['builds'] += 1; extra = {}
-        try: res, note, extra = prove_one(mod, F, b, key, args)
-        except Exception as ex:
-            if type(ex).__name__ != 'ModelGap': raise
-            res, note = 'model-gap', 'GAP ' + str(ex)[:110]
-        e['enc'].append((res, b.hex())); note and e['notes'].append('%s: %s' % (b.hex(), note[:230]))
-        json.dump(dict(form=key, encoding=b.hex(), result=res, dsl_sha256=F.sha(), z3=z3.get_version_string(), model=args.model, note=note, **extra),
-                  open(os.path.join(args.cert, '%s_%s.json' % (re.sub(r'[^\w-]', '_', key), b.hex())), 'w'))
-    tot = {k: 0 for k in ('proved', 'FAILED(dsl)', 'FAILED(def0)', 'FAILED(model-defect)', 'model-gap', 'timeout')}; status = {}; missing = []
-    for key in order:
-        e = per[key]
-        if not e['builds']: missing.append(key); res = 'no-form'
-        else:
-            rs = [r for r, _ in e['enc']]
-            sev = lambda r: SEVERITY.index('FAILED(model-defect)' if r.startswith('FAILED(model-defect') else r)
-            res = max(rs, key=lambda r: -sev(r)); ids = sorted(set(i for r in rs if r.startswith('FAILED(model-defect:') for i in r[20:-1].split(',')))
-            if res.startswith('FAILED(model-defect'): res = 'FAILED(model-defect:%s)' % ','.join(ids)
-            tot[res if res in tot else 'FAILED(model-defect)'] += 1
-        status[key] = res
-        print('%s %d %s %s n=%d' % (key, e['w'], e['enc'][0][1] if e['enc'] else '-', res, len(e['enc'])))
-        for n in e['notes'][:2]: res != 'proved' and print('   ' + n)
-    scope = [k for k in order if k in base_keys]; hasf = [k for k in order if per[k]['builds']]
-    print('TOTAL keys=%d with_dsl_form=%d proved=%d FAILED(dsl)=%d FAILED(model-defect)=%d model-gap=%d timeout=%d' % (
-        len(order), len(hasf), tot['proved'], tot['FAILED(dsl)'], tot['FAILED(model-defect)'], tot['model-gap'], tot['timeout']))
-    print('in-scope keys (result.json)=%d  without a DSL form: %s' % (len(scope), [k for k in scope if k in missing]))
-    cert = [k for k in order if status[k] == 'proved']
-    json.dump({'schema': 'fnvnx-gate/1', 'name': 'l3.forms.int', 'status': 'green' if not (tot['FAILED(dsl)'] or tot['timeout'] or [k for k in scope if k in missing]) else 'red',
-               'universe': order, 'certified': cert, 'uncertified': [k for k in order if k not in cert], 'status_by_key': status},
-              open(os.path.join(args.cert, 'gate_forms.json'), 'w'), indent=1)
-    return tot['FAILED(dsl)'] + tot['FAILED(def0)'] + tot['timeout']
-
-if __name__ == '__main__':
-    ap = argparse.ArgumentParser(); ap.add_argument('--model', choices=sorted(MODELS)); ap.add_argument('--backends', action='store_true'); ap.add_argument('--only')
-    ap.add_argument('--n', type=int, default=1000); ap.add_argument('--cert', default='/home/user/l3work/proof')
-    ap.add_argument('--timeout', type=float, default=180); ap.add_argument('--all', action='store_true'); ap.add_argument('--work', default='/home/user/l3work/proof/backends')
-    a = ap.parse_args()
-    if a.backends:
-        sys.exit(1 if backends.run(a, forms, items, post_of) else 0)
-    if not a.model: sys.exit('prove.py: give --model MODULE (reference model plug-in, see the docstring) or --backends')
-    sys.exit(1 if prove(a) else 0)

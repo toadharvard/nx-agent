@@ -34,7 +34,10 @@ rec = R.load_recipe(REPO, roots, ROOT)
 pin = R.load_pin(REPO)
 check('the recipe accepts the root (guest_errors)', R.guest_errors(rec, ROOT, roots, pin) == [], R.guest_errors(rec, ROOT, roots, pin))
 fl = rec['flags']
-check('effective cxx flags start with the pin semantics', list(R.SEMANTICS_FLAGS) == list(pin['flags']['semantics']))
+sem = pin['flags']['semantics']   # {"common": [...], "lifted_extra": [...]}: the one source; the recipe reads it, the test reads it again
+origin = roots[ROOT].get('cxx_origin')
+want = list(sem['common']) + (list(sem['lifted_extra']) if R.origin_class(origin) == 'lifted' else [])
+check('effective semantic flags of the root are the pin semantics (common, plus lifted_extra for a lifted origin)', list(R.semantics_set(origin)) == want, (origin, list(R.semantics_set(origin)), want))
 check('compiler is the pinned guest compiler', rec['compiler'] == {'external': pin['external']['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, rec['compiler'])
 check('external is the pin', rec['external'] == [pin['external']], rec['external'])
 check('plugins are PLUGIN_SOURCES in load order with PLUGIN_ARGS',

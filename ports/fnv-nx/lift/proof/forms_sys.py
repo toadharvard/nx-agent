@@ -2,19 +2,33 @@
 KiTrap0D / Wine 9.0), the machine constants are rt/fnvl.h's.  Fault kinds (dsl.FAULTS): a Form that raises says which exception the process observes; the C text of each kind is f_dsl.FAULT_ROWS.
   ARPL          protected-mode RPL adjust: ZF = RPL(dest) < RPL(src); dest.RPL = src.RPL only then (a memory destination is written only then: Form.store `when`)
   BOUND         #BR as FNVL_BOUNDS when the signed index is outside [lo, hi]
-  privileged    CPL-0 instructions and I/O at IOPL 0 (f_sys.PRIV_MN, MOV CRn/DRn): #GP(0), reported by KiTrap0D's opcode table: PRIV (STATUS_PRIVILEGED_INSTRUCTION) or AV {0, 0xFFFFFFFF}
+  privileged    CPL-0 instructions and I/O at IOPL 0 (proof/privset.py: the SDM rows of sdmpriv.py; MOV CRn/DRn): #GP(0), reported by KiTrap0D's opcode table: PRIV (STATUS_PRIVILEGED_INSTRUCTION) or AV {0, 0xFFFFFFFF}
   INT n / INTO / INT1   the vector table of f_sys.INT_VECTORS
   SLDT STR SMSW SGDT SIDT   the model's constants
   CPUID RDTSC   the reference CPU's fixed answer / the platform timer: uf nodes (dsl.uf)"""
 from fnvlift.dsl import C, V, extract, ite, slt, uf, ult, zext
 from proof.forms import Op, ea, handler, rd, store_op, wr
 
-# the reference machine (rt/fnvl.h; test/dsl_int_classes_test.py checks these against the header)
+# the reference machine: RECORDED TEMPORARY, typed until L5's platform/declared/x86sys.json (the declared descriptor tables and DPL-3 vectors) exists; then READ from it (rt/fnvl.h carries the same values)
 GDTR_BASE, GDTR_LIMIT, IDTR_BASE, IDTR_LIMIT, LDTR_SEL, TR_SEL, CR0 = 0x80b95000, 0x03ff, 0x80b95400, 0x07ff, 0, 0x28, 0x80010033
-K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP, K_ASSERT, K_DBGSRV, K_INTO_AT1 = 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
-INT_KIND = {3: K_BP, 4: K_INTO_AT1, 5: K_BOUNDS, 0x2c: K_ASSERT, 0x2d: K_DBGSRV}      # f_sys.INT_VECTORS; every other vector is #GP -> AV
-PRIV_MN = ('cli', 'sti', 'hlt', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd', 'rdmsr', 'wrmsr', 'invd', 'wbinvd', 'wbnoinvd', 'clts', 'lgdt', 'lidt', 'lldt', 'ltr',
-           'lmsw', 'invlpg', 'rdpmc', 'sysexit')      # = f_sys.PRIV_MN (test/dsl_int_classes_test.py checks the equality)
+# the fault kinds: READ from the one fault table (fnvlift/faults.json via fnvlift/faults.py)
+from fnvlift.faults import BYNAME as _FT
+from fnvlift.f_sys import INT_VECTORS
+from proof import privset
+KIND = {n: r['code'] for n, r in _FT.items()}
+K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP, K_ASSERT, K_DBGSRV, K_INTO_AT1 = (KIND[n] for n in ('BP', 'UD', 'BOUNDS', 'INTO', 'PRIV', 'AV', 'STEP', 'ASSERT', 'DBGSRV', 'INTO_AT1'))
+
+
+def _int_kind():
+    """vector -> fault kind, from f_sys.INT_VECTORS rows (FNVL_<NAME>, at offset): kind <NAME>, or <NAME>_AT1 when the row reports the address after the opcode byte; every other vector is #GP -> AV
+    (recorded temporary: L5's x86sys.json DPL-3 record replaces f_sys.INT_VECTORS as the source)"""
+    out = {}
+    for vec, (c, off) in INT_VECTORS.items():
+        out[vec] = KIND[c[len('FNVL_'):] + ('_AT%d' % off if off else '')]
+    return out
+
+
+INT_KIND = _int_kind()
 
 @handler('arpl')
 def arpl(c):
@@ -27,7 +41,7 @@ def arpl(c):
 def privileged(c):
     from fnvlift.f_sys import trap0d_privileged
     c.F.fault(K_PRIV if trap0d_privileged(c.raw) else K_AV, C(1, 1))
-handler(*PRIV_MN)(privileged)
+handler(*privset.mnemonics())(privileged)
 
 @handler('int')
 def int_(c): c.F.fault(INT_KIND.get(c.ops[0].val & 0xff, K_AV), C(1, 1))

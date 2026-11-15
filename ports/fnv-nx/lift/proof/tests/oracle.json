@@ -28,14 +28,20 @@
   "test_dsl_int_classes.py": {
    "references": [
     {
-     "anchor": "L5-L21",
+     "anchor": "L3-L7",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/proof/tests/sdm_int_rows.tsv"
+    },
+    {
+     "anchor": "L3-L43",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_ea16_rows.tsv"
     }
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/lift_dsl.py",
-    "ports/fnv-nx/lift/proof/forms.py"
+    "ports/fnv-nx/lift/proof/forms.py",
+    "ports/fnv-nx/lift/proof/sdm_rows.py"
    ]
   },
   "test_dsl_lock.py": {
@@ -116,6 +122,19 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/rt/build.json"
+   ]
+  },
+  "test_sdmpriv.py": {
+   "references": [
+    {
+     "anchor": "L2-L10",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_priv_sentences.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sdmpriv.py",
+    "ports/fnv-nx/lift/proof/privset.py"
    ]
   },
   "test_shape.py": {

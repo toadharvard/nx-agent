@@ -1,6 +1,6 @@
 
 typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef unsigned long long u64;
-typedef signed char s8; typedef short s16; typedef int s32; typedef long long s64;
+typedef unsigned __int128 u128; typedef signed char s8; typedef short s16; typedef int s32; typedef long long s64;
 typedef u8 __attribute__((may_alias)) u8a; typedef u16 __attribute__((aligned(1),may_alias)) u16a;
 typedef u32 __attribute__((aligned(1),may_alias)) u32a; typedef u64 __attribute__((aligned(1),may_alias)) u64a;
 typedef float __attribute__((aligned(1),may_alias)) f32a; typedef double __attribute__((aligned(1),may_alias)) f64a;
@@ -10,13 +10,22 @@ typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]
 struct fv { u64 v; u32 e; u32 k; };
 struct fnvl_nframe;   /* rt/imp.h: one per live import entry of the thread (native frames between lifted frames) */
 #include "fnvl_abi.h"
-struct cpu { u32 r[8]; u32 fs; u32 ftop, fcw, fc; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm_unused[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; u32 eflags; u32 dr[6]; };   /* mxcsr (reset 0x1f80) is appended: SSE family (W6); mm_unused is the former separate MM register file, kept only so the offsets hold: mm0-7 ARE the significands of fx[0..7] (rt/fnvl_x87.h, MMX aliasing). r[] is only the save area of the
+struct cpu { u32 r[8]; u32 fs; u32 ftop, fcw, fc; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm_unused[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; u32 eflags; u32 dr[6]; u32 fsw, fop, fcs, fds; };   /* mxcsr (reset 0x1f80) is appended: SSE family (W6); mm_unused is the former separate MM register file, kept only so the offsets hold: mm0-7 ARE the significands of fx[0..7] (rt/fnvl_x87.h, MMX aliasing). r[] is only the save area of the
    entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README).
    x87 (W13): fx[8] are the PHYSICAL registers (carriers; k==0 is the empty tag), ftop the TOP, fcw the control word, fex the exception status bits that the host FPSR cannot
    hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). The pre-R8 double stack `st` and tag word `ftag` are deleted (nothing read them; the x87 state is fx/ftop/fcw/fex). eflags, fc (and dr, the debug registers Dr0 Dr1 Dr2 Dr3 Dr6 Dr7 of the CONTEXT):
    the state that a hardware-exception CONTEXT names and that is not a register of the lifted code: at every raise site the lifter flushes its flag and condition-bit locals into c->eflags / c->fc (RAISE_OUT)
    and reloads them after a continue (RAISE_IN); rt/seh.cc writes the CONTEXT from them and reads them back. */
 static_assert(__builtin_offsetof(struct cpu, ra) == FNVL_CPU_RA_OFF, "rt/fnvl_abi.h: FNVL_CPU_RA_OFF is the offset of struct cpu::ra");
+/* The layout of struct cpu is append-only: every field that existed before the x87 status words (fsw, fop, fcs, fds) keeps its offset (ILP32). */
+static_assert(__builtin_offsetof(struct cpu, fex) == 252 && __builtin_offsetof(struct cpu, fx) == 256 && __builtin_offsetof(struct cpu, eflx) == 384 && __builtin_offsetof(struct cpu, nf) == 388 &&
+              __builtin_offsetof(struct cpu, hfpcr) == 392 && __builtin_offsetof(struct cpu, sel) == 400 && __builtin_offsetof(struct cpu, teb) == 424 && __builtin_offsetof(struct cpu, fip) == 428 &&
+              __builtin_offsetof(struct cpu, fdp) == 432 && __builtin_offsetof(struct cpu, msvcrt) == 436 && __builtin_offsetof(struct cpu, eflags) == 460 && __builtin_offsetof(struct cpu, dr) == 464 &&
+              __builtin_offsetof(struct cpu, fsw) == 488 && __builtin_offsetof(struct cpu, fop) == 492 && __builtin_offsetof(struct cpu, fcs) == 496 && __builtin_offsetof(struct cpu, fds) == 500 && sizeof(struct cpu) == 504,
+              "struct cpu: earlier offsets hold; fsw fop fcs fds are appended");
+/* New x87 state (appended): fsw = the ES (bit 7) and B (bit 15) bits of the FSW, loaded verbatim by FRSTOR / FLDENV / a CONTEXT restore and cleared by FNINIT / FNCLEX; the FSW image the program or a CONTEXT sees is
+   TOP | C0..C3 | the sticky bits | (fsw | ES/B derived from the flags and FCW), where ES = B = ((flags & ~FCW & 0x3f) != 0) (SDM Vol 1 8.5: ES is set when an unmasked exception flag is set). fop (FOP, 11 bits), fcs (FCS),
+   fds (FDS) are the last-instruction opcode and the selectors, written by the same x87 entry as fip / fdp (fnvlift/f_x87.py ptrs) and loaded by FLDENV / FRSTOR / a CONTEXT restore. */
 /* FNVL_FLAGS_IO (test/instest.py): the arithmetic flags, DF and the x87 condition bits also travel in c->fl / c->fc.
    fl: the EFLAGS bit positions (CF 0, PF 2, AF 4, ZF 6, SF 7, DF 10, OF 11); fc: C0 bit 8, C2 bit 10, C3 bit 14. */
 #ifdef FNVL_FLAGS_IO
@@ -37,11 +46,8 @@ register struct cpu *c asm("x27");
 #define REGS() __asm__ volatile("" : "+r"(eax),"+r"(ecx),"+r"(edx),"+r"(ebx),"+r"(esp),"+r"(ebp),"+r"(esi),"+r"(edi))
 /* Control transfer (README): a lifted function is `void L_<addr>(void)`. A direct call or tail to another entry is a C call of its
    L_ function (CALLX); the one-instruction tests (test/instest.py) redefine CALLX after the prelude in their own sources. */
+#include "fnvl_faults.h"      /* the FNVL_* fault codes: generated from fnvlift/faults.json, the one CPU fault table (tools/gen_faults.py) */
 /* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.cc maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
-#define FNVL_DE0 1
-#define FNVL_DEOVF 5
-#define FNVL_BP 3
-#define FNVL_UD 4
 extern "C" { void (*fnvl_dispatch(u32 image_addr))(void);
              void fnvl_trace(u32 entry, u32 esp); }
 #define CALLX(h) L_##h()
@@ -225,29 +231,68 @@ FNVL_F2I static inline u32 sse_f2i(double v,u32 rc){ double r=rc==0?__builtin_ro
 static inline double sse_f2d(float v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u32 b=fxbits(v); return fxval<double>((u64)(b&0x80000000u)<<32|0x7ffull<<52|(u64)(b&0x7fffffu)<<29|1ull<<51); } return (double)v; }
 static inline float sse_d2f(double v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u64 b=fxbits(v); return fxval<float>((u32)(b>>32)&0x80000000u|0x7f800000u|(u32)((b&FX<double>::M)>>29)|0x400000u); } return sse_ftz((float)v,mx); }
 static inline void sse_fpcr(u32 mx){ static const unsigned char m[4]={0,2,1,3}; u64 f; __asm__ volatile("mrs %0, fpcr":"=r"(f)); f=(f&~(3ull<<22))|((u64)m[(mx>>13)&3]<<22); __asm__ volatile("msr fpcr, %0"::"r"(f)); }
+/* DSL SSE state (fnvlift/dsl.py F.xmm / F.mxcsr and the xmm<i> / mxcsr pre-state): the whole value of the register as a u128 (little endian: q[0] is the low half), the architectural
+   MXCSR image = c->mxcsr (flags of the SSE family's host FPSR are added while it is the owner); a write replaces the whole register / the whole MXCSR: the flags the host FPSR holds for the
+   SSE family are cleared (the new value carries the sticky flags), the host rounding mode follows RC (bits 13-14). */
+static inline u128 fx_dsl_xmm(u32 i){ return ((u128)c->x[i].q[1]<<64)|c->x[i].q[0]; }
+static inline void fx_dsl_xmm_set(u32 i, u128 v){ c->x[i].q[0]=(u64)v; c->x[i].q[1]=(u64)(v>>64); }
+static inline u32 fx_dsl_mxcsr(void){ return c->mxcsr|sse_live(); }
+static inline void fx_dsl_mxcsr_set(u32 v){ FOWN_SSE(); fnvl_fp_x87_clear(); c->mxcsr=v; sse_fpcr(v); }
+/* dsl.fp (fnvlift/dsl.py `fp`, the rules are in its docstring and in _fp_smt): scalar binary32 / binary64 add sub mul div sqrt (op 0..4) of the bit patterns a, b under the MXCSR value mx -> the result's
+   bit pattern in the low w bits and THIS operation's flags IE DE ZE OE UE PE (MXCSR bits 0-5) in bits w..w+5. The host does the IEEE operation in the guest's rounding mode (FPCR RC from mx, sse_fpcr);
+   its sticky IOC / DZC / OFC / IXC flags are IE / ZE / OE / PE; NaN operands, DAZ, DE, tininess BEFORE rounding (UE: the round-toward-zero result below the smallest normal, the host's UFC is after
+   rounding and is not used) and FTZ are computed here on the bit patterns. The live host flags of the SSE family are folded into c->mxcsr first (the family's sticky set is c->mxcsr | live), so none is lost. */
+template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a, UT b, u32 mx){
+  const int W=sizeof(UT)*8; const UT SGN=(UT)1<<(W-1), FM=((UT)1<<FB)-1, EX=(UT)((((UT)1<<(W-1))-1)&~FM), QB=(UT)1<<(FB-1), MINN=(UT)1<<FB;
+  const bool daz=(mx>>6)&1, um=(mx>>11)&1, ftz=(mx>>15)&1;
+  auto isnan=[&](UT x){ return (x&EX)==EX && (x&FM)!=0; };
+  auto issnan=[&](UT x){ return isnan(x) && !(x&QB); };
+  auto issub=[&](UT x){ return (x&EX)==0 && (x&FM)!=0; };
+  const bool unary=op==4;
+  const UT ao=a, bo=unary?a:b;
+  if(daz){ if(issub(a)) a&=SGN; if(issub(b)) b&=SGN; }
+  const UT indef=(UT)(SGN|EX|QB);
+  UT val; u32 fl=0;
+  if(isnan(a)||(!unary&&isnan(b))){
+    val=isnan(a)?(UT)(a|QB):(UT)(b|QB); fl=(issnan(a)||(!unary&&issnan(b)))?1u:0u;
+    return ((u128)fl<<W)|val; }
+  FOWN_SSE(); c->mxcsr|=sse_live(); sse_fpcr(mx); fnvl_fp_x87_clear();
+  FT x, y, r; __builtin_memcpy(&x,&a,sizeof x); __builtin_memcpy(&y,&b,sizeof y);
+  __asm__ volatile("" : "+w"(x), "+w"(y));
+  switch(op){ case 0: r=x+y; break; case 1: r=x-y; break; case 2: r=x*y; break; case 3: r=x/y; break; default: r=__builtin_sqrt(x); }
+  __asm__ volatile("" : "+w"(r));
+  const u32 hf=fnvl_fp_x87_flags(); fnvl_fp_x87_clear();
+  const bool ie=hf&1u, ze=(hf>>2)&1u, oe=(hf>>3)&1u, pe=((hf>>5)&1u)!=0;
+  __builtin_memcpy(&val,&r,sizeof val);
+  if(ie){ sse_fpcr(mx); return ((u128)1u<<W)|indef; }
+  const bool de=!daz && (issub(ao)||issub(bo));
+  bool tiny=false;
+  if((UT)(val&~SGN)<=MINN){                                         /* the result may be tiny: the round-toward-zero result decides (tininess before rounding) */
+    sse_fpcr((mx&~(3u<<13))|(3u<<13)); FT z; fnvl_fp_x87_clear();
+    switch(op){ case 0: z=x+y; break; case 1: z=x-y; break; case 2: z=x*y; break; case 3: z=x/y; break; default: z=__builtin_sqrt(x); }
+    __asm__ volatile("" : "+w"(z)); fnvl_fp_x87_clear();
+    UT zb; __builtin_memcpy(&zb,&z,sizeof zb); zb&=~SGN; tiny=zb<MINN && (zb!=0 || pe); sse_fpcr(mx); }
+  bool ue=tiny&&(pe||!um), pe2=pe||oe;
+  if(ftz&&um&&tiny){ val&=SGN; ue=true; pe2=true; }
+  fl=(de?2u:0u)|(ze?4u:0u)|(oe?8u:0u)|(ue?16u:0u)|(pe2?32u:0u);
+  return ((u128)fl<<W)|val; }
+static inline u128 fx_dsl_fp(u32 op, u32 w, u64 a, u64 b, u32 mx){
+  return w==32 ? fx_dsl_fp_t<float,u32,23>(op,(u32)a,(u32)b,mx) : fx_dsl_fp_t<double,u64,52>(op,a,b,mx); }
 static inline int sse_sat(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
 static inline u64 sse_sad(const u8*a,const u8*b){ u32 s=0; for(int i=0;i<8;i++) s+=a[i]>b[i]?a[i]-b[i]:b[i]-a[i]; return s; }
 static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=(u32)(s.b[i]>>7)<<i; return r; }
 /* ---- Integer / system helpers (W14). ---- */
-/* more hardware exception codes for fnvl_raise(code, at); rt/seh.cc maps them (the case in its status mapping is the runtime owner's):
-   FNVL_PRIV 6  STATUS_PRIVILEGED_INSTRUCTION 0xC0000096, a fault: ExceptionAddress = Context.Eip = at
-   FNVL_BOUNDS 7  STATUS_ARRAY_BOUNDS_EXCEEDED 0xC000008C (bound, `int 5`), a fault: Eip = at
-   FNVL_INTO 8  STATUS_INTEGER_OVERFLOW 0xC0000095 (into, `int 4`), a trap: ExceptionAddress = at, Context.Eip = at+1
-   FNVL_ASSERT 9  STATUS_ASSERTION_FAILURE 0xC0000420 (`int 0x2c`): ExceptionAddress = Context.Eip = at
-   `int 3` / `int 0x2d` use FNVL_BP with at = the address of the byte after the opcode byte (see f_sys.py). A #GP from a software interrupt whose gate has DPL 0
-   is fnvl_raise_av(0, 0xFFFFFFFF, at). */
-#define FNVL_PRIV 6
-#define FNVL_BOUNDS 7
-#define FNVL_INTO 8
-#define FNVL_ASSERT 9
+/* The hardware exception codes (FNVL_*) are one table, fnvlift/faults.json (status, trap/fault, address rule, source per row): fnvl_faults.h and the cases of rt/seh.cc are generated from it.
+   `int 3` / `int 0x2d` use FNVL_BP with at = the address of the byte after the opcode byte (see f_sys.py). A #GP from a software interrupt whose gate has DPL 0 is fnvl_raise_av(0, 0xFFFFFFFF, at). */
 extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void); }
 /* The hardware-raise entries of the runtime (rt/seh.cc) are declared ONLY here, inside namespace fnvl_rt, and only FNVL_RAISE / FNVL_RAISE_AV below name them: a lifted unit that calls the raw
    fnvl_raise or fnvl_raise_av (no EFLAGS / C0 C2 C3 flush) does not find the name and is a compile error. They are the same C-linkage functions as the definitions in seh.cc. */
 namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_raise_av(u32 access, u32 addr, u32 at); } }
+#define FNVL_EFL_KEEP 0x244000u      /* the non-arithmetic EFLAGS bits a user-mode popfd can change and pushfd shows: NT (14), AC (18), ID (21) */
 /* EFLAGS image of pushfd: the arithmetic flags and DF of the lifted state, bit 1, IF (9) set, AC and ID from c->eflx, everything else 0.
    popfd loads CF PF AF ZF SF DF OF; AC and ID are kept in c->eflx; TF/IF/IOPL/NT/RF/VM/VIF/VIP changes are ignored (user mode cannot change them). */
-#define EFL_PUSH() ((u32)((cf&1)|2u|((pf&1)<<2)|((af&1)<<4)|((zf&1)<<6)|((sf&1)<<7)|0x200u|((df&1)<<10)|((of&1)<<11)|(c->eflx&0x240000u)))
-#define EFL_POP(v_) do{ u32 f_=(v_); cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c->eflx=f_&0x240000u; }while(0)
+#define EFL_PUSH() ((u32)((cf&1)|2u|((pf&1)<<2)|((af&1)<<4)|((zf&1)<<6)|((sf&1)<<7)|0x200u|((df&1)<<10)|((of&1)<<11)|(c->eflx&FNVL_EFL_KEEP)))
+#define EFL_POP(v_) do{ u32 f_=(v_); cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c->eflx=f_&FNVL_EFL_KEEP; }while(0)
 /* RAISE_OUT / RAISE_IN: the flush rule of every explicit raise site (the lifter emits only FNVL_RAISE / FNVL_RAISE_AV; the raw entries are not visible to a lifted unit).
    Everything the CONTEXT names that the lifted function keeps in locals goes to struct cpu before the call: EFLAGS (the pushfd image, EFL_PUSH) into c->eflags and the x87 condition bits
    C0 C2 C3 (FSW bits 8 10 14) into c->fc; the x87 stack and xmm state are flushed by the same sites (fnvlift f_x87_ctl.store, SYNC_X_OUT). After a continue the handler's EFLAGS and condition
@@ -260,15 +305,7 @@ namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_ra
 #define SEL_CS 0x1bu
 #define SEL_DS 0x23u
 #define SEL_FS 0x3bu
-/* ---- W15: class rules of the system / rare-instruction family (fnvlift/f_sys.py, f_int.py). Appended; nothing above changed. ----
-   More hardware exception codes for fnvl_raise(code, at) (the mapping lines for rt/seh.cc are in the W15 report):
-   FNVL_STEP 10  STATUS_SINGLE_STEP 0x80000004 (`int1` / icebp, F1: a debug TRAP): ExceptionAddress = Context.Eip = at, which is the address of the NEXT instruction
-   (KiTrap01: KiDispatchException0Args(STATUS_SINGLE_STEP, TrapFrame->Eip), no parameters). */
-#define FNVL_STEP 10
-/* FNVL_LOCK 11  STATUS_INVALID_LOCK_SEQUENCE 0xC000001E: #UD of an instruction that has an F0 prefix among its bytes (KiTrap06Handler); at = the instruction, a fault. */
-#define FNVL_LOCK 11
-/* FNVL_DBGSRV 12  `int 0x2d` (the debug service), at = the instruction; the rule of Wine 9.0 handle_interrupt, rt/seh.cc fnvl_raise. */
-#define FNVL_DBGSRV 12
+/* ---- W15: class rules of the system / rare-instruction family (fnvlift/f_sys.py, f_int.py). The fault codes they raise (STEP, LOCK, DBGSRV, FLT_*) are rows of fnvlift/faults.json. ---- */
 /* Segment registers of the process model (rt/seh.cc CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
    (base = TEB, limit 0xFFF); the only descriptors a ring-3 load can reach are the three of the model GDT below, plus the null selector for ES/DS/FS/GS.
    SELK strips the RPL: it keeps the descriptor index and the TI bit (a TI=1 selector names the LDT, which a Win32 process has none of: always invalid). */

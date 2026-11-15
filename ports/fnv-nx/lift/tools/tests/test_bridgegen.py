@@ -9,10 +9,10 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.pat
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
 import bridgegen
 M = 0xffffffff
-OK = ['stack:v:', 'this:i:i', 'this:q:i,q,f,d', 'fast:i:i,i', 'fast:i:i,q,i,i', 'stack:a8:i', 'stack:a12:i', 'stack:a16:', 'stack:a8hf:', 'stack:a8hd:', 'stack:a16hd:', 'stack:a12hf:i',
-      'stack:m20:s4r', 'stack:m4:', 'this:m12:i,q', 'stack:f:s8hf,s16hd,s24hd,s32hd,s3g,s16g', 'stack:d:s100r', 'stack:a3:i', 'stack:a1:', 'this:v:i']
-BAD = ['', 'stack', 'stack:v', 'stack:v:i:i', 'pascal:v:', 'stack:x:', 'stack:v:z', 'stack:a17:', 'stack:a0:', 'stack:aN:', 'stack:m0:', 'stack:v:s0g', 'stack:v:s17g', 'stack:v:s6hf',
-       'stack:v:s20hf', 'stack:v:s40hd', 'stack:a12hd:', 'stack:v:s8', 'stack:v:s8x', 'stack:v:s-8g', 'this:v:', 'this:v:q', 'this:v:f,i', 'fast:m20:i,i', 'stack:v:i,',
+OK = ['stack:v:', 'this:i:i', 'this:q:i,q,f,d', 'fast:i:i,i', 'fast:i:i,q,i,i', 'stack:a8Rg:i', 'stack:a12Hg:i', 'stack:a16Hg:', 'stack:a8Rhf:', 'stack:a8Rhd:', 'stack:a16Hhd:', 'stack:a12Hhf:i',
+      'stack:a20Hm:s4r', 'stack:a4Hm:', 'this:a12Hm:i,q', 'stack:f:s8hf,s16hd,s24hd,s32hd,s3g,s16g', 'stack:d:s100r', 'stack:a3Hg:i', 'stack:a1Rg:', 'this:v:i']
+BAD = ['', 'stack', 'stack:v', 'stack:v:i:i', 'pascal:v:', 'stack:x:', 'stack:v:z', 'stack:a17Hg:', 'stack:a0:', 'stack:aN:', 'stack:a0Hm:', 'stack:v:s0g', 'stack:v:s17g', 'stack:v:s6hf',
+       'stack:v:s20hf', 'stack:v:s40hd', 'stack:a12Hhd:', 'stack:v:s8', 'stack:v:s8x', 'stack:v:s-8g', 'this:v:', 'this:v:q', 'this:v:f,i', 'stack:v:i,',
        'stack:v:,i', 'stack: v:', 'STACK:v:']
 
 
@@ -44,9 +44,9 @@ def main():
     check('this: the object is not on the stack, the others are (4 words: q 2, f 1, d 2 minus nothing)', 'fnvnx_guest_invoke_regs(fp, a0, 0, 5,' in bridgegen.emit('this:q:i,q,f,d', 'b'))
     check('fast: ecx, edx take the first two `i`; a q in between is on the stack', 'fnvnx_guest_invoke_regs(fp, a0, a2, 2,' in bridgegen.emit('fast:i:i,q,i', 'b'))
     check('fast: i after two registers is on the stack', 'fnvnx_guest_invoke_regs(fp, a0, a1, 1,' in bridgegen.emit('fast:i:i,i,i', 'b'))
-    check('result in memory: the hidden pointer is stack word 0', 'args[0] = (u32)(unsigned long)&res;' in bridgegen.emit('stack:m20:i', 'b'))
-    check('a12 is in memory on x86 (not 1, 2, 4, 8 bytes), a8 is edx:eax', 'args[0] = (u32)(unsigned long)&res;' in bridgegen.emit('stack:a12:', 'b') and 'out.edx' in bridgegen.emit('stack:a8:', 'b'))
-    check('x87 result: kind 2; q and an 8-byte aggregate: kind 1; others kind 0', all(('fnvnx_guest_invoke_regs(fp, 0, 0, 0, args, %d, &out)' % k) in bridgegen.emit(d, 'b') for d, k in (('stack:d:', 2), ('stack:f:', 2), ('stack:q:', 1), ('stack:a8:', 1), ('stack:a8hd:', 1), ('stack:i:', 0), ('stack:a4:', 0))))
+    check('result in memory: the hidden pointer is stack word 0', 'args[0] = (u32)(unsigned long)&res;' in bridgegen.emit('stack:a20Hm:i', 'b'))
+    check('a12 is in memory on x86 (not 1, 2, 4, 8 bytes), a8 is edx:eax', 'args[0] = (u32)(unsigned long)&res;' in bridgegen.emit('stack:a12Hg:', 'b') and 'out.edx' in bridgegen.emit('stack:a8Rg:', 'b'))
+    check('x87 result: kind 2; q and an 8-byte aggregate: kind 1; others kind 0', all(('fnvnx_guest_invoke_regs(fp, 0, 0, 0, args, %d, &out)' % k) in bridgegen.emit(d, 'b') for d, k in (('stack:d:', 2), ('stack:f:', 2), ('stack:q:', 1), ('stack:a8Rg:', 1), ('stack:a8Rhd:', 1), ('stack:i:', 0), ('stack:a4Rg:', 0))))
     # pure function of the set
     good = sorted(set(OK))
     ok1, rows = bridgegen.generate(good)
@@ -75,12 +75,12 @@ def main():
     def parses(d):
         try: return bridgegen.parse(d)
         except ValueError: return None
-    check('a8x (a non-POD of 8 bytes): hidden pointer, not registers', parses('stack:a8x:i') and not parses('stack:a8x:i')[3] and parses('stack:a8:i')[3])
-    check('a12 under fast: the hidden pointer is on the stack (PS), allowed', parses('fast:a12:i,i') is not None)
-    check('a non-POD result under fast: the register is not documented, error', parses('fast:a8x:i') is None and parses('fast:m20:i') is None)
+    check('a8x (a non-POD of 8 bytes): hidden pointer, not registers', parses('stack:a8Hg:i') and not parses('stack:a8Hg:i')[3] and parses('stack:a8Rg:i')[3])
+    check('a12 under fast: the hidden pointer is on the stack (PS), allowed', parses('fast:a12Hg:i,i') is not None)
+    check('a non-POD result under fast: the register is not documented, error', parses('fast:a8Hg:i') is None and parses('fast:a8Hm:i') is None)
     check('x on a scalar result is an error', parses('stack:ix:') is None)
     check('element codes hq hh hv8 hv16 parse, an undivided size does not', all(parses('stack:v:s%d%s' % x) for x in ((16, 'hq'), (4, 'hh'), (16, 'hv8'), (32, 'hv16'))) and parses('stack:v:s12hq') is None and parses('stack:v:s40hd') is None)
-    t, r = bridgegen.generate(['stack:a8x:i', 'stack:v:s16hq'])
+    t, r = bridgegen.generate(['stack:a8Hg:i', 'stack:v:s16hq'])
     check('x and hq descriptors generate bridges', len(r) == 2)
     print('bridgegentest: %d failed' % bad); sys.exit(1 if bad else 0)
 

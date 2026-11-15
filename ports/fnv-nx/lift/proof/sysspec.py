@@ -12,14 +12,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import shape, symform, x86sys  # noqa: E402
+from proof import privset, shape, symform, x86sys  # noqa: E402
 from fnvlift import dsl  # noqa: E402
 
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
 
-# mnemonic -> (SDM page, #GP(0) at CPL 3 under the declared facts?)
-PRIV = {m: 'SDM Vol. 2 %s: Protected Mode Exceptions: #GP(0) if the CPL is greater than %s' % (m.upper(), 'IOPL (CLI/STI) / and no I/O bitmap grant (IN/OUT/INS/OUTS)' if m in ('cli', 'sti', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd') else '0')
-        for m in ('cli', 'sti', 'hlt', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd', 'lldt', 'ltr', 'lgdt', 'lidt', 'rdmsr', 'wrmsr', 'invd', 'wbinvd', 'clts', 'lmsw', 'invlpg', 'rdpmc')}
+# mnemonic -> (class, SDM citation, sentence): the privileged set read from the SDM rows (sdmpriv.py via privset.py)
+PRIV = privset.citations()
+CONDROW = {'rdpmc': ('cr4', 'pce'), 'sgdt': ('cr4', 'umip'), 'sidt': ('cr4', 'umip'), 'sldt': ('cr4', 'umip'), 'smsw': ('cr4', 'umip'), 'str': ('cr4', 'umip')}      # the record row that decides the #GP(0) condition of a `cond` SDM row
+COND = {m for r in privset.rows() if r['class'] == 'cond' for m in r['mnemonics'] if m in CONDROW}      # a #GP(0) that needs another condition (the SDM sentence names CR4.PCE / CR4.UMIP): its row of the record decides
 CLASS_B = {'int3': (K_BP, None), 'int1': (K_STEP, None), 'into': (K_INTO, 'of')}
 
 
@@ -38,19 +39,24 @@ def sreg_load(ins):
     return m in ('lds', 'les', 'lss', 'lfs', 'lgs') or (m in ('mov', 'pop') and ins.op_str.split(',')[0].strip() in SREGS)
 
 
+def cond_fires(m, rec):
+    """the #GP(0) condition of a `cond` row holds in every state: RDPMC faults at CPL 3 when CR4.PCE is clear, SGDT/SIDT/SLDT/SMSW/STR when CR4.UMIP is set (SDM sentences of sdm_priv_rows.tsv)"""
+    return x86sys.get(rec, *CONDROW[m]) == (0 if m == 'rdpmc' else 1)
+
+
 def needs(key, rec):
     """the rows of the declared-machine record that the SDM semantics of the shape depends on -> None when all are decided, else the blocker ("record has no row ...", the row's `why`)"""
     ins = next(iter(shape.decoder().disasm(shape.rep_bytes(key), shape.ADDR))); m = ins.mnemonic.split()[-1]
     rows = []
-    if m in PRIV:
+    if m in COND:
+        rows.append(CONDROW[m])
+    if m in PRIV or m in COND:
         rows.append(('selectors', 'cs'))                                  # CPL = the RPL of cs
-        if m in ('cli', 'sti') or m in IO:
+        if m in PRIV and PRIV[m][0] == 'iopl':
             rows.append(('eflags', 'iopl'))                              # SDM: #GP(0) if CPL > IOPL
         if m in IO:
             rows.append(('tss_io_bitmap',))                              # SDM IN/OUT/INS/OUTS: then the I/O permission bitmap of the TSS decides
-        if m == 'rdpmc':
-            rows.append(('cr4', 'pce'))                                  # SDM RDPMC: #GP(0) if CR4.PCE = 0 and CPL > 0
-    elif m == 'int':
+    if m == 'int':
         rows += [('int_ring3', 'vectors'), ('int_ring3', 'other_vectors')]
     elif sreg_load(ins):
         rows += [('mov_to_sreg', 'undecided')]
@@ -79,7 +85,7 @@ def needs(key, rec):
 def check(key):
     import z3
     m = mnemonic(key)
-    if m not in PRIV and m not in CLASS_B and not needs_any(m):
+    if m not in PRIV and m not in COND and m not in CLASS_B and not needs_any(m):
         return 'not-covered', 'no spec for %s' % m
     if m in CLASS_B:
         return class_b(symform.symbuild(key).form, m)                                              # no row of the record is involved: the SDM condition alone
@@ -92,15 +98,16 @@ def check(key):
         return 'uncertified', 'uncertified: %s' % why
     if x86sys.get(rec, 'cr4', 'umip') != 0:
         return 'FAILED(facts)', 'cr4.umip is set on the declared machine: UMIP semantics are not specified'
-    if m not in PRIV and m not in CLASS_B:
+    if m not in PRIV and m not in COND and m not in CLASS_B:
         return 'not-covered', 'no spec for %s (its record rows are decided)' % m
     f = symform.symbuild(key).form
     if f.regs or f.flags or f.stores or f.flo is not None:
         return 'FAILED(dsl)', 'a class (a)/(b) instruction changes state'
     ft = [(k, c) for k, c in f.faults]
-    if m in PRIV:
-        if not (x86sys.cpl(rec) == 3 and x86sys.get(rec, 'eflags', 'iopl') == 0) or m in IO or m == 'rdpmc':
-            return 'not-covered', 'no spec for %s under the record' % m
+    if m in PRIV or m in COND:
+        cpl = x86sys.cpl(rec)
+        if m in IO or cpl == 0 or (m in PRIV and PRIV[m][0] == 'iopl' and cpl <= x86sys.get(rec, 'eflags', 'iopl')) or (m in COND and not cond_fires(m, rec)):
+            return 'not-covered', 'no spec for %s under the record (the instruction does not fault at CPL %d)' % (m, cpl)
         if len(ft) != 1 or ft[0][0] not in (K_PRIV, K_AV):
             return 'FAILED(dsl)', 'expected one #GP(0) fault (PRIV or AV), got %s' % [k for k, _ in ft]
         s = z3.Solver(); s.add(dsl.to_smt(ft[0][1]) != 1)
