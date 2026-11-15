@@ -22,6 +22,9 @@
  *       vtable                a GCC table group; its address points are named in .fnvnx.vtpair
  *       gcc                   an Itanium ABI object with no counterpart in the exe (VTT, construction table,
  *                             typeinfo, guard variable): the MSVC name is empty
+ *       noemit                a function this unit defines whose body GCC wrote nowhere in the object (inlined at every use): a cl name, no symbol, def=ref
+ *
+ * THE closed set of kinds is FNVNX_SYMPAIR_KINDS in sympair_kinds.inc (with a meaning per kind); the plugin refuses a row outside it.
  *       nodecor:<reason>      a typed fact: the decoration source has no name for the symbol (localscope: cl's local scope numbering, fnparmform: the
  *                             declared form of a function-type parameter, vtordisp: the exe's vbptr layout, or a tree code). Not a fallback: a gate
  *                             is red only for a symbol the exe's or a module's own facts reach (the crossing join), never for a row
@@ -699,6 +702,7 @@ enum CrossFact { CF_BINFO_VIRTUAL, CF_PTRMEM, CF_VA_LIST_NODE };
 struct CrossTerm { const char *id; CrossFact fact; };
 static const CrossTerm cross_terms[] = {
 #include "../layout/crossing_terms.inc"
+#include "sympair_kinds.inc"   /* FNVNX_SYMPAIR_KINDS: the closed set of the kind column of .fnvnx.sympair */
 };
 
 static bool cross_holds(CrossFact f, tree t, std::set<tree> &seen)
@@ -1417,8 +1421,14 @@ static void finish_unit(void *, void *)
     }
   }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.sympair,\"\",%%progbits\n");
-  for (auto &r : rows)
+  for (auto &r : rows) {
+    bool known = r.kind.compare(0, 8, "nodecor:") == 0 && r.kind.size() > 8;
+#define FNVNX_KIND_IS(n, meaning) known = known || r.kind == #n;
+    FNVNX_SYMPAIR_KINDS(FNVNX_KIND_IS)
+#undef FNVNX_KIND_IS
+    if (!known) error("%<.fnvnx.sympair%>: the kind \"%s\" of %s is not in FNVNX_SYMPAIR_KINDS (sympair_kinds.inc)", r.kind.c_str(), r.sym.c_str());
     fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t%s\\t%s\\n\"\n", r.sym.c_str(), r.ms.c_str(), r.kind.c_str(), r.def ? "def" : "ref");
+  }
   /* .fnvnx.names: every function and object the unit named, whether or not the object has a symbol for it (a
      function inlined everywhere has none): `<symbol>\t<MSVC name>`. Read by gates that follow a call the compiler
      inlined (tools/link/argordergate.py); the contract's pairs are .fnvnx.sympair's. */

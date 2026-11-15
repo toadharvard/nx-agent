@@ -107,6 +107,20 @@ if ids:
 n, c, ids = judge(obj('xa6', [], sym=SY, cross='f\t-\n'), obj('xb6', [], sym='f\t?f@@YAXXZ\tfunc\tref\n'))
 if ids:
     fails.append('crossing: one row in a unit that declares it suffices: %r' % ids)
+# noemit (toolchain/names/sympair_kinds.inc): the unit defines the function, GCC wrote it nowhere; the row is read, never a reference and never a boundary symbol
+NE = 'f\t?f@@YAXXZ\tnoemit\tref\n'
+n, c, ids = judge(obj('na1', [], sym=NE), obj('nb1', []))
+if ids:
+    fails.append('noemit: a row with no symbol in the object, no crossing line, is green (no pairing, no crossing obligation): %r' % ids)
+n, c, ids = judge(obj('na2', [], sym=NE, cross='f\tpointer_to_member\n'), obj('nb2', []))
+if ids:
+    fails.append('noemit: its crossing line is a fact about the signature, with no symbol to bind it to: %r' % ids)
+n, c, ids = judge(obj('na3', [], sym=NE), obj('nb3', [], sym=SY.replace('def', 'def'), cross='f\t-\n'))
+if ids:
+    fails.append('noemit in one unit, the definer in another: the definer\'s row is judged, green: %r' % ids)
+n, c, ids = judge(obj('na4', [], sym='f\t?f@@YAXXZ\tbogus\tdef\n'), obj('nb4', []))
+if not any('unreadable' in i for i in ids):
+    fails.append('a kind outside the plugin set is red: %r' % ids)
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

@@ -57,7 +57,7 @@ def edges(v, x, cookie):
 
 def undeclared(ob, v, pristine, objs, x, cookie, own):
     """None when every edge of the copy is declared as the rule says, else (address, reason) of the lowest failing edge."""
-    refs = [(ms, k) for _, ms, k, d in objs.get((ob, 'sympair'), ()) if d == 'ref']
+    refs = [(ms, k) for _, ms, k, d in objs.get((ob, 'sympair'), ()) if d == 'ref' and k != 'noemit']   # a noemit row is the unit's own definition with no symbol (sympair_kinds.inc), not a reference to a body elsewhere
     for y in sorted(e for e in edges(v, x, cookie) if e not in own):
         if (ob, 'sympair') not in objs:
             return y, 'object has no .fnvnx.sympair section'

@@ -83,6 +83,13 @@ if gcc and oc:
         except ValueError as e:
             check('read error names object and section', str(e).startswith('t3.o:.fnvnx.vtpair: line 1'), True)
 
+import re as _re
+_inc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'toolchain', 'names', 'sympair_kinds.inc')).read()
+check('the kind set is the plugin definition (one X(name, "meaning") per kind of sympair_kinds.inc), noemit among them',
+      (L.KINDS == frozenset(_re.findall(r'^\s*(?:#define FNVNX_SYMPAIR_KINDS\(X\)\s*\\\n\s*)?X\(([^,()\s]+),', _inc, _re.M)) and 'noemit' in L.KINDS and len(L.KINDS) == _inc.count('X(') - 1), True)
+check('sympair noemit row', L.parse_sympair(b'_Z1fv\t?f@@YAXXZ\tnoemit\tref\n', 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'noemit', 'ref')])
+err('sympair noemit needs the cl name', L.parse_sympair, b'_Z1fv\t\tnoemit\tref\n', 'without an MSVC name')
+
 for f in fails:
     print('FAIL', f)
 print('path: ' + how, file=sys.stderr)

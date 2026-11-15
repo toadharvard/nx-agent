@@ -14,10 +14,18 @@ Itanium type strings (the producer's own separator; the task brief said `;`).  A
 `<where>: line N: <what>`; no line is skipped, a final line without LF is an error, an empty section is [].
 Pure: bytes in, tuples out (rows keep the section's order).
 """
-import os, sys
+import os, re, sys
 
-KINDS = frozenset(('func', 'data', 'ctor.c1', 'ctor.c2', 'dtor.d2', 'dtor.d1', 'dtor.d0', 'dtor.sdd', 'dtor.sdd.thunk',
-                   'thunk', 'vtable', 'gcc', 'internal'))     # `vtable`: NAMES1 writes it for the table groups
+def _sympair_kinds():
+    """the closed set of sympair kinds, read from where the names plugin defines it once (toolchain/names/sympair_kinds.inc, FNVNX_SYMPAIR_KINDS)"""
+    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'toolchain', 'names', 'sympair_kinds.inc')
+    m = re.search(r'#define FNVNX_SYMPAIR_KINDS\(X\)(.*?)\n\n|#define FNVNX_SYMPAIR_KINDS\(X\)(.*)\Z', open(inc).read(), re.S)
+    if not m:
+        raise ValueError('%s: no FNVNX_SYMPAIR_KINDS' % inc)
+    return frozenset(re.findall(r'X\(([^,()\s]+),', m.group(1) or m.group(2)))
+
+
+KINDS = _sympair_kinds()     # `vtable`: NAMES1 writes it for the table groups; `noemit`: a function the unit defines with no symbol in the object (the .inc)
 NAMELESS = frozenset(('thunk', 'vtable', 'gcc', 'internal'))
 N3_KINDS = frozenset(('', 'thunk', 'inline', 'sdd', 'alias'))
 
