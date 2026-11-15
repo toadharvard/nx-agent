@@ -317,7 +317,7 @@ def gs_guard(cx, ins):
         cx.em(f_sys.gp_cond(cx, '1'))
         return
     # the null_seg_access row of x86sys (L5): an access through an effective segment register S (prefix, or the default) that may hold the null selector raises the row at this instruction; PRIV vs AV by the
-    # row's opcode set. S may hold null in this image iff its initial selector (x86sys selectors) is null or the image has a write site of S (tools/segwrites.py, the SEGWRITES fact); ss and cs never
+    # row's opcode set. S may hold null in this image iff the SEGWRITES fact (tools/segwrites.py) does not prove it non-null: its initial selector is null, or a write of S loads a selector not proven non-null; ss and cs never
     # hold it (loading null is #GP, x86sys mov_to_sreg). lea and the NO_ACCESS mnemonics have no access (returned above); a prefixed instruction without a memory operand has no operand here.
     from . import x86sys
     SEGI = {X.X86_REG_ES: 0, X.X86_REG_DS: 3, X.X86_REG_FS: 4, X.X86_REG_GS: 5}
@@ -354,13 +354,10 @@ def may_null(i):
     n = {0: 'es', 3: 'ds', 4: 'fs', 5: 'gs'}[i]
     if n not in x86sys.SEL:
         raise Unsupported('%s: the initial selector is undecided in x86sys selectors' % n)
-    if x86sys.SEL[n] & 0xfffc == 0:
-        return True
     path = inputs.get('segwrites')
     if path not in _SEGW:
-        d = json.load(open(path)); assert d['format'] == 'fnvnx-segwrites/1', d['format']; _SEGW[path] = d['images']
-    im = _SEGW[path][inputs.get('image')]
-    return im[n] > 0
+        d = json.load(open(path)); assert d['format'] == 'fnvnx-segwrites/2', d['format']; _SEGW[path] = d['images']
+    return _SEGW[path][inputs.get('image')][n]['guard']
 
 
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):

@@ -17,10 +17,11 @@ import tempfile
 from fnvlift import inputs
 
 
-def configure(**counts):
+def configure(**guard):
     inputs.reset()
     d = tempfile.mkdtemp(prefix='nullseg-')
-    json.dump({'format': 'fnvnx-segwrites/1', 'images': {'buf': {**dict(es=0, ds=0, fs=0, gs=0), **counts}}}, open(d + '/segwrites.json', 'w'))
+    g = {**dict(es=False, ds=False, fs=False, gs=True), **guard}
+    json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': v} for n, v in g.items()}}}, open(d + '/segwrites.json', 'w'))
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
     inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, segwrites=d + '/segwrites.json', image='buf')
 
@@ -43,7 +44,7 @@ for seg in ('es', 'ds', 'fs'):
 t = lift(bytes([0x8b, 0x00, 0xc3])); assert 'SELK(c->sel[3])==0' not in t
 t = lift(bytes([0x65, 0x8b, 0x00, 0xc3])); assert GUARD['gs'] in t and AVC in t, t[:400]
 # a write site of S in the image: every access through S is guarded, prefixed or default; ss (ebp/esp base) never
-configure(ds=2, es=1, fs=1)
+configure(ds=True, es=True, fs=True)
 for seg in ('es', 'ds', 'fs', 'gs'):
     t = lift(bytes([PFX[seg], 0x8b, 0x00, 0xc3])); assert GUARD[seg] in t and AVC in t, (seg, t[:300])
 assert GUARD['ds'] in lift(bytes([0x8b, 0x00, 0xc3]))                   # default ds

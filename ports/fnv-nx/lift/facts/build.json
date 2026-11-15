@@ -40,6 +40,10 @@
   {
    "root": "ports/fnv-nx/lift/factsimg/libvorbisfile",
    "output": "IMG"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "X86SYS"
   }
  ],
  "generated": [
@@ -92,7 +96,9 @@
     "--exe",
     "/ext/exe/FalloutNV.exe",
     "--moddirs",
-    "/ext/exe:/ext/redist"
+    "/ext/exe:/ext/redist",
+    "--x86sys",
+    "/uses/ports/fnv-nx/platform/X86SYS"
    ],
    "inputs": [
     {
