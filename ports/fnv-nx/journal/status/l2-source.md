@@ -482,3 +482,9 @@ After the first frame:
   - DECLTYPE-COMPLETE: one line per symtab symbol, with reasons from the closed set FNVNX_DECLTYPE_REASONS (mangled, builtin, libcall, noname, cxx). Three universe gaps are closed by rule: back-end libcalls (external_libcall hook), referenced builtins, and asm-label decls (interned at finish_decl; a real SYMSET gap, it also fixes sympair). dsound repro: 84 symtab = 84 lines.
   - Open: the global test_layout count and the libstdc++.a section size, both measured on the rebuilt pin.
 - 2026-11-15 19:30Z: 6280f1295 (key 9f0d5729908efe09, w3) supersedes 6315e193a as the rebuild base. The newlib units ffsl.c and ffsll.c define a function that GCC also declares as a builtin, which produced two spellings. The rule: the builtin decl and the unit's own decl of the same symbol are one symbol, and the typed row is the line. Every other difference stays an error. A regression fixture was added.
+- 2026-11-15 19:45Z: NEW PIN @05082bde6223bfc0e30990623b0a41310db754f5, tree_sha256 da6a3d1b251ead3666b3069167097f803ed79ca279bec76ff7a89183408031ec. It supersedes b36df930.
+  - build_key 9f0d5729908efe09, equal to stamp.py at 6280f1295 (checked).
+  - Built once from plugins 6280f1295 with the strip rule: DECLTYPE-SPEC, the empty-base layout fix, DECLTYPE-COMPLETE and the ffsl builtin rule.
+  - newlib, libgcc and libstdc++ built with 0 errors.
+  - The farm sent the pin to L1 and L5.
+  - Next: w2 updates the guest_compiler.json pin fields for cand2 and reruns its tests; w3 runs the full layout and datamodel reruns plus the symtab = lines check over the whole runtime.
