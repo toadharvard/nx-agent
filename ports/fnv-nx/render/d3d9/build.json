@@ -28,7 +28,8 @@
   "ports/fnv-nx/render/nxgpu",
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/lib/sha256/include",
-  "ports/fnv-nx/render/d3d9/gen"
+  "ports/fnv-nx/render/d3d9/gen",
+  "ports/fnv-nx/render/pair/include"
  ],
  "units": "all",
  "generated": [

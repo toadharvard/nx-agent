@@ -1,0 +1,52 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [],
+  "cxx": [
+   "-std=gnu++20",
+   "-Wall",
+   "-Werror",
+   "-O2",
+   "-fPIC",
+   "-DFNVNX_SDD=1",
+   "-fno-devirtualize"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/render/pair/include",
+  "ports/fnv-nx/render/shaders/translator/include"
+ ],
+ "units": "all",
+ "link": null,
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi"
+  },
+  {
+   "name": "fnvnx_order"
+  },
+  {
+   "name": "fnvnx_sdd"
+  },
+  {
+   "name": "fnvnx_pi"
+  },
+  {
+   "name": "fnvnx_dispatch"
+  },
+  {
+   "name": "fnvnx_addr"
+  },
+  {
+   "name": "fnvnx_names"
+  },
+  {
+   "name": "fnvnx_layout"
+  }
+ ]
+}
