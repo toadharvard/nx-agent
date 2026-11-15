@@ -54,10 +54,9 @@ def _w(repo, rel, text):
 
 
 def _plugin(name, args):
-    p = {'name': name, 'source': source_of(name), 'args': dict(args)}
-    if name in recipe.PLUGIN_INPUTS:
-        p['inputs'] = recipe.PLUGIN_INPUTS[name]
-    return p
+    """a root's plugin entry is {"name": PLUGIN}: source, inputs and arguments are fixed by recipe.py alone (a test never carries them)"""
+    assert not args or args == recipe.plugin_args('native').get(name) or name == 'fnvnx_ftoi', 'plugin %s: arguments are fixed by recipe.py' % name
+    return {'name': name}
 
 
 EXTRA = {'external': [], 'include': [], 'copy': []}   # a test of a header that needs more of the real tree: pinned externals, include dirs, (real repo dir, name under the toy root) copied whole

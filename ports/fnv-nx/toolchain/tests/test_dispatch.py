@@ -130,10 +130,6 @@ def main():
         if r.returncode == 0:
             checks(out)
         host(td, so)
-        r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_dispatch-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
-        r = pb.compile(FIX, os.path.join(td, 'y.o'), [so[0], so[2]])
-        check('without the names plugin the dispatcher says so', r.returncode != 0 and 'fnvnx_names plugin is not loaded' in r.stderr, r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

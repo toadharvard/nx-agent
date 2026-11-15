@@ -48,7 +48,8 @@
         "-fno-stack-clash-protection",
         "-U_FORTIFY_SOURCE",
         "-fno-math-errno",
-        "-fno-reorder-blocks-and-partition"
+        "-fno-reorder-blocks-and-partition",
+        "-D__FNVNX_HOST_ATTR__=1"
       ],
       "lifted_extra": [
         "-ffreestanding",
