@@ -1806,3 +1806,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 warm verdict on w15.
 - 21:10 L2: the cand2 toolchain/ and targets.json come whole from claude/fnv-l2-source-plugins 17fb4961a (tree 1b2b42da = pin; stamp 74cafda2, stages K1 79be858a / K2 74cafda2). Sent to w15. The cold pin build takes 787 s (gcc 396, plugins 160, runtime 231); a plugin-only change will skip gcc once the farm proves the restore path.
 bottleneck: the cand2 warm verdict on w15.
+- 21:12 w15 cand2 at 265c4ea4a: pin 56a4d09c/cbb8843f applied; stamp 74cafda21648518e; compiler_stamp_errors=[]; fa5235a50 reverted, 34a4a4b2a picked. toolchain/ equals 17fb4961a except stamp.py, test_stamp.py and plugbuild.py, which now read the include closure (the stamp is unchanged, so the key is valid). Those 3 files go back to L2's plugins branch after the merge. Real-compiler selftests are running, then shard_merge, then the warm verdict.
+bottleneck: the cand2 warm verdict on w15.
