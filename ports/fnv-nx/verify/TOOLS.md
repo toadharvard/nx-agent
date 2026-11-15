@@ -514,10 +514,11 @@ boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest
                                [--gpu-branch <artifacts branch>]
 
 Steps:
- 1 setup: what the stage needs (python3, git, the aarch64 binutils readelf/nm that icount.py spec runs, unicorn==2.1.4)
+ 1 setup: what the stage needs (python3, git, unicorn==2.1.4; no binutils: the ELF facts come from the link record)
    is checked first; only what is missing is installed (apt-get, pip), and an install that fails fails the job
  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
-   them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
+   them, and fails on any row or line it does not understand): elffacts.json (the link record of the ELF, L1: its sections and defined symbols, read through
+   bootfacts.py), guest.elf, or manifest.json + part.NNN (joined in manifest
    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
@@ -713,7 +714,7 @@ Register ids are normalised through MCRegisterInfo super-register chains to the 
 ```text
 The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions.
 
-  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
+  boot.py run --elf GUEST.elf --facts elffacts.json --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
               --quantum N [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
@@ -857,9 +858,8 @@ Address-space plan of the emulator boot stage for the guest ELF (elf32-littleaar
 
 Pure and stdlib-only: no unicorn, clock, environment or randomness; every iteration runs over sorted/ordered data.
 The guest loader later maps the original Windows exe image (0x00400000..) and the module images through a host call, so
-the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census. CLI:
-`python3 -I verify/bootlayout.py plan -h`. A condition that cannot be met raises LayoutError (CLI: message, exit 1);
-there is no alternative placement and no default.
+the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, file_bytes. A condition that cannot be met raises
+LayoutError; there is no alternative placement and no default.
 
 Rules (each with its argument):
 1. parse_elf: EI_CLASS=ELFCLASS32, EI_DATA=little, e_machine=EM_AARCH64 (183), e_type=ET_DYN and DT_FLAGS_1 with
@@ -877,17 +877,30 @@ Rules (each with its argument):
    (4 KiB) at 0x3F000000, heap at 0x40000000, end <= 2^32. Fixed regions are not moved: a clash is an error. Totality:
    `checks` lists every unordered pair of {regions + reserved} exactly once, each verified disjoint here, so the
    plan's disjointness is auditable without re-deriving it. `free` repeats the (aligned) reserved ranges.
-4. reloc_census: the guest relocates itself at run time, so the stage applies no relocation; it only proves that the
-   image is self-contained. Counts of dynamic relocations per type from DT_RELA/DT_RELASZ (Elf32_Rela), DT_REL and
-   DT_JMPREL (decoded per DT_PLTREL) and the DT_RELR entry count (DT_RELRSZ / DT_RELRENT, default 4). Allowed: type
-   R_AARCH64_P32_RELATIVE = 183 in DT_RELA (AAELF64 ILP32 relocations, binutils include/elf/aarch64.h, glibc elf.h)
-   and any DT_RELR; anything else (other types, non-empty DT_REL / DT_JMPREL) is an error listing the counts.
-   The census is part of the plan.
-   crt0 header (parse_elf): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
+4. crt0 header (parse_elf; the guest relocates itself at run time, so the stage applies no relocation and reads no relocation table): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
    lowest PT_LOAD vaddr aligned down, u32 size (+20) == page-aligned span, u32 flags (+24) with bit0 (relocatable).
    Regions and reserved ranges all lie at or above 0x10000 (the guest's low pages stay unmapped).
-5. CLI plan (--keys mandatory): deterministic JSON (sorted keys, indent 1, format "fnvnx-bootlayout/1").
+5. entry: plan() takes the image entry from its caller (`entry=`: header.entry of the link record, bootfacts.entry; the ELF header is not read for
+   it) and requires it to lie inside the image span; the plan's image.entry is base + entry. There is no CLI: boot.py builds the plan.
 ```
+
+
+## verify/bootfacts.py
+
+The L4 views of the ELF facts of a linked output: lookups in the link record (L1's "fnvnx-elffacts/2", `elffacts.json` beside the linked ELF), which is
+the one source of sections and defined symbols (L4 reads no section or symbol table of an ELF, and runs no readelf or nm on one).
+
+```text
+load(path)                      the record, its format checked (FactError)
+sections_by_name(rec)             {section name: [(address, size), ...]}
+symbol_values(rec)            {symbol name: [value, ...]}   the record lists the defined symbols (L1 leaves out STT_SECTION and STT_FILE)
+entry(rec)                      header.entry of the record (FactError when absent)
+symbol(rec, name)               the one value; FactError unless the name is defined exactly once
+symbol_bytes(rec, data, name)   the st_size bytes of the symbol, read from the image DATA through its PT_LOAD program headers
+                                (bootlayout.file_bytes); FactError for a bss symbol
+```
+Consumers: icount.py spec, boot.py run, bootmiles.py resolve and lockobs.py (all take `--facts elffacts.json`; boot.py reads the image itself from `--elf` for its program headers only), tests/test_bootmachine.py
+(modes_of, symbol, facts_path). bootmiles.symbols / alloc_sections apply the symbol rules (global vs local, mapping symbols) to the record. Tests: tests/test_bootfacts.py (the guest image's own record).
 
 ## verify/bootmachine.py
 
@@ -1790,7 +1803,8 @@ Deterministic executed-instruction counter for a Unicorn AArch64 guest (the owne
 Library: attach(uc, lo, hi, spec=None, bias=0) installs one UC_HOOK_BLOCK over [lo, hi) and returns an Icount;
 the emulator tells it thread(tid), mark(name, out_of_order=False) and stop(reason, **events); write(path) or report()
 gives the OUT.json document ("fnvnx-icount/1", see report()). CLI: `python3 -I verify/icount.py spec ...` builds the
-SPEC.json that classes (ranges, entries) are read from; run `spec -h`.
+SPEC.json that classes (ranges, entries) are read from, from the link record `--facts elffacts.json` of the ELF
+(bootfacts.py: the one source of sections and defined symbols; no ELF is read here); run `spec -h`.
 
 Counting rule: a block of `size` bytes adds size/4 instructions. The static facts of a block (instructions per opcode
 class, per range class, entry) are computed once per (address, size) from the block's bytes and cached, so the hook

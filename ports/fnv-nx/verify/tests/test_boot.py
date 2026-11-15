@@ -60,7 +60,7 @@ def main():
 
     def args(elf, out, tbl=table, man=manifest, *extra):
         tb.write_mode(root, modes[elf])
-        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", 
+        return ["run", "--elf", elf, "--facts", tb.facts_path(), "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", 
                 "--root", root, "--quantum", str(tb.QUANTUM), "--milestones", tbl, "--manifest", man, "--out", os.path.join(d, out), *extra]
 
     rc, o, e = cli(args(elf6, "a.json"))

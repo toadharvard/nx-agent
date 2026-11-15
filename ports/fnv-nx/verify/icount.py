@@ -34,7 +34,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # run as `python3 -I icount.py`: the script's directory is not on the path
-import bootlayout  # noqa: E402
+import bootfacts  # noqa: E402
 
 FORMAT = "fnvnx-icount/1"
 CLASS_HEADER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests", "icount", "icount_classes.h")   # the one record of the class ids
@@ -256,15 +256,15 @@ class Icount:
 
 
 # -- spec subcommand
-def build_spec(elf, ranges, entries):
+def build_spec(facts, ranges, entries):
     """ranges: ["NAME=section:S" | "NAME=symrange:A,B"], entries: ["NAME=symfile:FILE"] -> SPEC dict; ValueError on a miss. The section ranges and the
-    symbol values are read from the ELF file itself (bootlayout.section_ranges, bootlayout.defined_symbols): no external program."""
-    with open(elf, "rb") as f:
-        data = f.read()
+    symbol values are read from FACTS, the path of the link record of the ELF (elffacts.json, bootfacts.py): no ELF and no external program."""
+    elf = os.path.basename(os.path.dirname(os.path.abspath(facts))) or facts
     try:
-        secs, syms = bootlayout.section_ranges(data), bootlayout.defined_symbols(data)
-    except bootlayout.LayoutError as e:
-        raise ValueError(f"{elf}: {e}")
+        rec = bootfacts.load(facts)
+    except bootfacts.FactError as e:
+        raise ValueError(str(e))
+    secs, syms = bootfacts.sections_by_name(rec), bootfacts.symbol_values(rec)
 
     def sym(n):
         if n not in syms:
@@ -305,14 +305,14 @@ def main(argv):
     import argparse
     ap = argparse.ArgumentParser(description="icount tools")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sp = sub.add_parser("spec", help="build SPEC.json (range and entry classes, link-time addresses) from an ELF")
-    sp.add_argument("--elf", required=True)
+    sp = sub.add_parser("spec", help="build SPEC.json (range and entry classes, link-time addresses) from the link record of an ELF")
+    sp.add_argument("--facts", required=True, help="the link record elffacts.json of the ELF")
     sp.add_argument("--range", action="append", default=[], metavar="NAME=section:S|symrange:A,B")
     sp.add_argument("--entries", action="append", default=[], metavar="NAME=symfile:FILE")
     sp.add_argument("-o", required=True)
     a = ap.parse_args(argv)
     try:
-        spec = build_spec(a.elf, a.range, a.entries)
+        spec = build_spec(a.facts, a.range, a.entries)
     except (ValueError, OSError) as e:
         print(f"icount spec: {e}", file=sys.stderr)
         return 1

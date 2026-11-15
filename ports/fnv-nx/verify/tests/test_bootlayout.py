@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """Tests of verify/bootlayout.py (address-space plan of the boot stage). Plain script: exit 0 on pass, one line per case.
 ELF32 AArch64 images are built here with struct (no cross compiler needed)."""
-import json
 import os
 import struct
-import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
@@ -23,6 +20,9 @@ def case(name, cond, extra=""):
     print(("ok   " if cond else "FAIL ") + name + ("" if cond else "  " + str(extra)[:300]))
     if not cond:
         FAILED.append(name)
+
+
+ENTRY = 0x1040   # the entry of the synthetic image (the e_entry make_elf writes; the plan takes it as an argument, as boot.py does from the link record)
 
 
 def make_elf(ei_class=1, ei_data=1, machine=183, etype=3, flags1=0x08000000, relocs=((0x12200, 183, 0x1234),),
@@ -42,7 +42,7 @@ def make_elf(ei_class=1, ei_data=1, machine=183, etype=3, flags1=0x08000000, rel
     dyn.append((0, 0))
     dyn_b = b"".join(struct.pack("<iI", t, v) for t, v in dyn)
     ident = b"\x7fELF" + bytes([ei_class, ei_data, 1]) + bytes(9)
-    ehdr = ident + struct.pack("<HHIIIIIHHHHHH", etype, machine, 1, 0x1040, 52, 0, 0, 52, 32, 4, 0, 0, 0)
+    ehdr = ident + struct.pack("<HHIIIIIHHHHHH", etype, machine, 1, ENTRY, 52, 0, 0, 52, 32, 4, 0, 0, 0)
     ph = struct.pack("<8I", 1, 0, 0, 0, 0x1000, 0x1000, 4, 0x1000)
     ph += struct.pack("<8I", 1, 0x1000, 0x1000, 0x1000, 0x100, 0x1000, 5, 0x1000)
     ph += struct.pack("<8I", 1, 0x2000, 0x12000, 0x12000, 0x300, 0x2000, 6, 0x1000)
@@ -63,7 +63,7 @@ def raises(fn, *needles):
 def main():
     good = make_elf()
     e = bootlayout.parse_elf(good)
-    case("good image: span, entry, loads", e["span"] == [0, 0x14000] and e["entry"] == 0x1040 and len(e["loads"]) == 3
+    case("good image: span, entry, loads", e["span"] == [0, 0x14000] and len(e["loads"]) == 3
          and e["loads"][2]["vaddr"] == 0x12000 and e["tls"] is None, e)
     for name, kw, needles in (
             ("class 64", dict(ei_class=2), ("EI_CLASS", "2")),
@@ -82,9 +82,9 @@ def main():
     case("reject truncated", ok, msg)
 
     rsv = [("exe", 0x00400000, 0x00C00000), ("res", 0x05000000, 0x05200000)]
-    p = bootlayout.plan(e, rsv, 16 * MB)
+    p = bootlayout.plan(e, rsv, 16 * MB, entry=ENTRY)
     case("base skips reserved to next 64 KiB", p["image"]["base"] == 0x05200000, p["image"])
-    p0 = bootlayout.plan(e, rsv[:1], 16 * MB)
+    p0 = bootlayout.plan(e, rsv[:1], 16 * MB, entry=ENTRY)
     case("base is the lowest candidate", p0["image"]["base"] == 0x05000000)
     case("fixed regions", p["regions"]["host_page"]["lo"] == 0x3F000000 and p["regions"]["heap"]["lo"] == 0x40000000
          and p["regions"]["stacks"]["hi"] == 0x3E000000 and p["regions"]["stacks"]["lo"] == 0x3E000000 - 32 * 0x40000)
@@ -92,11 +92,11 @@ def main():
     case("checks total", len(p["checks"]) == n * (n - 1) // 2
          and len({tuple(sorted(c[:2])) for c in p["checks"]}) == len(p["checks"]), len(p["checks"]))
     case("free verbatim", [(f["name"], f["lo"], f["hi"]) for f in p["free"]] == [tuple(r) for r in rsv], p["free"])
-    ok, msg = raises(lambda: bootlayout.plan(e, [("big", 0x05000000, 0x3D7F0000)], MB), "image")
+    ok, msg = raises(lambda: bootlayout.plan(e, [("big", 0x05000000, 0x3D7F0000)], MB, entry=ENTRY), "image")
     case("image too large for gap", ok, msg)
-    ok, msg = raises(lambda: bootlayout.plan(e, [("h", 0x40000000, 0x40010000)], MB), "heap", "h")
+    ok, msg = raises(lambda: bootlayout.plan(e, [("h", 0x40000000, 0x40010000)], MB, entry=ENTRY), "heap", "h")
     case("heap onto reserved is an error", ok, msg)
-    ok, msg = raises(lambda: bootlayout.plan(e, rsv, 0xC1000000), "heap")
+    ok, msg = raises(lambda: bootlayout.plan(e, rsv, 0xC1000000, entry=ENTRY), "heap")
     case("heap beyond 4 GiB is an error", ok, msg)
     ok, msg = raises(lambda: bootlayout.normalize_reserved([("a", 0x11000, 0x13000), ("b", 0x12000, 0x14000)]), "overlap")
     case("overlapping reserved rows", ok, msg)
@@ -107,58 +107,10 @@ def main():
 
     ok, msg = raises(lambda: bootlayout.normalize_reserved([("low", 0x8000, 0x20000)]), "low", "0x10000")
     case("reserved below 0x10000", ok, msg)
-    c = bootlayout.reloc_census(good)
-    case("census: 183 only", c == {"rela": {"183": 1}, "rel": {}, "jmprel": {}, "relr": 0}, c)
-    c = bootlayout.reloc_census(make_elf(relr=5, relocs=()))
-    case("census: RELR ok", c["relr"] == 5 and c["rela"] == {}, c)
-    ok, msg = raises(lambda: bootlayout.reloc_census(make_elf(relocs=((0x12200, 183, 0), (0x12204, 181, 0),
-                                                                      (0x12208, 181, 0)))), "181", "2")
-    case("census: foreign type", ok, msg)
-    ok, msg = raises(lambda: bootlayout.reloc_census(make_elf(jmprel=1)), "jmprel")
-    case("census: non-empty JMPREL", ok, msg)
-    ok, msg = raises(lambda: bootlayout.reloc_census(make_elf(rel=1)), "rel")
-    case("census: non-empty REL", ok, msg)
-
-    with tempfile.TemporaryDirectory() as d:
-        open(d + "/e.elf", "wb").write(good)
-        open(d + "/t.tsv", "w").write("exe\t0x400000\t0xc00000\nres\t5000000\t5200000\n")
-        outs = []
-        for i in (1, 2):
-            pr = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "bootlayout.py"), "plan", "--elf", d + "/e.elf",
-                                 "--reserved", d + "/t.tsv", "--keys", "60000000:60100000", "--heap-size",
-                                 str(16 * MB), "-o", d + "/p%d.json" % i], capture_output=True, text=True)
-            outs.append((pr.returncode, open(d + "/p%d.json" % i, "rb").read() if pr.returncode == 0 else b""))
-        doc = json.loads(outs[0][1] or b"{}")
-        case("cli: identical bytes, format", outs[0][0] == 0 and outs[0] == outs[1]
-             and doc.get("format") == "fnvnx-bootlayout/1" and any(f["name"] == "keys" for f in doc["free"])
-             and doc["census"]["rela"] == {"183": 1}, outs)
-        pr = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "bootlayout.py"), "plan", "--elf", d + "/e.elf",
-                             "--reserved", d + "/t.tsv", "--keys", "f0000:200000", "--heap-size", "7", "-o", d + "/bad.json"],
-                            capture_output=True, text=True)
-        pr2 = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "bootlayout.py"), "plan", "--elf", d + "/e.elf",
-                              "--reserved", d + "/t.tsv", "--heap-size", "4096", "-o", d + "/bad2.json"],
-                             capture_output=True, text=True)
-        case("cli: --keys mandatory", pr2.returncode == 2, pr2.stderr)
-        case("cli: LayoutError exits 1", pr.returncode == 1 and "heap" in pr.stderr, pr.stderr)
-    # symbol and section readers of the file itself (an assembled and linked fixture: the assembler's own symbol table is the reference)
-    with tempfile.TemporaryDirectory() as d:
-        open(d + "/a.s", "w").write(".data\n.global fnvboot_mode\n.type fnvboot_mode,%object\n.size fnvboot_mode,4\nfnvboot_mode: .word 0\n"
-                                    ".global tab\n.type tab,%object\n.size tab,16\ntab: .word 5,0,6,0\n.bss\n.global zz\n.type zz,%object\n.size zz,4\nzz: .space 4\n"
-                                    ".text\n.global _start\n_start: ret\n")
-        subprocess.run(["aarch64-linux-gnu-as", d + "/a.s", "-o", d + "/a.o"], check=True)
-        subprocess.run(["aarch64-linux-gnu-ld", d + "/a.o", "-o", d + "/a.elf"], check=True)
-        raw = open(d + "/a.elf", "rb").read()
-        secs, syms = bootlayout.section_ranges(raw), bootlayout.defined_symbols(raw)
-        case("readers: sections of the file by name, defined symbols with values", {".text", ".data", ".bss"} <= set(secs) and len(syms["tab"]) == 1
-             and syms["_start"] == [secs[".text"][0][0]], (sorted(secs), sorted(syms)))
-        bad = []
-        try:
-            bootlayout.data_symbol(raw, "zz")
-            bad.append("bss contents")
-        except bootlayout.LayoutError:
-            pass
-        case("data_symbol: initialised contents read back, a .bss symbol is refused", bootlayout.data_symbol(raw, "tab") == struct.pack("<4I", 5, 0, 6, 0)
-             and bootlayout.data_symbol(raw, "fnvboot_mode") == struct.pack("<I", 0) and not bad, bad)
+    case("plan: image.entry is base + entry", p["image"]["entry"] == p["image"]["base"] + ENTRY, p["image"])
+    for what, ent in (("past the span", 0x14000), ("below it", -1)):
+        ok, msg = raises(lambda ent=ent: bootlayout.plan(e, rsv, 16 * MB, entry=ent), "entry", "span")
+        case("plan: an entry %s is refused" % what, ok, msg)
     print("%d failed" % len(FAILED) if FAILED else "all %d passed" % N[0])
     return 1 if FAILED else 0
 

@@ -213,7 +213,7 @@ def call_h(a, name, reg):
 
 def make_plan(raw):
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)]
-    return bootlayout.plan(bootlayout.parse_elf(raw), rows, 4 << 20)
+    return bootlayout.plan(bootlayout.parse_elf(raw), rows, 4 << 20, entry=tbl.ENTRY)
 
 
 def run(raw, quantum, root, limit=None, svc=None):

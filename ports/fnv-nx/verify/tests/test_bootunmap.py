@@ -14,7 +14,7 @@ sys.path.insert(0, HERE)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
-from test_bootlayout import make_elf  # noqa: E402
+from test_bootlayout import ENTRY, make_elf  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 HDR = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "hostapi.h")
@@ -42,7 +42,7 @@ def main():
     case("header: UNMAP_RANGE is 37, BADINPUT 0x1759, RANGE 0xD401", (FN, BAD, RNG) == (37, 0x1759, 0xD401), (FN, BAD, RNG))
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
-    plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
+    plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20, entry=ENTRY)
     m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")), quantum=20000)
     ARGS = 0x1400000   # inside the window, scratch for the argument array
     m.map_fixed(ARGS & ~0xFFF, P, 0)

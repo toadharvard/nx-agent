@@ -5,7 +5,7 @@ The fixture is the guest image of the recipe root verify/tests/icount (icfix.s: 
 icenc.S: one instruction per opcode-class row with its expected class mask as table data), built and linked by verify/recipe.py through gate_build.ensure in GATE_CACHE
 like every guest image, and loaded by the boot machine's own loader (bootmachine.Machine). Its program runs with two fake threads and two marks; the block-hook
 counters are compared with a reference taken by a UC_HOOK_CODE single-step run of the same schedule (capstone mnemonics decide the classes). Every address, range, entry
-and expected class is read from the linked image (bootlayout.section_ranges / defined_symbols / data_symbol); no address is typed here, and no assembler, linker
+and expected class is read from the linked image (the link record elffacts.json of the build, bootfacts.py); no address is typed here, and no assembler, linker
 or binutils tool runs in this test.
 """
 import json
@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, HERE)
-import bootlayout  # noqa: E402
+import bootfacts  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 import icount  # noqa: E402
@@ -40,13 +40,15 @@ class Fix:
     def __init__(self):
         import gate_build
         res, _out = gate_build.ensure(FIX_ROOT, tb.GATE_CACHE, tb.REPO)
-        if res["status"] != "green":
-            raise RuntimeError("icount fixture: recipe %s: %s" % (res["status"], res.get("failure")))
+        if res["status"] != "green" or "elf_facts" not in res:
+            raise RuntimeError("icount fixture: recipe %s, link record %s: %s" % (res["status"], "elf_facts" in res, res.get("failure")))
         self.path = res["elf"]["path"]
+        self.facts = res["elf_facts"]["path"]
+        self.rec = bootfacts.load(self.facts)
         self.raw = open(self.path, "rb").read()
-        self.secs = bootlayout.section_ranges(self.raw)
+        self.secs = bootfacts.sections_by_name(self.rec)
         self.syms = {}
-        for n, vs in bootlayout.defined_symbols(self.raw).items():
+        for n, vs in bootfacts.symbol_values(self.rec).items():
             if n.startswith(("icfx_", "icenc_")):
                 if len(vs) != 1:
                     raise RuntimeError("symbol %s is defined %d times" % (n, len(vs)))
@@ -279,7 +281,7 @@ def main():
 
 def encoding_rows(fx):
     """[(instruction address, instruction word, expected class mask)] of the image's table icenc_table: {offset from icenc_begin, mask} per row"""
-    t = bootlayout.data_symbol(fx.raw, "icenc_table")
+    t = bootfacts.symbol_bytes(fx.rec, fx.raw, "icenc_table")
     if len(t) % 8 or len(t) != fx.syms["icenc_table_end"] - fx.syms["icenc_table"]:
         raise RuntimeError("icenc_table is %d bytes" % len(t))
     uc = fx.machine().uc
@@ -299,7 +301,7 @@ def spec_cases(d, fx):
     nf = os.path.join(d, "names.txt")
     open(nf, "w").write("icfx_funcb\nicfx_funca2\n")
     out = os.path.join(d, "spec.json")
-    base = [sys.executable, "-I", ic, "spec", "--elf", fx.path]
+    base = [sys.executable, "-I", ic, "spec", "--facts", fx.facts]
     r = subprocess.run(base + ["--range", "T=section:.text", "--range", "F=symrange:icfx_funca2,icfx_bench",
                                "--entries", "fn=symfile:" + nf, "-o", out], capture_output=True, text=True)
     if r.returncode != 0:

@@ -3,9 +3,8 @@
 
 Pure and stdlib-only: no unicorn, clock, environment or randomness; every iteration runs over sorted/ordered data.
 The guest loader later maps the original Windows exe image (0x00400000..) and the module images through a host call, so
-the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census. CLI:
-`python3 -I verify/bootlayout.py plan -h`. A condition that cannot be met raises LayoutError (CLI: message, exit 1);
-there is no alternative placement and no default.
+the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, file_bytes. A condition that cannot be met raises
+LayoutError; there is no alternative placement and no default.
 
 Rules (each with its argument):
 1. parse_elf: EI_CLASS=ELFCLASS32, EI_DATA=little, e_machine=EM_AARCH64 (183), e_type=ET_DYN and DT_FLAGS_1 with
@@ -23,28 +22,19 @@ Rules (each with its argument):
    (4 KiB) at 0x3F000000, heap at 0x40000000, end <= 2^32. Fixed regions are not moved: a clash is an error. Totality:
    `checks` lists every unordered pair of {regions + reserved} exactly once, each verified disjoint here, so the
    plan's disjointness is auditable without re-deriving it. `free` repeats the (aligned) reserved ranges.
-4. reloc_census: the guest relocates itself at run time, so the stage applies no relocation; it only proves that the
-   image is self-contained. Counts of dynamic relocations per type from DT_RELA/DT_RELASZ (Elf32_Rela), DT_REL and
-   DT_JMPREL (decoded per DT_PLTREL) and the DT_RELR entry count (DT_RELRSZ / DT_RELRENT, default 4). Allowed: type
-   R_AARCH64_P32_RELATIVE = 183 in DT_RELA (AAELF64 ILP32 relocations, binutils include/elf/aarch64.h, glibc elf.h)
-   and any DT_RELR; anything else (other types, non-empty DT_REL / DT_JMPREL) is an error listing the counts.
-   The census is part of the plan.
-   crt0 header (parse_elf): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
+4. crt0 header (parse_elf; the guest relocates itself at run time, so the stage applies no relocation and reads no relocation table): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
    lowest PT_LOAD vaddr aligned down, u32 size (+20) == page-aligned span, u32 flags (+24) with bit0 (relocatable).
    Regions and reserved ranges all lie at or above 0x10000 (the guest's low pages stay unmapped).
-5. CLI plan (--keys mandatory): deterministic JSON (sorted keys, indent 1, format "fnvnx-bootlayout/1").
+5. entry: plan() takes the image entry from its caller (`entry=`: header.entry of the link record, bootfacts.entry; the ELF header is not read for
+   it) and requires it to lie inside the image span; the plan's image.entry is base + entry. There is no CLI: boot.py builds the plan.
 """
-import argparse
-import json
 import struct
-import sys
 
 FORMAT = "fnvnx-bootlayout/1"
 PAGE = 0x1000
 ALIGN = 0x10000
 EM_AARCH64, ET_DYN, PT_LOAD, PT_DYNAMIC, PT_TLS = 183, 3, 1, 2, 7
 DF_1_PIE, DT_FLAGS_1 = 0x08000000, 0x6ffffffb
-R_P32_RELATIVE = 183
 MIN_ADDR, CRT0_MAGIC = 0x10000, 0x47584E46
 IMAGE_MIN, STACK_END, HOST_PAGE, HEAP_BASE, TOP = 0x05000000, 0x3E000000, 0x3F000000, 0x40000000, 1 << 32
 REGION_NAMES = ("image", "stacks", "host_page", "heap")
@@ -91,7 +81,7 @@ def parse_elf(data):
         raise LayoutError("EI_CLASS=%d, need ELFCLASS32 (1)" % data[4])
     if data[5] != 1:
         raise LayoutError("EI_DATA=%d, need little endian (1)" % data[5])
-    (etype, machine, _v, entry, phoff, _sh, _fl, _eh, phentsize, phnum) = _unpack("<HHIIIIIHHH", data, 16, "ELF header")
+    (etype, machine, _v, _entry, phoff, _sh, _fl, _eh, phentsize, phnum) = _unpack("<HHIIIIIHHH", data, 16, "ELF header")
     if machine != EM_AARCH64:
         raise LayoutError("e_machine=%d, need EM_AARCH64 (183)" % machine)
     if etype != ET_DYN:
@@ -114,7 +104,7 @@ def parse_elf(data):
         raise LayoutError("no PT_LOAD segment")
     lo = min(s["vaddr"] for s in loads) // PAGE * PAGE
     hi = _up(max(s["vaddr"] + s["memsz"] for s in loads), PAGE)
-    elf = {"entry": entry, "loads": loads, "span": [lo, hi], "tls": tls, "dynamic": dyn}
+    elf = {"loads": loads, "span": [lo, hi], "tls": tls, "dynamic": dyn}
     tags = _dynamic(data, elf)
     if DT_FLAGS_1 not in tags:
         raise LayoutError("DT_FLAGS_1 missing in PT_DYNAMIC (need DF_1_PIE 0x08000000)")
@@ -137,85 +127,11 @@ def parse_elf(data):
     return elf
 
 
-# INTERIM (L4/L1 ruling): _sections, section_ranges, defined_symbols and data_symbol are a second copy of the ELF facts (sections, defined symbols,
-# definers) that L1 w25 adds to every green link record. When that lands, icount.build_spec reads the record and these readers are deleted.
-def _sections(data):
-    """[(name, type, addr, size, offset, link)] of the section headers of a little-endian ELF file of class 32 or 64, the null section left out"""
-    if len(data) < 52 or data[:4] != b"\x7fELF" or data[4] not in (1, 2) or data[5] != 1:
-        raise LayoutError("ELF header: need a little-endian ELFCLASS32 or ELFCLASS64 file")
-    w = data[4] == 2
-    if w:
-        shoff, = _unpack("<Q", data, 40, "ELF header")
-        shentsize, shnum, shstrndx = _unpack("<HHH", data, 58, "ELF header")
-        fmt, size = "<IIQQQQIIQQ", 64
-    else:
-        shoff, = _unpack("<I", data, 32, "ELF header")
-        shentsize, shnum, shstrndx = _unpack("<HHH", data, 46, "ELF header")
-        fmt, size = "<10I", 40
-    if shentsize != size:
-        raise LayoutError("e_shentsize=%d, need %d" % (shentsize, size))
-    rows = [_unpack(fmt, data, shoff + size * i, "section header %d" % i) for i in range(shnum)]
-    if not rows:
-        return []
-    stroff = rows[shstrndx][4]
-
-    def name(o):
-        return data[stroff + o:data.index(b"\0", stroff + o)].decode()
-    return [(name(r[0]), r[1], r[3], r[5], r[4], r[6]) for r in rows[1:]]
-
-
-def section_ranges(data):
-    """{section name: [(addr, size), ...]} of every section header (a name may repeat): the section facts of the file itself"""
-    out = {}
-    for name, _t, addr, size, _o, _l in _sections(data):
-        out.setdefault(name, []).append((addr, size))
-    return out
-
-
-def defined_symbols(data):
-    """{symbol name: [value, ...]} of the defined symbols of the file's symbol table (not undefined, not STT_SECTION or STT_FILE), all bindings:
-    the same set that `nm --defined-only` lists, read from the file"""
-    w = data[4] == 2
-    secs = _sections(data)
-    out = {}
-    for _n, typ, _a, size, off, link in secs:
-        if typ != 2:   # SHT_SYMTAB
-            continue
-        stroff = secs[link - 1][4]
-        for i in range(1, size // (24 if w else 16)):
-            if w:
-                name, info, _other, shndx, value, _sz = _unpack("<IBBHQQ", data, off + 24 * i, "symbol %d" % i)
-            else:
-                name, value, _sz, info, _other, shndx = _unpack("<IIIBBH", data, off + 16 * i, "symbol %d" % i)
-            if shndx != 0 and info & 15 not in (3, 4) and name:
-                out.setdefault(data[stroff + name:data.index(b"\0", stroff + name)].decode(), []).append(value)
-    return out
-
-
-def data_symbol(data, name):
-    """the bytes of the one defined symbol NAME of the file's symbol table (st_size bytes at its address, read from the file-backed section that holds it);
-    LayoutError when the symbol is not defined exactly once or is not in file-backed contents. The file's own facts: a table in the image is read from the image."""
-    w = data[4] == 2
-    secs = _sections(data)
-    found = []
-    for _n, typ, _a, size, off, link in secs:
-        if typ != 2:
-            continue
-        stroff = secs[link - 1][4]
-        for i in range(1, size // (24 if w else 16)):
-            if w:
-                nm, info, _o, shndx, value, sz = _unpack("<IBBHQQ", data, off + 24 * i, "symbol %d" % i)
-            else:
-                nm, value, sz, info, _o, shndx = _unpack("<IIIBBH", data, off + 16 * i, "symbol %d" % i)
-            if shndx and nm and data[stroff + nm:data.index(b"\0", stroff + nm)].decode() == name and info & 15 not in (3, 4):
-                found.append((value, sz))
-    if len(found) != 1:
-        raise LayoutError("symbol %s: defined %d times, need exactly once" % (name, len(found)))
-    value, sz = found[0]
-    for _n, typ, addr, size, off, _l in secs:
-        if typ != 8 and addr <= value and value + sz <= addr + size and addr:   # not SHT_NOBITS: the contents are in the file
-            return bytes(data[off + value - addr:off + value - addr + sz])
-    raise LayoutError("symbol %s: 0x%x..0x%x is in no file-backed section" % (name, value, value + sz))
+def file_bytes(data, elf, vaddr, size, what):
+    """the SIZE bytes at link-time address VADDR of the image DATA, read through its program headers (ELF = parse_elf(DATA)): they must lie in the file-backed
+    part of one PT_LOAD, else LayoutError. The address and size come from the link record's facts (bootfacts.py), never from the section or symbol tables."""
+    off = _file_off(elf["loads"], vaddr, size, what)
+    return bytes(data[off:off + size])
 
 
 def normalize_reserved(rows):
@@ -241,9 +157,11 @@ def normalize_reserved(rows):
     return out
 
 
-def plan(elf, reserved, heap_size, n_stacks=32, stack_size=0x40000):
+def plan(elf, reserved, heap_size, *, entry, n_stacks=32, stack_size=0x40000):
     if n_stacks < 1 or stack_size < ALIGN or stack_size % ALIGN:
         raise LayoutError("n_stacks=%d stack_size=0x%x: need n >= 1 and a 64 KiB multiple" % (n_stacks, stack_size))
+    if not elf["span"][0] <= entry < elf["span"][1]:
+        raise LayoutError("entry 0x%x (header.entry of the link record) is outside the image span 0x%x..0x%x" % (entry, *elf["span"]))
     if heap_size <= 0 or heap_size % PAGE:
         raise LayoutError("heap_size=%d must be a positive multiple of 4096" % heap_size)
     if HEAP_BASE + heap_size > TOP:
@@ -271,46 +189,9 @@ def plan(elf, reserved, heap_size, n_stacks=32, stack_size=0x40000):
     for n, (a, b) in regions.items():
         if a % ALIGN or b > TOP:
             raise LayoutError("region %s 0x%x..0x%x is not 64 KiB aligned or exceeds 4 GiB" % (n, a, b))
-    return {"format": FORMAT, "image": {"base": base, "lo": lo, "hi": hi, "entry": base + elf["entry"]},
+    return {"format": FORMAT, "image": {"base": base, "lo": lo, "hi": hi, "entry": base + entry},
             "regions": {n: {"lo": a, "hi": b} for n, (a, b) in regions.items()},
             "free": [{"name": n, "lo": a, "hi": b} for n, a, b in res], "checks": checks}
-
-
-def _count_table(data, loads, addr, size, ent, what):
-    off = _file_off(loads, addr, size, what)
-    counts = {}
-    for i in range(size // ent):
-        info = _unpack("<II", data, off + ent * i, what)[1]
-        counts[info & 0xFF] = counts.get(info & 0xFF, 0) + 1
-    return {str(t): c for t, c in sorted(counts.items())}
-
-
-def reloc_census(data):
-    elf = parse_elf(data)
-    tags = _dynamic(data, elf)
-    loads, cen = elf["loads"], {"rela": {}, "rel": {}, "jmprel": {}, "relr": 0}
-    size = tags.get(8, 0)
-    if tags.get(9, 12) != 12 or size % 12:
-        raise LayoutError("DT_RELAENT=%d DT_RELASZ=%d: need entries of 12 bytes" % (tags.get(9, 12), size))
-    if size:
-        cen["rela"] = _count_table(data, loads, tags[7], size, 12, "DT_RELA")
-    if tags.get(18, 0):
-        cen["rel"] = _count_table(data, loads, tags[17], tags[18] // 8 * 8, 8, "DT_REL")
-    if tags.get(2, 0):
-        if tags.get(20) not in (17, 23):
-            raise LayoutError("DT_JMPREL non-empty but DT_PLTREL=%s, need 17 or 23" % tags.get(20))
-        ent = 12 if tags[20] == 17 else 8
-        cen["jmprel"] = _count_table(data, loads, tags[23], tags[2] // ent * ent, ent, "DT_JMPREL")
-    if tags.get(35, 0):
-        if tags.get(37, 4) != 4:
-            raise LayoutError("DT_RELRENT=%d, need 4" % tags.get(37, 4))
-        cen["relr"] = tags[35] // 4
-    bad = [(k, t, c) for k in ("rela", "rel", "jmprel") for t, c in cen[k].items()
-           if not (k == "rela" and t == str(R_P32_RELATIVE))]
-    if bad:
-        raise LayoutError("relocations the stage does not accept (table type: count): " +
-                          ", ".join("%s %s: %d" % b for b in bad))
-    return cen
 
 
 def read_tsv(path):
@@ -328,43 +209,3 @@ def read_tsv(path):
             except ValueError:
                 raise LayoutError("%s:%d: not hexadecimal: %r" % (path, n, line))
     return rows
-
-
-def _cmd_plan(a):
-    with open(a.elf, "rb") as fh:
-        raw = fh.read()
-    elf = parse_elf(raw)
-    rows = normalize_reserved(read_tsv(a.reserved))
-    try:
-        lo, hi = (int(x, 16) for x in a.keys.split(":"))
-    except ValueError:
-        raise LayoutError("--keys %r: need LO:HI in hex" % a.keys)
-    if not lo < hi or lo < MIN_ADDR:
-        raise LayoutError("--keys: need %x <= lo < hi, got 0x%x..0x%x" % (MIN_ADDR, lo, hi))
-    rows.append(("keys", lo // PAGE * PAGE, _up(hi, PAGE)))
-    doc = plan(elf, sorted(rows, key=lambda r: r[1]), a.heap_size)
-    doc["census"] = reloc_census(raw)
-    with open(a.o, "w") as fh:
-        fh.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
-
-
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    sp = sub.add_parser("plan", help="write PLAN.json (format %s) for the boot stage" % FORMAT)
-    sp.add_argument("--elf", required=True)
-    sp.add_argument("--reserved", required=True, metavar="T.tsv", help="name<TAB>lo_hex<TAB>hi_hex rows, sorted")
-    sp.add_argument("--keys", required=True, metavar="LO:HI", help="import-slot key range (hex), never mapped")
-    sp.add_argument("--heap-size", required=True, type=lambda s: int(s, 0))
-    sp.add_argument("-o", required=True)
-    a = ap.parse_args(argv)
-    try:
-        _cmd_plan(a)
-    except (LayoutError, OSError) as e:
-        print("bootlayout plan: %s" % e, file=sys.stderr)
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

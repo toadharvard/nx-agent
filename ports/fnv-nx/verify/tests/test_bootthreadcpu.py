@@ -17,7 +17,7 @@ import bootlayout  # noqa: E402
 import hostabirec  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
-from test_bootlayout import make_elf  # noqa: E402
+from test_bootlayout import ENTRY, make_elf  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 INC = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx")
@@ -50,7 +50,7 @@ def main():
 
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)]
-    plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
+    plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20, entry=ENTRY)
 
     def machine():
         svc = boothost.Services(tempfile.mkdtemp(prefix="tc-"))

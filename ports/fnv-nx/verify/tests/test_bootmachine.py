@@ -29,6 +29,7 @@ import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 import gate_build  # noqa: E402
 import hostabirec  # noqa: E402
+import bootfacts  # noqa: E402
 
 QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 TMP = tempfile.mkdtemp(prefix="bm-")
@@ -65,10 +66,23 @@ def build():
     return open(path, "rb").read(), path
 
 
+def facts_path():
+    """the path of the link record of the guest image (elffacts.json of the same build: the one source of its sections and defined symbols, bootfacts.py)"""
+    res, out = gate_build.ensure(GUEST_ROOT, GATE_CACHE, REPO)
+    if res["status"] != "green" or "elf_facts" not in res:
+        raise RuntimeError("guest image: the link record is missing (%s)" % res["status"])
+    return res["elf_facts"]["path"]
+
+
+def facts():
+    return bootfacts.load(facts_path())
+
+
 def modes_of(elf_bytes):
     """the ids of the modes the image has: the rows of its table fnvboot_modes (count fnvboot_mode_count), read from the ELF itself"""
-    n, = struct.unpack("<I", bootlayout.data_symbol(elf_bytes, "fnvboot_mode_count"))
-    t = bootlayout.data_symbol(elf_bytes, "fnvboot_modes")
+    rec = facts()
+    n, = struct.unpack("<I", bootfacts.symbol_bytes(rec, elf_bytes, "fnvboot_mode_count"))
+    t = bootfacts.symbol_bytes(rec, elf_bytes, "fnvboot_modes")
     if len(t) != 8 * n:
         raise RuntimeError("fnvboot_modes is %d bytes for %d rows" % (len(t), n))
     return [struct.unpack_from("<I", t, 8 * i)[0] for i in range(n)]
@@ -87,18 +101,15 @@ def write_mode(root, mode):
 
 
 def symbol(elf, name):
-    for line in sh(["aarch64-linux-gnu-nm", elf]).splitlines():
-        a, _t, n = line.split()
-        if n == name:
-            return int(a, 16)
-    raise KeyError(name)
+    """the link-time address of the symbol NAME of the guest image (its link record; ELF is the image's path, kept for the callers)"""
+    return bootfacts.symbol(facts(), name)
 
 
 def make_plan(elf_bytes):
     # exe and mod1 lie inside the host's window (0x400000..0x2100000: map_fixed only zeroes there); mod2 is outside it (map_fixed
     # moves a heap block there); keys stays never-mapped
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
-    plan = bootlayout.plan(bootlayout.parse_elf(elf_bytes), rows, 4 << 20)
+    plan = bootlayout.plan(bootlayout.parse_elf(elf_bytes), rows, 4 << 20, entry=bootfacts.entry(facts()))
     return plan
 
 
