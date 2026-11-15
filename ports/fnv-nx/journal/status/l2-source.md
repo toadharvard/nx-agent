@@ -278,3 +278,8 @@ After the first frame:
   - The rest are grouped after ORD-T. Doing.
 - VEC1 widened (from L1). The row is `vec:<N>:<size>:<align>:<elem>`. Every tcc_type code of the pinned GCC 13.3 tree.def gets a row, a cited proof that it cannot reach a decl, or a deliberate error, and a test derives that universe from tree.def. Also reached: render/d3d9 ffp_vs_state.c:127 (a vectorizer temporary). The handover goes to L1 w15 for the gate_abi parser.
 - HOST1, platform side: L5 w9 a7b7805fe. All 47 function slots are `fnvnx_hslot` and 215 call sites are converted to FNVNX_HCALLn. The macro is __FNVNX_HOST_ATTR__. The plugin side is with w3; recognition goes by the FIELD_DECL type.
+- HOST1, plugin side: w3 ae980c2f5 on claude/fnv-l2-source-w4-host.
+  - Provenance is marked at early GIMPLE. 13 containment forms are compile errors, and the attribute checks its type. The new `.fnvnx.dispatch` record goes to L1 w15.
+  - Added rule CONT-P: no conversion of a pointer to a slot-holding record to another pointer, an integer or another reference type, checked at pre-genericize. It closes the case of opaque callees.
+  - Open: the platform-root build at L5 a7b7805fe, with objstub reach-not-exit at 0.
+- The toolchain test harness (plugbuild.py) is out of step with the trunk's recipe (a5c8f427e: env.json, the semantic flags, all 8 plugins). It is L2's, given to w3: the toy root reads the same records as a product root. Order for w3: the harness, then VEC1, then the HOST1 build, with S23 (b) whenever it lands.
