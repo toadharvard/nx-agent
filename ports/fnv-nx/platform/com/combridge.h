@@ -61,6 +61,7 @@ struct Tables {
 extern const Tables g_tables;   /* generated */
 unsigned nxcom_iface_count();
 void gen_init();               /* generated: the IID table from the C++ constants */
+unsigned cxx_init();           /* generated (gen_cxx.py): the keys of the CRT C++ records (vtables, ThrowInfo, CatchableType); the number of functions with no bridge row (0) */
 unsigned selfcheck();          /* generated: the number of methods whose vtable slot differs from the spec (0) */
 
 struct Face {

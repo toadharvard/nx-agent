@@ -22,6 +22,7 @@
 
 #include "fnvnx_iobuf.h"
 #include "fnvnx_msvcrt.h"
+#include "fnvnx_cxx.h"
 
 extern "C" {
 struct fnvnx_ioinfo;
@@ -45,9 +46,8 @@ extern "C" void *c_malloc(size_t n)
  *   do { retval = msvcrt_heap_alloc(0, size); if (retval) return retval; } while (_callnewh(size)); throw_bad_alloc();
  * _callnewh calls MSVCRT_new_handler, whose only writer is _set_new_handler. That function (and set_new_handler,
  * _query_new_handler) is not in the import closure of the exe and modules (msvcrt_names.tsv), so the handler is NULL for
- * the whole run and _callnewh returns 0: the loop is one allocation. throw_bad_alloc (Wine cpp.c: the MSVC exception object and
- * its type tables, thrown through _CxxThrowException) is the C++ runtime of the exceptions layer (L3); it is not defined here. */
-extern "C" void throw_bad_alloc(void) __attribute__((noreturn, nothrow));
+ * the whole run and _callnewh returns 0: the loop is one allocation. throw_bad_alloc is cxx_bodies.cpp (Wine cpp.c, with the records of
+ * cxx_types.tsv), which ends in _CxxThrowException, the dispatch through the lifted frames (the exceptions layer, not defined here).  */
 extern "C" void *c_new(size_t n)
 {
     void *p = malloc(n ? n : 1);   /* msvcrt_heap_alloc(0, size): one block, size 0 gives a unique non-NULL block */
