@@ -561,6 +561,9 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
   - Each such case is a cited conflict row: the Microsoft page and section, and the Wine 9.0 file and line. Examples are
     `ps_3_0:vFace_src`, `ps:47` and `vs_3_0:v[a0.x]`.
   - Where Microsoft states the opposite, Microsoft holds.
+  - "The opposite" means a Microsoft statement of what the system itself does: a result, an error code, a behaviour.
+    A rule addressed to the application ("applications may not use vs_3_0 with the fixed function pipeline") names no
+    result of the system, so it is a silence on that result, and Wine 9.0 fills it as above (orchestrator, 2026-11-15 16:00Z).
 
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
