@@ -22,7 +22,7 @@ from fnvlift.core import CC, SKIP, SUB, Unsupported
 from fnvlift import f_flow
 from fnvlift import dsl
 
-from proof import forms, forms_alu, forms_flow, forms_move             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
+from proof import forms, forms_alu, forms_flow, forms_move, forms_simd             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
 FAULT = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BR'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
@@ -39,7 +39,7 @@ def supported(ins):
     operand is a general register (the string forms' mnemonics movsd/cmpsd are also SSE2 instructions)"""
     m = ins.mnemonic.split()[-1]
     ok = m in forms.H or (m[0] == 'j' and m[1:] in CC) or (m.startswith('set') and m[3:] in CC) or (m.startswith('cmov') and m[4:] in CC)
-    return ok and all(ins.reg_name(o.reg) in SUB for o in ins.operands if o.type == forms.X.X86_OP_REG)
+    return ok and all(ins.reg_name(o.reg) in SUB or forms.isvec(forms.Op(ins, o)) for o in ins.operands if o.type == forms.X.X86_OP_REG)
 
 
 def varc(cx):

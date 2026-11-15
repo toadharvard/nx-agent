@@ -307,6 +307,7 @@ class Form:
         s.uwhen = {}      # flag name -> 1-bit node: the flag is undefined only when it holds (absent = unconditionally undefined); the emitted value is cond ? 0 : prior
         s.swhen = {}      # index in stores -> 1-bit node: the store happens only when it holds (absent = unconditional)     # addr: int, or a node (V('eip', 32)) for a form of a whole shape
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
+        s.mmw = []        # MMX register writes of a builder, (N, 64-bit value): proof/forms.build hands them to mmx() once the handler is done
         s.xs = []         # x87 / MMX / SSE state effects, in order: (kind, index or None, node, ...); the later effect on one target wins (kinds: fr ftop ftag fsw fptr xmm mxcsr)
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
