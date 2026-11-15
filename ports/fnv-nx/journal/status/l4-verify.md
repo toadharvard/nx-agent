@@ -373,3 +373,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - test_bootgpu: 1 case passed. It is red at ld:tests/bootguest, because input root lift/rt has an unpinned msvcmodel and plugin fields that recipe.py fixes. w7 is porting lift/rt (owner L3a, told).
   - test_runner: 7 PASS, 1 FAIL ("the branch is the published commit": branch l4-verify/after-merge/f9ffbd055e14 is missing), plus 1 crash. w7 is finding the cause.
 - 14:42: lift/rt comes from L3a t16l 022c5d5f2: pinned b274ec06, plugins as names only. w7's port is cancelled. The last rt red is the "i" constraint in rt/fnvl.h (owner L3a w8, commit pending).
+- 14:48: w7-u 25d99b79b: lift/rt from 022c5d5f2 plus that line's verify files, so L1's current recipe.py now applies (derived link.roots, directory outputs).
+  - Red: link.roots is still declared in render/gl4 (L6A) and lift/tests/guest/*/native (L3a). w7 is deleting the key, one commit per owner; both owners are told.
+  - test_runner: the cause is the test, which still passes ARTIFACTS=art after Y. w7 is fixing the test to use its own bare repo for FNVNX_BUILD.
+  - Side effect: w7's run pushed l4-verify/after-merge/f9ffbd055e14 (L4 reports only) to fnv-nx-build. Our delete was refused by the permission layer, so the branch stays until the owner removes it.
