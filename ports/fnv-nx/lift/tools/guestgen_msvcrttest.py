@@ -28,7 +28,7 @@ SYM = {'_except_handler3': 'except_handler3', '__CxxFrameHandler': 'CxxFrameHand
        '?terminate@@YAXXZ': 'terminate', '??1type_info@@UAE@XZ': 'type_info_dtor', '_setjmp3': 'setjmp3', 'longjmp': 'longjmp', '_controlfp': 'controlfp',
        '_clearfp': 'clearfp', '_fpclass': 'fpclass', '_finite': 'finite', '_isnan': 'isnan'}
 BRIDGE = [('msvcrt.dll', n, cv, rt, ar, 'fnvl_msvcrt_' + SYM[n], 'l3') for n, cv, rt, ar in ROWS]
-KEY = {r[1]: 0x00100000 + 16 * i for i, r in enumerate(sorted(BRIDGE, key=lambda r: (r[0], r[1])))}      # the key rule of tools/impgen.py
+KEY = None      # name -> import key: impgen.rows of the bridge.tsv written below (the one key rule), set by gen()
 SLOTS = {r[1]: IAT + 4 * i for i, r in enumerate(BRIDGE)}
 EH_KEYS = {0x000fffd0: 'fnvl_msvcrt_eh_nested_catch', 0x000fffe0: 'fnvl_msvcrt_eh_nested_collide'}      # rt/msvcrt.h: the runtime's own registrations
 class Fake:
@@ -308,6 +308,7 @@ def main():
     texts = [L.lift(img, P.addr[n], SLOT, owns=P.owns[n])[0] for n in P.order] + [L.lift(img, a, SLOT, start=l, owns=[l])[0] for a, l in labels]
     work = tempfile.mkdtemp(dir='/dev/shm')
     open(work + '/bridge.tsv', 'w').write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n' + ''.join('%s\t%s\t\t%s\t%s\t%s\t%s\t%s\n' % r for r in BRIDGE))
+    KEY = {r['name']: r['key'] for r in impgen.rows(work + '/bridge.tsv')[0] if r['key'] is not None}
     open(work + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOTS[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE))
     ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None)      # a bind-l3 row without a body in the runtime is an undefined symbol at the link
     if not (len(ent) == len(BRIDGE) and not blocked and not hit and not absent): sys.exit('msvcrttest gen: %d entries, blocked %s hit %s absent %s' % (len(ent), blocked, hit, absent))

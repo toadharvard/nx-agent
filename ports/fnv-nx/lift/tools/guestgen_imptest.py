@@ -27,7 +27,7 @@ BRIDGE = [  # dll, name, conv, ret, args, native symbol, bind
     ('t.dll', 'vsum', 'vararg', 'i', 'i', 't_vsum', 'sym'),
     ('kernel32.dll', 'DebugBreak', 'stdcall', 'v', '', 'fnvl_os_DebugBreak', 'l3'),
 ]
-KEY = {r[1]: 0x00100000 + 16 * i for i, r in enumerate(sorted(BRIDGE, key=lambda r: (r[0], r[1])))}      # the key rule of tools/impgen.py
+KEY = None      # name -> import key: impgen.rows of the bridge.tsv written below (the one key rule), set by gen()
 SLOT = {r[1]: IAT + 4 * i for i, r in enumerate(BRIDGE)}
 class Fake:
     def __init__(s, code): s.d = code; s.secs = [('.text', BASE, len(code), 0, len(code))]; s.rset = set(); s.taken = []; s.base = BASE
@@ -88,6 +88,7 @@ def main():
     code, ents, cases = guest(); img = Fake(code); img.entries = set(v[0] for v in ents.values())
     work = tempfile.mkdtemp(dir='/dev/shm')            # scratch outside /out: the stage's outputs are exactly the files listed in the header
     open(work + '/bridge.tsv', 'w').write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n' + ''.join('%s\t%s\t\t%s\t%s\t%s\t%s\t%s\n' % r for r in BRIDGE))
+    KEY = {r['name']: r['key'] for r in impgen.rows(work + '/bridge.tsv')[0] if r['key'] is not None}
     open(work + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOT[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE if r[6] != 'none'))
     ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None)
     # the generation is itself a check: 10 entries, exactly the `nobody` row blocked, nothing hit or absent (a violation fails the stage)

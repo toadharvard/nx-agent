@@ -64,8 +64,9 @@
  ],
  "generated": [
   {
-   "tool": "ports/fnv-nx/lift/tools/packcopy.py",
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
    "args": [
+    "copy",
     "/ext/liftpack",
     "/out"
    ],
@@ -4166,21 +4167,63 @@
     "u/ffc.cpp",
     "u/ffd.cpp",
     "u/ffe.cpp",
-    "u/fff.cpp",
-    "disp.S",
-    "imp.cpp"
+    "u/fff.cpp"
    ]
   },
   {
-   "tool": "ports/fnv-nx/lift/tools/packentries.py",
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
    "args": [
-    "/ext/liftpack/entries.tsv",
+    "imp",
+    "--bridge",
     "/uses/ports/fnv-nx/loader/BRIDGE_TSV",
-    "/out/entries.tsv"
+    "--need",
+    "/ext/liftpack/need.tsv",
+    "--prelude",
+    "fnvl_prelude.h",
+    "--out",
+    "/out"
    ],
    "inputs": [],
    "outputs": [
+    "imp.cpp",
+    "imp_entries.tsv",
+    "imp_blocked.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "entries",
+    "/ext/liftpack/entries.tsv",
+    "/stage/imp_entries.tsv",
+    "/uses/ports/fnv-nx/loader/BRIDGE_TSV",
+    "/out/entries.tsv"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/lift/pack:gen:1",
+     "path": "imp_entries.tsv"
+    }
+   ],
+   "outputs": [
     "entries.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "disp",
+    "/stage/entries.tsv",
+    "/out/disp.S"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/lift/pack:gen:2",
+     "path": "entries.tsv"
+    }
+   ],
+   "outputs": [
+    "disp.S"
    ]
   }
  ],
@@ -4192,9 +4235,9 @@
   {
    "name": "liftpack",
    "repo": "fnv-nx-build",
-   "ref": "l3a-lift/pack/7b2faae276b2",
-   "commit": "7ef692b5b8532e22e66d4a70fd5cb75fc06722f3",
-   "tree_sha256": "728f43035dbcc949d05aa17e76a35298b01d2d41e9467a50d288f9ae29e6d59c",
+   "ref": "l3a-lift/pack/7b2faae276b2-notable",
+   "commit": "632538cd327ea220fc756dc372e6c3773110a2c7",
+   "tree_sha256": "ffaca41534283856141fd43e967d437d52da5d83e9422fee3ed4492e1b753ae2",
    "at": "/ext/liftpack"
   },
   {

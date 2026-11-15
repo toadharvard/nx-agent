@@ -71,7 +71,7 @@ def thunk(r, target):
             '  fnvl_native_out(&nf); REGS(); %s c->ra=M32(sp); esp=sp+%du; }\n') % (r['key'], r['dll'], r['name'], conv, ret, args, do, put, pop)
 
 
-def generate(bridge, out, need=(), l3=None, rt_defined=None):
+def generate(bridge, out, need=(), l3=None, rt_defined=None, prelude=None):
     """rt_defined: the global symbols the runtime objects define (nm); a bind-l3 row whose symbol is not among them has no body yet and is blocked like a
     bind-none row (None: not checked, the unit test's case)."""
     rs, table_id = rows(bridge)
@@ -85,7 +85,7 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None):
         for l in open(f):
             p = l.rstrip('\n').split('\t')
             if len(p) >= 4 and p[3] == 'key': needed.add((p[1].lower(), p[2]))
-    T = ['#include "fnvl.h"', '#include "imp.h"', 'extern "C" { void *fnvnx_win32_lookup_export(const char *dll, const char *name); int fnvnx_lift_imports_init(void); void fnvl_runtime_install(void); }']
+    T = ['#include "fnvl.h"' if prelude is None else '#include "%s"' % prelude, '#include "imp.h"', 'extern "C" { void *fnvnx_win32_lookup_export(const char *dll, const char *name); int fnvnx_lift_imports_init(void); void fnvl_runtime_install(void); }']
     ent, blocked, look, body = [], [], [], []
     for r in rs:
         k = (r['dll'], r['name'])
@@ -128,9 +128,9 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None):
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--bridge', required=True, help='the loader BRIDGE_TSV'); A('--out', required=True); A('--need', action='append', default=[])
-    A('--l3', default=None)
+    A('--l3', default=None); A('--prelude', default=None, help='the header that replaces fnvl.h as the first include (the pack: fnvl_prelude.h)')
     a = ap.parse_args()
-    ent, blocked, hit, absent = generate(a.bridge, a.out, a.need, a.l3)
+    ent, blocked, hit, absent = generate(a.bridge, a.out, a.need, a.l3, None, a.prelude)
     sys.exit(1 if hit or absent else 0)
 
 
