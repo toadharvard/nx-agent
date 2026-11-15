@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 01:05Z root head 310d0e97e (L1 accepted: b25ddaac7 + w20u unit_flags + w9 f24506325): 7 roots green 0 failed, assumptions 103/103. objstub input-red on the declared_machine.tsv header line form (w9 fixing; source forms come from the header, no gate change).
 - 2026-11-15 01:00Z L1 ruling: guest start/end files and libs = pinned driver -### derivation (w12h 91850075d link/guest.json, crt0.o excluded by ENTRY rule); w14 runtime.libs removed (second declaration), guest_errors onto the derivation.
 - 2026-11-15 00:58Z w14 pair farm session_01KmtZKR9PGPSxf9iUWd5Q54 at 78299544c (inputs by pin; rt branch fbeeb49ff merges L1 559f220db): measurement only, not published. Publish after W1+W2 and C9 0/0, second pair.
 - 2026-11-15 00:55Z w14 C9 f70d0f25f @libnx 518bf11: 68 data-model warnings (ptr->int 27, int->ptr 9, shift 20, overflow 2, incompatible ptr 10), 25/120 types differ ILP32 vs LP64. Ruling: W1 all 68 fixed at source by class rule (u64 widening, 32-bit address space fact) + 5 options -Werror in guest semantics; W2 wire types decided statically (type reaching svc/IPC descriptor/shmem), wire types layout-equal or ILP32 wire definition. Name split rejected.
