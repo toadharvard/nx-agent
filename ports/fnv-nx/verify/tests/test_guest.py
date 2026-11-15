@@ -18,8 +18,11 @@ from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_rep
 
 
 
+_REAL_PIN = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))   # the driver names are the pin's: no test restates them
+
+
 def guest_rec(ext, **kw):
-    r = mut(compiler={"external": "gcc-msvcmodel", "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext], **kw)
+    r = mut(compiler={"external": "gcc-msvcmodel", "cc": _REAL_PIN["cc"], "cxx": _REAL_PIN["cxx"]}, external=[ext], **kw)
     if "flags" not in kw:   # every guest root carries -Werror=attributes in flags.c and flags.cxx
         # a guest build.json holds only per-root flags (recipe.PER_ROOT); every semantic flag comes from the pin and is appended by the recipe
         r["flags"] = {"c": ["-O2", recipe.WERROR_ATTR], "cxx": ["-O2", recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": []}
@@ -46,7 +49,7 @@ def guest_repo(name, rec, pin, target="guest", files=None):
 def main():
     pin_real = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = {"name": "gcc-msvcmodel", "repo": "fnv-nx-build", "ref": "tools/gcc-ilp32-msvcmodel", "commit": "a" * 40, "tree_sha256": "b" * 64, "at": "/ext/gcc"}
-    pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}
+    pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": _REAL_PIN["cc"], "cxx": _REAL_PIN["cxx"]}
     rec = guest_rec(ext)
     # --- the rule, validation only (no compiler needed)
     g = guest_repo("g1", rec, pin)

@@ -287,8 +287,20 @@ def decltype_cxx(td, so):
         check('DECLTYPE-MANGLED: an extern "C" declaration of a `_Z` mangled name (a specialization in its signature) gets no row, and a plain extern "C" one still does',
               '_ZN2ZZC1ERK2TTIiE' not in got and 'r1' in got)
         check('every C++ row parses with ctypes_compat', all(cc.parse(t) for t in got.values()))
+    # DECLTYPE-SPEC: a class template specialization (or a class nested in one) is written by its Itanium type mangling, `_ZTS...`
+    src = os.path.join(td, 'tspec.cpp')
+    open(src, 'w').write('template <class T> struct TT { T t; struct In { int i; }; };\n'
+                         'template <class F> struct G;\ntemplate <class R, class A> struct G<R(A)> { R (*f)(A); };\n'
+                         'extern "C" int ts(TT<int> *p, G<int(char)> *g, TT<int>::In *n);\n'
+                         'extern "C" int use(void) { TT<int> x; TT<int> *loc = &x; (void)loc; return ts(&x, 0, 0); }\n')
+    r = pb.compile(src, os.path.join(td, 'tspec.o'), so)
+    check('DECLTYPE-SPEC: a template-typed parameter and body local of an extern "C" function compile', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        got = dict(l.split('\t') for l in pb.section(os.path.join(td, 'tspec.o'), '.fnvnx.decltype').splitlines())
+        row = got.get('ts', '')
+        check('DECLTYPE-SPEC: the row names each specialization by `_ZTS` + its Itanium mangling and parses with ctypes_compat',
+              'struct:_ZTS2TTIiE{t:int}' in row and 'struct:_ZTS1GIFicEE,' in row and 'struct:_ZTSN2TTIiE2InE{i:int}' in row and bool(cc.parse(row)), row)
     for name, text, why in (('ptrmem', 'struct M { int m; };\nextern "C" int pm(int M::*p);\nextern "C" int use(void) { return pm(0); }\n', 'offset_type'),
-                            ('tspec', 'template <class T> struct TT { T t; };\nextern "C" int ts(TT<int> *p);\nextern "C" int use(void) { TT<int> x; return ts(&x); }\n', 'class template specialization has no tag form'),
                             ('lambda', 'auto lam = [] {};\nextern "C" int lm(decltype(lam) *p);\nextern "C" int use(void) { return lm(0); }\n', 'lambda closure type has no tag form'),
                             ('anonns', 'namespace { struct An { int i; }; }\nextern "C" int an(An *p);\nextern "C" int use(void) { An x; return an(&x); }\n', 'scope name outside the grammar')):
         src = os.path.join(td, name + '.cpp')
