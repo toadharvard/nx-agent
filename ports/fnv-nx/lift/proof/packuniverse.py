@@ -6,6 +6,7 @@ PACKDIR: the pack (u/*.cpp).  Every lifted instruction has one label line `L_<8 
 (a parent range shared by several entries is lifted once per entry: the same address under several entries is one instruction).  No form name, no census, no facts list is consulted.
 IMAGES.tsv: `module<TAB>image path<TAB>load base<TAB>preferred base` (hex), one row per image of the pack; a label address a belongs to the image with load <= a < load + image size,
 and the bytes of the instruction are those of the image at the preferred base (a - load + preferred; the relocation patches only fields, which the shape key masks).
+SITES.tsv (optional 4th argument): every lifted instruction address with its shape key and family.
 A label whose whole body is `fnvl_raise(KIND, ...)` (undecodable bytes, an invalid LOCK) is not a lifted instruction: it is counted in the header (raise_only, by kind) and not in the universe.
 Every other label address must belong to exactly one image and decode to one instruction (capstone, or the reserved-NOP gap fnvlift.f_sys.nop_gap, counted separately as family `nop-gap`); otherwise the run fails.
 OUT.tsv: the format of census.py (`shape<TAB>family<TAB>form_key<TAB>count<TAB>first_address`, count = distinct label addresses), header with the sha256 of every input."""
@@ -85,7 +86,7 @@ def work(chunk):
                 bad.append((a, 'undecodable')); continue
             nop.append((a, bytes(g.bytes).hex())); continue
         k = shape.shape_key(ins); e = shapes.get(k)
-        if shape.family(ins) == 'simd': sites.append((a, k))
+        sites.append((a, k, shape.family(ins)))
         if e is None:
             shapes[k] = [shape.family(ins), 1, a]
         else:
@@ -151,11 +152,11 @@ def main(argv):
             f, c, a = shapes[k]
             fh.write('%s\t%s\t%s\t%d\t%08x\n' % (k, f, fk[k], c, a))
     sys.stdout.write('labels %d raise_only %d shapes %d nop_gap %d %s\n' % (len(ls), len(raised), len(shapes), len(nop), ' '.join('%s=%d' % x for x in sorted(fam.items()))))
-    if len(argv) == 4:                                        # SITES.tsv: every address of a simd-family instruction: module:address<TAB>shape key
+    if len(argv) == 4:                                        # SITES.tsv: every lifted instruction address of the pack: module:address<TAB>shape key<TAB>family
         with open(argv[3], 'w', newline='\n') as fh:
-            fh.write('# fnvnx-packsites/1 simd-family sites of the pack, module:address (pack load address)\tshape\n')
-            for a, k in sorted(sites):
-                fh.write('%s:%08x\t%s\n' % (IMGS[image_of(a)][0], a, k))
+            fh.write('# fnvnx-packsites/2 every lifted instruction of the pack, module:address (pack load address)\tshape\tfamily\n')
+            for a, k, f in sorted(sites):
+                fh.write('%s:%08x\t%s\t%s\n' % (IMGS[image_of(a)][0], a, k, f))
     return 0
 
 
