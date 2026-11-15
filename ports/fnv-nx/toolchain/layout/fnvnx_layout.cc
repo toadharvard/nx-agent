@@ -360,6 +360,13 @@ static void emit_decltype()
     /* RULE (DECLTYPE-LANG): the symbols of a C unit and the symbols with C language linkage of a C++ unit (extern "C": the names C code can declare); a C++ name
      * has the ODR (.fnvnx.odrdef) and the layout gates, not C's 6.2.7 */
     if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) continue;
+    /* RULE (DECLTYPE-MANGLED): a symbol whose assembler name is in the Itanium mangled-name space carries its type in its name, so it gets no row. The space is
+     * fixed by two citations: the Itanium C++ ABI 5.1 (a mangled name begins with `_Z`) and C11 7.1.3p1 / C++ [lex.name] (an identifier that begins with `_` and an
+     * uppercase letter is reserved to the implementation, so no user C symbol has such a name). It is decided on the assembler name, the string sym_emitted uses,
+     * not on the source spelling: an extern "C" declaration of a mangled name (libstdc++'s cow-stdexcept.cc declares the std::string constructors so) is in it
+     * too. Its cross-object comparison is .fnvnx.sympair / .fnvnx.odrdef, which cover mangled names. */
+    const char *an = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+    if (an[0] == '_' && an[1] == 'Z') continue;
     decls.push_back(d);
   }
   std::map<std::string, std::string> rows;

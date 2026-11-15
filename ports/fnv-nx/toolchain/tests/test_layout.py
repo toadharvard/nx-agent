@@ -254,6 +254,7 @@ CXX_ONLY = ('struct P { int a; };\nstruct Q : P { int b; };\nstruct V { virtual 
             'enum class EC : short { A };\nstruct Top { struct In { int i; }; };\n'
             'extern "C" {\nint r1(P &p, const Q &q);\nint r2(V *v, ns::N n, EC e, Top::In *t);\nint r3(decltype(nullptr) n);\nextern Q gq;\nQ gq2 = {};\n'
             'int r4(int x) { return x; }\nint use(void) { return r1(gq, gq) + r4(2) + gq2.b + r2(0, ns::N(), EC::A, 0) + r3(nullptr); }\n}\n'
+            'template <class T> struct TT { T t; };\nextern "C" int _ZN2ZZC1ERK2TTIiE(void *self, const TT<int> &s);\nint mangled_use(TT<int> &x) { return _ZN2ZZC1ERK2TTIiE(0, x); }\n'
             'int cxxfn(int);\nint cxxuse() { return cxxfn(1); }\n')
 CXX_ONLY_ROWS = {
     'r1': '(ref:4:4:struct:P{a:int},ref:4:4:const:struct:Q{-:struct:P{a:int};b:int})int',
@@ -283,6 +284,8 @@ def decltype_cxx(td, so):
         check('a C++ unit: references, classes with bases and a vptr, scoped names, enum class, nullptr_t, in the existing grammar (ILP32 reference size 4)',
               all(got.get(k) == v for k, v in CXX_ONLY_ROWS.items()), {k: (got.get(k), v) for k, v in CXX_ONLY_ROWS.items() if got.get(k) != v})
         check('a C++ unit: exactly its C-linkage symbols (cxxfn, cxxuse have C++ linkage: no row)', set(got) == set(CXX_ONLY_ROWS), sorted(set(got) ^ set(CXX_ONLY_ROWS)))
+        check('DECLTYPE-MANGLED: an extern "C" declaration of a `_Z` mangled name (a specialization in its signature) gets no row, and a plain extern "C" one still does',
+              '_ZN2ZZC1ERK2TTIiE' not in got and 'r1' in got)
         check('every C++ row parses with ctypes_compat', all(cc.parse(t) for t in got.values()))
     for name, text, why in (('ptrmem', 'struct M { int m; };\nextern "C" int pm(int M::*p);\nextern "C" int use(void) { return pm(0); }\n', 'offset_type'),
                             ('tspec', 'template <class T> struct TT { T t; };\nextern "C" int ts(TT<int> *p);\nextern "C" int use(void) { TT<int> x; return ts(&x); }\n', 'class template specialization has no tag form'),
