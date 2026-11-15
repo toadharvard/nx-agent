@@ -21,7 +21,7 @@
 # as recipe.semantics_for decides (the driver names the flags that do not apply to a language).
 # The triplet (guest_platform.triplet) and the CPU (console_cpu: arch+features, the driver's default --with-arch) come from
 # verify/targets.json ($TARGETS); nothing of the target is written in this script.
-# Binutils: the env.json 2.42 package (its ld lists aarch64elf32, checked below), linked in as aarch64-none-elf-*.
+# Binutils: the env.json 2.42 package (its ld lists aarch64elf32, checked below), copied in as aarch64-none-elf-*.
 # Every stage's configure line goes to <prefix>/CONFIGURE.txt.
 set -euo pipefail
 W=$(mkdir -p "$1" && cd "$1" && pwd)
@@ -56,8 +56,9 @@ if [ -z "$LD" ] || ! "$LD" -V | grep -qw aarch64elf32; then
 fi
 mkdir -p "$P/bin" "$P/$T/bin"
 for t in as ld ld.bfd ar ranlib nm objcopy objdump strip readelf size strings addr2line c++filt; do
-  ln -sf "$(command -v aarch64-linux-gnu-$t)" "$P/bin/$T-$t"
-  ln -sf "$(command -v aarch64-linux-gnu-$t)" "$P/$T/bin/$t"
+  rm -f "$P/bin/$T-$t" "$P/$T/bin/$t"   # real files, not links: the mirror is a self-contained tree (a recipe external)
+  cp -L "$(command -v aarch64-linux-gnu-$t)" "$P/bin/$T-$t"
+  cp -L "$(command -v aarch64-linux-gnu-$t)" "$P/$T/bin/$t"
 done
 export PATH=$P/bin:$PATH
 
