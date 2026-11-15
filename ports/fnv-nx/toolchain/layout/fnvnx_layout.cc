@@ -71,6 +71,7 @@
 #include "../names/fnvnx_names.cc"
 #undef plugin_init
 #undef plugin_is_GPL_compatible
+#include "../names/plugsym.inc"   /* RULE DECLTYPE-PLUGINSYM: the registry of the symbols plugins write as text; this plugin is its reader */
 
 #include "stor-layout.h"
 #include "cgraph.h"
@@ -381,6 +382,20 @@ static void emit_decltype()
   }
   for (tree f : sdd_slot_decls()) decls.push_back(f);
   std::map<std::string, std::string> rows;
+  /* RULE DECLTYPE-PLUGINSYM (weakref): the ELF symbol of `static T a __attribute__((weakref("t")))` is its TARGET `t` (GCC assemble_weakref: `.weak t`, no symbol `a`), so the
+   * line is written under `t` with the spelling of the weakref's own declaration (libgcc's __gthrw: `__typeof(t)`, the type of the target). When a declaration of `t` is also
+   * in the unit its row must be the same spelling (checked below, as for any symbol with two declarations). Only a weakref whose target the object names (the identifier is
+   * TREE_SYMBOL_REFERENCED once the back end output a reference) is a symbol. */
+  std::vector<std::pair<std::string, tree>> weakrefs;
+  FOR_EACH_SYMBOL(sn) {
+    if (!sn->weakref || !sn->alias_target) continue;
+    const char *tn = TREE_CODE(sn->alias_target) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(sn->alias_target)
+                     : DECL_P(sn->alias_target) ? IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(sn->alias_target)) : nullptr;
+    if (!tn) continue;
+    tree id = maybe_get_identifier(tn);
+    if (!id || !TREE_SYMBOL_REFERENCED(id)) continue;
+    weakrefs.push_back({tn, sn->decl});
+  }
   for (tree d : decls) {
     const std::string nms = asmname(d);   /* the object's symbol: an assembler-label declaration has the assembler name `*x` */
     const char *nm = nms.c_str();
@@ -403,6 +418,15 @@ static void emit_decltype()
     else if (ty == "-builtin") {}
     else if (it->second != ty) dl_error("one symbol is declared with two spellings in one unit", std::string(nm) + ": " + it->second + " / " + ty);
   }
+  for (auto &w : weakrefs) {
+    tree d = w.second;
+    std::string ty;
+    if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) ty = "-cxx";
+    else { std::vector<tree> stk; ty = dl_type(TREE_TYPE(d), stk); }
+    auto it = rows.find(w.first);
+    if (it == rows.end()) rows[w.first] = ty;
+    else if (it->second != ty) dl_error("a weakref and its target are declared with two spellings", w.first + ": " + it->second + " / " + ty);
+  }
   /* The symbols the object has that no symbol table node names: the references the back end makes itself. (1) The library functions it calls implicitly: every one is
    * announced through targetm.asm_out.external_libcall (varasm.cc assemble_external_libcall, called once per SYMBOL_REF the first time it is used: the one place a
    * libcall is emitted, whatever table made its SYMBOL_REF), which the plugin wraps (libcall_seen). (2) The explicit built-in functions it lowers to calls after the
@@ -415,6 +439,17 @@ static void emit_decltype()
     tree an = DECL_ASSEMBLER_NAME(d);
     if (!TREE_SYMBOL_REFERENCED(an)) continue;
     if (!rows.count(IDENTIFIER_POINTER(an))) rows[IDENTIFIER_POINTER(an)] = "-builtin";
+  }
+  /* RULE DECLTYPE-PLUGINSYM: the symbols the plugins wrote as text (names/plugsym.inc): the row the writer spelled, else `-mangled` for a `_Z` name, else `-plugin`.
+   * A symbol that a declaration also gave (weakref targets, a called function the unit declares) keeps that row; a writer's spelling that differs from it is an error. */
+  for (auto &pr : fnvnx_plugsym().syms) {
+    const std::string &nm = pr.first;
+    std::string ty = !pr.second.empty() ? pr.second : (nm[0] == '_' && nm[1] == 'Z') ? "-mangled" : "-plugin";
+    auto it = rows.find(nm);
+    if (it == rows.end()) rows[nm] = ty;
+    /* a plugin's own artificial declaration (no source location) reads as the front end's `-builtin` (DECL_IS_UNDECLARED_BUILTIN is location 0); its writer's spelling is the row */
+    else if (!pr.second.empty() && it->second == "-builtin") it->second = ty;
+    else if (!pr.second.empty() && it->second != ty && it->second[0] != '-') dl_error("a plugin's symbol is declared with another spelling", nm + ": " + it->second + " / " + ty);
   }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.decltype,\"\",%%progbits\n");
   for (auto &r : rows) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(r.first + "\t" + r.second).c_str());
@@ -480,7 +515,7 @@ static void finish_unit_cb(void *, void *)
   for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(lines[i]).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
   emit_objects();
-  emit_decltype();
+  plugsym_reader_ready(emit_decltype);   /* RULE DECLTYPE-PLUGINSYM: written when every writer plugin has finished its unit */
 }
 
 extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)
@@ -493,6 +528,7 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
     error("%<fnvnx_layout%>: unknown plugin argument %qs", info->argv[0].key);
     return 1;
   }
+  fnvnx_plugsym().reader = true;
   orig_external_libcall = targetm.asm_out.external_libcall;
   targetm.asm_out.external_libcall = libcall_seen;
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */

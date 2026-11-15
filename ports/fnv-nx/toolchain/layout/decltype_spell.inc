@@ -8,8 +8,9 @@
  *   libcall  a library function the back end calls implicitly (libfuncs.h): no declaration of the unit's text at all
  *   noname   a declaration without a source name
  *   cxx      a C++ name (not extern "C"): it has the ODR (.fnvnx.odrdef) and layout gates, not C11 6.2.7 (RULE DECLTYPE-LANG)
+ *   plugin   a symbol a plugin writes into the output as assembly text (names/plugsym.inc, RULE DECLTYPE-PLUGINSYM) when its writer gives no type
  * A symbol with none of the two forms is an error of the plugin (emit_decltype). */
-#define FNVNX_DECLTYPE_REASONS(X) X(mangled) X(builtin) X(libcall) X(noname) X(cxx)
+#define FNVNX_DECLTYPE_REASONS(X) X(mangled) X(builtin) X(libcall) X(noname) X(cxx) X(plugin)
 static bool dl_failed = false;
 static void dl_error(const char *what, const std::string &name)
 {

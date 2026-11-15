@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
-# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
-# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
-# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
-# reads: ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc
-# reads: ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/gcc ports/fnv-nx/toolchain/layout/crossing_terms.inc
-# reads: ports/fnv-nx/toolchain/layout/decltype_spell.inc ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json
-# reads: ports/fnv-nx/toolchain/msvcmodel/build.sh ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch ports/fnv-nx/toolchain/names/fnvnx_names.cc
-# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
-# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/toolchain/tests ports/fnv-nx/verify
 """Test of toolchain/layout/fnvnx_layout.cc (section .fnvnx.layout), built from the tracked source with the argv of the recipe's
 plugin stage (plugbuild.py). The layout stage includes toolchain/names/fnvnx_names.cc (one mangler): the names source is an
 input of the layout plugin's build. Compiles layout/layout.cpp (ILP32) with the pi and layout plugins, with a garbage
@@ -406,6 +396,35 @@ def crossing_inc_current():
     check('crossing_terms.inc is what gen_crossing.py makes of DATAMODEL.json', r.returncode == 0, r.stdout + r.stderr)
 
 
+def plugsym(td):
+    """RULE DECLTYPE-PLUGINSYM: the symbols the plugins write as text (sdd: the address-point symbols, the slot functions and the symbols they call; dispatch: fnvnx_dispatch,
+    fnvnx_call_fp) and a weakref target (libgcc's __gthrw) have their line, whichever order GCC runs the plugins' finish callbacks in: symbol table = lines, in a C++ unit with
+    virtual destructors, an array new/delete and an indirect call, a C unit with an indirect call, and a unit with a weakref"""
+    so = [pb.build(n, td) for n in ('sdd', 'dispatch', 'names', 'layout')]
+    src = os.path.join(td, 'ps.cpp')
+    open(src, 'w').write('struct A { virtual ~A(); int x; };\nstruct B : A { ~B(); };\nA::~A() {}\nB::~B() {}\ntypedef int (*fp)(int);\n'
+                         'extern "C" int cx(fp f, int v) { return f(v); }\n'
+                         'static int gthrw_x(void) __attribute__((weakref("pthread_foo_x")));\n'
+                         'extern "C" int use_gth(void) { if (gthrw_x) return gthrw_x(); return 0; }\n'
+                         'B *mk() { return new B[3]; }\nvoid rm(B *p) { delete[] p; }\n')
+    r = pb.compile(src, os.path.join(td, 'ps.o'), so, native=True)
+    check('DECLTYPE-PLUGINSYM: a C++ unit with sdd, dispatch and a weakref compiles', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        rows, why = dt_all(os.path.join(td, 'ps.o'), 'ps.cpp')
+        both = dict(rows, **why)
+        check('DECLTYPE-PLUGINSYM: the address-point symbol, the slot function, the called operator delete, the dispatcher and the weakref target have a line',
+              all(k in both for k in ('_ZTV1B.fnvnx_ap8', '_ZN1BD1Ev.fnvnx_sdd', '_ZdlPv', 'fnvnx_dispatch', 'pthread_foo_x', 'fnvnx_call_fp')), sorted(both))
+        check('DECLTYPE-PLUGINSYM: a plugin-written `_Z` name is `mangled`, the dispatcher of a C++ unit is `plugin`, the call-sequence word has its type',
+              why.get('_ZTV1B.fnvnx_ap8') == 'mangled' and why.get('fnvnx_dispatch') == 'plugin' and rows.get('fnvnx_call_fp') == 'unsigned_int', (rows, why))
+    src = os.path.join(td, 'ps.c')
+    open(src, 'w').write('typedef int (*fp)(int);\nint cx(fp f, int v) { return f(v); }\n')
+    r = pb.compile(src, os.path.join(td, 'psc.o'), so, native=True)
+    check('DECLTYPE-PLUGINSYM: a C unit with an indirect call compiles', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        rows, why = dt_all(os.path.join(td, 'psc.o'), 'ps.c')
+        check('DECLTYPE-PLUGINSYM: the C unit\'s dispatcher has the row of its prototype, once', rows.get('fnvnx_dispatch', '').startswith('(*void,*struct:fnvnx_site{'), (rows, why))
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-layout-')
     try:
@@ -425,6 +444,7 @@ def main():
         check('decltype.c compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             decltype(obj)
+        plugsym(td)
         decltype_errors(td, so)
         decltype_cxx(td, so)
         obj = os.path.join(td, 'v.o')
