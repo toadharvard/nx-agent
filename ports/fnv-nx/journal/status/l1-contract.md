@@ -1357,3 +1357,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - L4: the undefset on bootguest (L4 w6-r 34d00ffda + w12h fe396a360) has 22 undefined symbols, 0 weak, and "-z text" is gone.
   - 8 of them are loader tables (modules.py, iat.py, mkidentity.py). w12 makes them generated stages of the loader root over the single exe pin of contract_inputs.json.
 - contract/facts (w22 33e41190b) is handed to L3a native-disp.
+- Construction order, path items from L2's pass (w22, first):
+  - gate_datamodel reads the generated DATAMODEL.json; its hand set of 3 macros was the cause of the missing long double;
+  - guest_compiler.json's triplet, CPU flags and datamodel flags are generated from the platform, CPU and DATAMODEL records.
+- w22 facts rebased: c4544e18b, for cand2.
