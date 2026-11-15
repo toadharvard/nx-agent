@@ -525,3 +525,7 @@ After the first frame:
   - msvcmodel.patch adds the event PLUGIN_FNVNX_COOKIE from build_new_1 and build_vec_delete_1.
   - The names plugin writes `.fnvnx.cookie` rows in every C++ unit.
   - test_cookie's expected rows are to be cited from S29's recorded cl 15.00 output. An over-aligned case without recorded output is undecided and gets reported.
+- 2026-11-15 20:38Z: S29 test at 0c725fdf2 (w2). It has 11 expected rows (7 new, 4 delete) from the recorded cl cases in ldbl/model.cpp, each cited.
+  - Decided domain: element alignment ≤8 (A8: the cookie is 4 bytes, not padded) and class-specific delete[].
+  - Outside the domain (alignment ≥16, global sized delete[]): no recorded cl output. A product cookie row there is red "undecided"; no value is chosen.
+  - The out-of-domain count over the product is reported once the pin exists. If it is above 0, a recorded cl 15.00 output is needed (to the orchestrator).
