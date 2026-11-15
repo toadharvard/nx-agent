@@ -33,7 +33,7 @@ static void block(uint32_t h[8], const uint8_t *p) {
     h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += k;
 }
 
-void fnvnx_sha256(const void *data, size_t size, uint8_t out[32]) {
+void fnvnx_sha256(const void *data, size_t size, uint8_t out[FNVNX_SHA256_DIGEST_SIZE]) {
     uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
     const uint8_t *p = (const uint8_t *)data;
     uint8_t tail[128];
@@ -48,6 +48,7 @@ void fnvnx_sha256(const void *data, size_t size, uint8_t out[32]) {
     for (i = 0; i < 8; i++) tail[rest - 1 - i] = (uint8_t)(bits >> (8 * i));
     block(h, tail);
     if (rest == 128) block(h, tail + 64);
+    _Static_assert(sizeof h == FNVNX_SHA256_DIGEST_SIZE, "the digest is the eight state words");
     for (i = 0; i < 8; i++) {
         out[4 * i] = (uint8_t)(h[i] >> 24); out[4 * i + 1] = (uint8_t)(h[i] >> 16);
         out[4 * i + 2] = (uint8_t)(h[i] >> 8); out[4 * i + 3] = (uint8_t)h[i];

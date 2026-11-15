@@ -199,7 +199,7 @@ static int check_table(const fnvnx_proc *p) {
     unsigned k;
     for (k = 0; k < p->nmod; k++) {
         const fnvnx_module_desc *d = &p->cfg.modules[k];
-        if (!d->name || !d->name[0] || !d->file_size || !d->size_of_image || (d->base & 0xffffu) || (d->size_of_image & (FNVNX_PAGE - 1u)) ||
+        if (!d->name || !d->name[0] || !d->file_size || !d->size_of_image || (d->base & 0xffffu) || (d->size_of_image & (FNVNX_PAGE_SIZE - 1u)) ||
             !fnvnx_in(d->base, d->size_of_image, 0, 0xffff0000u) ||
             (d->base < FNVNX_START_RESERVED_HI && (uint64_t)d->base + d->size_of_image > FNVNX_START_RESERVED_LO) ||
             fnvnx_images_overlap(p, d->base, d->size_of_image, (int)k)) {
@@ -218,7 +218,7 @@ static int check_table(const fnvnx_proc *p) {
 static int load_one(fnvnx_proc *p, unsigned k) {
     const fnvnx_module_desc *d = &p->cfg.modules[k];
     fnvnx_loaded *L = &p->mod[k];
-    uint8_t sha[32], extra;
+    uint8_t sha[FNVNX_SHA256_DIGEST_SIZE], extra;
     uint8_t *buf;
     int r;
     L->name = d->name;
@@ -229,7 +229,7 @@ static int load_one(fnvnx_proc *p, unsigned k) {
     else fnvnx_sha256(buf, d->file_size, sha);
     p->os->free(p->os->ctx, buf);
     if (r) return r;
-    if (memcmp(sha, d->sha256, 32)) {
+    if (memcmp(sha, d->sha256, FNVNX_SHA256_DIGEST_SIZE)) {
         fnvnx_logf(p->os, "fnvnx-start: identity mismatch: module %s is not the file the table was built from", L->name);
         return FNVNX_START_E_IDENTITY;
     }
