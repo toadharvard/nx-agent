@@ -30,7 +30,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "gen/guest.cc",
