@@ -3,7 +3,7 @@
 is stored: link/guest.json holds the script only (a stored copy of the derivation is a second declaration), and the link derives the libraries itself
 (recipe.Job.guest_libs, keyed stages). This gate recomputes the same derivation and reds when it does not hold.
     python3 -I gate_guestlink.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
-Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (verify/guest_compiler.json `runtime_driver`) is run, as the hermetic recipe
+Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (the cxx driver of the triplet of verify/targets.json, in the compiler tree of verify/guest_compiler.json) is run, as the hermetic recipe
 stage `drv:<root>`, with the guest semantic flags (flags.semantics.common, filtered for C++ by the pinned compiler) and `-pie -###` on a one-line C++
 file; its last line is the link command: recipe.parse_driver_link reads startfiles, dirs, names and endfiles. An object of startfiles/endfiles is
 excluded by the one-definition rule (recipe.onedef over the symbols of the green guest roots) or the entry rule (recipe.entry_object), nothing else.
@@ -29,8 +29,8 @@ def derive(repo, cache):
     recipe.onedef over the symbols of every green guest root. Raises ValueError (input), recipe.RecipeError, recipe.BuildRed."""
     admit = recipe.load_admit(repo)
     pin = recipe.load_pin(repo)
-    if pin is None or not isinstance(pin.get("runtime_driver"), str):
-        raise ValueError("verify/guest_compiler.json with runtime_driver is required")
+    if pin is None:
+        raise ValueError("verify/guest_compiler.json is required")
     guests = [r for r in gate_build.buildable_roots(repo) if recipe.entry_of(admit, r).get("target") == "guest"]
     if not guests:
         raise ValueError("no guest root")

@@ -82,7 +82,7 @@ def main():
     d = tree(files, [root("lift/gen", ["lift/fnvlift"], ["lift/gen/g.py"]), root("lift/fnvlift", ["lift/gen"])])
     rc, res, err = run(d)
     check("the gate is red on a cycle of declared imports", rc == 2 and res["status"] == "red" and "cycle" in res["detail"], (res, err))
-    check("judge reports the cycle as a root error of the table", any("cycle" in x for x in gate_admit.judge([], {"format": "fnvnx-admit/1", "roots": rs}, ["pure", "selftests"], lambda p: True)[1]))
+    check("judge reports the cycle as a root error of the table", any("cycle" in x for x in gate_admit.judge([], {"format": "fnvnx-admit/1", "roots": rs}, lambda p: True)[1]))
     # host readers and the universe
     verify = {T + "/verify/recipe.py": "import time\nt = time.time()\n"}
     stage = {T + "/lift/gen/g.py": "import recipe\n"}
@@ -123,7 +123,7 @@ def main():
     rc, res, err = run(d)
     check("a clean tests/x.py imported by a stage is certified, a non-imported tests/y.py with a clock read is outside: green", rc == 0 and res["universe"] == 2, (res, err))
     # `entry` is required for a tool root
-    adm = lambda rs, files=(): gate_admit.judge(list(files), {"format": "fnvnx-admit/1", "roots": rs}, ["pure", "selftests"], lambda p: True)
+    adm = lambda rs, files=(): gate_admit.judge(list(files), {"format": "fnvnx-admit/1", "roots": rs}, lambda p: True)
     noent = {"path": T + "/x", "class": "tool"}
     check("entry is required for a tool root", any("entry" in x for x in adm([noent])[1]) and adm([dict(noent, entry=[])])[1] == [], adm([noent]))
     check("an entry outside the root's trees or not .py is an error", adm([dict(noent, entry=[T + "/y/a.py"])])[1] != [] and adm([dict(noent, entry=[T + "/x/a.sh"])])[1] != [])
@@ -138,7 +138,7 @@ def main():
     check("the same two trees as two roots without declared imports are red", rc == 2 and T + "/contract/a.py" in res["uncertified"], (res, err))
     adm2 = lambda rs: adm(rs, [T + "/contract/a.py", T + "/link/b.py"])
     check("a file of the second tree is certified by the root", adm2([tr]) == ({}, []), adm2([tr]))
-    check("trees overlapping another root are an error", any("overlap" in x for x in adm2([tr, root("link/sub")])[1]))
+    check("a root inside another root's trees is no error (the nearest root owns a file)", adm2([tr, root("link/sub", entry=["link/sub/s.py"])])[1] == [], adm2([tr, root("link/sub", entry=["link/sub/s.py"])]))
     check("trees whose first is not path, or a single tree, are errors", adm2([dict(tr, trees=[T + "/link", T + "/contract"])])[1] != [] and adm2([dict(tr, trees=[T + "/contract"])])[1] != [])
     return 1 if FAILED else 0
 

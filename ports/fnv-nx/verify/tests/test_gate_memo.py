@@ -31,6 +31,7 @@ def files(cache, gate):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="gate-memo-")
+    __import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind
     c = os.path.join(tmp, "cache")
     made = []
 

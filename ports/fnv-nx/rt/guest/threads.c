@@ -19,6 +19,7 @@
 #include <sys/lock.h>
 
 #include "fnvnx/guest.h"
+#include "fnvnx/cite.h"
 #include "fnvnx/hostapi.h"
 #include "fnvnx/placement.h"
 
@@ -29,10 +30,10 @@ extern const uint32_t __tls_align HIDDEN;
 
 /* ---- futex-style wait/wake --------------------------------------------------------------------------- */
 int fnvnx_wait(volatile uint32_t *addr, uint32_t expected, uint64_t timeout_ns) {
-    return (int)fnvnx_hcall3(fnvnx_host->wait_on_address, FNVNX_ADDR(addr), expected, timeout_ns);
+    return (int)FNVNX_HCALL3(wait_on_address, FNVNX_ADDR(addr), expected, timeout_ns);
 }
 void fnvnx_wake(volatile uint32_t *addr, uint32_t count) {
-    fnvnx_hcall2(fnvnx_host->wake_address, FNVNX_ADDR(addr), count == UINT32_MAX ? UINT64_MAX : count);
+    FNVNX_HCALL2(wake_address, FNVNX_ADDR(addr), count == UINT32_MAX ? UINT64_MAX : count);
 }
 
 /* ---- thread records ----------------------------------------------------------------------------------- */
@@ -107,7 +108,7 @@ int fnvnx_thread_create(struct __pthread_t **out, void *(*fn)(void *), void *arg
     t->fn = fn; t->arg = arg;
     t->tid = __atomic_add_fetch(&g_next_tid, 1, __ATOMIC_RELAXED);
     if (!(t->tls_block = alloc_tls_block())) { free(t); return ENOMEM; }
-    t->host_id = fnvnx_hcall5(fnvnx_host->thread_create, FNVNX_ADDR(guest_thread_entry), FNVNX_ADDR(t),
+    t->host_id = FNVNX_HCALL5(thread_create, FNVNX_ADDR(guest_thread_entry), FNVNX_ADDR(t),
                               stack_size ? stack_size : 0x40000, (uint64_t)(int64_t)wprio, FNVNX_CPU_SPEC(ideal, mask));
     if (!t->host_id) { free(t->tls_block); free(t); return EAGAIN; }
     *out = t;
@@ -115,12 +116,12 @@ int fnvnx_thread_create(struct __pthread_t **out, void *(*fn)(void *), void *arg
 }
 uint64_t fnvnx_thread_host_id(struct __pthread_t *t) { return t ? t->host_id : 0; }
 int fnvnx_thread_start(struct __pthread_t *t) {
-    return fnvnx_hcall1(fnvnx_host->thread_start, t->host_id) ? EAGAIN : 0;
+    return FNVNX_HCALL1(thread_start, t->host_id) ? EAGAIN : 0;
 }
 void *fnvnx_thread_join(struct __pthread_t *t) {
-    fnvnx_hcall1(fnvnx_host->thread_join, t->host_id);
+    FNVNX_HCALL1(thread_join, t->host_id);
     void *ret = t->ret;
-    fnvnx_hcall1(fnvnx_host->thread_free, t->host_id);
+    FNVNX_HCALL1(thread_free, t->host_id);
     free(t->tls_block);
     free(t);
     return ret;
@@ -131,10 +132,11 @@ void fnvnx_thread_exit(void *ret) {
     t->ret = ret;
     _reclaim_reent(&t_reent);
     __atomic_store_n(&t->done, 1, __ATOMIC_RELEASE);
-    fnvnx_hcall0(fnvnx_host->thread_exit);
-    for (;;) {}   /* the host's thread_exit does not return */
+    FNVNX_HCALL0(thread_exit);
+    __builtin_unreachable();   /* the host's thread_exit does not return (hostapi.h) */
 }
-void fnvnx_yield(void) { fnvnx_hcall0(fnvnx_host->thread_yield); }
+FNVNX_CITE(fnvnx_thread_exit, "dm:10");
+void fnvnx_yield(void) { FNVNX_HCALL0(thread_yield); }
 /* libsysbase's weak sched_yield returns ENOSYS; std::this_thread::yield and spin loops need a real one. */
 int sched_yield(void) { fnvnx_yield(); return 0; }
 
@@ -144,7 +146,7 @@ int sched_yield(void) { fnvnx_yield(); return 0; }
 int sched_getcpu(void) {
     if (!fnvnx_host->ext_call) { errno = ENOSYS; return -1; }
     uint64_t none[1] = {0};
-    int64_t r = (int64_t)fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_CPU, FNVNX_ADDR(none), 0);
+    int64_t r = (int64_t)FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_CPU, FNVNX_ADDR(none), 0);
     if (r < 0) { errno = ENOSYS; return -1; }
     return (int)r;
 }
@@ -159,7 +161,7 @@ int __syscall_thread_create(struct __pthread_t **thread, void *(*func)(void *), 
 void *__syscall_thread_join(struct __pthread_t *thread) { return fnvnx_thread_join(thread); }
 int __syscall_thread_detach(struct __pthread_t *thread) {
     thread->detached = 1;                        /* record leaks by design: host thread freed, record kept */
-    fnvnx_hcall1(fnvnx_host->thread_free, thread->host_id);
+    FNVNX_HCALL1(thread_free, thread->host_id);
     return 0;
 }
 void __syscall_thread_exit(void *value) { fnvnx_thread_exit(value); }

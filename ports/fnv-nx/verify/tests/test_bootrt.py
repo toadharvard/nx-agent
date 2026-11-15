@@ -24,8 +24,16 @@ from test_bootlayout import make_elf  # noqa: E402
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 RT_H = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "reach.h")
 TMP = tempfile.mkdtemp(prefix="brt-")
+__import__('atexit').register(__import__('shutil').rmtree, TMP, True)   # a test leaves no scratch behind
 GATE_CACHE = os.environ.get("GATE_CACHE") or os.path.join(TMP, "gate-cache")
 FAILED, N = [], [0]
+
+
+def _scratch(prefix):
+    d = tempfile.mkdtemp(prefix=prefix)
+    __import__('atexit').register(__import__('shutil').rmtree, d, True)   # a test leaves no scratch behind
+    return d
+
 
 CHILD = r"""
 import ctypes, json, os, sys
@@ -88,7 +96,7 @@ def main():
     # the machine's side: the run record of a host-object exit, full width, as run() would classify a guest's exit
     elf = make_elf()
     plan = bootlayout.plan(bootlayout.parse_elf(elf), [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)], 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="brt-m-")), app_cores=bootmachine.FNVNX_APP_CORES)
+    m = bootmachine.Machine(elf, plan, boothost.Services(_scratch("brt-m-")), app_cores=bootmachine.FNVNX_APP_CORES)
     r = m.host_exit(REACH | 0xABCDEF)
     case("host_exit reach: reason reach-violation, fact_id, exit_code in full", r["reason"] == "reach-violation" and r["fact_id"] == 0xABCDEF
          and r["exit_code"] == REACH | 0xABCDEF, r)

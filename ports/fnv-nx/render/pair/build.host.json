@@ -21,5 +21,14 @@
  ],
  "units": "all",
  "link": null,
- "plugins": []
+ "plugins": [],
+ "outputs": {
+  "INCLUDE": "include"
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/render/shaders/translator",
+   "output": "INCLUDE"
+  }
+ ]
 }

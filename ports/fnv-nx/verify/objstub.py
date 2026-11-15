@@ -97,6 +97,12 @@ noreturn (below). Exactly one record per body (`cite-mismatch`), the row's contr
 call, so a row saying success is not rejected; only a body that differs from its row is. A body with no record that is V needs a constants row as before.
 The gate result counts records per id ("declared_machine"). The calls of `fnvnx_wine_fixme` keep rule (W).
 
+(O) OWNER DECISION (CLAUDE.md "GL keeps its branch ..."). `FNVNX_CITE(fn, "od:<id>")` cites a body that an owner decision keeps although the stub gate would flag it.
+`<id>` must be an anchor line of the CLAUDE.md of the tree under test, `<!-- fnvnx-owner-decision: ID | class: CLASS | root: ROOT -->` (read_owner_decisions: the only
+source, no list in the gate; a duplicate or malformed anchor is an error, red). The decision names the class of the branch; the body's object must lie under ROOT
+(`owner-decision-wrong-root`), the id must be an anchor (`owner-decision-unknown-id`), and the record is the body's only one (`cite-mismatch`). Then every finding of
+that body is accepted; the gate result counts them as "owner_decision". An uncited body keeps its findings.
+
 TERMINATING BODIES AND T2 (replaces "a reference to a terminator is a finding"). A REAL terminator is a function declared noreturn in a header of the unit that
 is either cited by a record whose row has fact process-end/thread-end (kind noreturn), or a library routine that no object of the root defines (documented by the
 pinned library). A cited terminator body is certified iff it is declared noreturn (`cite-not-declared-noreturn`) and no path of it returns
@@ -232,8 +238,11 @@ class Obj:
 
     def __init__(self, path, lite=False):
         d = self.data = open(path, "rb").read()   # lite: no relocation tables (symbol names only)
-        if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1 or struct.unpack_from("<HH", d, 16) != (1, 183):
-            raise ValueError("%s: not a little-endian AArch64 ELF relocatable" % path)
+        if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1 or struct.unpack_from("<H", d, 16)[0] != 1 or struct.unpack_from("<H", d, 18)[0] not in (183, 62):
+            raise ValueError("%s: not a little-endian AArch64 or x86-64 ELF relocatable" % path)
+        self.machine = struct.unpack_from("<H", d, 18)[0]   # e_machine: 183 AArch64 (the guest profile), 62 x86-64 (the host profile, objstub_x64.py)
+        if self.machine == 62 and d[4] != 2:
+            raise ValueError("%s: an x86-64 object must be ELF64" % path)
         w64 = self.w64 = d[4] == 2
         self.cite = CITE   # the functions a call of which is transparent for V (is_wine); trap_candidate adds the one callee under test
         self.stop = frozenset()   # the declared-noreturn callees: a call of one ends the path (no successor) in the V analysis of a MIXED body (see check_obj)
@@ -522,7 +531,8 @@ WINE = "fnvnx_wine_fixme"   # the one log function of the Wine-9.0-simplified bo
 CITE = (WINE,)   # the citation function: a body that calls it is judged against wine_fixme.tsv by rule (W). The declared machine and the terminators are cited by RECORDS (rule C)
 CITE_SEC = ".fnvnx.cite"   # rule C: the non-alloc section of the FNVNX_CITE records (hostabi/include/fnvnx/cite.h)
 ASSUME = "fnvnx_assume_violation"   # the second symbol of class R (the exit of a value outside an OWNER-accepted domain (ASM-004)): a declared noreturn function that needs no citation
-CITE_ID = re.compile(r"(dm|wf):([0-9]+)")
+CITE_ID = re.compile(r"(?:(?:dm|wf):[0-9]+|od:[a-z0-9]+(?:-[a-z0-9]+)*)")
+OWNER_ANCHOR = re.compile(r"<!-- fnvnx-owner-decision: ([a-z0-9]+(?:-[a-z0-9]+)*) \| class: ([^|]+?) \| root: (\S+) -->")
 REACH = "fnvnx_reach_violation"   # the one contract symbol of the proven-unreachable assertion (owner decision 2026-11-11, option iii)
 # Branch relocations of both ABIs. LP64 (ELF64): R_AARCH64_JUMP26 = 282, CALL26 = 283 (elf.h). ILP32 (ELF32, r_info = sym << 8 | type):
 # R_AARCH64_P32_JUMP26 = 20, P32_CALL26 = 21 (AAELF64 ILP32 tables; checked against the names binutils' readelf prints for objects the
@@ -984,6 +994,9 @@ def image_check(path, errno):
     branch is outside the class by definition (cfg has a result: it proves an effect). kind `unjudged`: the body cannot be judged and is red, never
     skipped: a size that is not a multiple of 4 or leaves the file, a word LLVM rejects, a data island ($d mapping symbol inside the range), a load/store
     word without a memory operand. errno reached through a TLS symbol (form "tls") is kind `unjudged` for the root: its stores are not read."""
+    if open(path, "rb").read(20)[18:20] == (62).to_bytes(2, "little"):   # the host profile's image: the same rule over x86-64 (objstub_x64.image_check)
+        import objstub_x64
+        return objstub_x64.image_check(path, errno)
     form, sym = errno
     im = Image(path, sym)
     if form != "call":
@@ -1124,12 +1137,14 @@ def _target(w, o):
     return o + 4 * (i - (1 << 26) if i >> 25 else i)
 
 
-def nr_ends(words, a, b, rels, obj, fn_at):
+def nr_ends(words, a, b, rels, obj, fn_at, tails=None):
     """The shape of a function that does not return, from its code: -> sorted list of the callees the paths END in (a symbol name; "<blr>" for
     a final call through a pointer), or None when some path can return or leave: a reachable RET, BR* (not BLR), ERET, SVC, a fall-through
     past the end after a word that is not a call, or a branch out of [a,b) that is not a tail call. A path ends in a call that the compiler
     placed last (BL at the end, a tail B out of the function: it knew the callee does not return) or in BRK/UDF (a trap word, which the T
-    rules judge). FN_AT {offset: name}: the functions of the section (a call without a relocation targets one of them)."""
+    rules judge). FN_AT {offset: name}: the functions of the section (a call without a relocation targets one of them).
+    TAILS, when given, receives the ends that a tail B (a jump out of the function) names: the compiler's tail call is no knowledge that the callee does not return,
+    so such an end is a returning path unless the callee is a declared terminator (the judge, nr_tail)."""
     callee = lambda o, w: obj.syms[rels[o][0]][0] if o in rels and rels[o][1] in BRANCH[obj.w64] else fn_at.get(_target(w, o))
     ends, seen, work, last = set(), set(), [a], b - 4
     while work:
@@ -1157,6 +1172,8 @@ def nr_ends(words, a, b, rels, obj, fn_at):
                 if c is None:
                     return None
                 ends.add(c)
+                if tails is not None:
+                    tails.add(c)
         elif isblr(w):
             if o == last:
                 ends.add("<blr>")
@@ -1217,6 +1234,11 @@ def flag_holds(fl, name, off, stack=()):
     return bool(sites) and every_path_calls(words, a, b, sites)
 
 
+# The 32-bit absolute data relocation of each object ABI, one table: (e_machine, ELF64?) -> type. R_AARCH64_ABS32 (258, ELF64 AArch64), R_AARCH64_P32_ABS32 (1, the
+# ILP32 ABI), R_X86_64_32 (10, the host profile). read_cites accepts exactly this one for a `.fnvnx.cite` record.
+ABS32 = {(183, True): 258, (183, False): 1, (62, True): 10}
+
+
 def read_cites(o):
     """RULE C (rule text in the module docstring). The `.fnvnx.cite` records of the object O (hostabi/include/fnvnx/cite.h): -> ({(section index, function
     offset): [id, ..]}, [(item name, detail)] of malformed records). A record is: u32 address of a function (the RELA entry at the record's offset: an
@@ -1225,7 +1247,7 @@ def read_cites(o):
     malformed: a cited function must be a body of the object, never a name that is merely mentioned."""
     at, bad = {}, []
     fn = {(s[5], s[1]) for s in o.syms if s[3] == 2 and 0 < s[5] < 0xFF00}
-    abs32 = 258 if o.w64 else 1   # R_AARCH64_ABS32 (ELF64) / R_AARCH64_P32_ABS32 (ELF32, the ILP32 ABI)
+    abs32 = ABS32[(o.machine, o.w64)]
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
         if sname != CITE_SEC:
             continue
@@ -1249,18 +1271,24 @@ def read_cites(o):
             if key not in fn:
                 bad.append((nm, "the record's relocation does not name the start of a function defined in this object (symbol %s)" % sy[0]))
             elif not m:
-                bad.append((nm, "the id %r is not dm:<decimal> or wf:<decimal>" % buf[p + 8:p + 8 + n].decode("latin-1")[:40]))
+                bad.append((nm, "the id %r is not dm:<decimal>, wf:<decimal> or od:<id>" % buf[p + 8:p + 8 + n].decode("latin-1")[:40]))
             else:
                 at.setdefault(key, []).append(m.group(0))
             p += (8 + n + 3) & ~3
     return at, bad
 
 
-def check_obj(path, terms, os_layer, probe=None):
+def check_obj(path, terms, os_layer, probe=None, machine=None):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
-    "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe)."""
+    "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe). MACHINE: the e_machine
+    the root's profile requires (183 guest, 62 host), a mismatch is an error (red); an x86-64 object is analysed by objstub_x64.py to the same result schema."""
     o = Obj(path)
-    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "flag": None, "tabs": {}, "assume": []}
+    if machine is not None and o.machine != machine:
+        raise ValueError("%s: e_machine %d, the root's profile requires %d" % (path, o.machine, machine))
+    if o.machine == 62:
+        import objstub_x64
+        return objstub_x64.check_obj(o, path, terms, os_layer, probe, vjson, read_cites, assume_id)
+    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "nr_tail": {}, "flag": None, "tabs": {}, "assume": []}
     pw = {}   # the probe (recipe error_abi kind flag): name -> (words, a, b, stores, calls) of every function
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
     stops = frozenset(t for t in terms if t[:1] != "~")   # the declared-noreturn callees (terminator candidates): a call ends the path of a mixed body
@@ -1296,6 +1324,7 @@ def check_obj(path, terms, os_layer, probe=None):
                 if last[3] in extra["tb"]:
                     extra["tb"][name] = extra["tb"][last[3]]
                 extra["nr"][name] = extra["nr"].get(last[3])
+                extra["nr_tail"][name] = extra["nr_tail"].get(last[3], [])
                 if last[3] in extra["cite"]:
                     extra["cite"][name] = extra["cite"][last[3]]
                     extra["wine_nz"][name] = extra["wine_nz"].get(last[3], {})
@@ -1358,7 +1387,10 @@ def check_obj(path, terms, os_layer, probe=None):
             elif lk not in ("b", "end"):
                 fnd.append((name, "fallthrough", "last instruction %s can run into the next function" % lm, None))
             ids = cites_at.get((si, a), [])
-            nrv = nr_ends(words, a, b, rel, o, fn_at)
+            if any(i.startswith("od:") for i in ids):
+                extra["cite"][name] = ids   # rule O reads the record before any rule branch: every finding of the body is decided by the anchor
+            ntail = set()
+            nrv = nr_ends(words, a, b, rel, o, fn_at, ntail)
             nterm = bisect.bisect_left(tk, b) - bisect.bisect_left(tk, a)
             if not any(f[1] in ("T1", "undecodable", "uncovered") for f in fnd):
                 # a MIXED body (some path returns, some path ends in a call of a declared-noreturn function): the terminator paths end there, and the
@@ -1395,6 +1427,7 @@ def check_obj(path, terms, os_layer, probe=None):
                     if tb is not None:
                         extra["tb"][name] = tb
             extra["nr"][name] = nrv
+            extra["nr_tail"][name] = sorted(ntail)
             if probe and probe.get("kind") == "flag" and probe["fail"] in {sy[0] for sy in o.syms if sy[3] == 2 and sy[4] != 0 and sy[5] == si}:
                 try:
                     pw[name] = (words, a, b) + flag_events(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, fn_at)
@@ -1501,7 +1534,8 @@ def matches(row, v):
     return kind in ("void", "identity") or (x0[0] == "A" and addr_name(val) in x0[1] if kind == "addr" else
                               x0[0] == "K" and x0[1] & (0xFFFFFFFF if kind == "u32" else 2 ** 64 - 1) == int(val, 0))
 
-ANALYSIS = hashlib.sha256(open(os.path.join(HERE, "objstub.py"), "rb").read() + open(os.path.join(HERE, "a64access.cc"), "rb").read()).hexdigest()
+ANALYSIS = hashlib.sha256(open(os.path.join(HERE, "objstub.py"), "rb").read() + open(os.path.join(HERE, "a64access.cc"), "rb").read() +
+                          open(os.path.join(HERE, "objstub_x64.py"), "rb").read()).hexdigest()
 
 
 def _atomic(path, data):
@@ -1512,35 +1546,39 @@ def _atomic(path, data):
     os.replace(tmp, path)
 
 
-def object_key(path, terms, os_layer, probe=None):
+def object_key(path, terms, os_layer, probe=None, machine=None):
     """(cache key, the terminators this object mentions). The analysis reads TERMS only through the object's own symbol names, so the
     key holds the object's sha256, the OS_LAYER flag, the analysis version and exactly terms & names."""
     o = Obj(path, lite=True)
+    if machine is not None and o.machine != machine:
+        raise ValueError("%s: e_machine %d, the root's profile requires %d" % (path, o.machine, machine))
     names = {s[0] for s in o.syms if s[4] != 0}
     mine = sorted(names & set(terms)) + sorted("~" + n for n in names if "~" + n in terms)   # "~name": an unwinder (see the terminator rule)
-    key = hashlib.sha256(json.dumps([ANALYSIS, hashlib.sha256(o.data).hexdigest(), bool(os_layer), mine, probe], sort_keys=True).encode()).hexdigest()
+    dec = __import__("objstub_x64").tool_version() if o.machine == 62 else ""   # an x86-64 object is decoded by the pinned objdump: its version is part of the key
+    key = hashlib.sha256(json.dumps([ANALYSIS, hashlib.sha256(o.data).hexdigest(), bool(os_layer), mine, probe, machine, dec], sort_keys=True).encode()).hexdigest()
     return key, set(mine)
 
 
 def _work(args):
-    path, mine, os_layer, probe = args
-    items, finds, extra = check_obj(path, mine, os_layer, probe)
+    path, mine, os_layer, probe, machine = args
+    items, finds, extra = check_obj(path, mine, os_layer, probe, machine)
     return dict(extra, items=items, finds=[list(f) for f in finds])
 
 
-def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1, probe=None):
+def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1, probe=None, machine=None):
     """OBJS [(id, path)] -> {id: result dict}. Per object cache CACHE/objstub/<key>.json when CACHE is given; the objects without a
     cache entry run in JOBS processes (the decoder binary is built or fetched once, before the fork)."""
     res, todo = {}, []
     for oid, path in objs:
-        key, mine = object_key(path, terms, oid in os_layer_ids, probe)
+        key, mine = object_key(path, terms, oid in os_layer_ids, probe, machine)
         cp = os.path.join(cache, "objstub", key + ".json") if cache else None
         if cp and os.path.exists(cp):
             res[oid] = json.load(open(cp))
         else:
-            todo.append((oid, (path, mine, oid in os_layer_ids, probe), cp))
+            todo.append((oid, (path, mine, oid in os_layer_ids, probe, machine), cp))
     if todo:
-        tool(cache)
+        if any(struct.unpack_from("<H", open(t[1][0], "rb").read(20), 18)[0] == 183 for t in todo):   # the AArch64 decoder is built only when an AArch64 object needs it
+            tool(cache)
         if jobs > 1 and len(todo) > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=jobs, mp_context=multiprocessing.get_context("fork")) as ex:
                 done = list(ex.map(_work, [t[1] for t in todo], chunksize=1))
@@ -1692,7 +1730,26 @@ def assume_counts(results, assume):
     return {"sites": n, "accepted": acc, "red": n - acc, "by_id": dict(sorted(by.items()))}
 
 
-def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, extconv=None, assume=None):
+def read_owner_decisions(path):
+    """OWNER DECISION anchors of the trunk's CLAUDE.md (the one source; the gate holds no list): the lines
+    `<!-- fnvnx-owner-decision: ID | class: CLASS | root: ROOT -->` -> {id: (class, root)}.  A missing file is {} (every citation is then unknown);
+    a duplicate id is an error (ValueError).  A line that starts the comment but has another shape is malformed (ValueError)."""
+    out = {}
+    if not os.path.exists(path):
+        return out
+    for ln in open(path, encoding="utf-8"):
+        if not ln.lstrip().startswith("<!-- fnvnx-owner-decision"):
+            continue   # prose that mentions the marker is no anchor
+        m = OWNER_ANCHOR.fullmatch(ln.strip())
+        if not m or not m.group(2).strip():
+            raise ValueError("malformed owner-decision anchor in %s: %r" % (path, ln.strip()[:120]))
+        if m.group(1) in out:
+            raise ValueError("duplicate owner-decision id %s in %s" % (m.group(1), path))
+        out[m.group(1)] = (m.group(2).strip(), m.group(3).rstrip("/"))
+    return out
+
+
+def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=None, stats=None, extconv=None, assume=None, owners=None):
     """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
     V: certified iff its row equals the result. indirect-noreturn-tail: certified iff every path ends in the tail and the function is
@@ -1703,11 +1760,14 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     definition is checked by error_abi_findings (once, global, and by kind: noreturn from the code, flag from the DWARF field and the stores).
     HANDLERS {object id: records of read_handler_records}: a V function with no constants row is certified iff handler_ok (rule H).
     STATS, a dict, receives the counts "trap_body", "handler_a", "handler_b".
+    OWNERS ({id: (class, root)} of read_owner_decisions, None = none): a body cited by an `od:<id>` record (FNVNX_CITE(fn, "od:<id>")) has every finding
+    of the stub gate accepted iff it is the body's only record (`cite-mismatch`), the id is an anchor of CLAUDE.md (`owner-decision-unknown-id`) and the
+    object lies under the anchor's root (`owner-decision-wrong-root`); the anchor names the branch's class.  There is no list in the gate.
     `ASSUME` = ({record id: status}, {ids of the objects of generated units}), None = both empty: a call of `fnvnx_assume_violation` is accepted
     iff it lies in an object of a unit that a generator stage of the root's recipe outputs (else `assume-direct-call`) and its first argument
     is a literal id whose record is OWNER (`assume-id-nonliteral`, `assume-id-not-owner`); see (A) above and `assume_verdict`."""
     registry, gen = assume if assume else ({}, set())
-    items, out, vflag, exited, used = [], [], set(), set(), set()
+    items, out, vflag, exited, used, out_od = [], [], set(), set(), set(), []
     wine, fails, handlers, stats = wine or {}, fails or {}, handlers or {}, stats if stats is not None else {}
     allv = {(oid, n) for oid, r in results.items() for n, k, _, _ in r["finds"] if k == "V"}
     root_of = {}   # records object -> the object ids that share it (one root)
@@ -1717,6 +1777,20 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     # RULE C and the terminator rule: the facts of the whole set of objects
     defined_all = {n for r in results.values() for n in r["items"]}
     stops_all = {n for r in results.values() for n in r["terms"]}   # the declared-noreturn names that any object mentions
+    owners, od_ok = owners or {}, set()
+    for oid, r in sorted(results.items()):   # RULE O: bodies cited by an owner-decision record
+        for name, ids in r["cite"].items():
+            if not any(i.startswith("od:") for i in ids):
+                continue
+            a = owners.get(ids[0][3:])
+            bad = (("cite-mismatch", "an owner-decision body is cited by exactly one record, has %s" % ids) if len(ids) != 1 else
+                   ("owner-decision-unknown-id", "id %s is not an anchor of CLAUDE.md" % ids[0]) if a is None else
+                   ("owner-decision-wrong-root", "id %s is for the root %s, the body is in %s" % (ids[0], a[1], oid)) if not oid.startswith(a[1] + "/") else None)
+            if bad:
+                out_od.append((oid, name, bad[0], bad[1]))
+            else:
+                od_ok.add((oid, name))
+                stats["owner_decision"] = stats.get("owner_decision", 0) + 1
     cited_ids = {i for r in results.values() for ids in r["cite"].values() for i in ids}
     cited_term = set()   # the names that a record cites with a process-end/thread-end row (kind noreturn): REAL terminators
     for r in results.values():
@@ -1760,6 +1834,8 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
         exit_ok = set(r["exit_ok"])
         for name, kind, detail, v in r["finds"]:
             row = rows.get((oid, name))
+            if name in r["cite"] and any(i.startswith("od:") for i in r["cite"][name]):
+                continue   # decided by rule O above
             if kind == "V":
                 vflag.add((oid, name))
                 if row and row[0] != "exit" and matches(row, v):
@@ -1793,10 +1869,10 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
                 crow, tk, err = cite_row(r, name)
                 if err:
                     kind, detail = err
-                elif wine_matches(crow[-2:], v, r["wine_nz"].get(name, {})):
+                elif wine_matches(crow[3:5] if tk == "dm" else crow[-2:], v, r["wine_nz"].get(name, {})):
                     continue
                 else:
-                    kind, detail = ("declared-machine" if tk == "dm" else "wine-fixme") + "-mismatch", "row %s %s, analysis: %s" % (crow[-2], crow[-1], detail)
+                    kind, detail = ("declared-machine" if tk == "dm" else "wine-fixme") + "-mismatch", "row %s %s, analysis: %s" % ((crow[3:5] if tk == "dm" else crow[-2:]) + (detail,))
             elif kind == "WINE-V":   # a call of fnvnx_wine_fixme (rule W): the id every path passes to it
                 wid = r["wine_id"].get(name)
                 if wid is None or r["cite_sym"].get(name, WINE) is None:
@@ -1824,7 +1900,8 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
                 # T2 only when EVERY path ends in a real terminator and the function is not itself a declared-noreturn definition (coverage rule below): a body with a
                 # returning path has a real control path, and its returning paths are judged by the V rules
                 nr = r["nr"].get(name)
-                if name in r["term_def"] or nr is None or (all(e in stops_all for e in nr) and not all(real_end(e, term_ok) for e in nr)):   # an end that is no declared terminator stays a finding: the compiler knew the callee does not return
+                # a tail call (B, jmp) into a function that is no declared terminator returns whenever the callee returns: the body has a returning path (MIXED)
+                if name in r["term_def"] or nr is None or any(e not in stops_all for e in r["nr_tail"].get(name, ())) or (all(e in stops_all for e in nr) and not all(real_end(e, term_ok) for e in nr)):   # an end that is no declared terminator stays a finding: the compiler knew the callee does not return
                     continue
             elif kind == "indirect-noreturn-tail":
                 if name in exit_ok and (name in (REACH, ASSUME) or (row and row[0] == "exit") or name in cited_term):
@@ -1871,7 +1948,8 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     if results:   # rule C: a row of the declared-machine table that no record cites
         out += [("-", "dm:%d" % i, "declared-machine-uncited", "row %d (%s) is cited by no record" % (i, declared[i][0])) for i in sorted(declared) if "dm:%d" % i not in cited_ids]
     out += [("-", "fact:%d" % c, "reach-stale", "fact in the reach facts with no call site of %s" % REACH) for c in sorted((facts or set()) - used)]
-    return items, sorted(set(out))
+    out = [f for f in out if (f[0], f[1]) not in od_ok]   # rule O: every finding of a body cited by a valid owner decision is accepted
+    return items, sorted(set(out) | set(out_od))
 
 
 def noreturn_set(results, oids):
@@ -1914,12 +1992,12 @@ def error_abi_findings(results, oids, abi):
     return []
 
 
-def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None):
+def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None, machine=None, owners=None):
     """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). ABI: the `error_abi` of the one root OBJS form; TABLES: the `empty_handlers.tables` of it;
     RECORDS: read_handler_records of it."""
     probe = dict(abi or {}, tables=tables or {}) if (abi or tables) else None
-    res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe)
-    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, extconv)
+    res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe, machine)
+    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, extconv, None, owners)
     return items, sorted(set(finds) | set(error_abi_findings(res, list(res), abi) if abi else ()) | set(handler_row_findings(records, res) if records else ()))
 
 
@@ -2022,8 +2100,7 @@ def declared_header(lines):
             if not all(prefixes):
                 raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
             fn = r":[A-Za-z_][A-Za-z0-9_@]*"
-            forms = {"c11": r":[0-9]+(?:\.[0-9]+)*" + fn,                 # ISO/IEC 9899:2011 clause number, digits and dots
-                     "posix-2017": r":[A-Za-z_][A-Za-z0-9_]*" + fn}       # IEEE Std 1003.1-2017 page name
+            forms = {"std": r":(?:C11:[0-9]+(?:\.[0-9]+)*|POSIX\.1-2017:[A-Za-z_][A-Za-z0-9_]*)"}   # `std:<doc>:<section>`: the clause of ISO/IEC 9899:2011 (N1570) or the IEEE Std 1003.1-2017 function page; no function component
             body = r":[A-Za-z0-9_./#+-]+" + fn
             return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + forms.get(x.group(1), body) for x in prefixes) + ")"
     raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
@@ -2036,28 +2113,113 @@ def _sources_ok(field, source):
     return all(re.fullmatch(source, x) for x in t) and t == sorted(set(t))
 
 
-def read_declared_table(path):
-    """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; lines starting with # are comments. fact is one of
-    the facts of the table's header line. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
-    `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against the documentation or a pinned Wine 9.0
-    tree is the oracle class, not done here). id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their
-    own. The source form `hostabi:<header>:<service>` (the header line lists it) is valid only for kind `noreturn`: a property of a symbol that our own product defines,
-    which the gates verify against the declaration in the header (the attribute) and the coverage rule (every path of the definition ends in a real terminator or an unwinder);
-    as the source of a Win32/Wine behaviour value it is a malformed row (the trust chain would end at us, not at OWNER 3).
-    -> {id: (contract name, fact, source, kind, value)}. ValueError when missing or malformed."""
+LASTERR = re.compile(r"([A-Z][A-Z0-9_]*)=([0-9]+)")
+
+
+def _sha256(path):
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+def std_index_load(root, pin):
+    """The pinned std index (declared_sources.json `std_index`, tree at ROOT) -> ({C11 clause}, {POSIX function page}). Each file is checked by sha256 before it is read."""
+    out = []
+    for key, col in (("c11", 0), ("posix", 0)):
+        f = pin["files"][key]
+        p = os.path.join(root, f["path"])
+        if not os.path.isfile(p) or _sha256(p) != f["sha256"]:
+            raise ValueError("std index file %s is missing or differs from its pinned sha256" % f["path"])
+        out.append({l.split("\t")[col] for l in read_list(p)})
+    return tuple(out)
+
+
+def winerror_load(root, pin):
+    """The pinned WDK 7.1 winerror.h and winsock2.h (declared_sources.json `wdk`, tree at ROOT) -> {NAME: decimal}: every `#define NAME <integer>` of the two headers,
+    where the integer is a decimal or hex literal (suffix L/U), possibly in parentheses or a (DWORD)/(HRESULT) cast, or `(WSABASEERR+N)`, or the name of another such
+    constant. A name the evaluator cannot resolve is absent (a citation of it is red)."""
+    raw = {}
+    for key in ("winerror", "winsock2"):
+        f = pin["files"][key]
+        p = os.path.join(root, f["path"])
+        if not os.path.isfile(p) or _sha256(p) != f["sha256"]:
+            raise ValueError("WDK header %s is missing or differs from its pinned sha256" % f["path"])
+        for l in open(p, encoding="latin-1"):
+            m = re.match(r"^#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.*?)\s*(?:/\*.*)?$", l.rstrip("\r\n"))
+            if m:
+                raw.setdefault(m.group(1), m.group(2).strip())
+    memo = {}
+
+    def ev(name, depth=0):
+        if name in memo:
+            return memo[name]
+        if depth > 8 or name not in raw:
+            return None
+        e = re.sub(r"\(\s*(?:DWORD|HRESULT|LONG|ULONG|NTSTATUS|WORD)\s*\)", "", raw[name]).replace(" ", "")
+        while e.startswith("(") and e.endswith(")") and e.count("(") == 1:
+            e = e[1:-1]
+        v = None
+        m = re.fullmatch(r"\(?(0[xX][0-9a-fA-F]+|[0-9]+)[uUlL]*\)?", e)
+        if m:
+            v = int(m.group(1), 0)
+        else:
+            m = re.fullmatch(r"\(([A-Za-z_][A-Za-z0-9_]*)\+([0-9]+)\)", e) or re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\+([0-9]+)", e)
+            if m and ev(m.group(1), depth + 1) is not None:
+                v = ev(m.group(1), depth + 1) + int(m.group(2))
+            elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", e):
+                v = ev(e, depth + 1)
+        memo[name] = v
+        return v
+    return {n: v for n in raw for v in [ev(n)] if v is not None}
+
+
+def read_declared_table(path, std_index=None, winerr=None):
+    """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value<TAB>lasterror`; lines starting with # are comments. fact is one of
+    the facts of the table's header line. source is the documented origin of the returned value: one or several tokens joined by `|` (sorted, unique, each of the
+    forms the header lists): `win-doc:<Windows documentation page or header path>:<function>`, `wine-9.0:<path in the Wine source tree>:<function name>`,
+    `galaxy-sdk:<page>:<function>`, `hostabi:<header>:<service>`, and `std:<doc>:<section>`: the standard's own clause, `std:C11:<clause number>` (ISO/IEC 9899:2011,
+    draft N1570) or `std:POSIX.1-2017:<function page>` (IEEE Std 1003.1-2017 System Interfaces). The FORM is validated here; a std token is also checked against the
+    pinned index (STD_INDEX: the callable that returns the directory of the std-index tree of declared_sources.json, called once, only when a std token occurs; the
+    clause or page must be in the index; None with a std token is an error). Checking win-doc/wine references against a pinned tree is the oracle class, not done.
+    id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their own. The source form `hostabi:<header>:<service>` is valid only for
+    kind `noreturn`: a property of a symbol that our own product defines, which the gates verify against the declaration in the header (the attribute) and the coverage
+    rule (every path of the definition ends in a real terminator or an unwinder); as the source of a Win32/Wine behaviour value it is a malformed row (the trust chain
+    would end at us, not at OWNER 3).
+    lasterror (7th column): `-` or `NAME=<decimal>`, NAME `[A-Z][A-Z0-9_]*` and the decimal its winerror.h or winsock2.h value (WINERR: the callable that returns the directory of the
+    WDK tree of declared_sources.json, called once, only when a non-`-` value occurs; the pair NAME, decimal must be a define of the pinned headers): the last error the body
+    sets on the path that returns the row's `value`. Kind `noreturn` has `-`. Any other kind has `-` only when the cited source leaves the last error unchanged on that path
+    (not decidable here). A `hostabi:` source never gives a non-`-` lasterror (that is a Win32 value).
+    -> {id: (contract name, fact, source, kind, value, lasterror)}. ValueError when missing or malformed."""
     if not os.path.exists(path):
         raise ValueError("declared machine table %s does not exist" % path)
     out = {}
     lines = read_list(path)
     facts, source = declared_header(lines)
+    std = werr = None
     for l in lines:
         if l.startswith("#"):
             continue
         f = l.split("\t")
-        ok = len(f) == 6 and f[4] != "branch" and f[2] in facts and _sources_ok(f[3], source) and \
-            _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:], True) and (f[4] == "noreturn") == (f[2] in ("process-end", "thread-end")) and (f[4] == "noreturn" or not any(x.startswith("hostabi:") for x in f[3].split("|")))   # hostabi: is a source for a noreturn property of our own symbol only, never for a Win32/Wine value (a return value, a lasterror, an output: wf:/dm: citations of OWNER 3 only); id, name, kind and value: the rules of the wine table; noreturn exactly for the terminator facts
+        ok = len(f) == 7 and f[4] != "branch" and f[2] in facts and _sources_ok(f[3], source) and \
+            _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:6], True) and (f[4] == "noreturn") == (f[2] in ("process-end", "thread-end")) and (f[4] == "noreturn" or not any(x.startswith("hostabi:") for x in f[3].split("|"))) and \
+            (f[6] == "-" or (f[4] != "noreturn" and LASTERR.fullmatch(f[6]) is not None and not any(x.startswith("hostabi:") for x in f[3].split("|"))))   # hostabi: is a source for a noreturn property of our own symbol only, never for a Win32/Wine value (a return value, a lasterror, an output); a noreturn row has no last error; id, name, kind and value: the rules of the wine table; noreturn exactly for the terminator facts
         if not ok or int(f[0]) in out:
             raise ValueError("bad or duplicate declared machine row in %s: %r" % (path, l[:80]))
+        for tok in f[3].split("|"):
+            if tok.startswith("std:"):
+                if std is None:
+                    if std_index is None:
+                        raise ValueError("declared machine row %s cites %s: no pinned std index was given" % (f[0], tok))
+                    std = std_index()
+                doc, sec = tok.split(":", 2)[1:]
+                if sec not in std[0 if doc == "C11" else 1]:
+                    raise ValueError("declared machine row %s cites %s, which is not in the pinned std index" % (f[0], tok))
+        if f[6] != "-":
+            if werr is None:
+                if winerr is None:
+                    raise ValueError("declared machine row %s has lasterror %s: no pinned WDK headers were given" % (f[0], f[6]))
+                werr = winerr()
+            name, num = LASTERR.fullmatch(f[6]).groups()
+            if werr.get(name) != int(num):
+                raise ValueError("declared machine row %s: lasterror %s is not a define of the pinned winerror.h/winsock2.h (%s)" % (f[0], f[6], werr.get(name)))
         out[int(f[0])] = tuple(f[1:])
     return out
 

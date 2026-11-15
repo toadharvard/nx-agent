@@ -32,6 +32,7 @@ def main():
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)]
     std = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
     root = tempfile.mkdtemp(prefix="bh-")
+    __import__('atexit').register(__import__('shutil').rmtree, root, True)   # a test leaves no scratch behind
 
     def build(edit):
         plan = copy.deepcopy(std)

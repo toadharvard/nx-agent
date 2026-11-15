@@ -1,6 +1,6 @@
 /* dsound_fx.h - the DirectSound interfaces dsound.h leaves out: the generic effect-parameter interfaces
  * (Chorus, Flanger, Compressor, Distortion, Echo, Gargle, ParamEq: Set/GetAllParameters over one struct, SDK vtable
- * order) and IKsPropertySet. Shared by dsound.cpp (the objects) and the COM bridge (platform/com/com_spec.json). */
+ * order) and IKsPropertySet. Shared by dsound.cpp (the objects) and the COM bridge (the COM bridge generator, platform/com/gen_combridge.py). */
 #ifndef FNVNX_DSOUND_FX_H
 #define FNVNX_DSOUND_FX_H
 #include <dsound.h>

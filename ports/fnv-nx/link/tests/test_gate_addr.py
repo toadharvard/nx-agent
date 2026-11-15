@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Check of link/gate_addr.py and toolchain/addr/fnvnx_addr.cc.  Compiles small C++ fixtures with the distro cross compiler and the
-plugin built from the tracked source (the argv of verify/recipe.py's plugin stage), and hand-assembles negative objects.  Cases:
+"""Check of link/gate_addr.py and toolchain/addr/fnvnx_addr.cc.  Compiles small C++ fixtures through the recipe (toolchain/tests/plugbuild.py: the pinned
+guest compiler, product flags, the plugin set built by the recipe's stages), and hand-assembles negative objects.  Cases:
 the plugin writes `.fnvnx.addr` with seen == routed and a barrier asm at every address sum (the code has a 32-bit add and no
 `uxtw` addressing mode); thunks and constructor aliases get records; the gate is green on those objects; red and named: an
 object without the section, a function without a record, two records, seen != routed, a malformed line (every function of
@@ -17,14 +17,15 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'contract'))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'toolchain', 'tests'))
 import a64obj
 import addrsec
 import gate_addr
 
+import plugbuild as pb
+
 TOOL = os.path.join(HERE, '..', '..', 'toolchain', 'addr', 'fnvnx_addr.cc')
-CXX = 'aarch64-linux-gnu-g++-13'
-FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fwrapv', '-fno-strict-aliasing', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57',
-         '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics', '-fno-exceptions', '-fno-rtti']
+
 fails = []
 tmp = tempfile.mkdtemp(prefix='gate-addr-')
 
@@ -38,25 +39,12 @@ def run(argv, **kw):
     return subprocess.run(argv, capture_output=True, text=True, **kw)
 
 
-def build_plugin():
-    out = run([CXX, '-print-file-name=plugin'])
-    pdir = out.stdout.strip()
-    so = os.path.join(tmp, 'fnvnx_addr.so')
-    host = 'x86_64-linux-gnu-g++-13'
-    crt = [run([host, '-print-file-name=' + n]).stdout.strip() for n in ('crti.o', 'crtbeginS.o')]
-    end = [run([host, '-print-file-name=' + n]).stdout.strip() for n in ('crtendS.o', 'crtn.o')]
-    r = run([host, '-shared', '-nostdlib', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-I' + pdir + '/include', '-o', so] + crt + [TOOL] + end)
-    if r.returncode:
-        fails.append('plugin build: ' + r.stderr[-800:])
-        return None
-    return so
-
-
-def compile_cxx(src, name, plugin):
+def compile_cxx(src, name):
+    """C++ fixture compiled by the recipe (plugbuild): pinned guest compiler, product flags, the full plugin set"""
     p = os.path.join(tmp, name + '.cpp')
     o = os.path.join(tmp, name + '.o')
     open(p, 'w').write(src)
-    r = run([CXX] + FLAGS + (['-fplugin=' + plugin] if plugin else []) + ['-c', p, '-o', o])
+    r = pb.compile(p, o, [], native=True)
     if r.returncode:
         fails.append('compile %s: %s' % (name, r.stderr[-800:]))
     return o
@@ -117,31 +105,29 @@ struct C : A, B { void g() override; int c; };
 void C::g() { sink(this); }
 struct E { E(); ~E(); int x; }; E::E() { x = 1; } E::~E() { sink(this); }
 '''
-plug = build_plugin()
-if plug:
-    good = compile_cxx(SRC, 'good', plug)
-    plain = compile_cxx(SRC, 'plain', None)
-    rows = addrsec.read(good)
-    check('section present', rows is not None, True)
-    byname = {s: (a, b) for s, a, b in rows or []}
-    check('r1 routed', byname.get('_Z2r1j', (0, 0))[0] >= 1 and byname['_Z2r1j'][0] == byname['_Z2r1j'][1], True)
-    check('r6 routed', byname.get('_Z2r6Pcj', (0, 0))[0] >= 1 and byname['_Z2r6Pcj'][0] == byname['_Z2r6Pcj'][1], True)
-    check('constant not counted', byname.get('_Z2r9v'), (0, 0))
-    check('every record seen == routed', all(a == b for _, a, b in rows or []), True)
-    check('sorted records', [s for s, _, _ in rows or []], sorted(s for s, _, _ in rows or []))
-    names = sorted(n for _, _, _, ns in a64obj.read(good).functions for n in ns)
-    check('record for every function symbol', sorted(set(names) - set(byname)), [])
-    check('thunk or alias record', any(n.startswith('_ZThn') for n in names) and byname.get(
-        [n for n in names if n.startswith('_ZThn')][0]), (0, 0))
-    code = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', good]).stdout
-    r1 = code.split('<_Z2r1j>:')[1].split('\n\n')[0]
-    check('r1 adds in 32 bits, no displacement addressing', ('add\tw' in r1) and ('#0x40]' not in r1), True)
-    r, j = gate(good)
-    check('green on plugin object', (r.returncode, j['status'], j['certified'] == j['universe']), (0, 'green', True))
-    r, j = gate(plain)
-    check('no section: red', (r.returncode, j['status']), (2, 'red'))
-    check('no section: every function named', sorted(j['uncertified']), sorted([plain] + [plain + ':' + n for n in names]))
-    check('no section: object item named', plain in j['uncertified'], True)
+good = compile_cxx(SRC, 'good')
+rows = addrsec.read(good)
+check('section present', rows is not None, True)
+byname = {s: (a, b) for s, a, b in rows or []}
+check('r1 routed', byname.get('_Z2r1j', (0, 0))[0] >= 1 and byname['_Z2r1j'][0] == byname['_Z2r1j'][1], True)
+check('r6 routed', byname.get('_Z2r6Pcj', (0, 0))[0] >= 1 and byname['_Z2r6Pcj'][0] == byname['_Z2r6Pcj'][1], True)
+check('constant not counted', byname.get('_Z2r9v'), (0, 0))
+check('every record seen == routed', all(a == b for _, a, b in rows or []), True)
+check('sorted records', [s for s, _, _ in rows or []], sorted(s for s, _, _ in rows or []))
+names = sorted(n for _, _, _, ns in a64obj.read(good).functions for n in ns)
+plain = asm_obj('plain', names, None)   # the object of a build without the plugin: the same functions, no section (the recipe loads the whole plugin set in every guest unit)
+check('record for every function symbol', sorted(set(names) - set(byname)), [])
+check('thunk or alias record', any(n.startswith('_ZThn') for n in names) and byname.get(
+    [n for n in names if n.startswith('_ZThn')][0]), (0, 0))
+code = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', good]).stdout
+r1 = code.split('<_Z2r1j>:')[1].split('\n\n')[0]
+check('r1 adds in 32 bits, no displacement addressing', ('add\tw' in r1) and ('#0x40]' not in r1), True)
+r, j = gate(good)
+check('green on plugin object', (r.returncode, j['status'], j['certified'] == j['universe']), (0, 'green', True))
+r, j = gate(plain)
+check('no section: red', (r.returncode, j['status']), (2, 'red'))
+check('no section: every function named', sorted(j['uncertified']), sorted([plain] + [plain + ':' + n for n in names]))
+check('no section: object item named', plain in j['uncertified'], True)
 
 o = asm_obj('norec', ['fa', 'fb'], 'fa\\t0\\t0\\n')
 r, j = gate(o)
@@ -242,24 +228,23 @@ except ValueError:
     pass
 
 # plugin: displacements of 2^16 or more and run-time field-array sums are routed (32-bit add, no 64-bit sum)
-if plug:
-    dsrc = '''
+dsrc = '''
 struct S { int pad[40000]; int f[8]; };
 int big(S* s) { return s->pad[39000]; }
 int fld(S* s, unsigned i) { return s->f[i]; }
 int small(int* p) { return p[100]; }
 '''
-    d = compile_cxx(dsrc, 'disp', plug)
-    rr = {s: (a, b) for s, a, b in addrsec.read(d) or []}
-    check('big displacement routed', rr.get('_Z3bigP1S', (0, 1))[0] >= 1 and rr['_Z3bigP1S'][0] == rr['_Z3bigP1S'][1], True)
-    check('field-array index routed', rr.get('_Z3fldP1Sj', (0, 1))[0] >= 1 and rr['_Z3fldP1Sj'][0] == rr['_Z3fldP1Sj'][1], True)
-    check('small displacement not routed', rr.get('_Z5smallPi'), (0, 0))
-    dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', d]).stdout
-    for fn in ('_Z3bigP1S', '_Z3fldP1Sj'):
-        body = dis.split('<%s>:' % fn)[1].split('\n\n')[0]
-        check('%s: no 64-bit add or uxtw' % fn, ('add\tx' in body) or ('uxtw' in body), False)
-    rg, jg = gate(d)
-    check('gate green on the displacement object', (rg.returncode, jg['status']), (0, 'green'))
+d = compile_cxx(dsrc, 'disp')
+rr = {s: (a, b) for s, a, b in addrsec.read(d) or []}
+check('big displacement routed', rr.get('_Z3bigP1S', (0, 1))[0] >= 1 and rr['_Z3bigP1S'][0] == rr['_Z3bigP1S'][1], True)
+check('field-array index routed', rr.get('_Z3fldP1Sj', (0, 1))[0] >= 1 and rr['_Z3fldP1Sj'][0] == rr['_Z3fldP1Sj'][1], True)
+check('small displacement not routed', rr.get('_Z5smallPi'), (0, 0))
+dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', d]).stdout
+for fn in ('_Z3bigP1S', '_Z3fldP1Sj'):
+    body = dis.split('<%s>:' % fn)[1].split('\n\n')[0]
+    check('%s: no 64-bit add or uxtw' % fn, ('add\tx' in body) or ('uxtw' in body), False)
+rg, jg = gate(d)
+check('gate green on the displacement object', (rg.returncode, jg['status']), (0, 'green'))
 shutil.rmtree(tmp, ignore_errors=True)
 if fails:
     print('FAIL\n' + '\n'.join(fails))

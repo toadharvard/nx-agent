@@ -29,6 +29,7 @@ destructors, operators (kept as ('op', code)), data symbols (kind 'data', no fur
 Pure: str in, tuple out.
 """
 import collections
+import re
 
 Decl = collections.namedtuple('Decl', 'kind scope access member static virtual thunk this_cv cc ret params varargs structor')
 
@@ -138,18 +139,30 @@ class _P:
             self.names.append(n)
 
     def template(self):
-        j = self.s.find('@', self.i)
-        if j <= self.i:
-            self.err('unterminated template name')
-        name = self.s[self.i:j]
-        self.i = j + 1
+        if self.peek() == '?':      # a member function template: the template name is an operator or ctor/dtor code (`??$?0<args>@...`); it is no back-reference target
+            self.i += 1
+            code = self.take()
+            if code == '_':
+                code += self.take()
+                if code == '__':
+                    code += self.take()
+            name, init, fnname = ('op', code), [], True
+        else:
+            j = self.s.find('@', self.i)
+            if j <= self.i:
+                self.err('unterminated template name')
+            name = self.s[self.i:j]
+            self.i = j + 1
+            init, fnname = [name], False
         outer_names, outer_args = self.names, self.args
-        self.names, self.args = [name], []
+        self.names, self.args = init, []
         args = []
         while not self.take('@'):
             args.append(self.targ())
         self.names, self.args = outer_names, outer_args
         t = ('tpl', name, tuple(args))
+        if fnname:                  # a function template's own name is not a back-reference target
+            return t
         self.memo(t)
         return t
 
@@ -203,6 +216,9 @@ class _P:
         if c == '$':
             if self.take('$Q'):
                 return ('ptr', '&&', '', self.type(True))
+            if self.take('$C'):                   # `$$C<cv>`: a cv-qualified element or pointee type (the cv is not an ABI fact here)
+                self.quals()
+                return self.type1()
             self.err('type form $%s' % self.peek())
         if c == 'Y':
             n = self.number()
@@ -269,7 +285,8 @@ def parse(name):
     scope = p.qualified()
     c = p.peek()
     inner = scope[-1]
-    structor = inner[1] if isinstance(inner, tuple) and inner[0] == 'op' and inner[1] in ('0', '1') else ''
+    op = inner[1] if isinstance(inner, tuple) and inner[0] == 'tpl' and isinstance(inner[1], tuple) else inner   # a ctor/dtor template: the op is the template's name
+    structor = op[1] if isinstance(op, tuple) and op[0] == 'op' and op[1] in ('0', '1') else ''
     if c.isdigit():     # a data symbol: storage letter and type follow; no ABI of its own
         return Decl('data', scope, '', False, False, False, False, '', '', None, (), False, '')
     if c not in FUNCLASS:
@@ -293,6 +310,32 @@ def parse(name):
     if p.i != len(name):
         p.err('trailing characters')
     return Decl('function', scope, access, member and not static, static, virtual, thunk, this_cv, cc, ret, params, var, structor)
+
+
+# The decoration of a C name (an `extern "C"` function or a C unit's function), the other form of Microsoft's x86 naming (Microsoft Learn, "Decorated names", section
+# "Format of a C decorated name", and "Argument passing and naming conventions"):
+#   __cdecl     `_name`            the name with one leading underscore; no argument information
+#   __stdcall   `_name@N`          leading underscore, then `@` and the number of bytes in the parameter list, in decimal
+#   __fastcall  `@name@N`          leading `@`, then `@` and the number of bytes in the parameter list, in decimal
+# Nothing else is a C decoration (a name starting with `?` is the C++ grammar above).  A C name encodes the calling convention and the argument byte count and
+# nothing about the types: that is all parse_c returns.  The identifier is the C identifier alphabet of the compiler (letters, digits, `_`, `$`; no leading digit).
+_C_IDENT = r'[A-Za-z_$][A-Za-z0-9_$]*'
+_C_NUM = r'(0|[1-9][0-9]*)'
+CDecl = collections.namedtuple('CDecl', 'kind cc name arg_bytes')
+
+
+def parse_c(name):
+    """A C decorated name -> CDecl('cfunction', cc, identifier, argument bytes or None for cdecl); ValueError('<name>: <what>') for anything that fits none of the three forms."""
+    m = re.fullmatch('@(%s)@%s' % (_C_IDENT, _C_NUM), name)
+    if m:
+        return CDecl('cfunction', 'fastcall', m.group(1), int(m.group(2)))
+    m = re.fullmatch('_(%s)@%s' % (_C_IDENT, _C_NUM), name)
+    if m:
+        return CDecl('cfunction', 'stdcall', m.group(1), int(m.group(2)))
+    m = re.fullmatch('_(%s)' % _C_IDENT, name)
+    if m:
+        return CDecl('cfunction', 'cdecl', m.group(1), None)
+    raise ValueError('%s: not a C decorated name (cdecl _name, stdcall _name@N, fastcall @name@N) and not a C++ name' % name)
 
 
 def parse_qualified_type_name(text):

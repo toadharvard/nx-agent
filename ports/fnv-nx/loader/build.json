@@ -18,9 +18,7 @@
  "include": [
   "ports/fnv-nx/loader/include",
   "ports/fnv-nx/hostabi/include",
-  "ports/fnv-nx/platform/include",
-  "ports/fnv-nx/shim/include",
-  "/ext/a64/aarch64-none-elf/include",
+  "/ext/gcc/aarch64-none-elf/include",
   "ports/fnv-nx/lib/sha256/include"
  ],
  "units": "all",
@@ -40,14 +38,6 @@
    "commit": "c53729e3bac168798fddcf4312f5a64a9b5eb08f",
    "tree_sha256": "fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2",
    "at": "/ext/redist"
-  },
-  {
-   "name": "manifest",
-   "repo": "fnv-nx-build",
-   "ref": "l5-manifest",
-   "commit": "2ac3091b7095598d04dce6091b2012f7cfa14bc7",
-   "tree_sha256": "4708f3d8d2dfa1adeab65fa4eeb4f994ad806372d49da392d22b4f93d2f169bb",
-   "at": "/ext/manifest"
   },
   {
    "name": "wine",
@@ -73,38 +63,12 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/contract/bridgegen.py",
-   "args": [
-    "--names",
-    "/ext/manifest/manifest/sys_names.tsv",
-    "--specs",
-    "/ext/wine/specs",
-    "--name-table",
-    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
-    "--va",
-    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_va.tsv",
-    "--extra",
-    "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
-    "--extra",
-    "/uses/ports/fnv-nx/bridgefacts/D9_ROWS",
-    "--out",
-    "/out/gen/bridge.tsv"
-   ],
-   "inputs": [
-    "ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
-    "ports/fnv-nx/bridgefacts/crt/msvcrt_va.tsv"
-   ],
-   "outputs": [
-    "gen/bridge.tsv"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/contract/modules.py",
    "args": [
     "--exe",
     "/ext/exe/FalloutNV.exe",
     "--bridge",
-    "/stage/gen/bridge.tsv",
+    "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
     "--dir",
     "/ext/exe",
     "--dir",
@@ -122,18 +86,12 @@
     "--keys-tsv-out",
     "/out/gen/keys.tsv",
     "--data-out",
-    "/out/gen/iat_data.tsv",
-    "--imported-out",
-    "/out/gen/imported.tsv"
+    "/out/gen/iat_data.tsv"
    ],
    "inputs": [
     {
      "stage": "ports/fnv-nx/loader:gen:0",
      "path": "gen/declared_dlls.tsv"
-    },
-    {
-     "stage": "ports/fnv-nx/loader:gen:1",
-     "path": "gen/bridge.tsv"
     }
    ],
    "outputs": [
@@ -142,7 +100,6 @@
     "gen/import_keys.h",
     "gen/keys.tsv",
     "gen/iat_data.tsv",
-    "gen/imported.tsv",
     "gen/modules.tsv"
    ]
   },
@@ -161,21 +118,24 @@
   }
  ],
  "outputs": {
+  "INCLUDE": "include",
   "IMPORT_KEYS_H": "gen/import_keys.h",
   "KEYS_TSV": "gen/keys.tsv",
   "MODULES_TSV": "gen/modules.tsv",
-  "IAT_DATA_TSV": "gen/iat_data.tsv",
-  "IMPORTED_TSV": "gen/imported.tsv",
-  "BRIDGE_TSV": "gen/bridge.tsv"
+  "IAT_DATA_TSV": "gen/iat_data.tsv"
  },
  "uses": [
   {
-   "root": "ports/fnv-nx/bridgefacts",
-   "output": "COM_ROWS"
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
   },
   {
    "root": "ports/fnv-nx/bridgefacts",
-   "output": "D9_ROWS"
+   "output": "BRIDGE"
   }
  ]
 }
