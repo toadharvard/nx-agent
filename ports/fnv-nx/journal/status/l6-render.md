@@ -580,3 +580,8 @@ Paused: w3b, w4, farm; no other work.
 - 00:08Z sm_link test root aa157d726 (claude/fnv-l6-render-w5-smlink) builds green.
     - The run waits on L1 w12 (link.roots by target, exe startfiles); the run stage is w6 1f912ad30.
     - Meanwhile a scratch run (a measurement) on w1b 819716297 covers all 24 variants.
+- 00:37Z sm_link scratch measurement (w5, claude/fnv-l6-render-w5-smlink).
+    - Translator w1b 819716297, shaders b545961f: 29,092 stage certificates, 0 signature disagreements, 120,392 link certificates, 0 failures.
+    - Correction: the checker must call draw_prog's own complete/flat/L selection (the real product function), not a copy.
+    - The run stage is content-keyed and sharded by class.
+    - Not yet covered: L, FFP, gl4 rewrite, EPI/NUMERICS.
