@@ -87,6 +87,11 @@ int fnvnx_exit_register(uintptr_t handler);
 FNVNX_CALLBACK_T(fnvnx_atexit_fn, void, (void));
 FNVNX_CALLBACK_T(_onexit_t, int, (void));
 void fnvnx_doexit(int code, int quick, int retcaller);
+/* the process-end entries of the declared machine: each one declaration, noreturn (verify/declared_machine.tsv rows 3, 4, 5, 9) */
+void c_exit(int code) __attribute__((noreturn, nothrow));
+void c_abort(void) __attribute__((noreturn, nothrow));
+void c_amsg_exit(int n) __attribute__((noreturn, nothrow));
+void c_purecall(void) __attribute__((noreturn, nothrow));
 int fnvnx_rand(void);                        /* MSVC LCG, RAND_MAX 0x7FFF, per thread */
 void fnvnx_srand(unsigned int);
 #define FNVNX_MSVC_RAND_MAX 0x7FFF

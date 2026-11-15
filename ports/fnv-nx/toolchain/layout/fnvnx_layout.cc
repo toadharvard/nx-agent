@@ -397,6 +397,10 @@ static void emit_decltype()
     else { std::vector<tree> stk; ty = dl_type(TREE_TYPE(d), stk); }
     auto it = rows.find(nm);
     if (it == rows.end()) rows[nm] = ty;
+    /* the front end's own declaration of a library function (`-builtin`) and the unit's declaration or definition of the same symbol (ffsll in newlib) are one symbol:
+     * the declaration of the unit's text is the row, the builtin one is only the implicit declaration of that libc function (GCC internals, "Builtins") */
+    else if (it->second == "-builtin" && ty != "-builtin") it->second = ty;
+    else if (ty == "-builtin") {}
     else if (it->second != ty) dl_error("one symbol is declared with two spellings in one unit", std::string(nm) + ": " + it->second + " / " + ty);
   }
   /* The symbols the object has that no symbol table node names: the references the back end makes itself. (1) The library functions it calls implicitly: every one is

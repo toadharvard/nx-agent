@@ -1,100 +1,89 @@
 {
-  "format": "fnvnx-guest-compiler/1",
-  "external": {
-    "name": "gcc-msvcmodel",
-    "repo": "fnv-nx-build",
-    "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
-    "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
-    "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
-    "at": "/ext/gcc"
-  },
-  "cc": "bin/aarch64-none-elf-gcc",
-  "cxx": "bin/aarch64-none-elf-g++",
-  "flags": {
-    "semantics": {
-      "common": [
-        "-frounding-math",
-        "-mno-outline-atomics",
-        "-fwrapv",
-        "-fno-strict-aliasing",
-        "-fno-delete-null-pointer-checks",
-        "-ffp-contract=off",
-        "-fms-extensions",
-        "-fcheck-new",
-        "-fno-sized-deallocation",
-        "-fno-lifetime-dse",
-        "-fno-devirtualize",
-        "-ffixed-x19",
-        "-ffixed-x20",
-        "-ffixed-x21",
-        "-ffixed-x22",
-        "-ffixed-x23",
-        "-ffixed-x24",
-        "-ffixed-x25",
-        "-ffixed-x26",
-        "-ffixed-x27",
-        "-fno-jump-tables",
-        "-fno-ipa-ra",
-        "-fno-builtin",
-        "-fno-stack-protector",
-        "-fno-stack-clash-protection",
-        "-fstack-reuse=none",
-        "-U_FORTIFY_SOURCE",
-        "-fno-math-errno",
-        "-fno-reorder-blocks-and-partition",
-        "-D__FNVNX_HOST_ATTR__=1"
-      ],
-      "lifted_extra": [
-        "-ffreestanding",
-        "-fno-exceptions",
-        "-fno-asynchronous-unwind-tables",
-        "-fno-unwind-tables"
-      ]
-    }
-  },
-  "provenance": {
-    "gcc_tarball": "gcc-13.3.0.tar.xz",
-    "gcc_tarball_sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083",
-    "patch": "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",
-    "patch_sha256": "08c9569a8e7b42ae529c202adc549474954a7f60b73cd4b50a4f111e3f0459d3",
-    "src_commit": "7ac84bda81732cad1c9f78deb23911e2d0dddebb",
-    "build": "ports/fnv-nx/toolchain/msvcmodel/build.sh",
-    "distribution_packages": "ports/fnv-nx/verify/env.json (cross packages g++-13-aarch64-linux-gnu, binutils-aarch64-linux-gnu, libc6-dev-arm64-cross, libstdc++-13-dev-arm64-cross, gcc-13-plugin-dev-aarch64-linux-gnu; versions are not copied)",
-    "runtime": "README.md of the runtime external: binutils 2.45.1, gcc 15.2.0 + newlib 4.6.0.20260123 (devkitPro patches) + toolchain/msvcmodel/msvcmodel.patch, target aarch64-none-elf, multilibs ., pic, ilp32, ilp32/pic (the guest's libc, libm, libstdc++ and headers)"
-  },
-  "runtime": {
-    "name": "fnvnx-a64-msvcmodel",
-    "repo": "fnv-nx-build",
-    "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
-    "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
-    "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
-    "at": "/ext/a64"
-  },
-  "runtime_driver": "bin/aarch64-none-elf-g++",
-  "runtime_cflags": [
-    "-DPREFER_SIZE_OVER_SPEED",
-    "-g"
-  ],
-  "runtime_configure": [
-    "--disable-decimal-float",
-    "--disable-libstdcxx-pch",
-    "--disable-libstdcxx-verbose",
-    "--enable-libstdcxx-time=yes"
-  ],
-  "runtime_configure_cite": {
-    "--disable-decimal-float": "DATAMODEL.json (toolchain/msvcmodel) has no decimal-float row: the guest compiler offers no type the data model lacks, so the gcc configure of the guest compiler and its libgcc does not build the decimal-float runtime (libbid)",
-    "--disable-libstdcxx-pch": "libstdc++-v3/acinclude.m4 GLIBCXX_ENABLE_PCH (GCC 13.3.0): --disable-libstdcxx-pch turns off attempts to use or build stdc++.h.gch; the guest has no precompiled header (the recipe compiles each unit hermetically from sources). Present in the devkitPro buildscripts' configure line this runtime follows (build-gcc-stage1.sh)",
-    "--disable-libstdcxx-verbose": "libstdc++-v3/acinclude.m4 GLIBCXX_ENABLE_VERBOSE (GCC 13.3.0): --disable-libstdcxx-verbose turns off descriptive messages to standard error on termination (_GLIBCXX_VERBOSE=0). Present in the devkitPro buildscripts' configure line this runtime follows (build-gcc-stage1.sh)",
-    "--enable-libstdcxx-time=yes": "the guest's declared machine has a monotonic clock, so chrono/this_thread take the POSIX clock path (acinclude.m4 GLIBCXX_ENABLE_LIBSTDCXX_TIME; its `auto` default has no arm for a `none` target and would leave steady_clock non-monotonic). The configure's own link tests (clock_gettime, nanosleep, sched_yield) are answered by rule CFG-LINK (runtime_configure_patch)"
-  },
-  "runtime_configure_patch": {
-    "script": "toolchain/gcc/cfg_link.py",
-    "subdirs": [
-      "libgcc",
-      "libstdc++-v3"
-    ],
-    "protocol_source": "toolchain/dispatch/fnvnx_dispatch.cc",
-    "guest_script": "link/guest.ld",
-    "cite": "libstdc++-v3/acinclude.m4 and config/no-executables.m4 GCC_NO_EXECUTABLES (GCC 13.3.0): with gcc_no_link=yes (set for a --with-newlib target so that autoconf's compiler-works step does not link) configure refuses every link test (the as_fn_error guard of AC_LINK_IFELSE, AC_CHECK_FUNC, AC_SEARCH_LIBS...); the guest runtime's objects reference the product link's protocol symbols, so a link test is answered by a static link (the linker's own archive closure, ld -r, over the driver's -### link line; leftover undefined symbols must be linker-script symbols of the ld default script or link/guest.ld, or protocol symbols the dispatch plugin declares): rule CFG-LINK, cfg_link.py"
+ "format": "fnvnx-guest-compiler/1",
+ "external": {
+  "name": "gcc-msvcmodel",
+  "repo": "fnv-nx-build",
+  "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
+  "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
+  "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
+  "at": "/ext/gcc"
+ },
+ "flags": {
+  "semantics": {
+   "common": [
+    "-frounding-math",
+    "-mno-outline-atomics",
+    "-fwrapv",
+    "-fno-strict-aliasing",
+    "-fno-delete-null-pointer-checks",
+    "-ffp-contract=off",
+    "-fms-extensions",
+    "-fcheck-new",
+    "-fno-sized-deallocation",
+    "-fno-lifetime-dse",
+    "-fno-devirtualize",
+    "-ffixed-x19",
+    "-ffixed-x20",
+    "-ffixed-x21",
+    "-ffixed-x22",
+    "-ffixed-x23",
+    "-ffixed-x24",
+    "-ffixed-x25",
+    "-ffixed-x26",
+    "-ffixed-x27",
+    "-fno-jump-tables",
+    "-fno-ipa-ra",
+    "-fno-builtin",
+    "-fno-stack-protector",
+    "-fno-stack-clash-protection",
+    "-fstack-reuse=none",
+    "-U_FORTIFY_SOURCE",
+    "-fno-math-errno",
+    "-fno-reorder-blocks-and-partition",
+    "-D__FNVNX_HOST_ATTR__=1"
+   ],
+   "lifted_extra": [
+    "-ffreestanding",
+    "-fno-exceptions",
+    "-fno-asynchronous-unwind-tables",
+    "-fno-unwind-tables"
+   ]
   }
+ },
+ "provenance": {
+  "gcc_tarball": "gcc-13.3.0.tar.xz",
+  "gcc_tarball_sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083",
+  "patch": "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",
+  "patch_sha256": "08c9569a8e7b42ae529c202adc549474954a7f60b73cd4b50a4f111e3f0459d3",
+  "src_commit": "7ac84bda81732cad1c9f78deb23911e2d0dddebb",
+  "build": "ports/fnv-nx/toolchain/msvcmodel/build.sh",
+  "distribution_packages": "ports/fnv-nx/verify/env.json (cross packages g++-13-aarch64-linux-gnu, binutils-aarch64-linux-gnu, libc6-dev-arm64-cross, libstdc++-13-dev-arm64-cross, gcc-13-plugin-dev-aarch64-linux-gnu; versions are not copied)",
+  "runtime": "the runtime (libc, libm, libstdc++, libgcc, headers, start files) is in the same tree as the compiler (`external`), built by toolchain/msvcmodel/build.sh in the one none-elf build: gcc 13.3.0 + newlib 4.6.0.20260123 + msvcmodel.patch, target = targets.json guest_platform.triplet"
+ },
+ "runtime_cflags": [
+  "-DPREFER_SIZE_OVER_SPEED",
+  "-g"
+ ],
+ "runtime_configure": [
+  "--disable-decimal-float",
+  "--disable-libstdcxx-pch",
+  "--disable-libstdcxx-verbose",
+  "--enable-libstdcxx-time=yes"
+ ],
+ "runtime_configure_cite": {
+  "--disable-decimal-float": "DATAMODEL.json (toolchain/msvcmodel) has no decimal-float row: the guest compiler offers no type the data model lacks, so the gcc configure of the guest compiler and its libgcc does not build the decimal-float runtime (libbid)",
+  "--disable-libstdcxx-pch": "libstdc++-v3/acinclude.m4 GLIBCXX_ENABLE_PCH (GCC 13.3.0): --disable-libstdcxx-pch turns off attempts to use or build stdc++.h.gch; the guest has no precompiled header (the recipe compiles each unit hermetically from sources). Present in the devkitPro buildscripts' configure line this runtime follows (build-gcc-stage1.sh)",
+  "--disable-libstdcxx-verbose": "libstdc++-v3/acinclude.m4 GLIBCXX_ENABLE_VERBOSE (GCC 13.3.0): --disable-libstdcxx-verbose turns off descriptive messages to standard error on termination (_GLIBCXX_VERBOSE=0). Present in the devkitPro buildscripts' configure line this runtime follows (build-gcc-stage1.sh)",
+  "--enable-libstdcxx-time=yes": "the guest's declared machine has a monotonic clock, so chrono/this_thread take the POSIX clock path (acinclude.m4 GLIBCXX_ENABLE_LIBSTDCXX_TIME; its `auto` default has no arm for a `none` target and would leave steady_clock non-monotonic). The configure's own link tests (clock_gettime, nanosleep, sched_yield) are answered by rule CFG-LINK (runtime_configure_patch)"
+ },
+ "runtime_configure_patch": {
+  "script": "toolchain/gcc/cfg_link.py",
+  "subdirs": [
+   "libgcc",
+   "libstdc++-v3"
+  ],
+  "protocol_source": "toolchain/dispatch/fnvnx_dispatch.cc",
+  "guest_script": "link/guest.ld",
+  "cite": "libstdc++-v3/acinclude.m4 and config/no-executables.m4 GCC_NO_EXECUTABLES (GCC 13.3.0): with gcc_no_link=yes (set for a --with-newlib target so that autoconf's compiler-works step does not link) configure refuses every link test (the as_fn_error guard of AC_LINK_IFELSE, AC_CHECK_FUNC, AC_SEARCH_LIBS...); the guest runtime's objects reference the product link's protocol symbols, so a link test is answered by a static link (the linker's own archive closure, ld -r, over the driver's -### link line; leftover undefined symbols must be linker-script symbols of the ld default script or link/guest.ld, or protocol symbols the dispatch plugin declares): rule CFG-LINK, cfg_link.py"
+ }
 }

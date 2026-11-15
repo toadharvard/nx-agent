@@ -742,14 +742,23 @@ extern "C" void OutputDebugStringA(LPCSTR s)
 /* DebugBreak: EXCEPTION_BREAKPOINT raised by the platform; it returns when the exception was continued. */
 extern "C" void DebugBreak(void) { w32_raise(0x80000003u, 0, 0, NULL); }
 
-/* FatalAppExitA: the documented sequence - a system-modal message box with the text and an OK button, then the
- * process ends (ExitProcess(0)). The action argument is reserved and must be 0. */
+/* FatalAppExitA: Wine 9.0 dlls/kernelbase/debug.c FatalAppExitA, as it is there: user32's MessageBoxA when the module and the export exist
+ * (MB_SYSTEMMODAL | MB_OK, no caption, the action argument unused), else the text goes to the log (Wine's ERR), then RtlExitUserProcess(1) = ExitProcess(1). */
 extern "C" void FatalAppExitA(UINT action, LPCSTR msg)
 {
+    typedef int (*MessageBoxA_funcptr)(HWND, LPCSTR, LPCSTR, UINT);
     W32_UNUSED(action);
-    MessageBoxA(NULL, msg, NULL, 0x1000 /* MB_SYSTEMMODAL | MB_OK */);
-    ExitProcess(0);
+    HMODULE mod = GetModuleHandleA("user32.dll");
+    MessageBoxA_funcptr pMessageBoxA = NULL;
+    if (mod)
+        pMessageBoxA = (MessageBoxA_funcptr)GetProcAddress(mod, "MessageBoxA");
+    if (pMessageBoxA)
+        pMessageBoxA(NULL, msg, NULL, 0x1000 /* MB_SYSTEMMODAL */ | 0 /* MB_OK */);
+    else
+        W32Log().s("err: ").s(msg ? msg : "(null)").emit();
+    ExitProcess(1);
 }
+FNVNX_CITE(FatalAppExitA, "dm:11");
 
 /* answered from the page map for every byte of the range; a guard page makes the probe fail and consumes the guard
  * (the probe's own access is the first one). IsBadCodePtr probes one byte for read, as Windows does. */

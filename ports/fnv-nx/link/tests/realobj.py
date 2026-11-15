@@ -71,9 +71,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
     names = list(recipe.PLUGIN_SOURCES) if plugins is None else list(plugins)
     if plugins is not None:
         raise ValueError('a guest root loads the full plugin set its front end can load (RECIPE.md gate rule): a subset is not a product configuration')
-    plugs = [dict({'name': n, 'source': recipe.PLUGIN_SOURCES[n], 'args': dict(recipe.PLUGIN_ARGS[n])},
-                  **({'inputs': recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES if n in names]
-    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
+    plugs = [{'name': n} for n in recipe.PLUGIN_SOURCES if n in names]   # a root entry is {"name": PLUGIN}: source, inputs and arguments are recipe.py's alone (plugin_errors refuses them in a root)
+    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': recipe.pin_drivers()[0], 'cxx': recipe.pin_drivers()[1]}, 'external': [ext],
            'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.SDD_DEFINE] + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
            'plugins': plugs}
     if not plugs:
@@ -81,7 +80,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     repo = os.path.join(base, 'repo')
     os.makedirs(repo)
     _git(repo, 'init', '-q')
-    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:
+    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v] + [recipe.ANALYSIS_PLUGIN[1]]:   # the analysis (objstub) plugin is built for every root with units
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     store = _store()
@@ -107,10 +106,6 @@ def build(sources, plugins=None, lifted=False, flags=()):
         rec['external'] = [ext, {'name': 'pack', 'repo': 'fnv-nx-build', 'ref': 't', 'commit': commit, 'tree_sha256': tree, 'at': '/ext/pack'}]
         _w(repo, T + 'gen/lift.py', lift)
         root['cxx_origin'] = {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'}
-        # a lifted guest root loads the full set too; the origin fixes the arguments: recipe.plugin_args
-        rec['plugins'] = [dict(p, args=dict(recipe.plugin_args('lifted')[p['name']])) for p in plugs]
-        # the game's compiler is in the external cache before ARTIFACTS_URL names the pack repo (which holds no compiler): mounted by the selftest gate (FNVNX_EXTCACHE), else fetched here
-        recipe.fetch_externals([ext], store, os.environ.get('FNVNX_EXTCACHE') or os.path.join(store, 'external'), base)
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():

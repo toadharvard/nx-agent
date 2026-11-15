@@ -3,16 +3,17 @@
 
     gen_x86sys.py --os os.json --sources x86sys_sources.json --mirror DIR --wine DIR --cpumodel FILE --out x86sys.json
 
-DIR (--mirror) is a checkout of fnv-nx-build tools/wdk71-headers, --wine one of tools/wine-9.0, FILE the rt/cpumodel.c of the sources record. The sha256 of every
+DIR (--mirror) is a checkout of fnv-nx-build tools/wdk71-headers, --wine one of tools/wine-9.0, FILE the cpuid_model.json of the sources record. The sha256 of every
 file read is checked against the record. Defined only for a native 32-bit x86 machine record (native_arch 0, process_wow64 0). The output is a pure function
 of its inputs; every row cites its source; a state with no pinned source is written {"status": "undecided", "why": ...} and never given a value.
-Trust chain: documented Win32 (WDK 7.1 headers), the Intel SDM, Wine 9.0 under the owner's Wine rule. Nothing else.
+Trust chain / precedence (header of the record): (1) documented Win32 for build 7601 (MSDN, WDK 7.1) and the Intel SDM, (2) Wine 9.0 only where it contradicts neither (1) nor the declared OS, (3) nothing else.
+A row with both a Wine and a documented source takes the documented one (sources `doc_gates`: a documented since-build above the declared build excludes the Wine value).
 
 Rows:
   selectors      cs ds es ss fs: KGDT_R3_CODE / KGDT_R3_DATA / KGDT_R3_TEB of ks386.inc | RPL_MASK, by the role the WDK names (code segment -> cs, data segment
                  -> ds es ss, the TEB's segment -> fs); gs: undecided (no WDK role); tr = KGDT_TSS.
   mov_to_sreg    the selectors a `mov sreg, r` can load at CPL 3: null for es/ds/fs/gs; the ring-3 data selectors for every register; the code selector: undecided.
-  int_ring3      the vectors Wine 9.0 handles for a user-mode `int n` (handle_interrupt cases) and the traps it maps to #BP / #OF (vectors 3, 4); every other
+  int_ring3      the vectors Wine 9.0 handles, minus those a documented gate excludes at build 7601 (0x29: MSDN __fastfail, Windows 8+; undecided in `excluded`) for a user-mode `int n` (handle_interrupt cases) and the traps it maps to #BP / #OF (vectors 3, 4); every other
                  vector: undecided (no pinned source says whether Windows 7 has a ring-3 gate there).
   cr4            tsd 0 (Wine: rdtsc is not intercepted); umip 0 (SDM CR4.UMIP is reserved unless CPUID.07H:ECX[2], and the declared CPU's max basic leaf is below 7);
                  pce undecided.
@@ -48,7 +49,7 @@ def build(osrec, src, mirror, wine, cpumodel):
         raise SystemExit("gen_x86sys: the sources describe a native 32-bit x86 machine; this record is not one")
     kf = src["files"]["ks386"]
     kg = ks386_equ(pinned(os.path.join(mirror, kf["path"]), kf, kf["path"]))
-    need = ["KGDT_R3_CODE", "KGDT_R3_DATA", "KGDT_R3_TEB", "KGDT_TSS", "RPL_MASK", "EFLAGS_USER_SANITIZE"]
+    need = ["TssIoMapBase", "PrIopmOffset", "KGDT_R3_CODE", "KGDT_R3_DATA", "KGDT_R3_TEB", "KGDT_TSS", "RPL_MASK", "EFLAGS_USER_SANITIZE"]
     if any(n not in kg for n in need):
         raise SystemExit("gen_x86sys: ks386.inc lacks " + ", ".join(n for n in need if n not in kg))
     rpl = kg["RPL_MASK"]
@@ -76,31 +77,72 @@ def build(osrec, src, mirror, wine, cpumodel):
     ext_ops = sorted(int(x, 16) for x in re.findall(r"case (0x[0-9a-fA-F]+):\s*/\*", ext))
     ints = sorted(int(x, 16) for x in re.findall(r"^    case (0x[0-9a-fA-F]+):", hi.group(0), re.M))
     traps = {n for n, t in (("TRAP_x86_OFLOW", segv), ("TRAP_x86_BPTFLT", trap)) if "case %s:" % n in t.group(0)}
+    gates = {x["key"]: x for x in src["doc_gates"] if x["row"] == "int_ring3.vectors"}
+    build_no = fl["build"]["value"]
+    gated = sorted(v for v, x in gates.items() if build_no < x["since_build"])   # a documented gate that the declared build is below: the vector is out (precedence 1 over Wine)
+    ints = [i for i in ints if i not in gated]
     vec = sorted(set(ints) | ({3} if "TRAP_x86_BPTFLT" in traps else set()) | ({4} if "TRAP_x86_OFLOW" in traps else set()))
+    tail = fn.group(0).split("case 0x6c:", 1)[1].split("default:", 1)[0]
+    io_ops = sorted(int(o, 16) for o, c in re.findall(r"case (0x[0-9a-fA-F]+):\s*/\*\s*([^*]*?)\s*\*/", "case 0x6c:" + tail) if re.match(r"(ins|outs|in|out)[bl( ]", c))
+    if io_ops != [0x6c, 0x6d, 0x6e, 0x6f, 0xe4, 0xe5, 0xe6, 0xe7, 0xec, 0xed, 0xee, 0xef] or "return EXCEPTION_PRIV_INSTRUCTION" not in tail:
+        raise SystemExit("gen_x86sys: is_privileged_instr does not treat in/out/ins/outs as privileged the way the row tss_io_bitmap needs")
+    fp = {}
+    for k in ("winnt", "ntddk"):
+        f = src["files"][k]
+        lines = pinned(os.path.join(mirror, f["path"]), f, f["path"]).split("\n")
+        for n, pat in (("mxcsr", r"#define INITIAL_MXCSR (0x[0-9a-fA-F]+)"), ("fpcsr", r"#define INITIAL_FPCSR (0x[0-9a-fA-F]+)")):
+            hit = [(i + 1, int(re.match(pat, l).group(1), 16)) for i, l in enumerate(lines) if re.match(pat, l)]
+            if len(hit) != 1:
+                raise SystemExit("gen_x86sys: %s has %d definitions of INITIAL_%s" % (f["path"], len(hit), n.upper()))
+            fp.setdefault(n, {})[k] = hit[0]
+    wl = wt.split("\n")
+    wine_cw = [(i + 1, int(re.search(r"=\s*(0x[0-9a-fA-F]+);", l).group(1), 16)) for i, l in enumerate(wl) if re.search(r"^\s*context\.FloatSave\.ControlWord\s*=", l)]
+    wine_mx = [(i + 1, int(re.search(r"=\s*(0x[0-9a-fA-F]+);", l).group(1), 16)) for i, l in enumerate(wl) if re.search(r"^\s*\(\(XSAVE_FORMAT \*\)context\.ExtendedRegisters\)->MxCsr\s*=", l)]
+    if len(wine_cw) != 1 or len(wine_mx) != 1:
+        raise SystemExit("gen_x86sys: call_init_thunk does not set the initial control word and MXCSR once each")
+    docv = {n: {v for _, v in fp[n].values()} for n in fp}
+    if len(docv["mxcsr"]) != 1 or len(docv["fpcsr"]) != 1:
+        raise SystemExit("gen_x86sys: the WDK headers disagree on the initial MXCSR / FPCSR")
+    if {wine_mx[0][1]} != docv["mxcsr"] or {wine_cw[0][1]} != docv["fpcsr"]:   # precedence: the documentation wins; Wine is cited only where it agrees
+        raise SystemExit("gen_x86sys: Wine 9.0 contradicts the WDK initial MXCSR / FPCSR")
+    cites = lambda n: "WDK 7.1.0 winnt.h line %d and ntddk.h line %d (INITIAL_%s); Wine 9.0 %s line %d (call_init_thunk, initial context)" % (fp[n]["winnt"][0], fp[n]["ntddk"][0], n.upper(), wf["path"], (wine_mx if n == "mxcsr" else wine_cw)[0][0])
     cm = src["cpumodel"]
     ct = pinned(cpumodel, cm, cm["path"])
-    mb = re.search(r"#define FNVL_MAX_BASIC (\d+)u", ct)
-    if not mb:
-        raise SystemExit("gen_x86sys: cpumodel.c does not define FNVL_MAX_BASIC")
-    max_basic = int(mb.group(1))
+    if any(v in vec for v in gated) or not src.get("precedence"):   # precedence check: a value that a documented gate excludes never comes from Wine
+        raise SystemExit("gen_x86sys: a Wine-sourced vector contradicts a documented gate, or the sources record has no precedence")
+    max_basic = json.loads(ct).get("max_basic")
+    if not isinstance(max_basic, int):
+        raise SystemExit("gen_x86sys: cpuid_model.json has no max_basic")
     umip = 0 if max_basic < 7 else None
     eflags0 = int(m.group(1), 16)
     sanit = kg["EFLAGS_USER_SANITIZE"]
     return {
         "format": "fnvnx-x86sys/2",
+        "precedence": src["precedence"],
         "os": {"sha256": None, "build": fl["build"]["value"]},
         "sources": {"mirror": src["mirror"], "ks386": kf, "wine": {"commit": src["wine"]["commit"], "file": wf}, "cpumodel": cm},
         "selectors": sel,
         "mov_to_sreg": mov,
         "int_ring3": {"vectors": vec, "other_vectors": undec("no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"),
-                      "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps))},
+                      "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps)),
+                      "excluded": {str(v): {"status": "undecided", "why": gates[v]["source"]} for v in gated}},
         "cr4": {"tsd": {"value": 0 if not {0x31, 0x33} & set(ext_ops) else None,
                         "source": "%s: is_privileged_instr intercepts only the 0F opcodes %s, so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform timer" % (wsrc, [hex(o) for o in ext_ops])},
-                "umip": {"value": umip, "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is %d (%s FNVL_MAX_BASIC @ %s), below 7, so there is no leaf 7 and CR4.UMIP is 0" % (max_basic, cm["path"], cm["commit"][:12])},
+                "umip": {"value": umip, "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is %d (%s max_basic @ %s), below 7, so there is no leaf 7 and CR4.UMIP is 0" % (max_basic, cm["path"], cm["commit"][:12])},
                 "pce": undec("rdpmc at CPL 3 needs CR4.PCE = 1; the SDM only defines the bit, the declared CPU's cpuid does not state it, the WDK 7.1 constants name no PCE bit and Wine 9.0 has no rdpmc case")},
         "eflags": {"initial": {"value": eflags0, "source": "%s: the initial thread context, context.EFlags" % wsrc},
                    "iopl": {"value": (eflags0 & 0x3000) >> 12, "source": "bits 12-13 of the initial EFLAGS (%s)" % wsrc},
                    "iopl_user_modifiable": {"value": bool(sanit & 0x3000), "source": "%s: EFLAGS_USER_SANITIZE = 0x%X, the EFLAGS bits user code can set; bits 12-13 are %s" % (ks, sanit, "in it" if sanit & 0x3000 else "not in it")}},
+        "tss_io_bitmap": {"value": "no port permitted", "ports_permitted": [], "exception": "EXCEPTION_PRIV_INSTRUCTION",
+                          "source": "%s: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for every in/out/ins/outs form with no per-port test (the instruction set is L3b's sdm_priv_rows.tsv, iopl class, not restated here), i.e. a Win32 user process has no permitted port; the documentation names the TSS I/O map (WDK 7.1 ks386.inc TssIoMapBase = 0x%X, PrIopmOffset = 0x%X) and the exception (MSDN EXCEPTION_PRIV_INSTRUCTION: an instruction not allowed in the current machine mode) but states no permitted port for a user process, so it does not contradict Wine (precedence 2); with IOPL 0 (row eflags) every such instruction at CPL 3 is #GP(0), delivered as that exception" % (wsrc, kg.get("TssIoMapBase", -1), kg.get("PrIopmOffset", -1))},
+        "thread_fp_initial": {"x87_control_word": {"value": next(iter(docv["fpcsr"])), "source": cites("fpcsr")},
+                              "mxcsr": {"value": next(iter(docv["mxcsr"])), "source": cites("mxcsr")},
+                              "applies_to": "the initial context of every thread, the process's first thread and CreateThread threads alike: the documentation names one initial value with no per-kind difference (the INITIAL_* constants of the thread context)"},
+        "cr0": {"em": undec("no pinned source states CR0.EM of the declared machine (ks386.inc CR0_EM is a bit constant only; Wine runs on the host CPU); user mode observes CR0 only through smsw, which is itself undecided; blocker: a reach certificate that no site depends on it, or an owner decision to derive it from the CPUID record"),
+                "ts": undec("no pinned source; user mode sees TS only through smsw (undecided); Windows handles #NM transparently (lazy FPU switch), and the lazy-switch behaviour is not a pinned source"),
+                "mp": undec("no pinned source states CR0.MP (ks386.inc CR0_MP is a bit constant only); user mode sees it only through smsw (undecided)")},
+        "cr4_sse": {"osfxsr": undec("no pinned source states CR4.OSFXSR (ks386.inc CR4_FXSR = 0x200 is a bit constant only); the declared CPU's cpuid (verify/cpuid_model.json leaf 1 EDX) advertises FXSR/SSE/SSE2, but whether the OS enabled them is not a pinned fact; blocker: an owner/L3b decision to take OS support from the CPUID record, or a reach certificate"),
+                    "osxmmexcpt": undec("no pinned source states CR4.OSXMMEXCPT (ks386.inc CR4_XMMEXCPT = 0x400 is a bit constant only); with the initial MXCSR 0x1F80 every SIMD exception is masked, so #XM is not raised until a site unmasks it; blocker: a certificate that every ldmxcsr / fxrstor site keeps the exceptions masked (CLAUDE.md fact, not yet certified)")},
         "idtr_limit": undec("the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"),
         "sldt": undec("no pinned source states the LDTR of a process that has no LDT"),
         "sgdt": undec("the GDT base and limit of the OS are kernel values with no documented fixed value and no pinned source"),
@@ -114,7 +156,7 @@ def main(argv):
     ap.add_argument("--sources", required=True)
     ap.add_argument("--mirror", required=True)
     ap.add_argument("--wine", required=True, help="checkout of fnv-nx-build tools/wine-9.0")
-    ap.add_argument("--cpumodel", required=True, help="rt/cpumodel.c of the sources record")
+    ap.add_argument("--cpumodel", required=True, help="verify/cpuid_model.json of the sources record")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     raw = open(a.os, "rb").read()
