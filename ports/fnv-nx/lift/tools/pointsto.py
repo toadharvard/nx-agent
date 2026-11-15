@@ -30,7 +30,7 @@ R32 = pcsrc.R32
 
 
 class NS(frozenset):
-    """a token set in canonical (normalised) form: norm() of it is itself. A set is canonical or it is small (at most min(WIDTH, OBJW) tokens, which norm leaves alone)."""
+    """a token set in canonical (normalised) form: norm() of it is itself. Only norm() makes one; every set stored in a cell or state is one."""
     __slots__ = ()
 
 
@@ -38,21 +38,24 @@ def norm(ts):
     """the canonical form of a token set: per object more than WIDTH offsets -> ANY; more than WIDTH integer constants -> the arbitrary integer; more than OBJW frame or heap objects of a kind -> the kind's summary object;
     TOP absorbs nothing (kept as a token). norm(norm(x)) == norm(x), and x is contained in norm(x) as a set of concrete values. No memo table (a memo keyed by the wide input sets held 1.3 GB at 3M joins on binkw32).
     Canonical forms are what makes the fixpoint terminate: two sets with the same meaning compare equal, so a join that adds nothing is seen as unchanged."""
-    if type(ts) is NS or len(ts) <= min(WIDTH, OBJW): return ts
+    if type(ts) is NS: return ts
     return NS(_norm(ts))
 
 
 def _norm(ts):
+    """canonical form, in this order: (1) per object more than WIDTH offsets -> ANY; (2) more than WIDTH integer constants -> the arbitrary integer; (3) more than OBJW frame or heap objects of a kind -> the kind's
+    summary object (kind, '*') with ANY offset; (4) SUBSUMPTION: a token that another token of the set already covers is dropped: (o, c) under (o, None), (F|H obj, c) under ((kind,'*'), None), (None, c) under UNK.
+    Without (4) one meaning has several forms and a loop that adds an offset to an object that already has ANY, then collapses at WIDTH, alternates between them forever."""
     byo = defaultdict(set)
     for o, c in ts: byo[o].add(c)
     out = set()
     for o, cs in byo.items():
-        if o is None: out |= {(None, c) for c in cs} if len(cs) <= WIDTH else {UNK}
+        if o is None:
+            if None in cs or len(cs) > WIDTH: out.add(UNK)
+            else: out |= {(None, c) for c in cs}
         elif o == 'TOP': out.add(TOP)
-        elif len(cs) <= WIDTH: out |= {(o, c) for c in cs}
-        else: out.add((o, None))
-    # more than OBJW distinct objects of one kind (frames F, heap H): the set becomes the ANY-offset pointer of the kind's SUMMARY object (kind, '*'), which stands for every object of the kind
-    # (a write through it is seen by a read of any of them: PT.read / PT.write / PT.objall). The representation of a set stays bounded by (static sections) + OBJW x kinds + the integer constants.
+        elif None in cs or len(cs) > WIDTH: out.add((o, None))
+        else: out |= {(o, c) for c in cs}
     kinds = defaultdict(set)
     for o, c in out:
         if o is not None and o != 'TOP' and o[0] in ('F', 'H') and o[1] != '*': kinds[o[0]].add(o)
@@ -60,6 +63,8 @@ def _norm(ts):
         if len(objs) > OBJW:
             out = {(o, c) for o, c in out if not (o is not None and o != 'TOP' and o[0] == k and o[1] != '*')}
             out.add(((k, '*'), None))
+    for o, c in list(out):                                   # (4) subsumption by a summary object
+        if o is not None and o != 'TOP' and o[0] in ('F', 'H') and o[1] != '*' and ((o[0], '*'), None) in out: out.discard((o, c))
     return frozenset(out)
 
 
