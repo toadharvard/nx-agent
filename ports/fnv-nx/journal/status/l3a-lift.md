@@ -974,3 +974,11 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - lift/fpfacts runs once per image and combines the results. It is red unless the image set equals the exe plus the module-table rows. The program-level ASM-204/205 is the AND over all images.
   - The build is blocked: lift/factsimg/exe gen:1 (universe.py) exits 1 with empty stderr. Sent to w7, together with the rule that every non-zero exit of a producer prints its reason.
 - base3 @ e92e86825 (L5 adba10d8e merged as one head). render/nxgpu include fix: w8.
+- 22:12 w7 measurement at facts 3159647ea:
+  - d3dx9_31: py-spy at 10 min shows 99 % of the time in pcsrc.analyse, in the state-join loop (pcsrc.py:598-607).
+  - d3dx9_38 was OOM-killed at 9.6 GB RSS while running concurrently with another stage; d3dx9_31 needs 4–5 GB.
+  - The exe stage's "empty stderr" comes from the universe.py round driver, which merges stdout and stderr and prints them only at the fixed point.
+  - Decisions:
+    - pcsrc is unchanged now; it is a cold cost paid once per facts change.
+    - w7 makes one commit in which every round's stderr streams to the stage and every non-zero exit prints its reason, finds the exe exit-1 cause, and makes no other change to the facts tools before the farms.
+    - Then 3 facts farms (exe, d3dx9_31, d3dx9_38), one root each with --jobs 1, on 15 GB containers. The 5 small images stay with w7.
