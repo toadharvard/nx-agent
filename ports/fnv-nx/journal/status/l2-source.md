@@ -239,3 +239,8 @@ After the first frame:
   - the plain/ordered decision was made earlier, from a separate address scan.
   - Closed by one fact: escapes, computed once at order's last-GIMPLE position before any rewrite, drives both the access form and `:n`. The recompute is deleted.
   - New SSA pointers without points-to information are ordered (conservative).
+- 2026-11-15 09:20 Weekly budget order (integration 9ea2d5403).
+  - Kept: w2 (session_01KmtZKUiDYYhRvaS8TJ2kGu), w3 (session_01KmtZKSTD6uibY3r7BhtJ7f) and the farm (session_01KmtZKTV1mniUErarfUpdJZ).
+  - w1 stopped; its measurement goes to w2.
+  - The RTL table at 30/92 (w1-rtlpasses 15b174cf2) waits until after the first frame.
+  - w4, w5 and w6 archived; the globext farm archive was denied here, so I asked the orchestrator.
