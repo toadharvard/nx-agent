@@ -3,8 +3,8 @@
 Not a gate itself (gates.json names gate_namegate.py and gate_r7gate.py). Library only.
 
 Universe of those two gates (VERDICT.md class 8): the rows of link/gate_names.py rows() (resp. link/gate_r7.py rows()) that concern a native body of an
-exe function, in each admitted product root with "target": "guest", "cxx_origin": "native" and a `game` directory. A root without `game` has no
-exe-function bodies: universe 0 for it.
+exe function, in each admitted root of class `product-guest-exe` (gatesdir.has_exe_twin: "target": "guest", "cxx_origin": "native" and a `game` directory).
+A root without `game` has no exe twin: it is not in the class, and the gates `namegate` and `r7` cover the class, not product-guest.
 The static facts of the join, all outputs of L1's own chain (gate_contract.chain, no new source):
   - addrmap.tsv (the link stage's map): row (object basename, symbol) -> exe address. A symbol with no row has no exe address, so no exe function
     stands on it. The object of the game unit UNIT (root-relative path) is `src_` + UNIT with `/` -> `_` + `.o` (gate_contract.assemble).
@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "link"))
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import gate_build  # noqa: E402
 import gate_contract as gc  # noqa: E402
+import gatesdir  # noqa: E402
 import recipe  # noqa: E402
 
 
@@ -81,6 +82,8 @@ def judge_files(game, objects, cl, units, amap, verdicts, rows_of, select_rows, 
         for o in objects:
             if o["unit"].startswith(game) and o["unit"].endswith(recipe.CXX_EXT):
                 os.symlink(o["object"], os.path.join(stage, stem_of(o["unit"]) + ".o"))
+        if not os.listdir(stage):
+            return 1, 0, [root + ":no-twin"], "the game directory %s has no C++ unit: no exe twin" % game
         rows = rows_of([stage], [cl], units)
         uni = select_rows(rows, native)
         bad = [r for r in uni if not certified(r)]
@@ -96,7 +99,7 @@ def judge_native_root(gate, repo, cache, root, rows_of, select_rows, certified, 
     try:
         rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
         if not isinstance(rec.get("game"), str) or not rec["game"]:
-            return 0, 0, [], "root has no game directory: no exe-function bodies (universe 0)"
+            return 1, 0, [root + ":no-twin"], "root has no game directory: it is not in class product-guest-exe (gatesdir.has_exe_twin)"
         with gc.chain("bodysel", repo, cache, root) as (doc, rec, objs, out, rp, ext, w):
             if not os.path.isfile(w + "/bodysel.tsv"):
                 raise gc.Red("bodysel per-symbol verdict missing (L1): %s/bodysel.tsv" % w)
@@ -131,13 +134,14 @@ def run_gate(name, judge_root):
     try:
         u = c = 0
         ids, why = [], []
-        roots = gate_argorder.native_guest(repo)
+        admit = recipe.load_admit(repo)
+        roots = [r for r in gate_argorder.native_guest(repo) if gatesdir.has_exe_twin(repo, admit[recipe.split_spec(r)[0]])]   # class product-guest-exe
         for r in roots:
             ru, rc, rids, rd = judge_root(repo, cache, r)
             u, c, ids = u + ru, c + rc, ids + rids
             if rc != ru:
                 why.append("%s: %s" % (r, rd))
-        detail = "; ".join(why) or ("%d native guest roots" % len(roots) if roots else "no native guest root (universe 0)")
+        detail = "; ".join(why) or ("%d product-guest-exe roots" % len(roots) if roots else "no product-guest-exe root (universe 0)")
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
