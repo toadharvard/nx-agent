@@ -10,6 +10,7 @@ Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a lat
 read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE_CACHE/objects/<tree>/<root name>/objects.json (with
 obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json."""
+import atexit
 import json
 import os
 import shutil
@@ -64,10 +65,48 @@ def tree_of(repo="."):
                           text=True, check=True).stdout.strip()
 
 
+_PRIVATE = []   # out dirs of a red build: private to this process (never published), removed at exit
+
+
+def _cleanup():
+    for d in _PRIVATE:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+atexit.register(_cleanup)
+
+
 def ensure(root, cache, repo="."):
-    """Build ROOT with the stage cache GATE_CACHE (CACHE, or a fresh temp dir) -> (objects dict, out dir); raises RecipeError."""
-    out = os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__"))
-    return recipe.build(repo, root, os.path.join(cache, "store"), out, ext=os.path.join(cache, "external")), out
+    """Build ROOT with the stage cache GATE_CACHE (CACHE, or a fresh temp dir) -> (objects dict, out dir); raises RecipeError.
+    A GREEN build is published ONCE as GATE_CACHE/objects/<tree>/<root name> (the key: the tree of the commit holds the sources, the recipe, the pins and env.json,
+    and the build is a function of them): the build runs in a private sibling directory, the machine paths of its objects.json are given the final name, and
+    recipe.publish_dir renames it in; a reader sees the directory only complete. The directory is published and never changed, so later calls, other
+    gates and other processes read it (the contract gate's link dir points into it) without building again. A red build is not published: its out dir is
+    private to this process and removed at exit."""
+    final = os.path.abspath(os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__")))
+    try:
+        with open(os.path.join(final, "objects.json")) as f:
+            return json.load(f), final
+    except (OSError, ValueError):
+        pass
+    os.makedirs(os.path.dirname(final), exist_ok=True)
+    tmp = "%s.tmp-%d-%s" % (final, os.getpid(), os.urandom(4).hex())
+    try:
+        res = recipe.build(repo, root, os.path.join(cache, "store"), tmp, ext=os.path.join(cache, "external"))
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    if res["status"] != "green":
+        _PRIVATE.append(tmp)
+        return res, tmp
+    p = os.path.join(tmp, "objects.json")
+    with open(p) as f:
+        text = f.read().replace(os.path.abspath(tmp), final)
+    with open(p, "w") as f:
+        f.write(text)
+    recipe.publish_dir(tmp, final)
+    with open(os.path.join(final, "objects.json")) as f:
+        return json.load(f), final
 
 
 def unitless(root, cache, repo="."):

@@ -2057,9 +2057,7 @@ def stage_output(root, ref, repo, cache):
         shutil.rmtree(ws, ignore_errors=True)
     h = hashlib.sha256(data).hexdigest()
     dest = os.path.join(cache, "stageout", h, ref["path"])
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, "wb") as f:
-        f.write(data)
+    cas.publish_file(dest, data)
     return dest, "stage:%s:%s:%s:%s" % (sroot, name, ref["path"], h), None
 
 
