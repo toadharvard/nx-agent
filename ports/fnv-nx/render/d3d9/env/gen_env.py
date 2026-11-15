@@ -70,8 +70,8 @@ def image(st, out, size):
 
 
 import json  # noqa: E402
-envq.SPEC = sys.argv[2] if len(sys.argv) > 2 else envq.SPEC
-TSV_DIR = sys.argv[3]   # OUT SPEC TSV_DIR: the directory of env_*.tsv, an argument (no default)
+envq.SPEC = sys.argv[2]   # OUT SPEC TSV_DIR: the interface table (D9_SPEC), an argument (no default)
+TSV_DIR = sys.argv[3]   # the directory of env_*.tsv, an argument (no default)
 ST = json.load(open(envq.SPEC))["structs"]
 
 

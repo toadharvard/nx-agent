@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""envq.py: the ONE source of the environment query list. `envq.py OUT.h` writes envq.gen.h = C code (nested loops over the domains below) that
+"""envq.py: the ONE source of the environment query list. emit() / emit_fmt() return envq.gen.h / envfmt.gen.h = C code (nested loops over the domains below), called by the generator that owns them (no entry point of its own), that
 both envprobe2.c (mingw, real D3D9) and hostenv.cpp (our NxDirect3D9) include, so the two sides cannot ask different questions.
 Domains are COMPLETE finite sets: every D3DFORMAT enum value of d3d9types.h + the FOURCC list + unknown values; every D3DDEVTYPE/D3DRESOURCETYPE/
 D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-bit word + all pairs of the bits that are not masked by Wine
@@ -115,8 +115,3 @@ def count():
         for d in doms: k *= len(D[d[0]])
         n += k
     return n
-
-
-if __name__ == "__main__":
-    if len(sys.argv) > 1: open(sys.argv[1], "w").write(emit()); open(sys.argv[1].replace("envq.gen.h", "envfmt.gen.h"), "w").write(emit_fmt())
-    print(f"envq: {len(Q)} groups, {count()} queries, {len(FMT)} formats, {len(PAIRS)} usage pairs", file=sys.stderr)
