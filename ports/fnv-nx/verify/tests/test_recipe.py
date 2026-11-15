@@ -165,6 +165,7 @@ def make_toolchain(dst):
     exes, trees = map(set, unitstage.gcc_set(CC_DRV))
     ld = subprocess.run([CC_DRV, "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
     exes.add(os.path.normpath(ld))
+    exes.add(os.path.normpath(ld)[:-2] + "readelf")   # the ELF facts stage runs the readelf beside the linker
     keep = {"cc1", "collect2"}    # test economy: the C compiler proper and the driver's helper; not cc1plus, lto1, f951 ... (unused by C units)
     for t in sorted(trees):
         if t == "/usr/include":   # the host's own headers: not searched by a freestanding cross compile, 87 MB
@@ -798,7 +799,7 @@ def check_run(SS):
     ex = [{"path": HX, "class": "product", "target": "host", "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc"}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
-        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["libc6"] + list(debs), "outputs": list(outs)}])
+        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["base-files", "libc6"] + list(debs), "outputs": list(outs)}])
 
     def mk(name, body=HX_C, data="5\n", **kw):
         return make_repo(name, rec=rec_(**kw), files={"hx/hx.c": body, "hx/build.json": json.dumps(hrec), "other/data.txt": data}, extra_roots=ex)
