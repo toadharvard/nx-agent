@@ -1915,3 +1915,10 @@ bottleneck: the cand3 head (w12: objstub terminator, then the merge of the lines
 bottleneck: the cand3 head (w12), and the cand2 merge (w15).
 - 22:59 L6's cand4 head is b3856ec5c: d3d9total is green, 332/332, and test_gl4_cursor gives 17 PASS. Sent to w12.
 bottleneck: the cand3 head (w12), and the cand2 merge (w15).
+- 23:01 w28 632a45447 (on cand3): liftfacts reads the loader's declared MODULES_TSV output and always compares; a missing root, output or file is red.
+  - abspath refinements:
+    - /arch is a sandbox prefix;
+    - os.environ[...] counts as a default only when its handler catches KeyError;
+    - store-merge, export and import require --store, which fixes recipe.py:3468 and :3472.
+  - Tests: test_gate_abspath 21 PASS, test_gate_liftfacts 0 FAIL. Not yet run through the verdict on a farm.
+bottleneck: the cand3 head (w12), and the cand2 merge (w15).
