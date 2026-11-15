@@ -22,7 +22,9 @@
  *       vtable                a GCC table group; its address points are named in .fnvnx.vtpair
  *       gcc                   an Itanium ABI object with no counterpart in the exe (VTT, construction table,
  *                             typeinfo, guard variable): the MSVC name is empty
- *       unnamed:<reason>      no rule here names it (the gate counts these; 0 is the gate)
+ *       nodecor:<reason>      a typed fact: the decoration source has no name for the symbol (localscope: cl's local scope numbering, fnparmform: the
+ *                             declared form of a function-type parameter, vtordisp: the exe's vbptr layout, or a tree code). Not a fallback: a gate
+ *                             is red only for a symbol the exe's or a module's own facts reach (the crossing join), never for a row
  *
  * .fnvnx.names: `<symbol>\t<MSVC name>` of every function and object the unit named, also those the object has no
  * symbol for (inlined everywhere): for gates that follow a call into cl's code, not for the contract.
@@ -72,6 +74,7 @@ FNVNX_CXX_ONLY(uses_template_parms);
 #include "attribs.h"
 #include "cgraph.h"
 #include "varasm.h"
+#include "target.h"
 #include "output.h"
 #include "diagnostic-core.h"
 #include "stor-layout.h"
@@ -155,6 +158,20 @@ static bool declared_class(tree t)
   return CLASSTYPE_DECLARED_CLASS(t);
 }
 
+/* A union whose first declaration was `class N;` or `struct N;` (the prepare rule UNION1 rewrote that declaration to
+ * `union __attribute__((fnvnx_key("class"))) N;`, since GCC rejects an elaborated declaration of another kind) is
+ * spelled with that key, as cl spells it; any other union is `T`. The key is kept in the type's own attribute list, not in
+ * plugin state: the names code is compiled into more than one plugin (the layout plugin includes it), and each copy
+ * has its own statics, while the attribute is on the tree they all read. The handler adds an attribute only to a
+ * type that has none (the first declaration wins). */
+static char union_letter(tree t)
+{
+  tree a = lookup_attribute("fnvnx_key", TYPE_ATTRIBUTES(TYPE_MAIN_VARIANT(t)));
+  if (!a) return 'T';
+  const char *k = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(a)));
+  return !strcmp(k, "class") ? 'V' : !strcmp(k, "struct") ? 'U' : 'T';
+}
+
 static void start_unit(void *, void *)
 {
   if (global_dc->dc_inhibit_warnings)
@@ -232,11 +249,12 @@ struct M {
   }
 
   /* `?$name@args` mangled on its own (its back-references are its own) */
-  std::string template_id(const std::string &base, bool special, tree targs)
+  std::string template_id(const std::string &base, bool special, tree targs, const std::string &lit = "")
   {
     M sub;
     sub.out = "?$";
     if (special) sub.out += base; else sub.source_name(base);
+    if (!lit.empty()) sub.source_name(lit);
     for (int i = 0; i < TREE_VEC_LENGTH(targs); i++) sub.targ(TREE_VEC_ELT(targs, i));
     if (!sub.why.empty()) fail(sub.why);
     internal |= sub.internal;
@@ -279,12 +297,12 @@ struct M {
         ctx = CP_TYPE_CONTEXT(ctx);
       } else if (TREE_CODE(ctx) == FUNCTION_DECL) {
         auto it = scope_no.find(uid_of(entity));
-        if (it == scope_no.end()) { fail("local scope number"); return; }
+        if (it == scope_no.end()) { fail("localscope"); return; }
         out += '?'; number(it->second); out += '?';
         decl(ctx, DT_NONE);
         if (!TREE_PUBLIC(ctx)) internal = true;
         return;
-      } else { fail("scope"); return; }
+      } else { fail(std::string("scope ") + get_tree_code_name(TREE_CODE(ctx))); return; }
     }
   }
 
@@ -329,7 +347,15 @@ struct M {
     else if (mv == float_type_node) out += 'M';
     else if (mv == double_type_node) out += 'N';
     else if (mv == long_double_type_node) out += 'O';
-    else fail("a type MSVC 2008 does not have");
+    /* types cl 15.00 (VC 2008) does not have: the names of the later MSVC ABI, as clang's MicrosoftMangle.cpp (llvmorg-18.1.8, sha256
+     * dbf824170fb8a05bf201603358eb34a67f43069705c8e0b3ae7e78f73b4e90bb) gives them: __int128 `_L`, unsigned __int128 `_M`, char8_t `_Q`, char16_t `_S`,
+     * char32_t `_U`. The exe has none of them, so no name of the exe depends on this. */
+    else if (TREE_CODE(mv) == INTEGER_TYPE && TYPE_PRECISION(mv) == 128 && !TYPE_UNSIGNED(mv)) out += "_L";
+    else if (TREE_CODE(mv) == INTEGER_TYPE && TYPE_PRECISION(mv) == 128 && TYPE_UNSIGNED(mv)) out += "_M";
+    else if (mv == char8_type_node) out += "_Q";
+    else if (mv == char16_type_node) out += "_S";
+    else if (mv == char32_type_node) out += "_U";
+    else fail(std::string("builtin type ") + get_tree_code_name(TREE_CODE(t)) + " of " + std::to_string(TYPE_PRECISION(t)) + " bits");
   }
 
   void type(tree t, Mode m, int q = -1)
@@ -367,9 +393,10 @@ struct M {
     }
     switch (TREE_CODE(t)) {
       case VOID_TYPE: case BOOLEAN_TYPE: case INTEGER_TYPE: case REAL_TYPE: builtin(t); break;
+      case NULLPTR_TYPE: out += "$$T"; break;      /* clang MicrosoftMangle.cpp, BuiltinType::NullPtr */
       case ENUMERAL_TYPE: out += "W4"; type_name(t); break;
       case RECORD_TYPE: out += declared_class(t) ? 'V' : 'U'; type_name(t); break;
-      case UNION_TYPE: out += 'T'; type_name(t); break;
+      case UNION_TYPE: out += union_letter(t); type_name(t); break;
       case POINTER_TYPE: out += ptr_letter(q); if (restrict_p) out += 'I'; type(TREE_TYPE(t), MANGLE); break;
       case REFERENCE_TYPE: out += 'A'; type(TREE_TYPE(t), MANGLE); break;   /* cl ignores a qualifier on a reference */
       case OFFSET_TYPE:
@@ -378,17 +405,22 @@ struct M {
         type(TREE_TYPE(t), DROP);
         break;
       case VECTOR_TYPE: {
-        /* the exe's SSE types (xmmintrin.h / emmintrin.h of cl: union __m128, union __m128i, struct __m128d) are
-         * the vectors the target's intrinsics header gives them: 4 x float, 2 x 64-bit integer, 2 x double */
+        /* clang's MicrosoftMangle.cpp (llvmorg-18.1.8) mangleType(VectorType), for the x86 target of the exe: the types of the SSE headers are tags of the
+         * Intel names (64 bits of long long: union __m64; from 128 bits: float `__m<W>`, long long `__m<W>i` (unions), double `__m<W>d` (a struct)); any other
+         * vector is `union __clang::?$__vector@<element><count>`, a template-id of its own whose arguments are the element type and the count */
         tree e = TREE_TYPE(t);
         unsigned HOST_WIDE_INT n = TYPE_VECTOR_SUBPARTS(t).to_constant();
-        const char *key = "T", *nm = NULL;
-        if (SCALAR_FLOAT_TYPE_P(e) && TYPE_PRECISION(e) == 32 && n == 4) nm = "__m128";
-        else if (INTEGRAL_TYPE_P(e) && TYPE_PRECISION(e) == 64 && n == 2) nm = "__m128i";
-        else if (SCALAR_FLOAT_TYPE_P(e) && TYPE_PRECISION(e) == 64 && n == 2) nm = "__m128d", key = "U";
-        else fail("a vector type that is not __m128, __m128i or __m128d");
-        /* a tag name like any other: the second `__m128` of a name is a back-reference to the first */
-        if (nm) { out += key; source_name(nm); out += '@'; }
+        unsigned HOST_WIDE_INT w = n * TYPE_PRECISION(e);
+        tree me = TYPE_MAIN_VARIANT(e);
+        const char *key = "T"; std::string nm;
+        if (me == long_long_integer_type_node && w == 64) nm = "__m64";
+        else if (w >= 128 && me == float_type_node) nm = "__m" + std::to_string(w);
+        else if (w >= 128 && me == long_long_integer_type_node) nm = "__m" + std::to_string(w) + "i";
+        else if (w >= 128 && me == double_type_node) nm = "__m" + std::to_string(w) + "d", key = "U";
+        if (!nm.empty()) { out += key; source_name(nm); out += '@'; break; }
+        M sub; sub.out = "?$"; sub.source_name("__vector"); sub.type(e, ESCAPE); sub.out += "$0"; sub.number(n);
+        if (!sub.why.empty()) { fail(sub.why); break; }
+        out += 'T'; source_name(sub.out); source_name("__clang"); out += '@';
         break;
       }
       default: fail(std::string("type ") + get_tree_code_name(TREE_CODE(t)));
@@ -421,7 +453,13 @@ struct M {
     q &= TYPE_QUAL_CONST | TYPE_QUAL_VOLATILE | TYPE_QUAL_RESTRICT;
     if (TYPE_REF_P(t)) q &= ~TYPE_QUAL_RESTRICT;      /* cl ignores a qualifier on a reference, also as a back-reference key */
     for (size_t i = 0; i < args.size(); i++)
-      if (args[i].quals == q && args[i].array == is_array && same_type_p(args[i].type, t)) { out += (char)('0' + i); return; }
+      if (args[i].quals == q && args[i].array == is_array && same_type_p(args[i].type, t)) {
+        /* cl keys the back-reference on the declared type: `void g(int)` (a function) and `void (*g)(int)` (a pointer) are different keys for it, and the front
+           end has adjusted the first to the second before any plugin sees it, so a repeated function-pointer parameter cannot be told which */
+        if (TREE_CODE(t) == POINTER_TYPE && TREE_CODE(TREE_TYPE(t)) == FUNCTION_TYPE)
+          fail("fnparmform");
+        out += (char)('0' + i); return;
+      }
     size_t before = out.size();
     if (is_array) { out += 'Q'; type(TREE_TYPE(t), MANGLE); }
     else type(t, DROP, q);
@@ -450,6 +488,9 @@ struct M {
     for (; p && p != void_list_node; p = TREE_CHAIN(p)) {
       any = true;
       tree t = TREE_VALUE(p);
+      /* a function type that is itself a parameter or a member has no declaration to say what each parameter was written as: `int *` and `int []` are one type to GCC,
+         `PAH` and `QAH` to cl */
+      if (!d && TREE_CODE(t) == POINTER_TYPE) fail("fnparmform");
       int q = 0; bool is_array = false;
       if (parm) {
         q = cp_type_quals(TREE_TYPE(parm));
@@ -474,6 +515,7 @@ struct M {
       {"le", "?N"}, {"gt", "?O"}, {"ge", "?P"}, {"cm", "?Q"}, {"cl", "?R"}, {"co", "?S"}, {"eo", "?T"}, {"or", "?U"},
       {"aa", "?V"}, {"oo", "?W"}, {"mL", "?X"}, {"pL", "?Y"}, {"mI", "?Z"}, {"dV", "?_0"}, {"rM", "?_1"}, {"rS", "?_2"},
       {"lS", "?_3"}, {"aN", "?_4"}, {"oR", "?_5"}, {"eO", "?_6"}, {"na", "?_U"}, {"da", "?_V"},
+      {"aw", "?__L"}, {"ss", "?__M"},         /* co_await, <=>: clang's MicrosoftMangle.cpp (llvmorg-18.1.8), mangleOperatorName */
     };
     const char *it = IDENTIFIER_OVL_OP_INFO(DECL_NAME(d))->mangled_name;
     for (auto &e : tab) if (!strcmp(e.it, it)) return e.ms;
@@ -484,12 +526,15 @@ struct M {
   void decl(tree d, DtorKind dk)
   {
     out += '?';
-    std::string base; bool special = true;
+    std::string base, lit; bool special = true;
     if (TREE_CODE(d) == FUNCTION_DECL && DECL_CONSTRUCTOR_P(d)) base = "?0";
     else if (TREE_CODE(d) == FUNCTION_DECL && DECL_DESTRUCTOR_P(d))
       base = dk == DT_SCALAR ? "?_G" : dk == DT_VECTOR ? "?_E" : dk == DT_VBASE ? "?_D" : "?1";
     else if (TREE_CODE(d) == FUNCTION_DECL && IDENTIFIER_CONV_OP_P(DECL_NAME(d))) base = "?B";
-    else if (TREE_CODE(d) == FUNCTION_DECL && IDENTIFIER_ANY_OP_P(DECL_NAME(d))) {
+    else if (TREE_CODE(d) == FUNCTION_DECL && UDLIT_OPER_P(DECL_NAME(d))) {
+      /* a literal operator: `?__K` and the suffix identifier as a source name (clang MicrosoftMangle.cpp, llvmorg-18.1.8, CXXLiteralOperatorName) */
+      base = "?__K"; lit = IDENTIFIER_POINTER(DECL_NAME(d)) + strlen(UDLIT_OP_ANSI_PREFIX);
+    } else if (TREE_CODE(d) == FUNCTION_DECL && IDENTIFIER_ANY_OP_P(DECL_NAME(d))) {
       const char *c = op_code(d);
       if (!c) { fail("operator"); return; }
       base = c;
@@ -497,9 +542,9 @@ struct M {
     else { base = IDENTIFIER_POINTER(DECL_NAME(d)); special = false; }
 
     if (TREE_CODE(d) == FUNCTION_DECL && fn_template_id(d)) {
-      out += template_id(base, special, INNERMOST_TEMPLATE_ARGS(DECL_TI_ARGS(d)));
+      out += template_id(base, special, INNERMOST_TEMPLATE_ARGS(DECL_TI_ARGS(d)), lit);
       out += '@';
-    } else if (special) out += base;
+    } else if (special) { out += base; if (!lit.empty()) source_name(lit); }
     else source_name(base);
     contexts(CP_DECL_CONTEXT(d), d);
     out += '@';
@@ -544,11 +589,18 @@ struct M {
 
   void targ(tree a)
   {
+    /* an argument pack of an instantiation is its elements, in order: the name of `f<A...>` instantiated with <int, double> is that of `f<int, double>`
+     * (cl's own rule for a pack, where it has packs: the template argument list is flat; an empty pack adds nothing) */
+    if (TREE_CODE(a) == TYPE_ARGUMENT_PACK || TREE_CODE(a) == NONTYPE_ARGUMENT_PACK) {
+      tree v = ARGUMENT_PACK_ARGS(a);
+      for (int i = 0; i < TREE_VEC_LENGTH(v); i++) targ(TREE_VEC_ELT(v, i));
+      return;
+    }
     if (TYPE_P(a)) { type(a, ESCAPE); return; }
     if (TREE_CODE(a) == TEMPLATE_DECL) {
       tree t = TREE_TYPE(a);
       if (!t || !CLASS_TYPE_P(t)) { fail("template template argument"); return; }
-      out += TREE_CODE(t) == UNION_TYPE ? 'T' : declared_class(t) ? 'V' : 'U';
+      out += TREE_CODE(t) == UNION_TYPE ? union_letter(t) : declared_class(t) ? 'V' : 'U';
       source_name(IDENTIFIER_POINTER(DECL_NAME(a)));
       contexts(CP_DECL_CONTEXT(a), a);
       out += '@';
@@ -694,7 +746,7 @@ static std::string cross_of(tree d)
 static void name_c_decl(tree d, bool def)
 {
   Row r; r.sym = asmname(d); r.def = def;
-  if (!DECL_NAME(d)) r.kind = "unnamed:no declaration";
+  if (!DECL_NAME(d)) r.kind = "nodecor:no declaration";
   else { r.ms = c_name(d); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data"; }
   if (TREE_CODE(d) == FUNCTION_DECL) r.cross = cross_of(d);
   rows.push_back(r);
@@ -719,7 +771,7 @@ static void name_decl(tree d, bool def)
     bool virt = integer_onep(TREE_VALUE(TREE_CHAIN(TREE_CHAIN(a))));
     /* the adjustment is an offset in the object: the exe's when the class is laid out as in the exe (layoutgate),
      * which a class with virtual bases never is here (the exe's has vbptrs, and vtordisp thunks of its own) */
-    if (virt || (fixed && CLASSTYPE_VBASECLASSES(DECL_CONTEXT(d1)))) r.kind = "unnamed:destructor thunk in a class with virtual bases";
+    if (virt || (fixed && CLASSTYPE_VBASECLASSES(DECL_CONTEXT(d1)))) r.kind = "nodecor:vtordisp";
     else if (fixed) { m.thunk = -fixed; m.decl(d1, DT_VECTOR); r.kind = "dtor.sdd.thunk"; }
     else { m.decl(d1, DT_VECTOR); r.kind = "dtor.sdd"; }
   } else if (TREE_CODE(d) == FUNCTION_DECL && DECL_THUNK_P(d)) {
@@ -731,14 +783,14 @@ static void name_decl(tree d, bool def)
     m.out = c_name(d); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data";
   } else if (TREE_CODE(d) == FUNCTION_DECL && DECL_CONSTRUCTOR_P(d)) {
     m.decl(d, DT_NONE);
-    r.kind = DECL_COMPLETE_CONSTRUCTOR_P(d) ? "ctor.c1" : DECL_BASE_CONSTRUCTOR_P(d) ? "ctor.c2" : "unnamed:constructor variant";
+    r.kind = DECL_COMPLETE_CONSTRUCTOR_P(d) ? "ctor.c1" : DECL_BASE_CONSTRUCTOR_P(d) ? "ctor.c2" : "nodecor:constructor variant";
   } else if (TREE_CODE(d) == FUNCTION_DECL && DECL_DESTRUCTOR_P(d)) {
     bool vb = CLASSTYPE_VBASECLASSES(DECL_CONTEXT(d)) != NULL;
     if (DECL_DELETING_DESTRUCTOR_P(d)) { m.decl(d, DT_SCALAR); r.kind = "dtor.d0"; }
     else if (DECL_COMPLETE_DESTRUCTOR_P(d)) { m.decl(d, vb ? DT_VBASE : DT_BASE); r.kind = "dtor.d1"; }
     else if (DECL_BASE_DESTRUCTOR_P(d)) { m.decl(d, DT_BASE); r.kind = "dtor.d2"; }
-    else r.kind = "unnamed:destructor variant";
-  } else if (!DECL_LANG_SPECIFIC(d) && !DECL_NAME(d)) r.kind = "unnamed:no declaration";
+    else r.kind = "nodecor:destructor variant";
+  } else if (!DECL_LANG_SPECIFIC(d) && !DECL_NAME(d)) r.kind = "nodecor:no declaration";
   else if (!DECL_LANG_SPECIFIC(d) && TREE_CODE(d) == FUNCTION_DECL && fndecl_built_in_p(d)) {
     m.out = c_name(d); r.kind = "func";          /* a C library function the compiler knows (C linkage) */
   } else if (!DECL_LANG_SPECIFIC(d) && TREE_CODE(d) == FUNCTION_DECL && DECL_ARTIFICIAL(d)) {
@@ -747,8 +799,8 @@ static void name_decl(tree d, bool def)
     m.decl(d, DT_NONE); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data";
   }
   if (r.kind == "thunk" && !m.why.empty()) m.why.clear(), m.out.clear();
-  if (!m.why.empty()) { r.kind = "unnamed:" + m.why; m.out.clear(); }
-  else if (m.internal) { r.kind = "unnamed:external symbol in an internal scope"; m.out.clear(); }
+  if (!m.why.empty()) { r.kind = "nodecor:" + m.why; m.out.clear(); }
+  else if (m.internal) { r.kind = "nodecor:external symbol in an internal scope"; m.out.clear(); }
   r.ms = m.out;
   if (TREE_CODE(d) == FUNCTION_DECL) r.cross = cross_of(d);
   rows.push_back(r);
@@ -761,7 +813,7 @@ static void name_decl(tree d, bool def)
  * non-virtual base has one it can extend, then every base's, in declaration order, a virtual base's once; paths
  * that would name two tables alike are extended by the next base on the way down). A vfptr and an address point
  * are the same table when they sit at the same offset in the object; that needs the class laid out as in the exe
- * (layoutgate's subject): a class whose vfptr offsets differ from GCC's vptr offsets gets `unnamed:` rows.
+ * (layoutgate's subject): a class whose vfptr offsets differ from GCC's vptr offsets gets `nodecor:` rows.
  */
 struct VPath { std::vector<tree> path; tree next; HOST_WIDE_INT off; std::vector<tree> vbases; HOST_WIDE_INT full; };
 static std::map<UidKey, std::vector<VPath>> vpaths_memo;
@@ -886,12 +938,12 @@ static void name_vtable(tree vt)
   for (auto &ap : aps) {
     VtRow r; r.sym = sym; r.ap = ap.first; r.off = ap.second;
     if (ps.empty()) r.ms = "";                    /* no virtual function: the exe has no vftable for it */
-    else if (!same) r.ms = "unnamed:vfptr offsets differ from the exe's rule";
+    else if (!same) r.ms = "nodecor:vfptr offsets differ from the exe's rule";
     else for (auto &p : ps) if (p.full == ap.second) {
       M m; m.out = "??_7"; m.type_name(c); m.out += "6B";
       for (tree base : p.path) m.type_name(base);
       m.out += '@';
-      r.ms = !m.why.empty() ? "unnamed:" + m.why : m.internal ? "unnamed:internal scope" : m.out;
+      r.ms = !m.why.empty() ? "nodecor:" + m.why : m.internal ? "nodecor:internal scope" : m.out;
     }
     vtrows.push_back(r);
   }
@@ -900,6 +952,26 @@ static void name_vtable(tree vt)
 /* ---- the unit */
 
 static std::map<UidKey, Row> early;     /* by decl uid: named while parameters and bodies are still there */
+static std::set<UidKey> early_body;     /* the functions among them that the unit defines (a body in the TU), before IPA removes the inlined ones */
+
+/* every function body the front end finishes is named when it is finished: the early inliner removes a function inlined everywhere (an implicit
+   member, an inline function) before ipa_start, and its cl name must still be accounted for (NOEMIT, finish_unit). The in-charge form of a
+   constructor or destructor is never emitted, its clones are, and each comes here itself. */
+static void name_body(void *gcc_data, void *)
+{
+  tree d = (tree)gcc_data;
+  if (!d || TREE_CODE(d) != FUNCTION_DECL || !DECL_SAVED_TREE(d) || !TREE_PUBLIC(d)) return;
+  /* the universe of a row is the unit's object: a symbol it defines or references. A template pattern, a member of a class template, a dependent
+   * conversion operator has no symbol and never will (only its instantiations do, and each comes here itself), so it is not named. */
+  if (uses_template_parms(d)) return;
+  if (DECL_LANG_SPECIFIC(d) && DECL_MAYBE_IN_CHARGE_CDTOR_P(d) && !DECL_CLONED_FUNCTION_P(d)) return;
+  if (early.count(uid_decl(d))) { early_body.insert(uid_decl(d)); return; }
+  size_t before = rows.size();
+  name_decl(d, false);
+  early[uid_decl(d)] = rows.back();
+  early_body.insert(uid_decl(d));
+  rows.resize(before);
+}
 
 static void ipa_start(void *, void *)
 {
@@ -910,6 +982,7 @@ static void ipa_start(void *, void *)
     size_t before = rows.size();
     name_decl(d, false);
     early[uid_decl(d)] = rows.back();
+    if (TREE_CODE(d) == FUNCTION_DECL && n->definition) early_body.insert(uid_decl(d));
     rows.resize(before);
     if (VAR_P(d) && DECL_VTABLE_OR_VTT_P(d) && asmname(d).compare(0, 4, "_ZTV") == 0) name_vtable(d);
   }
@@ -980,7 +1053,10 @@ static void odr_add_type(std::set<std::string> &out, tree t, int depth = 0)
 {
   if (!t || t == error_mark_node || depth > 8) return;
   if (TREE_CODE(t) == LANG_TYPE || TREE_CODE(t) == TEMPLATE_TYPE_PARM || TREE_CODE(t) == TYPENAME_TYPE) return;   /* no mangling: an overload set, a braced list, a dependent type */
-  out.insert(odr_type_name(t));
+  /* the mangler names only types with a symbol-level name. A variably-modified type (a local array whose bound is a run-time expression: a SAVE_EXPR in its domain,
+   * as in any template instance's `T buf[n]`) has none in any ABI, and cp/mangle.cc says `sorry, unimplemented: mangling save_expr`. Its bound is an expression of the
+   * body, which the token hash of the definition holds, so the record keeps what the type is made of: its element, pointee, result and parameter types. */
+  if (!variably_modified_type_p(t, NULL_TREE)) out.insert(odr_type_name(t));
   switch (TREE_CODE(t)) {
   case POINTER_TYPE: case REFERENCE_TYPE: case ARRAY_TYPE: case VECTOR_TYPE: odr_add_type(out, TREE_TYPE(t), depth + 1); break;
   case FUNCTION_TYPE: case METHOD_TYPE:
@@ -1079,6 +1155,7 @@ struct OdrTok { std::string text; std::string file; int line, col; };
 static std::vector<OdrTok> odr_toks;
 static std::map<std::tuple<std::string, int, int>, size_t> odr_at;
 static bool odr_loaded, odr_lexed_ok;
+static const char *odr_lex_why = "the unit could not be lexed again";
 
 static bool odr_nodiag(cpp_reader *, enum cpp_diagnostic_level, enum cpp_warning_reason, rich_location *, const char *, va_list *) ATTRIBUTE_FPTR_PRINTF(5, 0);
 static bool odr_nodiag(cpp_reader *, enum cpp_diagnostic_level l, enum cpp_warning_reason, rich_location *, const char *m, va_list *ap) { (void)l; (void)m; (void)ap; odr_lexed_ok = false; return false; }
@@ -1091,6 +1168,17 @@ static void odr_load()
   if (odr_loaded) return;
   odr_loaded = true;
   odr_lexed_ok = true;
+  /* RULE (ODRDEF-PP): the second lex of the unit reads exactly the text the first lex read, which is a function of the unit's own preprocessor state alone
+   * only when the unit is its own preprocessed text (-fpreprocessed: every include, macro and -include already applied, line markers kept). A raw source's
+   * state is the include chains, the builtin and command-line macros and the -include list, held by parse_in (c_finish_options and register_include_chains
+   * keep them in statics of the front end) and not readable from here: a second reader over a raw source would lex another token sequence, or fail on its
+   * first #include. So a raw unit is refused by this cause, never lexed with a rebuilt state; the driver's -save-temps (the compiler's own two steps, as the
+   * recipe's PP and CC stages) gives the preprocessed unit. */
+  if (!cpp_get_options(parse_in)->preprocessed) {
+    odr_lexed_ok = false;
+    odr_lex_why = "the unit is not preprocessed (-fpreprocessed): its include chains and macros are not readable to lex it again; compile its preprocessed text (the driver's -save-temps, or the recipe's PP stage)";
+    return;
+  }
   line_maps *lm = new line_maps();
   linemap_init(lm, BUILTINS_LOCATION);
   lm->reallocator = odr_realloc;   /* toplev.cc general_init sets the front end's own (ggc) ones; this table is the plugin's, in the heap */
@@ -1123,7 +1211,7 @@ static void odr_load()
 static bool odr_hash_range(location_t start, location_t end, std::string &hex, std::string &why)
 {
   odr_load();
-  if (!odr_lexed_ok) { why = "the unit could not be lexed again"; return false; }
+  if (!odr_lexed_ok) { why = odr_lex_why; return false; }
   size_t at[2];
   location_t loc[2] = { start, end };
   for (int k = 0; k < 2; k++) {
@@ -1163,7 +1251,32 @@ static bool odr_targ(tree a, std::string &out, std::string &why)
     out = "L" + odr_type_name(TREE_TYPE(a)) + (tree_fits_shwi_p(a) ? std::to_string(tree_to_shwi(a)) : std::to_string(tree_to_uhwi(a))) + "E";
     return true;
   }
+  if (TREE_CODE(a) == TEMPLATE_DECL) {   /* a template template argument: the Itanium <template-name> of the template, a source-name per scope (<name> is N..E when qualified); it has no assembler name */
+    std::vector<std::string> parts;
+    for (tree x = a; x && x != global_namespace && TREE_CODE(x) != TRANSLATION_UNIT_DECL; x = DECL_CONTEXT(x)) {
+      if (TYPE_P(x)) { why = "a template template argument in a class scope"; return false; }
+      if (!DECL_NAME(x)) { why = "a template template argument in an unnamed scope"; return false; }
+      const char *id = IDENTIFIER_POINTER(DECL_NAME(x));
+      parts.insert(parts.begin(), std::to_string(strlen(id)) + id);
+    }
+    out.clear();
+    for (size_t k = 0; k < parts.size(); k++) out += parts[k];
+    if (parts.size() > 1) out = "N" + out + "E";
+    return true;
+  }
   if (DECL_P(a)) { out = odr_decl_name(a); return true; }
+  if (TREE_CODE(a) == PTRMEM_CST) {   /* a pointer to member: a function member by its assembler name, a data member by its class and name */
+    tree m = PTRMEM_CST_MEMBER(a);
+    if (TREE_CODE(m) == FUNCTION_DECL) { out = "&" + odr_decl_name(m); return true; }
+    if (!DECL_NAME(m)) { why = "a pointer to an unnamed data member"; return false; }
+    out = "&" + odr_type_name(PTRMEM_CST_CLASS(a)) + "::" + IDENTIFIER_POINTER(DECL_NAME(m));
+    return true;
+  }
+  if (TREE_CODE(a) == INDIRECT_REF) {   /* a reference argument: the object it names (through conversions of its address) */
+    tree p = TREE_OPERAND(a, 0);
+    while (CONVERT_EXPR_P(p) || TREE_CODE(p) == NON_LVALUE_EXPR || TREE_CODE(p) == VIEW_CONVERT_EXPR) p = TREE_OPERAND(p, 0);
+    if (TREE_CODE(p) == ADDR_EXPR && DECL_P(TREE_OPERAND(p, 0))) { out = odr_decl_name(TREE_OPERAND(p, 0)); return true; }
+  }
   if (TREE_CODE(a) == ADDR_EXPR && DECL_P(TREE_OPERAND(a, 0))) { out = "&" + odr_decl_name(TREE_OPERAND(a, 0)); return true; }
   why = std::string("a template argument of kind ") + get_tree_code_name(TREE_CODE(a));
   return false;
@@ -1224,25 +1337,31 @@ static void odr_emit()
   fprintf(asm_out_file, "\t.popsection\n");
 }
 
-static void finish_unit(void *, void *)
+/* THE emitted symbol set of a unit (RULE SYMSET): an external function or object has a symbol in the object exactly when the unit defines it (its body or
+ * data was written, or it is an alias) or its assembler name was referenced by what was written (TREE_SYMBOL_REFERENCED). The sections that are indexed by
+ * symbol (.fnvnx.sympair, .fnvnx.crossing, .fnvnx.decltype) take their rows from this one predicate, never from "a declaration the front end saw". */
+static bool sym_emitted(symtab_node *n, bool &def)
 {
-  symtab_node *n;
-  std::set<std::string> emitted;
-  FOR_EACH_SYMBOL(n) {
-    tree d = n->decl;
-    if (!TREE_PUBLIC(d) || !VAR_OR_FUNCTION_DECL_P(d)) continue;
-    bool def = n->definition && !DECL_EXTERNAL(d) && (TREE_ASM_WRITTEN(d) || n->alias);
-    bool ref = TREE_SYMBOL_REFERENCED(DECL_ASSEMBLER_NAME(d));
-    if (!def && !ref) continue;
-    auto it = early.find(uid_decl(d));
-    if (it != early.end()) { rows.push_back(it->second); rows.back().def = def; }
-    else name_decl(d, def);
-    emitted.insert(rows.back().sym);
-  }
-  /* the SDD2 slot functions: that plugin writes them as assembly in the object that defines the table, and they
-   * are named only by the table's entries */
+  tree d = n->decl;
+  def = false;
+  if (!TREE_PUBLIC(d) || !VAR_OR_FUNCTION_DECL_P(d)) return false;
+  def = n->definition && !DECL_EXTERNAL(d) && (TREE_ASM_WRITTEN(d) || n->alias);
+  /* varasm.cc assemble_name marks the identifier of the STRIPPED name (targetm.strip_name_encoding: an assembler-label declaration, `__asm__("x")`, has the
+   * assembler name `*x`, and the object's symbol is `x`), so that identifier is the one that says the symbol was referenced; the layout plugin interns it when
+   * the declaration is finished (intern_label_name), which is the only way the mark is made for it. */
+  if (def) return true;
+  tree id = maybe_get_identifier(targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d))));
+  return id && TREE_SYMBOL_REFERENCED(id);
+}
+
+/* The SDD2 slot functions of the unit: the functions named by the entries of the vtables the unit defines that carry the fnvnx_sdd attribute (the sdd plugin writes
+ * their bodies as assembly in the object that defines the table). One list for every section that is indexed by symbol. */
+static std::vector<tree> sdd_slot_decls()
+{
+  std::vector<tree> out;
   varpool_node *v;
-  if (is_cxx()) FOR_EACH_DEFINED_VARIABLE(v) {
+  if (!is_cxx()) return out;
+  FOR_EACH_DEFINED_VARIABLE(v) {
     tree vt = v->decl, init = DECL_INITIAL(vt);
     if (!DECL_VTABLE_OR_VTT_P(vt) || !init || TREE_CODE(init) != CONSTRUCTOR) continue;
     unsigned HOST_WIDE_INT ix; tree val;
@@ -1250,13 +1369,43 @@ static void finish_unit(void *, void *)
       STRIP_NOPS(val);
       if (TREE_CODE(val) != ADDR_EXPR || TREE_CODE(TREE_OPERAND(val, 0)) != FUNCTION_DECL) continue;
       tree f = TREE_OPERAND(val, 0);
-      if (!lookup_attribute("fnvnx_sdd", DECL_ATTRIBUTES(f)) || emitted.count(asmname(f))) continue;
-      name_decl(f, true);
-      emitted.insert(rows.back().sym);
+      if (lookup_attribute("fnvnx_sdd", DECL_ATTRIBUTES(f))) out.push_back(f);
     }
   }
+  return out;
+}
+
+static void finish_unit(void *, void *)
+{
+  symtab_node *n;
+  std::set<std::string> emitted;
+  FOR_EACH_SYMBOL(n) {
+    tree d = n->decl;
+    bool def;
+    if (!sym_emitted(n, def)) continue;
+    auto it = early.find(uid_decl(d));
+    if (it != early.end()) { rows.push_back(it->second); rows.back().def = def; }
+    else name_decl(d, def);
+    emitted.insert(rows.back().sym);
+  }
+  /* NOEMIT: a function the unit defines whose body GCC wrote nowhere in the object (inlined at every use, or never used out of line) has a cl name
+   * and no symbol. The row says so (kind noemit, ref; a function the rules gave no name keeps its nodecor kind), so every cl name without a
+   * symbol is accounted for: a nodecor row or a noemit one. */
+  for (auto &e : early)
+    if (early_body.count(e.first) && !emitted.count(e.second.sym) && (!e.second.ms.empty() || e.second.kind.compare(0, 8, "nodecor:") == 0)) {
+      Row r = e.second; if (!r.ms.empty()) r.kind = "noemit"; r.def = false;
+      rows.push_back(r); emitted.insert(r.sym);
+    }
+  /* the SDD2 slot functions: that plugin writes them as assembly in the object that defines the table, and they
+   * are named only by the table's entries */
+  for (tree f : sdd_slot_decls()) {
+    if (emitted.count(asmname(f))) continue;
+    name_decl(f, true);
+    emitted.insert(rows.back().sym);
+  }
   if (is_cxx()) odr_emit();
-  if (rows.empty() && vtrows.empty()) return;
+  /* every unit the plugin compiles carries the sections, an empty one when the unit names nothing (an empty unit, a body that is #if'd out): the
+   * record of a unit is its object's own fact, so its absence must mean "not compiled by this plugin", never "nothing to say" */
   {
     /* .fnvnx.crossing: the terms of every function row that has an MSVC name, from the same rows as .fnvnx.sympair (a symbol once) */
     std::map<std::string, std::string> cr;
@@ -1294,7 +1443,7 @@ static void finish_unit(void *, void *)
  * A static variable or a class of a function has the number of its block in the name: the function's outermost
  * block is 2 for cl (written `?1?`; test_names.expect). The number of a deeper block counts every block opened before it,
  * including those that declare nothing; the trees do not keep those, so a deeper entity has no number here
- * (`unnamed:local scope number`). The depth is read from the front end's own scope stack when the entity is
+ * (`nodecor:localscope`). The depth is read from the front end's own scope stack when the entity is
  * declared: a block directly in the function's parameter scope (a constructor or destructor has the front end's
  * own body block in between).
  */
@@ -1339,10 +1488,23 @@ static tree handle_cc(tree *node, tree name, tree args, int, bool *no_add_attrs)
   return NULL_TREE;
 }
 
+static tree handle_key(tree *node, tree name, tree args, int, bool *no_add_attrs)
+{
+  tree v = args ? TREE_VALUE(args) : NULL_TREE;
+  tree t = TYPE_P(*node) ? *node : (DECL_P(*node) ? TREE_TYPE(*node) : NULL_TREE);
+  if (!v || TREE_CODE(v) != STRING_CST || !t || TREE_CODE(t) != UNION_TYPE
+      || (strcmp(TREE_STRING_POINTER(v), "class") && strcmp(TREE_STRING_POINTER(v), "struct") && strcmp(TREE_STRING_POINTER(v), "union"))) {
+    error("%qE takes \"class\", \"struct\" or \"union\" on a union", name); *no_add_attrs = true; return NULL_TREE;
+  }
+  if (lookup_attribute("fnvnx_key", TYPE_ATTRIBUTES(TYPE_MAIN_VARIANT(t)))) *no_add_attrs = true;   /* the first declaration wins */
+  return NULL_TREE;
+}
+
+static struct attribute_spec key_attr = { "fnvnx_key", 1, 1, false, true, false, false, handle_key, NULL };
 static struct attribute_spec cc_attr = { "fnvnx_cc", 1, 1, false, true, true, false, handle_cc, NULL };
 static struct attribute_spec sdd_attr = { "fnvnx_sdd", 3, 3, true, false, false, false, NULL, NULL };
 
-static void register_attrs(void *, void *) { register_attribute(&cc_attr); register_attribute(&sdd_attr); }
+static void register_attrs(void *, void *) { register_attribute(&cc_attr); register_attribute(&sdd_attr); register_attribute(&key_attr); }
 
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)
 {
@@ -1361,6 +1523,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type, NULL);
     register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, odr_pre_genericize, NULL);
+    register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, name_body, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_PARSE_FUNCTION, odr_finish_function, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
