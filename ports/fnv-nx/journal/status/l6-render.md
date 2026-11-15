@@ -912,3 +912,6 @@ Paused: w3b, w4, farm; no other work.
     - Open: w6 re-checks table_id from the stage output.
     - Found: the platform root is red because the hostabi include is not admitted for guest. Unrelated to the spec; sent to L1.
     - The L1 hand-off for w6-root is now 98cd75f28. The w5 head follows the next sm_link run.
+- 15:33Z w6: D9_ROWS stage output at 98cd75f28 is byte-equal (sha 71cb85a7…) to the loader's pinned manifest rows (2ac3091b).
+    - table_id e8aaba62…11d4 is unchanged because the hermetic stage's input bytes are equal. Accepted as a proof.
+    - The confirming loader run is blocked by the hostabi admission error (L1). w6 runs it once that is fixed.
