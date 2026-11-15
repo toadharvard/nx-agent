@@ -161,3 +161,24 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - Resume rule: a shard killed at the 2 h limit is rerun with the same command; the appended jsonl skips shapes already proved.
 - w4 merged the lead branch (cdd9ce1b1): one IR fetch path. Next: the oracle.json entries, then SIMD slice 1 (prover state for xmm/mm/mxcsr/fr/fptr).
 - Sent to L3a w1: the pinsrw/pextrw/pshufw lane index must be an ite over the masked immediate.
+
+## 2026-11-15 09:30Z
+- Undecided x86sys rows, dependent sites (w3 330074b8a, proof/undecided_sites.py).
+  - Inputs: pack 7b2faae276b2 @ 7ef692b5b, L5 x86sys 3646ebab3. The universe is 5,007,758 pack addresses, all decoded.
+  - Full site list: fnv-nx-build l3b-lift/undecided-sites @ 10f8792.
+  - Sites (markers) per row:
+    - cr4.pce 0
+    - idtr_limit 156
+    - int other vectors 154
+    - int 0x29 0
+    - selectors.gs 5,305 (3,015 addresses, 2,988 of them in d3dx9_38)
+    - sgdt 5
+    - sidt_base 0
+    - sldt 35
+  - These counts are an upper bound: almost all the gs and int sites are data decoded as code. The cut is L3a's code-range facts (CODEMAP, w7); after it, each remaining site needs a reach certificate or a decided row.
+- w3 1d42a4550 (#12): certbasis.py is the one source of OBLIGATIONS and platform_sha. Merged at 29939d7b4. w3 is archived (budget).
+- Queue v3 is BLOCKED on the 4 farms.
+  - Cause (rule 3): farm_shapeprove.sh still read the IR pin from sail_pins.txt after #13 moved it to the external x86ir.
+  - w4 fixes it: the IR comes only through the external, and the sha comes from certs_build --model-sha.
+- w9: the x87 tables, Table 4-8 and loads/stores/BCD are done (d826016e, d0a72b87; 44 tests). The merge into the lead branch waits for w9 to resolve the CERTS.md/oracle conflicts.
+- w4 SIMD: Sail has no SIMD semantics, so the reference comes from ACL2 transcriptions, with SDM specs under OWNER 10 where ACL2 has no instruction. The cr0/cr4 OSFXSR and MXCSR rows are asked of L5.
