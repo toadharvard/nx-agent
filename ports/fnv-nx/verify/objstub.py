@@ -137,7 +137,7 @@ this change, platform root, 114 objects, warm cache: total 49 s, maximum 8.9 s (
 
 (I) IMAGE. For a root with a link stage the gate also reads the FINAL ELF (image_check): every STT_FUNC symbol with a size in an executable section of the image
 is a body, so a weak definition that a strong one replaced is not in the image and is not judged, and the archive members the linker pulled are judged as
-they stand. A body is FIXED-FAILURE iff, by the V rules with the root's `errno_accessor` (recipe: the function the libc errno macro calls) transparent, it
+they stand. A body is FIXED-FAILURE iff, by the V rules with the root's errno accessor (DERIVED, `errno_probe`: the function the libc errno macro calls; no recipe key) transparent, it
 stores only constants through the pointer that a call of the accessor returned (at least one such store), reads nothing but its own frame, and returns one
 constant on every path: its whole effect is `errno = K1; return K2`. Finding `fixed-failure` (id <root>/<link output>, name the function). Stated limits: a constant
 return without an errno store is the V class (a constants row); an errno held in a thread register or inlined (no call of the accessor) is not seen; a body with a
@@ -918,32 +918,30 @@ AARCH64_TLS = frozenset(range(512, 576)) | frozenset(range(80, 127))   # AAELF64
 
 
 def errno_probe(cc, flags, cache):
-    """How the root's libc reaches errno, DERIVED by compiling `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler CC and
-    unit flags FLAGS and reading the object: -> ("call", SYMBOL) when the body calls SYMBOL (a call relocation, the accessor that returns the address of
-    errno), ("tls", SYMBOL) when it reaches a thread-local symbol (a TLS relocation). Anything else (no call and no TLS relocation, several targets)
-    raises ValueError: the way errno is reached is not known, nothing is guessed. Cached CACHE/objstub/e-<key>, key = compiler, flags, source."""
+    """How the root's libc reaches errno, DERIVED from the libc header of the declared target: the C compiler CC with the root's unit FLAGS preprocesses
+    `#include <errno.h>` / `int f(void){return errno;}` and the expansion of `errno` is read from the text (no object is read, so the rule is the same for every
+    target): `(*NAME ())` -> ("call", NAME), the function that returns the address of errno; a bare identifier NAME -> ("tls", NAME), a thread-local or
+    plain object. Any other expansion raises ValueError: the way errno is reached is not known, nothing is guessed. Cached CACHE/objstub/e-<key>,
+    key = compiler, flags, source."""
     src = "#include <errno.h>\nint f(void){return errno;}\n"
-    key = hashlib.sha256(json.dumps([cc, subprocess.run([cc, "--version"], capture_output=True, text=True).stdout, list(flags), src]).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([cc, subprocess.run([cc, "--version"], capture_output=True, text=True).stdout, list(flags), src, 2]).encode()).hexdigest()
     cp = os.path.join(cache, "objstub", "e-%s.txt" % key)
     if not os.path.exists(cp):
         with tempfile.TemporaryDirectory() as td:
             open(td + "/p.c", "w").write(src)
-            r = subprocess.run([cc, "-c", "-O1", "-o", td + "/p.o"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True)
+            r = subprocess.run([cc, "-E", "-P"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True)
             if r.returncode:
                 raise ValueError("errno probe does not compile: %s" % r.stderr[-300:])
-            o = Obj(td + "/p.o")
-            tgt = set()
-            for si, rel in o.rela.items():
-                if o.secs[si][2] & 4:
-                    for _, (sy, ty, _) in rel.items():
-                        name = o.syms[sy][0]
-                        if ty in (283, 21):                       # R_AARCH64_CALL26 / R_AARCH64_P32_CALL26
-                            tgt.add(("call", name))
-                        elif ty in AARCH64_TLS:
-                            tgt.add(("tls", name))
-            if len(tgt) != 1:
-                raise ValueError("errno probe: the object of `return errno;` has %d call/TLS targets (%s): how errno is reached is not known" % (len(tgt), sorted(tgt)))
-            _atomic(cp, ("%s %s\n" % sorted(tgt)[0]).encode())
+            d = subprocess.run([cc, "-E", "-dM"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True).stdout
+        if not re.search(r"^#define errno\b", d, re.M):   # ISO C: errno is a macro of <errno.h>; an unexpanded identifier is no derivation
+            raise ValueError("errno probe: <errno.h> of the root's flags defines no macro `errno`")
+        body = re.findall(r"int\s+f\s*\(\s*void\s*\)\s*\{\s*return\s+(.*?);\s*\}", r.stdout, re.S)
+        m = re.fullmatch(r"\(\s*\*\s*([A-Za-z_]\w*)\s*\(\s*\)\s*\)", body[0].strip()) if len(body) == 1 else None
+        t = re.fullmatch(r"([A-Za-z_]\w*)", body[0].strip()) if len(body) == 1 and not m else None
+        if not (m or t):
+            raise ValueError("errno probe: `errno` expands to %r: how errno is reached is not known" % (body[0].strip()[:80] if body else r.stdout[-80:]))
+        os.makedirs(os.path.dirname(cp), exist_ok=True)
+        _atomic(cp, ("%s %s\n" % (("call", m.group(1)) if m else ("tls", t.group(1)))).encode())
     k, n = open(cp).read().split()
     return k, n
 
