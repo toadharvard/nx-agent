@@ -968,3 +968,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Fit: CC ~ max_insns^1.24 and ~ bytes^1.95. At 4.5k insns the time varies by a factor of 18 (65–1,195 s), so the region size after CFG drives the cost, not the function size.
   - b3c (39,600 insns) was stopped after 38 min at 5.2 GB RSS, and ec2 (9,081) after 24 min: the largest units are the compile-time and memory problem.
   - Next, as ordered at 21:40: @prof2 with -fno-schedule-insns (a recipe flag class, declared in the inbox), after checking the semantic flags and the order of the ldar/stlr plugin; then the 6 FTOI units against the generated prelude.
+- 22:08 w13 fpfacts2 @ 32c1787d0, on w7-facts2 3a5531e1d.
+  - x86flow.image_base(path, table, name): the exe uses its own ImageBase, every other image the modules.tsv row; there is no default.
+  - lift/retn runs once per image (RETN/<image>.tsv for 8 images).
+  - lift/fpfacts runs once per image and combines the results. It is red unless the image set equals the exe plus the module-table rows. The program-level ASM-204/205 is the AND over all images.
+  - The build is blocked: lift/factsimg/exe gen:1 (universe.py) exits 1 with empty stderr. Sent to w7, together with the rule that every non-zero exit of a producer prints its reason.
+- base3 @ e92e86825 (L5 adba10d8e merged as one head). render/nxgpu include fix: w8.
