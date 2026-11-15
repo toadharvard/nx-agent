@@ -1467,3 +1467,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - S29's check form belongs to L2 w3.
     - The flags come from the DATAMODEL rows. Every guest unit key changes once.
   - (C) host_gl: the version is derived from gl.xml (tools/khronos-glxml f4894d73) as the max minimum-core-version of the referenced gl* symbols. No owner record.
+- 01:09 **rtasm gate (w23 04d85648).** Accepted: frame/D1, kernel call, ordered atomics, 10 tests.
+  - **Universe** is redefined: the assembled objects in the guest link closure, read from DWARF (language or producer). It includes the runtime external's archive members. An object with no DWARF is red.
+  - **jmp_buf facts** come from preprocessing the pinned <setjmp.h> (w20's probe stage).
+  - **Before-threads** is a call-graph fixpoint from the ENTRY symbol, cut at sites that reach the CreateThread svc (its number from the pinned libnx header). It needs w25's per-site call edges.
+  - rtasm goes into the guest product class set (w24) and REQUIRED_PRODUCT (w15).
