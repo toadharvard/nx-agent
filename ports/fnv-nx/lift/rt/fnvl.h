@@ -1,6 +1,6 @@
 
 typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef unsigned long long u64;
-typedef signed char s8; typedef short s16; typedef int s32; typedef long long s64;
+typedef unsigned __int128 u128; typedef signed char s8; typedef short s16; typedef int s32; typedef long long s64;
 typedef u8 __attribute__((may_alias)) u8a; typedef u16 __attribute__((aligned(1),may_alias)) u16a;
 typedef u32 __attribute__((aligned(1),may_alias)) u32a; typedef u64 __attribute__((aligned(1),may_alias)) u64a;
 typedef float __attribute__((aligned(1),may_alias)) f32a; typedef double __attribute__((aligned(1),may_alias)) f64a;
@@ -234,6 +234,53 @@ FNVL_F2I static inline u32 sse_f2i(double v,u32 rc){ double r=rc==0?__builtin_ro
 static inline double sse_f2d(float v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u32 b=fxbits(v); return fxval<double>((u64)(b&0x80000000u)<<32|0x7ffull<<52|(u64)(b&0x7fffffu)<<29|1ull<<51); } return (double)v; }
 static inline float sse_d2f(double v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u64 b=fxbits(v); return fxval<float>((u32)(b>>32)&0x80000000u|0x7f800000u|(u32)((b&FX<double>::M)>>29)|0x400000u); } return sse_ftz((float)v,mx); }
 static inline void sse_fpcr(u32 mx){ static const unsigned char m[4]={0,2,1,3}; u64 f; __asm__ volatile("mrs %0, fpcr":"=r"(f)); f=(f&~(3ull<<22))|((u64)m[(mx>>13)&3]<<22); __asm__ volatile("msr fpcr, %0"::"r"(f)); }
+/* DSL SSE state (fnvlift/dsl.py F.xmm / F.mxcsr and the xmm<i> / mxcsr pre-state): the whole value of the register as a u128 (little endian: q[0] is the low half), the architectural
+   MXCSR image = c->mxcsr (flags of the SSE family's host FPSR are added while it is the owner); a write replaces the whole register / the whole MXCSR: the flags the host FPSR holds for the
+   SSE family are cleared (the new value carries the sticky flags), the host rounding mode follows RC (bits 13-14). */
+static inline u128 fx_dsl_xmm(u32 i){ return ((u128)c->x[i].q[1]<<64)|c->x[i].q[0]; }
+static inline void fx_dsl_xmm_set(u32 i, u128 v){ c->x[i].q[0]=(u64)v; c->x[i].q[1]=(u64)(v>>64); }
+static inline u32 fx_dsl_mxcsr(void){ return c->mxcsr|sse_live(); }
+static inline void fx_dsl_mxcsr_set(u32 v){ FOWN_SSE(); fnvl_fp_x87_clear(); c->mxcsr=v; sse_fpcr(v); }
+/* dsl.fp (fnvlift/dsl.py `fp`, the rules are in its docstring and in _fp_smt): scalar binary32 / binary64 add sub mul div sqrt (op 0..4) of the bit patterns a, b under the MXCSR value mx -> the result's
+   bit pattern in the low w bits and THIS operation's flags IE DE ZE OE UE PE (MXCSR bits 0-5) in bits w..w+5. The host does the IEEE operation in the guest's rounding mode (FPCR RC from mx, sse_fpcr);
+   its sticky IOC / DZC / OFC / IXC flags are IE / ZE / OE / PE; NaN operands, DAZ, DE, tininess BEFORE rounding (UE: the round-toward-zero result below the smallest normal, the host's UFC is after
+   rounding and is not used) and FTZ are computed here on the bit patterns. The live host flags of the SSE family are folded into c->mxcsr first (the family's sticky set is c->mxcsr | live), so none is lost. */
+template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a, UT b, u32 mx){
+  const int W=sizeof(UT)*8; const UT SGN=(UT)1<<(W-1), FM=((UT)1<<FB)-1, EX=(UT)((((UT)1<<(W-1))-1)&~FM), QB=(UT)1<<(FB-1), MINN=(UT)1<<FB;
+  const bool daz=(mx>>6)&1, um=(mx>>11)&1, ftz=(mx>>15)&1;
+  auto isnan=[&](UT x){ return (x&EX)==EX && (x&FM)!=0; };
+  auto issnan=[&](UT x){ return isnan(x) && !(x&QB); };
+  auto issub=[&](UT x){ return (x&EX)==0 && (x&FM)!=0; };
+  const bool unary=op==4;
+  const UT ao=a, bo=unary?a:b;
+  if(daz){ if(issub(a)) a&=SGN; if(issub(b)) b&=SGN; }
+  const UT indef=(UT)(SGN|EX|QB);
+  UT val; u32 fl=0;
+  if(isnan(a)||(!unary&&isnan(b))){
+    val=isnan(a)?(UT)(a|QB):(UT)(b|QB); fl=(issnan(a)||(!unary&&issnan(b)))?1u:0u;
+    return ((u128)fl<<W)|val; }
+  FOWN_SSE(); c->mxcsr|=sse_live(); sse_fpcr(mx); fnvl_fp_x87_clear();
+  FT x, y, r; __builtin_memcpy(&x,&a,sizeof x); __builtin_memcpy(&y,&b,sizeof y);
+  __asm__ volatile("" : "+w"(x), "+w"(y));
+  switch(op){ case 0: r=x+y; break; case 1: r=x-y; break; case 2: r=x*y; break; case 3: r=x/y; break; default: r=__builtin_sqrt(x); }
+  __asm__ volatile("" : "+w"(r));
+  const u32 hf=fnvl_fp_x87_flags(); fnvl_fp_x87_clear();
+  const bool ie=hf&1u, ze=(hf>>2)&1u, oe=(hf>>3)&1u, pe=((hf>>5)&1u)!=0;
+  __builtin_memcpy(&val,&r,sizeof val);
+  if(ie){ sse_fpcr(mx); return ((u128)1u<<W)|indef; }
+  const bool de=!daz && (issub(ao)||issub(bo));
+  bool tiny=false;
+  if((UT)(val&~SGN)<=MINN){                                         /* the result may be tiny: the round-toward-zero result decides (tininess before rounding) */
+    sse_fpcr((mx&~(3u<<13))|(3u<<13)); FT z; fnvl_fp_x87_clear();
+    switch(op){ case 0: z=x+y; break; case 1: z=x-y; break; case 2: z=x*y; break; case 3: z=x/y; break; default: z=__builtin_sqrt(x); }
+    __asm__ volatile("" : "+w"(z)); fnvl_fp_x87_clear();
+    UT zb; __builtin_memcpy(&zb,&z,sizeof zb); zb&=~SGN; tiny=zb<MINN && (zb!=0 || pe); sse_fpcr(mx); }
+  bool ue=tiny&&(pe||!um), pe2=pe||oe;
+  if(ftz&&um&&tiny){ val&=SGN; ue=true; pe2=true; }
+  fl=(de?2u:0u)|(ze?4u:0u)|(oe?8u:0u)|(ue?16u:0u)|(pe2?32u:0u);
+  return ((u128)fl<<W)|val; }
+static inline u128 fx_dsl_fp(u32 op, u32 w, u64 a, u64 b, u32 mx){
+  return w==32 ? fx_dsl_fp_t<float,u32,23>(op,(u32)a,(u32)b,mx) : fx_dsl_fp_t<double,u64,52>(op,a,b,mx); }
 static inline int sse_sat(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
 static inline u64 sse_sad(const u8*a,const u8*b){ u32 s=0; for(int i=0;i<8;i++) s+=a[i]>b[i]?a[i]-b[i]:b[i]-a[i]; return s; }
 static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=(u32)(s.b[i]>>7)<<i; return r; }
@@ -279,6 +326,16 @@ namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_ra
 #define FNVL_LOCK 11
 /* FNVL_DBGSRV 12  `int 0x2d` (the debug service), at = the instruction; the rule of Wine 9.0 handle_interrupt, rt/seh.cc fnvl_raise. */
 #define FNVL_DBGSRV 12
+/* An UNMASKED x87 (#MF) or SIMD (#XM) floating-point exception raised by a Form (dsl.FAULTS 12..18, one code per NTSTATUS, Wine 9.0 get_fpu_code's order), a fault: ExceptionAddress = Context.Eip = at.
+   FNVL_FLT_IE 13 STATUS_FLOAT_INVALID_OPERATION 0xC0000090, _DE 14 STATUS_FLOAT_DENORMAL_OPERAND 0xC000008D, _ZE 15 STATUS_FLOAT_DIVIDE_BY_ZERO 0xC000008E, _OE 16 STATUS_FLOAT_OVERFLOW 0xC0000091,
+   _UE 17 STATUS_FLOAT_UNDERFLOW 0xC0000093, _PE 18 STATUS_FLOAT_INEXACT_RESULT 0xC000008F, _SF 19 STATUS_FLOAT_STACK_CHECK 0xC0000092 (rt/seh.cc). */
+#define FNVL_FLT_IE 13
+#define FNVL_FLT_DE 14
+#define FNVL_FLT_ZE 15
+#define FNVL_FLT_OE 16
+#define FNVL_FLT_UE 17
+#define FNVL_FLT_PE 18
+#define FNVL_FLT_SF 19
 /* Segment registers of the process model (rt/seh.cc CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
    (base = TEB, limit 0xFFF); the only descriptors a ring-3 load can reach are the three of the model GDT below, plus the null selector for ES/DS/FS/GS.
    SELK strips the RPL: it keeps the descriptor index and the TI bit (a TI=1 selector names the LDT, which a Win32 process has none of: always invalid). */

@@ -26,6 +26,11 @@ from proof import forms, forms_alu, forms_flow, forms_move             # noqa: F
 
 FAULT = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BR'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
+# the x87 / MMX / SSE pre-state (dsl.XW) as C expressions over struct cpu (rt/fnvl_x87.h fx_dsl_*); c0 c2 c3 are the lifted function's own condition-code locals
+XSTATE = {**{'fr%d' % i: 'fx_dsl_fr(%d)' % i for i in range(8)}, 'ftop': 'c->ftop', 'ftag': 'fx_dsl_ftag()', 'fcw': '(c->fcw & 0xffffu)', 'fsw': 'fx_dsl_fsw(c0, c2, c3)',
+          'fip': 'c->fip', 'fdp': 'c->fdp', 'fop': 'fx_fop()', 'fcs': '(c->fcs & 0xffffu)', 'fds': '(c->fds & 0xffffu)',
+          **{'xmm%d' % i: 'fx_dsl_xmm(%d)' % i for i in range(8)}, 'mxcsr': 'fx_dsl_mxcsr()'}
+assert set(XSTATE) == set(dsl.XW)
 SIXFLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 
 
@@ -43,6 +48,8 @@ def varc(cx):
             return 'FNVL_GS_BASE()'
         if name == 'fs_base':
             cx.usesfs = True
+        if name in XSTATE:
+            return XSTATE[name]
         if name in dsl.REGS or name in SIXFLAGS or name in STATE:
             return STATE.get(name, name)
         raise Unsupported('form variable ' + name)
@@ -71,7 +78,8 @@ def de_code(n, ref):
 # TRAP_x86_BOUND -> STATUS_ARRAY_BOUNDS_EXCEEDED, TRAP_x86_OFLOW -> STATUS_INTEGER_OVERFLOW, privileged instruction (#GP from CLI/HLT/...) -> STATUS_PRIVILEGED_INSTRUCTION,
 # TRAP_x86_PROTFLT -> STATUS_ACCESS_VIOLATION, TRAP_x86_TRCTRAP -> STATUS_SINGLE_STEP). at: 'a' the instruction, 'nxt' the next instruction, 'a+1' the imm8 byte of a 2-byte int.
 FAULT_MAP = {2: ('FNVL_BP', 'a', True), 3: ('FNVL_UD', 'a', True), 4: ('FNVL_BOUNDS', 'a', False), 5: ('FNVL_INTO', 'a', True), 6: ('FNVL_PRIV', 'a', False),
-             7: ('AV', 'a', False), 8: ('FNVL_STEP', 'nxt', True), 9: ('FNVL_ASSERT', 'a', False), 10: ('FNVL_DBGSRV', 'a', False), 11: ('FNVL_INTO', 'a+1', True)}
+             7: ('AV', 'a', False), 8: ('FNVL_STEP', 'nxt', True), 9: ('FNVL_ASSERT', 'a', False), 10: ('FNVL_DBGSRV', 'a', False), 11: ('FNVL_INTO', 'a+1', True),
+             **{k: ('FNVL_FLT_' + dsl.FAULTS[k][4:], 'a', False) for k in dsl.FLT_STATUS}}
 DE = 1        # #DE: the status (divide by zero or overflow) is chosen by the condition (de_code), a fault
 assert set(FAULT_MAP) | {DE} == set(dsl.FAULTS), 'a fault code of dsl.FAULTS has no row in FAULT_MAP: %s' % sorted(set(dsl.FAULTS) - set(FAULT_MAP) - {DE})
 
