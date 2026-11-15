@@ -41,7 +41,7 @@ def main():
             check("shards N=%d: disjoint and covering" % n, len(parts) == n and len(flat) == len(set(flat)) and set(flat) == set(keys))
         check("shard_of is int(key,16) mod N", recipe.shard_of("ff", 8) == 255 % 8 and recipe.shard_of("10", 3) == 16 % 3)
         check("shard_spec parses i/N", recipe.shard_spec("2/5") == (2, 5))
-        for bad in ("0/0", "3/3", "1/9", "x", "-1/2", "01/2"):
+        for bad in ("0/0", "3/3", "1/17", "x", "-1/2", "01/2"):
             try:
                 recipe.shard_spec(bad)
                 got = None

@@ -142,6 +142,15 @@ def own_nodes(scope):
             todo.extend(ast.iter_child_nodes(n))
 
 
+def catches_keyerror(h):
+    """True iff the handler H catches a missing environment key (a fallback): bare, KeyError, LookupError, Exception or BaseException."""
+    t = h.type
+    if t is None:
+        return True
+    ts = t.elts if isinstance(t, ast.Tuple) else [t]
+    return any((dotted(x) or "").split(".")[-1] in ("KeyError", "LookupError", "Exception", "BaseException") for x in ts)
+
+
 def is_guard(node):
     """A call of the one guard of a dynamic load: require_mounted(...) or require_under(...) (recipe.py), plain or as an attribute."""
     return isinstance(node, ast.Call) and (dotted(node.func) or "").split(".")[-1] in GUARDS
@@ -232,7 +241,7 @@ def judge_file(path, src):
                     add("envdefault", n.lineno)
             if fn == "os.environ.setdefault":
                 add("envdefault", n.lineno)
-        if isinstance(n, ast.Try) and n.handlers:
+        if isinstance(n, ast.Try) and any(catches_keyerror(h) for h in n.handlers):
             for b in n.body:
                 for m in ast.walk(b):
                     if isinstance(m, ast.Subscript) and isinstance(m.ctx, ast.Load) and mod.full(m.value) == "os.environ":
