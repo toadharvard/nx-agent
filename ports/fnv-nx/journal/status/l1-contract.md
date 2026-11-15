@@ -1585,3 +1585,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Next:
     - the entry rule;
     - bridge.tsv as a generated stage output that includes the platform's combridge and cxx rows (the manifest copy is deleted).
+- 09:43 **L6 render roots (w6-root 945dcc5a0 on cand2 df4fb69c8) go into cand2.**
+  - recipe check is valid. Cold builds take 4-50 s per root; warm builds 3-6 s with 0 stages. admit is 1192/1192; d3d9total is 332/332.
+  - Merge: the variant fix is unified with w22's, and the rows become path plus class.
+  - Pending: the ASM-628 citation fix.
