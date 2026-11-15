@@ -188,6 +188,12 @@ LD_KIND = {"pie": LD_FIXED, "exe": ["--build-id=none", "-pie", "-z", "text", "-z
 LD_TOOLS = (TREE + "/link", TREE + "/contract")   # tool roots of the ldcheck stage: link/ldcheck.py, and gatefile.py at /contract
 WERROR_ATTR = "-Werror=attributes"   # required in flags.c and flags.cxx of every guest root
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
+STAGE_EXT_KEYS = {"name", "root", "output", "at"}   # an external that is the declared output of another root's stages (the compiler stage): built, never fetched
+
+
+def is_stage_ext(e):
+    """E is an external produced by a root's stages (STAGE_EXT_KEYS), not a fetched commit."""
+    return isinstance(e, dict) and set(e) == STAGE_EXT_KEYS
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/uses", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
 SBIND = {1: "GLOBAL", 2: "WEAK", 10: "UNIQUE"}
@@ -1285,12 +1291,17 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err.append("external must be a list")
         exts = []
     for i, e in enumerate(exts):
-        if not (isinstance(e, dict) and set(e) == EXT_KEYS and all(isinstance(v, str) for v in e.values())):
-            err.append("external[%d] needs exactly %s (strings)" % (i, ", ".join(sorted(EXT_KEYS))))
+        if not (isinstance(e, dict) and set(e) in (EXT_KEYS, STAGE_EXT_KEYS) and all(isinstance(v, str) for v in e.values())):
+            err.append("external[%d] needs exactly %s (a fetched commit) or %s (a root's output); strings" % (i, ", ".join(sorted(EXT_KEYS)), ", ".join(sorted(STAGE_EXT_KEYS))))
             continue
         at = e["at"]
-        for ok, why in ((e["repo"] == "fnv-nx-build", "repo must be fnv-nx-build"), (re.fullmatch("[0-9a-f]{40}", e["commit"]), "commit is not 40 hex"),
-                        (re.fullmatch("[0-9a-f]{64}", e["tree_sha256"]), "tree_sha256 is not 64 hex"), (re.fullmatch("[A-Za-z0-9._-]+", e["name"]), "bad name"),
+        if is_stage_ext(e):
+            fetched = ((e["root"] in roots and e["root"] != root, "root must be another admitted product root"),
+                       (re.fullmatch("[A-Za-z0-9_]+", e["output"]), "bad output name"))
+        else:
+            fetched = ((e["repo"] == "fnv-nx-build", "repo must be fnv-nx-build"), (re.fullmatch("[0-9a-f]{40}", e["commit"]), "commit is not 40 hex"),
+                       (re.fullmatch("[0-9a-f]{64}", e["tree_sha256"]), "tree_sha256 is not 64 hex"))
+        for ok, why in fetched + ((re.fullmatch("[A-Za-z0-9._-]+", e["name"]), "bad name"),
                         (at.startswith("/") and at != "/" and posixpath.normpath(at) == at, "at is not an absolute normalised path"),
                         (not any(under(at, p) or under(p, at) for p in SANDBOX_PATHS), "at overlaps a path the stages use itself %s" % (SANDBOX_PATHS,)),
                         (not any(under(at, a) or under(a, at) for a in ats), "at overlaps another external's at"),
@@ -1603,33 +1614,6 @@ def publish_dir(tmp, final):
         shutil.rmtree(tmp, ignore_errors=True)
         if x.errno not in (errno.ENOTEMPTY, errno.EEXIST) or not os.path.isdir(final):
             raise
-
-
-RECIPE_TREE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))   # ports/fnv-nx of the checkout this recipe is part of
-
-
-def compiler_stamp_errors(tree, host, name):
-    """Problems of a pinned compiler tree: its MANIFEST.json `compiler.build_key` (written by toolchain/msvcmodel/build.sh from the one computation,
-    toolchain/msvcmodel/stamp.py) must equal stamp.py over the compiler inputs of the checkout TREE (ports/fnv-nx) that this recipe belongs to, else the pin names a
-    compiler built from other patches than the ones this checkout's data model table (DATAMODEL.json) describes. HOST is the tree's checkout. [] = ok."""
-    spec = importlib.util.spec_from_file_location("fnvnx_msvcmodel_stamp", os.path.join(tree, "toolchain", "msvcmodel", "stamp.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    want = mod.stamp(tree, recipe=sys.modules[__name__])
-    try:
-        with open(os.path.join(host, "MANIFEST.json")) as f:
-            comp = json.load(f).get("compiler", {})
-        got = comp.get("build_key")
-    except (OSError, ValueError):
-        return ["external %s: no MANIFEST.json with compiler.build_key: the tree was not built by toolchain/msvcmodel/build.sh at a checkout with stamp.py; "
-                "this checkout's compiler key is %s" % (name, want)]
-    if got != want:
-        pw = mod.patch_sha256(tree)
-        why = ("its msvcmodel_patch_sha256 is %s, this checkout's msvcmodel.patch is %s" % (comp.get("msvcmodel_patch_sha256"), pw)
-               if comp.get("msvcmodel_patch_sha256") != pw else "msvcmodel.patch is the same, another input of the build differs")
-        return ["external %s: compiler.build_key is %s, this checkout's compiler inputs (toolchain/msvcmodel/stamp.py) give %s (%s): the pinned tree was built "
-                "from other inputs than this checkout's; rebuild it and re-pin" % (name, got, want, why)]
-    return []
 
 
 def fetch_externals(exts, store, extcache, ws):
@@ -2001,8 +1985,52 @@ class Job:
         return p, json.load(open(p))
 
     def externals(self, ws):
-        """Fetch by exact commit into the shared bare cache, check out, ingest, require tree_sha256 (BuildRed naming the external)."""
-        self.ext.update(fetch_externals(self.rec.get("external", []), self.store, self.extcache, ws))
+        """Fetch by exact commit into the shared bare cache, check out, ingest, require tree_sha256 (BuildRed naming the external). An external that
+        is another root's output (is_stage_ext: the compiler stage) is built by that root's stages (stage_external)."""
+        exts = self.rec.get("external", [])
+        self.ext.update(fetch_externals([e for e in exts if not is_stage_ext(e)], self.store, self.extcache, ws))
+        for e in exts:
+            if is_stage_ext(e):
+                self.ext[e["name"]] = self.stage_external(ws, e)
+
+    def stage_external(self, ws, e):
+        """The output E["output"] of root E["root"], built by that root's generated and run stages (cached by key: a hit costs the lookups, a plugin
+        change re-runs the plugin stage only, an input of an earlier stage re-runs everything after it), ingested, and materialised once at
+        EXTCACHE/stage-<tree> for the mount. -> {host, tree, at, stage_key}; stage_key = sha256 of the producer's sorted stage keys: the key of
+        every PP and CC stage of this root holds it (FNVNX_COMPILER_KEY), beside the tree hash that its mount already holds."""
+        p = Job(self.repo, e["root"], self.store, self.jobs, self.extcache)
+        pws = tempfile.mkdtemp(dir=ws)
+        try:
+            _copy(self.repo, [f for f in p.files if under(f, e["root"])], e["root"], os.path.join(pws, "root"))
+            p.externals(pws)
+            p.generate(pws)
+            p.run_all(pws)
+        finally:
+            self.run, self.hit = self.run + p.run, self.hit + p.hit
+        self.keys |= p.keys
+        if p.red:
+            raise BuildRed({"stage": "external:" + e["name"], "exit": None, "stderr": ["producer %s is red: %s" % (e["root"], p.red[0]["stage"])] + list(p.red[0]["stderr"])[-18:]})
+        rel = (p.rec.get("outputs") or {}).get(e["output"])
+        path = os.path.join(pws, "root", rel) if isinstance(rel, str) else ""
+        if not os.path.isdir(path):
+            raise BuildRed({"stage": "external:" + e["name"], "exit": None, "stderr": ["root %s declares no directory output %r" % (e["root"], e["output"])]})
+        tree = cas.ingest(path, self.store)
+        host = os.path.join(self.extcache, "stage-" + tree)
+        if not os.path.isdir(host):
+            tmp = "%s.tmp%d-%s" % (host, os.getpid(), os.urandom(4).hex())
+            shutil.copytree(path, tmp, symlinks=True)
+            publish_dir(tmp, host)
+        os.makedirs(os.path.join(self.extcache, "stage-ext"), exist_ok=True)   # the pointer a gate reads (host_compilers): name -> the tree this build used
+        ptr = os.path.join(self.extcache, "stage-ext", e["name"] + ".json")
+        with open(ptr + ".tmp%d" % os.getpid(), "w") as fh:
+            json.dump({"host": host, "tree": tree}, fh, sort_keys=True)
+        os.replace(ptr + ".tmp%d" % os.getpid(), ptr)
+        return {"host": host, "tree": tree, "at": e["at"], "stage_key": hashlib.sha256(json.dumps(sorted(p.keys)).encode()).hexdigest()}
+
+    def compiler_key(self):
+        """The stage key of the compiler's producer root (stage_external), "" when the compiler is a distribution package (host profile)."""
+        c = self.rec["compiler"]
+        return self.ext[c["external"]].get("stage_key", "") if "external" in c else ""
 
     def drivers(self):
         c = self.rec["compiler"]
@@ -2478,17 +2506,6 @@ class Job:
                 self.analysis = self.analysis_plugin(ws, 1 if "cxx" in kinds.values() else 0)
             except BuildRed as r:   # the gate objstub cannot judge the root: red and named, no unit is blocked by it
                 self.red.append(dict(r.args[0]))
-        # RULE: a unit of a guest root is compiled only by a compiler tree that is a build of THIS checkout's compiler inputs (compiler_stamp_errors: the one key,
-        # toolchain/msvcmodel/stamp.py). The plugin stages above only read headers from the tree (they are what the compiler build itself needs), so the check
-        # stands here, at the first stage that compiles a unit.
-        pin = load_pin(self.repo) if guest and cc else None
-        if pin:
-            bad = []
-            bad += compiler_stamp_errors(RECIPE_TREE, self.ext[cc]["host"], cc)
-            if bad:
-                self.red.append({"stage": "external:" + cc, "exit": None, "stderr": bad})
-                self.blocked.update({u: "external:" + cc for u in units})
-                return {}
         builds = {}
         sos = {}
         for n, t, _ in self.built:   # the plugins each front end can load (plugin_languages): the stage loads exactly those, the gate reads the same fact
@@ -2508,6 +2525,7 @@ class Job:
             builds[k].cc_drop = drop | {i["at"] for i in ppin}
             builds[k].rt = dict(builds[k].rt, inputs=sorted(builds[k].rt["inputs"] + ppin, key=lambda i: i["at"]))
             builds[k].variant = self.variant
+            builds[k].compiler_key = self.compiler_key()
             builds[k].cc_flags = list(self.aux)
             builds[k].hint_ns = self.root + ("@" + self.variant if self.variant else "")   # closure hints are per root (unitstage.hint_path)
             if k in pk:   # plugins are loaded by the CC stage only, never by preprocessing (guest roots: C and C++ units; host roots: C++ only)
@@ -2766,7 +2784,8 @@ class Job:
         -> (stderr text, the runtime external's mount point): the link command of the multilib the flags select."""
         pin = load_pin(self.repo)
         rt = pin["external"]
-        self.ext.update(fetch_externals([rt], self.store, self.extcache, ws))
+        if rt["name"] not in self.ext:
+            self.externals(ws)
         drv = rt["at"] + "/" + pin_drivers()[1]
         flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
         tr = self.toolrt([drv])[1]
@@ -2924,6 +2943,9 @@ def objects_digest(res):
 def exttree(e, cache):
     """Host directory of external E (a recipe `external` entry) checked out by its exact commit from the bare fetch the build made in
     CACHE/external, into CACHE/exttree/<commit> (shared, atomic). For gates that read what a build linked in."""
+    if is_stage_ext(e):   # a root's output: the directory the build materialised (stage_external)
+        with open(os.path.join(cache, "external", "stage-ext", e["name"] + ".json")) as fh:
+            return json.load(fh)["host"]
     dest = os.path.join(cache, "exttree", e["commit"])
     if not os.path.isdir(dest):
         tmp = "%s.tmp%d-%s" % (dest, os.getpid(), os.urandom(4).hex())
@@ -2975,10 +2997,15 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
         if cache is None:
             raise ValueError("%s: input %r needs the gate cache to mount the external" % (root, ref))
         base = exttree(e, cache)
-        if (cache, e["commit"]) not in _EXT_CHECKED:
-            if cas.ingest(base, os.path.join(cache, "store")) != e["tree_sha256"]:
-                raise ValueError("external %r: tree_sha256 differs from the checkout" % kind)
-            _EXT_CHECKED.add((cache, e["commit"]))
+        if is_stage_ext(e):   # a root's output: its tree hash is what the build ingested (stage_external)
+            with open(os.path.join(cache, "external", "stage-ext", e["name"] + ".json")) as fh:
+                etree = json.load(fh)["tree"]
+        else:
+            etree = e["tree_sha256"]
+            if (cache, e["commit"]) not in _EXT_CHECKED:
+                if cas.ingest(base, os.path.join(cache, "store")) != etree:
+                    raise ValueError("external %r: tree_sha256 differs from the checkout" % kind)
+                _EXT_CHECKED.add((cache, e["commit"]))
     elif isinstance(ref, dict) and set(ref) == {"stage", "path"} and all(isinstance(v, str) for v in ref.values()):
         return stage_output(root, ref, repo, cache)
     else:
@@ -2998,7 +3025,7 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
         if os.path.isdir(full):
             return _tracked_dir(repo, rel, cache)
         return full, rel
-    return full, "%s:%s" % (e["tree_sha256"], p)
+    return full, "%s:%s" % (etree, p)
 
 
 def _tracked_dir(repo, rel, cache):
