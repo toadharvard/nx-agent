@@ -8,8 +8,6 @@
   "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
   "at": "/ext/gcc"
  },
- "cc": "bin/aarch64-none-elf-gcc",
- "cxx": "bin/aarch64-none-elf-g++",
  "flags": {
   "semantics": {
    "common": [
@@ -60,17 +58,8 @@
   "src_commit": "7ac84bda81732cad1c9f78deb23911e2d0dddebb",
   "build": "ports/fnv-nx/toolchain/msvcmodel/build.sh",
   "distribution_packages": "ports/fnv-nx/verify/env.json (cross packages g++-13-aarch64-linux-gnu, binutils-aarch64-linux-gnu, libc6-dev-arm64-cross, libstdc++-13-dev-arm64-cross, gcc-13-plugin-dev-aarch64-linux-gnu; versions are not copied)",
-  "runtime": "README.md of the runtime external: binutils 2.45.1, gcc 15.2.0 + newlib 4.6.0.20260123 (devkitPro patches) + toolchain/msvcmodel/msvcmodel.patch, target aarch64-none-elf, multilibs ., pic, ilp32, ilp32/pic (the guest's libc, libm, libstdc++ and headers)"
+  "runtime": "the runtime (libc, libm, libstdc++, libgcc, headers, start files) is in the same tree as the compiler (`external`), built by toolchain/msvcmodel/build.sh in the one none-elf build: gcc 13.3.0 + newlib 4.6.0.20260123 + msvcmodel.patch, target = targets.json guest_platform.triplet"
  },
- "runtime": {
-  "name": "fnvnx-a64-msvcmodel",
-  "repo": "fnv-nx-build",
-  "ref": "tools/fnvnx-a64-msvcmodel",
-  "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
-  "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
-  "at": "/ext/a64"
- },
- "runtime_driver": "bin/aarch64-none-elf-g++",
  "runtime_cflags": [
   "-DPREFER_SIZE_OVER_SPEED",
   "-g"
