@@ -226,6 +226,8 @@ def build(osrec, src, mirror, wine, cpumodel, cpuref):
                     "osxmmexcpt": undec("no pinned source states CR4.OSXMMEXCPT (ks386.inc CR4_XMMEXCPT = 0x400 is a bit constant only); with the initial MXCSR 0x1F80 every SIMD exception is masked, so #XM is not raised until a site unmasks it; blocker: a certificate that every ldmxcsr / fxrstor site keeps the exceptions masked (CLAUDE.md fact, not yet certified)")},
         "idtr_limit": undec("the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"),
         "sldt": undec("no pinned source states the LDTR of a process that has no LDT"),
+        "descriptors": {n: {f: undec("the %s of the GDT entry behind selector 0x%X (%s) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries" % (f, sel[n]["value"], n)) for f in ("type", "readable", "writable", "dpl", "base", "limit")} for n in ("cs", "ds", "es", "ss", "fs")},
+        "lar_lsl": {n: undec("lar and lsl on selector 0x%X return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided" % sel[n]["value"]) for n in ("cs", "ds", "es", "ss", "fs", "tr")},
         "sgdt": undec("the GDT base and limit of the OS are kernel values with no documented fixed value and no pinned source"),
         "sidt_base": undec("the IDT base is a kernel address with no documented fixed value and no pinned source"),
     }

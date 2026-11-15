@@ -37,6 +37,138 @@
    "why": "no pinned source states CR4.OSXMMEXCPT (ks386.inc CR4_XMMEXCPT = 0x400 is a bit constant only); with the initial MXCSR 0x1F80 every SIMD exception is masked, so #XM is not raised until a site unmasks it; blocker: a certificate that every ldmxcsr / fxrstor site keeps the exceptions masked (CLAUDE.md fact, not yet certified)"
   }
  },
+ "descriptors": {
+  "cs": {
+   "base": {
+    "status": "undecided",
+    "why": "the base of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "dpl": {
+    "status": "undecided",
+    "why": "the dpl of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "limit": {
+    "status": "undecided",
+    "why": "the limit of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "readable": {
+    "status": "undecided",
+    "why": "the readable of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "type": {
+    "status": "undecided",
+    "why": "the type of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "writable": {
+    "status": "undecided",
+    "why": "the writable of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   }
+  },
+  "ds": {
+   "base": {
+    "status": "undecided",
+    "why": "the base of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "dpl": {
+    "status": "undecided",
+    "why": "the dpl of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "limit": {
+    "status": "undecided",
+    "why": "the limit of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "readable": {
+    "status": "undecided",
+    "why": "the readable of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "type": {
+    "status": "undecided",
+    "why": "the type of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "writable": {
+    "status": "undecided",
+    "why": "the writable of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   }
+  },
+  "es": {
+   "base": {
+    "status": "undecided",
+    "why": "the base of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "dpl": {
+    "status": "undecided",
+    "why": "the dpl of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "limit": {
+    "status": "undecided",
+    "why": "the limit of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "readable": {
+    "status": "undecided",
+    "why": "the readable of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "type": {
+    "status": "undecided",
+    "why": "the type of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "writable": {
+    "status": "undecided",
+    "why": "the writable of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   }
+  },
+  "fs": {
+   "base": {
+    "status": "undecided",
+    "why": "the base of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "dpl": {
+    "status": "undecided",
+    "why": "the dpl of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "limit": {
+    "status": "undecided",
+    "why": "the limit of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "readable": {
+    "status": "undecided",
+    "why": "the readable of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "type": {
+    "status": "undecided",
+    "why": "the type of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "writable": {
+    "status": "undecided",
+    "why": "the writable of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   }
+  },
+  "ss": {
+   "base": {
+    "status": "undecided",
+    "why": "the base of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "dpl": {
+    "status": "undecided",
+    "why": "the dpl of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "limit": {
+    "status": "undecided",
+    "why": "the limit of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "readable": {
+    "status": "undecided",
+    "why": "the readable of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "type": {
+    "status": "undecided",
+    "why": "the type of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   },
+   "writable": {
+    "status": "undecided",
+    "why": "the writable of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   }
+  }
+ },
  "eflags": {
   "initial": {
    "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: the initial thread context, context.EFlags",
@@ -73,6 +205,32 @@
    4,
    45
   ]
+ },
+ "lar_lsl": {
+  "cs": {
+   "status": "undecided",
+   "why": "lar and lsl on selector 0x1B return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+  },
+  "ds": {
+   "status": "undecided",
+   "why": "lar and lsl on selector 0x23 return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+  },
+  "es": {
+   "status": "undecided",
+   "why": "lar and lsl on selector 0x23 return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+  },
+  "fs": {
+   "status": "undecided",
+   "why": "lar and lsl on selector 0x3B return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+  },
+  "ss": {
+   "status": "undecided",
+   "why": "lar and lsl on selector 0x23 return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+  },
+  "tr": {
+   "status": "undecided",
+   "why": "lar and lsl on selector 0x28 return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+  }
  },
  "mov_to_sreg": {
   "ds": {
