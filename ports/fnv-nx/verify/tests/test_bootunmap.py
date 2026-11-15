@@ -43,7 +43,7 @@ def main():
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
     plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")))
+    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")), quantum=20000)
     ARGS = 0x1400000   # inside the window, scratch for the argument array
     m.map_fixed(ARGS & ~0xFFF, P, 0)
 

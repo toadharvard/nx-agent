@@ -14,6 +14,7 @@ VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 sys.path.insert(0, HERE)
 import bootlayout  # noqa: E402
+import hostabirec  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 from test_bootlayout import make_elf  # noqa: E402
@@ -30,19 +31,17 @@ def case(name, cond, extra=""):
         FAILED.append(name)
 
 
-def define(name):
-    for h in ("hostapi.h", "placement.h"):
-        m = re.search(r"#define\s+%s\s+(0x[0-9A-Fa-f]+|\d+)(?:ull|u)?\b" % name, open(os.path.join(INC, h)).read())
-        if m:
-            return int(m.group(1), 0)
-    return None
+define = hostabirec.record().define   # the headers' constants by name, from the one record (hostabirec.py)
+
+
+QUANTUM = 20000   # instructions per slice: a declared parameter of every run (the value is not under test)
 
 
 def main():
     D, APP, KEEP, FN, BAD, NOTF = (define(n) for n in ("FNVNX_DEFAULT_CORE", "FNVNX_APP_CORES", "FNVNX_CPU_KEEP",
                                                              "FNVNX_PLAT_THREAD_CPU", "FNVNX_HE_BADINPUT", "FNVNX_HE_NOTFOUND"))
     case("headers: default core, app cores, KEEP, THREAD_CPU by name", None not in (D, APP, KEEP, FN) and FN == 38, (D, APP, KEEP, FN))
-    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.FNVNX_APP_CORES,
+    case("machine constants equal the headers", (bootmachine.FNVNX_DEFAULT_CORE, bootmachine.APP_CORES,
                                                  bootmachine.FNVNX_CPU_KEEP) == (D, APP, KEEP))
     case("BADINPUT 0x1759 and NOTFOUND by name", BAD == bootmachine.LIBNX_BAD_INPUT and (NOTF or bootmachine.FNVNX_HE_NOTFOUND) == bootmachine.FNVNX_HE_NOTFOUND)
 
@@ -55,7 +54,7 @@ def main():
 
     def machine():
         svc = boothost.Services(tempfile.mkdtemp(prefix="tc-"))
-        m = bootmachine.Machine(elf, plan, svc)
+        m = bootmachine.Machine(elf, plan, svc, quantum=QUANTUM)
         m.threads[1] = bootmachine.Thread(1)   # as run() starts main
         m.order, m.cur = [1], m.threads[1]
         return m, svc
