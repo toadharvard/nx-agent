@@ -44,9 +44,8 @@ uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage) {
 uint64_t gl4_api_shader_create(uint64_t a) {
     const NxShaderDesc* d = (const NxShaderDesc*)nxgl4_guest_ptr(a, sizeof *d);
     if (!d) return 0;
-    const struct nx_gl4shim_prog* row = &nx_gl4shim_progs[(enum nx_gl4shim_prog_id)d->row];   /* the ids are a bounded enum; the one caller passes constants */
-    const char* text = d->stage == NxStage_Vertex ? row->vs : row->fs;
-    return gl4_shader_from_glsl(text, strlen(text), d->stage);
+    const struct nx_gl4shim_stage* row = &nx_gl4shim_stages[(enum nx_gl4shim_stage_id)d->row];   /* a stage-row id: a bounded enum, the one caller passes constants */
+    return gl4_shader_from_glsl(row->text, strlen(row->text), row->stage);
 }
 
 /* Programs are cached by (vs, ps). Destroying a shader deletes the programs built from it and bumps progEpoch: a
@@ -99,9 +98,9 @@ uint32_t gl4_program_for(uint32_t vs, uint32_t ps) {
 }
 
 /* Internal programs (scaling, present): GLSL 4.50 core, compiled as given. 0 and a recorded error on failure. */
-GLuint gl4_compile_program(enum nx_gl4shim_prog_id id) {
+GLuint gl4_compile_program(enum nx_gl4shim_pair_id id) {
     GLuint sh[2] = {p_glCreateShader(GL_VERTEX_SHADER), p_glCreateShader(GL_FRAGMENT_SHADER)}, p = p_glCreateProgram();
-    const char* src[2] = {nx_gl4shim_progs[id].vs, nx_gl4shim_progs[id].fs};
+    const char* src[2] = {nx_gl4shim_pairs[id].vs, nx_gl4shim_pairs[id].fs};
     GLint ok = 1;
     char log[1500];
     for (int i = 0; i < 2; i++) {

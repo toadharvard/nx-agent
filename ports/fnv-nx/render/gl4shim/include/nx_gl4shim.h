@@ -37,16 +37,29 @@ size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, siz
       "void main() {\n" NX_GL4SHIM_TEX " if (((texelFetch(s, t, 0).r >> uint(mode)) & 1u) == 0u) discard; }\n") \
     S(FFP_VS_SMOOTH, VS, nx_gl4shim_ffp_vs_smooth) S(FFP_VS_FLAT, VS, nx_gl4shim_ffp_vs_flat) \
     S(FFP_PS_SMOOTH, FS, nx_gl4shim_ffp_ps_smooth) S(FFP_PS_FLAT, FS, nx_gl4shim_ffp_ps_flat)
-enum nx_gl4shim_prog_id {
-#define NX_GL4SHIM_ENUM_P(id, vs, fs) NX_GL4SHIM_PROG_##id,
-#define NX_GL4SHIM_ENUM_S(id, st, text) NX_GL4SHIM_PROG_##id,
+/* Two enums from the one list: pair rows (gl4_compile_program) and stage rows (NXGPU_FN_SHADER_CREATE), so a pair row cannot be passed as a stage row by type. */
+enum nx_gl4shim_pair_id {
+#define NX_GL4SHIM_ENUM_P(id, vs, fs) NX_GL4SHIM_PAIR_##id,
+#define NX_GL4SHIM_ENUM_S(id, st, text)
     NX_GL4SHIM_PROG_LIST(NX_GL4SHIM_ENUM_P, NX_GL4SHIM_ENUM_S)
 #undef NX_GL4SHIM_ENUM_P
 #undef NX_GL4SHIM_ENUM_S
-    NX_GL4SHIM_PROG_COUNT
+    NX_GL4SHIM_PAIR_COUNT
 };
-struct nx_gl4shim_prog { const char* vs; const char* fs; };   /* a stage row has the text of its stage only, the other is NULL */
-extern const struct nx_gl4shim_prog nx_gl4shim_progs[NX_GL4SHIM_PROG_COUNT];
+enum nx_gl4shim_stage_id {
+#define NX_GL4SHIM_ENUM_P(id, vs, fs)
+#define NX_GL4SHIM_ENUM_S(id, st, text) NX_GL4SHIM_STAGE_##id,
+    NX_GL4SHIM_PROG_LIST(NX_GL4SHIM_ENUM_P, NX_GL4SHIM_ENUM_S)
+#undef NX_GL4SHIM_ENUM_P
+#undef NX_GL4SHIM_ENUM_S
+    NX_GL4SHIM_STAGE_COUNT
+};
+#define NX_GL4SHIM_STG_VS 0u   /* = NxStage_Vertex (nx/gpu_abi.h) */
+#define NX_GL4SHIM_STG_FS 1u   /* = NxStage_Fragment */
+struct nx_gl4shim_pair { const char* vs; const char* fs; };
+struct nx_gl4shim_stage { uint32_t stage; const char* text; };   /* stage: NX_GL4SHIM_STG_*, a fact of the row */
+extern const struct nx_gl4shim_pair nx_gl4shim_pairs[NX_GL4SHIM_PAIR_COUNT];
+extern const struct nx_gl4shim_stage nx_gl4shim_stages[NX_GL4SHIM_STAGE_COUNT];
 #ifdef __cplusplus
 }
 #endif

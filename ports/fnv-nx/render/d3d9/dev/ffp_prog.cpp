@@ -1,7 +1,7 @@
 // ffp_prog.cpp: nx_ffp_vs_program / nx_ffp_ps_program (draw_ffp.h) and the backend programs behind them.
 //  P1 Programs: ONE vertex and ONE pixel program (render/d3d9/ffp/ffp.vert.glsl, ffp.frag.glsl), in two variants selected by D3DRS_SHADEMODE FLAT (locations 0 / 1 `flat`, NX_FFP_FLAT; both stages by the same rule), made
 //     lazily at the first draw that needs (stage, variant), cached on the device record (ffp_dev.cpp R1), destroyed with it. A program id is NOT a function of any other state: everything else is uniform data.
-//  P2 The front end sends the backend a row id of the one GLSL table of render/gl4shim (NxShaderDesc.row, gpu_abi.h; nx_gl4shim.h, rows FFP_VS/PS_SMOOTH/FLAT) and never GLSL text or DKSH: the text is a function of (stage, variant)
+//  P2 The front end sends the backend a row id of the one GLSL table of render/gl4shim (NxShaderDesc.row, gpu_abi.h; nx_gl4shim.h, stage rows FFP_VS/PS_SMOOTH/FLAT) and never GLSL text or DKSH: the text is a function of (stage, variant)
 //     only, and lives in the backend's table; there is no backend switch.
 //  P3 Every address the backend call reads is backend memory: the descriptor lives in the scratch of the glue (glue_stream.h). No memory = 0.
 //  P4 The blocks handed out (ubo[i].data) are the record's: the vertex block (memoised by its inputs, ffp_dev.h F2), the pixel block, and the world palette = the device's own WORLDMATRIX(0..255) states
@@ -10,9 +10,9 @@
 #include "nx_gl4shim.h"
 
 namespace {
-enum nx_gl4shim_prog_id row(uint32_t stage, uint32_t flat) {
-    if (stage == NxStage_Vertex) return flat ? NX_GL4SHIM_PROG_FFP_VS_FLAT : NX_GL4SHIM_PROG_FFP_VS_SMOOTH;
-    return flat ? NX_GL4SHIM_PROG_FFP_PS_FLAT : NX_GL4SHIM_PROG_FFP_PS_SMOOTH;
+enum nx_gl4shim_stage_id row(uint32_t stage, uint32_t flat) {
+    if (stage == NxStage_Vertex) return flat ? NX_GL4SHIM_STAGE_FFP_VS_FLAT : NX_GL4SHIM_STAGE_FFP_VS_SMOOTH;
+    return flat ? NX_GL4SHIM_STAGE_FFP_PS_FLAT : NX_GL4SHIM_STAGE_FFP_PS_SMOOTH;
 }
 }
 
@@ -30,7 +30,7 @@ bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat) {
 uint32_t nx_ffp_make_program(NxFfpDev* f, uint32_t stage, uint32_t flat) {
     if (!nxs_reserve()) return 0;                                      // the scratch of the glue exists once the ring does (glue_stream.h E1)
     NxShaderDesc* d = (NxShaderDesc*)nxs_scratch(sizeof *d); if (!d) return 0;
-    memset(d, 0, sizeof *d); d->stage = stage; d->row = (uint32_t)row(stage, flat);                 // P2
+    memset(d, 0, sizeof *d); d->row = (uint32_t)row(stage, flat);                 // P2
     uint64_t a[1] = {FNVNX_ADDR_(d)}, r = nxd3d_gpu_call(NXGPU_FN_SHADER_CREATE, a, 1);
     return nxs_ok(r) && r != 0 && r < (1u << 16) ? (uint32_t)r : 0;
 }

@@ -22,11 +22,11 @@
 #endif
 
 #define SCALE_UNIT 62   /* texture units 62 / 63: above every unit a guest stage * 16 + slot can name */
-enum { P_C2D = NX_GL4SHIM_PROG_SCALE_C2D, P_CARR = NX_GL4SHIM_PROG_SCALE_CARR, P_C3D = NX_GL4SHIM_PROG_SCALE_C3D,
-       P_DEPTH = NX_GL4SHIM_PROG_SCALE_DEPTH, P_STENCIL = NX_GL4SHIM_PROG_SCALE_STENCIL };
+enum { P_C2D = NX_GL4SHIM_PAIR_SCALE_C2D, P_CARR = NX_GL4SHIM_PAIR_SCALE_CARR, P_C3D = NX_GL4SHIM_PAIR_SCALE_C3D,
+       P_DEPTH = NX_GL4SHIM_PAIR_SCALE_DEPTH, P_STENCIL = NX_GL4SHIM_PAIR_SCALE_STENCIL };
 
 static GLuint program(int kind) {
-    if (!g4.scaleProg[kind]) g4.scaleProg[kind] = gl4_compile_program((enum nx_gl4shim_prog_id)kind);
+    if (!g4.scaleProg[kind]) g4.scaleProg[kind] = gl4_compile_program((enum nx_gl4shim_pair_id)kind);
     return g4.scaleProg[kind];
 }
 
