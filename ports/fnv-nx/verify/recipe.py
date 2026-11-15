@@ -1294,7 +1294,9 @@ class Job:
         comp = {k: self.ext[cc].get(k) for k in ("repo", "ref", "commit", "tree_sha256")}
         plugins = [{"name": n, "so_sha256": hashlib.sha256(open(sos[n], "rb").read()).hexdigest(), "stage_key": self.pkeys[n], "argv": fl} for n, _, fl in self.built]
         argv = [f for _, _, fl in self.built for f in fl]
-        extra = list(pin["runtime"].get("build_flags", []))
+        extra = pin.get("runtime_cflags")   # the one source of the runtime's own flags (always part of the expected list, even when empty)
+        if not (isinstance(extra, list) and all(isinstance(x, str) for x in extra)):
+            return ["guest_compiler.json has no runtime_cflags list (the runtime's own flags, read with guest_flags.py --runtime)"]
         flags = {k: semantics_for(self.hostpath(drv[k]), k, origin=entry_of(self.roots, self.root).get("cxx_origin")) + extra + argv for k in ("c", "cxx")}
         return runtime_manifest_errors(self.ext[rtn]["host"], comp, plugins, flags, [f for f in flags["c"] if f.startswith("-mabi=")])
 
