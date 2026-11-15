@@ -465,3 +465,8 @@ After the first frame:
   - The decltype walk's universe is the decl's declared type alone.
   - A specialization that does appear in a declared type is written in its Itanium type mangling (§5.1.5).
   - A regression test is added, the fix goes to L5 and the farm, and the pin is rebuilt from it.
+- 2026-11-15 19:10Z: DECLTYPE-SPEC 689328e7f (key cf7e2ca6a3d8102a, w3). A class template specialization in an extern "C" signature gets the tag `_ZTS`+Itanium mangling (§5.1.5). dsound.cpp compiles; fixtures are in test_layout. w3's tests at the old pin b36df930:
+  - Green: cc1 23, dispatch 67, ftoi 30, names 29, odrdef 80, pi 121, sdd 37, stamp 36, ctypes ok, ldbl 68.
+  - test_layout: 2 of 169 red (UBits, UTwoEmpty). These are a real msvcmodel defect: the empty-base hunk bumps rli->offset by hand and leaves offset_align stale. w3 fixes it now through GCC's layout bookkeeping, with rows from cpp-docs.
+  - One pin rebuild carries both fixes; the farm is holding for the layout commit.
+  - L1: gate_abi:84 should take its universe from sym_emitted, not from a `_Z` exemption.
