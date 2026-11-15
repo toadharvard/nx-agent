@@ -129,6 +129,13 @@ def _trivial(tmp, names):
     return _recipe(tmp, [], {'t.cpp': 'int t(int x) { return x; }\n'}, PRODUCT_FLAGS)
 
 
+def driver():
+    """-> the pinned guest C++ driver of the recipe's fetched external (the compiler the stages run), for the one test of a raw unit (test_odrdef: the recipe has no raw
+    stage, every unit it builds is preprocessed first); the external is in STORE once a recipe build ran"""
+    pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
+    return os.path.join(STORE, 'external', pin['external']['commit'] + '.co', pin['cxx'])
+
+
 def build(name, tmp, source=None):
     """-> path of the plugin's .so out of the recipe's plugin:<name> stage (the plugin's name is the file's base name), or raises
     AssertionError with the diagnostics. Only the tracked source is built (SOURCE is not accepted: one source, the recipe's)."""

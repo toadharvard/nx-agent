@@ -5,6 +5,7 @@ input of the layout plugin's build. Compiles layout/layout.cpp (ILP32) with the 
 collection after every function (--param ggc-min-expand=0 ggc-min-heapsize=0), and checks the lines read in-process from the
 object: key (MSVC's decorated type name), size, align, members, bases; every type of pi's `types` column has a layout line; an
 unknown plugin argument is an error. No network, no game data. Run: python3 -I <this file> from the checkout root."""
+import re
 import os
 import shutil
 import sys
@@ -134,10 +135,102 @@ def decltype(obj):
     check('every spelling round-trips: parse is total on what the plugin wrote', all(cc.parse(t) for t in got.values()))
 
 
+VEC = {
+    'n_s32': 'vec:4:16:16:int', 'n_u8': 'vec:16:16:16:unsigned_char', 'n_f32': 'vec:2:8:8:float', 'g_s4': 'vec:4:16:16:int',
+    'g_u4': 'vec:4:16:16:unsigned_int', 'g_s2': 'vec:2:8:8:int', 'g_d2': 'vec:2:16:16:double', 'g_c4': 'const:vec:4:16:16:int',
+    'g_p4': '*vec:4:16:16:int', 'g_a': '[2]vec:4:16:16:int', 'g_h': 'struct:HoldsV{c:char;v:vec:4:16:16:int}',
+    'n_fn': '(vec:16:16:16:unsigned_char,vec:4:16:16:int)vec:4:16:16:int', 'g_cmp': 'vec:4:16:16:int',
+    'sv_f32': '(vec:4+4x:16+16x:16:float,vec:16+16x:2+2x:2:bool_bits_1)vec:4+4x:16+16x:16:float', 'sv_i8': '()vec:16+16x:16+16x:16:signed_char',
+    'sv_b': '(*vec:16+16x:16+16x:16:signed_char)vec:16+16x:2+2x:2:bool_bits_1', 'np': 'nullptr_t',
+}
+
+# every code of class tcc_type in the pinned GCC 13.3 tree.def and cp/cp-tree.def has exactly one outcome: a row of the grammar (a `case` of dl_type), or
+# the error of dl_type's default arm.  Why the error arm cannot fire for a code (or is the rule) is the reason below; a code of the pinned headers
+# without an entry here fails the test, so a GCC change that adds a type code is seen.
+TCC_TYPE_ROW = {'POINTER_TYPE', 'ARRAY_TYPE', 'FUNCTION_TYPE', 'RECORD_TYPE', 'UNION_TYPE', 'ENUMERAL_TYPE', 'VOID_TYPE', 'INTEGER_TYPE', 'REAL_TYPE',
+                'BOOLEAN_TYPE', 'VECTOR_TYPE', 'NULLPTR_TYPE', 'COMPLEX_TYPE', 'REFERENCE_TYPE'}
+# RULE: a code with no row is an error of the compilation (dl_type's default arm): a loud failure, never a wrong spelling. The reasons are facts of the
+# pinned GCC 13.3.0 source (gcc-13.3.0.tar.xz sha256 0845e962...) on where a code is made; they say why the error does not fire in practice.
+GCC = 'gcc-13.3.0/gcc/'
+TCC_TYPE_ERROR = {
+    'FIXED_POINT_TYPE': GCC + 'c/c-decl.cc:12234-12236 and 12551-12553: _Fract/_Accum is a compile error unless targetm.fixed_point_supported_p; the default is false '
+                        '(targhooks.cc:638) and only config/avr makes the type (avr.cc:1638, stor-layout.cc:2726/2748 from the avr hook); tested: _Fract is a compile error',
+    'QUAL_UNION_TYPE': GCC + 'ada/gcc-interface/decl.cc:10009 is the only make_node (QUAL_UNION_TYPE)',
+    'OPAQUE_TYPE': GCC + 'config/rs6000/rs6000-builtin.cc:760,772 are the only make_node (OPAQUE_TYPE)',
+    'OFFSET_TYPE': GCC + 'tree.cc:7637 build_offset_type; callers outside cp/ and ada/ are tree.cc:7662 (its own canonical-type step) and 10067 (reconstruct_complex_type, '
+                         'which rebuilds an OFFSET_TYPE only from an OFFSET_TYPE it is given); none in c/, c-family/ or the middle end (grep of the pinned tree): C has no pointer to member',
+    'METHOD_TYPE': GCC + 'tree.cc:7569 build_method_type_directly; callers outside cp/ are tree.cc:7608, 7627 and 10059 (reconstruct_complex_type, from a METHOD_TYPE it is given); '
+                         'none in c/, c-family/ or the middle end (grep of the pinned tree): C has no member function',
+    'LANG_TYPE': GCC + 'tree.def:252; no make_node (LANG_TYPE) and no make_lang_type in c/, c-family/ or the middle end (grep of the pinned tree); the C++ front end '
+                       'makes them (cp/decl.cc:4756,4767,4798), the section is written only for C units',
+    **{c: GCC + 'cp/cp-tree.def: a code of the C++ front end only (templates, dependent and pack types); the section is written only for C units '
+          '(fnvnx_layout.cc: `if (!is_cxx()) emit_decltype()`)'
+       for c in ('BASES', 'BOUND_TEMPLATE_TEMPLATE_PARM', 'DECLTYPE_TYPE', 'DEPENDENT_OPERATOR_TYPE', 'TEMPLATE_TEMPLATE_PARM', 'TEMPLATE_TYPE_PARM',
+                 'TRAIT_TYPE', 'TYPENAME_TYPE', 'TYPEOF_TYPE', 'TYPE_ARGUMENT_PACK', 'TYPE_PACK_EXPANSION', 'UNBOUND_CLASS_TEMPLATE')},
+}
+
+
+def tcc_type_codes():
+    inc = subprocess.run([os.environ.get('FNVNX_GXX', 'aarch64-linux-gnu-g++-13'), '-print-file-name=plugin'], capture_output=True, text=True).stdout.strip()
+    codes = set()
+    for rel in ('include/tree.def', 'include/c-family/c-common.def', 'include/cp/cp-tree.def'):
+        f = os.path.join(inc, rel)
+        if os.path.exists(f):
+            codes |= set(re.findall(r'^DEFTREECODE\s*\((\w+),\s*"[^"]*",\s*tcc_type\b', open(f).read(), re.M))
+    return codes
+
+
+SO = []
+
+
+def vec(obj, td):
+    got = dict(l.split('\t') for l in pb.section(obj, '.fnvnx.decltype').splitlines())
+    for sym, want in sorted(VEC.items()):
+        check('vec %s is %s' % (sym, want), got.get(sym) == want, got.get(sym))
+    check('vec: exactly the external symbols', set(got) == set(VEC), sorted(set(got) ^ set(VEC)))
+    check('vec: NEON int32x4 and a vector_size(16) int are one spelling (GCC compares subparts and element types), unsigned and size differ',
+          got['n_s32'] == got['g_s4'] and got['g_s4'] != got['g_u4'] and got['g_s4'] != got['g_s2'] and got['g_s4'] != got['g_d2'], got)
+    codes = tcc_type_codes()
+    check('tcc_type universe is read from the pinned headers (32 codes at GCC 13.3)', len(codes) == 32, sorted(codes))
+    body = open(os.path.join(HERE, '..', 'layout', 'decltype_spell.inc')).read()   # dl_type, the one spelling function (shared with fnvnx_dispatch)
+    body = body[body.index('static std::string dl_type('):]
+    cases = set(re.findall(r'case (\w+):', body))
+    check('every tcc_type code has one outcome (row or error)', codes == TCC_TYPE_ROW | set(TCC_TYPE_ERROR), sorted(codes ^ (TCC_TYPE_ROW | set(TCC_TYPE_ERROR))))
+    check('the row codes are exactly the cases of dl_type', {c for c in cases if c.endswith('_TYPE')} == TCC_TYPE_ROW, sorted(cases))
+    src = os.path.join(td, 'fract.c')
+    open(src, 'w').write('_Fract fr;\n')
+    r = pb.compile(src, os.path.join(td, 'fract.o'), SO)
+    check('_Fract is a compile error on aarch64 (FIXED_POINT_TYPE cannot reach the plugin)', r.returncode != 0, r.stderr[-300:])
+
+
+def cplx(obj):
+    got = dict(l.split('\t') for l in pb.section(obj, '.fnvnx.decltype').splitlines())
+    for k, rx in (('c_f', r'complex:8:4:float'), ('c_d', r'complex:16:8:double'), ('c_i', r'complex:8:4:int'), ('c_cd', r'const:complex:16:8:double'),
+                  ('c_p', r'\*complex:16:8:double'), ('c_a', r'\[3\]complex:8:4:float'), ('c_h', r'struct:HoldsC\{c:char;z:complex:16:8:double\}'),
+                  ('c_fn', r'\(complex:8:4:float,complex:\d+:\d+:long_double\)complex:16:8:double'), ('at_i', r'atomic:int'),
+                  ('at_cf', r'atomic:complex:8:4:float'), ('at_vl', r'volatile:atomic:long_int')):
+        check('complex %s matches %s' % (k, rx), re.fullmatch(rx, got.get(k, '')) is not None, got.get(k))
+    m = re.fullmatch(r'complex:(\d+):(\d+):long_double', got.get('c_ld', ''))
+    check('complex long double is two long doubles: size twice the alignment of the type (read off TYPE_SIZE_UNIT/TYPE_ALIGN_UNIT)', m and int(m[1]) == 2 * int(m[2]), got.get('c_ld'))
+    check('complex: exactly the external symbols', set(got) == {'c_f', 'c_d', 'c_ld', 'c_i', 'c_cd', 'c_p', 'c_a', 'c_h', 'c_fn', 'at_i', 'at_cf', 'at_vl'}, sorted(got))
+    check('complex: every spelling round-trips through ctypes_compat.parse', all(cc.parse(t) for t in got.values()))
+    check('complex: compatibility is by size, alignment and component',
+          cc.compatible(cc.parse(got['c_f']), cc.parse('complex:8:4:float')) and not cc.compatible(cc.parse(got['c_f']), cc.parse(got['c_d']))
+          and not cc.compatible(cc.parse(got['at_i']), cc.parse('int')), got)
+
+
+def refrow(obj):
+    got = dict(l.split('\t') for l in pb.section(obj, '.fnvnx.decltype').splitlines())
+    check('ref: the builtin va_list prototypes a C unit redeclares take the unit\'s own types (no reference row is written); the row is the reader\'s and dl_type\'s',
+          set(got) == {'__builtin_va_start', '__builtin_va_end', '__builtin_va_copy', 'use'} and not any('ref:' in v for v in got.values()), got)
+    check('ref: ctypes_compat parses and compares the row',
+          cc.compatible(cc.parse('*ref:8:8:int'), cc.parse('*ref:8:8:int')) and not cc.compatible(cc.parse('ref:8:8:int'), cc.parse('ref:8:8:char')))
+
+
 def decltype_errors(td, so):
     """a type outside the grammar is an error of the compilation; the declarations of one symbol that the front end composes (C11 6.2.7p3)
     give one line, with the composite type"""
-    for name, text, why in (('atomic', '_Atomic int at;\n', '_Atomic'), ('cplx', '_Complex double z;\n', 'outside the grammar')):
+    for name, text, why in (('fixed', '_Fract fr;\n', 'error'),):
         src = os.path.join(td, name + '.c')
         open(src, 'w').write(text)
         r = pb.compile(src, os.path.join(td, name + '.o'), so)
@@ -166,8 +259,12 @@ def crossing(obj):
     except ValueError as e:
         check('crossing.cpp section parses with gate_abi.parse_crossing', False, str(e))
         return
-    check('crossing: every external function has its terms (gate_abi.parse_crossing round trip)', got == CROSSING,
-          sorted(set(got.items()) ^ set(CROSSING.items())))
+    # the universe is the sympair's: a row for every function the unit pairs with an MSVC name (the implicit constructors included, which have no terms:
+    # they take only `this`); the terms of the fixture's own functions are the table
+    pairs = {p.split('\t')[0] for p in pb.section(obj, '.fnvnx.sympair').splitlines() if len(p.split('\t')) == 4 and p.split('\t')[1] and p.split('\t')[2] != 'data'}
+    check('crossing: the universe is the unit\'s sympair rows with an MSVC name (gate_abi.parse_crossing round trip)', set(got) == pairs, sorted(set(got) ^ pairs))
+    check('crossing: the terms of every function of the fixture', {k: got.get(k) for k in CROSSING} == CROSSING and all(v == () for k, v in got.items() if k not in CROSSING),
+          sorted(set((k, got.get(k)) for k in CROSSING) ^ set(CROSSING.items())))
     ids = {t['id'] for t in json.load(open(os.path.join(HERE, '..', 'msvcmodel', 'DATAMODEL.json')))['crossing_forbidden']['terms']}
     check('crossing: every emitted term is an id of DATAMODEL.json', all(t in ids for v in got.values() for t in v), ids)
     check('crossing: terms sorted and distinct', all(list(v) == sorted(set(v)) for v in got.values()), got)
@@ -198,6 +295,22 @@ def main():
         if r.returncode == 0:
             decltype(obj)
         decltype_errors(td, so)
+        obj = os.path.join(td, 'v.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'vec.c'), obj, so, args=['-std=gnu2x'])
+        check('vec.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            SO[:] = so
+            vec(obj, td)
+        obj = os.path.join(td, 'cx.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'complex.c'), obj, so)
+        check('complex.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            cplx(obj)
+        obj = os.path.join(td, 'rf.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'ref.c'), obj, so)
+        check('ref.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            refrow(obj)
         obj = os.path.join(td, 'c.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'linkage_c.c'), obj, so)
         check('linkage_c.c compiles', r.returncode == 0, r.stderr[:2000])

@@ -13,18 +13,33 @@
  
  /* This value is the amount of bytes a caller is allowed to drop the stack
     before probing has to be done for stack clash protection.  */
-@@ -149,9 +153,17 @@
+@@ -142,16 +146,28 @@
+ /* Heap alignment (same as BIGGEST_ALIGNMENT and STACK_BOUNDARY).  */
+ #define MALLOC_ABI_ALIGNMENT  128
+ 
+-/* Defined by the ABI */
+-#define WCHAR_TYPE "unsigned int"
+-#define WCHAR_TYPE_SIZE			32
++/* Defined by the ABI.  fnv-nx msvcmodel (MLIB1): under ILP32, the data model of
++   the 32-bit Windows program this compiler builds, wchar_t is a native 2-byte
++   unsigned type (cpp-docs build/reference/zc-wchar-t-wchar-t-is-native-type.md);
++   it is the compiler's default, not a flag (-fshort-wchar), so that the default
++   multilib is the guest's.  LP64 keeps the ABI's unsigned int.  */
++#define WCHAR_TYPE (TARGET_ILP32 ? "short unsigned int" : "unsigned int")
++#define WCHAR_TYPE_SIZE			(TARGET_ILP32 ? 16 : 32)
+ 
  /* Using long long breaks -ansi and -std=c90, so these will need to be
     made conditional for an LLP64 ABI.  */
  
 -#define SIZE_TYPE	"long unsigned int"
+-
+-#define PTRDIFF_TYPE	"long int"
 +/* fnv-nx msvcmodel: under ILP32 the data model is the 32-bit Windows one of
 +   the program this compiler builds: size_t is unsigned int and ptrdiff_t is
 +   int (types of their own in overloads, templates and names), not the
 +   32-bit long types.  */
 +#define SIZE_TYPE	(TARGET_ILP32 ? "unsigned int" : "long unsigned int")
- 
--#define PTRDIFF_TYPE	"long int"
++
 +#define PTRDIFF_TYPE	(TARGET_ILP32 ? "int" : "long int")
 +
 +/* fnv-nx msvcmodel: wint_t is unsigned short in the 32-bit Windows program
@@ -33,6 +48,20 @@
  
  #define PCC_BITFIELD_TYPE_MATTERS	1
  
+@@ -986,7 +1002,12 @@
+ 
+ #define CASE_VECTOR_MODE Pmode
+ 
+-#define DEFAULT_SIGNED_CHAR 0
++/* fnv-nx msvcmodel (MLIB1): plain char is signed in the 32-bit Windows program
++   (cpp-docs cpp/fundamental-types-cpp.md, /J off), so it is under the ILP32 ABI the
++   compiler is configured for (--with-abi=ilp32: AARCH64_ABI_DEFAULT).  The default is
++   read where the option structure is initialised, before -mabi is parsed, so it
++   follows the configured ABI.  */
++#define DEFAULT_SIGNED_CHAR (AARCH64_ABI_DEFAULT == AARCH64_ABI_ILP32 ? 1 : 0)
+ 
+ /* An integer expression for the size in bits of the largest integer machine
+    mode that should actually be used.  We allow pairs of registers.  */
 --- a/gcc/cp/call.cc
 +++ b/gcc/cp/call.cc
 @@ -5096,7 +5096,8 @@
@@ -67,8 +96,8 @@
 +	{
 +	  offset = size_binop (PLUS_EXPR, offset, size_one_node);
 +	  rli->offset = size_binop (PLUS_EXPR, rli->offset,
-+				    size_diffop (offset,
-+						 rli_size_unit_so_far (rli)));
++				    size_binop (MINUS_EXPR, offset,
++						rli_size_unit_so_far (rli)));
 +	}
 +      atend = !integer_zerop (offset);
 +    }
@@ -99,6 +128,21 @@
    /* If the usual deallocation function is a two-argument whose second
       argument is of type `size_t', then we have to pass the size of
       the array to the deallocation function, so we will need to store
+@@ -6615,6 +6644,14 @@
+   tree eoc;
+   tree rli_size;
+ 
++  /* fnv-nx msvcmodel: Visual C++ does not grow a class to cover an empty
++     base class placed past the end of the other subobjects (cpp/empty-bases.md:
++     Struct2 : Struct1, Empty1 is 1 byte with Empty1 at offset 1); the
++     running offset alone, which the empty-base placement above advances
++     between consecutive empty bases, gives the size.  */
++  if (TARGET_ILP32)
++    return;
++
+   /* It might be the case that we grew the class to allocate a
+      zero-sized base class.  That won't be reflected in RLI, yet,
+      because we are willing to overlay multiple bases at the same
 --- a/gcc/cp/init.cc
 +++ b/gcc/cp/init.cc
 @@ -3358,7 +3358,10 @@
