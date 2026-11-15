@@ -70,5 +70,5 @@
     "at": "/ext/a64"
   },
   "runtime_driver": "bin/aarch64-none-elf-g++",
-  "runtime_cflags": ["-DPREFER_SIZE_OVER_SPEED"]
+  "runtime_cflags": ["-DPREFER_SIZE_OVER_SPEED", "-g"]
 }

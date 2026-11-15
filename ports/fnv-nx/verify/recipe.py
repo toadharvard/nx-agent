@@ -453,7 +453,7 @@ def load_pin(repo="."):
 
 def runtime_cflags(pin):
     """The flags the guest runtime (newlib, libstdc++) is built with beyond the semantic set: the `runtime_cflags` of the one guest compiler record.
-    The runtime build reads them here (guest_flags.py --runtime); no build script spells them."""
+    They apply to every runtime translation unit: C, C++ and assembly (.S) alike. The runtime build reads them here (guest_flags.py --runtime); no build script spells them."""
     v = pin.get("runtime_cflags") if isinstance(pin, dict) else None
     if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("-") for x in v):
         raise BuildRed("%s: runtime_cflags must be a list of compiler flags" % GUEST_PIN)
@@ -1250,8 +1250,7 @@ def unit_flags(rec, roots, spec, driver, kind):
     """The flags a unit of KIND ("c", "cxx", "asm") of root SPEC is compiled with, before the plugin flags of the CC stage: for a guest root the pinned
     semantics (semantics_for the host path DRIVER, the root's cxx_origin) first, then the root's own flags. The one place that composes them: the
     compile stage and the gates that run the compiler on a unit's preprocessed text (objstub) read it, so they see the same TU."""
-    root = split_spec(spec)[0]
-    ent = roots.get(root, {})
+    ent = entry_of(roots, spec)   # the variant's own target (a host variant of a guest root is a host compile: no guest semantics)
     sem = semantics_for(driver, kind, origin=ent.get("cxx_origin")) if ent.get("target") == "guest" else []
     return sem + rec["flags"][kind]
 
@@ -1667,7 +1666,7 @@ class Job:
         drop = {e["at"] for n, e in self.ext.items() if n != cc}
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
-            json.dump({"argv": unit_flags(rec, self.roots, self.root, self.hostpath(drv["c" if k == "asm" else k]), k)}, open(fp, "w"))   # semantics first, then the root's own
+            json.dump({"argv": unit_flags(rec, self.roots, self.root + ("@" + self.variant if self.variant else ""), self.hostpath(drv["c" if k == "asm" else k]), k)}, open(fp, "w"))   # semantics first, then the root's own
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}

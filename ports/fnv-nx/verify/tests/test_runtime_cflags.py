@@ -23,7 +23,7 @@ def check(name, ok, detail=""):
 
 pin = json.load(open(os.path.join(V, "guest_compiler.json")))
 flags = recipe.runtime_cflags(pin)
-check("the record holds -DPREFER_SIZE_OVER_SPEED", flags == ["-DPREFER_SIZE_OVER_SPEED"], flags)
+check("the record holds -DPREFER_SIZE_OVER_SPEED and -g (DWARF CU language for the rtasm gate)", flags == ["-DPREFER_SIZE_OVER_SPEED", "-g"], flags)
 out = subprocess.run([sys.executable, "-I", os.path.join(V, "guest_flags.py"), "--runtime"], capture_output=True, text=True)
 check("guest_flags.py --runtime prints the record's list", out.returncode == 0 and json.loads(out.stdout) == flags, out.stderr)
 for bad in (None, {}, {"runtime_cflags": "-DX"}, {"runtime_cflags": ["X"]}):

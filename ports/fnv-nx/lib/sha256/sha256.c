@@ -1,5 +1,11 @@
-/* SHA-256 (FIPS 180-4), small and portable; the content-key hash of fnv-nx. */
+/* SHA-256 (FIPS 180-4); the content-key hash of fnv-nx.
+   The block function has two bodies, chosen at compile time by one fact: whether the target's declared Arm feature set holds SHA2 (the compiler
+   defines __ARM_FEATURE_SHA2 from the arch option that verify/targets.json generates; console_cpu.features has crypto). A target without it (the host
+   variant) takes the portable body. No runtime detection, no flag spelled here. */
 #include <string.h>
+#ifdef __ARM_FEATURE_SHA2
+#include <arm_neon.h>
+#endif
 #include "fnvnx_sha256.h"
 
 static const uint32_t K[64] = {
@@ -12,6 +18,26 @@ static const uint32_t K[64] = {
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
+#ifdef __ARM_FEATURE_SHA2
+static void block(uint32_t h[8], const uint8_t *p) {
+    uint32x4_t abcd = vld1q_u32(h), efgh = vld1q_u32(h + 4), a0 = abcd, e0 = efgh;
+    uint32x4_t w[4];
+    unsigned i;
+    for (i = 0; i < 4; i++) w[i] = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(p + 16 * i)));
+    for (i = 0; i < 16; i++) {
+        uint32x4_t wk, t;
+        if (i >= 4) {
+            w[i & 3] = vsha256su1q_u32(vsha256su0q_u32(w[i & 3], w[(i + 1) & 3]), w[(i + 2) & 3], w[(i + 3) & 3]);
+        }
+        wk = vaddq_u32(w[i & 3], vld1q_u32(K + 4 * i));
+        t = abcd;
+        abcd = vsha256hq_u32(abcd, efgh, wk);
+        efgh = vsha256h2q_u32(efgh, t, wk);
+    }
+    vst1q_u32(h, vaddq_u32(abcd, a0));
+    vst1q_u32(h + 4, vaddq_u32(efgh, e0));
+}
+#else
 #define ROR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
 
 static void block(uint32_t h[8], const uint8_t *p) {
@@ -32,6 +58,7 @@ static void block(uint32_t h[8], const uint8_t *p) {
     }
     h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += k;
 }
+#endif
 
 void fnvnx_sha256(const void *data, size_t size, uint8_t out[32]) {
     uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
