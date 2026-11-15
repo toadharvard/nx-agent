@@ -72,15 +72,6 @@ import re
 c_syms = re.findall(r'FNVNX_IMPORT_DATA, \(uintptr_t\)&(\w+)\}', text)
 check('iat_data.tsv rows = the data entries of import_keys.c, same order', [l.split('\t')[4] for l in dt.splitlines()[1:]], c_syms)
 check('the table_id of both is the one given', ('"%s"' % ('T' * 64) in text, dt.splitlines()[0].endswith('T' * 64)), (True, True))
-import subprocess, tempfile
-def cli(*args):
-    r = subprocess.run([sys.executable, '-I', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'iat.py')] + list(args), capture_output=True, text=True)
-    return r.returncode, r.stderr
-with tempfile.TemporaryDirectory() as d:
-    rc, err = cli('--facts', 'x', '--bridge', 'x', '--out', d + '/o', '--c-out', d + '/c.c')
-    check('a stage without --module is an error and writes nothing', (rc != 0, 'without --module' in err, os.path.exists(d + '/c.c')), (True, True, False))
-    rc, err = cli('--facts', 'x', '--bridge', 'x', '--out', d + '/o', '--check', '--c-out', d + '/c.c')
-    check('--check never writes a product file', (rc != 0, 'never writes a product file' in err, os.path.exists(d + '/c.c')), (True, True, False))
 for f in fails:
     print('FAIL', f)
 print('ok' if not fails else 'FAILED %d' % len(fails))

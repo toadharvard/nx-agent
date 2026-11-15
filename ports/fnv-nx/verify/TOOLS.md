@@ -305,8 +305,7 @@ code that reaches the hive, and the implementation creates no key by itself (the
 ```text
 iat - the value the loader writes in every import slot of an image (L1 CONTRACT, loader contract with L3 and L5).
 
-    iat.py --facts facts.json --bridge bridge.tsv --module name.dll=exports.tsv ... --module-imports name.dll=imports.tsv ... --out iat.tsv
-    iat.py --check ...   tool mode: no --module needed, never writes keys.tsv, import_keys.c or iat_data.tsv
+    a library of rules, run by contract/modules.py (--out-dir iat.tsv, --c-out, --keys-c-out, --keys-tsv-out, --data-out); it has no command line
 
 Image code pointers are not rewritten and `call [slot]` is an ordinary indirect call, so a slot must hold a 32-bit
 value the dispatcher of the lifted code maps to an entry.  Rule, total over the image's import directory:
@@ -324,45 +323,6 @@ Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the fir
 Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
-
-A stage that writes a product file (keys.tsv, import_keys.c, iat_data.tsv) passes --module and --module-imports for every
-image of modules.tsv; without --module it is a stage error, because the import set of every image is an input.  Only
-`--check` runs without them, and then no product file is written.
-
-A slot without a provider, an export the module does not have, a dll that is both a module and a bridge dll: the
-stage fails and lists them (gate `iat`: universe = slots, certified = slots with a value).  Output rows:
-slot VA, dll, name (an import by ordinal is written with the name bridge.tsv gives that ordinal), kind, value
-(empty for data).  Exe-derived: container and fnv-nx-build only.
-
-One key table, three consumers (the loader binding slots, the lifter's import stubs, the platform's GetProcAddress):
-
-  --keys-out keys.tsv   key (8 hex), dll, name, ordinal, conv, ret, args, native_symbol; one row per non-data row of
-                        bridge.tsv, sorted by key; first line `# table_id <sha256 of bridge.tsv>`.  Input of the stubs.
-  --c-out import_keys.c the C table of loader/src/importkey.c (`fnvnx_import_rows`, sorted by (dll, name) for binary
-                        search, `fnvnx_import_by_key_idx`, `fnvnx_import_table_id` = the same sha256).  No timestamps.
-
-Rules fixed here (all three consumers use them through this file and importkey.c, nowhere else):
-  dll name   as the Windows loader compares module names: ASCII case-insensitive, and a name with no '.' gets ".dll"
-             appended (LoadLibrary / the import directory: "KERNEL32" and "kernel32.dll" are one module).  A name with
-             another extension keeps it.  norm_dll() here and the same function in importkey.c.  Function names are
-             compared exactly (GetProcAddress is case-sensitive).
-  same name  in two dlls: two functions, two keys (the key is a function of (dll, name), never of name alone).
-  ordinal    an import by ordinal (facts name `#N`) is the row of bridge.tsv with that (dll, ordinal), as the export
-             table of the real dll maps ordinal to export; no row, no provider.  Two rows with one (dll, ordinal), or
-             one (dll, name) twice, are a stage error.  Rows without an ordinal are reachable by name only.
-  bridge.tsv gains or loses a row: keys of all later rows shift.  Keys, stubs and the loader table are generated from
-             the same bridge.tsv in one link; the stage key of all three includes the SHA-256 of bridge.tsv, and
-             keys.tsv and import_keys.c each carry it (`table_id`) so the gate can check they come from one input.
-  data row   a bridge row of conv `data` whose native_symbol is a C identifier is a table row of kind data (value =
-             address of the native object).  A data row with native_symbol `-` has no native object.  If an image of
-             modules.tsv imports it (an import slot of the exe's facts, or of any module's imports/<name>.tsv, by name or
-             by the ordinal of the row) it is a stage error naming dll!name: the slot would be unbound at start.  If no
-             image imports it, it stays outside the table (the lookup returns 0) and is counted in the stdout line.
-             The imports of every module are an input (--module-imports, one per --module, the same name set): a rule
-             over "every image" is not computed over a subset.
-  --data-out iat_data.tsv  `# table_id <sha256 of bridge.tsv>` (the table_id of keys.tsv and import_keys.c), then one row per data
-                        row of the table, in the order of import_keys.c: dll, name, ordinal, kind (`data`), native_symbol.
-                        The build fact L4's rule S4 reads; the address of each native_symbol is in the ELF symtab.
 ```
 
 ## contract/images.py
