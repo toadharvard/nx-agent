@@ -369,3 +369,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - test_bootgpu is env_blocked on this host (no declared env). w7 is installing it with setup_verdict_env.sh, then runs the test and checks the .so sha against L6A's 5cfbee35….
 - 14:35: 4.3: render/ is from gl4link2 47c284629 (w7-u d5627dfaa). On the declared machine (envcheck OK), libnxgl4.so builds green through ensure(render/gl4) with sha256 116b1377…c5c8c6, equal to L6A's.
   - w7 is adopting L1's verify files and copying the bootguest/icount compiler pin from L1's record, then runs test_bootgpu and test_runner.
+- 14:40: w7 adopted L1's verify files from 47c284629 on w7-u: 51 verify files, admit.json rows, 6 loader/platform/link files, contract/. The bootguest and icount compiler pins are copied from the platform record, and the entry symbols are bootguest_entry and icfx_start.
+  - test_bootgpu: 1 case passed. It is red at ld:tests/bootguest, because input root lift/rt has an unpinned msvcmodel and plugin fields that recipe.py fixes. w7 is porting lift/rt (owner L3a, told).
+  - test_runner: 7 PASS, 1 FAIL ("the branch is the published commit": branch l4-verify/after-merge/f9ffbd055e14 is missing), plus 1 crash. w7 is finding the cause.
