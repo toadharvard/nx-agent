@@ -180,6 +180,7 @@ def check(key, timeout=60000):
     Python index by it: the Form of the shape cannot be made symbolic), so every one of the 256 immediates was checked with its concrete Form (a complete case split of a
     finite field; the shape's certificate needs L3a to make the builder symbolic in the immediate, or the case split as the certificate's `split`)."""
     rep = symform.parse_key(key)[0]
+    if cleared(rep): return 'ud-class', None                       # the class order: a shape whose feature the declared CPU (CPUREF) denies is #UD (fnvlift.f_cpufeat.missing) before any Form or row step
     try: S.Enc(rep)
     except (AssertionError, IndexError): return 'no-row', None
     try: S.mem_width(rep)
@@ -194,6 +195,13 @@ def check(key, timeout=60000):
         if imm is None: return 'builder-branches-on-field', str(ex)[:120]
         return _by_cases(key, rep, timeout)
     return _obligation(rep, sf.form, symform.symins(key)[0], imm, timeout)
+
+
+def cleared(rep):
+    """the encoding needs a feature that CPUREF's cpuid denies (f_cpufeat.missing non-empty): #UD on the declared CPU"""
+    from fnvlift import f_cpufeat
+    ins = list(shape.decoder().disasm(rep, 0))
+    return bool(ins) and bool(f_cpufeat.missing(ins[0]))
 
 
 def touches_fp(key):
