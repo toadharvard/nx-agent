@@ -1460,3 +1460,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - The acceptance case is met: the 4 std::string/vector<string> instantiations, which were tier 3, are tier 2.
   - **Blocking the 114/114 measure:** L2 w3's ODRDEF error on dshow.cpp (the _ZN3dsh5StageD0Ev deleting destructor).
   - **Next for w23:** rtasm.
+- 01:07 **w22 fa6bed977.**
+  - (A) 19 files deleted, -2042 lines: graph/l1graph, stackuse, the toolflags msvc/wine kinds, fnvnx_pe/formats, iat_check. oraclecheck now uses the one strace runner. coffnorm, now an orphan, is to be deleted.
+  - (B) datamodel 26/33 at b4057704.
+    - 6 are compiler rejections that wait for the repin.
+    - S29's check form belongs to L2 w3.
+    - The flags come from the DATAMODEL rows. Every guest unit key changes once.
+  - (C) host_gl: the version is derived from gl.xml (tools/khronos-glxml f4894d73) as the max minimum-core-version of the referenced gl* symbols. No owner record.
