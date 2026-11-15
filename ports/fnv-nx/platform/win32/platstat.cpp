@@ -88,7 +88,7 @@ extern "C" void fnvnx_wine_fixme(uint32_t id)
  * end here and nowhere else: not through os_exit_process, whose body is a libc exit that runs handlers. */
 [[noreturn]] static inline __attribute__((always_inline)) void violation_exit(uint32_t code)
 {
-    fnvnx_hcall1(fnvnx_host->exit, code);
+    FNVNX_HCALL1(exit, code);
     __builtin_unreachable();
 }
 
