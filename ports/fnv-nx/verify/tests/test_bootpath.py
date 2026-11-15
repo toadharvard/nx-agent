@@ -9,6 +9,8 @@ import tempfile
 
 VERIFY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, VERIFY)
+import bootdecl  # noqa: E402
+import hostabirec  # noqa: E402
 import bootpath  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="bp-")
@@ -66,16 +68,18 @@ bp.changed()
 case("fresh listing after changed()", bp.resolve("/Dup/zz") == g)
 
 # --game mount: both prefixes, precedence over the root, port names stay on the card
+OLD_PARTS = ("fnvnx", "game")
 root, game = fresh("b"), fresh("gm")
 gf = touch(game, "Data", "FalloutNV.esm")
 touch(root, "switch", "fnv", "Data", "FalloutNV.esm")      # shadowed by the mount
-touch(root, "fnvnx", "game", "Data", "x")
+touch(root, *OLD_PARTS, "Data", "x")   # an ordinary SD file
 bp = bootpath.BootPath(root, game)
 case("mount dirs made on the card", all(os.path.isdir(os.path.join(root, *m.split("/")))
                                         for m in bootpath.GAME_MOUNTS))
 case("game wins at switch/fnv", bp.resolve("sdmc:/switch/fnv/Data/FalloutNV.esm") == gf)
-case("game wins at fnvnx/game, case folded", bp.resolve("sdmc:/FNVNX/Game/data/falloutnv.ESM") == gf,
-     bp.resolve("sdmc:/FNVNX/Game/data/falloutnv.ESM"))
+OLD = "/".join(("fnvnx", "game"))   # a path that was once a second mount of the game: now an ordinary SD path
+case("a path under the former second mount is an ordinary SD path, not the game", bp.resolve("sdmc:/%s/Data/x" % OLD.upper()) ==
+     os.path.join(root, *OLD_PARTS, "Data", "x"), bp.resolve("sdmc:/%s/Data/x" % OLD.upper()))
 case("mount point itself", bp.resolve("/switch/fnv") == game)
 case("port entry stays on the card", bp.resolve("/switch/fnv/host.log") == os.path.join(root, "switch", "fnv", "host.log"))
 case("port prefix drive_* stays on the card", bp.resolve("/switch/fnv/Drive_C/x") ==
@@ -84,13 +88,14 @@ case("outside the mounts: the card", bp.resolve("/other/y") == os.path.join(root
 case(".. cannot leave the game mount into the card", bp.resolve("/switch/fnv/../../etc/passwd") ==
      os.path.join(root, "etc", "passwd"))
 
-# no --game: install detection
+# no --game: the game directory is root/FNVNX_SD_DIR, whatever it holds
 root = fresh("c")
 touch(root, "switch", "fnv", "FalloutNV.exe")
-case("install on the card: game is switch/fnv", bootpath.BootPath(root).game == os.path.join(root, "switch", "fnv"))
+GD = hostabirec.record().string("FNVNX_SD_DIR").split(":/", 1)[1].strip("/")
+case("no game given: bp.game == <root>/FNVNX_SD_DIR (name from the header record)", bootpath.BootPath(root).game == os.path.join(root, *GD.split("/")))
 root = fresh("d")
 touch(root, "switch", "fnv", "host.log")
-case("only port entries: game is fnvnx/game", bootpath.BootPath(root).game == os.path.join(root, "fnvnx", "game"))
+case("only port entries: the same directory", bootpath.BootPath(root).game == os.path.join(root, *GD.split("/")))
 
 # faults
 bp = bootpath.BootPath(fresh("e"))
@@ -150,7 +155,7 @@ for n, g in (("p3", None), ("p4", fresh("p4g"))):
          not os.path.exists(u))
 
 # declared input: sdmc:/switch/fnv/fonts (bootpath.py PORT_NAMES, READ_ONLY): on the card's root in every mode, never in the game
-RO = ["switch/fnv/fonts"]   # the mount list of verify/boot_inputs.json (boot.py passes it)
+RO = [bootdecl.mount_point()]   # the mount list of the declared input (boot.py passes it): FNVNX_SD_FONTS of sdlayout.h without its device prefix
 for tag, with_game in (("with game", True), ("without game", False)):
     root = fresh("f1" if with_game else "f2")
     game = fresh("f1g") if with_game else None
@@ -167,12 +172,10 @@ for tag, with_game in (("with game", True), ("without game", False)):
     if with_game:
         case("fonts with game: the game's own fonts/ is not reached", bp.resolve("sdmc:/switch/fnv/fonts/game-own.ttf") ==
              os.path.join(root, "switch", "fnv", "fonts", "game-own.ttf") and not os.path.exists(bp.resolve("sdmc:/switch/fnv/fonts/game-own.ttf")))
-        case("fonts with game: the alias mount fnvnx/game/fonts is the game's", bp.resolve("sdmc:/fnvnx/game/fonts/game-own.ttf") ==
-             os.path.join(game, "fonts", "game-own.ttf"))
     case("fonts %s: read_only for the dir, below it, any case, ..-normalised" % tag,
          all(bp.read_only(s) for s in ("sdmc:/switch/fnv/fonts", "/switch/fnv/fonts/Sub/x.ttf", "SDMC:/SWITCH/FNV/Fonts/new", "/a/../switch/fnv/fonts/q")))
-    case("fonts %s: read_only is false elsewhere (sibling, parent, game-side alias)" % tag,
-         not any(bp.read_only(s) for s in ("/switch/fnv", "/switch/fnv/fonts2", "/switch/fnv/user/fonts", "/fnvnx/game/fonts/x", "/fonts", "/switch")))
+    case("fonts %s: read_only is false elsewhere (sibling, parent)" % tag,
+         not any(bp.read_only(s) for s in ("/switch/fnv", "/switch/fnv/fonts2", "/switch/fnv/user/fonts", "/fonts", "/switch")))
 
 # the read-only set is the mount list given, not a fonts-only check
 bp = bootpath.BootPath(fresh("f4"), None, read_only=["switch/fnv/fonts", "Switch/FNV/other/dir"])
@@ -190,11 +193,11 @@ case("casefold-only spelling of a read-only mount is read_only (ß ~ ss, final s
      and bootpath.BootPath(fresh("f7"), None, read_only=["switch/fnv/\u03c3\u03c2"]).read_only("/switch/fnv/\u03a3\u03a3/x"))
 case("a mount given in a casefold-only spelling matches too", bootpath.BootPath(fresh("f8"), None, read_only=["Switch/fnv/FONT\u00df"]).read_only("/switch/fnv/fontss/a"))
 
-# fonts alone in switch/fnv does not make it an install: no game -> the game dir stays root/fnvnx/game
+# fonts alone in switch/fnv: the game directory is the same
 root = fresh("f3")
 touch(root, "switch", "fnv", "fonts", "a.ttf")
 bp = bootpath.BootPath(root)
-case("a card holding only fonts has no install in switch/fnv", bp.game == os.path.join(root, "fnvnx", "game"), bp.game)
+case("a card holding only fonts: game is root/FNVNX_SD_DIR", bp.game == os.path.join(root, *GD.split("/")), bp.game)
 
 print("%d failed" % len(FAILED) if FAILED else "all %d passed" % N[0])
 sys.exit(1 if FAILED else 0)

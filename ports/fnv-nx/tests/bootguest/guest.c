@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "fnvnx/hostapi.h"
 #include "fnvnx/placement.h"
+#include "fnvnx/sdlayout.h"
 #define CPU_MAIN FNVNX_CPU_SPEC(FNVNX_DEFAULT_CORE, 1u << FNVNX_DEFAULT_CORE)   /* thread_create's cpu: a spec, ideal in mask */
 #define H (fnvnx_host)
 static const char *const MSG[] = {"hello from the guest\n", "second line\n"};   /* needs RELATIVE relocations */
@@ -297,7 +298,7 @@ static void mode_92(uint32_t mode) {
 static void mode_6(uint32_t mode) {
     (void)mode;
     if (mode == 61) {
-    num("write-fonts", fnvnx_hcall2(H->fs_open, FNVNX_ADDR("sdmc:/switch/fnv/fonts/New.ttf"), FNVNX_O_WRITE | FNVNX_O_CREATE));
+    num("write-fonts", fnvnx_hcall2(H->fs_open, FNVNX_ADDR(FNVNX_SD_FONTS "/New.ttf"), FNVNX_O_WRITE | FNVNX_O_CREATE));
     }
     uint32_t acc = fnvboot_a(3);
     acc += fnvboot_b(acc);

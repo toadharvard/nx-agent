@@ -1073,10 +1073,10 @@ bootpath.py - the guest-path rule of the boot stage: where a guest SD path lands
 A guest path is a string, "sdmc:/a/b" (prefix case-insensitive) or "/a/b"; "\" counts as "/". Components "" and "." are
 dropped; ".." removes the previous component and stops at the card's root, so nothing outside the mounts is reachable
 (the path is refused by clamping, not by an error: "/../x" is "/x").
-Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at sdmc:/switch/fnv and at
-sdmc:/fnvnx/game: a path under either prefix (compared case-folded) continues inside `game`, except that the port's own
-entries of sdmc:/switch/fnv (PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without `game`
-it is <root>/switch/fnv when that directory holds anything besides the port's own entries, else <root>/fnvnx/game.
+Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at FNVNX_SD_DIR (sdlayout.h, read by
+name through hostabirec.py; sdmc:/switch/fnv): a path under that prefix (compared case-folded) continues inside `game`, except that
+the port's own entries of it (FNVNX_SD_PORT_NAMES: PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without
+`game` it is <root>/FNVNX_SD_DIR, always, with no inspection of the directory. The header has no other name for the game directory.
 Case. The SD card folds case. Each component is matched against the host entries: if the exact spelling exists it is
 used (os.path.lexists); else the host entries equal under str.casefold() are collected and the first in sorted order
 (code-point order, deterministic) is taken; with no match the spelling given is kept (a path to be created).
@@ -1806,6 +1806,21 @@ on argv/env/tool/input `at` only (not on tree hashes), so documents of not-yet-r
 `python3 verify/guest_flags.py --lang c|c++|asm [--cache DIR]` prints, as a JSON array, the semantic flag set the recipe passes to a guest compile stage of that language:
 `recipe.semantics_for(pinned driver, language)` on `flags.semantics` of `guest_compiler.json` (the set minus the flags the driver itself says do not apply to the language).
 It is the one function the recipe uses; there is no second list. The pinned compiler is fetched by its pin into DIR (default `$GATE_CACHE`). For the runtime build of L5.
+
+## verify/hostabirec.py
+
+```text
+The one record of the host ABI as the boot machine uses it, parsed from hostabi/include/fnvnx/{hostapi,placement,reach,sockwire,sockwire_errno,
+sdlayout,hostvm}.h (the headers are L5's). Nothing of it is typed a second time in verify/.
+
+  record().define(NAME)   an object-like integer #define (constant expression of literals, earlier names, | & ^ << >> + - ~ * and casts)
+  record().string(NAME)   a string macro: the C concatenation of the adjacent string literals (no escapes) and earlier string macros of its body
+                          (FNVNX_SD_FONTS = FNVNX_SD_DIR "/fonts" is "sdmc:/switch/fnv/fonts"); a body with a literal that does not resolve
+                          completely is a RecordError at load, never skipped; a name that is no string macro is a KeyError
+  record().xlist(NAME), .services, .slots, .platform_services(), .sock_services(), .api_size()
+  python3 hostabirec.py [--include DIR] --out FILE.py   the same record as a Python module (DEFINES, LISTS, STRINGS, SERVICES, SLOTS, API_SIZE)
+Asking for anything absent raises: there is no default.
+```
 
 ## verify/icount.py
 

@@ -140,7 +140,7 @@ __doc__ = __doc__.replace("@SERVED@", _ranges(_served)).replace("@HOLES@", "0, "
 
 TZ_VC1 = (0, 0, b"UTC")   # VC1's zone: off_s, dst, abbr
 WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
-MAP_FIXED_MAX = 512   # blocked by header (owner L5): hostapi.h does not state the map_fixed table size
+MAP_FIXED_MAX = _D("FNVNX_MAP_FIXED_MAX")   # hostvm.h
 FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = _D("FNVNX_HE_NOMEM"), _D("FNVNX_HE_NOTFOUND")
 FNVNX_DEFAULT_CORE, FNVNX_CPU_KEEP = _D("FNVNX_DEFAULT_CORE"), _D("FNVNX_CPU_KEEP")
 APP_CORES = _D("FNVNX_APP_CORES")   # the declared machine's application cores (placement.h); N = popcount
@@ -148,8 +148,8 @@ KERNEL_BUSY, KERNEL_INVALID_STATE = 0xF401, 0xFA01   # blocked by header (owner 
 SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = (
     _D("FNVNX_SEC_E_" + n) for n in ("SIZE", "ALIGN", "RANGE", "REGION", "ID", "NOMEM", "FULL"))
 SEC_MAX_SIZE = _D("FNVNX_SEC_MAX_SIZE")
-SEC_SECTIONS, SEC_VIEWS = 128, 512   # blocked by header (owner L5): table sizes of host_section.inc
-VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # blocked by header (owner L5): host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
+SEC_SECTIONS, SEC_VIEWS = _D("FNVNX_SEC_SECTIONS"), _D("FNVNX_SEC_VIEWS")   # hostvm.h
+VM_ALIGN, VM_FLOOR = _D("FNVNX_VM_ALIGN"), _D("FNVNX_VM_FLOOR")   # hostvm.h; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
 LIBNX_BAD_INPUT, LIBNX_ALREADY_INITIALIZED = _D("FNVNX_HE_BADINPUT"), _D("FNVNX_HE_ALREADY")
 ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = _D("FNVNX_HE_SIZE"), _D("FNVNX_HE_ADDR"), _D("FNVNX_HE_RANGE")
 ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = _D("FNVNX_HE_PERM"), SEC_E_ID, KERNEL_INVALID_STATE
