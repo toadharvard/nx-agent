@@ -1800,3 +1800,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d. The cold pack build
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 21:03 w12 d90e5e45d: the assumptions gate shows 0 mention-no-id over 1103 files (9cfa6ee57). Precision fix asked: objdump falls under ASM-001 (pinned binutils), not ASM-043 (LLVM/capstone). The citation rule O is merged (a889bf949 + de9996915; x86-64 gatecert left out); test_objstub_owner passes; L6 has the head. test_objstub's 20 failures predate this (toy root has no declared_sources.json). crossing.py reads exefacts through --facts (L2).
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 21:06 w12 1ef71ed33: crossing.py --facts also checks that every import of a bridged dll has a bridge row. The CROSSING stage moves out of cand3 and enters with L3a's pack root (dispatch rows); the per-image facts carrier goes to L2. cand3 remaining: PP keying, the test_objstub harness, the pin.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
