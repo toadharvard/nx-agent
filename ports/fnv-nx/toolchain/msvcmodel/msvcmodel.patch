@@ -43,7 +43,45 @@
  			   original_size, errval);
 --- a/gcc/cp/class.cc
 +++ b/gcc/cp/class.cc
-@@ -5856,6 +5856,13 @@
+@@ -4525,6 +4525,27 @@
+   /* This is an empty base class.  We first try to put it at offset
+      zero.  */
+   tree offset = size_zero_node;
++  /* fnv-nx msvcmodel: Visual C++ places an empty base class at the running
++     offset of the class (after the bases and the vptr placed so far), and
++     adds one byte of padding between two consecutive empty bases (the
++     second one is placed one byte after the first, and the class then
++     continues from there), so that an empty base lands past the end of a
++     preceding non-empty base (cpp/empty-bases.md, "the default class
++     layout": Derived3 is 2 bytes, Derived4 is 8, Struct2 has its empty
++     base at offset 1).  An empty member is a one-byte member, never an
++     overlapped one, so only bases take this path.  */
++  if (TARGET_ILP32 && binfo && TREE_CODE (rli->t) != UNION_TYPE)
++    {
++      offset = eoc;
++      if (splay_tree_lookup (offsets, (splay_tree_key) offset))
++	{
++	  offset = size_binop (PLUS_EXPR, offset, size_one_node);
++	  rli->offset = size_binop (PLUS_EXPR, rli->offset,
++				    size_diffop (offset,
++						 rli_size_unit_so_far (rli)));
++	}
++      atend = !integer_zerop (offset);
++    }
+   if (TREE_CODE (rli->t) != UNION_TYPE
+       && layout_conflict_p (type,
+ 			    offset,
+@@ -4534,7 +4555,8 @@
+       /* That didn't work.  Now, we move forward from the next
+ 	 available spot in the class.  */
+       atend = true;
+-      offset = eoc;
++      if (!(TARGET_ILP32 && binfo))
++	offset = eoc;
+       while (1)
+ 	{
+ 	  if (!layout_conflict_p (type,
+@@ -5856,6 +5878,13 @@
    if (TYPE_HAS_NONTRIVIAL_DESTRUCTOR (type))
      return true;
  

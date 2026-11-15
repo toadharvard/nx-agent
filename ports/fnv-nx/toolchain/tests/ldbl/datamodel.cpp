@@ -68,7 +68,16 @@ DM("S22", sizeof(D1) == 4 && sizeof(D2) == 8 && sizeof(D2b) == 1);   // the firs
 struct E5 {};
 struct E6 {};
 struct D3 : E5, E6 { int x; };
-DM("S23", sizeof(D3) == 4);   // OPEN: MSVC pads one byte between consecutive empty bases (sizeof 8)
+// the cases of cpp/empty-bases.md (pinned cpp-docs): Derived3 is 2 bytes, Derived4 8, Struct2 1 (its empty base sits at offset 1, past Struct1)
+struct Empty1d {};
+struct Empty2d : Empty1d {};
+struct Empty3d {};
+struct Derived2d : Empty2d { char c; };
+struct Derived3d : Empty2d, Empty3d { char c; };
+struct Derived4d : Empty2d, Empty3d { int i; };
+struct Struct1d { char c; };
+struct Struct2d : Struct1d, Empty1d {};
+DM("S23", sizeof(D3) == 8 && sizeof(Derived2d) == 1 && sizeof(Derived3d) == 2 && sizeof(Derived4d) == 8 && sizeof(Struct2d) == 1);
 struct V { virtual void f(); };
 struct NV { int a; };
 struct D6 : NV { virtual void f(); int y; };

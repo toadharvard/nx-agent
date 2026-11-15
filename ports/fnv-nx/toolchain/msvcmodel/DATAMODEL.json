@@ -419,9 +419,9 @@
    "id": "S23",
    "property": "1 byte of padding is added between consecutive empty bases; the last empty base of a run is placed at the running offset, even past the end of a non-empty base",
    "msvc": "consecutive empty bases are separated by 1 byte of padding; the last is placed at the running offset",
-   "gcc": "empty bases all at offset 0 (Itanium)",
-   "mechanism": "not in this patch: cp/class.cc build_base_field / layout_empty_base_or_field need a build-and-test loop (nearly-empty and primary-base interplay); detected per record by the R7 layout gate",
-   "kind": "none",
+   "gcc": "as MSVC after the patch: the empty base at the running offset, one byte between consecutive empty bases (the cases of the cited page)",
+   "mechanism": "msvcmodel.patch hunk in gcc/cp/class.cc layout_empty_base_or_field under TARGET_ILP32 (written; its farm build is pending)",
+   "kind": "patch",
    "status": "open",
    "check": "static_assert DM(\"S23\") in toolchain/tests/ldbl/datamodel.cpp",
    "flag": null,
@@ -430,6 +430,11 @@
      "page": "docs/cpp/empty-bases.md",
      "line": 72,
      "quote": "The class layout algorithm is adding 1 byte of padding between any two consecutive empty base classes"
+    },
+    {
+     "page": "docs/cpp/empty-bases.md",
+     "line": 119,
+     "quote": "static_assert(sizeof(Struct2) == 1, \"Struct2 should be 1 byte\");"
     }
    ]
   },
