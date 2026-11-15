@@ -564,7 +564,7 @@ def v_analyse(ins, a, b, rel, syms, stop=frozenset(), cite=CITE, loads_ok=False,
 
 # ---- shapes of a function ----------------------------------------------------------------------------------------------------------------
 
-def nr_ends(ins, a, b, rel, syms, fn_at):
+def nr_ends(ins, a, b, rel, syms, fn_at, tails=None):
     """As objstub.nr_ends: the sorted names the paths END in ("<blr>" for a last call through a pointer), or None when a path can return or leave."""
     f = Flow(ins, a, b, rel, syms)
     f.fn_at = fn_at
@@ -604,6 +604,8 @@ def nr_ends(ins, a, b, rel, syms, fn_at):
                 if c is None:
                     return None
                 ends.add(c)
+                if tails is not None:
+                    tails.add(c)
         elif i.mn in ("ud2", "int3", "hlt", "ud0", "ud1", "int1", "icebp"):
             continue
         else:
@@ -690,7 +692,7 @@ def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id):
         raise ValueError("objstub: an error_abi flag probe or an instruction-table probe is not implemented for x86-64 objects (%s)" % path)
     items, finds, exit_ok = [], [], set()
     extra = {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [],
-             "dref": [], "nr": {}, "flag": None, "tabs": {}, "assume": []}
+             "dref": [], "nr": {}, "nr_tail": {}, "flag": None, "tabs": {}, "assume": []}
     unw = {t[1:] for t in terms if t[:1] == "~"}
     stops = frozenset(t for t in terms if t[:1] != "~")
     cites_at, cbad = read_cites_fn(o)
@@ -720,6 +722,7 @@ def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id):
                 if last[3] in extra["tb"]:
                     extra["tb"][name] = extra["tb"][last[3]]
                 extra["nr"][name] = extra["nr"].get(last[3])
+                extra["nr_tail"][name] = extra["nr_tail"].get(last[3], [])
                 for key in ("cite", "wine_nz", "wine_id", "cite_sym"):
                     if last[3] in extra[key]:
                         extra[key][name] = extra[key][last[3]]
@@ -783,7 +786,8 @@ def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id):
             elif lk not in ("jmpd", "jmpi", "ret", "trap"):
                 fnd.append((name, "fallthrough", "last instruction %s can run into the next function" % lastm.mn, None))
             ids = cites_at.get((si, a), [])
-            nrv = nr_ends(ins, a, b, rel, o.syms, fn_at)
+            ntail = set()
+            nrv = nr_ends(ins, a, b, rel, o.syms, fn_at, ntail)
             nterm = bisect.bisect_left(tk, b) - bisect.bisect_left(tk, a)
             if not any(f[1] in ("T1", "undecodable", "uncovered") for f in fnd):
                 v, _ = v_analyse(ins, a, b, rel, o.syms, stop=stops if (nrv is None and nterm) else frozenset(), wine=bool(wsites) or bool(ids), fn_at=fn_at)
@@ -808,6 +812,7 @@ def check_obj(o, path, terms, os_layer, probe, jsonv, read_cites_fn, assume_id):
                     if tb is not None:
                         extra["tb"][name] = tb
             extra["nr"][name] = nrv
+            extra["nr_tail"][name] = sorted(ntail)
             finds += fnd
             last = (a, b, fnd, name)
             cover.append((a, b))
