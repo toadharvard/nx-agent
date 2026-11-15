@@ -697,3 +697,7 @@ Paused: w3b, w4, farm; no other work.
     - caps: env_*.tsv is the single source (PrimitiveMiscCaps 0x2ecff2, MRTINDEPENDENTBITDEPTHS set; NumSimultaneousRTs 4).
     - Next: gen/env_caps.gen.h plus a static_assert against the nxgpu4 maximum.
     - #7: d3d9_enums.gen.h generated; d3d9total 332/332.
+- 01:04Z L6A e408b213: the nxgpu ABI head.
+    - ASM-629 is removed: unnamed bit-field padding, sizeof 64; gpu_abi.h uses FNVNX_SHA256_DIGEST_SIZE.
+    - Checked: no d3d9 or translator code names the pad fields (draw_prog.cpp:57 memsets).
+    - w6 takes e408b213, deletes the ASM-629 record and adds the sha256 include to every root that includes gpu_abi.h.
