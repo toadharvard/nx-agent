@@ -344,6 +344,7 @@ class Func:
         self.words = sorted([i.off for i in self.ins] + self.undec)
 
     # -- control flow
+    entry_regs = ()    # (reg, tag) pairs the registers hold at entry (default none): rtasm seeds the jmp_buf argument
     _forming = None
     _escapes = None
     args = None   # the incoming stack-argument size from the frame row (bytes at [CFA, CFA+args)), None when the row has none
@@ -634,7 +635,7 @@ class Func:
         self.state = [None] * n
         if not n:
             return
-        self.state[0] = (0, ())
+        self.state[0] = (0, self.entry_regs)
         work = collections.deque([0])
         queued = {0}
         while work:

@@ -112,7 +112,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():
-            _w(repo, ROOT + '/%s.cc' % n, text)
+            _w(repo, ROOT + '/' + (n if '.' in n else n + '.cc'), text)
         root['cxx_origin'] = 'native'
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
