@@ -9,7 +9,7 @@ Every indirect transfer lands in s1..s3 unless s4 happens, so the closure is com
 check is pcsrc's (the typed-source rule extended from return addresses to relocated code values); its result is read from <facts dir>/pcsrc_s4.json {"s4_violations": n}. No file: s4 is UNCHECKED and
 the residue is red, never assumed green.
 
-RULE: closure complete -> every residue byte is data (class DATA = 9, "data-unreached"); otherwise every residue byte is UNEXPLAINED (class 8 in modlift, 0 in codemap) with the closure reason.
+RULE: closure complete -> every residue byte is class DATA = 9, "data-unreached" (not reached by any entry; may-be-read only through a data_in_code range, tools/CODEMAP.md); otherwise every residue byte is UNEXPLAINED (class 8 in modlift, 0 in codemap) with the closure reason.
 Nothing else decides a residue byte: the sweep below (decodes / undecodable / reloc-not-operand / no-end) is a breakdown printed for information and decides nothing."""
 import os, json, bisect
 from types import SimpleNamespace

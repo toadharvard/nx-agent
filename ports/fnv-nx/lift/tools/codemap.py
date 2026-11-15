@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""R3 byte accounting of .text (used by universe.py; U is the universe module). Every byte is exactly one class:
+"""R3 byte accounting of .text (used by universe.py; U is the universe module). Every byte gets one accounting class (a breakdown, NOT a partition of the properties may-execute / may-be-read: see tools/CODEMAP.md, rule DIC):
 1 instruction of a decomp function, 2 instruction of a non-decomp entry, 3 table/data named by a relocation, 4 padding,
 5 dead code inside a decomp function, 6 dead code in a gap (no entry, no relocation names it), 8 data named by a PE data directory,
 7 hole between executable sections (not part of the universe), 0 unexplained (build error).

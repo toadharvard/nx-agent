@@ -8,7 +8,7 @@ that leave the lifter's range of each entry (the lifter's own fnvlift.core.explo
 executable section is no entry (the lifter sends it through the dispatcher). Each entry has its own recursive descent; entries may overlap. A path ends at ret /
 indirect jmp / another entry / `ud` (bytes that do not decode: the lifted body raises #UD) / the end of the executable span. Provenance: `proven` = reachable by direct
 flow from entry point, exports, TLS, EH tables or from a pointer whose consumer transfers control (vptr-store run, jump table); `candidate` = known only as a relocated
-pointer target. Byte accounting: every byte of the executable sections is exactly one class (entry body, PE-directory data, padding, relocation slot, dead gap) or is
+pointer target. Byte accounting: every byte of the executable sections gets one accounting class (tools/CODEMAP.md: may-execute and may-be-read are independent sets, the class is no partition of them) (entry body, PE-directory data, padding, relocation slot, dead gap) or is
 reported UNEXPLAINED by reason; the gate is red then. Output: $FNVNX_FACTS_OUT (default /home/user/l3facts2)/<module>/{universe,codemap,ranges,noreturn,outside,imports}.tsv, ehtables.json, gate_codemap.json."""
 import os, re, sys, json, bisect, hashlib
 from array import array
