@@ -94,6 +94,7 @@ def main():
                 if ln.strip(): out.write(json.dumps(migrate(json.loads(ln), a), sort_keys=True) + '\n'); out.flush()
         return 0
     keys, bad = load_shapes(a.shapes); keys = keys[::a.slice]
+    qsha = {l.split()[0]: l.split()[1] for l in open(a.shapes) if l.strip() and not l.startswith('#') and len(l.split()) > 1}     # the queue row's shape_sha: the Form of the tree must be the Form the queue was built from
     if a.only: keys = [x for x in keys if a.only in x]
     mine = [x for i, x in enumerate(keys) if i % n == k - 1][:a.limit]
     done = set()
@@ -109,7 +110,9 @@ def main():
         for key in mine:
             if key in done: continue
             t0 = time.time()
-            try: rec = one(key, a)
+            try:
+                if key in qsha and symform.shape_sha(key) != qsha[key]: raise ValueError('shape_sha of this tree differs from the queue row (the queue was built from another tree)')
+                rec = one(key, a)
             except Exception as e:                 # a prover exception on a shape is a record (error + the traceback hash), never a missing one
                 import hashlib, traceback
                 tb = traceback.format_exc(); rec = {'shape': key, 'result': 'error', 'note': ('%s: %s' % (type(e).__name__, e))[:300], 'traceback_sha': hashlib.sha256(tb.encode()).hexdigest()[:16], 'model_sha': model_sail.ir_sha()}
