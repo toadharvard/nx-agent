@@ -1970,3 +1970,7 @@ bottleneck: the cand2 merge (w15), and cand3 (w12: the sympair table and mount, 
   - recipe plugin_errors: cxx_origin pack = a root in `uses`, with the units checked against the lifted_by tool's generated stages;
   - gate_lift reads the PACK output, not fetch_externals.
 bottleneck: the cand2 merge (w15), cand3 (w12), and the pack-uses machinery (w28).
+- 00:12 w28 789ef219c (on cand3 8fc4c58b9): the pack as a uses-root (plugin_errors and gate_lift), and gate_build.published_output, which also fixes the liftfacts output paths.
+  - It is not yet built at 09182012b, since w28's host has no pins; w12 runs it.
+  - L3b's formgate.py:156 must read PACK too; relayed through L3a.
+bottleneck: the cand2 merge (w15), and cand3 (w12: the pack build check).
