@@ -101,7 +101,7 @@ against `x87spec.py` (OWNER 10 for the parts no pinned formal model covers; the 
   The environment is `cr0_em = 0, cr0_ts = 0, cr4_osfxsr = 1` (Res.env): the rows of L5's x86sys (the user-mode machine); the spec reads them as state
   variables, never as a constant.
 - A misaligned 16-byte memory operand of an aligned form is the access violation (SDM 2A 'Exceptions Type 1/4': #GP(0), reported by Windows as the AV code of the
-  fault table); the rule per row is `al` (ACL2 `inst-ac?`). QEMU/unicorn does not fault on it, so the emulator is not the reference for that cell.
+  fault table); the rule per row is `al` (ACL2 `inst-ac?`). No emulator is a reference of a certificate (Unicorn harnesses are deleted).
 - The MMX rule is x87spec's (`mmx_exec_effect`, `mmx_write_effect`: TOP := 0, tags valid, a written mmN gets 0xFFFF in bits 79..64, SDM 1:9.6.2). QEMU leaves
   bits 79..64 of the destination alone, so the emulator test compares the 64 data bits only; the exponent bits are checked against the SDM rule.
 - Floating-point arithmetic rows (`ssefp.py`, mapped over the lanes by simdspec.py): add sub mul div min max sqrt, ps pd ss sd. Source: ACL2 `rtl/excps.lisp`
@@ -109,17 +109,16 @@ against `x87spec.py` (OWNER 10 for the parts no pinned formal model covers; the 
   `acl2_cites.tsv`; `acl2_cite_check.py` resolves `rtl/` cites in books/rtl/rel11/lib). The value is z3's IEEE operation under MXCSR.RC (OWNER 8); DAZ, FTZ and the six
   flags are the ACL2 cases; tiny / overflow / inexact come from one exact comparison (the same operation in a sort with 3 more exponent bits; RTN against RTP), not from a table.
   Environment (Res.env): the masks are set (ASM-204 = I-FPMASK, `ssefp.masks_set`: the same single assumption the x87 side names), so an unmasked-exception branch has no row;
-  MXCSR has no bit outside CPUREF's MXCSR_MASK (`ssefp.mxcsr_in_mask`: ldmxcsr/fxrstor fault on one, SDM 1:11.6.6). The mask is READ from lift/rt/cpumodel.c
-  (FNVL_CPUREF_MXCSR_MASK); until the file has it every FP row is `uncertified: CPUREF has no mxcsr_mask` (simdcheck result `uncertified`), never a constant.
-  Measurement, not part of any certificate: tests/test_simdspec.py FpRows runs the row's own bytes on the host x86-64 CPU between ldmxcsr and stmxcsr (QEMU/unicorn keeps
-  no SSE flags and ignores FTZ); 2880 cases per run (FPN), 0 differences. One recorded disagreement: with a NaN operand, min/max set only IE; ACL2's `sse-max/min` also sets DE for a denormal other operand. The CPU and SDM 1:4.9.2 (the invalid
-  operation takes precedence) decide.
+  MXCSR has no bit outside CPUREF's MXCSR_MASK (`ssefp.mxcsr_in_mask`: ldmxcsr/fxrstor fault on one, SDM 1:11.6.6). The mask is READ from verify/cpuid_model.json
+  (mxcsr_mask of verify/cpuid_model.json); until the file has it every FP row is `uncertified: CPUREF has no mxcsr_mask` (simdcheck result `uncertified`), never a constant.
+  Measurement, not part of any certificate: `measure_simd_host.py` (not a test) runs the row's own bytes on the CPU it runs on between ldmxcsr and stmxcsr; meaningful only on the pinned
+  reference host (CPUREF). The test references are the ACL2 cites and the SDM cells (tests/test_simdspec.py).
 - Compare, mxcsr and conversion rows (same file, same rules): cmpps/pd/ss/sd (a predicate shape is concrete: its immediate is part of the mnemonic), comiss/sd and ucomiss/sd (EFLAGS ZF PF CF
   from the ordered/unordered result, OF SF AF cleared; `Res.flags` is compared by simdcheck against the Form's `flags`), ldmxcsr / stmxcsr (a loaded bit outside MXCSR_MASK is #GP(0),
   mapped to the AV kind, SDM 2A:LDMXCSR; ACL2 does not implement that fault), cvtsi2ss/sd, cvt(t)ss2si, cvt(t)sd2si, cvtss2sd, cvtsd2ss, cvtps2pd, cvtpd2ps (ACL2 fp/convert.lisp), and
   cvtdq2ps, cvtps2dq, cvttps2dq, cvtdq2pd, cvtpd2dq, cvttpd2dq (SDM 2A text, ACL2 has no row). A float to int conversion out of range / NaN gives the integer indefinite 0x80000000 with IE
   (SDM 1:4.8.4.1); inexact gives PE. Reciprocal rows (rcpps/ss, rsqrtps/ss) read the reference CPU's table from lift/rt/rcptab.c (accepted only when its sha256 is the certificate's
-  and its mismatches are 0), MXCSR plays no part. Measurements (host CPU, not part of any certificate): FpRows 2880 cases, CvtRows 4800 cases, MxcsrRows, RcpRows: 0 differences.
+  and its mismatches are 0), MXCSR plays no part. The rcp/rsqrt transcription is tested against the C function of the same file (RcpRows).
   Not rows: the MMX-register forms (cvtpi2ps/pd, cvt(t)ps2pi, cvt(t)pd2pi) and 3DNow (the declared CPU clears it: #UD)
 - The symbolic Form side does not exist for FP arithmetic yet (forms_simd.py has no handler: the lifter emits it in C++, fnvlift/f_sse.py), so simdcheck reports these shapes
   `no-form`, not `proved`.

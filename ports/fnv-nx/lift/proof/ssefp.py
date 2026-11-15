@@ -11,7 +11,7 @@ z3's IEEE operation under the rounding mode of MXCSR.RC (OWNER 8: plain IEEE), a
   * the denormal rounding `drnd` = the narrow operation itself (z3 rounds into the subnormal range).
 The masked-response branches only: the exception masks are all set at every SSE instruction, MXCSR bits 12..7 = 1 (environment row `masks_set`, the one assumption ASM-204 = I-FPMASK of
 verify/ASSUMPTIONS.json, removed by L3a's fpstate mask census); an unmasked exception (ACL2 returns NIL, the instruction faults) has no row here: the precondition excludes it.
-DAZ: whether MXCSR bit 6 can be set is a property of the reference CPU, the MXCSR_MASK of CPUREF (lift/rt/cpumodel.c, FNVL_CPUREF_MXCSR_MASK; SDM 1:11.6.6).  MXCSR is only written by
+DAZ: whether MXCSR bit 6 can be set is a property of the reference CPU, the MXCSR_MASK of CPUREF (verify/cpuid_model.json `mxcsr_mask`, 0xFFBF: no DAZ; SDM 1:11.6.6).  MXCSR is only written by
 ldmxcsr / fxrstor, which fault on a bit outside that mask, so the environment row `mxcsr_in_mask` is (MXCSR & ~mask) == 0, with the mask READ from the file.  A file without it makes every
 row of this module `Uncertified`: no constant stands in for it.
 """
@@ -27,22 +27,23 @@ OPS = ('add', 'sub', 'mul', 'div')
 def K(v, w): return BitVecVal(v, w)
 
 
-import os, re
+import json, os, re
 
 
 class Uncertified(KeyError):
     """a row that cannot be certified because a pinned fact it reads is missing (simdcheck reports it as 'uncertified: <reason>')"""
 
 
-_CPUMODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rt', 'cpumodel.c')
+_CPUID_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'verify', 'cpuid_model.json')          # the one fact of the declared CPU (derived data, `mxcsr_mask`)
 _TEST_MASK = []                  # test harness only (tests/test_simdspec.py FpRows: the host's own MXCSR_MASK); simdcheck never sets it
 
 
 def cpuref_mxcsr_mask():
     if _TEST_MASK: return _TEST_MASK[0]
-    m = re.search(r'^#define\s+FNVL_CPUREF_MXCSR_MASK\s+(0[xX][0-9a-fA-F]+)u?\b', open(_CPUMODEL).read(), re.M)
-    if not m: raise Uncertified('CPUREF has no mxcsr_mask')
-    return int(m.group(1), 16)
+    try: v = json.load(open(_CPUID_MODEL)).get('mxcsr_mask')
+    except OSError: v = None
+    if v is None: raise Uncertified('CPUREF has no mxcsr_mask')
+    return int(v, 16)
 
 
 def masks_set(mx): return Extract(12, 7, mx) == K(0x3F, 6)          # ASM-204 (I-FPMASK): IM DM ZM OM UM PM
