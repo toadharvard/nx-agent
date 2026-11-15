@@ -261,6 +261,14 @@ template<class UT, int FB> static inline bool fx_tiny_after(bool div, UT a, UT b
     top=E+d+P-1; if(up && R+1==((u128)1<<P)) top++; }
   else top=E+L-1;
   return top < 1-BIAS; }
+/* fx_pre: the pre-computation exception flags of every SSE floating-point operation, the C twin of dsl._pre, in the priority order of SDM Vol 1 11.5.2.1 (Table 11-3, "SIMD Floating-Point Exception Priority"):
+   row 1 #I of a signalling NaN operand; row 2 a QNaN operand (no exception, nothing below is checked); row 3 other #I (an invalid operation, or a QNaN operand of MINPS MAXPS COMISS and the CMPPS predicates
+   lt le nlt nle: sig_qnan); row 4 #Z; row 5 #D (a denormal operand, DAZ clear).  A lower row's flag is not set when a higher row applies.  Returns IE 1, DE 2, ZE 4 (MXCSR bit values). */
+static inline u32 fx_pre(bool snan, bool qnan_op, bool sig_qnan, bool other_inv, bool zdiv, bool denorm){
+  if(snan || (qnan_op && sig_qnan) || other_inv) return 1u;
+  if(qnan_op) return 0u;
+  if(zdiv) return 4u;
+  return denorm ? 2u : 0u; }
 /* dsl.fp ops 5..16: min max, the eight CMPPS predicates, comi ucomi (fnvlift/dsl.py CMPPRED, _fp_smt): no rounding, integer compares of the bit patterns (a, b after DAZ; ao, bo the operands as read, for DE); the result's flags are IE and DE only.
    The value is the min / max result, the all-ones / zero predicate mask, or ZF<<2 | PF<<1 | CF of COMISS / UCOMISS. */
 template<class UT, int FB> static inline u128 fx_dsl_fcmp(u32 op, UT ao, UT bo, UT a, UT b, u32 mx){
@@ -271,14 +279,14 @@ template<class UT, int FB> static inline u128 fx_dsl_fcmp(u32 op, UT ao, UT bo, 
   auto key=[&](UT x)->long long { long long m=(long long)(x&~SGN); return (x&SGN) ? -m : m; };
   const bool un=isnan(a)||isnan(b), sn=issnan(a)||issnan(b), daz=(mx>>6)&1;
   const bool lt=!un && key(a)<key(b), eq=!un && key(a)==key(b), gt=!un && key(a)>key(b);
-  bool invalid; UT val;
-  if(op==5||op==6){ invalid=un; const bool bz=(a&~SGN)==0 && (b&~SGN)==0; val=un||bz ? b : (op==5 ? (lt?a:b) : (gt?a:b)); }
-  else if(op>=7&&op<=14){ const u32 k=op-7; const bool sig=k==1||k==2||k==5||k==6; invalid=sig?un:sn;
+  bool sig_qnan; UT val;
+  if(op==5||op==6){ sig_qnan=true; const bool bz=(a&~SGN)==0 && (b&~SGN)==0; val=un||bz ? b : (op==5 ? (lt?a:b) : (gt?a:b)); }
+  else if(op>=7&&op<=14){ const u32 k=op-7; sig_qnan=k==1||k==2||k==5||k==6;
     const bool t=k==0?eq : k==1?lt : k==2?(lt||eq) : k==3?un : k==4?(un||!eq) : k==5?(un||!lt) : k==6?(un||!(lt||eq)) : !un;
     val=t?(UT)~(UT)0:(UT)0; }
-  else { invalid=(op==15)?un:sn; val=(UT)(((un||eq)?4u:0u)|(un?2u:0u)|((un||lt)?1u:0u)); }
-  const bool de=!daz && !invalid && (issub(ao)||issub(bo));
-  return ((u128)((invalid?1u:0u)|(de?2u:0u))<<W)|val; }
+  else { sig_qnan=(op==15); val=(UT)(((un||eq)?4u:0u)|(un?2u:0u)|((un||lt)?1u:0u)); }
+  const u32 pre=fx_pre(sn, un, sig_qnan, false, false, !daz && (issub(ao)||issub(bo)));
+  return ((u128)pre<<W)|val; }
 template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a, UT b, u32 mx){
   const int W=sizeof(UT)*8; const UT SGN=(UT)1<<(W-1), FM=((UT)1<<FB)-1, EX=(UT)((((UT)1<<(W-1))-1)&~FM), QB=(UT)1<<(FB-1), MINN=(UT)1<<FB;
   const bool daz=(mx>>6)&1, um=(mx>>11)&1, ftz=(mx>>15)&1;
@@ -292,7 +300,7 @@ template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a
   const UT indef=(UT)(SGN|EX|QB);
   UT val; u32 fl=0;
   if(isnan(a)||(!unary&&isnan(b))){
-    val=isnan(a)?(UT)(a|QB):(UT)(b|QB); fl=(issnan(a)||(!unary&&issnan(b)))?1u:0u;
+    val=isnan(a)?(UT)(a|QB):(UT)(b|QB); fl=fx_pre(issnan(a)||(!unary&&issnan(b)), true, false, false, false, false);
     return ((u128)fl<<W)|val; }
   FOWN_SSE(); c->mxcsr|=sse_live(); sse_fpcr(mx); fnvl_fp_x87_clear();
   FT x, y, r; __builtin_memcpy(&x,&a,sizeof x); __builtin_memcpy(&y,&b,sizeof y);
@@ -302,19 +310,44 @@ template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a
   const u32 hf=fnvl_fp_x87_flags(); fnvl_fp_x87_clear();
   const bool ie=hf&1u, ze=(hf>>2)&1u, oe=(hf>>3)&1u, pe=((hf>>5)&1u)!=0;
   __builtin_memcpy(&val,&r,sizeof val);
-  if(ie){ sse_fpcr(mx); return ((u128)1u<<W)|indef; }
-  const bool de=!daz && (issub(ao)||issub(bo));
+  const u32 pre=fx_pre(false, false, false, ie, ze, !daz && (issub(ao)||issub(bo)));
+  if(pre&1u){ sse_fpcr(mx); return ((u128)1u<<W)|indef; }
   bool tiny=false;
   if((UT)(val&~SGN)<=MINN){                                         /* a tiny-after-rounding result is at most the smallest normal: add / sub there are exact (a multiple of the subnormal step), mul / div decide exactly in integers, sqrt is never tiny */
     if(op<=1) tiny=(UT)(val&~SGN)!=0 && (UT)(val&~SGN)<MINN;
     else if(op<=3) tiny=fx_tiny_after<UT,FB>(op==3,a,b,(mx>>13)&3u); }
   bool ue=tiny&&(pe||!um), pe2=pe||oe;
   if(ftz&&um&&tiny){ val&=SGN; ue=true; pe2=true; }
-  fl=(de?2u:0u)|(ze?4u:0u)|(oe?8u:0u)|(ue?16u:0u)|(pe2?32u:0u);
+  fl=pre|(oe?8u:0u)|(ue?16u:0u)|(pe2?32u:0u);
   return ((u128)fl<<W)|val; }
 static inline u128 fx_dsl_fp(u32 op, u32 w, u64 a, u64 b, u32 mx){
   return w==32 ? fx_dsl_fp_t<float,u32,23>(op,(u32)a,(u32)b,mx) : fx_dsl_fp_t<double,u64,52>(op,a,b,mx); }
+/* dsl.cvt (fnvlift/dsl.py cvt, _cvt_smt): kind 0 = signed int32 -> binary rw (CVTSI2SS CVTSI2SD CVTDQ2PS CVTDQ2PD CVTPI2PS), kind 1 = binary sw -> int32 (CVTSS2SI ... CVTTPS2DQ; trunc: toward zero, else mx.RC).
+   Software rounding by mx.RC (no FPCR): the value in the low rw bits (kind 0) or 32 bits (kind 1), the flags IE..PE (MXCSR bits 0-5) above it.  i2f binary32: the magnitude is cut to 24 significant bits by RC (tie: even), exactly representable, PE iff bits were dropped.
+   f2i: DAZ reads a denormal operand as a zero of its sign; NaN, infinity or a rounded value outside int32 -> 0x80000000 and IE (dsl._pre row 3: fx_pre(false,false,false,true,false,false)); else PE iff the rounded value is not the operand. */
+static inline u128 fx_dsl_cvt(u32 kind, u32 sw, u32 rw, u32 trunc, u64 a, u32 mx){
+  const u32 rc=(mx>>13)&3u;
+  if(kind==0){
+    const int i=(int)(u32)a; const bool neg=i<0; const u32 m=neg ? 0u-(u32)i : (u32)i;
+    if(rw==64){ const double r=(double)i; u64 v; __builtin_memcpy(&v,&r,8); return (u128)v; }
+    u32 mag=m; bool inex=false; int L=0; for(u32 t=m;t;t>>=1) L++;
+    if(L>24){ const int sh=L-24; const u32 low=m&((1u<<sh)-1u), half=1u<<(sh-1), tr=m-low, up=tr+(1u<<sh); inex=low!=0; bool u=false;
+      if(rc==0) u=low>half||(low==half&&((tr>>sh)&1u)); else if(rc==1) u=neg&&inex; else if(rc==2) u=!neg&&inex;
+      mag=u?up:tr; }
+    float r=(float)mag; if(neg) r=-r; u32 v; __builtin_memcpy(&v,&r,4);
+    return ((u128)(inex?32u:0u)<<32)|v; }
+  double x; const bool d32=sw==32; const u32 daz=(mx>>6)&1u; bool nan, inf;
+  if(d32){ u32 b=(u32)a; const u32 e=(b>>23)&0xffu, f=b&0x7fffffu; nan=e==0xffu&&f; inf=e==0xffu&&!f; if(daz&&e==0&&f) b&=0x80000000u; float t; __builtin_memcpy(&t,&b,4); x=(double)t; }
+  else { u64 b=a; const u32 e=(u32)(b>>52)&0x7ffu; const u64 f=b&0xfffffffffffffull; nan=e==0x7ffu&&f; inf=e==0x7ffu&&!f; if(daz&&e==0&&f) b&=0x8000000000000000ull; __builtin_memcpy(&x,&b,8); }
+  const double r=trunc ? __builtin_trunc(x) : rc==0 ? __builtin_roundeven(x) : rc==1 ? __builtin_floor(x) : rc==2 ? __builtin_ceil(x) : __builtin_trunc(x);
+  const bool inr=!nan&&!inf&&r>=-2147483648.0&&r<2147483648.0;
+  const u32 val=inr?(u32)(int)r:0x80000000u; const u32 fl=fx_pre(false,false,false,!inr,false,false)|((inr&&r!=x)?32u:0u);
+  return ((u128)fl<<32)|val; }
 static inline int sse_sat(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
+/* dsl.tab: one entry of the reference CPU's table, read through the pinned rcptab.c function itself (the unit rt/rcptab.c, certified by rcptab.cert.json): an input with exponent 126 (rcp; 253-126 = 127) or 126 + bit 10 of the index (rsqrt) puts the entry
+   in bits 11..22 of the result. */
+static inline u32 fnvl_tab_rcp(u32 i){ return (fnvl_rcp32(0x3f000000u|((i&0x7ffu)<<12))>>11)&0xfffu; }
+static inline u32 fnvl_tab_rsqrt(u32 i){ return (fnvl_rsqrt32(((126u|((i>>10)&1u))<<23)|((i&0x3ffu)<<13))>>11)&0xfffu; }
 static inline u64 sse_sad(const u8*a,const u8*b){ u32 s=0; for(int i=0;i<8;i++) s+=a[i]>b[i]?a[i]-b[i]:b[i]-a[i]; return s; }
 static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=(u32)(s.b[i]>>7)<<i; return r; }
 /* ---- Integer / system helpers (W14). ---- */
