@@ -7,7 +7,7 @@ Reference model plug-in: a module of the MODELS table below (proof/model_sail.py
     model_post(code: bytes, pre: dict) -> dict
   pre  = {'regs': {'eax'..'edi': z3 BitVec(name,32)}, 'flags': {'cf','pf','af','zf','sf','of': z3 BitVec(name,1)},
           'mem': z3 Array(BV32->BV8) named 'mem', 'eip': BitVecVal(0x401000,32)}      (code is ONE instruction)
-  ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': post-state Array, 'eip': BV32, optional 'assume': Bool (pre-states the model is defined on)}
+  ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': post-state Array, 'eip': BV32, optional `assume`: Bool (pre-states the model is defined on)}
   Other pre-state names shared with the model by name: fs_base, gs_base (BV32), rflags_other (BV32; DF = bit 10) which prove.py maps onto the DSL inputs df / flo.
   A model that cannot express the instruction raises an exception whose class is named ModelGap (result model-gap).
 Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) assume => DSL does not fault, and (2) for forms

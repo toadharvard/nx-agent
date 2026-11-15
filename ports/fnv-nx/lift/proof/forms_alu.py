@@ -1,7 +1,7 @@
 """Arithmetic / logic / shift / bit / multiply / divide families (see forms.py)."""
 from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
 from proof.forms import Op, addoff, af, ea, handler, mload, pzs, rd, store_op, undef, wr
-from proof import faults
+from fnvlift import faults
 
 UNDEF_LOGIC = 'AND/OR/XOR/TEST: "The state of the AF flag is undefined."'
 UNDEF_MUL = 'MUL/IMUL: "The SF, ZF, AF, and PF flags are undefined."'
@@ -9,7 +9,7 @@ UNDEF_SHAF = 'SHL/SHR/SAR/SHLD/SHRD: "The AF flag is undefined" (for non-zero co
 UNDEF_SHCF = 'SHL/SHR: "CF ... is undefined for SHL and SHR instructions where the count is greater than or equal to the size (in bits) of the destination operand."'
 UNDEF_DIV = 'DIV/IDIV: "The CF, OF, SF, ZF, AF, and PF flags are undefined."'
 UNDEF_BT = 'BT/BTS/BTR/BTC: "The OF, SF, AF, and PF flags are undefined." (ZF is unaffected)'
-UNDEF_BS = 'BSF/BSR: "The CF, OF, SF, AF, and PF flags are undefined" (ZF = 1 iff source is 0; destination undefined then).'
+UNDEF_BS = 'BSF/BSR: "The CF, OF, SF, AF, and PF flags are undefined" (ZF = 1 iff source is 0; destination unchanged then: DEFPRIOR).'
 
 @handler('add', 'adc', 'sub', 'sbb', 'cmp', 'and', 'or', 'xor', 'test')
 def alu(c):
@@ -60,7 +60,7 @@ def shift(c):
         of = {'shl': msb(r) ^ cf, 'shr': msb(a), 'sar': C(0, 1)}[m]
         # SHL/SHR: CF is undefined when the masked count >= the operand size (SDM); SAR is defined for every count
         F.flag('cf', keep('cf', cf), when=ult(n32, w) if m != 'sar' else None); F.flag('of', keep('of', of), when=one)
-        F.undefined('af', UNDEF_SHAF); pzs(F, r, keep)
+        F.undefined('af', UNDEF_SHAF, when=nz); pzs(F, r, keep)      # AF undefined for a non-zero count; count 0: every flag unchanged (SDM)
     wr(F, d, r)
 
 @handler('rcl', 'rcr')
@@ -74,11 +74,16 @@ def rotc(c):
 
 @handler('shld', 'shrd')
 def shld(c):
-    F, d, s = c.F, c.ops[0], c.ops[1]; assert d.w == 32; a, b = rd(d), rd(s); n = count(c, 2); nz = ~eq(n, 0)
+    """SHLD/SHRD (SDM Vol 2): the count is masked to 5 bits (0..31). Count 0: nothing changes. Count 1..w (w the operand size): result and CF computed, OF only for a 1-bit shift.
+    "If the count is greater than the operand size, the result [destination] and the flags are undefined" (a 16-bit operand with count 17..31): the destination keeps its prior
+    value (DEFPRIOR: the write has when = count <= w) and CF/OF/SF/ZF/PF are the constant 0 (DEF0: the writes have when = count <= w); AF is undefined for every non-zero count."""
+    F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; assert s.w == w and w in (16, 32); a, b = rd(d), rd(s); n32 = count(c, 2); n = trunc(n32, w) if w < 32 else n32; nz = ~eq(n32, 0)
+    ok = ult(n32, w + 1) if w < 32 else None                      # count <= operand size: the SDM defines result and flags (always true for w = 32: count <= 31)
     keep = lambda f, new: ite(nz, new, V(f, 1))
-    if c.m == 'shld': r = shl(a, n) | lshr(b, C(32, 32) - n); cf = msb(shl(a, n - 1))
-    else: r = lshr(a, n) | shl(b, C(32, 32) - n); cf = bit(lshr(a, n - 1), 0)
-    F.flag('cf', keep('cf', cf)); F.flag('of', keep('of', msb(r) ^ msb(a)), when=ult(n, 2)); F.undefined('af', UNDEF_SHAF); pzs(F, r, keep); wr(F, d, r)
+    if c.m == 'shld': r = shl(a, n) | lshr(b, C(w, w) - n); cf = msb(shl(a, n - 1))
+    else: r = lshr(a, n) | shl(b, C(w, w) - n); cf = bit(lshr(a, n - 1), 0)
+    one = ult(n32, 2)
+    F.flag('cf', keep('cf', cf), when=ok); F.flag('of', keep('of', msb(r) ^ msb(a)), when=one); F.undefined('af', UNDEF_SHAF, when=nz); pzs(F, r, keep, ok); wr(F, d, r, ok)
 
 @handler('bt', 'bts', 'btr', 'btc')
 def bt(c):
@@ -102,7 +107,10 @@ def bs(c):
     m = {'tzcnt': 'bsf', 'lzcnt': 'bsr'}.get(c.m, c.m)
     F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; a = rd(s); r = C(0, w)
     for i in (range(w - 1, -1, -1) if m == 'bsf' else range(w)): r = ite(bit(a, i), C(i, w), r)
-    z = eq(a, 0); F.flag('zf', z); undef(F, ('cf', 'of', 'sf', 'af', 'pf'), UNDEF_BS)
+    # a zero source (the pinned model defines it, L3b IR 7c097d301 / ca469d14, ACL2 bit.lisp 3ccb342c): the destination is unchanged (DEFPRIOR: the write has when = ~z), ZF = 1, and
+    # CF/OF/SF/AF/PF are undefined (DEF0: 0) for EVERY source (SDM "Flags Affected" of BSF/BSR; ACL2 bit.lisp 3ccb342c 818-822 / 939-943 set them undefined unconditionally). Every width (16/32); tzcnt/lzcnt alias while CPUREF's BMI1/ABM bits are clear.
+    z = eq(a, 0); F.flag('zf', z)
+    for f in ('cf', 'of', 'sf', 'af', 'pf'): F.undefined(f, UNDEF_BS)
     wr(F, d, ite(z, rd(d), r), when=~z)
 
 @handler('xadd')
@@ -152,7 +160,7 @@ def div(c):
         qu, ru = udiv(an, ad), urem(an, ad); q = ite(sn ^ sd, -qu, qu); r = ite(sn, -ru, ru)
         ovf = ~eq(q, sext(trunc(q, w), W))
     else: q, r = udiv(N, D), urem(N, D); ovf = ~eq(extract(q, W - 1, w), 0)
-    F.fault(faults.KIND['DE'], eq(D, 0) | ovf)                                  # SDM: #DE when the divisor is 0 or the quotient overflows
+    F.fault(faults.BYNAME['DE']['code'], eq(D, 0) | ovf)                                  # SDM: #DE when the divisor is 0 or the quotient overflows
     qd, rm = trunc(q, w), trunc(r, w)
     if w == 8: F.reg('eax', concat(extract(F.cur('eax'), 31, 16), concat(rm, qd)))
     elif w == 16: F.reg('eax', concat(extract(F.cur('eax'), 31, 16), qd)); F.reg('edx', concat(extract(F.cur('edx'), 31, 16), rm))

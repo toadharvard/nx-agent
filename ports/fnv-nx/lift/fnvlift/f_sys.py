@@ -4,7 +4,7 @@ software interrupts, into/bound/icebp, the privileged instructions, segment regi
 Faults are never trap paths: they go through fnvl_raise(code, at) / fnvl_raise_av (rt/seh.cc) exactly like #DE and #UD (f_flow.raise_site).
 
 THE TOTALITY RULE (W15). The lifter executes the instruction set of the REFERENCE CPU MODEL: a 32-bit Windows user-mode process (ring 3, CPL 3, IOPL 0, CR4.TSD = 0,
-flat segments), on the CPU that rt/cpumodel.c's cpuid describes (FPU VME DE PSE TSC MSR PAE MCE CX8 APIC SEP MTRR PGE MCA CMOV PAT PSE36 CLFSH MMX FXSR SSE SSE2, NX; leaf 1 ECX = 0,
+flat segments), on the CPU that rt/cpumodel.c's cpuid describes (FPU VME DE PSE TSC MSR PAE MCE CX8 APIC SEP MTRR PGE MCA CMOV PAT PSE36 CLFSH MMX FXSR SSE SSE2 HTT, NX; leaf 1 ECX = 0,
 no leaf 7, no 0x80000001 ECX). Every instruction capstone decodes in 32-bit mode falls in exactly one class, and the class decides the body (proof: the classes are
 exclusive by their guards and exhaustive because the last one, UD, is the complement of everything before it):
   1. implemented with its SDM semantics (f_int, f_string, f_flow, f_x87*, f_sse, f_simd_int and the handlers below);

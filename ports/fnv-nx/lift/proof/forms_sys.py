@@ -9,26 +9,26 @@ KiTrap0D / Wine 9.0), the machine constants are rt/fnvl.h's.  Fault kinds (dsl.F
 from fnvlift.dsl import C, V, extract, ite, slt, uf, ult, zext
 from proof.forms import Op, ea, handler, rd, store_op, wr
 
-# the reference machine and the fault kinds: READ, never typed (faults.py = the integer macros of rt/fnvl.h; dsl.FAULTS = the DSL's kind table; f_sys.INT_VECTORS = the vector table)
+# the reference machine: RECORDED TEMPORARY, typed until L5's platform/declared/x86sys.json (the declared descriptor tables and DPL-3 vectors) exists; then READ from it (rt/fnvl.h carries the same values)
+GDTR_BASE, GDTR_LIMIT, IDTR_BASE, IDTR_LIMIT, LDTR_SEL, TR_SEL, CR0 = 0x80b95000, 0x03ff, 0x80b95400, 0x07ff, 0, 0x28, 0x80010033
+# the fault kinds: READ from the one fault table (fnvlift/faults.json via fnvlift/faults.py)
+from fnvlift.faults import BYNAME as _FT
 from fnvlift.f_sys import INT_VECTORS
-from proof import faults, privset
-GDTR_BASE, GDTR_LIMIT, IDTR_BASE, IDTR_LIMIT, LDTR_SEL, TR_SEL, CR0 = (faults.D['FNVL_' + n] for n in ('GDTR_BASE', 'GDTR_LIMIT', 'IDTR_BASE', 'IDTR_LIMIT', 'LDTR_SEL', 'TR_SEL', 'CR0'))
-KIND = faults.KIND
+from proof import privset
+KIND = {n: r['code'] for n, r in _FT.items()}
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP, K_ASSERT, K_DBGSRV, K_INTO_AT1 = (KIND[n] for n in ('BP', 'UD', 'BOUNDS', 'INTO', 'PRIV', 'AV', 'STEP', 'ASSERT', 'DBGSRV', 'INTO_AT1'))
 
 
 def _int_kind():
-    """vector -> fault kind, from f_sys.INT_VECTORS rows (FNVL_<NAME>, at offset): kind <NAME>, or <NAME>_AT1 when the row reports the address after the opcode byte; every other vector is #GP -> AV"""
+    """vector -> fault kind, from f_sys.INT_VECTORS rows (FNVL_<NAME>, at offset): kind <NAME>, or <NAME>_AT1 when the row reports the address after the opcode byte; every other vector is #GP -> AV
+    (recorded temporary: L5's x86sys.json DPL-3 record replaces f_sys.INT_VECTORS as the source)"""
     out = {}
     for vec, (c, off) in INT_VECTORS.items():
-        name = c[len('FNVL_'):] + ('_AT%d' % off if off else '')
-        out[vec] = KIND[name]
-        faults.code(c[len('FNVL_'):])      # the header has the code
+        out[vec] = KIND[c[len('FNVL_'):] + ('_AT%d' % off if off else '')]
     return out
 
 
 INT_KIND = _int_kind()
-
 
 @handler('arpl')
 def arpl(c):

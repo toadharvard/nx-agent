@@ -142,6 +142,17 @@ Everything that depends on the machine follows one fixed model, the same at ever
   fnv-nx-build.
 - `cpuid`: the fixed answer of the reference CPU. `rdtsc`: the platform's monotonic timer.
 
+### Undefined outputs: DEF0 and DEFPRIOR (orchestrator, 2026-11-12)
+
+- **DEF0:** a flag output that the pinned Sail model leaves free (the flags of a Form's `undef`, and a flag write whose `when` can be false) is the constant 0 in the emitted code.
+- **DEFPRIOR:** a free non-flag output (a register write whose `when` can be false) keeps its pre-state value: the emitted write is conditional on `when`.
+- **Basis:** refinement of the pinned model only. The model allows any value for a free output, so 0 / the pre-state value is one of its behaviours. Matching a reference CPU is not part of the proof. Certificates per (shape, output) are L3b's.
+- **No third rule:** a free output that neither rule covers is `uncovered` and the check is red. The one emitter is `Form.to_c_inline` (and `to_c`); hand handlers are not covered.
+- **Check:** `lift/gates/def_check.py` reads back the emitted lines of every Form (all decoded shapes of the images); test: `test_def0_defpior_emission` in `lift/gates/tests/test_gate_flags.py`.
+- **Conditional undefined (`Form.undefined(name, sdm, when=cond)`):** emitted `f = cond ? 0 : prior`; the prover checks cond ⇒ model free (0 refines) and ¬cond ⇒ prior. Class: the SDM leaves AF (shl/shr/sar/shld/shrd) undefined only when the count is nonzero; OF of shifts/rotates is written only for count 1 (`write_when`); rotates at count 0 leave flags unchanged. The per-mnemonic table is `by_mnemonic` in the def_check report.
+- **`Form.model_gap`:** marks bsf/bsr (zero source: destination and non-ZF flags undefined; the pinned model cannot state it; L3b batched IR bump). A gap Form is not certified by DEF0.
+- **Global counts (5 of 7 images, facts 163ec389; db708d738):** shapes 25036, sites 5489535; Forms 18572 (4945146 sites); no Form 6464 (544389 sites); Forms with free outputs 3828; DEF0 flag outputs 5895 (445999 sites); DEFPRIOR 0; uncovered 0; Forms with `when=` 255 (22502 sites); model_gap Forms 0 (no bsf/bsr shape occurs in these 5 images); unmapped fault codes 0. DEF0 certificates pending (owner L3b): status red until they land. Re-run over 7 images when the facts commit adds d3dx9_31 and atimgpud.
+
 ## Faults and exceptions (owner order 2026-11-10)
 
 No trap paths. Whatever the x86 code does on the CPU, the lifted code does:
