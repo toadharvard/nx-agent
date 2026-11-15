@@ -13,6 +13,18 @@
     "ports/fnv-nx/lift/fnvlift/dsl.py"
    ]
   },
+  "test_formgate_real.py": {
+   "references": [
+    {
+     "kind": "external",
+     "name": "certs",
+     "path": "certs/certs.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/formgate.py"
+   ]
+  },
   "test_gate_fpexact.py": {
    "references": [
     {
