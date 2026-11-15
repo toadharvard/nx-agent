@@ -322,7 +322,7 @@ not declare, a path that is no file inside the external (`..` included), a `.` p
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
 
 ### Objects selected by declaration (`objects_of` with `target`, `origin`)
-`objects_of: {"except": [R...], "target": "guest"|"host", "origin": "native"|"lifted"}`: `target` and `origin` (both optional) select the admitted product roots by their
+`objects_of: {"target": "guest"|"host", "origin": "native"|"lifted"}`: `target` and `origin` (both optional) select the admitted product roots by their
 admit.json declaration: `target` equals the entry's `target`, `origin` is `origin_class(cxx_origin)` (native = `"native"` or undeclared, lifted = `{lifted_by, pack}`). A selecting stage
 also leaves out every root that depends on the producing root through `link.roots`, the declared loader or `uses`, transitively (`depends_on`), so the consumer of the
 stage's output is never in its input set: no `except` list and no cycle. `contract/facts` selects `{"target": "guest", "origin": "native"}` (the native roots' objects, whose
@@ -333,17 +333,19 @@ stage's output is never in its input set: no `except` list and no cycle. `contra
 `{target: guest, origin: native, dependents_of: contract/facts}` and proves (`nobinding.py`: bind over those objects with facts' `n1` output, red on any bound symbol)
 that the roots facts leaves out contribute no row to `native.tsv`; it cannot be a stage of facts itself (those roots' builds need `native`: a cycle).
 
-### Objects of every admitted product root (`objects_of`) and `forbid_sections`
-A generate stage may carry `objects_of: {"except": [R...]}` (every R an admitted product root). Its inputs then hold, at `/objs/<root with / as __>/<unit>.o`,
-the objects of every admitted product root with a recipe except the root itself and the R listed: the set is read from admit.json at the commit, so a
-newly admitted root enters the next build and no list names it. Each such root is built as a product root and must be green (else red, stage
-`objects_of:<root>`); the stage key holds the objects' content. A root that takes such a fact through `uses` is in the producer's reading set, so it must be
-in `except` (else the cycle check is red), and it must carry `forbid_sections: [".name", ...]`: an object of the root with a named section is red (stage
-`forbid:<root>`). The exception then loses nothing: the excepted root cannot hold what the fact collects.
+### Objects of every admitted product root (`objects_of`): the fact universe
+A generate stage may carry `objects_of: {...}` (every key optional: `target`, `origin`, `dependents_of`, `section`). Its inputs then hold, at `/objs/<root with / as __>/<unit>.o`,
+the objects of the stage's **fact universe**: every admitted product root with a recipe except the root itself and every root that depends on it (`depends_on`:
+`link.roots`, the declared loader, `uses` and `objects_of`, transitively), the consumers of the fact. The universe is a rule over admit.json and the uses graph at
+the commit: a newly admitted root enters the next build, and no recipe excludes a root by name (a key `except` is a check error). Each universe root is built as a
+product root and must be green (else red, stage `objects_of:<root>`); the stage key holds the objects' content.
+`section` (not with `dependents_of`) names the fact section the stage collects. The build appends `--section NAME` to the tool's arguments: the recipe is the one place the
+name is written. A root that depends on the producer is outside its universe, so its objects can contribute nothing to the fact; therefore the build requires that none of
+its objects holds the section, red stage `forbid:<root>` (`recipe.fact_sections`, derived from the admitted recipes: no recipe names the section for the consumer).
 `lift/descs` is this rule's first use: its tool collects the `.fnvnx.disp` sections (one `conv:ret:args` descriptor per line, sorted, unique per object,
 LF-terminated, ASCII; an absent section is no indirect call) into the sorted union `descs.tsv`, output `descs`. A malformed section is red at the
-generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`),
-is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
+generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`);
+it is outside the universe because it uses descs, and the build forbids `.fnvnx.disp` in its objects.
 
 ### errno (objstub, derived, no recipe key)
 How the root's libc reaches `errno` is derived per root: objstub compiles `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler and unit flags and reads the object (`errno_probe`): a call relocation to a symbol X is the accessor, a TLS relocation to Y is the thread-local form. The final ELF is then judged (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image). A body that cannot be judged (a data island, a word LLVM rejects, an odd size) is the finding `unjudged`; the TLS form is `unjudged` for the root. Nothing is skipped.

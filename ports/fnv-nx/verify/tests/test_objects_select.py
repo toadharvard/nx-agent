@@ -53,8 +53,10 @@ with tempfile.TemporaryDirectory() as repo:
     allp = sorted(r for r, e in ROOTS.items() if e.get("class") == "product" and r != F)
     check("descs -> consumer -> facts: bridges depends on facts through descs' objects_of (the cycle lift/rt -> facts -> bridges -> descs -> lift/rt)",
           recipe.depends_on(P + "bridges", F, ROOTS, repo))
-    check("no selector: every product root with a recipe, as before", recipe.objects_of_roots(gen(**{"except": []}), F, ROOTS, repo), allp)
-    check("except still removes a root", recipe.objects_of_roots(gen(**{"except": [P + "nat"]}), F, ROOTS, repo), [r for r in allp if r != P + "nat"])
+    univ = [r for r in allp if not recipe.depends_on(r, F, ROOTS, repo)]
+    check("no selector: the universe is every product root with a recipe minus the consumers of the producer (derived from the uses graph)",
+          recipe.objects_of_roots(gen(), F, ROOTS, repo), univ)
+    check("the consumers of the producer are outside its universe", all(P + r not in univ for r in ("consumer", "viaconsumer", "bridges")) and P + "nat" in univ, True)
     want = [P + "linker", P + "nat", P + "nat_undeclared"]
     check("target guest + origin native: declared native or undeclared origin, not lifted, not host, not a consumer of the producer (directly or through a chain)",
           recipe.objects_of_roots(gen(target="guest", origin="native"), F, ROOTS, repo), want)
