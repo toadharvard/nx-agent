@@ -30,7 +30,7 @@ PREFIX=${BRANCH_PREFIX:-l3b-lift/shapeprove}; PUBLISH=${PUBLISH:-1}
 SAILBASE="${GATE_CACHE:?GATE_CACHE (the verdict cache) is not set}/sail/$(sha256sum "$HERE/sail_pins.txt" | cut -c1-12)"      # the toolchain and its caches live in the verdict cache, keyed by the pins (proof/sail_pins.txt)
 WORKDIR=${WORK:-$SAILBASE/work}
 mkdir -p "$W/in"
-exec 9> "$W/in/.lock"; flock 9      # shards started together on one machine fetch the inputs one after the other
+{ flock 9      # shards started together on one machine stage the inputs one after the other; fd 9 exists only inside this group, so no child of the proving phase holds the lock
 T0=$(date +%s)
 fetch_branch() {   # fetch_branch <branch> <dir>: a worktree of the branch head in <dir> (reused when present)
     local d=$2
@@ -95,7 +95,6 @@ PY
     ( for m in $(cut -f1 "$W/in/shapes/KEYS.tsv" | grep -v '^#' | sort); do grep -hv '^#' "$W/in/shapes/$m/shapes.tsv" | cut -f1; done | LC_ALL=C sort -u ) > "$SHAPES.tmp"
     mv "$SHAPES.tmp" "$SHAPES"
 fi
-flock -u 9
 # 2b. the queue: published shards of every earlier run (all branches under $PREFIX/) are read; their valid certificates are skipped
 PUBD="$W/published"; rm -rf "$PUBD"; mkdir -p "$PUBD"
 if [ "$PUBLISH" = 1 ] || [ -n "${FETCH_PUBLISHED:-}" ]; then
@@ -111,6 +110,7 @@ QLINE=$(python3 -I "$HERE/certs_build.py" --queue "$SHAPES" --shards "$PUBD" --o
 QID=$(echo "$QLINE" | awk '{print $2}'); echo "queue $QLINE (from $(find "$PUBD" -name 'shapeprove_*.jsonl' | wc -l) published shard files)"
 [ "$(awk '{print $3}' <<< "$QLINE")" != 0 ] || { echo "SHAPEPROVE shard=$K/$N: queue empty, every encoding with a Form has a valid certificate"; exit 0; }
 fi
+} 9> "$W/in/.lock"
 ID="$(python3 -I "$HERE/certs_build.py" --id)-$QID"
 OUT="$W/out/$ID"; mkdir -p "$OUT"
 J="$OUT/shapeprove_${K}_of_$N.jsonl"
