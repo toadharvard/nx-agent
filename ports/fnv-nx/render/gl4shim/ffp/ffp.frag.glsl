@@ -1,13 +1,13 @@
 #version 460
 // D3D9 fixed-function PIXEL pipeline as ONE total program (rule RD5): behaviour is selected by the data block
-// NxFfpPsState (ffp_state.h, std140, UBO binding 3). Twin of ffp_ps_ref.c (same function names, same statements);
+// NxFfpPsState (ffp_state.h, std140, UBO NX_FFP_UBO_BINDING). Twin of ffp_ps_ref.c (same function names, same statements);
 // semantic source for open points: WineD3D ffp fragment generator, deviations in README.md.
 //
 // Interface (render/shaders/include/fnvnx_dk_layout.h): varyings by fnvnx_dk_varying_location: COLOR0 diffuse = 0,
 // COLOR1 specular = 1, TEXCOORDn = 2 + n (n = 0..7, all vec4). Fog factor at 18 is read by d9_epilogue.glsl.
 // D3DRS_SHADEMODE = FLAT: the vertex stage and this program must both qualify locations 0 and 1 `flat`; build the
 // program with NX_FFP_FLAT defined (nx-variants line below). Texcoord varyings are never flat.
-// Samplers (deko3d sampler binding = image slot): stage n 2D = n, CUBE = 8 + n, VOLUME = 16 + n. The host binds every
+// Samplers (deko3d sampler binding = image slot; the bindings are written by gen_glsl.py from fnvnx_dk_layout.h). The host binds every
 // slot (a stage's unused dimensionalities may point at any texture/sampler: they are never read) .
 // nx-variants: -= flat=NX_FFP_FLAT
 #ifdef NX_FFP_FLAT
@@ -16,20 +16,9 @@
 #define FFP_FLAT
 #endif
 struct FfpStage { uvec4 op; uvec4 carg; uvec4 aarg; vec4 cst; vec4 bump; vec4 lum; };
-layout (std140, binding = 3) uniform NxFfpPs { FfpStage stage[8]; vec4 tfactor; uvec4 spec; };
+layout (std140, binding = NX_FFP_UBO_BINDING) uniform NxFfpPs { FfpStage stage[8]; vec4 tfactor; uvec4 spec; };
 
-layout (binding = 0) uniform sampler2D t2d0;   layout (binding = 1) uniform sampler2D t2d1;
-layout (binding = 2) uniform sampler2D t2d2;   layout (binding = 3) uniform sampler2D t2d3;
-layout (binding = 4) uniform sampler2D t2d4;   layout (binding = 5) uniform sampler2D t2d5;
-layout (binding = 6) uniform sampler2D t2d6;   layout (binding = 7) uniform sampler2D t2d7;
-layout (binding = 8) uniform samplerCube tcb0;  layout (binding = 9) uniform samplerCube tcb1;
-layout (binding = 10) uniform samplerCube tcb2; layout (binding = 11) uniform samplerCube tcb3;
-layout (binding = 12) uniform samplerCube tcb4; layout (binding = 13) uniform samplerCube tcb5;
-layout (binding = 14) uniform samplerCube tcb6; layout (binding = 15) uniform samplerCube tcb7;
-layout (binding = 16) uniform sampler3D tvl0;  layout (binding = 17) uniform sampler3D tvl1;
-layout (binding = 18) uniform sampler3D tvl2;  layout (binding = 19) uniform sampler3D tvl3;
-layout (binding = 20) uniform sampler3D tvl4;  layout (binding = 21) uniform sampler3D tvl5;
-layout (binding = 22) uniform sampler3D tvl6;  layout (binding = 23) uniform sampler3D tvl7;
+//@SAMPLERS
 
 layout(location = 0) FFP_FLAT in vec4 vDiffuse;
 layout(location = 1) FFP_FLAT in vec4 vSpecular;

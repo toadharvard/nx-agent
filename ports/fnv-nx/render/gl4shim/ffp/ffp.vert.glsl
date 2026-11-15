@@ -1,6 +1,6 @@
 #version 460
 // D3D9 fixed-function VERTEX pipeline as ONE total program (rule RD5): behaviour is selected by the data block
-// NxFfpVsState (ffp_vs_state.h, std140, binding 4) and the world-matrix palette (binding 5); the driver UBO 2 supplies
+// NxFfpVsState (ffp_vs_state.h, std140, NX_FFP_VS_UBO_BINDING) and the world-matrix palette (NX_FFP_VS_PALETTE_BINDING); the driver UBO 2 supplies
 // posfix (fnvnx_dk_layout.h). Twin of ffp_vs_ref.c (same step order and statements); open points: ffp_vs_README.md.
 // Matrices: the D3D row-major bytes read as a GLSL mat4 are the TRANSPOSE, so D3D's  v * M  is written  M * v.
 // Attribute locations follow fnvnx_dk_attrib_location (POSITION 0, BLENDWEIGHT 1, BLENDINDICES 2, NORMAL 3, COLOR 4-5,
@@ -14,14 +14,14 @@
 #define FFP_FLAT
 #endif
 struct FfpLight { vec4 diffuse; vec4 specular; vec4 ambient; vec4 position; vec4 direction; vec4 att; vec4 cone; uvec4 kind; };
-layout (std140, binding = 4) uniform NxFfpVs {
+layout (std140, binding = NX_FFP_VS_UBO_BINDING) uniform NxFfpVs {
     uvec4 inputs; uvec4 rsBlend; uvec4 rsLight; uvec4 rsFog; uvec4 rsSrc; uvec4 rsMisc; uvec4 tci[2]; uvec4 ttff[2];
     vec4 fogp; vec4 point; vec4 point2; vec4 viewport; vec4 gAmbient;
     vec4 mDiffuse; vec4 mAmbient; vec4 mSpecular; vec4 mEmissive; vec4 mPower;
     mat4 view; mat4 proj; mat4 normalMat; mat4 texm[8]; vec4 clipPlane[6]; FfpLight light[8];
 };
-layout (std140, binding = 5) uniform NxFfpPalette { mat4 world[256]; };
-layout (std140, binding = 2) uniform NxVsDriver { vec4 posfix; };
+layout (std140, binding = NX_FFP_VS_PALETTE_BINDING) uniform NxFfpPalette { mat4 world[256]; };
+layout (std140, binding = FNVNX_DK_UBO_DRIVER) uniform NxVsDriver { vec4 posfix; };
 
 layout (location = 0) in vec4 aPos;   layout (location = 1) in vec4 aBW;   layout (location = 2) in vec4 aBI;
 layout (location = 3) in vec4 aNrm;   layout (location = 4) in vec4 aC0;   layout (location = 5) in vec4 aC1;

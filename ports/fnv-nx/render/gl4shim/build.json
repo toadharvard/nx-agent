@@ -27,12 +27,18 @@
    "tool": "ports/fnv-nx/render/gl4shim/ffp/gen_glsl.py",
    "args": [
     "/out/gen",
-    "/in/ports/fnv-nx/render/gl4shim/ffp"
+    "/in/ports/fnv-nx/render/gl4shim/ffp",
+    "/in/ports/fnv-nx/render/d3d9/ffp/ffp_state.h",
+    "/in/ports/fnv-nx/render/d3d9/ffp/ffp_vs_state.h",
+    "/in/ports/fnv-nx/render/shaders/translator/include/fnvnx_dk_layout.h"
    ],
    "inputs": [
     "ports/fnv-nx/render/gl4shim/ffp/ffp.vert.glsl",
     "ports/fnv-nx/render/gl4shim/ffp/ffp.frag.glsl",
-    "ports/fnv-nx/render/gl4shim/ffp/d9_epilogue.glsl"
+    "ports/fnv-nx/render/gl4shim/ffp/d9_epilogue.glsl",
+    "ports/fnv-nx/render/d3d9/ffp/ffp_state.h",
+    "ports/fnv-nx/render/d3d9/ffp/ffp_vs_state.h",
+    "ports/fnv-nx/render/shaders/translator/include/fnvnx_dk_layout.h"
    ],
    "outputs": [
     "gen/gl4shim_ffp.gen.h"
