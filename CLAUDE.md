@@ -521,3 +521,25 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
    - Every defect report names the enumeration, copy or second path that let it happen.
    - The fix replaces that with a derivation, a generation or a deletion (rules 1-3).
    - A fix of the single item alone is not accepted.
+
+## Orchestrator decision of 2026-11-15: memory ordering of runtime calls (binding for L1, L2)
+
+- The guest runtime (newlib, libstdc++, libgcc, libnx) is compiled by the game's compiler with every plugin. So a callee
+  whose body is C or C++ orders its own accesses, and a call to it is a plain call.
+  - There is no fenced call and no libcall or string-op record.
+  - Membership of a fold set never assigns a class.
+- newlib is built with `-DPREFER_SIZE_OVER_SPEED`, read from the one guest compiler record. With it, its aarch64 `.S`
+  string routines use their C sources.
+- The remaining assembly is derived from the built runtime objects: every object assembled from `.S` or `.s`. Each one
+  is closed by a stated class:
+  - it touches only jmp_buf and the frame (D1);
+  - it runs before threads;
+  - it is a kernel call;
+  - it is an atomic with its documented ordering.
+  An assembly object with a memory access outside these classes makes the runtime stage red. There is no allow-list.
+- The ordered C string loops switch off a fast path. They are `PD-RT-STRING-ORDERED` in `verify/PERFDEBT.json`
+  (owner L2), 0 at the first frame. The restoring rule gives each string routine a body whose ordering is proven equal
+  to the x86 semantics of the call in the source:
+  - where the exe's own CRT routine uses `rep movs`/`stos`, SDM §8.2.4 fast-string semantics (fenced at entry and
+    exit, unordered inside);
+  - elsewhere, ordering per x86 store, by size path.
