@@ -162,6 +162,16 @@
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "D9_SPEC"
+  },
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "FFP_LAYOUT"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "FFP_LAYOUT"
   }
  ]
 }

@@ -13,14 +13,8 @@
 #else
 #define FFP_FLAT
 #endif
-struct FfpLight { vec4 diffuse; vec4 specular; vec4 ambient; vec4 position; vec4 direction; vec4 att; vec4 cone; uvec4 kind; };
-layout (std140, binding = NX_FFP_VS_UBO_BINDING) uniform NxFfpVs {
-    uvec4 inputs; uvec4 rsBlend; uvec4 rsLight; uvec4 rsFog; uvec4 rsSrc; uvec4 rsMisc; uvec4 tci[2]; uvec4 ttff[2];
-    vec4 fogp; vec4 point; vec4 point2; vec4 viewport; vec4 gAmbient;
-    vec4 mDiffuse; vec4 mAmbient; vec4 mSpecular; vec4 mEmissive; vec4 mPower;
-    mat4 view; mat4 proj; mat4 normalMat; mat4 texm[8]; vec4 clipPlane[6]; FfpLight light[8];
-};
-layout (std140, binding = NX_FFP_VS_PALETTE_BINDING) uniform NxFfpPalette { mat4 world[256]; };
+//@UBO NxFfpVsState
+layout (std140, binding = NX_FFP_VS_PALETTE_BINDING) uniform NxFfpPalette { mat4 world[NX_FFP_MAX_BLEND_MATRICES]; };
 layout (std140, binding = FNVNX_DK_UBO_DRIVER) uniform NxVsDriver { vec4 posfix; };
 
 layout (location = 0) in vec4 aPos;   layout (location = 1) in vec4 aBW;   layout (location = 2) in vec4 aBI;
@@ -94,7 +88,7 @@ vec4 texStage(uint s, bool posT, vec3 normal, vec4 ec) {
             pad.x = src.x; pad.y = n > 1u ? src.y : (n == 1u ? 1.0 : 0.0);
             pad.z = n > 2u ? src.z : (n == 2u ? 1.0 : 0.0); pad.w = n > 3u ? src.w : (n == 3u ? 1.0 : 0.0);
         }
-        o = texm[s] * pad;
+        o = tex[s] * pad;
         if (cnt < 4u) o.w = 0.0;
         if (cnt < 3u) o.z = 0.0;
         if (cnt < 2u) o.y = 0.0;
@@ -127,7 +121,7 @@ void main() {
     } else {
         vec3 p = aPos.xyz, nn = nin;
         if (tween) {
-            float t = fogp.w;
+            float t = fog.w;
             vec3 p1 = (fl & 32u) != 0u ? aBW.xyz : vec3(0.0), n1 = (fl & 64u) != 0u ? aBI.xyz : vec3(0.0);
             p = (1.0 - t) * p + t * p1; nn = (1.0 - t) * nn + t * n1;
         }
@@ -159,7 +153,7 @@ void main() {
     vec4 o0, o1;
     if (!posT && rsBlend.w != 0u) {
         bool specOn = rsLight.y != 0u, localViewer = rsLight.z != 0u;
-        vec3 accA = gAmbient.rgb, accD = vec3(0.0); vec4 accS = vec4(0.0);
+        vec3 accA = ambient.rgb, accD = vec3(0.0); vec4 accS = vec4(0.0);
         for (uint i = 0u; i < 8u; i++) {
             if (i >= rsMisc.z) break;
             uint kind = light[i].kind.x;
@@ -213,7 +207,7 @@ void main() {
     else if (vmode == 0u) f = sat(c1.a);
     else {
         float d = rsFog.z != 0u ? sqrt(dot(ec.xyz, ec.xyz)) : abs(ec.z);
-        float s = fogp.x, e = fogp.y, dn = fogp.z;
+        float s = fog.x, e = fog.y, dn = fog.z;
         if (vmode == 3u) f = e != s ? (e - d) / (e - s) : (d <= e ? 1.0 : 0.0);
         else if (vmode == 1u) f = exp(-d * dn);
         else f = exp(-(d * dn) * (d * dn));

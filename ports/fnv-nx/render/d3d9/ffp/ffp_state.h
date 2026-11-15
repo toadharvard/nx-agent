@@ -6,17 +6,8 @@
  * over every bit pattern of every word: ffp_norm_op / ffp_norm_arg / ffp_norm_textype (ffp_ps_ref.h) give each
  * out-of-range value one defined meaning, in C and in GLSL alike.
  *
- * std140 layout (offsets in bytes, all vec4-aligned; sizeof == 800):
- *   0      NxFfpStage stage[8]   (96 bytes each)
- *     +0   u32 colorOp, alphaOp, resultArg, texType   D3DTSS_COLOROP, ALPHAOP, RESULTARG, bound texture type
- *     +16  u32 cArg0, cArg1, cArg2, ttff              D3DTSS_COLORARG0/1/2, TEXTURETRANSFORMFLAGS
- *     +32  u32 aArg0, aArg1, aArg2, pad               D3DTSS_ALPHAARG0/1/2
- *     +48  f32 constant[4]   D3DTSS_CONSTANT (D3DCOLOR) as r,g,b,a in [0,1]
- *     +64  f32 bump[4]       D3DTSS_BUMPENVMAT00, 01, 10, 11 (float bit patterns)
- *     +80  f32 lum[4]        D3DTSS_BUMPENVLSCALE, BUMPENVLOFFSET, 0, 0
- *   768    f32 tfactor[4]    D3DRS_TEXTUREFACTOR (D3DCOLOR) as r,g,b,a
- *   784    u32 specularEnable, pad[3]   D3DRS_SPECULARENABLE (any non-zero value = TRUE)
- * GLSL: uniform block binding NX_FFP_UBO_BINDING (3; fnvnx_dk_layout.h uses 0..2).
+ * The std140 layout is the struct: render/gl4shim/ffp/gen_glsl.py writes the GLSL block of NxFfpPsState from it (UBO NX_FFP_UBO_BINDING) and the offset of
+ * every member as typedef-char assertions (ffp_layout_ps.gen.h, included by ffp_state.c), so the C and GLSL layouts cannot differ.
  */
 #ifndef NX_FFP_STATE_H
 #define NX_FFP_STATE_H
@@ -49,28 +40,27 @@ enum { /* D3D9 D3DTSS_* indices (tss[stage][i]) */
 };
 enum { NX_RS_SPECULARENABLE = 29, NX_RS_TEXTUREFACTOR = 60, NX_RS_COUNT = 210 }; /* D3DRENDERSTATETYPE */
 
+/* indices of NxFfpStage.op / carg / aarg and NxFfpPsState.spec */
+enum { NX_FFP_OP_COLOROP = 0, NX_FFP_OP_ALPHAOP = 1, NX_FFP_OP_RESULTARG = 2, NX_FFP_OP_TEXTYPE = 3 };
+enum { NX_FFP_CARG0 = 0, NX_FFP_CARG1 = 1, NX_FFP_CARG2 = 2, NX_FFP_CARG_TTFF = 3 };
+enum { NX_FFP_AARG0 = 0, NX_FFP_AARG1 = 1, NX_FFP_AARG2 = 2, NX_FFP_AARG_PAD = 3 };
+enum { NX_FFP_SPEC_ENABLE = 0 };
+
 typedef struct NxFfpStage {
-    uint32_t colorOp, alphaOp, resultArg, texType;
-    uint32_t cArg0, cArg1, cArg2, ttff;
-    uint32_t aArg0, aArg1, aArg2, pad;
-    float constant[4];
-    float bump[4];
-    float lum[4];
+    uint32_t op[4];        /* D3DTSS_COLOROP, D3DTSS_ALPHAOP, D3DTSS_RESULTARG, bound texture type (NX_FFP_OP_*) */
+    uint32_t carg[4];      /* D3DTSS_COLORARG0/1/2, D3DTSS_TEXTURETRANSFORMFLAGS (NX_FFP_CARG*) */
+    uint32_t aarg[4];      /* D3DTSS_ALPHAARG0/1/2, pad (NX_FFP_AARG*) */
+    float constant[4];     /* D3DTSS_CONSTANT (D3DCOLOR) as r,g,b,a in [0,1] */
+    float bump[4];         /* D3DTSS_BUMPENVMAT00, 01, 10, 11 (float bit patterns) */
+    float lum[4];          /* D3DTSS_BUMPENVLSCALE, BUMPENVLOFFSET, 0, 0 */
 } NxFfpStage;
 
 typedef struct NxFfpPsState {
     NxFfpStage stage[NX_FFP_STAGES];
-    float tfactor[4];
-    uint32_t specularEnable, pad[3];
+    float tfactor[4];      /* D3DRS_TEXTUREFACTOR (D3DCOLOR) as r,g,b,a */
+    uint32_t spec[4];      /* D3DRS_SPECULARENABLE (any non-zero value = TRUE), 0, 0, 0 (NX_FFP_SPEC_ENABLE) */
 } NxFfpPsState;
 
-#define NX_FFP_SA(n, c) typedef char nx_ffp_sa_##n[(c) ? 1 : -1]
-NX_FFP_SA(stage_size, sizeof(NxFfpStage) == 96);
-NX_FFP_SA(stage_carg, offsetof(NxFfpStage, cArg0) == 16 && offsetof(NxFfpStage, aArg0) == 32);
-NX_FFP_SA(stage_const, offsetof(NxFfpStage, constant) == 48 && offsetof(NxFfpStage, bump) == 64);
-NX_FFP_SA(stage_lum, offsetof(NxFfpStage, lum) == 80);
-NX_FFP_SA(state_tf, offsetof(NxFfpPsState, tfactor) == 768 && offsetof(NxFfpPsState, specularEnable) == 784);
-NX_FFP_SA(state_size, sizeof(NxFfpPsState) == 800);
 
 /* Pure and total: tss[stage][D3DTSS_*] (8 x 33), rs[D3DRS_*] (>= NX_RS_COUNT entries; only TEXTUREFACTOR and
  * SPECULARENABLE are read), texType[stage] (NX_FFP_TEX_*; any other value is stored and means NONE). */

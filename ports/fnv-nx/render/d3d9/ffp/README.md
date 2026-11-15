@@ -1,12 +1,10 @@
 # D3D9 fixed-function pixel pipeline (T-FFP-PS, rule RD5)
 
 One program, behaviour selected by data. `ffp.frag.glsl` (deko3d GLSL, include `d9_epilogue.glsl` for alpha test + fog) and
-`ffp_ps_ref.c` (CPU twin, same function names) read `NxFfpPsState` (`ffp_state.h`, std140, 800 bytes, UBO `NX_FFP_UBO_BINDING`;
-fnvnx_dk_layout.h uses 0..2). Test: `python3 tests/l6/ffp_ps/test_ffp_ps.py`.
+`ffp_ps_ref.c` (CPU twin, same function names) read `NxFfpPsState` (`ffp_state.h`, std140, UBO `NX_FFP_UBO_BINDING`). Test: `python3 tests/l6/ffp_ps/test_ffp_ps.py`.
 
-## State layout (bytes)
-stage[8] x 96: +0 colorOp alphaOp resultArg texType | +16 cArg0 cArg1 cArg2 ttff | +32 aArg0 aArg1 aArg2 pad |
-+48 constant rgba | +64 bump m00 m01 m10 m11 | +80 lscale loffset 0 0; 768 tfactor rgba; 784 specularEnable + pad.
+## State layout
+The struct `NxFfpPsState` of `ffp_state.h` is the one record (member comments name the D3D9 states). `render/gl4shim/ffp/gen_glsl.py` writes the GLSL block from it and the std140 offset of every member as compile-time assertions.
 All D3D9 values are stored RAW (`nx_ffp_ps_state_from_d3d9` only converts D3DCOLOR and float bit patterns); the program is
 total over every bit pattern. Interface: varyings COLOR0=0, COLOR1=1, TEXCOORDn=2+n (vec4), fog at 18 (epilogue).
 Samplers: 2D = n, CUBE = 8+n, VOLUME = 16+n. SHADEMODE flat: build with `NX_FFP_FLAT` (locations 0,1 `flat`, the vertex stage

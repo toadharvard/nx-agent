@@ -41,8 +41,13 @@
     "ports/fnv-nx/render/shaders/translator/include/fnvnx_dk_layout.h"
    ],
    "outputs": [
-    "gen/gl4shim_ffp.gen.h"
+    "gen/gl4shim_ffp.gen.h",
+    "gen/layout/ffp_layout_ps.gen.h",
+    "gen/layout/ffp_layout_vs.gen.h"
    ]
   }
- ]
+ ],
+ "outputs": {
+  "FFP_LAYOUT": "gen/layout"
+ }
 }

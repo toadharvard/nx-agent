@@ -15,8 +15,7 @@
 #else
 #define FFP_FLAT
 #endif
-struct FfpStage { uvec4 op; uvec4 carg; uvec4 aarg; vec4 cst; vec4 bump; vec4 lum; };
-layout (std140, binding = NX_FFP_UBO_BINDING) uniform NxFfpPs { FfpStage stage[8]; vec4 tfactor; uvec4 spec; };
+//@UBO NxFfpPsState
 
 //@SAMPLERS
 
@@ -172,7 +171,7 @@ void main() {
         if (pmC) r.cur.xyz *= tex.xyz;
         if (pmA) r.cur.w *= tex.w;
         r.tex = tex;
-        r.cst = stage[s].cst;
+        r.cst = stage[s].constant;
 
         vec4 rc = ffp_op(cop, ffp_arg(c0, r), ffp_arg(c1, r), ffp_arg(c2, r), r);
         vec4 ra = ffp_op(aop, ffp_arg(a0, r), ffp_arg(a1, r), ffp_arg(a2, r), r);
