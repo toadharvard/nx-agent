@@ -153,10 +153,11 @@ class Build:
         if bad:
             raise UnitError("caller flags that change a stage's job (use --include for -I): %s" % bad)
         self.roots, self.iargs = [], []
+        mounted = set(getattr(a, "mounted", ()))   # `at` of the stage inputs the caller adds to the tool runtime (the directory outputs of other roots, include_uses)
         for spec in [a.src_root] + a.include:
             host, sep, at = spec.rpartition("@")
             if not sep and spec is not a.src_root:   # -I of a sandbox path inside a declared input of the tool runtime (an external)
-                if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/") for i in self.rt["inputs"]):
+                if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/") for i in self.rt["inputs"] + [{"at": m} for m in mounted]):
                     raise UnitError("--include %s: not HOST@/inc/N and inside no input of the tool runtime" % spec)
                 self.iargs.append("-I" + spec)
                 continue

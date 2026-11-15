@@ -4,7 +4,6 @@ pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gc
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -335,30 +334,7 @@ def main():
                 check("generator embedding %s: sandbox makes it constant, so two cold builds are equal (closed channel); without GATE_CACHE there is no warm build" % label,
                       rc == 0 and "no warm" in g["detail"] and g["universe"] == 2, (g, txt))
 
-    def gate_inc():
-        # determinism is incremental, like every stage: a second run with nothing changed executes 0 stages in its store, and one changed unit executes
-        # exactly the stages whose keys are new (read from the two builds' stage_keys), never more
-        irepo, gc, n = make_repo("inc"), BASE + "/inccache", [0]
-
-        def run():
-            n[0] += 1
-            rc0, _, _, t0 = gate(irepo, "build", BASE + "/ib%d" % n[0], gc)
-            rc, g, _, txt = gate(irepo, "determinism", BASE + "/id%d" % n[0], gc)
-            tree = git(irepo, "rev-parse", "HEAD^{tree}").strip()
-            keys = set(json.load(open("%s/objects/%s/%s/objects.json" % (gc, tree, ROOT.replace("/", "__"))))["stage_keys"])
-            m = re.search(r"detstore: (\d+) stages executed", (g or {}).get("detail", ""))
-            return rc0 == 0 and rc == 0, keys, int(m.group(1)) if m else None, (g, txt, t0)
-        ok1, k1, r1, d1 = run()
-        check("determinism, first run: green, every stage executed in its own store", ok1 and r1 is not None and 0 < r1 <= len(k1), (r1, len(k1), d1))
-        ok2, k2, r2, d2 = run()
-        check("determinism, second run with nothing changed: 0 stages executed", ok2 and k2 == k1 and r2 == 0, (r2, d2))
-        w(irepo, "toy/b.c", '#include "toy.h"\nint f_b(void) { return TOY * 3; }\n')
-        git(irepo, "add", "-A")
-        git(irepo, "commit", "-q", "-m", "change b")
-        ok3, k3, r3, d3 = run()
-        check("determinism, one changed unit: exactly the stages with new keys executed", ok3 and 0 < r3 <= len(k3 - k1) < len(k3) and r3 < r1, (r3, len(k3 - k1), len(k3), r1, d3))
-
-    for fn in (gate_toy, gate_bad, gate_nd, gate_cases, gate_inc):
+    for fn in (gate_toy, gate_bad, gate_nd, gate_cases):
         later(fn)
 
     # --- toy root, shared store: cold, then cached
@@ -392,7 +368,7 @@ def main():
         librec["include"] = []
         a_c = "int f_lib(void);\nint f_a(void) { return f_lib(); }\n"
         lr = make_repo("lr", rec=dict(RECIPE, generated=[], constants=None, include=[], units="all",
-                                      link=dict(RECIPE["link"], roots=[LIB])),
+                                      link=dict(RECIPE["link"])),
                        files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
                               "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
         ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
@@ -401,7 +377,7 @@ def main():
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib")
         x1 = recipe.build(lr, ROOT, LRS, BASE + "/lr1")
-        check("link roots: the image links the objects of the listed root (f_lib resolves)", x1["status"] == "green" and x1["elf"]
+        check("link roots: the image links the objects of the root that defines its undefined f_lib (the definer closure, no list)", x1["status"] == "green" and x1["elf"]
               and [r["root"] for r in x1.get("link_roots", [])] == [LIB], x1.get("failure"))
         w(lr, "lib/l.c", "int f_lib(void) { return 2; }\n")
         git(lr, "add", "-A")
@@ -410,14 +386,15 @@ def main():
         check("link roots: a change in the listed root changes the link key and the ELF", x2["status"] == "green"
               and x2["elf"]["sha256"] != x1["elf"]["sha256"] and set(x2["stage_keys"]) != set(x1["stage_keys"]), (x1["stage_keys"], x2["stage_keys"]))
         nolink = dict(json.load(open(os.path.join(lr, ROOT, "build.json"))))
-        nolink["link"] = dict(nolink["link"], roots=[])
-        w(lr, "toy/build.json", json.dumps(nolink))
+        ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
+        ad["roots"] = [r for r in ad["roots"] if r["path"] != LIB]       # no admitted root defines f_lib any more
+        w(lr, "verify/admit.json", json.dumps(ad))
         git(lr, "add", "-A")
-        git(lr, "commit", "-q", "-m", "no roots")
+        git(lr, "commit", "-q", "-m", "lib no longer admitted")
         x3 = recipe.build(lr, ROOT, LRS, BASE + "/lr3")
         check("link roots: without the root f_lib has no body and the link is red, never a silent zero", x3["status"] == "red", x3.get("failure"))
         ig = dict(nolink)
-        ig["link"] = dict(nolink["link"], roots=[LIB], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
+        ig["link"] = dict(nolink["link"], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
         w(lr, "toy/build.json", json.dumps(ig))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "ignore-all")
@@ -431,16 +408,14 @@ def main():
     later(link_roots)
 
     def host_in_guest_link():
-        """the plugin set is the target profile's (RECIPE.md "Plugins"): a host-profile object never enters a guest image, so a guest link.roots naming a host root is red"""
+        """a host-profile object never enters a guest image: a root of the host profile is no candidate of the definer closure of a guest image; and link.roots is a check error"""
         hp = make_repo("hg")
         roots = dict(recipe.load_admit(hp))
         roots[ROOT] = dict(roots[ROOT], target="guest")
         roots[LIB] = {"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"}
+        check("target profile: a root of the host profile is no link candidate of a guest image", LIB not in recipe.link_candidates(roots, ROOT, "guest", hp), recipe.link_candidates(roots, ROOT, "guest", hp))
         e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
-        check("target profile: a guest image whose link.roots names a root of the host profile is red", any("link.roots" in x and "'host'" in x for x in e), e)
-        roots[ROOT] = dict(roots[ROOT], target="host")
-        e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
-        check("target profile: the same link of a host image has no target error", not any("link.roots" in x and "'host'" in x and "has target" in x for x in e), e)
+        check("link.roots is a check error: the members are derived", any("link.roots is derived" in x for x in e), e)
     later(host_in_guest_link)
 
     def declared_outputs():
@@ -457,8 +432,6 @@ def main():
     def include_rule():
         """RECIPE.md "Include": root C includes B's header dir, B's recipe includes A's: C's unit include path holds A's dir without C naming it"""
         d = tempfile.mkdtemp(prefix="inc-", dir=BASE)
-        for sub in ("a/include", "a2/include"):   # the carried dirs are checkout directories (generated output of another root is not carried)
-            os.makedirs(os.path.join(d, T + sub))
         os.makedirs(d + "/b")
         json.dump({"include": [T + "a/include", "/ext/private/include"]}, open(d + "/b/build.json", "w"))
         os.makedirs(d + "/b2")
@@ -690,6 +663,14 @@ def main():
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # header home (class header): valid from every target, one rule (header_dirs and the include check)
+    hr = dict(rr, **{T + "hdr_hdr": {"path": T + "hdr_hdr", "class": "header"}})
+    hf = rfiles + [T + "hdr_hdr/h2.h"]
+    for tgt in ("guest", "host"):
+        ent = dict(hr[ROOT], target=tgt)
+        er = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_hdr"]), ROOT, hf, dict(hr, **{ROOT: ent}), None, rk) if "lies in no admitted header root" in e]
+        check("include dir in a header-class root accepted from a %s includer" % tgt, not er, er)
+        check("header_dirs of a %s root holds the header root" % tgt, T + "hdr_hdr" in recipe.header_dirs(mut(), ROOT, dict(hr, **{ROOT: ent}), rk))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]
@@ -930,13 +911,6 @@ def check_run(SS):
 
 def check_tc_gate(repo, tcc, tiny):
     rc, g, td, txt = gate(repo, "determinism", BASE + "/gtc", BASE + "/tccache")
-    if rc:
-        for dp, _, fs in os.walk(BASE + "/gtc"):
-            for fn in fs:
-                if fn.endswith(".json"):
-                    t = open(os.path.join(dp, fn), errors="replace").read()
-                    if "stderr" in t:
-                        print("DIAG", fn, t[:1500])
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"

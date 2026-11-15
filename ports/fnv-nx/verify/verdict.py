@@ -129,8 +129,6 @@ def _covers_verdict(g, st, u, present):
     seen = sorted(set(cv) & present)
     if st == "green" and u == 0 and seen:
         return "red", "vacuous: universe 0 while admitted roots of class %s exist" % ",".join(seen)
-    if st == "green" and u == 0:   # a gate that passes over nothing says so: no admitted root holds a class it covers (the class rule, not a gate's own claim)
-        return st, "vacuous: no admitted root of class %s" % ",".join(sorted(cv))
     return st, ""
 
 
@@ -184,8 +182,6 @@ def cmd_run(a):
             st2, why2 = _covers_verdict(g, st, u, present)
             if st2 != st:
                 st, why = st2, why2 if st == "green" else why + "; " + why2
-            elif st == "green" and why2:
-                why = why2
             res.append({"name": g["name"], "status": st, "universe": u, "certified": c,
                         "seconds": round(time.time() - t0, 3), "reason": why})
     finally:

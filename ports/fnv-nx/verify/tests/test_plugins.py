@@ -58,7 +58,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v] + [recipe.ANALYSIS_PLUGIN[1]]:   # the real plugin sources (and the analysis plugin every root with units builds)
+    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:   # the real plugin sources
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     for k, v in dict({ROOT + "/a.cc": SRC}, **(files or {})).items():

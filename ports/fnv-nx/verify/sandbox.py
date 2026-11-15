@@ -176,15 +176,6 @@ def launch(doc, run, root, srcs):
     pid = os.fork()
     if pid == 0:
         try:
-            # The forked child holds a copy of every descriptor that a sibling thread of the parent has open at this instant, among them files open for
-            # writing (a tool being copied into a store, an object being ingested). Such a copy makes an exec of that file by another stage fail with
-            # ETXTBSY for as long as the child lives, which is the whole of the mount setup. The child keeps only what it uses: stdin/out/err, the error
-            # pipe and the two logs.
-            prev = 2
-            for k in sorted({efd[0], efd[1], *logs}):
-                os.closerange(prev + 1, k)
-                prev = max(prev, k)
-            os.closerange(prev + 1, 1 << 16)
             # NEWNS|NEWUTS|NEWIPC|NEWPID|NEWNET
             _c(libc.unshare(0x00020000 | 0x04000000 | 0x08000000 | 0x20000000 | 0x40000000), "unshare")
             b = os.fork()
