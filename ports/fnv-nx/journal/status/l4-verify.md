@@ -202,3 +202,10 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - L2: 3 `_ZTV...fnvnx_ap8` vtable refs from a plugin rename whose universe includes libstdc++ objects the plugin did not build. The class rule is (a) the runtime built with the plugin, or (b) the plugin renames only symbols its own root defines.
 - Task R (w6): the one bounded 2026-11-15 pass over L4's universe. It lists hand-written sets, second copies of facts and second paths, each with a derivation, generation or deletion, marked path or after. Output: journal/status/l4-defects-0215.md.
 - Task P2 (w7): L4's files by path onto cand1.
+- 00:52: w6-r 71c548c80 (w12h 2898a3bb6): the set is unchanged at 22; 0 run, 344 hit. Orchestrator rulings:
+  - fnvnx_lift_imports_init belongs to L3a;
+  - the vtable fix is option (a), the runtime built with the same plugins in L2's none-elf build;
+  - the link is exe-keyed through the exe-facts external, L1's single pin in verify/contract_inputs.json.
+  - w12 implements the 8 loader tables as generated loader stages; mkidentity stays L5's tool, run as a stage.
+  - L1 facts producer: w22-facts 33e41190b (native.tsv has 0 rows today), available to L3a's native-disp.
+  - Target set: ∅.
