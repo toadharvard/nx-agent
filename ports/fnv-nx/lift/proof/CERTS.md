@@ -104,6 +104,16 @@ against `x87spec.py` (OWNER 10 for the parts no pinned formal model covers; the 
   fault table); the rule per row is `al` (ACL2 `inst-ac?`). QEMU/unicorn does not fault on it, so the emulator is not the reference for that cell.
 - The MMX rule is x87spec's (`mmx_exec_effect`, `mmx_write_effect`: TOP := 0, tags valid, a written mmN gets 0xFFFF in bits 79..64, SDM 1:9.6.2). QEMU leaves
   bits 79..64 of the destination alone, so the emulator test compares the 64 data bits only; the exponent bits are checked against the SDM rule.
+- Floating-point arithmetic rows (`ssefp.py`, mapped over the lanes by simdspec.py): add sub mul div min max sqrt, ps pd ss sd. Source: ACL2 `rtl/excps.lisp`
+  (`sse-binary-spec`, `sse-post-comp`, `sse-sqrt-spec`) and `fp/arith-spec.lisp` (`sse-max/min`): the same case analysis over operand classes (the cites are in
+  `acl2_cites.tsv`; `acl2_cite_check.py` resolves `rtl/` cites in books/rtl/rel11/lib). The value is z3's IEEE operation under MXCSR.RC (OWNER 8); DAZ, FTZ and the six
+  flags are the ACL2 cases; tiny / overflow / inexact come from one exact comparison (the same operation in a sort with 3 more exponent bits; RTN against RTP), not from a table.
+  Environment: the masks are set (ASM-204, `ssefp.masks_set`, in Res.env), so an unmasked-exception branch has no row. Reference: the host x86-64 CPU runs the row's own bytes
+  between ldmxcsr and stmxcsr (tests/test_simdspec.py FpRows: QEMU/unicorn does not keep the SSE flags and ignores FTZ, it is not a reference here). 8400 cases, 0 differences.
+  One recorded disagreement: with a NaN operand, min/max set only IE; ACL2's `sse-max/min` also sets DE for a denormal other operand. The CPU and SDM 1:4.9.2 (the invalid
+  operation takes precedence) decide.
+- The symbolic Form side does not exist for FP arithmetic yet (forms_simd.py has no handler: the lifter emits it in C++, fnvlift/f_sse.py), so simdcheck reports these shapes
+  `no-form`, not `proved`.
 
 ## Pinned IR 7c307464: hunks
 

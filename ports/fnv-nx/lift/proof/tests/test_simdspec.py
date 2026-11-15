@@ -11,6 +11,7 @@ from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UcError
 from unicorn.x86_const import *
 K = S.K
 N = int(os.environ.get('SIMD_N', '12'))
+FPN = int(os.environ.get('SIMD_FPN', '40'))
 
 
 def enc_of(pfx, op, mod3, mem_ok):
@@ -107,6 +108,63 @@ class Rows(unittest.TestCase):
         self.assertEqual((val(r.d['ftop']), val(r.d['ftag'])), (5, 0x1234))
         r = S.run(bytes([0x0F, 0x7F, 0x03]), d, None, K(0x10000, 32), {})             # movq [ebx], mm0: a read of mm0 still resets TOP and the tags (SDM 1:9.6.2)
         self.assertEqual((val(r.d['ftop']), val(r.d['ftag']), r.store[2]), (0, 0, 64))
+
+
+def fpval(rng, w):
+    """operand lanes that hit every class: normals, denormals, zeros, infinities, SNaN / QNaN, extremes, the rounding boundaries"""
+    eb, fb = (8, 23) if w == 32 else (11, 52)
+    cls = rng.randrange(9); sgn = rng.getrandbits(1) << (w - 1); fr = rng.getrandbits(fb); ex = rng.randrange(1, (1 << eb) - 1)
+    return sgn | {0: ex << fb | fr, 1: fr, 2: 0, 3: ((1 << eb) - 1) << fb, 4: ((1 << eb) - 1) << fb | fr | 1, 5: ((1 << eb) - 1) << fb | 1 << (fb - 1) | fr,
+                  6: ((1 << eb) - 2) << fb | fr, 7: 1 << fb | (fr & 3), 8: (rng.randrange(0, 4) + (1 << (eb - 1)) - 2) << fb | fr}[cls]
+
+
+def emu_fp(code, st, mem, mxcsr):
+    """the reference for MXCSR-dependent behaviour: the host CPU itself (x86-64 Intel), running the very bytes of the row between ldmxcsr and stmxcsr (QEMU / unicorn does not
+    maintain the SSE exception flags and ignores FTZ: it is not a reference here).  The row's encoding is re-addressed from [ebx] (r/m 3) to [rdi+16] (r/m 7, disp8 0x10);
+    code: movups xmm2,[rdi]; movups xmm5,[rdi+16]; stmxcsr [rdi+40]; ldmxcsr [rdi+32]; ROW; stmxcsr [rdi+36]; ldmxcsr [rdi+40]; movups [rdi+48],xmm2; ret"""
+    import ctypes, mmap
+    row = bytearray(code)
+    if len(row) >= 3 and row[-1] == ((2 << 3) | 3): row[-1] = 0x40 | (2 << 3) | 7; row += bytes([0x10])
+    body = (bytes([0x0F, 0x10, 0x17, 0x0F, 0x10, 0x6F, 0x10, 0x0F, 0xAE, 0x5F, 0x28, 0x0F, 0xAE, 0x57, 0x20]) + bytes(row) +
+            bytes([0x0F, 0xAE, 0x5F, 0x24, 0x0F, 0xAE, 0x57, 0x28, 0x0F, 0x11, 0x57, 0x30, 0xC3]))
+    mm = mmap.mmap(-1, 4096, prot=mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC)
+    mm.write(body)
+    buf = mmap.mmap(-1, 4096)
+    ptr = ctypes.addressof(ctypes.c_char.from_buffer(buf))
+    buf[0:16] = st['xmm2'].to_bytes(16, 'little'); buf[16:32] = (st['xmm5'].to_bytes(16, 'little') if len(code) and code[-1] >> 6 == 3 else mem)
+    buf[32:36] = mxcsr.to_bytes(4, 'little')
+    ctypes.CFUNCTYPE(None, ctypes.c_void_p)(ctypes.addressof(ctypes.c_char.from_buffer(mm)))(ptr)
+    out = {'xmm2': int.from_bytes(buf[48:64], 'little'), 'mxcsr': int.from_bytes(buf[36:40], 'little')}
+    for i in (0, 1, 3, 4, 5, 6, 7): out['xmm%d' % i] = st['xmm%d' % i]
+    return out
+
+
+class FpRows(unittest.TestCase):
+    def test_fp_arith_against_unicorn(self):
+        """add sub mul div min max sqrt, ps pd ss sd: value, MXCSR flags, rounding control, DAZ and FTZ, masks set (ASM-204), on operands of every class"""
+        rng = random.Random(11); fails = []; nc = 0
+        for (pfx, op, m3), R in sorted(S.ROWS.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+            if op not in S._FPOPS or (pfx, op, m3) != (pfx, op, None) or pfx not in S._FPFMT: continue
+            w, scalar = S._FPFMT[pfx]
+            for f in ('r', 'm'):
+                code = enc_of(pfx, op, None, True)[f]
+                for n in range(FPN):
+                    st = {'xmm%d' % i: sum(fpval(rng, w) << (w * j) for j in range(128 // w)) for i in range(8)}
+                    mem = rng.randbytes(16) if rng.random() < .5 else b''.join(fpval(rng, w).to_bytes(w // 8, 'little') for _ in range(128 // w))
+                    mx = 0x1F80 | rng.getrandbits(2) << 13 | (rng.getrandbits(1) << 6) | (rng.getrandbits(1) << 15) | rng.getrandbits(6) * rng.getrandbits(1)
+                    want = emu_fp(code, st, mem, mx)
+                    d = {k: K(v, 128) for k, v in st.items()}; d['mxcsr'] = K(mx, 32); d['ftop'] = K(0, 3); d['ftag'] = K(0, 16)
+                    for i in range(8): d['fr%d' % i] = K(0, 80)
+                    mw = S.mem_width(code) if f == 'm' else 0
+                    m = K(int.from_bytes(mem[:mw // 8], 'little'), mw) if f == 'm' else None
+                    r = S.run(code, d, m, K(0x10000, 32), {}); nc += 1
+                    if want is None: continue
+                    for k in ['xmm%d' % i for i in range(8)] + ['mxcsr']:
+                        got = val(r.d[k])
+                        if got != want[k]: fails.append((R.name, f, k, hex(want[k]), hex(got), hex(mx), [hex(x) for x in (st['xmm2'], st['xmm5'] if f == 'r' else int.from_bytes(mem, 'little'))]))
+        print('fp cases', nc, 'fails', len(fails))
+        for x in fails[:20]: print('FAIL', x)
+        self.assertEqual(fails, [])
 
 
 if __name__ == '__main__': unittest.main()

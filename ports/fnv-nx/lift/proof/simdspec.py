@@ -402,6 +402,53 @@ row('F2', 0x70, 'pshuflw', [cite('pshuf.lisp', 'x86-pshuflw', '(result (logapp 6
 row('F3', 0x70, 'pshufhw', [cite('pshuf.lisp', 'x86-pshufhw', '(pshufw (logtail 64 src) imm)))')], mw=128, imm=True)(_pshuf('hw'))
 
 
+# ==== floating-point arithmetic (ssefp.py: the lane functions; rows: add sub mul div min max sqrt x ps pd ss sd) =====================================================
+import ssefp as F
+
+_FPOPS = {0x58: 'add', 0x59: 'mul', 0x5C: 'sub', 0x5D: 'min', 0x5E: 'div', 0x5F: 'max', 0x51: 'sqrt'}
+_FPFMT = {'': (32, False), '66': (64, False), 'F3': (32, True), 'F2': (64, True)}
+_RTL = 'rtl/excps.lisp'
+
+
+def _fp_lane(name, a, b, mx, w):
+    if name == 'sqrt': return F.sqrt(b, mx, w)
+    if name in ('min', 'max'): return F.minmax(name, a, b, mx, w)
+    return F.binop(name, a, b, mx, w)
+
+
+def _fparith(name, w, scalar):
+    def f(e, d, m, a, g):
+        src = m if (scalar and e.mem) else _src(e, d, m, 128)
+        dst = xmm(d, e.reg); mx = d['mxcsr']
+        n = 1 if scalar else 128 // w
+        sl = [src] if (scalar and e.mem) else lanes(src, w)[:n]
+        dl = lanes(dst, w)[:n]
+        outs, fl = [], K(0, 6)
+        for x, y in zip(dl, sl):
+            o, fg = _fp_lane(name, x, y, mx, w); outs.append(o); fl = fl | fg
+        res = join(outs)
+        out = Concat(Extract(127, w, dst), res) if scalar else res
+        r = Res(put_xmm(d, e.reg, out))
+        r.d['mxcsr'] = mx | ZeroExt(26, fl)
+        r.env = And(r.env, F.masks_set(mx))
+        if e.mem and not scalar: r.fault = misaligned(a)
+        return r
+    return f
+
+
+for _op, _nm in _FPOPS.items():
+    for _p, (_fw, _sc) in _FPFMT.items():
+        _arith = 'x86-adds?/subs?/muls?/divs?/maxs?/mins?-Op/En-RM' if _sc else ('x86-addps/subps/mulps/divps/maxps/minps-Op/En-RM' if _fw == 32 else 'x86-addpd/subpd/mulpd/divpd/maxpd/minpd-Op/En-RM')
+        _q = {(32, True): '(sp-sse-add/sub/mul/div/max/min operation xmm xmm/mem (mxcsr x86))', (64, True): '(dp-sse-add/sub/mul/div/max/min operation xmm xmm/mem (mxcsr x86))',
+              (32, False): '(sp-sse-add/sub/mul/div/max/min operation xmm3 xmm/mem3 mxcsr))', (64, False): '(dp-sse-add/sub/mul/div/max/min operation xmm1 xmm/mem1 mxcsr))'}[(_fw, _sc)]
+        _sqrt = {(32, True): ('x86-sqrts?-Op/En-RM', '(sp-sse-sqrt xmm/mem (mxcsr x86))'), (64, True): ('x86-sqrts?-Op/En-RM', '(dp-sse-sqrt xmm/mem (mxcsr x86))'),
+                 (32, False): ('x86-sqrtps-Op/En-RM', '(sp-sse-sqrt xmm/mem3 mxcsr)'), (64, False): ('x86-sqrtpd-Op/En-RM', '(dp-sse-sqrt xmm/mem1 mxcsr)')}[(_fw, _sc)]
+        _c = [cite('fp/arithmetic.lisp', *_sqrt)] if _nm == 'sqrt' else [cite('fp/arithmetic.lisp', _arith, _q)]
+        _spec = ('sse-sqrt-spec', '(sse-sqrt-comp adaz mxcsr f)') if _nm == 'sqrt' else (('sse-max/min', '(sse-max/min-special kind1 sign1 exp1 implicit1 frac1') if _nm in ('min', 'max') else ('sse-binary-spec', '(sse-binary-comp op adaz bdaz mxcsr f)'))
+        _c.append(cite(_RTL if _nm not in ('min', 'max') else 'fp/arith-spec.lisp', *_spec))
+        row(_p, _op, _nm + ('s' if _sc else 'p') + ('s' if _fw == 32 else 'd'), _c, mw=(_fw if _sc else 128))(_fparith(_nm, _fw, _sc))
+
+
 # ==== execution ===============================================================================================================================================
 def run(code, d, m=None, a=None, gpr=None, imm=None):
     """the spec of one encoding (bytes) on the state d: Res"""

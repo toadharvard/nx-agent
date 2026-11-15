@@ -8,6 +8,7 @@ import os, re, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import simdspec as S
 REL = 'books/projects/x86isa/machine/instructions'
+RTL = 'books/rtl/rel11/lib'
 TSV = os.path.join(HERE, 'acl2_cites.tsv')
 
 
@@ -23,12 +24,13 @@ def cites():
 
 def resolve(root, c):
     f, inst, q = c
-    lines = open(os.path.join(root, REL, f), encoding='utf-8', errors='replace').read().split('\n')
-    start = next((i for i, l in enumerate(lines) if re.match(r'\(def-inst\s+' + re.escape(inst) + r'\s*$', l.strip()) or l.strip() == '(def-inst ' + inst), None)
+    base = RTL if f.startswith('rtl/') else REL                              # rtl/<file>: the RTL library the x86isa FP books include (books/rtl/rel11/lib)
+    lines = open(os.path.join(root, base, f[4:] if f.startswith('rtl/') else f), encoding='utf-8', errors='replace').read().split('\n')
+    start = next((i for i, l in enumerate(lines) if re.match(r'\((def-inst|defund|defun|define)\s+' + re.escape(inst) + r'(\s|$)', l.strip())), None)
     if start is None: return None
     nq = ' '.join(q.split())
     for i in range(start + 1, len(lines)):
-        if lines[i].startswith('(def-inst '): break
+        if lines[i].startswith(('(def-inst ', '(defund ', '(defun ', '(define ')): break
         if nq in ' '.join(lines[i].split()): return i + 1
     return None
 
