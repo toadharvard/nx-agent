@@ -602,3 +602,14 @@ Paused: w3b, w4, farm; no other work.
 - 00:45Z Defect reported to L1 (rule 8): concurrent GATE_CACHE external fetches raced, and one verdict came out red (SM 0/171).
     - Cause: the store's writes are not atomic.
     - Closing rule asked of L1: every store write goes to a temp path, is verified, and is then atomically renamed.
+- 00:47Z Construction pass done: w1b db026e9fb, journal/status/l6-render-construction.md on the w1b branch.
+    - 39 rows: (a) 19, (b) 22, (c) 3 covering 11 scripts. 28 on the path, 3 partly, 8 after.
+    - Homes: render/nxgpu, translator/include, translator/src (sdp.c moves there).
+    - w1b:
+        1. delete the lead-branch second homes and paths (render/backend, shaders/include, shaders/src, old patches, build.sh/CMake, shaders/cache, the sm_hand and d9wrap twins, ASSUMPTIONS.md);
+        2. private mirrors: MicrosoftDocs/win32 at a pinned commit, d3d9 SDK headers at a pinned version;
+        3. sm_table/sm_illegal derived by a stage; sm_rows and op_* become build outputs.
+    - w6, after w16c1: d3d9_spec, format table, rules, state lists and shim d3d9 headers derived; enums.gen.h becomes a build output; platform_hooks from L5; FFP GLSL literals from fnvnx_dk_layout.h.
+    - w5: the checker universe from the flag bits plus nx_pair_variant; hex() from lib/sha256.
+    - To L6A: #23, #29-#32 (gl4/dk scripts, gl.xml entry list, dk_facts).
+    - To the orchestrator: #38 cmath set (L5/L2).
