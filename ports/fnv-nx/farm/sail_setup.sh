@@ -6,7 +6,8 @@
 #                                                 tars of the pinned commits, z3-solver wheel, cargo vendor tar of isla, opam download cache)
 # Env: REMS (default /home/user/rems-project: isla/ sail-x86-from-acl2/), TOOLS (/home/user/l3tools: opam, opam-root, opam-repository,
 # cargo-home, isla-vendor), WORK (/home/user/l3work/proof), JOBS (2: opam/dune/cargo parallelism).  Idempotent: finished steps are skipped.
-# Phases: apt -> opam binary -> sources -> opam switch+packages -> z3 -> isla (cargo --locked) -> isla-sail -> sail_build.sh -> check.
+# Default (a proving farm): apt -> sources (isla) -> z3 -> isla (cargo --locked).  NO IR is produced here: the proof IR is an external fetched by its pinned sha (tools/sail-ir-<sha 12>).
+# FULL=1 (the one machine that PRODUCES the IR): additionally opam binary -> opam switch+packages -> isla-sail -> sail_build.sh (PUBLISH_IR=1 publishes it) -> check.
 # The result (sha256 of x86_proof.ir) is compared with the pin in sail_pins.txt; a mismatch exits 1.  No step may fail silently.
 set -euo pipefail
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd); PINS=$HERE/sail_pins.txt
@@ -55,14 +56,18 @@ fi
 [ -x $CARGO ] || die "apt cargo missing"
 echo "cargo: $($CARGO --version)  rustc: $(/usr/bin/rustc --version)  python: $(python3 --version)"
 
+FULL=${FULL:-0}
+if [ "$FULL" = 1 ]; then
 phase "opam binary"
 if [ ! -x "$OPAM" ] || [ "$($OPAM --version)" != "$(pin opam-bin 3)" ]; then
   get_file opam-bin "$OPAM.tmp"; chmod +x "$OPAM.tmp"; mv "$OPAM.tmp" "$OPAM"
 fi
 echo "opam $($OPAM --version)"
+fi
 
-phase "sources (opam-repository, isla, sail-x86-from-acl2)"
-git_src opam-repository "$TOOLS/opam-repository"; git_src isla "$REMS/isla"; git_src sail-x86-from-acl2 "$REMS/sail-x86-from-acl2"
+phase "sources (isla; FULL: opam-repository, sail-x86-from-acl2)"
+git_src isla "$REMS/isla"
+if [ "$FULL" = 1 ]; then git_src opam-repository "$TOOLS/opam-repository"; git_src sail-x86-from-acl2 "$REMS/sail-x86-from-acl2"; fi
 check_sha "$REMS/isla/Cargo.lock" "$(pin isla-cargo-lock 4)"
 
 phase "z3-solver wheel"
@@ -107,12 +112,14 @@ if [ -n "$MAKE_MIRROR" ]; then
   phase ""; echo "mirror $M: $(du -sh "$M" | cut -f1), $(find "$M" -type f | wc -l) files"; exit 0
 fi
 
+if [ "$FULL" = 1 ]; then
 phase "opam switch + packages"
 opam_prepare
 $OPAM switch list --short | grep -qx sail || $OPAM switch create sail "ocaml-base-compiler.$(pin ocaml-compiler 3)"
 [ "$(installed)" = "$PKGLIST" ] || { $OPAM install --switch=sail $(echo "$PKGLIST"); }
 [ "$(installed)" = "$PKGLIST" ] || { diff <(installed) <(echo "$PKGLIST") | head -20; die "installed opam packages differ from the pins"; }
 $OPAM exec --switch=sail -- sail --version | head -1
+fi
 
 phase "isla (cargo --locked)"
 CFG=()
@@ -129,6 +136,7 @@ if [ ! -x "$REMS/isla/target/release/isla-execute-function" ]; then
 fi
 ls -l "$REMS/isla/target/release/isla-execute-function" | cut -d' ' -f5-
 
+if [ "$FULL" = 1 ]; then
 phase "isla-sail (make)"
 if [ ! -x "$REMS/isla/isla-sail/plugin.cmxs" ]; then eval "$($OPAM env --switch=sail)"; make -C "$REMS/isla/isla-sail"; fi
 
@@ -139,4 +147,5 @@ phase "check"
 GOT=$(sha256sum "$WORK/sail/x86_proof.ir" | cut -d' ' -f1); WANT=$(pin x86_proof.ir 4)
 echo "x86_proof.ir sha256 $GOT ($(stat -c %s "$WORK/sail/x86_proof.ir") bytes), pinned $WANT"
 [ "$GOT" = "$WANT" ] || die "x86_proof.ir differs from the pinned hash"
+fi
 phase ""; echo "sail_setup: OK"
