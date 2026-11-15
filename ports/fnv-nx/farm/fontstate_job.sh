@@ -16,10 +16,11 @@
 # exit 1 and nothing is published. The report's last notes give the branch commit (40 hex), the sha256 of fontdump.txt
 # and the tree hash of the branch checkout (`verify/cas.py ingest`, .git excluded): what a recipe's external names.
 # Needs: root for apt (wine32:i386, xvfb, gcc-mingw-w64-i686, fontconfig), the artifacts repository with push.
-# Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS (/home/user/fnv-nx-build). Runtime: about 3 minutes after apt.
+# Env: FARM_HOME (~/fnvnx-farm), FNVNX_BUILD (required: the fnv-nx-build checkout; no default). Runtime: about 3 minutes after apt.
 set -uo pipefail
 REPORT=${1:?usage: fontstate_job.sh <report.md>}; REPORT=$(readlink -f "$REPORT")
-FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}; ARTIFACTS=${ARTIFACTS:-/home/user/fnv-nx-build}
+FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
+: "${FNVNX_BUILD:?FNVNX_BUILD must name the fnv-nx-build checkout}"; ARTIFACTS=$FNVNX_BUILD
 W=$FARM_HOME/fontstate; rm -rf "$W"; mkdir -p "$W/out/reg"; O=$W/out
 NOTES=()
 finish() { { echo "# fontstate"; echo; for n in "${NOTES[@]}"; do echo "- $n"; done; } > "$REPORT"; cat "$REPORT"; exit "${1:-0}"; }
