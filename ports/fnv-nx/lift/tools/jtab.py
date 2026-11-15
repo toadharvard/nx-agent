@@ -56,6 +56,15 @@ def meet(a, lo, hi):
 def add(a, c): return ((a[0] + c) % N, a[1])
 
 
+def parts(al):
+    """the partition an alias map names: {frozenset of the locations of one class}.  The class ids of `al` are fresh labels (copy and joinst mint a new one per call), so only the partition is the state:
+    two maps with the same partition are the same abstract value.  This is what makes `joinst(m, s) != m` mean "the join moved up the lattice", the termination argument of the worklist (every join only
+    coarsens r, shrinks the partition, nz, f and pk, and widening bounds r); comparing the labels instead makes a state with an alias class change on every join and the loop never ends."""
+    c = {}
+    for k, v in al.items(): c.setdefault(v, []).append(k)
+    return frozenset(frozenset(ks) for ks in c.values() if len(ks) > 1)       # a class of one location says nothing (joinst drops it too)
+
+
 class St:
     """r: {loc: interval} (absent = top), loc = a register name or a frame cell ('c', base, disp); f: None | (kind, loc, pre interval, imm);
     al: {loc: class id} (locations that hold the same value); nz: {loc: set of masks m with loc & m != 0}; pk: tuple of pushed intervals (top last), espd: esp offset since the seed (None = unknown)."""
@@ -63,7 +72,7 @@ class St:
 
     def __init__(s, r, f, al=None, nz=None, pk=(), espd=0): s.r = r; s.f = f; s.al = al or {}; s.nz = nz or {}; s.pk = pk; s.espd = espd
     def cp(s): return St(dict(s.r), s.f, dict(s.al), {k: set(v) for k, v in s.nz.items()}, s.pk, s.espd)
-    def __eq__(s, o): return s.r == o.r and s.f == o.f and s.al == o.al and s.nz == o.nz and s.pk == o.pk and s.espd == o.espd
+    def __eq__(s, o): return s.r == o.r and s.f == o.f and parts(s.al) == parts(o.al) and s.nz == o.nz and s.pk == o.pk and s.espd == o.espd
     def g(s, loc): return s.r.get(loc, TOP)
 
 
