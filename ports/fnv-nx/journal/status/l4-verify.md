@@ -178,3 +178,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - Runnable set at 0fde931c4: passing are bootlayout 32, bootpath 54, bootunmap 28, bootheap 13, bootsock 6, bootinputs, bootmiles and bootrt 8/8. test_bootthreadcpu is red: it reads the deleted CORE3 constant; fixed by merging w7-i.
 - w6 is doing: merge w7-i, then the t38 fixes, then run the tests one at a time.
 - Reported to L1: a race when concurrent builds extract an external into one GATE_CACHE (Errno 39).
+- 00:21: Orchestrator confirms that 4.1 and 4.2 are one link (platform plus lifted pack). L3a lead: session_01KmtZKSANKhYEe4nVesF6Ho; the orchestrator is asking it for the dispatcher/bridges root and an ETA. The -z text attribution goes to w6 (read the cached objects with the pinned readelf; no ld run), then to the owners: L1 for the link flags, or the root's owner for a non-PIC object.
