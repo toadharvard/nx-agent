@@ -56,12 +56,12 @@ def build_plugin():
     return os.path.join(d, 'fnvnx_order.so')
 
 
-def compile_cxx(src, name, plugin):
+def compile_cxx(src, name, plugin, extra=()):
     p = os.path.join(tmp, name + '.cpp')
     o = os.path.join(tmp, name + '.o')
     open(p, 'w').write(src)
     pl = ['-fplugin=' + plugin] + ['-fplugin-arg-fnvnx_order-' + a for a in PLUGIN_ARGS] if plugin else []
-    r = run([CXX] + FLAGS + pl + ['-c', p, '-o', o])
+    r = run([CXX] + FLAGS + list(extra) + pl + ['-c', p, '-o', o])
     if r.returncode:
         fails.append('compile %s: %s' % (name, r.stderr[-800:]))
     return o
@@ -267,6 +267,12 @@ void takes(S s);
 void pass() { takes(gs); }
 char* dyn(int n) { char* p = (char*)__builtin_alloca(n); sink(p); p[1] = 2; return p; }
 '''
+LANES_SRC = r'''
+struct H { unsigned spares[32]; };
+void sw(H* __restrict d, const H* __restrict s) {
+  for (int i = 0; i < 32; i++) { const char* p = (const char*)&s->spares[i]; char* q = (char*)&d->spares[i]; q[0]=p[3]; q[1]=p[2]; q[2]=p[1]; q[3]=p[0]; }
+}
+'''
 plug = build_plugin()
 if plug:
     po = compile_cxx(SRC, 'plug', plug)
@@ -301,6 +307,12 @@ if plug:
     check('packed bit-field store: read-modify-write of the 3 bytes, release byte stores', (pbs.count('ldarb'), pbs.count('stlrb')), (3, 3))
     check('table walk through a derived pointer: read-only by provenance, no ordered access', ('ldar' in pbc, 'stlr' in pbc), (False, False))
     check('the walk records the table in .fnvnx.ro', '_ZL3cpb' in run(['aarch64-linux-gnu-readelf', '-p', '.fnvnx.ro', po]).stdout, True)
+    # the vectorizer's load/store-lanes form (-O3): `MEM <char[64]> [p] = .STORE_LANES (array)` writes shared memory through an internal function
+    lanes = compile_cxx(LANES_SRC, 'lanes', plug, ['-O3'])
+    lr = {k: v for k, v in a64order.scan(lanes).rows if v}
+    check('lanes: the shared load and store of the byte-swap loop certify', lr, {})
+    ldis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', lanes]).stdout
+    check('lanes: the shared bytes are read ldarb and written stlrb (no plain access of the shared span)', ('ldarb' in ldis, 'stlrb' in ldis), (True, True))
     check('bit-field store certified', not any(k.startswith('_Z3stbv') or k.startswith('_Z3ldbv') for k in rs), True)
     dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
     esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]

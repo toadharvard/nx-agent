@@ -14,9 +14,10 @@ is certified by the first rule that applies:
  O  ordered: LDAR*/LDAXR*/LDAXP (acquire), STLR*/STLXR*/STLXP (release), and the LSE read-modify-write forms with both acquire and
     release (CASAL*, SWPAL*, LDxxxAL*): the forms of the R9 map (ldar/stlr and the Interlocked loops).
  F  frame (record R1): the access goes through the frame (sp while its offset from the CFA is statically known; x29 while it is
-    the frame pointer; a register that holds a computed frame address) with an immediate offset, so that the gate itself computes the
+    the frame pointer; a register that holds a computed frame address) with an immediate offset (or, through such a register, a register
+    offset: the folded `add; access` of a derived address), so that the gate itself computes the
     CFA-relative range [c, c+size) it touches (size from the mnemonic and the data register: LDR/STR/LDUR/STUR (+B/H/SB/SH/SW),
-    LDP/STP/LDNP/STNP, LDPSW; any other form is not F); the function has exactly one `.fnvnx.frame` record, it is not `dynamic`,
+    LDP/STP/LDNP/STNP, LDPSW, and the full-vector LD1-LD4/ST1-ST4; any other form is not F); the function has exactly one `.fnvnx.frame` record, it is not `dynamic`,
     the range lies below the CFA (inside the function's own frame), and it overlaps no recorded range (the frame ranges of the
     variables whose address the compiler took).  A plain access that overlaps a recorded range, or whose range the gate cannot
     compute, is not F and must be O or R like any non-frame access.
@@ -273,6 +274,10 @@ def _regsize(rid):
     return {'x': 8, 'w': 4, 'q': 16, 'd': 8, 's': 4, 'h': 2, 'b': 1}.get(n[:1]) if n[1:].isdigit() or n in ('xzr', 'wzr') else None
 
 
+_VAS_BYTES = {K.ARM64_VAS_8B: 8, K.ARM64_VAS_4H: 8, K.ARM64_VAS_2S: 8, K.ARM64_VAS_1D: 8,
+              K.ARM64_VAS_16B: 16, K.ARM64_VAS_8H: 16, K.ARM64_VAS_4S: 16, K.ARM64_VAS_2D: 16}   # the arrangements of a full 64/128-bit vector
+
+
 def acc_size(i):
     """bytes a plain memory instruction accesses, from its mnemonic and data registers; None when the form is not one of
     LDR/STR/LDUR/STUR (+B/H/SB/SH/SW) and LDP/STP/LDNP/STNP/LDPSW, which are the only plain forms the compiler uses on the frame"""
@@ -285,6 +290,13 @@ def acc_size(i):
         return None if z is None else 2 * z
     if n in ('LDR', 'STR', 'LDUR', 'STUR'):
         return _regsize(regs[0]) if regs else None
+    if n in ('LD1', 'LD2', 'LD3', 'LD4', 'ST1', 'ST2', 'ST3', 'ST4'):
+        # the full-vector structure forms (the vectorizer's load/store lanes): the bytes are those of the listed registers, each a 64- or
+        # 128-bit arrangement; a lane or replicate form (a vector index) accesses one element, which this does not size: not F
+        vr = [o for o in i.ops if o.type == K.ARM64_OP_REG]
+        if not vr or any(o.vector_index != -1 or o.vas not in _VAS_BYTES for o in vr):
+            return None
+        return sum(_VAS_BYTES[o.vas] for o in vr)
     if n in ('LDRB', 'STRB', 'LDURB', 'STURB', 'LDRSB', 'LDURSB'):
         return 1
     if n in ('LDRH', 'STRH', 'LDURH', 'STURH', 'LDRSH', 'LDURSH'):
@@ -663,8 +675,11 @@ class Func:
         the base (a derived tag ('X', origins) is judged for EVERY origin), or None when the base is not a frame address (no tag, RO) or its
         origin is unknown (sp not static, ('X', None)): None is then never a certificate (frame_ok is False)."""
         b = _base(i)
-        if i.mem is None or i.mem.index != 0 or b is None:
+        if i.mem is None or b is None or (i.mem.index != 0 and b == SP):
             return None
+        # a register-offset access `[xB, wI, ext]` of a register that holds a formed frame address is the access `add xT, xB, wI; [xT]` folded
+        # into one instruction: the same derived address, judged by the origins of xB (ASM-006: the index stays inside the object the
+        # formed address points into). Through sp itself the object is not named by the base, so that form is never judged
         og = (sp,) if b == SP else origins(rg.get(b))
         if not og or None in og:
             return None

@@ -698,11 +698,10 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
             for (unsigned i = 0; i < gimple_call_num_args(stmt); i++)
               if ((e.mask & (1u << i)) && TREE_CODE(gimple_call_arg(stmt, i)) == INTEGER_CST)
                 gimple_call_set_arg(stmt, i, build_int_cst(TREE_TYPE(gimple_call_arg(stmt, i)), MEMMODEL_SEQ_CST));
-        return;
       }
       // __builtin_va_copy: GCC expands it as the assignment of the two va_list objects (builtins.cc expand_builtin_va_copy: MODIFY_EXPR dst,
       // src), a plain access through its pointer operand. It is lowered to that assignment here, and ordered as any aggregate copy.
-      if (tree vf = gimple_call_fndecl(stmt)) {
+      if (tree vf = gimple_call_internal_p(stmt) ? NULL_TREE : gimple_call_fndecl(stmt)) {
         // (the destination is the address of the va_list object; the source is the va_list value, or its address when va_list is an array)
         if (fndecl_built_in_p(vf, BUILT_IN_VA_COPY) && gimple_call_num_args(stmt) == 2 && POINTER_TYPE_P(TREE_TYPE(gimple_call_arg(stmt, 0))) &&
             TREE_CODE(TREE_TYPE(TREE_TYPE(gimple_call_arg(stmt, 0)))) == RECORD_TYPE &&
@@ -714,7 +713,10 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
           return;
         }
       }
-      order_builtin_call(gsi, as_a<gcall *>(stmt));
+      // an internal function reads through its arguments (read into a private temporary above, hoist_read) and may store through its lhs
+      // (the vectorizer's .STORE_LANES: `MEM <char[N]> [p] = .STORE_LANES (array)`): the lhs rule below makes the function write a private
+      // temporary of the lhs type, copied to the shared object ordered unit by unit (unit_copy). The lanes stay exact, on private memory.
+      if (!gimple_call_internal_p(stmt)) order_builtin_call(gsi, as_a<gcall *>(stmt));
       // `ref = f()` storing into an ordered object: route the result through a temporary, and order that store
       tree lhs = gimple_call_lhs(stmt);
       if (lhs && shared_ordered(lhs)) {
@@ -839,6 +841,33 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
     force_addressable(base);
     return build2(MEM_REF, aty, build_fold_addr_expr(base), build_int_cst(ptr_type_node, bp / BITS_PER_UNIT + (HOST_WIDE_INT)k));
   };
+  // A LOOP OVER AN UNSHARED OBJECT is addressed by an ARRAY_REF over a view of the whole decl as an array of units, never by a pointer
+  // plus the induction variable: that sum is computed in ptr_mode (ILP32, SImode), and a frame address is not a 32-bit value (sp has no
+  // SImode lowpart), so RTL would route it through a stack slot and the access would no longer be a frame access. The reference
+  // form expands to [sp + const + zero_extend (index)] (the same as any local array element). Applies when the object is the whole decl or
+  // a unit-aligned part of it at a constant offset (index_ok); otherwise the pointer form stays.
+  auto index_ok = [&](tree obj, HOST_WIDE_INT *boff) -> bool {
+    tree base = ref_base(obj);
+    if (!base || !DECL_P(base) || !DECL_SIZE_UNIT(base) || !tree_fits_uhwi_p(DECL_SIZE_UNIT(base))) return false;
+    poly_int64 bsz, bpos;
+    tree voff;
+    machine_mode mm;
+    int uns, rev, vol;
+    tree inner = get_inner_reference(obj, &bsz, &bpos, &voff, &mm, &uns, &rev, &vol);
+    HOST_WIDE_INT bp;
+    if (inner != base || voff || rev || !bpos.is_constant(&bp) || bp % BITS_PER_UNIT) return false;
+    HOST_WIDE_INT ds = tree_to_uhwi(DECL_SIZE_UNIT(base));
+    *boff = bp / BITS_PER_UNIT;
+    return ds % unit == 0 && *boff % unit == 0 && get_object_alignment(base) >= unit * 8;
+  };
+  auto indexed = [&](tree obj, HOST_WIDE_INT boff, tree iv, gimple_seq *seq) -> tree {
+    tree base = ref_base(obj);
+    force_addressable(base);
+    tree at = build_array_type_nelts(ity, tree_to_uhwi(DECL_SIZE_UNIT(base)) / unit);
+    tree idx = fold_build2(RSHIFT_EXPR, sizetype, iv, size_int(exact_log2(unit)));
+    if (boff) idx = fold_build2(PLUS_EXPR, sizetype, idx, size_int(boff / unit));
+    return build4(ARRAY_REF, ity, build1(VIEW_CONVERT_EXPR, at, base), gimplify_to(idx, seq), NULL_TREE, NULL_TREE);
+  };
   // one unit: the load into v, then the store; the store is returned. dpp/spp: a pointer for a shared side, the unit's memory reference
   // for an unshared one
   auto one = [&](gimple_seq *seq, tree dpp, tree spp, gimple **last) {
@@ -892,8 +921,10 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   }
   // more than STRAIGHT units: a loop over units 0..n-2 (do { dst[i] = src[i]; i += unit; } while (i < (n-1)*unit)), then the
   // last unit in place of the statement: the code does not grow with the object
-  getp(dp, dst);
-  getp(sp, src);   // the loop addresses both objects through pointers
+  HOST_WIDE_INT doff = 0, soff = 0;
+  bool dix = !st && index_ok(dst, &doff), six = !src_sh && index_ok(src, &soff);
+  if (!dix) getp(dp, dst);
+  if (!six) getp(sp, src);   // a shared side, or one index_ok does not take, is addressed through a pointer
   gsi_insert_seq_before(gsi, pre, GSI_SAME_STMT);
   basic_block bb = gsi_bb(*gsi);
   gimple_stmt_iterator g = *gsi;
@@ -910,9 +941,10 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   add_phi_arg(phi, size_zero_node, e, UNKNOWN_LOCATION);
   add_phi_arg(phi, iv1, back, UNKNOWN_LOCATION);
   gimple_seq bs = NULL;
-  tree dpp = at(&bs, getp(dp, dst), iv), spp = at(&bs, getp(sp, src), iv);
-  if (!st) dpp = build2(MEM_REF, aty, dpp, zero);
-  if (!src_sh) spp = build2(MEM_REF, aty, spp, zero);
+  tree dpp = dix ? indexed(dst, doff, iv, &bs) : at(&bs, getp(dp, dst), iv);
+  tree spp = six ? indexed(src, soff, iv, &bs) : at(&bs, getp(sp, src), iv);
+  if (!st && !dix) dpp = build2(MEM_REF, aty, dpp, zero);
+  if (!src_sh && !six) spp = build2(MEM_REF, aty, spp, zero);
   one(&bs, dpp, spp, NULL);
   gimple_seq_add_stmt(&bs, gimple_build_assign(iv1, PLUS_EXPR, iv, size_int(unit)));
   gimple_seq_add_stmt(&bs, gimple_build_cond(LT_EXPR, iv1, size_int((n - 1) * unit), NULL_TREE, NULL_TREE));
@@ -933,9 +965,10 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   // the last unit replaces the statement, now the first one of the tail
   gimple_seq ls = NULL;
   tree off = size_int((n - 1) * unit);
-  tree ldp = at(&ls, getp(dp, dst), off), lsp = at(&ls, getp(sp, src), off);
-  if (!st) ldp = build2(MEM_REF, aty, ldp, zero);
-  if (!src_sh) lsp = build2(MEM_REF, aty, lsp, zero);
+  tree ldp = dix ? indexed(dst, doff, off, &ls) : at(&ls, getp(dp, dst), off);
+  tree lsp = six ? indexed(src, soff, off, &ls) : at(&ls, getp(sp, src), off);
+  if (!st && !dix) ldp = build2(MEM_REF, aty, ldp, zero);
+  if (!src_sh && !six) lsp = build2(MEM_REF, aty, lsp, zero);
   one(&ls, ldp, lsp, &last);
   gimple_stmt_iterator ts = gsi_for_stmt(stmt);
   gsi_insert_seq_before(&ts, ls, GSI_SAME_STMT);
