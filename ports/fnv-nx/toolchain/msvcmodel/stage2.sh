@@ -1,17 +1,25 @@
 # stage2.sh - stage 2 of build.sh (sourced by it): the plugins' flags, newlib, libgcc, libstdc++/libsupc++, the MANIFEST. Everything here is keyed by
-# K2 (stamp.py): the stage-1 key, this file, the runtime patches, cfg_link.py, the plugin sources and the record values the runtime reads. A changed K2
-# restores the stage-1 snapshot (prefix, build tree, source tree) and reruns only this part. Variables come from build.sh.
+# K2 (stamp.py): the stage-1 tree (S1_TREE), this file, the runtime patches, cfg_link.py, the plugin sources, their argv and the plugin stage's own inputs, and
+# the record values the runtime reads. A changed K2 restores the stage-1 snapshot (prefix, build tree, source tree) and reruns only this part. Variables come
+# from build.sh.
+# The files this stage applies or runs are the ones stamp.py lists (--files = STAGE2_INPUTS, with their paths): `listed NAME` is the only way to name one, and a
+# name stamp.py does not list is a refusal, so nothing is applied that K2 does not cover. Their content is in K2; no hash of them is written here.
 
 NLSHA256=6ff27e3bf022666f43f7802255be680eeff722ac181b1725d21e2e8318604ee3   # sourceware.org/pub/newlib, recorded at first download
 BUILDSCRIPTS_COMMIT=5740da9beb433ff9f5b724fafc1127f3a5ddc944                  # github.com/devkitPro/buildscripts
 NLPATCH_SHA256=6d5aba4356553c727765c98e7553d3784f31d361c856e220ef27cc26353fb88f  # patches/newlib-$NLV-4.patch
-X19_PATCH_SHA256=6b0cea9340bc0291ef74fc3a6eaa2e033b06896955fc7c5ebbd9eb2c21e8d935
-NOSIZED_PATCH_SHA256=cb8a51365da7062a063e21a13aa461670f2054c7d9a3a36e6dcfa5cdfe7db204
-NLGUEST_PATCH_SHA256=0b7dca2e46cb6c36e999e147f9ec78bac5e4c340172138f8292c8ad44a8abb10   # NL-LDBL (libm/ld, ld128 only when long double != double) + NL-SECT (no second -ffunction-sections source)
+# the guest patches (toolchain/gcc: x19-x27, libstdcxx-nosized, newlib-guest [NL-LDBL: libm/ld, ld128 only when long double != double; NL-SECT: no second -ffunction-sections source])
+# are STAGE2_INPUTS of stamp.py: their paths and content come from there
 # the autotools newlib's own generated files state (configure: Autoconf 2.69, Makefile.in: automake 1.15.1), from their GNU tarballs
 AUTOCONF_SHA256=64ebcec9f8ac5b2487125a86a7760d2591ac9e1d3dbd59489633f9de62a57684
 AUTOMAKE_SHA256=af6ba39142220687c500f79b4aa2f181d9b24e4f8d8ec497cea4ba26c64bedaf
 
+STAMP_FILES=$(python3 -I "$HERE/stamp.py" --files --override "toolchain/msvcmodel/msvcmodel.patch=$MSVC_PATCH")
+listed() { # tree-relative name -> the path of that stage-2 input, or a refusal
+  local p; p=$(printf '%s\n' "$STAMP_FILES" | awk -v n="$1" '$1 == n { print $2 }')
+  [ -n "$p" ] || { echo "stage2.sh: $1 is no stage-2 input of stamp.py (STAGE2_INPUTS): its content would not be in K2" >&2; exit 8; }
+  printf '%s' "$p"
+}
 if [ -f "$W/stamp-k2" ] && [ "$(cat "$W/stamp-k2")" != "$STAMP" ]; then
   rm -rf "$P" "$W/b-gcc" "$SRC" "$NL" "$W/b-newlib" "$W"/stamp-unpack2 "$W"/stamp-specs "$W"/stamp-newlib "$W"/stamp-limits "$W"/stamp-libs
   cp -a "$W/s1/prefix" "$P"; cp -a "$W/s1/b-gcc" "$W/b-gcc"; cp -a "$W/s1/src" "$SRC"
@@ -28,9 +36,6 @@ if [ ! -d "$BS/.git" ]; then
 fi
 git -C "$BS" checkout -q $BUILDSCRIPTS_COMMIT
 echo "$NLPATCH_SHA256  $BS/patches/newlib-$NLV-4.patch" | sha256sum -c --quiet
-echo "$X19_PATCH_SHA256  $PATCH_DIR/x19-x27.patch" | sha256sum -c --quiet
-echo "$NOSIZED_PATCH_SHA256  $PATCH_DIR/libstdcxx-nosized.patch" | sha256sum -c --quiet
-echo "$NLGUEST_PATCH_SHA256  $PATCH_DIR/newlib-guest.patch" | sha256sum -c --quiet
 
 # the CFG-LINK patch of the runtime subdirs' configure scripts: guest_compiler.json runtime_configure_patch, read through recipe
 eval "$(python3 -I - "$VERIFY" <<'EOF4'
@@ -62,10 +67,10 @@ if ! step unpack2; then
   mkdir "$NL"
   tar -xzf newlib-$NLV.tar.gz -C "$NL" --strip-components=1
   patch -s -d "$NL" -p1 < "$BS/patches/newlib-$NLV-4.patch"
-  apply_p0 "$PATCH_DIR/x19-x27.patch"
-  apply_p0 "$PATCH_DIR/libstdcxx-nosized.patch"
+  apply_p0 "$(listed toolchain/gcc/x19-x27.patch)"
+  apply_p0 "$(listed toolchain/gcc/libstdcxx-nosized.patch)"
   # CFG-LINK: every runtime subdir's generated configure answers its link tests by a static link (see the libs step)
-  for d in "${CFG_SUBDIRS[@]}"; do python3 -I "$PATCH_DIR/cfg_link.py" patch "$SRC/$d/configure"; done
+  for d in "${CFG_SUBDIRS[@]}"; do python3 -I "$(listed toolchain/gcc/cfg_link.py)" patch "$SRC/$d/configure"; done
   # NL-LDBL (newlib-guest.patch): configure and Makefile.in are regenerated with the autotools the tarball's files state. Proof that
   # the tooling is the right one: on the pristine tarball tree the regeneration reproduces its configure and Makefile.in byte for byte.
   AT=$W/autotools
@@ -83,7 +88,7 @@ if ! step unpack2; then
   cmp "$W/nl-pristine/newlib/configure" "$W/configure" && cmp "$W/nl-pristine/newlib/Makefile.in" "$W/Makefile.in" \
     || { echo "autoconf 2.69 / automake 1.15.1 do not reproduce the tarball's configure / Makefile.in" >&2; exit 2; }
   rm -rf "$W/nl-pristine" "$W/configure" "$W/Makefile.in"
-  apply_p0 "$PATCH_DIR/newlib-guest.patch"
+  apply_p0 "$(listed toolchain/gcc/newlib-guest.patch)"
   regen "$NL"
   done_ unpack2
 fi
@@ -102,9 +107,11 @@ EOF
 }
 
 
-PLUG_C=""; PLUG_CXX=""
-[ -n "${FNVNX_TL_PLUGIN_FLAGS_C:-}" ] && PLUG_C=$(cat "$FNVNX_TL_PLUGIN_FLAGS_C")
-[ -n "${FNVNX_TL_PLUGIN_FLAGS_CXX:-}" ] && PLUG_CXX=$(cat "$FNVNX_TL_PLUGIN_FLAGS_CXX")
+# the plugin flags of the target libraries: stamp.py's plugin_flags (the recipe's PLUGIN_SOURCES in load order, recipe.plugin_args), from the plugin stages' list; the
+# argv is in K2, the .so files by content through the list's sha256 (stamp.py checks each file against it). A build without the list does not build the runtime.
+[ -n "${FNVNX_PLUGINS_JSON:-}" ] || { echo "stage2.sh: FNVNX_PLUGINS_JSON (the plugin stages' list) is required: the runtime is compiled with the recipe's plugins" >&2; exit 9; }
+PLUG_C=$(python3 -I "$HERE/stamp.py" --plugin-flags c --plugins-json "$FNVNX_PLUGINS_JSON")
+PLUG_CXX=$(python3 -I "$HERE/stamp.py" --plugin-flags cxx --plugins-json "$FNVNX_PLUGINS_JSON")
 TLC="-O2 $(tlflags c) $PLUG_C"   # no -ffunction-sections/-fdata-sections: rtasm reads whole objects with their .fnvnx* sections
 # -save-temps=obj for C++ (rule ODRDEF-PP of fnvnx_names.cc): the driver runs the compiler's own two steps, preprocess then compile the preprocessed text, as the
 # recipe's PP and CC stages do; the ODR definition record re-lexes the unit and can only do so from its own preprocessed text (a raw unit's include chains and macros are
@@ -151,7 +158,7 @@ if ! step libs; then
   # Rule CFG-LINK (toolchain/gcc/cfg_link.py, recorded as guest_compiler.json runtime_configure_patch). The configure scripts of the runtime
   # subdirs (patched in the unpack step) answer every link test by a static link: the test compiles, and the linker's own archive closure
   # (ld -r over the driver's -### link line) leaves only linker-script and product-protocol symbols undefined.
-  export PYTHON_CFG_LINK="python3 -I $PATCH_DIR/cfg_link.py"
+  export PYTHON_CFG_LINK="python3 -I $(listed toolchain/gcc/cfg_link.py)"
   export FNVNX_CFG_NM=$P/bin/$T-nm FNVNX_CFG_LD=$P/bin/$T-ld FNVNX_CFG_EMUL=aarch64elf${ABI#ilp}
   export FNVNX_CFG_GUEST_LD=$VERIFY/../$CFG_GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$VERIFY/../$CFG_PROTOCOL_SRC FNVNX_CFG_CACHE=$W/cfg-cache
   note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC' CXXFLAGS_FOR_TARGET='$TLCXX'"
@@ -189,8 +196,8 @@ for ml in "" $MLFLAGS; do
 done
 # MANIFEST.json (fnvnx-runtime-manifest/1): what the recipe compares against the compiler before any unit runs. The compiler's own
 # repo/ref/commit/tree_sha256 are not in it (the manifest is inside the tree that hash covers): they are the pin in guest_compiler.json.
-# Plugins come from the recipe's objects.json (FNVNX_PLUGINS_JSON: name, sha256, stage_key) in recipe.PLUGIN_SOURCES order, argv from the flag files.
-if [ -n "${FNVNX_PLUGINS_JSON:-}" ]; then
+# Plugins come from the plugin stages' list (FNVNX_PLUGINS_JSON: name, sha256, stage_key) in recipe.PLUGIN_SOURCES order, argv from stamp.py.
+{
   # The prefix is self-contained real files (a tree_sha256 of it must not depend on link targets): every symlink (libtool's .so version
   # chain of libcc1 and the plugin libraries) becomes a copy of the regular file it resolves to inside the prefix; any other kind is an error.
   while IFS= read -r l; do
@@ -217,9 +224,9 @@ if [ -n "${FNVNX_PLUGINS_JSON:-}" ]; then
   git -C "$TCDIR" archive --format=tar "$TC_GIT" | tar -x -C "$W/tc-arch"
   TC_CAS=$(python3 -I "$VERIFY/cas.py" ingest "$W/tc-store" "$W/tc-arch")
   rm -rf "$W/tc-arch" "$W/tc-store"
-  python3 -I - "$P" "$T" "$V" "$SHA256" "$STAMP" "$MSVC_PATCH" "$MLFLAGS" "$PLUG_C" "$PLUG_CXX" "$TLC" "$TLCXX" "$CONF" "$FNVNX_PLUGINS_JSON" "$VERIFY" "$P/bin/$T-gcc" "$K1" "$TC_GIT" "$TC_CAS" <<'EOF'
+  python3 -I - "$P" "$T" "$V" "$SHA256" "$STAMP" "$MSVC_PATCH" "$MLFLAGS" "$PLUG_C" "$PLUG_CXX" "$TLC" "$TLCXX" "$CONF" "$FNVNX_PLUGINS_JSON" "$VERIFY" "$P/bin/$T-gcc" "$K1" "$TC_GIT" "$TC_CAS" "$S1_TREE" <<'EOF'
 import sys, os, json, hashlib, subprocess
-P, T, V, SHA, STAMP, PATCH, ML, PC, PCX, TLC, TLCXX, CONF, PJ, VERIFY, GCC, K1, TC_GIT, TC_CAS = sys.argv[1:19]
+P, T, V, SHA, STAMP, PATCH, ML, PC, PCX, TLC, TLCXX, CONF, PJ, VERIFY, GCC, K1, TC_GIT, TC_CAS, S1_TREE = sys.argv[1:20]
 sys.path.insert(0, VERIFY)
 import recipe
 h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
@@ -235,7 +242,7 @@ for root in (os.path.join(P, T, "lib"), os.path.join(P, "lib", "gcc", T, V)):
 ml = subprocess.run([GCC, "-print-multi-lib"], capture_output=True, text=True, check=True).stdout.split()
 conf = [l for l in open(CONF).read().splitlines() if l.strip()]
 m = {"format": "fnvnx-runtime-manifest/1",
-     "compiler": {"gcc": V, "source_sha256": SHA, "msvcmodel_patch_sha256": h(PATCH), "build_key": STAMP, "stage_keys": {"compiler": K1, "runtime": STAMP}, "toolchain_tree_git": TC_GIT, "toolchain_tree_sha256": TC_CAS, "configure": conf},
+     "compiler": {"gcc": V, "source_sha256": SHA, "msvcmodel_patch_sha256": h(PATCH), "build_key": STAMP, "stage_keys": {"compiler": K1, "runtime": STAMP, "compiler_tree_sha256": S1_TREE}, "toolchain_tree_git": TC_GIT, "toolchain_tree_sha256": TC_CAS, "configure": conf},
      "plugins": plugins,
      "flags": {"c": TLC.split(), "cxx": TLCXX.split()},
      "multilib": {"select": ML.split(), "dir": ml},
@@ -249,5 +256,5 @@ m = {"format": "fnvnx-runtime-manifest/1",
 open(os.path.join(P, "MANIFEST.json"), "w").write(json.dumps(m, indent=1, sort_keys=True) + "\n")
 print("MANIFEST.json: %d plugins, %d libraries" % (len(plugins), len(libs)))
 EOF
-fi
+}
 echo "$P/bin/$T-g++"

@@ -97,6 +97,11 @@ PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
 # no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
 # PLUGIN_OUT of the CC stage's own /out; the recipe passes it, a build.json does not declare it.
 PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
+# The flags of the plugin stage's compile (plugin_build), the one declaration: the stage's argv is HOST + PRE + -I<plugin headers> + -frandom-seed=<hash of the name> + POST + -o ...
+# toolchain/msvcmodel/stamp.py reads PLUGIN_BUILD_FLAGS (PRE + POST) into the build key of the runtime: the runtime is compiled with plugins that this stage builds.
+PLUGIN_FLAGS_PRE = ("-shared", "-nostdlib", "-fPIC", "-fno-rtti", "-fno-exceptions", "-O2")
+PLUGIN_FLAGS_POST = ("-Werror=date-time", "-ffile-prefix-map=/psrc=psrc")
+PLUGIN_BUILD_FLAGS = PLUGIN_FLAGS_PRE + PLUGIN_FLAGS_POST
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
 
 
@@ -1431,20 +1436,30 @@ def compiler_stamp_errors(tree, host, name):
     spec = importlib.util.spec_from_file_location("fnvnx_msvcmodel_stamp", os.path.join(tree, "toolchain", "msvcmodel", "stamp.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    want = mod.stamp(tree, recipe=sys.modules[__name__])
     try:
         with open(os.path.join(host, "MANIFEST.json")) as f:
             comp = json.load(f).get("compiler", {})
         got = comp.get("build_key")
+        sk = comp.get("stage_keys") or {}
+        t1 = sk.get("compiler_tree_sha256")
     except (OSError, ValueError):
-        return ["external %s: no MANIFEST.json with compiler.build_key: the tree was not built by toolchain/msvcmodel/build.sh at a checkout with stamp.py; "
-                "this checkout's compiler key is %s" % (name, want)]
+        comp, got, sk, t1 = {}, None, {}, None
+    me = sys.modules[__name__]
+    k1 = mod.stages(tree, recipe=me)[0]
+    # K2 is over the stage-1 TREE the build started from: the manifest names it (stage_keys.compiler_tree_sha256), and the key must be this checkout's inputs over that tree
+    want = mod.stamp(tree, recipe=me, stage1_tree=t1) if t1 else None
+    if got is None or not t1:
+        return ["external %s: no MANIFEST.json with compiler.build_key and compiler.stage_keys.compiler_tree_sha256: the tree was not built by toolchain/msvcmodel/build.sh at a "
+                "checkout with stamp.py; this checkout's stage-1 key is %s" % (name, k1)]
+    if sk.get("compiler") != k1:
+        return ["external %s: the stage-1 key (compiler.stage_keys.compiler) is %s, this checkout's stage-1 inputs (toolchain/msvcmodel/stamp.py) give %s: the compiler was built from other "
+                "msvcmodel.patch, build.sh, records or environment pins than this checkout's; rebuild it and re-pin" % (name, sk.get("compiler"), k1)]
     if got != want:
         pw = mod.patch_sha256(tree)
         why = ("its msvcmodel_patch_sha256 is %s, this checkout's msvcmodel.patch is %s" % (comp.get("msvcmodel_patch_sha256"), pw)
-               if comp.get("msvcmodel_patch_sha256") != pw else "msvcmodel.patch is the same, another input of the build differs")
-        return ["external %s: compiler.build_key is %s, this checkout's compiler inputs (toolchain/msvcmodel/stamp.py) give %s (%s): the pinned tree was built "
-                "from other inputs than this checkout's; rebuild it and re-pin" % (name, got, want, why)]
+               if comp.get("msvcmodel_patch_sha256") != pw else "the stage-1 key is the same, a stage-2 input (runtime patches, plugin files or argv, records) differs")
+        return ["external %s: compiler.build_key is %s, this checkout's compiler inputs (toolchain/msvcmodel/stamp.py) over stage-1 tree %s give %s (%s): the pinned tree was built "
+                "from other inputs than this checkout's; rebuild it and re-pin" % (name, got, t1, want, why)]
     return []
 
 
@@ -1946,8 +1961,8 @@ class Job:
         host, inc, rt, pf = env["host"], env["inc"], env["rt"], env["pf"]
         tmp = tempfile.mkdtemp(dir=ws)
         tree = self.ingest_files(tmp, "psrc", [src] + inputs, "")   # at their repo paths: `#include "../names/x.cc"` resolves
-        argv = [host, "-shared", "-nostdlib", "-fPIC", "-fno-rtti", "-fno-exceptions", "-O2", "-I" + inc + "/include", "-frandom-seed=" + hashlib.sha256(n.encode()).hexdigest(),
-                "-Werror=date-time", "-ffile-prefix-map=/psrc=psrc", "-o", "/out/%s.so" % n, "/plugcrt/crti.o", pf("crtbeginS.o"),
+        argv = [host, *PLUGIN_FLAGS_PRE, "-I" + inc + "/include", "-frandom-seed=" + hashlib.sha256(n.encode()).hexdigest(),
+                *PLUGIN_FLAGS_POST, "-o", "/out/%s.so" % n, "/plugcrt/crti.o", pf("crtbeginS.o"),
                 "/psrc/" + src, pf("crtendS.o"), "/plugcrt/crtn.o"]
         doc = {"format": "fnvnx-stage/1", "stage": "plugin:" + n, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(host)), "outputs": ["/out"],
