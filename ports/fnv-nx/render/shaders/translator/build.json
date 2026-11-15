@@ -1,10 +1,6 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-none-elf-gcc",
-  "cxx": "bin/aarch64-none-elf-g++"
- },
+ "profile": "guest",
  "flags": {
   "c": [
    "-O2",
@@ -77,40 +73,6 @@
    "commit": "6e7f17919b962b9a6c44a249f5b68b6611f127b9",
    "tree_sha256": "af453ab90c1dc2a88616c43362af09c31f4f1e90d090851105b11d4ff5f5bb8a",
    "at": "/ext/mojoshader"
-  },
-  {
-   "name": "gcc-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
-   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
-   "at": "/ext/gcc"
-  }
- ],
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
   }
  ],
  "link": null
