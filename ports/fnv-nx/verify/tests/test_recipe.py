@@ -542,6 +542,16 @@ def main():
                            ("include outside roots and externals", mut(external=[ex], include=["/ext/other/inc"]), "include")):
         check("external validation: %s" % what, any(want in x for x in errs(e2)), errs(e2))
 
+    # RULE (the compiler is named by reference): a build.json never restates the commit or tree_sha256 of the guest compiler or runtime; the profile is the reference
+    gpin = json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guest_compiler.json")))
+    for what, k in (("the compiler", "external"), ("the runtime", "runtime")):
+        rr = make_repo("ck-pin", rec=mut(external=[dict(gpin[k])]))
+        e_ = recipe.check(mut(external=[dict(gpin[k])]), ROOT, recipe.tracked(rr), recipe.load_admit(rr), gpin, rr)
+        check("pin by reference: a build.json that writes %s external of the pin is red, naming the profile" % what, any("restates the pin" in x and "profile" in x for x in e_), e_)
+        shutil.rmtree(rr, ignore_errors=True)
+    e_ = recipe.check(dict(mut(), profile="host", external=[]), ROOT, recipe.tracked(repo), recipe.load_admit(repo), gpin, repo)
+    check("pin by reference: a recipe that names its profile has no restating error", not any("restates the pin" in x for x in e_), e_)
+
     # RULE (a stage is keyed by what it can read): PP mounts the compiler's external plus the externals the include path and flags name; a generated
     # stage mounts the externals its args and inputs name. An external only the generator names changes that stage's key and no PP key.
     def gdata(v):
@@ -654,14 +664,19 @@ def main():
     other = "host" if own != "host" else "guest"
     extra = {T + "hdr_prod": {"path": T + "hdr_prod", "class": "product", "target": own},
              T + "hdr_other": {"path": T + "hdr_other", "class": "product", "target": other},
-             T + "hdr_tool": {"path": T + "hdr_tool", "class": "tool"}, T + "hdr_doc": {"path": T + "hdr_doc", "class": "doc"}}
+             T + "hdr_tool": {"path": T + "hdr_tool", "class": "tool"}, T + "hdr_doc": {"path": T + "hdr_doc", "class": "doc"},
+             T + "hdr_head": {"path": T + "hdr_head", "class": "header"}}
     rr = dict(base_roots, **extra)
-    rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")]
+    rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc", "hdr_head")]
 
     def home(d):
         return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted header root" in e]
     check("include dir in a product root of the same target accepted", not home("hdr_prod"), home("hdr_prod"))
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("include dir in a header-class root accepted from a root of its own target (guest includer or host includer alike)", not home("hdr_head"), home("hdr_head"))
+    rr_o = dict(rr, **{ROOT: dict(rr[ROOT], target=other)})
+    ho = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_head"]), ROOT, rfiles, rr_o, None, rk) if "lies in no admitted header root" in e]
+    check("include dir in a header-class root accepted from a root of the other target too", not ho, ho)
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red

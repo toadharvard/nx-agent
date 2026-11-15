@@ -216,7 +216,7 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   spelling may be written in admit.json directly (it parses to the same structure). `entry_of` resolves the effective target and recipe path; the
   pair `root@OTHER` is built, keyed (the variant name, `FNVNX_TARGET`, its own compiler and flags) and gated separately in `GATE_CACHE`. A per-target
   recipe is a whole recipe with no variants of its own; its name may not also be a variant of the base recipe. Header home: an include into a
-  product root is accepted for the including root's target only if that root has a recipe for it (its own, or a per-target one).
+  `header`-class root is valid from every target (it has no recipe and no target). An include into any other (product) root is accepted for the including root's target only if that root has a recipe for it (its own, or a per-target one). (Selftest: tests/test_recipe.py, one guest and one host includer into a header root.)
 
 ### ELF facts of a linked output (the link record)
 A green link record carries the facts of the linked ELF, written by the link itself with the pinned binutils of `env.json`; every consumer reads the record and none runs
@@ -280,6 +280,7 @@ function of the expanded values alone (a root that names its profile has the key
 - host: `compiler` = the distribution compiler of env.json, no plugin, no external.
 A root names `profile` plus its own `flags`, `include`, `units`, `defines`, `generated`, `link`, and in `external` only what the profile does not carry (those follow
 the profile's in the expanded list). Writing `compiler`, `plugins` or a profile external in the recipe is red ("restates a profile field").
+The compiler is named by reference only: a recipe that writes an `external` entry with the name, ref or commit of the pin's compiler or runtime (verify/guest_compiler.json) is red ("restates the pin"), and the profile is how a root names it; the commit and `tree_sha256` are written once, in the pin. (Selftest: tests/test_recipe.py "pin by reference".)
 
 ## Variants
 `variants: {NAME: {"compiler": .., "flags": {..}, "link": {..}, "flags_add": {..}, "defines_add": [..]}}`: one root built for several targets or with sanitizers. A variant is a set of **deltas**:

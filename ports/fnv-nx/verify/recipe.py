@@ -1074,6 +1074,10 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         want = (entry_of(roots, root + "@" + variant) if variant else ent0).get("target")
         if rec["profile"] != want:
             err.append("profile %r: the admit.json target of %s is %r (a root names the profile of its own target)" % (rec["profile"], root, want))
+    lit = [] if "profile" in rec or variant or not isinstance(pin, dict) else [e for e in (rec.get("external") if isinstance(rec.get("external"), list) else [])
+                                                                   if isinstance(e, dict) and any(isinstance(pin.get(k), dict) and (e.get("name") == pin[k].get("name") or e.get("ref") == pin[k].get("ref")
+                                                                                                                                   or e.get("commit") == pin[k].get("commit")) for k in ("external", "runtime"))]
+    err += ["external %r restates the pin of %s (a commit and tree_sha256 are written once, there): name the root's `profile`" % (e.get("name"), GUEST_PIN) for e in lit]
     rec, perr = expand_profile(rec, pin)
     err += perr
     vs = rec.get("variants")
