@@ -1832,3 +1832,5 @@ bottleneck: the cand2 warm verdict on w15.
   - bootrt, the compiler stage and all other w12L2 items go to cand4. w27: the typed dispatch gate, then per-image facts as a generator stage.
   - Workers 4/4: w15, w12, w27, w28.
 bottleneck: the cand2 verdict on w15.
+- 21:32 w27 archived while waiting. Typed dispatch gate aec29d556 (rows fnvnx-disp-rows/1, gate_contract wiring) is in w12L2 for cand4. Per-image facts stage b8607ef76 (loader:gen:3, gen/imgfacts.json) waits on w12's cand3 generator interface; it gets adapted when that lands. Workers 3/4: w15, w12, w28.
+bottleneck: the cand2 verdict on w15.
