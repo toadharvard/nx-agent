@@ -22,3 +22,6 @@
 45	D3DPERF_SetRegion	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_SetRegion	void	
 46	IDirect3DDevice9::SetDialogBoxMode	wine-9.0:dlls/wined3d/device.c:wined3d_device_set_dialog_box_mode	u32	0
 47	IDirect3DDevice9Ex::ComposeRects	wine-9.0:dlls/d3d9/device.c:d3d9_device_ComposeRects	u32	0x80004001
+200	IMediaControl::AddSourceFilter	wine-9.0:dlls/quartz/filtergraph.c:MediaControl_AddSourceFilter	u32	0
+201	IMediaControl::get_FilterCollection	wine-9.0:dlls/quartz/filtergraph.c:MediaControl_get_FilterCollection	u32	0
+202	IMediaControl::get_RegFilterCollection	wine-9.0:dlls/quartz/filtergraph.c:MediaControl_get_RegFilterCollection	u32	0
