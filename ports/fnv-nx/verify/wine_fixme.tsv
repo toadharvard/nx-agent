@@ -7,6 +7,7 @@
 22	IDirect3DShaderValidator9::Begin	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_Begin	u32	0
 23	IDirect3DShaderValidator9::Instruction	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_Instruction	u32	0
 24	IDirect3DShaderValidator9::End	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_End	u32	0
+25	IDirect3DDevice9::DrawPrimitive/Clear (incomplete framebuffer)	wine-9.0:dlls/wined3d/context_gl.c:wined3d_context_gl_check_fbo_status	branch	-
 20	Direct3DShaderValidatorCreate9	wine-9.0:dlls/d3d9/d3d9_main.c:Direct3DShaderValidatorCreate9	addr	_ZL5g_mem+8
 10	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/device.c:wined3d_device_process_vertices	branch	-
 11	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/device.c:process_vertices_strided	branch	-

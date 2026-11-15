@@ -15,6 +15,7 @@
 // colour-renderable per the env table (CheckDeviceFormat RENDERTARGET) - a plain surface of any other format has no fill; rect = whole when null, else a valid box of the level (check_box_dimensions:
 // non-empty, inside, block aligned) or INVALIDCALL; the colour is not affected by SRGBWRITEENABLE (the view is the plain one).
 #include "copy_util.h"
+#include "draw_core.h"
 #include "../gen/env_table.gen.h"
 #include <math.h>
 
@@ -43,6 +44,7 @@ static HRESULT do_clear(NxDeviceCore* d, DWORD count, const D3DRECT* rects, DWOR
         if (!ds) return D3DERR_INVALIDCALL;
         if ((flags & D3DCLEAR_TARGET) && rt0) { const NxSub* a = nx_surf_sub(ds); const NxSub* b = nx_surf_sub(rt0); if (a->w < b->w || a->h < b->h) return D3D_OK; }
     }
+    if (nx_attach(d->cur).incomplete) { fnvnx_wine_fixme(NXW_wined3d_context_gl_check_fbo_status); return D3D_OK; }          // incomplete framebuffer: nothing cleared (draw_state.cpp nx_attach)
     const D3DVIEWPORT9& vp = d->cur.viewport[0];
     NxRc draw = {(int32_t)vp.X, (int32_t)vp.Y, (int32_t)(vp.X + vp.Width), (int32_t)(vp.Y + vp.Height)};                 // R-C3
     if (d->cur.rs[D3DRS_SCISSORTESTENABLE]) { const RECT& s = d->cur.scissor[0]; draw = nx_rc_and(draw, {s.left, s.top, s.right, s.bottom}); }

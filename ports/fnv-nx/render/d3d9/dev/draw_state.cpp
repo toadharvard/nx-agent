@@ -4,7 +4,7 @@
 //     binding is emitted again. Otherwise only what differs from g_nxb is emitted (dirty groups gate the recomputation of the large blocks, the comparison decides the ops: nothing when clean).
 //  S2 render targets (NULL-format rule of copy_util.h: a target without storage has no attachment): colour targets 0..h (h = the last target with storage) in order; a target without storage BELOW h is an attachment
 //     of a scratch RGBA8 image of the pass size (a pass has no holes: nxgpu4.h BeginPass4; nobody can read a NULL target); no colour target with storage and a depth target = a depth-only pass; no target of any kind =
-//     one scratch colour target. Targets must agree in size and sample count (backend rule): a depth surface larger than the colour targets is NOT representable (reported, nxs_errors() counts the submit).
+//     one scratch colour target. The depth surface is bound only when Wine 9.0 binds it (nx_depth_bound, Rule D below): smaller than render target 0, or another multisample type / quality = unbound.
 //  S3 colour write masks of NxRenderState ANDed with nx_d3d9_rt_rule(format).mask per target; the NxRenderState word 3 bits (nxgpu4.h NXRS_M_*): MSAA = MULTISAMPLEANTIALIAS != 0, AALINE = ANTIALIASEDLINEENABLE != 0, LASTPIXEL =
 //     LASTPIXEL != 0, NOCLIP = CLIPPING == 0, bits 32.. = MULTISAMPLEMASK (the front leaves word 3 at 0).
 //  S4 half pixel: the viewport already carries it (nx/state.h NxViewport x = X + 0.5), so VS posfix.xy = 0 and posfix.z = 1 (draw_const.cpp).
@@ -37,11 +37,38 @@ static_assert(sizeof(NxTarget) == 8 && offsetof(NxTarget, level) == 4 && offseto
 bool same(const NxTarget& a, const NxTarget& b) { return memcmp(&a, &b, sizeof a) == 0; }
 }
 
-HRESULT nx_pass_resolve(NxDeviceCore* d, NxPassSet* ps) {
-    const NxDeviceState& s = d->cur; memset((void*)ps, 0, sizeof *ps); NxSurfCore* c[4]; int hi = -1; uint32_t w = 0, h = 0, smp = 1;
-    for (uint32_t i = 0; i < 4; i++) { c[i] = nx_surf_core(s.rt[i]); if (real(c[i])) hi = (int)i; if (c[i] && !w) { const NxSub* sb = nx_surf_sub(c[i]); w = sb->w; h = sb->h; smp = c[i]->img->samples ? c[i]->img->samples : 1; } }
+// Rule D: which depth-stencil a draw binds. The ONE decision, Wine 9.0 dlls/wined3d/context_gl.c wined3d_context_gl_find_fbo_entry (the depth-stencil is replaced by ds_null, i.e. unbound, in two cases):
+//   precondition (lines 647-649): a depth-stencil and render target 0 exist, and render target 0's format is not NULL (a NULL target has no storage: nothing to compare, the depth stays bound);
+//   size (lines 656-659, ds_null at 662): the depth level is narrower OR shorter than render target 0's level  -> unbound;
+//   multisample (lines 664-666, ds_null at 671): the depth's multisample type differs from the colour's, or the type is non-zero and the qualities differ -> unbound.
+// Both sides read the surfaces' own descriptors (the sub-resource level that is bound, NxImg ms / msq); no other target takes part (Wine compares render target 0 only).
+bool nx_depth_bound(const NxSurfCore* rt0, const NxSurfCore* ds) {
+    if (!ds || !rt0 || nx_img_null(rt0->img)) return true;                                                  // 647-649
+    const NxSub* r = nx_surf_sub(rt0); const NxSub* z = nx_surf_sub(ds);
+    if (z->w < r->w || z->h < r->h) return false;                                                           // 656-659 -> 662
+    if (ds->img->ms != rt0->img->ms || (ds->img->ms && ds->img->msq != rt0->img->msq)) return false;        // 664-666 -> 671
+    return true;
+}
+
+// Rule D + the incomplete pass: THE attachments of a draw or a clear, from the surfaces' own descriptors, one function. The colour attachments are the targets with storage (a NULL-format target has none, S2), the depth-stencil is
+// an attachment iff nx_depth_bound. The pass is `incomplete` iff the attachments do not all have one sample count (NxImg samples; 0 = 1). Wine 9.0 over GL: the FBO is then incomplete (GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE);
+// wined3d_context_gl_check_fbo_status (context_gl.c 420-449) only logs it (FIXME "FBO status", callers 3545, 3648, 4414 ignore the result), d3d9 SetRenderTarget (d3d9/device.c 2104-2144) returns D3D_OK, and the GL draw or clear on
+// the incomplete framebuffer generates INVALID_FRAMEBUFFER_OPERATION and has no effect (GL 4.5 core 9.4.4). So the draw / clear is skipped, D3D_OK, one log line (id NXW_wined3d_context_gl_check_fbo_status).
+NxAttach nx_attach(const NxDeviceState& s) {
+    NxAttach a; memset((void*)&a, 0, sizeof a); a.hi = -1; uint32_t smp = 0;
+    for (uint32_t i = 0; i < 4; i++) {
+        a.c[i] = nx_surf_core(s.rt[i]);
+        if (real(a.c[i])) { a.hi = (int)i; uint32_t n = a.c[i]->img->samples ? a.c[i]->img->samples : 1; if (smp && n != smp) a.incomplete = true; smp = n; }
+    }
     NxSurfCore* ds = nx_surf_core(s.ds[0]);
-    if (real(ds)) { ps->dep = nx_target(ds); ps->has_dep = true; ps->dsc = ds; ps->depth_fmt = ds->img->fmt; if (!w) { const NxSub* sb = nx_surf_sub(ds); w = sb->w; h = sb->h; smp = ds->img->samples ? ds->img->samples : 1; } }
+    if (real(ds) && nx_depth_bound(a.c[0], ds)) { a.ds = ds; uint32_t n = ds->img->samples ? ds->img->samples : 1; if (smp && n != smp) a.incomplete = true; }
+    return a;
+}
+HRESULT nx_pass_resolve(NxDeviceCore* d, NxPassSet* ps) {
+    const NxDeviceState& s = d->cur; memset((void*)ps, 0, sizeof *ps); const NxAttach at = nx_attach(s); NxSurfCore* const* c = at.c; const int hi = at.hi; uint32_t w = 0, h = 0, smp = 1;
+    for (uint32_t i = 0; i < 4; i++) if (c[i] && !w) { const NxSub* sb = nx_surf_sub(c[i]); w = sb->w; h = sb->h; smp = c[i]->img->samples ? c[i]->img->samples : 1; }
+    NxSurfCore* ds = at.ds; ps->incomplete = at.incomplete;
+    if (ds) { ps->dep = nx_target(ds); ps->has_dep = true; ps->dsc = ds; ps->depth_fmt = ds->img->fmt; if (!w) { const NxSub* sb = nx_surf_sub(ds); w = sb->w; h = sb->h; smp = ds->img->samples ? ds->img->samples : 1; } }
     ps->nc = hi >= 0 ? (uint32_t)hi + 1 : ps->has_dep ? 0 : 1;                                             // S2
     for (uint32_t i = 0; i < ps->nc; i++) {
         if (real(c[i])) { ps->col[i] = nx_target(c[i]); ps->csc[i] = c[i]; }

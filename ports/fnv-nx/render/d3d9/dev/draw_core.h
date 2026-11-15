@@ -69,7 +69,10 @@ void nx_draw_shutdown();   // returns the process-wide memory of the draw path (
 struct NxDrawDev : NxDevLifeBase { NxD3D9Latch latch; NxDrawDev() { nx_d3d9_latch_init(&latch); } };
 NxDrawDev* nx_draw_dev(NxDeviceCore* d);
 
-struct NxPassSet { uint32_t nc; NxTarget col[4]; NxSurfCore* csc[4]; NxTarget dep; bool has_dep; NxSurfCore* dsc; uint32_t depth_fmt; };
+struct NxPassSet { uint32_t nc; NxTarget col[4]; NxSurfCore* csc[4]; NxTarget dep; bool has_dep; NxSurfCore* dsc; uint32_t depth_fmt; bool incomplete; };
+struct NxAttach { NxSurfCore* c[4]; NxSurfCore* ds; int hi; bool incomplete; };   // draw_state.cpp: the attachments of a draw / clear (Rule D, incomplete pass)
+NxAttach nx_attach(const NxDeviceState& s);
+bool nx_depth_bound(const NxSurfCore* rt0, const NxSurfCore* ds);                                    // Rule D: Wine 9.0 find_fbo_entry's depth-stencil rule (draw_state.cpp)
 HRESULT nx_pass_resolve(NxDeviceCore* d, NxPassSet* ps);                       // the target set of the device state by the NULL-format rules (draw_state.cpp)
 void nx_pass_ensure(NxDeviceCore* d, const NxPassSet& ps);                  // a pass of these targets is open (begins one if not); may flush
 void nx_state_flush(NxDeviceCore* d, const NxDrawReq& r, const NxProg& pr, const NxLayout& lay, const NxPassSet& ps, uint64_t groups);   // viewport, scissor, dynamics, layout / state ids, BindState
