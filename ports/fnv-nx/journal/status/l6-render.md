@@ -793,3 +793,7 @@ Paused: w3b, w4, farm; no other work.
 - 10:05Z L1 w12: bridgefacts tool root (8968eaa30 on fnv-l1-contract-w12L2).
     - The d3d9 bridge rows are still read from the manifest external d9bridge_rows.tsv. The table is byte-identical; table_id is unchanged.
     - Open (L6, deferred by budget): the d3d9 rows generator becomes a bridgefacts stage (D3D9_ROWS) and the loader takes it via `uses`. Then the external read is deleted.
+- 10:07Z L1: the d3d9 rows move into bridgefacts is now required (RECIPE.md "inputs live below their consumers").
+    - w6 does it first: spec and generator move to bridgefacts (output D9_ROWS); d3d9 reads them via `uses`; the copies are deleted.
+    - Done means: bytes equal to the manifest, table_id e8aaba62…11d4.
+    - Then the commit goes to w12, which wires the loader. smscan follows after.
