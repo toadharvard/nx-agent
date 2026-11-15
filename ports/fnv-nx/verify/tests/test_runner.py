@@ -59,8 +59,8 @@ bare = os.path.join(SCRATCH, "artifacts.git")
 subprocess.run(["git", "init", "-q", "--bare", bare], check=True)
 art = os.path.join(SCRATCH, "artifacts")
 subprocess.run(["git", "clone", "-q", bare, art], check=True, capture_output=True)
-ENV = dict({k: v for k, v in os.environ.items() if not k.startswith("GATE_")}, FARM_HOME=os.path.join(SCRATCH, "farm"),
-           ARTIFACTS=art, RUNNER_JOBS="1")
+ENV = dict({k: v for k, v in os.environ.items() if not k.startswith("GATE_") and k != "ARTIFACTS_URL"}, FARM_HOME=os.path.join(SCRATCH, "farm"),
+           FNVNX_BUILD=art, RUNNER_JOBS="1")
 FINAL = re.compile(r"^AFTERMERGE commit=([0-9a-f]{12}) jobs=(\d+) violated=(\S+) published=(\S+)@([0-9a-f]{12})$")
 
 
