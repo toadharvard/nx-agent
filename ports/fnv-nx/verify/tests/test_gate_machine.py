@@ -54,7 +54,7 @@ def toy_repo(tag, sites, declared=DECL, seed=None, unit="seed.c", writers=None, 
 
 
 noroot = TR.make_repo("rg-noroot")
-TR.w(noroot, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "gen", "class": "tool", "gates": []}]}))
+TR.w(noroot, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "gen", "class": "tool"}]}))
 TR.git(noroot, "commit", "-q", "-am", "no product root")
 rc, g, txt = run(noroot, "noroot")
 check("no product root: universe 0, green", rc == 0 and g["universe"] == 0 and g["status"] == "green", (g, txt))

@@ -115,7 +115,7 @@ def image_parts(spec, group, cache, repo):
         defs, dig = [], {}
         for o in res["objects"]:
             syms = ls.elf_symbols(o["object"]) or []
-            member, groups = ls.elf_comdat(o["object"])
+            member, groups = ls.elf_comdat(o["object"])[:2]   # member, groups; the undecidable copies are linkstrict's (red where copies meet)
             for name, val, size, typ, bind, shn in syms:
                 if bind in (ls.GLOBAL, ls.WEAK, ls.UNIQUE) and shn != 0:
                     defs.append((name, bind, member.get(shn)))

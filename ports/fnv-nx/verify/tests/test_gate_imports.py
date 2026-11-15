@@ -39,7 +39,7 @@ def run(repo, tag):
 
 # no product root: universe 0, green, accepted by the verdict
 empty = TR.make_repo("im-empty")
-TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
+TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
 rc, g, txt, acc = run(empty, "none")
 check("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and g["status"] == "green" and acc[0] == "green", (g, txt))
 
@@ -111,7 +111,7 @@ def two_roots(tag, body):
     TR.w(repo, "toy2/x.c", body)
     TR.w(repo, "toy2/build.json", json.dumps(rec2))
     ad = json.load(open(repo + "/" + TR.T + "verify/admit.json"))
-    ad["roots"].append({"path": TR.T + "toy2", "class": "product", "target": "host", "gates": [], "recipe": TR.T + "toy2/build.json"})
+    ad["roots"].append({"path": TR.T + "toy2", "class": "product", "target": "host", "recipe": TR.T + "toy2/build.json"})
     TR.w(repo, "verify/admit.json", json.dumps(ad))
     TR.git(repo, "add", "-A")
     TR.git(repo, "commit", "-q", "-m", "toy2")

@@ -11,6 +11,11 @@ import argparse, hashlib, json, os, re, subprocess, sys, tempfile
 FORMAT = "fnvnx-opentrace/1"
 TRACE_SET = "open,openat,openat2,execve,execveat,chdir,fchdir,clone,clone3,fork,vfork"
 ENV_HINTS = ("CXX", "CC", "ORDER_KEYS", "JOBS")
+# What a run can depend on besides the files it opens: whether a path exists or what it is (stat family, access, readlink) and what a directory lists
+# (getdents). parse(extra=True) yields these as "stat" / "statfail" / "list" events; the default call yields none of them (opentrace check and oraclecheck read opens only).
+READ_EXTRA = "stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,readlinkat,getdents,getdents64"
+STAT_CALLS = {"stat", "lstat", "newfstatat", "statx", "access", "faccessat", "faccessat2", "readlink", "readlinkat"}
+DIRFD_CALLS = {"openat", "openat2", "execveat", "newfstatat", "statx", "faccessat", "faccessat2", "readlinkat"}
 
 
 def sha(data):
@@ -75,8 +80,9 @@ FLAGS = re.compile(r"\bO_[A-Z_]+\b")
 UNRESOLVED = "/<unresolved-cwd>"
 
 
-def parse(lines, cwd0):
-    """Yield events (pid, kind, path, flags) kind in open/exec/fail; tracks cwd per pid."""
+def parse(lines, cwd0, extra=False):
+    """Yield events (pid, kind, path, flags) kind in open/exec/fail; tracks cwd per pid. EXTRA: also stat / statfail (a stat-family, access or readlink call on a path)
+    and list (getdents on a directory; the path is the one `strace -y` prints for the descriptor)."""
     cwd, pend, clone_pend = {}, {}, []
 
     def get_cwd(pid):
@@ -111,6 +117,11 @@ def parse(lines, cwd0):
             if ok and int(ret) > 0 and int(ret) not in cwd:
                 cwd[int(ret)] = cwd[pid]
             continue
+        if extra and name in ("getdents", "getdents64") and ok:
+            dm = re.match(r"\s*\d+<(.*?)>", args)
+            if dm:
+                yield (pid, "list", os.path.normpath(dm.group(1)), [])
+            continue
         sm = STR.search(args)
         if name == "fchdir":
             if ok and "<" in args:
@@ -120,7 +131,7 @@ def parse(lines, cwd0):
             continue
         path = unescape(sm.group(1))
         base = cwd[pid]
-        if name in ("openat", "openat2", "execveat"):
+        if name in DIRFD_CALLS:
             d = re.match(r"\s*(AT_FDCWD|\d+)(?:<(.*?)>)?\s*,", args)
             if not d:
                 continue
@@ -133,6 +144,9 @@ def parse(lines, cwd0):
         if name == "chdir":
             if ok:
                 cwd[pid] = full
+        elif name in STAT_CALLS:
+            if extra:
+                yield (pid, "stat" if ok else "statfail", full, [])
         elif name in ("execve", "execveat"):
             yield (pid, "exec" if ok else "fail", full, [])
         elif name.startswith("open"):
@@ -205,6 +219,19 @@ def finish(rep, out):
     return 0 if rep["verdict"] == "green" else 2
 
 
+def strace_run(cmd, trace, timeout=None, **popen):
+    """The one strace invocation (opentrace and oraclecheck both run commands through it): CMD under `strace -f -qq -y -e trace=TRACE_SET -o TRACE`;
+    POPEN is passed to subprocess.Popen. -> the command's exit status, or None when TIMEOUT seconds passed (the process group is killed)."""
+    import signal
+    p = subprocess.Popen(["strace", "-f", "-qq", "-y", "-e", "trace=" + TRACE_SET, "-o", trace, "--"] + list(cmd), start_new_session=True, **popen)
+    try:
+        return p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+        return None
+
+
 def main(argv):
     ap = argparse.ArgumentParser(prog="opentrace.py")
     ap.add_argument("mode", choices=["run", "check", "key"])
@@ -237,8 +264,7 @@ def main(argv):
             raise SystemExit("opentrace: run needs -- cmd")
         tf = a.keep_trace or tempfile.mkstemp(prefix="opentrace-", suffix=".strace")[1]
         try:
-            rc = subprocess.run(["strace", "-f", "-qq", "-y", "-e", "trace=" + TRACE_SET,
-                                 "-o", tf, "--"] + cmd).returncode
+            rc = strace_run(cmd, tf)
             with open(tf, errors="surrogateescape") as f:
                 lines = f.readlines()
         finally:

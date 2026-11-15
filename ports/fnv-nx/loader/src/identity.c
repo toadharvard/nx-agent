@@ -2,8 +2,8 @@
 #include "fnvnx_identity.h"
 #include "fnvnx_loader.h"
 
-int fnvnx_image_identity(const uint8_t *file, size_t size, const uint8_t want[32]) {
-    uint8_t got[32];
+int fnvnx_image_identity(const uint8_t *file, size_t size, const uint8_t want[FNVNX_SHA256_DIGEST_SIZE]) {
+    uint8_t got[FNVNX_SHA256_DIGEST_SIZE];
     uint8_t diff = 0;
     unsigned k;
 

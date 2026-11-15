@@ -31,7 +31,7 @@ T = "ports/fnv-nx/"
 ROOT = T + "toy"
 PLUGS = [{"name": n} for n in recipe.PLUGIN_SOURCES]   # a root names only the plugin: source, inputs and arguments are fixed by recipe.py
 P = {p["name"]: p for p in PLUGS}
-SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\n"
+SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\nstatic int arr[7];\nint ua(int i) { return arr[i]; }\nint lf() { static char ls[3]; return ls[0]; }\nextern int ex;\nint uex() { return ex; }\nextern int dg[];\nint udg() { return dg[0]; }\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
        "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + list(recipe.SDD_FLAGS), "asm": []}, "include": [], "units": "all",
        "plugins": PLUGS}
@@ -66,12 +66,12 @@ def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
     w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
-    root = {"path": ROOT, "class": "product", "target": target, "gates": [], "recipe": ROOT + "/build.json"}
+    root = {"path": ROOT, "class": "product", "target": target, "recipe": ROOT + "/build.json"}
     if origin is not None:
         root["cxx_origin"] = origin
     w(repo, T + "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
-        root, {"path": T + "toolchain", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
-        {"path": T + "gen", "class": "tool", "gates": []}] + list(extra_roots)}))
+        root, {"path": T + "toolchain", "class": "tool"}, {"path": T + "verify", "class": "tool"},
+        {"path": T + "gen", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -147,11 +147,19 @@ def main():
     o = next(x["object"] for x in ra["objects"] if x["unit"] == "a.cc")
     secs = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", o], capture_output=True, text=True).stdout
     have = set(x for x in secs.split() if ".fnvnx" in x)
-    check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout"} <= have, sorted(have))
+    check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout", ".fnvnx.objects"} <= have, sorted(have))
     check("addr plugin wrote .fnvnx.addr (symbol, seen, routed; seen == routed), no .cold section", ".fnvnx.addr" in have and not any(".cold" in x for x in secs.split()), sorted(have))
     rows = subprocess.run(["aarch64-linux-gnu-objcopy", "-O", "binary", "--set-section-flags=.fnvnx.addr=alloc,load", "--only-section=.fnvnx.addr", o, "/dev/stdout"], capture_output=True, text=True).stdout.splitlines()
     ok = bool(rows) and all(len(r.split("\t")) == 3 and r.split("\t")[1] == r.split("\t")[2] and r.split("\t")[1].isdigit() for r in rows) and "_Z2rdv" in [r.split("\t")[0] for r in rows]
     check(".fnvnx.addr lines are <symbol>\\t<seen>\\t<routed> and name the unit's functions", ok, rows[:4])
+    ob = os.path.join(BASE, "objects.bin")
+    subprocess.run(["aarch64-linux-gnu-objcopy", "--dump-section", ".fnvnx.objects=" + ob, o, os.path.join(BASE, "objects.o")], capture_output=True, text=True)
+    objs = open(ob).read() if os.path.exists(ob) else ""
+    rows = {r.split("\t")[0]: r.split("\t")[1:] for r in objs.splitlines() if r}
+    check("OBJECTS: a global struct, a static array and a local static have a row; extern declarations have none",
+          rows.get("gs") == ["8", "4", "US@@", "1S", ""] and rows.get("_ZL3arr") == ["28", "4", "-", "A7_i", "internal"] and
+          any(v[0] == "3" and v[-1] == "internal,local" for k, v in rows.items() if k.startswith("_ZZ2lfv")) and
+          "ex" not in rows and "dg" not in rows and not any(k.startswith("*") for k in rows), (rows, objs[:400], have))
     und = subprocess.run(["aarch64-linux-gnu-nm", "-u", o], capture_output=True, text=True).stdout
     check("dispatch plugin routes an indirect call through fnvnx_dispatch", "fnvnx_dispatch" in und, und)
     rd, wr_, f2i = disasm(ra, "_Z2rdv"), disasm(ra, "_Z2wri"), disasm(ra, "_Z3f2if")
@@ -302,7 +310,7 @@ def main():
     tt = T + "gen2tree/lift.py"
     trec = dict(srec, generated=[dict(srec["generated"][0], tool=tt)])
     tr = make_repo("treetool", trec, {"lifted_by": tt, "stage": st}, {tt: lift, T + "gen2/x.py": "", ROOT + "/a.cc": None},
-                   extra_roots=[{"path": T + "gen2", "class": "tool", "gates": [], "trees": [T + "gen2", T + "gen2tree"]}])
+                   extra_roots=[{"path": T + "gen2", "class": "tool", "trees": [T + "gen2", T + "gen2tree"]}])
     check("a tool file in a tree of an admitted tool root (not under the root path) is a valid lifted_by and generator tool", errs(tr, trec) == [], errs(tr, trec))
     tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
     check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
@@ -312,7 +320,7 @@ def main():
     hfiles = dict(sfiles, **{hh: "#define FNVL_HOST 1\n"})
     for tg, want in (("guest", False), ("host", True)):
         hr = make_repo("hh_" + tg, hrec, {"lifted_by": T + "gen/lift.py", "stage": st}, hfiles,
-                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest", "gates": []}], target=tg)
+                       extra_roots=[{"path": T + "platform", "class": "product", "target": "guest"}], target=tg)
         he = [x for x in errs(hr, hrec) if "include" in x]
         check("lifted root of target %s including platform/include (a guest product root): %s" % (tg, "red, the other target is no home" if want else "no include error"),
               bool(he) == want and (not want or any("lies in no admitted product root" in x for x in he)), he)

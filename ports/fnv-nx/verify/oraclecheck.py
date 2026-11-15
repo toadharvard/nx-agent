@@ -21,7 +21,6 @@ This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: 
 import concurrent.futures
 import json
 import os
-import signal
 import subprocess
 import sys
 import tempfile
@@ -74,15 +73,8 @@ def run_one(test, root, timeout):
     tmp = tempfile.mkdtemp(prefix="oraclecheck-")
     trace = os.path.join(tmp, "trace")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
-    p = subprocess.Popen(["strace", "-f", "-y", "-qq", "-e", "trace=" + opentrace.TRACE_SET, "-o", trace, sys.executable, "-I", test],
-                         cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True, env=env)
-    try:
-        rc = p.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGKILL)
-        p.wait()
-        rc = None
+    rc = opentrace.strace_run([sys.executable, "-I", test], trace, timeout, cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, env=env)
     try:
         with open(trace, errors="surrogateescape") as fh:
             lines = fh.readlines()

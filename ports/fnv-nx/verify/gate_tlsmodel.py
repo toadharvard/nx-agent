@@ -145,7 +145,8 @@ def main():
                 objs.update(objects(r)[0])
             groups[root] = objs
             if res["elf"]:
-                linked[root + "/" + os.path.basename(res["elf"]["path"])] = relocs(res["elf"]["path"])
+                facts = json.load(open(res["elf_facts"]["path"]))   # the link record (elffacts.py): the relocations of the final ELF, read by the pinned readelf of the link stage
+                linked[root + "/" + os.path.basename(res["elf"]["path"])] = [(r[0], r[1], r[2], r[3]) for r in facts["relocations"]]
     except recipe.RecipeError as e:
         why = "invalid recipe: %s" % "; ".join(e.errors)[:300]
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as e:

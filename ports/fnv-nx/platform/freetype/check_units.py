@@ -7,7 +7,7 @@
 Runs gen_units.py on TREE and DEB and requires, exit 1 listing each difference:
   (1) the generated stage's outputs in build.json are exactly the files the generator writes (so no output is missing and none is unwritten);
   (2) `sources` names the stage's units.list;
-  (3) the unit set (units.list plus the generated units, <gen>/src/<dir>/<name>.c) equals units.txt, the committed record of the derivation;
+  (3) (the unit set is units.list plus the generated units, <gen>/src/<dir>/<name>.c; it is derived, with no committed record of it)
   (4) the `include` list holds, in this order, the generated include directory, the external's include and one /ext/freetype/src/<dir> per unit directory of that set;
   (5) the stage's arguments are the two externals' mount points and /out/freetype, and its one tracked input is the root's sources (the reference proof of unreferenced.. service modules)."""
 import json
@@ -44,9 +44,6 @@ def main(a):
         red.append("sources is %r, not freetype/units.list" % (bj.get("sources"),))
     gen_units = [m[len("freetype/gen/"):] for m in made if m.startswith("freetype/gen/src/") and m.endswith(".c")]
     allu = sorted(listed + gen_units)
-    rec = open(os.path.join(HERE, "units.txt")).read().split()
-    if allu != rec:
-        red.append("unit set %s differs from units.txt %s" % (len(allu), len(rec)))
     dirs = sorted({u.rsplit("/", 1)[0] for u in allu})
     want_inc = ["ports/fnv-nx/platform/freetype/gen/include", "/ext/freetype/include"] + ["/ext/freetype/" + d for d in dirs]
     got_inc = [i for i in bj["include"] if "freetype" in i]

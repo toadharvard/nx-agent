@@ -9,14 +9,14 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       (GLOBAL, not common) definition, or by one COMDAT group family (b1), or by the link script (b2). Findings: `undefined` (no
       definition anywhere), `duplicate-strong` (two strong definitions), `weak-only` (a weak or UNIQUE definition outside any COMDAT
       group and no strong one: the linker may substitute it), `common` (a common symbol), `ifunc` (an IFUNC definition: the body is
-      chosen at run time), `comdat-differs` (b1). Items: every undefined reference (object, symbol), every defined global symbol name
+      chosen at run time), `undecidable: no definition record` (b1; `comdat-differs` is kept for tier-2 records that differ, once the definition record exists). Items: every undefined reference (object, symbol), every defined global symbol name
       and every COMDAT signature; a reference is certified iff its symbol has exactly one definition and no finding.
   (b1) C++ vague linkage. A weak or UNIQUE definition in a section that is a member of an SHT_GROUP with GRP_COMDAT (inline functions,
       templates, vtables, typeinfo, guard variables) is a DEFINITION: the linker keeps exactly one copy per group signature (the group's
       signature symbol). The kept copy is arbitrary, so the rule needs all copies to be the same: for each signature, across all
       objects of all product roots, every copy (the member sections in group order: name, type, flags, alignment, bytes, and the
-      relocations of each member by offset, type, addend and TARGET) has one digest, else every copy is `comdat-differs` (an ODR
-      violation). TARGET of a relocation: a global/weak symbol by name; a member of the same group by its ordinal in the group plus offset;
+      relocations of each member by offset, type, addend and TARGET) has one digest, else every copy is `undecidable: no definition record` (byte-different copies; the entity is a source definition,
+      decided by the definition record, link/odr.py). TARGET of a relocation: a global/weak symbol by name; a member of the same group by its ordinal in the group plus offset;
       a SHF_MERGE section by the entity it points at (the NUL-terminated string, or entsize bytes), so string literals of one inline
       function certify wherever the object put them; any other local target by (section name, symbol name, offset), which is
       layout dependent and therefore conservative (two identical copies that reference differently laid out local data are reported).
@@ -115,10 +115,11 @@ def elf_comdat(path):
     A signature that occurs twice in one object keeps both copies in one digest."""
     ids, member, defs = comdat_id.copies(path)
     return (member, {s: i.digest for s, i in ids.items()}, {s: i.undecidable for s, i in ids.items() if i.undecidable},
-            frozenset(n for i in ids.values() for n in i.resolved), defs)
+            frozenset(n for i in ids.values() for n in i.resolved), defs, {s: i.defrec for s, i in ids.items()})
 
 
 OUTLINE = re.compile(r"__aarch64_(cas|swp|ldadd|ldclr|ldeor|ldset)[0-9]+_(relax|acq|rel|acq_rel|sync)")   # libgcc's outline-atomics ABI: __aarch64_<op><bytes>_<memory model>
+UNDEC = "undecidable: no definition record"   # one name for byte-different COMDAT copies in every gate (link/odr.py)
 HOST_RUNTIME_PKGS = ("libc6", "libgcc-s1", "libstdc++6")   # packages of verify/env.json whose shared objects are the host boundary (envcheck pins them)
 
 
@@ -170,7 +171,7 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
     HOST (host root prefixes ["<root>/"], exports {name}) or None: rule (d), the host boundary
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function of its arguments."""
     items, out, comdat = [], set(), comdat or {}
-    defs, refs, copies, undec = {}, [], {}, {}
+    defs, refs, copies, undec, recs = {}, [], {}, {}, {}
     for oid, syms in sorted(objs.items()):
         member = comdat.get(oid, ({}, {}))[0]
         for name, val, size, typ, bind, shn in syms:
@@ -182,16 +183,26 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
                 defs.setdefault(name, []).append((oid, bind, shn, typ, member.get(shn) if bind != GLOBAL else None))
         for sig, dg in sorted(comdat.get(oid, ({}, {}))[1].items()):
             copies.setdefault(sig, {})[oid] = dg
+            recs.setdefault(sig, {})[oid] = (comdat.get(oid) + ({},))[5].get(sig) if len(comdat.get(oid)) > 5 else None
         for sig, us in sorted((comdat.get(oid, ({}, {}, {})) + ({},))[2].items()):
             undec.setdefault(sig, []).extend((oid,) + u[1:] for u in us)
     bad = {}
+
+    def state(sig):
+        """link/comdat.py entity over the copies' digests and definition records: 'same' | 'differs' (tier-2 records differ) | 'norecord'"""
+        c = copies[sig]
+        if len(set(c.values())) == 1:
+            return "same"
+        if any(r is None for r in recs[sig].values()):
+            return "norecord"
+        return "same" if len(set(recs[sig].values())) == 1 else "differs"
     for sig, c in sorted(copies.items()):
         items.append(("<comdat>", sig))
         if sig in undec and len(c) > 1:       # one copy has nothing to be the same as: undecidable only matters where copies meet
             u = undec[sig][0]
             out.add(("<comdat>", sig, "identity-undecidable", "object %s section %s offset %d: %s" % u))
-        elif len(set(c.values())) > 1:
-            out.add(("<comdat>", sig, "comdat-differs", "copies differ across %s" % ", ".join("%s (%s)" % (o, c[o][:12]) for o in sorted(c))[:400]))
+        elif state(sig) != "same":
+            out.add(("<comdat>", sig, UNDEC if state(sig) == "norecord" else "comdat-differs", "copies differ across %s" % ", ".join("%s (%s)" % (o, c[o][:12]) for o in sorted(c))[:400]))
     script = {}   # elf id -> names the link (script or linker), not an object, defines in that ELF
     for eid, syms in elfs.items():
         pre = eid.rsplit("/", 1)[0] + "/"
@@ -208,9 +219,10 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
         items.append(("<defs>", name))
         strong = [d for d in ds if d[1] == GLOBAL and d[2] != COMMON]
         cdef = [d for d in ds if d[4] is not None]
-        differs = any(len(set(copies[d[4]].values())) > 1 or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef)
+        differs = any(state(d[4]) != "same" or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef)
+        dkind = UNDEC if any(state(d[4]) == "norecord" or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef) else "comdat-differs"
         for kind, why in (("common", any(d[2] == COMMON for d in ds)), ("ifunc", any(d[3] == IFUNC for d in ds)),
-                          ("duplicate-strong", len(strong) > 1), ("comdat-differs", differs and not strong),
+                          ("duplicate-strong", len(strong) > 1), (dkind, differs and not strong),
                           ("weak-only", not strong and not any(d[2] == COMMON for d in ds) and (not cdef or any(d[4] is None for d in ds)))):
             if why:
                 bad[name] = kind

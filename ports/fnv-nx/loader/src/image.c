@@ -1,10 +1,10 @@
 /* Mapping the headers and every section as the Windows loader does; base relocations. */
 #include "internal.h"
+#include "fnvnx/hostvm.h"
 #include <stdlib.h>
 
-#define PAGE 0x1000u
 
-static uint32_t page_up(uint32_t v) { return (v + PAGE - 1) & ~(PAGE - 1); }
+static uint32_t page_up(uint32_t v) { return (v + FNVNX_PAGE_SIZE - 1) & ~(FNVNX_PAGE_SIZE - 1); }
 static uint32_t vsize_eff(const fnvnx_section *s) { return s->vsize ? s->vsize : s->raw_size; }
 
 int fnvnx_image_map(fnvnx_image *img, const fnvnx_pe *pe, const fnvnx_os *os, uint32_t load_base, uintptr_t bias,

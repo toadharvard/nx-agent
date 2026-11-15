@@ -121,7 +121,7 @@ static int paced_start(uint32_t rate, uint32_t period)
     g_buf = (int16_t *)malloc((size_t)period * 4);
     if (!g_buf)
         return -1;
-    g_pump = clk_pump_start(pump_step, pump_after, NULL, rate, period, 64 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));
+    g_pump = clk_pump_start(pump_step, pump_after, NULL, rate, period, 64 * 1024, 2, FNVNX_THREAD_ROLE(FNVNX_ROLE_AUDIO));
     if (!g_pump) {
         free(g_buf);
         g_buf = NULL;
