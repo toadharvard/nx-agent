@@ -195,9 +195,15 @@ def parse_members(map_text):
     lines = map_text.splitlines()
     try:
         i = next(k for k, ln in enumerate(lines) if ln.startswith("Archive member included to satisfy reference by file (symbol)"))
-    except StopIteration:   # ld prints the heading lazily, with the first archive member it pulls (ldmain.c add_archive_element): no section = no member, in a map that is a map
-        if not any(ln.startswith("Memory Configuration") for ln in lines):
-            raise ElfFactsError("map: no `Archive member included` section and no `Memory Configuration` (not a GNU ld map)")
+    except StopIteration:
+        # ld prints the section only when the link pulled a member out of an archive. Absence is proof of "none" only if the map is complete (it has
+        # `Memory Configuration` and `Linker script and memory map`) and its memory map has no input section named ARCHIVE(MEMBER); otherwise it is inconsistent.
+        if not any(ln.startswith("Memory Configuration") for ln in lines) or not any(ln.startswith("Linker script and memory map") for ln in lines):
+            raise ElfFactsError("map: neither an `Archive member included` section nor a complete map (`Memory Configuration`, `Linker script and memory map`)")
+        k = next(k for k, ln in enumerate(lines) if ln.startswith("Linker script and memory map"))
+        for ln in lines[k + 1:]:
+            if re.search(r"(?:^|\s)[^\s*()]\S*\([^()\s]+\)\s*$", ln):
+                raise ElfFactsError("map: input section %r is an archive member but the map has no `Archive member included` section" % ln.strip())
         return []
     out, i, pend = [], i + 1, None
     while i < len(lines):

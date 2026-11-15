@@ -158,8 +158,12 @@ def main():
     check("parse_relocs: a row that does not fit raises", raises(elffacts.parse_relocs, "Relocation section '.s' at offset 0x1 contains 1 entry:\nnot a row\n"))
     check("parse_header: a header without an entry point raises", raises(elffacts.parse_header, "  Type: EXEC\n  Machine: x\n"))
     check("derive: a machine with no call-relocation table raises", raises(elffacts.derive, {"machine": "Z80"}, [], [], []))
-    check("parse_members: no section in a text that is no ld map raises", raises(elffacts.parse_members, "nothing"))
-    check("parse_members: a map with no archive section pulled no member (ld prints the heading with the first one)", elffacts.parse_members("Memory Configuration\n\nName Origin\n") == [])
+    check("parse_members: no section raises", raises(elffacts.parse_members, "nothing"))
+    full = "Memory Configuration\n\nName Origin Length Attributes\n*default* 0x0 0xffffffffffffffff\n\nLinker script and memory map\n\n.text 0x1000 0x10\n *(.text)\n .text 0x1000 0x10 a.o\n"
+    check("parse_members: a complete map with no archive member and no section gives []", elffacts.parse_members(full) == [])
+    check("parse_members: an ARCHIVE(MEMBER) input section with no `Archive member included` section raises", raises(elffacts.parse_members, full + " .text 0x1010 0x4 /x/libx.a(y.o)\n"))
+    check("parse_members: a truncated map (no `Linker script and memory map`) raises", raises(elffacts.parse_members, "Memory Configuration\n\nName Origin Length Attributes\n"))
+    check("parse_members: a truncated map (no `Memory Configuration`) raises", raises(elffacts.parse_members, "Linker script and memory map\n\n .text 0x1 0x2 a.o\n"))
     check("parse_cref: no table raises", raises(elffacts.parse_cref, "no table"))
     check("definers: a file ld printed that is no input of the link raises", raises(elffacts.definers, {"s": ["zzz.o"]}, {}, lambda f: None, set()))
     # a long name puts its file on the next line of ld's table
