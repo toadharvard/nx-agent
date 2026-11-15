@@ -904,6 +904,13 @@ def check_run(SS):
 
 def check_tc_gate(repo, tcc, tiny):
     rc, g, td, txt = gate(repo, "determinism", BASE + "/gtc", BASE + "/tccache")
+    if rc:
+        for dp, _, fs in os.walk(BASE + "/gtc"):
+            for fn in fs:
+                if fn.endswith(".json"):
+                    t = open(os.path.join(dp, fn), errors="replace").read()
+                    if "stderr" in t:
+                        print("DIAG", fn, t[:1500])
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"

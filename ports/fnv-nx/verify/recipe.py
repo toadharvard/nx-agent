@@ -1913,7 +1913,7 @@ class Job:
             # linking a shared object also needs collect2 and ld, which gcc_set (compile only) does not list
             q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
             exes = [e if e.startswith("/") else "/usr/bin/" + e for e in exes + [q("collect2"), q("ld")]]
-            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + [t for t in trees if not any(under(t, x) for x in ts)]))))   # the plugin headers of the host compiler itself are in its own tree already
+            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(ts + [t for t in trees if not any(under(t, x) for x in ts)]))), [x for x in [self.rec["compiler"].get("external")] if x])   # the compiler's own external only (its plugin headers); no other external is an input of a plugin build; the plugin headers of the host compiler itself are in its own tree already
         rt = self.cached_rt("tool-plugin-" + hashlib.sha256(repr((host, pdir, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], make)[1]
         # A plugin is linked against nothing (its symbols come from the compiler that loads it): -nostdlib, with the startup files the
         # driver would pass (crti/crtbeginS ... crtendS/crtn: __dso_handle, .init/.fini). crtbeginS/crtendS are in the driver's own
@@ -2191,12 +2191,15 @@ class Job:
         pn = subprocess.run([self.hostpath(self.drivers()[0]), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         d, b = posixpath.split(posixpath.normpath(unitstage.prog(pn)))
         rd = posixpath.join(d, b[:-2] + "readelf") if b.endswith("ld") else ""
-        in_ext = bool(rd) and any(under(rd, e["host"]) or under(rd, e["at"]) for e in self.ext.values())   # a file of a declared external tree is pinned by its commit and tree_sha256
+        ex_ = next((e for e in self.ext.values() if rd and (under(rd, e["host"]) or under(rd, e["at"]))), None)
+        in_ext = ex_ is not None   # a file of a declared external tree is pinned by its commit and tree_sha256; it runs at the tree's own mount point
+        if in_ext and under(rd, ex_["host"]):
+            rd = posixpath.join(ex_["at"], posixpath.relpath(rd, ex_["host"]))
         bad = [] if in_ext else envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
         if bad:
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
         rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr((rd, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16],
-                            lambda: self.plus(runtime.build_tool(self.store, [rd], [])))[1]
+                            lambda: self.plus(runtime.build_tool(self.store, [rd], [ex_["host"] + "@" + ex_["at"]] if in_ext else []), [n for n, e in self.ext.items() if e is ex_]))[1]
         doc = {"format": "fnvnx-stage/1", "stage": stage, "argv": [rd, "-W", "-h", "-S", "-r", "-s", "/linked/" + name], "cwd": "/", "class": "build", "tool": "readelf",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(rd)), "outputs": [],
                "inputs": merge_inputs(rt["inputs"] + [{"at": "/linked", "tree": fin}], [], self.store, ws)}
