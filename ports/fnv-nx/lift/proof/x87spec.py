@@ -1529,12 +1529,16 @@ def fyl2x(s):
     gb, goe, gue, gpe, gup = _tr_flags(rm, exact)
     x_lt1 = xr < 1
     gzero = Concat(sgn(y), K(0, 63)) ^ If(x_lt1, K(1 << 63, 64), K(0, 64))
-    gres = If(is_zero(y), gzero, gb)
+    # ST(1) infinite and ST(0) finite, positive, not 1 (Table 1-44 columns +0<+F<+1 and +F>+1): an exact infinity, no flags;
+    # the sign is that of ST(1), flipped when log2(ST(0)) < 0 (xr < 1).  (yr of an infinity is not a real: it is never used for it.)
+    yinf = is_inf(y)
+    ginf = Concat(sgn(y), K(0x7FF, 11), K(0, 52)) ^ If(x_lt1, K(1 << 63, 64), K(0, 64))
+    gres = If(is_zero(y), gzero, If(yinf, ginf, gb))
     res = If(nan_any, nres, If(x_neg, K(QNAN_INDEF, 64), If(inv_sp, K(QNAN_INDEF, 64),
           If(special, bits(prod), gres))))
     ie = Or(is_snan(x), is_snan(y), And(Not(nan_any), Or(x_neg, inv_sp)))
     de = And(Not(ie), Or(is_sub(x), is_sub(y)))
-    gen_nz = And(generic, Not(is_zero(y)))
+    gen_nz = And(generic, Not(is_zero(y)), Not(yinf))
     uf = Or(is_empty(s, 0), is_empty(s, 1))
     s_ok = do_pop(_c1(write_reg(s, 1, res), And(gen_nz, gup)))
     s_f = do_pop(_uf_state(s, 1, False))

@@ -86,3 +86,11 @@ fpatan | -0 | -1 -1 -1 -0 -0 -0 | SDM 2A:FPATAN Table 1-26
 fpatan | +0 | 1 1 1 0 0 0 | SDM 2A:FPATAN Table 1-26
 fpatan | +F | 1 range 1/2 1/2 range 0 | SDM 2A:FPATAN Table 1-26
 fpatan | +inf | 3/4 1/2 1/2 1/2 1/2 1/4 | SDM 2A:FPATAN Table 1-26
+# FYL2X Table 1-44 (rows ST(1), columns ST(0) = -inf -F +-0 (+0<+F<+1) +1 (+F>+1) +inf NaN; * = #IA with the QNaN indefinite, ** = #Z with an infinity signed opposite to ST(1); F = a finite value, symbolic in the spec)
+fyl2x | -inf | * * +inf +inf * -inf -inf NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | -F | * * ** +F -0 -F -inf NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | -0 | * * * +0 -0 -0 * NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | +0 | * * * -0 +0 +0 * NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | +F | * * ** -F +0 +F +inf NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | +inf | * * -inf -inf * +inf +inf NaN | SDM 2A:FYL2X Table 1-44
+fyl2x | NaN | NaN NaN NaN NaN NaN NaN NaN NaN | SDM 2A:FYL2X Table 1-44

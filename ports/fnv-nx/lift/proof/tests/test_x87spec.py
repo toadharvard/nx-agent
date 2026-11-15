@@ -236,6 +236,29 @@ class SpecialTables(unittest.TestCase):
                 self.assertLess(abs(got - w), 1e-15, 'Y=%s X=%s' % (r[0], c)); n += 1
         self.assertEqual(n, 32)
 
+    def test_fyl2x_table_1_44(self):
+        """every cell of the table; the finite-by-finite cells ('+F', '-F' with a finite log) are symbolic (LOG2) and are checked by class only where the spec is concrete"""
+        r1 = {'-inf': float('-inf'), '-F': -3.0, '-0': -0.0, '+0': 0.0, '+F': 3.0, '+inf': float('inf'), 'NaN': NAN}
+        c0 = [('-inf', float('-inf')), ('-F', -2.0), ('+-0', -0.0), ('+-0', 0.0), ('<1', 0.5), ('1', 1.0), ('>1', 4.0), ('+inf', float('inf')), ('NaN', NAN)]
+        # table columns: -inf, -F, +-0, 0<F<1, 1, F>1, +inf, NaN  (the +-0 column is run for both zeros)
+        colmap = [0, 1, 2, 2, 3, 4, 5, 6, 7]
+        n = 0
+        for r in rows('fyl2x'):
+            cells = r[1].split()
+            for (cn, xv), ci in zip(c0, colmap):
+                want = cells[ci]
+                o = run(('d9', 'reg', 6, 1), state([xv, r1[r[0]]]))
+                top = val(X.top(o.s)); raised = z3.simplify(o.raised)
+                try: b = val(z3.Select(o.s.R, K(top, 3)))
+                except AssertionError: self.assertIn(want, ('+F', '-F')); continue          # symbolic finite result
+                fl = val(raised)
+                if want == '*': self.assertEqual((self.cls(b), fl & 1), ('NaN', 1), (r[0], cn))
+                elif want == '**': self.assertEqual(fl & 4, 4, (r[0], cn)); self.assertEqual(self.cls(b), '+inf' if r1[r[0]] < 0 else '-inf', (r[0], cn))
+                elif want == 'NaN': self.assertEqual(self.cls(b), 'NaN', (r[0], cn))
+                else: self.assertEqual(self.cls(b), want, (r[0], cn)); self.assertEqual(fl, 0, (r[0], cn))
+                n += 1
+        self.assertEqual(n, 7 * 9 - 4)                                                     # 63 runs, 4 of them symbolic finite results (ST(1) finite, ST(0) < 1 or > 1)
+
 class MmxAlias(unittest.TestCase):
     """MMX aliasing, SDM 1:9.5.1 / 1:9.6.2 / 1:9.4.8: one copy of the effect, on the DSL names"""
     def d(self):
