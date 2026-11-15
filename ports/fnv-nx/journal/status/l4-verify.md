@@ -282,3 +282,9 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - w6 resumed: icenc class table as image data, test_icount onto the icount root, then the relink when w12 lands.
   - w7 task U (doing, w7-u): bootlayout's interim ELF readers are replaced by L1 w25's link-record ELF facts (547405ab5) and deleted.
   - Blocked: the bootguest link and the icount root both wait on L1 w12's two recipe rules (gen output dirs; one driver argv with PROBE_FLAGS).
+- 09:25:
+  - Task U done in design (w7-u 2ae540009): verify/bootfacts.py reads L1 w25's link-record ELF facts, and bootlayout's section_ranges, defined_symbols and data_symbol are deleted (0 uses).
+  - Tests: test_bootfacts 10, bootlayout 32, icount 12 are green.
+  - Correction under way: rebase onto w6-r ee9d12897 and delete the hand-written facts record in favour of the icount root's own link record.
+  - Task V (w7, doing): bootmiles, lockobs, test_bootgpu and test_lockobs move to bootfacts.
+  - Asked L1 w25: elffacts.json published on the ELF branch.
