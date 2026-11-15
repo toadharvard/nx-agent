@@ -344,6 +344,7 @@ class Func:
         self.words = sorted([i.off for i in self.ins] + self.undec)
 
     # -- control flow
+    entry_regs = ()    # (reg, tag) pairs the registers hold at entry (default none): gate rtasm seeds the jmp_buf argument
     _forming = None
     _escapes = None
     args = None   # the incoming stack-argument size from the frame row (bytes at [CFA, CFA+args)), None when the row has none
@@ -634,7 +635,7 @@ class Func:
         self.state = [None] * n
         if not n:
             return
-        self.state[0] = (0, ())
+        self.state[0] = (0, self.entry_regs)
         work = collections.deque([0])
         queued = {0}
         while work:
@@ -991,37 +992,3 @@ def scan(path):
 
 
 ASM_FRAME = ((-(1 << 24), 1 << 25),)    # an assembled routine has no frame record: its whole frame is ONE recorded range whose address may escape (rule D1 decides)
-
-
-def scan_asm_rules(path):
-    """-> [(item, what, rule)] sorted; rule is the certifying rule letter (O ordered, F frame, D unshared, L load of read-only data or a linker slot) or None (red, `what` says why).
-    scan_asm is this with the rule dropped (the one implementation).  -> [(item, kind)] sorted, kind '' = certified, for an object assembled from .S/.s (gate rtasm).  There is no `.fnvnx.frame` record: every body
-    (function symbol or the gap between them) is judged with the whole frame as one escaping range, so a frame access is certified (rule D) only if no escape of a
-    frame address reaches it on any path from the entry (D1), an ordered form (ldar/stlr/ldaxr/stlxr/LSE acquire-release) by rule O, and every other access is red.
-    Items: 'SYM+0xOFF' (a memory-access instruction, or an undecodable word), 'SYM' (a range the gate cannot judge)."""
-    o = a64obj.read(path)
-    rows = []
-    bodies, extra = functions_of(o)
-    for si, a, name, kind in extra:
-        rows.append((name, kind, None))
-    for si, a, b, names, kind in bodies:
-        name = names[0]
-        if (b - a) % 4 or a % 4:
-            rows.append(('%s+0x0' % name, 'odd-code-range', None))
-            continue
-        f = Func(o, si, a, b, name, o.relocs.get(si, {}), ASM_FRAME)
-        f.args = 0 if kind == 'func' else None
-        f.build()
-        f.dataflow()
-        res = f.judge()
-        for off in f.undec:
-            rows.append(('%s+0x%x' % (name, off - a), 'undecodable', None))
-        for off, (what, rule) in sorted(res.items()):
-            rows.append(('%s+0x%x' % (name, off - a), what, rule))
-    return sorted(rows)
-
-
-
-def scan_asm(path):
-    """-> [(item, kind)] sorted, kind '' = certified, for an object assembled from .S/.s (gate rtasm): scan_asm_rules without the rule"""
-    return sorted((i, '' if r else w) for i, w, r in scan_asm_rules(path))

@@ -40,7 +40,11 @@ def main():
     td = tempfile.mkdtemp(prefix='test-stamp-')
     try:
         other = os.path.join(td, 'other-checkout')
-        for i in stamp.INPUTS:
+        plug = stamp.plugin_inputs(recipe=recipe)
+        check('the plugin file list is the recipe\'s own (every PLUGIN_SOURCES and PLUGIN_INPUTS file, nothing else)',
+              plug == sorted({os.path.relpath(f, recipe.TREE) for f in list(recipe.PLUGIN_SOURCES.values()) + [x for v in recipe.PLUGIN_INPUTS.values() for x in v]})
+              and any(n.endswith('decltype_spell.inc') for n in plug) and any(n.endswith('crossing_terms.inc') for n in plug))
+        for i in list(stamp.INPUTS) + plug:
             os.makedirs(os.path.dirname(os.path.join(other, i)), exist_ok=True)
             shutil.copyfile(os.path.join(TREE, i), os.path.join(other, i))
         check('the key depends on content only (the inputs copied to another directory give the same key)', stamp.stamp(other, recipe=recipe, verify=os.path.join(TREE, "verify")) == k)
@@ -48,6 +52,11 @@ def main():
             with open(os.path.join(other, i), 'a') as f:
                 f.write('\n')
             check('a changed input (%s) changes the key' % i, stamp.stamp(other, recipe=recipe, verify=os.path.join(TREE, "verify")) != k)
+            shutil.copyfile(os.path.join(TREE, i), os.path.join(other, i))
+        for i in plug:
+            with open(os.path.join(other, i), 'a') as f:
+                f.write('\n')
+            check('a changed plugin file (%s) changes the key' % i, stamp.stamp(other, recipe=recipe, verify=os.path.join(TREE, "verify")) != k)
             shutil.copyfile(os.path.join(TREE, i), os.path.join(other, i))
         # the values build.sh reads from the records: a changed runtime_configure / runtime_cflags / target / semantic flag changes the key
         vd = os.path.join(td, 'verify')
