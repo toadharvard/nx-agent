@@ -221,6 +221,21 @@ class SpecialTables(unittest.TestCase):
                 o = run(('d9', 'reg', 7, 5), state([self.VAL[r[0]], self.COL[c]]))
                 s = o.s; top = val(X.top(s))
                 self.assertEqual(self.cls(val(z3.Select(s.R, K(top, 3)))), want, 'ST(0)=%s ST(1)=%s' % (r[0], c))
+    def test_fpatan_table_1_26(self):
+        """every concrete cell of the table (angles that are multiples of pi, signed zeros); a 'range' cell is symbolic in the spec (ATAN2) and is skipped"""
+        V = {'-inf': float('-inf'), '-F': -1.0, '-0': -0.0, '+0': 0.0, '+F': 1.0, '+inf': float('inf')}
+        cols = list(V); n = 0
+        for r in rows('fpatan'):
+            for c, want in zip(cols, r[1].split()):
+                if want == 'range': continue
+                o = run(('d9', 'reg', 6, 3), state([V[c], V[r[0]]]))                     # ST(0) = X, ST(1) = Y
+                top = val(X.top(o.s)); got = struct.unpack('<d', struct.pack('<Q', val(z3.Select(o.s.R, K(top, 3)))))[0]
+                w = float(Fraction(want.lstrip('-+')) * Fraction(math.pi)) if want.lstrip('-+') not in ('0',) else 0.0
+                w = -w if want.startswith('-') else w
+                self.assertEqual(math.copysign(1, got), math.copysign(1, w), 'Y=%s X=%s' % (r[0], c))
+                self.assertLess(abs(got - w), 1e-15, 'Y=%s X=%s' % (r[0], c)); n += 1
+        self.assertEqual(n, 32)
+
 class MmxAlias(unittest.TestCase):
     """MMX aliasing, SDM 1:9.5.1 / 1:9.6.2 / 1:9.4.8: one copy of the effect, on the DSL names"""
     def d(self):
