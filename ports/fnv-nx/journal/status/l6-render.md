@@ -639,3 +639,8 @@ Paused: w3b, w4, farm; no other work.
     - #30/#31: gl.xml mirror plus a generated entry list and map (L6A w6).
     - The lead-line test tests/l6/gl4/xl.py names the deleted gl4_xlator.sh; deleted here.
     - render/backend, shaders/include and shaders/src are not on w6-root, so no candidate deletion is needed. Deleting them on our line would risk a delete-wins merge loss against L6A's dk root.
+- 00:52Z One variant encoding (decided with L6A).
+    - NxShaderD3D.variant carries the translator key flags (VS_COMPLETE on VS only, FLAT_COLOR).
+    - The gl4/dk mapping is deleted (L6A). nx_pair_variant and draw_prog produce the flags (w6).
+    - The two land together on L6A's ABI commit. sm_link follows.
+    - nxgpu4_shader.h includes fnvnx_shaders.h and the sha256 size; its only new constants are MAX code size and the link-pair count.
