@@ -5,7 +5,7 @@
 # BUILDSCRIPTS (devkitPro buildscripts), LIBNX_SRC + LIBNX_TREE_SHA256 (fnv-nx-build tools/libnx checkout and its tree_sha256), FNVNX_BUILD (fnv-nx-build checkout at tools/toolchain-debs). JOBS defaults to 2 per build.
 # Prints the two tree_sha256 and "EQUAL" or "DIFFERENT"; the check_mirror lines (C1-C7, C5 manifest with long double size/mantissa) are in WORK/run-{a,b}.log.
 set -u
-W=${1:?work dir}; : "${GUEST_FLAGS_DIR:?}" "${GUEST_FLAGS_COMMIT:?}" "${DL:?}" "${BUILDSCRIPTS:?}" "${FNVNX_BUILD:?}"
+W=${1:?work dir}; : "${GUEST_FLAGS_DIR:?}" "${GUEST_FLAGS_COMMIT:?}" "${DL:?}" "${BUILDSCRIPTS:?}" "${FNVNX_BUILD:?}" "${LIBNX_SRC:?}" "${LIBNX_TREE_SHA256:?}"
 HERE=$(cd "$(dirname "$0")/../.." && pwd); mkdir -p "$W"; export JOBS=${JOBS:-2} GUEST_FLAGS_DIR GUEST_FLAGS_COMMIT LIBNX_SRC LIBNX_TREE_SHA256
 for x in a b; do
   ( cd "$HERE" && exec toolchain/gcc/chroot_build.sh "/var/tmp/chroot-$x" "$FNVNX_BUILD" "$HERE" "$DL" "$BUILDSCRIPTS" "$W/out-$x" ) >"$W/run-$x.log" 2>&1 &
