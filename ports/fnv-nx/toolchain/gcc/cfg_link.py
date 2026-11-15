@@ -54,11 +54,12 @@ def patch(path):
         if body.count(TRY_LINK_CALL) != 1:
             die("%s: the link call of %s is not the expected line" % (path, fn))
         s = s.replace(body, body.replace(TRY_LINK_CALL, TRY_LINK_NEW))
-    if "CFG-LINK" not in s:
-        die("no ac_fn_*_try_link in " + path)
     n = len(GCC_NO_LINK_RE.findall(s))
-    if not n:
-        die("no gcc_no_link=yes in " + path)
+    if "CFG-LINK" not in s and not n and "try_link" not in s:
+        print("cfg_link: %s has no link test (nothing to patch)" % path)
+        return
+    if "CFG-LINK" not in s or not n:
+        die("%s: ac_fn_*_try_link and gcc_no_link=yes must both be present" % path)
     s = GCC_NO_LINK_RE.sub(r"\1gcc_no_link=no", s)
     open(path, "w").write(s)
     print("cfg_link: patched %s (gcc_no_link=yes x%d)" % (path, n))
