@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/toolchain/names/sympair_kinds.inc
 """l2sections - the three non-loaded ELF sections that L2's compiler plugins put into every game object (L1 CONTRACT).
 
     parse_sympair(data, where) -> [(symbol, msvc_name, kind, 'def'|'ref')]            .fnvnx.sympair (plugin NAMES1)

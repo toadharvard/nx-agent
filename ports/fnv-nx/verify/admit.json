@@ -19,7 +19,6 @@
   {"path": "ports/fnv-nx/render/shaders/build.sh", "class": "doc"},
   {"path": "ports/fnv-nx/render/shaders/mojoshader.patch", "class": "doc"},
   {"path": "ports/fnv-nx/render/shaders/total", "class": "tool", "entry": []},
-  {"path": "ports/fnv-nx/render/total", "class": "tool", "imports": ["ports/fnv-nx/contract"], "entry": []},
   {"path": "ports/fnv-nx/rules", "class": "tool", "entry": []},
   {"path": "ports/fnv-nx/shim", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/shim/build.json"},
   {"path": "ports/fnv-nx/shim/include", "class": "header"},

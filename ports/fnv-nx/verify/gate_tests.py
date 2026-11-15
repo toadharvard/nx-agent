@@ -176,7 +176,7 @@ def mount_files(path):
         a = os.path.realpath(f)
         if a.startswith(root + os.sep):
             out[a[len(root) + 1:]] = a
-    for r in reads_of(path):
+    for r in sorted({x for f in closure_of(path)[1] for x in reads_of(f)} | set(reads_of(path))):   # the `# reads:` of the test and of every file of its import closure (a module declares its own data)
         base = os.path.join(root, r)
         if os.path.isfile(base):
             out[r] = base
