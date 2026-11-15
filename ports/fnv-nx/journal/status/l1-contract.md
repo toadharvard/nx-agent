@@ -1776,3 +1776,4 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:37 Sharding is done at w26 ca3a256: test_shard passes; the toy shard_merge scenario has not run, and w15 runs it after cand2. w12's crossing.py 199d4bd97 is accepted as the deliverable. The CROSSING stage enters once w27's rows and an exports carrier exist (w12 asks L2 for the format). The import-table move becomes a brief for w15 (verdict env). w12 prepares the cand3 merge list.
   - w26 has no path item. It is waiting; archive it once cand3 needs nothing from it.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:38 w26 archived (sharding done at ca3a256, lift-blr parked at 41b6d799a). Workers 3/4: w15, w12, w27.
