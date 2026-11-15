@@ -1040,3 +1040,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The cold run waits for lift/facts (farms), retn and fpfacts.
 - 23:15 gs, L5 ruling: Wine is ruled out, because its initial gs is the host's TLS selector, and check_invalid_gs does not apply at game code addresses. L5 w16 (session_01KmtZKR4HBYhA1ppA6GgxeF) takes the initial gs from the WDK 7.1 debugger documentation and cross-checks it against the ks386 selectors, plus a row `null_seg_access`: #GP(0), giving PRIV_INSTRUCTION or AV [0, 0xffffffff] by Wine's err==0 path. w8 prepares the consumer: gs reads, gs memory operands, no-memory prefixes, and gs loads.
 - 23:17 Exe shard 0/64 (fixed rule, real record f1da9b3e9, facts 6944080): 1,517 entries, 1,477 lifted, 40 missing, all for want of jtab facts. The old tree has no jtab_tables, so the next measurement uses w7's FACTS.
+- 23:22 gs stays undecided: 0 of 70 WDK 7.1 register displays match the record, and Wine's value is host state. L5 reported it to the orchestrator.
+  - L3a sent the orchestrator the impact (24 reads and 4,001 prefixed accesses, which keep the pack's finish red) and the two class rules:
+    - (A) a declared-machine decision gs = 0, giving SDM #GP(0) and L5's null_seg_access row; recommended;
+    - (B) certified unreachability, which is off the path.
+  - blocked: pack completeness on the gs decision (orchestrator).
