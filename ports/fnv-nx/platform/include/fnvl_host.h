@@ -22,6 +22,22 @@ void fnvl_host_world_resume(void);
 
 extern __thread unsigned int fnvnx_call_fp __attribute__((tls_model("initial-exec")));
 
+/* DISPATCH1 (toolchain/dispatch/fnvnx_dispatch.cc): the per-site record and the dispatcher's prototype. The plugin builds the same record
+ * (`struct fnvnx_site { unsigned int fp; <native entry> entry; }`, size 8, alignment 8) for every indirect call site and never looks it up by
+ * name: the call sequence reads the whole record with one 64-bit acquire load and calls `.entry` when `.fp` is the callee's exe address.
+ * fnvnx_dispatch (the runtime's, lift/rt) returns the entry for the exe address and stores the record, both halves, with ONE 64-bit release
+ * store. fnvnx_entry_fn is the generic native entry type (ENTRY1): calls through it are native calls, and the call sequence converts it to the
+ * call site's own function-pointer type. The plugin's row of this prototype in .fnvnx.decltype is compared with the row of this header by the
+ * layout gate (gate abi), so the two cannot drift. */
+typedef void (*__attribute__((fnvnx_entry)) fnvnx_entry_fn)(void);
+typedef struct fnvnx_site {
+  unsigned int fp;
+  fnvnx_entry_fn entry;
+} __attribute__((aligned(8))) fnvnx_site_t;
+_Static_assert(sizeof(fnvnx_site_t) == 8 && _Alignof(fnvnx_site_t) == 8, "the site record is one 64-bit word");
+
+fnvnx_entry_fn fnvnx_dispatch(void *fp, fnvnx_site_t *site, const void *descriptor);
+
 #ifdef __cplusplus
 }
 #endif

@@ -102,6 +102,30 @@ def decltype(td, so):
               ty == '*const:struct:Api{size:unsigned_int;open:host:long_long_unsigned_int;close:host:long_long_unsigned_int;tab:[2]host:long_long_unsigned_int;cs:const:host:long_long_unsigned_int}', ty)
 
 
+SITE_ROW = 'fnvnx_dispatch\t(*void,*struct:fnvnx_site{fp:unsigned_int;entry:entry:*()void},*const:void)entry:*()void'
+HEADER = os.path.join(HERE, '..', '..', 'platform', 'include', 'fnvl_host.h')
+
+
+def site_record(td, so):
+    """the typed site record: the plugin's decltype row, and the header's row (layout plugin) are the same string, so they cannot drift"""
+    obj = os.path.join(td, 'site_c.o')
+    r = pb.compile(os.path.join(HERE, 'dispatch', 'site_c.c'), obj, so)
+    check('site_c.c compiles', r.returncode == 0, r.stderr[:2000])
+    if r.returncode == 0:
+        rows = [l for l in pb.section(obj, '.fnvnx.decltype').splitlines() if l.startswith('fnvnx_dispatch\t')]
+        check('.fnvnx.decltype: the plugin\'s row of fnvnx_dispatch (typed record, entry-typed result), once', rows == [SITE_ROW], rows)
+        check('the site is the 8-byte record in .bss (size 8 per site)', pb.section_size(obj, '.bss') == 8, pb.section_size(obj, '.bss'))
+    src = os.path.join(td, 'site_hdr.c')
+    open(src, 'w').write(open(HEADER).read() + '\nint site_call(int (*f)(int), int a) { return f(a); }\n'
+                         'fnvnx_entry_fn site_get(void *fp, fnvnx_site_t *s) { return fnvnx_dispatch(fp, s, 0); }\n')
+    obj = os.path.join(td, 'site_hdr.o')
+    r = pb.compile(src, obj, so)
+    check('a unit that includes fnvl_host.h compiles (a call of the entry-typed dispatcher is a native call)', r.returncode == 0, r.stderr[:2000])
+    if r.returncode == 0:
+        rows = [l for l in pb.section(obj, '.fnvnx.decltype').splitlines() if l.startswith('fnvnx_dispatch\t')]
+        check('.fnvnx.decltype: the header\'s row (layout plugin) equals the plugin\'s row, once', rows == [SITE_ROW], rows)
+
+
 def host(td, so):
     obj = os.path.join(td, 'host.o')
     r = pb.compile(HOSTFIX, obj, so)
@@ -170,6 +194,7 @@ def main():
             checks(out)
         host(td, so)
         decltype(td, so)
+        site_record(td, so)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_dispatch-mode=1'])
         check('an unknown plugin argument is an error', pb.argument_refused(r, 'dispatch'), r.stderr[:500])
         check('the recipe refuses a root that lacks a product plugin (the dispatcher needs names; the full set is the recipe\'s)', pb.missing_plugin_refused('names'))

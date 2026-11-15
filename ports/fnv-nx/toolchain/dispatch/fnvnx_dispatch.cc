@@ -5,16 +5,18 @@
  * pointer is an exe address, not something the processor can jump to. Just before RTL expansion, when the calls of
  * the function are final, every call whose target is not a named function becomes
  *
- *     static unsigned long long site;             one per call site, in the unit's data, 0 at start
- *     w = site;                                    one 64-bit acquire load: low half = the exe address last called here,
- *     entry = (unsigned) w == fp ? w >> 32         high half = its entry (pointers are 32 bits)
- *                                : fnvnx_dispatch(fp, &site, desc);
- *     entry(arguments...)                          the call itself is unchanged
+ *     static fnvnx_site_t site;                    one per call site, in the unit's data, 0 at start; the record the plugin builds
+ *                                                  (never looked up by name): { unsigned int fp; <native entry type> entry; }, size 8, alignment 8
+ *     r = site;                                    ONE 64-bit acquire load of the whole record (`ldar x`): fp = the exe address last called here,
+ *     entry = r.fp == (unsigned) callee            entry = its native entry (pointers are 32 bits)
+ *                 ? r.entry : fnvnx_dispatch(callee, &site, desc);
+ *     ((call's own function-pointer type) entry)(arguments...)   a pointer-to-function conversion; no integer becomes an entry or back
  *
- * fnvnx_dispatch(exe code address, site, descriptor) is the runtime's (L3 LIFT): it returns the entry to call with
- * the call site's own AAPCS signature - a native body, or a bridge into a lifted one - and stores the site's word
- * in one 64-bit store, so a reader never sees the key of one target with the entry of another. An address that is
- * no entry does not return. The hit path is a load, a compare, a branch and a shift.
+ * fnvnx_dispatch(exe code address, site, descriptor) is the runtime's (L3 LIFT): it returns the entry (type fnvnx_entry_fn, ENTRY1), which is the
+ * call site's own AAPCS signature - a native body, or a bridge into a lifted one - and stores the site's record in one 64-bit release store, so a
+ * reader never sees the key of one target with the entry of another. An address that is no entry does not return. The prototype and the record
+ * are declared by platform/include/fnvl_host.h; the plugin's own `.fnvnx.decltype` row of the prototype is compared with the header's by the
+ * layout gate. The hit path is a load, a compare, a branch and the call.
  *
  * A bridge is one function per descriptor, so it is not told which exe address it stands for. The call sequence
  * therefore stores the address in the thread-local word `fnvnx_call_fp` (shim/include/fnvl_host.h) just before the call, on
@@ -123,12 +125,50 @@ static inline bool fnvnx_cxx_fe() { return !strncmp(lang_hooks.name, "GNU C++", 
 int plugin_is_GPL_compatible;
 
 static tree dispatch_decl;
+static tree entry_generic, site_record;
 static unsigned site_count;
+static bool fe_declares_dispatch;                   /* a declaration of fnvnx_dispatch in this unit: the layout plugin spells it */
 
+/* The site record, built here and never looked up by name:
+ *     struct fnvnx_site_t { uint32_t fp; void (*entry)(void) /+ fnvnx_entry/; }   size 8, alignment 8
+ * `entry` is the generic native entry type (ENTRY1): the call target is a conversion of it to the call's own
+ * function-pointer type (pointer to function to pointer to function), and no integer ever becomes an entry or back. */
+static tree get_entry_generic()
+{
+  if (!entry_generic) {
+    tree pt = build_pointer_type(build_function_type_list(void_type_node, NULL_TREE));
+    entry_generic = build_type_attribute_variant(pt, tree_cons(get_identifier("fnvnx_entry"), NULL_TREE, NULL_TREE));
+  }
+  return entry_generic;
+}
+static tree site_field(tree rec, const char *name, tree type)
+{
+  tree f = build_decl(UNKNOWN_LOCATION, FIELD_DECL, get_identifier(name), type);
+  DECL_CONTEXT(f) = rec;
+  return f;
+}
+static tree get_site_record()
+{
+  if (!site_record) {
+    tree rec = make_node(RECORD_TYPE);
+    tree f_fp = site_field(rec, "fp", unsigned_type_node), f_entry = site_field(rec, "entry", get_entry_generic());
+    DECL_CHAIN(f_fp) = f_entry;
+    TYPE_FIELDS(rec) = f_fp;
+    SET_TYPE_ALIGN(rec, 64); TYPE_USER_ALIGN(rec) = 1;
+    TYPE_NAME(rec) = get_identifier("fnvnx_site");   /* the C tag, as the header spells it */
+    layout_type(rec);
+    site_record = rec;
+  }
+  return site_record;
+}
+static tree site_f_fp() { return TYPE_FIELDS(get_site_record()); }
+static tree site_f_entry() { return DECL_CHAIN(TYPE_FIELDS(get_site_record())); }
+
+/* fnvnx_dispatch(fp, &site, descriptor) -> the entry, typed */
 static tree get_dispatch()
 {
   if (!dispatch_decl) {
-    tree t = build_function_type_list(ptr_type_node, ptr_type_node, ptr_type_node, const_ptr_type_node, NULL_TREE);
+    tree t = build_function_type_list(get_entry_generic(), ptr_type_node, build_pointer_type(get_site_record()), const_ptr_type_node, NULL_TREE);
     dispatch_decl = build_fn_decl("fnvnx_dispatch", t);
     DECL_EXTERNAL(dispatch_decl) = 1; TREE_PUBLIC(dispatch_decl) = 1; DECL_ARTIFICIAL(dispatch_decl) = 1;
     TREE_NOTHROW(dispatch_decl) = 1;
@@ -155,7 +195,7 @@ static tree new_site()
 {
   char name[64];
   snprintf(name, sizeof name, "fnvnx_site.%u", site_count++);
-  tree v = build_decl(UNKNOWN_LOCATION, VAR_DECL, get_identifier(name), long_long_unsigned_type_node);
+  tree v = build_decl(UNKNOWN_LOCATION, VAR_DECL, get_identifier(name), get_site_record());
   TREE_STATIC(v) = 1; TREE_PUBLIC(v) = 0; DECL_ARTIFICIAL(v) = 1; DECL_IGNORED_P(v) = 1; TREE_USED(v) = 1;
   TREE_ADDRESSABLE(v) = 1; DECL_CONTEXT(v) = NULL_TREE;
   DECL_INITIAL(v) = NULL_TREE;                       /* .bss: 0, and no exe code address is 0 */
@@ -352,8 +392,41 @@ static void emit_lines(const char *section, const std::set<std::string> &lines)
 
 /* .fnvnx.defdisp: `<asm name> <descriptor>\n` per emitted definition (any linkage, clones under their own asm name), sorted, unique.
  * The exe address is not here: exitgen joins by asm name with .fnvnx.sympair and the bound exe VA. */
+/* The row of the dispatcher's own prototype in `.fnvnx.decltype` (C units, grammar of link/ctypes_compat.py): the plugin's fact about its types.
+ * The layout plugin spells what the front end declares, and this decl is not one; a unit that declares fnvnx_dispatch itself (the runtime, through
+ * fnvl_host.h) already has its row, so the layout gate compares this row, in the units whose calls were rewritten, with that header's row. */
+static std::string spell(tree t)
+{
+  switch (TREE_CODE(t)) {
+  case POINTER_TYPE:
+    return std::string(lookup_attribute("fnvnx_entry", TYPE_ATTRIBUTES(t)) ? "entry:" : "") + "*" + spell(TREE_TYPE(t));
+  case FUNCTION_TYPE: {
+    std::string ps;
+    for (tree a = TYPE_ARG_TYPES(t); a && TREE_VALUE(a) != void_type_node; a = TREE_CHAIN(a))
+      ps += (ps.empty() ? "" : ",") + spell(TREE_VALUE(a));
+    return "(" + ps + ")" + spell(TREE_TYPE(t));
+  }
+  case RECORD_TYPE: {
+    std::string ms;
+    for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
+      ms += (ms.empty() ? "" : ";") + std::string(IDENTIFIER_POINTER(DECL_NAME(f))) + ":" + spell(TREE_TYPE(f));
+    return std::string("struct:") + IDENTIFIER_POINTER(TYPE_NAME(t)) + "{" + ms + "}";
+  }
+  case VOID_TYPE: return std::string(TYPE_READONLY(t) ? "const:" : "") + "void";
+  default:
+    if (TREE_CODE(t) == INTEGER_TYPE && TYPE_UNSIGNED(t) && TYPE_PRECISION(t) == 32) return "unsigned_int";
+    error("fnvnx_dispatch: no decltype spelling for a type of the site record");
+    return "?";
+  }
+}
+
 static void finish_unit(void *, void *)
 {
+  if (site_count && !fnvnx_cxx_fe() && !fe_declares_dispatch) {
+    std::set<std::string> row;
+    row.insert("fnvnx_dispatch\t" + spell(TREE_TYPE(get_dispatch())));
+    emit_lines(".fnvnx.decltype", row);
+  }
   emit_lines(".fnvnx.disp", descs);
   need_names_plugin();
   std::set<std::string> defs;
@@ -558,6 +631,7 @@ static void entry_init(tree val, tree to, location_t loc)
 static void entry_decl(void *gcc_data, void *)
 {
   tree d = (tree)gcc_data;
+  if (d && TREE_CODE(d) == FUNCTION_DECL && DECL_NAME(d) && !strcmp(IDENTIFIER_POINTER(DECL_NAME(d)), "fnvnx_dispatch")) fe_declares_dispatch = true;
   if (!d || TREE_CODE(d) != VAR_DECL || !DECL_INITIAL(d)) return;
   if (DECL_CONTEXT(d) && TREE_CODE(DECL_CONTEXT(d)) == FUNCTION_DECL && !TREE_STATIC(d)) return;   /* an automatic variable: its DECL_EXPR is walked in the body */
   entry_init(DECL_INITIAL(d), TREE_TYPE(d), DECL_SOURCE_LOCATION(d));
@@ -913,15 +987,20 @@ static void rewrite(function *fun, gimple *st)
   gimple_stmt_iterator gsi = gsi_for_stmt(st);
   auto before = [&](gimple *g) { gimple_set_location(g, loc); gsi_insert_before(&gsi, g, GSI_SAME_STMT); };
 
-  /* head: k = (unsigned) fp; w = site; if ((unsigned) w == k) */
-  tree k = make_ssa_name(u32), w = make_ssa_name(u64), lo = make_ssa_name(u32);
+  /* head: k = (unsigned) fp; w = site (one 64-bit acquire load); r = the record viewed over w; if (r.fp == k) */
+  tree rec = get_site_record(), entry_t = get_entry_generic();
+  tree k = make_ssa_name(u32), w = make_ssa_name(u64), lo = make_ssa_name(u32), e1 = make_ssa_name(entry_t);
   before(gimple_build_assign(k, NOP_EXPR, fp));
   /* the slot is shared memory: its load is created ordered (R9, docs/ORDERING.md; fnvnx_order runs before this pass and cannot see it) */
-  gcall *ld = gimple_build_call(builtin_decl_explicit(BUILT_IN_ATOMIC_LOAD_8), 2, build_fold_addr_expr(site),
+  tree pa = make_ssa_name(build_pointer_type(u64));
+  before(gimple_build_assign(pa, NOP_EXPR, build_fold_addr_expr(site)));
+  gcall *ld = gimple_build_call(builtin_decl_explicit(BUILT_IN_ATOMIC_LOAD_8), 2, pa,
                                 build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
   gimple_call_set_lhs(ld, w);
   before(ld);
-  before(gimple_build_assign(lo, NOP_EXPR, w));
+  tree r = create_tmp_var(rec, "fnvnx_rec");
+  before(gimple_build_assign(r, build1(VIEW_CONVERT_EXPR, rec, w)));
+  before(gimple_build_assign(lo, build3(COMPONENT_REF, u32, r, site_f_fp(), NULL_TREE)));
   gcond *cond = gimple_build_cond(EQ_EXPR, lo, k, NULL_TREE, NULL_TREE);
   before(cond);
 
@@ -936,13 +1015,10 @@ static void rewrite(function *fun, gimple *st)
   edge hit_tail = make_edge(hit, tail, EDGE_FALLTHRU), miss_tail = make_edge(miss, tail, EDGE_FALLTHRU);
   hit->count = e_hit->count(); miss->count = e_miss->count();
 
-  /* hit: e1 = (unsigned) (w >> 32) */
-  tree hi = make_ssa_name(u64), e1 = make_ssa_name(u32), e2p = make_ssa_name(ptr_type_node), e2 = make_ssa_name(u32),
-       e = make_ssa_name(u32);
+  /* hit: e1 = r.entry */
+  tree e2 = make_ssa_name(entry_t), e = make_ssa_name(entry_t);
   gimple_stmt_iterator hgsi = gsi_start_bb(hit);
-  gimple *g = gimple_build_assign(hi, RSHIFT_EXPR, w, build_int_cst(unsigned_type_node, 32));
-  gimple_set_location(g, loc); gsi_insert_after(&hgsi, g, GSI_NEW_STMT);
-  g = gimple_build_assign(e1, NOP_EXPR, hi);
+  gimple *g = gimple_build_assign(e1, build3(COMPONENT_REF, entry_t, r, site_f_entry(), NULL_TREE));
   gimple_set_location(g, loc); gsi_insert_after(&hgsi, g, GSI_NEW_STMT);
   /* miss: e2 = fnvnx_dispatch(fp, &site, desc) */
   gimple_stmt_iterator mgsi = gsi_start_bb(miss);
@@ -950,11 +1026,9 @@ static void rewrite(function *fun, gimple *st)
   g = gimple_build_assign(fpv, NOP_EXPR, fp);
   gimple_set_location(g, loc); gsi_insert_after(&mgsi, g, GSI_NEW_STMT);
   gcall *d = gimple_build_call(get_dispatch(), 3, fpv, build_fold_addr_expr(site), desc);
-  gimple_call_set_lhs(d, e2p); gimple_set_location(d, loc);
+  gimple_call_set_lhs(d, e2); gimple_set_location(d, loc);
   gsi_insert_after(&mgsi, d, GSI_NEW_STMT);
-  g = gimple_build_assign(e2, NOP_EXPR, e2p);
-  gimple_set_location(g, loc); gsi_insert_after(&mgsi, g, GSI_NEW_STMT);
-  /* tail: e = PHI <e1 (hit), e2 (miss)>; the call through it */
+  /* tail: e = PHI <e1 (hit), e2 (miss)>; the call through it, converted from the entry to the call's own function-pointer type */
   gphi *phi = create_phi_node(e, tail);
   add_phi_arg(phi, e1, hit_tail, loc); add_phi_arg(phi, e2, miss_tail, loc);
   tree target = make_ssa_name(TREE_TYPE(fp));
@@ -1054,6 +1128,15 @@ struct host_pass : gimple_opt_pass {
 };
 }
 
+/* the trees this plugin keeps between functions are GC roots */
+static const struct ggc_root_tab keep_roots[] = {
+  { &dispatch_decl, 1, sizeof(tree), &gt_ggc_mx_tree_node, &gt_pch_nx_tree_node },
+  { &entry_generic, 1, sizeof(tree), &gt_ggc_mx_tree_node, &gt_pch_nx_tree_node },
+  { &site_record, 1, sizeof(tree), &gt_ggc_mx_tree_node, &gt_pch_nx_tree_node },
+  { &fp_var, 1, sizeof(tree), &gt_ggc_mx_tree_node, &gt_pch_nx_tree_node },
+  LAST_GGC_ROOT_TAB
+};
+
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
   if (!plugin_default_version_check(ver, &gcc_version)) {
@@ -1064,6 +1147,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
     error("%<fnvnx_dispatch%>: unknown plugin argument %qs", info->argv[0].key);
     return 1;
   }
+  register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
   register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, contp_fn, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_TYPE, entry_union, NULL);

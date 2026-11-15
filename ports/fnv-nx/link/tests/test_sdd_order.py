@@ -42,6 +42,12 @@ def functions(obj):
     return fns
 
 
+def got_tls(ins, k):
+    """is instruction K the GOT load of the TLS offset of fnvnx_call_fp: `ldr wN, [xB]` right after `adrp xB, <fnvnx_call_fp>`"""
+    m = re.fullmatch(r'w\d+, \[(x\d+)\]', ins[k][2])
+    return bool(m and k and ins[k - 1][1] == 'adrp' and ins[k - 1][2].startswith(m.group(1) + ',') and '<fnvnx_call_fp>' in ins[k - 1][2])
+
+
 def main():
     obj = realobj.objects(['sdd_order'])['sdd_order']
     fns = functions(obj)
@@ -50,7 +56,8 @@ def main():
     for fn, want in (('_Z5del_aP1A', 2), ('_Z6del_s2P2S2', 2), ('_Z5del_mP1M', 2)):
         ins = fns[fn]
         ldar = [o for o, m, a in ins if m == 'ldar' and a.startswith('w')]   # the 4-byte vptr and slot (the 8-byte ldar is dispatch's slot)
-        plain4 = [o for o, m, a in ins if m == 'ldr' and a.startswith('w')]
+        # the thread-local word fnvnx_call_fp (initial-exec): its offset is read from the GOT, a load the loader wrote once, no shared memory
+        plain4 = [o for k, (o, m, a) in enumerate(ins) if m == 'ldr' and a.startswith('w') and not got_tls(ins, k)]
         check(fn + ': two ordered loads (vptr, slot)', len(ldar) == want, ldar)
         check(fn + ': no plain 4-byte load', not plain4, plain4)
         for o in ldar:

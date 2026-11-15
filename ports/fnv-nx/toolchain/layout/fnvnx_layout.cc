@@ -385,7 +385,7 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
   if (!t || t == error_mark_node) { dl_error("an erroneous type", "?"); return "?"; }
   int q = TYPE_QUALS(t);
   const int code = TREE_CODE(t);
-  std::string pre;
+  std::string pre, host_entry;
   /* HOST1: a scalar that carries the type attribute fnvnx_host, on the type or on the original type of the typedef that names it, is spelled with the
    * prefix `host:` after the qualifiers. It is read before the main variant is taken: an attribute makes a variant. */
   bool host = false;
@@ -394,6 +394,14 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     tree n = TYPE_NAME(t);
     if (!host && n && TREE_CODE(n) == TYPE_DECL && DECL_ORIGINAL_TYPE(n))
       host = lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(DECL_ORIGINAL_TYPE(n))) != NULL_TREE;
+  }
+  /* ENTRY1: a pointer that carries the type attribute fnvnx_entry (on the type, or on the original type of the typedef that names it) is spelled `entry:*...` */
+  if (code == POINTER_TYPE) {
+    bool entry = lookup_attribute("fnvnx_entry", TYPE_ATTRIBUTES(t)) != NULL_TREE;
+    tree n = TYPE_NAME(t);
+    if (!entry && n && TREE_CODE(n) == TYPE_DECL && DECL_ORIGINAL_TYPE(n))
+      entry = lookup_attribute("fnvnx_entry", TYPE_ATTRIBUTES(DECL_ORIGINAL_TYPE(n))) != NULL_TREE;
+    if (entry) host_entry = "entry:";
   }
   if (code != ARRAY_TYPE && code != FUNCTION_TYPE) {   /* an array's qualifiers are its element's: spelled there */
     if (q & TYPE_QUAL_CONST) pre += "const:";
@@ -404,7 +412,7 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
   }
   switch (code) {
   case POINTER_TYPE:
-    return pre + "*" + dl_type(TREE_TYPE(t), stk);
+    return pre + host_entry + "*" + dl_type(TREE_TYPE(t), stk);
   case ARRAY_TYPE: {
     tree dom = TYPE_DOMAIN(t), mx = dom ? TYPE_MAX_VALUE(dom) : NULL_TREE;
     std::string n;

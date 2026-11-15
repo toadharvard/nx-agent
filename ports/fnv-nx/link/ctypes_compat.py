@@ -6,6 +6,7 @@ layout plugin of a C unit) has one line per external symbol the unit declares or
     scalar        a word of [A-Za-z0-9_] (`int`, `unsigned_int`, `float`, `void`, `_Bool`)
     qualified     `const:`T | `volatile:`T | `restrict:`T | `atomic:`T   (any order, each once, canonical order const, volatile, restrict, atomic)
     host          `host:`W   a scalar word carrying the fnvnx_host attribute (the HOST1 rule): a distinct constructor, compatible only with itself
+    entry         `entry:`T  T a pointer carrying the fnvnx_entry attribute (ENTRY1): a distinct constructor, compatible only with itself (and a compatible T)
     vector        `vec:`N`:`S`:`A`:`T   N elements (a decimal or `c0+c1x` poly), S bytes, A byte alignment, element T (VEC1)
     reference     `ref:`S`:`A`:`T   a reference type (REF1): S bytes, A byte alignment, pointee T
     complex       `complex:`S`:`A`:`T   `_Complex T`: S bytes, A byte alignment, component T (CPLX1; layout_type case COMPLEX_TYPE)
@@ -92,6 +93,9 @@ class Parse:
         if w == 'host' and self.peek() == ':':
             self.i += 1
             return ('host', self.word())
+        if w == 'entry' and self.peek() == ':':
+            self.i += 1
+            return ('entry', self.ty())
         if w in ('vec', 'complex', 'ref') and self.peek() == ':':
             self.i += 1
             fields = []
@@ -160,7 +164,7 @@ def compatible(a, b, seen=None):
         return a[1] == b[1] and compatible(a[2], b[2], seen)
     if k == 'q':
         return a[1] == b[1] and compatible(a[2], b[2], seen)
-    if k == 'ptr':
+    if k in ('ptr', 'entry'):
         return compatible(a[1], b[1], seen)
     if k == 'arr':
         return (a[1] is None or b[1] is None or a[1] == b[1]) and compatible(a[2], b[2], seen)
