@@ -86,9 +86,6 @@
    "-m",
    "aarch64linux32"
   ],
-  "roots": [
-   "ports/fnv-nx/rt/guest"
-  ],
   "entry": "icfx_start"
  }
 }
