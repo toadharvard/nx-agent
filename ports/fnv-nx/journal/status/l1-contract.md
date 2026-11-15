@@ -1960,3 +1960,5 @@ bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data)
     5. the OWNER 6 id is cited.
   - L3a defines the certificate fields.
 bottleneck: the cand2 merge (w15), and cand3 (w12).
+- 23:50 The gs-fail certificate is withdrawn by the orchestrator: gs comes from the pinned 7601 kernel (integ 1b0541249). w28 is cancelled on it.
+bottleneck: the cand2 merge (w15), and cand3 (w12).
