@@ -1,0 +1,455 @@
+{
+ "format": "fnvnx-datamodel/1",
+ "target": "Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8",
+ "compiler": "msvcmodel (GCC 13.3.0 + msvcmodel.patch) under -mabi=ilp32 and the recipe semantic flags of verify/guest_compiler.json",
+ "rows": [
+  {
+   "id": "S01",
+   "property": "char is signed (/J off)",
+   "gcc": "signed char; a type of its own",
+   "mechanism": "equal under the recipe flag",
+   "kind": "flag",
+   "site": "-fsigned-char",
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S01\")"
+  },
+  {
+   "id": "S02",
+   "property": "wchar_t is a native 2-byte unsigned type (/Zc:wchar_t, default on in C++)",
+   "gcc": "unsigned 2 bytes; a type of its own",
+   "mechanism": "equal under the recipe flag",
+   "kind": "flag",
+   "site": "-fshort-wchar",
+   "status": "closed",
+   "citations": [
+    {
+     "title": "/Zc:wchar_t (wchar_t Is Native Type)",
+     "url": "https://learn.microsoft.com/en-us/cpp/build/reference/zc-wchar-t-wchar-t-is-native-type"
+    },
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S02\")"
+  },
+  {
+   "id": "S03",
+   "property": "bool, char: 1 byte, alignment 1",
+   "gcc": "1/1",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S03\")"
+  },
+  {
+   "id": "S04",
+   "property": "short: 2/2",
+   "gcc": "2/2",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S04\")"
+  },
+  {
+   "id": "S05",
+   "property": "int and long: 4/4, distinct types",
+   "gcc": "4/4",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S05\")"
+  },
+  {
+   "id": "S06",
+   "property": "long long / __int64: 8 bytes, alignment 8",
+   "gcc": "8/8",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    },
+    {
+     "title": "Padding and Alignment of Structure Members",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/padding-and-alignment-of-structure-members"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S06\")"
+  },
+  {
+   "id": "S07",
+   "property": "float: 4/4",
+   "gcc": "4/4",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S07\")"
+  },
+  {
+   "id": "S08",
+   "property": "double: 8/8",
+   "gcc": "8/8",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S08\")"
+  },
+  {
+   "id": "S09",
+   "property": "long double: 8 bytes, binary64, a type of its own",
+   "gcc": "8/8 after the patch (binary64, DFmode); 16 before",
+   "mechanism": "msvcmodel.patch LONG_DOUBLE_TYPE_SIZE and TFmode scalar-mode support",
+   "kind": "patch",
+   "site": "aarch64.h / aarch64.cc (ldbl hunks)",
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S09\")"
+  },
+  {
+   "id": "S10",
+   "property": "data and function pointers: 4 bytes, alignment 4",
+   "gcc": "4/4",
+   "mechanism": "equal under -mabi=ilp32",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S10\")"
+  },
+  {
+   "id": "S11",
+   "property": "pointer to data member: 4 bytes",
+   "gcc": "4/4 (an offset)",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "/vmb, /vmg (Representation Method)",
+     "url": "https://learn.microsoft.com/en-us/cpp/build/reference/vmb-vmg-representation-method"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S11\")"
+  },
+  {
+   "id": "S12",
+   "property": "pointer to member function: 4 bytes for a class with single inheritance, 8 for multiple (/vmb, best case)",
+   "gcc": "8 (Itanium: pointer and adjustment)",
+   "mechanism": "not closable by a hunk: the representation is the C++ ABI's; no GCC switch",
+   "kind": "none",
+   "site": null,
+   "status": "open",
+   "citations": [
+    {
+     "title": "/vmb, /vmg (Representation Method)",
+     "url": "https://learn.microsoft.com/en-us/cpp/build/reference/vmb-vmg-representation-method"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S12\")"
+  },
+  {
+   "id": "S13",
+   "property": "member alignment is min(size of the type, 8) (/Zp8, default on x86); struct alignment is the largest member alignment",
+   "gcc": "equal: double, long long, long double at 8 inside structs",
+   "mechanism": "equal on aarch64 (natural alignment)",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Padding and Alignment of Structure Members",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/padding-and-alignment-of-structure-members"
+    },
+    {
+     "title": "/Zp (Struct Member Alignment)",
+     "url": "https://learn.microsoft.com/en-us/cpp/build/reference/zp-struct-member-alignment"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S13\")"
+  },
+  {
+   "id": "S14",
+   "property": "the underlying type of an enumeration without a fixed type is always int, whatever the enumerators; an enumerator value outside int is outside the language",
+   "gcc": "int (C and C++), error for a value outside int",
+   "mechanism": "msvcmodel.patch: cp/decl.cc finish_enum_value_list, c/c-decl.cc finish_enum under TARGET_ILP32 (GCC picked unsigned int for non-negative values)",
+   "kind": "patch",
+   "site": "cp/decl.cc, c/c-decl.cc",
+   "status": "closed",
+   "citations": [
+    {
+     "title": "/Zc:enumTypes (Enable enum type deduction)",
+     "url": "https://learn.microsoft.com/en-us/cpp/build/reference/zc-enumtypes"
+    },
+    {
+     "title": "C enumeration declarations",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/c-enumeration-declarations"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S14\")"
+  },
+  {
+   "id": "S15",
+   "property": "an enumeration with a fixed underlying type has it",
+   "gcc": "as declared",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "/Zc:enumTypes (Enable enum type deduction)",
+     "url": "https://learn.microsoft.com/en-us/cpp/build/reference/zc-enumtypes"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S15\")"
+  },
+  {
+   "id": "S16",
+   "property": "adjacent bit-fields share an allocation unit only if their integral types have the same size; the unit is 1, 2 or 4 bytes",
+   "gcc": "allocation units follow the MSVC rule",
+   "mechanism": "msvcmodel.patch: TARGET_MS_BITFIELD_LAYOUT_P (aarch64.cc) under TARGET_ILP32, the generic stor-layout.cc place_field implementation",
+   "kind": "patch",
+   "site": "aarch64.cc",
+   "status": "closed",
+   "citations": [
+    {
+     "title": "Padding and Alignment of Structure Members",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/padding-and-alignment-of-structure-members"
+    },
+    {
+     "title": "C Bit Fields",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/c-bit-fields"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S16\")"
+  },
+  {
+   "id": "S17",
+   "property": "an unnamed zero-width bit-field aligns the next field to the boundary of its base type",
+   "gcc": "as MSVC",
+   "mechanism": "same hook as S16 (and equal before it for these cases)",
+   "kind": "patch",
+   "site": "aarch64.cc",
+   "status": "closed",
+   "citations": [
+    {
+     "title": "C Bit Fields",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/c-bit-fields"
+    },
+    {
+     "title": "C++ Bit Fields",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/cpp-bit-fields"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S17\")"
+  },
+  {
+   "id": "S18",
+   "property": "a bit-field does not straddle its storage unit",
+   "gcc": "as MSVC",
+   "mechanism": "same hook as S16",
+   "kind": "patch",
+   "site": "aarch64.cc",
+   "status": "closed",
+   "citations": [
+    {
+     "title": "C Bit Fields",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/c-bit-fields"
+    },
+    {
+     "title": "Padding and Alignment of Structure Members",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/padding-and-alignment-of-structure-members"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S18\")"
+  },
+  {
+   "id": "S19",
+   "property": "bit-fields are allocated from the least significant bit up",
+   "gcc": "equal (little endian)",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "C Bit Fields",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/c-bit-fields"
+    },
+    {
+     "title": "C++ Bit Fields",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/cpp-bit-fields"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S19\")"
+  },
+  {
+   "id": "S20",
+   "property": "a bit-field of type int is signed",
+   "gcc": "signed",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "C Bit Fields",
+     "url": "https://learn.microsoft.com/en-us/cpp/c-language/c-bit-fields"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S20\")"
+  },
+  {
+   "id": "S21",
+   "property": "an empty class has size 1 and alignment 1",
+   "gcc": "1/1",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "empty_bases",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/empty-bases"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S21\")"
+  },
+  {
+   "id": "S22",
+   "property": "the first empty base is overlapped by the next subobject (EBCO of a single empty base)",
+   "gcc": "equal",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "empty_bases",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/empty-bases"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S22\")"
+  },
+  {
+   "id": "S23",
+   "property": "1 byte of padding is added between consecutive empty bases; the last empty base of a run is placed at the running offset, even past the end of a non-empty base",
+   "gcc": "empty bases all at offset 0 (Itanium)",
+   "mechanism": "not in this patch: cp/class.cc build_base_field / layout_empty_base_or_field need a build-and-test loop (nearly-empty and primary-base interplay); detected per record by the R7 layout gate",
+   "kind": "none",
+   "site": null,
+   "status": "open",
+   "citations": [
+    {
+     "title": "empty_bases",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/empty-bases"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S23\")"
+  },
+  {
+   "id": "S24",
+   "property": "the vptr is 4 bytes at offset 0 of the class that introduces virtual functions; a derived class's members follow its bases",
+   "gcc": "equal",
+   "mechanism": "equal",
+   "kind": "default",
+   "site": null,
+   "status": "closed",
+   "citations": [
+    {
+     "title": "empty_bases",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/empty-bases"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S24\")"
+  },
+  {
+   "id": "S25",
+   "property": "a virtual base is reached through a vbptr member and a vbtable",
+   "gcc": "a vptr whose table holds the virtual base offsets (Itanium); the size is equal for one virtual base, the layout is not",
+   "mechanism": "not closable by a hunk; the R7 layout gate compares every record with the exe's CodeView",
+   "kind": "none",
+   "site": null,
+   "status": "open",
+   "citations": [
+    {
+     "title": "empty_bases",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/empty-bases"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S25\")"
+  },
+  {
+   "id": "S26",
+   "property": "va_list is `char *`; each argument takes a 4-byte-rounded stack slot (char and short as int, float as double, long double and long long 8 bytes)",
+   "gcc": "promotions equal; va_list is the AAPCS64 structure",
+   "mechanism": "not a layout of a guest record: lifted callers pass arguments through the dispatch descriptor (names/dispatch plugins); a va_list stored in a record is an R7 mismatch",
+   "kind": "none",
+   "site": null,
+   "status": "open",
+   "citations": [
+    {
+     "title": "Built-in types (C++)",
+     "url": "https://learn.microsoft.com/en-us/cpp/cpp/fundamental-types-cpp"
+    }
+   ],
+   "test": "tests/ldbl/datamodel.cpp: DM(\"S26\")"
+  }
+ ]
+}

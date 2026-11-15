@@ -80,6 +80,31 @@ def model(td, so):
           '__cxa_throw_bad_array_new_length' not in pb.undefined(obj) and re.search(r'csinv|mov\s+w0, #0xffffffff', b('_Z5n_varj')), b('_Z5n_varj'))
 
 
+def datamodel(td, so):
+    """msvcmodel/DATAMODEL.json: every row has a DM("<id>") static_assert case in ldbl/datamodel.cpp (and no case lacks a row), the case
+    compiles on a recipe root, and the flags that rows of kind `flag` name are in the pinned semantic flags."""
+    import json
+    root = os.path.dirname(HERE)
+    doc = json.load(open(os.path.join(root, 'msvcmodel', 'DATAMODEL.json')))
+    src = open(os.path.join(HERE, 'ldbl', 'datamodel.cpp')).read()
+    ids = [r['id'] for r in doc['rows']]
+    cases = re.findall(r'^DM\("(S\d+)"', src, re.M)
+    check('DATAMODEL.json has no duplicate row id', len(ids) == len(set(ids)), ids)
+    check('every DATAMODEL row has a case and every case a row', sorted(set(cases)) == sorted(ids), (sorted(set(ids) ^ set(cases))))
+    for r in doc['rows']:
+        check('%s has a citation, a mechanism and a status' % r['id'], r['citations'] and r['mechanism'] and r['status'] in ('closed', 'open'), r)
+    GC = os.path.join(root, '..', 'verify', 'guest_compiler.json')
+    gc = open(GC).read()
+    for r in doc['rows']:
+        if r['kind'] == 'flag':
+            check('%s: flag %s is a semantic flag of guest_compiler.json' % (r['id'], r['site']), r['site'] in gc, r['site'])
+    obj = os.path.join(td, 'datamodel.o')
+    r = pb.compile(os.path.join(HERE, 'ldbl', 'datamodel.cpp'), obj, so, native=True)
+    errs = '\n'.join(l for l in r.stderr.splitlines() if 'error' in l)
+    failed = sorted(set(re.findall(r'static assertion failed: (S\d+)', r.stderr)))
+    check('every DATAMODEL case holds (failing rows: %s)' % failed, r.returncode == 0, errs[:3000])
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-ldbl-')
     try:
@@ -116,6 +141,7 @@ def main():
                   all(number(ldbl[k]) == number(dbl[k]) for k in dbl if k in ldbl),
                   {k: (dbl[k], ldbl[k]) for k in dbl if k in ldbl and number(ldbl[k]) != number(dbl[k])})
         model(td, so)
+        datamodel(td, so)
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
