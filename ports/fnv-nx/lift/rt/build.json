@@ -170,6 +170,19 @@
    "outputs": [
     "gen/x87.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_entry.h",
+    "/out/gen/fnvl_entry.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_entry.h"
+   ],
+   "outputs": [
+    "gen/fnvl_entry.h"
+   ]
   }
  ],
  "uses": [
