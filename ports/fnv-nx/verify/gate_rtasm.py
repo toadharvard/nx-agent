@@ -583,7 +583,15 @@ def judge_root_objects(repo, cache, root):
     if res["status"] != "green":
         return None, "build %s" % res["status"]
     blobs = [(root + "/" + o["unit"], open(o["object"], "rb").read(), False) for o in res["objects"]]
+    blobs += link_member_blobs(root, res)
     return judge(universe(blobs)), ""
+
+
+def link_member_blobs(root, res):
+    """the archive members the root's link pulled (ld's own map: res["link_archives"], the objects of the link, kept by the recipe), labelled
+    ROOT/ARCHIVE(MEMBER) and marked as archive members (':' in the label): the universe is what the linker took, not a re-derivation of it"""
+    return [("%s/%s(%s):%s" % (root, m["archive"].lstrip("/"), m["member"], m["member"]), open(m["object"], "rb").read(), False)
+            for m in res.get("link_archives", [])]
 
 
 def report_items(rep):

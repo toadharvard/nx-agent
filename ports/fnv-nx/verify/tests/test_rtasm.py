@@ -254,6 +254,14 @@ def main():
     # jmp_buf routines are read from the runtime's own header
     hdr = 'void longjmp (jmp_buf __jmpb, int __retval);\nint setjmp (jmp_buf __jmpb);\nint sigsetjmp (sigjmp_buf, int);\nint f (int);\n'
     check('jmp_buf routines are read from the header', rtasm.jmpbuf_routines(hdr) == ['longjmp', 'setjmp', 'sigsetjmp'], rtasm.jmpbuf_routines(hdr))
+    # the universe of a root is what its link pulled (res["link_archives"]), labelled as archive members
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        f = os.path.join(td, 'm.o')
+        open(f, 'wb').write(b'\x7fELF')
+        bl = rtasm.link_member_blobs('r', {'link_archives': [{'archive': '/x/libc.a', 'member': 'a.o', 'object': f}]})
+        check('link members are labelled root/archive(member) and are archive members', bl == [('r/x/libc.a(a.o):a.o', b'\x7fELF', False)] and ':' in bl[0][0], bl)
+        check('a root without a link record has no members', rtasm.link_member_blobs('r', {}) == [])
     return 1 if fails else 0
 
 
