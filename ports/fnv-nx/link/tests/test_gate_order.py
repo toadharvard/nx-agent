@@ -245,7 +245,7 @@ struct S { int a, b, c, d, e; };
 struct B { unsigned a:3, b:5; };
 S gs, gs2; B gb; int g, *gptr;
 int nonesc(int x) { sink2(1); return x + 1; }
-int esc() { int x = 0; gptr = &x; x = 5; sink2(x); return x; }
+int esc() { int x = 0; gptr = &x; sink2(x); x = 5; sink2(x); return x; }
 int esc2() { int x[4]; gptr = x; for (int i = 0; i < 4; i++) x[i] = i; sink(x); return x[2]; }
 S ret() { return gs; }
 int agg() { S l = gs2; return l.a + l.e; }
