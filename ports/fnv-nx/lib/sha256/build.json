@@ -22,5 +22,8 @@
  "include": [
   "ports/fnv-nx/lib/sha256/include"
  ],
- "units": "all"
+ "units": "all",
+ "outputs": {
+  "INCLUDE": "include"
+ }
 }

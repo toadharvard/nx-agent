@@ -536,5 +536,23 @@
  },
  "outputs": {
   "X86SYS": "declared/x86sys.export.json"
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  }
+ ]
 }

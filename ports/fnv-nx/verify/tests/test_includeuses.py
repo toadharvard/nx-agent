@@ -35,13 +35,31 @@ with tempfile.TemporaryDirectory() as repo:
     os.makedirs(os.path.join(repo, "ports/fnv-nx/p", "gen")); open(os.path.join(repo, "ports/fnv-nx/p", "gen", "tracked.h"), "w").close()
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     check("a tracked file inside the directory output is red", len(ie({"uses": [U], "include_uses": [U]})) == 1, True)
-# the include carry: a generated directory of P's include is not carried to a consumer (no tracked file: nothing to mount)
+# INCLUDE outputs of tracked files (a header-only root) and the header-home rule
 with tempfile.TemporaryDirectory() as repo:
-    P, C = "ports/fnv-nx/p", "ports/fnv-nx/c"
-    os.makedirs(os.path.join(repo, P)); os.makedirs(os.path.join(repo, C))
-    json.dump({"include": [P + "/inc", P + "/gen/inc"]}, open(os.path.join(repo, P, "build.json"), "w"))
-    roots = {P: {"recipe": P + "/build.json", "class": "product", "target": "guest"}, C: {"class": "product", "target": "guest"}}
-    files = [P + "/inc/a.h", P + "/x.c"]
+    def w(p, o):
+        os.makedirs(os.path.dirname(os.path.join(repo, p)), exist_ok=True)
+        json.dump(o, open(os.path.join(repo, p), "w")) if isinstance(o, dict) else open(os.path.join(repo, p), "w").write(o)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    T = "ports/fnv-nx/"
+    w(T + "h/build.json", {"outputs": {"INCLUDE": "include"}}); w(T + "h/include/x.h", "int x;\n")
+    w(T + "u/build.json", {"outputs": {"INCLUDE": "include"}}); w(T + "u/include/y.h", "int y;\n")
+    w(T + "m/build.json", {"outputs": {"MIX": "inc"}, "generated": [{"tool": "t.py", "args": [], "inputs": [], "outputs": ["inc/g.h"]}]}); w(T + "m/inc/t.h", "int t;\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    files = recipe.tracked(repo)
+    roots = {T + n: {"recipe": T + n + "/build.json", "class": "product", "target": "guest"} for n in "huc m".replace(" ", "")}
+    H = {"root": T + "h", "output": "INCLUDE"}
+    ue = lambda rec, root: recipe.uses_errors(rec, root, roots, repo, files)
+    check("outputs: a directory of tracked files is a valid output", ue({"outputs": {"INCLUDE": "include"}}, T + "h"), [])
+    check("outputs: a directory of both generated and tracked files is red", len(ue(json.load(open(os.path.join(repo, T, "m/build.json"))), T + "m")) == 1, True)
+    check("include_uses accepts a directory output of tracked files", recipe.include_uses_errors({"uses": [H], "include_uses": [H]}, roots, repo), [])
+    rec = {"include": [T + "h/include"], "uses": [H]}
+    check("include_home: an include in a directory output the root uses", recipe.include_home(T + "h/include", rec, roots, repo, files), True)
+    check("include_home: a file below it", recipe.include_home(T + "h/include/sub", rec, roots, repo, files), True)
+    check("include_home: an admitted root that is not used is no home", recipe.include_home(T + "u/include", rec, roots, repo, files), False)
+    check("include_home: no uses, no home", recipe.include_home(T + "h/include", {"include": [T + "h/include"]}, roots, repo, files), False)
+    check("output_kind: srcdir", recipe.output_kind("include", T + "h", [], files), "srcdir")
+    check("output_kind: nothing there", recipe.output_kind("nope", T + "h", [], files), None)
 # unitstage: an include of a mounted `include_uses` directory is accepted, one that no input names is refused
 import argparse, unitstage
 with tempfile.TemporaryDirectory() as d:

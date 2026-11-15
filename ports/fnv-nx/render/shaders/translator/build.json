@@ -75,5 +75,14 @@
    "at": "/ext/mojoshader"
   }
  ],
- "link": null
+ "link": null,
+ "outputs": {
+  "INCLUDE": "include"
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
+  }
+ ]
 }

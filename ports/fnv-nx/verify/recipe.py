@@ -967,6 +967,36 @@ def dir_output(p, gen):
     return any(o != p and under(o, p) for o in gen)
 
 
+def include_home(d, rec, roots, repo, files):
+    """D (a repo directory) lies in a directory output of tracked files (a `srcdir`) of a root that REC `uses`."""
+    for u in rec.get("uses") or []:
+        ent = roots.get(u.get("root")) if isinstance(u, dict) else None
+        if not (ent and isinstance(ent.get("recipe"), str)):
+            continue
+        try:
+            prod = read_recipe(repo, ent["recipe"])
+            p = (prod.get("outputs") or {}).get(u["output"])
+        except (OSError, ValueError, KeyError, AttributeError, TypeError):
+            continue
+        if isinstance(p, str) and output_kind(p, u["root"], generated_outputs(prod), files) == "srcdir" and under(d, u["root"] + "/" + p):
+            return True
+    return False
+
+
+def output_kind(p, root, gen, files):
+    """What the declared output path P (root-relative) of ROOT is: "file" (a generated output), "gendir" (a directory whose files are generated outputs, none
+    tracked), "srcdir" (a directory of tracked files of the root, nothing generated below it: its content is its tree hash), "mixed" (generated and tracked
+    files below one directory: red), or None."""
+    if p in gen:
+        return "file"
+    full = root + "/" + p
+    gdir = dir_output(p, gen)
+    tdir = any(under(f, full) for f in files)
+    if gdir and tdir:
+        return "mixed"
+    return "gendir" if gdir else "srcdir" if tdir else None
+
+
 def include_uses_errors(rec, roots, repo):
     """Problems of `include_uses` ([{root, output}], a subset of `uses`): the directory output NAME of another root, which is mounted at /uses/<root>/<NAME>
     and is one more include directory (after `include`, in list order). It is how a consumer reads the generated headers of another root."""
@@ -987,20 +1017,22 @@ def include_uses_errors(rec, roots, repo):
             p = (prod.get("outputs") or {}).get(u["output"])
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             continue    # uses_errors reports an unreadable or undeclared producer
-        if not (isinstance(p, str) and dir_output(p, generated_outputs(prod))):
-            err.append("include_uses: output %r of %s is not a directory output (outputs: {NAME: a directory of generated files})" % (u["output"], u["root"]))
-        elif any(under(f, u["root"] + "/" + p) for f in tracked(repo)):
-            err.append("include_uses: directory output %r of %s holds a tracked file (a directory output is generated files only)" % (u["output"], u["root"]))
+        if not (isinstance(p, str) and output_kind(p, u["root"], generated_outputs(prod), tracked(repo)) in ("gendir", "srcdir")):
+            err.append("include_uses: output %r of %s is not a directory output (outputs: {NAME: a directory of generated files, or of tracked files})" % (u["output"], u["root"]))
     return err
 
 
-def uses_errors(rec, root, roots, repo):
-    """Problems of `outputs` ({name: a generated output of this root}) and `uses` ([{root, output}]: an output another admitted root declares)."""
+def uses_errors(rec, root, roots, repo, files=None):
+    """Problems of `outputs` ({name: a generated output of this root, a directory of generated files, or a directory of tracked files}) and `uses`
+    ([{root, output}]: an output another admitted root declares)."""
     err, gen = [], generated_outputs(rec)
     outs = rec.get("outputs")
-    if outs is not None and not (isinstance(outs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(p, str) and (p in gen or dir_output(p, gen))
-                                                                 for n, p in outs.items())):
-        err.append("outputs must be {NAME: a path in generated[].outputs of this root, or a directory every file of which is one of them}")
+    if outs is not None:
+        held = tracked(repo) if files is None else files
+        if not (isinstance(outs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(p, str) and rel_ok(p)
+                                               and output_kind(p, root, gen, held) in ("file", "gendir", "srcdir") for n, p in outs.items())):
+            err.append("outputs must be {NAME: a path in generated[].outputs of this root, a directory every file of which is one of them, or a directory of tracked files of this root "
+                       "with no generated output below it (never both in one directory)}")
     us = rec.get("uses")
     if us is None:
         return err
@@ -1285,11 +1317,11 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             continue
         if not rel_ok(d) or tree_of(roots, d) is None:
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
-        elif not under(d, root) and not any(under(d, r) and (roots[r].get("class") == "header" or roots[r].get("class") == "product" and tg in targets_of(roots[r])) for r in roots):
-            # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
-            # the units that read them), never in a doc or tool root or a root of the other target
-            err.append("include %r lies in no admitted header root and no product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
-                       % (d, tg))
+        elif not under(d, root) and not include_home(d, rec, roots, repo, files):
+            # one home per header, and the way to it is declared: an include outside the unit's own root lies in a directory output
+            # (`outputs: {INCLUDE: dir}`) of another admitted root that this root `uses`, never merely in some admitted root
+            err.append("include %r lies outside root %s and in no directory output of a root that this root `uses` (the owner declares `outputs: {INCLUDE: dir}`, this root `uses: [{root, output}]`)"
+                       % (d, root))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
     # a path into a generated tree of another root is no include: the generated files of a root are its declared outputs, and a consumer takes them through `uses`
@@ -1350,7 +1382,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
     err += run_errors(rec, root, files, roots, mine, seen, repo)
-    err += uses_errors(rec, root, roots, repo) + include_uses_errors(rec, roots, repo)
+    err += uses_errors(rec, root, roots, repo, files) + include_uses_errors(rec, roots, repo)
     ea, ident = rec.get("error_abi"), lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x)
     if ea is not None and not (isinstance(ea, dict) and ident(ea.get("fail")) and (
             (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
@@ -1865,6 +1897,12 @@ class Job:
         for u in self.rec.get("uses", []):
             p = Job(self.repo, u["root"], self.store, self.jobs, self.extcache)
             pws = tempfile.mkdtemp(dir=ws)
+            rel = (p.rec.get("outputs") or {}).get(u["output"])
+            if isinstance(rel, str) and output_kind(rel, u["root"], generated_outputs(p.rec), p.files) == "srcdir":
+                # a directory of tracked files: its content is the output, no stage of the producer runs (a header-only root has nothing to build)
+                _copy(self.repo, [f for f in p.files if under(f, u["root"] + "/" + rel)], u["root"], os.path.join(pws, "root"))
+                out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(os.path.join(pws, "root", rel), self.store)})
+                continue
             try:
                 p.externals(pws)
                 p.generate(pws)

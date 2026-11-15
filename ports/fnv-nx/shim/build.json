@@ -11,5 +11,8 @@
   "asm": []
  },
  "include": [],
- "units": "all"
+ "units": "all",
+ "outputs": {
+  "INCLUDE": "include"
+ }
 }

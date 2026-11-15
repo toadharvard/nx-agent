@@ -121,5 +121,18 @@
     "gen/identity.c"
    ]
   }
+ ],
+ "outputs": {
+  "INCLUDE": "include"
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
+  }
  ]
 }
