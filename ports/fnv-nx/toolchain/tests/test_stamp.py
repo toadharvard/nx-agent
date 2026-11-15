@@ -43,12 +43,34 @@ def main():
         for i in stamp.INPUTS:
             os.makedirs(os.path.dirname(os.path.join(other, i)), exist_ok=True)
             shutil.copyfile(os.path.join(TREE, i), os.path.join(other, i))
-        check('the key depends on content only (the inputs copied to another directory give the same key)', stamp.stamp(other) == k)
+        check('the key depends on content only (the inputs copied to another directory give the same key)', stamp.stamp(other, recipe=recipe, verify=os.path.join(TREE, "verify")) == k)
         for i in stamp.INPUTS:
             with open(os.path.join(other, i), 'a') as f:
                 f.write('\n')
-            check('a changed input (%s) changes the key' % i, stamp.stamp(other) != k)
+            check('a changed input (%s) changes the key' % i, stamp.stamp(other, recipe=recipe, verify=os.path.join(TREE, "verify")) != k)
             shutil.copyfile(os.path.join(TREE, i), os.path.join(other, i))
+        # the values build.sh reads from the records: a changed runtime_configure / runtime_cflags / target / semantic flag changes the key
+        vd = os.path.join(td, 'verify')
+        os.makedirs(vd)
+        for n in ('targets.json', 'guest_compiler.json'):
+            shutil.copyfile(os.path.join(TREE, 'verify', n), os.path.join(vd, n))
+        gc = json.load(open(os.path.join(vd, 'guest_compiler.json')))
+        check('a verify dir copy with the same records gives the same key', stamp.stamp(verify=vd, recipe=recipe) == k)
+        pinned = dict(gc, external=dict(gc['external'], commit='0' * 40))
+        json.dump(pinned, open(os.path.join(vd, 'guest_compiler.json'), 'w'))
+        check('a changed pin (the output of the build) does not change the key', stamp.stamp(verify=vd, recipe=recipe) == k)
+        for field, val in (('runtime_configure', gc['runtime_configure'] + ['--disable-nls-test']), ('runtime_cflags', gc['runtime_cflags'] + ['-DX=1'])):
+            json.dump(dict(gc, **{field: val}), open(os.path.join(vd, 'guest_compiler.json'), 'w'))
+            try:
+                kk = stamp.stamp(verify=vd, recipe=recipe)
+            except Exception as ex:   # runtime_configure may refuse an uncited option: that is red as well, never the same key
+                kk = 'refused: %s' % ex
+            check('a changed %s changes the key (or is refused)' % field, kk != k, kk)
+        json.dump(gc, open(os.path.join(vd, 'guest_compiler.json'), 'w'))
+        tj = json.load(open(os.path.join(vd, 'targets.json')))
+        tj['guest_platform']['triplet'] += 'x'
+        json.dump(tj, open(os.path.join(vd, 'targets.json'), 'w'))
+        check('a changed targets.json triplet changes the key', stamp.stamp(verify=vd, recipe=recipe) != k)
         # the tree check, on trees written here
         tree = os.path.join(td, 'tree')
         os.makedirs(tree)

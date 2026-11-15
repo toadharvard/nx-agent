@@ -1420,7 +1420,7 @@ def compiler_stamp_errors(tree, host, name):
     spec = importlib.util.spec_from_file_location("fnvnx_msvcmodel_stamp", os.path.join(tree, "toolchain", "msvcmodel", "stamp.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    want = mod.stamp(tree)
+    want = mod.stamp(tree, recipe=sys.modules[__name__])
     try:
         with open(os.path.join(host, "MANIFEST.json")) as f:
             comp = json.load(f).get("compiler", {})
