@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "fnvnx/guest.h"
+#include "fnvnx/vm.h"
 #include "fnvnx/hostapi.h"
 #include "fnvnx/sdlayout.h"
 #include "fnvnx/import_key.h"
@@ -29,7 +30,6 @@
 #ifndef FNVNX_EXE_NAME
 #define FNVNX_EXE_NAME "FalloutNV.exe"
 #endif
-#define PAGE 0x1000u
 #define EXIT_FAILED 0xF0000100u   /* fnvnx_loader_main's result when the start sequence did not reach the guest's entry */
 
 /* the platform (L5, platform/include/fnvnx_win32_ext.h): records an image for GetModuleHandle / VirtualQuery */
@@ -98,11 +98,11 @@ static int h_map_fixed(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
     uint8_t *blk;
     mf_node *n;
     (void)c; (void)prot;   /* the final protection is applied later by protect */
-    if (!size || ((addr | size) & (PAGE - 1)) || size > 0xffff0000u - 2 * PAGE) return -1;
+    if (!size || ((addr | size) & (FNVNX_PAGE_SIZE - 1)) || size > 0xffff0000u - 2 * FNVNX_PAGE_SIZE) return -1;
     if (!(n = (mf_node *)malloc(sizeof *n))) return -1;
-    if (!(blk = (uint8_t *)memalign(PAGE, size + 2 * PAGE))) { free(n); return -1; }
-    memset(blk + PAGE, 0, size);
-    if (fnvnx_hcall3(fnvnx_host->map_fixed, addr, size, FNVNX_ADDR(blk + PAGE))) { free(blk); free(n); return -1; }
+    if (!(blk = (uint8_t *)memalign(FNVNX_PAGE_SIZE, size + 2 * FNVNX_PAGE_SIZE))) { free(n); return -1; }
+    memset(blk + FNVNX_PAGE_SIZE, 0, size);
+    if (fnvnx_hcall3(fnvnx_host->map_fixed, addr, size, FNVNX_ADDR(blk + FNVNX_PAGE_SIZE))) { free(blk); free(n); return -1; }
     n->addr = addr; n->size = size; n->blk = blk;
     fnvnx_lock(&g_mf_lock);
     n->next = g_mf; g_mf = n;
@@ -155,7 +155,7 @@ static void h_log(void *c, const char *msg) {
 static fnvnx_proc proc;   /* large: not on the stack; the platform's VirtualQuery reads its section map */
 fnvnx_proc *fnvnx_start_proc(void) { return &proc; }
 static uint32_t g_arena;
-static uint32_t g_used[ARENA_SIZE / PAGE / 32];   /* bit per page: handed out */
+static uint32_t g_used[ARENA_SIZE / FNVNX_PAGE_SIZE / 32];   /* bit per page: handed out */
 static volatile uint32_t g_lock;
 
 static int used(uint32_t pg) { return (g_used[pg >> 5] >> (pg & 31)) & 1u; }
@@ -164,33 +164,33 @@ static void mark(uint32_t pg, uint32_t n, int on) {
 }
 
 static uint32_t h_alloc_va(void *c, uint32_t size, unsigned prot) {
-    uint32_t n = size / PAGE, pg, run = 0, va = 0;
+    uint32_t n = size / FNVNX_PAGE_SIZE, pg, run = 0, va = 0;
     (void)c;
-    if (!size || (size & (PAGE - 1)) || prot != (FNVNX_PROT_R | FNVNX_PROT_W) || n > ARENA_SIZE / PAGE) return 0;
+    if (!size || (size & (FNVNX_PAGE_SIZE - 1)) || prot != (FNVNX_PROT_R | FNVNX_PROT_W) || n > ARENA_SIZE / FNVNX_PAGE_SIZE) return 0;
     fnvnx_lock(&g_lock);
     if (!g_arena) {
         uint64_t a = plat(FNVNX_PLAT_VM_RESERVE, 0, ARENA_SIZE, 0, 2);
-        if (!(a & (PAGE - 1)) && a <= 0x100000000ull - ARENA_SIZE && !fnvnx_address_reserved(&proc, (uint32_t)a, ARENA_SIZE))
+        if (!(a & (FNVNX_PAGE_SIZE - 1)) && a <= 0x100000000ull - ARENA_SIZE && !fnvnx_address_reserved(&proc, (uint32_t)a, ARENA_SIZE))
             g_arena = (uint32_t)a;
     }
-    for (pg = 0; g_arena && pg < ARENA_SIZE / PAGE; pg++) {
+    for (pg = 0; g_arena && pg < ARENA_SIZE / FNVNX_PAGE_SIZE; pg++) {
         run = used(pg) ? 0 : run + 1;
-        if (run == n) { va = g_arena + (pg + 1 - n) * PAGE; break; }
+        if (run == n) { va = g_arena + (pg + 1 - n) * FNVNX_PAGE_SIZE; break; }
     }
     if (va) {
-        mark((va - g_arena) / PAGE, n, 1);
-        if (plat(FNVNX_PLAT_VM_COMMIT, va, size, 0, 2)) { mark((va - g_arena) / PAGE, n, 0); va = 0; }
+        mark((va - g_arena) / FNVNX_PAGE_SIZE, n, 1);
+        if (plat(FNVNX_PLAT_VM_COMMIT, va, size, 0, 2)) { mark((va - g_arena) / FNVNX_PAGE_SIZE, n, 0); va = 0; }
     }
     fnvnx_unlock(&g_lock);
     return va;
 }
 
 static int h_free_va(void *c, uint32_t va, uint32_t size) {
-    uint32_t pg, n = size / PAGE, k;
+    uint32_t pg, n = size / FNVNX_PAGE_SIZE, k;
     int r = -1;
     (void)c;
-    if (!g_arena || !size || ((va | size) & (PAGE - 1)) || va < g_arena || va - g_arena > ARENA_SIZE - size) return -1;
-    pg = (va - g_arena) / PAGE;
+    if (!g_arena || !size || ((va | size) & (FNVNX_PAGE_SIZE - 1)) || va < g_arena || va - g_arena > ARENA_SIZE - size) return -1;
+    pg = (va - g_arena) / FNVNX_PAGE_SIZE;
     fnvnx_lock(&g_lock);
     for (k = 0; k < n && used(pg + k); k++) {}
     /* DECOMMIT does not reset the protection of a page that stays mapped (hostapi.h), and a freed thread block holds the
