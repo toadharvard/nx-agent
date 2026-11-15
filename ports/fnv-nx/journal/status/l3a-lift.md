@@ -900,3 +900,14 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - the reloc fixed-point cap (12 rounds) is red when the fixed point is not reached, or the loop is bounded by monotonicity alone;
   - one stage per image with pcsrc inside it, and no cut unless the timing shows a reason.
 - bottleneck: lift/facts build.json (w7) -> fpfacts (w13) -> liftsrc (w8); workers 4.
+
+## 21:15 lift tool tests on base3 d9d208c61 (w8)
+- 19 test files ran with no inputs given. 1 file has failures: test_defdisp, 2 cases (static u128 with its address taken; external u128 should be DISPATCH1).
+  - Cause: cand3's dispatch plugin (an L2 file) lacks the shapeless-definition rule of 37d4e27df/b0198f906. That rule makes a shapeless definition quiet only when it is static and its address is never taken.
+  - The decision is with L2: (a) put the rule in the plugin, or (b) state cand3's rule, and the test follows it. The test is unchanged until then.
+- Pass: bridgegen, cpuref, dispgen, ehflow, jtab, liftgen_recipe, packentries, root_graph.
+  - liftgen_recipe: pack build.json equals liftgen.recipe.
+  - root_graph: acyclic.
+- Not run, because they need declared inputs: test_dsl_emit, lifted_vs_shapes, universe_r3_check, lock_only, ranges, modules_check, modlift_closure.
+  - Three of them read FNVNX_INPUT_EXE/FACTS from the environment. They take explicit arguments once facts is a stage. That is not on the path before then.
+- liftsrc chain: the recipe is valid on w8's local branch, and a cold build is running to measure the shard time.
