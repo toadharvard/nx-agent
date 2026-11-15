@@ -57,6 +57,14 @@ def main():
         ms = mn(pre)
         if 'ldaxr' not in ms or 'stlxr' not in ms or 'ldxr' in ms or 'stxr' in ms:
             fails.append('%s: atomics must be seq_cst (ldaxr/stlxr): %s' % (pre, ms))
+    # types no single ldar/stlr covers: vector, complex, long double, packed (each unit ordered)
+    ov = T.functions(realobj.objects(['order_vec'])['order_vec'])
+    for sym, want in (('_Z5vcopyPDv4_fPKS_', {'ldar': 2, 'stlr': 2}), ('_Z6vstorePDv4_fS_', {'stlr': 2}), ('_Z4cplxPKCf', {'ldar': 2}),
+                      ('_Z2ldPKe', {'ldar': 2}), ('_Z3ldsPee', {'stlr': 2}), ('_Z6packedPK2Pk', {'ldarb': 4}), ('_Z6pstoreP2Pki', {'stlrb': 4})):
+        ms = [m for o, m, a in ov[sym]]
+        got = {k: ms.count(k) for k in want}
+        if got != want:
+            fails.append('%s: want %s, got %s (%s)' % (sym, want, got, sorted(set(ms))))
     # READONLY RECORD: .fnvnx.ro names the table with its byte ranges (the whole 32 bytes for the indexed read)
     import subprocess
     sec = subprocess.run(['objdump', '-s', '-j', '.fnvnx.ro', obj], capture_output=True, text=True)

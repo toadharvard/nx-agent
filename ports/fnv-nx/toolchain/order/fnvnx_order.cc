@@ -304,6 +304,14 @@ static gimple *fence(enum memmodel m) {
 }
 
 // force_gimple_operand replaces its sequence; gimplify into a fresh one and append it
+// mark a declaration as living in memory: its address is about to be taken. A gimplifier temporary of a register type is
+// a gimple register (it must never be addressable), so that flag goes too
+static void force_addressable(tree d) {
+  if (!d || !DECL_P(d)) return;
+  DECL_NOT_GIMPLE_REG_P(d) = 1;
+  ::mark_addressable(d);
+}
+
 static tree gimplify_to(tree e, gimple_seq *seq) {
   gimple_seq s = NULL;
   tree v = force_gimple_operand(e, &s, true, NULL_TREE);
@@ -313,7 +321,7 @@ static tree gimplify_to(tree e, gimple_seq *seq) {
 
 static tree address_of(tree ref, gimple_seq *seq) {
   tree base = get_base_address(ref);
-  if (base && DECL_P(base) && !hard_register(base)) mark_addressable(base);
+  if (base && DECL_P(base) && !hard_register(base)) force_addressable(base);
   return gimplify_to(build_fold_addr_expr(ref), seq);
 }
 
@@ -418,12 +426,21 @@ static void add_resume_fences(function *fun) {
   }
 }
 
+// a temporary of any type: create_tmp_var refuses a type that must live in memory (TREE_ADDRESSABLE: a C++ class with a
+// non-trivial copy), the raw form takes it
+static tree make_tmp(tree ty, const char *name) {
+  if (!TREE_ADDRESSABLE(ty)) return create_tmp_var(ty, name);
+  tree d = create_tmp_var_raw(ty, name);
+  gimple_add_tmp_var(d);
+  return d;
+}
+
 // an operand that is a shared memory reference but sits where only a value can (a call argument, a return value, a
 // condition, an arithmetic operand): read it into a local first with an ordinary assignment, ordered as any other
 // load, and use the local
 static void hoist_read(gimple_stmt_iterator *gsi, gimple *stmt, unsigned i) {
   tree op = gimple_op(stmt, i);
-  tree tmp = create_tmp_var(TREE_TYPE(op), "order_a");
+  tree tmp = make_tmp(TREE_TYPE(op), "order_a");
   gimple *as = gimple_build_assign(tmp, op);
   gimple_set_location(as, gimple_location(stmt));
   gsi_insert_before(gsi, as, GSI_SAME_STMT);
@@ -784,8 +801,8 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
     tree pt = TREE_TYPE(TREE_TYPE(a));
     bool known = spec.known_p() && spec.arg_specified_p(i);
     bool r = !known || spec.arg_maybe_read_p(i), w = !known || spec.arg_maybe_written_p(i);
-    tree tmp = create_tmp_var(pt, "order_b");
-    mark_addressable(tmp);
+    tree tmp = make_tmp(pt, "order_b");
+    force_addressable(tmp);
     tree ref = build2(MEM_REF, pt, a, build_int_cst(TREE_TYPE(a), 0));
     if (r) {
       gimple *in = gimple_build_assign(tmp, ref);
@@ -821,7 +838,7 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
       if (shared_ordered(gimple_assign_lhs(stmt))) {
         tree lhs = gimple_assign_lhs(stmt);
         if (!stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
-          tree tmp = create_tmp_var(TREE_TYPE(lhs), "order_r");
+          tree tmp = make_tmp(TREE_TYPE(lhs), "order_r");
           gimple_assign_set_lhs(stmt, tmp);
           gsi_insert_after(gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
         } else {
@@ -838,7 +855,7 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
       // `ref = f()` storing into an ordered object: route the result through a temporary, and order that store
       tree lhs = gimple_call_lhs(stmt);
       if (lhs && shared_ordered(lhs) && !stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
-        tree tmp = create_tmp_var(TREE_TYPE(lhs), "order_r");
+        tree tmp = make_tmp(TREE_TYPE(lhs), "order_r");
         gimple_call_set_lhs(stmt, tmp);
         gsi_insert_after(gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
       } else if (lhs && shared_ordered(lhs)) {
@@ -897,16 +914,24 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   bool src_sh = ld;
   tree rb = get_base_address(rhs);
   if (!is_memory_ref(rhs) || (rb && hard_register(rb)) || TREE_CODE(rhs) == CONSTRUCTOR) {
-    tree tmp = create_tmp_var(ty, "order_u");
-    mark_addressable(tmp);
+    tree tmp = make_tmp(ty, "order_u");
+    force_addressable(tmp);
     gimple *as = gimple_build_assign(tmp, rhs);
     gimple_set_location(as, loc);
     gimple_seq_add_stmt(&pre, as);
     src = tmp;
     src_sh = false;
   }
-  tree dp = address_of(lhs, &pre), sp = address_of(src, &pre);
-  unsigned al = MIN(get_object_alignment(lhs), get_object_alignment(src));
+  // a destination that is no memory (a register variable: the load `D.1 = *p` of a gimplifier temporary) is not given an
+  // address: the units go to a memory temporary, which the statement then copies into the register
+  tree dst = lhs, fin = NULL_TREE;
+  if (!st && !is_memory_ref(lhs)) {
+    dst = make_tmp(ty, "order_d");
+    force_addressable(dst);
+    fin = lhs;
+  }
+  tree dp = address_of(dst, &pre), sp = address_of(src, &pre);
+  unsigned al = MIN(get_object_alignment(dst), get_object_alignment(src));
   unsigned unit = 8;
   while (unit > 1 && (size % unit || al < unit * 8)) unit >>= 1;
   unsigned HOST_WIDE_INT n = size / unit;
@@ -950,7 +975,8 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
     }
     gsi_insert_seq_before(gsi, pre, GSI_SAME_STMT);
     gsi_insert_before(gsi, last, GSI_SAME_STMT);
-    gsi_replace(gsi, gimple_build_nop(), true);   // the original statement is gone (gsi_replace keeps the lhs of the old one)
+    // the original statement goes (gsi_replace wants the same lhs, so a nop; the register destination gets its copy)
+    gsi_replace(gsi, fin ? gimple_build_assign(fin, dst) : gimple_build_nop(), true);
     return;
   }
 }
@@ -977,7 +1003,7 @@ static void order_single(gimple_stmt_iterator *gsi) {
     tree ty = TREE_TYPE(rhs);
     tree v = SCALAR_FLOAT_TYPE_P(ty) ? build1(VIEW_CONVERT_EXPR, ty, bits) : build1(NOP_EXPR, ty, bits);
     if (!useless_type_conversion_p(TREE_TYPE(lhs), ty)) {
-      tree t2 = create_tmp_var(ty, "order_v");
+      tree t2 = make_tmp(ty, "order_v");
       gsi_insert_before(gsi, gimple_build_assign(t2, v), GSI_SAME_STMT);
       v = build1(NOP_EXPR, TREE_TYPE(lhs), t2);
     }
@@ -1032,7 +1058,7 @@ struct order_pass : gimple_opt_pass {
       std::map<tree, tree> repl;
       for (tree d : taken)
         if (TREE_CODE(d) == PARM_DECL && !DECL_BY_REFERENCE(d) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
-          repl[d] = create_tmp_var(TREE_TYPE(d), "order_p");
+          repl[d] = make_tmp(TREE_TYPE(d), "order_p");
       if (!repl.empty()) {
         struct W { static tree sub(tree *tp, int *ws, void *data) {
           std::map<tree, tree> *m = (std::map<tree, tree> *)((struct walk_stmt_info *)data)->info;
@@ -1062,7 +1088,7 @@ struct order_pass : gimple_opt_pass {
     addr_set = &taken;
     for (tree d : taken)
       if ((VAR_P(d) || TREE_CODE(d) == PARM_DECL || TREE_CODE(d) == RESULT_DECL) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
-        mark_addressable(d);
+        force_addressable(d);
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
     add_resume_fences(fun);
