@@ -316,11 +316,18 @@ def gs_guard(cx, ins):
         # wine-9.0: err == 0 and not is_privileged_instr -> rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION, NumberParameters = 2, ExceptionInformation[0] = 0, [1] = 0xffffffff); the same row as f_sys.gp_cond. Nothing was modified yet.
         cx.em(f_sys.gp_cond(cx, '1'))
         return
-    # the null_seg_access row of x86sys (L5): a memory operand whose segment register (ds/es/fs/gs, by prefix) holds the null selector raises the row at this instruction; PRIV vs AV by the row's opcode set.
-    # lea and the NO_ACCESS mnemonics have no access (returned above); a prefixed instruction without a memory operand has no operand here. Default-segment operands (no prefix) are not guarded here: see the lead's note.
+    # the null_seg_access row of x86sys (L5): an access through an effective segment register S (prefix, or the default) that may hold the null selector raises the row at this instruction; PRIV vs AV by the
+    # row's opcode set. S may hold null in this image iff its initial selector (x86sys selectors) is null or the image has a write site of S (tools/segwrites.py, the SEGWRITES fact); ss and cs never
+    # hold it (loading null is #GP, x86sys mov_to_sreg). lea and the NO_ACCESS mnemonics have no access (returned above); a prefixed instruction without a memory operand has no operand here.
     from . import x86sys
     SEGI = {X.X86_REG_ES: 0, X.X86_REG_DS: 3, X.X86_REG_FS: 4, X.X86_REG_GS: 5}
-    g = sorted({SEGI[o.mem.segment] for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.segment in SEGI})
+    eff = set()
+    for o in ins.operands:
+        if o.type == X.X86_OP_MEM:
+            sg = o.mem.segment or (X.X86_REG_SS if o.mem.base in (X.X86_REG_ESP, X.X86_REG_EBP) else X.X86_REG_DS)
+            if sg in SEGI: eff.add(SEGI[sg])
+    if ins.mnemonic.split(' ')[-1] == 'xlatb': eff.add(3)             # implicit ds:[ebx+al]
+    g = sorted(i for i in eff if may_null(i))
     if not g:
         return
     r = x86sys.NULL_SEG
@@ -335,6 +342,25 @@ def gs_guard(cx, ins):
         cx.em(f_sys.gp_cond(cx, cond))
     if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
         cx.em(f_sys.gp_cond(cx, 'SELK(c->sel[SEG_GS])==SELK(SEL_CS)'))
+
+
+_SEGW = {}
+
+
+def may_null(i):
+    """may the data segment register with state index i (0 es, 3 ds, 4 fs, 5 gs) hold the null selector in the image being lifted (see gs_guard)"""
+    import json
+    from . import inputs, x86sys
+    n = {0: 'es', 3: 'ds', 4: 'fs', 5: 'gs'}[i]
+    if n not in x86sys.SEL:
+        raise Unsupported('%s: the initial selector is undecided in x86sys selectors' % n)
+    if x86sys.SEL[n] & 0xfffc == 0:
+        return True
+    path = inputs.get('segwrites')
+    if path not in _SEGW:
+        d = json.load(open(path)); assert d['format'] == 'fnvnx-segwrites/1', d['format']; _SEGW[path] = d['images']
+    im = _SEGW[path][inputs.get('image')]
+    return im[n] > 0
 
 
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):

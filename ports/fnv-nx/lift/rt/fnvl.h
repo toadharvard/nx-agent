@@ -387,7 +387,7 @@ static inline void fnvl_seg_set(struct cpu *p, u32 idx, u32 sel){ p->sel[idx]=se
 static inline u32 fnvl_seg_get(struct cpu *p, u32 idx){ return p->sel[idx]; }
 /* Segment state of a fresh thread (rt/enter.cc cpu_reset): the process constants of a native 32-bit Windows 7 user process (rt/seh.cc make_context): CS 0x1b, DS=ES=SS 0x23, FS 0x3b with
    base = TEB, GS null. struct cpu.sel is indexed ES, CS, SS, DS, FS, GS (SEG_*); sel and teb are the last fields of struct cpu. */
-static inline void fnvl_seg_init(struct cpu *p, u32 teb){ p->teb=teb; p->sel[SEG_ES]=SEL_ES; p->sel[SEG_CS]=SEL_CS; p->sel[SEG_SS]=SEL_SS; p->sel[SEG_DS]=SEL_DS; p->sel[SEG_FS]=SEL_FS; p->fs=teb; }
+static inline void fnvl_seg_init(struct cpu *p, u32 teb){ p->teb=teb; p->sel[SEG_ES]=SEL_ES; p->sel[SEG_CS]=SEL_CS; p->sel[SEG_SS]=SEL_SS; p->sel[SEG_DS]=SEL_DS; p->sel[SEG_FS]=SEL_FS; p->sel[SEG_GS]=SEL_GS; p->fs=teb; }
 /* Base of a `gs:` access, by the CURRENT GS selector (the null selector never gets here: the lifter emits a #GP(0) guard before the instruction): the FS descriptor -> TEB, a flat one -> 0. */
 #define FNVL_GS_BASE() (SELK(c->sel[SEG_GS])==SELK(SEL_FS)?c->teb:0u)
 /* The descriptor-table registers, LDTR and CR0 have no source in platform/declared/x86sys.json (sgdt, sidt, sldt, smsw: undecided): no constant here and no Form for them. */

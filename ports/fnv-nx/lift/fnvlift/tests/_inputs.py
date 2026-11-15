@@ -9,4 +9,6 @@ def configure():
     from fnvlift import inputs
     d = tempfile.mkdtemp(prefix='lifter-inputs-')
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS)
+    import json
+    json.dump({'format': 'fnvnx-segwrites/1', 'images': {'buf': dict(es=0, ds=0, fs=0, gs=0)}}, open(d + '/segwrites.json', 'w'))      # a buffer has no write site of a segment register
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, segwrites=d + '/segwrites.json', image='buf')

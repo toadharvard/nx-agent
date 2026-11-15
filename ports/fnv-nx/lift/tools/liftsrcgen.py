@@ -21,7 +21,7 @@ EXTERNALS = [
     {'name': 'exe', 'repo': 'fnv-nx-build', 'ref': 'gamedata/exe', 'commit': '0948da1e89ab719dcf8471e45b67bc60575f6b93', 'tree_sha256': 'ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b', 'at': '/ext/exe'},
     {'name': 'redist', 'repo': 'fnv-nx-build', 'ref': 'gamedata/redist', 'commit': 'c53729e3bac168798fddcf4312f5a64a9b5eb08f', 'tree_sha256': 'fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2', 'at': '/ext/redist'},
 ]
-USES = [{'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPSTATE'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPDEPTH'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
+USES = [{'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'SEGWRITES'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPSTATE'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPDEPTH'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
 MOD = '/uses/ports/fnv-nx/loader/MODULES_TSV'
 
 
@@ -42,7 +42,7 @@ def images(modules):
 
 
 def recipe(modules, exts=EXTERNALS):
-    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
+    common = ['--lift', '/in/' + LIFT, '--fpstate', '/uses/ports/fnv-nx/lift/fpfacts/FPSTATE', '--fpdepth', '/uses/ports/fnv-nx/lift/fpfacts/FPDEPTH', '--x86sys', '/uses/ports/fnv-nx/platform/X86SYS', '--segwrites', '/uses/ports/fnv-nx/lift/facts/SEGWRITES', '--certs', '/in/' + ROOT + '/certs', '--jobs', '4']
     gen, imgargs = [], []
     for name, mod, size in images(modules):
         n = shards(size)
