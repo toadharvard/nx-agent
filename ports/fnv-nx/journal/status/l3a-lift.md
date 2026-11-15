@@ -855,3 +855,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - w12 (session_01KmtZKUVVL6cV1kisqKEof7, claude/fnv-l3a-lift-w12-paths): after the profile, the path and env-default sweep over lift/. Status: doing.
   - Target: the pack compiled by about 04:00Z on up to 16 farms (brief 217cb3ce0, N=16) once the chain is green. EFLAGS liveness is in only if ready before cand3; no worker is free for it now.
 - bottleneck: the lift chain as stages (w7 -> w13 -> w8); cand3; workers 4 (w7, w8, w12, w13).
+- 21:10 w7 07512aba0 (claude/fnv-l3a-lift-w7-modtable, on t16l): the module-table stamp.
+  - liftgen finish requires --modules and runs check_images: every table row has an image from its pinned file at its assigned base, and the universe lies inside it.
+  - The packentries stage is red on a missing, double, non-last or mismatching stamp against the loader's MODULES_TSV.
+  - Tests: 13 checks plus the packentries extension, 0 fail. It goes into w8's liftsrc.
+  - Worker containers lack the pinned verdict env (`blocked: env`), so w7 runs farm/setup_verdict_env.sh.
+- 21:10 Farm 1 (session_01KmtZKU7i9iyCYMN5hkeoJW) archived. It was disconnected since 17:42Z, its 3b11d118 regen is superseded by the lift/facts stage, and only d3dx9_31 was reported, 2 h 40 min into pcsrc. Risk for the 04:00Z target: pcsrc on d3dx9_31 alone runs for hours, so the facts stage cost sets the schedule. w7 reports per-image stage times.
+- 21:10 Tail rows: universe.py tail_pass admits an instruction start of the global decode outside the source entry's extent. The pack, older than a0f3d8e, lacked them; by the rule the universe is right.
