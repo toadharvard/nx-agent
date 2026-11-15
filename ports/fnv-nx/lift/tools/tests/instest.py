@@ -216,7 +216,7 @@ class Oracle(World):
             uc.reg_write(UC_X86_REG_MXCSR, st['mxcsr'])
             s.mode = 'test'; uc.emu_start(E['addr'], 0xffffffffffffffff, timeout=2000000); s.mode = 'epi'
             if s.nxt is None or s.collide: return dict(fault='collide' if s.collide else 'no next instruction', collide=s.collide)
-            o = dict(regs=[uc.reg_read(k) for k in X86R], eip=s.nxt, fl=uc.reg_read(UC_X86_REG_EFLAGS) & 0xcd5, eflx=uc.reg_read(UC_X86_REG_EFLAGS) & 0x240000, mem=s.written(), fp=None, xmm=None, mm=None,
+            o = dict(regs=[uc.reg_read(k) for k in X86R], eip=s.nxt, fl=uc.reg_read(UC_X86_REG_EFLAGS) & 0xcd5, eflx=uc.reg_read(UC_X86_REG_EFLAGS) & 0x244000, mem=s.written(), fp=None, xmm=None, mm=None,
                      mxcsr=uc.reg_read(UC_X86_REG_MXCSR), wr=sorted(s.writes))
             if E['sse']: o['xmm'] = [uc.reg_read(UC_X86_REG_XMM0 + i) for i in range(8)]
             if E['mmx']:
@@ -270,7 +270,7 @@ class Arm(World):
             s.ensure(r0[4], 4, False); eip = struct.unpack('<I', bytes(uc.mem_read(r0[4], 4)))[0] if E['base'] in ('ret', 'retn') else 'returned'
         else: eip = s.ev[1] if s.ev[0] not in ('fnvl_raise', 'fnvl_raise_av') or s.ev[2] == 2 else 'trap%d' % s.ev[2]
         ftop, fcw, fc = struct.unpack_from('<3I', b, 36); fxv = [struct.unpack_from('<QII', b, 256 + 16 * i) for i in range(8)]
-        return dict(regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 176)[0] & 0xcd5, eflx=struct.unpack_from('<I', b, 384)[0] & 0x240000, mem=s.written(), xmm=[int.from_bytes(b[48 + 16 * i:64 + 16 * i], 'little') for i in range(8)],
+        return dict(regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 176)[0] & 0xcd5, eflx=struct.unpack_from('<I', b, 384)[0] & 0x244000, mem=s.written(), xmm=[int.from_bytes(b[48 + 16 * i:64 + 16 * i], 'little') for i in range(8)],
                     fp=dict(top=ftop & 7, fcw=fcw, cc=fc & 0x4500, valid=sum(1 << i for i in range(8) if fxv[i][2]), st=dict(enumerate(fxv)), wr=sorted(s.writes)),
                     mxcsr=struct.unpack_from('<I', b, 180)[0], mm=[img80(k, v, e)[0] for v, e, k in fxv], mme=[img80(k, v, e)[1] & 0xffff for v, e, k in fxv], mtop=ftop & 7, mvalid=sum(1 << i for i in range(8) if fxv[i][2]))
 def gen_state(E, i, att, xd=None):

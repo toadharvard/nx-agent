@@ -47,7 +47,7 @@ enum { FS_CW = 0, FS_SW = 4, FS_TW = 8, FS_EO = 12, FS_ES = 16, FS_DO = 20, FS_D
 enum { X_FCW = 0, X_FSW = 2, X_FTW = 4, X_FOP = 6, X_FIP = 8, X_FCS = 12, X_FDP = 16, X_FDS = 20, X_MXCSR = 24, X_MXMASK = 28, X_ST = 32, X_XMM = 160 };   /* XSAVE_FORMAT (FXSAVE image) */
 /* EFLAGS of a software raise (RaiseException, DebugBreak, RtlUnwind are API calls, not instructions): bit 1, IF, AC/ID as kept, arithmetic flags 0: the flags are dead across a call (the lifter's
    ABI), so no value is read from the caller; Wine's RtlCaptureContext likewise reports the flags of its own pushfd, not of the caller's instruction */
-#define SW_EFL (0x202u | (c->eflx & 0x240000u))
+#define SW_EFL (0x202u | (c->eflx & FNVL_EFL_KEEP))
 static u32 g16(const u8 *b, u32 o) { return b[o] | b[o + 1] << 8; }
 static u32 g32(const u8 *b, u32 o) { return g16(b, o) | g16(b, o + 2) << 16; }
 static u64 g64(const u8 *b, u32 o) { return g32(b, o) | (u64)g32(b, o + 4) << 32; }
@@ -58,13 +58,13 @@ static void to_guest(u32 dst, const u8 *src, u32 n) { for (u32 i = 0; i < n; i +
 static void from_guest(u8 *dst, u32 src, u32 n) { for (u32 i = 0; i < n; i += 4) p32(dst, i, M32(src + i)); }
 
 /* the FXSAVE image of the guest state now (struct cpu; the lifted raise site has flushed fx/ftop/fc/x, rt/fnvl.h RAISE_OUT): the registers in ST order as 80-bit images (an empty register keeps its image,
-   rt/fnvl_x87.h fv_free), the abridged tag byte (bit = physical register not empty), FOP/FCS/FDS derived as fnstenv does (fx_env_st), MXCSR with the live SSE flags, XMM0-7 (XMM8-15 do not exist in 32-bit mode). */
+   rt/fnvl_x87.h fv_free), the abridged tag byte (bit = physical register not empty), FOP/FCS/FDS from struct cpu as fnstenv stores them (fx_env_st), MXCSR with the live SSE flags, XMM0-7 (XMM8-15 do not exist in 32-bit mode). */
 static void fx_capture(u8 *g) {
     for (u32 i = 0; i < XS_SIZE; i++) g[i] = 0;
-    u32 fsw = (c->ftop & 7) << 11 | (c->fc & 0x4500u) | fx_live() | (c->fex & FEX_X87), tag = 0, ip = c->fip, dp = c->fdp;
+    u32 fsw = (c->ftop & 7) << 11 | (c->fc & 0x4500u) | fx_live() | (c->fex & FEX_X87) | fx_esb(), tag = 0, ip = c->fip, dp = c->fdp;
     for (u32 p = 0; p < 8; p++) if (c->fx[p].k) tag |= 1u << p;
-    p16(g, X_FCW, c->fcw); p16(g, X_FSW, fsw); g[X_FTW] = (u8)tag; p16(g, X_FOP, fx_fop()); p32(g, X_FIP, ip); p16(g, X_FCS, ip ? c->sel[SEG_CS] : 0);
-    p32(g, X_FDP, dp); p16(g, X_FDS, dp ? c->sel[SEG_DS] : 0); p32(g, X_MXCSR, c->mxcsr | sse_live()); p32(g, X_MXMASK, FNVL_MXCSR_MASK);
+    p16(g, X_FCW, c->fcw); p16(g, X_FSW, fsw); g[X_FTW] = (u8)tag; p16(g, X_FOP, fx_fop()); p32(g, X_FIP, ip); p16(g, X_FCS, c->fcs);
+    p32(g, X_FDP, dp); p16(g, X_FDS, c->fds); p32(g, X_MXCSR, c->mxcsr | sse_live()); p32(g, X_MXMASK, FNVL_MXCSR_MASK);
     for (u32 i = 0; i < 8; i++) { fnvl_f80 t = fv_x(c->fx[(c->ftop + i) & 7]); p64(g, X_ST + 16 * i, t.m); p16(g, X_ST + 16 * i + 8, t.se); }
     for (u32 i = 0; i < 8; i++) { p64(g, X_XMM + 16 * i, c->x[i].q[0]); p64(g, X_XMM + 16 * i + 8, c->x[i].q[1]); }
 }
@@ -93,11 +93,11 @@ static void fpu_to_fpux(u8 *g, const u8 *f) {
     g[X_FTW] = (u8)tag;
 }
 /* load the x87 part of the image (always) and the SSE part (sse): the exact inverse of fx_capture. FCW goes through FLDCW (the host rounding mode follows), the sticky flags REPLACE the x87 set like
-   FRSTOR (fx_env_ld) and the SSE set like LDMXCSR; FOP, FCS and FDS are derived values (ASM-214, ASM-213 of rt/fnvl_x87.h), not stored. */
+   FRSTOR (fx_env_ld) and the SSE set like LDMXCSR; FOP, FCS, FDS and the ES/B bits are stored in struct cpu (fop, fcs, fds, fsw) and loaded verbatim. */
 static void fx_restore(const u8 *g, int sse) {
     u32 fsw = g16(g, X_FSW), top = (fsw >> 11) & 7, tag = g[X_FTW];
     FLDCW(g16(g, X_FCW)); c->ftop = top; c->fex = (c->fex & ~FEX_X87) | (fsw & FEX_X87); if (fown() == 1u) fnvl_fp_x87_clear();
-    c->fc = fsw & 0x4500u; c->fip = g32(g, X_FIP); c->fdp = g32(g, X_FDP);
+    c->fc = fsw & 0x4500u; c->fsw = fsw & 0x8080u; c->fip = g32(g, X_FIP); c->fdp = g32(g, X_FDP); c->fop = g16(g, X_FOP) & 0x7ffu; c->fcs = g16(g, X_FCS); c->fds = g16(g, X_FDS);
     for (u32 p = 0; p < 8; p++) { u32 i = (p - top) & 7; c->fx[p] = fvmk((tag >> p) & 1 ? FK_M80 : FK_E, g64(g, X_ST + 16 * i), g16(g, X_ST + 16 * i + 8)); }
     if (!sse) return;
     u32 mx = g32(g, X_MXCSR); c->mxcsr = mx; sse_fpcr(mx); if (fown() == 2u) fnvl_fp_x87_clear();
