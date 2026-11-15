@@ -26,7 +26,8 @@
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/render/d3d9/gen",
   "ports/fnv-nx/render/pair/include",
-  "ports/fnv-nx/render/smscan/include"
+  "ports/fnv-nx/render/smscan/include",
+  "ports/fnv-nx/render/gl4shim/include"
  ],
  "units": "all",
  "generated": [
@@ -93,16 +94,6 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/render/d3d9/ffp/gen_glsl.py",
-   "args": [
-    "/out/gen"
-   ],
-   "inputs": [],
-   "outputs": [
-    "gen/ffp_glsl.gen.h"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_wine_ids.py",
    "args": [
     "/out/gen",
@@ -157,6 +148,10 @@
   },
   {
    "root": "ports/fnv-nx/render/smscan",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
    "output": "INCLUDE"
   }
  ]

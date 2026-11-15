@@ -87,6 +87,10 @@
   {
    "root": "ports/fnv-nx/lib/sha256",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "INCLUDE"
   }
  ]
 }
