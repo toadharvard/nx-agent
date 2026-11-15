@@ -3,18 +3,22 @@
 
 The dispatch plugin (toolchain/dispatch/fnvnx_dispatch.cc) takes the class of every argument and result from the backend (pass_by_reference, function_arg,
 function_value). This test is the reference check: for every type of the list below the real plugin compiles an indirect call, and the class it wrote into
-.fnvnx.disp is compared with the registers the same compiler uses in the prologue of a callee of the same signature, compiled WITHOUT the plugin
+.fnvnx.disp is compared with the registers the same compiler uses in the prologue of a callee of the same signature (the callee is compiled in the same recipe root;
+every guest root loads the full plugin set, and none of the plugins chooses the registers of a plain function body)
 (argument: which register file the first use reads; result: which register file the epilogue writes, x8 for a result in memory). Only the register FILE is compared: the compiler
 reads or packs the pieces of an aggregate at widths of its own choosing (fmov x0, d0 for {float, float}), so the element width is the backend's answer, which bridgegen
 checks for consistency with the size (an element code that does not divide the size into 1..4 parts is a build error). It verifies the rule; it selects nothing.
 
-    descclasstest.py [--cc DIR] [--work DIR]
+    test_descclass.py
+Every compile is a stage of the recipe (toolchain/tests/plugbuild.py): the prepared machinery, the pinned msvcmodel compiler, no direct compiler call.
 """
-import argparse, os, re, subprocess, sys
+import os, re, shutil, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE)); FNV = os.path.dirname(LIFT)
 sys.path.insert(0, LIFT + '/tools')
+sys.path.insert(0, os.path.join(FNV, 'toolchain', 'tests'))
 import bridgegen
+import plugbuild as pb
 
 # name -> declaration text; every type is used as an argument and as a result
 TYPES = [
@@ -40,12 +44,6 @@ TYPES = [
     ('i20', 'struct I20 { int a, b, c, d, e; };', 'I20'),
 ]
 CC = '__attribute__((fnvnx_cc("stack")))'
-
-
-def run(cmd, **k):
-    r = subprocess.run(cmd, capture_output=True, text=True, **k)
-    if r.returncode: sys.exit('%s: %s' % (' '.join(cmd[:3]), r.stderr[:800]))
-    return r.stdout
 
 
 WIDTH = {'b': 1, 'h': 2, 's': 4, 'd': 8, 'q': 16}
@@ -89,6 +87,19 @@ def ref_ret(asm, fn):
     return ('g',) if any(re.match(r'\s*(ldr|ldp|ldur|mov|lsr|and)\s+[xw][01]\b', ln) for ln in body) else None
 
 
+def asm_of(obj):
+    """the object's functions as `name:` + one `mnemonic operands` line per instruction + `.size` (the form ref_arg / ref_ret / func read): the recipe-built
+    object read back by the pinned objdump (reading, not compiling)"""
+    out = []
+    for sym, lines in pb.objdump(obj).items():
+        out.append(sym + ':')
+        for ln in lines:
+            m = re.match(r'\s*[0-9a-f]+:\t[0-9a-f]{8}\s+\t?(.*)$', ln)
+            if m: out.append('\t' + re.sub(r'\t+', ' ', m.group(1)))
+        out.append('\t.size')
+    return '\n'.join(out) + '\n'
+
+
 def func(asm, fn):
     out, on = [], False
     for ln in asm.split('\n'):
@@ -99,23 +110,23 @@ def func(asm, fn):
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--cc', default=''); ap.add_argument('--work', default='/tmp/descclass'); a = ap.parse_args()
-    w = a.work; os.makedirs(w, exist_ok=True)
-    cc = lambda t: (a.cc + '/' if a.cc else '') + 'aarch64-linux-gnu-' + t
-    pdir = run([cc('g++'), '-print-file-name=plugin']).strip() + '/include'
-    plug = []
-    for n, src in (('fnvnx_names', 'names/fnvnx_names.cc'), ('fnvnx_dispatch', 'dispatch/fnvnx_dispatch.cc')):
-        so = '%s/%s.so' % (w, n)
-        run(['x86_64-linux-gnu-g++-13', '-shared', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-I' + pdir, '%s/toolchain/%s' % (FNV, src), '-o', so])
-        plug.append('-fplugin=' + so)
+    w = tempfile.mkdtemp(prefix='descclass-')
+    try:
+        return run_all(w)
+    finally:
+        shutil.rmtree(w, ignore_errors=True)
+
+
+def run_all(w):
+    plug = [pb.build(n, w) for n in ('sdd', 'names', 'dispatch')]
     decls = '\n'.join(t[1] for t in TYPES)
     call = ''.join('void c_a_%s(unsigned long p, %s x) { ((void (%s *)(%s))p)(x); }\n%s c_r_%s(unsigned long p) { return ((%s (%s *)(void))p)(); }\n'
                    % (n, T, CC, T, T, n, T, CC) for n, d, T in TYPES)
     ref = ''.join('%s g_%s;\nextern "C" void __attribute__((noinline)) a_%s(%s x) { g_%s = x; }\nextern "C" %s __attribute__((noinline)) r_%s(void) { return g_%s; }\n' % (T, n, n, T, n, T, n, n) for n, d, T in TYPES)
-    F = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-ffreestanding', '-fno-exceptions', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-Wno-attributes']
     open(w + '/ref.cc', 'w').write(decls + '\n' + ref)
-    run([cc('g++')] + F + ['-S', w + '/ref.cc', '-o', w + '/ref.s'])
-    asm = open(w + '/ref.s').read()
+    r = pb.compile(w + '/ref.cc', w + '/ref.o', plug)
+    if r.returncode: print('reference callees do not compile: ' + r.stderr[:800]); return 1
+    asm = asm_of(w + '/ref.o')
     bad = 0
     def check(name, ok, info=''):
         nonlocal bad
@@ -125,7 +136,7 @@ def main():
         for kind in ('a', 'r'):
             src = '#define CC\n' + decls + '\n' + [c for c in call.split('\n') if c.startswith(('void c_a_%s(' % n, '%s c_r_%s(' % (T, n)))][0 if kind == 'a' else 1] + '\n'
             open(w + '/one.cc', 'w').write(src)
-            r = subprocess.run([cc('g++')] + F + plug + ['-c', w + '/one.cc', '-o', w + '/one.o'], capture_output=True, text=True)
+            r = pb.compile(w + '/one.cc', w + '/one.o', plug)
             if r.returncode: check('%s %s: the plugin compiles' % (kind, n), False, r.stderr[:200]); continue
             ds = bridgegen.read_obj(w + '/one.o')
             d1 = ds[0] if len(ds) == 1 else None
@@ -144,7 +155,7 @@ def main():
             nonpod = n in ('ct', 'in', 'vf')
             if kind == 'r' and rm: ok = ok and (rm.group(2) == 'R') == (not nonpod and int(rm.group(1)) in (1, 2, 4, 8))   # X: the x86 side, from the POD rule and the size
             check('%s %s' % ('argument' if kind == 'a' else 'result', n), ok, 'descriptor %s, the compiler uses %s' % (d1, want))
-    print('descclasstest: %d failed' % bad); sys.exit(1 if bad else 0)
+    print('descclasstest: %d failed' % bad); return 1 if bad else 0
 
 
-if __name__ == '__main__': main()
+if __name__ == '__main__': sys.exit(main())

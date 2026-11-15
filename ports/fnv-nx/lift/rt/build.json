@@ -20,7 +20,8 @@
  },
  "include": [
   "ports/fnv-nx/lift/rt",
-  "ports/fnv-nx/platform/include"
+  "ports/fnv-nx/platform/include",
+  "ports/fnv-nx/hostabi/include"
  ],
  "units": "all",
  "link": null,
