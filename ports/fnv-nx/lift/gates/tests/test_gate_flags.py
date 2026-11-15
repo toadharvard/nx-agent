@@ -111,7 +111,7 @@ def uncovered_encoding():
 
 UNCOVERED = uncovered_encoding()
 if UNCOVERED is not None:
-    CASES['no_form_row'] = ('01c0 %s c3' % UNCOVERED.hex(), [('-', 0, 'no-form')])                            # an instruction with no Form is a red row, never assumed
+    CASES['no_form_row'] = ('01c0 %s c3' % UNCOVERED.hex(), [('-', 0, 'no-form')])                            # an instruction with no Form is a red row, never covered by a guess
     CASES['pf_prove_no_form'] = ('21d8 9c 58 89c1 %s c3' % UNCOVERED.hex(), [('af', 4, 'pushf'), ('-', 0, 'no-form')])   # the proof stops at it: no Form, red
 
 

@@ -7,7 +7,7 @@ families have their own provers.  Order: sorted canonical keys; shard K/N (K = 1
 every STRIDE-th shape of the sorted integer shapes BEFORE sharding: a subset, not a proof of the others.
 Output DIR/shapeprove_K_of_N.jsonl, one JSON line per shape (resumable: shapes already in the file are skipped):
   shape, form_key, dsl_sha (sha256 of the serialization of the SYMBOLIC Form: symform.shape_sha(shape) recomputes it without z3), model_sha (IR sha256),
-  model_terms_sha, result, defects, assumptions, split, eip_dependence, note
+  model_terms_sha, result, defects, `assumptions`, split, eip_dependence, note
 Obligation = prove.prove_one (imported, not forked): no pre-state AND no value of the field variables (free in the unsat query = universally quantified)
 gives a DSL post-state different from the Sail post-state.  Results: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout, and the classes of a
 shape that has no obligation to run: no-form (no DSL builder / builder precondition) | builder-branches-on-field (file:line) | field-decode (capstone fits

@@ -13,7 +13,7 @@ RULE (every instruction of the image's reached ranges, decoded once; both sweeps
     open    any other base register, ebp included (ebp is a frame pointer only where the entry's code makes it one; that needs the typed dataflow of pcsrc, not the form): the address is whatever the register holds; OPEN for every byte range it may reach.
   A string store (rep stos / movs) writes through edi: open.
   A query's answer is `exact` writers + the number of open stores. The fact "no store writes [lo, hi)" is PROVEN iff exact is empty AND open == 0 (stack stores cannot reach it: the stack is outside every static section); open > 0 makes it
-  OPEN, never assumed closed. Stores performed by imports (ReadFile into a buffer, memcpy, ...) are not instructions of the image: they are counted as `import_call_sites` (calls through the IAT) and bound the fact the same way.
+  OPEN, closed only by a proved rule. Stores performed by imports (ReadFile into a buffer, memcpy, ...) are not instructions of the image: they are counted as `import_call_sites` (calls through the IAT) and bound the fact the same way.
 Output rows: site<TAB>class<TAB>lo<TAB>hi<TAB>base (hex; lo/hi empty for open)."""
 import os, sys, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

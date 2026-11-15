@@ -35,9 +35,13 @@ FNVL_SA(FNVNX_NPROC >= 1u && FNVNX_NPROC <= 0xffu, "leaf 1 EBX[23:16] holds 8 bi
 FNVL_SA(FNVNX_NPROC - 1u < 64u && FNVNX_NPROC - 1u < 4096u, "leaf 4 EAX[31:26] holds 6 bits, EAX[25:14] 12 bits");
 FNVL_SA((FNVL_CPUID1_EDX >> 28 & 1u) == 1u, "HTT (leaf 1 EDX bit 28) is set: EBX[23:16] is a valid count only then (SDM)");
 FNVL_SA((FNVL_CPUID1_EBX >> 16 & 0xffu) == FNVNX_NPROC && (FNVL_CPUID1_EBX & 0xffff0000u) >> 16 == FNVNX_NPROC, "EBX layout");
+#define FNVL_EAX_FAMILY(e) ((((e) >> 8) & 0xfu) + ((((e) >> 8) & 0xfu) == 0xfu ? (((e) >> 20) & 0xffu) : 0u))
+#define FNVL_EAX_MODEL(e) ((((e) >> 4) & 0xfu) | ((((e) >> 8) & 0xfu) == 6u || (((e) >> 8) & 0xfu) == 0xfu ? (((e) >> 16) & 0xfu) << 4 : 0u))
+FNVL_SA(FNVL_EAX_FAMILY(FNVL_CPUID1_EAX) == FNVL_CPUREF_FAMILY, "leaf 1 EAX family is the reference CPU's (SDM Vol 2A, CPUID leaf 1)");
+FNVL_SA(FNVL_EAX_MODEL(FNVL_CPUID1_EAX) == FNVL_CPUREF_MODEL, "leaf 1 EAX model (with extended model) is the reference CPU's");
+FNVL_SA((FNVL_CPUID1_EAX & 0xfu) == FNVL_CPUREF_STEPPING, "leaf 1 EAX stepping is the reference CPU's");
 typedef unsigned int u32; typedef unsigned long long u64;
 unsigned long long fnvl_host_ticks_ns(void);
-#define FNVL_MAX_BASIC 4u
 #define FNVL_MAX_EXT 0x80000004u
 void fnvl_cpuid(u32 leaf, u32 sub, u32 o[4]) {
     static const u32 L0[4] = { FNVL_MAX_BASIC, 0x756e6547, 0x49656e69, 0x6c65746e };   /* EAX max leaf, EBX "Genu", EDX "ineI", ECX "ntel" */
