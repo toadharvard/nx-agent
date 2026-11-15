@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 01:26Z L1 cand1 2b66742ec red 24/42 (L5 reds from older tree a44acb71f). cand2 assembled by L1 w15 from L5 root 310d0e97e + w24 pluginfix (pending). w10 rerunning hostapi/addr32/argordergate/order/oracle on 310d0e97e.
 - 2026-11-15 01:22Z msvcmodel13 blocked: game compiler mirror b274ec067 is linux-gnu all-gcc (no libgcc/crt/libstdc++/newlib, no configure line). Proposed to L2 + orchestrator: one msvcmodel GCC 13.3 aarch64-none-elf --with-newlib build incl. target libs = compiler of every root + runtime; -U__linux__ route rejected. w14: W2 stopped (deferred), guard + delete stage1/2 + runtime needs note; rt e3aec1bb4 (no heap clamp). Farm on hold.
 - 2026-11-15 01:18Z W2 (libnx wire types, 25 differ) deferred to the Switch step by rule: no root includes switch.h or links libnx @310d0e97e; guard in recipe.guest_errors makes any libnx use red until C9 wire check 0 (w14). w14 rt 71ff6ca4f: runtime.libs removed. Pair: pinned mirror, no stage-2 rebuild, then one publish.
 - 2026-11-15 01:14Z pair at 1ef9f2566 failed (msvcmodel.patch hunk in the chroot stage-2 build). Ruling: one game compiler; the pair installs the pinned mirror b274ec067 (tree-checked) instead of rebuilding stage 2. objstub row 1 keeps win-doc|wine-9.0 (L1 grammar).
