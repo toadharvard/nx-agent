@@ -128,6 +128,11 @@ def datamodel(td, so):
     errs = '\n'.join(l for l in r.stderr.splitlines() if 'error' in l)
     failed = sorted(set(re.findall(r'static assertion failed: (S\d+)', r.stderr)))
     check('every DATAMODEL case holds (failing rows: %s)' % failed, r.returncode == 0, errs[:3000])
+    # S14 on the C front end: its own file (c/c-decl.cc finish_enum is not the C++ hunk)
+    objc = os.path.join(td, 'datamodel_enum.o')
+    rc = pb.compile(os.path.join(HERE, 'ldbl', 'datamodel_enum.c'), objc, so, native=True)
+    check('S14 holds in C (enumerators 0xffff0000, 0x80000000 and expressions: int, 4 bytes, the 32-bit pattern as int; failing: %s)'
+          % sorted(set(re.findall(r'static assertion failed: "?(S14\w+)', rc.stderr))), rc.returncode == 0, '\n'.join(l for l in rc.stderr.splitlines() if 'error' in l)[:3000])
 
 
 def main():
