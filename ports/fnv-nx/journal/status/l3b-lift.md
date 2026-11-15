@@ -182,3 +182,12 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - w4 fixes it: the IR comes only through the external, and the sha comes from certs_build --model-sha.
 - w9: the x87 tables, Table 4-8 and loads/stores/BCD are done (d826016e, d0a72b87; 44 tests). The merge into the lead branch waits for w9 to resolve the CERTS.md/oracle conflicts.
 - w4 SIMD: Sail has no SIMD semantics, so the reference comes from ACL2 transcriptions, with SDM specs under OWNER 10 where ACL2 has no instruction. The cr0/cr4 OSFXSR and MXCSR rows are asked of L5.
+
+## 2026-11-15 09:35Z
+- Queue v3 is blocked by 3 defects, all given to w4 as one commit:
+  1. The farm read the IR pin from sail_pins.txt (rule 3; the fix is the external x86ir only).
+  2. prove.py post_of fails on w1's Form.post() lists/tuples (fr/xmm/fptr), so 0 integer shapes are provable. The fix is the prover state extension in prove.py, by the d935ecda widths.
+  3. Fake success: a shard whose shapes all crashed published an empty jsonl with "shapes=0". The fix: a crash is an error record; a shard with missing or error records exits 1 and publishes nothing; "already published" requires a full record count.
+- Farm 11 published 3 empty branches (…/7c3074644653-f3eb5096ad36/{13,14,15}of24) through SAIL_IR; it is deleting them.
+- Merged w9 into the lead branch (d920f6633). w9 693a75a9: ou_pre names the L3a fact x87-masked-sites (asked of L3a); FBLD digits above 9 are nd.fbld.img; 45 tests.
+- gate_oracle: 113/116. The 3 missing tests are L3a w1's (test_census, test_dsl_xsimd, test_forms_simd), asked of L3a.
