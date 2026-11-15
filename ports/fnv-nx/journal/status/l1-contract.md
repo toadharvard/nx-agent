@@ -1347,3 +1347,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - accepted: the undefset closure (ld record failed_units[].undefined), (A) weak undefined, (C) merging w1b-root;
   - to revert: the runtime.libs part of f4db6c4ef (the derivation is the one declaration; guestlink checks derived files lie under the pinned runtime external);
   - gap: ld-internal names closed by a keyed reference-link stage.
+- w12h 2898a3bb6 accepted: the driver derivation is restored, there is no runtime.libs, and guestlink checks the multilib (-print-multi-directory with flags.semantics). Last commit pending: guest.json = script only (the derivation comes from a keyed stage, `--write` removed), plus a check that derived files lie under the pinned runtime external.
