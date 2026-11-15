@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "fnvnx_shaders.h"
+#include "fnvnx_dk_layout.h"   /* the product header: fnvnx_dk_vs_needs_complete is called, not copied */
 #include "fnvnx_sha256.h"
 
 typedef void *EGLDisplay; typedef void *EGLContext; typedef void *EGLConfig; typedef void *EGLSurface; typedef int32_t EGLint; typedef unsigned EGLBoolean;
@@ -133,20 +134,27 @@ static int read_sdp(Forms *F, const char *path, int *entries) {
     free(b); return 0;
 }
 
-typedef struct { uint8_t sig[32]; unsigned shader; int form; unsigned flags; unsigned mask; } Rep;
+typedef struct { uint8_t p[225]; int n; } Pairs;   /* FNVNX_DK_PAIR codes of the translator's reflection ("varyings_written" of a VS, "varyings_read" of a PS) */
+typedef struct { uint8_t sig[32]; unsigned shader; int form; unsigned flags; Pairs pr; } Rep;
 typedef struct { Rep *r; int n; } Reps;
-typedef struct { uint8_t sb[32], sc[32]; unsigned mask; } VFull;   /* a vertex class: the signatures of its base and complete variants, the slots (0..30) its base variant writes */
+typedef struct { uint8_t sb[32], sc[32]; Pairs w; } VFull;   /* a vertex class: the signatures of its base and complete variants, the pairs its reflection says it writes */
 typedef struct { VFull *v; int n; } VFulls;
-static unsigned slot_mask(const Decl *d, int nd, char dir) { unsigned m = 0; for (int i = 0; i < nd; i++) if (d[i].dir == dir && d[i].loc >= 0 && d[i].loc <= 30) m |= 1u << d[i].loc; return m; }
-static int add_rep(Reps *R, const uint8_t sig[32], unsigned shader, int form, unsigned flags, unsigned mask) {
+static int reflect_pairs(const char *json, const char *key, Pairs *o) {
+    char pat[40]; snprintf(pat, sizeof pat, "\"%s\": [", key); o->n = 0;
+    const char *q = json ? strstr(json, pat) : NULL; if (!q) return -1;
+    q += strlen(pat);
+    while (*q && *q != ']') { char *e; long v = strtol(q, &e, 10); if (e == q || v < 0 || v > 255 || o->n >= 224) return -1; o->p[o->n++] = (uint8_t)v; q = e; while (*q == ',' || *q == ' ') q++; }
+    return *q == ']' ? 0 : -1;
+}
+static int add_rep(Reps *R, const uint8_t sig[32], unsigned shader, int form, unsigned flags, const Pairs *pr) {
     for (int i = 0; i < R->n; i++) if (!memcmp(R->r[i].sig, sig, 32)) return 0;
     R->r = realloc(R->r, sizeof(Rep) * (size_t)(R->n + 1)); if (!R->r) return -1;
-    memcpy(R->r[R->n].sig, sig, 32); R->r[R->n].shader = shader; R->r[R->n].form = form; R->r[R->n].flags = flags; R->r[R->n].mask = mask; R->n++; return 0;
+    memcpy(R->r[R->n].sig, sig, 32); R->r[R->n].shader = shader; R->r[R->n].form = form; R->r[R->n].flags = flags; R->r[R->n].pr = *pr; R->n++; return 0;
 }
-static int add_vfull(VFulls *V, const uint8_t sb[32], const uint8_t sc[32], unsigned mask) {
-    for (int i = 0; i < V->n; i++) if (!memcmp(V->v[i].sb, sb, 32) && !memcmp(V->v[i].sc, sc, 32) && V->v[i].mask == mask) return 0;
+static int add_vfull(VFulls *V, const uint8_t sb[32], const uint8_t sc[32], const Pairs *w) {
+    for (int i = 0; i < V->n; i++) if (!memcmp(V->v[i].sb, sb, 32) && !memcmp(V->v[i].sc, sc, 32) && V->v[i].w.n == w->n && !memcmp(V->v[i].w.p, w->p, (size_t)w->n)) return 0;
     V->v = realloc(V->v, sizeof(VFull) * (size_t)(V->n + 1)); if (!V->v) return -1;
-    memcpy(V->v[V->n].sb, sb, 32); memcpy(V->v[V->n].sc, sc, 32); V->v[V->n].mask = mask; V->n++; return 0;
+    memcpy(V->v[V->n].sb, sb, 32); memcpy(V->v[V->n].sc, sc, 32); V->v[V->n].w = *w; V->n++; return 0;
 }
 static const Rep *find_rep(const Reps *R, const uint8_t sig[32]) { for (int i = 0; i < R->n; i++) if (!memcmp(R->r[i].sig, sig, 32)) return &R->r[i]; return NULL; }
 
@@ -186,7 +194,7 @@ int main(int argc, char **argv) {
         Form *f = &F.forms[i]; char hs[65]; hex(f->sha, 32, hs);
         if (f->stage < 0) { red++; refused++; continue; }
         if (f->stage == 0) nvs++; else nps++;
-        int nv = f->stage == 0 ? 4 : npp; uint8_t bsig[2][32]; unsigned bmask[2] = { 0, 0 }; int bok[2] = { 0, 0 };
+        int nv = f->stage == 0 ? 4 : npp; uint8_t bsig[2][32]; Pairs bw[2]; int bok[2] = { 0, 0 };
         for (int v = 0; v < nv; v++) {
             unsigned flags = f->stage == 0 ? pv[v] : pp[v];
             fnvnx_shader_opts o; fnvnx_shader_result r; memset(&o, 0, sizeof o); memset(&r, 0, sizeof r);
@@ -194,7 +202,7 @@ int main(int argc, char **argv) {
             fnvnx_shader_translate_glsl(f->bc, f->n, &o, &r);
             snprintf(path, sizeof path, "%s/stage/%s.f%u.json", odir, hs, flags);
             FILE *c = fopen(path, "w"); if (!c) { fprintf(stderr, "sm_link: cannot write %s\n", path); return 2; }
-            const char *status = "ok"; char why[400] = ""; uint8_t sig[32] = { 0 }; int active = 0, disagree = 0, ndecl = 0; unsigned sh = 0, mask = 0; Decl decls[64];
+            const char *status = "ok"; char why[400] = ""; uint8_t sig[32] = { 0 }; int active = 0, disagree = 0, ndecl = 0; unsigned sh = 0; Pairs pr = { { 0 }, 0 }; Decl decls[64];
             if (!r.ok || !r.glsl) { status = "translate_fail"; snprintf(why, sizeof why, "%.399s", r.error); }
             else {
                 sh = glCreateShader(f->stage ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER); const char *src[1] = { r.glsl }; int ok = 0;
@@ -202,7 +210,7 @@ int main(int argc, char **argv) {
                 if (!ok) { status = "compile_fail"; glGetShaderInfoLog(sh, (int)sizeof why, NULL, why); }
                 else {
                     if (grammar_read(r.glsl, sig, decls, 64, &ndecl)) { status = "grammar_fail"; }
-                    else { mask = slot_mask(decls, ndecl, f->stage ? 'i' : 'o'); disagree = query_read(sh, decls, ndecl, &active); if (disagree) { status = "signature_disagree"; mism += (unsigned long long)disagree; } }
+                    else { if (reflect_pairs(r.reflection_json, f->stage ? "varyings_read" : "varyings_written", &pr)) { status = "reflection_fail"; } disagree = query_read(sh, decls, ndecl, &active); if (disagree) { status = "signature_disagree"; mism += (unsigned long long)disagree; } }
                 }
             }
             { char sg[65]; hex(sig, 32, sg);
@@ -213,11 +221,11 @@ int main(int argc, char **argv) {
             if (strcmp(status, "ok")) { red++; if (sh) glDeleteShader(sh); }
             else {
                 int fl = (flags & FNVNX_SHADER_FLAT_COLOR) ? 1 : 0; Reps *R = f->stage ? &rp[fl] : &rv[fl];
-                if (add_rep(R, sig, sh, i, flags, mask)) return 2;
+                if (add_rep(R, sig, sh, i, flags, &pr)) return 2;
                 if (f->stage == 0) {
                     int cb = (flags & FNVNX_SHADER_VS_COMPLETE) ? 1 : 0;
-                    if (!cb) { memcpy(bsig[fl], sig, 32); bmask[fl] = mask; bok[fl] = 1; }
-                    else if (bok[fl] && add_vfull(&vf[fl], bsig[fl], sig, bmask[fl])) return 2;
+                    if (!cb) { memcpy(bsig[fl], sig, 32); bw[fl] = pr; bok[fl] = 1; }
+                    else if (bok[fl] && add_vfull(&vf[fl], bsig[fl], sig, &bw[fl])) return 2;
                 }
                 if (R->r[R->n - 1].shader != sh) glDeleteShader(sh);   /* not the class representative */
             }
@@ -229,7 +237,7 @@ int main(int argc, char **argv) {
          * variant iff the PS reads a canonical slot the base VS does not write (FOG0, slot 18, is always written). Only that pair is linked and certified. */
         for (int a = 0; a < vf[fl].n; a++) for (int b = 0; b < rp[fl].n; b++) {
             const VFull *vc = &vf[fl].v[a]; const Rep *pc = &rp[fl].r[b];
-            int cb = (pc->mask & ~(vc->mask | (1u << 18))) != 0; const uint8_t *vsig = cb ? vc->sc : vc->sb;
+            int cb = fnvnx_dk_vs_needs_complete(vc->w.p, vc->w.n, pc->pr.p, pc->pr.n); const uint8_t *vsig = cb ? vc->sc : vc->sb;
             const Rep *vr = find_rep(&rv[fl], vsig); char sa[65], sb[65];
             if (!vr) { red++; continue; }
             hex(vsig, 32, sa); hex(pc->sig, 32, sb);
