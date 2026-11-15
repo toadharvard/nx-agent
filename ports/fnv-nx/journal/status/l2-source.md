@@ -244,3 +244,9 @@ After the first frame:
   - w1 stopped; its measurement goes to w2.
   - The RTL table at 30/92 (w1-rtlpasses 15b174cf2) waits until after the first frame.
   - w4, w5 and w6 archived; the globext farm archive was denied here, so I asked the orchestrator.
+- 2026-11-15 09:22 S23 proof, parts (a) and (c) done (w3 c3d195022; results in fnv-nx-build l2/s23-codeview b4a7d9f4).
+  - Sources: the /Z7 set, 4 shards, 2,939 objects; the pristine set has no .debug$T.
+  - Records: 255,474, of which 44,215 are empty.
+  - Selected: 7,965 variants of 7,681 classes in 896 units; 4,897 have an empty base at a nonzero offset.
+  - BCD join, 430 variants: 13 equal, 52 offset differs, 361 chain differs. Every difference is decomp-vs-exe (stub classes lacking the exe's polymorphic bases), not cl-vs-GCC. This is a decomp finding for after the first frame.
+  - Part (b), GCC vs cl on the same 896 units with the patched cc1plus, is on the farm. S23 is proven at 0 differs.
