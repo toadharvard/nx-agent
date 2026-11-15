@@ -1377,3 +1377,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - L4 found that variants replace keys whole (tests/bootguest restates its flags 45 times):
   - delta variants (flags_add) go to w12 with the profile;
   - variants_from by regex is rejected (a guess from text). The preferred rule is one binary with the mode chosen at run time; else the source declares an X-macro, read by w20's probe stage.
+- L6A census items:
+  - recipe copies are closed by the profile (w12);
+  - admit gate set derived from class (w24, item 3);
+  - GL/EGL headers come from pinned debs (w6 15c11ecd8);
+  - a `host_gl` record in targets.json (w22, value from L6).
