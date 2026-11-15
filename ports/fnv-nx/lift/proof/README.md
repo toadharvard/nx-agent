@@ -102,7 +102,7 @@ Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/
 ## Gates `forms` and `fpexact` (fnvnx-gate/1, verify/VERDICT.md classes 6 and C)
 Both read their private inputs the way verify/gate_contract.py does: declared as content-pinned externals of fnv-nx-build, loaded by `recipe.fetch_externals`
 from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/, so the gates are red with that reason and the tests overlay it through
-`FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`. A missing or invalid input is RED with the reason.
+`FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`, which the gate reads once in `main` and passes on explicitly. The generated headers of lift/rt (`rcpref.h`) are read through `genout.gen_dir(cache)`, which takes the store as an argument (no environment read) and resolves the root's published GEN output with `gate_build.published_output`. A missing or invalid input is RED with the reason.
 * `formgate.py` (gate `forms`): universe = the shapes of `shapes.tsv` in the external `liftpack` (`shape_key<TAB>family<TAB>count`, sorted); certificates = `certs.tsv`
   of the external `certs` (fnv-nx-build `l3b-lift/certs`). Inputs: `formgate_inputs.json` (`fnvnx-forms-inputs/1`; `model_sha256` must equal the `x86_proof.ir` pin of
   `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. Today the file declares no `liftpack`:

@@ -13,6 +13,28 @@
     "ports/fnv-nx/lift/proof/sail_patches/bump/bit_bsf_bsr.sail"
    ]
   },
+  "test_census.py": {
+   "references": [
+    {
+     "anchor": "L3-L4",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    },
+    {
+     "anchor": "# data-reloc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    },
+    {
+     "anchor": "# padding",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/tools/CODEMAP.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/census.py"
+   ]
+  },
   "test_certs_build.py": {
    "references": [
     {
@@ -40,7 +62,12 @@
   "test_declared_gen.py": {
    "references": [
     {
-     "anchor": "L26-L61",
+     "anchor": "L31-L31",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/cpumodel.c"
+    },
+    {
+     "anchor": "L51-L51",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/rt/cpumodel.c"
     }
@@ -126,15 +153,27 @@
      "anchor": "## External inputs",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
-    },
-    {
-     "kind": "external",
-     "name": "certs",
-     "path": "certs/certs.tsv"
     }
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/formgate.py"
+   ]
+  },
+  "test_forms_far.py": {
+   "references": [
+    {
+     "anchor": "L2-L16",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/sysspec_far.py"
+    },
+    {
+     "kind": "contract",
+     "path": "ports/fnv-nx/platform/declared/x86sys.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms.py",
+    "ports/fnv-nx/lift/proof/forms_flow.py"
    ]
   },
   "test_gate_fpexact.py": {
@@ -154,7 +193,7 @@
   "test_generated_readers.py": {
    "references": [
     {
-     "anchor": "\"GEN\": \"gen\"",
+     "anchor": "L193-L196",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/rt/build.json"
     }
@@ -298,6 +337,18 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/shape.py"
+   ]
+  },
+  "test_shardok.py": {
+   "references": [
+    {
+     "anchor": "L120-L120",
+     "kind": "spec",
+     "path": "ports/fnv-nx/farm/farm_shapeprove.sh"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/shardok.py"
    ]
   },
   "test_simdcheck.py": {
