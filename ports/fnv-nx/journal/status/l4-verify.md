@@ -191,3 +191,14 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 00:33: w6-r 6cf9b85a5 has w12h 91850075d merged; all 12 roots are valid. bootguest@m0 (1 stage run, 333 hit): "-z text" is gone. Still undefined (lower bound): lift/pack (3), lift/bridges (3), native-disp (2; L1 facts producer). One-entry and weak-undefined results need the linked ELF. Next: w8's bridges and pack.
 - 00:38: cand1 2b66742ec selftests are red, 106/118. This includes L4's test_bootmachine (-Wunused-function waiter()) and test_bootunmap. w7 (session_01KmtZKSVNKxeFQnmt4i24aF) is doing task P: fix the L4 selftests on claude/fnv-l4-verify-cand1 from 2b66742ec (dead code deleted, never silenced) and say which of the red tests are not L4's. L1 takes the branch into cand2.
 - 00:44: Task P (w7, claude/fnv-l4-verify-cand1 2ca4ff1aa on cand1 2b66742ec): 11 of 13 L4 test files are green. test_boot_job needs the gamedata exe. test_bootmachine is red because cand1 lacks fn38 and the N-core machine. Task P2: take L4's files by path from w6-r's head (and the w7-k deltas) onto cand1, keeping cand1's L1/L5 files; tests that need other layers are marked blocked with an owner. w6-r's test_bootmachine builds guests through the recipe, which removes the direct gcc call. w12h 2898a3bb6 (derived libs without crt0, multilib check, static undefined set) is being merged by w6.
+
+## 2026-11-15 00:50 — first global undefined set of the 4.1/4.2 link
+- Measured on bootguest@m0 at w6-r 34d00ffda (link.roots lift/rt + rt/guest + loader + lib/sha256 + platform; w12h fe396a360 static closure).
+- Totals: 22 undefined, 0 weak, 0 linker-defined; -z text is gone.
+- Groups, each routed to its owner:
+  - L3a: lift/pack 3, lift/bridges 3, native-disp 3 (blocked on L1's facts producer), fnvnx_lift_imports_init 1 (to be confirmed).
+  - L1 producers / L5 loader stages: 8 exe-derived loader tables (modules.py, iat.py, mkidentity.py). These need generated stages over the exe-facts external.
+  - L5: fnvnx_declared_fonts 1.
+  - L2: 3 `_ZTV...fnvnx_ap8` vtable refs from a plugin rename whose universe includes libstdc++ objects the plugin did not build. The class rule is (a) the runtime built with the plugin, or (b) the plugin renames only symbols its own root defines.
+- Task R (w6): the one bounded 2026-11-15 pass over L4's universe. It lists hand-written sets, second copies of facts and second paths, each with a derivation, generation or deletion, marked path or after. Output: journal/status/l4-defects-0215.md.
+- Task P2 (w7): L4's files by path onto cand1.
