@@ -1348,3 +1348,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - to revert: the runtime.libs part of f4db6c4ef (the derivation is the one declaration; guestlink checks derived files lie under the pinned runtime external);
   - gap: ld-internal names closed by a keyed reference-link stage.
 - w12h 2898a3bb6 accepted: the driver derivation is restored, there is no runtime.libs, and guestlink checks the multilib (-print-multi-directory with flags.semantics). Last commit pending: guest.json = script only (the derivation comes from a keyed stage, `--write` removed), plus a check that derived files lie under the pinned runtime external.
+## Owner order 2026-11-15 "defects impossible by construction"
+- The bounded pass over L1's files (verify/, link/, contract/, loader/) is given to w22. It lists every hand set, second copy and second path, each with its replacement and path flag, in journal/status/l1-construction.md on claude/fnv-l1-contract-w22-construction.
+- Already converted in this wave by this rule: plugin decls (w24 b707cd5c4), startfiles by derivation (w12h), resolve_input from tracked blobs (L5 w10), the legal gate deleted (w23 3bfb85dd), one deb mirror lineage (L6 w6).
+- cand2 takes CLAUDE.md from integ 4004c3451.
