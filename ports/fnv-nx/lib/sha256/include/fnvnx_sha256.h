@@ -1,4 +1,4 @@
-/* SHA-256 (FIPS 180-4). The one content-key hash of fnv-nx (accepted assumption 2). Portable C99, no libc beyond memcpy/memset. */
+/* SHA-256 (FIPS 180-4). The one content-key hash of fnv-nx (accepted assumption ASM-002). Portable C99, no libc beyond memcpy/memset. */
 #ifndef FNVNX_SHA256_H
 #define FNVNX_SHA256_H
 

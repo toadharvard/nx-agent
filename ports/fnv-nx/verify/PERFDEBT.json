@@ -1,13 +1,24 @@
 {
- "format": "fnvnx-perfdebt/1",
  "entries": [
   {
-   "switch": "MINIMP3_NO_SIMD",
-   "site": "ports/fnv-nx/platform/audio/dshow_filters.cpp (made unconditional by commit 6aa648f7)",
-   "fast_path": "minimp3's NEON mp3d_scale_pcm",
-   "restoring_rule": "fnvnx_ftoi rewrites every explicit target float->int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact: in range it converts; out of range or NaN it gives the x86 integer indefinite (cvttps2dq). fpexact then certifies the NEON path.",
+   "fast_path": "ARMv8 SHA-256 instructions in lib/sha256",
+   "id": "PD-LOADER-SHA256-ISA",
+   "owner": "L1",
+   "rule": "lib/sha256 is native Arm code (Cortex-A57 with the Crypto extension, and the aarch64 host): the x86 reference CPU and cpuid do not apply to it. Its ISA body is selected at compile time by the target's declared Arm feature set, one value per recipe target written once in that target's build flags (for the console target -march=armv8-a+crypto); no runtime detection. The debt closes when the crypto body is selected by that rule."
+  },
+  {
+   "fast_path": "minimp3's NEON mp3d_scale_pcm (MINIMP3_NO_SIMD, ports/fnv-nx/platform/audio/dshow_filters.cpp, commit 6aa648f7)",
+   "id": "PD-MINIMP3-NEON",
    "owner": "L2",
-   "removal": "the switch and this entry are deleted in the same commit that lands the rule"
+   "rule": "fnvnx_ftoi rewrites every explicit target float->int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact: in range it converts; out of range or NaN it gives the x86 integer indefinite (cvttps2dq). fpexact then certifies the NEON path."
+  },
+  {
+   "fast_path": "GCC stack slot reuse (-fstack-reuse=all) in guest code",
+   "id": "PD-STACK-REUSE",
+   "owner": "L2",
+   "rule": "Stack-slot sharing is allowed for slots whose address does not escape, decided by the same points-to model as gate_order rule D (no address-forming instruction of the range reaches the slot in the CFG), and for slots shared by variables of disjoint lifetimes from the order plugin's per-variable ranges and lifetime facts (L2 plugin, L1 gate). When gate_order certifies every shared slot of the guest roots by that rule, -fstack-reuse=none leaves guest_compiler.json flags.semantics.common and this entry is deleted in the same commit."
   }
- ]
+ ],
+ "first_frame": false,
+ "format": "fnvnx-perfdebt/1"
 }

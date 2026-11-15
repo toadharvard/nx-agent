@@ -41,7 +41,7 @@ L5's bridge rows) or absent (not on the declared machine));
 its entries are served by bridge rows.  Only images are lifted modules.
 
 Outputs in OUT: modules.tsv (sorted by name: name, sha256, size, preferred base, assigned base, SizeOfImage, has TLS, entry rva, static,
-load index; hex for addresses), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
+load index; hex for addresses), tls.tsv + tls/<name>.bin (the TLS directory facts of the exe and of every image of modules.tsv with has TLS = 1; see tls_rows), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
 iat.tsv (the exe's import slots through iat.py with these modules), imports/<name>.tsv per module (that module's own
 import slots through iat.py: slot, dll, name, kind, value; empty value + kind `none` = no provider).  Exit 1 when an exe
 slot has no value (gate `iat`).  A module's own slots without provider are listed on stdout (the platform's work list):
@@ -152,6 +152,39 @@ class PE:
 
     def inside_mapping(self, rva, n):
         return any(lo <= rva and rva + n <= lo + size for lo, size in self.mapped)
+
+    def tls(self):
+        """The TLS directory of this image (data directory 9) as the facts L4's rule S5 compares, or None when the directory is absent (size 0, the has_tls rule of modules.tsv).
+        IMAGE_TLS_DIRECTORY32 = StartAddressOfRawData, EndAddressOfRawData, AddressOfIndex, AddressOfCallBacks, SizeOfZeroFill, Characteristics, all
+        raw (VAs at the PREFERRED base).  Red, never clamped: a directory shorter than its 24 bytes or outside the image (already refused for every
+        directory in __init__), end < start, a template outside the image, a callback array that has no null terminator inside the image, a callback
+        outside the image.  -> dict(start_va, end_va, index_va, callbacks_va, template_rva, template_size, zero_fill, align, template, callbacks [rva])."""
+        rva, size = self.dirs[9]
+        if not size:      # the rule of has_tls in modules.tsv: the directory size is nonzero
+            return None
+        if size < 24:
+            raise StageError('%s: TLS directory is %d bytes, an IMAGE_TLS_DIRECTORY32 has 24' % (self.what, size))
+        start, end, index, cbs, zero, chars = struct.unpack('<6I', self.rd(rva, 24))
+        if end < start:
+            raise StageError('%s: TLS EndAddressOfRawData 0x%08x is below StartAddressOfRawData 0x%08x' % (self.what, end, start))
+        t_rva = start - self.base
+        if t_rva < 0 or t_rva > self.size_of_image or end - start > self.size_of_image - t_rva:
+            raise StageError('%s: TLS template 0x%08x..0x%08x is outside the image' % (self.what, start, end))
+        callbacks = []
+        if cbs:
+            a = cbs - self.base
+            while True:
+                if a < 0 or a > self.size_of_image or 4 > self.size_of_image - a:
+                    raise StageError('%s: TLS callback array at 0x%08x has no null terminator inside the image' % (self.what, cbs))
+                v = self.u32(a)
+                if not v:
+                    break
+                if not 0 <= v - self.base < self.size_of_image:
+                    raise StageError('%s: TLS callback 0x%08x is outside the image' % (self.what, v))
+                callbacks.append(v - self.base)
+                a += 4
+        return {'start_va': start, 'end_va': end, 'index_va': index, 'callbacks_va': cbs, 'template_rva': t_rva, 'template_size': end - start,
+                'zero_fill': zero, 'align': (chars >> 20) & 0xf, 'template': self.rd(t_rva, end - start), 'callbacks': callbacks}
 
     def import_directory(self):
         """[(dll name, [(slot rva, "name" | "#ordinal")])] in directory order (loader/src/imports.c walk_imports)."""
@@ -343,6 +376,51 @@ def tsv(path, text):
         fh.write(text)
 
 
+def tls_rows(exe, order, load_index):
+    """[(name, load_index or '', facts)] of every image that has a TLS directory: the exe first, then the images of modules.tsv sorted by name.
+    The universe of the DLL rows is `order` (= the rows of modules.tsv), so their number equals the count of has_tls = 1 there."""
+    rows = []
+    t = exe.tls()
+    if t is not None:
+        rows.append((exepin.NAME, '', t))
+    for m in sorted(order, key=lambda m: m.name):
+        t = m.pe.tls()
+        if t is not None:
+            rows.append((m.name, load_index.get(m.name, ''), t))
+    return rows
+
+
+def tls_slots(rows):
+    """{name: TLS index the loader assigns} of the rows of tls_rows: the exe 0 (loader/src/start.c:301, fnvnx_loaded_tls(p, &p->exe, 0)), then each
+    static image with a TLS directory 1, 2, ... in table order = load_index order (fnvnx_modules_prepare_tls, loader/src/modules.c:273-278: the
+    modules of fnvnx_modules[] in order, `next` starting at 1, incremented per image whose directory is present).  An image that is not static
+    (empty load_index) is loaded on demand and gets no slot (loader/src/modules.c:396): its slot is empty."""
+    out = {rows[0][0]: 0} if rows and rows[0][0] == exepin.NAME else {}
+    static = sorted((int(i), n) for n, i, _ in rows if i != '')
+    out.update({n: k for k, (_, n) in enumerate(static, 1)})
+    return out
+
+
+def align_bytes(raw):
+    """The alignment in bytes the loader applies for the raw IMAGE_SCN_ALIGN field RAW (bits 20-23 of the directory's Characteristics): 1 for 0,
+    else 1 << (RAW - 1) (loader/src/tls.c:38, `out->align = n ? 1 << (n - 1) : 1`)."""
+    return 1 << (raw - 1) if raw else 1
+
+
+def write_tls(out, rows):
+    """OUT/tls.tsv (columns below, hex for addresses and rvas, decimal for sizes) and OUT/tls/<name>.bin (the template bytes of each row).
+    tls_slot: the TLS index the loader assigns (tls_slots; empty for an image loaded on demand); align_bytes: align as the loader applies it (align_bytes)."""
+    os.makedirs(os.path.join(out, 'tls'), exist_ok=True)
+    slots = tls_slots(rows)
+    tsv(os.path.join(out, 'tls.tsv'), '# name\tload_index\tstart_va\tend_va\tindex_va\tcallbacks_va\ttemplate_rva\ttemplate_size\tzero_fill\talign\ttemplate_sha256\tcallbacks\ttls_slot\talign_bytes\n' +
+        ''.join('%s\t%s\t%08x\t%08x\t%08x\t%08x\t%08x\t%d\t%d\t%d\t%s\t%s\t%s\t%d\n' % (
+            n, i, t['start_va'], t['end_va'], t['index_va'], t['callbacks_va'], t['template_rva'], t['template_size'], t['zero_fill'], t['align'],
+            hashlib.sha256(t['template']).hexdigest(), ';'.join('%08x' % c for c in t['callbacks']), slots.get(n, ''), align_bytes(t['align'])) for n, i, t in rows))
+    for n, _, t in rows:
+        with open(os.path.join(out, 'tls', n + '.bin'), 'wb') as fh:
+            fh.write(t['template'])
+
+
 def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
@@ -366,6 +444,7 @@ def run(exe_path, bridge_path, dirs, out, declared_path):
         ''.join('%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\t%d\t%s\n' % (
             m.name, m.sha256, m.size, m.pe.base, m.base, m.pe.size_of_image, 1 if m.pe.dirs[9][1] else 0, m.pe.entry_rva,
             int(m.static), load_index.get(m.name, '')) for m in sorted(order, key=lambda m: m.name)))
+    write_tls(out, tls_rows(exe, order, load_index))
     tsv(os.path.join(out, 'modules.c'), c_source(order))
     bridged = []                  # bridge dlls that have a file: the platform serves them, nothing of the file is lifted
     for n in sorted(system):

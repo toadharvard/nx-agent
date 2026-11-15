@@ -1,7 +1,7 @@
 /* The lifted PE modules of the exe's static import closure: rules M2 (map, relocate, import resolver), M3 (TLS), M4
  * (initialisation, thread and process notifications). See include/fnvnx_modules.h and include/fnvnx_start.h.
  *
- * Assumptions about the Windows loader (the rules below follow them):
+ * The Windows loader behaviour (Win32 as documented) that the rules below follow:
  *  - a module is mapped as the exe is (headers and every section at base + rva, claimed to SizeOfImage) and relocated
  *    by adding (base - ImageBase) to every HIGHLOW word its base relocation blocks list (ABSOLUTE entries are padding);
  *    no other relocation type exists in an i386 image, so any other type refuses the start;

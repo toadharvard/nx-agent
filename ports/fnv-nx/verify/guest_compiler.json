@@ -4,8 +4,8 @@
     "name": "gcc-msvcmodel",
     "repo": "fnv-nx-build",
     "ref": "tools/gcc-ilp32-msvcmodel",
-    "commit": "b4057704c0babd012e466cc89181132e02542289",
-    "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+    "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+    "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
     "at": "/ext/gcc"
   },
   "cc": "bin/aarch64-linux-gnu-gcc",
@@ -46,6 +46,7 @@
         "-fno-builtin",
         "-fno-stack-protector",
         "-fno-stack-clash-protection",
+        "-fstack-reuse=none",
         "-U_FORTIFY_SOURCE",
         "-fno-math-errno",
         "-fno-reorder-blocks-and-partition"

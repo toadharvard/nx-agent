@@ -59,8 +59,21 @@ TR.git(noroot, "commit", "-q", "-am", "no product root")
 rc, g, txt = run(noroot, "noroot")
 check("no product root: universe 0, green", rc == 0 and g["universe"] == 0 and g["status"] == "green", (g, txt))
 
+# class registry-reader (a fact of the build's symbol table): a root with no registry.in.json that neither defines nor references a registry API is
+# outside the class (0 items); one that references or defines one enters it and is the one red item.
 rc, g, txt = run(TR.make_repo("rg-empty"), "none")
-check("product root without registry.in.json: red", rc == 2 and g["status"] == "red" and g["universe"] == 1 and "registry.in.json" in g["detail"], (g, txt))
+check("non-member: product root with no registry API and no registry.in.json is outside the class, 0 items", rc == 0 and g["status"] == "green" and g["universe"] == 0, (g, txt))
+rc, g, txt = run(TR.make_repo("rg-enter", files={"toy/regapi.c": "int RegSetValueExA(void) { return 1; }\n"}), "enter")
+check("a root that enters the class (defines RegSetValueExA) without registry.in.json: the one red item",
+      rc == 2 and g["status"] == "red" and g["universe"] == 1 and "registry.in.json" in g["detail"] and "RegSetValueExA" in g["detail"], (g, txt))
+NOLINK = {"format": "fnvnx-recipe/1", "compiler": TR.RECIPE["compiler"], "flags": TR.RECIPE["flags"], "include": [TR.ROOT + "/inc"], "units": "all", "link": None}
+rc, g, txt = run(TR.make_repo("rg-ref", rec=NOLINK, files={"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None, "toy/constants.tsv": None,
+                                                         "toy/regref.c": "int RegQueryValueExW(void);\nint use_it(void) { return RegQueryValueExW(); }\n"}), "ref")
+check("a root that only references RegQueryValueExW (undefined) is a member too", rc == 2 and g["universe"] == 1 and "RegQueryValueExW" in g["detail"], (g, txt))
+
+rc, g, txt = run(TR.make_repo("rg-gpa", rec=NOLINK, files={"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None, "toy/constants.tsv": None,
+                                                         "toy/gpa.c": "void *GetProcAddress(void *, const char *);\nvoid *use_it(void *m) { return GetProcAddress(m, \"x\"); }\n"}), "gpa")
+check("the gpa term: a root that references GetProcAddress is a member (it can reach a Reg* body by a name it resolves)", rc == 2 and g["universe"] == 1 and "GetProcAddress" in g["detail"], (g, txt))
 
 rc, g, txt = run(toy_repo("ok", SH + READ), "ok")
 check("green: declared row read, seed equal, only the seed unit writes", rc == 0 and g["status"] == "green" and g["universe"] == 3 == g["certified"], (g, txt))

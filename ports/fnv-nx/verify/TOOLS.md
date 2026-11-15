@@ -304,7 +304,8 @@ code that reaches the hive, and the implementation creates no key by itself (the
 ```text
 iat - the value the loader writes in every import slot of an image (L1 CONTRACT, loader contract with L3 and L5).
 
-    iat.py --facts facts.json --bridge bridge.tsv [--module name.dll=exports.tsv ...] --out iat.tsv
+    iat.py --facts facts.json --bridge bridge.tsv --module name.dll=exports.tsv ... --module-imports name.dll=imports.tsv ... --out iat.tsv
+    iat.py --check ...   tool mode: no --module needed, never writes keys.tsv, import_keys.c or iat_data.tsv
 
 Image code pointers are not rewritten and `call [slot]` is an ordinary indirect call, so a slot must hold a 32-bit
 value the dispatcher of the lifted code maps to an entry.  Rule, total over the image's import directory:
@@ -322,6 +323,10 @@ Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the fir
 Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
+
+A stage that writes a product file (keys.tsv, import_keys.c, iat_data.tsv) passes --module and --module-imports for every
+image of modules.tsv; without --module it is a stage error, because the import set of every image is an input.  Only
+`--check` runs without them, and then no product file is written.
 
 A slot without a provider, an export the module does not have, a dll that is both a module and a bridge dll: the
 stage fails and lists them (gate `iat`: universe = slots, certified = slots with a value).  Output rows:
@@ -348,8 +353,15 @@ Rules fixed here (all three consumers use them through this file and importkey.c
              the same bridge.tsv in one link; the stage key of all three includes the SHA-256 of bridge.tsv, and
              keys.tsv and import_keys.c each carry it (`table_id`) so the gate can check they come from one input.
   data row   a bridge row of conv `data` whose native_symbol is a C identifier is a table row of kind data (value =
-             address of the native object).  A data row with native_symbol `-` has no native object: it is left out of
-             the table (the lookup returns 0 = the platform does not provide it) and counted in the stdout line.
+             address of the native object).  A data row with native_symbol `-` has no native object.  If an image of
+             modules.tsv imports it (an import slot of the exe's facts, or of any module's imports/<name>.tsv, by name or
+             by the ordinal of the row) it is a stage error naming dll!name: the slot would be unbound at start.  If no
+             image imports it, it stays outside the table (the lookup returns 0) and is counted in the stdout line.
+             The imports of every module are an input (--module-imports, one per --module, the same name set): a rule
+             over "every image" is not computed over a subset.
+  --data-out iat_data.tsv  `# table_id <sha256 of bridge.tsv>` (the table_id of keys.tsv and import_keys.c), then one row per data
+                        row of the table, in the order of import_keys.c: dll, name, ordinal, kind (`data`), native_symbol.
+                        The build fact L4's rule S4 reads; the address of each native_symbol is in the ELF symtab.
 ```
 
 ## contract/images.py
@@ -441,6 +453,26 @@ PE directories).  Assumptions (stated, not proven): P; the image's code ranges a
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
+```
+
+## contract/modules.py
+
+```text
+modules - the module table of the guest (L1 CONTRACT), and, from the same PE reading, the facts the loader's start rules compare.
+
+TLS directory facts (tls.tsv, tls/<name>.bin; rule S5 of the loader, read by L4's bootstart.py).  Universe: the exe, then every image of
+modules.tsv whose has_tls column is 1 (data directory 9 has a nonzero size), sorted by name; so the DLL rows of tls.tsv number exactly the
+has_tls = 1 rows of modules.tsv.  The directory is IMAGE_TLS_DIRECTORY32 (StartAddressOfRawData, EndAddressOfRawData, AddressOfIndex,
+AddressOfCallBacks, SizeOfZeroFill, Characteristics), read raw: the four addresses are VAs at the PREFERRED base.
+Columns: name, load_index (as in modules.tsv; empty for the exe), start_va, end_va, index_va, callbacks_va (hex, raw), template_rva (start_va
+- preferred base, hex), template_size (end - start, decimal), zero_fill (SizeOfZeroFill, decimal), align (the IMAGE_SCN_ALIGN field of
+Characteristics, bits 20-23, the field itself: 0 stays 0), template_sha256, callbacks (;-list of the RVAs of the callback array up to its null word;
+empty when AddressOfCallBacks is 0 or the first word is 0), tls_slot (the TLS index the loader assigns: the exe 0, loader/src/start.c:301; then each static image with a directory 1, 2, ... in
+load_index order, loader/src/modules.c:273-278; empty for an image loaded on demand, modules.c:396), align_bytes (align as the loader applies it, loader/src/tls.c:38: 1 for 0, else
+1 << (align - 1)).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
+then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
+array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
+Test: contract/tests/test_modules.py on synthetic PE images built by the test.
 ```
 
 ## contract/objfacts_merge.py
@@ -1518,6 +1550,9 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
                                          has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
+Dangling keys: every key of every tracked oracle.json that lies in a directory named `tests` (any directory of the tree, whether or not its
+tests are in the universe above) must name a tracked file of that directory; a key that does not is one uncertified item, `DIR/tests/oracle.json:KEY`,
+which also counts in the universe; an oracle.json that is not a JSON object with a `tests` object is one such item (`DIR/tests/oracle.json`).
 Rule. A test file is certified iff ALL hold:
   1. its DIR's oracle.json is well formed and holds exactly one entry for it (an entry without a test file, an unknown
      key or a wrong format is an error of the DIR: none of its tests is certified);
@@ -1545,6 +1580,8 @@ and compares the tracked files it opened with subject + references (verify/oracl
 ## verify/gate_assumptions.py
 
 ```text
+Perf debt: verify/PERFDEBT.json (fnvnx-perfdebt/1) lists switched-off fast paths, each with id, fast_path, rule, owner (a layer); the report gives
+perfdebt.open; first_frame true makes any open entry red.
 Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
 (verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
     python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json
@@ -2475,3 +2512,36 @@ regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `
 getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
 TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 ```
+
+## verify/stackuse.py
+
+```text
+stackuse - the stack growth a codegen flag causes, from the compiler's own reports (measurement, never a gate input).
+
+    python3 -I stackuse.py --base OBJECTS.json... --flag OBJECTS.json... [--json OUT]
+
+Inputs: the objects.json files of two builds of the same roots made with `recipe.py build --stack-usage 1` (RECIPE.md): BASE without the flag, FLAG with it.
+Every row of an objects.json names the unit's object (`object`) and its `-fstack-usage` report (`su`: `file:line:col:name TAB bytes TAB qualifier`).
+
+(a) Frame growth. A function is keyed by (unit, file:line:col, name), the compiler's own identity in both reports. Growth = FLAG bytes - BASE bytes. Reported: the
+    number of functions in both, the largest growth with its function, the sum of all growth, the functions in one report only, and the functions whose qualifier is
+    not `static` (dynamic frames have no byte bound: counted, never given a number).
+(b) The deepest native call chain. The call graph of the objects: an edge for every R_AARCH64_CALL26 / JUMP26 relocation, from the function symbol that contains the
+    relocated word to the function symbol the relocation names (a section symbol + addend resolves to the function at that offset); a function whose code contains a
+    BLR or BR instruction word (a superset of its indirect calls: a data word that looks like one only adds a report) has an INDIRECT call. A frame of a function is the
+    `.su` bytes of the function of that symbol name in that object (the C name is the symbol; a C++ name in the report is not the mangled symbol, so such a
+    function has no frame: it is counted as `noframe`). The depth of a function = its frame + the largest depth of its callees. A cycle, a function with an
+    indirect call, a dynamic frame, a callee with no definition among the objects (runtime library, other image) or a function with no frame makes the depth of
+    everything that reaches it `unbounded`, and it is listed; no value is guessed. Growth along the chain = the same walk over (FLAG - BASE) frame growth.
+Output: a JSON document and one summary line per number. Exit 0.
+```
+
+### Measurement of `-fstack-reuse=none` (head 8dc852415)
+
+`-fstack-reuse=none` is in `guest_compiler.json` `flags.semantics.common` and `PERFDEBT.json` `PD-STACK-REUSE` records the switch-off (owner L2: the restoring rule is per-variable slot ranges in the order plugin, judged by gate_order). It closes the class "a stack slot shared by variables of disjoint lifetimes" (93 class-d accesses). Measured with `recipe.py build --stack-usage 1` over the 7 guest roots (loader, lib/sha256, hostabi, shim, rt/guest, render/shaders/translator, platform; platform exits 2 on its known red unit, its built units are counted), base vs flag, then `stackuse.py`:
+
+- (a) 5000 functions in both builds, 0 dynamic frames. Largest growth +2528 B (platform crt/msvcrt_format.cpp, `put_float`: 2432 -> 4960). Sum of growth +30736 B. 16 functions only in base and 14 only in flag.
+- (b) Base: 5554 functions, 600 bounded, 4954 unbounded (noframe 3753 C++ names, indirect call 454, undefined callee 118, reaches 747, cycle 0). Flag: 5551 functions, 600 bounded. Deepest bounded chain 528 B (`ps_parser_to_token_array`). Largest chain growth over the bounded functions: 0.
+- (c) FalloutNV.exe sha256 89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe: PE32 SizeOfStackReserve 1048576, SizeOfStackCommit 4096 (the bytes stay outside the repository). The `dwStackSize` of the CreateThread/_beginthreadex call sites is not measured (argflow over exe facts, L3).
+
+These numbers are NOT a bound of the native stack depth per thread: no such bound exists with or without the flag (4954 of 5554 functions unbounded; recursion through indirect or C++ calls is not excluded). The class "native stack depth per thread" is reported to the orchestrator as a run-time failure class without a gate.
