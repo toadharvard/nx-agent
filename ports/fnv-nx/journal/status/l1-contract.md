@@ -1681,3 +1681,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - gate_disp and gate_reach read the generator's declared rows output, and check the linked ELF's typed tables against those rows through the relocations, slot by slot.
   - The asm parsers are deleted.
   - L3a holds ae7417004 until these gates are in.
+- 14:26 cpu_s (w12 c61259c85): held for cand3. It changes sandbox_id, so it lands with hermeticity item 0 in one cold run. L3a/w8 told.
