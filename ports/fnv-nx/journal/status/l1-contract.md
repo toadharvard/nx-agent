@@ -1337,3 +1337,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w23r 3bfb85dd (legal gate removed) and 7ed499e3 (linkstrict: byte-different COMDATs labelled "undecidable: no definition record") accepted for cand2.
 - L6 w6: the -run series rebased onto w12h 91850075d (81426546a, check_run 33/33). One mirror lineage, tools/verdict-debs 6b9102132 (376 debs, tree b6559a5d…); the GL dev debs come by the readroots rule.
   - The merge with w5 at 0f100ce81 (env_id 4e62b6db…) is pending a list of what else w5 brings, plus a rerun of check_run and test_recipe.
+- w24 pluginfix b707cd5c4 accepted.
+  - recipe.plugin_decls is the only declaration; plugin entries name only the plugin.
+  - 48 entries in 6 build.json files cleaned: 48 source, 48 args, 8 inputs. 8/8 product roots valid.
+  - test_recipe has 2 pre-existing FAILs: PT_INTERP is fixed by w12h with base-files; the generated-stage cache miss goes to w24 gatekeys as item 1.
