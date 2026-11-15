@@ -1,6 +1,18 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_bsfbsr_closed_form.py": {
+   "references": [
+    {
+     "anchor": "## Pinned IR 7c307464: hunks",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sail_patches/bump/bit_bsf_bsr.sail"
+   ]
+  },
   "test_certs_build.py": {
    "references": [
     {
@@ -23,6 +35,18 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/codeuniverse.py"
+   ]
+  },
+  "test_declared_gen.py": {
+   "references": [
+    {
+     "anchor": "L26-L61",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/cpumodel.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/declared_gen.py"
    ]
   },
   "test_dsl_int_classes.py": {
@@ -99,6 +123,30 @@
     "ports/fnv-nx/lift/proof/prove.py"
    ]
   },
+  "test_opmap.py": {
+   "references": [
+    {
+     "anchor": "L1-L579",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/opmap_cells.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/opmap.py"
+   ]
+  },
+  "test_opmap_sdm.py": {
+   "references": [
+    {
+     "anchor": "L1-L579",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/opmap_cells.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/opmap.py"
+   ]
+  },
   "test_rewrite.py": {
    "references": [
     {
@@ -124,6 +172,18 @@
     "ports/fnv-nx/lift/rt/build.json"
    ]
   },
+  "test_sdmfeat.py": {
+   "references": [
+    {
+     "anchor": "L3-L870",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_cpuid_feature_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sdmfeat.py"
+   ]
+  },
   "test_sdmpriv.py": {
    "references": [
     {
@@ -147,6 +207,19 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/shape.py"
+   ]
+  },
+  "test_sysspec.py": {
+   "references": [
+    {
+     "anchor": "L1-L56",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/sdm_priv_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sysspec.py",
+    "ports/fnv-nx/lift/proof/x86sys.py"
    ]
   }
  }

@@ -192,8 +192,10 @@ def forms_of(shapes_path):
                 fam = shape.family(ins[0])
             except shape.ShapeError:
                 continue
+            if fam not in ('int', 'sys'):
+                continue                                        # only these families are proved here: a SIMD/x87 Form builder is not run (its errors are not this queue's)
             d = current_sha(ck)
-            if fam in ('int', 'sys') and d is not None:
+            if d is not None:
                 out[ck] = d
     return out
 

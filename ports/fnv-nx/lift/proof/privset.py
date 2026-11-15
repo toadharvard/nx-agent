@@ -1,5 +1,5 @@
 """The privileged-mnemonic set: read from sdm_priv_rows.tsv, the rows sdmpriv.py extracts from the pinned Intel SDM (rule: sdmpriv.py docstring; header: the SDM sha256).
-A mnemonic is privileged at CPL 3 under the declared facts (declared.json: cpl 3, iopl 0, io_bitmap_grants none) when a row of class cpl0 or iopl names it.  A `cond` row (a #GP(0) that needs another condition, e.g. CR4.PCE clear for RDPMC) is not in the set
+A mnemonic is privileged at CPL 3 under the declared machine record (platform/declared/x86sys.json, read by x86sys.py: cpl from cs, iopl) when a row of class cpl0 or iopl names it.  A `cond` row (a #GP(0) that needs another condition, e.g. CR4.PCE clear for RDPMC) is not in the set
 until declared.json states that condition as a fact.  `mov` is the operand-qualified MOV to/from CRn/DRn, not a mnemonic of the set (its two rows are told apart by heading)."""
 import os
 

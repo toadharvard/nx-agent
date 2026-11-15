@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """declared_gen: the rows of declared.json are GENERATED, not typed.
-    python3 -I declared_gen.py SDM.txt OUT.json        (check: `declared_gen.py --check SDM.txt` compares with the committed file's rows and facts-free content)
+    python3 -I declared_gen.py SDM.txt OUT.json        (check: `declared_gen.py --check SDM.txt` compares with the committed file's rows)
 Inputs, both hashed into the output header:
   rt/cpumodel.c      the exported interface: `void fnvl_cpuid(u32 leaf, u32 sub, u32 o[N])` (N outputs, o[i] = the i-th register of the SDM's output tuple) and `u64 fnvl_rdtsc(void)` (a 64-bit result);
   the SDM text       the Operation lines of CPUID (`(EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)`) and RDTSC (`EDX:EAX := TimeStampCounter`), which name the output registers and their order.
-A function of cpumodel.c's interface whose SDM instruction line is absent, or whose output count differs from the SDM tuple, makes the stage fail.  facts (cpl, iopl, ...) are not generated here: they stay in the file as given."""
+A function of cpumodel.c's interface whose SDM instruction line is absent, or whose output count differs from the SDM tuple, makes the stage fail.  The file holds no machine fact (cpl, iopl, selectors, CR4 bits): those are the rows of platform/declared/x86sys.json, read by x86sys.py."""
 import hashlib
 import json
 import os
@@ -35,8 +35,7 @@ def rows(sdm_text, cpumodel):
 
 def build(sdm_path):
     sdm = open(sdm_path, encoding='utf-8', errors='replace').read(); cm = open(CPUMODEL).read()
-    old = json.load(open(OUT)) if os.path.exists(OUT) else {}
-    return {'format': 'fnvnx-declared/1', 'generated_from': {'rt/cpumodel.c': sha(cm.encode()), 'sdm_sha256': sha(sdm.encode())}, 'rows': rows(sdm, cm), 'facts': old.get('facts', [])}
+    return {'format': 'fnvnx-declared/1', 'generated_from': {'rt/cpumodel.c': sha(cm.encode()), 'sdm_sha256': sha(sdm.encode())}, 'rows': rows(sdm, cm)}
 
 
 if __name__ == '__main__':
