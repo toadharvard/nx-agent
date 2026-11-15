@@ -434,6 +434,8 @@ static int mode_table(int argc, char **argv) {
 }
 
 /* ---- mode summary: totals, and the completeness of both certificate sets against the universe (the stage set is exactly forms x flag sets; the link set is exactly the program set) ---- */
+typedef struct { const char *kind; char id[128]; char sha[65]; } UEnt;
+static int cmp_uent(const void *a, const void *b) { const UEnt *x = a, *y = b; int c = strcmp(x->kind, y->kind); return c ? c : strcmp(x->id, y->id); }
 static int mode_summary(int argc, char **argv) {
     if (argc < 5) { fprintf(stderr, "usage: sm_link_check summary SHADER_DIR OUT.json STAGE... -- LINK... -- TABLE\n"); return 2; }
     int sep = -1, sep2 = -1; for (int i = 4; i < argc; i++) if (!strcmp(argv[i], "--")) { if (sep < 0) sep = i; else { sep2 = i; break; } }
@@ -497,23 +499,35 @@ static int mode_summary(int argc, char **argv) {
       free(ln); fclose(fp); }
     const long TROWS = NX_GL4SHIM_PAIR_COUNT + NX_GL4SHIM_STAGE_COUNT;
     if (trows != TROWS) tbad += trows < TROWS ? TROWS - trows : trows - TROWS;
-    /* the universe hash: every bytecode hash in sorted order, then each table row (id, texts, stage): a change of any member or of the table changes it */
-    uint8_t uh[32]; { size_t tot = (size_t)F.n * 32;
-        for (int i = 0; i < NX_GL4SHIM_PAIR_COUNT; i++) tot += strlen(pair_id[i]) + strlen(nx_gl4shim_pairs[i].vs) + strlen(nx_gl4shim_pairs[i].fs) + 3;
-        for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) tot += strlen(stage_id[i]) + 12 + strlen(nx_gl4shim_stages[i].text) + 3;
-        unsigned char *ub = malloc(tot), *w = ub; if (!ub) return 2;
-        for (int i = 0; i < F.n; i++) { memcpy(w, F.forms[i].sha, 32); w += 32; }
-        for (int i = 0; i < NX_GL4SHIM_PAIR_COUNT; i++) { const char *p[3] = { pair_id[i], nx_gl4shim_pairs[i].vs, nx_gl4shim_pairs[i].fs }; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; } }
-        for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) { char sn[16]; snprintf(sn, sizeof sn, "%u", nx_gl4shim_stages[i].stage);
-            const char *p[3] = { stage_id[i], sn, nx_gl4shim_stages[i].text }; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; } }
-        fnvnx_sha256(ub, tot, uh); free(ub); }
-    char uhx[FNVNX_SHADER_KEY_HEX]; hex(uh, 32, uhx);
+    /* the universe (L1 gate_cert): every member as {kind, id, sha256}, sorted by (kind, id): "bytecode" = a unique bytecode (id = its content hash, sha256 = the same), "glsl_table" = a row of the gl4shim table
+     * (id = the row's id, sha256 = the hash of the canonical bytes id NUL, [stage NUL,] texts NUL). universe_hash = sha256 over the lines `kind TAB id TAB sha256 LF` of that sorted list: the ONE hash of the universe. */
+    long nu = (long)F.n + TROWS; UEnt *U = calloc((size_t)nu, sizeof *U); if (!U) return 2;
+    for (int i = 0; i < F.n; i++) { U[i].kind = "bytecode"; hex(F.forms[i].sha, 32, U[i].id); memcpy(U[i].sha, U[i].id, sizeof U[i].sha); }
+    for (int i = 0; i < NX_GL4SHIM_PAIR_COUNT; i++) {
+        const char *p[3] = { pair_id[i], nx_gl4shim_pairs[i].vs, nx_gl4shim_pairs[i].fs }; size_t tot = 0; for (int k = 0; k < 3; k++) tot += strlen(p[k]) + 1;
+        unsigned char *ub = malloc(tot), *w = ub; uint8_t h[32]; if (!ub) return 2; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; }
+        fnvnx_sha256(ub, tot, h); free(ub); UEnt *u = &U[F.n + i]; u->kind = "glsl_table"; snprintf(u->id, sizeof u->id, "%s", pair_id[i]); hex(h, 32, u->sha);
+    }
+    for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) {
+        char sn[16]; snprintf(sn, sizeof sn, "%u", nx_gl4shim_stages[i].stage); const char *p[3] = { stage_id[i], sn, nx_gl4shim_stages[i].text }; size_t tot = 0; for (int k = 0; k < 3; k++) tot += strlen(p[k]) + 1;
+        unsigned char *ub = malloc(tot), *w = ub; uint8_t h[32]; if (!ub) return 2; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; }
+        fnvnx_sha256(ub, tot, h); free(ub); UEnt *u = &U[F.n + NX_GL4SHIM_PAIR_COUNT + i]; u->kind = "glsl_table"; snprintf(u->id, sizeof u->id, "%s", stage_id[i]); hex(h, 32, u->sha);
+    }
+    qsort(U, (size_t)nu, sizeof *U, cmp_uent);
+    for (long i = 1; i < nu; i++) if (!cmp_uent(&U[i - 1], &U[i])) tbad++;   /* a duplicated (kind, id) is no universe */
+    char uhx[FNVNX_SHADER_KEY_HEX];
+    { size_t tot = 0; for (long i = 0; i < nu; i++) tot += strlen(U[i].kind) + strlen(U[i].id) + strlen(U[i].sha) + 3;
+      unsigned char *ub = malloc(tot + 1), *w = ub; uint8_t h[32]; if (!ub) return 2;
+      for (long i = 0; i < nu; i++) w += sprintf((char *)w, "%s\t%s\t%s\n", U[i].kind, U[i].id, U[i].sha);
+      fnvnx_sha256(ub, (size_t)(w - ub), h); free(ub); hex(h, 32, uhx); }
     red = refused + bad_stage + disagree + lfail + lbad + missing + extra + rejected_pairs + tfail + tbad;
     FILE *s = fopen(argv[3], "w"); if (!s) return 2;
-    fprintf(s, "{\"format\": \"fnvnx-sm-link-summary/1\", \"universe\": %d, \"red\": %ld, \"details\": {\"entries\": %d, \"unique_bytecodes\": %d, \"vs\": %ld, \"ps\": %ld, \"flag_sets\": %d, \"refused\": %ld, "
+    fprintf(s, "{\"format\": \"fnvnx-sm-link-summary/2\", \"universe_count\": %d, \"red\": %ld, \"details\": {\"entries\": %d, \"unique_bytecodes\": %d, \"vs\": %ld, \"ps\": %ld, \"flag_sets\": %d, \"refused\": %ld, "
                "\"stage_certificates\": %ld, \"stage_not_ok\": %ld, \"signature_disagreements\": %ld, \"programs\": %ld, \"link_certificates\": %ld, \"linked\": %ld, \"link_fail\": %ld, "
-               "\"bad_link_lines\": %ld, \"missing_certificates\": %ld, \"unexpected_certificates\": %ld, \"link_set_programs_uncovered\": %ld, \"pairs_rejected\": %ld, \"table_rows\": %ld, \"table_linked\": %ld, \"table_fail\": %ld, \"table_bad\": %ld, \"ffp_programs\": %ld, \"ffp_certificates\": %ld, \"ffp_linked\": %ld, \"ffp_ps_only\": [%ld, %ld, %ld], \"ffp_vs_only\": [%ld, %ld, %ld], \"ffp_both\": [%ld, %ld, %ld], \"universe_sha256\": \"%s\"}}\n",
+               "\"bad_link_lines\": %ld, \"missing_certificates\": %ld, \"unexpected_certificates\": %ld, \"link_set_programs_uncovered\": %ld, \"pairs_rejected\": %ld, \"table_rows\": %ld, \"table_linked\": %ld, \"table_fail\": %ld, \"table_bad\": %ld, \"ffp_programs\": %ld, \"ffp_certificates\": %ld, \"ffp_linked\": %ld, \"ffp_ps_only\": [%ld, %ld, %ld], \"ffp_vs_only\": [%ld, %ld, %ld], \"ffp_both\": [%ld, %ld, %ld]}, \"universe_hash\": \"%s\", \"universe\": [",
             F.n + (int)TROWS, red, entries, F.n, nvs, nps, nfs, refused, S.n, bad_stage, disagree, np, nlines, linked, lfail, lbad, missing, extra, uncovered_L, rejected_pairs, trows, tlinked, tfail, tbad, ffp_programs, ffp_lines, ffp_linked, ffp_prog_by[1], side_lines[1], side_linked[1], ffp_prog_by[2], side_lines[2], side_linked[2], ffp_prog_by[3], side_lines[3], side_linked[3], uhx);
+    for (long i = 0; i < nu; i++) fprintf(s, "%s{\"kind\": \"%s\", \"id\": \"%s\", \"sha256\": \"%s\"}", i ? ", " : "", U[i].kind, U[i].id, U[i].sha);
+    fprintf(s, "]}\n"); free(U);
     return fclose(s) ? 2 : 0;
 }
 
