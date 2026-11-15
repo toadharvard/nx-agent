@@ -15,7 +15,8 @@ Rule. A link test succeeds iff
      symbols a final link would report undefined). Every undefined symbol left must be defined by the linker: a symbol the ld default script or the guest link script (link/guest.ld) provides, or a symbol of the product link's
      protocol (the names the dispatch plugin declares: fnvnx_dispatch, fnvnx_call_fp), which only the product link defines.
 
-`patch` rewrites the body of ac_fn_c_try_link and ac_fn_cxx_try_link of a generated configure and sets gcc_no_link=no, with the
+`patch` rewrites the body of ac_fn_c_try_link and ac_fn_cxx_try_link of a generated configure and removes the
+GCC_NO_EXECUTABLES refusals of link tests (gcc_no_link itself stays: it keeps autoconf's own compiler-works step from linking), with the
 citation acinclude.m4 / GCC_NO_EXECUTABLES. `check` is what the rewritten body runs.
 """
 import hashlib, json, os, re, shlex, subprocess, sys
@@ -39,7 +40,8 @@ TRY_LINK_NEW = (
     "  ( eval \"$ac_cfg_cc\" >&5 && eval \"$ac_cfg_link -###\" 2>conftest.cfg.link >/dev/null &&\n"
     "    $PYTHON_CFG_LINK check conftest.cfg.o conftest.cfg.link conftest$ac_exeext >&5 ) 2>conftest.err\n"
 )
-GCC_NO_LINK_RE = re.compile(r"^(\s*)gcc_no_link=yes\s*$", re.M)
+# autoconf's AC_LINK_IFELSE, AC_SEARCH_LIBS, AC_CHECK_FUNC... open with: if test x$gcc_no_link = xyes; then as_fn_error ... fi
+GUARD_RE = re.compile(r'^([ \t]*)if test x\$gcc_no_link = xyes; then\n[ \t]*as_fn_error \$\? "Link tests are not allowed after GCC_NO_EXECUTABLES\." "\$LINENO" 5\nfi\n', re.M)
 
 
 def patch(path):
@@ -54,17 +56,18 @@ def patch(path):
         if body.count(TRY_LINK_CALL) != 1:
             die("%s: the link call of %s is not the expected line" % (path, fn))
         s = s.replace(body, body.replace(TRY_LINK_CALL, TRY_LINK_NEW))
-    n = len(GCC_NO_LINK_RE.findall(s))
     if "CFG-LINK" not in s:
-        # No ac_fn_*_try_link: the subdir runs no link test through configure's function (libgcc compiles only), and its
-        # gcc_no_link=yes is what tells autoconf's own "compiler works" step not to link: nothing to patch.
+        # No ac_fn_*_try_link: the subdir runs no link test through configure's function (libgcc compiles only): nothing to patch.
         print("cfg_link: %s has no link test (nothing to patch)" % path)
         return
-    if not n:
-        die("%s: ac_fn_*_try_link without gcc_no_link=yes" % path)
-    s = GCC_NO_LINK_RE.sub(r"\1gcc_no_link=no", s)
+    # gcc_no_link stays what GCC_NO_EXECUTABLES set it to (it tells autoconf's own "compiler works" step not to link). What it guarded
+    # is the refusal of a link test; every link test now goes through the patched function, so the refusal is removed, all of them.
+    n, total = len(GUARD_RE.findall(s)), s.count("Link tests are not allowed after GCC_NO_EXECUTABLES")
+    if n != total:
+        die("%s: %d refusals, %d of the expected form" % (path, total, n))
+    s = GUARD_RE.sub("", s)
     open(path, "w").write(s)
-    print("cfg_link: patched %s (gcc_no_link=yes x%d)" % (path, n))
+    print("cfg_link: patched %s (%d link refusals removed)" % (path, n))
 
 
 # ---------------------------------------------------------------- check

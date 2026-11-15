@@ -95,6 +95,6 @@
   ],
   "protocol_source": "toolchain/dispatch/fnvnx_dispatch.cc",
   "guest_script": "link/guest.ld",
-  "cite": "libstdc++-v3/acinclude.m4 and config/no-executables.m4 GCC_NO_EXECUTABLES (GCC 13.3.0): with gcc_no_link=yes configure refuses every link test; the guest runtime's objects reference the product link's protocol symbols, so a link test is answered by a static link (the linker's own archive closure, ld -r, over the driver's -### link line; leftover undefined symbols must be linker-script symbols of the ld default script or link/guest.ld, or protocol symbols the dispatch plugin declares): rule CFG-LINK, cfg_link.py"
+  "cite": "libstdc++-v3/acinclude.m4 and config/no-executables.m4 GCC_NO_EXECUTABLES (GCC 13.3.0): with gcc_no_link=yes (set for a --with-newlib target so that autoconf's compiler-works step does not link) configure refuses every link test (the as_fn_error guard of AC_LINK_IFELSE, AC_CHECK_FUNC, AC_SEARCH_LIBS...); the guest runtime's objects reference the product link's protocol symbols, so a link test is answered by a static link (the linker's own archive closure, ld -r, over the driver's -### link line; leftover undefined symbols must be linker-script symbols of the ld default script or link/guest.ld, or protocol symbols the dispatch plugin declares): rule CFG-LINK, cfg_link.py"
  }
 }
