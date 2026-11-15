@@ -625,3 +625,9 @@ Workers are capped at 3. Assignment by plan item:
   - 6 x86 reference-host programs wait on L1's host-variant root.
 - w7: the facts commit now also carries the EH ThrowInfo union rule (L3b w9: 1 site, 1 missing ThrowInfo) and CODEMAP.md.
 - PERFDEBT PD-LIFT-ORDERED: accepted, scheduled after the relift.
+
+## 2026-11-15 00:05 — host programs (L1 answer relayed to w8)
+- The host x86-64 root exists (admit target "host", pinned g++-13-x86-64-linux-gnu). rcptest, rcpgen, rothost, bthost and fmathtest become host roots (w8, queue item e). Owner: L3a w8.
+- proof/backends.py host C++ becomes the variant root@ubsan. libubsan1 is pinned by L1 through setup_verdict_env.sh.
+- Blocked: running a built program as a stage (`run` plus host_cpu CPUREF). Owner: L1 + L6 w6. Until it lands, rcp tables from a direct run are measurements, not inputs.
+- The L1 machinery files in the compile-call census are L1's to move.
