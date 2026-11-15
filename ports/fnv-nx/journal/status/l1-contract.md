@@ -1521,3 +1521,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - the pluginfix correction;
     - glmin as a gate on cand2, reading the generated gl4 loader table;
     - the EGL-Registry mirror (tools/khronos-egl) for the surfaceless citation.
+## 09:22 weekly budget (CLAUDE.md integ 9ea2d5403)
+- Kept:
+  - w15: the cand2 verdict and merge;
+  - w12: the gen-stage fixes, the bootguest relink and undefined set, the loader key header;
+  - the farm session_01KmtZKTV1mniUErarfUpdJZ.
+- Stopping, with branches kept, to be archived:
+  - w20 (e6d3b415f): next would have been a64access;
+  - w22 (8aeeabb6e): next would have been pluginfix, glmin, EGL;
+  - w23 (8b6b7ed0): next would have been abi ctype, crossing, rtasm (b)/(a');
+  - w24 (bd6646a1a): next would have been the selftests index;
+  - w25 (547405ab): next would have been farm verification, relocations.
+- w19 is archived. These items resume after the first frame or when the budget lifts.
