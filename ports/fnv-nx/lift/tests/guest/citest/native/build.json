@@ -36,14 +36,6 @@
    "-m",
    "aarch64linux32"
   ],
-  "roots": [
-   "ports/fnv-nx/lift/tests/guest/citest/lifted",
-   "ports/fnv-nx/lift/rt",
-   "ports/fnv-nx/rt/guest",
-   "ports/fnv-nx/platform",
-   "ports/fnv-nx/loader",
-   "ports/fnv-nx/lib/sha256"
-  ],
   "libs": {
    "external": "fnvnx-a64-msvcmodel",
    "dirs": [
