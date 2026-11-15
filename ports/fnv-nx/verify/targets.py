@@ -49,7 +49,7 @@ def check(t, ext=None, assumptions=None, repo=None):
     if t.get("format") != "fnvnx-targets/1":
         bad.append("format")
     known = {i["id"] for i in json.load(open(assumptions or ASSUMPTIONS))["entries"]}
-    for rec in ("guest_platform", "console_cpu"):
+    for rec in ("guest_platform", "console_cpu", "host_gl"):
         r = t.get(rec) or {}
         cites = r.get("cite") or {}
         for field in sorted(set(r) - {"cite"} - ({"features"} if rec == "console_cpu" else set())):   # each feature is cited under its own name
@@ -80,6 +80,9 @@ def check(t, ext=None, assumptions=None, repo=None):
                             bad.append("%s: %s:%d does not hold %r" % (where, c["path"], c["line"], c["quote"]))
                 else:
                     bad.append("%s: citation is none of external, doc, assumption" % where)
+    ver = (t.get("host_gl") or {}).get("version")
+    if not isinstance(ver, str) or len(ver.split(".")) != 2:
+        bad.append("host_gl.version is a string MAJOR.MINOR (derived and judged by glmin.py against the backend's referenced commands)")
     for f in t["console_cpu"]["features"]:
         if not t["console_cpu"]["cite"].get(f):
             bad.append("console_cpu feature %s has no citation" % f)
