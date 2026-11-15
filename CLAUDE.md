@@ -571,3 +571,19 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
     - an idle lead with nothing on the path waits; it does not invent work.
   - **Off the path:** no verifier, census, refactor or proof waits for nothing else. Everything that does not block one of
     the four steps waits until after the first frame.
+
+## Orchestrator decision of 2026-11-15 09:45Z: message discipline (binding for every session)
+
+Measured (fleet study, 09:20Z): 87 % of the orchestrator's turns were started by messages from other sessions, and half
+of those turns did nothing. Each turn re-reads the whole context, 200-300k tokens. That is where the weekly limit goes.
+
+- Send a message only when the receiver must act on it now: a ruling it needs, a blocker, or a finished item it takes
+  over.
+  - No acknowledgements, no "resumed", no "kept N workers", no FYI, no progress reports.
+  - A reply that only says "accepted" is not sent.
+- Status lives only in `journal/status/<layer>.md`, pushed when an item is finished. The orchestrator reads the status
+  files in its hourly check. A status commit is not a message.
+- One message per finished item, carrying everything in it: the commit, the global numbers, what is next. A worker
+  reports to its lead once per item, not per step.
+- Send with `priority: "later"`, unless it unblocks the receiver now.
+- Farm prompts do not tell the farm to read CLAUDE.md: it is loaded automatically.
