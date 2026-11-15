@@ -393,6 +393,19 @@
    "outputs": [
     "win32/declared_os.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/declared/gen_export.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/declared/x86sys.json",
+    "/out/declared/x86sys.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/declared/x86sys.json"
+   ],
+   "outputs": [
+    "declared/x86sys.json"
+   ]
   }
  ],
  "os_layer": [],
@@ -566,5 +579,8 @@
    "type": "FT_Error",
    "success": 0
   }
+ },
+ "outputs": {
+  "X86SYS": "declared/x86sys.json"
  }
 }
