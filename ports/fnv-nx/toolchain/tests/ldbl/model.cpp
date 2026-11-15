@@ -1,19 +1,12 @@
-// test_msvcmodel.cpp - what toolchain/msvcmodel/test_msvcmodel.py compiles with the game's compiler (MSVCMODEL1).
-// The numbers in the comments are the pinned cl's (MSVC 2008 SP1 /O2) for the same lines.
-#ifdef _MSC_VER                 // the same file compiles with cl, to reread its numbers
-typedef int ptrdiff_t;
-#define SIZEOF_T size_t
-#define PTRDIFF_T ptrdiff_t
-#else
+// model.cpp - the data model and array new/delete of the game's compiler (msvcmodel, MSVCMODEL1), compiled by test_ldbl.py through the
+// recipe. The numbers in the comments are the pinned cl's (MSVC 2008 SP1 /O2) for the same lines.
 typedef __SIZE_TYPE__ size_t;
 typedef __PTRDIFF_TYPE__ ptrdiff_t;
-#define SIZEOF_T decltype(sizeof 0)
-#define PTRDIFF_T decltype((char *)0 - (char *)0)
-#endif
-void types(size_t, ptrdiff_t, SIZEOF_T, PTRDIFF_T) {}                                        // cl: ?types@@YAXIHIH@Z
+static_assert(__is_same(size_t, unsigned int) && __is_same(ptrdiff_t, int), "the exe's 32-bit data model");
+static_assert(__is_same(decltype(sizeof 0), unsigned int) && __is_same(decltype((char *)0 - (char *)0), int), "sizeof and a pointer difference have those types");
+void types(size_t, ptrdiff_t, decltype(sizeof 0), decltype((char *)0 - (char *)0)) {}      // cl: ?types@@YAXIHIH@Z
 extern "C" void *heap_alloc(size_t);
 extern "C" void heap_free(void *, size_t);
-struct P { int a; };
 struct D { ~D(); int a; };
 struct A8 { ~A8(); double d; };                                                               // 8 bytes, aligned to 8
 struct NM { int a[5]; static void *operator new[](size_t n) { return heap_alloc(n); }

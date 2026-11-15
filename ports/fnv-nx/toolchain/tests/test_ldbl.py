@@ -41,6 +41,45 @@ def number(v):
     return re.sub(r'[()\s]', '', v)
 
 
+def const_arg(dis, fn, callee, reg):
+    """the constant moved into REG (`mov wN, #imm`) before the call or tail call of CALLEE in function FN of an objdump -dr read, or None"""
+    val = None
+    for l in dis.get(fn, []):
+        m = re.search(r'\bmov\s+%s, #(0x[0-9a-f]+|\d+)\b' % reg, l)
+        if m:
+            val = int(m.group(1), 0)
+        elif re.search(r'R_AARCH64_P32_(?:CALL|JUMP)26\s+%s\b' % re.escape(callee), l):
+            return val
+    return None
+
+
+def model(td, so):
+    """size_t / ptrdiff_t and array new/delete: the constants the compiler passes are the pinned cl's for the same lines (comments of ldbl/model.cpp)"""
+    obj = os.path.join(td, 'model.o')
+    r = pb.compile(os.path.join(HERE, 'ldbl', 'model.cpp'), obj, so, native=True)
+    check('model.cpp compiles (size_t is unsigned int and ptrdiff_t is int: static_assert)', r.returncode == 0,
+          '\n'.join(l for l in r.stderr.splitlines() if 'warning' not in l and 'note:' not in l)[:3000])
+    if r.returncode != 0:
+        return
+    dis = pb.objdump(obj)
+    rows = {l.split('\t')[0]: l.split('\t')[1] for l in pb.section(obj, '.fnvnx.sympair').splitlines()}
+    check('size_t is unsigned int, ptrdiff_t is int: Itanium _Z5typesjiji, cl\'s ?types@@YAXIHIH@Z',
+          '_Z5typesjiji' in dis and rows.get('_Z5typesjiji') == '?types@@YAXIHIH@Z', rows)
+    for fn, callee, want in (('_Z3n_dv', '_Znaj', 16), ('_Z4n_a8v', '_Znaj', 28), ('_Z4n_nmv', 'heap_alloc', 60),
+                             ('_Z4n_ndv', 'heap_alloc', 72), ('_Z4n_nvv', 'heap_alloc', 88), ('_Z3n_nv', 'heap_alloc', 40)):
+        check('%s allocates %d bytes (cl)' % (fn, want), const_arg(dis, fn, callee, 'w0') == want, dis.get(fn))
+    for fn, want in (('_Z4d_nmP2NM', 20), ('_Z4d_ndP2ND', 24), ('_Z4d_nvP2NV', 28), ('_Z3d_nP1N', 12)):
+        check('%s: the sized operator delete[] gets the element size %d (cl)' % (fn, want), const_arg(dis, fn, 'heap_free', 'w1') == want, dis.get(fn))
+    b = lambda f: '\n'.join(dis.get(f, []))
+    check('no count before an array of a trivially destructible class', '#-4]' not in b('_Z4d_nmP2NM') and '#-4]' not in b('_Z4d_ndP2ND'), b('_Z4d_nmP2NM'))
+    d = b('_Z4d_nvP2NV')
+    m = re.search(r'sub\s+w(\d+), w\d+, #0x4\b.*?\b(?:ldr|ldar)\s+w\d+, \[x\1\]', d, re.S)
+    check('the count is the 4 bytes before the array (loaded from array - 4; the product order rule makes the load an ldar), the block handed to the free starts there',
+          m is not None and len(re.findall(r'sub\s+w\d+, w\d+, #0x4\b', d)) >= 2, d)
+    check('an overflowing new[] size is passed as the largest size, nothing is thrown',
+          '__cxa_throw_bad_array_new_length' not in pb.undefined(obj) and re.search(r'csinv|mov\s+w0, #0xffffffff', b('_Z5n_varj')), b('_Z5n_varj'))
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-ldbl-')
     try:
@@ -76,6 +115,7 @@ def main():
             check('every __LDBL_*__ equals its __DBL_*__ counterpart (%d of %d)' % (len(dbl), len(dbl)),
                   all(number(ldbl[k]) == number(dbl[k]) for k in dbl if k in ldbl),
                   {k: (dbl[k], ldbl[k]) for k in dbl if k in ldbl and number(ldbl[k]) != number(dbl[k])})
+        model(td, so)
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
