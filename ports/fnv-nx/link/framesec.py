@@ -117,3 +117,36 @@ def from_sections(sections, where):
 
 def read(path):
     return from_sections(a64obj.read(path).sections, path)
+
+
+REDIR = '.fnvnx.redir'
+REDIR_KINDS = ('string-op', 'libcall', 'inline-builtin')
+
+
+def parse_redir(data, where):
+    """the redirect record of the order plugin: LF-terminated lines `symbol<TAB>kind`, kind string-op | libcall | inline-builtin, sorted, no repeat.
+    -> {symbol: kind}"""
+    try:
+        text = data.decode('utf-8')
+    except UnicodeDecodeError as e:
+        raise ValueError('%s: line 1: not UTF-8 text (%s)' % (where, e))
+    if text and text[-1] != '\n':
+        raise ValueError('%s: line %d: no final LF' % (where, text.count('\n') + 1))
+    out = {}
+    for n, ln in enumerate(text.split('\n')[:-1], 1):
+        f = ln.split('\t')
+        if len(f) != 2 or not f[0] or ' ' in f[0] or f[1] not in REDIR_KINDS:
+            raise ValueError('%s: line %d: not symbol<TAB>kind: %r' % (where, n, ln))
+        if f[0] in out:
+            raise ValueError('%s: line %d: %s twice' % (where, n, f[0]))
+        out[f[0]] = f[1]
+    return out
+
+
+def redir_from_sections(sections, where):
+    found = [s for s in sections if s.name == REDIR]
+    if not found:
+        return None
+    if len(found) > 1:
+        raise ValueError('%s: %d %s sections' % (where, len(found), REDIR))
+    return parse_redir(found[0].data, where)
