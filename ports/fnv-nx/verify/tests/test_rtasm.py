@@ -11,6 +11,7 @@ sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link')
 import gate_rtasm  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix='rtasm-')
+__import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind
 fails = []
 
 

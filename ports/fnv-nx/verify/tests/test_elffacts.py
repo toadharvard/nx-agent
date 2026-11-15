@@ -53,6 +53,7 @@ def struct_elf(path):
 
 def main():
     tmp = tempfile.mkdtemp(prefix="elffacts-")
+    __import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind
     os.chdir(tmp)
     open("a.c", "w").write("#include <string.h>\nint g_data = 3; static int loc = 1;\nint f_b(int);\nint (*fp)(int) = f_b; int f_a(const char *s) { return (int)strlen(s) + f_b(loc) + g_data + fp(2); }\n")
     open("b.c", "w").write("int f_b(int x) { return x + 1; }\n")

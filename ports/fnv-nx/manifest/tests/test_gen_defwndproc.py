@@ -9,6 +9,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "gen_defwndproc.py")
 d = tempfile.mkdtemp(prefix="defwnd-")
+__import__('atexit').register(__import__('shutil').rmtree, d, True)   # a test leaves no scratch behind
 os.makedirs(d + "/tree/dlls/win32u")
 os.makedirs(d + "/tree/include")
 open(d + "/tree/include/winuser.rh", "w").write("#define WM_KEYFIRST 0x0100\n#define WM_KEYDOWN WM_KEYFIRST\n#define WM_CLOSE 0x0010\n")

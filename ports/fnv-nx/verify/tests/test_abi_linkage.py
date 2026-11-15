@@ -11,6 +11,7 @@ sys.path[:0] = [os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'link')
 import gate_abi  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix='abilink-')
+__import__('atexit').register(__import__('shutil').rmtree, tmp, True)   # a test leaves no scratch behind
 fails = []
 
 

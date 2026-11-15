@@ -9,6 +9,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "gen_wine_cites.py")
 d = tempfile.mkdtemp(prefix="wine-cites-")
+__import__('atexit').register(__import__('shutil').rmtree, d, True)   # a test leaves no scratch behind
 os.makedirs(d + "/tree/dlls/x")
 open(d + "/tree/dlls/x/a.c", "w").write("static int helper(int a);\n/*\n * old_fn(int x)\n */\nstatic unsigned int\nreal_fn(int x)\n{\n    return helper(x) + call_only(x);\n}\n"
                                         "#define MAC(x) x\nint WINAPI Api(int a)\n{\n    return 0;\n}\n")
