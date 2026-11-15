@@ -7,19 +7,25 @@ Verdict per site (all tokens must hold):
   masked          every token is a constant with the masks set, or a transform that keeps them (the masks are in A, or in O), starting from the reachable set whose start word has them
                   (x87 FCW 0x027F: OM bit 3 and UM bit 4, mask 0x18; MXCSR 0x1F80: OM bit 10 and UM bit 11, mask 0x0C00; thread start state, ASM-219)
   unmasks         a constant or transform that can clear OE or UE
+  sets-daz        (MXCSR sites) a constant with bit 6 (DAZ) set or a transform that ORs DAZ in: the declared MXCSR_MASK is 0xFFBF, so such a value raises #GP; listed, goes to the orchestrator
+  `masked` for an MXCSR site means: exceptions masked AND DAZ clear on every value
   undecided:WHY   a token `u:`; the site is listed with the reason class, not guessed, and goes to the orchestrator
 Output: a header with the totals, then one row per site: image, address, instruction, entry, value tokens, verdict. Exit 1 when any site is `unmasks` or `undecided`."""
 import sys, os, collections
 FCW_M, MX_M = 0x18, 0x0C00
+DAZ = 0x40
 def verdict(toks, mask):
-    why = []; bad = False
+    why = []; daz = mask == MX_M
     for t in toks:
         k = t[0]
         if k == 'c':
-            if int(t.split(':')[1], 16) & mask != mask: return 'unmasks'
+            v = int(t.split(':')[1], 16)
+            if v & mask != mask: return 'unmasks'
+            if daz and v & DAZ: return 'sets-daz'
         elif k == 't':
-            _, a, o = t.split(':')
-            if (int(a, 16) & mask) != mask and (int(o, 16) & mask) != mask: return 'unmasks'
+            _, a, o = t.split(':'); a = int(a, 16); o = int(o, 16)
+            if (a & mask) != mask and (o & mask) != mask: return 'unmasks'
+            if daz and o & DAZ: return 'sets-daz'            # a transform keeps DAZ clear iff it ORs nothing into it (the start word and every reachable word have it clear: induction)
         else: why.append(t.split(':', 1)[1].split(':')[0])
     return 'undecided:' + ','.join(sorted(set(why))) if why else 'masked'
 def rows(name, d, fn, mask, cls):
@@ -42,5 +48,5 @@ def main(out, specs):
         for r in sorted(R, key=lambda r: (r[0], int(r[1], 16))): f.write('\t'.join(r[:6]) + '\n')
     print('x87-masked-sites: %d sites: %s' % (len(R), ', '.join('%s %d' % kv for kv in sorted(tot.items()))))
     for im in sorted({r[0] for r in R}): print('  %s: %s' % (im, ', '.join('%s/%s %d' % (k[1], k[2], v) for k, v in sorted(c.items()) if k[0] == im)))
-    return 1 if tot['unmasks'] or sum(v for k, v in tot.items() if k.startswith('undecided')) else 0
+    return 1 if tot['unmasks'] or tot['sets-daz'] or sum(v for k, v in tot.items() if k.startswith('undecided')) else 0
 if __name__ == '__main__': sys.exit(main(sys.argv[1], sys.argv[2:]))
