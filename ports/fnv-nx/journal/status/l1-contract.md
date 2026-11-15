@@ -1367,3 +1367,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - Rule 5: there is no guest-platform or console-CPU record on cand1. Proposed to the orchestrator: verify/targets.json (L1); owner assignment pending.
 - errno_accessor per root is a rule-5 defect, raised by L4. It goes to w20's probe stage: derived from the declared libc header, and the root field is deleted.
 - cand2 additions: L4 c0b42b63f; admit rows for bootguest/bootrt (and lift/rt 68814726d if valid); w15c hostabi host recipe.
+- Orchestrator: verify/targets.json (guest_platform, console_cpu) is L1's. w22 builds it after the listing pass; the restated fields are generated from it or deleted; L2's none-elf triplet reads it; PD-LOADER-SHA256-ISA reads console_cpu.
+- L6 defect (a concurrent external fetch raced, SM 0/171): the cause is closed by w24 98deaec70 publish_dir. w24 extends it to every store write, with a concurrent-build test.
+- w20u 3ee8cf755 accepted: objstub rule C (cite rows, noreturn kind, `|` sources, mixed bodies, noreturn-uncited).
