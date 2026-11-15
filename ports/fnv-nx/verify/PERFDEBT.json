@@ -11,6 +11,12 @@
    "id": "PD-MINIMP3-NEON",
    "owner": "L2",
    "rule": "fnvnx_ftoi rewrites every explicit target float->int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact: in range it converts; out of range or NaN it gives the x86 integer indefinite (cvttps2dq). fpexact then certifies the NEON path."
+  },
+  {
+   "fast_path": "GCC stack slot reuse (-fstack-reuse=all) in guest code",
+   "id": "PD-STACK-REUSE",
+   "owner": "L2",
+   "rule": "gate_order judges a slot shared by variables of disjoint lifetimes from the order plugin's per-variable ranges and lifetime facts (L2 plugin, L1 gate); then -fstack-reuse=none leaves guest_compiler.json flags.semantics.common and this entry is deleted in the same commit."
   }
  ],
  "first_frame": false,

@@ -2535,3 +2535,13 @@ Every row of an objects.json names the unit's object (`object`) and its `-fstack
     everything that reaches it `unbounded`, and it is listed; no value is guessed. Growth along the chain = the same walk over (FLAG - BASE) frame growth.
 Output: a JSON document and one summary line per number. Exit 0.
 ```
+
+### Measurement of `-fstack-reuse=none` (head 8dc852415)
+
+`-fstack-reuse=none` is in `guest_compiler.json` `flags.semantics.common` and `PERFDEBT.json` `PD-STACK-REUSE` records the switch-off (owner L2: the restoring rule is per-variable slot ranges in the order plugin, judged by gate_order). It closes the class "a stack slot shared by variables of disjoint lifetimes" (93 class-d accesses). Measured with `recipe.py build --stack-usage 1` over the 7 guest roots (loader, lib/sha256, hostabi, shim, rt/guest, render/shaders/translator, platform; platform exits 2 on its known red unit, its built units are counted), base vs flag, then `stackuse.py`:
+
+- (a) 5000 functions in both builds, 0 dynamic frames. Largest growth +2528 B (platform crt/msvcrt_format.cpp, `put_float`: 2432 -> 4960). Sum of growth +30736 B. 16 functions only in base and 14 only in flag.
+- (b) Base: 5554 functions, 600 bounded, 4954 unbounded (noframe 3753 C++ names, indirect call 454, undefined callee 118, reaches 747, cycle 0). Flag: 5551 functions, 600 bounded. Deepest bounded chain 528 B (`ps_parser_to_token_array`). Largest chain growth over the bounded functions: 0.
+- (c) FalloutNV.exe sha256 89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe: PE32 SizeOfStackReserve 1048576, SizeOfStackCommit 4096 (the bytes stay outside the repository). The `dwStackSize` of the CreateThread/_beginthreadex call sites is not measured (argflow over exe facts, L3).
+
+These numbers are NOT a bound of the native stack depth per thread: no such bound exists with or without the flag (4954 of 5554 functions unbounded; recursion through indirect or C++ calls is not excluded). The class "native stack depth per thread" is reported to the orchestrator as a run-time failure class without a gate.
