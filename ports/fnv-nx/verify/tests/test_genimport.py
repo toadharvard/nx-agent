@@ -32,6 +32,16 @@ FILES = {
     "a/bad3.py": "import helper2\n",
     "a/helper2.py": "import proto\n",
     "a/rel.py": "from .. import nothing\n",
+    "a/p2/__init__.py": "",
+    "a/p2/m.py": "ctl = 1\n",
+    "a/p2/sub.py": "import proto\n",
+    "a/p2/ok_attr.py": "from .m import ctl\n",
+    "a/p2/ok_sub.py": "from . import m\nfrom .m import ctl\n",
+    "a/ok_pkg_sub.py": "from .p2 import m\n",
+    "a/ok_pkg_attr.py": "from .p2 import whatever\n",
+    "a/bad_mod.py": "from .nomod import x\n",
+    "a/bad_sub.py": "from . import nosuch\n",
+    "a/ok_sub_follow.py": "from .p2 import sub\n",
 }
 with tempfile.TemporaryDirectory() as td:
     for p, t in FILES.items():
@@ -47,5 +57,11 @@ with tempfile.TemporaryDirectory() as td:
     check("a declared input carries a module and what it imports", fi("a/bad3.py", ["b/proto.py", "b/store.py"]) == [], fi("a/bad3.py", ["b/proto.py", "b/store.py"]))
     check("a declared directory input carries its modules", fi("a/bad3.py", ["b"]) == [], fi("a/bad3.py", ["b"]))
     check("a relative import that leaves the tree is red", fi("a/rel.py") == ["nothing"] or fi("a/rel.py") == [".nothing"] or len(fi("a/rel.py")) == 1, fi("a/rel.py"))
+    check("a from-import of a name inside a module is green (the name is an attribute, never looked up as a file)", fi("a/p2/ok_attr.py") == [], fi("a/p2/ok_attr.py"))
+    check("a submodule from-import is green", fi("a/p2/ok_sub.py") == [] and fi("a/ok_pkg_sub.py") == [], (fi("a/p2/ok_sub.py"), fi("a/ok_pkg_sub.py")))
+    check("a name a package does not hold as a file is an attribute: green", fi("a/ok_pkg_attr.py") == [], fi("a/ok_pkg_attr.py"))
+    check("a missing module is red", fi("a/bad_mod.py") == [".nomod"], fi("a/bad_mod.py"))
+    check("a missing submodule file (from . import NAME, no such file) is red", fi("a/bad_sub.py") == [".nosuch"], fi("a/bad_sub.py"))
+    check("a submodule from-import is followed into the closure (its own imports count)", fi("a/ok_sub_follow.py") == ["proto"], fi("a/ok_sub_follow.py"))
 print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)

@@ -685,20 +685,31 @@ def foreign_imports(tool, owner, files, inputs, repo="."):
             continue
         for n in ast.walk(tree):
             names = []
+            if isinstance(n, ast.ImportFrom) and n.level:
+                # Python's own resolution of `from <.. module> import names`: a relative import names a module beside the importing file, inside its root
+                base = posixpath.normpath(posixpath.join(posixpath.dirname(f), *([".."] * (n.level - 1))))
+                if n.module:
+                    mp = base + "/" + n.module.replace(".", "/")
+                    hit = [c for c in (mp + ".py", mp + "/__init__.py") if c in files]
+                    if not hit:
+                        bad.append("." * n.level + n.module)
+                        continue
+                    todo.append(hit[0])
+                    if hit[0].endswith("/__init__.py"):    # a name is a submodule only where the package holds the file; else it is an attribute of the module
+                        todo += [mp + "/" + a.name + ".py" for a in n.names if (mp + "/" + a.name + ".py") in files]
+                else:
+                    for a in n.names:
+                        hit = [c for c in (base + "/" + a.name + ".py", base + "/" + a.name + "/__init__.py") if c in files]
+                        if hit:
+                            todo.append(hit[0])
+                        else:
+                            bad.append("." * n.level + a.name)
+                continue
             if isinstance(n, ast.Import):
                 names = [(a.name, 0) for a in n.names]
             elif isinstance(n, ast.ImportFrom):
-                names = [((n.module or "") + ("." + a.name if n.module is None or True else ""), n.level) for a in n.names] if n.level else [(n.module or "", 0)]
+                names = [(n.module or "", 0)]
             for name, level in names:
-                if level:    # a relative import names a module beside the importing file, inside its root
-                    base = posixpath.normpath(posixpath.join(posixpath.dirname(f), *([".."] * (level - 1))))
-                    tail = name.lstrip(".").replace(".", "/")
-                    hit = [c for c in (base + "/" + tail + ".py", base + "/" + tail + "/__init__.py") if c in files]
-                    if not hit:
-                        bad.append(name)
-                    else:
-                        todo.append(hit[0])
-                    continue
                 top = name.split(".")[0]
                 if top in std or top in pinned or not top:
                     continue
