@@ -84,14 +84,6 @@ extern "C" void fnvnx_wine_fixme(uint32_t id)
     fnvnx_plat_note(FNVNX_NOTE_UNIMPL, "wine-fixme", FNVNX_NOTE_RA, d);
 }
 
-/* The citation function of the declared-machine bodies (verify/VERDICT.md "Declared-machine bodies", verify/declared_machine.tsv): a body that
- * answers from the declared machine (no network, fixed time zone, registry values, no Galaxy) calls it with the id of its row. It writes nothing
- * and returns: the gate reads the call, the body's result is the row's value. */
-extern "C" void fnvnx_declared_machine(uint32_t id)
-{
-    (void)id;
-}
-
 /* The end of a violation: the hostapi `exit` slot, an indirect call that does not return (hostapi.h: exit "does not return"). The reach and assume
  * violations end here and nowhere else: not through os_exit_process, whose body is a libc exit that runs handlers. */
 [[noreturn]] static void violation_exit(uint32_t code)
