@@ -397,21 +397,20 @@ extern "C" onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end
     *begin = t, *end = t + len;
     return f;
 }
-extern "C" void c_exit(int code)
+/* C11 7.22.4.4 exit: cannot return to its caller (abort: 7.22.4.1; _amsg_exit: Wine 9.0 dlls/msvcrt/exit.c _amsg_exit ends in _exit) */
+extern "C" [[noreturn]] void c_exit(int code)
 {
     fnvnx_doexit(code, 0, 1); /* the handlers, last registered first */
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
-    os_exit_process(code);
 }
-extern "C" void c_abort(void)
+extern "C" [[noreturn]] void c_abort(void)
 {
     static const char m[] = "\nabnormal program termination\n";
     fnvnx_write(2, m, sizeof m - 1);
     ExitProcess(3);
-    os_exit_process(3);
 }
-extern "C" void c_amsg_exit(int n)
+extern "C" [[noreturn]] void c_amsg_exit(int n)
 {
     const char *t;
     switch (n) {
@@ -429,7 +428,6 @@ extern "C" void c_amsg_exit(int n)
     int l = snprintf(m, sizeof m, "\nR60%02d\n- %s\n", n, t);
     fnvnx_write(2, m, (unsigned)l);
     ExitProcess(255);
-    os_exit_process(255);
 }
 extern "C" void c_purecall(void) { c_amsg_exit(25); }
 
