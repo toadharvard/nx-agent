@@ -304,7 +304,8 @@ code that reaches the hive, and the implementation creates no key by itself (the
 ```text
 iat - the value the loader writes in every import slot of an image (L1 CONTRACT, loader contract with L3 and L5).
 
-    iat.py --facts facts.json --bridge bridge.tsv [--module name.dll=exports.tsv ...] --out iat.tsv
+    iat.py --facts facts.json --bridge bridge.tsv --module name.dll=exports.tsv ... --module-imports name.dll=imports.tsv ... --out iat.tsv
+    iat.py --check ...   tool mode: no --module needed, never writes keys.tsv, import_keys.c or iat_data.tsv
 
 Image code pointers are not rewritten and `call [slot]` is an ordinary indirect call, so a slot must hold a 32-bit
 value the dispatcher of the lifted code maps to an entry.  Rule, total over the image's import directory:
@@ -322,6 +323,10 @@ Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the fir
 Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
+
+A stage that writes a product file (keys.tsv, import_keys.c, iat_data.tsv) passes --module and --module-imports for every
+image of modules.tsv; without --module it is a stage error, because the import set of every image is an input.  Only
+`--check` runs without them, and then no product file is written.
 
 A slot without a provider, an export the module does not have, a dll that is both a module and a bridge dll: the
 stage fails and lists them (gate `iat`: universe = slots, certified = slots with a value).  Output rows:
@@ -450,15 +455,6 @@ platform implementation writes through a pointer argument only when ImportInfo s
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
 ```
 
-## contract/nativerows.py
-The rows of the native dispatch table: for every exe address whose body is native (bodysel verdict `native`), the one symbol a native root defines for it.
-`nativerows.py --obj obj.json --bind bind.json --bodysel bodysel.tsv --out native.tsv`; `native.tsv` is `address(8 hex)<TAB>symbol`, sorted by address.
-Rule, total over the native addresses: exactly one defined symbol of the objects carries the address (a `def` row of `.fnvnx.sympair`, function kinds, with the
-address bind.json gave it) gives its row; none, or several different symbols for one address (both constructor variants), is an error that lists every such
-address, because the table has no rule to choose between bodies. A symbol defined in several objects (inline functions) counts once. The output is a function
-of the three input files only. `lift/tools/dispgen.py --prefix fnvnx_native --allow-empty` turns the rows into the table `fnvnx_native_disp_table`, which
-`fnvnx_dispatch` consults first.
-
 ## contract/modules.py
 
 ```text
@@ -471,7 +467,9 @@ AddressOfCallBacks, SizeOfZeroFill, Characteristics), read raw: the four address
 Columns: name, load_index (as in modules.tsv; empty for the exe), start_va, end_va, index_va, callbacks_va (hex, raw), template_rva (start_va
 - preferred base, hex), template_size (end - start, decimal), zero_fill (SizeOfZeroFill, decimal), align (the IMAGE_SCN_ALIGN field of
 Characteristics, bits 20-23, the field itself: 0 stays 0), template_sha256, callbacks (;-list of the RVAs of the callback array up to its null word;
-empty when AddressOfCallBacks is 0 or the first word is 0).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
+empty when AddressOfCallBacks is 0 or the first word is 0), tls_slot (the TLS index the loader assigns: the exe 0, loader/src/start.c:301; then each static image with a directory 1, 2, ... in
+load_index order, loader/src/modules.c:273-278; empty for an image loaded on demand, modules.c:396), align_bytes (align as the loader applies it, loader/src/tls.c:38: 1 for 0, else
+1 << (align - 1)).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
 then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
 array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
 Test: contract/tests/test_modules.py on synthetic PE images built by the test.
@@ -698,7 +696,7 @@ gate_disp - the dispatcher of the lifted guest holds exactly the code entries (p
     gate_disp.py --elf guest.elf --universe universe.tsv --entries entries.tsv [--keys keys.tsv] [--missing missing.tsv]
 
 The lifted code reaches every code entry of the exe through `fnvl_dispatch(a)` (lift/rt/rt.c, FNVL_PHF_REL), which looks the
-address up in the table `fnvl_disp_table` (lift/tools/phf.py `table_asm`):
+address up in the table `fnvl_disp_table` (lift/bench/phf.py `table_asm`):
     i = ((a ^ fnvl_g[(a * K1) >> (32 - NBITS)]) * K2) >> (32 - TBITS)          (all arithmetic modulo 2^32)
     slot i = {u32 key, s32 offset}; the entry is found iff key == a and offset != 0; the body is `(char *)fnvl_disp_table + offset`.
 A slot is OCCUPIED iff its offset is not 0 (the key of an empty slot is arbitrary).  {K1, K2, NBITS, TBITS} are the four u32 words of
@@ -1387,6 +1385,29 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
+## verify/gate_onedef.py
+
+```text
+Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
+    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
+Rules (by symbol tables and file content, never by a name's text):
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
+      definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
+      the linker's choice between them would pick a body by link order.
+  (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
+      member sections (bytes, flags, alignment and relocations by offset, type, addend and target: gate_linkstrict.elf_comdat), else
+      `comdat-differs` (flags, plugins or a body differ: an ODR violation). Instances of one group inside ONE root need no comparison.
+      NOT EXACT (stated): this compares what the linker sees. "The same source definition" (same decl_file/decl_line) needs DWARF
+      `DW_AT_decl_file/line`, and the objects of a recipe carry no debug info (flags are the root's -O/-W/-std only): until a recipe
+      builds them with `-g1`-class line tables, a cross-root COMDAT group whose digests are equal is accepted on equal bytes alone.
+  (c') Every translation-unit source file (.c .cc .cpp .cxx .s .S) of a product root is a unit of exactly ONE root: the content sha256 of a unit
+      must not be the content of a unit of another root (`unit-copy`), and a path is a unit of one root only (`unit-path`).
+  (c'') Headers are shared by include, never copied: a tracked header (.h .hh .hpp .hxx .inc .inl) whose content sha256 appears under two
+      paths of the admitted roots is `header-copy` for every copy. Externals are pinned trees, outside this clause; generated outputs are
+      not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
+Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
+no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
+
 ## verify/gate_tlsmodel.py
 
 ```text
@@ -1414,28 +1435,6 @@ Rules (a finding names the object, the symbol and the relocation):
   (5) `unclassified`: a TLS relocation of a name outside the families above.
 Items: every object, every linked ELF, every TLS relocation (object, symbol, relocation name, section, offset). Certified = the items with no
 finding. Counts per relocation family over all roots are in `detail`. No guest root: universe 0, green.
-## verify/gate_onedef.py
-
-```text
-Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
-    python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
-Rules (by symbol tables and file content, never by a name's text):
-  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
-      definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
-      the linker's choice between them would pick a body by link order.
-  (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
-      member sections (bytes, flags, alignment and relocations by offset, type, addend and target: gate_linkstrict.elf_comdat), else
-      `comdat-differs` (flags, plugins or a body differ: an ODR violation). Instances of one group inside ONE root need no comparison.
-      NOT EXACT (stated): this compares what the linker sees. "The same source definition" (same decl_file/decl_line) needs DWARF
-      `DW_AT_decl_file/line`, and the objects of a recipe carry no debug info (flags are the root's -O/-W/-std only): until a recipe
-      builds them with `-g1`-class line tables, a cross-root COMDAT group whose digests are equal is accepted on equal bytes alone.
-  (c') Every translation-unit source file (.c .cc .cpp .cxx .s .S) of a product root is a unit of exactly ONE root: the content sha256 of a unit
-      must not be the content of a unit of another root (`unit-copy`), and a path is a unit of one root only (`unit-path`).
-  (c'') Headers are shared by include, never copied: a tracked header (.h .hh .hpp .hxx .inc .inl) whose content sha256 appears under two
-      paths of the admitted roots is `header-copy` for every copy. Externals are pinned trees, outside this clause; generated outputs are
-      not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
-Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
-no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
 ```
 
 ## verify/gate_argorder.py
@@ -1579,6 +1578,9 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
                                          has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
+Dangling keys: every key of every tracked oracle.json that lies in a directory named `tests` (any directory of the tree, whether or not its
+tests are in the universe above) must name a tracked file of that directory; a key that does not is one uncertified item, `DIR/tests/oracle.json:KEY`,
+which also counts in the universe; an oracle.json that is not a JSON object with a `tests` object is one such item (`DIR/tests/oracle.json`).
 Rule. A test file is certified iff ALL hold:
   1. its DIR's oracle.json is well formed and holds exactly one entry for it (an entry without a test file, an unknown
      key or a wrong format is an error of the DIR: none of its tests is certified);
@@ -1880,6 +1882,17 @@ process-exit imports, generated by the owner's manifest (one per import); a hand
 NOT PROVEN: that the pointer called is the host exit slot (the contract row says so); an infinite loop is class `nodeadlock`.
 `fnvnx_reach_violation` is also `reach-not-exit` if its definition does not end that way.
 
+(A) ASSUME. `fnvnx_assume_violation(asm_id, value)` (C linkage; noreturn; like `fnvnx_reach_violation` its definition ends in the call through the
+host exit slot on every path, else `assume-not-exit`) is the exit of a miss of a total domain that an ACCEPTED assumption (verify/ASSUMPTIONS.json
+status OWNER) declares. It is the second contract symbol of an assertion, not a trap path. Polarity holds by construction: the ONLY caller is a
+check function that a generator stage of the root's recipe writes (`fnvnx_dom_<name>[]` and `fnvnx_dom_<name>_check(v)`: hit returns v, miss
+calls ASSUME with the id the generator writes from its declared input); the generator is the one place the polarity is written and its test
+proves hit -> return, miss -> violation. A call is accepted iff, per site: (a) it lies in an object of a unit that a generator stage outputs
+(`recipe.generated_outputs`; else `assume-direct-call`: hand-written code never calls it); (b) w0 is a literal, an integer c (id `ASM-%03d` % c)
+or a pointer to a C string in a data section of the object (its text), and the record of that id has status OWNER (`assume-id-nonliteral`;
+`assume-id-not-owner`: REMOVE, missing or unknown). A reference that is not a call is `assume-address-taken`. The gate result holds
+"assume_calls": {sites, accepted, red, by_id} over all objects.
+
 (W) WINE FIXME. `fnvnx_wine_fixme(uint32_t id)` (C linkage, defined by the runtime's owner; writes one line and RETURNS) marks a body that
 does exactly what Wine 9.0's simplified implementation of an API does (nothing, or a fixed value). For V the BL of it is transparent: it
 is no evidence of a call (rule (i)), and after it x0-x18, x30, v0-v7, v16-v31 are unknown (written with unknown values), so a result
@@ -2116,6 +2129,14 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from A
   the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
   is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
+Input refs (the one reader is recipe.resolve_input(root, ref, repo, cache, rec) -> (host path, ident); no gate opens an input itself): a bare string is a
+  tracked file or directory of ROOT (git ls-files only); {"external": NAME, "path": P} reads P in the root's external NAME, checked against its tree_sha256;
+  {"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P} reads the declared output P of generator I or run stage NAME of an admitted root, produced by that stage
+  (cached by its key) and written to CACHE/stageout/<sha256>/P. An absolute path, `..`, a symlink leaving the tree, a missing or untracked path, an
+  undeclared external or output, an unknown root/stage and a red stage are ValueError. A generator reads exactly its declared inputs, read-only (stage flag ro_root).
+Run stages (RECIPE.md "Run stages"): `run` executes the linked output of another admitted host root in the sandbox with declared inputs, debs (env.json
+  debs.packages) and /out; the key holds the artifact, input contents, deb sha256s and argv; a PT_INTERP must be provided by a declared deb; optional
+  "host_cpu": "cpuref" puts verify/cpuref.json in the key and refuses a non-matching host (cache hits are served anywhere).
 Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
   {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
@@ -2576,4 +2597,55 @@ independent decoders on every instruction of the set; after first frame.  Droppe
 regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `leaf_constant`, `string_at`, the vftable
 getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
 TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
+```
+
+## verify/stackuse.py
+
+```text
+stackuse - the stack growth a codegen flag causes, from the compiler's own reports (measurement, never a gate input).
+
+    python3 -I stackuse.py --base OBJECTS.json... --flag OBJECTS.json... [--json OUT]
+
+Inputs: the objects.json files of two builds of the same roots made with `recipe.py build --stack-usage 1` (RECIPE.md): BASE without the flag, FLAG with it.
+Every row of an objects.json names the unit's object (`object`) and its `-fstack-usage` report (`su`: `file:line:col:name TAB bytes TAB qualifier`).
+
+(a) Frame growth. A function is keyed by (unit, file:line:col, name), the compiler's own identity in both reports. Growth = FLAG bytes - BASE bytes. Reported: the
+    number of functions in both, the largest growth with its function, the sum of all growth, the functions in one report only, and the functions whose qualifier is
+    not `static` (dynamic frames have no byte bound: counted, never given a number).
+(b) The deepest native call chain. The call graph of the objects: an edge for every R_AARCH64_CALL26 / JUMP26 relocation, from the function symbol that contains the
+    relocated word to the function symbol the relocation names (a section symbol + addend resolves to the function at that offset); a function whose code contains a
+    BLR or BR instruction word (a superset of its indirect calls: a data word that looks like one only adds a report) has an INDIRECT call. A frame of a function is the
+    `.su` bytes of the function of that symbol name in that object (the C name is the symbol; a C++ name in the report is not the mangled symbol, so such a
+    function has no frame: it is counted as `noframe`). The depth of a function = its frame + the largest depth of its callees. A cycle, a function with an
+    indirect call, a dynamic frame, a callee with no definition among the objects (runtime library, other image) or a function with no frame makes the depth of
+    everything that reaches it `unbounded`, and it is listed; no value is guessed. Growth along the chain = the same walk over (FLAG - BASE) frame growth.
+Output: a JSON document and one summary line per number. Exit 0.
+```
+
+### Measurement of `-fstack-reuse=none` (head 8dc852415)
+
+`-fstack-reuse=none` is in `guest_compiler.json` `flags.semantics.common` and `PERFDEBT.json` `PD-STACK-REUSE` records the switch-off (owner L2: the restoring rule is per-variable slot ranges in the order plugin, judged by gate_order). It closes the class "a stack slot shared by variables of disjoint lifetimes" (93 class-d accesses). Measured with `recipe.py build --stack-usage 1` over the 7 guest roots (loader, lib/sha256, hostabi, shim, rt/guest, render/shaders/translator, platform; platform exits 2 on its known red unit, its built units are counted), base vs flag, then `stackuse.py`:
+
+- (a) 5000 functions in both builds, 0 dynamic frames. Largest growth +2528 B (platform crt/msvcrt_format.cpp, `put_float`: 2432 -> 4960). Sum of growth +30736 B. 16 functions only in base and 14 only in flag.
+- (b) Base: 5554 functions, 600 bounded, 4954 unbounded (noframe 3753 C++ names, indirect call 454, undefined callee 118, reaches 747, cycle 0). Flag: 5551 functions, 600 bounded. Deepest bounded chain 528 B (`ps_parser_to_token_array`). Largest chain growth over the bounded functions: 0.
+- (c) FalloutNV.exe sha256 89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe: PE32 SizeOfStackReserve 1048576, SizeOfStackCommit 4096 (the bytes stay outside the repository). The `dwStackSize` of the CreateThread/_beginthreadex call sites is not measured (argflow over exe facts, L3).
+
+These numbers are NOT a bound of the native stack depth per thread: no such bound exists with or without the flag (4954 of 5554 functions unbounded; recursion through indirect or C++ calls is not excluded). The class "native stack depth per thread" is reported to the orchestrator as a run-time failure class without a gate.
+
+## verify/gate_guestlink.py
+
+```text
+Gate "guestlink" (fnvnx-gate/1, class A of VERDICT.md): the guest link profile link/guest.json holds exactly the values the pinned guest runtime's
+own driver derives, so a hand-picked startfile, library directory or library name is red.
+    python3 -I gate_guestlink.py [--write]    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
+    (--write first rewrites `libs` of link/guest.json from the derivation: the way the profile is made; the gate then compares it)
+Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (verify/guest_compiler.json `runtime_driver`) is run, as the hermetic recipe
+stage `drv:<root>`, with the guest semantic flags (flags.semantics.common, filtered for C++ by the pinned compiler) and `-pie -###` on a one-line C++
+file. Its last line is the link command of the multilib the flags select; recipe.parse_driver_link reads startfiles (.o before the library group),
+dirs (-L inside the external), names (-l, in order) and endfiles (.o after the group) from it. An object of startfiles/endfiles is then excluded by
+the one-definition rule only (recipe.onedef): it defines a global or weak symbol that an admitted guest product root defines (the roots' symbols are
+those of their green builds, gate_build.ensure). Nothing is excluded by a name.
+Rule: the derived libs equal `libs` of link/guest.json, key by key and in order, and `libs.external` is the pinned runtime. A difference is a finding
+naming the key, the derived values and the profile's. Items: every entry of dirs, names, startfiles and endfiles, derived or profiled. Certified =
+the entries present in both. A red guest root build, or a driver run that fails, is red with the reason.
 ```

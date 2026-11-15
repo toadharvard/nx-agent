@@ -162,6 +162,71 @@ def judge(decl, use):
     return len(items) + len(bad), len(items) - len(miss), miss + bad
 
 
+def read_table(repo, path, name):
+    """[(NAME, nargs, line)] of the service table NAME declared in file PATH (repo relative), or ValueError. A Python table is the module-level
+    dict NAME = {fn: (name, least nargs)} (entry name upper-cased = the service name); a C table is the array NAME[] = { [FNVNX_PLAT_X] =
+    {n, handler}, ... }. Nothing is searched for: a table that is missing, not of that form or empty is an error."""
+    import ast
+    import re
+    text = open(os.path.join(repo, path), errors="replace").read()
+    if path.endswith(".py"):
+        for n in ast.parse(text).body:
+            if isinstance(n, (ast.Assign, ast.AnnAssign)) and any(isinstance(t, ast.Name) and t.id == name for t in (n.targets if isinstance(n, ast.Assign) else [n.target])):
+                d = n.value
+                if not (isinstance(d, ast.Dict) and d.keys and all(isinstance(k, ast.Constant) and isinstance(k.value, int) for k in d.keys)
+                        and all(isinstance(v, ast.Tuple) and len(v.elts) == 2 and isinstance(v.elts[0], ast.Constant) and isinstance(v.elts[0].value, str)
+                                and isinstance(v.elts[1], ast.Constant) and isinstance(v.elts[1].value, int) for v in d.values)):
+                    raise ValueError("table %s in %s is not {int: (str, int)}" % (name, path))
+                return [(v.elts[0].value.upper(), v.elts[1].value, v.lineno) for v in d.values]
+        raise ValueError("table %s is not defined in %s" % (name, path))
+    code = strip_comments(text)
+    m = re.search(r"\b%s\s*\[[^\]]*\]\s*=\s*\{" % re.escape(name), code)
+    if not m:
+        raise ValueError("table %s is not defined in %s" % (name, path))
+    depth, i = 1, m.end()
+    while i < len(code) and depth:
+        depth += {"{": 1, "}": -1}.get(code[i], 0)
+        i += 1
+    rows = [(r.group(1), int(r.group(2)), code.count("\n", 0, m.end() + r.start()) + 1)
+            for r in re.finditer(r"\[FNVNX_PLAT_([A-Z0-9_]+)\]\s*=\s*\{\s*(\d+)\s*,", code[m.end():i])]
+    if depth or not rows:
+        raise ValueError("table %s in %s has no FNVNX_PLAT_ rows" % (name, path))
+    return rows
+
+
+def served_ids(repo, svc, count, notserved):
+    """-> (universe, [uncertified ids]) of "served == declared" (the one home of the rule; manifest/check_hostapi.py calls it). The hosts are the
+    admitted roots of verify/admit.json with "serves": {"interface": "hostapi", "tables": [{"path", "name"}]}: those tables, exactly, are what a host
+    answers. Items: one per declared service that the header counts (served exactly once, with the header's count) and one per defect (a served
+    name the header does not declare or declares NOT SERVED, a served twice, a wrong count, a declared table that is missing or malformed); no
+    admitted host is one item."""
+    rows = json.load(open(os.path.join(repo, recipe.ADMIT)))["roots"]
+    hosts = [r for r in rows if isinstance(r.get("serves"), dict) and r["serves"].get("interface") == "hostapi"]
+    if not hosts:
+        return len(svc) + 1, ["no host: verify/admit.json has no root with serves.interface hostapi"]
+    served, bad = {}, []
+    for r in hosts:
+        for t in r["serves"].get("tables", []):
+            try:
+                for name, k, line in read_table(repo, t["path"], t["name"]):
+                    where = "%s:%d" % (t["path"], line)
+                    if name in served:
+                        bad.append("%s served twice (%s, %s)" % (name, served[name][0], where))
+                    served[name] = (where, k)
+            except (ValueError, OSError, SyntaxError, KeyError) as e:
+                bad.append("table: %s" % (str(e)[:200] or type(e).__name__))
+    for name, (where, k) in sorted(served.items()):
+        if name not in svc:
+            bad.append("%s: serves %s, which hostapi.h does not declare" % (where, name))
+        elif name in notserved:
+            bad.append("%s: serves %s, which hostapi.h declares NOT SERVED" % (where, name))
+        elif count.get(name) != k:
+            bad.append("%s: %s takes %d arguments, hostapi.h declares %s" % (where, name, k, count.get(name)))
+    counted = [n for n in sorted(svc) if n not in notserved]
+    bad += ["declared %s (n=%s) has no host table row" % (n, count.get(n)) for n in counted if n not in served]
+    return len(counted) + len([b for b in bad if not b.startswith("declared ")]), bad
+
+
 def header_text(repo, explicit):
     return open(os.path.join(repo, explicit or HOSTAPI_HEADER)).read()
 
@@ -210,6 +275,14 @@ def main(argv):
             u, c, ids = u + su, c + sc, sids + ids
             if sc != su:
                 detail = ("%s; services: %s" % (detail, "; ".join(sids)))[:900]
+            sys.path.insert(1, os.path.join(repo, "ports", "fnv-nx", "manifest"))
+            import check_hostapi   # the header grammar (service numbers, argument counts) has its one home there
+            errs = []
+            svc, _, count, notserved = check_hostapi.parse_header(header, errs)
+            hu, hids = served_ids(repo, svc, count, notserved)
+            u, c, ids = u + hu + len(errs), c + hu - len(hids) + 0, ["host: " + i for i in hids + errs] + ids
+            if hids or errs:
+                detail = ("%s; hosts: %s" % (detail, "; ".join(hids + errs)))[:900]
         st = stale_names(repo) if os.path.isfile(os.path.join(repo, HOLES)) else []
         u, ids = u + len(st), st + ids
         status = "green" if u == c else "red"

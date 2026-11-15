@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Tests for link.kind / link.roots validation (recipe.link_errors) with `root@NAME` variants, and the admit.json `variants` rule. Pure: no build."""
-import json
+"""Tests for recipe.resolve_link_root and its use in link_errors: a link.roots entry is the root's recipe for the image's own target. Pure."""
 import os
+import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import gate_admit as ga  # noqa: E402
 import recipe  # noqa: E402
 
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 fails = 0
 
 
@@ -19,75 +18,45 @@ def check(name, ok, info=""):
     fails += 0 if ok else 1
 
 
-T = "ports/fnv-nx/"
-P, H, TST, IMG = T + "platform", T + "hostlib", T + "tests/t1", T + "img"
-V = P + "@asan"   # the sanitizer variant of the platform: a flags variant of the same root
-ROOTS = {
-    P: {"path": P, "class": "product", "target": "guest", "variants": {"asan": {}}},
-    H: {"path": H, "class": "product", "target": "host"},
-    TST: {"path": TST, "class": "test", "target": "guest"},
-    IMG: {"path": IMG, "class": "product", "target": "guest"},
-    T + "tests/th": {"path": T + "tests/th", "class": "test", "target": "host"},
-    T + "doc": {"path": T + "doc", "class": "doc"},
-}
-REPO = tempfile.mkdtemp(prefix="linkroots-")
-for p, r in ROOTS.items():
-    if r["class"] != "doc":
-        r["recipe"] = p + "/build.json"
-        os.makedirs(os.path.join(REPO, p), exist_ok=True)
-        json.dump({"variants": {"asan": {"flags": {"c": ["-fsanitize=address"]}}}} if p == P else {}, open(os.path.join(REPO, r["recipe"]), "w"))
+R = {"g": {"path": "g", "class": "product", "target": "guest", "variants": {"host": {"target": "host"}}},
+     "h": {"path": "h", "class": "product", "target": "host"},
+     "g2": {"path": "g2", "class": "product", "target": "guest", "variants": {"a": {"target": "host"}, "b": {"target": "host"}}},
+     "g0": {"path": "g0", "class": "product", "target": "guest"}}
+rs = lambda d, t: recipe.resolve_link_root(R, d, t)  # noqa: E731
+check("a base root of the image's target is itself", rs("g", "guest")[0] == "g" and rs("h", "host")[0] == "h", (rs("g", "guest"), rs("h", "host")))
+check("a guest base root in a host image is its variant of target host", rs("g", "host")[0] == "g@host", rs("g", "host"))
+sp, why = rs("g0", "host")
+check("no variant of the image's target: none, naming the root", sp is None and "g0" in why and "no variant" in why, (sp, why))
+sp, why = rs("g2", "host")
+check("two variants of the image's target are ambiguous: none (an explicit root@variant is needed)", sp is None and "several" in why, (sp, why))
+check("an explicit root@variant of the image's target is itself", rs("g2@a", "host")[0] == "g2@a" and rs("g@host", "host")[0] == "g@host", (rs("g2@a", "host"), rs("g@host", "host")))
+sp, why = rs("g@host", "guest")
+check("an explicit root@variant of another target is none", sp is None and "target" in why, (sp, why))
+sp, why = rs("h", "guest")
+check("a host base root in a guest image, with no guest variant, is none", sp is None, (sp, why))
+check("an unadmitted root is none", rs("zz", "host")[0] is None, rs("zz", "host"))
+# link_errors on the real sha256 root (guest, variant host) and platform (guest, no variant)
+files = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True).stdout.split("\n")
+roots = dict(recipe.load_admit(REPO))
+for p, tg in (("ports/fnv-nx/zh", "host"), ("ports/fnv-nx/zg", "guest")):
+    roots[p] = {"path": p, "class": "product", "target": tg}
 
 
-def lk(kind, roots, flags=()):
-    return {"script": "l.ld", "output": "x.elf", "flags": list(flags) or ["-m", {"pie": "aarch64linux32", "exe": "elf_x86_64"}.get(kind, "x")], "kind": kind, "roots": list(roots)}
+def errs(image, member, kind, flags):
+    lk = {"output": "x.exe" if kind == "exe" else "x.elf", "kind": kind, "flags": flags, "roots": [member]}
+    if kind == "pie":
+        lk["script"] = "ports/fnv-nx/link/guest.ld"
+    return [e for e in recipe.link_errors(lk, image, set(), roots, set(), REPO, files, "") if "link.roots" in e]
 
 
-def errs(root, link):
-    return recipe.link_errors(link, root, {"l.ld"}, ROOTS, set(), REPO)
-
-
-check("an image links base roots: green", errs(IMG, lk("pie", [P])) == [], errs(IMG, lk("pie", [P])))
-check("an image refuses a variant root", any("variant" in e for e in errs(IMG, lk("pie", [V]))), errs(IMG, lk("pie", [V])))
-check("a test root links a variant and a base", errs(TST, lk("pie", [V, P])) == [], errs(TST, lk("pie", [V, P])))
-check("a guest root refuses kind exe", any("host executable" in e for e in errs(IMG, lk("exe", []))), errs(IMG, lk("exe", [])))
-check("a host test root links host roots with kind exe", errs(T + "tests/th", lk("exe", [H])) == [], errs(T + "tests/th", lk("exe", [H])))
-check("a host test root refuses a guest root", any("target" in e or "ILP32" in e or "exe" in e for e in errs(T + "tests/th", lk("exe", [P]))), errs(T + "tests/th", lk("exe", [P])))
-check("an unknown kind is red", bool(errs(IMG, lk("dll", []))), "")
-check("a root that is not an admitted root is red", any("not an admitted product root" in e for e in errs(IMG, lk("pie", [T + "nope"]))), "")
-check("a doc root and a test root are not linkable roots", len(errs(IMG, lk("pie", [T + "doc", TST]))) >= 2, errs(IMG, lk("pie", [T + "doc", TST])))
-check("the root itself is red", any("the root itself" in e for e in errs(IMG, lk("pie", [IMG]))), "")
-check("a repeated root is red", any("listed twice" in e for e in errs(IMG, lk("pie", [P, P]))), "")
-check("roots that is not a list is red", bool(errs(IMG, dict(lk("pie", []), roots="x"))), "")
-# the refusal set names the class and reaches the link flags of every root class
-for f in (["--unresolved-symbols=ignore-all"], ["-Wl,--unresolved-symbols=ignore-all"], ["--noinhibit-exec"], ["-z", "undefs"], ["--warn-unresolved-symbols"],
-          ["--allow-shlib-undefined"], ["-z", "lazy"], ["-zlazy"], ["-Wl,-z,lazy"], ["-Xlinker", "--unresolved-symbols=ignore-in-object-files"]):
-    check("resolution-relaxing option %s is refused" % " ".join(f), recipe.refused(f) != [], f)
-check("an ordinary flag is not refused", recipe.refused(["-e", "entry", "-z", "now"]) == [], recipe.refused(["-e", "entry", "-z", "now"]))
-# admit.json: variants
-def judge(roots):
-    files = [r["path"] + "/f.c" for r in roots]
-    rs = [dict(r, gates=list(ga.REQUIRED["product"] if r["class"] == "product" else ga.REQUIRED_TEST), recipe=r["path"] + "/build.json") for r in roots]
-    names = sorted(set(ga.REQUIRED["product"]) | set(ga.REQUIRED_TEST))
-    return ga.judge(files, {"format": "fnvnx-admit/1", "roots": rs}, names, lambda p: True)
-
-
-def prod(**kw):
-    return dict({"path": P, "class": "product", "target": "guest"}, **kw)
-
-
-bad, err = judge([prod(variants={"asan": {}})])
-check("variants {NAME: {}} of a product root is admitted", not bad and not err, (bad, err))
-bad, err = judge([prod(variants={"host": {"target": "host"}})])
-check("a variant may name its own target", not bad and not err, (bad, err))
-bad, err = judge([prod(variants={"x": {"target": "arm"}})])
-check("a variant with another target value is refused", bool(bad), bad)
-bad, err = judge([prod(variants={"x": {"flags": ["-O0"]}})])
-check("flags live in the recipe: a variant entry names only a target", bool(bad), bad)
-bad, err = judge([prod(variants={})])
-check("empty variants is refused", bool(bad), bad)
-bad, err = judge([prod(variants=["x"])])
-check("variants that is not a mapping is refused", bool(bad), bad)
-bad, err = judge([{"path": TST, "class": "test", "target": "guest", "variants": {"a": {}}}])
-check("a test root has no variants", bool(bad), bad)
-print("fails: %d" % fails)
+SHA = "ports/fnv-nx/lib/sha256"
+e = errs("ports/fnv-nx/zh", SHA, "exe", ["-m", "aarch64linux"])
+check("a host image that names a guest root with a host variant is valid (it links the variant)", e == [], e)
+e = errs("ports/fnv-nx/zg", SHA, "pie", ["-m", "aarch64linux32"])
+check("a guest image that names the same root links its base recipe: valid", e == [], e)
+e = errs("ports/fnv-nx/zh", "ports/fnv-nx/platform", "exe", ["-m", "aarch64linux"])
+check("a host image that names a guest root with no host variant is red", len(e) == 1 and "no variant" in e[0], e)
+e = errs("ports/fnv-nx/zg", SHA + "@host", "pie", ["-m", "aarch64linux32"])
+check("a guest image that names the host variant explicitly is red (target mismatch)", len(e) >= 1, e)
+print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)

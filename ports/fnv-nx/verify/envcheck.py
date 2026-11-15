@@ -70,6 +70,25 @@ def file_owners():
                 own.setdefault(ln.rstrip("\n"), set()).add(pk)
     return own
 
+def spellings(p, real=os.path.realpath):
+    """The names under which the dpkg file lists may spell file P: P, its resolved path, and each of those with /usr merged in or out (usrmerge: /lib,
+    /lib64, /bin and /sbin are /usr/... on disk, while a package that predates the merge lists the unmerged name). A function of P and the disk."""
+    out = []
+    for q in (p, real(p)):
+        for r in (q, q[4:] if q.startswith("/usr/") else "/usr" + q):
+            if r not in out:
+                out.append(r)
+    return out
+
+def system_lib_errors(paths, packages, owners, real=os.path.realpath, isfile=os.path.isfile):
+    """The link.libs.system rule (RECIPE.md, Link): a system library of a link is a file of a package that env.json pins (PACKAGES, a dict or list
+    of the pinned package names; their dependency closure is env.json's own `packages`, derived). One error per path in PATHS that is no file, or that
+    no pinned package owns by any spelling of spellings(); OWNERS is file_owners(). The loader (ld-linux-x86-64.so.2) is a library like another: pinned
+    by libc6."""
+    pk = set(packages)
+    return ["%s: %s" % (p, "not a file of this machine" if not isfile(p) else "owned by no package that env.json pins")
+            for p in paths if not isfile(p) or not any(owners.get(s_, set()) & pk for s_ in spellings(p, real))]
+
 def pinned_set(names):
     """The packages an environment owns: NAMES and their dependency closure."""
     return set(names) | set(dep_closure(names))

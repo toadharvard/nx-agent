@@ -154,5 +154,50 @@ check("universe 0 green", r.returncode == 0 and res.get("status") == "green" and
 r = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_hostapi.py"), "--header", "nope.h"], cwd=repo, env=env, capture_output=True, text=True)
 check("universe 0 needs no header", r.returncode == 0, r.stdout + r.stderr)
 
+# served == declared (served_ids): hosts and tables are declared by admit.json, read by name, never searched for
+def served_repo(serves, files):
+    d = tempfile.mkdtemp(prefix="served-")
+    os.makedirs(d + "/ports/fnv-nx/verify")
+    for k, v in files.items():
+        open(os.path.join(d, k), "w").write(v)
+    row = {"path": "ports/fnv-nx/verify", "class": "tool", "gates": []}
+    if serves is not None:
+        row["serves"] = serves
+    json.dump({"format": "fnvnx-admit/1", "roots": [row]}, open(d + "/ports/fnv-nx/verify/admit.json", "w"))
+    return d
+
+
+import recipe  # noqa: E402
+SVC, CNT = {"A": 1, "B": 2, "C": 3}, {"A": 1, "B": 2}
+TAB = "ports/fnv-nx/verify/host.py"
+def tbl(*rows):
+    return "T = {%s}\n" % ", ".join("%d: (%r, %d)" % r for r in rows)
+def served(serves, files, svc=SVC, cnt=CNT, notserved=("C",)):
+    d = served_repo(serves, files)
+    return g.served_ids(d, svc, cnt, set(notserved))
+S = {"interface": "hostapi", "tables": [{"path": TAB, "name": "T"}]}
+u, bad = served(S, {TAB: tbl((1, "a", 1), (2, "b", 2))})
+check("served == declared: green (the not-served C needs no row)", bad == [] and u == 2, (u, bad))
+u, bad = served(None, {})
+check("no admitted host is red", len(bad) == 1 and "no host" in bad[0], bad)
+u, bad = served(S, {TAB: "OTHER = 1\n"})
+check("declared table missing is red", any("not defined" in b for b in bad), bad)
+u, bad = served(S, {TAB: "T = {1: 'x'}\n"})
+check("declared table malformed is red", any("not {int: (str, int)}" in b for b in bad), bad)
+u, bad = served(S, {TAB: tbl((1, "a", 1), (2, "b", 3))})
+check("wrong argument count is red", any("takes 3 arguments" in b for b in bad), bad)
+u, bad = served(S, {TAB: tbl((1, "a", 1), (2, "b", 2), (3, "c", 1))})
+check("serving a NOT SERVED service is red", any("NOT SERVED" in b for b in bad), bad)
+u, bad = served(S, {TAB: tbl((1, "a", 1), (2, "b", 2), (9, "zz", 1))})
+check("serving an undeclared service is red", any("does not declare" in b for b in bad), bad)
+u, bad = served(S, {TAB: tbl((1, "a", 1))})
+check("a declared service with no row is red", any(b.startswith("declared B") for b in bad), bad)
+CS = {"interface": "hostapi", "tables": [{"path": "ports/fnv-nx/verify/h.c", "name": "g_plat"}]}
+u, bad = served(CS, {"ports/fnv-nx/verify/h.c": "static const row g_plat[] = {\n  [FNVNX_PLAT_A] = {1, pf_a},\n  [FNVNX_PLAT_B] = {2, pf_b},\n};\n"})
+check("C table: the rows of the named array", bad == [], bad)
+u, bad = served(CS, {"ports/fnv-nx/verify/h.c": "static const row g_other[] = {[FNVNX_PLAT_A] = {1, pf_a}};\n"})
+check("C table: a different array is not searched", any("not defined" in b for b in bad), bad)
+
+
 print("FAILED: %d" % len(FAILED) if FAILED else "ALL PASS")
 sys.exit(1 if FAILED else 0)

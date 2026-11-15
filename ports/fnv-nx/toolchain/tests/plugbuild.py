@@ -87,8 +87,6 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
-    os.makedirs(os.path.dirname(os.path.join(repo, T + 'verify/env.json')), exist_ok=True)
-    shutil.copyfile(os.path.join(REAL, T + 'verify/env.json'), os.path.join(repo, T + 'verify/env.json'))   # the declared environment: recipe.build refuses to run on a checkout without it (env_blocked)
     for src, dst in EXTRA['copy']:   # the real tree under the toy root (a header dir needs a product root of the guest target as its home)
         shutil.copytree(os.path.join(REAL, src), os.path.join(repo, ROOT, dst))
     if not any(k.endswith(('.cc', '.cpp', '.cxx')) for k in fixtures):   # a root with a C++ unit declares its origin: a C fixture comes with one

@@ -103,6 +103,14 @@ def red(o):
 P = framesec.parse_frame
 check('parse empty', P(b'', 'x'), [])
 check('parse lines', P(b'a\t\nb\tdynamic\nc\t-16:12 -4:4 0:8\n', 'x'), [('a', ()), ('b', 'dynamic'), ('c', ((-16, 12), (-4, 4), (0, 8)))])
+fr3 = P(b'a\t-4:4 unk:mem unk:reg\targs:16\nb\t\targs:0\nc\tdynamic\targs:8\nd\t4:4\n', 'x')
+check('parse 3-field rows', [(tuple(r), r.args, r.unk) for r in fr3], [(('a', 'dynamic'), 16, ('mem', 'reg')), (('b', ()), 0, ()), (('c', 'dynamic'), 8, ()), (('d', ((4, 4),)), None, ())])
+for bad in (b'a\t\targs:01\n', b'a\t\targs:-1\n', b'a\t\tx:1\n', b'a\tunk:foo\targs:0\n', b'a\tunk:reg unk:mem\targs:0\n', b'a\tunk:reg 4:4\targs:0\n', b'a\t\t\targs:0\n'):
+    try:
+        P(bad, 'x')
+        fails.append('parser accepted %r' % bad)
+    except ValueError:
+        pass
 for bad in (b'a\t', b'a', b'a\t\tb\n', b'\t\n', b'a b\t\n', b'a\t1:0\n', b'a\t01:4\n', b'a\t+1:4\n', b'a\t4:1 -4:4\n', b'a\tx\n', b'a\t1:2 \n',
             b'a\tDynamic\n', b'a\t1:2:3\n', b'\xff\t\n', b'a\t-0:4\n', b'a\t 1:2\n'):
     try:
@@ -192,12 +200,12 @@ o = assemble('esc_norec', {'f': FUNCS['ok_escape']}, {'f': ''})
 check('escape of a slot the record lacks is red', red(o), {'f+0x10/escape': 'frame-escape-unrecorded'})
 o = assemble('esc_rec', {'f': FUNCS['ok_escape']}, {'f': '-8:4'})
 check('escape into a recorded slot is green', red(o), {})
-o = assemble('rec_overlap', {'f': ['sub sp, sp, #16', 'str w0, [sp, #4]', 'str w0, [sp, #12]', 'add sp, sp, #16', 'ret']}, {'f': '-4:4'})
-check('plain store beside a recorded slot is F, onto it is not', red(o), {'f+0x8': 'plain-store'})
+o = assemble('rec_overlap', {'f': ['sub sp, sp, #16', 'add x1, sp, #12', 'str w0, [sp, #4]', 'str w0, [sp, #12]', 'add sp, sp, #16', 'ret']}, {'f': '-4:4'})
+check('plain store beside a recorded slot is F, onto a slot whose address is formed it is not', red(o), {'f+0xc': 'plain-store'})
 o = assemble('rec_above', {'f': ['ldr w0, [sp, #8]', 'ret']}, {'f': ''})
 check('access above the CFA (incoming stack argument) is not F', red(o), {'f+0x0': 'plain-load'})
-o = assemble('rec_pair', {'f': ['sub sp, sp, #16', 'stp x0, x1, [sp, #0]', 'add sp, sp, #16', 'ret']}, {'f': '-12:4'})
-check('a pair store sizes 16 bytes', red(o), {'f+0x4': 'plain-store'})
+o = assemble('rec_pair', {'f': ['sub sp, sp, #16', 'add x2, sp, #4', 'stp x0, x1, [sp, #0]', 'add sp, sp, #16', 'ret']}, {'f': '-12:4'})
+check('a pair store sizes 16 bytes', red(o), {'f+0x8': 'plain-store'})
 
 # frame record problems
 o = assemble('noline', {'fa': FUNCS['ok_frame'], 'fb': FUNCS['ok_frame']}, {'fa': ''})

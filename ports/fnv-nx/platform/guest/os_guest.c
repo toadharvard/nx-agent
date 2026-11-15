@@ -15,6 +15,7 @@
 
 #include "fnvnx/guest.h"
 #include "fnvnx/hostapi.h"
+#include "fnvnx/placement.h"
 #include "fnvnx/sdlayout.h"
 
 static int64_t hs(uint64_t v) { return (int64_t)v; }
@@ -31,7 +32,8 @@ void os_exit_process(int code) {
     exit(code);
 }
 
-unsigned os_cpu_count(void) { return (unsigned)fnvnx_hcall0(fnvnx_host->cpu_count); }
+unsigned os_cpu_count(void) { return FNVNX_NPROC; }          /* the declared processors (fnvnx/placement.h) */
+uint32_t os_cpu_mask(void) { return FNVNX_APP_CORES; }
 uint32_t os_process_id(void) { return 0x51; }   /* any stable non-zero id */
 
 void os_memory_info(uint64_t *total, uint64_t *avail) {

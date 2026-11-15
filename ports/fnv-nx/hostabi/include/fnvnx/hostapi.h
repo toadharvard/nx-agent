@@ -269,8 +269,8 @@ typedef struct FnvnxHostApi {
  * An id (thread, directory) is used by one thread at a time while it is freed (the guest's side of the contract).
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
- *   UINT32_MAX; host_ext.inc:h_ext_call, fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext (host_platform.inc, one row per service); fn 0, 10, 15, 27..29, 32, 33 and fn >= 39 -> NO_SERVICE (-254):
+ *   UINT32_MAX; fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
+ * module 11, platform_ext, one row per service; fn 0, 10, 15, 27..29, 32, 33 and fn >= 39 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  * test:cpu_boost
@@ -308,10 +308,10 @@ typedef struct FnvnxHostApi {
  * 35 THREAD_SELF        n=0  thread id | 0 (no memory, id table full)
  * test:thread_self
  * 36 TEXT_ENTRY         n=5  1 text entered | 0 cancelled | -FNVNX_HE_BADINPUT (max_len 0 or > 500, out or n null) | -(the applet's Horizon result)
- *                            host_textentry.inc:host_text_entry                                               test:text_entry
+ * test:text_entry
  * 37 UNMAP_RANGE       n=2  0 | 0x1759 (size 0, addr+size wraps, addr or size not 4 KiB aligned) | 0xD401 (the range is not inside a window the host
  *                            claimed at start, or a page of it was not mapped by map_fixed: nothing done)
- *                            host_platform.inc:pf_unmap_range, host_vm.inc:host_unmap_range                   test:unmap_range
+ *  test:unmap_range
  * 38 THREAD_CPU        n=0  the index of a core in the calling thread's affinity mask, the one it runs on at the call; always succeeds
  *  test:thread_cpu
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.

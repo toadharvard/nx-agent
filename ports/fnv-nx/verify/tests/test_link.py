@@ -112,7 +112,7 @@ def main():
     W = {"toy/w.c": 'extern void wf(void) __attribute__((weak));\nvoid f_w(void) { if (wf) wf(); }\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rw = build(mk("weak", main_rec(), W), SS)
     check("weak undefined reference: red at ldcheck:<root>, naming it", rw["status"] == "red" and rw["failure"]["stage"] == "ldcheck:" + ROOT
-          and any("weak:wf" in x for x in rw["failure"]["stderr"]) and rw["elf"] is None, err_text(rw))
+          and any("weak-undefined:wf" in x for x in rw["failure"]["stderr"]) and rw["elf"] is None, err_text(rw))
     # (c) an R_AARCH64_P32_ABS32 in .rodata of a position independent link
     A = {"toy/r.c": '__asm__(".section .rodata\\n.balign 4\\n.word f_b\\n.text\\n");\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rr = build(mk("abs32", main_rec(), A), SS)
@@ -188,11 +188,24 @@ def main():
     rs3 = build(mk("shared-und", host_rec("shared", version_script="exp.map"), UND), SS)
     check("kind shared: an undefined symbol no library defines is red at ldcheck:<root>", rs3["status"] == "red" and rs3["failure"]["stage"] == "ldcheck:" + ROOT
           and any("so_fn" in x for x in rs3["failure"]["stderr"]), err_text(rs3))
+    # link.libs.system: any file of a package env.json pins (libstdc++6-arm64-cross here), nothing else
+    LIBC = "/usr/aarch64-linux-gnu/lib/libstdc++.so.6"   # libstdc++6-arm64-cross, a package env.json pins
+    PIN = dict(NONE, **{"toy/s.c": "void *_Znwm(unsigned long);\nint f_a(void) { return _Znwm(8) != 0; }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"})
+    rs4 = build(mk("shared-lib", host_rec("shared", version_script="exp.map", libs={"system": [LIBC]}), PIN), SS)
+    check("kind shared: link.libs.system names a library of a pinned package (libstdc++6-arm64-cross) that defines the name through its .dynsym: green", rs4["status"] == "green", err_text(rs4))
     so = BASE + "/libtoyso.so"
     open(BASE + "/so.c", "w").write("int so_fn(void) { return 5; }\n")
     subprocess.run([CC, "-shared", "-nostdlib", "-fPIC", "-o", so, BASE + "/so.c"], check=True)
-    rs4 = build(mk("shared-lib", host_rec("shared", version_script="exp.map", libs={"system": [so]}), UND), SS)
-    check("kind shared: link.libs.system defines the name through its .dynsym: green", rs4["status"] == "green", err_text(rs4))
+    rs4b = build(mk("shared-unpinned", host_rec("shared", version_script="exp.map", libs={"system": [so]}), UND), SS)
+    check("kind shared: a system library no pinned package owns is red at ld:<root>, naming it", rs4b["status"] == "red" and rs4b["failure"]["stage"] == "ld:" + ROOT
+          and any(so in x and "no package that env.json pins" in x for x in rs4b["failure"]["stderr"]), err_text(rs4b))
+    # link.loader: the defined set of the declared loader root may stay undefined in a shared image
+    LDR = T + "loader"
+    rs5 = build(mk("shared-loader", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (LIB_REC, {"l.c": "int so_fn(void) { return 5; }\n"}))]), SS)
+    check("kind shared: a name the declared loader root defines may stay undefined: green", rs5["status"] == "green", err_text(rs5))
+    rs6 = build(mk("shared-loader-other", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (LIB_REC, {"l.c": "int other_fn(void) { return 5; }\n"}))]), SS)
+    check("kind shared: a loader that does not define the name leaves it red at ldcheck:<root>", rs6["status"] == "red" and rs6["failure"]["stage"] == "ldcheck:" + ROOT
+          and any("so_fn" in x for x in rs6["failure"]["stderr"]), err_text(rs6))
     e7 = errs(host_rec("shared"), [], "novs")
     check("kind shared needs a version_script, a pie needs a script, a pie takes aarch64linux32 only", any("version_script" in e for e in e7)
           and any("a pie" in e or "pie" in e for e in errs(main_rec(flags=["-m", "aarch64linux"]), [], "piemu")), e7)
