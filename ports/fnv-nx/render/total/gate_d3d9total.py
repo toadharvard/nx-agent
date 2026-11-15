@@ -383,7 +383,7 @@ def total_outputs(inp, work, cache):
     (st,) = [g for g in rec["generated"] if g["tool"].endswith("/sm_table.py")]
     exts = {e["at"]: e for e in rec["external"]}
     gen = os.path.join(work, "gen")
-    os.makedirs(gen)
+    os.makedirs(os.path.join(gen, "inc"))      # the launcher creates the parents of the declared outputs (the generator does not)
     args = []
     for a in st["args"]:
         if a.startswith("/ext/"):
