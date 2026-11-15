@@ -79,3 +79,15 @@ Certificates = certs.tsv at the commit pinned by lift/proof/formgate_inputs.json
 | x87test.py | rt/x87.c operations vs softfloat | no shape keys (runtime library, not forms) | n/a |
 | citest.py | the 15 msvcrt _CI* entries (rt/msvcrt_ci.cc, rt/fmath.c) | no shape keys (runtime entries) | n/a |
 Reading: the instest family (instest, instest_extra) is what the forms certificates replace, key by key, once certs.tsv has rows (int first; simd/x87 wait for the certified builders, plan item 2.6). mmxtest, x87dyn (state properties of the runtime) and x87test, citest (runtime library) are not shape-key tests: their replacement is a reference-judged test of rt/x87.c and rt/msvcrt_ci.cc on the boot machine, not certificates.
+
+## Correction (by-construction row #22): the numbers above were retold, not produced
+The counts above (50 / 34 / 10 / 11 Unicorn files ...) were read by hand at head 62b8a2c39 and are superseded. Numbers come from these commands, run at commit a5af25537 (branch claude/fnv-l3b-lift-w3b), in ports/fnv-nx/lift:
+
+| what | command | result at a5af25537 |
+|---|---|---|
+| python files in lift test dirs | `git ls-files '*/tests/*.py' 'test/*.py' \| wc -l` | 56 |
+| test_*.py in tests dirs | `git ls-files '*/tests/test_*.py' \| wc -l` | 39 (fnvlift 3, gates 4, proof 16, tools 16) |
+| files that import unicorn | `git grep -l 'import unicorn\|from unicorn' -- '*.py' \| wc -l` | 8 (test/x87test.py, tools/tests/{citest,instest,sehcodes,test_disp,test_exitbridge,test_imp,test_msvcrt}.py) |
+| files defining a stand-in image `class Fake` | `git grep -l 'class Fake' -- '*.py' \| wc -l` | 3 |
+
+The doubles census itself is a gate class (test binary symbols ∩ product symbols = ∅, owner L1), so the count of tests with doubles is the output of that gate at a commit, not this note. This note's tables are a worklist, not a result.
