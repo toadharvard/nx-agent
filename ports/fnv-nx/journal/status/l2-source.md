@@ -336,3 +336,12 @@ After the first frame:
 - Orchestrator: guest stages on cand2 still run the linux-gnu triplet against host glibc; L6 w6 measured it on 644d66b36. L1 cand3 adds -nostdinc and the runtime sysroot. The aarch64-none-elf mirror pin (phase B) goes straight to L1 for cand3. Until then guest objects are measurements. Phase B path: w3 MLIB1, then the farm's stage 1 and libraries, then the MANIFEST and two equal clean builds, then the pin to L1.
 - S23 (b): w3 55c706557 verify/roots/s23-layout (test root, `--limit 3`) is red in the prepared decomp tree. A forward declaration uses the class-key `class` for an SDK union (fnvnx_win32.h:127, _ULARGE_INTEGER), which -fpermissive used to hide. The rule: derive the class-key from the PDB UDT kind and regenerate the tree (w3, L2's generator).
   - Decision: the none-elf repin for cand3 does not wait for S23 (b). The empty-base hunk counts as measured, not proven, until S23 (b) shows 0 differences. A difference means a fix by rule and one more repin. The orchestrator is told.
+- w2 f7d8f7a05, group B: 239 → 10.
+  - Cause: GCC gave order's private temps the slots of dead escaping variables (162 of 164 overlaps).
+  - Rule NO-MIX: each private memory variable is live from entry, so a slot is all-private or all-shared. Tests nomix2 and nomix3.
+  - This switches off slot sharing, so PD-STACK-REUSE goes into PERFDEBT in the same commit. The restoring rule is lifetime-scoped frame rows, gate-side, after the first frame.
+  - Platform cand2 gate over 109 objects: A 543, B 10, C 49.
+  - Open:
+    - name the 10 in Graph::build;
+    - merge cand2's gate, with no in-branch copy, and rerun test_order_local and test_sdd_order;
+    - A and C are with L1 w15 (RO-IDX, RO-PTR, G-IDX, SPILL).
