@@ -25,7 +25,7 @@ VALUES found by a backward walk over the control-flow graph of the caller (every
   - anything else (constants, stack loads, arithmetic, an unknown call result) has no certificate (`constant`, `stack-load`, `computed`, ...).
 A value is accepted iff it is PROD(F) with F a producer of kind function, or an address of / load from Y at a constant offset < size(Y) with
 Y a producer of kind data (sizes from the symbol table), or PARAM(j) whose callers are all accepted.  A requested site with no call is
-`no-site` (a vacuous certificate is no certificate).  Assumptions: the compiler (OWNER 1) and the pinned objdump decode the objects.
+`no-site` (a vacuous certificate is no certificate).  Assumptions: the compiler (ASM-001) and the pinned objdump decoder (ASM-043) decode the objects.
 """
 import re
 
@@ -310,7 +310,7 @@ class Prover:
                 break
             best = max(best, u)
         stack.discard(key)
-        if self.cuts == cuts:              # a result that used the loop assumption is not final: not memoised
+        if self.cuts == cuts:              # a result that used a loop cut is not final: not memoised
             memo[key] = best
         return best
 
