@@ -332,3 +332,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 21:30Z v3 shard 40/54 (farm 20): shapes 345, proved 340, model-gap 5, failed 0, 4,105 s. 43/54 complete. Still running: 8, 11, 14, 24, 25, 28, 49, 51, 52, 53, 54.
 - 21:42Z v3 shard 8/54 (farm 05): shapes 346, proved 335, model-gap 11, failed 0, 3,846 s. Farm 05 is done and archived. 44/54 complete. Still running: 11, 14, 24, 25, 28, 49, 51, 52, 53, 54.
 - 21:43Z v3 shard 24/54 (farm 07): shapes 345, proved 341, model-gap 4, failed 0, 3,803 s. 45/54 complete.
+- 22:01Z w9's SIMD rerun at w7 9c97f84b is partial: 1,724 of 4,290 shapes; proved 1,288, ud-class 330, timeout 106, FAILED 0. About 50 shapes/h; the rest are FP shapes at the 240 s budget. Decision: stop the run and publish a checkpoint. The FP remainder and the timeouts go to w10's simdsplit; the non-FP remainder goes to the farm queue.
