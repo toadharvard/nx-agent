@@ -53,8 +53,13 @@ check("... linkstrict has no comdat finding", g["status"] == "green", (g, txt))
 # 2. different flags (an optimisation level by pragma) give different bytes: red, both copies named
 OPT = "#pragma GCC optimize(\"O0\")\n"
 st, (uni, red), g, txt = run({"toy/x1.cc": TEMPLATE % "A", "toy/x2.cc": OPT + TEMPLATE % "B"})
-check("a unit built with another optimisation level (O0 against the root's O2): odr red, both objects named", any("x1.cc" in r and "x2.cc" in r for r in red.values()), (uni, red))
-check("... linkstrict: undecidable: no definition record", g["status"] == "red" and "undecidable: no definition record" in g["detail"], (g, txt))
+check("a unit built with another optimisation level (O0 against the root's O2): bytes differ, the definition records are equal (tier 2): odr green", st == "green" and not red, (uni, red))
+check("... linkstrict green (one entity by its record)", g["status"] == "green", (g, txt))
+# 2b. a different token sequence in the same inline function: tier 2 differs, red in both gates, both objects named
+DIFF = TEMPLATE.replace("return v;", "return v + 0;")
+st, (uni, red), g, txt = run({"toy/x1.cc": TEMPLATE % "A", "toy/x2.cc": OPT + DIFF % "B"})
+check("a different token sequence: odr red `comdat-differs`, both objects named", any(r.startswith("comdat-differs") and "x1.cc" in r and "x2.cc" in r for r in red.values()), (uni, red))
+check("... linkstrict: comdat-differs", g["status"] == "red" and "comdat-differs" in g["detail"], (g, txt))
 
 
 def asm(body):

@@ -115,7 +115,7 @@ def elf_comdat(path):
     A signature that occurs twice in one object keeps both copies in one digest."""
     ids, member, defs = comdat_id.copies(path)
     return (member, {s: i.digest for s, i in ids.items()}, {s: i.undecidable for s, i in ids.items() if i.undecidable},
-            frozenset(n for i in ids.values() for n in i.resolved), defs)
+            frozenset(n for i in ids.values() for n in i.resolved), defs, {s: i.defrec for s, i in ids.items()})
 
 
 OUTLINE = re.compile(r"__aarch64_(cas|swp|ldadd|ldclr|ldeor|ldset)[0-9]+_(relax|acq|rel|acq_rel|sync)")   # libgcc's outline-atomics ABI: __aarch64_<op><bytes>_<memory model>
@@ -171,7 +171,7 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
     HOST (host root prefixes ["<root>/"], exports {name}) or None: rule (d), the host boundary
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function of its arguments."""
     items, out, comdat = [], set(), comdat or {}
-    defs, refs, copies, undec = {}, [], {}, {}
+    defs, refs, copies, undec, recs = {}, [], {}, {}, {}
     for oid, syms in sorted(objs.items()):
         member = comdat.get(oid, ({}, {}))[0]
         for name, val, size, typ, bind, shn in syms:
@@ -183,16 +183,26 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
                 defs.setdefault(name, []).append((oid, bind, shn, typ, member.get(shn) if bind != GLOBAL else None))
         for sig, dg in sorted(comdat.get(oid, ({}, {}))[1].items()):
             copies.setdefault(sig, {})[oid] = dg
+            recs.setdefault(sig, {})[oid] = (comdat.get(oid) + ({},))[5].get(sig) if len(comdat.get(oid)) > 5 else None
         for sig, us in sorted((comdat.get(oid, ({}, {}, {})) + ({},))[2].items()):
             undec.setdefault(sig, []).extend((oid,) + u[1:] for u in us)
     bad = {}
+
+    def state(sig):
+        """link/comdat.py entity over the copies' digests and definition records: 'same' | 'differs' (tier-2 records differ) | 'norecord'"""
+        c = copies[sig]
+        if len(set(c.values())) == 1:
+            return "same"
+        if any(r is None for r in recs[sig].values()):
+            return "norecord"
+        return "same" if len(set(recs[sig].values())) == 1 else "differs"
     for sig, c in sorted(copies.items()):
         items.append(("<comdat>", sig))
         if sig in undec and len(c) > 1:       # one copy has nothing to be the same as: undecidable only matters where copies meet
             u = undec[sig][0]
             out.add(("<comdat>", sig, "identity-undecidable", "object %s section %s offset %d: %s" % u))
-        elif len(set(c.values())) > 1:
-            out.add(("<comdat>", sig, UNDEC, "copies differ across %s" % ", ".join("%s (%s)" % (o, c[o][:12]) for o in sorted(c))[:400]))
+        elif state(sig) != "same":
+            out.add(("<comdat>", sig, UNDEC if state(sig) == "norecord" else "comdat-differs", "copies differ across %s" % ", ".join("%s (%s)" % (o, c[o][:12]) for o in sorted(c))[:400]))
     script = {}   # elf id -> names the link (script or linker), not an object, defines in that ELF
     for eid, syms in elfs.items():
         pre = eid.rsplit("/", 1)[0] + "/"
@@ -209,9 +219,10 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
         items.append(("<defs>", name))
         strong = [d for d in ds if d[1] == GLOBAL and d[2] != COMMON]
         cdef = [d for d in ds if d[4] is not None]
-        differs = any(len(set(copies[d[4]].values())) > 1 or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef)
+        differs = any(state(d[4]) != "same" or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef)
+        dkind = UNDEC if any(state(d[4]) == "norecord" or (d[4] in undec and len(copies[d[4]]) > 1) for d in cdef) else "comdat-differs"
         for kind, why in (("common", any(d[2] == COMMON for d in ds)), ("ifunc", any(d[3] == IFUNC for d in ds)),
-                          ("duplicate-strong", len(strong) > 1), (UNDEC, differs and not strong),
+                          ("duplicate-strong", len(strong) > 1), (dkind, differs and not strong),
                           ("weak-only", not strong and not any(d[2] == COMMON for d in ds) and (not cdef or any(d[4] is None for d in ds)))):
             if why:
                 bad[name] = kind
