@@ -57,7 +57,7 @@ r, t = emit('65678b00')                     # mov eax, gs:[bx+si]
 check('gs + 16-bit addressing: both', 'FNVL_GS_BASE()' in t)
 
 # ---- 16-bit addressing: z3 evaluation of the effective address against base+index+disp mod 2^16
-ROWS = [r.rstrip('\n').split('\t') for r in open(os.path.join(HERE, 'sdm_int_rows.tsv')) if r[0] != '#' and r.strip()]       # expected values: SDM, tests/sdm_int_rows.tsv
+ROWS = [r.rstrip('\n').split('\t') for f in ('sdm_int_rows.tsv', 'sdm_ea16_rows.tsv') for r in open(os.path.join(HERE, f)) if r[0] != '#' and r.strip()]       # expected values: the SDM; sdm_ea16_rows.tsv is generated from SDM Table 2-1 by proof/sdm_rows.py, sdm_int_rows.tsv (stack rows) is still typed
 REG = {'bx': 0, 'bp': 1, 'si': 3, 'di': 4}           # index into (b, c, d, s, i) below
 rng = random.Random(7)
 for _, hx, _cite, terms, disp in (r for r in ROWS if r[0] == 'ea16'):
@@ -72,7 +72,7 @@ for _, hx, _cite, terms, disp in (r for r in ROWS if r[0] == 'ea16'):
         env = {'ebx': (b, 32), 'ebp': (c, 32), 'edx': (d, 32), 'esi': (s, 32), 'edi': (i, 32)}
         got = ev(to_smt(ld.a[0]), env)
         val = {'bx': b, 'bp': c, 'si': s, 'di': i}
-        want = (sum(val[t] & 0xffff for t in terms.split('+')) + int(disp)) & 0xffff
+        want = (sum(val[t] & 0xffff for t in terms.split('+') if t) + int(disp)) & 0xffff
         ok &= got == want
     check('67 %s: address = sum of 16-bit halves mod 2^16' % hx, ok)
 

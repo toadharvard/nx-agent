@@ -1,4 +1,4 @@
-# fnvnx-sdm-cpuid-feature-rows/1 sdm_sha256=a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321 cpumodel_sha256=c9e781ccfa0640199ea3f82621754914984c4c7c37b6d8088eff4775f8ae55ac forms=867 shapes=25233 sites=5007758
+# fnvnx-sdm-cpuid-feature-rows/1 sdm_sha256=a4a62e6a7ba11a76c7753a195b825087306812aac39b930973f9168ee599f321 cpumodel_sha256=465fbd127dd3a55c204db5eb3fe5c20872b4a9bd6b66c752c60cd786e1d8f0e1 forms=867 shapes=25233 sites=5007758
 # source: Intel 64 and IA-32 Architectures SDM combined volumes (pdftotext -layout), opcode tables of Vol. 2A-2D; flag names and bits: Vol. 1 ch. 21 CPUID leaf tables; declared CPU: lift/rt/cpumodel.c
 # form	family	status	needs	value	exec_as	sdm_opcode	sdm_instr	citation	shapes	nsites
 -|00|-	int	found	-	none	-	00 /r	ADD r/m8	SDM ADD Vol. 2A 3-14 opcode table row "00 /r" (no flag column; flags from the #UD CPUID lines of the section)	n=1142	117041
@@ -609,80 +609,79 @@ NP|0F FB|-	simd	found	SSE2	present	-	NP 0F FB /r1	PSUBQ mm1, mm2/m64	SDM PSUBQ V
 NP|0F FC|-	simd	found	MMX	present	-	NP 0F FC /r1	PADDB mm, mm/m64	SDM PADDB/PADDW/PADDD/PADDQ Vol. 2B 4-201 opcode table row "NP 0F FC /r1"	n=9	19
 NP|0F FD|-	simd	found	MMX	present	-	NP 0F FD /r1	PADDW mm, mm/m64	SDM PADDB/PADDW/PADDD/PADDQ Vol. 2B 4-201 opcode table row "NP 0F FD /r1"	n=38	438
 NP|0F FE|-	simd	found	MMX	present	-	NP 0F FE /r1	PADDD mm, mm/m64	SDM PADDB/PADDW/PADDD/PADDQ Vol. 2B 4-201 opcode table row "NP 0F FE /r1"	n=56	92
-map|0F 1E / 0F 1F Reserved-NOP|0F 1E 7D	int	defined-by-opcode-map	-	none	-	0F 1E / 0F 1F Reserved-NOP	-	SDM Appendix A: "Reserved-NOP" opcodes may behave as NOP (?)	n=1	1
-map|0F 1E / 0F 1F Reserved-NOP|0F 1F 1F	int	defined-by-opcode-map	-	none	-	0F 1E / 0F 1F Reserved-NOP	-	SDM Appendix A: "Reserved-NOP" opcodes may behave as NOP (?)	n=1	1
-map|82 /n|82 00 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	3
-map|82 /n|82 04 7F	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 09 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 12 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 13 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 1F 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 20 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	2
-map|82 /n|82 27 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 2B 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 3B 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 3D 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	10
-map|82 /n|82 3F 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 42 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	3
-map|82 /n|82 44 01	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 44 ED	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 46 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 67 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 69 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 6C 73	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 6D 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	2
-map|82 /n|82 6E 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 79 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 7A 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	9
-map|82 /n|82 7F 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 80 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 81 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 83 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 87 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 88 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 95 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 9C 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 A0 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 A4 01	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 B5 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 CF 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	2
-map|82 /n|82 D7 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	2
-map|82 /n|82 DB 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 F3 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|82 /n|82 FA 00	int	defined-by-opcode-map	-	none	-	82 /n	-	SDM Table A-6: Group 1 covers opcodes 80-83, so 82 /n is the Group 1 instruction of 80 /n (?)	n=1	1
-map|C4 /r LES|C4 04 85	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	1
-map|C4 /r LES|C4 74 01	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	2
-map|C4 /r LES|C4 7C 73	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	1
-map|C4 /r LES|C4 85 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	1
-map|C4 /r LES|C4 87 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	1
-map|C4 /r LES|C4 8D 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	1
-map|C4 /r LES|C4 95 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	1
-map|C4 /r LES|C4 96 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	1
-map|C4 /r LES|C4 9A 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	3
-map|C4 /r LES|C4 9B 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	4
-map|C4 /r LES|C4 9C 72	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	4
-map|C4 /r LES|C4 9C E6	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	2
-map|C4 /r LES|C4 A3 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	5
-map|C4 /r LES|C4 AE 00	int	defined-by-opcode-map	-	none	-	C4 /r LES	-	SDM Table A-2: C4 is LES (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 48 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 4D 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 55 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 58 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	2
-map|C5 /r LDS|C5 5B 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 64 7E	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 74 01	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 75 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	2
-map|C5 /r LDS|C5 79 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	2
-map|C5 /r LDS|C5 7C 01	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 84 C7	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 87 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 89 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	2
-map|C5 /r LDS|C5 8C 93	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 98 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 A2 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 AA 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 AB 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
-map|C5 /r LDS|C5 BC 00	int	defined-by-opcode-map	-	none	-	C5 /r LDS	-	SDM Table A-2: C5 is LDS (invalid only in 64-bit mode) (?)	n=1	1
+map|Table A-2|C4 04 85	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	1
+map|Table A-2|C4 74 01	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	2
+map|Table A-2|C4 7C 73	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	1
+map|Table A-2|C4 85 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	1
+map|Table A-2|C4 87 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	1
+map|Table A-2|C4 8D 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	1
+map|Table A-2|C4 95 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	1
+map|Table A-2|C4 96 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	1
+map|Table A-2|C4 9A 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	3
+map|Table A-2|C4 9B 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	4
+map|Table A-2|C4 9C 72	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	4
+map|Table A-2|C4 9C E6	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	2
+map|Table A-2|C4 A3 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	5
+map|Table A-2|C4 AE 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C4 = LESi64 Gz, Mp	n=1	1
+map|Table A-2|C5 48 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 4D 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 55 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 58 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	2
+map|Table A-2|C5 5B 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 64 7E	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 74 01	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 75 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	2
+map|Table A-2|C5 79 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	2
+map|Table A-2|C5 7C 01	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 84 C7	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 87 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 89 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	2
+map|Table A-2|C5 8C 93	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 98 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 A2 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 AA 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 AB 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-2|C5 BC 00	int	defined-by-opcode-map	-	none	-	Table A-2	-	SDM Vol. 2 Appendix A, Table A-2 (PDF page index 2994): C5 = LDSi64 Gz, Mp	n=1	1
+map|Table A-3|0F 1F 1F	int	defined-by-opcode-map	-	none	-	Table A-3	-	SDM Vol. 2 Appendix A, Table A-3 (PDF page index 2996): 0F 1F = NOP /0 Ev	n=1	1
+map|Table A-6 Group 1|82 00 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	3
+map|Table A-6 Group 1|82 04 7F	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	1
+map|Table A-6 Group 1|82 09 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /1 = OR	n=1	1
+map|Table A-6 Group 1|82 12 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /2 = ADC	n=1	1
+map|Table A-6 Group 1|82 13 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /2 = ADC	n=1	1
+map|Table A-6 Group 1|82 1F 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /3 = SBB	n=1	1
+map|Table A-6 Group 1|82 20 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /4 = AND	n=1	2
+map|Table A-6 Group 1|82 27 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /4 = AND	n=1	1
+map|Table A-6 Group 1|82 2B 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /5 = SUB	n=1	1
+map|Table A-6 Group 1|82 3B 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /7 = CMP	n=1	1
+map|Table A-6 Group 1|82 3D 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /7 = CMP	n=1	10
+map|Table A-6 Group 1|82 3F 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /7 = CMP	n=1	1
+map|Table A-6 Group 1|82 42 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	3
+map|Table A-6 Group 1|82 44 01	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	1
+map|Table A-6 Group 1|82 44 ED	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	1
+map|Table A-6 Group 1|82 46 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	1
+map|Table A-6 Group 1|82 67 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /4 = AND	n=1	1
+map|Table A-6 Group 1|82 69 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /5 = SUB	n=1	1
+map|Table A-6 Group 1|82 6C 73	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /5 = SUB	n=1	1
+map|Table A-6 Group 1|82 6D 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /5 = SUB	n=1	2
+map|Table A-6 Group 1|82 6E 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /5 = SUB	n=1	1
+map|Table A-6 Group 1|82 79 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /7 = CMP	n=1	1
+map|Table A-6 Group 1|82 7A 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /7 = CMP	n=1	9
+map|Table A-6 Group 1|82 7F 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /7 = CMP	n=1	1
+map|Table A-6 Group 1|82 80 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	1
+map|Table A-6 Group 1|82 81 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	1
+map|Table A-6 Group 1|82 83 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	1
+map|Table A-6 Group 1|82 87 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /0 = ADD	n=1	1
+map|Table A-6 Group 1|82 88 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /1 = OR	n=1	1
+map|Table A-6 Group 1|82 95 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /2 = ADC	n=1	1
+map|Table A-6 Group 1|82 9C 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /3 = SBB	n=1	1
+map|Table A-6 Group 1|82 A0 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /4 = AND	n=1	1
+map|Table A-6 Group 1|82 A4 01	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /4 = AND	n=1	1
+map|Table A-6 Group 1|82 B5 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /6 = XOR	n=1	1
+map|Table A-6 Group 1|82 CF 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /1 = OR	n=1	2
+map|Table A-6 Group 1|82 D7 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /2 = ADC	n=1	2
+map|Table A-6 Group 1|82 DB 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /3 = SBB	n=1	1
+map|Table A-6 Group 1|82 F3 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /6 = XOR	n=1	1
+map|Table A-6 Group 1|82 FA 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /7 = CMP	n=1	1
 undefined|-|0F 0E	simd	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	129
 undefined|-|0F 0F 00	simd	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	1
 undefined|-|0F 0F 01	simd	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	12
@@ -807,6 +806,7 @@ undefined|-|0F 0F FC	simd	undefined	-	none	-	-	-	no row in the SDM opcode tables
 undefined|-|0F 0F FD	simd	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=2	6
 undefined|-|0F 0F FE	simd	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=2	71
 undefined|-|0F 0F FF	simd	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	3
+undefined|-|0F 1E 7D	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	1
 undefined|-|C0 32 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	1
 undefined|-|C0 71 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	1
 undefined|-|C0 72 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	6

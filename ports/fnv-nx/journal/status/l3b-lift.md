@@ -108,3 +108,56 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - Blocked: #4 (L3a w7 CODEMAP.md).
   - After the first frame: #6 (becomes the L5 record reader), #7, #9, #10, #11, #12, #14, #15, #18, #22 (#22 by w3 now, small).
 - 2026-11-15 01:00: rule-5 decision (orchestrator). Selectors, IDT user vectors and sgdt/sldt/str go in one L5 declared-machine record, sourced from Windows (MS docs, else the Windows 7 x86 trap handler), keyed to the declared-OS record. The 38 remaining sys shapes are specified against it by w4.
+- 2026-11-15 01:10: #UD class = 2,731 (w4 d12dfc498, opmap from SDM Appendix A table cells; fnv-nx-build .../7b2faae276b2-opmap 796346c). The +1 is 0F 1E /r at d3dx9_38:017d20e0, a blank A-3 cell; cause: a hand row lumped it with 0F 1F, now closed by the cell rule. Sent to L3a. Audit #13 done (w3 8c2da433d: IR sha derived from the x86ir external, loads 7c307464; formgate 31/31, certs_build 11/11). Audit #1 reworded: soundness comes from the exhaustive symcheck, which had no gate; symcheck becomes part of gate forms (w3). #5 done (w4 04102380b, declared.json generated). Open: tree_sha of the IR external (MANIFEST cc427662 vs loader ebbc7a42), so w4 uses the loader's hash. x87 carrier: fr is the 80-bit image (L3a); the x87 spec is being revised to exact-vs-binary64 classes from SDM Vol. 1 8.3.
+- 2026-11-15 01:20: audit rows done by w3: #13, #3 (faults.py; switching to L3a's faults.json f67ed0cc), #2 (sdmpriv, SDM-derived privileged set of 53 rows), #8 (ACL2 citation pending), #16 ea16 part, #19/#20 (second prover path deleted, a5af25537), #21 (isla/cache under GATE_CACHE), #22. #1 becomes symcheck-as-gate (in progress). gate_oracle at w3 f55a9405a: 104/110 (missing entries: test_census w3; test_bsfbsr_closed_form, test_declared_gen, test_sdmfeat, test_sysspec w4; test_nativerows L3a).
+  - After the first frame: #16 rest (shape/stack/smtlib/model_patch reference rows; a generator would be a second SDM decoder); #21 isla as a prebuilt external (next-queue farm, FULL=1); #6, #7, #9-#12, #14, #15, #18.
+- 2026-11-15 01:20: L5 published the declared machine record x86sys.json (claude/fnv-l5-platform-w14-osrec 9d6f6d4bd: selectors, ring-3 int vectors 03/04/2a-2e). sgdt/sidt/sldt are undecided; CR4/IOPL are to follow. sysspec readers: w4. x87spec: FYL2X infinity defect fixed (w9 4df05f34); FSCALE, FPATAN and FYL2X tables are now cell tests.
+- 2026-11-15 01:30: lead line e9bb4cbac = merge of w3b 37424079c.
+  - Done: x86ir re-pinned to 8b711fba (tree fdf3f3fd); L3b faults.py replaced by L3a's faults.json reader; symcheck in gate forms (waits for the relift pack's instrs.tsv, since pack 7ef692b5 has none); rep-prefix-ignored cited from ACL2 string.lisp 162-165/213-220; test_rtroot green (it was L3a's pin flags).
+  - gate_oracle at 37424079c: 105/112.
+  - The w4 merge is pending (sail_setup.sh conflict, resolved by w4).
+- 2026-11-15 01:30: L5 x86sys.json 28bbec363: cr4.umip=0 is derived (CPUREF max leaf 4); the opcode copy is deleted. The int-vector source conflict (Wine set with 0x29 against Windows 7) went to the orchestrator; I recommended admitting ReactOS.
+
+## 2026-11-15 04:10Z — resume after the limit reset (integ d65489ae9)
+- Cert farms 05, 07 and 11-16: queue v2 is STOPPED, and nothing from it was published. Cause: the v2 header pins IR 70c8dc39, but the bump pin 7c3074644653 superseded it (w4 0034e98e5; external tools/sail-ir-7c3074644653 8b711fba). The farms wait for v3.
+- w4 (doing):
+  1. merge the lead branch (one IR fetch path in sail_setup.sh);
+  2. queue v3 on IR 7c307464 for pack 7b2faae276b2;
+  3. the bs shapeprove against w1 426d95f8;
+  4. the oracle.json entries;
+  5. SIMD slice 1 (reference).
+  - The sysspec readers landed at 8ed832c07.
+- w3 (doing): the count of sites that depend on undecided x86sys rows, at the L5 head; then audit rows #7, #9-#12, #14 and #15.
+- w9 (doing): the carrier revision; nd.f2xm1.out; fault_kind from faults.py; the SDM tables F2XM1/FPTAN/FSIN/FSINCOS/FPREM; the NaN rule against Table 4-8.
+- Blocked:
+  - the 2.6 certs wait for queue v3 (w4);
+  - symcheck waits for the relift instrs.tsv (L3a w1);
+  - the #UD certificates wait for L3a w6;
+  - row #4 waits for CODEMAP.md (L3a w7).
+
+## 2026-11-15 09:15Z
+- All 8 farms confirm: the 24 v2 shards ran to the 2 h background limit, emitted no SHAPEPROVE line, published nothing, and no process survived.
+  - Cause (rule 8): the runner keeps results only at the end of a shard.
+  - Class fix, given to w4 for v3: per-shape results keyed by (shape_sha, IR pin, prover hash), published incrementally, with skip on restart; the shard count is derived from the measured per-shape rate.
+  - Orchestrator rule 8 fix, also in v3: the queue reads the IR pin from proof/sail_pins.txt at its head, and the runner checks it against the pin at its own head before the first shard.
+- bs class proof (w4, w1 426d95f8, IR 7c307464):
+  - 96 class shapes, 48 proved and 48 no-form. The no-form ones are F3 tzcnt/lzcnt, which have no builder. Sent to L3a: register them on bs() by decode under CPUREF.
+  - The pack universe (25,233 shapes) holds 0 bs shapes.
+- sysspec readers done (w4 8ed832c07). IN/OUT/INS/OUTS are uncertified until L5 adds the tss_io_bitmap row (asked of w14).
+- L5 w14 2895b30fe: 0x29 is in int_ring3.excluded as undecided; vectors 3, 4 and 0x2d come from Wine 9.0. w3 counts the dependent sites at this head.
+
+## 2026-11-15 09:20Z — the weekly budget binds (integ 9ea2d5403)
+- Workers kept: w4 (queue v3, the 2.6 certs, sysspec) and w9 (the x87 carrier). w3 finishes its dependent-site count, then it is archived; its audit rows #7, #9-#12, #14 and #15 wait until after the first frame.
+- Farms kept: 05, 07, 11 and 12. Archived: 13, 14, 15 and 16. Their branches stay.
+- tss_io_bitmap: L5 w14 3646ebab3 holds "no port permitted" with no opcode copy. The I/O instruction set stays in sdm_priv_rows.tsv.
+- L3a takes the tzcnt/lzcnt class into img.dec: a feature-dependent encoding is decoded under CPUREF (tzcnt→bsf, popcnt→#UD, pause→nop).
+
+## 2026-11-15 09:25Z — queue v3 started (2.6)
+- Queue v3: fnv-nx-build l3b-lift/queue/7b2faae276b2-c4ba6f912412-v3 at 20ffd0c3.
+  - queue.tsv sha 48fddcc0, queue_id f3eb5096ad36.
+  - 18,649 integer rows. Pack 7ef692b5b, prover w4 c4ba6f912, IR 7c307464.
+  - Out of this queue: x87 2,063, SIMD 4,291, sys 129, and 101 integer shapes without a Form.
+- Farms 05/07/11/12 run K=1-6, 7-12, 13-18 and 19-24 of 24, three at a time.
+  - Resume rule: a shard killed at the 2 h limit is rerun with the same command; the appended jsonl skips shapes already proved.
+- w4 merged the lead branch (cdd9ce1b1): one IR fetch path. Next: the oracle.json entries, then SIMD slice 1 (prover state for xmm/mm/mxcsr/fr/fptr).
+- Sent to L3a w1: the pinsrw/pextrw/pshufw lane index must be an ite over the masked immediate.

@@ -1,10 +1,10 @@
 """`.fnvl.sites` records (16 bytes: kind, x86 pc, host start, host end) on a compiled unit: each record is kind and pc plain, start and end R_AARCH64_P32_ABS32 in .text, and the range is exactly
-the exclusive sequence (kind 1: ldaxr .. cbnz) or the one store / the one bfxil (kind 2). Needs aarch64-linux-gnu-g++ (flags of the pack without the plugin attribute error).
-    ranges_test.py [--work DIR]"""
-import os, re, subprocess, sys
+the exclusive sequence (kind 1: ldaxr .. cbnz) or the one store / the one bfxil (kind 2). Compiled by a stage of the recipe (toolchain/tests/plugbuild.py), no direct compiler call.   test_ranges.py"""
+import os, re, shutil, subprocess, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools'))
-import fnvlift as L, liftgen
+sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
+import fnvlift as L
+import plugbuild as pb
 
 SRC = '''
 extern "C" void L_t(u32 ft0){ u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,c0=0,c2=0,c3=0;
@@ -17,12 +17,11 @@ extern "C" void L_t(u32 ft0){ u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,c0=0,c2=0,c3=0;
 
 
 def main():
-    work = sys.argv[sys.argv.index('--work') + 1] if '--work' in sys.argv else os.path.join(LIFT, '..', '..', '..', 'build_ranges_test')
-    os.makedirs(work, exist_ok=True)
+    work = tempfile.mkdtemp(prefix='ranges-')
     src = os.path.join(work, 't.cc'); obj = os.path.join(work, 't.o')
     open(src, 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + SRC)
-    flags = [f for f in liftgen.resolved_flags() if f != '-Werror=attributes'] + ['-Wno-attributes']
-    subprocess.check_call(['aarch64-linux-gnu-g++', '-x', 'c++', '-c'] + flags + ['-o', obj, src])
+    r = pb.compile(src, obj, [pb.build(n, work) for n in ('sdd', 'names', 'dispatch')])
+    assert r.returncode == 0, r.stderr[-1500:]
     dis = subprocess.run(['aarch64-linux-gnu-objdump', '-d', obj], capture_output=True, text=True, check=True).stdout
     insn = {int(m.group(1), 16): m.group(2).split()[0] for m in re.finditer(r'^\s*([0-9a-f]+):\t[0-9a-f]{8} *\t(.*)$', dis, re.M)}
     out = {}
@@ -49,6 +48,7 @@ def main():
     got = sorted((r[0], r[1]) for r in out['sites'])
     assert got == [(1, 0x401000), (2, 0x402000), (2, 0x402002), (2, 0x402004), (2, 0x402006)], got      # one record per instruction
     print('ranges_test ok: %d records' % len(got))
+    shutil.rmtree(work, ignore_errors=True)
 
 
 main()

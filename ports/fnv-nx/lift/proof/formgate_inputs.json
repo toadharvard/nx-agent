@@ -12,13 +12,13 @@
   {
    "name": "x86ir",
    "repo": "fnv-nx-build",
-   "ref": "tools/x86-proof-ir",
-   "commit": "baf8bc809f84759ee941285f0de76a9d1064126b",
-   "tree_sha256": "2dc6263d77db4448148e2041c08f06b034fe26e6615c4629921e66c02d913afa",
+   "ref": "tools/sail-ir-7c3074644653",
+   "commit": "8b711fba9b9387c54889d4aa6c6fb38dc5007ba4",
+   "tree_sha256": "fdf3f3fdf413f998b86750412d8c3781413a722998d2a5c24ccad9e37806297c",
    "at": "/ext/x86ir"
   }
  ],
  "shapes": "liftpack/shapes.tsv",
  "certs": "certs/certs.tsv",
- "model_sha256": "7c3074644653d2976cbb101ae993e94f2a09c9b7a3b574d3c74f6a80278d079c"
+ "instrs": "liftpack/instrs.tsv"
 }

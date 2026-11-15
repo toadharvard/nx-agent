@@ -15,7 +15,7 @@
 #   (certs_build.py --id: the proof IR sha256; queue id = sha256 over the queue's (key, shape_sha) lines, so the same queue and K/N is the same branch).
 #   Already published: nothing is re-run.
 # Resumable: rerun the same command after an interruption (the jsonl is appended, shapes already in it are skipped).
-# Env: FNVNX_BUILD (clone of fnv-nx-build, default /home/user/fnv-nx-build)  FNVNX_WORK (default /home/user/l3work/farm-shapeprove)
+# Env: GATE_CACHE (required: the verdict cache; the Sail toolchain and caches are under it)  FNVNX_BUILD (clone of fnv-nx-build)  FNVNX_WORK (default $GATE_CACHE/farm-shapeprove)
 #      SHAPES_BRANCH (default l3b-lift/shapes; the census branch, KEYS.tsv-pinned; a re-pinned census goes to ANOTHER branch, the running farms read the head of this one)  BRANCH_PREFIX (default l3b-lift/shapeprove; tests use l3b-lift/shapeprove-test)  PUBLISH (1 default; 0: prove only)
 #      TIMEOUT (s per shape, default 600)  EIP (sym|fixed, default sym)  SLICE (default 1)  LIMIT (first LIMIT shapes of the shard, default all)
 #      VMEM_KB (address-space limit per process, default 6000000)  SHAPES (a shapes.tsv: skips the fetch of l3b-lift/shapes; local tests)
@@ -25,9 +25,10 @@ PINQ=
 if [ "${1:-}" = "--queue" ]; then PINQ=${2:?usage: farm_shapeprove.sh [--queue FILE] K N}; shift 2; [ -f "$PINQ" ] || { echo "queue file $PINQ not found" >&2; exit 1; }; fi
 K=${1:?usage: farm_shapeprove.sh [--queue FILE] K N}; N=${2:?usage: farm_shapeprove.sh [--queue FILE] K N}
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd)
-B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/farm-shapeprove}
+B=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build)}; W=${FNVNX_WORK:-${GATE_CACHE:?GATE_CACHE not set}/farm-shapeprove}
 PREFIX=${BRANCH_PREFIX:-l3b-lift/shapeprove}; PUBLISH=${PUBLISH:-1}
-WORKDIR=${WORK:-/home/user/l3work/proof}
+SAILBASE="${GATE_CACHE:?GATE_CACHE (the verdict cache) is not set}/sail/$(sha256sum "$HERE/sail_pins.txt" | cut -c1-12)"      # the toolchain and its caches live in the verdict cache, keyed by the pins (proof/sail_pins.txt)
+WORKDIR=${WORK:-$SAILBASE/work}
 mkdir -p "$W/in"
 exec 9> "$W/in/.lock"; flock 9      # shards started together on one machine fetch the inputs one after the other
 T0=$(date +%s)
@@ -51,15 +52,24 @@ if ! python3 -c 'import capstone, keystone' 2>/dev/null; then
     python3 -m pip install -q --break-system-packages --no-index --no-deps --require-hashes --find-links "$W/in/pywheels" -r "$REQ"
 fi
 
-# 1. toolchain: the installed one, else built from the mirror branch (sail_setup.sh prints the IR sha256 and exits 1 unless it equals the pin)
-ISLA=${ISLA_EXEC:-/home/user/rems-project/isla/target/release/isla-execute-function}
-if [ ! -x "$ISLA" ] || [ ! -f "$WORKDIR/sail/x86_proof.ir" ]; then
+# 1. toolchain: the installed isla binary, else built from the mirror branch (sail_setup.sh).  The proof IR is NOT built here: it is fetched by its sha (the pin of
+#    sail_pins.txt) from the external tools/sail-ir-<sha 12 hex> of the artifacts repository, which farm/sail_build.sh produced and published once (PUBLISH_IR=1)
+ISLA=${ISLA_EXEC:-$SAILBASE/rems-project/isla/target/release/isla-execute-function}
+export ISLA_EXEC=$ISLA SAIL_WORK=$WORKDIR      # tests (gate_tests strips GATE_*) and model_sail.py read the toolchain through these
+if [ ! -x "$ISLA" ]; then
     fetch_branch tools/sail-mirror "$W/in/sail-mirror"
     MIRROR="$W/in/sail-mirror" bash "$FARM/sail_setup.sh" > "$W/sail_setup_$K.log" 2>&1 || { echo "sail_setup.sh failed (see $W/sail_setup_$K.log)" >&2; exit 1; }
 fi
-bash "$FARM/sail_build.sh" > "$W/sail_build_$K.log" 2>&1 || { echo "sail_build.sh failed (see $W/sail_build_$K.log): the toolchain / IR is not the pinned one" >&2; exit 1; }
+PIN=$(awk '$1=="x86_proof.ir"{print $NF}' "$HERE/sail_pins.txt")
+mkdir -p "$WORKDIR/sail"
+if [ -z "${SAIL_IR:-}" ] && [ "$(sha256sum "$WORKDIR/sail/x86_proof.ir" 2>/dev/null | cut -d' ' -f1)" != "$PIN" ]; then
+    fetch_branch "tools/sail-ir-${PIN:0:12}" "$W/in/sail-ir"
+    [ "$(sha256sum "$W/in/sail-ir/ir/x86_proof.ir" | cut -d' ' -f1)" = "$PIN" ] || { echo "the external tools/sail-ir-${PIN:0:12} does not hold the pinned IR $PIN" >&2; exit 1; }
+    cp "$W/in/sail-ir/ir/x86_proof.ir" "$WORKDIR/sail/x86_proof.ir"
+fi
 SHA=$(sha256sum "${SAIL_IR:-$WORKDIR/sail/x86_proof.ir}" | cut -d' ' -f1)
-grep -q "^x86_proof.ir .* $SHA\$" "$HERE/sail_pins.txt" || { echo "IR sha256 $SHA is not the pin in sail_pins.txt" >&2; exit 1; }
+PINSHA=$(env -u SAIL_IR python3 -I "$HERE/certs_build.py" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
+[ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of formgate_inputs.json)" >&2; exit 1; }
 
 if [ -n "$PINQ" ]; then
     # 2. the pinned queue: its header names the IR and the queue id; the rows must hash to it

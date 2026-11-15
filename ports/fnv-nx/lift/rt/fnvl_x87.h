@@ -9,7 +9,7 @@
 #include "x87.h"
 #include "fmath.h"
 /* FNVL_F2I marks a float -> integer conversion helper: the only functions whose bodies may convert a float to an integer (x86 semantics:
-   out of range / NaN -> integer indefinite). toolchain/f2i_check/fnvnx_f2i_check.cc finds any other conversion in a unit; proof/gate_fpexact.py judges. */
+   out of range / NaN -> integer indefinite). toolchain/ftoi/fnvnx_ftoi.cc (mode lifted) rejects any other conversion in a unit; proof/gate_fpexact.py judges. */
 #define FNVL_F2I __attribute__((fnvnx_f2i))
 enum { FK_E, FK_F64, FK_F32, FK_I16, FK_I32, FK_I64, FK_M80 };
 #define FQ64 (1ull<<51)
@@ -48,7 +48,9 @@ static __attribute__((noinline)) void fown_set(u32 f){ u32 o=fown(), fl=fnvl_fp_
 #define FOWN_SSE() do{ if(__builtin_expect(fown()!=2u,0)) fown_set(2u); }while(0)
 static inline u32 fx_live(void){ return fown()==1u?fnvl_fp_x87_flags():0; }          /* the x87 flags still in the FPSR */
 static inline u32 sse_live(void){ return fown()==2u?(fnvl_fp_x87_flags()&0x3fu):0; }   /* the SSE flags still in the FPSR: MXCSR image = c->mxcsr | sse_live() */
-static inline void fx_flags_clear(void){ c->fex&=~FEX_X87; if(fown()==1u) fnvl_fp_x87_clear(); }   /* FNCLEX / FNINIT: the x87 set := 0 */
+static inline void fx_flags_clear(void){ c->fex&=~FEX_X87; c->fsw=0; if(fown()==1u) fnvl_fp_x87_clear(); }   /* FNCLEX / FNINIT: the x87 set := 0 */
+/* ES (FSW bit 7) and B (bit 15): c->fsw as loaded by FRSTOR / FLDENV / a CONTEXT restore, plus the SDM rule ES = B = ((exception flags & ~FCW & 0x3f) != 0) over the flags held now */
+static inline u32 fx_esb(void){ u32 fl=(c->fex&0x3fu)|(fx_live()&0x3fu); return (c->fsw|((fl&~c->fcw&0x3fu)?0x8080u:0u))&0x8080u; }
 /* exact 80-bit image of a carrier */
 static inline fnvl_f80 fv_x(fv a){ u32 f=0; fnvl_f80 r;
   switch(a.k){ case FK_F64: return fnvl_x_from_f64(a.v,&f); case FK_F32: return fnvl_x_from_f32((u32)a.v,&f);
@@ -100,7 +102,7 @@ static inline u32 fv_cmp(fv a,fv b){ u32 f=0;
 #define FCMP(A,B) do{ u32 r_=fv_cmp((A),(B)); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; c->fex&=~0x200u; }while(0)
 #define FCMPI(A,B) do{ u32 r_=fv_cmp((A),(B)); zf=(r_>>14)&1; pf=(r_>>10)&1; cf=(r_>>8)&1; of=sf=af=0; }while(0)
 #define FXAM(F) do{ fv f_=(F); u32 r_=fnvl_x_xam(fv_x(f_),f_.k==0); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; c->fex=(c->fex&~0x200u)|(r_&0x200u); }while(0)
-#define FSWV_(TOP) ((u32)(TOP)<<11|(c3<<14)|(c2<<10)|(c0<<8)|fx_live()|(c->fex&FEX_X87))
+#define FSWV_(TOP) ((u32)(TOP)<<11|(c3<<14)|(c2<<10)|(c0<<8)|fx_live()|(c->fex&FEX_X87)|fx_esb())
 #ifdef FNVL_TRACE
 extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivered to the guest (sticky exception bits are not compared with the x86 oracle) */
 #define FSWV(TOP) fnvl_trace_sw(FSWV_(TOP))
@@ -130,7 +132,7 @@ static inline fv dyn_rd(u32 i){ fv *p=&c->fx[(c->ftop+i)&7]; if(__builtin_expect
 static inline void dyn_push(fv v){ u32 t=(c->ftop-1)&7; if(__builtin_expect(c->fx[t].k!=0,0)){ c->fex|=0x41; v=FV_INDEF; } c->ftop=t; c->fx[t]=v; }
 static inline void fv_free(fv *p){ if(p->k){ if(p->k!=FK_M80){ fnvl_f80 x=fv_x(*p); p->v=x.m; p->e=x.se; } p->k=0; } }   /* tag := empty; the register KEEPS its 80-bit image (MMX reads it, SDM 9.2) */
 static inline void dyn_pop(void){ fv *p=&c->fx[c->ftop&7]; if(__builtin_expect(!p->k,0)) c->fex|=0x41; fv_free(p); c->ftop=(c->ftop+1)&7; }
-static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) fv_free(&c->fx[i]); c->ftop=0; c->fcw=0x37f; fx_flags_clear(); c->fip=c->fdp=0; fnvl_fp_set_rc_x87(0); }
+static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) fv_free(&c->fx[i]); c->ftop=0; c->fcw=0x37f; fx_flags_clear(); c->fip=c->fdp=0; c->fop=c->fcs=c->fds=c->fsw=0; fnvl_fp_set_rc_x87(0); }
 /* fbld / fbstp: packed BCD (rt/x87.c; ASM-216: digits above 9 follow the arithmetic formula d*10^k). The value of an 18-digit number is an integer below 10^18: exact in the M80 carrier. */
 static inline fv fv_ldbcd(u64 lo,u32 hi){ u8 b[10]; u16 h=(u16)hi; __builtin_memcpy(b,&lo,8); __builtin_memcpy(b+8,&h,2); fnvl_f80 r=fnvl_x_from_bcd(b); return fvmk(FK_M80,r.m,r.se); }
 static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnvl_x_to_bcd(fv_x(a),c->fcw,b,&f); __builtin_memcpy(lo,b,8); __builtin_memcpy(&h,b+8,2); *hi=h; FM_FL(f); }
@@ -138,18 +140,22 @@ static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnv
    opcode (FOP) of the last non-control instruction it executed, and the data pointer (FDP, FDS) of its memory operand; the control instructions (FNINIT, FNCLEX, FLDCW, FNSTCW, FNSTSW,
    FNSTENV, FLDENV, FNSAVE, FRSTOR, WAIT) leave them alone; FNINIT / FNSAVE (re-initialisation) zero them. State: c->fip (address of the first byte of the instruction, prefixes included) and
    c->fdp (offset of the last memory operand, no segment base), written by the lifter's x87 entry (f_x87.py) before every non-control x87 instruction (fdp only with a memory operand).
-   ASM-212: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged. ASM-213: FDS is DS whenever FDP != 0 (an FS-relative operand is
-   reported with the DS selector: the selector is not kept per operand). ASM-214: FOP is not stored, it is the low 11 bits of the two opcode bytes at FIP (first byte & 7, second byte), read
-   from the code when an image is written; FIP == 0 (no x87 instruction since FNINIT / thread start) gives the FNINIT state: FIP = FCS = FOP = FDP = FDS = 0. FCS and FDS are the model's
-   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.cc). ASM-215: reserved bits of the image are 0. */
-static inline u32 fx_fop(void){ u32 a=c->fip, b;
-  if(!a) return 0;
-  for(int n=0;n<14;n++){ b=M8(a); if(b==0x66||b==0x67||b==0xf0||b==0xf2||b==0xf3||b==0x2e||b==0x36||b==0x3e||b==0x26||b==0x64||b==0x65) a++; else break; }
-  return ((M8(a)&7u)<<8)|M8(a+1u); }
+   ASM-212: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged.
+   FOP, FCS and FDS are guest state (struct cpu fop, fcs, fds): written by fnvlift's x87 entry (f_x87.py ptrs()) before every non-control x87 instruction (FCS = the CS selector; FDS only with a
+   memory operand: the explicit segment override, else SS for an ebp/esp base, else DS, SDM Vol 1 3.7.2), and loaded verbatim by fx_env_ld, FRSTOR and the rt/seh.cc CONTEXT restore. The 16-bit
+   image (fig 8-11) keeps FOP. FNINIT / FNSAVE give the FNINIT state: FIP = FCS = FOP = FDP = FDS = 0. ASM-215: reserved bits of the image are 0. */
+/* SDM Vol 1 8.1.8: CPUID.(EAX=7,ECX=0):EBX[6] (FDP/FDS updated only on an unmasked exception) and EBX[13] (FCS/FDS deprecated, stored as 0) exist only when leaf 7 is reported. The declared CPU
+   reports no leaf 7 (max basic leaf below 7), so both bits are 0 and the per-instruction update above is its behaviour. If leaf 7 is ever reported, both bits must be honoured from CPUREF. */
+#ifdef __cplusplus
+static_assert(FNVL_MAX_BASIC < 7u, "declared CPU has no cpuid leaf 7: FDP/FDS and FCS/FDS behaviour of SDM 8.1.8 is the per-instruction one");
+#else
+_Static_assert(FNVL_MAX_BASIC < 7u, "declared CPU has no cpuid leaf 7");
+#endif
+static inline u32 fx_fop(void){ return c->fop&0x7ffu; }
 /* tag of a physical register (SDM 8.1.7): 0 valid, 1 zero, 2 special (NaN, infinity, denormal, unsupported), 3 empty */
 static inline u32 fx_tag(const fv *p){ if(!p->k) return 3; fnvl_f80 x=fv_x(*p); u32 e=x.se&0x7fff; if(e==0x7fff) return 2; if(e==0) return x.m?2:1; return (x.m>>63)?0:2; }
 /* fnstenv / fnsave image of the environment (32-bit layout fig 8-9 / 16-bit fig 8-11: FCW, FSW (TOP in), FTW (2-bit tags from the contents), FIP, FCS | FOP<<16, FDP, FDS) */
-static inline __attribute__((always_inline)) void fx_env_st(u32 a,u32 d32,u32 fsw,u32 cs,u32 ds,u32 pc){ u32 ftw=0, ip=c->fip, dp=c->fdp, cs_=ip?cs:0, op=fx_fop(), ds_=dp?ds:0;
+static inline __attribute__((always_inline)) void fx_env_st(u32 a,u32 d32,u32 fsw,u32 cs,u32 ds,u32 pc){ u32 ftw=0, ip=c->fip, dp=c->fdp, cs_=c->fcs, op=fx_fop(), ds_=c->fds; (void)cs; (void)ds;
   for(u32 p=0;p<8;p++) ftw|=fx_tag(&c->fx[p])<<(2*p);
   if(d32){ M32(a)=c->fcw&0xffffu; FSW_ST32(a+4u,fsw&0xffffu,pc); M32(a+8u)=ftw; M32(a+12u)=ip; M32(a+16u)=cs_|(op<<16); M32(a+20u)=dp; M32(a+24u)=ds_; }
   else { M16(a)=(u16)c->fcw; FSW_ST16(a+2u,fsw,pc); M16(a+4u)=(u16)ftw; M16(a+6u)=(u16)ip; M16(a+8u)=(u16)cs_; M16(a+10u)=(u16)dp; M16(a+12u)=(u16)ds_; } }
@@ -161,9 +167,11 @@ static inline __attribute__((always_inline)) void fx_env_st(u32 a,u32 d32,u32 fs
   fnvl_x87_init(); c0=c2=c3=0; }while(0)
 /* fldenv / frstor (SDM Vol 1 8.1.10, 32-bit layout fig 8-9, 16-bit layout fig 8-11; assumptions ASM-210 and ASM-211: see f_x87_ctl.py env()). Dynamic stack only. The image words: FCW at 0,
    FSW at w, FTW at 2w with w = 4 (32-bit operand size) or 2; FIP at 12 / 6, FDP at 20 / 10; frstor's ST(i) images follow the 7 dwords (28 bytes) / 7 words (14 bytes) of the environment,
-   10 bytes each in ST order. FIP and FDP are loaded; FCS, FOP, FDS are derived (ASM-214, ASM-213). */
-static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+2*w); FLDCW(M16(a)); c->ftop=(fsw>>11)&7; c->fex=(c->fex&~FEX_X87)|(fsw&FEX_X87); if(fown()==1u) fnvl_fp_x87_clear();
-  c->fip=w==4?M32(a+12u):M16(a+6u); c->fdp=w==4?M32(a+20u):M16(a+10u); return fsw; }
+   10 bytes each in ST order. FIP and FDP are loaded; FCS, FOP and FDS are loaded from the image into c->fcs / c->fop / c->fds. */
+static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+2*w); FLDCW(M16(a)); c->ftop=(fsw>>11)&7; c->fex=(c->fex&~FEX_X87)|(fsw&FEX_X87); c->fsw=fsw&0x8080u; if(fown()==1u) fnvl_fp_x87_clear();
+  c->fip=w==4?M32(a+12u):M16(a+6u); c->fdp=w==4?M32(a+20u):M16(a+10u);
+  if(w==4){ u32 e_=M32(a+16u); c->fcs=e_&0xffffu; c->fop=(e_>>16)&0x7ffu; c->fds=M16(a+24u); } else { c->fcs=M16(a+8u); c->fds=M16(a+12u); }       /* the 16-bit protected layout has no FOP word: it keeps its value */
+  return fsw; }
 #define FLDENV(A,D32) do{ u32 ftw_, a_=(A), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
   for(u32 p_=0;p_<8;p_++){ if(((ftw_>>(2*p_))&3)==3) c->fx[p_].k=0; else if(!c->fx[p_].k) c->fx[p_]=FV_INDEF; } }while(0)
 #define FRSTOR(A,D32) do{ u32 ftw_, a_=(A), r_=a_+((D32)?28u:14u), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
@@ -182,3 +190,14 @@ static inline void mmx_canon(void){ for(int i=0;i<8;i++){ fv *p=&c->fx[i]; if(p-
 #define MMX_EMMS() do{ for(int i_=0;i_<8;i_++) fv_free(&c->fx[i_]); }while(0)
 #define MMR(i) (c->fx[(i)].v)
 #define MMW(i,val) do{ u64 v_=(val); c->fx[(i)].v=v_; c->fx[(i)].e=0xffffu; }while(0)
+/* DSL x87 state (fnvlift/dsl.py F.fr F.ftop F.ftag F.fsw F.fptr and the fr<i> ftop ftag fcw fsw fip fdp fop fcs fds pre-state). The state is struct cpu (the dynamic-stack, flushed state: a function that
+   keeps the x87 stack in locals flushes it before such a Form, f_x87_ctl.store); fr<i> = the PHYSICAL register i. fr: the exact 80-bit image of the carrier, an empty register's own bits included;
+   a write keeps an empty register empty and turns a valid one into an M80 carrier. ftag: the 2-bit tags of the contents (fx_tag) in physical order; a write of 11 frees the register (its bits
+   stay), any other tag makes an empty register valid with the bits it holds. fsw (without TOP): sticky flags IE..PE, SF, C1 from c->fex (plus the live FPSR flags), ES and B (fx_esb), C0 C2 C3 from
+   the function's locals; a write replaces all of them (the host FPSR flags of the x87 family are cleared, fx_flags_clear's rule). */
+static inline u128 fx_dsl_fr(u32 i){ fnvl_f80 x=fv_x(c->fx[i]); return ((u128)(x.se&0xffffu)<<64)|x.m; }
+static inline void fx_dsl_fr_set(u32 i, u128 v){ fv *p=&c->fx[i]; p->v=(u64)v; p->e=(u32)(v>>64)&0xffffu; if(p->k) p->k=FK_M80; }
+static inline u32 fx_dsl_ftag(void){ u32 t=0; for(u32 i=0;i<8;i++) t|=fx_tag(&c->fx[i])<<(2*i); return t; }
+static inline void fx_dsl_ftag_set(u32 t){ for(u32 i=0;i<8;i++){ fv *p=&c->fx[i]; if(((t>>(2*i))&3u)==3u) fv_free(p); else if(!p->k){ p->k=FK_M80; } } }
+static inline u32 fx_dsl_fsw(u32 c0,u32 c2,u32 c3){ return ((c->fex&FEX_X87)|(fx_live()&0x3fu)|fx_esb()|((c0&1u)<<8)|((c2&1u)<<10)|((c3&1u)<<14))&0xffffu; }
+#define FX_DSL_FSW_SET(V) do{ u32 v_=(V); c->fex=(c->fex&~FEX_X87)|(v_&FEX_X87); c->fsw=v_&0x8080u; if(fown()==1u) fnvl_fp_x87_clear(); c0=(v_>>8)&1u; c2=(v_>>10)&1u; c3=(v_>>14)&1u; }while(0)

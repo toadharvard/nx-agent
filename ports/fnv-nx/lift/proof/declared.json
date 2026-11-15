@@ -1,5 +1,9 @@
 {
  "format": "fnvnx-declared/1",
+ "generated_from": {
+  "rt/cpumodel.c": "ef17a000eb5b8854a15efb373970508b61db35d3365fe93f33e8b9f796132f06",
+  "sdm_sha256": "c87ef800d8e22b84df6da4f3228bf25cb47daa75bdfd685ca6ce810e79fca51c"
+ },
  "rows": [
   {
    "function": "cpuid",
@@ -10,7 +14,7 @@
     "cpuid3"
    ],
    "source": "rt/cpumodel.c",
-   "basis": "CLAUDE.md 'The declared CPU': cpuid is the reference host's answer (CPUREF, lift/rt/cpumodel.c) restricted to MMX, SSE, SSE2; SDM vol. 2A CPUID: the instruction returns the processor identification in EAX, EBX, ECX, EDX",
+   "basis": "SDM vol. 2A CPUID Operation: (EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)",
    "outputs": [
     "eax",
     "ebx",
@@ -24,7 +28,7 @@
     "rdtsc"
    ],
    "source": "rt/cpumodel.c",
-   "basis": "CLAUDE.md 'One fixed reference CPU model': rdtsc reads the platform's monotonic timer (fnvl_rdtsc); SDM vol. 2B RDTSC: the 64-bit time-stamp counter is returned in EDX:EAX",
+   "basis": "SDM vol. 2B RDTSC Operation: EDX:EAX := TimeStampCounter (64-bit result of fnvl_rdtsc)",
    "outputs": [
     "eax",
     "edx"
