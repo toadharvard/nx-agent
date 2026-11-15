@@ -124,3 +124,4 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
   Status: doing.
 - 2026-11-15 00:48 odrdef: L1 accepts it. Bindings come from the instantiated body (two-phase lookup); passed to w3.
 - 2026-11-15 00:50 w3 test_ldbl: done, 9b6e20f1d. Checks: DFmode from d-register arithmetic; every __LDBL_*__ equals its __DBL_*__; no reference to the 34 TF symbols, generated from the pinned libgcc; mangling e/O. It is red until the farm's compiler is pinned. Queued for w3 after odrdef: test_msvcmodel.py ($CXX directly, a second build path) moved onto recipe roots, then deleted.
+- 2026-11-15 00:52 L5 ask: the gen_values.py docstring (gate_assumptions mention-no-id) is fixed as 98c4eee7d on w1-ftoivec-final.
