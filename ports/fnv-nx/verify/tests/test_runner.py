@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/farm/runner.sh ports/fnv-nx/verify/tests
 """Host test of farm/runner.sh. A clone of this checkout's HEAD stands in for the trunk (farm/runner.sh of the working
 tree is committed on top, so the script under test is the one of this tree), a local bare git repository for the
 artifacts repository, a scratch directory for FARM_HOME. The verified commits are made in the clone: the HEAD tree, the

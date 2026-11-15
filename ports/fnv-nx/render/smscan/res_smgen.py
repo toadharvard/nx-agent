@@ -1,16 +1,17 @@
 #!/usr/bin/env python3 -I
-"""res_smgen.py OUT_DIR SM_TABLE_JSON D3D9_TABLES_PY: writes OUT_DIR/res_smtab.gen.h, the data of smscan.c, from render/shaders/total/sm_table.json
+"""res_smgen.py OUT_DIR SM_TABLE_JSON SM_ILLEGAL_TSV D3D9_TABLES_PY: writes OUT_DIR/res_smtab.gen.h, the data of smscan.c, from the render/shaders/total stage outputs sm_table.json and sm_illegal.tsv
 (models, registers, modifiers, opcode model sets and operand roles) and spec/d3d9_tables.py SM1_PARAMS (sm1 token-walk operand counts). Nothing is chosen
 by hand here: a fact the table does not state is not generated (the checker then accepts: superset)."""
-import csv, importlib.util, json, os, sys
-out, tabj, tabpy = sys.argv[1:4]; os.makedirs(out, exist_ok=True)
+import csv, json, os, sys
+out, tabj, illj, tabpy = sys.argv[1:5]; os.makedirs(out, exist_ok=True)
 T = json.load(open(tabj))
 for _c in T["conflicts"]:   # every union row cites the rule, the Microsoft page and section, and the Wine 9.0 file and line (CLAUDE.md: Where the Microsoft page is narrower)
     assert _c.get("decision") == "union" and _c["rule"] and _c["ms"]["page"] and _c["ms"]["section"] and _c["wine"]["file"] and _c["wine"]["line"], _c["id"]
 for _u in T["undetermined"]:   # no undetermined row stays without a decision and a source: included = union (MS silent, Wine accepts), illegal = Microsoft states it
     assert _u["rows"] in ("included", "illegal") and _u["rule"] and _u["ms"]["page"] and _u["ms"]["section"], _u["id"]
     assert _u["decision"] == ("union" if _u["rows"] == "included" else "illegal") and (_u["rows"] == "illegal" or (_u["wine"]["file"] and _u["wine"]["line"])), _u["id"]
-sp = importlib.util.spec_from_file_location("d3d9_tables", tabpy); D = importlib.util.module_from_spec(sp); sp.loader.exec_module(D)
+sys.path.insert(0, os.path.dirname(tabpy)); import d3d9_tables as D   # the module of the argument, a plain import from its own directory
+assert os.path.samefile(D.__file__, tabpy), (D.__file__, tabpy)
 CLS = ["r", "v", "c", "t", "a0", "aL", "b", "i", "l", "oPos", "oFog", "oPts", "oD", "oT", "o", "oC", "oDepth", "s", "p0", "vPos", "vFace"]
 SRCMOD = ["neg", "bias", "biasneg", "sign", "signneg", "comp", "x2", "x2neg", "dz", "dw", "abs", "absneg"]          # token codes 1..12 (13 = not: predicate only)
 DSTMOD = ["sat", "pp", "centroid", "x2", "x4", "x8", "d2", "d4", "d8"]                                            # bit n; shift codes are decoded by the checker
@@ -71,7 +72,7 @@ mx = max(max(v, d14.get(a, v)) for a, v in agg.items())
 assert mx <= 15, "an sm1 instruction of the table has more operand words than the scanner's buffer (15)"
 L.append("#define NX_SM1_MAX_OPERANDS %d" % mx)
 # texld operand rule (sm_illegal.tsv rows kind srcmod, feature *@texld.coord / *@texld.sampler-src): the models in which src0 / the sampler take no modifier or swizzle
-ill = list(csv.DictReader(open(os.path.join(os.path.dirname(tabj), "sm_illegal.tsv")), delimiter="\t"))
+ill = list(csv.DictReader(open(illj), delimiter="\t"))
 _lk = {(x["model"], x["feature"]) for x in T["legacy"]}   # one record per fact: a (model, feature) is in sm_table.json legacy or in sm_illegal.tsv, never both
 _both = sorted(_lk & {(r["model"], r["feature"]) for r in ill})
 assert not _both, _both

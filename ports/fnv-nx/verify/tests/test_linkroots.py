@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for recipe.resolve_link_root and its use in link_errors: a link.roots entry is the root's recipe for the image's own target. Pure."""
 import os
 import subprocess

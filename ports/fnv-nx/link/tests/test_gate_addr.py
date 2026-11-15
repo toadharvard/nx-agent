@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/addr/fnvnx_addr.cc
 """Check of link/gate_addr.py and toolchain/addr/fnvnx_addr.cc.  Compiles small C++ fixtures through the recipe (toolchain/tests/plugbuild.py: the pinned
 guest compiler, product flags, the plugin set built by the recipe's stages), and hand-assembles negative objects.  Cases:
 the plugin writes `.fnvnx.addr` with seen == routed and a barrier asm at every address sum (the code has a 32-bit add and no

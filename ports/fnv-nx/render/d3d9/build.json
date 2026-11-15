@@ -75,10 +75,12 @@
    "tool": "ports/fnv-nx/render/d3d9/env/gen_env.py",
    "args": [
     "/out/gen",
-    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
+    "/in/ports/fnv-nx/render/d3d9/env"
    ],
    "inputs": [
-    "ports/fnv-nx/shim/include/d3d9types.h"
+    "ports/fnv-nx/shim/include/d3d9types.h",
+    "ports/fnv-nx/render/d3d9/env"
    ],
    "outputs": [
     "gen/env_caps.gen.h",

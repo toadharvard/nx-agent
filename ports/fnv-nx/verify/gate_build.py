@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "build" (fnvnx-gate/1): every product root's recipe (build.json, see RECIPE.md) builds, all in the sandbox.
-    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE, optional GATE_COMMIT
+    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE, GATE_COMMIT
 Universe: every unit of every product root of verify/admit.json (tracked sources + generated sources, recipe.units_of) and the ELF
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
@@ -63,7 +63,7 @@ def quantify(repo, judge_root):
 
 
 def tree_of(repo="."):
-    return subprocess.run(["git", "-C", repo, "rev-parse", os.environ.get("GATE_COMMIT", "HEAD") + "^{tree}"], capture_output=True,
+    return subprocess.run(["git", "-C", repo, "rev-parse", os.environ["GATE_COMMIT"] + "^{tree}"], capture_output=True,
                           text=True, check=True).stdout.strip()
 
 

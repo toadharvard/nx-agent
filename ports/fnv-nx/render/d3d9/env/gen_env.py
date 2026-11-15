@@ -71,6 +71,7 @@ def image(st, out, size):
 
 import json  # noqa: E402
 envq.SPEC = sys.argv[2] if len(sys.argv) > 2 else envq.SPEC
+TSV_DIR = sys.argv[3]   # OUT SPEC TSV_DIR: the directory of env_*.tsv, an argument (no default)
 ST = json.load(open(envq.SPEC))["structs"]
 
 
@@ -273,8 +274,8 @@ def carr(name, ct, vals, per_line=24):
 
 
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else HERE; os.makedirs(out, exist_ok=True)
-    Ts = [derive(*load(os.path.join(os.environ.get("ENV_TSV_DIR", HERE), f"env_{p}.tsv"))) for p in PROFILES]
+    out = sys.argv[1]; os.makedirs(out, exist_ok=True)
+    Ts = [derive(*load(os.path.join(TSV_DIR, f"env_{p}.tsv"))) for p in PROFILES]
     if bytes(Ts[0]["IDENT"]) != bytes(Ts[1]["IDENT"]): die("the adapter identifier images of the profiles differ: one fact, one image (ident_*.bin)")
     diff = [k for k in Ts[0] if Ts[0][k] != Ts[1][k]]; print("profile differences (table entries): " + (", ".join(diff) or "none"))
     print("promises (profile 0):\n" + promises(Ts[0]))

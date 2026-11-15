@@ -40,19 +40,6 @@
  "units": "all",
  "generated": [
   {
-   "tool": "ports/fnv-nx/render/shaders/total/gen_sm_rows.py",
-   "args": [
-    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
-    "/out/gen/fnvnx_sm_rows.h"
-   ],
-   "inputs": [
-    "ports/fnv-nx/render/shaders/total/sm_table.json"
-   ],
-   "outputs": [
-    "gen/fnvnx_sm_rows.h"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/render/total/translator_gen/gen_sources.py",
    "args": [
     "/ext/mojoshader",
@@ -83,6 +70,16 @@
   {
    "root": "ports/fnv-nx/lib/sha256",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_rows"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_rows"
   }
  ],
  "constants": "constants.tsv"

@@ -41,6 +41,7 @@ import cas  # noqa: E402
 import elffacts  # noqa: E402
 import gate_admit  # noqa: E402
 import envcheck  # noqa: E402
+import hostprofile  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
 import relocs  # noqa: E402
 import undefset  # noqa: E402
@@ -195,9 +196,24 @@ def is_stage_ext(e):
     """E is an external produced by a root's stages (STAGE_EXT_KEYS), not a fetched commit."""
     return isinstance(e, dict) and set(e) == STAGE_EXT_KEYS
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/uses", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
+MOUNT_PREFIXES = SANDBOX_PATHS + ("/ext", "/launch", "/deb", "/plug", "/probe")   # every absolute path a stage can open: the stage paths above, the externals ("at": /ext/<name>) and the launcher (/launch/genlaunch.py), the debs of a run stage (/deb), the plugin objects (/plug) and the driver probe (/probe); gate_abspath.py reads this one constant
+def require_mounted(path):
+    """PATH when it is under MOUNT_PREFIXES (the stage's own mount namespace), else ValueError: the one guard of a launcher that runs a tool by path (gate_abspath.py accepts a dynamic load only through it or require_under)."""
+    if not any(path == m or path.startswith(m + "/") for m in MOUNT_PREFIXES):
+        raise ValueError("%s is not under a mount prefix %s" % (path, MOUNT_PREFIXES))
+    return path
+
+
+def require_under(path, root):
+    """PATH when it is inside ROOT (a checkout tree given as an argument), else ValueError: the guard of a host-side load of a tracked file of that tree."""
+    p, r = os.path.realpath(path), os.path.realpath(root)
+    if p != r and not p.startswith(r + os.sep):
+        raise ValueError("%s is not inside %s" % (path, root))
+    return path
+
+
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
 SBIND = {1: "GLOBAL", 2: "WEAK", 10: "UNIQUE"}
-ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 CC_EXT, CXX_EXT, ASM_EXT = (".c",), (".cc", ".cpp", ".cxx"), (".s", ".S")
 LONG_R = ("unresolved-symbols", "allow-shlib-undefined", "noinhibit-exec", "defsym", "wrap", "allow-multiple-definition",
           "warn-unresolved-symbols")
@@ -1624,7 +1640,7 @@ def fetch_externals(exts, store, extcache, ws):
     a variant of a root adds only its own stage keys. A mismatch stores nothing. Used by a recipe (Job.externals) and by gate_contract.py
     (the exe-derived inputs of the contract gates), one mechanism."""
     out = {}
-    url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
+    url = os.environ["ARTIFACTS_URL"]   # a required input (recipe.py --artifacts URL, l1.py --artifacts URL; a test passes it explicitly)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     os.makedirs(ws, exist_ok=True)   # the index files live in WS: every caller may name a fresh sub-path of its scratch directory
     for e in exts:
@@ -2322,11 +2338,19 @@ class Job:
                     shutil.copy2(p, dest + p)
         return cas.ingest(dest, self.store)
 
+    def mounts_file(self, tmp):
+        """MOUNT_PREFIXES as /launch/mounts.json: the one list, read by genlaunch.py's require_mounted (a stage input, so in the key)."""
+        p = os.path.join(tmp, "mounts.json")
+        with open(p, "w") as f:
+            json.dump(list(MOUNT_PREFIXES), f)
+        return cas.ingest(p, self.store)
+
     def generate_one(self, ws, i, g, py, xin):
         owner = tree_of(self.roots, g["tool"])
         tmp = tempfile.mkdtemp(dir=ws)
         ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)},
-               {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)}] + xin + self.use_inputs(ws)
+               {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)},
+               {"at": "/launch/mounts.json", "tree": self.mounts_file(tmp)}] + xin + self.use_inputs(ws)
         if "objects_of" in g:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:
@@ -2400,7 +2424,7 @@ class Job:
         """The common inputs of every plugin stage: the host driver `PLUGIN_CXX` (derived from env.json), the plugin headers of the target compiler
         (`compiler.cxx -print-file-name=plugin`), the tool runtime and the startup files -> dict. A plugin stage's key is f(source content, host
         compiler, flags, headers)."""
-        host = "/usr/bin/" + PLUGIN_CXX
+        host = os.path.join(hostprofile.HOST["bindir"], PLUGIN_CXX)
         cxx = self.hostpath(self.drivers()[drv])   # the C++ driver (the C driver for a root without C++ units: the same compiler, the same plugin headers)
         pdir = subprocess.run([cxx, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
         if not os.path.isfile(os.path.join(pdir, "include", "gcc-plugin.h")):
@@ -3193,7 +3217,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True, shard=N
     in a shard build, its objects.json says `shard`. -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
     spec = root
-    j = Job(repo, spec, store, jobs, ext or os.path.join(store, "external"))
+    j = Job(repo, spec, store, jobs, ext or os.environ.get("FNVNX_EXTCACHE") or os.path.join(store, "external"))   # FNVNX_EXTCACHE: the cache a test gate mounts (gate_tests.fetch_guest)
     j.shard = shard
     if shard:
         link = False
@@ -3467,7 +3491,10 @@ def main(argv):
             errs = check(rec, root, tracked(repo), roots, load_pin(repo), repo, _)
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0
-        unknown = set(opt) - {"--root", "--store", "--out", "--jobs", "--ext", "--stack-usage", "--shard"}
+        unknown = set(opt) - {"--root", "--store", "--out", "--jobs", "--ext", "--stack-usage", "--shard", "--artifacts"}
+        if "--artifacts" not in opt:
+            raise RecipeError(["missing --artifacts URL (the artifacts repository of the externals)"])
+        os.environ["ARTIFACTS_URL"] = opt["--artifacts"]
         if unknown or opt.get("--stack-usage", "1") != "1":
             raise RecipeError(["unknown or bad option: %s" % ", ".join(sorted(unknown) or ["--stack-usage"])])
         res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"), AUX_FLAGS if "--stack-usage" in opt else None, shard=shard_spec(opt["--shard"]) if "--shard" in opt else None)

@@ -7,7 +7,8 @@ guards uncertified (red):
   enum header value / enumerator dropped (per switched enumeration E)  -> header mismatch [E], every enum value red
   front switch over E made a switch over int (per E)                    -> E insensitive, exactly enum:E:* red
   front loses one case label                                             -> front does not build, every enum value red
-  sm_table row changed, rows header not regenerated / regenerated        -> rows header not generated / translator red, every SM row red
+  generated sm_table row changed (table and rows header from one run)    -> translator red, every SM row red
+  rows generator drops the comparison lines                              -> header off the layout, every SM row red
   tree_sha256 of the translator recipe's mojoshader external wrong      -> every SM row red
   opcode-value / stage / comparison assertion dead in the mirror         -> exactly the OP rows / OP rows / rows with a comparison red
   PHASE token not consumed by the parser                                 -> exactly sm:ps:phase red
@@ -27,7 +28,9 @@ sys.path.insert(0, TOTAL)
 import gate_d3d9total as G  # noqa: E402
 
 SWITCHED = G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["SWITCHED"]
-OPS = json.load(open(os.path.join(PORT, "render", "shaders", "total", "sm_table.json")))["opcodes"]
+CACHE = os.path.join(tempfile.mkdtemp(prefix="t-d3d9total-"), "cache")   # the one cache of this test (a test does not see GATE_CACHE)
+os.makedirs(CACHE)
+OPS = json.load(open(G.total_output("gen/sm_table.json", CACHE)))["opcodes"]   # the generated table, read as the gate reads it
 SM_ALL = ["sm:" + k for k in sorted(OPS)]
 SM_OP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0]
 SM_CMP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0 and "cmp" in OPS[k]]
@@ -39,17 +42,57 @@ def git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
+# The scratch repository holds exactly what the gate reads from the repository, DERIVED by a probe run, not listed: the probe imports the gate and
+# reads the SM language definition (recipe.stage_output of render/shaders/total) in a process whose audit hook records every file it opens; the
+# closure is the tracked files among them (the gate's modules and everything they import, the recipe machinery, the data they read at import, the
+# root's recipe and generator and their inputs). A file the gate reads that is not tracked is not part of the repository's input and stays out.
+PROBE = """import json, os, sys
+repo = os.getcwd()
+seen = set()
+def hook(ev, args):
+    if ev == "open" and args and isinstance(args[0], (str, bytes)):
+        seen.add(os.fsdecode(args[0]))
+sys.addaudithook(hook)
+sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))
+import gate_d3d9total as G
+G.total_output("gen/sm_table.json", sys.argv[2])
+G.total_output("gen/inc/fnvnx_sm_rows.h", sys.argv[2])
+mods = sorted(m.__file__ for m in list(sys.modules.values()) if getattr(m, "__file__", None))
+print(json.dumps({"opened": sorted(seen), "modules": mods}))
+"""
+
+
+def read_closure():
+    probe = os.path.join(os.path.dirname(CACHE), "probe.py")
+    with open(probe, "w") as f:
+        f.write(PROBE)
+    r = subprocess.run([sys.executable, "-I", probe, os.path.join(TOTAL, "gate_d3d9total.py"), CACHE], cwd=REPO, capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit("probe of the gate's reads failed: " + (r.stderr or r.stdout)[-600:])
+    res = json.loads(r.stdout.splitlines()[-1])
+    tracked = {x for x in git(REPO, "ls-files", "-z").split("\0") if x}
+    rel = lambda p: os.path.relpath(os.path.realpath(p), REPO) if os.path.isabs(p) else p
+    mods = {rel(p) for p in res["modules"] if not rel(p).startswith("..")}   # every module the gate imports from the repository (a cached .pyc is read instead of its source, so open() does not show it)
+    assert mods <= tracked, sorted(mods - tracked)      # a module of the repository that is not tracked is no input of the repository
+    return sorted(({rel(p) for p in res["opened"]} & tracked) | mods)
+
+
+CLOSURE = read_closure()
+
+
 def scratch(base):
     """a git repository holding the gate and its declared inputs at the same paths"""
-    files = git(REPO, "ls-files", "-z", "--", *[G.PORT_REL + "/" + p for p in G.INPUTS + ["render/total/gate_d3d9total.py"]]).split("\0")
+    files = set(CLOSURE) | {x for x in git(REPO, "ls-files", "-z", "--", *[G.PORT_REL + "/" + p for p in G.INPUTS + ["render/total/gate_d3d9total.py"]]).split("\0") if x}
     os.makedirs(base)
-    for f in sorted(x for x in files if x):
+    for f in sorted(files):
         d = os.path.join(base, f)
         os.makedirs(os.path.dirname(d), exist_ok=True)
         shutil.copyfile(os.path.join(REPO, f), d)
         shutil.copymode(os.path.join(REPO, f), d)
     git(base, "init", "-q")
     git(base, "add", "-A")
+    for m in (f for f in CLOSURE if f.endswith(".py")):   # every module the gate imports from the repository is a file of the copy
+        assert os.path.isfile(os.path.join(base, m)), m
     return base
 
 
@@ -143,12 +186,18 @@ def mut_case(base):
     open(front, "w").write(t[:m.start()] + t[m.end():])
 
 
-def mut_table(regen):
-    def f(base):
-        edit(base, "render/shaders/total/sm_table.json", lambda t: re.sub(r'("ps:add": \{[^}]*"opnum": )2\b', r"\g<1>3", t, count=1))
-        if regen:
-            subprocess.run([sys.executable, "-I", p(base, "render/shaders/total/gen_sm_rows.py")], check=True)
-    return f
+TOTAL = "render/shaders/total"
+
+
+def mut_table(base):
+    """one table row changed in the generator, before both the table and the rows header are written (one run makes both)"""
+    edit(base, TOTAL + "/sm_table.py", lambda t: t.replace('    ill = T.pop("legacy_illegal")\n',
+         '    ill = T.pop("legacy_illegal")\n    T["opcodes"]["ps:add"]["opnum"] += 1\n', 1))
+
+
+def mut_layout(base):
+    """the rows generator emits no comparison line: the header no longer follows the layout the gate locates rows by"""
+    edit(base, TOTAL + "/gen_sm_rows.py", lambda t: t.replace('        if "cmp" in r:', '        if False:', 1))
 
 
 MIRROR = {}   # filled by main(): {"ext": the recipe's mojoshader external entry, "cache": the gate cache, "tmp": scratch root}
@@ -194,8 +243,8 @@ for _e in SWITCHED:
     CASES["header-drop:" + _e] = (mut_drop(_e), ENUM_ALL, [_e])
     CASES["front-untyped:" + _e] = (mut_untyped(_e), enum_ids(_e), [])
 CASES["front-case-missing"] = (mut_case, ENUM_ALL, [])
-CASES["table-not-generated"] = (mut_table(False), SM_ALL, [])
-CASES["table-wrong-opcode"] = (mut_table(True), SM_ALL, [])
+CASES["table-wrong-opcode"] = (mut_table, SM_ALL, [])
+CASES["rows-layout-broken"] = (mut_layout, SM_ALL, [])
 CASES["tree-hash-wrong"] = (lambda b: edit(b, "render/shaders/translator/build.json", lambda t: t.replace(translator_ext(b)["tree_sha256"], "0" * 64)), SM_ALL, [])
 CASES["value-assert-dead"] = (mut_patch(VALUE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
 CASES["stage-assert-dead"] = (mut_patch(STAGE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
@@ -247,10 +296,9 @@ def tree_hash_vs_cas(tmp, cache):
 
 
 def main():
-    tmp = tempfile.mkdtemp(prefix="t-d3d9total-")
+    tmp = os.path.dirname(CACHE)
     try:
-        cache = os.path.join(tmp, "cache")
-        os.makedirs(cache)
+        cache = CACHE
         MIRROR.update(cache=cache, tmp=tmp)
         base = scratch(os.path.join(tmp, "base"))
         rc, res = run_gate(base, cache)      # also fills the cache before the parallel cases

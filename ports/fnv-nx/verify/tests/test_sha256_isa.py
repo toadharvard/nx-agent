@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/lib/sha256/sha256.c ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the lib/sha256 body selection: the guest root (console_cpu.features has crypto, so the compiler defines __ARM_FEATURE_SHA2 from the generated
 -march) compiles the Arm SHA2 body; the host variant (x86) compiles the portable body. The choice is the feature macro, nothing else.
 Plain script: PASS/FAIL lines, exit 0 on pass. Needs the pinned compiler (fetched by recipe into the store)."""
@@ -35,7 +36,7 @@ def objdump_count(spec, tool):
     with tempfile.TemporaryDirectory(prefix="sha-isa-") as d:
         store, ext = os.environ.get("GATE_CACHE", "/tmp/v12/cache"), None
         cmd = [sys.executable, "-I", os.path.join(V, "recipe.py"), "build", "--root", spec, "--store", os.path.join(store, "store"),
-               "--ext", os.path.join(store, "external"), "--out", d, "--jobs", "4"]
+               "--ext", os.path.join(store, "external"), "--out", d, "--jobs", "4", "--artifacts", os.environ["ARTIFACTS_URL"]]
         r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
         if r.returncode:
             return None, r.stdout + r.stderr

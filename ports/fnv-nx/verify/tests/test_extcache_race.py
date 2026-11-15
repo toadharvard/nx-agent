@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """recipe.publish_dir / fetch_externals under concurrency (spec: verify/RECIPE.md "Externals in a shared store"). Real git repository, real fetch, real processes:
 N concurrent fetch_externals of one external into one cache and store all succeed and exactly one bare fetch and one checkout exist; an interrupted extract
 leaves only a temporary directory that the next run ignores; the loser of a race deletes its own copy; any other rename error is raised."""
