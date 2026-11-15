@@ -1298,3 +1298,8 @@ Paused: w3b, w4, farm; no other work.
     - The d3d9types.h and d3d9.h constants, the usage MASK (wined3d.h) and the MSAA bound are derived by name.
     - Dead constants deleted. Product byte-identical; d3d9total 332/332; test 45/45; abspath render 0.
     - Next (w6, doing): the last hand numbers in env/: AFLAG, SCAN and the complement proofs; the caps masks from d3d9caps.h; the sizes from D9_SPEC; 960 MiB from ENV_PIN. It also checks that the gen/ encoding tables are the one source.
+- 22:09Z w6 88eb3fde6: the cand4 candidate at w12, replacing 62aa78908. The d3d9 env class is closed.
+    - The remaining hand numbers are derived from d3d9.h, d3d9caps.h and D9_SPEC, or carry a cited complement proof.
+    - The gen tables are deduplicated (PROP/PIDS, REFS); 960 MiB is stated only in ENV_PIN.txt.
+    - Product byte-identical; d3d9total 332/332; test 45/45; test_env_ident passes; abspath render 0.
+- bottleneck: L1's merge1 store fix (sm_link) and the cand3 head (COM_SPEC rebase), then cand3 and cand4 to the trunk (a5c8f427). 2 workers (w6, farm1), both waiting on L1.
