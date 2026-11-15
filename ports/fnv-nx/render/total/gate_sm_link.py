@@ -28,17 +28,18 @@ def main():
     except (ValueError, OSError, KeyError) as x:
         err = str(x)[:400]
     d = s.get("details", {})
-    universe = d.get("stage_certificates", 0) + d.get("programs", 0)
-    red = s.get("red", 1) if not err else 1
+    unc = d.get("link_set_programs_uncovered", 0)   # programs with a non-empty link set L: not certified (the draw path translates them per pair)
+    universe = d.get("stage_certificates", 0) + d.get("programs", 0) + unc
+    red = (s.get("red", 1) + unc) if not err else 1
     green = not err and universe > 0 and red == 0
     res = {"format": "fnvnx-gate/1", "name": "sm_link", "status": "green" if green else "red", "universe": universe,
            "red": red, "certified": universe - (red if not err else universe), "details": d,
            "detail": ("error: " + err) if err else
                      "%d unique bytecodes (%d VS, %d PS), %d stage certificates (%d not ok, %d signature disagreements), %d link programs "
-                     "(%d linked, %d failed), %d missing, %d unexpected" % (
+                     "(%d linked, %d failed), %d missing, %d unexpected, %d programs with a link set L not covered, %d pairs rejected" % (
                          d.get("unique_bytecodes", 0), d.get("vs", 0), d.get("ps", 0), d.get("stage_certificates", 0), d.get("stage_not_ok", 0),
                          d.get("signature_disagreements", 0), d.get("programs", 0), d.get("linked", 0), d.get("link_fail", 0),
-                         d.get("missing_certificates", 0), d.get("unexpected_certificates", 0))}
+                         d.get("missing_certificates", 0), d.get("unexpected_certificates", 0), unc, d.get("pairs_rejected", 0))}
     with open(os.path.join(out, "sm_link.json"), "w") as f:
         f.write(json.dumps(res, sort_keys=True, indent=1) + "\n")
     return 0 if green else 2
