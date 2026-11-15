@@ -47,7 +47,10 @@ import json, sys
 print(" ".join(json.load(open(sys.argv[1]))["flags"]["semantics"]["common"]))
 EOF
 )
-TLFLAGS="-O2 -ffunction-sections -fdata-sections $SEM"
+# FNVNX_TL_PLUGIN_FLAGS: a file with the -fplugin=... flags every target library is compiled with (the plugins are built between the
+# stage-1 compiler and the libraries: STAGE=gcc, then the plugin stages, then this script again with the file)
+PLUG=""; [ -n "${FNVNX_TL_PLUGIN_FLAGS:-}" ] && PLUG=$(cat "$FNVNX_TL_PLUGIN_FLAGS")
+TLFLAGS="-O2 -ffunction-sections -fdata-sections $SEM $PLUG"
 CONF=$P/CONFIGURE.txt
 note() { printf '%s\n' "$*" >> "$CONF"; }
 step() { [ -f "$W/stamp-$1" ]; }
@@ -83,6 +86,16 @@ if ! step unpack; then
   patch -s -d src -p1 < "$HERE/msvcmodel.patch"
   tar -xzf newlib-$NLV.tar.gz -C nl-src --strip-components=1
   patch -s -d nl-src -p1 < "$BS/patches/newlib-$NLV-4.patch"
+  # int32_t is int, as in the exe: newlib-stdint.h (config.gcc, aarch64*-*-elf) would make __INT32_TYPE__ long (and the LEAST32/FAST8
+  # types), a different mangled type for every int32_t parameter. Without it GCC's own stdint types are used, the same as the linux
+  # compiler's, and newlib's _default_types.h takes __INT32_TYPE__ from the compiler.
+  python3 -I - src/gcc/config.gcc <<'EOF2'
+import re, sys
+p = sys.argv[1]; s = open(p).read()
+s2, n = re.subn(r'(aarch64\*-\*-elf \| [^\n]*\n(?:[^\n]*\n){0,3}?\ttm_file="\$\{tm_file\} elfos.h) newlib-stdint.h"', r'\1"', s, count=1)
+assert n == 1, "aarch64 newlib-stdint.h line not found"
+open(p, "w").write(s2)
+EOF2
   # One multilib: ILP32 + the exe's char and wchar_t + PIC (see the header).
   python3 -I - src/gcc/config/aarch64/t-aarch64 <<'EOF'
 import re, sys
