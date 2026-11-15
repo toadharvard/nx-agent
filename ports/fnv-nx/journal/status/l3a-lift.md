@@ -848,3 +848,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - If either is not ready by then, the relift is not held: it goes with the stamp fix and the generated prelude, and the density rules come in the next relift.
   - Owner of the implementation: the first worker free after the w12/w13 measurements. Order by the measured shares.
 - 20:55 L1 confirmed: generated stages still mount every uses output (recipe.py:2235). Only unit PP/CC drops them.
+- 21:05 Owner order (integ 4363f94e9): every generator is a recipe stage. The relift is done as stages facts -> universe -> fpfacts -> liftsrc -> pack, all based on t16l 2c3591efc. At that commit the lifter inputs are already explicit (fnvlift/inputs.py, P2); what is left is the stages and proof/model_sail.py's /home/user and env defaults.
+  - w7 (session_01KmtZKV5F6B2PqGD9piX26f, claude/fnv-l3a-lift-w7-facts): root lift/facts, with codemap and jtab per image from the gamedata external and the loader's MODULES_TSV, then universe; lift/retn moved onto it. Status: doing.
+  - w13 (session_01KmtZKT9VGwj9Youb1vJwUR, claude/fnv-l3a-lift-w13-fpfacts): root lift/fpfacts (fpmodes, fpstate). The emitcat relift is stopped. Status: doing.
+  - w8 (session_01KmtZKR4JRJLXpi1LcSzp9b, claude/fnv-l3a-lift-w8-liftsrc): liftgen shards and finish as stages, the stamp check (w7 33a330868), the generated prelude, and lift/pack taking its units by uses. Status: doing.
+  - w12 (session_01KmtZKUVVL6cV1kisqKEof7, claude/fnv-l3a-lift-w12-paths): after the profile, the path and env-default sweep over lift/. Status: doing.
+  - Target: the pack compiled by about 04:00Z on up to 16 farms (brief 217cb3ce0, N=16) once the chain is green. EFLAGS liveness is in only if ready before cand3; no worker is free for it now.
+- bottleneck: the lift chain as stages (w7 -> w13 -> w8); cand3; workers 4 (w7, w8, w12, w13).
