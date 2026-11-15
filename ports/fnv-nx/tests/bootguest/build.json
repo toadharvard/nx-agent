@@ -90,7 +90,9 @@
    "ports/fnv-nx/loader",
    "ports/fnv-nx/lift/rt",
    "ports/fnv-nx/lib/sha256",
-   "ports/fnv-nx/platform"
-  ]
+   "ports/fnv-nx/platform",
+   "ports/fnv-nx/lift/bridges"
+  ],
+  "entry": "fnvnx_test_entry"
  }
 }

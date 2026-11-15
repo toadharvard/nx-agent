@@ -1061,7 +1061,7 @@ static uint32_t read_mode(void) {
     fnvnx_hcall1(H->fs_close, fd);
     return mode;
 }
-int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are set up before main */
+int fnvnx_test_entry(void) {   /* rt/guest: relocation, host API table, TLS and newlib are set up before the image entry */
     uint32_t mode = read_mode();
     fnvboot_mode_start();
     say(MSG[0]); say(MSG[1]);

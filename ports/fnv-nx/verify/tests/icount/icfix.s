@@ -5,6 +5,8 @@
 .section .text,"ax"
 .globl icfx_start
 icfx_start:
+.globl fnvnx_test_entry
+.set fnvnx_test_entry, icfx_start   // the image entry (link.entry): the fixture's first instruction
     adrp x0, icfx_data
     add x0, x0, :lo12:icfx_data
     mov x20, #5
