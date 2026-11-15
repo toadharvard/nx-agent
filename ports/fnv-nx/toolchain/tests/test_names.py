@@ -96,12 +96,12 @@ def main():
     try:
         so = [pb.build(n, td) for n in ('sdd', 'names')]
         obj = os.path.join(td, 't.o')
-        r = pb.compile(FIX, obj, so, flags=pb.PRODUCT_FLAGS + ['-O0', '-fkeep-inline-functions'])
+        r = pb.compile(FIX, obj, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
         check('compiles', r.returncode == 0, r.stderr[-3000:])
         if r.returncode == 0:
             checks(obj)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_names-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+        check('an unknown plugin argument is an error', pb.argument_refused(r, 'names'), r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

@@ -66,9 +66,8 @@ def main():
         if r.returncode == 0:
             checks(out)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_dispatch-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
-        r = pb.compile(FIX, os.path.join(td, 'y.o'), [so[0], so[2]])
-        check('without the names plugin the dispatcher says so', r.returncode != 0 and 'fnvnx_names plugin is not loaded' in r.stderr, r.stderr[:500])
+        check('an unknown plugin argument is an error', pb.argument_refused(r, 'dispatch'), r.stderr[:500])
+        check('the recipe refuses a root that lacks a product plugin (the dispatcher needs names; the full set is the recipe\'s)', pb.missing_plugin_refused('names'))
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
