@@ -281,3 +281,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 17:30Z farm 05 producing: K=1 increment on origin (1of54-a4fcfcf45590, 119 records); K=2 running. Cause of the one-at-a-time runs: a flock fd 9 in farm_shapeprove.sh held past flock -u (inherited lock). Fix by rule assigned to w4 (close fd 9 for children, or a per-K work dir); farm 05 uses a per-K FNVNX_WORK until then. Check at 17:54Z cancelled.
 - 17:35Z merged w4 2d6fe094d: the farm lock defect's cause was flock -u inside the non-queue else branch, so with --queue the lock was held to shard exit. Fix: staging is a { flock 9 ...; } 9>lock group, so no child holds fd 9. Farm 05 moves to it for K>=3.
 - 17:35Z v3 shard 19/54 done (farm 07): proved 342, gap 4, failed 0. Complete: 16/54.
+- 18:05Z v3 shard 1/54 done (farm 05): proved 337, gap 9, failed 0. Complete: 17/54. Farm 05 K=3 started on the fixed script (76cf2acca).
