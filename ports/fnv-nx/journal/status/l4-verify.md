@@ -214,3 +214,9 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Blocked on L1: test_boot, bootgpu, bootmachine, lockobs and bootrt. The causes are the admit rows for tests/bootguest, verify/bootrt and lift/rt, the hostabi host recipe, and errno_accessor.
   - errno_accessor is a per-root restatement of a declared-target fact (newlib `__errno`); I asked L1 to read it from the target record (rule 5).
   - test_boot_job needs the exe.
+- 00:57: The 22-symbol set is fully owned, with fixes in flight:
+  - L3a pack 4 (including fnvnx_lift_imports_init from impgen.py), bridges 3, native-disp 3 (w8 is wiring facts 33e41190b);
+  - L1 w12 loader stages 8;
+  - L5 w10 fnvnx_declared_fonts (FNVNX_SD_FONTS in sdlayout.h);
+  - L2 sdd plugin vtables 3 (closed by the noneelf runtime build, phase B mirror pending).
+  - Task S (w7): the boot machine mounts the pinned tools/fonts-wine9 mirror at FNVNX_SD_FONTS, path read from sdlayout.h, mirror verified by the pin.
