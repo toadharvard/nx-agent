@@ -1482,3 +1482,14 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - L4 w6 then relinks bootguest and returns the undefined set.
 - 01:11 **w23 8b6b7ed0.** The rtasm universe is read from DWARF DW_AT_language. An object with no DWARF is red. (b) and (a') wait for w25 and w20.
 - 01:12 **L4 defect 2: the mld: argv lacks PROBE_FLAGS.** Rule: one argv constructor for every driver stage. Assigned to w12, together with defect 1; it blocks icount and the bootguest link.
+## 09:12 resume after the limit reset (orchestrator message, CLAUDE.md integ d65489ae9)
+- All workers resumed:
+  - w12: the two gen-stage defects first;
+  - w15: cand2 at df4fb69c8, then the verdict;
+  - w24: gatekeys, atomicity, admit;
+  - w25: farm verification, then relocations and the rtasm link facts;
+  - w20: the a64access root, then the probe stage with the jmp_buf prototypes;
+  - w22: runtime_cflags, coffnorm, host_gl;
+  - w23: abi ctype measurement on L2 w3 8259179e.
+- w20 e6d3b415f is accepted: the objstub plugin is a recipe analysis stage, and the hostabi source rule holds (noreturn only).
+- Open: L5's generated-stage manifest feature (item 12) belongs to L1 and is not assigned yet.
