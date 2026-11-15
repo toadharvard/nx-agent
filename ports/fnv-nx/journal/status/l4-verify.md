@@ -343,3 +343,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 
   - Sent to L1: the compiler pin is restated per root (lift/* stale at b4057704c vs b274ec067). Rule asked: one pin record, and a literal pin in a build.json is an error.
   - Admit variant m0 is gone, so the plain bootguest root is built.
+- 11:10:
+  - w6-r 0ba1e2ff8 (L1 5e3f9edf2 merged): bootguest and icount fail recipe validation before any stage. Both blockers are with L1:
+    1. A header-root include is still refused (RECIPE.md "Header home").
+    2. A link.roots cycle bridges → descs → bridges; rule asked: a fact's universe excludes its consumers via the uses graph.
+  - The 9 link-free L4 tests are green. 8 link-dependent tests wait on these blockers.
