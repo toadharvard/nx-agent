@@ -292,11 +292,20 @@ check('sret aggregate store certified', not any(k.startswith('_Z3retv') for k in
 check('aggregate load certified', not any(k.startswith('_Z3aggv') or k.startswith('_Z3cpyv') for k in rs), True)
 check('packed bit-field (no representative): load, store and the read-only table walk certify',
       [k for k in rs if k.startswith(('_Z3pbli', '_Z3pbsi', '_Z3pbcj'))], [])
-dis0 = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
+dis0 = run(['aarch64-linux-gnu-objdump', '-dr', '--no-show-raw-insn', po]).stdout
+
+
+def plain_loads(fn):
+    """the plain ldr/ldrb/ldrh instructions of the disassembly FN (objdump -dr) that do not load a GOT entry (the PIC address of the global itself)"""
+    ls = fn.splitlines()
+    return [l for i, l in enumerate(ls) if '\tldr' in l and 'ldar' not in l and 'GOT_LO12' not in ' '.join(ls[i + 1:i + 2])]
+
+
+
 pbl = dis0.split('<_Z3pbli>:')[1].split('\n\n')[0]
 pbs = dis0.split('<_Z3pbsi>:')[1].split('\n\n')[0]
 pbc = dis0.split('<_Z3pbcj>:')[1].split('\n\n')[0]
-check('packed bit-field load: its 3 bytes are ldarb in address order, no plain load of the field', (pbl.count('ldarb'), 'ldr\tw' in pbl), (3, False))
+check('packed bit-field load: its 3 bytes are ldarb in address order, no plain load of the field', (pbl.count('ldarb'), plain_loads(pbl)), (3, []))
 check('packed bit-field store: read-modify-write of the 3 bytes, release byte stores', (pbs.count('ldarb'), pbs.count('stlrb')), (3, 3))
 check('table walk through a derived pointer: read-only by provenance, no ordered access', ('ldar' in pbc, 'stlr' in pbc), (False, False))
 check('the walk records the table in .fnvnx.ro', '_ZL3cpb' in run(['aarch64-linux-gnu-readelf', '-p', '.fnvnx.ro', po]).stdout, True)
