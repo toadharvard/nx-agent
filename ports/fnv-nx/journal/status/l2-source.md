@@ -375,3 +375,7 @@ After the first frame:
   - DISPATCH1 refuses 84 files (soft-fp TF/HF 40, libbid 39, TImode 2). The cause is def_descriptor on every definition; only the exitgen join knows whether a definition gets an exit bridge. w2 doing rule DEFDISP-NS: `-<reason>` rows, exitgen red on a joined one.
   - fnvnx_pi segfaults in finish_unit on cold clones in C units (emutls, unwind-dw2, unwind-dw2-fde). w3 doing: a cdtor-clone predicate guarded for C, split parts take their own sites.
   - Open with the farm: libbid was built despite --disable-decimal-float (config.log check).
+- DEFDISP-NS: done, w2 @00558b34a (test_dispatch_defdisp_ns 7, test_dispatch 26, test_exitgen_defdisp 16).
+- pi segfault: done, w3 @ba689f64f / c918f0d92. The cause was get_alias_target on unanalyzed weakref aliases (libgcc __gthrw_*); the fix uses ultimate_alias_target, with a weakref fixture.
+- libbid: the farm's build.sh never passed --disable-decimal-float (enable_decimal_float=bid by default). It is now a record field in guest_compiler.json, cited to DATAMODEL having no decimal row.
+- w3 doing: one L2 plugin set, claude/fnv-l2-source-plugins, on the farm base e858ede5 (layout, pi, names, dispatch), then the farm START with the stage-1 rebuild.
