@@ -45,7 +45,8 @@
     "assign": "msvc"
    },
    "inputs": [
-    "ports/fnv-nx/toolchain/order/fnvnx_frame.h"
+    "ports/fnv-nx/toolchain/order/fnvnx_frame.h",
+    "ports/fnv-nx/toolchain/order/atomic_order.inc"
    ]
   },
   {
