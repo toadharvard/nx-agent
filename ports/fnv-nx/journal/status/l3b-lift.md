@@ -204,3 +204,15 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - The 3 empty branches …/7c3074644653-f3eb5096ad36/{13,14,15}of24 cannot be deleted, because the proxy refuses deletes (403). Resume from the published file makes them harmless.
 - SIMD split: w9 owns the spec path (ACL2/SDM specs; Sail has none), w4 owns prove.py.
 - w9 7d4c17d6: the x87 spec is complete over the registry (47 tests), merged at 32654c699. (D), the seh CONTEXT test, waits for L3a's lift/rt recipe root.
+
+## 2026-11-15 09:58Z
+- SIMD spec (w9 d1ce5545, merged at 60abe266a). simdcheck over all 4,290 pack SIMD shape keys:
+  - proved 2,659, proved by cases 98, FAILED 0;
+  - no-form 773: SSE FP arithmetic, sent to L3a w1 as one parameterized builder;
+  - no spec row 760: the integer remainder plus cmpps, comis, cvt, rcp/rsqrt and ld/stmxcsr. w9 does these next.
+  - Rules given: one name for the FP-mask fact (ASM-204's removing fact); DAZ from CPUREF mxcsr_mask (L3a); rcp/rsqrt from the reference table; the host comparison is not a proof.
+- Queue v3 is ready at w4 0e643a0a7 with N=54 (p95 15.46 s, 90 min budget), queue f3eb5096ad36.
+  - The merge into the lead branch conflicts with certbasis (prove.py and others). Since prover_sha covers those files, w4 merges the lead first; the farms START on the merged lead commit.
+- Orchestrator ruling: an x86sys row is the ring-3 observable. So cr0.ts=0, cr0.em=0, osfxsr=1 and osxmmexcpt=1.
+  - mxcsr_mask is CPUREF's (L3a).
+  - The GDT descriptor contents stay undecided. Their 37 sites wait for CODEMAP, then get reach certificates.
