@@ -8,6 +8,7 @@ extern "C" {
 #endif
 uint64_t fnvl_citest_entry(uint64_t api);
 uint64_t fnvl_imptest_entry(uint64_t api);
+uint64_t fnvl_msvcrttest_entry(uint64_t api);
 #ifdef __cplusplus
 }
 #endif
