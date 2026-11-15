@@ -439,7 +439,7 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
 
 
 LINK_KEYS = {"output", "flags"}
-LINK_OPT = {"script", "kind", "version_script", "roots", "libs"}
+LINK_OPT = {"script", "kind", "version_script", "roots", "libs", "loader"}
 LIBS_KEYS = {"external", "dirs", "names", "startfiles", "endfiles"}
 KINDS = ("pie", "exe", "shared")
 # The emulation names a link may carry, and the target each one is: (ELF class, e_machine). `pie` is the ILP32 guest; `exe` and `shared` are host images.
@@ -472,6 +472,7 @@ def root_edges(rec):
     """The roots a recipe depends on besides its own files: `link.roots` (objects) and `uses` (outputs), variants cut off."""
     lk = rec.get("link") if isinstance(rec, dict) else None
     ds = [split_spec(d)[0] for d in (lk.get("roots", []) if isinstance(lk, dict) and isinstance(lk.get("roots"), list) else []) if isinstance(d, str)]
+    ds += [split_spec(lk["loader"])[0]] if isinstance(lk, dict) and isinstance(lk.get("loader"), str) else []   # the declared loader: its defined names are inputs of the link check
     us = rec.get("uses") if isinstance(rec, dict) else None
     return ds + [u["root"] for u in (us if isinstance(us, list) else []) if isinstance(u, dict) and isinstance(u.get("root"), str)]
 
@@ -586,8 +587,19 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant=""):
                 err.append("link.roots: %s is a variant: only a test root (class test) links a variant; a product image links base roots" % d)
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
-    cyc = link_roots_cycle(root, roots, repo) if deps else None
-    if cyc and any(d in cyc for d in [split_spec(x)[0] for x in deps]):
+    if "loader" in lk:
+        ld = lk["loader"]
+        lent = roots.get(split_spec(ld)[0]) if isinstance(ld, str) else None
+        if kind != "shared":
+            err.append("link.loader: only a shared image declares the root of the image that loads it (kind shared)")
+        elif not (lent and lent.get("recipe") and lent.get("class") in ("product", "test")):
+            err.append("link.loader: %r is not an admitted root with a recipe (product or test)" % (ld,))
+        elif split_spec(ld)[0] == root:
+            err.append("link.loader: %s is the root itself" % ld)
+        elif entry_of(roots, ld).get("target") != rent.get("target"):
+            err.append("link.loader: %s has target %r, the loaded image %r" % (ld, entry_of(roots, ld).get("target"), rent.get("target")))
+    cyc = link_roots_cycle(root, roots, repo) if (deps or isinstance(lk.get("loader"), str)) else None
+    if cyc and any(d in cyc for d in [split_spec(x)[0] for x in deps + ([lk["loader"]] if isinstance(lk.get("loader"), str) else [])]):
         err.append("link.roots: cycle %s" % " -> ".join(cyc))
     lb = lk.get("libs")
     if guest:
@@ -1440,7 +1452,7 @@ class Job:
             res.append({"archive": ar, "archive_sha256": ash, "member": mem, "object": os.path.abspath(dest), "sha256": hashlib.sha256(members[mem]).hexdigest()})
         return res
 
-    def ldcheck(self, ws, elf_tree, objs_tree, extra):
+    def ldcheck(self, ws, elf_tree, objs_tree, extra, loader_defs=None):
         """Stage `ldcheck:<root>`: link/ldcheck.py (python of the python runtime, a pure tool like `generated`) judges the linked ELF from ELF
         symbol tables, writes the crt0 header words and the gate file `ld`. -> tree of /out (the final ELF, ld.json, ld.ids)."""
         lk = self.rec["link"]
@@ -1450,15 +1462,45 @@ class Job:
         ins = []
         for at, owner in (("/tool", LD_TOOLS[0]), ("/contract", LD_TOOLS[1])):
             ins.append({"at": at, "tree": self.ingest_files(tmp, at[1:], [f for f in self.files if under(f, owner)], owner)})
+        if loader_defs is not None:      # the names the declared loader defines, one per line, a declared input at /loader (its content is in the key)
+            ld = os.path.join(tmp, "loader")
+            os.makedirs(ld)
+            with open(os.path.join(ld, "defs.txt"), "w") as f:
+                f.write("".join(n + "\n" for n in sorted(loader_defs)))
+            ins.append({"at": "/loader", "tree": cas.ingest(ld, self.store)})
         ins += [{"at": "/linked", "tree": elf_tree}, {"at": "/objs", "tree": objs_tree}] + extra + [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/tool/ldcheck.py", "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
-               + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])],
+               + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])]
+               + (["--loader-defs", "/loader/defs.txt"] if loader_defs is not None else []),
                "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
         return self.stage(doc)[1]["outputs"]["/out"]
+
+
+def loader_defined(repo, loader, store, jobs, extcache, ws, stage):
+    """The names the declared loader root LOADER defines: the global and weak definitions of its objects and of the objects of its own link.roots (the
+    image it makes), each root built objects-only through the stage cache. -> (the set, the build results: their stage keys and counts belong to the
+    caller's); raises BuildRed(stage STAGE) when one of them is invalid or red."""
+    ent = load_admit(repo)[split_spec(loader)[0]]
+    try:
+        rec = json.load(open(os.path.join(repo, ent["recipe"])))
+    except (OSError, ValueError) as x:
+        raise BuildRed({"stage": stage, "exit": None, "stderr": ["loader root %s: unreadable recipe: %s" % (loader, x)]})
+    names, rs = set(), []
+    for n, d in enumerate([loader] + list((rec.get("link") or {}).get("roots", []))):
+        try:
+            r = build(repo, d, store, os.path.join(ws, "%d" % n), jobs, extcache, link=False)
+        except RecipeError as x:
+            raise BuildRed({"stage": stage, "exit": None, "stderr": ["loader root %s: invalid recipe: %s" % (d, x)][:20]})
+        if r["status"] == "red":
+            f = r["failure"]
+            raise BuildRed({"stage": stage, "exit": f["exit"], "stderr": ["loader root %s is red: stage %s" % (d, f["stage"])] + f["stderr"][-18:]})
+        names |= {x["symbol"] for x in r["defined"]}
+        rs.append(r)
+    return names, rs
 
 
 def emulation_of(flags):
@@ -1634,6 +1676,12 @@ def build(repo, root, store, out, jobs=4, ext=None, link=True):
                   res["link_roots"].append({"root": d, "sha256": objects_digest(r), "objects": kept})
                   groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in kept]))
                   defs[groups[-1][0]] = r["defined"]
+              loader_defs = None
+              if lk.get("loader"):      # the declared loader root: the names its objects (and its link.roots') define may stay undefined in this shared image
+                  loader_defs, lrs = loader_defined(repo, lk["loader"], store, jobs, j.extcache, os.path.join(ws, "in", "loader"), "ld:" + root)
+                  for r in lrs:
+                      j.keys |= set(r["stage_keys"])
+                      j.run, j.hit = j.run + r["stages"]["run"], j.hit + r["stages"]["hit"]
               for lab, objs in groups:
                   bad = defined_mismatch(lab, res["defined"] if lab == "00-own" else defs[lab], objs)
                   if bad:
@@ -1645,7 +1693,7 @@ def build(repo, root, store, out, jobs=4, ext=None, link=True):
                           lab, u, object_target(dict(objs)[u]), emulation_of(lk["flags"]), TARGETS[emulation_of(lk["flags"])]) for u in bad[:20]]})
               elf_tree, objs_tree, extra = j.link(ws, groups)
               res["link_archives"] = j.archive_members(cas.manifest(elf_tree, store)["entries"], name, out)
-              fin = j.ldcheck(ws, elf_tree, objs_tree, extra)
+              fin = j.ldcheck(ws, elf_tree, objs_tree, extra, loader_defs)
               ent = cas.manifest(fin, store)["entries"]
               shutil.copyfile(cas._obj(store, ent[name]), os.path.join(out, name))
               res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent[name]["h"]}

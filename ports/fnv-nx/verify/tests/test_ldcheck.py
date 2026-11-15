@@ -69,5 +69,76 @@ check("a strong undefined reference is cover and output-undefined, not weak-unde
 # a name referenced weakly by one object and strongly by another is a strong reference
 ids = L.symbol_ids(objs(a=[("x", W, False)], b=[("x", G, False)]), set(), elf([("x", G, False)]))
 check("a symbol referenced strongly anywhere is not weak-only", all(not i.startswith("weak-undefined") for i in ids), ids)
+
+# ---- host images: the declared loader (link.loader) --------------------------------------------------------------------------------------
+import argparse  # noqa: E402
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import tempfile  # noqa: E402
+
+
+def elf32(symtab, dynsym, etype=3):
+    """An ELF32 little-endian AArch64 image with .symtab and .dynsym; each [(name, bind, defined)]."""
+    def table(syms):
+        st, ent = b"\0", [b"\0" * 16]
+        for n, bind, defined in syms:
+            ent.append(struct.pack("<IIIBBH", len(st), 0, 0, bind << 4, 0, 1 if defined else 0))
+            st += n.encode() + b"\0"
+        return b"".join(ent), st
+    (sy, sstr), (dy, dstr) = table(symtab), table(dynsym)
+    parts, off = [], 52
+    for blob in (sy, sstr, dy, dstr):
+        parts.append((off, blob))
+        off += len(blob)
+    sh = struct.pack("<10I", *([0] * 10))
+    for (o, b), typ, link, ent in zip(parts, (2, 3, 11, 3), (2, 0, 4, 0), (16, 0, 16, 0)):
+        sh += struct.pack("<10I", 0, typ, 0, 0, o, len(b), link, 0, 4, ent)
+    hdr = b"\x7fELF" + bytes([1, 1, 1, 0]) + bytes(8) + struct.pack("<HHIIIIIHHHHHH", etype, 183, 1, 0, 0, off, 0, 52, 0, 0, 40, 5, 0)
+    return hdr + b"".join(b for _, b in parts) + sh
+
+
+def run_host(inputs, image_dyn, loader=None, libdyn=None):
+    """ldcheck.host_main on a shared image: INPUTS {object: symbols}, IMAGE_DYN the image's dynamic symbols; -> (exit code, ids)."""
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "o"))
+        for n, syms in inputs.items():
+            open(os.path.join(d, "o", n + ".o"), "wb").write(elf32(syms, [], 1))
+        img = os.path.join(d, "x.so")
+        open(img, "wb").write(elf32(image_dyn, image_dyn))
+        vs = os.path.join(d, "v.map")
+        open(vs, "w").write("{ global: ex; local: *; };\n")
+        lib = []
+        if libdyn is not None:
+            open(os.path.join(d, "lib.so"), "wb").write(elf32([], libdyn))
+            lib = [os.path.join(d, "lib.so")]
+        ld = None
+        if loader is not None:
+            ld = os.path.join(d, "defs.txt")
+            open(ld, "w").write("".join(n + "\n" for n in loader))
+        a = argparse.Namespace(elf=img, objs=os.path.join(d, "o"), out=os.path.join(d, "out"), name="x.so", kind="shared", version_script=vs, lib=lib, loader_defs=ld)
+        rc = 0
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            try:
+                L.host_main(a)
+            except SystemExit as x:
+                rc = x.code or 0
+        return rc, sorted(ln[len("ldcheck: "):] for ln in err.getvalue().splitlines() if ln.startswith("ldcheck: ") and ":" in ln[9:] and "image" not in ln)
+
+
+EX = [("ex", G, True)]
+REF = [("nxgl4_guest_ptr", G, False)]
+rc, ids = run_host({"a": EX + REF}, EX + REF)
+check("a shared image whose undefined name has no definition anywhere is red", rc == 1 and "output-undefined:nxgl4_guest_ptr" in ids, (rc, ids))
+rc, ids = run_host({"a": EX + REF}, EX + REF, loader=["nxgl4_guest_ptr", "nxgl4_on_present"])
+check("the same image with the name in the defined set of its declared loader is green", rc == 0 and not ids, (rc, ids))
+rc, ids = run_host({"a": EX + REF + [("other", G, False)]}, EX + REF + [("other", G, False)], loader=["nxgl4_guest_ptr"])
+check("a loader defining one name does not cover another undefined name: red, naming the other", rc == 1 and "output-undefined:other" in ids
+      and "output-undefined:nxgl4_guest_ptr" not in ids, (rc, ids))
+rc, ids = run_host({"a": EX + [("memcpy", G, False)]}, EX + [("memcpy", G, False)], libdyn=[("memcpy", G, True)])
+check("a name a pinned system library exports stays undefined (libraries, no loader)", rc == 0 and not ids, (rc, ids))
+rc, ids = run_host({"a": EX + REF + [("memcpy", G, False)]}, EX + REF + [("memcpy", G, False)], loader=["nxgl4_guest_ptr"], libdyn=[("memcpy", G, True)])
+check("undefined = system exports + loader's defined set: both together are green", rc == 0 and not ids, (rc, ids))
+rc, ids = run_host({"a": EX + REF}, EX + REF, loader=[])
+check("a declared loader that defines nothing covers nothing", rc == 1 and "output-undefined:nxgl4_guest_ptr" in ids, (rc, ids))
 print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)

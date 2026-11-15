@@ -349,6 +349,15 @@ def version_globals(text):
     return exact, pats
 
 
+def loader_names(path):
+    """The names of a --loader-defs file (one per line), a set; none when PATH is None. A shared image's undefined names must lie in the dynamic
+    exports of its system libraries or in this set (the defined set of the declared loader root): nothing else may stay undefined."""
+    if path is None:
+        return set()
+    with open(path) as fh:
+        return {ln.rstrip('\n') for ln in fh if ln.strip()}
+
+
 def host_main(a):
     """Rules for a host image (exe, shared): no undefined name except those the link's shared libraries define (their .dynsym); every name the
     inputs reference or define is defined in the output or by a library; no text relocation; for `shared`, every name the version script exports as
@@ -369,7 +378,7 @@ def host_main(a):
             if typ in (STT_SECTION, STT_FILE) or bind not in (1, 2):
                 continue
             (defs if shndx != SHN_UNDEF else strong if bind == 1 else weak).add(n)
-    libdef = set()
+    libdef = loader_names(a.loader_defs)
     for p in a.lib:
         with open(p, 'rb') as fh:
             libdef |= {n for n, _, _, shndx, _ in syms_any(fh.read(), 11) if shndx != SHN_UNDEF}
@@ -418,6 +427,7 @@ def main():
     ap.add_argument('--name', required=True)
     ap.add_argument('--kind', default='pie', choices=('pie', 'exe', 'shared'))
     ap.add_argument('--version-script', default=None)
+    ap.add_argument('--loader-defs', default=None, help='a file of the names the declared loader root defines, one per line (a shared image may leave them undefined)')
     ap.add_argument('--lib', action='append', default=[], help='a shared library of the link (its .dynsym defines names the image may leave undefined)')
     a = ap.parse_args()
     if a.kind != 'pie':
