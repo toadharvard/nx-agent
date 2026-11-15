@@ -1796,3 +1796,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
   - Rule, in cand3 (w12, after the assumptions fix): a stage's declared inputs are what its sandbox can read. PP gets its unit, the include subtrees only (subtree hash), the files its flags name, the include_uses outputs only, and the compiler, plugins and flags. Other uses outputs go only to the stage kinds that declare them.
   - 4 re-key selftests.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d. The cold pack build waits for cand3 (PP keying, sharding).
+- 20:59 w12 179158f99: stage timing is done. Wall/CPU go to a sidecar <key>.time that store-merge does not compare; the @time variant gives TIMEREPORT, read by `recipe timing`; test_timing passes; L4 has it. fa5f145c0 fixes test_bridgefacts. Queue: assumptions ids, then the citation merge for L6 (w27 de9996915), then PP keying, then CROSSING.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
