@@ -53,4 +53,4 @@ NxFfpDev* nx_ffp_dev(NxDeviceCore* d);                    // the device's record
 // ---- ffp_prog.cpp
 enum NxBackendKind : uint32_t { NX_BACKEND_DEKO3D = 1, NX_BACKEND_GL = 2 };   // NxGpuInfo.backend (gpu_abi.h)
 bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat);        // the program variant: D3DRS_SHADEMODE FLAT (the front's flat_shade rule over the draw path's latch); false = no memory for the latch
-uint32_t nx_ffp_make_program(NxFfpDev* f, uint32_t stage /* NxStage */, uint32_t flat);   // a backend shader id (>= 1) of the program, 0 = not made
+uint32_t nx_ffp_make_program(NxFfpDev* f, enum NxStage stage, uint32_t flat);   // a backend shader id (>= 1) of the program, 0 = not made
