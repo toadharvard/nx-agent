@@ -79,7 +79,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=()):
 
 
 def errs(repo, rec):
-    return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), recipe.load_pin(repo))
+    return recipe.check(rec, ROOT, recipe.tracked(repo), recipe.load_admit(repo), recipe.load_pin(repo), repo)
 
 
 def build(repo, store, out=None):

@@ -353,6 +353,67 @@ def guest_errors(rec, spec, roots, pin):
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
+LIBNX_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"](switch\.h|switch/[^>"]*)[>"]', re.M)   # a header of libnx's switch/ tree
+ANY_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]([^>"]+)[>"]', re.M)
+LIBNX_LIB = re.compile(r'(^|[/ ])(lib)?nx(\.a)?$|^-lnx$')
+LINK_PROFILE = TREE + "/link/guest.json"
+
+
+def libnx_errors(rec, root, files, roots, repo, variant=""):
+    """The libnx guard (W2 of the L5 platform layer). libnx is written for LP64; its wire types (the structs and integers that cross the svc / IPC /
+    TLS boundary) are certified for the guest's ILP32 model by the wire check C9 of toolchain/gcc/check_mirror.py, and that certification is not
+    complete: a guest root that reaches libnx is red until it is. Reaching = (a) the root's link names libnx (a `nx`/`libnx.a` library or
+    `-lnx` in `link`, or in the tracked link profile), or (b) a unit of the root includes, directly or through headers of the repo, a header
+    of libnx's switch/ tree (`<switch.h>`, `<switch/...>`). (b) is the textual include closure over the tracked files, a superset of the
+    preprocessor's (an include in a comment or an #if 0 adds a finding, never hides one);
+    generated units are not tracked files, so their includes are not seen here (the PP stage's header list of the verdict is the sound check).
+    The guard has no green case for a root that reaches libnx: C9's wire check being 0 changes this function, by a commit that cites it."""
+    if entry_of(roots, root + "@" + variant if variant else root).get("target") != "guest":
+        return []
+    err = []
+    def strings(x):
+        if isinstance(x, str):
+            yield x
+        elif isinstance(x, list):
+            for y in x:
+                yield from strings(y)
+        elif isinstance(x, dict):
+            for y in x.values():
+                yield from strings(y)
+    links = list(strings(rec.get("link")))
+    try:
+        with open(os.path.join(repo, LINK_PROFILE)) as f:
+            links += list(strings(json.load(f)))
+    except (OSError, ValueError):
+        pass
+    err += ["guest root %s: the link names libnx (%r): libnx is red until its wire check (C9) is 0" % (root, l) for l in links if LIBNX_LIB.search(l)]
+    fset = set(files)
+    dirs = [d.strip("/") for d in header_dirs(rec, root, roots, repo, variant)]
+    todo = [f for f in files if under(f, root) and f.endswith((".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".inc", ".s", ".S"))]
+    seen, hits = set(), []
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        try:
+            with open(os.path.join(repo, f), errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        for m in ANY_INCLUDE.finditer(text):
+            t = m.group(1)
+            if LIBNX_INCLUDE.fullmatch(m.group(0)):
+                hits.append((f, t))
+                continue
+            for cand in [posixpath.normpath(posixpath.join(posixpath.dirname(f), t))] + [posixpath.normpath(posixpath.join(d, t)) for d in dirs]:
+                if cand in fset:
+                    todo.append(cand)
+                    break
+    err += ["guest root %s: %s includes <%s> (libnx switch/ tree): libnx is red until its wire check (C9) is 0" % (root, f, t) for f, t in sorted(set(hits))]
+    return err
+
+
 def compiler_long_double(cc):
     """(__SIZEOF_LONG_DOUBLE__, __LDBL_MANT_DIG__) as the guest compiler CC (a host path) predefines them for the ILP32 data model."""
     d = predefined(cc, "c", ["-mabi=ilp32"])
@@ -731,6 +792,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
             if p not in files or not any(under(p, r) for r in roots)]
     err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin)
+    err += libnx_errors(rec, root, files, roots, repo, variant)
     err += plugin_errors(rec, root, files, roots, units, names, variant)
     return err
 
