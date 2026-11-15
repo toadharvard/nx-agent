@@ -1272,3 +1272,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - startfiles and endfiles come from guest_compiler.json runtime.libs (crti, crtbegin / crtend, crtn), with no crt0;
   - ldcheck "one entry": the entry is defined exactly once, in a product-root object.
 - w20: declared_machine sources accept c11:<clause>:<fn> and posix-2017:<page>:<fn>.
+
+### 2026-11-15 02:15 — w24 pin; w12h
+- w24 559f220db (claude/fnv-l1-contract-w24-ldbl): msvcmodel pin b274ec067a2f / a1eeb84d in 9 build files. Tree recomputed; probe ldbl = 8 bytes, mant 53; loader green fresh. Accepted; it lands after cand1. Next: the extract race.
+- w12h d6df0254 (code 50f7ec6a) accepted: guestlink from -###, weak-undefined red, libs.system pinned, link.loader, trees, per-target link.roots, and for exe the startfiles/dynamic linker from the driver plus the exec bit. vd3 verdict RED (1221 s cold, reds cascade from lib/sha256). Rulings:
+  - weak undefined is accepted only from pinned toolchain runtime objects;
+  - guest start/end files come only from guest_compiler.json runtime.libs (no crt0), host exe from -###, with one-entry over both;
+  - test_link's aborting fixture gets fixed.
