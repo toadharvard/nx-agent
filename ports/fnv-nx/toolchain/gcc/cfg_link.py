@@ -55,10 +55,14 @@ def patch(path):
             die("%s: the link call of %s is not the expected line" % (path, fn))
         s = s.replace(body, body.replace(TRY_LINK_CALL, TRY_LINK_NEW))
     n = len(GCC_NO_LINK_RE.findall(s))
-    if "CFG-LINK" not in s and not n:
+    if "CFG-LINK" not in s:
+        # No ac_fn_*_try_link: the subdir runs no link test through configure's function (libgcc compiles only), and its
+        # gcc_no_link=yes is what tells autoconf's own "compiler works" step not to link: nothing to patch.
         print("cfg_link: %s has no link test (nothing to patch)" % path)
         return
-    s = GCC_NO_LINK_RE.sub(r"\1gcc_no_link=no", s)  # a subdir without ac_fn_*_try_link (libgcc) has no link test; its gate is only lifted
+    if not n:
+        die("%s: ac_fn_*_try_link without gcc_no_link=yes" % path)
+    s = GCC_NO_LINK_RE.sub(r"\1gcc_no_link=no", s)
     open(path, "w").write(s)
     print("cfg_link: patched %s (gcc_no_link=yes x%d)" % (path, n))
 
