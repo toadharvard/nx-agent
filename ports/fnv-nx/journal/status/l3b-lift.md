@@ -263,3 +263,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - v3: 4/54 complete (15,29,30,42); farms running; w4 aggregates at 54/54.
 - 13:20Z v3 shard 17/54 done (farm 07): 346 rows, proved 336, model-gap 10, failed 0. Complete: 5/54 (15,17,29,30,42).
 - 13:30Z L3a w7 ready (claude/fnv-l3a-lift-w7-simd after cfe7049b: flag-priority fn + 17 Forms). Rerun over the full 4,290 universe assigned to w9, with spec rows prefetch (0F18 /0..3) and the mem_width None/8 Concat rule. w7's 62-shape local run is not a result.
+- 13:40Z w7 subject now df8cfeda7 (supersedes 46357156; hand handlers deleted for Form-covered mnemonics). w9: SIMD rerun at df8cfeda7. w4: far call/jmp sysspec rows (SDM Vol 2, same privilege), selector validity from x86sys only; non-decided selectors -> undecided_sites.
