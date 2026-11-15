@@ -76,6 +76,19 @@
     "ports/fnv-nx/lift/proof/declared_gen.py"
    ]
   },
+  "test_defectspec.py": {
+   "references": [
+    {
+     "anchor": "L158-L158",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/defects.py",
+    "ports/fnv-nx/lift/proof/defectspec.py"
+   ]
+  },
   "test_dsl_int_classes.py": {
    "references": [
     {
@@ -159,6 +172,19 @@
     "ports/fnv-nx/lift/proof/formgate.py"
    ]
   },
+  "test_forms_cmpimm.py": {
+   "references": [
+    {
+     "anchor": "L17-L19",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/symform.py",
+    "ports/fnv-nx/lift/proof/shape.py"
+   ]
+  },
   "test_forms_far.py": {
    "references": [
     {
@@ -174,6 +200,49 @@
    "subject": [
     "ports/fnv-nx/lift/proof/forms.py",
     "ports/fnv-nx/lift/proof/forms_flow.py"
+   ]
+  },
+  "test_forms_immsel.py": {
+   "references": [
+    {
+     "anchor": "L159-L159",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_simd.py",
+    "ports/fnv-nx/lift/proof/symform.py"
+   ]
+  },
+  "test_forms_simdclass.py": {
+   "references": [
+    {
+     "anchor": "L20-L49",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    },
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/lift/rt/rcptab.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_ssefp.py",
+    "ports/fnv-nx/lift/proof/ssefp.py"
+   ]
+  },
+  "test_forms_ssefp.py": {
+   "references": [
+    {
+     "anchor": "L20-L36",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/forms_ssefp.py",
+    "ports/fnv-nx/lift/proof/ssefp.py"
    ]
   },
   "test_gate_fpexact.py": {
@@ -382,6 +451,18 @@
     "ports/fnv-nx/lift/proof/ssefp.py"
    ]
   },
+  "test_stringspec.py": {
+   "references": [
+    {
+     "anchor": "L1-L16",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_oracle_cites.txt"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/stringspec.py"
+   ]
+  },
   "test_sysspec.py": {
    "references": [
     {
@@ -393,6 +474,18 @@
    "subject": [
     "ports/fnv-nx/lift/proof/sysspec.py",
     "ports/fnv-nx/lift/proof/x86sys.py"
+   ]
+  },
+  "test_treeid.py": {
+   "references": [
+    {
+     "anchor": "L160-L160",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/CERTS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/treeid.py"
    ]
   },
   "test_vendormap.py": {

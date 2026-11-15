@@ -150,3 +150,11 @@ Proved on the new IR (shapeprove, SAIL_IR): 0fbc, 0fbd, f30fbc (reg, mem), f30fb
 Changed-closure counts follow from certs_build once the v2 farm records land.
 
 Published IR: fnv-nx-build branch tools/sail-ir-7c3074644653 (ir/x86_proof.ir, MANIFEST.json with ir_sha256 and tree_sha256).
+
+## Oracle rules (what tests/oracle.json cites for the tests of this layer)
+
+SDM statements that a test relies on are in `tests/sdm_oracle_cites.txt`, extracted from the pinned SDM by `sdm_pages.py --cites` from `sdm_oracle_req.tsv` (the text is never typed). The rules below have no pinned text elsewhere.
+
+1. Declared model defects (`defects.DEFECTS`, `defectspec.SPECS`): every declared model defect has exactly one certifying spec, and a `FAILED(model-defect)` record counts only when its spec proves it; it is never a pass by itself.
+2. Symbolic immediates (`symform`, `forms_simd`): the Form built from a shape with a symbolic immediate, instantiated at value v, equals the Form built from the concrete instruction with immediate v, for every v of the field's width.
+3. Resume (`treeid.py`): a resumed shard keeps only records whose tree id equals the running tree's, that are complete and not error records; every other record is re-proved. The file keeps exactly the kept records, each shape once; a file that does not exist resumes nothing; the running tree id is the 40-hex commit of HEAD, with `+dirty` when a tracked file differs.

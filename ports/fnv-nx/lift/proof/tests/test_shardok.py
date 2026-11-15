@@ -10,5 +10,5 @@ class T(unittest.TestCase):
     def test_short_not_published(self): self.assertFalse(shardok.ok(self.f([{'result': 'proved'}]), 2))
     def test_error_not_published(self): self.assertFalse(shardok.ok(self.f([{'result': 'proved'}, {'result': 'error'}]), 2))
     def test_complete(self): self.assertTrue(shardok.ok(self.f([{'result': 'proved'}, {'result': 'FAILED'}]), 2))
-    def test_missing_file(self): self.assertFalse(shardok.ok('/nonexistent', 0) and False)
+    def test_missing_file(self): self.assertFalse(shardok.ok('/nonexistent', 0))
 if __name__ == '__main__': unittest.main()
