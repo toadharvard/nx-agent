@@ -146,9 +146,10 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
   closure_key  `dispatcher=NAME`  (dll `-`, name = the dispatcher symbol, arg_index 0): every value that reaches the dispatcher NAME (native
              fnvnx_dispatch, lifted fnvl_dispatch) is a key of its table.  Inputs: --dispatcher NAME=ENTRIES,CLOSURE,SOURCES (ENTRIES: dispgen's
              rows `addr<TAB>sym`; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
-             of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES) and --loadlib loadlib.tsv.  CERTIFIED iff (i) every
-             source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress / LoadLibrary site is open (the gpa
-             rows and loadlib.tsv).  While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
+             of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES).  CERTIFIED iff (i) every
+             source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress site is open (the gpa rows).
+             An undecided LoadLibrary* name is not open: its result is the may-load set plus NULL (gpa_names.py --mayload).
+             While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -1790,7 +1791,7 @@ Verdict green iff >= 1 gate, all green with certified == universe, and no stage 
 
 ```text
 objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap/abort path or (V) a vacuous function.
-    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
+    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--declared-machine FILE] [--fail SYMBOL] [--op-cover FILE --op-syntax FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
@@ -1859,6 +1860,13 @@ is not otherwise V is `wine-fixme-in-real-body`. A reference that is not a BL (a
 `wine-9.0:<path in the Wine source tree>:<function name>`: only the FORM is validated here; checking the reference against a pinned
 Wine 9.0 tree is the oracle class, not done. A row without a call site is no finding; the gate result counts call sites per id.
 
+(D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
+applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
+V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
+`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact and the source prefixes are read from the table's own header line (`# fact: ...; source: ...`: no-network, time-zone, registry, no-galaxy; win-doc, wine-9.0, galaxy-sdk), source `PREFIX:<page or path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
+result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
+stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
+
 (R) REACH. A call (BL, or B as a tail call, with a CALL26/JUMP26 relocation) of the symbol `fnvnx_reach_violation` is not a T2 and not a
 T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a constant of objstub's own forward constant propagation (the
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
@@ -1867,8 +1875,40 @@ when the file does not exist); a fact with no call site in the universe is `reac
 taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
 writes (a missed write of x0 would make a constant wrong).
 
+(T-B) TRAP BODY. The root's recipe declares its failure function, `error_abi: {"fail": SYMBOL, "kind": "noreturn"}` or `{"fail": SYMBOL, "kind": "flag",
+"flag": FIELD}` (`--fail --kind [--flag]`; the declaration is required of every root with table handlers). A call of the failure function is the failure edge.
+A function is TRAP-SHAPED (trap_candidate), by output effect alone, iff it calls exactly one symbol X (BL, or a tail B, with a branch relocation; X global,
+not a citation function, not REACH) and, with calls of X transparent, has no output effect: no store outside its own frame, no indirect branch, no other
+call, no system word, no atomic, and no returned constant or address (the result of x0 is not K or A); LOADS from any address and the arguments of the call
+are not effects (so `if (ctx->x) fail(ctx, ...)` does not escape: that path has no call of X, hence the body is not trap-shaped only for that reason, and
+`fail(ctx, ctx->x)` is). EVERY path of it must pass a call of X (every_path_calls). If X is the root's failure function the function is the finding
+`trap-body`: a body that only reports a failure is a stub. The analysis is per object and root-independent (the callee name is the fact, cached with the
+object); `judge` compares it with the root's symbol. The gate result holds "trap_body": the count.
+The DECLARATION is checked against the definition (error_abi_findings): the symbol is defined exactly once as a global function of the root
+(`error-abi-undefined`, `error-abi-multiple`); kind noreturn: no path of the definition returns (nr_ends/noreturn_set: no RET, BR, ERET, SVC, no fall-through,
+every path ends in a call through a pointer, or in a call that the compiler placed last of a function of the root that is itself noreturn, the least fixed
+point; REACH is in it by its BLR tail) else `error-abi-noreturn`; kind flag: the object's DWARF gives the structure the first parameter points to and the
+member FLAG, and on EVERY path the definition stores a nonzero constant at that offset through x0 as it was at entry (flag_events: no write of x0 before; the
+ILP32 `mov w0, w0` is no write), directly or through direct calls (BL, tail B) of functions of the same object with x0 unchanged (flag_holds, any depth,
+cycles do not count) else `error-abi-flag` (also without DWARF). STATED SUBSET: a callee in another object is not followed (red, the safe side). Both
+kinds read the code of the object: the compiler's code generation is ASM-001.
+
+(H) EMPTY HANDLERS BY RECORDS. A table of handlers selects functions by their address stored in a data section (an instruction table). A V function
+(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE --table
+SLOT=SYMBOL:FIELD`; recipe `empty_handlers: {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE, "field": FIELD}}}`, tracked files;
+read_handler_records, an unparseable record is an error): (1) the layout-derived join: the handler of entry k of the table of slot S is the target of the
+data relocation at sym + k*sizeof(entry) + offsetof(entry, FIELD), with sizeof and offsetof from the object's DWARF (the array variable SYM, its element
+structure); at least one (S, k) selects the function (a local function: in its own object's table; a global one: in any object's); a table with no DWARF
+layout, or an entry with no relocation (the declared slot cannot be resolved) is red, not skipped; (2) every selected (S, k) has a row of op_cover.tsv
+(`slot id opnum op class covering evidence`, key (slot, opnum = k)) and EVERY such row is justified: class a (the id is `sm:<key>` and every op_syntax
+row of the key is `ok` with 0 destination, 0 source, 0 other operands: the opcode has nothing to do), or class b (`covering` names symbols, each defined
+in the root and none a V body: another non-empty emitter carries the semantics); class c (the row is unreachable) is judged by the reach rule, so an
+empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a certificate); none and own justify nothing. Otherwise the
+finding V with the reason. The gate result holds "handler_justified": {a: n, b: n}. The records carry no handler name: a name copied from source text
+would need its own proof, the layout of the object is the proof.
+
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
-flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so
+flag, the terminators the object's own symbols mention, the probe = the root's error_abi and empty_handlers.tables): the analysis reads the terminator set only through the object's symbol names, so
 the key is exact and a changed header does not invalidate objects that do not mention the new terminator. Constants rows and reach facts
 are applied after the analysis (judge), so they are not in the key. Objects without an entry run in --jobs processes.
 
@@ -2034,6 +2074,14 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from A
   the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
   is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
+Input refs (the one reader is recipe.resolve_input(root, ref, repo, cache, rec) -> (host path, ident); no gate opens an input itself): a bare string is a
+  tracked file or directory of ROOT (git ls-files only); {"external": NAME, "path": P} reads P in the root's external NAME, checked against its tree_sha256;
+  {"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P} reads the declared output P of generator I or run stage NAME of an admitted root, produced by that stage
+  (cached by its key) and written to CACHE/stageout/<sha256>/P. An absolute path, `..`, a symlink leaving the tree, a missing or untracked path, an
+  undeclared external or output, an unknown root/stage and a red stage are ValueError. A generator reads exactly its declared inputs, read-only (stage flag ro_root).
+Run stages (RECIPE.md "Run stages"): `run` executes the linked output of another admitted host root in the sandbox with declared inputs, debs (env.json
+  debs.packages) and /out; the key holds the artifact, input contents, deb sha256s and argv; a PT_INTERP must be provided by a declared deb; optional
+  "host_cpu": "cpuref" puts verify/cpuref.json in the key and refuses a non-matching host (cache hits are served anywhere).
 Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
   {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)

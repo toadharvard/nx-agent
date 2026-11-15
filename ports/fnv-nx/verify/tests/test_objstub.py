@@ -51,6 +51,20 @@ def row(sym, kind, val=""):
     return {sym: (kind, val, "ref")}
 
 
+# liveness of the input registers is a union (OR) over the successors: a loop converges (a sum of the masks never did; ftbbox.c ran > 30 min)
+import signal  # noqa: E402
+LOOPS = "int f(int n, int m) { int s = 0; for (int i = 0; i < n; i++) for (int j = 0; j < m; j++) { if ((i ^ j) & 1) s += i * j; else s -= j; } return s; }\n"
+signal.signal(signal.SIGALRM, lambda *a: (_ for _ in ()).throw(TimeoutError()))
+signal.alarm(120)
+try:
+    kinds(build(LOOPS, "lp64"))
+    kinds(build(LOOPS, "ilp32"))
+    done = True
+except TimeoutError:
+    done = False
+signal.alarm(0)
+check("a function with nested loops is analysed (liveness converges, LP64 and ILP32)", done)
+
 # terminator derivation: plugin on a tiny header and on the real libc headers
 tiny = os.path.join(ROOT, "tiny.h")
 open(tiny, "w").write("void myabort(void) __attribute__((noreturn));\nvoid fine(void);\n")
@@ -61,7 +75,14 @@ libc = objstub.derive_terminators(CC, [], ["stdlib.h", "unistd.h", "assert.h", "
 check("terminators: libc set", all(x in libc for x in ("abort", "exit", "_Exit", "quick_exit")) and "atexit" not in libc
       and "raise" not in libc, libc)
 cxx = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["cstdlib", "exception"], "c++", tf + ".cxx")
+cxx_sj = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["csetjmp", "cstdlib", "cxxabi.h"], "c++", tf + ".cxxsj")
+cxx_ne = objstub.derive_terminators("aarch64-linux-gnu-g++", ["-fno-exceptions"], ["csetjmp", "cstdlib", "cxxabi.h"], "c++", tf + ".cxxne")
+libc_sj = objstub.derive_terminators(CC, [], ["setjmp.h", "stdlib.h"], "c", tf + ".libcsj")
 check("terminators: C++ set has mangled terminate", "_ZSt9terminatev" in cxx and "abort" in cxx, cxx)
+check("terminators: longjmp family (<setjmp.h>) is a control transfer, an unwinder, in C and C++", all("~" + n in cxx_sj and n not in cxx_sj for n in ("longjmp", "siglongjmp", "_longjmp")) and "abort" in cxx_sj
+      and all("~" + n in libc_sj and n not in libc_sj for n in ("longjmp", "siglongjmp")), (cxx_sj, libc_sj))
+check("terminators: __cxa_throw is an unwinder when exceptions are enabled and a terminator under -fno-exceptions", "~__cxa_throw" in cxx_sj and "__cxa_throw" not in cxx_sj
+      and "__cxa_throw" in cxx_ne and "~__cxa_throw" not in cxx_ne, (cxx_sj, cxx_ne))
 print("INFO libc set size %d, c++ set size %d" % (len(libc), len(cxx)))
 
 for abi in ("ilp32", "lp64"):
@@ -560,6 +581,13 @@ repo2 = TR.make_repo("os-toy2", files={"toy/constants.tsv": ""})
 rc, g, _, txt, st = gate(repo2, ROOT + "/g3", GC)
 check("toy root without the constants row of f_b: red, names the function by unit path", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]
       and st[0] == "red", (g, txt))
+IDB = '#include "toy.h"\nint f_b(int x) { return x; }\n'
+for tag, tbl, want in (("identity row", "b.c\tf_b\tidentity\t0\tref b\n", "green"), ("void row also matches the same body", "b.c\tf_b\tvoid\t\tref b\n", "green"),
+                       ("no row", "", "red"), ("identity of another argument is no V row", "b.c\tf_b\tidentity\t1\tref b\n", "input")):
+    ri_ = TR.make_repo("os-id-" + tag.replace(" ", "-"), files={"toy/constants.tsv": tbl, "toy/b.c": IDB})
+    rc, g, _, txt, st = gate(ri_, ROOT + "/gid-" + tag.replace(" ", "-"), GC)
+    check("constants kind identity, case %s: %s" % (tag, want), (rc == 0 and g["certified"] == g["universe"]) if want == "green" else
+          (rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]) if want == "red" else (rc == 2 and "input error" in g["detail"]), (g, txt))
 repo3 = TR.make_repo("os-reach", files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS})
 rc, g, _, txt, st = gate(repo3, ROOT + "/g4", GC)
 check("reach call in the toy root with no reach facts file: red reach-uncertified, REACH's own definition and the terminator exemption accepted",
@@ -598,6 +626,39 @@ print("INFO ILP32 toy gate warm %.1f s" % secs)
 r32r = TR.make_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
 rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
 check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
+
+# a failing unit is a red finding of that unit, never a gate crash (exit 2 from an exception)
+rb = TR.make_repo("os-buildred", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": "int f_c(int x) { return x +; }\n"})
+rc, g, _, txt, st = gate(rb, ROOT + "/gbr", GC)
+check("a build-red unit: red finding build-red naming the unit, not an input error", rc == 2 and g["status"] == "red" and "build-red" in g["detail"]
+      and "input error" not in g["detail"] and any(u.endswith("c.c") for u in g["uncertified"]), (g, txt))
+bad_ii = tf + ".bad.ii"
+open(bad_ii, "w").write("int f(void) { return +; }\n")
+tc = objstub.unit_terminators("aarch64-linux-gnu-g++", [("pk-bad", bad_ii, "c")], {"c": []}, tempfile.mkdtemp(prefix="objstub-tc-"), 1)
+check("a unit the terminator plugin cannot process: a failure of that unit in the result (no exception)", tc[0] == [] and len(tc[2]) == 1 and tc[2][0][0] == "pk-bad", tc)
+
+# the final image: every function body of the linked ELF is judged for the fixed-failure class (a weak `errno = ENOSYS; return -1` fallback left in it is red;
+# the same image with a strong override is green, the weak body is not in the image)
+ERR = '#include "toy.h"\nint e;\nint *__errno_location(void) { return &e; }\n'
+WEAK = '#include "toy.h"\nint *__errno_location(void);\nint __attribute__((weak)) sched_getcpu(void) { *__errno_location() = 38; return -1; }\n'
+USE = '#include "toy.h"\nint sched_getcpu(void);\nint f_c(int x) { return x + TOY + sched_getcpu(); }\n'
+ri = TR.make_repo("os-image-weak", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK})
+rc, g, _, txt, st = gate(ri, ROOT + "/gi1", GC)
+check("image with a weak errno/-1 fallback: red fixed-failure, the function named under the image", rc == 2 and g["uncertified"] == [TR.ROOT + "/toy.elf:sched_getcpu"]
+      and "fixed-failure 1" in g["detail"] and g["image"]["fixed_failure"] == 1 and g["image"]["bodies"] > 0, (g, txt))
+rs = TR.make_repo("os-image-strong", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE, "toy/e.c": ERR, "toy/w.c": WEAK, "toy/s.c": '#include "toy.h"\nint *__errno_location(void);\nint sched_getcpu(void) { return *__errno_location() + 3; }\n'})
+rc, g, _, txt, st = gate(rs, ROOT + "/gi2", GC)
+check("the same image with a strong override: green, the weak body is not in the image", rc == 0 and g["image"]["fixed_failure"] == 0 and g["image"]["bodies"] > 0, (g, txt))
+# errno is derived by a probe compile with the root's own flags: an errno.h the root cannot compile is a red finding `errno-probe`, not a crash
+rn2 = TR.mut(); rn2["flags"] = {k: v + ["-D_ERRNO_H"] for k, v in rn2["flags"].items()}   # errno.h becomes empty: `errno` is undeclared
+rd = TR.make_repo("os-image-noprobe", rec=rn2, files={"toy/constants.tsv": CONST})
+rc, g, _, txt, st = gate(rd, ROOT + "/gi3", GC)
+check("a root whose errno.h does not compile: red errno-probe (the probe does not compile with the root's flags), never green", rc == 2 and "errno-probe" in g["detail"], (g, txt))
+# a body with a data island in the final image is unjudged, and unjudged is red
+ISL = '.text\n.globl isl\n.type isl,%function\nisl:\n mov w0, #1\n ret\n .word 0x12345678\n.size isl,.-isl\n'
+rj = TR.make_repo("os-image-island", files={"toy/constants.tsv": CONST + "e.c\t__errno_location\taddr\te\tref e\n", "toy/c.c": USE.replace("sched_getcpu()", "0"), "toy/e.c": ERR, "toy/isl.S": ISL})
+rc, g, _, txt, st = gate(rj, ROOT + "/gi4", GC)
+check("an image body with a data island is red unjudged", rc == 2 and "unjudged" in g["detail"] and g["image"]["unjudged"] >= 1, (g, txt))
 
 # a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
 xt = tf + ".x86"
