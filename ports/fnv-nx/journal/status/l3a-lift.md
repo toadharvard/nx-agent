@@ -886,3 +886,17 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The native test roots have no link.entry under cand3's single guest entry rule. L4's harness calls fnvl_{citest,imptest,msvcrttest}_entry by symbol. L4 was copied and asks if it needs a per-test entry.
 - Not run yet: the lift tool tests (now in the background, w8) and the facts/native builds on this base (w7, w13).
 - bottleneck: the lift chain as stages (w7 facts -> w13 fpfacts -> w8 liftsrc) on d9d208c61; workers 4 (w7, w8, w12, w13).
+
+## 21:12 w7 facts2 3f008ed82: jtab rules merged
+- claude/fnv-l3a-lift-w7-facts2 @ 3f008ed82 = base3 49848fd9e + bea44f836 + 3433aa159 + the jtab facts rules. It brings in DIC, the reloc-consistency fixed point, REF refusals and protect_sites, and removes ASM-233.
+- Deleted:
+  - the jtab persistent memo store, which was a second cache outside the key;
+  - FNVNX_CLOSURE_TRACE;
+  - the FNVNX_FACTS env read.
+- The universe now checks its `# base=` header against the given base.
+- gate_abspath at 9c7c14b92 finds 0 issues in lift/. The 28 it reports are all in verify/ and render/.
+- Lead conditions:
+  - rebase onto d9d208c61;
+  - the reloc fixed-point cap (12 rounds) is red when the fixed point is not reached, or the loop is bounded by monotonicity alone;
+  - one stage per image with pcsrc inside it, and no cut unless the timing shows a reason.
+- bottleneck: lift/facts build.json (w7) -> fpfacts (w13) -> liftsrc (w8); workers 4.
