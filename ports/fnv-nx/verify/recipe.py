@@ -1045,16 +1045,36 @@ def link_roots_cycle(root, roots, repo, seen=()):
 
 
 def source_lines(text):
-    """[(ext name, path)] of a `sources` file: one `<ext>:<path>` line per unit, '.' naming the root itself; blank lines skipped. ValueError for a bad line."""
+    """[(ext name, path)] of a `sources` file: one `<ext>:<path>` line per unit, '.' naming the root itself, an admitted ROOT path naming a tracked file of that
+    root (root_source); blank lines skipped. ValueError for a bad line."""
     out = []
     for n, ln in enumerate(text.splitlines(), 1):
         if not ln.strip():
             continue
-        m = re.fullmatch(r"([A-Za-z0-9._-]+):(.+)", ln.strip())
+        m = re.fullmatch(r"([A-Za-z0-9._/-]+):(.+)", ln.strip())
         if not m or not rel_ok(m.group(2)):
-            raise ValueError("line %d is not <external>:<path inside it>: %r" % (n, ln[:80]))
+            raise ValueError("line %d is not <external or root>:<path inside it>: %r" % (n, ln[:80]))
         out.append((m.group(1), m.group(2)))
     return out
+
+
+def root_source(roots, files, uses, root, other, p):
+    """The `sources` line `OTHER:P` where OTHER is an admitted root: -> (repo path, unit name). The file is a git-tracked file under the root OTHER (never a directory
+    or a glob; P is a normalized relative path, so it cannot leave OTHER), and OTHER is a root of ROOT's `uses` (the stage graph shows the edge and the
+    uses cycle check applies). ValueError with the reason otherwise. The unit is `<OTHER with / as __>/<P>`: the file is copied into the unit view as an
+    external's file is, so its content is in the unit's keys; it stays owned by OTHER (onedef and objstub judge each product separately)."""
+    if other not in roots:
+        raise ValueError("%s is not an admitted root" % other)
+    if other == root:
+        raise ValueError("%s is the root itself (use `.`)" % other)
+    if not rel_ok(p):
+        raise ValueError("%s is not a relative path inside %s" % (p, other))
+    full = other + "/" + p
+    if full not in files:
+        raise ValueError("%s is not a git-tracked file of %s" % (p, other))
+    if other not in {u.get("root") for u in uses if isinstance(u, dict)}:
+        raise ValueError("%s is not in `uses` of %s (list it as {root, output})" % (other, root))
+    return full, other.replace("/", "__") + "/" + p
 
 
 def dir_output(p, gen):
@@ -2229,6 +2249,17 @@ class Job:
             if ext == ".":
                 if p not in mine:
                     raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s is no tracked file of the root" % (sr, p)]})
+                continue
+            if ext not in self.ext and ext in self.roots:   # a tracked file of another admitted root of `uses`
+                try:
+                    full, unit = root_source(self.roots, set(self.files), self.rec.get("uses", []), self.root, ext, p)
+                except ValueError as e:
+                    raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s" % (sr, e)]})
+                dest = os.path.join(ws, "root", unit)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(os.path.join(self.repo, full), dest)
+                if is_unit(unit):
+                    out.append(unit)
                 continue
             if ext not in self.ext:
                 raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s names no external of the recipe" % (sr, ext)]})
