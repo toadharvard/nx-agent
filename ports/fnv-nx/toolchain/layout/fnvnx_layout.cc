@@ -4,7 +4,7 @@
  * One text line per complete record type (class, struct, union) the unit lays out, in the object's own section
  * .fnvnx.layout (not loaded):
  *
- *     key <TAB> size <TAB> align <TAB> fields <TAB> bases <TAB> flags <TAB> itanium
+ *     key <TAB> size <TAB> align <TAB> fields <TAB> bases <TAB> flags <TAB> itanium <TAB> linkage
  *
  *   key      MSVC's decorated type name as cl writes it into CodeView as the "unique name" of the record
  *            (`UP@@` for struct P, `VB@@` for class B, `T...@@` for a union, `UIn@Q@@` for Q::In, `U?$TT@H@@` for
@@ -26,6 +26,19 @@
  *            alignment the source asked for), altered (the record's alignment is not the natural one: pack, packed,
  *            alignas / __declspec(align) on it or on a member)
  *   itanium  the Itanium type string (the key of the `types` column of .fnvnx.n3)
+ *   linkage  `none` | `internal` | `external`: the linkage of the record type, C++ [basic.link], decided by GCC 13.3's own predicates
+ *            (linkage_of below), not by names:
+ *              none      cp/tree.cc no_linkage_check(t, false) names a type: a local class, an unnamed class without a typedef name for
+ *                        linkage at namespace scope, a lambda without mangling scope, a class nested in those (the offending type
+ *                        is the record itself or a type it is a member of)
+ *              internal  not none, and the type's declaration is not public: cp/tree.cc decl_anon_ns_mem_p (a member of an unnamed
+ *                        namespace, however deeply, also through an enclosing class) or TREE_PUBLIC cleared by the front end's
+ *                        determine_visibility / constrain_visibility_for_template (cp/decl2.cc: a template instantiation with an
+ *                        argument of internal linkage)
+ *              external  everything else
+ *            An unnamed class with a typedef name for linkage purposes is named for the front end (TYPE_UNNAMED_P is false) and takes
+ *            the linkage of that name's scope. A record of a C unit (cc1) has none of these predicates: `none` when it is declared in a function's
+ *            block (TYPE_CONTEXT is a FUNCTION_DECL), else `external`.
  *
  * Objects (section .fnvnx.objects, not loaded): one line per variable definition with static storage the unit
  * makes (a global, a file-scope static, a static data member, a function-local static; not a declaration alone):
@@ -58,6 +71,20 @@
 #include "tree-inline.h"
 
 int plugin_is_GPL_compatible;
+
+FNVNX_CXX_ONLY(no_linkage_check);
+FNVNX_CXX_ONLY(decl_anon_ns_mem_p);
+
+/* the linkage column of a layout line, by the front end's own predicates (see the header comment) */
+static const char *linkage_of(tree t)
+{
+  t = TYPE_MAIN_VARIANT(t);
+  if (!is_cxx()) return TYPE_CONTEXT(t) && TREE_CODE(TYPE_CONTEXT(t)) == FUNCTION_DECL ? "none" : "external";
+  if (no_linkage_check(t, false)) return "none";
+  tree d = TYPE_MAIN_DECL(t);
+  if (!TREE_PUBLIC(d) || decl_anon_ns_mem_p(d)) return "internal";
+  return "external";
+}
 
 static std::vector<tree> found;
 static std::set<tree> found_set;
@@ -108,7 +135,7 @@ static void add_var(tree d)
 {
   if (!d || TREE_CODE(d) != VAR_DECL || !TREE_STATIC(d) || DECL_EXTERNAL(d)) return;
   if (DECL_HARD_REGISTER(d)) return;   /* a global register variable is no memory: no extent */
-  if (fnvnx_cxx_fe() && (processing_template_decl || uses_template_parms(TREE_TYPE(d)))) return;   /* (cc1: no templates) */
+  if (is_cxx() && (processing_template_decl || uses_template_parms(TREE_TYPE(d)))) return;   /* (cc1: no templates) */
   if (vars_set.insert(d).second) { vars.push_back(d); keep_vars = tree_cons(NULL_TREE, d, keep_vars); }
 }
 
@@ -280,7 +307,7 @@ static void emit_objects()
     tree e = type;
     while (TREE_CODE(e) == ARRAY_TYPE) e = TREE_TYPE(e);
     std::string elem = "-";
-    if (RECORD_OR_UNION_TYPE_P(e) && (!fnvnx_cxx_fe() || CLASS_TYPE_P(e) || TREE_CODE(e) == UNION_TYPE) && COMPLETE_TYPE_P(e)) {
+    if (RECORD_OR_UNION_TYPE_P(e) && (!is_cxx() || CLASS_TYPE_P(e) || TREE_CODE(e) == UNION_TYPE) && COMPLETE_TYPE_P(e)) {
       std::string why;
       elem = key_of(TYPE_MAIN_VARIANT(e), why);
     }
@@ -343,7 +370,7 @@ static void finish_unit_cb(void *, void *)
     }
     std::vector<std::string> fl(flags.begin(), flags.end());
     lines.push_back(key + "\t" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(t))) + "\t" + std::to_string(TYPE_ALIGN_UNIT(t)) + "\t"
-                    + join(fields, ',') + "\t" + join(bases, ',') + "\t" + join(fl, ',') + "\t" + itanium(t));
+                    + join(fields, ',') + "\t" + join(bases, ',') + "\t" + join(fl, ',') + "\t" + itanium(t) + "\t" + linkage_of(t));
   }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.layout,\"\",%%progbits\n");
   for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(lines[i]).c_str());
