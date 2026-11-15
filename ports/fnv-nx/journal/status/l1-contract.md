@@ -1943,3 +1943,11 @@ bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data)
   - Red in render: the recipe `store` stage of gl4 and sm_link fails with EEXIST on /tmp/recipe-*/syslib (recipe.py:2762). It is L1's, given to w28; the rule is a private scratch per stage.
   - objstub at that head: 2059/2126, 79 findings, none in render. w12 attributes them when it assembles cand4.
 bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data).
+- 23:22 w28 work for cand4:
+  - 0cdff83c8: syslib EEXIST fixed (a private mkdtemp per link call, plus an ast rule test_recipe_scratch, 4 PASS).
+  - 8e3643237: the abspath escape rule (tool reads built from __file__ that leave the tool's tree).
+    - Over the cand3 closure (167 files): 14 findings, 0 in verify/.
+    - The escape findings are contract/l2sections.py:22 (w12, cand3) and render/d3d9/env/envq.py:104 (L6).
+  - Change asked of w28: a path that is not constant is red unless it goes through require_under.
+  - The 6 render rows were cand3's older render copy; L6's tree has 0.
+bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data).
