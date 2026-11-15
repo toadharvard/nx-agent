@@ -1,16 +1,22 @@
 {
  "entries": [
   {
-   "fast_path": "ARMv8 SHA-256 instructions in lib/sha256",
-   "id": "PD-LOADER-SHA256-ISA",
-   "owner": "L1",
-   "rule": "lib/sha256 selects the ISA body by the declared reference CPU's features (one home)"
-  },
-  {
    "fast_path": "plain ldr/str (and ldp/stp, the vectorizer's free scheduling) for guest memory accesses; the lifter emits every guest load as ldar and every guest store as stlr",
    "id": "PD-LIFT-ORDERED",
    "owner": "L3a",
    "rule": "An access whose cell is proven thread-private is emitted as plain ldr/str; every other access stays ordered (ldar/stlr). A cell is thread-private iff it is (1) a stack slot of the accessing function's frame whose address does not escape, or (2) a cell that no other thread can reach. Both are decided by the one points-to/write-set model (w4's pointsto.py, the one that also serves DIC and the cpufeat certificates), over all images and the declared host boundary. Escape means the address flows to a global cell, a heap cell, another frame's escaping cell, a thread-start or callback argument, or any import argument (the platform's native code is another observer). A cell the model cannot decide is not thread-private. Undecided stays ordered: it is the sound side. Proof: x86-TSO to Arm: the published mapping proof (OWNER 9) requires ldar/stlr only to preserve, for other threads, the order of accesses to locations they can access. For a thread-private cell, no access by another thread exists by definition (in every execution, since the points-to over-approximates every address the program can form; wild accesses are excluded by OWNER 6). So no other thread can observe the order of its accesses relative to anything. Within the accessing thread, Arm keeps per-location coherence and program-order semantics for a single thread (a single-threaded execution sees its own accesses in program order: Arm ARM B2, the single-copy and per-location coherence and dependency rules). The thread's own values are therefore identical to the ordered emission. The TSO behaviour of every cell another thread can reach is unchanged, because those accesses stay ordered. Hence the set of observable behaviours is unchanged: TSO is preserved by construction. When: after the product relift (2.3), before the first frame is measured."
+  },
+  {
+   "fast_path": "the guest runtime's string routines (memcpy, memmove, memset, strlen, ... of newlib) are the generic C bodies with every access ordered by fnvnx_order (newlib -DPREFER_SIZE_OVER_SPEED), not newlib's aarch64 assembly",
+   "id": "PD-RT-STRING-ORDERED",
+   "owner": "L2",
+   "rule": "An aarch64 string-routine body whose ordering is proven equal to the x86 semantics of the exe CRT routine the call replaces: SDM 8.2.4 fast-string (fenced at entry and exit, unordered inside) where that routine uses rep movs/stos, per-store ordering by size path where it uses plain or SSE stores. To be stated in full by L2 before the first frame. Must be 0 at: the first frame. The switch-off is guest_compiler.json runtime_cflags; entry and field are deleted in the commit that lands the rule."
+  },
+  {
+   "fast_path": "GCC stack slot reuse (-fstack-reuse=all) in guest code",
+   "id": "PD-STACK-REUSE",
+   "owner": "L2",
+   "rule": "Stack-slot sharing is allowed for slots whose address does not escape, decided by the same points-to model as gate_order rule D (no address-forming instruction of the range reaches the slot in the CFG), and for slots shared by variables of disjoint lifetimes from the order plugin's per-variable ranges and lifetime facts (L2 plugin, L1 gate). When gate_order certifies every shared slot of the guest roots by that rule, -fstack-reuse=none leaves guest_compiler.json flags.semantics.common and this entry is deleted in the same commit."
   }
  ],
  "first_frame": false,

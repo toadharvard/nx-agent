@@ -14,12 +14,12 @@ import test_link as TL  # noqa: E402
 
 recipe, T, ROOT, BASE, check = TR.recipe, TR.T, TR.ROOT, TR.BASE, TR.check
 P = T + "prod"
-MK = ("import os, sys\nos.makedirs('/out/gen', exist_ok=True)\n"
+MK = ("import os, sys\n"
       "for n in ('handheld', 'docked'):\n    open('/out/gen/ident_%s.bin' % n, 'wb').write((sys.argv[1] + n).encode())\n#PAD\n")
-USE = ("import hashlib, os, sys\nos.makedirs('/out/gen', exist_ok=True)\n"
+USE = ("import hashlib, os, sys\n"
        "n = sum(len(open('/uses/%s/%s' % (sys.argv[1], k), 'rb').read()) for k in ('handheld', 'docked'))\n"
        "open('/out/gen/used.c', 'w').write('const int used_len_%d = 1;\\n' % n)\n")
-LST = "import os, sys\nos.makedirs('/out/gen', exist_ok=True)\nopen('/out/gen/srcs.txt', 'w').write('\\n'.join(sys.argv[1:]) + '\\n')\n"
+LST = "import os, sys\nopen('/out/gen/srcs.txt', 'w').write('\\n'.join(sys.argv[1:]) + '\\n')\n"
 PREC = dict(TL.LIB_REC, generated=[{"tool": P + "/mk.py", "args": ["alpha"], "inputs": [],
                                     "outputs": ["gen/ident_handheld.bin", "gen/ident_docked.bin"]}],
             outputs={"handheld": "gen/ident_handheld.bin", "docked": "gen/ident_docked.bin"})
@@ -69,7 +69,8 @@ def main():
     g = consumer()
     g["generated"] = [dict(g["generated"][0], inputs=[P + "/p.c"])]
     e4 = errs(g, "red4")
-    check("a stage reading another root's file by path (generated input) is a check error pointing at `uses`", any("another root" in e and "uses" in e for e in e4), e4)
+    # recipe 22aa53b17: a generator may read declared inputs of any admitted root (their content is in the stage key), so a tracked file of another root is no check error
+    check("a stage reading another root's tracked file by path (generated input) is accepted: the content is in the key", not [e for e in e4 if "another root" in e], e4)
     e5 = errs(consumer(outputs={"used": "gen/other.c"}), "red5")
     check("outputs: a name that maps to no generated output of the root is a check error", any("outputs must be" in e for e in e5), e5)
     # generated `sources`: units listed by a generate stage as <external>:<path> lines

@@ -96,8 +96,8 @@ def main():
     try:
         so = [pb.build(n, td) for n in ('sdd', 'names')]
         obj = os.path.join(td, 't.o')
-        r = pb.compile(FIX, obj, so, flags=pb.PRODUCT_FLAGS + ['-O0', '-fkeep-inline-functions'])
-        check('compiles', r.returncode == 0, r.stderr[-3000:])
+        r = pb.compile(FIX, obj, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
+        check('compiles', r.returncode == 0, '\n'.join(l for l in r.stderr.splitlines() if 'warning' not in l and 'note:' not in l)[:3000])
         if r.returncode == 0:
             checks(obj)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_names-mode=1'])

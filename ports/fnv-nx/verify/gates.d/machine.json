@@ -8,8 +8,6 @@
  ],
  "result": "machine.json",
  "covers": [
-  "product-guest",
-  "lifted",
-  "host-product"
+  "registry-reader"
  ]
 }

@@ -97,6 +97,13 @@ def main():
         keys = {l.split('\t')[0]: l.split('\t')[1:] for l in (lay or []) if l}
         check('layout, C: US@@ is size 8 align 4 fields a:0:4,b:4:1; TU@@ is a union of size 4', lay is not None
               and keys.get('US@@', [None] * 3)[:3] == ['8', '4', 'a:0:4,b:4:1'] and keys.get('TU@@', [None])[0] == '4', lay or r.stderr[-1000:])
+        # --- the data model is the front end's, not the language's: size_t is unsigned int and ptrdiff_t is int under cc1 too (the same compiler patch)
+        r, out = build_c(td, 'dm_c', [so['names']], '_Static_assert(__builtin_types_compatible_p(__typeof__(sizeof 0), unsigned int), "size_t");\n'
+                         '_Static_assert(__builtin_types_compatible_p(__typeof__((char *)0 - (char *)0), int), "ptrdiff_t");\n'
+                         'int dm;\n')
+        check('data model, C: size_t is unsigned int, ptrdiff_t is int', r.returncode == 0, r.stderr[-1000:])
+        r, out = build_c(td, 'dm_ld', [so['names']], '_Static_assert(sizeof(long double) == 8 && __LDBL_MANT_DIG__ == 53, "long double is binary64");\nint dl;\n')
+        check('data model, C: long double is binary64 (the compiler of msvcmodel.patch LONG_DOUBLE_TYPE_SIZE)', r.returncode == 0, r.stderr[-1000:])
         # --- all eight together on one C unit (a native root: the full set with its fixed arguments)
         r, out = build_c(td, 'all', [], COMMON, native=True)
         check('all eight plugins together build a C unit of a native root', r.returncode == 0, r.stderr[-1500:])
