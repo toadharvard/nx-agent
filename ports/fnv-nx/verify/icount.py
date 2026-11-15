@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # run as `pytho
 import bootlayout  # noqa: E402
 
 FORMAT = "fnvnx-icount/1"
-CLASS_HEADER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icount_abi", "icount_classes.h")   # the one record of the class ids
+CLASS_HEADER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests", "icount", "icount_classes.h")   # the one record of the class ids
 
 
 def class_bits(path=CLASS_HEADER):
