@@ -572,7 +572,28 @@ def to_json(rep):
 
 
 
-def judge_root_objects(repo, cache, root):
+PROBE_ROOT = "ports/fnv-nx/verify/probes"   # the admitted root of the jmp_buf probe unit (probes/jmpbuf.c)
+
+
+def jmpbuf_facts(repo, cache):
+    """(routine names, sizeof(jmp_buf)) of the guest runtime: the size from the probe root's object (built by the recipe with the pinned compiler), the routines
+    from the one setjmp.h of the pinned runtime external (guest_compiler.json). Raises ValueError when the probe is red or the header is not exactly one file."""
+    import gate_build  # noqa: E402
+    import recipe  # noqa: E402
+    res, _ = gate_build.ensure(PROBE_ROOT, cache, repo)
+    if res["status"] != "green":
+        raise ValueError("jmp_buf probe root: build %s" % res["status"])
+    objs = [o["object"] for o in res["objects"] if o["unit"].endswith("jmpbuf.c")]
+    if len(objs) != 1:
+        raise ValueError("jmp_buf probe root: %d objects of jmpbuf.c" % len(objs))
+    ext = os.path.join(cache, "external", recipe.load_pin(repo)["external"]["commit"])
+    hdr = [os.path.join(d, "setjmp.h") for d, _n, fs in os.walk(ext) if "setjmp.h" in fs and os.path.basename(d) == "include"]
+    if len(hdr) != 1:
+        raise ValueError("the pinned runtime external holds %d include/setjmp.h (want exactly 1)" % len(hdr))
+    return jmpbuf_routines(open(hdr[0]).read()), jmpbuf_size(objs[0], "fnvnx_jmpbuf_probe")
+
+
+def judge_root_objects(repo, cache, root, jb=((), 0)):
     """the root's built objects (every unit of a guest product root) -> (Report | None, why)"""
     import gate_build  # noqa: E402
     import recipe  # noqa: E402
@@ -584,7 +605,7 @@ def judge_root_objects(repo, cache, root):
         return None, "build %s" % res["status"]
     blobs = [(root + "/" + o["unit"], open(o["object"], "rb").read(), False) for o in res["objects"]]
     blobs += link_member_blobs(root, res)
-    return judge(universe(blobs)), ""
+    return judge(universe(blobs), jb[0], jb[1]), ""
 
 
 def link_member_blobs(root, res):
@@ -613,8 +634,14 @@ def gate_main():
         ids, why = [], []
         adm = recipe.load_admit(repo)
         roots = [r for r in gate_build.product_roots(repo) if recipe.entry_of(adm, r).get("target") == "guest"]
+        try:
+            jb = jmpbuf_facts(repo, cache)
+        except (ValueError, recipe.RecipeError) as e:
+            jb, why = ((), 0), ["jmp_buf facts: %s" % str(e)[:200]]
+            u += 1
+            ids.append("jmpbuf:probe")
         for r in roots:
-            rep, w = judge_root_objects(repo, cache, r)
+            rep, w = judge_root_objects(repo, cache, r, jb)
             if rep is None:
                 u, ids = u + 1, ids + [r + ":build"]
                 why.append("%s: %s" % (r, w))
