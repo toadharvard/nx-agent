@@ -439,19 +439,29 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
   case VOID_TYPE: case INTEGER_TYPE: case REAL_TYPE: case BOOLEAN_TYPE: {
     tree n = TYPE_NAME(t);
     if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
+    if (!n && (code == BOOLEAN_TYPE || code == INTEGER_TYPE))   /* an element type the target makes without a name (the SVE predicate's 1-bit boolean): its precision and signedness are its identity */
+      return pre + (code == BOOLEAN_TYPE ? "bool_bits_" : TYPE_UNSIGNED(t) ? "uint_bits_" : "int_bits_") + std::to_string(TYPE_PRECISION(t));
     if (!n || TREE_CODE(n) != IDENTIFIER_NODE) { dl_error("a scalar type without a name", "?"); return "?"; }
     return pre + dl_word(IDENTIFIER_POINTER(n));
   }
+  case NULLPTR_TYPE:   /* C23 nullptr_t (c/c-decl.cc 4653 records the builtin type): one node, identified by its name */
+    return pre + "nullptr_t";
   case VECTOR_TYPE: {
-    /* VEC1: a vector type is spelled by the facts GCC's own compatibility check reads: c/c-typeck.cc comptypes_internal (VECTOR_TYPE: equal
-     * TYPE_VECTOR_SUBPARTS and compatible element types) and cp/typeck.cc structural_comptypes (same), plus the layout the ABI sees (size,
-     * alignment) and TYPE_VECTOR_OPAQUE (an opaque vector is a distinct type for the builtins' overload machinery).  Row:
-     * `vec:<N>:<size>:<align>:` [`opaque:`] element. */
-    poly_uint64 n = TYPE_VECTOR_SUBPARTS(t);
-    unsigned HOST_WIDE_INT nc = 0;
-    if (!n.is_constant(&nc) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { dl_error("a vector type of non-constant size", "?"); return "?"; }
-    return pre + "vec:" + std::to_string(nc) + ":" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(t))) + ":"
-           + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + (TYPE_VECTOR_OPAQUE(t) ? "opaque:" : "") + dl_type(TREE_TYPE(t), stk);
+    /* VEC1: a vector type is spelled by the facts that GCC's own compatibility check reads: c/c-typeck.cc comptypes_internal case VECTOR_TYPE (1279-1283:
+     * known_eq of TYPE_VECTOR_SUBPARTS and compatible element types; cp/typeck.cc structural_comptypes likewise) plus the layout the ABI sees (size, alignment).
+     * Row `vec:<N>:<size>:<align>:` element.  N and size are poly_ints (a variable-length SVE vector has N = c0 + c1*x, x the runtime vector-length factor): the
+     * decimal c0, or `c0+c1x` when c1 is not 0 (known_eq compares coefficient-wise).
+     * TYPE_VECTOR_OPAQUE is not spelled: an opaque vector is a VARIANT of its non-opaque main type (tree.cc build_opaque_vector_type 10162-10180: a variant copy;
+     * tree.cc 13366: "vector types may differ by TYPE_VECTOR_OPAQUE"), the main variant is taken above, and comptypes_internal ignores it.  It is made by vector
+     * comparison results (c/c-typeck.cc 12725, 12886; cp/typeck.cc 6050; cp/call.cc 5674): tested with __typeof__ of such a comparison. */
+    auto ps = [](poly_uint64 v) {
+      std::string r = std::to_string(v.coeffs[0]);
+      for (unsigned i = 1; i < NUM_POLY_INT_COEFFS; i++) if (v.coeffs[i]) r += "+" + std::to_string(v.coeffs[i]) + (i == 1 ? "x" : "y" + std::to_string(i));
+      return r;
+    };
+    poly_uint64 size;
+    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size)) { dl_error("a vector type whose size is not a poly_int constant", "?"); return "?"; }
+    return pre + "vec:" + ps(TYPE_VECTOR_SUBPARTS(t)) + ":" + ps(size) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
   }
   default:
     dl_error("a type outside the grammar", get_tree_code_name((enum tree_code)code));
