@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory() as t:
     check('packstage inc: the command line writes the same text', r.returncode == 0 and open(out).read() == prelude.text('imp.h', d))
     pk = t + '/pack'
     os.makedirs(pk + '/u')
-    for n in packcopy.names(): w(pk, n, '')
+    for n in packcopy.names(): w(pk, n[:-4] + '.src', '')
     packcopy.main(pk, t + '/out')
     check('packcopy: a pack without inc/ is copied', os.path.isfile(t + '/out/u/fff.cpp'))
     os.makedirs(pk + '/inc')

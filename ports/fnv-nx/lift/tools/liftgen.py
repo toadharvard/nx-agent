@@ -2,8 +2,8 @@
 """The generator of the lifted pack: the lifter's output for the whole code universe as C++ SOURCE. No compiler runs here: the objects are built
 only by verify/recipe.py from the product root lift/pack (build.json), whose `generated` stage copies the units out of the published pack tree.
     liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shapes_K.tsv
-    liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...]
-        merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, entries.tsv (lifted and runtime rows),
+    liftgen.py --finish --out DIR --exe EXE --modules MODULES_TSV --image DIR=UNIVERSE.tsv ...   (one --image per image: the exe and every row of the module table)
+        merge the shards of every image of the process -> DIR/pack/: u/000.src .. u/fff.src (the source of the unit u/NNN.cpp: a tool-class root holds no C++ unit, lift/pack's packcopy stage names it), entries.tsv (lifted and runtime rows),
         forms.tsv, encs.tsv, shapes.tsv, gate_liftgen.json. Nothing derived from the loader's bridge table is written (imp.cpp, disp.cc, the import rows and
         the table_id, inc/fnvl_prelude.h and inc/imp.h are the generated stages of lift/pack: the runtime's headers are never in the pack).
     liftgen.py --recipe REF COMMIT TREE_SHA256    write lift/pack/build.json for the published pack tree (fnv-nx-build branch, commit, cas.py ingest hash)
@@ -204,9 +204,9 @@ def finish(a):
     import fnvlift as L
     out = a.out; pk = out + '/pack'
     os.makedirs(pk + '/u', exist_ok=True)
-    images = [(out, L.universe.load(a.universe)[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
+    images = [(d, L.universe.load(u)[0]) for d, u in (x.split('=', 1) for x in a.image)]      # every image: its shard directory and its universe (the exe's included)
     table_sha, table = module_table(a.modules)
-    check_images(images, table, image_inputs(out)['exe_sha256'])
+    check_images(images, table, sha(a.exe))
     texts, forms, encs, shapes, shape_fam = {}, collections.defaultdict(lambda: [0, 'none']), {}, collections.Counter(), {}
     for d, ent in images:
         t = image(d, ent)
@@ -227,7 +227,7 @@ def finish(a):
     units = collections.defaultdict(list)
     for x in sorted(texts): units[bucket(x)].append(texts[x])
     for i in range(NBUCKET):
-        with open('%s/u/%03x.cpp' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
+        with open('%s/u/%03x.src' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
     syms = {x: 'L_%08x' % x for x in texts}
     kind = {x: 'code' for x in syms}                      # the kind of an entry is the producer set its key came from: the keys of texts, EH_KEYS (the import rows are the pack's impgen stage)
     for k, sy in EH_KEYS:
@@ -314,18 +314,18 @@ def main():
     A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
     A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--l3', default=None)
     A('--lift', help='the lift/ directory (fnvlift/, rt/) when it is not the parent of this tool (a recipe stage mounts it as a declared input)')
-    A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
+    A('--image', action='append', default=[], metavar='DIR=UNIVERSE.tsv', help='finish: one image (exe and every module row): its shard directory and its universe')
     A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
     A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)
-    need = ['out'] + (['universe', 'gen', 'modules'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
+    need = ['out'] + (['exe', 'modules', 'image'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
     miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
     if miss: ap.error('missing %s' % ' '.join(miss))
     a.base = None
     if a.module: module_inputs(a)
     import fnvlift
-    fnvlift.inputs.configure(**({'universe': a.universe} if a.finish else dict(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys)))
+    if not a.finish: fnvlift.inputs.configure(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys)      # finish merges texts: it reads no lifter input
     os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)
     elif a.shard: shard(a)
