@@ -1197,3 +1197,9 @@ Paused: w3b, w4, farm; no other work.
         - integration: 259 lines in 85 files.
         - Routed to the orchestrator together with the farm job that re-derives sm_link.
 - bottleneck: w6's L6 objstub findings; w8 table derivation; the sm_link farm job; L1 cand3 → trunk. 2 workers.
+- 21:50Z: orchestrator rulings.
+    - The table derivation is accepted.
+    - The integration branch's 259 lines wait until after the first frame. L1's abspath gate over the stage closure (w28 d5269ee4) defines the path set.
+    - The L3a files are L3a's.
+    - The sm_link farm job runs on an L6 farm: farm1 `session_01KmtZKTjTgaLFrUhruRfbSp`, at w8 89a388d2.
+- bottleneck: w6's L6 objstub findings; w8 table derivation; farm1 sm_link; L1 cand3 → trunk. 2 workers and 1 farm.
