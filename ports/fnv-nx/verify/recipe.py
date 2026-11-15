@@ -639,6 +639,61 @@ def link_candidates(roots, root, target, repo):
     return out
 
 
+def foreign_imports(tool, owner, files, inputs, repo="."):
+    """[module] a generator tool imports that its stage cannot read: the stage mounts the tool's own root and the generator's declared inputs, plus the Python
+    standard library and the pinned modules of env.json (envcheck.PY_MODULES). Every import of the tool, found by `ast` (any depth, relative imports included), and,
+    transitively, of every module it resolves to, must be one of those; a module of another root that no declared input carries is foreign (the stage would die with
+    ModuleNotFoundError at run time, so the recipe is red before any run). INPUTS: the generator's input paths (repo-relative strings)."""
+    import ast
+    std, pinned = set(sys.stdlib_module_names) | {"__future__"}, set(envcheck.PY_MODULES.values())
+    mine = [f for f in files if under(f, owner) and f.endswith(".py")]
+    ins = [i for i in inputs if isinstance(i, str)]
+    by_path = {}
+
+    def find(name, rel):    # the tracked file of module NAME (dotted): in the tool's own root, or carried by a declared input
+        parts = name.split(".")
+        for cand in (mine + [f for f in files if f.endswith(".py") and any(f == i or under(f, i) for i in ins)]):
+            for suf in ("/".join(parts) + ".py", "/".join(parts) + "/__init__.py"):
+                if cand == suf or cand.endswith("/" + suf):
+                    return cand
+        return None
+    bad, seen, todo = [], set(), [tool]
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        try:
+            tree = ast.parse(open(os.path.join(repo, f)).read())
+        except (OSError, SyntaxError, ValueError):
+            continue
+        for n in ast.walk(tree):
+            names = []
+            if isinstance(n, ast.Import):
+                names = [(a.name, 0) for a in n.names]
+            elif isinstance(n, ast.ImportFrom):
+                names = [((n.module or "") + ("." + a.name if n.module is None or True else ""), n.level) for a in n.names] if n.level else [(n.module or "", 0)]
+            for name, level in names:
+                if level:    # a relative import names a module beside the importing file, inside its root
+                    base = posixpath.normpath(posixpath.join(posixpath.dirname(f), *([".."] * (level - 1))))
+                    tail = name.lstrip(".").replace(".", "/")
+                    hit = [c for c in (base + "/" + tail + ".py", base + "/" + tail + "/__init__.py") if c in files]
+                    if not hit:
+                        bad.append(name)
+                    else:
+                        todo.append(hit[0])
+                    continue
+                top = name.split(".")[0]
+                if top in std or top in pinned or not top:
+                    continue
+                got = find(name, f) or find(top, f)
+                if got is None:
+                    bad.append(name)
+                else:
+                    todo.append(got)
+    return sorted(set(bad))
+
+
 def ar_bytes(members):
     """The bytes of a GNU `ar` archive of MEMBERS [(name, object bytes)], names at most 15 characters: the symbol index ('/') of the members' global and weak
     definitions (COMMON included), then the members. Deterministic (date, uid, gid 0, mode 644), so an archive is a pure function of its members: the linker reads
@@ -1395,6 +1450,9 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err.append("generated[%d].tool %r is not a tracked .py file of an admitted tool or product root" % (i, t))
         if not (isinstance(g["args"], list) and all(isinstance(a, str) for a in g["args"])):
             err.append("generated[%d].args must be strings" % i)
+        if isinstance(t, str) and t in files and t.endswith(".py") and owner:
+            err += ["gen:foreign-import:%s:%s (generated[%d]: the stage mounts the tool's own root and the declared inputs; the module lies in another root and no input carries it)" % (t, m, i)
+                    for m in foreign_imports(t, owner, files, g["inputs"] if isinstance(g["inputs"], list) else [], repo)]
         stg = [p for p in ins if isinstance(p, dict)] if isinstance(ins, list) else []
         ins = [p for p in ins if not isinstance(p, dict)] if isinstance(ins, list) else ins
         for p in stg:   # the declared output of an EARLIER generator of this recipe: {"stage": "<this root>:gen:I", "path": OUTPUT}, mounted at /stage/<OUTPUT>
