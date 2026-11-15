@@ -9,8 +9,11 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
   compiler item: the build is green, the root's recipe compiler is the external of verify/guest_compiler.json (recipe.guest_errors: name,
     repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
     with the pin's driver (the object was built by that tree, not by a name).
-  unit item, all of: a CC stage document exists for the unit; under the recipe's flags the compiler's predefined macros (recipe.predefined, `-dM -E`)
-    say __SIZE_TYPE__ is unsigned int, __PTRDIFF_TYPE__ is int and __CHAR_UNSIGNED__ is undefined (the exe's data model, plain char signed); its argv holds the whole semantic set of the pin ("flags"."semantics", the one source
+  data-model item `<root>:datamodel:<row id>`, one per row of DATAMODEL.json (the one table of the exe's data model; no set is written here): the pinned
+    C++ driver compiles the case file the row names (its `test` field) under the root's semantic flags, syntax only; the row is certified when its
+    DM("<id>") case exists and the compiler accepted it, and, for a kind=flag row, its `site` flag is in the semantic set. A case with no row is
+    an item of its own (`case:<id>`). A row of status `open` pins what the compiler gives today, so its case passes by that.
+  unit item, all of: a CC stage document exists for the unit; its argv holds the whole semantic set of the pin ("flags"."semantics", the one source
     recipe.SEMANTICS_FLAGS reads) for the unit's language as ONE ordered run, exactly as recipe.semantics_for derives it from the pinned driver
     (the set minus the flags the driver's own diagnostic says do not apply to that language; the gate re-runs that probe itself), and no other
     -f/-m token except a stage's own (-fplugin, -frandom-seed, -ffile-prefix-map, -fpreprocessed) and the per-root class recipe.PER_ROOT; and
@@ -22,6 +25,7 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
 Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model."""
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,8 +33,40 @@ import gate_build  # noqa: E402
 import recipe  # noqa: E402
 
 ILP32 = "-mabi=ilp32"
-# The exe's Visual C++ 2008 data model as the compiler states it (predefined macros under the unit's flags): size_t unsigned int, ptrdiff_t int, plain char signed
-MODEL = {"__SIZE_TYPE__": "unsigned int", "__PTRDIFF_TYPE__": "int"}
+DATAMODEL = "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"   # the one table of the exe's data model (L2, fnvnx-datamodel/1); its path is the only name here
+TOOLCHAIN = "ports/fnv-nx/toolchain/"   # a row's "test" ("tests/ldbl/datamodel.cpp: DM(\"S01\")") names its case file relative to this
+
+
+def case_file(row):
+    """The source file of a row's case, from the row's own `test` field (relative to the toolchain dir)."""
+    return row["test"].split(":")[0].strip()
+
+
+def failing(lines):
+    """Row ids whose case the compiler rejected: the message of a failed static_assert is the row id (`static assertion failed: S01`)."""
+    return {m for l in lines for m in re.findall(r"static assertion failed: (\w+)", l)}
+
+
+def row_why(rows, sem, code, lines, cases):
+    """{row id: reasons it is not certified ([] = certified)} for the ROWS of DATAMODEL.json. SEM: the semantic flags the unit's driver applies
+    (kind=flag rows: the row's `site` flag is among them). CODE, LINES: the compiler's exit code and diagnostics on the case file. CASES: the ids that
+    file holds a DM(...) case for. A row is certified when its case exists and the compiler accepted it; a case with no row is a row of its own
+    (reported under `case:<id>`)."""
+    bad = failing(lines)
+    why = {}
+    for r in rows:
+        w = []
+        if r["id"] not in cases:
+            w.append("no case in " + case_file(r))
+        if r["id"] in bad:
+            w.append("the compiler rejects the case")
+        elif code and not bad:
+            w.append("the case file does not compile: " + (lines[-1] if lines else "exit %d" % code))
+        if r["kind"] == "flag" and r["site"] not in sem:
+            w.append("flag %s is not in the semantic set" % r["site"])
+        why[r["id"]] = w
+    why.update({"case:" + c: ["a case with no row in " + DATAMODEL] for c in sorted(cases - {r["id"] for r in rows})})
+    return why
 
 
 def cc_docs(store, res):
@@ -48,10 +84,9 @@ def cc_docs(store, res):
 STAGE_F = ("-fplugin", "-frandom-seed=", "-ffile-prefix-map=", "-fpreprocessed", "-ffunction-sections", "-fdata-sections")   # -f tokens a stage itself adds or a root may carry
 
 
-def unit_why(u, doc, sem, pin, plugs=None, macros=None):
+def unit_why(u, doc, sem, pin, plugs=None):
     """Reasons a unit's CC stage document does not certify it ([] = certified). SEM: the semantic flags the pinned driver applies to this unit's
-    language (recipe.semantics_for), or None to skip that clause. PLUGS: the plugins the unit's front end can load (recipe.plugin_languages), in order. MACROS: the compiler's predefined macros for the
-    unit's language under the recipe's flags (recipe.predefined), or None to skip that clause."""
+    language (recipe.semantics_for), or None to skip that clause. PLUGS: the plugins the unit's front end can load (recipe.plugin_languages), in order."""
     if doc is None:
         return ["no CC stage document"]
     argv, ins = doc.get("argv", []), {i["at"]: i["tree"] for i in doc.get("inputs", [])}
@@ -70,15 +105,37 @@ def unit_why(u, doc, sem, pin, plugs=None, macros=None):
             if "-fplugin=/plug/%s/%s.so" % (n, n) not in argv:
                 why.append("argv lacks -fplugin for " + n)
         why += ["argv loads %s, which this front end cannot load" % n for n in ([] if plugs is None else recipe.PLUGIN_SOURCES) if n not in plugs and "/plug/" + n in ins]
-    if macros is not None:
-        why += ["%s is %r, not %r" % (k, macros.get(k), v) for k, v in MODEL.items() if macros.get(k) != v]
-        why += ["plain char is unsigned (__CHAR_UNSIGNED__ is defined)"] if "__CHAR_UNSIGNED__" in macros else []
     ex = pin["external"]
     if ins.get(ex["at"]) != ex["tree_sha256"]:
         why.append("compiler tree at %s is not the pin's" % ex["at"])
     if not argv or not argv[0].startswith(ex["at"] + "/"):
         why.append("driver is not inside the pinned compiler")
     return why
+
+
+def model_rows(repo, root, cxx, sem):
+    """-> (row count, uncertified items, reasons): the rows of DATAMODEL.json, each judged by the pinned C++ driver on the case file the row names
+    (one compile per case file, syntax only, under the root's semantic flags): the universe is the table; nothing is listed here."""
+    path = os.path.join(repo, DATAMODEL)
+    if not os.path.isfile(path):
+        return 1, [root + ":datamodel"], ["no " + DATAMODEL]
+    rows = json.load(open(path))["rows"]
+    bad, why = [], []
+    for f in sorted({case_file(r) for r in rows}):
+        mine = [r for r in rows if case_file(r) == f]
+        src = os.path.join(repo, TOOLCHAIN, f)
+        if not os.path.isfile(src):
+            res = {r["id"]: ["no case file " + f] for r in mine}
+        else:
+            cases = set(re.findall(r'\bDM\("(\w+)"', open(src).read()))
+            code, lines = recipe.diagnostics(cxx, "cxx", sem, src)
+            res = row_why(mine, sem, code, lines, cases)
+        for i, w in sorted(res.items()):
+            if w:
+                bad.append("%s:datamodel:%s" % (root, i))
+                why.append("%s: %s" % (i, ", ".join(w)))
+    extra = len([1 for b in bad if ":datamodel:case:" in b])
+    return len(rows) + extra, bad, why
 
 
 def judge_root(root, repo, cache):
@@ -105,18 +162,20 @@ def judge_root(root, repo, cache):
         why.append("; ".join(g)[:300])
     cc, cxx = recipe.host_compilers(rec, cache)
     sem = {k: recipe.semantics_for(cxx if k == "cxx" else cc, k, origin=roots[root].get("cxx_origin")) for k in ("c", "cxx", "asm")}   # the pinned driver's own answer per language
-    mac = {k: recipe.predefined(cxx if k == "cxx" else cc, k, sem[k]) for k in ("c", "cxx", "asm")}   # the compiler's own statement of the data model
     sos = {p["name"]: p["path"] for p in res.get("plugins", [])}
     langs = recipe.plugin_languages(cc, cxx, sos) if sos else {"c": [], "cxx": []}   # the plugins each front end loads: a fact of the ELF files
     for u in res["units"]:
         w = unit_why(u, docs.get(u), sem["c" if u.endswith(recipe.CC_EXT) else "cxx" if u.endswith(recipe.CXX_EXT) else "asm"], pin,
-                     langs["c" if u.endswith(recipe.CC_EXT) else "cxx"], mac["c" if u.endswith(recipe.CC_EXT) else "cxx" if u.endswith(recipe.CXX_EXT) else "asm"])
+                     langs["c" if u.endswith(recipe.CC_EXT) else "cxx"])
         if w or g:
             bad.append(root + "/" + u)
             if w:
                 why.append("%s: %s" % (u, ", ".join(w)))
-    n = len(units) + 1
-    return n, n - len(bad), bad, "; ".join(why)[:300] or "%d units" % len(units)
+    rows, rbad, rwhy = model_rows(repo, root, cxx, sem["cxx"])
+    bad += rbad
+    why += rwhy
+    n = len(units) + 1 + rows
+    return n, n - len(bad), bad, "; ".join(why)[:300] or "%d units, %d data-model rows" % (len(units), rows)
 
 
 def main():

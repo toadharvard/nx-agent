@@ -1212,6 +1212,14 @@ def predefined(driver, kind, flags):
     return {l.split(" ", 2)[1]: (l.split(" ", 2) + [""])[2] for l in r.stdout.splitlines() if l.startswith("#define ")}
 
 
+def diagnostics(driver, kind, flags, source):
+    """The diagnostics (stderr lines) of the pinned DRIVER compiling SOURCE (a file) for a unit of KIND under FLAGS, syntax only: the compiler's own
+    answer on a translation unit whose static_asserts state the data model (gate "datamodel").  -> (exit code, [lines])."""
+    r = subprocess.run([driver, "-x", LANG_X[kind], "-fsyntax-only"] + list(flags) + [source], capture_output=True, text=True,
+                       env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+    return r.returncode, r.stderr.splitlines()
+
+
 def semantics_for(driver, kind, flags=None, origin=None):
     """The semantic flags the pinned DRIVER (host path) applies to a unit of KIND ("c", "cxx", "asm"), in their order: FLAGS minus every flag that
     the driver itself says does not apply to that language (its diagnostic "command-line option 'X' is valid for C++/ObjC++ but not for C", read
