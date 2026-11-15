@@ -7,7 +7,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import certs_build, prove, shape, symform
+from proof import certbasis, certs_build, prove, shape, symform
 
 WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')
 MD = shape.decoder()
@@ -23,7 +23,7 @@ MODEL = certs_build.pinned_model()
 
 
 def rec(key, result='proved', model=MODEL, dsl=None):
-    return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key), 'obligations': list(prove.OBLIGATIONS)}
+    return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key), 'obligations': list(certbasis.OBLIGATIONS)}
 
 
 class Aggregate(unittest.TestCase):
@@ -99,13 +99,13 @@ class Aggregate(unittest.TestCase):
 
     def test_declared_outputs_cert(self):
         dc = {'eax': 'cpuid0', 'ebx': 'cpuid1'}
-        good = dict(rec(KEYS[0], 'agree-except-declared'), declared=dc, platform_sha256=prove.platform_sha(dc))
+        good = dict(rec(KEYS[0], 'agree-except-declared'), declared=dc, platform_sha256=certbasis.platform_sha(dc.values()))
         bad = dict(rec(KEYS[1], 'agree-except-declared'), declared=dc, platform_sha256='0' * 64)          # the reference CPU changed since
         o = os.path.join(self.d, 'o'); a = self.write('shapeprove_1_of_1.jsonl', [good, bad])
         self.assertEqual(self.run_main([a], o), 0)
         rows = [ln.split('\t') for ln in open(o).read().splitlines()[1:]]
         self.assertEqual([r[0] for r in rows], [KEYS[0]])
-        self.assertEqual(rows[0][5], 'agree-except-declared'); self.assertEqual(rows[0][-1], 'eax:cpuid0,ebx:cpuid1@' + prove.platform_sha(dc))
+        self.assertEqual(rows[0][5], 'agree-except-declared'); self.assertEqual(rows[0][-1], 'eax:cpuid0,ebx:cpuid1@' + certbasis.platform_sha(dc.values()))
         self.assertEqual(prove.declared_outputs(__import__('proof.symform', fromlist=['x']).symbuild(key_of('0fa2')).form), {'eax': 'cpuid0', 'ebx': 'cpuid1', 'ecx': 'cpuid2', 'edx': 'cpuid3'})
         self.assertEqual(prove.declared_outputs(__import__('proof.symform', fromlist=['x']).symbuild(key_of('0f31')).form), {'eax': 'rdtsc', 'edx': 'rdtsc'})
 

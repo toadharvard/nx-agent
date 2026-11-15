@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from proof import shape  # noqa: E402
 
-FAMILIES = ("int", "simd", "x87", "sys")
+FAMILIES = shape.FAMILIES
 MARK = re.compile(rb"^L_([0-9a-f]{8}): ;$", re.M)
 NAME = re.compile(r"[A-Za-z0-9._-]+$")
 

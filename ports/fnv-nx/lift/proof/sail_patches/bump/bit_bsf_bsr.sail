@@ -1,4 +1,4 @@
-// PATCH (viii): x86_bsr and x86_bsf, TRANSCRIPTION of ACL2 books/projects/x86isa/machine/instructions/bit.lisp at acl2 master 3ccb342c88bd3b815856f4bbc336382287934405 (ASM-009), with the dispatch
+// PATCH (viii): x86_bsr and x86_bsf, TRANSCRIPTION of ACL2 books/projects/x86isa/machine/instructions/bit.lisp at acl2 master (sail_pins.txt row acl2) (ASM-009), with the dispatch
 // of inst-listing.lisp:10314-10317 (BSF 0F BC, no prefix: X86-BSF, (:UD (UD-LOCK-USED))) and :10322-10325 (BSR 0F BD, no prefix: X86-BSR, same UD rule), see bsf_bsr_dispatch.py.  The pinned model (the translation
 // of ACL2 8.5) has no x86_bsf / x86_bsr: opcode 0F BC is `Translation error: ... not translated` and 0F BD is `Opcode Unimplemented`, i.e. the isla poison path.
 //   bit.lisp:755-824 def-inst x86-bsr: operand-size (select-operand-size ... nil ...), seg-reg, source = x86-operand-from-modr/m-and-sib-bytes (gpr access, operand-size, inst-ac? t, no immediate), rip increment,
