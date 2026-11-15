@@ -5,10 +5,13 @@ Universe: every unit of every product root of verify/admit.json (tracked sources
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
 Stages are cached by key in GATE_CACHE/store (a temp dir without GATE_CACHE); the result must not depend on the cache (determinism.py
-compares a warm and a cold build). Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
+compares a warm and a cold build). Keep going (RECIPE.md): a red root lists every red unit and stage and every blocked unit; all that was buildable is built and kept.
+Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
 read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE_CACHE/objects/<tree>/<root name>/objects.json (with
 obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json."""
+import atexit
+import hashlib
 import json
 import os
 import shutil
@@ -17,13 +20,14 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cas  # noqa: E402
 import recipe  # noqa: E402
 
 
 def product_roots(repo="."):
     """Every (root, variant) pair of the admitted product roots, spelled `root` (the implicit variant) or `root@NAME` (recipe.split_spec)."""
     adm = recipe.load_admit(repo)
-    return sorted(s for p, r in adm.items() if r["class"] == "product" for s in recipe.pairs_of(_full(repo, r), p))
+    return sorted(s for p, r in adm.items() if r["class"] == "product" for s in recipe.pairs_of(_full(repo, r), p, r))
 
 
 def _full(repo, ent):
@@ -32,6 +36,11 @@ def _full(repo, ent):
             return json.load(f)
     except (OSError, ValueError, KeyError):
         return {}
+
+
+def buildable_roots(repo="."):
+    """The roots the build family (build, determinism, linkstrict, objstub) judges: the product roots and the test roots (admit class test)."""
+    return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] in ("product", "test"))
 
 
 NO_ROOT = "no product root (nothing to build yet)"
@@ -58,21 +67,93 @@ def tree_of(repo="."):
                           text=True, check=True).stdout.strip()
 
 
+_PRIVATE = []   # out dirs of a red build: private to this process (never published), removed at exit
+
+
+def _cleanup():
+    for d in _PRIVATE:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+atexit.register(_cleanup)
+
+
 def ensure(root, cache, repo="."):
-    """Build ROOT with the stage cache GATE_CACHE (CACHE, or a fresh temp dir) -> (objects dict, out dir); raises RecipeError."""
-    out = os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__"))
-    res = recipe.build(repo, root, os.path.join(cache, "store"), out, ext=os.path.join(cache, "external"))
-    return (fixture_view(res) if os.environ.get("GATE_FIXTURES") else res), out
+    """Build ROOT with the stage cache GATE_CACHE (CACHE, or a fresh temp dir) -> (objects dict, out dir); raises RecipeError.
+    A GREEN build is published ONCE as GATE_CACHE/objects/<tree>/<root name> (the key: the tree of the commit holds the sources, the recipe, the pins and env.json,
+    and the build is a function of them): the build runs in a private sibling directory, the machine paths of its objects.json are given the final name, and
+    recipe.publish_dir renames it in; a reader sees the directory only complete. The directory is published and never changed, so later calls, other
+    gates and other processes read it (the contract gate's link dir points into it) without building again. A red build is not published: its out dir is
+    private to this process and removed at exit."""
+    final = os.path.abspath(os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__")))
+    try:
+        with open(os.path.join(final, "objects.json")) as f:
+            return json.load(f), final
+    except (OSError, ValueError):
+        pass
+    os.makedirs(os.path.dirname(final), exist_ok=True)
+    tmp = "%s.tmp-%d-%s" % (final, os.getpid(), os.urandom(4).hex())
+    try:
+        res = recipe.build(repo, root, os.path.join(cache, "store"), tmp, ext=os.path.join(cache, "external"))
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    if res["status"] != "green":
+        _PRIVATE.append(tmp)
+        return res, tmp
+    p = os.path.join(tmp, "objects.json")
+    with open(p) as f:
+        text = f.read().replace(os.path.abspath(tmp), final)
+    with open(p, "w") as f:
+        f.write(text)
+    recipe.publish_dir(tmp, final)
+    with open(os.path.join(final, "objects.json")) as f:
+        return json.load(f), final
 
 
-def fixture_view(res):
-    """RULE (fixtures, RECIPE.md): with env GATE_FIXTURES set, every gate that gets its input from ensure() sees ONLY the fixture units of the
-    root as its objects/units (no ELF, constants or link); a gate then reports its findings as usual and writes them to its result file as
-    "findings": [{"id": ITEM-ID, "code": FINDING-CODE}] (an id is `<root>/<unit>` or `<root>/<unit>:<symbol>`). gate_fixtures.py judges them."""
-    fx = res.get("fixtures", [])
-    return dict(res, objects=[{"unit": f["unit"], "object": f["object"], "sha256": f["sha256"], "os_layer": False} for f in fx],
-                units=[f["unit"] for f in fx], elf=None, constants=None, contract_names=None, defined=[], undefined=[],
-                pp_keys={f["unit"]: f["pp_key"] for f in fx if f.get("pp_key")}, fixtures=[])
+def tool_digest(*mods):
+    """sha256 over the source files of the python modules MODS (module objects or file paths): the tool half of a result key."""
+    h = hashlib.sha256()
+    for m in mods:
+        p = m if isinstance(m, str) else m.__file__
+        with open(p, "rb") as f:
+            h.update(hashlib.sha256(f.read()).digest())
+    return h.hexdigest()
+
+
+def memo(cache, gate, key_doc, make, keep=lambda v: True):
+    """One item of a gate as a result of the verdict's store: GATE_CACHE/memo/<gate>/<key>.json, KEY = sha256 of the canonical KEY_DOC, which must hold
+    everything the item reads (the sha256 of each input file, the tool digest, the declared environment) and nothing else. A hit reads the file; a miss runs
+    MAKE() -> a JSON-able value, published by cas.publish_file (complete or absent) iff KEEP(value) (a result that may be a transient failure is not kept). No cache (CACHE None): MAKE() every time. -> (value, hit)."""
+    if not cache:
+        return make(), False
+    key = hashlib.sha256(cas.canon(key_doc)).hexdigest()
+    p = os.path.join(cache, "memo", gate, key[:2], key + ".json")
+    try:
+        with open(p) as f:
+            return json.load(f), True
+    except (OSError, ValueError):
+        pass
+    v = make()
+    if keep(v):
+        cas.publish_file(p, json.dumps(v, sort_keys=True).encode())
+    return v, False
+
+
+def file_sha(p):
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def unitless(root, cache, repo="."):
+    """True iff ROOT's green build has no unit and no link output: a header-only root (RECIPE.md "Header-only roots"). It holds no code, so by
+    construction it references no import and reads no registry key; the imports and machine gates count 0 items for it and need no declaration.
+    A red build is not unitless (the caller reports it)."""
+    res = ensure(root, cache, repo)[0]
+    return res["status"] == "green" and not res.get("objects") and not res.get("units") and not res.get("elf")
 
 
 def ids(root, res, rec):
@@ -87,7 +168,7 @@ def main():
     roots = recipe.load_admit(repo)
     files = recipe.tracked(repo)
     try:
-        for root in product_roots(repo):
+        for root in buildable_roots(repo):
             rec = recipe.load_recipe(repo, roots, root)
             try:
                 res, out = ensure(root, cache, repo)
@@ -98,7 +179,9 @@ def main():
             items += ids(root, res, rec)
             if res["status"] == "red":
                 f = res["failure"]
-                why.append("%s: stage %s exit %s: %s" % (root, f["stage"], f["exit"], " | ".join(f["stderr"][-3:])[:300]))
+                why.append("%s: stage %s exit %s: %s (%d red units, %d red stages, %d blocked)" % (
+                    root, f["stage"], f["exit"], " | ".join(f["stderr"][-3:])[:300], len(res.get("failed_units", [])), len(res.get("red_stages", [])),
+                    len(res.get("blocked", []))))
                 ok = res["objects"] and [o["unit"] for o in res["objects"]] or f.get("done", [])
                 done += [root + "/" + u for u in ok] + ([root + "/" + rec["link"]["output"]] if res["elf"] else [])
             else:
@@ -109,7 +192,7 @@ def main():
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
     bad = sorted(set(items) - set(done))
-    detail = "; ".join(why) or ("%d units/ELF built from %d product roots" % (len(items), len(product_roots(repo))) if items else
+    detail = "; ".join(why) or ("%d units/ELF built from %d product and test roots" % (len(items), len(buildable_roots(repo))) if items else
                                 NO_ROOT)
     res = {"format": "fnvnx-gate/1", "name": "build", "status": "red" if why else "green", "universe": len(items),
            "certified": len(set(done) & set(items)), "uncertified": bad[:50], "detail": detail[:900]}

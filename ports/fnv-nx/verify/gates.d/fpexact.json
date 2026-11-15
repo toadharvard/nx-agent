@@ -1,0 +1,14 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "fpexact",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/lift/proof/gate_fpexact.py"
+ ],
+ "result": "fpexact.json",
+ "covers": [
+  "product-guest",
+  "lifted"
+ ]
+}

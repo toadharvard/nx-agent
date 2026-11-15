@@ -1,0 +1,19 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "pure",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_pure.py"
+ ],
+ "result": "pure.json",
+ "covers": [
+  "tool",
+  "ref",
+  "header",
+  "test",
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

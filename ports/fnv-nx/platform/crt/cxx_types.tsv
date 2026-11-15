@@ -1,0 +1,14 @@
+# The C++ objects of the exe's CRT that the platform builds: one row per Wine 9.0 definition (platform/com/gen_cxx.py reads this file).
+# fn   <symbol>  <MSVC decorated name>  <C signature: return(args), `this` first>  <citation wine-9.0:<path>:<function>>
+#   the decorated name gives the calling convention and the stack words (contract/proto.py, the one decoder); the signature is checked against it
+# class <name>  <MSVC type name>  <size>  <bases, ; separated, in Wine's order or ->  <vtable slots (fn symbols), ; separated or ->  <cxx: - | info | throw>  <copy ctor fn or ->  <destructor fn or ->  <citation>
+#   cxx info: the class has a CatchableType; throw: it also has a ThrowInfo (destructor required); a base of a class named here must have cxx info
+fn	fnvnx_cxx_type_info_vector_dtor	??_Etype_info@@UAEPAXI@Z	void*(fnvnx_type_info*,unsigned)	wine-9.0:dlls/msvcrt/cxx.h:type_info_vector_dtor
+fn	fnvnx_cxx_exception_vector_dtor	??_Eexception@std@@UAEPAXI@Z	void*(fnvnx_exception*,unsigned)	wine-9.0:dlls/msvcrt/cppexcept.h:exception_vector_dtor
+fn	fnvnx_cxx_exception_what	?what@exception@std@@UBEPBDXZ	const char*(fnvnx_exception*)	wine-9.0:dlls/msvcrt/cppexcept.h:exception_what
+fn	fnvnx_cxx_exception_copy_ctor	??0exception@std@@QAE@ABV01@@Z	fnvnx_exception*(fnvnx_exception*,const fnvnx_exception*)	wine-9.0:dlls/msvcrt/cppexcept.h:exception_copy_ctor
+fn	fnvnx_cxx_bad_alloc_copy_ctor	??0bad_alloc@std@@QAE@ABV01@@Z	fnvnx_exception*(fnvnx_exception*,const fnvnx_exception*)	wine-9.0:dlls/msvcrt/cpp.c:bad_alloc_copy_ctor
+fn	fnvnx_cxx_bad_alloc_dtor	??1bad_alloc@std@@UAE@XZ	void(fnvnx_exception*)	wine-9.0:dlls/msvcrt/cpp.c:bad_alloc_dtor
+class	type_info	.?AVtype_info@@	72	-	fnvnx_cxx_type_info_vector_dtor	-	-	-	wine-9.0:dlls/msvcrt/cxx.h:CREATE_TYPE_INFO_VTABLE
+class	exception	.?AVexception@std@@	12	-	fnvnx_cxx_exception_vector_dtor;fnvnx_cxx_exception_what	info	fnvnx_cxx_exception_copy_ctor	-	wine-9.0:dlls/msvcrt/cppexcept.h:CREATE_EXCEPTION_OBJECT
+class	bad_alloc	.?AVbad_alloc@std@@	12	exception	fnvnx_cxx_exception_vector_dtor;fnvnx_cxx_exception_what	throw	fnvnx_cxx_bad_alloc_copy_ctor	fnvnx_cxx_bad_alloc_dtor	wine-9.0:dlls/msvcrt/cpp.c:bad_alloc

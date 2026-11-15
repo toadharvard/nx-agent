@@ -77,7 +77,7 @@
     blk_00c40000_od_ob1_variant_rtm_variant (1 row each). The rest are other layout causes, next on the list.
 * **S5-boot's three wrong decomp bodies (s5-002.md)**
   - 0x00c3c460 `new MH(false)` with an empty `MH::MH`: **already fixed** by STAND2 (S1-fuzzB 57fe267) in the current
-    rules. STAND2 drops the untagged local `MH::MH(bool) {}`, and the recipe binds `??0MH@@QAE@_N@Z` to 0x00c3bcf0
+    rules. STAND2 drops the untagged local `MH::MH(bool) {}`, and the recipe binds `??0MH@@QAE@_N@Z` to <va>
     (MessageHandler's constructor). With the current link code, GCC's `_ZN2MHC1Eb` / `C2Eb` resolve to 0x00c3bcf0
     in the unit's index. S5 measured on older guests. Its stand-in for 0x00c3c460 in tests/s5/standins.c can go
     after a boot on a guest linked from a tree with STAND2.

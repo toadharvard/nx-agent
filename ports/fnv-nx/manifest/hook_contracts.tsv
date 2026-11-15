@@ -1,0 +1,4 @@
+symbol	param	attrs	source
+fnvnx_import_key	0	nocapture,readonly	L1 statement 2026-11-11
+fnvnx_import_key	1	nocapture,readonly	L1 statement 2026-11-11
+fnvnx_module_load	3	nocapture,readonly	L1 statement 2026-11-11

@@ -7,6 +7,10 @@ Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) 
 sdmc:/fnvnx/game: a path under either prefix (compared case-folded) continues inside `game`, except that the port's own
 entries of sdmc:/switch/fnv (PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without `game`
 it is <root>/switch/fnv when that directory holds anything besides the port's own entries, else <root>/fnvnx/game.
+Read-only. The mounts of the declared inputs (verify/boot_inputs.json, bootdecl.py; the font set is sdmc:/switch/fnv/fonts) are on
+`root` in every mode, never in `game` (their first component under switch/fnv is in PORT_NAMES), and read_only(sd) is true for a mount
+and everything below it (mounts compared case-folded, after the ".." clamping of resolve). The mount list is the `read_only` argument
+(boot.py passes the mounts of boot_inputs.json). The file calls that create, change or remove under it answer EACCES (boothost.py).
 Case. The SD card folds case. Each component is matched against the host entries: if the exact spelling exists it is
 used (os.path.lexists); else the host entries equal under str.casefold() are collected and the first in sorted order
 (code-point order, deterministic) is taken; with no match the spelling given is kept (a path to be created).
@@ -18,7 +22,7 @@ import os
 
 GAME_MOUNTS = ("switch/fnv", "fnvnx/game")
 PORT_NAMES = {"fnv.nro", "fnv-exefs.nsp", "guest.nso", "fnvnx.ini", "user", "host.log", "crash.log", "launcher.log",
-              "override.txt", "readme.txt", "shaders.nvc0cache", "nxgpu.log"}
+              "override.txt", "readme.txt", "shaders.nvc0cache", "nxgpu.log", "fonts"}
 PORT_PREFIXES = ("drive_",)
 
 
@@ -36,7 +40,8 @@ def _parts(p):
 
 
 class BootPath:
-    def __init__(self, root, game=None):
+    def __init__(self, root, game=None, read_only=()):
+        self.ro = [[c.casefold() for c in _parts(m)] for m in read_only]   # casefold, as resolve matches host entries
         sw = os.path.join(root, "switch", "fnv")
         inst = os.path.isdir(sw) and any(not (n.lower() in PORT_NAMES or n.lower().startswith(PORT_PREFIXES))
                                          for n in os.listdir(sw))
@@ -59,6 +64,13 @@ class BootPath:
                     break
                 return self.game, parts[len(mp):]
         return self.root, parts
+
+    def read_only(self, sd):
+        """true for a guest path at or below a read-only mount (case-folded, after the same normalisation as resolve)"""
+        if sd.lower().startswith("sdmc:"):
+            sd = sd[5:]
+        low = [c.casefold() for c in _parts(sd)]
+        return any(low[:len(m)] == m for m in self.ro)
 
     def _names(self, d):
         if d not in self.listing:

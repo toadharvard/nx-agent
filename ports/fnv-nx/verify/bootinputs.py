@@ -67,8 +67,10 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract"))
 import boot
 import bootmiles
+import exepin
 
 MODULE_HEADER = "# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index"
 KEYS_STRIDE = 0x10
@@ -347,10 +349,11 @@ def milestone_table(milestones_text, run_text, entries_id=None, stage_text=None,
             out += ["first-present any call 0x%x" % key for key in present]
         else:
             out.append("%s any call 0x%x" % item)
+    out.append("first-frame any host present")   # the GL backend's first present (boot.py header): always generated, a stage `first-frame` is an error
     if stage_text is not None:
         if man is None:
             raise InputError("a stage table needs entries.tsv (--entries)")
-        taken = {item[0] for item in body if item} | {"first-present"} | {"start-%02d" % i for i in range(1, len(lines) + 1)}
+        taken = {item[0] for item in body if item} | {"first-present", "first-frame"} | {"start-%02d" % i for i in range(1, len(lines) + 1)}
         out += stage_check(stage_text, man, taken)
     return "\n".join(out) + "\n"
 
@@ -440,7 +443,7 @@ def main(argv=None):
             data = join_elf(rd(os.path.join(a.dir, "manifest.json")), lambda n: open(os.path.join(a.dir, os.path.basename(n)), "rb").read())
             open(a.o, "wb").write(data)
         elif a.cmd == "reserved":
-            rows = reserved_rows(rd(a.modules), open(a.exe, "rb").read())
+            rows = reserved_rows(rd(a.modules), exepin.load_exe(a.exe))
             open(a.o, "w").write("".join("%s\t%x\t%x\n" % r for r in rows))
         elif a.cmd == "keys":
             lo, hi = key_range(rd(a.entries), rd(a.keys))
@@ -456,7 +459,7 @@ def main(argv=None):
             man = bootmiles.load_manifest(rd(a.entries)) if a.entries else None
             open(a.o, "w").write(milestone_table(rd(a.table), rd(a.run) if a.run else "", man.table_id if man else None,
                                                  rd(a.stage_table) if a.stage_table else None, man))
-    except (InputError, bootmiles.ManifestError, OSError) as e:
+    except (InputError, bootmiles.ManifestError, OSError, exepin.ExePinError) as e:
         src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "milestones": "milestones.tsv", "stage-table": "old table",
                "render-branch": "manifest.json", "pair": "manifest.json/build.json/meta.json"}[a.cmd]
         print(f"bootinputs {a.cmd} ({src}/entries.tsv/run.txt): {e}", file=sys.stderr)

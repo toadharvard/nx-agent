@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 #
-#   [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked]
+#   [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
 #                                [--gpu-branch <artifacts branch>]
 #
 # Steps:
-#  1 setup: what the stage needs (python3, git, the aarch64 binutils readelf/nm that icount.py spec runs, unicorn==2.1.4)
-#    is checked first; only what is missing is installed (apt-get, pip), and an install that fails fails the job
+#  1 setup: nothing is installed. verify/envcheck.py check (the verdict farms' own check of verify/env.json) runs first;
+#    a mismatch is an input error (rc 1, "set the host up with farm/setup_verdict_env.sh") before anything is fetched or published
 #  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
 #    them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
 #    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
 #    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
 #    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
-#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present) + the loader's
+#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present; the table always gains first-frame = the GL backend's first present host event) + the loader's
 #    console lines of run.txt (when present) -> the bootmiles table; optional softfloat.syms or softfloat.tsv (one symbol
 #    per line). Every missing required file is listed and fails the job
 #  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
@@ -22,14 +22,23 @@
 #    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
 #    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
 #    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
+#    The declared port inputs (verify/boot_inputs.json; now the font set, fnv-nx-build tools/fonts-wine9 at a pinned commit) are fetched by that
+#    commit, verified (sha256 of the sums file, the file set equal to the sums entries under the input's path, every file) and mounted
+#    read-only on the card (sdmc:/switch/fnv/fonts, verify/bootdecl.py, boot.py --declared-inputs); a write the guest makes there is a fault
+#    (OUT.json declared_input_faults) and fails the run (exit 2, verdict failed); any mismatch ends the job "input-error" before the boot, and
+#    OUT.json inputs.declared records {name, commit, sums_sha256, files}
 #  5 verify/boot.py run, heap size 0x40000000. Exit 0 or 2 (the guest stopped with a fault, a deadlock, a missing
 #    module or a nonzero exit) is a RESULT; 1 is an input error and fails the job
 #  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
 #  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
 # --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-#    Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the versions of
-#    verify/env.json (installed by farm/setup_verdict_env.sh, never by this job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
-#    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
+#    Mesa llvmpipe). The job fetches it, requires the host to match the declared environment (verify/env.json, checked by verify/envcheck.py above, installed by farm/setup_verdict_env.sh, never by this job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. EVERY
+#    presented frame is published, losslessly, by content (no cap, no sampling): boot.py stores each distinct frame once as <key>.rgba + <key>.txt
+#    in the frames directory (key = sha256 of the .txt bytes followed by the .rgba bytes; a repeated identical frame, such as a static menu, is the
+#    same file), and the job publishes every file there under frames/ with the result. OUT.json "frames" has a record for every frame (n, t_ns,
+#    per_tid, sha256 = its key), so n frames with d distinct images are n records and d file pairs. Size: one distinct frame is width x height x 4
+#    bytes (1280x720 handheld = 3.7 MB, 1920x1080 docked = 8.3 MB) plus a few bytes of .txt; a publish over a store limit is reported to L4, not
+#    trimmed. meta.json gains gpu_branch and
 #    gpu_branch_commit, the final line gains presents=<n>.
 #    The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
 #    the bridge it was linked with (render: {branch, archive_sha256}); that branch's build.json archive_sha256 and its libfnvnx-d3d9.a
@@ -38,10 +47,13 @@
 # Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
 #    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
+# The declared inputs (verify/env.json, verify/boot_inputs.json) are read only from the tree the job runs from; no variable redirects them.
 # Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
 # when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
+# --quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py
+# and recorded in meta.json (quantum).
 # Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 set -euo pipefail
 die() { echo "boot_job: FAILED: $*" >&2; exit 1; }
@@ -49,17 +61,20 @@ log() { echo "boot_job: $*" >&2; }
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 NX=$(cd "$SELF_DIR/.." && pwd)                     # ports/fnv-nx of the checkout this script lives in
-ELF_ID=${1:?usage: boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked] [--gpu-branch B]}; shift
+ELF_ID=${1:?usage: boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked] [--gpu-branch B]}; shift
 case $ELF_ID in ''|*[!A-Za-z0-9._-]*|.*) die "elf_id '$ELF_ID' must be letters, digits, '.', '_' or '-' and not start with '.'" ;; esac
-LIMIT=""; PROFILE=handheld; GPU_BRANCH=
+LIMIT=""; PROFILE=handheld; GPU_BRANCH=; QUANTUM=
 while [ $# -gt 0 ]; do
   case $1 in
     --limit-instructions) [ $# -ge 2 ] || die "--limit-instructions needs a value"; LIMIT=$2; shift 2 ;;
+    --quantum) [ $# -ge 2 ] || die "--quantum needs a value"; QUANTUM=$2; shift 2 ;;
     --profile) [ $# -ge 2 ] || die "--profile needs a value"; PROFILE=$2; shift 2 ;;
     --gpu-branch) [ $# -ge 2 ] || die "--gpu-branch needs a value"; GPU_BRANCH=$2; shift 2 ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
+[ -n "$QUANTUM" ] || die "--quantum N is required (instructions per slice of a core's thread; a declared parameter of the run, no default)"
+[[ $QUANTUM =~ ^([1-9][0-9]*|0[xX][0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*)$ ]] || die "--quantum '$QUANTUM' is not a positive integer (decimal or 0x hex)"
 if [ -n "$LIMIT" ]; then
   [[ $LIMIT =~ ^([1-9][0-9]*|0[xX][0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*)$ ]] || die "--limit-instructions '$LIMIT' is not a positive integer (decimal or 0x hex)"
 fi
@@ -80,32 +95,12 @@ mkdir -p "$FARM_HOME" "$WORK"
 NX_COMMIT=$(git -C "$SELF_DIR" rev-parse HEAD) || die "$SELF_DIR is not inside a git checkout (meta.json records its commit)"
 
 # 1. setup
-APT=()
-command -v python3 > /dev/null || APT+=(python3)
-command -v git > /dev/null || APT+=(git)
-{ command -v aarch64-linux-gnu-readelf > /dev/null && command -v aarch64-linux-gnu-nm > /dev/null; } || APT+=(binutils-aarch64-linux-gnu)
-if [ -n "$GPU_BRANCH" ]; then   # the renderer's host packages are part of the declared environment (verify/env.json): required, never installed here
-  for p in gcc libegl1 libegl-mesa0; do
-    want=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["packages"][sys.argv[2]])' "$NX/verify/env.json" "$p") || die "verify/env.json does not declare package $p"
-    have=$(dpkg-query -W -f '${Version}' "$p" 2> /dev/null || true)
-    [ "$have" = "$want" ] || die "package $p=$want (verify/env.json) is required by --gpu-branch, found '${have:-none}'; set the host up with farm/setup_verdict_env.sh"
-  done
-fi
-unicorn_ok() { python3 -s -c 'import importlib.metadata as m, sys; sys.exit(0 if m.version("unicorn") == "2.1.4" else 1)' 2> /dev/null; }
-if [ ${#APT[@]} -gt 0 ] || ! unicorn_ok; then
-  if [ "$(id -u)" = 0 ]; then SUDO=(); else command -v sudo > /dev/null || die "packages are missing (${APT[*]:-unicorn==2.1.4}) and this user is not root and has no sudo"; SUDO=(sudo -n); fi
-  if [ ${#APT[@]} -gt 0 ]; then
-    log "apt-get install ${APT[*]}"
-    "${SUDO[@]}" apt-get update -q > /dev/null || die "apt-get update failed"
-    "${SUDO[@]}" apt-get install -y -q "${APT[@]}" > /dev/null || die "apt-get install ${APT[*]} failed"
-  fi
-  if ! unicorn_ok; then
-    python3 -m pip --version > /dev/null 2>&1 || { "${SUDO[@]}" apt-get install -y -q python3-pip > /dev/null || die "apt-get install python3-pip failed"; }
-    log "pip install unicorn==2.1.4"
-    "${SUDO[@]}" env PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install -q unicorn==2.1.4 > /dev/null || die "pip install unicorn==2.1.4 failed"
-    unicorn_ok || die "unicorn==2.1.4 is still not importable after pip install"
-  fi
-fi
+ENVF=$NX/verify/env.json   # the declared inputs are read only from the tree the job runs from: verify/env.json, verify/boot_inputs.json (no variable redirects them)
+# GATE_CACHE (required input, no default): the verdict's own store (VDIR/cache). boot.py --gpu loads the recipe-built host runtime tests/bootrt from it
+# (bootgpu.py); nothing is compiled here and no other cache exists.
+[ -n "${GATE_CACHE:-}" ] || die "input-error: GATE_CACHE is not set (the verdict's cache; the host runtime tests/bootrt is built in it by recipe.py)"
+export GATE_CACHE
+python3 -I "$NX/verify/envcheck.py" check --env "$ENVF" > "$WORK/envcheck.txt" 2>&1 || { sed 's/^/boot_job: /' "$WORK/envcheck.txt" >&2; die "input-error: the host does not match the declared environment ($ENVF); set the host up with farm/setup_verdict_env.sh"; }
 
 # 2. the guest branch
 if [ ! -d "$ARTIFACTS/.git" ] && [ ! -f "$ARTIFACTS/HEAD" ]; then
@@ -189,7 +184,28 @@ fi
 [ -s "$GAME_DIR/FalloutNV.exe" ] || die "$GAME_DIR/FalloutNV.exe is missing or empty"
 EXE_SHA=$(sha256sum "$GAME_DIR/FalloutNV.exe" | cut -c1-64)
 log "game $GAME_DIR: FalloutNV.exe sha256 $EXE_SHA"
-SD=$WORK/sd; rm -rf "$SD"; mkdir -p "$SD"
+SD=$WORK/sd; chmod -R u+w "$SD" 2> /dev/null || true; rm -rf "$SD"; mkdir -p "$SD"
+# the declared port inputs (verify/boot_inputs.json: the font set): the pinned commit is fetched through the same artifacts clone, then
+# verify/bootdecl.py verifies (early, the job's input-error; boot.py --declared-inputs verifies again and mounts) sha256(sums file) == the pin, the file set against the sums list (an extra or a missing file is an error)
+# and every file, and boot.py mounts it read-only under the card (--declared-inputs). Any mismatch ends the job as input-error before the boot.
+PINS=$NX/verify/boot_inputs.json
+DECL=$WORK/declared; rm -rf "$DECL"; mkdir -p "$DECL"
+DSRC=(); DECL_SRC=(); DERR=$WORK/declared.err
+while IFS=$'\t' read -r dname dcommit dpath dsums; do
+  [ -n "$dname" ] || continue
+  retry GITA fetch -q "$ARTIFACTS_URL" "$dcommit" || die "input-error: fetch of declared input $dname@${dcommit:0:12} failed"
+  [ "$(GITA rev-parse FETCH_HEAD^{commit})" = "$dcommit" ] || die "input-error: declared input $dname: fetched commit is not $dcommit"
+  mkdir -p "$DECL/$dname"
+  dextract() { GITA archive "$dcommit" "$dpath" "$dsums" | tar -x -C "$DECL/$dname"; }
+  retry dextract || die "input-error: cannot extract $dpath and $dsums of declared input $dname@${dcommit:0:12}"
+  DSRC+=(--src "$dname=$DECL/$dname"); DECL_SRC+=(--declared-src "$dname=$DECL/$dname")
+done < <(python3 -s -B -c 'import json, sys
+for p in json.load(open(sys.argv[1]))["inputs"]:
+    print("\t".join(p[k] for k in ("name", "commit", "path", "sums")))' "$PINS" 2> "$DERR" || echo "pins unreadable" > "$DERR")
+[ ! -s "$DERR" ] || die "input-error: $PINS: $(tail -1 "$DERR" | cut -c1-300)"
+python3 -s -B "$NX/verify/bootdecl.py" verify --pins "$PINS" "${DSRC[@]}" > "$WORK/declared.log" 2> "$DERR" \
+  || die "input-error: $(tail -1 "$DERR" | cut -c1-400)"
+log "declared inputs: $(tr '\n' ' ' < "$WORK/declared.log")"
 # the contract's files in the forms boot.py takes (each converter fails on any row it does not understand)
 conv() { "$@" 2> "$WORK/conv.err" || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"; }
 conv "${BI[@]}" reserved --modules "$IN/modules.tsv" --exe "$GAME_DIR/FalloutNV.exe" -o "$IN/reserved.tsv"
@@ -217,7 +233,8 @@ conv "${BI[@]}" milestones --table "$IN/milestones.tsv" --entries "$IN/entries.t
 # 5. boot
 OUT=$WORK/OUT.json; rm -f "$OUT" "$WORK/OUT.console.txt"
 BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --reserved "$IN/reserved.tsv" --keys "$KEYS" --heap-size 0x40000000
-      --profile "$PROFILE" --root "$SD" --game "$GAME_DIR" --milestones "$IN/table.txt" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
+      --profile "$PROFILE" --root "$SD" --game "$GAME_DIR" --declared-inputs "$PINS" "${DECL_SRC[@]}" --milestones "$IN/table.txt" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
+BOOT+=(--quantum "$QUANTUM")
 [ -z "$LIMIT" ] || BOOT+=(--limit-instructions "$LIMIT")
 FRAMES=$WORK/frames; rm -rf "$FRAMES"
 [ -z "$GPU_LIB" ] || BOOT+=(--gpu "$GPU_LIB" --frames "$FRAMES")
@@ -243,27 +260,34 @@ CPU=$(lscpu 2> /dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -1)
 [ -n "$CPU" ] || CPU=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -1)
 [ -n "$CPU" ] || die "the host cpu model is in neither lscpu nor /proc/cpuinfo"
 python3 -I -c 'import json, sys
-k = ["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc", "seconds", "limit_instructions", "profile", "host_cpu_model", "softfloat", "data_items"]
+k = ["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc", "seconds", "limit_instructions", "quantum", "profile", "host_cpu_model", "softfloat", "data_items"]
 v = sys.argv[1:]
 d = dict(zip(k, v))
 d["boot_rc"], d["seconds"] = int(d["boot_rc"]), int(d["seconds"])
 d["limit_instructions"] = int(d["limit_instructions"], 0) if d["limit_instructions"] else None
+d["quantum"] = int(d["quantum"], 0)
 d["data_items"] = d["data_items"][len("fetched:"):].split() if d["data_items"] else None
 if v[len(k):]:
     d["gpu_branch"], d["gpu_branch_commit"], d["bridge_branch"], d["bridge_branch_commit"], d["render_head"] = v[len(k):]
-print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" ${GPU_BRANCH:+"$GPU_BRANCH" "$GPU_COMMIT" "$BRIDGE_BRANCH" "$BRIDGE_COMMIT" "$RENDER_HEAD"} > "$WORK/meta.json" \
+print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$QUANTUM" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" ${GPU_BRANCH:+"$GPU_BRANCH" "$GPU_COMMIT" "$BRIDGE_BRANCH" "$BRIDGE_COMMIT" "$RENDER_HEAD"} > "$WORK/meta.json" \
   || die "meta.json could not be written"
 IDX=$(mktemp -u "$WORK/index.XXXXXX")
 for f in OUT.json OUT.console.txt spec.json meta.json; do
   GIT_INDEX_FILE=$IDX GITA update-index --add --cacheinfo "100644,$(GITA hash-object -w "$WORK/$f"),$f" || die "cannot stage $f"
 done
-if [ -n "$GPU_LIB" ]; then   # the first 3 frames only (lexical order = present order)
-  for r in $(cd "$FRAMES" && ls frame_*.rgba 2> /dev/null | sort | head -3); do
-    for f in "$r" "${r%.rgba}.txt"; do
-      [ -f "$FRAMES/$f" ] || die "frame file $f is missing next to $r"
-      GIT_INDEX_FILE=$IDX GITA update-index --add --cacheinfo "100644,$(GITA hash-object -w "$FRAMES/$f"),frames/$f" || die "cannot stage $f"
-    done
-  done
+if [ -n "$GPU_LIB" ]; then   # EVERY distinct frame the renderer dumped (<key>.rgba + <key>.txt, boot.py store_frame), staged in one batch
+  (cd "$FRAMES" && ls *.rgba 2> /dev/null | sort) > "$WORK/frames.lst" || true
+  while read -r r; do [ -f "$FRAMES/${r%.rgba}.txt" ] || die "frame file ${r%.rgba}.txt is missing next to $r"; done < "$WORK/frames.lst"
+  if [ -s "$WORK/frames.lst" ]; then
+    : > "$WORK/frames.paths"; : > "$WORK/frames.names"
+    while read -r r; do
+      printf '%s\n%s\n' "$FRAMES/$r" "$FRAMES/${r%.rgba}.txt" >> "$WORK/frames.paths"
+      printf '%s\n%s\n' "$r" "${r%.rgba}.txt" >> "$WORK/frames.names"
+    done < "$WORK/frames.lst"
+    GITA hash-object -w --stdin-paths < "$WORK/frames.paths" > "$WORK/frames.sha" || die "cannot store the frame files"
+    paste -d '\t' "$WORK/frames.sha" "$WORK/frames.names" | awk -F '\t' '{printf "100644 %s\tframes/%s\n", $1, $2}' \
+      | GIT_INDEX_FILE=$IDX GITA update-index --add --index-info || die "cannot stage the frame files"
+  fi
 fi
 TREE=$(GIT_INDEX_FILE=$IDX GITA write-tree) || die "write-tree failed"; rm -f "$IDX"
 MSG=$(printf 'boot %s: rc %s reason %s last %s instr %s' "$ELF_ID" "$RC" "$REASON" "$LAST" "$INSTR")

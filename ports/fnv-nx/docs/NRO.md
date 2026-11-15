@@ -41,7 +41,7 @@ replaced that process.
 | `sdmc:/switch/fnv/{launcher,host,crash}.log` | what the owner sends back | launcher, host |
 | `sdmc:/switch/fnv/fnvnx.ini`, `nxgpu.log`, `override.txt` | options, the native renderer's log, the marker | owner, renderer, launcher |
 
-`os_fs_case_insensitive()` probes the card once (guest.nso against GUEST.NSO) instead of assuming FAT case folding.
+`os_fs_case_insensitive()` probes the card once (guest.nso against GUEST.NSO) instead of taking FAT case folding as given.
 On a case-sensitive card, path.cpp resolves each component against the directory.
 
 ## Build and publish

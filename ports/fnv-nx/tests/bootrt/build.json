@@ -1,0 +1,12 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {"cc": "x86_64-linux-gnu-gcc-13", "cxx": "x86_64-linux-gnu-g++-13"},
+ "flags": {
+  "c": ["-O2", "-fPIC", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-Wall", "-Wextra", "-Werror"],
+  "cxx": ["-O2", "-fPIC"],
+  "asm": []
+ },
+ "include": ["ports/fnv-nx/hostabi/include"],
+ "units": "all",
+ "link": {"output": "libnxgl4rt.so", "kind": "shared", "version_script": "exports.ver", "flags": ["-m", "elf_x86_64"]}
+}

@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-hostapi-holes/1",
+ "note": "names of deleted hostapi.h slots, services and markers; the numbers stay holes (answer FNVNX_EXT_NO_SERVICE) and the names are never reused; the gate hostapi makes a name here appearing in any admitted file red",
+ "names": [
+  "console_flush",
+  "tz_offset_minutes",
+  "ACCESS_FAULT_HANDLER",
+  "FnvnxFaultFrame",
+  "main_loop",
+  "buttons_down",
+  "UNMAP_FIXED",
+  "SOCK_FIRST",
+  "SOCK_LAST"
+ ]
+}

@@ -4,6 +4,9 @@ import json, os, subprocess, sys, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
+sys.path.insert(0, os.path.join(C, '..', 'verify'))
+import scratch
+scratch.install()
 import bind, store
 
 fails = []
@@ -27,20 +30,20 @@ n1 = dict(fn={}, exe_sha256='0', sym={(3, '?f@@YAXXZ'): 0x401000, (3, '?g@@YAXXZ
                                       (4, '?f@@YAXXZ'): 0x409000, (3, 7, '?st'): 1}, vt={(3, '??_7A@@6B@'): 0x500000})
 rows = [('_Z1fv', '?f@@YAXXZ', 'func', 'def'), ('_Z1gv', '?g@@YAXXZ', 'func', 'ref'), ('_Zabs', '?abs@@3HA', 'data', 'def'),
         ('_Zth', '', 'thunk', 'def'), ('_ZTV1A', '', 'vtable', 'def'), ('_ZTI1A', '', 'gcc', 'def'), ('_Zin', '', 'internal', 'def'),
-        ('_Zun', '', 'unnamed:local scope number', 'def'), ('_Zmiss', '?h@@YAXXZ', 'func', 'def'), ('_Zempty', '', 'func', 'def')]
-sa, ub = bind.symbol_addresses(3, rows[:-1] + [('_Zempty', '', 'unnamed:x', 'def')], n1)
+        ('_Zun', '', 'nodecor:localscope', 'def'), ('_Zmiss', '?h@@YAXXZ', 'func', 'def'), ('_Zempty', '', 'func', 'def')]
+sa, ub = bind.symbol_addresses(3, rows[:-1] + [('_Zempty', '', 'nodecor:x', 'def')], n1)
 check('addresses', sa, {'_Z1fv': 0x401000, '_Z1gv': 0x402000, '_Zabs': ABS | 5})
 check('unbound', ub, [('_Zth', 'thunk', 'no exe twin'), ('_ZTV1A', 'vtable', bind.NO_TWIN['vtable']), ('_ZTI1A', 'gcc', 'no exe twin'),
-                      ('_Zin', 'internal', 'no exe twin'), ('_Zun', 'unnamed:local scope number', 'unnamed:local scope number'),
-                      ('_Zmiss', 'func', 'not in N1'), ('_Zempty', 'unnamed:x', 'unnamed:x')])
+                      ('_Zin', 'internal', 'no exe twin'), ('_Zun', 'nodecor:localscope', 'nodecor:localscope'),
+                      ('_Zmiss', 'func', 'not in N1'), ('_Zempty', 'nodecor:x', 'nodecor:x')])
 check('no msvc name', bind.symbol_addresses(3, [('s', '', 'func', 'def')], n1), ({}, [('s', 'func', 'no MSVC name')]))
 check('unit scope', bind.symbol_addresses(4, rows[:1], n1)[0], {'_Z1fv': 0x409000})
 raises('two names', bind.symbol_addresses, 3, [('s', '?f@@YAXXZ', 'func', 'def'), ('s', '?g@@YAXXZ', 'func', 'def')], n1)
 
 va, uv = bind.vtable_addresses(3, [('_ZTV1A', 8, '??_7A@@6B@', 0), ('_ZTV1A', 24, '??_7B@@6B@', 8), ('_ZTV1A', 32, '', 12),
-                                   ('_ZTV1A', 40, 'unnamed:r', 16)], n1)
+                                   ('_ZTV1A', 40, 'nodecor:r', 16)], n1)
 check('vt', va, {('_ZTV1A', 8): 0x500000})
-check('vt unbound', uv, [('_ZTV1A', 24, 'not in N1'), ('_ZTV1A', 32, 'no MSVC name'), ('_ZTV1A', 40, 'unnamed:r')])
+check('vt unbound', uv, [('_ZTV1A', 24, 'not in N1'), ('_ZTV1A', 32, 'no MSVC name'), ('_ZTV1A', 40, 'nodecor:r')])
 n1b = dict(n1, vt=dict(n1['vt']))
 check('vt repeated row', bind.vtable_addresses(3, [('z', 8, '??_7A@@6B@', 0)] * 2, n1)[0], {('z', 8): 0x500000})
 
@@ -104,7 +107,9 @@ check('object without rows needs no unit', r.returncode, 0)
 obj[('ghost.o', 'n3')] = [('_Zq', 'ok', (), '', ())]
 store.save(d + '/obj2.json', 'obj', obj)
 r = subprocess.run(cmd[:5] + [d + '/obj2.json'] + cmd[6:] + ['--out', d + '/b3.json'], capture_output=True, text=True)
-check('missing unit status', (r.returncode, 'ghost.o' in r.stderr), (1, True))
+check('object with rows and no unit: no error', r.returncode, 0)
+b3 = store.load(d + '/b3.json', 'bind')
+check('object with rows and no unit binds nothing', (b3['sym'], b3['vt'], b3['n3']), (b['sym'], b['vt'], b['n3']))
 
 for f in fails:
     print('FAIL', f)

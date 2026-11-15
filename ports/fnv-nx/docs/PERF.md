@@ -56,7 +56,7 @@ at 720p **[E]**; section 9 lists the tests.
 
 * Cortex-A57 at 1.02 GHz: 34.0 M cycles per 33.3 ms frame per core; games get cores 0-2 (core 3 is the system's;
   `os_horizon.c` returns 3 from `os_cpu_count`).
-* **IPC assumption 0.8** (range 0.6-1.0) for this engine's code. Source: public SPEC CPU2006 integer results for
+* **IPC assumption 0.8** (range 0.6-1.0) for this engine's code. Source: public SPEC CPU2006 integer results for (ASM-024)
   A57-class cores put IPC around 1.0-1.2; game engine code with pointer-chasing scene graphs, virtual calls and a
   large instruction footprint runs lower (estimate, to be replaced by the on-device measurement B1 in section 9).
   At IPC 0.8 one instruction costs 1.23 ns: **27 M instructions per frame per core**, ~80 M on three cores.
@@ -94,7 +94,7 @@ guest text, and reports **dynamic instructions per subsystem per interval** and 
 
 ```sh
 tools/perf/frameprof.py guest.nso --elf fnvnx.elf --map fnvnx.map --units <decomp>/build/units.json \
-    --file fnvnx/game/FalloutNV.exe=<exe> --skip-faulting-init --budget 6000000000 \
+    --file <FNVNX_SD_DIR without the device prefix>/FalloutNV.exe=<exe> --skip-faulting-init --budget 6000000000 \
     --frame __fnv_0086e650 [--frame <Present>] --mark main --mark __fnv_0086a850 \
     [--nine-ids <nine build>/gen/nine_proxy_ids.h] --top 20 --json out.json
 ```
@@ -229,7 +229,7 @@ occlusion), not threading. The setting objects behind these names are not identi
 
 ### 6.3 What our platform layer implements, and the gaps
 
-| primitive | implementation (`platform/win32`, `toolchain/guest`, `toolchain/host`) | verdict |
+| primitive | implementation (`platform/win32`, `rt/guest`, `toolchain/host`) | verdict |
 |---|---|---|
 | CRITICAL_SECTION | 24-byte PC layout (D15), recursive, owner/recursion in place, futex word in `LockSemaphore`; spins up to SpinCount (capped at 4,000, not on one core) before `svcWaitForAddress` (S5 `31cdca3`) | works |
 | Interlocked* | `ldaxr/stlxr` loops, full barrier; 6 instructions + call (fnvnx-a64, inline LL/SC; A57 has no LSE) | fine |
@@ -300,7 +300,7 @@ Only the main-scene split runs concurrently:
 * With `bMTRendering=0` both hunks do what the PC code does.
 
 What moves off main: half of the main-scene pass, so the lever is 15-35 % of cull and of accumulation (it was
-70-90 % and 50-70 % when the whole 360 path was assumed).
+70-90 % and 50-70 % when the whole 360 path was presumed).
 
 Still needed before it is on by default:
 * S1b's MT1 class in the tooling;
@@ -470,7 +470,7 @@ shader accumulator's list pools (0x011c5f80), Havok collision objects, fonts and
 There is no ILP32 TSan and no hardware. `linhost` is a freestanding LP64 Linux stand-in for the Switch host module:
 threads by `clone`, address wait/wake by futexes, `placement.h` applied with `sched_setaffinity` (Switch cores 0-3 ->
 host CPUs 0-3). `guest.elf` is ILP32 code over the real `platform/win32` (sync, thread, handles),
-`toolchain/guest/os_guest.c` and `threads.c`. The test is compiled with GCC's `-fsanitize=thread`, and `hb.c` is the
+`rt/guest/os_guest.c` and `threads.c`. The test is compiled with GCC's `-fsanitize=thread`, and `hb.c` is the
 runtime behind its hooks: a vector-clock happens-before checker with edges from C11 atomics by memory order and from
 the Win32 calls (wrapped at link time, like TSan's interceptors). Under `qemu-aarch64 -R 0xC0000000` every guest
 thread is a host thread, so the cases run in parallel on the container's cores. Build in seconds, run 2-6 s.
@@ -655,7 +655,7 @@ case does not) or `uncertain`. Schema in the tool's docstring.
 
 * **Inputs.** `tools/perf/budget_model.json`: the work items of one exterior Mojave frame with the native renderer
   (instructions per frame as [lo, hi], each with the thread role that runs it), the levers, the scenarios and the
-  assumptions. Each measurement replaces model items:
+  assumptions. Each measurement replaces model items: (ASM-024)
   - `--frameprof`: frameprof's JSON, which now counts instructions per emulated thread with its placement role
     (`threads` per interval). Frame intervals replace the CPU items by the measured per-role counts (median, min,
     max). Boot intervals are listed under `measured.frameprof.boot` until the boot reaches the main loop;
@@ -670,9 +670,9 @@ case does not) or `uncertain`. Schema in the tool's docstring.
   slowest core is the critical path), or the GPU's if larger. The worst frame is the mean times
   `worst_frame_factor`; every target is checked on the worst frame.
 
-**Assumptions** (all explicit in the JSON, each with a range; lo case = least work, highest IPC):
+**Assumptions** (all explicit in the JSON, each with a range; lo case = least work, highest IPC): (ASM-024)
 
-| assumption | value | range | basis |
+| assumption | value | range | basis (ASM-024) |
 |---|---|---|---|
 | IPC of engine code on the A57 | 0.8 | 0.6-1.0 | [E] (section 2); B1 measures it |
 | clocks | 1020, 1785 MHz | | [M] (Switch CPU) |
@@ -746,7 +746,7 @@ The two measurements that close it stay frameprof on a real frame and B1 (IPC) o
 
 **A57 prices (`--perf`, P0-perfmodel's fnvnx-perf/1, section 12).**
 * Each `hotspot_functions` row with a `per_call_cycles` price adds an item on its thread: cycles x the mid IPC minus
-  its instructions, per frame. The unpriced work stays at the assumed IPC; `fn_interlocked` is left out, because its
+  its instructions, per frame. The unpriced work stays at the assumed IPC; `fn_interlocked` is left out, because its (ASM-024)
   price lacks the dmb drain that `interlocked_barriers` models.
 * With P0's 12.6 prices the as-built worst frame at 1020 MHz goes from 35.15 to about 36.5 ms (+0.88 M main;
   Slerp +0.47 M and the per-object cull +0.29 M are latency-bound).
@@ -918,7 +918,7 @@ here on an override is kept only if its mid cycles drop, as well as its instruct
 
 ## 12. The A57 cycle model (`tools/perf/a57model`, stream P0-perfmodel)
 
-Until now every millisecond in this file was instructions divided by an assumed IPC of 0.8. The model replaces that
+Until now every millisecond in this file was instructions divided by an assumed IPC of 0.8. The model replaces that (ASM-024)
 assumption with a per-block, per-function price for the Tegra X1's Cortex-A57, computed without the device, with a
 measured error bar. Every optimization stream reads its output (fnvnx-perf/1, 12.4).
 
@@ -1132,7 +1132,7 @@ What the model says about the plan:
 **Worst frame (frame_budget.py).** Overrides now feed the frame model. A hotspot row with a `before` (the decomp's
 measured instructions per call) adds an item `simd_<row>`: (after - before) x calls, on the row's thread and
 subsystem (`apply_overrides`). The items estimate the decomp's code; with --perf, apply_perf prices the after side
-in A57 cycles on top. **Cull reconciled:** the cull item's 2-4.5 M assumed 0.3-1.8 M for the per-object plane
+in A57 cycles on top. **Cull reconciled:** the cull item's 2-4.5 M was built on 0.3-1.8 M for the per-object plane
 tests. V1 measured the decomp's test at 306-433 instructions, which is 1.84-8.66 M at 6,000-20,000 objects. The
 measured per-call cost wins. The item is now the rest of the cull (1.7-2.7 M [E]) plus that, 3.54-11.36 M (E+M). The
 number of objects tested per frame stays the open estimate; frameprof on a real frame settles it.
@@ -1170,7 +1170,7 @@ computed on the exe's 2.5. The current figures (placed, mid, 1.02 GHz): base 26.
 `base`; no measurement ties them to either fade.
 
 **Calibration of the work items (asked by the orchestrator).** No ini. The items are code-path estimates
-(sections 3 and 5): the per-draw costs times RENDER_NATIVE.md 3.7's draw table, which assumes uGridsToLoad 5 (25
+(sections 3 and 5): the per-draw costs times RENDER_NATIVE.md 3.7's draw table, which uses uGridsToLoad 5 (25
 cells) and 2-4 shadow lights. Those match the exe's defaults (5; iActorShadowCountExt 2, Int 4), and the table names
 no fade multiplier. So `base` = the exe's defaults, and no PC High/Ultra ini, is the consistent reading. A frameprof
 frame at base is still the first measurement to take.

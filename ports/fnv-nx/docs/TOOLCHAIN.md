@@ -80,7 +80,7 @@ default.)
 `toolchain/include/fnvnx/hostapi.h`.** The ELF linker cannot mix ELF32 and ELF64 objects, so the halves are two
 modules in one process and one address space, both AArch64 with the same AAPCS64 registers and stack. The host
 passes a table of LP64 function addresses (`uint64_t`, all < 4 GiB because the space is 32-bit) and the guest
-calls them through ILP32 function pointers (`fnvnx_hcall0..3`).
+calls them through ILP32 function pointers (`FNVNX_HCALL0..5`: macros over the slot lvalue, HOST1).
 
 Rules (header comment): every argument and result is `uint64_t` (addresses zero-extended, never `void *`,
 `long` or `size_t`); shared structs have only fixed-width fields; no struct-by-value, varargs, exceptions or
@@ -268,7 +268,7 @@ Failure signs: back to HOME / error at launch = NSO or NPDM rejected by ldr (che
 | v1 | debug string, sleep, exit, console, main loop, buttons, ticks |
 | threads | `thread_create/start/join/free/exit/yield/set_priority/set_cpu` (libnx threads running a guest entry) |
 | blocking | `wait_on_address`, `wake_address` (svcWaitForAddress / svcSignalToAddress) |
-| time, misc | `wall_time_us`, `tz_offset_minutes` (0, TODO), `random64`, `memory_info`, `cpu_count` |
+| time, misc | `wall_time_us`, `random64`, `memory_info`, `cpu_count` |
 | files | `fs_open/read/write/pread/pwrite/seek/truncate/sync/fstat/close/stat/mkdir/rmdir/remove/rename/dir_*` (host newlib over fsdev, paths `sdmc:/...`, results `-errno`) |
 | audio, input | `audio_open/submit/close` (audren voice, submit blocks = pacing), `pad_read`, `pad_vibrate`, `input_poll` (HID usage key events, mouse, touch) |
 | memory | `map_fixed(addr, size, src)`: svcMapMemory of a guest heap block at a fixed address (the S3 data image) |
@@ -277,7 +277,7 @@ Failure signs: back to HOME / error at launch = NSO or NPDM rejected by ldr (che
 `-DFNVNX_HOST_NO_CONSOLE` builds the host without the libnx text console (graphics owns the display); output then
 goes to `sdmc:/fnvnx/host.log` and svcOutputDebugString only.
 
-### Guest runtime (`toolchain/guest/`, `toolchain/guest/build.sh` -> `crt0.o`, `libfnvnx-guest.a`)
+### Guest runtime (`rt/guest/`, `the recipe (rt/guest/build.json)` -> `crt0.o`, `libfnvnx-guest.a`)
 
 * `threads.c`: guest threads = host threads with their own static TLS block (TPIDR_EL0) and newlib reent; futex
   locks (normal + recursive) and sequence condvars on `wait_on_address`; all devkitPro libsysbase hooks
@@ -348,7 +348,7 @@ writing through a null pointer in `FUN_00404d00_class::FUN_00404d00_class` [orig
 `GetGameSettingCollection` [00404a70] <- `FUN_0040c150(int,int)` [0040c150] <- a static initialiser. The null comes
 from the empty image (a global the real exe provides) or a trapped allocator returning 0. Not reached: WinMain.
 
-What blocks a boot, in order: (1) the player's `FalloutNV.exe` in `sdmc:/fnvnx/game/` (data image; the emulator run
+What blocks a boot, in order: (1) the player's `FalloutNV.exe` at `FNVNX_SD_EXE` (data image; the emulator run
 had none); (2) the 7,300 + 984 + 53 address references without native code, among them whatever the static
 initialisers call; (3) WinMain's unit; (4) S4's CRT start running the image's `__xi`/`__xc` tables (not done:
 `boot.cpp` TODO); (5) D3DX9 and the vtables/typeinfo of uncompiled classes.
@@ -554,7 +554,7 @@ ExitProcess), so the real exe's import directory may name it differently; the no
 ### The game memory manager
 
 * Who sets the heap pointer 0x011f6080: in the MSVC-built pristine objects (S11, `objdump -M intel`) the only store
-  is in `InitHolder` = 0x00aa2020 (`blk_00aa0000_o2.cpp`), which allocates 4 bytes from the MemoryManager at
+  is in `InitHolder` = <va> (`blk_00aa0000_o2.cpp`), which allocates 4 bytes from the MemoryManager at
   0x011f6238 (`FUN_00aa3e40`) and stores the result there. Every other reference reads it (nimemorydefines,
   nimemobject).
 * The chain above it is 0x00aa2020 <- `InitializeGlobal` 0x00866690 (`blk_00860000_od.cpp`) <- the MemoryManager
@@ -658,12 +658,12 @@ the units. Frontier against fresh8's compile logs and S1's census c18 (2,869 cle
   | 105 | constructors reading through null (`FUN_00633000` 46, `FUN_004a4a40` 21, `FUN_004de2f0` 15, ...) |
 
 * **WinMain gets past +0x1c8**: 0x00af3020 is defined now. The next call, at **+0x1d0**, is `FUN_00aa20b0` ->
-  `FUN_00aa3050`. That is a once-only Gamebryo memory initialisation (flag byte, then `InitHolder` 0x00aa2020,
-  `FUN_00aa1920`, 0x00aa7eb0). `InitHolder` allocates the holder (0x00aa3e40, the heap stand-in) and stores it at
+  `FUN_00aa3050`. That is a once-only Gamebryo memory initialisation (flag byte, then `InitHolder` <va>,
+  `FUN_00aa1920`, <va>). `InitHolder` allocates the holder (<va>, the heap stand-in) and stores it at
   0x011f6080. It then asks the source list at 0x011f6118 for its head (`CBaseList::GetHeadPositionI` 0x009fd0f0,
   **untranslated**: `blk_009e0000_o2.cpp`, which still fails in c18 with `conflicting declaration of C function 'void*
   VirtualAlloc(...)'`). The trap returns 0, and the tail call through `(*holder)->vtbl[7]` reads address 0. **That is
-  the first fault: InitHolder [00aa2020]+0x54.** Before it, inside WinMain: 0x00c3c460 (`blk_00c20000_od_ob1_variant`,
+  the first fault: InitHolder [<va>]+0x54.** Before it, inside WinMain: <va> (`blk_00c20000_od_ob1_variant`,
   c18: `fabs` conflicts with a previous declaration) and `StandardLibrarySingletonObject`'s constructor.
 * So 0x011f6080 is also set from WinMain's path, through 0x00aa3050's guard. The static initializers that need it
   earlier (`FUN_00aa1070`) still point to the constructor section 11 describes. S1's census c18 has the constructor's
@@ -746,7 +746,7 @@ DEVKITPRO=<dkp> toolchain/package/build.sh <g>/guest.nso <pkg> <program id> <g>/
    mounts it at the root). The profile
    (`My Games/FalloutNV`, Fallout.ini, saves) is `sdmc:/switch/fnv/user`. It is one folder for the port and the
    game, as in NX1's `toolchain/include/fnvnx/sdlayout.h`. Guests built before this layout read
-   `sdmc:/fnvnx/game` and `sdmc:/fnvnx/user`. Without the exe the guest boots in trace mode with an empty data image.
+   the game directory the older layout named and its `user` directory (the paths are now `FNVNX_SD_DIR` and `FNVNX_SD_USER`). Without the exe the guest boots in trace mode with an empty data image.
 4. Launch the title from HOME without holding R. Clean up afterwards by deleting
    `atmosphere/contents/<program id>/exefs.nsp`.
 
@@ -897,7 +897,7 @@ InitHolder.
 The faults it runs past, and their causes:
 
 * **Allocator, one-slot vtable (S1).**
-  - `InitHolder` 0x00aa2020 makes the tail call through slot 7.
+  - `InitHolder` <va> makes the tail call through slot 7.
   - NiMalloc 0x00aa1070, the aligned allocations 0x00aa10b0 and 0x00aa1130, and `NiMemObject::operator new`
     0x00aa13e0 all call through the same allocator (`use-malloc`). Their frees return 0.
 * **The constructor's stand-in member `MemoryManagerAA3880::Allocate`** (f13 only) has no address, so it is a
@@ -977,8 +977,8 @@ those vftables can a hand vptr into the image work at all.
   4,343 skips, the same stop.
 
 **Startup order of the guest** (S1's INIT question):
-1. `__fnvnx_guest_entry` (`toolchain/guest/runtime.c:167`): bss, self-relocation, host API, TLS, newlib, files.
-2. `__libc_init_array()` (`runtime.c:199`): `.preinit_array`, `_init`, then `.init_array`. `toolchain/guest/guest.ld:95-96`
+1. `__fnvnx_guest_entry` (`rt/guest/runtime.c:167`): bss, self-relocation, host API, TLS, newlib, files.
+2. `__libc_init_array()` (`runtime.c:199`): `.preinit_array`, `_init`, then `.init_array`. `rt/guest/guest.ld:95-96`
    orders it: prioritized entries first, then the rest in link order. On the 9a0243c7eabe guest it has 19 entries:
    - `register_fini`;
    - `boot_banner`, `constructor(101)` (now 110, see below) (`toolchain/game/boot.cpp:339`): it maps the data image (`load_image`, :349)
@@ -1003,7 +1003,7 @@ What that means for the INIT fix:
      `time.cpp` `time_init`), module/COM registrations 103 (`input/register.cpp`);
   3. `boot_banner` 110;
   4. the runtime libraries' unprioritized constructors (crtbegin, libstdc++ `eh_alloc`/`eh_globals`, newlib's
-     stack guard), which `toolchain/guest/guest.ld` now places ahead of the rest. It needs one input section per
+     stack guard), which `rt/guest/guest.ld` now places ahead of the rest. It needs one input section per
      `KEEP`, and `libstdc??.a`, because `+` is not a pattern character;
   5. the game units' constructors.
 
@@ -1128,9 +1128,9 @@ python3 -I tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init 
     --game <game dir> --budget 6000000000 [--stub-faults tests/s5/known_faults.txt] --summary-json boot.json
 ```
 
-`--game` mounts the install (FalloutNV.exe, Fallout_default.ini, Data/) in place at the guest's `sdmc:/switch/fnv`
-and the older `sdmc:/fnvnx/game`. The port's own entries there (user/, fnvnx.ini, guest.nso, the logs) stay in
-`--root`; without it both are `<sdmc>/fnvnx/game`. Paths fold case as on the SD card
+`--game` mounts the install (FalloutNV.exe, Fallout_default.ini, Data/) in place at the guest's `FNVNX_SD_DIR`
+(sdlayout.h; the older layout's game directory is retired). The port's own entries there (user/, fnvnx.ini, guest.nso, the logs) stay in
+`--root`; without it both are `<sdmc>` plus `FNVNX_SD_DIR` without its device prefix. Paths fold case as on the SD card
 (`tests/s5/datapath.py`). `farm_boot.sh` takes the same as `FARM_GAME=<game dir>`. The data milestones (`data` lines
 of `tests/s5/milestones.txt`: ini-read, archive-list, bsa-opened, esm-header, masters-loaded) and the file faults
 (`data-counts`, `file-fault` lines; `data` and `file_faults` in the summary JSON) come from the guest's host file

@@ -5,7 +5,9 @@ function of the stage key. Needs root, Linux x86-64. Stage document "fnvnx-stage
   optional "class": "build" | "verification" (part of the key; verdict.py provenance requires it); optional "tool"
   (the declared tool kind toolflags.py checks; part of the key).
 key = cas.stage_key(document + {"sandbox": {sandbox.py sha256, cas.py sha256}}). Results: STORE/keys/<key>/result.json.
-Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked from the CAS and bound read-only;
+Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked from the CAS and bound read-only (a VIEW input, a tree that holds
+unitview.PLACEHOLDER, is its all-placeholder base placed once, bound read-only, with each real file's object bound read-only over its
+placeholder path: O(real files) mounts per stage, never a tree per view);
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
 stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; seccomp: getrandom -> ENOSYS (x32 ABI and foreign arch killed).
 Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open_channels":
@@ -30,9 +32,11 @@ import resource
 import shutil
 import struct
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import unitview  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPEN_CHANNELS = ["wall_clock", "entropy", "cpu_count_scheduling", "kernel_version", "memory_size",
@@ -68,7 +72,8 @@ def check_doc(doc):
           and isinstance(doc.get("argv"), list) and doc["argv"] and all(isinstance(a, str) for a in doc["argv"])
           and doc["argv"][0].startswith("/") and isinstance(doc.get("cwd"), str) and doc["cwd"].startswith("/")
           and isinstance(doc.get("env"), dict) and isinstance(doc.get("inputs"), list)
-          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool", "ro_root"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and doc.get("ro_root", False) in (True, False)
           and doc.get("class", "build") in ("build", "verification"))
     if not ok:
         raise SbxError("malformed stage document")
@@ -100,10 +105,11 @@ def _seccomp():
     _c(libc.prctl(22, 2, ctypes.c_char_p(fprog)), "seccomp")
 
 def _setup_root(doc, root, run, srcs):
+    ro_flag = MS_RDONLY if doc.get("ro_root") else 0   # a stage with "ro_root": every write outside its outputs fails (EROFS)
     _mount(None, "/", None, MS_REC | MS_PRIVATE)
     _mount("tmpfs", root, "tmpfs", 0, "mode=755")
     for n, i in enumerate(doc["inputs"]):
-        src, tgt = srcs[n], root + i["at"]
+        (src, binds), tgt = srcs[n], root + i["at"]
         os.makedirs(os.path.dirname(tgt), exist_ok=True)
         if os.path.isdir(src) and not os.path.islink(src):
             os.mkdir(tgt)
@@ -112,6 +118,8 @@ def _setup_root(doc, root, run, srcs):
         else:
             raise SbxError("input %s is a symlink; only files and directories can be mounted" % i["at"])
         _bind_ro(src, tgt)
+        for rel, obj in binds:   # a view: the real file over its placeholder (the base is read-only, the object is mounted read-only)
+            _bind_ro(obj, tgt + "/" + rel)
     for n, o in enumerate(doc["outputs"]):
         os.makedirs(root + o)
         _bind_ro(os.path.join(run, "out", str(n)), root + o, ro=False)
@@ -125,18 +133,20 @@ def _setup_root(doc, root, run, srcs):
     for f in ("null", "zero"):
         open(root + "/dev/" + f, "w").close()
         _bind_ro("/dev/" + f, root + "/dev/" + f, ro=False)
-    os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing)
-    _mount("tmpfs", root + "/dev/shm", "tmpfs", 0, "mode=1777")
+    os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing). Writable even in a ro_root stage: it is not an output
+    _mount("tmpfs", root + "/dev/shm", "tmpfs", 0, "mode=1777")   # (nothing survives the run, so the "writes only /out" rule is unchanged), and a tool that forks workers needs its semaphores
     for f in ("urandom", "random"):   # a constant: entropy read from a device is a function of the sandbox version
         with open(root + "/dev/" + f, "wb") as g:
             for n in range(32768):
                 g.write(hashlib.sha256(b"fnvnx-sandbox-urandom/1:%d" % n).digest())
         os.chmod(root + "/dev/" + f, 0o444)
-    _mount("tmpfs", root + "/tmp", "tmpfs", 0, "mode=1777")
+    _mount("tmpfs", root + "/tmp", "tmpfs", ro_flag, "mode=1777")
     _c(libc.syscall(155, root.encode(), (root + "/oldroot").encode()), "pivot_root")
     os.chdir("/")
     _c(libc.umount2(b"/oldroot", 2), "umount old root")
     os.rmdir("/oldroot")
+    if doc.get("ro_root"):   # the root tmpfs (cwd, the parents of the input mounts) read-only; the outputs, bound rw, stay the only writable paths
+        _mount(None, "/", None, MS_BIND | MS_REMOUNT | MS_RDONLY)
 
 def _pid1(doc, root, run, logs, errfd, srcs):
     try:
@@ -167,6 +177,15 @@ def launch(doc, run, root, srcs):
     pid = os.fork()
     if pid == 0:
         try:
+            # The forked child holds a copy of every descriptor that a sibling thread of the parent has open at this instant, among them files open for
+            # writing (a tool being copied into a store, an object being ingested). Such a copy makes an exec of that file by another stage fail with
+            # ETXTBSY for as long as the child lives, which is the whole of the mount setup. The child keeps only what it uses: stdin/out/err, the error
+            # pipe and the two logs.
+            prev = 2
+            for k in sorted({efd[0], efd[1], *logs}):
+                os.closerange(prev + 1, k)
+                prev = max(prev, k)
+            os.closerange(prev + 1, 1 << 16)
             # NEWNS|NEWUTS|NEWIPC|NEWPID|NEWNET
             _c(libc.unshare(0x00020000 | 0x04000000 | 0x08000000 | 0x20000000 | 0x40000000), "unshare")
             b = os.fork()
@@ -179,13 +198,13 @@ def launch(doc, run, root, srcs):
             os.write(efd[1], str(e).encode()[:1000])
             os._exit(126)
     os.close(efd[1])
-    _, st = os.waitpid(pid, 0)
+    _, st, ru = os.wait4(pid, 0)     # the usage of fork A includes the descendants it waited for (fork B, the command and what it reaped): the stage's CPU
     err = os.read(efd[0], 2000).decode()
     for f in logs + [efd[0]]:
         os.close(f)
     if err:
         raise SbxError("sandbox setup/exec failed: " + err)
-    return os.waitstatus_to_exitcode(st)
+    return os.waitstatus_to_exitcode(st), round(ru.ru_utime + ru.ru_stime, 3)
 
 def placed(store, tree):
     """Directory (or file) of the store that holds tree TREE placed as hardlinks of the objects: made once per store and tree (atomic
@@ -202,19 +221,146 @@ def placed(store, tree):
             shutil.rmtree(tmp, ignore_errors=True) if os.path.isdir(tmp) else os.unlink(tmp)
     return d
 
+MAX_LINKS = 60000   # below the 65000 links of an inode on ext4: a placeholder inode serves at most this many names
+_SPLIT = {}   # {(store, directory hash): (base hash, [(path, entry)] of the non-placeholder files)}, a pure function of the manifest
+_HAS_PH = {}
+
+
+def _has_ph(store, h):
+    """True iff the tree of directory manifest H holds the placeholder object somewhere (it is a VIEW)."""
+    k = (store, h)
+    if k not in _HAS_PH:
+        _HAS_PH[k] = any(e["t"] == "f" and e["h"] == unitview.PH_SHA or e["t"] == "d" and _has_ph(store, e["h"])
+                         for e in cas.manifest(h, store)["entries"].values())
+    return _HAS_PH[k]
+
+
+def _split(store, h):
+    """(base, reals) of view H: BASE = the hash of the manifest with every file entry replaced by the placeholder entry (every directory,
+    symlink and name stays: a function of the real tree's structure alone, the same for every unit); REALS = [(tree-relative path, file
+    entry)] of the files that are not the placeholder. The base manifests are written to the store."""
+    k = (store, h)
+    if k in _SPLIT:
+        return _SPLIT[k]
+    ents, reals = {}, []
+    ph = {"t": "f", "h": unitview.PH_SHA, "x": 0}
+    for name, e in cas.manifest(h, store)["entries"].items():
+        if e["t"] == "d":
+            b, rs = _split(store, e["h"])
+            ents[name] = {"t": "d", "h": b}
+            reals += [(name + "/" + p, x) for p, x in rs]
+        elif e["t"] == "f":
+            ents[name] = ph
+            if e["h"] != unitview.PH_SHA:
+                reals.append((name, e))
+        else:
+            ents[name] = e
+    data = cas.canon({"format": cas.FORMAT, "entries": ents})
+    b = hashlib.sha256(data).hexdigest()
+    cas._put(store, "tree", b + ".json", data)
+    _SPLIT[k] = (b, reals)
+    return _SPLIT[k]
+
+
+def _place_base(store, e, dest, state):
+    if e["t"] == "f":   # a placeholder: its own small file, a new inode after every MAX_LINKS names
+        if state["n"] % MAX_LINKS == 0:
+            with open(dest, "wb") as f:
+                f.write(unitview.PLACEHOLDER)
+            os.chmod(dest, 0o444)
+            os.utime(dest, (0, 0))
+            state["first"] = dest
+        else:
+            os.link(state["first"], dest)
+        state["n"] += 1
+    elif e["t"] == "l":
+        os.symlink(e["to"], dest)
+        os.utime(dest, (0, 0), follow_symlinks=False)
+    else:
+        os.mkdir(dest)
+        for name, c in cas.manifest(e["h"], store)["entries"].items():
+            _place_base(store, c, os.path.join(dest, name), state)
+        os.chmod(dest, 0o755)
+        os.utime(dest, (0, 0))
+
+
+def placed_base(store, base):
+    """The directory of the store that holds the all-placeholder tree BASE (made once per store and base, atomic rename)."""
+    d = os.path.join(store, "placed-base", base)
+    if not os.path.lexists(d):
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        tmp = "%s.tmp-%d-%s" % (d, os.getpid(), os.urandom(4).hex())
+        _place_base(store, {"t": "d", "h": base}, tmp, {"n": 0, "first": None})
+        try:
+            os.rename(tmp, d)
+        except OSError:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return d
+
+
+def placed_input(store, tree):
+    """(host path, [(path in the tree, host object file)]) of an input tree. A view (a directory tree that holds the placeholder): the
+    placed base and the objects of its real files, which the sandbox binds over the placeholder paths. Any other tree: placed(), no binds."""
+    m = cas.manifest(tree, store)
+    if cas._is_dir_manifest(m) and _has_ph(store, tree):
+        base, reals = _split(store, tree)
+        return placed_base(store, base), [(p, cas._obj(store, e)) for p, e in sorted(reals)]
+    return placed(store, tree), []
+
+TIME_FORMAT = "fnvnx-stage-time/1"
+
+
+def time_path(store, key):
+    """the timing sidecar of a stage key: store/<key>.time. NOT part of the key, NOT part of the record (keys/<key>/result.json) and NOT compared by store-merge"""
+    return os.path.join(store, key + ".time")
+
+
+def compared(doc):
+    """The record fields two executions of one key must agree on. A `-ftime-report` stage's stderr is a measurement, not a function of the key (the TIMEREPORT
+    of the @time variant): it is kept but not compared."""
+    return ("rc", "stdout", "outputs") if "-ftime-report" in doc.get("argv", []) else ("rc", "stdout", "stderr", "outputs")
+
+
+def write_time(store, key, t):
+    """publish the sidecar {wall_s, cpu_s} of one execution (a miss); a hit never calls this. Atomic (private temp name, rename)."""
+    p = time_path(store, key)
+    tmp = "%s.tmp-%d-%s" % (p, os.getpid(), os.urandom(4).hex())
+    with open(tmp, "w") as f:
+        json.dump({"format": TIME_FORMAT, "wall_s": t["wall_s"], "cpu_s": t["cpu_s"]}, f, sort_keys=True)
+    os.replace(tmp, p)
+
+
+def read_time(store, key):
+    """the sidecar of KEY or None (a stage that was only ever a hit in this store, or a store merged from one that did not time it)"""
+    try:
+        with open(time_path(store, key)) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) and d.get("format") == TIME_FORMAT else None
+
+
 def execute(store, doc, key):
+    return execute_timed(store, doc, key)[0]
+
+
+def execute_timed(store, doc, key):
+    """-> (result record, {wall_s, cpu_s}): the record is a function of the key; the timing (wall seconds of the launch, child user+sys seconds from wait4
+    rusage) is a measurement and goes to the sidecar (write_time), never into the record"""
     run = os.path.join(store, "run", "%s.%d.%s" % (key, os.getpid(), os.urandom(4).hex()))
     root = os.path.join(run, "root")
     try:
-        srcs = [placed(store, i["tree"]) for i in doc["inputs"]]
+        srcs = [placed_input(store, i["tree"]) for i in doc["inputs"]]
         for n in range(len(doc["outputs"])):
             os.makedirs(os.path.join(run, "out", str(n)))
         os.makedirs(root)
-        rc = launch(doc, run, root, srcs)
+        t0 = time.monotonic()
+        rc, cpu = launch(doc, run, root, srcs)
+        wall = round(time.monotonic() - t0, 3)
         return {"format": "fnvnx-stage-result/1", "key": key, "stage": doc["stage"], "rc": rc,
                 "outputs": {o: cas.ingest(os.path.join(run, "out", str(n)), store) for n, o in enumerate(doc["outputs"])},
                 "stdout": cas.ingest(os.path.join(run, "stdout"), store),
-                "stderr": cas.ingest(os.path.join(run, "stderr"), store), "open_channels": list(OPEN_CHANNELS)}
+                "stderr": cas.ingest(os.path.join(run, "stderr"), store), "open_channels": list(OPEN_CHANNELS)}, {"wall_s": wall, "cpu_s": cpu}
     finally:
         shutil.rmtree(run, ignore_errors=True)
 
@@ -238,11 +384,12 @@ def cmd_run(store, path, cold, result_path):
     if old is not None and not cold:
         res = old
     else:
-        res = execute(store, doc, key)
+        res, tm = execute_timed(store, doc, key)
+        write_time(store, key, tm)
         if old is None:
             _store_result(store, key, res)
         else:
-            bad = [k for k in ("rc", "stdout", "stderr", "outputs") if res[k] != old[k]]
+            bad = [k for k in compared(doc) if res[k] != old[k]]
             if bad:
                 lines = []
                 for o in doc["outputs"]:

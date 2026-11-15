@@ -1,0 +1,5850 @@
+{
+ "caps": {
+  "MaxPixelShaderInstructionSlots": {
+   "feats": [],
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-differences (Instruction Slots)",
+   "validator_only": true
+  },
+  "MaxVertexShaderConst": {
+   "feats": [
+    "c_index"
+   ],
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-vs-registers-vs-*"
+  },
+  "PS20Caps.ArbitrarySwizzle": {
+   "feats": [
+    "swizzle_arbitrary"
+   ],
+   "models": [
+    "ps_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-2-x (Arbitrary Swizzle)"
+  },
+  "PS20Caps.DynamicFlowControlDepth": {
+   "feats": [
+    "if_cmp",
+    "break",
+    "break_cmp",
+    "if_bool"
+   ],
+   "models": [
+    "ps_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-2-x"
+  },
+  "PS20Caps.GradientInstructions": {
+   "feats": [
+    "dsx",
+    "dsy",
+    "texldd"
+   ],
+   "models": [
+    "ps_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-2-x (Gradient Instructions)"
+  },
+  "PS20Caps.NoDependentReadLimit": {
+   "feats": [],
+   "models": [
+    "ps_2_x",
+    "ps_2_0"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-2-x; texld---ps-2-0 (dependent read order)",
+   "validator_only": true
+  },
+  "PS20Caps.NoTexInstructionLimit": {
+   "feats": [],
+   "models": [
+    "ps_2_x",
+    "ps_2_0"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-2-x",
+   "validator_only": true
+  },
+  "PS20Caps.NumTemps": {
+   "feats": [
+    "r_index>=12"
+   ],
+   "models": [
+    "ps_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-2-x"
+  },
+  "PS20Caps.Predication": {
+   "feats": [
+    "setp",
+    "if_pred",
+    "callnz_pred",
+    "breakp",
+    "pred_prefix",
+    "p0"
+   ],
+   "models": [
+    "ps_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-2-x (Predication)"
+  },
+  "PS20Caps.StaticFlowControlDepth": {
+   "feats": [
+    "rep",
+    "call",
+    "callnz_bool",
+    "label",
+    "ret",
+    "else",
+    "endif"
+   ],
+   "models": [
+    "ps_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-ps-2-x"
+  },
+  "VS20Caps.DynamicFlowControlDepth": {
+   "feats": [
+    "if_cmp",
+    "break",
+    "break_cmp"
+   ],
+   "models": [
+    "vs_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-vs-2-x (Dynamic Flow Control)"
+  },
+  "VS20Caps.NumTemps": {
+   "feats": [
+    "r_index>=12"
+   ],
+   "models": [
+    "vs_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-vs-2-x (Number of Temporary Registers)"
+  },
+  "VS20Caps.Predication": {
+   "feats": [
+    "setp",
+    "if_pred",
+    "callnz_pred",
+    "breakp",
+    "pred_prefix",
+    "p0"
+   ],
+   "models": [
+    "vs_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-vs-2-x (Predication)"
+  },
+  "VS20Caps.StaticFlowControlDepth": {
+   "feats": [
+    "loop_rep_nest",
+    "call_nest"
+   ],
+   "models": [
+    "vs_2_x"
+   ],
+   "src": "MS:dx9-graphics-reference-asm-vs-2-x"
+  }
+ },
+ "conflicts": [
+  {
+   "id": "ps:47",
+   "kind": "opcode_models",
+   "ms": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
+   "vkd3d": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "wine": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ]
+  },
+  {
+   "id": "ps:70",
+   "kind": "opcode_models",
+   "ms": [
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
+   "vkd3d": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "wine": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ]
+  },
+  {
+   "id": "vs:sgn@vs_3_0",
+   "kind": "operand_count",
+   "note": "MS sgn---vs syntax has 3 sources in all versions; vkd3d d3dbc.c: sgn has 1 source in 3_0; universe has both forms"
+  },
+  {
+   "id": "vs_3_0:v[a0.x]",
+   "kind": "legacy",
+   "note": "MS table says a0/aL, MS prose says aL only; wine allows any (reladdr flag)"
+  }
+ ],
+ "env_default": {
+  "arbitrary_swizzle": true,
+  "dynamic_flow": true,
+  "gradient": true,
+  "mrt": 4,
+  "note": "superset ENV: the ENV table may narrow it; the universe is generated for these values (fnvnx_dk_layout.h: c[256])",
+  "predication": true,
+  "ps_const": {
+   "ps_1_1": 8,
+   "ps_1_2": 8,
+   "ps_1_3": 8,
+   "ps_1_4": 8,
+   "ps_2_0": 32,
+   "ps_2_x": 32,
+   "ps_3_0": 224
+  },
+  "static_depth": 4,
+  "temps": 32,
+  "vs_const": 256
+ },
+ "excluded_models": {
+  "ps_1_0": {
+   "creatable": "undetermined",
+   "included_in_universe": true,
+   "source": "not in MS asm reference; see undetermined.vs1_0_ps1_0"
+  },
+  "ps_2_sw": {
+   "creatable": false,
+   "source": "MS:dx9-graphics-reference-asm-software-shaders: *_sw are 'only supported by software vertex processing and/or a reference device'; this device is a hardware (HAL-like) device"
+  },
+  "ps_3_sw": {
+   "creatable": false,
+   "source": "MS:dx9-graphics-reference-asm-software-shaders: *_sw are 'only supported by software vertex processing and/or a reference device'; this device is a hardware (HAL-like) device"
+  },
+  "vs_1_0": {
+   "creatable": "undetermined",
+   "included_in_universe": true,
+   "source": "not in MS asm reference; see undetermined.vs1_0_ps1_0"
+  },
+  "vs_2_sw": {
+   "creatable": false,
+   "source": "MS:dx9-graphics-reference-asm-software-shaders: *_sw are 'only supported by software vertex processing and/or a reference device'; this device is a hardware (HAL-like) device"
+  },
+  "vs_3_sw": {
+   "creatable": false,
+   "source": "MS:dx9-graphics-reference-asm-software-shaders: *_sw are 'only supported by software vertex processing and/or a reference device'; this device is a hardware (HAL-like) device"
+  }
+ },
+ "instruction_limits": "instruction slot / executed-instruction / read-port / dependent-read limits are validator rules, not translator features",
+ "legacy": [
+  {
+   "feature": "abs@mov",
+   "kind": "srcmod",
+   "model": "vs_2_0",
+   "rule": "source modifier abs not valid in vs_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "abs@mad.s2",
+   "kind": "srcmod",
+   "model": "vs_2_0",
+   "rule": "source modifier abs not valid in vs_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "absneg@mov",
+   "kind": "srcmod",
+   "model": "vs_2_0",
+   "rule": "source modifier absneg not valid in vs_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "absneg@mad.s2",
+   "kind": "srcmod",
+   "model": "vs_2_0",
+   "rule": "source modifier absneg not valid in vs_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "not",
+   "kind": "srcmod",
+   "model": "vs_2_0",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "sat@mov",
+   "kind": "dstmod",
+   "model": "vs_2_0",
+   "rule": "_sat invalid in vs_2_0 (wine accepts: silent)",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "pp@mov",
+   "kind": "dstmod",
+   "model": "vs_2_0",
+   "rule": "_pp invalid in vertex shaders",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "if@temp-written-in-branch-only",
+   "kind": "opcode",
+   "model": "vs_2_0",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "rep@temp-written-in-loop",
+   "kind": "opcode",
+   "model": "vs_2_0",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "call@label-used-in-and-out-of-loop",
+   "kind": "opcode",
+   "model": "vs_2_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)",
+   "status": "legal"
+  },
+  {
+   "feature": "c[a0.x+n]@aL-loop",
+   "kind": "addr",
+   "model": "vs_2_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)",
+   "status": "legal"
+  },
+  {
+   "feature": "breakc",
+   "kind": "opcode",
+   "model": "vs_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table) (breakc = break_comp)",
+   "status": "legal"
+  },
+  {
+   "feature": "abs@mov",
+   "kind": "srcmod",
+   "model": "vs_2_x",
+   "rule": "source modifier abs not valid in vs_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "abs@mad.s2",
+   "kind": "srcmod",
+   "model": "vs_2_x",
+   "rule": "source modifier abs not valid in vs_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "absneg@mov",
+   "kind": "srcmod",
+   "model": "vs_2_x",
+   "rule": "source modifier absneg not valid in vs_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "absneg@mad.s2",
+   "kind": "srcmod",
+   "model": "vs_2_x",
+   "rule": "source modifier absneg not valid in vs_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "not",
+   "kind": "srcmod",
+   "model": "vs_2_x",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "sat@mov",
+   "kind": "dstmod",
+   "model": "vs_2_x",
+   "rule": "_sat invalid in vs_2_x (wine accepts: silent)",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "pp@mov",
+   "kind": "dstmod",
+   "model": "vs_2_x",
+   "rule": "_pp invalid in vertex shaders",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "callnz@p0",
+   "kind": "opcode",
+   "model": "vs_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/callnz-pred---vs (instruction page 'callnz_pred', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "if@p0",
+   "kind": "opcode",
+   "model": "vs_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "not@if.p0",
+   "kind": "srcmod",
+   "model": "vs_2_x",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "if@temp-written-in-branch-only",
+   "kind": "opcode",
+   "model": "vs_2_x",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "rep@temp-written-in-loop",
+   "kind": "opcode",
+   "model": "vs_2_x",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "call@label-used-in-and-out-of-loop",
+   "kind": "opcode",
+   "model": "vs_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)",
+   "status": "legal"
+  },
+  {
+   "feature": "c[a0.x+n]@aL-loop",
+   "kind": "addr",
+   "model": "vs_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)",
+   "status": "legal"
+  },
+  {
+   "feature": "not",
+   "kind": "srcmod",
+   "model": "vs_3_0",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "sat@mov",
+   "kind": "dstmod",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw)",
+   "status": "legal"
+  },
+  {
+   "feature": "pp@mov",
+   "kind": "dstmod",
+   "model": "vs_3_0",
+   "rule": "_pp invalid in vertex shaders",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "1:blendweight0@output",
+   "kind": "usage",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "2:blendindices0@output",
+   "kind": "usage",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "3:normal0@output",
+   "kind": "usage",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "6:tangent0@output",
+   "kind": "usage",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "7:binormal0@output",
+   "kind": "usage",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "9:positiont0@output",
+   "kind": "usage",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "callnz@p0",
+   "kind": "opcode",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/callnz-pred---vs (instruction page 'callnz_pred', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "if@p0",
+   "kind": "opcode",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "not@if.p0",
+   "kind": "srcmod",
+   "model": "vs_3_0",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "if@temp-written-in-branch-only",
+   "kind": "opcode",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "rep@temp-written-in-loop",
+   "kind": "opcode",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "call@label-used-in-and-out-of-loop",
+   "kind": "opcode",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)",
+   "status": "legal"
+  },
+  {
+   "feature": "c[a0.x+n]@aL-loop",
+   "kind": "addr",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)",
+   "status": "legal"
+  },
+  {
+   "feature": "v[a0.x]",
+   "kind": "addr",
+   "model": "vs_3_0",
+   "rule": "",
+   "source": "MS vs-registers-vs-3-0 table: v# RelAddr 'a0/aL'; MS vs-3-0 page 'Indexing Registers': v# indexed 'using the loop counter register (aL)'",
+   "status": "conflict"
+  },
+  {
+   "feature": "o[a0.x]",
+   "kind": "addr",
+   "model": "vs_3_0",
+   "rule": "o# relative addressing only through aL",
+   "source": "MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 (o# RelAddr aL only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "shift_x8",
+   "kind": "dstmod",
+   "model": "ps_1_1",
+   "rule": "result shift x8 invalid in ps_1_1",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "shift_d8",
+   "kind": "dstmod",
+   "model": "ps_1_1",
+   "rule": "result shift d8 invalid in ps_1_1",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "shift_x8",
+   "kind": "dstmod",
+   "model": "ps_1_2",
+   "rule": "result shift x8 invalid in ps_1_2",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "shift_d8",
+   "kind": "dstmod",
+   "model": "ps_1_2",
+   "rule": "result shift d8 invalid in ps_1_2",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "shift_x8",
+   "kind": "dstmod",
+   "model": "ps_1_3",
+   "rule": "result shift x8 invalid in ps_1_3",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "shift_d8",
+   "kind": "dstmod",
+   "model": "ps_1_3",
+   "rule": "result shift d8 invalid in ps_1_3",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
+   "status": "illegal"
+  },
+  {
+   "feature": "lit",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "CreatePixelShader: opcode lit not in the ps_2_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "dst",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "CreatePixelShader: opcode dst not in the ps_2_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "expp",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "CreatePixelShader: opcode expp not in the ps_2_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "logp",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "CreatePixelShader: opcode logp not in the ps_2_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "sgn",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "CreatePixelShader: opcode sgn not in the ps_2_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "m4x4",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x4---ps (instruction page 'm4x4', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m4x3",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x3---ps (instruction page 'm4x3', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x4",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x4---ps (instruction page 'm3x4', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x3",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x3---ps (instruction page 'm3x3', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x2",
+   "kind": "opcode",
+   "model": "ps_2_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "abs@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "source modifier abs not valid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "abs@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "source modifier abs not valid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "absneg@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "source modifier absneg not valid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "absneg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "source modifier absneg not valid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "bias@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier bias invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "bias@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier bias invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "biasneg@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier biasneg invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "biasneg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier biasneg invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "sign@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier sign invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "sign@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier sign invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "signneg@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier signneg invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "signneg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier signneg invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "comp@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier comp invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "comp@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier comp invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier x2 invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier x2 invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2neg@mov",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier x2neg invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2neg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "legacy source modifier x2neg invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "centroid@dcl_texcoord",
+   "kind": "dstmod",
+   "model": "ps_2_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-2-0 (_centroid: 2_0..3_0)",
+   "status": "legal"
+  },
+  {
+   "feature": "neg@texld.coord",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "texld src0 modifier/swizzle invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
+   "status": "illegal"
+  },
+  {
+   "feature": "abs@texld.coord",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "texld src0 modifier/swizzle invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
+   "status": "illegal"
+  },
+  {
+   "feature": "swizzle@texld.coord",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "texld src0 modifier/swizzle invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
+   "status": "illegal"
+  },
+  {
+   "feature": "swizzle@texld.sampler-src",
+   "kind": "srcmod",
+   "model": "ps_2_0",
+   "rule": "texld sampler operand swizzle invalid in ps_2_0",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_x: src1 no modifier or swizzle)",
+   "status": "illegal"
+  },
+  {
+   "feature": "lit",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "CreatePixelShader: opcode lit not in the ps_2_x instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "dst",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "CreatePixelShader: opcode dst not in the ps_2_x instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "expp",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "CreatePixelShader: opcode expp not in the ps_2_x instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "logp",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "CreatePixelShader: opcode logp not in the ps_2_x instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "sgn",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "CreatePixelShader: opcode sgn not in the ps_2_x instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "m4x4",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x4---ps (instruction page 'm4x4', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m4x3",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x3---ps (instruction page 'm4x3', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x4",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x4---ps (instruction page 'm3x4', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x3",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x3---ps (instruction page 'm3x3', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x2",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "abs@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "source modifier abs not valid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "abs@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "source modifier abs not valid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "absneg@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "source modifier absneg not valid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "absneg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "source modifier absneg not valid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "not",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "bias@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier bias invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "bias@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier bias invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "biasneg@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier biasneg invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "biasneg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier biasneg invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "sign@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier sign invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "sign@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier sign invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "signneg@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier signneg invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "signneg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier signneg invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "comp@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier comp invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "comp@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier comp invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier x2 invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier x2 invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2neg@mov",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier x2neg invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2neg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "legacy source modifier x2neg invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "centroid@dcl_texcoord",
+   "kind": "dstmod",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-2-0 (_centroid: 2_0..3_0)",
+   "status": "legal"
+  },
+  {
+   "feature": "callnz@p0",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/callnz-pred---ps (instruction page 'callnz_pred', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "if@p0",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---ps (instruction page 'if_pred', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "not@if.p0",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "neg@texld.coord",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "texld src0 modifier/swizzle invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
+   "status": "illegal"
+  },
+  {
+   "feature": "abs@texld.coord",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "texld src0 modifier/swizzle invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
+   "status": "illegal"
+  },
+  {
+   "feature": "swizzle@texld.coord",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "texld src0 modifier/swizzle invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
+   "status": "illegal"
+  },
+  {
+   "feature": "swizzle@texld.sampler-src",
+   "kind": "srcmod",
+   "model": "ps_2_x",
+   "rule": "texld sampler operand swizzle invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_x: src1 no modifier or swizzle)",
+   "status": "illegal"
+  },
+  {
+   "feature": "if@temp-written-in-branch-only",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "rep@temp-written-in-loop",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "call@label-used-in-and-out-of-loop",
+   "kind": "opcode",
+   "model": "ps_2_x",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)",
+   "status": "legal"
+  },
+  {
+   "feature": "c[aL+n]",
+   "kind": "addr",
+   "model": "ps_2_x",
+   "rule": "relative addressing of c# invalid in ps_2_x",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-ps-2-x (c# RelAddr N); wine ps_2_x_reg_allowed CONST reladdr FALSE agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "lit",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "CreatePixelShader: opcode lit not in the ps_3_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "dst",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "CreatePixelShader: opcode dst not in the ps_3_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "expp",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "CreatePixelShader: opcode expp not in the ps_3_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "logp",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "CreatePixelShader: opcode logp not in the ps_3_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "sgn",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "CreatePixelShader: opcode sgn not in the ps_3_0 instruction set",
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
+   "status": "illegal"
+  },
+  {
+   "feature": "m4x4",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x4---ps (instruction page 'm4x4', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m4x3",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x3---ps (instruction page 'm4x3', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x4",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x4---ps (instruction page 'm3x4', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x3",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x3---ps (instruction page 'm3x3', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "m3x2",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "not",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "bias@mov",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier bias invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "bias@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier bias invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "biasneg@mov",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier biasneg invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "biasneg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier biasneg invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "sign@mov",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier sign invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "sign@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier sign invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "signneg@mov",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier signneg invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "signneg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier signneg invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "comp@mov",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier comp invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "comp@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier comp invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2@mov",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier x2 invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier x2 invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2neg@mov",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier x2neg invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "x2neg@mad.s2",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "legacy source modifier x2neg invalid in ps_3_0",
+   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
+   "status": "illegal"
+  },
+  {
+   "feature": "0:position0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "1:blendweight0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "2:blendindices0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "3:normal0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "4:psize0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "6:tangent0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "7:binormal0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "8:tessfactor0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "9:positiont0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "12:depth0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "13:sample0@input",
+   "kind": "usage",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15",
+   "status": "legal"
+  },
+  {
+   "feature": "callnz@p0",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/callnz-pred---ps (instruction page 'callnz_pred', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "if@p0",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---ps (instruction page 'if_pred', version table)",
+   "status": "legal"
+  },
+  {
+   "feature": "not@if.p0",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "NOT modifier on b# invalid",
+   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
+   "status": "illegal"
+  },
+  {
+   "feature": "abs@texld.coord",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 ps_3_0: only src1 forbids modifiers; swizzle allowed on src0",
+   "status": "legal"
+  },
+  {
+   "feature": "swizzle@texld.sampler-src",
+   "kind": "srcmod",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_3_0: swizzle allowed on src1)",
+   "status": "legal"
+  },
+  {
+   "feature": "if@temp-written-in-branch-only",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "rep@temp-written-in-loop",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent",
+   "status": "unreachable-doc"
+  },
+  {
+   "feature": "call@label-used-in-and-out-of-loop",
+   "kind": "opcode",
+   "model": "ps_3_0",
+   "rule": "",
+   "source": "MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)",
+   "status": "legal"
+  }
+ ],
+ "models": {
+  "ps_1_1": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "t"
+   ],
+   "dstmods": [
+    "sat",
+    "x2",
+    "x4",
+    "d2"
+   ],
+   "flow": null,
+   "major": 1,
+   "minor": 1,
+   "regs": {
+    "c": {
+     "dcl": false,
+     "n": 8,
+     "rel": [],
+     "rw": "R"
+    },
+    "r": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "RW"
+    },
+    "t": {
+     "dcl": false,
+     "n": 4,
+     "rel": [],
+     "rw": "RW"
+    },
+    "v": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-ps-registers-ps-1-x (Register Types)",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "t"
+   ],
+   "srcmods": [
+    "neg",
+    "bias",
+    "biasneg",
+    "sign",
+    "signneg",
+    "comp"
+   ],
+   "stage": "ps",
+   "swizzle": "ps1"
+  },
+  "ps_1_2": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "t"
+   ],
+   "dstmods": [
+    "sat",
+    "x2",
+    "x4",
+    "d2"
+   ],
+   "flow": null,
+   "major": 1,
+   "minor": 2,
+   "regs": {
+    "c": {
+     "dcl": false,
+     "n": 8,
+     "rel": [],
+     "rw": "R"
+    },
+    "r": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "RW"
+    },
+    "t": {
+     "dcl": false,
+     "n": 4,
+     "rel": [],
+     "rw": "RW"
+    },
+    "v": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-ps-registers-ps-1-x (Register Types)",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "t"
+   ],
+   "srcmods": [
+    "neg",
+    "bias",
+    "biasneg",
+    "sign",
+    "signneg",
+    "comp"
+   ],
+   "stage": "ps",
+   "swizzle": "ps1"
+  },
+  "ps_1_3": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "t"
+   ],
+   "dstmods": [
+    "sat",
+    "x2",
+    "x4",
+    "d2"
+   ],
+   "flow": null,
+   "major": 1,
+   "minor": 3,
+   "regs": {
+    "c": {
+     "dcl": false,
+     "n": 8,
+     "rel": [],
+     "rw": "R"
+    },
+    "r": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "RW"
+    },
+    "t": {
+     "dcl": false,
+     "n": 4,
+     "rel": [],
+     "rw": "RW"
+    },
+    "v": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-ps-registers-ps-1-x (Register Types)",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "t"
+   ],
+   "srcmods": [
+    "neg",
+    "bias",
+    "biasneg",
+    "sign",
+    "signneg",
+    "comp"
+   ],
+   "stage": "ps",
+   "swizzle": "ps1"
+  },
+  "ps_1_4": {
+   "creatable": true,
+   "dst_regs": [
+    "r"
+   ],
+   "dstmods": [
+    "sat",
+    "x2",
+    "x4",
+    "x8",
+    "d2",
+    "d4",
+    "d8"
+   ],
+   "flow": null,
+   "major": 1,
+   "minor": 4,
+   "regs": {
+    "c": {
+     "dcl": false,
+     "n": 8,
+     "rel": [],
+     "rw": "R"
+    },
+    "r": {
+     "dcl": false,
+     "n": 6,
+     "rel": [],
+     "rw": "RW"
+    },
+    "t": {
+     "dcl": false,
+     "n": 6,
+     "rel": [],
+     "rw": "R"
+    },
+    "v": {
+     "dcl": false,
+     "n": 2,
+     "phase2": true,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-ps-registers-ps-1-x (Register Types)",
+   "src_regs": [
+    "r",
+    "v",
+    "c"
+   ],
+   "srcmods": [
+    "neg",
+    "bias",
+    "biasneg",
+    "sign",
+    "signneg",
+    "comp",
+    "x2",
+    "x2neg",
+    "dz",
+    "dw"
+   ],
+   "stage": "ps",
+   "swizzle": "ps14"
+  },
+  "ps_2_0": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "oC",
+    "oDepth"
+   ],
+   "dstmods": [
+    "sat",
+    "pp",
+    "centroid"
+   ],
+   "flow": null,
+   "major": 2,
+   "minor": 0,
+   "regs": {
+    "c": {
+     "dcl": false,
+     "n": 32,
+     "rel": [],
+     "rw": "R"
+    },
+    "oC": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DCAPS9.NumSimultaneousRTs",
+      "max": 4,
+      "min": 1
+     },
+     "rel": [],
+     "rw": "W"
+    },
+    "oDepth": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "r": {
+     "dcl": false,
+     "n": 12,
+     "rel": [],
+     "rw": "RW"
+    },
+    "s": {
+     "dcl": true,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "t": {
+     "dcl": true,
+     "n": 8,
+     "rel": [],
+     "rw": "R"
+    },
+    "v": {
+     "dcl": true,
+     "n": 2,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-ps-registers-ps-2-0/2-x",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "t"
+   ],
+   "srcmods": [
+    "neg"
+   ],
+   "stage": "ps",
+   "swizzle": "ps20"
+  },
+  "ps_2_x": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "oC",
+    "oDepth"
+   ],
+   "dstmods": [
+    "sat",
+    "pp",
+    "centroid"
+   ],
+   "flow": {
+    "call": 4,
+    "cap": "PS20Caps",
+    "dynamic": 24,
+    "labels": 16,
+    "loop_rep": 4,
+    "static": 24
+   },
+   "major": 2,
+   "minor": 1,
+   "regs": {
+    "b": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "c": {
+     "dcl": false,
+     "n": 32,
+     "rel": [],
+     "rw": "R"
+    },
+    "i": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "l": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "-"
+    },
+    "oC": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DCAPS9.NumSimultaneousRTs",
+      "max": 4,
+      "min": 1
+     },
+     "rel": [],
+     "rw": "W"
+    },
+    "oDepth": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "p0": {
+     "dcl": false,
+     "gate": "PS20Caps.Predication",
+     "n": 1,
+     "rel": [],
+     "rw": "RW"
+    },
+    "r": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DPSHADERCAPS2_0.NumTemps",
+      "max": 32,
+      "min": 12
+     },
+     "rel": [],
+     "rw": "RW"
+    },
+    "s": {
+     "dcl": true,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "t": {
+     "dcl": true,
+     "n": 8,
+     "rel": [],
+     "rw": "R"
+    },
+    "v": {
+     "dcl": true,
+     "n": 2,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-ps-registers-ps-2-0/2-x",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "t"
+   ],
+   "srcmods": [
+    "neg"
+   ],
+   "stage": "ps",
+   "swizzle": "arbitrary"
+  },
+  "ps_3_0": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "oC",
+    "oDepth"
+   ],
+   "dstmods": [
+    "sat",
+    "pp",
+    "centroid"
+   ],
+   "flow": {
+    "call": 4,
+    "dynamic": 24,
+    "labels": 2048,
+    "loop_rep": 4,
+    "static": 24
+   },
+   "major": 3,
+   "minor": 0,
+   "regs": {
+    "aL": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "R"
+    },
+    "b": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "c": {
+     "dcl": false,
+     "n": 224,
+     "rel": [],
+     "rw": "R"
+    },
+    "i": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "l": {
+     "dcl": false,
+     "n": 2048,
+     "rel": [],
+     "rw": "-"
+    },
+    "oC": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DCAPS9.NumSimultaneousRTs",
+      "max": 4,
+      "min": 1
+     },
+     "rel": [],
+     "rw": "W"
+    },
+    "oDepth": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "p0": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "R"
+    },
+    "r": {
+     "dcl": false,
+     "n": 32,
+     "rel": [],
+     "rw": "RW"
+    },
+    "s": {
+     "dcl": true,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "v": {
+     "dcl": true,
+     "n": 10,
+     "rel": [
+      "aL"
+     ],
+     "rw": "R"
+    },
+    "vFace": {
+     "cond_only": true,
+     "dcl": true,
+     "n": 1,
+     "rel": [],
+     "rw": "R"
+    },
+    "vPos": {
+     "dcl": true,
+     "n": 1,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-ps-registers-ps-3-0",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "vPos",
+    "aL"
+   ],
+   "srcmods": [
+    "neg",
+    "abs",
+    "absneg"
+   ],
+   "stage": "ps",
+   "swizzle": "arbitrary"
+  },
+  "vs_1_1": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "oPos",
+    "oFog",
+    "oPts",
+    "oD",
+    "oT"
+   ],
+   "dstmods": [],
+   "flow": null,
+   "major": 1,
+   "minor": 1,
+   "regs": {
+    "a0": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": ".x only"
+    },
+    "c": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DCAPS9.MaxVertexShaderConst",
+      "min": 96
+     },
+     "rel": [
+      "a0"
+     ],
+     "rw": "R"
+    },
+    "oD": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "W"
+    },
+    "oFog": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oPos": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oPts": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oT": {
+     "dcl": false,
+     "n": 8,
+     "rel": [],
+     "rw": "W"
+    },
+    "r": {
+     "dcl": false,
+     "n": 12,
+     "rel": [],
+     "rw": "RW"
+    },
+    "v": {
+     "dcl": true,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-vs-registers-vs-1-1",
+   "src_regs": [
+    "r",
+    "v",
+    "c"
+   ],
+   "srcmods": [
+    "neg"
+   ],
+   "stage": "vs",
+   "swizzle": "arbitrary"
+  },
+  "vs_2_0": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "oPos",
+    "oFog",
+    "oPts",
+    "oD",
+    "oT"
+   ],
+   "dstmods": [],
+   "flow": {
+    "call": 1,
+    "cap": null,
+    "dynamic": 0,
+    "labels": 16,
+    "loop_rep": 1,
+    "static": 16
+   },
+   "major": 2,
+   "minor": 0,
+   "regs": {
+    "a0": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "RW"
+    },
+    "aL": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "R"
+    },
+    "b": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "c": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DCAPS9.MaxVertexShaderConst",
+      "min": 256
+     },
+     "rel": [
+      "a0",
+      "aL"
+     ],
+     "rw": "R"
+    },
+    "i": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "l": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "-"
+    },
+    "oD": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "W"
+    },
+    "oFog": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oPos": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oPts": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oT": {
+     "dcl": false,
+     "n": 8,
+     "rel": [],
+     "rw": "W"
+    },
+    "r": {
+     "dcl": false,
+     "n": 12,
+     "rel": [],
+     "rw": "RW"
+    },
+    "v": {
+     "dcl": true,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "aL"
+   ],
+   "srcmods": [
+    "neg"
+   ],
+   "stage": "vs",
+   "swizzle": "arbitrary"
+  },
+  "vs_2_x": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "oPos",
+    "oFog",
+    "oPts",
+    "oD",
+    "oT"
+   ],
+   "dstmods": [],
+   "flow": {
+    "call": 4,
+    "cap": "VS20Caps",
+    "dynamic": 24,
+    "labels": 16,
+    "loop_rep": 4,
+    "static": 16
+   },
+   "major": 2,
+   "minor": 1,
+   "regs": {
+    "a0": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "RW"
+    },
+    "aL": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "R"
+    },
+    "b": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "c": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DCAPS9.MaxVertexShaderConst",
+      "min": 256
+     },
+     "rel": [
+      "a0",
+      "aL"
+     ],
+     "rw": "R"
+    },
+    "i": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "l": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "-"
+    },
+    "oD": {
+     "dcl": false,
+     "n": 2,
+     "rel": [],
+     "rw": "W"
+    },
+    "oFog": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oPos": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oPts": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "W"
+    },
+    "oT": {
+     "dcl": false,
+     "n": 8,
+     "rel": [],
+     "rw": "W"
+    },
+    "p0": {
+     "dcl": false,
+     "gate": "VS20Caps.Predication",
+     "n": 1,
+     "rel": [],
+     "rw": "RW"
+    },
+    "r": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DCAPS9.VS20Caps.NumTemps",
+      "max": 32,
+      "min": 12
+     },
+     "rel": [],
+     "rw": "RW"
+    },
+    "v": {
+     "dcl": true,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "aL"
+   ],
+   "srcmods": [
+    "neg"
+   ],
+   "stage": "vs",
+   "swizzle": "arbitrary"
+  },
+  "vs_3_0": {
+   "creatable": true,
+   "dst_regs": [
+    "r",
+    "o"
+   ],
+   "dstmods": [
+    "sat"
+   ],
+   "flow": {
+    "call": 4,
+    "dynamic": 24,
+    "labels": 2048,
+    "loop_rep": 4,
+    "static": 24
+   },
+   "major": 3,
+   "minor": 0,
+   "regs": {
+    "a0": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "RW"
+    },
+    "aL": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "R"
+    },
+    "b": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "c": {
+     "dcl": false,
+     "n": {
+      "cap": "D3DCAPS9.MaxVertexShaderConst",
+      "min": 256
+     },
+     "rel": [
+      "a0",
+      "aL"
+     ],
+     "rw": "R"
+    },
+    "i": {
+     "dcl": false,
+     "n": 16,
+     "rel": [],
+     "rw": "R"
+    },
+    "l": {
+     "dcl": false,
+     "n": 2048,
+     "rel": [],
+     "rw": "-"
+    },
+    "o": {
+     "dcl": true,
+     "n": 12,
+     "rel": [
+      "aL"
+     ],
+     "rw": "W"
+    },
+    "p0": {
+     "dcl": false,
+     "n": 1,
+     "rel": [],
+     "rw": "RW"
+    },
+    "r": {
+     "dcl": false,
+     "n": 32,
+     "rel": [],
+     "rw": "RW"
+    },
+    "s": {
+     "dcl": true,
+     "n": 4,
+     "rel": [],
+     "rw": "R"
+    },
+    "v": {
+     "dcl": true,
+     "n": 16,
+     "rel": [
+      "a0",
+      "aL"
+     ],
+     "rw": "R"
+    }
+   },
+   "regs_source": "MS:dx9-graphics-reference-asm-vs-registers-vs-3-0",
+   "src_regs": [
+    "r",
+    "v",
+    "c",
+    "aL"
+   ],
+   "srcmods": [
+    "neg",
+    "abs",
+    "absneg"
+   ],
+   "stage": "vs",
+   "swizzle": "arbitrary"
+  }
+ },
+ "opcodes": {
+  "ps:abs": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "ABS",
+   "opnum": 35,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/abs---ps (instruction page 'abs', version table)",
+   "tm": "abs {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:add": {
+   "alu": true,
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "ADD",
+   "opnum": 2,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/add---ps (instruction page 'add', version table)",
+   "tm": "add {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:bem": {
+   "d": "Rr",
+   "mk": "rg",
+   "models": [
+    "ps_1_4"
+   ],
+   "num": "BEM",
+   "opnum": 89,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/bem---ps (instruction page 'bem', version table)",
+   "tm": "texld r0, t0\ntexld r2, t1\nbem {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:break": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAK",
+   "opnum": 44,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break---ps (instruction page 'break', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak\nendrep",
+   "xref": "agree"
+  },
+  "ps:break_eq": {
+   "cmp": "eq",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_eq {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "ps:break_ge": {
+   "cmp": "ge",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_ge {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "ps:break_gt": {
+   "cmp": "gt",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_gt {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "ps:break_le": {
+   "cmp": "le",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_le {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "ps:break_lt": {
+   "cmp": "lt",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_lt {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "ps:break_ne": {
+   "cmp": "ne",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---ps (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_ne {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "ps:breakp": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi+setp",
+   "num": "BREAKP",
+   "opnum": 96,
+   "s": [
+    "Pp"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-p---ps (instruction page 'breakp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreakp {S0}\nendrep",
+   "xref": "agree"
+  },
+  "ps:call": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "CALL",
+   "opnum": 25,
+   "s": [
+    "L"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/call---ps (instruction page 'call', version table)",
+   "tm": "call l0\n@E@\nret\nlabel l0\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "ps:callnz_bool": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defb",
+   "num": "CALLNZ",
+   "opnum": 26,
+   "s": [
+    "L",
+    "B"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/callnz-bool---ps (instruction page 'callnz_bool', version table)",
+   "tm": "callnz l0, {S1}\n@E@\nret\nlabel l0\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "ps:callnz_pred": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "setp",
+   "num": "CALLNZ",
+   "opnum": 26,
+   "s": [
+    "L",
+    "Pp"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/callnz-pred---ps (instruction page 'callnz_pred', version table)",
+   "tm": "callnz l0, {S1}\n@E@\nret\nlabel l0\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "ps:cmp": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "CMP",
+   "opnum": 88,
+   "s": [
+    "S",
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/cmp---ps (instruction page 'cmp', version table)",
+   "tm": "cmp {D}, {S0}, {S1}, {S2}",
+   "xref": "agree"
+  },
+  "ps:cnd": {
+   "d": "D",
+   "fix": {
+    "ps_1_1": {
+     "0": "r0.a"
+    },
+    "ps_1_2": {
+     "0": "r0.a"
+    },
+    "ps_1_3": {
+     "0": "r0.a"
+    }
+   },
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4"
+   ],
+   "num": "CND",
+   "opnum": 80,
+   "s": [
+    "S",
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/cnd---ps (instruction page 'cnd', version table)",
+   "tm": "cnd {D}, {S0}, {S1}, {S2}",
+   "xref": "agree"
+  },
+  "ps:crs": {
+   "d": "D",
+   "mk": "xyz",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "CRS",
+   "opnum": 33,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/crs---ps (instruction page 'crs', version table)",
+   "tm": "crs {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:dcl": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DCL",
+   "opnum": 31,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dcl---ps (version table)",
+   "tm": "dcl",
+   "xref": "agree"
+  },
+  "ps:dcl_samplertype": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DCL",
+   "opnum": 31,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dcl-samplertype---ps (version table)",
+   "tm": "dcl_samplertype",
+   "xref": "agree"
+  },
+  "ps:dcl_usage": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "ps_3_0"
+   ],
+   "num": "DCL",
+   "opnum": 31,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dcl-usage---ps (version table)",
+   "tm": "dcl_usage",
+   "xref": "agree"
+  },
+  "ps:def": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DEF",
+   "opnum": 81,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/def---ps (version table)",
+   "tm": "def",
+   "xref": "agree"
+  },
+  "ps:defb": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DEFB",
+   "opnum": 47,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/defb---ps (version table)",
+   "tm": "defb",
+   "xref": "conflict"
+  },
+  "ps:defi": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DEFI",
+   "opnum": 48,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/defi---ps (version table)",
+   "tm": "defi",
+   "xref": "agree"
+  },
+  "ps:dp2add": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DP2ADD",
+   "opnum": 90,
+   "s": [
+    "S",
+    "S",
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dp2add---ps (instruction page 'dp2add', version table)",
+   "tm": "dp2add {D}, {S0}, {S1}, {S2}",
+   "xref": "agree"
+  },
+  "ps:dp3": {
+   "d": "D",
+   "mk": "any",
+   "mk_ps1": [
+    "",
+    ".xyz"
+   ],
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DP3",
+   "opnum": 8,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dp3---ps (instruction page 'dp3', version table)",
+   "tm": "dp3 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:dp4": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DP4",
+   "opnum": 9,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dp4---ps (instruction page 'dp4', version table)",
+   "tm": "dp4 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:dsx": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DSX",
+   "opnum": 91,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dsx---ps (instruction page 'dsx', version table)",
+   "tm": "dsx {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:dsy": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "DSY",
+   "opnum": 92,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dsy---ps (instruction page 'dsy', version table)",
+   "tm": "dsy {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:else": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defb",
+   "num": "ELSE",
+   "opnum": 42,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/else---ps (instruction page 'else', version table)",
+   "tm": "if {B0}\n{BODY}\nelse\n{BODY2}\nendif",
+   "xref": "agree"
+  },
+  "ps:endif": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defb",
+   "num": "ENDIF",
+   "opnum": 43,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/endif---ps (instruction page 'endif', version table)",
+   "tm": "if {B0}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:endloop": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "ENDLOOP",
+   "opnum": 29,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/endloop---ps (instruction page 'endloop', version table)",
+   "tm": "loop aL, {I0}\n{BODY}\nendloop",
+   "xref": "agree"
+  },
+  "ps:endrep": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "ENDREP",
+   "opnum": 39,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/endrep---ps (instruction page 'endrep', version table)",
+   "tm": "rep {I0}\n{BODY}\nendrep",
+   "xref": "agree"
+  },
+  "ps:exp": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "EXP",
+   "opnum": 14,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/exp---ps (instruction page 'exp', version table)",
+   "tm": "exp {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:frc": {
+   "d": "D",
+   "mk": "x_y_xy_vs1",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "FRC",
+   "opnum": 19,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/frc---ps (instruction page 'frc', version table)",
+   "tm": "frc {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:if_bool": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defb",
+   "num": "IF",
+   "opnum": 40,
+   "s": [
+    "B"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-bool---ps (instruction page 'if_bool', version table)",
+   "tm": "if {S0}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:if_eq": {
+   "cmp": "eq",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
+   "tm": "if_eq {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:if_ge": {
+   "cmp": "ge",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
+   "tm": "if_ge {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:if_gt": {
+   "cmp": "gt",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
+   "tm": "if_gt {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:if_le": {
+   "cmp": "le",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
+   "tm": "if_le {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:if_lt": {
+   "cmp": "lt",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
+   "tm": "if_lt {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:if_ne": {
+   "cmp": "ne",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---ps (instruction page 'if_comp', version table)",
+   "tm": "if_ne {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:if_pred": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "setp",
+   "num": "IF",
+   "opnum": 40,
+   "s": [
+    "Pp"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---ps (instruction page 'if_pred', version table)",
+   "tm": "if {S0}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "ps:label": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "LABEL",
+   "opnum": 30,
+   "s": [
+    "L"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/label---ps (instruction page 'label', version table)",
+   "tm": "call l{LBL}\n@E@\nret\nlabel l{LBL}\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "ps:log": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "LOG",
+   "opnum": 15,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/log---ps (instruction page 'log', version table)",
+   "tm": "log {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:loop": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "LOOP",
+   "opnum": 27,
+   "s": [
+    "AL",
+    "I"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/loop---ps (instruction page 'loop', version table)",
+   "tm": "loop aL, {S1}\n{BODY}\nendloop",
+   "xref": "agree"
+  },
+  "ps:lrp": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "LRP",
+   "opnum": 18,
+   "s": [
+    "S",
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/lrp---ps (instruction page 'lrp', version table)",
+   "tm": "lrp {D}, {S0}, {S1}, {S2}",
+   "xref": "agree"
+  },
+  "ps:m3x2": {
+   "d": "D",
+   "matrix": 3,
+   "mk": "xy",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "M3X2",
+   "opnum": 24,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)",
+   "tm": "m3x2 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:m3x3": {
+   "d": "D",
+   "matrix": 3,
+   "mk": "xyz",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "M3X3",
+   "opnum": 23,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x3---ps (instruction page 'm3x3', version table)",
+   "tm": "m3x3 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:m3x4": {
+   "d": "D",
+   "matrix": 3,
+   "mk": "xyz_or_all",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "M3X4",
+   "opnum": 22,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x4---ps (instruction page 'm3x4', version table)",
+   "tm": "m3x4 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:m4x3": {
+   "d": "D",
+   "matrix": 4,
+   "mk": "xyz",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "M4X3",
+   "opnum": 21,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x3---ps (instruction page 'm4x3', version table)",
+   "tm": "m4x3 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:m4x4": {
+   "d": "D",
+   "matrix": 4,
+   "mk": "xyz_or_all",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "M4X4",
+   "opnum": 20,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x4---ps (instruction page 'm4x4', version table)",
+   "tm": "m4x4 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:mad": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "MAD",
+   "opnum": 4,
+   "s": [
+    "S",
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/mad---ps (instruction page 'mad', version table)",
+   "tm": "mad {D}, {S0}, {S1}, {S2}",
+   "xref": "agree"
+  },
+  "ps:max": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "MAX",
+   "opnum": 11,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/max---ps (instruction page 'max', version table)",
+   "tm": "max {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:min": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "MIN",
+   "opnum": 10,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/min---ps (instruction page 'min', version table)",
+   "tm": "min {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:mov": {
+   "alu": true,
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "MOV",
+   "opnum": 1,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/mov---ps (instruction page 'mov', version table)",
+   "tm": "mov {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:mul": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "MUL",
+   "opnum": 5,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/mul---ps (instruction page 'mul', version table)",
+   "tm": "mul {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:nop": {
+   "alu": false,
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "NOP",
+   "opnum": 0,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/nop---ps (instruction page 'nop', version table)",
+   "tm": "nop",
+   "xref": "agree"
+  },
+  "ps:nrm": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "NRM",
+   "opnum": 36,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/nrm---ps (instruction page 'nrm', version table)",
+   "tm": "nrm {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:phase": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_1_4"
+   ],
+   "num": "PHASE",
+   "opnum": 65533,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/phase---ps (instruction page 'phase', version table)",
+   "tm": "texld r0, t0\nphase\nmov r0, r0",
+   "xref": "agree"
+  },
+  "ps:pow": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "POW",
+   "opnum": 32,
+   "s": [
+    "Ss",
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/pow---ps (instruction page 'pow', version table)",
+   "tm": "pow {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:rcp": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "RCP",
+   "opnum": 6,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/rcp---ps (instruction page 'rcp', version table)",
+   "tm": "rcp {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:rep": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "needs": "defi",
+   "num": "REP",
+   "opnum": 38,
+   "s": [
+    "I"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/rep---ps (instruction page 'rep', version table)",
+   "tm": "rep {S0}\n{BODY}\nendrep",
+   "xref": "agree"
+  },
+  "ps:ret": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "RET",
+   "opnum": 28,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/ret---ps (instruction page 'ret', version table)",
+   "tm": "call l0\n@E@\nret\nlabel l0\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "ps:rsq": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "RSQ",
+   "opnum": 7,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/rsq---ps (instruction page 'rsq', version table)",
+   "tm": "rsq {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:setp_eq": {
+   "cmp": "eq",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
+   "tm": "setp_eq {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:setp_ge": {
+   "cmp": "ge",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
+   "tm": "setp_ge {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:setp_gt": {
+   "cmp": "gt",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
+   "tm": "setp_gt {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:setp_le": {
+   "cmp": "le",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
+   "tm": "setp_le {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:setp_lt": {
+   "cmp": "lt",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
+   "tm": "setp_lt {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:setp_ne": {
+   "cmp": "ne",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---ps (instruction page 'setp_comp', version table)",
+   "tm": "setp_ne {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:sincos": {
+   "d": "D",
+   "dr": [
+    "r"
+   ],
+   "mk": "x_y_xy",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "SINCOS",
+   "opnum": 37,
+   "s": [
+    "Ss",
+    "Sc",
+    "Sc"
+   ],
+   "s3": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/sincos---ps (instruction page 'sincos', version table)",
+   "tm": "sincos {D}, {S0}, {S1}, {S2}",
+   "tm3": "sincos {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:sub": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "SUB",
+   "opnum": 3,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/sub---ps (instruction page 'sub', version table)",
+   "tm": "sub {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:tex": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEX",
+   "opnum": 66,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/tex---ps (instruction page 'tex', version table)",
+   "st": null,
+   "tex": true,
+   "tm": "tex {D}",
+   "xref": "agree"
+  },
+  "ps:texbem": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXBEM",
+   "opnum": 67,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texbem---ps (instruction page 'texbem', version table)",
+   "st": "2d",
+   "tex": true,
+   "tm": "tex t0\ntexbem {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:texbeml": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXBEML",
+   "opnum": 68,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texbeml---ps (instruction page 'texbeml', version table)",
+   "st": "2d",
+   "tex": true,
+   "tm": "tex t0\ntexbeml {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:texcoord": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXCOORD",
+   "opnum": 64,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texcoord---ps (instruction page 'texcoord', version table)",
+   "tm": "texcoord {D}",
+   "xref": "agree"
+  },
+  "ps:texcrd": {
+   "d": "Rr",
+   "mk": "any",
+   "models": [
+    "ps_1_4"
+   ],
+   "num": "TEXCOORD",
+   "opnum": 64,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texcrd---ps (instruction page 'texcrd', version table)",
+   "tm": "texcrd {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:texdepth": {
+   "d": "Rr",
+   "mk": "any",
+   "models": [
+    "ps_1_4"
+   ],
+   "num": "TEXDEPTH",
+   "opnum": 87,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texdepth---ps (instruction page 'texdepth', version table)",
+   "tm": "texdepth {D}",
+   "xref": "agree"
+  },
+  "ps:texdp3": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXDP3",
+   "opnum": 85,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texdp3---ps (instruction page 'texdp3', version table)",
+   "tm": "tex t0\ntexdp3 {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:texdp3tex": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXDP3TEX",
+   "opnum": 83,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texdp3tex---ps (instruction page 'texdp3tex', version table)",
+   "st": "1d",
+   "tex": true,
+   "tm": "tex t0\ntexdp3tex {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:texkill": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3",
+    "ps_1_4",
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "TEXKILL",
+   "opnum": 65,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texkill---ps (instruction page 'texkill', version table)",
+   "tm": "texkill {S0}",
+   "xref": "agree"
+  },
+  "ps:texld": {
+   "ctrl": 0,
+   "d": "Dr",
+   "mk": "none",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "TEXLD",
+   "opnum": 66,
+   "s": [
+    "S",
+    "Sm"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texld---ps-2-0 (instruction page 'texld', version table)",
+   "tex": true,
+   "tm": "texld {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:texld14": {
+   "d": "Rr",
+   "mk": "any",
+   "models": [
+    "ps_1_4"
+   ],
+   "num": "TEXLD",
+   "opnum": 66,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texld---ps-1-4 (instruction page 'texld', version table)",
+   "st": null,
+   "tex": true,
+   "tm": "texld {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:texldb": {
+   "ctrl": 2,
+   "d": "Dr",
+   "mk": "none",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "TEXLD",
+   "opnum": 66,
+   "s": [
+    "S",
+    "Sm"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texldb---ps (instruction page 'texldb', version table)",
+   "tex": true,
+   "tm": "texldb {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:texldd": {
+   "d": "Dr",
+   "mk": "none",
+   "models": [
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "TEXLDD",
+   "opnum": 93,
+   "s": [
+    "S",
+    "Sm",
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-2-x (instruction list)",
+   "tex": true,
+   "tm": "texldd {D}, {S0}, {S1}, {S2}, {S3}",
+   "xref": "agree"
+  },
+  "ps:texldl": {
+   "d": "Dr",
+   "mk": "none",
+   "models": [
+    "ps_3_0"
+   ],
+   "num": "TEXLDL",
+   "opnum": 95,
+   "s": [
+    "S",
+    "Sm"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texldl---ps (instruction page 'texldl', version table)",
+   "tex": true,
+   "tm": "texldl {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:texldp": {
+   "ctrl": 1,
+   "d": "Dr",
+   "mk": "none",
+   "models": [
+    "ps_2_0",
+    "ps_2_x",
+    "ps_3_0"
+   ],
+   "num": "TEXLD",
+   "opnum": 66,
+   "s": [
+    "S",
+    "Sm"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texldp---ps (instruction page 'texldp', version table)",
+   "tex": true,
+   "tm": "texldp {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "ps:texm3x2depth": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_3"
+   ],
+   "num": "TEXM3x2DEPTH",
+   "opnum": 84,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texm3x2depth---ps (instruction page 'texm3x2depth', version table)",
+   "tm": "tex t0\ntexm3x2pad t1, t0\ntexm3x2depth {D}, t0",
+   "xref": "agree"
+  },
+  "ps:texm3x2pad": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXM3x2PAD",
+   "opnum": 71,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texm3x2pad---ps (instruction page 'texm3x2pad', version table)",
+   "tm": "tex t0\ntexm3x2pad t1, t0\ntexm3x2tex t2, t0",
+   "xref": "agree"
+  },
+  "ps:texm3x2tex": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXM3x2TEX",
+   "opnum": 72,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texm3x2tex---ps (instruction page 'texm3x2tex', version table)",
+   "st": "2d",
+   "tex": true,
+   "tm": "tex t0\ntexm3x2pad t1, t0\ntexm3x2tex {D}, t0",
+   "xref": "agree"
+  },
+  "ps:texm3x3": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXM3x3",
+   "opnum": 86,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texm3x3---ps (instruction page 'texm3x3', version table)",
+   "st": "3d_or_cube",
+   "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3 {D}, t0",
+   "xref": "agree"
+  },
+  "ps:texm3x3pad": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXM3x3PAD",
+   "opnum": 73,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texm3x3pad---ps (instruction page 'texm3x3pad', version table)",
+   "st": "3d_or_cube",
+   "tex": true,
+   "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3tex t3, t0",
+   "xref": "agree"
+  },
+  "ps:texm3x3spec": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXM3x3SPEC",
+   "opnum": 76,
+   "s": [
+    "X",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texm3x3spec---ps (instruction page 'texm3x3spec', version table)",
+   "st": "3d_or_cube",
+   "tex": true,
+   "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3spec {D}, t0, {S1}",
+   "xref": "agree"
+  },
+  "ps:texm3x3tex": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXM3x3TEX",
+   "opnum": 74,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texm3x3tex---ps (instruction page 'texm3x3tex', version table)",
+   "st": "3d_or_cube",
+   "tex": true,
+   "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3tex {D}, t0",
+   "xref": "agree"
+  },
+  "ps:texm3x3vspec": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXM3x3VSPEC",
+   "opnum": 77,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texm3x3vspec---ps (instruction page 'texm3x3vspec', version table)",
+   "st": "3d_or_cube",
+   "tex": true,
+   "tm": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3vspec {D}, t0",
+   "xref": "agree"
+  },
+  "ps:texreg2ar": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_1",
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXREG2AR",
+   "opnum": 69,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texreg2ar---ps (instruction page 'texreg2ar', version table)",
+   "st": "2d",
+   "tex": true,
+   "tm": "tex t0\ntexreg2ar {D}, {S0}",
+   "xref": "agree"
+  },
+  "ps:texreg2gb": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXREG2GB",
+   "opnum": 70,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texreg2gb---ps (instruction page 'texreg2gb', version table)",
+   "st": "2d",
+   "tex": true,
+   "tm": "tex t0\ntexreg2gb {D}, {S0}",
+   "xref": "conflict"
+  },
+  "ps:texreg2rgb": {
+   "d": "T",
+   "mk": "any",
+   "models": [
+    "ps_1_2",
+    "ps_1_3"
+   ],
+   "num": "TEXREG2RGB",
+   "opnum": 82,
+   "s": [
+    "X"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texreg2rgb---ps (instruction page 'texreg2rgb', version table)",
+   "st": "2d",
+   "tex": true,
+   "tm": "tex t0\ntexreg2rgb {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:abs": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "ABS",
+   "opnum": 35,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/abs---vs (instruction page 'abs', version table)",
+   "tm": "abs {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:add": {
+   "alu": true,
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "ADD",
+   "opnum": 2,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/add---vs (instruction page 'add', version table)",
+   "tm": "add {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:break": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAK",
+   "opnum": 44,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break---vs (instruction page 'break', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak\nendrep",
+   "xref": "agree"
+  },
+  "vs:break_eq": {
+   "cmp": "eq",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_eq {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "vs:break_ge": {
+   "cmp": "ge",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_ge {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "vs:break_gt": {
+   "cmp": "gt",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_gt {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "vs:break_le": {
+   "cmp": "le",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_le {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "vs:break_lt": {
+   "cmp": "lt",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_lt {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "vs:break_ne": {
+   "cmp": "ne",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "BREAKC",
+   "opnum": 45,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreak_ne {S0}, {S1}\nendrep",
+   "xref": "agree"
+  },
+  "vs:breakp": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi+setp",
+   "num": "BREAKP",
+   "opnum": 96,
+   "s": [
+    "Pp"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/breakp---vs (instruction page 'breakp', version table)",
+   "tm": "rep {I0}\n{BODY}\nbreakp {S0}\nendrep",
+   "xref": "agree"
+  },
+  "vs:call": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "CALL",
+   "opnum": 25,
+   "s": [
+    "L"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/call---vs (instruction page 'call', version table)",
+   "tm": "call l0\n@E@\nret\nlabel l0\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "vs:callnz_bool": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defb",
+   "num": "CALLNZ",
+   "opnum": 26,
+   "s": [
+    "L",
+    "B"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/callnz-bool---vs (instruction page 'callnz_bool', version table)",
+   "tm": "callnz l0, {S1}\n@E@\nret\nlabel l0\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "vs:callnz_pred": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "setp",
+   "num": "CALLNZ",
+   "opnum": 26,
+   "s": [
+    "L",
+    "Pp"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/callnz-pred---vs (instruction page 'callnz_pred', version table)",
+   "tm": "callnz l0, {S1}\n@E@\nret\nlabel l0\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "vs:crs": {
+   "d": "D",
+   "mk": "xyz",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "CRS",
+   "opnum": 33,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/crs---vs (instruction page 'crs', version table)",
+   "tm": "crs {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:dcl_samplertype": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "vs_3_0"
+   ],
+   "num": "DCL",
+   "opnum": 31,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dcl-samplertype---vs (version table)",
+   "tm": "dcl_samplertype",
+   "xref": "agree"
+  },
+  "vs:dcl_usage": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "DCL",
+   "opnum": 31,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dcl-usage-input-register---vs (version table)",
+   "tm": "dcl_usage",
+   "xref": "agree"
+  },
+  "vs:def": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "DEF",
+   "opnum": 81,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/def---vs (version table)",
+   "tm": "def",
+   "xref": "agree"
+  },
+  "vs:defb": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "DEFB",
+   "opnum": 47,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/defb---vs (version table)",
+   "tm": "defb",
+   "xref": "agree"
+  },
+  "vs:defi": {
+   "d": null,
+   "decl": true,
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "DEFI",
+   "opnum": 48,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/defi---vs (version table)",
+   "tm": "defi",
+   "xref": "agree"
+  },
+  "vs:dp3": {
+   "d": "D",
+   "mk": "any",
+   "mk_ps1": [
+    "",
+    ".xyz"
+   ],
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "DP3",
+   "opnum": 8,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dp3---vs (instruction page 'dp3', version table)",
+   "tm": "dp3 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:dp4": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "DP4",
+   "opnum": 9,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dp4---vs (instruction page 'dp4', version table)",
+   "tm": "dp4 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:dst": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "DST",
+   "opnum": 17,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/dst---vs (instruction page 'dst', version table)",
+   "tm": "dst {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:else": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defb",
+   "num": "ELSE",
+   "opnum": 42,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/else---vs (instruction page 'else', version table)",
+   "tm": "if {B0}\n{BODY}\nelse\n{BODY2}\nendif",
+   "xref": "agree"
+  },
+  "vs:endif": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defb",
+   "num": "ENDIF",
+   "opnum": 43,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/endif---vs (instruction page 'endif', version table)",
+   "tm": "if {B0}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:endloop": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "ENDLOOP",
+   "opnum": 29,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/endloop---vs (instruction page 'endloop', version table)",
+   "tm": "loop aL, {I0}\n{BODY}\nendloop",
+   "xref": "agree"
+  },
+  "vs:endrep": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "ENDREP",
+   "opnum": 39,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/endrep---vs (instruction page 'endrep', version table)",
+   "tm": "rep {I0}\n{BODY}\nendrep",
+   "xref": "agree"
+  },
+  "vs:exp": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "EXP",
+   "opnum": 14,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/exp---vs (instruction page 'exp', version table)",
+   "tm": "exp {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:expp": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "EXPP",
+   "opnum": 78,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/expp---vs (instruction page 'expp', version table)",
+   "tm": "expp {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:frc": {
+   "d": "D",
+   "mk": "x_y_xy_vs1",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "FRC",
+   "opnum": 19,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/frc---vs (instruction page 'frc', version table)",
+   "tm": "frc {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:if_bool": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defb",
+   "num": "IF",
+   "opnum": 40,
+   "s": [
+    "B"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-bool---vs (instruction page 'if_bool', version table)",
+   "tm": "if {S0}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:if_eq": {
+   "cmp": "eq",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
+   "tm": "if_eq {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:if_ge": {
+   "cmp": "ge",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
+   "tm": "if_ge {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:if_gt": {
+   "cmp": "gt",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
+   "tm": "if_gt {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:if_le": {
+   "cmp": "le",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
+   "tm": "if_le {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:if_lt": {
+   "cmp": "lt",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
+   "tm": "if_lt {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:if_ne": {
+   "cmp": "ne",
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "IFC",
+   "opnum": 41,
+   "s": [
+    "Sr",
+    "Sr"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-comp---vs (instruction page 'if_comp', version table)",
+   "tm": "if_ne {S0}, {S1}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:if_pred": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "setp",
+   "num": "IF",
+   "opnum": 40,
+   "s": [
+    "Pp"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)",
+   "tm": "if {S0}\n{BODY}\nendif",
+   "xref": "agree"
+  },
+  "vs:label": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "LABEL",
+   "opnum": 30,
+   "s": [
+    "L"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/label---vs (instruction page 'label', version table)",
+   "tm": "call l{LBL}\n@E@\nret\nlabel l{LBL}\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "vs:lit": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "LIT",
+   "opnum": 16,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/lit---vs (instruction page 'lit', version table)",
+   "tm": "lit {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:log": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "LOG",
+   "opnum": 15,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/log---vs (instruction page 'log', version table)",
+   "tm": "log {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:logp": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "LOGP",
+   "opnum": 79,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/logp---vs (instruction page 'logp', version table)",
+   "tm": "logp {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:loop": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "LOOP",
+   "opnum": 27,
+   "s": [
+    "AL",
+    "I"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/loop---vs (instruction page 'loop', version table)",
+   "tm": "loop aL, {S1}\n{BODY}\nendloop",
+   "xref": "agree"
+  },
+  "vs:lrp": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "LRP",
+   "opnum": 18,
+   "s": [
+    "S",
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/lrp---vs (instruction page 'lrp', version table)",
+   "tm": "lrp {D}, {S0}, {S1}, {S2}",
+   "xref": "agree"
+  },
+  "vs:m3x2": {
+   "d": "D",
+   "matrix": 3,
+   "mk": "xy",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "M3X2",
+   "opnum": 24,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---vs (instruction page 'm3x2', version table)",
+   "tm": "m3x2 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:m3x3": {
+   "d": "D",
+   "matrix": 3,
+   "mk": "xyz",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "M3X3",
+   "opnum": 23,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x3---vs (instruction page 'm3x3', version table)",
+   "tm": "m3x3 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:m3x4": {
+   "d": "D",
+   "matrix": 3,
+   "mk": "xyz_or_all",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "M3X4",
+   "opnum": 22,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m3x4---vs (instruction page 'm3x4', version table)",
+   "tm": "m3x4 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:m4x3": {
+   "d": "D",
+   "matrix": 4,
+   "mk": "xyz",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "M4X3",
+   "opnum": 21,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x3---vs (instruction page 'm4x3', version table)",
+   "tm": "m4x3 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:m4x4": {
+   "d": "D",
+   "matrix": 4,
+   "mk": "xyz_or_all",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "M4X4",
+   "opnum": 20,
+   "s": [
+    "S",
+    "Sc"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/m4x4---vs (instruction page 'm4x4', version table)",
+   "tm": "m4x4 {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:mad": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "MAD",
+   "opnum": 4,
+   "s": [
+    "S",
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/mad---vs (instruction page 'mad', version table)",
+   "tm": "mad {D}, {S0}, {S1}, {S2}",
+   "xref": "agree"
+  },
+  "vs:max": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "MAX",
+   "opnum": 11,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/max---vs (instruction page 'max', version table)",
+   "tm": "max {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:min": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "MIN",
+   "opnum": 10,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/min---vs (instruction page 'min', version table)",
+   "tm": "min {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:mov": {
+   "alu": true,
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "MOV",
+   "opnum": 1,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/mov---vs (instruction page 'mov', version table)",
+   "tm": "mov {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:mova": {
+   "d": "A0",
+   "mk": "xy_any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "MOVA",
+   "opnum": 46,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/mova---vs (instruction page 'mova', version table)",
+   "tm": "mova {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:mul": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "MUL",
+   "opnum": 5,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/mul---vs (instruction page 'mul', version table)",
+   "tm": "mul {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:nop": {
+   "alu": false,
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "NOP",
+   "opnum": 0,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/nop---vs (instruction page 'nop', version table)",
+   "tm": "nop",
+   "xref": "agree"
+  },
+  "vs:nrm": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "NRM",
+   "opnum": 36,
+   "s": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/nrm---vs (instruction page 'nrm', version table)",
+   "tm": "nrm {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:pow": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "POW",
+   "opnum": 32,
+   "s": [
+    "Ss",
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/pow---vs (instruction page 'pow', version table)",
+   "tm": "pow {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:rcp": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "RCP",
+   "opnum": 6,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/rcp---vs (instruction page 'rcp', version table)",
+   "tm": "rcp {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:rep": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "needs": "defi",
+   "num": "REP",
+   "opnum": 38,
+   "s": [
+    "I"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/rep---vs (instruction page 'rep', version table)",
+   "tm": "rep {S0}\n{BODY}\nendrep",
+   "xref": "agree"
+  },
+  "vs:ret": {
+   "d": null,
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "RET",
+   "opnum": 28,
+   "s": [],
+   "source": "MS:dx9-graphics-reference-asm-instructions/ret---vs (instruction page 'ret', version table)",
+   "tm": "call l0\n@E@\nret\nlabel l0\n{BODY}\nret",
+   "xref": "agree"
+  },
+  "vs:rsq": {
+   "d": "D",
+   "mk": "single",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "RSQ",
+   "opnum": 7,
+   "s": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/rsq---vs (instruction page 'rsq', version table)",
+   "tm": "rsq {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:setp_eq": {
+   "cmp": "eq",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
+   "tm": "setp_eq {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:setp_ge": {
+   "cmp": "ge",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
+   "tm": "setp_ge {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:setp_gt": {
+   "cmp": "gt",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
+   "tm": "setp_gt {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:setp_le": {
+   "cmp": "le",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
+   "tm": "setp_le {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:setp_lt": {
+   "cmp": "lt",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
+   "tm": "setp_lt {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:setp_ne": {
+   "cmp": "ne",
+   "d": "P0",
+   "mk": "any",
+   "models": [
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SETP",
+   "opnum": 94,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/setp-comp---vs (instruction page 'setp_comp', version table)",
+   "tm": "setp_ne {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:sge": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SGE",
+   "opnum": 13,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/sge---vs (instruction page 'sge', version table)",
+   "tm": "sge {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:sgn": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SGN",
+   "opnum": 34,
+   "s": [
+    "S",
+    "Tmp",
+    "Tmp"
+   ],
+   "s3": [
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/sgn---vs (instruction page 'sgn', version table)",
+   "tm": "sgn {D}, {S0}, {S1}, {S2}",
+   "tm3": "sgn {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:sincos": {
+   "d": "D",
+   "dr": [
+    "r"
+   ],
+   "mk": "x_y_xy",
+   "models": [
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SINCOS",
+   "opnum": 37,
+   "s": [
+    "Ss",
+    "Sc",
+    "Sc"
+   ],
+   "s3": [
+    "Ss"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/sincos---vs (instruction page 'sincos', version table)",
+   "tm": "sincos {D}, {S0}, {S1}, {S2}",
+   "tm3": "sincos {D}, {S0}",
+   "xref": "agree"
+  },
+  "vs:slt": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SLT",
+   "opnum": 12,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/slt---vs (instruction page 'slt', version table)",
+   "tm": "slt {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:sub": {
+   "d": "D",
+   "mk": "any",
+   "models": [
+    "vs_1_1",
+    "vs_2_0",
+    "vs_2_x",
+    "vs_3_0"
+   ],
+   "num": "SUB",
+   "opnum": 3,
+   "s": [
+    "S",
+    "S"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/sub---vs (instruction page 'sub', version table)",
+   "tm": "sub {D}, {S0}, {S1}",
+   "xref": "agree"
+  },
+  "vs:texldl": {
+   "d": "Dr",
+   "mk": "none",
+   "models": [
+    "vs_3_0"
+   ],
+   "num": "TEXLDL",
+   "opnum": 95,
+   "s": [
+    "S",
+    "Sm"
+   ],
+   "source": "MS:dx9-graphics-reference-asm-instructions/texldl---vs (instruction page 'texldl', version table)",
+   "tex": true,
+   "tm": "texldl {D}, {S0}, {S1}",
+   "xref": "agree"
+  }
+ },
+ "ref_commits": {
+  "wine": "ref: refs/heads/master"
+ },
+ "sampler_types": {
+  "ps_2_0": [
+   "2d",
+   "cube",
+   "volume"
+  ],
+  "ps_2_x": [
+   "2d",
+   "cube",
+   "volume"
+  ],
+  "ps_3_0": [
+   "2d",
+   "cube",
+   "volume"
+  ],
+  "vs_3_0": [
+   "2d",
+   "cube",
+   "volume"
+  ]
+ },
+ "sat_except_vs": [
+  "frc",
+  "sincos",
+  "texldl"
+ ],
+ "schema": 1,
+ "srcmod_source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source / vs-registers-modifiers-source (version tables); wine asmparser.c check_legacy_srcmod/check_abs_srcmod",
+ "swizzle_forms": {
+  "arbitrary": null,
+  "ps1": [
+   "",
+   ".w",
+   ".a"
+  ],
+  "ps14": [
+   "",
+   ".x",
+   ".y",
+   ".z",
+   ".w"
+  ],
+  "ps20": [
+   "",
+   ".x",
+   ".y",
+   ".z",
+   ".w",
+   ".yzxw",
+   ".zxyw",
+   ".wzyx"
+  ]
+ },
+ "undetermined": [
+  {
+   "id": "vs_a0_src",
+   "note": "a0 as a direct ALU source operand (vs_1_1..vs_3_0): MS lists a0 R/W; wine allows; no instruction page says it is a legal source. Excluded from universe.",
+   "rows": "excluded"
+  },
+  {
+   "id": "vs_bi_alu",
+   "note": "b#/i# as ALU source in vs: MS ps pages say flow-control-only, vs pages are silent. Excluded (same rule as ps).",
+   "rows": "excluded"
+  },
+  {
+   "id": "mov_a0_vs2",
+   "note": "mov to a0 (instead of mova) in vs_2_0+: MS mova page says dst must be a0; mov-to-a0 only documented for vs_1_1. Excluded.",
+   "rows": "excluded"
+  },
+  {
+   "id": "vs1_0_ps1_0",
+   "note": "vs_1_0/ps_1_0 via Create*Shader: not in any MS page of the D3D9 asm reference; wine d3d9 has no test, only d3d8. Included as 1_1 grammar (superset).",
+   "rows": "included"
+  },
+  {
+   "id": "temp_uninit_flow",
+   "note": "read of a temp written only inside if/rep: MS states the uninitialised-read validator rule for ps_1_x only; sm2/3 silent. Included.",
+   "rows": "included"
+  },
+  {
+   "id": "rcp_mask",
+   "note": "MS vs masking page: exp/expp/log/logp/pow/rcp/rsq need a single-component write mask; ps pages silent; universe uses single-component masks plus full mask. Included.",
+   "rows": "included"
+  }
+ ],
+ "usage_source": "MS:dx9-graphics-reference-asm-dcl-usage-input-register---vs, dcl-usage---ps (D3DDECLUSAGE values, usage_index 0..15)",
+ "usages": [
+  "position",
+  "blendweight",
+  "blendindices",
+  "normal",
+  "psize",
+  "texcoord",
+  "tangent",
+  "binormal",
+  "tessfactor",
+  "positiont",
+  "color",
+  "fog",
+  "depth",
+  "sample"
+ ],
+ "writemask": {
+  "general": "any subset in xyzw order (MS ps-registers-modifiers-write-mask / vs-registers-modifiers-masking)",
+  "ps14": "arbitrary r,g,b,a order from 1_4; ps_1_1-1_3: .rgba .rgb .a only",
+  "vs_outputs": {
+   "note": "oFog/oPts '.x' conflicts: vs page 'must use only one mask', ps page 'no explicit mask'",
+   "oFog": [
+    "",
+    ".x"
+   ],
+   "oPos": [
+    ""
+   ],
+   "oPts": [
+    "",
+    ".x"
+   ],
+   "oT": [
+    "",
+    ".x",
+    ".xy",
+    ".xyz"
+   ]
+  }
+ }
+}

@@ -10,7 +10,7 @@ A row is certified iff its body is proven by the symbol table of a build product
 Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
 only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
 no proven symbol), external (l3 or another owner's row that no other root defines).
-The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption: objects.json lists every global, weak
+The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption (ASM-052): objects.json lists every global, weak
 and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to."""
 
 

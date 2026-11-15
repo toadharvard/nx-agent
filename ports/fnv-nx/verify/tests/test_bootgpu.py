@@ -83,7 +83,7 @@ def main():
     os.environ.update(boot.GPU_ENV)
     os.environ["NXGL4_FRAMES"] = frames
     os.makedirs(frames)
-    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root))
+    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     seen = []
     g = bootgpu.Gpu(lib, m, "docked", on_present=seen.append)
     lines = []
@@ -111,14 +111,14 @@ def main():
     g.close()
 
     # --- without a library: module 10 is not registered
-    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root))
+    m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     lines = []
     m.on_console(lines.append)
     m.run()
     tb.case("without --gpu: module 10 answers NO_MODULE", parse(lines)["infoRc"] == bootmachine.EXT_NO_MODULE, lines)
 
     # --- host_ptr
-    m = bootmachine.Machine(elf51, tb.make_plan(elf51), boothost.Services(root))
+    m = bootmachine.Machine(elf51, tb.make_plan(elf51), boothost.Services(root), quantum=tb.QUANTUM)
     lines = []
     m.on_console(lines.append)
     r = m.run()
@@ -151,7 +151,7 @@ def main():
 
     def args(out, fr, *extra):
         return ["run", "--elf", elf, "--reserved", w("res.tsv", "exe\t400000\t2100000\nmod2\t4000000\t4200000\n"), "--keys", "f0000:200000",
-                "--heap-size", "0x100000", "--root", root, "--milestones", table, "--manifest", w("m.tsv", "1000\tmarker\n"),
+                "--heap-size", "0x100000", "--root", root, "--quantum", str(tb.QUANTUM), "--milestones", table, "--manifest", w("m.tsv", "1000\tmarker\n"),
                 "--out", os.path.join(d, out), "--gpu", lib, "--frames", os.path.join(d, fr), *extra]
 
     outs = []
@@ -167,8 +167,17 @@ def main():
         st = {x["name"]: x["reached"] for x in doc["milestones"]}
         tb.case("CLI: host events gpu-first-call and present reached", st == {"first": True, "pres": True}, st)
         names = [iv["to"] for iv in doc["icount"]["intervals"]]
-        tb.case("CLI: icount marks frame-1..3 only", [n for n in names if n.startswith("frame")] == ["frame-1", "frame-2", "frame-3"], names)
-        tb.case("CLI: frame files in --frames", len(os.listdir(os.path.join(d, "fr0"))) == 8)
+        tb.case("CLI: a frame is not an icount interval (no frame-<n> mark)", [n for n in names if n.startswith("frame")] == [], names)
+        fr = doc.get("frames", [])
+        tb.case("CLI: OUT.json frames = one record per present: n 1..4, virtual t_ns not decreasing, main-thread instructions, a sha256 key",
+                [f["n"] for f in fr] == [1, 2, 3, 4] and all(set(f) == {"n", "t_ns", "per_tid", "sha256"} for f in fr)
+                and [f["t_ns"] for f in fr] == sorted(f["t_ns"] for f in fr) and all(f["per_tid"].get("main", 0) > 0 for f in fr)
+                and sum(sum(f["per_tid"].values()) for f in fr) <= doc["icount"]["totals"]["all"]["total"], fr)
+        keys = {f["sha256"] for f in fr}
+        tb.case("CLI: the frames directory holds exactly the distinct frames, <key>.rgba + <key>.txt, key = sha256(.txt + .rgba)",
+                sorted(os.listdir(os.path.join(d, "fr0"))) == sorted(k + e for k in keys for e in (".rgba", ".txt"))
+                and all(hashlib.sha256(open(os.path.join(d, "fr0", k + ".txt"), "rb").read() + open(os.path.join(d, "fr0", k + ".rgba"), "rb").read()).hexdigest() == k
+                        for k in keys), sorted(os.listdir(os.path.join(d, "fr0"))))
         tb.case("CLI: two runs give byte-identical OUT.json", open(os.path.join(d, "g0.json"), "rb").read()
                 == open(os.path.join(d, "g1.json"), "rb").read())
     try:
