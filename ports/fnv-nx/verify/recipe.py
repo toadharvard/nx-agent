@@ -39,6 +39,8 @@ import gate_admit  # noqa: E402
 import envcheck  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
 import relocs  # noqa: E402
+import undefset  # noqa: E402
+from ldcheck import syms_any as ldcheck_syms  # noqa: E402
 import ldcheck  # noqa: E402
 import runtime  # noqa: E402
 import sandbox  # noqa: E402
@@ -338,21 +340,31 @@ def load_guest_link(repo="."):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
+def runtime_ident(pin):
+    """The pinned runtime external's identity: the pin's `runtime` without its `libs`."""
+    return {k: v for k, v in pin["runtime"].items() if k != "libs"}
+
+
+def runtime_libs(pin):
+    """The libs a guest link takes: the pin's `runtime.libs` ({dirs, names, startfiles, endfiles}; the one declaration of the guest's start and end files,
+    crti/crtbegin and crtend/crtn, no crt0: the product owns the entry) with `external` the pinned runtime's name."""
+    rt = pin.get("runtime") if isinstance(pin, dict) else None
+    return dict(rt["libs"], external=rt["name"]) if isinstance(rt, dict) and isinstance(rt.get("libs"), dict) else None
+
+
 def guest_link_errors(prof, pin, files, roots):
-    """Problems of the guest link profile PROF (load_guest_link): exactly {script, libs}; `script` a tracked file under a tree of an admitted tool root
-    (tool_file); `libs` {external, dirs, names, startfiles, endfiles} of LIBS_KEYS whose external is the pinned runtime of PIN (no hand path)."""
-    if not isinstance(prof, dict) or set(prof) != {"script", "libs"}:
-        return ["%s must be {script, libs}" % GUEST_LINK]
-    sc, lb, err = prof["script"], prof["libs"], []
+    """Problems of the guest link profile PROF (load_guest_link): exactly {script}; `script` a tracked file under a tree of an admitted tool root
+    (tool_file). The libs are the pin's runtime.libs (runtime_libs): {dirs, names, startfiles, endfiles} of LIBS_KEYS, paths inside the runtime."""
+    if not isinstance(prof, dict) or set(prof) != {"script"}:
+        return ["%s must be {script}: the libs are runtime.libs of %s" % (GUEST_LINK, GUEST_PIN)]
+    sc, lb, err = prof["script"], runtime_libs(pin), []
     full = TREE + "/" + sc if isinstance(sc, str) and rel_ok(sc) else None
     if not (full and tool_file(roots, files, full)):
         err.append("%s: script %r is not a tracked file of an admitted tool root (a path inside %s)" % (GUEST_LINK, sc, TREE))
     paths = lambda k: isinstance(lb.get(k), list) and all(rel_ok(x) for x in lb[k])  # noqa: E731
     if not (isinstance(lb, dict) and set(lb) == LIBS_KEYS and paths("dirs") and paths("startfiles") and paths("endfiles")
             and isinstance(lb.get("names"), list) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", n) for n in lb["names"])):
-        err.append("%s: libs must be {external, dirs, names, startfiles, endfiles} (paths inside the external)" % GUEST_LINK)
-    elif not (isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) and lb["external"] == pin["runtime"].get("name")):
-        err.append("%s: libs.external %r is not the pinned runtime external of %s" % (GUEST_LINK, lb["external"], GUEST_PIN))
+        err.append("%s: runtime.libs must be {dirs, names, startfiles, endfiles} (paths inside the runtime external)" % GUEST_PIN)
     return err
 
 
@@ -362,7 +374,7 @@ def with_guest_link(rec, root, roots, repo):
     lk, prof = rec.get("link"), load_guest_link(repo)
     if not (isinstance(lk, dict) and prof and roots.get(root, {}).get("target") == "guest"):
         return rec
-    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs=prof["libs"]))
+    return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs=runtime_libs(load_pin(repo))))
 
 
 
@@ -503,8 +515,9 @@ def guest_link_part(rec, root, pin, prof, files, roots):
         return []
     bad = ["link.%s is declared: script and libs of a guest link come from %s" % (k, GUEST_LINK) for k in ("script", "libs") if k in lk]
     bad += guest_link_errors(prof, pin, files, roots) if prof is not None else ["%s is missing" % GUEST_LINK]
-    if isinstance(prof, dict) and isinstance(prof.get("libs"), dict) and prof["libs"].get("external") not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
-        bad.append("the runtime external %r of %s is not declared in external" % (prof["libs"].get("external"), GUEST_LINK))
+    rl = runtime_libs(pin)
+    if rl and rl["external"] not in [e.get("name") for e in rec.get("external", []) if isinstance(e, dict)]:
+        bad.append("the runtime external %r of %s is not declared in external" % (rl["external"], GUEST_PIN))
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
@@ -528,7 +541,8 @@ def guest_errors(rec, spec, roots, pin, prof=None, files=()):
     bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
     rt = pin.get("runtime")   # the guest's libc/libstdc++ external: when a recipe declares it (by name), it is the pinned one, exactly
     if isinstance(rt, dict):
-        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
+        rte = runtime_ident(pin)   # the external's identity; `libs` is the layout the guest links by
+        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rte) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rte]
     bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
@@ -1545,6 +1559,10 @@ class Job:
             at = self.ext[lb["external"]]["at"]
             pre, post = [at + "/" + p for p in lb["startfiles"]], [at + "/" + p for p in lb["endfiles"]]
             search, libs = ["-L" + at + "/" + d for d in lb["dirs"]], ["-l" + n for n in lb["names"]]
+        self.linkfacts = {"startend": [self.hostpath(x) for x in pre + post if not x.startswith("/syslib/")],
+                          "dirs": [self.hostpath(x[2:]) for x in search if x.startswith("-L") and x != "-L/syslib"], "names": [x[2:] for x in libs],
+                          "script": open(os.path.join(sd, os.path.basename(lk["script"]))).read() if "script" in lk else "",
+                          "system": list(lb["system"]) if lb and "system" in lb else []}
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
         argv = [ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
@@ -1586,12 +1604,31 @@ class Job:
         text = open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
         return parse_host_link(text, dirs), mnt
 
+    def link_undefined(self, groups, loader_defs=None):
+        """The full static undefined set of the link just attempted (undefset.closure over the symbol tables of its inputs): the objects of the product
+        roots (GROUPS), the start and end files, the archive members of the `-l` libraries (pulled by the closure's own rule), the .dynsym of the declared
+        system libraries and the declared loader's names, and the names the link script assigns. -> [{symbol, referencers}]."""
+        f = self.linkfacts
+        rd = lambda p: open(p, "rb").read()  # noqa: E731
+        prod = {"%s:%s" % (lab, u): undefset.object_symbols(rd(p)) for lab, objs in groups for u, p in objs}
+        rt = {os.path.basename(x): undefset.object_symbols(rd(x)) for x in f["startend"] if os.path.isfile(x)}
+        arch = []
+        for n in f["names"]:
+            ar = next((os.path.join(d, "lib%s.a" % n) for d in f["dirs"] if os.path.isfile(os.path.join(d, "lib%s.a" % n))), None)
+            if ar:
+                arch += [("lib%s.a(%s)" % (n, m), *undefset.object_symbols(b)) for m, _, b in relocs.ar_members(ar)]
+        dyn = set(loader_defs or ())
+        for p in f["system"]:
+            dyn |= {n for n, _, _, shndx, _ in ldcheck_syms(rd(os.path.realpath(p)), 11) if shndx != 0}
+        u = undefset.closure(prod, rt, arch, dyn, undefset.script_defined(f["script"]))
+        return [{"symbol": k, "referencers": v} for k, v in u.items()]
+
     def link_probe(self, ws):
         """Stage `drv:<root>`: the guest runtime's C++ driver (pin `runtime_driver`, inside the pinned runtime external) run with the guest semantic flags
         (the common set: the profile is one fact for every guest link, native and lifted alike) and `-###` on the link of a one-line C++ file, hermetic (the driver prints the commands it would run; none is run).
         -> (stderr text, the runtime external's mount point): the link command of the multilib the flags select."""
         pin = load_pin(self.repo)
-        rt = pin["runtime"]
+        rt = runtime_ident(pin)
         self.ext.update(fetch_externals([pin["external"], rt], self.store, self.extcache, ws))
         drv = rt["at"] + "/" + pin["runtime_driver"]
         flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
@@ -1880,7 +1917,18 @@ def build(repo, root, store, out, jobs=4, ext=None, link=True):
                   res["ld_gate"][f] = {"path": os.path.abspath(os.path.join(out, f)), "sha256": ent[f]["h"]}
           except BuildRed as r:
             j.red.append(dict(r.args[0]))
-            res["failed_units"].append({"unit": j.rec["link"]["output"], "stage": r.args[0]["stage"], "exit": r.args[0].get("exit"), "stderr": list(r.args[0]["stderr"])[-20:]})
+            fu = {"unit": j.rec["link"]["output"], "stage": r.args[0]["stage"], "exit": r.args[0].get("exit"), "stderr": list(r.args[0]["stderr"])[-20:]}
+            if r.args[0]["stage"].startswith("ld:") and getattr(j, "linkfacts", None):
+                # the link record carries the full static undefined set (never ld's text: its status decides, its stderr is an attachment)
+                try:
+                    und = j.link_undefined(groups, loader_defs)
+                    fu["undefined"] = und
+                    if not und and r.args[0].get("exit"):
+                        fu["findings"] = ["static closure disagrees with ld: ld exit %s with an empty static undefined set (the failure is not an undefined reference the symbol tables show)" % r.args[0]["exit"]]
+                except (OSError, ValueError, struct.error) as e:
+                    fu["findings"] = ["static undefined set not computed: %s" % e]
+                res["link_undefined"] = fu.get("undefined")
+            res["failed_units"].append(fu)
         for key in ("constants", "contract_names"):
             if j.rec.get(key):
                 shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))

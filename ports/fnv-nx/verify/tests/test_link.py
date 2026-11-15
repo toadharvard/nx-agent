@@ -165,6 +165,9 @@ def main():
     check("link.libs: a library that is not there is a red ld:<root>", rl2["status"] == "red" and rl2["failure"]["stage"] == "ld:" + ROOT, err_text(rl2))
     rl3 = build(mk("libs-none", main_rec(), L), SS)
     check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] == "ld:" + ROOT, err_text(rl3))
+    fu = (rl3.get("failed_units") or [{}])[0]
+    check("a red link record carries the full static undefined set, each symbol with its referencing objects (never from ld's text)",
+          [u["symbol"] for u in fu.get("undefined", [])] == ["lib_fn"] and "a.c" in fu["undefined"][0]["referencers"][0], fu.get("undefined"))
 
 
     # (k) kinds: exe and shared host images (LP64), and the target of the link
