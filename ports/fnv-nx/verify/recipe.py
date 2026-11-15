@@ -393,25 +393,12 @@ def libnx_errors(rec, root, roots, repo, variant=""):
     return ["guest root %s: the link names libnx (%r): libnx is red until its wire check (C9) is 0" % (root, l) for l in links if LIBNX_LIB.search(l)]
 
 
-def compiler_long_double(cc):
-    """(__SIZEOF_LONG_DOUBLE__, __LDBL_MANT_DIG__) as the guest compiler CC (a host path) predefines them for the ILP32 data model."""
-    d = predefined(cc, "c", ["-mabi=ilp32"])
-    return int(d["__SIZEOF_LONG_DOUBLE__"]), int(d["__LDBL_MANT_DIG__"])
-
-
-def manifest_long_double_errors(man, ld_size, ld_mant):
-    """The runtime's long double (recorded in its MANIFEST.json at build time from the compiler that built it) must be the compiler's: size and
-    mantissa equal, else red. A MANIFEST that does not record them is red too: the runtime then does not say what it was built with."""
-    sz = man.get("sizeof", {}).get("long double") if isinstance(man.get("sizeof"), dict) else None
-    mant = man.get("ldbl_mant_dig")
-    err = ["MANIFEST.json lacks %s" % k for k, v in (("sizeof[long double]", sz), ("ldbl_mant_dig", mant)) if not isinstance(v, int)]
-    if not err:
-        err = ["runtime long double is %d bytes / %d mantissa bits, the compiler's is %d / %d" % (sz, mant, ld_size, ld_mant)] if (sz, mant) != (ld_size, ld_mant) else []
-    return err
-
-
-def runtime_manifest_errors(runtime_dir, cc):
-    """Problems of RUNTIME_DIR/MANIFEST.json against the compiler CC (host paths); [] when it agrees."""
+def runtime_manifest_errors(runtime_dir, comp, plugins, flags, select):
+    """Problems of RUNTIME_DIR/MANIFEST.json (fnvnx-runtime-manifest/1, written by the runtime's build) against what the recipe builds with; [] when
+    it agrees. COMP: the pinned compiler external (repo, ref, commit, tree_sha256); PLUGINS: [{name, so_sha256, stage_key, argv}] as built, in
+    PLUGIN_SOURCES order; FLAGS: {"c": [...], "cxx": [...]} the flags a guest unit gets (semantics, the runtime build-flags field, plugin argv);
+    SELECT: the multilib select (the semantics' -mabi). Every field is compared whole; a missing field is red (the runtime then does not say what
+    it was built with). The data model (sizeof, alignof, long double) is not here: DATAMODEL.json / gate_datamodel own it."""
     p = os.path.join(runtime_dir, "MANIFEST.json")
     if not os.path.isfile(p):
         return ["the runtime has no MANIFEST.json"]
@@ -419,7 +406,32 @@ def runtime_manifest_errors(runtime_dir, cc):
         man = json.load(open(p))
     except ValueError as e:
         return ["MANIFEST.json is not JSON: %s" % e]
-    return manifest_long_double_errors(man, *compiler_long_double(cc))
+    if not isinstance(man, dict) or man.get("format") != "fnvnx-runtime-manifest/1":
+        return ["MANIFEST.json format is %r, not fnvnx-runtime-manifest/1" % (man.get("format") if isinstance(man, dict) else None)]
+    err = []
+    mc = man.get("compiler") if isinstance(man.get("compiler"), dict) else {}
+    for k in ("repo", "ref", "commit", "tree_sha256"):
+        if mc.get(k) != comp.get(k):
+            err.append("compiler %s: the runtime was built by %r, the recipe's is %r" % (k, mc.get(k), comp.get(k)))
+    mp = man.get("plugins") if isinstance(man.get("plugins"), list) else []
+    have, want = [x.get("name") for x in mp if isinstance(x, dict)], [x["name"] for x in plugins]
+    if have != want:
+        err.append("plugins: the runtime was built with %s, the recipe's are %s" % (have, want))
+    else:
+        for m, w in zip(mp, plugins):
+            for k in ("so_sha256", "stage_key", "argv"):
+                if m.get(k) != w[k]:
+                    err.append("plugin %s %s: the runtime was built with %r, the recipe's is %r" % (w["name"], k, m.get(k), w[k]))
+    mf = man.get("flags") if isinstance(man.get("flags"), dict) else {}
+    for lang in ("c", "cxx"):
+        if mf.get(lang) != flags[lang]:
+            err.append("flags[%s]: the runtime was built with %r, the recipe's are %r" % (lang, mf.get(lang), flags[lang]))
+    ml = man.get("multilib") if isinstance(man.get("multilib"), dict) else {}
+    if ml.get("select") != select:
+        err.append("multilib.select: the runtime was built with %r, the recipe's is %r" % (ml.get("select"), select))
+    if not isinstance(man.get("libraries"), list) or not man["libraries"]:
+        err.append("MANIFEST.json lists no libraries")
+    return err
 
 
 LINK_KEYS = {"output", "flags"}
@@ -1020,6 +1032,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = load_recipe(repo, self.roots, spec)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.pkeys = {}   # {plugin name: key of its build stage} (the runtime MANIFEST names them)
         self.aux = []   # build(aux): AUX_FLAGS of the CC stage
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
@@ -1056,13 +1069,6 @@ class Job:
     def externals(self, ws):
         """Fetch by exact commit into the shared bare cache, check out, ingest, require tree_sha256 (BuildRed naming the external)."""
         self.ext.update(fetch_externals(self.rec.get("external", []), self.store, self.extcache, ws))
-        pin = load_pin(self.repo)
-        rtn = pin["runtime"]["name"] if isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) else None
-        if rtn in self.ext and self.rec.get("compiler", {}).get("external") in self.ext:   # a guest root with the pinned runtime: its MANIFEST is judged before any unit
-            e = self.ext[self.rec["compiler"]["external"]]
-            errs = runtime_manifest_errors(self.ext[rtn]["host"], e["host"] + "/" + self.rec["compiler"]["cc"])
-            if errs:
-                raise BuildRed({"stage": "manifest:" + rtn, "exit": None, "stderr": errs})
 
     def drivers(self):
         c = self.rec["compiler"]
@@ -1269,11 +1275,28 @@ class Job:
             doc = {"format": "fnvnx-stage/1", "stage": "plugin:" + n, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
                    "env": dict(unitstage.ENV, PATH=os.path.dirname(host)), "outputs": ["/out"],
                    "inputs": sorted(rt["inputs"] + [{"at": "/psrc", "tree": tree}, {"at": "/plugcrt", "tree": crt_tree}], key=lambda i: i["at"])}
-            res = self.stage(doc)[1]["outputs"]["/out"]
+            pkey, pres = self.stage(doc)
+            res = pres["outputs"]["/out"]
+            self.pkeys[n] = pkey
             flags = ["-fplugin=/plug/%s/%s.so" % (n, n)] + ["-fplugin-arg-%s-%s%s" % (n, k, "=" + v if v else "") for k, v in p["args"].items()] + (
                 ["-fplugin-arg-%s-out=%s" % (n, PLUGIN_OUT[n])] if n in PLUGIN_OUT else [])
             out.append((n, res, flags))
         return out
+
+    def manifest_errors(self, sos, drv):
+        """runtime_manifest_errors of the pinned runtime for this build: its plugins as built, the flags of a guest C / C++ unit (semantics_for, the
+        pin's runtime build_flags field, the plugin argv) and the semantics' -mabi. [] when the recipe has no pinned runtime external."""
+        pin = load_pin(self.repo)
+        rtn = pin["runtime"]["name"] if isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) else None
+        cc = self.rec["compiler"].get("external")
+        if rtn not in self.ext or cc not in self.ext:
+            return []
+        comp = {k: self.ext[cc].get(k) for k in ("repo", "ref", "commit", "tree_sha256")}
+        plugins = [{"name": n, "so_sha256": hashlib.sha256(open(sos[n], "rb").read()).hexdigest(), "stage_key": self.pkeys[n], "argv": fl} for n, _, fl in self.built]
+        argv = [f for _, _, fl in self.built for f in fl]
+        extra = list(pin["runtime"].get("build_flags", []))
+        flags = {k: semantics_for(self.hostpath(drv[k]), k, origin=entry_of(self.roots, self.root).get("cxx_origin")) + extra + argv for k in ("c", "cxx")}
+        return runtime_manifest_errors(self.ext[rtn]["host"], comp, plugins, flags, [f for f in flags["c"] if f.startswith("-mabi=")])
 
     def compile(self, ws, units):
         rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
@@ -1307,6 +1330,12 @@ class Job:
         for n, t, _ in self.built:   # the plugins each front end can load (plugin_languages): the stage loads exactly those, the gate reads the same fact
             sos[n] = cas._obj(self.store, cas.manifest(t, self.store)["entries"][n + ".so"])
         loadable = plugin_languages(self.hostpath(drv["c"]), self.hostpath(drv["cxx"]), sos) if sos else {"c": [], "cxx": []}
+        if guest:   # the pinned runtime's MANIFEST is judged against what this build gives a guest unit, before any unit is built
+            merr = self.manifest_errors(sos, drv)
+            if merr:
+                self.red.append({"stage": "manifest", "exit": None, "stderr": merr})
+                self.blocked.update({u: "manifest" for u in units})
+                return {}
         # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the
         # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
         # does not depend on it by construction (a new commit of such an external changes the PP keys, not the CC keys).

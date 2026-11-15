@@ -94,13 +94,33 @@ def main():
     bad_rt = json.loads(json.dumps(sample))
     bad_rt["external"] = [x if x["name"] != rtp["name"] else dict(x, commit="e" * 40) for x in bad_rt["external"]]
     check("a recipe whose runtime external is not the pinned one is red", any("not the pinned runtime" in x for x in errs(gs, bad_rt)), errs(gs, bad_rt))
-    # --- the runtime's long double is the compiler's (size and mantissa from its MANIFEST.json): the runtime of tools/fnvnx-a64-msvcmodel13 69cc10ed was
-    # built by the 128-bit-long-double compiler (sizeof 16, mantissa 113): red against a compiler that answers 8 / 53 (VC++ 2008's binary64)
-    old_rt = {"sizeof": {"long double": 16}, "ldbl_mant_dig": 113}
-    check("a runtime with long double 16/113 is red against a compiler with 8/53", any("16 bytes / 113" in x for x in recipe.manifest_long_double_errors(old_rt, 8, 53)), "")
-    check("a runtime with long double 8/53 is green against a compiler with 8/53", recipe.manifest_long_double_errors({"sizeof": {"long double": 8}, "ldbl_mant_dig": 53}, 8, 53) == [], "")
-    check("a MANIFEST without the mantissa is red", recipe.manifest_long_double_errors({"sizeof": {"long double": 8}}, 8, 53) == ["MANIFEST.json lacks ldbl_mant_dig"], "")
-    check("a runtime without MANIFEST.json is red", recipe.runtime_manifest_errors(os.path.join(BASE, "no-such-dir"), "/nonexistent") == ["the runtime has no MANIFEST.json"], "")
+    # --- the runtime's MANIFEST.json (fnvnx-runtime-manifest/1) is judged field by field against what the recipe builds with
+    mdir = os.path.join(BASE, "manifest-rt")
+    os.makedirs(mdir, exist_ok=True)
+    comp = {"repo": "r", "ref": "f", "commit": "c" * 40, "tree_sha256": "t" * 64}
+    plug = [{"name": "fnvnx_ftoi", "so_sha256": "a" * 64, "stage_key": "k1", "argv": ["-fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so"]},
+            {"name": "fnvnx_order", "so_sha256": "b" * 64, "stage_key": "k2", "argv": ["-fplugin=/plug/fnvnx_order/fnvnx_order.so"]}]
+    fl = {"c": ["-mabi=ilp32", "-X"], "cxx": ["-mabi=ilp32", "-Y"]}
+    good = {"format": "fnvnx-runtime-manifest/1", "compiler": comp, "plugins": plug, "flags": fl, "multilib": {"select": ["-mabi=ilp32"], "dir": "ilp32"},
+            "libraries": [{"path": "lib/libc.a", "sha256": "d" * 64}]}
+
+    def merr(man):
+        json.dump(man, open(os.path.join(mdir, "MANIFEST.json"), "w"))
+        return recipe.runtime_manifest_errors(mdir, comp, plug, fl, ["-mabi=ilp32"])
+    check("a MANIFEST that agrees with the recipe is green", merr(good) == [], merr(good))
+    for name, mut, word in (("a compiler commit", lambda m: m.__setitem__("compiler", dict(comp, commit="e" * 40)), "compiler commit"),
+                            ("a plugin .so hash", lambda m: m.__setitem__("plugins", [dict(plug[0], so_sha256="0" * 64), plug[1]]), "so_sha256"),
+                            ("a plugin stage key", lambda m: m.__setitem__("plugins", [plug[0], dict(plug[1], stage_key="zz")]), "stage_key"),
+                            ("a plugin argument", lambda m: m.__setitem__("plugins", [dict(plug[0], argv=["-x"]), plug[1]]), "argv"),
+                            ("a missing plugin", lambda m: m.__setitem__("plugins", plug[:1]), "plugins:"),
+                            ("a C++ flag", lambda m: m.__setitem__("flags", dict(fl, cxx=["-mabi=ilp32"])), "flags[cxx]"),
+                            ("a multilib select", lambda m: m.__setitem__("multilib", {"select": ["-mabi=lp64"]}), "multilib.select"),
+                            ("no libraries", lambda m: m.__setitem__("libraries", []), "no libraries")):
+        m = json.loads(json.dumps(good))
+        mut(m)
+        check("a MANIFEST that differs in %s is red" % name, any(word in x for x in merr(m)), merr(m))
+    check("a MANIFEST of another format is red", any("format" in x for x in merr(dict(good, format="x"))), "")
+    check("a runtime without MANIFEST.json is red", recipe.runtime_manifest_errors(os.path.join(BASE, "no-such-dir"), {}, [], {}, []) == ["the runtime has no MANIFEST.json"], "")
     no_rt = json.loads(json.dumps(sample))
     no_rt["external"] = [x for x in no_rt["external"] if x["name"] != rtp["name"]]
     no_rt["include"] = []
