@@ -86,7 +86,7 @@ extern "C" void fnvnx_wine_fixme(uint32_t id)
 
 /* The end of a violation: the hostapi `exit` slot, an indirect call that does not return (hostapi.h: exit "does not return"). Both violation exits of reach.h
  * end here and nowhere else: not through os_exit_process, whose body is a libc exit that runs handlers. */
-[[noreturn]] static void violation_exit(uint32_t code)
+[[noreturn]] static inline __attribute__((always_inline)) void violation_exit(uint32_t code)
 {
     fnvnx_hcall1(fnvnx_host->exit, code);
     __builtin_unreachable();

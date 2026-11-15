@@ -27,7 +27,6 @@ extern "C" {
 struct fnvnx_ioinfo;
 extern struct fnvnx_ioinfo *__pioinfo[64];   /* iob.c */
 extern struct fnvnx_ioinfo __badioinfo;
-void ExitProcess(UINT);
 void GetLocalTime(LPSYSTEMTIME);
 }
 
@@ -399,21 +398,21 @@ extern "C" onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end
     return f;
 }
 /* C11 7.22.4.4 exit: cannot return to its caller (abort: 7.22.4.1; _amsg_exit: Wine 9.0 dlls/msvcrt/exit.c _amsg_exit ends in _exit) */
-extern "C" [[noreturn]] void c_exit(int code)
+extern "C" void c_exit(int code)
 {
     fnvnx_doexit(code, 0, 1); /* the handlers, last registered first */
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
 }
 FNVNX_CITE(c_exit, "dm:3");
-extern "C" [[noreturn]] void c_abort(void)
+extern "C" void c_abort(void)
 {
     static const char m[] = "\nabnormal program termination\n";
     fnvnx_write(2, m, sizeof m - 1);
     ExitProcess(3);
 }
 FNVNX_CITE(c_abort, "dm:4");
-extern "C" [[noreturn]] void c_amsg_exit(int n)
+extern "C" void c_amsg_exit(int n)
 {
     const char *t;
     switch (n) {
@@ -434,6 +433,7 @@ extern "C" [[noreturn]] void c_amsg_exit(int n)
 }
 FNVNX_CITE(c_amsg_exit, "dm:5");
 extern "C" void c_purecall(void) { c_amsg_exit(25); }
+FNVNX_CITE(c_purecall, "dm:9");
 
 struct rlock { os_lock_t m; void *volatile owner; int count; };
 rlock g_locks[64];

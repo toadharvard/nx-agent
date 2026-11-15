@@ -28,7 +28,7 @@ extern "C" {
 
 /* ---- process */
 void os_debug_print(const char *s);         /* one line to the debug log (stderr / svcOutputDebugString) */
-void os_exit_process(int code) __attribute__((noreturn));
+void os_exit_process(int code) __attribute__((noreturn, nothrow));
 unsigned os_cpu_count(void);                /* the declared processor count (FNVNX_NPROC) */
 uint32_t os_cpu_mask(void);                 /* the declared affinity mask (FNVNX_APP_CORES) */
 uint32_t os_process_id(void);
@@ -114,7 +114,7 @@ int os_thread_set_cpu(os_thread *t, int cpu);         /* t == NULL: calling thre
 int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask);
 int os_thread_suspend(os_thread *t);        /* user reason (SuspendThread), synchronous, os_world.c; -1: calling thread / already suspended */
 int os_thread_resume(os_thread *t);
-void os_thread_exit(void) __attribute__((noreturn));
+void os_thread_exit(void) __attribute__((noreturn, nothrow));
 void os_yield(void);
 
 /* ---- the world (platform/os/os_world.c has the contract and the proof). Lifter hooks (rule R9): fnvl_host_world_stop /
