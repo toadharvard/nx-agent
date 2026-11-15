@@ -1176,28 +1176,49 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
     return sorted(dirs)
 
 
+def deb_pins():
+    """The declared debs {name: {version, sha256, ...}} of verify/env.json (the one record of the declared system's packages); {} when unreadable."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
+            return json.load(f)["debs"]["packages"]
+    except (OSError, KeyError, ValueError):
+        return {}
+
+
 def run_errors(rec, root, files, roots, mine, seen, repo):
     """The `run` stages (RECIPE.md "Run stages"): {name, artifact "ROOT:OUTPUT", args, inputs [ref], debs [env.json package], outputs [path]}."""
     rs, err = rec.get("run", []), []
     if not isinstance(rs, list):
         return ["run is not a list"]
-    try:
-        pk = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")))["debs"]["packages"]
-    except (OSError, KeyError, ValueError):
-        pk = {}
+    pk = deb_pins()
     names = set()
     for i, g in enumerate(rs):
-        if not (isinstance(g, dict) and {"name", "artifact", "args", "inputs", "debs", "outputs"} <= set(g) <= {"name", "artifact", "args", "inputs", "debs", "outputs", "host_cpu"}):
-            err.append("run[%d] needs name, artifact, args, inputs, debs, outputs (and optionally host_cpu)" % i)
+        tool = isinstance(g, dict) and "exec" in g   # a tool step: runs a program of the declared debs in their root layout (RECIPE.md "Tool steps")
+        base = {"name", "args", "inputs", "debs", "outputs"} | ({"exec"} if tool else {"artifact"})
+        if not (isinstance(g, dict) and base <= set(g) <= base | {"host_cpu"} | ({"dirs", "scratch", "timeout_s"} if tool else set())):
+            err.append("run[%d] needs name, args, inputs, debs, outputs and exactly one of artifact | exec (and optionally host_cpu; a tool step also dirs, scratch, timeout_s)" % i)
             continue
         if "host_cpu" in g and not (g["host_cpu"] == "cpuref" and TREE + "/verify/cpuref.json" in files):
             err.append('run[%d].host_cpu must be "cpuref", with the tracked pin file %s/verify/cpuref.json' % (i, TREE))
         if not (isinstance(g["name"], str) and re.fullmatch(r"[A-Za-z0-9_.-]+", g["name"])) or g["name"] in names:
             err.append("run[%d].name must be a unique plain name" % i)
         names.add(g["name"])
-        a = g["artifact"]
-        ar, _, ao = a.partition(":") if isinstance(a, str) else ("", "", "")
-        if ar not in roots or ar == root or not ao:
+        a = g["exec"] if tool else g["artifact"]
+        ar, _, ao = a.partition(":") if isinstance(a, str) and not tool else ("", "", "")
+        if tool:
+            sc = g.get("scratch", [])
+            if not (isinstance(a, str) and a.startswith("/") and posixpath.normpath(a) == a):
+                err.append("run[%d].exec %r must be an absolute path of a program in the declared debs" % (i, a))
+            if not (isinstance(sc, list) and all(isinstance(p, str) and p.startswith("/") and posixpath.normpath(p) == p and p != "/"
+                                                 and not any(under(p, r) or under(r, p) for r in ("/in", "/out", "/proc", "/dev", "/tmp", "/usr", "/etc", "/var", "/bin", "/lib", "/sbin"))
+                                                 for p in sc)):
+                err.append("run[%d].scratch must be absolute paths of fresh directories (not /in, /out, /proc, /dev, /tmp or a system directory)" % i)
+            if "timeout_s" in g and not (isinstance(g["timeout_s"], int) and not isinstance(g["timeout_s"], bool) and g["timeout_s"] > 0):
+                err.append("run[%d].timeout_s must be a positive integer" % i)
+            dd = g.get("dirs", [])
+            if not (isinstance(dd, list) and all(rel_ok(d) for d in dd)):
+                err.append("run[%d].dirs must be root-relative directory paths" % i)
+        elif ar not in roots or ar == root or not ao:
             err.append("run[%d].artifact %r must be ROOT:OUTPUT of another admitted root" % (i, a))
         else:
             try:
@@ -1228,10 +1249,10 @@ def run_errors(rec, root, files, roots, mine, seen, repo):
                 elif not (isinstance(p, dict) and set(p) == {"stage", "path"} and all(isinstance(v, str) for v in p.values())):
                     err.append("run[%d].inputs: %r is neither a path, {external, path} nor {stage, path}" % (i, p))
         outs = g["outputs"]
-        if not (isinstance(outs, list) and outs and all(isinstance(o, str) and rel_ok(o) for o in outs)):
-            err.append("run[%d].outputs must be a non-empty list of root-relative paths" % i)
+        if not (isinstance(outs, list) and (outs or g.get("dirs")) and all(isinstance(o, str) and rel_ok(o) for o in outs)):
+            err.append("run[%d].outputs must be a non-empty list of root-relative paths (a tool step may have only dirs)" % i)
             continue
-        for o in outs:
+        for o in outs + (g.get("dirs", []) if isinstance(g.get("dirs"), list) else []):
             if o in mine:
                 err.append("run output %s is also a tracked file" % o)
             if o in seen:
@@ -2252,39 +2273,48 @@ class Job:
             except BuildRed as r:
                 f = dict(r.args[0])
                 self.red.append(f)
-                for o in g["outputs"]:
+                for o in step_outputs(g):
                     self.blocked[o] = f["stage"]
 
     def run_one(self, ws, i, g):
         """Stage `run:<root>:<name>`: executes the artifact (the linked output of an admitted root) in the sandbox. It sees the artifact at /art/<output>,
         the declared inputs at /in/<ident>, each declared deb's installed files at /deb/<name>/<absolute path>, and writes /out. Key = artifact
         content + input contents + deb sha256 (env.json) + argv. A nonzero exit, an undeclared or a missing output is red."""
-        aroot, aout = g["artifact"].split(":", 1)
         tmp = tempfile.mkdtemp(dir=ws)
-        r = build(self.repo, aroot, self.store, os.path.join(tmp, "art"), self.jobs, self.extcache)
-        if r["status"] != "green" or not r["elf"] or os.path.basename(r["elf"]["path"]) != aout:
-            raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])]})
-        ins = [{"at": "/art", "tree": self._one_file(tmp, "art", r["elf"]["path"], aout)}]
+        tool = "exec" in g
+        if tool:
+            ins, rootfs = self._rootfs(tmp, g)
+        else:
+            aroot, aout = g["artifact"].split(":", 1)
+            r = build(self.repo, aroot, self.store, os.path.join(tmp, "art"), self.jobs, self.extcache)
+            if r["status"] != "green" or not r["elf"] or os.path.basename(r["elf"]["path"]) != aout:
+                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["artifact %s is not produced (root status %s)" % (g["artifact"], r["status"])]})
+            ins = [{"at": "/art", "tree": self._one_file(tmp, "art", r["elf"]["path"], aout)}]
         n = 0
         for ref in g["inputs"]:
             n += 1
             at = "/in/%d" % n
+            if isinstance(ref, dict) and "stage" in ref and ref["stage"].partition(":")[0] == self.root:   # an output (file or directory) of an earlier step of this root, as a generator's stage ref
+                if ref["path"] in self.blocked:
+                    raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["input %s is not produced: %s is red" % (ref["path"], self.blocked[ref["path"]])]})
+                ins.append({"at": at, "tree": cas.ingest(os.path.join(ws, "root", ref["path"]), self.store)})
+                continue
             if isinstance(ref, str):   # a repo-relative tracked file or directory (git ls-files only), like a generator input
                 sub = [f for f in self.files if f == ref or under(f, ref)]
                 ins.append({"at": at, "tree": cas.ingest(os.path.join(self.repo, ref), self.store) if sub == [ref] else self.ingest_files(tmp, "in%d" % n, sub, ref)})
             else:   # {external, path} or {stage, path}: resolve_input is the one reader
                 host, _ = resolve_input(self.root, ref, self.repo, os.path.dirname(self.store), self.rec)
                 ins.append({"at": at, "tree": cas.ingest(host, self.store)})
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
-            pk = json.load(f)["debs"]["packages"]
-        for d in g["debs"]:
-            if d not in pk:
-                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["deb %s is not declared in env.json debs.packages" % d]})
-            ins.append({"at": "/deb/" + d, "tree": self._deb_tree(tmp, d, pk[d])})
-        env = {"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "PATH": "/deb",
+        pk = deb_pins()
+        if not tool:
+            for d in g["debs"]:
+                if d not in pk:
+                    raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["deb %s is not declared in env.json debs.packages" % d]})
+                ins.append({"at": "/deb/" + d, "tree": self._deb_tree(tmp, d, pk[d])})
+        env = {"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "PATH": "/usr/bin:/bin" if tool else "/deb",
                "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
-        argv = ["/art/" + aout] + g["args"]
-        interp = elf_interp(r["elf"]["path"])
+        argv = [g["exec"]] + g["args"] if tool else ["/art/" + aout] + g["args"]
+        interp = None if tool else elf_interp(r["elf"]["path"])
         if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
             home = deb_resolve(interp, tmp, g["debs"])
             if not home:
@@ -2297,18 +2327,71 @@ class Job:
             env["FNVNX_HOST_CPU"] = json.dumps(pin, sort_keys=True)
         doc = {"format": "fnvnx-stage/1", "stage": "run:%s:%s" % (self.root, g["name"]), "class": "build", "tool": "run", "cwd": "/work",
                "argv": argv, "env": env, "inputs": sorted(ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}
+        if tool:   # the declared debs' root layout: top-level symlinks are links, scratch is a tmpfs; the job count and the time limit are outside the key
+            doc.update(links=rootfs, scratch=list(g.get("scratch", [])), unkeyed={"env": {"JOBS": str(self.jobs)}, "timeout": g.get("timeout_s", 7200)})
+            if not doc["links"]:
+                del doc["links"]
+            if not doc["scratch"]:
+                del doc["scratch"]
         if g.get("host_cpu") and sandbox._load(self.store, sandbox.key_of(doc)) is None:
             bad = cpu_mismatch(pin)
             if bad:
                 raise BuildRed({"stage": doc["stage"], "exit": None, "stderr": ["host_cpu: this host is not the reference host: " + "; ".join(bad)]})
         res = self.stage(doc)[1]
         got = sorted(x for x, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
-        if got != sorted(g["outputs"]):
-            raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs %s differ from the declared %s" % (got, sorted(g["outputs"]))]})
+        dirs = g.get("dirs", [])
+        stray = [r for r in got if r not in g["outputs"] and not any(under(r, d) for d in dirs)]
+        absent = [o for o in g["outputs"] if o not in got] + [d + "/" for d in dirs if not any(under(r, d) for r in got)]
+        if stray or absent:
+            raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs differ from the declared %s: unexpected %s, missing %s" % (sorted(g["outputs"] + dirs), stray[:10], absent[:10])]})
         cas.materialize(res["outputs"]["/out"], self.store, os.path.join(tmp, "out"))
         for o in g["outputs"]:
             os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
             shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
+        for d in dirs:
+            os.makedirs(os.path.dirname(os.path.join(ws, "root", d)), exist_ok=True)
+            shutil.copytree(os.path.join(tmp, "out", d), os.path.join(ws, "root", d), symlinks=True)
+
+    def _rootfs(self, tmp, g):
+        """The root layout of the declared debs of a tool step: the union of their installed files (_deb_tree), each top-level directory an input mounted at
+        its own path, each top-level symlink (base-files' /bin, /lib, /lib64, /sbin) a sandbox link. Two debs that ship one file are red. The trees are in
+        the key by content (not by the package version). -> ([inputs], [links])."""
+        pk = deb_pins()
+        for d in g["debs"]:
+            if d not in pk:
+                raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["deb %s is not declared in env.json debs.packages" % d]})
+        union, owner = os.path.join(tmp, "rootfs"), {}
+        os.makedirs(union)
+        for d in sorted(g["debs"]):
+            self._deb_tree(tmp, d, pk[d])
+            base = os.path.join(tmp, "deb-" + d)
+            for dp, dn, fn in os.walk(base, followlinks=False):
+                rel = os.path.relpath(dp, base)
+                for name in dn + fn:
+                    src, p = os.path.join(dp, name), os.path.normpath(os.path.join(rel, name))
+                    if os.path.isdir(src) and not os.path.islink(src):
+                        os.makedirs(os.path.join(union, p), exist_ok=True)
+                        continue
+                    if p in owner:
+                        if open(src, "rb").read() == open(os.path.join(union, p), "rb").read() if not os.path.islink(src) and not os.path.islink(os.path.join(union, p)) else (
+                                os.path.islink(src) and os.path.islink(os.path.join(union, p)) and os.readlink(src) == os.readlink(os.path.join(union, p))):
+                            continue   # the same file shipped twice is one file
+                        raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["debs %s and %s ship /%s with different content" % (owner[p], d, p)]})
+                    owner[p] = d
+                    if os.path.islink(src):
+                        os.symlink(os.readlink(src), os.path.join(union, p))
+                    else:
+                        shutil.copy2(src, os.path.join(union, p), follow_symlinks=False)
+        ins, links = [], []
+        for name in sorted(os.listdir(union)):
+            p = os.path.join(union, name)
+            if "/" + name in ("/proc", "/dev", "/tmp", "/in", "/out", "/work"):
+                continue   # the sandbox's own directories (and base-files' empty ones)
+            if os.path.islink(p):
+                links.append({"at": "/" + name, "to": os.readlink(p)})
+            elif os.path.isdir(p):
+                ins.append({"at": "/" + name, "tree": cas.ingest(p, self.store)})
+        return ins, links
 
     def _one_file(self, tmp, name, path, base):
         d = os.path.join(tmp, "f-" + name)
