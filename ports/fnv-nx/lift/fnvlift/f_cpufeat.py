@@ -15,26 +15,32 @@ Assumption ASM-203: capstone's group tags are a correct classification of the in
 missing (item 2) the table adds the SDM's feature. A tag that is too wide on a feature the model HAS is harmless (the model has it); too wide on an absent feature would raise a wrong #UD:
 test/cpufeat_check.py lists, over every instruction of every module, the forms whose group maps to an absent feature (the A3 table of tools/fpstate.py)."""
 
-# feature -> (CPUID leaf, register, bit): DERIVED from the generated table (inputs 'cpufeat', L3b cpuid_feature_bits.tsv), never written here.
-# Rule: a feature's gate is its row in a CPUID feature-flag leaf (1, 7, 0x80000001); where the table cites both Intel SDM and AMD APM for one feature, the Intel row decides (the declared
-# machine's CPU is Intel-documented, source order of CLAUDE.md); several remaining rows that differ in register or bit, or no row, is an error at load; the same register and bit in two flag leaves counts as one row (lowest leaf) (never a silent default).
+# feature -> (CPUID leaf, register, bit): DERIVED from the generated table (input 'cpufeat', L3b cpuid_feature_bits.tsv format /2, one row per (leaf, sub, reg, bit)), never written here.
+# The feature's name is the table's `canonical` column (SDM name, else APM name); a name that the table spells at several places is `NAME@leaf.sub.reg[bit]`, and the part before `@` is the feature.
+# Rule: a feature's gate is its row in a CPUID feature-flag leaf (1, 7, 0x80000001); the same register and bit in two flag leaves (the AMD alias of a leaf 1 bit) counts as one row (lowest
+# leaf, the declared CPU answers both identically); several flag rows that differ in register or bit, or no row, is an error at load (never a silent default).
 FLAG_LEAVES = (1, 7, 0x80000001)
+FORMAT = '# fnvnx-cpuid-feature-bits/2'
+
+
 def _load_table(want):
     from . import inputs
     rows = {}
-    for l in open(inputs.get('cpufeat')):
-        if not l.strip() or l[0] == '#':
-            continue
-        f, leaf, sub, reg, bit, cit = l.rstrip('\n').split('\t')
-        if f in want and int(leaf, 16) in FLAG_LEAVES:
-            rows.setdefault(f, []).append(((int(leaf, 16), reg, int(bit)), cit.startswith('Intel SDM')))
+    with open(inputs.get('cpufeat')) as fh:
+        if not fh.readline().startswith(FORMAT):
+            raise ValueError('cpufeat: %s is not a %s table' % (inputs.get('cpufeat'), FORMAT))
+        for l in fh:
+            if not l.strip() or l[0] == '#':
+                continue
+            canon, leaf, sub, reg, bit = l.rstrip('\n').split('\t')[:5]
+            f = canon.split('@')[0]
+            if f in want and int(leaf, 16) in FLAG_LEAVES:
+                rows.setdefault(f, set()).add((int(leaf, 16), reg, int(bit)))
     out = {}
     for f, rs in rows.items():
-        pick = [r for r, intel in rs if intel] or [r for r, intel in rs]
-        if len({(reg, bit) for leaf, reg, bit in pick}) != 1:
-            raise ValueError('cpufeat: feature %s has several flag rows %s' % (f, sorted(set(pick))))
-        pick = [min(pick)]      # the same register and bit in leaf 1 and in 0x80000001 (AMD alias): the basic leaf is the gate, as the declared CPU answers both identically
-        out[f] = pick[0]
+        if len({(reg, bit) for leaf, reg, bit in rs}) != 1:
+            raise ValueError('cpufeat: feature %s has several flag rows %s' % (f, sorted(rs)))
+        out[f] = min(rs)
     return out
 
 

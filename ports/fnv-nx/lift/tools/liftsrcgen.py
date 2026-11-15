@@ -20,7 +20,7 @@ EXE = 'FalloutNV.exe'
 EXTERNALS = [
     {'name': 'exe', 'repo': 'fnv-nx-build', 'ref': 'gamedata/exe', 'commit': '0948da1e89ab719dcf8471e45b67bc60575f6b93', 'tree_sha256': 'ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b', 'at': '/ext/exe'},
     {'name': 'redist', 'repo': 'fnv-nx-build', 'ref': 'gamedata/redist', 'commit': 'c53729e3bac168798fddcf4312f5a64a9b5eb08f', 'tree_sha256': 'fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2', 'at': '/ext/redist'},
-    {'name': 'cpufeat', 'repo': 'fnv-nx-build', 'ref': 'l3b-lift/cpuid-feature-bits/964510be8', 'commit': 'b30137748185bd456237f5c805bcf67c2697170c', 'tree_sha256': 'f6ccfbb64fdfc54fd53524def719e4eb8b11516498b4a5a9ee826e51319ab694', 'at': '/ext/cpufeat'},
+    {'name': 'cpufeat', 'repo': 'fnv-nx-build', 'ref': 'l3b-lift/cpuid-feature-bits/ffb79d19d', 'commit': '947b7817d1933089b84d5946713993a5db632699', 'tree_sha256': '8f17fd521c2cce9b066ca30f59a9963f340417500f72faa2013dde2a5b887fb6', 'at': '/ext/cpufeat'},
 ]
 USES = [{'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'FACTS'}, {'root': 'ports/fnv-nx/lift/facts', 'output': 'SEGWRITES'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPSTATE'}, {'root': 'ports/fnv-nx/lift/fpfacts', 'output': 'FPDEPTH'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
 MOD = '/uses/ports/fnv-nx/loader/MODULES_TSV'
