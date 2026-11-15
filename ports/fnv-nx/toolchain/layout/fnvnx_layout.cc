@@ -387,6 +387,15 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
   if (q & TYPE_QUAL_ATOMIC) { dl_error("an _Atomic type has no spelling", "?"); return "?"; }
   const int code = TREE_CODE(t);
   std::string pre;
+  /* HOST1: a scalar that carries the type attribute fnvnx_host, on the type or on the original type of the typedef that names it, is spelled with the
+   * prefix `host:` after the qualifiers. It is read before the main variant is taken: an attribute makes a variant. */
+  bool host = false;
+  if (code == INTEGER_TYPE) {
+    host = lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(t)) != NULL_TREE;
+    tree n = TYPE_NAME(t);
+    if (!host && n && TREE_CODE(n) == TYPE_DECL && DECL_ORIGINAL_TYPE(n))
+      host = lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(DECL_ORIGINAL_TYPE(n))) != NULL_TREE;
+  }
   if (code != ARRAY_TYPE && code != FUNCTION_TYPE) {   /* an array's qualifiers are its element's: spelled there */
     if (q & TYPE_QUAL_CONST) pre += "const:";
     if (q & TYPE_QUAL_VOLATILE) pre += "volatile:";
@@ -442,7 +451,7 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     if (!n && (code == BOOLEAN_TYPE || code == INTEGER_TYPE))   /* an element type the target makes without a name (the SVE predicate's 1-bit boolean): its precision and signedness are its identity */
       return pre + (code == BOOLEAN_TYPE ? "bool_bits_" : TYPE_UNSIGNED(t) ? "uint_bits_" : "int_bits_") + std::to_string(TYPE_PRECISION(t));
     if (!n || TREE_CODE(n) != IDENTIFIER_NODE) { dl_error("a scalar type without a name", "?"); return "?"; }
-    return pre + dl_word(IDENTIFIER_POINTER(n));
+    return pre + (host ? "host:" : "") + dl_word(IDENTIFIER_POINTER(n));
   }
   case NULLPTR_TYPE:   /* C23 nullptr_t (c/c-decl.cc 4653 records the builtin type): one node, identified by its name */
     return pre + "nullptr_t";

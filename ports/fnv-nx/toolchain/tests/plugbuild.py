@@ -84,7 +84,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     flags = required + [f for f in flags if f not in required]
     plugins = [('fnvnx_' + n, a) for n, a in plugins]
     names = [n for n, _ in plugins]
-    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
+    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])} | {recipe.ANALYSIS_PLUGIN[1]}):   # the objstub plugin is built for every root with units
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))

@@ -68,7 +68,9 @@
  *      a `void *` parameter) cannot receive the table, and a callee that takes a `const FnvnxHostApi *` is guest
  *      code, built with this plugin, so its loads are checked by 2.
  * The unit's section `.fnvnx.dispatch` (not loaded) has one line `symbol<TAB>rewritten<TAB>host` for every function with
- * an indirect call: the number of call sites rewritten and the number of host-ABI calls.
+ * an indirect call: the number of call sites rewritten and the number of host-ABI calls. Each host-ABI call has one more line
+ * `symbol<TAB>host<TAB><record tag>.<field>`: the slot field the callee was loaded from (for a slot array, the array member), in the
+ * spelling of .fnvnx.decltype (the record `struct:TAG{...}` and the slot's type prefixed `host:`). Rows are sorted; a call per row.
  */
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -110,6 +112,7 @@ static inline bool fnvnx_cxx_fe() { return !strncmp(lang_hooks.name, "GNU C++", 
 #include "gimple-walk.h"
 #include "ssa-iterators.h"
 #include "tree-dfa.h"
+#include <algorithm>
 #include <map>
 #include "langhooks.h"
 #include <string.h>
@@ -432,16 +435,17 @@ static void contp_fn(void *gcc_data, void *)
   if (DECL_SAVED_TREE(fn)) walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), contp_walk, NULL);
 }
 
-/* a reference that names a field of host slot type (at any depth of the access path) */
-static bool host_ref(tree r)
+/* a reference that names a field of host slot type (at any depth of the access path): that field (for a slot array, the array member) */
+static tree host_ref_field(tree r)
 {
-  if (!r) return false;
+  if (!r) return NULL_TREE;
   while (handled_component_p(r)) {
-    if (TREE_CODE(r) == COMPONENT_REF && host_elem_type(TREE_TYPE(TREE_OPERAND(r, 1)))) return true;
+    if (TREE_CODE(r) == COMPONENT_REF && host_elem_type(TREE_TYPE(TREE_OPERAND(r, 1)))) return TREE_OPERAND(r, 1);
     r = TREE_OPERAND(r, 0);
   }
-  return false;
+  return NULL_TREE;
 }
+static bool host_ref(tree r) { return host_ref_field(r) != NULL_TREE; }
 
 static bool conv_code(enum tree_code c)
 {
@@ -450,27 +454,29 @@ static bool conv_code(enum tree_code c)
 
 /* the SSA name holds the address of a host slot (or of a place inside a host-slot array): `&p->slot`, or such an
  * address plus an offset, or a conversion of one. GCC itself writes `&p->slot` and loads through it at the last GIMPLE. */
-static bool host_addr(tree n, int guard = 0)
+static tree host_addr_field(tree n, int guard = 0)
 {
-  if (guard > 32 || !n || TREE_CODE(n) != SSA_NAME) return false;
+  if (guard > 32 || !n || TREE_CODE(n) != SSA_NAME) return NULL_TREE;
   gimple *d = SSA_NAME_DEF_STMT(n);
-  if (!is_gimple_assign(d)) return false;
+  if (!is_gimple_assign(d)) return NULL_TREE;
   enum tree_code c = gimple_assign_rhs_code(d);
   tree r = gimple_assign_rhs1(d);
-  if (gimple_assign_single_p(d)) return TREE_CODE(r) == ADDR_EXPR && host_ref(TREE_OPERAND(r, 0));
-  if (c == POINTER_PLUS_EXPR) return host_addr(r, guard + 1);
-  if (c == NOP_EXPR || c == CONVERT_EXPR) return host_addr(r, guard + 1);
-  return false;
+  if (gimple_assign_single_p(d)) return TREE_CODE(r) == ADDR_EXPR ? host_ref_field(TREE_OPERAND(r, 0)) : NULL_TREE;
+  if (c == POINTER_PLUS_EXPR) return host_addr_field(r, guard + 1);
+  if (c == NOP_EXPR || c == CONVERT_EXPR) return host_addr_field(r, guard + 1);
+  return NULL_TREE;
 }
+static bool host_addr(tree n) { return host_addr_field(n) != NULL_TREE; }
 
 /* a memory reference that reads a host slot: a field access of host slot type, or a dereference of a host address */
-static bool host_load(tree r)
+static tree host_load_field(tree r)
 {
-  if (host_ref(r)) return true;
-  if (TREE_CODE(r) != MEM_REF) return false;
+  if (tree f = host_ref_field(r)) return f;
+  if (TREE_CODE(r) != MEM_REF) return NULL_TREE;
   tree b = TREE_OPERAND(r, 0);
-  return TREE_CODE(b) == SSA_NAME ? host_addr(b) : TREE_CODE(b) == ADDR_EXPR && host_ref(TREE_OPERAND(b, 0));
+  return TREE_CODE(b) == SSA_NAME ? host_addr_field(b) : TREE_CODE(b) == ADDR_EXPR ? host_ref_field(TREE_OPERAND(b, 0)) : NULL_TREE;
 }
+static bool host_load(tree r) { return host_load_field(r) != NULL_TREE; }
 
 static bool atomic_load_fn(gcall *c)
 {
@@ -493,28 +499,42 @@ static bool atomic_store_fn(gcall *c)
 }
 
 /* the ordering plugin turns a load into `__atomic_load_N (address, order)`: this call reads a host slot */
-static bool host_atomic_load(gimple *st)
+static tree host_atomic_load_field(gimple *st)
 {
   gcall *c = dyn_cast<gcall *>(st);
-  if (!c || !atomic_load_fn(c) || gimple_call_num_args(c) < 1) return false;
+  if (!c || !atomic_load_fn(c) || gimple_call_num_args(c) < 1) return NULL_TREE;
   tree a = gimple_call_arg(c, 0);
-  return TREE_CODE(a) == SSA_NAME ? host_addr(a) : TREE_CODE(a) == ADDR_EXPR && host_ref(TREE_OPERAND(a, 0));
+  return TREE_CODE(a) == SSA_NAME ? host_addr_field(a) : TREE_CODE(a) == ADDR_EXPR ? host_ref_field(TREE_OPERAND(a, 0)) : NULL_TREE;
 }
+static bool host_atomic_load(gimple *st) { return host_atomic_load_field(st) != NULL_TREE; }
 
 /* the callee value comes from a host slot load through conversions only */
-static bool host_callee(tree fn)
+static tree host_callee_field(tree fn)
 {
   for (int guard = 0; guard < 64 && fn && TREE_CODE(fn) == SSA_NAME; guard++) {
     gimple *d = SSA_NAME_DEF_STMT(fn);
-    if (host_atomic_load(d)) return true;
-    if (!is_gimple_assign(d)) return false;
+    if (tree f = host_atomic_load_field(d)) return f;
+    if (!is_gimple_assign(d)) return NULL_TREE;
     enum tree_code c = gimple_assign_rhs_code(d);
     tree r = gimple_assign_rhs1(d);
-    if (gimple_assign_single_p(d) && host_load(r)) return true;
-    if (!conv_code(c)) return false;
+    if (gimple_assign_single_p(d)) if (tree f = host_load_field(r)) return f;
+    if (!conv_code(c)) return NULL_TREE;
     fn = c == VIEW_CONVERT_EXPR ? TREE_OPERAND(r, 0) : r;
   }
-  return false;
+  return NULL_TREE;
+}
+
+/* `<record tag>.<field>`: the record that declares the slot (for a slot array, the array member) and its name. The tag is spelled as the
+ * layout plugin's .fnvnx.decltype spells it (a typedef name is not a tag); a slot in a record or member without a name has no such spelling. */
+static std::string host_slot_name(tree f, location_t loc)
+{
+  tree rec = DECL_CONTEXT(f), n = rec && TYPE_P(rec) ? TYPE_NAME(rec) : NULL_TREE;
+  if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_ARTIFICIAL(n) ? DECL_NAME(n) : NULL_TREE;
+  if (!n || TREE_CODE(n) != IDENTIFIER_NODE || !DECL_NAME(f)) {
+    error_at(loc, "HOST1: a host slot in a record or member without a name has no tag-dot-field row");
+    return "-";
+  }
+  return std::string(IDENTIFIER_POINTER(n)) + "." + IDENTIFIER_POINTER(DECL_NAME(f));
 }
 
 static void host_error(gimple *st, const char *form)
@@ -688,20 +708,28 @@ static bool marker_call(gimple *st)
 
 static tree marker_decl(tree ptr_type)
 {
-  tree t = build_function_type_list(ptr_type, ptr_type, NULL_TREE);
+  tree t = build_function_type_list(ptr_type, ptr_type, integer_type_node, NULL_TREE);
   tree d = build_fn_decl("fnvnx_host_ptr", t);
   DECL_EXTERNAL(d) = 1; TREE_PUBLIC(d) = 1; DECL_ARTIFICIAL(d) = 1; TREE_NOTHROW(d) = 1; TREE_READONLY(d) = 1; DECL_PURE_P(d) = 0;
   return d;
 }
 
-/* per function: [rewritten, host] */
-static std::map<std::string, std::pair<unsigned, unsigned>> records;
+/* the slots the host-ABI calls were loaded from, `<record tag>.<field>`; a marker carries its index */
+static std::vector<std::string> host_slots;
 
-static void finish_unit(void *, void *)
+struct fn_record { unsigned rewritten = 0; std::vector<std::string> host; };
+/* per function: the number of call sites rewritten, and one slot per host-ABI call */
+static std::map<std::string, fn_record> records;
+
+static void finish_records(void *, void *)
 {
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.dispatch,\"\",%%progbits\n");
-  for (auto &r : records)
-    fprintf(asm_out_file, "\t.ascii\t\"%s\\t%u\\t%u\\n\"\n", r.first.c_str(), r.second.first, r.second.second);
+  for (auto &r : records) {
+    fprintf(asm_out_file, "\t.ascii\t\"%s\\t%u\\t%u\\n\"\n", r.first.c_str(), r.second.rewritten, (unsigned)r.second.host.size());
+    std::vector<std::string> rows = r.second.host;
+    std::sort(rows.begin(), rows.end());
+    for (auto &h : rows) fprintf(asm_out_file, "\t.ascii\t\"%s\\thost\\t%s\\n\"\n", r.first.c_str(), h.c_str());
+  }
   fprintf(asm_out_file, "\t.popsection\n");
 }
 
@@ -780,7 +808,7 @@ struct dispatch_pass : gimple_opt_pass {
   unsigned int execute(function *fun) override
   {
     std::vector<gimple *> calls, markers;
-    unsigned host = 0;
+    std::vector<std::string> host;
     basic_block bb;
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
@@ -789,7 +817,10 @@ struct dispatch_pass : gimple_opt_pass {
         else if (indirect_call(st)) {
           tree fn = gimple_call_fn(st);
           gimple *d = TREE_CODE(fn) == SSA_NAME ? SSA_NAME_DEF_STMT(fn) : NULL;
-          if (d && marker_call(d)) host++; else calls.push_back(st);
+          if (d && marker_call(d)) {
+            tree ix = gimple_call_arg(d, 1);
+            host.push_back(host_slots[tree_to_uhwi(ix)]);
+          } else calls.push_back(st);
         }
       }
     /* a marker value is only ever a callee; then the marker is a plain copy */
@@ -802,7 +833,7 @@ struct dispatch_pass : gimple_opt_pass {
       gimple_stmt_iterator gsi = gsi_for_stmt(m);
       gsi_replace(&gsi, gimple_build_assign(l ? l : make_ssa_name(TREE_TYPE(gimple_call_arg(m, 0))), gimple_call_arg(m, 0)), true);
     }
-    if (calls.empty() && !host) return 0;
+    if (calls.empty() && host.empty()) return 0;
     records[IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl))] = { (unsigned)calls.size(), host };
     if (calls.empty()) return 0;
     for (size_t i = 0; i < calls.size(); i++) rewrite(fun, calls[i]);
@@ -838,12 +869,14 @@ struct host_pass : gimple_opt_pass {
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi))
         if (indirect_call(gsi_stmt(gsi))) {
           tree fn = gimple_call_fn(gsi_stmt(gsi));
-          if (TREE_CODE(fn) == SSA_NAME && host_callee(fn)) calls.push_back(gsi_stmt(gsi));
+          if (TREE_CODE(fn) == SSA_NAME && host_callee_field(fn)) calls.push_back(gsi_stmt(gsi));
         }
     for (gimple *call : calls) {
       tree fn = gimple_call_fn(call);
       tree m = make_ssa_name(TREE_TYPE(fn));
-      gcall *mk = gimple_build_call(marker_decl(TREE_TYPE(fn)), 1, fn);
+      std::string slot = host_slot_name(host_callee_field(fn), gimple_location(call));
+      host_slots.push_back(slot);
+      gcall *mk = gimple_build_call(marker_decl(TREE_TYPE(fn)), 2, fn, build_int_cst(integer_type_node, host_slots.size() - 1));
       gimple_call_set_lhs(mk, m);
       gimple_set_location(mk, gimple_location(call));
       gimple_stmt_iterator gsi = gsi_for_stmt(call);
@@ -887,6 +920,6 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   p.ref_pass_instance_number = 1;
   p.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &p);
-  register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
+  register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_records, NULL);
   return 0;
 }

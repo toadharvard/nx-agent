@@ -90,6 +90,18 @@ FORMS = [
 ]
 
 
+def decltype(td, so):
+    obj = os.path.join(td, 'host_c.o')
+    r = pb.compile(os.path.join(HERE, 'dispatch', 'host_c.c'), obj, so)
+    check('host_c.c compiles', r.returncode == 0, r.stderr[:2000])
+    if r.returncode == 0:
+        dt = dict(l.split('\t', 1) for l in pb.section(obj, '.fnvnx.decltype').splitlines() if '\t' in l)
+        ty = dt.get('host_api', '')
+        check('.fnvnx.decltype: every function slot of the host table is spelled host: (a slot named through a second typedef too, a slot array by its element, '
+              'after the qualifiers), the size field is not',
+              ty == '*const:struct:Api{size:unsigned_int;open:host:long_long_unsigned_int;close:host:long_long_unsigned_int;tab:[2]host:long_long_unsigned_int;cs:const:host:long_long_unsigned_int}', ty)
+
+
 def host(td, so):
     obj = os.path.join(td, 'host.o')
     r = pb.compile(HOSTFIX, obj, so)
@@ -103,9 +115,14 @@ def host(td, so):
         check('a host call is a plain indirect call (blr), with no site', all(re.search(r'\b(?:blr|br) x\d+', body(dis, f)) for f in ('_Z2h1y', '_Z2h2yy', '_Z2h3iy', '_Z2h4y')), body(dis, '_Z2h1y'))
         check('the pointer call of ord is rewritten and its host call is not: one site, two indirect calls',
               len(re.findall(r'\b(?:blr|br) x\d+', body(dis, '_Z3ordPFyyEy'))) == 2 and pb.section_size(obj, '.bss') == 8, body(dis, '_Z3ordPFyyEy'))
-        rec = {l.split('\t')[0]: tuple(int(x) for x in l.split('\t')[1:]) for l in pb.section(obj, '.fnvnx.dispatch').splitlines()}
+        lines = [l.split('\t') for l in pb.section(obj, '.fnvnx.dispatch').splitlines()]
+        rec = {l[0]: tuple(int(x) for x in l[1:]) for l in lines if l[1] != 'host'}
         want = {'_Z2h1y': (0, 1), '_Z2h2yy': (0, 2), '_Z2h3iy': (0, 1), '_Z2h4y': (0, 1), '_Z3ordPFyyEy': (1, 1)}
         check('.fnvnx.dispatch: per function the rewritten sites and the host-ABI calls', rec == want, rec)
+        rows = sorted((l[0], l[2]) for l in lines if l[1] == 'host')
+        wrows = sorted([('_Z2h1y', 'Api.open'), ('_Z2h2yy', 'Api.close'), ('_Z2h2yy', 'Api.open'), ('_Z2h3iy', 'Api.tab'),
+                        ('_Z2h4y', 'Api.open'), ('_Z3ordPFyyEy', 'Api.open')])
+        check('.fnvnx.dispatch: one host row per host-ABI call, `symbol host <tag>.<field>` (a slot array names the array member)', rows == wrows, rows)
     for name, fn, err in FORMS:
         src = os.path.join(td, 'form.cpp')
         open(src, 'w').write(PRE + fn + '\n')
@@ -152,6 +169,7 @@ def main():
         if r.returncode == 0:
             checks(out)
         host(td, so)
+        decltype(td, so)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_dispatch-mode=1'])
         check('an unknown plugin argument is an error', pb.argument_refused(r, 'dispatch'), r.stderr[:500])
         check('the recipe refuses a root that lacks a product plugin (the dispatcher needs names; the full set is the recipe\'s)', pb.missing_plugin_refused('names'))
