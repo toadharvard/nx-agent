@@ -1,4 +1,5 @@
 /* fnv-nx L6 front: blend / depth / stencil / raster state words. Rules and the out-of-range results: d3d9_state.h.
+ * ASM-612 (verify/ASSUMPTIONS.json)
  * Every enumeration is a switch over its generated enum type without a default, built with -Werror=switch-enum; the
  * test for a value outside the enumeration comes before the switch (nxd3d_in_<enum>). */
 #include "front_int.h"

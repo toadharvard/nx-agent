@@ -1,4 +1,5 @@
 // draw_layout.cpp: vertex layouts. A layout is a function of (bound declaration, vertex shader input signature, stream frequencies, which streams have data), cached by content.
+// ASM-624 (verify/ASSUMPTIONS.json)
 //  L1 each shader input (usage, index) takes the declaration element of the same (usage, index); with several such elements the LAST one wins (wined3d_stream_info_from_declaration walks the elements in order and
 //     each match overwrites the input's slot). The attribute's location is the input's location (draw_prog.cpp P1), its type nx_attr_type(D3DDECLTYPE), its offset the element's Offset.
 //  L2 a declaration element no input reads is not an attribute (nxgpu4.h).

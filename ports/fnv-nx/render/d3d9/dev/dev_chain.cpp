@@ -1,4 +1,5 @@
 // D7: swap chains (IDirect3DSwapChain9 / 9Ex). Sources (Wine 9.0): d3d9/swapchain.c (d3d9_swapchain_*), wined3d/swapchain.c (wined3d_swapchain_present, _get_back_buffer, _get_front_buffer_data,
+// ASM-616 (verify/ASSUMPTIONS.json)
 // _get_raster_status, swapchain_gl_present -> wined3d_swapchain_gl_rotate), wined3d/directx.c wined3d_output_get_raster_status (the scan line is derived from QueryPerformanceCounter).
 // BACK BUFFER ROTATION RULE (source: wined3d_swapchain_gl_rotate, reached by every Present of the GL swap chain, whatever the swap effect): with count >= 2, after a Present the buffer i holds the former
 // contents of buffer i + 1 (mod count); the buffer OBJECTS (GetBackBuffer identity) never move, their images do. With count 1 nothing changes (DISCARD / COPY / FLIP alike). Lockable buffers: the CPU
@@ -92,7 +93,7 @@ HRESULT NxChainCore::present(const RECT* s, const RECT* dr, void* ov, DWORD flag
     if (!img->gpu) { L->frame++; rotate(this); presented(); return D3D_OK; }   // NXFMT_NULL: no pixels
     NxPresent p = {}; p.image = img->gpu; p.sx = src.left; p.sy = src.top; p.sw = src.right - src.left; p.sh = src.bottom - src.top; p.dx = dst.left; p.dy = dst.top; p.dw = dst.right - dst.left; p.dh = dst.bottom - dst.top;
     p.interval = (flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 : nx_pp_interval(pp.PresentationInterval); p.gamma = ramp_set ? (uint64_t)(uintptr_t)&ramp : 0; p.frame = ++L->frame;
-    if (L->cur.visible && L->cur.bgra) { p.cursor = (uint64_t)(uintptr_t)L->cur.bgra; p.cw = L->cur.w; p.ch = L->cur.h; p.cx = L->cur.x - (int32_t)L->cur.hx - cr.left; p.cy = L->cur.y - (int32_t)L->cur.hy - cr.top; }   // nxgpu4.h P2: blended onto the presented image, never into the back buffer
+    if (L->cur.visible && L->cur.bgra) { p.cursor = (uint64_t)(uintptr_t)L->cur.bgra; p.cw = L->cur.w; p.ch = L->cur.h; p.cx = L->cur.x - (int32_t)L->cur.hx - (pp.Windowed ? cr.left : 0); p.cy = L->cur.y - (int32_t)L->cur.hy - (pp.Windowed ? cr.top : 0); }   // nxgpu4.h P2, Wine 9.0 cs.c wined3d_cs_exec_present: the rect is (x - hotspot, y - hotspot), mapped to client coordinates only when windowed (MapWindowPoints), in back-buffer pixels; the backend stamps it into the back buffer before the present
     if (int rc = nxd3d_present(this, &p)) return rc == NXD3D_HOOK_NOMEM ? D3DERR_OUTOFVIDEOMEMORY : D3DERR_DRIVERINTERNALERROR;   // the rects were validated: a refusal is a backend defect
     rotate(this); presented(); return D3D_OK;
 }

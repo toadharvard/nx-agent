@@ -1,4 +1,5 @@
 ENV_PIN: the pinned recording environment of render/d3d9/env/env_*.tsv (written by tests/l6/env/make_env.py; do not edit)
+ASM-604 ASM-605 (verify/ASSUMPTIONS.json)
 wine --version: wine-9.0 (Ubuntu 9.0~repack-4build3)
 packages (dpkg):
   libgl1-mesa-dri:i386 25.2.8-0ubuntu0.24.04.4

@@ -8,7 +8,7 @@
 //  read     R3: flush, then NXGPU_FN_IMAGE_READ of the whole sub-resource into the reserved staging block (E3); rows go to dst (row_pitch / slice_pitch); a CONVERT format is converted back to its D3D layout
 //           (nx_d3d9_unconvert: A8 alpha, L8 red, R8G8B8 drops the x byte, ...).
 //  gen_mips NxOp_GenMips.
-//  preload  MANAGED textures / surfaces / volumes: nx_tex_preload (upload of the dirty regions); vertex / index buffers: nx_buf_gpu_sync (glue_buf.cpp). Both paths are one switch on the resource type.
+//  preload  MANAGED textures / surfaces / volumes: nx_tex_preload (upload of the dirty regions); vertex / index buffers: nx_buf_mirror (glue_buf.h; the draw path's function, so the hazard rule B2 holds). Both paths are one switch on the resource type.
 #include "glue_stream.h"
 #include "res_tex.h"
 #include "glue_buf.h"
@@ -71,7 +71,7 @@ void nxd3d_image_read(NxObj* res, uint32_t image, uint32_t level, uint32_t layer
 void nxd3d_gen_mips(NxObj*, uint32_t image, uint32_t filter) { if (!nxs_gen_mips(image, filter)) nxs_error(); }   // E1
 void nxd3d_preload(NxObj* res) {
     switch (res->ci->rtype) {
-    case D3DRTYPE_VERTEXBUFFER: case D3DRTYPE_INDEXBUFFER: nx_ignore(nx_buf_gpu_sync(static_cast<NxBufCore*>(res))); break;   // PreLoad is void: a mirror that could not be made (0) leaves the dirty range, the next use retries and reports
+    case D3DRTYPE_VERTEXBUFFER: case D3DRTYPE_INDEXBUFFER: nx_ignore(nx_buf_mirror(static_cast<NxBufCore*>(res))); break;   // PreLoad is void: a mirror that could not be made (0) leaves the dirty range, the next use retries and reports
     default: nx_tex_preload(res); break;
     }
 }

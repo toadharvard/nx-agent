@@ -13,7 +13,7 @@ size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, siz
 #define NX_GL4SHIM_OUT_CAP(n) ((size_t)(n) * 2 + 256)
 
 /* The internal programs of the GL 4.5 backend: the only GLSL gl4 compiles besides the shim's output (render/gl4shim, one table).
- * GLSL 4.50 core, compiled as given; point-filtered scaling by rule (see gl4_scale.c): P_* = colour 2D / 2D array / 3D, depth, stencil. */
+ * GLSL 4.50 core, compiled as given; point-filtered scaling by rule (see gl4_scale.c): P_* = colour 2D / 2D array / 3D, depth, stencil; the software cursor stamp (nxgpu4.h P2). */
 /* The GLSL version of the GL 4.5 backend: the one record. The shim writes it over the #version line of every shader it passes to the driver; the internal programs and the FFP texts (gen_glsl.py) carry it. */
 #define NX_GL4SHIM_GLSL_VERSION "#version 450 core"
 #define NX_GL4SHIM_VS NX_GL4SHIM_GLSL_VERSION "\nvoid main() { vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); " \
@@ -37,6 +37,8 @@ size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, siz
       "void main() {\n" NX_GL4SHIM_TEX " gl_FragDepth = texelFetch(s, t, 0).r; }\n") \
     P(SCALE_STENCIL, NX_GL4SHIM_VS, NX_GL4SHIM_HEAD "layout(binding = 62) uniform usampler2D s;\n" \
       "void main() {\n" NX_GL4SHIM_TEX " if (((texelFetch(s, t, 0).r >> uint(mode)) & 1u) == 0u) discard; }\n") \
+    P(CURSOR_STAMP, NX_GL4SHIM_VS, NX_GL4SHIM_HEAD "layout(binding = 62) uniform sampler2D s;\n" \
+      "layout(location = 0) out vec4 o;\nvoid main() {\n ivec2 t = ivec2(gl_FragCoord.xy) - dst.xy + src.xy; vec4 c = texelFetch(s, t, 0);\n if (c.a == 0.0) discard;\n o = c; }\n") \
     S(FFP_VS_SMOOTH, VS, nx_gl4shim_ffp_vs_smooth) S(FFP_VS_FLAT, VS, nx_gl4shim_ffp_vs_flat) \
     S(FFP_PS_SMOOTH, FS, nx_gl4shim_ffp_ps_smooth) S(FFP_PS_FLAT, FS, nx_gl4shim_ffp_ps_flat)
 /* Two enums from the one list: pair rows (gl4_compile_program) and stage rows (NXGPU_FN_SHADER_CREATE), so a pair row cannot be passed as a stage row by type. */

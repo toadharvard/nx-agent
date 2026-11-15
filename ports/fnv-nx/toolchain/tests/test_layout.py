@@ -6,6 +6,7 @@ collection after every function (--param ggc-min-expand=0 ggc-min-heapsize=0), a
 object: key (MSVC's decorated type name), size, align, members, bases; every type of pi's `types` column has a layout line; an
 unknown plugin argument is an error. No network, no game data. Run: python3 -I <this file> from the checkout root."""
 import re
+import glob
 import os
 import shutil
 import sys
@@ -35,8 +36,14 @@ WANT = {
     'UVDer2@@': (16, 4, 'c:8:1', 'UVDer@@:0:n,UVBase@@:12:i'),
     'UEmpty@@': (1, 1, '', ''),
     'UEmptyDer@@': (4, 4, 'a:0:4', 'UEmpty@@:0:n'),
-    'UTwoEmpty@@': (4, 4, 'a:0:4', 'UEmpty@@:0:n,UEmpty2@@:0:n'),
-    'UBits@@': (8, 4, 'a:0:0:3:4,b:0:3:5:4,c:1:0:20:4,d:3:4:2:1,e:4:0:9:2', ''),
+    # cpp-docs cpp/empty-bases.md, Derived4 : Empty2, Empty3 { int i; } is size(8): the first empty base at 0, a byte of padding to the second
+    # empty base at 1, the int aligned to 4 at offset 4.  UTwoEmpty : UEmpty, UEmpty2 { int a; } is the same shape.
+    'UTwoEmpty@@': (8, 4, 'a:4:4', 'UEmpty@@:0:n,UEmpty2@@:1:n'),
+    # c-language/padding-and-alignment-of-structure-members.md: adjacent bit fields share an allocation unit only if their integral types are the same
+    # size and the next fits without crossing the unit.  a(3) b(5) c(20): three 4-byte-typed fields, 28 bits, one unit (c starts at bit 8 = byte 1 bit 0).
+    # d is a char: another size, a new unit at byte 4 (alignment 1, bits 0-1).  e is a short: another size again, a new 2-byte unit at byte 6 (aligned 2), 9 bits;
+    # the unit ends at 8 and the struct (alignment 4) is 8 bytes.
+    'UBits@@': (8, 4, 'a:0:0:3:4,b:0:3:5:4,c:1:0:20:4,d:4:0:2:1,e:6:0:9:2', ''),
     'UWide@@': (24, 8, 'c:0:1,d:8:8,i:16:8', ''),
     'UPacked1@@': (13, 1, 'c:0:1,i:1:4,d:5:8', ''),
     'U?$Tmpl@N@@': (16, 8, 'v:0:8,c:8:1', ''),
@@ -113,14 +120,27 @@ DECLTYPE = {
     'a': '[4]int', 'au': '[]int', 'f': '(int,*char)int', 'g': '(int,...)int', 'h': '(?)int', 'q': 'const:*int', 'pc': '*const:int',
     'l': 'struct:Lst{next:*struct:Lst}', 'ts': 'struct:-{m:int;n:*const:int}', 'vv': 'volatile:long_long_unsigned_int',
     'fp': '*(*()int,*const:char)int', 'u': 'union:U{i:int;f:float}', 'cs': 'const:struct:S{x:int;y:*char}',
-    'caller': '()int', 'use': '()int', 'implicit_fn': '(?)int',
+    'caller': '()int', 'use': '()int', 'implicit_fn': '(?)int', 'use2': '()int',
 }
+
+
+def dt_all(obj, label):
+    """RULE DECLTYPE-COMPLETE: every global or weak symbol of the object's symbol table has exactly one line of .fnvnx.decltype (a type, or `-reason` of the closed set
+    that link/ctypes_compat.py reads from the plugin), and every line is a symbol of the table; -> ({symbol: type}, {symbol: reason})"""
+    rows, why = cc.parse_decltype_lines(pb.section(obj, '.fnvnx.decltype').encode(), label)
+    # the pinned binutils' nm -g: the global and weak symbols, defined or not (readelf's column layout shifts for a symbol with a st_other flag such as an SVE variant-PCS one)
+    nm = os.path.join(os.path.dirname(pb.driver()), 'aarch64-none-elf-nm')
+    syms = {l.split()[-1] for l in subprocess.run([nm, '-g', obj], capture_output=True, text=True, check=True).stdout.splitlines() if len(l.split()) >= 2}
+    lines = set(rows) | set(why)
+    check('DECLTYPE-COMPLETE %s: one line for each of the %d global/weak symbols of the object (type or closed-set reason), no line for another' % (label, len(syms)),
+          lines == syms and not (set(rows) & set(why)), (sorted(syms - lines), sorted(lines - syms)))
+    return rows, why
 
 
 def decltype(obj):
     data = pb.section(obj, '.fnvnx.decltype')
     try:
-        got = cc.parse_decltype((data or '').encode(), 'decltype.c') if data else None
+        got = dt_all(obj, 'decltype.c')[0] if data else None
     except ValueError as e:
         check('.fnvnx.decltype parses with ctypes_compat.parse_decltype', False, e)
         return
@@ -131,7 +151,7 @@ def decltype(obj):
     check('enum E: `enum:E=` + int or unsigned_int (the compiler\'s choice of the integer type)', e in ('enum:E=int', 'enum:E=unsigned_int'), e)
     for sym, want in sorted(DECLTYPE.items()):
         check('decltype %s is %s' % (sym, want), got.get(sym) == want, got.get(sym))
-    check('exactly the external symbols (no static, no builtin), each once', set(got) == set(DECLTYPE), sorted(set(got) ^ set(DECLTYPE)))
+    check('exactly the symbols the object has (no static, no builtin, no declaration that only a header or the unit makes: never_used), each once', set(got) == set(DECLTYPE), sorted(set(got) ^ set(DECLTYPE)))
     check('every spelling round-trips: parse is total on what the plugin wrote', all(cc.parse(t) for t in got.values()))
 
 
@@ -141,37 +161,38 @@ VEC = {
     'g_p4': '*vec:4:16:16:int', 'g_a': '[2]vec:4:16:16:int', 'g_h': 'struct:HoldsV{c:char;v:vec:4:16:16:int}',
     'n_fn': '(vec:16:16:16:unsigned_char,vec:4:16:16:int)vec:4:16:16:int', 'g_cmp': 'vec:4:16:16:int',
     'sv_f32': '(vec:4+4x:16+16x:16:float,vec:16+16x:2+2x:2:bool_bits_1)vec:4+4x:16+16x:16:float', 'sv_i8': '()vec:16+16x:16+16x:16:signed_char',
-    'sv_b': '(*vec:16+16x:16+16x:16:signed_char)vec:16+16x:2+2x:2:bool_bits_1', 'np': 'nullptr_t',
+    'sv_b': '(*vec:16+16x:16+16x:16:signed_char)vec:16+16x:2+2x:2:bool_bits_1', 'np': 'nullptr_t', 'sv_refs': '[3]const:*void',
 }
 
 # every code of class tcc_type in the pinned GCC 13.3 tree.def and cp/cp-tree.def has exactly one outcome: a row of the grammar (a `case` of dl_type), or
 # the error of dl_type's default arm.  Why the error arm cannot fire for a code (or is the rule) is the reason below; a code of the pinned headers
 # without an entry here fails the test, so a GCC change that adds a type code is seen.
 TCC_TYPE_ROW = {'POINTER_TYPE', 'ARRAY_TYPE', 'FUNCTION_TYPE', 'RECORD_TYPE', 'UNION_TYPE', 'ENUMERAL_TYPE', 'VOID_TYPE', 'INTEGER_TYPE', 'REAL_TYPE',
-                'BOOLEAN_TYPE', 'VECTOR_TYPE', 'NULLPTR_TYPE'}
+                'BOOLEAN_TYPE', 'VECTOR_TYPE', 'NULLPTR_TYPE', 'COMPLEX_TYPE', 'REFERENCE_TYPE'}
 # RULE: a code with no row is an error of the compilation (dl_type's default arm): a loud failure, never a wrong spelling. The reasons are facts of the
 # pinned GCC 13.3.0 source (gcc-13.3.0.tar.xz sha256 0845e962...) on where a code is made; they say why the error does not fire in practice.
 GCC = 'gcc-13.3.0/gcc/'
 TCC_TYPE_ERROR = {
-    'COMPLEX_TYPE': 'deliberate: _Complex has no spelling (tested: decltype_errors cplx)',
     'FIXED_POINT_TYPE': GCC + 'c/c-decl.cc:12234-12236 and 12551-12553: _Fract/_Accum is a compile error unless targetm.fixed_point_supported_p; the default is false '
                         '(targhooks.cc:638) and only config/avr makes the type (avr.cc:1638, stor-layout.cc:2726/2748 from the avr hook); tested: _Fract is a compile error',
     'QUAL_UNION_TYPE': GCC + 'ada/gcc-interface/decl.cc:10009 is the only make_node (QUAL_UNION_TYPE)',
     'OPAQUE_TYPE': GCC + 'config/rs6000/rs6000-builtin.cc:760,772 are the only make_node (OPAQUE_TYPE)',
-    'OFFSET_TYPE': GCC + 'tree.cc:7642 build_offset_type, called by no file of c/ or c-family/ (pointer to data member: cp/)',
-    'METHOD_TYPE': GCC + 'tree.cc:7579 build_method_type_directly, called by no file of c/ or c-family/',
-    'REFERENCE_TYPE': GCC + 'tree.cc:7020; C-side callers (c-family/c-attribs.cc, c-common.cc, c/c-objc-common.cc) make references only for Objective-C and attribute '
-                      'machinery, none is the declared type of an external C symbol; any that were is this error',
-    'LANG_TYPE': GCC + 'cp/decl.cc:4756,4767,4798 make the C++ front end\'s own LANG_TYPE nodes; the one C-side use is ada/ (utils.cc:494)',
+    'OFFSET_TYPE': GCC + 'tree.cc:7637 build_offset_type; callers outside cp/ and ada/ are tree.cc:7662 (its own canonical-type step) and 10067 (reconstruct_complex_type, '
+                         'which rebuilds an OFFSET_TYPE only from an OFFSET_TYPE it is given); none in c/, c-family/ or the middle end (grep of the pinned tree): C has no pointer to member',
+    'METHOD_TYPE': GCC + 'tree.cc:7569 build_method_type_directly; callers outside cp/ are tree.cc:7608, 7627 and 10059 (reconstruct_complex_type, from a METHOD_TYPE it is given); '
+                         'none in c/, c-family/ or the middle end (grep of the pinned tree): C has no member function',
+    'LANG_TYPE': GCC + 'tree.def:252; no make_node (LANG_TYPE) and no make_lang_type in c/, c-family/ or the middle end (grep of the pinned tree); the C++ front end '
+                       'makes them (cp/decl.cc:4756,4767,4798), the section is written only for C units',
     **{c: GCC + 'cp/cp-tree.def: a code of the C++ front end only (templates, dependent and pack types); the section is written only for C units '
-          '(fnvnx_layout.cc: `if (!is_cxx()) emit_decltype()`)'
+          '(fnvnx_layout.cc: the C++ rows are the C-linkage symbols, whose types are never these codes)'
        for c in ('BASES', 'BOUND_TEMPLATE_TEMPLATE_PARM', 'DECLTYPE_TYPE', 'DEPENDENT_OPERATOR_TYPE', 'TEMPLATE_TEMPLATE_PARM', 'TEMPLATE_TYPE_PARM',
                  'TRAIT_TYPE', 'TYPENAME_TYPE', 'TYPEOF_TYPE', 'TYPE_ARGUMENT_PACK', 'TYPE_PACK_EXPANSION', 'UNBOUND_CLASS_TEMPLATE')},
 }
 
 
 def tcc_type_codes():
-    inc = subprocess.run([os.environ.get('FNVNX_GXX', 'aarch64-linux-gnu-g++-13'), '-print-file-name=plugin'], capture_output=True, text=True).stdout.strip()
+    co = os.path.dirname(os.path.dirname(pb.driver()))   # the pinned compiler tree (the recipe has fetched it): its own plugin headers, not a distribution compiler's
+    inc = glob.glob(os.path.join(co, 'lib', 'gcc', '*', '*', 'plugin'))[0]
     codes = set()
     for rel in ('include/tree.def', 'include/c-family/c-common.def', 'include/cp/cp-tree.def'):
         f = os.path.join(inc, rel)
@@ -184,7 +205,7 @@ SO = []
 
 
 def vec(obj, td):
-    got = dict(l.split('\t') for l in pb.section(obj, '.fnvnx.decltype').splitlines())
+    got = dt_all(obj, 'obj')[0]
     for sym, want in sorted(VEC.items()):
         check('vec %s is %s' % (sym, want), got.get(sym) == want, got.get(sym))
     check('vec: exactly the external symbols', set(got) == set(VEC), sorted(set(got) ^ set(VEC)))
@@ -192,8 +213,8 @@ def vec(obj, td):
           got['n_s32'] == got['g_s4'] and got['g_s4'] != got['g_u4'] and got['g_s4'] != got['g_s2'] and got['g_s4'] != got['g_d2'], got)
     codes = tcc_type_codes()
     check('tcc_type universe is read from the pinned headers (32 codes at GCC 13.3)', len(codes) == 32, sorted(codes))
-    src = open(os.path.join(HERE, '..', 'layout', 'fnvnx_layout.cc')).read()
-    body = src[src.index('static std::string dl_type('):src.index('static void emit_decltype')]
+    body = open(os.path.join(HERE, '..', 'layout', 'decltype_spell.inc')).read()   # dl_type, the one spelling function (shared with fnvnx_dispatch)
+    body = body[body.index('static std::string dl_type('):]
     cases = set(re.findall(r'case (\w+):', body))
     check('every tcc_type code has one outcome (row or error)', codes == TCC_TYPE_ROW | set(TCC_TYPE_ERROR), sorted(codes ^ (TCC_TYPE_ROW | set(TCC_TYPE_ERROR))))
     check('the row codes are exactly the cases of dl_type', {c for c in cases if c.endswith('_TYPE')} == TCC_TYPE_ROW, sorted(cases))
@@ -203,10 +224,34 @@ def vec(obj, td):
     check('_Fract is a compile error on aarch64 (FIXED_POINT_TYPE cannot reach the plugin)', r.returncode != 0, r.stderr[-300:])
 
 
+def cplx(obj):
+    got = dt_all(obj, 'obj')[0]
+    for k, rx in (('c_f', r'complex:8:4:float'), ('c_d', r'complex:16:8:double'), ('c_i', r'complex:8:4:int'), ('c_cd', r'const:complex:16:8:double'),
+                  ('c_p', r'\*complex:16:8:double'), ('c_a', r'\[3\]complex:8:4:float'), ('c_h', r'struct:HoldsC\{c:char;z:complex:16:8:double\}'),
+                  ('c_fn', r'\(complex:8:4:float,complex:\d+:\d+:long_double\)complex:16:8:double'), ('at_i', r'atomic:int'),
+                  ('at_cf', r'atomic:complex:8:4:float'), ('at_vl', r'volatile:atomic:long_int')):
+        check('complex %s matches %s' % (k, rx), re.fullmatch(rx, got.get(k, '')) is not None, got.get(k))
+    m = re.fullmatch(r'complex:(\d+):(\d+):long_double', got.get('c_ld', ''))
+    check('complex long double is two long doubles: size twice the alignment of the type (read off TYPE_SIZE_UNIT/TYPE_ALIGN_UNIT)', m and int(m[1]) == 2 * int(m[2]), got.get('c_ld'))
+    check('complex: exactly the external symbols', set(got) == {'c_f', 'c_d', 'c_ld', 'c_i', 'c_cd', 'c_p', 'c_a', 'c_h', 'c_fn', 'at_i', 'at_cf', 'at_vl'}, sorted(got))
+    check('complex: every spelling round-trips through ctypes_compat.parse', all(cc.parse(t) for t in got.values()))
+    check('complex: compatibility is by size, alignment and component',
+          cc.compatible(cc.parse(got['c_f']), cc.parse('complex:8:4:float')) and not cc.compatible(cc.parse(got['c_f']), cc.parse(got['c_d']))
+          and not cc.compatible(cc.parse(got['at_i']), cc.parse('int')), got)
+
+
+def refrow(obj):
+    got = dt_all(obj, 'obj')[0]
+    check('ref: the builtin va_list prototypes a C unit redeclares take the unit\'s own types (no reference row is written); the row is the reader\'s and dl_type\'s',
+          set(got) == {'__builtin_va_end', '__builtin_va_copy', 'use'} and not any('ref:' in v for v in got.values()), got)
+    check('ref: ctypes_compat parses and compares the row',
+          cc.compatible(cc.parse('*ref:8:8:int'), cc.parse('*ref:8:8:int')) and not cc.compatible(cc.parse('ref:8:8:int'), cc.parse('ref:8:8:char')))
+
+
 def decltype_errors(td, so):
     """a type outside the grammar is an error of the compilation; the declarations of one symbol that the front end composes (C11 6.2.7p3)
     give one line, with the composite type"""
-    for name, text, why in (('atomic', '_Atomic int at;\n', '_Atomic'), ('cplx', '_Complex double z;\n', 'outside the grammar')):
+    for name, text, why in (('fixed', '_Fract fr;\n', 'error'),):
         src = os.path.join(td, name + '.c')
         open(src, 'w').write(text)
         r = pb.compile(src, os.path.join(td, name + '.o'), so)
@@ -218,6 +263,106 @@ def decltype_errors(td, so):
         r = pb.compile(src, os.path.join(td, name + '.o'), so)
         got = cc.parse_decltype(pb.section(os.path.join(td, name + '.o'), '.fnvnx.decltype').encode(), name) if r.returncode == 0 else None
         check('decltype: declarations of one symbol compose to one line (%s)' % name, got == want, (got, r.stderr[-300:]))
+
+
+# DECLTYPE-LANG: the same declarations in a C unit and, inside extern "C", in a C++ unit give the same rows; a declaration of a C++ unit with C++ linkage gives none
+PAIR = ('struct S { int x; char *y; };\nstruct S v;\nstruct L;\nextern struct L *il;\nint a[4];\nint f(int i, char *s) { return i + s[0]; }\n'
+        'int g(int i, ...);\nint h(void);\nconst int *pc;\nstruct Lst { struct Lst *next; } l;\nenum E { E0, E1 } e;\n'
+        'int (*fp)(int (*cb)(void), const char *const name);\nvolatile unsigned long long vv;\n'
+        'struct W { struct { int a; char b; } in; union { int i; float f; }; int z; };\ntypedef struct { int t; } TD;\nint anf(struct W *w, TD *t);\nenum { AN0 } anv;\n'
+        'int use(void) { return f(1, 0) + g(1, 2) + h() + (il != 0) + anf(0, 0); }\n')
+CXX_ONLY = ('struct P { int a; };\nstruct Q : P { int b; };\nstruct V { virtual void f(); int c; };\nnamespace ns { struct N { int n; }; }\n'
+            'enum class EC : short { A };\nstruct Top { struct In { int i; }; };\n'
+            'extern "C" {\nint r1(P &p, const Q &q);\nint r2(V *v, ns::N n, EC e, Top::In *t);\nint r3(decltype(nullptr) n);\nextern Q gq;\nQ gq2 = {};\n'
+            'int r4(int x) { return x; }\nint use(void) { return r1(gq, gq) + r4(2) + gq2.b + r2(0, ns::N(), EC::A, 0) + r3(nullptr); }\n}\n'
+            'template <class T> struct TT { T t; };\nextern "C" int _ZN2ZZC1ERK2TTIiE(void *self, const TT<int> &s);\nint mangled_use(TT<int> &x) { return _ZN2ZZC1ERK2TTIiE(0, x); }\n'
+            'int cxxfn(int);\nint cxxuse() { return cxxfn(1); }\nint asmn(int) __asm__("plain_cxx");\nint asmuse() { return asmn(1); }\n')
+CXX_ONLY_ROWS = {
+    'r1': '(ref:4:4:struct:P{a:int},ref:4:4:const:struct:Q{-:struct:P{a:int};b:int})int',
+    'r2': '(*struct:V{-:**(?)int;c:int},struct:ns__N{n:int},enum:EC=short_int,*struct:Top__In{i:int})int',
+    'r3': '(nullptr_t)int', 'gq': 'struct:Q{-:struct:P{a:int};b:int}', 'gq2': 'struct:Q{-:struct:P{a:int};b:int}', 'r4': '(int)int', 'use': '()int'}
+
+
+def decltype_cxx(td, so):
+    cs, cp = os.path.join(td, 'pair.c'), os.path.join(td, 'pair.cpp')
+    open(cs, 'w').write(PAIR)
+    open(cp, 'w').write('extern "C" {\n' + PAIR + '}\n')
+    rows = {}
+    for src, o in ((cs, 'pair_c.o'), (cp, 'pair_cxx.o')):
+        r = pb.compile(src, os.path.join(td, o), so)
+        check('decltype pair: %s compiles' % os.path.basename(src), r.returncode == 0, r.stderr[-800:])
+        if r.returncode:
+            return
+        rows[o] = dt_all(os.path.join(td, o), o)[0]
+    check('extern "C" declarations and definitions of a C++ unit give the same rows as the same text in a C unit (%d symbols)' % len(rows['pair_c.o']),
+          rows['pair_c.o'] == rows['pair_cxx.o'] and len(rows['pair_c.o']) >= 14 and '-' in rows['pair_c.o']['anf'] and '._anon' not in rows['pair_cxx.o']['anf'], (sorted(set(rows['pair_c.o'].items()) ^ set(rows['pair_cxx.o'].items()))))
+    src = os.path.join(td, 'cxxonly.cpp')
+    open(src, 'w').write(CXX_ONLY)
+    r = pb.compile(src, os.path.join(td, 'cxxonly.o'), so)
+    check('decltype C++-only types compile', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        got, why = dt_all(os.path.join(td, 'cxxonly.o'), 'cxxonly')
+        check('a C++ unit: references, classes with bases and a vptr, scoped names, enum class, nullptr_t, in the existing grammar (ILP32 reference size 4)',
+              all(got.get(k) == v for k, v in CXX_ONLY_ROWS.items()), {k: (got.get(k), v) for k, v in CXX_ONLY_ROWS.items() if got.get(k) != v})
+        check('a C++ unit: exactly its C-linkage symbols (cxxfn, cxxuse have C++ linkage: no row)', set(got) == set(CXX_ONLY_ROWS), sorted(set(got) ^ set(CXX_ONLY_ROWS)))
+        check('DECLTYPE-MANGLED: an extern "C" declaration of a `_Z` mangled name (a specialization in its signature) gets no row, and a plain extern "C" one still does',
+              '_ZN2ZZC1ERK2TTIiE' not in got and why.get('_ZN2ZZC1ERK2TTIiE') == 'mangled' and 'r1' in got)
+        check('DECLTYPE-COMPLETE: C++ names with the Itanium mangling have the reason mangled, a C++ name with an assembler label (not `_Z`) the reason cxx, a plain extern "C" one a type',
+              why.get('_Z5cxxfni') == 'mangled' and why.get('_Z6cxxusev') == 'mangled' and why.get('plain_cxx') == 'cxx' and 'r4' in got, why)
+        check('every reason of the section is in the closed set of the plugin (FNVNX_DECLTYPE_REASONS), read by ctypes_compat', set(why.values()) <= cc._decltype_reasons(), why)
+        check('every C++ row parses with ctypes_compat', all(cc.parse(t) for t in got.values()))
+    # DECLTYPE-SPEC: a class template specialization (or a class nested in one) is written by its Itanium type mangling, `_ZTS...`
+    src = os.path.join(td, 'tspec.cpp')
+    open(src, 'w').write('template <class T> struct TT { T t; struct In { int i; }; };\n'
+                         'template <class F> struct G;\ntemplate <class R, class A> struct G<R(A)> { R (*f)(A); };\n'
+                         'extern "C" int ts(TT<int> *p, G<int(char)> *g, TT<int>::In *n);\n'
+                         'extern "C" int use(void) { TT<int> x; TT<int> *loc = &x; (void)loc; return ts(&x, 0, 0); }\n')
+    r = pb.compile(src, os.path.join(td, 'tspec.o'), so)
+    check('DECLTYPE-SPEC: a template-typed parameter and body local of an extern "C" function compile', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        got = dt_all(os.path.join(td, 'tspec.o'), 'tspec')[0]
+        row = got.get('ts', '')
+        check('DECLTYPE-SPEC: the row names each specialization by `_ZTS` + its Itanium mangling and parses with ctypes_compat',
+              'struct:_ZTS2TTIiE{t:int}' in row and 'struct:_ZTS1GIFicEE,' in row and 'struct:_ZTSN2TTIiE2InE)' in row and bool(cc.parse(row)), row)
+    # DECLTYPE-COMPLETE in a C unit: a declaration with an assembler label is the symbol of the label (SYMSET: `*x` is stripped, the mark is on `x`), and a function the back
+    # end calls implicitly (a binary128 sum is the library function __addtf3) has the reason libcall
+    src = os.path.join(td, 'lbl.c')
+    open(src, 'w').write('int af(int) __asm__("realname");\nint q(int i) { volatile _Float128 a = i, b = 2; volatile _Float128 c = a + b; return i; }\nint use(void) { return af(1) + q(3); }\n')
+    r = pb.compile(src, os.path.join(td, 'lbl.o'), so)
+    check('DECLTYPE-COMPLETE: an assembler-label declaration and a libcall compile', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        rl, wl = dt_all(os.path.join(td, 'lbl.o'), 'lbl')
+        check('DECLTYPE-COMPLETE: the label declaration is the row of `realname` (its object symbol), the implicit library call __addtf3 has the reason libcall',
+              rl.get('realname') == '(int)int' and wl.get('__addtf3') == 'libcall' and wl.get('__floatsitf') == 'libcall', (rl, wl))
+    # a unit that defines a library function the front end also declares as a builtin (newlib's ffsll): one symbol, the unit's declaration is the row
+    src = os.path.join(td, 'bi.c')
+    open(src, 'w').write('int ffsll(long long i) { return __builtin_ffsll(i); }\nint ffsl(long i) { return __builtin_ffsl(i); }\n')
+    r = pb.compile(src, os.path.join(td, 'bi.o'), so)
+    check('DECLTYPE-COMPLETE: a definition of a function the front end declares as a builtin compiles', r.returncode == 0, r.stderr[-400:])
+    if r.returncode == 0:
+        rb, wb = dt_all(os.path.join(td, 'bi.o'), 'bi')
+        check('DECLTYPE-COMPLETE: the definition\'s typed row is the symbol\'s line, not the builtin reason', rb.get('ffsll') == '(long_long_int)int' and rb.get('ffsl') == '(long_int)int' and not wb, (rb, wb))
+    for name, text, why in (('ptrmem', 'struct M { int m; };\nextern "C" int pm(int M::*p);\nextern "C" int use(void) { return pm(0); }\n', 'offset_type'),
+                            ('lambda', 'auto lam = [] {};\nextern "C" int lm(decltype(lam) *p);\nextern "C" int use(void) { return lm(0); }\n', 'lambda closure type has no tag form'),
+                            ('anonns', 'namespace { struct An { int i; }; }\nextern "C" int an(An *p);\nextern "C" int use(void) { An x; return an(&x); }\n', 'scope name outside the grammar')):
+        src = os.path.join(td, name + '.cpp')
+        open(src, 'w').write(text)
+        r = pb.compile(src, os.path.join(td, name + '.o'), so)
+        check('decltype: %s in an extern "C" declaration is an error naming the cause (%s)' % (name, why), r.returncode != 0 and why in r.stderr, (r.returncode, r.stderr[-400:]))
+    # a C/C++ pair with an incompatible parameter is red in the gate that reads the sections (link/ctypes_compat.check)
+    for name, text in (('pc.c', 'int pf(int x);\nint use(void) { return pf(1); }\n'), ('pcx.cpp', 'extern "C" int pf(long long x);\nextern "C" int use2(void) { return pf(1); }\n')):
+        src = os.path.join(td, name)
+        open(src, 'w').write(text)
+        r = pb.compile(src, os.path.join(td, name + '.o'), so)
+        check('incompatible pair: %s compiles' % name, r.returncode == 0, r.stderr[-400:])
+        if r.returncode:
+            return
+    per = {n: cc.parse_decltype(pb.section(os.path.join(td, n + '.o'), '.fnvnx.decltype').encode(), n) for n in ('pc.c', 'pcx.cpp')}
+    items, red = cc.check(per)
+    check('a C declaration and an extern "C" declaration of one symbol with an incompatible parameter: ctypes_compat is red', 'pf' in red and 'pf' in items, (items, red))
+    per2 = {'pair_c': rows['pair_c.o'], 'pair_cxx': rows['pair_cxx.o']}
+    items, red = cc.check(per2)
+    check('the same declarations in a C unit and a C++ unit are compatible (%d symbols compared)' % len(items), not red and len(items) >= 12, (items, red))
 
 
 CROSSING = {
@@ -271,12 +416,23 @@ def main():
         if r.returncode == 0:
             decltype(obj)
         decltype_errors(td, so)
+        decltype_cxx(td, so)
         obj = os.path.join(td, 'v.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'vec.c'), obj, so, args=['-std=gnu2x'])
         check('vec.c compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             SO[:] = so
             vec(obj, td)
+        obj = os.path.join(td, 'cx.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'complex.c'), obj, so)
+        check('complex.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            cplx(obj)
+        obj = os.path.join(td, 'rf.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'ref.c'), obj, so)
+        check('ref.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            refrow(obj)
         obj = os.path.join(td, 'c.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'linkage_c.c'), obj, so)
         check('linkage_c.c compiles', r.returncode == 0, r.stderr[:2000])

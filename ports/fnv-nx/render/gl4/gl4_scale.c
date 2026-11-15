@@ -23,7 +23,7 @@
 
 #define SCALE_UNIT 62   /* texture units 62 / 63: above every unit a guest stage * 16 + slot can name */
 enum { P_C2D = NX_GL4SHIM_PAIR_SCALE_C2D, P_CARR = NX_GL4SHIM_PAIR_SCALE_CARR, P_C3D = NX_GL4SHIM_PAIR_SCALE_C3D,
-       P_DEPTH = NX_GL4SHIM_PAIR_SCALE_DEPTH, P_STENCIL = NX_GL4SHIM_PAIR_SCALE_STENCIL };
+       P_DEPTH = NX_GL4SHIM_PAIR_SCALE_DEPTH, P_STENCIL = NX_GL4SHIM_PAIR_SCALE_STENCIL, P_CURSOR = NX_GL4SHIM_PAIR_CURSOR_STAMP };
 
 static GLuint program(int kind) {
     if (!g4.scaleProg[kind]) g4.scaleProg[kind] = gl4_compile_program((enum nx_gl4shim_pair_id)kind);
@@ -115,4 +115,41 @@ void gl4_scale_point(const Gl4Sub* s, const Gl4Sub* d, const uint16_t* ramp) {
     p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
     gl4_neutral_state();
     gl4_query_resume();
+}
+
+/* The software cursor of NxPresent (nxgpu4.h P2) stamped into the colour image `im` (level 0, layer 0) before the present blit: the cursor pixels (BGRA bytes, cw x ch, top row first) are
+ * uploaded as an RGBA8 texture and one fragment per covered image texel writes the cursor texel unless its alpha is 0 (the program CURSOR_STAMP); blending is off, so the write is the
+ * colour-key copy of Wine's glsl blitter. The rect is the cursor's rect clipped to the image; entirely outside = nothing is drawn. Returns 0, or 1 when GL reported an error. */
+int gl4_cursor_stamp(const Gl4Image* im, int32_t cx, int32_t cy, uint32_t cw, uint32_t ch, const uint8_t* bgra) {
+    int64_t x0 = cx < 0 ? 0 : cx, y0 = cy < 0 ? 0 : cy, x1 = (int64_t)cx + cw, y1 = (int64_t)cy + ch;
+    if (x1 > im->w) x1 = im->w;
+    if (y1 > im->h) y1 = im->h;
+    if (x0 >= x1 || y0 >= y1) return 0;
+    Gl4Sub d = {im, 0, 0, (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0)};
+    Gl4Sub s = {im, 0, 0, (uint32_t)(x0 - cx), (uint32_t)(y0 - cy), d.w, d.h};   /* src.xy = the cursor texel of the rect's corner */
+    GLuint tex = 0;
+    while (p_glGetError()) {}
+    gl4_query_pause();
+    ensure_objects();
+    p_glCreateTextures(GL_TEXTURE_2D, 1, &tex);
+    p_glTextureStorage2D(tex, 1, GL_RGBA8, (GLsizei)cw, (GLsizei)ch);
+    p_glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    p_glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    p_glTextureSubImage2D(tex, 0, 0, 0, (GLsizei)cw, (GLsizei)ch, GL_BGRA, GL_UNSIGNED_BYTE, bgra);
+    gl4_neutral_state();
+    gl4_detach_all(g4.blitFbo[1]);
+    gl4_attach(g4.blitFbo[1], GL_COLOR_ATTACHMENT0, im, 0, 0);
+    p_glNamedFramebufferDrawBuffer(g4.blitFbo[1], GL_COLOR_ATTACHMENT0);
+    p_glBindFramebuffer(GL_FRAMEBUFFER, g4.blitFbo[1]);
+    p_glBindVertexArray(g4.lay[0].vao);
+    p_glViewportIndexedf(0, (float)d.x, (float)d.y, (float)d.w, (float)d.h);
+    p_glEnable(GL_SCISSOR_TEST);
+    p_glScissor((GLint)d.x, (GLint)d.y, (GLsizei)d.w, (GLsizei)d.h);
+    draw(program(P_CURSOR), tex, &s, &d, 0, 0);
+    gl4_detach_all(g4.blitFbo[1]);
+    p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    p_glDeleteTextures(1, &tex);
+    gl4_neutral_state();
+    gl4_query_resume();
+    return p_glGetError() != 0;
 }

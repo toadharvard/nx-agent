@@ -258,10 +258,10 @@
   },
   {
    "id": "S14",
-   "property": "the underlying type of an enumeration without a fixed type is always int, whatever the enumerators; an enumerator value outside int is outside the language",
+   "property": "the underlying type of an enumeration without a fixed type is always int, whatever the enumerators; an enumerator written outside int is converted to int (modular, the 32-bit pattern kept): the cited page states the type, not a diagnostic",
    "msvc": "the underlying type of an enumeration without a fixed type is always int, whatever the enumerators",
-   "gcc": "int (C and C++), error for a value outside int",
-   "mechanism": "msvcmodel.patch: cp/decl.cc finish_enum_value_list, c/c-decl.cc finish_enum under TARGET_ILP32 (GCC picked unsigned int for non-negative values)",
+   "gcc": "int (C and C++); a value outside int is converted to int by the front end's own conversion (C: convert, modular; C++: perform_implicit_conversion, modular with -Woverflow), no error",
+   "mechanism": "msvcmodel.patch: cp/decl.cc finish_enum_value_list, c/c-decl.cc finish_enum under TARGET_ILP32 (GCC picked unsigned int for non-negative values, and a wider type for a value outside int; here minnode/maxnode are the bounds of int, so the type is int, and the enumerator loop converts each value)",
    "kind": "patch",
    "status": "closed",
    "check": "static_assert DM(\"S14\") in toolchain/tests/ldbl/datamodel.cpp",
