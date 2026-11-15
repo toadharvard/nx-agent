@@ -925,3 +925,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - bottleneck: cand3 platform gen:12 (L1/L5); then liftsrc cold (w8); facts on d9d208c61 (w7); fpfacts (w13).
 - 21:27 Platform gen:12 has a fix by the rule: L5 0608004f5 (claude/fnv-l5-platform-w10-objstub, on w12L2 5fb4374ee). gen_combridge takes COM_SPEC, COM_ROWS and COM_WORDS from bridgefacts outputs through `uses`, with no import of another root's code; combridge.gen.cpp is byte-equal. L1 w12 takes it into cand3. w8 merges it into base3 now.
 - 21:28 L1 adds a static check that makes any generator importing another root's code a check error. I asked L1 that w12 take L5's 0608004f5 into cand3 rather than write a second fix.
+
+## 21:32 base3 393e79d8c; the second cand3 blocker
+- base3 @ 393e79d8c adds test_defdisp following DEFDISP-NS: POD matrix 245 cases, 0 mismatches, 0 failed.
+- Loader red, also in cand3 41a8855d4: boot.c includes platform's fnvnx_win32_ext.h, and platform already uses the loader, so a `uses` would make a cycle.
+  - lift/descs objects_of is red only because the loader is red, and lift/bridges follows from it.
+  - Rule: an interface shared by two roots lives in a root below both. Proposed to L5 (owner of the header) and L1 (owner of the loader): the image-record and fnvnx_declared_fonts declarations move into hostabi/include, and the loader uses hostabi INCLUDE.
+- bottleneck: cand3 heads for gen:12 (L5 0608004f5, via w12) and the loader interface (L5/L1). Then the liftsrc cold build (w8). Facts (w7) and fpfacts (w13) go on meanwhile.
