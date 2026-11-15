@@ -18,19 +18,12 @@ def ours(pairs):
     from fnvlift import f_cpufeat
     for pe, facts in pairs:
         mod = os.path.splitext(os.path.basename(pe))[0]
-        base, rows = g.load_ranges(os.path.join(facts, 'ranges.tsv'))
-        img = g.Image(pe, base); seen = set()
-        for e in sorted(rows):
-            for lo, hi in rows[e]:
-                if (lo, hi) in seen: continue
-                seen.add((lo, hi)); code = img.read(lo, hi)
-                if code is None: continue
-                for i in g._md.disasm(code, lo):
-                    try: shape.shape_key(i)
-                    except shape.ShapeError: continue
-                    if def_check.lifted_by(i) == 'cpufeat-UD':
-                        gs = f_cpufeat.gates(i)
-                        out['%s:%08x' % (mod, i.address)] = (i.mnemonic, ';'.join(x[0] for x in gs), i.bytes.hex())
+        for ad, i in sorted(def_check.instructions(pe, facts).items()):
+            try: shape.shape_key(i)
+            except shape.ShapeError: continue
+            if def_check.lifted_by(i) == 'cpufeat-UD':
+                gs = f_cpufeat.gates(i)
+                out['%s:%08x' % (mod, ad)] = (i.mnemonic, ';'.join(x[0] for x in gs), i.bytes.hex())
     return out
 
 
