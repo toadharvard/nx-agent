@@ -18,11 +18,10 @@ void nxgl4_shim_set(void *(*ptr)(uint64_t, uint64_t), void (*present)(uint32_t),
     g_exit = exit_cb;
 }
 
-void *nxgl4_guest_ptr(uint64_t addr, uint64_t size) { return g_ptr ? g_ptr(addr, size) : (void *)0; }
+void *nxgl4_guest_ptr(uint64_t addr, uint64_t size) { return g_ptr(addr, size); }
 
 void nxgl4_on_present(uint32_t frame) {
-    if (g_present)
-        g_present(frame);
+    g_present(frame);
 }
 
 void fnvnx_reach_violation(uint32_t fact_id) {
