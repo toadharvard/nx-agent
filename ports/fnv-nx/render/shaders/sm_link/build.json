@@ -45,5 +45,27 @@
     "/usr/lib/x86_64-linux-gnu/libc.so.6"
    ]
   }
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/render/shaders/translator",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/pair",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/smscan",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "INCLUDE"
+  }
+ ]
 }

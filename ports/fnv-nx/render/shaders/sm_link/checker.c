@@ -262,8 +262,15 @@ static int cmp_vcls(const void *a, const void *b) { const VCls *x = a, *y = b; i
 static int cmp_pcls(const void *a, const void *b) { const PCls *x = a, *y = b; int c; if (x->fl != y->fl) return x->fl - y->fl; if ((c = memcmp(x->sig, y->sig, 32))) return c; if (x->major != y->major) return x->major < y->major ? -1 : 1; return cmp_pairs(&x->pr, &y->pr); }
 static long rejected_pairs;   /* nx_pair_variant refused the pair (outside the link slots): the draw path cannot build it */
 static long ffp_programs, ffp_prog_by[4];   /* the programs with a fixed-function side */
-static uint8_t ffp_sig[NX_GL4SHIM_STAGE_COUNT][32];   /* sha256 of the row's text: the signature of a fixed-function stage */
-static void ffp_sigs(void) { for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) fnvnx_sha256(nx_gl4shim_stages[i].text, strlen(nx_gl4shim_stages[i].text), ffp_sig[i]); }
+#define NX_SM_NOP_(id, st, text)
+#define NX_SM_ROW_(id, st, text) &nx_gl4shim_##id,
+#define NX_SM_PAIR_(id, vs, fs) &nx_gl4shim_##id,
+#define NX_SM_NOPAIR_(id, vs, fs)
+#define NSTAGES ((int)NX_GL4SHIM_SHADER_COUNT - 1)   /* the stage rows of the one gl4shim list; row i has the reserved shader id i + 1 */
+static const struct nx_gl4shim_stage *const stage_tab[] = { NX_GL4SHIM_PROG_LIST(NX_SM_NOPAIR_, NX_SM_ROW_) };
+static const struct nx_gl4shim_pair *const pair_tab[] = { NX_GL4SHIM_PROG_LIST(NX_SM_PAIR_, NX_SM_NOP_) };   /* the pair rows of the same list, in row order */
+static uint8_t ffp_sig[NSTAGES][32];   /* sha256 of the row's text: the signature of a fixed-function stage */
+static void ffp_sigs(void) { for (int i = 0; i < NSTAGES; i++) fnvnx_sha256(stage_tab[i]->text, strlen(stage_tab[i]->text), ffp_sig[i]); }
 static long uncovered_L;   /* programs whose link set L is not empty: the draw path translates both stages per pair (link_pairs), which this certificate does not cover */
 static Prog *programs(const SLines *S, long *np) {
     uncovered_L = 0; rejected_pairs = 0; ffp_programs = 0; memset(ffp_prog_by, 0, sizeof ffp_prog_by); ffp_sigs();
@@ -296,7 +303,7 @@ static Prog *programs(const SLines *S, long *np) {
      * the one function nx_pair_variant: the FFP VS's writes are nx_pair_ffp_vs_writes, the FFP PS's reads nx_pair_ffp_ps_reads, an FFP PS has ps_major 3. The same call, the same arguments. */
     uint8_t fw[31], fr[31]; uint32_t nfw = nx_pair_ffp_vs_writes(fw), nfr = nx_pair_ffp_ps_reads(fr);
     for (int fl = 0; fl < 2; fl++) {
-        int rv = (int)nx_pair_ffp_vs_row(fl != 0), rp = (int)nx_pair_ffp_ps_row(fl != 0);
+        int rv = (int)nx_pair_ffp_vs_row(fl != 0) - 1, rp = (int)nx_pair_ffp_ps_row(fl != 0) - 1;   /* row index = reserved shader id - 1 */
         uint32_t vv, pv, nl; uint8_t L[2 * 224];
 #define ADD(vs_, ps_, sides) do { pg = realloc(pg, sizeof(Prog) * (size_t)(n + 1)); memcpy(pg[n].vsig, vs_, 32); memcpy(pg[n].psig, ps_, 32); pg[n].fl = fl; pg[n].cb = cb; pg[n].ffp = sides; n++; } while (0)
         int cb = 0; nl = 0;
@@ -365,8 +372,8 @@ static int mode_link(int argc, char **argv) {
     Forms F; int entries; SLines S; long np;
     if (gl_init() || load_forms(argv[2], &F, &entries) || read_stage_files(argc - 6, argv + 6, &S)) return 2;
     Prog *pg = programs(&S, &np); Helds H = { NULL, 0 };
-    for (int r = 0; r < NX_GL4SHIM_STAGE_COUNT; r++) {   /* the fixed-function stages: compiled as given, held under the signature of their text */
-        char lg[400] = ""; unsigned sh = compile_given(nx_gl4shim_stages[r].stage == NX_GL4SHIM_STG_VS ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER, nx_gl4shim_stages[r].text, lg, sizeof lg);
+    for (int r = 0; r < NSTAGES; r++) {   /* the fixed-function stages: compiled as given, held under the signature of their text */
+        char lg[400] = ""; unsigned sh = compile_given(stage_tab[r]->stage == NX_GL4SHIM_STG_VS ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER, stage_tab[r]->text, lg, sizeof lg);
         if (!sh) { fprintf(stderr, "sm_link: stage row %d does not compile: %s\n", r, lg); continue; }   /* no representative: its programs report red */
         H.h = realloc(H.h, sizeof(Held) * (size_t)(H.n + 1)); memcpy(H.h[H.n].sig, ffp_sig[r], 32); H.h[H.n].shader = sh; H.n++;
     }
@@ -395,7 +402,7 @@ static const char *const pair_id[NX_GL4SHIM_PAIR_COUNT] = {
 #undef NX_SM_PID
 #undef NX_SM_PIDS
 };
-static const char *const stage_id[NX_GL4SHIM_STAGE_COUNT] = {
+static const char *const stage_id[NSTAGES] = {
 #define NX_SM_SID(id, vs, fs)
 #define NX_SM_SIDS(id, st, text) #id,
     NX_GL4SHIM_PROG_LIST(NX_SM_SID, NX_SM_SIDS)
@@ -408,9 +415,9 @@ static int mode_table(int argc, char **argv) {
     FILE *o = fopen(argv[2], "w"); if (!o) { fprintf(stderr, "sm_link: cannot write %s\n", argv[2]); return 2; }
     for (int i = 0; i < NX_GL4SHIM_PAIR_COUNT; i++) {
         uint8_t hv[32], hf[32]; char a[FNVNX_SHADER_KEY_HEX], b[FNVNX_SHADER_KEY_HEX], log[400] = ""; const char *st = "linked";
-        fnvnx_sha256(nx_gl4shim_pairs[i].vs, strlen(nx_gl4shim_pairs[i].vs), hv); fnvnx_sha256(nx_gl4shim_pairs[i].fs, strlen(nx_gl4shim_pairs[i].fs), hf);
+        fnvnx_sha256(pair_tab[i]->vs, strlen(pair_tab[i]->vs), hv); fnvnx_sha256(pair_tab[i]->fs, strlen(pair_tab[i]->fs), hf);
         hex(hv, 32, a); hex(hf, 32, b);
-        unsigned vs = compile_given(GL_VERTEX_SHADER, nx_gl4shim_pairs[i].vs, log, sizeof log), fs = vs ? compile_given(GL_FRAGMENT_SHADER, nx_gl4shim_pairs[i].fs, log, sizeof log) : 0;
+        unsigned vs = compile_given(GL_VERTEX_SHADER, pair_tab[i]->vs, log, sizeof log), fs = vs ? compile_given(GL_FRAGMENT_SHADER, pair_tab[i]->fs, log, sizeof log) : 0;
         if (!vs || !fs) st = "compile_fail";
         else {
             int ls = 0; unsigned pr = glCreateProgram(); glAttachShader(pr, vs); glAttachShader(pr, fs); glLinkProgram(pr); glGetProgramiv(pr, GL_LINK_STATUS, &ls);
@@ -422,12 +429,12 @@ static int mode_table(int argc, char **argv) {
         fprintf(o, "{\"format\": \"fnvnx-sm-table/1\", \"kind\": \"pair\", \"row\": %d, \"id\": \"%s\", \"vs_sha256\": \"%s\", \"fs_sha256\": \"%s\", \"status\": \"%s\", \"log\": ", i, pair_id[i], a, b, st);
         jstr(o, log); fprintf(o, "}\n");
     }
-    for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) {
+    for (int i = 0; i < NSTAGES; i++) {
         uint8_t h[32]; char a[FNVNX_SHADER_KEY_HEX], log[400] = ""; const char *st = "compiled";
-        fnvnx_sha256(nx_gl4shim_stages[i].text, strlen(nx_gl4shim_stages[i].text), h); hex(h, 32, a);
-        unsigned sh = compile_given(nx_gl4shim_stages[i].stage == NX_GL4SHIM_STG_VS ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER, nx_gl4shim_stages[i].text, log, sizeof log);
+        fnvnx_sha256(stage_tab[i]->text, strlen(stage_tab[i]->text), h); hex(h, 32, a);
+        unsigned sh = compile_given(stage_tab[i]->stage == NX_GL4SHIM_STG_VS ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER, stage_tab[i]->text, log, sizeof log);
         if (!sh) st = "compile_fail"; else glDeleteShader(sh);
-        fprintf(o, "{\"format\": \"fnvnx-sm-table/1\", \"kind\": \"stage\", \"row\": %d, \"id\": \"%s\", \"stage\": %u, \"text_sha256\": \"%s\", \"status\": \"%s\", \"log\": ", i, stage_id[i], nx_gl4shim_stages[i].stage, a, st);
+        fprintf(o, "{\"format\": \"fnvnx-sm-table/1\", \"kind\": \"stage\", \"row\": %d, \"id\": \"%s\", \"stage\": %u, \"text_sha256\": \"%s\", \"status\": \"%s\", \"log\": ", i, stage_id[i], stage_tab[i]->stage, a, st);
         jstr(o, log); fprintf(o, "}\n");
     }
     return fclose(o) ? 2 : 0;
@@ -482,34 +489,34 @@ static int mode_summary(int argc, char **argv) {
       while (getline(&ln, &lc, fp) > 0) {
           const char *q; trows++;
           int i = (int)trows - 1; uint8_t hv[32], hf[32]; char a[FNVNX_SHADER_KEY_HEX], b[FNVNX_SHADER_KEY_HEX], want[160];
-          if (i >= NX_GL4SHIM_PAIR_COUNT + NX_GL4SHIM_STAGE_COUNT) { tbad++; continue; }
+          if (i >= NX_GL4SHIM_PAIR_COUNT + NSTAGES) { tbad++; continue; }
           if (i < NX_GL4SHIM_PAIR_COUNT) {
-              fnvnx_sha256(nx_gl4shim_pairs[i].vs, strlen(nx_gl4shim_pairs[i].vs), hv); fnvnx_sha256(nx_gl4shim_pairs[i].fs, strlen(nx_gl4shim_pairs[i].fs), hf); hex(hv, 32, a); hex(hf, 32, b);
+              fnvnx_sha256(pair_tab[i]->vs, strlen(pair_tab[i]->vs), hv); fnvnx_sha256(pair_tab[i]->fs, strlen(pair_tab[i]->fs), hf); hex(hv, 32, a); hex(hf, 32, b);
               snprintf(want, sizeof want, "\"%s\"", pair_id[i]);
               if (!(q = jkey(ln, "kind")) || strncmp(q, "\"pair\"", 6) || !(q = jkey(ln, "id")) || strncmp(q, want, strlen(want)) || !(q = jkey(ln, "vs_sha256")) || strncmp(q + 1, a, 64) || !(q = jkey(ln, "fs_sha256")) || strncmp(q + 1, b, 64)) { tbad++; continue; }
               if ((q = jkey(ln, "status")) && !strncmp(q, "\"linked\"", 8)) tlinked++; else tfail++;
           } else {
-              int r = i - NX_GL4SHIM_PAIR_COUNT; fnvnx_sha256(nx_gl4shim_stages[r].text, strlen(nx_gl4shim_stages[r].text), hv); hex(hv, 32, a);
+              int r = i - NX_GL4SHIM_PAIR_COUNT; fnvnx_sha256(stage_tab[r]->text, strlen(stage_tab[r]->text), hv); hex(hv, 32, a);
               snprintf(want, sizeof want, "\"%s\"", stage_id[r]);
               if (!(q = jkey(ln, "kind")) || strncmp(q, "\"stage\"", 7) || !(q = jkey(ln, "id")) || strncmp(q, want, strlen(want)) || !(q = jkey(ln, "text_sha256")) || strncmp(q + 1, a, 64)
-                  || !(q = jkey(ln, "stage")) || (unsigned)atoi(q) != nx_gl4shim_stages[r].stage) { tbad++; continue; }
+                  || !(q = jkey(ln, "stage")) || (unsigned)atoi(q) != stage_tab[r]->stage) { tbad++; continue; }
               if ((q = jkey(ln, "status")) && !strncmp(q, "\"compiled\"", 10)) tlinked++; else tfail++;
           }
       }
       free(ln); fclose(fp); }
-    const long TROWS = NX_GL4SHIM_PAIR_COUNT + NX_GL4SHIM_STAGE_COUNT;
+    const long TROWS = NX_GL4SHIM_PAIR_COUNT + NSTAGES;
     if (trows != TROWS) tbad += trows < TROWS ? TROWS - trows : trows - TROWS;
     /* the universe (L1 gate_cert): every member as {kind, id, sha256}, sorted by (kind, id): "bytecode" = a unique bytecode (id = its content hash, sha256 = the same), "glsl_table" = a row of the gl4shim table
      * (id = the row's id, sha256 = the hash of the canonical bytes id NUL, [stage NUL,] texts NUL). universe_hash = sha256 over the lines `kind TAB id TAB sha256 LF` of that sorted list: the ONE hash of the universe. */
     long nu = (long)F.n + TROWS; UEnt *U = calloc((size_t)nu, sizeof *U); if (!U) return 2;
     for (int i = 0; i < F.n; i++) { U[i].kind = "bytecode"; hex(F.forms[i].sha, 32, U[i].id); memcpy(U[i].sha, U[i].id, sizeof U[i].sha); }
     for (int i = 0; i < NX_GL4SHIM_PAIR_COUNT; i++) {
-        const char *p[3] = { pair_id[i], nx_gl4shim_pairs[i].vs, nx_gl4shim_pairs[i].fs }; size_t tot = 0; for (int k = 0; k < 3; k++) tot += strlen(p[k]) + 1;
+        const char *p[3] = { pair_id[i], pair_tab[i]->vs, pair_tab[i]->fs }; size_t tot = 0; for (int k = 0; k < 3; k++) tot += strlen(p[k]) + 1;
         unsigned char *ub = malloc(tot), *w = ub; uint8_t h[32]; if (!ub) return 2; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; }
         fnvnx_sha256(ub, tot, h); free(ub); UEnt *u = &U[F.n + i]; u->kind = "glsl_table"; snprintf(u->id, sizeof u->id, "%s", pair_id[i]); hex(h, 32, u->sha);
     }
-    for (int i = 0; i < NX_GL4SHIM_STAGE_COUNT; i++) {
-        char sn[16]; snprintf(sn, sizeof sn, "%u", nx_gl4shim_stages[i].stage); const char *p[3] = { stage_id[i], sn, nx_gl4shim_stages[i].text }; size_t tot = 0; for (int k = 0; k < 3; k++) tot += strlen(p[k]) + 1;
+    for (int i = 0; i < NSTAGES; i++) {
+        char sn[16]; snprintf(sn, sizeof sn, "%u", stage_tab[i]->stage); const char *p[3] = { stage_id[i], sn, stage_tab[i]->text }; size_t tot = 0; for (int k = 0; k < 3; k++) tot += strlen(p[k]) + 1;
         unsigned char *ub = malloc(tot), *w = ub; uint8_t h[32]; if (!ub) return 2; for (int k = 0; k < 3; k++) { size_t l = strlen(p[k]) + 1; memcpy(w, p[k], l); w += l; }
         fnvnx_sha256(ub, tot, h); free(ub); UEnt *u = &U[F.n + NX_GL4SHIM_PAIR_COUNT + i]; u->kind = "glsl_table"; snprintf(u->id, sizeof u->id, "%s", stage_id[i]); hex(h, 32, u->sha);
     }
