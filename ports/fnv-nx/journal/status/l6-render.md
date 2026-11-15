@@ -820,3 +820,7 @@ Paused: w3b, w4, farm; no other work.
     - L1: guest stage hermeticity (-nostdinc plus the runtime sysroot), first item of cand3.
     - L2: the aarch64-none-elf mirror.
     - L6: rebuild d3d9, translator and sha256 when cand3 carries both. w6 waits until then.
+- 10:35Z Owner order "Я хочу свой кадр" (integ 76e450faf): the L4 boot loop.
+    - A stop that L4 routes to L6 comes before every other L6 item; it is closed by its class rule and the commit goes to L4.
+    - The render head that L4 links is w6-root 644d66b36 (d3d9, translator and sha256 guest builds green; a measurement build because of the glibc header defect).
+    - The first stop, 0xC000001D after `init d3dx9_38.dll`, is being classified by L4; it is not L6's yet.
