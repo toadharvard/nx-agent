@@ -90,6 +90,9 @@ def main():
           and [int(b[2], 16) for b in body] == sorted(syms) and [b[3] for b in body] == [syms[a] for a in sorted(syms)])
     check('rows: table[slot] of the emitted array is (addr, index+1) for every row, and every other slot is empty (index half 0)',
           all(tbl[int(b[4])] == (int(b[2], 16), int(b[1]) + 1) for b in body) and sorted(int(b[4]) for b in body) == [i for i, t in enumerate(tbl) if t[1]] and len(set(b[4] for b in body)) == len(body))
+    tl = ROWS + ['# table_id %s\n' % ('ab' * 32)]
+    check('rows: the table_id trailer of the entries file is line 2 of the rows file, a file without one has none',
+          dispgen.table_id(tl) == 'ab' * 32 and dispgen.table_id(ROWS) is None and dispgen.rows_text(syms, dispgen.table(tl)[1], 'fnvl', dispgen.table_id(tl)).split('\n')[1] == '# table_id ' + 'ab' * 32)
     eh = dispgen.table([])[1]
     check('rows: an empty list has the header and no row', dispgen.rows_text({}, eh, 'fnvl') == '# fnvnx-disp-rows/1\n# hash fnvl_disp_table slots=%d empty=0\n# table\tindex\taddr\tsymbol\tslot\n' % len(eh['slots']))
     print('dispgentest: %d failed' % bad); sys.exit(1 if bad else 0)
