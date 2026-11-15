@@ -1334,3 +1334,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Next for w22: a downstream bind gate over the roots objects_of excludes.
 - L2 w3 e46db69a6: linkage `c` and odrdef (test_odrdef 30 ok). w23 wires tier 2.
 - Orchestrator: the b274ec067 repin (559f220db) does not land; one repin comes with L2's aarch64-none-elf mirror. cand2 stays on the current pin, takes the race fix b30f7b460 alone, and takes CLAUDE.md (integ b12c221a6) and ORCHESTRATION.md/ALL.md (integ 3025e51f5).
+- w23r 3bfb85dd (legal gate removed) and 7ed499e3 (linkstrict: byte-different COMDATs labelled "undecidable: no definition record") accepted for cand2.
