@@ -53,11 +53,16 @@ def table(rows, prefix='fnvl', closure=None):
 ROWS_FORMAT = 'fnvnx-disp-rows/1'
 
 
-def rows_text(syms, prefix):
-    """the rows file of one table (the declared stage output the layer-1 table gates compare the linked ELF with): `# fnvnx-disp-rows/1`, a column line, then
-    `<prefix>_disp_entries<TAB>index<TAB>addr<TAB>symbol` per entry, sorted by address (index = rank = the position phf.table_c gives the entry)."""
+def rows_text(syms, h, prefix):
+    """the rows file of one table (the declared stage output the layer-1 table gates compare the linked ELF with), generated from the arrays phf.layout gives
+    the emitter, never re-sorted: `# fnvnx-disp-rows/1`, `# hash <prefix>_disp_table slots=<N> empty=0`, a column line, then one row per element of
+    <prefix>_disp_entries: `<prefix>_disp_entries<TAB>index<TAB>addr<TAB>symbol<TAB>slot` (index = the position in the entries array; slot = the slot of
+    <prefix>_disp_table that holds {addr, index + 1}). Every slot that no row names is empty: its index half is 0."""
+    keys, pairs, entries = phf.layout(syms, h)
+    at = {p: i for i, p in enumerate(pairs) if p[1]}
     E = prefix + '_disp_entries'
-    return '\n'.join(['# ' + ROWS_FORMAT, '# table\tindex\taddr\tsymbol'] + ['%s\t%d\t%08x\t%s' % (E, j, a, syms[a]) for j, a in enumerate(sorted(syms))]) + '\n'
+    return '\n'.join(['# ' + ROWS_FORMAT, '# hash %s_disp_table slots=%d empty=0' % (prefix, len(pairs)), '# table\tindex\taddr\tsymbol\tslot'] +
+                     ['%s\t%d\t%08x\t%s\t%d' % (E, j, a, sy, at[(a, j + 1)]) for j, (a, sy) in enumerate(entries)]) + '\n'
 
 
 def main(argv):
@@ -74,7 +79,7 @@ def main(argv):
     with open(argv[1], 'w', newline='') as f: f.write(text)
     if rows:
         with open(argv[0]) as f: syms = parse(f)
-        with open(rows, 'w', newline='') as f: f.write(rows_text(syms, prefix))
+        with open(rows, 'w', newline='') as f: f.write(rows_text(syms, h, prefix))
     print('dispgen: %d slots, %d hash attempts' % (len(h['slots']), h['attempts']))
 
 

@@ -76,19 +76,22 @@ def main():
     try: dispgen.table(ROWS, closure=allc + ['deadbee0\n']); ok = False
     except SystemExit as e: ok = 'deadbee0' in str(e) and 'no dispatch entry' in str(e)
     check('closure: a target with no entry exits naming it', ok)
-    # the rows file (fnvnx-disp-rows/1): one row per entry in key order, the same index and symbol as the entries array of the table
+    # the rows file (fnvnx-disp-rows/1): generated from the emitted arrays, slot by slot, never re-sorted
     with tempfile.TemporaryDirectory() as d:
         open(d + '/e.tsv', 'w').write(''.join(ROWS))
         r = subprocess.run([sys.executable, '-I', os.path.join(LIFT, 'tools', 'dispgen.py'), '--prefix', 'fnvnx_native', '--rows', d + '/r.tsv', d + '/e.tsv', d + '/n.cc'], capture_output=True, text=True, env={})
         rl = open(d + '/r.tsv').read().split('\n') if r.returncode == 0 else []
         ncc = open(d + '/n.cc').read() if r.returncode == 0 else ''
-    body = [l.split('\t') for l in rl[2:] if l]
+    body = [l.split('\t') for l in rl[3:] if l]
+    tbl = [(int(k, 0), int(i)) for k, i in re.findall(r'^  (0x[0-9a-f]+)u, (\d+)u,$', ncc, re.M)]
     ents = re.findall(r'^  &(\w+),$', ncc, re.M)
-    check('rows: header, column line, one row per key', rl[:1] == ['# fnvnx-disp-rows/1'] and rl[1].startswith('# table') and len(body) == len(syms))
-    check('rows: table name, index = rank, address, symbol; the entries array lists the same symbols in the same order',
-          [(b[0], int(b[1]), int(b[2], 16), b[3]) for b in body] == [('fnvnx_native_disp_entries', j, a, syms[a]) for j, a in enumerate(sorted(syms))] and ents == [b[3] for b in body])
-    check('rows: the hash table stores index+1 for each row', all(phf.lookup(nh2, int(b[2], 16)) is not None for b in body) if (nh2 := dispgen.table(ROWS, 'fnvnx_native')[1]) else False)
-    check('rows: an empty list has the two header lines and no row', dispgen.rows_text({}, 'fnvl') == '# fnvnx-disp-rows/1\n# table\tindex\taddr\tsymbol\n')
+    check('rows: three header lines, one row per entry', rl[:1] == ['# fnvnx-disp-rows/1'] and rl[1].startswith('# hash fnvnx_native_disp_table slots=%d empty=0' % len(tbl)) and rl[2].startswith('# table') and len(body) == len(syms))
+    check('rows: rows[j] is entries[j] of the emitted array: index, address, symbol', [(b[0], int(b[1]), b[3]) for b in body] == [('fnvnx_native_disp_entries', j, e) for j, e in enumerate(ents)]
+          and [int(b[2], 16) for b in body] == sorted(syms) and [b[3] for b in body] == [syms[a] for a in sorted(syms)])
+    check('rows: table[slot] of the emitted array is (addr, index+1) for every row, and every other slot is empty (index half 0)',
+          all(tbl[int(b[4])] == (int(b[2], 16), int(b[1]) + 1) for b in body) and sorted(int(b[4]) for b in body) == [i for i, t in enumerate(tbl) if t[1]] and len(set(b[4] for b in body)) == len(body))
+    eh = dispgen.table([])[1]
+    check('rows: an empty list has the header and no row', dispgen.rows_text({}, eh, 'fnvl') == '# fnvnx-disp-rows/1\n# hash fnvl_disp_table slots=%d empty=0\n# table\tindex\taddr\tsymbol\tslot\n' % len(eh['slots']))
     print('dispgentest: %d failed' % bad); sys.exit(1 if bad else 0)
 
 
