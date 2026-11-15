@@ -573,3 +573,4 @@ Paused: w3b, w4, farm; no other work.
 - 23:52Z w1b 819716297: gate_admit 941/941 over 25 roots.
     - Rule-A (c): the RESERVED body calls fnvnx_reach_violation from <fnvnx/reach.h> (hostabi). Its fact is request class `shader_opcode` from op_reserved.tsv, which L1 w20 implements in gate_reach.
     - Blocked on w20, owner L1.
+- 00:01Z w1b 5bc689044: op_reserved_values.tsv has 16 rows (opnum 49..63 and 75), from the same table read; --check byte-equal. Sent to L1 w20. The RESERVED body waits on w20's shader_opcode fact.
