@@ -82,13 +82,20 @@ class Aggregate(unittest.TestCase):
         self.assertEqual(rows[1][6:], ['def0', '-', '0', '0', '-', '-'])
 
     def test_closure_key_keeps_a_record_valid_across_an_ir_change(self):
+        # the old-IR side is computed from a provided IR file (hashed), not read from the record
         fns = ['bool_to_bits', 'zf_spec']
-        r = dict(rec(KEYS[0], model='0' * 64), model_fns=fns, closure_sha=certs_build.model_sail.closure_sha(fns))
-        self.assertTrue(certs_build.model_valid(r, MODEL))
-        self.assertFalse(certs_build.model_valid(dict(r, closure_sha='1' * 64), MODEL))
-        self.assertFalse(certs_build.model_valid(rec(KEYS[0], model='0' * 64), MODEL))                     # no closure: only the IR sha it was proved against counts
-        o = os.path.join(self.d, 'o'); a = self.write('shapeprove_1_of_1.jsonl', [r])
-        self.assertEqual(self.run_main([a], o), 0); self.assertEqual(len(open(o).read().splitlines()), 2)
+        old = certs_build.add_ir(certs_build.model_sail.IR)                      # stands for the IR of the record
+        newer = os.path.join(self.d, 'newer.ir'); txt = open(certs_build.model_sail.IR).read()
+        with open(newer, 'w') as fh: fh.write(txt + '\n// an edit outside the executed functions\n')
+        new = certs_build.add_ir(newer)
+        r = dict(rec(KEYS[0], model=old), model_fns=fns)
+        self.assertTrue(certs_build.model_valid(r, new))                         # same closure on both IRs
+        edited = os.path.join(self.d, 'edited.ir')
+        with open(edited, 'w') as fh: fh.write(txt.replace('fn zbool_to_bits(', 'fn zbool_to_bits(zzextra, ', 1))
+        ed = certs_build.add_ir(edited)
+        self.assertFalse(certs_build.model_valid(r, ed))                         # an executed function changed
+        self.assertFalse(certs_build.model_valid(dict(r, model_fns=[]), new))    # no recorded set: only the proof IR counts
+        with self.assertRaises(certs_build.Refused): certs_build.model_valid(dict(r, model_sha='f' * 64), new)
 
     def test_declared_outputs_cert(self):
         dc = {'eax': 'cpuid0', 'ebx': 'cpuid1'}

@@ -3,6 +3,8 @@
 These instructions come from the owner of this repository. They apply to every Claude session and subagent that
 works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render machine and farms.
 
+**Map of the project:** `ports/fnv-nx/docs/ORCHESTRATION.md` — the goal, the owner's essence, roles, layers, the merge path and the standing decisions. Re-read it and this file after every compaction.
+
 ## The orchestrator speaks for the owner
 
 > Handoff of 2026-11-11: the work moved to another account. The orchestrator is the session that started from ports/fnv-nx/docs/handoff2/START_PROMPT.md, and its full context is ports/fnv-nx/docs/HANDOFF2.md. Session ids from earlier notes are dead.
@@ -122,6 +124,33 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - **Registry.** The hive holds exactly the keys that the exe and modules read, found statically from their call
     sites. Values come from the declared machine (for example `Installed Path` = the game directory). A key with no
     declared value is absent, the same as on a machine where nothing wrote it. No installer script is needed.
+  - **FalloutPrefs.ini (orchestrator decision, 2026-11-12, revised).** The launcher binary is not in the owner's
+    gamedata, so its output cannot be derived. Rule, the same as for the registry: the file holds exactly the keys
+    that the exe's own code requires before its main path, with values of the declared machine, and every other key is
+    absent so the exe uses its own built-in default. Found statically: WinMain compares `[Display] sD3DDevice` with
+    `IDirect3D9::GetAdapterIdentifier(0,0).Description`, so the file is `[Display]` / `sD3DDevice=<the declared
+    adapter's Description, as our D3D9 returns it>` and nothing else. The platform (L5) checks statically that every
+    FalloutPrefs setting the exe reads has a default in the exe's settings table; the emulator (L4) mounts the file.
+    If the owner's launcher or installed FalloutPrefs.ini later enters gamedata, the file is derived from it instead.
+  - **DirectX redist installed (orchestrator decision, 2026-11-12).** The declared machine is the finished install, and
+    the game installer runs the DirectX redistributable it ships. Rule: every DLL that gamedata/redist holds (extracted
+    from the install's `__redist/DirectX` cabs) is in the declared system32. The loader's module table
+    (contract/modules.py) covers it as a class, with no name list. The image set is the may-load closure from the exe
+    over that declared file set, a sound superset. That is why d3dx9_31.dll (OCT2006 cab, loaded by d3dx9_38 at 0x56b708)
+    joins the set as a may-load image, 6 -> 7, pinned by exepin and lifted like d3dx9_38. A name outside the declared
+    file set gets NULL / ERROR_MOD_NOT_FOUND (126), as Windows and Wine 9.0 return it.
+  - **The declared CPU (orchestrator decision, 2026-11-14).**
+    - Features: cpuid is the reference host's answer (lift/rt/cpumodel.c, CPUREF), restricted to the feature set
+      whose every instruction is lifted. That is MMX, SSE and SSE2; SSE3 and up, 3DNow and AVX are clear.
+    - An instruction of a cleared feature is #UD, as on a real CPU with that feature set. This is read from CPUREF,
+      not from a list.
+    - Every #UD shape site must be certified unreachable on the declared machine: dominated by the exe's own cpuid
+      test whose declared answer excludes it, with a call-graph certificate. If a site is not certified, the build is
+      red; the feature is then lifted or the site is reported.
+    - Processors: one count holds for the whole declared machine, 3. These are the console cores an application
+      gets, one thread each. cpuid leaf 1 EBX/HTT and leaf 4 (L3a), GetSystemInfo, GetLogicalProcessorInformation and
+      the affinity masks 0b111 (L5), and the emulator's core count (L4) all report it. Guest threads run in parallel
+      on these cores.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -170,7 +199,7 @@ The owner's words: "Я буквально сказал, что я использ
   - Native and decomp C++ load them all.
   - Lifted C++ is compiled by the same compiler; the lifter emits the memory ordering itself (R9 (б)).
   - The stock `g++-13` of `env.json` is the base the compiler is built from. It is not the game's compiler.
-  - fnvnx-a64 (gcc 15 + newlib) provides the guest's libc/libstdc++ and libnx.
+  - The guest runtime is built by the game's own compiler: `tools/fnvnx-a64-msvcmodel13` (L5 w14, with a MANIFEST.json the recipe compares against the compiler before any unit runs). Its libstdc++ (headers and library) is GCC 13.3's own, the same version as the compiler. newlib and libnx come from the fnvnx-a64 devkit sources, rebuilt with msvcmodel. The gcc 15 libstdc++ headers of fnvnx-a64 are not used for guest code: they do not parse under gcc 13 (orchestrator decision, 2026-11-12).
 - **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
 - **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
 - **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
@@ -185,7 +214,7 @@ The owner's words: "Ты когда пишешь че-то агентом они
   orchestrator and pushed to the trunk and the integration branch. A message only points to it.
   - Every lead merges the trunk's `CLAUDE.md` into its branch when told, and re-reads this file after every compaction.
   - If an orchestrator message and this file disagree, this file wins; report the conflict.
-- **Assumptions: one registry, nine accepted.** The owner asked "Сколько допущений?", and no one could answer.
+- **Assumptions: one registry, ten accepted.** The owner asked "Сколько допущений?", and no one could answer.
   - Every assumption has an id in `verify/ASSUMPTIONS.json`. The `assumptions` gate makes the trunk red for:
     - an "Assumption"/"допущение" in code or docs without an id;
     - an id without a record;
@@ -201,6 +230,9 @@ The owner's words: "Ты когда пишешь че-то агентом они
     8. IEEE floating point;
     9. the pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3,
        the published proof of the x86-TSO to Arm memory mapping (owner decision, 2026-11-11).
+    10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers (owner decision, 2026-11-15: "Тогда согласен делай");
+        today the x87 machinery: TOP and stack indexing, tags, FSW C0-C3 and exception bits, FCW, the fcomi/fucomi EFLAGS,
+        fld/fst conversions. It is transcribed as a z3 spec with an SDM citation on every line, owner L3b; values stay IEEE (8).
   - Every other assumption is REMOVE. Its record names the fact or gate that removes it and the owner of that work.
     Examples: callee-saved registers, `ret n`, no PIC and complete code ranges are checked from the exe's code; kernel
     result codes come from the pinned libnx headers; guard zones are a fact of the loader's layout.
@@ -231,7 +263,7 @@ The owner's words, on a render defect that unit tests missed because the sibling
     hand-written stand-ins of sibling files.
   - The check is mechanical, per test binary: (symbols the test defines) ∩ (symbols the product roots define) = ∅.
     There is no allow-list. The owner is L1, as part of the stub gate.
-- Below the product there is one boundary: deko3d, libnx and the kernel. A test that runs on the host meets it in one
+- Below the product there is one boundary: the GL library (for the OpenGL backend), deko3d, libnx and the kernel. A test that runs on the host meets it in one
   shared model, the L4 boot machine (its GPU and kernel model, checked against its references). There is no
   per-test double of it.
 - Failure injection is allowed only as an input of that shared model, such as a kernel or allocator result that
@@ -272,10 +304,148 @@ The owner's words: "Агенты вызывают соннетов которы�
   - every current task, with its worker session id and status: doing, done (commit) or blocked (by what, owner);
   - the layer's global progress numbers, with the commit they were measured at.
   - The orchestrator collects these files into the overall progress.
-- **One render backend: deko3d.**
-  - Desktop GL (`gl4`), Mesa (llvmpipe, switch-mesa, Gallium Nine) and host GL packages are not product, and are not
-    part of the boot machine.
-  - The emulator runs the same product backend as the console. The boot machine's GPU is the L4 model of the deko3d
-    boundary (the dk* functions, the libnx calls it uses and the command buffers).
-  - Shaders run in that model from the DKSH that the build produced. An instruction that the model does not cover makes
-    the build red.
+- **Two render backends: OpenGL and deko3d (owner correction, 2026-11-11 22:45; it replaces the earlier
+  "one backend" line, which was the orchestrator's mistake).** The owner's words: "их два. Один опенгл другой деко"
+  and "Нахуя ты гл удалил. Ты же рендерил с помощью него."
+  - The OpenGL backend (`gl4`, `nxgl`, the renderer pair and `verify/bootgpu.py` with its GL library) is product and
+    stays. It is the backend that already rendered frames, and it renders in the emulator. Nothing of it is deleted.
+  - The deko3d backend (L6A, `render/backend`) is the second backend, built beside it, for the console.
+  - **OpenGL is the reference for deko3d** (owner, 22:50: "Опенгл должен был быть эталоном для деко"). The same
+    nxgpu command stream (the same D3D9 front end, the same scenes and game frames) is rendered by both backends, and
+    the deko3d frames are checked against the GL frames. A difference is a deko3d defect until it is explained by
+    rule. GL frames are produced on the boot machine with the GL library. This check verifies deko3d; it never
+    selects code.
+  - The D3D9 front end (L6) serves both through the same nxgpu ABI.
+  - The worker branches that deleted GL (`claude/fnv-l6-render-w1` 89fa6a889, `claude/fnv-l4-verify-w1` 68e37dab7)
+    are not merged, ever. No session deletes or disables GL, Mesa in the boot machine, or their tests.
+
+## Owner order of 2026-11-11, night: the first frame in this budget, correct by construction (binding)
+
+The owner's words: "Трекай прогресс послойно и прогрессируй всегда. Задача понятная. Осталось 50% недельного лимита. За
+это время можно закрыть первый кадр точно. Что говорить об остальном. Опять же все должно быть корректно по
+построению."
+
+- **Target:** the first frame in the L4 emulator within the remaining half of the weekly usage limit. Everything a
+  session does is measured against that path: product roots → lifted packs as roots → ELF → boot → WinMain → menu →
+  first frame.
+- **Spend only on the path.** Work that does not move a layer toward the first frame waits until after it. Workers are
+  Sonnet; long or mechanical runs go to farms or workers, not to a lead's own context. No repeated censuses of numbers
+  that did not change; a gate reads cached facts.
+- **Correct by construction.** Each step is closed by its rule and gate, never by a run that happened to pass. A shortcut
+  that breaks a rule (a stub, a double, a second build path, a new assumption, a heuristic) is not progress: it is red.
+- **Progress is tracked per layer** in `ports/fnv-nx/journal/status/<layer>.md` (see "late night"); the orchestrator
+  collects them into `ports/fnv-nx/journal/status/ALL.md` on the integration branch every hour.
+
+## Owner order of 2026-11-11, 23:00: the orchestrator decides, the owner is not disturbed (binding)
+
+The owner's words: "Я запрещаю меня тревожить и просить мое да. Делай что хочешь... Я разрешаю тебе как оркестратору
+решать что архивировать закрывать а что нет. Ты главный. А я сплю. Меня нельзя тревожить и нельзя не делать то что
+необходимо."
+
+- No session asks the owner for a yes, a confirmation or a choice. The orchestrator decides everything the owner would
+  decide, within these rules and the Legal limits, and records the decision in ALL.md.
+- The orchestrator decides which sessions are archived, stopped, resumed or created (leads, workers, farms, old waves).
+  Stale, finished or duplicate sessions are archived without asking.
+- Nothing necessary is left undone for want of an answer: a blocked decision goes to the orchestrator, never to the owner.
+- No messages to the owner except milestones on the goal path (exe entry, WinMain, menu, first frame, Switch).
+
+## Owner order of 2026-11-11, 23:00: GOG Galaxy is not lifted (binding)
+
+The owner's words: "нахуя лифтить гэлакси... Ну нет доступа к нему. Похуй на него. Это как сокеты."
+
+- Galaxy.dll and GalaxyWrp.dll are not lifted. The declared machine has no Galaxy service, the same as it has no network.
+- Every Galaxy entry the exe or a module reaches answers the documented "Galaxy unavailable / not initialized / not
+  signed in" result of the Galaxy SDK, the same way network calls answer the documented "network down" error. It is a
+  declared-machine body (CLAUDE.md "The declared machine"), with the SDK documentation cited per function, not a stub.
+- Owner of the bodies: platform (L5). Lifting work on Galaxy stops; modules.tsv lists Galaxy as a declared-machine
+  module, not as a lifted one.
+
+## Owner order of 2026-11-14: the full native port, correct by construction, quota only on the path (binding)
+
+The owner's words: "делегируй остаток работы аккуратно так, чтобы мы действительно двигались к полному нативному
+порту. Каждый шаг должен приближать нас по известным правилам описанным в проекте.", "мы не должны тратить квоту туда,
+куда нет смысла. Лишние суммаризации или бесконечные верификаторы всего на свете ни к чему. Только корректность по
+построению, закрываемая известным правилом." and "цели в 45/60 фпс остаются. Корректность тоже обязательна и
+незыблема. С редкими заранее просчитанными исключениями. Например, мы верим в корректность gcc."
+
+- **The goal is the full native port** on the Switch: the exe and its modules fully lifted, the native platform, the
+  D3D9 front end over the GL backend (the reference) and deko3d. The order of the steps is the one in "The goal comes
+  first".
+- **Every step is closed by a known rule.** A rule is known when it is written in this file, `verify/VERDICT.md`,
+  `verify/RECIPE.md` or MASTER_PLAN4, and the gate that checks it is in the L1 verdict. A step for which no known rule
+  exists is reported to the orchestrator; it is not improvised.
+- **Correctness is mandatory and unconditional.** The only exceptions are the OWNER records of
+  `verify/ASSUMPTIONS.json` (for example: the compiler is correct). They are decided in advance; none is added without
+  the owner.
+- **Performance targets stay:** 45 fps is the floor and 60 fps (the panel's rate) is the target, on the console's
+  1.02 GHz CPU. Correctness is never traded for speed. Speed work is measured from the first frame on. Until then no
+  design choice may close the way to the targets: no one-guest-thread-at-a-time, no interpreter or emulator on the
+  product path.
+- **Quota goes only to path steps.** Not spent on:
+  - summaries beyond the lead's own status file;
+  - censuses of numbers that did not change;
+  - new verifiers, gates or farms that do not block a path step;
+  - runs repeated on unchanged content (the verdict's cache answers them).
+  - One verdict per candidate. A lead updates its status file after each finished item; that is the report.
+- **Orchestrator decisions of 2026-11-14 (path plan).** The tasks and their order are in
+  `ports/fnv-nx/journal/status/ALL.md`, section "Path plan 2026-11-14", on the integration branch.
+  - **Guest runtime first.** The platform root enters the trunk only when it is built against
+    `tools/fnvnx-a64-msvcmodel13`, with its MANIFEST checked by the recipe. A build against the gcc 15 libstdc++ of
+    fnvnx-a64 is a measurement. A source change made only so that the gcc 15 headers parse is reverted once
+    msvcmodel13 is in.
+  - **Shape certificates by the pack's own universe.** L3b certifies the shape keys that the product pack uses. L3a
+    publishes that list with the relift. The work does not wait for the pack root to be admitted. The pack root enters
+    the trunk when its forms are a subset of the certified ones. x87, SIMD and system shapes get certified builders from
+    the same prover (the Sail model, ASM-009 / OWNER 9).
+  - **Hardware exceptions in lifted code.**
+    - Under OWNER 6 an access fault does not occur in normal operation, so there is no asynchronous fault recovery.
+    - Every other x86 exception the exe can raise is synchronous at a known instruction: #DE of div/idiv, int3,
+      int n, ud2, into, bound, and x87/SSE exceptions only when unmasked. The lifter emits the check there and raises
+      through the SEH path, with the precise CONTEXT of that instruction.
+    - It is a fact that every fldcw, ldmxcsr, fldenv, frstor and fxrstor site keeps the exceptions masked. A site the
+      facts cannot decide is reported to the orchestrator.
+  - **SEH continue restores the whole CONTEXT** that the record's ContextFlags names: integer, control, FloatSave and
+    the extended registers. This is how Windows documents it (OWNER 3) and how Wine 9.0 implements it.
+  - **Shaders.**
+    - The game's shaders are a static set from its gamedata. The translator's link check (`sm_link`) over that whole
+      set is a gate at 0 failures.
+    - The backends' link-failure branch becomes `fnvnx_reach_violation`, with that gate's certificate as its fact.
+      So neither GL nor deko3d has a run-time link-failure path.
+  - **The product ELF root.**
+    - Owner: L3a, with a worker.
+    - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
+    - Undefined symbols get their owners from the closure:
+      - `fnvnx_dispatch`: L3a's generated bridges;
+      - the process entry `main`: L5's own root `rt/guest/main`, which only calls `fnvnx_loader_main()` (the L1 loader: map, imports, TLS, DllMain, TEB/stack, then `fnvnx_lift_enter(AddressOfEntryPoint)`). `fnvnx_lift_enter` (lift/rt) is the single bridge into lifted code, and there is no second entry path;
+      - `fnvnx_import_key` / the IAT root: L1;
+      - the pthread mutexes that libgcc's unwinder needs: L5, over its real threads.
+  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, first frame (GL in the
+    emulator: the GL backend's first present). The menu gets an input-scenario rule after the first frame; no
+    certified fact names it by role. Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
+    thread.
+  - **The boot machine's GL** comes from the recipe-built gl4 root, not from the prebuilt libnxgl4 @2f0427f5.
+  - **One registry.** `render/ASSUMPTIONS.md` is merged into `verify/ASSUMPTIONS.json` or deleted.
+  - **Second build paths.** No new run goes through them. Each is deleted once its root is on the recipe:
+    - the L5 host Makefiles s4/s7 and `build_guest.sh`;
+    - the loader Makefile;
+    - the unpinned apt in `farm/boot_job.sh`;
+    - the lift tests' Unicorn harnesses.
+  - **Off the path until the first frame:**
+    - the deko3d harnesses and the uam work;
+    - vtnames and decomp C++;
+    - the native CRT;
+    - toolchain mirror reproducibility;
+    - IKOS;
+    - any census of numbers that did not change.
+- **Correctness never switches off a fast path (owner, 2026-11-14).** The owner's words: "Очень хотелось бы сразу классом
+  оптимизаций это закрывать. Иначе получится, что мы просто так ухудшили производительность и забили".
+  - A correctness rule is met by giving the fast path itself the exact semantics, by a rule over the whole class:
+    a plugin rewrite, an exact helper, or a proof of range. Turning the fast path off is not the way. That covers
+    SIMD, the vectorizer, an intrinsic, inline asm and a library's optimized path.
+  - A switch-off that a green trunk needs before the class rule exists is recorded in `verify/PERFDEBT.json`. Each
+    entry names the class rule that restores the fast path and its owner. The entry and the switch-off are deleted in
+    the same commit that lands the rule. PERFDEBT stays at 0 when the first frame is measured.
+  - First entry: `MINIMP3_NO_SIMD` (audio/dshow_filters.cpp, L5). The restoring rule is L2's: `fnvnx_ftoi` rewrites
+    every explicit target float→int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact. In range it
+    converts; out of range or NaN it gives x86 integer-indefinite (cvttps2dq semantics). Then fpexact certifies the
+    NEON path and the switch is removed.

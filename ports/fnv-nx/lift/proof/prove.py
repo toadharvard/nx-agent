@@ -168,23 +168,34 @@ def users_of(users, names):
 def users_all(users):
     return {o for u in users.values() for o in u}
 
-PLATFORM = {'cpuid': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt', 'cpumodel.c')}     # platform source of a declared output: the reference CPU (rt/cpumodel.c)
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'declared.json')) as _fh:
+    DECLARED = json.load(_fh)                                   # the contract of the declared outputs: function -> platform source, SDM / OWNER basis, the outputs it may define
+UFROW = {u: row for row in DECLARED['rows'] for u in row['ufs']}
+RT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the lift tree: sources are relative to it
 
 def declared_outputs(F):
-    """{register: platform function name} of the registers whose written value is EXACTLY a platform function result (a `uf` node, or an extract / zext of one): a declared output.
-    A value that mixes a platform result with any other state is not declared (the comparison with the model stays strict).  Rule over the Form's own nodes, no list."""
+    """{register: platform function name} of the registers whose written value is EXACTLY a platform-function result (a `uf` node, or an extract / zext of one, unconditional) of a function in
+    declared.json, written to an output that row allows.  A uf anywhere else in the outputs (another function, another output, mixed with other state) is not declared: the comparison with the model
+    stays strict, and the form is reported by declared_findings."""
     out = {}
     for name, v, when in F.regs:
         n = v
-        while n.op in ('extract', 'zext') : n = n.a[0]
-        if n.op == 'uf' and when is None: out[name] = n.x
+        while n.op in ('extract', 'zext'): n = n.a[0]
+        if n.op == 'uf' and when is None and n.x in UFROW and name in UFROW[n.x]['outputs'] and n is v: out[name] = n.x
     return out
 
-def platform_sha(declared):
-    """sha256 over the platform sources named by the declared outputs' functions (cpuidN -> rt/cpumodel.c): part of the certificate, a change of the reference CPU stales it"""
+def declared_findings(F):
+    """ufs of the Form's outputs that are not declared by contract (a platform function outside declared.json, or in an output it may not define)"""
+    d = declared_outputs(F); bad = []
+    for name, v, when in F.regs:
+        if any(n.op == 'uf' for n in _nodes([v])) and name not in d: bad.append((name, sorted({n.x for n in _nodes([v]) if n.op == 'uf'})))
+    return bad
+
+def platform_sha(declared, root=RT):
+    """sha256 over the source files of the declared.json rows the functions belong to (relative path + content): part of the certificate; formgate recomputes it from the tree it runs in"""
     h = hashlib.sha256()
-    for k in sorted({PLATFORM[f.rstrip('0123456789')] for f in declared.values() if f.rstrip('0123456789') in PLATFORM}):
-        h.update(os.path.basename(k).encode()); h.update(open(k, 'rb').read())
+    for src in sorted({UFROW[f]['source'] for f in declared.values()}):
+        h.update(src.encode()); h.update(open(os.path.join(root, src), 'rb').read())
     return h.hexdigest()
 
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):

@@ -27,6 +27,7 @@ TODAY (no pack with shapes.tsv is published): the committed file declares only `
 To make it live add ONE entry to "external" in formgate_inputs.json:
   {"name": "liftpack", "repo": "fnv-nx-build", "ref": <branch of the pack>, "commit": <40 hex>, "tree_sha256": <cas tree hash of that commit's checkout>, "at": "/ext/liftpack"}
 (tree_sha256 = what recipe.fetch_externals reports for it)."""
+import hashlib
 import json
 import os
 import re
@@ -161,6 +162,37 @@ def load_shapes(path):
 OBLIGATIONS = ("def0",)      # = prove.OBLIGATIONS (test_formgate checks it; this module imports no SMT solver): a row certifies only what the current prover checks
 
 
+def declared_table():
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "declared.json")) as fh:
+        return json.load(fh)
+
+
+def platform_sha(fns, root=None):
+    """= prove.platform_sha (test_formgate checks they agree; this module imports no SMT solver): sha256 over (relative path, content) of the declared.json sources of the functions, hashed from the lift tree this gate runs from"""
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    rows = {u: r for r in declared_table()["rows"] for u in r["ufs"]}
+    h = hashlib.sha256()
+    for src in sorted({rows[f]["source"] for f in fns}):
+        h.update(src.encode()); h.update(open(os.path.join(root, src), "rb").read())
+    return h.hexdigest()
+
+
+def declared_ok(decl, root=None):
+    """`reg:fn,...@sha256`: every pair is allowed by declared.json (function, output), and the sha is that of the platform sources in this tree"""
+    try:
+        pairs, sha = decl.rsplit("@", 1)
+        rows = {u: r for r in declared_table()["rows"] for u in r["ufs"]}
+        fns = []
+        for p in pairs.split(","):
+            reg, fn = p.split(":")
+            if fn not in rows or reg not in rows[fn]["outputs"]: return False
+            fns.append(fn)
+        return sha == platform_sha(fns, root)
+    except (ValueError, KeyError, OSError):
+        return False
+
+
+
 def load_certs(path, model_sha):
     """{shape: set of dsl_sha} of the rows that are proofs against the pinned model"""
     ok = {}
@@ -172,6 +204,8 @@ def load_certs(path, model_sha):
         # (reg:function pairs, @platform sha256), which the Form takes from a platform function (cpuid: rt/cpumodel.c); a proved row declares nothing
         if res not in ("proved", "agree-except-declared") or (res == "proved") != (decl == "-"):
             continue
+        if decl != "-" and not declared_ok(decl):
+            continue                                                # a declared output outside declared.json, or a platform source that is not the one of this tree: stale
         if model == model_sha and ref in REFERENCES and obl == ",".join(OBLIGATIONS):
             ok.setdefault(key, set()).add(dsl)
     return ok

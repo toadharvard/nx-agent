@@ -33,7 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import model_sail, prove, shape, symform  # noqa: E402
+from proof import irdeps, model_sail, prove, shape, symform  # noqa: E402
 
 HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\tdeclared\n'
 
@@ -91,16 +91,33 @@ def current_sha(key, cache=_SHA):
     return cache[key]
 
 
-_ir_ok = {}
+IR_FILES = {}          # sha256 -> path of an IR file (--ir PATH, fetched by sha from the artifacts repository: tools/x86-proof-ir*); every file is hashed here, a file is never trusted by name
+_K = {}
+
+
+def add_ir(path):
+    with open(path, 'rb') as fh: sha = hashlib.sha256(fh.read()).hexdigest()
+    IR_FILES[sha] = path
+    return sha
+
+
+def _closure(sha, fns):
+    key = (sha, tuple(fns))
+    if key not in _K:
+        path = IR_FILES.get(sha) or (model_sail.IR if model_sail.ir_sha() == sha else None)
+        if path is None: raise Refused('the IR %s of a record is not provided (--ir PATH: fetch it by sha, tools/x86-proof-ir*)' % sha)
+        _K[key] = irdeps.sha_of_file(path, fns, model_sail.run_env_sha())
+    return _K[key]
+
+
 def model_valid(r, model):
-    """K: a record is valid for the pinned model iff it was proved against it (model_sha), or its closure_sha (the definitions the isla run executed + the run environment) is unchanged
-    on the pinned IR (irdeps.py: the run is then step for step the same, so the shape's certificate is the same)"""
+    """K: a record is valid for the pinned model iff it was proved against it (model_sha), or the closure of the functions its isla run executed (model_fns, recorded) is the same on the IR of the
+    record (its model_sha) and on the pinned IR: both are COMPUTED here by irdeps (the stored closure_sha is informational), from IR files that are hashed to their sha.  Equal closure => the run is
+    step for step the same (irdeps.py), so the shape's certificate is the same."""
     if r.get('model_sha') == model: return True
-    fns, want = r.get('model_fns'), r.get('closure_sha')
-    if not fns or not want: return False
-    if model not in _ir_ok: _ir_ok[model] = model_sail.ir_sha() == model
-    if not _ir_ok[model]: raise Refused('the IR file %s is not the pinned model %s' % (model_sail.IR, model))
-    return model_sail.closure_sha(fns) == want
+    fns = r.get('model_fns')
+    if not fns or not r.get('model_sha'): return False
+    return _closure(r['model_sha'], fns) == _closure(model, fns)
 
 
 def scan(files):
@@ -221,7 +238,9 @@ def main(argv):
     ap.add_argument('--queue')
     ap.add_argument('--report')
     ap.add_argument('--coverage')
+    ap.add_argument('--ir', action='append', default=[], help='an IR file (hashed to its sha) that a record of another model_sha was proved against')
     a = ap.parse_args(argv)
+    for f in a.ir: add_ir(f)
     if a.id:
         sys.stdout.write(run_id() + '\n')
         return 0
