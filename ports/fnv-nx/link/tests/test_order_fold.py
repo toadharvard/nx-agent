@@ -44,6 +44,19 @@ def main():
     stl = [m for o, m, a in pc if m == 'stlr' or m.startswith('dmb')]   # an ordered or release-fenced store
     if not pc or plain or len(stl) < 2:
         fails.append('pcaller: the inlined parameter store must be ordered: plain=%s stlr=%d' % (plain, len(stl)))
+    # AGGREGATE COPIES: unit-wise, every shared unit ordered; ATOMICS: raised to seq_cst (ldaxr/stlxr)
+    def mn(prefix):
+        return [m for k, v in fns.items() if k.startswith(prefix) for o, m, a in v]
+    for pre, nl in (('_Z6copy12', 3), ('_Z7copybig', 100)):
+        ms = mn(pre)
+        if ms.count('ldar') != nl or ms.count('stlr') != nl or [m for m in ms if re.match(r'(ldr|str|ldp|stp)', m)]:
+            fails.append('%s: want %d ldar + %d stlr and no plain access: %s' % (pre, nl, nl, {m: ms.count(m) for m in set(ms)}))
+    if mn('_Z4retgv').count('ldar') != 3 or mn('_Z6passesPK3T12').count('ldar') != 3:
+        fails.append('retg/passes: the shared source of a by-value copy is read with 3 ldar')
+    for pre in ('_Z3rmwPi', '_Z3casPiS_'):
+        ms = mn(pre)
+        if 'ldaxr' not in ms or 'stlxr' not in ms or 'ldxr' in ms or 'stxr' in ms:
+            fails.append('%s: atomics must be seq_cst (ldaxr/stlxr): %s' % (pre, ms))
     # READONLY RECORD: .fnvnx.ro names the table with its byte ranges (the whole 32 bytes for the indexed read)
     import subprocess
     sec = subprocess.run(['objdump', '-s', '-j', '.fnvnx.ro', obj], capture_output=True, text=True)
