@@ -4,8 +4,8 @@
   "name": "gcc-msvcmodel",
   "repo": "fnv-nx-build",
   "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
-  "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
-  "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
+  "commit": "05082bde6223bfc0e30990623b0a41310db754f5",
+  "tree_sha256": "da6a3d1b251ead3666b3069167097f803ed79ca279bec76ff7a89183408031ec",
   "at": "/ext/gcc"
  },
  "flags": {
