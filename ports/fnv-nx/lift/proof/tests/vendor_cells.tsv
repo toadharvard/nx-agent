@@ -1,0 +1,402 @@
+3DNow!	80000001	EDX	31	APM Vol. 3 Table 3-1 (PDF page index 80): 3DNow! EDX[31] CPUID 80000001h
+3DNow! Prefetch	80000001	ECX	8	APM Vol. 3 Table 3-1 (PDF page index 80): 3DNow! Prefetch ECX[8] CPUID 80000001h
+Advanced Bit Manipulation (ABM)	80000001	ECX	5	APM Vol. 3 Table 3-1 (PDF page index 80): Advanced Bit Manipulation (ABM) ECX[5] CPUID 80000001h
+CLFSH	00000001	EDX	19	APM Vol. 3 Table 3-1 (PDF page index 80): CLFSH EDX[19] CPUID 00000001h
+CMOV	00000001	EDX	15	APM Vol. 3 Table 3-1 (PDF page index 80): CMOV EDX[15] CPUID 00000001h
+CMOV	80000001	EDX	15	APM Vol. 3 Table 3-1 (PDF page index 80): CMOV EDX[15] CPUID 80000001h
+CMPXCHG16B	00000001	ECX	13	APM Vol. 3 Table 3-1 (PDF page index 80): CMPXCHG16B ECX[13] CPUID 00000001h
+CMPXCHG8B	00000001	EDX	8	APM Vol. 3 Table 3-1 (PDF page index 80): CMPXCHG8B EDX[8] CPUID 00000001h
+CMPXCHG8B	80000001	EDX	8	APM Vol. 3 Table 3-1 (PDF page index 80): CMPXCHG8B EDX[8] CPUID 80000001h
+FXSR	00000001	EDX	25	APM Vol. 3 Table 3-1 (PDF page index 80): FXSR EDX[25] CPUID 00000001h
+LM	80000001	EDX	29	APM Vol. 3 Table 3-1 (PDF page index 80): LM EDX[29] CPUID 80000001h
+Long Mode (LM)	80000001	EDX	29	APM Vol. 3 Table 3-1 (PDF page index 80): Long Mode (LM) EDX[29] CPUID 80000001h
+POPCNT	00000001	ECX	23	APM Vol. 3 Table 3-1 (PDF page index 80): POPCNT ECX[23] CPUID 00000001h
+SSE	00000001	EDX	25	APM Vol. 3 Table 3-1 (PDF page index 80): SSE EDX[25] CPUID 00000001h
+SSE2	00000001	EDX	26	APM Vol. 3 Table 3-1 (PDF page index 80): SSE2 EDX[26] CPUID 00000001h
+SSE2	00000001	EDX	26	APM Vol. 3 Table 3-1 (PDF page index 80): SSE2 EDX[26] CPUID 00000001h
+SSE2	00000001	EDX	26	APM Vol. 3 Table 3-1 (PDF page index 80): SSE2 EDX[26] CPUID 00000001h
+cell	0F0E	n/a	3DNow!
+cell	0F0F	n/a	3DNow!
+cell	0F10	66	SSE2
+cell	0F10	F3	SSE
+cell	0F10	none	SSE
+cell	0F12	66	SSE2
+cell	0F12	none	SSE
+cell	0F13	none	SSE
+cell	0F14	66	SSE2
+cell	0F14	none	SSE
+cell	0F15	66	SSE2
+cell	0F15	none	SSE
+cell	0F16	66	SSE2
+cell	0F16	none	SSE
+cell	0F17	none	SSE
+cell	0F28	66	SSE2
+cell	0F28	none	SSE
+cell	0F2A	66	SSE2
+cell	0F2A	F2	SSE2
+cell	0F2A	F3	SSE
+cell	0F2A	none	SSE
+cell	0F2B	66	SSE2
+cell	0F2B	none	SSE
+cell	0F2C	66	SSE2
+cell	0F2C	F2	SSE2
+cell	0F2C	F3	SSE
+cell	0F2C	none	SSE
+cell	0F2D	66	SSE2
+cell	0F2D	F2	SSE2
+cell	0F2D	F3	SSE
+cell	0F2D	none	SSE
+cell	0F2E	66	SSE2
+cell	0F2E	none	SSE
+cell	0F2F	66	SSE2
+cell	0F2F	none	SSE
+cell	0F50	66	SSE2
+cell	0F50	none	SSE
+cell	0F51	66	SSE2
+cell	0F51	F2	SSE2
+cell	0F51	F3	SSE
+cell	0F51	none	SSE
+cell	0F52	F3	SSE
+cell	0F52	none	SSE
+cell	0F53	F3	SSE
+cell	0F53	none	SSE
+cell	0F54	66	SSE2
+cell	0F54	none	SSE
+cell	0F55	66	SSE2
+cell	0F55	none	SSE
+cell	0F56	66	SSE2
+cell	0F56	none	SSE
+cell	0F57	66	SSE2
+cell	0F57	none	SSE
+cell	0F58	66	SSE2
+cell	0F58	F2	SSE2
+cell	0F58	F3	SSE
+cell	0F58	none	SSE
+cell	0F59	66	SSE2
+cell	0F59	F2	SSE2
+cell	0F59	F3	SSE
+cell	0F59	none	SSE
+cell	0F5A	66	SSE2
+cell	0F5A	F2	SSE2
+cell	0F5A	F3	SSE2
+cell	0F5A	none	SSE2
+cell	0F5B	66	SSE2
+cell	0F5B	none	SSE2
+cell	0F5C	66	SSE2
+cell	0F5C	F2	SSE2
+cell	0F5C	F3	SSE
+cell	0F5C	none	SSE
+cell	0F5D	66	SSE2
+cell	0F5D	F2	SSE2
+cell	0F5D	F3	SSE
+cell	0F5D	none	SSE
+cell	0F5E	66	SSE2
+cell	0F5E	F2	SSE2
+cell	0F5E	F3	SSE
+cell	0F5E	none	SSE
+cell	0F5F	66	SSE2
+cell	0F5F	F2	SSE2
+cell	0F5F	F3	SSE
+cell	0F5F	none	SSE
+cell	0F63	66	SSE2
+cell	0F63	none	SSE2
+cell	0F64	66	SSE2
+cell	0F64	none	SSE2
+cell	0F65	66	SSE2
+cell	0F65	none	SSE2
+cell	0F66	66	SSE2
+cell	0F66	none	SSE2
+cell	0F67	66	SSE2
+cell	0F67	none	SSE2
+cell	0F6B	66	SSE2
+cell	0F6B	none	SSE2
+cell	0F6E	66	SSE2
+cell	0F6E	none	SSE2
+cell	0F6F	66	SSE2
+cell	0F6F	F3	SSE2
+cell	0F6F	none	SSE2
+cell	0F70	66	SSE2
+cell	0F70	F2	SSE2
+cell	0F70	F3	SSE2
+cell	0F70	none	SSE
+cell	0F74	66	SSE2
+cell	0F74	none	SSE2
+cell	0F75	66	SSE2
+cell	0F75	none	SSE2
+cell	0F76	66	SSE2
+cell	0F76	none	SSE2
+cell	0F7E	66	SSE2
+cell	0F7E	F3	SSE2
+cell	0F7E	none	SSE2
+cell	0F7F	66	SSE2
+cell	0F7F	F3	SSE2
+cell	0F7F	none	SSE2
+cell	0FB8	F3	POPCNT
+cell	0FC2	66	SSE2
+cell	0FC2	F3	SSE
+cell	0FC2	none	SSE
+cell	0FC3	none	SSE2
+cell	0FC6	66	SSE2
+cell	0FC6	none	SSE
+cell	0FD1	66	SSE2
+cell	0FD1	none	SSE2
+cell	0FD2	66	SSE2
+cell	0FD2	none	SSE2
+cell	0FD3	66	SSE2
+cell	0FD3	none	SSE2
+cell	0FD4	66	SSE2
+cell	0FD4	none	SSE2
+cell	0FD5	66	SSE2
+cell	0FD5	none	SSE2
+cell	0FD6	66	SSE2
+cell	0FD6	F2	SSE2
+cell	0FD6	F3	SSE2
+cell	0FD8	66	SSE2
+cell	0FD8	none	SSE2
+cell	0FD9	66	SSE2
+cell	0FD9	none	SSE2
+cell	0FDB	66	SSE2
+cell	0FDB	none	SSE2
+cell	0FDC	66	SSE2
+cell	0FDC	none	SSE2
+cell	0FDD	66	SSE2
+cell	0FDD	none	SSE2
+cell	0FDF	66	SSE2
+cell	0FDF	none	SSE2
+cell	0FE1	66	SSE2
+cell	0FE1	none	SSE2
+cell	0FE2	66	SSE2
+cell	0FE2	none	SSE2
+cell	0FE5	66	SSE2
+cell	0FE5	none	SSE2
+cell	0FE6	F2	SSE2
+cell	0FE6	F3	SSE2
+cell	0FE7	66	SSE2
+cell	0FE7	none	SSE
+cell	0FE8	66	SSE2
+cell	0FE8	none	SSE2
+cell	0FE9	66	SSE2
+cell	0FE9	none	SSE2
+cell	0FEB	66	SSE2
+cell	0FEB	none	SSE2
+cell	0FEC	66	SSE2
+cell	0FEC	none	SSE2
+cell	0FED	66	SSE2
+cell	0FED	none	SSE2
+cell	0FEF	66	SSE2
+cell	0FEF	none	SSE2
+cell	0FF1	66	SSE2
+cell	0FF1	none	SSE2
+cell	0FF2	66	SSE2
+cell	0FF2	none	SSE2
+cell	0FF3	66	SSE2
+cell	0FF3	none	SSE2
+cell	0FF4	66	SSE2
+cell	0FF4	none	SSE2
+cell	0FF5	66	SSE2
+cell	0FF5	none	SSE2
+cell	0FF7	none	SSE
+cell	0FF8	66	SSE2
+cell	0FF8	none	SSE2
+cell	0FF9	66	SSE2
+cell	0FF9	none	SSE2
+cell	0FFA	66	SSE2
+cell	0FFA	none	SSE2
+cell	0FFB	66	SSE2
+cell	0FFB	none	SSE2
+cell	0FFC	66	SSE2
+cell	0FFC	none	SSE2
+cell	0FFD	66	SSE2
+cell	0FFD	none	SSE2
+cell	0FFE	66	SSE2
+cell	0FFE	none	SSE2
+subset	ADDPD	SSE2
+subset	ADDPS	SSE
+subset	ADDSD	SSE2
+subset	ADDSS	SSE
+subset	ANDNPD	SSE2
+subset	ANDNPS	SSE
+subset	ANDPD	SSE2
+subset	ANDPS	SSE
+subset	CMPPD	SSE2
+subset	CMPPS	SSE
+subset	CMPSS	SSE
+subset	CMPXCHG16B	CMPXCHG16B
+subset	CMPXCHG8B	CMPXCHG8B
+subset	COMISD	SSE2
+subset	COMISS	SSE
+subset	CVTDQ2PD	SSE2
+subset	CVTDQ2PS	SSE2
+subset	CVTPD2DQ	SSE2
+subset	CVTPD2PI	SSE2
+subset	CVTPD2PS	SSE2
+subset	CVTPI2PD	SSE2
+subset	CVTPI2PS	SSE
+subset	CVTPS2DQ	SSE2
+subset	CVTPS2PD	SSE2
+subset	CVTPS2PI	SSE
+subset	CVTSD2SI	SSE2
+subset	CVTSD2SS	SSE2
+subset	CVTSI2SD	SSE2
+subset	CVTSI2SS	SSE
+subset	CVTSS2SD	SSE2
+subset	CVTSS2SI	SSE
+subset	CVTTPD2DQ	SSE2
+subset	CVTTPD2PI	SSE2
+subset	CVTTPS2DQ	SSE2
+subset	CVTTPS2PI	SSE
+subset	CVTTSD2SI	SSE2
+subset	CVTTSS2SI	SSE
+subset	DIVPD	SSE2
+subset	DIVPS	SSE
+subset	DIVSD	SSE2
+subset	DIVSS	SSE
+subset	FEMMS	3DNow!
+subset	LDMXCSR	SSE
+subset	LFENCE	SSE2
+subset	MASKMOVDQU	SSE2
+subset	MASKMOVQ	SSE
+subset	MAXPD	SSE2
+subset	MAXPS	SSE
+subset	MAXSD	SSE2
+subset	MAXSS	SSE
+subset	MFENCE	SSE2
+subset	MINPD	SSE2
+subset	MINPS	SSE
+subset	MINSD	SSE2
+subset	MINSS	SSE
+subset	MOVAPD	SSE2
+subset	MOVAPS	SSE
+subset	MOVD	SSE2
+subset	MOVDQ2Q	SSE2
+subset	MOVDQA	SSE2
+subset	MOVDQU	SSE2
+subset	MOVHLPS	SSE
+subset	MOVHPD	SSE2
+subset	MOVHPS	SSE
+subset	MOVLHPS	SSE
+subset	MOVLPD	SSE2
+subset	MOVLPS	SSE
+subset	MOVMSKPD	SSE2
+subset	MOVMSKPS	SSE
+subset	MOVNTDQ	SSE2
+subset	MOVNTI	SSE2
+subset	MOVNTPD	SSE2
+subset	MOVNTPS	SSE
+subset	MOVNTQ	SSE
+subset	MOVQ	SSE2
+subset	MOVQ2DQ	SSE2
+subset	MOVSS	SSE
+subset	MOVUPD	SSE2
+subset	MOVUPS	SSE
+subset	MULPD	SSE2
+subset	MULPS	SSE
+subset	MULSD	SSE2
+subset	MULSS	SSE
+subset	ORPD	SSE2
+subset	ORPS	SSE
+subset	PACKSSDW	SSE2
+subset	PACKSSWB	SSE2
+subset	PACKUSWB	SSE2
+subset	PADDB	SSE2
+subset	PADDD	SSE2
+subset	PADDQ	SSE2
+subset	PADDSB	SSE2
+subset	PADDSW	SSE2
+subset	PADDUSB	SSE2
+subset	PADDUSW	SSE2
+subset	PADDW	SSE2
+subset	PAND	SSE2
+subset	PANDN	SSE2
+subset	PAVGUSB	3DNow!
+subset	PCMPEQB	SSE2
+subset	PCMPEQD	SSE2
+subset	PCMPEQW	SSE2
+subset	PCMPGTB	SSE2
+subset	PCMPGTD	SSE2
+subset	PCMPGTW	SSE2
+subset	PF2ID	3DNow!
+subset	PF2IW	3DNow!
+subset	PFACC	3DNow!
+subset	PFADD	3DNow!
+subset	PFCMPEQ	3DNow!
+subset	PFCMPGE	3DNow!
+subset	PFCMPGT	3DNow!
+subset	PFMAX	3DNow!
+subset	PFMIN	3DNow!
+subset	PFMUL	3DNow!
+subset	PFNACC	3DNow!
+subset	PFPNACC	3DNow!
+subset	PFRCP	3DNow!
+subset	PFRCPIT1	3DNow!
+subset	PFRCPIT2	3DNow!
+subset	PFRSQIT1	3DNow!
+subset	PFRSQRT	3DNow!
+subset	PFSUB	3DNow!
+subset	PFSUBR	3DNow!
+subset	PI2FD	3DNow!
+subset	PI2FW	3DNow!
+subset	PMADDWD	SSE2
+subset	PMULHRW	3DNow!
+subset	PMULHW	SSE2
+subset	PMULLW	SSE2
+subset	PMULUDQ	SSE2
+subset	POR	SSE2
+subset	PREFETCH	3DNow!
+subset	PREFETCHW	3DNow!
+subset	PREFETCHlevel	SSE
+subset	PSHUFD	SSE2
+subset	PSHUFHW	SSE2
+subset	PSHUFLW	SSE2
+subset	PSHUFW	SSE
+subset	PSLLD	SSE2
+subset	PSLLDQ	SSE2
+subset	PSLLQ	SSE2
+subset	PSLLW	SSE2
+subset	PSRAD	SSE2
+subset	PSRAW	SSE2
+subset	PSRLD	SSE2
+subset	PSRLDQ	SSE2
+subset	PSRLQ	SSE2
+subset	PSRLW	SSE2
+subset	PSUBB	SSE2
+subset	PSUBD	SSE2
+subset	PSUBQ	SSE2
+subset	PSUBSB	SSE2
+subset	PSUBSW	SSE2
+subset	PSUBUSB	SSE2
+subset	PSUBUSW	SSE2
+subset	PSUBW	SSE2
+subset	PSWAPD	3DNow!
+subset	PUNPCKHBW	SSE2
+subset	PUNPCKHDQ	SSE2
+subset	PUNPCKHQDQ	SSE2
+subset	PUNPCKHWD	SSE2
+subset	PUNPCKLBW	SSE2
+subset	PUNPCKLDQ	SSE2
+subset	PUNPCKLQDQ	SSE2
+subset	PXOR	SSE2
+subset	RCPPS	SSE
+subset	RCPSS	SSE
+subset	RSQRTPS	SSE
+subset	RSQRTSS	SSE
+subset	SFENCE	SSE
+subset	SHUFPD	SSE2
+subset	SHUFPS	SSE
+subset	SQRTPD	SSE2
+subset	SQRTPS	SSE
+subset	SQRTSD	SSE2
+subset	SQRTSS	SSE
+subset	STMXCSR	SSE
+subset	SUBPD	SSE2
+subset	SUBPS	SSE
+subset	SUBSD	SSE2
+subset	SUBSS	SSE
+subset	UCOMISD	SSE2
+subset	UCOMISS	SSE
+subset	UNPCKHPD	SSE2
+subset	UNPCKHPS	SSE
+subset	UNPCKLPD	SSE2
+subset	UNPCKLPS	SSE
+subset	XORPD	SSE2
+subset	XORPS	SSE
