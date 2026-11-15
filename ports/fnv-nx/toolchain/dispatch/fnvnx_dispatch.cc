@@ -368,11 +368,14 @@ static void finish_unit(void *, void *)
   emit_lines(".fnvnx.defdisp", defs);
 }
 
+static bool entry_type(tree t);
+
 static bool indirect_call(gimple *st)
 {
   if (!is_gimple_call(st) || gimple_call_internal_p(st)) return false;
   tree fn = gimple_call_fn(st);
   if (!fn) return false;
+  if (entry_type(TREE_TYPE(fn))) return false;       /* ENTRY1: a call through a native entry address is no call of exe code */
   return !(TREE_CODE(fn) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(fn, 0)) == FUNCTION_DECL);
 }
 
@@ -388,7 +391,30 @@ static tree handle_host(tree *node, tree name, tree args, int, bool *no_add_attr
   return NULL_TREE;
 }
 static struct attribute_spec host_attr = { "fnvnx_host", 0, 0, false, true, false, false, handle_host, NULL };
-static void register_attrs(void *, void *) { register_attribute(&host_attr); }
+
+/* ENTRY1: `fnvnx_entry` marks a pointer-to-function type whose values are NATIVE entry addresses (what the dispatcher returns for an exe address: the
+ * native function itself, which the call reaches directly). A call through such a value is not a call of exe code, so it is not rewritten and has no
+ * descriptor; the type is closed under conversion (ENTRY1-CONT, below), so a value of it is only ever the address of a function, a load of entry-typed
+ * storage, a call result of entry type or a copy of those. */
+static tree handle_entry(tree *node, tree name, tree args, int, bool *no_add_attrs)
+{
+  tree t = *node;
+  if (TREE_CODE(t) != POINTER_TYPE || (TREE_CODE(TREE_TYPE(t)) != FUNCTION_TYPE && TREE_CODE(TREE_TYPE(t)) != METHOD_TYPE)) {
+    error("%qE applies to a pointer-to-function type (its values are native entry addresses)", name);
+    *no_add_attrs = true;
+  }
+  return NULL_TREE;
+}
+static struct attribute_spec entry_attr = { "fnvnx_entry", 0, 0, false, true, false, true, handle_entry, NULL };
+static void register_attrs(void *, void *) { register_attribute(&host_attr); register_attribute(&entry_attr); }
+
+static bool entry_attr_on(tree t) { return t && TYPE_P(t) && lookup_attribute("fnvnx_entry", TYPE_ATTRIBUTES(t)); }
+static bool entry_type(tree t)
+{
+  if (entry_attr_on(t)) return true;
+  tree n = t && TYPE_P(t) ? TYPE_NAME(t) : NULL_TREE;
+  return n && TREE_CODE(n) == TYPE_DECL && entry_attr_on(DECL_ORIGINAL_TYPE(n));
+}
 
 
 /* HOST1: the attribute is on the type itself or on the typedef that names it (`typedef unsigned long long __attribute__((fnvnx_host)) hslot`: GCC
@@ -423,6 +449,21 @@ static bool contains_host(tree t)
   return false;
 }
 
+/* ENTRY1-CONT: a value of type SRC (the expression OPERAND) flows into type DST (a conversion, an initialisation or assignment, a call argument, a result): an
+ * entry type meets only itself; the address of a function is the one other source of an entry value. A result that is discarded or tested for truth moves no
+ * value, so it is no flow. The front end keeps no conversion node between types it counts as one type: the flow sites are checked as well as the conversions. */
+static void entry_flow(tree src, tree dst, tree operand, location_t loc)
+{
+  if (!src || !dst || !(entry_type(src) || entry_type(dst))) return;
+  tree o = operand;
+  while (o && (CONVERT_EXPR_P(o) || TREE_CODE(o) == NON_LVALUE_EXPR)) o = TREE_OPERAND(o, 0);
+  bool same = entry_type(src) && entry_type(dst) && TYPE_MAIN_VARIANT(TREE_TYPE(src)) == TYPE_MAIN_VARIANT(TREE_TYPE(dst));
+  bool fnaddr = entry_type(dst) && !entry_type(src) && o && TREE_CODE(o) == ADDR_EXPR && TREE_CODE(TREE_OPERAND(o, 0)) == FUNCTION_DECL;
+  bool discard = entry_type(src) && (VOID_TYPE_P(dst) || TREE_CODE(dst) == BOOLEAN_TYPE);
+  if (!same && !fnaddr && !discard)
+    error_at(loc, "ENTRY1-CONT: a conversion between %qT and %qT: a native entry type converts only to itself", src, dst);
+}
+
 /* CONT-P: the explicit conversions of a function body, walked before genericization */
 static tree contp_walk(tree *tp, int *walk_subtrees, void *)
 {
@@ -430,8 +471,19 @@ static tree contp_walk(tree *tp, int *walk_subtrees, void *)
   if (!e) return NULL_TREE;
   if (TYPE_P(e)) { *walk_subtrees = 0; return NULL_TREE; }
   const enum tree_code c = TREE_CODE(e);
+  if (c == DECL_EXPR && TREE_CODE(DECL_EXPR_DECL(e)) == VAR_DECL && DECL_INITIAL(DECL_EXPR_DECL(e)))
+    entry_flow(TREE_TYPE(DECL_INITIAL(DECL_EXPR_DECL(e))), TREE_TYPE(DECL_EXPR_DECL(e)), DECL_INITIAL(DECL_EXPR_DECL(e)), EXPR_LOCATION(e));
+  if (c == INIT_EXPR || c == MODIFY_EXPR) { entry_flow(TREE_TYPE(TREE_OPERAND(e, 1)), TREE_TYPE(TREE_OPERAND(e, 0)), TREE_OPERAND(e, 1), EXPR_LOCATION(e)); return NULL_TREE; }
+  if (c == CALL_EXPR && CALL_EXPR_FN(e)) {
+    tree ft = TREE_TYPE(TREE_TYPE(CALL_EXPR_FN(e)));
+    tree parm = ft && (TREE_CODE(ft) == FUNCTION_TYPE || TREE_CODE(ft) == METHOD_TYPE) ? TYPE_ARG_TYPES(ft) : NULL_TREE;
+    for (int i = 0; i < call_expr_nargs(e) && parm && parm != void_list_node; i++, parm = TREE_CHAIN(parm))
+      entry_flow(TREE_TYPE(CALL_EXPR_ARG(e, i)), TREE_VALUE(parm), CALL_EXPR_ARG(e, i), EXPR_LOCATION(e));
+    return NULL_TREE;
+  }
   if (c != NOP_EXPR && c != CONVERT_EXPR && c != VIEW_CONVERT_EXPR) return NULL_TREE;
   tree src = TREE_TYPE(TREE_OPERAND(e, 0)), dst = TREE_TYPE(e);
+  if (src && dst && (entry_type(src) || entry_type(dst))) { entry_flow(src, dst, TREE_OPERAND(e, 0), EXPR_LOCATION(e)); return NULL_TREE; }
   if (!src || !dst || !(POINTER_TYPE_P(src))) return NULL_TREE;
   tree sp = TREE_TYPE(src);
   if (!contains_host(sp)) return NULL_TREE;
