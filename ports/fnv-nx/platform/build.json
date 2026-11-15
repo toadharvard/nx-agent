@@ -417,5 +417,6 @@
    "at": "/ext/freetype-debian"
   }
  ],
- "sources": "freetype/units.list"
+ "sources": "freetype/units.list",
+ "external_errors": {"freetype": {"type": "FT_Error", "success": 0}}
 }
