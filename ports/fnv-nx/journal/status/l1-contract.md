@@ -1862,3 +1862,5 @@ bottleneck: the cand2 verdict on w15, then cand3.
   - w12 merges every L1-file commit from that line, checked by a diff of verify/contract/loader against t16l.
   - Closure rule (L4's proposal, accepted): the link.roots seed = undefined symbols of the objects ∪ the symbols the link script references, taken from the pinned ld on the script alone. crt0 then enters by rule (the icount image's __fnvnx_guest_hdr).
 bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
+- 22:12 L4 bootrt fix at w9 d16d89c: rt.c has 4 symbols, the callbacks are unconditional, reach_violation exits through g_exit(0x52000000|fact), no syscall or libc; test_bootrt 7/7. Remaining L1 items go to w12 for cand3: the admit row for tests/bootguest(@m80) from L4 w8 478c8914b; the profile-host body analyzer (objstub_x64) wired in by ISA fact.
+bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
