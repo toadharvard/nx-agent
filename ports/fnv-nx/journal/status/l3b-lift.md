@@ -231,3 +231,15 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - not covered: iretd 6 (no Form; L3a w1 queue, the SDM IRET same-privilege rule) and 1 mov.
 - Shard count: the final timing sample (132/132) gives N=59, but the farms keep N=54; resume covers any overrun.
 - No v3 shard has been published yet.
+
+## 2026-11-15 10:20Z
+- SIMD (w9 acc73e7d, merged at ac173e928). simdcheck over 4,290 shapes:
+  - proved 2,828, by cases 122, no-form 1,005, no-row 335, FAILED 0.
+  - rcp/rsqrt come from rt/rcptab.c (exhaustive 2^32 certificate rcptab.cert.json).
+  - The FP-mask fact has one name, ASM-204.
+- w9 next:
+  - rerun the subject on L3a 0bfa4a518 (the SSE FP class);
+  - route 3DNow and VEX to the CPUREF #UD class by derivation;
+  - pause and cvtpi2ps rows;
+  - the ACL2-vs-SDM deviations cited per row.
+- L3a is asked for FNVL_CPUREF_MXCSR_MASK (0xFFBF) in cpumodel.c. Until then the SSE FP certificates are uncertified.
