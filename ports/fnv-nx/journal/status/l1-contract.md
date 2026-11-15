@@ -1892,3 +1892,5 @@ bottleneck: the cand3 platform fix (w12), and the cand2 merge (w15).
   - The loader↔platform cycle (boot.c needs a platform header, and platform uses the loader): the shared interface moves to hostabi/include, and the loader uses hostabi INCLUDE. L5 lands it whole, including the loader line; w12 takes it.
   - L6: the 8 translator V are closed on render-w6-root 717e82995 (table rule plus cited constants), which reaches the trunk with cand4.
 bottleneck: the cand3 head (w12: L5 commits, the cycle fix, nxgpu, lineage, closure), and the cand2 merge (w15).
+- 22:45 L3a asked for a gate on lift/facts GATES (example: libvorbis has 6,499 uncertified bytes, and nothing in the verdict reads it yet). Gate `liftfacts` goes to w28 for cand4, after the exe row. It is red when any image is not green, when uncertified bytes, entries_on_data or s4 rows are above 0, or when an image is missing. w7 sends the format to w28.
+bottleneck: the cand3 head (w12), and the cand2 merge (w15).
