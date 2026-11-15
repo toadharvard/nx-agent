@@ -266,3 +266,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Group 2 mode channel done (w6-r 8e2890530): sdmc:/mode is read through the product fs path; missing -> 0xE0000002, unknown -> 0xE0000001; with_data_word deleted. Shifted assertions are measured from the fnvboot_mode_start mark. Not yet run: link red.
   - Icount fixture (w6, doing): its own guest test root on link/guest.json, loaded by the boot machine's loader; no as/ld/objcopy/nm in the test.
   - w6 is checking that w12L2 a7c657f56 and w8 68814726d (lift/rt ftoi inputs) are in w6-r.
+- 01:50:
+  - Task T done (w7-s 1a64f0375): the game is mounted at FNVNX_SD_DIR only, read from the header, and the "fnvnx/game" alias is deleted. 0 uses left in verify/ and farm/.
+  - Tests: test_bootpath 53, bootinputs 75, oracle 83 are green.
+  - w6 takes w7-s into w6-r with the next merge.
