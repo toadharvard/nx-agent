@@ -1,0 +1,86 @@
+{
+ "format": "fnvnx-recipe/1",
+ "uses": [
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "MODULES_TSV"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/exe",
+   "output": "IMG"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/exe",
+   "output": "FUNCS"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/atimgpud",
+   "output": "IMG"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/binkw32",
+   "output": "IMG"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/d3dx9_31",
+   "output": "IMG"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/d3dx9_38",
+   "output": "IMG"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/gdffalloutnv",
+   "output": "IMG"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/libvorbis",
+   "output": "IMG"
+  },
+  {
+   "root": "ports/fnv-nx/lift/factsimg/libvorbisfile",
+   "output": "IMG"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/factsassemble.py",
+   "args": [
+    "--table",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--funcs",
+    "/uses/ports/fnv-nx/lift/factsimg/exe/FUNCS",
+    "--exe",
+    "/uses/ports/fnv-nx/lift/factsimg/exe/IMG",
+    "--module",
+    "atimgpud=/uses/ports/fnv-nx/lift/factsimg/atimgpud/IMG",
+    "--module",
+    "binkw32=/uses/ports/fnv-nx/lift/factsimg/binkw32/IMG",
+    "--module",
+    "d3dx9_31=/uses/ports/fnv-nx/lift/factsimg/d3dx9_31/IMG",
+    "--module",
+    "d3dx9_38=/uses/ports/fnv-nx/lift/factsimg/d3dx9_38/IMG",
+    "--module",
+    "gdffalloutnv=/uses/ports/fnv-nx/lift/factsimg/gdffalloutnv/IMG",
+    "--module",
+    "libvorbis=/uses/ports/fnv-nx/lift/factsimg/libvorbis/IMG",
+    "--module",
+    "libvorbisfile=/uses/ports/fnv-nx/lift/factsimg/libvorbisfile/IMG",
+    "--out",
+    "/out/facts",
+    "--gates",
+    "/out/gates"
+   ],
+   "inputs": [],
+   "outputs": [],
+   "dirs": [
+    "facts",
+    "gates"
+   ]
+  }
+ ],
+ "outputs": {
+  "FACTS": "facts",
+  "GATES": "gates"
+ }
+}

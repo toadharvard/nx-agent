@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""R3 byte accounting of .text (used by universe.py; U is the universe module). Every byte is exactly one class:
+"""R3 byte accounting of .text (used by universe.py; U is the universe module). Every byte gets one accounting class (a breakdown, NOT a partition of the properties may-execute / may-be-read: see tools/CODEMAP.md, rule DIC):
 1 instruction of a decomp function, 2 instruction of a non-decomp entry, 3 table/data named by a relocation, 4 padding,
 5 dead code inside a decomp function, 6 dead code in a gap (no entry, no relocation names it), 8 data named by a PE data directory,
 7 hole between executable sections (not part of the universe), 0 unexplained (build error).
@@ -66,7 +66,7 @@ def finish(U):
     """final accounting -> (stdout lines, unexplained bytes, classes). The residue runs are settled by tools/residue.py (the one residual rule); the per-run sweep reason is printed for information."""
     import residue
     cls = U.classify(); runs = split_runs(U, U.pad_split(cls)); res, ops = analyse(U, runs); bad = []
-    CLO = residue.closure(U.rvals, U.entries, U.outdir); brk = Counter()
+    CLO = residue.closure(U.vals, U.entries, U.outdir); brk = Counter()
     for s, e, st in res:
         brk[st if st != 'dead' else 'decodes-and-ends'] += e - s
         if CLO.complete: cls[s:e] = bytes([residue.DATA]) * (e - s)

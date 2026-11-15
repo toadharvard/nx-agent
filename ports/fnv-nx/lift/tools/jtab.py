@@ -13,6 +13,7 @@ node more than WIDEN times becomes top there (loop heads), so the analysis termi
 The table is the words T + 4*v, v over the interval: every word must be a relocated dword whose value is the address of an executable instruction; the extent may lie below T. The number of words
 is at most the image's size / 4 (more cannot be relocated code addresses). Anything else is RED with the reason.
 Basis: closure completeness (the preds are every edge of the closure, seeds are top: no assumption beyond the manifest of ASM-202); intervals and flags are an over-approximation."""
+import sys, os
 from capstone import x86 as X
 
 N = 1 << 32; M32 = N - 1; TOP = (0, M32); WIDEN = 4
@@ -55,6 +56,15 @@ def meet(a, lo, hi):
 def add(a, c): return ((a[0] + c) % N, a[1])
 
 
+def parts(al):
+    """the partition an alias map names: {frozenset of the locations of one class}.  The class ids of `al` are fresh labels (copy and joinst mint a new one per call), so only the partition is the state:
+    two maps with the same partition are the same abstract value.  This is what makes `joinst(m, s) != m` mean "the join moved up the lattice", the termination argument of the worklist (every join only
+    coarsens r, shrinks the partition, nz, f and pk, and widening bounds r); comparing the labels instead makes a state with an alias class change on every join and the loop never ends."""
+    c = {}
+    for k, v in al.items(): c.setdefault(v, []).append(k)
+    return frozenset(frozenset(ks) for ks in c.values() if len(ks) > 1)       # a class of one location says nothing (joinst drops it too)
+
+
 class St:
     """r: {loc: interval} (absent = top), loc = a register name or a frame cell ('c', base, disp); f: None | (kind, loc, pre interval, imm);
     al: {loc: class id} (locations that hold the same value); nz: {loc: set of masks m with loc & m != 0}; pk: tuple of pushed intervals (top last), espd: esp offset since the seed (None = unknown)."""
@@ -62,7 +72,7 @@ class St:
 
     def __init__(s, r, f, al=None, nz=None, pk=(), espd=0): s.r = r; s.f = f; s.al = al or {}; s.nz = nz or {}; s.pk = pk; s.espd = espd
     def cp(s): return St(dict(s.r), s.f, dict(s.al), {k: set(v) for k, v in s.nz.items()}, s.pk, s.espd)
-    def __eq__(s, o): return s.r == o.r and s.f == o.f and s.al == o.al and s.nz == o.nz and s.pk == o.pk and s.espd == o.espd
+    def __eq__(s, o): return s.r == o.r and s.f == o.f and parts(s.al) == parts(o.al) and s.nz == o.nz and s.pk == o.pk and s.espd == o.espd
     def g(s, loc): return s.r.get(loc, TOP)
 
 
@@ -347,7 +357,14 @@ class Tg(tuple):
     pass
 
 
+STATS = {'calls': 0, 'secs': 0.0, 'cone_sum': 0, 'cone_max': 0, 'slow': []}      # cost accounting of resolve (printed by the callers): calls, total seconds, backward-cone sizes
 def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
+    """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""
+    import time; t0 = time.time(); r = _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords); dt = time.time() - t0
+    STATS['calls'] += 1; STATS['secs'] += dt
+    if dt > 5: STATS['slow'].append((site, round(dt, 1), STATS.get('_cone', 0))); sys.stderr.write('jtab resolve %08x: %.1f s, cone %d, calls so far %d, %.0f s\n' % (site, dt, STATS.get('_cone', 0), STATS['calls'], STATS['secs']))
+    return r
+def _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
     """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""
     ins = ins_at(site); op = ins.operands[0]
     if op.mem.base or op.mem.segment: return None, 'table jump with a base register or segment'
@@ -359,6 +376,7 @@ def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
         if seeded(x): continue
         for p in preds(x):
             if p not in cone: cone.add(p); stack.append(p)
+    STATS['_cone'] = len(cone); STATS['cone_sum'] += len(cone); STATS['cone_max'] = max(STATS['cone_max'], len(cone))
     IN = {}; cnt = {}; work = []; cache = {}
     def ins_c(a):
         if a not in cache: cache[a] = ins_at(a)
@@ -430,3 +448,5 @@ def exclusive(ok, svals):
             i += 1
         if good: out.update(t.addrs)
     return out
+import atexit
+atexit.register(lambda: STATS['calls'] and sys.stderr.write('jtab resolve cost: %d calls, %.0f s, cone sum %d, cone max %d, slow(>5s) %d\n' % (STATS['calls'], STATS['secs'], STATS['cone_sum'], STATS['cone_max'], len(STATS['slow']))))
