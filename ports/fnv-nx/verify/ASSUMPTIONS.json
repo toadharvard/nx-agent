@@ -1789,7 +1789,7 @@
    "id": "ASM-640",
    "text": "The undocumented d3d9 exports have Wine's signatures.",
    "used_by": [
-    "ports/fnv-nx/render/d3d9/spec/d3d9_exports.py"
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_exports.py"
    ],
    "aliases": [
     "L6:census#70"

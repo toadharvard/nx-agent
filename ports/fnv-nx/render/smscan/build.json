@@ -66,12 +66,12 @@
    "args": [
     "/out/gen",
     "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
-    "/in/ports/fnv-nx/render/d3d9/spec/d3d9_tables.py"
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_tables.py"
    ],
    "inputs": [
     "ports/fnv-nx/render/shaders/total/sm_table.json",
     "ports/fnv-nx/render/shaders/total/sm_illegal.tsv",
-    "ports/fnv-nx/render/d3d9/spec/d3d9_tables.py"
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_tables.py"
    ],
    "outputs": [
     "gen/res_smtab.gen.h"

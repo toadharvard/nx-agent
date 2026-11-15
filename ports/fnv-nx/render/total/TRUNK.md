@@ -18,7 +18,7 @@ L1 also adds `ports/fnv-nx/render/total` to the argv of the `pure` and `selftest
 
 The gate reads only the git-tracked files of these paths (`git ls-files`). It copies them to `GATE_OUT/d3d9total.work/in`, and a declared path with no tracked file makes the gate red:
 
-- `render/d3d9/front`, `render/d3d9/spec/d3d9_spec.json`
+- `render/d3d9/front`, `bridgefacts/d3d9/d3d9_spec.json`
 - the roots' own records: `render/d3d9/build.json` and the directories of its `include` list (nothing restated in the gate), `render/shaders/translator/build.json`
 - `render/shaders/total/sm_table.json`, `gen_sm_rows.py`, `fnvnx_sm_rows.h`
 

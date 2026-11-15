@@ -4,7 +4,7 @@ x86 SDK rules, which AArch64-ILP32 reproduces: every pointer/HANDLE/HWND/long is
 (LARGE_INTEGER 8). The result is cross-checked by tests/l6/test_spec.py against a g++ -m32 probe of the headers."""
 import os, re
 
-INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "shim", "include")
+INC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "shim", "include")
 HDRS = ("d3d9types.h", "d3d9caps.h", "d3d9.h")
 WIN_STRUCTS = ("GUID", "POINT", "RECT", "PALETTEENTRY", "RGNDATAHEADER", "RGNDATA", "LUID")
 # base type -> (size, signed, kind)

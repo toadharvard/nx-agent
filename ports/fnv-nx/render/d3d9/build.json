@@ -37,9 +37,12 @@
   {
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_impl.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
    "outputs": [
     "gen/d9impl.gen.h",
     "gen/d9impl_methods.txt",
@@ -49,9 +52,12 @@
   {
    "tool": "ports/fnv-nx/render/d3d9/dev/state_model.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
    "outputs": [
     "gen/state.gen.cpp",
     "gen/state.gen.h",
@@ -61,20 +67,25 @@
   {
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_bridge.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json",
+    "/in/ports/fnv-nx/bridgefacts/d3d9"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9"
+   ],
    "outputs": [
-    "gen/d9bridge.gen.cpp",
-    "gen/d9bridge_rows.tsv"
+    "gen/d9bridge.gen.cpp"
    ]
   },
   {
    "tool": "ports/fnv-nx/render/d3d9/env/gen_env.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
    ],
    "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json",
     "ports/fnv-nx/shim/include/d3d9types.h"
    ],
    "outputs": [
@@ -111,9 +122,12 @@
   {
    "tool": "ports/fnv-nx/render/d3d9/front/gen_enums.py",
    "args": [
-    "/out/gen/d3d9_enums.gen.h"
+    "/out/gen/d3d9_enums.gen.h",
+    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+   ],
    "outputs": [
     "gen/d3d9_enums.gen.h"
    ]
