@@ -453,3 +453,11 @@ After the first frame:
   - It was built from plugins 2057a846, which carries 2fc56b832, 68183c628 and the strip rule 8d3e6b63.
   - The MANIFEST's compiler.build_key is a1ae3ba606ed766a. stamp.py at 2057a846 gives the same key (checked).
   - The farm sent the pin to L1 for cand2. L5 replaces msvcmodel13 and deletes toolchain/gcc/build.sh. w3 and w2 rerun the toolchain and gate tests against the pin.
+- 2026-11-15 19:05Z: Pin check by w2 at 2057a8465, on pin b36df930. Gate tests:
+  - gate_rtasm over every member (L1's pulled set needs a product link map): 1601 members, 129 assembled, 535 accesses, 150 violations. All 150 are in libgcc's outline-atomic lse objects, which nothing references under -mno-outline-atomics.
+  - Startfiles-only pulled approximation: 0 violations (setjmp.o is D1).
+  - test_dispatch 67 ok; test_sdd_order ok.
+  - Open, w2:
+    - (1) guest_compiler.json still names the old mirror b274ec06 and the linux-gnu binaries. w2 wires the pin, derives cc/cxx from the one target triple field (rule 5) and sends it to L1 for cand2.
+    - (2) test_gate_order uses stock linux-gnu g++, a second path. It moves onto the recipe, and the test universe is censused for direct compiler calls.
+    - (3) Explain the lse violation shape (gate rule or correct red).
