@@ -672,3 +672,9 @@ Paused: w3b, w4, farm; no other work.
 - 00:56Z ASM-628/629 (registry on w6-root) are removed by fact.
     - 628: cite the D3D9 page from the mirror (w6).
     - 629: reserved ABI fields are deleted, padding is stated by static_assert (L6A W6-D1b).
+- 00:57Z L6A e3678657: the variant field carries the translator key flags. gl4 refuses bits outside KEY or VS_COMPLETE on PS.
+    - Width: KEY is a positive set (X-macro), plus a static_assert that it fits sizeof(NxShaderD3D.variant).
+    - The producer change bases on e3678657 + W6-D1b (reserved fields deleted).
+- 00:57Z ASM-628 check: BeginPass4 requires equal size including depth. D3D9 allows depth >= RT (SetDepthStencilSurface), so this may be stricter than D3D9.
+    - w1b cites each condition from the docs mirror.
+    - Where D3D9 is weaker, the ABI follows D3D9.
