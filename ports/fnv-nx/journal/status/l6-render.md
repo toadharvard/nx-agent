@@ -984,3 +984,13 @@ Paused: w3b, w4, farm; no other work.
         - w6 QbpDKvc9 (doing): delete the stale render/d3d9/QUEUE.md and the stale numbers in render docs; then the COM_SPEC rebase on cand3.
     - cand4 (handed to L1): w6-root 68521ef8f, then w5-smlink ed6a8f41e. sm_link red 0, 121,394 programs.
 - bottleneck: waiting on L1 for cand3, the trunk merge (a5c8f427 since 08:58Z). The guest builds of pair and d3d9 are red only on the L1 plugin fnvnx_names mount (crossing_terms.inc), and platform and loader on hostabi admission; ffp_prog.cpp is compiled nowhere until then. The hermetic sm_link chain is blocked by L1 w12's run-stage cost (> 2 h per cold run). 3 of 4 workers busy.
+- 20:15Z w5 ff208d525 (w5-fbo): Rule D and item (f), design accepted.
+    - One nx_attach in draw_state.cpp, called from 2 sites (nx_pass_resolve and do_clear).
+    - Depth bound per Wine context_gl.c 647-671. An incomplete pass is a no-op returning D3D_OK, with one fixme line (wine_fixme row 25).
+    - Unverified: the guest build is blocked by the L1 names-plugin inputs (w5's recipe.py fix is a separate commit for L1) and by L2's duplicate cases in fnvnx_layout.cc 456/492 and 458/494. Both sent to L1.
+    - The real-files test is written as a guest test unit; it runs on L4's harness.
+    - w6 2abcc10ec: the 28 ASM-6xx records are decided: 19 cited at code, 7 deleted as resolved. Open: the cursor blend order needs a Wine citation; preload must use the one upload path; the LASTPIXEL log must print per call.
+    - w1b 1d566a1d8: the sm tables are generated only.
+        - Rulings: the Wine source is wined3d shader_sm1.c, not vkd3d; an unbounded entry means Wine accepts every model; the 501 derived opcode rows stay; R3 sees a contradiction only on exclusion words; v[a0.x] is legal.
+        - Next: the per-row diff, with flips decided by me.
+- bottleneck: waiting on L1 and L2 for the guest compile (no L6 guest code compiles; 2 plugin defects) and on L1 cand3 for the trunk. 3 of 4 workers busy.
