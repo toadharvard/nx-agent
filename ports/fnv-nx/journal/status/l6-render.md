@@ -597,3 +597,8 @@ Paused: w3b, w4, farm; no other work.
     - On w6-root, draw_prog.cpp:85 calls fnvnx_dk_vs_needs_complete, and the sm_link checker calls the same function.
     - nx_pair_variant (w6 1a02d0de) is only on the old branch claude/fnv-l6-render-w6. w6 carries it onto w6-root after w16c1.
     - FFP pair sets (nx_ffp_*_program) are still open for sm_link.
+- 00:45Z w6 34ce66f16: nx_pair_variant is on w6-root (draw_core.h / draw_prog.cpp only). d3d9total 332/332 before and after.
+    - Not yet compiled: it needs the d3d9 root build (L1 w16c1).
+- 00:45Z Defect reported to L1 (rule 8): concurrent GATE_CACHE external fetches raced, and one verdict came out red (SM 0/171).
+    - Cause: the store's writes are not atomic.
+    - Closing rule asked of L1: every store write goes to a temp path, is verified, and is then atomically renamed.
