@@ -151,3 +151,13 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Farms kept: 05, 07, 11 and 12. Archived: 13, 14, 15 and 16. Their branches stay.
 - tss_io_bitmap: L5 w14 3646ebab3 holds "no port permitted" with no opcode copy. The I/O instruction set stays in sdm_priv_rows.tsv.
 - L3a takes the tzcnt/lzcnt class into img.dec: a feature-dependent encoding is decoded under CPUREF (tzcnt→bsf, popcnt→#UD, pause→nop).
+
+## 2026-11-15 09:25Z — queue v3 started (2.6)
+- Queue v3: fnv-nx-build l3b-lift/queue/7b2faae276b2-c4ba6f912412-v3 at 20ffd0c3.
+  - queue.tsv sha 48fddcc0, queue_id f3eb5096ad36.
+  - 18,649 integer rows. Pack 7ef692b5b, prover w4 c4ba6f912, IR 7c307464.
+  - Out of this queue: x87 2,063, SIMD 4,291, sys 129, and 101 integer shapes without a Form.
+- Farms 05/07/11/12 run K=1-6, 7-12, 13-18 and 19-24 of 24, three at a time.
+  - Resume rule: a shard killed at the 2 h limit is rerun with the same command; the appended jsonl skips shapes already proved.
+- w4 merged the lead branch (cdd9ce1b1): one IR fetch path. Next: the oracle.json entries, then SIMD slice 1 (prover state for xmm/mm/mxcsr/fr/fptr).
+- Sent to L3a w1: the pinsrw/pextrw/pshufw lane index must be an ite over the masked immediate.
