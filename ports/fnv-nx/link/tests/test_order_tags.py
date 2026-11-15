@@ -91,12 +91,24 @@ check('BR: br inside a frame scanned without an exception', 'f' in rows, True)
 rows, o = scan('lp', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'bl g', 'ldp x29, x30, [sp], #32', 'ret', 'str w0, [sp, #8]', 'ldp x29, x30, [sp], #32', 'ret'])
 check('LP: landing pad keeps sp, its frame access certified', {k: v for k, v in rows.items() if v}, {})
 # rule D (dominance): a store to an address-taken slot before any instruction forms its address is certified; a back edge from the forming instruction is a path
-rows, o = scan('dom1', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'str w0, [sp, #16]', 'add x1, sp, #16', 'ldar x2, [x1]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
-check('D: store before the address is formed is certified', rows.get('f+0x8'), '')
-rows, o = scan('dom2', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', '1: str w0, [sp, #16]', 'add x1, sp, #16', 'ldar x2, [x1]', 'cbnz x3, 1b', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
-check('D: a loop back edge makes the store shared', bool(rows.get('f+0x8')), True)
-rows, o = scan('dom3', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #16', 'ldar x2, [x1]', 'str w0, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
-check('D: a store after the address is formed is shared', bool(rows.get('f+0x10')), True)
+PRO = ['stp x29, x30, [sp, #-32]!', 'mov x29, sp']
+EPI = ['ldp x29, x30, [sp], #32', 'ret']
+R = 'f\t-16:8\n'
+rows, o = scan('dom1', PRO + ['add x1, sp, #16', 'ldar x2, [x1]', 'str w0, [sp, #16]', 'add x0, sp, #16', 'bl g'] + EPI, R)
+check('D1: forming the address and loading through it is no escape: the store is certified', rows.get('f+0xc'), '')
+rows, o = scan('dom1b', PRO + ['str w0, [sp, #16]', 'add x0, sp, #16', 'bl g', 'ldr w2, [sp, #16]'] + EPI, R)
+check('D1: an access before the escaping call is certified', rows.get('f+0x8'), '')
+check('D1: the same access after the call is not', bool(rows.get('f+0x14')), True)
+rows, o = scan('dom2', PRO + ['1: str w0, [sp, #16]', 'add x0, sp, #16', 'bl g', 'cbnz x3, 1b'] + EPI, R)
+check('D1: a loop back edge from the escape makes the store shared', bool(rows.get('f+0x8')), True)
+rows, o = scan('dom3', PRO + ['add x1, sp, #16', 'str x1, [x3]', 'str w0, [sp, #16]'] + EPI, R)
+check('D1: a store of the address, then an access: shared', bool(rows.get('f+0x10')), True)
+rows, o = scan('dom4', PRO + ['add x1, sp, #16', 'cbz x4, 1f', 'str x1, [x3]', '1: str w0, [sp, #16]'] + EPI, R)
+check('D1: the address stored on one branch makes the join point uncertified', bool(rows.get('f+0x14')), True)
+rows, o = scan('dom5', PRO + ['add x1, sp, #16', 'cbz x4, 1f', 'nop', '1: str w0, [sp, #16]'] + EPI, R)
+check('D1: no branch stores it: the join point is certified', rows.get('f+0x14'), '')
+rows, o = scan('dom6', PRO + ['add x1, sp, #16', 'add x2, x1, #4', 'str x2, [x3]', 'ldr w0, [sp, #16]'] + EPI, R)
+check('D1: a derived address stored escapes the variable', bool(rows.get('f+0x10')), True)
 # rule A: an access in the incoming stack-argument area is a frame access iff the row has args:N covering it and it overlaps no recorded range
 rows, o = scan('arg1', ['ldr w0, [sp, #8]', 'ret'], 'f\t\targs:16\n')
 check('A: in the argument area: certified', {k: v for k, v in rows.items() if v}, {})
@@ -111,10 +123,10 @@ check('unk token: the row is dynamic, a frame store is red', bool(rows.get('f+0x
 # `OFF:SIZE:n` (escapes=0): plain accesses to it are certified by its range, via sp or via a register holding the formed address; an escaping pair is not
 rows, o = scan('pn1', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #16', 'str w0, [x1]', 'ldr w2, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8:n\n')
 check('n: private variable, accesses through x1 and sp are certified', {k: v for k, v in rows.items() if v}, {})
-rows, o = scan('pn2', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #16', 'str w0, [x1]', 'ldr w2, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
-check('n: the same variable without :n escapes, its access after the formation is red', bool(rows.get('f+0xc')), True)
-rows, o = scan('pn3', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #18', 'ldr w2, [sp, #18]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:2:n -14:4\n')
-check('n: an access overlapping an escaping pair is not certified by a :n pair', bool(rows.get('f+0xc')), True)
+rows, o = scan('pn2', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #16', 'str x1, [x3]', 'ldr w2, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
+check('n: the same variable without :n, its access after the escape is red', bool(rows.get('f+0xc')), True)
+rows, o = scan('pn3', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #18', 'str x1, [x3]', 'ldr w2, [sp, #18]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:2:n -14:4\n')
+check('n: an access overlapping an escaping pair is not certified by a :n pair', bool(rows.get('f+0x10')), True)
 import framesec as FS
 check('parse :n', [(tuple(q), q.priv) for q in FS.parse_frame(b'f\t-16:8:n -8:4\n', 'x')[0][1]], [((-16, 8), True), ((-8, 4), False)])
 for bad in (b'f\t-16:8:m\n', b'f\t-16:8:n:n\n', b'f\t-16:8: \n'):

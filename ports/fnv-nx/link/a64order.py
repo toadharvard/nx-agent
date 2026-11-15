@@ -67,8 +67,9 @@ INPUT FACTS AND RULES.
  KC      rule: `movz`/`movk`/`movn`/`mov` with an immediate give a register the constant tag ('K', v); `sub|add sp, sp, xN` with xN of that tag changes sp by
          v. Soundness: the tag is the exact value of the register on every path that reaches the instruction (a join of different values drops it); a
          constant is not an address, so it never counts as a frame-derived value.
- D       rule (dominance; the prologue home-slot store is its forward form): see Func.unshared. A callee cannot reach a slot whose address is not
-         formed yet except by a wild access from its own sp, which OWNER assumption ASM-006 (no wild accesses) excludes; so no call condition is needed.
+ D       rule (dominance, D1; the prologue home-slot store is its forward form): see Func.unshared. An access to a slot is unshared iff no ESCAPE of
+         the slot's address (a stored value, an argument register at a call, an index register) reaches it on any CFG path from the entry. A stale pointer
+         from an earlier frame, or a callee reaching a slot nobody published, is a wild access, which OWNER assumption ASM-006 excludes.
  A       rule (incoming arguments): [CFA, CFA+args) is the call's argument area, args = crtl->args.size from the third field `args:N` of the frame row;
          an access inside it that overlaps no recorded range is a frame access. Soundness: the area holds the call's own stack arguments, written by the
          caller before the call; an address-taken parameter in it is a recorded range, and any other slot has no name another thread could hold.
@@ -344,6 +345,7 @@ class Func:
 
     # -- control flow
     _forming = None
+    _escapes = None
     args = None   # the incoming stack-argument size from the frame row (bytes at [CFA, CFA+args)), None when the row has none
     _reach = None
 
@@ -775,15 +777,32 @@ class Func:
                     self._forming[k] = None if og is None else tuple(sorted(og))
         return self._forming
 
+    def escapes(self):
+        """{k: origins tuple, or None for an unknown origin}: the instructions that hand out a frame address (escape_sites: the value operand of a store, an
+        argument register at a call or a tail jump, an index register), by the state before the instruction, cached.  Returning x0 is no seed: the
+        frame is popped and the function has no instruction after the return."""
+        if self._escapes is None:
+            self._escapes = {}
+            for k in range(len(self.ins)):
+                sp, rg = self.fact(k)
+                og = set()
+                for s_ in self.escape_sites(k, sp, dict(rg)):
+                    og = None if (s_ is None or og is None) else og | set(s_)
+                    if og is None:
+                        break
+                if og is None or og:
+                    self._escapes[k] = None if og is None else tuple(sorted(og))
+        return self._escapes
+
     def reaches(self, rng):
-        """the set of instructions CFG-reachable (one or more edges, loops included) from an instruction that forms an address inside the range (o, s)
-        (end included: a one-past-the-end pointer), or from one whose origin is unknown"""
+        """the set of instructions CFG-reachable (one or more edges, loops included) from an ESCAPE of an address inside the range (o, s) (end included:
+        a one-past-the-end pointer), or from one whose origin is unknown"""
         key = rng
         if self._reach is None:
             self._reach = {}
         if key not in self._reach:
             o, s = rng
-            seeds = [k for k, og in self.forming().items() if og is None or any(o <= c <= o + s for c in og)]
+            seeds = [k for k, og in self.escapes().items() if og is None or any(o <= c <= o + s for c in og)]
             seen = set()
             work = list(seeds)
             while work:
@@ -797,9 +816,13 @@ class Func:
 
     def unshared(self, k, i, sp, rg):
         """rule D (dominance; the forward form of it is the prologue home-slot store): a frame access that overlaps recorded variables is unshared, and so
-        needs no order, iff for every recorded range it overlaps no instruction that forms an address inside that range can reach it in the CFG.
-        Soundness: another thread can observe a frame object only through an address of it; before the first address-forming instruction on every path no
-        such address exists (the frame is the thread's own: STACK), and a loop back edge from a forming instruction to the access is a path from it."""
+        needs no order, iff for every recorded range it overlaps no ESCAPE of an address inside that range reaches it on any CFG path from the function
+        entry (escape: the address, or one derived from it, is the value operand of a store, an argument register at a bl/blr/tail jump, an index register;
+        returning it pops the frame).  Soundness (D1): another thread can hold a frame object's address only if it was published, and publishing is an
+        escape; before the first escape on every path the address lives in registers of this thread only, and a loop back edge from an escape to the access
+        is a path from it.  A stale pointer to the same stack address from an earlier frame is a use after scope, which is undefined behaviour of the source
+        and a wild access, excluded by OWNER assumption ASM-006.  A callee cannot reach a slot that no escape has published except by a wild access from its
+        own sp, also ASM-006.  Callee-saved registers holding the address across a call are preserved by the callee (the ABI), the call is an escape anyway."""
         if self.rec is None or self.rec == a64frame.DYNAMIC:
             return False
         cs = self.frame_offsets(i, sp, rg)
