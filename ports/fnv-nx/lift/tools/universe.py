@@ -31,7 +31,7 @@ FUNCS = os.environ.get('FNVNX_FUNCS', None if STRICT else '/home/user/l3facts/fu
 NAME = os.path.splitext(os.path.basename(MOD))[0].lower() if STRICT else ''
 OUTD = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts') + ('/' + NAME if STRICT else ''); OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
-M = pemod.load(EXE); d, pe, base, secs, loc, off, sec, u32, dirent = M.d, M.pe, M.base, M.secs, M.loc, M.off, M.sec, M.u32, M.dirent
+M = pemod.load(EXE); JT.open_store(os.environ.get('FNVNX_JT_STORE'), M.d); d, pe, base, secs, loc, off, sec, u32, dirent = M.d, M.pe, M.base, M.secs, M.loc, M.off, M.sec, M.u32, M.dirent
 RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
 T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0; SINGLE = len(M.xs) == 1
 V = bytearray(TN); tx = bytearray(b'\xcc' * TN)                   # V: byte belongs to an executable section; the holes between sections are filled with int3

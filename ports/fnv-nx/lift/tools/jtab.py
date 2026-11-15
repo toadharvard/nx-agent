@@ -13,7 +13,7 @@ node more than WIDEN times becomes top there (loop heads), so the analysis termi
 The table is the words T + 4*v, v over the interval: every word must be a relocated dword whose value is the address of an executable instruction; the extent may lie below T. The number of words
 is at most the image's size / 4 (more cannot be relocated code addresses). Anything else is RED with the reason.
 Basis: closure completeness (the preds are every edge of the closure, seeds are top: no assumption beyond the manifest of ASM-202); intervals and flags are an over-approximation."""
-import sys
+import sys, os
 from capstone import x86 as X
 
 N = 1 << 32; M32 = N - 1; TOP = (0, M32); WIDEN = 4
@@ -349,10 +349,57 @@ class Tg(tuple):
 
 
 STATS = {'calls': 0, 'secs': 0.0, 'cone_sum': 0, 'cone_max': 0, 'slow': []}      # cost accounting of resolve (printed by the callers): calls, total seconds, backward-cone sizes
+STORE = {'f': None, 'mem': {}, 'salt': b'', 'hit': 0, 'miss': 0}
+def open_store(dirpath, image_bytes):
+    """a persistent memo of `resolve` (a pure function of the site's backward cone, dec[x] and seeded(x) over it, maxwords, the image and this file): results are appended to DIRPATH/jtab-<key>.memo after every call, so a killed run resumes
+    with every finished call answered from the file. The result of a hit is byte-identical to a recomputation (same function, same arguments); the key is sha256 of (this file's source, capstone version, the image bytes). A partial last record is dropped."""
+    if not dirpath: return
+    import hashlib, pickle, struct
+    salt = hashlib.sha256(open(__file__, 'rb').read() + capstone_version().encode() + hashlib.sha256(bytes(image_bytes)).digest()).digest(); STORE['salt'] = salt
+    os.makedirs(dirpath, exist_ok=True); p = os.path.join(dirpath, 'jtab-%s.memo' % salt.hex()[:24]); good = 0
+    if os.path.exists(p):
+        with open(p, 'rb') as f:
+            b = f.read()
+        i = 0
+        while i + 36 <= len(b):
+            n = struct.unpack_from('<I', b, i + 32)[0]
+            if i + 36 + n > len(b): break
+            STORE['mem'][bytes(b[i:i + 32])] = pickle.loads(b[i + 36:i + 36 + n]); i += 36 + n
+        good = i
+    f = open(p, 'ab'); f.truncate(good) if hasattr(f, 'truncate') else None; f.seek(good); STORE['f'] = f
+def capstone_version():
+    import capstone; return capstone.__version__
+def _norm(site, dec, seeded, cone, maxwords):
+    import hashlib
+    h = hashlib.sha256(STORE['salt']); h.update(repr((site, maxwords)).encode())
+    for x in sorted(cone):
+        d = dec.get(x) if hasattr(dec, 'get') else None
+        if d is None: h.update(repr((x, None, seeded(x))).encode()); continue
+        sz, mn, ft, fall, tg = d; h.update(repr((x, sz, mn, ft, bool(fall), tuple(sorted(tg)), bool(seeded(x)))).encode())
+    return h.digest()
 def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
+    """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""
+    key = None
+    if STORE['f'] is not None:
+        cone = {site}; stk = [site]
+        while stk:
+            x = stk.pop()
+            if seeded(x): continue
+            for p in preds(x):
+                if p not in cone: cone.add(p); stk.append(p)
+        key = _norm(site, dec, seeded, cone, maxwords)
+        r = STORE['mem'].get(key)
+        if r is not None:
+            STORE['hit'] += 1; t, why = r
+            if t is None: return None, why
+            tg = Tg(t[0]); tg.addrs, tg.base, tg.dsite, tg.lo, tg.hi = t[1:]; return tg, None
     import time; t0 = time.time(); r = _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords); dt = time.time() - t0
     STATS['calls'] += 1; STATS['secs'] += dt
     if dt > 5: STATS['slow'].append((site, round(dt, 1), STATS.get('_cone', 0))); sys.stderr.write('jtab resolve %08x: %.1f s, cone %d, calls so far %d, %.0f s\n' % (site, dt, STATS.get('_cone', 0), STATS['calls'], STATS['secs']))
+    if key is not None:
+        import pickle, struct
+        t, why = r; v = (None, why) if t is None else ((tuple(t), t.addrs, t.base, t.dsite, t.lo, t.hi), None)
+        STORE['mem'][key] = v; STORE['miss'] += 1; b = pickle.dumps(v); STORE['f'].write(key + struct.pack('<I', len(b)) + b); STORE['f'].flush()
     return r
 def _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
     """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""

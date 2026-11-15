@@ -31,7 +31,7 @@ def _run(arg, XEX, REF=frozenset()):
     path, mrow = pemod.locate(arg)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2') + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
-    M = pemod.load(path, mrow.base); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
+    M = pemod.load(path, mrow.base); JT.open_store(os.environ.get('FNVNX_JT_STORE'), M.d); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
     T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0
     V = bytearray(TN); tx = bytearray(b'\xcc' * TN)
     for n, a, z, ro in M.xs: V[a - T0:a - T0 + z] = b'\1' * z; tx[a - T0:a - T0 + z] = M.d[ro:ro + z]
