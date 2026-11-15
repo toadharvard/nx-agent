@@ -67,12 +67,15 @@ def work(addrs):
     return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()]
 
 
-def write_texts(path, texts):
+def write_texts(path, texts, tagged=False):
+    """tagged: TEXTS carry the emit-category tag lines (fnvlift/emitcat.py, --emitcat); the record header then holds the length of the text without them, so deleting the lines that start with `//@e ` from the file gives the untagged file byte for byte"""
+    import fnvlift.emitcat as E
     with open(path, 'wb') as f:
         for a, t in sorted(texts):
-            b = t.encode()
+            b = (E.strip(t) if tagged else t).encode()
             if not b.endswith(b'\n'): b += b'\n'
-            f.write(b'//@ %08x %d\n' % (a, len(b))); f.write(b)
+            f.write(b'//@ %08x %d\n' % (a, len(b)))
+            f.write(t.encode() if tagged else b)
 
 
 def read_texts(path):
@@ -96,6 +99,7 @@ def shard(a):
     orig = core.explore
     def cap(*x, **k): r = orig(*x, **k); G['cap'].append(r); return r
     core.explore = cap
+    if a.emitcat: import fnvlift.emitcat as E; E.install(core)      # a measurement option, off by default: the tag lines are a rule-strippable comment (emitcat.strip); the forked workers inherit it
     with mp.get_context('fork').Pool(a.jobs) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
     forms = collections.Counter()
@@ -103,6 +107,10 @@ def shard(a):
     encs = {}
     for g in got: enc_add(encs, g[3])
     certs = formcert.Certs()
+    if a.emitcat:
+        import fnvlift.emitcat as E
+        write_texts('%s/emitcat_%d.txt' % (out, K), texts, tagged=True)
+        texts = [(x, E.strip(t)) for x, t in texts]
     write_texts('%s/texts_%d.txt' % (out, K), texts)
     w = lambda n, rows: open('%s/%s_%d.tsv' % (out, n, K), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('missing', [('%08x' % ad, k, why) for ad, k, why in miss])
@@ -200,7 +208,7 @@ def module_env(name):
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--shard'); A('--finish', action='store_true'); A('--recipe', nargs=3, metavar=('REF', 'COMMIT', 'TREE_SHA256')); A('--out', default='/home/user/l3work/liftgen'); A('--jobs', type=int, default=3)
-    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module')
+    A('--emitcat', action='store_true', help='tag every emitted line with its emitter and emit category (emitcat_K.txt; texts_K.txt is the stripped text, equal to the untagged run)'); A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module')
     A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None); A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)

@@ -62,14 +62,14 @@ def h_arith(cx, ins):
     em('{ u32 a=%s, b=%s, r; u64 t;' % (cx.rd(ins, ops[0]), cx.rd(ins, ops[1], ops[0].size)))
     M = MASK[s]
     if m == 'add':
-        em('r=(a+b)&%s; cf=r<a; of=(((a^r)&(b^r))>>%d)&1;' % (M, s - 1))
+        em('r=(a+b)&%s;' % M + cx.fl(' cf=r<a; of=(((a^r)&(b^r))>>%d)&1;' % (s - 1)))
     elif m == 'adc':
-        em('t=(u64)a+b+cf; r=(u32)t&%s; of=(((a^r)&(b^r))>>%d)&1; cf=(t>>%d)&1;' % (M, s - 1, s))
+        em('t=(u64)a+b+cf; r=(u32)t&%s;' % M + cx.fl(' of=(((a^r)&(b^r))>>%d)&1; cf=(t>>%d)&1;' % (s - 1, s)))
     elif m in ('sub', 'cmp'):
-        em('r=(a-b)&%s; cf=a<b; of=(((a^b)&(a^r))>>%d)&1;' % (M, s - 1))
+        em('r=(a-b)&%s;' % M + cx.fl(' cf=a<b; of=(((a^b)&(a^r))>>%d)&1;' % (s - 1)))
     else:
-        em('t=(u64)a-(u64)b-cf; r=(u32)t&%s; of=(((a^b)&(a^r))>>%d)&1; cf=(t>>%d)&1;' % (M, s - 1, s))
-    em('af=((a^b^r)>>4)&1; ' + cx.zsp(s))
+        em('t=(u64)a-(u64)b-cf; r=(u32)t&%s;' % M + cx.fl(' of=(((a^b)&(a^r))>>%d)&1; cf=(t>>%d)&1;' % (s - 1, s)))
+    em(cx.fl('af=((a^b^r)>>4)&1; ') + cx.zsp(s))
     if m != 'cmp':
         em(cx.wr(ins, ops[0], 'r'))
     em('}')
@@ -79,7 +79,7 @@ def h_arith(cx, ins):
 def h_logic(cx, ins):
     m, ops, s, em = cx.m, cx.ops, cx.s, cx.em
     o = {'and': '&', 'test': '&', 'or': '|', 'xor': '^'}[m]
-    em('{ u32 r=(%s)%s(%s); cf=of=af=0; %s' % (cx.rd(ins, ops[0]), o, cx.rd(ins, ops[1], ops[0].size), cx.zsp(s)))
+    em('{ u32 r=(%s)%s(%s);' % (cx.rd(ins, ops[0]), o, cx.rd(ins, ops[1], ops[0].size)) + cx.fl(' cf=of=af=0;') + ' ' + cx.zsp(s))
     if m != 'test':
         em(cx.wr(ins, ops[0], 'r'))
     em('}')
@@ -89,17 +89,17 @@ def h_logic(cx, ins):
 def h_incdec(cx, ins):
     m, ops, s = cx.m, cx.ops, cx.s
     o = '+' if m == 'inc' else '-'
-    cx.em('{ u32 a=%s, r=(a%s1)&%s; of=%s; af=((a^1^r)>>4)&1; %s %s }' % (
+    cx.em('{ u32 a=%s, r=(a%s1)&%s;%s %s %s }' % (
         cx.rd(ins, ops[0]), o, MASK[s],
-        ('r==0x%xu' % (1 << (s - 1))) if m == 'inc' else ('a==0x%xu' % (1 << (s - 1))),
+        cx.fl(' of=%s; af=((a^1^r)>>4)&1;' % (('r==0x%xu' % (1 << (s - 1))) if m == 'inc' else ('a==0x%xu' % (1 << (s - 1))))),
         cx.zsp(s), cx.wr(ins, ops[0], 'r')))
 
 
 @op('neg')
 def h_neg(cx, ins):
     ops, s = cx.ops, cx.s
-    cx.em('{ u32 a=%s, r=(0-a)&%s; cf=a!=0; of=a==0x%xu; af=((a^r)>>4)&1; %s %s }' % (
-        cx.rd(ins, ops[0]), MASK[s], 1 << (s - 1), cx.zsp(s), cx.wr(ins, ops[0], 'r')))
+    cx.em('{ u32 a=%s, r=(0-a)&%s;%s %s %s }' % (
+        cx.rd(ins, ops[0]), MASK[s], cx.fl(' cf=a!=0; of=a==0x%xu; af=((a^r)>>4)&1;' % (1 << (s - 1))), cx.zsp(s), cx.wr(ins, ops[0], 'r')))
 
 
 @op('not')
@@ -122,12 +122,12 @@ def h_shift(cx, ins):
     cnt = shcount(cx, ins, ops)
     em('{ u32 a=%s, n=(%s)&31, r, p; if(n){' % (cx.rd(ins, ops[0]), cnt))
     if m in ('shl', 'sal'):
-        em('p=a<<(n-1); r=(p<<1)&%s; cf=(p>>%d)&1; of=((p^r)>>%d)&1;' % (MASK[s], s - 1, s - 1))
+        em('p=a<<(n-1); r=(p<<1)&%s;' % MASK[s] + cx.fl(' cf=(p>>%d)&1; of=((p^r)>>%d)&1;' % (s - 1, s - 1)))
     elif m == 'shr':
-        em('p=a>>(n-1); r=p>>1; cf=p&1; of=((p^r)>>%d)&1;' % (s - 1))
+        em('p=a>>(n-1); r=p>>1;' + cx.fl(' cf=p&1; of=((p^r)>>%d)&1;' % (s - 1)))
     else:
-        em('s32 sa=(s%d)a; p=(u32)(sa>>(n-1)); r=(u32)(sa>>n)&%s; cf=p&1; of=0;' % (s, MASK[s]))
-    em('af=0; %s %s }}' % (cx.zsp(s), cx.wr(ins, ops[0], 'r')))
+        em('s32 sa=(s%d)a; p=(u32)(sa>>(n-1)); r=(u32)(sa>>n)&%s;' % (s, MASK[s]) + cx.fl(' cf=p&1; of=0;'))
+    em(cx.fl('af=0;') + ' %s %s }}' % (cx.zsp(s), cx.wr(ins, ops[0], 'r')))
 
 
 @op('rol', 'ror')
@@ -136,9 +136,9 @@ def h_rotate(cx, ins):
     cnt = shcount(cx, ins, ops)
     em('{ u32 a=%s, n=(%s)&31, k=n%%%d, r=a; if(n){ if(k) r=' % (cx.rd(ins, ops[0]), cnt, s))
     if m == 'rol':
-        em('((a<<k)|(a>>(%d-k)))&%s; cf=r&1; of=((r>>%d)&1)^cf;' % (s, MASK[s], s - 1))
+        em('((a<<k)|(a>>(%d-k)))&%s;' % (s, MASK[s]) + cx.fl(' cf=r&1; of=((r>>%d)&1)^cf;' % (s - 1)))
     else:
-        em('((a>>k)|(a<<(%d-k)))&%s; cf=(r>>%d)&1; of=((r>>%d)^(r>>%d))&1;' % (s, MASK[s], s - 1, s - 1, s - 2))
+        em('((a>>k)|(a<<(%d-k)))&%s;' % (s, MASK[s]) + cx.fl(' cf=(r>>%d)&1; of=((r>>%d)^(r>>%d))&1;' % (s - 1, s - 1, s - 2)))
     em(cx.wr(ins, ops[0], 'r') + ' }}')
 
 
@@ -149,9 +149,9 @@ def h_rcx(cx, ins):
     cnt = shcount(cx, ins, ops)
     em('{ u32 a=%s, n5=(%s)&31, n=n5%%%d; if(n){ u64 v=((u64)cf<<%d)|a; u32 r;' % (cx.rd(ins, ops[0]), cnt, s + 1, s))
     if m == 'rcl':
-        em('v=((v<<n)|(v>>(%d-n)))&0x%xull; r=(u32)v&%s; cf=(v>>%d)&1; of=((r>>%d)&1)^cf;' % (s + 1, (1 << (s + 1)) - 1, MASK[s], s, s - 1))
+        em('v=((v<<n)|(v>>(%d-n)))&0x%xull; r=(u32)v&%s;' % (s + 1, (1 << (s + 1)) - 1, MASK[s]) + cx.fl(' cf=(v>>%d)&1; of=((r>>%d)&1)^cf;' % (s, s - 1)))
     else:
-        em('v=((v>>n)|(v<<(%d-n)))&0x%xull; r=(u32)v&%s; cf=(v>>%d)&1; of=((r>>%d)^(r>>%d))&1;' % (s + 1, (1 << (s + 1)) - 1, MASK[s], s, s - 1, s - 2))
+        em('v=((v>>n)|(v<<(%d-n)))&0x%xull; r=(u32)v&%s;' % (s + 1, (1 << (s + 1)) - 1, MASK[s]) + cx.fl(' cf=(v>>%d)&1; of=((r>>%d)^(r>>%d))&1;' % (s, s - 1, s - 2)))
     em(cx.wr(ins, ops[0], 'r') + ' }}')
 
 
@@ -162,19 +162,19 @@ def h_shd(cx, ins):
         # count > 16 (result undefined in the SDM): the 48-bit string a:b:a is shifted, which equals the SDM result for counts <= 16
         em('{ u32 a=%s, b=%s, n=(%s)&31, r; if(n){ u64 X=((u64)a<<32)|((u64)b<<16)|a;' % (cx.rd(ins, ops[0]), cx.rd(ins, ops[1]), cx.rd(ins, ops[2])))
         if m == 'shld':
-            em('r=(u32)((X<<n)>>32)&0xffffu; cf=(X>>(48-n))&1; of=((a^r)>>15)&1;')
+            em('r=(u32)((X<<n)>>32)&0xffffu;' + cx.fl(' cf=(X>>(48-n))&1; of=((a^r)>>15)&1;'))
         else:
-            em('r=(u32)(X>>n)&0xffffu; cf=(X>>(n-1))&1; of=((a^r)>>15)&1;')
-        em('af=0; %s %s }}' % (cx.zsp(16), cx.wr(ins, ops[0], 'r')))
+            em('r=(u32)(X>>n)&0xffffu;' + cx.fl(' cf=(X>>(n-1))&1; of=((a^r)>>15)&1;'))
+        em(cx.fl('af=0;') + ' %s %s }}' % (cx.zsp(16), cx.wr(ins, ops[0], 'r')))
         return
     if cx.s != 32:
         raise Unsupported(m + str(cx.s))
     em('{ u32 a=%s, b=%s, n=(%s)&31, r; if(n){' % (cx.rd(ins, ops[0]), cx.rd(ins, ops[1]), cx.rd(ins, ops[2])))
     if m == 'shld':
-        em('r=(a<<n)|(b>>(32-n)); cf=(a>>(32-n))&1; of=((a^r)>>31)&1;')
+        em('r=(a<<n)|(b>>(32-n));' + cx.fl(' cf=(a>>(32-n))&1; of=((a^r)>>31)&1;'))
     else:
-        em('r=(a>>n)|(b<<(32-n)); cf=(a>>(n-1))&1; of=((a^r)>>31)&1;')
-    em('af=0; %s %s }}' % (cx.zsp(32), cx.wr(ins, ops[0], 'r')))
+        em('r=(a>>n)|(b<<(32-n));' + cx.fl(' cf=(a>>(n-1))&1; of=((a^r)>>31)&1;'))
+    em(cx.fl('af=0;') + ' %s %s }}' % (cx.zsp(32), cx.wr(ins, ops[0], 'r')))
 
 
 @op('imul')

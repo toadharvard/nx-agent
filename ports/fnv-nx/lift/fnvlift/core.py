@@ -70,6 +70,8 @@ class Ctx:
         self.lo, self.hi = addr, addr + size
         self.insns, self.tables, self.taken = insns, tables, taken
         self.L = []
+        if TAG is not None:
+            TAG.new_function(self)
         self.callrets = []
         self.usesfs = False
         self.kinds = set()
@@ -82,7 +84,15 @@ class Ctx:
         self.raises = set()                      # addresses of instructions that can raise: ContinueExecution resumes there, so they are labels of the loop
 
     def em(self, t):
-        self.L.append(t)
+        self.L.append(t if TAG is None else TAG.tag(self, t))      # TAG: fnvlift/emitcat.py, a measurement option (off: the text is unchanged)
+
+    def fl(self, t):
+        """a literal fragment of EFLAGS computation, named by the emitter that writes it: returns t unchanged (emitcat counts it to `eflags` when the option is on)"""
+        return t
+
+    def macc_(self, ins, op, w):
+        """the accessor text of a memory operand of w bits"""
+        return '%s%d(%s)' % (self.macc, w, self.ea(ins, op))
 
     def lab(self, a):
         return 'L_%08x' % a
@@ -120,7 +130,7 @@ class Ctx:
         if op.type == X.X86_OP_REG:
             b, sh, bits = reg(ins.reg_name(op.reg))
             return b if bits == 32 else ('((%s>>%d)&%s)' % (b, sh, MASK[bits]))
-        return '%s%d(%s)' % (self.macc, s, self.ea(ins, op))
+        return self.macc_(ins, op, s)
 
     def wr(self, ins, op, v):
         if op.type == X.X86_OP_REG:
@@ -129,7 +139,7 @@ class Ctx:
                 return '%s=(%s);' % (b, v)
             mk = (1 << bits) - 1
             return '%s=(%s&~0x%xu)|(((u32)(%s)&0x%xu)<<%d);' % (b, b, mk << sh, v, mk, sh)
-        return '%s%d(%s)=(%s);' % (self.macc, op.size * 8, self.ea(ins, op), v)
+        return '%s=(%s);' % (self.macc_(ins, op, op.size * 8), v)
 
     def zsp(self, s):
         return 'zf=(r&%s)==0; sf=(r>>%d)&1; pf=PAR(r);' % (MASK[s], s - 1)
@@ -200,6 +210,7 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     return insns, tables, taken, bad
 
 
+TAG = None      # fnvlift/emitcat.py once installed (emitcat.install(core)); None = no tags
 EMIT = os.environ.get('FNVL_EMIT', '')      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only
 if EMIT not in ('', 'dsl'):
     raise ValueError('FNVL_EMIT=%s (want dsl or unset)' % EMIT)
