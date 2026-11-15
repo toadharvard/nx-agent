@@ -1603,3 +1603,11 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - cand2 head 83816c91e already has deb_resolve and the L6 roots. Next for w12: bridge.tsv as a generated stage.
 - 09:48 **Defect (L5 w10): cand2 a3e251cfb is broken.** 978c17ea6 re-applied 7cece903a partly; envcheck.record_problems and RecordError are missing, so every generate stage dies.
   - Fix: w15 merges the remaining envcheck, runtime and test_record changes. This comes first; L5 is blocked until then.
+- 09:50 **cand2 d523d1367.**
+  - The envcheck fix is in. test_record passes, envcheck is OK, and recipe check is valid on 14 roots.
+  - Also merged: w12L2 1aa06561a, L2 datamodel, w22, w25, L4 cand1, the L6 roots, the header-root rule and the generated-only rule.
+  - Admit rulings:
+    - doubles is part of objstub, and REQUIRED_* is derived from the gates.d covers;
+    - a file belongs to its nearest admitted root;
+    - bootguest waits for the lift/rt root (L3a).
+  - Assumptions reds are routed: ASM-601..641 to L6, ORCHESTRATION.md to the orchestrator.
