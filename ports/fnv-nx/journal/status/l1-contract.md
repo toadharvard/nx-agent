@@ -1696,3 +1696,14 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 15:23 elffacts fix (L6 w5 50a239be9, cand4) accepted with a tightening: members [] only for a complete map (Memory Configuration + Linker script and memory map) with no archive(member) input sections; 3 selftests. w5-smlink now carries w6-root 98cd75f28; the final head follows.
 - 15:24 L5 w9 ed6b737b6 to cand3 (w12): the hostabi product root (guest and host), and a new recipe form `uses: [{root}]` for header-only roots (header-home check: own root or a used root), plus COM_SPEC as a bridgefacts output.
 - 15:25 Header root form, corrected: outputs {INCLUDE: dir}, consumers use {root, output: INCLUDE}; header-home accepts only the own root or a used INCLUDE. w9 adds the 7 hostabi uses after. COM_SPEC (w9 ed6b737b6) goes to cand3; L6 told. combridge_rows.tsv may be deleted if it has no reader.
+## 15:36 cand2 report 2 (w15)
+- Selftests: the key is stable. The misses were failing files, never recorded.
+  - 10 scratch leaks fixed.
+  - The untraced list is derived from the import closure (69 files).
+  - Now 94 hit, 34 newly pass, 24 still fail.
+- Decisions:
+  - Untraced tests run in the sandbox with their import closure plus a declared `# reads:` mount, keyed by that mount's content.
+  - A test that needs a root not in admit is cut with that root (`cut:test:`).
+  - The old fixtures (descs, uses, onedef, linkstrict, gate_publish, gate_lift, recipe) are cand2 red fixes.
+- abi decoder: `$$C` and `??$?0` done.
+- C prototypes: 1607 of 2737 C-decorated boundary symbols have no type check (extern "C" in C++ units). Sent to L2 (layout plugin decltype rows) and to the orchestrator as a class without a gate; cand3.
