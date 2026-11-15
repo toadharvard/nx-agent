@@ -648,3 +648,5 @@ Workers are capped at 3. Assignment by plan item:
 - 00:20 w8 t16k 5673d80f8: int3 00ef4468d and loader 36713265 merged; the recipe check passes on all 12 roots; the run7 relink in GATE_CACHE is in progress.
 - L3b cleared_sites (pack 7ef692b5): 2,575 SIMD sites, plus 26 fisttp in our census = 2,601. The certificate is w6's. The single AVX site in FalloutNV goes to w7's facts as a code-range question.
 - 00:25 w6: lift/rt at 286fdc939 is green (12 objects; the static_asserts compile with msvcmodel). gate_assumptions after c09b32e87: L3a findings 4 → 0; 24 remain, all other layers' (L5 22, toolchain/f2i_check 2), forwarded through the orchestrator.
+- 00:28 f2icheck (L2 1c9f04063, deletes toolchain/f2i_check): w8 merges it into int3. Expected gate_assumptions: 22, all L5.
+- 00:28 The AVX "site" FalloutNV 0xe3d1f0 is jump-table data that pack 7ef692b5 decodes as code (L3b). Class rule given to w7: a table extent from its jmp bound is data_in_code, never an entry. w7 reports the global count of extents that intersect entries (must be 0). #UD set: 2,600.
