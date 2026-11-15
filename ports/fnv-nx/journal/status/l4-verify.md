@@ -372,3 +372,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 14:40: w7 adopted L1's verify files from 47c284629 on w7-u: 51 verify files, admit.json rows, 6 loader/platform/link files, contract/. The bootguest and icount compiler pins are copied from the platform record, and the entry symbols are bootguest_entry and icfx_start.
   - test_bootgpu: 1 case passed. It is red at ld:tests/bootguest, because input root lift/rt has an unpinned msvcmodel and plugin fields that recipe.py fixes. w7 is porting lift/rt (owner L3a, told).
   - test_runner: 7 PASS, 1 FAIL ("the branch is the published commit": branch l4-verify/after-merge/f9ffbd055e14 is missing), plus 1 crash. w7 is finding the cause.
+- 14:42: lift/rt comes from L3a t16l 022c5d5f2: pinned b274ec06, plugins as names only. w7's port is cancelled. The last rt red is the "i" constraint in rt/fnvl.h (owner L3a w8, commit pending).
