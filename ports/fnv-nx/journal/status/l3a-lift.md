@@ -1033,3 +1033,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The universe is a sound may-execute superset, so every decoded instruction gets the CPU's semantics, and the universe is unchanged. int n is covered by L5's f1da9b3e9 row.
   - gs is undecided in the record. While it stays undecided, all 4,025 sites are red and the pack is incomplete. L5 is asked for one row for the class: either the initial gs plus #GP(0) through null-selector access, or the Wine 9.0 check_invalid_gs path if precedence admits it.
 - bottleneck: the exe jump-table red (w7); the gs record (L5); the facts farms; lift/bridges l2sections (L1 w12).
+- 23:12 base3 @ 212f252ff = 909e0452f + L5 f1da9b3e9 + w13 fpfacts2 42217f3b2 + the int n consumer.
+  - int semantics are read from the record (INT_EXCLUDED, INT_OTHER). A gate gets its trap row; vector 41 is red at the site; every other vector gets FNVL_RAISE_AV with the record's parameters, after each row field is checked.
+  - test_int_vectors covers all 256 vectors: 3 gate, 1 excluded, 252 other.
+  - liftsrc 69f0497a9: a fixed stage set (exe 64; images of 2 MiB or more 16; others 1, from the loader row only), so 101 shards plus finish. FP and facts enter through `uses`, and the only externals left are the gamedata exe and redist. Local exe shard 3/64: 1,469 entries, 1,410 lifted, 59 missing (jtab and int, old facts).
+  - The cold run waits for lift/facts (farms), retn and fpfacts.
