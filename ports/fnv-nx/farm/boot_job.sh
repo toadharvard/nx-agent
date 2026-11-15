@@ -129,6 +129,8 @@ for f in softfloat.syms softfloat.tsv; do
   if grep -qxF "$f" "$WORK/branch-files.txt"; then want+=("$f"); SOFT=present; SOFTFILE=$f; break; fi
 done
 HAVE_RUN=0; if grep -qxF run.txt "$WORK/branch-files.txt"; then want+=(run.txt); HAVE_RUN=1; fi
+# an optional declared card input of the run, the file `mode` (4 bytes): it is placed at sdmc:/mode and its sha256 is recorded in meta.json (mode_input); the test guests read their mode from it
+HAVE_MODE=0; if grep -qxF mode "$WORK/branch-files.txt"; then want+=(mode); HAVE_MODE=1; fi
 extract() { rm -rf "$IN"; mkdir -p "$IN"; GITA archive "$ELF_COMMIT" "${want[@]}" | tar -x -C "$IN"; }
 retry extract || die "cannot extract ${want[*]} from $IN_BRANCH@${ELF_COMMIT:0:12}"
 BI=(python3 -s -B "$NX/verify/bootinputs.py")
@@ -267,6 +269,8 @@ d["boot_rc"], d["seconds"] = int(d["boot_rc"]), int(d["seconds"])
 d["limit_instructions"] = int(d["limit_instructions"], 0) if d["limit_instructions"] else None
 d["quantum"] = int(d["quantum"], 0)
 d["data_items"] = d["data_items"][len("fetched:"):].split() if d["data_items"] else None
+pin = json.load(open(os.environ["PIN_FILE"]))
+d["declared_inputs"] = [{k: pin[k] for k in ("name", "commit", "tree_sha256")}]
 if v[len(k):]:
     d["gpu_branch"], d["gpu_branch_commit"], d["bridge_branch"], d["bridge_branch_commit"], d["render_head"] = v[len(k):]
 print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$QUANTUM" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" ${GPU_BRANCH:+"$GPU_BRANCH" "$GPU_COMMIT" "$BRIDGE_BRANCH" "$BRIDGE_COMMIT" "$RENDER_HEAD"} > "$WORK/meta.json" \

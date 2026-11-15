@@ -55,5 +55,4 @@ if __name__ == "__main__":
     except (ValueError, OSError, IndexError) as e:
         print("gen_msvcrt_table: %s" % e, file=sys.stderr)
         sys.exit(2)
-    os.makedirs(os.path.dirname(os.path.abspath(sys.argv[2])), exist_ok=True)
     open(sys.argv[2], "w").write(txt)

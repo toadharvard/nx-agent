@@ -48,9 +48,12 @@ def main():
     table, manifest = w("t.txt", TABLE), w("m.tsv", MANIFEST)
     root = os.path.join(d, "sd")
     os.makedirs(root, exist_ok=True)
+    modes = {}   # image path -> the mode of its runs: written as the file `mode` of the card before each run (tb.write_mode)
+
     def patched(n, mode):
-        """the patched ELF bytes (crt0 header) as a file, unstripped: the reader skips the mapping symbols itself"""
-        open(os.path.join(d, n), "wb").write(tb.build(mode)[0])
+        """the guest image (crt0 header patched by the recipe) as a file, unstripped: the reader skips the mapping symbols itself; with the mode of its run"""
+        open(os.path.join(d, n), "wb").write(tb.build()[0])
+        modes[os.path.join(d, n)] = mode
         return os.path.join(d, n)
     elf6, elf3, elf35 = patched("h6.elf", 6), patched("h3.elf", 3), patched("h35.elf", 35)
 

@@ -3,7 +3,7 @@
  *
  * Known gap: MSVC text mode ("r"/"w" without 'b') translates CRLF <-> LF; here files are always binary, so
  * text read by fgets keeps its '\r'. See docs/RUNTIME.md. */
-#define _FILE_OFFSET_BITS 64
+#include "fnvnx_crt_config.h"
 #include "fnvnx_msvcrt.h"
 
 #include <errno.h>
@@ -23,7 +23,6 @@ unsigned long fnvnx_path_map(const char *win, char *host, size_t n);
 unsigned long GetCurrentDirectoryA(unsigned long n, char *buf);
 int SetCurrentDirectoryA(const char *dir);
 
-#define HOST_MAX 1024
 
 static int map(const char *win, char *host)
 {
@@ -31,7 +30,7 @@ static int map(const char *win, char *host)
         errno = EINVAL;
         return 0;
     }
-    if (fnvnx_path_map(win, host, HOST_MAX)) {
+    if (fnvnx_path_map(win, host, FNVNX_CRT_HOST_MAX)) {
         errno = ENOENT;
         return 0;
     }
@@ -59,7 +58,7 @@ static int set_errno(int neg)
 
 int fnvnx_access(const char *path, int mode)
 {
-    char host[HOST_MAX];
+    char host[FNVNX_CRT_HOST_MAX];
     if (!map(path, host))
         return -1;
     os_stat_t st;

@@ -12,12 +12,13 @@
  * static load base (64 KiB aligned): the lifter lifts the module at exactly this address, the loader maps it there
  * and relocates it when the base differs from the preferred one. */
 #include <stdint.h>
+#include "fnvnx_sha256.h"
 
 #define FNVNX_MAX_MODULES 32u
 
 typedef struct fnvnx_module_desc {
     const char *name;        /* lowercase file name with ".dll": the name the imports use (contract/iat.py norm_dll) */
-    uint8_t     sha256[32];  /* SHA-256 of the whole file */
+    uint8_t     sha256[FNVNX_SHA256_DIGEST_SIZE];  /* SHA-256 of the whole file */
     uint32_t    file_size;
     uint32_t    base;
     uint32_t    size_of_image;  /* SizeOfImage rounded up to a page: the range [base, base + size_of_image) is reserved for the module */

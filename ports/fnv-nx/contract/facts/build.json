@@ -1,0 +1,232 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "aarch64-linux-gnu-gcc-13",
+  "cxx": "aarch64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-mabi=ilp32"
+  ],
+  "cxx": [
+   "-mabi=ilp32"
+  ],
+  "asm": [
+   "-mabi=ilp32"
+  ]
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  },
+  {
+   "name": "msvc",
+   "repo": "fnv-nx-build",
+   "ref": "msvc/pristine/87eb9373a0bb",
+   "commit": "64d64a8b4a2b0eb81c522791d9c271a3df13f5c7",
+   "tree_sha256": "18079c57ed676afccfda45502248c55840fb8e730f7a8bf76c7066c19a5bce4f",
+   "at": "/ext/msvc"
+  },
+  {
+   "name": "facts",
+   "repo": "fnv-nx-build",
+   "ref": "l3a-lift/facts",
+   "commit": "163ec389036feb9593005bb8fb9ac38a8e85dfd2",
+   "tree_sha256": "48833743dbdb51757616a112291f71184393258f2173b30c0f19cecefccaeccc",
+   "at": "/ext/facts"
+  },
+  {
+   "name": "units",
+   "repo": "fnv-nx-build",
+   "ref": "l1-contract/inputs/e1ca6b02d60d",
+   "commit": "18d39fbb43270310cef8c92f11844583e0815e58",
+   "tree_sha256": "5cc7fd648f915fd68b7f0c31c4136ccbfa307d67ddad91ba626941ec8cb0bc5d",
+   "at": "/ext/units"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/contract/exefacts.py",
+   "args": [
+    "--exe",
+    "/ext/exe/FalloutNV.exe",
+    "--units",
+    "/ext/units/units.json",
+    "--out",
+    "/out/facts.json"
+   ],
+   "inputs": [],
+   "outputs": [
+    "facts.json"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/contract/n1.py",
+   "args": [
+    "--exe",
+    "/ext/exe/FalloutNV.exe",
+    "--units",
+    "/ext/units/units.json",
+    "--msvc",
+    "/ext/msvc",
+    "--out",
+    "/out/n1.json"
+   ],
+   "inputs": [],
+   "outputs": [
+    "n1.json"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/contract/objfacts_dir.py",
+   "args": [
+    "--objects",
+    "/objs",
+    "--out",
+    "/out/obj.json"
+   ],
+   "inputs": [],
+   "outputs": [
+    "obj.json"
+   ],
+   "objects_of": {
+    "except": [],
+    "target": "guest",
+    "origin": "native"
+   }
+  },
+  {
+   "tool": "ports/fnv-nx/contract/registry.py",
+   "args": [
+    "--facts",
+    "/stage/facts.json",
+    "--obj",
+    "/stage/obj.json",
+    "--n1",
+    "/stage/n1.json",
+    "--out",
+    "/out/gates"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:0",
+     "path": "facts.json"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:1",
+     "path": "n1.json"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:2",
+     "path": "obj.json"
+    }
+   ],
+   "outputs": [
+    "gates/gates.json",
+    "gates/bodysel.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/contract/bind.py",
+   "args": [
+    "--obj",
+    "/stage/obj.json",
+    "--n1",
+    "/stage/n1.json",
+    "--units",
+    "/ext/units/units.json",
+    "--out",
+    "/out/bind.json",
+    "--n3-out",
+    "/out/n3.tsv"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:1",
+     "path": "n1.json"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:2",
+     "path": "obj.json"
+    }
+   ],
+   "outputs": [
+    "bind.json",
+    "n3.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/contract/bodysel.py",
+   "args": [
+    "--universe",
+    "/ext/facts/universe.tsv",
+    "--n1",
+    "/stage/n1.json",
+    "--gates",
+    "/stage/gates",
+    "--n3",
+    "/stage/n3.tsv",
+    "--out",
+    "/out/bodysel.tsv"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:1",
+     "path": "n1.json"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:3",
+     "path": "gates/bodysel.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:4",
+     "path": "n3.tsv"
+    }
+   ],
+   "outputs": [
+    "bodysel.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/contract/nativerows.py",
+   "args": [
+    "--obj",
+    "/stage/obj.json",
+    "--bind",
+    "/stage/bind.json",
+    "--bodysel",
+    "/stage/bodysel.tsv",
+    "--out",
+    "/out/native.tsv"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:2",
+     "path": "obj.json"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:4",
+     "path": "bind.json"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/facts:gen:5",
+     "path": "bodysel.tsv"
+    }
+   ],
+   "outputs": [
+    "native.tsv"
+   ]
+  }
+ ],
+ "outputs": {
+  "native": "native.tsv",
+  "n1": "n1.json"
+ }
+}

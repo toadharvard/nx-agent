@@ -77,6 +77,8 @@ CASES = [
      "env: debs.packages: zzz is not in the packages or their dependency closure"),
     ("deb mirror commit not 40 hex", mutate(lambda d: d["debs"]["mirror"].__setitem__("commit", "x")), "env: debs.mirror: needs repo"),
     ("no debs section", mutate(lambda d: d.pop("debs")), "env: debs: missing"),
+    ("missing python module", mutate(lambda d: d["python"]["modules"].__setitem__("no-such-module-xyz", "1.0")),
+     "env: python module no-such-module-xyz: want 1.0, have not installed"),
     ("python module version", mutate(lambda d: d["python"]["modules"].__setitem__("capstone", "0.0")),
      "env: python module capstone: want 0.0, have "),
     ("python module content sha256 (same version, other bytes)", mutate(lambda d: d["python"]["installed_files_sha256"].__setitem__("z3-solver", "0" * 64)),

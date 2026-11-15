@@ -29,13 +29,31 @@ the emulator's event counts (faults, budget slices, ...) as `events` and puts th
 approximate. Threads that switch at host calls (blocks ended by a branch to a host page) are exact.
 """
 import json
-import re
 import struct
-import subprocess
+import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # run as `python3 -I icount.py`: the script's directory is not on the path
+import bootlayout  # noqa: E402
+
 FORMAT = "fnvnx-icount/1"
-OPCODE_NAMES = ("ldar_stlr", "ldapr", "ldaxr_stlxr", "dmb", "dsb", "isb")
+CLASS_HEADER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icount_abi", "icount_classes.h")   # the one record of the class ids
+
+
+def class_bits(path=CLASS_HEADER):
+    """{class name: bit mask} of the header's `#define ICOUNT_CLS_<NAME> <integer>` lines, in file order (one bit each, distinct)"""
+    import re
+    out = {}
+    with open(path) as f:
+        for m in re.finditer(r"^#define\s+ICOUNT_CLS_(\w+)\s+(0[xX][0-9A-Fa-f]+|\d+)\s*$", f.read(), re.M):
+            out[m.group(1).lower()] = int(m.group(2), 0)
+    if not out or any(v <= 0 or v & (v - 1) for v in out.values()) or len(set(out.values())) != len(out):
+        raise ValueError("%s: need distinct one-bit ICOUNT_CLS_* values" % path)
+    return out
+
+
+CLASS_BITS = class_bits()
+OPCODE_NAMES = tuple(sorted(CLASS_BITS, key=CLASS_BITS.get))
 # (name, mask, value); word & mask == value. Bits: size[31:30] 001000 o2[23] L[22] o1[21] Rs[20:16] o0[15] Rt2[14:10]
 OPCODES = (
     # LDAR/STLR (+B/H): 00 001000 1 L 0 11111 1 11111 Rn Rt (size, L free; o2=1 o1=0 Rs=Rt2=31 o0=1)
@@ -53,8 +71,8 @@ OPCODES = (
     # ISB: ... 0011 CRm 1 10 11111
     ("isb", 0xFFFFF0FF, 0xD50330DF),
 )
-N_FIXED = 7   # counter slots: total, ldar_stlr, ldapr, ldaxr_stlxr, dmb, dsb, isb, then ranges, then entries
-SLOT = {"total": 0, "ldar_stlr": 1, "ldapr": 2, "ldaxr_stlxr": 3, "dmb": 4, "dsb": 5, "isb": 6}
+N_FIXED = 1 + len(OPCODE_NAMES)   # counter slots: total, then the classes in header order, then ranges, then entries
+SLOT = dict({"total": 0}, **{n: 1 + i for i, n in enumerate(OPCODE_NAMES)})
 
 
 def classify(word):
@@ -238,21 +256,15 @@ class Icount:
 
 
 # -- spec subcommand
-def _run(*cmd):
-    return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
-
-
 def build_spec(elf, ranges, entries):
-    """ranges: ["NAME=section:S" | "NAME=symrange:A,B"], entries: ["NAME=symfile:FILE"] -> SPEC dict; ValueError on a miss"""
-    secs, syms = {}, {}
-    for line in _run("aarch64-linux-gnu-readelf", "-S", "-W", elf).splitlines():
-        m = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+\S+\s+([0-9a-f]+)\s+[0-9a-f]+\s+([0-9a-f]+)\s", line)
-        if m:
-            secs.setdefault(m[1], []).append((int(m[2], 16), int(m[3], 16)))
-    for line in _run("aarch64-linux-gnu-nm", "--defined-only", elf).splitlines():
-        p = line.split()
-        if len(p) == 3:
-            syms.setdefault(p[2], []).append(int(p[0], 16))
+    """ranges: ["NAME=section:S" | "NAME=symrange:A,B"], entries: ["NAME=symfile:FILE"] -> SPEC dict; ValueError on a miss. The section ranges and the
+    symbol values are read from the ELF file itself (bootlayout.section_ranges, bootlayout.defined_symbols): no external program."""
+    with open(elf, "rb") as f:
+        data = f.read()
+    try:
+        secs, syms = bootlayout.section_ranges(data), bootlayout.defined_symbols(data)
+    except bootlayout.LayoutError as e:
+        raise ValueError(f"{elf}: {e}")
 
     def sym(n):
         if n not in syms:
@@ -301,7 +313,7 @@ def main(argv):
     a = ap.parse_args(argv)
     try:
         spec = build_spec(a.elf, a.range, a.entries)
-    except (ValueError, OSError, subprocess.CalledProcessError) as e:
+    except (ValueError, OSError) as e:
         print(f"icount spec: {e}", file=sys.stderr)
         return 1
     with open(a.o, "w") as f:

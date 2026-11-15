@@ -1,0 +1,106 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "aarch64-linux-gnu-gcc-13",
+  "cxx": "aarch64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-mabi=ilp32"
+  ],
+  "cxx": [
+   "-mabi=ilp32"
+  ],
+  "asm": [
+   "-mabi=ilp32"
+  ]
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "units",
+   "repo": "fnv-nx-build",
+   "ref": "l1-contract/inputs/e1ca6b02d60d",
+   "commit": "18d39fbb43270310cef8c92f11844583e0815e58",
+   "tree_sha256": "5cc7fd648f915fd68b7f0c31c4136ccbfa307d67ddad91ba626941ec8cb0bc5d",
+   "at": "/ext/units"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/contract/facts",
+   "output": "n1"
+  }
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/contract/objfacts_dir.py",
+   "args": [
+    "--objects",
+    "/objs",
+    "--out",
+    "/out/obj.json"
+   ],
+   "inputs": [],
+   "outputs": [
+    "obj.json"
+   ],
+   "objects_of": {
+    "except": [],
+    "target": "guest",
+    "origin": "native",
+    "dependents_of": "ports/fnv-nx/contract/facts"
+   }
+  },
+  {
+   "tool": "ports/fnv-nx/contract/bind.py",
+   "args": [
+    "--obj",
+    "/stage/obj.json",
+    "--n1",
+    "/uses/ports/fnv-nx/contract/facts/n1",
+    "--units",
+    "/ext/units/units.json",
+    "--out",
+    "/out/bind.json"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/contract/factscheck:gen:0",
+     "path": "obj.json"
+    }
+   ],
+   "outputs": [
+    "bind.json"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/contract/nobinding.py",
+   "args": [
+    "--obj",
+    "/stage/obj.json",
+    "--bind",
+    "/stage/bind.json",
+    "--out",
+    "/out/proof.txt"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/contract/factscheck:gen:0",
+     "path": "obj.json"
+    },
+    {
+     "stage": "ports/fnv-nx/contract/factscheck:gen:1",
+     "path": "bind.json"
+    }
+   ],
+   "outputs": [
+    "proof.txt"
+   ]
+  }
+ ],
+ "outputs": {
+  "proof": "proof.txt"
+ }
+}

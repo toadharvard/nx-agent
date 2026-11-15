@@ -168,9 +168,6 @@ def write_facts_h(path, reqs):
 
 
 def write(path, text):
-    d = os.path.dirname(path)
-    if d:
-        os.makedirs(d, exist_ok=True)
     with open(path, 'w', newline='\n') as fh:
         fh.write(text)
 

@@ -290,6 +290,7 @@ def link_generated(rec_file, mine, seen):
 
 
 PROBE_SRC = "int main(void) { return 0; }\n"
+GEN_LAUNCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "genlaunch.py")   # the launcher of every generated stage: creates the parent directory of each declared output (verify/genlaunch.py)
 PROBE_FLAGS = ["-frandom-seed=guestlink", "-ffile-prefix-map=/probe=.", "-Werror=date-time"]   # the reproducibility flags every gcc stage carries (toolflags)
 
 
@@ -608,19 +609,48 @@ def emulation_flags(toks, kind="pie"):
     return err
 
 
-def objects_of_roots(rec, root, roots):
+OBJECTS_OF_KEYS = {"except", "target", "origin", "dependents_of"}
+OBJECTS_OF_ORIGINS = ("native", "lifted")
+
+
+def depends_on(cand, root, roots, repo, seen=()):
+    """True iff admitted root CAND reaches ROOT through any input edge (root_edges: `link.roots`, the declared loader, `uses` and `objects_of`, so a root
+    that reads the objects of a root that uses ROOT depends on it too), transitively. `objects_of` edges are taken whole (every product root they could select,
+    no selector exclusion: that is what keeps this function free of recursion), a superset. Read from the recipes at REPO; a root without a readable recipe has
+    no edges."""
+    if cand == root:
+        return True
+    if cand in seen:
+        return False
+    ent = roots.get(cand)
+    try:
+        rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
+    except (OSError, ValueError):
+        rec = None
+    return any(depends_on(d, root, roots, repo, tuple(seen) + (cand,)) for d in root_edges(rec, cand, roots) if d != cand) if isinstance(rec, dict) else False
+
+
+def objects_of_roots(rec, root, roots, repo=None):
     """The roots whose objects the generate stages of REC read (`objects_of`): every admitted product root with a recipe, except ROOT itself and
-    the roots a stage's `except` names. Sorted. A rule over the admitted set, not a list: a new product root is read by the next build."""
+    the roots a stage's `except` names. Sorted. A rule over the admitted set, not a list: a new product root is read by the next build.
+    A stage with `target` and/or `origin` selects by the admit.json declaration, never by a name: `target` equals the root's `target`, `origin` is
+    the class of its `cxx_origin` (origin_class: "native" = native or undeclared, "lifted" = {lifted_by, pack}). A selecting stage also leaves out
+    every root that depends on ROOT (depends_on: `link.roots`, `uses`, the loader), so the consumer of this root's output is never in its input set
+    and there is no cycle; that needs REPO (the recipes are read from it)."""
     out = set()
     for g in rec.get("generated", []) if isinstance(rec.get("generated"), list) else []:
         oo = g.get("objects_of") if isinstance(g, dict) else None
         if isinstance(oo, dict):
             ex = set(oo.get("except", [])) if isinstance(oo.get("except"), list) else set()
-            out |= {r for r, e in roots.items() if e.get("class") == "product" and e.get("recipe") and r != root and r not in ex}
+            sel = [k for k in ("target", "origin") if k in oo]
+            dep = oo.get("dependents_of")   # the complement of a producer's selection: only the roots that depend on DEP (the checker of what the producer left out)
+            out |= {r for r, e in roots.items() if e.get("class") == "product" and e.get("recipe") and r != root and r not in ex
+                    and all((e.get("target") == oo["target"]) if k == "target" else (origin_class(e.get("cxx_origin")) == oo["origin"]) for k in sel)
+                    and (repo is None or (depends_on(r, dep, roots, repo) if dep else not (sel and depends_on(r, root, roots, repo))))}
     return sorted(out)
 
 
-def root_edges(rec, root=None, roots=None):
+def root_edges(rec, root=None, roots=None, repo=None):
     """The roots a recipe depends on besides its own files: `link.roots` (objects), `uses` (outputs) and, with ROOTS, the roots `objects_of`
     reads, variants cut off."""
     lk = rec.get("link") if isinstance(rec, dict) else None
@@ -628,7 +658,7 @@ def root_edges(rec, root=None, roots=None):
     ds += [split_spec(lk["loader"])[0]] if isinstance(lk, dict) and isinstance(lk.get("loader"), str) else []   # the declared loader: its defined names are inputs of the link check
     us = rec.get("uses") if isinstance(rec, dict) else None
     return ds + [u["root"] for u in (us if isinstance(us, list) else []) if isinstance(u, dict) and isinstance(u.get("root"), str)] + (
-        objects_of_roots(rec, root, roots) if isinstance(rec, dict) and roots else [])
+        objects_of_roots(rec, root, roots, repo) if isinstance(rec, dict) and roots else [])
 
 
 def link_roots_cycle(root, roots, repo, seen=()):
@@ -640,7 +670,7 @@ def link_roots_cycle(root, roots, repo, seen=()):
         rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
     except (OSError, ValueError):
         rec = None
-    for d in root_edges(rec, root, roots):
+    for d in root_edges(rec, root, roots, repo):
         c = link_roots_cycle(d, roots, repo, tuple(seen) + (root,))
         if c:
             return c
@@ -984,17 +1014,27 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err.append("generated[%d] needs exactly tool, args, inputs, outputs (and optionally objects_of)" % i)
             continue
         oo = g.get("objects_of")
-        if "objects_of" in g and not (isinstance(oo, dict) and set(oo) <= {"except"} and isinstance(oo.get("except", []), list)
-                                      and all(isinstance(r, str) and r in roots and roots[r].get("class") == "product" for r in oo.get("except", []))):
-            err.append('generated[%d].objects_of must be {"except": [admitted product roots]}' % i)
+        if "objects_of" in g and not (isinstance(oo, dict) and set(oo) <= OBJECTS_OF_KEYS and isinstance(oo.get("except", []), list)
+                                      and all(isinstance(r, str) and r in roots and roots[r].get("class") == "product" for r in oo.get("except", []))
+                                      and oo.get("target", "guest") in GUEST_TARGETS and oo.get("origin", "native") in OBJECTS_OF_ORIGINS
+                                      and ("dependents_of" not in oo or (oo["dependents_of"] in roots and oo["dependents_of"] != root))):
+            err.append('generated[%d].objects_of must be {"except": [admitted product roots], "target": guest|host, "origin": native|lifted, "dependents_of": another admitted root} '
+                       '(the rest optional: select by declaration; dependents_of takes only the roots that depend on that root)' % i)
         t, ins, outs = g["tool"], g["inputs"], g["outputs"]
         owner = next((r for r in roots if isinstance(t, str) and tree_of({r: roots[r]}, t)), None)
         if not (isinstance(t, str) and t in files and t.endswith(".py") and owner and roots[owner]["class"] in ("tool", "product")):
             err.append("generated[%d].tool %r is not a tracked .py file of an admitted tool or product root" % (i, t))
         if not (isinstance(g["args"], list) and all(isinstance(a, str) for a in g["args"])):
             err.append("generated[%d].args must be strings" % i)
+        stg = [p for p in ins if isinstance(p, dict)] if isinstance(ins, list) else []
+        ins = [p for p in ins if not isinstance(p, dict)] if isinstance(ins, list) else ins
+        for p in stg:   # the declared output of an EARLIER generator of this recipe: {"stage": "<this root>:gen:I", "path": OUTPUT}, mounted at /stage/<OUTPUT>
+            m = re.fullmatch(re.escape(root) + r":gen:(\d+)", p.get("stage", "")) if set(p) == {"stage", "path"} and isinstance(p.get("stage"), str) else None
+            prev = rec["generated"][int(m.group(1))] if m and int(m.group(1)) < i else None
+            if not (prev and isinstance(prev, dict) and isinstance(prev.get("outputs"), list) and p["path"] in prev["outputs"]):
+                err.append("generated[%d].inputs: %r is not {stage: %s:gen:I, path: an output of generator I} with I before this one" % (i, p, root))
         if not (isinstance(ins, list) and all(rel_ok(p) and any(f == p or under(f, p) for f in files) for p in ins)):
-            err.append("generated[%d].inputs must be tracked files or directories (repo-relative)" % i)
+            err.append("generated[%d].inputs must be tracked files or directories (repo-relative), or stage refs of earlier generators" % i)
         elif any(a != b and under(a, b) for a in ins for b in ins):
             err.append("generated[%d].inputs nest" % i)
         for p in ins if isinstance(ins, list) else []:
@@ -1307,6 +1347,13 @@ def unit_flags(rec, roots, spec, driver, kind):
     return sem + rec["flags"][kind]
 
 
+def driver_doc(stage, drv, flags, mode, tail, inputs):
+    """The one constructor of the stage doc of every compiler-driver probe (drv:, mld:): argv = driver + semantic FLAGS + PROBE_FLAGS (the reproducibility
+    flags toolflags demands of every gcc stage) + MODE + TAIL, the hermetic environment, one declared input set."""
+    return {"format": "fnvnx-stage/1", "stage": stage, "argv": [drv] + list(flags) + PROBE_FLAGS + list(mode) + list(tail), "cwd": "/", "class": "build", "tool": "gcc",
+            "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"], "inputs": inputs}
+
+
 class Job:
     def __init__(self, repo, spec, store, jobs, ext):
         root, self.variant = split_spec(spec)
@@ -1463,7 +1510,7 @@ class Job:
         a red root makes the stage red; the stage key holds the objects' content, not a path."""
         out = os.path.join(tmp, "objs")
         os.makedirs(out, exist_ok=True)
-        for d in objects_of_roots({"generated": [g]}, self.root, self.roots):
+        for d in objects_of_roots({"generated": [g]}, self.root, self.roots, self.repo):
             try:
                 r = build(self.repo, d, self.store, os.path.join(ws, "objs-" + d.replace("/", "__")), self.jobs, self.extcache)
             except RecipeError as x:
@@ -1590,17 +1637,21 @@ class Job:
     def generate_one(self, ws, i, g, py, xin):
         owner = tree_of(self.roots, g["tool"])
         tmp = tempfile.mkdtemp(dir=ws)
-        ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin + self.use_inputs(ws)
+        ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)},
+               {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)}] + xin + self.use_inputs(ws)
         if "objects_of" in g:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:
+            if isinstance(p, dict):   # the output of an earlier generator of this recipe: already in the root's view (generate runs in list order), keyed by content
+                ins.append({"at": "/stage/" + p["path"], "tree": cas.ingest(os.path.join(ws, "root", p["path"]), self.store)})
+                continue
             sub = [f for f in self.files if f == p or under(f, p)]
             ins.append({"at": "/in/" + p, "tree": cas.ingest(os.path.join(self.repo, p), self.store) if sub == [p] else
                         self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
+               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
         res = self.stage(doc)[1]
         got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
@@ -1699,6 +1750,8 @@ class Job:
             self.red.append(dict(r.args[0]))
             self.blocked.update({u: r.args[0]["stage"] for u in units})
             return {}
+        guest = entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("target") == "guest"
+        pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
         try:
             self.built = self.plugins(ws) if any(k in pk for k in kinds.values()) else []
         except BuildRed as r:
@@ -1858,13 +1911,14 @@ class Job:
         with open(os.path.join(pd, "x.cc"), "w") as f:
             f.write(PROBE_SRC)
         tr = self.toolrt([cxx])[1]
-        argv = [cxx] + PROBE_FLAGS + (["-pie"] if kind == "exe" else ["-shared"]) + ["-###", "/probe/x.cc", "-o", "/out/x"]
-        doc = {"format": "fnvnx-stage/1", "stage": "drv:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(unitstage.ENV, PATH=os.path.dirname(cxx)), "outputs": ["/out"],
-               "inputs": merge_inputs(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], mnt, self.store, ws)}
-        res = self.stage(doc)[1]
+        res = self.driver_stage("drv:" + self.root, cxx, [], ["-pie"] if kind == "exe" else ["-shared"], ["-###", "/probe/x.cc", "-o", "/out/x"],
+                                merge_inputs(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], mnt, self.store, ws))
         text = open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
         return parse_host_link(text, dirs), mnt
+
+    def driver_stage(self, stage, drv, flags, mode, tail, inputs):
+        """The one place a compiler-driver probe stage (drv:, mld:) runs: driver_doc, hermetic. -> the stage result."""
+        return self.stage(driver_doc(stage, drv, flags, mode, tail, inputs))[1]
 
     def link_undefined(self, groups, loader_defs=None):
         """The full static undefined set of the link just attempted (undefset.closure over the symbol tables of its inputs): the objects of the product
@@ -1981,12 +2035,9 @@ class Job:
         os.makedirs(pd)
         with open(os.path.join(pd, "x.cc"), "w") as f:
             f.write(PROBE_SRC)
-        argv = [drv] + list(flags) + PROBE_FLAGS + ["-pie", "-###", "/probe/x.cc", "-o", "/out/x.elf"]
-        doc = {"format": "fnvnx-stage/1", "stage": "drv:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"],
-               "inputs": sorted(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], key=lambda i: i["at"])}
-        res = self.stage(doc)[1]
-        md = self.stage(dict(doc, argv=[drv] + list(flags) + ["-print-multi-directory"], stage="mld:" + self.root))[1]   # the multilib directory the same flags select
+        ins = sorted(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], key=lambda i: i["at"])
+        res = self.driver_stage("drv:" + self.root, drv, flags, ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x.elf"], ins)
+        md = self.driver_stage("mld:" + self.root, drv, flags, [], ["-print-multi-directory"], ins)   # the multilib directory the same flags select
         self.multidir = open(cas._obj(self.store, cas.manifest(md["stdout"], self.store)), errors="replace").read().strip()
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read(), rt["at"]
 

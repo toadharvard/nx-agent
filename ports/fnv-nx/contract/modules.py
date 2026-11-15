@@ -52,6 +52,7 @@ import hashlib
 import os
 import struct
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import declareddlls
@@ -425,7 +426,7 @@ def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
-def run(exe_path, bridge_path, dirs, out, declared_path):
+def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None):
     exe = PE(exepin.load_exe(exe_path), exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
@@ -487,6 +488,14 @@ def run(exe_path, bridge_path, dirs, out, declared_path):
         k['none'] = len(mbad)
         summary += ['module import slots %s: via bridge %d, via modules %d, no provider %d' % (m.name, k['system'], k['module'], k['none'])]
         summary += ['  no provider: %s!%s' % (d, n) for _, d, n, _ in mbad]
+    if c_out:   # the loader's module table, one file (loader/src/modules.c reads fnvnx_modules, fnvnx_module_count)
+        with open(c_out, 'w', newline='\n') as fh:
+            fh.write(c_source(order))
+    if keys_out:   # the loader's import table (iat.c_source over the bridge rows and every import of the exe and of every image of `order`)
+        imported = iat.imported_set(brows, list(exe_slots(exe).values()) + [(d, n) for m in order for d, items in m.imports for _, n in items])
+        txt, _, _ = iat.c_source(brows, iat.bridge_rows(bridge_path)[1], imported)
+        with open(keys_out, 'w', newline='\n') as fh:
+            fh.write(txt)
     return '\n'.join(summary), bool(bad)
 
 
@@ -496,10 +505,17 @@ def main():
     ap.add_argument('--bridge', required=True)
     ap.add_argument('--dir', action='append', required=True, help='where module files are looked for; first match in list order')
     ap.add_argument('--declared', required=True, help='declared_dlls.tsv (contract/declareddlls.py): the dlls of the declared machine')
-    ap.add_argument('--out-dir', required=True)
+    ap.add_argument('--out-dir', help='the tables of the contract (modules.tsv, exports/, imports/, tls, iat.tsv ...); without it only --c-out and --keys-c-out are written')
+    ap.add_argument('--c-out', help='modules.c: the loader module table (fnvnx_modules, fnvnx_module_count)')
+    ap.add_argument('--keys-c-out', help='import_keys.c: the loader import table (fnvnx_import_rows, fnvnx_import_row_count, fnvnx_import_key_count, fnvnx_import_by_key_idx)')
     a = ap.parse_args()
+    if not (a.out_dir or a.c_out or a.keys_c_out):
+        ap.error('one of --out-dir, --c-out, --keys-c-out is required')
     try:
-        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared)
+        with tempfile.TemporaryDirectory() as tmp:
+            text, bad = run(a.exe, a.bridge, a.dir, a.out_dir or tmp, a.declared, a.c_out, a.keys_c_out)
+        if not a.out_dir:   # tables-only mode: a slot without a provider is the `iat` gate's finding (it needs the tables), not a failure of the generator
+            bad = False
     except (StageError, ValueError, OSError, exepin.ExePinError) as e:
         sys.exit('modules: %s' % e)
     print(text)

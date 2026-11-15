@@ -454,8 +454,9 @@ for nm, rows_ in (('one', (CK,)), ('two', (CK, CK2)), ('cfm', (R_H, R_P, R_W))):
     tsv = os.path.join(tdir, nm + '.tsv')
     open(tsv, 'w').write('\t'.join(gate_reach.COLUMNS) + '\n' + ''.join('\t'.join(r) + '\n' for r in rows_))
     outh = os.path.join(tdir, 'sub', nm + '.h')
+    os.makedirs(os.path.dirname(outh), exist_ok=True)   # the stage launcher creates the parent of a declared output; the generator does not
     rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', tsv, '--facts-h', outh], capture_output=True).returncode
-    check('reachreq CLI %s: exit 0 and the header equals gate_reach.header(parse_requests(table)) (output dir created)' % nm,
+    check('reachreq CLI %s: exit 0 and the header equals gate_reach.header(parse_requests(table))' % nm,
           (rc_, open(outh).read()), (0, gate_reach.header(gate_reach.parse_requests(open(tsv).read()))))
 rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.path.join(tdir, 'nope.tsv'), '--facts-h', outh], capture_output=True).returncode
 check('reachreq CLI on a missing table is an error', rc_ != 0, True)

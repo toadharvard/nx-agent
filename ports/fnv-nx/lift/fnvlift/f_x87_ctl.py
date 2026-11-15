@@ -11,6 +11,7 @@ does not model (ffree, fincstp, fdecstp: X87Dyn from the handlers)."""
 import os
 from capstone import x86 as X
 from .core import X87Dyn, Unsupported
+from . import sites
 
 TAB = None
 DEFAULT = '/home/user/l3facts/fpmodes/depth.tsv'
@@ -304,7 +305,7 @@ def env(cx, ins, b0, g):
     recomputed from its contents by every store, SDM 8.1.7, so 00/01/10 carry no state); frstor also loads ST(0..7) as 80-bit images into M80 carriers; FIP and FDP are loaded into
     c->fip / c->fdp.
     STORES (fnstenv, fnsave): FCW, FSW (FSWV: TOP, C0..C3, C1, sticky bits), FTW from the register contents, FIP, FCS | FOP << 16, FDP, FDS from the last-instruction state (c->fip, c->fdp:
-    rt/fnvl_x87.h, SDM 8.1.8, assumptions ASM-212 ASM-213 ASM-214 ASM-215 there); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
+    rt/fnvl_x87.h, SDM 8.1.8, assumptions ASM-212 ASM-215 there; FOP/FCS/FDS are stored state, fnvl_x87.h); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
     Assumptions: ASM-210 a register that the image marks non-empty but whose carrier is empty holds the real indefinite (the value the tree gives every read of an empty register:
     dyn_rd; an empty register keeps the 80-bit image it last held, fv_free, which an MMX read sees, but every x87 read of it gives the indefinite; fnsave writes the indefinite for an empty register too); ASM-211 the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending
     in the model (invariant ASM-204, fnvlift/fpfacts.py: all exceptions masked, FSWV never reports them)."""
@@ -313,7 +314,7 @@ def env(cx, ins, b0, g):
     d32 = 0 if ins.prefix[2] == 0x66 else 1
     a = cx.ea(ins, cx.ops[0])
     if g == 6:
-        cx.em(('FNSTENV(%s,%d,FSWV(c->ftop));' if b0 == 0xd9 else 'FNSAVE(%s,%d,FSWV(c->ftop));') % (a, d32))
+        cx.em(('FNSTENV(%s,%d,FSWV(c->ftop),0x%xu);' if b0 == 0xd9 else 'FNSAVE(%s,%d,FSWV(c->ftop),0x%xu);') % (a, d32, cx.a))
     else:
         cx.em(('FLDENV(%s,%d);' if b0 == 0xd9 else 'FRSTOR(%s,%d);') % (a, d32))
 
@@ -327,15 +328,15 @@ def ctl(cx, ins, b0, mr, g):
             em('FLDCW(M16(%s));' % cx.ea(ins, cx.ops[0]))
         elif b0 == 0xd9 and g == 7:
             em('M16(%s)=c->fcw;' % cx.ea(ins, cx.ops[0]))
-        elif b0 == 0xdd and g == 7:
-            em('M16(%s)=FSWV(%s);' % (cx.ea(ins, cx.ops[0]), top))
-        elif b0 in (0xd9, 0xdd) and g in (4, 6):
+        elif sites.fsw_form(b0, mr) == 'mem' and g == 7:       # FSTSW m16 (the site predicate is fnvlift/sites.py, shared with the `sites` facts)
+            em('FSW_ST16(%s,FSWV(%s),0x%xu);' % (cx.ea(ins, cx.ops[0]), top, cx.a))
+        elif b0 in (0xd9, 0xdd) and g in (4, 6):            # FLDENV FRSTOR FNSTENV FNSAVE (g 6: sites.fsw_form 'mem')
             env(cx, ins, b0, g)
         else:
             return False
         return True
-    if b0 == 0xdf and mr == 0xe0:
-        em('eax=(eax&0xffff0000u)|FSWV(%s);' % top)
+    if sites.fsw_form(b0, mr) == 'ax':
+        em('FSW_AX(FSWV(%s),0x%xu);' % (top, cx.a))
     elif b0 == 0xdb and mr == 0xe2:
         em('FNCLEX();')
     elif b0 == 0xdb and mr == 0xe3:

@@ -60,7 +60,7 @@ class BootPath:
             mp = m.split("/")
             if low[:len(mp)] == mp:
                 rest = low[len(mp):]
-                if m == "switch/fnv" and rest and (rest[0] in PORT_NAMES or rest[0].startswith(PORT_PREFIXES)):
+                if m == _SD and rest and (rest[0] in PORT_NAMES or rest[0].startswith(PORT_PREFIXES)):
                     break
                 return self.game, parts[len(mp):]
         return self.root, parts

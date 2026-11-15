@@ -473,7 +473,14 @@ load_index order, loader/src/modules.c:273-278; empty for an image loaded on dem
 1 << (align - 1)).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
 then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
 array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
-Test: contract/tests/test_modules.py on synthetic PE images built by the test.
+Loader tables (generated stages of loader/build.json over the pinned exe; no checked-in copy): `--c-out F` writes the module table (`fnvnx_modules`,
+`fnvnx_module_count`) and `--keys-c-out F` the import table (`fnvnx_import_rows`, `fnvnx_import_row_count`, `fnvnx_import_key_count`,
+`fnvnx_import_by_key_idx`: iat.c_source over the bridge rows and every import of the exe and of every image of the module order, computed in the
+same run, because the module set is data of the run and a generator stage declares its outputs by name). Without `--out-dir` only these files are
+written and a slot without a provider does not fail the stage: that is the finding of the `iat` gate, which needs the tables. `contract/mkidentity.py`
+writes `fnvnx_exe_sha256` and `fnvnx_exe_size` over the same exe external. The exe, redist, manifest and wine externals of the loader recipe are
+the pins of contract_inputs.json (test_loader_tables.py); the declared dlls are the generator stage `declareddlls.py` over the wine external.
+Test: contract/tests/test_modules.py on synthetic PE images built by the test; verify/tests/test_loader_tables.py (the loader recipe).
 ```
 
 ## contract/objfacts_merge.py
@@ -543,7 +550,7 @@ Kinds (the explicit per-file encoding):
 ```text
 boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 
-  [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked]
+  [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
                                [--gpu-branch <artifacts branch>]
 
 Steps:
@@ -569,7 +576,7 @@ Steps:
  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
 --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-   Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the
+   Mesa llvmpipe). The job fetches it, requires the packages libegl1 and libegl-mesa0 at the
    versions of verify/env.json (installed by farm/setup_verdict_env.sh, never by the job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
    gpu_branch_commit, the final line gains presents=<n>.
@@ -584,6 +591,7 @@ Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts;
 when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
+--quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py and recorded in meta.json (quantum).
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 ```
 
@@ -747,7 +755,7 @@ The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the mi
 
   boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              [--hc-slice N] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
+              --quantum N [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -791,8 +799,9 @@ The renderer of the boot stage: ext module 10 (the guest's GPU calls) forwarded 
 The library exports nxgl4_create(width, height, err, errlen), nxgl4_destroy, nxgl4_ext(fn, args, nargs) and nxgl4_last_error, and
 leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range -> host pointer; NULL when the range is not wholly inside
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
-this file builds a tiny C shim once per process (the two symbols forwarding to function pointers set through nxgl4_shim_set), loads
-it RTLD_GLOBAL, then loads the library. The shim needs the host gcc. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
+this file loads the recipe product of the host-target root verify/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
+no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
+nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
 The library's host packages (libegl1, libegl-mesa0 and what they pull: libglvnd0, mesa-libgallium, libllvm20, ...) are part of the declared
 environment (verify/env.json, derived by envcheck.py snapshot from RENDER_LIBS/RENDER_FILES); nothing installs them at test or job time.
@@ -932,9 +941,22 @@ Rules:
    host page / heap = the plan's regions. No relocation: the guest relocates itself. A segment outside the image region
    or sharing a page with another raises MachineError.
 2. Totality: all 50 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
-3. One CPU. A thread switches only at a blocking host call and at a host call's return after `hc_slice` calls of its
-   slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
-   the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
+3. N cores, parallel progress in rounds (CLAUDE.md "The declared CPU"). N = popcount(FNVNX_APP_CORES) (placement.h, read by name:
+   the declared machine; cores = its set bits, ascending). Every thread lives on its ideal core for ever (thread_create's
+   FNVNX_CPU_SPEC ideal, thread_set_cpu; the main thread FNVNX_DEFAULT_CORE): THREAD_CPU = ideal, there is no migration, the mask is not
+   used for placement. Per core the ready thread of the highest priority runs (Win32 scale, signed, higher first), FIFO within equal
+   priority (the order in which threads became ready; a thread that only used up its quantum keeps its place; thread_yield goes behind its
+   equals). A round visits the cores 0..N-1 in order and gives each core's chosen thread one slice of `quantum` instructions: the machine's
+   own count (block size / 4 per image block, the one block hook), ended at the first block boundary at or after the quantum (the block that
+   would run next is not run and not counted, so every block is counted once and icount stays exact). A thread leaves its core only at a
+   blocking host call, its end, or, at the next round boundary, when a thread of higher priority on the same core is ready. quantum is a
+   required argument (no default); a different quantum changes interleavings, not what a race-free guest computes. The pick is made at the
+   start of each core's turn, so it is a pure function of the machine's state: no wall clock, switch points repeat. Nothing ready on any
+   core: the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report. run()["cores"] has the
+   per-core numbers: {core: {"slices", "instructions", "switches", "pairs": {"from>to": n}}}; a switch is a core running another thread than
+   the one it ran last. quantum is a declared parameter of the instrument. The slice end is a function of the code's block extents and the
+   pinned Unicorn (env.json python.modules; its version is in OUT.json machine.unicorn), so switch points repeat for the same code and pin.
+   Memory ordering is proved by the plugin rule (R9, OWNER 9); the boot machine neither tests nor certifies it.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
    ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
@@ -1051,10 +1073,10 @@ bootpath.py - the guest-path rule of the boot stage: where a guest SD path lands
 A guest path is a string, "sdmc:/a/b" (prefix case-insensitive) or "/a/b"; "\" counts as "/". Components "" and "." are
 dropped; ".." removes the previous component and stops at the card's root, so nothing outside the mounts is reachable
 (the path is refused by clamping, not by an error: "/../x" is "/x").
-Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at sdmc:/switch/fnv and at
-sdmc:/fnvnx/game: a path under either prefix (compared case-folded) continues inside `game`, except that the port's own
-entries of sdmc:/switch/fnv (PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without `game`
-it is <root>/switch/fnv when that directory holds anything besides the port's own entries, else <root>/fnvnx/game.
+Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at FNVNX_SD_DIR (sdlayout.h, read by
+name through hostabirec.py; sdmc:/switch/fnv): a path under that prefix (compared case-folded) continues inside `game`, except that
+the port's own entries of it (FNVNX_SD_PORT_NAMES: PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without
+`game` it is <root>/FNVNX_SD_DIR, always, with no inspection of the directory. The header has no other name for the game directory.
 Case. The SD card folds case. Each component is matched against the host entries: if the exact spelling exists it is
 used (os.path.lexists); else the host entries equal under str.casefold() are collected and the first in sorted order
 (code-point order, deterministic) is taken; with no match the spelling given is kept (a path to be created).
@@ -1793,6 +1815,21 @@ on argv/env/tool/input `at` only (not on tree hashes), so documents of not-yet-r
 `python3 verify/guest_flags.py --lang c|c++|asm [--cache DIR]` prints, as a JSON array, the semantic flag set the recipe passes to a guest compile stage of that language:
 `recipe.semantics_for(pinned driver, language)` on `flags.semantics` of `guest_compiler.json` (the set minus the flags the driver itself says do not apply to the language).
 It is the one function the recipe uses; there is no second list. The pinned compiler is fetched by its pin into DIR (default `$GATE_CACHE`). For the runtime build of L5.
+
+## verify/hostabirec.py
+
+```text
+The one record of the host ABI as the boot machine uses it, parsed from hostabi/include/fnvnx/{hostapi,placement,reach,sockwire,sockwire_errno,
+sdlayout,hostvm}.h (the headers are L5's). Nothing of it is typed a second time in verify/.
+
+  record().define(NAME)   an object-like integer #define (constant expression of literals, earlier names, | & ^ << >> + - ~ * and casts)
+  record().string(NAME)   a string macro: the C concatenation of the adjacent string literals (no escapes) and earlier string macros of its body
+                          (FNVNX_SD_FONTS = FNVNX_SD_DIR "/fonts" is "sdmc:/switch/fnv/fonts"); a body with a literal that does not resolve
+                          completely is a RecordError at load, never skipped; a name that is no string macro is a KeyError
+  record().xlist(NAME), .services, .slots, .platform_services(), .sock_services(), .api_size()
+  python3 hostabirec.py [--include DIR] --out FILE.py   the same record as a Python module (DEFINES, LISTS, STRINGS, SERVICES, SLOTS, API_SIZE)
+Asking for anything absent raises: there is no default.
+```
 
 ## verify/icount.py
 

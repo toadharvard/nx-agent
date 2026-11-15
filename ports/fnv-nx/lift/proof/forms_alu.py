@@ -1,6 +1,6 @@
 """Arithmetic / logic / shift / bit / multiply / divide families (see forms.py)."""
-from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, load, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
-from proof.forms import Op, af, ea, handler, pzs, rd, undef, wr
+from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
+from proof.forms import Op, addoff, af, ea, handler, mload, pzs, rd, store_op, undef, wr
 
 UNDEF_LOGIC = 'AND/OR/XOR/TEST: "The state of the AF flag is undefined."'
 UNDEF_MUL = 'MUL/IMUL: "The SF, ZF, AF, and PF flags are undefined."'
@@ -59,7 +59,7 @@ def shift(c):
         of = {'shl': msb(r) ^ cf, 'shr': msb(a), 'sar': C(0, 1)}[m]
         # SHL/SHR: CF is undefined when the masked count >= the operand size (SDM); SAR is defined for every count
         F.flag('cf', keep('cf', cf), when=ult(n32, w) if m != 'sar' else None); F.flag('of', keep('of', of), when=one)
-        F.undefined('af', UNDEF_SHAF); pzs(F, r, keep)
+        F.undefined('af', UNDEF_SHAF, when=nz); pzs(F, r, keep)      # AF undefined for a non-zero count; count 0: every flag unchanged (SDM)
     wr(F, d, r)
 
 @handler('rcl', 'rcr')
@@ -73,11 +73,16 @@ def rotc(c):
 
 @handler('shld', 'shrd')
 def shld(c):
-    F, d, s = c.F, c.ops[0], c.ops[1]; assert d.w == 32; a, b = rd(d), rd(s); n = count(c, 2); nz = ~eq(n, 0)
+    """SHLD/SHRD (SDM Vol 2): the count is masked to 5 bits (0..31). Count 0: nothing changes. Count 1..w (w the operand size): result and CF computed, OF only for a 1-bit shift.
+    "If the count is greater than the operand size, the result [destination] and the flags are undefined" (a 16-bit operand with count 17..31): the destination keeps its prior
+    value (DEFPRIOR: the write has when = count <= w) and CF/OF/SF/ZF/PF are the constant 0 (DEF0: the writes have when = count <= w); AF is undefined for every non-zero count."""
+    F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; assert s.w == w and w in (16, 32); a, b = rd(d), rd(s); n32 = count(c, 2); n = trunc(n32, w) if w < 32 else n32; nz = ~eq(n32, 0)
+    ok = ult(n32, w + 1) if w < 32 else None                      # count <= operand size: the SDM defines result and flags (always true for w = 32: count <= 31)
     keep = lambda f, new: ite(nz, new, V(f, 1))
-    if c.m == 'shld': r = shl(a, n) | lshr(b, C(32, 32) - n); cf = msb(shl(a, n - 1))
-    else: r = lshr(a, n) | shl(b, C(32, 32) - n); cf = bit(lshr(a, n - 1), 0)
-    F.flag('cf', keep('cf', cf)); F.flag('of', keep('of', msb(r) ^ msb(a)), when=ult(n, 2)); F.undefined('af', UNDEF_SHAF); pzs(F, r, keep); wr(F, d, r)
+    if c.m == 'shld': r = shl(a, n) | lshr(b, C(w, w) - n); cf = msb(shl(a, n - 1))
+    else: r = lshr(a, n) | shl(b, C(w, w) - n); cf = bit(lshr(a, n - 1), 0)
+    one = ult(n32, 2)
+    F.flag('cf', keep('cf', cf), when=ok); F.flag('of', keep('of', msb(r) ^ msb(a)), when=one); F.undefined('af', UNDEF_SHAF, when=nz); pzs(F, r, keep, ok); wr(F, d, r, ok)
 
 @handler('bt', 'bts', 'btr', 'btc')
 def bt(c):
@@ -85,20 +90,21 @@ def bt(c):
     if d.k == 'r': addr, bn, val = None, off & (w - 1), rd(d)
     else:
         addr = ea(d)
-        if s.k == 'r': addr = addr + sext(ashr(off, C(lg, w)), 32) * (w // 8)       # bit-string: signed offset selects the word
-        bn = off & (w - 1); val = load(addr, w)
+        if s.k == 'r': addr = addoff(addr, sext(ashr(off, C(lg, w)), 32) * (w // 8))       # bit-string: signed offset selects the word
+        bn = off & (w - 1); val = mload(addr, w)
     F.flag('cf', bit(lshr(val, bn), 0)); undef(F, ('of', 'sf', 'af', 'pf'), UNDEF_BT)
     msk = shl(C(1, w), bn)
     if c.m != 'bt':
         nv = {'bts': val | msk, 'btr': val & ~msk, 'btc': val ^ msk}[c.m]
         if addr is None: wr(F, d, nv)
-        else: F.store(addr, nv)
+        else: store_op(F, d, addr, nv)
 
 @handler('bsf', 'bsr')
 def bs(c):
     F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; a = rd(s); r = C(0, w)
     for i in (range(w - 1, -1, -1) if c.m == 'bsf' else range(w)): r = ite(bit(a, i), C(i, w), r)
     z = eq(a, 0); F.flag('zf', z); undef(F, ('cf', 'of', 'sf', 'af', 'pf'), UNDEF_BS)
+    F.model_gap('BSF/BSR: with a zero source the destination is undefined and the flags other than ZF are undefined; the pinned model cannot state this refinement (L3b, batched IR bump)')
     wr(F, d, ite(z, rd(d), r), when=~z)
 
 @handler('xadd')

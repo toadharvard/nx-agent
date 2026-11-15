@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Tests of verify/icount.py: exact executed-instruction counters. Plain script, exit 0 on pass, one line per case.
 
-A tiny A64 program (two address ranges, loops, a function called N times, ldar/stlr/ldaxr/stlxr/dmb/dsb/isb) runs in a
-bare Unicorn instance with two fake threads and two marks; the block-hook counters are compared with a reference taken
-by a UC_HOOK_CODE single-step run of the same schedule (capstone mnemonics decide the classes).
+The fixture is the guest image of the recipe root verify/tests/icount (icfix.s: two address ranges, loops, a function called N times, ldar/stlr/ldaxr/stlxr/dmb/dsb/isb;
+icenc.S: one instruction per opcode-class row with its expected class mask as table data), built and linked by verify/recipe.py through gate_build.ensure in GATE_CACHE
+like every guest image, and loaded by the boot machine's own loader (bootmachine.Machine). Its program runs with two fake threads and two marks; the block-hook
+counters are compared with a reference taken by a UC_HOOK_CODE single-step run of the same schedule (capstone mnemonics decide the classes). Every address, range, entry
+and expected class is read from the linked image (bootlayout.section_ranges / defined_symbols / data_symbol); no address is typed here, and no assembler, linker
+or binutils tool runs in this test.
 """
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -15,141 +19,61 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
+sys.path.insert(0, HERE)
+import bootlayout  # noqa: E402
+import boothost  # noqa: E402
+import bootmachine  # noqa: E402
 import icount  # noqa: E402
+import test_bootmachine as tb  # noqa: E402
 
 from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs  # noqa: E402
-from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_MODE_ARM, Uc  # noqa: E402
-from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1  # noqa: E402
+from unicorn import UC_HOOK_CODE  # noqa: E402
 
-AS, LD, OBJCOPY, NM = ("aarch64-linux-gnu-" + t for t in ("as", "ld", "objcopy", "nm"))
-ARCH = ".arch armv8.4-a+rcpc+lse+lor\n"
-
-PROG = ARCH + """
-.section .text,"ax"
-.globl _start
-_start:
-    mov x0, #0x30000
-    mov x20, #5
-l1: bl funcb
-    subs x20, x20, #1
-    b.ne l1
-p1:
-    mov x20, #4
-l2: ldar w1, [x0]
-    stlr w1, [x0]
-    ldarb w1, [x0]
-    stlrb w1, [x0]
-    ldarh w1, [x0]
-    stlrh w1, [x0]
-    ldaxr w3, [x0]
-    stlxr w4, w3, [x0]
-    dmb ish
-    dmb ishst
-    dsb sy
-    isb
-    subs x20, x20, #1
-    b.ne l2
-p2:
-    bl funcb
-    bl funca2
-p3:
-    mov x20, #3
-l3: bl funca2
-    bl funcb
-    subs x20, x20, #1
-    b.ne l3
-end:
-    nop
-funca2:
-    add x1, x1, #1
-    add x1, x1, #2
-    ret
-bench:
-    movz x20, #50000
-l4: add x1, x1, #1
-    subs x20, x20, #1
-    b.ne l4
-benchend:
-    nop
-.section .textb,"ax"
-.globl funcb
-funcb:
-    ldar w9, [x0]
-    dmb ish
-    add x2, x2, #1
-    ret
-.section .data
-.space 64
-"""
-
-# mnemonic -> classes expected from icount.classify (assembled and decoded by the encoding table)
-CLASS_CASES = [
-    ("ldar w1,[x0]", "ldar_stlr"), ("ldar x1,[x0]", "ldar_stlr"), ("ldarb w1,[x0]", "ldar_stlr"),
-    ("ldarh w1,[x0]", "ldar_stlr"), ("stlr w1,[x0]", "ldar_stlr"), ("stlr x1,[x0]", "ldar_stlr"),
-    ("stlrb w1,[x0]", "ldar_stlr"), ("stlrh w1,[x0]", "ldar_stlr"),
-    ("ldapr w1,[x0]", "ldar_stlr,ldapr"), ("ldapr x1,[x0]", "ldar_stlr,ldapr"),
-    ("ldaprb w1,[x0]", "ldar_stlr,ldapr"), ("ldaprh w1,[x0]", "ldar_stlr,ldapr"),
-    ("ldapur w1,[x0]", "ldar_stlr,ldapr"), ("stlur x1,[x0,#8]", "ldar_stlr,ldapr"),
-    ("ldapursw x1,[x0,#4]", "ldar_stlr,ldapr"),
-    ("ldaxr w1,[x0]", "ldar_stlr,ldaxr_stlxr"), ("ldaxr x1,[x0]", "ldar_stlr,ldaxr_stlxr"),
-    ("ldaxrb w1,[x0]", "ldar_stlr,ldaxr_stlxr"), ("stlxr w2,w1,[x0]", "ldar_stlr,ldaxr_stlxr"),
-    ("stlxrh w2,w1,[x0]", "ldar_stlr,ldaxr_stlxr"), ("ldaxp x1,x2,[x0]", "ldar_stlr,ldaxr_stlxr"),
-    ("stlxp w3,x1,x2,[x0]", "ldar_stlr,ldaxr_stlxr"),
-    ("dmb ish", "dmb"), ("dmb sy", "dmb"), ("dmb ishld", "dmb"), ("dmb oshst", "dmb"),
-    ("dsb sy", "dsb"), ("dsb ish", "dsb"), ("isb", "isb"),
-    # none of the classes
-    ("ldr w1,[x0]", ""), ("str x1,[x0]", ""), ("ldxr w1,[x0]", ""), ("stxr w2,w1,[x0]", ""),
-    ("ldlar w1,[x0]", ""), ("stllr w1,[x0]", ""), ("casal w1,w2,[x0]", ""), ("swpal w1,w2,[x0]", ""),
-    ("ldur w1,[x0,#1]", ""), ("ldp x1,x2,[x0]", ""), ("clrex", ""), ("nop", ""), ("add x1,x2,x3", ""),
-    ("ldaddal w1,w2,[x0]", ""),
-]
+FIX_ROOT = "ports/fnv-nx/verify/tests/icount"   # the recipe root of the fixture (admit.json, class test, target guest)
+QUANTUM = 10 ** 12   # one slice for the whole program: the counters are compared, the scheduling is not under test
+TMPD = tempfile.mkdtemp(prefix="icount-")
 
 
-def sh(*cmd, **kw):
-    return subprocess.run(cmd, check=True, capture_output=True, text=True, **kw).stdout
+class Fix:
+    """the fixture image: raw ELF bytes, path, link-time symbols (icfx_ prefix left off), the plan's load base"""
 
+    def __init__(self):
+        import gate_build
+        res, _out = gate_build.ensure(FIX_ROOT, tb.GATE_CACHE, tb.REPO)
+        if res["status"] != "green":
+            raise RuntimeError("icount fixture: recipe %s: %s" % (res["status"], res.get("failure")))
+        self.path = res["elf"]["path"]
+        self.raw = open(self.path, "rb").read()
+        self.secs = bootlayout.section_ranges(self.raw)
+        self.syms = {}
+        for n, vs in bootlayout.defined_symbols(self.raw).items():
+            if n.startswith(("icfx_", "icenc_")):
+                if len(vs) != 1:
+                    raise RuntimeError("symbol %s is defined %d times" % (n, len(vs)))
+                self.syms[n[5:] if n.startswith("icfx_") else n] = vs[0]
+        self.plan = tb.make_plan(self.raw)
+        self.base = self.plan["image"]["base"]
+        self.abs = {n: v + self.base for n, v in self.syms.items()}
 
-def build(d):
-    s = os.path.join(d, "p.s")
-    open(s, "w").write(PROG)
-    sh(AS, s, "-o", os.path.join(d, "p.o"))
-    elf = os.path.join(d, "p.elf")
-    sh(LD, "-N", "--section-start=.text=0x10000", "--section-start=.textb=0x20000", "--section-start=.data=0x30000",
-       "-o", elf, os.path.join(d, "p.o"))
-    secs = {}
-    for name in (".text", ".textb", ".data"):
-        b = os.path.join(d, "s.bin")
-        sh(OBJCOPY, "-O", "binary", "--only-section=" + name, elf, b)
-        secs[name] = open(b, "rb").read()
-    syms = {}
-    for line in sh(NM, elf).splitlines():
-        a, _, n = line.split()
-        syms[n] = int(a, 16)
-    return elf, secs, syms
-
-
-def machine(secs):
-    uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
-    uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)
-    uc.mem_map(0x10000, 0x30000)
-    for addr, name in ((0x10000, ".text"), (0x20000, ".textb"), (0x30000, ".data")):
-        uc.mem_write(addr, secs[name])
-    return uc
+    def machine(self):
+        """a boot machine with the image loaded by its own loader; nothing is run"""
+        return bootmachine.Machine(self.raw, self.plan, boothost.Services(TMPD), quantum=QUANTUM)
 
 
 # schedule: (until, thread to run it, mark before it); segments end at block boundaries (after a branch)
-def schedule(syms):
-    return [(syms["p1"], 1, None), (syms["p2"], 2, None), (syms["p3"], 1, "m1"), (syms["end"], 2, "m2")]
+def schedule(A):
+    return [(A["p1"], 1, None), (A["p2"], 2, None), (A["p3"], 1, "m1"), (A["end"], 2, "m2")]
 
 
-def spec_for(syms):
-    return {"ranges": {"A": [[0x10000, 0x11000]], "B": [[0x20000, 0x21000]]},
-            "entries": {"funcb": [syms["funcb"]], "funca2": [syms["funca2"]]}}
+def spec_for(S):
+    """SPEC.json of the fixture from its link-time symbols: range A is the code before funcb, B is funcb"""
+    return {"ranges": {"A": [[S["start"], S["funcb"]]], "B": [[S["funcb"], S["funcb_end"]]]},
+            "entries": {"funcb": [S["funcb"]], "funca2": [S["funca2"]]}}
 
 
-def drive(uc, syms, ic=None, extra_hook=None):
-    pc = syms["_start"]
-    for until, tid, mark in schedule(syms):
+def drive(uc, A, ic=None, extra_hook=None):
+    pc = A["start"]
+    for until, tid, mark in schedule(A):
         if mark:
             (ic.mark(mark) if ic else None)
             if extra_hook:
@@ -166,19 +90,19 @@ def drive(uc, syms, ic=None, extra_hook=None):
         extra_hook("stop", None)
 
 
-def run_icount(secs, syms, out):
-    uc = machine(secs)
-    ic = icount.attach(uc, 0x10000, 0x22000, spec_for(syms), bias=0)
-    drive(uc, syms, ic)
+def run_icount(fx, out):
+    m = fx.machine()
+    ic = m.attach_icount(spec_for(fx.syms), fx.base)
+    drive(m.uc, fx.abs, ic)
     ic.write(out)
     return ic
 
 
-def reference(secs, syms):
+def reference(fx):
     """per (interval, thread) counters by single-stepping every instruction"""
-    uc = machine(secs)
+    uc = fx.machine().uc
     md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
-    spec = spec_for(syms)
+    spec = spec_for(fx.syms)
     state = {"iv": 0, "tid": 1}
     acc = {}
     names = ["total", "ldar_stlr", "ldapr", "ldaxr_stlxr", "dmb", "dsb", "isb", "A", "B", "funcb", "funca2"]
@@ -196,16 +120,19 @@ def reference(secs, syms):
         if mn in ("dmb", "dsb", "isb"):
             c[mn] += 1
         for r in ("A", "B"):
-            if any(lo <= addr < hi for lo, hi in spec["ranges"][r]):
+            if any(lo + fx.base <= addr < hi + fx.base for lo, hi in spec["ranges"][r]):
                 c[r] += 1
+        for e in ("funcb", "funca2"):
+            if addr == fx.abs[e]:
+                c[e] += 1
 
     def ev(kind, v):
         if kind == "mark":
             state["iv"] += 1
         elif kind == "thread":
             state["tid"] = v
-    uc.hook_add(UC_HOOK_CODE, code, begin=0x10000, end=0x21fff)
-    drive(uc, syms, None, ev)
+    uc.hook_add(UC_HOOK_CODE, code, begin=fx.abs["start"], end=fx.abs["funcb_end"] - 1)
+    drive(uc, fx.abs, None, ev)
     return acc
 
 
@@ -292,12 +219,11 @@ def frame_cases():
 def main():
     frame_cases()
     with tempfile.TemporaryDirectory() as d:
-        elf, secs, syms = build(d)
         out1, out2 = os.path.join(d, "o1.json"), os.path.join(d, "o2.json")
-        run_icount(secs, syms, out1)
-        run_icount(secs, syms, out2)
+        run_icount(fx, out1)
+        run_icount(fx, out2)
         rep = json.load(open(out1))
-        ref = reference(secs, syms)
+        ref = reference(fx)
         got = flat(rep)
 
         # (1) total
@@ -311,14 +237,16 @@ def main():
         tot = rep["totals"]["all"]
         want = {"ldar_stlr": 4 * 8 + 9, "ldapr": 0, "ldaxr_stlxr": 4 * 2, "dmb": 4 * 2 + 9, "dsb": 4, "isb": 4}
         bad2 = {c: (tot[c], want[c]) for c in cls if tot[c] != want[c]}
-        words = assemble_cases(d)
-        bad3 = [(m, icount.classify(w), e) for (m, e), w in zip(CLASS_CASES, words)
-                if ",".join(icount.classify(w)) != e]
+        rows = encoding_rows(fx)
+        bad3 = [(hex(a), icount.classify(w), icount.OPCODE_NAMES) for a, w, mask in rows
+                if sum(icount.CLASS_BITS[n] for n in icount.classify(w)) != mask]
+        if len(rows) < 30:
+            bad3.append(("table", len(rows)))
         case("2 opcode class counts == reference == analytic; encoding masks vs assembled mnemonics",
              not bad and not bad2 and not bad3, f"{bad} {bad2} {bad3}")
 
         # (3) ranges and entries
-        calls_b, calls_a2 = 5 + 1 + 3, 1 + 3
+        calls_b, calls_a2 = 5 + 1 + 3, 1 + 3   # the call counts of the program text in icfix.s
         bad = {k: (got[k][r], ref[k][r]) for k in ref for r in ("A", "B") if got[k][r] != ref[k][r]}
         entries_ok = tot["entries"] == {"funca2": calls_a2, "funcb": calls_b}
         b_ok = tot["ranges"]["B"] == 4 * calls_b and tot["ranges"]["A"] + tot["ranges"]["B"] == tot["total"]
@@ -342,57 +270,57 @@ def main():
         case("5 two runs give byte-identical OUT.json", open(out1, "rb").read() == open(out2, "rb").read())
 
         # (6) spec subcommand
-        case("6 spec resolves a section and symbols, errors on a missing one", spec_cases(d, elf, syms))
+        case("6 spec resolves a section and symbols, errors on a missing one", spec_cases(d, fx))
 
-        bench(secs, syms)
+        bench(fx)
     return 0 if all(results) else 1
 
 
-def assemble_cases(d):
-    s = os.path.join(d, "c.s")
-    open(s, "w").write(ARCH + "".join(f"{m}\n" for m, _ in CLASS_CASES))
-    sh(AS, s, "-o", os.path.join(d, "c.o"))
-    sh(OBJCOPY, "-O", "binary", "--only-section=.text", os.path.join(d, "c.o"), os.path.join(d, "c.bin"))
-    b = open(os.path.join(d, "c.bin"), "rb").read()
-    assert len(b) == 4 * len(CLASS_CASES)
-    return [int.from_bytes(b[i:i + 4], "little") for i in range(0, len(b), 4)]
+def encoding_rows(fx):
+    """[(instruction address, instruction word, expected class mask)] of the image's table icenc_table: {offset from icenc_begin, mask} per row"""
+    t = bootlayout.data_symbol(fx.raw, "icenc_table")
+    if len(t) % 8 or len(t) != fx.syms["icenc_table_end"] - fx.syms["icenc_table"]:
+        raise RuntimeError("icenc_table is %d bytes" % len(t))
+    uc = fx.machine().uc
+    out = []
+    for i in range(0, len(t), 8):
+        off, mask = struct.unpack_from("<II", t, i)
+        a = fx.abs["icenc_begin"] + off
+        out.append((a, int.from_bytes(bytes(uc.mem_read(a, 4)), "little"), mask))
+    if fx.abs["icenc_begin"] + 4 * len(out) != fx.abs["icenc_end"]:
+        raise RuntimeError("icenc rows are not the whole of icenc_begin..icenc_end")
+    return out
 
 
-def spec_cases(d, elf, syms):
+def spec_cases(d, fx):
     ic = os.path.join(VERIFY, "icount.py")
+    S = fx.syms
     nf = os.path.join(d, "names.txt")
-    open(nf, "w").write("funcb\nfunca2\n")
+    open(nf, "w").write("icfx_funcb\nicfx_funca2\n")
     out = os.path.join(d, "spec.json")
-    base = [sys.executable, "-I", ic, "spec", "--elf", elf]
-    r = subprocess.run(base + ["--range", "B=section:.textb", "--range", "F=symrange:funca2,bench",
+    base = [sys.executable, "-I", ic, "spec", "--elf", fx.path]
+    r = subprocess.run(base + ["--range", "T=section:.text", "--range", "F=symrange:icfx_funca2,icfx_bench",
                                "--entries", "fn=symfile:" + nf, "-o", out], capture_output=True, text=True)
     if r.returncode != 0:
         return False
     sp = json.load(open(out))
-    ok = sp["ranges"]["B"] == [[0x20000, 0x20000 + len(secs_b(d, elf))]]
-    ok &= sp["ranges"]["F"] == [[syms["funca2"], syms["bench"]]]
-    ok &= sp["entries"]["fn"] == sorted([syms["funcb"], syms["funca2"]])
-    open(nf, "w").write("funcb\nnope\n")
+    ok = sp["ranges"]["T"] == [[a, a + n] for a, n in fx.secs[".text"]]
+    ok &= sp["ranges"]["F"] == [[S["funca2"], S["bench"]]]
+    ok &= sp["entries"]["fn"] == sorted([S["funcb"], S["funca2"]])
+    open(nf, "w").write("icfx_funcb\nnope\n")
     r1 = subprocess.run(base + ["--entries", "fn=symfile:" + nf, "-o", out + "1"], capture_output=True, text=True)
     r2 = subprocess.run(base + ["--range", "X=section:.nosuch", "-o", out + "2"], capture_output=True, text=True)
-    r3 = subprocess.run(base + ["--range", "X=symrange:funca2,nope", "-o", out + "3"], capture_output=True, text=True)
+    r3 = subprocess.run(base + ["--range", "X=symrange:icfx_funca2,nope", "-o", out + "3"], capture_output=True, text=True)
     return ok and r1.returncode == 1 and r2.returncode == 1 and r3.returncode == 1 and not os.path.exists(out + "1")
 
 
-def secs_b(d, elf):
-    b = os.path.join(d, "sb.bin")
-    sh(OBJCOPY, "-O", "binary", "--only-section=.textb", elf, b)
-    return open(b, "rb").read()
-
-
-def bench(secs, syms):
+def bench(fx):
     def timed(with_ic):
-        uc = machine(secs)
-        uc.reg_write(__import__("unicorn.arm64_const", fromlist=["x"]).UC_ARM64_REG_X0, 0x30000)
+        m = fx.machine()
         if with_ic:
-            icount.attach(uc, 0x10000, 0x22000, spec_for(syms))
+            m.attach_icount(spec_for(fx.syms), fx.base)
         t = time.perf_counter()
-        uc.emu_start(syms["bench"], syms["benchend"])
+        m.uc.emu_start(fx.abs["bench"], fx.abs["benchend"])
         return time.perf_counter() - t
     a, b = min(timed(False) for _ in range(3)), min(timed(True) for _ in range(3))
     print(f"info slowdown on the 3-instruction loop (50000 blocks): {b / a:.1f}x ({a * 1e3:.1f} ms -> {b * 1e3:.1f} ms)")

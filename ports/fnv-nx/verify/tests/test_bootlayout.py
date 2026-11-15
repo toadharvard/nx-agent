@@ -140,6 +140,25 @@ def main():
                              capture_output=True, text=True)
         case("cli: --keys mandatory", pr2.returncode == 2, pr2.stderr)
         case("cli: LayoutError exits 1", pr.returncode == 1 and "heap" in pr.stderr, pr.stderr)
+    # symbol and section readers of the file itself (an assembled and linked fixture: the assembler's own symbol table is the reference)
+    with tempfile.TemporaryDirectory() as d:
+        open(d + "/a.s", "w").write(".data\n.global fnvboot_mode\n.type fnvboot_mode,%object\n.size fnvboot_mode,4\nfnvboot_mode: .word 0\n"
+                                    ".global tab\n.type tab,%object\n.size tab,16\ntab: .word 5,0,6,0\n.bss\n.global zz\n.type zz,%object\n.size zz,4\nzz: .space 4\n"
+                                    ".text\n.global _start\n_start: ret\n")
+        subprocess.run(["aarch64-linux-gnu-as", d + "/a.s", "-o", d + "/a.o"], check=True)
+        subprocess.run(["aarch64-linux-gnu-ld", d + "/a.o", "-o", d + "/a.elf"], check=True)
+        raw = open(d + "/a.elf", "rb").read()
+        secs, syms = bootlayout.section_ranges(raw), bootlayout.defined_symbols(raw)
+        case("readers: sections of the file by name, defined symbols with values", {".text", ".data", ".bss"} <= set(secs) and len(syms["tab"]) == 1
+             and syms["_start"] == [secs[".text"][0][0]], (sorted(secs), sorted(syms)))
+        bad = []
+        try:
+            bootlayout.data_symbol(raw, "zz")
+            bad.append("bss contents")
+        except bootlayout.LayoutError:
+            pass
+        case("data_symbol: initialised contents read back, a .bss symbol is refused", bootlayout.data_symbol(raw, "tab") == struct.pack("<4I", 5, 0, 6, 0)
+             and bootlayout.data_symbol(raw, "fnvboot_mode") == struct.pack("<I", 0) and not bad, bad)
     print("%d failed" % len(FAILED) if FAILED else "all %d passed" % N[0])
     return 1 if FAILED else 0
 

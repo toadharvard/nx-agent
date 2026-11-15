@@ -10,10 +10,10 @@ Host slots whose effect is not modelled (the observable contract is kept; see HO
  thread_free, thread_set_priority / thread_set_cpu (recorded in .placement as ideal and mask, checked as hostapi.h says; THREAD_CPU answers the ideal),
  wall_time_us (fixed epoch + virtual ns), random64 (deterministic splitmix64, seed 0),
  memory_info (4 GiB / 3 GiB), audio_open / audio_submit / audio_close (frames counted, samples
- dropped, submit sleeps the period in virtual time), pad_read (never connected, zeros), pad_vibrate, input_poll
- (no events), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
+ dropped, submit sleeps the period in virtual time), pad_read / pad_vibrate / input_poll (the declared device states of a scenario, bootinput.py; none: nothing attached), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
  .messages, returns 0: the dialog is closed at once). The rest of module 11 (thread_activity, vm_*) is the machine's.
 """
+import errno
 import os
 import stat as S
 import struct
@@ -21,13 +21,15 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import bootinput  # noqa: E402
 import bootmachine  # noqa: E402
 import bootpath  # noqa: E402
 
 U64 = (1 << 64) - 1
 WALL_EPOCH_US = 1_700_000_000_000_000
-INT64_MAX = (1 << 63) - 1
-HE_NOTFOUND, HE_BADINPUT, HE_ADDR, HE_RANGE = bootmachine.FNVNX_HE_NOTFOUND, bootmachine.LIBNX_BAD_INPUT, 0xCC01, 0xD401
+INT64_MAX = bootmachine.INT64_MAX
+HE_NOTFOUND, HE_BADINPUT, HE_ADDR, HE_RANGE = (bootmachine.FNVNX_HE_NOTFOUND, bootmachine.LIBNX_BAD_INPUT, bootmachine.ERR_INVALID_ADDRESS,
+                                               bootmachine.ERR_INVALID_CURRENT_MEMORY)
 
 
 def neg(e):
@@ -35,10 +37,12 @@ def neg(e):
 
 
 class Services:
-    def __init__(self, root, game=None):
+    def __init__(self, root, game=None, scenario=None, watch_reads=False, read_only=()):
         self.m = None
-        self.dp = bootpath.BootPath(root, game)
+        self.input = bootinput.InputModel(scenario, watch_reads)   # R-INPUT: the declared device states, read as host_v3.inc does
+        self.dp = bootpath.BootPath(root, game, read_only)
         self.debug, self.fds = [], {}
+        self.ro_fds, self.declared_faults = set(), []   # fds opened below a read-only mount; refused writes (a run failure, see _refuse)
         self.audio_period, self.audio_frames, self.boosts, self.placement, self.messages = 0, 0, [], {}, []
         self.rng = 0
 
@@ -58,7 +62,16 @@ class Services:
 
     def path(self, addr):
         self.last_sd = self.cstr(addr)
+        self.last_ro = self.dp.read_only(self.last_sd)
         return self.dp.resolve(self.last_sd)
+
+    def _refuse(self, call, sd):
+        """a create/change/remove under a read-only declared input. L5 declares the mount read-only (L4 item 17); a call is recorded as a
+        fault (OUT.json declared_input_faults) and fails the verdict (boot.py), and answers EACCES, which the platform maps to
+        ERROR_ACCESS_DENIED (platform/win32/handles.cpp:208 w32_os_error: OS_EACCES -> ERROR_ACCESS_DENIED; os.h:160 OS_EACCES 13)"""
+        self.declared_faults.append({"kind": "declared-input-write", "call": call, "sd": sd, "t_ns": self.m.clock.now_ns(), "tid": self.m.tid()})
+        self.dp.fault(call, sd, errno.EACCES)
+        return neg(errno.EACCES)
 
     # -- v1
     def h_output_debug_string(self, s, n, *_):
@@ -87,7 +100,7 @@ class Services:
         thread_create (cur None): FNVNX_CPU_SPEC(ideal, mask) only, ideal in mask, mask within the application cores. thread_set_cpu
         (cur = (ideal, mask)): additionally a plain core 0..63 (that core only); FNVNX_CPU_KEEP ideal and mask 0 keep the current value; the
         ideal core joins the mask; the result's mask must lie within the application cores."""
-        app = self.m.app_cores
+        app = bootmachine.APP_CORES
         if spec >> 63 == 0:   # not a spec: one core
             if cur is None or spec > 63 or spec >= 32 or not app >> spec & 1:
                 return None
@@ -217,11 +230,15 @@ class Services:
         fl = os.O_RDWR if flags & 3 == 3 else os.O_WRONLY if flags & 2 else os.O_RDONLY
         fl |= (os.O_CREAT if flags & 4 else 0) | (os.O_EXCL if flags & 8 else 0) | (os.O_TRUNC if flags & 0x10 else 0)
         fl |= os.O_APPEND if flags & 0x20 else 0
-        path, sd = self.path(p), self.last_sd
+        path, sd, ro = self.path(p), self.last_sd, self.last_ro
+        if self.last_ro and fl & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
+            return self._refuse("open", sd)
 
         def op():
             fd = os.open(path, fl, 0o666)
             self.fds[fd] = path
+            if ro:
+                self.ro_fds.add(fd)
             if fl & os.O_CREAT:
                 self.dp.changed()
             return fd
@@ -241,15 +258,21 @@ class Services:
         return self._rd("pread", fd, b, n, off)
 
     def h_fs_write(self, fd, b, n, *_):
+        if fd in self.ro_fds:
+            return self._refuse("write", self.fds.get(fd))
         return self.fs(lambda: os.write(fd, bytes(self.m.uc.mem_read(b, n))), "write", self.fds.get(fd))
 
     def h_fs_pwrite(self, fd, b, n, off, *_):
+        if fd in self.ro_fds:
+            return self._refuse("pwrite", self.fds.get(fd))
         return self.fs(lambda: os.pwrite(fd, bytes(self.m.uc.mem_read(b, n)), off), "pwrite", self.fds.get(fd))
 
     def h_fs_seek(self, fd, off, whence, *_):
         return self.fs(lambda: os.lseek(fd, struct.unpack("<q", struct.pack("<Q", off))[0], whence), "seek")
 
     def h_fs_truncate(self, fd, size, *_):
+        if fd in self.ro_fds:
+            return self._refuse("truncate", self.fds.get(fd))
         return self.fs(lambda: os.ftruncate(fd, size), "truncate")
 
     def h_fs_sync(self, fd, *_):
@@ -265,6 +288,7 @@ class Services:
 
     def h_fs_close(self, fd, *_):
         self.fds.pop(fd, None)
+        self.ro_fds.discard(fd)
         return self.fs(lambda: os.close(fd), "close")
 
     def h_fs_stat(self, p, out, *_):
@@ -278,19 +302,27 @@ class Services:
 
     def h_fs_mkdir(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._refuse("mkdir", self.last_sd)
         return self._mutate(lambda: os.mkdir(path), "mkdir", self.last_sd)
 
     def h_fs_rmdir(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._refuse("rmdir", self.last_sd)
         return self._mutate(lambda: os.rmdir(path), "rmdir", self.last_sd)
 
     def h_fs_remove(self, p, *_):
         path = self.path(p)
+        if self.last_ro:
+            return self._refuse("remove", self.last_sd)
         return self._mutate(lambda: os.remove(path), "remove", self.last_sd)
 
     def h_fs_rename(self, a, b, *_):
-        pa, sa = self.path(a), self.last_sd
+        pa, sa, ra = self.path(a), self.last_sd, self.last_ro
         pb = self.path(b)
+        if ra or self.last_ro:
+            return self._refuse("rename", sa if ra else self.last_sd)
         return self._mutate(lambda: os.replace(pa, pb), "rename", sa)
 
     def h_fs_dir_open(self, p, *_):
@@ -335,16 +367,16 @@ class Services:
         return 0
 
     def h_pad_read(self, i, out, *_):
-        """index 0..3: not connected (0, zeros written); index > 3: 0, nothing written"""
-        if i <= 3:
-            self.m.uc.mem_write(out, bytes(32))
-        return 0
+        """index 0..3: the declared pad state (not connected by default: 0, zeros written); index > 3: 0, nothing written (bootinput)"""
+        return self.input.pad_read(self.m, i, out)
 
-    def h_pad_vibrate(self, *_):
-        return 0
+    def h_pad_vibrate(self, i, lo, hi, *_):
+        """recorded as an event pad-vibrate (index <= 3), returns 0 (bootinput)"""
+        return self.input.pad_vibrate(self.m, i, lo, hi)
 
-    def h_input_poll(self, *_):
-        return 0
+    def h_input_poll(self, out, cap, *_):
+        """host_v3.inc's input_poll over the declared device states (bootinput)"""
+        return self.input.input_poll(self.m, out, cap)
 
     def h_map_fixed(self, addr, size, src, *_):
         return self.m.map_fixed(addr, size, src)

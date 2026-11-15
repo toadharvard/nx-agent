@@ -9,6 +9,8 @@ import tempfile
 
 VERIFY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, VERIFY)
+import bootdecl  # noqa: E402
+import hostabirec  # noqa: E402
 import bootpath  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="bp-")
@@ -66,16 +68,18 @@ bp.changed()
 case("fresh listing after changed()", bp.resolve("/Dup/zz") == g)
 
 # --game mount: both prefixes, precedence over the root, port names stay on the card
+OLD_PARTS = ("fnvnx", "game")
 root, game = fresh("b"), fresh("gm")
 gf = touch(game, "Data", "FalloutNV.esm")
 touch(root, "switch", "fnv", "Data", "FalloutNV.esm")      # shadowed by the mount
-touch(root, "fnvnx", "game", "Data", "x")
+touch(root, *OLD_PARTS, "Data", "x")   # an ordinary SD file
 bp = bootpath.BootPath(root, game)
 case("mount dirs made on the card", all(os.path.isdir(os.path.join(root, *m.split("/")))
                                         for m in bootpath.GAME_MOUNTS))
 case("game wins at switch/fnv", bp.resolve("sdmc:/switch/fnv/Data/FalloutNV.esm") == gf)
-case("game wins at fnvnx/game, case folded", bp.resolve("sdmc:/FNVNX/Game/data/falloutnv.ESM") == gf,
-     bp.resolve("sdmc:/FNVNX/Game/data/falloutnv.ESM"))
+OLD = "/".join(("fnvnx", "game"))   # a path that was once a second mount of the game: now an ordinary SD path
+case("a path under the former second mount is an ordinary SD path, not the game", bp.resolve("sdmc:/%s/Data/x" % OLD.upper()) ==
+     os.path.join(root, *OLD_PARTS, "Data", "x"), bp.resolve("sdmc:/%s/Data/x" % OLD.upper()))
 case("mount point itself", bp.resolve("/switch/fnv") == game)
 case("port entry stays on the card", bp.resolve("/switch/fnv/host.log") == os.path.join(root, "switch", "fnv", "host.log"))
 case("port prefix drive_* stays on the card", bp.resolve("/switch/fnv/Drive_C/x") ==
@@ -84,13 +88,14 @@ case("outside the mounts: the card", bp.resolve("/other/y") == os.path.join(root
 case(".. cannot leave the game mount into the card", bp.resolve("/switch/fnv/../../etc/passwd") ==
      os.path.join(root, "etc", "passwd"))
 
-# no --game: install detection
+# no --game: the game directory is root/FNVNX_SD_DIR, whatever it holds
 root = fresh("c")
 touch(root, "switch", "fnv", "FalloutNV.exe")
-case("install on the card: game is switch/fnv", bootpath.BootPath(root).game == os.path.join(root, "switch", "fnv"))
+GD = hostabirec.record().string("FNVNX_SD_DIR").split(":/", 1)[1].strip("/")
+case("no game given: bp.game == <root>/FNVNX_SD_DIR (name from the header record)", bootpath.BootPath(root).game == os.path.join(root, *GD.split("/")))
 root = fresh("d")
 touch(root, "switch", "fnv", "host.log")
-case("only port entries: game is fnvnx/game", bootpath.BootPath(root).game == os.path.join(root, "fnvnx", "game"))
+case("only port entries: the same directory", bootpath.BootPath(root).game == os.path.join(root, *GD.split("/")))
 
 # faults
 bp = bootpath.BootPath(fresh("e"))
