@@ -26,6 +26,7 @@ PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-co
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
 
+_INSMEMO = {}; _RESMEMO = {}
 def _run(arg, XEX, REF=frozenset()):
     path, mrow = pemod.locate(arg)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2') + '/' + name; os.makedirs(outd, exist_ok=True)
@@ -117,14 +118,21 @@ def _run(arg, XEX, REF=frozenset()):
     tailsrc = {}; jt_red = {}; jt_ok = {}; svals = sorted((u32(r), r) for r in relocs); vrefs = {}
     for r, v in rvals: vrefs.setdefault(v, []).append(r)
     X_.jtab = jtab; X_.jtab_red = jt_red; X_.jtab_ok = jt_ok
+    pm = {}; pm_n = [0]
     def jt_pass():
         """jump-table edges (tools/jtab.py): every `jmp [T + r*4]` site is evaluated on the CURRENT decode (a guard chain needs unique predecessors, so the evaluation is repeated until the entry set is closed);
         a site that resolves gets its table words as edges (the descent follows them), a site that does not is red with the reason."""
-        pm = {}
-        for a, (sz, mn, ft, fall, tg) in dec.items():
+        import itertools                       # the predecessor map is kept across passes and extended by the entries decoded since the last pass (dec only grows; a resolved table jump gets its table edges)
+        for a, (sz, mn, ft, fall, tg) in itertools.islice(dec.items(), pm_n[0], None):
             for t in tg: pm.setdefault(t, set()).add(a)
             if fall: pm.setdefault(a + sz, set()).add(a)
-        def ins_at(a): return next(md.disasm(text[a - T0:a - T0 + 15], a, 1), None) if T0 <= a < T1 else None
+        pm_n[0] = len(dec)
+        for a in jt_ok:
+            for t in dec[a][4]: pm.setdefault(t, set()).add(a)
+        def ins_at(a):          # decoded once per address for the whole run and across the fixed-point rounds of one image (the text bytes are the same)
+            k = (path, a)
+            if k not in _INSMEMO: _INSMEMO[k] = next(md.disasm(text[a - T0:a - T0 + 15], a, 1), None) if T0 <= a < T1 else None
+            return _INSMEMO[k]
         def u8(a):
             if any(v <= a < v + z for v, z in M.wr): return None       # a byte table is read only from a read-only section (a writable one is not a fact)
             try: return u32(a) & 0xff
@@ -136,9 +144,22 @@ def _run(arg, XEX, REF=frozenset()):
             return any(r not in ex for r in vrefs.get(x, ()))
         n = 0
         for a in sorted(jtab):
-            tg, why = JT.resolve(a, dec, ins_at, lambda x: pm.get(x, ()), seeded, rset, u32, u8, intext, TN // 4)
+            # a site is resolved on the decode WITHOUT its own table edges (its result must not depend on what its own resolution adds: otherwise the evaluation oscillates between two tables when the targets lead back to the site)
+            cone = {a}; st_ = [a]                      # the cone of JT.resolve (its first step, repeated here): the result is a function of the cone, dec[x] and seeded(x) for x in it, and constants of the image
+            while st_:
+                x = st_.pop()
+                if seeded(x): continue
+                for p in pm.get(x, ()):
+                    if p != a and p not in cone: cone.add(p); st_.append(p)
+            sig = (path, a, tuple(sorted((x, dec[x], seeded(x)) for x in cone if x in dec)), len(cone))
+            if sig not in _RESMEMO: _RESMEMO[sig] = JT.resolve(a, dec, ins_at, lambda x, a=a: [p for p in pm.get(x, ()) if p != a], seeded, rset, u32, u8, intext, TN // 4)
+            tg, why = _RESMEMO[sig]
             if tg is None: jt_red[a] = why; continue
             jt_red.pop(a, None)
+            if a in jt_ok and jt_ok[a] != tg:      # monotone: a site's table only grows (each result is proved on a real decode, so the union of two results is a set of real edges; the evaluation can otherwise oscillate between two decodes)
+                old = jt_ok[a]; pairs = sorted(set(zip(old.addrs, old)) | set(zip(tg.addrs, tg)))
+                if len(pairs) == len(old.addrs): continue
+                m = JT.Tg(t for _, t in pairs); m.addrs = tuple(x for x, _ in pairs); m.base = old.base; m.dsite = old.dsite; m.lo = min(old.lo, tg.lo); m.hi = max(old.hi, tg.hi); tg = m
             if a not in jt_ok or jt_ok[a] != tg:
                 jt_ok[a] = tg; sz, mn, ft, fall, old = dec[a]; dec[a] = (sz, mn, ft, False, tuple(tg)); jins.append(a); n += 1
                 for t in tg: descend(t)
@@ -192,14 +213,19 @@ def _run(arg, XEX, REF=frozenset()):
                 elif m == 'jecxz' and not lo <= (o[0].imm & M32) < hi: jx.add(a_); ts.setdefault(o[0].imm & M32, a_)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
                 if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and a_ + g.size >= hi) and a_ + g.size not in ins and a_ + g.size not in bad:      # explore's own stop rule: the path falls out of what was decoded
                     ts.setdefault(a_ + g.size, a_); ft.add(a_ + g.size)         # a fall-through is a control transfer to its successor, like `jmp nxt` (f_flow.jump_out)
-            lcache[k] = (cs, ts, jx, ft, residue.body_facts(ins, tabs, None, intext, imports), {x: (g.size, g.operands[0].imm & M32 if g.mnemonic.split(' ')[-1] == 'call' and g.operands[0].type == X.X86_OP_IMM else None, g.mnemonic.split(' ')[-1] not in ('jmp', 'ret', 'retf', 'iret', 'iretd', 'hlt', 'ud2')) for x, g in ins.items()})
+            lcache[k] = (cs, ts, jx, ft, residue.body_facts(ins, tabs, None, intext, imports), frozenset(ins))
         return lcache[k]
+    def lift_detail(e, ext):        # the lifter's own flow of one entry with sizes, call targets and fall-through flags (only for the rare entry whose flow leaves its ranges)
+        lo, hi = e, e + ext; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, hi - lo + 16), e, (), hi)
+        return {x: (g.size, g.operands[0].imm & M32 if g.mnemonic.split(' ')[-1] == 'call' and g.operands[0].type == X.X86_OP_IMM else None, g.mnemonic.split(' ')[-1] not in ('jmp', 'ret', 'retf', 'iret', 'iretd', 'hlt', 'ud2')) for x, g in ins.items()}
     def span(e, xs):        # the lifter range of entry e is [e, e + span): the smallest interval from e that holds every instruction e reaches (a reached instruction below e is outside: a jump to it leaves the range)
         return residue.span(e, ((a, dec[a][0]) for a in xs))      # the one function (residue.span), shared with the exe producer
+    _it = [0]
     while True:
         while True:
             while queue: descend(queue.popleft())
-            ch = tail_pass() + jt_pass() + eh.scan()
+            _a, _b, _c = tail_pass(), jt_pass(), eh.scan(); ch = _a + _b + _c; _it[0] += 1
+            if _it[0] % 25 == 0: print('  pass %d: dec %d, entries %d, queue %d, changed %d (tail %d, jtab %d, eh %d)' % (_it[0], len(dec), len(ent), len(queue), ch, _a, _b, _c), file=sys.stderr, flush=True)
             if not queue and not ch: break
         E = es(); NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent)); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
         rounds += 1; n_before = n_before or len(E); viol = {}; outside = {}; jxs = set(); ftall = set()
@@ -294,7 +320,7 @@ def _run(arg, XEX, REF=frozenset()):
     RI = {}; LO = {}; LOA = {}; LOT = {}                                         # LO: instructions the lifter's own flow reaches that lie outside the entry's ranges (invariant: 0)
     # retn.tsv: how each entry returns (residue.retn_rows)
     for e in E:
-        cs_, ts_, jx_, ft_, rf_, ia_ = lc_targets(e, span(e, exts[e])); LO[e], LOA[e], LOT[e] = residue.lifter_outside(ia_, exts[e], NR)
+        cs_, ts_, jx_, ft_, rf_, ia_ = lc_targets(e, span(e, exts[e])); LO[e], LOA[e], LOT[e] = (0, [], 0) if ia_ <= set(exts[e]) else residue.lifter_outside(lift_detail(e, span(e, exts[e])), exts[e], NR)
         RI[e] = dict(rets=rf_['rets'], far=rf_['far'], open=rf_['open'], tails={t for t in ts_ if t in ent}, outside=any(t not in ent for t in ts_), noreturn=e in NR)
     rc = residue.write_retn(outd, hd, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
     print('invariant ranges: instructions the lifter reaches outside the entry ranges, other than the dead tail after a call to a never-returning entry: %d (entries %d of %d); dead tails after NORETURN calls: %d instructions in %d entries' % (sum(LO.values()), sum(1 for v in LO.values() if v), len(LO), sum(LOT.values()), sum(1 for v in LOT.values() if v)))
@@ -461,7 +487,7 @@ def run(arg):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             code, Xo, Ro, PMF, nE, nC, nh = _run(arg, X, R)
-        refinfo.update(Ro)
+        refinfo.update(Ro); print('round %d: X %d R %d (+%d refused, %d displacement-only sites)' % (k, len(X), len(R), len(set(Ro) - R), len(Xo)), file=sys.stderr, flush=True)
         if frozenset(Xo) == X and set(Ro) <= R:
             sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
             print('reloc-consistency: entries %d (candidates %d); refused (unproven, decoding has a relocation-misfit) %d; proven entries with a misfit %d%s' % (nE, nC, len(R), len(PMF), ' RED: ' + ' '.join('%08x' % a for a in PMF[:8]) if PMF else ''))

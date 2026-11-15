@@ -463,7 +463,7 @@ class EH(Flow):
     def scan_throw(s):
         """every ThrowInfo is the second argument of a call of the thrower (R1)."""
         X = s.X
-        if not s.throwers: s.throwers = s.find_throwers()
+        if not s.throwers and getattr(s, '_thr_n', -1) != len(X.insns): s.throwers = s.find_throwers(); s._thr_n = len(X.insns)      # the search reads the decode: repeated only when the decode grew
         for site, off in sorted(s.throw_sites().items()):
             if site in s.tsites: continue
             cs, kind, why = s.resolve(site, off); s.tsites[site] = (cs, kind, why, off)

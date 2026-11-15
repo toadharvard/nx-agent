@@ -396,6 +396,10 @@ def cl_range(a):
     p = parent.get(a)
     if p is not None and p in entries: return p, p + fsize[p]
     return a, a + span_of(a)
+def lift_detail(a, kids):        # the lifter's own flow of one entry with sizes, call targets and fall-through flags (only for the rare entry whose flow leaves its ranges)
+    lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
+    ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, hi - lo + 16), a, own if a == lo else (), hi)
+    return {x: (g.size, g.operands[0].imm & 0xffffffff if g.mnemonic.split(' ')[-1] == 'call' and g.operands[0].type == X.X86_OP_IMM else None, g.mnemonic.split(' ')[-1] not in ('jmp', 'ret', 'retf', 'iret', 'iretd', 'hlt', 'ud2')) for x, g in ins.items()}
 def cl_targets(a, kids):
     lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
     key = (lo, hi, a, own)
@@ -410,7 +414,7 @@ def cl_targets(a, kids):
             elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x); ts.add(o[0].imm & 0xffffffff)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
             if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and x + g.size >= hi) and x + g.size not in ins and x + g.size not in bad:       # explore's own stop rule: a fall-out is a control transfer to the successor (f_flow.jump_out)
                 ts.add(x + g.size); cl_ft.add((a, x + g.size))
-        cl_cache[key] = (cs, ts, jx, residue.body_facts(ins, tabs, None, intext, imports), {x: (g.size, g.operands[0].imm & 0xffffffff if g.mnemonic.split(' ')[-1] == 'call' and g.operands[0].type == X.X86_OP_IMM else None, g.mnemonic.split(' ')[-1] not in ('jmp', 'ret', 'retf', 'iret', 'iretd', 'hlt', 'ud2')) for x, g in ins.items()})
+        cl_cache[key] = (cs, ts, jx, residue.body_facts(ins, tabs, None, intext, imports), frozenset(ins))
     return cl_cache[key]
 while True:
     kids = {}
@@ -463,7 +467,7 @@ kids = {}
 for x, q in parent.items(): kids.setdefault(q, []).append(x)
 RI = {}; LOX = {}; LOT = {}; NRS = {a for a, _ in NRR}                                      # retn.tsv: how each entry returns (residue.retn_rows)
 for a in sorted(entries):
-    cs_, ts_, jx_, rf_, ia_ = cl_targets(a, kids); LOX[a], _, LOT[a] = residue.lifter_outside(ia_, scx[a] if a in scx else extent_insns(a), NRS)
+    cs_, ts_, jx_, rf_, ia_ = cl_targets(a, kids); _xs = scx[a] if a in scx else extent_insns(a); LOX[a], _, LOT[a] = (0, [], 0) if ia_ <= set(_xs) else residue.lifter_outside(lift_detail(a, kids), _xs, NRS)
     RI[a] = dict(rets=rf_['rets'], far=rf_['far'], open=rf_['open'], tails={t for t in ts_ if t in entries}, outside=any(t not in entries for t in ts_), noreturn=a in NRS)
 os.makedirs(os.path.dirname(OUT), exist_ok=True); HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % base
 open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; decomp rows: the declared function size; the bytes reached: ranges.tsv)\n' + '\n'.join(rows) + '\n')
