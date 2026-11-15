@@ -66,8 +66,10 @@ def _plugin_cxx():
 
 PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "variants", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "errno_accessor", "run"}
-VARIANT_KEYS = {"compiler", "flags", "link"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system)
+        "plugins", "variants", "profile", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "errno_accessor", "run"}
+VARIANT_KEYS = {"compiler", "flags", "link", "flags_add", "defines_add"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system) and its two deltas
+VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of the root (RECIPE.md, "Profiles")
+PROFILES = ("guest", "host")
 PLUGIN_FIXED = {"source": "PLUGIN_SOURCES", "inputs": "PLUGIN_INPUTS", "args": "PLUGIN_ARGS"}   # what recipe.py fixes for a plugin: a root entry names only the plugin
 GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -461,13 +463,70 @@ def entry_of(roots, spec):
     return ent
 
 
+def profile_fields(profile, pin):
+    """The fields of the PROFILE ("guest" | "host") of a root: {compiler, plugins, external}, generated from the pins and never written in a build.json.
+    guest: the game's compiler (the external and drivers of verify/guest_compiler.json, PIN), the full plugin set of PLUGIN_SOURCES in load order
+    (plugin_decls takes the arguments from recipe.py alone), the compiler's external and the runtime's external (pin `runtime`).
+    host: the distribution compiler pinned by env.json (PLUGIN_CXX's package), no plugin, no external. -> (fields, errors)."""
+    if profile == "host":
+        return {"compiler": {"cc": PLUGIN_CXX.replace("g++", "gcc"), "cxx": PLUGIN_CXX}, "plugins": [], "external": []}, []
+    if profile != "guest":
+        return None, ["profile %r is unknown (%s)" % (profile, " | ".join(PROFILES))]
+    if not (isinstance(pin, dict) and isinstance(pin.get("external"), dict) and isinstance(pin.get("runtime"), dict)):
+        return None, ["profile guest: %s is missing or has no external and runtime" % GUEST_PIN]
+    ex = pin["external"]
+    return {"compiler": {"external": ex["name"], "cc": pin["cc"], "cxx": pin["cxx"]}, "plugins": [{"name": n} for n in PLUGIN_SOURCES],
+            "external": [dict(ex), dict(pin["runtime"])]}, []
+
+
+def expand_profile(rec, pin):
+    """REC with its `profile` expanded: the profile's fields (profile_fields) in place of the keys the root does not write. A root that names a
+    profile writes none of `compiler` and `plugins` (restating a profile field is red); its `external` lists only the externals the profile does not
+    carry, which follow the profile's own in the expanded list. The expanded recipe has no `profile` key, so expansion is idempotent and every stage key is a
+    function of the expanded values alone. -> (recipe, errors)."""
+    if not isinstance(rec, dict) or "profile" not in rec:
+        return rec, []
+    fields, err = profile_fields(rec["profile"], pin)
+    if fields is None:
+        return rec, err
+    out = {k: v for k, v in rec.items() if k != "profile"}
+    err += ["profile %s: %s is the profile's field and is not written in the recipe" % (rec["profile"], k) for k in ("compiler", "plugins") if k in rec]
+    mine = rec.get("external") if isinstance(rec.get("external"), list) else []
+    names = {e["name"] for e in fields["external"]}
+    err += ["profile %s: external %s is the profile's and is not written in the recipe" % (rec["profile"], e["name"])
+            for e in mine if isinstance(e, dict) and e.get("name") in names]
+    out["compiler"] = fields["compiler"]
+    out["plugins"] = fields["plugins"]
+    out["external"] = fields["external"] + [e for e in mine if not (isinstance(e, dict) and e.get("name") in names)]
+    return out, err
+
+
+def read_recipe(repo, path):
+    """The recipe file PATH of the checkout REPO, its profile expanded (expand_profile with the checkout's guest compiler pin). Errors of the profile are
+    reported by check(), which reads the same file through expand_profile; a reader that only needs the values takes the expanded recipe."""
+    with open(os.path.join(repo, path)) as f:
+        rec = json.load(f)
+    return expand_profile(rec, load_pin(repo))[0]
+
+
 def effective(rec, name):
-    """The recipe of variant NAME of REC: REC without `variants`, the keys the variant names replaced whole. '' is the implicit variant."""
+    """The recipe of variant NAME of REC: REC without `variants`, the keys the variant names replaced whole, and its deltas applied: `flags_add`
+    {c, cxx, asm} and `defines_add` ["NAME[=VALUE]"] are appended to the base flags of the languages (defines as -D to c, cxx and asm). '' is the
+    implicit variant."""
     if not isinstance(rec, dict):
         return rec
     out = {k: v for k, v in rec.items() if k != "variants"}
     if name:
-        out.update(rec["variants"][name])
+        v = rec["variants"][name]
+        out.update({k: x for k, x in v.items() if k not in VARIANT_DELTAS})
+        if VARIANT_DELTAS & set(v) and isinstance(out.get("flags"), dict):
+            fl = {k: list(x) if isinstance(x, list) else x for k, x in out["flags"].items()}
+            for lang, add in (v.get("flags_add") or {}).items():
+                fl[lang] = list(fl.get(lang, [])) + list(add)
+            for d in v.get("defines_add") or []:
+                for lang in ("c", "cxx", "asm"):
+                    fl[lang] = list(fl.get(lang, [])) + ["-D" + d]
+            out["flags"] = fl
     return out
 
 
@@ -506,8 +565,7 @@ def pairs_of(rec, root, ent=None):
 def load_recipe(repo, roots, spec):
     """The effective recipe of a root or of a 'root@NAME' pair."""
     root, name = split_spec(spec)
-    with open(os.path.join(repo, entry_of(roots, spec)["recipe"])) as f:
-        rec = json.load(f)
+    rec = read_recipe(repo, entry_of(roots, spec)["recipe"])
     if name in own_recipes(roots[root]):   # a per-target recipe is a whole recipe, with no variants of its own
         return effective(rec, "")
     return effective(rec, name) if not name or name in variant_names(rec) else rec
@@ -648,7 +706,7 @@ def link_roots_cycle(root, roots, repo, seen=()):
         return list(seen[seen.index(root):]) + [root]
     ent = roots.get(root)
     try:
-        rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
+        rec = read_recipe(repo, ent["recipe"]) if ent and ent.get("recipe") else None
     except (OSError, ValueError):
         rec = None
     for d in root_edges(rec, root, roots):
@@ -694,7 +752,7 @@ def uses_errors(rec, root, roots, repo):
             err.append("uses: %s is not an admitted root with a recipe" % r)
         else:
             try:
-                decl = json.load(open(os.path.join(repo, ent["recipe"]))).get("outputs")
+                decl = read_recipe(repo, ent["recipe"]).get("outputs")
             except (OSError, ValueError, AttributeError):
                 err.append("uses: the recipe of %s is unreadable" % r)
                 continue
@@ -742,7 +800,7 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
             err.append("link.roots: %s (the linking image has target %r)" % (why, rent.get("target")))
         else:
             try:
-                drec = json.load(open(os.path.join(repo, ent["recipe"])))
+                drec = read_recipe(repo, ent["recipe"])
                 dl = drec.get("link")
             except (OSError, ValueError, KeyError, AttributeError):
                 err.append("link.roots: the recipe of %s is unreadable" % d)
@@ -894,6 +952,13 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if not isinstance(rec, dict):
         return ["recipe is not a JSON object"]
     err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
+    if "profile" in rec:
+        ent0 = roots.get(root, {})
+        want = (entry_of(roots, root + "@" + variant) if variant else ent0).get("target")
+        if rec["profile"] != want:
+            err.append("profile %r: the admit.json target of %s is %r (a root names the profile of its own target)" % (rec["profile"], root, want))
+    rec, perr = expand_profile(rec, pin)
+    err += perr
     vs = rec.get("variants")
     if vs is not None:
         if not (isinstance(vs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(v, dict) and v and set(v) <= VARIANT_KEYS
@@ -914,7 +979,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         for n, (t, path) in sorted(per.items()):   # a per-target recipe is a variant: every rule applies to it whole, with its own target
             try:
                 with open(os.path.join(repo, path)) as f:
-                    prec = json.load(f)
+                    prec = json.load(f)   # raw: the recursive check() expands its profile
             except (OSError, ValueError):
                 err.append("variant %s: recipe %s is unreadable" % (n, path))
                 continue
@@ -2056,7 +2121,7 @@ def loader_defined(repo, loader, store, jobs, extcache, ws, stage):
     caller's); raises BuildRed(stage STAGE) when one of them is invalid or red."""
     ent = load_admit(repo)[split_spec(loader)[0]]
     try:
-        rec = json.load(open(os.path.join(repo, ent["recipe"])))
+        rec = read_recipe(repo, ent["recipe"])
     except (OSError, ValueError) as x:
         raise BuildRed({"stage": stage, "exit": None, "stderr": ["loader root %s: unreadable recipe: %s" % (loader, x)]})
     names, rs = set(), []
@@ -2503,7 +2568,7 @@ def main(argv):
         if argv[:1] == ["check"]:
             roots = load_admit(repo)
             root, _ = split_spec(opt["--root"])   # the one place the spec is split: nothing below sees root@NAME
-            rec = load_recipe(repo, roots, opt["--root"]) if _ else json.load(open(os.path.join(repo, roots[root]["recipe"])))   # a base is checked whole: with its variants
+            rec = load_recipe(repo, roots, opt["--root"]) if _ else json.load(open(os.path.join(repo, roots[root]["recipe"])))   # a base is checked whole (raw: check() expands its profile): with its variants
             errs = check(rec, root, tracked(repo), roots, load_pin(repo), repo, _)
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0

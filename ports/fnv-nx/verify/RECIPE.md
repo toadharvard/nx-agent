@@ -239,8 +239,21 @@ the linked ELF, contract/pcrel_abs.py).
 `generated`) or of run stage NAME of an admitted root. The stage runs (cached by its key), the output is written to `CACHE/stageout/<sha256>/P`
 and the ident is `stage:ROOT:NAME:P:sha256`. An undeclared output, an unknown root or stage and a red stage are `ValueError`.
 
+## Profiles
+`"profile": "guest" | "host"` names the profile of the root's target (it is the root's admit.json `target`; any other is red). recipe.py generates the
+profile's fields from the pins (`recipe.profile_fields`, `recipe.expand_profile`) and expands them into the recipe before anything reads it, so every stage key is a
+function of the expanded values alone (a root that names its profile has the keys of the root that spelled every field):
+- guest: `compiler` (the external and drivers of verify/guest_compiler.json), `plugins` (the full PLUGIN_SOURCES set in load order, fixed arguments from
+  recipe.py via `plugin_decls`), `external` = the compiler's external and the runtime's (pin `runtime`). The semantic flags are already generated (targets.json, DATAMODEL.json, guest_compiler.json).
+- host: `compiler` = the distribution compiler of env.json, no plugin, no external.
+A root names `profile` plus its own `flags`, `include`, `units`, `defines`, `generated`, `link`, and in `external` only what the profile does not carry (those follow
+the profile's in the expanded list). Writing `compiler`, `plugins` or a profile external in the recipe is red ("restates a profile field").
+
 ## Variants
-`variants: {NAME: {"compiler": .., "flags": {..}, "link": {..}}}`: one root built for several targets or with sanitizers. A variant replaces only the keys it names (`compiler`, `flags`, `link`; `link` whole, e.g. a sanitizer variant's own `link.libs.system` [libubsan.so.1 of the pinned libubsan1]), the rest is
+`variants: {NAME: {"compiler": .., "flags": {..}, "link": {..}, "flags_add": {..}, "defines_add": [..]}}`: one root built for several targets or with sanitizers. A variant is a set of **deltas**:
+`flags_add: {"c": [..], "cxx": [..], "asm": [..]}` appends to the root's flags of that language, `defines_add: ["NAME[=VALUE]"]` appends `-DNAME[=VALUE]` to c, cxx and asm; both are
+appended in the order written, after the base flags. A whole replacement (`compiler`, `flags`, `link`) is kept only where replacement is the point: a sanitizer variant's own `link`
+(whole, e.g. its `link.libs.system` [libubsan.so.1 of the pinned libubsan1]) and a variant that changes the compiler. The rest is
 the root's; its effective recipe is checked by every rule of `check()`. A (root, variant) pair is spelled `root@NAME` (`recipe.split_spec`; the implicit
 variant is `root`). It is its own set of content-keyed stages: the variant name is in every stage key (env `FNVNX_VARIANT`, absent for the implicit variant, so
 a root without variants keeps its keys), its objects are stored at `GATE_CACHE/objects/<tree>/<root>@<NAME>/objects.json` and its `objects.json` has
