@@ -243,3 +243,10 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Tests: bootsock 6, bootthreadcpu 31, bootcores and bootunmap 27 are green.
   - Next: hostvm.h joins (A8); group 3 interim (ELF facts output asked of L1); group 2 (one binary).
   - cand2 delivery is f795cd487.
+- 01:17:
+  - R group 3 is done, w6-r d8d3ef0db: icount has no tool calls; it uses interim ELF readers in bootlayout.py, deleted when L1 w25's link-record ELF facts land.
+  - test_icount 12 and test_bootlayout 32 are green.
+  - Found: test_icount's fixture calls as/ld/objcopy/nm directly; it becomes a recipe test root (after group 2).
+  - Group 2 (one binary) is in progress by w6.
+  - Told L1 that gate_contract.py:72 hardcodes the nm/readelf paths.
+  - w7: sdlayout.h and hostvm.h into hostabirec (string macros, A8), then the fonts mount.
