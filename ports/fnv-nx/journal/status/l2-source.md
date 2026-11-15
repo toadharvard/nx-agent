@@ -293,3 +293,9 @@ After the first frame:
     - 311 are a constant frame offset overlapping an escaping range;
     - 589 are non-frame. Of those, 316 resolve by the walk (loaded pointer 243, symbol 55, frame pointer 14, by-reference 2, call 1) and 273 are unresolved.
   - Next: ORD-T, using dump_file for the mapping. ORD-AGG is a hypothesis for the 311, to be confirmed in the dump first.
+- VEC1 done: w3 9b6945f86 and 3165f2d70, handed to L1 w15 and L5.
+  - Rows: `vec:<N>:<size>:<align>:[opaque:]<elem>`. The tcc_type universe is 32 codes from tree.def and cp-tree.def: 11 rows, 21 errors, each with its reason.
+  - test_layout passes 127 checks. Through the recipe at 3165f2d70: lib/sha256 1 object, loader 9, rt/guest 6, rt/guest_main 1, all green with 0 errors. The stale plugin inputs in build.json are fixed.
+  - Still to do: the opaque row needs a test or a cited-proof error, and the "cannot reach" proofs must cite GCC 13.3 lines.
+  - After the first frame: filter decltype rows to the symbols a unit uses (arm_neon.h gives 290 KB per unit).
+- S23 (b) source: fnv-nx-build t/8f324ec cee201aa1 tree/. It gets one test root, verify/roots/s23-layout, built through the recipe, with its 896 units chosen by the selection rule.
