@@ -326,3 +326,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 21:22Z v3 shard 7/54 (farm 05): shapes 346, proved 336, model-gap 10, failed 0, 3,892 s. 35/54 complete.
 - 21:23Z v3 shards 38 and 39 (farm 11): 345+345 shapes, proved 334+336, model-gap 10+8. Each has 1 declared model defect, rep-prefix-ignored: f3aa rep stosb and f3ab rep stosd, both stringspec's class, so neither is a pass until stringspec certifies it. Farm 11 is done and archived. 37/54 complete.
 - 21:23Z v3 shard 12/54 (farm 18): shapes 346, proved 335, model-gap 11, failed 0, 3,736 s. 38/54 complete.
+- 21:24Z v3 shard 13/54 (farm 18): shapes 346, proved 337, model-gap 9, failed 0, 3,758 s. Shard 12's final branch is 12of54-277dcdf2ce02. 39/54 complete.
