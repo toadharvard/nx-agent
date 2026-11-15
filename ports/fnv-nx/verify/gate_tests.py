@@ -25,7 +25,8 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   and a leak are never recorded. No file is recorded without a trace (strace missing or a trace that cannot be read: the file is failed, never skipped).
   UNTRACED: a test that itself runs strace cannot run under it (one tracer per process). DIR/tests/inputs.json lists such files under "untraced"; they run
   untraced and their entry is keyed by whole directories: the tree hash (cas.tree_hash, no mtimes, __pycache__ skipped) of every --key-dirs directory
-  (default: the DIRs scanned) in place of a read set. Detail of a green run: `N of M test files pass, K cached`.
+  (default: the DIRs scanned) and the tree hash of the commit (HEAD^{tree}) in place of a read set: a test that runs the recipe runs strace itself (the env gate
+  `kernel ptrace` is red under another tracer), so its reads are the whole checkout. Detail of a green run: `N of M test files pass, K cached`.
 A test that needs game data declares it in DIR/tests/inputs.json ({"format": "fnvnx-selftest-inputs/1", "tests": {"test_x.py": ["exe"]}, "untraced": ["test_y.py"]}); the names
 are externals of verify/contract_inputs.json (commit + tree_sha256, fetched like a recipe's external). The test gets FNVNX_INPUT_<NAME> = the checked-out
 directory. If the input cannot be fetched or its tree hash differs, the file's status is `blocked-env`: uncertified (the gate is red), never skipped.
@@ -267,7 +268,7 @@ def lookup(cache, key, st, whole_dirs):
             if e["format"] != CACHE_FORMAT or e["status"] != "passed":
                 continue
             if e["untraced"]:
-                if e["trees"] == st.whole(whole_dirs):
+                if e["trees"] == st.whole(whole_dirs) and e["tree"] == st.git_tree():
                     return True
                 continue
             if all(st.of(r) == v for r, v in e["files"].items()) and all(st.listing(r) == v for r, v in e["dirs"].items()) and (not e["git"] or e["tree"] == st.git_tree()):
@@ -340,7 +341,7 @@ def main(argv):
             ok, sec, why = run_one(f, o["timeout"], base, idx, extra, tr)
             if ok and o["cache"]:
                 if untraced:
-                    record(o["cache"], key, st, {"untraced": True, "trees": st.whole(whole_dirs), "files": {}, "dirs": {}, "git": False, "tree": None})
+                    record(o["cache"], key, st, {"untraced": True, "trees": st.whole(whole_dirs), "files": {}, "dirs": {}, "git": False, "tree": st.git_tree()})
                 else:
                     try:
                         lines = open(tr, errors="replace").read().splitlines()

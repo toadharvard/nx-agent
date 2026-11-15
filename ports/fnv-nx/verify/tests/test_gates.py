@@ -501,7 +501,7 @@ check("tests cache (git): a new tree re-runs the file that asked git, not the on
 e1 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")
 d2 = tmp("tests-cache-env")
 mk(d2, test_a="pass\n")
-for n in ("gate_tests.py", "cas.py", "envcheck.py", "opentrace.py", "treehash.py"):
+for n in ("gate_tests.py", "cas.py", "envcheck.py", "opentrace.py"):
     shutil.copy(os.path.join(VERIFY, n), os.path.join(d2, n))
 def gate_in(dirpath, cache):
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
