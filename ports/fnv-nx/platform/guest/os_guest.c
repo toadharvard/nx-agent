@@ -190,12 +190,12 @@ void os_show_message(const char *caption, const char *text) {
     fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
 }
 /* the system software keyboard: host service FNVNX_PLAT_TEXT_ENTRY (hostapi.h), whose result is this function's: 1 entered, 0 cancelled,
- * negative = -FNVNX_HE_BADINPUT or -(the applet's Horizon result) */
-int os_text_entry(unsigned max_len, const uint16_t *init, size_t init_n, uint16_t *out, size_t *n) {
-    uint32_t cnt = 0;
-    uint64_t arg[5] = {max_len, init ? FNVNX_ADDR(init) : 0u, init ? init_n : 0u, out ? FNVNX_ADDR(out) : 0u, n ? FNVNX_ADDR(&cnt) : 0u};
+ * negative = -(the applet's Horizon result). The service's argument checks (max_len 1..FNVNX_TEXT_ENTRY_MAX, out and n non-null)
+ * hold by the types: the max length is a constant, out and n are the addresses of members of a reference. */
+_Static_assert(FNVNX_SWKBD_MAX_LEN >= 1 && FNVNX_SWKBD_MAX_LEN <= FNVNX_TEXT_ENTRY_MAX, "the service takes max_len 1..500");
+int os_text_entry(const struct fnvnx_text *init, struct fnvnx_text *out) {
+    uint64_t arg[5] = {FNVNX_SWKBD_MAX_LEN, init ? FNVNX_ADDR(init->u) : 0u, init ? init->n : 0u, FNVNX_ADDR(out->u), FNVNX_ADDR(&out->n)};
     int64_t r = (int64_t)fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TEXT_ENTRY, FNVNX_ADDR(arg), 5);
-    if (r == 1) *n = cnt;
     return (int)r;
 }
 /* the console's operation mode: host service FNVNX_PLAT_DISPLAY_DOCKED (hostapi.h), which every host implements
