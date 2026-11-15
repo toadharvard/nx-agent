@@ -33,7 +33,7 @@ def le(b): return int.from_bytes(b, 'little')
 class EH(Flow):
     def __init__(s, X):
         s.X = X; s.fi = {}; s.stubs = {}; s.noise = Counter(); s.sites = {}; s.scopes = {}; s.helpers = {}; s.seenh = set()
-        s.regs = {}; s.unknown = 0; s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.throwers = []; s.tsites = {}; s.dc = {}; s.slot = {}; s.lead = set(); s.jt = defaultdict(list); s.nseen = 0; s.rv = None; s.rvk = -1; s.rst = False; s.sb = {}; s.rl = {}; s.relset = None
+        s.regs = {}; s.unknown = 0; s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.throwers = []; s.tsites = {}; s.dc = {}; s.slot = {}; s.lead = set(); s.jt = defaultdict(list); s.nseen = 0; s.rv = None; s.rvk = -1; s.rst = False; s.sb = {}; s.rl = {}; s.relset = None; s.dicr = None
         s.cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); s.cs.detail = True; s.flow_init(); s.am = {}; s.fsc_new = []; s.fsw = set(); s.fsc_seen = 0; s.regsites = {}; s.hlp = {}; s.seh_red = []; s.fs0_other = 0
 
     @property
@@ -265,11 +265,15 @@ class EH(Flow):
         return seen
 
     def real(s, a):
-        """a decoded instruction is code only if every relocated dword it overlaps is one of its own operands (its immediate or displacement). Premise (ASM-233): a relocated dword in the
-        middle of an instruction's bytes is a pointer in a data table (jump table, vtable) that the linear decode ran through; it is never executed."""
+        """a decoded instruction is code iff (1) it lies in no data_in_code range (tools/dic.py: the slots of a jump table a proven consumer reads, from jtab_ok) and (2) every relocated dword it
+        overlaps is one of its own operands (its imm32 or disp32): the reloc-consistency rule (a base relocation proves an absolute 32-bit word at its offset, so a decoding with a relocation anywhere
+        else is not code on that decoding; residue.disp_only / modlift.conflict). Removes ASM-233: no premise about what the relocated word is; the data ranges come from consumers, the misfit from the relocations."""
         r = s.rl.get(a)
         if r is None:
             ins = s.dis(a); sz = s.X.insns[a][0]; r = ins is not None
+            if r:
+                if s.dicr is None: s.dicr = sorted((min(t.addrs), max(t.addrs) + 4) for t in getattr(s.X, 'jtab_ok', {}).values() if t.addrs)
+                r = not any(lo <= a < hi for lo, hi in s.dicr)
             if r:
                 if s.relset is None: s.relset = set(s.X.relocs)
                 for q in range(a - 3, a + sz):
@@ -434,7 +438,7 @@ class EH(Flow):
         """R1: -> (constants or None, kind, why): kind 'const' | 'rethrow' | 'red'. The ThrowInfo is the 2nd argument of the call: a constant, a set of constants, or an incoming
         argument of the caller (the union over every direct call site, argvals); a rethrow is 0 with a 0 object."""
         st = s.state_before(site)
-        if st.sp is None: return None, 'red', 'esp unknown at the call'
+        if st.sp is None: return s.resolve_slice(site, off, 'esp unknown at the call')
         ti = sload(st, st.sp + off + 4); obj = sload(st, st.sp + off); cs = cset(ti)
         if cs is None:
             if isinstance(ti, tuple) and ti[0] == 'arg':
@@ -444,6 +448,63 @@ class EH(Flow):
         if cs == {0}: return (cs, 'rethrow', None) if cset(obj) == {0} else (None, 'red', 'null ThrowInfo with an object')
         if 0 in cs: return None, 'red', 'null ThrowInfo among the values'
         return cs, 'const', None
+    def slice_delta(s, ins):
+        """net change of esp over one instruction (esp after - esp before), or None when it is not a fixed amount; (push -4, pop +4, add/sub esp imm, a call whose callee's balance is known, any instruction that does not name esp as a destination 0)"""
+        mn = ins.mnemonic.split()[-1]; ops = ins.operands
+        if mn == 'push': return -4
+        if mn == 'pop': return 4 if not (ops[0].type == cx.X86_OP_REG and FULL.get(ins.reg_name(ops[0].reg)) == 'esp') else None
+        if mn in ('add', 'sub') and len(ops) == 2 and ops[0].type == cx.X86_OP_REG and FULL.get(ins.reg_name(ops[0].reg)) == 'esp':
+            return (ops[1].imm if mn == 'add' else -ops[1].imm) if ops[1].type == cx.X86_OP_IMM else None
+        if mn == 'call':
+            op = ops[0]; eff = s.summary(op.imm & M32) if op.type == cx.X86_OP_IMM else s.import_effect(op)
+            return None if eff is None or eff[1] is None else eff[1]
+        if mn in ('leave', 'ret', 'retn', 'pushfd', 'popfd', 'pushal', 'popal', 'pushad', 'popad', 'pushf', 'popf', 'enter', 'int', 'int3', 'iret'): return None
+        try: wr = [FULL.get(ins.reg_name(r)) for r in ins.regs_access()[1]]
+        except capstone.CsError: return None
+        return None if 'esp' in wr else 0
+
+    def resolve_slice(s, site, off, why0):
+        """R1 on a path-sensitive footing, for a call whose forward state has no single esp (the paths into it have different stack roots, e.g. a catch funclet that restores esp from its frame jumps to a shared throw tail).
+        The ThrowInfo is the dword at [esp+off+4] before the call. Walk the decoded predecessors backwards with the slot named by its offset d from the esp before the instruction: over an instruction whose esp change is
+        known the offset moves by that change; a push whose word is the slot (d = 0) or a store `mov [esp+d], imm` is the value (a constant), anything else that writes the slot, an unknown esp change, a store through
+        ebp/esp the walk cannot place, a call between the slot and the throw (its callee may write the slot through an escaped frame address), a store through any other base or index (not provably disjoint), a seeded instruction (entered from outside the decoded edges) or an instruction with no predecessor is RED. The result is the union over every path: a set of constants, each path
+        proving its own. -> (constants or None, kind, why) as resolve."""
+        X = s.X; seen = set(); vals = set(); work = [(site, off + 4)]
+        while work:
+            x, d = work.pop()
+            if (x, d) in seen: continue
+            seen.add((x, d))
+            if s.seeded(x) and x != site: return None, 'red', '%s; the walk reaches the entry %08x' % (why0, x)
+            ps = s.preds(x)
+            if not ps: return None, 'red', '%s; the walk reaches an instruction with no predecessor (%08x)' % (why0, x)
+            for p in ps:
+                ins = s.dis(p)
+                if ins is None: return None, 'red', '%s; undecodable predecessor %08x' % (why0, p)
+                dl = s.slice_delta(ins)
+                if dl is None: return None, 'red', '%s; esp change of %08x is not fixed' % (why0, p)
+                mn = ins.mnemonic.split()[-1]; ops = ins.operands
+                if mn == 'push' and d == 0:
+                    if ops[0].type != cx.X86_OP_IMM: return None, 'red', '%s; the slot is pushed from a non-constant at %08x' % (why0, p)
+                    vals.add(ops[0].imm & M32); continue
+                dp = d + dl                      # esp_before(x) = esp_before(p) + dl, so the slot esp_before(x) + d = esp_before(p) + (d + dl)
+                if mn == 'call': return None, 'red', '%s; a call (%08x) lies between the slot and the throw: its callee may write the slot through a frame address that escaped into it, and this walk does not track escapes' % (why0, p)
+                if mn == 'pop' and ops[0].type == cx.X86_OP_MEM: return None, 'red', '%s; pop to memory at %08x' % (why0, p)
+                for o in ops:
+                    if o.type == cx.X86_OP_MEM and o.access & capstone.CS_AC_WRITE and mn != 'push':
+                        if not o.mem.base and not o.mem.index and not o.mem.segment: continue       # an absolute address of the image: not the stack
+                        b = ins.reg_name(o.mem.base) if o.mem.base else None
+                        if b == 'esp' and not o.mem.index and not o.mem.segment and mn == 'mov' and len(ops) == 2 and o.size == 4:
+                            if o.mem.disp == dp:
+                                if ops[1].type != cx.X86_OP_IMM: return None, 'red', '%s; the slot is stored from a non-constant at %08x' % (why0, p)
+                                vals.add(ops[1].imm & M32); break
+                            if abs(o.mem.disp - dp) >= 4: continue          # an esp-based dword store of another slot: disjoint by offset
+                        return None, 'red', '%s; a store at %08x through a base or index the walk cannot prove disjoint from the slot' % (why0, p)
+                else:
+                    work.append((p, dp)); continue
+        if not vals: return None, 'red', why0
+        if 0 in vals: return None, 'red', 'null ThrowInfo among the values'
+        return vals, 'const', None
+
     def reg_ti(s, S, ref):
         X = s.X
         if S in s.throws: return
@@ -458,7 +519,7 @@ class EH(Flow):
     def scan_throw(s):
         """every ThrowInfo is the second argument of a call of the thrower (R1)."""
         X = s.X
-        if not s.throwers: s.throwers = s.find_throwers()
+        if not s.throwers and getattr(s, '_thr_n', -1) != len(X.insns): s.throwers = s.find_throwers(); s._thr_n = len(X.insns)      # the search reads the decode: repeated only when the decode grew
         for site, off in sorted(s.throw_sites().items()):
             if site in s.tsites: continue
             cs, kind, why = s.resolve(site, off); s.tsites[site] = (cs, kind, why, off)

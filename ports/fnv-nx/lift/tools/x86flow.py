@@ -104,6 +104,8 @@ def load_universe(exe, base):
     IMG = Image(exe, base)
     raw = open(UNI, 'rb').read()
     rows = []
+    hd = raw.split(b'\n', 1)[0].decode()
+    if hd.startswith('# base=0x') and int(hd[9:hd.index(':')], 16) != base: sys.exit('x86flow: universe.tsv is stated at base %s, the image was given base %08x' % (hd[7:hd.index(':')], base))      # the facts and the image speak one base
     for ln in raw.decode().splitlines():
         f = ln.split('\t')
         if len(f) >= 3 and f[2].isdigit() and int(f[2]) > 0:
