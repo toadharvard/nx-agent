@@ -10,6 +10,14 @@ r == imm on the edge; for `sub` the PRE value is refined and the post value reco
 Merge: the join (smallest covering arc) over ALL predecessors, where predecessors are the decoded edges of the closure (fall-through, jumps, branches and the table edges resolved so far).
 A seeded instruction (call target, relocated code address, PE entry or export) is entered from outside the decoded edges: its state is top. Widening: a register whose interval changed at a
 node more than WIDEN times becomes top there (loop heads), so the analysis terminates.
+Frame cells: an MSVC /Od local is a stack slot, so the guard and the jump often meet through `cmp [ebp-k], imm` ... `mov r, [ebp-k]`. A dword [ebp+k] / [esp+k] is tracked as a cell (St.r, St.al, St.nz keyed ('c', base, disp)):
+a store to it sets its interval, `cmp [cell], imm` refines it on the branch, `mov r, [cell]` gives r the cell's interval and keeps r as an alias of it (a refinement of r refines the cell). A store through any other
+address, a partly overlapping store, a call, and a write to the base register kill the cells (esp-based ones also when the depth of esp differs across a join; ebp-based ones do not depend on it).
+The only other writer of a cell is a pointer that names the frame, so cells are tracked unless the cone forms a frame address (esc): `lea r, [ebp+d]`, `mov r, ebp|esp`, a `push ebp` that is not the prologue's `push ebp; mov ebp, esp`.
+Exceptions, each proved from its own form (benign_form): the SEH registration `lea r, [ebp+d]; mov fs:[0], r` (r overwritten before the straight line ends) exposes only the 8 bytes of the EXCEPTION_REGISTRATION_RECORD
+at [ebp+d] (winnt.h), and cells overlapping them are not tracked; the /GS `xor r, ebp|esp` with r just loaded from an absolute address makes a value that is no frame pointer (OWNER 6: a wild access through it is excluded), so it escapes nothing.
+FRAME_ESCAPE_OTHER = False applies OWNER 6 to every other form too (a frame address is formed but not used to write a cell the table index reads between guard and jump).
+Joins keep the flags record of one (kind, location, imm) with the joined pre interval.
 The table is the words T + 4*v, v over the interval: every word must be a relocated dword whose value is the address of an executable instruction; the extent may lie below T. The number of words
 is at most the image's size / 4 (more cannot be relocated code addresses). Anything else is RED with the reason.
 Basis: closure completeness (the preds are every edge of the closure, seeds are top: no assumption beyond the manifest of ASM-202); intervals and flags are an over-approximation."""
@@ -93,10 +101,20 @@ def copy(st, dst, src):
     if src in st.nz: st.nz[dst] = set(st.nz[src])
 
 
-def kill_cells(st, lo=None, hi=None):
-    for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple)]:
+def kill_cells(st, lo=None, hi=None, base=None):
+    """forget the frame cells (of one base register if given; of the displacements lo..hi if given) and the flags that compared one"""
+    for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple) and (base is None or k[1] == base)]:
         if lo is None or lo <= k[2] <= hi: st.r.pop(k, None); st.al.pop(k, None); st.nz.pop(k, None)
-    if st.f is not None and isinstance(st.f[1], tuple): st.f = None
+    if st.f is not None and isinstance(st.f[1], tuple) and (base is None or st.f[1][1] == base): st.f = None
+
+
+def joinf(p, q):
+    """the join of two flag records: equal records stay; records of the same (kind, loc, imm) whose pre-compare intervals differ join the intervals (the flags still compare the same location with the
+    same constant; the pre interval is an over-approximation of its value, so the hull of both is one too); anything else forgets the flags"""
+    if p == q: return p
+    if p is None or q is None: return None
+    if p[0] == q[0] and p[1] == q[1] and p[3] == q[3] and p[2] is not None and q[2] is not None: return (p[0], p[1], join(p[2], q[2]), p[3])
+    return None
 
 
 def joinst(p, q):
@@ -116,19 +134,26 @@ def joinst(p, q):
         if m: nz[k] = m
     pk = p.pk if p.pk == q.pk else (tuple(join(a, b) for a, b in zip(p.pk, q.pk)) if len(p.pk) == len(q.pk) else ())
     e = p.espd if p.espd == q.espd else None
-    o = St(r, p.f if p.f == q.f else None, al, nz, pk, e)
-    if e is None: kill_cells(o, None, None)
+    o = St(r, joinf(p.f, q.f), al, nz, pk, e)
+    if e is None: kill_cells(o, base='esp')       # the depth of esp is unknown: an esp-based cell names no location; an ebp-based cell does not depend on esp (a write to ebp kills its cells in step)
     return o
 
 
+class Cells:
+    """the frame cells a resolve tracks: every [ebp+k] / [esp+k] dword except the ebp displacements that overlap `ranges` (half-open (lo, hi) pairs, the extents a formed frame address can reach)"""
+    __slots__ = ('ranges',)
+    def __init__(s, ranges): s.ranges = tuple(sorted(ranges))
+
+
 def cell(ins, op, st, cells):
-    """the frame cell an operand names: ('c', 'ebp'|'esp', disp) for a plain [ebp+k] / [esp+k] dword, else None"""
+    """the frame cell an operand names: ('c', 'ebp'|'esp', disp) for a plain [ebp+k] / [esp+k] dword, else None.  cells: False (none tracked), True (all), or Cells"""
     if not cells or op.type != X.X86_OP_MEM: return None
     m = op.mem
     if m.segment or m.index or op.size != 4: return None
     b = FULL.get(ins.reg_name(m.base)) if m.base else None
-    if b == 'ebp': return ('c', 'ebp', m.disp)
-    if b == 'esp' and st.espd is not None: return ('c', 'esp', m.disp + st.espd)
+    rg = () if cells is True else cells.ranges
+    if b == 'ebp': return None if any(m.disp + 4 > lo and m.disp < hi for lo, hi in rg) else ('c', 'ebp', m.disp)
+    if b == 'esp' and st.espd is not None and not rg: return ('c', 'esp', m.disp + st.espd)       # with an escaped ebp-based extent the relation of esp to it is not tracked: no esp cell
     return None
 
 
@@ -357,6 +382,56 @@ class Tg(tuple):
     pass
 
 
+FRAME_ESCAPE_OTHER = True      # a frame-address form that is not proved benign (benign_form) turns the cells off for the whole cone; False = the owner decision "OWNER 6 applied to the table index"
+SEH_RECORD_BYTES = 8           # EXCEPTION_REGISTRATION_RECORD {Next, Handler}: the Windows SDK / WDK 7.1 winnt.h / nt.h type, the extent the OS reads and writes through the TEB ExceptionList entry
+
+
+def _written(ins):
+    try: return {FULL.get(ins.reg_name(r)) for r in ins.regs_access()[1]}
+    except Exception: return None
+
+
+def _read(ins):
+    try: return {FULL.get(ins.reg_name(r)) for r in ins.regs_access()[0]}
+    except Exception: return None
+
+
+def benign_form(ins, x, ins_c, preds, dec):
+    """-> False (the frame-address form at x is not proved benign), None (it escapes nothing) or (lo, hi) (it exposes the ebp displacements [lo, hi) only).
+    SEH registration: `lea r, [ebp+d]` followed in the same straight line by `mov dword ptr fs:[0], r` (the TEB ExceptionList): the frame address reaches the OS exception dispatcher as an
+    EXCEPTION_REGISTRATION_RECORD, SEH_RECORD_BYTES at [ebp+d]; r must not be read between the lea and that store, and must be overwritten before the straight line ends (so the address goes nowhere else).
+    /GS cookie: `xor r, ebp|esp` whose other operand r was loaded by the single fall-through predecessor from an absolute memory operand (no base, index or segment): the value derived from ebp/esp has no
+    provenance of a frame address (a bitwise xor with a loaded word is not a frame pointer; dereferencing it would be a wild access, OWNER 6), so it escapes nothing."""
+    mn = ins.mnemonic; ops = ins.operands
+    if mn == 'xor' and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[0].size == 4 and ops[1].type == X.X86_OP_REG and FULL.get(ins.reg_name(ops[1].reg)) in ('ebp', 'esp'):
+        r = FULL.get(ins.reg_name(ops[0].reg)); ps = [p for p in preds(x)]
+        if len(ps) == 1 and ps[0] + dec[ps[0]][0] == x:
+            q = ins_c(ps[0]); qo = q.operands if q is not None else ()
+            if (q is not None and q.mnemonic == 'mov' and len(qo) == 2 and qo[0].type == X.X86_OP_REG and FULL.get(q.reg_name(qo[0].reg)) == r and qo[1].type == X.X86_OP_MEM
+                    and not qo[1].mem.base and not qo[1].mem.index and not qo[1].mem.segment): return None
+        return False
+    if mn == 'lea' and ops[0].type == X.X86_OP_REG and ops[0].size == 4 and ops[1].type == X.X86_OP_MEM and not ops[1].mem.index and not ops[1].mem.segment and \
+            ops[1].mem.base and FULL.get(ins.reg_name(ops[1].mem.base)) == 'ebp':
+        r = FULL.get(ins.reg_name(ops[0].reg)); d = ops[1].mem.disp; a = x + ins.size; stored = False
+        for _ in range(12):
+            j = ins_c(a)
+            if j is None or a not in dec: return False
+            jo = j.operands
+            if not stored:
+                if j.mnemonic == 'mov' and len(jo) == 2 and jo[0].type == X.X86_OP_MEM and jo[0].size == 4 and jo[1].type == X.X86_OP_REG and FULL.get(j.reg_name(jo[1].reg)) == r \
+                        and jo[0].mem.segment == X.X86_REG_FS and not jo[0].mem.base and not jo[0].mem.index and jo[0].mem.disp == 0:
+                    stored = True; a += j.size; continue
+            rd, wr = _read(j), _written(j)
+            if rd is None or wr is None: return False
+            if r in rd: return False                       # r is used by something else than the registration
+            if j.mnemonic in ('call', 'ret', 'jmp') or j.mnemonic[0] == 'j': return False
+            if r in wr: return (d, d + SEH_RECORD_BYTES) if stored else False
+            a += j.size
+            if a in preds(a) or len(preds(a)) != 1: return False       # the straight line must have no other entry
+        return False
+    return False
+
+
 STATS = {'calls': 0, 'secs': 0.0, 'cone_sum': 0, 'cone_max': 0, 'slow': []}      # cost accounting of resolve (printed by the callers): calls, total seconds, backward-cone sizes
 def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
     """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""
@@ -382,15 +457,21 @@ def _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
         if a not in cache: cache[a] = ins_at(a)
         return cache[a]
     def esc(x):
+        """what the frame address formed at x can reach: None (nothing), 'all' (a frame address of unknown extent), or (lo, hi) ebp displacements"""
         i = ins_c(x)
-        if i is None: return False
-        if forms_frame(i): return True
+        if i is None: return None
+        if forms_frame(i):
+            r = benign_form(i, x, ins_c, preds, dec)
+            return r if r is not False else ('all' if FRAME_ESCAPE_OTHER else None)
         if i.mnemonic == 'push' and i.operands[0].type == X.X86_OP_REG and FULL.get(i.reg_name(i.operands[0].reg)) == 'ebp':
             j = ins_c(x + i.size)
-            return not (j is not None and j.mnemonic == 'mov' and len(j.operands) == 2 and all(o.type == X.X86_OP_REG for o in j.operands) and
-                        FULL.get(j.reg_name(j.operands[0].reg)) == 'ebp' and FULL.get(j.reg_name(j.operands[1].reg)) == 'esp')
-        return False
-    cells = not any(esc(x) for x in cone)                  # a frame cell is tracked only if no instruction of the cone forms the frame address (then no pointer can name it)
+            ok = (j is not None and j.mnemonic == 'mov' and len(j.operands) == 2 and all(o.type == X.X86_OP_REG for o in j.operands) and
+                  FULL.get(j.reg_name(j.operands[0].reg)) == 'ebp' and FULL.get(j.reg_name(j.operands[1].reg)) == 'esp')
+            return None if ok else ('all' if FRAME_ESCAPE_OTHER else None)
+        return None
+    escs = [esc(x) for x in cone]
+    # a frame cell is tracked unless a frame address of unknown extent is formed in the cone (then any pointer may name it); the exposed extents of the other forms (benign_form) are left out
+    cells = False if 'all' in escs else Cells([e for e in escs if e is not None])
     for x in cone:
         if seeded(x): IN[x] = St({}, None); work.append(x)
     while work:
@@ -414,6 +495,7 @@ def _resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
                     if cnt[y] > WIDEN:
                         for k in list(m.r):
                             if m.r[k] != IN[y].g(k): del m.r[k]
+                        if m.f != IN[y].f: m.f = None          # the pre interval of the flags is widened the same way
                     IN[y] = m; work.append(y)
     st = IN.get(site)
     if st is None: return None, 'the site is unreachable from any entry in the decoded edges'

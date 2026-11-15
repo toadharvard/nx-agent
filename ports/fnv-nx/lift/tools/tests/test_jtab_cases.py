@@ -100,6 +100,49 @@ class P(unittest.TestCase):
     def test_escaping_frame_address_drops_cells(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
         s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + [TAB + 4 * i for i in range(5)])
+class F(unittest.TestCase):
+    """R-B (a join kills only esp cells; flag records of one (kind, loc, imm) join their intervals) and R-A(i) (precise frame-address escapes)"""
+    def rel(s, code_prefix, tail_at):
+        return code_prefix
+    def ok(s, want, *a, **k):
+        t, why = run(*a, **k); s.assertIsNone(why); s.assertEqual(sorted(t), sorted(want))
+    def red(s, *a, **k):
+        t, why = run(*a, **k); s.assertIsNone(t); return why
+    R5 = [TAB + 4 * i for i in range(5)]
+    def test_join_with_different_esp_depth_keeps_ebp_cells(s):
+        code = (b'\x89\x55\xec\x83\x7d\xec\x04\x77\x0f' + b'\x85\xc9\x74\x01\x50' + b'\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3')
+        s.ok(OUT[:5], code, tab(*OUT[:5]), relocs=[FN + 20] + s.R5)
+    def test_join_with_different_esp_depth_drops_esp_cells(s):
+        code = (b'\x89\x54\x24\x14\x83\x7c\x24\x14\x04\x77\x10' + b'\x85\xc9\x74\x01\x50' + b'\x8b\x44\x24\x14' + jmp_tab(TAB) + b'\xc3')
+        s.red(code, tab(*OUT[:5]), relocs=[FN + 26] + s.R5)
+    def test_flag_records_of_one_compare_join(s):
+        code = (b'\x85\xc9\x74\x08\x83\xe0\x07\x83\xf8\x03\xeb\x03\x83\xf8\x03' + b'\x77\x07' + jmp_tab(TAB) + b'\xc3')
+        s.ok(OUT[:4], code, tab(*OUT[:4]), relocs=[FN + 20] + [TAB + 4 * i for i in range(4)])
+    def seh(s, cell):
+        # lea eax,[ebp-0xc] / mov fs:[0],eax / mov eax,edx : the registration of an 8-byte EXCEPTION_REGISTRATION_RECORD at [ebp-0xc, ebp-4)
+        return (b'\x8d\x45\xf4\x64\xa3\x00\x00\x00\x00\x89\xd0' + b'\x89\x55' + bytes([cell]) + b'\x83\x7d' + bytes([cell]) + b'\x04\x77\x0a' +
+                b'\x8b\x45' + bytes([cell]) + jmp_tab(TAB) + b'\xc3')
+    def test_seh_registration_escapes_only_the_record(s):
+        s.ok(OUT[:5], s.seh(0xec), tab(*OUT[:5]), relocs=[FN + 26] + s.R5)
+    def test_seh_registration_cell_inside_the_record_is_not_tracked(s):
+        s.red(s.seh(0xf8), tab(*OUT[:5]), relocs=[FN + 26] + s.R5)
+    def test_seh_address_used_elsewhere_stays_whole_cone(s):
+        code = b'\x8d\x45\xf4\x64\xa3\x00\x00\x00\x00\x89\xc1\x89\xd0' + b'\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
+        s.red(code, tab(*OUT[:5]), relocs=[FN + 28] + s.R5)
+    def cookie(s, load):
+        return load + b'\x31\xe8\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
+    def test_cookie_xor_escapes_nothing(s):
+        s.ok(OUT[:5], s.cookie(b'\xa1' + u32(RW)), tab(*OUT[:5]), relocs=[FN + 22] + s.R5)
+    def test_xor_with_a_pointer_loaded_value_stays_whole_cone(s):
+        s.red(s.cookie(b'\x8b\x03\x90\x90\x90'), tab(*OUT[:5]), relocs=[FN + 22] + s.R5)
+    def test_other_frame_address_forms_stay_whole_cone(s):
+        code = b'\x89\xe9\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
+        s.red(code, tab(*OUT[:5]), relocs=[FN + 17] + s.R5)
+    def test_switch_owner6_on_the_table_index(s):
+        code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
+        jtab.FRAME_ESCAPE_OTHER = False
+        try: s.ok(OUT[:5], code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5)
+        finally: jtab.FRAME_ESCAPE_OTHER = True
 class E(unittest.TestCase):
     def test_second_reference_into_the_table_keeps_targets_seeded(s):
         code = b'\x83\xf8\x03\x77\x0a' + jmp_tab(TAB) + b'\xcc\xcc\xcc\xc3'
