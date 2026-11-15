@@ -560,22 +560,20 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
 - A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
   to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
 - Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.
-- **gs on Windows 7 (7601) x86, orchestrator decision 2026-11-15 22:05Z.**
-  - No pinned source states the initial user-mode gs selector (L5, from the whole WDK 7.1 ISO and Wine 9.0). So the row
-    stays undecided. No value is chosen, and none is taken from register dumps of another NT build.
-  - The sites that read gs are closed by reach, by two rules:
-    1. **/GS failure paths (OWNER 6).** The cookie check compares the frame's cookie with the value at the image's own
-       load-config `SecurityCookie` VA (PE IMAGE_LOAD_CONFIG_DIRECTORY, read from the image bytes, not from names).
-       Only a write outside its object can make them differ, which OWNER 6 excludes. So the failure branch, and every
-       site reached only through it, is unreachable. The CRT context capture (`mov m16, gs`, 24 sites) is such a site.
-       The certificate names that branch, the load-config field and OWNER 6.
-    2. **Bytes that no path from an entry reaches.** They get the ordinary call-graph certificate. Bytes decoded only
-       by fallthrough into data are a defect of the code universe, and L3a fixes it there.
-  - A gs site that neither rule closes is reported to the orchestrator with its address.
-  - Owners:
-    - L3a emits the facts and the reach_violation sites;
-    - L1's call-graph gate accepts certificate kind (1) with the load-config fact;
-    - L5 keeps the row undecided and hands its brief to L3a.
+- **gs on Windows 7 (7601) x86, orchestrator decision 2026-11-15 22:15Z (it replaces the 22:05Z text).**
+  - No pinned document states the initial user-mode gs selector (L5: the whole WDK 7.1 ISO and Wine 9.0). Register dumps
+    of other NT builds do not count.
+  - The source is a Microsoft-published 7601 artefact: the Windows 7 SP1 x86 kernel (`ntkrnlpa.exe`/`ntoskrnl.exe` of
+    build 7601), with its public PDB from Microsoft's symbol server. Both are pinned by sha256 and mirrored in
+    fnv-nx-build `tools/win7sp1-x86-kernel` (private, never in this repository).
+  - The row's value is derived from that binary: the store of `KTRAP_FRAME.SegGs` (offset from the PDB) on the
+    user-thread initialization path. The function and the instruction address are cited in the row. Source 1 above
+    covers this ("the exe and module bytes" class, applied to the declared OS's own binary).
+  - The `null_seg_access` row and the 24 `mov m16, gs` reads then follow by the existing method. They are one row each,
+    with no per-site work.
+  - The gs-prefixed operands that the code universe reaches only by decoding data are a defect of the universe rule.
+    L3a fixes it in the facts stage. A site is never certified around it.
+  - Owner: L5 (a worker, now; it blocks the pack finish). L3a consumes the row.
 - **Where the Microsoft page is narrower (orchestrator, 2026-11-15 13:45Z; it applies to D3D9 and its shader models as well).**
   - Microsoft does not list a case, but Wine 9.0 accepts it. That case is a silence, not a contradiction, so source 2
     fills it and the accepted set is the union.
