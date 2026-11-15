@@ -1352,3 +1352,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - The bounded pass over L1's files (verify/, link/, contract/, loader/) is given to w22. It lists every hand set, second copy and second path, each with its replacement and path flag, in journal/status/l1-construction.md on claude/fnv-l1-contract-w22-construction.
 - Already converted in this wave by this rule: plugin decls (w24 b707cd5c4), startfiles by derivation (w12h), resolve_input from tracked blobs (L5 w10), the legal gate deleted (w23 3bfb85dd), one deb mirror lineage (L6 w6).
 - cand2 takes CLAUDE.md from integ 4004c3451.
+- w23r accepted: framesec `:n` (rule F; 67e94122), generalised D1 (2e013ed9), linkage (only `external` pairs by name; e46db69a merged).
+  - Pending: `c` records are compared through external symbols' declared types under C11 6.2.7p2.
