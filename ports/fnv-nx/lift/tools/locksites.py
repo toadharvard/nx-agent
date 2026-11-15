@@ -26,8 +26,8 @@ def scan(exe, ranges, base=None):
     stated at BASE (the ranges' base). One decoder predicate for the lifter and for these facts: fnvlift/sites.py."""
     import x86flow
     from fnvlift import sites
-    img = x86flow.Image(exe)
-    d = int(base, 16) - img.base if base else 0
+    img = x86flow.Image(exe, int(base, 16) if base else None)      # the image at the assigned base, through the one loader
+    d = 0
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
     spans = set()
     for l in open(ranges):

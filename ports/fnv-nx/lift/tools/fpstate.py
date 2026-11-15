@@ -225,8 +225,8 @@ def analyse(sites, start, fl, entries_of, kinds):
     return dict(cls=cls, consts=sorted(consts), trans=sorted(trans), unk=sorted(set(unk)), R=R, fields=fields(R, start, fl))
 
 
-def do_scan(exe, facts, retn):
-    raw, rows = load_universe(exe)
+def do_scan(exe, facts, retn, base=None):
+    raw, rows = load_universe(exe, base)
     out = os.path.join(facts, 'fpstate')
     os.makedirs(out, exist_ok=True)
     W.load_retn(retn)
@@ -343,8 +343,8 @@ def do_combine(dirs):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 5 and sys.argv[1] == 'scan':
-        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4])
+    if len(sys.argv) in (5, 6) and sys.argv[1] == 'scan':
+        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5], 16) if len(sys.argv) == 6 else None)
     elif len(sys.argv) >= 3 and sys.argv[1] == 'combine':
         do_combine(sys.argv[2:])
     else:

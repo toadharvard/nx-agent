@@ -13,7 +13,7 @@ from capstone import x86 as X
 import cli
 USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE | --module NAME --modules modules.tsv --moddirs DIR[:DIR...] --exports-dir DIR --exe-mnemonics FILE) --keys keys.tsv [--theirs DIR]
   code universe of the exe (--exe, with the decomp function starts --funcs) or of the module NAME (a name or file of modules.tsv; the module table, the directories
-  that hold the module files, the L1 exports directory and the exe's mnemonic list are declared inputs). --keys: L1's keys.tsv (import conventions). --theirs: with --exe, the directory that holds L1's facts.pkl and eh.pkl, for the entry-set comparison (reconcile.py). Every path is an explicit argument: no environment variable, no default.'''
+  that hold the module files, the L1 exports directory and the exe's mnemonic list are declared inputs). --keys: L1's keys.tsv (import conventions). --theirs (optional): with --exe, the directory that holds L1's facts.pkl and eh.pkl, for the entry-set comparison (reconcile.py). Every path is an explicit argument: no environment variable, no default.'''
 _OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--exports-dir': True, '--exe-mnemonics': True, '--keys': True, '--theirs': True}
 if __name__ == '__main__': _POS, _O = cli.parse(USAGE, sys.argv[1:], (0, 0), _OPTS)
 else: _O = {}
@@ -25,7 +25,7 @@ _need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
 if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
     _need('--modules', '--moddirs', '--exports-dir', '--exe-mnemonics')
     import modlift; sys.exit(modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'], exports_dir=_O['--exports-dir'], exe_mnemonics=_O['--exe-mnemonics'])))
-_need('--exe', '--funcs', '--theirs')
+_need('--exe', '--funcs')
 EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
 OUTD = _O['--out']; OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
@@ -467,11 +467,11 @@ if not STRICT:
         e = next((e for e in reversed(OWN[max(0, bisect.bisect_right(OWN, x) - 40):bisect.bisect_right(OWN, x)]) if x in set(extent_insns(e))), None)
         print('  %08x %s in entry %s kind %s via site@%s' % (x, insns[x][1], '%08x' % e if e else '-', next((k for k in PRI if e and k in kinds[e]), '-'), '%08x' % esite[e] if e in esite and esite[e] else '-'))
     print('\n'.join(codemap.consumers(U, eh)))
-    print('\n'.join(reconcile.run(U, _O['--theirs'])))
+    if '--theirs' in _O: print('\n'.join(reconcile.run(U, _O['--theirs'])))      # a comparison report with L1's facts: not an input of any fact
     pts = sorted({v for r, v in rvals}); ne = [v for v in pts if v not in entries]; dfr = [(x[1], x[1] + x[3]) for x in datarec]
     print('relocated pointer targets in .text: %d, entries %d, NOT entries %d: %s' % (len(pts), len(pts) - len(ne), len(ne), dict(sorted(Counter(
         'didataformat-blob' if any(x <= v < y for x, y in dfr) else ('data-by-reloc@object-start' if not tbl[v - T0 - 1] else 'data-by-reloc@object-interior') if tbl[v - T0] else 'inside-other-insn' if cov[v - T0] == 2 else 'insn-start-not-entry' if cov[v - T0] == 1 else 'unreached' for v in ne).items()))))
-    if '--mnemonics' in ARGV: open(OUTD + '/exe_mnemonics.tsv', 'w').write(''.join('%s\t%d\n' % kv for kv in sorted(Counter(v[1] for v in insns.values()).items())))
+    open(OUTD + '/exe_mnemonics.tsv', 'w').write(''.join('%s\t%d\n' % kv for kv in sorted(Counter(v[1] for v in insns.values()).items())))
     gate(not unexpl and not bad_entries and not rejects and not rbad, TN, [])
 # ---- module report
 midf = 0; why = []; TNu = TN - cc[7]; exs = [n for n, a, z, ro in M.xs]

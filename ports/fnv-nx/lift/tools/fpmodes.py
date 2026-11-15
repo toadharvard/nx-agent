@@ -430,7 +430,7 @@ def callargs(args):
 
 
 def main():
-    raw, rows = load_universe(EXE)
+    raw, rows = load_universe(EXE, BASE)
     print('fpmodes: exe sha256 %s  universe.tsv md5 %s  entries %d' % (hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:12], hashlib.md5(raw).hexdigest()[:12], len(rows)))
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
@@ -574,8 +574,8 @@ def main():
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import cli
-    _U = 'usage: fpmodes.py --exe FILE --facts DIR --retn RETN.tsv --out DIR   x87/SSE control-mode facts of the exe: the exe, the facts directory (universe.tsv, ehtables.json) and the output directory are explicit inputs'
-    _o = cli.parse(_U, sys.argv[1:], (0, 0), {'--exe': True, '--facts': True, '--out': True, '--retn': True})[1]
-    if len(_o) != 4: sys.exit(_U)
-    EXE, OUT, RETN = _o['--exe'], _o['--out'], _o['--retn']; W.configure(_o['--facts'])
+    _U = 'usage: fpmodes.py --exe FILE --facts DIR --retn RETN.tsv --out DIR [--base HEX: the assigned base of a module; none = the exe]   x87/SSE control-mode facts of the exe: the exe, the facts directory (universe.tsv, ehtables.json) and the output directory are explicit inputs'
+    _o = cli.parse(_U, sys.argv[1:], (0, 0), {'--exe': True, '--facts': True, '--out': True, '--retn': True, '--base': False})[1]
+    if len(_o) < 4: sys.exit(_U)
+    EXE, OUT, RETN = _o['--exe'], _o['--out'], _o['--retn']; BASE = int(_o['--base'], 16) if '--base' in _o else None; W.configure(_o['--facts'])
     main()

@@ -4,7 +4,10 @@
 events, x87 stack-depth dataflow. No clocks, no entropy; every iteration order is sorted."""
 import os, struct, bisect, itertools
 from collections import defaultdict
+import sys
 import capstone
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from fnvlift.image import Image as _FImage
 from capstone import x86 as X
 
 M32 = 0xffffffff
@@ -34,50 +37,11 @@ RETN, ALLOCA = {}, []          # entry -> callee-popped bytes (None = several di
 IATADDR = {}                   # IAT slot address -> import name
 
 
-class Image:
-    def __init__(s, path):
-        d = s.d = open(path, 'rb').read()
-        pe = struct.unpack_from('<I', d, 0x3c)[0]
-        n = struct.unpack_from('<H', d, pe + 6)[0]
-        opt = struct.unpack_from('<H', d, pe + 20)[0]
-        s.base = struct.unpack_from('<I', d, pe + 52)[0]
-        s.secs, s.pe = [], pe
-        o = pe + 24 + opt
-        for i in range(n):
-            name = d[o:o + 8].rstrip(b'\0').decode()
-            vs, va, rs, ro = struct.unpack_from('<IIII', d, o + 8)
-            s.secs.append((name, s.base + va, vs, ro, rs, struct.unpack_from('<I', d, o + 36)[0]))
-            o += 40
-        rr, rsz = struct.unpack_from('<II', d, pe + 24 + 96 + 40)
-        rel = []
-        p = s.off(s.base + rr)
-        end = p + rsz
-        while p < end:
-            page, bs = struct.unpack_from('<II', d, p)
-            if not bs:
-                break
-            for i in range((bs - 8) // 2):
-                e = struct.unpack_from('<H', d, p + 8 + 2 * i)[0]
-                if e >> 12 == 3:
-                    rel.append(s.base + page + (e & 0xfff))
-            p += bs
-        rel.sort()
-        s.rset = frozenset(rel)
-        s.taken = sorted(s.u32(r) for r in rel)
-
-    def off(s, a):
-        for n, va, vs, ro, rs, ch in s.secs:
-            if va <= a < va + vs and a - va < rs:
-                return ro + a - va
-        return None
-
-    def u32(s, a):
-        o = s.off(a)
-        return struct.unpack_from('<I', s.d, o)[0] if o is not None else 0
-
-    def bytes(s, a, n):
-        o = s.off(a)
-        return s.d[o:o + n]
+class Image(_FImage):
+    """The one image loader is fnvlift.image.Image(path, base): the image as the Windows loader maps it at the module table's assigned base (None = the exe, whose assigned base is its preferred one)."""
+    def __init__(s, path, base=None):
+        super().__init__(path, base)
+        s.pe = struct.unpack_from('<I', s.d, 0x3c)[0]
 
 
 def explore(img, lo, hi, code):
@@ -135,9 +99,9 @@ def memslot(i, o, sz):
     return ('s', m.disp, sz) if b == 'esp' else ('b', m.disp, sz) if b == 'ebp' else ('g', m.disp & M32) if b is None else None
 
 
-def load_universe(exe):
+def load_universe(exe, base=None):
     global IMG
-    IMG = Image(exe)
+    IMG = Image(exe, base)
     raw = open(UNI, 'rb').read()
     rows = []
     for ln in raw.decode().splitlines():
