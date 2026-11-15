@@ -3190,7 +3190,61 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_include_case, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_namespace_specializations, r_va_list, r_va_enum_args, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
+# ---------------------------------------------------------------------------------------------------------- UNION1
+#
+# GCC rejects an elaborated declaration whose union-ness differs from the tag's definition (`class N;` of a tag that is a
+# union); cl accepts it. The decomp forward-declares the SDK's `_ULARGE_INTEGER` as `class` in its generated headers, and
+# the platform header (the one source of that definition) defines `union _ULARGE_INTEGER`.
+# RULE: every forward declaration of a tag N at file scope takes the union-ness of N's one definition at file scope: in the
+# unit's own text, else in the platform header (core.CTX['win32_header']). class/struct stays as written (GCC reads them as
+# one thing); a declaration of a union becomes `union __attribute__((fnvnx_key("<key as written>"))) N;`,
+# so that the names plugin spells the tag with the key of its FIRST declaration, as cl does (V for class, U for struct, T for union: a plain `union N;` carries the attribute too, so that a later `class N;` cannot become the first). A friend
+# declaration names its tag in a class scope, not at file scope: FRIEND1's domain, not rewritten here. A tag defined as a union by one source and as a
+# class/struct by the other is a conflict: counted in stats['UNION1_conflict'], never rewritten.
+
+UNION_DEF = re.compile(r'\b(class|struct|union)\s+(?:%s)?([A-Za-z_]\w*)\s*(?:final\s*)?(?::[^;{}]*)?\{' % DECOR)
+UNION_FWD = re.compile(r'(?<![\w>])(friend\s+)?\b(class|struct|union)\s+([A-Za-z_]\w*)\s*;')
+_UNION_HEADER = {}
+
+def _tag_defs(text):
+    """-> (set of union tags, set of class/struct tags) defined at file scope (or in an extern "C" block) of `text`"""
+    masked = FRIEND_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m[0]), text)
+    spans = core.scope_spans(text)
+    un, st = set(), set()
+    for m in UNION_DEF.finditer(masked):
+        if any(k != 'extern' for k, _ in core.scope_chain(spans, m.start())): continue
+        (un if m[1] == 'union' else st).add(m[2])
+    return un, st
+
+def r_union_forward(path, text, stats):
+    """UNION1: see above."""
+    if 'class' not in text and 'struct' not in text and 'union' not in text: return text
+    found = [m for m in UNION_FWD.finditer(text)]
+    if not found: return text
+    hdr = core.CTX['win32_header']
+    if hdr not in _UNION_HEADER: _UNION_HEADER[hdr] = _tag_defs(hdr)
+    hun, hst = _UNION_HEADER[hdr]
+    un, st = _tag_defs(text)
+    masked = FRIEND_MASK.sub(lambda m: re.sub(r'[^\n]', ' ', m[0]), text)
+    spans = core.scope_spans(text)
+    own = un | st
+    unions, conflict = (un | (hun - own)), (un & st) | (un & hst) | (st & hun)      # the unit's own definition, else the header's
+    unions -= conflict
+    if conflict: stats['UNION1_conflict'] += len(conflict)
+    out, pos = [], 0
+    for m in found:
+        if masked[m.start():m.end()] != m[0]: continue
+        key, name = m[2], m[3]
+        if m[1] or name not in unions or any(k != 'extern' for k, _ in core.scope_chain(spans, m.start())): continue   # a friend is in a class scope
+        new = 'union __attribute__((fnvnx_key("%s"))) %s;' % (key, name)
+        out.append(text[pos:m.start()]); out.append(new + ' /* fnv-nx UNION1 */'); pos = m.end()
+        stats['UNION1'] += 1
+    if not out: return text
+    out.append(text[pos:])
+    return ''.join(out)
+
+
+RULES = [r_include_case, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_namespace_specializations, r_va_list, r_va_enum_args, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility, r_union_forward]
 
 # ==================================================================================================== stream S1-refs
 #

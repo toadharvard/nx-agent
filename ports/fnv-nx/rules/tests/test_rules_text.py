@@ -1108,4 +1108,24 @@ check('VFPAD1 puts FNVNX_VFPAD(member types) first in a no-base class with a vfp
       ['struct VS { FNVNX', 'struct VB : B { FNVNX', 'struct VN { FNVNX',
        'struct VP4 { FNVNX', 'int*)'])
 
+# ---- UNION1: a forward declaration takes the union-ness of the tag's definition (the platform header, else the unit)
+_hdr = core.CTX['win32_header']
+core.CTX['win32_header'] = 'extern "C" {\ntypedef union _ULARGE_INTEGER { struct { int Low; int High; }; long long Quad; } ULARGE_INTEGER;\nstruct _RECT_ { int x; };\n}\n'
+_u1 = Counter()
+_got = s1.r_union_forward('/x/a.h', 'class _ULARGE_INTEGER;\nstruct _ULARGE_INTEGER;\nunion _ULARGE_INTEGER;\nclass _RECT_;\n'
+                          'namespace n { class _ULARGE_INTEGER; }\nclass K { friend class _ULARGE_INTEGER; };\ntemplate <class T> class _ULARGE_INTEGER2;\n'
+                          'union Own { int a; };\nstruct Own;\n// class _ULARGE_INTEGER;\n', _u1)
+check('UNION1 rewrites file-scope forward declarations of a union to `union` with the key as written; class/struct tags, namespaces, friends, templates, comments stay',
+      _got,
+      ['union __attribute__((fnvnx_key("class"))) _ULARGE_INTEGER; /* fnv-nx UNION1 */\nunion __attribute__((fnvnx_key("struct"))) _ULARGE_INTEGER; /* fnv-nx UNION1 */\n'
+       'union __attribute__((fnvnx_key("union"))) _ULARGE_INTEGER; /* fnv-nx UNION1 */\nclass _RECT_;\n',
+       'namespace n { class _ULARGE_INTEGER; }', 'friend class _ULARGE_INTEGER;', 'template <class T> class _ULARGE_INTEGER2;', '\n// class _ULARGE_INTEGER;',
+       'union __attribute__((fnvnx_key("struct"))) Own; /* fnv-nx UNION1 */'], [])
+check('UNION1 counts its rewrites and reports no conflict here', repr(sorted(_u1.items())), ["[('UNION1', 4)]"], [])
+_u2 = Counter()
+_got = s1.r_union_forward('/x/a.h', 'struct _ULARGE_INTEGER { int a; };\nclass _ULARGE_INTEGER;\n', _u2)
+check('UNION1: a tag the header defines as a union and the unit as a struct is a conflict, counted and left as written',
+      _got + repr(sorted(_u2.items())), ["struct _ULARGE_INTEGER { int a; };\nclass _ULARGE_INTEGER;\n[('UNION1_conflict', 1)]"], [])
+core.CTX['win32_header'] = _hdr
+
 support.finish()
