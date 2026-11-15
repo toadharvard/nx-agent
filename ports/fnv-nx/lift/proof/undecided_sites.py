@@ -151,21 +151,23 @@ def main():
         print("%-28s %10d %8d %10d" % (row, sum(x[5] for x in L), len({x[2] for x in L}), len(L)))
         for o, va, sk, mn, detail, m in sorted(L, key=lambda x: (x[0], x[1])):
             lines.append("%s\t%s:%08x\t%s\t%s\t%s\t%d" % (row, o, va, sk, mn, detail, m))
-    # class `reserved-encoding`: the sites whose encoding the SDM opcode tables do not define (sdmfeat.py partition, reason `undefined opcode`). The declared-CPU rule makes each of them #UD,
-    # each needs a reach certificate like a cleared-feature site; the class is the partition's own, nothing is listed here and no semantics is attached to it (the pinned Sail model's decode will give them, OWNER 9).
-    R = []
+    # Two classes from the partition (sdmfeat.py partition output), each decided by the partition's reason column, nothing named here:
+    #   cleared-feature   reason `needs <feature>`: the form belongs to a feature the declared CPU clears (CLAUDE.md "The declared CPU"); #UD there, the reach certificates are L3a's.
+    #   reserved-encoding reason `undefined opcode`: the SDM opcode map cell is blank and no feature gates the form. No semantics is attached to it (the pinned Sail model's decode will give them, OWNER 9).
+    R = {"cleared-feature": [], "reserved-encoding": []}
     for ln in open(a.cleared):
         if ln[0] == "#" or not ln.strip():
             continue
         site, sk, form, why = ln.rstrip("\n").split("\t")
-        if why != "undefined opcode":
-            continue
+        cls = "reserved-encoding" if why == "undefined opcode" else "cleared-feature"
         o, va = site.rsplit(":", 1); va = int(va, 16)
         ins = next(iter(md.disasm(images[o].bytes(va, 15), va, 1)), None)
-        R.append((o, va, sk, ins.mnemonic if ins else "-", form))
-    print("%-28s %10d %8d %10d" % ("reserved-encoding", len(R), len({x[2] for x in R}), len(R)))
-    for o, va, sk, mn, form in sorted(R, key=lambda x: (x[0], x[1])):
-        lines.append("reserved-encoding\t%s:%08x\t%s\t%s\t%s\t1" % (o, va, sk, mn, form))
+        R[cls].append((o, va, sk, ins.mnemonic if ins else "-", why if cls == "cleared-feature" else form))
+    for cls in sorted(R):
+        L = R[cls]
+        print("%-28s %10d %8d %10d" % (cls, len(L), len({x[2] for x in L}), len(L)))
+        for o, va, sk, mn, detail in sorted(L, key=lambda x: (x[0], x[1])):
+            lines.append("%s\t%s:%08x\t%s\t%s\t%s\t1" % (cls, o, va, sk, mn, detail))
     if a.out:
         open(a.out, "w").write("\n".join(lines) + "\n")
 

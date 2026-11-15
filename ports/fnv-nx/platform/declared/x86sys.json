@@ -1,0 +1,664 @@
+{
+ "cpuid_faulting": {
+  "meaning": "cpuid at CPL 3 executes and returns the CPUID record; it does not fault (CPUID faulting, MSR_MISC_FEATURES_ENABLES bit 0, is not enabled)",
+  "source": "level 2 by absence, per the orchestrator's observable-behaviour ruling: (a) MS Learn __cpuid/__cpuidex (cpp/intrinsics/cpuid-cpuidex, read 2026-11-15) documents the intrinsic as generating the cpuid instruction for ordinary programs, its example is a plain user-mode console main() that executes cpuid and prints the result, and no page text mentions a privilege restriction or an exception; (b) Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6 dlls/ntdll/unix/signal_i386.c is_privileged_instr lines 1214-1271 lists the instructions Wine reports as STATUS_PRIVILEGED_INSTRUCTION (opcode 0x0f 0x20-0x23, in/out, ins/outs, int) and cpuid (0f a2) is not among them; Wine does not use ARCH_SET_CPUID. No pinned source states that Windows 7 SP1 sets the MSR; the SDM Vol 3A pinned here does not describe CPUID faulting (searched 'cpuid faulting': no hit); blocker for a stronger source: Intel SDM Vol 4 (MSRs) and a Windows 7 SP1 statement, neither pinned",
+  "value": 0
+ },
+ "cr0": {
+  "em": {
+   "source": "ruling of the orchestrator (each row is what a ring-3 thread observes on the declared OS): x87 executes natively, no emulation trap is visible; derived: CR0.EM = 1 iff PF_FLOATING_POINT_EMULATED is TRUE, MSDN IsProcessorFeaturePresent gives that value the meaning 'floating-point operations are emulated using a software emulator' (WDK 7.1 winnt.h line 8718), the declared value is 0 (processor_features[1]), and MSDN KeSaveFloatingPointState (learn.microsoft.com wdm/nf-wdm-kesavefloatingpointstate, read 2026-11-15) names STATUS_ILLEGAL_FLOAT_CONTEXT 'the system is configured to use floating-point emulation, rather than doing floating-point operations in the processors' as the other configuration; ks386.inc CR0_EM = 0x4 names the bit",
+   "value": 0
+  },
+  "mp": {
+   "status": "undecided",
+   "why": "no pinned source states CR0.MP (ks386.inc CR0_MP is a bit constant only); user mode sees it only through smsw (undecided)"
+  },
+  "ts": {
+   "source": "ruling of the orchestrator (what a ring-3 thread observes): a ring-3 thread never sees #NM and its FP/SSE state is preserved across context switches; the documentation makes the x87 and SSE state part of the thread context (WDK 7.1 winnt.h line 4135 CONTEXT_FLOATING_POINT '387 state', FLOATING_SAVE_AREA line 4152, ExtendedRegisters line 4275) and no documented user-mode exception for a not-available FPU exists; MS text does not state smsw's TS bit, so this is the observable behaviour only; ks386.inc CR0_TS = 0x8 names the bit",
+   "value": 0
+  }
+ },
+ "cr4": {
+  "pce": {
+   "status": "undecided",
+   "why": "rdpmc at CPL 3 needs CR4.PCE = 1; the SDM only defines the bit, the declared CPU's cpuid does not state it, the WDK 7.1 constants name no PCE bit and Wine 9.0 has no rdpmc case"
+  },
+  "tsd": {
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: is_privileged_instr intercepts only the 0F opcodes ['0x20', '0x21', '0x22', '0x23'], so rdtsc (0F 31) runs in user mode; consistent with the owner's decision that rdtsc reads the platform timer",
+   "value": 0
+  },
+  "umip": {
+   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/verify/cpuid_model.json max_basic @ a3217cd2c604), below 7, so there is no leaf 7 and CR4.UMIP is 0",
+   "value": 0
+  }
+ },
+ "cr4_sse": {
+  "osfxsr": {
+   "source": "derived: CR4.OSFXSR = 1 iff the declared PF_XMMI_INSTRUCTIONS_AVAILABLE (row processor_features[6]) is TRUE, because MSDN IsProcessorFeaturePresent gives that value the meaning 'the SSE instruction set is available' to the calling process and Intel SDM Vol 3A 2.5 / 13.1 raises #UD for SSE instructions when CR4.OSFXSR = 0; ks386.inc CR4_FXSR = 0x200 names the bit",
+   "value": 1
+  },
+  "osxmmexcpt": {
+   "source": "ruling of the orchestrator: an unmasked SIMD FP exception reaches the thread as the documented SEH codes, not as #UD; WDK 7.1 winnt.h line 2030 STATUS_FLOAT_MULTIPLE_FAULTS 0xC00002B4 and line 2031 STATUS_FLOAT_MULTIPLE_TRAPS 0xC00002B5 (MS-ERREF 2.3.1, read 2026-11-15: '{EXCEPTION} Multiple floating-point faults.' / '... traps.'); LEVEL 2 for the mapping from #XM to the code: Wine 9.0 dlls/ntdll/unix/signal_i386.c fpe_handler case TRAP_x86_CACHEFLT lines 2058-2066 raises STATUS_FLOAT_MULTIPLE_TRAPS (0xC00002B5); the MS pages name the codes but do not state which SIMD exception maps to which; ks386.inc CR4_XMMEXCPT = 0x400 names the bit",
+   "value": 1
+  }
+ },
+ "descriptors": {
+  "cs": {
+   "accessed": {
+    "status": "undecided",
+    "why": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"
+   },
+   "base": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 0
+   },
+   "d_b": {
+    "source": "SDM Vol 3A 3.4.5 line 6061: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')",
+    "value": 1
+   },
+   "dpl": {
+    "source": "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3",
+    "value": 3
+   },
+   "g": {
+    "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line 6010, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 1
+   },
+   "limit": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'; the limit is 4 GBytes = 0xFFFFFFFF bytes",
+    "value": 4294967295
+   },
+   "present": {
+    "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread",
+    "value": 1
+   },
+   "s": {
+    "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)",
+    "value": 1
+   },
+   "type": {
+    "status": "undecided",
+    "why": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type"
+   }
+  },
+  "ds": {
+   "accessed": {
+    "status": "undecided",
+    "why": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"
+   },
+   "base": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 0
+   },
+   "d_b": {
+    "source": "SDM Vol 3A 3.4.5 line 6061: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')",
+    "value": 1
+   },
+   "dpl": {
+    "source": "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3",
+    "value": 3
+   },
+   "g": {
+    "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line 6010, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 1
+   },
+   "limit": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'; the limit is 4 GBytes = 0xFFFFFFFF bytes",
+    "value": 4294967295
+   },
+   "present": {
+    "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread",
+    "value": 1
+   },
+   "s": {
+    "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)",
+    "value": 1
+   },
+   "type": {
+    "status": "undecided",
+    "why": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type"
+   }
+  },
+  "es": {
+   "accessed": {
+    "status": "undecided",
+    "why": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"
+   },
+   "base": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 0
+   },
+   "d_b": {
+    "source": "SDM Vol 3A 3.4.5 line 6061: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')",
+    "value": 1
+   },
+   "dpl": {
+    "source": "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3",
+    "value": 3
+   },
+   "g": {
+    "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line 6010, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 1
+   },
+   "limit": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'; the limit is 4 GBytes = 0xFFFFFFFF bytes",
+    "value": 4294967295
+   },
+   "present": {
+    "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread",
+    "value": 1
+   },
+   "s": {
+    "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)",
+    "value": 1
+   },
+   "type": {
+    "status": "undecided",
+    "why": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type"
+   }
+  },
+  "fs": {
+   "accessed": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "base": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "d_b": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "dpl": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "g": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "limit": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "present": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "s": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "type": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   }
+  },
+  "ss": {
+   "accessed": {
+    "status": "undecided",
+    "why": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"
+   },
+   "base": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 0
+   },
+   "d_b": {
+    "source": "SDM Vol 3A 3.4.5 line 6061: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')",
+    "value": 1
+   },
+   "dpl": {
+    "source": "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3",
+    "value": 3
+   },
+   "g": {
+    "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line 6010, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 1
+   },
+   "limit": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'; the limit is 4 GBytes = 0xFFFFFFFF bytes",
+    "value": 4294967295
+   },
+   "present": {
+    "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread",
+    "value": 1
+   },
+   "s": {
+    "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)",
+    "value": 1
+   },
+   "type": {
+    "status": "undecided",
+    "why": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type"
+   }
+  }
+ },
+ "eflags": {
+  "initial": {
+   "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: the initial thread context, context.EFlags",
+   "value": 514
+  },
+  "iopl": {
+   "source": "bits 12-13 of the initial EFLAGS (Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6)",
+   "value": 0
+  },
+  "iopl_user_modifiable": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): EFLAGS_USER_SANITIZE = 0x3F4DD7, the EFLAGS bits user code can set; bits 12-13 are not in it",
+   "value": false
+  }
+ },
+ "format": "fnvnx-x86sys/2",
+ "idtr_limit": {
+  "status": "undecided",
+  "why": "the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"
+ },
+ "int_ring3": {
+  "excluded": {
+   "41": {
+    "status": "undecided",
+    "why": "MSDN __fastfail intrinsic: fast fail is supported from Windows 8 (build 9200); Windows 7 SP1 is build 7601, so int 0x29 is not a fast-fail gate there. What the instruction does on build 7601 is not stated by MSDN: undecided"
+   }
+  },
+  "other_vectors": {
+   "status": "undecided",
+   "why": "no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"
+  },
+  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: handle_interrupt cases ['0x2d']; segv_handler / trap_handler map ['TRAP_x86_BPTFLT', 'TRAP_x86_OFLOW'] to #OF / #BP",
+  "vectors": [
+   3,
+   4,
+   45
+  ]
+ },
+ "lar_lsl": {
+  "cs": {
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
+  },
+  "ds": {
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
+  },
+  "es": {
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
+  },
+  "fs": {
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed, base/limit-dependent bits (fs descriptor undecided)"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "limit of the fs descriptor is undecided"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
+  },
+  "ss": {
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
+  },
+  "tr": {
+   "status": "undecided",
+   "why": "lar/lsl on the TSS selector 0x28: the TSS descriptor (type, limit) is a kernel value with no pinned source"
+  }
+ },
+ "mov_to_sreg": {
+  "ds": {
+   "null": true,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
+  },
+  "es": {
+   "null": true,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
+  },
+  "fs": {
+   "null": true,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
+  },
+  "gs": {
+   "null": true,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3"
+  },
+  "ss": {
+   "null": false,
+   "selectors": [
+    35,
+    59
+   ],
+   "source": "KGDT_R3_DATA and KGDT_R3_TEB are the ring-3 data segments of the WDK's GDT constants (ks386.inc); SDM Vol 3 MOV Sreg: a data segment of DPL 3 is loadable at CPL 3 with RPL 3; ss needs a writable data segment, not the null selector"
+  },
+  "undecided": {
+   "selectors": [
+    27
+   ],
+   "why": "the ring-3 code descriptor's readable bit is not stated in a pinned source, so whether es/ds/fs/gs may load it is undecided"
+  }
+ },
+ "os": {
+  "build": 7601,
+  "sha256": "623155df2ce5dec30006208c391dd9841f123ab5ca7c0153b246859fe617b460"
+ },
+ "precedence": [
+  "(1) documented Win32 for Windows 7 SP1 build 7601: MSDN and WDK 7.1",
+  "(2) Wine 9.0, only where it contradicts neither (1) nor the declared OS",
+  "(3) nothing else (ReactOS is not a source)"
+ ],
+ "processor_features": {
+  "others": {
+   "source": "MSDN IsProcessorFeaturePresent, return value: zero when the feature is not supported; the WDK 7.1 winnt.h defines indices 0..17 only. Wine 9.0 also sets higher indices of newer Windows (e.g. PF_FASTFAIL_AVAILABLE, Windows 8+), which contradicts the declared build 7601 (precedence 1: documentation).",
+   "value": 0
+  },
+  "records": {
+   "0": {
+    "meaning": "On a Pentium, a floating-point precision error can occur in rare circumstances",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_FLOATING_POINT_PRECISION_ERRATA",
+    "source": "Wine 9.0 never sets it on x86: server/mapping.c line 1236 (the section is created SEC_COMMIT, zero-filled, line 1231; the server writes only SystemCall = 1 at line 1237); no assignment of the index in wineboot.c PROCESSOR_ARCHITECTURE_INTEL case lines 408-430",
+    "value": 0,
+    "winnt_h_line": 8717
+   },
+   "1": {
+    "meaning": "Floating-point operations are emulated using a software emulator",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_FLOATING_POINT_EMULATED",
+    "source": "Wine 9.0 never sets it on x86: server/mapping.c line 1236 (the section is created SEC_COMMIT, zero-filled, line 1231; the server writes only SystemCall = 1 at line 1237); no assignment of the index in wineboot.c PROCESSOR_ARCHITECTURE_INTEL case lines 408-430",
+    "value": 0,
+    "winnt_h_line": 8718
+   },
+   "10": {
+    "meaning": "The SSE2 instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_XMMI64_INSTRUCTIONS_AVAILABLE",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 416 maps CPU_FEATURE_SSE2; dlls/ntdll/unix/system.c line 378: CPUID leaf 1 EDX[26] = 1; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 1,
+    "winnt_h_line": 8727
+   },
+   "11": {
+    "name": "PF_SSE_DAZ_MODE_AVAILABLE",
+    "status": "undecided",
+    "why": "Wine 9.0 computes it as SSE2 && FXSAVE && MXCSR_MASK bit 6 (dlls/ntdll/unix/system.c line 386, have_sse_daz_mode, fxsave); verify/cpuid_model.json lacks mxcsr_mask; blocker: the owner of cpuid_model.json (L3a) must add the reference CPU's MXCSR_MASK, which the lifted FXSAVE needs too",
+    "winnt_h_line": 8728
+   },
+   "12": {
+    "meaning": "Data execution prevention is enabled",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_NX_ENABLED",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 422 maps CPU_FEATURE_NX; dlls/ntdll/unix/system.c line 440: CPUID 0x80000001 EDX[20] = 1; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 1,
+    "winnt_h_line": 8729
+   },
+   "13": {
+    "meaning": "The SSE3 instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_SSE3_INSTRUCTIONS_AVAILABLE",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 417 maps CPU_FEATURE_SSE3; dlls/ntdll/unix/system.c line 379: CPUID leaf 1 ECX[0] = 0; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 0,
+    "winnt_h_line": 8730
+   },
+   "14": {
+    "meaning": "The atomic compare and exchange 128-bit operation (cmpxchg16b) is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_COMPARE_EXCHANGE128",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 420 maps CPU_FEATURE_CX128; dlls/ntdll/unix/system.c line 381: CPUID leaf 1 ECX[13] = 0; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 0,
+    "winnt_h_line": 8731
+   },
+   "15": {
+    "name": "PF_COMPARE64_EXCHANGE128",
+    "source": "Wine 9.0 never sets it on x86: server/mapping.c line 1236 (the section is created SEC_COMMIT, zero-filled, line 1231; the server writes only SystemCall = 1 at line 1237); no assignment of the index in wineboot.c PROCESSOR_ARCHITECTURE_INTEL case lines 408-430",
+    "value": 0,
+    "winnt_h_line": 8732
+   },
+   "16": {
+    "name": "PF_CHANNELS_ENABLED",
+    "source": "Wine 9.0 never sets it on x86: server/mapping.c line 1236 (the section is created SEC_COMMIT, zero-filled, line 1231; the server writes only SystemCall = 1 at line 1237); no assignment of the index in wineboot.c PROCESSOR_ARCHITECTURE_INTEL case lines 408-430",
+    "value": 0,
+    "winnt_h_line": 8733
+   },
+   "17": {
+    "meaning": "The processor implements the XSAVE and XRSTOR instructions",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_XSAVE_ENABLED",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 419 maps CPU_FEATURE_XSAVE; dlls/ntdll/unix/system.c line 384: CPUID leaf 1 ECX[27] = 0; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 0,
+    "winnt_h_line": 8734
+   },
+   "2": {
+    "meaning": "The atomic compare and exchange operation (cmpxchg8b) is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_COMPARE_EXCHANGE_DOUBLE",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 410 maps CPU_FEATURE_CX8; dlls/ntdll/unix/system.c line 370: CPUID leaf 1 EDX[8] = 1; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 1,
+    "winnt_h_line": 8719
+   },
+   "3": {
+    "meaning": "The MMX instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_MMX_INSTRUCTIONS_AVAILABLE",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 411 maps CPU_FEATURE_MMX; dlls/ntdll/unix/system.c line 375: CPUID leaf 1 EDX[23] = 1; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 1,
+    "winnt_h_line": 8720
+   },
+   "4": {
+    "name": "PF_PPC_MOVEMEM_64BIT_OK",
+    "source": "Wine 9.0 never sets it on x86: server/mapping.c line 1236 (the section is created SEC_COMMIT, zero-filled, line 1231; the server writes only SystemCall = 1 at line 1237); no assignment of the index in wineboot.c PROCESSOR_ARCHITECTURE_INTEL case lines 408-430",
+    "value": 0,
+    "winnt_h_line": 8721
+   },
+   "5": {
+    "name": "PF_ALPHA_BYTE_INSTRUCTIONS",
+    "source": "Wine 9.0 never sets it on x86: server/mapping.c line 1236 (the section is created SEC_COMMIT, zero-filled, line 1231; the server writes only SystemCall = 1 at line 1237); no assignment of the index in wineboot.c PROCESSOR_ARCHITECTURE_INTEL case lines 408-430",
+    "value": 0,
+    "winnt_h_line": 8722
+   },
+   "6": {
+    "meaning": "The SSE instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_XMMI_INSTRUCTIONS_AVAILABLE",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 412 maps CPU_FEATURE_SSE; dlls/ntdll/unix/system.c line 377: CPUID leaf 1 EDX[25] = 1; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 1,
+    "winnt_h_line": 8723
+   },
+   "7": {
+    "meaning": "The 3D-Now instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_3DNOW_INSTRUCTIONS_AVAILABLE",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 413 maps CPU_FEATURE_3DNOW; dlls/ntdll/unix/system.c sets it only in another vendor's branch (line 419), never in the GenuineIntel branch (lines 423-444) of the declared CPU, so the feature word lacks it",
+    "value": 0,
+    "winnt_h_line": 8724
+   },
+   "8": {
+    "meaning": "The RDTSC instruction is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_RDTSC_INSTRUCTION_AVAILABLE",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 414 maps CPU_FEATURE_TSC; dlls/ntdll/unix/system.c line 368: CPUID leaf 1 EDX[4] = 1; dlls/ntdll/unix/system.c line 441: CPUID 0x80000001 EDX[27] = 0; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 1,
+    "winnt_h_line": 8725
+   },
+   "9": {
+    "meaning": "The processor is PAE-enabled",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_PAE_ENABLED",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 415 maps CPU_FEATURE_PAE; dlls/ntdll/unix/system.c line 369: CPUID leaf 1 EDX[6] = 1; under the declared masks of ports/fnv-nx/verify/cpuid_model.json (vendor GenuineIntel from ports/fnv-nx/verify/cpuref.json)",
+    "value": 1,
+    "winnt_h_line": 8726
+   }
+  }
+ },
+ "selectors": {
+  "cs": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_CODE = 0x18 (the ring-3 code segment) | RPL_MASK 3",
+   "value": 27
+  },
+  "ds": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
+   "value": 35
+  },
+  "es": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
+   "value": 35
+  },
+  "fs": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_TEB = 0x38 (the TEB's segment) | RPL_MASK 3",
+   "value": 59
+  },
+  "gs": {
+   "status": "undecided",
+   "why": "no pinned source gives the initial gs of a Windows 7 user thread (Wine loads the host's gs, the WDK has no KGDT constant for it)"
+  },
+  "ss": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_DATA = 0x20 (the ring-3 data segment) | RPL_MASK 3",
+   "value": 35
+  },
+  "tr": {
+   "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_TSS (the task state segment selector)",
+   "value": 40
+  }
+ },
+ "sgdt": {
+  "status": "undecided",
+  "why": "the GDT base and limit of the OS are kernel values with no documented fixed value and no pinned source"
+ },
+ "sidt_base": {
+  "status": "undecided",
+  "why": "the IDT base is a kernel address with no documented fixed value and no pinned source"
+ },
+ "sldt": {
+  "status": "undecided",
+  "why": "no pinned source states the LDTR of a process that has no LDT"
+ },
+ "sources": {
+  "cpumodel": {
+   "branch": "claude/fnv-l3a-lift-int3",
+   "commit": "a3217cd2c6041b8cf455f8ef269e99747620e18f",
+   "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source",
+   "path": "ports/fnv-nx/verify/cpuid_model.json",
+   "sha256": "91f9b38f04a89fc967c9121d3bdeb8342034e91cd1fe87b8c194cea9061aec3c"
+  },
+  "ks386": {
+   "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc",
+   "path": "headers/_ks386.inc_00858",
+   "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23"
+  },
+  "mirror": {
+   "commit": "09a54d413da7a42d1956b5d675033e71941ae4da",
+   "ref": "tools/wdk71-headers",
+   "repo": "fnv-nx-build",
+   "tree_sha256": "301fc827dd66a386a425a67cdf586bdd81fac68168c114bc6d8e2b833e302770"
+  },
+  "sdm": {
+   "date": "September 2026",
+   "order_number": "253668-093US",
+   "sha256": "310c6a64513e8095abfc32b6a158539560f499d53444050343022f7dda240211",
+   "terms": "ASM-055 (OWNER 10, per the orchestrator): an MS term such as '32-bit flat mode' means what SDM vol. 3A 3.2.1 defines; ASM-055 was not present in verify/ASSUMPTIONS.json on claude/fnv-nx-clean or claude/port-nsw-un6t9s when read (2026-11-15), so the citation names it as the ruling and the registry entry is owed by the orchestrator",
+   "title": "Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A: System Programming Guide, Part 1",
+   "url": "https://cdrdv2-public.intel.com/929359/253668-093-sdm-vol-3a.pdf"
+  },
+  "wine": {
+   "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+   "file": {
+    "origin": "Wine 9.0 dlls/ntdll/unix/signal_i386.c (initial thread context, is_privileged_instr)",
+    "path": "dlls/ntdll/unix/signal_i386.c",
+    "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d"
+   }
+  }
+ },
+ "thread_fp_initial": {
+  "applies_to": "the initial context of every thread, the process's first thread and CreateThread threads alike: the documentation names one initial value with no per-kind difference (the INITIAL_* constants of the thread context)",
+  "mxcsr": {
+   "source": "WDK 7.1.0 winnt.h line 3251 and ntddk.h line 480 (INITIAL_MXCSR); Wine 9.0 dlls/ntdll/unix/signal_i386.c line 2498 (call_init_thunk, initial context)",
+   "value": 8064
+  },
+  "x87_control_word": {
+   "source": "WDK 7.1.0 winnt.h line 3252 and ntddk.h line 481 (INITIAL_FPCSR); Wine 9.0 dlls/ntdll/unix/signal_i386.c line 2496 (call_init_thunk, initial context)",
+   "value": 639
+  }
+ },
+ "tss_io_bitmap": {
+  "exception": "EXCEPTION_PRIV_INSTRUCTION",
+  "ports_permitted": [],
+  "source": "Wine 9.0 dlls/ntdll/unix/signal_i386.c @ c8373ee49fb6: is_privileged_instr returns EXCEPTION_PRIV_INSTRUCTION for every in/out/ins/outs form with no per-port test (the instruction set is L3b's sdm_priv_rows.tsv, iopl class, not restated here), i.e. a Win32 user process has no permitted port; the documentation names the TSS I/O map (WDK 7.1 ks386.inc TssIoMapBase = 0x66, PrIopmOffset = 0x6E) and the exception (MSDN EXCEPTION_PRIV_INSTRUCTION: an instruction not allowed in the current machine mode) but states no permitted port for a user process, so it does not contradict Wine (precedence 2); with IOPL 0 (row eflags) every such instruction at CPL 3 is #GP(0), delivered as that exception",
+  "value": "no port permitted"
+ }
+}
