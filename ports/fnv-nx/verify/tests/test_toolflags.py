@@ -146,10 +146,10 @@ expect("objcopy --disable-deterministic-archives", doc("objcopy", OC + ["-U"]), 
 expect("objcopy --jobs", doc("objcopy", OC + ["--jobs=2"]), ["jobs-in-argv"])
 
 # --- readelf (the link record's ELF facts)
-RE = ["/tc/bin/readelf", "-W", "-S", "-s", "/src/a.elf"]
-expect("readelf -W -S -s on a declared input passes", doc("readelf", RE), [])
+RE = ["/tc/bin/readelf", "-W", "-h", "-S", "-r", "-s", "/src/a.elf"]
+expect("readelf -W -h -S -r -s on a declared input passes", doc("readelf", RE), [])
 expect("readelf without -W", doc("readelf", ["/tc/bin/readelf", "-S", "/src/a.elf"]), ["flag-missing"])
-expect("readelf with another option (-r)", doc("readelf", RE + ["-r"]), ["flag-forbidden"])
+expect("readelf with another option (-x)", doc("readelf", RE + ["-x", "1"]), ["flag-forbidden"])
 expect("readelf on a file outside the inputs", doc("readelf", RE + ["/etc/passwd"]), ["path-outside-inputs"])
 
 # --- python

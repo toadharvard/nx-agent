@@ -197,11 +197,21 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 
 ### ELF facts of a linked output (the link record)
 A green link record carries the facts of the linked ELF, written by the link itself with the pinned binutils of `env.json`; every consumer reads the record and none runs
-`readelf`, `nm` or `objdump` on a linked output. The record is `elffacts.json` ("fnvnx-elffacts/1", `objects.json` key `elf_facts`):
+`readelf`, `nm` or `objdump` on a linked output. The record is `elffacts.json` ("fnvnx-elffacts/2", `objects.json` key `elf_facts`):
 - `sections`: `{index, name, type, address, size, flags}` of every section of the final ELF (`flags` as readelf's letters), from the stage `ldfacts:<root>`: the
-  pinned `readelf -W -S -s` (the one beside the linker the compiler names; it must be a file of a package env.json pins, else the stage is red) run on the final ELF
+  pinned `readelf -W -h -S -r -s` (the one beside the linker the compiler names; it must be a file of a package env.json pins, else the stage is red) run on the final ELF
   (after ldcheck). The stage's stdout is cached with it, so a link that hits the cache runs nothing.
 - `symbols`: the DEFINED symbols of `.symtab`: `{name, value, size, type, bind, section}` (`section` = the Ndx column: an index, ABS or COM).
+- `header`: `{machine, type, entry}` (`-h`; `entry` the e_entry address, an integer).
+- `relocations`: rows `[section, offset, type, symbol, addend, target]` of every relocation section (`-r`; `symbol` is "" for a relocation with no symbol, the section
+  name for a section symbol; `target` = symbol value + addend, an IFUNC symbol's value taken from the symbol table). A link keeps the STATIC relocations of its inputs
+  only with `--emit-relocs` (a link flag of the root; ld manual, Options): without it these are the dynamic relocations of the image.
+- `call_edges`: `{site, caller, caller_offset, callee, target, type}` sorted by site, one per call relocation (the machine's CALL_TYPES: AArch64 CALL26, JUMP26):
+  `caller` the FUNC symbols that hold the site (`[]` if none), `callee` the symbol of the relocation or, for a section symbol, every symbol whose range holds the
+  target. `address_taken`: `{symbol, target}` for every other relocation (not a conditional branch) in an allocated section other than `.eh_frame` and
+  `.gcc_except_table` (unwind tables name every function: metadata). Static call edges exist only for a link with `--emit-relocs`.
+- `members`: `{member, requested_by, symbol}` for every archive member the link pulled in (the map's `Archive member included to satisfy reference by file (symbol)`
+  section), in ld's order. The entry point symbol is the symbol of `symbols` at `header.entry` (the ENTRY of the link script).
 - `references`: for every product object of the link (key `<group>:<unit>`, the objects of the root and of its `link.roots`) the list `{symbol, definer}` of every
   undefined reference it makes that the link resolved: `definer` is the input that defines it, named as ld names it (a product object `/objs/<group>/<unit>.o`, a
   start file, an archive member `ARCHIVE(MEMBER)` with the archive's path, a system library), or `<linker>` for a name that the linker defines itself. A weak
@@ -212,8 +222,7 @@ A green link record carries the facts of the linked ELF, written by the link its
   otherwise the name is the linker's own (or weak undefined: not defined in the output). No text of ld's diagnostics is read.
 Totality: a row of readelf's tables that does not fit the layout of `readelf.c`, a count that disagrees with the table's header line, or a file in ld's table that
 is no input of the link makes `ldfacts:<root>` red; nothing is skipped. The layouts are those of binutils 2.42 and are pinned by `tests/test_elffacts.py`.
-The readelf readers of linked outputs that are to take their facts from this record: see the list in the lead's report (icount.py, gate_tlsmodel.py relocations of
-the linked ELF, contract/pcrel_abs.py).
+Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contract/pcrel_abs.py via gate_pcrel (the ABS symbols), verify/icount.py (L4 converts it).
 
 ## Run stages (`run`)
 

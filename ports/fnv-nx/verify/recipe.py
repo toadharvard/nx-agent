@@ -1979,7 +1979,7 @@ class Job:
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
         rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr((rd, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16],
                             lambda: self.plus(runtime.build_tool(self.store, [rd], [])))[1]
-        doc = {"format": "fnvnx-stage/1", "stage": stage, "argv": [rd, "-W", "-S", "-s", "/linked/" + name], "cwd": "/", "class": "build", "tool": "readelf",
+        doc = {"format": "fnvnx-stage/1", "stage": stage, "argv": [rd, "-W", "-h", "-S", "-r", "-s", "/linked/" + name], "cwd": "/", "class": "build", "tool": "readelf",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(rd)), "outputs": [],
                "inputs": merge_inputs(rt["inputs"] + [{"at": "/linked", "tree": fin}], [], self.store, ws)}
         res = self.stage(doc)[1]
@@ -2006,7 +2006,7 @@ class Job:
             m = re.fullmatch(r"(.*/)?(lib[^/()]*\.a)\((.*)\)", file)
             return base.get("%s(%s)" % (m[2], m[3])) if m else base.get(posixpath.basename(file))
         try:
-            return elffacts.record(name, text, text, mp, products, defs_of)
+            return elffacts.record(name, text, mp, mp, products, defs_of)
         except elffacts.ElfFactsError as e:
             raise BuildRed({"stage": stage, "exit": None, "stderr": [str(e)[-300:]]})
 

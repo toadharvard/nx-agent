@@ -1388,7 +1388,7 @@ Rule (c) groups by address: a body reached through two names of one address with
 ## verify/elffacts.py
 
 ```text
-elffacts: the facts of a LINKED ELF that the link record carries ("fnvnx-elffacts/1"), so that no consumer runs readelf, nm or objdump on a linked
+elffacts: the facts of a LINKED ELF that the link record carries ("fnvnx-elffacts/2"), so that no consumer runs readelf, nm or objdump on a linked
 output. Pure functions over texts the PINNED binutils of env.json printed (the link stage's own readelf and ld stages): no process is started here.
 
   sections    readelf -W -S ELF   -> [{index, name, type, address, size, flags}]            (binutils readelf.c, process_section_headers:
@@ -1397,6 +1397,8 @@ output. Pure functions over texts the PINNED binutils of env.json printed (the l
               C compressed, E exclude, R retain, p processor specific, o OS specific, x unknown, l large)).
   symbols     readelf -W -s ELF   -> the DEFINED symbols (Ndx not UND) of `.symtab`: [{name, value, size, type, bind, section}]  (readelf.c,
               process_symbol_table / print_dynamic_symbol: `Num: Value Size Type Bind Vis [other] Ndx Name`; Size is decimal, or 0xHEX above 100000).
+  header, relocations, members, call_edges, address_taken: as RECIPE.md "ELF facts of a linked output" (readelf -W -h / -r, the map's archive member section,
+              and the derivation from the relocations by the machine's CALL_TYPES); the one `readelf -W -h -S -r -s` output is split by the parsers.
   definers    ld --cref --no-demangle -Map=MAP   -> {symbol: [file, ...]}  (ld.texi, Options, `--cref`: "Output a cross reference table. ... The
               format of the table is intentionally simple, so that it may be easily processed by a script if necessary. The symbols are printed
               out, sorted by name. For each symbol, a list of file names is given. If the symbol is defined, the first file listed is the

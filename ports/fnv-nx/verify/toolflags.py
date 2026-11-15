@@ -166,7 +166,7 @@ def chk_readelf(c, a):
     c.need("-W" in a, "-W", "readelf.args")
     for t in a:
         if t.startswith("-"):
-            if t not in ("-W", "-S", "-s"):
+            if t not in ("-W", "-h", "-S", "-r", "-s"):
                 c.v("flag-forbidden", t, "readelf.args")
         else:
             c.need_under(t, "readelf input", "readelf.args")

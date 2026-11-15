@@ -44,8 +44,8 @@ POLICY = {
     "ar.D": ("ar", "operation letters contain D and not U", "GNU ar manual, Modifiers (D deterministic mode, U real timestamps)"),
     "objcopy.D": ("objcopy", "-D/--enable-deterministic-archives present; -p/--preserve-dates, -U forbidden",
                   "GNU binutils objcopy manual (-D, -p, -U)"),
-    "readelf.args": ("readelf", "-W present; the only options are -W -S -s; every file under a declared input (a reader: it writes nothing)",
-                     "GNU binutils readelf manual, Options (-W --wide, -S --section-headers, -s --syms)"),
+    "readelf.args": ("readelf", "-W present; the only options are -W -h -S -r -s; every file under a declared input (a reader: it writes nothing)",
+                     "GNU binutils readelf manual, Options (-W --wide, -h --file-header, -S --section-headers, -r --relocs, -s --syms)"),
     "python.flags": ("python", "-s and (-B or env PYTHONDONTWRITEBYTECODE=1); -I and -E forbidden (they drop PYTHONHASHSEED, "
                      "measured: hash(\"a\") differs per run under -I); -c and -m forbidden",
                      "Python docs, Command line (-B, -E, -I, -s); PEP 552 (pyc embed source mtime)"),

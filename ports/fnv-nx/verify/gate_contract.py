@@ -143,6 +143,7 @@ def assemble(link, res, game, out, rr):
         if is_game:
             os.symlink(o["object"], os.path.join(link, "game", name))
     os.symlink(res["elf"]["path"], os.path.join(link, "guest", "fnvnx.elf"))
+    os.symlink(res["elf_facts"]["path"], os.path.join(link, "guest", "elffacts.json"))   # the link record: consumers of the linked ELF read it, never nm or readelf
     with open(os.path.join(os.path.dirname(link), "inputs.rsp"), "w") as f:      # the link's response file: one quoted path per object of the link
         f.write("".join('"%s"\n' % o["object"] for o in res["objects"] + [x for lr in res.get("link_roots", []) for x in lr["objects"]]))   # in link order
     for k, dst in (("addrmap", "out/addrmap.tsv"), ("aliases", "out/aliases.ld")):
@@ -202,7 +203,7 @@ def stages(w, doc, ext, rp, only=None):
         "xunit": (py("gate_xunit.py", "--objects", link + "/game", "--nm", NM), ["gate/xunit.json"]),
         "rtti": (py("gate_rtti.py", "--objects", link + "/game", "--readelf", READELF), ["gate/rtti.json"]),
         "pcrel": (py("gate_pcrel.py", "--elf", link + "/guest/fnvnx.elf", "--objects", link + "/fixed", "--work", w + "/pcrel",
-                     "--readelf", READELF, "--nm", NM), ["gate/pcrel.json"]),
+                     "--readelf", READELF, "--facts", link + "/guest/elffacts.json"), ["gate/pcrel.json"]),
         "bind": (py("bind.py", "--obj", w + "/obj.json", "--n1", w + "/n1.json", "--units", rp["units"], "--out", w + "/bind.json", "--n3-out", w + "/n3.tsv"),
                  ["bind.json", "n3.tsv"]),
         "bodysel": (py("bodysel.py", "--universe", P("universe"), "--n1", w + "/n1.json", "--gates", w + "/gates", "--n3", w + "/n3.tsv",
