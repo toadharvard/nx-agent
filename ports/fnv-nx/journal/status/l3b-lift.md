@@ -294,3 +294,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - bottleneck: farm proving time. v3 is 25/54 shards after ~10 h; each shard takes 3,400-4,400 s, 2 at a time per farm, 4 farms, so about 4 h are left. The 4-farm cap limits it. Second: L3a (CODEMAP / SITES.tsv for the undecided and far sites; the lift/rt recipe root for the SEH CONTEXT test).
 - 20:10Z v3 shards 36 (proved 338, gap 7) and 37 (proved 336, gap 8, timeout 1) done (farm 11), failed 0. Complete: 27/54.
 - 20:15Z farms raised to 8 (orchestrator, integ c25091f47). New: farm 17 session_01KmtZKQsNbUFJo5YLf99XPh (K 9-11), 18 session_01KmtZKS6JztAqdT1BzKcjPM (12-14), 19 session_01KmtZKRrFezD7nFUYe49K4K (26-28), 20 session_01KmtZKTosbJBST86GQV375j (40,41,53,54). The old farms keep 05: 5-8, 07: 22-25, 11: 38-39, 12: 49-52. Each farm stops when its list is done; then it is archived.
+- 20:15Z v3 shard 50/54 done (farm 12): proved 334, gap 10, timeout 1, failed 0. Complete: 28/54.
