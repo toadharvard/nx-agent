@@ -360,3 +360,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - aggregation takes exactly one complete content per shard, and two different ones are a failure.
   The rcpref reader fix (04d2aaaad) is not applicable to the lead: the lead still has rcpref.h checked in and lacks L3a's rtgen/gen_cpuref. It joins with the post-v3 merge of L3a's line.
 - 22:33Z v3 shard 14/54 (farm 18): shapes 346, proved 336, model-gap 10, failed 0, 3,811 s. Farm 18 is done and archived. 49/54 complete. Still running: 11, 25, 51, 53, 54.
+- 22:34Z v3 shard 51/54 (farm 12): shapes 345, proved 335, model-gap 10, failed 0. Farm 12 is done and archived. 50/54 complete. Still running: 11 (farm 17), 25 (farm 07), 53, 54 (farm 20).
