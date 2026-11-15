@@ -26,7 +26,8 @@ FN = {"verts": ("d9g_verts", ()), "index_size": ("d9g_index_size", ()), "sm_byte
       "box_w": ("d9x_box_w", (0,)), "box_h": ("d9x_box_h", (0,)), "box_d": ("d9x_box_d", (0,))}
 SPECIAL = {"ok", "ok0", "pd_iunknown", "nonnull", "if", "eq", "band"}
 PROP = {"length": "D9P_LENGTH", "fmt": "D9P_FMT", "width": "D9P_WIDTH", "height": "D9P_HEIGHT", "depth": "D9P_DEPTH", "levels": "D9P_LEVELS", "usage": "D9P_USAGE",
-        "pool": "D9P_POOL", "shader_bytes": "D9P_SHADER_BYTES", "decl_bytes": "D9P_DECL_BYTES", "data_size": "D9P_DATA_SIZE"}
+        "pool": "D9P_POOL", "shader_bytes": "D9P_SHADER_BYTES", "decl_bytes": "D9P_DECL_BYTES", "data_size": "D9P_DATA_SIZE", "qtype": "D9P_QTYPE"}
+REFS = ("REFIID", "REFGUID")   # the parameter ctypes that carry a GUID by reference: one list for every generator
 
 
 class Ctx:

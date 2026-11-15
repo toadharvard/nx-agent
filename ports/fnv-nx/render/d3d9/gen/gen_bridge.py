@@ -20,7 +20,7 @@ from gen_impl import cname  # noqa: E402
 import gen_expr  # noqa: E402
 gen_expr.use_spec(sys.argv[3])
 from gen_expr import Ctx  # noqa: E402
-REFS = ("REFIID", "REFGUID")
+from gen_expr import REFS  # noqa: E402
 
 
 

@@ -9,7 +9,7 @@ import gen_tab as T                           # noqa: E402
 KIND = {"value": 0, "enum": 1, "flags": 2, "float": 3, "ohandle": 4, "handle": 5, "struct": 6, "buffer": 7, "locked": 8}
 DIR = {"in": 0, "out": 1, "inout": 2}
 SHAPE = {"linear": 0, "rect": 1, "box": 2, "dc": 3}
-REFS = ("REFIID", "REFGUID")
+from gen_expr import REFS  # noqa: E402
 
 
 def isptr(p): return p["byref"] or p["kind"] in ("buffer", "locked", "struct")
