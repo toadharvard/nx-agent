@@ -488,3 +488,4 @@ After the first frame:
   - newlib, libgcc and libstdc++ built with 0 errors.
   - The farm sent the pin to L1 and L5.
   - Next: w2 updates the guest_compiler.json pin fields for cand2 and reruns its tests; w3 runs the full layout and datamodel reruns plus the symtab = lines check over the whole runtime.
+- 2026-11-15 19:50Z: guest_compiler.json is on the new pin at plugins a42ad8875 (w2), sent to L1 for cand2; stamp = 9f0d5729908efe09. On the recipe path test_gate_order, test_gate_addr, test_odr, test_dispatch (67) and test_sdd_order pass. w2 has no path item open: PD-RT-STRING-ORDERED waits under the budget rule, since it does not block root, packs, ELF or boot.
