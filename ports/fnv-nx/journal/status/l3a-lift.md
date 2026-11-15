@@ -1085,3 +1085,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Red, sent to L1: contract/objfacts.py does not know L2's sympair kind 'noemit' (66353d9ea), which breaks the pack's `uses` chain and blocks the 6 FTOI units.
   - Next for w12: the cause of expand vars, then a lifter-side rule proposal.
   - bottleneck: the exe facts memory growth (w7); L1 objfacts 'noemit'.
+- 22:18 w8 null_seg_access consumer: base3 e53c09106 accepted (prefixed operands guarded by the row; gs reads stay red until L5's row).
+  - Rule given for default-segment operands: a guard iff segment S may be null, decided per image from the declared initial row and every write to S in the universe. ss and cs are never null in ring 3.
+  - fnvl_seg_init: every selector comes from the declared row through a generated header; no implicit zero.
+- 22:18 w12 paths: bf89c7b36 accepted.
+  - N2 (f_cpufeat from L3b's cpuid table) waits on L3b for 4 AMD rows (3DNOWEXT, SSE4A, XOP, FMA4) and a check of the FXSR leaf.
