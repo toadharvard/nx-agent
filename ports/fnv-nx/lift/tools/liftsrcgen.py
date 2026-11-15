@@ -31,7 +31,7 @@ def universe_size(path):
 
 def lift_inputs():
     """the declared inputs of a shard stage: the lifter package, the runtime headers, the (empty) certificate directory"""
-    return [LIFT + '/fnvlift'] + sorted(os.path.relpath(f, REPO) for f in glob.glob(os.path.join(REPO, LIFT, 'rt', '*.h'))) + [ROOT + '/certs']
+    return [LIFT + '/fnvlift', LIFT + '/proof/__init__.py', LIFT + '/proof/shape.py'] + sorted(os.path.relpath(f, REPO) for f in glob.glob(os.path.join(REPO, LIFT, 'rt', '*.h'))) + [ROOT + '/certs']
 
 
 def images(modules):

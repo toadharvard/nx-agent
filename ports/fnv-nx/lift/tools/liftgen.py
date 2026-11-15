@@ -139,7 +139,7 @@ def sha(path):
 
 def lifter_tree():
     """sha256 over (path, content) of every file the generated text is a function of: the lifter package, the runtime headers it inlines and the generator tools"""
-    fs = [(os.path.relpath(f, LIFT), f) for f in glob.glob(LIFT + '/fnvlift/*.py') + glob.glob(LIFT + '/fnvlift/*/*.py') + glob.glob(LIFT + '/rt/*.h')]
+    fs = [(os.path.relpath(f, LIFT), f) for f in glob.glob(LIFT + '/fnvlift/*.py') + glob.glob(LIFT + '/fnvlift/*/*.py') + glob.glob(LIFT + '/rt/*.h') + [LIFT + '/proof/__init__.py', LIFT + '/proof/shape.py']]
     fs += [('tools/%s.py' % n, '%s/%s.py' % (HERE, n)) for n in ('liftgen', 'impgen', 'dispgen', 'formcert')]      # names, not paths: the same under a stage (/tool) and in a checkout
     h = hashlib.sha256()
     for k, f in sorted(fs): h.update(k.encode() + b'\0' + hashlib.sha256(open(f, 'rb').read()).digest())
