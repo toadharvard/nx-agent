@@ -28,7 +28,7 @@ Pinned SDM: fnv-nx-build `tools/intel-sdm` 0768b0baf29a, PDF sha256 a4a62e6a...f
 
 | 13 | **spec defect, not a citation:** FYL2X with ST(1) = +-inf and ST(0) finite, positive, not 1 | Table 1-44, PDF 1126: -inf row, 0<x<1 -> +inf, x>1 -> -inf; +inf row the opposite; no exception | result bits and OE/UE/PE came from `fpToReal(+-inf) * LOG2(x)` (the real of an infinity is an unspecified z3 value), so the result and flags were unconstrained | the result is an exact infinity (sign of ST(1), flipped when x < 1), no flags; every cell of Table 1-44 is now a test |
 
-Registry scope, no change: the registry has the instructions the pack uses (`x87_keys.tsv`, 118 + 2 cleared). FYL2XP1 (D9 F9), FXTRACT, FDECSTP, FINCSTP, FLDL2T, FLDL2E-class others that the pack never uses are not in it; a new shape would be added from the SDM page by the same rules.
+Registry scope, no change: the registry has the instructions the pack uses (`x87_keys.tsv`, 118 + 2 cleared). FYL2XP1 (D9 F9), FXTRACT, FDECSTP, FINCSTP, FLDL2T and the other forms that the pack never uses are not in it; a new shape would be added from the SDM page by the same rules.
 
 Also recorded, no change needed: FNSTSW/FNSTCW/FLDCW/FNCLEX undefine C0..C3 in the spec (`UNDEF_C0123`): PDF 1096 "The C0, C1, C2, and C3 are undefined." matches.
 
