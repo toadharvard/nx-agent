@@ -15,14 +15,39 @@ Assumption ASM-203: capstone's group tags are a correct classification of the in
 missing (item 2) the table adds the SDM's feature. A tag that is too wide on a feature the model HAS is harmless (the model has it); too wide on an absent feature would raise a wrong #UD:
 test/cpufeat_check.py lists, over every instruction of every module, the forms whose group maps to an absent feature (the A3 table of tools/fpstate.py)."""
 
-# feature -> (CPUID leaf, register, bit), SDM Vol 2 CPUID tables 3-8 / 3-10 and Vol 1 Ch.12
-FEATURES = {
-    'FPU': (1, 'EDX', 0), 'TSC': (1, 'EDX', 4), 'CX8': (1, 'EDX', 8), 'CMOV': (1, 'EDX', 15), 'MMX': (1, 'EDX', 23), 'FXSR': (1, 'EDX', 24), 'SSE': (1, 'EDX', 25), 'SSE2': (1, 'EDX', 26),
-    'SSE3': (1, 'ECX', 0), 'PCLMULQDQ': (1, 'ECX', 1), 'SSSE3': (1, 'ECX', 9), 'FMA': (1, 'ECX', 12), 'SSE4.1': (1, 'ECX', 19), 'SSE4.2': (1, 'ECX', 20), 'MOVBE': (1, 'ECX', 22),
-    'POPCNT': (1, 'ECX', 23), 'AES': (1, 'ECX', 25), 'AVX': (1, 'ECX', 28), 'F16C': (1, 'ECX', 29), 'RDRAND': (1, 'ECX', 30),
-    'BMI1': (7, 'EBX', 3), 'AVX2': (7, 'EBX', 5), 'BMI2': (7, 'EBX', 8), 'ADX': (7, 'EBX', 19), 'SHA': (7, 'EBX', 29),
-    '3DNOW': (0x80000001, 'EDX', 31), '3DNOWEXT': (0x80000001, 'EDX', 30), 'SSE4A': (0x80000001, 'ECX', 6), 'XOP': (0x80000001, 'ECX', 11), 'FMA4': (0x80000001, 'ECX', 16),
-}
+# feature -> (CPUID leaf, register, bit): DERIVED from the generated table (inputs 'cpufeat', L3b cpuid_feature_bits.tsv), never written here.
+# Rule: a feature's gate is its row in a CPUID feature-flag leaf (1, 7, 0x80000001); where the table cites both Intel SDM and AMD APM for one feature, the Intel row decides (the declared
+# machine's CPU is Intel-documented, source order of CLAUDE.md); several distinct remaining rows, or no row, is an error at load (never a silent default).
+FLAG_LEAVES = (1, 7, 0x80000001)
+# the name of a feature in this file -> its name in the table (the table's own spelling, Intel SDM / APM)
+TABLE_NAME = {'CX8': 'CMPXCHG8B', 'SSE4.1': 'SSE4_1', 'SSE4.2': 'SSE4_2', 'AES': 'AESNI', '3DNOW': '3DNow!', '3DNOWEXT': '3DNowExt'}
+
+
+def _load_table(want):
+    from . import inputs
+    rows = {}
+    for l in open(inputs.get('cpufeat')):
+        if not l.strip() or l[0] == '#':
+            continue
+        f, leaf, sub, reg, bit, cit = l.rstrip('\n').split('\t')
+        if f in want and int(leaf, 16) in FLAG_LEAVES:
+            rows.setdefault(f, []).append(((int(leaf, 16), reg, int(bit)), cit.startswith('Intel SDM')))
+    out = {}
+    for f, rs in rows.items():
+        pick = [r for r, intel in rs if intel] or [r for r, intel in rs]
+        if len(set(pick)) != 1:
+            raise ValueError('cpufeat: feature %s has several flag rows %s' % (f, sorted(set(pick))))
+        out[f] = pick[0]
+    return out
+
+
+FEATURE_NAMES = ('FPU', 'TSC', 'CX8', 'CMOV', 'MMX', 'FXSR', 'SSE', 'SSE2', 'SSE3', 'PCLMULQDQ', 'SSSE3', 'FMA', 'SSE4.1', 'SSE4.2', 'MOVBE', 'POPCNT', 'AES', 'AVX', 'F16C', 'RDRAND',
+                 'BMI1', 'AVX2', 'BMI2', 'ADX', 'SHA', '3DNOW', '3DNOWEXT', 'SSE4A', 'XOP', 'FMA4')
+_T = _load_table({TABLE_NAME.get(f, f) for f in FEATURE_NAMES})
+_missing_rows = [f for f in FEATURE_NAMES if TABLE_NAME.get(f, f) not in _T]
+if _missing_rows:
+    raise ValueError('cpufeat: the table has no flag row for %s' % ', '.join(_missing_rows))
+FEATURES = {f: _T[TABLE_NAME.get(f, f)] for f in FEATURE_NAMES}
 # the model's answer, DERIVED from verify/cpuid_model.json by cpumodel_bits.model_words (the one derivation, shared with tools/gen_cpuref.py); leaf 7 is above the
 # model's max basic leaf (verify/cpuid_model.json max_basic), so every leaf-7 feature is absent. No hand-copied constant: a change of the reference CPU changes the gate.
 def _model_bits():
