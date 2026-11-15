@@ -15,3 +15,13 @@ def generate(outdir):
 
 def tmpdir():
     return generate(tempfile.mkdtemp(prefix='fnvl_gen_'))
+
+
+_CPUREF = []
+
+
+def cpuref_dir():
+    """the output of tools/gen_cpuref.py (fnvl_cpuref.h, rcpref.h, cpumodel_tab.inc), generated once per process into a private directory; the one reader of rcpref.h outside the recipe"""
+    if not _CPUREF:
+        d = tempfile.mkdtemp(prefix='fnvl_cpuref_'); subprocess.run([sys.executable, '-I', os.path.join(LIFT, 'tools', 'gen_cpuref.py'), d], check=True); _CPUREF.append(d)
+    return _CPUREF[0]
