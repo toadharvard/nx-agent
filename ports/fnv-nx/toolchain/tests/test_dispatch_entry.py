@@ -50,6 +50,12 @@ def main():
                         ('plain2entry_reint', 'conversion between'), ('entry2void', 'conversion between'), ('implicit', 'conversion between'), ('return', 'conversion between'), ('arg', 'conversion between')):
             r = pb.compile(os.path.join(FIX, 'bad_%s.cpp' % n), os.path.join(td, n + '.o'), so)
             check('%s is the error ENTRY1-CONT' % n, r.returncode != 0 and 'ENTRY1-CONT' in r.stderr and want in r.stderr, r.stderr[:900])
+        r = pb.compile(os.path.join(FIX, 'ok_paths.cpp'), os.path.join(td, 'p.o'), so)
+        check('static initialisers (scalar, array, aggregate), an aggregate copy and a same-type builtin copy are accepted', r.returncode == 0, r.stderr[:1500])
+        for n, tag in (('static_dyn', 'ENTRY1-CONT'), ('static_const', 'a constant is no native entry'), ('static_ctor', 'a constant is no native entry'),
+                       ('union', 'ENTRY1-UNION'), ('union_nested', 'ENTRY1-UNION'), ('memcpy_other', 'ENTRY1-CONT'), ('memset', 'ENTRY1-CONT'), ('memmove_cast', 'ENTRY1-CONT')):
+            r = pb.compile(os.path.join(FIX, 'bad_%s.cpp' % n), os.path.join(td, n + '.o'), so)
+            check('%s is an error (%s)' % (n, tag), r.returncode != 0 and tag in r.stderr, r.stderr[:900])
         r = pb.compile(os.path.join(FIX, 'bad_attr.cpp'), os.path.join(td, 'a.o'), so)
         check('the attribute on a function type (not a pointer) is an error', r.returncode != 0 and 'applies to a pointer-to-function type' in r.stderr, r.stderr[:900])
     finally:

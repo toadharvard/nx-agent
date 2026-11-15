@@ -437,21 +437,24 @@ static bool host_elem_type(tree t)
   return host_type(t);
 }
 
-/* a type that is, or holds by member or element, a host slot */
-static bool contains_host(tree t)
+/* a type that is, or holds by member or element, a marked type (a host slot, an entry pointer): one walker for both attributes */
+static bool contains_marked(tree t, bool (*marked)(tree))
 {
   if (!t || !TYPE_P(t)) return false;
-  if (host_type(t)) return true;
-  if (TREE_CODE(t) == ARRAY_TYPE) return contains_host(TREE_TYPE(t));
+  if (marked(t)) return true;
+  if (TREE_CODE(t) == ARRAY_TYPE) return contains_marked(TREE_TYPE(t), marked);
   if (TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE)
     for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
-      if (TREE_CODE(f) == FIELD_DECL && contains_host(TREE_TYPE(f))) return true;
+      if (TREE_CODE(f) == FIELD_DECL && contains_marked(TREE_TYPE(f), marked)) return true;
   return false;
 }
+static bool contains_host(tree t) { return contains_marked(t, host_type); }
+static bool contains_entry(tree t) { return contains_marked(t, entry_type); }
 
 /* ENTRY1-CONT: a value of type SRC (the expression OPERAND) flows into type DST (a conversion, an initialisation or assignment, a call argument, a result): an
  * entry type meets only itself; the address of a function is the one other source of an entry value. A result that is discarded or tested for truth moves no
  * value, so it is no flow. The front end keeps no conversion node between types it counts as one type: the flow sites are checked as well as the conversions. */
+static std::set<tree> copy_args;                     /* the pointer conversions of a same-type builtin copy: accepted (entry_flow's CALL_EXPR case) */
 static void entry_flow(tree src, tree dst, tree operand, location_t loc)
 {
   if (!src || !dst || !(entry_type(src) || entry_type(dst))) return;
@@ -475,6 +478,23 @@ static tree contp_walk(tree *tp, int *walk_subtrees, void *)
     entry_flow(TREE_TYPE(DECL_INITIAL(DECL_EXPR_DECL(e))), TREE_TYPE(DECL_EXPR_DECL(e)), DECL_INITIAL(DECL_EXPR_DECL(e)), EXPR_LOCATION(e));
   if (c == INIT_EXPR || c == MODIFY_EXPR) { entry_flow(TREE_TYPE(TREE_OPERAND(e, 1)), TREE_TYPE(TREE_OPERAND(e, 0)), TREE_OPERAND(e, 1), EXPR_LOCATION(e)); return NULL_TREE; }
   if (c == CALL_EXPR && CALL_EXPR_FN(e)) {
+    /* __builtin_memcpy/memmove/mempcpy between storage of ONE type that holds entry values copies entry values: its two pointer conversions to `void *` are no flow */
+    if (tree fd = get_callee_fndecl(e))
+      if (fndecl_built_in_p(fd, BUILT_IN_NORMAL)) switch (DECL_FUNCTION_CODE(fd)) {
+        case BUILT_IN_MEMCPY: case BUILT_IN_MEMMOVE: case BUILT_IN_MEMPCPY:
+          if (call_expr_nargs(e) >= 2) {
+            tree a0 = CALL_EXPR_ARG(e, 0), a1 = CALL_EXPR_ARG(e, 1), o0 = a0, o1 = a1;
+            std::vector<tree> chain;
+            for (tree *o : { &o0, &o1 }) while (CONVERT_EXPR_P(*o) || TREE_CODE(*o) == NON_LVALUE_EXPR) { chain.push_back(*o); *o = TREE_OPERAND(*o, 0); }
+            tree t0 = TREE_TYPE(o0), t1 = TREE_TYPE(o1);
+            if (t0 && t1 && POINTER_TYPE_P(t0) && POINTER_TYPE_P(t1) && contains_entry(TREE_TYPE(t0)) &&
+                TYPE_MAIN_VARIANT(strip_array_types(TREE_TYPE(t0))) == TYPE_MAIN_VARIANT(strip_array_types(TREE_TYPE(t1)))) {
+              for (tree x : chain) copy_args.insert(x);
+            }
+          }
+          break;
+        default: break;
+      }
     tree ft = TREE_TYPE(TREE_TYPE(CALL_EXPR_FN(e)));
     tree parm = ft && (TREE_CODE(ft) == FUNCTION_TYPE || TREE_CODE(ft) == METHOD_TYPE) ? TYPE_ARG_TYPES(ft) : NULL_TREE;
     for (int i = 0; i < call_expr_nargs(e) && parm && parm != void_list_node; i++, parm = TREE_CHAIN(parm))
@@ -484,6 +504,16 @@ static tree contp_walk(tree *tp, int *walk_subtrees, void *)
   if (c != NOP_EXPR && c != CONVERT_EXPR && c != VIEW_CONVERT_EXPR) return NULL_TREE;
   tree src = TREE_TYPE(TREE_OPERAND(e, 0)), dst = TREE_TYPE(e);
   if (src && dst && (entry_type(src) || entry_type(dst))) { entry_flow(src, dst, TREE_OPERAND(e, 0), EXPR_LOCATION(e)); return NULL_TREE; }
+  if (src && dst && POINTER_TYPE_P(src) && contains_entry(TREE_TYPE(src))) {
+    if (copy_args.count(e)) return NULL_TREE;      /* an argument of a builtin copy between storage of one type (see the CALL_EXPR case) */
+    /* a pointer to storage that holds entry values (memcpy and memset take it as `void *`): to the same type only; an array decays to its element */
+    tree a = TREE_TYPE(src), b = POINTER_TYPE_P(dst) ? TREE_TYPE(dst) : NULL_TREE;
+    while (a && TREE_CODE(a) == ARRAY_TYPE) a = TREE_TYPE(a);
+    while (b && TREE_CODE(b) == ARRAY_TYPE) b = TREE_TYPE(b);
+    if (!(b && TYPE_MAIN_VARIANT(a) == TYPE_MAIN_VARIANT(b)))
+      error_at(EXPR_LOCATION(e), "ENTRY1-CONT: a pointer to storage that holds entry values (%qT) is converted to %qT: it converts only to a pointer to the same type", src, dst);
+    return NULL_TREE;
+  }
   if (!src || !dst || !(POINTER_TYPE_P(src))) return NULL_TREE;
   tree sp = TREE_TYPE(src);
   if (!contains_host(sp)) return NULL_TREE;
@@ -494,6 +524,43 @@ static tree contp_walk(tree *tp, int *walk_subtrees, void *)
     error_at(EXPR_LOCATION(e), "HOST1: CONT-P: a pointer to a record that holds a host slot is converted to an integer");
   }
   return NULL_TREE;
+}
+
+/* ENTRY1-UNION: a union that is, or holds, an entry type would let another member forge an entry value. Seen once per completed type. */
+static void entry_union(void *gcc_data, void *)
+{
+  tree t = (tree)gcc_data;
+  if (!t || TREE_CODE(t) != UNION_TYPE || !TYPE_FIELDS(t)) return;
+  for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
+    if (TREE_CODE(f) == FIELD_DECL && contains_entry(TREE_TYPE(f))) {
+      error_at(DECL_SOURCE_LOCATION(f), "ENTRY1-UNION: a union member of type %qT holds a native entry type: writing another member would forge an entry value", TREE_TYPE(f));
+      return;
+    }
+}
+
+/* ENTRY1-CONT of a static initialiser: the value of an element flows into the element's type (a CONSTRUCTOR is walked to its elements) */
+static void entry_init(tree val, tree to, location_t loc)
+{
+  if (!val || !to) return;
+  if (TREE_CODE(val) == CONSTRUCTOR) {
+    unsigned long i; tree idx, v;
+    FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(val), i, idx, v) {
+      tree et = idx && TREE_CODE(idx) == FIELD_DECL ? TREE_TYPE(idx) : TREE_CODE(to) == ARRAY_TYPE ? TREE_TYPE(to) : NULL_TREE;
+      if (et) entry_init(v, et, loc);
+    }
+    return;
+  }
+  tree o = val;
+  while (CONVERT_EXPR_P(o) || TREE_CODE(o) == NON_LVALUE_EXPR) o = TREE_OPERAND(o, 0);
+  if (entry_type(to) && TREE_CODE(o) == INTEGER_CST) { error_at(loc, "ENTRY1-CONT: a constant is no native entry address"); return; }
+  entry_flow(TREE_TYPE(val), to, val, loc);
+}
+static void entry_decl(void *gcc_data, void *)
+{
+  tree d = (tree)gcc_data;
+  if (!d || TREE_CODE(d) != VAR_DECL || !DECL_INITIAL(d)) return;
+  if (DECL_CONTEXT(d) && TREE_CODE(DECL_CONTEXT(d)) == FUNCTION_DECL && !TREE_STATIC(d)) return;   /* an automatic variable: its DECL_EXPR is walked in the body */
+  entry_init(DECL_INITIAL(d), TREE_TYPE(d), DECL_SOURCE_LOCATION(d));
 }
 
 static void contp_fn(void *gcc_data, void *)
@@ -686,6 +753,35 @@ static void check_operand(gimple *st, tree op, bool lhs)
   if (lhs && host_load(op)) host_error(st, "a host slot is stored into");
 }
 
+/* ENTRY1-CONT on the lowered GIMPLE: a whole-aggregate copy into storage that holds entry values from another type, and a memory builtin whose destination
+ * points to such storage and whose source is not the same type (memset has no source: a written byte pattern is no entry address) */
+static void entry_aggregate(gimple *st)
+{
+  const char *form = "ENTRY1-CONT: a raw copy or aggregate store into storage that holds entry values from another type";
+  if (gassign *a = dyn_cast<gassign *>(st)) {
+    if (gimple_assign_single_p(a) && TREE_TYPE(gimple_assign_lhs(a)) && AGGREGATE_TYPE_P(TREE_TYPE(gimple_assign_lhs(a))) && contains_entry(TREE_TYPE(gimple_assign_lhs(a)))
+        && TYPE_MAIN_VARIANT(TREE_TYPE(gimple_assign_lhs(a))) != TYPE_MAIN_VARIANT(TREE_TYPE(gimple_assign_rhs1(a))))
+      error_at(gimple_location(st), "%s", form);
+  } else if (gcall *c = dyn_cast<gcall *>(st)) {
+    if (!gimple_call_builtin_p(c, BUILT_IN_NORMAL)) return;
+    switch (DECL_FUNCTION_CODE(gimple_call_fndecl(c))) {
+    case BUILT_IN_MEMCPY: case BUILT_IN_MEMMOVE: case BUILT_IN_MEMPCPY: case BUILT_IN_MEMCPY_CHK: case BUILT_IN_MEMMOVE_CHK: case BUILT_IN_MEMPCPY_CHK: {
+      tree d = TREE_TYPE(gimple_call_arg(c, 0)), s2 = TREE_TYPE(gimple_call_arg(c, 1));
+      if (POINTER_TYPE_P(d) && contains_entry(strip_array_types(TREE_TYPE(d))) &&
+          !(POINTER_TYPE_P(s2) && TYPE_MAIN_VARIANT(strip_array_types(TREE_TYPE(s2))) == TYPE_MAIN_VARIANT(strip_array_types(TREE_TYPE(d)))))
+        error_at(gimple_location(st), "%s", form);
+      break;
+    }
+    case BUILT_IN_MEMSET: case BUILT_IN_MEMSET_CHK: {
+      tree d = TREE_TYPE(gimple_call_arg(c, 0));
+      if (POINTER_TYPE_P(d) && contains_entry(strip_array_types(TREE_TYPE(d)))) error_at(gimple_location(st), "%s", form);
+      break;
+    }
+    default: break;
+    }
+  }
+}
+
 static const char *aggregate_form = "an aggregate with host slots is copied, loaded, stored, passed or returned by value";
 
 static void aggregate_operand(gimple *st, tree op)
@@ -701,6 +797,7 @@ static tree aggregate_stmt(gimple_stmt_iterator *gsi, bool *handled, struct walk
 {
   gimple *st = gsi_stmt(*gsi);
   if (is_gimple_debug(st)) return NULL_TREE;
+  entry_aggregate(st);
   if (gassign *a = dyn_cast<gassign *>(st)) {
     for (unsigned i = 0; i < gimple_num_ops(a); i++) aggregate_operand(st, gimple_op(a, i));
   } else if (gcall *c = dyn_cast<gcall *>(st)) {
@@ -969,6 +1066,8 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   }
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
   register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, contp_fn, NULL);
+  register_callback(info->base_name, PLUGIN_FINISH_TYPE, entry_union, NULL);
+  register_callback(info->base_name, PLUGIN_FINISH_DECL, entry_decl, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   register_pass_info ap;
   ap.pass = new agg_pass(g);
