@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/verify
 """Every write into GATE_CACHE is a publication (spec: verify/RECIPE.md "Externals in a shared store", the rule of publish_dir / cas.publish_file).
 Real processes on the real checkout: two processes run gate_build.ensure of one product root on ONE cache at the same moment; both are green, both read the
 same published objects dir, no temporary name is left, and the content of the cache (store objects, stage results, objects.json after the cache path is

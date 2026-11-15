@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
+# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_pure.py, verify/gate_tests.py, verify/gates.d and verify/l1.py.
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Uses temp git repositories."""
 import json
@@ -206,7 +211,7 @@ check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"p
 
 # ---- l1
 def l1(*a):
-    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "l1.py")] + list(a), capture_output=True, text=True, env=ENV)
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "l1.py"), a[0], "--artifacts", ENV.get("ARTIFACTS_URL", "file:///none")] + list(a[1:]), capture_output=True, text=True, env=ENV)
     lines = [x for x in p.stdout.splitlines() if x.startswith("L1 ")]
     return p.returncode, lines[-1] if lines else "", p.stdout, p.stderr
 
@@ -471,10 +476,11 @@ check("tests cache (view): a path the test saw as absent now exists -> that file
 # a test whose import closure reaches a module that runs strace is untraced (derived, no list) and keyed by whole directories
 d4 = tmp("tests-cache-untraced")
 c4 = os.path.join(d4, "cache")
-mk(d4, test_u="open('ran.log', 'a').write('u\\n')\nCHILD = \"\"\"\nimport envcheck\n\"\"\"\n", test_t="open('ran.log', 'a').write('t\\n')\n")
+LOG4 = os.path.join(d4, "ran.log")   # an untraced test runs in its own mount directory: the log is an absolute path
+mk(d4, test_u="# reads: other\nopen(%r, 'a').write('u\\n')\nCHILD = \"\"\"\nimport envcheck\n\"\"\"\n" % LOG4, test_t="open(%r, 'a').write('t\\n')\n" % LOG4)
 put(d4, "other/data.txt", "1\n")
 ran4 = lambda: open(os.path.join(d4, "ran.log")).read().split() if os.path.exists(os.path.join(d4, "ran.log")) else []
-ex4 = ("--key-dirs", "verify", "other", "--")
+ex4 = ()   # the untraced file declares its data (`# reads: other`); no key-dirs
 tests_c(d4, c4, extra=ex4)
 tests_c(d4, c4, extra=ex4)
 check("tests cache (untraced): unchanged -> both cached", sorted(ran4()) == ["t", "u"], ran4())

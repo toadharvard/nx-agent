@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/loader/build.json ports/fnv-nx/loader/guest/boot.c ports/fnv-nx/loader/src
+# reads: ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """The loader's generated tables (loader/build.json): the eight symbols the loader links against come from generator stages over the pinned exe, never from a
 tracked file. Pure: reads the recipe and runs the producers' text functions on toy rows; no private input."""
 import json

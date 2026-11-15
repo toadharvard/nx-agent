@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for the `link.loader` key of recipe.link_errors: a shared image declares the root of the image that loads it. Pure: synthetic admit entries."""
 import os
 import sys
