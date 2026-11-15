@@ -560,6 +560,22 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
 - A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
   to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
 - Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.
+- **gs on Windows 7 (7601) x86, orchestrator decision 2026-11-15 22:05Z.**
+  - No pinned source states the initial user-mode gs selector (L5, from the whole WDK 7.1 ISO and Wine 9.0). So the row
+    stays undecided. No value is chosen, and none is taken from register dumps of another NT build.
+  - The sites that read gs are closed by reach, by two rules:
+    1. **/GS failure paths (OWNER 6).** The cookie check compares the frame's cookie with the value at the image's own
+       load-config `SecurityCookie` VA (PE IMAGE_LOAD_CONFIG_DIRECTORY, read from the image bytes, not from names).
+       Only a write outside its object can make them differ, which OWNER 6 excludes. So the failure branch, and every
+       site reached only through it, is unreachable. The CRT context capture (`mov m16, gs`, 24 sites) is such a site.
+       The certificate names that branch, the load-config field and OWNER 6.
+    2. **Bytes that no path from an entry reaches.** They get the ordinary call-graph certificate. Bytes decoded only
+       by fallthrough into data are a defect of the code universe, and L3a fixes it there.
+  - A gs site that neither rule closes is reported to the orchestrator with its address.
+  - Owners:
+    - L3a emits the facts and the reach_violation sites;
+    - L1's call-graph gate accepts certificate kind (1) with the load-config fact;
+    - L5 keeps the row undecided and hands its brief to L3a.
 - **Where the Microsoft page is narrower (orchestrator, 2026-11-15 13:45Z; it applies to D3D9 and its shader models as well).**
   - Microsoft does not list a case, but Wine 9.0 accepts it. That case is a silence, not a contradiction, so source 2
     fills it and the accepted set is the union.
