@@ -352,3 +352,5 @@ After the first frame:
 - objstub reach-not-exit: blocked by L1 (gate_objstub.py @2548e6128 input errors: an x86-64 gl4 object in the guest universe; the loader gen has no TMPDIR). Reported to the L1 lead.
 - MLIB1 flag-copy deletions (guest_compiler.json, targets.py:32, test_targets.py:26/28, test_datamodel.py:49): sent to L1 for cand3.
 - w3 next: test_names, test_pi, test_sdd, then the S23 tree regeneration. w2: NO-MIX follow-ups (PD-STACK-REUSE, cand2 gate merge, the 10 Graph::build B).
+- NO-MIX: done, w2 claude/fnv-l2-source-w2-sddorder @444507866 (+ PERFDEBT PD-STACK-REUSE b947b2c5d). Platform root, cand2 gate: A 543, B 0, C 49; 592 plain + 114 frame-escape-unrecorded = 706 (was 980 at 39e62c50b), over 109/114 objects (the 5 missing are named to L1 w15).
+- w2 doing: plugin-emitted loads (the dispatch TLS-offset `ldr`) classified by ORD-T reason or ordered; test_sdd_order on the reason record. Order fixtures handed to w15 as the one copy; test_gate_order's direct compiler call reported to w15 (rule 3).
