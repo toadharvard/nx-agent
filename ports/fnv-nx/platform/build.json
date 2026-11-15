@@ -308,6 +308,21 @@
     "freetype/gen/src/truetype/truetype.c",
     "freetype/gen/src/truetype/ttgxvar.fnvnx.inc"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/declared/gen_osrec.py",
+   "args": [
+    "--os",
+    "/in/ports/fnv-nx/platform/declared/os.json",
+    "--header",
+    "/out/win32/declared_os.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/declared/os.json"
+   ],
+   "outputs": [
+    "win32/declared_os.h"
+   ]
   }
  ],
  "os_layer": [],
