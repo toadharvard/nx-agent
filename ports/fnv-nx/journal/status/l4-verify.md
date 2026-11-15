@@ -262,3 +262,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 01:40:
   - NPROC follow-up declined. FNVNX_NPROC is defined as popcount(FNVNX_APP_CORES) in placement.h (static-asserted), so it is one fact and has no second check.
   - Task T (w7, doing): the "fnvnx/game" alias is deleted (L5: no header name, stale pre-split layout). The game is FNVNX_SD_DIR only, read from the header; no directory-content choice.
+- 01:45:
+  - Group 2 mode channel done (w6-r 8e2890530): sdmc:/mode is read through the product fs path; missing -> 0xE0000002, unknown -> 0xE0000001; with_data_word deleted. Shifted assertions are measured from the fnvboot_mode_start mark. Not yet run: link red.
+  - Icount fixture (w6, doing): its own guest test root on link/guest.json, loaded by the boot machine's loader; no as/ld/objcopy/nm in the test.
+  - w6 is checking that w12L2 a7c657f56 and w8 68814726d (lift/rt ftoi inputs) are in w6-r.
