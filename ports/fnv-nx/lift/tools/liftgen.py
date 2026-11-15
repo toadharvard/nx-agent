@@ -148,7 +148,8 @@ def lifter_tree():
 
 def inputs(a):
     """the generation inputs of a shard: the exe, the universe, the jump-table facts, the emit mode and the lifter; a change of any of them changes the pack manifest and so the external's tree"""
-    return dict(exe_sha256=sha(a.exe), universe_sha256=sha(a.universe), jtab_sha256=sha(a.jtab), emit=a.emit, lifter_tree_sha256=lifter_tree())
+    return dict(exe_sha256=sha(a.exe), universe_sha256=sha(a.universe), jtab_sha256=sha(a.jtab), emit=a.emit, lifter_tree_sha256=lifter_tree(),
+                base=('%08x' % a.base if a.base is not None else None))      # base: the loader's assigned base of a module (modules.tsv row); None for the exe
 
 
 def image_inputs(d):
@@ -174,11 +175,38 @@ def image(d, ent):
     return texts
 
 
+def module_table(path):
+    """-> (sha256 of the loader's modules.tsv, {lower-case file name: row}) : the ONE source of the module set and of every base (contract/modules.py output; tools/pemod.modules)"""
+    import pemod
+    return sha(path), pemod.modules(path)
+
+
+def check_images(images, table, exe_sha):
+    """RULE one module table: the image set of the pack is the exe plus EVERY row of the loader's table, nothing else; each image was lifted from the file the row pins (sha256) at the row's
+    assigned base, and every entry of its universe lies inside the row's address range [base, base + size_of_image). The pack takes no module set and no base of its own."""
+    by_sha = {r.sha256: r for r in table.values()}; seen, bad = {}, []
+    for d, ent in images:
+        rec = image_inputs(d); r = by_sha.get(rec['exe_sha256'])
+        if rec['exe_sha256'] == exe_sha:
+            if rec.get('base') is not None: bad.append('%s: the exe image carries a base %s' % (d, rec['base']))
+            continue
+        if r is None: bad.append('%s: its file (sha256 %s) is not a row of the module table' % (d, rec['exe_sha256'])); continue
+        if r.name in seen: bad.append('%s: the image of %s is given twice (%s)' % (d, r.name, seen[r.name])); continue
+        seen[r.name] = d
+        if rec.get('base') is None or int(rec['base'], 16) != r.base: bad.append('%s: %s lifted at base %s, the table assigns %08x' % (d, r.name, rec.get('base'), r.base))
+        out = sorted(x for x in ent if not r.base <= x < r.base + r.sizeimg)
+        if out: bad.append('%s: %d universe entries outside [%08x, %08x) of %s (first %08x)' % (d, len(out), r.base, r.base + r.sizeimg, r.name, out[0]))
+    bad += ['%s: a row of the module table with no image in the pack' % n for n in sorted(set(r.name for r in table.values()) - set(seen))]
+    if bad: sys.exit('finish: the images do not agree with the module table:\n  ' + '\n  '.join(bad))
+
+
 def finish(a):
     import fnvlift as L
     out = a.out; pk = out + '/pack'
     os.makedirs(pk + '/u', exist_ok=True)
     images = [(out, L.universe.load(a.universe)[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
+    table_sha, table = module_table(a.modules)
+    check_images(images, table, image_inputs(out)['exe_sha256'])
     texts, forms, encs, shapes, shape_fam = {}, collections.defaultdict(lambda: [0, 'none']), {}, collections.Counter(), {}
     for d, ent in images:
         t = image(d, ent)
@@ -206,7 +234,8 @@ def finish(a):
         assert k not in syms
         syms[k] = sy; kind[k] = 'runtime'
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
-    w('entries', [('%08x' % x, sy, kind[x]) for x, sy in sorted(syms.items())])      # lifted and runtime rows: independent of the loader table
+    w('entries', [('%08x' % x, sy, kind[x]) for x, sy in sorted(syms.items())])      # lifted and runtime rows
+    open(pk + '/entries.tsv', 'a').write('# module_table sha256 %s\n' % table_sha)      # the loader's modules.tsv this pack was lifted against (the stage packentries.py checks it)
     w('shapes', [(k, shape_fam[k], n) for k, n in sorted(shapes.items(), key=lambda t: t[0].encode())])      # the universe of formgate: exactly what was lifted
     w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
@@ -250,12 +279,12 @@ def recipe(ref, commit, tree, dest=None):
     rec = {'format': 'fnvnx-recipe/1', 'profile': 'guest',      # the game's compiler, its runtime and the full plugin set come from the profile (verify/guest_compiler.json, recipe.py): a root names only its own flags
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['ports/fnv-nx/lift/pack/inc'], 'units': 'all',
-           'uses': [{'root': 'ports/fnv-nx/bridgefacts', 'output': 'BRIDGE'}, {'root': 'ports/fnv-nx/loader', 'output': 'IMPORTED_TSV'}, GEN_USE],
+           'uses': [{'root': 'ports/fnv-nx/bridgefacts', 'output': 'BRIDGE'}, {'root': 'ports/fnv-nx/loader', 'output': 'IMPORTED_TSV'}, {'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, GEN_USE],
            'include_uses': [GEN_USE],
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['copy', '/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['imp', '--bridge', '/uses/ports/fnv-nx/bridgefacts/BRIDGE', '--imported', '/uses/ports/fnv-nx/loader/IMPORTED_TSV', '--prelude', 'fnvl_prelude.h', '--out', '/out'],
                           'inputs': [], 'outputs': ['imp.cpp', 'imp_entries.tsv', 'imp_blocked.tsv']},
-                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/bridgefacts/BRIDGE', '/out/entries.tsv'],
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/bridgefacts/BRIDGE', '/uses/ports/fnv-nx/loader/MODULES_TSV', '/out/entries.tsv'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:1', 'path': 'imp_entries.tsv'}], 'outputs': ['entries.tsv']},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '--rows', '/out/disp_rows.tsv', '/stage/entries.tsv', '/out/disp.cc'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.cc', 'disp_rows.tsv']}] + inc_stages(),
@@ -290,7 +319,7 @@ def main():
     A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)
-    need = ['out'] + (['universe', 'gen'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
+    need = ['out'] + (['universe', 'gen', 'modules'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
     miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
     if miss: ap.error('missing %s' % ' '.join(miss))
     a.base = None

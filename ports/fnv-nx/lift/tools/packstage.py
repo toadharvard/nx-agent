@@ -21,7 +21,7 @@ def main(argv):
         (a, b), _ = cli.parse('usage: packstage.py copy PACK OUT', rest, (2, 2)); packcopy.main(a, b); return 0
     if sub == 'entries':
         import cli, packentries
-        (a, b, c, d), _ = cli.parse('usage: packstage.py entries PACK_ENTRIES IMP_ENTRIES BRIDGE_TSV OUT', rest, (4, 4)); packentries.main(a, b, c, d); return 0
+        (a, b, c, m, d), _ = cli.parse('usage: packstage.py entries PACK_ENTRIES IMP_ENTRIES BRIDGE_TSV MODULES_TSV OUT', rest, (5, 5)); packentries.main(a, b, c, m, d); return 0
     if sub == 'inc':
         import prelude
         return prelude.main(rest)

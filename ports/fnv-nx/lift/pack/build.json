@@ -26,6 +26,10 @@
    "output": "IMPORTED_TSV"
   },
   {
+   "root": "ports/fnv-nx/loader",
+   "output": "MODULES_TSV"
+  },
+  {
    "root": "ports/fnv-nx/lift/rt",
    "output": "GEN"
   }
@@ -4171,6 +4175,7 @@
     "/ext/liftpack/entries.tsv",
     "/stage/imp_entries.tsv",
     "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
     "/out/entries.tsv"
    ],
    "inputs": [
@@ -4252,9 +4257,9 @@
   {
    "name": "liftpack",
    "repo": "fnv-nx-build",
-   "ref": "l3a-lift/pack/7b2faae276b2-noprelude",
-   "commit": "751b898b14ce2f527030236fb625cc7cd7467f96",
-   "tree_sha256": "aefdd1bd32b25464ee0cc7db2fe504a52d8fcb8d5d85542bcfc11b7d97cbc4a7",
+   "ref": "l3a-lift/pack/7b2faae276b2-noneed",
+   "commit": "db2aaf6d4a08d96f9c91d25980170578b983bfe0",
+   "tree_sha256": "c7367e301ed27aabc548eb2a0f0fa9e081ac97d60911a914d7f4f021b777cb05",
    "at": "/ext/liftpack"
   }
  ]
