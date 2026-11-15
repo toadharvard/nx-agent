@@ -956,3 +956,5 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - w12 checks that the semantic flags do not need sched1, then measures @prof2.
   - 6 units fail FTOI in the stale prelude snapshot. They are recompiled against the generated prelude.
 - 21:42 L1 accepted the verdict gate `liftfacts` (cand4; written by L1 w28, claude/fnv-l1-contract-w28). It is red on any non-green image, on uncertified bytes, entries_on_data or pcsrc s4 rows above 0, or on a pack-set image missing from GATES. w7 sends the format sample to w28.
+- 21:45 The loader/platform cycle is closed by L5 w9 a9cefdbec (hostabi/include/fnvnx/loader_iface.h; the loader has 0 platform includes). The loader (12 objects), platform (113) and rt/guest (6) are green. w8 merges a9cefdbec and 0608004f5 into base3 and resumes the liftsrc cold build.
+- bottleneck: the liftsrc cold build on the new base3 (w8); the d3dx9 and exe facts stages (w7); per-image fpfacts (w13); @prof2 (w12).
