@@ -72,6 +72,9 @@ assert mx <= 15, "an sm1 instruction of the table has more operand words than th
 L.append("#define NX_SM1_MAX_OPERANDS %d" % mx)
 # texld operand rule (sm_illegal.tsv rows kind srcmod, feature *@texld.coord / *@texld.sampler-src): the models in which src0 / the sampler take no modifier or swizzle
 ill = list(csv.DictReader(open(os.path.join(os.path.dirname(tabj), "sm_illegal.tsv")), delimiter="\t"))
+_lk = {(x["model"], x["feature"]) for x in T["legacy"]}   # one record per fact: a (model, feature) is in sm_table.json legacy or in sm_illegal.tsv, never both
+_both = sorted(_lk & {(r["model"], r["feature"]) for r in ill})
+assert not _both, _both
 for nm, suf in (("COORD", "@texld.coord"), ("SAMPLER", "@texld.sampler-src")):
     L.append("#define NX_SM_TEXLD_%s_MODELS 0x%x" % (nm, sum(1 << MI[m] for m in {r["model"] for r in ill if r["feature"].endswith(suf)})))
 # undetermined rcp_mask (illegal above one component, MS vs masking page): the vs opcodes whose table mask kind is `single`
