@@ -39,7 +39,7 @@ def main():
     host = tg.guest_repo("d1", REC, pin, target="host")
     rc, r, o = gate(host, cache)
     check("no guest root: universe 0, green", rc == 0 and r["status"] == "green" and r["universe"] == 0, o)
-    stock = tg.guest_repo("d2", REC, pin)
+    stock = tg.guest_repo("d2", dict(REC, compiler={"cc": "gcc", "cxx": "g++"}), pin)
     rc, r, o = gate(stock, cache)
     check("guest root on the stock g++: red, compiler item uncertified", rc == 2 and r["certified"] == 0 and ROOT + ":compiler" in r["uncertified"], r)
     other = tg.guest_repo("d3", tg.guest_rec(dict(ext, commit="c" * 40)), pin)
@@ -106,6 +106,18 @@ def main():
                                                      ROOT + "/s.S": ".text\n.globl sx\nsx: ret\n"})
     rc, r, o = gate(g, cache)
     check("native guest root on the pinned compiler: green, compiler + C++, C and asm units", rc == 0 and r["status"] == "green" and (r["certified"], r["universe"]) == (7, 7), (rc, r, o))
+
+    # a (root, variant) spec is judged by the variant's own record; an unknown variant is red, never a crash
+    vrec = dict(rec, variants={"vv": {"flags_add": {"cxx": ["-DFNVNX_VARIANT=1"]}}})
+    vg = tg.guest_repo("d5", vrec, pin, files={DM_JSON: json.dumps({"rows": [dict(id="S05", flag=None, check='static_assert DM("S05") in toolchain/tests/x.cpp')]}),
+                                                "ports/fnv-nx/toolchain/tests/x.cpp": '#define DM(id, ...) static_assert((__VA_ARGS__), id)\nDM("S05", sizeof(int) == 4);\n',
+                                                ROOT + "/b.cc": "int b() { return 2; }\n"})
+    vc = os.path.join(BASE, "gate-cache-dm")
+    jb = gd.judge_root(ROOT, vg, vc)
+    jv = gd.judge_root(ROOT + "@vv", vg, vc)
+    ju = gd.judge_root(ROOT + "@nope", vg, vc)
+    check("root@variant: judged by the variant record (own units, same universe as the base), green", jv[0] == jb[0] and jv[1] == jv[0] and jb[1] == jb[0], (jb, jv))
+    check("root@unknown variant: red item, 'no variant' reason, no crash", ju[1] == 0 and ju[0] >= 1 and "no variant" in ju[3], ju)
 
 
 if __name__ == "__main__":
