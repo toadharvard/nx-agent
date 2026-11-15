@@ -310,9 +310,14 @@ EOF5
   done_ libs
 fi
 note "multilibs: $("$P/bin/$T-gcc" -print-multi-lib | tr '\n' ' ')"
-for lib in libgcc.a libgcc_eh.a libstdc++.a libsupc++.a libc.a libm.a libsysbase.a; do
-  f=$("$P/bin/$T-gcc" $MLFLAGS -print-file-name=$lib)
-  [ -f "$f" ] || { echo "build.sh: missing $lib for the multilib ($f)" >&2; exit 4; }
+# every library the g++ driver names on a C++ link line exists in each multilib (the names are the driver's own: -### of a C++ link;
+# libsupc++ is part of libstdc++'s convenience set and is checked with it)
+echo 'int main() {}' > "$W/probe.cc"
+for ml in "" $MLFLAGS; do
+  for lib in $("$P/bin/$T-g++" -mabi=$ABI $ml -### "$W/probe.cc" -o "$W/probe" 2>&1 | grep collect2 | tr ' ' '\n' | tr -d '"' | sed -n 's/^-l//p' | sort -u) supc++; do
+    f=$("$P/bin/$T-g++" -mabi=$ABI $ml -print-file-name=lib$lib.a)
+    [ -f "$f" ] || { echo "build.sh: missing lib$lib.a for the multilib '$ml' ($f)" >&2; exit 4; }
+  done
 done
 # MANIFEST.json (fnvnx-runtime-manifest/1): what the recipe compares against the compiler before any unit runs. The compiler's own
 # repo/ref/commit/tree_sha256 are not in it (the manifest is inside the tree that hash covers): they are the pin in guest_compiler.json.

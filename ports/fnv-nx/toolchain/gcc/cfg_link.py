@@ -140,8 +140,16 @@ def check(obj, linkfile, marker):
         if t.startswith(("-L", "-l", "-m")) or t in ("--start-group", "--end-group", "-(", "-)"):
             args.append(t)
         elif t.endswith(".o") and not t.startswith("-"):
-            args.append(obj if not os.path.exists(t) and os.path.basename(t).startswith("cc") else t)
+            args.append(t)
         i += 1
+    # The driver's -### prints the test's own object under a name it never creates (a cc*.o temp, or conftest.o under -save-temps).
+    # Of the .o inputs, the crt objects are found in the -L directories or by path; the one that exists nowhere is the test's object.
+    dirs = [a[2:] for a in args if a.startswith("-L")]
+    missing = [k for k, a in enumerate(args) if a.endswith(".o") and not a.startswith("-") and not os.path.exists(a)
+               and not any(os.path.exists(os.path.join(d, a)) for d in dirs)]
+    if len(missing) != 1:
+        die("expected exactly one object that exists nowhere (the test's), found %d: %s" % (len(missing), [args[k] for k in missing]))
+    args[missing[0]] = obj
     # ld itself decides which archive members the link pulls: a relocatable link (-r) takes the same members for the same
     # undefined symbols, and leaves exactly the symbols that a final link would report as undefined.
     out = marker + ".r.o"
