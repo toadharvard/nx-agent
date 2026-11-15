@@ -64,6 +64,12 @@ def _plugin(name, args):
     return p
 
 
+def _root_flags(flags, cxx):
+    """the per-root part of the product flags (recipe.PER_ROOT) plus the required -Werror=attributes; the semantics come from the pin"""
+    f = [x for x in flags if recipe.PER_ROOT.fullmatch(x) and (cxx or x not in CXX_ONLY_FLAGS)]
+    return f + [recipe.WERROR_ATTR]
+
+
 def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=False):
     """build the toy guest root: plugins [(name, {key: value})] in load order, fixtures {unit file name: text}; -> (objects.json dict, out dir)"""
     _N[0] += 1
@@ -72,19 +78,18 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     _git(repo, 'init', '-q')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
     ext = pin['external']
-    if native:   # a native root loads every plugin with its fixed arguments (recipe.PLUGIN_ARGS) and the semantics flags
-        plugins = [(n[len('fnvnx_'):], a) for n, a in ((n, dict(recipe.PLUGIN_ARGS[n])) for n in recipe.PLUGIN_SOURCES)]
-        flags = ['-O2'] + list(recipe.SEMANTICS_FLAGS) + [f for f in flags if f not in recipe.SEMANTICS_FLAGS and f != '-O2']
-    plugins = [('fnvnx_' + n, a) for n, a in plugins]
-    if not native and not raw:   # the mode of fnvnx_ftoi is the root's, never a choice (recipe.plugin_args)
-        plugins = [(n, dict(a, mode='lifted') if n == 'fnvnx_ftoi' else a) for n, a in plugins]
-    if not native and lifted_ftoi and 'fnvnx_ftoi' not in [n for n, _ in plugins]:   # required by the lifted-root rule, loaded first as in the product order
-        plugins.insert(0, ('fnvnx_ftoi', dict(recipe.plugin_args('lifted')['fnvnx_ftoi'])))
+    # every guest root loads the full plugin set in the recipe's order, with the fixed arguments of its origin (recipe.plugin_args); the test's
+    # arguments for a plugin override them (raw: the test's ftoi arguments as given)
+    chosen = {'fnvnx_' + n: a for n, a in plugins}
+    fixed = recipe.plugin_args('native' if native else 'lifted')
+    plugins = [(n, dict(fixed[n], **({} if (native or (raw and n == 'fnvnx_ftoi')) and False else {k: v for k, v in chosen.get(n, {}).items() if not (n == 'fnvnx_ftoi' and k == 'mode' and not raw)}))) for n in recipe.PLUGIN_SOURCES]
     names = [n for n, _ in plugins]
     for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
+    os.makedirs(os.path.dirname(os.path.join(repo, T + 'verify/env.json')), exist_ok=True)
+    shutil.copyfile(os.path.join(REAL, T + 'verify/env.json'), os.path.join(repo, T + 'verify/env.json'))   # the declared environment: recipe.build refuses to run on a checkout without it (env_blocked)
     if not any(k.endswith(('.cc', '.cpp', '.cxx')) for k in fixtures):   # a root with a C++ unit declares its origin: a C fixture comes with one
         fixtures = dict(fixtures, **{'zz_cxx.cpp': 'int zz_cxx() { return 0; }\n'})
     files = ({k: v for k, v in fixtures.items()} if native else {})
@@ -94,7 +99,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
            '    open("/out/" + n, "w").write(t)\n') % {'gen/' + k: v for k, v in fixtures.items()}
     _w(repo, T + 'gen/lift.py', gen)
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']},
-           'flags': {'c': [f for f in flags if f not in CXX_ONLY_FLAGS], 'cxx': list(flags), 'asm': []}, 'include': [], 'units': 'all', 'external': [ext],
+           'flags': {'c': _root_flags(flags, False), 'cxx': _root_flags(flags, True), 'asm': []}, 'include': [], 'units': 'all', 'external': [ext],
            }
     if not native:
         rec['generated'] = [{'tool': T + 'gen/lift.py', 'args': [], 'inputs': [], 'outputs': ['gen/' + k for k in fixtures]}]

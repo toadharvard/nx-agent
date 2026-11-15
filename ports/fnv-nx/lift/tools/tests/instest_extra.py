@@ -260,7 +260,7 @@ def x87_range(E):
     return orig_x87_range(E)
 def oracle_run(s, E, st):
     if is_vex(E['raw']):
-        return dict(regs=list(st['regs']), eip='trap4', fl=st['fl'] & 0xcd5, eflx=st['eflx'] & 0x240000, mem={}, fp=None, xmm=list(st['xmm']), mm=None, mxcsr=st['mxcsr'], wr=[])
+        return dict(regs=list(st['regs']), eip='trap4', fl=st['fl'] & 0xcd5, eflx=st['eflx'] & 0x244000, mem={}, fp=None, xmm=list(st['xmm']), mm=None, mxcsr=st['mxcsr'], wr=[])
     return orig_run(s, E, st)
 # fnstenv / fnsave (X1b): the image fields FIP FCS FOP FDP FDS depend on the last non-control x87 instruction, which Unicorn/QEMU does not model (its helper stores 0 there). The lifted side is
 # seeded with a known last-instruction state (c->fip, c->fdp, c->sel[] written into the harness CPU block before the run); the expected fields come from an independent Python model of SDM

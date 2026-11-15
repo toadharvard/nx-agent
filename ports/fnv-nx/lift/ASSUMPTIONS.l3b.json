@@ -43,7 +43,7 @@
    "area": "proof",
    "file": "lift/proof/model_sail.py",
    "statement": "Pre-states where the model raises a segment-limit fault are excluded; the lifted code wraps modulo 2^32.",
-   "disposition": "owner: no wild accesses, for data; relative branch targets are checked by proof/symcheck.py (make it a gate)"
+   "disposition": "owner: no wild accesses (ASM-006), for data; relative branch targets are checked by gate forms (formgate.py -> proof/symcheck.py link(): a target outside [0, 2^32) is a red seglim item) over the pack's instrs.tsv"
   },
   {
    "id": "A-SHAPEFAMILY",
@@ -144,20 +144,6 @@
    "disposition": "open: pin to the reference CPU by a host table, then fact"
   },
   {
-   "id": "A-FDS",
-   "area": "x87",
-   "file": "lift/rt/fnvl_x87.h",
-   "statement": "FDS is DS whenever FDP != 0 (FS-relative operand reported with DS).",
-   "disposition": "open: wrong for FS operands on the CPU; closing = keep the selector per operand (1 store)"
-  },
-  {
-   "id": "A-FOP",
-   "area": "x87",
-   "file": "lift/rt/fnvl_x87.h",
-   "statement": "FOP is recomputed from the opcode bytes at FIP when an image is written.",
-   "disposition": "fact: code is read-only (W^X of the lifted image) so the bytes are those executed; needs the read-only fact from L3a universe"
-  },
-  {
    "id": "A-RES",
    "area": "x87",
    "file": "lift/rt/fnvl_x87.h",
@@ -251,9 +237,9 @@
   {
    "id": "A-F2IASM",
    "area": "fpexact",
-   "file": "lift/tools/fnvnx_f2i_check.cc",
+   "file": "toolchain/ftoi/fnvnx_ftoi.cc",
    "statement": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
-   "disposition": "gate: check 3b covers units with no site; closing fully = forbid inline asm outside listed rt files by the plugin"
+   "disposition": "removed: gate fpexact 3c/3d decodes every byte of every asm range (.fnvnx.asmrange) and every byte outside compiler-function extents for fp_to_int; ASM-218 removed_by gate:fpexact"
   },
   {
    "id": "A-F2ICONST",

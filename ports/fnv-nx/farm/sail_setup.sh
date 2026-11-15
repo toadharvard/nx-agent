@@ -4,13 +4,14 @@
 #   MIRROR=<dir> bash proof/sail_setup.sh         same, every download taken from <dir> (made by --make-mirror); apt is still needed
 #   bash proof/sail_setup.sh --make-mirror <dir>  fill <dir> from the network (opam binary, opam-repository / isla / sail-x86-from-acl2
 #                                                 tars of the pinned commits, z3-solver wheel, cargo vendor tar of isla, opam download cache)
-# Env: REMS (default /home/user/rems-project: isla/ sail-x86-from-acl2/), TOOLS (/home/user/l3tools: opam, opam-root, opam-repository,
-# cargo-home, isla-vendor), WORK (/home/user/l3work/proof), JOBS (2: opam/dune/cargo parallelism).  Idempotent: finished steps are skipped.
+# Env: GATE_CACHE (required: the toolchain is built under $GATE_CACHE/sail/<12 hex of sha256(sail_pins.txt)>), REMS (default there: rems-project/ isla/ sail-x86-from-acl2/), TOOLS (tools/: opam, opam-root, opam-repository,
+# cargo-home, isla-vendor), WORK (work/), JOBS (2: opam/dune/cargo parallelism).  Idempotent: finished steps are skipped.
 # Phases: apt -> opam binary -> sources -> opam switch+packages -> z3 -> isla (cargo --locked) -> isla-sail -> sail_build.sh -> check.
-# The result (sha256 of x86_proof.ir) is compared with the pin in sail_pins.txt; a mismatch exits 1.  No step may fail silently.
+# The result (sha256 of x86_proof.ir) is compared with the sha256 of the pinned IR (the external x86ir of formgate_inputs.json); a mismatch exits 1.  No step may fail silently.
 set -euo pipefail
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd); PINS=$HERE/sail_pins.txt
-REMS=${REMS:-/home/user/rems-project}; TOOLS=${TOOLS:-/home/user/l3tools}; WORK=${WORK:-/home/user/l3work/proof}
+SAILBASE="${GATE_CACHE:?GATE_CACHE (the verdict cache) is not set}/sail/$(sha256sum "$HERE/sail_pins.txt" | cut -c1-12)"      # the toolchain and its caches live in the verdict cache, keyed by the pins (proof/sail_pins.txt)
+REMS=${REMS:-$SAILBASE/rems-project}; TOOLS=${TOOLS:-$SAILBASE/tools}; WORK=${WORK:-$SAILBASE/work}
 JOBS=${JOBS:-2}; MIRROR=${MIRROR:-}; MAKE_MIRROR=""
 if [ "${1:-}" = "--make-mirror" ]; then MAKE_MIRROR=${2:?usage: --make-mirror <dir>}; MIRROR=""; mkdir -p "$MAKE_MIRROR"; MAKE_MIRROR=$(cd "$MAKE_MIRROR" && pwd); fi
 [ -z "$MIRROR" ] || MIRROR=$(cd "$MIRROR" && pwd)
@@ -136,7 +137,7 @@ phase "sail_build.sh (stock IR, proof IR, smoke test)"
 REMS=$REMS TOOLS=$TOOLS WORK=$WORK CARGO=$CARGO bash "$FARM/sail_build.sh"
 
 phase "check"
-GOT=$(sha256sum "$WORK/sail/x86_proof.ir" | cut -d' ' -f1); WANT=$(pin x86_proof.ir 4)
+GOT=$(sha256sum "$WORK/sail/x86_proof.ir" | cut -d' ' -f1); WANT=$(env -u SAIL_IR python3 -I "$HERE/certs_build.py" --model-sha)
 echo "x86_proof.ir sha256 $GOT ($(stat -c %s "$WORK/sail/x86_proof.ir") bytes), pinned $WANT"
 [ "$GOT" = "$WANT" ] || die "x86_proof.ir differs from the pinned hash"
 phase ""; echo "sail_setup: OK"
