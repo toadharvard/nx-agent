@@ -1238,3 +1238,10 @@ Paused: w3b, w4, farm; no other work.
     - test_d3d9total.py not measured (0/45): its scratch repo lacks link/, so recipe.py `import relocs` fails. Cause: SM_MACHINERY is a hand list. Fix (w8, doing): derive the scratch tree from the gate's import/mount closure, hand list deleted; then farm1 re-runs, 45/45 expected.
     - bottleneck: test_d3d9total scratch closure (w8); render objstub RESERVED patch (w6); cand4 waits for both.
 - 21:08Z w8 d7be7453: SM_MACHINERY hand list deleted; test_d3d9total derives its scratch tree from the gate's own import/open closure (audit hook) plus the gate's INPUTS, asserted to cover every repo module in sys.modules. farm1 runs the 45 mutations at d7be7453.
+- 21:10Z farm1: test_d3d9total.py at w8 e3826a54 PASS: base 332/332, 45 mutations, 45 killed.
+- 21:10Z w6 717e82995: render objstub findings 0.
+    - Translator contract_refs cite msdocs-win32-d3d9@3fb42a59 pages. Not in the mirror: parse_args_NULL (no pinned d3d9types.h; cites the parser site), and there is no `dcl - vs` page.
+    - RESERVED: tools/mojoshader-glsldk 7693847e (tree bc0ea3c1…8097). The 16 rows with opcode_string 0 are INSTRUCTION_UNASSIGNED, with no emitter; emit_GLSL_RESERVED is deleted; the proof is at the macro.
+    - Global objstub: 2204/2208, 18 findings, 0 of them render (L5 w10 and L1 hold the rest). The assumptions gate is 135/136; the one finding is toolchain/names/plugsym.inc:1, from w12L2 6135d0bed, routed to L2.
+    - Next: w6 merges w8 e3826a54 into w6-root and re-runs the builds and gates. That head is the cand4 candidate for L1.
+- bottleneck: the w6 merge of w8 (cand4 candidate); the L2 fix for plugsym.inc:1; L1 cand3/cand4 for the trunk (a5c8f427).
