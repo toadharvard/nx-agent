@@ -78,6 +78,8 @@
 #include "output.h"
 #include "tree-iterator.h"
 #include "tree-inline.h"
+#include "toplev.h"     /* ident_hash */
+#include "symtab.h"     /* ht_forall (libcpp) */
 
 int plugin_is_GPL_compatible;
 
@@ -380,7 +382,10 @@ static void emit_decltype()
     bool def;
     if (sym_emitted(sn, def)) decls.push_back(sn->decl);
   }
-  for (tree f : sdd_slot_decls()) decls.push_back(f);
+  for (tree f : sdd_slot_decls()) if (TREE_PUBLIC(f)) decls.push_back(f);   /* the symbol table of the object has the global and weak symbols: a slot function with internal linkage is a local one */
+  /* the local symbols of the unit (symtab nodes without external linkage): never a line, however they are named by a plugin or a reference */
+  std::set<std::string> local_names;
+  FOR_EACH_SYMBOL(sn) if (!TREE_PUBLIC(sn->decl) && DECL_ASSEMBLER_NAME_SET_P(sn->decl)) local_names.insert(asmname(sn->decl));
   std::map<std::string, std::string> rows;
   /* RULE DECLTYPE-PLUGINSYM (weakref): the ELF symbol of `static T a __attribute__((weakref("t")))` is its TARGET `t` (GCC assemble_weakref: `.weak t`, no symbol `a`), so the
    * line is written under `t` with the spelling of the weakref's own declaration (libgcc's __gthrw: `__typeof(t)`, the type of the target). When a declaration of `t` is also
@@ -427,6 +432,23 @@ static void emit_decltype()
     if (it == rows.end()) rows[w.first] = ty;
     else if (it->second != ty) dl_error("a weakref and its target are declared with two spellings", w.first + ": " + it->second + " / " + ty);
   }
+  /* RULE DECLTYPE-REF: every identifier the back end referenced in the output (TREE_SYMBOL_REFERENCED, set by assemble_name for each symbol the assembler text names) that
+   * has no line yet is a symbol of the object the front end made without a symbol table node at this point (std::terminate, which the EH lowering calls from a noexcept
+   * cleanup: terminate_fn). One rule over the identifier table, not a list of such functions. Local labels (`.L...`) and the unit's own local symbols are not in the
+   * symbol table of the universe (global and weak symbols). The reason is the predicate's: `mangled` for a `_Z` name, else the front end's own reference (`builtin`). */
+  struct RefScan {
+    std::map<std::string, std::string> *rows; std::set<std::string> *local;
+    static int cb(struct cpp_reader *, hashnode hn, const void *u) {
+      RefScan *r = (RefScan *)u;
+      tree id = HT_IDENT_TO_GCC_IDENT(hn);
+      if (!TREE_SYMBOL_REFERENCED(id)) return 1;
+      std::string nm = IDENTIFIER_POINTER(id);
+      if (nm.empty() || nm[0] == '.' || nm[0] == '*' || r->rows->count(nm) || r->local->count(nm)) return 1;
+      (*r->rows)[nm] = (nm[0] == '_' && nm[1] == 'Z') ? "-mangled" : "-builtin";
+      return 1;
+    }
+  };
+  { RefScan rs{&rows, &local_names}; ht_forall(ident_hash, RefScan::cb, &rs); }
   /* The symbols the object has that no symbol table node names: the references the back end makes itself. (1) The library functions it calls implicitly: every one is
    * announced through targetm.asm_out.external_libcall (varasm.cc assemble_external_libcall, called once per SYMBOL_REF the first time it is used: the one place a
    * libcall is emitted, whatever table made its SYMBOL_REF), which the plugin wraps (libcall_seen). (2) The explicit built-in functions it lowers to calls after the
@@ -444,6 +466,7 @@ static void emit_decltype()
    * A symbol that a declaration also gave (weakref targets, a called function the unit declares) keeps that row; a writer's spelling that differs from it is an error. */
   for (auto &pr : fnvnx_plugsym().syms) {
     const std::string &nm = pr.first;
+    if (local_names.count(nm)) continue;
     std::string ty = !pr.second.empty() ? pr.second : (nm[0] == '_' && nm[1] == 'Z') ? "-mangled" : "-plugin";
     auto it = rows.find(nm);
     if (it == rows.end()) rows[nm] = ty;

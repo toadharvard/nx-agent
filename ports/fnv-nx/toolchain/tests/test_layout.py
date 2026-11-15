@@ -416,6 +416,19 @@ def plugsym(td):
               all(k in both for k in ('_ZTV1B.fnvnx_ap8', '_ZN1BD1Ev.fnvnx_sdd', '_ZdlPv', 'fnvnx_dispatch', 'pthread_foo_x', 'fnvnx_call_fp')), sorted(both))
         check('DECLTYPE-PLUGINSYM: a plugin-written `_Z` name is `mangled`, the dispatcher of a C++ unit is `plugin`, the call-sequence word has its type',
               why.get('_ZTV1B.fnvnx_ap8') == 'mangled' and why.get('fnvnx_dispatch') == 'plugin' and rows.get('fnvnx_call_fp') == 'unsigned_int', (rows, why))
+    # RULE DECLTYPE-REF and the local-symbol rule: an anonymous-namespace class with a virtual destructor (its slot functions are local symbols, not in the table's
+    # global/weak universe), a noexcept function with a scoped object (the EH lowering references std::terminate, a front-end library function without a symbol table
+    # node), a switch jump table, a function-local static, a thread-local and a lambda: symbol table = lines
+    src = os.path.join(td, 'ps2.cpp')
+    open(src, 'w').write('#include <cstdio>\nextern void g();\nnamespace { struct An { virtual ~An(); int x; }; An::~An() {} int hidden(An *a) { delete a; return 1; } static int sv = 5; }\n'
+                         'struct L { L(); ~L(); };\nvoid m() noexcept { L l; g(); }\n'
+                         'void sw(int i) { switch (i) { case 0: puts("a"); break; case 1: puts("b"); break; case 2: puts("c"); break; case 3: puts("d"); break; case 4: puts("e"); break; case 5: g(); break; } }\n'
+                         'int cnt() { static int c = 0; return ++c + sv; }\nint mk() { return hidden(new An); }\n__thread int tl = 3; int rt() { return tl; }\n'
+                         'int lam() { auto f = [](int a) { return a + 1; }; return f(2); }\n')
+    r = pb.compile(src, os.path.join(td, 'ps2.o'), so, native=True, args=['-O2', '-fexceptions'])
+    check('DECLTYPE-REF: a C++ unit with a local virtual class, a noexcept cleanup, a jump table, statics, a thread-local and a lambda compiles', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        rows, why = dt_all(os.path.join(td, 'ps2.o'), 'ps2.cpp')
     src = os.path.join(td, 'ps.c')
     open(src, 'w').write('typedef int (*fp)(int);\nint cx(fp f, int v) { return f(v); }\n')
     r = pb.compile(src, os.path.join(td, 'psc.o'), so, native=True)
