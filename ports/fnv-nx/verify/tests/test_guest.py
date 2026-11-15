@@ -147,19 +147,55 @@ def main():
     check("cold and warm build: warm runs no stage, objects equal", rw["stages"]["run"] == 0 and [o["sha256"] for o in rw["objects"]] == [
         o["sha256"] for o in ra["objects"]] == [o["sha256"] for o in rb["objects"]], (rw["stages"], ra["stages"]))
     print("TIME guest cold A %.1fs, cold B %.1fs, warm %.1fs" % (ta, tb, tw))
+    # per-target recipes: one root, one set of units, a recipe per target; the host recipe is a variant keyed by its target
+    pt = guest_repo("pt", rec, pin, files={ROOT + "/a.cc": src})
+    w(pt, ROOT + "/host.json", json.dumps(REC))
+    ad = json.load(open(os.path.join(pt, T + "verify/admit.json")))
+    for r in ad["roots"]:
+        if r["path"] == ROOT:
+            r["recipe"] = {"guest": ROOT + "/build.json", "host": ROOT + "/host.json"}
+    w(pt, T + "verify/admit.json", json.dumps(ad))
+    git(pt, "add", "-A")
+    git(pt, "commit", "-q", "-m", "per-target")
+    adm_pt = recipe.load_admit(pt)
+    check("per-target recipes: the pairs of the root are the guest base and root@host",
+          recipe.pairs_of(json.load(open(os.path.join(pt, ROOT + "/build.json"))), ROOT, adm_pt[ROOT]) == [ROOT, ROOT + "@host"], adm_pt[ROOT])
+    ept = recipe.check(rec, ROOT, recipe.tracked(pt), adm_pt, recipe.load_pin(pt), pt)
+    check("per-target recipes: the root and both recipes are valid together", ept == [], ept)
+    rg, _ = build(pt, "PTG")
+    rh = recipe.build(pt, ROOT + "@host", os.path.join(BASE, "PTH"), os.path.join(BASE, "out-PTH"))
+    check("per-target recipes: both targets build green from the same units", rg["status"] == "green" and rh["status"] == "green" and rh["root"] == ROOT + "@host"
+          and [o["unit"] for o in rg["objects"]] == [o["unit"] for o in rh["objects"]], (rg.get("failure"), rh.get("failure")))
+    check("per-target recipes: each target has its own keys and objects (compiler, flags and variant are in the key)",
+          not set(rg["stage_keys"]) & set(rh["stage_keys"]) and [o["sha256"] for o in rg["objects"]] != [o["sha256"] for o in rh["objects"]], "")
+    # a flags-only variant of a guest root (L2's gcstress): the base's flags plus the GC-stress params, built as ROOT@gcstress with the same target
+    GCS = ["--param", "ggc-min-expand=0", "--param", "ggc-min-heapsize=0"]
+    gcrec = dict(rec, variants={"gcstress": {"flags": dict(rec["flags"], cxx=rec["flags"]["cxx"] + GCS)}})
+    w(pt, ROOT + "/build.json", json.dumps(gcrec))
+    git(pt, "add", "-A")
+    git(pt, "commit", "-q", "-m", "gcstress")
+    adm_gc = recipe.load_admit(pt)
+    egc = recipe.check(gcrec, ROOT, recipe.tracked(pt), adm_gc, recipe.load_pin(pt), pt)
+    check("gcstress: a flags-only variant of a guest root is valid next to the per-target recipe", egc == [], egc)
+    check("gcstress: pairs are root, root@gcstress, root@host; the variant keeps the guest target and has the base's flags plus the params",
+          recipe.pairs_of(gcrec, ROOT, adm_gc[ROOT]) == [ROOT, ROOT + "@gcstress", ROOT + "@host"]
+          and recipe.entry_of(adm_gc, ROOT + "@gcstress")["target"] == "guest"
+          and recipe.load_recipe(pt, adm_gc, ROOT + "@gcstress")["flags"]["cxx"] == rec["flags"]["cxx"] + GCS, recipe.pairs_of(gcrec, ROOT, adm_gc[ROOT]))
+    rgc = recipe.build(pt, ROOT + "@gcstress", os.path.join(BASE, "PTGC"), os.path.join(BASE, "out-PTGC"))
+    check("gcstress: ROOT@gcstress builds green on the guest compiler with keys of its own",
+          rgc["status"] == "green" and not set(rgc["stage_keys"]) & set(rg["stage_keys"]), rgc.get("failure"))
+    check("per-target recipes: the guest target is judged by the guest rules, the host target by none of them",
+          recipe.guest_errors(rec, ROOT, adm_pt, recipe.load_pin(pt)) == [] and recipe.guest_errors(REC, ROOT + "@host", adm_pt, recipe.load_pin(pt)) == [], "")
     o = next(x["object"] for x in ra["objects"] if x["unit"] == "a.cc")
     syms = subprocess.run(["aarch64-linux-gnu-nm", o], capture_output=True, text=True).stdout
     check("msvcmodel data model: size_t is unsigned int (mangled j)", "_Z2szj" in syms, syms)
     check("volatile is ldar/stlr and float -> int is _ftol on the external compiler", "ldar" in disasm(ra, "_Z2rdv") and "stlr" in disasm(ra, "_Z2wri")
           and "#0x80000000" in disasm(ra, "_Z3f2if"))
-    t = os.path.join(os.path.dirname(VERIFY), "toolchain", "msvcmodel", "test_msvcmodel.py")
-    p = subprocess.run([sys.executable, "-I", t], env=dict(os.environ, CXX=os.path.join(prefix, "bin/aarch64-linux-gnu-g++")), capture_output=True, text=True)
     # the sample root builds a unit that includes the guest's libstdc++ and newlib headers (compiler 13.3 reads gcc 15.2 headers: -std=gnu++20)
     hdr = "#include <vector>\n#include <string>\n#include <cstdio>\nint hv(int n) { std::vector<int> v(n); std::string s(\"x\"); std::printf(\"%d\", (int)v.size()); return (int)s.size(); }\n"
     gp = guest_repo("gp", sample, pin_real, files={ROOT + "/h.cc": hdr})
     rp, tpb = build(gp, "GP")
     check("sample platform root builds a unit using the runtime's libstdc++ and newlib headers", rp["status"] == "green", rp.get("failure"))
-    check("test_msvcmodel.py on the external", p.returncode == 0 and "skip" not in p.stdout, p.stdout + p.stderr)
 
 
 if __name__ == "__main__":

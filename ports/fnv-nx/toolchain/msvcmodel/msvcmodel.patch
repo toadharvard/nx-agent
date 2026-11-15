@@ -1,6 +1,19 @@
 --- a/gcc/config/aarch64/aarch64.h
 +++ b/gcc/config/aarch64/aarch64.h
-@@ -149,9 +149,13 @@
+@@ -93,7 +93,11 @@
+ 
+ #define DOUBLE_TYPE_SIZE	64
+ 
+-#define LONG_DOUBLE_TYPE_SIZE	128
++/* fnv-nx msvcmodel: under ILP32 `long double` is binary64 like `double` and
++   a type of its own (it mangles apart from double), the data model of the
++   32-bit Windows program this compiler builds; LP64 keeps binary128.  TFmode
++   stays a supported scalar mode (aarch64_scalar_mode_supported_p) for _Float128.  */
++#define LONG_DOUBLE_TYPE_SIZE	(TARGET_ILP32 ? 64 : 128)
+ 
+ /* This value is the amount of bytes a caller is allowed to drop the stack
+    before probing has to be done for stack clash protection.  */
+@@ -149,9 +153,13 @@
  /* Using long long breaks -ansi and -std=c90, so these will need to be
     made conditional for an LLP64 ABI.  */
  
@@ -84,3 +97,18 @@
    type_align = size_int (TYPE_ALIGN_UNIT (type));
    if (tree_int_cst_lt (type_align, sizetype_size))
      cookie_size = sizetype_size;
+--- a/gcc/config/aarch64/aarch64.cc
++++ b/gcc/config/aarch64/aarch64.cc
+@@ -26736,7 +26736,11 @@
+   if (DECIMAL_FLOAT_MODE_P (mode))
+     return default_decimal_float_supported_p ();
+ 
+-  return ((mode == HFmode || mode == BFmode)
++  /* fnv-nx msvcmodel: default_scalar_mode_supported_p accepts a float mode
++     by its precision being float, double or long double (targhooks.cc);
++     with a 64-bit long double under ILP32 that no longer holds for TFmode,
++     and _Float128, _Float64x and libgcc's TF routines need it.  */
++  return ((mode == HFmode || mode == BFmode || mode == TFmode)
+ 	  ? true
+ 	  : default_scalar_mode_supported_p (mode));
+ }

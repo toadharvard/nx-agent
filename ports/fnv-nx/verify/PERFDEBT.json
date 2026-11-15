@@ -1,0 +1,12 @@
+{
+ "entries": [
+  {
+   "fast_path": "ARMv8 SHA-256 instructions in lib/sha256",
+   "id": "PD-LOADER-SHA256-ISA",
+   "owner": "L1",
+   "rule": "lib/sha256 selects the ISA body by the declared reference CPU's features (one home)"
+  }
+ ],
+ "first_frame": false,
+ "format": "fnvnx-perfdebt/1"
+}

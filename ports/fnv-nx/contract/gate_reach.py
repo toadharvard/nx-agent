@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gate_reach - certificates that a branch of a platform import body is unreachable (L1 CONTRACT, gate `reach`).
 
-    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe,ranges.tsv ... [--bridge bridge.tsv]
+    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe ... --facts DIR --facts-tree SHA [--bridge bridge.tsv]
                   [--out DIR/reach.tsv] [--facts-h reach_facts.h] [--facts-tsv reach.facts.tsv]
     gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
 
@@ -88,126 +88,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'link'))
 import argflow
+import imagerec
 import gatefile
 import memfx
 import gateids
 import gpa_names
 import iat
 import relocs
+from reachreq import (COLUMNS, KINDS, M32, FormatError, num, parse_clause, parse_values, parse_ret, parse_requests, canon, sha,
+                      table_id, macro_part, header, write_facts_h, write)   # the request table and the one header emitter (reachreq.py)
 
 BASE_ASSUMPTIONS = ('A1', 'A2', 'A3', 'A4', 'A5', 'A6')
 BLOCKING = ('A7',)
-COLUMNS = ['request', 'dll', 'name', 'arg_index', 'kind', 'values', 'note']
-KINDS = {'imm_set': 'imm_set', 'imm_mask': 'imm_mask', 'result_of': 'result_of', 'handle_origin': 'result_of', 'closure_key': 'closure_key'}
 CLOSURE_SOURCES = ('r3_reloc', 'pcsrc', 'export', 'tls', 'entry', 'eh', 'no_s4_arith')  # the sources of a code address (the lift's item 22)
 MEASUREMENT = ('gpa-open', 'gpa-uncovered', 'gpa-ordinal-import', 'loadlib-open')  # reasons that only say `not valid yet`
 SYMBOL = 'fnvnx_reach_violation'
-M32 = 0xffffffff
-
-
-class FormatError(Exception):
-    pass
 
 
 # ---------------------------------------------------------------- requests
-def num(s):
-    try:
-        return int(s.strip(), 0) & M32
-    except ValueError:
-        raise FormatError('not a number: %r' % s)
-
-
-def parse_clause(s):
-    """`argI [& M] == V` or `argI [& M] != V` -> [I, M (all bits = 0xffffffff), op, V]."""
-    s = s.strip()
-    if not s.startswith('arg'):
-        raise FormatError('clause %r does not start with argI' % s)
-    op = '==' if '==' in s else '!=' if '!=' in s else None
-    if not op:
-        raise FormatError('clause %r has no == or !=' % s)
-    lhs, rhs = s.split(op, 1)
-    lhs = lhs[3:]
-    if '&' in lhs:
-        i, m = lhs.split('&', 1)
-        mask = num(m)
-    else:
-        i, mask = lhs, M32
-    return [int(i.strip(), 10), mask, op, num(rhs)]
-
-
-def parse_values(kind, text):
-    if kind == 'imm_set':
-        vals = [x for x in text.replace(',', ' ').replace('|', ' ').split() if x]
-        if not vals:
-            raise FormatError('imm_set without values')
-        return {'forbidden': sorted({num(x) for x in vals})}
-    if kind == 'imm_mask':
-        return {'mask': num(text)}
-    if kind == 'closure_key':
-        head, _, tail = text.partition(';')
-        if not head.startswith('dispatcher=') or not head[11:].strip().isidentifier() or tail.strip() not in ('', 'miss=fallthrough'):
-            raise FormatError('closure_key values must be `dispatcher=NAME` or `dispatcher=NAME;miss=fallthrough`')
-        return {'dispatcher': head[11:].strip(), 'fallthrough': bool(tail.strip())}
-    parts = [p.strip() for p in text.split(';') if p.strip()]
-    if not parts or not parts[0].startswith('callee='):
-        raise FormatError('result_of values must start with callee=')
-    callee = []
-    for c in parts[0][len('callee='):].split('|'):
-        d, n = c.strip().split('!', 1)
-        callee.append([iat.norm_dll(d), n])
-    spec = {'callee': sorted(callee), 'where': sorted(parse_clause(p) for p in parts[1:] if not p.startswith('ret'))}
-    rets = [parse_ret(p) for p in parts[1:] if p.startswith('ret')]
-    if rets:
-        spec['ret'] = sorted(rets)
-    return spec
-
-
-def parse_ret(s):
-    """`ret != V on every path to the site` -> ['!=', V]: on every control-flow path from the call to the site the result was compared
-    with V and the `!= V` edge taken (argflow.result_predicate)."""
-    t = s.replace('!=', ' != ').split()
-    if len(t) != 9 or t[:2] != ['ret', '!='] or t[3:] != ['on', 'every', 'path', 'to', 'the', 'site']:
-        raise FormatError('clause %r is not `ret != V on every path to the site`' % s)
-    return ['!=', num(t[2])]
-
-
-def parse_requests(text):
-    """-> canonical sorted list of dicts(request, dll, name, k, kind, spec, note); fact id = index + 1."""
-    lines = [l for l in text.split('\n') if l.strip()]
-    if not lines or lines[0].split('\t') != COLUMNS:
-        raise FormatError('header must be %s' % '\t'.join(COLUMNS))
-    out = []
-    for l in lines[1:]:
-        f = l.split('\t')
-        if len(f) < 6:
-            raise FormatError('row with %d columns: %r' % (len(f), l[:60]))
-        if f[4] not in KINDS:
-            raise FormatError('unknown kind %r' % f[4])
-        kind = KINDS[f[4]]
-        if kind == 'closure_key' and f[1] != '-':
-            raise FormatError('closure_key rows have dll `-`')
-        out.append(dict(request=f[0], dll=f[1] if kind == 'closure_key' else iat.norm_dll(f[1]), name=f[2], k=int(f[3], 10), kind=kind,
-                        spec=parse_values(kind, f[5]), note=f[6] if len(f) > 6 else ''))
-    out.sort(key=lambda r: (r['dll'], r['name'], r['k'], r['kind'], canon(r['spec'])))
-    for i in range(1, len(out)):
-        if (out[i]['dll'], out[i]['name'], out[i]['k'], out[i]['kind'], canon(out[i]['spec'])) == \
-                (out[i - 1]['dll'], out[i - 1]['name'], out[i - 1]['k'], out[i - 1]['kind'], canon(out[i - 1]['spec'])):
-            raise FormatError('duplicate request %s / %s' % (out[i - 1]['request'], out[i]['request']))
-    for i, r in enumerate(out):
-        r['id'] = i + 1
-    return out
-
-
-def canon(o):
-    return json.dumps(o, sort_keys=True, separators=(',', ':'))
-
-
-def sha(b):
-    return hashlib.sha256(b if isinstance(b, bytes) else b.encode()).hexdigest()
-
-
-def table_id(reqs):
-    return sha(canon([[r['id'], r['dll'], r['name'], r['k'], r['kind'], r['spec']] for r in reqs]))
 
 
 # ---------------------------------------------------------------- GetProcAddress rows
@@ -473,37 +371,6 @@ def uncertified_ids(facts):
     return sorted('%d:%s:%s:%s' % ((f.req['id'],) + r) for f in facts for r in sorted(f.reasons))
 
 
-def macro_part(s):
-    return ''.join(c if c.isalnum() else '_' for c in s)
-
-
-def header(reqs):
-    tid = table_id(reqs)
-    lines = ['/* reach_facts.h - generated by contract/gate_reach.py from the request table; do not edit.  Exe-derived ids: container only. */',
-             '#ifndef FNVNX_REACH_FACTS_H', '#define FNVNX_REACH_FACTS_H',
-             '#define FNVNX_REACH_TABLE_ID "%s"' % tid,
-             'static const char fnvnx_reach_table_id[] = FNVNX_REACH_TABLE_ID;',
-             '#define FNVNX_REACH_FACT_COUNT %d' % len(reqs)]
-    seq = {}
-    for r in reqs:
-        if r['kind'] == 'closure_key':
-            lines.append('#define FNVNX_REACH_CLOSURE_KEY_%s %d   /* %s: every value reaching %s is a key of its table */' % (
-                macro_part(r['spec']['dispatcher']).upper(), r['id'], r['request'], r['name']))
-            own = 'FNVNX_' + macro_part(r['request'] if r['request'].startswith('REACH_') else 'REACH_' + r['request'])
-            if own != 'FNVNX_REACH_CLOSURE_KEY_' + macro_part(r['spec']['dispatcher']).upper():
-                lines.append('#define %s %d' % (own, r['id']))
-            continue
-        key = (r['dll'], r['name'])
-        seq[key] = seq.get(key, 0) + 1
-        dll = r['dll'][:-4] if r['dll'].endswith('.dll') else r['dll']
-        lines.append('#define FNVNX_REACH_%s_%s_%d %d   /* %s: arg %d %s */' % (
-            macro_part(dll).upper(), macro_part(r['name']), seq[key], r['id'], r['request'], r['k'], r['kind']))
-        pre = r['request'] if r['request'].startswith('REACH_') else 'REACH_' + r['request']
-        lines.append('#define FNVNX_%s %d' % (macro_part(pre), r['id']))
-    lines.append('#endif')
-    return '\n'.join(lines) + '\n'
-
-
 def report_tsv(facts, certs):
     lines = ['fact_id\trequest\tdll!name\targ\tkind\tstatus\tsites\treasons']
     for f in facts:
@@ -513,14 +380,6 @@ def report_tsv(facts, certs):
                                 'certified' if r['id'] in certs else 'measurement' if r['kind'] == 'closure_key' and f.reasons and all(a in MEASUREMENT for a, _, _ in f.reasons) else 'uncertified',
                                 str(f.examined), ' | '.join(rs) or '-']))
     return '\n'.join(lines) + '\n'
-
-
-def write(path, text):
-    d = os.path.dirname(path)
-    if d:
-        os.makedirs(d, exist_ok=True)
-    with open(path, 'w', newline='\n') as fh:
-        fh.write(text)
 
 
 def gate(facts, certs, g, nimages):
@@ -702,29 +561,25 @@ def main_objects(a):
     return 1 if red else 0
 
 
-def load_images(specs, stacks, info=None):
+def load_images(recs, stacks, info=None):
+    """recs: {name: imagerec.ImageRec} from imagerec.load_images (the pinned facts and images); -> ({name: argflow.Image}, meta rows)."""
     images, meta = {}, []
-    for spec in specs:
-        nm, rest = spec.split('=', 1)
-        pe, rg = rest.split(',')
-        with open(pe, 'rb') as fh:
-            pb = fh.read()
-        with open(rg, 'rb') as fh:
-            rb = fh.read()
-        img = argflow.Image(pb, nm.lower(), argflow.read_ranges(rb.decode()))
+    for nm, rec in sorted(recs.items()):
+        img = images[nm] = argflow.Image(rec)
         img.import_stack = stacks
         if info is not None:
             memfx.Memfx(img, info)
-        images[nm.lower()] = img
-        meta.append(dict(name=nm.lower(), pe=sha(pb), ranges=sha(rb)))
-    return images, sorted(meta, key=lambda m: m['name'])
+        meta.append(dict(name=nm, pe=rec.sha, ranges=rec.ranges_sha))
+    return images, meta
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--requests', required=True)
     ap.add_argument('--gpa')
-    ap.add_argument('--image', action='append', default=[], help='name=pe_path,ranges_path (the image set of the stage)')
+    ap.add_argument('--image', action='append', default=[], help='NAME=image path (the image set of the stage; its runs come from --facts)')
+    ap.add_argument('--facts', help='the facts directory (manifest.json, ranges)')
+    ap.add_argument('--facts-tree', help='tree_sha256 of the facts directory, the pin')
     ap.add_argument('--bridge')
     ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; worst letter counts)')
     ap.add_argument('--writes', help='per import argument write facts (memfx.ImportInfo); default: every pointer argument may be written')
@@ -757,7 +612,9 @@ def main(argv=None):
         with open(a.bridge) as fh:
             bt = fh.read()
         info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')
-    images, meta = load_images(a.image, stacks, info)
+    if not (a.facts and a.facts_tree):
+        ap.error('--facts and --facts-tree (the pin of the facts tree) are required with --image')
+    images, meta = load_images(imagerec.load_images(a.image, a.facts, a.facts_tree), stacks, info)
     with open(a.gpa) as fh:
         rows = read_gpa(fh.read())
     ctx = {'dispatchers': {}, 'loadlib': None}
@@ -770,7 +627,7 @@ def main(argv=None):
     if a.out:
         write(a.out, report_tsv(facts, certs))
     if a.facts_h:
-        write(a.facts_h, header(reqs))
+        write_facts_h(a.facts_h, reqs)
     if a.facts_tsv:
         write(a.facts_tsv, ''.join('%d\t%s\n' % (i, certs[i]) for i in sorted(certs)))
     uf, detail = gate(facts, certs, g, len(images))

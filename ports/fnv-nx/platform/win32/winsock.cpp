@@ -174,12 +174,12 @@ Reach reach_of(const in_addr &a)
  *     the Linux setsockopt fails with EADDRNOTAVAIL; wine-9.0:dlls/ntdll/unix/socket.c:sock_errno_to_status maps it to
  *     STATUS_INVALID_PARAMETER (setsockopt goes through do_setsockopt in that file), and
  *     wine-9.0:dlls/ws2_32/socket.c:NtStatusToWSAError has no row for it, so it is WSAEINVAL. win-doc:setsockopt:WSAEINVAL.
- *     Assumption: the host kernel answers as Linux does, seen through Wine's mapping.
+ *     The verdict is the one Wine 9.0 derives from the Linux answer; that the console's bsd service answers so is ASM-004.
  *   OP_MCAST_MEMBER ANY/EXTERNAL: 10022 WSAEINVAL. ANY asks the kernel to pick the interface by a route to the group, the
  *     declared machine has no route; EXTERNAL names no interface: both are ENODEV, which
  *     wine-9.0:dlls/ntdll/unix/socket.c:sock_errno_to_status does not list (STATUS_UNSUCCESSFUL), and
  *     wine-9.0:dlls/ws2_32/socket.c:NtStatusToWSAError gives WSAEINVAL. A group outside 224/4 is EINVAL, also WSAEINVAL.
- *     Same assumption; no Windows documentation text states this case. */
+ *     Same basis (ASM-004); no Windows documentation text states this case. */
 enum NetOp { OP_BIND, OP_CONNECT, OP_MCAST_IF, OP_MCAST_MEMBER };
 int net_verdict(NetOp op, Reach r)
 {
@@ -731,10 +731,10 @@ extern "C" void *fnvnx_ws2_gethostbyname(const char *name)
      *   own name and "localhost": 127.0.0.1. wine-9.0:dlls/ws2_32/protocol.c:get_local_ips returns no address on a machine
      *     whose only interface is the loopback (it takes them from GetAdaptersInfo, which skips loopback), so the Magic IP
      *     127.12.34.56 substitution in gethostbyname never applies and the host resolver answers (wine-9.0:dlls/ws2_32/unixlib.c:
-     *     unix_gethostbyname); on the declared machine that answer for the own name is the loopback. Assumption (neither source
+     *     unix_gethostbyname); on the declared machine that answer for the own name is the loopback. Declared-machine decision (neither source
      *     fixes the address): 127.0.0.1.
      *   any other name: 11001 WSAHOST_NOT_FOUND. win-doc:gethostbyname:WSAHOST_NOT_FOUND; wine-9.0:dlls/ws2_32/unixlib.c:host_errno_from_unix
-     *     (HOST_NOT_FOUND -> WSAHOST_NOT_FOUND). Assumption: with no DNS server the host resolver answers HOST_NOT_FOUND. */
+     *     (HOST_NOT_FOUND -> WSAHOST_NOT_FOUND). The declared machine has no network and no DNS server, so the answer is HOST_NOT_FOUND. */
     if (!name[0]) name = self;
     uint32_t ip;
     if (parse_ip(name, &ip)) { uint32_t b = bswap(ip); memcpy(t.ad[0], &b, 4); }   /* memory order a.b.c.d = network order */

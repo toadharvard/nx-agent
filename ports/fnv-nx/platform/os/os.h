@@ -70,7 +70,7 @@ typedef void (*os_thread_fn)(void *arg);
  * its start and after each infinite wait, off before such a wait and at its end (platform/win32 thread.cpp,
  * sync.cpp). Not passed on to os_thread_create. */
 #define OS_THREAD_BOOST 0x10000
-#define OS_ROLE_AUDIO 6   /* FNVNX_ROLE_AUDIO (toolchain/include/fnvnx/hostapi.h): the platform's audio pump */
+#define OS_ROLE_AUDIO 6   /* FNVNX_ROLE_AUDIO (hostabi/include/fnvnx/placement.h): the platform's audio pump */
 os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int prio, int cpu);
 /* CPU boost for loading: 1 = fast load (Switch: appletSetCpuBoostMode FastLoad, CPU 1785 MHz, GPU at its minimum),
  * 0 = normal. The host may refuse (platform config boost_loading=0); a no-op on other backends. */
@@ -80,7 +80,7 @@ void os_cpu_boost(int fast_load);
 void os_show_message(const char *caption, const char *text);
 
 /* Text entry through the system software keyboard (docs/AUDIO_INPUT.md "Text entry"); the host service TEXT_ENTRY (hostapi.h)
- * (toolchain/include/fnvnx/hostapi.h), same arguments. Opens the applet for at most max_len UTF-16 units (1..500) starting with
+ * (hostabi/include/fnvnx/placement.h), same arguments. Opens the applet for at most max_len UTF-16 units (1..500) starting with
  * init[0..init_n) (init NULL: empty). Returns 1: entered (out[0..*n) holds the text, out[*n] = 0, *n <= max_len; out has room for
  * max_len + 1 units), 0: the user cancelled (out and *n untouched), <0: -FNVNX_HE_BADINPUT (max_len 0 or above 500, out or n NULL)
  * or -(the applet's Horizon result): the caller treats it as fatal. The backend does no validation of the text: that is the caller's,

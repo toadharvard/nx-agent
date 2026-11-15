@@ -548,8 +548,8 @@ for what in ("empty",):
 GC = ROOT + "/gcache"
 repo = TR.make_repo("os-toy", files={"toy/constants.tsv": CONST})
 rc, g, secs, txt, st = gate(repo, ROOT + "/g1", GC)
-# the toy's functions: f_a, f_b, f_c, os_svc, plus the functions of the product's crt0 the toy links (toolchain/guest/crt0.s, %function symbols)
-NTOY = 4 + len(re.findall(r"^\s*\.type\s+\S+,\s*%function", open(os.path.join(os.path.dirname(HERE), "..", "toolchain", "guest", "crt0.s")).read(), re.M))
+# the toy's functions: f_a, f_b, f_c, os_svc, plus the functions of the product's crt0 the toy links (rt/guest/crt0.s, %function symbols)
+NTOY = 4 + len(re.findall(r"^\s*\.type\s+\S+,\s*%function", open(os.path.join(os.path.dirname(HERE), "..", "rt", "guest", "crt0.s")).read(), re.M))
 check("gate on the toy root (os_layer, constants row, terminators from its own units): green NTOY/NTOY, accepted by verdict",
       rc == 0 and g["universe"] == NTOY == g["certified"] and st[0] == "green", (g, txt))
 print("INFO toy gate cold (with build) %.1f s" % secs)
