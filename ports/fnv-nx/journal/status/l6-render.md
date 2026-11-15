@@ -749,3 +749,11 @@ Paused: w3b, w4, farm; no other work.
     - Decision (L6) on the 5 conflicts (slt, sge, dst, expp, logp in ps): illegal. The MS instruction page lists the models (OWNER 3); Wine decides only where MS is silent. Applied when w1b resumes.
     - Open: rule R4 is written only in sm_table.py:110. It goes to the orchestrator together with the next item.
     - Lead branch: the old render/shaders/src/sdp.c goes when w6-root is merged into claude/fnv-l6-render.
+- 09:30Z w6 945dcc5a0 (cand2 df4fb69c8 + w1b 61d4e879a + L6A dfe4b6a94)
+    - nx_pair_variant returns the translator key flags; env_caps.gen.h with its static_asserts; sha256 include on every nxgpu user.
+    - Cold builds: d3d9 70 objects, 49.6 s. Warm builds: ≤5.7 s.
+    - gate_admit 1192/1192 (32 roots); d3d9total 332/332; self-test 45/45.
+    - The 4 admit rows and 2 L1-file fixes (recipe.py target of root@NAME; recipe dict) are forwarded to L1.
+    - ASM-628 had no record, so the reference at nxgpu4.h:138 made the assumptions gate red. Fix: the sdk-api citation replaces it.
+    - dev/ facts: a sample-count mismatch between colour targets, or between colour and depth, reaches the backend unchecked (draw_state.cpp:42). Rule D and Wine (f) close it; they are deferred by the budget order.
+    - Quality levels are 1 in all 7562 rows of both env tsvs.
