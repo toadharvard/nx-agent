@@ -86,6 +86,25 @@
     "ports/fnv-nx/verify/boot.py"
    ]
   },
+  "test_bootcores.py": {
+   "references": [
+    {
+     "anchor": "## verify/bootmachine.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/boot.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootmachine.py",
+    "ports/fnv-nx/verify/boothost.py",
+    "ports/fnv-nx/verify/boot.py"
+   ]
+  },
   "test_bootgpu.py": {
    "references": [
     {
@@ -208,25 +227,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/bootsock.py"
-   ]
-  },
-  "test_bootcores.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootmachine.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boot.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootmachine.py",
-    "ports/fnv-nx/verify/boothost.py",
-    "ports/fnv-nx/verify/boot.py"
    ]
   },
   "test_bootstart.py": {
@@ -514,6 +514,18 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/gate_guestlink.py"
+   ]
+  },
+  "test_hostabirec.py": {
+   "references": [
+    {
+     "anchor": "## verify/hostabirec.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/hostabirec.py"
    ]
   },
   "test_icount.py": {

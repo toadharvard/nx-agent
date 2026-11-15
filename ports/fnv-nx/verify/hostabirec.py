@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """The one record of the host ABI as the boot machine uses it: every number, name list and table that bootmachine.py, boothost.py,
-bootsock.py and their tests need from hostabi/include/fnvnx/{hostapi,placement,reach,sockwire,sockwire_errno}.h, parsed from the headers
+bootsock.py and their tests need from hostabi/include/fnvnx/{hostapi,placement,reach,sockwire,sockwire_errno,sdlayout,hostvm}.h, parsed from the headers
 (the one source; the headers are L5's). Nothing of the record is typed a second time in verify/.
 
     import hostabirec; R = hostabirec.record()
     R.define("FNVNX_APP_CORES")              -> int     an object-like `#define NAME <constant expression>` of any of the headers
+    R.string("FNVNX_SD_FONTS")               -> str     a string macro: the concatenation of its adjacent string literals and named string macros
     R.xlist("FNVNX_WIRE_AF_LIST")            -> [(AF_UNSPEC, 0), ...]   the X(...) rows of a `#define NAME(X) X(a, b) ...` list, numbers resolved
     R.slots                                  -> [names of the uint64 fields of struct FnvnxHostApi after the four header words]
     R.services                               -> {fn: (NAME, least nargs or None)} the TOTALITY TABLE of hostapi.h (module 11), None = NOT SERVED
@@ -12,7 +13,9 @@ bootsock.py and their tests need from hostabi/include/fnvnx/{hostapi,placement,r
 
 Parsing rules (the argument that they close the class): comments are removed; a line ending in a backslash continues; an object-like
 `#define NAME <expr>` is evaluated when <expr> is integer literals (with u/l suffixes), earlier names of the record, parentheses and the
-operators | & ^ << >> + - ~ and C integer casts; a define that is not such an expression (a macro with parameters other than a list, an
+operators | & ^ << >> + - ~ and C integer casts; a define whose body holds a string literal is a string macro: the C concatenation of
+its string literals (no escapes) and of earlier string macros (FNVNX_SD_FONTS = FNVNX_SD_DIR "/fonts"), and a body with a literal that does not
+resolve completely is a RecordError at load (never skipped); a define that is not such an expression (a macro with parameters other than a list, an
 expression with a builtin) is not in the record and R.define raises KeyError for it. An X-list row is `X(a, b, ...)` with each argument an
 integer expression or an identifier (kept as a string when it is no define). Asking for anything absent raises: there is no default.
 """
@@ -23,7 +26,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INCLUDE = os.path.join(HERE, "..", "hostabi", "include", "fnvnx")
-HEADERS = ("hostapi.h", "placement.h", "reach.h", "sockwire.h", "sockwire_errno.h")   # the headers of the declared host ABI, in dependency order
+HEADERS = ("hostapi.h", "placement.h", "reach.h", "sockwire.h", "sockwire_errno.h", "sdlayout.h", "hostvm.h")   # the headers of the declared host ABI, in dependency order
 
 
 class RecordError(Exception):
@@ -124,7 +127,7 @@ def _split_args(s):
 class Record:
     def __init__(self, include=INCLUDE):
         self.include = include
-        self.defines, self.lists, self.texts = {}, {}, {}
+        self.defines, self.lists, self.texts, self.strings = {}, {}, {}, {}
         for h in HEADERS:
             with open(os.path.join(include, h)) as f:
                 raw = f.read()
@@ -142,9 +145,28 @@ class Record:
                 try:
                     self.defines[name] = _eval(body, self.defines)
                 except ValueError:
-                    pass
+                    if '"' in body:
+                        self.strings[name] = self._string(h, name, body)
         hx = self.texts["hostapi.h"]
         self.services, self.slots = self._totality(hx)
+
+    def _string(self, header, name, body):
+        """the value of the string macro NAME = BODY (a body that holds a string literal): literals and earlier string macros, adjacent"""
+        out, pos = "", 0
+        while pos < len(body):
+            m = re.compile(r'\s*(?:"([^"\\]*)"|([A-Za-z_]\w*))').match(body, pos)
+            if not m or body[pos:].strip() == "":
+                if body[pos:].strip() == "":
+                    break
+                raise RecordError("%s: #define %s: %r is not a string literal or a string macro" % (header, name, body[pos:].strip()[:40]))
+            pos = m.end()
+            if m.group(1) is not None:
+                out += m.group(1)
+            elif m.group(2) in self.strings:
+                out += self.strings[m.group(2)]
+            else:
+                raise RecordError("%s: #define %s names %s, which is no string macro of the record" % (header, name, m.group(2)))
+        return out
 
     def _row(self, args):
         out = []
@@ -194,6 +216,11 @@ class Record:
             raise KeyError("hostabirec: no constant define %s in %s" % (name, ", ".join(HEADERS)))
         return self.defines[name]
 
+    def string(self, name):
+        if name not in self.strings:
+            raise KeyError("hostabirec: no string macro %s in %s" % (name, ", ".join(HEADERS)))
+        return self.strings[name]
+
     def xlist(self, name):
         if name not in self.lists:
             raise KeyError("hostabirec: no X-list %s in %s" % (name, ", ".join(HEADERS)))
@@ -226,7 +253,7 @@ def record(include=INCLUDE):
 def module_text(r):
     out = ["# GENERATED by verify/hostabirec.py from hostabi/include/fnvnx/*.h; do not edit\n",
            "DEFINES = %r\n" % (dict(sorted(r.defines.items())),), "LISTS = %r\n" % (dict(sorted(r.lists.items())),),
-           "SERVICES = %r\n" % (dict(sorted(r.services.items())),), "SLOTS = %r\n" % (list(r.slots),), "API_SIZE = %d\n" % r.api_size()]
+           "STRINGS = %r\n" % (dict(sorted(r.strings.items())),), "SERVICES = %r\n" % (dict(sorted(r.services.items())),), "SLOTS = %r\n" % (list(r.slots),), "API_SIZE = %d\n" % r.api_size()]
     return "".join(out)
 
 

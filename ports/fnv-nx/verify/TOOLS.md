@@ -1761,6 +1761,21 @@ on argv/env/tool/input `at` only (not on tree hashes), so documents of not-yet-r
 `recipe.semantics_for(pinned driver, language)` on `flags.semantics` of `guest_compiler.json` (the set minus the flags the driver itself says do not apply to the language).
 It is the one function the recipe uses; there is no second list. The pinned compiler is fetched by its pin into DIR (default `$GATE_CACHE`). For the runtime build of L5.
 
+## verify/hostabirec.py
+
+```text
+The one record of the host ABI as the boot machine uses it, parsed from hostabi/include/fnvnx/{hostapi,placement,reach,sockwire,sockwire_errno,
+sdlayout,hostvm}.h (the headers are L5's). Nothing of it is typed a second time in verify/.
+
+  record().define(NAME)   an object-like integer #define (constant expression of literals, earlier names, | & ^ << >> + - ~ * and casts)
+  record().string(NAME)   a string macro: the C concatenation of the adjacent string literals (no escapes) and earlier string macros of its body
+                          (FNVNX_SD_FONTS = FNVNX_SD_DIR "/fonts" is "sdmc:/switch/fnv/fonts"); a body with a literal that does not resolve
+                          completely is a RecordError at load, never skipped; a name that is no string macro is a KeyError
+  record().xlist(NAME), .services, .slots, .platform_services(), .sock_services(), .api_size()
+  python3 hostabirec.py [--include DIR] --out FILE.py   the same record as a Python module (DEFINES, LISTS, STRINGS, SERVICES, SLOTS, API_SIZE)
+Asking for anything absent raises: there is no default.
+```
+
 ## verify/icount.py
 
 ```text
