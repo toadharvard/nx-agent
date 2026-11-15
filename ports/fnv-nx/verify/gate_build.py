@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Gate "build" (fnvnx-gate/1): every product root's recipe (build.json, see RECIPE.md) builds, all in the sandbox.
-    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE, optional GATE_COMMIT
+    python3 -I gate_build.py        cwd = checkout root (a git worktree), env GATE_OUT, optional GATE_CACHE, GATE_COMMIT
 Universe: every unit of every product root of verify/admit.json (tracked sources + generated sources, recipe.units_of) and the ELF
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
@@ -63,7 +63,7 @@ def quantify(repo, judge_root):
 
 
 def tree_of(repo="."):
-    return subprocess.run(["git", "-C", repo, "rev-parse", os.environ.get("GATE_COMMIT", "HEAD") + "^{tree}"], capture_output=True,
+    return subprocess.run(["git", "-C", repo, "rev-parse", os.environ["GATE_COMMIT"] + "^{tree}"], capture_output=True,
                           text=True, check=True).stdout.strip()
 
 
@@ -146,6 +146,23 @@ def file_sha(p):
         for b in iter(lambda: f.read(1 << 20), b""):
             h.update(b)
     return h.hexdigest()
+
+
+def published_output(cache, root, name, repo="."):
+    """-> (path, sha256) of the declared output NAME of ROOT as published in GATE_CACHE (`outputs` of the root's objects.json, written by recipe.build: a
+    file or a directory of <root>/outputs). It never builds: a producer that is not published, or does not declare NAME, or whose file is gone, is
+    LookupError with the reason, and every reader of a root's output is red on it (an input that is absent is never skipped)."""
+    base = os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__"))
+    try:
+        with open(os.path.join(base, "objects.json")) as f:
+            outs = json.load(f)["outputs"]
+        ent = outs[name]
+        path, sha = ent["path"], ent["sha256"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise LookupError("output %s of %s is not published in GATE_CACHE (%s)" % (name, root, base))
+    if not os.path.exists(path):
+        raise LookupError("output %s of %s: the published path %s is gone" % (name, root, path))
+    return path, sha
 
 
 def unitless(root, cache, repo="."):
