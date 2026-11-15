@@ -12,6 +12,18 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-15 21:10Z (orchestrator).** Trunk a5c8f427 (0 roots).
+- cand2 a0db3beaa: on pin 56a4d09c (PINSPLIT, 787 s from scratch, was ~50 min); verdict running (w15).
+- cand3 41a8855d4: shards N<=16, cpu_s, hermetic generator stages; merges right after cand2.
+- Defect found by L3a: the pack 7b2faae276b2/db2aaf6d4a08 was lifted from a container-local, stale modules.tsv (pemod.py:7). libvorbis and libvorbisfile are lifted 0x450000 high; d3dx9_31, atimgpud and gdffalloutnv are not lifted. The cold build is not run on it.
+- Owner orders (CLAUDE.md integ 49db7687b, 4363f94e9): the compiler is a recipe stage keyed by its mounts, with no pin handover; every generator is a hermetic stage, with no absolute or env-default input path; the cold pack build runs on up to 16 farms.
+- L1 abspath gate w28 d5269ee4 over the stage-graph closure (162 files): 28 findings (L1 14 being fixed, L6 8, L3a 6, L5 0, L2 0); it lands with cand4.
+- L3a: relift as recipe stages (facts, fpfacts, liftgen/pack), 4 workers, on cand3; then the 16-farm cold build.
+- L6: sm_table becomes a generator-only root.
+- L6A: gl4 link green 17/17 (decb62ead).
+- L3b: v3 queue 32/54.
+- Pack size (u/000 sample): 94.5 B per x86 instruction; flags 13 %, labels 15 %, calls 12 %, nonlocal 9 %. L3a item 1 is the pack-wide table.
+
 **2026-11-15 20:15Z (orchestrator).** Owner: up to 4 workers per lead (dd27cfdb1). Bottleneck lines from the 8 leads: the chain waits on cand3 (L3a, L4, L5, L6, L6A); cand2 waits on one more pin rebuild (stamp key mismatch, ~50 min per plugin change; split compiler/runtime stages asked of L2); the L3b proof queue is 25/54 shards (4-farm cap, about 4 h); the cold pack build is ~10 h on one farm. Decided (c25091f47): up to 8 farms for the L3b queue and for the pack build, sharded by the recipe's own rule into the one store; recipe shard item to L1.
 
 **2026-11-15 19:10Z (orchestrator).** Trunk a5c8f427; cand2 02d97431d. The none-elf pin is held for one rebuild carrying three fixes: DECLTYPE-SPEC 689328e7f (template specialization in an extern "C" signature), a real msvcmodel defect (empty-base hunk leaves offset_align stale; test_layout 2/169 red, w3 fixing via GCC's layout bookkeeping), DECLTYPE-COMPLETE (one decltype line per symtab symbol, closed reason set; L2 c2af898fd). L5 d8023503f waits for that pin.
