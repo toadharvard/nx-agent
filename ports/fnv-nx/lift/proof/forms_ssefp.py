@@ -53,7 +53,8 @@ def cmp_imm(c, w, packed):
     p = c.ops[2].val & 0xff
     if isinstance(p, int) and p > 7: raise KeyError('%s imm8 %d: reserved (SDM Vol 2 CMPPS: bits 7:3 of the immediate are reserved)' % (c.m, p))
     arith(c, 'cmp', w, packed, p)
-for _sfx, _w, _pk in (('ss', 32, False), ('sd', 64, False), ('ps', 32, True), ('pd', 64, True)):
+# 'cmpsd' is also the string compare: its handler (forms_move.string) owns the mnemonic and dispatches the SSE form here
+for _sfx, _w, _pk in (('ss', 32, False), ('ps', 32, True), ('pd', 64, True)):
     handler('cmp' + _sfx)(lambda c, w=_w, p=_pk: cmp_imm(c, w, p))
 def comi(c, op, w):
     """COMISS/UCOMISS/COMISD/UCOMISD: ZF PF CF = unordered / equal / less (SDM Vol 2); OF SF AF = 0; IE (QNaN operands only for ucomi) and DE go to MXCSR."""
