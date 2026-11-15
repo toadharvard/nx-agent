@@ -15,7 +15,7 @@ iff, for the group of an object O and its address points (ap, d):
   V5  completeness: the exe vftables of the class (same RTTI TypeDescriptor name as the vftable bound at d = 0) are exactly the vftables
       bound by the named address points of the group - no exe vftable of the class is left unbound, none is bound twice.
 UNIVERSE.  Every address point of every `_ZTV` of every object of obj.json whose claim is `named` or `missing` (a `missing` one is
-uncertified: the plugin must state a twin or its absence for every address point).  Address points whose row says `unnamed:<reason>`
+uncertified: the plugin must state a twin or its absence for every address point).  Address points whose row says `nodecor:<reason>`
 are outside the universe: the compiler asserts the class has no MSVC vftable (Open, REMOVE, owner L2: the plugin's kinds), they are counted in `detail`.
 PROOF.  V1-V5 are equalities between structures read from the PE (RTTI, COL, slot run), from the object (`_ZTV` words and relocations) and
 from the plugin's rows; each is decided on those structures alone.  If all five hold for every named point of a group, the group has

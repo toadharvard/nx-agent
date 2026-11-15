@@ -47,7 +47,7 @@ import store
 d = tempfile.mkdtemp()
 exe, op, bp, a = F.scene(d)
 obj = store.load(op, 'obj')
-obj[('u.o', 'vtpair')] = obj[('u.o', 'vtpair')][:1] + [('_ZTV3Der', 28, 'unnamed:no twin', 8)]
+obj[('u.o', 'vtpair')] = obj[('u.o', 'vtpair')][:1] + [('_ZTV3Der', 28, 'nodecor:no twin', 8)]
 store.save(op, 'obj', obj)
 rc, r = abi_gaterun.run(G, ['--exe', exe, '--obj', op, '--bind', bp], 'vtables')
 check('unnamed point', (r['universe'], r['detail'].split()[0]), (1, '1'))

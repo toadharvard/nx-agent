@@ -56,12 +56,12 @@ def build_plugin():
     return os.path.join(d, 'fnvnx_order.so')
 
 
-def compile_cxx(src, name, plugin):
+def compile_cxx(src, name, plugin, extra=()):
     p = os.path.join(tmp, name + '.cpp')
     o = os.path.join(tmp, name + '.o')
     open(p, 'w').write(src)
     pl = ['-fplugin=' + plugin] + ['-fplugin-arg-fnvnx_order-' + a for a in PLUGIN_ARGS] if plugin else []
-    r = run([CXX] + FLAGS + pl + ['-c', p, '-o', o])
+    r = run([CXX] + FLAGS + list(extra) + pl + ['-c', p, '-o', o])
     if r.returncode:
         fails.append('compile %s: %s' % (name, r.stderr[-800:]))
     return o
@@ -245,16 +245,44 @@ struct S { int a, b, c, d, e; };
 struct B { unsigned a:3, b:5; };
 S gs, gs2; B gb; int g, *gptr;
 int nonesc(int x) { sink2(1); return x + 1; }
-int esc() { int x = 0; gptr = &x; x = 5; sink2(x); return x; }
+int esc() { int x = 0; gptr = &x; sink2(x); x = 5; sink2(x); return x; }
 int esc2() { int x[4]; gptr = x; for (int i = 0; i < 4; i++) x[i] = i; sink(x); return x[2]; }
 S ret() { return gs; }
 int agg() { S l = gs2; return l.a + l.e; }
 void stb() { gb.b = 3; }
 int ldb() { return gb.b; }
 int cpy() { gs = gs2; return g; }
+struct __attribute__((packed)) PB { unsigned first:24; unsigned cat:8; unsigned short delta; };
+PB gpb[4];
+static const PB cpb[] = {{1,2,3},{4,5,6},{7,8,9},{3,3,3},{1,1,1}};
+int pbl(int m) { return gpb[m].first; }
+void pbs(int m) { gpb[m].first = 7; }
+static inline int pbis(unsigned u, const PB* t, int n) {
+  const PB* b = t;
+  while (n > 0) { int mid = n / 2; const PB* p = b + mid; if (u > p->first + p->delta) { b = p + 1; n -= mid + 1; } else n = mid; }
+  return b->cat;
+}
+int pbc(unsigned u) { return pbis(u, cpb, 5); }
 void takes(S s);
 void pass() { takes(gs); }
 char* dyn(int n) { char* p = (char*)__builtin_alloca(n); sink(p); p[1] = 2; return p; }
+'''
+LANES_SRC = r'''
+struct H { unsigned spares[32]; };
+void sw(H* __restrict d, const H* __restrict s) {
+  for (int i = 0; i < 32; i++) { const char* p = (const char*)&s->spares[i]; char* q = (char*)&d->spares[i]; q[0]=p[3]; q[1]=p[2]; q[2]=p[1]; q[3]=p[0]; }
+}
+'''
+EH_SRC = r'''
+static unsigned char tab[97];
+void init() { __builtin_init_dwarf_reg_size_table(tab); }
+void* f(void* a) { return __builtin_extract_return_addr(a); }
+void* g(void* a) { return __builtin_frob_return_addr(a); }
+void h(long a, void* b) { __builtin_eh_return(a, b); }
+'''
+WAIT_SRC = r'''
+#include <atomic>
+void waitf(std::atomic<int>& a, int v) { a.wait(v); }
 '''
 plug = build_plugin()
 if plug:
@@ -280,6 +308,34 @@ if plug:
     check('escaped array: certified', not any(k.startswith('_Z4esc2v') for k in rs), True)
     check('sret aggregate store certified', not any(k.startswith('_Z3retv') for k in rs), True)
     check('aggregate load certified', not any(k.startswith('_Z3aggv') or k.startswith('_Z3cpyv') for k in rs), True)
+    check('packed bit-field (no representative): load, store and the read-only table walk certify',
+          [k for k in rs if k.startswith(('_Z3pbli', '_Z3pbsi', '_Z3pbcj'))], [])
+    dis0 = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
+    pbl = dis0.split('<_Z3pbli>:')[1].split('\n\n')[0]
+    pbs = dis0.split('<_Z3pbsi>:')[1].split('\n\n')[0]
+    pbc = dis0.split('<_Z3pbcj>:')[1].split('\n\n')[0]
+    check('packed bit-field load: its 3 bytes are ldarb in address order, no plain load of the field', (pbl.count('ldarb'), 'ldr\tw' in pbl), (3, False))
+    check('packed bit-field store: read-modify-write of the 3 bytes, release byte stores', (pbs.count('ldarb'), pbs.count('stlrb')), (3, 3))
+    check('table walk through a derived pointer: read-only by provenance, no ordered access', ('ldar' in pbc, 'stlr' in pbc), (False, False))
+    check('the walk records the table in .fnvnx.ro', '_ZL3cpb' in run(['aarch64-linux-gnu-readelf', '-p', '.fnvnx.ro', po]).stdout, True)
+    # the vectorizer's load/store-lanes form (-O3): `MEM <char[64]> [p] = .STORE_LANES (array)` writes shared memory through an internal function
+    lanes = compile_cxx(LANES_SRC, 'lanes', plug, ['-O3'])
+    lr = {k: v for k, v in a64order.scan(lanes).rows if v}
+    check('lanes: the shared load and store of the byte-swap loop certify', lr, {})
+    ldis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', lanes]).stdout
+    check('lanes: the shared bytes are read ldarb and written stlrb (no plain access of the shared span)', ('ldarb' in ldis, 'stlrb' in ldis), (True, True))
+    # the unwinder's context builtins (libgcc unwind-dw2.c): value-only return-address/EH builtins, and the dwarf register-size table filler
+    ehs = compile_cxx(EH_SRC, 'eh', plug)
+    er = {k: v for k, v in a64order.scan(ehs).rows if v}
+    check('unwinder builtins: no ORD-T error, every access certified', er, {})
+    edis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', ehs]).stdout
+    check('init_dwarf_reg_sizes: the shared table is read ldarb and written stlrb, the builtin fills a private copy',
+          ('ldarb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0], 'stlrb' in edis.split('<_Z4initv>:')[1].split('\n\n')[0]), (True, True))
+    # an atomic builtin whose memory-order operand is an SSA name (libstdc++ atomic wait: a PHI of the order): raising it to a constant must
+    # leave the statement's operand cache consistent (the SSA update after the pass crashed on the stale use)
+    wo = compile_cxx(WAIT_SRC, 'wait', plug, ['-std=gnu++20'])
+    wdis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', wo]).stdout
+    check('atomic wait: compiles with the order raised to seq_cst on a run-time order operand', 'ldar' in wdis, True)
     check('bit-field store certified', not any(k.startswith('_Z3stbv') or k.startswith('_Z3ldbv') for k in rs), True)
     dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', po]).stdout
     esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]

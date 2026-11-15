@@ -20,10 +20,10 @@ import plugbuild as pb  # noqa: E402
 check = pb.Checks('test_ldbl')
 
 
-def predefines(cxx):
-    """{name: value} of the macros the pinned compiler predefines (-dM -E of an empty C++ unit with the data-model flag of the root): a query of the
-    compiler the recipe builds with, whose list is the complete one by construction (nothing is named here)"""
-    r = subprocess.run([cxx, '-mabi=ilp32', '-x', 'c++', '-dM', '-E', '/dev/null'], capture_output=True, text=True)
+def predefines(cxx, flags=()):
+    """{name: value} of the macros the pinned compiler predefines (-dM -E of an empty C++ unit, FLAGS given): a query of the compiler the recipe builds
+    with, whose list is the complete one by construction (nothing is named here)"""
+    r = subprocess.run([cxx] + list(flags) + ['-x', 'c++', '-dM', '-E', '/dev/null'], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError('the pinned compiler: ' + r.stderr[-500:])
     out = {}
@@ -128,6 +128,11 @@ def datamodel(td, so):
     errs = '\n'.join(l for l in r.stderr.splitlines() if 'error' in l)
     failed = sorted(set(re.findall(r'static assertion failed: (S\d+)', r.stderr)))
     check('every DATAMODEL case holds (failing rows: %s)' % failed, r.returncode == 0, errs[:3000])
+    # S14 on the C front end: its own file (c/c-decl.cc finish_enum is not the C++ hunk)
+    objc = os.path.join(td, 'datamodel_enum.o')
+    rc = pb.compile(os.path.join(HERE, 'ldbl', 'datamodel_enum.c'), objc, so, native=True)
+    check('S14 holds in C (enumerators 0xffff0000, 0x80000000 and expressions: int, 4 bytes, the 32-bit pattern as int; failing: %s)'
+          % sorted(set(re.findall(r'static assertion failed: "?(S14\w+)', rc.stderr))), rc.returncode == 0, '\n'.join(l for l in rc.stderr.splitlines() if 'error' in l)[:3000])
 
 
 def main():
@@ -165,6 +170,17 @@ def main():
             check('every __LDBL_*__ equals its __DBL_*__ counterpart (%d of %d)' % (len(dbl), len(dbl)),
                   all(number(ldbl[k]) == number(dbl[k]) for k in dbl if k in ldbl),
                   {k: (dbl[k], ldbl[k]) for k in dbl if k in ldbl and number(ldbl[k]) != number(dbl[k])})
+            # MLIB1: the compiler's defaults are the guest record. A plain compile (no flag at all) has the ILP32 data model of the exe: the ABI of
+            # guest_platform (--with-abi), signed char and a 16-bit wchar_t (DATAMODEL S01, S02: the patch, not a flag), binary64 long double.
+            plain = predefines(os.path.join(co, ext['cxx']))
+            check('a plain compile is ILP32 (__ILP32__), with plain char signed (no __CHAR_UNSIGNED__), a 16-bit wchar_t and an 8-byte long double (MLIB1)',
+                  '__ILP32__' in plain and '__CHAR_UNSIGNED__' not in plain and plain.get('__WCHAR_WIDTH__') == '16'
+                  and plain.get('__SIZEOF_WCHAR_T__') == '2' and plain.get('__SIZEOF_LONG_DOUBLE__') == '8',
+                  {k: plain.get(k) for k in ('__ILP32__', '__CHAR_UNSIGNED__', '__WCHAR_WIDTH__', '__SIZEOF_WCHAR_T__', '__SIZEOF_LONG_DOUBLE__')})
+            ml = subprocess.run([os.path.join(co, ext['cxx']), '-print-multi-lib'], capture_output=True, text=True).stdout.split()
+            sel = {x for l in ml for x in l.split(';', 1)[1].replace('@', ' -').split()}
+            check('-print-multi-lib lists only the guest\'s variants: every one selects the platform\'s code model (-fPIC) and nothing about the ABI, '
+                  'wchar_t or char, which are the compiler\'s defaults (MLIB1)', ml and sel == {'-fPIC'} and all(';@fPIC' in l for l in ml), ml)
         model(td, so)
         datamodel(td, so)
     finally:

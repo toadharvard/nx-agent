@@ -174,18 +174,16 @@ def main():
     check("double -> __int128 fails the build with an FTOI error naming both types", rwd["status"] == "red" and any(
         "FTOI" in x and "double" in x and "__int128" in x for x in rwd["failure"]["stderr"]), rwd.get("failure"))
     check("the ordinary conversions of the same root still compile", "#0x80000000" in f2i)
-    # --- ORDER-CONT: a block-ending statement without a fall-through edge needs no fence; every resumption point begins with dmb ishld
+    # --- ONE FORM: no fence anywhere; an exception landing pad and the setjmp() library call need none (ldar orders by itself)
     cont_src = (
         "#include <setjmp.h>\n"
-        "struct NF { void *jb[5]; };\nstruct C { NF *nf; int v; };\n"
-        "void lj(C *c) { if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1); }\n"
-        "void thrower();\nint sj(void **b, int *p) { if (__builtin_setjmp(b)) return *p; thrower(); return 0; }\n"
+        "void thrower();\n"
         "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
-        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[1]; }\n"
-        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; return 0; }\n")
+        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[2]; }\n"
+        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n")
     crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
     rc_, _ = build(crepo, "C")
-    check("ORDER-CONT: longjmp / setjmp / try-catch fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
+    check("ONE FORM: setjmp / try-catch / hard-register fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
     if rc_["status"] == "green":
         ob = next(x["object"] for x in rc_["objects"] if x["unit"] == "b.cc")
         syms = {n.split()[-1] for n in subprocess.run(["aarch64-linux-gnu-nm", ob], capture_output=True, text=True).stdout.splitlines()}
@@ -193,20 +191,12 @@ def main():
         def lines(sym):
             sym = next((n for n in syms if sym in n and n.startswith("_Z")), sym)
             return [x.split("\t", 2)[-1].strip() for x in disasm(rc_, sym, "b.cc").split("\n") if "\t" in x]
-        before_ldar = lambda ls: any("dmb\tishld" in x for x in ls) and next(i for i, x in enumerate(ls) if "dmb\tishld" in x) < max(i for i, x in enumerate(ls) if x.startswith("ldar"))  # noqa: E731
-        lj = lines("2ljP1C")
         hl = lines("2hli")
-        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", not any("dmb" in x and "ishld" in x and False for x in hl) and any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
-        print("DISASM lj:", lj)
-        check("(i) noreturn __builtin_longjmp: no fence needed after it", any(x.startswith("br") or x.startswith("b ") or x.startswith("bl") or x.startswith("ldr") for x in lj) and lj, lj)
-        s2 = lines("2sjPPvPi")
-        check("(ii) __builtin_setjmp: dmb ishld at the receiver, before the load", before_ldar(s2), s2)
+        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
         tc = lines("2tcPi")
-        check("(iii) catch landing pad: dmb ishld before the load in the catch", before_ldar(tc), tc)
+        check("catch landing pad: ldar and no dmb", any(x.startswith("ldar") for x in tc) and not any(x.startswith("dmb") for x in tc), tc)
         s3 = lines("3sj2P")
-        i3 = [i for i, x in enumerate(s3) if "_setjmp" in x or "setjmp" in x]
-        print("DISASM sj2:", s3, "\nDISASM sj:", s2, "\nDISASM tc:", tc)
-        check("(iv) setjmp(): dmb ishld right after the call", bool(i3) and any("dmb" in x and "ishld" in x for x in s3[i3[0] + 1:i3[0] + 3]), s3)
+        check("setjmp(): a plain call, no dmb", not any(x.startswith("dmb") for x in s3), s3)
     # the plugin is a declared input of the CC stage and its flags are in the stage document
     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
     cc = [d for d in docs if d["stage"] == "cc:a.cc"]
