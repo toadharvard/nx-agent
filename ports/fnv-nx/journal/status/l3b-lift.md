@@ -301,3 +301,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - 66 U-NOGATE: opmap does not read the SDM x87 escape tables, so D8-DF forms look undefined (e.g. fist m16int);
   - 87 U-NODEC: our own sweep, not the lift facts' code universe (rule 2).
   Assigned to the new worker w11 (session_01KmtZKTzdEzraX9VWyyDcG3). Workers: w4, w9, w10, w11 (4/4).
+- 20:25Z owner order (integ 5c3e8e289), no rework without progress. Checked: all open L3b items block step 2 (the pack root enters the trunk only when its forms are a subset of the certified ones): v3 integer, SIMD rerun and timeouts, sys/far, #UD list. The fpexact test blocks L1 cand3. Nothing open is polishing; no task stopped.
