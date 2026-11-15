@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""comrows.py SPEC ROWS WORDS: the bridge rows of the platform's COM interfaces, derived once from com_spec.json (the one derivation of the
+"""comrows.py SHIM_DIR AUDIO_DIR SPEC ROWS WORDS: derives the COM spec from the interface declarations (spec_extract.py, no tracked spec) and writes it as SPEC (the output COM_SPEC); the bridge rows of the platform's COM interfaces, derived once from that spec (the one derivation of the
 signature of a COM thunk: the C++ half, platform/com/gen_combridge.py, reads these files and never recomputes them).
 
   ROWS   rows of the bridge table (8 TAB columns, no header; the `extra` rows of contract/bridgegen.py): one per method of every non-hidden
@@ -9,7 +9,11 @@ signature of a COM thunk: the C++ half, platform/com/gen_combridge.py, reads the
 
 The vocabulary of the spec is documented in platform/com/gen_combridge.py. A spec item without a rule stops the tool (exit 2)."""
 import json
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import spec_extract
 
 
 def die(msg):
@@ -80,10 +84,14 @@ def derive(spec):
 
 
 def main():
-    spec = json.load(open(sys.argv[1]))
+    shim, audio, spec_path, rows_path, words_path = sys.argv[1:6]
+    spec = spec_extract.extract({"shim": shim, "audio": audio})
+    with open(spec_path, "w") as f:
+        json.dump(spec, f, indent=1, sort_keys=True)
+        f.write("\n")
     rows, words = derive(spec)
-    open(sys.argv[2], "w").write("".join("\t".join(r) + "\n" for r in rows))
-    open(sys.argv[3], "w").write("".join("\t".join(w) + "\n" for w in words))
+    open(rows_path, "w").write("".join("\t".join(r) + "\n" for r in rows))
+    open(words_path, "w").write("".join("\t".join(w) + "\n" for w in words))
 
 
 if __name__ == "__main__":

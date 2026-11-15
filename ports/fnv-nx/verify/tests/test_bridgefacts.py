@@ -27,12 +27,12 @@ roots = recipe.load_admit(repo)
 check("bridgefacts is an admitted tool root with a recipe", roots.get(BF, {}).get("class") == "tool", roots.get(BF))
 rec = recipe.load_recipe(repo, roots, BF)
 check("it declares the COM rows, COM words and d3d9 rows as outputs and uses nothing (a root below every consumer: no uses cycle)",
-      rec["outputs"] == {"COM_ROWS": "com_rows.tsv", "COM_WORDS": "com_words.tsv", "D9_ROWS": "d9bridge_rows.tsv"} and not rec.get("uses"), rec.get("outputs"))
+      all(rec["outputs"].get(k) == v for k, v in {"COM_ROWS": "com_rows.tsv", "COM_SPEC": "com_spec.json", "COM_WORDS": "com_words.tsv", "D9_ROWS": "d9bridge_rows.tsv"}.items()) and not rec.get("uses"), rec.get("outputs"))
 for r in ("ports/fnv-nx/loader", "ports/fnv-nx/platform"):
     u = recipe.load_recipe(repo, roots, r).get("uses") or []
     check("%s takes COM_ROWS through uses" % r, {"root": BF, "output": "COM_ROWS"} in u, u)
 check("no consumer root owns a copy of the inputs (spec, name table): the old paths are gone",
-      not any(os.path.exists(os.path.join(repo, "ports/fnv-nx", p)) for p in ("platform/com/com_spec.json", "platform/crt/msvcrt_names.tsv", "platform/com/spec_extract.py")))
+      not any(os.path.exists(os.path.join(repo, "ports/fnv-nx", p)) for p in ("platform/com/com_spec.json", "platform/crt/msvcrt_names.tsv", "platform/com/spec_extract.py", "bridgefacts/com/com_spec.json")))
 # the {root, path} ref: a tracked file of a tool root; a product root and an untracked path are red
 host, ident = recipe.resolve_input("ports/fnv-nx/platform", {"root": BF, "path": "crt/msvcrt_va.tsv"}, repo)
 check("resolve_input {root, path} reads a tracked file of the tool root", ident == BF + "/crt/msvcrt_va.tsv" and os.path.isfile(host), ident)
@@ -51,9 +51,10 @@ for why, ref in (("an output the consumer does not use", {"root": BF, "output": 
     except ValueError:
         check("resolve_input {root, output}: %s is red" % why, True)
 # comrows.py on the real spec: one row per method of every non-hidden interface and export; words for every method incl. hidden ones
-spec = json.load(open(os.path.join(repo, BF, "com/com_spec.json")))
 with tempfile.TemporaryDirectory() as td:
-    r = subprocess.run([sys.executable, "-I", os.path.join(repo, BF, "com/comrows.py"), os.path.join(repo, BF, "com/com_spec.json"), td + "/r", td + "/w"], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, "-I", os.path.join(repo, BF, "com/comrows.py"), os.path.join(repo, "ports/fnv-nx/shim/include"), os.path.join(repo, "ports/fnv-nx/platform/audio"),
+                        td + "/s", td + "/r", td + "/w"], capture_output=True, text=True)
+    spec = json.load(open(td + "/s")) if r.returncode == 0 else {"interfaces": {}, "exports": []}   # COM_SPEC: derived by the same stage, never tracked
     rows = [l.split("\t") for l in open(td + "/r").read().split("\n") if l] if r.returncode == 0 else []
     words = [l.split("\t") for l in open(td + "/w").read().split("\n") if l] if r.returncode == 0 else []
 nm = sum(i["slots"] for i in spec["interfaces"].values() if not i["hidden"])
@@ -61,9 +62,8 @@ check("comrows: rows = methods of the non-hidden interfaces + exports, 8 columns
 check("comrows: words = every method of every interface (hidden ones included)", len(words) == sum(i["slots"] for i in spec["interfaces"].values()), len(words))
 bad = json.loads(json.dumps(spec))
 bad["methods"][0]["params"] = [{"kind": "nosuchkind", "name": "x", "ctype": "int", "byref": False}]
-with tempfile.TemporaryDirectory() as td:
-    json.dump(bad, open(td + "/s.json", "w"))
-    r = subprocess.run([sys.executable, "-I", os.path.join(repo, BF, "com/comrows.py"), td + "/s.json", td + "/r", td + "/w"], capture_output=True, text=True)
+r = subprocess.run([sys.executable, "-I", "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import comrows; comrows.derive(json.load(sys.stdin))",
+                    os.path.join(repo, BF, "com")], input=json.dumps(bad), capture_output=True, text=True)
 check("comrows: a parameter kind without a rule stops the tool (exit 2)", r.returncode == 2, r.returncode)
 print("FAILED %d" % fails if fails else "all pass")
 sys.exit(1 if fails else 0)

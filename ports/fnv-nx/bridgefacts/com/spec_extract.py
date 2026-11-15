@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""spec_extract.py SHIM_DIR AUDIO_DIR OUT.json (a library of gen_combridge.py; the generated com_spec.json is not a tracked file): derives the spec from the platform's own interface declarations.
+"""spec_extract.py SHIM_DIR AUDIO_DIR OUT.json (a library of comrows.py, the one derivation; the spec is the build output COM_SPEC of bridgefacts, never a tracked file): derives the spec from the platform's own interface declarations.
 
 The COM interfaces the platform implements are C++ abstract classes (shim/include/dsound.h, dinput.h, platform/audio/
 dsound_fx.h, dshow_int.h); this tool reads their `virtual` declarations in vtable order (a base class's methods first) and writes

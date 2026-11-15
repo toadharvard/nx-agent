@@ -243,17 +243,14 @@
   {
    "tool": "ports/fnv-nx/platform/com/gen_combridge.py",
    "args": [
+    "/uses/ports/fnv-nx/bridgefacts/COM_SPEC",
+    "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
+    "/uses/ports/fnv-nx/bridgefacts/COM_WORDS",
     "/out/com",
-    "/in/ports/fnv-nx/shim/include",
-    "/in/ports/fnv-nx/platform/audio",
     "/in/ports/fnv-nx/contract",
     "/in/ports/fnv-nx/platform/crt/cxx_types.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/shim/include/dsound.h",
-    "ports/fnv-nx/shim/include/dinput.h",
-    "ports/fnv-nx/platform/audio/dsound_fx.h",
-    "ports/fnv-nx/platform/audio/dshow_int.h",
     "ports/fnv-nx/contract/proto.py",
     "ports/fnv-nx/contract/store.py",
     "ports/fnv-nx/platform/crt/cxx_types.tsv"
@@ -263,8 +260,7 @@
     "com/combridge_cxx.gen.h",
     "com/combridge.gen.cpp",
     "com/combridge_exports.gen.cpp",
-    "com/combridge_if.gen.h",
-    "com/combridge_rows.tsv"
+    "com/combridge_if.gen.h"
    ]
   },
   {
@@ -553,6 +549,18 @@
   {
    "root": "ports/fnv-nx/shim",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "COM_SPEC"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "COM_ROWS"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "COM_WORDS"
   }
  ]
 }

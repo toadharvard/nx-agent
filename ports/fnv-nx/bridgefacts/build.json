@@ -21,14 +21,20 @@
   {
    "tool": "ports/fnv-nx/bridgefacts/com/comrows.py",
    "args": [
-    "/in/ports/fnv-nx/bridgefacts/com/com_spec.json",
+    "/in/ports/fnv-nx/shim/include",
+    "/in/ports/fnv-nx/platform/audio",
+    "/out/com_spec.json",
     "/out/com_rows.tsv",
     "/out/com_words.tsv"
    ],
    "inputs": [
-    "ports/fnv-nx/bridgefacts/com/com_spec.json"
+    "ports/fnv-nx/shim/include/dsound.h",
+    "ports/fnv-nx/shim/include/dinput.h",
+    "ports/fnv-nx/platform/audio/dsound_fx.h",
+    "ports/fnv-nx/platform/audio/dshow_int.h"
    ],
    "outputs": [
+    "com_spec.json",
     "com_rows.tsv",
     "com_words.tsv"
    ]
@@ -49,6 +55,7 @@
  ],
  "outputs": {
   "COM_ROWS": "com_rows.tsv",
+  "COM_SPEC": "com_spec.json",
   "COM_WORDS": "com_words.tsv",
   "D9_ROWS": "d9bridge_rows.tsv"
  }
