@@ -57,6 +57,10 @@ def main():
         json.dump({'compiler': {'build_key': '0' * 16}}, open(os.path.join(tree, 'MANIFEST.json'), 'w'))
         e = recipe.compiler_stamp_errors(TREE, tree, 'cc')
         check('a compiler tree with a stale build_key is red, naming both keys', len(e) == 1 and '0' * 16 in e[0] and k in e[0] and 'build_key' in e[0], e)
+        check('the message names the patch hash when the manifest\'s patch is another', 'msvcmodel_patch_sha256 is None' in e[0] and stamp.patch_sha256() in e[0], e)
+        json.dump({'compiler': {'build_key': '0' * 16, 'msvcmodel_patch_sha256': stamp.patch_sha256()}}, open(os.path.join(tree, 'MANIFEST.json'), 'w'))
+        e = recipe.compiler_stamp_errors(TREE, tree, 'cc')
+        check('with the same patch and another key the message says another input differs', len(e) == 1 and 'another input of the build differs' in e[0], e)
         json.dump({'compiler': {'build_key': k}}, open(os.path.join(tree, 'MANIFEST.json'), 'w'))
         check('a compiler tree with this checkout\'s build_key is accepted', recipe.compiler_stamp_errors(TREE, tree, 'cc') == [])
         # the recipe, with the real pin

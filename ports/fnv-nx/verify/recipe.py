@@ -1423,13 +1423,17 @@ def compiler_stamp_errors(tree, host, name):
     want = mod.stamp(tree)
     try:
         with open(os.path.join(host, "MANIFEST.json")) as f:
-            got = json.load(f).get("compiler", {}).get("build_key")
+            comp = json.load(f).get("compiler", {})
+        got = comp.get("build_key")
     except (OSError, ValueError):
         return ["external %s: no MANIFEST.json with compiler.build_key: the tree was not built by toolchain/msvcmodel/build.sh at a checkout with stamp.py; "
                 "this checkout's compiler key is %s" % (name, want)]
     if got != want:
-        return ["external %s: compiler.build_key is %s, this checkout's compiler inputs (toolchain/msvcmodel/stamp.py) give %s: the pinned compiler was built "
-                "from other patches than this checkout's; rebuild it and re-pin" % (name, got, want)]
+        pw = mod.patch_sha256(tree)
+        why = ("its msvcmodel_patch_sha256 is %s, this checkout's msvcmodel.patch is %s" % (comp.get("msvcmodel_patch_sha256"), pw)
+               if comp.get("msvcmodel_patch_sha256") != pw else "msvcmodel.patch is the same, another input of the build differs")
+        return ["external %s: compiler.build_key is %s, this checkout's compiler inputs (toolchain/msvcmodel/stamp.py) give %s (%s): the pinned tree was built "
+                "from other inputs than this checkout's; rebuild it and re-pin" % (name, got, want, why)]
     return []
 
 

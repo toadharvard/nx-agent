@@ -27,6 +27,12 @@ def stamp(root=None, patch=None, build=None, patch_dir=None):
     return hashlib.sha256(lines.encode()).hexdigest()[:16]
 
 
+def patch_sha256(root=None, patch=None):
+    """the full sha256 of msvcmodel.patch: the MANIFEST.json field `compiler.msvcmodel_patch_sha256`, the one input of the key that names the data model; the key
+    covers it, so a tree with another patch has another key (this is the readable form of that fact)."""
+    return hashlib.sha256(open(patch or os.path.join(root or TREE, INPUTS[0]), "rb").read()).hexdigest()
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--patch")
