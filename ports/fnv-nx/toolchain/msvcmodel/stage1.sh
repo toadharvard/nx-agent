@@ -2,15 +2,14 @@
 # stage1.sh - stage 1 of the game's compiler build, a `run` step of the toolchain product root (step gcc1): GCC 13.3.0 + msvcmodel.patch for the guest target, installed
 # into a prefix, with the binutils of the pinned deb copied in as <triplet>-*. It reads ONLY what the sandbox mounts (the constants below): no network, no repo, no
 # host paths. Its key is the content of those mounts (sources, patch, records, debs, this file), so there is no key computed here.
-#   output $OUT_DIR/prefix   the installed compiler          $OUT_DIR/b-gcc   GCC's build tree (libgcc is configured and built inside it in stage 2)
-#   output $OUT_DIR/src      the patched GCC source tree     (all three stay at the absolute paths of $PREFIX, $WORK/b-gcc, $SRC: GCC's Makefiles and the
+#   output $OUT_DIR/STAGE1/prefix   the installed compiler          $OUT_DIR/STAGE1/b-gcc   GCC's build tree (libgcc is configured and built inside it in stage 2)
+#   output $OUT_DIR/STAGE1/src      the patched GCC source tree     (all three stay at the absolute paths of $PREFIX, $WORK/b-gcc, $SRC: GCC's Makefiles and the
 #                            compiler's configured paths are absolute; stage 2 puts them back at the same paths, see rt.sh)
 set -euo pipefail
-# ---- the constants of this step: every path the step touches; the mounts are the sandbox's (a change of the mounts is a change of these lines alone) ----
-GCC_TARBALL=/ext/gcc/gcc-13.3.0.tar.xz          # external: the sha256-pinned GNU tarball
-MSVC_PATCH=/in/repo/toolchain/msvcmodel/msvcmodel.patch   # input: the repo file at its tree-relative name
-RECORDS=/in/records.sh                          # input: records.py's output (targets, runtime_configure, semantics, plugins)
-DEB_ROOT=/deb                                   # the installed files of each declared deb: /deb/<name>/<absolute path>
+# ---- the constants of this step: every path the step touches (the sandbox's mounts: inputs /in/N in the order of build.json, externals /ext/<at>); a change of the mounts is a change of these lines alone ----
+GCC_TARBALL=/ext/gcc/gcc-13.3.0.tar.xz          # external `gcc` (`at` /ext/gcc): the GNU tarball
+MSVC_PATCH=/in/2                                # input 2: toolchain/msvcmodel/msvcmodel.patch   (input 1 is this script)
+RECORDS=/in/3                                   # input 3: records1.sh, the stage ref of the generator `records.py stage1` (compiler configure: T ABI CPUARCH MLFLAG GCC_RT_CONF)
 SCRATCH=/scratch                                # the writable scratch directory, the same absolute path on every run
 WORK=$SCRATCH/w; PREFIX=$SCRATCH/prefix         # the absolute build paths
 OUT_DIR=/out
@@ -19,10 +18,8 @@ V=13.3.0
 . "$RECORDS"
 JOBS=${JOBS:-$(nproc)}   # the job count is not part of the content (make's -j changes no output)
 P=$PREFIX; W=$WORK; SRC=$W/gcc-$V
-# the host tools are the debs': every bin directory and library directory of the declared debs, by pattern (no package list here)
-for d in "$DEB_ROOT"/*/usr/bin "$DEB_ROOT"/*/bin "$DEB_ROOT"/*/usr/sbin; do [ -d "$d" ] && PATH="$d:$PATH"; done
-for d in "$DEB_ROOT"/*/usr/lib/x86_64-linux-gnu "$DEB_ROOT"/*/lib/x86_64-linux-gnu; do [ -d "$d" ] && LD_LIBRARY_PATH="$d${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; done
-export PATH LD_LIBRARY_PATH LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=0
+# the host tools are the declared debs' (the step's root is their union, PATH=/usr/bin:/bin)
+export LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=0
 mkdir -p "$P/bin" "$P/$T/bin" "$W"; cd "$W"
 CONF=$P/CONFIGURE.txt
 note() { printf '%s\n' "$*" >> "$CONF"; }
@@ -94,6 +91,6 @@ make install-gcc > ../install-gcc1.log 2>&1
 cd ..
 
 # the outputs: the three trees, kept as they are (absolute paths of this scratch are the contract with stage 2)
-mkdir -p "$OUT_DIR"
-cp -a "$P" "$OUT_DIR/prefix"; cp -a "$W/b-gcc" "$OUT_DIR/b-gcc"; cp -a "$SRC" "$OUT_DIR/src"
+mkdir -p "$OUT_DIR/STAGE1"   # the directory output STAGE1 of build.json
+cp -a "$P" "$OUT_DIR/STAGE1/prefix"; cp -a "$W/b-gcc" "$OUT_DIR/STAGE1/b-gcc"; cp -a "$SRC" "$OUT_DIR/STAGE1/src"
 echo "$P/bin/$T-g++"

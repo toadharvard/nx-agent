@@ -30,3 +30,11 @@ mount points changes those lines only.
 
 ## Check done here (no sandbox yet)
 `bash -n` on both scripts; the stage-2 `tlflags` function gives byte-equal output to `recipe.semantics_for` on the cand2 compiler (c and cxx).
+
+
+## Roots (build.json) and externals
+- `toolchain/stage1` (step `gcc1`, output `STAGE1`) and `toolchain/compiler` (compiler = stage external `{root toolchain/stage1, output STAGE1, at /ext/stage1}`, the eight `plugins` in load order,
+  step `rt`, output `COMPILER`). Mounts are exactly the constants at the top of `stage1.sh` / `rt.sh`; `records.py stage1|stage2` are the generators (input: the verify directory, mounted at `/in/ports/fnv-nx/verify`).
+- Externals (fnv-nx-build, orphan mirror branches): gcc `tools/gcc-src-13.3.0` f445876d (tree f50e0b05...), newlib `tools/newlib-4.6.0.20260123` 2fb73524 (af2b544d...), autotools `tools/autotools-src` 2dee1098 (6dbd091d...),
+  buildscripts `tools/devkitpro-buildscripts-5740da9b` f34068c8 (f0923ebe...); full hashes in the two build.json files.
+- Debs: the lists name `bash sed grep patch xz-utils findutils diffutils gzip` which env.json does not pin yet (all others are pinned); the roots are not admitted until they are.

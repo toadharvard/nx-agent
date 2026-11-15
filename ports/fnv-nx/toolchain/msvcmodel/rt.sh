@@ -5,16 +5,21 @@
 #   output $OUT_DIR   the compiler tree COMPILER: bin/, lib/, the plugin headers, the runtime libraries and crt, MANIFEST.json
 set -euo pipefail
 # ---- the constants of this step: every path it touches; the mounts are the sandbox's (a change of the mounts is a change of these lines alone) ----
-STAGE1=/in/1                                      # stage 1's output tree: prefix/, b-gcc/, src/ (absolute paths below are the ones stage 1 built at)
-REPO=/in/repo                                     # the repo files, at their tree-relative names: toolchain/gcc/*.patch, cfg_link.py, link/guest.ld, toolchain/dispatch/fnvnx_dispatch.cc
-RECORDS=/in/records.sh                            # records.py's output
-PLUGINS_DIR=/in/plugins                           # <plugin name>.so of every plugin of PLUGIN_ORDER (the recipe's plugin stages, built against the stage-1 compiler's plugin headers)
-GCC_TARBALL=/ext/gcc/gcc-13.3.0.tar.xz            # (the source tree is in STAGE1/src; the tarball is only the MANIFEST's source_sha256)
+STAGE1=/ext/stage1                                # the compiler external (stage 1's output STAGE1): prefix/, b-gcc/, src/ (the absolute paths below are the ones stage 1 built at)
+RECORDS=/in/2                                     # input 2: records2.sh, the stage ref of the generator `records.py stage2` (T ABI MLFLAG, semantics, plugins)   (input 1 is this script)
+MSVC_PATCH=/in/3                                  # inputs 3-9: the repo files, in this order (build.json)
+P_X19=/in/4                                       #   toolchain/gcc/x19-x27.patch
+P_NOSIZED=/in/5                                   #   toolchain/gcc/libstdcxx-nosized.patch
+P_NLGUEST=/in/6                                   #   toolchain/gcc/newlib-guest.patch
+CFG_LINK_PY=/in/7                                 #   toolchain/gcc/cfg_link.py
+CFG_GUEST_LD=/in/8                                #   link/guest.ld
+CFG_PROTOCOL_SRC=/in/9                            #   toolchain/dispatch/fnvnx_dispatch.cc
+PLUGIN_IN=10                                      # inputs 10.. : {"plugin": NAME} in the records' PLUGIN_ORDER; plugin i is /in/$((PLUGIN_IN+i))/<name>.so
+GCC_TARBALL=/ext/gcc/gcc-13.3.0.tar.xz            # external `gcc` (only the MANIFEST's source_sha256: the source tree is STAGE1/src)
 NEWLIB_TARBALL=/ext/newlib/newlib-4.6.0.20260123.tar.gz
 AUTOCONF_TARBALL=/ext/autotools/autoconf-2.69.tar.xz   # the autotools newlib's own generated files state (configure: Autoconf 2.69, Makefile.in: automake 1.15.1)
 AUTOMAKE_TARBALL=/ext/autotools/automake-1.15.1.tar.xz
 BS=/ext/buildscripts                              # devkitPro/buildscripts at its pinned commit: patches/newlib-$NLV-4.patch
-DEB_ROOT=/deb
 SCRATCH=/scratch                                  # the same absolute path as in stage 1
 WORK=$SCRATCH/w; PREFIX=$SCRATCH/prefix
 OUT_DIR=/out
@@ -23,10 +28,8 @@ NLV=4.6.0.20260123
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------------
 . "$RECORDS"
 JOBS=${JOBS:-$(nproc)}   # the job count is not part of the content
-W=$WORK; P=$PREFIX; SRC=$W/gcc-$V; NL=$W/newlib-$NLV; PATCH_DIR=$REPO/toolchain/gcc
-for d in "$DEB_ROOT"/*/usr/bin "$DEB_ROOT"/*/bin "$DEB_ROOT"/*/usr/sbin; do [ -d "$d" ] && PATH="$d:$PATH"; done
-for d in "$DEB_ROOT"/*/usr/lib/x86_64-linux-gnu "$DEB_ROOT"/*/lib/x86_64-linux-gnu; do [ -d "$d" ] && LD_LIBRARY_PATH="$d${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; done
-export PATH LD_LIBRARY_PATH LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=0
+W=$WORK; P=$PREFIX; SRC=$W/gcc-$V; NL=$W/newlib-$NLV
+export LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH=0   # the host tools are the declared debs' (PATH=/usr/bin:/bin)
 CONF=$P/CONFIGURE.txt
 note() { printf '%s\n' "$*" >> "$CONF"; }
 # stage 1's output goes back to the absolute paths it was built at (GCC's build tree and the compiler's configured paths are absolute)
@@ -36,7 +39,7 @@ cd "$W"
 note "# stage 2; newlib $NLV; devkitPro/buildscripts at $BS"
 mkdir -p "$W/tarballs"
 BSP=$BS/patches/newlib-$NLV-4.patch
-# the CFG-LINK patch of the runtime subdirs: guest_compiler.json runtime_configure_patch, from the records (CFG_SUBDIRS, CFG_GUEST_LD, CFG_PROTOCOL_SRC)
+# the CFG-LINK patch of the runtime subdirs: guest_compiler.json runtime_configure_patch, from the records (CFG_SUBDIRS; the two files it names, link/guest.ld and the dispatch plugin source, are inputs 8 and 9)
 
 # apply one -p0 patch of L5 (it names the trees of the old two-compiler build): the sections whose tree this build has
 apply_p0() {
@@ -55,10 +58,10 @@ export W
   mkdir "$NL"
   tar -xzf "$NEWLIB_TARBALL" -C "$NL" --strip-components=1
   patch -s -d "$NL" -p1 < "$BSP"
-  apply_p0 "$PATCH_DIR/x19-x27.patch"
-  apply_p0 "$PATCH_DIR/libstdcxx-nosized.patch"
+  apply_p0 "$P_X19"
+  apply_p0 "$P_NOSIZED"
   # CFG-LINK: every runtime subdir's generated configure answers its link tests by a static link (see the libs step)
-  for d in "${CFG_SUBDIRS[@]}"; do python3 -I "$PATCH_DIR/cfg_link.py" patch "$SRC/$d/configure"; done
+  for d in "${CFG_SUBDIRS[@]}"; do python3 -I "$CFG_LINK_PY" patch "$SRC/$d/configure"; done
   # NL-LDBL (newlib-guest.patch): configure and Makefile.in are regenerated with the autotools the tarball's files state. Proof that
   # the tooling is the right one: on the pristine tarball tree the regeneration reproduces its configure and Makefile.in byte for byte.
   AT=$W/autotools
@@ -76,7 +79,7 @@ export W
   cmp "$W/nl-pristine/newlib/configure" "$W/configure" && cmp "$W/nl-pristine/newlib/Makefile.in" "$W/Makefile.in" \
     || { echo "autoconf 2.69 / automake 1.15.1 do not reproduce the tarball's configure / Makefile.in" >&2; exit 2; }
   rm -rf "$W/nl-pristine" "$W/configure" "$W/Makefile.in"
-  apply_p0 "$PATCH_DIR/newlib-guest.patch"
+  apply_p0 "$P_NLGUEST"
   regen "$NL"
 }
 
@@ -96,7 +99,8 @@ tlflags() { # c|cxx
 
 # the plugins' flags: -fplugin=<so> in the records' PLUGIN_ORDER, then each plugin's arguments from the records (recipe.plugin_args("native")); the same for C and C++
 PLUG=""
-for n in "${PLUGIN_ORDER[@]}"; do [ -f "$PLUGINS_DIR/$n.so" ] || { echo "rt.sh: $PLUGINS_DIR/$n.so is not mounted" >&2; exit 9; }; PLUG="$PLUG -fplugin=$PLUGINS_DIR/$n.so"; done
+PLUGIN_SO=()
+i=0; for n in "${PLUGIN_ORDER[@]}"; do so=/in/$((PLUGIN_IN+i))/$n.so; i=$((i+1)); [ -f "$so" ] || { echo "rt.sh: $so is not mounted" >&2; exit 9; }; PLUGIN_SO+=("$so"); PLUG="$PLUG -fplugin=$so"; done
 for n in "${PLUGIN_ORDER[@]}"; do eval "PLUG=\"\$PLUG \${PLUGIN_ARGV_$n[*]}\""; done
 PLUG_C=$PLUG; PLUG_CXX=$PLUG
 TLC="-O2 $(tlflags c) $PLUG_C"   # no -ffunction-sections/-fdata-sections: rtasm reads whole objects with their .fnvnx* sections
@@ -143,9 +147,9 @@ printf '*lib:\n%%{!shared:%%{g*:-lg} %%{!p:%%{!pg:--start-group -lc -lsysbase --
   # Rule CFG-LINK (toolchain/gcc/cfg_link.py, recorded as guest_compiler.json runtime_configure_patch). The configure scripts of the runtime
   # subdirs (patched in the unpack step) answer every link test by a static link: the test compiles, and the linker's own archive closure
   # (ld -r over the driver's -### link line) leaves only linker-script and product-protocol symbols undefined.
-  export PYTHON_CFG_LINK="python3 -I $PATCH_DIR/cfg_link.py"
+  export PYTHON_CFG_LINK="python3 -I $CFG_LINK_PY"
   export FNVNX_CFG_NM=$P/bin/$T-nm FNVNX_CFG_LD=$P/bin/$T-ld FNVNX_CFG_EMUL=aarch64elf${ABI#ilp}
-  export FNVNX_CFG_GUEST_LD=$REPO/$CFG_GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$REPO/$CFG_PROTOCOL_SRC FNVNX_CFG_CACHE=$W/cfg-cache
+  export FNVNX_CFG_GUEST_LD=$CFG_GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$CFG_PROTOCOL_SRC FNVNX_CFG_CACHE=$W/cfg-cache
   note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC' CXXFLAGS_FOR_TARGET='$TLCXX'"
   make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > make-libs.log 2>&1
   make -C b-gcc install CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > install-libs.log 2>&1
@@ -199,8 +203,8 @@ done < <(find "$P/bin" "$P/libexec" -type f)
 # PLUGIN_ORDER with their arguments, the flags of the target libraries, the multilib set, every library's sha256, CFG-LINK's answers. There is no key in it: the key of
 # this tree is the stage key of the step that wrote it (the sandbox's content key).
 PLUGLIST=$W/plugins.tsv; : > "$PLUGLIST"
-for n in "${PLUGIN_ORDER[@]}"; do eval "printf '%s\\t%s\\t%s\\n' \"\$n\" \"\$(sha256sum \"\$PLUGINS_DIR/\$n.so\" | cut -d' ' -f1)\" \"\${PLUGIN_ARGV_$n[*]}\"" >> "$PLUGLIST"; done
-python3 -I - "$P" "$T" "$V" "$(sha256sum "$GCC_TARBALL" | cut -d' ' -f1)" "$(sha256sum "$REPO/toolchain/msvcmodel/msvcmodel.patch" | cut -d' ' -f1)" "$MLFLAG" "$TLC" "$TLCXX" "$CONF" "$PLUGLIST" "$P/bin/$T-gcc" <<'EOF'
+i=0; for n in "${PLUGIN_ORDER[@]}"; do eval "printf '%s\\t%s\\t%s\\n' \"\$n\" \"\$(sha256sum \"\${PLUGIN_SO[$i]}\" | cut -d' ' -f1)\" \"\${PLUGIN_ARGV_$n[*]}\"" >> "$PLUGLIST"; i=$((i+1)); done
+python3 -I - "$P" "$T" "$V" "$(sha256sum "$GCC_TARBALL" | cut -d' ' -f1)" "$(sha256sum "$MSVC_PATCH" | cut -d' ' -f1)" "$MLFLAG" "$TLC" "$TLCXX" "$CONF" "$PLUGLIST" "$P/bin/$T-gcc" <<'EOF'
 import sys, os, json, hashlib, subprocess
 P, T, V, SHA, PATCH_SHA, ML, TLC, TLCXX, CONF, PLUGLIST, GCC = sys.argv[1:12]
 h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
@@ -232,6 +236,6 @@ open(os.path.join(P, "MANIFEST.json"), "w").write(json.dumps(m, indent=1, sort_k
 print("MANIFEST.json: %d plugins, %d libraries" % (len(plugins), len(libs)))
 EOF
 # the output: the compiler tree
-mkdir -p "$OUT_DIR"
-cp -a "$P/." "$OUT_DIR/"
+mkdir -p "$OUT_DIR/COMPILER"   # the directory output COMPILER of build.json
+cp -a "$P/." "$OUT_DIR/COMPILER/"
 echo "$P/bin/$T-g++"
