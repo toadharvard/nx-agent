@@ -1788,3 +1788,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:50 w27 a889bf949: the stub gate accepts owner-decision citations, FNVNX_CITE(fn,"od:<id>") against the CLAUDE.md anchor (integ 911175615). It reds unknown-id, wrong-root, cite-mismatch and a malformed anchor; the synthetic tests pass, and the compiler cases run in w15's verdict. Fix asked: read the citation before every rule branch, so it is path-independent. Spelling sent to L6.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:52 L6: the assumptions gate on cand3 shows 5 mention-no-id (gatecert.py:11,292; objstub_x64.py:1,15,686). w12 fixes them first: cite an existing id, reword a gated fact, or report a new assumption. L6 d3d9total 332/332 with 45/45 mutations killed at 4bd215d1b.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
