@@ -1,0 +1,82 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-std=c11",
+   "-Wall",
+   "-Werror",
+   "-Werror=switch-enum",
+   "-O2",
+   "-fPIC"
+  ],
+  "cxx": [],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/render/nxgpu",
+  "ports/fnv-nx/render/shaders/translator/include",
+  "ports/fnv-nx/lib/sha256/include"
+ ],
+ "units": "all",
+ "link": {
+  "output": "libnxgl4.so",
+  "kind": "shared",
+  "version_script": "libnxgl4.map",
+  "flags": [
+   "-m",
+   "elf_x86_64"
+  ],
+  "roots": [
+   "ports/fnv-nx/render/nxgpu",
+   "ports/fnv-nx/render/shaders/translator",
+   "ports/fnv-nx/lib/sha256"
+  ],
+  "libs": {
+   "system": [
+    "/usr/lib/x86_64-linux-gnu/libc.so.6",
+    "/usr/lib/x86_64-linux-gnu/libEGL.so.1"
+   ]
+  },
+  "loader": "ports/fnv-nx/tests/bootrt"
+ },
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/gl4/gen_funcs.py",
+   "args": [
+    "/out/gl4_funcs.h",
+    "/ext/khronos-glxml/xml/gl.xml"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gl4_funcs.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/gl4/gen_exports.py",
+   "args": [
+    "/out/libnxgl4.map",
+    "/in/ports/fnv-nx/render/gl4/gl4.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/gl4/gl4.h"
+   ],
+   "outputs": [
+    "libnxgl4.map"
+   ]
+  }
+ ],
+ "external": [
+  {
+   "name": "khronos-glxml",
+   "repo": "fnv-nx-build",
+   "ref": "tools/khronos-glxml",
+   "commit": "f4894d73bf8e40c85a20a61408179c9898ec3340",
+   "tree_sha256": "db3ce8936cb697673ae539cd3ba552747a6ad14ca2ba6d537a15b05b0a9c6907",
+   "at": "/ext/khronos-glxml"
+  }
+ ]
+}

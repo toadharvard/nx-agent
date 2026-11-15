@@ -511,7 +511,7 @@ Kinds (the explicit per-file encoding):
 boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 
   [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
-                               [--gpu-branch <artifacts branch>]
+                               [--gpu]
 
 Steps:
  1 setup: what the stage needs (python3, git, unicorn==2.1.4; no binutils: the ELF facts come from the link record)
@@ -536,15 +536,11 @@ Steps:
    module or a nonzero exit) is a RESULT; 1 is an input error and fails the job
  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
---gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-   Mesa llvmpipe). The job fetches it, requires the packages libegl1 and libegl-mesa0 at the
-   versions of verify/env.json (installed by farm/setup_verdict_env.sh, never by the job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
-   frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
-   gpu_branch_commit, the final line gains presents=<n>.
-   The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
-   the bridge it was linked with (render: {branch, archive_sha256}); that branch's build.json archive_sha256 and its libfnvnx-d3d9.a
-   bytes equal it; B's meta.json sha256 equals the libnxgl4.so bytes; bridge build.json nx_agent_commit == B's meta.json
-   nx_agent_commit (bridge head == nxgl4 head). meta.json gains bridge_branch, bridge_branch_commit and render_head.
+--gpu: the renderer. The GL library is the product of the host-target root render/gl4 (libnxgl4.so, GL 4.5 on Mesa llvmpipe), built
+   by recipe.py in the verdict's store ($GATE_CACHE) through gate_build.ensure; nothing is fetched or pinned. The job requires the packages
+   libegl1 and libegl-mesa0 at the versions of verify/env.json (installed by farm/setup_verdict_env.sh, never by the job; a missing or other
+   version fails the job), checks that the library loads, and runs boot.py with --gpu --frames DIR. The first 3
+   frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. The final line gains presents=<n>.
 Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
@@ -760,7 +756,7 @@ The renderer of the boot stage: ext module 10 (the guest's GPU calls) forwarded 
 The library exports nxgl4_create(width, height, err, errlen), nxgl4_destroy, nxgl4_ext(fn, args, nargs) and nxgl4_last_error, and
 leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range -> host pointer; NULL when the range is not wholly inside
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
-this file loads the recipe product of the host-target root verify/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
+this file loads the recipe product of the host-target root tests/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
 no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
 nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
@@ -795,13 +791,6 @@ row or line a converter does not understand is an InputError carrying the file l
 
   join       --dir D -o guest.elf     manifest.json (fnvnx-elf/1: name, size, sha256, parts [[file, size, sha256]]) -> the parts
                                       concatenated in manifest order; each part's size and sha256 and the whole size and sha256 checked
-                                      an optional `render` object is allowed (see pair)
-  render-branch --manifest manifest.json
-                                      prints `BRANCH SHA256`: manifest.json's `render` object {branch, archive_sha256} = the artifacts
-                                      branch of the D3D9 bridge the ELF was linked with and the sha256 of its libfnvnx-d3d9.a
-  pair       --manifest manifest.json --bridge DIR --gpu DIR
-                                      the renderer pair rule (render_pair): the bridge linked into the ELF and libnxgl4.so are of one
-                                      nx-agent commit, and every recorded sha256 equals the bytes; prints the common commit
   reserved   --modules modules.tsv --exe FalloutNV.exe -o reserved.tsv
                                       modules.tsv (header `# name sha256 size preferred_base assigned_base size_of_image has_tls
                                       entry_rva static load_index`; one row per module) -> `name lo hi` rows (lo = assigned_base,

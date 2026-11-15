@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bootrt (verify/bootrt, recipe root of target host): the embedder symbols of the boot machine's host objects and the proven-unreachable
+"""bootrt (tests/bootrt, recipe root of target host): the embedder symbols of the boot machine's host objects and the proven-unreachable
 assertion fnvnx_reach_violation of hostabi/include/fnvnx/reach.h. The library is the recipe product in GATE_CACHE (gate_build.ensure, the verdict's own store). A violation
 ends the process, so each case runs in a child python: it loads the library through bootgpu, registers an exit callback that writes the code it
 receives to a file, and calls the violation. Exit 0 on pass."""

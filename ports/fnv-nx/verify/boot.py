@@ -32,7 +32,7 @@ Host parts: the table's `host` target is an ID word, so the exact console line a
 writes exactly that line. Two more host events exist: `present` (every present of the renderer) and `gpu-first-call` (the first
 guest call of ext module 10); they only fire with --gpu. Any other host name is an input error listing the known forms.
 
-Renderer: --gpu LIB registers ext module 10 and forwards it to the host library LIB (bootgpu.py); --frames DIR is its
+Renderer: --gpu registers ext module 10 and forwards it to the host library libnxgl4.so, the recipe product of render/gl4 in $GATE_CACHE (bootgpu.py; no other source); --frames DIR is its
 $NXGL4_FRAMES (the library writes frame_%06u.rgba/.txt there). The three GL variables for software rendering are set for it.
 Without --gpu module 10 is not registered (a guest call answers NO_MODULE). EVERY present of the renderer is a record of OUT.json "frames" = [{n (from 1), t_ns (virtual clock
 at the present), per_tid: {thread name: instructions}, sha256 (with --frames)}] (Icount.frames(): frame n counts every instruction since
@@ -391,7 +391,7 @@ def run(a):
             sys.stdout.flush()
             sys.stderr.flush()
             os._exit(rc)
-        gpu = bootgpu.Gpu(a.gpu, m, a.profile, on_present=presented, on_exit=host_exit,
+        gpu = bootgpu.Gpu(m, a.profile, on_present=presented, on_exit=host_exit,
                           on_first_call=lambda: [fire(i, m.tid()) for i in watch["host"].get("gpu-first-call", ())])
 
     def finish(r, gpu_report):
@@ -461,7 +461,7 @@ def main(argv=None):
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))
     sp.add_argument("--quantum", required=True, type=lambda s: int(s, 0),
                     help="instructions per slice of a core's thread (bootmachine.py rule 3); a declared parameter of the run, no default; recorded in OUT.json machine")
-    sp.add_argument("--gpu", help="host renderer library libnxgl4.so: registers ext module 10 (bootgpu.py)")
+    sp.add_argument("--gpu", action="store_true", help="registers ext module 10, forwarded to the recipe-built render/gl4 library libnxgl4.so (bootgpu.py; needs GATE_CACHE)")
     sp.add_argument("--frames", help="directory for the library's frame files ($NXGL4_FRAMES); needs --gpu")
     sp.add_argument("--threads", type=int, default=256,
                     help="guest thread stacks the stage provides (a number of the run, not of the contract; beyond it "

@@ -2,10 +2,13 @@
 """The renderer of the boot stage: ext module 10 (the guest's GPU calls) forwarded to the renderer's host library libnxgl4.so
 (render/d3d9/backend/gl4.h: desktop GL 4.5 on Mesa llvmpipe, EGL surfaceless). Library: Gpu.
 
+The library is the recipe product of the host-target root render/gl4 (GL_ROOT), taken only from gate_build.ensure in the verdict's store
+($GATE_CACHE): there is no prebuilt library, no pin of one and no path argument.
+
 The library exports nxgl4_create(width, height, err, errlen), nxgl4_destroy, nxgl4_ext(fn, args, nargs) and nxgl4_last_error, and
 leaves two symbols for the embedder: nxgl4_guest_ptr(addr, size) (guest range -> host pointer; NULL when the range is not wholly inside
 one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_present(frame). The library does not ship them, so
-this file loads the recipe product of the host-target root verify/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
+this file loads the recipe product of the host-target root tests/bootrt (libnxgl4rt.so, built by recipe.py in the verdict's store, $GATE_CACHE;
 no compiler is called here) RTLD_GLOBAL, then the library. bootrt defines the two embedder symbols (forwarding to the function pointers set through
 nxgl4_shim_set(ptr, present, exit)) and fnvnx_reach_violation (hostabi/include/fnvnx/reach.h) for every host object. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
@@ -21,7 +24,8 @@ MODULE = 10
 PTR_CB = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64)
 PRESENT_CB = ctypes.CFUNCTYPE(None, ctypes.c_uint32)
 EXIT_CB = ctypes.CFUNCTYPE(None, ctypes.c_uint32)
-BOOTRT_ROOT = "ports/fnv-nx/verify/bootrt"   # the host-target recipe root that defines the embedder symbols (admit.json)
+BOOTRT_ROOT = "ports/fnv-nx/tests/bootrt"   # the host-target recipe root that defines the embedder symbols (admit.json)
+GL_ROOT = "ports/fnv-nx/render/gl4"   # the host-target recipe root of the renderer library libnxgl4.so (admit.json)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _shim = {}
 
@@ -30,18 +34,28 @@ class GpuError(Exception):
     pass
 
 
-def bootrt_path(gate_cache=None):
-    """the path of libnxgl4rt.so built by recipe.py from BOOTRT_ROOT in the verdict's own store ($GATE_CACHE, the same cache the other recipe
-    products come from); a missing cache variable or a red build is an input error"""
+def product_path(root, gate_cache=None):
+    """the path of the linked output of the host-target recipe root ROOT, built by recipe.py in the verdict's own store ($GATE_CACHE, the same cache
+    the other recipe products come from); a missing cache variable or a red build is an input error"""
     cache = gate_cache or os.environ.get("GATE_CACHE")
     if not cache:
-        raise GpuError("GATE_CACHE is not set: the embedder symbols are the recipe product of %s, built in the verdict's store" % BOOTRT_ROOT)
+        raise GpuError("GATE_CACHE is not set: %s is a recipe product, built in the verdict's store" % root)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import gate_build
-    res, _out = gate_build.ensure(BOOTRT_ROOT, cache, REPO)
+    res, _out = gate_build.ensure(root, cache, REPO)
     if res.get("status") != "green" or not res.get("elf"):
-        raise GpuError("%s is not green: %s" % (BOOTRT_ROOT, (res.get("failure") or {}).get("stage", res.get("status"))))
+        raise GpuError("%s is not green: %s" % (root, (res.get("failure") or {}).get("stage", res.get("status"))))
     return res["elf"]["path"]
+
+
+def bootrt_path(gate_cache=None):
+    """the path of the embedder library libnxgl4rt.so (the product of BOOTRT_ROOT)"""
+    return product_path(BOOTRT_ROOT, gate_cache)
+
+
+def gl4_path(gate_cache=None):
+    """the path of the renderer library libnxgl4.so (the product of GL_ROOT): the only source of the library"""
+    return product_path(GL_ROOT, gate_cache)
 
 
 def _load_shim(gate_cache=None):
@@ -54,9 +68,10 @@ def _load_shim(gate_cache=None):
     return _shim["lib"]
 
 
-def load(path, gate_cache=None):
-    """load the shim and then the library at `path` (the shim's symbols must exist before it); the library's functions typed"""
+def load(gate_cache=None):
+    """load the shim and then the recipe-built library (the shim's symbols must exist before it); the library's functions typed"""
     shim = _load_shim(gate_cache)
+    path = gl4_path(gate_cache)
     try:
         lib = ctypes.CDLL(os.path.abspath(path))
     except OSError as e:
@@ -67,19 +82,19 @@ def load(path, gate_cache=None):
     lib.nxgl4_ext.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32]
     lib.nxgl4_ext.restype = ctypes.c_uint64
     lib.nxgl4_last_error.argtypes, lib.nxgl4_last_error.restype = [], ctypes.c_char_p
-    return shim, lib
+    return shim, lib, path
 
 
 class Gpu:
     """one renderer library bound to one machine; at most one live Gpu per process (the library holds one GL context)"""
 
-    def __init__(self, path, machine, profile="handheld", on_present=None, on_first_call=None, on_exit=None):
+    def __init__(self, machine, profile="handheld", on_present=None, on_first_call=None, on_exit=None, gate_cache=None):
         if profile not in SIZES:
             raise GpuError("profile must be handheld or docked, got %r" % (profile,))
+        self.m, self.presents, self.first_call, self.hook_present, self.hook_first = machine, 0, None, on_present, on_first_call
+        shim, self.lib, path = load(gate_cache)
         with open(path, "rb") as f:
             self.sha256 = hashlib.sha256(f.read()).hexdigest()
-        self.m, self.presents, self.first_call, self.hook_present, self.hook_first = machine, 0, None, on_present, on_first_call
-        shim, self.lib = load(path)
         # on_exit(code): a host object ended the process through fnvnx_reach_violation with the full 32-bit code; it
         # ends the process itself. None registers no exit callback: the violation then ends the process with status 1 after its log line.
         self._cbs = (PTR_CB(self._guest_ptr), PRESENT_CB(self._present), EXIT_CB(on_exit) if on_exit else EXIT_CB())   # alive as long as the library may call them
@@ -122,7 +137,5 @@ class Gpu:
                 "last_error": self.last_error() or None}
 
 
-if __name__ == "__main__":   # bootgpu.py LIB: the load check of the farm job (shim + library load, every export present)
-    import sys
-    load(sys.argv[1])
-    print("bootgpu: %s loads" % sys.argv[1])
+if __name__ == "__main__":   # bootgpu.py: the load check of the farm job (shim + the recipe-built library load, every export present)
+    print("bootgpu: %s loads" % load()[2])

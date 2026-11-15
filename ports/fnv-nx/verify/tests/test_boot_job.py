@@ -25,7 +25,6 @@ sys.path.insert(0, VERIFY)
 import boot  # noqa: E402
 import cas  # noqa: E402
 import test_bootmachine as tb  # noqa: E402
-import test_bootgpu as tg  # noqa: E402
 
 SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
@@ -147,32 +146,8 @@ def main():
     nofacts = {k: v for k, v in contract.items() if k != "elffacts.json"}
     publish_branch("l1-contract/elf/nofactsid", dict(nofacts, **{"mode": M6, "guest.elf": ok_elf}))
     publish_branch("l1-contract/elf/noentries", dict(noent, **{"mode": M6, "guest.elf": ok_elf}))
-    # the REAL renderer files: the pinned nxgl4 and bridge branch commits of the artifacts repository (test_bootgpu.fetch_renderer), published
-    # unchanged into the test's bare repository under their real branch names; the broken-chain cases below are mutations of these inputs
-    gdir, bdir = tg.fetch_renderer(SCRATCH)
-    rd = lambda d, n: open(os.path.join(d, n), "rb").read()  # noqa: E731
-    lib, meta_j, ar, build_j = rd(gdir, "libnxgl4.so"), rd(gdir, "meta.json"), rd(bdir, "libfnvnx-d3d9.a"), rd(bdir, "build.json")
-    GB, BB = tg.NXGL4["ref"], tg.BRIDGE["ref"]
-    sha = lambda b: hashlib.sha256(b).hexdigest()  # noqa: E731
-    jd = lambda d: json.dumps(d).encode()  # noqa: E731
-    gman = lambda render: jd(dict({"schema": "fnvnx-elf/1", "name": "guest.elf", "size": len(gpu_elf), "sha256": sha(gpu_elf), "parts": []},
-                                  **({"render": render} if render is not None else {})))
-    render = {"branch": BB, "archive_sha256": json.loads(build_j)["archive_sha256"]}
-    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(render)}))
-    publish_branch("l1-contract/elf/gpunoman", dict(contract, **{"mode": M80, "guest.elf": gpu_elf}))
-    publish_branch("l1-contract/elf/gpunorender", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(None)}))
-    publish_branch("l1-contract/elf/gpuothersha", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(dict(render, archive_sha256="0" * 64))}))
-    publish_branch("l1-contract/elf/gpuoldbridge", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="bridge-h2"))}))
-    publish_branch("l1-contract/elf/gpunocommit", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="bridge-nocommit"))}))
-    publish_branch(BB, {"build.json": build_j, "libfnvnx-d3d9.a": ar})
-    bj = json.loads(build_j)
-    publish_branch("bridge-h2", {"build.json": jd(dict(bj, nx_agent_commit="2" * 40)), "libfnvnx-d3d9.a": ar})
-    publish_branch("bridge-nocommit", {"build.json": jd({k: v for k, v in bj.items() if k != "nx_agent_commit"}), "libfnvnx-d3d9.a": ar})
-    publish_branch(GB, {"libnxgl4.so": lib, "meta.json": meta_j})
-    publish_branch("gpu-nometa", {"libnxgl4.so": lib})
-    publish_branch("gpu-othersha", {"libnxgl4.so": lib, "meta.json": jd(dict(json.loads(meta_j), sha256="0" * 64))})
-    publish_branch("gpu-empty", {"README": b"no library here\n"})
-    publish_branch("gpu-bad", {"libnxgl4.so": b"not an elf\n", "meta.json": jd(dict(json.loads(meta_j), sha256=sha(b"not an elf\n")))})
+    # the renderer is the recipe product of render/gl4 (bootgpu.py, GATE_CACHE): the ELF branch of the gpu run holds no renderer file
+    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"mode": M80, "guest.elf": gpu_elf}))
     # the declared input: a fixture font set at the root of a branch of the fixture artifacts repository; the pin file names that commit and the
     # tree hash of its checkout (verify/cas.py, the recipe's own function), and the font files are the tree's fonts/ directory (mount_path)
     publish_branch("test/fonts", dict(FONT_FILES))
@@ -293,12 +268,12 @@ def main():
     r0 = subprocess.run(["bash", os.path.join(TREE, "farm", "boot_job.sh"), "testid", "--quantum", "1"], env={"PATH": os.environ["PATH"], "HOME": HOME, "GAME_DIR": GAME, "LANG": "C.UTF-8"}, capture_output=True, text=True)
     tb.case("FNVNX_BUILD unset: job fails naming it, nothing cloned", r0.returncode != 0 and "FNVNX_BUILD" in r0.stderr and not os.path.exists(os.path.join(HOME, "fnvnx-farm", "artifacts")), (r0.returncode, r0.stderr[-400:]))
     tb.case("no quantum: job fails (no default)", r.returncode == 1 and "--quantum" in r.stderr, (r.returncode, r.stderr[-400:]))
-    # --- the renderer: --gpu-branch
+    # --- the renderer: --gpu (the recipe product of render/gl4)
     genv = {}   # the host matches the declared environment (verify/env.json, envcheck.py); the job installs nothing
-    rc, out, err = run_job(["gpuid", "--gpu-branch", GB], genv)
+    rc, out, err = run_job(["gpuid", "--gpu"], genv)
     last = out.strip().splitlines()[-1] if out.strip() else ""
     m = FINAL.match(last)
-    tb.case("--gpu-branch: exit 0, final line carries presents=4", rc == 0 and m is not None and m.group(11) == " presents=4", (rc, out, err[-600:]))
+    tb.case("--gpu: exit 0, final line carries presents=4", rc == 0 and m is not None and m.group(11) == " presents=4", (rc, out, err[-600:]))
     if rc == 0:
         files, msg, cm = published("l4-verify/boot/gpuid")
         fr = sorted(n for n in files if n.startswith("frames/"))
@@ -312,31 +287,11 @@ def main():
         doc, meta = json.loads(files["OUT.json"]), json.loads(files["meta.json"])
         tb.case("OUT.json frames: a record for every present (4), one image pair published per distinct key", [f["n"] for f in doc["frames"]] == [1, 2, 3, 4]
                 and len(fr) == 2 * len({f["sha256"] for f in doc["frames"]}), (doc.get("frames"), fr))
-        tb.case("OUT.json gpu record, meta.json gpu fields", doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"]
-                and meta["gpu_branch"] == GB
-                and meta["gpu_branch_commit"] == git("rev-parse", "refs/heads/" + GB, cwd=BARE).strip(), (doc.get("gpu"), meta))
-        tb.case("meta.json records the renderer pair", meta.get("bridge_branch") == BB and meta.get("render_head") == tg.NX_AGENT_COMMIT
-                and meta.get("bridge_branch_commit") == git("rev-parse", "refs/heads/" + BB, cwd=BARE).strip()
-                and "data_items" in meta and meta["data_items"] is None, meta)
-    # the renderer pair rule: every broken link of the chain ELF -> bridge -> nxgl4 fails the job before the run
-    for eid, gb, word, what in (("gpunoman", GB, "manifest.json", "ELF branch without manifest.json"),
-                                ("gpunorender", GB, "render", "manifest.json without the render object"),
-                                ("gpuothersha", GB, "bridge archive", "ELF linked with another archive than the bridge branch holds"),
-                                ("gpuoldbridge", GB, "!= nxgl4 head", "bridge head != nxgl4 head"),
-                                ("gpunocommit", GB, "nx_agent_commit", "bridge build.json without nx_agent_commit"),
-                                ("gpuid", "gpu-nometa", "meta.json", "nxgl4 branch without meta.json"),
-                                ("gpuid", "gpu-othersha", "libnxgl4.so", "libnxgl4.so bytes differ from meta.json")):
-        rc, out, err = run_job([eid, "--gpu-branch", gb], genv)
-        tb.case("pair rule: %s: job fails naming it, nothing published" % what, rc == 1 and word in err and out == ""
-                and (eid == "gpuid" or not git("ls-remote", BARE, "refs/heads/l4-verify/boot/" + eid)), (rc, err[-400:]))
-    rc, out, err = run_job(["gpuid", "--gpu-branch", "no-such-gpu"], genv)
-    tb.case("missing renderer branch: job fails", rc == 1 and "no-such-gpu" in err, (rc, err[-300:]))
-    rc, out, err = run_job(["gpuid", "--gpu-branch", "gpu-empty"], genv)
-    tb.case("renderer branch without libnxgl4.so: job fails naming it", rc == 1 and "libnxgl4.so" in err, (rc, err[-300:]))
-    rc, out, err = run_job(["gpuid", "--gpu-branch", "gpu-bad"], genv)
-    tb.case("library that does not load: job fails", rc == 1 and "does not load" in err, (rc, err[-300:]))
-    rc, out, err = run_job(["testid", "--gpu-branch", "-bad"], genv)
-    tb.case("bad --gpu-branch value: job fails", rc == 1 and "--gpu-branch" in err, (rc, err[-300:]))
+        tb.case("OUT.json gpu record: presents, first module-10 call and the library's sha256; meta.json has no renderer branch fields",
+                doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"] and len(doc["gpu"]["library_sha256"]) == 64
+                and not {"gpu_branch", "bridge_branch", "render_head"} & set(meta) and "data_items" in meta and meta["data_items"] is None, (doc.get("gpu"), meta))
+    rc, out, err = run_job(["testid", "--gpu-branch", "x"], genv)
+    tb.case("the removed --gpu-branch option is an unknown argument", rc == 1 and "unknown argument" in err, (rc, err[-300:]))
     # nothing is installed: a host that does not match the declared environment ends the job as an input error before anything is
     # fetched or published (the per-item mismatch cases are test_envcheck's; here one real envcheck mismatch, in a fixture tree)
     et = make_tree("env")

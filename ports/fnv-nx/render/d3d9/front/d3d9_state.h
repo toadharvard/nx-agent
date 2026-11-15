@@ -1,4 +1,4 @@
-/* fnv-nx L6: D3D9 state -> backend state words (render/d3d9/backend/nx/state.h). Pure functions: C99, no globals, no
+/* fnv-nx L6: D3D9 state -> backend state words (render/nxgpu/nx/state.h). Pure functions: C99, no globals, no
  * allocation, no I/O. In-range semantics mirror Gallium Nine (nine_pipe.c nine_convert_*_state); the result for a value
  * OUTSIDE a D3D9 enumeration is Wine 9.0's (wined3d state.c / stateblock.c / utils.c), see "Totality" below.
  *
@@ -12,7 +12,7 @@
  * Floats held in DWORD render states (FOGSTART, DEPTHBIAS, POINTSIZE, ...) are IEEE bit patterns, as in D3D9.
  *
  * ---- Totality (the rule that closes the class) -------------------------------------------------------------------
- * Every D3D9 enumeration the translation reads (front/d3d9_enums.gen.h, generated from render/d3d9/spec/d3d9_spec.json:
+ * Every D3D9 enumeration the translation reads (front/d3d9_enums.gen.h, generated from bridgefacts/d3d9/d3d9_spec.json:
  * D3DCMPFUNC, D3DSTENCILOP, D3DBLEND, D3DBLENDOP, D3DCULL, D3DFILLMODE, D3DSHADEMODE, D3DFOGMODE, D3DZBUFFERTYPE,
  * D3DTEXTUREADDRESS, D3DTEXTUREFILTERTYPE, D3DFORMAT) is a C enum, and its translation is a switch over that enum type with no
  * default branch, compiled with -Werror=switch -Werror=switch-enum: an enumerator without a case is a build error. A DWORD
