@@ -14,7 +14,7 @@
    "repo": "fnv-nx-build",
    "ref": "gamedata/redist",
    "commit": "c53729e3bac168798fddcf4312f5a64a9b5eb08f",
-   "tree_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "tree_sha256": "fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2",
    "at": "/ext/redist"
   },
   {
@@ -30,7 +30,7 @@
    "repo": "fnv-nx-build",
    "ref": "l3a-lift/fpfixture-w8",
    "commit": "616cc88c0a13fa8fe7ce9c17a9ebfd84b57f9197",
-   "tree_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "tree_sha256": "41c780bdffb76769536daf3bada5e5b8d28d282f4e90a37620f4e74d123b29c5",
    "at": "/ext/fp"
   }
  ],

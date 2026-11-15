@@ -17,9 +17,9 @@ PER_SHARD = 1024
 EXE = 'FalloutNV.exe'
 EXTERNALS = [
     {'name': 'exe', 'repo': 'fnv-nx-build', 'ref': 'gamedata/exe', 'commit': '0948da1e89ab719dcf8471e45b67bc60575f6b93', 'tree_sha256': 'ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b', 'at': '/ext/exe'},
-    {'name': 'redist', 'repo': 'fnv-nx-build', 'ref': 'gamedata/redist', 'commit': 'c53729e3bac168798fddcf4312f5a64a9b5eb08f', 'tree_sha256': '0' * 64, 'at': '/ext/redist'},
+    {'name': 'redist', 'repo': 'fnv-nx-build', 'ref': 'gamedata/redist', 'commit': 'c53729e3bac168798fddcf4312f5a64a9b5eb08f', 'tree_sha256': 'fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2', 'at': '/ext/redist'},
     {'name': 'facts', 'repo': 'fnv-nx-build', 'ref': 'l3a-lift/facts', 'commit': '6944080c904b1d11c1ddf06601d5e19fcd8d32fd', 'tree_sha256': '900e4f0b20407252f0b4de91698854276976fc52e57b2787d3f9cc53a5ab1e8d', 'at': '/ext/facts'},
-    {'name': 'fp', 'repo': 'fnv-nx-build', 'ref': 'l3a-lift/fpfixture-w8', 'commit': '616cc88c0a13fa8fe7ce9c17a9ebfd84b57f9197', 'tree_sha256': '0' * 64, 'at': '/ext/fp'},
+    {'name': 'fp', 'repo': 'fnv-nx-build', 'ref': 'l3a-lift/fpfixture-w8', 'commit': '616cc88c0a13fa8fe7ce9c17a9ebfd84b57f9197', 'tree_sha256': '41c780bdffb76769536daf3bada5e5b8d28d282f4e90a37620f4e74d123b29c5', 'at': '/ext/fp'},
 ]
 USES = [{'root': 'ports/fnv-nx/loader', 'output': 'MODULES_TSV'}, {'root': 'ports/fnv-nx/platform', 'output': 'X86SYS'}]
 MOD = '/uses/ports/fnv-nx/loader/MODULES_TSV'
