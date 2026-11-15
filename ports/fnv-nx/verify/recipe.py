@@ -156,6 +156,15 @@ class EnvBlocked(RecipeError):
 _ENV_OK = set()   # sha256 of the env.json files this process already found matching (an install between processes is seen by the next one)
 
 
+
+def runtime_cflags(pin):
+    """The flags the guest runtime (newlib, libstdc++) is built with beyond the semantic set: the `runtime_cflags` of the one guest compiler record.
+    They apply to every runtime translation unit: C, C++ and assembly (.S) alike. The runtime build reads them here (guest_flags.py --runtime); no build script spells them."""
+    v = pin.get("runtime_cflags") if isinstance(pin, dict) else None
+    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("-") for x in v):
+        raise BuildRed("%s: runtime_cflags must be a list of compiler flags" % GUEST_PIN)
+    return list(v)
+
 def env_blocked(repo):
     """Raise EnvBlocked unless this machine matches repo/verify/env.json (envcheck.py check; a missing file is a mismatch, as in l1.py)."""
     p = os.path.join(repo, ENV_JSON)

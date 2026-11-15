@@ -3,7 +3,7 @@
 ordering of runtime calls"; docs/ORDERING.md).
 
     judge(objs, ...)  ->  Report        every memory-access instruction of every assembled object of the runtime, in exactly one class
-    python3 rtasm.py --ext DIR --dirs D.. --names N.. [--startfiles F..] [--endfiles F..] --jmpbuf-probe OBJ --lse-source lse.S [--out report.json]
+    python3 rtasm.py --ext DIR --dirs D.. --names N.. [--startfiles F..] [--endfiles F..] --jmpbuf-probe OBJ [--jmpbuf-symbol S] --lse-source lse.S [--out report.json]
 
 UNIVERSE (one rule over the runtime, never a file list): every member of every archive of the runtime (the `link.libs` of the recipe: the
 archives `lib<name>.a` found in `dirs`, first dir wins, as the gcc driver searches them) and every start/end file. ASSEMBLED = the object carries no `.fnvnx.ordt`, the record fnvnx_order writes into every object it compiled. That is the positive fact the
@@ -98,19 +98,14 @@ def lse_models(text):
     return {k: {c: tuple(v) for c, v in d.items()} for k, d in out.items()}
 
 
-def jmpbuf_size(decl_row, sizes=None):
-    """sizeof(jmp_buf) from the `.fnvnx.decltype` row (`symbol<TAB>type`, grammar of ctypes_compat) of a probe object that declares one jmp_buf, in a unit that
-    includes the runtime's setjmp.h: an array `[N]T` of a scalar T (ILP32, OWNER 7).  Any other shape is an error."""
-    t = decl_row.split('\t', 1)[1].strip()
-    m = re.match(r'^\[(\d+)\](\w+)$', t)
-    sz = dict(ILP32_SCALAR, **(sizes or {}))
-    if not m or m.group(2) not in sz:
-        raise ValueError('jmp_buf type %r is not an array of a known scalar' % t)
-    return int(m.group(1)) * sz[m.group(2)]
-
-
-ILP32_SCALAR = {'char': 1, 'signed_char': 1, 'unsigned_char': 1, 'short': 2, 'unsigned_short': 2, 'int': 4, 'unsigned_int': 4, 'long': 4, 'unsigned_long': 4,
-                'long_long': 8, 'unsigned_long_long': 8, 'float': 4, 'double': 8}
+def jmpbuf_size(probe_obj, symbol):
+    """sizeof(jmp_buf), as the compiler computed it: the st_size of the one object a probe unit defines (`jmp_buf SYMBOL;` after the runtime's own
+    setjmp.h is included, built by the recipe with the guest compiler). No type table is read here."""
+    o = a64obj.read(probe_obj)
+    sz = [y.size for y in o.symbols if y.name == symbol and y.shndx is not None]
+    if len(sz) != 1 or not sz[0]:
+        raise ValueError('%s: %s is not one defined object with a size' % (probe_obj, symbol))
+    return sz[0]
 
 
 def exclusive_ordering(i):
@@ -581,7 +576,9 @@ def main():
     ap.add_argument('--startfiles', nargs='*', default=[])
     ap.add_argument('--endfiles', nargs='*', default=[])
     ap.add_argument('--setjmp-header', default=None, help='path (inside --ext) of the runtime setjmp.h the jmp_buf routines are read from')
-    ap.add_argument('--jmpbuf-probe', default=None, help='object of a unit that declares one jmp_buf (includes setjmp.h): its .fnvnx.decltype row gives sizeof(jmp_buf)')
+    ap.add_argument('--jmpbuf-probe', default=None, help='object of a unit that defines one jmp_buf (includes setjmp.h): its symbol size is sizeof(jmp_buf)')
+    ap.add_argument('--jmpbuf-symbol', default='fnvnx_jmpbuf_probe')
+    ap.add_argument('--guest-pin', default=None, help='verify/guest_compiler.json: the runtime_cflags are read through recipe.runtime_cflags and must hold -DPREFER_SIZE_OVER_SPEED')
     ap.add_argument('--lse-source', default=None, help='libgcc/config/aarch64/lse.S of the pinned libgcc source: the documented ordering of the outline atomics')
     ap.add_argument('--product', nargs='*', default=[], help='the product objects (.o): the linked set is what a linker would pull for them')
     ap.add_argument('--out', default=None)
@@ -596,11 +593,13 @@ def main():
             d |= {y.name for y in o.symbols if y.shndx is not None and y.bind in ('STB_GLOBAL', 'STB_WEAK') and y.name}
             u |= {y.name for y in o.symbols if y.shndx is None and y.name and y.bind in ('STB_GLOBAL', 'STB_WEAK')}
         linked = pulled(objs, (d, u))
-    jbn = 0
-    if a.jmpbuf_probe:
-        o = a64obj.read(a.jmpbuf_probe)
-        sec = next(x for x in o.sections if x.name == '.fnvnx.decltype')
-        jbn = jmpbuf_size(next(r for r in sec.data.decode().split('\n') if r))
+    jbn = jmpbuf_size(a.jmpbuf_probe, a.jmpbuf_symbol) if a.jmpbuf_probe else 0
+    prefer = None
+    if a.guest_pin:
+        sys.path.insert(0, os.path.join(HERE, '..', 'verify'))
+        import recipe
+        prefer = '-DPREFER_SIZE_OVER_SPEED' in recipe.runtime_cflags(json.load(open(a.guest_pin)))
+        print('runtime_cflags carries -DPREFER_SIZE_OVER_SPEED: %s' % prefer)
     lse = lse_models(open(a.lse_source).read()) if a.lse_source else None
     rep = judge(objs, jb, jbn, linked, lse)
     j = to_json(rep)
@@ -615,7 +614,9 @@ def main():
     per = collections.Counter((v.obj, v.func, v.detail) for v in rep['violations'] if linked is None or v.obj in linked or v.obj.startswith('<'))
     for (ob, fn, det), n in sorted(per.items()):
         print('  VIOLATION %s %s: %d x %s' % (ob, fn, n, det))
-    return 1 if rep['violations'] else 0
+    libc = [x for x in rep['assembled'] if '/libc.a:' in x]
+    print('assembled objects of libc.a (string routines are C under PREFER_SIZE_OVER_SPEED): %d %s' % (len(libc), libc))
+    return 1 if rep['violations'] or prefer is False or libc and prefer else 0
 
 
 if __name__ == '__main__':

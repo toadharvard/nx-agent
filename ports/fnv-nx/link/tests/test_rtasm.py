@@ -4,6 +4,7 @@ class and violating fixtures, assembled by the one build (realobj: the guest com
 beside a compiled C++ unit (it carries the plugin record `.fnvnx.ordt`, so it is not assembly and not judged; a `.ident` in an assembly source adds `.comment` and changes nothing).  Classes: D1 (frame, jmp_buf), BT (before threads, the
 call-graph proof), KC (kernel call result), AT (atomic with its documented ordering), RO.  Run: python3 -I <this file> (needs the pinned compiler)."""
 import os
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -169,6 +170,7 @@ gvar: .skip 4
 .global tab
 tab: .word tab_data
 ''',
+    'jbp.cc': 'typedef long jmp_buf[22];\njmp_buf fnvnx_jmpbuf_probe;\n',
     'c.cc': 'int cc_f(int *p) { return *p; }\n',
 }
 LSE = '''
@@ -216,11 +218,16 @@ def main():
     check('fixtures build', res['status'] == 'green', res.get('failure'))
     if res['status'] != 'green':
         return 1
-    obj = {os.path.basename(o['unit']): open(o['object'], 'rb').read() for o in res['objects']}
-    order = ['start.S', 'd1.S', 'jb.S', 'kc.S', 'at.S', 'init.S', 'c.cc']
+    OBJP = {os.path.basename(o['unit']): o['object'] for o in res['objects']}
+    obj = {k: open(p, 'rb').read() for k, p in OBJP.items()}
+    # a compiled object without the plugin record (the recipe refuses a plugin-less guest root, so the record is removed from a built object)
+    stripped = os.path.join(os.path.dirname(OBJP['c.cc']), 'np.o')
+    subprocess.run(['aarch64-linux-gnu-objcopy', '--remove-section=.fnvnx.ordt', OBJP['c.cc'], stripped], check=True)
+    obj['np.c'] = open(stripped, 'rb').read()
+    order = ['start.S', 'd1.S', 'jb.S', 'kc.S', 'at.S', 'init.S', 'c.cc', 'np.c']
     objs = rtasm.universe([(n, obj[n], n == 'start.S') for n in order])
     rep = rtasm.judge(objs, jb_names=['setjmp', 'longjmp'], jb_bytes=176, lse=rtasm.lse_models(LSE))
-    check('assembled = the .S objects only (the compiled unit carries .fnvnx.ordt; the .S with .ident is still assembly)', sorted(rep['assembled']) == sorted(n for n in order if n.endswith('.S')), rep['assembled'])
+    check('assembled = the .S objects only (the compiled unit carries .fnvnx.ordt; the .S with .ident is still assembly)', sorted(rep['assembled']) == sorted(n for n in order if n.endswith('.S') or n == 'np.c'), rep['assembled'])
     by = {}
     for a in rep['accesses']:
         by.setdefault((a.func, a.cls), []).append(a)
@@ -238,11 +245,12 @@ def main():
         by.get(('__aarch64_ldadd4_relax', 'AT'), [])) == 1 and len(by.get(('ordered_pair', 'AT'), [])) == 2, {k: len(v) for k, v in by.items() if k[1] == 'AT'})
     check('AT: swp _sync is acquire only (lse.S #ifdef L_swp), acq_rel for every other op', len(by.get(('__aarch64_swp4_sync', 'AT'), [])) == 1 and '__aarch64_ldadd4_sync' in viol and '__aarch64_swp4_sync' not in viol, (viol.get('__aarch64_swp4_sync'), viol.get('__aarch64_ldadd4_sync')))
     check('lse_models is read from the lse.S text', rtasm.lse_models(LSE)['sync'] == {'swp': (True, False), 'other': (True, True)}, rtasm.lse_models(LSE))
-    check('jmp_buf size from the .fnvnx.decltype row', rtasm.jmpbuf_size('jb\t[22]long') == 88 and rtasm.jmpbuf_size('jb\t[22]long_long') == 176, '')
+    check('jmp_buf size is the probe symbol size the compiler computed', rtasm.jmpbuf_size(OBJP['jbp.cc'], 'fnvnx_jmpbuf_probe') == 88, '')
     check('AT violated: the instruction ordering differs from the routine name\'s documented one', '__aarch64_ldadd4_acq' in viol, viol.get('__aarch64_ldadd4_acq'))
     check('BT: init_data (called by the entry before the thread-possible call)', len(by.get(('init_data', 'BT'), [])) == 1, by.get(('init_data', 'BT')))
     check('BT violated: late_data (called after the call to main_ext)', 'late_data' in viol, viol.get('late_data'))
     check('BT violated: tab_data (its address is in a data table)', 'tab_data' in viol, viol.get('tab_data'))
+    check('an object compiled without the plugin record is judged as assembly (its accesses are classified, none is skipped)', any(a.obj == 'np.c' for a in rep['accesses'] + rep['violations']) and 'np.c' in rep['assembled'], rep['assembled'])
     check('every access is in exactly one class (accesses + violations = all)', len(rep['accesses']) + len(rep['violations']) == sum(rep['counts'].values()) + len(rep['violations']))
     # jmp_buf routines are read from the runtime's own header
     hdr = 'void longjmp (jmp_buf __jmpb, int __retval);\nint setjmp (jmp_buf __jmpb);\nint sigsetjmp (sigjmp_buf, int);\nint f (int);\n'

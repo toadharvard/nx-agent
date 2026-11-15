@@ -75,5 +75,7 @@
     "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
     "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
     "at": "/ext/a64"
-  }
+  },
+  "runtime_driver": "bin/aarch64-none-elf-g++",
+  "runtime_cflags": ["-DPREFER_SIZE_OVER_SPEED", "-g"]
 }
