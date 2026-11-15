@@ -110,4 +110,5 @@ icenc_end:
     .pushsection .rodata.icenc,"a"
     .globl icenc_table_end
 icenc_table_end:
+    .size icenc_table, icenc_table_end - icenc_table
     .popsection
