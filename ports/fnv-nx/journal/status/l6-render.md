@@ -770,3 +770,6 @@ Paused: w3b, w4, farm; no other work.
     - done: render/pair 5d572a5eb. Recipe check valid; d3d9total 332/332.
     - doing: the registry union-by-id restore. Still 0 ASM-6xx records at 5d572a5eb.
     - blocked: the d3d9 and pair builds and onedef wait on cand2 a3e251cfb, owner L1. Causes: the plugin stage is missing aarch64-protos.h; envcheck has no record_problems. Forwarded to L1.
+- 09:50Z w6 38335c989: registry union done (cand2's 82 records + 39 L6 records, 0 deletions).
+    - Assumptions gate 116/124. The 10 remaining findings: 5 orchestrator, 5 L1, 0 L6. Forwarded.
+    - Next: the d523d1367 merge, then the builds and gates.
