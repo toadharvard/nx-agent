@@ -498,3 +498,4 @@ After the first frame:
     - 302 have plugin-written or weakref symbols. DECLTYPE-PLUGINSYM (w3, now) adds one registry of plugin-written symbols in toolchain/names, and weakref lines go under the alias target with the decl's type. A pin rebuild follows, for cand3.
   - Section sizes: libstdc++.a 976 KB, runtime total 50 MB. Reasons: mangled 25874, builtin 1425, libcall 108.
   - cand2 takes 05082bde as it is.
+- 2026-11-15 20:05Z: L5 w9 on pin 05082bde with gate_datamodel cf22647fd: 501/529 certified, and S14/S16/S23/S31 certified on every root. S29 (new[] cookie, delete[] size) is uncertified on the 6 non-loader roots because its check kind is 'test' and the gate accepts only static_assert. w3 gives S29 a static object check: a plugin-written cookie fact read from the front end's tree, or one recipe-executed check kind agreed with L1 w15. It goes with the DECLTYPE-PLUGINSYM rebuild. The other uncertified rows belong to L1 (loader 13) and L5 (rt 7).
