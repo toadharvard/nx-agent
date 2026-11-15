@@ -9,7 +9,9 @@
 extern "C" {
 #endif
 
-void fnvnx_sha256(const void *data, size_t size, uint8_t out[32]);
+#define FNVNX_SHA256_DIGEST_SIZE 32   /* FIPS 180-4: 8 words of 32 bits */
+
+void fnvnx_sha256(const void *data, size_t size, uint8_t out[FNVNX_SHA256_DIGEST_SIZE]);
 
 #ifdef __cplusplus
 }
