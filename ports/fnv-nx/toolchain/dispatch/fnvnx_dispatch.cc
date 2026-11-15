@@ -976,9 +976,14 @@ static void rewrite(function *fun, gimple *st)
                                 build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
   gimple_call_set_lhs(ld, w);
   before(ld);
-  tree r = create_tmp_var(rec, "fnvnx_rec");
-  before(gimple_build_assign(r, build1(VIEW_CONVERT_EXPR, rec, w)));
-  before(gimple_build_assign(lo, build3(COMPONENT_REF, u32, r, site_f_fp(), NULL_TREE)));
+  /* The fields are read out of the loaded word w itself, as BIT_FIELD_REFs at the fields' own bit positions: no aggregate variable is made. A local
+     record would be a memory object, and the order plugin (the last GIMPLE pass, after every optimizer) keeps a private local in its own stack slot, so the
+     hit path would store w and reload a half. PROOF: the record is exactly 64 bits (layout_type above) and w holds all of them, so the field at bit
+     position P of size S is bits [P, P+S) of w, which is what BIT_FIELD_REF<w, S, P> reads, on any endianness (bit_position is the target's). */
+  tree fp_bits = bitsize_int(TREE_INT_CST_LOW(DECL_SIZE(site_f_fp())));
+  tree lo_ref = build3(BIT_FIELD_REF, u32, w, fp_bits, bit_position(site_f_fp()));
+  tree en_ref = build3(BIT_FIELD_REF, entry_t, w, bitsize_int(TREE_INT_CST_LOW(DECL_SIZE(site_f_entry()))), bit_position(site_f_entry()));
+  before(gimple_build_assign(lo, lo_ref));
   gcond *cond = gimple_build_cond(EQ_EXPR, lo, k, NULL_TREE, NULL_TREE);
   before(cond);
 
@@ -996,7 +1001,7 @@ static void rewrite(function *fun, gimple *st)
   /* hit: e1 = r.entry */
   tree e2 = make_ssa_name(entry_t), e = make_ssa_name(entry_t);
   gimple_stmt_iterator hgsi = gsi_start_bb(hit);
-  gimple *g = gimple_build_assign(e1, build3(COMPONENT_REF, entry_t, r, site_f_entry(), NULL_TREE));
+  gimple *g = gimple_build_assign(e1, en_ref);
   gimple_set_location(g, loc); gsi_insert_after(&hgsi, g, GSI_NEW_STMT);
   /* miss: e2 = fnvnx_dispatch(fp, &site, desc) */
   gimple_stmt_iterator mgsi = gsi_start_bb(miss);
