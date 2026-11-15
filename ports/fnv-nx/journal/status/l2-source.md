@@ -470,3 +470,4 @@ After the first frame:
   - test_layout: 2 of 169 red (UBits, UTwoEmpty). These are a real msvcmodel defect: the empty-base hunk bumps rli->offset by hand and leaves offset_align stale. w3 fixes it now through GCC's layout bookkeeping, with rows from cpp-docs.
   - One pin rebuild carries both fixes; the farm is holding for the layout commit.
   - L1: gate_abi:84 should take its universe from sym_emitted, not from a `_Z` exemption.
+- 2026-11-15 19:12Z: DECLTYPE-COMPLETE, agreed with L1 and owned by w3, goes into the same rebuild. The plugin writes exactly one `.fnvnx.decltype` line for every symtab symbol, either `<type>` or `-<reason>`, from a closed set (`-mangled`, Itanium §5.1). gate_abi (L1 w15) checks completeness against the ELF and the closed set, and does no `_Z` test of its own.
