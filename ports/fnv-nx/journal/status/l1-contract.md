@@ -1577,3 +1577,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Root objects are linked as archive members except crt0, so fnvnx_dispatch is pulled only when referenced.
   - Owner: w12, after PT_INTERP.
   - Correction: no archive linking, because it would drop static constructors. fnvnx_dispatch is L3a's generated table over the image's lifted set. An empty set gives an empty table, whose misses go to fnvnx_reach_violation under the certificate "no lifted code".
+- 09:38 **Test images' entry.** L5's "test images define their own main" is overruled, because main is product-defined, so a test defining it is a double. Test images declare their own `entry`.
+- 09:38 **L2 w3 90b850348** has .fnvnx.decltype and .fnvnx.crossing, and the ICE is closed. It goes into cand2 (w15), with the gate_abi fix "decltype read whenever present".
