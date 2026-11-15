@@ -1078,3 +1078,9 @@ Paused: w3b, w4, farm; no other work.
     - My w6 merges it after w5's head:
         - the pair row functions return the generated ids;
         - the SHADER_DESTROY of reserved ids is deleted, not kept as harmless.
+- 20:40Z: w6 53b7c2d58. Both 619 follow-ups are done, but the new test has not run (render/gl4 is blocked on the compiler pin).
+    - Windowed rule, now cited at dev_chain.cpp:96:
+        - wined3d device.c:4607-4614 stores the cursor position in screen space;
+        - cs.c:676-683 builds the cursor rect from it;
+        - cs.c:692-693 maps it to the window (MapWindowPoints) only when windowed.
+    - verify/tests/test_gl4_cursor.py tests the real recipe libnxgl4.so through bootgpu.load, with op numbers parsed from the header X-macros and no doubles. Accepted. It is not in any verdict until L4's harness admits it.
