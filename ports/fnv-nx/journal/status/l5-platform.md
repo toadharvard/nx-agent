@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 12:45Z datamodel S14/16/23/29/31: L2 w3 (session_01KmtZKSTD6uibY3r7BhtJ7f) is working out whether the compiler pin b274ec067 or the DATAMODEL table (S09, long double = binary64) is wrong. All roots fail the same rows. L5 worker held until w3 sends its per-case list.
 - 2026-11-15 13:45Z L5 reds of cand2 verdict 278a69341, for cand3: (1) declared_machine.tsv rows 1-8 prose sources become std:<doc>:<section>; (2) check_hostapi.py still names the deleted SOCK_FIRST/LAST (lines 24, 72). Both assigned to w9. (3) datamodel S14/16/23/29/31 long double, led by L2: asked L2 for the platform sites and the rule. farm/fontstate_job.sh: FNVNX_BUILD required (w10, next farm commit).
 - 2026-11-15 12:40Z boot-loop order withdrawn (integration 4674ce3e9, owner rejected it). No measurement stops; path items stand. The L4 link-head note is void.
 - 2026-11-15 12:35Z owner order "my frame" (CLAUDE.md integ 76e450faf): the L4 boot loop runs now; a stop routed to L5 comes before every other item. The linkable platform head for L4 is w10-pending 12695dba3 (sent to L4). First stop: ELF 509809b3 0xC000001D after init d3dx9_38.dll, being classified by L4.
