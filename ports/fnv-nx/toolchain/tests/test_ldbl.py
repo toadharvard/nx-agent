@@ -3,7 +3,7 @@
 its own that mangles as 'O' (double: 'N'). ldbl/ldbl.cpp is compiled through the recipe (pinned compiler external, the product plugins,
 plugbuild.py); its static_asserts hold sizeof/alignof, LDBL_MANT_DIG == 53, __LDBL_MAX__ == __DBL_MAX__ and the distinctness from double, so
 a compiler that still has a 128-bit long double fails to compile. The MSVC names of the functions are read from the names plugin's
-.fnvnx.sympair rows: ?ld@@YAONON@Z (long double 'O', double 'N'), as cl writes them. No network, no game data.
+.fnvnx.sympair rows: ?ld@@YAOON@Z (long double 'O', double 'N'), as cl writes them. No network, no game data.
 Run: python3 -I <this file> from the checkout root."""
 import json
 import os
@@ -20,10 +20,10 @@ import plugbuild as pb  # noqa: E402
 check = pb.Checks('test_ldbl')
 
 
-def predefines(cxx):
-    """{name: value} of the macros the pinned compiler predefines (-dM -E of an empty C++ unit with the data-model flag of the root): a query of the
-    compiler the recipe builds with, whose list is the complete one by construction (nothing is named here)"""
-    r = subprocess.run([cxx, '-mabi=ilp32', '-x', 'c++', '-dM', '-E', '/dev/null'], capture_output=True, text=True)
+def predefines(cxx, flags=()):
+    """{name: value} of the macros the pinned compiler predefines (-dM -E of an empty C++ unit, FLAGS given): a query of the compiler the recipe builds
+    with, whose list is the complete one by construction (nothing is named here)"""
+    r = subprocess.run([cxx] + list(flags) + ['-x', 'c++', '-dM', '-E', '/dev/null'], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError('the pinned compiler: ' + r.stderr[-500:])
     out = {}
@@ -35,8 +35,10 @@ def predefines(cxx):
 
 
 def number(v):
-    """the value of a float-constant macro without its spelling: casts and the type suffix removed (`((double)1.79e+308L)` and `1.79e+308L`)"""
+    """the value of a float-constant macro without its spelling: casts and the type suffix removed (`((double)1.79e+308L)`, `double(1.79e+308L)` and `1.79e+308L`)"""
     v = re.sub(r'\(\((?:long )?double\)', '(', v)
+    v = re.sub(r'\((?:long )?(?:double|float)\)\(', '(', v)
+    v = re.sub(r'\b(?:long double|double|float)\(', '(', v)   # the C++ functional-cast form GCC 13 writes: `double(1.79e+308L)`
     v = re.sub(r'(?<=[0-9.])[LlFf]\b', '', v)
     return re.sub(r'[()\s]', '', v)
 
@@ -102,10 +104,10 @@ def datamodel(td, so):
     for r in rows.values():
         check('%s has a doc quotation or an exe_source, a mechanism and a status' % r['id'],
               (r['citations'] or r.get('exe_source')) and r['mechanism'] and r['status'] in ('closed', 'open'), r)
-    gc = open(os.path.join(root, '..', 'verify', 'guest_compiler.json')).read()
+    sem = set(pb.recipe.semantics_set(None))   # the one derivation: the data-model rows' flags and guest_compiler.json's common flags (L1, fa6bed977)
     for r in rows.values():
         if r.get('flag'):
-            check('%s: flag %s is a semantic flag of guest_compiler.json' % (r['id'], r['flag']), r['flag'] in gc, r['flag'])
+            check('%s: flag %s is in the recipe\'s semantic flag set' % (r['id'], r['flag']), r['flag'] in sem, r['flag'])
     bad = [t['entry'] for t in doc['tm'] if ('fact' in t and t['fact'] not in rows) or ('fact' not in t and not t.get('not_layout'))]
     check('every tm.texi entry (%d) maps to a row or states why it is not a layout fact' % len(doc['tm']), not bad, bad)
     used = {t['fact'] for t in doc['tm'] if 'fact' in t}
@@ -117,7 +119,7 @@ def datamodel(td, so):
     gdir = os.path.join(root, 'msvcmodel', 'datamodel')
     mirror = json.load(open(os.path.join(gdir, 'sources.json')))['mirror']
     ext = {k: mirror[k] for k in ('name', 'repo', 'ref', 'commit', 'tree_sha256', 'at')}
-    got = recipe.fetch_externals([ext], pb.STORE, os.path.join(pb.STORE, 'external'), os.path.join(td, 'ext-ws'))
+    got = pb.recipe.fetch_externals([ext], pb.STORE, os.path.join(pb.STORE, 'external'), os.path.join(td, 'ext-ws'))
     g = subprocess.run([sys.executable, '-I', os.path.join(gdir, 'gen.py'), '--mirror', got[ext['name']]['host'],
                         '--out', os.path.join(root, 'msvcmodel', 'DATAMODEL.json'), '--check'], capture_output=True, text=True)
     check('DATAMODEL.json and .md are what gen.py writes from the pinned mirror (--check)', g.returncode == 0, g.stdout + g.stderr)
@@ -126,6 +128,11 @@ def datamodel(td, so):
     errs = '\n'.join(l for l in r.stderr.splitlines() if 'error' in l)
     failed = sorted(set(re.findall(r'static assertion failed: (S\d+)', r.stderr)))
     check('every DATAMODEL case holds (failing rows: %s)' % failed, r.returncode == 0, errs[:3000])
+    # S14 on the C front end: its own file (c/c-decl.cc finish_enum is not the C++ hunk)
+    objc = os.path.join(td, 'datamodel_enum.o')
+    rc = pb.compile(os.path.join(HERE, 'ldbl', 'datamodel_enum.c'), objc, so, native=True)
+    check('S14 holds in C (enumerators 0xffff0000, 0x80000000 and expressions: int, 4 bytes, the 32-bit pattern as int; failing: %s)'
+          % sorted(set(re.findall(r'static assertion failed: "?(S14\w+)', rc.stderr))), rc.returncode == 0, '\n'.join(l for l in rc.stderr.splitlines() if 'error' in l)[:3000])
 
 
 def main():
@@ -138,7 +145,7 @@ def main():
               '\n'.join(l for l in r.stderr.splitlines() if 'warning' not in l and 'note:' not in l)[:3000])
         if r.returncode == 0:
             rows = {l.split('\t')[0]: l.split('\t')[1] for l in pb.section(obj, '.fnvnx.sympair').splitlines()}
-            check('long double mangles as O: ?ld@@YAONON@Z', rows.get('_Z2lded') == '?ld@@YAONON@Z',
+            check('long double mangles as O: ?ld@@YAOON@Z', rows.get('_Z2lded') == '?ld@@YAOON@Z',
                   rows)
             check('double still mangles as N: ?dd@@YANN@Z', rows.get('_Z2ddd') == '?dd@@YANN@Z', rows)
             check('the Itanium names keep long double (e) apart from double (d): two overloads, two MSVC names',
@@ -155,7 +162,7 @@ def main():
                   not (und & tf), sorted(und & tf))
             ext = json.load(open(os.path.join(pb.REAL, pb.T + 'verify/guest_compiler.json')))
             co = os.path.join(pb.STORE, 'external', ext['external']['commit'] + '.co')
-            pd = predefines(os.path.join(co, ext['cxx']))
+            pd = predefines(os.path.join(co, pb.recipe.pin_drivers()[1]))
             dbl = {k[len('__DBL_'):]: v for k, v in pd.items() if k.startswith('__DBL_')}
             ldbl = {k[len('__LDBL_'):]: v for k, v in pd.items() if k.startswith('__LDBL_')}
             check('every __LDBL_*__ predefine has its __DBL_*__ twin and the reverse (%d names)' % len(dbl), set(ldbl) == set(dbl),
@@ -163,6 +170,18 @@ def main():
             check('every __LDBL_*__ equals its __DBL_*__ counterpart (%d of %d)' % (len(dbl), len(dbl)),
                   all(number(ldbl[k]) == number(dbl[k]) for k in dbl if k in ldbl),
                   {k: (dbl[k], ldbl[k]) for k in dbl if k in ldbl and number(ldbl[k]) != number(dbl[k])})
+            # MLIB1: the compiler's defaults are the guest record. A plain compile (no flag at all) has the ILP32 data model of the exe: the ABI of
+            # guest_platform (--with-abi), signed char and a 16-bit wchar_t (DATAMODEL S01, S02: the patch, not a flag), binary64 long double.
+            plain = predefines(os.path.join(co, pb.recipe.pin_drivers()[1]))
+            check('a plain compile is ILP32 (__ILP32__), with plain char signed (no __CHAR_UNSIGNED__), a 16-bit wchar_t and an 8-byte long double (MLIB1)',
+                  '__ILP32__' in plain and '__CHAR_UNSIGNED__' not in plain and plain.get('__WCHAR_WIDTH__') == '16'
+                  and plain.get('__SIZEOF_WCHAR_T__') == '2' and plain.get('__SIZEOF_LONG_DOUBLE__') == '8',
+                  {k: plain.get(k) for k in ('__ILP32__', '__CHAR_UNSIGNED__', '__WCHAR_WIDTH__', '__SIZEOF_WCHAR_T__', '__SIZEOF_LONG_DOUBLE__')})
+            ml = subprocess.run([os.path.join(co, pb.recipe.pin_drivers()[1]), '-print-multi-lib'], capture_output=True, text=True).stdout.split()
+            sel = {x for l in ml for x in l.split(';', 1)[1].replace('@', ' -').split()}
+            check('-print-multi-lib lists only the guest\'s variants: the default (no selector) and the position-independent one, which selects the platform\'s code '
+                  'model (-fPIC) and nothing about the ABI, wchar_t or char, which are the compiler\'s defaults (MLIB1)',
+                  ml and sel == {'-fPIC'} and all(l == '.;' or l.endswith(';@fPIC') for l in ml) and any(l.endswith(';@fPIC') for l in ml), ml)
         model(td, so)
         datamodel(td, so)
     finally:

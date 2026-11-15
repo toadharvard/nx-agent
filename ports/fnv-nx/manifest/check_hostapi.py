@@ -12,7 +12,7 @@ Checks (exit 1 with one line per violation):
      table row names a defined service with the defined number, every defined service (but the not-served ones) has a count, the
      socket list names exactly the FNVNX_PLAT_SOCK_* services;
   B. every use of ext_call in platform/ and rt/guest/ is
-        fnvnx_hcall4(<slot>ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_<NAME>, <args>, <literal n>)
+        FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_<NAME>, <args>, <literal n>)
      or a call of a wrapper of that form: a function whose body makes that call with the service (and the count) taken from its
      own parameters. Wrappers are found by rule, transitively (a function that passes its own parameter as the service of a
      wrapper is a wrapper). At every use the service is a header name, the module is a FNVNX_EXT_ name (never a number), the
@@ -288,7 +288,7 @@ def main(argv):
     # B: wrappers by rule, to a fixed point. wrappers[name] = (svc param index, count: ('lit', k) | ('par', index))
     wrappers_all = {}   # file -> {name: spec}: a wrapper is a static function of its file
     funcs = {f: functions(code) for f, code in srcs.items()}
-    HCALL = "fnvnx_hcall4"
+    HCALL = "FNVNX_HCALL4"
 
     def classify(arg, params):
         arg = arg.strip()

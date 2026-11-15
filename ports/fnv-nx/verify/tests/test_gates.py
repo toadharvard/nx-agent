@@ -247,7 +247,7 @@ def branch(r, name, files, base="main", delete=()):
     git(r, "commit", "-m", name)
     git(r, "checkout", "main")
 
-LINE = r"^L1 (green|red) [0-9a-f]{40} [0-9.]+s gates:\d+ over_budget:(True|False)$"
+LINE = r"^L1 (green|red) [0-9a-f]{40} [0-9.]+s gates:\d+ over_budget:(True|False) vacuous:\d+$"
 
 r = small_repo()
 vd = tmp("verdicts")
@@ -468,11 +468,10 @@ check("tests cache (view): a new name in a listed directory re-runs exactly the 
 put(d3, "verify/flag.txt", "1\n")
 rc, r, e = tests_c(d3, c3)
 check("tests cache (view): a path the test saw as absent now exists -> that file re-runs (and now fails)", rc != 0 and sorted(ran3()) == ["e", "e", "l", "l"] and r["uncertified"] == ["verify/tests/test_e.py"], (r, ran3()))
-# a test that runs strace itself is declared untraced and keyed by whole directories
+# a test whose import closure reaches a module that runs strace is untraced (derived, no list) and keyed by whole directories
 d4 = tmp("tests-cache-untraced")
 c4 = os.path.join(d4, "cache")
-mk(d4, test_u="open('ran.log', 'a').write('u\\n')\n", test_t="open('ran.log', 'a').write('t\\n')\n")
-put(d4, "verify/tests/inputs.json", json.dumps({"format": "fnvnx-selftest-inputs/1", "tests": {}, "untraced": ["test_u.py"]}))
+mk(d4, test_u="open('ran.log', 'a').write('u\\n')\nCHILD = \"\"\"\nimport envcheck\n\"\"\"\n", test_t="open('ran.log', 'a').write('t\\n')\n")
 put(d4, "other/data.txt", "1\n")
 ran4 = lambda: open(os.path.join(d4, "ran.log")).read().split() if os.path.exists(os.path.join(d4, "ran.log")) else []
 ex4 = ("--key-dirs", "verify", "other", "--")
