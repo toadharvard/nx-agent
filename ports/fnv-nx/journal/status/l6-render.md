@@ -1152,3 +1152,20 @@ Paused: w3b, w4, farm; no other work.
     - w5 is archived; there is no work for it until the pin lands.
     - w6 does the guest rebuild after the pin, on the one render line claude/fnv-l6-render-w6-root.
 - bottleneck: the farm pin from L2 b9f6b3a69 (stamp 03eacf9d); L1 cand3 → trunk (and cand3's 5 assumption findings). 1 worker busy (w6).
+- 21:20Z: w6 3020f072d: w12L2 d90e5e45d merged, and od:gl-shader-failure cited in shader_into, gl4_program_for and gl4_compile_pair.
+    - Assumptions gate: green, 135/135, 0 findings. The 5 L1 findings are gone.
+    - Objstub over the whole admitted universe: red, 161/176 certified, 29 findings:
+        - T1: 2
+        - T2-noreturn-tail: 1
+        - V: 2
+        - build-red: 10
+        - cite-malformed: 1
+        - dm-uncited: 12
+        - reach-not-exit: 1
+    - Tests with doubles: 0.
+    - render/gl4 findings and who owns them:
+        - cite-malformed: an L1 gate defect (read_cites does not accept R_X86_64_32). Routed to w12.
+        - fbo_blit T2: w6 is finding the cause.
+        - gl4_api_mem_gpu_addr / gl4_api_wait_frame V: w6 is finding the cause.
+    - Pin: L1 w15 pinned 56a4d09c (stamp 74cafda2) on cand2 @ 265c4ea4a. I've asked w12 to carry it into w12L2.
+- bottleneck: the pin in w12L2; the read_cites fix; L1 cand3 → trunk. 1 worker (w6).
