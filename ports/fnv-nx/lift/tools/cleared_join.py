@@ -36,6 +36,8 @@ def theirs(p):
 
 
 def main(a):
+    if len(a) < 3 or a[0] != '--cpufeat': print('usage: cleared_join.py --cpufeat CPUID_FEATURE_BITS.TSV CLEARED_SITES.TSV [IMAGE FACTS ...]', file=sys.stderr); return 2
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))); from fnvlift import inputs; inputs.configure(cpufeat=a[1]); a = a[2:]
     o = ours(list(zip(a[1::2], a[2::2]))); t = theirs(a[0])
     print('ours %d theirs %d both %d' % (len(o), len(t), len(set(o) & set(t))))
     for k in sorted(set(o) - set(t)): print('OURS-ONLY', k, o[k][0], o[k][1], o[k][2])

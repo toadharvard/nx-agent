@@ -5,10 +5,17 @@ sys.path.insert(0, LIFT)
 X86SYS = os.path.join(os.path.dirname(LIFT), 'platform', 'declared', 'x86sys.json')
 
 
-def configure():
+def cpufeat_arg():
+    """the table path: `--cpufeat PATH` of the test's own command line (removed from argv); no default, a missing argument is an error"""
+    if '--cpufeat' not in sys.argv or sys.argv.index('--cpufeat') + 1 >= len(sys.argv):
+        raise SystemExit('missing --cpufeat PATH (the CPUID feature-bit table, L3b cpuid_feature_bits.tsv)')
+    i = sys.argv.index('--cpufeat'); p = sys.argv[i + 1]; del sys.argv[i:i + 2]; return p
+
+
+def configure(cpufeat=None):
     from fnvlift import inputs
     d = tempfile.mkdtemp(prefix='lifter-inputs-')
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
     import json
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': n == 'gs'} for n in ('es', 'ds', 'fs', 'gs')}}}, open(d + '/segwrites.json', 'w'))      # a buffer has no write site of a segment register
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=X86SYS, cpufeat=cpufeat or cpufeat_arg(), segwrites=d + '/segwrites.json', image='buf')
