@@ -2,8 +2,8 @@
 linked ELF, objects.json key `elf_facts`), the one source of sections and defined symbols (rule 2: L4 reads no section or symbol table of an ELF).
 
   load(path)               the record, its format checked
-  section_ranges(rec)      {section name: [(address, size), ...]}                 (every section of the final ELF, a name may repeat)
-  defined_symbols(rec)     {symbol name: [value, ...]}   the defined symbols of .symtab other than STT_SECTION and STT_FILE, all bindings
+  sections_by_name(rec)      {section name: [(address, size), ...]}                 (every section of the final ELF, a name may repeat)
+  symbol_values(rec)     {symbol name: [value, ...]}   the defined symbols of .symtab other than STT_SECTION and STT_FILE, all bindings
   symbol(rec, name)        the one value of the symbol NAME; FactError when it is not defined exactly once with one value
   symbol_bytes(rec, data, name)   the st_size bytes of the one defined symbol NAME, read from the image DATA through its PT_LOAD program headers
                            (bootlayout.file_bytes); FactError when the symbol is not defined exactly once, or its bytes are not file-backed (.bss)
@@ -34,7 +34,7 @@ def load(path):
     return rec
 
 
-def section_ranges(rec):
+def sections_by_name(rec):
     out = {}
     for s in rec["sections"]:
         out.setdefault(s["name"], []).append((s["address"], s["size"]))
@@ -45,7 +45,7 @@ def _syms(rec):
     return [s for s in rec["symbols"] if s["type"] not in NOT_SYMBOLS and s["name"]]
 
 
-def defined_symbols(rec):
+def symbol_values(rec):
     out = {}
     for s in _syms(rec):
         out.setdefault(s["name"], []).append(s["value"])

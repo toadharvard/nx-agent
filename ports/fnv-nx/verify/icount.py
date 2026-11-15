@@ -264,7 +264,7 @@ def build_spec(facts, ranges, entries):
         rec = bootfacts.load(facts)
     except bootfacts.FactError as e:
         raise ValueError(str(e))
-    secs, syms = bootfacts.section_ranges(rec), bootfacts.defined_symbols(rec)
+    secs, syms = bootfacts.sections_by_name(rec), bootfacts.symbol_values(rec)
 
     def sym(n):
         if n not in syms:
