@@ -278,7 +278,7 @@ DWORD GetCurrentProcessId(void);
 void Sleep(DWORD);
 DWORD SleepEx(DWORD, BOOL);
 BOOL SwitchToThread(void);
-void ExitProcess(UINT) __attribute__((noreturn));   /* MSDN ExitProcess: "does not return" */
+void ExitProcess(UINT) __attribute__((noreturn, nothrow));   /* MSDN ExitProcess: "does not return" */
 DWORD TlsAlloc(void);
 LPVOID TlsGetValue(DWORD);
 BOOL TlsSetValue(DWORD, LPVOID);
@@ -587,7 +587,7 @@ typedef struct _MEMORY_BASIC_INFORMATION {
 } MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
 
 BOOL GetExitCodeThread(HANDLE, LPDWORD);
-void ExitThread(DWORD) __attribute__((noreturn));
+void ExitThread(DWORD) __attribute__((noreturn, nothrow));
 BOOL SetThreadPriorityBoost(HANDLE, BOOL);
 int GetThreadPriority(HANDLE);
 BOOL SetFilePointerEx(HANDLE, LARGE_INTEGER, PLARGE_INTEGER, DWORD);
