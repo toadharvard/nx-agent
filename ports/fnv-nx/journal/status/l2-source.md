@@ -139,3 +139,4 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
 - 2026-11-15 01:05 msvcmodel long double rebuild: done. tools/gcc-ilp32-msvcmodel b274ec067a2f, tree_sha256 a1eeb84d83a6. Smoke ok (ILP32 sizeof is 8, LP64 is 16). Farm archived. Repin of guest_compiler.json requested from L1; then L5 w14 rebuilds msvcmodel13 and test_ldbl goes green.
 - 2026-11-15 01:06 The compiler repin is L1 w24's, on claude/fnv-l1-contract-w24-ldbl. w3 runs test_ldbl on it when it lands.
 - 2026-11-15 01:08 w3 linkage: done, 14be98130 (8th column; no_linkage_check / decl_anon_ns_mem_p / !TREE_PUBLIC; test_layout 68 ok). The value for C records is open with L1 (proposed: `c`, C11 6.2.2/6.2.7). w3 → odrdef.
+- 2026-11-15 01:10 L1 accepts `c` for C records (C11 6.2.2p6/6.2.7); parse_layout's set is {none, internal, external, c}. w3 amends on top of 14be98130.
