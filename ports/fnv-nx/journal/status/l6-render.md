@@ -803,3 +803,7 @@ Paused: w3b, w4, farm; no other work.
     - Open (after the first frame): smscan has no committed test with a reference (the rows of sm_table/sm_illegal as the reference).
     - d3d9total 332/332. The guest d3d9 build still waits on the L1 layout vector_type fix (68/69 objects; ffp_vs_state.c).
     - Next for w6: the bridgefacts move. w5 links smscan@host and pair@host.
+- 10:16Z w6 150333ba3: done. The spec and the rows generator are in bridgefacts/d3d9; d3d9 generates from them via `uses`; the copies are deleted.
+    - D9_ROWS = the manifest rows: 514 rows, 71cb85a7…. Recipe check valid; d3d9total 332/332; mutations 45/45 killed.
+    - Sent to w12, which wires the loader.
+    - w6 now waits; blocked on the L1 layout vector_type fix.
