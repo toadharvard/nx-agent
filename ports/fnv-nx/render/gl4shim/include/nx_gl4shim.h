@@ -14,9 +14,11 @@ size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, siz
 
 /* The internal programs of the GL 4.5 backend: the only GLSL gl4 compiles besides the shim's output (render/gl4shim, one table).
  * GLSL 4.50 core, compiled as given; point-filtered scaling by rule (see gl4_scale.c): P_* = colour 2D / 2D array / 3D, depth, stencil. */
-#define NX_GL4SHIM_VS "#version 450 core\nvoid main() { vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); " \
+/* The GLSL version of the GL 4.5 backend: the one record. The shim writes it over the #version line of every shader it passes to the driver; the internal programs and the FFP texts (gen_glsl.py) carry it. */
+#define NX_GL4SHIM_GLSL_VERSION "#version 450 core"
+#define NX_GL4SHIM_VS NX_GL4SHIM_GLSL_VERSION "\nvoid main() { vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); " \
                       "gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n"
-#define NX_GL4SHIM_HEAD "#version 450 core\nlayout(location = 0) uniform ivec4 src;\nlayout(location = 1) uniform ivec4 dst;\n" \
+#define NX_GL4SHIM_HEAD NX_GL4SHIM_GLSL_VERSION "\nlayout(location = 0) uniform ivec4 src;\nlayout(location = 1) uniform ivec4 dst;\n" \
                         "layout(location = 2) uniform ivec2 lz;\nlayout(location = 3) uniform int mode;\n" \
                         "layout(binding = 63) uniform usampler2D ramp;\n"
 #define NX_GL4SHIM_TEX "ivec2 t = src.xy + ((2 * (ivec2(gl_FragCoord.xy) - dst.xy) + 1) * src.zw) / (2 * dst.zw);\n"

@@ -8,6 +8,7 @@
 #include "draw_core.h"
 #include "../gen/d9impl.gen.h"
 #include "state_rt.h"
+#include "nx_gl4shim.h"
 #define NX_RS_COUNT NX_FFP_PS_RS_COUNT_   // ffp_state.h declares its own NX_RS_COUNT (= 210); the device's generated one (state.gen.h) is the same number: keep both, rename the module's
 extern "C" {
 #include "../ffp/ffp_state.h"
@@ -53,4 +54,4 @@ NxFfpDev* nx_ffp_dev(NxDeviceCore* d);                    // the device's record
 // ---- ffp_prog.cpp
 enum NxBackendKind : uint32_t { NX_BACKEND_DEKO3D = 1, NX_BACKEND_GL = 2 };   // NxGpuInfo.backend (gpu_abi.h)
 bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat);        // the program variant: D3DRS_SHADEMODE FLAT (the front's flat_shade rule over the draw path's latch); false = no memory for the latch
-uint32_t nx_ffp_make_program(NxFfpDev* f, enum NxStage stage, uint32_t flat);   // a backend shader id (>= 1) of the program, 0 = not made
+uint32_t nx_ffp_make_program(NxFfpDev* f, enum nx_gl4shim_stage_id row);   // a backend shader id (>= 1) of the program, 0 = not made

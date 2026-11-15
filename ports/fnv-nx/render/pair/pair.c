@@ -19,13 +19,8 @@ int nx_link_set(const uint8_t* vs_out, uint32_t nv, const uint8_t* ps_in, uint32
     for (uint32_t i = 1; i < m; i++) { uint8_t v = d[i]; uint32_t q = i; while (q > 0 && d[q - 1] > v) { d[q] = d[q - 1]; q--; } d[q] = v; }
     memcpy(l, d, m); *nl = m; return 0;
 }
-enum nx_gl4shim_stage_id nx_pair_ffp_row(enum NxStage stage, uint32_t flat) {
-    switch (stage) {
-    case NxStage_Vertex: return flat ? NX_GL4SHIM_STAGE_FFP_VS_FLAT : NX_GL4SHIM_STAGE_FFP_VS_SMOOTH;
-    case NxStage_Fragment: return flat ? NX_GL4SHIM_STAGE_FFP_PS_FLAT : NX_GL4SHIM_STAGE_FFP_PS_SMOOTH;
-    }
-    __builtin_unreachable();
-}
+enum nx_gl4shim_stage_id nx_pair_ffp_vs_row(bool flat) { return flat ? NX_GL4SHIM_STAGE_FFP_VS_FLAT : NX_GL4SHIM_STAGE_FFP_VS_SMOOTH; }
+enum nx_gl4shim_stage_id nx_pair_ffp_ps_row(bool flat) { return flat ? NX_GL4SHIM_STAGE_FFP_PS_FLAT : NX_GL4SHIM_STAGE_FFP_PS_SMOOTH; }
 int nx_pair_variant(const uint8_t* vs_pairs, uint32_t nv, uint8_t ps_major, const uint8_t* ps_pairs, uint32_t np, uint32_t flat, uint32_t* vs_variant, uint32_t* ps_variant, uint8_t* l, uint32_t* nl) {
     uint8_t vw[225], pr[225]; uint32_t nvw = 0, npr = 0;
     for (uint32_t i = 0; i < nv; i++) if (vs_pairs[i] != FNVNX_DK_PAIR(FNVNX_USAGE_POSITION, 0) && vs_pairs[i] != FNVNX_DK_PAIR(FNVNX_USAGE_PSIZE, 0)) vw[nvw++] = vs_pairs[i];

@@ -13,7 +13,7 @@ static GLenum stage_enum(uint32_t stage) {
     return 0;
 }
 
-/* GLSL (deko style, "#version 460") -> a registered GL shader of the stage. 0 and a recorded error when the host allocator fails or the compile fails: nothing is registered then. */
+/* GLSL (deko style; its #version line becomes NX_GL4SHIM_GLSL_VERSION in the shim) -> a registered GL shader of the stage. 0 and a recorded error when the host allocator fails or the compile fails: nothing is registered then. */
 uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage) {
     if (!glsl || !n || !stage_enum(stage)) return 0;
     uint32_t id = 1;
