@@ -1868,3 +1868,11 @@ bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
 bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
 - 22:17 New red at cand3 41a8855d4: render/nxgpu pp:nxgpu4_check.c cannot find nxgpu4_check.h, caused by our c58c0a4f3 header move. w12 fixes it by the header-home rule. L4 bootrt is now w9 9e457ca on 41a8855d4 and goes into cand3.
 bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
+- 22:21 cand2 verdict (w15, a0db3beaa+): RED, cold 660.8 s, 43 gates, 19 vacuous.
+  - Causes:
+    - rt/guest HOST1 (section_guest.c:12, L2 rule vs L5 source) reddens the guest roots and their dependent gates;
+    - assumptions: toolchain/names/plugsym.inc:1 has no id (L2, stamp-covered, so a new pin is needed);
+    - admit: tests/bootguest;
+    - selftests.json missing (L1).
+  - Ruling: cut every red-build root plus its uses dependents by the graph, and their tests become cut:test:; the cut list goes in the merge message. selftests.json is fixed, not cut. L2 fixes plugsym.inc and the farm rebuilds stage 2. L5 fixes HOST1 for cand3.
+bottleneck: the cand2 merge (cut, the plugsym pin, a warm verdict).
