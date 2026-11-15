@@ -3,7 +3,7 @@
 
 usage: rtlpasses.py <gcc-13.3.0.tar.xz> [--write | --check]    (default: print the table)
 
-The tarball must have the sha256 of the pin of toolchain/msvcmodel/build.sh (the same pin as gen_foldset.py).
+The tarball must have the name and sha256 of verify/guest_compiler.json "provenance" (the pin of toolchain/msvcmodel/build.sh).
 Derived exactly from the tarball:
   universe   every NEXT_PASS of gcc/passes.def from `pass_expand` to the end of the file (the RTL passes: pass_expand turns the last
              GIMPLE form into RTL), nested groups included, in file order, then the passes of config/aarch64/aarch64-passes.def (each
@@ -25,9 +25,12 @@ Errors (exit 1): a pass of the universe without a row, a row without a pass of t
 file whose sha256 differs from the row's key, a cited line that does not hold the cited identifier."""
 import hashlib, io, json, os, re, sys, tarfile
 
-PIN = "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083"
-CANDIDATE_IDENTS = ("MEM_VOLATILE_P", "UNSPEC_VOLATILE", "volatile_insn_p", "volatile_refs_p", "side_effects_p", "MEM_READONLY_P")
 HERE = os.path.dirname(os.path.abspath(__file__))
+# the pin is read from verify/guest_compiler.json "provenance" (gcc_tarball, gcc_tarball_sha256), never copied here
+_PROV = json.load(open(os.path.join(HERE, "..", "..", "verify", "guest_compiler.json")))["provenance"]
+PIN = _PROV["gcc_tarball_sha256"]
+TARBALL_NAME = _PROV["gcc_tarball"]
+CANDIDATE_IDENTS = ("MEM_VOLATILE_P", "UNSPEC_VOLATILE", "volatile_insn_p", "volatile_refs_p", "side_effects_p", "MEM_READONLY_P")
 ROWS = os.path.join(HERE, "rtlpasses.json")
 OUT = os.path.join(HERE, "rtlpasses.md")
 
@@ -131,6 +134,8 @@ def check_gated_off(p, r, files):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not args or os.path.basename(args[0]) != TARBALL_NAME:
+        raise SystemExit("usage: rtlpasses.py <%s> [--write | --check]" % TARBALL_NAME)
     mode = [a for a in sys.argv[1:] if a.startswith("--")]
     files = load(args[0])
     uni = universe(files["passes.def"].decode(), files["config/aarch64/aarch64-passes.def"].decode())
