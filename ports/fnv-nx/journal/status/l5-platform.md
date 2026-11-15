@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 01:31Z L1 w24 pluginfix b707cd5c4 (plugin entries name only the plugin) -> w10 merging onto 310d0e97e + gate set. L1 w12h fe396a360: runtime.libs = generated record (gate_guestlink --write from driver -###), link/guest.json script only; w14 takes it.
 - 2026-11-15 01:28Z orchestrator approved: game compiler = one L2 msvcmodel GCC 13.3 aarch64-none-elf build incl. runtime (CLAUDE.md integration b12c221a6). w14: separate msvcmodel13 build stopped, farm pair cancelled; now libnx guard, runtime acceptance list to L2, MANIFEST check on new mirror, libnx stage 3 on top. 1.5 blocked by L2 none-elf build.
 - 2026-11-15 01:26Z L1 cand1 2b66742ec red 24/42 (L5 reds from older tree a44acb71f). cand2 assembled by L1 w15 from L5 root 310d0e97e + w24 pluginfix (pending). w10 rerunning hostapi/addr32/argordergate/order/oracle on 310d0e97e.
 - 2026-11-15 01:22Z msvcmodel13 blocked: game compiler mirror b274ec067 is linux-gnu all-gcc (no libgcc/crt/libstdc++/newlib, no configure line). Proposed to L2 + orchestrator: one msvcmodel GCC 13.3 aarch64-none-elf --with-newlib build incl. target libs = compiler of every root + runtime; -U__linux__ route rejected. w14: W2 stopped (deferred), guard + delete stage1/2 + runtime needs note; rt e3aec1bb4 (no heap clamp). Farm on hold.
