@@ -6,8 +6,8 @@ Universe = every (enumeration, enumerator) of the enumerations the translation c
 render/d3d9/front/gen_enums.py, enumerators from render/d3d9/spec/d3d9_spec.json plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
 + every row of render/shaders/total/sm_table.json (the SM1-3 commands, (stage, opcode form)), ids "sm:K".
 
-Declared inputs (nothing else is read): the tracked files (git ls-files) of INPUTS below, copied into GATE_OUT/d3d9total.work;
-the external "mojoshader" of render/total/externals.json (fnv-nx-build commit + tree_sha256, fetched by exact commit from
+Declared inputs (nothing else is read): the tracked files (git ls-files) of INPUTS below (the d3d9 and translator recipes and the d3d9 root's include lists), copied into GATE_OUT/d3d9total.work;
+the external "mojoshader" of the translator root's recipe (render/shaders/translator/build.json: fnv-nx-build commit + tree_sha256, fetched by exact commit from
 ARTIFACTS_URL, default the fnv-nx-build repository, into GATE_CACHE/external/<commit> or the work dir; its tree hash, the hash of
 verify/cas.py, must equal tree_sha256); the programs /usr/bin/gcc, /usr/bin/clang, git of verify/env.json (absolute paths, compile only:
 nothing is linked or run) with the C headers of the pinned /usr/include tree and clang's resource headers.
@@ -22,9 +22,9 @@ used by E) inserted at the end of the AST range of NxD3D<E> must give a -Werror=
 front over E exists) and must compile without the switch flags (so that is the only error). A value of E is certified iff the header
 matches for all enumerations, the front builds and E is sensitive.
 
-SM rule. The external is the pinned MojoShader tree (its commit must equal MOJO_PIN of render/shaders/build.sh); mojoshader.patch is
-applied, fnvnx_sm_rows.h (gen_sm_rows.py --check: equal to the generator's output for sm_table.json) is put next to fnvnx_sm_check.h.
-The translator sources (mojoshader.c, the glsl profile; the other profiles are compiled out as in build.sh) must compile: that evaluates
+SM rule. The external is the translator root's own pinned MojoShader tree (the patched mirror; the pin is read from the recipe, nothing
+is applied or restated here); fnvnx_sm_rows.h (gen_sm_rows.py --check: equal to the generator's output for sm_table.json) is put next to fnvnx_sm_check.h.
+The translator sources (mojoshader.c, the glsl profile; the profile set is the -DSUPPORT_PROFILE_* of the translator recipe) must compile: that evaluates
 the _Static_asserts every row expands to. The row of command K is located by the generator's layout (one comment line, then per K in
 sorted order its FNVNX_SM_OP or FNVNX_SM_TOKEN line, then its FNVNX_SM_CMP line if it has a comparison); each line is checked to start
 with that macro and id. Liveness, per row line, by mutation of the macro arguments (the row text stays, the leading macro name is renamed
@@ -39,15 +39,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, "..", ".."))
 REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = os.path.relpath(PORT, REPO)
-INPUTS = ["render/d3d9/front", "render/nxgpu", "render/d3d9/spec/d3d9_spec.json", "shim/include",
-          "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h",
-          "render/shaders/mojoshader.patch", "render/shaders/build.sh", "render/total/externals.json"]
+D3D9_REC, TRANSLATOR_REC = "render/d3d9/build.json", "render/shaders/translator/build.json"
+PORT_PFX = "ports/fnv-nx/"
+
+
+def recipe_includes(path):
+    """the port-relative include directories of a root's own recipe (its `include` list; /ext entries are externals, not inputs)"""
+    return [i[len(PORT_PFX):] for i in json.load(open(os.path.join(PORT, path)))["include"] if i.startswith(PORT_PFX)]
+
+
+# the inputs are the roots' own records: the d3d9 root's recipe and its include lists, the translator root's recipe (its mojoshader external)
+INCLUDES = recipe_includes(D3D9_REC)
+INPUTS = ["render/d3d9/front", "render/d3d9/spec/d3d9_spec.json", D3D9_REC, TRANSLATOR_REC,
+          "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h"] + INCLUDES
 GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
 PLAIN = ["-Wall", "-Wextra", "-Werror", "-Wno-switch", "-Wno-switch-enum"]
-SM_CC = [GCC, "-fsyntax-only", "-Wall", "-fmax-errors=0", "-fdiagnostics-format=json"] + ["-DSUPPORT_PROFILE_%s=0" % p for p in
-         ("ARB1", "ARB1_NV", "D3D", "GLSL120", "GLSPIRV", "HLSL", "METAL", "SPIRV")]
+SM_CC_BASE = [GCC, "-fsyntax-only", "-Wall", "-fmax-errors=0", "-fdiagnostics-format=json"]
 SM_SOURCES = ["mojoshader.c", os.path.join("profiles", "mojoshader_profile_glsl.c")]
 ROWS = "fnvnx_sm_rows.h"
 # the wrappers of the mutated row lines: kind -> (wrapper definitions, {row macro: wrapper name})
@@ -213,11 +222,11 @@ def locs(d):
 
 
 # ---------------------------------------------------------------- enum part
-def front_build(front, backend, flags):
+def front_build(front, incs, flags):
     """compile every front source syntax-only with gcc JSON diagnostics -> (ok, errors [(diag, src)])"""
     ok, errs = True, []
     for f in [x for x in sorted(os.listdir(front)) if x.endswith(".c")]:
-        r = run([GCC, "-std=c11", "-fsyntax-only", "-fdiagnostics-format=json", *flags, "-I", backend, "-I", front, os.path.join(front, f)])
+        r = run([GCC, "-std=c11", "-fsyntax-only", "-fdiagnostics-format=json", *flags, *[x for i in incs for x in ("-I", i)], "-I", front, os.path.join(front, f)])
         if r.returncode:
             ok = False
         errs += [(d, f) for d in diags(r.stderr) if d.get("kind") == "error"]
@@ -225,7 +234,7 @@ def front_build(front, backend, flags):
 
 
 def enum_part(inp, work):
-    front, backend = os.path.join(inp, "render", "d3d9", "front"), os.path.join(inp, "render", "nxgpu")
+    front, backend = os.path.join(inp, "render", "d3d9", "front"), [os.path.join(inp, i) for i in INCLUDES]
     gen = module_lists(os.path.join(front, "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])
     spec = json.load(open(os.path.join(inp, "render", "d3d9", "spec", "d3d9_spec.json")))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]
@@ -325,7 +334,7 @@ def fetch_external(e, cache, dest, scratch):
             raise Red("external %s: git %s: %s" % (e["name"], cmd[2], r.stderr[-200:]))
     h = tree_hash(dest)
     if h != e["tree_sha256"]:
-        raise Red("external %s: tree_sha256 is %s, externals.json says %s" % (e["name"], h, e["tree_sha256"]))
+        raise Red("external %s: tree_sha256 is %s, the recipe says %s" % (e["name"], h, e["tree_sha256"]))
     return h
 
 
@@ -341,11 +350,11 @@ def row_layout(ops):
     return out
 
 
-def sm_compile(tree, extra=()):
+def sm_compile(tree, defs, extra=()):
     """-> (ok, error diagnostics) of the translator sources"""
     ok, errs = True, []
     for s in SM_SOURCES:
-        r = run(SM_CC + list(extra) + ["-I", tree, os.path.join(tree, s)])
+        r = run(SM_CC_BASE + defs + list(extra) + ["-I", tree, "-I", os.path.join(tree, "profiles"), os.path.join(tree, s)])
         ok = ok and r.returncode == 0
         errs += [d for d in diags(r.stderr) if d.get("kind") == "error"]
     return ok, errs
@@ -357,27 +366,20 @@ def sm_part(inp, work, cache):
     info = {"rows_header_equals_generated": False, "baseline_compiles": False, "layout": False, "killed": {}, "error": ""}
     os.makedirs(work)
     try:
-        pin = None
-        for line in read(os.path.join(inp, "render", "shaders", "build.sh")).split("\n"):
-            if line.startswith("MOJO_PIN="):
-                pin = line[len("MOJO_PIN="):].split()[0].strip("\"'")
-        exts = [x for x in json.load(open(os.path.join(inp, "render", "total", "externals.json")))["externals"] if x.get("name") == "mojoshader"]
-        if len(exts) != 1 or exts[0].get("repo") != "fnv-nx-build" or exts[0].get("commit") != pin:
-            raise Red("externals.json: one external mojoshader of fnv-nx-build at MOJO_PIN %s of build.sh is required" % pin)
+        exts = [x for x in json.load(open(os.path.join(inp, TRANSLATOR_REC)))["external"] if x.get("name") == "mojoshader"]
+        if len(exts) != 1 or exts[0].get("repo") != "fnv-nx-build":
+            raise Red("%s: exactly one external mojoshader of fnv-nx-build is required" % TRANSLATOR_REC)
+        defs = [f for f in json.load(open(os.path.join(inp, TRANSLATOR_REC)))["flags"]["c"] if f.startswith("-DSUPPORT_PROFILE_")]   # the profile set of the translator recipe
         tree = os.path.join(work, "ext", "mojoshader")
         info["tree_sha256"] = fetch_external(exts[0], cache, tree, work)
-        info["commit"] = pin
-        ap = run([GIT, "apply", os.path.join(inp, "render", "shaders", "mojoshader.patch")], cwd=tree,
-                 env=git_env({"GIT_CEILING_DIRECTORIES": os.path.dirname(tree)}))
-        if ap.returncode:
-            raise Red("mojoshader.patch does not apply: " + ap.stderr[-200:])
+        info["commit"] = exts[0]["commit"]
         gen_rows = os.path.join(inp, "render", "shaders", "total", "gen_sm_rows.py")
         info["rows_header_equals_generated"] = run([sys.executable, "-I", gen_rows, "--check"]).returncode == 0
         rows_text = read(os.path.join(inp, "render", "shaders", "total", ROWS))
         rows = os.path.join(tree, ROWS)
         write(rows, rows_text)
         write(os.path.join(tree, "mojoshader_version.h"), '#define MOJOSHADER_VERSION -1\n#define MOJOSHADER_CHANGESET "gate"\n')  # cmake-generated
-        base_ok, base_errs = sm_compile(tree)
+        base_ok, base_errs = sm_compile(tree, defs)
         info["baseline_compiles"] = base_ok
         if not base_ok:
             raise Red("patched translator does not compile: " + "; ".join(d.get("message", "") for d in base_errs[:3]))
@@ -397,7 +399,7 @@ def sm_part(inp, work, cache):
             inc = os.path.join(work, "mut_%s.h" % m)
             write(inc, MUTATIONS[m])
             write(rows, mutated)
-            _, errs = sm_compile(tree, ["-include", inc])
+            _, errs = sm_compile(tree, defs, ["-include", inc])
             hit = {line for d in errs for f, line in locs(d) if f == os.path.normpath(rows)}
             for ln in sorted(hit):
                 if ln in killed and m in need[ln]:
@@ -408,7 +410,7 @@ def sm_part(inp, work, cache):
             if kind == "TOKEN":
                 write(rows, "\n".join("FNVNX_GATE_TOKEN" + l[len("FNVNX_SM_TOKEN"):] if i == ln else l
                                       for i, l in enumerate(lines, 1)))
-                if not sm_compile(tree, ["-include", inc])[0]:
+                if not sm_compile(tree, defs, ["-include", inc])[0]:
                     killed[ln].append("token")
         write(rows, rows_text)
         ok_rows = {k for k in ops}
