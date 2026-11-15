@@ -1762,3 +1762,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:25 w12 (h) census at a1aa3932e: 43/188 test files, 186 driver literals (an upper bound). w12 narrows it to real argv sites and writes the brief; w15 converts after the cand2 merge, since it has the verdict env. (f) spec sent to w12: crossing universe = IAT/bridgefacts rows plus called exports plus per-image dispatch rows; S-terms judged only there; a va_list crossing without a msvcrt_va record is red abi:va.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:27 L6: cand2 has no include_uses/uses. Decision: include_uses is deleted. The canonical form is outputs {INCLUDE: dir} plus uses [{root, output: INCLUDE}], on cand3 (w12L2 c58c0a4f3). cand2 stays frozen, and the render roots enter through cand4. gl4shim moves to outputs {NAME: path in generated[].outputs}. L6 measures against w12L2 plus the new pin and sends the errors to w12.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
