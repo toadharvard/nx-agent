@@ -1156,3 +1156,16 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - Held, with no runs of their own: w19 (selftests universe, next) and w22 (the fpexact candidate after L2 w1).
 - Rule: one full verdict per candidate, which is w15's cand1. Workers run unit tests only.
 - L6 w6 verdict on 2c7e65a4a: RED. Attributable to w16c1: oracle 94/95 (test_resolve_input.py has no oracle entry). The entry is to be added on -run with the TOOLS.md recipe.py spec reference. The rest is the render root's own state (L6).
+
+### 2026-11-15 00:40 — probe stage, objstub universe, stack flag
+- L5 constants: a recipe stage kind `probe`, one kind shared with w20's errno probe.
+  - The TU is compiled with the consuming root's unit_flags. Rows are read from the non-alloc section `.fnvnx.const` (u32 id, u32 len, bytes, pad 4).
+  - w20 builds the stage and the reader; L5 w9 builds gen_env_const.py --probe.
+- objstub universe = the final linked ELF after --gc-sections. A gc-dropped body is not a finding. Over unlinked objects objstub is a measurement. Implemented by w20, which also moves objstub to the .fnvnx.cite record (L5 deleted fnvnx_declared_machine).
+- w24 -fstack-reuse=none, measured at 8dc852415:
+  - frame sum +30736 B; max +2528 B (put_float);
+  - 600 of 5554 functions bounded, with no growth on bounded chains;
+  - FalloutNV.exe reserve 1 MiB.
+  - Ruled: land the flag + PD-STACK-REUSE. The bound numbers are not proof.
+- Class without a gate, reported to the orchestrator: native stack depth per thread (4954 unbounded functions; dwStackSize call sites unmeasured). Proposed after the first frame: owner L1, facts from L3a (argflow, indirect targets) and L5 (stack placement).
+- cpuref.json: filled by L3a's worker. microcode null = line absent, required absent, never a wildcard.
