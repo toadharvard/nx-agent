@@ -152,7 +152,7 @@ static int call_handler(u32 h, u32 rec, u32 frame, u32 ctx, u32 disp, u32 *r) {
     u32 s[8] = { eax, ecx, edx, ebx, esp, ebp, esi, edi };
     esp -= 16; M32(esp) = rec; M32(esp + 4) = frame; M32(esp + 8) = ctx; M32(esp + 12) = disp;
     esp -= 4; M32(esp) = RET_SENT;
-    REGS(); void (*f)(void) = fnvl_dispatch(h); f(); REGS();
+    REGS(); fnvnx_entry_fn f = fnvl_dispatch(h); f(); REGS();
     if (c->ra != RET_SENT) return 0;
     *r = eax; eax = s[0]; ecx = s[1]; edx = s[2]; ebx = s[3]; esp = s[4]; ebp = s[5]; esi = s[6]; edi = s[7];
     return 1;

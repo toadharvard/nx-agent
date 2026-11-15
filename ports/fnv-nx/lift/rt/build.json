@@ -109,11 +109,11 @@
     "--prefix",
     "fnvnx_native",
     "/uses/ports/fnv-nx/contract/facts/native",
-    "/out/native_disp.S"
+    "/out/native_disp.cc"
    ],
    "inputs": [],
    "outputs": [
-    "native_disp.S"
+    "native_disp.cc"
    ]
   }
  ],

@@ -4218,7 +4218,7 @@
    "args": [
     "disp",
     "/stage/entries.tsv",
-    "/out/disp.S"
+    "/out/disp.cc"
    ],
    "inputs": [
     {
@@ -4227,7 +4227,7 @@
     }
    ],
    "outputs": [
-    "disp.S"
+    "disp.cc"
    ]
   }
  ],

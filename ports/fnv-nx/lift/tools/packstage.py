@@ -3,7 +3,7 @@
     packstage.py copy ...      packcopy.py   the bodies u/*.cpp of the external
     packstage.py imp ...       impgen.py     imp.cpp and the import rows from the loader's BRIDGE_TSV
     packstage.py entries ...   packentries.py entries.tsv = the external's rows + the import rows + table_id
-    packstage.py disp ...      dispgen.py    disp.S from entries.tsv
+    packstage.py disp ...      dispgen.py    disp.cc from entries.tsv
 Each name runs the named tool's own main with the remaining arguments, unchanged."""
 import os
 import sys

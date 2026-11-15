@@ -4,7 +4,7 @@ only by verify/recipe.py from the product root lift/pack (build.json), whose `ge
     liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shapes_K.tsv
     liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...]
         merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, entries.tsv (lifted and runtime rows), inc/fnvl_prelude.h, inc/imp.h,
-        forms.tsv, encs.tsv, shapes.tsv, gate_liftgen.json. Nothing derived from the loader's bridge table is written (imp.cpp, disp.S, the import rows and
+        forms.tsv, encs.tsv, shapes.tsv, gate_liftgen.json. Nothing derived from the loader's bridge table is written (imp.cpp, disp.cc, the import rows and
         the table_id are the generated stages of lift/pack).
     liftgen.py --recipe REF COMMIT TREE_SHA256    write lift/pack/build.json for the published pack tree (fnv-nx-build branch, commit, cas.py ingest hash)
     liftgen.py --module NAME ...                  (shard mode) a module of modules.tsv, lifted at its assigned base with its universe
@@ -45,7 +45,7 @@ def bucket(a): return (a >> 4) & (NBUCKET - 1)
 
 def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)]
 # The pack's external holds the bodies and what is derived from them alone. Everything derived from the loader's bridge table is a generated stage of lift/pack (recipe():
-# impgen.py -> imp.cpp + the import rows, packentries.py -> entries.tsv with the table_id trailer, dispgen.py -> disp.S): a change of the table rebuilds those stages, never the external.
+# impgen.py -> imp.cpp + the import rows, packentries.py -> entries.tsv with the table_id trailer, dispgen.py -> disp.cc): a change of the table rebuilds those stages, never the external.
 
 
 def lift_one(a):
@@ -242,8 +242,8 @@ def recipe(ref, commit, tree, dest=None):
                           'inputs': [], 'outputs': ['imp.cpp', 'imp_entries.tsv', 'imp_blocked.tsv']},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '/out/entries.tsv'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:1', 'path': 'imp_entries.tsv'}], 'outputs': ['entries.tsv']},
-                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '/stage/entries.tsv', '/out/disp.S'],
-                          'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.S']}],
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '/stage/entries.tsv', '/out/disp.cc'],
+                          'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.cc']}],
            'outputs': {'ENTRIES': 'entries.tsv'},
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}

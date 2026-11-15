@@ -48,7 +48,8 @@ register struct cpu *c asm("x27");
    L_ function (CALLX); the one-instruction tests (the retired one-instruction harness) redefine CALLX after the prelude in their own sources. */
 #include "fnvl_faults.h"      /* the FNVL_* fault codes: generated from fnvlift/faults.json, the one CPU fault table (tools/gen_faults.py) */
 /* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.cc maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
-extern "C" { void (*fnvl_dispatch(u32 image_addr))(void);
+#include "fnvl_host.h"      /* fnvnx_entry_fn (ENTRY1): what the dispatcher returns */
+extern "C" { fnvnx_entry_fn fnvl_dispatch(u32 image_addr);
              void fnvl_trace(u32 entry, u32 esp); }
 #define CALLX(h) L_##h()
 #ifdef FNVL_TRACE

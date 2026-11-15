@@ -36,7 +36,7 @@
    "outputs": [
     "gen/guest.cc",
     "gen/imp.cc",
-    "gen/tab.S",
+    "gen/tab.cc",
     "gen/image.inc",
     "gen/labels.txt",
     "gen/terminal.json"
