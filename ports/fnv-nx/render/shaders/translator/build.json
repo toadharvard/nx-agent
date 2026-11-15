@@ -1,0 +1,86 @@
+{
+ "format": "fnvnx-recipe/1",
+ "profile": "guest",
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-DSTDMETHODCALLTYPE=",
+   "-DNDEBUG",
+   "-std=gnu99",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-DSUPPORT_PROFILE_ARB1=0",
+   "-DSUPPORT_PROFILE_ARB1_NV=0",
+   "-DSUPPORT_PROFILE_BYTECODE=0",
+   "-DSUPPORT_PROFILE_D3D=0",
+   "-DSUPPORT_PROFILE_GLSL=1",
+   "-DSUPPORT_PROFILE_GLSL120=0",
+   "-DSUPPORT_PROFILE_GLSLDK=1",
+   "-DSUPPORT_PROFILE_GLSLES=1",
+   "-DSUPPORT_PROFILE_GLSLES3=1",
+   "-DSUPPORT_PROFILE_GLSPIRV=0",
+   "-DSUPPORT_PROFILE_HLSL=0",
+   "-DSUPPORT_PROFILE_METAL=0",
+   "-DSUPPORT_PROFILE_SPIRV=0"
+  ],
+  "cxx": [
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/render/shaders/translator/gen",
+  "ports/fnv-nx/render/shaders/translator/include",
+  "/ext/mojoshader",
+  "/ext/mojoshader/profiles"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/total/translator_gen/gen_sources.py",
+   "args": [
+    "/ext/mojoshader",
+    "/out/gen/sources.txt"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/sources.txt"
+   ]
+  }
+ ],
+ "sources": "gen/sources.txt",
+ "external": [
+  {
+   "name": "mojoshader",
+   "repo": "fnv-nx-build",
+   "ref": "tools/mojoshader-glsldk",
+   "commit": "7693847e3ba4fc85c51aad2ddd19bf795c608daf",
+   "tree_sha256": "bc0ea3c1432f5ab3739e15de8040a23bf5bba5c433c8005901a6f44649a38097",
+   "at": "/ext/mojoshader"
+  }
+ ],
+ "link": null,
+ "outputs": {
+  "INCLUDE": "include"
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_rows"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/render/shaders/total",
+   "output": "sm_rows"
+  }
+ ],
+ "constants": "constants.tsv"
+}
