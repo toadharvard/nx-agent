@@ -842,3 +842,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - The cold build waits for that external as well as cand3.
 - 20:50 L3b: comparator moved to pemod.load, the pack-bytes claim withdrawn. ehoracle over 8 images: 235,208 rows agree, wine 0, 2 FalloutNV findings on our side (throw-site TI unresolved, throwinfo set). Addresses come from L3b w11.
 - bottleneck: relift of the stale pack (w7, facts on farm 1) plus cand3 before the cold build; workers 4 (w7, w8, w12, w13).
+- 20:55 Decision, 2026-11-15 (orchestrator ruling, accepted): the stale-pack relift is a full re-key in any case.
+  - If the EFLAGS liveness rule is ready before cand3 merges, it goes into this relift and the 8-farm cold build compiles the smaller code once. Ready means the emitter only drops dead assignments, L3b's (A) projection lemma, and L3a's (B) live-mask certificate, with exception points and boundaries as all-flag readers.
+  - The same holds for the labels-only-at-control-targets rule (b), which changes no Form.
+  - If either is not ready by then, the relift is not held: it goes with the stamp fix and the generated prelude, and the density rules come in the next relift.
+  - Owner of the implementation: the first worker free after the w12/w13 measurements. Order by the measured shares.
+- 20:55 L1 confirmed: generated stages still mount every uses output (recipe.py:2235). Only unit PP/CC drops them.
