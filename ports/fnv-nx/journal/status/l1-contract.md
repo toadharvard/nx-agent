@@ -1876,3 +1876,5 @@ bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
     - selftests.json missing (L1).
   - Ruling: cut every red-build root plus its uses dependents by the graph, and their tests become cut:test:; the cut list goes in the merge message. selftests.json is fixed, not cut. L2 fixes plugsym.inc and the farm rebuilds stage 2. L5 fixes HOST1 for cand3.
 bottleneck: the cand2 merge (cut, the plugsym pin, a warm verdict).
+- 22:23 L2 plugins 6d9f72b18 (toolchain tree 33fbb22b): plugsym.inc now states the fact without the word, and toolchain/ has 0 id-less mentions. The farm rebuilds only stage 2 and sends the pin to w15 and me. HOST1 stays with L5; L2 says the rule targets exactly that pattern.
+bottleneck: the cand2 merge (cut, the stage-2 pin, a warm verdict).
