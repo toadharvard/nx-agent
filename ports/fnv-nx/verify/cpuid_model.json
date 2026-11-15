@@ -1,7 +1,7 @@
 {
  "_doc": "The declared CPU's cpuid, as DATA: the raw leaves of the pinned reference host (identity: verify/cpuref.json) and the declared-machine masks applied to them. lift/tools/gen_cpuref.py generates lift/rt/fnvl_cpuref.h, lift/rt/rcpref.h and lift/rt/cpumodel_tab.inc from cpuref.json + this file; nothing restates these values by hand. Provenance of `raw`: transcribed from the table recorded in lift/rt/cpumodel.c at 286fdc93 (a `cpuid` run on the pinned host). Fields the platform owns (leaf 1 EBX [23:16], leaf 4 EAX [31:26] and the L3 share field [25:14]) are zero in `raw` and filled by rt/cpumodel.c from FNVNX_NPROC.",
  "mxcsr_mask": "0x0000ffbf",
- "mxcsr_mask_doc": "DERIVED, no capture (orchestrator ruling 2026-11-15). Source: Intel SDM Vol 1 §11.6.6 with CPUREF's identity row (verify/cpuref.json, family 6 model 207, a DAZ-capable part): its FXSAVE MXCSR_MASK is 0xFFFF. Restricted to the declared feature set (host ∩ lifted): DAZ (MXCSR bit 6) is outside the lifted set (no Form implements DAZ), so mxcsr_mask = 0xFFFF & ~0x40 = 0xFFBF. LDMXCSR of a value with a bit outside the mask is #GP(0) (SDM Vol 2 LDMXCSR, Exceptions).",
+ "mxcsr_mask_doc": "DERIVED, no capture (orchestrator ruling 2026-11-15). Source: Intel SDM Vol 1 §11.6.6 (ASM-055, OWNER 10: the ISA as the SDM documents it) with CPUREF's identity row (verify/cpuref.json, family 6 model 207, a DAZ-capable part): its FXSAVE MXCSR_MASK is 0xFFFF. Restricted to the declared feature set (host ∩ lifted): DAZ (MXCSR bit 6) is outside the lifted set (no Form implements DAZ), so mxcsr_mask = 0xFFFF & ~0x40 = 0xFFBF. LDMXCSR of a value with a bit outside the mask is #GP(0) (SDM Vol 2 LDMXCSR, Exceptions).",
  "max_basic": 4,
  "max_ext": "0x80000004",
  "leaf1_edx_clear": "0x08000000",
