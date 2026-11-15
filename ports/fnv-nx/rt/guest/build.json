@@ -86,7 +86,8 @@
       "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
       "args": {},
       "inputs": [
-        "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+        "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+        "ports/fnv-nx/toolchain/layout/crossing_terms.inc"
       ]
     }
   ],

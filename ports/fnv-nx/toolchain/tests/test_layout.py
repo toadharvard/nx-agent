@@ -15,6 +15,10 @@ sys.path.insert(0, HERE)
 import plugbuild as pb  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'link'))
 import ctypes_compat as cc  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'verify'))
+import gate_abi  # noqa: E402
+import json  # noqa: E402
+import subprocess  # noqa: E402
 
 check = pb.Checks('test_layout')
 FIX = os.path.join(HERE, 'layout', 'layout.cpp')
@@ -147,6 +151,33 @@ def decltype_errors(td, so):
         check('decltype: declarations of one symbol compose to one line (%s)' % name, got == want, (got, r.stderr[-300:]))
 
 
+CROSSING = {
+    '_Z10none_plain5Plain8PlainDeriPv': (), '_Z10vb_derived2DD': ('virtual_base',), '_Z11pm_in_class2PM': ('pointer_to_member',),
+    '_Z2vaiSt9__va_list': ('va_list',), '_Z4both2DVM5Plaini': ('pointer_to_member', 'virtual_base'), '_Z4usesv': (), '_Z6pm_ptrP2PM': (),
+    '_Z6vb_refRK2DV': (), '_Z6vb_val2DV': ('virtual_base',), '_Z7pm_dataM5Plaini': ('pointer_to_member',),
+    '_Z7pm_funcM5PlainFiiE': ('pointer_to_member',), '_Z7va_held3VaH': ('va_list',), '_Z8vb_array8HoldsArr': ('virtual_base',),
+    '_Z9vb_member7HoldsDV': ('virtual_base',), '_Z9vb_returnv': ('virtual_base',)}
+
+
+def crossing(obj):
+    data = pb.section(obj, '.fnvnx.crossing').encode()
+    try:
+        got = gate_abi.parse_crossing(data, 'crossing.cpp')
+    except ValueError as e:
+        check('crossing.cpp section parses with gate_abi.parse_crossing', False, str(e))
+        return
+    check('crossing: every external function has its terms (gate_abi.parse_crossing round trip)', got == CROSSING,
+          sorted(set(got.items()) ^ set(CROSSING.items())))
+    ids = {t['id'] for t in json.load(open(os.path.join(HERE, '..', 'msvcmodel', 'DATAMODEL.json')))['crossing_forbidden']['terms']}
+    check('crossing: every emitted term is an id of DATAMODEL.json', all(t in ids for v in got.values() for t in v), ids)
+    check('crossing: terms sorted and distinct', all(list(v) == sorted(set(v)) for v in got.values()), got)
+
+
+def crossing_inc_current():
+    r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'layout', 'gen_crossing.py'), '--check'], capture_output=True, text=True)
+    check('crossing_terms.inc is what gen_crossing.py makes of DATAMODEL.json', r.returncode == 0, r.stdout + r.stderr)
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-layout-')
     try:
@@ -174,6 +205,12 @@ def main():
             rows = [l.split('\t') for l in pb.section(obj, '.fnvnx.layout').splitlines()]
             check('a C unit: every record (file scope, static, in a function, union) has linkage c',
                   len(rows) >= 4 and all(len(r) == 8 and r[7] == 'c' for r in rows), rows)
+        obj = os.path.join(td, 'x.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'crossing.cpp'), obj, so)
+        check('crossing.cpp compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            crossing(obj)
+        crossing_inc_current()
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_layout-mode=1'])
         check('an unknown plugin argument is an error', pb.argument_refused(r, 'layout'), r.stderr[:500])
     finally:
