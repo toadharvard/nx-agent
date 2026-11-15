@@ -1341,3 +1341,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - recipe.plugin_decls is the only declaration; plugin entries name only the plugin.
   - 48 entries in 6 build.json files cleaned: 48 source, 48 args, 8 inputs. 8/8 product roots valid.
   - test_recipe has 2 pre-existing FAILs: PT_INTERP is fixed by w12h with base-files; the generated-stage cache miss goes to w24 gatekeys as item 1.
+- w22 33e41190b accepted: contract/factscheck (dependents_of selector, nobinding.py); excluded roots 0, bound addresses 0.
+- w24 race standalone 98deaec70 (on cand1).
+- w12h fe396a360:
+  - accepted: the undefset closure (ld record failed_units[].undefined), (A) weak undefined, (C) merging w1b-root;
+  - to revert: the runtime.libs part of f4db6c4ef (the derivation is the one declaration; guestlink checks derived files lie under the pinned runtime external);
+  - gap: ld-internal names closed by a keyed reference-link stage.
