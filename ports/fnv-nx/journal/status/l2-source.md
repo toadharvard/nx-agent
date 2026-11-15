@@ -323,3 +323,4 @@ After the first frame:
     - newlib's own -ffunction-sections and -fdata-sections are removed (one flag record).
     - The *l subset check now comes from math.h's declarations.
   - libgcc, libstdc++ and the smoke test wait on MLIB1.
+- Farm 9e3b6ce9: newlib-guest.patch (sha256 7a9b0a61) = NL-LDBL + NL-SECT (newlib's -ffunction-sections and -fdata-sections removed, configure.host:647). Long double: math.h declares 60 functions with a long double parameter or result, and 0 are missing from libm.a/libc.a (ILP32 schar multilib, before MLIB1). The stage-1 rebuild waits on w3's MLIB1 sha.
