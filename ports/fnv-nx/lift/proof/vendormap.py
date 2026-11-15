@@ -4,7 +4,6 @@
     table31(txt)                -> {flag: {(reg, bit)}}                      APM Vol. 3 Table 3-1 "Instruction Support Indicated by CPUID Feature Bits": which features gate instructions
     subsets(pdf, txt, feats)    -> {mnemonic: (feature, cite)}       Appendix D Table D-1
     mapcells(pdf, txt, names)   -> {(opcode, prefix): (feature, citation)}  cells of the two-byte opcode maps (Tables A-3, A-4) whose first line is a feature mnemonic of Table 3-1
-    table(flags, rows)          -> {name: [(leaf, sub, reg, bit)]}          sdmfeat.flag_table  U  the APM Appendix E rows (one table that the partition reads)
 The rule that a cell belongs to a feature is only: its first line, trademark signs removed, equals a feature mnemonic of Table 3-1 that Appendix E defines (gating). No feature name is written here."""
 import re
 import sys
@@ -142,13 +141,6 @@ def instrcells(txt, known):
                 if m and m.group(2) not in ('38', '3A'):
                     byte = int(m.group(2), 16); pfx = m.group(1).strip() or 'n/a'
                     out[(byte, pfx)] = (f, 'APM Vol. 5 instruction reference (PDF page index %d): `%s` is a %s instruction (Support ... is indicated by CPUID ...[%s])' % (pi, t.strip()[:60], f, f))
-    return out
-
-
-def table(flags, apm_rows):
-    out = {k: list(v) for k, v in flags.items()}
-    for name, leaf, sub, reg, bit, _ in apm_rows:
-        out.setdefault(name, []).append((leaf, sub, reg, bit))
     return out
 
 

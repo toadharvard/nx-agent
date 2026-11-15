@@ -25,10 +25,29 @@ class Synthetic(unittest.TestCase):
         self.assertIsNone(S.vendor_cell(cells, None, b'\x90'))                  # one-byte opcodes are not in the two-byte map
 
     def test_table_union(self):
-        t = V.table({'SSE2': [(1, 0, 'EDX', 26)]}, [('3DNow!', 0x80000001, 0, 'EDX', 31, 'c'), ('SSE2', 1, 0, 'EDX', 26, 'c')])
-        self.assertEqual(t['3DNow!'], [(0x80000001, 0, 'EDX', 31)])
+        t = S.Table(S.unify([('SSE2', 1, 0, 'EDX', 26, 's')], [('3DNow!', 0x80000001, 0, 'EDX', 31, 'c'), ('SSE2', 1, 0, 'EDX', 26, 'c')]))
+        self.assertEqual(t.addresses('3DNow!'), [(0x80000001, 0, 'EDX', 31)])
         cpu = {(0, 'EAX'): 4, (0x80000000, 'EAX'): 0x80000004, (0x80000001, 'EDX'): 0}
         self.assertFalse(S.present('3DNow!', t, cpu))                          # the declared answer clears the bit
+
+    def test_canonical_precedence_and_aliases(self):
+        recs = S.unify([('SSE4.1', 1, 0, 'ECX', 19, 's')], [('SSE4_1', 1, 0, 'ECX', 19, 'a'), ('AESNI', 1, 0, 'ECX', 25, 'a')])
+        by = {(r['leaf'], r['reg'], r['bit']): r for r in recs}
+        r = by[(1, 'ECX', 19)]
+        self.assertEqual((r['canonical'], r['sdm_name'], r['apm_name'], r['sdm_cite'], r['apm_cite']), ('SSE4.1', 'SSE4.1', 'SSE4_1', 's', 'a'))
+        self.assertEqual(by[(1, 'ECX', 25)]['canonical'], 'AESNI')               # no SDM name: the APM's
+        t = S.Table(recs)
+        self.assertEqual(t.canonicals('SSE4_1'), ['SSE4.1'])                      # either vendor spelling resolves to the one canonical
+
+    def test_one_vendor_two_names_at_one_address_is_an_error(self):
+        with self.assertRaises(SystemExit):
+            S.unify([('A', 1, 0, 'ECX', 1, 's'), ('B', 1, 0, 'ECX', 1, 's')], [])
+
+    def test_reused_name_is_address_qualified_except_the_mirror(self):
+        recs = S.unify([], [('FPU', 1, 0, 'EDX', 0, 'a'), ('FPU', 0x80000001, 0, 'EDX', 0, 'a'), ('X', 1, 0, 'EAX', 3, 'a'), ('X', 0xD, 0, 'EAX', 3, 'a')])
+        names = sorted(r['canonical'] for r in recs)
+        self.assertEqual(names.count('FPU'), 2)                                   # mirror pair: one feature, two addresses
+        self.assertTrue(all(n.startswith('X@') for n in names if n.startswith('X')))
 
 
 SAMPLE = """Table of contents
@@ -90,6 +109,7 @@ class Pinned(unittest.TestCase):
             txt = vols[0][1]; p = pdfplumber.open(vols[0][0]); t31 = V.table31(txt); fn = V.gating(txt, f); sub = V.subsets(p, txt, fn)
             got = V.dump(f) + ''.join('cell\t0F%02X\t%s\t%s\n' % (k[0], k[1], v[0]) for k, v in sorted(cells.items())) + ''.join('subset\t%s\t%s\n' % (m, v[0]) for m, v in sorted(sub.items()))
         self.assertEqual(got, open(os.path.join(HERE, 'vendor_cells.tsv')).read())
+        S.Table(S.unify([], f))                                                  # the APM rows alone: address -> canonical a function, canonical -> address one-to-one (Table() raises otherwise)
         self.assertEqual({k[0] for k, v in cells.items() if v[0] == '3DNow'}, {0x0e, 0x0f})            # 0F 0F from Vol. 3 Appendix A (map cell), 0F 0E FEMMS from Vol. 5 (instruction reference); no hand entry
         self.assertIn(('3DNow', 0x80000001, 0, 'EDX', 31), {x[:5] for x in f})
         # one bit, one feature; every row's leaf and register are those of the table that the row was read under (the citation names the section)

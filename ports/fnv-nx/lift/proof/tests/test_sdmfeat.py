@@ -7,7 +7,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
 from proof import sdmfeat as S, shape  # noqa: E402
 
-T = {'SSE2': [(1, 0, 'EDX', 26)], 'SSE3': [(1, 0, 'ECX', 0)], 'AVX': [(1, 0, 'ECX', 28)], 'AVX512F': [(7, 0, 'EBX', 16)], 'AVX512VL': [(7, 0, 'EBX', 31)]}
+T = S.Table(S.unify([(n, l, s, r, b, 'c') for n, l, s, r, b in (('SSE2', 1, 0, 'EDX', 26), ('SSE3', 1, 0, 'ECX', 0), ('AVX', 1, 0, 'ECX', 28), ('AVX512F', 7, 0, 'EBX', 16), ('AVX512VL', 7, 0, 'EBX', 31))], []))
 CPU = {(0, 'EAX'): 4, (0x80000000, 'EAX'): 0x80000004, (1, 'EDX'): 0x078bfbff, (1, 'ECX'): 0}
 
 
