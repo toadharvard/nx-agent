@@ -388,3 +388,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 15:20: w7-u 06ffbd8ca. lift/, contract iat/modules and loader/build.json come from L3a 18c2b9cde (FASTFAIL row included). shim d3d9types.h and fnvnx_win32.h come from 18c2b9cde (C asserts), and admit.json has L3a's lift rows.
   - All earlier reds are closed: sha256, descs, bridges, pack, rt.
   - test_bootgpu now compiles lift/pack (about 4096 lifted units) as a cold build, running in the background with a 55 min limit. Later runs hit GATE_CACHE.
+- 16:00: w7-u f70211d54: lift/ is whole from 18c2b9cde, and the d3d9types red is closed. test_bootgpu's setup case passes; the cold lift/pack build (about 4096 units, 4 cores) passed 3300 s without failing.
+  - Decision: resume on w7's warm GATE_CACHE rather than on a farm, because a farm would start cold and repay the whole build. The rerun is in the background.
