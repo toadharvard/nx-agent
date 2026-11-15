@@ -16,6 +16,8 @@ Read by a reviewer, recorded in rtlpasses.json (keyed by the pass and the sha256
                           merged, split or moved by the pass
              "no-mem"   : the cited lines are where the pass creates or changes insns and none of them creates, merges, splits or
                           moves a MEM (the reason says why)
+             "preserves": the pass may merge or duplicate insns, and the cited lines prove that it keeps every insn's order and count on
+                          each path (the reason gives the proof)
              "expand"   : pass_expand, the pass that creates the MEMs
   gated_off  an optional field of a row: the pass is not run under any flag the recipe allows. The gate line holds the flag variable; the
              option's record in common.opt has no Init other than 0; neither opts.cc (the -O level tables) nor config/aarch64 names the flag
@@ -163,7 +165,7 @@ def main():
             errors.append("%s (%s:%d): no classification row" % (p, fn, ln))
             table.append((p, fn, ln, len(cand), "UNCLASSIFIED", ""))
             continue
-        if r["class"] not in ("refuses", "no-mem", "expand"):
+        if r["class"] not in ("refuses", "no-mem", "preserves", "expand"):
             errors.append("%s: unknown class %s" % (p, r["class"]))
         for f, sha in r["files"].items():
             if f not in files:

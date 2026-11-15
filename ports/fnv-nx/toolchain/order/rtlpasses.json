@@ -172,7 +172,8 @@
    "class": "refuses",
    "reason": "can_decompose_p returns false for a volatile MEM (316); a source with side effects (an UNSPEC_VOLATILE has them, rtlanal.cc side_effects_p) or a destination with side effects goes through a temporary register instead of being decomposed (1020, 1053)",
    "files": {
-    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744"
+    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744",
+    "rtlanal.cc": "2029aeaa389a3b25e979528e4b6c6328bf7612c26fc05ddb4504d543b1f02de4"
    },
    "cites": [
     {
@@ -189,6 +190,16 @@
      "file": "lower-subreg.cc",
      "line": 1053,
      "ident": "side_effects_p"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3069,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3075,
+     "ident": "MEM_VOLATILE_P"
     }
    ]
   },
@@ -197,7 +208,8 @@
    "class": "refuses",
    "reason": "can_decompose_p returns false for a volatile MEM (316); a source with side effects (an UNSPEC_VOLATILE has them, rtlanal.cc side_effects_p) or a destination with side effects goes through a temporary register instead of being decomposed (1020, 1053)",
    "files": {
-    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744"
+    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744",
+    "rtlanal.cc": "2029aeaa389a3b25e979528e4b6c6328bf7612c26fc05ddb4504d543b1f02de4"
    },
    "cites": [
     {
@@ -214,6 +226,16 @@
      "file": "lower-subreg.cc",
      "line": 1053,
      "ident": "side_effects_p"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3069,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3075,
+     "ident": "MEM_VOLATILE_P"
     }
    ]
   },
@@ -222,7 +244,8 @@
    "class": "refuses",
    "reason": "can_decompose_p returns false for a volatile MEM (316); a source with side effects (an UNSPEC_VOLATILE has them, rtlanal.cc side_effects_p) or a destination with side effects goes through a temporary register instead of being decomposed (1020, 1053)",
    "files": {
-    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744"
+    "lower-subreg.cc": "f503e2522b21d8d5d1924203d1bae606eff61c5ad6be1c40eb818c88fdebd744",
+    "rtlanal.cc": "2029aeaa389a3b25e979528e4b6c6328bf7612c26fc05ddb4504d543b1f02de4"
    },
    "cites": [
     {
@@ -239,6 +262,16 @@
      "file": "lower-subreg.cc",
      "line": 1053,
      "ident": "side_effects_p"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3069,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3075,
+     "ident": "MEM_VOLATILE_P"
     }
    ]
   },
@@ -431,6 +464,403 @@
      "file": "combine.cc",
      "line": 1927,
      "ident": "UNSPEC_VOLATILE"
+    }
+   ]
+  },
+  {
+   "pass": "pass_df_initialize_opt",
+   "class": "no-mem",
+   "reason": "execute is rest_of_handle_df_initialize: it allocates the dataflow instance and scans the insns into it (df_scan_blocks); it emits, changes, moves and deletes no insn",
+   "files": {
+    "df-core.cc": "f981b28d37932feb21fd77fd2549f67d3add837d64f3e1f99921be201484ce1f"
+   },
+   "cites": [
+    {
+     "file": "df-core.cc",
+     "line": 684,
+     "ident": "rest_of_handle_df_initialize"
+    },
+    {
+     "file": "df-core.cc",
+     "line": 715,
+     "ident": "df_scan_blocks"
+    }
+   ]
+  },
+  {
+   "pass": "pass_df_initialize_no_opt",
+   "class": "no-mem",
+   "reason": "execute is rest_of_handle_df_initialize: it allocates the dataflow instance and scans the insns into it (df_scan_blocks); it emits, changes, moves and deletes no insn",
+   "files": {
+    "df-core.cc": "f981b28d37932feb21fd77fd2549f67d3add837d64f3e1f99921be201484ce1f"
+   },
+   "cites": [
+    {
+     "file": "df-core.cc",
+     "line": 684,
+     "ident": "rest_of_handle_df_initialize"
+    },
+    {
+     "file": "df-core.cc",
+     "line": 715,
+     "ident": "df_scan_blocks"
+    }
+   ]
+  },
+  {
+   "pass": "pass_df_finish",
+   "class": "no-mem",
+   "reason": "execute is rest_of_handle_df_finish: it frees the dataflow problems and the instance (free_fun); no insn is touched",
+   "files": {
+    "df-core.cc": "f981b28d37932feb21fd77fd2549f67d3add837d64f3e1f99921be201484ce1f"
+   },
+   "cites": [
+    {
+     "file": "df-core.cc",
+     "line": 805,
+     "ident": "rest_of_handle_df_finish"
+    },
+    {
+     "file": "df-core.cc",
+     "line": 814,
+     "ident": "free_fun"
+    }
+   ]
+  },
+  {
+   "pass": "pass_reginfo_init",
+   "class": "no-mem",
+   "reason": "execute is reginfo_init: it recomputes regs_ever_live from the dataflow info and resets register-class tables; no insn is touched",
+   "files": {
+    "reginfo.cc": "74bb8fe71f3947e748e4a3b1c7e91adde8195a716d46fc2073523825a2a05f99"
+   },
+   "cites": [
+    {
+     "file": "reginfo.cc",
+     "line": 919,
+     "ident": "reginfo_init"
+    },
+    {
+     "file": "reginfo.cc",
+     "line": 922,
+     "ident": "df_compute_regs_ever_live"
+    }
+   ]
+  },
+  {
+   "pass": "pass_rest_of_compilation",
+   "class": "no-mem",
+   "reason": "a group pass: it has a gate and no execute method, so it runs no transformation of its own (its members are rows of their own)",
+   "files": {
+    "passes.cc": "b250925cc05f46f86945e3042caf33fa93052c385097df944e14844d1b9bb2d3"
+   },
+   "cites": [
+    {
+     "file": "passes.cc",
+     "line": 650,
+     "ident": "gate"
+    }
+   ]
+  },
+  {
+   "pass": "pass_postreload",
+   "class": "no-mem",
+   "reason": "a group pass: a gate (reload_completed) and no execute method",
+   "files": {
+    "passes.cc": "b250925cc05f46f86945e3042caf33fa93052c385097df944e14844d1b9bb2d3"
+   },
+   "cites": [
+    {
+     "file": "passes.cc",
+     "line": 690,
+     "ident": "gate"
+    }
+   ]
+  },
+  {
+   "pass": "pass_late_compilation",
+   "class": "no-mem",
+   "reason": "a group pass: a gate and no execute method",
+   "files": {
+    "passes.cc": "b250925cc05f46f86945e3042caf33fa93052c385097df944e14844d1b9bb2d3"
+   },
+   "cites": [
+    {
+     "file": "passes.cc",
+     "line": 725,
+     "ident": "gate"
+    }
+   ]
+  },
+  {
+   "pass": "pass_loop2",
+   "class": "no-mem",
+   "reason": "a group pass: pass_loop2 has a gate and no execute method; its only action is, when the gate is false, to drop the loop structures (loop_optimizer_finalize, which edits no insn); its members are rows of their own",
+   "files": {
+    "loop-init.cc": "516ee34c099914578262999e288933234b8fe119a5df35a3079a58c7125f151e"
+   },
+   "cites": [
+    {
+     "file": "loop-init.cc",
+     "line": 365,
+     "ident": "gate"
+    },
+    {
+     "file": "loop-init.cc",
+     "line": 379,
+     "ident": "loop_optimizer_finalize"
+    }
+   ]
+  },
+  {
+   "pass": "pass_rtl_loop_init",
+   "class": "no-mem",
+   "reason": "execute is rtl_loop_init: loop_optimizer_init builds the loop structures from the CFG; no insn is touched",
+   "files": {
+    "loop-init.cc": "516ee34c099914578262999e288933234b8fe119a5df35a3079a58c7125f151e"
+   },
+   "cites": [
+    {
+     "file": "loop-init.cc",
+     "line": 405,
+     "ident": "loop_optimizer_init"
+    }
+   ]
+  },
+  {
+   "pass": "pass_rtl_loop_done",
+   "class": "preserves",
+   "reason": "loop_optimizer_finalize drops the loop structures, then cleanup_cfg (0) runs with neither CLEANUP_THREADING nor CLEANUP_CROSSJUMP: cfgcleanup.cc only enters jump threading under CLEANUP_THREADING (486) and cross-jumping under CLEANUP_CROSSJUMP (2938), so with mode 0 it deletes unreachable blocks, concatenates straight-line blocks and forwards jumps: whole blocks in the same insn order, no insn is duplicated or deleted except an unreachable block's",
+   "files": {
+    "loop-init.cc": "516ee34c099914578262999e288933234b8fe119a5df35a3079a58c7125f151e",
+    "cfgcleanup.cc": "1a44800de9cfc473a07de54c56fc65931798f36b93c002160218ba0870ec6e98"
+   },
+   "cites": [
+    {
+     "file": "loop-init.cc",
+     "line": 479,
+     "ident": "loop_optimizer_finalize"
+    },
+    {
+     "file": "loop-init.cc",
+     "line": 482,
+     "ident": "cleanup_cfg"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 486,
+     "ident": "CLEANUP_THREADING"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 2938,
+     "ident": "CLEANUP_CROSSJUMP"
+    }
+   ]
+  },
+  {
+   "pass": "pass_jump",
+   "class": "refuses",
+   "reason": "execute runs delete_trivially_dead_insns (3237), which keeps an insn that has side effects (cse.cc:6793 count_reg_usage marks the insn not deletable, 6875 set_live_p), and cleanup_cfg with CLEANUP_EXPENSIVE and, under flag_thread_jumps, CLEANUP_THREADING, never CLEANUP_CROSSJUMP (3240-3242); jump threading refuses a block that holds an insn with side effects (cfgcleanup.cc:324); side_effects_p is true for UNSPEC_VOLATILE (rtlanal.cc:3069) and a volatile MEM (3075)",
+   "files": {
+    "cfgcleanup.cc": "1a44800de9cfc473a07de54c56fc65931798f36b93c002160218ba0870ec6e98",
+    "cse.cc": "0fa170751662249a448bebfb26c94970ae9bcc5e56783a409139266144787f8b",
+    "rtlanal.cc": "2029aeaa389a3b25e979528e4b6c6328bf7612c26fc05ddb4504d543b1f02de4"
+   },
+   "cites": [
+    {
+     "file": "cfgcleanup.cc",
+     "line": 3237,
+     "ident": "delete_trivially_dead_insns"
+    },
+    {
+     "file": "cse.cc",
+     "line": 6793,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "cse.cc",
+     "line": 6875,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 3242,
+     "ident": "CLEANUP_THREADING"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 486,
+     "ident": "CLEANUP_THREADING"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 324,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3069,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3075,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_jump_after_combine",
+   "class": "refuses",
+   "reason": "execute is cleanup_cfg (CLEANUP_THREADING) only (3290); jump threading refuses a block that holds an insn with side effects (cfgcleanup.cc:324), and side_effects_p is true for UNSPEC_VOLATILE and a volatile MEM (rtlanal.cc:3069, 3075)",
+   "files": {
+    "cfgcleanup.cc": "1a44800de9cfc473a07de54c56fc65931798f36b93c002160218ba0870ec6e98",
+    "rtlanal.cc": "2029aeaa389a3b25e979528e4b6c6328bf7612c26fc05ddb4504d543b1f02de4"
+   },
+   "cites": [
+    {
+     "file": "cfgcleanup.cc",
+     "line": 3290,
+     "ident": "CLEANUP_THREADING"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 486,
+     "ident": "CLEANUP_THREADING"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 324,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3069,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3075,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_jump2",
+   "class": "preserves",
+   "reason": "execute is cleanup_cfg (CLEANUP_CROSSJUMP) under flag_crossjumping (3327). Cross-jumping merges the identical tails of two blocks only when old_insns_match_p finds the insns equal: whole PATTERNs equal under rtx_equal_p (cfgcleanup.cc:1272), so an ldar/stlr (unspec_volatile) merges only with an identical insn; the merged tail is one copy executed once on each path, in the same order, and merge_memattrs makes both MEMs volatile if either was (907)",
+   "files": {
+    "cfgcleanup.cc": "1a44800de9cfc473a07de54c56fc65931798f36b93c002160218ba0870ec6e98"
+   },
+   "cites": [
+    {
+     "file": "cfgcleanup.cc",
+     "line": 3327,
+     "ident": "CLEANUP_CROSSJUMP"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 1272,
+     "ident": "rtx_equal_p"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 907,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_rtl_move_loop_invariants",
+   "class": "refuses",
+   "reason": "move_loop_invariants moves only insns that check_maybe_invariant accepts: an UNSPEC_VOLATILE is not invariant (loop-invariant.cc:215), a MEM is invariant only when read-only and not volatile (228; every other MEM returns false), a volatile asm is refused (235)",
+   "files": {
+    "loop-init.cc": "516ee34c099914578262999e288933234b8fe119a5df35a3079a58c7125f151e",
+    "loop-invariant.cc": "46eb7bbdb9493f45794d78839cd1e2b86fdb8e7922010679572641cd04483422"
+   },
+   "cites": [
+    {
+     "file": "loop-init.cc",
+     "line": 526,
+     "ident": "flag_move_loop_invariants"
+    },
+    {
+     "file": "loop-invariant.cc",
+     "line": 215,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "loop-invariant.cc",
+     "line": 228,
+     "ident": "MEM_READONLY_P"
+    },
+    {
+     "file": "loop-invariant.cc",
+     "line": 235,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_ud_rtl_dce",
+   "class": "refuses",
+   "reason": "dead-code elimination deletes an insn only if deletable_insn_p allows it: deletable_insn_p_1 returns !volatile_refs_p (body) (dce.cc:86), and volatile_refs_p is true for UNSPEC_VOLATILE (rtlanal.cc:2997) and a volatile MEM (3003); an UNSPEC body is never deleted (82)",
+   "files": {
+    "dce.cc": "68a6052ac292f50cd504948900a761c3c36af95b6572e8564365c4d5f17550b8",
+    "rtlanal.cc": "2029aeaa389a3b25e979528e4b6c6328bf7612c26fc05ddb4504d543b1f02de4"
+   },
+   "cites": [
+    {
+     "file": "dce.cc",
+     "line": 86,
+     "ident": "volatile_refs_p"
+    },
+    {
+     "file": "dce.cc",
+     "line": 82,
+     "ident": "UNSPEC"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 2997,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3003,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_fast_rtl_dce",
+   "class": "refuses",
+   "reason": "dead-code elimination deletes an insn only if deletable_insn_p allows it: deletable_insn_p_1 returns !volatile_refs_p (body) (dce.cc:86), and volatile_refs_p is true for UNSPEC_VOLATILE (rtlanal.cc:2997) and a volatile MEM (3003); an UNSPEC body is never deleted (82)",
+   "files": {
+    "dce.cc": "68a6052ac292f50cd504948900a761c3c36af95b6572e8564365c4d5f17550b8",
+    "rtlanal.cc": "2029aeaa389a3b25e979528e4b6c6328bf7612c26fc05ddb4504d543b1f02de4"
+   },
+   "cites": [
+    {
+     "file": "dce.cc",
+     "line": 86,
+     "ident": "volatile_refs_p"
+    },
+    {
+     "file": "dce.cc",
+     "line": 82,
+     "ident": "UNSPEC"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 2997,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3003,
+     "ident": "MEM_VOLATILE_P"
     }
    ]
   }
