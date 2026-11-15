@@ -837,3 +837,8 @@ Paused: w3b, w4, farm; no other work.
     - gates.d/sm_link.json and gate_sm_link.py added.
     - Rejected: case 2 (translator declared_pairs, branch w5-pair 5da4de284). d3d9 never calls the translator. The single source stays smscan nx_sm_pairs.
     - Re-run pending with smscan@host and pair@host.
+- 13:30Z w5 sm_link on smscan@host and pair@host (w6-root 644d66b36; shaders b545961f)
+    - 1,809 shaders, 120,392 programs, all linked; 0 disagreements.
+    - The program set is identical to the previous run.
+    - FINDING (red): PS e92b2db2…40cc is rejected by nx_sm_check with SRC_REG; the translator and Mesa accept it. That is 64/115,776 stage cells.
+    - w6 (doing): decide it by the msdocs page and the Wine 9.0 parser; fix the class in the res_smgen table rows.
