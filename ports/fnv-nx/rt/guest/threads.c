@@ -19,6 +19,7 @@
 #include <sys/lock.h>
 
 #include "fnvnx/guest.h"
+#include "fnvnx/cite.h"
 #include "fnvnx/hostapi.h"
 #include "fnvnx/placement.h"
 
@@ -132,8 +133,9 @@ void fnvnx_thread_exit(void *ret) {
     _reclaim_reent(&t_reent);
     __atomic_store_n(&t->done, 1, __ATOMIC_RELEASE);
     fnvnx_hcall0(fnvnx_host->thread_exit);
-    for (;;) {}   /* the host's thread_exit does not return */
+    __builtin_unreachable();   /* the host's thread_exit does not return (hostapi.h) */
 }
+FNVNX_CITE(fnvnx_thread_exit, "dm:10");
 void fnvnx_yield(void) { fnvnx_hcall0(fnvnx_host->thread_yield); }
 /* libsysbase's weak sched_yield returns ENOSYS; std::this_thread::yield and spin loops need a real one. */
 int sched_yield(void) { fnvnx_yield(); return 0; }
