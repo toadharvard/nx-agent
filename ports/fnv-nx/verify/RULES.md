@@ -1,7 +1,7 @@
 # Rules referenced by the gates
 
 The ids that gate code and docstrings cite (`N1`, `R5`, `K16`, ...). Source: the plan of record MASTER_PLAN4 (private
-plan repository; section 1 "Rules (with proof and assumptions)"; the registry of assumptions is ASSUMPTIONS.json: ASM-001 to ASM-009 accepted, the others to be removed) and, for K16/K2, MASTER_PLAN2. The statements are
+plan repository; section 1 "Rules (with proof and assumptions)"; the registry of assumptions is ASSUMPTIONS.json: ASM-001 to ASM-009 and ASM-055 accepted, the others to be removed) and, for K16/K2, MASTER_PLAN2. The statements are
 carried over in our own words; no fact about the exe is stored here. Verdict and gate list: `VERDICT.md`.
 Principle (MASTER_PLAN4): the solver must be sound and static; incompleteness costs speed, never correctness.
 Whatever is not proved gets the lifted body. Fuzzing, boots and farms only verify a rule.
@@ -146,10 +146,21 @@ Assumptions: A7 (the ARMv8 model matches the A57), A10 (the lifter keeps the exe
 the source's accesses in GCC's order, so at a race site it gives the source's behaviour under SC, not necessarily the exe's).
 
 ## R14 ASSUMPTIONS (gate `assumptions`, VERDICT.md class 18)
-An assumption that a proof rests on is in `ASSUMPTIONS.json` with an id (ASM-NNN, for example ASM-001 for the compiler) and a status. OWNER: the owner accepted it in `CLAUDE.md` (the nine of the owner's list, ASM-001 to ASM-009). REMOVE: a gate, a fact or a planned work removes it, and one lead owns the work. Argument: a statement that rests on an assumption names its id; an id has exactly one entry; an OWNER entry exists only with the owner's words; so the set of assumptions is the set of entries, and nothing is assumed that the registry does not show. Assumption: none beyond the nine (ASM-001 to ASM-009); an assumption written without the words of the pattern is closed by review, not by the gate.
+An assumption that a proof rests on is in `ASSUMPTIONS.json` with an id (ASM-NNN, for example ASM-001 for the compiler) and a status. OWNER: the owner accepted it in `CLAUDE.md` (the ten of the owner's list, ASM-001 to ASM-009 and ASM-055). REMOVE: a gate, a fact or a planned work removes it, and one lead owns the work. Argument: a statement that rests on an assumption names its id; an id has exactly one entry; an OWNER entry exists only with the owner's words; so the set of assumptions is the set of entries, and nothing is assumed that the registry does not show. Assumption: none beyond the ten (ASM-001 to ASM-009 and ASM-055); an assumption written without the words of the pattern is closed by review, not by the gate.
 
 ## Host API header holds only what the product calls
 
 For every admitted product root that includes fnvnx/hostapi.h: services declared (numbers of `FNVNX_PLAT_*`) = services expanded by at least one
 unit (gate `hostapi`, TOOLS.md). Module ids (`FNVNX_EXT_*`) are not services; machine models below the product boundary are modules. A service
 with no caller is deleted, never kept as a number answering a placeholder.
+
+## T1 NO-DOUBLES
+
+A test binary of a product root is linked from the root's whole product unit set plus its own units (same script and flags), and defines no
+symbol that any product root defines: `symbols(test objects) INTERSECT symbols(all product objects) = EMPTY` (global, weak and unique;
+no allow-list). Every source of a root is a product unit or a unit of exactly one declared test, so an undeclared test source is product code and
+meets the second half of the rule: no GLOBAL symbol is defined by two product objects of one root.
+Proof argument: a double of a product body, fake, mock or recording stand-in is, at the object level, a second definition of that name; the
+intersection is empty iff no test replaces a product symbol. Failure injection is an input of the shared boot machine, never a replaced function.
+Depends only on the accepted OWNER item 1 (the compiler is correct).
+Gate: `objstub` (`doubles.py`; fields `tests_total`, `tests_with_doubles`, `double_symbols`). Owner order of 2026-11-11 night (CLAUDE.md).

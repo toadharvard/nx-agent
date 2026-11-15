@@ -248,6 +248,24 @@ class Progress:
         return names[-1] if names else None
 
 
+def read_section(path, name):
+    """ELF32 little-endian section headers -> [(addr, size)] of every allocated section called NAME (a name no section has: [])"""
+    with open(path, "rb") as f:
+        d = f.read()
+    if d[:4] != b"\x7fELF" or len(d) < 52 or d[4] != 1 or d[5] != 1:
+        raise ElfError(f"{path}: not a little-endian ELF32 file")
+    shoff, = struct.unpack_from("<I", d, 32)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", d, 46)
+    secs = [struct.unpack_from("<10I", d, shoff + i * shentsize) for i in range(shnum)]
+    stroff = secs[shstrndx][4]
+    out = []
+    for nm, _ty, flags, addr, _off, size, *_ in secs:
+        e = d.index(b"\0", stroff + nm)
+        if d[stroff + nm:e].decode("ascii") == name and flags & 2:   # SHF_ALLOC
+            out.append((addr, size))
+    return out
+
+
 def read_symtab(path):
     """ELF32 little-endian .symtab -> Symbols {name: value} (defined, named symbols). Rule: a GLOBAL/WEAK name at two values is
     an ElfError (the linker forbids it); a name defined only by STB_LOCAL symbols may repeat at several values (compiler clones

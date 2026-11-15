@@ -7,23 +7,111 @@
  },
  "flags": {
   "c": [
-   "-Werror=attributes"
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-DSTDMETHODCALLTYPE=",
+   "-DNDEBUG",
+   "-std=gnu99",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-DSUPPORT_PROFILE_ARB1=0",
+   "-DSUPPORT_PROFILE_ARB1_NV=0",
+   "-DSUPPORT_PROFILE_BYTECODE=0",
+   "-DSUPPORT_PROFILE_D3D=0",
+   "-DSUPPORT_PROFILE_GLSL=1",
+   "-DSUPPORT_PROFILE_GLSL120=0",
+   "-DSUPPORT_PROFILE_GLSLDK=1",
+   "-DSUPPORT_PROFILE_GLSLES=1",
+   "-DSUPPORT_PROFILE_GLSLES3=1",
+   "-DSUPPORT_PROFILE_GLSPIRV=0",
+   "-DSUPPORT_PROFILE_HLSL=0",
+   "-DSUPPORT_PROFILE_METAL=0",
+   "-DSUPPORT_PROFILE_SPIRV=0"
   ],
   "cxx": [
    "-Werror=attributes"
   ],
   "asm": []
  },
- "include": [],
+ "include": [
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/render/shaders/translator/gen",
+  "ports/fnv-nx/render/shaders/translator/include",
+  "/ext/mojoshader",
+  "/ext/mojoshader/profiles"
+ ],
  "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/shaders/total/gen_sm_rows.py",
+   "args": [
+    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
+    "/out/gen/fnvnx_sm_rows.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/shaders/total/sm_table.json"
+   ],
+   "outputs": [
+    "gen/fnvnx_sm_rows.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/total/translator_gen/gen_sources.py",
+   "args": [
+    "/ext/mojoshader",
+    "/out/gen/sources.txt"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/sources.txt"
+   ]
+  }
+ ],
+ "sources": "gen/sources.txt",
  "external": [
+  {
+   "name": "mojoshader",
+   "repo": "fnv-nx-build",
+   "ref": "tools/mojoshader-glsldk",
+   "commit": "6e7f17919b962b9a6c44a249f5b68b6611f127b9",
+   "tree_sha256": "af453ab90c1dc2a88616c43362af09c31f4f1e90d090851105b11d4ff5f5bb8a",
+   "at": "/ext/mojoshader"
+  },
   {
    "name": "gcc-msvcmodel",
    "repo": "fnv-nx-build",
    "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b4057704c0babd012e466cc89181132e02542289",
-   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
    "at": "/ext/gcc"
   }
- ]
+ ],
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi"
+  },
+  {
+   "name": "fnvnx_order"
+  },
+  {
+   "name": "fnvnx_sdd"
+  },
+  {
+   "name": "fnvnx_pi"
+  },
+  {
+   "name": "fnvnx_dispatch"
+  },
+  {
+   "name": "fnvnx_addr"
+  },
+  {
+   "name": "fnvnx_names"
+  },
+  {
+   "name": "fnvnx_layout"
+  }
+ ],
+ "link": null
 }

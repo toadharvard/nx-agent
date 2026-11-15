@@ -132,8 +132,8 @@ def _setup_root(doc, root, run, srcs):
     for f in ("null", "zero"):
         open(root + "/dev/" + f, "w").close()
         _bind_ro("/dev/" + f, root + "/dev/" + f, ro=False)
-    os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing)
-    _mount("tmpfs", root + "/dev/shm", "tmpfs", ro_flag, "mode=1777")
+    os.mkdir(root + "/dev/shm")   # private and empty in every run: POSIX semaphores and shared memory (multiprocessing). Writable even in a ro_root stage: it is not an output
+    _mount("tmpfs", root + "/dev/shm", "tmpfs", 0, "mode=1777")   # (nothing survives the run, so the "writes only /out" rule is unchanged), and a tool that forks workers needs its semaphores
     for f in ("urandom", "random"):   # a constant: entropy read from a device is a function of the sandbox version
         with open(root + "/dev/" + f, "wb") as g:
             for n in range(32768):

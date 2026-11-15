@@ -49,7 +49,7 @@ def run(d):
 
 
 def root(p, imports=None, entry=()):
-    r = {"path": T + "/" + p, "class": "tool", "gates": ["pure", "selftests"], "entry": [T + "/" + e for e in entry]}
+    r = {"path": T + "/" + p, "class": "tool", "entry": [T + "/" + e for e in entry]}
     if imports is not None:
         r["imports"] = [T + "/" + i for i in imports]
     return r
@@ -104,7 +104,7 @@ def main():
           rc2 == 0 and res2["universe"] == 1, (res2, err2))
     # entries: recipe generators
     rec = {T + "/prod/build.json": json.dumps({"generated": [{"tool": T + "/lift/gen/g.py"}]}), T + "/lift/gen/g.py": "import fnvlift\n"}
-    pr = {"path": T + "/prod", "class": "product", "gates": [], "recipe": T + "/prod/build.json"}
+    pr = {"path": T + "/prod", "class": "product", "recipe": T + "/prod/build.json"}
     d = tree(dict(rec, **lib), [root("lift/gen", ["lift/fnvlift"]), root("lift/fnvlift"), pr])
     rc, res, err = run(d)
     check("a generator tool of a recipe is an entry point: its closure is the universe", rc == 0 and res["universe"] == 2, (res, err))
@@ -124,12 +124,12 @@ def main():
     check("a clean tests/x.py imported by a stage is certified, a non-imported tests/y.py with a clock read is outside: green", rc == 0 and res["universe"] == 2, (res, err))
     # `entry` is required for a tool root
     adm = lambda rs, files=(): gate_admit.judge(list(files), {"format": "fnvnx-admit/1", "roots": rs}, ["pure", "selftests"], lambda p: True)
-    noent = {"path": T + "/x", "class": "tool", "gates": ["pure", "selftests"]}
+    noent = {"path": T + "/x", "class": "tool"}
     check("entry is required for a tool root", any("entry" in x for x in adm([noent])[1]) and adm([dict(noent, entry=[])])[1] == [], adm([noent]))
     check("an entry outside the root's trees or not .py is an error", adm([dict(noent, entry=[T + "/y/a.py"])])[1] != [] and adm([dict(noent, entry=[T + "/x/a.sh"])])[1] != [])
     # one root of two trees
     two = {T + "/contract/a.py": "import b\n", T + "/link/b.py": "import a\n"}
-    tr = {"path": T + "/contract", "trees": [T + "/contract", T + "/link"], "class": "tool", "gates": ["pure", "selftests"], "entry": [T + "/contract/a.py"]}
+    tr = {"path": T + "/contract", "trees": [T + "/contract", T + "/link"], "class": "tool", "entry": [T + "/contract/a.py"]}
     d = tree(two, [tr])
     rc, res, err = run(d)
     check("two trees of one root that import each other are green (one puregate run)", rc == 0 and res["universe"] == 2, (res, err))

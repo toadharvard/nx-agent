@@ -116,9 +116,8 @@ extern "C" void fnvnx_guest_platform_init(void) {
 
 /* ---- GPU backend: the product side of nxd3d_gpu_call (shim/include/fnvnx_render_hooks.h). The call is the host
  * extension call of module FNVNX_EXT_GPU with the guest address of the caller's argument words; the result is the
- * host's uint64_t unchanged. A host without the ext_call slot has no module: FNVNX_EXT_NO_MODULE, as the host's own
- * answer for an unregistered module. */
+ * host's uint64_t unchanged. A host without the GPU module answers FNVNX_EXT_NO_MODULE through ext_call's total result
+ * (hostapi.h: every function slot is filled). */
 uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t *args, uint32_t nargs) {
-    if (!FNVNX_HOST_HAS(ext_call)) return FNVNX_EXT_NO_MODULE;
     return FNVNX_HCALL4(ext_call, FNVNX_EXT_GPU, fn, FNVNX_ADDR(args), nargs);
 }

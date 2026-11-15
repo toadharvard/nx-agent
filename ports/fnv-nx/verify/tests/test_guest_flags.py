@@ -49,6 +49,8 @@ def main():
           and [f for f in recipe.SEMANTICS_FLAGS if f in want["native", "c"]] == want["native", "c"])
     r = subprocess.run([sys.executable, TOOL, "--lang", "rust"], capture_output=True, text=True)
     check("an unknown language is refused", r.returncode != 0)
+    r = subprocess.run([sys.executable, TOOL, "--lang", "c"], capture_output=True, text=True, env={k: v for k, v in os.environ.items() if k != "GATE_CACHE"})
+    check("no GATE_CACHE and no --cache: refused (no default directory)", r.returncode != 0 and "no cache" in r.stderr, r.stderr[-200:])
 
 
 if __name__ == "__main__":

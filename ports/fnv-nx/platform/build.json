@@ -393,6 +393,19 @@
    "outputs": [
     "win32/declared_os.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/declared/gen_export.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/declared/x86sys.json",
+    "/out/declared/x86sys.export.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/declared/x86sys.json"
+   ],
+   "outputs": [
+    "declared/x86sys.export.json"
+   ]
   }
  ],
  "os_layer": [],
@@ -428,8 +441,8 @@
    "name": "gcc-msvcmodel",
    "repo": "fnv-nx-build",
    "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b4057704c0babd012e466cc89181132e02542289",
-   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
    "at": "/ext/gcc"
   },
   {
@@ -560,5 +573,14 @@
     "asm": []
    }
   }
+ },
+ "external_errors": {
+  "freetype": {
+   "type": "FT_Error",
+   "success": 0
+  }
+ },
+ "outputs": {
+  "X86SYS": "declared/x86sys.export.json"
  }
 }

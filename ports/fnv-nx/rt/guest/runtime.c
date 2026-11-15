@@ -211,9 +211,9 @@ int __syscall_clock_settime(clockid_t clock_id, const struct timespec *tp) {
 static int api_ok(const FnvnxHostApi *a, uintptr_t base) {
     if (a->magic != FNVNX_HOSTAPI_MAGIC || a->version != FNVNX_HOSTAPI_VERSION || a->size < sizeof(*a)) return 0;
     if (a->guest_base != base) return 0;
-    const uint64_t *slot = &a->guest_base, *end = (const uint64_t *)(a + 1);
-    for (; slot < end; slot++)
-        if (*slot >> 32) return 0; /* a 32-bit address space keeps every address below 4 GiB */
+    /* The non-slot fields, by name: the guest image and the heap window lie inside the 32-bit address space (the function slots are
+     * non-null host addresses by the host contract, hostapi.h, and are not read here). */
+    if (a->guest_base + a->guest_size > ((uint64_t)1 << 32)) return 0;
     /* The heap window is part of the contract (hostapi.h heap_base/heap_size): non-empty, inside the 32-bit address space, and disjoint
      * from the guest image [guest_base, guest_base + guest_size).  A table that breaks it is an invalid table: GUEST_ERR_API. */
     if (a->heap_size == 0 || a->heap_base + a->heap_size > ((uint64_t)1 << 32)) return 0;

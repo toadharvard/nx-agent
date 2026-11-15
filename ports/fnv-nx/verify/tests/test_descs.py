@@ -19,7 +19,7 @@ REC_SRC = os.path.join(VERIFY, "..", "lift", "descs", "build.json")
 D = T + "lift/descs"
 PA, PB, PC = T + "pa", T + "pb", T + "pc"
 ASM = '.section .fnvnx.disp,"a",%%progbits\n.ascii "%s"\n'
-USE = ("import os, sys\nos.makedirs('/out/gen', exist_ok=True)\nt = open('/uses/%s/descs' % sys.argv[1]).read()\n"
+USE = ("import os, sys\nt = open('/uses/%s/descs' % sys.argv[1]).read()\n"
        "open('/out/gen/used.c', 'w').write('const char descs_text[] = \"' + t.replace('\\n', '\\\\n') + '\";\\n')\n")
 
 

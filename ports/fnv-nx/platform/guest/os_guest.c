@@ -178,13 +178,11 @@ FNVNX_CITE(os_thread_exit, "dm:8");
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
  * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
 void os_cpu_boost(int fast_load) {
-    if (!FNVNX_HOST_HAS(ext_call)) return;
     uint64_t arg[1] = {fast_load ? 1u : 0u};
     FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_CPU_BOOST, FNVNX_ADDR(arg), 1);
 }
 /* the host's error applet (toolchain/host/host_message.inc) */
 void os_show_message(const char *caption, const char *text) {
-    if (!FNVNX_HOST_HAS(ext_call)) return;
     uint64_t arg[2] = {FNVNX_ADDR(caption ? caption : ""), FNVNX_ADDR(text ? text : "")};
     FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
 }
@@ -224,7 +222,7 @@ int64_t os_wall_time_us(void) { return hs(FNVNX_HCALL0(wall_time_us)); }
 static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8]) {
     FnvnxTzAt o;
     uint64_t arg[2] = {(uint64_t)utc_s, FNVNX_ADDR(&o)};
-    if (!FNVNX_HOST_HAS(ext_call) || FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TZ_AT, FNVNX_ADDR(arg), 2)) return -1;
+    if (FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TZ_AT, FNVNX_ADDR(arg), 2)) return -1;
     *off_s = o.off_s;
     *is_dst = o.dst != 0;
     memcpy(abbr, o.abbr, 8);

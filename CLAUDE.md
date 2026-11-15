@@ -3,6 +3,8 @@
 These instructions come from the owner of this repository. They apply to every Claude session and subagent that
 works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render machine and farms.
 
+**Map of the project:** `ports/fnv-nx/docs/ORCHESTRATION.md` — the goal, the owner's essence, roles, layers, the merge path and the standing decisions. Re-read it and this file after every compaction.
+
 ## The orchestrator speaks for the owner
 
 > Handoff of 2026-11-11: the work moved to another account. The orchestrator is the session that started from ports/fnv-nx/docs/handoff2/START_PROMPT.md, and its full context is ports/fnv-nx/docs/HANDOFF2.md. Session ids from earlier notes are dead.
@@ -137,6 +139,18 @@ The owner's words: "Транк никогда красный. Всегда зе�
     over that declared file set, a sound superset. That is why d3dx9_31.dll (OCT2006 cab, loaded by d3dx9_38 at 0x56b708)
     joins the set as a may-load image, 6 -> 7, pinned by exepin and lifted like d3dx9_38. A name outside the declared
     file set gets NULL / ERROR_MOD_NOT_FOUND (126), as Windows and Wine 9.0 return it.
+  - **The declared CPU (orchestrator decision, 2026-11-14).**
+    - Features: cpuid is the reference host's answer (lift/rt/cpumodel.c, CPUREF), restricted to the feature set
+      whose every instruction is lifted. That is MMX, SSE and SSE2; SSE3 and up, 3DNow and AVX are clear.
+    - An instruction of a cleared feature is #UD, as on a real CPU with that feature set. This is read from CPUREF,
+      not from a list.
+    - Every #UD shape site must be certified unreachable on the declared machine: dominated by the exe's own cpuid
+      test whose declared answer excludes it, with a call-graph certificate. If a site is not certified, the build is
+      red; the feature is then lifted or the site is reported.
+    - Processors: one count holds for the whole declared machine, 3. These are the console cores an application
+      gets, one thread each. cpuid leaf 1 EBX/HTT and leaf 4 (L3a), GetSystemInfo, GetLogicalProcessorInformation and
+      the affinity masks 0b111 (L5), and the emulator's core count (L4) all report it. Guest threads run in parallel
+      on these cores.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -179,13 +193,13 @@ The owner's words: "Транк никогда красный. Всегда зе�
 The owner's words: "Я буквально сказал, что я использую только конкретный компилятор... Мы нахуя инструменты подготавливали? Чтобы потом просто игнорить?"
 
 - **Compiler:** only the one pinned in `verify/env.json` (g++-13-aarch64-linux-gnu 13.3.0-6ubuntu2~24.04.1cross1, binutils 2.42-4ubuntu2.10), installed by `farm/setup_verdict_env.sh` and checked by `envcheck.py`. No unpinned apt, no other gcc.
-- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, and MSVC's new[] cookie and delete[] size. The headers and binutils come from the pinned distribution cross packages in `env.json`.
+- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model. That model is one table, DATAMODEL, derived from Microsoft's documentation with a test per row: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, signed `char`, 16-bit `wchar_t`, binary64 `long double`, MSVC's new[] cookie and delete[] size, and every other row of the table. **Target (orchestrator decision, 2026-11-15):** it is configured `--target=aarch64-none-elf --with-newlib` with the ILP32 multilib, because the guest is a Horizon process over newlib, not Linux. It is built in one build together with its target libraries (libgcc, crt, newlib from the pinned fnvnx-a64 devkit sources, GCC 13.3's own libstdc++), and the configure line is recorded. That one mirror is both the compiler of every guest root and the guest runtime. The headers are newlib's and its own. Binutils are the env.json 2.42 package when its ld has the aarch64elf32 emulations; otherwise binutils 2.42 are built from the pinned GNU sources in the same build.
   - It enters every guest product root as the recipe's external compiler (`{"external", "cc", "cxx"}`, RECIPE.md): a fnv-nx-build mirror `tools/gcc-ilp32-msvcmodel`, pinned by commit and `tree_sha256`.
   - Our GCC plugins are built against its own plugin headers, as hermetic recipe stages; each `.so` is a declared input, so it is in every key. They are `fnvnx_order` (x86 TSO and MSVC volatile become `ldar`/`stlr`; MSVC argument order), `fnvnx_ftoi` (MSVC `_ftol`), and L2's `addr`, `dispatch`, `names`, `sdd` and `pi` (plus the clang `vtnames`).
   - Native and decomp C++ load them all.
   - Lifted C++ is compiled by the same compiler; the lifter emits the memory ordering itself (R9 (б)).
   - The stock `g++-13` of `env.json` is the base the compiler is built from. It is not the game's compiler.
-  - The guest runtime is built by the game's own compiler: `tools/fnvnx-a64-msvcmodel13` (L5 w14, with a MANIFEST.json the recipe compares against the compiler before any unit runs). Its libstdc++ (headers and library) is GCC 13.3's own, the same version as the compiler. newlib and libnx come from the fnvnx-a64 devkit sources, rebuilt with msvcmodel. The gcc 15 libstdc++ headers of fnvnx-a64 are not used for guest code: they do not parse under gcc 13 (orchestrator decision, 2026-11-12).
+  - The guest runtime is built by the game's own compiler, in the same none-elf build (2026-11-15). Until that build lands, it is `tools/fnvnx-a64-msvcmodel13` (L5 w14, with a MANIFEST.json the recipe compares against the compiler before any unit runs). Its libstdc++ (headers and library) is GCC 13.3's own, the same version as the compiler. newlib and libnx come from the fnvnx-a64 devkit sources, rebuilt with msvcmodel. The gcc 15 libstdc++ headers of fnvnx-a64 are not used for guest code: they do not parse under gcc 13 (orchestrator decision, 2026-11-12).
 - **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
 - **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
 - **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
@@ -200,7 +214,7 @@ The owner's words: "Ты когда пишешь че-то агентом они
   orchestrator and pushed to the trunk and the integration branch. A message only points to it.
   - Every lead merges the trunk's `CLAUDE.md` into its branch when told, and re-reads this file after every compaction.
   - If an orchestrator message and this file disagree, this file wins; report the conflict.
-- **Assumptions: one registry, nine accepted.** The owner asked "Сколько допущений?", and no one could answer.
+- **Assumptions: one registry, ten accepted.** The owner asked "Сколько допущений?", and no one could answer.
   - Every assumption has an id in `verify/ASSUMPTIONS.json`. The `assumptions` gate makes the trunk red for:
     - an "Assumption"/"допущение" in code or docs without an id;
     - an id without a record;
@@ -216,6 +230,9 @@ The owner's words: "Ты когда пишешь че-то агентом они
     8. IEEE floating point;
     9. the pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3,
        the published proof of the x86-TSO to Arm memory mapping (owner decision, 2026-11-11).
+    10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers (owner decision, 2026-11-15: "Тогда согласен делай");
+        today the x87 machinery: TOP and stack indexing, tags, FSW C0-C3 and exception bits, FCW, the fcomi/fucomi EFLAGS,
+        fld/fst conversions. It is transcribed as a z3 spec with an SDM citation on every line, owner L3b; values stay IEEE (8).
   - Every other assumption is REMOVE. Its record names the fact or gate that removes it and the owner of that work.
     Examples: callee-saved registers, `ret n`, no PIC and complete code ranges are checked from the exe's code; kernel
     result codes come from the pinned libnx headers; guard zones are a fact of the loader's layout.
@@ -399,11 +416,12 @@ The owner's words: "делегируй остаток работы аккура�
     - L1 supplies the link stage (`link/guest.json`) and the onedef and link-root rules.
     - Undefined symbols get their owners from the closure:
       - `fnvnx_dispatch`: L3a's generated bridges;
-      - the process entry `main`: L5 `rt/guest`;
+      - the process entry `main`: L5's own root `rt/guest/main`, which only calls `fnvnx_loader_main()` (the L1 loader: map, imports, TLS, DllMain, TEB/stack, then `fnvnx_lift_enter(AddressOfEntryPoint)`). `fnvnx_lift_enter` (lift/rt) is the single bridge into lifted code, and there is no second entry path;
       - `fnvnx_import_key` / the IAT root: L1;
       - the pthread mutexes that libgcc's unwinder needs: L5, over its real threads.
-  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, main menu, first frame (GL in
-    the emulator). Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
+  - **Acceptance.** The L4 boot milestones extend past loader init: exe entry, WinMain, first frame (GL in the
+    emulator: the GL backend's first present). The menu gets an input-scenario rule after the first frame; no
+    certified fact names it by role. Each is an observable in the boot machine's trace, recorded with the instructions per frame of every
     thread.
   - **The boot machine's GL** comes from the recipe-built gl4 root, not from the prebuilt libnxgl4 @2f0427f5.
   - **One registry.** `render/ASSUMPTIONS.md` is merged into `verify/ASSUMPTIONS.json` or deleted.
@@ -431,3 +449,141 @@ The owner's words: "делегируй остаток работы аккура�
     every explicit target float→int builtin (vcvtq_s32_f32, vcvtq_u32_f32 and their family) lane-exact. In range it
     converts; out of range or NaN it gives x86 integer-indefinite (cvttps2dq semantics). Then fpexact certifies the
     NEON path and the switch is removed.
+
+## Owner order of 2026-11-15: parallel loops and deviations, after the first frame (binding)
+
+The owner's words: "Делаем, так как данные уже будут для анализа этого" and "Это не должно быть так, что мы просто решили
+исправить все баги. Это разрешено только если решает конкретную задачу, например, позволяет добиться большей
+производительности за счет улучшения корректности."
+
+- **Parallel-loop rule (speed, after the first frame).** A loop of the main thread runs its iterations on several cores
+  only when it is proven statically, by the one points-to/write-set model, that:
+  - the iterations write disjoint memory and read nothing another iteration writes;
+  - they touch no shared state (allocator, reference counts, shared lists), or that state is made thread-safe natively first;
+  - there is no floating-point reduction across iterations.
+
+  Execution is fork-join, so the result is bit-identical to the sequential loop. A loop that is not proven stays sequential.
+  Which loops to try comes from the per-function instructions-per-frame data; the proof decides.
+- **Deviations (`verify/DEVIATIONS.json`).** A change of the exe's behaviour is allowed only when it serves a stated
+  goal on the path (for example a speed rule), never as bug-fixing for its own sake. Each entry gives:
+  - the original behaviour and why it is undefined or a defect (a data race, a crash, an out-of-bounds access);
+  - the new behaviour;
+  - the proof that every behaviour of the new program is one the original program could already show on its defined
+    inputs. For example, adding synchronization to a race only removes interleavings;
+  - the goal it unlocks, such as a rule id or a PERFDEBT/speed item;
+  - its owner.
+
+  A deviation without a goal, or without that proof, is red.
+  - Example (owner): a worker thread writes UI state concurrently with the main thread. That is a race. Making the write
+    ordered through the main thread lets the worker run on its own core.
+
+## Owner order of 2026-11-15: defects impossible by construction (binding)
+
+The owner's words: "Надо закрыть те проблемы которые мы обсуждали на корню. Чтобы новых подобных просто не могло
+возникнуть."
+
+The defects of 2026-11-14/15 had one cause: a fact was enumerated from memory, copied, or reachable by a second path,
+instead of derived once from a complete source. Examples: `long double` missing from the data model; a linux-gnu target
+for a Horizon guest; data lifted as code; a test compiling with stock g++; a dead second ftoi plugin; numbers counted on
+a stale tree. The rules below make that class impossible. Adding checks on top of checks does not.
+
+1. **Derive, never enumerate.**
+   - Every set or table that defines behaviour or coverage is generated by a recipe stage from one complete, pinned
+     source, with the source cited per row. Examples: the data model, the ISA spec, the Win32 bodies, the shader set,
+     the image set, code ranges, thread kinds and gate universes.
+   - The source is one of: the exe and module bytes, the owner's gamedata, or a pinned edition of the vendor's
+     documentation (Microsoft, Intel, Arm, the Horizon/libnx headers).
+   - A set written by hand from memory is red, even when it is complete today.
+2. **One source of truth, everything else generated.**
+   - A fact lives in exactly one file.
+   - Whatever follows from it is produced by a recipe stage and is never written a second time. Examples: compiler flags
+     from DATAMODEL, the dispatcher from the facts, the bridges from the descriptors.
+   - A second copy of a fact is deleted, not gated.
+3. **One path, alternatives deleted.**
+   - There is no second compiler call, plugin, cache, build script or test runner.
+   - When one is found, it is deleted in the same commit that reports it. It is never kept behind a check.
+4. **Universes by one rule.** Every universe is defined by one rule over the tree or the exe, so a new item is inside
+   automatically. Examples: files, tests, functions, sites, threads. "Every test file by the naming rule" counts;
+   "these 12 tests" does not.
+5. **The declared target is one record each, and everything reads it.** These are:
+   - the guest platform (Horizon process over newlib, aarch64-none-elf, ILP32);
+   - the console CPU (Cortex-A57 feature set);
+   - the game's data model (DATAMODEL);
+   - the declared x86 CPU (CPUREF);
+   - the declared machine.
+
+   No root or tool restates any of them.
+6. **Numbers come only from a run at a commit.** A reported number is the output of a recipe or gate run, given with its
+   commit and command, read from the cached facts. It is never retold from memory or counted on another tree.
+7. **The trust chain ends at the OWNER registry.** A gate is ordinary code. Its lead checks it against its rule, and it is
+   tested against its references. No gate checks another gate, and below the OWNER entries nothing is checked.
+8. **A found defect closes its cause.**
+   - Every defect report names the enumeration, copy or second path that let it happen.
+   - The fix replaces that with a derivation, a generation or a deletion (rules 1-3).
+   - A fix of the single item alone is not accepted.
+
+## Orchestrator decision of 2026-11-15: memory ordering of runtime calls (binding for L1, L2)
+
+- The guest runtime (newlib, libstdc++, libgcc, libnx) is compiled by the game's compiler with every plugin. So a callee
+  whose body is C or C++ orders its own accesses, and a call to it is a plain call.
+  - There is no fenced call and no libcall or string-op record.
+  - Membership of a fold set never assigns a class.
+- newlib is built with `-DPREFER_SIZE_OVER_SPEED`, read from the one guest compiler record. With it, its aarch64 `.S`
+  string routines use their C sources.
+- The remaining assembly is derived from the built runtime objects: every object assembled from `.S` or `.s`. Each one
+  is closed by a stated class:
+  - it touches only jmp_buf and the frame (D1);
+  - it runs before threads;
+  - it is a kernel call;
+  - it is an atomic with its documented ordering.
+  An assembly object with a memory access outside these classes makes the runtime stage red. There is no allow-list.
+- The ordered C string loops switch off a fast path. They are `PD-RT-STRING-ORDERED` in `verify/PERFDEBT.json`
+  (owner L2), 0 at the first frame. The restoring rule gives each string routine a body whose ordering is proven equal
+  to the x86 semantics of the call in the source:
+  - where the exe's own CRT routine uses `rep movs`/`stos`, SDM §8.2.4 fast-string semantics (fenced at entry and
+    exit, unordered inside);
+  - elsewhere, ordering per x86 store, by size path.
+
+## Orchestrator decision of 2026-11-15: sources of the declared machine (binding for L3a, L3b, L5)
+
+- Every row of the declared-machine records (`platform/declared/os.json`, `x86sys.json`) takes its value from these
+  sources, in order:
+  1. Microsoft documentation and the WDK 7.1 headers for Windows 7;
+  2. Wine 9.0's code, only where it contradicts neither source 1 nor the declared OS version (Windows 7). For example,
+     vector 0x29 (`__fastfail`, Windows 8 and later) is not in the set.
+- No other source counts; ReactOS is not one. A row with no source stays undecided and names its blocker.
+- A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
+  to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
+- Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.
+
+## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
+
+- The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
+  on 2026-11-16 at night, five days early. The budget is at most about 11 % of the week per day until the reset.
+- Until the orchestrator lifts this:
+  - **Workers:** at most 2 per lead, and each runs only a path item that blocks the next step: first root, packs as roots,
+    ELF, boot.
+  - **Farms:** at most 4 per layer. Never rerun on unchanged content; a farm stops as soon as its queue is done.
+  - **Leads:**
+    - one message per finished item, no interim reports;
+    - no re-reading of large files already read;
+    - compact the context before 250k tokens;
+    - an idle lead with nothing on the path waits; it does not invent work.
+  - **Off the path:** no verifier, census, refactor or proof waits for nothing else. Everything that does not block one of
+    the four steps waits until after the first frame.
+
+## Orchestrator decision of 2026-11-15 09:45Z: message discipline (binding for every session)
+
+Measured (fleet study, 09:20Z): 87 % of the orchestrator's turns were started by messages from other sessions, and half
+of those turns did nothing. Each turn re-reads the whole context, 200-300k tokens. That is where the weekly limit goes.
+
+- Send a message only when the receiver must act on it now: a ruling it needs, a blocker, or a finished item it takes
+  over.
+  - No acknowledgements, no "resumed", no "kept N workers", no FYI, no progress reports.
+  - A reply that only says "accepted" is not sent.
+- Status lives only in `journal/status/<layer>.md`, pushed when an item is finished. The orchestrator reads the status
+  files in its hourly check. A status commit is not a message.
+- One message per finished item, carrying everything in it: the commit, the global numbers, what is next. A worker
+  reports to its lead once per item, not per step.
+- Send with `priority: "later"`, unless it unblocks the receiver now.
+- Farm prompts do not tell the farm to read CLAUDE.md: it is loaded automatically.
