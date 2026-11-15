@@ -85,6 +85,14 @@ def main():
     bad_rt = json.loads(json.dumps(sample))
     bad_rt["external"] = [x if x["name"] != rtp["name"] else dict(x, commit="e" * 40) for x in bad_rt["external"]]
     check("a recipe whose runtime external is not the pinned one is red", any("not the pinned runtime" in x for x in errs(gs, bad_rt)), errs(gs, bad_rt))
+    # --- link.libs of a guest root is the pin's runtime.libs exactly
+    pinlibs = dict(rtp["libs"], external=rtp["name"])
+    lk = {"output": "x.elf", "flags": [], "script": ROOT + "/x.ld"}
+    with_libs = dict(sample, link=dict(lk, libs=pinlibs))
+    check("link.libs equal to the pin's is accepted by the guest rule", recipe.guest_errors(with_libs, ROOT, recipe.load_admit(gs), recipe.load_pin(gs)) == [], "")
+    miss = dict(pinlibs, names=[n for n in pinlibs["names"] if n != "sysbase"])
+    check("link.libs without sysbase is red", any("link.libs" in x for x in recipe.guest_errors(dict(sample, link=dict(lk, libs=miss)), ROOT, recipe.load_admit(gs), recipe.load_pin(gs))), "")
+    check("a guest link without libs is not judged by the libs rule", not [x for x in recipe.guest_errors(dict(sample, link=lk), ROOT, recipe.load_admit(gs), recipe.load_pin(gs)) if "link.libs" in x], "")
     no_rt = json.loads(json.dumps(sample))
     no_rt["external"] = [x for x in no_rt["external"] if x["name"] != rtp["name"]]
     no_rt["include"] = []

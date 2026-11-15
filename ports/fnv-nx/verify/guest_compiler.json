@@ -74,6 +74,12 @@
     "ref": "tools/fnvnx-a64-msvcmodel",
     "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
     "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
-    "at": "/ext/a64"
+    "at": "/ext/a64",
+    "libs": {
+      "dirs": ["aarch64-none-elf/lib/ilp32/wchar16/schar/pic", "lib/gcc/aarch64-none-elf/13.3.0/ilp32/wchar16/schar/pic"],
+      "names": ["stdc++", "m", "c", "sysbase", "gcc"],
+      "startfiles": ["lib/gcc/aarch64-none-elf/13.3.0/ilp32/wchar16/schar/pic/crti.o", "lib/gcc/aarch64-none-elf/13.3.0/ilp32/wchar16/schar/pic/crtbegin.o"],
+      "endfiles": ["lib/gcc/aarch64-none-elf/13.3.0/ilp32/wchar16/schar/pic/crtend.o", "lib/gcc/aarch64-none-elf/13.3.0/ilp32/wchar16/schar/pic/crtn.o"]
+    }
   }
 }
