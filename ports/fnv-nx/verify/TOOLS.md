@@ -305,7 +305,7 @@ code that reaches the hive, and the implementation creates no key by itself (the
 ```text
 iat - the value the loader writes in every import slot of an image (L1 CONTRACT, loader contract with L3 and L5).
 
-    a library of rules, run by contract/modules.py (--out-dir iat.tsv, --c-out, --keys-c-out, --keys-tsv-out, --data-out); it has no command line
+    a library of rules, run by contract/modules.py (--out-dir iat.tsv, --c-out, --keys-c-out, --keys-tsv-out, --data-out, --keys-h-out); it has no command line
 
 Image code pointers are not rewritten and `call [slot]` is an ordinary indirect call, so a slot must hold a 32-bit
 value the dispatcher of the lifted code maps to an entry.  Rule, total over the image's import directory:
@@ -434,7 +434,7 @@ load_index order, loader/src/modules.c:273-278; empty for an image loaded on dem
 then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
 array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
 Loader tables (generated stages of loader/build.json over the pinned exe; no checked-in copy): `--c-out F` writes the module table (`fnvnx_modules`,
-`fnvnx_module_count`) and `--keys-c-out F` the import table (`fnvnx_import_rows`, `fnvnx_import_row_count`, `fnvnx_import_key_count`,
+`fnvnx_module_count`) and `--keys-h-out F` the key header (`FNVNX_KEY(dll, name)`: the import key of a function row as a compile-time constant; a name that is not a function row of the bridge table is a compile error), `--keys-c-out F` the import table (`fnvnx_import_rows`, `fnvnx_import_row_count`, `fnvnx_import_key_count`,
 `fnvnx_import_by_key_idx`: iat.c_source over the bridge rows and every import of the exe and of every image of the module order, computed in the
 same run, because the module set is data of the run and a generator stage declares its outputs by name). Without `--out-dir` only these files are
 written and a slot without a provider does not fail the stage: that is the finding of the `iat` gate, which needs the tables. `contract/mkidentity.py`

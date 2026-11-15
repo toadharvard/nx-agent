@@ -132,7 +132,9 @@
     "--c-out",
     "/out/gen/modules.c",
     "--keys-c-out",
-    "/out/gen/import_keys.c"
+    "/out/gen/import_keys.c",
+    "--keys-h-out",
+    "/out/gen/import_keys.h"
    ],
    "inputs": [
     {
@@ -142,7 +144,8 @@
    ],
    "outputs": [
     "gen/modules.c",
-    "gen/import_keys.c"
+    "gen/import_keys.c",
+    "gen/import_keys.h"
    ]
   },
   {

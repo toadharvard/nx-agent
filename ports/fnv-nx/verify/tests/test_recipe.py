@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import sys
 import tempfile
 import threading
@@ -661,7 +662,7 @@ def check_run(SS):
     ex = [{"path": HX, "class": "product", "target": "host", "gates": [], "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc", "gates": []}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
-        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["libc6"] + list(debs), "outputs": list(outs)}])
+        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["base-files", "libc6"] + list(debs), "outputs": list(outs)}])
 
     def mk(name, body=HX_C, data="5\n", **kw):
         return make_repo(name, rec=rec_(**kw), files={"hx/hx.c": body, "hx/build.json": json.dumps(hrec), "other/data.txt": data}, extra_roots=ex)
@@ -677,8 +678,29 @@ def check_run(SS):
     check("run stage: an artifact that names no link output of an admitted root is red at check", any("artifact" in e for e in recipe.check(rec_(art=HX + ":nope.exe"), ROOT, files, roots, None, good)))
     r1 = build(good, "1")
     txt1 = " ".join((r1.get("failure") or {}).get("stderr", []))
-    check("run stage: a PT_INTERP that no declared deb provides is red by rule, naming the path (hx.exe: the link rule's /lib/ld64.so.1 until w12h item 1 lands)",
-          r1["status"] == "green" or ("PT_INTERP" in txt1 and "no declared deb provides" in txt1), txt1)
+    check("run stage: the interpreter reached through base-files' /lib64 link runs (the run is green)", r1["status"] == "green", txt1)
+    nb = build(make_repo("rn-nb", rec=dict(rec_(), run=[dict(rec_()["run"][0], debs=["libc6"])]), files={"hx/hx.c": HX_C, "hx/build.json": json.dumps(hrec), "other/data.txt": "5\n"}, extra_roots=ex), "nb")
+    txtnb = " ".join((nb.get("failure") or {}).get("stderr", []))
+    check("run stage: with base-files absent the interpreter is not found: red, naming the path", nb["status"] != "green" and "PT_INTERP" in txtnb and "do not provide" in txtnb, txtnb)
+    with tempfile.TemporaryDirectory() as dt:
+        def put(d, path, to=None):
+            q = dt + "/deb-" + d + path
+            os.makedirs(os.path.dirname(q), exist_ok=True)
+            if to is None:
+                open(q, "w").write("x")
+            else:
+                os.symlink(to, q)
+        put("bf", "/lib64", "usr/lib64")
+        put("bf", "/lib", "usr/lib")
+        put("c6", "/usr/lib64/ld.so")
+        put("c6", "/usr/lib/x/l.so")
+        put("lp", "/a", "b"); put("lp", "/b", "a")
+        put("bf", "/abs", "../usr/lib64/ld.so")
+        check("deb_resolve: a path through a link shipped by one deb resolves to the file of another", recipe.deb_resolve("/lib64/ld.so", dt, ["bf", "c6"]) == ("c6", "/usr/lib64/ld.so"), recipe.deb_resolve("/lib64/ld.so", dt, ["bf", "c6"]))
+        check("deb_resolve: without the link's deb it is None", recipe.deb_resolve("/lib64/ld.so", dt, ["c6"]) is None)
+        check("deb_resolve: a relative link target with .. resolves", recipe.deb_resolve("/abs", dt, ["bf", "c6"]) == ("c6", "/usr/lib64/ld.so"))
+        check("deb_resolve: a link loop is None", recipe.deb_resolve("/a", dt, ["lp"]) is None)
+        check("deb_resolve: a directory is not a file", recipe.deb_resolve("/usr/lib", dt, ["bf", "c6"]) is None)
     cpu = {"vendor_id": None, "family": None, "model": None, "stepping": None, "microcode": None, "model_name": None}
     cur = {}
     for line in open("/proc/cpuinfo").read().splitlines():
@@ -705,8 +727,7 @@ def check_run(SS):
     check("variant ubsan: its own link.libs.system (an absolute path of the pinned libubsan1) is accepted", not recipe.check(vl(["/usr/lib/x86_64-linux-gnu/libubsan.so.1"]), HX, files, roots, None, good), recipe.check(vl(["/usr/lib/x86_64-linux-gnu/libubsan.so.1"]), HX, files, roots, None, good))
     check("variant ubsan: a relative link.libs.system path is red at check", any("link.libs.system" in e for e in recipe.check(vl(["libubsan.so.1"]), HX, files, roots, None, good)))
     if r1["status"] != "green":
-        check("run stage execution checks (13: green run, keys, red cases, stage ref, debs, host_cpu run): PT_INTERP of link kind exe not runnable: w12h item 1", False,
-              "hx.exe's PT_INTERP %s is provided by no declared deb" % (txt1[:200],))
+        check("run stage execution checks (13: green run, keys, red cases, stage ref, debs, host_cpu run): the toy exe's run is green", False, txt1[:300])
         return
     cache = BASE + "/rc"
     os.makedirs(cache + "/store", exist_ok=True)

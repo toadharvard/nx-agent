@@ -1567,12 +1567,12 @@ class Job:
         argv = ["/art/" + aout] + g["args"]
         interp = elf_interp(r["elf"]["path"])
         if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
-            home = [(d, interp) for d in g["debs"] if os.path.isfile(os.path.join(tmp, "deb-" + d + interp))]
+            home = deb_resolve(interp, tmp, g["debs"])
             if not home:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": [
-                    "%s has PT_INTERP %s: no declared deb provides that file" % (g["artifact"], interp)]})
+                    "%s has PT_INTERP %s: the declared debs %s do not provide that file (followed through the symlinks they ship)" % (g["artifact"], interp, sorted(g["debs"]))]})
             lp = [os.path.join("/deb", d, "lib", "x86_64-linux-gnu") for d in g["debs"]] + [os.path.join("/deb", d, "usr", "lib", "x86_64-linux-gnu") for d in g["debs"]]
-            argv = ["/deb/" + home[0][0] + home[0][1], "--library-path", ":".join(lp)] + argv
+            argv = ["/deb/" + home[0] + home[1], "--library-path", ":".join(lp)] + argv
         if g.get("host_cpu"):   # the reference host's identity is in the key; it must be this host unless the stage is a cache hit
             pin = json.load(open(os.path.join(self.repo, TREE, "verify", "cpuref.json")))
             env["FNVNX_HOST_CPU"] = json.dumps(pin, sort_keys=True)
@@ -2259,6 +2259,32 @@ def cpu_mismatch(pin, text=None):
                 bad.append("processor %d %s is %r, reference %r" % (i, name, have, want))
     return bad[:6] if procs else ["/proc/cpuinfo lists no processor"]
 
+
+def deb_resolve(path, tmp, debs, limit=40):
+    """(deb, real path) of the file the absolute PATH names in the root made by the union of the installed files of DEBS (<tmp>/deb-<name>/<path>,
+    from _deb_tree), following every symlink component the debs ship, such as base-files' /lib64 -> usr/lib64; None when a component is missing, a
+    link loop or the final path is not a file. The union is the stage's whole root: no alias and no hand list of usr-merged names is relied on."""
+    def find(p):
+        return [d for d in debs if os.path.lexists(os.path.join(tmp, "deb-" + d + p))]
+    parts, cur = [x for x in path.split("/") if x], "/"
+    for _ in range(limit * 8):
+        if not parts:
+            break
+        nxt = os.path.join(cur, parts[0])
+        link = [d for d in find(nxt) if os.path.islink(os.path.join(tmp, "deb-" + d + nxt))]
+        if link:
+            limit -= 1
+            if limit < 0:
+                return None
+            t = os.readlink(os.path.join(tmp, "deb-" + link[0] + nxt))
+            full = os.path.normpath(os.path.join(cur, t))
+            parts, cur = [x for x in full.split("/") if x] + parts[1:], "/"
+            continue
+        if not find(nxt):
+            return None
+        cur, parts = nxt, parts[1:]
+    home = [d for d in find(cur) if os.path.isfile(os.path.join(tmp, "deb-" + d + cur))]
+    return (home[0], cur) if home else None
 
 def elf_interp(path):
     """The PT_INTERP path of an ELF64 file, or None (read from the program headers)."""
