@@ -113,5 +113,60 @@ with tempfile.TemporaryDirectory() as td:
     check("a declared directory the generator does not write is red", rb["status"] == "red" and "never/" in json.dumps(rb["failure"]), rb.get("failure"))
     rb = build(make(td, "bad4", tool1=TOOL1 + 'open("/out/stray.txt", "w").write("s")\n'), td, "b4")
     check("a file outside the declared outputs and directories is red", rb["status"] == "red" and "unexpected" in json.dumps(rb["failure"]), rb.get("failure"))
+
+# two roots: A's generator writes a `dirs` output, B's generator reads it through `uses`
+B = T + "chainb"
+TOOLA = 'import os\nd = open("/in/%s/in.txt").read()\nos.makedirs("/out/pack/sub", exist_ok=True)\nopen("/out/pack/x.txt", "w").write("x" + d)\nopen("/out/pack/sub/y.txt", "w").write("y")\n' % R
+TOOLB = 'open("/out/b.txt", "w").write(open("/uses/%s/pack/x.txt").read() + open("/uses/%s/pack/sub/y.txt").read())\n' % (R, R)
+TOOLB_BAD = 'open("/out/b.txt", "w").write(open("/uses/%s/other.txt").read())\n' % R   # a tracked file of A that is not in A's output
+TOOLB_ABS = 'open("/out/b.txt", "w").write(open("%s").read())\n'
+
+
+def make2(td, name, in_txt="abc\n", noise="n\n", toolb=TOOLB):
+    repo = os.path.join(td, name)
+    os.makedirs(repo)
+    git(repo, "init", "-q")
+    w(repo, T + "t/a.py", TOOLA)
+    w(repo, T + "t/b.py", toolb)
+    w(repo, R + "/in.txt", in_txt)
+    w(repo, R + "/other.txt", "secret\n")
+    w(repo, R + "/noise.txt", noise)
+    w(repo, R + "/build.json", json.dumps({"format": "fnvnx-recipe/1", "generated": [
+        {"tool": T + "t/a.py", "args": [], "inputs": [R + "/in.txt", R + "/noise.txt"], "outputs": [], "dirs": ["pack"]}], "outputs": {"pack": "pack"}}, indent=1))
+    w(repo, B + "/build.json", json.dumps({"format": "fnvnx-recipe/1", "uses": [{"root": R, "output": "pack"}], "generated": [
+        {"tool": T + "t/b.py", "args": [], "inputs": [], "outputs": ["b.txt"]}], "outputs": {"b": "b.txt"}}, indent=1))
+    w(repo, "ports/fnv-nx/verify/env.json", open(os.path.join(VERIFY, "env.json")).read())
+    w(repo, "ports/fnv-nx/verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
+        {"path": R, "class": "product", "target": "host", "recipe": R + "/build.json"}, {"path": B, "class": "product", "target": "host", "recipe": B + "/build.json"},
+        {"path": T + "t", "class": "tool"}, {"path": T + "verify", "class": "tool"}]}))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "toy")
+    return repo
+
+
+def b_keys(repo, td, tag):
+    """(B's stage keys, B's produced b.txt or None, B's red stages): B built through the recipe machinery, A's output read through `uses`."""
+    j = recipe.Job(repo, B, os.path.join(td, "store"), 2, os.path.join(td, "store", "external"))
+    ws = tempfile.mkdtemp(prefix="gb-" + tag, dir=td)
+    recipe._copy(repo, [f for f in j.files if recipe.under(f, B)], B, os.path.join(ws, "root"))
+    j.externals(ws)
+    j.generate(ws)
+    p = os.path.join(ws, "root", "b.txt")
+    return j.keys, (open(p).read() if os.path.exists(p) else None), j.red
+
+
+with tempfile.TemporaryDirectory() as td:
+    k1, out1, red1 = b_keys(make2(td, "x1"), td, "1")
+    check("root B reads root A's directory output through `uses`", out1 == "xabc\ny" and not red1, (out1, red1))
+    k2, out2, _ = b_keys(make2(td, "x2", in_txt="abd\n"), td, "2")
+    check("a change in A's input re-keys B's stage", out2 == "xabd\ny" and len(k2 - k1) == 1, (out2, len(k2 - k1)))
+    k3, out3, _ = b_keys(make2(td, "x3", noise="other\n"), td, "3")
+    check("a change in A that leaves A's output equal leaves B's key (the key holds A's output content)", out3 == out1 and k3 == k1, (len(k3 - k1)))
+    k4, out4, red4 = b_keys(make2(td, "x4", toolb=TOOLB_BAD), td, "4")
+    check("a file of A outside A's output is not readable from B", out4 is None and red4, (out4, red4))
+    outside = os.path.join(td, "outside.txt")
+    open(outside, "w").write("host\n")
+    k5, out5, red5 = b_keys(make2(td, "x5", toolb=TOOLB_ABS % outside), td, "5")
+    check("an absolute host path is not readable from B", out5 is None and red5, (out5, red5))
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)

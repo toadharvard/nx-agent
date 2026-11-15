@@ -67,7 +67,7 @@ EXE = make_exe()
 IAT = [(0x402060, "KERNEL32.dll", "Foo", "key", 0x000F0010), (0x402064, "KERNEL32.dll", "Bar", "key", 0x000F0020)]
 MODS = [("m.dll", 0x10000000, 0x10010000)]
 # the contract's facts: modules.tsv (m.dll: static, load index 1, has TLS) and tls.tsv + tls/ (the exe row first, then m.dll's)
-MF = {"m.dll": {"pref": 0x10000000, "base": 0x10000000, "soi": 0x10000, "tls": True, "static": True, "idx": 0}}
+MF = {"m.dll": {"pref": 0x10000000, "base": 0x10000000, "soi": 0x10000, "tls": True, "static": True, "idx": 0, "dll": True}}
 DLLT = b"DLLT"
 TLS = [{"name": "FalloutNV.exe", "idx": None, "start": 0x402100, "end": 0x402108, "index_va": 0x4020E0, "cb_va": 0x4020F0, "rva": 0x2100, "size": 8, "zero": 8,
         "align_f": 3, "slot": 0, "align_bytes": 4, "sha": hashlib.sha256(b"TEMPLATE").hexdigest(), "callbacks": [0x1010], "bin": b"TEMPLATE"},
@@ -230,8 +230,9 @@ def main():
         P = lambda n: os.path.join(td, n)  # noqa: E731
         open(P("exe"), "wb").write(EXE)
         open(P("iat.tsv"), "w").write("".join("%08x\t%s\t%s\t%s\t%s\n" % (a, d_, n, k, "" if v is None else "%08x" % v) for a, d_, n, k, v in IAT))
-        open(P("modules.tsv"), "w").write("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n"
-                                          "m.dll\t%s\t100\t10000000\t10000000\t00010000\t1\t00001000\t1\t0\n" % ("0" * 64))
+        open(P("modules.tsv"), "w").write("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\tdll\n"
+                                          "m.dll\t%s\t100\t10000000\t10000000\t00010000\t1\t00001000\t1\t0\t1\n"
+                                          "falloutnv.exe\t%s\t100\t00400000\t00400000\t00010000\t%d\t00001000\t1\t\t0\n" % ("0" * 64, hashlib.sha256(EXE).hexdigest(), 1 if bs.parse_pe(EXE)["tls"][1] else 0))
         os.makedirs(P("tls"))
         open(P("tls/FalloutNV.exe.bin"), "wb").write(b"TEMPLATE")
         open(P("tls/m.dll.bin"), "wb").write(DLLT)

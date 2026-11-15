@@ -35,7 +35,7 @@ def objdump_count(spec, tool):
     with tempfile.TemporaryDirectory(prefix="sha-isa-") as d:
         store, ext = os.environ.get("GATE_CACHE", "/tmp/v12/cache"), None
         cmd = [sys.executable, "-I", os.path.join(V, "recipe.py"), "build", "--root", spec, "--store", os.path.join(store, "store"),
-               "--ext", os.path.join(store, "external"), "--out", d, "--jobs", "4"]
+               "--ext", os.path.join(store, "external"), "--out", d, "--jobs", "4", "--artifacts", os.environ["ARTIFACTS_URL"]]
         r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
         if r.returncode:
             return None, r.stdout + r.stderr
