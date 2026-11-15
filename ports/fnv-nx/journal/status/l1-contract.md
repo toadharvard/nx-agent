@@ -1299,3 +1299,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - declared_machine.tsv grammar ruling (w20 implements, w10 reruns on L5 16438f911):
   - kind `noreturn` is the T2 citation row, valid only with noreturn on the pinned or hostabi declaration (from PP);
   - `|`-joined sources are allowed when each token matches the grammar, sorted and unique.
+- w22 contract/facts root b3cc6f3b9 (base cand1):
+  - Result: valid; cold build 327 stages, warm 327 hits. native.tsv has 0 rows, byte-equal to the hand chain; bodysel 101590 rows, all lifted (no decomp root yet).
+  - Accepted with corrections:
+    - drop the build.json ftoi edits (covered by w24 pluginfix);
+    - delete the placeholder aliases.ld and make gate_data read link outputs only for linked roots;
+    - a private tmpfs per stage at /dev/shm;
+    - fix gate_contract's msvc/obj doubling (all 68719 functions "no MSVC object"), and explain why it was green.
