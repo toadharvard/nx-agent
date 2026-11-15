@@ -479,10 +479,14 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
     if cyc and any(d in cyc for d in [split_spec(x)[0] for x in deps]):
         err.append("link.roots: cycle %s" % " -> ".join(cyc))
     lb = lk.get("libs")
-    if isinstance(lb, dict) and set(lb) == {"system"}:
+    if isinstance(lb, dict) and "system" in lb and set(lb) <= {"system", "startfiles", "endfiles"}:
         sysl = lb["system"]
-        if not (isinstance(sysl, list) and sysl and all(isinstance(p, str) and p.startswith("/") and posixpath.normpath(p) == p for p in sysl)):
-            err.append("link.libs.system must be a non-empty list of absolute normalised paths of the shared libraries of env.json packages")
+        okp = lambda l: isinstance(l, list) and all(isinstance(p, str) and p.startswith("/") and posixpath.normpath(p) == p for p in l)  # noqa: E731
+        allp = [p for k in ("system", "startfiles", "endfiles") for p in lb.get(k, []) if isinstance(p, str)]
+        if not (isinstance(sysl, list) and sysl and all(okp(lb.get(k, [])) for k in ("system", "startfiles", "endfiles")) and okp(sysl)):
+            err.append("link.libs.system must be a non-empty list of absolute normalised paths of the shared libraries of env.json packages (startfiles, endfiles: the same form, the crt objects)")
+        elif len({posixpath.basename(p) for p in allp}) != len(allp):
+            err.append("link.libs: the files of system, startfiles and endfiles must have distinct names (they are mounted side by side)")
         elif kind == "pie":
             err.append("link.libs.system: a pie is the guest: its libraries are those of an external")
     elif "libs" in lk:
@@ -703,7 +707,7 @@ def check(rec, root, files, roots, pin=None, repo="."):
         err += link_errors(lk, root, mine, roots, names, repo)
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
-            if p not in files or not any(under(p, r) for r in roots)]
+            if p not in files or not any(under(p, t) for r, e in roots.items() for t in [r] + list(e.get("trees", [])))]
     err += guest_errors(rec, root, roots, pin)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err
@@ -763,6 +767,9 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
+    if ent.get("target") == "host" and ent.get("class") == "tool":   # a host tool (a binary the gates run, never the game's code): the distribution's compiler, no origin, no plugins
+        return err + (["admit.json %s: a host tool root declares no cxx_origin" % root] if origin is not None else []) + \
+            ["host tool root %s: plugins are for the game's code" % root for _ in loaded][:1]
     if origin == "native":
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
@@ -1350,19 +1357,24 @@ class Job:
             # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names
             yd = os.path.join(ws, "syslib")
             os.makedirs(yd)
-            for p in lb["system"]:
+            for p in lb["system"] + lb.get("startfiles", []) + lb.get("endfiles", []):
                 if not os.path.isfile(p):
                     raise BuildRed({"stage": "ld:" + self.root, "exit": None, "stderr": ["link.libs.system: %s is not a file of this machine (env.json packages)" % p]})
                 shutil.copyfile(os.path.realpath(p), os.path.join(yd, os.path.basename(p)))
             sysin = [{"at": "/syslib", "tree": cas.ingest(yd, self.store)}]
-            search, post = ["-L/syslib"], ["/syslib/" + os.path.basename(p) for p in lb["system"]]
+            pre = ["/syslib/" + os.path.basename(p) for p in lb.get("startfiles", [])]
+            search, post = ["-L/syslib"], ["/syslib/" + os.path.basename(p) for p in lb["system"] + lb.get("endfiles", [])]
         elif lb:
             at = self.ext[lb["external"]]["at"]
             pre, post = [at + "/" + p for p in lb["startfiles"]], [at + "/" + p for p in lb["endfiles"]]
             search, libs = ["-L" + at + "/" + d for d in lb["dirs"]], ["-l" + n for n in lb["names"]]
+        if lb and "system" in lb and kind == "exe":   # a host executable: the loader the driver itself names for this target (its link line), and the libraries' own needs found beside them
+            sysld = ["-dynamic-linker", host_dynamic_linker(self.hostpath(cc)), "-rpath-link", "/syslib"]
+        else:
+            sysld = []
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        argv = [ld] + LD_KIND[kind] + lk["flags"] + sc + vs + ["-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
+        argv = [ld] + LD_KIND[kind] + sysld + lk["flags"] + sc + vs + ["-o", "/out/" + output, "-Map=/out/" + output + ".map"] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root + (":" + tag if tag else ""), "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
@@ -1407,6 +1419,16 @@ class Job:
                + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])],
                "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
         return self.stage(doc)[1]["outputs"]["/out"]
+
+
+def host_dynamic_linker(driver):
+    """The program interpreter the DRIVER links a host executable with, read from the link line it prints for an empty C program (`-###`): the
+    one `-dynamic-linker` argument. No name is assumed; a driver that names none is an error."""
+    r = subprocess.run([driver, "-###", "-x", "c", "-o", "/dev/null", "/dev/null"], capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"))
+    m = re.findall(r'(?:^|\s)"?-dynamic-linker"? "?([^"\s]+)"?', r.stderr)
+    if len(set(m)) != 1:
+        raise BuildRed({"stage": "ld", "exit": r.returncode, "stderr": ["the driver %s names no single -dynamic-linker for a host executable" % driver]})
+    return m[0]
 
 
 def emulation_of(flags):

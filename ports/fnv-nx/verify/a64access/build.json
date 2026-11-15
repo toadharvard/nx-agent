@@ -1,0 +1,72 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "gcc-13",
+  "cxx": "g++-13"
+ },
+ "flags": {
+  "c": [],
+  "cxx": [
+   "-std=c++17",
+   "-O1",
+   "-fno-exceptions",
+   "-funwind-tables",
+   "-D_GNU_SOURCE",
+   "-D__STDC_CONSTANT_MACROS",
+   "-D__STDC_FORMAT_MACROS",
+   "-D__STDC_LIMIT_MACROS"
+  ],
+  "asm": []
+ },
+ "include": [
+  "/ext/llvm/include"
+ ],
+ "units": "all",
+ "link": {
+  "kind": "exe",
+  "output": "a64access.exe",
+  "flags": [
+   "-m",
+   "elf_x86_64"
+  ],
+  "libs": {
+   "startfiles": [
+    "/usr/lib/x86_64-linux-gnu/crt1.o",
+    "/usr/lib/x86_64-linux-gnu/crti.o",
+    "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o"
+   ],
+   "endfiles": [
+    "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o",
+    "/usr/lib/x86_64-linux-gnu/crtn.o"
+   ],
+   "system": [
+    "/usr/lib/x86_64-linux-gnu/libLLVM.so.18.1",
+    "/lib/x86_64-linux-gnu/libstdc++.so.6",
+    "/lib/x86_64-linux-gnu/libm.so.6",
+    "/lib/x86_64-linux-gnu/libgcc_s.so.1",
+    "/lib/x86_64-linux-gnu/libc.so.6",
+    "/lib/x86_64-linux-gnu/libffi.so.8",
+    "/lib/x86_64-linux-gnu/libedit.so.2",
+    "/lib/x86_64-linux-gnu/libz.so.1",
+    "/lib/x86_64-linux-gnu/libzstd.so.1",
+    "/lib/x86_64-linux-gnu/libtinfo.so.6",
+    "/lib/x86_64-linux-gnu/libxml2.so.2",
+    "/lib/x86_64-linux-gnu/libbsd.so.0",
+    "/lib/x86_64-linux-gnu/libicuuc.so.74",
+    "/lib/x86_64-linux-gnu/liblzma.so.5",
+    "/lib/x86_64-linux-gnu/libmd.so.0",
+    "/lib/x86_64-linux-gnu/libicudata.so.74"
+   ]
+  }
+ },
+ "external": [
+  {
+   "name": "llvm",
+   "repo": "fnv-nx-build",
+   "ref": "tools/llvm18-dev",
+   "commit": "2b9a441975b1497ee2bfe2aefc52d15ab5018c81",
+   "tree_sha256": "13f8d8bbe837342e872c4166ac10c41ac523c07d00154364629b4b2776484e00",
+   "at": "/ext/llvm"
+  }
+ ]
+}
