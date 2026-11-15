@@ -25,21 +25,27 @@ size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, siz
                          "  c.b = float(texelFetch(ramp, ivec2(i.b, 2), 0).r >> 8) / 255.0; }\n"
 #define NX_GL4SHIM_COLOUR(smp, fetch) NX_GL4SHIM_HEAD "layout(binding = 62) uniform " smp " s;\n" \
     "layout(location = 0) out vec4 o;\nvoid main() {\n" NX_GL4SHIM_TEX " vec4 c = " fetch ";\n" NX_GL4SHIM_GAMMA " o = c; }\n"
-#define NX_GL4SHIM_PROG_LIST(X) \
-    X(SCALE_C2D, NX_GL4SHIM_VS, NX_GL4SHIM_COLOUR("sampler2D", "texelFetch(s, t, 0)")) \
-    X(SCALE_CARR, NX_GL4SHIM_VS, NX_GL4SHIM_COLOUR("sampler2DArray", "texelFetch(s, ivec3(t, lz.y), 0)")) \
-    X(SCALE_C3D, NX_GL4SHIM_VS, NX_GL4SHIM_COLOUR("sampler3D", "texelFetch(s, ivec3(t, lz.y), 0)")) \
-    X(SCALE_DEPTH, NX_GL4SHIM_VS, NX_GL4SHIM_HEAD "layout(binding = 62) uniform sampler2D s;\n" \
+/* Row kinds. P(id, vs, fs): a linked program (both stages); S(id, VS|FS, text): one stage, made per stage because D3D9 pairs a fixed-function stage with a
+ * game stage. The FFP texts are generated (gen_glsl.py from the ffp directory) into gen/gl4shim_ffp.gen.h and exist only in the table's unit. */
+#define NX_GL4SHIM_PROG_LIST(P, S) \
+    P(SCALE_C2D, NX_GL4SHIM_VS, NX_GL4SHIM_COLOUR("sampler2D", "texelFetch(s, t, 0)")) \
+    P(SCALE_CARR, NX_GL4SHIM_VS, NX_GL4SHIM_COLOUR("sampler2DArray", "texelFetch(s, ivec3(t, lz.y), 0)")) \
+    P(SCALE_C3D, NX_GL4SHIM_VS, NX_GL4SHIM_COLOUR("sampler3D", "texelFetch(s, ivec3(t, lz.y), 0)")) \
+    P(SCALE_DEPTH, NX_GL4SHIM_VS, NX_GL4SHIM_HEAD "layout(binding = 62) uniform sampler2D s;\n" \
       "void main() {\n" NX_GL4SHIM_TEX " gl_FragDepth = texelFetch(s, t, 0).r; }\n") \
-    X(SCALE_STENCIL, NX_GL4SHIM_VS, NX_GL4SHIM_HEAD "layout(binding = 62) uniform usampler2D s;\n" \
-      "void main() {\n" NX_GL4SHIM_TEX " if (((texelFetch(s, t, 0).r >> uint(mode)) & 1u) == 0u) discard; }\n")
+    P(SCALE_STENCIL, NX_GL4SHIM_VS, NX_GL4SHIM_HEAD "layout(binding = 62) uniform usampler2D s;\n" \
+      "void main() {\n" NX_GL4SHIM_TEX " if (((texelFetch(s, t, 0).r >> uint(mode)) & 1u) == 0u) discard; }\n") \
+    S(FFP_VS_SMOOTH, VS, nx_gl4shim_ffp_vs_smooth) S(FFP_VS_FLAT, VS, nx_gl4shim_ffp_vs_flat) \
+    S(FFP_PS_SMOOTH, FS, nx_gl4shim_ffp_ps_smooth) S(FFP_PS_FLAT, FS, nx_gl4shim_ffp_ps_flat)
 enum nx_gl4shim_prog_id {
-#define NX_GL4SHIM_ENUM(id, vs, fs) NX_GL4SHIM_PROG_##id,
-    NX_GL4SHIM_PROG_LIST(NX_GL4SHIM_ENUM)
-#undef NX_GL4SHIM_ENUM
+#define NX_GL4SHIM_ENUM_P(id, vs, fs) NX_GL4SHIM_PROG_##id,
+#define NX_GL4SHIM_ENUM_S(id, st, text) NX_GL4SHIM_PROG_##id,
+    NX_GL4SHIM_PROG_LIST(NX_GL4SHIM_ENUM_P, NX_GL4SHIM_ENUM_S)
+#undef NX_GL4SHIM_ENUM_P
+#undef NX_GL4SHIM_ENUM_S
     NX_GL4SHIM_PROG_COUNT
 };
-struct nx_gl4shim_prog { const char* vs; const char* fs; };
+struct nx_gl4shim_prog { const char* vs; const char* fs; };   /* a stage row has the text of its stage only, the other is NULL */
 extern const struct nx_gl4shim_prog nx_gl4shim_progs[NX_GL4SHIM_PROG_COUNT];
 #ifdef __cplusplus
 }

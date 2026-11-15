@@ -30,7 +30,8 @@
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/render/d3d9/gen",
   "ports/fnv-nx/render/pair/include",
-  "ports/fnv-nx/render/smscan/include"
+  "ports/fnv-nx/render/smscan/include",
+  "ports/fnv-nx/render/gl4shim/include"
  ],
  "units": "all",
  "generated": [
@@ -94,16 +95,6 @@
     "gen/env_table.gen.h",
     "gen/ident_docked.bin",
     "gen/ident_handheld.bin"
-   ]
-  },
-  {
-   "tool": "ports/fnv-nx/render/d3d9/ffp/gen_glsl.py",
-   "args": [
-    "/out/gen"
-   ],
-   "inputs": [],
-   "outputs": [
-    "gen/ffp_glsl.gen.h"
    ]
   },
   {

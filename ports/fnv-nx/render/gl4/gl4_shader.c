@@ -1,6 +1,5 @@
 /* fnv-nx L6 GL 4.5 backend v4: shaders and programs. The GLSL rewrite for the driver is nxgl4_shim_glsl (render/gl4shim, nx_gl4shim.h). */
 #include "gl4.h"
-#include "fnvnx_sha256.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,12 +43,10 @@ uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage) {
 
 uint64_t gl4_api_shader_create(uint64_t a) {
     const NxShaderDesc* d = (const NxShaderDesc*)nxgl4_guest_ptr(a, sizeof *d);
-    if (!d || !d->glsl || !d->glsl_size) return 0;
-    const char* src = (const char*)nxgl4_guest_ptr(d->glsl, d->glsl_size);
-    if (!src) return 0;
-    uint8_t k[FNVNX_SHA256_DIGEST_SIZE]; fnvnx_sha256(src, d->glsl_size, k);
-    if (memcmp(k, d->key, sizeof k)) { gl4_err("shader_create: key is not the sha256 of the glsl"); return 0; }
-    return gl4_shader_from_glsl(src, d->glsl_size, d->stage);
+    if (!d) return 0;
+    const struct nx_gl4shim_prog* row = &nx_gl4shim_progs[(enum nx_gl4shim_prog_id)d->row];   /* the ids are a bounded enum; the one caller passes constants */
+    const char* text = d->stage == NxStage_Vertex ? row->vs : row->fs;
+    return gl4_shader_from_glsl(text, strlen(text), d->stage);
 }
 
 /* Programs are cached by (vs, ps). Destroying a shader deletes the programs built from it and bumps progEpoch: a
