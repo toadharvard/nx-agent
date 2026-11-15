@@ -1190,3 +1190,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w23r: accepted 0a60ecf (docstrings), rule E (local-clone bisimulation) and odr.by_class.
   - Measured on the 114 platform objects: 327 signatures, 187 multi-copy, 6 differ (std::string / vector<string>: real ODR by bytes), 0 undecidable (was 8).
   - Internal linkage is blocked on L2: a `linkage` field on .fnvnx.layout record rows was requested.
+
+### 2026-11-15 01:10 — heads to cand1
+- w6 b25ddaac7 accepted:
+  - the honest FAIL for the 13 run checks, pending w12h item 1;
+  - cpuref.json holds L3a's values with microcode null = absent;
+  - literal PT_INTERP lookup, with the alias list removed;
+  - a variant may replace `link`;
+  - libubsan1 and libgcc-13-dev are already pinned.
+- Open with w6: a dpkg-deb check of whether base-files or usrmerge ships /lib64 -> usr/lib64 as a deb member. Re-snapshot only if it does; otherwise the link side is ruled with w12.
+- w24 232a5d14e: the PD-STACK-REUSE text is amended. Accepted.
+- To w15 for cand1: w24 232a5d14e and w16c1-run b25ddaac7.
+- L2: linkage field on .fnvnx.layout rows, from w3 on claude/fnv-l2-source-w3-linkage, decided by GCC's own linkage predicates. It starts after the long double patch.
