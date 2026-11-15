@@ -13,7 +13,8 @@ section of the group (group order; relocation sections are not members, they bel
   * a section symbol (or local symbol) into a SHF_MERGE section            -> the merged entity read at offset + addend (the NUL
     terminated string for SHF_STRINGS, else entsize bytes): literals of one inline function are one entity wherever the object put them;
   * a section symbol (or local symbol) into any other section OUTSIDE the group -> the one GLOBAL or WEAK symbol defined in that
-    section at offset + addend (its name), a name being what the linker resolves; if no or several such symbols, the copy is
+    section at offset + addend (its name), a name being what the linker resolves; if there is none and exactly one sized local symbol is
+    defined there, the ENTITY it names (rule E, _entities: bisimulation, cycles identical); otherwise the copy is
     UNDECIDABLE: Identity.undecidable names (object, section, offset) and the copy is never passed.  The premise "a name is one body" is a FACT
     checked over the link by name_not_unique: every name used this way is defined once, or only inside identical copies of one group.
 The identity also holds the symbols the group DEFINES: every non-section symbol defined in a member section, as (name, or for a local symbol
@@ -49,7 +50,7 @@ class Obj:
             self.secs = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * shent) for i in range(shnum)]
             # (name_off, type, flags, addr, off, size, link, info, align, entsize)
             self.names = [self._cs(self.secs[shstr][4], s[0]) for s in self.secs] if shstr else [""] * shnum
-            self.syms, self.rels, self.defs = [], {}, {}
+            self.syms, self.rels, self.defs, self.ents = [], {}, {}, {}
             st = next((i for i, s in enumerate(self.secs) if s[1] == SHT_SYMTAB), None)
             if st is not None:
                 ss = self.secs[st]
@@ -60,6 +61,8 @@ class Obj:
                 for name, bind, typ, shn, val, size, oth in self.syms:
                     if bind in (STB_GLOBAL, STB_WEAK) and 0 < shn < SHN_ABS and name:
                         self.defs.setdefault((shn, val), set()).add(name)
+                    if typ != STT_SECTION and 0 < shn < SHN_ABS and size:
+                        self.ents.setdefault((shn, val), set()).add(size)
             for s in self.secs:
                 if s[1] == SHT_REL:
                     raise ValueError("SHT_REL relocations (implicit addends) are not supported")
@@ -90,7 +93,7 @@ def _signature(o, g):
     return o.names[shn] if typ == STT_SECTION else n
 
 
-def _target(o, rel_sec, rel, ordinal, undec, resolved):
+def _target(o, rel_sec, rel, ordinal, undec, resolved, ents):
     """Normalised target of relocation REL (offset, symbol index, type, addend) of member REL_SEC of a group whose members are ORDINAL."""
     off, si, ty, a = rel
     n, bind, typ, shn, val = o.syms[si][:5]
@@ -118,8 +121,48 @@ def _target(o, rel_sec, rel, ordinal, undec, resolved):
     if len(names) == 1:
         resolved.add(next(iter(names)))
         return ("sym", next(iter(names)), 0)
-    undec.append((o.names[shn], at, "%d global or weak symbols are defined there" % len(names)))
+    sizes = o.ents.get((shn, at), set())
+    if not names and len(sizes) == 1:                     # a local entity (a clone such as .isra, a static function): judged by bisimulation, see _entities
+        ref = (shn, at, next(iter(sizes)))
+        ents.add(ref)
+        return ("ent",) + ref
+    undec.append((o.names[shn], at, "%d global or weak symbols and %d sized local symbols are defined there" % (len(names), len(sizes))))
     return ("undecidable", o.names[shn], at)
+
+
+def _entities(o, refs, undec, resolved):
+    """Rule E (bisimulation).  The entities REFS (section, offset, size) a copy points to without a global name, and every entity they point to
+    in turn: each is (section header, bytes, relocations with the targets normalised as above), its own references being entities again.
+    Two entities are the same iff they are bisimilar: equal content and pairwise the same entities, a cycle assumed the same (the GREATEST
+    fixed point).  Computed by colour refinement of the reachable graph until the number of classes stops growing; the colours are
+    hashes, so they compare across objects.  Returns {ref: colour}.  Soundness: refinement from the one class converges to the coarsest stable
+    partition (at most one round per entity); that partition is the greatest bisimulation, and bisimilar graphs have the same quotient, hence the
+    same stop round and equal colours.  Two entities that are not bisimilar get different colours with the hash collision-free (SHA-256)."""
+    content, todo = {}, sorted(refs)
+    while todo:
+        ref = todo.pop()
+        if ref in content:
+            continue
+        shn, at, size = ref
+        sec = o.secs[shn]
+        sub = set()
+        rl = []
+        for off, si, ty, a in sorted(o.rels.get(shn, [])):
+            if at <= off < at + size:
+                rl.append((off - at, ty, _target(o, shn, (off, si, ty, a), {}, undec, resolved, sub)))
+        body = b"" if sec[1] == SHT_NOBITS else o.data[sec[4] + at:sec[4] + at + size]
+        content[ref] = ((o.names[shn], sec[1], sec[2], sec[8], size, hashlib.sha256(body).hexdigest()), tuple(rl))
+        todo.extend(sub)
+    h = lambda x: hashlib.sha256(repr(x).encode()).hexdigest()
+
+    def strip(rl, col):
+        return tuple((off, ty, (("ent", col[t[1:]]) if t[0] == "ent" else t)) for off, ty, t in rl)
+    col = {r: h(c[0]) for r, c in content.items()}
+    while True:
+        new = {r: h((c[0], strip(c[1], col))) for r, c in content.items()}
+        if len(set(new.values())) == len(set(col.values())):
+            return new
+        col = new
 
 
 def comdat_identity(o, g):
@@ -133,12 +176,15 @@ def comdat_identity(o, g):
     if len(set(mem)) != len(mem):
         raise ValueError("%s: group %d lists a member twice" % (o.path, g))
     ordinal = {m: k for k, m in enumerate(mem)}
-    members, undec, resolved = [], [], set()
+    members, undec, resolved, ents = [], [], set(), set()
     for m in mem:
         s = o.secs[m]
         body = b"" if s[1] == SHT_NOBITS else d[s[4]:s[4] + s[5]]
-        rl = [(off, ty, _target(o, m, (off, si, ty, a), ordinal, undec, resolved)) for off, si, ty, a in sorted(o.rels.get(m, []))]
+        rl = [(off, ty, _target(o, m, (off, si, ty, a), ordinal, undec, resolved, ents)) for off, si, ty, a in sorted(o.rels.get(m, []))]
         members.append((o.names[m], s[1], s[2], s[8], s[9], s[5], hashlib.sha256(body).hexdigest(), tuple(rl)))
+    if ents:
+        color = _entities(o, ents, undec, resolved)
+        members = [m[:7] + (tuple((off, ty, ("ent", color[t[1:]]) if t[0] == "ent" else t) for off, ty, t in m[7]),) for m in members]
     # the symbols the group defines (a symbol defined in a member section, STT_SECTION left out): a global or weak one by name, a local one by
     # its member ordinal; with member ordinal, value, size, type, binding and st_other (visibility). Equal bytes under other symbols are another definition.
     syms = sorted((n if bind != STB_LOCAL else "(local)", ordinal[shn], val, size, typ, bind, oth)
