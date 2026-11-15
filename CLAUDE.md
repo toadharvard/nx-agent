@@ -412,6 +412,7 @@ The owner's words: "делегируй остаток работы аккура�
     - **GL keeps its branch "the shader did not compile or link" (owner, 2026-11-15 20:20Z: "В бэкенде GL есть ветка
       «шейдер не собрался». Оставь.").** It is not converted to `fnvnx_reach_violation`, and no assumption about the GL
       library's GLSL compiler is added. The stub gate accepts this branch with this owner decision cited.
+      <!-- fnvnx-owner-decision: gl-shader-failure | class: GL shader compile/link failure | root: ports/fnv-nx/render/gl4 -->
     - The deko3d backend's link-failure branch becomes `fnvnx_reach_violation`, with the `sm_link` certificate as its fact.
     - The translator-totality proof over the SM 1-3 grammar (L6, 2026-11-15) waits until after the first frame. `sm_link`
       over the gamedata set stays the gate.
