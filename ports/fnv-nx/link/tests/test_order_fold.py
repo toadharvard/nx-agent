@@ -107,6 +107,19 @@ def main():
     rec = bytes.fromhex(flat).decode('latin1') if flat else ''
     if '_ZL3tbl\t0:32\n' not in rec:
         fails.append('.fnvnx.ro lacks the tbl ranges: %r' % rec)
+    # NO-MIX: no recorded frame range of a function overlaps another one (a private temporary keeps its own slot, never the slot of a shared object)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        subprocess.run(['aarch64-linux-gnu-objcopy', '--dump-section', '.fnvnx.frame=' + td + '/fr', obj, td + '/o'], check=True)
+        frtxt = open(td + '/fr', 'rb').read().decode('latin1')
+    for sym in ('_Z6nomix2iPK2Gd', '_Z6nomix3iPK2GdS1_'):
+        row = next((l for l in frtxt.split('\n') if l.startswith(sym + '\t')), None)
+        if row is None:
+            fails.append('no frame row for %s' % sym)
+            continue
+        rg = sorted((int(x.split(':')[0]), int(x.split(':')[1])) for x in row.split('\t')[1].split() if x[0] in '-0123456789')
+        if any(rg[i][0] + rg[i][1] > rg[i + 1][0] for i in range(len(rg) - 1)):
+            fails.append('%s: frame ranges overlap (a slot is shared): %s' % (sym, row))
     if fails:
         print('FAIL', *fails, sep='\n  ')
         return 1

@@ -179,7 +179,7 @@ def main():
         "#include <setjmp.h>\n"
         "void thrower();\n"
         "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
-        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[1]; }\n"
+        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[2]; }\n"
         "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }\n")
     crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
     rc_, _ = build(crepo, "C")

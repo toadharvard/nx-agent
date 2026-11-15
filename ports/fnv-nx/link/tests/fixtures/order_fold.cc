@@ -43,3 +43,10 @@ int ld_priv(const Big *s, int i) { Big l = *s; return l.v[i]; }
 // a folded memcmp of two shared GUID-like members reads parts of aggregates as BIT_FIELD_REF (platform dsound.cpp guid_eq)
 struct G { unsigned d1; unsigned short d2, d3; unsigned char d4[8]; };
 bool geq(const G &a, const G &b) { return a.d1 == b.d1 && a.d2 == b.d2 && !__builtin_memcmp(a.d4, b.d4, 8); }
+// NO-MIX: a scope-local shared object (its address leaves) dies, then a private copy (order's temporary of a by-value aggregate) is built:
+// GCC would give both one stack slot
+struct Gd { unsigned a; unsigned short b, c; unsigned char d[8]; };
+int esc_use2(Big *);
+int use3(Gd);
+int nomix2(int c, const Gd *s) { { Big e; e.v[0] = c; esc_use2(&e); } return use3(*s); }
+int nomix3(int c, const Gd *s, const Gd *t) { { Big e; e.v[0] = c; esc_use2(&e); } Gd l = *s; if (c) l = *t; return use3(l); }
