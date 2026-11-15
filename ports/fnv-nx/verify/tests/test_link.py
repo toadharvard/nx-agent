@@ -165,6 +165,14 @@ def main():
     check("link.libs: a library that is not there is a red ld:<root>", rl2["status"] == "red" and rl2["failure"]["stage"] == "ld:" + ROOT, err_text(rl2))
     rl3 = build(mk("libs-none", main_rec(), L), SS)
     check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] == "ld:" + ROOT, err_text(rl3))
+    L2 = {"toy/a.c": TR.HDR + '#include "toy.h"\nint lib_fn(void);\nextern char _GLOBAL_OFFSET_TABLE_[];\nint f_a(void) { return lib_fn() + TOY + (int)(long)_GLOBAL_OFFSET_TABLE_; }\n'}
+    rl4 = build(mk("libs-none-got", main_rec(), L2), SS)
+    fu4 = (rl4.get("failed_units") or [{}])[0]
+    check("the static undefined set omits a name the pinned ld defines itself (_GLOBAL_OFFSET_TABLE_, read from a reference link of an empty product), and keeps the owned one",
+          [u["symbol"] for u in fu4.get("undefined", [])] == ["lib_fn"], (fu4.get("undefined"), fu4.get("findings")))
+    fu = (rl3.get("failed_units") or [{}])[0]
+    check("a red link record carries the full static undefined set, each symbol with its referencing objects (never from ld's text)",
+          [u["symbol"] for u in fu.get("undefined", [])] == ["lib_fn"] and "a.c" in fu["undefined"][0]["referencers"][0], fu.get("undefined"))
 
 
     # (k) kinds: exe and shared host images (LP64), and the target of the link
