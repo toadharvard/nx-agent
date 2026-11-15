@@ -22,7 +22,27 @@
   "ports/fnv-nx/lib/sha256/include"
  ],
  "units": "all",
- "link": null,
+ "link": {
+  "output": "libnxgl4.so",
+  "kind": "shared",
+  "version_script": "libnxgl4.map",
+  "flags": [
+   "-m",
+   "elf_x86_64"
+  ],
+  "roots": [
+   "ports/fnv-nx/render/nxgpu",
+   "ports/fnv-nx/render/shaders/translator",
+   "ports/fnv-nx/lib/sha256"
+  ],
+  "libs": {
+   "system": [
+    "/usr/lib/x86_64-linux-gnu/libc.so.6",
+    "/usr/lib/x86_64-linux-gnu/libEGL.so.1"
+   ]
+  },
+  "loader": "ports/fnv-nx/verify/bootrt"
+ },
  "generated": [
   {
    "tool": "ports/fnv-nx/render/gl4/gen_funcs.py",
@@ -33,6 +53,19 @@
    "inputs": [],
    "outputs": [
     "gl4_funcs.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/gl4/gen_exports.py",
+   "args": [
+    "/out/libnxgl4.map",
+    "/in/ports/fnv-nx/render/gl4/gl4.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/gl4/gl4.h"
+   ],
+   "outputs": [
+    "libnxgl4.map"
    ]
   }
  ],
