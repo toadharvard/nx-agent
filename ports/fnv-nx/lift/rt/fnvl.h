@@ -10,13 +10,22 @@ typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]
 struct fv { u64 v; u32 e; u32 k; };
 struct fnvl_nframe;   /* rt/imp.h: one per live import entry of the thread (native frames between lifted frames) */
 #include "fnvl_abi.h"
-struct cpu { u32 r[8]; u32 fs; u32 ftop, fcw, fc; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm_unused[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; u32 eflags; u32 dr[6]; };   /* mxcsr (reset 0x1f80) is appended: SSE family (W6); mm_unused is the former separate MM register file, kept only so the offsets hold: mm0-7 ARE the significands of fx[0..7] (rt/fnvl_x87.h, MMX aliasing). r[] is only the save area of the
+struct cpu { u32 r[8]; u32 fs; u32 ftop, fcw, fc; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm_unused[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; u32 eflags; u32 dr[6]; u32 fsw, fop, fcs, fds; };   /* mxcsr (reset 0x1f80) is appended: SSE family (W6); mm_unused is the former separate MM register file, kept only so the offsets hold: mm0-7 ARE the significands of fx[0..7] (rt/fnvl_x87.h, MMX aliasing). r[] is only the save area of the
    entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README).
    x87 (W13): fx[8] are the PHYSICAL registers (carriers; k==0 is the empty tag), ftop the TOP, fcw the control word, fex the exception status bits that the host FPSR cannot
    hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). The pre-R8 double stack `st` and tag word `ftag` are deleted (nothing read them; the x87 state is fx/ftop/fcw/fex). eflags, fc (and dr, the debug registers Dr0 Dr1 Dr2 Dr3 Dr6 Dr7 of the CONTEXT):
    the state that a hardware-exception CONTEXT names and that is not a register of the lifted code: at every raise site the lifter flushes its flag and condition-bit locals into c->eflags / c->fc (RAISE_OUT)
    and reloads them after a continue (RAISE_IN); rt/seh.cc writes the CONTEXT from them and reads them back. */
 static_assert(__builtin_offsetof(struct cpu, ra) == FNVL_CPU_RA_OFF, "rt/fnvl_abi.h: FNVL_CPU_RA_OFF is the offset of struct cpu::ra");
+/* The layout of struct cpu is append-only: every field that existed before the x87 status words (fsw, fop, fcs, fds) keeps its offset (ILP32). */
+static_assert(__builtin_offsetof(struct cpu, fex) == 252 && __builtin_offsetof(struct cpu, fx) == 256 && __builtin_offsetof(struct cpu, eflx) == 384 && __builtin_offsetof(struct cpu, nf) == 388 &&
+              __builtin_offsetof(struct cpu, hfpcr) == 392 && __builtin_offsetof(struct cpu, sel) == 400 && __builtin_offsetof(struct cpu, teb) == 424 && __builtin_offsetof(struct cpu, fip) == 428 &&
+              __builtin_offsetof(struct cpu, fdp) == 432 && __builtin_offsetof(struct cpu, msvcrt) == 436 && __builtin_offsetof(struct cpu, eflags) == 460 && __builtin_offsetof(struct cpu, dr) == 464 &&
+              __builtin_offsetof(struct cpu, fsw) == 488 && __builtin_offsetof(struct cpu, fop) == 492 && __builtin_offsetof(struct cpu, fcs) == 496 && __builtin_offsetof(struct cpu, fds) == 500 && sizeof(struct cpu) == 504,
+              "struct cpu: earlier offsets hold; fsw fop fcs fds are appended");
+/* New x87 state (appended): fsw = the ES (bit 7) and B (bit 15) bits of the FSW, loaded verbatim by FRSTOR / FLDENV / a CONTEXT restore and cleared by FNINIT / FNCLEX; the FSW image the program or a CONTEXT sees is
+   TOP | C0..C3 | the sticky bits | (fsw | ES/B derived from the flags and FCW), where ES = B = ((flags & ~FCW & 0x3f) != 0) (SDM Vol 1 8.5: ES is set when an unmasked exception flag is set). fop (FOP, 11 bits), fcs (FCS),
+   fds (FDS) are the last-instruction opcode and the selectors, written by the same x87 entry as fip / fdp (fnvlift/f_x87.py ptrs) and loaded by FLDENV / FRSTOR / a CONTEXT restore. */
 /* FNVL_FLAGS_IO (test/instest.py): the arithmetic flags, DF and the x87 condition bits also travel in c->fl / c->fc.
    fl: the EFLAGS bit positions (CF 0, PF 2, AF 4, ZF 6, SF 7, DF 10, OF 11); fc: C0 bit 8, C2 bit 10, C3 bit 14. */
 #ifdef FNVL_FLAGS_IO
@@ -244,10 +253,11 @@ extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void
 /* The hardware-raise entries of the runtime (rt/seh.cc) are declared ONLY here, inside namespace fnvl_rt, and only FNVL_RAISE / FNVL_RAISE_AV below name them: a lifted unit that calls the raw
    fnvl_raise or fnvl_raise_av (no EFLAGS / C0 C2 C3 flush) does not find the name and is a compile error. They are the same C-linkage functions as the definitions in seh.cc. */
 namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_raise_av(u32 access, u32 addr, u32 at); } }
+#define FNVL_EFL_KEEP 0x244000u      /* the non-arithmetic EFLAGS bits a user-mode popfd can change and pushfd shows: NT (14), AC (18), ID (21) */
 /* EFLAGS image of pushfd: the arithmetic flags and DF of the lifted state, bit 1, IF (9) set, AC and ID from c->eflx, everything else 0.
    popfd loads CF PF AF ZF SF DF OF; AC and ID are kept in c->eflx; TF/IF/IOPL/NT/RF/VM/VIF/VIP changes are ignored (user mode cannot change them). */
-#define EFL_PUSH() ((u32)((cf&1)|2u|((pf&1)<<2)|((af&1)<<4)|((zf&1)<<6)|((sf&1)<<7)|0x200u|((df&1)<<10)|((of&1)<<11)|(c->eflx&0x240000u)))
-#define EFL_POP(v_) do{ u32 f_=(v_); cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c->eflx=f_&0x240000u; }while(0)
+#define EFL_PUSH() ((u32)((cf&1)|2u|((pf&1)<<2)|((af&1)<<4)|((zf&1)<<6)|((sf&1)<<7)|0x200u|((df&1)<<10)|((of&1)<<11)|(c->eflx&FNVL_EFL_KEEP)))
+#define EFL_POP(v_) do{ u32 f_=(v_); cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c->eflx=f_&FNVL_EFL_KEEP; }while(0)
 /* RAISE_OUT / RAISE_IN: the flush rule of every explicit raise site (the lifter emits only FNVL_RAISE / FNVL_RAISE_AV; the raw entries are not visible to a lifted unit).
    Everything the CONTEXT names that the lifted function keeps in locals goes to struct cpu before the call: EFLAGS (the pushfd image, EFL_PUSH) into c->eflags and the x87 condition bits
    C0 C2 C3 (FSW bits 8 10 14) into c->fc; the x87 stack and xmm state are flushed by the same sites (fnvlift f_x87_ctl.store, SYNC_X_OUT). After a continue the handler's EFLAGS and condition
