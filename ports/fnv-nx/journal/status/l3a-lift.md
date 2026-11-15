@@ -982,3 +982,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - pcsrc is unchanged now; it is a cold cost paid once per facts change.
     - w7 makes one commit in which every round's stderr streams to the stage and every non-zero exit prints its reason, finds the exe exit-1 cause, and makes no other change to the facts tools before the farms.
     - Then 3 facts farms (exe, d3dx9_31, d3dx9_38), one root each with --jobs 1, on 15 GB containers. The 5 small images stay with w7.
+- 22:16 w7 53583fa77: the silent red was the round process OOM-killed (status 247, SIGKILL) while running beside d3dx9_31, with its output held back. Now every failed round writes its output and the reason to stderr, and every exit carries a message. test_exit_messages is an AST rule over the generated-tool closure (14 files, 0 violations).
+  - Facts farms on 53583fa77, one root each with --jobs 1, publishing to fnv-nx-build l3a-lift/factsstore/53583fa77-<image>:
+    - exe: session_01KmtZKSCxbwkhbjPyVKontV (doing);
+    - d3dx9_31: session_01KmtZKSXJfEfpDazdv43Dkf (doing);
+    - d3dx9_38: session_01KmtZKTC7Y1r6PNDNnBLoET (doing).
+  - w7 builds the 5 small images, then store-merges and builds lift/facts (all hits). w13 rebases onto 53583fa77 and builds retn and fpfacts on the merged FACTS.
+- bottleneck: the facts farms (d3dx9_31 about 3 h); the nxgpu include (w8), then the liftsrc cold build.
