@@ -10,6 +10,10 @@ unitview.PLACEHOLDER, is its all-placeholder base placed once, bound read-only, 
 placeholder path: O(real files) mounts per stage, never a tree per view);
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
 stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; seccomp: getrandom -> ENOSYS (x32 ABI and foreign arch killed).
+Optional stage fields: "ro_root" (every write outside the outputs fails); "links" [{"at","to"}] (symlinks of the root layout, in the key: a link cannot be an
+input mount); "scratch" [paths] (a writable tmpfs per path, nothing survives, not an output, in the key); "unkeyed" {"env": {K: V}, "timeout": seconds}
+(NOT in the key: the job count and the time limit change how long a stage takes, not what it computes; a stage past its timeout is killed as a whole
+process group and the run raises SbxError naming the timeout). tests/test_sandbox.py case 13.
 Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open_channels":
   wall_clock           clock_gettime/time/statx show real time (vDSO). PR_SET_TSC=SIGSEGV + seccomp on the clock syscalls
                        was tried: dynamic date/python/gcc/make crash at startup (SIGSEGV), coarse clocks stay readable. Dropped.
@@ -65,14 +69,16 @@ def sandbox_id():
     return {n: cas._sha_file(os.path.join(HERE, n)) for n in ("sandbox.py", "cas.py")}
 
 def key_of(doc):
-    return cas.stage_key(dict(doc, sandbox=sandbox_id()))
+    """The stage key: the document and the sandbox's own files, WITHOUT `unkeyed` (the job count and the timeout change the time a stage takes, not what it
+    computes: a stage that needs a different value for either has the same key and the same record)."""
+    return cas.stage_key(dict({k: v for k, v in doc.items() if k != "unkeyed"}, sandbox=sandbox_id()))
 
 def check_doc(doc):
     ok = (isinstance(doc, dict) and doc.get("format") == "fnvnx-stage/1" and isinstance(doc.get("stage"), str)
           and isinstance(doc.get("argv"), list) and doc["argv"] and all(isinstance(a, str) for a in doc["argv"])
           and doc["argv"][0].startswith("/") and isinstance(doc.get("cwd"), str) and doc["cwd"].startswith("/")
           and isinstance(doc.get("env"), dict) and isinstance(doc.get("inputs"), list)
-          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool", "ro_root"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
+          and isinstance(doc.get("outputs"), list) and set(doc) - {"class", "tool", "ro_root", "links", "scratch", "unkeyed"} == {"format", "stage", "argv", "cwd", "env", "inputs", "outputs"}
           and doc.get("ro_root", False) in (True, False)
           and doc.get("class", "build") in ("build", "verification"))
     if not ok:
@@ -80,7 +86,14 @@ def check_doc(doc):
     for i in doc["inputs"]:
         if not (isinstance(i, dict) and set(i) == {"at", "tree"} and isinstance(i["at"], str)):
             raise SbxError("malformed input entry")
-    paths = [i["at"] for i in doc["inputs"]] + list(doc["outputs"])
+    links, scratch, unk = doc.get("links", []), doc.get("scratch", []), doc.get("unkeyed", {})
+    if not (isinstance(links, list) and all(isinstance(l, dict) and set(l) == {"at", "to"} and isinstance(l["at"], str) and isinstance(l["to"], str) and l["to"] for l in links)
+            and isinstance(scratch, list) and all(isinstance(p, str) for p in scratch)
+            and isinstance(unk, dict) and set(unk) <= {"env", "timeout"}
+            and all(isinstance(k, str) and isinstance(v, str) for k, v in unk.get("env", {}).items())
+            and (unk.get("timeout") is None or (isinstance(unk["timeout"], int) and not isinstance(unk["timeout"], bool) and unk["timeout"] > 0))):
+        raise SbxError("malformed links, scratch or unkeyed")
+    paths = [i["at"] for i in doc["inputs"]] + list(doc["outputs"]) + [l["at"] for l in links] + list(scratch)
     for p in paths:
         if not p.startswith("/") or os.path.normpath(p) != p or p == "/":
             raise SbxError("bad path %r (absolute, normalized, not /)" % p)
@@ -123,6 +136,12 @@ def _setup_root(doc, root, run, srcs):
     for n, o in enumerate(doc["outputs"]):
         os.makedirs(root + o)
         _bind_ro(os.path.join(run, "out", str(n)), root + o, ro=False)
+    for l in doc.get("links", []):   # the symlinks of the declared machine's root layout (a link cannot be an input mount): part of the key
+        os.makedirs(os.path.dirname(root + l["at"]), exist_ok=True)
+        os.symlink(l["to"], root + l["at"])
+    for p in doc.get("scratch", []):   # a writable scratch directory: a tmpfs that nothing survives (not an output); a build that works out of tree
+        os.makedirs(root + p)
+        _mount("tmpfs", root + p, "tmpfs", 0, "mode=755")
     os.makedirs(root + doc["cwd"], exist_ok=True)
     for d in ("proc", "dev", "tmp", "oldroot"):
         os.makedirs(os.path.join(root, d), exist_ok=True)
@@ -165,7 +184,7 @@ def _pid1(doc, root, run, logs, errfd, srcs):
             if libc.prctl(24, cap, 0, 0, 0) != 0:
                 break
         _seccomp()
-        os.execve(doc["argv"][0], doc["argv"], doc["env"])
+        os.execve(doc["argv"][0], doc["argv"], dict(doc["env"], **doc.get("unkeyed", {}).get("env", {})))
     except BaseException as e:
         os.write(errfd, ("%s: %s" % (type(e).__name__, e)).encode()[:1000])
     os._exit(127)
@@ -177,6 +196,7 @@ def launch(doc, run, root, srcs):
     pid = os.fork()
     if pid == 0:
         try:
+            os.setsid()   # one process group: a timeout kills the whole stage
             # The forked child holds a copy of every descriptor that a sibling thread of the parent has open at this instant, among them files open for
             # writing (a tool being copied into a store, an object being ingested). Such a copy makes an exec of that file by another stage fail with
             # ETXTBSY for as long as the child lives, which is the whole of the mount setup. The child keeps only what it uses: stdin/out/err, the error
@@ -198,7 +218,23 @@ def launch(doc, run, root, srcs):
             os.write(efd[1], str(e).encode()[:1000])
             os._exit(126)
     os.close(efd[1])
-    _, st, ru = os.wait4(pid, 0)     # the usage of fork A includes the descendants it waited for (fork B, the command and what it reaped): the stage's CPU
+    timeout = doc.get("unkeyed", {}).get("timeout")
+    if timeout:
+        deadline, st = time.monotonic() + timeout, None
+        while st is None:
+            w, st0, ru = os.wait4(pid, os.WNOHANG)
+            if w:
+                st = st0
+            elif time.monotonic() > deadline:
+                os.killpg(pid, 9)
+                os.wait4(pid, 0)
+                for f in logs + [efd[0]]:
+                    os.close(f)
+                raise SbxError("stage %s: timeout after %d s (killed)" % (doc["stage"], timeout))
+            else:
+                time.sleep(0.05)
+    else:
+        _, st, ru = os.wait4(pid, 0)     # the usage of fork A includes the descendants it waited for (fork B, the command and what it reaped): the stage's CPU
     err = os.read(efd[0], 2000).decode()
     for f in logs + [efd[0]]:
         os.close(f)
