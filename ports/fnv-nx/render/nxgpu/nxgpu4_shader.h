@@ -7,13 +7,14 @@
  *   bytecode / size  the D3D9 token stream (version token .. END), `link_pairs` n_link_pairs bytes of FNVNX_DK_PAIR codes (usage * 16 + index) ascending, unique = the link set L of
  *                    render/shaders/include/fnvnx_dk_layout.h "Location rule" (fnvnx_shader_opts.link_pairs); n_link_pairs 0 = the stage alone (every pair of the draw is canonical).
  *   stage            0 vertex, 1 pixel (must match the bytecode's version token)
- *   variant          bit 0: vertex shader complete (FNVNX_SHADER_VS_COMPLETE; fnvnx_dk_vs_needs_complete); bit 1 (either stage): D3DRS_SHADEMODE FLAT
- *                    (FNVNX_SHADER_FLAT_COLOR: the COLOR0/COLOR1 interpolants are `flat`, first-vertex value; both stages of a draw carry the same bit); all other bits 0
+ *   variant          translator key flags (fnvnx_shaders.h): a subset of FNVNX_SHADER_KEY_FLAGS, passed to the translator as they are. FNVNX_SHADER_VS_COMPLETE
+ *                    (fnvnx_dk_vs_needs_complete) is valid on stage 0 only; FNVNX_SHADER_FLAT_COLOR (D3DRS_SHADEMODE FLAT: the COLOR0/COLOR1 interpolants are `flat`,
+ *                    first-vertex value; both stages of a draw carry the same bit). The header defines no bit of its own.
  *   key              SHA-256 of the bytecode (fnvnx_sha256, lib/sha256; 32 bytes), the cache key's code key
  *   Every address is an address of memory from nxd3d_gpu_alloc (as every address of every call).
  // ASM-629 (verify/ASSUMPTIONS.json)
  *   Implemented by gl4 (gl4_d3dshader.c): the same key (bytecode, stage, variant, L) returns the same id, once per create (each NXGPU_FN_SHADER_DESTROY takes one back; the last releases it).
- *   Reserved fields (pad, pad2) and the variant bits above bit 1 must be 0, a pixel stage has bit 0 clear, size is a multiple of 4: else 0.
+ *   Reserved fields (pad, pad2) and a variant bit outside FNVNX_SHADER_KEY_FLAGS must be 0, a pixel stage has FNVNX_SHADER_VS_COMPLETE clear, size is a multiple of 4: else 0.
  * NXGPU_FN_COUNT4 is unchanged (the v4 table), NXGPU_VERSION4 stays 4. */
 #ifndef FNVNX_NXGPU4_SHADER_H
 #define FNVNX_NXGPU4_SHADER_H
@@ -29,14 +30,10 @@ extern "C" {
 enum { NXGPU_FN_SHADER_CREATE_D3D = NXGPU_FN_COUNT4 };
 NX_ASSERT_((int)NXGPU_FN_SHADER_CREATE_D3D == (int)NXGPU_FN_COUNT4, "ABI 4.1 continues ABI 4");
 
-/* NxShaderD3D.variant bits (any other bit must be 0) and the limits of one create call. */
+/* The limits of one create call (NxShaderD3D.variant has no bits of its own: it carries the translator's key flags, see above). */
 enum {
-    NXGPU_SHADER_VS_COMPLETE = 1u << 0,   /* vertex stage only: FNVNX_SHADER_VS_COMPLETE */
-    NXGPU_SHADER_FLAT = 1u << 1,          /* either stage: FNVNX_SHADER_FLAT_COLOR */
-    NXGPU_SHADER_VARIANT_MASK = NXGPU_SHADER_VS_COMPLETE | NXGPU_SHADER_FLAT,
     NXGPU_SHADER_MAX_CODE = 1u << 20,     /* bytes of bytecode */
-    NXGPU_SHADER_MAX_LINK_PAIRS = 31,     /* n_link_pairs: the varying slots of render/shaders FNVNX_DK_VARYING_SLOTS */
-    NXGPU_SHADER_PAIR_USAGE_MAX = 13      /* a link pair is usage * 16 + index; usage <= D3DDECLUSAGE_SAMPLE */
+    NXGPU_SHADER_MAX_LINK_PAIRS = 31      /* n_link_pairs (= FNVNX_DK_VARYING_SLOTS of render/shaders fnvnx_dk_layout.h, asserted by gl4) */
 };
 
 typedef struct NxShaderD3D {
