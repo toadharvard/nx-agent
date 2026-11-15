@@ -66,6 +66,13 @@ for t in as ld ld.bfd ar ranlib nm objcopy objdump strip readelf size strings ad
   cp -L "$(command -v aarch64-linux-gnu-$t)" "$P/$T/bin/$t"
 done
 export PATH=$P/bin:$PATH
+# The package's ld keeps the scripts of its emulations in the package (dpkg -L), at a path that its own SEARCH_DIR("=/usr/lib/aarch64-linux-gnu")
+# reaches only without a sysroot; the target driver runs it with --sysroot=$P/$T, so ld looks in $P/$T/lib. The scripts of the ILP32 emulation
+# (aarch64elf32, the emulation the aarch64-none-elf driver selects for -mabi=ilp32) are copied there, taken from the package's file list.
+PKG=$(dpkg -S "$(readlink -f "$LD")" | cut -d: -f1 | head -1)
+mkdir -p "$P/$T/lib/ldscripts"
+dpkg -L "$PKG" | grep '/ldscripts/aarch64elf32\.' | while read -r f; do cp -L "$f" "$P/$T/lib/ldscripts/"; done
+[ -f "$P/$T/lib/ldscripts/aarch64elf32.xc" ] || { echo "build.sh: the ld package $PKG has no ldscripts/aarch64elf32.xc" >&2; exit 2; }
 
 # the multilib selector: the platform's code model (guest_platform.code holds -fPIC; the stop is the check)
 read -r MLFLAGS < <(python3 -I - "$TARGETS" <<'EOF'
