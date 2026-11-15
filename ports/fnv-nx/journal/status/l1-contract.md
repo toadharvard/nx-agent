@@ -1180,3 +1180,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - In a mixed body, the terminator path is real, and the returning paths are judged by the constant-error rules: a cited declared-machine row, else image_unreachable, else red.
   - TerminateProcess non-self FALSE/ERROR_INVALID_HANDLE gets a declared-machine row (one process).
 - Orchestrator: msvcmodel long double is 128-bit under ILP32 and should be binary64 (VC++2008); the patch sets LONG_DOUBLE_TYPE_SIZE 64. The pin bump is a separate small commit after the L2 farm; cand1 continues on the current pin.
+
+### 2026-11-15 01:00 — stack class ruling; w24 landed; w23
+- Orchestrator ruling: native stack depth goes to the gate backlog, owner L1, after the first frame and before the Switch. ALL.md lists it as an open class with no gate.
+  - Shape: lifted depth is bounded by the guest stack (dwStackSize, or the PE reserve) times the max ratio of A64 frame to x86 bytes consumed per call.
+  - Native code needs a call-graph bound with recursion certificates; a missing .su entry is red.
+  - L5 sizes host stacks from these; a size over budget is a design defect.
+- w24 f2ea1e662: -fstack-reuse=none + PD-STACK-REUSE landed. Amendment asked: the restoring rule text is non-escaping slots by gate_order rule D's points-to model, plus disjoint lifetimes. Then the head goes to w15.
+- w23r: accepted 0a60ecf (docstrings), rule E (local-clone bisimulation) and odr.by_class.
+  - Measured on the 114 platform objects: 327 signatures, 187 multi-copy, 6 differ (std::string / vector<string>: real ODR by bytes), 0 undecidable (was 8).
+  - Internal linkage is blocked on L2: a `linkage` field on .fnvnx.layout record rows was requested.
