@@ -363,3 +363,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 13:10: Task Y done (w7-u 541cc07b3): farm jobs take the artifacts tree only from FNVNX_BUILD (required, no default); boot_job's own clone is deleted.
   - Checks: bash -n passes; test_runner has +1 case; test_oracle 0 FAIL.
   - Waiting on L1 cand3 (w12 fd2505f0e: link.roots derived, link.tables per image) for the bootguest and icount link.
+- 14:25: 4.3: L6A's gl4 root is green (render/gl4 at gl4link2 133d310f3; libnxgl4.so 5cfbee35…, the same in 2 stores).
+  - Task Z (w7, doing): bootgpu takes GL only from gate_build.ensure(render/gl4); the prebuilt @2f0427f5 and the NXGL4 pins are deleted (A27).
