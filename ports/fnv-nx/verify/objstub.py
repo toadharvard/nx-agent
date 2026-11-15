@@ -137,7 +137,7 @@ this change, platform root, 114 objects, warm cache: total 49 s, maximum 8.9 s (
 
 (I) IMAGE. For a root with a link stage the gate also reads the FINAL ELF (image_check): every STT_FUNC symbol with a size in an executable section of the image
 is a body, so a weak definition that a strong one replaced is not in the image and is not judged, and the archive members the linker pulled are judged as
-they stand. A body is FIXED-FAILURE iff, by the V rules with the root's `errno_accessor` (recipe: the function the libc errno macro calls) transparent, it
+they stand. A body is FIXED-FAILURE iff, by the V rules with the errno accessor `errno_probe` derives by compiling a probe transparent, it
 stores only constants through the pointer that a call of the accessor returned (at least one such store), reads nothing but its own frame, and returns one
 constant on every path: its whole effect is `errno = K1; return K2`. Finding `fixed-failure` (id <root>/<link output>, name the function). Stated limits: a constant
 return without an errno store is the V class (a constants row); an errno held in a thread register or inlined (no call of the accessor) is not seen; a body with a

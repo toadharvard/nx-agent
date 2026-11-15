@@ -146,7 +146,7 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/loader/tools/mkidentity.py",
+   "tool": "ports/fnv-nx/contract/mkidentity.py",
    "args": [
     "--exe",
     "/ext/exe/FalloutNV.exe",
