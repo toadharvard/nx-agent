@@ -232,8 +232,11 @@ class Obj:
 
     def __init__(self, path, lite=False):
         d = self.data = open(path, "rb").read()   # lite: no relocation tables (symbol names only)
-        if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1 or struct.unpack_from("<HH", d, 16) != (1, 183):
-            raise ValueError("%s: not a little-endian AArch64 ELF relocatable" % path)
+        if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1 or struct.unpack_from("<H", d, 16)[0] != 1 or struct.unpack_from("<H", d, 18)[0] not in (183, 62):
+            raise ValueError("%s: not a little-endian AArch64 or x86-64 ELF relocatable" % path)
+        self.machine = struct.unpack_from("<H", d, 18)[0]   # e_machine: 183 AArch64 (the guest profile), 62 x86-64 (the host profile, objstub_x64.py)
+        if self.machine == 62 and d[4] != 2:
+            raise ValueError("%s: an x86-64 object must be ELF64" % path)
         w64 = self.w64 = d[4] == 2
         self.cite = CITE   # the functions a call of which is transparent for V (is_wine); trap_candidate adds the one callee under test
         self.stop = frozenset()   # the declared-noreturn callees: a call of one ends the path (no successor) in the V analysis of a MIXED body (see check_obj)
@@ -1256,10 +1259,16 @@ def read_cites(o):
     return at, bad
 
 
-def check_obj(path, terms, os_layer, probe=None):
+def check_obj(path, terms, os_layer, probe=None, machine=None):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
-    "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe)."""
+    "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe). MACHINE: the e_machine
+    the root's profile requires (183 guest, 62 host), a mismatch is an error (red); an x86-64 object is analysed by objstub_x64.py to the same result schema."""
     o = Obj(path)
+    if machine is not None and o.machine != machine:
+        raise ValueError("%s: e_machine %d, the root's profile requires %d" % (path, o.machine, machine))
+    if o.machine == 62:
+        import objstub_x64
+        return objstub_x64.check_obj(o, path, terms, os_layer, probe, vjson, read_cites, assume_id)
     items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "flag": None, "tabs": {}, "assume": []}
     pw = {}   # the probe (recipe error_abi kind flag): name -> (words, a, b, stores, calls) of every function
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
@@ -1501,7 +1510,8 @@ def matches(row, v):
     return kind in ("void", "identity") or (x0[0] == "A" and addr_name(val) in x0[1] if kind == "addr" else
                               x0[0] == "K" and x0[1] & (0xFFFFFFFF if kind == "u32" else 2 ** 64 - 1) == int(val, 0))
 
-ANALYSIS = hashlib.sha256(open(os.path.join(HERE, "objstub.py"), "rb").read() + open(os.path.join(HERE, "a64access.cc"), "rb").read()).hexdigest()
+ANALYSIS = hashlib.sha256(open(os.path.join(HERE, "objstub.py"), "rb").read() + open(os.path.join(HERE, "a64access.cc"), "rb").read() +
+                          open(os.path.join(HERE, "objstub_x64.py"), "rb").read()).hexdigest()
 
 
 def _atomic(path, data):
@@ -1512,35 +1522,39 @@ def _atomic(path, data):
     os.replace(tmp, path)
 
 
-def object_key(path, terms, os_layer, probe=None):
+def object_key(path, terms, os_layer, probe=None, machine=None):
     """(cache key, the terminators this object mentions). The analysis reads TERMS only through the object's own symbol names, so the
     key holds the object's sha256, the OS_LAYER flag, the analysis version and exactly terms & names."""
     o = Obj(path, lite=True)
+    if machine is not None and o.machine != machine:
+        raise ValueError("%s: e_machine %d, the root's profile requires %d" % (path, o.machine, machine))
     names = {s[0] for s in o.syms if s[4] != 0}
     mine = sorted(names & set(terms)) + sorted("~" + n for n in names if "~" + n in terms)   # "~name": an unwinder (see the terminator rule)
-    key = hashlib.sha256(json.dumps([ANALYSIS, hashlib.sha256(o.data).hexdigest(), bool(os_layer), mine, probe], sort_keys=True).encode()).hexdigest()
+    dec = __import__("objstub_x64").tool_version() if o.machine == 62 else ""   # an x86-64 object is decoded by the pinned objdump: its version is part of the key
+    key = hashlib.sha256(json.dumps([ANALYSIS, hashlib.sha256(o.data).hexdigest(), bool(os_layer), mine, probe, machine, dec], sort_keys=True).encode()).hexdigest()
     return key, set(mine)
 
 
 def _work(args):
-    path, mine, os_layer, probe = args
-    items, finds, extra = check_obj(path, mine, os_layer, probe)
+    path, mine, os_layer, probe, machine = args
+    items, finds, extra = check_obj(path, mine, os_layer, probe, machine)
     return dict(extra, items=items, finds=[list(f) for f in finds])
 
 
-def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1, probe=None):
+def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1, probe=None, machine=None):
     """OBJS [(id, path)] -> {id: result dict}. Per object cache CACHE/objstub/<key>.json when CACHE is given; the objects without a
     cache entry run in JOBS processes (the decoder binary is built or fetched once, before the fork)."""
     res, todo = {}, []
     for oid, path in objs:
-        key, mine = object_key(path, terms, oid in os_layer_ids, probe)
+        key, mine = object_key(path, terms, oid in os_layer_ids, probe, machine)
         cp = os.path.join(cache, "objstub", key + ".json") if cache else None
         if cp and os.path.exists(cp):
             res[oid] = json.load(open(cp))
         else:
-            todo.append((oid, (path, mine, oid in os_layer_ids, probe), cp))
+            todo.append((oid, (path, mine, oid in os_layer_ids, probe, machine), cp))
     if todo:
-        tool(cache)
+        if any(struct.unpack_from("<H", open(t[1][0], "rb").read(20), 18)[0] == 183 for t in todo):   # the AArch64 decoder is built only when an AArch64 object needs it
+            tool(cache)
         if jobs > 1 and len(todo) > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=jobs, mp_context=multiprocessing.get_context("fork")) as ex:
                 done = list(ex.map(_work, [t[1] for t in todo], chunksize=1))
@@ -1793,10 +1807,10 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
                 crow, tk, err = cite_row(r, name)
                 if err:
                     kind, detail = err
-                elif wine_matches(crow[-2:], v, r["wine_nz"].get(name, {})):
+                elif wine_matches(crow[3:5] if tk == "dm" else crow[-2:], v, r["wine_nz"].get(name, {})):
                     continue
                 else:
-                    kind, detail = ("declared-machine" if tk == "dm" else "wine-fixme") + "-mismatch", "row %s %s, analysis: %s" % (crow[-2], crow[-1], detail)
+                    kind, detail = ("declared-machine" if tk == "dm" else "wine-fixme") + "-mismatch", "row %s %s, analysis: %s" % ((crow[3:5] if tk == "dm" else crow[-2:]) + (detail,))
             elif kind == "WINE-V":   # a call of fnvnx_wine_fixme (rule W): the id every path passes to it
                 wid = r["wine_id"].get(name)
                 if wid is None or r["cite_sym"].get(name, WINE) is None:
@@ -1914,11 +1928,11 @@ def error_abi_findings(results, oids, abi):
     return []
 
 
-def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None):
+def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None, extconv=None, machine=None):
     """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). ABI: the `error_abi` of the one root OBJS form; TABLES: the `empty_handlers.tables` of it;
     RECORDS: read_handler_records of it."""
     probe = dict(abi or {}, tables=tables or {}) if (abi or tables) else None
-    res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe)
+    res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe, machine)
     items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats, extconv)
     return items, sorted(set(finds) | set(error_abi_findings(res, list(res), abi) if abi else ()) | set(handler_row_findings(records, res) if records else ()))
 
@@ -2022,8 +2036,7 @@ def declared_header(lines):
             if not all(prefixes):
                 raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
             fn = r":[A-Za-z_][A-Za-z0-9_@]*"
-            forms = {"c11": r":[0-9]+(?:\.[0-9]+)*" + fn,                 # ISO/IEC 9899:2011 clause number, digits and dots
-                     "posix-2017": r":[A-Za-z_][A-Za-z0-9_]*" + fn}       # IEEE Std 1003.1-2017 page name
+            forms = {"std": r":(?:C11:[0-9]+(?:\.[0-9]+)*|POSIX\.1-2017:[A-Za-z_][A-Za-z0-9_]*)"}   # `std:<doc>:<section>`: the clause of ISO/IEC 9899:2011 (N1570) or the IEEE Std 1003.1-2017 function page; no function component
             body = r":[A-Za-z0-9_./#+-]+" + fn
             return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + forms.get(x.group(1), body) for x in prefixes) + ")"
     raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
@@ -2036,28 +2049,113 @@ def _sources_ok(field, source):
     return all(re.fullmatch(source, x) for x in t) and t == sorted(set(t))
 
 
-def read_declared_table(path):
-    """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; lines starting with # are comments. fact is one of
-    the facts of the table's header line. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
-    `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against the documentation or a pinned Wine 9.0
-    tree is the oracle class, not done here). id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their
-    own. The source form `hostabi:<header>:<service>` (the header line lists it) is valid only for kind `noreturn`: a property of a symbol that our own product defines,
-    which the gates verify against the declaration in the header (the attribute) and the coverage rule (every path of the definition ends in a real terminator or an unwinder);
-    as the source of a Win32/Wine behaviour value it is a malformed row (the trust chain would end at us, not at OWNER 3).
-    -> {id: (contract name, fact, source, kind, value)}. ValueError when missing or malformed."""
+LASTERR = re.compile(r"([A-Z][A-Z0-9_]*)=([0-9]+)")
+
+
+def _sha256(path):
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+def std_index_load(root, pin):
+    """The pinned std index (declared_sources.json `std_index`, tree at ROOT) -> ({C11 clause}, {POSIX function page}). Each file is checked by sha256 before it is read."""
+    out = []
+    for key, col in (("c11", 0), ("posix", 0)):
+        f = pin["files"][key]
+        p = os.path.join(root, f["path"])
+        if not os.path.isfile(p) or _sha256(p) != f["sha256"]:
+            raise ValueError("std index file %s is missing or differs from its pinned sha256" % f["path"])
+        out.append({l.split("\t")[col] for l in read_list(p)})
+    return tuple(out)
+
+
+def winerror_load(root, pin):
+    """The pinned WDK 7.1 winerror.h and winsock2.h (declared_sources.json `wdk`, tree at ROOT) -> {NAME: decimal}: every `#define NAME <integer>` of the two headers,
+    where the integer is a decimal or hex literal (suffix L/U), possibly in parentheses or a (DWORD)/(HRESULT) cast, or `(WSABASEERR+N)`, or the name of another such
+    constant. A name the evaluator cannot resolve is absent (a citation of it is red)."""
+    raw = {}
+    for key in ("winerror", "winsock2"):
+        f = pin["files"][key]
+        p = os.path.join(root, f["path"])
+        if not os.path.isfile(p) or _sha256(p) != f["sha256"]:
+            raise ValueError("WDK header %s is missing or differs from its pinned sha256" % f["path"])
+        for l in open(p, encoding="latin-1"):
+            m = re.match(r"^#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.*?)\s*(?:/\*.*)?$", l.rstrip("\r\n"))
+            if m:
+                raw.setdefault(m.group(1), m.group(2).strip())
+    memo = {}
+
+    def ev(name, depth=0):
+        if name in memo:
+            return memo[name]
+        if depth > 8 or name not in raw:
+            return None
+        e = re.sub(r"\(\s*(?:DWORD|HRESULT|LONG|ULONG|NTSTATUS|WORD)\s*\)", "", raw[name]).replace(" ", "")
+        while e.startswith("(") and e.endswith(")") and e.count("(") == 1:
+            e = e[1:-1]
+        v = None
+        m = re.fullmatch(r"\(?(0[xX][0-9a-fA-F]+|[0-9]+)[uUlL]*\)?", e)
+        if m:
+            v = int(m.group(1), 0)
+        else:
+            m = re.fullmatch(r"\(([A-Za-z_][A-Za-z0-9_]*)\+([0-9]+)\)", e) or re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\+([0-9]+)", e)
+            if m and ev(m.group(1), depth + 1) is not None:
+                v = ev(m.group(1), depth + 1) + int(m.group(2))
+            elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", e):
+                v = ev(e, depth + 1)
+        memo[name] = v
+        return v
+    return {n: v for n in raw for v in [ev(n)] if v is not None}
+
+
+def read_declared_table(path, std_index=None, winerr=None):
+    """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value<TAB>lasterror`; lines starting with # are comments. fact is one of
+    the facts of the table's header line. source is the documented origin of the returned value: one or several tokens joined by `|` (sorted, unique, each of the
+    forms the header lists): `win-doc:<Windows documentation page or header path>:<function>`, `wine-9.0:<path in the Wine source tree>:<function name>`,
+    `galaxy-sdk:<page>:<function>`, `hostabi:<header>:<service>`, and `std:<doc>:<section>`: the standard's own clause, `std:C11:<clause number>` (ISO/IEC 9899:2011,
+    draft N1570) or `std:POSIX.1-2017:<function page>` (IEEE Std 1003.1-2017 System Interfaces). The FORM is validated here; a std token is also checked against the
+    pinned index (STD_INDEX: the callable that returns the directory of the std-index tree of declared_sources.json, called once, only when a std token occurs; the
+    clause or page must be in the index; None with a std token is an error). Checking win-doc/wine references against a pinned tree is the oracle class, not done.
+    id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their own. The source form `hostabi:<header>:<service>` is valid only for
+    kind `noreturn`: a property of a symbol that our own product defines, which the gates verify against the declaration in the header (the attribute) and the coverage
+    rule (every path of the definition ends in a real terminator or an unwinder); as the source of a Win32/Wine behaviour value it is a malformed row (the trust chain
+    would end at us, not at OWNER 3).
+    lasterror (7th column): `-` or `NAME=<decimal>`, NAME `[A-Z][A-Z0-9_]*` and the decimal its winerror.h or winsock2.h value (WINERR: the callable that returns the directory of the
+    WDK tree of declared_sources.json, called once, only when a non-`-` value occurs; the pair NAME, decimal must be a define of the pinned headers): the last error the body
+    sets on the path that returns the row's `value`. Kind `noreturn` has `-`. Any other kind has `-` only when the cited source leaves the last error unchanged on that path
+    (not decidable here). A `hostabi:` source never gives a non-`-` lasterror (that is a Win32 value).
+    -> {id: (contract name, fact, source, kind, value, lasterror)}. ValueError when missing or malformed."""
     if not os.path.exists(path):
         raise ValueError("declared machine table %s does not exist" % path)
     out = {}
     lines = read_list(path)
     facts, source = declared_header(lines)
+    std = werr = None
     for l in lines:
         if l.startswith("#"):
             continue
         f = l.split("\t")
-        ok = len(f) == 6 and f[4] != "branch" and f[2] in facts and _sources_ok(f[3], source) and \
-            _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:], True) and (f[4] == "noreturn") == (f[2] in ("process-end", "thread-end")) and (f[4] == "noreturn" or not any(x.startswith("hostabi:") for x in f[3].split("|")))   # hostabi: is a source for a noreturn property of our own symbol only, never for a Win32/Wine value (a return value, a lasterror, an output: wf:/dm: citations of OWNER 3 only); id, name, kind and value: the rules of the wine table; noreturn exactly for the terminator facts
+        ok = len(f) == 7 and f[4] != "branch" and f[2] in facts and _sources_ok(f[3], source) and \
+            _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:6], True) and (f[4] == "noreturn") == (f[2] in ("process-end", "thread-end")) and (f[4] == "noreturn" or not any(x.startswith("hostabi:") for x in f[3].split("|"))) and \
+            (f[6] == "-" or (f[4] != "noreturn" and LASTERR.fullmatch(f[6]) is not None and not any(x.startswith("hostabi:") for x in f[3].split("|"))))   # hostabi: is a source for a noreturn property of our own symbol only, never for a Win32/Wine value (a return value, a lasterror, an output); a noreturn row has no last error; id, name, kind and value: the rules of the wine table; noreturn exactly for the terminator facts
         if not ok or int(f[0]) in out:
             raise ValueError("bad or duplicate declared machine row in %s: %r" % (path, l[:80]))
+        for tok in f[3].split("|"):
+            if tok.startswith("std:"):
+                if std is None:
+                    if std_index is None:
+                        raise ValueError("declared machine row %s cites %s: no pinned std index was given" % (f[0], tok))
+                    std = std_index()
+                doc, sec = tok.split(":", 2)[1:]
+                if sec not in std[0 if doc == "C11" else 1]:
+                    raise ValueError("declared machine row %s cites %s, which is not in the pinned std index" % (f[0], tok))
+        if f[6] != "-":
+            if werr is None:
+                if winerr is None:
+                    raise ValueError("declared machine row %s has lasterror %s: no pinned WDK headers were given" % (f[0], f[6]))
+                werr = winerr()
+            name, num = LASTERR.fullmatch(f[6]).groups()
+            if werr.get(name) != int(num):
+                raise ValueError("declared machine row %s: lasterror %s is not a define of the pinned winerror.h/winsock2.h (%s)" % (f[0], f[6], werr.get(name)))
         out[int(f[0])] = tuple(f[1:])
     return out
 
