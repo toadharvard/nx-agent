@@ -8,7 +8,7 @@
  * the flag list of fnvnx_shaders.h), both stages. A stage certificate is the compile of the translator's GLSL on the pinned Mesa (GL 4.5 core, llvmpipe, EGL surfaceless)
  * and the interface signature read two ways (the emission grammar; the Mesa program-interface query of a separable single-stage program).
  * A link certificate is the glLinkProgram of the program the draw path builds for a (vertex class, PS class): the VS variant fnvnx_dk_vs_needs_complete selects.
- * Output is a function of the inputs: sorted order, no times, no paths. Not covered yet (rule text section 3/5): link set L, FFP stages, the backend's own GLSL rewrite. */
+ * Output is a function of the inputs: sorted order, no times, no paths. Not covered yet (rule text section 3/5): link set L, FFP stages. The text Mesa compiles is the output of nxgl4_shim_glsl (render/gl4shim), the GL backend's own rewrite. */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
 #include <stdint.h>
@@ -17,6 +17,7 @@
 #include <string.h>
 #include "fnvnx_shaders.h"
 #include "fnvnx_sdp.h"
+#include "nx_gl4shim.h"    /* the GL backend's own GLSL rewrite: the text Mesa compiles is the shim's output */
 #include "nx_smscan.h"    /* the one scanner of the draw path: nx_sm_check, nx_sm_pairs */
 #include "nx_pair.h"      /* the one selection function of the draw path: nx_pair_variant */
 #include "fnvnx_dk_layout.h"   /* the product header: fnvnx_dk_vs_needs_complete is called, not copied */
@@ -182,8 +183,11 @@ static void do_stage(const Form *f, unsigned flags, StageRes *o) {
     fnvnx_shader_translate_glsl(f->bc, f->n, &opt, &r);
     if (!r.ok || !r.glsl) { o->status = "translate_fail"; snprintf(o->why, sizeof o->why, "%.399s", r.error); }
     else {
-        unsigned sh = glCreateShader(f->stage ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER); const char *src[1] = { r.glsl }; int ok = 0;
-        glShaderSource(sh, 1, src, NULL); glCompileShader(sh); glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+        unsigned sh = glCreateShader(f->stage ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER); int ok = 0;
+        size_t gl = strlen(r.glsl), cap = 2 * gl + 4096; char *shim = malloc(cap);
+        if (!shim || !nxgl4_shim_glsl(r.glsl, gl, (uint32_t)f->stage, shim, cap)) { free(shim); o->status = "shim_fail"; fnvnx_shader_result_free(&r); o->shader = sh; return; }
+        const char *src[1] = { shim };
+        glShaderSource(sh, 1, src, NULL); glCompileShader(sh); glGetShaderiv(sh, GL_COMPILE_STATUS, &ok); free(shim);
         o->shader = sh;
         if (!ok) { o->status = "compile_fail"; glGetShaderInfoLog(sh, (int)sizeof o->why, NULL, o->why); }
         else if (grammar_read(r.glsl, o->sig, decls, 64, &o->ndecl)) o->status = "grammar_fail";
