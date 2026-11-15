@@ -161,8 +161,8 @@ def main():
         status, detail = "green", "%d items: one definition, one source" % len(items)
     res = {"format": "fnvnx-gate/1", "name": "onedef", "status": status, "universe": len(items), "certified": cert,
            "uncertified": sorted("%s:%s" % x for x in bad)[:50], "detail": detail}
-    os.makedirs(os.environ.get("GATE_OUT", "."), exist_ok=True)
-    with open(os.path.join(os.environ.get("GATE_OUT", "."), "onedef.json"), "w") as fh:
+    os.makedirs(os.environ["GATE_OUT"], exist_ok=True)
+    with open(os.path.join(os.environ["GATE_OUT"], "onedef.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("onedef: %s %d/%d %s" % (status, cert, len(items), detail[:200]))
     return 0 if status == "green" else 2

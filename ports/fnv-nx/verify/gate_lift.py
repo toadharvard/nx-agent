@@ -249,7 +249,7 @@ def judge_lifted_flags(root, repo, cache):
             covered |= mine
             if not mine:
                 continue
-            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": os.environ.get("JOBS", "4")})["flags"]
+            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": "4"})["flags"]
             nf = r.get("no_form_rows", 0)
             reads, bad = r.get("flag_reads", 0), r.get("undecodable_ranges", 0)
             red = r.get("red_flag_reads", 0)

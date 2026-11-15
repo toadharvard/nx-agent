@@ -119,6 +119,7 @@ Run now (the files of `gates.d`, run in the order of their names; no gate reads 
 every merge pays today; with such a root and universe 0 it is red (`covers`, no vacuous green, `gatesdir.py`); with a product root each judges it (tested on a toy root, `tests/test_recipe.py` fixtures). Roots always come from
 `admit.json`, never from gate arguments. Shared state goes through `GATE_CACHE` (`gate_build.ensure`: stage store, `objects/<tree>/<root>`).
 
+- `abspath` (`gate_abspath.py`, owner order of 2026-11-15 21:00Z; covers `tool`): red on any absolute host path, `~` path or environment default (`os.environ.get(k, default)`, `getenv`, `setdefault`, a try-fallback read) in the Python files a stage or gate can run: the `generated[].tool` of every admitted recipe, recipe.py's stage launchers, the scripts of `gates.d`, and their import closure (ast; an unresolved dynamic import is red). A path under `recipe.MOUNT_PREFIXES` (the one constant) is the stage's own mount namespace and is green. Prints the findings per file with the commit; exit 1 on any finding. Tests: `tests/test_gate_abspath.py`.
 - `build` (all roots build in the sandbox), `determinism` (two cold builds and the warm one equal bit for bit): class 9 and the precondition
   of the others.
 - `objstub` (classes 1, 2 and the reach rule of 16): `gate_objstub.py`, rules in `objstub.py`.
