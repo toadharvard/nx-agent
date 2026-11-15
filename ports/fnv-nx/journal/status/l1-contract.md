@@ -1414,3 +1414,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Next for w22: PD-LOADER-SHA256-ISA, closed by console_cpu.features.
 - w23 tier 2 COMDAT c9c20af8 over 114 platform objects: 186 multi-object signatures, tier 1 182, tier 3 4 (the std::string ones). The acceptance case waits on the L2 w3 odrdef ICE (swkbd.cpp:166, mangle.cc:2515).
 - w25 item 3 (profile) bases on targets.json.
+## Check-in 00:56
+- cand1 verdict is RED and not merged (see above). w15 is assembling cand2 with a 14-step merge list; the per-root check comes before the verdict.
+- Workers, all busy:
+  - w12: loader generated tables on w12L2;
+  - w15: cand2;
+  - w20: objstub g++/cache, then (e), (A) probe + errno derivation, (B), doubles, shader_opcode + op tables;
+  - w22: PD-LOADER-SHA256-ISA, then construction A-rows;
+  - w23: C 6.2.7, tier 2 acceptance (after the L2 ICE), D2 scope, remaining order classes, crossing predicate;
+  - w24: store atomicity, gatekeys, admit by class;
+  - w25: generated link scripts, ELF facts + gate_contract tools, profile.
