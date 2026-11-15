@@ -591,11 +591,22 @@ def check_run(SS):
     for f in cpu:
         alt = dict(cpu, **{f: (cpu[f] + 1) if isinstance(cpu[f], int) else cpu[f] + "x"})
         check("host_cpu: an altered %s is a mismatch (red)" % f, len(recipe.cpu_mismatch(alt)) >= 1, recipe.cpu_mismatch(alt))
+    vm = "processor\t: 0\nvendor_id\t: GenuineIntel\ncpu family\t: 6\nmodel\t\t: 207\nmodel name\t: Intel(R) Xeon(R) Processor @ 2.10GHz\nstepping\t: 2\n"
+    vpin = dict(cpu, microcode=None, **{k: cpu[k] for k in ()})
+    vpin.update({"vendor_id": "GenuineIntel", "family": 6, "model": 207, "stepping": 2, "model_name": "Intel(R) Xeon(R) Processor @ 2.10GHz"})
+    check("host_cpu: pin microcode null matches a VM cpuinfo with no microcode line", recipe.cpu_mismatch(vpin, vm) == [], recipe.cpu_mismatch(vpin, vm))
+    check("host_cpu: pin microcode null is NOT a wildcard: a host with a microcode line is a mismatch", len(recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping"))) == 1, recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping")))
+    check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
     hc = dict(rec_(), run=[dict(rec_()["run"][0], host_cpu="cpuref")])
     check("host_cpu: the key needs the tracked pin file verify/cpuref.json", any("cpuref" in e for e in recipe.check(hc, ROOT, files, roots, None, good)))
     check("host_cpu: with the pin file tracked the check accepts it", not [e for e in recipe.check(hc, ROOT, files + [T + "verify/cpuref.json"], roots, None, good) if "host_cpu" in e])
+    vl = lambda libs: dict(hrec, variants={"ubsan": {"flags": hrec["flags"], "link": dict(hrec["link"], libs={"system": libs})}})   # noqa: E731
+    vr = recipe.load_admit(good)
+    check("variant ubsan: its own link.libs.system (an absolute path of the pinned libubsan1) is accepted", not recipe.check(vl(["/usr/lib/x86_64-linux-gnu/libubsan.so.1"]), HX, files, roots, None, good), recipe.check(vl(["/usr/lib/x86_64-linux-gnu/libubsan.so.1"]), HX, files, roots, None, good))
+    check("variant ubsan: a relative link.libs.system path is red at check", any("link.libs.system" in e for e in recipe.check(vl(["libubsan.so.1"]), HX, files, roots, None, good)))
     if r1["status"] != "green":
-        print("PENDING run stage green/red-run tests (13): the link rule's PT_INTERP is not runnable until w12h item 1; the rest of this function is not executed")
+        check("run stage execution checks (13: green run, keys, red cases, stage ref, debs, host_cpu run): PT_INTERP of link kind exe not runnable: w12h item 1", False,
+              "hx.exe's PT_INTERP %s is provided by no declared deb" % (txt1[:200],))
         return
     cache = BASE + "/rc"
     os.makedirs(cache + "/store", exist_ok=True)
