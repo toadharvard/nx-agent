@@ -2,7 +2,7 @@
 """Code universe of FalloutNV.exe: recursive descent from decomp starts, entry point, call/tail targets, reloc'd
 pointers (rule R3: EVERY relocated value into an executable section is an entry; the consumer rules below only classify bytes
 for the accounting and never exclude an entry); jump tables; R3 byte accounting of .text (codemap.py), entry-set
-comparison (reconcile.py). Output: $FNVNX_FACTS_OUT (default /home/user/l3facts)/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
+comparison (reconcile.py). Output: OUTDIR/{universe,codemap}.tsv (module mode: OUTDIR/<module>/...) + count-only stdout; exit 1 if any byte is unexplained."""
 import os, re, sys, json, struct, bisect, capstone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I, which has no script directory on the path)
 from types import SimpleNamespace
@@ -11,14 +11,23 @@ from array import array
 from collections import Counter, deque
 from capstone import x86 as X
 import cli
-USAGE = 'usage: universe.py [--module NAME]   code universe of the exe (FNVNX_EXE) or of the module NAME (a name or file of modules.tsv); env FNVNX_FACTS_OUT, FNVNX_MODULES, FNVNX_MODDIRS'
-if __name__ == '__main__': cli.parse(USAGE, sys.argv[1:], (0, 0), {'--module': True})
-ARGV = sys.argv[1:]; MOD = ARGV[ARGV.index('--module') + 1] if '--module' in ARGV else None; STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
-if STRICT: import modlift; sys.exit(modlift.run(MOD))      # module mode: separate engine (every relocated pointer into executable bytes is an entry)
-EXE = MOD or os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
-FUNCS = os.environ.get('FNVNX_FUNCS', None if STRICT else '/home/user/l3facts/funcs.tsv')
-NAME = os.path.splitext(os.path.basename(MOD))[0].lower() if STRICT else ''
-OUTD = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts') + ('/' + NAME if STRICT else ''); OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
+USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE | --module NAME --modules modules.tsv --moddirs DIR[:DIR...] --exports-dir DIR --exe-mnemonics FILE) --keys keys.tsv [--theirs DIR]
+  code universe of the exe (--exe, with the decomp function starts --funcs) or of the module NAME (a name or file of modules.tsv; the module table, the directories
+  that hold the module files, the L1 exports directory and the exe's mnemonic list are declared inputs). --keys: L1's keys.tsv (import conventions). --theirs: with --exe, the directory that holds L1's facts.pkl and eh.pkl, for the entry-set comparison (reconcile.py). Every path is an explicit argument: no environment variable, no default.'''
+_OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--exports-dir': True, '--exe-mnemonics': True, '--keys': True, '--theirs': True}
+if __name__ == '__main__': _POS, _O = cli.parse(USAGE, sys.argv[1:], (0, 0), _OPTS)
+else: _O = {}
+def _need(*ks):
+    miss = [k for k in ks if k not in _O]
+    if miss: sys.stderr.write('universe.py: missing %s\n\n%s\n' % (' '.join(miss), USAGE)); sys.exit(2)
+MOD = _O.get('--module'); STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
+_need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
+if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
+    _need('--modules', '--moddirs', '--exports-dir', '--exe-mnemonics')
+    import modlift; sys.exit(modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'], exports_dir=_O['--exports-dir'], exe_mnemonics=_O['--exe-mnemonics'])))
+_need('--exe', '--funcs', '--theirs')
+EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
+OUTD = _O['--out']; OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 M = pemod.load(EXE); d, pe, base, secs, loc, off, sec, u32, dirent = M.d, M.pe, M.base, M.secs, M.loc, M.off, M.sec, M.u32, M.dirent
 RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
@@ -458,7 +467,7 @@ if not STRICT:
         e = next((e for e in reversed(OWN[max(0, bisect.bisect_right(OWN, x) - 40):bisect.bisect_right(OWN, x)]) if x in set(extent_insns(e))), None)
         print('  %08x %s in entry %s kind %s via site@%s' % (x, insns[x][1], '%08x' % e if e else '-', next((k for k in PRI if e and k in kinds[e]), '-'), '%08x' % esite[e] if e in esite and esite[e] else '-'))
     print('\n'.join(codemap.consumers(U, eh)))
-    print('\n'.join(reconcile.run(U)))
+    print('\n'.join(reconcile.run(U, _O['--theirs'])))
     pts = sorted({v for r, v in rvals}); ne = [v for v in pts if v not in entries]; dfr = [(x[1], x[1] + x[3]) for x in datarec]
     print('relocated pointer targets in .text: %d, entries %d, NOT entries %d: %s' % (len(pts), len(pts) - len(ne), len(ne), dict(sorted(Counter(
         'didataformat-blob' if any(x <= v < y for x, y in dfr) else ('data-by-reloc@object-start' if not tbl[v - T0 - 1] else 'data-by-reloc@object-interior') if tbl[v - T0] else 'inside-other-insn' if cov[v - T0] == 2 else 'insn-start-not-entry' if cov[v - T0] == 1 else 'unreached' for v in ne).items()))))

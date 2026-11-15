@@ -13,8 +13,7 @@
                  `nonconst_stores` (red); an empty table is valid iff no level >= 0 is stored.
   Also: the catch continuations (`mov eax, imm32; ret` of a catch funclet) and the frame-handler stubs (`live` iff the stub address is a relocated constant of the universe).
 Used by universe.py, which supplies the descent state (tools/modlift.py supplies it for a module image read through pemod: the same code, rebased addresses; running this
-file runs the whole pipeline). Output: <facts>/ehtables.json (exe) and <facts>/<module>/ehtables.json, which lift/gates/gate_eh.py reads (schema: its docstring). Environment:
-FNVNX_KEYS (L1 keys.tsv with the import conventions; default keys.tsv beside the directory of FNVNX_MODULES)."""
+file runs the whole pipeline). Output: <facts>/ehtables.json (exe) and <facts>/<module>/ehtables.json, which lift/gates/gate_eh.py reads (schema: its docstring). Input: L1's keys.tsv (the import conventions), ehflow.configure_keys(path), passed by universe.py --keys."""
 import os, re, sys, json, bisect
 from collections import Counter, defaultdict, deque
 from itertools import islice

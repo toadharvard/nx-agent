@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Entry-set comparison with the L1 contract team's facts (private repo /home/user/fnv-nx-build, branch l1-contract/mp4: facts.pkl, eh.pkl).
+"""Entry-set comparison with the L1 contract team's facts (private repo fnv-nx-build, branch l1-contract/mp4: facts.pkl, eh.pkl; the directory holding the two files is the argument `theirs`).
 Their kinds are derived here from their own facts (priority: decomp, call, tail, eh, vtable slot, other data pointer, code-stored pointer).
-Used by universe.py (run(U) -> report lines); the pickles are the owner's own artifacts, loaded only from that checkout."""
+Used by universe.py (run(U) -> report lines); the pickles are the owner's own artifacts, read from `theirs` only; an unreadable file is an error."""
 import os, sys, json, subprocess, bisect
 from collections import Counter
-REPO = os.environ.get('FNVNX_THEIRS', '/home/user/fnv-nx-build'); REF = 'FETCH_HEAD'
-def show(f): return subprocess.run(['git', '-C', REPO, 'show', '%s:%s' % (REF, f)], capture_output=True, check=True).stdout
 CHILD = """import sys, pickle, json
 F = pickle.loads(open(sys.argv[1], 'rb').read()); E = pickle.loads(open(sys.argv[2], 'rb').read()); fn = F['fn']
 sk = {}
@@ -15,14 +13,11 @@ print(json.dumps({'fn': [[a, int(bool(v['decomp'])), v['end'], v['size']] for a,
   'called': sorted({c[1] for v in fn.values() for c in v['calls']}), 'tails': sorted({last(t) for v in fn.values() for t in v['tails']}),
   'cp': sorted({last(c) for v in fn.values() for c in v['codeptrs']}), 'sk': [[t, sorted(k)] for t, k in sorted(sk.items())]}))
 """
-def load():
-    d = os.environ.get('FNVNX_SCRATCH', '/home/user/l3work'); os.makedirs(d, exist_ok=True)
-    for f in ('facts.pkl', 'eh.pkl'): open(os.path.join(d, 'theirs_' + f), 'wb').write(show(f))
-    r = subprocess.run([sys.executable, '-I', '-c', CHILD, os.path.join(d, 'theirs_facts.pkl'), os.path.join(d, 'theirs_eh.pkl')], capture_output=True, check=True)
+def load(theirs):
+    r = subprocess.run([sys.executable, '-I', '-c', CHILD, os.path.join(theirs, 'facts.pkl'), os.path.join(theirs, 'eh.pkl')], capture_output=True, check=True)
     return json.loads(r.stdout)
-def run(U):
-    try: J = load()
-    except Exception as ex: return ['reconcile: skipped (%s)' % str(ex)[:60]]
+def run(U, theirs):
+    J = load(theirs)
     fn = {a: {'decomp': dc, 'end': e, 'size': sz} for a, dc, e, sz in J['fn']}; TH, OU = set(fn), set(U.entries); called = set(J['called']); tails = set(J['tails']); cp = set(J['cp'])
     sk = {t: set(k) for t, k in J['sk']}
     def tk(a):

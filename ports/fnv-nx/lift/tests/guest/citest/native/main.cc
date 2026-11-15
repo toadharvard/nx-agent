@@ -38,7 +38,7 @@ Res g_res[NCASES];
 static struct cpu cpu0;
 static bool is_nan(u64 x) { return (x & 0x7ff0000000000000ull) == 0x7ff0000000000000ull && (x & 0xfffffffffffffull); }
 
-extern "C" int main(void) {
+extern "C" int fnvl_citest_entry(void) {
   c = &cpu0;
   u32 first = 0;
   for (u32 i = 0; i < NCASES; i++) {

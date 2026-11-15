@@ -2,9 +2,10 @@
 """The generator of the lifted pack: the lifter's output for the whole code universe as C++ SOURCE. No compiler runs here: the objects are built
 only by verify/recipe.py from the product root lift/pack (build.json), whose `generated` stage copies the units out of the published pack tree.
     liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shapes_K.tsv
-    liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...] --bridge bridge.tsv [--need iat.tsv ...]
-        merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, disp.S, imp.cpp, inc/fnvl_prelude.h, inc/imp.h,
-        entries.tsv, forms.tsv, encs.tsv, shapes.tsv, imp_entries.tsv, imp_blocked.tsv, gate_liftgen.json
+    liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...] [--need iat.tsv ...]
+        merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, entries.tsv (lifted and runtime rows), need.tsv, inc/fnvl_prelude.h, inc/imp.h,
+        forms.tsv, encs.tsv, shapes.tsv, gate_liftgen.json. Nothing derived from the loader's bridge table is written (imp.cpp, disp.S, the import rows and
+        the table_id are the generated stages of lift/pack).
     liftgen.py --recipe REF COMMIT TREE_SHA256    write lift/pack/build.json for the published pack tree (fnv-nx-build branch, commit, cas.py ingest hash)
     liftgen.py --module NAME ...                  (shard mode) a module of modules.tsv, lifted at its assigned base with its universe
 RULE units: entry A lives in unit u/<(A >> 4) & 0xfff as 3 hex digits>.cpp, for every image. The 4096 unit names are fixed, so the recipe's
@@ -13,14 +14,14 @@ unit is a cache hit). A unit is `#include "fnvl_prelude.h"` + its entries in add
 RULE completeness: --finish fails unless every universe entry of every image has a text (an entry the lifter refuses is a missing row).
 Symbols the pack references in the runtime (bind-l3 import rows, the two EH handler entries) are not checked here: a symbol the runtime does
 not define is an undefined symbol of the link, which the linkstrict gate refuses.
-Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs FNVNX_EXE, FNVNX_UNIVERSE, FNVNX_PROOF; outputs only under --out
+Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs: explicit arguments only (--exe, --universe, --certs, ...); outputs only under --out
 (exe-derived: they go to the private fnv-nx-build repository, never into this one)."""
 import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 BATCH = 60
-ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of tools/tests/instest.py
+ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of the retired one-instruction harness
 NBUCKET = 4096
 # The flags of lifted C++: the recipe's (verify/guest_compiler.json flags.semantics + lift/pack/build.json), resolved by resolved_flags() for every test that compiles pack code. No flag that turns an error into a warning or silences one.
 PACK_ROOT_FLAGS = {'c': ['-Werror=attributes'], 'cxx': ['-std=gnu++17', '-O2', '-Werror=attributes'], 'asm': []}   # the per-root classes of the pack (recipe.PER_ROOT); the semantic flags are the pin's, never listed here
@@ -42,7 +43,9 @@ import lifted      # the one definition of the lifted set (the lift step and the
 def bucket(a): return (a >> 4) & (NBUCKET - 1)
 
 
-def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)] + ['disp.S', 'imp.cpp']
+def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)]
+# The pack's external holds the bodies and what is derived from them alone. Everything derived from the loader's bridge table is a generated stage of lift/pack (recipe():
+# impgen.py -> imp.cpp + the import rows, packentries.py -> entries.tsv with the table_id trailer, dispgen.py -> disp.S): a change of the table rebuilds those stages, never the external.
 
 
 def lift_one(a):
@@ -97,19 +100,19 @@ def read_texts(path):
             out[a] = f.read(int(m[2]))
 
 
-def init(exe, ent, emit, jtab):
+def init(exe, base, ent, emit, jtab):
     """the state of a lifting process (the parent and every pool worker), built from the arguments: the result does not depend on the start method"""
     import fnvlift as L
     G.update(ent=ent)
-    lifted.begin(L.Image(exe), emit, jtab)
+    lifted.begin(L.Image(exe, base), emit, jtab)
 
 
 def shard(a):
     import fnvlift as L, fnvlift.core as core, formcert
     K, N = map(int, a.shard.split('/')); out = a.out
     ent = L.universe.load()[0]; mine = sorted(ent)[K::N]
-    init(a.exe, ent, a.emit, a.jtab)
-    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, ent, a.emit, a.jtab)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
+    init(a.exe, a.base, ent, a.emit, a.jtab)
+    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, a.base, ent, a.emit, a.jtab)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
     forms = collections.Counter()
     for g in got: forms.update(g[1])
@@ -117,7 +120,7 @@ def shard(a):
     for g in got: enc_add(encs, g[3])
     shapes = collections.Counter()
     for g in got: shapes.update(g[4])
-    certs = formcert.Certs()
+    certs = formcert.Certs(a.certs)
     json.dump(inputs(a), open('%s/inputs_%d.json' % (out, K), 'w'), sort_keys=True)      # what this shard generated from (finish checks that every shard of an image agrees)
     write_texts('%s/texts_%d.txt' % (out, K), texts)
     w = lambda n, rows: open('%s/%s_%d.tsv' % (out, n, K), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
@@ -142,7 +145,7 @@ def lifter_tree():
 
 def inputs(a):
     """the generation inputs of a shard: the exe, the universe, the jump-table facts, the emit mode and the lifter; a change of any of them changes the pack manifest and so the external's tree"""
-    return dict(exe_sha256=sha(a.exe), universe_sha256=sha(os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv')), jtab_sha256=sha(a.jtab), emit=a.emit, lifter_tree_sha256=lifter_tree())
+    return dict(exe_sha256=sha(a.exe), universe_sha256=sha(a.universe), jtab_sha256=sha(a.jtab), emit=a.emit, lifter_tree_sha256=lifter_tree())
 
 
 def image_inputs(d):
@@ -169,10 +172,10 @@ def image(d, ent):
 
 
 def finish(a):
-    import dispgen, fnvlift as L, impgen
+    import fnvlift as L
     out = a.out; pk = out + '/pack'
     for d in (pk + '/u', pk + '/inc'): os.makedirs(d, exist_ok=True)
-    images = [(out, L.universe.load()[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
+    images = [(out, L.universe.load(a.universe)[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
     texts, forms, encs, shapes, shape_fam = {}, collections.defaultdict(lambda: [0, 'none']), {}, collections.Counter(), {}
     for d, ent in images:
         t = image(d, ent)
@@ -194,41 +197,32 @@ def finish(a):
     for x in sorted(texts): units[bucket(x)].append(texts[x])
     for i in range(NBUCKET):
         with open('%s/u/%03x.cpp' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
-    open(pk + '/inc/fnvl_prelude.h', 'w', newline='').write('#ifndef FNVL_PRELUDE_H\n#define FNVL_PRELUDE_H\n' + L.prelude(os.path.join(LIFT, 'rt')) + '\n#endif\n')
-    open(pk + '/inc/imp.h', 'w', newline='').write(L.inline(os.path.join(LIFT, 'rt'), 'imp.h'))
-    syms = {x: 'L_%08x' % x for x in texts}; code = set(syms)
-    imp, blocked, hit, absent = impgen.generate(a.bridge, pk, a.need, a.l3, None)
-    if hit or absent: sys.exit('finish: an import row a loaded image needs has no entry (imp_blocked.tsv)')
-    t = open(pk + '/imp.cpp').read()
-    assert t.startswith('#include "fnvl.h"\n#include "imp.h"\n')
-    open(pk + '/imp.cpp', 'w').write('#include "fnvl_prelude.h"\n' + t.split('\n', 1)[1])
-    assert not set(k for k, *_ in imp) & code
-    kind = {x: 'code' for x in code}                      # the kind of an entry is the producer set its key came from: the keys of texts, the rows of impgen.generate, EH_KEYS (pairwise disjoint)
-    for k, s, *_ in imp:
+    open(pk + '/inc/fnvl_prelude.h', 'w', newline='').write('#ifndef FNVL_PRELUDE_H\n#define FNVL_PRELUDE_H\n' + L.prelude(os.path.join(LIFT, 'rt'), a.gen) + '\n#endif\n')
+    open(pk + "/inc/imp.h", "w", newline="").write(L.inline(os.path.join(LIFT, "rt"), "imp.h", L._GEN[0]))
+    syms = {x: 'L_%08x' % x for x in texts}
+    kind = {x: 'code' for x in syms}                      # the kind of an entry is the producer set its key came from: the keys of texts, EH_KEYS (the import rows are the pack's impgen stage)
+    for k, sy in EH_KEYS:
         assert k not in syms
-        syms[k] = s; kind[k] = 'import'
-    for k, s in EH_KEYS:
-        assert k not in syms
-        syms[k] = s; kind[k] = 'runtime'
+        syms[k] = sy; kind[k] = 'runtime'
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
-    rows = [('%08x' % x, s, kind[x]) for x, s in sorted(syms.items())]
-    w('entries', rows)
-    open(pk + '/entries.tsv', 'a').write(open(pk + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
-    asm, h = dispgen.table(rows)      # the one dispatcher generator (tools/dispgen.py): disp.S is a pure function of the entry rows
-    open(pk + '/disp.S', 'w').write(asm)
+    w('entries', [('%08x' % x, sy, kind[x]) for x, sy in sorted(syms.items())])      # lifted and runtime rows: independent of the loader table
+    open(pk + '/need.tsv', 'w').write(''.join(open(f).read() for f in a.need))      # the import slots the images need (impgen's completeness check); empty = none declared
     w('shapes', [(k, shape_fam[k], n) for k, n in sorted(shapes.items(), key=lambda t: t[0].encode())])      # the universe of formgate: exactly what was lifted
     w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
     nc = sum(1 for v in forms.values() if v[1] == 'sail')
-    res = dict(schema='fnvnx-gate/1', name='l3.liftgen', status='green', images=len(images), universe=[len(e) for _, e in images], entries=len(texts), imports=len(imp), units=NBUCKET + 2,
+    res = dict(schema='fnvnx-gate/1', name='l3.liftgen', status='green', images=len(images), universe=[len(e) for _, e in images], entries=len(texts), units=NBUCKET,
                text_bytes=sum(len(t) for t in texts.values()), forms=len(forms), forms_certified=nc, build='measurement: forms without a certificate %d of %d' % (len(forms) - nc, len(forms)))
     json.dump(res, open(pk + '/gate_liftgen.json', 'w'), sort_keys=True)
     json.dump(dict(format='fnvnx-liftpack-manifest/1', images=[image_inputs(d) for d, _ in images]), open(pk + '/manifest.json', 'w'), sort_keys=True, indent=1)      # generation inputs: part of the external's tree
-    print('finish: images %d, entries %d, imports %d, units %d, text bytes %d, largest unit %d bytes; forms %d (certified %d); dispatcher %d slots, %d hash attempts' % (
-        len(images), len(texts), len(imp), NBUCKET + 2, res['text_bytes'], max(sum(map(len, u)) for u in units.values()), len(forms), nc, len(h['slots']), h['attempts']))
+    print('finish: images %d, entries %d, units %d, text bytes %d, largest unit %d bytes; forms %d (certified %d)' % (
+        len(images), len(texts), NBUCKET, res['text_bytes'], max(sum(map(len, u)) for u in units.values()), len(forms), nc))
 
 
-def recipe(ref, commit, tree):
+GEN_USE = {'root': 'ports/fnv-nx/lift/rt', 'output': 'GEN'}      # the generated rt headers (fnvl_cpuref.h, fnvl_faults.h, fnvl_sys.h): included, not copied
+
+
+def recipe(ref, commit, tree, dest=None):
     """lift/pack/build.json. The recipe is the one definition of the semantic flags (verify/guest_compiler.json flags.semantics, appended to every guest compile stage), so
     the build.json holds only the per-root classes (PACK_ROOT_FLAGS; recipe.PER_ROOT: -O, -W, -D, -std ...), and the plugins are the full set of recipe.PLUGIN_SOURCES in
     load order with recipe.plugin_args(origin) of the pack's declared lifted origin (fnvnx_ftoi mode lifted); the units are the fixed names."""
@@ -236,43 +230,60 @@ def recipe(ref, commit, tree):
     import recipe as R
     keep = lambda fl: [f for f in fl if R.PER_ROOT.fullmatch(f)]
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
-    args = R.plugin_args('lifted')
     plugins = []
     for n, src in R.PLUGIN_SOURCES.items():
-        pl = {'name': n, 'source': src, 'args': args[n]}
-        if R.PLUGIN_INPUTS.get(n): pl['inputs'] = list(R.PLUGIN_INPUTS[n])
-        plugins.append(pl)
+        plugins.append({'name': n})      # source, args and inputs are fixed by recipe.py (PLUGIN_SOURCES/ARGS/INPUTS): a root names the plugin only
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
-           'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
+           'uses': [{'root': 'ports/fnv-nx/loader', 'output': 'BRIDGE_TSV'}, GEN_USE],
+           'include_uses': [GEN_USE],
+           'generated': [{'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['copy', '/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()},
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['imp', '--bridge', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '--need', '/ext/liftpack/need.tsv', '--prelude', 'fnvl_prelude.h', '--out', '/out'],
+                          'inputs': [], 'outputs': ['imp.cpp', 'imp_entries.tsv', 'imp_blocked.tsv']},
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '/out/entries.tsv'],
+                          'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:1', 'path': 'imp_entries.tsv'}], 'outputs': ['entries.tsv']},
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '/stage/entries.tsv', '/out/disp.S'],
+                          'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.S']}],
+           'outputs': {'ENTRIES': 'entries.tsv'},
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
-    os.makedirs(os.path.join(LIFT, 'pack'), exist_ok=True)
-    with open(os.path.join(LIFT, 'pack', 'build.json'), 'w') as f:
+    dest = dest or os.path.join(LIFT, 'pack', 'build.json')
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, 'w') as f:
         json.dump(rec, f, indent=1); f.write('\n')
 
 
-def module_env(name):
+def module_inputs(a):
+    """--module NAME: the module's file, its assigned load base (modules.tsv row) and its universe (tools/universe.py --module output below --facts-out), all from declared inputs"""
     import pemod
-    path, row = pemod.locate(name); u = '%s/%s/universe.tsv' % (os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2'), os.path.splitext(row.name)[0])
-    if not os.path.exists(u): sys.exit('--module %s: no universe %s (tools/universe.py --module)' % (name, u))
-    os.environ.update(FNVNX_EXE=path, FNVNX_BASE='%08x' % row.base, FNVNX_UNIVERSE=u)
-    return path
+    path, row = pemod.locate(a.module, a.modules, a.moddirs.split(':'))
+    u = '%s/%s/universe.tsv' % (a.facts_out, os.path.splitext(row.name)[0])
+    if not os.path.exists(u): sys.exit('--module %s: no universe %s (tools/universe.py --module)' % (a.module, u))
+    a.exe, a.base, a.universe = path, row.base, u
 
 
 def main():
-    ap = argparse.ArgumentParser(); A = ap.add_argument
-    A('--shard'); A('--finish', action='store_true'); A('--recipe', nargs=3, metavar=('REF', 'COMMIT', 'TREE_SHA256')); A('--out', default='/home/user/l3work/liftgen'); A('--jobs', type=int, default=3)
-    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module'); A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
-    A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None); A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
+    ap = argparse.ArgumentParser(description='Every input is an explicit argument: no environment variable, no default path.'); A = ap.add_argument
+    A('--shard'); A('--finish', action='store_true'); A('--recipe', nargs=3, metavar=('REF', 'COMMIT', 'TREE_SHA256')); A('--out'); A('--jobs', type=int, default=3)
+    A('--exe', help='the exe (or, with --module, ignored: the module file is located in --moddirs)'); A('--universe', help='universe.tsv of the image (with --module: derived below --facts-out)')
+    A('--module'); A('--modules', help='modules.tsv (the loader module table)'); A('--moddirs', help='DIR[:DIR...] that hold the module files'); A('--facts-out', help='where tools/universe.py --module wrote the module facts')
+    A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
+    A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--need', action='append', default=[]); A('--l3', default=None)
+    A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
+    A('--gen', help='the GEN output of the lift/rt root (generated headers of the prelude)'); A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
+    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)
+    need = ['out'] + (['universe', 'gen'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
+    miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
+    if miss: ap.error('missing %s' % ' '.join(miss))
+    a.base = None
+    if a.module: module_inputs(a)
+    import fnvlift
+    fnvlift.inputs.configure(**({'universe': a.universe} if a.finish else dict(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys)))
     os.makedirs(a.out, exist_ok=True)
-    if a.module: a.exe = module_env(a.module)
-    if a.finish:
-        if not a.bridge: ap.error('--finish needs --bridge')
-        finish(a)
+    if a.finish: finish(a)
     elif a.shard: shard(a)
     else: ap.error('--shard K/N, --finish or --recipe')
 

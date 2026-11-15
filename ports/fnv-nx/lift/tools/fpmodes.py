@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """W10-A: whole-program static analysis of the floating-point control state of FalloutNV.exe (x87 CW, MXCSR, status
-readers, x87 stack depth). Count-only stdout; site lists under /home/user/l3facts/fpmodes/. Sound = over-approximate:
-anything not decided is reported as unknown. Inputs: FNVNX_EXE, /home/user/l3facts/universe.tsv (read-only). Shared decoder,
+readers, x87 stack depth). Count-only stdout; site lists under --out. Sound = over-approximate:
+anything not decided is reported as unknown. Inputs: --exe, --facts/universe.tsv (read-only). Shared decoder,
 CFG and esp tracking: x86flow.py."""
 import os, sys, hashlib
 from collections import Counter, defaultdict
@@ -10,8 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import x86flow as W
 from x86flow import X, M32, SUB, mn, rn, memslot, Fn, UNC, KINDS, isx87, depth, track, frame_events, load_universe, pmap
 
-EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
-OUT = '/home/user/l3facts/fpmodes'
+EXE = OUT = None        # set by main from the explicit arguments
 T = {}                      # entry -> net x87 depth change at return (nonzero only), set before each wave
 KNOWN = set()
 EAXLIVE = set()             # entries that may read eax at entry (LTCG register args), set before the status pass
@@ -436,7 +435,7 @@ def main():
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
     with Pool(2) as p0:
-        W.prepare(p0, rows, hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:16] + hashlib.md5(raw).hexdigest()[:16])
+        W.prepare(p0, rows)
     with Pool(2) as pool:
         for a, r in pool.imap(work, [(a, e, k, 'all') for a, e, k in rows], chunksize=200):
             res[a] = r
@@ -576,5 +575,8 @@ def main():
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import cli
-    cli.parse('usage: fpmodes.py   x87/SSE control-mode facts of the exe (env FNVNX_FACTS)', sys.argv[1:], (0, 0))
+    _U = 'usage: fpmodes.py --exe FILE --facts DIR --out DIR   x87/SSE control-mode facts of the exe: the exe, the facts directory (universe.tsv, ehtables.json) and the output directory are explicit inputs'
+    _o = cli.parse(_U, sys.argv[1:], (0, 0), {'--exe': True, '--facts': True, '--out': True})[1]
+    if len(_o) != 3: sys.exit(_U)
+    EXE, OUT = _o['--exe'], _o['--out']; W.configure(_o['--facts'])
     main()

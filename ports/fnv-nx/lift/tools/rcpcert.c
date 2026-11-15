@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "../rt/rcpref.h"
+#include "rcpref.h"      /* generated (tools/gen_cpuref.py); the include path is the generated directory */
 typedef uint32_t u32;
 u32 fnvl_rcp32(u32); u32 fnvl_rsqrt32(u32);
 static u32 hw_rcp(u32 b) { float f; memcpy(&f, &b, 4); float r = _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ss(f))); u32 o; memcpy(&o, &r, 4); return o; }

@@ -9,7 +9,7 @@ executable section is no entry (the lifter sends it through the dispatcher). Eac
 indirect jmp / another entry / `ud` (bytes that do not decode: the lifted body raises #UD) / the end of the executable span. Provenance: `proven` = reachable by direct
 flow from entry point, exports, TLS, EH tables or from a pointer whose consumer transfers control (vptr-store run, jump table); `candidate` = known only as a relocated
 pointer target. Byte accounting: every byte of the executable sections is exactly one class (entry body, PE-directory data, padding, relocation slot, dead gap) or is
-reported UNEXPLAINED by reason; the gate is red then. Output: $FNVNX_FACTS_OUT (default /home/user/l3facts2)/<module>/{universe,codemap,ranges,noreturn,outside,imports}.tsv, ehtables.json, gate_codemap.json."""
+reported UNEXPLAINED by reason; the gate is red then. Output: cfg.facts_out/<module>/{universe,codemap,ranges,noreturn,outside,imports}.tsv, ehtables.json, gate_codemap.json."""
 import os, re, sys, json, bisect, hashlib
 from array import array
 from itertools import groupby
@@ -26,9 +26,10 @@ PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-co
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
 
-def run(arg):
-    path, mrow = pemod.locate(arg)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
-    name = os.path.splitext(mrow.name)[0]; outd = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2') + '/' + name; os.makedirs(outd, exist_ok=True)
+def run(arg, cfg):
+    """cfg: modules (the module table), moddirs (list), facts_out, exports_dir (L1's per-module export lists), exe_mnemonics (the exe universe's mnemonic counts): declared inputs, passed by universe.py"""
+    path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
+    name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
     M = pemod.load(path, mrow.base); u32 = M.u32; RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
     T0 = min(a for n, a, z, ro in M.xs); T1 = max(a + z for n, a, z, ro in M.xs); TN = T1 - T0
@@ -174,7 +175,6 @@ def run(arg):
     # ---- rule C: the entry set is closed under the direct control transfers of EVERY entry (proven or candidate), computed with the lifter's own explore: the body of entry e is
     # the descent from e over the range [e, e + span(e)) (span = the universe.tsv extent column: up to the end of the last instruction e reaches), a direct call target is an entry (the lifter emits L_<target>() for every
     # direct call), a direct jmp/jcc/loop target outside the range is an entry; a target outside every executable section is no entry (the lifter sends it through the dispatcher).
-    TRACE = os.environ.get('FNVNX_CLOSURE_TRACE')
     limg = LImage(path, M.base); lcache = {}; clos = {}; closure_new = Counter(); rounds = 0; n_before = 0; JMP = ('loop', 'loope', 'loopne')
     def lc_targets(e, ext):
         k = (e, ext)
@@ -207,7 +207,6 @@ def run(arg):
                     if t in ent: continue
                     if intext(t):
                         viol.setdefault(t, kd)
-                        if TRACE: print('closure-trace round %d: %08x %s from entry %08x ext %d at %08x' % (rounds, t, kd, e, span(e, exts[e]), a_), file=sys.stderr, flush=True)
                     else: outside[e, a_, t] = kd
         if not viol: break      # terminates: every round adds at least one entry and entries are addresses of the executable sections
         for t, k in sorted(viol.items()):
@@ -373,13 +372,12 @@ def run(arg):
                 break
     na = sum(1 for v in pt if v in proven); nb = sum(1 for v in pt if v not in proven and (pe[v - T0] or v in dread)); nc = len(pt) - na - nb
     exe_mn = {}
-    if os.path.exists('/home/user/l3facts/exe_mnemonics.tsv'):
-        for ln in open('/home/user/l3facts/exe_mnemonics.tsv'): k, n = ln.split(); exe_mn[k] = int(n)
+    for ln in open(cfg.exe_mnemonics): k, n = ln.split(); exe_mn[k] = int(n)
     mp = Counter(dec[a][1] for a in pset); new_mn = sorted(((k, n) for k, n in mp.items() if k not in exe_mn), key=lambda kv: (-kv[1], kv[0]))[:60]
     fi = eh.finish(ent)
     exs = [n for n, a, z, ro in M.xs]; green = not why
         # ---- exports against L1's list, imports by DLL, delay imports
-    l1 = {}; l1f = os.path.join(os.path.dirname(os.environ.get('FNVNX_MODULES', pemod.MODULES)), 'exports', mrow.name + '.tsv')
+    l1 = {}; l1f = os.path.join(cfg.exports_dir, mrow.name + '.tsv')
     for ln in (open(l1f) if os.path.exists(l1f) else ()):
         f = ln.rstrip('\n').split('\t')
         if len(f) > 1 and not f[2]: l1[f[0]] = int(f[1], 16)
