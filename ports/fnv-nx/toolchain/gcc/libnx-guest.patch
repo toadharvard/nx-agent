@@ -497,16 +497,13 @@
  
      if (envHasHeapOverride()) {
          addr = envGetHeapOverrideAddr();
-@@ -76,7 +76,11 @@
+@@ -76,7 +76,8 @@
              svcGetInfo(&mem_available, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
              svcGetInfo(&mem_used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
              if (mem_available > mem_used+0x200000)
 -                size = (mem_available - mem_used - 0x200000) & ~0x1FFFFF;
-+            {
-+                // the heap of a 32-bit process cannot exceed its address space: clamp to the largest 2 MiB multiple a size_t holds
-+                u64 want = (mem_available - mem_used - 0x200000) & ~0x1FFFFFull;
-+                size = want > (u64)SIZE_MAX ? (size_t)(SIZE_MAX & ~(size_t)0x1FFFFF) : (size_t)want;
-+            }
++            // Exact by the fact that this process has the 32-bit address space of its NPDM: any heap size the kernel reports for it is below 2^32.
++            size = (size_t)((mem_available - mem_used - 0x200000) & ~0x1FFFFFull);
              if (size==0)
                  size = 0x2000000*16;
          }
