@@ -245,3 +245,9 @@ void na_u7(int *q, int *r);
 void na_u7(int *const q, int *const r) {}
 void na_u8(int *const q, int *const r);
 void na_u8(int *q, int *r) {}
+union __attribute__((fnvnx_key("class"))) NkU;
+union NkU { int a; float b; };
+void nk_u(NkU *p) {}
+union __attribute__((fnvnx_key("struct"))) NkS;
+union NkS { int a; float b; };
+void nk_s(NkS *p) {}

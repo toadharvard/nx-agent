@@ -121,6 +121,8 @@ static std::map<UidKey, int> scope_no;    /* a function-local static or class ->
  */
 static std::map<UidKey, bool> ref_class_key;      /* class (type uid) -> the reference key is `class` */
 static std::map<UidKey, bool> def_class_key;      /* class (type uid) -> its definition had the key `class` */
+static std::map<UidKey, bool> attr_class_key;     /* union (type uid) -> the key of its first declaration (fnvnx_key), true = class */
+static std::map<UidKey, bool> attr_key_present;
 static printer_fn old_decoder;
 
 static bool key_decoder(pretty_printer *pp, text_info *text, const char *spec, int precision, bool wide,
@@ -153,6 +155,16 @@ static bool declared_class(tree t)
   auto d = def_class_key.find(uid_type(t));
   if (d != def_class_key.end()) return d->second;
   return CLASSTYPE_DECLARED_CLASS(t);
+}
+
+/* A union whose first declaration was `class N;` or `struct N;` (the prepare rule UNION1 rewrote that declaration to
+ * `union __attribute__((fnvnx_key("class"))) N;`, since GCC rejects an elaborated declaration of another kind) is
+ * spelled with that key, as cl spells it; any other union is `T`. */
+static char union_letter(tree t)
+{
+  auto it = attr_class_key.find(uid_type(TYPE_MAIN_VARIANT(t)));
+  if (it == attr_class_key.end()) return 'T';
+  return it->second ? 'V' : 'U';
 }
 
 static void start_unit(void *, void *)
@@ -369,7 +381,7 @@ struct M {
       case VOID_TYPE: case BOOLEAN_TYPE: case INTEGER_TYPE: case REAL_TYPE: builtin(t); break;
       case ENUMERAL_TYPE: out += "W4"; type_name(t); break;
       case RECORD_TYPE: out += declared_class(t) ? 'V' : 'U'; type_name(t); break;
-      case UNION_TYPE: out += 'T'; type_name(t); break;
+      case UNION_TYPE: out += union_letter(t); type_name(t); break;
       case POINTER_TYPE: out += ptr_letter(q); if (restrict_p) out += 'I'; type(TREE_TYPE(t), MANGLE); break;
       case REFERENCE_TYPE: out += 'A'; type(TREE_TYPE(t), MANGLE); break;   /* cl ignores a qualifier on a reference */
       case OFFSET_TYPE:
@@ -557,7 +569,7 @@ struct M {
     if (TREE_CODE(a) == TEMPLATE_DECL) {
       tree t = TREE_TYPE(a);
       if (!t || !CLASS_TYPE_P(t)) { fail("template template argument"); return; }
-      out += TREE_CODE(t) == UNION_TYPE ? 'T' : declared_class(t) ? 'V' : 'U';
+      out += TREE_CODE(t) == UNION_TYPE ? union_letter(t) : declared_class(t) ? 'V' : 'U';
       source_name(IDENTIFIER_POINTER(DECL_NAME(a)));
       contexts(CP_DECL_CONTEXT(a), a);
       out += '@';
@@ -1329,10 +1341,25 @@ static tree handle_cc(tree *node, tree name, tree args, int, bool *no_add_attrs)
   return NULL_TREE;
 }
 
+static tree handle_key(tree *node, tree name, tree args, int, bool *no_add_attrs)
+{
+  tree v = args ? TREE_VALUE(args) : NULL_TREE;
+  tree t = TYPE_P(*node) ? *node : (DECL_P(*node) ? TREE_TYPE(*node) : NULL_TREE);
+  if (!v || TREE_CODE(v) != STRING_CST || !t || TREE_CODE(t) != UNION_TYPE
+      || (strcmp(TREE_STRING_POINTER(v), "class") && strcmp(TREE_STRING_POINTER(v), "struct"))) {
+    error("%qE takes \"class\" or \"struct\" on a union", name); *no_add_attrs = true; return NULL_TREE;
+  }
+  UidKey k = uid_type(TYPE_MAIN_VARIANT(t));
+  if (!attr_key_present[k]) { attr_key_present[k] = true; attr_class_key[k] = !strcmp(TREE_STRING_POINTER(v), "class"); }   /* the first wins */
+  *no_add_attrs = true;
+  return NULL_TREE;
+}
+
+static struct attribute_spec key_attr = { "fnvnx_key", 1, 1, false, true, false, false, handle_key, NULL };
 static struct attribute_spec cc_attr = { "fnvnx_cc", 1, 1, false, true, true, false, handle_cc, NULL };
 static struct attribute_spec sdd_attr = { "fnvnx_sdd", 3, 3, true, false, false, false, NULL, NULL };
 
-static void register_attrs(void *, void *) { register_attribute(&cc_attr); register_attribute(&sdd_attr); }
+static void register_attrs(void *, void *) { register_attribute(&cc_attr); register_attribute(&sdd_attr); register_attribute(&key_attr); }
 
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)
 {
