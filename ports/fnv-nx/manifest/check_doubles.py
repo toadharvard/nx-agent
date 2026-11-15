@@ -6,8 +6,9 @@ and a test links the real product files of its root.
 
 Product  = the guest runtime units (toolchain/guest/build.sh: the .c of its `for f in` line and the .cpp it compiles) and the units
            platform/build_guest.sh compiles for the guest: depth-1 *.c / *.cpp of platform/{win32,crt,audio,
-           input,boundary,com,os} platform/clock/clock_rt.cpp, clock_real.cpp (clock_virtual.cpp is
-           the verification clock, also a product choice: both clocks are product units), platform/guest/os_guest.c and
+           input,boundary,com,os} platform/clock/clock_rt.cpp, clock_real.cpp and clock_virtual.cpp (the build selects the clock by FNVNX_VCLOCK: the
+           product links clock_real, the platform@vclock variant links clock_virtual; each file is compiled only in its own build, so both are units of the
+           platform root and each is a product unit of the build that links it), platform/guest/os_guest.c and
            platform_glue.cpp.  The set is read from platform/build_guest.sh itself, so it cannot drift from the build.
 Test file = every .o of a test binary's link line that is not a product unit (the product's third-party FreeType objects and
            archives are not test files and are not read).

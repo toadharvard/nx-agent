@@ -41,6 +41,8 @@ LDFLAGS = ["-m", "aarch64elf32", "-pie", "--no-dynamic-linker", "-z", "text", "-
 GUEST = r'''
 #include <stdint.h>
 #include "fnvnx/hostapi.h"
+#include "fnvnx/placement.h"
+#define CPU_MAIN FNVNX_CPU_SPEC(FNVNX_DEFAULT_CORE, 1u << FNVNX_DEFAULT_CORE)   /* thread_create's cpu: a spec, ideal in mask */
 const FnvnxHostApi *fnvnx_host;
 #define H (fnvnx_host)
 typedef struct { int32_t d_tag; uint32_t d_val; } Dyn;
@@ -204,7 +206,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("hint-ok-overlap", plat(4, 0x20010000, 0x10000, 0, 2));
     num("tact-nothread", plat(2, 99, 1, 0, 2));
     num("tact-tid0", plat(2, 0, 1, 0, 2));
-    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
+    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, CPU_MAIN);
     num("tact-new", plat(2, id, 1, 0, 2));
     fnvnx_hcall1(H->thread_start, id);
     num("tact-pause", plat(2, id, 1, 0, 2));
@@ -297,7 +299,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     g_v1 = SM(s, 0, 0, 0x2000); g_v2 = SM(s, 0, 0, 0x2000);
     W32(g_v1) = 0xA5A5;
     for (uint64_t k = 1; k <= 2; k++) {
-        uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(sec_worker), k, 0x10000, 0, ~0ull);
+        uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(sec_worker), k, 0x10000, 0, CPU_MAIN);
         fnvnx_hcall1(H->thread_start, id);
         while (sflag != k) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&sflag), k - 1, ~0ull);
         fnvnx_hcall1(H->thread_join, id);
@@ -328,7 +330,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("mod9-unreg", EC(9, 1, FNVNX_ADDR(v), 1));
     num("mod12-fn-huge", EC(12, 0x100000001ull, 0, 0));
     num("fn0", EC(11, 0, FNVNX_ADDR(v), 4));
-    num("fn37", EC(11, 37, FNVNX_ADDR(v), 4));
+    num("fn39", EC(11, 39, FNVNX_ADDR(v), 4));
     num("te-n4", EC(11, 36, FNVNX_ADDR(v), 4));
     num("te-null-array", EC(11, 36, 0, 5));
     num("self-n0-null", EC(11, 35, 0, 0));
@@ -437,8 +439,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
 #elif MODE == 46
     /* thread and directory ids, wait/wake */
 #define THR(f, a) fnvnx_hcall1(H->f, a)
-    uint64_t h1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
-    uint64_t h2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 78, 0x10000, 0, ~0ull);
+    uint64_t h1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, CPU_MAIN);
+    uint64_t h2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 78, 0x10000, 0, CPU_MAIN);
     num("h1-id", h1 != 0 && (h1 >> 16) != 0); num("h-distinct", h1 != h2);
     num("start-unknown", THR(thread_start, 0x12345)); num("start-zero", THR(thread_start, 0));
     num("join-unknown", THR(thread_join, 0x12345)); num("join-never-started", THR(thread_join, h2));
@@ -451,7 +453,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("join-freed", THR(thread_join, h1)); num("start-freed", THR(thread_start, h1));
     num("prio-freed", fnvnx_hcall2(H->thread_set_priority, h1, 1)); num("act-freed", plat(2, h1, 1, 0, 2));
     num("free-unknown", THR(thread_free, 0x12345));
-    uint64_t h3 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 79, 0x10000, 0, ~0ull);
+    uint64_t h3 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 79, 0x10000, 0, CPU_MAIN);
     num("h3-new-generation", h3 != h1 && h3 != h2 && (h3 >> 16) != (h1 >> 16));
     THR(thread_start, h3);
     num("free-running", THR(thread_free, h3));
@@ -476,8 +478,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("wake-unal", fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&flag) + 2, 1));
     num("wake-unmapped", fnvnx_hcall2(H->wake_address, 0x30000000, 1));
     num("wake-prot-none", fnvnx_hcall2(H->wake_address, H->heap_base + 0x320000, 1));
-    uint64_t w1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 1, 0x10000, 0, ~0ull);
-    uint64_t w2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 2, 0x10000, 0, ~0ull);
+    uint64_t w1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 1, 0x10000, 0, CPU_MAIN);
+    uint64_t w2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 2, 0x10000, 0, CPU_MAIN);
     THR(thread_start, w1); THR(thread_start, w2);
     fnvnx_hcall1(H->sleep_ns, 1000000);
     num("wake-all", fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&wf), 0x80000000ull));
@@ -486,9 +488,9 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     uint64_t cnt = 0, last = 0, x;
     while ((x = THR(fs_dir_open, FNVNX_ADDR("sdmc:/"))) != 0) { cnt++; last = x; }
     num("dirs-until-full", cnt);
-    num("thread-when-full", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull));
+    num("thread-when-full", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, CPU_MAIN));
     num("close-one", THR(fs_dir_close, last));
-    num("thread-after-close", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull) != 0);
+    num("thread-after-close", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, CPU_MAIN) != 0);
 #elif MODE == 47
     uint64_t b[8];
     for (int i = 0; i < 8; i++) b[i] = 0xABABABABABABABABull;
@@ -566,13 +568,13 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("self-free", fnvnx_hcall1(H->thread_free, s2));
     num("self-free-again", fnvnx_hcall1(H->thread_free, s2));
     num("self-use-freed", plat(2, s2, 0, 0, 2));
-    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(self_worker), s1, 0x10000, 0, ~0ull);
+    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(self_worker), s1, 0x10000, 0, CPU_MAIN);
     fnvnx_hcall1(H->thread_start, w);
     while (sflag2 == 0) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&sflag2), 0, ~0ull);
     mainran = 1;
     fnvnx_hcall1(H->thread_join, w);
     num("pause-by-worker", tcount);   /* 100 + pause result 0 + 10 * main-ran-while-paused 0 + 1000 * resume result 0 */
-    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, ~0ull);
+    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, CPU_MAIN);
     num("act-new", plat(2, c, 1, 0, 2));
     num("start", fnvnx_hcall1(H->thread_start, c));
     num("start-again", fnvnx_hcall1(H->thread_start, c));
@@ -600,8 +602,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     say("after the pause\n");
 #elif MODE == 55
     uint64_t me = plat(35, 0, 0, 0, 0);
-    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(rec_worker), 0, 0x10000, 0, ~0ull);
-    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, ~0ull);
+    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(rec_worker), 0, 0x10000, 0, CPU_MAIN);
+    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, CPU_MAIN);
     num("not-started-pause", plat(2, c, 1, 0, 2));
     fnvnx_hcall1(H->thread_start, c);
     num("resume-running", plat(2, c, 0, 0, 2));       /* not paused */
@@ -621,7 +623,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("no-record", plat(2, 0x7777, 1, 0, 2));
 #elif MODE == 56
     static FnvnxWireSockaddr to, lo;
-    static FnvnxWireAddrinfo recs[3];
+    static uint32_t recs[4];   /* the 16-byte tz_at record (hostapi.h TZ_AT); the sockwire getaddrinfo record type was deleted with the GAI services */
     static char buf[4];
     uint32_t ec = 0x77;
     uint64_t h1 = sk(16, 3, 2, 1, 0, 0, 0), h2 = sk(16, 3, 2, 2, 17, 0, 0);
@@ -730,7 +732,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     p[0] = 9;
     uint64_t t1 = fnvnx_hcall0(H->system_tick), t2 = fnvnx_hcall0(H->system_tick);
     num("tickdiff", t2 - t1);
-    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
+    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, CPU_MAIN);
     num("thread", id);
     fnvnx_hcall1(H->thread_start, id);
     uint64_t r = 0;
@@ -954,8 +956,8 @@ def main():
     case("limit_host_calls ends with reason limit", rl["reason"] == "limit" and rl["host_calls"] == 3, rl)
 
     n_slots = sum(1 for n in bootmachine.SLOTS if callable(getattr(boothost.Services, "h_" + n, None)))
-    case("46 slots, all resolved at construction", len(bootmachine.SLOTS) == 46 == n_slots
-        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root)).handlers) == 46)
+    case("45 slots, all resolved at construction", len(bootmachine.SLOTS) == 45 == n_slots
+        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root)).handlers) == 45)
 
     class NoPad(boothost.Services):
         h_pad_read = None
@@ -1093,17 +1095,16 @@ def main():
          "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
     sw = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire.h")).read()
     lst = lambda name: [int(v, 0) for v in re.findall(r"X\(\w+, (\w+)\)", re.search(r"#define " + name + r"\(X\)((?:[^\n]*\\\n)*[^\n]*)", sw).group(1))]
-    nums = dict(re.findall(r"#define FNVNX_(WE_\w+|WEAI_\w+) (\d+)", sw))
-    eai = dict(re.findall(r"X\(EAI_(\w+), (\d+)\)", sw))
-    case("machine's wire constants equal the fixture sockwire.h (errno numbers, AF and type lists, AI mask, EAI numbers, POLLNVAL)",
+    nums = dict(re.findall(r"#define FNVNX_(WE_\w+) (\d+)", sw))
+    swe = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire_errno.h")).read()   # the generated errno list (manifest/gen_wire_errno.py)
+    errs = dict(re.findall(r"X\((E\w+), (\d+)\)", swe))
+    case("machine's wire constants equal the hostabi headers (errno numbers, AF and type lists, POLLNVAL; the getaddrinfo services are not in the ABI)",
          tuple(lst("FNVNX_WIRE_AF_LIST")) == bootmachine.WIRE_AF and tuple(lst("FNVNX_WIRE_SOCKTYPE_LIST")) == bootmachine.WIRE_SOCKTYPE
-         and functools.reduce(lambda x, y: x | y, lst("FNVNX_WIRE_AI_LIST")) == bootmachine.WIRE_AI_MASK
-         and int(nums["WE_INVAL"]) == bootmachine.WE_INVAL and int(nums["WE_FAULT"]) == bootmachine.WE_FAULT
-         and int(nums["WE_OVERFLOW"]) == bootmachine.WE_OVERFLOW
-         and (int(eai["BADFLAGS"]), int(eai["NONAME"]), int(eai["FAMILY"]), int(eai["SOCKTYPE"])) == (
-             bootmachine.WEAI_BADFLAGS, bootmachine.WEAI_NONAME, bootmachine.WEAI_FAMILY, bootmachine.WEAI_SOCKTYPE)
-         and "X(EBADF, 9)" in sw and "X(EAFNOSUPPORT, 97)" in sw and int(re.search(r"FNVNX_WPOLLNVAL (0x\w+)", sw).group(1), 16) == bootmachine.WPOLLNVAL,
-         (nums, eai))
+         and int(nums["WE_INVAL"]) == bootmachine.WE_INVAL
+         and (int(errs["EFAULT"]), int(errs["EOVERFLOW"]), int(errs["EBADF"]), int(errs["EAFNOSUPPORT"])) == (
+             bootmachine.WE_FAULT, bootmachine.WE_OVERFLOW, bootmachine.WE_BADF, bootmachine.WE_AFNOSUPPORT)
+         and int(re.search(r"FNVNX_WPOLLNVAL (0x\w+)", sw).group(1), 16) == bootmachine.WPOLLNVAL,
+         (nums, errs.get("EFAULT")))
 
     class NoMsg(boothost.Services):
         plat_message = None
@@ -1114,7 +1115,7 @@ def main():
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every served non-socket fn of module 11 (1..9, 11..14, 34, 35, 36) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 10), *range(11, 15), 34, 35, 36])
+    case("every served non-socket fn of module 11 (1..9, 11..14, 34..38) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 10), *range(11, 15), 34, 35, 36, 37, 38])
 
     class NoSec(boothost.Services):
         plat_section_map = None
@@ -1185,10 +1186,10 @@ def main():
 
     # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
     rows, hslots = parse_totality(os.path.join(HOSTABI_DIR, "fnvnx", "hostapi.h"))
-    SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37]
+    SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37, 38]
     mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root))
-    case("header: 30 services of module 11 and 46 slots parsed", len(rows) == 30 and sorted(rows) == SERVED
-         and len(hslots) == 46, (len(rows), len(hslots)))
+    case("header: 31 services of module 11 and 45 slots parsed", len(rows) == 31 and sorted(rows) == SERVED
+         and len(hslots) == 45, (len(rows), len(hslots)))
     case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
          and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
     served_decl = {f for f in rows if f in mach0.plat or f in bootmachine.SOCK_SERVICES}
@@ -1226,8 +1227,8 @@ def main():
             bad[nm] = "null array with nargs > 0"
     case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs, BAD_NARGS on a null array and a value for zero arguments",
          not bad, bad)
-    case("services: fn 0, 10, 15, 27..29, 32, 33 and 37.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
-         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 10, 15, 27, 28, 29, 32, 33, 37, 38, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
+    case("services: fn 0, 10, 15, 27..29, 32, 33 and 39.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
+         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 10, 15, 27, 28, 29, 32, 33, 39, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
          and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
          and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
     try:
@@ -1240,7 +1241,7 @@ def main():
     r40, l40 = run(built[40][0], root)[:2]
     k = kv(l40)
     NOMOD, NOSVC, BADN, EINVAL = "ffffffffffffff01", "ffffffffffffff02", "ffffffffffffff03", "ffffffffffffffea"
-    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn37": NOSVC, "te-n4": BADN, "te-null-array": BADN, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
+    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn39": NOSVC, "te-n4": BADN, "te-null-array": BADN, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
               "sock-null-array-n0": EINVAL, "sock-null-array-exact": BADN, "fn0-null-array": NOSVC,
               "fn-u32max": NOSVC, "fn-above-u32": NOSVC, "fn10-nargs1": NOSVC, "vm-reserve-n1": BADN, "null-array": BADN,
               "docked-n0-null": "0", "docked-n1-null": BADN, "docked-n3": "0", "docked-ncap": "0", "boost-extra-args": "0",
@@ -1336,7 +1337,7 @@ def main():
     case("ids: thread and directory ids are table handles (unknown / freed -> NotFound, never started -> BadInput, 1024 live together, "
          "a freed id never names anything again); dir_next cap 0 / cut; wait / wake alignment and readability; wake count above "
          "0x7FFFFFFF wakes all (%d values)" % len(want46), r46["reason"] == "exit" and not bad, (bad, r46))
-    case("ids: thread_set_cpu with a negative spec changes nothing", run(built[46][0], root)[3].placement.get(1) == {"cpu": 2, "prio": 3},
+    case("ids: thread_set_cpu with a negative spec changes nothing", run(built[46][0], root)[3].placement.get(1) == {"ideal": 2, "mask": 4, "prio": 3},
          "")
 
     r47, l47 = run(built[47][0], root)[:2]

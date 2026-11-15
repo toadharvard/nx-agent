@@ -465,5 +465,36 @@
    "at": "/ext/linuxerrno"
   }
  ],
- "sources": "freetype/units.list"
+ "sources": "freetype/units.list",
+ "variants": {
+  "vclock": {
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_PLATFORM_BUILD",
+     "-Werror=attributes",
+     "-DFT2_BUILD_LIBRARY",
+     "-DFNVNX_VCLOCK=1"
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-std=gnu++20",
+     "-DFNVNX_SDD=1",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DSTDMETHODCALLTYPE=",
+     "-DFNVNX_PLATFORM_BUILD",
+     "-Werror=attributes",
+     "-DFNVNX_VCLOCK=1"
+    ],
+    "asm": []
+   }
+  }
+ }
 }
