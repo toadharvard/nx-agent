@@ -249,3 +249,8 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - The first stop is ELF 509809b3: 0xC000001D (illegal instruction) after `init d3dx9_38.dll`. L4 is classifying it. If it is a #UD-class site (CPUREF cleared feature, no-SDM encoding), it is L3b's together with L3a.
 - "Call economy" (integration 0e4c31db2) is passed to w4 and w9.
 - 10:40Z: the boot-loop order is WITHDRAWN (integration 4674ce3e9), so no measurement-run stops are routed to L3b. The path items stand as before.
+
+## 2026-11-15 13:00Z — queue v3 progress
+- 4/54 shards complete (15, 29, 30, 42): 1,349 proved, 31 model-gap, 1 timeout, 0 failed. Running aggregate: l3b-lift/certsagg/7c3074644653-f3eb5096ad36/54-4d4b7448fed5 (w4, rerun every 45 min).
+- Checked: shards 29, 30 and 42 hold disjoint shape sets (345 each, overlap 0).
+- Farm 05 has been disconnected since 10:08 and none of K=1-14 has started; it is asked to restart. Farms 07/11/12 each run 2-3 at once (min(nproc, mem/6 GB) on 4 cores / 16 GB), about 22 h for the rest.
