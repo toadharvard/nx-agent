@@ -3,7 +3,7 @@
 only by code we wrote and certified. Four checks, each total over its universe.
     python3 -I ports/fnv-nx/lift/proof/gate_fpexact.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/fpexact.json
 No argument is read. Universe convention of the object-level gates (gate_build.quantify, as gate_objstub / gate_linkstrict): the admitted product
-roots of verify/admit.json; each root is built or taken from the cache by gate_build.ensure (GATE_CACHE, else GATE_OUT/fpexact-cache) and its
+roots of verify/admit.json; each root is built or taken from the cache by gate_build.ensure (GATE_CACHE: the verdict's one store, always set by l1.py) and its
 objects (objects.json "objects") are judged; no product root: universe 0, green. The loader modules (gate_build, recipe) are imported from
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
 All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]), `read_f2i_paths` (objects.json -> {unit: the plugin's file of
@@ -503,7 +503,7 @@ def main(argv):
     if argv or "GATE_OUT" not in os.environ:
         sys.stderr.write("usage: gate_fpexact.py   (no arguments; env GATE_OUT, optional GATE_CACHE; cwd = checkout root)\n")
         return 1
-    cache = os.environ.get("GATE_CACHE") or os.path.join(os.environ["GATE_OUT"], "fpexact-cache")
+    cache = os.environ["GATE_CACHE"]      # the verdict's one store (l1.py always sets it): no cache of this gate's own
     os.makedirs(cache, exist_ok=True)
     memo = []
 

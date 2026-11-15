@@ -176,7 +176,7 @@ def flags_repo(name, code, cache, extra_entries=()):
 def main():
     subprocess.run(["git", "init", "-q", "--bare", ART], check=True)
     os.environ["ARTIFACTS_URL"] = ART
-    cache = os.path.join(BASE, "cache")
+    cache = os.environ["GATE_CACHE"]      # the verdict's one store (l1.py sets it); no cache of this test's own
     # --- no root of these kinds: universe 0, green, all three gates (a host root with C++ is no item either)
     host = tp.make_repo("host", tp.REC, "native")
     for n in ("order", "addr32", "eh", "flags"):

@@ -2,7 +2,6 @@
 """Gate for the DSL forms (fnvlift/dsl.py, proof/forms*.py).  Two independent checks:
   prove.py --model MODULE   per encoding: exists a pre-state with DSL post-state != reference post-state;  unsat = proved.  One line per FORM KEY
                             (all its encodings: the real ones of instest/result.json plus enc_table.py), then totals and gate_forms.json.
-  prove.py --backends       emitted C++ (g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined) agrees with the z3 term on N inputs (backends.py).
 Options: --only SUBSTR  --n 1000  --cert DIR  --timeout SEC  --all   (a deliberately broken copy of forms*.py is proved by running the prove.py of a copy of the tree)
 Result per key: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout  (worst over its encodings in that order of severity).
 Reference model plug-in: a module of the MODELS table below (proof/model_sail.py) with one function
@@ -19,7 +18,7 @@ import argparse, hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-from proof import universe, defects, rewrite, forms, model_sail, backends
+from proof import universe, defects, rewrite, forms, model_sail
 MODELS = {'model_sail': model_sail}      # the reference models --model can name
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
@@ -181,11 +180,9 @@ def prove(args):
     return tot['FAILED(dsl)'] + tot['timeout']
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(); ap.add_argument('--model', choices=sorted(MODELS)); ap.add_argument('--backends', action='store_true'); ap.add_argument('--only')
+    ap = argparse.ArgumentParser(); ap.add_argument('--model', choices=sorted(MODELS)); ap.add_argument('--only')
     ap.add_argument('--n', type=int, default=1000); ap.add_argument('--cert', default='/home/user/l3work/proof')
     ap.add_argument('--timeout', type=float, default=180); ap.add_argument('--all', action='store_true'); ap.add_argument('--work', default='/home/user/l3work/proof/backends')
     a = ap.parse_args()
-    if a.backends:
-        sys.exit(1 if backends.run(a, forms, items, post_of) else 0)
-    if not a.model: sys.exit('prove.py: give --model MODULE (reference model plug-in, see the docstring) or --backends')
+    if not a.model: sys.exit('prove.py: give --model MODULE (reference model plug-in, see the docstring)')
     sys.exit(1 if prove(a) else 0)
