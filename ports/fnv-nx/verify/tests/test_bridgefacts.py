@@ -26,8 +26,8 @@ BF = "ports/fnv-nx/bridgefacts"
 roots = recipe.load_admit(repo)
 check("bridgefacts is an admitted tool root with a recipe", roots.get(BF, {}).get("class") == "tool", roots.get(BF))
 rec = recipe.load_recipe(repo, roots, BF)
-check("it declares the COM rows and words as outputs and uses nothing (a root below every consumer: no uses cycle)",
-      rec["outputs"] == {"COM_ROWS": "com_rows.tsv", "COM_WORDS": "com_words.tsv"} and not rec.get("uses"), rec.get("outputs"))
+check("it declares the COM rows, COM words and d3d9 rows as outputs and uses nothing (a root below every consumer: no uses cycle)",
+      rec["outputs"] == {"COM_ROWS": "com_rows.tsv", "COM_WORDS": "com_words.tsv", "D9_ROWS": "d9bridge_rows.tsv"} and not rec.get("uses"), rec.get("outputs"))
 for r in ("ports/fnv-nx/loader", "ports/fnv-nx/platform"):
     u = recipe.load_recipe(repo, roots, r).get("uses") or []
     check("%s takes COM_ROWS through uses" % r, {"root": BF, "output": "COM_ROWS"} in u, u)

@@ -84,7 +84,7 @@
     "--extra",
     "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
     "--extra",
-    "/ext/manifest/manifest/d9bridge_rows.tsv",
+    "/uses/ports/fnv-nx/bridgefacts/D9_ROWS",
     "--out",
     "/out/gen/bridge.tsv"
    ],
@@ -166,6 +166,10 @@
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "COM_ROWS"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_ROWS"
   }
  ]
 }
