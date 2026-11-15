@@ -45,7 +45,8 @@
    "outputs": [
     "gen/gl4shim_ffp.gen.h",
     "gen/layout/ffp_layout_ps.gen.h",
-    "gen/layout/ffp_layout_vs.gen.h"
+    "gen/layout/ffp_layout_vs.gen.h",
+    "gen/layout/ffp_sets.gen.h"
    ]
   }
  ],

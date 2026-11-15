@@ -60,5 +60,17 @@
    "name": "fnvnx_layout"
   }
  ],
- "link": null
+ "link": null,
+ "uses": [
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "FFP_LAYOUT"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/render/gl4shim",
+   "output": "FFP_LAYOUT"
+  }
+ ]
 }

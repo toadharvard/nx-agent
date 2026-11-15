@@ -2,6 +2,7 @@
 // nx_link_set: the varying link set L = (VS outputs without POSITION0 / PSIZE0) U (PS inputs), empty when every pair is canonical (fnvnx_dk_varying_location >= 0), else the set ascending (shcache_link_set).
 // nx_pair_variant: the translator key flags of the pair (FNVNX_SHADER_VS_COMPLETE iff fnvnx_dk_vs_needs_complete(VS written + FOG0, PS read), FNVNX_SHADER_FLAT_COLOR iff flat) and the link set.
 #include "nx_pair.h"
+#include "ffp_sets.gen.h"
 #include "fnvnx_dk_layout.h"
 #include "fnvnx_shaders.h"
 #include <stdbool.h>
@@ -19,6 +20,19 @@ int nx_link_set(const uint8_t* vs_out, uint32_t nv, const uint8_t* ps_in, uint32
     for (uint32_t i = 1; i < m; i++) { uint8_t v = d[i]; uint32_t q = i; while (q > 0 && d[q - 1] > v) { d[q] = d[q - 1]; q--; } d[q] = v; }
     memcpy(l, d, m); *nl = m; return 0;
 }
+// The pairs of the fixed-function stages' declared varyings: the pairs whose canonical location (fnvnx_dk_varying_location, a bijection of the 224 (usage, index) codes' canonical subset onto 0..30)
+// is one of the locations the stage's GLSL declares (ffp_sets.gen.h, read from ffp.vert.glsl / ffp.frag.glsl by gen_glsl.py). Total: a location is a member of the set or not, no value is outside the domain.
+static uint32_t ffp_pairs(const unsigned char* loc, uint32_t n, uint8_t* out) {
+    uint32_t m = 0;
+    for (uint32_t u = 0; u < 14; u++) for (uint32_t i = 0; i < 16; i++) {
+        int c = fnvnx_dk_varying_location((int)u, (int)i); bool in = false;
+        for (uint32_t k = 0; k < n; k++) in |= c >= 0 && loc[k] == c;
+        if (in) out[m++] = FNVNX_DK_PAIR(u, i);
+    }
+    return m;
+}
+uint32_t nx_pair_ffp_vs_writes(uint8_t out[31]) { return ffp_pairs(nx_ffp_vs_write_loc, sizeof nx_ffp_vs_write_loc, out); }
+uint32_t nx_pair_ffp_ps_reads(uint8_t out[31]) { return ffp_pairs(nx_ffp_ps_read_loc, sizeof nx_ffp_ps_read_loc, out); }
 enum nx_gl4shim_stage_id nx_pair_ffp_vs_row(bool flat) { return flat ? NX_GL4SHIM_STAGE_FFP_VS_FLAT : NX_GL4SHIM_STAGE_FFP_VS_SMOOTH; }
 enum nx_gl4shim_stage_id nx_pair_ffp_ps_row(bool flat) { return flat ? NX_GL4SHIM_STAGE_FFP_PS_FLAT : NX_GL4SHIM_STAGE_FFP_PS_SMOOTH; }
 int nx_pair_variant(const uint8_t* vs_pairs, uint32_t nv, uint8_t ps_major, const uint8_t* ps_pairs, uint32_t np, uint32_t flat, uint32_t* vs_variant, uint32_t* ps_variant, uint8_t* l, uint32_t* nl) {
