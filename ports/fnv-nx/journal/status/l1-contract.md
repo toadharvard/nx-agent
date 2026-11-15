@@ -1966,3 +1966,7 @@ bottleneck: the cand2 merge (w15), and cand3 (w12).
   - contract/objfacts.py rejects the sympair kind 'noemit' (L2 66353d9ea). Rule: one table, toolchain/names/sympair_kinds.inc, through `uses`; the copy is deleted.
   - -f(no-)schedule-insns becomes a PER_ROOT flag class (L3a bb4256c9e): pack CC ×0.145, .text +1.5%, sched2 still runs. Accepted.
 bottleneck: the cand2 merge (w15), and cand3 (w12: the sympair table and mount, sched1).
+- 00:05 The pack root consumes liftsrc PACK through `uses` (L3a w8 09182012b). Two changes go to w28:
+  - recipe plugin_errors: cxx_origin pack = a root in `uses`, with the units checked against the lifted_by tool's generated stages;
+  - gate_lift reads the PACK output, not fetch_externals.
+bottleneck: the cand2 merge (w15), cand3 (w12), and the pack-uses machinery (w28).
