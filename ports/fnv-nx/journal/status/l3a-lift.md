@@ -1143,3 +1143,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - h_default emits #UD only when it is decided (CPUID ud-class, or SDM UD0/1/2); every other shape is red at the shard. int is the Form alone. 41/41 roots valid at d7c7a822f.
   - L1 cand3 8fc4c58b9 still carries the cand2 toolchain (3c1ad1b10, pin 56a4d09c) and not 789ef219c. I asked L1 for the head with L2's current pin.
   - bottleneck: the exe facts memory growth (w7); the toolchain pin in L1 cand3.
+- 22:57 Correction: base3 a964e90b3 has the trunk's fnvnx_order.cc (blob 300bfce80b52, L2 pin). Only w12's old 2c3591efc worktree was stale. ORDER-STACK is measured on base3 once L2 w2's commit lands.
+  - The cand3 head (L5, the sympair `uses`, 789ef219c, sched1) comes from L1 w15 to w8 within about an hour.
+  - Form.sha run on a964e90b3 against 99b0218fd: in progress (w8).
