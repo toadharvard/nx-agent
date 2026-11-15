@@ -796,6 +796,30 @@ def root_edges(rec, root=None, roots=None, repo=None):
         objects_of_roots(rec, root, roots, repo) if isinstance(rec, dict) and roots else [])
 
 
+def generated_trees(roots, repo, files=None):
+    """{root: sorted directories a generate stage of its recipe writes into}: `<root>/<dirname of an output>` for every output with a directory part, that holds
+    no tracked file (FILES, default: the tracked files of REPO). These are generated trees; no other root includes from them (a consumer takes the declared
+    output through `uses`). Read from the admitted recipes at REPO; a root without a readable recipe has none."""
+    files = tracked(repo) if files is None else files
+    out = {}
+    for r, e in roots.items():
+        if not e.get("recipe"):
+            continue
+        try:
+            rec = json.load(open(os.path.join(repo, e["recipe"])))
+        except (OSError, ValueError):
+            continue
+        ds = set()
+        for g in rec.get("generated", []) if isinstance(rec, dict) and isinstance(rec.get("generated"), list) else []:
+            for o in g.get("outputs", []) if isinstance(g, dict) and isinstance(g.get("outputs"), list) else []:
+                if isinstance(o, str) and "/" in o:
+                    ds.add(r + "/" + os.path.dirname(o))
+        ds = {t for t in ds if not any(under(f, t) for f in files)}
+        if ds:
+            out[r] = sorted(ds)
+    return out
+
+
 def link_roots_cycle(root, roots, repo, seen=()):
     """The cycle through ROOT in the graph of `link.roots` and `uses` between roots, as a list of roots, or None."""
     if root in seen:
@@ -1182,6 +1206,11 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
                        % (d, tg))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
+    # a path into a generated tree of another root is no include: the generated files of a root are its declared outputs, and a consumer takes them through `uses`
+    for d in inc if isinstance(inc, list) else []:
+        for r, g in generated_trees(roots, repo, files).items():
+            if r != root and isinstance(d, str) and not under(d, root) and any(under(d, t) for t in g):
+                err.append("include %r is inside a generated tree of root %r (%s): take its declared output through `uses`" % (d, r, ", ".join(sorted(t for t in g if under(d, t)))))
     # one name, one file, over the whole target: the include dirs of this recipe, of every admitted product root's recipe of the same target
     # and the `include/` dir of each such root; two files of one include-relative path in them make `#include <that/path>` depend on the
     # order of a -I list (the first wins, silently), or on which root builds: a header is in one home only

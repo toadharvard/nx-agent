@@ -298,6 +298,8 @@ P's own repo directories of `include`, transitively, after the consumer's own an
 in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A header root
 (class header) has no recipe and carries nothing; a header it includes from another root is named by the consumer.
 
+**A path into another root.** An `include` entry inside a generated tree of another root (a directory a generate stage of that root writes into that holds no tracked file, `recipe.generated_trees`, for example `platform/freetype/gen/include`) is a check error: a generated file of a root is its declared output, and a consumer takes it through `uses`. The root's own generated tree is not affected.
+
 **Header home.** A directory of a root of class `header` is a valid `include` entry of a root of every target, guest and host alike (`recipe.header_dirs` and the include check are one rule). A product root's own tree is a home only for the targets it has a recipe for; a tool or doc root is no home. A header root's headers may read only header roots and externals.
 
 ## Outputs and uses

@@ -826,6 +826,18 @@
     "ports/fnv-nx/verify/oraclecheck.py"
    ]
   },
+  "test_pathrules.py": {
+   "references": [
+    {
+     "anchor": "## Include",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_plugins.py": {
    "references": [
     {
