@@ -132,21 +132,22 @@ def _plan(a, raw):
     return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, n_stacks=a.threads)
 
 
-MEM_SPEC = re.compile(r"^(x[0-7])((?:->(?:0x[0-9a-fA-F]+|[0-9]+))*):(0x[0-9a-fA-F]+|[0-9]+)$")
+MEM_SPEC = re.compile(r"^(x[0-7])((?:->(?:0x[0-9a-fA-F]+|[0-9]+))*)(?:\+(0x[0-9a-fA-F]+|[0-9]+))?:(0x[0-9a-fA-F]+|[0-9]+)$")
 MEM_MAX = 1 << 16
 
 
 def parse_mem_spec(spec):
-    """`REG(->OFF)*:LEN` -> (reg index, [offsets], len). The address is the 32-bit value of REG (x0..x7); each `->OFF` loads the 32-bit
-    little-endian word at address+OFF and takes it as the new address; LEN bytes (at most 65536) are read there"""
+    """`REG(->OFF)*(+DELTA)?:LEN` -> (reg index, [offsets], len, delta). The address is the 32-bit value of REG (x0..x7); each `->OFF` loads the
+    32-bit little-endian word at address+OFF and takes it as the new address; then DELTA (default 0) is added and LEN bytes (at most 65536 per
+    spec) are read there: a longer object is captured by several specs with growing DELTA"""
     m = MEM_SPEC.match(spec)
     if not m:
-        raise bootmiles.ResolveError("--watch-log: memory spec %r is not REG(->OFF)*:LEN with REG x0..x7" % spec)
+        raise bootmiles.ResolveError("--watch-log: memory spec %r is not REG(->OFF)*(+DELTA)?:LEN with REG x0..x7" % spec)
     offs = [int(t, 0) for t in m.group(2).split("->")[1:]]
-    n = int(m.group(3), 0)
+    n = int(m.group(4), 0)
     if not 0 < n <= MEM_MAX:
         raise bootmiles.ResolveError("--watch-log: memory spec %r: LEN must be 1..%d" % (spec, MEM_MAX))
-    return int(m.group(1)[1:]), offs, n
+    return int(m.group(1)[1:]), offs, n, int(m.group(3), 0) if m.group(3) else 0
 
 
 def parse_until(tok):
@@ -196,14 +197,14 @@ def _watch_names(path, syms):
 
 def read_chain(m, regs, spec):
     """the bytes `spec` (parse_mem_spec) names, or None when a page on the way is not mapped"""
-    reg, offs, n = spec
+    reg, offs, n, delta = spec
     addr = regs[reg] & 0xFFFFFFFF
     for o in offs:
         w = m.peek((addr + o) & 0xFFFFFFFF, 4)
         if w is None:
             return None
         addr = int.from_bytes(w, "little")
-    return m.peek(addr, n)
+    return m.peek((addr + delta) & 0xFFFFFFFF, n)
 
 
 def load_state_request(path):

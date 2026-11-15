@@ -727,8 +727,8 @@ Watch log: --watch-log SYMS (text file, one ELF symbol per line, # starts a comm
 first instruction: OUT.json "watch_log" = [{"seq", "tid", "sym", "pc" (guest-relative), "sp"}], seq from 0 in machine order, no
 sampling, no cap, two names at one address in file order. A name that is absent or not STT_FUNC is an input error naming it.
 Without the option the key is absent.
-Memory at a watched call: a line `NAME [ret] [mem SPEC... [until REG=VALUE]]`, SPEC = `REG(->OFF)*:LEN` (REG x0..x7 as a 32-bit address; each `->OFF` loads the
-32-bit word at address+OFF and takes it as the address; LEN 1..65536 bytes are read there, protection ignored). A name with `mem` records
+Memory at a watched call: a line `NAME [ret] [mem SPEC... [until REG=VALUE]]`, SPEC = `REG(->OFF)*(+DELTA)?:LEN` (REG x0..x7 as a 32-bit address; each `->OFF` loads the
+32-bit word at address+OFF and takes it as the address; DELTA (default 0) is added; LEN 1..65536 bytes are read there, protection ignored; a longer object is several specs with growing DELTA). A name with `mem` records
 also "args" = [w0, w1, w2, w3] and "mem" = {SPEC: hex | null (a page on the way unmapped)}; other records keep their keys.
 `until REG=VALUE` (REG x0..x7): the first call whose REG equals VALUE is the last one recorded with "mem"; later calls of the name carry "args" only.
 State snapshot: --state-at SYM --state-request JSON ({"hash": [{name, lo, hi}], "dump": [{name, addr, len}]}): when SYM is first entered OUT.json
@@ -1144,8 +1144,8 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
                      the entry (0, 0, 0); esp = (stack_base - 16) & ~15 holding the sentinel; console "enter <entry>"       N watch_log args, mem
 Rules no observation can decide are listed in the verdicts as undecided, with the reason.
 S5 details: align is the IMAGE_SCN_ALIGN field of the TLS Characteristics (0 = byte alignment, n = 1 << (n-1)); an image of tls.tsv without a load_index (a
-dynamic image) has no start state and is only fact-checked (sha256 of its template); a block longer than 65536 bytes is compared up to that length and
-the verdict is undecided (the watch log reads at most boot.py MEM_MAX bytes). Two rows on one vector slot (the exe's slot is 0) fail.
+dynamic image) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
+whole block is compared, never a prefix. Two rows on one vector slot (the exe's slot is 0) fail.
 ```
 
 ## verify/cas.py

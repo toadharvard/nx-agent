@@ -29,8 +29,8 @@ RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by th
                      the entry (0, 0, 0); esp = (stack_base - 16) & ~15 holding the sentinel; console "enter <entry>"       N watch_log args, mem
 Rules no observation can decide are listed in the verdicts as undecided, with the reason.
 S5 details: align is the IMAGE_SCN_ALIGN field of the TLS Characteristics (0 = byte alignment, n = 1 << (n-1)); an image of tls.tsv without a load_index (a
-dynamic image) has no start state and is only fact-checked (sha256 of its template); a block longer than 65536 bytes is compared up to that length and
-the verdict is undecided (the watch log reads at most boot.py MEM_MAX bytes). Two rows on one vector slot (the exe's slot is 0) fail.
+dynamic image) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
+whole block is compared, never a prefix. Two rows on one vector slot (the exe's slot is 0) fail.
 """
 import argparse
 import hashlib
@@ -350,8 +350,10 @@ def vec_spec(obs):
     return "x2->0x2c:%d" % (4 * n)
 
 
-def block_spec(o):
-    return "x2->0x2c->%d:%d" % (4 * o["idx"], max(1, min(o["size"] + o["zero"], MEM_MAX)))
+def block_specs(o):
+    """the memory specs that capture the whole block (template + zero fill) of the observed image: chunks of at most MEM_MAX bytes"""
+    n = max(1, o["size"] + o["zero"])
+    return ["x2->0x2c->%d%s:%d" % (4 * o["idx"], "+%d" % k if k else "", min(MEM_MAX, n - k)) for k in range(0, n, MEM_MAX)]
 
 
 def request(pe, iat, mods, tls=None):
@@ -362,7 +364,7 @@ def request(pe, iat, mods, tls=None):
     specs = ["x1:16", "x2:%d" % TEB_HEAD, "x2->0x2c:4"]
     if vec_spec(obs) not in specs:
         specs.append(vec_spec(obs))
-    specs += [block_spec(o) for o in obs]
+    specs += [sp for o in obs for sp in block_specs(o)]
     watch = ("# bootstart.py request: the loader's guest entries; mem = [esp] words, the TEB head, the TLS vector, the TLS block of every image of tls.tsv, captured up\n"
              "# to and including the call of the exe entry (S8: ImageBase + AddressOfEntryPoint); later calls record args only\n%s mem %s until x0=0x%08x\n" % (
                  LIFT, " ".join(specs), pe["base"] + pe["entry_rva"]))
@@ -560,15 +562,14 @@ def check(doc, console, pe, expect_sha, iat, modules, modfacts, tls=None, iat_da
             for o in obs:
                 w = vec[4 * o["idx"]:4 * o["idx"] + 4] if vec and len(vec) >= 4 * o["idx"] + 4 else None
                 got = int.from_bytes(w, "little") if w else None
-                blk = mem(c0, block_spec(o))
+                parts = [mem(c0, sp) for sp in block_specs(o)]
+                blk = None if any(p is None for p in parts) else b"".join(parts)
                 want = o["tmpl"] + bytes(o["zero"])
                 if not got or got % o["align"] or blk is None:
                     v.fail.append("%s: vector slot %d = %s: not a block address at the alignment %d, or the block is unmapped" % (
                         o["name"], o["idx"], got is not None and "0x%08x" % got, o["align"]))
-                elif blk != want[:len(blk)] or (len(want) <= MEM_MAX and len(blk) != len(want)):
+                elif blk[:len(want)] != want:
                     v.fail.append("%s: the main thread's TLS block is not the template followed by %d zero bytes" % (o["name"], o["zero"]))
-                elif len(want) > MEM_MAX:
-                    v.undec.append("%s: the block is %d bytes, the watch log reads %d: the rest is not observed" % (o["name"], len(want), MEM_MAX))
         else:
             vec0 = mem(c0, "x2->0x2c:4")
             got = int.from_bytes(vec0, "little") if vec0 else None

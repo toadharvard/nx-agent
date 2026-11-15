@@ -252,6 +252,31 @@ def main():
         case("read_tls: the rows of tls.tsv with their templates", [r["name"] for r in rd] == ["FalloutNV.exe", "m.dll"] and rd[1]["bin"] == DLLT and rd[0]["idx"] is None
              and rd[1]["idx"] == 1 and rd[0]["callbacks"] == [0x1010], rd)
         case("read_modules: the load index, bases and has_tls", bs.read_modules(open(P("modules.tsv")).read())["m.dll"] == MF["m.dll"], bs.read_modules(open(P("modules.tsv")).read()))
+    # blocks over 64 KiB: captured whole, in chunks; pass and fail, never undecided for size
+    big = bytes((i * 31 + 7) & 0xFF for i in range(70000))
+    TB = [TLS[0], dict(TLS[1], size=70000, end=0x10003000 + 70000, zero=100, sha=hashlib.sha256(big).hexdigest(), bin=big)]
+    obs, errs = bs.tls_plan(bs.parse_pe(EXE), TB, MF)
+    ob = [o for o in obs if o["name"] == "m.dll"][0]
+    sp = bs.block_specs(ob)
+    case("a block over 64 KiB is captured by chunk specs of <= MEM_MAX with growing +DELTA", errs == [] and len(sp) == 2 and sp[0] == "x2->0x2c->4:65536" and sp[1] == "x2->0x2c->4+65536:4564", (errs, sp))
+    case("request lists every chunk", all(x in bs.request(bs.parse_pe(EXE), IAT, MF, TB)[0] for x in sp))
+    want = big + bytes(100)
+
+    def bigdoc(mut=None, drop=None):
+        d, c = good()
+        for k, x in enumerate(sp):
+            d["watch_log"][0]["mem"][x] = want[k * 65536:k * 65536 + 65536][:4564 if k else 65536].hex() if mut is None or k != mut else (
+                bytes([want[k * 65536] ^ 1]) + want[k * 65536 + 1:k * 65536 + 4564]).hex()
+        if drop is not None:
+            d["watch_log"][0]["mem"][sp[drop]] = None
+        return d, c
+    d, c = bigdoc()
+    v = run(d, c, tls=TB)["S5"]
+    case("S5 pass: a block over 64 KiB equal to template + zero fill (no undecided)", v.verdict() == "pass", (v.fail, v.undec))
+    d, c = bigdoc(mut=1)
+    case("S5 fail: a byte beyond 64 KiB differs", run(d, c, tls=TB)["S5"].verdict() == "fail")
+    d, c = bigdoc(drop=1)
+    case("S5 fail: the second chunk is unmapped", run(d, c, tls=TB)["S5"].verdict() == "fail")
     # S5
     d, c = good()
     d["start_state"]["dump"]["tls_index"]["hex"] = "01000000"
@@ -335,8 +360,13 @@ def main():
     del d["watch_log"][2]
     case("S8 fail: the entry is never called", only("S8", d, c)[0] == "fail")
     # boot.py's grammar of the new observation requests
-    case("mem spec: x2->0x2c->0:16 = reg 2, offsets [0x2c, 0], 16 bytes", boot.parse_mem_spec("x2->0x2c->0:16") == (2, [0x2C, 0], 16))
-    for bad in ("x9:4", "x1", "x1:0", "x1:0x20000", "x1->:4", "sp:4"):
+    case("mem spec: x2->0x2c->0:16 = reg 2, offsets [0x2c, 0], 16 bytes", boot.parse_mem_spec("x2->0x2c->0:16") == (2, [0x2C, 0], 16, 0))
+    case("mem spec: a +DELTA after the chain", boot.parse_mem_spec("x2->0x2c->4+65536:100") == (2, [0x2C, 4], 100, 65536) and boot.parse_mem_spec("x1+0x10:4") == (1, [], 4, 16))
+    class Pk:
+        def peek(self, a, n):
+            return (a.to_bytes(4, "little") + bytes(n))[:n] if a < 0x1000 else None
+    case("read_chain adds DELTA after the last load", boot.read_chain(Pk(), [0, 0x100, 0, 0], boot.parse_mem_spec("x1+8:4")) == (0x108).to_bytes(4, "little"))
+    for bad in ("x9:4", "x1", "x1:0", "x1:0x20000", "x1+:4", "x1->:4", "sp:4"):
         try:
             boot.parse_mem_spec(bad)
             case("mem spec error: " + bad, False)
