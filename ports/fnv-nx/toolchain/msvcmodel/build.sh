@@ -297,8 +297,10 @@ open(site, "w").write("".join("ac_cv_func_%s=%s\n" % (r["name"], r["answer"]) fo
 json.dump({"rule": "CFG-FUNC", "configure": "libstdc++-v3/configure", "funcs": rows}, open(out, "w"), indent=1)
 print("CFG-FUNC: %d functions, %d yes" % (len(rows), sum(r["answer"] == "yes" for r in rows)))
 EOF3
-  export CONFIG_SITE=$W/config.site
-  note "target libraries: configure answers ac_cv_func_* from the built runtime (CONFIG_SITE=config.site, $P/CFG-FUNC.json)"
+  # The top Makefile runs every target configure with CONFIG_SITE=no-such-file, so the answers go in as the cache variables of the
+  # environment, which configure honours as presets (autoconf "Cache variables": a set ac_cv_* is not re-tested).
+  set -a; . "$W/config.site"; set +a
+  note "target libraries: configure answers ac_cv_func_* from the built runtime (environment presets, $P/CFG-FUNC.json)"
   note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC' CXXFLAGS_FOR_TARGET='$TLCXX'"
   make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > make-libs.log 2>&1
   make -C b-gcc install CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > install-libs.log 2>&1
