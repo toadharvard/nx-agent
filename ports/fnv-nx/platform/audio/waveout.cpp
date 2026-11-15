@@ -179,7 +179,7 @@ void start_threads()   /* g_lock held */
 {
     if (g_threads) return;
     /* the thread lives for the process; its os_thread record is never freed (the thread reads its own) */
-    os_thread *t = os_thread_create(deliver_loop, NULL, 512 * 1024, 2, OS_THREAD_ROLE(OS_ROLE_AUDIO));
+    os_thread *t = os_thread_create(deliver_loop, NULL, 512 * 1024, 2, FNVNX_THREAD_ROLE(FNVNX_ROLE_AUDIO));
     if (t) os_thread_start(t);
     g_threads = 1;
 }
