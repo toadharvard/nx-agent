@@ -766,3 +766,7 @@ Paused: w3b, w4, farm; no other work.
     - Fix (w6, doing): union of the records by id from cand2 and 532f139f1, minus 628/629; then the gate re-run.
     - Merge rule "registry is union-by-id" sent to L1 w15.
 - 09:42Z Message discipline (integ 933d7dc5f): send a message only when the receiver must act, one per finished item, with priority "later". It goes into each worker's next brief.
+- 09:47Z w6
+    - done: render/pair 5d572a5eb. Recipe check valid; d3d9total 332/332.
+    - doing: the registry union-by-id restore. Still 0 ASM-6xx records at 5d572a5eb.
+    - blocked: the d3d9 and pair builds and onedef wait on cand2 a3e251cfb, owner L1. Causes: the plugin stage is missing aarch64-protos.h; envcheck has no record_problems. Forwarded to L1.
