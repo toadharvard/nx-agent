@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """sm_table.py - generate sm_table.json (the machine-readable SM1-3 language definition), sm_illegal.tsv, sm_legacy.tsv and fnvnx_sm_rows.h.
-  python3 -I sm_table.py --docs DIR --wine DIR --vkd3d DIR --recipe build.json --out DIR   (recipe step of this root: the three reference trees are its externals)
+  python3 -I sm_table.py --docs DIR --wine DIR --vkd3d DIR --cites DIR --recipe build.json --out DIR   (recipe step of this root: the reference trees are its externals; --cites is the Wine 9.0 tree whose file lines the decision records cite)
 Opcode model sets: MS version tables (per instruction page); cross-checked against wine wined3d + vkd3d d3dbc (set, operand counts);
 registers: MS register tables vs wine d3dcompiler asmparser tables.  Disagreements -> `conflicts`; facts nobody states -> `undetermined`."""
 import argparse, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
-import sm_docs, sm_xref
+import sm_docs, sm_xref, sm_decisions
 from sm_rules import *
 from sm_rules2 import *
 from sm_legacy import legacy_rows
@@ -53,7 +53,7 @@ def build(a):
         put(st, key, num, set(next(iter(vt.values()))) & MOD_ALL, MS + "instructions/" + page + " (version table)", dict(d=None, s=[], decl=True, tm=key))
     for (st, key), (mods, src) in MANUAL_MODELS.items(): put(st, key, D[key]["num"], set(mods), src, dict(D[key]))
     # ---- cross-check (stage, opcode number): MS union vs wine vs vkd3d ----
-    conflicts, xr, resolved = [], {}, []
+    conflicts, xr, mism = [], {}, {}
     by = {}
     for k, e in ops.items():
         if e.get("opnum") is not None: by.setdefault((k[:2], e["opnum"]), set()).update(e["models"])
@@ -61,11 +61,7 @@ def build(a):
         w = set(sm_xref.models_of(wine.get((st, n), []), st)); v = set(sm_xref.models_of(vk.get((st, n), []), st))
         ok = ms == v and ms <= w     # wine shader_sm1.c is a decoder table (min/max 0 = unconstrained): wine wider than MS+vkd3d is silence, not disagreement
         xr[(st, n)] = dict(ms=sorted(ms, key=ALL.index), wine=sorted(w, key=ALL.index), vkd3d=sorted(v, key=ALL.index), status="agree" if ok else "conflict")
-        if not ok:
-            rec = dict(kind="opcode_models", id="%s:%d" % (st, n), ms=xr[(st, n)]["ms"], wine=xr[(st, n)]["wine"], vkd3d=xr[(st, n)]["vkd3d"])
-            if ms <= v and v <= w:    # R1: both decoders (wine: unconstrained = silence; vkd3d: explicit version range) accept every model of MS and vkd3d's range adds models -> legal set = vkd3d's range
-                resolved.append(dict(rec, rule="R1", resolution="legal models = vkd3d d3dbc.c range (a superset of the MS table, accepted by the wine decoder); the MS version table is a summary that is narrower than the token decoders; no source states the extra models illegal"))
-            else: conflicts.append(dict(rec, note="MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION"))
+        if not ok: mism[(st, n)] = xr[(st, n)]
     for k, e in ops.items():
         if e.get("opnum") is not None: e["xref"] = xr[(k[:2], e["opnum"])]["status"]
     # opcodes the two implementations list for a stage but MS has no page for
@@ -82,6 +78,10 @@ def build(a):
                 for (nd, ns, lo, hi) in tab.get((k[:2], e["opnum"]), []):
                     if sm_xref.in_range(m, lo, hi) and nd + ns != mine and m not in e.setdefault("opcount_diff", {}):
                         e["opcount_diff"][m] = dict(mine=mine, **{nm: nd + ns})
+    # every disagreement of MS, wine and vkd3d on an opcode's model set is a decided record of sm_decisions (its id names the opcode; its `vkd3d` list is the table's)
+    dec = {c["id"]: c for c in sm_decisions.CONFLICTS if c["kind"] == "opcode_models"}
+    assert set(dec) == {"%s:%d" % k for k in mism}, ("opcode model disagreements without a decision record, or records without a disagreement", sorted(set(dec) ^ {"%s:%d" % k for k in mism}))
+    for k, x in mism.items(): assert dec["%s:%d" % k]["vkd3d"] == x["vkd3d"], k
     # registers: wine tables
     wr = sm_xref.wine_regs(a.wine)
     regx = []     # wine's tables are lenient (shared vs_2_0/2_x, ps_2_0 temps 32): a conflict is a MS register wine lacks or wine's count below MS's
@@ -98,48 +98,46 @@ def build(a):
             if bad: regx.append((m, r, "count_ms=%s wine=%s" % (n, wn)))
     for m, r, why in regx:
         conflicts.append(dict(kind="register", id="%s:%s" % (m, r), note=why, ms_src=REG_SRC[m], wine="asmparser.c %s" % sm_xref.WINE_TABLE[m]))
-    R4 = "R4 closed world: the universe holds every form that no source states illegal; legality of such a form is a validator fact (sm_illegal.tsv lists only forms a source states illegal); the translator's acceptance of each row is checked by sm_run, never decided by it"
-    undet = []
-    resolved += [
-     dict(kind="undetermined", id="vs_a0_src", rule="R4", resolution="rows included (family_srcreg: a0 as ALU source, vs_1_1..vs_3_0). " + R4, evidence="MS vs register tables list a0 R/W; wine asmparser.c allows; no page states it illegal as a source"),
-     dict(kind="undetermined", id="vs_bi_alu", rule="R4", resolution="rows included: i# and b# as ALU sources in vs. " + R4 + " Translator item (not a universe item): a b# source is a SCALAR bool operand (vkd3d d3dbc.c: VSIR_DATA_BOOL, VSIR_DIMENSION_SCALAR in the CONSTBOOL case of the operand reader); the numeric value a vec4 ALU op reads from it is not defined by MS, wine or vkd3d, so the translator's bool-to-vec4 form (rejected by uam) needs that definition", evidence="MS vs-registers-vs-2-0/2-x/3-0: b# row (Constant Boolean Register, 16, R, 1 read port) carries no flow-control note; the ps pages' 'Only usable by a flow control instruction' note (ps-registers-ps-2-0/2-x) is on ps pages only; wine asmparser.c vs_2_reg_allowed/vs_3_reg_allowed list CONSTBOOL/CONSTINT as source register types with no instruction restriction; vkd3d d3dbc.c reads CONSTBOOL as an operand of any instruction"),
-     dict(kind="undetermined", id="mov_a0_vs2", rule="R4", resolution="rows included (mov to a0 in vs_2_0..vs_3_0). " + R4, evidence="MS mova page says mova's dst must be a0; no page states mov-to-a0 illegal in vs_2_0+; mov-to-a0 is documented for vs_1_1"),
-     dict(kind="undetermined", id="vs1_0_ps1_0", rule="R4", resolution="rows included as the 1_1 grammar (version token 1.0). " + R4, evidence="no MS asm page lists vs_1_0/ps_1_0 and none states them illegal; wine/vkd3d decoders carry ranges from 1_0 (ps texreg2gb {1,0}-{1,3})"),
-     dict(kind="undetermined", id="temp_uninit_flow", rule="R4", resolution="rows included (read of a temp written only inside if/rep). " + R4, evidence="MS states the uninitialised-read rule for ps_1_x only; the sm2/3 pages are silent"),
-     dict(kind="undetermined", id="rcp_mask", rule="R4", resolution="rows included (single-component masks plus the full mask). " + R4, evidence="MS vs masking page says single component for exp/expp/log/logp/pow/rcp/rsq; ps pages silent; the validator side of a full mask in vs is a CreateVertexShader fact"),
-    ]
-    resolved.append(dict(kind="operand_count", id="vs:sgn@vs_3_0", rule="R2", resolution="sgn in vs_3_0 has ONE source (dst, src0): the 3-source form is illegal in vs_3_0 (sm_illegal.tsv); vs_2_0/2_x keep dst,src0,src1,src2",
-                         evidence="MS sgn---vs: one syntax line for all versions (no per-version operand count); wine shader_sm1.c {SGN,1,2,...(3,0)} and vkd3d d3dbc.c {SGN,1,1,{3,0}} both fix 3_0 at one source, and {2,0}-{2,1} at three. The token decoders are version-exact where the MS syntax line is not"))
+    assert not conflicts, ("disagreements without a decision record", conflicts)
+    mirror = {"ms": os.path.join(a.docs, "desktop-src", "direct3dhlsl"), "wine": a.cites}
+    for rid, cites in sm_decisions.CHECKS.items():       # a citation is checked, not trusted
+        assert rid in {c["id"] for c in sm_decisions.CONFLICTS + sm_decisions.UNDETERMINED}, rid
+        for kind, f, n, quote in cites:
+            t = open(os.path.join(mirror[kind], f), encoding="utf8").read().split("\n")
+            assert (quote in t[n - 1]) if kind == "ms" else any(quote in l for l in t[n - 1:n + 14]), "%s citation %s:%d lacks %r" % (kind, f, n, quote)
+    assert {c["id"] for c in sm_decisions.CONFLICTS + sm_decisions.UNDETERMINED} == set(sm_decisions.CHECKS), "a decision record without a citation check"
+    conflicts, undet = list(sm_decisions.CONFLICTS), list(sm_decisions.UNDETERMINED)
     models = {m: dict(stage=stage(m), major=int(m[3]), minor=1 if m[5] == "x" else int(m[5]), creatable=True, regs=REG[m], regs_source=REG_SRC[m],
                       srcmods=SRCMOD[m], dstmods=DSTMOD[m], swizzle=SWZ[m], dst_regs=DST_OK[m], src_regs=SRC_OK[m], flow=FLOW_LIM.get(m)) for m in ALL}
     excl = {m: dict(creatable=False, source=MS + "software-shaders: *_sw are 'only supported by software vertex processing and/or a reference device'; this device is a hardware (HAL-like) device") for m in ("vs_2_sw", "vs_3_sw", "ps_2_sw", "ps_3_sw")}
-    excl.update({m: dict(creatable="closed-world", included_in_universe=True, source="not in MS asm reference; see resolved.vs1_0_ps1_0 (R4)") for m in ("vs_1_0", "ps_1_0")})
+    excl.update({m: dict(creatable="undetermined", included_in_universe=True, source="not in MS asm reference; see undetermined.vs1_0_ps1_0") for m in ("vs_1_0", "ps_1_0")})
     ill = []
-    res = legacy_rows(a.legacy_dir, models, ops)
-    return dict(schema=1, ref_commits=dict(wine=a.wine_commit, vkd3d=a.vkd3d_commit, msdocs=a.docs_commit), models=models, excluded_models=excl, opcodes=ops, srcmod_source=SRCMOD_SRC, sat_except_vs=SAT_EXCEPT_VS,
+    res = legacy_rows(a.legacy_dir, models, ops, a)
+    return dict(schema=1, ref_commits=a.pins, models=models, excluded_models=excl, opcodes=ops, srcmod_source=SRCMOD_SRC, sat_except_vs=SAT_EXCEPT_VS,
                 usages=USAGES, usage_source=DCL_SRC, sampler_types={k: v for k, v in SAMPLER_TYPES.items()}, caps=CAPS, env_default=ENV_DEFAULT,
                 writemask=dict(general="any subset in xyzw order (MS ps-registers-modifiers-write-mask / vs-registers-modifiers-masking)",
                                vs_outputs={"oFog": ["", ".x"], "oPts": ["", ".x"], "oPos": [""], "oT": ["", ".x", ".xy", ".xyz"], "note": "oFog/oPts '.x' conflicts: vs page 'must use only one mask', ps page 'no explicit mask'"},
                                ps14="arbitrary r,g,b,a order from 1_4; ps_1_1-1_3: .rgba .rgb .a only"),
-                swizzle_forms=SWZ_FORMS, instruction_limits=INSTR_LIMITS, conflicts=conflicts + res["conflicts"], undetermined=undet, resolved=resolved + res["resolved"],
-                legacy=res["rows"]), regx
+                swizzle_forms=SWZ_FORMS, instruction_limits=INSTR_LIMITS, conflicts=conflicts + res["conflicts"], undetermined=undet,
+                legacy=[r for r in res["rows"] if r["status"] != "illegal"], legacy_illegal=[r for r in res["rows"] if r["status"] == "illegal"]), regx
 
 def pins(recipe):
     """ref_commits: the recipe's own external entries (build.json of this root) are the one record of the pinned reference trees"""
     ex = {e["name"]: e for e in json.load(open(recipe))["external"]}
-    return {n: "fnv-nx-build %s commit %s tree_sha256 %s" % (ex[n]["ref"], ex[n]["commit"], ex[n]["tree_sha256"]) for n in ("msdocs-win32-d3d9", "wine-sm1", "vkd3d")}
+    return {n: "fnv-nx-build %s commit %s tree_sha256 %s" % (ex[n]["ref"], ex[n]["commit"], ex[n]["tree_sha256"]) for n in ("msdocs-win32-d3d9", "wine-sm1", "vkd3d", "wine-9.0-d3d9")}
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--docs", required=True); ap.add_argument("--wine", required=True); ap.add_argument("--vkd3d", required=True)
+    ap.add_argument("--docs", required=True); ap.add_argument("--wine", required=True); ap.add_argument("--vkd3d", required=True); ap.add_argument("--cites", required=True);
     ap.add_argument("--recipe", required=True, help="build.json of this root: the external pins"); ap.add_argument("--out", required=True, help="output directory")
     ap.add_argument("--legacy-dir", dest="legacy_dir", default=HERE)
-    a = ap.parse_args(); p = pins(a.recipe); a.docs_commit = p["msdocs-win32-d3d9"]; a.vkd3d_commit = p["vkd3d"]; a.wine_commit = p["wine-sm1"]
+    a = ap.parse_args(); p = pins(a.recipe); a.pins = p
     T, regx = build(a)
     os.makedirs(a.out, exist_ok=True); tj = os.path.join(a.out, "sm_table.json")
+    ill = T.pop("legacy_illegal")
     json.dump(T, open(tj, "w"), indent=1, sort_keys=True)
-    import gen_sm_rows; open(os.path.join(a.out, "fnvnx_sm_rows.h"), "w").write(gen_sm_rows.render(tj))
-    leg = T["legacy"]
+    import gen_sm_rows; os.makedirs(os.path.join(a.out, "inc"), exist_ok=True); open(os.path.join(a.out, "inc", "fnvnx_sm_rows.h"), "w").write(gen_sm_rows.render(tj))
+    leg = T["legacy"] + ill
     with open(os.path.join(a.out, "sm_legacy.tsv"), "w") as o:
         o.write("model\tkind\tfeature\tstatus\tsource\n")
         for r in leg: o.write("\t".join([r["model"], r["kind"], r["feature"], r["status"], r["source"]]) + "\n")
@@ -152,7 +150,7 @@ def main():
         for r in leg:
             if r["status"] == "illegal": o.write("\t".join([r["model"], r["kind"], r["feature"], r["source"], r["rule"], "D3DERR_INVALIDCALL", "census legal=?"]) + "\n")
         for m, k, f, src, rule in extra: o.write("\t".join([m, k, f, src, rule, "D3DERR_INVALIDCALL", "census legal=y"]) + "\n")
-    ops = T["opcodes"]; print("opcodes", len(ops), "conflicts", len(T["conflicts"]), "undetermined", len(T["undetermined"]), "resolved", len(T["resolved"]))
+    ops = T["opcodes"]; print("opcodes", len(ops), "conflicts", len(T["conflicts"]), "undetermined", len(T["undetermined"]))
     for c in T["conflicts"]: print(" ", c["kind"], c["id"], c.get("note", "")[:90])
     d = [(k, e["opcount_diff"]) for k, e in ops.items() if e.get("opcount_diff")]
     print("opcount diffs", len(d)); [print("  ", k, v) for k, v in d[:40]]

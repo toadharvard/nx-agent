@@ -7,7 +7,8 @@ guards uncertified (red):
   enum header value / enumerator dropped (per switched enumeration E)  -> header mismatch [E], every enum value red
   front switch over E made a switch over int (per E)                    -> E insensitive, exactly enum:E:* red
   front loses one case label                                             -> front does not build, every enum value red
-  sm_table row changed, rows header not regenerated / regenerated        -> rows header not generated / translator red, every SM row red
+  generated sm_table row changed (table and rows header from one run)    -> translator red, every SM row red
+  rows generator drops the comparison lines                              -> header off the layout, every SM row red
   tree_sha256 of the translator recipe's mojoshader external wrong      -> every SM row red
   opcode-value / stage / comparison assertion dead in the mirror         -> exactly the OP rows / OP rows / rows with a comparison red
   PHASE token not consumed by the parser                                 -> exactly sm:ps:phase red
@@ -27,7 +28,9 @@ sys.path.insert(0, TOTAL)
 import gate_d3d9total as G  # noqa: E402
 
 SWITCHED = G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["SWITCHED"]
-OPS = json.load(open(os.path.join(PORT, "render", "shaders", "total", "sm_table.json")))["opcodes"]
+CACHE = os.path.join(tempfile.mkdtemp(prefix="t-d3d9total-"), "cache")   # the one cache of this test (a test does not see GATE_CACHE)
+os.makedirs(CACHE)
+OPS = json.load(open(G.total_output("gen/sm_table.json", CACHE)))["opcodes"]   # the generated table, read as the gate reads it
 SM_ALL = ["sm:" + k for k in sorted(OPS)]
 SM_OP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0]
 SM_CMP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0 and "cmp" in OPS[k]]
@@ -39,9 +42,14 @@ def git(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
+# the SM language definition is a stage output of the root render/shaders/total: the scratch repository holds the recipe machinery and that root
+# (the generator, its recipe, its decision records), so the gate builds it in the shared cache as it does in the verdict
+SM_MACHINERY = ["verify", "render/shaders/total", "contract"]
+
+
 def scratch(base):
     """a git repository holding the gate and its declared inputs at the same paths"""
-    files = git(REPO, "ls-files", "-z", "--", *[G.PORT_REL + "/" + p for p in G.INPUTS + ["render/total/gate_d3d9total.py"]]).split("\0")
+    files = git(REPO, "ls-files", "-z", "--", *[G.PORT_REL + "/" + p for p in G.INPUTS + ["render/total/gate_d3d9total.py"] + SM_MACHINERY]).split("\0")
     os.makedirs(base)
     for f in sorted(x for x in files if x):
         d = os.path.join(base, f)
@@ -143,12 +151,18 @@ def mut_case(base):
     open(front, "w").write(t[:m.start()] + t[m.end():])
 
 
-def mut_table(regen):
-    def f(base):
-        edit(base, "render/shaders/total/sm_table.json", lambda t: re.sub(r'("ps:add": \{[^}]*"opnum": )2\b', r"\g<1>3", t, count=1))
-        if regen:
-            subprocess.run([sys.executable, "-I", p(base, "render/shaders/total/gen_sm_rows.py")], check=True)
-    return f
+TOTAL = "render/shaders/total"
+
+
+def mut_table(base):
+    """one table row changed in the generator, before both the table and the rows header are written (one run makes both)"""
+    edit(base, TOTAL + "/sm_table.py", lambda t: t.replace('    ill = T.pop("legacy_illegal")\n',
+         '    ill = T.pop("legacy_illegal")\n    T["opcodes"]["ps:add"]["opnum"] += 1\n', 1))
+
+
+def mut_layout(base):
+    """the rows generator emits no comparison line: the header no longer follows the layout the gate locates rows by"""
+    edit(base, TOTAL + "/gen_sm_rows.py", lambda t: t.replace('        if "cmp" in r:', '        if False:', 1))
 
 
 MIRROR = {}   # filled by main(): {"ext": the recipe's mojoshader external entry, "cache": the gate cache, "tmp": scratch root}
@@ -194,8 +208,8 @@ for _e in SWITCHED:
     CASES["header-drop:" + _e] = (mut_drop(_e), ENUM_ALL, [_e])
     CASES["front-untyped:" + _e] = (mut_untyped(_e), enum_ids(_e), [])
 CASES["front-case-missing"] = (mut_case, ENUM_ALL, [])
-CASES["table-not-generated"] = (mut_table(False), SM_ALL, [])
-CASES["table-wrong-opcode"] = (mut_table(True), SM_ALL, [])
+CASES["table-wrong-opcode"] = (mut_table, SM_ALL, [])
+CASES["rows-layout-broken"] = (mut_layout, SM_ALL, [])
 CASES["tree-hash-wrong"] = (lambda b: edit(b, "render/shaders/translator/build.json", lambda t: t.replace(translator_ext(b)["tree_sha256"], "0" * 64)), SM_ALL, [])
 CASES["value-assert-dead"] = (mut_patch(VALUE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
 CASES["stage-assert-dead"] = (mut_patch(STAGE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
@@ -247,10 +261,9 @@ def tree_hash_vs_cas(tmp, cache):
 
 
 def main():
-    tmp = tempfile.mkdtemp(prefix="t-d3d9total-")
+    tmp = os.path.dirname(CACHE)
     try:
-        cache = os.path.join(tmp, "cache")
-        os.makedirs(cache)
+        cache = CACHE
         MIRROR.update(cache=cache, tmp=tmp)
         base = scratch(os.path.join(tmp, "base"))
         rc, res = run_gate(base, cache)      # also fills the cache before the parallel cases

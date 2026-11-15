@@ -20,7 +20,7 @@ Deletes the files the CMake profile set of build.sh does not build: `mojoshader_
 programs. Adds `mojoshader_version.h`, which CMake wrote with `MOJOSHADER_VERSION -1` and `MOJOSHADER_CHANGESET "???"` (build.sh's shallow
 clone has no HEAD~, so CMake's git step always gave "???"). Result: 13 units, all built today by `ninja mojoshader`.
 `fnvnx_sm_rows.h` is not in the patch: it is a recipe `generated` python step (`total/gen_sm_rows.py`, input `total/sm_table.json`,
-output byte-equal to the committed `total/fnvnx_sm_rows.h`, which `gen_sm_rows.py --check` compares).
+output byte-equal to `gen/inc/fnvnx_sm_rows.h` of the render/shaders/total stage).
 
 uam patches (`uam_gen.patch`, `uam_nomain.patch`) were removed: generated content is not tracked. See journal/inbox/l6-render-w1b.md, "after the first frame".
 

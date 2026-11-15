@@ -1,8 +1,26 @@
 """sm_legacy.py - resolves the 168 legal=? rows of the previous census (render/total/census/sm_ops.tsv) against sm_table facts.
 status: legal | illegal | conflict | unreachable-doc.  Illegal rows carry the documented validator rule (-> sm_illegal.tsv)."""
-import os, sys
+import os, re, sys
+EXCL = re.compile(r"\b(only|cannot|can not|must not|not supported|not allowed|not valid)\b", re.I)
+PAGE_PREFIX = "dx9-graphics-reference-asm-"
+def r3_v_reladdr(a):
+    """R3 (prose against a table cell, CLAUDE.md "Where the Microsoft page is narrower"): the prose of vs-3-0 that names the indexable banks overrides the RelAddr cell of the
+    v# row of the vs_3_0 register table only when that sentence carries an exclusion word (only, cannot, must not, not supported, not allowed, not valid); the Wine 9.0
+    vkd3d decoder line is the corroboration. Everything is read from the pinned pages: no exclusion word in the sentence and a0 in the cell -> v[a0.x] is legal."""
+    base = os.path.join(a.docs, "desktop-src", "direct3dhlsl")
+    pl = open(os.path.join(base, PAGE_PREFIX + "vs-3-0.md"), encoding="utf8").read().split("\n")
+    rp = PAGE_PREFIX + "vs-registers-vs-3-0.md"; rl = open(os.path.join(base, rp), encoding="utf8").read().split("\n")
+    sent = next(x for l in pl for x in re.split(r"(?<=[.:])\s+", l) if "can be indexed" in x)
+    col = [c.strip() for c in next(l for l in rl if l.startswith("| Register")).strip("|").split("|")].index("RelAddr")
+    cn, row = next((n + 1, l) for n, l in enumerate(rl) if re.match(r"\| v\\#", l))
+    cell = [c.strip() for c in row.strip("|").split("|")][col]
+    dl = open(os.path.join(a.cites, "libs/vkd3d/libs/vkd3d-shader/d3dbc.c"), encoding="utf8").read().split("\n")
+    d0 = next(n for n, l in enumerate(dl) if l.startswith("static void shader_sm1_read_src_param"))
+    wn = next(n + 1 for n in range(d0, len(dl)) if "has_relative_address(token)" in dl[n])
+    ok = "a0" in cell and not EXCL.search(sent)
+    return ok, "MS:%s:%d (register table: v# RelAddr %s; the 'Indexing Registers' prose describes aL indexing without 'only', so it excludes nothing); corroborated by wine 9.0 libs/vkd3d/libs/vkd3d-shader/d3dbc.c:%d (relative-address token of any source register)" % (rp, cn, cell, wn)
 S1 = "MS:dx9-graphics-reference-asm-"
-def legacy_rows(cdir, models, ops):
+def legacy_rows(cdir, models, ops, a):
     sys.path.insert(0, os.path.abspath(cdir))
     import sm_cases
     out, conf, resolved = [], [], []
@@ -42,9 +60,8 @@ def legacy_rows(cdir, models, ops):
         elif f == "c[a0.x+n]@aL-loop": R(m, k, f, "legal", S1 + "vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)")
         elif f == "o[a0.x]": R(m, k, f, "illegal", S1 + "vs-registers-vs-3-0 (o# RelAddr aL only)", "o# relative addressing only through aL")
         elif f == "v[a0.x]":
-            R(m, k, f, "illegal", S1 + "vs-registers-vs-3-0 ('Indexing Registers': v# indexed 'using the loop counter register (aL)'; the register table's 'a0/aL' RelAddr cell is the row summary; same-page prose wins, as for o#)", "v# relative addressing only through aL in vs_3_0")
-            resolved.append(dict(kind="legacy", id="vs_3_0:v[a0.x]", rule="R3", resolution="v[a0.x] is illegal in vs_3_0 (sm_illegal.tsv); v[aL+n] stays legal",
-                                 evidence="MS vs-registers-vs-3-0: table cell 'a0/aL' vs the same page's prose 'the following register banks can be indexed, using the loop counter register (aL)': prose names the mechanism, the cell lists the column's register types (the same page gives o# 'aL' only, resolved the same way); wine decoder is unconstrained (silence)"))
+            ok, cite = r3_v_reladdr(a)
+            R(m, k, f, "legal" if ok else "illegal", cite, "" if ok else "v# relative addressing only through aL in vs_3_0")
         elif k == "usage":
             R(m, k, f, "legal", S1 + "dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15")
         else: R(m, k, f, "unreachable-doc", "no rule found for %s/%s" % (k, f))
