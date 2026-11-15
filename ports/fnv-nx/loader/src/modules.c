@@ -218,7 +218,7 @@ static int check_table(const fnvnx_proc *p) {
 static int load_one(fnvnx_proc *p, unsigned k) {
     const fnvnx_module_desc *d = &p->cfg.modules[k];
     fnvnx_loaded *L = &p->mod[k];
-    uint8_t sha[32], extra;
+    uint8_t sha[FNVNX_SHA256_DIGEST_SIZE], extra;
     uint8_t *buf;
     int r;
     L->name = d->name;
@@ -229,7 +229,7 @@ static int load_one(fnvnx_proc *p, unsigned k) {
     else fnvnx_sha256(buf, d->file_size, sha);
     p->os->free(p->os->ctx, buf);
     if (r) return r;
-    if (memcmp(sha, d->sha256, 32)) {
+    if (memcmp(sha, d->sha256, FNVNX_SHA256_DIGEST_SIZE)) {
         fnvnx_logf(p->os, "fnvnx-start: identity mismatch: module %s is not the file the table was built from", L->name);
         return FNVNX_START_E_IDENTITY;
     }
