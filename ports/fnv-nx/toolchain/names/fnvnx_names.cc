@@ -567,6 +567,13 @@ struct M {
 
   void targ(tree a)
   {
+    /* an argument pack of an instantiation is its elements, in order: the name of `f<A...>` instantiated with <int, double> is that of `f<int, double>`
+     * (cl's own rule for a pack, where it has packs: the template argument list is flat; an empty pack adds nothing) */
+    if (TREE_CODE(a) == TYPE_ARGUMENT_PACK || TREE_CODE(a) == NONTYPE_ARGUMENT_PACK) {
+      tree v = ARGUMENT_PACK_ARGS(a);
+      for (int i = 0; i < TREE_VEC_LENGTH(v); i++) targ(TREE_VEC_ELT(v, i));
+      return;
+    }
     if (TYPE_P(a)) { type(a, ESCAPE); return; }
     if (TREE_CODE(a) == TEMPLATE_DECL) {
       tree t = TREE_TYPE(a);
@@ -932,6 +939,9 @@ static void name_body(void *gcc_data, void *)
 {
   tree d = (tree)gcc_data;
   if (!d || TREE_CODE(d) != FUNCTION_DECL || !DECL_SAVED_TREE(d) || !TREE_PUBLIC(d)) return;
+  /* the universe of a row is the unit's object: a symbol it defines or references. A template pattern, a member of a class template, a dependent
+   * conversion operator has no symbol and never will (only its instantiations do, and each comes here itself), so it is not named. */
+  if (uses_template_parms(d)) return;
   if (DECL_LANG_SPECIFIC(d) && DECL_MAYBE_IN_CHARGE_CDTOR_P(d) && !DECL_CLONED_FUNCTION_P(d)) return;
   if (early.count(uid_decl(d))) { early_body.insert(uid_decl(d)); return; }
   size_t before = rows.size();
@@ -1342,7 +1352,8 @@ static void finish_unit(void *, void *)
     }
   }
   if (is_cxx()) odr_emit();
-  if (rows.empty() && vtrows.empty()) return;
+  /* every unit the plugin compiles carries the sections, an empty one when the unit names nothing (an empty unit, a body that is #if'd out): the
+   * record of a unit is its object's own fact, so its absence must mean "not compiled by this plugin", never "nothing to say" */
   {
     /* .fnvnx.crossing: the terms of every function row that has an MSVC name, from the same rows as .fnvnx.sympair (a symbol once) */
     std::map<std::string, std::string> cr;

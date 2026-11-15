@@ -101,6 +101,33 @@ def checks(obj):
           sorted({n for n in expect if n.startswith('??_7')} - names_vt))
 
 
+def sections(td, so):
+    """every unit the plugin compiles carries its records, even when the unit names nothing (empty, or a body that is #if'd out); and the universe of
+    the rows is the object's own symbols: a template pattern (variadic, a templated conversion operator, a literal operator template) has no symbol,
+    so it has no row, instantiated or not, and no row is `unnamed:`"""
+    for fx in ('empty', 'ifdef_out'):
+        o = os.path.join(td, fx + '.o')
+        r = pb.compile(os.path.join(HERE, 'names', fx + '.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
+        check('%s: compiles' % fx, r.returncode == 0, r.stderr[-2000:])
+        if r.returncode == 0:
+            have = pb.elfobj.read(o)
+            check('%s: the unit carries .fnvnx.sympair, empty' % fx, have.section('.fnvnx.sympair') == b'', have.section('.fnvnx.sympair'))
+    for inst in (False, True):
+        o = os.path.join(td, 'pattern%d.o' % inst)
+        r = pb.compile(os.path.join(HERE, 'names', 'pattern.cpp'), o, so, flags=pb.PRODUCT_FLAGS + ['-O0'] + (['-DINSTANTIATE'] if inst else []))
+        check('pattern (instantiated: %s): compiles' % inst, r.returncode == 0, r.stderr[-2000:])
+        if r.returncode:
+            continue
+        rows = rows_of(o, '.fnvnx.sympair')
+        st = pb.symbols_of(o)
+        bad = [x for x in rows if x[2].startswith('unnamed')]
+        check('pattern (instantiated: %s): no unnamed row' % inst, not bad, bad)
+        outside = [x[0] for x in rows if x[0] not in st]
+        check('pattern (instantiated: %s): every row is a symbol of the object' % inst, not outside or all(x[2] == 'noemit' for x in rows if x[0] in outside), outside)
+        if inst:
+            check('pattern instantiated: its instantiations are named', {x[1] for x in rows} >= {'??$count@HN@@YAHHN@Z', '??$?BH@C@@QBEHXZ', '??$n@HH@C@@QBEHHH@Z', '??$both@H@?$Pack@HD@@SAHH@Z'}, rows)
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-names-')
     try:
@@ -110,6 +137,7 @@ def main():
         check('compiles', r.returncode == 0, r.stderr[-3000:])
         if r.returncode == 0:
             checks(obj)
+        sections(td, so)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_names-mode=1'])
         check('a plugin argument is an error: the recipe fixes them', pb.argument_refused(r, 'names'), r.stderr[:500])
     finally:
