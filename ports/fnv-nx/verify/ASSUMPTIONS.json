@@ -136,6 +136,246 @@
   {
    "id": "ASM-800",
    "aliases": []
+  },
+  {
+   "id": "ASM-628",
+   "aliases": [
+    "L6:census#37"
+   ]
+  },
+  {
+   "id": "ASM-629",
+   "aliases": [
+    "L6:census#38"
+   ]
+  },
+  {
+   "id": "ASM-601",
+   "aliases": [
+    "L6:census#1"
+   ]
+  },
+  {
+   "id": "ASM-602",
+   "aliases": [
+    "L6:census#2"
+   ]
+  },
+  {
+   "id": "ASM-603",
+   "aliases": [
+    "L6:census#3"
+   ]
+  },
+  {
+   "id": "ASM-604",
+   "aliases": [
+    "L6:census#5"
+   ]
+  },
+  {
+   "id": "ASM-605",
+   "aliases": [
+    "L6:census#6"
+   ]
+  },
+  {
+   "id": "ASM-606",
+   "aliases": [
+    "L6:census#7"
+   ]
+  },
+  {
+   "id": "ASM-607",
+   "aliases": [
+    "L6:census#8"
+   ]
+  },
+  {
+   "id": "ASM-608",
+   "aliases": [
+    "L6:census#10"
+   ]
+  },
+  {
+   "id": "ASM-609",
+   "aliases": [
+    "L6:census#11"
+   ]
+  },
+  {
+   "id": "ASM-610",
+   "aliases": [
+    "L6:census#13"
+   ]
+  },
+  {
+   "id": "ASM-611",
+   "aliases": [
+    "L6:census#15"
+   ]
+  },
+  {
+   "id": "ASM-612",
+   "aliases": [
+    "L6:census#16"
+   ]
+  },
+  {
+   "id": "ASM-613",
+   "aliases": [
+    "L6:census#17"
+   ]
+  },
+  {
+   "id": "ASM-614",
+   "aliases": [
+    "L6:census#19"
+   ]
+  },
+  {
+   "id": "ASM-615",
+   "aliases": [
+    "L6:census#21"
+   ]
+  },
+  {
+   "id": "ASM-616",
+   "aliases": [
+    "L6:census#22"
+   ]
+  },
+  {
+   "id": "ASM-617",
+   "aliases": [
+    "L6:census#24"
+   ]
+  },
+  {
+   "id": "ASM-618",
+   "aliases": [
+    "L6:census#25"
+   ]
+  },
+  {
+   "id": "ASM-619",
+   "aliases": [
+    "L6:census#26"
+   ]
+  },
+  {
+   "id": "ASM-620",
+   "aliases": [
+    "L6:census#27"
+   ]
+  },
+  {
+   "id": "ASM-621",
+   "aliases": [
+    "L6:census#28"
+   ]
+  },
+  {
+   "id": "ASM-622",
+   "aliases": [
+    "L6:census#29"
+   ]
+  },
+  {
+   "id": "ASM-623",
+   "aliases": [
+    "L6:census#30"
+   ]
+  },
+  {
+   "id": "ASM-624",
+   "aliases": [
+    "L6:census#31"
+   ]
+  },
+  {
+   "id": "ASM-625",
+   "aliases": [
+    "L6:census#32"
+   ]
+  },
+  {
+   "id": "ASM-626",
+   "aliases": [
+    "L6:census#33"
+   ]
+  },
+  {
+   "id": "ASM-627",
+   "aliases": [
+    "L6:census#34"
+   ]
+  },
+  {
+   "id": "ASM-630",
+   "aliases": [
+    "L6:census#52"
+   ]
+  },
+  {
+   "id": "ASM-631",
+   "aliases": [
+    "L6:census#53"
+   ]
+  },
+  {
+   "id": "ASM-632",
+   "aliases": [
+    "L6:census#55"
+   ]
+  },
+  {
+   "id": "ASM-633",
+   "aliases": [
+    "L6:census#58"
+   ]
+  },
+  {
+   "id": "ASM-634",
+   "aliases": [
+    "L6:census#59"
+   ]
+  },
+  {
+   "id": "ASM-635",
+   "aliases": [
+    "L6:census#60"
+   ]
+  },
+  {
+   "id": "ASM-636",
+   "aliases": [
+    "L6:census#61"
+   ]
+  },
+  {
+   "id": "ASM-637",
+   "aliases": [
+    "L6:census#64"
+   ]
+  },
+  {
+   "id": "ASM-638",
+   "aliases": [
+    "L6:census#65"
+   ]
+  },
+  {
+   "id": "ASM-639",
+   "aliases": [
+    "L6:census#66"
+   ]
+  },
+  {
+   "id": "ASM-641",
+   "aliases": [
+    "L6:QUEUE-ABI-frontbuffer"
+   ]
   }
  ],
  "entries": [
@@ -1184,7 +1424,7 @@
     "L3b:A-RCPPURE"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC×FTZ×DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
+   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC\u00d7FTZ\u00d7DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
    "owner": "L3b"
   },
   {
@@ -1273,6 +1513,49 @@
    "status": "REMOVE",
    "removed_by": "planned: a gate reads the facts of rules/prepare.py, whose mscgate.check_rule_edit checks every edit of every rule at the moment it is made, so the whole-file count does not rest on it",
    "owner": "L2"
+  },
+  {
+   "id": "ASM-501",
+   "text": "The function boundaries and the forward control flow of the platform manifest passes: a function starts at a prologue pattern and ends at the next one, flow is followed forward only.",
+   "used_by": [
+    "ports/fnv-nx/manifest/funcfacts.py",
+    "ports/fnv-nx/manifest/check_funcfacts.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "fact:ports/fnv-nx/manifest/funcfacts.py",
+   "owner": "L5+L3a",
+   "note": "removed: the passes read the L3a function facts (facts.json pin); gate check_funcfacts.py keeps image bytes and code facts inside funcfacts.py. Enters the registry with the merge of the L5 manifest, the files of used_by being tracked there."
+  },
+  {
+   "id": "ASM-055",
+   "text": "The x86 ISA behaves as the Intel SDM documents it, for the parts that no pinned formal model covers (today the x87 machinery).",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "L3b:x87 reference",
+    "the x86 ISA as the Intel SDM documents it"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers"
+   }
+  },
+  {
+   "id": "ASM-640",
+   "text": "The undocumented d3d9 exports have Wine's signatures.",
+   "used_by": [
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_exports.py"
+   ],
+   "aliases": [
+    "L6:census#70"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: an import fact from the exe and modules. Any export that nothing imports gets a reach-violation certificate; the others need a source.",
+   "owner": "L6+L1"
   }
  ]
 }

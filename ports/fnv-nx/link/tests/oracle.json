@@ -25,6 +25,18 @@
     "ports/fnv-nx/link/abi_msvcname.py"
    ]
   },
+  "test_ctypes.py": {
+   "references": [
+    {
+     "anchor": "## Classes of run-time failure and their gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/ctypes_compat.py"
+   ]
+  },
   "test_exevft.py": {
    "references": [
     {
@@ -112,16 +124,16 @@
     "ports/fnv-nx/link/gate_r7.py"
    ]
   },
-  "test_ice_poly_byvalue.py": {
+  "test_milestones.py": {
    "references": [
     {
-     "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
+     "anchor": "## link/milestones.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/docs/ORDERING.md"
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     }
    ],
    "subject": [
-    "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
+    "ports/fnv-nx/link/milestones.py"
    ]
   },
   "test_odr.py": {
@@ -136,16 +148,17 @@
     "ports/fnv-nx/link/odr.py"
    ]
   },
-  "test_order_cont.py": {
+  "test_order_tags.py": {
    "references": [
     {
-     "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
+     "anchor": "L156-L156",
      "kind": "spec",
-     "path": "ports/fnv-nx/docs/ORDERING.md"
+     "path": "ports/fnv-nx/verify/VERDICT.md"
     }
    ],
    "subject": [
-    "ports/fnv-nx/toolchain/order/fnvnx_order.cc"
+    "ports/fnv-nx/link/a64order.py",
+    "ports/fnv-nx/link/gate_order.py"
    ]
   },
   "test_thisadj.py": {

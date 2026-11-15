@@ -9,6 +9,7 @@
  "result": "assumptions.json",
  "covers": [
   "tool",
-  "ref"
+  "ref",
+  "header"
  ]
 }

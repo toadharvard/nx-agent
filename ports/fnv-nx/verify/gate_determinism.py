@@ -24,8 +24,14 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cas  # noqa: E402
 import gate_build  # noqa: E402
 import recipe  # noqa: E402
+import runtime  # noqa: E402
+import sandbox  # noqa: E402
+import unitstage  # noqa: E402
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def shas(res):
@@ -35,16 +41,26 @@ def shas(res):
     return d
 
 
-def main():
-    items, good, why, repo, secs = [], [], [], ".", []
-    roots, files = recipe.load_admit(repo), recipe.tracked(repo)
-    cache = os.environ.get("GATE_CACHE")
-    ext = os.path.join(cache, "external") if cache else tempfile.mkdtemp(prefix="gate-det-ext-")   # the bare fetch cache is shared, stores are not
-    for root in gate_build.buildable_roots(repo):
-        rec = recipe.load_recipe(repo, roots, root)
-        pre = [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files)] if isinstance(rec, dict) else []
-        runs = []
-        try:
+def judge_root(repo, root, rec, roots, files, ext, cache, warm):
+    """-> {"items", "good", "why", "secs"} of one root: two cold builds in fresh stores (and WARM, the published build of gate_build.ensure) compared by sha256."""
+    items, good, why, secs, ran = [], [], [], [], []
+    pre = [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files)] if isinstance(rec, dict) else []
+    runs = []
+    try:
+        if warm is not None and cache:
+            # Incremental: the second execution lives in a store of its own (GATE_CACHE/detstore, never the store of the build under judgement), whose entries were
+            # all made by this gate. A stage whose key is in it was executed here once and its object compared with the build's: it is not executed again; a stage
+            # with a new key (new source, flags, compiler pin) is executed exactly once. The final objects are compared on every run.
+            tmp, t0 = tempfile.mkdtemp(prefix="gate-det-"), time.time()
+            try:
+                os.makedirs(os.path.join(cache, "detstore"), exist_ok=True)
+                second = recipe.build(repo, root, os.path.join(cache, "detstore"), tmp + "/out", ext=ext)
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+            secs.append(round(time.time() - t0, 1))
+            runs = [second, warm]
+            ran.append((second.get("stages") or {}).get("run", 0))
+        else:
             for n in range(2):
                 tmp, t0 = tempfile.mkdtemp(prefix="gate-det-"), time.time()
                 try:
@@ -52,29 +68,63 @@ def main():
                 finally:
                     shutil.rmtree(tmp, ignore_errors=True)
                 secs.append(round(time.time() - t0, 1))
+            if warm is not None:
+                runs.append(warm)
+    except recipe.RecipeError as e:
+        return {"items": pre, "good": [], "why": ["%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300])], "secs": secs, "ran": ran}
+    a = runs[0]
+    names = ["det", "warm"] if len(runs) == 2 else ["cold 1", "cold 2", "warm"]
+    items += [root + "/" + u for u in a["units"]] + ([root + "/" + rec["link"]["output"]] if rec.get("link") else [])
+    if any(r["status"] == "red" for r in runs):
+        return {"items": items, "good": [], "why": ["%s: build red in %s" % (root, ",".join(n for n, r in zip(names, runs) if r["status"] == "red"))], "secs": secs, "ran": ran}
+    ref, elf = shas(a), root + "/" + (rec["link"]["output"] if rec.get("link") else "")
+    for k in sorted(ref):
+        if all(shas(r).get(k) == ref[k] for r in runs):
+            good.append(elf if k == "<elf>" else root + "/" + k)
+        else:
+            differ = [n for n, r in zip(names, runs) if shas(r).get(k) != ref[k]]
+            why.append("%s differs in %s" % (k, "/".join(differ)))
+    return {"items": items, "good": good, "why": why, "secs": secs, "ran": ran}
+
+
+def main():
+    items, good, why, repo, secs, ran = [], [], [], ".", [], []
+    roots, files = recipe.load_admit(repo), recipe.tracked(repo)
+    cache = os.environ.get("GATE_CACHE")
+    ext = os.path.join(cache, "external") if cache else tempfile.mkdtemp(prefix="gate-det-ext-")   # the bare fetch cache is shared, stores are not
+    for root in gate_build.buildable_roots(repo):
+        rec = recipe.load_recipe(repo, roots, root)
+        warm = None
+        try:
             if cache:
-                runs.append(gate_build.ensure(root, cache, repo)[0])
+                warm = gate_build.ensure(root, cache, repo)[0]
         except recipe.RecipeError as e:
-            items += pre
-            why.append("%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300]))
+            r = {"items": [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files)] if isinstance(rec, dict) else [], "good": [],
+                 "why": ["%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300])], "secs": []}
+            items += r["items"]
+            why += r["why"]
             continue
-        a = runs[0]
-        names = ["cold 1", "cold 2", "warm"]
-        items += [root + "/" + u for u in a["units"]] + ([root + "/" + rec["link"]["output"]] if rec.get("link") else [])
-        if any(r["status"] == "red" for r in runs):
-            why.append("%s: build red in %s" % (root, ",".join(n for n, r in zip(names, runs) if r["status"] == "red")))
-            continue
-        ref, elf = shas(a), root + "/" + (rec["link"]["output"] if rec.get("link") else "")
-        for k in sorted(ref):
-            if all(shas(r).get(k) == ref[k] for r in runs):
-                good.append(elf if k == "<elf>" else root + "/" + k)
-            else:
-                differ = [n for n, r in zip(names, runs) if shas(r).get(k) != ref[k]]
-                why.append("%s differs in %s" % (k, "/".join(differ)))
+        if warm is not None and warm["status"] == "green":
+            # The claim about a root is that two cold builds equal the warm one. A stage key covers every input of its stage (the content it reads, its tool
+            # runtime, flags and environment), so the claim is a function of the root's stage keys and of the code that executes and stores stages: that code's
+            # digest is in the key, and so is env.json. A hit is the claim already proven for exactly these stages.
+            key = {"gate": "determinism", "root": root, "stage_keys": sorted(warm["stage_keys"]), "pp_keys": sorted(warm.get("pp_keys", {}).items()), "du_keys": sorted(warm.get("du_keys", {}).items()),
+                   "objects": [[o["unit"], o["sha256"]] for o in warm["objects"]], "elf": warm["elf"] and warm["elf"]["sha256"],
+                   "tools": gate_build.tool_digest(__file__, recipe, sandbox, unitstage, runtime, cas), "env": gate_build.file_sha(os.path.join(HERE, "env.json"))}
+            r, hit = gate_build.memo(cache, "determinism", key, lambda: judge_root(repo, root, rec, roots, files, ext, cache, warm), keep=lambda v: not v["why"])
+        else:
+            r = judge_root(repo, root, rec, roots, files, ext, cache, warm)
+        if warm is not None and warm["status"] == "green" and hit:
+            r = dict(r, ran=[])   # a memo hit executes nothing
+        items += r["items"]
+        good += r["good"]
+        why += r["why"]
+        secs += r["secs"]
+        ran += r.get("ran", [])
     if not cache:
         shutil.rmtree(ext, ignore_errors=True)
     bad = sorted(set(items) - set(good))
-    detail = "; ".join(why)[:800] or ("%d items equal in %s (cold build seconds %s)" % (len(items), "2 cold + 1 warm build" if cache else
+    detail = "; ".join(why)[:800] or ("%d items equal in %s (cold build seconds %s)" % (len(items), "the build and its second execution (detstore: %d stages executed)" % sum(ran) if cache else
                                                                                      "2 cold builds, no GATE_CACHE so no warm build", secs)
                                       if items else "no product root (nothing to build yet)")
     res = {"format": "fnvnx-gate/1", "name": "determinism", "status": "red" if why else "green", "universe": len(items),

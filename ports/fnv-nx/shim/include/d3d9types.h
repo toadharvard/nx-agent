@@ -8,6 +8,9 @@
 #ifndef FNVNX_SHIM_D3D9TYPES_H
 #define FNVNX_SHIM_D3D9TYPES_H
 #include "fnvnx_win32.h"
+#ifndef __cplusplus
+#include <assert.h>   /* static_assert of the layout checks below (a C translation unit: render/d3d9/front) */
+#endif
 
 #pragma pack(push, 4)
 

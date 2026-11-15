@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/rt/guest/crt0.s ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """Tests for verify/gate_linkstrict.py (class 3): the rules on synthetic objects (compiled with aarch64-linux-gnu-gcc) and the gate on the
 toy product root of test_recipe.py (reused by import). Plain script: PASS/FAIL lines, exit 0 on pass."""
 import json
@@ -97,27 +98,27 @@ for ABI[0] in ("lp64", "ilp32"):
           not {x for x in k if x[0] == "_Z2sqi"} and ("<comdat>", "_Z2sqi") in {(i, n) for i, n in items}, (k, items))
     cd = build("#define K 2\n" + INL + "int fb(int v) { return sq(v) + 1; }\n", "cc")
     k, _, f = kinds([ca, cd, cc_])
-    check("(b1) the same inline function with another macro value in one unit: comdat-differs on the signature, the symbol and the reference",
-          {("_Z2sqi", "comdat-differs")} <= k and any(i == "<comdat>" and n == "_Z2sqi" and kd == "comdat-differs" for i, n, kd, _ in f)
+    check("(b1) the same inline function with another macro value in one unit: byte-different copies on the signature, the symbol and the reference",
+          {("_Z2sqi", "undecidable: no definition record")} <= k and any(i == "<comdat>" and n == "_Z2sqi" and kd == "undecidable: no definition record" for i, n, kd, _ in f)
           and any(i == cc_ and n == "_Z2sqi" for i, n, _, _ in f), (k, f))
     VT = "struct B { virtual ~B() {} virtual int f() { return 1; } };\nB *%s() { return new B; }\n"
     v1, v2 = build(VT % "mk1", "cc"), build(VT % "mk2", "cc")
     k, _, f = kinds([v1, v2])
     check("(b1) a class with a virtual destructor in two units: vtable, typeinfo and member groups are identical, no finding of vague linkage",
-          not {x for x in k if x[1] in ("weak-only", "comdat-differs")} and any(n == "_ZTV1B" for _, n, _, _ in f) is False, (k, f))
+          not {x for x in k if x[1] in ("weak-only", "undecidable: no definition record")} and any(n == "_ZTV1B" for _, n, _, _ in f) is False, (k, f))
     v3 = build(VT.replace("return 1", "return 3") % "mk3", "cc")
     k, _, _ = kinds([v1, v3])
-    check("(b1) the same class with another inline body: its member function and vtable group differ", {("_ZN1B1fEv", "comdat-differs"), ("<defs>", "_ZN1B1fEv")} & k
-          and ("_ZN1B1fEv", "comdat-differs") in k, k)
+    check("(b1) the same class with another inline body: its member function and vtable group differ", {("_ZN1B1fEv", "undecidable: no definition record"), ("<defs>", "_ZN1B1fEv")} & k
+          and ("_ZN1B1fEv", "undecidable: no definition record") in k, k)
     SL = "const char *%s() { return \"zzzz-%s\"; }\n__attribute__((noinline)) inline const char *nm() { return \"hello\"; }\nconst char *u%s() { return nm(); }\n"
     s1, s2 = build(SL % ("p", "p", "1"), "cc"), build(SL % ("q", "q-longer", "2"), "cc")
     k, _, f = kinds([s1, s2])
-    check("(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)", not {x for x in k if x[1] == "comdat-differs"}, (k, f))
+    check("(b1) a string literal in an inline function certifies wherever the object laid it out (SHF_MERGE entity, not offset)", not {x for x in k if x[1] == "undecidable: no definition record"}, (k, f))
     wk = build("__attribute__((weak)) int wk() { return 1; }\n", "cc")
     k, _, _ = kinds([wk])
     check("(b1) a weak definition outside every COMDAT group stays weak-only in C++", ("wk", "weak-only") in k or ("_Z2wkv", "weak-only") in k, k)
-    mem, grp = L.elf_comdat(ca)
-    check("elf_comdat: signature -> digest, member section indices; no group in a C object", "_Z2sqi" in grp and mem and not any(L.elf_comdat(build("int x(void){return 1;}")))
+    mem, grp = L.elf_comdat(ca)[:2]
+    check("elf_comdat: signature -> digest, member section indices; no group in a C object", "_Z2sqi" in grp and mem and not any(L.elf_comdat(build("int x(void){return 1;}"))[:3])
           , (mem, grp))
     # (b2) script symbols
     ref = build("extern char __image_end[];\nchar *e(void) { return __image_end; }")
@@ -138,13 +139,24 @@ LS = lambda repo, name, cache=None: (lambda r: (r, verdict._gate_result({"name":
     TR.gate(repo, "linkstrict", TR.BASE + "/" + name, cache))
 GC = ROOT + "/cache"
 empty = TR.make_repo("ls-empty")
-TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
+TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
 (rc, g, _, txt), st = LS(empty, "e")
 check("no product root: universe 0, green, accepted by the verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
+# The toy's items: references a.c->f_b; definitions f_a, f_b, f_c, os_svc; the ELF of a linked root. A linked root also carries the product's
+# crt0 (test_recipe.CRT0): its items are its GLOBAL/WEAK symbols (definitions and references), read from the assembled crt0 itself.
+def crt0_items():
+    d = TR.tempfile.mkdtemp(dir=TR.BASE)
+    open(d + "/c.S", "w").write(TR.CRT0)
+    TR.subprocess.run([TR.CC_DRV, "-mabi=ilp32", "-c", "-o", d + "/c.o", d + "/c.S"], check=True)
+    return len({(n, shn == 0) for n, val, size, typ, bind, shn in L.elf_symbols(d + "/c.o") if bind in (L.GLOBAL, L.WEAK)})
+
+
+N_NOLINK = 5
+N_LINK = N_NOLINK + 1 + crt0_items()
 repo = TR.make_repo("ls-toy")
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t1", GC)
-check("toy root: every reference resolved, ELF closed: green, accepted (2 references + 5 definitions + the ELF)", rc == 0 and g["universe"] == 8 == g["certified"]
+check("toy root: every reference resolved, ELF closed: green, accepted (the toy's items, crt0's and the ELF: %d)" % N_LINK, rc == 0 and g["universe"] == N_LINK == g["certified"]
       and st[0] == "green", (g, txt))
 print("INFO toy gate (incl. build) %.1f s" % (time.time() - t0))
 t0 = time.time()
@@ -171,7 +183,7 @@ for abi in ("ilp32", "lp64"):
     ABI[0] = abi
     t0 = time.time()
     (rc, g, _, txt), st = LS(TR.make_repo("ls-toy-" + abi, rec=TR.abi_rec(abi)), "ta" + abi, GC)
-    n = 8 if abi == "ilp32" else 7      # LP64: no ELF (a link is the ILP32 guest ELF)
+    n = N_LINK if abi == "ilp32" else N_NOLINK      # LP64: no ELF (a link is the ILP32 guest ELF), so no crt0
     check("toy root: green %d/%d and accepted" % (n, n), rc == 0 and g["universe"] == n == g["certified"] and st[0] == "green", (g, txt))
     print("INFO %s toy gate %.1f s" % (abi, time.time() - t0))
     IE = {"toy/a.c": TR.FILES["toy/a.c"].replace("int f_a(void) {", "extern char __image_end[];\nint f_a(void) { (void)*(volatile char *)__image_end;"),

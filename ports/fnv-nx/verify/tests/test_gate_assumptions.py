@@ -225,7 +225,7 @@ M = {
     "a.md": "An assumption without an id.\n\nAn assumption with %s.\n\n- assumed here\n- ok %s assumed\n" % (asm(1), asm(10)),
     "b.md": "Assumption: %s is unknown.\n" % asm(999),
     "c.md": "no word at all\n",
-    "d.txt": "assumed\n",
+    "d.sh": "# assumed\n",
 }
 m, bad = G.judge_mentions(sorted(M), ids, lambda p: M[p])
 check("mentions counted", len(m) == 6, m)
@@ -234,7 +234,7 @@ check("block with a known id is certified", ("a.md", 3) not in bad and ("a.md", 
 check("unknown id in a mention is red", "not in the registry" in bad.get(("b.md", 1), ""), bad)
 check("block without the word is not a mention", all(f != "c.md" for f, _ in m), m)
 check("a list item is its own block", ("a.md", 5) in bad, bad)
-check("non-md text counts whole", ("d.txt", 1) in bad, bad)
+check("a shell comment is prose", ("d.sh", 1) in bad, bad)
 
 PY = '"""doc line\n\nA docstring paragraph with an assumption.\n"""\n\nassumption = "assumed"\n\n# comment about assumed %s\n\nx = 1  # assumes it\n' % asm(1)
 m, bad = G.judge_mentions(["p.py"], ids, lambda p: PY)
@@ -245,7 +245,43 @@ PY2 = 'name = "an assumption in a string"\nassumption = 1\n'
 m, bad = G.judge_mentions(["q.py"], ids, lambda p: PY2)
 check("python: code and string values hide nothing and show nothing", m == [], m)
 m, bad = G.judge_mentions(["r.py"], ids, lambda p: "def (:\n# assumed\n")
-check("python that does not parse is scanned whole", len(m) == 1, m)
+check("python that does not parse is red (lex-error), not scanned whole", m == [("r.py", 0)] and bad[("r.py", 0)].code == "lex-error", (m, bad))
+
+# lexers: for each class a mention in prose and a non-mention in code
+def mention(path, text):
+    mm, bb = G.judge_mentions([path], ids, lambda p: text)
+    return [ln for _, ln in mm]
+BT = "`"
+check("lexer python: comment, docstring are mentions", mention("x.py", '"""assume"""\n\n# assume\n') == [1, 3], "")
+check("lexer python: identifier, parameter, def, dict key, string, s.add(assume) are not mentions",
+      mention("x.py", 'def f(assume):\n    """doc"""\n    s.add(assume)\n    return {"assume": assume, "k": "an assumption"}\n') == [], "")
+check("lexer python: a backticked word in a docstring or comment is not a mention",
+      mention("x.py", '"""the %sassume%s flag"""\n# the %sassumed%s var\n' % (BT, BT, BT, BT)) == [], "")
+check("lexer python: a bare word in a docstring is a mention", mention("x.py", 'def f():\n\n    """we assume x"""\n') == [3], "")
+check("lexer python: a string that is not the first statement is not a docstring", mention("x.py", 'x = 1\n"assume"\n') == [], "")
+check("lexer c: // and /* */ comments are mentions", mention("x.c", "int a; // assume\n\n/* assumed */\n") == [1, 3], "")
+check("lexer c: identifier, string, char literal, digit separator, raw string are not mentions",
+      mention("x.cc", 'int assume = 1; const char *s = "assume // x"; char c = \'a\'; int n = 1\'000; auto r = R"x(assume /* )x";\nint assumed;\n') == [], "")
+check("lexer c: .inc is C", mention("x.inc", "/* assume */\n") == [1], "")
+check("lexer c: a backticked word in a comment is not a mention", mention("x.h", "// the %sassume%s flag\n" % (BT, BT)) == [], "")
+check("lexer c: an unterminated block comment is red", mention("x.h", "/* assume\n") == [0], "")
+check("lexer markdown: prose is a mention", mention("x.md", "we assume this\n") == [1], "")
+check("lexer markdown: a code fence and an inline code span are not mentions",
+      mention("x.md", "text\n\n```py\ndef f(assume):\n    pass\n```\n\nthe %sassume%s flag and %s%sassumed%s%s\n" % (BT, BT, BT, BT, BT, BT)) == [], "")
+check("lexer markdown: prose after a closed fence is a mention", mention("x.md", "```\nx\n```\n\nassumed\n") == [5], "")
+check("lexer shell: a # comment is a mention, a quoted # and a word are not",
+      mention("x.sh", 'echo "# assume"; assume=1\n\n# assume\n\necho $#assume\n') == [3], "")
+check("lexer shell: a heredoc body is not a comment", mention("x.sh", "cat <<EOF\n# assume\nEOF\n") == [], "")
+check("lexer toml: a # comment is a mention, a quoted value and a key are not", mention("x.toml", 'assume = "# assume"\n\n# assume\n') == [3], "")
+check("lexer shell: a here-string is not a heredoc", mention("x.sh", 'read x <<< "$a"\n\n# assume\n') == [3], "")
+check("lexer asm: a ; comment is a mention, a quoted ; and a label are not", mention("x.asm", 'db "a ; assume"\nassume: nop\n\n; assume\n') == [4], "")
+check("lexer sail: C comments, a type variable apostrophe is not a literal", mention("x.sail", "val f : forall 'n. bits('n) -> int // assume\n") == [1] and mention("x.sail", "val assume : bits('n)\n") == [], "")
+check("lexer data: json, tsv, txt are never prose", all(mention("x" + e, "assume\n") == [] for e in (".json", ".tsv", ".txt")), "")
+check("an extension not in the table is red and named", mention("x.zzz", "assume\n") == [0] and
+      "'.zzz'" in str(G.judge_mentions(["x.zzz"], ids, lambda p: "a")[1][("x.zzz", 0)]) and
+      G.judge_mentions(["x.zzz"], ids, lambda p: "a")[1][("x.zzz", 0)].code == "ext-unknown", "")
+check("a file with no extension is keyed by its name (.gitignore is in the table, Makefile is not)",
+      mention(".gitignore", "# assume\n") == [1] and mention("Makefile", "x\n") == [0], "")
 
 # stray ids
 S = {"a.json": '{"x": "%s"}' % asm(998), "b.md": "ok %s" % asm(1)}
@@ -261,11 +297,20 @@ GATES = json.dumps({"format": "fnvnx-gatefile/1", "name": "g", "argv": ["x"], "r
 ADMIT = json.dumps({"roots": [{"path": T + "journal", "record": True}]})
 
 
+PD0 = {"format": "fnvnx-perfdebt/1", "first_frame": False, "entries": []}
+PDE = {"id": "MINIMP3_NO_SIMD", "fast_path": "minimp3 SIMD decode", "rule": "fnvnx_ftoi lane-exact float to int", "owner": "L5"}
+
+
+def pd(first=False, *entries):
+    return {"format": "fnvnx-perfdebt/1", "first_frame": first, "entries": list(entries)}
+
+
 def tree(extra=None, doc=None):
     td = tempfile.mkdtemp()
     files = dict(FILES)
     files[T + "verify/gates.d/g.json"] = GATES
     files[T + "verify/admit.json"] = ADMIT
+    files[T + "verify/PERFDEBT.json"] = json.dumps(PD0)
     files[T + "verify/ASSUMPTIONS.json"] = json.dumps(doc if doc is not None else base())
     files[T + "journal/log.md"] = "An assumption in the append-only log.\n"
     files.update(extra or {})
@@ -291,6 +336,9 @@ rc, res = gate(tree())
 check("gate: green tree, the log is not scanned", rc == 0 and res["status"] == "green" and res["universe"] == 0, (rc, res))
 rc, res = gate(tree({T + "docs/b.md": "An assumption nobody numbered.\n"}))
 check("gate: a new mention without an id is red", rc == 2 and res["status"] == "red" and res["uncertified"] == [T + "docs/b.md:1"], (rc, res))
+rc, res = gate(tree({T + "shim/include/x.h": "/* An assumption nobody numbered. */\n"}))
+check("gate: an unnumbered mention in a header of a unit-less product root is red (the universe is every tracked file, not units)",
+      rc == 2 and res["status"] == "red" and res["uncertified"] == [T + "shim/include/x.h:1"], (rc, res))
 rc, res = gate(tree({T + "docs/b.md": "An assumption, %s.\n" % asm(1)}))
 check("gate: a new mention with an id is green", rc == 0 and res["universe"] == 1 and res["certified"] == 1, (rc, res))
 rc, res = gate(tree({T + "docs/b.md": "An assumption, %s.\n" % asm(77)}))
@@ -345,6 +393,66 @@ check("findings file holds every finding, not a capped list", ok and doc["total"
 check("findings file is sorted by code", ok and [f["code"] for f in doc["findings"]] == sorted(f["code"] for f in doc["findings"]), "")
 check("stdout prints at most 20 findings and the summary names the file", r.returncode == 2 and fp in r.stdout and
       r.stdout.count("\n  ") <= 22, r.stdout[-300:])
+
+# lexer table: .glsl and templates
+rc, res = gate(tree({T + "shader/a.glsl": "// An assumption nobody numbered.\nvoid main() {}\n"}))
+check("lexer: a .glsl comment mention with no id is red as uncertified", rc == 2 and res["uncertified"] == [T + "shader/a.glsl:1"], (rc, res))
+rc, res = gate(tree({T + "shader/a.glsl": "// An assumption, %s.\n" % asm(1)}))
+check("lexer: a .glsl comment mention with an id is green", rc == 0 and res["certified"] == 1, (rc, res))
+rc, res = gate(tree({T + "inc/a.h.in": "/* An assumption nobody numbered. */\n"}))
+check("lexer: a .h.in file is lexed as C", rc == 2 and res["uncertified"] == [T + "inc/a.h.in:1"], (rc, res))
+rc, res = gate(tree({T + "inc/a.py.in": "x = 1  # An assumption nobody numbered.\n"}))
+check("lexer: a .py.in file is lexed as python", rc == 2 and res["uncertified"] == [T + "inc/a.py.in:1"], (rc, res))
+rc, res = gate(tree({T + "inc/x.in": "plain\n"}))
+check("lexer: a bare x.in is red (ext-unknown)", rc == 2 and has(list(res["reasons"].values()), "no lexer"), (rc, res))
+rc, res = gate(tree({T + "inc/x.zzz.in": "plain\n"}))
+check("lexer: a .in with an unknown inner extension is red", rc == 2 and has(list(res["reasons"].values()), "no lexer"), (rc, res))
+
+rc, res = gate(tree({T + "render/gl4/x.map": "/* An assumption nobody numbered. */\n{ global: foo; local: *; };\n"}))
+check("lexer: a .map (ld version script) comment mention with no id is red as uncertified", rc == 2 and res["uncertified"] == [T + "render/gl4/x.map:1"], (rc, res))
+rc, res = gate(tree({T + "render/gl4/x.map": "/* An assumption, %s. */\n{ global: foo; local: *; };\n" % asm(1)}))
+check("lexer: a .map comment mention with an id is green", rc == 0 and res["certified"] == 1, (rc, res))
+rc, res = gate(tree({T + "render/gl4/x.map": "{ global: \"assumption\"; local: *; };\n"}))
+check("lexer: a quoted string in a .map is code, not a mention", rc == 0 and res["universe"] == 0, (rc, res))
+rc, res = gate(tree({T + "link/x.ld": "SECTIONS { /* An assumption nobody numbered. */ .text : { *(.text) } }\n"}))
+check("lexer: a .ld linker script /* */ comment mention with no id is red as uncertified", rc == 2 and res["uncertified"] == [T + "link/x.ld:1"], (rc, res))
+rc, res = gate(tree({T + "link/x.ld": "/* An assumption, %s. */\nSECTIONS { .text : { *(.text) } }\n" % asm(1)}))
+check("lexer: a .ld comment mention with an id is green", rc == 0 and res["certified"] == 1, (rc, res))
+rc, res = gate(tree({T + "link/x.ld": "SECTIONS { .text : { *(.text) } }\nPROVIDE(a = 1); // an assumption in a C++ comment is not a comment for ld\n"}))
+check("lexer: // is code in a .ld, not a comment", rc == 0 and res["universe"] == 0, (rc, res))
+rc, res = gate(tree({T + "link/x.ld": "INPUT(\"a/*assumption*/b.o\")\nSECTIONS { .text : { *(.text) } }\n"}))
+check("lexer: a quoted string in a .ld is skipped (no escapes) and holds no comment", rc == 0 and res["universe"] == 0, (rc, res))
+rc, res = gate(tree({T + "link/x.ld": "/* unterminated assumption\nSECTIONS {}\n"}))
+check("lexer: an unterminated /* in a .ld is red (lex-error)", rc == 2 and has(list(res["reasons"].values()), "unterminated"), (rc, res))
+rc, res = gate(tree({T + "render/gl4/x.zzz": "plain\n"}))
+check("lexer: an extension with no lexer stays red", rc == 2 and has(list(res["reasons"].values()), "no lexer"), (rc, res))
+
+# PERFDEBT
+PDF = T + "verify/PERFDEBT.json"
+rc, res = gate(tree())
+check("perfdebt: empty file is green, open count 0", rc == 0 and res["perfdebt"] == {"open": 0, "first_frame": False}, (rc, res))
+rc, res = gate(tree({PDF: json.dumps(pd(False, PDE))}))
+check("perfdebt: a complete open entry is green and counted", rc == 0 and res["perfdebt"]["open"] == 1 and "perfdebt: 1 open" in res["detail"], (rc, res))
+for name, mut, code in (("no rule", {"rule": ""}, "has no rule"), ("rule missing", {"rule": None}, "has no rule"),
+                        ("no fast path", {"fast_path": " "}, "has no fast_path"), ("no owner", {"owner": None}, "owner is not a layer"),
+                        ("owner not a layer", {"owner": "L9"}, "owner is not a layer"), ("no id", {"id": ""}, "has no id"),
+                        ("unknown field", {"note": "x"}, "unknown fields")):
+    e = dict(PDE); e.update(mut); e = {k: v for k, v in e.items() if v is not None}
+    rc, res = gate(tree({PDF: json.dumps(pd(False, e))}))
+    check("perfdebt: entry with %s is red (%s)" % (name, code), rc == 2 and res["status"] == "red" and has(res["errors"], code), (rc, res["errors"]))
+rc, res = gate(tree({PDF: json.dumps(pd(False, PDE, PDE))}))
+check("perfdebt: a repeated id is red", rc == 2 and has(res["errors"], "used twice"), (rc, res["errors"]))
+rc, res = gate(tree({PDF: json.dumps(pd(True, PDE))}))
+check("perfdebt: an open entry with first_frame set is red", rc == 2 and has(res["errors"], "first_frame set"), (rc, res["errors"]))
+rc, res = gate(tree({PDF: json.dumps(pd(True))}))
+check("perfdebt: first_frame set and no entries is green", rc == 0 and res["perfdebt"] == {"open": 0, "first_frame": True}, (rc, res))
+rc, res = gate(tree({PDF: json.dumps(dict(pd(False), first_frame="no"))}))
+check("perfdebt: first_frame not a boolean is red", rc == 2 and has(res["errors"], "first_frame"), (rc, res["errors"]))
+rc, res = gate(tree({PDF: "{not json"}))
+check("perfdebt: an unparseable file is red", rc == 2 and has(res["errors"], "is missing or is not a JSON object"), (rc, res["errors"]))
+td = tree(); os.remove(os.path.join(td, PDF)); subprocess.run(["git", "rm", "-q", "--cached", PDF], cwd=td, check=True)
+rc, res = gate(td)
+check("perfdebt: a missing file is red", rc == 2 and has(res["errors"], "is missing or is not a JSON object"), (rc, res["errors"]))
 
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)

@@ -26,7 +26,7 @@ import s1_compile as s1  # noqa: E402
 
 core = prepare
 core.CTX['win32_header'] = support.WIN32_HEADER
-core.CTX['crt_symbols'] = '00401040\tcrt_inline\tfloor(float) -> floorf\n'
+core.CTX['crt_symbols'] = '00001040\tcrt_inline\tfloor(float) -> floorf\n'
 support.legacy_units_lookup()
 
 
@@ -42,7 +42,7 @@ check('ALLOC1 untagged file-scope operator new[] dropped',
       run(s1.r_global_allocators, 'inline void* operator new[](unsigned int n)\n{\n    return A(n);\n}\n'),
       ['ALLOC1'], ['return A(n)'])
 check('ALLOC1 @fnv-tagged operator new kept',
-      run(s1.r_global_allocators, '// @fnv 0x00401080\nvoid* operator new(unsigned int n)\n{\n    return A(n);\n}\n'),
+      run(s1.r_global_allocators, '// @fnv 0x00001080\nvoid* operator new(unsigned int n)\n{\n    return A(n);\n}\n'),
       ['return A(n)'], ['ALLOC1'])
 check('ALLOC1 placement and debug forms kept',
       run(s1.r_global_allocators, 'inline void* operator new(size_t, void* p)\n{\n    return p;\n}\n'
@@ -75,7 +75,7 @@ got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> clas
 check('TPL2 never forward-declares an explicit specialization (template <>) ahead of its primary', got,
       ['template <class T> inline void D(T* p); /* fnv-nx TPL2 */'], ['template <> inline void D(char*);'])
 
-# ---- S1-STL (blk_00401340): TPL2 specializations, TPL3, TYPN1, INST1, COPY1, DECL3
+# ---- S1-STL (blk_00001340): TPL2 specializations, TPL3, TYPN1, INST1, COPY1, DECL3
 got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'
           '    {\n        D(p);\n    }\n};\ntemplate <> inline void D<int>(int* p)\n{\n}\n'
           'template <class T> inline void D(T* p)\n{\n    p->~T();\n}\n}\n')
@@ -260,14 +260,14 @@ check('RCAST1 member operator call result',
 
 # ---- KEEP1 never in front of a statement
 check('KEEP1 tag in front of a statement: no FNVNX_KEEP',
-      run(s1.r_keep_definitions, 'bool f()\n{\n// @fnv 0x00401280\n    if (x)\n        g();\n    return true;\n}\n'),
+      run(s1.r_keep_definitions, 'bool f()\n{\n// @fnv 0x00001280\n    if (x)\n        g();\n    return true;\n}\n'),
       (), ['FNVNX_KEEP'])
 
 check('KEEP1 tag above an access label: FNVNX_KEEP after the label',
-      run(s1.r_keep_definitions, 'class C {\n// @fnv 0x00401400\npublic:\n    C() {}\n};\n'), ['public:\n    FNVNX_KEEP C() {}'])
+      run(s1.r_keep_definitions, 'class C {\n// @fnv 0x00001400\npublic:\n    C() {}\n};\n'), ['public:\n    FNVNX_KEEP C() {}'])
 
 check('KEEP1 tag in front of a member initializer list: no FNVNX_KEEP',
-      run(s1.r_keep_definitions, 'A::A(int n)\n// @fnv 0x004013c0\n    : Base(n)\n{}\n'), (), ['FNVNX_KEEP'])
+      run(s1.r_keep_definitions, 'A::A(int n)\n// @fnv 0x000013c0\n    : Base(n)\n{}\n'), (), ['FNVNX_KEEP'])
 
 # ---- NEW1 keeps reference parameters
 check('NEW1 size parameter -> size_t, reference parameter kept',
@@ -403,7 +403,7 @@ import json as _json
 import tempfile
 _m = tempfile.mkdtemp()
 os.makedirs(os.path.join(_m, 'src')); os.makedirs(os.path.join(_m, 'build'))
-_json.dump({'units': [{'source': 'src/u.cpp', 'symbols': {'_floor': '0x00401040'}},
+_json.dump({'units': [{'source': 'src/u.cpp', 'symbols': {'_floor': '0x00001040'}},
                       {'source': 'src/v.cpp', 'symbols': {}}]}, open(os.path.join(_m, 'build', 'units.json'), 'w'))
 open(os.path.join(_m, 'src', 'u_decls.h'), 'w').write('extern "C" double floor(float);\n')
 open(os.path.join(_m, 'src', 'u.cpp'), 'w').write('#include "u_decls.h"\nbool f(float a, float b) { return floor(a) != floor(b); }\n')
@@ -675,8 +675,8 @@ check('PTR1 ordered compares of a function / pointer with 0',
       ['!(GetTime64 != 0)', 'c != 0 && n > 0 && q == 0'])
 
 # ---- REC1-RETARGET: a placed function's recipe symbol moves to the recon's new decoration, only from the expected old
-_u = {'source': 'src/x.cpp', 'functions': [{'address': '0x00401300', 'symbol': '?F@S@@QAEMXZ', 'size': 31}],
-      'symbols': {'?F@S@@QAEMXZ': '0x00401300'}}
+_u = {'source': 'src/x.cpp', 'functions': [{'address': '0x00001300', 'symbol': '?F@S@@QAEMXZ', 'size': 31}],
+      'symbols': {'?F@S@@QAEMXZ': '0x00001300'}}
 
 # ---- STR1 uses the declaration in scope
 got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(&str_01082ab8); }\nnamespace N {\n'
@@ -738,7 +738,7 @@ _json.dump({'units': [{'source': 'src/r.cpp', 'symbols': {
     '?g_pInst@@3PAUH@@A': '0x011d96c0', '?g_pInst@fnv_1@@3PAUH@@A': '0x011d96c0', '_s_kList': '0x011d0000'}}]},
            open(os.path.join(_n, 'build', 'units.json'), 'w'))
 _src = ('struct H;\nstruct L { L(); };\nextern H* g_pInst;\nstatic H* g_pInst;\nnamespace fnv_1 {\nextern H* g_pInst;\n}\n'
-        'namespace fnv_004012c0 {\nstatic float s_12;\nstatic int s_iLastState = 4;\n'
+        'namespace fnv_000012c0 {\nstatic float s_12;\nstatic int s_iLastState = 4;\n'
         'static const char s_szName[] = "x";\nstatic H* g_pInst;\nstatic L s_kList;\nvoid f() { s_12 = 1; }\n}\n')
 open(os.path.join(_n, 'src', 'r.cpp'), 'w').write(_src)
 _saved = (s1._IMAGE_NAMES, dict(s1._IMAGE_CNAMES), dict(s1._IMAGE_ADDRS))
@@ -833,26 +833,26 @@ import json as _json
 _s2 = tempfile.mkdtemp()
 os.makedirs(os.path.join(_s2, 'build')); os.makedirs(os.path.join(_s2, 'src'))
 _json.dump({'units': [{'source': 'src/g.cpp', 'functions': [
-    {'address': '0x00401080', 'symbol': '?abs@std@@YANM@Z', 'size': 20},
-    {'address': '0x004010c0', 'symbol': '?f@@YAHH@Z', 'size': 8}], 'symbols': {}},
-    {'source': 'src/h.cpp', 'functions': [{'address': '0x00401100', 'symbol': '?g@@YAHH@Z', 'size': 8}],
-     'symbols': {'?abs@std@@YANM@Z': '0x00401080'}}]}, open(os.path.join(_s2, 'build', 'units.json'), 'w'))
+    {'address': '0x00001080', 'symbol': '?abs@std@@YANM@Z', 'size': 20},
+    {'address': '0x000010c0', 'symbol': '?f@@YAHH@Z', 'size': 8}], 'symbols': {}},
+    {'source': 'src/h.cpp', 'functions': [{'address': '0x00001100', 'symbol': '?g@@YAHH@Z', 'size': 8}],
+     'symbols': {'?abs@std@@YANM@Z': '0x00001080'}}]}, open(os.path.join(_s2, 'build', 'units.json'), 'w'))
 s1._STD2_FNS = None; s1.STD2_RENAMES.clear()
-_g = ('// @fnv 0x00401080\nFNVNX_KEEP double std::abs(float value)\n{\n    return value < 0 ? -value : value;\n}\n'
-      '// @fnv 0x004010c0\nint f(int x) { return (int)std::abs((float)x); }\n')
+_g = ('// @fnv 0x00001080\nFNVNX_KEEP double std::abs(float value)\n{\n    return value < 0 ? -value : value;\n}\n'
+      '// @fnv 0x000010c0\nint f(int x) { return (int)std::abs((float)x); }\n')
 _o = run(s1.r_std_definitions, _g, os.path.join(_s2, 'src', 'g.cpp'))
 check('STD2 file-scope std:: definition the recipe decorates in std -> fnvnx_std_',
       _o, ['FNVNX_KEEP double fnvnx_std_abs(float value)', 'return (int)std::abs((float)x);'], ['double std::abs'])
 check('STD2 a unit whose recipe has no std:: definition is untouched',
-      run(s1.r_std_definitions, _g.replace('0x00401080', '0x00401140'), os.path.join(_s2, 'src', 'h.cpp')),
+      run(s1.r_std_definitions, _g.replace('0x00001080', '0x00001140'), os.path.join(_s2, 'src', 'h.cpp')),
       ['double std::abs(float value)'], ['fnvnx_std_'])
 check('STD2 a member definition in a class scope is not at file scope',
-      run(s1.r_std_definitions, 'struct S {\n// @fnv 0x00401080\ndouble std::abs(float v) { return v; }\n};\n',
+      run(s1.r_std_definitions, 'struct S {\n// @fnv 0x00001080\ndouble std::abs(float v) { return v; }\n};\n',
           os.path.join(_s2, 'src', 'g.cpp')), [], ['fnvnx_std_'])
 s1.rename_std_definitions(_s2, Counter())
 _u = _json.load(open(os.path.join(_s2, 'build', 'units.json')))['units']
 check('STD2 POST hook renames the definition\'s recipe symbol only', _json.dumps(_u),
-      ['"?fnvnx_std_abs@@YANM@Z"', '"?f@@YAHH@Z"', '"?abs@std@@YANM@Z": "0x00401080"'])
+      ['"?fnvnx_std_abs@@YANM@Z"', '"?f@@YAHH@Z"', '"?abs@std@@YANM@Z": "0x00001080"'])
 _shutil.rmtree(_s2, ignore_errors=True)
 
 # ---- S1-refs: COND1 (`c ? false : f()` with f returning a class convertible both ways with bool), RSTR1
@@ -945,11 +945,11 @@ _shutil.rmtree(_c, ignore_errors=True)
 _s3 = tempfile.mkdtemp()
 os.makedirs(os.path.join(_s3, 'build')); os.makedirs(os.path.join(_s3, 'src'))
 _json.dump({'units': [
-    {'source': 'src/n.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00401180'}},
-    {'source': 'src/g.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00401180',
-                                        '?strcpy_s@@YAHPADIPBD@Z': '0x00401180'}},
-    {'source': 'src/d.cpp', 'symbols': {'_Fmt': '0x004011c0', '?Fmt@@YAPADPADIPBDZZ': '0x004011c0',
-                                        '_Pick': '0x00401200', '?Pick@@YAHPAXE@Z': '0x00401200'}}]},
+    {'source': 'src/n.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00001180'}},
+    {'source': 'src/g.cpp', 'symbols': {'?strcpy_s@ns1@@YAHPADIPBD@Z': '0x00001180',
+                                        '?strcpy_s@@YAHPADIPBD@Z': '0x00001180'}},
+    {'source': 'src/d.cpp', 'symbols': {'_Fmt': '0x000011c0', '?Fmt@@YAPADPADIPBDZZ': '0x000011c0',
+                                        '_Pick': '0x00001200', '?Pick@@YAHPAXE@Z': '0x00001200'}}]},
            open(os.path.join(_s3, 'build', 'units.json'), 'w'))
 _saved, s1._UNIT_SYMBOLS = s1._UNIT_SYMBOLS, None
 _n = ('namespace ns1 {\nint strcpy_s(char* d, unsigned int n, const char* s);\n'
@@ -1037,7 +1037,7 @@ _sta = Counter()
 _st = Counter()
 _st = Counter()
 _st = Counter()
-_dt = 'struct E { int a; };\n// @fnv 0x00401440\nstatic void __declspec(noinline)\n    Copy(E* d, const E* s, unsigned int n)\n{\n    d[0] = s[0];\n}\n'
+_dt = 'struct E { int a; };\n// @fnv 0x00001440\nstatic void __declspec(noinline)\n    Copy(E* d, const E* s, unsigned int n)\n{\n    d[0] = s[0];\n}\n'
 _st = Counter()
 
 # ---- S1-layout: EBO3 (an empty base after a base with data goes after it, as in MSVC)
@@ -1059,17 +1059,17 @@ check('EBO3 headers are left alone', run(s1.r_later_empty_base, _E3, '/nonexiste
 # ---- S1-rules: STAND7 (an out-of-class inline template member stand-in bound elsewhere -> MSVC only)
 _s7 = tempfile.mkdtemp(); os.makedirs(os.path.join(_s7, 'src')); os.makedirs(os.path.join(_s7, 'build'))
 _json.dump({'units': [{'source': 'src/u.cpp', 'flags': ['/MT', '/Od', '/Ob1'],
-                       'symbols': {'?assign@?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z': '0x00401240'},
-                       'functions': [{'address': '0x00401380', 'symbol': '?f@@YAXXZ', 'size': 8}]},
-                      {'source': 'src/v.cpp', 'symbols': {}, 'functions': [{'address': '0x00401240', 'symbol': '?assign@x', 'size': 8}]}]},
+                       'symbols': {'?assign@?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z': '0x00001240'},
+                       'functions': [{'address': '0x00001380', 'symbol': '?f@@YAXXZ', 'size': 8}]},
+                      {'source': 'src/v.cpp', 'symbols': {}, 'functions': [{'address': '0x00001240', 'symbol': '?assign@x', 'size': 8}]}]},
            open(os.path.join(_s7, 'build', 'units.json'), 'w'))
 _S7 = ('template <class C, class T, class A>\ninline basic_string<C, T, A>& basic_string<C, T, A>::assign(const basic_string<C, T, A>& r,'
        ' unsigned int o, unsigned int n)\n{\n    if (o == 0x7f3f3f3f) { _Tidy(true); }\n    return *this;\n}\n'
-       '// @fnv 0x00401380\nvoid f() {}\n')
+       '// @fnv 0x00001380\nvoid f() {}\n')
 _saved = (s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS)
 s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
-_json.dump({'units': [{'source': 'src/u.cpp', 'flags': ['/MT', '/O2'], 'symbols': {'?assign@?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z': '0x00401240'},
-                       'functions': []}, {'source': 'src/v.cpp', 'symbols': {}, 'functions': [{'address': '0x00401240', 'symbol': '?assign@x', 'size': 8}]}]},
+_json.dump({'units': [{'source': 'src/u.cpp', 'flags': ['/MT', '/O2'], 'symbols': {'?assign@?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z': '0x00001240'},
+                       'functions': []}, {'source': 'src/v.cpp', 'symbols': {}, 'functions': [{'address': '0x00001240', 'symbol': '?assign@x', 'size': 8}]}]},
            open(os.path.join(_s7, 'build', 'units.json'), 'w'))
 s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = None, None, None
 s1._UNIT_SYMBOLS, s1._UNIT_INFO, s1._ALL_FUNCTIONS = _saved

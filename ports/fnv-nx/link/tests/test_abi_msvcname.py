@@ -78,6 +78,25 @@ for bad in ('?AVFoo@@', '.?AXFoo@@', '.?AVFoo@@x', '.?AV'):
         fails.append('%r: no error' % bad)
     except ValueError:
         pass
+# C decorations (Microsoft Learn, "Decorated names": "Format of a C decorated name"): one test per form and the malformed names
+check('C cdecl', tuple(M.parse_c('_CloseHandle')), ('cfunction', 'cdecl', 'CloseHandle', None))
+check('C stdcall', tuple(M.parse_c('_CloseHandle@4')), ('cfunction', 'stdcall', 'CloseHandle', 4))
+check('C stdcall, no argument', tuple(M.parse_c('_f@0')), ('cfunction', 'stdcall', 'f', 0))
+check('C fastcall', tuple(M.parse_c('@f@12')), ('cfunction', 'fastcall', 'f', 12))
+check('C identifier alphabet', tuple(M.parse_c('__x$1_')), ('cfunction', 'cdecl', '_x$1_', None))
+for bad in ('', 'f', '_', '_9f', '_f@', '_f@x', '_f@08', '_f@4@4', '@f', '@f@', '@@4', '_f@-4', '_f g', '?f@@YAXXZ'):
+    try:
+        M.parse_c(bad)
+        fails.append('parse_c %r: no error' % bad)
+    except ValueError as e:
+        check('parse_c error text of %r' % bad, str(e).startswith(bad), True)
+
+# `$$C<cv>`: a cv-qualified element type (the array parameter `const unsigned (*)[33]`); a ctor template `??$?0<args>@<scope>`, whose own name is no back-reference
+d = M.parse('?nx_ffp_stage_mask@@YAIQAY0CB@$$CBIQBE@Z')
+check('$$C const element', d.params[0], ('ptr', '*', 'const', ('arr', (33,), ('b', 'unsigned int'))))
+d = M.parse('??$?0AAPAU_Rb_tree_node_base@std@@AAPAU01@@?$pair@PAU_Rb_tree_node_base@std@@PAU12@@std@@QAE@AAPAU_Rb_tree_node_base@1@0@Z')
+nb = ('ptr', '&', '', ('ptr', '*', '', ('tag', 'struct', ('std', '_Rb_tree_node_base'))))
+check('ctor template: structor, scope and the back-references of the parameters', (d.structor, d.scope[-1][:2], d.params), ('0', ('tpl', ('op', '0')), (nb, nb)))
 
 for f in fails:
     print('FAIL', f)

@@ -8,6 +8,7 @@
 /* the SDK's own packing (8, MSVC's default), whatever region includes this header: DECL1 / DECL2 put the include
  * where the decomp's prototype or SDK type was, 16 times inside the #pragma pack(push, 4) of its generated layout
  * headers (S11: LARGE_INTEGER, ULARGE_INTEGER, MEMORYSTATUSEX came out 4-aligned there) */
+#include "fnvnx_callback.h"
 #pragma pack(push, 8)
 /* the SDK's own include guards: the decomp's generated layout headers (include/_FILETIME.h, _RTL_CRITICAL_SECTION.h,
  * _ULARGE_INTEGER.h, _WIN32_FIND_DATAA.h) skip their copies when the SDK came first - their copies carry Xbox 360
@@ -180,7 +181,11 @@ LONG InterlockedCompareExchange(volatile LONG *, LONG, LONG);
 PVOID InterlockedCompareExchangePointer(PVOID volatile *, PVOID, PVOID);
 PVOID InterlockedExchangePointer(PVOID volatile *, PVOID);
 #else
+#ifdef __cplusplus
 #define FNVNX_ILK inline __attribute__((gnu_inline, always_inline))
+#else
+#define FNVNX_ILK extern inline __attribute__((gnu_inline, always_inline))   /* C: `inline` + gnu_inline would EMIT a definition in every C unit that includes this header; extern inline emits none */
+#endif
 #define FNVNX_ILK_MISALIGNED(p) __builtin_expect(((uintptr_t)(p) & (sizeof(*(p)) - 1)) != 0, 0)
 #define FNVNX_ILK_FULL(expr) ({ __typeof__(expr) r_ = (expr); __atomic_thread_fence(__ATOMIC_SEQ_CST); r_; })
 FNVNX_ILK LONG InterlockedIncrement(volatile LONG *p)
@@ -259,7 +264,7 @@ BOOL CloseHandle(HANDLE);
 #define WAIT_FAILED 0xFFFFFFFF
 
 /* ---- threads, TLS, time */
-typedef DWORD (*LPTHREAD_START_ROUTINE)(LPVOID);
+FNVNX_CALLBACK_T(LPTHREAD_START_ROUTINE, DWORD, (LPVOID));
 HANDLE CreateThread(void *, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
 DWORD ResumeThread(HANDLE);
 DWORD SuspendThread(HANDLE);
@@ -273,7 +278,7 @@ DWORD GetCurrentProcessId(void);
 void Sleep(DWORD);
 DWORD SleepEx(DWORD, BOOL);
 BOOL SwitchToThread(void);
-void ExitProcess(UINT);
+void ExitProcess(UINT) __attribute__((noreturn, nothrow));   /* MSDN ExitProcess: "does not return" */
 DWORD TlsAlloc(void);
 LPVOID TlsGetValue(DWORD);
 BOOL TlsSetValue(DWORD, LPVOID);
@@ -377,7 +382,7 @@ void OutputDebugStringA(LPCSTR);
 #define INVALID_SET_FILE_POINTER ((DWORD)-1)
 
 /* ---- windowing (only what the engine's bootstrap touches) */
-typedef LRESULT (*WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+FNVNX_CALLBACK_T(WNDPROC, LRESULT, (HWND, UINT, WPARAM, LPARAM));
 typedef struct tagMSG { HWND hwnd; UINT message; WPARAM wParam; LPARAM lParam; DWORD time; POINT pt; } MSG, *LPMSG;
 typedef struct tagWNDCLASSA {
     UINT style; WNDPROC lpfnWndProc; int cbClsExtra, cbWndExtra; HINSTANCE hInstance; HICON hIcon;
@@ -430,8 +435,7 @@ static inline unsigned int _rotr(unsigned int v, int s) { s &= 31; return s ? (v
 #endif
 
 /* ---- C++ exception plumbing referenced by name in a few units (compiler-generated on MSVC) */
-typedef struct _ThrowInfo _ThrowInfo;
-void _CxxThrowException(void *, _ThrowInfo *);
+#include "fnvnx_crt.h"   /* _ThrowInfo, _CxxThrowException */
 
 /* ==== merged from platform/include/fnvnx_win32_ext.h (S4): imports the runtime implements */
 #ifndef WAIT_ABANDONED
@@ -583,7 +587,7 @@ typedef struct _MEMORY_BASIC_INFORMATION {
 } MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
 
 BOOL GetExitCodeThread(HANDLE, LPDWORD);
-void ExitThread(DWORD) __attribute__((noreturn));
+void ExitThread(DWORD) __attribute__((noreturn, nothrow));
 BOOL SetThreadPriorityBoost(HANDLE, BOOL);
 int GetThreadPriority(HANDLE);
 BOOL SetFilePointerEx(HANDLE, LARGE_INTEGER, PLARGE_INTEGER, DWORD);
@@ -627,8 +631,8 @@ UINT timeEndPeriod(UINT);
 
 /* ---- user32 / gdi32 imports not in the shim */
 typedef struct HHOOK__ *HHOOK;
-typedef LRESULT (*HOOKPROC)(int, WPARAM, LPARAM);
-typedef BOOL (*WNDENUMPROC)(HWND, LPARAM);
+FNVNX_CALLBACK_T(HOOKPROC, LRESULT, (int, WPARAM, LPARAM));
+FNVNX_CALLBACK_T(WNDENUMPROC, BOOL, (HWND, LPARAM));
 HWND GetWindow(HWND, UINT);
 UINT GetDoubleClickTime(void);
 BOOL SwapMouseButton(BOOL);

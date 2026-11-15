@@ -31,8 +31,8 @@ def check(what, got, want):
 INT, CHAR, UINT, REAL80 = 0x74, 0x10, 0x75, 0x42
 
 
-def line(key, size, align, fields='', bases='', flags='', itanium='_Z1T'):
-    return '\t'.join([key, str(size), str(align), fields, bases, flags, itanium]) + '\n'
+def line(key, size, align, fields='', bases='', flags='', itanium='_Z1T', linkage='external'):
+    return '\t'.join([key, str(size), str(align), fields, bases, flags, itanium, linkage]) + '\n'
 
 
 cv = synth.CV()
@@ -188,13 +188,18 @@ try:
     check('unreadable members', gate_r7.check(g, c)[1], ['u:UPlain@@: undecided: CodeView: members: field leaf 0x1fff'])
 
     # malformed GCC sections are errors (one item), never a pass
-    for what, text in (('six fields', 'a\t1\t1\t\t\t\n'), ('bad size', 'a\tx\t1\t\t\t\t_Z\n'), ('bad field', 'a\t1\t1\tf:1\t\t\t_Z\n'),
-                       ('bad base flag', 'a\t1\t1\t\tb:0:x\t\t_Z\n'), ('unknown flag', 'a\t1\t1\t\t\tweird\t_Z\n'), ('empty key', '\t1\t1\t\t\t\t_Z\n'),
-                       ('bit offset 8', 'a\t1\t1\tf:0:8:1:1\t\t\t_Z\n'), ('empty element', 'a\t1\t1\tf:0:1,,g:1:1\t\t\t_Z\n'), ('no final LF', 'a\t1\t1\t\t\t\t_Z'),
-                       ('not UTF-8', b'a\t1\t1\t\t\t\t\xff\n')):
+    for what, text in (('seven fields', 'a\t1\t1\t\t\t\t_Z\n'), ('bad size', 'a\tx\t1\t\t\t\t_Z\texternal\n'), ('bad field', 'a\t1\t1\tf:1\t\t\t_Z\texternal\n'),
+                       ('bad base flag', 'a\t1\t1\t\tb:0:x\t\t_Z\texternal\n'), ('unknown flag', 'a\t1\t1\t\t\tweird\t_Z\texternal\n'), ('empty key', '\t1\t1\t\t\t\t_Z\texternal\n'),
+                       ('bit offset 8', 'a\t1\t1\tf:0:8:1:1\t\t\t_Z\texternal\n'), ('empty element', 'a\t1\t1\tf:0:1,,g:1:1\t\t\t_Z\texternal\n'), ('no final LF', 'a\t1\t1\t\t\t\t_Z\texternal'),
+                       ('bad linkage', 'a\t1\t1\t\t\t\t_Z\tstatic\n'), ('upper-case C linkage', 'a\t1\t1\t\t\t\t_Z\tC\n'), ('empty linkage', 'a\t1\t1\t\t\t\t_Z\t\n'),
+                       ('not UTF-8', b'a\t1\t1\t\t\t\t\xff\texternal\n')):
         g, c = fixture(tmp + '/m_' + what.replace(' ', '_'), text, synth.debug_object(SERIES))
         u, r, _ = gate_r7.check(g, c)
         check('malformed ' + what, (u, len(r), r[0].startswith('u:error: ')), (1, 1, True))
+    import objsections
+    for v in ('none', 'internal', 'external', 'c'):
+        rows = objsections.parse_layout(line('k', 1, 1, linkage=v).encode(), 'x')
+        check('linkage %s is accepted' % v, [r.linkage for r in rows], [v])
     gj = tmp + '/gj'
     synth.write(gj, 'u.o', b'not an elf')
     check('garbage GCC object', gate_r7.check([gj], [tmp + '/a/c'])[1][0][:9], 'u:error: ')

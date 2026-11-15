@@ -8,7 +8,7 @@ Inputs (all L1 fact bases, read through contract/store.py; nothing is parsed a s
   exe    the PE image (contract/exefacts.Image) -> exevft.scan (RTTI vftables) and exevft.chain (adjustor thunks).
 
   groups(obj, bind)               -> [Point] one per address point of every `_ZTV` of every object, sorted; `claim` is
-                                     'named' (the plugin's vtpair row names a `??_7`), 'unnamed' (the row says `unnamed:<reason>`: the
+                                     'named' (the plugin's vtpair row names a `??_7`), 'unnamed' (the row says `nodecor:<reason>`: the
                                      compiler states there is no MSVC twin) or 'missing' (no vtpair row for the address point)
   role(symbol)                    -> ('fn',) | ('thunk', adj, target symbol) | ('unsupported', why): the Itanium special-name grammar
                                      `_ZT h <nv-offset> _ <encoding>` (call-offset `h`, offset `n<digits>` = negative); the thunk's callee
@@ -45,7 +45,7 @@ def groups(obj, bind):
         for z, pts in sorted(obj[(ob, 'ztv')].items()):
             for ap, d, slots in sorted(pts):
                 ms, off = rows.get((z, ap), (None, None))
-                claim = 'missing' if ms is None else 'unnamed' if (not ms or ms.startswith('unnamed:')) else 'named'
+                claim = 'missing' if ms is None else 'unnamed' if (not ms or ms.startswith('nodecor:')) else 'named'
                 out.append(Point(ob, z, ap, d, tuple(slots), claim, ms or '', off, bind['vt'].get((ob, z, ap))))
     return out
 

@@ -166,7 +166,7 @@ exe:** `loader/tools/check_hints.py FalloutNV.exe hints.txt --s2-addrmap out/add
 | `outside` | not in a mapped data section |
 
 On the synth image all 40 are `not-code`, because their slots have no address there. The boot does not pass hints yet
-(`toolchain/game/boot.cpp`: `opts = NULL`); S5 would read them from `sdmc:/fnvnx/game/vtable_hints.txt`, written next
+(`toolchain/game/boot.cpp`: `opts = NULL`); S5 would read them from `vtable_hints.txt` in `FNVNX_SD_DIR`, written next
 to the exe by the build.
 
 ## Steam executable

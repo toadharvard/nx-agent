@@ -13,7 +13,7 @@
     "ports/fnv-nx/lift/gates/gate_eh.py"
    ]
   },
-  "test_gate_lift.py": {
+  "test_gate_flags.py": {
    "references": [
     {
      "anchor": "## State of the product gates",
@@ -22,9 +22,8 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/verify/gate_lift.py",
-    "ports/fnv-nx/lift/gates/gate_order.py",
-    "ports/fnv-nx/lift/gates/gate_eh.py"
+    "ports/fnv-nx/lift/gates/gate_flags.py",
+    "ports/fnv-nx/lift/proof/flagagree.py"
    ]
   },
   "test_gate_order.py": {

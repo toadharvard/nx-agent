@@ -30,16 +30,18 @@ import glob  # noqa: E402
 T = 'ports/fnv-nx/'
 ROOT = T + 'toy'
 TOOLCHAIN = os.path.normpath(os.path.join(HERE, '..'))
-STORE = os.environ.get('GATE_CACHE') or os.path.join(tempfile.gettempdir(), 'fnvnx-toolchain-tests-cache')
+STORE = os.environ.get('GATE_CACHE') or tempfile.mkdtemp(prefix='fnvnx-toolchain-tests-')  # a scratch store of this run only, removed at exit
+if not os.environ.get('GATE_CACHE'):
+    import atexit
+    import shutil
+    atexit.register(shutil.rmtree, STORE, ignore_errors=True)
 STATS = {'run': 0, 'hit': 0}
-CXX_ONLY_FLAGS = ('-std=gnu++17', '-fno-sized-deallocation', '-fpermissive')   # the C++-only options cc1 warns about
-PRODUCT_FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fms-extensions', '-fshort-wchar', '-frounding-math', '-fsigned-char',
-                 '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks', '-fcheck-new', '-fno-sized-deallocation',
-                 '-fno-lifetime-dse', '-ffp-contract=off', '-fPIC', '-fpermissive', '-Wno-narrowing', '-march=armv8-a+crc+crypto',
-                 '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics',
-                 '-U_FORTIFY_SOURCE', '-fno-devirtualize']
+# The toy root states nothing that a record already holds (RECIPE.md): the compiler, the runtime, the semantic flags and the plugins come from
+# env.json, guest_compiler.json and recipe.PLUGIN_SOURCES as for a product root. What the recipe requires of a root's own flags are its constants:
+# WERROR_ATTR in every guest root, SDD_DEFINE in a native C++ root; the optimisation level is the test's own choice (PER_ROOT).
+PRODUCT_FLAGS = ['-O2', recipe.WERROR_ATTR]
 _N = [0]
-# the plugins of a lifted root: fnvnx_ftoi in mode lifted is required (recipe.LIFTED_ARGS), the others are the test's choice
+# the plugins of a lifted root: fnvnx_ftoi in mode lifted is required (recipe.plugin_args), the others are the test's choice
 
 
 def source_of(name):
@@ -58,13 +60,15 @@ def _w(repo, rel, text):
 
 
 def _plugin(name, args):
-    p = {'name': name, 'source': source_of(name), 'args': dict(args)}
-    if name in recipe.PLUGIN_INPUTS:
-        p['inputs'] = recipe.PLUGIN_INPUTS[name]
-    return p
+    """a root's plugin entry is {"name": PLUGIN}: source, inputs and arguments are fixed by recipe.py alone. A test that gives an argument writes it into the
+    entry, so the recipe's own refusal is what the test sees."""
+    return dict({'name': name}, **({'args': dict(args)} if args else {}))
 
 
-def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=False):
+EXTRA = {'external': [], 'include': [], 'copy': []}   # a test of a header that needs more of the real tree: pinned externals, include dirs, (real repo dir, name under the toy root) copied whole
+
+
+def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=False, variant=''):
     """build the toy guest root: plugins [(name, {key: value})] in load order, fixtures {unit file name: text}; -> (objects.json dict, out dir)"""
     _N[0] += 1
     repo = os.path.join(tmp, 'toy%d' % _N[0])
@@ -72,19 +76,24 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     _git(repo, 'init', '-q')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
     ext = pin['external']
-    if native:   # a native root loads every plugin with its fixed arguments (recipe.PLUGIN_ARGS) and the semantics flags
-        plugins = [(n[len('fnvnx_'):], a) for n, a in ((n, dict(recipe.PLUGIN_ARGS[n])) for n in recipe.PLUGIN_SOURCES)]
-        flags = ['-O2'] + list(recipe.SEMANTICS_FLAGS) + [f for f in flags if f not in recipe.SEMANTICS_FLAGS and f != '-O2']
+    # RULE of the recipe (guest root): the FULL plugin set in the fixed order with the arguments fixed by the root's origin (recipe.plugin_args(origin): native, or lifted with
+    # fnvnx_ftoi in mode lifted). A test never picks a subset or an argument: PLUGINS holds [(name, extra args)] merged over the fixed ones (an extra argument is a
+    # recipe error, which a test may expect); RAW takes the list as it stands (a test of the recipe's own validation).
+    if not raw:
+        extra = {'fnvnx_' + n: a for n, a in plugins}   # the arguments are the recipe's (recipe.plugin_args of the origin): an entry carries only what a test adds
+        plugins = [(n[len('fnvnx_'):], extra.get(n, {})) for n in recipe.PLUGIN_SOURCES]
+    else:
+        lifted_ftoi = False
+    required = ['-O2', recipe.WERROR_ATTR, recipe.SDD_DEFINE]
+    flags = required + [f for f in flags if f not in required]
     plugins = [('fnvnx_' + n, a) for n, a in plugins]
-    if not native and not raw:   # the mode of fnvnx_ftoi is the root's, never a choice (recipe.LIFTED_ARGS)
-        plugins = [(n, dict(recipe.LIFTED_ARGS[n], **a) if n in recipe.LIFTED_ARGS else a) for n, a in plugins]
-    if not native and lifted_ftoi and 'fnvnx_ftoi' not in [n for n, _ in plugins]:   # required by the lifted-root rule, loaded first as in the product order
-        plugins.insert(0, ('fnvnx_ftoi', dict(recipe.LIFTED_ARGS['fnvnx_ftoi'])))
     names = [n for n, _ in plugins]
-    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])}):
+    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.plugin_inputs(source_of(n), recipe.tracked(REAL), recipe.load_admit(REAL), REAL)} | {recipe.ANALYSIS_PLUGIN[1]}):   # the objstub plugin is built for every root with units
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
+    for src, dst in EXTRA['copy']:   # the real tree under the toy root (a header dir needs a product root of the guest target as its home)
+        shutil.copytree(os.path.join(REAL, src), os.path.join(repo, ROOT, dst))
     if not any(k.endswith(('.cc', '.cpp', '.cxx')) for k in fixtures):   # a root with a C++ unit declares its origin: a C fixture comes with one
         fixtures = dict(fixtures, **{'zz_cxx.cpp': 'int zz_cxx() { return 0; }\n'})
     files = ({k: v for k, v in fixtures.items()} if native else {})
@@ -93,15 +102,18 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     gen = ('import os\nfor n, t in %r.items():\n    os.makedirs(os.path.dirname("/out/" + n), exist_ok=True)\n'
            '    open("/out/" + n, "w").write(t)\n') % {'gen/' + k: v for k, v in fixtures.items()}
     _w(repo, T + 'gen/lift.py', gen)
-    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']},
-           'flags': {'c': [f for f in flags if f not in CXX_ONLY_FLAGS], 'cxx': list(flags), 'asm': []}, 'include': [], 'units': 'all', 'external': [ext],
+    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': recipe.pin_drivers()[0], 'cxx': recipe.pin_drivers()[1]},
+           'flags': {'c': list(flags), 'cxx': list(flags), 'asm': []}, 'include': list(EXTRA['include']), 'units': 'all', 'external': [ext] + list(EXTRA['external']),
            }
+    if variant:   # the recipe's declared variant: the root's flags plus its own parameters (verify/recipe.py GCSTRESS_*), built as ROOT@VARIANT
+        assert variant == recipe.GCSTRESS_VARIANT, variant
+        rec['variants'] = {variant: {'flags': {k: v + recipe.GCSTRESS_FLAGS for k, v in rec['flags'].items()}}}
     if not native:
         rec['generated'] = [{'tool': T + 'gen/lift.py', 'args': [], 'inputs': [], 'outputs': ['gen/' + k for k in fixtures]}]
     if plugins:
-        rec['plugin_cxx'] = 'x86_64-linux-gnu-g++-13'
         rec['plugins'] = [_plugin(n, a) for n, a in plugins]
     _w(repo, ROOT + '/build.json', json.dumps(rec))
+    _w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
     _w(repo, T + 'verify/admit.json', json.dumps({'format': 'fnvnx-admit/1', 'roots': [
         {'path': ROOT, 'class': 'product', 'target': 'guest', 'gates': [], 'recipe': ROOT + '/build.json',
          'cxx_origin': 'native' if native else {'lifted_by': T + 'gen/lift.py', 'pack': ext['name']}},
@@ -111,26 +123,33 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     _git(repo, 'commit', '-q', '-m', 'toy')
     out = os.path.join(tmp, 'out%d' % _N[0])
     os.makedirs(STORE, exist_ok=True)
-    res = recipe.build(repo, ROOT, STORE, out)
+    res = recipe.build(repo, ROOT + ('@' + variant if variant else ''), STORE, out)
     STATS['run'] += res['stages']['run']
     STATS['hit'] += res['stages']['hit']
     return res, out
 
 
 def _trivial(tmp, names):
-    return _recipe(tmp, [(n, {}) for n in names], {'t.cpp': 'int t(int x) { return x; }\n'}, PRODUCT_FLAGS)
+    return _recipe(tmp, [], {'t.cpp': 'int t(int x) { return x; }\n'}, PRODUCT_FLAGS)
+
+
+def driver():
+    """-> the pinned guest C++ driver of the recipe's fetched external (the compiler the stages run), for the one test of a raw unit (test_odrdef: the recipe has no raw
+    stage, every unit it builds is preprocessed first); the external is in STORE once a recipe build ran"""
+    pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
+    return os.path.join(STORE, 'external', pin['external']['commit'] + '.co', recipe.pin_drivers()[1])
 
 
 def build(name, tmp, source=None):
     """-> path of the plugin's .so out of the recipe's plugin:<name> stage (the plugin's name is the file's base name), or raises
     AssertionError with the diagnostics. Only the tracked source is built (SOURCE is not accepted: one source, the recipe's)."""
     assert source is None, 'the recipe builds the tracked source only'
-    res, _ = _trivial(tmp, [name])
+    res, _ = _trivial(tmp, [])   # the root loads the full set: the .so of NAME is one of its plugin stages
     assert res['status'] == 'green', 'plugin %s does not build: %s' % (name, json.dumps(res.get('failure'))[-1500:])
     return next(p['path'] for p in res['plugins'] if p['name'] == 'fnvnx_' + name)
 
 
-def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, native=False):
+def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, native=False, variant=''):
     """compile src to out (an object) through the recipe with the product flags and the plugins (paths of .so made by build()), in that
     order; `args` holds extra compiler flags and -fplugin-arg-<plugin>-<key>[=<value>] plugin arguments; -> CompletedProcess (the caller
     checks returncode: some tests expect an error, and then stderr is the recipe's failure diagnostics)"""
@@ -145,7 +164,10 @@ def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, nativ
             extra.append(a)
     tmp = tempfile.mkdtemp(prefix='plugbuild-')
     try:
-        res, odir = _recipe(tmp, [(n, pa[n]) for n in names], {os.path.basename(src): open(src).read()}, (PRODUCT_FLAGS if flags is None else flags) + extra, native)
+        try:   # the plugin list of a root is the recipe's full set; PLUGINS only names the ones a test gives arguments to
+            res, odir = _recipe(tmp, [(n, pa[n]) for n in names if pa[n]], {os.path.basename(src): open(src).read()}, (PRODUCT_FLAGS if flags is None else flags) + extra, native, variant=variant)
+        except recipe.RecipeError as e:
+            return subprocess.CompletedProcess([], 2, '', '\n'.join(e.errors))
         if res['status'] != 'green':
             f = res['failure']
             return subprocess.CompletedProcess([], f.get('exit') or 1, '', '\n'.join(f.get('stderr') or []) + '\n' + json.dumps(f)[:600])
@@ -171,6 +193,22 @@ def cc_files(res):
     return out
 
 
+def missing_plugin_refused(missing):
+    """True iff the recipe refuses a guest root whose plugin list lacks the product plugin MISSING (a name without the fnvnx_ prefix): the product set is
+    recipe.PLUGIN_SOURCES in its fixed order, every unit is compiled with all of it, so a root with fewer is an admission error naming the plugin."""
+    fixed = recipe.plugin_args('native')
+    tmp = tempfile.mkdtemp(prefix='plugbuild-missing-')
+    try:
+        try:
+            _recipe(tmp, [(n[len('fnvnx_'):], fixed[n]) for n in recipe.PLUGIN_SOURCES if n != 'fnvnx_' + missing], {'t.cpp': 'int t(int x) { return x; }\n'},
+                    PRODUCT_FLAGS, native=True, raw=True)
+        except recipe.RecipeError as e:
+            return any('does not load plugin fnvnx_%s' % missing in x for x in e.errors)
+        return False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def objdump(obj):
     """the object read back with the pinned binutils (env.json): `objdump -dr` -> {symbol: [lines]} (a relocation is the line after its
     instruction). Disassembly is reading, not compiling: the object is the recipe's."""
@@ -185,6 +223,17 @@ def cstring(obj, sec, off):
     """the NUL-terminated string at offset OFF of section SEC of the object"""
     d = elfobj.read(obj).section(sec)
     return d[off:d.index(b'\0', off)].decode()
+
+
+def mnemonics(body):
+    """the set of instruction mnemonics of an objdump body (a list of instruction lines)"""
+    return {m.group(1) for l in body for m in [re.search(r'\t([a-z][a-z0-9.]*)\b', l)] if m}
+
+
+def rule_form(body):
+    """True when the body holds the in-range test of the float -> integer rule: a floating compare and a select (csel, fcsel, bit select, mask and, or a conditional branch)"""
+    ms = mnemonics(body)
+    return bool(ms & {'fcmp', 'fcmpe', 'fcmge', 'fcmgt', 'fcmle', 'fcmlt', 'fcmeq'}) and bool(ms & {'csel', 'fcsel', 'bsl', 'bif', 'bit', 'and', 'csinv', 'cinv'} or any(m.startswith('b.') for m in ms))
 
 
 def section_size(obj, name):
@@ -313,3 +362,9 @@ class Checks:
     def done(self, extra=''):
         print('%s: %s (%d checks)%s [recipe stages run %d hit %d]' % (self.name, 'FAILED %d' % len(self.fails) if self.fails else 'ok', self.n, extra, STATS['run'], STATS['hit']))
         return 1 if self.fails else 0
+
+
+def argument_refused(r, plugin):
+    """True iff R (a compile() result) is the recipe's own refusal of an argument written into a root's entry of the plugin: source, inputs and arguments of every
+    plugin are fixed by recipe.py alone (PLUGIN_ARGS, by the root's origin). One helper for every plugin test; a test never carries its own expected text."""
+    return r.returncode != 0 and 'plugin fnvnx_%s: args is fixed by recipe.py' % plugin in r.stderr

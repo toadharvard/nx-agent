@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# reads: ports/fnv-nx/contract ports/fnv-nx/link ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify ports/fnv-nx/farm/setup_verdict_env.sh
 """Tests for verify/envcheck.py and farm/setup_verdict_env.sh: the declared environment of the verdict. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs the declared environment itself (a mismatch here IS the failure the file reports)."""
 import hashlib
@@ -207,6 +208,27 @@ rc3, out3, err3 = inst(mirror_doc(wtree="0" * 64))
 check("install_mirror: a mirror with another wheels tree hash -> exit 2", rc3 == 2 and "wheels tree_sha256 is" in err3, (rc3, out3, err3))
 check("install_mirror: a mirror with another tree hash -> exit 2", rc == 2 and "tree_sha256 is" in err, (rc, out, err))
 check("install_mirror: it leaves nothing in its TMPDIR, on success and on every failure", left == [], left)
+
+# read roots: the system headers a host root reads must belong to pinned packages
+rr = os.path.join(TD, "rrepo")
+os.makedirs(os.path.join(rr, "src"))
+open(os.path.join(rr, "src", "a.c"), "w").write("#include <stdio.h>\n#include <GL/gl.h>\nint main(void){return 0;}\n")
+rf = os.path.join(TD, "readroots.json")
+json.dump({"format": "fnvnx-readroots/1", "roots": [{"name": "t", "cwd": "src", "flags": ["-std=c11"], "sources": ["a.c"]},
+                                                  {"name": "absent", "cwd": "nosrc", "flags": [], "sources": ["x.c"]}]}, open(rf, "w"))
+envcheck.READROOTS = rf
+d = doc()
+bad = [b for b in envcheck.check(d, rr) if "read root" in b]
+check("read root: headers of pinned packages (stdio.h, GL/gl.h) pass; a root whose sources are absent is skipped", bad == [], bad)
+for pn in ("libgl-dev", "libglx-dev", "libegl-dev"):
+    d["packages"].pop(pn, None)
+bad = [b for b in envcheck.check(d, rr) if "read root" in b]
+check("read root: a header owned by a package that is not pinned is a mismatch naming root, file and package",
+      any("env: read root t reads /usr/include/GL/gl.h, owned by libgl-dev (not a package of env.json)" in b for b in bad), bad)
+open(os.path.join(rr, "src", "a.c"), "w").write("#include <no/such/header.h>\n")
+bad = [b for b in envcheck.check(doc(), rr) if "read root" in b]
+check("read root: a missing header is a mismatch", any("env: read root t:" in b and "no/such/header.h" in b for b in bad), bad)
+envcheck.READROOTS = os.path.join(VERIFY, "readroots.json")
 
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")

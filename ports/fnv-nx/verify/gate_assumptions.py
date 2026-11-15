@@ -10,13 +10,21 @@ Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries a
     REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
     optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
               branch enters with that branch's merge, and every rule below applies to every entry without exception.
+Perf debt: verify/PERFDEBT.json ("fnvnx-perfdebt/1": {"first_frame": BOOL, "entries": [{"id", "fast_path", "rule", "owner"}]}) records a
+switch-off of a fast path that was needed before the class rule restoring it exists. Red when: the file is missing or does not parse; the format or
+first_frame is wrong; an entry lacks a unique id, the fast_path, the rule that restores it, or an owner that is a layer of LEADS; or first_frame is
+true and any entry is open. The report carries perfdebt.open. An entry and its switch-off are deleted in the commit that lands the rule.
 Universe: the MENTIONS of the tree. A text file is a tracked file below ports/fnv-nx that decodes as UTF-8 without NUL
 bytes and is not data (suffix .json); a file of a root of verify/admit.json marked "record": true is an append-only log
 (its dated entries state what was said then; the owner forbids editing it) and is not scanned. CLAUDE.md (the owner's
 words) is read for the decisions, not scanned. A BLOCK is the unit of a text file: in a .md file a paragraph (lines up to a
 blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
-mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive); the prose of a .py file is
-its comments and docstrings (code and string values are not statements), of any other file the whole text. An item of the
+mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive). PROSE is defined by one lexer per
+file kind, chosen by the extension from the one table LEXER: python = COMMENT tokens and docstring STRING tokens (tokenize + ast); c, c++,
+headers, .inc, .s, .glsl = // and /* */ comments (string and char literals skipped); linker scripts (.ld, .map: ld scripts and version scripts, ld doc "Simple Linker Script Commands" / "Version Script") = /* */ comments only, the rest is code (`//` is not a comment there; a double-quoted string has no escapes and is skipped); markdown = text outside fenced code blocks; shell and toml =
+# comments (quoted strings and heredoc bodies skipped); asm = ; comments; sail = as c without char literals; data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
+backticked spans are dropped. Totality: a text file whose extension is not in the table, or that its lexer cannot read, is red (codes
+ext-unknown, lex-error); nothing is skipped silently. An item of the
 universe is (path, first line of the block). A mention is certified iff ALL hold:
   1. its raw block contains at least one id of the form ASM-NNN, for example ASM-001 (the compiler is correct);
   2. every id in it is the id of an entry of the registry.
@@ -60,6 +68,8 @@ import gatesdir  # noqa: E402
 TREE = "ports/fnv-nx"
 REGISTRY = TREE + "/verify/ASSUMPTIONS.json"
 ADMIT = TREE + "/verify/admit.json"
+PERFDEBT = TREE + "/verify/PERFDEBT.json"
+PERFDEBT_FORMAT = "fnvnx-perfdebt/1"
 FORMAT = "fnvnx-assumptions/1"
 OWNER_FILE = "CLAUDE.md"
 OWNER_HEAD = "OWNER, the only accepted ones:"
@@ -87,28 +97,249 @@ ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"\s*\|")
 
 
+LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".inc": "c", ".hpp": "c", ".ld": "ld", ".s": "c", ".glsl": "c", ".map": "ld", ".ver": "ld", ".sail": "sail", ".asm": "semi",
+         ".md": "markdown", ".sh": "shell", ".gitignore": "shell", ".toml": "toml",
+         ".json": "data", ".tsv": "data", ".txt": "data", ".expect": "data", ".patch": "data"}
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
+
+
+class LexError(Exception):
+    pass
+
+
+def suffix_of(path):
+    """the key of the one lexer table: the extension, or the whole name of a file with no extension (.gitignore)"""
+    base = os.path.basename(path)
+    ext = os.path.splitext(base)[1] or base
+    if ext == ".in":  # a template takes the lexer of its inner extension (foo.h.in lexes as .h); a bare x.in has none and stays unknown
+        inner = os.path.splitext(os.path.splitext(base)[0])[1]
+        return inner if inner and inner != ".in" else ext
+    return ext
+
+
+def lexer_of(path):
+    return LEXER.get(suffix_of(path))
+
+
+def py_spans(body, lines, off):
+    """comments and docstrings of a Python file as (start, end) offsets, found with tokenize and ast (code and string values are not prose)"""
+    def at(row, col):
+        return off[row - 1] + col
+    try:
+        tree = ast.parse(body)
+        docs = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body \
+                    and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) \
+                    and isinstance(node.body[0].value.value, str):
+                v = node.body[0].value
+                # ast columns are UTF-8 byte offsets, tokenize columns are characters
+                c0 = len(lines[v.lineno - 1].encode()[:v.col_offset].decode())
+                c1 = len(lines[v.end_lineno - 1].encode()[:v.end_col_offset].decode())
+                docs.append((at(v.lineno, c0), at(v.end_lineno, c1)))
+        out = []
+        for tok in tokenize.generate_tokens(io.StringIO(body).readline):
+            st, en = at(*tok.start), at(*tok.end)
+            if tok.type == tokenize.COMMENT:
+                out.append((st, en))
+            elif tok.type == tokenize.STRING and any(d0 <= st and en <= d1 for d0, d1 in docs):
+                out.append((st, en))
+        return out
+    except (SyntaxError, ValueError, tokenize.TokenError) as e:
+        raise LexError("python: %s" % e)
+
+
+def ld_spans(body):
+    """the comments of a GNU ld linker script or version script: /* */ only (binutils ld, Scripts: "comments ... in C style"); everything else is
+    code. A double-quoted string runs to the next quote with no escapes (a file name or symbol pattern) and is skipped."""
+    n, i, out = len(body), 0, []
+    while i < n:
+        if body.startswith("/*", i):
+            j = body.find("*/", i + 2)
+            if j < 0:
+                raise LexError("ld: unterminated /* comment")
+            out.append((i, j + 2))
+            i = j + 2
+        elif body[i] == '"':
+            j = body.find('"', i + 1)
+            if j < 0:
+                raise LexError("ld: unterminated string")
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def c_spans(body, chars=True):
+    """// and /* */ comments of C and C++ (with string, char and raw string literals and digit separators skipped); CHARS false (Sail: an
+    apostrophe starts a type variable, not a literal) skips strings only"""
+    n, i, out = len(body), 0, []
+    while i < n:
+        ch = body[i]
+        nx = body[i + 1] if i + 1 < n else ""
+        if ch == "/" and nx == "/":
+            j = i
+            while j < n and body[j] != "\n":
+                j += 2 if body[j] == "\\" and j + 1 < n else 1   # a backslash continues a line comment
+            out.append((i, min(j, n)))
+            i = j
+        elif ch == "/" and nx == "*":
+            j = body.find("*/", i + 2)
+            if j < 0:
+                raise LexError("c: unterminated /* comment")
+            out.append((i, j + 2))
+            i = j + 2
+        elif ch == '"' or (ch == "'" and chars):
+            raw = ch == '"' and i > 0 and body[i - 1] == "R" and (i < 2 or body[i - 2] in "uUL8" or not (body[i - 2].isalnum() or body[i - 2] == "_"))
+            if raw:
+                m = re.compile(r'"([^()\\ \t\n]{0,16})\(').match(body, i)
+                if not m:
+                    raise LexError("c: bad raw string")
+                j = body.find(")" + m.group(1) + '"', m.end())
+                if j < 0:
+                    raise LexError("c: unterminated raw string")
+                i = j + len(m.group(1)) + 2
+                continue
+            j = i + 1
+            while j < n and body[j] != ch and body[j] != "\n":
+                j += 2 if body[j] == "\\" else 1
+            if j >= n or body[j] != ch:
+                raise LexError("c: unterminated %s literal" % ("string" if ch == '"' else "char"))
+            i = j + 1
+        elif ch.isdigit() and (i == 0 or not (body[i - 1].isalnum() or body[i - 1] == "_")):
+            j = i + 1                                             # a pp-number: digit separators are not char literals
+            while j < n and (body[j].isalnum() or body[j] in "_." or (body[j] == "'" and j + 1 < n and body[j + 1].isalnum())
+                             or (body[j] in "+-" and body[j - 1] in "eEpP")):
+                j += 1
+            i = j
+        else:
+            i += 1
+    return out
+
+
+def hash_spans(body, toml, mark="#"):
+    """# comments of shell and TOML (MARK ";" with TOML rules: assembler), with quoted strings (and heredoc bodies of shell) skipped"""
+    n, i, out = len(body), 0, []
+    heredocs = []
+    bol = True
+    while i < n:
+        ch = body[i]
+        if ch == "\n":
+            i += 1
+            bol = True
+            for tag, dash in heredocs:                              # the bodies of the heredocs opened on the line just ended
+                while i < n:
+                    j = body.find("\n", i)
+                    j = n if j < 0 else j
+                    line = body[i:j]
+                    i = min(j + 1, n)
+                    if (line.strip() if dash else line) == tag:
+                        break
+                else:
+                    raise LexError("shell: unterminated heredoc %s" % tag)
+            heredocs = []
+            continue
+        if ch == mark and (toml or bol or body[i - 1] in " \t;|&()"):
+            j = body.find("\n", i)
+            j = n if j < 0 else j
+            out.append((i, j))
+            i = j
+            continue
+        bol = bol and ch in " \t"
+        if ch == "\\" and not toml:
+            i += 2
+        elif ch in "'\"":
+            if toml and body.startswith(ch * 3, i):
+                j = body.find(ch * 3, i + 3)
+                if j < 0:
+                    raise LexError("toml: unterminated multi-line string")
+                i = j + 3
+                continue
+            j = i + 1
+            while j < n and body[j] != ch and not (toml and body[j] == "\n"):
+                j += 2 if body[j] == "\\" and ch == '"' else 1
+            if j >= n or body[j] != ch:
+                raise LexError("%s: unterminated quote" % ("toml" if toml else "shell"))
+            i = j + 1
+        elif not toml and body.startswith("<<<", i):
+            i += 3                                                  # a here-string, not a heredoc
+        elif not toml and body.startswith("<<", i):
+            m = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\?([A-Za-z_][A-Za-z_0-9]*))").match(body, i)
+            if m:
+                heredocs.append((m.group(2) or m.group(3) or m.group(4), m.group(1) == "-"))
+                i = m.end()
+            else:
+                i += 2
+        else:
+            i += 1
+    return out
+
+
+def md_spans(body):
+    """the text of a Markdown file outside fenced code blocks (the inline code spans are dropped for every lexer by strip_code)"""
+    out, pos, fence, start = [], 0, None, 0
+    for line in body.split("\n"):
+        end = pos + len(line)
+        m = re.match(r" {0,3}(`{3,}|~{3,})", line)
+        if fence is None:
+            if m:
+                if start < pos:
+                    out.append((start, pos))
+                fence = (m.group(1)[0], len(m.group(1)))
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1] and line.strip() == m.group(1):
+            fence = None
+            start = end + 1
+        pos = end + 1
+    if fence is None and start < len(body):
+        out.append((start, len(body)))
+    return out
+
+
+def strip_code(body, spans):
+    """the prose spans of one file: the comment spans of one run (only whitespace and at most one newline between) are one text; in every
+    text the backticked `...` spans are dropped, paragraph by paragraph. -> list of (start, end) offsets that remain prose"""
+    merged = []
+    for s, e in sorted(spans):
+        gap = body[merged[-1][1]:s] if merged else None
+        if merged and not gap.strip() and gap.count("\n") <= 1:
+            merged[-1] = (merged[-1][0], e)
+        else:
+            merged.append((s, e))
+    keep = []
+    for s, e in merged:
+        p = s
+        for para in re.split(r"(\n[ \t]*\n)", body[s:e]):
+            q = p + len(para)
+            a = p
+            for m in CODE_SPAN.finditer(para):
+                keep.append((a, p + m.start()))
+                a = p + m.end()
+            keep.append((a, q))
+            p = q
+    return keep
+
+
 def prose_lines(path, body):
-    """the lines of a file with everything that is not prose replaced by spaces (a mention is a statement in prose):
-    .py: only comments and docstrings remain (code, identifiers and string values are not statements); any other file: whole"""
+    """the lines of a file with everything that is not prose replaced by spaces (a mention is a statement in prose). Prose is defined by one
+    lexer per file kind (LEXER, by extension): python = COMMENT tokens and docstring STRING tokens; c = // and /* */ comments; ld = /* */ comments; markdown = the
+    text outside fenced code; shell and toml = # comments; data = none. In every prose span the backticked spans are dropped.
+    A suffix not in the table or a file the lexer cannot read raises LexError."""
+    kind = lexer_of(path)
+    if kind is None:
+        raise LexError("the extension %r has no lexer: add it to LEXER" % suffix_of(path))
     lines = body.split("\n")
-    if path.endswith(".py"):
-        keep = [[False] * len(ln) for ln in lines]
-        try:
-            for node in ast.walk(ast.parse(body)):
-                if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body \
-                        and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) \
-                        and isinstance(node.body[0].value.value, str):
-                    v = node.body[0].value
-                    for k in range(v.lineno - 1, v.end_lineno):
-                        keep[k] = [True] * len(lines[k])
-            for tok in tokenize.generate_tokens(io.StringIO(body).readline):
-                if tok.type == tokenize.COMMENT:
-                    r, c = tok.start[0] - 1, tok.start[1]
-                    keep[r][c:] = [True] * (len(lines[r]) - c)
-        except (SyntaxError, ValueError, tokenize.TokenError):
-            return lines
-        return ["".join(ch if k else " " for ch, k in zip(ln, kp)) for ln, kp in zip(lines, keep)]
-    return lines
+    off, o = [], 0
+    for ln in lines:
+        off.append(o)
+        o += len(ln) + 1
+    if kind == "data":
+        return [" " * len(ln) for ln in lines]
+    spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "ld": lambda: ld_spans(body), "sail": lambda: c_spans(body, False), "markdown": lambda: md_spans(body),
+             "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True), "semi": lambda: hash_spans(body, True, ";")}[kind]()
+    keep = bytearray(len(body))
+    for s, e in strip_code(body, spans):
+        keep[s:e] = b"\x01" * (e - s)
+    return "".join(ch if keep[k] or ch == "\n" else " " for k, ch in enumerate(body)).split("\n")
 
 
 def blocks(path, body):
@@ -149,7 +380,13 @@ def judge_mentions(files, ids, read):
     """files: scanned paths; ids: registry ids; read(path) -> text. -> (mentions [(path, line)], bad {(path, line): reason})"""
     mentions, bad = [], {}
     for f in files:
-        for line, text, prose in blocks(f, read(f)):
+        try:
+            bl = blocks(f, read(f))
+        except LexError as e:
+            mentions.append((f, 0))
+            bad[(f, 0)] = finding("ext-unknown" if lexer_of(f) is None else "lex-error", "%s:0" % f, "%s: %s" % (f, e))
+            continue
+        for line, text, prose in bl:
             if not WORD.search(prose):
                 continue
             mentions.append((f, line))
@@ -369,6 +606,49 @@ def judge_registry(doc, tracked, read, gate_names):
     return err, count
 
 
+def judge_perfdebt(doc):
+    """DOC (verify/PERFDEBT.json parsed, None if missing or unparseable) -> (findings [F], open count). The file records the switch-offs of a fast path that a
+    green trunk needs before the class rule that restores it exists (CLAUDE.md "Correctness never switches off a fast path"). Format
+    fnvnx-perfdebt/1: {"first_frame": bool, "entries": [{"id", "fast_path", "rule", "owner"}]}; an entry that exists is open (it is deleted in the
+    commit that lands its rule). Rules: the file parses with that format and a boolean first_frame; every entry has a unique non-empty id, the fast path
+    it switched off, the class rule that restores it, and the owner layer (one of LEADS); with first_frame true every open entry is a finding."""
+    if not isinstance(doc, dict):
+        return [finding("perfdebt-unreadable", PERFDEBT, "%s is missing or is not a JSON object (duplicate keys count as unparseable)" % PERFDEBT)], 0
+    errs = []
+    if doc.get("format") != PERFDEBT_FORMAT:
+        errs.append(finding("perfdebt-format", PERFDEBT, "format is not %s" % PERFDEBT_FORMAT))
+    if not isinstance(doc.get("first_frame"), bool):
+        errs.append(finding("perfdebt-format", PERFDEBT, "first_frame is not a boolean"))
+    ents = doc.get("entries")
+    if not isinstance(ents, list):
+        return errs + [finding("perfdebt-format", PERFDEBT, "entries is not a list")], 0
+    seen = set()
+    for i, e in enumerate(ents):
+        eid = e.get("id") if isinstance(e, dict) else None
+        sub = eid if isinstance(eid, str) and eid else "entry %d" % i
+        if not isinstance(e, dict):
+            errs.append(finding("perfdebt-entry", sub, "entry %d is not an object" % i))
+            continue
+        if not isinstance(eid, str) or not eid.strip():
+            errs.append(finding("perfdebt-entry", sub, "entry %d has no id" % i))
+        elif eid in seen:
+            errs.append(finding("perfdebt-entry", sub, "%s: id used twice" % eid))
+        seen.add(eid)
+        for k, why in (("fast_path", "the fast path that was switched off"), ("rule", "the class rule that restores it")):
+            if not isinstance(e.get(k), str) or not e[k].strip():
+                errs.append(finding("perfdebt-no-" + k.replace("_", "-"), sub, "%s has no %s (%s)" % (sub, k, why)))
+        if e.get("owner") not in LEADS:
+            errs.append(finding("perfdebt-no-owner", sub, "%s: owner is not a layer (%s)" % (sub, ", ".join(LEADS))))
+        extra = sorted(set(e) - {"id", "fast_path", "rule", "owner"})
+        if extra:
+            errs.append(finding("perfdebt-entry", sub, "%s: unknown fields %s" % (sub, ", ".join(map(str, extra)))))
+    if doc.get("first_frame") is True:
+        errs += [finding("perfdebt-open-at-first-frame", e.get("id") if isinstance(e, dict) and isinstance(e.get("id"), str) else "entry %d" % i,
+                         "open entry with first_frame set: the fast path must be restored before the first frame is measured")
+                 for i, e in enumerate(ents)]
+    return errs, len(ents)
+
+
 def judge_stray(files, ids, read):
     """every id written in any tracked text file is an id of the registry -> {path: [ids]}"""
     bad = {}
@@ -437,8 +717,7 @@ def main():
     # the owner's file is outside the tree: it is read, not scanned (it holds the owner's words)
     tracked_all = set(tracked) | {"CLAUDE.md"}
     scanned_all = [p for p in text_files if not any(p == r or p.startswith(r + "/") for r in records)]
-    scanned = [p for p in text_files if not p.endswith(".json")
-               and not any(p == r or p.startswith(r + "/") for r in records)]
+    scanned = scanned_all
     doc = load(REGISTRY)
     gates = gatesdir.load_dir_or_empty()
     gate_names = set(g.get("name") for g in gates.get("gates", []) if isinstance(g, dict))
@@ -447,6 +726,8 @@ def main():
         if isinstance(doc, dict) and isinstance(doc.get("entries"), list) else set()
     retired = retired_of(doc.get("retired"))[0] if isinstance(doc, dict) else {}
     errors += judge_retired([p for p in scanned_all if p != REGISTRY], retired, read)
+    pd_errs, pd_open = judge_perfdebt(load(PERFDEBT))
+    errors += pd_errs
     mentions, bad = judge_mentions(scanned, ids, read)
     stray = judge_stray(text_files, ids | set(retired), read)
     for f, x in sorted(stray.items()):
@@ -462,11 +743,12 @@ def main():
             count.get("planned", 0), count.get("no gate yet", 0), count.get("OPEN", 0))
     allf = sorted([e for e in errors] + [bad[k] for k in sorted(bad)], key=lambda x: (x.code, x.subject, str(x)))
     where = write_findings(allf)
+    detail += "; perfdebt: %d open" % pd_open
     detail += "; %d findings, full list: %s" % (len(allf), where)
     res = {"format": "fnvnx-gate/1", "name": "assumptions", "status": status, "universe": len(mentions), "certified": n,
            "uncertified": ["%s:%d" % k for k in sorted(bad)][:50], "detail": "; ".join(errors[:20] + [detail])[:2000],
            "reasons": {"%s:%d" % k: bad[k] for k in sorted(bad)[:50]}, "errors": errors[:50],
-           "entries": count}
+           "entries": count, "perfdebt": {"open": pd_open, "first_frame": (load(PERFDEBT) or {}).get("first_frame") is True}}
     with open(os.path.join(out, "assumptions.json"), "w") as fh:
         json.dump(res, fh, indent=1, sort_keys=True)
         fh.write("\n")

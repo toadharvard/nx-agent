@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
-"""fnvnx_order rules on the game's compiler (msvcmodel, all 8 plugins, the one build via realobj.build): ORDER-CONT (resumption-point fences, no error
-for a block-ending statement without fall-through edge), HARDREG (a hard-register object is no memory), LOCAL (a non-escaped decl is not ordered, a
+# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link
+# reads: ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json
+# reads: ports/fnv-nx/render/nxgpu/build.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.json
+# reads: ports/fnv-nx/render/smscan/build.json ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json
+# reads: ports/fnv-nx/toolchain/addr/fnvnx_addr.cc ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc
+# reads: ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc ports/fnv-nx/toolchain/layout/crossing_terms.inc ports/fnv-nx/toolchain/layout/decltype_spell.inc
+# reads: ports/fnv-nx/toolchain/layout/fnvnx_layout.cc ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/toolchain/names/fnvnx_names.cc
+# reads: ports/fnv-nx/toolchain/order/atomic_order.inc ports/fnv-nx/toolchain/order/fnvnx_frame.h ports/fnv-nx/toolchain/order/fnvnx_order.cc
+# reads: ports/fnv-nx/toolchain/pi/fnvnx_pi.cc ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc ports/fnv-nx/verify
+"""fnvnx_order rules on the game's compiler (msvcmodel, all 8 plugins, the one build via realobj.build): ONE FORM (no fence anywhere: an exception
+landing pad and the setjmp() library call need none, ldar orders by itself; a builtin with no library function that GCC expands at RTL and that
+touches shared memory is a compile error naming it), HARDREG (a hard-register object is no memory), LOCAL (a non-escaped decl is not ordered, a
 by-reference result is a pointer value, never memory). Plain script: exit 0 on pass. Run: python3 -I <this file>  (needs the pinned compiler: ARTIFACTS_URL)."""
 import os
 import subprocess
@@ -23,11 +33,7 @@ def check(name, ok, detail=''):
 SRC = {
     'cont': r'''
 #include <setjmp.h>
-struct NF { void *jb[5]; };
-struct C { NF *nf; int v; };
-void lj(C *c) { if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1); }
 void thrower();
-int sj(void **b, int *p) { if (__builtin_setjmp(b)) return *p; thrower(); return 0; }
 int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }
 int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; thrower(); return 0; }
 ''',
@@ -37,7 +43,7 @@ struct cpu { int r[4]; };
 register cpu *cc asm("x27");
 int hg(int v) { eax = v; eax += 1; return eax; }
 int hl(int v) { register unsigned loc asm("x25") = v; loc += 2; return loc; }
-int hp(int v) { cc->r[1] = v; return cc->r[1]; }
+int hp(int v) { cc->r[1] = v; return cc->r[2]; }
 ''',
     'local': r'''
 extern int gg;
@@ -76,25 +82,19 @@ def main():
         body = txt.split('<%s>:' % sym)[1].split('\n\n')[0]
         return [x.split('\t', 2)[-1].strip() for x in body.split('\n') if '\t' in x]
 
-    def fence_before_ldar(ls):
-        f = [i for i, x in enumerate(ls) if x.startswith('dmb') and 'ishld' in x]
-        l = [i for i, x in enumerate(ls) if x.startswith('ldar')]
-        return bool(f and l and f[0] < max(l))
-
     ops = lambda ls: [x.split()[0] for x in ls]  # noqa: E731
-    # ORDER-CONT
-    lj = lines('cont', '2ljP1C')
-    br = [i for i, x in enumerate(lj) if x.split()[0] == 'br']
-    check('(i) noreturn longjmp after a load: compiles (no error); the noreturn path ends in br, nothing after it but padding',
-          bool(br) and all(x.split()[0] in ('nop', 'br') for x in lj[br[-1]:]), lj)
-    s2 = lines('cont', '2sjPPvPi')
-    check('(ii) __builtin_setjmp: the receiver begins with dmb ishld, before the load', fence_before_ldar(s2), s2)
-    check('(ii) no two adjacent identical dmb ishld (FENCE-MERGE)', not any(a == b and a.startswith('dmb') and 'ishld' in a for a, b in zip(s2, s2[1:])), s2)
+    # ONE FORM: no fence in a landing pad or after setjmp()
     tc = lines('cont', '2tcPi')
-    check('(iii) catch landing pad begins with dmb ishld, before the load', fence_before_ldar(tc), tc)
+    check('(i) catch landing pad: ldar, no dmb', 'ldar' in ops(tc) and 'dmb' not in ops(tc), tc)
     s3 = lines('cont', '3sj2P')
-    i3 = [i for i, x in enumerate(s3) if 'setjmp' in x]
-    check('(iv) setjmp(): dmb ishld right after the call', bool(i3) and any(x.startswith('dmb') and 'ishld' in x for x in s3[i3[0] + 1:i3[0] + 3]), s3)
+    check('(ii) setjmp(): a plain call, no dmb', 'dmb' not in ops(s3), s3)
+    # a builtin with no library function that is expanded at RTL and touches shared memory through a pointer: a compile error naming it
+    bad = realobj.build({'bad': '''
+struct NF { void *jb[5]; };
+void lj(NF *c) { __builtin_longjmp((void **)c->jb, 1); }
+'''})
+    check('__builtin_longjmp on a shared buffer is a compile error naming the builtin',
+          bad['status'] != 'green' and '__builtin_longjmp' in str(bad.get('failure')), bad.get('failure'))
     # HARDREG
     for frag in ('2hgi', '2hli'):
         ls = lines('hard', frag)

@@ -43,7 +43,8 @@ def _opts(a, extra=(), optional=()):
     return verdict._opts(a, dict({"--repo": 0, "--verdicts": 0, "--budget-s": 1}, **{k: 0 for k in extra}, **{k: 1 for k in optional}))
 
 def _line(v):
-    return "L1 %s %s %ss gates:%d over_budget:%s" % (v["verdict"], v["tree"], v["seconds"], len(v["gates"]), v["over_budget"])
+    return "L1 %s %s %ss gates:%d over_budget:%s vacuous:%d" % (v["verdict"], v["tree"], v["seconds"], len(v["gates"]), v["over_budget"],
+                                                               sum(1 for g in v["gates"] if g.get("status") == "green" and str(g.get("reason", "")).startswith("vacuous:")))
 
 def _gates_file(repo, rev, td):
     """The gates document of REV's verify/gates.d (one file per gate, gatesdir.py), written canonically into TD: a value of this run, never a tracked file."""
