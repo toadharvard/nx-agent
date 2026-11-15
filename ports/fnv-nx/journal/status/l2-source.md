@@ -137,3 +137,4 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
   - atomics to the x86 mapping.
   Status: doing.
 - 2026-11-15 01:05 msvcmodel long double rebuild: done. tools/gcc-ilp32-msvcmodel b274ec067a2f, tree_sha256 a1eeb84d83a6. Smoke ok (ILP32 sizeof is 8, LP64 is 16). Farm archived. Repin of guest_compiler.json requested from L1; then L5 w14 rebuilds msvcmodel13 and test_ldbl goes green.
+- 2026-11-15 01:06 The compiler repin is L1 w24's, on claude/fnv-l1-contract-w24-ldbl. w3 runs test_ldbl on it when it lands.
