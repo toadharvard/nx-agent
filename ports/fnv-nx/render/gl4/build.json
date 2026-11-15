@@ -31,6 +31,12 @@
    "-m",
    "elf_x86_64"
   ],
+  "roots": [
+   "ports/fnv-nx/render/nxgpu",
+   "ports/fnv-nx/render/shaders/translator",
+   "ports/fnv-nx/lib/sha256",
+   "ports/fnv-nx/render/gl4shim"
+  ],
   "libs": {
    "system": [
     "/usr/lib/x86_64-linux-gnu/libc.so.6",
