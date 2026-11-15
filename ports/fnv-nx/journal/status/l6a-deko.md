@@ -21,7 +21,7 @@ On the path (converted now; w6 task W6-D1 on gl4w15c, one commit, then L1 verdic
 |---|---|---|---|
 | 1 | gl4_funcs.h: 109 GL entries typed by hand (3 unused: glGetString, glDeleteSamplers, glFlush) (L6 #30) | A | generation: a recipe stage emits gl4_funcs.h from a pinned Khronos gl.xml edition (mirror fnv-nx-build tools/khronos-glxml), restricted to the gl* symbols gl4's objects reference (a compiler fact); the hand file is deleted |
 | 2 | libnxgl4.map exports (5) restated in gl4.h | A+B | generation: the version script is generated from gl4.h's NXGL4_EXPORT declarations; the hand map is deleted |
-| 3 | variant bits as literals in gl4_d3dshader.c (cause of the FLAT refusal defect: gl4 kept its own copy of the rule) | B | one source: named constants (variant mask, VS_COMPLETE, FLAT) in render/nxgpu/nxgpu4_shader.h, the ABI home; gl4 reads them; byte change sent to L6 |
+| 3 | variant bits as literals in gl4_d3dshader.c (cause of the FLAT refusal defect: gl4 kept its own copy of the rule); variant bit 0/1 is itself a second encoding of FNVNX_SHADER_VS_COMPLETE/FLAT_COLOR | B | nxgpu4_shader.h includes the existing homes (translator fnvnx_shaders.h flags, lib/sha256 digest size), no restated constants (L6 00:48Z); proposed to L6: variant carries the translator flag bits themselves, mapping deleted in gl4 and dk; pending L6 |
 | 4, 4b | MAX_CODE, MAX_L, the lp/16 bound, key size 32 as literals (about 6 places) | B | one source: ABI constants in nxgpu4_shader.h / gpu_abi.h, the sizes asserted from them |
 | 4c | gl4.h GL4_MAX_* (7) | B | each one names the ABI constant it follows from, or is removed |
 | 4d | gl4.h NXGL4_OP_LIST / FN_LIST / FN_EXT_LIST (28+17+1) against the NxOp / NXGPU_FN enums; a static_assert checks counts only | A+B | generation: one X-macro list in the nxgpu header defines the enums; gl4's tables are expanded from it; the count assert is deleted |
@@ -32,11 +32,11 @@ On the path (converted now; w6 task W6-D1 on gl4w15c, one commit, then L1 verdic
 Reported to other owners (on the path):
 | # | item | kind | owner | replacement |
 |---|---|---|---|---|
-| 1' | glcorearb.h / EGL headers come from the host system, not pinned in env.json | B (unpinned source) | L1 | a pinned Khronos header input (declared GL target record) |
-| 4f | gl4_core.c:106 asks EGL for GL 4.5 core: the GL target restated in code | B | L1 + L4 | one declared GL target record that gl4 and the boot machine both read |
-| 5, 5b | gl4, nxgpu, translator@host, lib/sha256@host recipes are identical copies; 3 guest recipes copy the msvcmodel pin and 8 plugins | B | L1 | one host and one guest target record; build.json names the target, not its contents |
-| 6 | admit.json: 7 roots x 34 copies of REQUIRED_PRODUCT | B | L1 | the gate set derived from the root's class |
-| 8 | verify/bootgpu.py: prebuilt libnxgl4 @2f0427f5 and a direct gcc call (line 47) | C | L4 | the gl4 root's libnxgl4.so from GATE_CACHE (item 4.3); the gcc call deleted |
+| 1' | glcorearb.h / EGL headers came from the host system | B (unpinned source) | L1 | done by L1: pinned debs libgl-dev, libegl-dev, libglx-dev in env.json (L6 w6 15c11ecd8 -> cand2) |
+| 4f | gl4_core.c:100,106 asks EGL for GL 4.5 core surfaceless: the GL target restated in code | B | L1 w22 | record host_gl in verify/targets.json (sent to w22 00:51Z: opengl 4.5 core, EGL surfaceless; reason DSA + glClipControl); gl4 and L4 read it |
+| 5, 5b | gl4, nxgpu, translator@host, lib/sha256@host recipes are identical copies; 3 guest recipes copy the msvcmodel pin and 8 plugins | B | L1 w12 | profile rule: guest/host profiles generated from verify/targets.json + DATAMODEL + pins; a root names its profile, a restated field is red; gl4 and nxgpu convert when the field form is out |
+| 6 | admit.json: 7 roots x 34 copies of REQUIRED_PRODUCT | B | L1 w24 | the gate set derived from the root's class |
+| 8 | verify/bootgpu.py: prebuilt libnxgl4 @2f0427f5 and a direct gcc call (line 47) | C | L4 | gcc call already gone on claude/fnv-l4-verify-w6-r (bootrt root); prebuilt pin: L4 w7 replaces it by gate_build.ensure(render/gl4) once the link check is valid (4.3), NXGL4 pins in boot_inputs.json deleted (A27) |
 | 10 | render/d3d9/build_guest.sh (second build path) | C | L6 | deleted; the d3d9 root on the recipe |
 
 After the first frame (deko, paused):
