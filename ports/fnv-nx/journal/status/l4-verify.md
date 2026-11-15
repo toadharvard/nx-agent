@@ -377,3 +377,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Red: link.roots is still declared in render/gl4 (L6A) and lift/tests/guest/*/native (L3a). w7 is deleting the key, one commit per owner; both owners are told.
   - test_runner: the cause is the test, which still passes ARTIFACTS=art after Y. w7 is fixing the test to use its own bare repo for FNVNX_BUILD.
   - Side effect: w7's run pushed l4-verify/after-merge/f9ffbd055e14 (L4 reports only) to fnv-nx-build. Our delete was refused by the permission layer, so the branch stays until the owner removes it.
+- 14:52: render/gl4 comes from L6A gl4link2 3b360ffd2 (no link.roots; L1 recipe w12 52717c148). L6A measured libnxgl4.so sha256 6f9480f4…2fe00 in 2 fresh stores, and that replaces the 116b… expectation. w7 is taking it and rerunning.
