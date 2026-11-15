@@ -1202,3 +1202,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w24 232a5d14e: the PD-STACK-REUSE text is amended. Accepted.
 - To w15 for cand1: w24 232a5d14e and w16c1-run b25ddaac7.
 - L2: linkage field on .fnvnx.layout rows, from w3 on claude/fnv-l2-source-w3-linkage, decided by GCC's own linkage predicates. It starts after the long double patch.
+
+### 2026-11-15 01:15 — w23 dc3e12426
+- Accepted: the Rule D ASM-006 sentence; framesec 3-field rows (args:N), where `unk` makes a row dynamic; Rule A (an access in [CFA, CFA+args) outside the recorded ranges is a frame access, closing class f). w23 sent this head to w15.
+- Per-class n/N: w23 builds the platform root through recipe.py with L2 w1's plugin head and runs gate_order only. This is a targeted run, not a full verdict.
+- READONLY: rule L (section flags of the object) is the proof. The `.fnvnx.ro` record stays advisory, with no cross-check now.
+- D2 waits for L2's order-plugin fields.
