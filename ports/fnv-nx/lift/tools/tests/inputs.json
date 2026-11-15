@@ -7,7 +7,10 @@
   ],
   "test_lifted_vs_shapes.py": [
    "exe",
-   "facts"
+   "facts",
+   "fpstate",
+   "fpdepth",
+   "x86sys"
   ],
   "test_dsl_emit.py": [
    "exe",

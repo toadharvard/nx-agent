@@ -15,11 +15,12 @@ from proof import shape
 def main():
     import argparse, tempfile, liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
-    os.environ['FNVNX_EXE'] = exe; os.environ['FNVNX_UNIVERSE'] = facts + '/universe.tsv'
+    import fnvlift
+    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=os.environ['FNVNX_INPUT_FPSTATE'], fpdepth=os.environ['FNVNX_INPUT_FPDEPTH'], x86sys=os.environ['FNVNX_INPUT_X86SYS'])      # declared inputs (inputs.json)
     emit, jtab = '', None
     out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
     try:
-        liftgen.shard(argparse.Namespace(shard='0/1', out=out, jobs=os.cpu_count() or 1, exe=exe, emit=emit, jtab=jtab))
+        liftgen.shard(argparse.Namespace(shard='0/1', out=out, jobs=os.cpu_count() or 1, exe=exe, base=None, universe=facts + '/universe.tsv', emit=emit, jtab=jtab))
         return compare(shapes, exe, emit, jtab)
     finally:
         import shutil; shutil.rmtree(out, ignore_errors=True)
