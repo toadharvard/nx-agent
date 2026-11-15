@@ -183,3 +183,7 @@ After the first frame:
   - Next: S23 goes into the same patch, with its loop on the farm tree.
   - The table becomes generated (pinned cpp-docs plus the tm.texi universe).
   - S26 va_list joins crossing_forbidden, reported to L1.
+- 2026-11-15 00:50 L6 row #38: shim/include/fnvnx_cmath, 36 hand-written libm headers, on integration only.
+  - Verdict: after the first frame.
+  - Why: the trunk has 1 build.json and no guest root includes shim/ (trunk 407e93af6). The only user is rules/core.py's decomp rewriting, and decomp C++ is off the path.
+  - Replacement when decomp resumes: a recipe stage generating the set from the pinned VC++ 2008 CRT headers' math declarations. Semantics come from the MSVC CRT docs under DATAMODEL and the ftoi/IEEE rules. The exe/module CRT imports ⊆ the set is a check.
