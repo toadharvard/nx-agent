@@ -55,12 +55,12 @@ def main():
     stl = [m for o, m, a in pc if m == 'stlr' or m.startswith('dmb')]   # an ordered or release-fenced store
     if not pc or plain or len(stl) < 2:
         fails.append('pcaller: the inlined parameter store must be ordered: plain=%s stlr=%d' % (plain, len(stl)))
-    # AGGREGATE COPIES: unit-wise, every shared unit ordered; ATOMICS: raised to seq_cst (ldaxr/stlxr)
+    # AGGREGATE COPIES: unit-wise (a loop beyond 16 units: copybig is the loop body plus the last unit), every shared unit ordered; ATOMICS: raised to seq_cst (ldaxr/stlxr)
     def mn(prefix):
         return [m for k, v in fns.items() if k.startswith(prefix) for o, m, a in v]
-    for pre, nl in (('_Z6copy12', 3), ('_Z7copybig', 100)):
+    for pre, nl in (('_Z6copy12', 3), ('_Z7copybig', 2)):
         ms = mn(pre)
-        if ms.count('ldar') != nl or ms.count('stlr') != nl or [m for m in ms if re.match(r'(ldr|str|ldp|stp)', m)]:
+        if ms.count('ldar') != nl or ms.count('stlr') != nl or [m for m in ms if re.match(r'(ldr|str|ldp|stp)', m)] or (pre == '_Z7copybig' and 'b.ne' not in ms):
             fails.append('%s: want %d ldar + %d stlr and no plain access: %s' % (pre, nl, nl, {m: ms.count(m) for m in set(ms)}))
     if mn('_Z4retgv').count('ldar') != 3 or mn('_Z6passesPK3T12').count('ldar') != 3:
         fails.append('retg/passes: the shared source of a by-value copy is read with 3 ldar')
