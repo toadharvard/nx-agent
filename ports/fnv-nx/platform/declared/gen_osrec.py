@@ -8,6 +8,7 @@ process_wow64), each {"value", "source"}. Errors: an unknown, missing or duplica
 header is a pure function of the record (fields in the fixed order below); every constant is cited with its source in a comment."""
 import argparse
 import json
+import os
 import sys
 
 FIELDS = [("major", int), ("minor", int), ("build", int), ("platform_id", int), ("csd", str), ("sp_major", int), ("sp_minor", int),
@@ -56,6 +57,7 @@ def main(argv):
     ap.add_argument("--header", required=True)
     a = ap.parse_args(argv)
     h = header(load(a.os))
+    os.makedirs(os.path.dirname(os.path.abspath(a.header)), exist_ok=True)   # the stage mounts /out empty: the output directory is the generator's
     with open(a.header, "w") as f:
         f.write(h)
     return 0
