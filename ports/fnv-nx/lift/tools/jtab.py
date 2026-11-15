@@ -604,7 +604,7 @@ import atexit
 atexit.register(lambda: STATS['calls'] and sys.stderr.write('jtab resolve cost: %d calls, %.0f s, cone sum %d, cone max %d, slow(>5s) %d\n' % (STATS['calls'], STATS['secs'], STATS['cone_sum'], STATS['cone_max'], len(STATS['slow']))))
 
 
-def write_certs(outd, image, image_sha256, jt_ok, jt_red, dispatch, facts_commit=None):
+def write_certs(outd, image, image_sha256, jt_ok, jt_red, dispatch):
     """JTABCERT of one image: the certificates of the resolved sites that need OWNER 6, and the residue (the red sites whose cone formed a frame address and had no valid certificate, with the reason).
     Written to outd/jtabcert.json; factsassemble copies it to JTABCERT/<image>.json."""
     import json
@@ -614,7 +614,7 @@ def write_certs(outd, image, image_sha256, jt_ok, jt_red, dispatch, facts_commit
         if not c: continue
         miss = [w for w in t if w not in dispatch]                # C4: every entry of the table has a dispatcher entry
         if miss: why[a] = 'C4: %d table entries without a dispatcher entry (first %08x)' % (len(miss), miss[0]); jt_red[a] = why[a]; continue
-        certs.append(dict(c, image=image, image_sha256=image_sha256, facts_commit=facts_commit, entries_dispatch=len(t)))
+        certs.append(dict(c, image=image, image_sha256=image_sha256, entries_dispatch=len(t)))
     res = [{'site_va': a, 'reason': why[a]} for a in sorted(jt_red) if a in why]
     json.dump({'format': 'fnvnx-jtabcert/1', 'image': image, 'image_sha256': image_sha256, 'certificates': certs, 'residue': res}, open(os.path.join(outd, 'jtabcert.json'), 'w'), indent=1, sort_keys=True)
     return len(certs), len(res)
