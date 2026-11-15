@@ -967,3 +967,12 @@ Paused: w3b, w4, farm; no other work.
         - It is a cited union row; the pairs stay in the universe.
         - Interpretation sent to the orchestrator.
     - w5 (doing): final sm_link on 35f8eafec.
+- 16:40Z sm_link GREEN, measured at w5 ed6a8f41e (on w6-root 35f8eafec, shaders b545961f).
+    - Universe 1,818, sha 3d157e07…6c19. 115,776 certificates, 0 not ok. 121,394 programs, all linked, red 0.
+    - Translator × translator: 120,392, identical to 0b7061b06.
+    - FFP sides: 1,002/1,002 linked, both shade modes (202 + 202 translator VS × FFP PS; 298 + 298; 1 + 1).
+    - Earlier 808 vs now 404: the old enumeration paired both VS variants, a superset the draw path never forms; now it follows nx_prog_resolve.
+    - w6 68521ef8f: union row pair:vs_3_0+ffp_ps, citing CLAUDE.md 10ce6e2df.
+    - Handed to L1 for cand4: w6-root 68521ef8f (contains L6A 1ca99e8bd), then w5-smlink ed6a8f41e.
+    - Waiting on L1: the hermetic chain, the plugin fnvnx_names mount (ffp_prog.cpp is compiled nowhere until then), hostabi admission.
+    - Waiting on cand3: the w6 COM_SPEC rebase.
