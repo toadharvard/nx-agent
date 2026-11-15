@@ -446,7 +446,7 @@ check("tests cache: new content that no test reads re-runs nothing", rc == 0 and
 put(d, "verify/data_a.txt", "2\n")
 rc, r, e = tests_c(d, cache)
 check("tests cache: a file that only test_a reads changes -> exactly test_a re-runs", rc == 0 and ran()[4:] == ["a"]
-      and {f["name"][-8:]: f["status"] for f in r["files"]} == {"test_a.py": "passed", "test_b.py": "cached"}, (r, ran()))
+      and {os.path.basename(f["name"]): f["status"] for f in r["files"]} == {"test_a.py": "passed", "test_b.py": "cached"}, (r, ran()))
 put(d, "verify/tests/test_b.py", "open('ran.log', 'a').write('b\\n')\nopen('verify/data_b.txt').read()\n# edited\n")
 rc, r, e = tests_c(d, cache)
 check("tests cache: a test file's own content is part of its read set", ran()[5:] == ["b"], (r, ran()))
@@ -540,7 +540,7 @@ cache = os.path.join(d, "cache")
 mk(d, test_slow="import time\ntime.sleep(3600)\n")
 rc, r, e = tests_c(d, cache, extra=("--timeout-s", "1"))
 rc2, r2, e = tests_c(d, cache, extra=("--timeout-s", "1"))
-check("tests cache: a timeout is never cached as passed", rc != 0 and rc2 != 0 and "cached" not in r2["detail"], (r, r2))
+check("tests cache: a timeout is never cached as passed", rc != 0 and rc2 != 0 and ", 0 cached" in r2["detail"], (r, r2))
 
 # l1 passes VDIR/cache as GATE_CACHE: the second verdict of an unchanged tree finds the selftests keyed result
 r = small_repo()
