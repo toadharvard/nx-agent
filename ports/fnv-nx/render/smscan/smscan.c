@@ -6,7 +6,8 @@
 //  R5 register class (token type, index) legal for the role: destinations / ALU sources per model table, declared classes for dcl, index < table count.
 //  R6 source modifiers in the model's list (code 13 `not` only on the predicate token); R7 result modifier / shift in the model's dstmods; R8 relative addressing only where the class's `rel` lists
 //  the address register used; R9 predicated instruction only in models with p0; texld src0 / sampler operand without modifier or swizzle in the models of sm_illegal.tsv.
-// NOT checked (accepted, superset): write-mask and swizzle form legality, instruction-slot / flow-depth / read-port / texld-count limits, the table `undetermined` rows (R5 accepts a0, b#, i# as vertex ALU sources and writable registers as destinations),
+//  R10 (vs) the destination write mask of exp/expp/log/logp/pow/rcp/rsq is one component (MS vs-registers-modifiers-masking.md:38; the table's mk single); a0 is a destination of mova only in vs_2_0+ and a0/b#/i# are no ALU sources (the undetermined rows mov_a0_vs2, vs_a0_src, vs_bi_alu, rcp_mask).
+// NOT checked (accepted, superset): swizzle form legality and the write masks of the other opcodes, instruction-slot / flow-depth / read-port / texld-count limits, the table `undetermined` rows (R5 accepts a0, b#, i# as vertex ALU sources and writable registers as destinations),
 // `conflicts` rows (the table's model sets already hold the union).
 #include "nx_smscan.h"
 #include <stdbool.h>
@@ -126,6 +127,7 @@ static int declare(const Ctx* c, uint32_t op, const uint32_t* t, uint32_t n) {
 static int instr(const Ctx* c, const NxSmOp* o, const uint32_t* t, uint32_t n, uint32_t optok) {
     uint32_t i = 0, first_src; int e;
     if (o->d && (e = param(c, t, n, &i, 1, o->d))) return e;
+    if (!c->stage && o->d == 1 && o->opnum < 32 * NX_SM_VS_SINGLE_WORDS && ((NX_SM_VS_SINGLE[o->opnum >> 5] >> (o->opnum & 31)) & 1) && __builtin_popcount((t[0] >> 16) & 15) != 1) return NX_SM_E_DSTMASK;
     if (c->major >= 2 && (optok & 0x10000000u)) { if (!c->M->pred) return NX_SM_E_PRED; if ((e = param(c, t, n, &i, 0, 10))) return e; }   // the predicate token follows the destination (Wine shader_sm1_read_instruction)
     first_src = i;
     for (int k = 0; k < o->nsrc; k++) {

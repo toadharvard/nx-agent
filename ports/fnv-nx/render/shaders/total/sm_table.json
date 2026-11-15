@@ -5814,19 +5814,37 @@
  },
  "undetermined": [
   {
+   "decision": "illegal",
    "id": "vs_a0_src",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-address.md",
+    "section": "line 25: the address register cannot be read by a vertex shader; it is used only for relative addressing of a constant register"
+   },
    "note": "a0 as a direct ALU source operand (vs_1_1..vs_3_0): MS lists a0 R/W; wine allows; no instruction page says it is a legal source. Excluded from universe.",
-   "rows": "excluded"
+   "rows": "illegal",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft states the opposite: Microsoft holds)"
   },
   {
+   "decision": "illegal",
    "id": "vs_bi_alu",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-constant-integer.md",
+    "section": "line 16: constant integer registers are used only by loop and rep (b#: see the constant-boolean page, flow control only)"
+   },
    "note": "b#/i# as ALU source in vs: MS ps pages say flow-control-only, vs pages are silent. Excluded (same rule as ps).",
-   "rows": "excluded"
+   "rows": "illegal",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft states the opposite: Microsoft holds)"
   },
   {
+   "decision": "illegal",
    "id": "mov_a0_vs2",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/mova---vs.md",
+    "section": "line 31: for vs_2_0 and above the destination a0 is written by mova (mov to a0 is documented for vs_1_1 only)"
+   },
    "note": "mov to a0 (instead of mova) in vs_2_0+: MS mova page says dst must be a0; mov-to-a0 only documented for vs_1_1. Excluded.",
-   "rows": "excluded"
+   "rows": "illegal",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft states the opposite: Microsoft holds)"
   },
   {
    "decision": "union",
@@ -5861,20 +5879,15 @@
    }
   },
   {
-   "decision": "union",
+   "decision": "illegal",
    "id": "rcp_mask",
    "ms": {
     "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-modifiers-masking.md",
-    "section": "Masking, line 38: exp, expp, log, logp, pow, rcp, rsq need a single write mask (vs); the ps pages are silent"
+    "section": "line 38: exp, expp, log, logp, pow, rcp and rsq need a single write mask (vs); legal masks are one component, multi-component masks are illegal"
    },
    "note": "MS vs masking page: exp/expp/log/logp/pow/rcp/rsq need a single-component write mask; ps pages silent; universe uses single-component masks plus full mask. Included.",
-   "rows": "included",
-   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
-   "wine": {
-    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
-    "line": 485,
-    "what": "shader_sm1_parse_dst_param stores the write mask unvalidated for every opcode, so a full mask on rcp parses"
-   }
+   "rows": "illegal",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft states the opposite: Microsoft holds)"
   }
  ],
  "usage_source": "MS:dx9-graphics-reference-asm-dcl-usage-input-register---vs, dcl-usage---ps (D3DDECLUSAGE values, usage_index 0..15)",

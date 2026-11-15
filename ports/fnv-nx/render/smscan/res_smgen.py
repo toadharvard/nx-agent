@@ -7,8 +7,9 @@ out, tabj, tabpy = sys.argv[1:4]; os.makedirs(out, exist_ok=True)
 T = json.load(open(tabj))
 for _c in T["conflicts"]:   # every union row cites the rule, the Microsoft page and section, and the Wine 9.0 file and line (CLAUDE.md: Where the Microsoft page is narrower)
     assert _c.get("decision") == "union" and _c["rule"] and _c["ms"]["page"] and _c["ms"]["section"] and _c["wine"]["file"] and _c["wine"]["line"], _c["id"]
-for _u in T["undetermined"]:   # no row stays included without a source: an included row is a union row with the same citation
-    if _u["rows"] == "included": assert _u.get("decision") == "union" and _u["rule"] and _u["ms"]["page"] and _u["ms"]["section"] and _u["wine"]["file"] and _u["wine"]["line"], _u["id"]
+for _u in T["undetermined"]:   # no undetermined row stays without a decision and a source: included = union (MS silent, Wine accepts), illegal = Microsoft states it
+    assert _u["rows"] in ("included", "illegal") and _u["rule"] and _u["ms"]["page"] and _u["ms"]["section"], _u["id"]
+    assert _u["decision"] == ("union" if _u["rows"] == "included" else "illegal") and (_u["rows"] == "illegal" or (_u["wine"]["file"] and _u["wine"]["line"])), _u["id"]
 sp = importlib.util.spec_from_file_location("d3d9_tables", tabpy); D = importlib.util.module_from_spec(sp); sp.loader.exec_module(D)
 CLS = ["r", "v", "c", "t", "a0", "aL", "b", "i", "l", "oPos", "oFog", "oPts", "oD", "oT", "o", "oC", "oDepth", "s", "p0", "vPos", "vFace"]
 SRCMOD = ["neg", "bias", "biasneg", "sign", "signneg", "comp", "x2", "x2neg", "dz", "dw", "abs", "absneg"]          # token codes 1..12 (13 = not: predicate only)
@@ -32,8 +33,8 @@ for m in order:
     for x in list(M["dst_regs"]) + list(M["src_regs"]): assert x in CLS, x
     # writable registers of the table (rw W / ".x only") are destinations too (vs_1_1 `mov a0.x`: dst_regs omits a0); the table's `undetermined`
     # ids vs_a0_src / vs_bi_alu (a0, b#, i# as ALU sources of a vertex shader: MS silent, wine allows) are accepted (superset)
-    wr = [c for c in r if c in CLS and ("W" in r[c]["rw"] or r[c]["rw"].startswith(".x"))]
-    und = [c for c in ("a0", "b", "i") if c in r and m[0] == "v"] + [c for c in ("vFace",) if c in r and m[0] == "p"]   # ps_3_0:vFace_src (conflicts): MS allows vFace only as a setp/if/break condition, wine (vkd3d d3dbc.c:666-676, glsl_shader.c:2873-2880) as any source; the universe is the union
+    wr = [c for c in r if c in CLS and ("W" in r[c]["rw"] or r[c]["rw"].startswith(".x")) and not (c == "a0" and M["major"] >= 2)]   # undetermined mov_a0_vs2 (illegal, MS mova page): from vs_2_0 a0 is written by mova only
+    und = [c for c in ("vFace",) if c in r and m[0] == "p"]   # vs a0/b#/i# as ALU sources: undetermined rows vs_a0_src, vs_bi_alu (illegal, MS register pages)   # ps_3_0:vFace_src (conflicts): MS allows vFace only as a setp/if/break condition, wine (vkd3d d3dbc.c:666-676, glsl_shader.c:2873-2880) as any source; the universe is the union
     DST = list(M["dst_regs"]) + wr; SRC = list(M["src_regs"]) + und
     pm = {x for k, v in T["caps"].items() if k.endswith("Predication") for x in v["models"]}
     pred = int("p0" in r or m in pm)    # predication: the model has p0, or caps PS20Caps / VS20Caps.Predication names it (ENV decides: superset)
@@ -73,5 +74,8 @@ L.append("#define NX_SM1_MAX_OPERANDS %d" % mx)
 ill = list(csv.DictReader(open(os.path.join(os.path.dirname(tabj), "sm_illegal.tsv")), delimiter="\t"))
 for nm, suf in (("COORD", "@texld.coord"), ("SAMPLER", "@texld.sampler-src")):
     L.append("#define NX_SM_TEXLD_%s_MODELS 0x%x" % (nm, sum(1 << MI[m] for m in {r["model"] for r in ill if r["feature"].endswith(suf)})))
+# undetermined rcp_mask (illegal above one component, MS vs masking page): the vs opcodes whose table mask kind is `single`
+vs1 = sorted({e["opnum"] for k, e in T["opcodes"].items() if k[0] == "v" and e.get("mk") == "single"}); W = max(vs1) // 32 + 1
+L.append("#define NX_SM_VS_SINGLE_WORDS %d" % W); L.append("static const uint32_t NX_SM_VS_SINGLE[%d] = {%s};" % (W, ",".join("0x%x" % sum(1 << (o & 31) for o in vs1 if o >> 5 == w) for w in range(W))))
 open(os.path.join(out, "res_smtab.gen.h"), "w").write("\n".join(L) + "\n")
 print("res_smgen: %d models, %d op rows, %d sm1 counts" % (len(order), len(rr), len(agg)))
