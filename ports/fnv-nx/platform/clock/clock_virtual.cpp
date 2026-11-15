@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if FNVNX_VCLOCK   /* the virtual build; the real build has clock_real.cpp instead (fnvnx_vtime.h) */
+
 static const uint64_t Q = 100;                                       /* ns */
 static const int64_t EPOCH_FT = 129383136000000000ll;                /* 2011-01-01T00:00:00Z */
 static const int64_t FT_UNIX_EPOCH = 116444736000000000ll;           /* 1970-01-01T00:00:00Z */
@@ -389,3 +391,5 @@ int clk_file_times(const char *host, int64_t ft[3])
 }
 
 }
+
+#endif   /* FNVNX_VCLOCK */

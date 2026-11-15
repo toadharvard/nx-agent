@@ -304,7 +304,7 @@ static void thread_trampoline(void *p)
     struct w32_thread_obj *to = (struct w32_thread_obj *)p;
     struct w32_thread *self = w32_self();
     /* adopt the id handed out by CreateThread */
-    clk_thread_start(to->clk_parent);
+    VT_THREAD_START(to->clk_parent);
     self->tid = to->tid;
     self->self_obj = &to->o;
     if (to->tls_block) {
@@ -344,7 +344,7 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
     t->tid = __atomic_fetch_add(&g_next_tid, 4, __ATOMIC_RELAXED);
     t->exit_code = STILL_ACTIVE;
     t->cpu = -1;
-    t->clk_parent = clk_stamp();
+    t->clk_parent = VT_STAMP();
     if (!fnvnx_image_tls_hook && g_tls_total) {
         t->tls_block = tls_block_new();
         if (!t->tls_block) {
