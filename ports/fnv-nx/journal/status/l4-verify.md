@@ -169,3 +169,12 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - Decision: the working line w6-r takes both from L5 a7b52eb38 unchanged. cand1 gets them from their owners; L1 has been told.
 - w6 (session_01KmtZKSWZWnNyxn2dMg6oFE): doing the step 4 ldcheck set (unresolved and weak-undefined, with owners), then step 5 (the runnable set).
 - 00:14: L1 confirms cand1 gets contract/reachreq.py (679eb04c8) and L2's fnvnx_ftoi 713aeee8b (f2i_builtins.inc and its PLUGIN_INPUTS entry) through L5 head a44acb71f. Nothing more needs routing. L2 lead: session_01KmtZKRi5XRMhd5qzRaEyxC. w6 adds the PLUGIN_INPUTS entry on w6-r, then runs the ldcheck.
+
+## 2026-11-15 00:20 — 4.1 link at w6-r 0fde931c4 (L5 set from 7d90df67e)
+- tests/bootguest link.roots = rt/guest + loader + platform. The platform compiles through the recipe (cold run 259 stages; warm 283 hit).
+- ld:tests/bootguest is red: 3 unresolved symbols, all owned by L3a: fnvnx_dispatch (5 refs), fnvnx_guest_current (3), fnvnx_lift_enter (1). They are blocked until the L3a dispatcher/bridges root is admitted and joins link.roots. The orchestrator has been asked for the L3a contact and an ETA.
+- Next ld line to attribute after those three: "read-only segment has dynamic relocations" (-z text).
+- Weak-undefined set: needs the linked ELF.
+- Runnable set at 0fde931c4: passing are bootlayout 32, bootpath 54, bootunmap 28, bootheap 13, bootsock 6, bootinputs, bootmiles and bootrt 8/8. test_bootthreadcpu is red: it reads the deleted CORE3 constant; fixed by merging w7-i.
+- w6 is doing: merge w7-i, then the t38 fixes, then run the tests one at a time.
+- Reported to L1: a race when concurrent builds extract an external into one GATE_CACHE (Errno 39).
