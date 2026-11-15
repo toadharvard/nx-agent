@@ -358,3 +358,5 @@ After the first frame:
 - S23 class-key: the UDT table is built (w3 rules/udt_table.py @61b708673, link/codeview.py reader). z7: 2,939 objects with .debug$T. Pristine: 0 of 2,987 carry it. 99,629 names; 1,741 cross-unit conflicts (the decomp's ODR state).
   - Ruling: the key is per unit, from that unit's own z7 object. No global vote, no SDK replacement, no unit exclusion.
   - w3 doing: the cause class of GCC-only union declarations over all 896 units (inserted shim text vs upstream); then the per-unit rule. SDK_TYPEDEFS (s1_compile.py:165) is a hand list, flagged under rule 1.
+  - Cause found (w3): cl's leaf kind is the key of the FIRST declaration, so the SDK union `_ULARGE_INTEGER`, forward-declared `class`, is recorded as LF_CLASS. 7/896 units. Not a hide-set difference; z7 unchanged.
+  - Ruling: S23 compares layout facts only (size, alignment, field offsets and types), not the leaf kind. A per-TU source rule makes forward and friend declarations take the union-ness of the tag's one definition; class/struct is kept, and cl's key reaches names. SDK_TAGS/SDK_TYPEDEFS give way to equiv.py sdk_only_names.
