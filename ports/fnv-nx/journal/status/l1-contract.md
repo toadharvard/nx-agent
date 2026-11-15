@@ -1656,3 +1656,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - cand3 (w12), from L6 w5: resolve_input accepts "." ; run-stage keys from declared content ids before materialization, deb-union tree as a store index entry, {stage} ref resolves only that stage (summary root >2h cold).
 - cand2 verdict 4 (w15, a26a94f84): `L1 red a5db8f92… 2764.9s gates:43 over_budget:True vacuous:19` (cold, overlapped). admit GREEN 1294/1294. abi 8690/10434: sdd rows gone; left 24 va_list crossing rows (L2) + ~44 undecorated C names (L1 decoder: cdecl/stdcall/fastcall MSVC grammar, w15). determinism incremental landed (5a8b909fe/2cf163678). datamodel waits on the new pin.
 - abi va_list rows: L2 ruling accepted — crossing universe = symbols reached by the exe's/modules' facts (IAT bindings, called exports, per-image dispatch descriptors); S-terms checked only there; va_list crossing must name the msvcrt_va forwarder. w12 cand3 (needs bridgefacts + per-image descs). In cand2 the rows stay red and their roots are cut. __cxa_atexit/__cxa_pure_virtual: w15 sends the object lines to L2 w2 to locate plugin vs join.
+
+## 2026-11-15 objstub per-profile (L5 blocker)
+- L5 w9 3d1775bb6: platform root builds green (113 objects); objstub aborted on host x86 objects (tests/bootrt).
+- cand2 (w15, red fix): objstub judges each root by its target profile; generic ELF symtab reader; doubles over all roots; AArch64 body analysis for guest; host roots red "no body analyzer for profile host" (no abort), cut from cand2; e_machine mismatch red; selftests for all three.
+- cand3 (w12): x86-64 body analyzer (pinned binutils, same rule set); L5 3d1775bb6 declared_machine rows 3/4/6/8 (std:) and 12 (hostabi only for noreturn of own exit) after std: grammar.
+- L5 item 4 (TerminateProcess lasterror column): column accepted, L5 writes the row; parser fix if needed goes to w12.
