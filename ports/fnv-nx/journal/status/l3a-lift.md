@@ -631,3 +631,9 @@ Workers are capped at 3. Assignment by plan item:
 - proof/backends.py host C++ becomes the variant root@ubsan. libubsan1 is pinned by L1 through setup_verdict_env.sh.
 - Blocked: running a built program as a stage (`run` plus host_cpu CPUREF). Owner: L1 + L6 w6. Until it lands, rcp tables from a direct run are measurements, not inputs.
 - The L1 machinery files in the compile-call census are L1's to move.
+
+## 2026-11-15 00:08: w8 item 1 done (int3 c1d4b6ad4)
+- test_descclass: recipe-built (plugbuild stages, the recipe object as the reference), 0 failed over 28 types × argument/result.
+- test_defdisp: recipe-built; the duplicate pairs are dropped, and clpod has moved to tools/tests/clpod. Direct compiler calls in both files: 0.
+- test_defdisp is red on one defect: the covariant-return thunk has no pi early record (fnvnx_pi.cc:651, N3). Blocked on L2; the class was sent to the L2 lead. The rest of the test is green: POD matrix 245 cases, 0 mismatches.
+- Census inbox note: journal/inbox/l3a-w8-compilecalls.md.
