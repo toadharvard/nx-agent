@@ -489,3 +489,12 @@ After the first frame:
   - The farm sent the pin to L1 and L5.
   - Next: w2 updates the guest_compiler.json pin fields for cand2 and reruns its tests; w3 runs the full layout and datamodel reruns plus the symtab = lines check over the whole runtime.
 - 2026-11-15 19:50Z: guest_compiler.json is on the new pin at plugins a42ad8875 (w2), sent to L1 for cand2; stamp = 9f0d5729908efe09. On the recipe path test_gate_order, test_gate_addr, test_odr, test_dispatch (67) and test_sdd_order pass. w2 has no path item open: PD-RT-STRING-ORDERED waits under the budget rule, since it does not block root, packs, ELF or boot.
+- 2026-11-15 20:00Z: w3's tests on pin 05082bde, recipe path, at tests ded0eda6d:
+  - Plugin tests: 677/677 green. layout 186, ldbl 68, names 29, sdd 37, ftoi 30, stamp 36, cc1 23, dispatch 67, pi 121, odrdef 80, plus ctypes.
+  - datamodel gate 67/67.
+  - test_plugins 71/73. The 2 recipe and admit expectations went to w2 to classify and fix by rule.
+  - DECLTYPE-COMPLETE over the whole runtime: 24 archives, 4640 members, 4024 equal.
+    - 314 are assembly units. L1 cand3 rule: the gate reads the source language from the recipe and expects no section.
+    - 302 have plugin-written or weakref symbols. DECLTYPE-PLUGINSYM (w3, now) adds one registry of plugin-written symbols in toolchain/names, and weakref lines go under the alias target with the decl's type. A pin rebuild follows, for cand3.
+  - Section sizes: libstdc++.a 976 KB, runtime total 50 MB. Reasons: mangled 25874, builtin 1425, libcall 108.
+  - cand2 takes 05082bde as it is.
