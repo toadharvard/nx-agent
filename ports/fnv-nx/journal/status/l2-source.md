@@ -129,3 +129,4 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
 - 2026-11-15 00:56 gate_order on w1's frame rows (w23 @fef875ab): 2,368 of 178,206 uncertified (was 17,371); dynamic, g, f, b and c are 0. Left:
   - (1) 1,714 escaping address-taken locals. Rule (b): the `escapes` fact from GCC PTA, and order orders escaping variables. w1 → claude/fnv-l2-source-w1-escape. Status: doing.
   - (2) 500 non-frame plain accesses (minimp3 L3_imdct12 etc.). Waiting for w23's split. Hypothesis: accesses created after order, so the rule would be about pass placement.
+- 2026-11-15 00:58 gate_order: all 2,368 uncertified accesses fall in two classes, (1) escaping locals 1,868 (w1 escape) and (2) non-frame plain accesses 500 (waiting for w23's split). Nothing else is open in the gate.
