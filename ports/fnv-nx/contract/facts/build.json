@@ -75,7 +75,7 @@
     "--out",
     "/out/obj.json",
     "--kinds",
-    "/uses/ports/fnv-nx/toolchain/names/sympair_kinds"
+    "/uses/ports/fnv-nx/toolchain/sympair_kinds"
    ],
    "inputs": [],
    "outputs": [
@@ -215,7 +215,7 @@
  },
  "uses": [
   {
-   "root": "ports/fnv-nx/toolchain/names",
+   "root": "ports/fnv-nx/toolchain",
    "output": "sympair_kinds"
   }
  ]
