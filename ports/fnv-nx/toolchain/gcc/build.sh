@@ -272,7 +272,10 @@ fi
 # (base_rules, bin2s, -mtp=soft of devkitA64's gcc 15): none of it exists here, so the build is this step: every .c/.s of the Makefile's SOURCES
 # compiled as its release build (-DNDEBUG=1 -O2, -D__SWITCH__ -DLIBNX_NO_DEPRECATION), thread pointer = the guest's (TPIDR_EL0, no -mtp), data/*
 # embedded as bin2s does (name, name_end, name_size; <name>_bin.h). The asm follows the x19..x27 rule (libnx-guest.patch).
+WL=$BUILD/libnx-warnings.log; export LIBNX_WARN_LOG=$WL   # the libnx compile's diagnostics, read by check_mirror C9
+lxgcc() { PATH=$S2PATH $TARGET-gcc "$@" 2>>"$WL" || { tail -40 "$WL" >&2; return 1; }; }
 if ! step libnx; then
+	: > "$WL"
 	LIBNX_SRC=${LIBNX_SRC:?LIBNX_SRC: the pinned libnx tree}; LIBNX_TREE_SHA256=${LIBNX_TREE_SHA256:?LIBNX_TREE_SHA256}
 	[ "$(python3 "$HERE/../../verify/cas.py" ingest "$BUILD/libnx-cas" "$LIBNX_SRC")" = "$LIBNX_TREE_SHA256" ] || { echo "libnx tree_sha256 differs from the pin"; exit 1; }
 	rm -rf "$BUILD/libnx" "$BUILD/libnx-cas"; mkdir -p "$BUILD/libnx" && cp -a "$LIBNX_SRC/nx" "$BUILD/libnx/nx" && cd "$BUILD/libnx"
@@ -289,9 +292,9 @@ if ! step libnx; then
 	ar_objs=""
 	for d in $SRCS; do for f in $d/*.c $d/*.s; do
 		[ -e "$f" ] || continue; o=$OBJ/$(echo "$f" | tr / _).o
-		case $f in *.c) PATH=$S2PATH $TARGET-gcc $LXF $SEM_C -std=gnu11 -c "$f" -o "$o";; *.s) PATH=$S2PATH $TARGET-gcc $LXF -x assembler-with-cpp -c "$f" -o "$o";; esac
+		case $f in *.c) lxgcc $LXF $SEM_C -std=gnu11 -c "$f" -o "$o";; *.s) lxgcc $LXF -x assembler-with-cpp -c "$f" -o "$o";; esac
 		ar_objs="$ar_objs $o"; done; done
-	for f in "$OBJ"/*.s; do o=$f.o; PATH=$S2PATH $TARGET-gcc $LXF -c "$f" -o "$o"; ar_objs="$ar_objs $o"; done
+	for f in "$OBJ"/*.s; do o=$f.o; lxgcc $LXF -c "$f" -o "$o"; ar_objs="$ar_objs $o"; done
 	D=$PREFIX/$TARGET/lib/ilp32/wchar16/schar/pic; rm -f "$D/libnx.a"
 	"$PREFIX/bin/$TARGET-ar" Dcr "$D/libnx.a" $ar_objs && "$PREFIX/bin/$TARGET-ranlib" -D "$D/libnx.a"
 	cp -a include/switch.h include/switch "$PREFIX/$TARGET/include/"

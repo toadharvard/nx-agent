@@ -256,6 +256,103 @@ def c8(prefix):
     print('C8 ok: libnx.a has %d members, %d instructions mention x19..x27 (a store source, a compare or a test is allowed), %d violations' % (len(members), seen, len(bad)))
 
 
+def dwarf_layout(obj, inc):
+    """{(tag, name): (size, ((member, offset, member size), ...))} of every struct and union declared under INC, from the compiler's own DWARF."""
+    from elftools.elf.elffile import ELFFile
+    from elftools.elf.relocation import RelocationHandler
+    # the ILP32 object's DWARF relocations are R_AARCH64_P32_ABS32 (1): the same 32-bit S + A as R_AARCH64_ABS32 (258)
+    RelocationHandler._RELOCATION_RECIPES_AARCH64.setdefault(1, RelocationHandler._RELOCATION_RECIPES_AARCH64[258])
+    out = {}
+    with open(obj, 'rb') as f:
+        dw = ELFFile(f).get_dwarf_info()
+        for cu in dw.iter_CUs():
+            dies = {d.offset: d for d in cu.iter_DIEs()}
+            nm = lambda d: d.attributes['DW_AT_name'].value.decode() if 'DW_AT_name' in d.attributes else None  # noqa: E731
+
+            def ref(d):
+                t = d.attributes.get('DW_AT_type')
+                return dies.get(t.value + cu.cu_offset) if t else None
+
+            def size(d, depth=0):
+                if d is None or depth > 16:
+                    return 0
+                if d.tag in ('DW_TAG_typedef', 'DW_TAG_const_type', 'DW_TAG_volatile_type', 'DW_TAG_restrict_type', 'DW_TAG_atomic_type'):
+                    return size(ref(d), depth + 1)
+                if 'DW_AT_byte_size' in d.attributes:
+                    return d.attributes['DW_AT_byte_size'].value
+                if d.tag == 'DW_TAG_array_type':
+                    n = 1
+                    for c in d.iter_children():
+                        if c.tag == 'DW_TAG_subrange_type':
+                            n *= c.attributes['DW_AT_upper_bound'].value + 1 if 'DW_AT_upper_bound' in c.attributes else 0
+                    return n * size(ref(d), depth + 1)
+                return 0
+            lp = dw.line_program_for_CU(cu)
+            files = {}
+            if lp:
+                v5 = lp['version'] >= 5
+                dirs = lp['include_directory']
+                for i, e in enumerate(lp['file_entry']):
+                    di = e.dir_index
+                    dn = dirs[di - (0 if v5 else 1)] if (di or v5) else b''
+                    dn = dn.decode() if isinstance(dn, bytes) else dn
+                    fn = e.name.decode() if isinstance(e.name, bytes) else e.name
+                    files[i + (0 if v5 else 1)] = os.path.join(dn, fn)
+            for d in dies.values():
+                if d.tag not in ('DW_TAG_structure_type', 'DW_TAG_union_type') or not nm(d) or 'DW_AT_byte_size' not in d.attributes:
+                    continue
+                df = d.attributes.get('DW_AT_decl_file')
+                if not df or not files.get(df.value, '').startswith(inc):
+                    continue
+                out[(d.tag, nm(d))] = (d.attributes['DW_AT_byte_size'].value,
+                                       tuple((nm(c), c.attributes['DW_AT_data_member_location'].value if 'DW_AT_data_member_location' in c.attributes else 0,
+                                              size(ref(c))) for c in d.iter_children() if c.tag == 'DW_TAG_member'))
+    return out
+
+
+def c9(prefix, s2, libnx_inc=None, warn_log=None):
+    """The data-model class of libnx (written for LP64, built ILP32). Reports, never decides: (1) the libnx compile's warnings by -W option, every
+    -Wint-to-pointer-cast, -Wpointer-to-int-cast, -Wint-conversion, -Wincompatible-pointer-types, -Wshift-count-overflow and -Woverflow as file:line
+    (unique); (2) the struct and union types of switch.h's closure whose sizeof or member offsets/sizes differ between the same compiler's
+    -mabi=ilp32 and LP64 compile (from the compiler's DWARF). The list goes to MANIFEST.json (man['libnx_data_model'])."""
+    inc = libnx_inc or (prefix + '/%s/include' % TARGET)
+    warn_log = warn_log or os.environ.get('LIBNX_WARN_LOG')
+    res = {'warnings': {}, 'findings': {}, 'layout': {}}
+    if warn_log and os.path.isfile(warn_log):
+        seen = {}
+        for ln in open(warn_log, errors='replace'):
+            m = re.match(r'^(\S+?):(\d+):\d+: warning: (.*) \[(-W[^\]]*)\]$', ln.rstrip('\n'))
+            if m:
+                f = re.sub(r'(?:[^/\s]+/\.\./)+', '', m.group(1))   # include/switch/services/../sf/hipc.h and the macro-expansion paths are one file
+                seen.setdefault((m.group(4), f, int(m.group(2))), m.group(3))
+        for (opt, f, l), msg in sorted(seen.items()):
+            res['warnings'][opt] = res['warnings'].get(opt, 0) + 1
+            if opt in ('-Wint-to-pointer-cast', '-Wpointer-to-int-cast', '-Wint-conversion', '-Wincompatible-pointer-types', '-Wshift-count-overflow', '-Woverflow'):
+                res['findings'].setdefault(opt, []).append('%s:%d' % (f, l))
+    gcc = (s2 or prefix) + '/bin/%s-gcc' % TARGET
+    lay = {}
+    with tempfile.TemporaryDirectory() as t:
+        open(t + '/all.c', 'w').write('#include <switch.h>\n')
+        for tag, extra in (('ilp32', ['-mabi=ilp32', '-fshort-wchar', '-fsigned-char']), ('lp64', ['-mabi=lp64'])):
+            r = run([gcc] + extra + ['-march=armv8-a+crc+crypto', '-D__SWITCH__', '-I' + inc, '-I' + inc + '/switch', '-x', 'c', '-std=gnu11', '-g',
+                                    '-fno-eliminate-unused-debug-types', '-c', t + '/all.c', '-o', '%s/%s.o' % (t, tag)])
+            if r.returncode != 0:
+                fail('C9 <switch.h> does not compile (%s): %s' % (tag, r.stderr.strip()[-300:]))
+                return
+            lay[tag] = dwarf_layout('%s/%s.o' % (t, tag), inc)
+    a, b = lay['ilp32'], lay['lp64']
+    diff = []
+    for k in sorted(set(a) & set(b)):
+        if a[k] != b[k]:
+            moved = [m[0] for m, n in zip(a[k][1], b[k][1]) if m != n]
+            diff.append('%s %s: sizeof %d (ILP32) vs %d (LP64), members that differ: %s' % (k[0][7:], k[1], a[k][0], b[k][0], ','.join(str(x) for x in moved) or '-'))
+    res['layout'] = {'types': len(set(a) & set(b)), 'differ': len(diff), 'list': diff}
+    LIBNX_INFO['data_model'] = res
+    print('C9: libnx warnings by option %s; %d findings; %d struct/union types of switch.h compared, %d differ between ILP32 and LP64'
+          % (json.dumps(res['warnings'], sort_keys=True), sum(len(v) for v in res['findings'].values()), res['layout']['types'], len(diff)))
+
+
+
 SIZED = '''#include <new>
 void f(void *p, std::size_t n, std::align_val_t a) {
     ::operator delete(p, n); ::operator delete[](p, n); ::operator delete(p, n, a); ::operator delete[](p, n, a);
@@ -358,6 +455,7 @@ def main():
     c6(prefix, a.s2)
     c7(prefix, a.gcc13)
     c8(prefix)
+    c9(prefix, a.s2)
     if a.manifest:
         c5(prefix, a.s2, a.gcc13, here, a.flags_dir, a.flags_commit)
     sys.exit(1 if fails else 0)
