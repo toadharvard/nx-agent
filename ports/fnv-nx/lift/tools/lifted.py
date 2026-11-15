@@ -60,7 +60,7 @@ def lifted(img, facts, emit, jtab):
     """-> list of (va, length) of every instruction a lifted body is emitted for (see the module text); `img` an fnvlift.Image, `facts` the universe.tsv the lifter reads"""
     import fnvlift as L
     ent = L.universe.load(facts)[0]
-    if facts is None or os.path.abspath(facts) != os.path.abspath(L.inputs.get('universe') or ''):
+    if os.path.abspath(facts) != os.path.abspath(L.inputs.get('universe')):
         raise ValueError('lifted: facts %s is not the universe the lifter reads (the configured input `universe`)' % facts)
     key = (id(img), facts, emit, jtab)
     if S.get('key') != key:
