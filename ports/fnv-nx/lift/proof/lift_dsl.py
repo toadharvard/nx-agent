@@ -22,7 +22,7 @@ from fnvlift.core import CC, SKIP, SUB, Unsupported
 from fnvlift import f_flow
 from fnvlift import dsl, faults
 
-from proof import forms, forms_alu, forms_flow, forms_move, forms_simd             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
+from proof import forms, forms_alu, forms_flow, forms_move, forms_simd, forms_ssefp             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
 FAULT = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BR'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
