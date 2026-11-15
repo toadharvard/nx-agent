@@ -69,6 +69,7 @@
 #include "gimple-walk.h"
 #include "rtl.h"
 #include "emit-rtl.h"
+#include "target.h"
 #include "fnvnx_frame.h"
 #include "regs.h"
 #include "cgraph.h"
@@ -610,7 +611,7 @@ struct frame_pass : rtl_opt_pass {
     long f, a, h;
     if (!fp.is_constant(&f) || !ap.is_constant(&a)) return false;
     if (regno == FRAME_POINTER_REGNUM) { *v = f - a; return true; }
-    if (regno == VIRTUAL_STACK_VARS_REGNUM) { *v = f - a + (long)STARTING_FRAME_OFFSET; return true; }
+    if (regno == VIRTUAL_STACK_VARS_REGNUM) { *v = f - a + (long)targetm.starting_frame_offset(); return true; }
     if (regno == ARG_POINTER_REGNUM) { *v = 0; return true; }
     if (regno == VIRTUAL_INCOMING_ARGS_REGNUM) { *v = (long)FIRST_PARM_OFFSET(fndecl); return true; }
     if (regno == STACK_POINTER_REGNUM) { *v = -a; return true; }
