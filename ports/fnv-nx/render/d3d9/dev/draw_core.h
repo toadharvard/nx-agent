@@ -72,6 +72,7 @@ NxDrawDev* nx_draw_dev(NxDeviceCore* d);
 struct NxPassSet { uint32_t nc; NxTarget col[4]; NxSurfCore* csc[4]; NxTarget dep; bool has_dep; NxSurfCore* dsc; uint32_t depth_fmt; bool incomplete; };
 struct NxAttach { NxSurfCore* c[4]; NxSurfCore* ds; int hi; bool incomplete; };   // draw_state.cpp: the attachments of a draw / clear (Rule D, incomplete pass)
 NxAttach nx_attach(const NxDeviceState& s);
+HRESULT nx_wine_incomplete_pass(void);   // draw_state.cpp: the Wine 9.0 body of an incomplete pass: the log line (row NXW_wined3d_context_gl_check_fbo_status) and D3D_OK
 bool nx_depth_bound(const NxSurfCore* rt0, const NxSurfCore* ds);                                    // Rule D: Wine 9.0 find_fbo_entry's depth-stencil rule (draw_state.cpp)
 HRESULT nx_pass_resolve(NxDeviceCore* d, NxPassSet* ps);                       // the target set of the device state by the NULL-format rules (draw_state.cpp)
 void nx_pass_ensure(NxDeviceCore* d, const NxPassSet& ps);                  // a pass of these targets is open (begins one if not); may flush

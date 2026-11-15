@@ -64,6 +64,8 @@ NxAttach nx_attach(const NxDeviceState& s) {
     if (real(ds) && nx_depth_bound(a.c[0], ds)) { a.ds = ds; uint32_t n = ds->img->samples ? ds->img->samples : 1; if (smp && n != smp) a.incomplete = true; }
     return a;
 }
+// The Wine 9.0 body of an incomplete pass (see above), its own function: every caller of an incomplete result (nx_attach / nx_pass_resolve) returns its result. One log line, D3D_OK.
+HRESULT nx_wine_incomplete_pass(void) { fnvnx_wine_fixme(NXW_wined3d_context_gl_check_fbo_status); return D3D_OK; }
 HRESULT nx_pass_resolve(NxDeviceCore* d, NxPassSet* ps) {
     const NxDeviceState& s = d->cur; memset((void*)ps, 0, sizeof *ps); const NxAttach at = nx_attach(s); NxSurfCore* const* c = at.c; const int hi = at.hi; uint32_t w = 0, h = 0, smp = 1;
     for (uint32_t i = 0; i < 4; i++) if (c[i] && !w) { const NxSub* sb = nx_surf_sub(c[i]); w = sb->w; h = sb->h; smp = c[i]->img->samples ? c[i]->img->samples : 1; }
