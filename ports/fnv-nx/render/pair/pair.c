@@ -1,9 +1,10 @@
-// pair.cpp: the program pair of a draw, as pure functions of the two shaders' declared pairs (render/shaders/translator/include/fnvnx_dk_layout.h, fnvnx_shaders.h).
+// pair.c: the program pair of a draw, as pure functions of the two shaders' declared pairs (render/shaders/translator/include/fnvnx_dk_layout.h, fnvnx_shaders.h).
 // nx_link_set: the varying link set L = (VS outputs without POSITION0 / PSIZE0) U (PS inputs), empty when every pair is canonical (fnvnx_dk_varying_location >= 0), else the set ascending (shcache_link_set).
 // nx_pair_variant: the translator key flags of the pair (FNVNX_SHADER_VS_COMPLETE iff fnvnx_dk_vs_needs_complete(VS written + FOG0, PS read), FNVNX_SHADER_FLAT_COLOR iff flat) and the link set.
 #include "nx_pair.h"
 #include "fnvnx_dk_layout.h"
 #include "fnvnx_shaders.h"
+#include <stdbool.h>
 #include <string.h>
 
 int nx_link_set(const uint8_t* vs_out, uint32_t nv, const uint8_t* ps_in, uint32_t np, uint8_t* l, uint32_t* nl) {

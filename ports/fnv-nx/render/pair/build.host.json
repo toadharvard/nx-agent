@@ -5,16 +5,14 @@
   "cxx": "x86_64-linux-gnu-g++-13"
  },
  "flags": {
-  "c": [],
-  "cxx": [
-   "-std=gnu++20",
+  "c": [
    "-Wall",
    "-Werror",
    "-O2",
-   "-fPIC",
-   "-DFNVNX_SDD=1",
-   "-fno-devirtualize"
+   "-std=gnu11",
+   "-fPIC"
   ],
+  "cxx": [],
   "asm": []
  },
  "include": [
@@ -23,30 +21,5 @@
  ],
  "units": "all",
  "link": null,
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
-  }
- ]
+ "plugins": []
 }

@@ -1,4 +1,4 @@
-// nx_pair.h: the pair functions of render/pair (pair.cpp).
+// nx_pair.h: the pair functions of render/pair (pair.c).
 #pragma once
 #include <stdint.h>
 

@@ -7,14 +7,14 @@
  },
  "flags": {
   "c": [
-   "-Werror=attributes"
-  ],
-  "cxx": [
-   "-O2",
    "-Werror=attributes",
    "-Wall",
-   "-std=gnu++20",
-   "-DFNVNX_SDD=1"
+   "-Werror",
+   "-O2",
+   "-std=gnu11"
+  ],
+  "cxx": [
+   "-Werror=attributes"
   ],
   "asm": []
  },
