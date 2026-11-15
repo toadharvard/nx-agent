@@ -1,6 +1,6 @@
 # L6A DEKO status (lead: Opus, branch claude/fnv-l6a-deko)
 
-Updated 2026-11-12. Trunk read at claude/fnv-nx-clean e35b870a (2026-11-12). CLAUDE.md on this branch = trunk e35b870a. L1 w15 (559fc150) and w16 (d91524a3) not yet on the trunk.
+Updated 2026-11-15. Trunk read at claude/fnv-nx-clean e35b870a (2026-11-12). CLAUDE.md on this branch = trunk e35b870a. L1 w15 (559fc150) and w16 (d91524a3) not yet on the trunk.
 
 ## Path plan 2026-11-14 (orchestrator, ALL.md on 21b10f1a)
 
@@ -11,6 +11,46 @@ Updated 2026-11-12. Trunk read at claude/fnv-nx-clean e35b870a (2026-11-12). CLA
 | 4.6 | link-failure branch -> fnvnx_reach_violation with L6's sm_link certificate (closes A3) | — | blocked by L6 (sm_link gate + certificate) |
 
 Paused until after the first frame: w4 (deko3d), w5 (uam). Workers running: 1 of at most 2.
+
+## Census under the owner order of 2026-11-15 ("defects impossible by construction")
+Measured by w6 at gl4 a975efdc (claude/fnv-l6a-deko-w6-gl4w15c), w4 fbd1c779, w5 53bad56f, lead branch 4e79aa3c.
+Kind: A = hand-written set, B = second copy of a fact, C = second path.
+
+On the path (converted now; w6 task W6-D1 on gl4w15c, one commit, then L1 verdict):
+| # | item | kind | replacement |
+|---|---|---|---|
+| 1 | gl4_funcs.h: 109 GL entries typed by hand (3 unused: glGetString, glDeleteSamplers, glFlush) | A | derivation: the entry set is generated from gl4's own call sites (the set of gl* names the gl4 units reference), unused rows go; prototypes from the Khronos header, which must be a pinned input (see L1 below) |
+| 2 | libnxgl4.map exports (5) restated in gl4.h | A+B | generation: the version script is generated from gl4.h's NXGL4_EXPORT declarations; the hand map is deleted |
+| 3 | variant bits as literals in gl4_d3dshader.c (cause of the FLAT refusal defect: gl4 kept its own copy of the rule) | B | one source: named constants (variant mask, VS_COMPLETE, FLAT) in render/nxgpu/nxgpu4_shader.h, the ABI home; gl4 reads them; byte change sent to L6 |
+| 4, 4b | MAX_CODE, MAX_L, the lp/16 bound, key size 32 as literals (about 6 places) | B | one source: ABI constants in nxgpu4_shader.h / gpu_abi.h, the sizes asserted from them |
+| 4c | gl4.h GL4_MAX_* (7) | B | each one names the ABI constant it follows from, or is removed |
+| 4d | gl4.h NXGL4_OP_LIST / FN_LIST / FN_EXT_LIST (28+17+1) against the NxOp / NXGPU_FN enums; a static_assert checks counts only | A+B | generation: one X-macro list in the nxgpu header defines the enums; gl4's tables are expanded from it; the count assert is deleted |
+| C1 | render/d3d9/backend/build_gl4.sh (second build path for libnxgl4) | C | deleted in this commit; the gl4 root on the recipe replaces it |
+| C2 | dk build scripts build_dk.sh, build_msres_dksh.sh, build_scale_dksh.sh, selftest/build_dksh.sh, selftest/build_nro.sh | C | deleted in this commit; the dk root on the recipe (w4) and the uam hermetic stage (3b) replace them |
+
+Reported to other owners (on the path):
+| # | item | kind | owner | replacement |
+|---|---|---|---|---|
+| 1' | glcorearb.h / EGL headers come from the host system, not pinned in env.json | B (unpinned source) | L1 | a pinned Khronos header input (declared GL target record) |
+| 4f | gl4_core.c:106 asks EGL for GL 4.5 core: the GL target restated in code | B | L1 + L4 | one declared GL target record that gl4 and the boot machine both read |
+| 5, 5b | gl4, nxgpu, translator@host, lib/sha256@host recipes are identical copies; 3 guest recipes copy the msvcmodel pin and 8 plugins | B | L1 | one host and one guest target record; build.json names the target, not its contents |
+| 6 | admit.json: 7 roots x 34 copies of REQUIRED_PRODUCT | B | L1 | the gate set derived from the root's class |
+| 8 | verify/bootgpu.py: prebuilt libnxgl4 @2f0427f5 and a direct gcc call (line 47) | C | L4 | the gl4 root's libnxgl4.so from GATE_CACHE (item 4.3); the gcc call deleted |
+| 10 | render/d3d9/build_guest.sh (second build path) | C | L6 | deleted; the d3d9 root on the recipe |
+
+After the first frame (deko, paused):
+| # | item | kind | replacement |
+|---|---|---|---|
+| 3b | w4 dk_shader.c:110,180 accepts only variant bit 0 (diverges from the ABI; same cause as 3) | B | reads the nxgpu4_shader.h constants of item 3 |
+| 4e | w4 dk.h NXDK_FN_LIST | A | expanded from the nxgpu X-macro list of item 4d |
+| 5c | w4 build.json: own flags, -isystem to the gcc 15 headers | B | the host/guest target record (L1), isystem deleted |
+| 7a | w4 dkabi.tsv: 74 rows typed by hand | A | generated from the dk_* call sites against the pinned deko3d/libnx headers |
+| 7c | embedder hooks: 3 in dk.h vs 2 in gl4.h | A+B | one hook declaration header in render/nxgpu, read by both backends and L4 |
+| 7d | NXSP v2 layout as dk.h prose plus literals | B | one struct header with offset asserts, read by the producer and dk_shader.c |
+| 7e | dk_msres_dksh.h / dk_scale_dksh.h: committed uam output | C | the uam hermetic stage (3b) generates them; the committed copies are deleted then |
+| 7f | w4 render/backend: old copies of the nxgpu headers | B | deleted; includes go to render/nxgpu |
+
+Defect reports from now on name their cause and how the cause is closed.
 
 ## Owner order 2026-11-12 08:37Z (via orchestrator): only the GL path runs
 The first frame comes from the GL backend in the emulator; deko3d is checked against it afterwards. Only the work that
