@@ -204,6 +204,23 @@ class Constants(unittest.TestCase):
             half = Fraction(2) ** (e - 53)                                                                        # half the spacing of the 53-bit grid
             k = v / half; dist = abs(k - round(k)) * half
             self.assertGreater(dist, Fraction(1, 10 ** 100), name)
+class SpecialTables(unittest.TestCase):
+    """the special-value tables of the transcendental group, read from the SDM (rows in x87_sdm_rows.txt)"""
+    VAL = {'-inf': float('-inf'), '-F': -2.0, '-0': -0.0, '+0': 0.0, '+F': 2.0, '+inf': float('inf'), 'NaN': NAN}
+    COL = {'-inf': float('-inf'), '-F': -1.0, '-0': -0.0, '+0': 0.0, '+F': 1.0, '+inf': float('inf'), 'NaN': NAN}
+    @staticmethod
+    def cls(b):
+        e, f, sg = (b >> 52) & 0x7ff, b & ((1 << 52) - 1), b >> 63
+        if e == 0x7ff: return 'NaN' if f else ('-inf' if sg else '+inf')
+        if e == 0 and f == 0: return '-0' if sg else '+0'
+        return '-F' if sg else '+F'
+    def test_fscale_table_1_30(self):
+        cols = list(self.COL)
+        for r in rows('fscale'):
+            for c, want in zip(cols, r[1].split()):
+                o = run(('d9', 'reg', 7, 5), state([self.VAL[r[0]], self.COL[c]]))
+                s = o.s; top = val(X.top(s))
+                self.assertEqual(self.cls(val(z3.Select(s.R, K(top, 3)))), want, 'ST(0)=%s ST(1)=%s' % (r[0], c))
 class MmxAlias(unittest.TestCase):
     """MMX aliasing, SDM 1:9.5.1 / 1:9.6.2 / 1:9.4.8: one copy of the effect, on the DSL names"""
     def d(self):

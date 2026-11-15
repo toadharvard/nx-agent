@@ -39,9 +39,9 @@ Register format (OWNER 8, the only deviation from the SDM).
 
 Return convention.  Every instruction function is  f(s, m=None) -> Out  where s is the machine state
 (St), m the memory operand bit-vector for memory forms.  Out.s is the new state, Out.mem the value
-stored (or None), Out.wr the Bool "memory was written", Out.ax a value written to AX (fnstsw ax),
+stored (or None), Out.wr the Bool (memory was written), Out.ax a value written to AX (fnstsw ax),
 Out.eflags the (ZF, PF, CF) written for fcomi/fucomi (OF, SF, AF are cleared, SDM 2A:FCOMI Flags),
-Out.pre the Bool "the instruction's behaviour is defined by the SDM and the register format here".
+Out.pre the Bool (the instruction's behaviour is defined by the SDM and the register format here).
 A page that says an exception is signalled with TOP and operands unchanged (SDM 1:8.5.1.1, 8.5.1.2,
 8.5.2, 8.5.3) gives the state with the flags set and TOP, tags, registers of the input.
 """
@@ -167,7 +167,7 @@ class St:
     here the register format), tag (SDM 1:8.1.7), fsw, fcw, and the pointers of SDM 1:8.1.8, 8.1.9."""
     FIELDS = ("R", "tag", "fsw", "fcw", "fip", "fcs", "fdp", "fds", "fop")
 
-    TRANSIENT = ("sfr",)      # not architectural: 'this instruction raised a stack fault' (SF newly reported); finish() moves it to Out.sf_raised
+    TRANSIENT = ("sfr",)      # not architectural: this instruction raised a stack fault (SF newly reported); finish() moves it to Out.sf_raised
 
     def __init__(self, **kw):
         for f in self.FIELDS:
@@ -203,7 +203,7 @@ def top(s):
 
 
 def phys(s, i):
-    """Physical register of ST(i), SDM 1:8.1.2 'ST(i) ... i-th register from the top of stack': (TOP+i) mod 8."""
+    """Physical register of ST(i), SDM 1:8.1.2 'to specify the ith register from TOP in the stack': (TOP+i) mod 8."""
     return (top(s) + K(i, 3)) if isinstance(i, int) else (top(s) + i)
 
 
@@ -302,11 +302,11 @@ def is_sub(b):
 
 
 QNAN_INDEF = 0xFFF8000000000000
-# SDM 1:T4-3 'QNaN Floating-Point Indefinite': sign 1, exponent all ones, integer bit 1, fraction 10..0
+# SDM 1:4.8.3.7 'QNaN Floating-Point Indefinite', encoding SDM 1:T4-3: sign 1, exponent all ones, integer bit 1, fraction 10..0
 
 
 def quieten(b):
-    """SDM 1:4.8.3.5: 'an SNaN is converted to a QNaN ... by setting the most-significant fraction bit to 1'."""
+    """SDM 1:4.8.3.5: 'When an SNaN is converted to a QNaN, the conversion is handled by setting the most-significant fraction bit of the SNaN to 1'."""
     return b | K(1 << 51, 64)
 
 
@@ -325,7 +325,7 @@ def real(b):
 
 def nan_result2(a, b):
     """SDM 1:T4-8, x87 column, for two operands of which at least one is a NaN.  Returns the result
-    pattern (a QNaN) and the Bool 'a result was selected by a rule' (False when the SDM leaves the choice
+    pattern (a QNaN) and the Bool (a result was selected by a rule) (False when the SDM leaves the choice
     open: two NaNs of equal significand and different sign)."""
     an, bn = is_nan(a), is_nan(b)
     asn, bsn = is_snan(a), is_snan(b)
@@ -438,7 +438,7 @@ def finish(s_in, s_out, newflags, mem=None, extra_pre=None, ou_pre=False, abort_
 def cc_copy(src, dst):
     """C1 and SF of src placed into dst.  When an exception aborts an instruction, C1 (stack fault direction
     or round-up, SDM 1:8.1.3.2) and SF (SDM 1:8.5.1.1) are those the instruction set; C0, C2, C3 stay
-    (SDM 1:T8-6 note: 'flags not set if unmasked invalid-arithmetic-operand exception')."""
+    (SDM 2A:FCOM Table 1-17 note: 'Flags not set if unmasked invalid-arithmetic-operand (#IA) exception is generated.')."""
     out = dst
     for pos in (C1, SF):
         out = set_bit(out, pos, bit(src, pos))
@@ -529,7 +529,7 @@ def to_m32(b, rm):
 
 def to_m64(b):
     """register format -> m64fp: identical pattern (OWNER 8); an SNaN is stored as the QNaN with IE
-    (SDM 2A:FST Exc '#IA Source operand is an SNaN'; SDM 1:T4-8)."""
+    (SDM 2A:FST Exc '#IA If destination result is an SNaN value or unsupported format, except when the destination format is in double extended-precision floating-point format.'; SDM 1:T4-8)."""
     return If(is_snan(b), quieten(b), b), is_snan(b)
 
 
@@ -596,7 +596,7 @@ def from_m80(m):
     up = Or(UGT(rem, K(0x400, 11)), And(rem == K(0x400, 11), Extract(0, 0, top53) == K(1, 1)))
     pat_norm = (ZeroExt(53, Extract(10, 0, u + K(1023, 16))) << K(52, 64)) + ZeroExt(12, Extract(51, 0, top53)) \
         + If(up, K(1, 64), K(0, 64))
-    # u > 1023 -> overflow to infinity under round-to-nearest (SDM 1:T4-11 'To nearest: +-infinity')
+    # u > 1023 -> overflow to infinity under round-to-nearest (SDM 1:T4-11, row To nearest: +-infinity for both signs)
     ovf = u > K(1023, 16)
     # subnormal binary64 result: u < -1022
     sh = K(-1022, 16) - u                                              # >= 1
@@ -627,14 +627,14 @@ def supported_m80(m):
 
 
 def int_to_reg(m, n, rm):
-    """m (n-bit two's complement) -> register format.  SDM 2A:FILD Op: 'ST(0) <- SignExtend(...)'.
+    """m (n-bit two's complement) -> register format.  SDM 2A:FILD Op: 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)'.
     16 and 32 bit values are exactly representable in binary64; 64 bit values are rounded by rm (OWNER 8)."""
     return bits(z3.fpSignedToFP(rm, m, F64))
 
 
 def reg_to_int(b, n, rm, truncate=False):
     """register format -> n-bit signed integer for FIST/FISTP/FISTTP.  Returns (value, ie, pe, roundup).
-    SDM 2A:FIST Op 'DEST <- Integer(ST(0))' rounded by RC; SDM 2A:FISTTP Op uses truncation.  Out of range,
+    SDM 2A:FIST Op 'DEST := Integer(ST(0))' rounded by RC; SDM 2A:FISTTP Op uses truncation.  Out of range,
     NaN or infinity: integer indefinite 10..0 with IE (SDM 1:T8-10, 1:8.2.1, SDM 1:T4-1).  PE when the
     rounding lost a fraction; C1 = rounded up (SDM 1:8.1.3.2)."""
     rmu = z3.RTZ() if truncate else rm
@@ -677,7 +677,7 @@ BCD_INDEFINITE = 0xFFFFC000000000000000   # SDM 1:T4-5, 'FFFFC000000000000000H'
 
 
 def reg_to_bcd(b, rm):
-    """register format -> packed BCD for FBSTP (SDM 2A:FBSTP Op 'DEST <- BCD(ST(0))').  Returns
+    """register format -> packed BCD for FBSTP (SDM 2A:FBSTP Op 'DEST := BCD(ST(0))').  Returns
     (m80 pattern, ie, pe, roundup).  Value not representable in 18 digits, NaN or infinity: the BCD
     indefinite and IE (SDM 1:T8-10)."""
     ri = z3.fpRoundToIntegral(rm, fp(b))
@@ -765,7 +765,7 @@ def fld_m80(s, m):
 
 
 def fld_sti(s, i):
-    """SDM 2A:FLD Op: 'temp := ST(i); TOP := TOP-1; ST(0) := temp'; #IS when ST(i) is empty."""
+    """SDM 2A:FLD Op: 'temp := ST(i)', 'TOP := TOP - 1', 'ST(0) := temp'; #IS when ST(i) is empty."""
     return _push(s, st(s, i), uf=is_empty(s, i))
 
 
@@ -855,12 +855,12 @@ def fldz(s):
 
 
 def fild(s, m, n):
-    """SDM 2A:FILD Op: 'TOP := TOP-1; ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)', n = 16, 32, 64."""
+    """SDM 2A:FILD Op: 'TOP := TOP - 1', 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)', n = 16, 32, 64."""
     return _push(s, int_to_reg(m, n, rm_of(s.fcw)))
 
 
 def fbld(s, m):
-    """SDM 2A:FBLD Op: 'TOP := TOP-1; ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)'.  The digits are
+    """SDM 2A:FBLD Op: 'TOP := TOP - 1', 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)'.  The digits are
     assumed decimal (SDM 2A:FBLD Description): precondition."""
     o = _push(s, bcd_to_reg(m, rm_of(s.fcw)))
     o.pre = And(o.pre, bcd_digits_ok(m))
@@ -895,7 +895,7 @@ def fst_m64(s, pop):
 
 
 def fstp_m80(s):
-    """SDM 2A:FSTP Op to m80fp (DB /7): no exceptions other than #IS (SDM 2A:FST Exc: #IA 'does not occur ... m80fp')."""
+    """SDM 2A:FSTP Op to m80fp (DB /7): no exceptions other than #IS (SDM 2A:FST Exc: '#IA If destination result is an SNaN value or unsupported format, except when the destination format is in double extended-precision floating-point format.')."""
     return _store(s, to_m80(st(s, 0)), to_m80(K(QNAN_INDEF, 64)), NOFLAGS, FALSE, True, fl(IE, OE, UE))
 
 
@@ -958,7 +958,7 @@ def fchs(s):
 
 
 def fabs_(s):
-    """SDM 2A:FABS Op 'SignBit(ST(0)) := 0' (D9 E1)."""
+    """SDM 2A:FABS Op 'ST(0) := |ST(0)|' (D9 E1)."""
     return _unary_nonarith(s, lambda b: b & K((1 << 63) - 1, 64))
 
 
@@ -1241,7 +1241,7 @@ def pow2r(n):
 
 
 def fscale(s):
-    """SDM 2A:FSCALE Op 'ST(0) := ST(0) * 2^RoundTowardZero(ST(1))' (D9 FD), special values of SDM 2A:FSCALE
+    """SDM 2A:FSCALE Op 'ST(0) := ST(0) * 2RoundTowardZero(ST(1))' (superscript flattened in the text) (D9 FD), special values of SDM 2A:FSCALE
     Table 1-30.  The scale is saturated at +-4096 (any |n| >= 2^12 overflows or underflows every finite
     non-zero binary64, SDM 1:8.5.4/8.5.5 'massive overflow')."""
     a, b = st(s, 0), st(s, 1)
@@ -1301,7 +1301,7 @@ def _prem(s, nearest):
       D := exponent(ST(0)) - exponent(ST(1)); D < 64: Q := trunc (FPREM) or round-to-nearest-even (FPREM1)
       of ST(0)/ST(1); ST(0) := ST(0) - ST(1)*Q; C2 := 0; (C0, C3, C1) := (Q2, Q1, Q0).
       D >= 64: C2 := 1; QQ := trunc((ST(0)/ST(1)) / 2^(D-N)); ST(0) := ST(0) - ST(1)*QQ*2^(D-N).
-    N is the SDM's 'implementation-dependent number between 32 and 63' (SDM 2A:FPREM Op): the free 16-bit
+    N is, in SDM 2A:FPREM Op, 'An implementation-dependent number between 32 and 63': the free 16-bit
     vector nd.prem.N with 32 <= N <= 63, so the spec holds for every D (the whole exponent range) and every admissible
     N; a Form refines it by equalling the spec for one N (a fixed N = 63 is such a Form).  (C0, C3, C1) are not
     assigned by the Operation when D >= 64, so they are listed undefined.  Result exact (SDM 2A:FPREM Description: no #P, RC no effect).
@@ -1411,9 +1411,9 @@ def _trig(s, kind):
     Out of range (|x| >= 2^63): C2 := 1, ST(0) unchanged, no exception, no push (SDM 2A:FPTAN Op ELSE branch,
     2A:FSINCOS Op, 2A:FSIN Description 'The instruction does not raise an exception when the source operand is out
     of range').  Infinity: #IA, masked response the QNaN indefinite (SDM 2A:FSIN Table 1-31, 2A:FPTAN Table 1-29,
-    2A:FSINCOS Table 1-32 '*', SDM 2A:FPTAN Exc '#IA Source operand is an SNaN value, infinity').  NaN: the NaN rule
+    2A:FSINCOS Table 1-32 (*), SDM 2A:FPTAN Exc '#IA Source operand is an SNaN value, ∞, or unsupported format.').  NaN: the NaN rule
     (SDM 1:T4-8; the Tables give NaN -> NaN).  For FPTAN and FSINCOS the SDM Operation pushes only inside its
-    'IF ST(0) < 2^63 THEN' and does not say whether a NaN or an infinity enters that branch, so both are admissible:
+    'IF ST(0) < 263 THEN' (2^63, superscript flattened) and does not say whether a NaN or an infinity enters that branch, so both are admissible:
     the free Bool nd.trig.push; likewise C2 for those operands ('Set to 1 if outside range (-2^63 < source operand <
     +2^63); otherwise, set to 0', SDM 2A:FPTAN Flags: whether a NaN or an infinity is outside is not said): the free
     Bool nd.trig.c2 (a Form refines the spec by equalling it for one value of each).  When pushed, FPTAN pushes
@@ -1504,7 +1504,7 @@ def f2xm1(s):
 
 
 def fyl2x(s):
-    """SDM 2A:FYL2X Op 'ST(1) := ST(1) * log2(ST(0)); PopRegisterStack' (D9 F1), SDM 2A:FYL2X Table 1-44.
+    """SDM 2A:FYL2X Op 'ST(1) := ST(1) * log2ST(0)', 'PopRegisterStack' (D9 F1), SDM 2A:FYL2X Table 1-44.
     Negative ST(0) (not -0): IE and the indefinite (SDM 2A:FYL2X Exc, SDM 1:T8-10); ST(0) = +-0: ZE and an
     infinity signed opposite to ST(1) (SDM 1:T8-11) when ST(1) is finite non-zero; the products of the
     special logarithms -inf (ST(0) = 0), 0 (ST(0) = 1) and +inf (ST(0) = +inf) with ST(1) follow SDM 1:T8-10
@@ -1546,7 +1546,7 @@ def fyl2x(s):
 
 
 def fpatan(s):
-    """SDM 2A:FPATAN Op 'ST(1) := arctan(ST(1)/ST(0)); PopRegisterStack' (D9 F3), special values SDM 2A:FPATAN
+    """SDM 2A:FPATAN Op 'ST(1) := arctan(ST(1) / ST(0))', 'PopRegisterStack' (D9 F3), special values SDM 2A:FPATAN
     Table 1-26: the angle of the point (X = ST(0), Y = ST(1)), i.e. atan2(Y, X): +-0 or +-pi on the X axis by the
     sign of X, +-pi/2 for X = +-0, +-pi/4 and +-3pi/4 for two infinities; no invalid operation except SNaN.
     The constants are the exact pi multiples, rounded by RC."""
@@ -1580,7 +1580,7 @@ def fpatan(s):
 
 # --- control instructions -------------------------------------------------------------------------
 def fwait(s):
-    """SDM 2D:FWAIT: 'Checks for pending unmasked FPU exceptions'; no state change.  The #MF is the registry
+    """SDM 2D:FWAIT: 'Causes the processor to check for and handle pending, unmasked, floating-point exceptions before proceeding.'; no state change.  The #MF is the registry
     wrapper's trap (all waiting instructions)."""
     return Out(s)
 
@@ -1619,7 +1619,7 @@ def fnstsw_m16(s):
 
 
 def fnstsw_ax(s):
-    """SDM 2A:FNSTSW Op 'AX := FPUStatusWord' (DF E0)."""
+    """SDM 2A:FNSTSW Op 'DEST := FPUStatusWord' with DEST = AX (DF E0)."""
     o = Out(s, ax=s.fsw)
     o.undef = UNDEF_C0123
     return o
