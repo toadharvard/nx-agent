@@ -72,9 +72,9 @@ def toy_repo(tag, names, table, decl_extra=None):
     ex = {"name": "manifest", "repo": "fnv-nx-build", "ref": "im-" + tag, "commit": commit, "tree_sha256": thash, "at": "/ext/manifest"}
     rec = dict(TR.RECIPE, external=[ex])
     decl = {"format": "fnvnx-imports-in/1", "names": {"external": "manifest", "path": "sys_names.tsv"}, "specs": {"external": "manifest", "path": "specs"}, "extra": [], "extra_other": [],
-            "name_table": "msvcrt_names.tsv"}
+            "name_table": "msvcrt_names.tsv", "va": "msvcrt_va.tsv"}
     decl.update(decl_extra or {})
-    return TR.make_repo("im-" + tag, rec=rec, files={"toy/imports.in.json": json.dumps(decl), "toy/msvcrt_names.tsv": table})
+    return TR.make_repo("im-" + tag, rec=rec, files={"toy/imports.in.json": json.dumps(decl), "toy/msvcrt_names.tsv": table, "toy/msvcrt_va.tsv": ""})
 
 
 # green: every import has a body in the toy objects (f_a, f_b, f_c global functions; the name table serves memcpy by f_b, strlen by f_c)

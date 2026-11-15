@@ -198,6 +198,19 @@
     "ports/fnv-nx/verify/bootsock.py"
    ]
   },
+  "test_bridgefacts.py": {
+   "references": [
+    {
+     "anchor": "## bridgefacts (tool root)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/bridgefacts/com/comrows.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_cas.py": {
    "references": [
     {

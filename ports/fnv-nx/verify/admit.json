@@ -31,6 +31,7 @@
   {"path": "ports/fnv-nx/hostabi", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/hostabi/build.json"},
   {"path": "ports/fnv-nx/loader", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/loader/build.json"},
   {"path": "ports/fnv-nx/lib/sha256", "class": "product", "target": "guest", "recipe": {"guest": "ports/fnv-nx/lib/sha256/build.json", "host": "ports/fnv-nx/lib/sha256/build.host.json"}},
+  {"path": "ports/fnv-nx/bridgefacts", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/bridgefacts/build.json"},
   {"path": "ports/fnv-nx/contract/facts", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/contract/facts/build.json"},
   {"path": "ports/fnv-nx/contract/factscheck", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/contract/factscheck/build.json"}
  ]

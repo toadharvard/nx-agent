@@ -37,8 +37,12 @@ SYMS = {"Foo": [("GLOBAL", "FUNC")],                 # certified
         "fnvnx_msvcrt_va_sprintf": [("GLOBAL", "FUNC")]}   # memset: table entry names no symbol at all -> lookup-miss
 
 
-def derive(names=NAMES, specs=SPECS, syms=SYMS, table=TABLE, extra=()):
-    return B.derive(names, lambda d: specs[d], set(syms), table, list(extra))
+VA = B.read_va("sprintf\tfnvnx_msvcrt_va_sprintf\n")
+TABLE = B.read_name_table("memcpy\tfnvnx_memcpy\tfunc\nstrlen\tfnvnx_strlen\tfunc\nmemset\tfnvnx_memset\tfunc\n_iob\tfnvnx_iob\tdata\n")
+
+
+def derive(names=NAMES, specs=SPECS, syms=SYMS, table=TABLE, extra=(), va=VA):
+    return B.derive(names, lambda d: specs[d], set(syms), table, list(extra), va)
 
 
 rows, errs, _ = derive()
@@ -81,6 +85,16 @@ check("derive: extra row with a bad column count is an error", derive(extra=["a\
 check("derive: stub in the spec is an error", derive(names="kernel32.dll\tFoo\n", specs={"kernel32": "1 stub Foo\n"})[1] != [])
 check("derive: name missing from the spec is an error", derive(names="kernel32.dll\tMissing\n")[1] != [])
 
+# the data row symbol comes from the name table, the va forwarder from the va record; either missing is an error, never a default
+check("derive: a data export without a data row in the name table is an error", derive(table={k: v for k, v in TABLE.items() if k != "_iob"})[1] != [])
+check("derive: a varargs export without a va row is an error", derive(names="msvcrt.dll\tprintf\n", specs=dict(SPECS, msvcrt="1 varargs printf(str)\n"), va={})[1] != [])
+for bad in ("a\n", "a\tb\tc\n", "a\tb\na\tc\n", "a\t1b\n"):
+    try:
+        B.read_va(bad)
+        check("va record bad input %r is an error" % bad, False)
+    except ValueError:
+        check("va record bad input %r is an error" % bad, True)
+
 # bad name tables are errors, never silently empty
 for bad in ("a\tb\n", "a\tb\tproc\n", "a\tb\tfunc\na\tc\tfunc\n", "a\t\tfunc\n"):
     try:
@@ -97,7 +111,7 @@ check("judge: UNIQUE counts as global", I.judge(g, {"F": [("UNIQUE", "FUNC")]}, 
 
 # the rows table (stage A): syms=None binds by rule, never reads a symbol table, and its keys equal the keys of every judged derivation
 import iat  # noqa: E402
-ra, ea, _ = B.derive(NAMES, lambda d: SPECS[d], None, TABLE, [])
+ra, ea, _ = B.derive(NAMES, lambda d: SPECS[d], None, TABLE, [], VA)
 check("rows table: no errors", ea == [], ea)
 check("rows table: every symbol row binds sym, data binds data (iob), msvcrt binds lookup by the name table, a name outside it is none",
       {(r[1]): r[7] for r in ra if r[0] == "kernel32.dll"} == {"Foo": "sym", "Bar": "sym", "Baz": "sym", "Qux": "sym", "Fwd": "sym"}
@@ -114,8 +128,9 @@ with tempfile.TemporaryDirectory() as td:
     for dll, text in SPECS.items():
         open(os.path.join(td, dll + ".spec"), "w").write(text)
     open(os.path.join(td, "names"), "w").write(NAMES)
-    open(os.path.join(td, "table"), "w").write("memcpy\tfnvnx_memcpy\tfunc\nstrlen\tfnvnx_strlen\tfunc\nmemset\tfnvnx_memset\tfunc\n")
-    r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(HERE), "bridgegen.py"), "--names", td + "/names", "--specs", td, "--name-table", td + "/table", "--out", td + "/bridge.tsv"],
+    open(os.path.join(td, "table"), "w").write("memcpy\tfnvnx_memcpy\tfunc\nstrlen\tfnvnx_strlen\tfunc\nmemset\tfnvnx_memset\tfunc\n_iob\tfnvnx_iob\tdata\n")
+    open(os.path.join(td, "va"), "w").write("sprintf\tfnvnx_msvcrt_va_sprintf\n")
+    r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(HERE), "bridgegen.py"), "--names", td + "/names", "--specs", td, "--name-table", td + "/table", "--va", td + "/va", "--out", td + "/bridge.tsv"],
                        capture_output=True, text=True)
     got = open(td + "/bridge.tsv").read() if r.returncode == 0 else ""
     check("bridgegen: the stage writes the header and the rows of derive(syms=None)", got == "dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n" + "".join("\t".join(x) + "\n" for x in ra), (r.stderr, got[:200]))

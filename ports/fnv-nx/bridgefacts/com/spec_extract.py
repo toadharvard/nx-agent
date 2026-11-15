@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""spec_extract.py OUT.json: derives platform/com/com_spec.json from the platform's own interface declarations.
+"""spec_extract.py OUT.json: derives bridgefacts/com/com_spec.json from the platform's own interface declarations.
 
 The COM interfaces the platform implements are C++ abstract classes (shim/include/dsound.h, dinput.h, platform/audio/
 dsound_fx.h, dshow_int.h); this tool reads their `virtual` declarations in vtable order (a base class's methods first) and writes
@@ -20,7 +20,7 @@ import json, re, sys, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SHIM = os.path.join(HERE, "..", "..", "shim", "include")
-AUDIO = os.path.join(HERE, "..", "audio")
+AUDIO = os.path.join(HERE, "..", "..", "platform", "audio")
 
 # ---- the interfaces: spec name -> (header, C++ struct text name, cxx type, base spec name, family, IID symbol, extra IID symbols)
 # family: ds (dsound.h: GUID layout), di (dinput.h), dsh (dshow_int.h: raw 16-byte Guid)

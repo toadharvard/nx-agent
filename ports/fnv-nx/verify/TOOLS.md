@@ -2624,10 +2624,28 @@ A pure function of its inputs; a violated precondition is a stage error.
 ```text
 bridgegen - the rows table (stage A of the bridge table): bridge.tsv without any symbol table (contract/bridgetable.derive with syms=None).
 
-    bridgegen.py --names sys_names.tsv --specs DIR --name-table msvcrt_names.tsv --out bridge.tsv [--extra rows.tsv ...]
+    bridgegen.py --names sys_names.tsv --specs DIR --name-table msvcrt_names.tsv --va msvcrt_va.tsv --out bridge.tsv [--extra rows.tsv ...]
 
 DIR holds the Wine 9.0 `<dll>.spec` files (dlls/<dll>/<dll>.spec copied by name); `--extra` files are 8-column rows of other owners (COM interfaces,
 the d3d9 exports), each replacing the derived row of the same (dll, name).  The output is the 8-column table with the header line iat.py reads;
 a row binds by rule (sym, data, lookup, l3), so the table does not depend on the product's objects and its sha256 is the table_id of the keys.
 A violated precondition (a name missing from its spec, a stub, a forward that cannot be followed, a duplicate in the extra rows) is a stage error.
+The native symbol of a data export of msvcrt is the `data` row of the name table (a data export without one is an error); the forwarder of an msvcrt
+export whose body reads the x86 stack words of the call (the printf family) is its row of the va record `name TAB symbol` (a varargs export without
+one is an error). Both records are tracked files of the tool root `bridgefacts`; there is no table of them in bridgetable.py.
+```
+
+## bridgefacts (tool root)
+
+```text
+ports/fnv-nx/bridgefacts: the inputs the bridge table derives from, in a root below every consumer of the table (RECIPE.md "Outputs and uses"). Tracked:
+com/com_spec.json (the COM interface spec; com/spec_extract.py derives it from the platform's declarations, com/com_spec_mutate.py is the
+compile-failure test's mutation), crt/msvcrt_names.tsv (name, provider symbol, func|data) and crt/msvcrt_va.tsv (the va forwarders). Its recipe runs one
+stage, com/comrows.py SPEC ROWS WORDS, the one derivation of the signature of every COM thunk, and declares the outputs COM_ROWS (the bridge rows of
+the COM methods and exports, the `extra` rows of bridgegen) and COM_WORDS (`Interface Method words` for every method, hidden interfaces too).
+The platform's C++ half (platform/com/gen_combridge.py SPEC ROWS WORDS OUTDIR) reads them through `uses` and never recomputes a signature; the
+loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({stage, path} for the rows,
+{root, path} for the records; recipe.resolve_input reads a tracked file of an admitted tool root). Ownership is unchanged: L5 owns the COM and msvcrt
+files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
+Test: verify/tests/test_bridgefacts.py.
 ```
