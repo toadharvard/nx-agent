@@ -137,85 +137,11 @@ def parse_elf(data):
     return elf
 
 
-# INTERIM (L4/L1 ruling): _sections, section_ranges, defined_symbols and data_symbol are a second copy of the ELF facts (sections, defined symbols,
-# definers) that L1 w25 adds to every green link record. When that lands, icount.build_spec reads the record and these readers are deleted.
-def _sections(data):
-    """[(name, type, addr, size, offset, link)] of the section headers of a little-endian ELF file of class 32 or 64, the null section left out"""
-    if len(data) < 52 or data[:4] != b"\x7fELF" or data[4] not in (1, 2) or data[5] != 1:
-        raise LayoutError("ELF header: need a little-endian ELFCLASS32 or ELFCLASS64 file")
-    w = data[4] == 2
-    if w:
-        shoff, = _unpack("<Q", data, 40, "ELF header")
-        shentsize, shnum, shstrndx = _unpack("<HHH", data, 58, "ELF header")
-        fmt, size = "<IIQQQQIIQQ", 64
-    else:
-        shoff, = _unpack("<I", data, 32, "ELF header")
-        shentsize, shnum, shstrndx = _unpack("<HHH", data, 46, "ELF header")
-        fmt, size = "<10I", 40
-    if shentsize != size:
-        raise LayoutError("e_shentsize=%d, need %d" % (shentsize, size))
-    rows = [_unpack(fmt, data, shoff + size * i, "section header %d" % i) for i in range(shnum)]
-    if not rows:
-        return []
-    stroff = rows[shstrndx][4]
-
-    def name(o):
-        return data[stroff + o:data.index(b"\0", stroff + o)].decode()
-    return [(name(r[0]), r[1], r[3], r[5], r[4], r[6]) for r in rows[1:]]
-
-
-def section_ranges(data):
-    """{section name: [(addr, size), ...]} of every section header (a name may repeat): the section facts of the file itself"""
-    out = {}
-    for name, _t, addr, size, _o, _l in _sections(data):
-        out.setdefault(name, []).append((addr, size))
-    return out
-
-
-def defined_symbols(data):
-    """{symbol name: [value, ...]} of the defined symbols of the file's symbol table (not undefined, not STT_SECTION or STT_FILE), all bindings:
-    the same set that `nm --defined-only` lists, read from the file"""
-    w = data[4] == 2
-    secs = _sections(data)
-    out = {}
-    for _n, typ, _a, size, off, link in secs:
-        if typ != 2:   # SHT_SYMTAB
-            continue
-        stroff = secs[link - 1][4]
-        for i in range(1, size // (24 if w else 16)):
-            if w:
-                name, info, _other, shndx, value, _sz = _unpack("<IBBHQQ", data, off + 24 * i, "symbol %d" % i)
-            else:
-                name, value, _sz, info, _other, shndx = _unpack("<IIIBBH", data, off + 16 * i, "symbol %d" % i)
-            if shndx != 0 and info & 15 not in (3, 4) and name:
-                out.setdefault(data[stroff + name:data.index(b"\0", stroff + name)].decode(), []).append(value)
-    return out
-
-
-def data_symbol(data, name):
-    """the bytes of the one defined symbol NAME of the file's symbol table (st_size bytes at its address, read from the file-backed section that holds it);
-    LayoutError when the symbol is not defined exactly once or is not in file-backed contents. The file's own facts: a table in the image is read from the image."""
-    w = data[4] == 2
-    secs = _sections(data)
-    found = []
-    for _n, typ, _a, size, off, link in secs:
-        if typ != 2:
-            continue
-        stroff = secs[link - 1][4]
-        for i in range(1, size // (24 if w else 16)):
-            if w:
-                nm, info, _o, shndx, value, sz = _unpack("<IBBHQQ", data, off + 24 * i, "symbol %d" % i)
-            else:
-                nm, value, sz, info, _o, shndx = _unpack("<IIIBBH", data, off + 16 * i, "symbol %d" % i)
-            if shndx and nm and data[stroff + nm:data.index(b"\0", stroff + nm)].decode() == name and info & 15 not in (3, 4):
-                found.append((value, sz))
-    if len(found) != 1:
-        raise LayoutError("symbol %s: defined %d times, need exactly once" % (name, len(found)))
-    value, sz = found[0]
-    for _n, typ, addr, size, off, _l in secs:
-        if typ != 8 and addr <= value and value + sz <= addr + size and addr:   # not SHT_NOBITS: the contents are in the file
-            return bytes(data[off + value - addr:off + value - addr + sz])
-    raise LayoutError("symbol %s: 0x%x..0x%x is in no file-backed section" % (name, value, value + sz))
+def file_bytes(data, elf, vaddr, size, what):
+    """the SIZE bytes at link-time address VADDR of the image DATA, read through its program headers (ELF = parse_elf(DATA)): they must lie in the file-backed
+    part of one PT_LOAD, else LayoutError. The address and size come from the link record's facts (bootfacts.py), never from the section or symbol tables."""
+    off = _file_off(elf["loads"], vaddr, size, what)
+    return bytes(data[off:off + size])
 
 
 def normalize_reserved(rows):

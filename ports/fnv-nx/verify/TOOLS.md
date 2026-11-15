@@ -554,10 +554,11 @@ boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest
                                [--gpu-branch <artifacts branch>]
 
 Steps:
- 1 setup: what the stage needs (python3, git, the aarch64 binutils readelf/nm that icount.py spec runs, unicorn==2.1.4)
+ 1 setup: what the stage needs (python3, git, unicorn==2.1.4; no binutils: the ELF facts come from the link record)
    is checked first; only what is missing is installed (apt-get, pip), and an install that fails fails the job
  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
-   them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
+   them, and fails on any row or line it does not understand): elffacts.json (the link record of the ELF, L1: its sections and defined symbols, read through
+   bootfacts.py), guest.elf, or manifest.json + part.NNN (joined in manifest
    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
@@ -928,6 +929,22 @@ Rules (each with its argument):
    Regions and reserved ranges all lie at or above 0x10000 (the guest's low pages stay unmapped).
 5. CLI plan (--keys mandatory): deterministic JSON (sorted keys, indent 1, format "fnvnx-bootlayout/1").
 ```
+
+
+## verify/bootfacts.py
+
+The L4 views of the ELF facts of a linked output: lookups in the link record (L1's "fnvnx-elffacts/1", `elffacts.json` beside the linked ELF), which is
+the one source of sections and defined symbols (L4 reads no section or symbol table of an ELF, and runs no readelf or nm on one).
+
+```text
+load(path)                      the record, its format checked (FactError)
+section_ranges(rec)             {section name: [(address, size), ...]}
+defined_symbols(rec)            {symbol name: [value, ...]}   STT_SECTION and STT_FILE rows are not symbols
+symbol(rec, name)               the one value; FactError unless the name is defined exactly once
+symbol_bytes(rec, data, name)   the st_size bytes of the symbol, read from the image DATA through its PT_LOAD program headers
+                                (bootlayout.file_bytes); FactError for a bss symbol
+```
+Consumers: icount.py spec (`--facts`), tests/test_bootmachine.py (modes_of, symbol). Tests: tests/test_bootfacts.py.
 
 ## verify/bootmachine.py
 
@@ -1830,7 +1847,8 @@ Deterministic executed-instruction counter for a Unicorn AArch64 guest (the owne
 Library: attach(uc, lo, hi, spec=None, bias=0) installs one UC_HOOK_BLOCK over [lo, hi) and returns an Icount;
 the emulator tells it thread(tid), mark(name, out_of_order=False) and stop(reason, **events); write(path) or report()
 gives the OUT.json document ("fnvnx-icount/1", see report()). CLI: `python3 -I verify/icount.py spec ...` builds the
-SPEC.json that classes (ranges, entries) are read from; run `spec -h`.
+SPEC.json that classes (ranges, entries) are read from, from the link record `--facts elffacts.json` of the ELF
+(bootfacts.py: the one source of sections and defined symbols; no ELF is read here); run `spec -h`.
 
 Counting rule: a block of `size` bytes adds size/4 instructions. The static facts of a block (instructions per opcode
 class, per range class, entry) are computed once per (address, size) from the block's bytes and cached, so the hook

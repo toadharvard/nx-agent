@@ -8,7 +8,7 @@
 #  1 setup: nothing is installed. verify/envcheck.py check (the verdict farms' own check of verify/env.json) runs first;
 #    a mismatch is an input error (rc 1, "set the host up with farm/setup_verdict_env.sh") before anything is fetched or published
 #  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
-#    them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
+#    them, and fails on any row or line it does not understand): elffacts.json (the link record of the ELF: its sections and defined symbols), guest.elf, or manifest.json + part.NNN (joined in manifest
 #    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
 #    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
 #    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
@@ -114,8 +114,8 @@ retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$IN_BRANCH:refs/remotes/boot-j
 ELF_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/$IN_BRANCH^{commit}") || die "no commit for $IN_BRANCH after fetch"
 GITA ls-tree --name-only "$ELF_COMMIT" > "$WORK/branch-files.txt" || die "cannot list the tree of $IN_BRANCH@${ELF_COMMIT:0:12}"
 MISSING=""
-for f in entries.tsv modules.tsv keys.tsv milestones.tsv; do grep -qxF "$f" "$WORK/branch-files.txt" || MISSING="$MISSING $f"; done
-want=(entries.tsv modules.tsv keys.tsv milestones.tsv)
+for f in entries.tsv modules.tsv keys.tsv milestones.tsv elffacts.json; do grep -qxF "$f" "$WORK/branch-files.txt" || MISSING="$MISSING $f"; done
+want=(entries.tsv modules.tsv keys.tsv milestones.tsv elffacts.json)   # elffacts.json: the link record of the ELF (L1; the one source of its sections and symbols)
 if grep -qxF guest.elf "$WORK/branch-files.txt"; then want+=(guest.elf)
 elif grep -qxF manifest.json "$WORK/branch-files.txt"; then want+=(manifest.json $(grep -E '^part\.[0-9]+$' "$WORK/branch-files.txt"))
 else MISSING="$MISSING guest.elf-or-manifest.json"; fi
@@ -170,7 +170,7 @@ if [ -n "$GPU_BRANCH" ]; then
 fi
 
 # 3. icount spec
-SPEC_ARGS=(--elf "$IN/guest.elf" --range lifted=section:.text.fnvl -o "$WORK/spec.json")
+SPEC_ARGS=(--facts "$IN/elffacts.json" --range lifted=section:.text.fnvl -o "$WORK/spec.json")
 [ $SOFT = absent ] || SPEC_ARGS+=(--entries "softfloat=symfile:$IN/$SOFTFILE")
 python3 -I "$NX/verify/icount.py" spec "${SPEC_ARGS[@]}" 2> "$WORK/spec.err" || die "icount.py spec failed: $(tail -1 "$WORK/spec.err" | cut -c1-300)"
 log "icount spec: lifted=section:.text.fnvl softfloat=$SOFT"
