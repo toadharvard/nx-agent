@@ -13,7 +13,8 @@ Result fields: tests_total, tests_with_doubles, double_symbols, doubles (first 5
 Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
 Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
-judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}.
+judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}. Seven fields per row (the
+7th is the last error); the `std:` citations and the lasterror values are checked against the pinned documents of verify/declared_sources.json (declared_pins).
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
 While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
@@ -107,6 +108,18 @@ def root_check(root, repo, cache, jobs, built=None):
     return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, gen, finds, abi, records, image, ext
 
 
+def declared_pins(repo, cache):
+    """The pinned documents of the declared-machine table (declared_sources.json of the tree under test) as the two lazy resolvers read_declared_table takes: each fetches
+    its fnv-nx-build tree once, by exact commit and tree_sha256, only when the table cites it (recipe.fetch_externals, the one mechanism of the recipe's externals)."""
+    pin = json.load(open(os.path.join(repo, "ports/fnv-nx/verify/declared_sources.json")))
+
+    def tree(key):
+        e = pin[key]
+        return recipe.fetch_externals([{"name": key, "commit": e["commit"], "tree_sha256": e["tree_sha256"], "at": key}], os.path.join(cache, "store"),
+                                      os.path.join(cache, "external"), os.path.join(cache, "ws-declared"))[key]["host"]
+    return (lambda: objstub.std_index_load(tree("std_index"), pin["std_index"])), (lambda: objstub.winerror_load(tree("wdk"), pin["wdk"]))
+
+
 def main(argv):
     jobs = int(argv[argv.index("--jobs") + 1]) if "--jobs" in argv else os.cpu_count() or 1
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-objstub-")
@@ -118,7 +131,8 @@ def main(argv):
     gen_ids = set()
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
-        declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
+        std_ix, winerr = declared_pins(repo, cache)
+        declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"), std_ix, winerr)   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
             r, w, gm, fs, abi, records, im, ex = root_check(root, repo, cache, jobs, built)
@@ -139,7 +153,7 @@ def main(argv):
         items, finds = items + its, finds + fs
         dit, dfs, dstats = doubles.judge(built)   # no doubles in tests (doubles.py)
         items, finds = items + dit, finds + dfs
-    except (ValueError, KeyError, OSError) as e:
+    except (ValueError, KeyError, OSError, recipe.BuildRed) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):

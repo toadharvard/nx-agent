@@ -501,12 +501,12 @@ except ValueError:
     check("wine table: missing file is an error", True)
 
 # --- declared machine (CLAUDE.md "The declared machine") and terminators: rule C, the FNVNX_CITE records of hostabi/include/fnvnx/cite.h
-DT = {31: ("f", "registry", "win-doc:sysinfo/regopenkeyex:RegOpenKeyExA", "u32", "2"),
-      32: ("conn", "no-network", "win-doc:winsock/connect:connect", "u32", "0xFFFFFFFF"),
-      33: ("cleanup", "no-network", "wine-9.0:dlls/ws2_32/socket.c:WSACleanup", "void", ""),
-      34: ("die", "process-end", "win-doc:processthreadsapi/exitprocess:ExitProcess", "noreturn", "-"),
-      35: ("tend", "thread-end", "posix-2017:pthread_exit:pthread_exit", "noreturn", "-"),
-      36: ("mixed3", "single-process", "win-doc:processthreadsapi/terminateprocess:TerminateProcess", "u32", "0")}
+DT = {31: ("f", "registry", "win-doc:sysinfo/regopenkeyex:RegOpenKeyExA", "u32", "2", "-"),
+      32: ("conn", "no-network", "win-doc:winsock/connect:connect", "u32", "0xFFFFFFFF", "-"),
+      33: ("cleanup", "no-network", "wine-9.0:dlls/ws2_32/socket.c:WSACleanup", "void", "", "-"),
+      34: ("die", "process-end", "win-doc:processthreadsapi/exitprocess:ExitProcess", "noreturn", "-", "-"),
+      35: ("tend", "thread-end", "std:POSIX.1-2017:pthread_exit", "noreturn", "-", "-"),
+      36: ("mixed3", "single-process", "win-doc:processthreadsapi/terminateprocess:TerminateProcess", "u32", "0", "ERROR_INVALID_HANDLE=6")}
 CH = ('#define FNVNX_CITE(fn, id) __asm__(".pushsection .fnvnx.cite,\\"\\",%progbits\\n\\t.balign 4\\n\\t.4byte " #fn "\\n\\t.4byte 2f-1f\\n1:\\t.ascii \\"" id "\\"\\n2:\\t.balign 4\\n\\t.popsection")\n'
       "void fnvnx_wine_fixme(unsigned);\n")
 for abi in ("ilp32", "lp64"):
@@ -573,61 +573,64 @@ for abi in ("ilp32", "lp64"):
     check(T("coverage: a declared-noreturn definition that ends in an unwinder (longjmp, throw) on every path is a control transfer, covered, no record"), not k, f)
     k, f = dk(NR + 'void die(void) __attribute__((noreturn));\nvoid die(void) { host_exit(); __builtin_unreachable(); }\nvoid die3(void) __attribute__((noreturn));\nvoid die3(void) { die(); }', terms=("die", "die3", "abort"))
     check(T("coverage: a declared-noreturn body that ends in an uncited defined terminator is uncovered too"), ("die3", "noreturn-uncited") in k, f)
+STD_FIX = ({"7.22.4.4", "7.22.4.1"}, {"pthread_exit"})   # the pinned std index, as the loaders return it (std_index_load is tested below on fixture trees)
+WIN_FIX = {"ERROR_INVALID_HANDLE": 6, "WSAHOST_NOT_FOUND": 11001}   # the pinned winerror.h/winsock2.h, as winerror_load returns it
+rdt = lambda path, std=STD_FIX, win=WIN_FIX: objstub.read_declared_table(path, (lambda: std) if std is not None else None, (lambda: win) if win is not None else None)
 HDR_REAL = ('# fact: no-network | time-zone | registry | no-galaxy | single-process | process-end | thread-end (CLAUDE.md "The declared machine"); source: win-doc:<documentation page or header path>:<function> | '
-            'wine-9.0:<path>:<function> | c11:<clause>:<function> | posix-2017:<page>:<function> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N>|noreturn')
-GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2",
-         "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF",
-         "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1")
-for bad in ("31\tx\tnetwork\twin-doc:a/b:f\tu32\t1", "31\tx\tno-network\thttp://example.com\tu32\t1", "31\tx\tno-network\twin-doc:a/b:f\tu32",
-            "31\tx\tno-network\twin-doc:a/b:f\tvoid\t1", "x\tx\tregistry\twin-doc:a/b:f\tu32\t1", "31\tx\tregistry\twine:a.c:f\tu32\t1",
-            "31\tx\tregistry\twin-doc:a/b:f\tu32\t1\n31\ty\tregistry\twin-doc:a/b:g\tu32\t1", "31\tx\tregistry\tu32\t1"):
+            'wine-9.0:<path>:<function> | std:<doc>:<section> | galaxy-sdk:<page>:<function>; kind void|u32|u64|addr|u32nz<N>|noreturn')
+GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2\t-",
+         "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF\t-",
+         "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1\t-")
+for bad in ("31\tx\tnetwork\twin-doc:a/b:f\tu32\t1\t-", "31\tx\tno-network\thttp://example.com\tu32\t1\t-", "31\tx\tno-network\twin-doc:a/b:f\tu32\t-",
+            "31\tx\tno-network\twin-doc:a/b:f\tvoid\t1\t-", "x\tx\tregistry\twin-doc:a/b:f\tu32\t1\t-", "31\tx\tregistry\twine:a.c:f\tu32\t1\t-",
+            "31\tx\tregistry\twin-doc:a/b:f\tu32\t1\t-\n31\ty\tregistry\twin-doc:a/b:g\tu32\t1\t-", "31\tx\tregistry\tu32\t1\t-"):
     tf_ = os.path.join(ROOT, "d.tsv")
     open(tf_, "w").write(HDR_REAL + "\n" + bad + "\n")
     try:
-        objstub.read_declared_table(tf_)
+        rdt(tf_)
         check("declared table: malformed row rejected: %r" % bad[:36], False)
     except ValueError:
         check("declared table: malformed row rejected: %r" % bad[:36], True)
 open(tf_, "w").write(HDR_REAL + "\n" + "\n".join(GOODS) + "\n")
-got = objstub.read_declared_table(tf_)
+got = rdt(tf_)
 check("declared table: header comment and three valid rows (win-doc and wine-9.0 sources, three facts)",
       set(got) == {31, 32, 33} and got[32][1:3] == ("no-network", "wine-9.0:dlls/ws2_32/socket.c:connect"), got)
 # the facts and sources come from the header line of the table itself
-GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1"
+GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1\t-"
 open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
-check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", objstub.read_declared_table(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
-for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1")):
+check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", rdt(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1\t-"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1\t-")):
     open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
     try:
-        objstub.read_declared_table(tf_)
+        rdt(tf_)
         check("declared table: a row with " + what + " is red", False)
     except ValueError:
         check("declared table: a row with " + what + " is red", True)
-for what, row, good in (("c11 clause digits and dots", "36\texit\tprocess-end\tc11:7.22.4.4:exit\tnoreturn\t-", True),
-                        ("c11 clause that is not digits and dots", "36\texit\tprocess-end\tc11:7.x:exit\tnoreturn\t-", False),
-                        ("posix-2017 page name", "37\tpthread_exit\tthread-end\tposix-2017:pthread_exit:pthread_exit\tnoreturn\t-", True),
-                        ("posix-2017 page that is not a name", "37\tpthread_exit\tthread-end\tposix-2017:p/q:pthread_exit\tnoreturn\t-", False),
-                        ("process-end with a kind that returns", "38\texit\tprocess-end\tc11:7.22.4.4:exit\tu32\t0", False),
-                        ("noreturn with a fact that is not a terminator", "38\texit\tregistry\tc11:7.22.4.4:exit\tnoreturn\t-", False),
-                        ("noreturn with a value", "38\texit\tprocess-end\tc11:7.22.4.4:exit\tnoreturn\t0", False),
-                        ("sources joined by | (sorted, unique, each token valid)", "39\tx\tregistry\twin-doc:a/b:f|wine-9.0:dlls/a.c:f\tu32\t1", True),
-                        ("sources joined by | with a token that fails the grammar", "39\tx\tregistry\twin-doc:a/b:f|http://x\tu32\t1", False),
-                        ("sources joined by | not in sorted order", "39\tx\tregistry\twine-9.0:dlls/a.c:f|win-doc:a/b:f\tu32\t1", False),
-                        ("sources joined by | with a repeated token", "39\tx\tregistry\twin-doc:a/b:f|win-doc:a/b:f\tu32\t1", False)):
+for what, row, good in (("c11 clause digits and dots", "36\texit\tprocess-end\tstd:C11:7.22.4.4\tnoreturn\t-\t-", True),
+                        ("c11 clause that is not digits and dots", "36\texit\tprocess-end\tstd:C11:7.x\tnoreturn\t-\t-", False),
+                        ("posix-2017 page name", "37\tpthread_exit\tthread-end\tstd:POSIX.1-2017:pthread_exit\tnoreturn\t-\t-", True),
+                        ("posix-2017 page that is not a name", "37\tpthread_exit\tthread-end\tstd:POSIX.1-2017:p/q\tnoreturn\t-\t-", False),
+                        ("process-end with a kind that returns", "38\texit\tprocess-end\tstd:C11:7.22.4.4\tu32\t0\t-", False),
+                        ("noreturn with a fact that is not a terminator", "38\texit\tregistry\tstd:C11:7.22.4.4\tnoreturn\t-\t-", False),
+                        ("noreturn with a value", "38\texit\tprocess-end\tstd:C11:7.22.4.4\tnoreturn\t0\t-", False),
+                        ("sources joined by | (sorted, unique, each token valid)", "39\tx\tregistry\twin-doc:a/b:f|wine-9.0:dlls/a.c:f\tu32\t1\t-", True),
+                        ("sources joined by | with a token that fails the grammar", "39\tx\tregistry\twin-doc:a/b:f|http://x\tu32\t1\t-", False),
+                        ("sources joined by | not in sorted order", "39\tx\tregistry\twine-9.0:dlls/a.c:f|win-doc:a/b:f\tu32\t1\t-", False),
+                        ("sources joined by | with a repeated token", "39\tx\tregistry\twin-doc:a/b:f|win-doc:a/b:f\tu32\t1\t-", False)):
     open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
     try:
-        objstub.read_declared_table(tf_)
+        rdt(tf_)
         got_ = True
     except ValueError:
         got_ = False
     check("declared table: " + what + (" is accepted" if good else " is red"), got_ == good, row)
 HDR_HOST = HDR_REAL.replace(" | galaxy-sdk:<page>:<function>", " | galaxy-sdk:<page>:<function> | hostabi:<header>:<service>")
-for what, row, good in (("hostabi source for a noreturn property of our own symbol", "40\tfnvnx_thread_exit\tthread-end\thostabi:hostabi/include/fnvnx/hostapi.h:thread_exit\tnoreturn\t-", True),
-                        ("hostabi source as the source of a Win32 value (a return value)", "41\tx\tno-network\thostabi:hostabi/include/fnvnx/hostapi.h:connect\tu32\t0xFFFFFFFF", False),
-                        ("hostabi joined to a wine source for a Win32 value", "41\tx\tno-network\thostabi:a.h:s|wine-9.0:dlls/a.c:f\tu32\t1", False)):
+for what, row, good in (("hostabi source for a noreturn property of our own symbol", "40\tfnvnx_thread_exit\tthread-end\thostabi:hostabi/include/fnvnx/hostapi.h:thread_exit\tnoreturn\t-\t-", True),
+                        ("hostabi source as the source of a Win32 value (a return value)", "41\tx\tno-network\thostabi:hostabi/include/fnvnx/hostapi.h:connect\tu32\t0xFFFFFFFF\t-", False),
+                        ("hostabi joined to a wine source for a Win32 value", "41\tx\tno-network\thostabi:a.h:s|wine-9.0:dlls/a.c:f\tu32\t1\t-", False)):
     open(tf_, "w").write(HDR_HOST + "\n" + row + "\n")
     try:
-        objstub.read_declared_table(tf_)
+        rdt(tf_)
         got_ = True
     except ValueError:
         got_ = False
@@ -635,13 +638,13 @@ for what, row, good in (("hostabi source for a noreturn property of our own symb
 slim = HDR_REAL.replace(" | no-galaxy", "").replace(" | galaxy-sdk:<page>:<function>", "")
 open(tf_, "w").write(slim + "\n" + GAL + "\n")
 try:
-    objstub.read_declared_table(tf_)
+    rdt(tf_)
     check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", False)
 except ValueError:
     check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", True)
 open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
 try:
-    objstub.read_declared_table(tf_)
+    rdt(tf_)
     check("declared table: no header line is an error", False)
 except ValueError:
     check("declared table: no header line is an error", True)
@@ -650,6 +653,71 @@ try:
     check("declared table: missing file is an error", False)
 except ValueError:
     check("declared table: missing file is an error", True)
+
+# lasterror (7th column), the std: citations against the pinned index, and the pinned loaders
+for what, row, good in (("lasterror ERROR_INVALID_HANDLE=6 (a define of the pinned header)", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=6", True),
+                        ("lasterror WSAHOST_NOT_FOUND=11001 (winsock2.h)", "50\tx\tno-network\twin-doc:a/b:f\tu32\t0xFFFFFFFF\tWSAHOST_NOT_FOUND=11001", True),
+                        ("lasterror - on a returning row", "50\tx\tno-network\twin-doc:a/b:f\tu32\t0\t-", True),
+                        ("lasterror with a lower-case name", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\terror_invalid_handle=6", False),
+                        ("lasterror with a malformed name (starts with a digit)", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\t6ERROR=6", False),
+                        ("lasterror with a name and no =N", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE", False),
+                        ("lasterror with = and no number", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=", False),
+                        ("lasterror with a hex number", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=0x6", False),
+                        ("lasterror with a number that is not the header's value", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=7", False),
+                        ("lasterror with a name that is no define of the pinned headers", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_NO_SUCH_THING=6", False),
+                        ("a noreturn row with a non-- lasterror", "50\texit\tprocess-end\tstd:C11:7.22.4.4\tnoreturn\t-\tERROR_INVALID_HANDLE=6", False),
+                        ("a row with six fields (no lasterror column)", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0", False),
+                        ("a row with eight fields", "50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\t-\t-", False),
+                        ("a hostabi: source with a non-- lasterror", "50\tx\tsingle-process\thostabi:a.h:s\tu32\t0\tERROR_INVALID_HANDLE=6", False),
+                        ("a hostabi: noreturn row with lasterror -", "50\tfnvnx_thread_exit\tthread-end\thostabi:hostabi/include/fnvnx/hostapi.h:thread_exit\tnoreturn\t-\t-", True),
+                        ("std:C11 clause that is in the pinned index", "50\texit\tprocess-end\tstd:C11:7.22.4.1\tnoreturn\t-\t-", True),
+                        ("std:C11 clause that is not in the pinned index", "50\texit\tprocess-end\tstd:C11:7.22.4.9\tnoreturn\t-\t-", False),
+                        ("std:POSIX.1-2017 page that is not in the pinned index", "50\tx\tthread-end\tstd:POSIX.1-2017:pthread_nothing\tnoreturn\t-\t-", False),
+                        ("std with an unknown document", "50\tx\tprocess-end\tstd:C99:7.22.4.4\tnoreturn\t-\t-", False)):
+    open(tf_, "w").write(HDR_HOST + "\n" + row + "\n")
+    try:
+        rdt(tf_)
+        got_ = True
+    except ValueError:
+        got_ = False
+    check("declared table: " + what + (" is accepted" if good else " is red"), got_ == good, row)
+open(tf_, "w").write(HDR_HOST + "\n50\texit\tprocess-end\tstd:C11:7.22.4.4\tnoreturn\t-\t-\n")
+try:
+    rdt(tf_, std=None)
+    check("declared table: a std: citation with no pinned index given is red", False)
+except ValueError:
+    check("declared table: a std: citation with no pinned index given is red", True)
+open(tf_, "w").write(HDR_HOST + "\n50\tx\tsingle-process\twin-doc:a/b:f\tu32\t0\tERROR_INVALID_HANDLE=6\n")
+try:
+    rdt(tf_, win=None)
+    check("declared table: a lasterror with no pinned headers given is red", False)
+except ValueError:
+    check("declared table: a lasterror with no pinned headers given is red", True)
+got = rdt(tf_)
+check("declared table: the row tuple is (name, fact, source, kind, value, lasterror)", got[50] == ("x", "single-process", "win-doc:a/b:f", "u32", "0", "ERROR_INVALID_HANDLE=6"), got)
+# the loaders of the pinned documents: fixture trees, sha256 of every file checked
+import hashlib as _hl  # noqa: E402
+fx = os.path.join(ROOT, "stdfix")
+os.makedirs(fx, exist_ok=True)
+open(os.path.join(fx, "c11.tsv"), "w").write("7.22.4.4\tThe exit function\n")
+open(os.path.join(fx, "posix2017.tsv"), "w").write("pthread_exit\n")
+sha = lambda p_: _hl.sha256(open(os.path.join(fx, p_), "rb").read()).hexdigest()
+pin = {"files": {"c11": {"path": "c11.tsv", "sha256": sha("c11.tsv")}, "posix": {"path": "posix2017.tsv", "sha256": sha("posix2017.tsv")}}}
+check("std_index_load: the pinned files give the clause and page sets", objstub.std_index_load(fx, pin) == ({"7.22.4.4"}, {"pthread_exit"}), "")
+open(os.path.join(fx, "c11.tsv"), "a").write("7.22.4.1\tThe abort function\n")
+try:
+    objstub.std_index_load(fx, pin)
+    check("std_index_load: a file that differs from its pinned sha256 is an error", False)
+except ValueError:
+    check("std_index_load: a file that differs from its pinned sha256 is an error", True)
+wx = os.path.join(ROOT, "wdkfix")
+os.makedirs(wx, exist_ok=True)
+open(os.path.join(wx, "winerror.h"), "w", newline="").write("#define ERROR_INVALID_HANDLE             6L\r\n#define HR_X ((HRESULT)0x80070005L)\r\n#define ERROR_ALIAS ERROR_INVALID_HANDLE\r\n")
+open(os.path.join(wx, "winsock2.h"), "w", newline="").write("#define WSABASEERR              10000\n#define WSAEINTR                (WSABASEERR+4)\n#define EINTR_ALIAS WSAEINTR\n")
+wsha = lambda p_: _hl.sha256(open(os.path.join(wx, p_), "rb").read()).hexdigest()
+wpin = {"files": {"winerror": {"path": "winerror.h", "sha256": wsha("winerror.h")}, "winsock2": {"path": "winsock2.h", "sha256": wsha("winsock2.h")}}}
+wv = objstub.winerror_load(wx, wpin)
+check("winerror_load: decimals, hex with a cast, (WSABASEERR+N) and an alias of another define", wv["ERROR_INVALID_HANDLE"] == 6 and wv["HR_X"] == 0x80070005 and wv["WSAEINTR"] == 10004 and wv["EINTR_ALIAS"] == 10004 and wv["ERROR_ALIAS"] == 6, wv)
 
 # gate on the toy product root of test_recipe.py
 import verdict  # noqa: E402
