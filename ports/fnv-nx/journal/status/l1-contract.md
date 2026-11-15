@@ -1790,3 +1790,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:52 L6: the assumptions gate on cand3 shows 5 mention-no-id (gatecert.py:11,292; objstub_x64.py:1,15,686). w12 fixes them first: cite an existing id, reword a gated fact, or report a new assumption. L6 d3d9total 332/332 with 45/45 mutations killed at 4bd215d1b.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:54 L6's 4 GL shader-failure sites are in gl4_shader.c (31, 92, 114, 120). w12 merges w27's fixed citation commit into w12L2, resolves the gate_objstub/objstub conflict, and sends the head to L6, which places the citations there.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
