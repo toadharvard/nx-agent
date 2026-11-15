@@ -1927,3 +1927,10 @@ bottleneck: the cand3 head (w12), and the cand2 merge (w15).
   - L6: gen_env.py, res_smgen.py, and gate_d3d9total.py (4 literals, including the host probes of clang, gcc and git).
   Sent to L6 for its cand4 head.
 bottleneck: the cand3 head (w12), and the cand2 merge (w15).
+- 23:08 w15 4cfd8add7: the cand2 verdict after the cut is still RED, 435.9 s cold.
+  - Ruling: cut in full by the graph. Without platform no root links, so loader, sha256, translator, d3d9, gl4, nxgpu, pair, smscan and guest_main leave and return with cand3. The tooling plus shim, hostabi/product, bridgefacts and bootrt remain.
+  - Each gate is judged on the roots that remain, and 0/0 is vacuous, not a pass.
+  - The fpexact scope bug (host roots judged as AArch64) is fixed, not cut.
+  - objstub 12 and pure 11 are attributed to the roots that remain.
+  - plugsym.inc waits for L2 6d9f72b18.
+bottleneck: the cand2 merge (w15: gate scope, pin, warm verdict), and the cand3 head (w12).
