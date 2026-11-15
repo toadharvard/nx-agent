@@ -1840,3 +1840,5 @@ bottleneck: the cand2 verdict on w15.
   - Ruling on L1's remaining: envcheck probes, runtime lib dirs and the host plugin compiler path become env.json data; ARTIFACTS_URL becomes a required argument; dynamic launcher imports are accepted only through require_mounted(path) (MOUNT_PREFIXES), with no exemptions.
   - Lists go to L3a and L6. The gate enters with cand4.
 bottleneck: the cand2 verdict on w15.
+- 21:43 cand3 pushed: claude/fnv-l1-contract-cand3 4952b11b3 (cand2 + shards N ≤ 16, cpu_s/timing/store-export, generator dirs outputs; test_genchain 11/11 with env bypass). Next for w12: a cross-root dirs toy case, then assemble cand4 (PP keying, compiler stage, bootrt, boot.c header, typed dispatch, rule O and the objstub fixes, assumption ids, abspath). w15: verify and merge cand3 after cand2. Orchestrator updated.
+bottleneck: the cand2 verdict on w15.
