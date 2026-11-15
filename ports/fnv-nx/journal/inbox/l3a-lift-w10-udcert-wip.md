@@ -1,0 +1,5 @@
+# w10 udcert: WIP, paused until after the first frame
+
+Done (bd94fd02 and this note): lift/tools/udcert.py, test_udcert.py (7/7), root lift/udcert (recipe check valid, recipe build not run). Measurement: 0 of 5,308 sites certified; 5,154 U-ROOT, 66 U-NOGATE, 87 U-NODEC, 1 U-DEAD. Rows in fnv-nx-build l3a-lift/udcert/bd94fd02.
+
+Not done: the table-selected rows (5,151 3DNow). Finding for the resume: the ptr roots' address values are relocated immediates in the table-fill code (d3dx9_38 0x1a79bd0 ff: `mov [ecx+off], imm`), guarded by `test al,0x20 / test al,al; jns` on the return value of 0x1a79aaf (cpuid flags accumulated in stack slot [ebp-0x28]). Measured in d3dx9_38: of the 131 entries owning cleared sites, 116 ptr/call roots have all relocation sites inside decoded code, 13 only in data, 1 mixed, 59 have none. Plan: (1) root liveness by materialization: a ptr-only root is live iff a reloc site lies in a reachable instruction or in data; (2) guard evaluation needs ebp-slot memory with known bits, a callee clobber and ebp-preservation summary, and the callee's eax at ret. Unwritten.
