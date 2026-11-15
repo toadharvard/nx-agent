@@ -5,7 +5,7 @@ Nothing here decides a policy: the rules are the ones of objstub.py's docstring,
 
 Decoder: GNU objdump of the pinned binutils (env.json `packages` binutils-x86-64-linux-gnu, `programs` x86_64-linux-gnu-objdump, checked by envcheck.py),
 `-d -w -M intel --no-show-raw-insn -j SECTION`: ONE decoder source. Relocations come from the ELF relocation tables (RELA), never from objdump's text.
-Assumption: objdump's disassembly of x86-64 is correct (the compiler/binutils trust of ASM-001/ASM-043 class: the decoder of a pinned package).
+Assumption: objdump's disassembly of x86-64 is correct (ASM-001: objdump is the pinned binutils, the pinned toolchain).
 A byte sequence that objdump prints as `(bad)` is `undecodable`.
 
 FUNCTION UNIVERSE. As in objstub.py: every STT_FUNC symbol defined in an SHF_EXECINSTR PROGBITS section, [value, value+size); equal ranges are aliases.

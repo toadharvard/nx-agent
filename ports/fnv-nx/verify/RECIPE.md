@@ -118,6 +118,7 @@ without the pin file has no valid guest root. The plugins are built against this
 What an external compiler names outside its tree is declared as inputs at their own paths, from the compiler's own answers: the assembler and linker it is
 configured with (`-print-prog-name=as|ld`) and the header directories of its search list, symlink targets included (the distribution's cross binutils and
 headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
+**PP inputs are exactly what the sandbox can read** (`recipe.Job.pp_subtrees`, `pp_uses`): the compiler's external whole; any other external only by the subtree an `include` entry or a flag path names (`-I /ext/x/inc` mounts that directory, tree id over the subtree; a path equal to the external's root is the whole external; `-include FILE` the file); of the `uses` outputs only the `include_uses` ones and those a flag path names. A change outside these re-keys no PP stage, and a PP that read more fails (the path is not mounted), it never builds stale. `tests/test_ppkeys.py`.
 
 The pin file also names the guest's **runtime** (`"runtime": {EXT_KEYS}`, fnv-nx-build `tools/fnvnx-a64-msvcmodel`: gcc 15.2.0 + newlib built with the same
 msvcmodel.patch, target `aarch64-none-elf`, multilibs `.`, `pic`, `ilp32`, `ilp32/pic`; its libc, libm, libstdc++ and headers). A guest recipe may declare it
