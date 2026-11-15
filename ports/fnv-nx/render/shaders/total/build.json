@@ -24,6 +24,61 @@
    "commit": "b4057704c0babd012e466cc89181132e02542289",
    "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
    "at": "/ext/gcc"
+  },
+  {
+   "name": "msdocs-win32-d3d9",
+   "repo": "fnv-nx-build",
+   "ref": "tools/msdocs-win32-d3d9",
+   "commit": "3fb42a59cf420c967916d2f674b09f4930168def",
+   "tree_sha256": "1aecae829c71209a9a15e25ff3df82485173ee8d6b0a515cfbc60ceec91a51ae",
+   "at": "/ext/msdocs"
+  },
+  {
+   "name": "wine-sm1",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-sm1",
+   "commit": "0a52e82db01433f1b0363c52cf68920ba059a1b1",
+   "tree_sha256": "70046f62058eb7c7addb664ce1e8438dacb68273abd4b23863e048e28addd530",
+   "at": "/ext/wine"
+  },
+  {
+   "name": "vkd3d",
+   "repo": "fnv-nx-build",
+   "ref": "tools/vkd3d",
+   "commit": "fd97ca35ae29a3f79b7a3467fe99d1a3b4e94643",
+   "tree_sha256": "8ea2fb820f32b38bdb360b63d87f2802e3a9705bc39403b5837441a5a87382d9",
+   "at": "/ext/vkd3d"
   }
- ]
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/shaders/total/sm_table.py",
+   "args": [
+    "--docs",
+    "/ext/msdocs",
+    "--wine",
+    "/ext/wine",
+    "--vkd3d",
+    "/ext/vkd3d",
+    "--recipe",
+    "/in/ports/fnv-nx/render/shaders/total/build.json",
+    "--out",
+    "/out/gen"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/shaders/total/build.json"
+   ],
+   "outputs": [
+    "gen/sm_table.json",
+    "gen/sm_illegal.tsv",
+    "gen/sm_legacy.tsv",
+    "gen/fnvnx_sm_rows.h"
+   ]
+  }
+ ],
+ "outputs": {
+  "sm_table": "gen/sm_table.json",
+  "sm_illegal": "gen/sm_illegal.tsv",
+  "sm_rows": "gen/fnvnx_sm_rows.h"
+ }
 }
