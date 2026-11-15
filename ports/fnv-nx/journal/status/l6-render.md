@@ -863,3 +863,10 @@ Paused: w3b, w4, farm; no other work.
     - The generate stage asserts the citations. res_smtab.gen.h is byte-identical.
     - w6 (doing): the 3 "included" undetermined rows (vs1_0_ps1_0, temp_uninit_flow, rcp_mask) get a Wine 9.0 accept or reject citation, or are reported. "Included" without a source is red by rule 1.
     - Hand-off to L1 follows that commit.
+- 13:52Z w6 b83d04e0a: the 3 included rows are now cited union rows (Wine accepts). Union rows 8, illegal 103, legal 54, unreachable-doc 10. gen.h is byte-identical.
+    - w6 (doing), by the rule's text:
+        - vs_a0_src and vs_bi_alu become union rows (MS silent).
+        - mov_a0_vs2 becomes illegal (MS mova page states it).
+        - The multi-component rcp_mask becomes illegal (MS masking page states the single-component mask).
+        - The legacy conflict row is decided by the same rule, or reported.
+    - Then nx_sm_check runs over the shipped set again; a newly rejected shader is reported, not worked around.
