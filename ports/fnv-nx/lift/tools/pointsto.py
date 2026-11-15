@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 
 M32 = 0xffffffff
 WIDTH = 8
-OBJW = 8
+OBJW = int(os.environ.get("PTOBJW", "8"))
 UNK = (None, None); TOP = ('TOP', None)
 U = frozenset([UNK]); TOPSET = frozenset([TOP])
 R32 = pcsrc.R32
