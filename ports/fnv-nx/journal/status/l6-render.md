@@ -790,3 +790,6 @@ Paused: w3b, w4, farm; no other work.
     - Decision: w6 converts it to C as root render/smscan (guest and host, fixed-width interface, size static_asserts); d3d9 and the sm_link checker link it.
     - Rejected: a translator reflection copy (a second source) and an equality gate.
     - w5: ALL_FLAGS X-macro and L design meanwhile.
+- 10:05Z L1 w12: bridgefacts tool root (8968eaa30 on fnv-l1-contract-w12L2).
+    - The d3d9 bridge rows are still read from the manifest external d9bridge_rows.tsv. The table is byte-identical; table_id is unchanged.
+    - Open (L6, deferred by budget): the d3d9 rows generator becomes a bridgefacts stage (D3D9_ROWS) and the loader takes it via `uses`. Then the external read is deleted.
