@@ -117,3 +117,20 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - gate_oracle at 37424079c: 105/112.
   - The w4 merge is pending (sail_setup.sh conflict, resolved by w4).
 - 2026-11-15 01:30: L5 x86sys.json 28bbec363: cr4.umip=0 is derived (CPUREF max leaf 4); the opcode copy is deleted. The int-vector source conflict (Wine set with 0x29 against Windows 7) went to the orchestrator; I recommended admitting ReactOS.
+
+## 2026-11-15 04:10Z — resume after the limit reset (integ d65489ae9)
+- Cert farms 05, 07 and 11-16: queue v2 is STOPPED, and nothing from it was published. Cause: the v2 header pins IR 70c8dc39, but the bump pin 7c3074644653 superseded it (w4 0034e98e5; external tools/sail-ir-7c3074644653 8b711fba). The farms wait for v3.
+- w4 (doing):
+  1. merge the lead branch (one IR fetch path in sail_setup.sh);
+  2. queue v3 on IR 7c307464 for pack 7b2faae276b2;
+  3. the bs shapeprove against w1 426d95f8;
+  4. the oracle.json entries;
+  5. SIMD slice 1 (reference).
+  - The sysspec readers landed at 8ed832c07.
+- w3 (doing): the count of sites that depend on undecided x86sys rows, at the L5 head; then audit rows #7, #9-#12, #14 and #15.
+- w9 (doing): the carrier revision; nd.f2xm1.out; fault_kind from faults.py; the SDM tables F2XM1/FPTAN/FSIN/FSINCOS/FPREM; the NaN rule against Table 4-8.
+- Blocked:
+  - the 2.6 certs wait for queue v3 (w4);
+  - symcheck waits for the relift instrs.tsv (L3a w1);
+  - the #UD certificates wait for L3a w6;
+  - row #4 waits for CODEMAP.md (L3a w7).
