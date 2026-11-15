@@ -898,9 +898,8 @@ Address-space plan of the emulator boot stage for the guest ELF (elf32-littleaar
 
 Pure and stdlib-only: no unicorn, clock, environment or randomness; every iteration runs over sorted/ordered data.
 The guest loader later maps the original Windows exe image (0x00400000..) and the module images through a host call, so
-the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census. CLI:
-`python3 -I verify/bootlayout.py plan -h`. A condition that cannot be met raises LayoutError (CLI: message, exit 1);
-there is no alternative placement and no default.
+the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census, file_bytes. A condition that cannot be met raises
+LayoutError; there is no alternative placement and no default.
 
 Rules (each with its argument):
 1. parse_elf: EI_CLASS=ELFCLASS32, EI_DATA=little, e_machine=EM_AARCH64 (183), e_type=ET_DYN and DT_FLAGS_1 with
@@ -923,11 +922,11 @@ Rules (each with its argument):
    DT_JMPREL (decoded per DT_PLTREL) and the DT_RELR entry count (DT_RELRSZ / DT_RELRENT, default 4). Allowed: type
    R_AARCH64_P32_RELATIVE = 183 in DT_RELA (AAELF64 ILP32 relocations, binutils include/elf/aarch64.h, glibc elf.h)
    and any DT_RELR; anything else (other types, non-empty DT_REL / DT_JMPREL) is an error listing the counts.
-   The census is part of the plan.
    crt0 header (parse_elf): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
    lowest PT_LOAD vaddr aligned down, u32 size (+20) == page-aligned span, u32 flags (+24) with bit0 (relocatable).
    Regions and reserved ranges all lie at or above 0x10000 (the guest's low pages stay unmapped).
-5. CLI plan (--keys mandatory): deterministic JSON (sorted keys, indent 1, format "fnvnx-bootlayout/1").
+5. entry: plan() takes the image entry from its caller (`entry=`: header.entry of the link record, bootfacts.entry; the ELF header is not read for
+   it) and requires it to lie inside the image span; the plan's image.entry is base + entry. There is no CLI: boot.py builds the plan.
 ```
 
 

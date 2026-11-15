@@ -3,9 +3,8 @@
 
 Pure and stdlib-only: no unicorn, clock, environment or randomness; every iteration runs over sorted/ordered data.
 The guest loader later maps the original Windows exe image (0x00400000..) and the module images through a host call, so
-the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census. CLI:
-`python3 -I verify/bootlayout.py plan -h`. A condition that cannot be met raises LayoutError (CLI: message, exit 1);
-there is no alternative placement and no default.
+the stage must keep those ranges free. Library: parse_elf, normalize_reserved, plan, reloc_census, file_bytes. A condition that cannot be met raises
+LayoutError; there is no alternative placement and no default.
 
 Rules (each with its argument):
 1. parse_elf: EI_CLASS=ELFCLASS32, EI_DATA=little, e_machine=EM_AARCH64 (183), e_type=ET_DYN and DT_FLAGS_1 with
@@ -28,16 +27,13 @@ Rules (each with its argument):
    DT_JMPREL (decoded per DT_PLTREL) and the DT_RELR entry count (DT_RELRSZ / DT_RELRENT, default 4). Allowed: type
    R_AARCH64_P32_RELATIVE = 183 in DT_RELA (AAELF64 ILP32 relocations, binutils include/elf/aarch64.h, glibc elf.h)
    and any DT_RELR; anything else (other types, non-empty DT_REL / DT_JMPREL) is an error listing the counts.
-   The census is part of the plan.
    crt0 header (parse_elf): at +8 of the first executable PT_LOAD: magic 0x47584E46, u32 abi, u32 link_base (+16) ==
    lowest PT_LOAD vaddr aligned down, u32 size (+20) == page-aligned span, u32 flags (+24) with bit0 (relocatable).
    Regions and reserved ranges all lie at or above 0x10000 (the guest's low pages stay unmapped).
-5. CLI plan (--keys mandatory): deterministic JSON (sorted keys, indent 1, format "fnvnx-bootlayout/1").
+5. entry: plan() takes the image entry from its caller (`entry=`: header.entry of the link record, bootfacts.entry; the ELF header is not read for
+   it) and requires it to lie inside the image span; the plan's image.entry is base + entry. There is no CLI: boot.py builds the plan.
 """
-import argparse
-import json
 import struct
-import sys
 
 FORMAT = "fnvnx-bootlayout/1"
 PAGE = 0x1000
@@ -91,7 +87,7 @@ def parse_elf(data):
         raise LayoutError("EI_CLASS=%d, need ELFCLASS32 (1)" % data[4])
     if data[5] != 1:
         raise LayoutError("EI_DATA=%d, need little endian (1)" % data[5])
-    (etype, machine, _v, entry, phoff, _sh, _fl, _eh, phentsize, phnum) = _unpack("<HHIIIIIHHH", data, 16, "ELF header")
+    (etype, machine, _v, _entry, phoff, _sh, _fl, _eh, phentsize, phnum) = _unpack("<HHIIIIIHHH", data, 16, "ELF header")
     if machine != EM_AARCH64:
         raise LayoutError("e_machine=%d, need EM_AARCH64 (183)" % machine)
     if etype != ET_DYN:
@@ -114,7 +110,7 @@ def parse_elf(data):
         raise LayoutError("no PT_LOAD segment")
     lo = min(s["vaddr"] for s in loads) // PAGE * PAGE
     hi = _up(max(s["vaddr"] + s["memsz"] for s in loads), PAGE)
-    elf = {"entry": entry, "loads": loads, "span": [lo, hi], "tls": tls, "dynamic": dyn}
+    elf = {"loads": loads, "span": [lo, hi], "tls": tls, "dynamic": dyn}
     tags = _dynamic(data, elf)
     if DT_FLAGS_1 not in tags:
         raise LayoutError("DT_FLAGS_1 missing in PT_DYNAMIC (need DF_1_PIE 0x08000000)")
@@ -167,9 +163,11 @@ def normalize_reserved(rows):
     return out
 
 
-def plan(elf, reserved, heap_size, n_stacks=32, stack_size=0x40000):
+def plan(elf, reserved, heap_size, *, entry, n_stacks=32, stack_size=0x40000):
     if n_stacks < 1 or stack_size < ALIGN or stack_size % ALIGN:
         raise LayoutError("n_stacks=%d stack_size=0x%x: need n >= 1 and a 64 KiB multiple" % (n_stacks, stack_size))
+    if not elf["span"][0] <= entry < elf["span"][1]:
+        raise LayoutError("entry 0x%x (header.entry of the link record) is outside the image span 0x%x..0x%x" % (entry, *elf["span"]))
     if heap_size <= 0 or heap_size % PAGE:
         raise LayoutError("heap_size=%d must be a positive multiple of 4096" % heap_size)
     if HEAP_BASE + heap_size > TOP:
@@ -197,7 +195,7 @@ def plan(elf, reserved, heap_size, n_stacks=32, stack_size=0x40000):
     for n, (a, b) in regions.items():
         if a % ALIGN or b > TOP:
             raise LayoutError("region %s 0x%x..0x%x is not 64 KiB aligned or exceeds 4 GiB" % (n, a, b))
-    return {"format": FORMAT, "image": {"base": base, "lo": lo, "hi": hi, "entry": base + elf["entry"]},
+    return {"format": FORMAT, "image": {"base": base, "lo": lo, "hi": hi, "entry": base + entry},
             "regions": {n: {"lo": a, "hi": b} for n, (a, b) in regions.items()},
             "free": [{"name": n, "lo": a, "hi": b} for n, a, b in res], "checks": checks}
 
@@ -254,43 +252,3 @@ def read_tsv(path):
             except ValueError:
                 raise LayoutError("%s:%d: not hexadecimal: %r" % (path, n, line))
     return rows
-
-
-def _cmd_plan(a):
-    with open(a.elf, "rb") as fh:
-        raw = fh.read()
-    elf = parse_elf(raw)
-    rows = normalize_reserved(read_tsv(a.reserved))
-    try:
-        lo, hi = (int(x, 16) for x in a.keys.split(":"))
-    except ValueError:
-        raise LayoutError("--keys %r: need LO:HI in hex" % a.keys)
-    if not lo < hi or lo < MIN_ADDR:
-        raise LayoutError("--keys: need %x <= lo < hi, got 0x%x..0x%x" % (MIN_ADDR, lo, hi))
-    rows.append(("keys", lo // PAGE * PAGE, _up(hi, PAGE)))
-    doc = plan(elf, sorted(rows, key=lambda r: r[1]), a.heap_size)
-    doc["census"] = reloc_census(raw)
-    with open(a.o, "w") as fh:
-        fh.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
-
-
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    sp = sub.add_parser("plan", help="write PLAN.json (format %s) for the boot stage" % FORMAT)
-    sp.add_argument("--elf", required=True)
-    sp.add_argument("--reserved", required=True, metavar="T.tsv", help="name<TAB>lo_hex<TAB>hi_hex rows, sorted")
-    sp.add_argument("--keys", required=True, metavar="LO:HI", help="import-slot key range (hex), never mapped")
-    sp.add_argument("--heap-size", required=True, type=lambda s: int(s, 0))
-    sp.add_argument("-o", required=True)
-    a = ap.parse_args(argv)
-    try:
-        _cmd_plan(a)
-    except (LayoutError, OSError) as e:
-        print("bootlayout plan: %s" % e, file=sys.stderr)
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -121,7 +121,7 @@ def _host_lines(host):
     return lines
 
 
-def _plan(a, raw):
+def _plan(a, raw, facts):
     rows = bootlayout.normalize_reserved(bootlayout.read_tsv(a.reserved))
     try:
         lo, hi = (int(x, 16) for x in a.keys.split(":"))
@@ -130,7 +130,7 @@ def _plan(a, raw):
     if not lo < hi or lo < bootlayout.MIN_ADDR:
         raise bootlayout.LayoutError("--keys: need %x <= lo < hi, got 0x%x..0x%x" % (bootlayout.MIN_ADDR, lo, hi))
     rows.append(("keys", lo // 4096 * 4096, (hi + 4095) // 4096 * 4096))
-    return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, n_stacks=a.threads)
+    return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, entry=bootfacts.entry(facts), n_stacks=a.threads)
 
 
 MEM_SPEC = re.compile(r"^(x[0-7])((?:->(?:0x[0-9a-fA-F]+|[0-9]+))*):(0x[0-9a-fA-F]+|[0-9]+)$")
@@ -253,7 +253,8 @@ def run(a):
     t0 = time.time()
     with open(a.elf, "rb") as f:
         raw = f.read()
-    plan = _plan(a, raw)
+    facts = bootfacts.load(a.facts)   # the link record of the ELF: the one source of its entry, sections and symbols
+    plan = _plan(a, raw, facts)
     declared, ro = [], []
     if a.declared_inputs:
         declared = bootdecl.mount_all(a.declared_inputs, a.root)   # fetched through the recipe's external mechanism, tree-hash verified, mounted read-only on the SD root before anything runs; a mismatch is an input error
@@ -263,7 +264,6 @@ def run(a):
         table = bootmiles.load_table(f.read())
     with open(a.manifest) as f:
         manifest = bootmiles.load_manifest(f.read())
-    facts = bootfacts.load(a.facts)   # the link record of the ELF: the one source of its sections and symbols
     syms = bootmiles.symbols(facts)
     watch = bootmiles.resolve(table, manifest, syms, base)
     host = _host_lines(watch["host"])

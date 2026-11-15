@@ -4,6 +4,7 @@ linked ELF, objects.json key `elf_facts`), the one source of sections and define
   load(path)               the record, its format checked
   sections_by_name(rec)      {section name: [(address, size), ...]}                 (every section of the final ELF, a name may repeat)
   symbol_values(rec)     {symbol name: [value, ...]}   the defined symbols of .symtab other than STT_SECTION and STT_FILE, all bindings
+  entry(rec)               header.entry: the entry address of the image (FactError when the record has none)
   symbol(rec, name)        the one value of the symbol NAME; FactError when it is not defined exactly once with one value
   symbol_bytes(rec, data, name)   the st_size bytes of the one defined symbol NAME, read from the image DATA through its PT_LOAD program headers
                            (bootlayout.file_bytes); FactError when the symbol is not defined exactly once, or its bytes are not file-backed (.bss)
@@ -57,6 +58,14 @@ def _one(rec, name):
     if len(found) != 1:
         raise FactError("symbol %s: defined %d times, need exactly once" % (name, len(found)))
     return found[0]
+
+
+def entry(rec):
+    """the entry address of the linked image (header.entry of the record: e_entry, a link-time address)"""
+    h = rec.get("header")
+    if not isinstance(h, dict) or not isinstance(h.get("entry"), int):
+        raise FactError("the record has no header.entry")
+    return h["entry"]
 
 
 def symbol(rec, name):

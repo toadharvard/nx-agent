@@ -13,7 +13,7 @@ sys.path.insert(0, HERE)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
-from test_bootlayout import make_elf  # noqa: E402
+from test_bootlayout import ENTRY, make_elf  # noqa: E402
 
 QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 
@@ -30,7 +30,7 @@ def case(name, cond, extra=""):
 def main():
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)]
-    std = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
+    std = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20, entry=ENTRY)
     root = tempfile.mkdtemp(prefix="bh-")
 
     def build(edit):

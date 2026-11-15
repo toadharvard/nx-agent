@@ -109,7 +109,7 @@ def make_plan(elf_bytes):
     # exe and mod1 lie inside the host's window (0x400000..0x2100000: map_fixed only zeroes there); mod2 is outside it (map_fixed
     # moves a heap block there); keys stays never-mapped
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
-    plan = bootlayout.plan(bootlayout.parse_elf(elf_bytes), rows, 4 << 20)
+    plan = bootlayout.plan(bootlayout.parse_elf(elf_bytes), rows, 4 << 20, entry=bootfacts.entry(facts()))
     return plan
 
 
