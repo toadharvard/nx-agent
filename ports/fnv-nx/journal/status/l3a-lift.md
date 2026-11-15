@@ -1171,3 +1171,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 23:37 w7 memory cause: ehtables.EH.dis memoises a full capstone CsInsn, native detail included, for all ~3.3M exe instructions (about 9 GB). d3dx9_38 has the same cache (9.6 GB).
   - Rule: memoise a compact record of the fields that are read (about 0.35 GB for the exe). The memo stays complete and deterministic, and FACTS must be byte-identical.
   - Second cost: the pcsrc join loop, the d3dx9_38 2 h wall; w7 profiles it next.
+- 23:38 w13 jtabcert wiring at fc89c31b4.
+  - C4 read-only check from the PE section flags. ASM-006 is read from the registry.
+  - Per-image jtabcert.json goes to FACTS JTABCERT/<image>.json; residue carries its reason. A merged modlift table that needs OWNER 6 is residue.
+  - facts_commit is dropped from the format. The real run waits on w7.
+- 23:38 w12: b3c prof2 left no result (no timereport). prof2 has 23 units: b32 16 s, 072 159 s, ec2 812 s. The old store is deleted. b3c is measured again with ORDER-STACK.
