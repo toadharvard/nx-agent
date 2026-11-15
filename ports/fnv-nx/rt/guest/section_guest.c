@@ -9,7 +9,7 @@
 static int64_t sec_call(uint32_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint32_t n)
 {
     uint64_t arg[4] = {a0, a1, a2, a3};
-    if (!fnvnx_host->ext_call) return -(int64_t)FNVNX_SEC_E_NOSERVICE;
+    if (!FNVNX_HOST_HAS(ext_call)) return -(int64_t)FNVNX_SEC_E_NOSERVICE;
     return (int64_t)FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(arg), n);
 }
 

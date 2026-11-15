@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""d3d9_spec.py: builds d3d9_spec.json, the one table that describes every method of every D3D9 COM interface (RD1).
-    python3 -I d3d9_spec.py            write d3d9_spec.json next to this script
-    python3 -I d3d9_spec.py --stdout   print it (tests/l6/test_spec.py compares the two)
+"""d3d9_spec.py: builds the D3D9 interface table, the one table that describes every method of every D3D9 COM interface (RD1), and the bridge rows of d3d9.dll.
+    python3 -I d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR   the stage of the tool root bridgefacts: outputs D9_SPEC and D9_ROWS (INCDIR = shim/include); no file of the table is tracked
+    python3 -I d3d9_spec.py --stdout [INCDIR]          print the table
 Inputs: shim/include/d3d9*.h (method order, types, structs, enums, constants) + d3d9_rules.py / d3d9_cls.py / d3d9_tables.py /
 d3d9_exports.py (the hand tables). Unknown types or invalid rules abort the run: nothing is guessed."""
 import json, os, re, sys
@@ -247,6 +247,13 @@ def render(spec):
 
 
 if __name__ == "__main__":
+    a = [x for x in sys.argv[1:] if x != "--stdout"]
+    if "--stdout" in sys.argv: ST.INC = a[0] if a else ST.INC
+    elif len(a) == 3: ST.INC = a[2]
+    else: die("usage: d3d9_spec.py OUT_SPEC OUT_ROWS INCDIR | --stdout [INCDIR]")
     out = render(Gen().build())
     if "--stdout" in sys.argv: sys.stdout.buffer.write(out)
-    else: open(os.path.join(HERE, "d3d9_spec.json"), "wb").write(out)
+    else:
+        import d9rows
+        open(a[0], "wb").write(out)
+        open(a[1], "w").write("".join("\t".join(r) + "\n" for r in d9rows.rows(json.loads(out))))

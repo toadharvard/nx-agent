@@ -17,7 +17,6 @@ vs_2_x	srcmod	not@if.p0	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'i
 vs_3_0	srcmod	not	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register	NOT modifier on b# invalid	D3DERR_INVALIDCALL	census legal=?
 vs_3_0	dstmod	pp@mov	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees	_pp invalid in vertex shaders	D3DERR_INVALIDCALL	census legal=?
 vs_3_0	srcmod	not@if.p0	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register	NOT modifier on b# invalid	D3DERR_INVALIDCALL	census legal=?
-vs_3_0	addr	v[a0.x]	MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 ('Indexing Registers': v# indexed 'using the loop counter register (aL)'; the register table's 'a0/aL' RelAddr cell is the row summary; same-page prose wins, as for o#)	v# relative addressing only through aL in vs_3_0	D3DERR_INVALIDCALL	census legal=?
 vs_3_0	addr	o[a0.x]	MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 (o# RelAddr aL only)	o# relative addressing only through aL	D3DERR_INVALIDCALL	census legal=?
 ps_1_1	dstmod	shift_x8	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)	result shift x8 invalid in ps_1_1	D3DERR_INVALIDCALL	census legal=?
 ps_1_1	dstmod	shift_d8	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)	result shift d8 invalid in ps_1_1	D3DERR_INVALIDCALL	census legal=?

@@ -1,7 +1,18 @@
 """gen_expr.py: compiles the closed length-rule language (d3d9_expr.py) to C++ uint64_t expressions. Unknown names/functions raise GenError."""
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "spec"))
-import d3d9_expr as X
+X = None   # d3d9_expr of bridgefacts/d3d9, imported by use_spec(DIR) (the directory is an input of the stage that calls it)
+
+
+def use_spec(d):
+    global X
+    sys.path.insert(0, d)
+    import d3d9_expr
+    X = d3d9_expr
+
+
+def _x():
+    if X is None: use_spec(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "bridgefacts", "d3d9"))   # the offline tools: the tracked directory
+    return X
 
 
 class GenError(Exception):
@@ -72,6 +83,6 @@ class Ctx:
 
     def c(self, s):
         try:
-            return self.num(X.parse(s))
+            return self.num(_x().parse(s))
         except ValueError as ex:
             raise GenError(f"{self.what}: {ex}")

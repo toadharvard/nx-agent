@@ -1,6 +1,6 @@
 # D3D9 interface spec (RD1)
 
-`d3d9_spec.json` is generated (`python3 -I d3d9_spec.py`, `--stdout` to print) from `shim/include/d3d9*.h` plus the hand
+`d3d9_spec.json` is the recipe output D9_SPEC, generated (`python3 -I d3d9_spec.py`, `--stdout` to print) from `shim/include/d3d9*.h` plus the hand
 tables `d3d9_rules.py` (per-parameter rules), `d3d9_cls.py` (out classes), `d3d9_tables.py`, `d3d9_exports.py`.
 Check: `python3 -I tests/l6/test_spec.py`. Expressions: `d3d9_expr.py` (parser, checker, evaluator).
 

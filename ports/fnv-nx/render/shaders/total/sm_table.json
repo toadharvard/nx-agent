@@ -161,56 +161,78 @@
  },
  "conflicts": [
   {
+   "decision": "union",
    "id": "ps:47",
    "kind": "opcode_models",
-   "ms": [
-    "ps_2_x",
-    "ps_3_0"
-   ],
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/defb---ps.md",
+    "section": "Remarks, pixel shader versions table (line 40: ps_2_x, 2_sw, 3_0, 3_sw only)"
+   },
    "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
    "vkd3d": [
     "ps_2_0",
     "ps_2_x",
     "ps_3_0"
    ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3",
-    "ps_1_4",
-    "ps_2_0",
-    "ps_2_x",
-    "ps_3_0"
-   ]
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 334,
+    "what": "ps_opcode_table lists DEFB with no version bound, so ps_2_0 takes it"
+   }
   },
   {
+   "decision": "union",
    "id": "ps:70",
    "kind": "opcode_models",
-   "ms": [
-    "ps_1_2",
-    "ps_1_3"
-   ],
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/texreg2gb---ps.md",
+    "section": "Remarks, pixel shader versions table (ps_1_2, ps_1_3)"
+   },
    "note": "MS version table disagrees with vkd3d d3dbc.c (or wine lacks a listed model); universe uses the UNION",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
    "vkd3d": [
     "ps_1_1",
     "ps_1_2",
     "ps_1_3"
    ],
-   "wine": [
-    "ps_1_1",
-    "ps_1_2",
-    "ps_1_3"
-   ]
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 362,
+    "what": "TEXREG2GB is accepted for ps_1_0..1_3, so ps_1_1 takes it"
+   }
   },
   {
+   "decision": "union",
    "id": "vs:sgn@vs_3_0",
    "kind": "operand_count",
-   "note": "MS sgn---vs syntax has 3 sources in all versions; vkd3d d3dbc.c: sgn has 1 source in 3_0; universe has both forms"
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/sgn---vs.md",
+    "section": "Syntax (three sources in every version) and Remarks, version table (line 42)"
+   },
+   "note": "MS sgn---vs syntax has 3 sources in all versions; vkd3d d3dbc.c: sgn has 1 source in 3_0; universe has both forms",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 253,
+    "what": "vs_3_0 SGN has one source (line 252 keeps the three-source form for vs_2_0..2_x); the universe keeps both forms"
+   }
   },
   {
-   "id": "vs_3_0:v[a0.x]",
+   "decision": "union",
+   "id": "ps_3_0:vFace_src",
    "kind": "legacy",
-   "note": "MS table says a0/aL, MS prose says aL only; wine allows any (reladdr flag)"
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-ps-registers-ps-3-0.md",
+    "section": "Face register (line 30): condition of setp_comp, if_comp or break_comp only"
+   },
+   "note": "MS ps_3_0 register page (dx9-graphics-reference-asm-ps-registers-ps-3-0.md:30): vFace only as a condition of setp_comp, if_comp or break_comp; wine 9.0 (vkd3d d3dbc.c:666-676 parses MISCTYPE 1 as VFACE with no instruction restriction, glsl_shader.c:2873-2880 reads it as any source) accepts it as a source of every instruction, and the shipped PS e92b2db2 (cmp r0.x, vFace, c1.x, c1.y) uses it so; universe uses the UNION",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": 666,
+    "what": "MISCTYPE 1 parsed as VFACE (666-676) with no instruction restriction; dlls/wined3d/glsl_shader.c:2873-2880 reads it as any source"
+   }
   }
  ],
  "env_default": {
@@ -264,62 +286,6 @@
  "instruction_limits": "instruction slot / executed-instruction / read-port / dependent-read limits are validator rules, not translator features",
  "legacy": [
   {
-   "feature": "abs@mov",
-   "kind": "srcmod",
-   "model": "vs_2_0",
-   "rule": "source modifier abs not valid in vs_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "abs@mad.s2",
-   "kind": "srcmod",
-   "model": "vs_2_0",
-   "rule": "source modifier abs not valid in vs_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "absneg@mov",
-   "kind": "srcmod",
-   "model": "vs_2_0",
-   "rule": "source modifier absneg not valid in vs_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "absneg@mad.s2",
-   "kind": "srcmod",
-   "model": "vs_2_0",
-   "rule": "source modifier absneg not valid in vs_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "not",
-   "kind": "srcmod",
-   "model": "vs_2_0",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
-  },
-  {
-   "feature": "sat@mov",
-   "kind": "dstmod",
-   "model": "vs_2_0",
-   "rule": "_sat invalid in vs_2_0 (wine accepts: silent)",
-   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "pp@mov",
-   "kind": "dstmod",
-   "model": "vs_2_0",
-   "rule": "_pp invalid in vertex shaders",
-   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees",
-   "status": "illegal"
-  },
-  {
    "feature": "if@temp-written-in-branch-only",
    "kind": "opcode",
    "model": "vs_2_0",
@@ -360,62 +326,6 @@
    "status": "legal"
   },
   {
-   "feature": "abs@mov",
-   "kind": "srcmod",
-   "model": "vs_2_x",
-   "rule": "source modifier abs not valid in vs_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "abs@mad.s2",
-   "kind": "srcmod",
-   "model": "vs_2_x",
-   "rule": "source modifier abs not valid in vs_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "absneg@mov",
-   "kind": "srcmod",
-   "model": "vs_2_x",
-   "rule": "source modifier absneg not valid in vs_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "absneg@mad.s2",
-   "kind": "srcmod",
-   "model": "vs_2_x",
-   "rule": "source modifier absneg not valid in vs_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "not",
-   "kind": "srcmod",
-   "model": "vs_2_x",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
-  },
-  {
-   "feature": "sat@mov",
-   "kind": "dstmod",
-   "model": "vs_2_x",
-   "rule": "_sat invalid in vs_2_x (wine accepts: silent)",
-   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "pp@mov",
-   "kind": "dstmod",
-   "model": "vs_2_x",
-   "rule": "_pp invalid in vertex shaders",
-   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees",
-   "status": "illegal"
-  },
-  {
    "feature": "callnz@p0",
    "kind": "opcode",
    "model": "vs_2_x",
@@ -430,14 +340,6 @@
    "rule": "",
    "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)",
    "status": "legal"
-  },
-  {
-   "feature": "not@if.p0",
-   "kind": "srcmod",
-   "model": "vs_2_x",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
   },
   {
    "feature": "if@temp-written-in-branch-only",
@@ -472,28 +374,12 @@
    "status": "legal"
   },
   {
-   "feature": "not",
-   "kind": "srcmod",
-   "model": "vs_3_0",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
-  },
-  {
    "feature": "sat@mov",
    "kind": "dstmod",
    "model": "vs_3_0",
    "rule": "",
    "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw)",
    "status": "legal"
-  },
-  {
-   "feature": "pp@mov",
-   "kind": "dstmod",
-   "model": "vs_3_0",
-   "rule": "_pp invalid in vertex shaders",
-   "source": "MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees",
-   "status": "illegal"
   },
   {
    "feature": "1:blendweight0@output",
@@ -560,14 +446,6 @@
    "status": "legal"
   },
   {
-   "feature": "not@if.p0",
-   "kind": "srcmod",
-   "model": "vs_3_0",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
-  },
-  {
    "feature": "if@temp-written-in-branch-only",
    "kind": "opcode",
    "model": "vs_3_0",
@@ -604,104 +482,8 @@
    "kind": "addr",
    "model": "vs_3_0",
    "rule": "",
-   "source": "MS vs-registers-vs-3-0 table: v# RelAddr 'a0/aL'; MS vs-3-0 page 'Indexing Registers': v# indexed 'using the loop counter register (aL)'",
-   "status": "conflict"
-  },
-  {
-   "feature": "o[a0.x]",
-   "kind": "addr",
-   "model": "vs_3_0",
-   "rule": "o# relative addressing only through aL",
-   "source": "MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 (o# RelAddr aL only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "shift_x8",
-   "kind": "dstmod",
-   "model": "ps_1_1",
-   "rule": "result shift x8 invalid in ps_1_1",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "shift_d8",
-   "kind": "dstmod",
-   "model": "ps_1_1",
-   "rule": "result shift d8 invalid in ps_1_1",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "shift_x8",
-   "kind": "dstmod",
-   "model": "ps_1_2",
-   "rule": "result shift x8 invalid in ps_1_2",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "shift_d8",
-   "kind": "dstmod",
-   "model": "ps_1_2",
-   "rule": "result shift d8 invalid in ps_1_2",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "shift_x8",
-   "kind": "dstmod",
-   "model": "ps_1_3",
-   "rule": "result shift x8 invalid in ps_1_3",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "shift_d8",
-   "kind": "dstmod",
-   "model": "ps_1_3",
-   "rule": "result shift d8 invalid in ps_1_3",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)",
-   "status": "illegal"
-  },
-  {
-   "feature": "lit",
-   "kind": "opcode",
-   "model": "ps_2_0",
-   "rule": "CreatePixelShader: opcode lit not in the ps_2_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "dst",
-   "kind": "opcode",
-   "model": "ps_2_0",
-   "rule": "CreatePixelShader: opcode dst not in the ps_2_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "expp",
-   "kind": "opcode",
-   "model": "ps_2_0",
-   "rule": "CreatePixelShader: opcode expp not in the ps_2_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "logp",
-   "kind": "opcode",
-   "model": "ps_2_0",
-   "rule": "CreatePixelShader: opcode logp not in the ps_2_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "sgn",
-   "kind": "opcode",
-   "model": "ps_2_0",
-   "rule": "CreatePixelShader: opcode sgn not in the ps_2_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
+   "source": "MS:dx9-graphics-reference-asm-vs-registers-vs-3-0.md:24 (register table: v# RelAddr a0/aL; the 'Indexing Registers' prose describes aL indexing without 'only', so it excludes nothing); corroborated by wine 9.0 libs/vkd3d/libs/vkd3d-shader/d3dbc.c:886 (relative-address token of any source register)",
+   "status": "legal"
   },
   {
    "feature": "m4x4",
@@ -742,150 +524,6 @@
    "rule": "",
    "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)",
    "status": "legal"
-  },
-  {
-   "feature": "abs@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "source modifier abs not valid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "abs@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "source modifier abs not valid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "absneg@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "source modifier absneg not valid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "absneg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "source modifier absneg not valid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "bias@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier bias invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "bias@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier bias invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "biasneg@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier biasneg invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "biasneg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier biasneg invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "sign@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier sign invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "sign@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier sign invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "signneg@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier signneg invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "signneg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier signneg invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "comp@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier comp invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "comp@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier comp invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier x2 invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier x2 invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2neg@mov",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier x2neg invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2neg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "legacy source modifier x2neg invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
   },
   {
    "feature": "centroid@dcl_texcoord",
@@ -896,78 +534,6 @@
    "status": "legal"
   },
   {
-   "feature": "neg@texld.coord",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "texld src0 modifier/swizzle invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
-   "status": "illegal"
-  },
-  {
-   "feature": "abs@texld.coord",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "texld src0 modifier/swizzle invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
-   "status": "illegal"
-  },
-  {
-   "feature": "swizzle@texld.coord",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "texld src0 modifier/swizzle invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
-   "status": "illegal"
-  },
-  {
-   "feature": "swizzle@texld.sampler-src",
-   "kind": "srcmod",
-   "model": "ps_2_0",
-   "rule": "texld sampler operand swizzle invalid in ps_2_0",
-   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_x: src1 no modifier or swizzle)",
-   "status": "illegal"
-  },
-  {
-   "feature": "lit",
-   "kind": "opcode",
-   "model": "ps_2_x",
-   "rule": "CreatePixelShader: opcode lit not in the ps_2_x instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "dst",
-   "kind": "opcode",
-   "model": "ps_2_x",
-   "rule": "CreatePixelShader: opcode dst not in the ps_2_x instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "expp",
-   "kind": "opcode",
-   "model": "ps_2_x",
-   "rule": "CreatePixelShader: opcode expp not in the ps_2_x instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "logp",
-   "kind": "opcode",
-   "model": "ps_2_x",
-   "rule": "CreatePixelShader: opcode logp not in the ps_2_x instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "sgn",
-   "kind": "opcode",
-   "model": "ps_2_x",
-   "rule": "CreatePixelShader: opcode sgn not in the ps_2_x instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
    "feature": "m4x4",
    "kind": "opcode",
    "model": "ps_2_x",
@@ -1006,158 +572,6 @@
    "rule": "",
    "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)",
    "status": "legal"
-  },
-  {
-   "feature": "abs@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "source modifier abs not valid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "abs@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "source modifier abs not valid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "absneg@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "source modifier absneg not valid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "absneg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "source modifier absneg not valid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "not",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
-  },
-  {
-   "feature": "bias@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier bias invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "bias@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier bias invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "biasneg@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier biasneg invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "biasneg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier biasneg invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "sign@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier sign invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "sign@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier sign invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "signneg@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier signneg invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "signneg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier signneg invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "comp@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier comp invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "comp@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier comp invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier x2 invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier x2 invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2neg@mov",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier x2neg invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2neg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "legacy source modifier x2neg invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
   },
   {
    "feature": "centroid@dcl_texcoord",
@@ -1184,46 +598,6 @@
    "status": "legal"
   },
   {
-   "feature": "not@if.p0",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
-  },
-  {
-   "feature": "neg@texld.coord",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "texld src0 modifier/swizzle invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
-   "status": "illegal"
-  },
-  {
-   "feature": "abs@texld.coord",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "texld src0 modifier/swizzle invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
-   "status": "illegal"
-  },
-  {
-   "feature": "swizzle@texld.coord",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "texld src0 modifier/swizzle invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')",
-   "status": "illegal"
-  },
-  {
-   "feature": "swizzle@texld.sampler-src",
-   "kind": "srcmod",
-   "model": "ps_2_x",
-   "rule": "texld sampler operand swizzle invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_x: src1 no modifier or swizzle)",
-   "status": "illegal"
-  },
-  {
    "feature": "if@temp-written-in-branch-only",
    "kind": "opcode",
    "model": "ps_2_x",
@@ -1246,54 +620,6 @@
    "rule": "",
    "source": "MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)",
    "status": "legal"
-  },
-  {
-   "feature": "c[aL+n]",
-   "kind": "addr",
-   "model": "ps_2_x",
-   "rule": "relative addressing of c# invalid in ps_2_x",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-ps-2-x (c# RelAddr N); wine ps_2_x_reg_allowed CONST reladdr FALSE agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "lit",
-   "kind": "opcode",
-   "model": "ps_3_0",
-   "rule": "CreatePixelShader: opcode lit not in the ps_3_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "dst",
-   "kind": "opcode",
-   "model": "ps_3_0",
-   "rule": "CreatePixelShader: opcode dst not in the ps_3_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "expp",
-   "kind": "opcode",
-   "model": "ps_3_0",
-   "rule": "CreatePixelShader: opcode expp not in the ps_3_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "logp",
-   "kind": "opcode",
-   "model": "ps_3_0",
-   "rule": "CreatePixelShader: opcode logp not in the ps_3_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
-  },
-  {
-   "feature": "sgn",
-   "kind": "opcode",
-   "model": "ps_3_0",
-   "rule": "CreatePixelShader: opcode sgn not in the ps_3_0 instruction set",
-   "source": "MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)",
-   "status": "illegal"
   },
   {
    "feature": "m4x4",
@@ -1334,126 +660,6 @@
    "rule": "",
    "source": "MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)",
    "status": "legal"
-  },
-  {
-   "feature": "not",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
-  },
-  {
-   "feature": "bias@mov",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier bias invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "bias@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier bias invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "biasneg@mov",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier biasneg invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "biasneg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier biasneg invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "sign@mov",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier sign invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "sign@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier sign invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "signneg@mov",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier signneg invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "signneg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier signneg invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "comp@mov",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier comp invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "comp@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier comp invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2@mov",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier x2 invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier x2 invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2neg@mov",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier x2neg invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
-  },
-  {
-   "feature": "x2neg@mad.s2",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "legacy source modifier x2neg invalid in ps_3_0",
-   "source": "MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees",
-   "status": "illegal"
   },
   {
    "feature": "0:position0@input",
@@ -1558,14 +764,6 @@
    "rule": "",
    "source": "MS:dx9-graphics-reference-asm-instructions/if-pred---ps (instruction page 'if_pred', version table)",
    "status": "legal"
-  },
-  {
-   "feature": "not@if.p0",
-   "kind": "srcmod",
-   "model": "ps_3_0",
-   "rule": "NOT modifier on b# invalid",
-   "source": "MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register",
-   "status": "illegal"
   },
   {
    "feature": "abs@texld.coord",
@@ -5776,34 +4974,80 @@
  },
  "undetermined": [
   {
+   "decision": "illegal",
    "id": "vs_a0_src",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-address.md",
+    "section": "line 25: the address register cannot be read by a vertex shader; it is used only for relative addressing of a constant register"
+   },
    "note": "a0 as a direct ALU source operand (vs_1_1..vs_3_0): MS lists a0 R/W; wine allows; no instruction page says it is a legal source. Excluded from universe.",
-   "rows": "excluded"
+   "rows": "illegal",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft states the opposite: Microsoft holds)"
   },
   {
+   "decision": "illegal",
    "id": "vs_bi_alu",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-constant-integer.md",
+    "section": "line 16: constant integer registers are used only by loop and rep (b#: see the constant-boolean page, flow control only)"
+   },
    "note": "b#/i# as ALU source in vs: MS ps pages say flow-control-only, vs pages are silent. Excluded (same rule as ps).",
-   "rows": "excluded"
+   "rows": "illegal",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft states the opposite: Microsoft holds)"
   },
   {
+   "decision": "illegal",
    "id": "mov_a0_vs2",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/mova---vs.md",
+    "section": "line 31: for vs_2_0 and above the destination a0 is written by mova (mov to a0 is documented for vs_1_1 only)"
+   },
    "note": "mov to a0 (instead of mova) in vs_2_0+: MS mova page says dst must be a0; mov-to-a0 only documented for vs_1_1. Excluded.",
-   "rows": "excluded"
+   "rows": "illegal",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft states the opposite: Microsoft holds)"
   },
   {
+   "decision": "union",
    "id": "vs1_0_ps1_0",
+   "ms": {
+    "page": "none: no vs_1_0/ps_1_0 page in the D3D9 asm reference (instruction pages start at vs_1_1/ps_1_1)",
+    "section": "every instruction version table"
+   },
    "note": "vs_1_0/ps_1_0 via Create*Shader: not in any MS page of the D3D9 asm reference; wine d3d9 has no test, only d3d8. Included as 1_1 grammar (superset).",
-   "rows": "included"
+   "rows": "included",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": "1243-1267",
+    "what": "version token: VS/PS type accepted, any version <= 3.0 accepted (vs_1_0 and ps_1_0 parse); opcode tables start at {1,0} (e.g. line 362); dlls/wined3d/shader.c:555 (vs 1_0..1_1) and :587 (ps 1_0..1_3) give them limits"
+   }
   },
   {
+   "decision": "union",
    "id": "temp_uninit_flow",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-ps-registers-ps-1-x.md",
+    "section": "temporary register: uninitialised-read validator rule, ps_1_x only; sm2/3 pages are silent"
+   },
    "note": "read of a temp written only inside if/rep: MS states the uninitialised-read validator rule for ps_1_x only; sm2/3 silent. Included.",
-   "rows": "included"
+   "rows": "included",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft silent or narrower, Wine 9.0 accepts: the universe is the union)",
+   "wine": {
+    "file": "libs/vkd3d/libs/vkd3d-shader/d3dbc.c",
+    "line": "880-899",
+    "what": "shader_sm1_read_src_param parses a temp source with no written-before check; no uninitialised-temp check exists in d3dbc.c, dlls/wined3d/shader.c or glsl_shader.c (0 matches for 'uninit')"
+   }
   },
   {
+   "decision": "illegal",
    "id": "rcp_mask",
+   "ms": {
+    "page": "desktop-src/direct3dhlsl/dx9-graphics-reference-asm-vs-registers-modifiers-masking.md",
+    "section": "line 38: exp, expp, log, logp, pow, rcp and rsq need a single write mask (vs); legal masks are one component, multi-component masks are illegal"
+   },
    "note": "MS vs masking page: exp/expp/log/logp/pow/rcp/rsq need a single-component write mask; ps pages silent; universe uses single-component masks plus full mask. Included.",
-   "rows": "included"
+   "rows": "illegal",
+   "rule": "CLAUDE.md: Where the Microsoft page is narrower (Microsoft states the opposite: Microsoft holds)"
   }
  ],
  "usage_source": "MS:dx9-graphics-reference-asm-dcl-usage-input-register---vs, dcl-usage---ps (D3DDECLUSAGE values, usage_index 0..15)",
