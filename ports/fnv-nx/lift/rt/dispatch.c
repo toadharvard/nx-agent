@@ -2,7 +2,7 @@
    Every indirect call of native code whose target is not a named function calls `fnvnx_dispatch(fp, &site, desc)` on a miss of its site cache:
 
      fp    an exe code address (code pointers in the image are exe addresses and stay so)
-     site  the call site's own 64-bit cache word, low half = fp, high half = the entry
+     site  the call site's own record fnvnx_site_t {u32 fp; fnvnx_entry_fn entry;} (size 8, one 64-bit word)
      desc  the call's shape, `conv:ret:arg,arg,..` (the plugin's string literal)
 
    RULE, in this order, a function of (fp, desc) and of the three read-only tables below:
@@ -32,10 +32,11 @@ void fnvnx_guest_invoke(u32 addr, u32 ecx, u32 nargs, const u32 *args, u32 kind,
 int fnvl_has_entry(u32 a);
 
 extern const u32 fnvnx_native_disp_table[];
+extern const fnvnx_entry_fn fnvnx_native_disp_entries[];
 extern const u16 fnvnx_native_g[];
 extern const u32 fnvnx_native_phf_params[4];
 
-struct fnvnx_bridge_row { u32 key; const char *desc; void (*fn)(void); };
+struct fnvnx_bridge_row { u32 key; const char *desc; fnvnx_entry_fn fn; };
 extern const struct fnvnx_bridge_row fnvnx_bridge_table[];
 extern const u16 fnvnx_bridge_g[];
 extern const u32 fnvnx_bridge_phf_params[4];
@@ -47,21 +48,24 @@ static u32 desc_key(const char *s)       /* FNV-1a, 32 bit: tools/bridgegen.py c
     return h;
 }
 
-void *fnvnx_dispatch(u32 fp, u64 *site, const char *desc)
+fnvnx_entry_fn fnvnx_dispatch(void *fp_, fnvnx_site_t *site, const void *desc_)
 {
-    void *e;
+    u32 fp = (u32)(unsigned long)fp_;
+    const char *desc = (const char *)desc_;
+    fnvnx_entry_fn e;
     const u32 *q = fnvnx_native_phf_params;
     const u32 *s = fnvnx_native_disp_table + 2 * (((fp ^ fnvnx_native_g[(fp * q[0]) >> (32 - q[2])]) * q[1]) >> (32 - q[3]));
     if (s[0] == fp && s[1]) {
-        e = (void *)((const char *)fnvnx_native_disp_table + (int)s[1]);
+        e = fnvnx_native_disp_entries[s[1] - 1];
     } else if (fnvl_has_entry(fp)) {
         u32 k = desc_key(desc);
         q = fnvnx_bridge_phf_params;
-        e = (void *)fnvnx_bridge_table[((k ^ fnvnx_bridge_g[(k * q[0]) >> (32 - q[2])]) * q[1]) >> (32 - q[3])].fn;
+        e = fnvnx_bridge_table[((k ^ fnvnx_bridge_g[(k * q[0]) >> (32 - q[2])]) * q[1]) >> (32 - q[3])].fn;
     } else {
         struct fnvnx_guest_ret out;
         for (;;) fnvnx_guest_invoke(fp, 0, 0, 0, 0, &out);
     }
-    __atomic_store_n(site, ((u64)(u32)e << 32) | fp, __ATOMIC_RELAXED);
+    fnvnx_site_t rec = { fp, e };
+    __atomic_store(site, &rec, __ATOMIC_RELEASE);      /* ONE 64-bit store of both halves: a reader sees the key of one target with the entry of that target */
     return e;
 }
