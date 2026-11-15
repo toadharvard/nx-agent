@@ -665,3 +665,22 @@ Workers are capped at 3. Assignment by plan item:
 - 01:15 facts cycle cleared (w22 c13ffa61b, transitive exclusion). Excluded roots bind no exe address: a downstream L1 gate, red on any bound symbol (proposed to L1). It cannot be checked in-stage without a cycle. Accepted.
 - 01:20 w1 (int3 fafbdeaa, d935ecda): the DSL x87/MMX/SSE state interface is in, with per-NTSTATUS FP fault kinds 12..18. test_dsl_xsimd is ok. Corrections given: fpc_host.py → a host root without shims (a measurement until it is a root); the lift/rt recipe build at fafbdeaa; cite the tininess rule (SDM + SoftFloat; Sail decides); route the 2 test_symform base failures. Next: the fallback census, then the builders. Interface commit sent to L3b.
 - 01:25 w6 join (7299b4153, facts 163ec389): both sides 2,590; 3DNow! equal (2,574). One-sided sites come from our per-range decode over overlapping facts ranges (d3dx9_38 17adfc0/17adfc1). New facts class for w7: disjoint ranges, starts on instruction boundaries. Census moves to per-entry decode. pointsto binkw32 still OOM (3 GB, pass 2); representation fix in progress.
+
+## 2026-11-15 01:35: rules 1-3 pass (owner order "defects impossible by construction"), lift/ at int3 0ee1f9268
+One bounded read-only pass over lift/. Each item gives its replacement.
+
+### On the path: converting now
+| # | item | cause | replacement | owner |
+|---|---|---|---|---|
+| P1 | pack/build.json has `plugins` twice (:19, :76) and a stale `plugin_cxx` (:71) | the generated file was hand-edited | regenerate from liftgen.recipe; a selftest runs liftgen and diffs | w8 |
+| P2 | hard-coded workdirs and facts paths in pack generation: liftgen.py:145,258,266; modlift.py:31,376; impgen.py:130; pemod.py:7-8; lifted.py:63; fpmodes.py:13; fnvlift/universe.py:9; fpfacts.py:27; f_x87_ctl.py:17 | a second facts cache | recipe externals (/ext/…) and GATE_CACHE only | w8 |
+| P3 | fault set: kinds in dsl.FAULTS (12..18) vs FNVL_* (13..19); NTSTATUS in seh.cc, dsl.FLT_STATUS, sehcodes.py ROWS and fnvl.h comments; int n vectors in f_sys.INT_VECTORS, forms_sys.INT_KIND and instest_extra | enumerated in several places from memory | ONE fault/vector table, cited per row (Windows 7 trap table as transcribed by ReactOS, Wine 9.0), which generates the seh.cc switch, the FNVL_* defines, dsl.FAULTS/FLT_STATUS and the test expectations; one numbering | w1 (with the int-vector item) |
+| P4 | CPUREF restated: fnvl_abi.h:10-15, rcpref.h:7-10, cpumodel.c:5/47/55 vendor and brand | copies of verify/cpuref.json | generate fnvl_abi.h, rcpref.h and cpumodel's leaf tables by a recipe stage from cpuref.json plus a pinned cpuid dump | w1 |
+| P5 | census vs lifter decode (the cause of the fisttp mismatch) | a second decoder | the census reads img.dec, the lifter's decode | w6 (doing) |
+| P6 | second build/test paths: test/rothost.py, bthost.py, rcptest.py, x87test.py; tools/tests/fmathtest.py, instest.py, citest.py, sehcodes.py, x87dyn.py, mmxtest.py (Unicorn harnesses, direct gcc/ld); proof/tests/fpc_host.py; proof/backends.py host g++; test/golden.py (a second runner); tools/tests/clpod/gen.py `wine cl`; own caches in gates/tests/test_gate_lift.py and proof/gate_fpexact.py | second compiler paths, runners and caches | deleted (rule 3). Their checks return only as recipe roots: host roots, guest test roots on the bootmachine, and L3b's Sail certificates for the semantics. clpod's `wine cl` becomes a recipe stage with the pinned wine-debs, or is deleted | w8, after run8 |
+
+### After the first frame
+- A: hand-written mnemonic and opcode classes (core.py:289, fpmodes, x86flow, pcsrc, writeset, jtab, f_x87 tables, f_cpufeat FEATURES, gate_order A64 sets, gate_fpexact A64 sets, enc_table, tools/universe.py sets, codemap API arg kinds / noreturn, ctlstate CTX_IMPORTS, fpstate import names, entry/EH-kind sets in 6 variants). Derive them from the Sail model / DSL Form effects, the pinned SDM tables, the Arm ARM (capstone groups) and Wine .spec files.
+- B6-B11, B13, B14: register/flag tuples, EFLAGS bit table, PRIV_MN, prefix set, EH keys, the gate fixture compiler name, raw capstone ids. Each gets one definition and imports.
+- C18/C19: three universe modules, several recursive-descent walkers, three flag tools. One decoder/CFG (x86flow over img.dec) and one census; the others read their facts.
+- C15: tools/reconcile.py reads fnv-nx-build through git show. Pin it as an external, or delete it.
