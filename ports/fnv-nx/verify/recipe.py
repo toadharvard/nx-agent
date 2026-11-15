@@ -189,6 +189,7 @@ LD_TOOLS = (TREE + "/link", TREE + "/contract")   # tool roots of the ldcheck st
 WERROR_ATTR = "-Werror=attributes"   # required in flags.c and flags.cxx of every guest root
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/uses", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
+MOUNT_PREFIXES = SANDBOX_PATHS + ("/ext", "/launch", "/deb", "/plug", "/probe")   # every absolute path a stage can open: the stage paths above, the externals ("at": /ext/<name>) and the launcher (/launch/genlaunch.py), the debs of a run stage (/deb), the plugin objects (/plug) and the driver probe (/probe); gate_abspath.py reads this one constant
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
 SBIND = {1: "GLOBAL", 2: "WEAK", 10: "UNIQUE"}
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
