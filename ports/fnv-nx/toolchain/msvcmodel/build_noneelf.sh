@@ -39,7 +39,7 @@ BUILDSCRIPTS_COMMIT=5740da9beb433ff9f5b724fafc1127f3a5ddc944                  # 
 NLPATCH_SHA256=6d5aba4356553c727765c98e7553d3784f31d361c856e220ef27cc26353fb88f  # patches/newlib-$NLV-4.patch
 X19_PATCH_SHA256=6b0cea9340bc0291ef74fc3a6eaa2e033b06896955fc7c5ebbd9eb2c21e8d935
 NOSIZED_PATCH_SHA256=cb8a51365da7062a063e21a13aa461670f2054c7d9a3a36e6dcfa5cdfe7db204
-NLLDBL_PATCH_SHA256=ab92ae1e8304dc091e3510664f75202f3559b1fa059b1f7b5de3b02743eb17d1   # NL-LDBL: libm/ld, ld128 only when long double != double
+NLGUEST_PATCH_SHA256=7a9b0a614e0f41e3fba22262da0b0eb177265eea816597499a76b6c9c3c6bbdc   # NL-LDBL (libm/ld, ld128 only when long double != double) + NL-SECT (no second -ffunction-sections source)
 # the autotools newlib's own generated files state (configure: Autoconf 2.69, Makefile.in: automake 1.15.1), from their GNU tarballs
 AUTOCONF_SHA256=64ebcec9f8ac5b2487125a86a7760d2591ac9e1d3dbd59489633f9de62a57684
 AUTOMAKE_SHA256=af6ba39142220687c500f79b4aa2f181d9b24e4f8d8ec497cea4ba26c64bedaf
@@ -99,10 +99,10 @@ git -C "$BS" checkout -q $BUILDSCRIPTS_COMMIT
 echo "$NLPATCH_SHA256  $BS/patches/newlib-$NLV-4.patch" | sha256sum -c --quiet
 echo "$X19_PATCH_SHA256  $PATCH_DIR/x19-x27.patch" | sha256sum -c --quiet
 echo "$NOSIZED_PATCH_SHA256  $PATCH_DIR/libstdcxx-nosized.patch" | sha256sum -c --quiet
-echo "$NLLDBL_PATCH_SHA256  $PATCH_DIR/newlib-ldbl-eq-dbl.patch" | sha256sum -c --quiet
+echo "$NLGUEST_PATCH_SHA256  $PATCH_DIR/newlib-guest.patch" | sha256sum -c --quiet
 
 MSVC_PATCH=${MSVC_PATCH:-$HERE/msvcmodel.patch}
-STAMP=$(sha256sum "$MSVC_PATCH" "$HERE/build_noneelf.sh" "$PATCH_DIR/x19-x27.patch" "$PATCH_DIR/libstdcxx-nosized.patch" "$PATCH_DIR/newlib-ldbl-eq-dbl.patch" | sha256sum | cut -c1-16)
+STAMP=$(sha256sum "$MSVC_PATCH" "$HERE/build_noneelf.sh" "$PATCH_DIR/x19-x27.patch" "$PATCH_DIR/libstdcxx-nosized.patch" "$PATCH_DIR/newlib-guest.patch" | sha256sum | cut -c1-16)
 if [ -f "$W/stamp-key" ] && [ "$(cat "$W/stamp-key")" != "$STAMP" ]; then rm -rf "$W"/stamp-* "$SRC" "$NL" "$W"/b-*; fi
 echo "$STAMP" > "$W/stamp-key"
 : > "$CONF"
@@ -130,7 +130,7 @@ if ! step unpack; then
   patch -s -d "$NL" -p1 < "$BS/patches/newlib-$NLV-4.patch"
   apply_p0 "$PATCH_DIR/x19-x27.patch"
   apply_p0 "$PATCH_DIR/libstdcxx-nosized.patch"
-  # NL-LDBL (newlib-ldbl-eq-dbl.patch): configure and Makefile.in are regenerated with the autotools the tarball's files state. Proof that
+  # NL-LDBL (newlib-guest.patch): configure and Makefile.in are regenerated with the autotools the tarball's files state. Proof that
   # the tooling is the right one: on the pristine tarball tree the regeneration reproduces its configure and Makefile.in byte for byte.
   AT=$W/autotools
   if [ ! -x "$AT/bin/automake" ]; then
@@ -147,7 +147,7 @@ if ! step unpack; then
   cmp "$W/nl-pristine/newlib/configure" "$W/configure" && cmp "$W/nl-pristine/newlib/Makefile.in" "$W/Makefile.in" \
     || { echo "autoconf 2.69 / automake 1.15.1 do not reproduce the tarball's configure / Makefile.in" >&2; exit 2; }
   rm -rf "$W/nl-pristine" "$W/configure" "$W/Makefile.in"
-  apply_p0 "$PATCH_DIR/newlib-ldbl-eq-dbl.patch"
+  apply_p0 "$PATCH_DIR/newlib-guest.patch"
   regen "$NL"
   # int32_t is int, as in the exe: newlib-stdint.h (config.gcc, aarch64*-*-elf) makes __INT32_TYPE__ long (and the LEAST32/FAST8
   # types), a different mangled type for every int32_t parameter. glibc-stdint.h is the target stdint macro set the linux compiler
