@@ -1225,3 +1225,11 @@ Paused: w3b, w4, farm; no other work.
     - The committed sm_table.json, sm_illegal.tsv and fnvnx_sm_rows.h are deleted. The consumers read the stage output.
     - Unverified: there is no env in w8's container, so farm1 is running d3d9total and its test.
     - After the first frame: the decision records cite d3dbc.c while the cross-reference uses vkd3d. Mixed provenance, recorded.
+- 22:08Z: w8 9a682848: the abspath findings in render/ are at 0. It merges w28 e8caf06f.
+    - What changed:
+        - host programs come from hostprofile;
+        - ARTIFACTS_URL and GATE_CACHE are now required;
+        - res_smgen uses a plain import, asserted samefile;
+        - gen_env takes the TSV dir as an argument.
+    - The 7 findings left are not L6's: 3 L3a l3facts defaults, and the GATE_CACHE default at recipe.py:3375 (L1).
+    - farm1 verifies at 9a682848.
