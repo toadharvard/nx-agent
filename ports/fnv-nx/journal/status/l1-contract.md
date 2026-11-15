@@ -1887,3 +1887,8 @@ bottleneck: the cand3 platform fix (w12), which blocks the relift, and the cand2
 bottleneck: the cand3 platform fix (w12), and the cand2 merge (w15).
 - 22:34 L4 bootrt is green (w9 bdc9c9d4: 0 findings, test_bootrt 7/7); its 3 commits go into cand3. Whole-tree objstub at 41a8855d4: 25 findings over 311/324. The 8 mojoshader V go to L6. The 17 unattributed (12 dm-uncited, 3 build-red, 2 recipe-invalid) are attributed by w12 at its new head.
 bottleneck: the cand3 platform fix (w12), and the cand2 merge (w15).
+- 22:37 Updates:
+  - L5 f128f4efb: HOST1 and gen:12 fixed; platform 113, @vclock 113, rt/guest 6 and guest_main 1 are green on the w12L2 pin.
+  - The loader↔platform cycle (boot.c needs a platform header, and platform uses the loader): the shared interface moves to hostabi/include, and the loader uses hostabi INCLUDE. L5 lands it whole, including the loader line; w12 takes it.
+  - L6: the 8 translator V are closed on render-w6-root 717e82995 (table rule plus cited constants), which reaches the trunk with cand4.
+bottleneck: the cand3 head (w12: L5 commits, the cycle fix, nxgpu, lineage, closure), and the cand2 merge (w15).
