@@ -91,6 +91,7 @@
     "ports/fnv-nx/shim/include/d3d9types.h"
    ],
    "outputs": [
+    "gen/env_caps.gen.h",
     "gen/env_table.gen.cpp",
     "gen/env_table.gen.h",
     "gen/ident_docked.bin",
