@@ -808,7 +808,7 @@ def main(argv):
     tot['v4_gs_cookie_tables'] = sum(r.get('v4_gs_cookie_tables', 0) for r in reps)
     tot['v4_eh_cookie_tables'] = sum(r.get('v4_eh_cookie_tables', 0) for r in reps)
     reps[0]['findings'].extend(wf)
-    for r, (name, path, fp) in zip(reps, images):                                  # the report is bound to the exact inputs it judged
+    for r, (name, path, fp, _sub) in zip(reps, images):                                  # the report is bound to the exact inputs it judged
         r['image_sha256'] = hashlib.sha256(open(path, 'rb').read()).hexdigest()
         r['facts_sha256'] = hashlib.sha256(open(fp, 'rb').read()).hexdigest()
     tot['wine_findings'] = len(wf)
