@@ -448,3 +448,8 @@ After the first frame:
   - Rule: the trees keep `&table+off` (the real object) through every analysis. ap_pass rewrites code. Data words are named by their ap symbol only where the assembler text is made (asm_out.integer, so every initializer of every class).
   - Regression test in test_sdd: -Werror=array-bounds, and no negative addend against an ap symbol. test_sdd, pi, names and cc1 pass.
 - 2026-11-15 18:25Z: Farm build 1 at 68183c628 is GREEN. libstdc++.a is 76 MB and libc.a 19.5 MB. Push blocker: the host compiler binaries (cc1 295 MB, compiled with -g) exceed GitHub's 100 MB file limit. Rule added (build.sh 8d3e6b63, compiler key eeeaca165d3fa5c3): every x86-64 ELF under bin/ and libexec/ gets strip --strip-debug; guest objects keep every section. The one rebuild includes 2fc56b832 (sdd ap fix). After that the pin goes to L1.
+- 2026-11-15 18:50Z: PIN LANDED. fnv-nx-build tools/gcc-ilp32-msvcmodel-noneelf @b36df9302cd1a27c11a606274b5d9bcfc6221f5f, tree_sha256 6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142, built once.
+  - It holds the compiler and the runtime in one tree: 1634 files, 412 MB.
+  - It was built from plugins 2057a846, which carries 2fc56b832, 68183c628 and the strip rule 8d3e6b63.
+  - The MANIFEST's compiler.build_key is a1ae3ba606ed766a. stamp.py at 2057a846 gives the same key (checked).
+  - The farm sent the pin to L1 for cand2. L5 replaces msvcmodel13 and deletes toolchain/gcc/build.sh. w3 and w2 rerun the toolchain and gate tests against the pin.
