@@ -3,11 +3,11 @@ malloc	platform/crt/msvcrt_exports.cpp	TOTAL
 calloc	platform/crt/msvcrt_exports.cpp	TOTAL
 realloc	platform/crt/msvcrt_exports.cpp	TOTAL
 free	platform/crt/msvcrt_exports.cpp	TOTAL
-??2@YAPAXI@Z	platform/crt/msvcrt_exports.cpp	PARTIAL: no new-handler loop (_set_new_handler/_callnewh are not provided); returns NULL with errno ENOMEM when the heap is exhausted
+??2@YAPAXI@Z	platform/crt/msvcrt_exports.cpp	TOTAL
 ??3@YAXPAX@Z	platform/crt/msvcrt_exports.cpp	TOTAL
 _strdup	platform/crt/string.c	TOTAL
 _iob	platform/crt/iob.c (fnvnx_iob[20])	TOTAL
-__pioinfo	platform/crt/iob.c	PARTIAL: blocks 0..7 (256 descriptors, MAX_FD); osfile bits FOPEN FEOFLAG FAPPEND FDEV FTEXT only (no FPIPE/FNOINHERIT/FCRLF, pipech fixed 10); osfhnd is the os descriptor, not a Win32 HANDLE
+__pioinfo	platform/crt/iob.c	TOTAL
 __badioinfo	platform/crt/iob.c	TOTAL
 fread	platform/crt/iob.c (fnvnx_iob_fread)	TOTAL
 fwrite	platform/crt/iob.c (fnvnx_iob_fwrite)	TOTAL

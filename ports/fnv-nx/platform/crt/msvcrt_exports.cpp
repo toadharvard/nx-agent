@@ -41,6 +41,20 @@ extern "C" void *c_malloc(size_t n)
         errno = ENOMEM;
     return p;
 }
+/* ??2@YAPAXI@Z, operator new(size_t): Wine 9.0 dlls/msvcrt/heap.c operator_new (_MSVCR_VER >= 80):
+ *   do { retval = msvcrt_heap_alloc(0, size); if (retval) return retval; } while (_callnewh(size)); throw_bad_alloc();
+ * _callnewh calls MSVCRT_new_handler, whose only writer is _set_new_handler. That function (and set_new_handler,
+ * _query_new_handler) is not in the import closure of the exe and modules (msvcrt_names.tsv), so the handler is NULL for
+ * the whole run and _callnewh returns 0: the loop is one allocation. throw_bad_alloc (Wine cpp.c: the MSVC exception object and
+ * its type tables, thrown through _CxxThrowException) is the C++ runtime of the exceptions layer (L3); it is not defined here. */
+extern "C" void throw_bad_alloc(void) __attribute__((noreturn, nothrow));
+extern "C" void *c_new(size_t n)
+{
+    void *p = malloc(n ? n : 1);   /* msvcrt_heap_alloc(0, size): one block, size 0 gives a unique non-NULL block */
+    if (p)
+        return p;
+    throw_bad_alloc();
+}
 extern "C" void *c_calloc(size_t a, size_t b)
 {
     if (b && a > (size_t)-1 / b) {

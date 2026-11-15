@@ -16,6 +16,7 @@
 #include "fnvnx_msvcrt.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +36,7 @@ _Static_assert(sizeof(fnvnx_ctypevec) == 16, "_Ctypevec");
 #endif
 
 #define HOST_MAX 1024
-#define MAX_FD 256
+#define MAX_FD 2048   /* MSVCRT_MAX_FILES (Wine 9.0 file.c, _MSVCR_VER >= 80) */
 #define BUFSZ 4096
 #define NUNGET 8
 #define CTRLZ 0x1A
@@ -55,22 +56,71 @@ static struct fdent g_fd[MAX_FD] = {
     { FD_OPEN | FD_TEXT | FD_DEV | FD_WRITE, -1, NULL, OS_LOCK_INIT },
 };
 
-/* MSVCRT.DLL's lowio table, which lifted code reads directly: __pioinfo[fd >> 5][fd & 31], 8-byte ioinfo
- * {osfhnd, osfile, pipech}. osfile bits: 0x01 FOPEN, 0x02 FEOFLAG, 0x20 FAPPEND, 0x40 FDEV, 0x80 FTEXT. Every change of
- * a descriptor's state goes through ioinfo_sync, so the table is the descriptor table seen in MSVCRT's encoding.
- * osfhnd is the os descriptor (the standard devices: 0..2); a closed entry is 0. */
-struct fnvnx_ioinfo { uint32_t osfhnd; uint8_t osfile; char pipech; uint8_t pad[2]; };
-static struct fnvnx_ioinfo g_info[MAX_FD] = { { 0, 0xC1, 10, { 0 } }, { 1, 0xC1, 10, { 0 } }, { 2, 0xC1, 10, { 0 } } };
-struct fnvnx_ioinfo *__pioinfo[64] = { g_info, g_info + 32, g_info + 64, g_info + 96, g_info + 128, g_info + 160,
-                                       g_info + 192, g_info + 224 };
-struct fnvnx_ioinfo __badioinfo = { 0xFFFFFFFFu, 0x80, 10, { 0 } };
+/* The lowio table, as Wine 9.0 dlls/msvcrt/file.c defines it for the exe's CRT (_MSVCR_VER >= 80: MSVCRT_MAX_FILES 2048,
+ * MSVCRT_FD_BLOCK_SIZE 32, `ioinfo` with handle, wxflag, lookahead[3], exflag, crit, textmode/unicode, pipech2, startpos,
+ * utf8translations, dbcsBuffer, dbcsBufferUsed; __badioinfo = { INVALID_HANDLE_VALUE, WX_TEXT }; __pioinfo = the array of
+ * MAX_FILES / BLOCK_SIZE block pointers). The offsets are those of the i386 build of that struct. wxflag bits are Wine's WX_*
+ * (0x01 OPEN, 0x02 ATEOF, 0x20 APPEND, 0x40 TTY, 0x80 TEXT); lookahead[0..2] start as '\n' (file.c msvcrt_set_fd). The
+ * descriptor table is the one table: every change of a descriptor's state goes through ioinfo_sync. handle is the os descriptor
+ * for an open file and the descriptor number for a standard device (no Win32 HANDLE exists for a CRT descriptor in this layer). */
+#define MSVCRT_MAX_FILES 2048
+#define MSVCRT_FD_BLOCK_SIZE 32
+struct fnvnx_ioinfo {
+    uint32_t handle;
+    uint8_t wxflag;
+    char lookahead[3];
+    int exflag;
+    uint32_t crit[6]; /* RTL_CRITICAL_SECTION, 32-bit: unused here, descriptors lock through fdent.lock */
+    char textmode : 7;
+    char unicode : 1;
+    char pipech2[2];
+    uint32_t startpos[2]; /* __int64 at 4-byte alignment, as in the i386 struct */
+    int utf8translations;
+    char dbcsBuffer[1];
+    int dbcsBufferUsed;
+};
+_Static_assert(offsetof(struct fnvnx_ioinfo, wxflag) == 4 && offsetof(struct fnvnx_ioinfo, exflag) == 8 &&
+                   offsetof(struct fnvnx_ioinfo, crit) == 12 && offsetof(struct fnvnx_ioinfo, pipech2) == 37 &&
+                   offsetof(struct fnvnx_ioinfo, startpos) == 40 && offsetof(struct fnvnx_ioinfo, utf8translations) == 48 &&
+                   offsetof(struct fnvnx_ioinfo, dbcsBufferUsed) == 56 && sizeof(struct fnvnx_ioinfo) == 60,
+               "Wine 9.0 file.c ioinfo (i386, _MSVCR_VER >= 80)");
+#define WX_OPEN 0x01
+#define WX_ATEOF 0x02
+#define WX_APPEND 0x20
+#define WX_TTY 0x40
+#define WX_TEXT 0x80
+static struct fnvnx_ioinfo g_info[MSVCRT_MAX_FILES] = {
+    { 0, WX_OPEN | WX_TTY | WX_TEXT, { '\n', '\n', '\n' }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 },
+    { 1, WX_OPEN | WX_TTY | WX_TEXT, { '\n', '\n', '\n' }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 },
+    { 2, WX_OPEN | WX_TTY | WX_TEXT, { '\n', '\n', '\n' }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 },
+};
+struct fnvnx_ioinfo *__pioinfo[MSVCRT_MAX_FILES / MSVCRT_FD_BLOCK_SIZE] = {   /* every block exists: MAX_FD == MSVCRT_MAX_FILES */
+    g_info + 0, g_info + 32, g_info + 64, g_info + 96,
+    g_info + 128, g_info + 160, g_info + 192, g_info + 224,
+    g_info + 256, g_info + 288, g_info + 320, g_info + 352,
+    g_info + 384, g_info + 416, g_info + 448, g_info + 480,
+    g_info + 512, g_info + 544, g_info + 576, g_info + 608,
+    g_info + 640, g_info + 672, g_info + 704, g_info + 736,
+    g_info + 768, g_info + 800, g_info + 832, g_info + 864,
+    g_info + 896, g_info + 928, g_info + 960, g_info + 992,
+    g_info + 1024, g_info + 1056, g_info + 1088, g_info + 1120,
+    g_info + 1152, g_info + 1184, g_info + 1216, g_info + 1248,
+    g_info + 1280, g_info + 1312, g_info + 1344, g_info + 1376,
+    g_info + 1408, g_info + 1440, g_info + 1472, g_info + 1504,
+    g_info + 1536, g_info + 1568, g_info + 1600, g_info + 1632,
+    g_info + 1664, g_info + 1696, g_info + 1728, g_info + 1760,
+    g_info + 1792, g_info + 1824, g_info + 1856, g_info + 1888,
+    g_info + 1920, g_info + 1952, g_info + 1984, g_info + 2016
+};
+_Static_assert(MAX_FD == MSVCRT_MAX_FILES, "one block pointer per MSVCRT_FD_BLOCK_SIZE descriptors");
+struct fnvnx_ioinfo __badioinfo = { 0xFFFFFFFFu, WX_TEXT, { 0 }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 };
 static void ioinfo_sync(struct fdent *d)
 {
     struct fnvnx_ioinfo *i = &g_info[d - g_fd];
     int f = d->flags;
-    i->osfile = (uint8_t)((f & FD_OPEN ? 0x01 : 0) | (f & FD_CTRLZ ? 0x02 : 0) | (f & FD_APPEND ? 0x20 : 0) |
-                          (f & FD_DEV ? 0x40 : 0) | (f & FD_TEXT ? 0x80 : 0));
-    i->osfhnd = (f & FD_OPEN) ? (f & FD_DEV ? (uint32_t)(d - g_fd) : (uint32_t)d->os) : 0;
+    i->wxflag = (uint8_t)((f & FD_OPEN ? WX_OPEN : 0) | (f & FD_CTRLZ ? WX_ATEOF : 0) | (f & FD_APPEND ? WX_APPEND : 0) |
+                          (f & FD_DEV ? WX_TTY : 0) | (f & FD_TEXT ? WX_TEXT : 0));
+    i->handle = (f & FD_OPEN) ? (f & FD_DEV ? (uint32_t)(d - g_fd) : (uint32_t)d->os) : 0;
 }
 
 /* _isatty: the descriptor is a character device (the standard streams) */
