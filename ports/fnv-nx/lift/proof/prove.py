@@ -22,6 +22,14 @@ ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 RFO = z3.BitVec('rflags_other', 32)
 SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RFO & 0xFFFFF328)]    # DSL inputs df / flo = bits of the model's free rflags_other
+PROVER_FILES = ('prove.py', 'model_sail.py', 'symform.py', 'certbasis.py')      # the files that define what a proof compares; a record is valid only under the same bytes of them (a prover fix invalidates by rule, an unrelated edit does not)
+def prover_sha():
+    import hashlib
+    h = hashlib.sha256(); d = os.path.dirname(os.path.abspath(__file__))
+    for f in PROVER_FILES:
+        q = os.path.join(d, f)
+        if os.path.exists(q): h.update(f.encode() + b'\0' + open(q, 'rb').read() + b'\0')
+    return h.hexdigest()
 OBLIGATIONS = ('def0', 'xstate')      # what a record of this prover certifies beyond the field equalities; certs_build refuses a record without it (stale-obligations)
 SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
 

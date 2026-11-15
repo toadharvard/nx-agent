@@ -11,7 +11,7 @@
 # Work = the QUEUE: the integer shapes that have no valid certificate in ANY published shard (certs_build.py --queue).  A certificate is valid iff
 #   (shape key, symform.shape_sha(key) of the CURRENT DSL, IR sha256) all match its record (certs_build.py header): a DSL edit re-queues exactly the shapes whose
 #   Form changed; nothing else is proved again, whatever shard, run or machine produced the earlier certificate.  Shard K/N is taken from the queue.
-# Output: branch  l3b-lift/shapeprove/<ID>/<K>of<N>  = shapeprove_<K>_of_<N>.jsonl (only that file), ID = <IR id 12 hex>-<queue id 12 hex>
+# Output: WRITE-ONCE branch  l3b-lift/shapeprove/<ID>/<K>of<N>-<sha12 of the jsonl>  = shapeprove_<K>_of_<N>.jsonl (only that file; a rerun writes a new branch); a branch counts as published only when shardok.py passes (records == queue rows, no error record), ID = <IR id 12 hex>-<queue id 12 hex>
 #   (certs_build.py --id: the proof IR sha256; queue id = sha256 over the queue's (key, shape_sha) lines, so the same queue and K/N is the same branch).
 #   Already published: nothing is re-run.
 # Resumable and incremental: the shard's results branch is updated every PUBLISH_EVERY seconds (default 600) and on SIGTERM/SIGINT; a rerun of the same command resumes from the published file (shapes with a record are skipped), so a time limit, a crash or a kill loses at most one increment.
@@ -113,18 +113,38 @@ QID=$(echo "$QLINE" | awk '{print $2}'); echo "queue $QLINE (from $(find "$PUBD"
 fi
 ID="$(python3 -I "$HERE/certs_build.py" --id)-$QID"
 OUT="$W/out/$ID"; mkdir -p "$OUT"
-BR="$PREFIX/$ID/${K}of${N}"
 J="$OUT/shapeprove_${K}_of_$N.jsonl"
-publish() {   # an orphan commit holding the jsonl only; only this shard writes its branch, so a forced update is the next increment of the same file
+# a results branch is WRITE-ONCE (the git proxy refuses deletes and forced updates): its name carries the content, <prefix>/<ID>/<K>of<N>-<sha12 of the jsonl>.  A rerun writes a new branch.  A branch counts as
+# published only when its record count equals the shard's queue rows and it has no error record (shardok); any other branch (empty, short, with errors) is ignored by rule, by every reader.
+ROWS=$(python3 -I - "$QUEUE" "$K" "$N" "${SLICE:-1}" <<'PY'
+import sys
+q, k, n, sl = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+rows = [l for l in open(q) if l.strip() and l[0] != '#'][::sl]
+print(len([1 for i, _ in enumerate(rows) if i % n == k - 1]))
+PY
+)
+[ -n "${LIMIT:-}" ] && [ "$LIMIT" -lt "$ROWS" ] && ROWS=$LIMIT
+shardok() { python3 -I "$HERE/shardok.py" "$1" "$ROWS"; }     # exit 0 iff the jsonl has exactly ROWS records and no error record
+publish() {   # an orphan commit holding the jsonl only, on a NEW branch named by its content
     [ "$PUBLISH" = 1 ] && [ -s "$J" ] || return 0
+    local h; h=$(sha256sum "$J" | cut -c1-12); BR="$PREFIX/$ID/${K}of${N}-$h"
+    git -C "$B" ls-remote --exit-code origin "refs/heads/$BR" >/dev/null 2>&1 && return 0
     local p="$W/pub-$K"; rm -rf "$p"; mkdir -p "$p"; git -C "$p" init -q; git -C "$p" checkout -q --orphan pub
     cp "$J" "$p/"; git -C "$p" add "shapeprove_${K}_of_$N.jsonl"
     git -C "$p" -c user.name=farm -c user.email=farm@localhost commit -q -m "l3b-lift shapeprove $ID shard $K/$N ($(wc -l < "$J") records)"
-    git -C "$p" push -q -f "$(git -C "$B" remote get-url origin)" "pub:refs/heads/$BR"; local rc=$?; rm -rf "$p"; return $rc
+    git -C "$p" push -q "$(git -C "$B" remote get-url origin)" "pub:refs/heads/$BR"; local rc=$?; rm -rf "$p"; return $rc
 }
-# 3. resume: the results this shard already published (a limit, a crash or a kill lost at most one increment); shapeprove.py skips the shapes whose valid record is in the file
-if [ "$PUBLISH" = 1 ] && git -C "$B" ls-remote --exit-code origin "refs/heads/$BR" >/dev/null 2>&1 && [ ! -s "$J" ]; then
-    git -C "$B" fetch -q --depth 1 origin "$BR" && git -C "$B" show FETCH_HEAD:"shapeprove_${K}_of_$N.jsonl" > "$J" && echo "resumed from $BR: $(wc -l < "$J") records"
+# 3. resume: among this shard's branches take the one with the most records; already published = such a branch that passes shardok (nothing is re-run)
+if [ "$PUBLISH" = 1 ] && [ ! -s "$J" ]; then
+    BEST=0
+    for r in $(git -C "$B" ls-remote origin "refs/heads/$PREFIX/$ID/${K}of${N}-*" | awk '{print $2}'); do
+        git -C "$B" fetch -q --depth 1 origin "$r" || continue
+        git -C "$B" show FETCH_HEAD:"shapeprove_${K}_of_$N.jsonl" > "$J.try" 2>/dev/null || continue
+        c=$(wc -l < "$J.try"); if [ "$c" -gt "$BEST" ]; then BEST=$c; mv "$J.try" "$J"; fi
+    done
+    rm -f "$J.try"
+    [ -s "$J" ] && echo "resumed: $(wc -l < "$J") of $ROWS records"
+    if [ -s "$J" ] && shardok "$J"; then echo "SHAPEPROVE shard=$K/$N id=$ID already published: $ROWS records, no error"; exit 0; fi
 fi
 # 4. prove; the results are published every PUBLISH_EVERY seconds (default 600) while it runs, and at the end or on SIGTERM/SIGINT
 ulimit -v "${VMEM_KB:-6000000}"
@@ -144,5 +164,7 @@ c = collections.Counter(json.loads(l)['result'] for l in open(sys.argv[1]))
 print('shapes=%d %s' % (sum(c.values()), ' '.join('%s=%d' % x for x in sorted(c.items()))))
 PY
 )
+echo "SHAPEPROVE shard=$K/$N id=$ID $SUM rows=$ROWS seconds=$(( $(date +%s) - T0 )) cores=$(nproc) mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo)"
+if ! shardok "$J"; then echo "SHAPEPROVE shard=$K/$N: FAILED: records != queue rows ($ROWS) or an error record; nothing is published as complete" >&2; exit 1; fi
 publish || { echo "SHAPEPROVE shard=$K/$N id=$ID: PUSH FAILED"; exit 1; }
-echo "SHAPEPROVE shard=$K/$N id=$ID $SUM seconds=$(( $(date +%s) - T0 )) branch=$([ "$PUBLISH" = 1 ] && echo "$BR" || echo none)"
+echo "published ${BR:-none}"

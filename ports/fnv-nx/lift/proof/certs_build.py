@@ -124,12 +124,18 @@ def scan(files):
     for f, i, r in records(files):
         where = '%s:%d' % (f, i)
         res = r.get('result')
+        if res == 'error':
+            counts['error'] = counts.get('error', 0) + 1
+            continue
         if res in ('no-form', 'builder-branches-on-field', 'field-decode', 'decode'):
             counts[res] = counts.get(res, 0) + 1
             continue                                            # no obligation ran: no Form, no model sha
         key = r['shape']
         if not model_valid(r, model):
             counts['stale-model'] = counts.get('stale-model', 0) + 1
+            continue
+        if r.get('prover_sha') != prove.prover_sha():          # proved by other prover semantics (prove.py, model_sail.py, symform.py, certbasis.py)
+            counts['stale-prover'] = counts.get('stale-prover', 0) + 1
             continue
         if r.get('obligations') != list(prove.OBLIGATIONS):          # a record of a prover that did not check DEF0 (every undefined flag = 0) certifies less than this one
             counts['stale-obligations'] = counts.get('stale-obligations', 0) + 1

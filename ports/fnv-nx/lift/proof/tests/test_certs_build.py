@@ -23,7 +23,7 @@ MODEL = certs_build.pinned_model()
 
 
 def rec(key, result='proved', model=MODEL, dsl=None):
-    return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key), 'obligations': list(prove.OBLIGATIONS)}
+    return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key), 'obligations': list(prove.OBLIGATIONS), 'prover_sha': prove.prover_sha()}
 
 
 class Aggregate(unittest.TestCase):

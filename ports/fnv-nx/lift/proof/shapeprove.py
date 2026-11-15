@@ -70,7 +70,7 @@ def one(key, args):
     if model_sail.LAST.get('fault_paths'): asm.append('A-SEGLIM')
     ids = res[len('FAILED(model-defect:'):-1].split(',') if res.startswith('FAILED(model-defect:') else []
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
-               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
+               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), prover_sha=prove.prover_sha(), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
 
 def migrate(rec, args):
     """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the
@@ -108,10 +108,16 @@ def main():
     with open(path, 'a') as out:
         for key in mine:
             if key in done: continue
-            t0 = time.time(); rec = one(key, a); rec['seconds'] = round(time.time() - t0, 2)           # the wall time of the shape (not part of the certificate): the shard count is derived from its distribution
+            t0 = time.time()
+            try: rec = one(key, a)
+            except Exception as e:                 # a prover exception on a shape is a record (error + the traceback hash), never a missing one
+                import hashlib, traceback
+                tb = traceback.format_exc(); rec = {'shape': key, 'result': 'error', 'note': ('%s: %s' % (type(e).__name__, e))[:300], 'traceback_sha': hashlib.sha256(tb.encode()).hexdigest()[:16], 'model_sha': model_sail.ir_sha()}
+                print(tb, file=sys.stderr, flush=True)
+            rec['seconds'] = round(time.time() - t0, 2)           # the wall time of the shape (not part of the certificate): the shard count is derived from its distribution
             out.write(json.dumps(rec, sort_keys=True) + '\n'); out.flush()
     rs = [json.loads(l) for l in open(path)]; c = collections.Counter(r['result'] for r in rs)
     print('shard %d/%d done: %d shapes  ' % (k, n, len(rs)) + ' '.join('%s=%d' % x for x in sorted(c.items())))
-    return 0
+    return 1 if c.get('error') or len(rs) < len(mine) else 0
 
 if __name__ == '__main__': sys.exit(main())
