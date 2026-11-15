@@ -1025,3 +1025,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - liftsrc branch fa8075b5c takes FACTS (universe, ehtables with jtab_tables, per-module dirs), MODULES_TSV and X86SYS through `uses`. The 6944080c external is deleted. The FP inputs stay a fixture until w13 lands.
   - int 0x29–0x2e: 0 sites.
   - Shard rule: a fixed N per image (exe 64, d3dx9 16 each, small images 1), and shard j takes bucket(entry) % N == j, with no stage set derived from facts. finish requires the union of the shards to equal UNIVERSE.
+- 23:03 L5 head f1da9b3e9 (claude/fnv-l5-platform-w15): the other_vectors row is #GP, error vector*8+2, AV 0xC0000005, flags 0, params [0, 0xffffffff], address = the int, eip_advance 0. Wine facts are checked against the pinned text; test_gen_x86sys passes 8/8. w8 merges it into base3 and writes the faults consumer against the row fields.
