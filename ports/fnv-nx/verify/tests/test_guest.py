@@ -52,10 +52,9 @@ def main():
     g = guest_repo("g1", rec, pin)
     check("guest root on the pinned external compiler is valid", errs(g, rec) == [] or [x for x in errs(g, rec) if "guest" in x] == [], errs(g, rec))
     # --- the libnx guard: a guest root that reaches libnx is red until the wire check C9 is 0
-    gn = guest_repo("gnx", rec, pin, files={ROOT + "/a.cc": "#include <switch.h>\nint a() { return 0; }\n"})
-    check("libnx guard: a unit that includes <switch.h> is red", any("libnx" in x and "switch.h" in x for x in errs(gn, rec)), errs(gn, rec))
-    gh = guest_repo("gnh", rec, pin, files={ROOT + "/h.h": "#include <switch/runtime/env.h>\n", ROOT + "/a.cc": "#include \"h.h\"\nint a() { return 0; }\n"})
-    check("libnx guard: an include through a header of the root is red", any("includes <switch/runtime/env.h>" in x for x in errs(gh, rec)), errs(gh, rec))
+    check("libnx guard: a switch.h of an external tree in a unit's PP closure is a hit", recipe.libnx_closure_hits(["/src/a.cc", "/ext/libnx/nx/include/switch.h"]) == ["/ext/libnx/nx/include/switch.h"], "")
+    check("libnx guard: a header of the switch/ tree in the PP closure is a hit", recipe.libnx_closure_hits(["/ext/m/include/switch/runtime/env.h"]) == ["/ext/m/include/switch/runtime/env.h"], "")
+    check("libnx guard: closures of the root's own files and other headers are green", recipe.libnx_closure_hits(["/src/switch.h", "/src/switch/x.h", "/ext/a64/include/stdio.h", "/ext/a/switcher.h"]) == [], "")
     gl = guest_repo("gnl", rec, pin)
     check("libnx guard: a guest root with no libnx include and no libnx link is green", not any("libnx" in x for x in errs(gl, rec)), errs(gl, rec))
     rl = guest_rec(ext, link={"libs": ["-lnx"]})

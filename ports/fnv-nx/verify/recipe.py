@@ -353,24 +353,28 @@ def guest_errors(rec, spec, roots, pin):
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
-LIBNX_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"](switch\.h|switch/[^>"]*)[>"]', re.M)   # a header of libnx's switch/ tree
-ANY_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]([^>"]+)[>"]', re.M)
+LIBNX_HEADER = re.compile(r"^/ext/.*(/switch\.h|/switch/[^/].*)$")   # a header of libnx's switch/ tree, in an external tree, as the PP stage names it
 LIBNX_LIB = re.compile(r'(^|[/ ])(lib)?nx(\.a)?$|^-lnx$')
 LINK_PROFILE = TREE + "/link/guest.json"
 
 
-def libnx_errors(rec, root, files, roots, repo, variant=""):
-    """The libnx guard (W2 of the L5 platform layer). libnx is written for LP64; its wire types (the structs and integers that cross the svc / IPC /
-    TLS boundary) are certified for the guest's ILP32 model by the wire check C9 of toolchain/gcc/check_mirror.py, and that certification is not
-    complete: a guest root that reaches libnx is red until it is. Reaching = (a) the root's link names libnx (a `nx`/`libnx.a` library or
-    `-lnx` in `link`, or in the tracked link profile), or (b) a unit of the root includes, directly or through headers of the repo, a header
-    of libnx's switch/ tree (`<switch.h>`, `<switch/...>`). (b) is the textual include closure over the tracked files, a superset of the
-    preprocessor's (an include in a comment or an #if 0 adds a finding, never hides one);
-    generated units are not tracked files, so their includes are not seen here (the PP stage's header list of the verdict is the sound check).
-    The guard has no green case for a root that reaches libnx: C9's wire check being 0 changes this function, by a commit that cites it."""
+def libnx_closure_hits(closure):
+    """The files of CLOSURE (the sandbox paths the PP stage of a unit recorded as read: `closure` of its unitstage report) that are headers of libnx's
+    switch/ tree. The one source of "does this unit include libnx": the preprocessor's own record, exact, generated units included."""
+    return [p for p in closure if LIBNX_HEADER.match(p)]
+
+
+def libnx_errors(rec, root, roots, repo, variant=""):
+    """The libnx guard (W2 of the L5 platform layer), link half. libnx is written for LP64; its wire types (the structs and integers that cross the
+    svc / IPC / TLS boundary) are certified for the guest's ILP32 model by the wire check C9 of toolchain/gcc/check_mirror.py, and that
+    certification is not complete: a guest root that reaches libnx is red until it is. Reaching = (a) the root's link names libnx (a `nx` /
+    `libnx.a` library or `-lnx` in `link`, or in the tracked link profile): checked here, before any build; (b) a unit includes a header of
+    libnx's switch/ tree: checked after each unit's PP stage from the stage's own header list (libnx_closure_hits; Build.units), not from a
+    textual scan. The guard has no green case for a root that reaches libnx; C9's wire check being 0 changes these functions, by a commit
+    that cites it."""
     if entry_of(roots, root + "@" + variant if variant else root).get("target") != "guest":
         return []
-    err = []
+
     def strings(x):
         if isinstance(x, str):
             yield x
@@ -386,32 +390,7 @@ def libnx_errors(rec, root, files, roots, repo, variant=""):
             links += list(strings(json.load(f)))
     except (OSError, ValueError):
         pass
-    err += ["guest root %s: the link names libnx (%r): libnx is red until its wire check (C9) is 0" % (root, l) for l in links if LIBNX_LIB.search(l)]
-    fset = set(files)
-    dirs = [d.strip("/") for d in header_dirs(rec, root, roots, repo, variant)]
-    todo = [f for f in files if under(f, root) and f.endswith((".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".inc", ".s", ".S"))]
-    seen, hits = set(), []
-    while todo:
-        f = todo.pop()
-        if f in seen:
-            continue
-        seen.add(f)
-        try:
-            with open(os.path.join(repo, f), errors="replace") as fh:
-                text = fh.read()
-        except OSError:
-            continue
-        for m in ANY_INCLUDE.finditer(text):
-            t = m.group(1)
-            if LIBNX_INCLUDE.fullmatch(m.group(0)):
-                hits.append((f, t))
-                continue
-            for cand in [posixpath.normpath(posixpath.join(posixpath.dirname(f), t))] + [posixpath.normpath(posixpath.join(d, t)) for d in dirs]:
-                if cand in fset:
-                    todo.append(cand)
-                    break
-    err += ["guest root %s: %s includes <%s> (libnx switch/ tree): libnx is red until its wire check (C9) is 0" % (root, f, t) for f, t in sorted(set(hits))]
-    return err
+    return ["guest root %s: the link names libnx (%r): libnx is red until its wire check (C9) is 0" % (root, l) for l in links if LIBNX_LIB.search(l)]
 
 
 def compiler_long_double(cc):
@@ -792,7 +771,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
             if p not in files or not any(under(p, r) for r in roots)]
     err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin)
-    err += libnx_errors(rec, root, files, roots, repo, variant)
+    err += libnx_errors(rec, root, roots, repo, variant)
     err += plugin_errors(rec, root, files, roots, units, names, variant)
     return err
 
@@ -1363,6 +1342,10 @@ class Job:
                 self.keys |= {e[k] for k in ("pp_key", "du_key", "cc_key") if e.get(k)}
                 self.run += (e.get("pp_status") == "run") + (e.get("cc_status") == "run")
                 self.hit += (e.get("pp_status") == "hit") + (e.get("cc_status") == "hit")
+                hits = libnx_closure_hits(e.get("closure", [])) if guest else []
+                if hits:   # the libnx guard: the PP stage's own header list (libnx_closure_hits)
+                    failed[u] = {"stage": "libnx-guard:" + u, "exit": None, "stderr": ["%s includes %s (libnx switch/ tree): libnx is red until its wire check (C9) is 0" % (u, h) for h in hits]}
+                    continue
                 res[u] = e["object"]
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
