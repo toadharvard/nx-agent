@@ -8,7 +8,7 @@
 #   the count before a new[] array exists exactly when the element has a non-trivial destructor, is one size_t
 #   whatever the alignment; a two-argument operator delete[] gets the size of one element; a size that overflows
 #   goes to the allocation function as the largest size (nothing thrown before the call).
-# Each rule is what the pinned cl compiles (test_msvcmodel.py has cl's own numbers). LP64 is untouched.
+# Each rule is what the pinned cl compiles (toolchain/tests/ldbl/model.cpp, run by test_ldbl.py through the recipe, has cl's own numbers). LP64 is untouched.
 #
 # The rest is the distribution's cross compiler: the same version, the same target headers and library headers
 # (include search list checked below), the distribution's assembler and linker. Plugins are built against this

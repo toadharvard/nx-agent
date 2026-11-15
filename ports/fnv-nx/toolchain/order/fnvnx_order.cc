@@ -95,9 +95,19 @@ static unsigned long calls_object_last, calls_operator, calls_prvalue_virtual, c
 // ---- what counts as shared memory
 
 // LOCAL: ordering exists only for memory another thread can observe. Two facts, both decided by the declaration alone:
-//  (1) a decl base that is not aliased (an automatic variable whose address is never taken, a gimple temporary, a
-//      parameter that is not addressable) is visible to one thread only: no access to it is ordered and its address is never
-//      taken (local_unshared);
+//  (1) a decl base that is not aliased (an automatic variable or parameter that no operand of this function's GIMPLE takes
+//      the address of, a gimple temporary) is visible to one thread only: no access to it is ordered and its address is never
+//      taken (local_unshared).  "Takes the address of" is decided on the GIMPLE of the function by address_taken_scan, NOT
+//      by TREE_ADDRESSABLE: the front end sets that flag whenever it formed `&x` at any point (for a trivial constructor or
+//      copy it later folds away: every aggregate local of C++ carries it), so it says nothing about a pointer that exists.
+//      PROOF.  A GIMPLE object that is neither static, external nor thread-local is named only by its own decl; another
+//      thread can reach it only through an address, and an address of a decl comes into being by exactly these operations:
+//      an ADDR_EXPR whose base is the decl (an rvalue operand: assignment, call argument, call function, static chain,
+//      constructor element, switch/cond/return operand; an ADDR_EXPR as the base of a MEM_REF/TARGET_MEM_REF is an access
+//      form, no pointer value); the hidden result pointer of a call whose result is returned in memory (aggregate_value_p)
+//      and whose lhs has the decl as base; an operand of an asm statement (a memory constraint takes the address implicitly).
+//      address_taken_scan collects the decls of all three over every statement; the scan covers every operand of every
+//      statement kind, so a decl outside the set has no pointer anywhere (ASM-001: the compiler's GIMPLE semantics).
 //  (2) a RESULT_DECL with DECL_BY_REFERENCE is the hidden result POINTER of the function (its type is the reference
 //      type; the object is at *<retval>): the decl itself is a value of this thread, never memory. Reading it (passing it
 //      on, `UVf::UVf (<retval>, x)`) is no load, and its address is never taken (&<retval> is the ICE in
@@ -118,13 +128,77 @@ static bool hard_register(tree base) {
   return base && TREE_CODE(base) == VAR_DECL && DECL_HARD_REGISTER(base);
 }
 
+// the decls whose address the function takes (see LOCAL above); valid between execute()'s scan and its end
+static std::set<tree> *addr_set;
+
+static void scan_operand(tree t, std::set<tree> &out) {
+  if (!t) return;
+  switch (TREE_CODE(t)) {
+    case ADDR_EXPR: {
+      tree b = get_base_address(TREE_OPERAND(t, 0));
+      if (b && DECL_P(b)) out.insert(b);
+      scan_operand(TREE_OPERAND(t, 0), out);
+      return;
+    }
+    case MEM_REF: case TARGET_MEM_REF: {
+      // MEM_REF[&x + c] is an access to x, not a pointer value: its ADDR_EXPR base takes no address
+      tree b = TREE_OPERAND(t, 0);
+      scan_operand(TREE_CODE(b) == ADDR_EXPR ? TREE_OPERAND(b, 0) : b, out);
+      for (int i = 1; i < TREE_OPERAND_LENGTH(t); i++) scan_operand(TREE_OPERAND(t, i), out);
+      return;
+    }
+    case CONSTRUCTOR: {
+      unsigned long i;
+      tree idx, val;
+      FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(t), i, idx, val) { scan_operand(idx, out); scan_operand(val, out); }
+      return;
+    }
+    case TREE_LIST:
+      for (; t; t = TREE_CHAIN(t)) scan_operand(TREE_VALUE(t), out);
+      return;
+    default:
+      if (EXPR_P(t) || handled_component_p(t))
+        for (int i = 0; i < TREE_OPERAND_LENGTH(t); i++) scan_operand(TREE_OPERAND(t, i), out);
+      return;
+  }
+}
+
+static void address_taken_scan(function *fun, std::set<tree> &out) {
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun)
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+      gimple *st = gsi_stmt(gsi);
+      for (unsigned i = 0; i < gimple_num_ops(st); i++) scan_operand(gimple_op(st, i), out);
+      if (gcall *call = dyn_cast<gcall *>(st)) {
+        scan_operand(gimple_call_chain(call), out);
+        tree lhs = gimple_call_lhs(call);
+        if (lhs && aggregate_value_p(TREE_TYPE(lhs), gimple_call_fntype(call))) {
+          tree b = get_base_address(lhs);
+          if (b && DECL_P(b)) out.insert(b);   // the hidden result pointer
+        }
+      } else if (gasm *as = dyn_cast<gasm *>(st)) {
+        auto asm_ops = [&](unsigned n, tree (*get)(const gasm *, unsigned)) {
+          for (unsigned i = 0; i < n; i++) {
+            tree v = TREE_VALUE(get(as, i));
+            tree b = get_base_address(v);
+            if (b && DECL_P(b)) out.insert(b);   // a memory constraint takes the address implicitly
+            scan_operand(v, out);
+          }
+        };
+        asm_ops(gimple_asm_noutputs(as), [](const gasm *a, unsigned i) { return gimple_asm_output_op(a, i); });
+        asm_ops(gimple_asm_ninputs(as), [](const gasm *a, unsigned i) { return gimple_asm_input_op(a, i); });
+      }
+    }
+}
+
 static bool local_unshared(tree base) {
   if (!base) return true;
   if (hard_register(base)) return true;
   if (TREE_CODE(base) == VAR_DECL || TREE_CODE(base) == PARM_DECL || TREE_CODE(base) == RESULT_DECL)
     // a result or parameter passed by invisible reference is the object the caller named (a return slot: `g = f()`
     // may construct f's result in g itself): a pointer dereference, not a frame variable of this function
-    return !memory_result(base) && !TREE_STATIC(base) && !DECL_EXTERNAL(base) && !TREE_ADDRESSABLE(base) && !DECL_THREAD_LOCAL_P(base);
+    return !memory_result(base) && !TREE_STATIC(base) && !DECL_EXTERNAL(base) && !DECL_THREAD_LOCAL_P(base) &&
+           !(addr_set ? addr_set->count(base) != 0 : TREE_ADDRESSABLE(base));
   if (TREE_CODE(base) == CONST_DECL || TREE_CODE(base) == STRING_CST) return true;
   return false;
 }
@@ -325,6 +399,84 @@ static bool pointer_to_constant(tree a) {
   return base && (TREE_CODE(base) == STRING_CST || readonly_object(base));
 }
 
+// FOLDSET-BEGIN  generated by gen_foldset.py from GCC 13.3.0 gcc/gimple-fold.cc (sha256 f999480bbdeef63afc3679ae59cd3134a83ece89ec477b5c9b4464c6fb1e2875); do not edit
+static const struct { built_in_function code; const char *where; } fold_set[] = {
+  {BUILT_IN_BCMP, "gimple_fold_builtin gimple-fold.cc:5004"},
+  {BUILT_IN_BCOPY, "gimple_fold_builtin gimple-fold.cc:5006"},
+  {BUILT_IN_BZERO, "gimple_fold_builtin gimple-fold.cc:5008"},
+  {BUILT_IN_MEMSET, "gimple_fold_builtin gimple-fold.cc:5011"},
+  {BUILT_IN_MEMCPY, "gimple_fold_builtin gimple-fold.cc:5015"},
+  {BUILT_IN_MEMPCPY, "gimple_fold_builtin gimple-fold.cc:5016"},
+  {BUILT_IN_MEMMOVE, "gimple_fold_builtin gimple-fold.cc:5017"},
+  {BUILT_IN_SPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5020"},
+  {BUILT_IN_VSPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5021"},
+  {BUILT_IN_STRCAT_CHK, "gimple_fold_builtin gimple-fold.cc:5023"},
+  {BUILT_IN_STRNCAT_CHK, "gimple_fold_builtin gimple-fold.cc:5025"},
+  {BUILT_IN_STRLEN, "gimple_fold_builtin gimple-fold.cc:5027"},
+  {BUILT_IN_STRCPY, "gimple_fold_builtin gimple-fold.cc:5029"},
+  {BUILT_IN_STRNCPY, "gimple_fold_builtin gimple-fold.cc:5033"},
+  {BUILT_IN_STRCAT, "gimple_fold_builtin gimple-fold.cc:5038"},
+  {BUILT_IN_STRNCAT, "gimple_fold_builtin gimple-fold.cc:5041"},
+  {BUILT_IN_INDEX, "gimple_fold_builtin gimple-fold.cc:5043"},
+  {BUILT_IN_STRCHR, "gimple_fold_builtin gimple-fold.cc:5044"},
+  {BUILT_IN_RINDEX, "gimple_fold_builtin gimple-fold.cc:5046"},
+  {BUILT_IN_STRRCHR, "gimple_fold_builtin gimple-fold.cc:5047"},
+  {BUILT_IN_STRSTR, "gimple_fold_builtin gimple-fold.cc:5049"},
+  {BUILT_IN_STRCMP, "gimple_fold_builtin gimple-fold.cc:5051"},
+  {BUILT_IN_STRCMP_EQ, "gimple_fold_builtin gimple-fold.cc:5052"},
+  {BUILT_IN_STRCASECMP, "gimple_fold_builtin gimple-fold.cc:5053"},
+  {BUILT_IN_STRNCMP, "gimple_fold_builtin gimple-fold.cc:5054"},
+  {BUILT_IN_STRNCMP_EQ, "gimple_fold_builtin gimple-fold.cc:5055"},
+  {BUILT_IN_STRNCASECMP, "gimple_fold_builtin gimple-fold.cc:5056"},
+  {BUILT_IN_MEMCHR, "gimple_fold_builtin gimple-fold.cc:5058"},
+  {BUILT_IN_FPUTS, "gimple_fold_builtin gimple-fold.cc:5060"},
+  {BUILT_IN_FPUTS_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5063"},
+  {BUILT_IN_MEMCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5066"},
+  {BUILT_IN_MEMPCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5067"},
+  {BUILT_IN_MEMMOVE_CHK, "gimple_fold_builtin gimple-fold.cc:5068"},
+  {BUILT_IN_MEMSET_CHK, "gimple_fold_builtin gimple-fold.cc:5069"},
+  {BUILT_IN_STPCPY, "gimple_fold_builtin gimple-fold.cc:5076"},
+  {BUILT_IN_STRCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5078"},
+  {BUILT_IN_STPCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5079"},
+  {BUILT_IN_STRNCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5085"},
+  {BUILT_IN_STPNCPY_CHK, "gimple_fold_builtin gimple-fold.cc:5086"},
+  {BUILT_IN_SNPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5093"},
+  {BUILT_IN_VSNPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5094"},
+  {BUILT_IN_FPRINTF, "gimple_fold_builtin gimple-fold.cc:5097"},
+  {BUILT_IN_FPRINTF_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5098"},
+  {BUILT_IN_VFPRINTF, "gimple_fold_builtin gimple-fold.cc:5099"},
+  {BUILT_IN_FPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5109"},
+  {BUILT_IN_VFPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5110"},
+  {BUILT_IN_PRINTF, "gimple_fold_builtin gimple-fold.cc:5120"},
+  {BUILT_IN_PRINTF_UNLOCKED, "gimple_fold_builtin gimple-fold.cc:5121"},
+  {BUILT_IN_VPRINTF, "gimple_fold_builtin gimple-fold.cc:5122"},
+  {BUILT_IN_PRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5129"},
+  {BUILT_IN_VPRINTF_CHK, "gimple_fold_builtin gimple-fold.cc:5130"},
+  {BUILT_IN_ACC_ON_DEVICE, "gimple_fold_builtin gimple-fold.cc:5137"},
+  {BUILT_IN_REALLOC, "gimple_fold_builtin gimple-fold.cc:5140"},
+  {BUILT_IN_CLEAR_PADDING, "gimple_fold_builtin gimple-fold.cc:5143"},
+};
+// FOLDSET-END
+
+static bool in_fold_set(built_in_function c) {
+  for (const auto &e : fold_set) if (e.code == c) return true;
+  return false;
+}
+
+// the non-builtin declaration of a builtin's library function (same name, same type, no built-in class), one per name.
+// GCC rewrites a call into memory accesses only for a call whose callee is a built-in declaration (gimple_fold_builtin,
+// match.pd and expand_builtin all start from DECL_BUILT_IN_CLASS), so the same call with this callee stays a call.
+static tree library_decl(tree fn) {
+  static std::map<std::string, tree> made;
+  const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn));
+  tree &d = made[name];
+  if (!d) {
+    d = build_fn_decl(name, TREE_TYPE(fn));
+    DECL_ARTIFICIAL(d) = 1;
+  }
+  return d;
+}
+
 // a call GCC may expand inline that reads or writes memory through its pointer arguments (memcpy, memset, memcmp,
 // strlen, ...): the memory is no GIMPLE operand. GCC's own fnspec of the callee says which pointer arguments it may
 // read or write (unknown spec: all, both ways). A write gets a release fence before, a read an acquire fence after.
@@ -344,6 +496,20 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
     if (!known || spec.arg_maybe_read_p(i)) rd = true;
     if (!known || spec.arg_maybe_written_p(i)) wr = true;
   }
+  if (!rd && !wr) return;
+  // FOLD SET.  A builtin that touches an operand which may be shared would be folded or expanded into plain accesses
+  // after this pass (gimple-fold.cc fold_set, match.pd, expand_builtin: move_by_pieces). The rule: every such call
+  // (the fold_set, and any other non-atomic builtin that reads or writes through a pointer) calls its library function
+  // instead of the builtin. PROOF. Every GCC rewrite of a call into memory accesses is keyed on the callee being a
+  // built-in declaration (DECL_BUILT_IN_CLASS); the library declaration has none, so the call survives to the object
+  // file as a call, which is no plain access, and the callee is the guest runtime's own ordered code (the same call a
+  // user-written memcpy is under -fno-builtin). A builtin with no library function (assembler name __builtin_*) cannot
+  // take this form: if it is in the fold set that is a compile error, otherwise it keeps the fences below.
+  const char *asmname = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fn));
+  bool has_lib = strncmp(asmname, "__builtin_", 10) != 0;
+  if (has_lib) { gimple_call_set_fndecl(call, library_decl(fn)); gimple_call_set_fntype(call, TREE_TYPE(library_decl(fn))); return; }
+  if (in_fold_set(code))
+    error_at(gimple_location(call), "fnvnx_order: %qs is in the GCC fold set and takes a shared operand, but has no library function to call instead", asmname);
   if (wr) { gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); cur->fence_st++; }
   if (rd) fence_after(gsi, MEMMODEL_ACQUIRE);
 }
@@ -467,17 +633,15 @@ struct order_pass : gimple_opt_pass {
     counts c = {0, 0, 0, 0, 0};
     cur = &c;
     basic_block bb;
-    // a local that receives an aggregate returned in memory is the object whose address goes to the callee (the hidden
-    // result pointer): the callee may publish it (copy elision, NRVO), so it is addressable. Decided before any access is
-    // classified, so no earlier statement keeps a plain access to it.
-    FOR_EACH_BB_FN(bb, fun)
-      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
-        gcall *call = dyn_cast<gcall *>(gsi_stmt(gsi));
-        tree lhs = call ? gimple_call_lhs(call) : NULL_TREE;
-        if (!lhs || !aggregate_value_p(TREE_TYPE(lhs), gimple_call_fntype(call))) continue;
-        tree base = get_base_address(lhs);
-        if (base && DECL_P(base) && !hard_register(base) && local_unshared(base)) mark_addressable(base);
-      }
+    // the decls whose address this function takes (address_taken_scan: operands, the hidden result pointer of a call that
+    // returns in memory, asm operands) are the shared locals; they are made addressable before any access is classified, so no
+    // earlier statement keeps a plain access to them.  Every other local is unshared (local_unshared).
+    std::set<tree> taken;
+    address_taken_scan(fun, taken);
+    addr_set = &taken;
+    for (tree d : taken)
+      if ((VAR_P(d) || TREE_CODE(d) == PARM_DECL || TREE_CODE(d) == RESULT_DECL) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
+        mark_addressable(d);
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
     add_resume_fences(fun);
@@ -487,6 +651,7 @@ struct order_pass : gimple_opt_pass {
       inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores, %lu+%lu fenced, %lu resume fences",
              c.ldar, c.stlr, c.fence_ld, c.fence_st, c.fence_resume);
     cur = NULL;
+    addr_set = NULL;
     return 0;
   }
 };

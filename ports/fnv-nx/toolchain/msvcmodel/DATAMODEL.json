@@ -1,0 +1,1173 @@
+{
+ "format": "fnvnx-datamodel/2",
+ "target": "Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8",
+ "pins": {
+  "cpp_docs": {
+   "repo": "https://github.com/MicrosoftDocs/cpp-docs",
+   "commit": "af4947c4bdf5993dcaee98e63d55a2d7a5744d7d",
+   "mirror": "fnv-nx-build tools/cpp-docs"
+  },
+  "gcc": {
+   "tarball": "gcc-13.3.0.tar.xz",
+   "file": "gcc/doc/tm.texi",
+   "tarball_sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083"
+  },
+  "mirror": {
+   "name": "cppdocs",
+   "repo": "fnv-nx-build",
+   "ref": "tools/cpp-docs",
+   "commit": "1bc81a52b15313d513f37c57c769b4413a1e3e21",
+   "tree_sha256": "9c63b1c754a2577d73bfc692b0b5c4e245df90d3f5d002df0b92ccdb2f185a5e",
+   "at": "/ext/cppdocs"
+  }
+ },
+ "rows": [
+  {
+   "id": "S01",
+   "property": "char is signed (/J off)",
+   "msvc": "char is signed (/J off); a type of its own",
+   "gcc": "signed char; a type of its own",
+   "mechanism": "equal under the recipe flag",
+   "kind": "flag",
+   "status": "closed",
+   "check": "static_assert DM(\"S01\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": "-fsigned-char",
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 34,
+     "quote": "Variables of type **`char`** are promoted to **`int`** as if from type **`signed char`** by default"
+    }
+   ]
+  },
+  {
+   "id": "S02",
+   "property": "wchar_t is a native 2-byte unsigned type (/Zc:wchar_t, default on in C++)",
+   "msvc": "wchar_t is a native 2-byte unsigned type (/Zc:wchar_t, on by default in C++)",
+   "gcc": "unsigned 2 bytes; a type of its own",
+   "mechanism": "equal under the recipe flag",
+   "kind": "flag",
+   "status": "closed",
+   "check": "static_assert DM(\"S02\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": "-fshort-wchar",
+   "citations": [
+    {
+     "page": "docs/build/reference/zc-wchar-t-wchar-t-is-native-type.md",
+     "line": 25,
+     "quote": "Microsoft implements **`wchar_t`** as a two-byte unsigned value"
+    }
+   ]
+  },
+  {
+   "id": "S03",
+   "property": "bool, char: 1 byte, alignment 1",
+   "msvc": "bool, char: 1 byte, alignment 1",
+   "gcc": "1/1",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S03\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 100,
+     "quote": "**`__int8`** | 1 byte"
+    }
+   ]
+  },
+  {
+   "id": "S04",
+   "property": "short: 2/2",
+   "msvc": "short: 2 bytes, alignment 2",
+   "gcc": "2/2",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S04\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 101,
+     "quote": "**`short`**, **`unsigned short`**, **`wchar_t`**, **`__wchar_t`** | 2 bytes"
+    }
+   ]
+  },
+  {
+   "id": "S05",
+   "property": "int and long: 4/4, distinct types",
+   "msvc": "int and long: 4 bytes, alignment 4, distinct types",
+   "gcc": "4/4",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S05\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 102,
+     "quote": "**`float`**, **`__int32`**, **`int`**, **`unsigned int`**, **`long`**, **`unsigned long`** | 4 bytes"
+    }
+   ]
+  },
+  {
+   "id": "S06",
+   "property": "long long / __int64: 8 bytes, alignment 8",
+   "msvc": "long long / __int64: 8 bytes, alignment 8",
+   "gcc": "8/8",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S06\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 103,
+     "quote": "**`double`**, **`__int64`**, **`long double`**, **`long long`**, **`unsigned long long`** | 8 bytes"
+    }
+   ]
+  },
+  {
+   "id": "S07",
+   "property": "float: 4/4",
+   "msvc": "float: 4 bytes",
+   "gcc": "4/4",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S07\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 102,
+     "quote": "**`float`**, **`__int32`**, **`int`**, **`unsigned int`**, **`long`**, **`unsigned long`** | 4 bytes"
+    }
+   ]
+  },
+  {
+   "id": "S08",
+   "property": "double: 8/8",
+   "msvc": "double: 8 bytes",
+   "gcc": "8/8",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S08\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 103,
+     "quote": "**`double`**, **`__int64`**, **`long double`**, **`long long`**, **`unsigned long long`** | 8 bytes"
+    }
+   ]
+  },
+  {
+   "id": "S09",
+   "property": "long double: 8 bytes, binary64, a type of its own",
+   "msvc": "long double: 8 bytes, the representation of double, a distinct type",
+   "gcc": "8/8 after the patch (binary64, DFmode); 16 before",
+   "mechanism": "msvcmodel.patch LONG_DOUBLE_TYPE_SIZE and TFmode scalar-mode support",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S09\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/fundamental-types-cpp.md",
+     "line": 56,
+     "quote": "The representation of **`long double`** and **`double`** is identical. However, **`long double`** and **`double`** are treated as distinct types by the compiler."
+    }
+   ]
+  },
+  {
+   "id": "S10",
+   "property": "data and function pointers: 4 bytes, alignment 4",
+   "msvc": "data and function pointers: 4 bytes on Win32",
+   "gcc": "4/4",
+   "mechanism": "equal under -mabi=ilp32",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S10\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-runtime-library/standard-types.md",
+     "line": 55,
+     "quote": "Stores a pointer (or `HANDLE`) on both Win32 and Win64 platforms."
+    }
+   ]
+  },
+  {
+   "id": "S11",
+   "property": "pointer to data member: 4 bytes",
+   "msvc": "pointer to data member: 4 bytes",
+   "gcc": "4/4 (an offset)",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S11\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "the pointer-to-data-member size is not documented by Microsoft; checked per record by the R7 layout gate against the exe's CodeView",
+   "citations": []
+  },
+  {
+   "id": "S12",
+   "property": "pointer to member function: 4 bytes for a class with single inheritance, 8 for multiple (/vmb, best case)",
+   "msvc": "pointer to member function: size depends on the inheritance model (best case by default)",
+   "gcc": "8 (Itanium: pointer and adjustment)",
+   "mechanism": "not closable by a hunk: the representation is the C++ ABI's; no GCC switch",
+   "kind": "none",
+   "status": "open",
+   "check": "static_assert DM(\"S12\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/build/reference/vmb-vmg-representation-method.md",
+     "line": 19,
+     "quote": "For complete types, it uses the best representation among single, multiple, or virtual inheritance"
+    }
+   ]
+  },
+  {
+   "id": "S13",
+   "property": "member alignment is min(size of the type, 8) (/Zp8, default on x86); struct alignment is the largest member alignment",
+   "msvc": "member alignment is min(size, packing size 8 on x86); a struct is aligned to its largest member",
+   "gcc": "equal: double, long long, long double at 8 inside structs",
+   "mechanism": "equal on aarch64 (natural alignment)",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S13\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-language/padding-and-alignment-of-structure-members.md",
+     "line": 14,
+     "quote": "The alignment-requirement for all data except structures, unions, and arrays is either the size of the object or the current packing size (specified with either /Zp or the `pack` pragma, whichever is less)."
+    },
+    {
+     "page": "docs/build/reference/zp-struct-member-alignment.md",
+     "line": 27,
+     "quote": "Packs structures on 8-byte boundaries (default for x86, ARM, and ARM64)."
+    }
+   ]
+  },
+  {
+   "id": "S14",
+   "property": "the underlying type of an enumeration without a fixed type is always int, whatever the enumerators; an enumerator value outside int is outside the language",
+   "msvc": "the underlying type of an enumeration without a fixed type is always int, whatever the enumerators",
+   "gcc": "int (C and C++), error for a value outside int",
+   "mechanism": "msvcmodel.patch: cp/decl.cc finish_enum_value_list, c/c-decl.cc finish_enum under TARGET_ILP32 (GCC picked unsigned int for non-negative values)",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S14\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/build/reference/zc-enumtypes.md",
+     "line": 24,
+     "quote": "Previously, such enumeration types always had an underlying type of **`int`** in the Microsoft compiler, regardless of enumerator values."
+    }
+   ]
+  },
+  {
+   "id": "S15",
+   "property": "an enumeration with a fixed underlying type has it",
+   "msvc": "an enumeration with a fixed underlying type has it",
+   "gcc": "as declared",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S15\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/enumerations-cpp.md",
+     "line": 74,
+     "quote": "The underlying type of the enumerators; all enumerators have the same underlying type. May be any integral type."
+    }
+   ]
+  },
+  {
+   "id": "S16",
+   "property": "adjacent bit-fields share an allocation unit only if their integral types have the same size; the unit is 1, 2 or 4 bytes",
+   "msvc": "adjacent bit-fields share a 1/2/4-byte unit only if their integral types have the same size and the next fits",
+   "gcc": "allocation units follow the MSVC rule",
+   "mechanism": "msvcmodel.patch: TARGET_MS_BITFIELD_LAYOUT_P (aarch64.cc) under TARGET_ILP32, the generic stor-layout.cc place_field implementation",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S16\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-language/padding-and-alignment-of-structure-members.md",
+     "line": 18,
+     "quote": "Adjacent bit fields are packed into the same 1-, 2-, or 4-byte allocation unit if the integral types are the same size"
+    }
+   ]
+  },
+  {
+   "id": "S17",
+   "property": "an unnamed zero-width bit-field aligns the next field to the boundary of its base type",
+   "msvc": "an unnamed zero-width bit-field aligns the next field to its base type",
+   "gcc": "as MSVC",
+   "mechanism": "same hook as S16 (and equal before it for these cases)",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S17\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-language/c-bit-fields.md",
+     "line": 20,
+     "quote": "An unnamed bit field whose width is specified as 0 guarantee"
+    }
+   ]
+  },
+  {
+   "id": "S18",
+   "property": "a bit-field does not straddle its storage unit",
+   "msvc": "a bit-field does not straddle its storage unit",
+   "gcc": "as MSVC",
+   "mechanism": "same hook as S16",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S18\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-language/padding-and-alignment-of-structure-members.md",
+     "line": 18,
+     "quote": "if the next bit field fits into the current allocation unit without crossing the boundary imposed by the common alignment requirements of the bit fields."
+    },
+    {
+     "page": "docs/c-language/c-bit-fields.md",
+     "line": 89,
+     "quote": "The Windows ABI convention packs bit fields into single storage integers, and doesn't straddle storage"
+    }
+   ]
+  },
+  {
+   "id": "S19",
+   "property": "bit-fields are allocated from the least significant bit up",
+   "msvc": "bit-fields are allocated from the least significant bit; little endian",
+   "gcc": "equal (little endian)",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S19\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-language/c-bit-fields.md",
+     "line": 75,
+     "quote": "the integer `0x01F2` would be stored in physical memory as `0xF2` followed by `0x01`."
+    }
+   ]
+  },
+  {
+   "id": "S20",
+   "property": "a bit-field of type int is signed",
+   "msvc": "a bit-field of type int is signed",
+   "gcc": "signed",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S20\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-language/c-bit-fields.md",
+     "line": 47,
+     "quote": "Bit fields defined as **`int`** are treated as **`signed`**."
+    }
+   ]
+  },
+  {
+   "id": "S21",
+   "property": "an empty class has size 1 and alignment 1",
+   "msvc": "an empty class has size 1",
+   "gcc": "1/1",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S21\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/empty-bases.md",
+     "line": 23,
+     "quote": "an empty class is 1 byte in size:"
+    }
+   ]
+  },
+  {
+   "id": "S22",
+   "property": "the first empty base is overlapped by the next subobject (EBCO of a single empty base)",
+   "msvc": "a single empty base is overlapped (EBCO)",
+   "gcc": "equal",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S22\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/empty-bases.md",
+     "line": 40,
+     "quote": "Combining these classes in a class hierarchy also results in a class that's 1 byte in size:"
+    }
+   ]
+  },
+  {
+   "id": "S23",
+   "property": "1 byte of padding is added between consecutive empty bases; the last empty base of a run is placed at the running offset, even past the end of a non-empty base",
+   "msvc": "consecutive empty bases are separated by 1 byte of padding; the last is placed at the running offset",
+   "gcc": "as MSVC after the patch: the empty base at the running offset, one byte between consecutive empty bases (the cases of the cited page)",
+   "mechanism": "msvcmodel.patch hunk in gcc/cp/class.cc layout_empty_base_or_field under TARGET_ILP32 (written; its farm build is pending)",
+   "kind": "patch",
+   "status": "open",
+   "check": "static_assert DM(\"S23\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/cpp/empty-bases.md",
+     "line": 72,
+     "quote": "The class layout algorithm is adding 1 byte of padding between any two consecutive empty base classes"
+    },
+    {
+     "page": "docs/cpp/empty-bases.md",
+     "line": 119,
+     "quote": "static_assert(sizeof(Struct2) == 1, \"Struct2 should be 1 byte\");"
+    }
+   ]
+  },
+  {
+   "id": "S24",
+   "property": "the vptr is 4 bytes at offset 0 of the class that introduces virtual functions; a derived class's members follow its bases",
+   "msvc": "the vptr is at offset 0 of the class that introduces virtual functions",
+   "gcc": "equal",
+   "mechanism": "equal",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S24\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "vptr placement is not documented by Microsoft; checked per class by the R7 layout gate against the exe's vtables",
+   "citations": []
+  },
+  {
+   "id": "S25",
+   "property": "a virtual base is reached through a vbptr member and a vbtable",
+   "msvc": "a virtual base is reached through a vbptr and a vbtable",
+   "gcc": "a vptr whose table holds the virtual base offsets (Itanium); the size is equal for one virtual base, the layout is not",
+   "mechanism": "not closable by a hunk; the R7 layout gate compares every record with the exe's CodeView",
+   "kind": "none",
+   "status": "open",
+   "check": "static_assert DM(\"S25\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "virtual-base layout (vbptr, vbtable) is not documented by Microsoft; checked per record by the R7 layout gate; crossing_forbidden",
+   "citations": []
+  },
+  {
+   "id": "S26",
+   "property": "va_list is `char *`; each argument takes a 4-byte-rounded stack slot (char and short as int, float as double, long double and long long 8 bytes)",
+   "msvc": "va_list is `char *`, one 4-byte-rounded slot per argument",
+   "gcc": "promotions equal; va_list is the AAPCS64 structure",
+   "mechanism": "not a layout of a guest record: lifted callers pass arguments through the dispatch descriptor (names/dispatch plugins); a va_list stored in a record is an R7 mismatch",
+   "kind": "none",
+   "status": "open",
+   "check": "static_assert DM(\"S26\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-runtime-library/standard-types.md",
+     "line": 89,
+     "quote": "`va_list` structure | Used to hold information needed by"
+    }
+   ]
+  },
+  {
+   "id": "S27",
+   "property": "size_t is unsigned int",
+   "msvc": "unsigned int on x86",
+   "gcc": "unsigned int (-mabi=ilp32 plus the msvcmodel SIZE_TYPE)",
+   "mechanism": "msvcmodel.patch hunk in gcc/config/aarch64/aarch64.h: SIZE_TYPE / PTRDIFF_TYPE under TARGET_ILP32",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S27\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-language/largest-array-size.md",
+     "line": 11,
+     "quote": "The `size_t` typedef is an **`unsigned int`** on the 32-bit x86 platform."
+    }
+   ]
+  },
+  {
+   "id": "S28",
+   "property": "ptrdiff_t: a 4-byte signed integer; its identity (int) is cl 15.00's own typedef",
+   "msvc": "long integer, 4 bytes",
+   "gcc": "int (4 bytes)",
+   "mechanism": "msvcmodel.patch hunk in gcc/config/aarch64/aarch64.h: SIZE_TYPE / PTRDIFF_TYPE under TARGET_ILP32",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S28\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "ldbl/model.cpp comments: cl 15.00 mangles ptrdiff_t as int (H)",
+   "citations": [
+    {
+     "page": "docs/c-runtime-library/standard-types.md",
+     "line": 64,
+     "quote": "`ptrdiff_t` (long integer or **`__int64`**, depending on the target platform)"
+    }
+   ]
+  },
+  {
+   "id": "S29",
+   "property": "operator new[] cookie and the sized delete[] argument",
+   "msvc": "a 4-byte element count before the array when the class has a non-trivial destructor; the size passed to delete[]",
+   "gcc": "as MSVC after the patch",
+   "mechanism": "msvcmodel.patch hunks in gcc/cp/init.cc, gcc/cp/call.cc, gcc/cp/class.cc and gcc/targhooks.cc",
+   "kind": "patch",
+   "status": "closed",
+   "check": "ldbl/model.cpp cases (test_ldbl model() step)",
+   "flag": null,
+   "exe_source": "pinned cl 15.00 output recorded in ldbl/model.cpp comments (Microsoft does not document the cookie)",
+   "citations": []
+  },
+  {
+   "id": "S30",
+   "property": "vtable: one 4-byte function pointer per virtual function, no descriptors, entries at 4-byte distance",
+   "msvc": "4-byte entries",
+   "gcc": "4-byte entries (ILP32 pointers)",
+   "mechanism": "equal by default",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S30\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "the exe's vtables; checked per class by the R7 layout gate (Microsoft does not document the vtable layout)",
+   "citations": []
+  },
+  {
+   "id": "S31",
+   "property": "wint_t is unsigned short",
+   "msvc": "wint_t is `unsigned short` (WCHAR.H)",
+   "gcc": "unsigned short (__WINT_TYPE__ = short unsigned int)",
+   "mechanism": "msvcmodel.patch hunk in gcc/config/aarch64/aarch64.h: WINT_TYPE under TARGET_ILP32 (GCC default is unsigned int)",
+   "kind": "patch",
+   "status": "closed",
+   "check": "static_assert DM(\"S31\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "citations": [
+    {
+     "page": "docs/c-runtime-library/is-isw-routines.md",
+     "line": 39,
+     "quote": "The `wint_t` data type is defined in `<WCHAR.H>` as an **`unsigned short`**."
+    }
+   ]
+  },
+  {
+   "id": "S32",
+   "property": "sig_atomic_t is int",
+   "msvc": "sig_atomic_t is `int` (SIGNAL.H of Visual C++ 2008)",
+   "gcc": "int (__SIG_ATOMIC_TYPE__ = int)",
+   "mechanism": "equal by default (SIG_ATOMIC_TYPE is unset in aarch64, the language default is int)",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S32\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "cpp-docs documents sig_atomic_t only as \"integer\" (c-runtime-library/standard-types.md); its type int is the declaration of cl 15.00's signal.h and is checked per record by the R7 layout gate",
+   "citations": []
+  },
+  {
+   "id": "S33",
+   "property": "fixed-width and intptr typedefs of the native side: intN_t, uintN_t, int_leastN_t, int_fastN_t, intmax_t, intptr_t",
+   "msvc": "Visual C++ 2008 has no <stdint.h>: the exe has no such typedef, so there is no MS value",
+   "gcc": "each alias denotes a fundamental type with an S-row: int8 signed char, int16 short, int32 int, int64 long long, intmax long long, intptr int; least/fast any fundamental integer type of at least N bits",
+   "mechanism": "rule, checked: each alias resolves to a fundamental type fixed by S03-S06 and S10, so a field of such a type has the layout of that type",
+   "kind": "default",
+   "status": "closed",
+   "check": "static_assert DM(\"S33\") in toolchain/tests/ldbl/datamodel.cpp",
+   "flag": null,
+   "exe_source": "none: native-only typedefs; the rule is the check (a field of such a type has the layout of its fundamental type)",
+   "citations": []
+  }
+ ],
+ "tm": [
+  {
+   "entry": "ACCUM_TYPE_SIZE",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "ADA_LONG_TYPE_SIZE",
+   "not_layout": "Ada front end only"
+  },
+  {
+   "entry": "ADJUST_FIELD_ALIGN",
+   "fact": "S13"
+  },
+  {
+   "entry": "ATTRIBUTE_ALIGNED_VALUE",
+   "not_layout": "upper bound and default of an explicit aligned attribute; the exe's alignments come from its declared types (S13)"
+  },
+  {
+   "entry": "BIGGEST_ALIGNMENT",
+   "not_layout": "upper bound and default of an explicit aligned attribute; the exe's alignments come from its declared types (S13)"
+  },
+  {
+   "entry": "BIGGEST_FIELD_ALIGNMENT",
+   "fact": "S13"
+  },
+  {
+   "entry": "BITFIELD_NBYTES_LIMITED",
+   "fact": "S18"
+  },
+  {
+   "entry": "BITS_BIG_ENDIAN",
+   "fact": "S19"
+  },
+  {
+   "entry": "BITS_PER_WORD",
+   "not_layout": "width of the host register word; the lifted code expresses every guest operation at its own width, so no guest type changes"
+  },
+  {
+   "entry": "BOOL_TYPE_SIZE",
+   "fact": "S03"
+  },
+  {
+   "entry": "BYTES_BIG_ENDIAN",
+   "fact": "S19"
+  },
+  {
+   "entry": "CHAR_TYPE_SIZE",
+   "fact": "S03"
+  },
+  {
+   "entry": "DATA_ABI_ALIGNMENT",
+   "not_layout": "alignment of objects (variables, constants), raised for speed; the layout of no record type changes"
+  },
+  {
+   "entry": "DATA_ALIGNMENT",
+   "not_layout": "alignment of objects (variables, constants), raised for speed; the layout of no record type changes"
+  },
+  {
+   "entry": "DEFAULT_SIGNED_CHAR",
+   "fact": "S01"
+  },
+  {
+   "entry": "DOUBLE_TYPE_SIZE",
+   "fact": "S08"
+  },
+  {
+   "entry": "EMPTY_FIELD_BOUNDARY",
+   "fact": "S13"
+  },
+  {
+   "entry": "FLOAT_TYPE_SIZE",
+   "fact": "S07"
+  },
+  {
+   "entry": "FLOAT_WORDS_BIG_ENDIAN",
+   "fact": "S19"
+  },
+  {
+   "entry": "FRACT_TYPE_SIZE",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "FUNCTION_BOUNDARY",
+   "not_layout": "code alignment of host functions, not a data layout"
+  },
+  {
+   "entry": "INCOMING_STACK_BOUNDARY",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "INT16_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT32_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT64_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT8_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INTMAX_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INTPTR_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_FAST16_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_FAST32_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_FAST64_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_FAST8_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_LEAST16_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_LEAST32_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_LEAST64_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_LEAST8_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "INT_TYPE_SIZE",
+   "fact": "S05"
+  },
+  {
+   "entry": "LIBGCC2_GNU_PREFIX",
+   "not_layout": "libgcc symbol naming and complex-arithmetic helper width; no type of the exe"
+  },
+  {
+   "entry": "LOCAL_ALIGNMENT",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "LOCAL_DECL_ALIGNMENT",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "LONG_ACCUM_TYPE_SIZE",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "LONG_DOUBLE_TYPE_SIZE",
+   "fact": "S09"
+  },
+  {
+   "entry": "LONG_FRACT_TYPE_SIZE",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "LONG_LONG_ACCUM_TYPE_SIZE",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "LONG_LONG_FRACT_TYPE_SIZE",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "LONG_LONG_TYPE_SIZE",
+   "fact": "S06"
+  },
+  {
+   "entry": "LONG_TYPE_SIZE",
+   "fact": "S05"
+  },
+  {
+   "entry": "MALLOC_ABI_ALIGNMENT",
+   "not_layout": "allocator and atomic contracts of the host runtime, not a type layout"
+  },
+  {
+   "entry": "MAX_BITS_PER_WORD",
+   "not_layout": "width of the host register word; the lifted code expresses every guest operation at its own width, so no guest type changes"
+  },
+  {
+   "entry": "MAX_FIXED_MODE_SIZE",
+   "not_layout": "host code-generation and libgcc internals; no type of the exe"
+  },
+  {
+   "entry": "MAX_OFILE_ALIGNMENT",
+   "not_layout": "alignment of objects (variables, constants), raised for speed; the layout of no record type changes"
+  },
+  {
+   "entry": "MAX_STACK_ALIGNMENT",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "MINIMUM_ALIGNMENT",
+   "not_layout": "alignment of objects (variables, constants), raised for speed; the layout of no record type changes"
+  },
+  {
+   "entry": "MINIMUM_ATOMIC_ALIGNMENT",
+   "not_layout": "allocator and atomic contracts of the host runtime, not a type layout"
+  },
+  {
+   "entry": "MIN_UNITS_PER_WORD",
+   "not_layout": "width of the host register word; the lifted code expresses every guest operation at its own width, so no guest type changes"
+  },
+  {
+   "entry": "PARM_BOUNDARY",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "PCC_BITFIELD_TYPE_MATTERS",
+   "fact": "S16"
+  },
+  {
+   "entry": "POINTERS_EXTEND_UNSIGNED",
+   "not_layout": "how a 32-bit pointer extends in a 64-bit host register; the guest address space is 32 bits (OWNER 7), so every guest pointer is zero-extended, which is the host representation, not a record layout"
+  },
+  {
+   "entry": "POINTER_SIZE",
+   "fact": "S10"
+  },
+  {
+   "entry": "PREFERRED_STACK_BOUNDARY",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "PROMOTE_MODE",
+   "not_layout": "promotion of sub-word values in registers; memory layout of records is unchanged"
+  },
+  {
+   "entry": "PTRDIFF_TYPE",
+   "fact": "S28"
+  },
+  {
+   "entry": "REG_WORDS_BIG_ENDIAN",
+   "fact": "S19"
+  },
+  {
+   "entry": "ROUND_TYPE_ALIGN",
+   "fact": "S13"
+  },
+  {
+   "entry": "SHORT_ACCUM_TYPE_SIZE",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "SHORT_FRACT_TYPE_SIZE",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "SHORT_TYPE_SIZE",
+   "fact": "S04"
+  },
+  {
+   "entry": "SIG_ATOMIC_TYPE",
+   "fact": "S32"
+  },
+  {
+   "entry": "SIZETYPE",
+   "fact": "S27"
+  },
+  {
+   "entry": "SIZE_TYPE",
+   "fact": "S27"
+  },
+  {
+   "entry": "STACK_BOUNDARY",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "STACK_SAVEAREA_MODE",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "STACK_SIZE_MODE",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "STACK_SLOT_ALIGNMENT",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "STRICT_ALIGNMENT",
+   "not_layout": "hardware access rule; guest code (x86) makes unaligned accesses, which the lifter emits as such; not a type layout"
+  },
+  {
+   "entry": "STRUCTURE_SIZE_BOUNDARY",
+   "fact": "S13"
+  },
+  {
+   "entry": "TARGET_ABSOLUTE_BIGGEST_ALIGNMENT",
+   "not_layout": "upper bound of explicit alignment, not the layout of a type"
+  },
+  {
+   "entry": "TARGET_ALIGN_ANON_BITFIELD",
+   "fact": "S17"
+  },
+  {
+   "entry": "TARGET_CONSTANT_ALIGNMENT",
+   "not_layout": "alignment of objects (variables, constants), raised for speed; the layout of no record type changes"
+  },
+  {
+   "entry": "TARGET_CXX_ADJUST_CLASS_AT_DEFINITION",
+   "fact": "S23"
+  },
+  {
+   "entry": "TARGET_CXX_CDTOR_RETURNS_THIS",
+   "not_layout": "calling convention of constructors (MSVC returns this); carried by the dispatch descriptor, not a record layout"
+  },
+  {
+   "entry": "TARGET_CXX_CLASS_DATA_ALWAYS_COMDAT",
+   "not_layout": "symbol visibility and linkage, not layout"
+  },
+  {
+   "entry": "TARGET_CXX_COOKIE_HAS_SIZE",
+   "fact": "S29"
+  },
+  {
+   "entry": "TARGET_CXX_DECL_MANGLING_CONTEXT",
+   "not_layout": "names of types; the names plugin (fnvnx_names) owns the MSVC name of every function, not a layout"
+  },
+  {
+   "entry": "TARGET_CXX_DETERMINE_CLASS_DATA_VISIBILITY",
+   "not_layout": "symbol visibility and linkage, not layout"
+  },
+  {
+   "entry": "TARGET_CXX_GET_COOKIE_SIZE",
+   "fact": "S29"
+  },
+  {
+   "entry": "TARGET_CXX_GUARD_MASK_BIT",
+   "not_layout": "the guard variable of a function-local static of the compiling unit; internal to that unit, never read across the exe boundary"
+  },
+  {
+   "entry": "TARGET_CXX_GUARD_TYPE",
+   "not_layout": "the guard variable of a function-local static of the compiling unit; internal to that unit, never read across the exe boundary"
+  },
+  {
+   "entry": "TARGET_CXX_IMPORT_EXPORT_CLASS",
+   "not_layout": "symbol visibility and linkage, not layout"
+  },
+  {
+   "entry": "TARGET_CXX_KEY_METHOD_MAY_BE_INLINE",
+   "not_layout": "symbol visibility and linkage, not layout"
+  },
+  {
+   "entry": "TARGET_CXX_LIBRARY_RTTI_COMDAT",
+   "not_layout": "symbol visibility and linkage, not layout"
+  },
+  {
+   "entry": "TARGET_CXX_USE_AEABI_ATEXIT",
+   "not_layout": "registration of static destructors, internal to the compiling unit"
+  },
+  {
+   "entry": "TARGET_CXX_USE_ATEXIT_FOR_CXA_ATEXIT",
+   "not_layout": "registration of static destructors, internal to the compiling unit"
+  },
+  {
+   "entry": "TARGET_C_EXCESS_PRECISION",
+   "not_layout": "x87 excess precision; floating point is plain IEEE (OWNER 8)"
+  },
+  {
+   "entry": "TARGET_DECIMAL_FLOAT_SUPPORTED_P",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "TARGET_DEFAULT_SHORT_ENUMS",
+   "fact": "S14"
+  },
+  {
+   "entry": "TARGET_EMIT_SUPPORT_TINFOS",
+   "not_layout": "host code-generation and libgcc internals; no type of the exe"
+  },
+  {
+   "entry": "TARGET_EXPAND_TO_RTL_HOOK",
+   "not_layout": "host code-generation and libgcc internals; no type of the exe"
+  },
+  {
+   "entry": "TARGET_FIXED_POINT_SUPPORTED_P",
+   "not_layout": "decimal-float and fixed-point types: Visual C++ 2008 has none, so the exe has no such type"
+  },
+  {
+   "entry": "TARGET_INSTANTIATE_DECLS",
+   "not_layout": "host code-generation and libgcc internals; no type of the exe"
+  },
+  {
+   "entry": "TARGET_LIBGCC_CMP_RETURN_MODE",
+   "not_layout": "host code-generation and libgcc internals; no type of the exe"
+  },
+  {
+   "entry": "TARGET_LIBGCC_SHIFT_COUNT_MODE",
+   "not_layout": "host code-generation and libgcc internals; no type of the exe"
+  },
+  {
+   "entry": "TARGET_LOWER_LOCAL_DECL_ALIGNMENT",
+   "not_layout": "host frame and argument-slot layout; guest calls cross through the generated dispatch descriptors, not through the host frame (a record never holds a frame)"
+  },
+  {
+   "entry": "TARGET_MANGLE_TYPE",
+   "not_layout": "names of types; the names plugin (fnvnx_names) owns the MSVC name of every function, not a layout"
+  },
+  {
+   "entry": "TARGET_MEMBER_TYPE_FORCES_BLK",
+   "not_layout": "machine mode of a record in registers; memory layout unchanged"
+  },
+  {
+   "entry": "TARGET_MS_BITFIELD_LAYOUT_P",
+   "fact": "S16"
+  },
+  {
+   "entry": "TARGET_NARROW_VOLATILE_BITFIELD",
+   "not_layout": "access width of a volatile bit-field at code generation; the unit layout is S16"
+  },
+  {
+   "entry": "TARGET_PROMOTE_FUNCTION_MODE",
+   "not_layout": "promotion of sub-word values in registers; memory layout of records is unchanged"
+  },
+  {
+   "entry": "TARGET_PTRMEMFUNC_VBIT_LOCATION",
+   "fact": "S12"
+  },
+  {
+   "entry": "TARGET_STATIC_RTX_ALIGNMENT",
+   "not_layout": "alignment of objects (variables, constants), raised for speed; the layout of no record type changes"
+  },
+  {
+   "entry": "TARGET_UNWIND_WORD_MODE",
+   "not_layout": "host code-generation and libgcc internals; no type of the exe"
+  },
+  {
+   "entry": "TARGET_VECTOR_ALIGNMENT",
+   "not_layout": "alignment of objects (variables, constants), raised for speed; the layout of no record type changes"
+  },
+  {
+   "entry": "TARGET_VTABLE_DATA_ENTRY_DISTANCE",
+   "fact": "S30"
+  },
+  {
+   "entry": "TARGET_VTABLE_ENTRY_ALIGN",
+   "fact": "S30"
+  },
+  {
+   "entry": "TARGET_VTABLE_USES_DESCRIPTORS",
+   "fact": "S30"
+  },
+  {
+   "entry": "UINT16_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT32_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT64_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT8_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINTMAX_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINTPTR_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT_FAST16_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT_FAST32_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT_FAST64_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT_FAST8_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT_LEAST16_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT_LEAST32_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT_LEAST64_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UINT_LEAST8_TYPE",
+   "fact": "S33"
+  },
+  {
+   "entry": "UNITS_PER_WORD",
+   "not_layout": "width of the host register word; the lifted code expresses every guest operation at its own width, so no guest type changes"
+  },
+  {
+   "entry": "WCHAR_TYPE",
+   "fact": "S02"
+  },
+  {
+   "entry": "WCHAR_TYPE_SIZE",
+   "fact": "S02"
+  },
+  {
+   "entry": "WIDEST_HARDWARE_FP_SIZE",
+   "not_layout": "libgcc symbol naming and complex-arithmetic helper width; no type of the exe"
+  },
+  {
+   "entry": "WINT_TYPE",
+   "fact": "S31"
+  },
+  {
+   "entry": "WORDS_BIG_ENDIAN",
+   "fact": "S19"
+  }
+ ],
+ "crossing_forbidden": {
+  "predicate": "crossing_forbidden(T) is true iff T is, or contains by member (recursively through arrays and member records) or by base (recursively), a record with a virtual base, or is or contains a pointer to member, or is or contains a va_list",
+  "terms": [
+   {
+    "id": "virtual_base",
+    "gcc": "for a RECORD_TYPE R with TYPE_BINFO: any binfo reached from TYPE_BINFO(R) through BINFO_BASE_BINFO whose BINFO_VIRTUAL_P is true; R and every member type that is a record or an array of records, recursively",
+    "rows": [
+     "S25"
+    ],
+    "reason": "Visual C++ keeps a vbptr and a vbtable, GCC (Itanium) a vtable with virtual-base offsets: sizes can agree, layouts do not; no msvcmodel patch"
+   },
+   {
+    "id": "pointer_to_member",
+    "gcc": "TYPE_PTRMEM_P(T), i.e. TYPE_PTRDATAMEM_P (data member) or TYPE_PTRMEMFUNC_P (member function), for T and for every member type, recursively",
+    "rows": [
+     "S11",
+     "S12"
+    ],
+    "reason": "a function pointer to member is 8 bytes under GCC and 4 bytes (single inheritance) in MSVC, and the representation depends on the inheritance model; a data member pointer is 4 bytes on both (a 4-byte offset) but its representation of the null value is not documented by Microsoft, so it is forbidden too"
+   },
+   {
+    "id": "va_list",
+    "gcc": "T is the va_list type (TYPE_MAIN_VARIANT(T) == va_list_type_node, __builtin_va_list), for the type, every member type and every parameter type of a function crossing the boundary, recursively",
+    "rows": [
+     "S26"
+    ],
+    "reason": "the exe's va_list is a char * into guest stack memory (cl); GCC's is the AAPCS64 structure. Native code never receives an x86 va_list as a va_list: a bridge that takes one walks it as guest memory by the x86 rules (4-byte-rounded slots)"
+   }
+  ]
+ }
+}
