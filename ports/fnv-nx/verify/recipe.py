@@ -1293,10 +1293,18 @@ class Job:
                 return e["host"] + p[len(e["at"]):]
         return p
 
-    def toolrt(self, paths):
-        """Tool runtime (runtime.py rules) of driver PATHS plus every external as declared input. An external compiler is a tree
+    def named_ext(self, tokens):
+        """The names of the externals whose `at` holds an absolute path that a token of TOKENS (argv words, include dirs, input paths) names. RULE: a stage
+        is keyed by what it can read, and a stage reads only what is mounted (it is hermetic): PP and a generated stage mount the compiler's external
+        plus the externals they name here, not every external of the root. A stage that reads an unnamed external fails (the path is absent), so the
+        narrowing cannot drop a real input."""
+        paths = {p for t in tokens if isinstance(t, str) for p in re.findall(r"/[^\s=:,;\"']+", t)}
+        return {n for n, e in self.ext.items() if any(under(p, e["at"]) for p in paths)}
+
+    def toolrt(self, paths, names=None):
+        """Tool runtime (runtime.py rules) of driver PATHS plus every external (NAMES: only those) as declared input. An external compiler is a tree
         mapped HOST@AT: the loader closure of its x86-64 ELF files is resolved as the loader resolves it inside the sandbox."""
-        xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
+        xin = [{"at": e["at"], "tree": e["tree"]} for n, e in self.ext.items() if names is None or n in names]
         tag = hashlib.sha256(repr((paths, xin)).encode()).hexdigest()[:16]
         c = self.rec["compiler"]
 
@@ -1319,13 +1327,13 @@ class Job:
                 for p in paths:
                     xs, ts = unitstage.gcc_set(p)
                     exes, trees = exes + xs, trees + ts
-            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(trees))))
+            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(trees))), names)
         return self.cached_rt("tool-" + tag, make)
 
-    def plus(self, rt):
-        """RT with every external that it does not hold yet as a declared input."""
+    def plus(self, rt, names=None):
+        """RT with every external (NAMES: only those) that it does not hold yet as a declared input."""
         have = {i["at"] for i in rt["inputs"]}
-        rt["inputs"] = sorted(rt["inputs"] + [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values() if e["at"] not in have], key=lambda i: i["at"])
+        rt["inputs"] = sorted(rt["inputs"] + [{"at": e["at"], "tree": e["tree"]} for n, e in self.ext.items() if e["at"] not in have and (names is None or n in names)], key=lambda i: i["at"])
         return rt
 
     def ingest_files(self, tmp, name, files, base):
@@ -1415,8 +1423,9 @@ class Job:
         sites = sorted({n for _, _, _, tops in mods for n in tops})
         _, py = self.cached_rt("python-" + hashlib.sha256(repr(sites).encode()).hexdigest()[:16], lambda: runtime.build(self.store, sys.executable, sites))
         self.pymods = ";".join("%s==%s:%s" % (m, v, d) for m, v, d, _ in mods)   # in the key of every generated stage: the interpreter digest (runtime_id) plus the installed files of every pinned module
-        xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
         for i, g in enumerate(self.rec["generated"]):
+            names = self.named_ext(list(g["args"]) + list(g["inputs"]))   # a generated stage mounts the externals its stage names (args, inputs), no other
+            xin = [{"at": e["at"], "tree": e["tree"]} for n, e in self.ext.items() if n in names]
             try:
                 self.generate_one(ws, i, g, py, xin)
             except BuildRed as r:   # a red generator does not stop the others: its outputs are absent, and what needs them is blocked by it
@@ -1618,7 +1627,10 @@ class Job:
         used = sorted({drv["c" if k == "asm" else k] for k in kinds.values()})
         if not used:
             return {}
-        rtp, _ = self.toolrt(used)
+        cc = self.rec["compiler"].get("external")
+        flags = {k: unit_flags(rec, self.roots, self.root, self.hostpath(drv["c" if k == "asm" else k]), k) for k in sorted(set(kinds.values()))}
+        mount = ({cc} if cc else set()) | self.named_ext(list(rec["include"]) + [t for fl in flags.values() for t in fl])   # PP mounts what the include path and the flags name
+        rtp, _ = self.toolrt(used, mount)
         guest = entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("target") == "guest"
         pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
         try:
@@ -1643,11 +1655,10 @@ class Job:
         # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the
         # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
         # does not depend on it by construction (a new commit of such an external changes the PP keys, not the CC keys).
-        cc = self.rec["compiler"].get("external")
         drop = {e["at"] for n, e in self.ext.items() if n != cc}
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
-            json.dump({"argv": unit_flags(rec, self.roots, self.root, self.hostpath(drv["c" if k == "asm" else k]), k)}, open(fp, "w"))   # semantics first, then the root's own
+            json.dump({"argv": flags[k]}, open(fp, "w"))   # semantics first, then the root's own
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
@@ -1692,12 +1703,14 @@ class Job:
         lk, cc = self.rec["link"], self.drivers()[0]
         pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         ld = unitstage.prog(posixpath.normpath(pn))
+        # the ld stage reads the compiler's external (the linker is in it, when the compiler is one) and the external of link.libs: it mounts those, no other
+        names = ({self.rec["compiler"]["external"]} if "external" in self.rec["compiler"] else set()) | ({lk["libs"]["external"]} if "external" in (lk.get("libs") or {}) else set())
         if "external" in self.rec["compiler"]:
             e = self.ext[self.rec["compiler"]["external"]]
             ld = e["at"] + ld[len(e["host"]):] if ld.startswith(e["host"] + "/") else ld
-            rt = self.toolrt([cc])[1]
+            rt = self.toolrt([cc], names)[1]
         else:
-            rt = self.cached_rt("tool-ld-" + hashlib.sha256(repr((ld, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], [])))[1]
+            rt = self.cached_rt("tool-ld-" + hashlib.sha256(repr((ld, sorted((e["at"], e["tree"]) for n, e in self.ext.items() if n in names))).encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], []), names))[1]
         od, sd = os.path.join(ws, "objs"), os.path.join(ws, "ld")
         args = []
         for label, objs in groups:
@@ -1792,7 +1805,7 @@ class Job:
             with open(os.path.join(ld, "defs.txt"), "w") as f:
                 f.write("".join(n + "\n" for n in sorted(loader_defs)))
             ins.append({"at": "/loader", "tree": cas.ingest(ld, self.store)})
-        ins += [{"at": "/linked", "tree": elf_tree}, {"at": "/objs", "tree": objs_tree}] + extra + [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
+        ins += [{"at": "/linked", "tree": elf_tree}, {"at": "/objs", "tree": objs_tree}] + extra
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
@@ -1800,7 +1813,9 @@ class Job:
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
                + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])]
                + (["--loader-defs", "/loader/defs.txt"] if loader_defs is not None else []),
-               "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
+               "env": env, "inputs": [], "outputs": ["/out"]}
+        names = self.named_ext(doc["argv"])   # the externals the stage names (none today: it reads the ELF and the objects), no other
+        doc["inputs"] = sorted(py["inputs"] + ins + [{"at": e["at"], "tree": e["tree"]} for n, e in self.ext.items() if n in names], key=lambda x: x["at"])
         return self.stage(doc)[1]["outputs"]["/out"]
 
 

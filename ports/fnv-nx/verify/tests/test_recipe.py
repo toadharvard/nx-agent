@@ -249,13 +249,16 @@ def main():
               [m for m, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
               and all(len(d) == 64 and tops for _, _, d, tops in pm), pm)
         base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
-        real = recipe.envcheck.wheel_digest
+        # The mutated digest is visible to THIS thread only: the other cases of this file build concurrently (later()), and a process-wide patch
+        # would leak into their generated-stage keys (a second build of an unchanged root then misses, with FNVNX_PYMODS the only difference).
+        real, tl = recipe.envcheck.wheel_digest, threading.local()
+        recipe.envcheck.wheel_digest = lambda dist: real(dist) + ("x" if dist == getattr(tl, "target", None) else "")
         for target in [m for m, _, _, _ in pm]:
-            recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
+            tl.target = target
             try:
                 alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
             finally:
-                recipe.envcheck.wheel_digest = real
+                tl.target = None
             d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
             check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
         # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
@@ -449,6 +452,19 @@ def main():
                            ("include outside roots and externals", mut(external=[ex], include=["/ext/other/inc"]), "include")):
         check("external validation: %s" % what, any(want in x for x in errs(e2)), errs(e2))
 
+    # RULE (a stage is keyed by what it can read): PP mounts the compiler's external plus the externals the include path and flags name; a generated
+    # stage mounts the externals its args and inputs name. An external only the generator names changes that stage's key and no PP key.
+    def gdata(v):
+        return lambda d: open(d + "/f.txt", "w").write("v%d\n" % v)
+    gc1, gh1 = publish("gdata1", gdata(1))
+    gc2, gh2 = publish("gdata2", gdata(2))
+    gx = lambda c, h: {"name": "gdata", "repo": "fnv-nx-build", "ref": "gdata%d" % (1 if c == gc1 else 2), "commit": c, "tree_sha256": h, "at": "/ext/gdata"}  # noqa: E731
+    gen_ = [dict(RECIPE["generated"][0], args=["/ext/gdata/f.txt"])]
+    g1 = recipe.build(make_repo("gd1", rec=mut(external=[ex, gx(gc1, gh1)], include=erec["include"], generated=gen_), files=ef), ROOT, SS, BASE + "/gdo1", ext=ec)
+    g2 = recipe.build(make_repo("gd2", rec=mut(external=[ex, gx(gc2, gh2)], include=erec["include"], generated=gen_), files=ef), ROOT, SS, BASE + "/gdo2", ext=ec)
+    d1, d2 = set(g1["stage_keys"]) - set(g2["stage_keys"]), set(g2["stage_keys"]) - set(g1["stage_keys"])
+    check("an external that only the generated stage names: changing it re-runs that stage and no PP/CC stage (1 key differs, 1 run)",
+          g1["status"] == "green" and g2["status"] == "green" and len(d1) == 1 and len(d2) == 1 and g2["stages"]["run"] == 1, (g1.get("failure"), g2.get("failure"), d1, d2, g2.get("stages")))
     print("INFO +%.1f s: externals done" % (time.time() - t_start))
     # --- the compiler as an external tree at /opt/tc (real ELF closure of the cross gcc, pinned by commit and tree hash)
     crepo = make_repo("tc", rec=crec)
@@ -456,9 +472,9 @@ def main():
     rc_x = recipe.build(crepo, ROOT, SS, BASE + "/tco", ext=ec)
     print("INFO toy build with the external compiler %.1f s, stages %s" % (time.time() - t0, rc_x.get("stages")))
     check("external compiler at /opt/tc: toy root builds green (4 objects + ELF)", rc_x["status"] == "green" and len(rc_x["objects"]) == 4 and rc_x["elf"], rc_x.get("failure"))
-    check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys",
+    check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys (the compile and link stages mount the compiler's external; a generated stage that names none keeps its key)",
           [o["sha256"] for o in rc_x["objects"]] == [o["sha256"] for o in r1["objects"]] and rc_x["elf"]["sha256"] == r1["elf"]["sha256"]
-          and set(rc_x["stage_keys"]).isdisjoint(r1["stage_keys"]), rc_x.get("failure"))
+          and set(rc_x["stage_keys"]) != set(r1["stage_keys"]), rc_x.get("failure"))
     ran = []
     _rs = recipe.unitstage.run_stage
     recipe.unitstage.run_stage = lambda store, doc, *a, **k: (lambda r: (ran.append((doc["stage"], r[0][:12], r[2])) if r[2] == "run" else None) or r)(_rs(store, doc, *a, **k))
