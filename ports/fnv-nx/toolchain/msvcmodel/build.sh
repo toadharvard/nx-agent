@@ -293,9 +293,17 @@ rows = []
 for n in names:
     assert (n in a) == (n in b), "multilibs disagree on %s" % n
     rows.append({"name": n, "answer": "yes" if n in a else "no", "member": a.get(n)})
-open(site, "w").write("".join("ac_cv_func_%s=%s\n" % (r["name"], r["answer"]) for r in rows))
-json.dump({"rule": "CFG-FUNC", "configure": "libstdc++-v3/configure", "funcs": rows}, open(out, "w"), indent=1)
-print("CFG-FUNC: %d functions, %d yes" % (len(rows), sum(r["answer"] == "yes" for r in rows)))
+# AC_SEARCH_LIBS(f, libs) asks the same question ("does the link find f, and which -l is needed"): a symbol the runtime archives
+# define needs no library, one they do not define stays unresolved ("no").
+snames = sorted(set(re.findall(r"\bac_cv_search_(\w+)", open(conf).read())))
+srows = []
+for n in snames:
+    assert (n in a) == (n in b), "multilibs disagree on %s" % n
+    srows.append({"name": n, "answer": "none required" if n in a else "no", "member": a.get(n)})
+open(site, "w").write("".join("ac_cv_func_%s=%s\n" % (r["name"], r["answer"]) for r in rows)
+                      + "".join("ac_cv_search_%s='%s'\n" % (r["name"], r["answer"]) for r in srows))
+json.dump({"rule": "CFG-FUNC", "configure": "libstdc++-v3/configure", "funcs": rows, "searches": srows}, open(out, "w"), indent=1)
+print("CFG-FUNC: %d functions, %d yes; %d searches, %d none required" % (len(rows), sum(r["answer"] == "yes" for r in rows), len(srows), sum(r["answer"] != "no" for r in srows)))
 EOF3
   # The top Makefile runs every target configure with CONFIG_SITE=no-such-file, so the answers go in as the cache variables of the
   # environment, which configure honours as presets (autoconf "Cache variables": a set ac_cv_* is not re-tested).
