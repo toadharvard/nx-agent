@@ -1,0 +1,8 @@
+{
+ "vendor_id": "GenuineIntel",
+ "family": 6,
+ "model": 207,
+ "stepping": 2,
+ "microcode": null,
+ "model_name": "Intel(R) Xeon(R) Processor @ 2.10GHz"
+}

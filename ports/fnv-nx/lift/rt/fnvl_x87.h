@@ -140,10 +140,17 @@ static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnv
    opcode (FOP) of the last non-control instruction it executed, and the data pointer (FDP, FDS) of its memory operand; the control instructions (FNINIT, FNCLEX, FLDCW, FNSTCW, FNSTSW,
    FNSTENV, FLDENV, FNSAVE, FRSTOR, WAIT) leave them alone; FNINIT / FNSAVE (re-initialisation) zero them. State: c->fip (address of the first byte of the instruction, prefixes included) and
    c->fdp (offset of the last memory operand, no segment base), written by the lifter's x87 entry (f_x87.py) before every non-control x87 instruction (fdp only with a memory operand).
-   ASM-212: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged. ASM-213: FDS is DS whenever FDP != 0 (an FS-relative operand is
-   reported with the DS selector: the selector is not kept per operand). ASM-214: FOP is not stored, it is the low 11 bits of the two opcode bytes at FIP (first byte & 7, second byte), read
-   from the code when an image is written; FIP == 0 (no x87 instruction since FNINIT / thread start) gives the FNINIT state: FIP = FCS = FOP = FDP = FDS = 0. FCS and FDS are the model's
-   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.cc). ASM-215: reserved bits of the image are 0. */
+   ASM-212: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged.
+   FOP, FCS and FDS are guest state (struct cpu fop, fcs, fds): written by fnvlift's x87 entry (f_x87.py ptrs()) before every non-control x87 instruction (FCS = the CS selector; FDS only with a
+   memory operand: the explicit segment override, else SS for an ebp/esp base, else DS, SDM Vol 1 3.7.2), and loaded verbatim by fx_env_ld, FRSTOR and the rt/seh.cc CONTEXT restore. The 16-bit
+   image (fig 8-11) keeps FOP. FNINIT / FNSAVE give the FNINIT state: FIP = FCS = FOP = FDP = FDS = 0. ASM-215: reserved bits of the image are 0. */
+/* SDM Vol 1 8.1.8: CPUID.(EAX=7,ECX=0):EBX[6] (FDP/FDS updated only on an unmasked exception) and EBX[13] (FCS/FDS deprecated, stored as 0) exist only when leaf 7 is reported. The declared CPU
+   reports no leaf 7 (max basic leaf below 7), so both bits are 0 and the per-instruction update above is its behaviour. If leaf 7 is ever reported, both bits must be honoured from CPUREF. */
+#ifdef __cplusplus
+static_assert(FNVL_MAX_BASIC < 7u, "declared CPU has no cpuid leaf 7: FDP/FDS and FCS/FDS behaviour of SDM 8.1.8 is the per-instruction one");
+#else
+_Static_assert(FNVL_MAX_BASIC < 7u, "declared CPU has no cpuid leaf 7");
+#endif
 static inline u32 fx_fop(void){ return c->fop&0x7ffu; }
 /* tag of a physical register (SDM 8.1.7): 0 valid, 1 zero, 2 special (NaN, infinity, denormal, unsupported), 3 empty */
 static inline u32 fx_tag(const fv *p){ if(!p->k) return 3; fnvl_f80 x=fv_x(*p); u32 e=x.se&0x7fff; if(e==0x7fff) return 2; if(e==0) return x.m?2:1; return (x.m>>63)?0:2; }
