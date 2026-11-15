@@ -793,3 +793,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - the 8-farm cold pack build (packs → ELF).
 - After the first frame: udcert SCCP (w10 bd94fd02 and later), fpmask (w11), the fnvl_seg_ok certificate, gate_oracle 29/155.
 - bottleneck: waiting on L1 cand3 for typed dispatch and the 8-farm cold pack build; workers 2 (w7, w8).
+- 20:25 Parked and archived (after the first frame): w10 at claude/fnv-l3a-lift-w10-udcert 74294bd0 (WIP note journal/inbox/l3a-lift-w10-udcert-wip.md; 0 of 5,308 certified); w11 at claude/fnv-l3a-lift-w11-fpmask e22f2c2 (lift/fpmask/WIP.md; 935 of 1,111 load sites proved masked, 176 undecided, none clears a mask bit).
