@@ -36,6 +36,8 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   An `inputs` entry may also be `{"stage": "<this root>:gen:I", "path": OUTPUT}`: the declared output of an EARLIER generator I of the same recipe (red: a later
   one, a path it does not output, another root's stage; another root's output goes through `uses`). It is mounted at `/stage/<OUTPUT>` and its content is in the
   stage key. A chain of tools (`contract/facts`: exefacts, n1, objects, registry, bind, bodysel, nativerows) is one recipe whose stages cache one by one.
+  A stage has no scratch directory: `/tmp` is read-only like the rest of the root, and a tool writes only its declared outputs (a tool that needs a table tree it does not output
+  does not write it: `contract/modules.py` without `--out-dir` writes only the outputs it is asked for). A tool that needs scratch fails in the stage, never differently by tool.
   The stage's `/dev/shm` is a private empty tmpfs that is writable (POSIX semaphores of `multiprocessing`); nothing in it survives the run and `/tmp`, the tool tree and the
   inputs stay read-only.
 - `os_layer`: units that implement the OS interface (may contain SVC). They are flagged `os_layer: true` in objects.json for `objstub --os-layer`.
