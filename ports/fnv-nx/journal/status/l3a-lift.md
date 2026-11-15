@@ -911,3 +911,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - Not run, because they need declared inputs: test_dsl_emit, lifted_vs_shapes, universe_r3_check, lock_only, ranges, modules_check, modlift_closure.
   - Three of them read FNVNX_INPUT_EXE/FACTS from the environment. They take explicit arguments once facts is a stage. That is not on the path before then.
 - liftsrc chain: the recipe is valid on w8's local branch, and a cold build is running to measure the shard time.
+- 21:17 L2 decision (a): the shapeless-definition rule (static and never address-taken, by GCC's own fact, is quiet; anything else is DISPATCH1) goes into the dispatch plugin on cand3's line. L2 w2 (session_01KmtZKUiDYYhRvaS8TJ2kGu) ports 37d4e27df/b0198f906 onto plugins-cand3. test_defdisp stays unchanged and turns green when that lands.
