@@ -695,6 +695,16 @@ def check_run(SS):
     check("host_cpu: pin microcode null matches a VM cpuinfo with no microcode line", recipe.cpu_mismatch(vpin, vm) == [], recipe.cpu_mismatch(vpin, vm))
     check("host_cpu: pin microcode null is NOT a wildcard: a host with a microcode line is a mismatch", len(recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping"))) == 1, recipe.cpu_mismatch(vpin, vm.replace("stepping", "microcode\t: 0x1\nstepping")))
     check("host_cpu: a pin with a microcode value is a mismatch on a host that has no microcode line", len(recipe.cpu_mismatch(dict(vpin, microcode=1), vm)) == 1)
+    jb = recipe.Job(good, ROOT, SS, 1, os.path.join(SS, "external"))
+    ver = lambda n: {"version": subprocess.run(["dpkg-query", "-W", "-f=${Version}", n], capture_output=True, text=True).stdout}   # noqa: E731
+    both, only = BASE + "/un-both", BASE + "/un-libc"
+    for n in ("base-files", "libc6"):
+        jb._deb_into(both, n, ver(n))
+    jb._deb_into(only, "libc6", ver("libc6"))
+    check("PT_INTERP /lib64/ld-linux-x86-64.so.2 resolves through base-files' ./lib64 -> usr/lib64 and then libc6's own link", recipe.resolves_in(both, "/lib64/ld-linux-x86-64.so.2"))
+    check("without base-files in the declared set the same PT_INTERP is red (libc6 alone has no ./lib64)", not recipe.resolves_in(only, "/lib64/ld-linux-x86-64.so.2"))
+    check("the link-free path /usr/lib64/ld-linux-x86-64.so.2 resolves in libc6 alone (its own link)", recipe.resolves_in(only, "/usr/lib64/ld-linux-x86-64.so.2"))
+    check("/lib/ld64.so.1 (what the link rule writes today) resolves in no declared deb", not recipe.resolves_in(both, "/lib/ld64.so.1"))
     hc = dict(rec_(), run=[dict(rec_()["run"][0], host_cpu="cpuref")])
     check("host_cpu: the key needs the tracked pin file verify/cpuref.json", any("cpuref" in e for e in recipe.check(hc, ROOT, files, roots, None, good)))
     check("host_cpu: with the pin file tracked the check accepts it", not [e for e in recipe.check(hc, ROOT, files + [T + "verify/cpuref.json"], roots, None, good) if "host_cpu" in e])
@@ -741,12 +751,12 @@ def check_run(SS):
     check("run stage: a declared input is visible at /in/N and its content is read", ri["status"] == "green" and got_in == "5\n", (ri.get("failure"), got_in))
     ri2 = build(mk("rn-in2", args=["copy", "/in/1"], ins=(OTH + "/data.txt",), data="6\n"), "in2")
     check("the content of a declared input is in the run key (one byte changed: exactly one key differs)", ri2["status"] == "green" and len(set(ri["stage_keys"]) - set(ri2["stage_keys"])) == 1, ri2.get("failure"))
-    dd = mk("rn-deb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
+    dd = mk("rn-deb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
     rdb = build(dd, "deb")
     os.makedirs(BASE + "/rc3/store", exist_ok=True)
     got_d = open(recipe.resolve_input(ROOT, ref_in, dd, BASE + "/rc3")[0], "rb").read() if rdb["status"] == "green" else b""
-    check("run stage: a declared deb's installed files are visible at /deb/<name>/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
-    nd = mk("rn-nodeb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"])
+    check("run stage: a declared deb's installed files are visible at /deb/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
+    nd = mk("rn-nodeb", args=["copy", "/deb/usr/bin/dh_autotools-dev_restoreconfig"])
     rnd = build(nd, "nodeb")
     got_n = open(recipe.resolve_input(ROOT, ref_in, nd, BASE + "/rc4")[0], "rb").read() if os.makedirs(BASE + "/rc4/store", exist_ok=True) is None and rnd["status"] == "green" else None
     check("run stage: a deb that is not declared is not in the sandbox (the file is not there: empty copy)", rnd["status"] == "green" and got_n == b"", (rnd["status"], got_n))
