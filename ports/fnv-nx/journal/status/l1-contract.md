@@ -1333,3 +1333,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - /dev/shm is a private tmpfs per stage (test 3f). aliases.ld deleted, and gate_data reads it only for linked roots.
   - Next for w22: a downstream bind gate over the roots objects_of excludes.
 - L2 w3 e46db69a6: linkage `c` and odrdef (test_odrdef 30 ok). w23 wires tier 2.
+- Orchestrator: the b274ec067 repin (559f220db) does not land; one repin comes with L2's aarch64-none-elf mirror. cand2 stays on the current pin, takes the race fix b30f7b460 alone, and takes CLAUDE.md (integ b12c221a6) and ORCHESTRATION.md/ALL.md (integ 3025e51f5).
