@@ -74,7 +74,7 @@ def run_env_sha():
             f = ln.split()
             if f and f[0] in ('isla', 'isla-cargo-lock', 'isla-vendor'): h.update(('|'.join(f) + '\n').encode())
     import inspect
-    h.update(repr((SEG, SEG_FREE, LINEARIZE, EIP_LIMIT, ADDR, 'v1', inspect.getsource(sym_constraint))).encode())
+    h.update(repr((SEG, SEG_FREE, LINEARIZE, EIP_LIMIT, ADDR, 'v2', inspect.getsource(sym_constraint))).encode())
     return h.hexdigest()
 
 def closure_sha(fns):

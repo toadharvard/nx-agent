@@ -32,6 +32,12 @@ def norm(text):
     """the text of an IR item without source positions and with single spaces"""
     return re.sub(r'[ \t]+', ' ', POS.sub('', text)).strip()
 
+GENID = re.compile(r'\bz3zE\d+\b')
+def alpha(text):
+    """the parameter ids Sail generates (z3zE<counter>: one per function that has a unit parameter, bound in that function only; the counter shifts with every line any patch adds anywhere before it) renamed by order of first occurrence in the item: alpha-renaming of a bound variable, a bijection inside one item"""
+    ids = {}
+    return GENID.sub(lambda m: ids.setdefault(m.group(0), 'z3zE#%d' % len(ids)), text)
+
 def encode(name):
     """Sail name (as isla prints it in a call event) -> IR name: z + name with z -> zz, < -> zI, > -> zK (sail_lib z-encoding of the characters that occur)"""
     return 'z' + ''.join({'z': 'zz', '<': 'zI', '>': 'zK'}.get(c, c) for c in name)
@@ -56,7 +62,7 @@ class IR:
             if m: (self.vals if m.group(1) == 'val' else self.regs)[m.group(2)] = norm(line)
         self.ids = None
     def _put(self, kind, name, text):
-        (self.fns if kind == 'fn' else self.types)[name] = norm(text)
+        (self.fns if kind == 'fn' else self.types)[name] = alpha(norm(text))
 
 _cache = {}
 def load(path):

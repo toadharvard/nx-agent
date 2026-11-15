@@ -75,7 +75,9 @@ def one(key, args):
 def migrate(rec, args):
     """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the
     same key) and add model_fns + closure_sha.  The proof is not redone: the run that is repeated is the run the proof used."""
-    if rec.get('closure_sha') or rec.get('model_sha') != model_sail.ir_sha() or rec.get('result') != 'proved': return rec
+    if rec.get('model_sha') != model_sail.ir_sha() or rec.get('result') != 'proved': return rec
+    if rec.get('model_fns'): return dict(rec, closure_sha=model_sail.closure_sha(rec['model_fns']))     # re-key (closure rule changed, env v2): pure recomputation over the recorded executed set, on the IR the record was proved against
+    if rec.get('closure_sha'): return rec
     rep, fields = symform.parse_key(rec['shape']); eip_sym = rec.get('eip_mode', 'sym') == 'sym'
     model_sail.LAST.clear(); model_sail.model_post_shape(rep, fields, pre_state(eip_sym), eip_sym, int(args.timeout))
     return dict(rec, **fns_fields())
