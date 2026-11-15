@@ -175,3 +175,7 @@ Already conforming: ftoi f2i_builtins.inc (generated from GCC 13.3 builtin defs)
 After the first frame:
 - **toolchain/msvc/setup_msvc.sh (S11 cl oracle, decomp; off the path)** → decide whether it is deleted or becomes a recipe external when decomp resumes.
 - **About 45 L2 remote branches, many of them stale copies** → delete the ones that are fully merged into claude/fnv-l2-source, once the first frame is reached.
+- 2026-11-15 00:47 Defect, L4 group 7: undefined `_ZTVSt*.fnvnx_ap8` from platform/win32/ini.cpp.
+  - Cause: a second ABI in one image. The sdd plugin rewrites vtable address points, but the guest runtime's libstdc++ was built without the plugins.
+  - Closed by (a), the orchestrator's decision: the noneelf phase B builds libgcc, newlib and libstdc++ with every loadable plugin, and the MANIFEST carries the plugin digests. Owner: farm.
+- order's RTL table: w1 builds it as a generator plus classification rows keyed by the pinned tarball, with checks. L2 reviews the rows.
