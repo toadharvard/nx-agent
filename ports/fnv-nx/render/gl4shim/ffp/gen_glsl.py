@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_glsl.py OUT_DIR SRC_DIR HEADER...: the fixed-function programs of the GL 4.5 backend (render/gl4shim, rows FFP_* of nx_gl4shim.h).
+"""gen_glsl.py OUT_DIR SRC_DIR HEADER... (the headers include nx_gl4shim.h): the fixed-function programs of the GL 4.5 backend (render/gl4shim, rows FFP_* of nx_gl4shim.h).
 Writes OUT_DIR/gl4shim_ffp.gen.h: the GLSL text of SRC_DIR/ffp.vert.glsl / ffp.frag.glsl with every #include expanded, in the two variants
 of the programs (smooth, and flat = NX_FFP_FLAT, selected by D3DRS_SHADEMODE), each as a NUL-terminated char array
 nx_gl4shim_ffp_<vs|ps>_<smooth|flat>.
@@ -17,6 +17,14 @@ VARIANTS = (("smooth", None), ("flat", "NX_FFP_FLAT"))
 CONSTS = ("NX_FFP_UBO_BINDING", "NX_FFP_VS_UBO_BINDING", "NX_FFP_VS_PALETTE_BINDING", "NX_FFP_MAX_BLEND_MATRICES", "NX_FFP_STAGES", "NX_FFP_MAX_LIGHTS", "FNVNX_DK_UBO_DRIVER", "FNVNX_DK_SAMP_CUBE_BASE", "FNVNX_DK_SAMP_VOLUME_BASE")
 BLOCKS = (("NxFfpPsState", "NX_FFP_UBO_BINDING"), ("NxFfpVsState", "NX_FFP_VS_UBO_BINDING"))   # the UBO records: the C structs of ffp_state.h / ffp_vs_state.h
 SAMPLERS = (("t2d", "sampler2D", None), ("tcb", "samplerCube", "FNVNX_DK_SAMP_CUBE_BASE"), ("tvl", "sampler3D", "FNVNX_DK_SAMP_VOLUME_BASE"))
+
+
+def version(headers):
+    """the `#version` line of the backend: NX_GL4SHIM_GLSL_VERSION of nx_gl4shim.h (the sources carry no version line)"""
+    for h in headers:
+        m = re.search(r'^#define\s+NX_GL4SHIM_GLSL_VERSION\s+"(#version [^"]+)"\s*$', open(h).read(), re.M)
+        if m: return m.group(1)
+    raise SystemExit("gen_glsl: NX_GL4SHIM_GLSL_VERSION is defined in no header")
 
 
 def consts(headers):
@@ -141,9 +149,10 @@ def expand(path, seen=()):
     return "\n".join(out)
 
 
-def variant(text, define, v):
-    """the constants of the headers and `#define <define> 1` right after the #version line"""
-    i = text.index("\n", text.index("#version")) + 1
+def variant(text, define, v, ver):
+    """the #version line, the constants of the headers and `#define <define> 1`, then the text"""
+    if re.search(r"^\s*#\s*version", text, re.M): raise SystemExit("gen_glsl: a source carries a #version line; it is NX_GL4SHIM_GLSL_VERSION")
+    text, i = ver + "\n" + text, len(ver) + 1
     d = "".join("#define %s %d\n" % (k, v[k]) for k in CONSTS) + ("#define %s 1\n" % define if define else "")
     return text[:i] + d + text[i:]
 
@@ -155,6 +164,7 @@ def carray(name, data):
 def main():
     if len(sys.argv) < 4: raise SystemExit("usage: gen_glsl.py OUT_DIR SRC_DIR HEADER...")
     out, src, v = sys.argv[1], sys.argv[2], consts(sys.argv[3:])
+    ver = version(sys.argv[3:])
     sts = structs(sys.argv[3:], v)
     btext, layout = blocks(sts)
     os.makedirs(out, exist_ok=True)
@@ -164,7 +174,7 @@ def main():
         if "//@SAMPLERS\n" in text: text = text.replace("//@SAMPLERS\n", samplers(v) + "\n")
         for n in btext: text = text.replace("//@UBO %s\n" % n, btext[n])
         for vname, d in VARIANTS:
-            b = variant(text, d, v).encode(); n = "nx_gl4shim_ffp_%s_%s" % (stage, vname)
+            b = variant(text, d, v, ver).encode(); n = "nx_gl4shim_ffp_%s_%s" % (stage, vname)
             g += carray(n, b)
     open(os.path.join(out, "gl4shim_ffp.gen.h"), "w").write(g)
     os.makedirs(os.path.join(out, "layout"), exist_ok=True)

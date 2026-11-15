@@ -1,6 +1,6 @@
 /* ffp_state.c - D3D9 state -> NxFfpPsState. A copy plus the two type conversions D3D9 itself defines
  * (D3DCOLOR -> rgba floats, DWORD -> float bit pattern). No value is interpreted here: every enumeration value,
- * valid or not, is stored raw and interpreted by the program (see ffp_ps_ref.h). */
+ * valid or not, is stored raw and interpreted by the program (see ffp.frag.glsl). */
 #include <string.h>
 #include "ffp_state.h"
 #include "ffp_layout_ps.gen.h"   /* the std140 offsets of the UBO records (render/gl4shim/ffp/gen_glsl.py): a layout that differs is a compile error */

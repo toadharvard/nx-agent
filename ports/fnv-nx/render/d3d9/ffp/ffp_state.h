@@ -1,10 +1,10 @@
 /*
  * ffp_state.h - D3D9 fixed-function PIXEL pipeline state (rule RD5): the data that selects the behaviour of the one
- * program ffp.frag.glsl / nx_ffp_ps_eval(). Plain C99, std140-compatible (the struct IS the UBO contents).
+ * program ffp.frag.glsl. Plain C99, std140-compatible (the struct IS the UBO contents).
  *
  * The block stores the D3D9 values RAW (masked/converted only where the D3D9 type demands it). The program is total
- * over every bit pattern of every word: ffp_norm_op / ffp_norm_arg / ffp_norm_textype (ffp_ps_ref.h) give each
- * out-of-range value one defined meaning, in C and in GLSL alike.
+ * over every bit pattern of every word: ffp_norm_op / ffp_norm_arg_sel / ffp_norm_textype (ffp.frag.glsl) give each
+ * out-of-range value one defined meaning.
  *
  * The std140 layout is the struct: render/gl4shim/ffp/gen_glsl.py writes the GLSL block of NxFfpPsState from it (UBO NX_FFP_UBO_BINDING) and the offset of
  * every member as typedef-char assertions (ffp_layout_ps.gen.h, included by ffp_state.c), so the C and GLSL layouts cannot differ.

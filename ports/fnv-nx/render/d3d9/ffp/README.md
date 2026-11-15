@@ -1,7 +1,6 @@
 # D3D9 fixed-function pixel pipeline (T-FFP-PS, rule RD5)
 
-One program, behaviour selected by data. `ffp.frag.glsl` (deko3d GLSL, include `d9_epilogue.glsl` for alpha test + fog) and
-`ffp_ps_ref.c` (CPU twin, same function names) read `NxFfpPsState` (`ffp_state.h`, std140, UBO `NX_FFP_UBO_BINDING`). Test: `python3 tests/l6/ffp_ps/test_ffp_ps.py`.
+One program, behaviour selected by data. `ffp.frag.glsl` (include `d9_epilogue.glsl` for alpha test + fog) reads `NxFfpPsState` (`ffp_state.h`, std140, UBO `NX_FFP_UBO_BINDING`).
 
 ## State layout
 The struct `NxFfpPsState` of `ffp_state.h` is the one record (member comments name the D3D9 states). `render/gl4shim/ffp/gen_glsl.py` writes the GLSL block from it and the std140 offset of every member as compile-time assertions.

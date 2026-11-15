@@ -1,7 +1,6 @@
-#version 460
 // D3D9 fixed-function VERTEX pipeline as ONE total program (rule RD5): behaviour is selected by the data block
 // NxFfpVsState (ffp_vs_state.h, std140, NX_FFP_VS_UBO_BINDING) and the world-matrix palette (NX_FFP_VS_PALETTE_BINDING); the driver UBO 2 supplies
-// posfix (fnvnx_dk_layout.h). Twin of ffp_vs_ref.c (same step order and statements); open points: ffp_vs_README.md.
+// posfix (fnvnx_dk_layout.h); open points: ffp_vs_README.md.
 // Matrices: the D3D row-major bytes read as a GLSL mat4 are the TRANSPOSE, so D3D's  v * M  is written  M * v.
 // Attribute locations follow fnvnx_dk_attrib_location (POSITION 0, BLENDWEIGHT 1, BLENDINDICES 2, NORMAL 3, COLOR 4-5,
 // TEXCOORD 6-13); the host binds absent inputs to anything (presence comes from the block). Tweening (VERTEXBLEND ==

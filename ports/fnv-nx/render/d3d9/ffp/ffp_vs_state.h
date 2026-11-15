@@ -1,6 +1,6 @@
 /*
  * ffp_vs_state.h - D3D9 fixed-function VERTEX pipeline state (rule RD5): the data that selects the behaviour of the one
- * program ffp.vert.glsl / nx_ffp_vs_eval(). Plain C99; NxFfpVsState IS the std140 UBO contents (binding
+ * program ffp.vert.glsl. Plain C99; NxFfpVsState IS the std140 UBO contents (binding
  * NX_FFP_VS_UBO_BINDING) and the matrix palette is a second UBO (binding NX_FFP_VS_PALETTE_BINDING). The driver UBO 2
  * of fnvnx_dk_layout.h (VS: vec4 posfix) is reused unchanged.
  *

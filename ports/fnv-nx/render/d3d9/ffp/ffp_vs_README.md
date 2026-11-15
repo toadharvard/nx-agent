@@ -1,8 +1,8 @@
 # D3D9 fixed-function vertex pipeline (T-FFP-VS, rule RD5)
 
-One program, behaviour selected by data: `ffp.vert.glsl` (build `NX_FFP_FLAT` for flat shading, like the pixel stage) and its CPU twin
-`ffp_vs_ref.c` read `NxFfpVsState` (`ffp_vs_state.h`: std140, 2144 bytes, UBO `NX_FFP_VS_UBO_BINDING`) + the world palette (`mat4 world[256]`, 16384
-bytes, `NX_FFP_VS_PALETTE_BINDING`) + `posfix` of the driver UBO (`FNVNX_DK_UBO_DRIVER`). `nx_ffp_vs_state_from_d3d9` is pure; a 256-mat4 block compiles in uam (its limit is 65536
+One program, behaviour selected by data: `ffp.vert.glsl` (build `NX_FFP_FLAT` for flat shading, like the pixel stage)
+reads `NxFfpVsState` (`ffp_vs_state.h`: std140, UBO `NX_FFP_VS_UBO_BINDING`) + the world palette (`mat4 world[NX_FFP_MAX_BLEND_MATRICES]`,
+`NX_FFP_VS_PALETTE_BINDING`) + `posfix` of the driver UBO (`FNVNX_DK_UBO_DRIVER`). `nx_ffp_vs_state_from_d3d9` is pure; a 256-mat4 block compiles in uam (its limit is 65536
 bytes = 1024 mat4; 1025 is rejected "too big (65600/65536)"). Test: `python3 tests/l6/ffp_vs/test_ffp_vs.py`.
 Interface: attributes POSITION 0, BLENDWEIGHT 1, BLENDINDICES 2, NORMAL 3, COLOR 4-5, TEXCOORD 6-13 (= fnvnx_dk_attrib_location), PSIZE 14;
 tweening (VERTEXBLEND 255, no weights) reuses 1 = POSITION1, 2 = NORMAL1. Absent inputs: presence bits in the block, the bound value is ignored.

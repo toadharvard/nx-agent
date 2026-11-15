@@ -1,6 +1,5 @@
-#version 460
 // D3D9 fixed-function PIXEL pipeline as ONE total program (rule RD5): behaviour is selected by the data block
-// NxFfpPsState (ffp_state.h, std140, UBO NX_FFP_UBO_BINDING). Twin of ffp_ps_ref.c (same function names, same statements);
+// NxFfpPsState (ffp_state.h, std140, UBO NX_FFP_UBO_BINDING).
 // semantic source for open points: WineD3D ffp fragment generator, deviations in README.md.
 //
 // Interface (render/shaders/include/fnvnx_dk_layout.h): varyings by fnvnx_dk_varying_location: COLOR0 diffuse = 0,
