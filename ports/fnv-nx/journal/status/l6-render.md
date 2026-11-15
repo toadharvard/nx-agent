@@ -1271,3 +1271,8 @@ Paused: w3b, w4, farm; no other work.
 - 21:36Z L1:
     - The syslib EEXIST is fixed at w28 0cdff83c8, with a private mkdtemp for each link. w6 (doing) merges it, re-runs gl4 and sm_link, and sends the head to w12.
     - The 6 render abspath rows came from cand3's older copy; render is at 0, confirmed.
+- 21:39Z L1: the abspath gate is final at w28 9d1124891, which includes the syslib fix 0cdff83c8. A path built from __file__ is red.
+    - w6 (doing): merge 9d1124891 and fix every render row it reports by `uses` plus an argument or require_mounted. On cand3's copy those rows are state_gen:30, envq:16, envq:104, gen_impl:41 and gen_wine_ids:16.
+    - Also: the gen_env:73 fallback becomes a required argument, and envq's __main__ is removed or given required arguments.
+    - Then send the head to w12.
+- bottleneck: that w6 head (cand4), then L1 cand3 and cand4.
