@@ -1078,3 +1078,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Facts 6944080: 6 certs and 262 sites. No cert for the exe (no load config) or binkw32 (no load config); d3dx9_31 has 1 cert with 0 sites (data-decoded universe, re-measured after w7).
   - Of the 24 `mov m16, gs`, 5 are in /GS failure regions. The other 19 (CONTEXT captures and the exe) read the initial gs and are closed by L5's kernel-derived gs row, not by a certificate.
   - L1 gate contract/gsfail.py is not pushed yet (w28 asked).
+- 22:16 GSCERTS withdrawn. Integ 1b0541249 deleted the /GS reach rule and L1 cancelled the gate. The /GS failure paths are lifted as ordinary code; w8 removes the stage from base3.
+- 22:16 w12 prof2: bb4256c9ef8c accepted.
+  - -fno-schedule-insns as a PER_ROOT flag class: pack CC usr 5664 s → 821 s (×0.145) on the 22 units that build in both runs; .text ×1.0148.
+  - ec2 now compiles (804 s, dominated by "expand vars"). b3c is still running at 47 min, 5.2 GB.
+  - Red, sent to L1: contract/objfacts.py does not know L2's sympair kind 'noemit' (66353d9ea), which breaks the pack's `uses` chain and blocks the 6 FTOI units.
+  - Next for w12: the cause of expand vars, then a lifter-side rule proposal.
+  - bottleneck: the exe facts memory growth (w7); L1 objfacts 'noemit'.
