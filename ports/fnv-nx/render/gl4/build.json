@@ -18,8 +18,24 @@
  },
  "include": [
   "ports/fnv-nx/render/nxgpu",
-  "ports/fnv-nx/render/shaders/translator/include","ports/fnv-nx/lib/sha256/include"
+  "ports/fnv-nx/render/shaders/translator/include",
+  "ports/fnv-nx/lib/sha256/include"
  ],
  "units": "all",
- "link": null
+ "link": null,
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/gl4/gen_funcs.py",
+   "args": [
+    "/out/gl4_funcs.h",
+    "/in/ports/fnv-nx/render/gl4"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/gl4"
+   ],
+   "outputs": [
+    "gl4_funcs.h"
+   ]
+  }
+ ]
 }

@@ -24,13 +24,26 @@
 extern "C" {
 #endif
 
+/* The ABI 4.1 function (number NXGPU_FN_COUNT4, no NxGpuApi4 member): X(id suffix, name, argument count). */
+#define NXGPU_FN_LIST_EXT(X) X(SHADER_CREATE_D3D, shader_create_d3d, 1)
 enum { NXGPU_FN_SHADER_CREATE_D3D = NXGPU_FN_COUNT4 };
+NX_ASSERT_((int)NXGPU_FN_SHADER_CREATE_D3D == (int)NXGPU_FN_COUNT4, "ABI 4.1 continues ABI 4");
+
+/* NxShaderD3D.variant bits (any other bit must be 0) and the limits of one create call. */
+enum {
+    NXGPU_SHADER_VS_COMPLETE = 1u << 0,   /* vertex stage only: FNVNX_SHADER_VS_COMPLETE */
+    NXGPU_SHADER_FLAT = 1u << 1,          /* either stage: FNVNX_SHADER_FLAT_COLOR */
+    NXGPU_SHADER_VARIANT_MASK = NXGPU_SHADER_VS_COMPLETE | NXGPU_SHADER_FLAT,
+    NXGPU_SHADER_MAX_CODE = 1u << 20,     /* bytes of bytecode */
+    NXGPU_SHADER_MAX_LINK_PAIRS = 31,     /* n_link_pairs: the varying slots of render/shaders FNVNX_DK_VARYING_SLOTS */
+    NXGPU_SHADER_PAIR_USAGE_MAX = 13      /* a link pair is usage * 16 + index; usage <= D3DDECLUSAGE_SAMPLE */
+};
 
 typedef struct NxShaderD3D {
     uint64_t bytecode;
     uint32_t size;
     uint8_t stage, variant, pad[2];
-    uint8_t key[32];
+    uint8_t key[NX_SHADER_KEY_SIZE];
     uint64_t link_pairs;
     uint32_t n_link_pairs, pad2;
 } NxShaderD3D;

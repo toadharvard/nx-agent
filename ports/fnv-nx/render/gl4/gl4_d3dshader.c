@@ -10,11 +10,12 @@
  *     this call: no cache path exists here . */
 #include "gl4.h"
 #include "fnvnx_shaders.h"
+#include "fnvnx_dk_layout.h"
 #include "fnvnx_sha256.h"
 #include <stdlib.h>
 #include <string.h>
 
-enum { MAX_CODE = 1u << 20, MAX_L = 31 };
+_Static_assert(NXGPU_SHADER_MAX_LINK_PAIRS == FNVNX_DK_VARYING_SLOTS, "the ABI link-pair limit is the translator's varying slot count");
 
 void gl4_d3d_free(Gl4D3d* d) { if (d) { free(d->code); free(d); } }
 
@@ -32,28 +33,28 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     const NxShaderD3D* dp = (const NxShaderD3D*)nxgl4_guest_ptr(a, sizeof *dp);
     if (!dp) return refuse("descriptor unreadable");
     const NxShaderD3D d = *dp;
-    if (d.stage > 1) return refuse("stage is neither vertex (0) nor pixel (1)");
-    if ((d.variant & ~3u) || (d.stage == 1 && (d.variant & 1))) return refuse("variant: bit 0 is the vertex stage's, bit 1 is FLAT, all other bits are 0");
+    if (d.stage > NxStage_Fragment) return refuse("stage is neither vertex (0) nor pixel (1)");
+    if ((d.variant & ~(uint32_t)NXGPU_SHADER_VARIANT_MASK) || (d.stage == NxStage_Fragment && (d.variant & NXGPU_SHADER_VS_COMPLETE))) return refuse("variant: bit 0 is the vertex stage's, bit 1 is FLAT, all other bits are 0");
     if (d.pad[0] || d.pad[1] || d.pad2) return refuse("reserved fields are not 0");
-    if (!d.size || (d.size & 3) || d.size > MAX_CODE) return refuse("bytecode size is 0, not a multiple of 4 or above 1 MiB");
-    if (d.n_link_pairs > MAX_L) return refuse("more than 31 link pairs");
+    if (!d.size || (d.size & 3) || d.size > NXGPU_SHADER_MAX_CODE) return refuse("bytecode size is 0, not a multiple of 4 or above NXGPU_SHADER_MAX_CODE");
+    if (d.n_link_pairs > NXGPU_SHADER_MAX_LINK_PAIRS) return refuse("more than NXGPU_SHADER_MAX_LINK_PAIRS link pairs");
     const uint8_t* bc = (const uint8_t*)nxgl4_guest_ptr(d.bytecode, d.size);
     const uint8_t* lp = d.n_link_pairs ? (const uint8_t*)nxgl4_guest_ptr(d.link_pairs, d.n_link_pairs) : NULL;
     if (!bc || (d.n_link_pairs && !lp)) return refuse("bytecode or link set unreadable");
     Gl4D3d key; memset(&key, 0, sizeof key);
     key.size = d.size; key.stage = d.stage; key.variant = d.variant; key.nl = (uint8_t)d.n_link_pairs;
     for (uint32_t i = 0; i < d.n_link_pairs; i++) {
-        if (lp[i] / 16 > 13 || (i && lp[i] <= lp[i - 1])) return refuse("link set is not ascending, unique pairs of usage <= 13");
+        if (lp[i] / 16 > NXGPU_SHADER_PAIR_USAGE_MAX || (i && lp[i] <= lp[i - 1])) return refuse("link set is not ascending, unique pairs of usage <= NXGPU_SHADER_PAIR_USAGE_MAX");
         key.l[i] = lp[i];
     }
     uint8_t* code = (uint8_t*)malloc(d.size);
     if (!code) return refuse("out of memory");
     memcpy(code, bc, d.size);
-    uint8_t k[32]; fnvnx_sha256(code, d.size, k); if (memcmp(k, d.key, 32)) { free(code); return refuse("key is not the sha256 of the bytecode"); }
+    uint8_t k[NX_SHADER_KEY_SIZE]; fnvnx_sha256(code, d.size, k); if (memcmp(k, d.key, sizeof k)) { free(code); return refuse("key is not the sha256 of the bytecode"); }
     uint32_t id = memo_find(&key, code);
     if (id) { free(code); g4.sh[id].d3d->refs++; return id; }
     fnvnx_shader_opts o; memset(&o, 0, sizeof o);
-    o.flags = FNVNX_SHADER_NO_DKSH | FNVNX_SHADER_KEEP_GLSL | (d.stage == 0 && (d.variant & 1) ? FNVNX_SHADER_VS_COMPLETE : 0) | ((d.variant & 2) ? FNVNX_SHADER_FLAT_COLOR : 0);
+    o.flags = FNVNX_SHADER_NO_DKSH | FNVNX_SHADER_KEEP_GLSL | (d.stage == NxStage_Vertex && (d.variant & NXGPU_SHADER_VS_COMPLETE) ? FNVNX_SHADER_VS_COMPLETE : 0) | ((d.variant & NXGPU_SHADER_FLAT) ? FNVNX_SHADER_FLAT_COLOR : 0);
     o.link_pairs = key.nl ? key.l : NULL; o.n_link_pairs = key.nl;
     fnvnx_shader_result r; memset(&r, 0, sizeof r);
     if (!fnvnx_shader_translate_glsl(code, d.size, &o, &r)) {
