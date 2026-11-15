@@ -4,6 +4,7 @@ non-atomic builtin that reads/writes through a pointer calls its library functio
 Fixture fixtures/order_fold.cc, built by the recipe with the full plugin set (realobj): copy16, zero8, cmp4 and len hold no plain
 ldr/str/ldp/stp of data and call memcpy/memset/memcmp/strlen.
 Run: python3 -I <this file> from the checkout root."""
+import json
 import os
 import re
 import sys
@@ -16,6 +17,16 @@ import realobj  # noqa: E402
 import test_sdd_order as T  # noqa: E402
 
 fails = []
+
+
+def ld_accesses():
+    """ordered 64-bit accesses of one long double: its size is the declared data model's (toolchain/msvcmodel/DATAMODEL.json, row S09: `long double: N bytes`),
+    one access per 8 bytes (the widest single ldar/stlr); the expectation is not a constant of this test"""
+    with open(os.path.join(HERE, '..', '..', 'toolchain', 'msvcmodel', 'DATAMODEL.json')) as f:
+        rows = json.load(f)
+    rows = rows if isinstance(rows, list) else rows['rows']
+    size = int(re.match(r'long double: (\d+) bytes', next(r for r in rows if r['id'] == 'S09')['property']).group(1))
+    return -(-size // 8)
 
 
 def main():
@@ -60,7 +71,7 @@ def main():
     # types no single ldar/stlr covers: vector, complex, long double, packed (each unit ordered)
     ov = T.functions(realobj.objects(['order_vec'])['order_vec'])
     for sym, want in (('_Z5vcopyPDv4_fPKS_', {'ldar': 2, 'stlr': 2}), ('_Z6vstorePDv4_fS_', {'stlr': 2}), ('_Z4cplxPKCf', {'ldar': 2}),
-                      ('_Z2ldPKe', {'ldar': 2}), ('_Z3ldsPee', {'stlr': 2}), ('_Z6packedPK2Pk', {'ldarb': 4}), ('_Z6pstoreP2Pki', {'stlrb': 4})):
+                      ('_Z2ldPKe', {'ldar': ld_accesses()}), ('_Z3ldsPee', {'stlr': ld_accesses()}), ('_Z6packedPK2Pk', {'ldarb': 4}), ('_Z6pstoreP2Pki', {'stlrb': 4})):
         ms = [m for o, m, a in ov[sym]]
         got = {k: ms.count(k) for k in want}
         if got != want:
