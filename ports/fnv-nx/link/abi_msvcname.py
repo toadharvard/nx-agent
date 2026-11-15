@@ -139,18 +139,30 @@ class _P:
             self.names.append(n)
 
     def template(self):
-        j = self.s.find('@', self.i)
-        if j <= self.i:
-            self.err('unterminated template name')
-        name = self.s[self.i:j]
-        self.i = j + 1
+        if self.peek() == '?':      # a member function template: the template name is an operator or ctor/dtor code (`??$?0<args>@...`); it is no back-reference target
+            self.i += 1
+            code = self.take()
+            if code == '_':
+                code += self.take()
+                if code == '__':
+                    code += self.take()
+            name, init, fnname = ('op', code), [], True
+        else:
+            j = self.s.find('@', self.i)
+            if j <= self.i:
+                self.err('unterminated template name')
+            name = self.s[self.i:j]
+            self.i = j + 1
+            init, fnname = [name], False
         outer_names, outer_args = self.names, self.args
-        self.names, self.args = [name], []
+        self.names, self.args = init, []
         args = []
         while not self.take('@'):
             args.append(self.targ())
         self.names, self.args = outer_names, outer_args
         t = ('tpl', name, tuple(args))
+        if fnname:                  # a function template's own name is not a back-reference target
+            return t
         self.memo(t)
         return t
 
@@ -204,6 +216,9 @@ class _P:
         if c == '$':
             if self.take('$Q'):
                 return ('ptr', '&&', '', self.type(True))
+            if self.take('$C'):                   # `$$C<cv>`: a cv-qualified element or pointee type (the cv is not an ABI fact here)
+                self.quals()
+                return self.type1()
             self.err('type form $%s' % self.peek())
         if c == 'Y':
             n = self.number()
@@ -270,7 +285,8 @@ def parse(name):
     scope = p.qualified()
     c = p.peek()
     inner = scope[-1]
-    structor = inner[1] if isinstance(inner, tuple) and inner[0] == 'op' and inner[1] in ('0', '1') else ''
+    op = inner[1] if isinstance(inner, tuple) and inner[0] == 'tpl' and isinstance(inner[1], tuple) else inner   # a ctor/dtor template: the op is the template's name
+    structor = op[1] if isinstance(op, tuple) and op[0] == 'op' and op[1] in ('0', '1') else ''
     if c.isdigit():     # a data symbol: storage letter and type follow; no ABI of its own
         return Decl('data', scope, '', False, False, False, False, '', '', None, (), False, '')
     if c not in FUNCLASS:

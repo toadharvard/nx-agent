@@ -91,6 +91,13 @@ for bad in ('', 'f', '_', '_9f', '_f@', '_f@x', '_f@08', '_f@4@4', '@f', '@f@', 
     except ValueError as e:
         check('parse_c error text of %r' % bad, str(e).startswith(bad), True)
 
+# `$$C<cv>`: a cv-qualified element type (the array parameter `const unsigned (*)[33]`); a ctor template `??$?0<args>@<scope>`, whose own name is no back-reference
+d = M.parse('?nx_ffp_stage_mask@@YAIQAY0CB@$$CBIQBE@Z')
+check('$$C const element', d.params[0], ('ptr', '*', 'const', ('arr', (33,), ('b', 'unsigned int'))))
+d = M.parse('??$?0AAPAU_Rb_tree_node_base@std@@AAPAU01@@?$pair@PAU_Rb_tree_node_base@std@@PAU12@@std@@QAE@AAPAU_Rb_tree_node_base@1@0@Z')
+nb = ('ptr', '&', '', ('ptr', '*', '', ('tag', 'struct', ('std', '_Rb_tree_node_base'))))
+check('ctor template: structor, scope and the back-references of the parameters', (d.structor, d.scope[-1][:2], d.params), ('0', ('tpl', ('op', '0')), (nb, nb)))
+
 for f in fails:
     print('FAIL', f)
 sys.exit(1 if fails else 0)
