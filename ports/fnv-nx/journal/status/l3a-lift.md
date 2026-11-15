@@ -746,3 +746,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - L3b's proof/universe.py reads /home/user/l3work/instest/result.json. Sent to the L3b lead: its universe comes from the def_check.instructions fact.
   - clpod is kept: table.tsv gets a provenance header. It is a measured reference without a pinned producer, because no fnv-nx-build ref holds cl.exe. It closes when cl.exe is mirrored to tools/ and gen.py becomes a recipe stage (L3a, after the first frame).
   - rcpgen waits for the L1/L6 `run` stage.
+- 13:10 Correction: the instest/result.json reader is lift/proof/universe.py on L3a's t16l, a stale copy from old branches (no L3b head has it; L3b confirmed). t16l prove.py reads it too. w8 deletes universe.py and takes prove.py from L3b's head, in the commit that deletes instest; afterwards git grep instest gives 0. t16l lacks 63 of L3b's lift/proof files; they arrive through L1's candidate, not by copying.
