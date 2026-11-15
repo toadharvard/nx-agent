@@ -34,8 +34,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--lang", required=True, choices=sorted(KIND))
     ap.add_argument("--origin", default="native", choices=["native", "lifted"], help="the root's cxx_origin class")
-    ap.add_argument("--cache", default=os.environ.get("GATE_CACHE") or os.path.expanduser("~/.cache/fnvnx-guest-flags"))
+    ap.add_argument("--cache", default=os.environ.get("GATE_CACHE"), help="the verdict's store (GATE_CACHE); no other default")
     a = ap.parse_args(argv)
+    if not a.cache:
+        ap.error("no cache: set GATE_CACHE or pass --cache (the one store of the verdict)")
     try:
         out = flags_for(a.lang, a.cache, a.origin)
     except recipe.BuildRed as e:

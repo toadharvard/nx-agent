@@ -59,6 +59,9 @@ def parse_crossing(data, where):
             raise ValueError("%s: line %d: %s twice" % (where, n, f[0]))
         out[f[0]] = () if f[1] == "-" else tuple(f[1].split(","))
     return out
+def envid():
+    """the declared environment of the result: env.json (the pinned toolchain the plugin's sections come from)"""
+    return gate_build.file_sha(os.path.join(HERE, "env.json"))
 
 
 def read_objects(objs):
@@ -157,8 +160,11 @@ def judge_root(repo, cache, root):
         return 1, 0, [root + ":recipe"], "invalid recipe: %s" % "; ".join(e.errors)[:300]
     if res["status"] != "green":
         return 1, 0, [root + ":build"], "build %s" % res["status"]
-    objs = [(root + "/" + o["unit"], o["object"]) for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
-    return judge_objects(objs)
+    objs = [(root + "/" + o["unit"], o["object"], o["sha256"]) for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
+    # the item is the root's C++ objects as a set (the ODR and layout joins read all of them): keyed by their ids and sha256 and the tools that read them
+    key = {"gate": "abi", "objects": [[i, h] for i, _, h in objs], "tools": gate_build.tool_digest(__file__, abi, odr, elfobj, l2sections, objsections), "env": envid()}
+    v, _ = gate_build.memo(cache, "abi", key, lambda: list(judge_objects([(i, p) for i, p, _ in objs])))
+    return tuple(v)
 
 
 def main():

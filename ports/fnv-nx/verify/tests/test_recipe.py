@@ -96,9 +96,9 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
     w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), recipe.ENV_JSON)).read())   # the declared environment
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
-        {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
-        {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
-        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}] + list(extra_roots)}))
+        {"path": ROOT, "class": "product", "target": "host", "recipe": ROOT + "/build.json"},
+        {"path": T + "gen", "class": "tool"}, {"path": T + "verify", "class": "tool"},
+        {"path": T + "link", "class": "tool"}, {"path": T + "contract", "class": "tool"}] + list(extra_roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -214,7 +214,7 @@ def main():
     def gate_cases():
         for n in ("build", "determinism"):
             empty = make_repo("empty-" + n)
-            w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": T + "toy", "class": "doc", "gates": []}]}))
+            w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": T + "toy", "class": "doc"}]}))
             rc, g, _, txt = gate(empty, n, BASE + "/ge" + n)
             check("%s gate with no product root: universe 0, green" % n, rc == 0 and g["universe"] == 0 and accepted(n, BASE + "/ge" + n)[0] == "green", txt)
 
@@ -361,7 +361,7 @@ def main():
                        files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
                               "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
         ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
-        ad["roots"].append({"path": LIB, "class": "product", "target": "host", "gates": [], "recipe": LIB + "/build.json"})
+        ad["roots"].append({"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"})
         w(lr, "verify/admit.json", json.dumps(ad))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib")
@@ -463,6 +463,19 @@ def main():
                            ("include outside roots and externals", mut(external=[ex], include=["/ext/other/inc"]), "include")):
         check("external validation: %s" % what, any(want in x for x in errs(e2)), errs(e2))
 
+    # RULE (a stage is keyed by what it can read): PP mounts the compiler's external plus the externals the include path and flags name; a generated
+    # stage mounts the externals its args and inputs name. An external only the generator names changes that stage's key and no PP key.
+    def gdata(v):
+        return lambda d: open(d + "/f.txt", "w").write("v%d\n" % v)
+    gc1, gh1 = publish("gdata1", gdata(1))
+    gc2, gh2 = publish("gdata2", gdata(2))
+    gx = lambda c, h: {"name": "gdata", "repo": "fnv-nx-build", "ref": "gdata%d" % (1 if c == gc1 else 2), "commit": c, "tree_sha256": h, "at": "/ext/gdata"}  # noqa: E731
+    gen_ = [dict(RECIPE["generated"][0], args=["/ext/gdata/f.txt"])]
+    g1 = recipe.build(make_repo("gd1", rec=mut(external=[ex, gx(gc1, gh1)], include=erec["include"], generated=gen_), files=ef), ROOT, SS, BASE + "/gdo1", ext=ec)
+    g2 = recipe.build(make_repo("gd2", rec=mut(external=[ex, gx(gc2, gh2)], include=erec["include"], generated=gen_), files=ef), ROOT, SS, BASE + "/gdo2", ext=ec)
+    d1, d2 = set(g1["stage_keys"]) - set(g2["stage_keys"]), set(g2["stage_keys"]) - set(g1["stage_keys"])
+    check("an external that only the generated stage names: changing it re-runs that stage and no PP/CC stage (1 key differs, 1 run)",
+          g1["status"] == "green" and g2["status"] == "green" and len(d1) == 1 and len(d2) == 1 and g2["stages"]["run"] == 1, (g1.get("failure"), g2.get("failure"), d1, d2, g2.get("stages")))
     print("INFO +%.1f s: externals done" % (time.time() - t_start))
     # --- the compiler as an external tree at /opt/tc (real ELF closure of the cross gcc, pinned by commit and tree hash)
     crepo = make_repo("tc", rec=crec)
@@ -470,9 +483,9 @@ def main():
     rc_x = recipe.build(crepo, ROOT, SS, BASE + "/tco", ext=ec)
     print("INFO toy build with the external compiler %.1f s, stages %s" % (time.time() - t0, rc_x.get("stages")))
     check("external compiler at /opt/tc: toy root builds green (4 objects + ELF)", rc_x["status"] == "green" and len(rc_x["objects"]) == 4 and rc_x["elf"], rc_x.get("failure"))
-    check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys",
+    check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys (the compile and link stages mount the compiler's external; a generated stage that names none keeps its key)",
           [o["sha256"] for o in rc_x["objects"]] == [o["sha256"] for o in r1["objects"]] and rc_x["elf"]["sha256"] == r1["elf"]["sha256"]
-          and set(rc_x["stage_keys"]).isdisjoint(r1["stage_keys"]), rc_x.get("failure"))
+          and set(rc_x["stage_keys"]) != set(r1["stage_keys"]), rc_x.get("failure"))
     ran = []
     _rs = recipe.unitstage.run_stage
     recipe.unitstage.run_stage = lambda store, doc, *a, **k: (lambda r: (ran.append((doc["stage"], r[0][:12], r[2])) if r[2] == "run" else None) or r)(_rs(store, doc, *a, **k))
@@ -603,7 +616,7 @@ def check_gen_reads(SS):
     """A generator stage reads, read-only, exactly its declared inputs, tracked files or directories of any admitted root (RECIPE.md "generated").
     The stage key holds the content of each; an undeclared read, a write outside /out, an untracked file and `uses` on a plain file are red."""
     OTH = T + "other"
-    ex = [{"path": OTH, "class": "doc", "gates": []}]
+    ex = [{"path": OTH, "class": "doc"}]
     rd = 'import sys\nn = int(open("/in/%s/data.txt").read())\n' % OTH
     wr = 'os.makedirs("/out/gen")\nopen("/out/gen/gen.h", "w").write("#define NCONST 1\\n#define STAMP %dL\\n" % (n - n))\n'
     def rec_(ins=(OTH + "/data.txt",), **kw):
@@ -672,7 +685,7 @@ def check_run(SS):
     HX, OTH = T + "hx", T + "other"
     hrec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "gcc-13", "cxx": "g++-13"}, "flags": {"c": ["-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
             "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"], "libs": {"system": ["/lib/x86_64-linux-gnu/libc.so.6"]}}}
-    ex = [{"path": HX, "class": "product", "target": "host", "gates": [], "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc", "gates": []}]
+    ex = [{"path": HX, "class": "product", "target": "host", "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc"}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
         return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["libc6"] + list(debs), "outputs": list(outs)}])

@@ -414,6 +414,33 @@
     "ports/fnv-nx/contract/hive.py"
    ]
   },
+  "test_gate_memo.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_build.py",
+    "ports/fnv-nx/verify/gate_exepin.py"
+   ]
+  },
+  "test_gate_publish.py": {
+   "references": [
+    {
+     "anchor": "## Externals in a shared store",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_build.py",
+    "ports/fnv-nx/verify/cas.py",
+    "ports/fnv-nx/verify/gate_contract.py"
+   ]
+  },
   "test_gate_pure.py": {
    "references": [
     {

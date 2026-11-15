@@ -657,7 +657,7 @@ def tree_of(repo):
 
 for what in ("empty",):
     empty = TR.make_repo("os-empty")
-    TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
+    TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc"}]}))
     rc, g, _, txt, st = gate(empty, ROOT + "/g0")
     check("gate with no product root: universe 0, green, accepted by verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
 GC = ROOT + "/gcache"

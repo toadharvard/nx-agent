@@ -28,13 +28,13 @@ import gate_admit  # noqa: E402
 from gate_admit import imports_errors  # noqa: E402
 
 ADMIT = "ports/fnv-nx/verify/admit.json"
-HOST = ("ports/fnv-nx/verify", "ports/fnv-nx/farm")
+HOST = gate_admit.HOST_READERS
 
 
 def units(roots):
     """-> [(trees of the root, imported root paths)] of every root naming gate pure (one puregate run per root)."""
     out = [(tuple(os.path.normpath(t) for t in gate_admit.trees(r) if os.path.exists(t)), tuple(r.get("imports", [])))
-           for r in roots if "pure" in r.get("gates", [])]
+           for r in roots if "pure" in gate_admit.gates_of(r)]
     return [u for u in out if u[0]]  # a tree that is not in this checkout contributes nothing
 
 

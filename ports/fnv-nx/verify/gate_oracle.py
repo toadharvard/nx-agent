@@ -59,6 +59,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import recipe  # noqa: E402
 import gate_admit  # noqa: E402
 import gate_tests  # noqa: E402
 import gatesdir  # noqa: E402
@@ -345,7 +346,7 @@ def fetcher(cache):
                 os.makedirs(tmp)
                 for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, commit]):
                     subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
-                os.replace(tmp, bare)
+                recipe.publish_dir(tmp, bare)
             dest = os.path.join(work, "tree")
             os.makedirs(dest)
             ienv = dict(env, GIT_INDEX_FILE=os.path.join(work, "idx"))
