@@ -36,8 +36,8 @@ if '--refused' not in _O:       # driver: reloc-consistency refusals to their fi
     while True:      # terminates: R only grows (R_{k+1} = R_k + _nx, and the loop ends when _nx adds nothing) and the pointer-only entries are finite; there is no round cap
         _k += 1
         open(_rf, 'w').write(''.join('%08x\n' % a for a in sorted(_R)))
-        _p = subprocess.run([sys.executable, '-I', os.path.abspath(__file__)] + sys.argv[1:] + ['--refused', _rf], stdout=subprocess.PIPE, text=True)      # the round's stderr streams to this stage's stderr as it happens
-        if _p.returncode:      # a failed round: its output and the reason go to stderr (a signal kill, e.g. the out-of-memory killer, has a negative returncode and no output of its own)
+        _p = subprocess.run([sys.executable, '-I', os.path.abspath(__file__)] + sys.argv[1:] + ['--refused', _rf], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if _p.returncode:      # a failed round: its whole output and the reason go to stderr (a signal kill, e.g. the out-of-memory killer, has a negative returncode and no output of its own)
             sys.stderr.write(_p.stdout); sys.stderr.write('universe.py: reloc-consistency round %d: the round process %s\n' % (_k, 'was killed by signal %d' % -_p.returncode if _p.returncode < 0 else 'exited with status %d' % _p.returncode)); sys.exit('universe.py: stopped')
         _nx = set(int(l.split()[0], 16) for l in open(OUTD + '/refused_next.tsv') if l.strip()) if os.path.exists(OUTD + '/refused_next.tsv') else set()
         if _nx <= _R:
