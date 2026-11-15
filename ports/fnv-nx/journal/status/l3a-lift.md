@@ -1197,3 +1197,12 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - The rest of the liftsrc red (2,652 gen:foreign-import lines) is an L1 bug: in recipe.py foreign_imports (line 691, `or True`), the imported NAME of a relative from-import is always taken as a submodule path. I sent the rule and the check to the L1 lead; w8 rechecks when the fix lands. Status: blocked on L1.
 - rcptab.c: L3b also holds the certified bytes (799f3a4e2). The rcpgen byte-equality check runs on L3b farm 1 at b39f131e4.
 - bottleneck: the L1 foreign_imports fix, then the liftsrc check, then the relift at w7's memo fix.
+
+## 2026-11-15 01:00
+- base3 a857c9852 (w8): the recipe check on all admitted roots gives 44/44 valid.
+  - factsimg/exe, retn (8 stages) and fpfacts (10 stages) declare lift/fnvlift and take it only through `--lib`, with no implicit sys.path entries. tools/libarg.py is new.
+  - The guest native test roots declare link.entry. This rests on L1's foreign_imports fix, w28 094b62a1e.
+- Doing (w8):
+  - The three test entries get crt0's ABI, `uint64_t f(uint64_t)`, held by a shared extern "C" declaration so a mismatch is a compile error.
+  - Byte-equality of the re-keyed d3dx9_31 factsimg stage against fnv-nx-build l3a-lift/facts 6944080; then retn.
+- bottleneck: the relift at w7's memo fix, which brings new keys for FACTS, RETN and FPFACTS.
