@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-15 03:30Z w9 0ce277abc = root 9c60d5817 + batch 1 + noreturn on ExitProcess, exit, abort and _amsg_exit (cited), dead tails removed. Generator FreeType rule is static over root sources; the after-build check belongs to L1. Open for my ruling later: swkbd applet failure exit (swkbd.cpp:130) and declared_input_broken (gdifont.cpp:223). To L1: a conditional terminator call is not T2. w10 builds and gates 0ce277abc.
 - 11-15 03:25Z w9 batch 1 88e3ec45c (not built; no toolchain at w9):
   - FreeType module rule in gen_units: 4 units out, 489 rows cleared by deletion.
   - reach and assume end through the host exit slot; filemap and VirtualProtect fact ids are literal.
