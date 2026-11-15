@@ -121,7 +121,9 @@
     "--keys-tsv-out",
     "/out/gen/keys.tsv",
     "--data-out",
-    "/out/gen/iat_data.tsv"
+    "/out/gen/iat_data.tsv",
+    "--imported-out",
+    "/out/gen/imported.tsv"
    ],
    "inputs": [
     {
@@ -139,6 +141,7 @@
     "gen/import_keys.h",
     "gen/keys.tsv",
     "gen/iat_data.tsv",
+    "gen/imported.tsv",
     "gen/modules.tsv"
    ]
   },
@@ -161,6 +164,7 @@
   "KEYS_TSV": "gen/keys.tsv",
   "MODULES_TSV": "gen/modules.tsv",
   "IAT_DATA_TSV": "gen/iat_data.tsv",
+  "IMPORTED_TSV": "gen/imported.tsv",
   "BRIDGE_TSV": "gen/bridge.tsv"
  },
  "uses": [
