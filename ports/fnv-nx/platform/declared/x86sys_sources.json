@@ -12,6 +12,16 @@
    "path": "headers/_ks386.inc_00858",
    "sha256": "21b726611a5608bcd21072901667fddca99bbbeb3eb4b944cf9c438b50bbab23",
    "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc"
+  },
+  "winnt": {
+   "path": "headers/_winnt.h_01105",
+   "sha256": "9fc5347c7451bb3c7433cc36b4d2f0260c6eea9a8ce0cbd7e426fbf2ed898a00",
+   "origin": "Windows Driver Kit 7.1.0 winnt.h"
+  },
+  "ntddk": {
+   "path": "headers/_ntddk.h_00413",
+   "sha256": "5e2f8a81e82ae74bbbafaaf4e0ab9712e123d13ee751e4dee55c0941eff1e39c",
+   "origin": "Windows Driver Kit 7.1.0 ntddk.h"
   }
  },
  "wine": {

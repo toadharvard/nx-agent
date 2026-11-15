@@ -1,4 +1,18 @@
 {
+ "cr0": {
+  "em": {
+   "status": "undecided",
+   "why": "no pinned source states CR0.EM of the declared machine (ks386.inc CR0_EM is a bit constant only; Wine runs on the host CPU); user mode observes CR0 only through smsw, which is itself undecided; blocker: a reach certificate that no site depends on it, or an owner decision to derive it from the CPUID record"
+  },
+  "mp": {
+   "status": "undecided",
+   "why": "no pinned source states CR0.MP (ks386.inc CR0_MP is a bit constant only); user mode sees it only through smsw (undecided)"
+  },
+  "ts": {
+   "status": "undecided",
+   "why": "no pinned source; user mode sees TS only through smsw (undecided); Windows handles #NM transparently (lazy FPU switch), and the lazy-switch behaviour is not a pinned source"
+  }
+ },
  "cr4": {
   "pce": {
    "status": "undecided",
@@ -11,6 +25,16 @@
   "umip": {
    "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/verify/cpuid_model.json max_basic @ a3217cd2c604), below 7, so there is no leaf 7 and CR4.UMIP is 0",
    "value": 0
+  }
+ },
+ "cr4_sse": {
+  "osfxsr": {
+   "status": "undecided",
+   "why": "no pinned source states CR4.OSFXSR (ks386.inc CR4_FXSR = 0x200 is a bit constant only); the declared CPU's cpuid (verify/cpuid_model.json leaf 1 EDX) advertises FXSR/SSE/SSE2, but whether the OS enabled them is not a pinned fact; blocker: an owner/L3b decision to take OS support from the CPUID record, or a reach certificate"
+  },
+  "osxmmexcpt": {
+   "status": "undecided",
+   "why": "no pinned source states CR4.OSXMMEXCPT (ks386.inc CR4_XMMEXCPT = 0x400 is a bit constant only); with the initial MXCSR 0x1F80 every SIMD exception is masked, so #XM is not raised until a site unmasks it; blocker: a certificate that every ldmxcsr / fxrstor site keeps the exceptions masked (CLAUDE.md fact, not yet certified)"
   }
  },
  "eflags": {
@@ -175,6 +199,17 @@
     "path": "dlls/ntdll/unix/signal_i386.c",
     "sha256": "70245021f17fae5002aaf3f2ea76f2151eb4c900a83e8ee05225e74ebf9afd0d"
    }
+  }
+ },
+ "thread_fp_initial": {
+  "applies_to": "the initial context of every thread, the process's first thread and CreateThread threads alike: the documentation names one initial value with no per-kind difference (the INITIAL_* constants of the thread context)",
+  "mxcsr": {
+   "source": "WDK 7.1.0 winnt.h line 3251 and ntddk.h line 480 (INITIAL_MXCSR); Wine 9.0 dlls/ntdll/unix/signal_i386.c line 2498 (call_init_thunk, initial context)",
+   "value": 8064
+  },
+  "x87_control_word": {
+   "source": "WDK 7.1.0 winnt.h line 3252 and ntddk.h line 481 (INITIAL_FPCSR); Wine 9.0 dlls/ntdll/unix/signal_i386.c line 2496 (call_init_thunk, initial context)",
+   "value": 639
   }
  },
  "tss_io_bitmap": {
