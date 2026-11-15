@@ -318,7 +318,8 @@ class DeclaredOutputs(unittest.TestCase):
         self.assertTrue(formgate.declared_ok('eax:cpuid0,edx:cpuid3@' + sha))
         self.assertFalse(formgate.declared_ok('eax:cpuid0@' + '0' * 64))               # the platform source changed
         self.assertFalse(formgate.declared_ok('esi:cpuid0@' + sha))                    # an output the contract does not allow
-        self.assertFalse(formgate.declared_ok('eax:rdtsc@' + sha))                     # a function that is not in declared.json
+        self.assertTrue(formgate.declared_ok('eax:rdtsc,edx:rdtsc@' + formgate.platform_sha(['rdtsc'])))      # rdtsc is declared (rt/cpumodel.c)
+        self.assertFalse(formgate.declared_ok('eax:nosuchfn@' + sha))                  # a function that is not in declared.json
         self.assertFalse(formgate.declared_ok('garbage'))
 
 

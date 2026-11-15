@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 
-VERIFY = os.environ.get('FNVNX_TEST_VERIFY', '/home/user/l3work/trunk/ports/fnv-nx/verify')    # declared input: a checkout of ports/fnv-nx/verify
+VERIFY = os.environ.get('FNVNX_TEST_VERIFY') or os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'verify'))    # the verify/ of the checkout this test runs in (FNVNX_TEST_VERIFY overrides it)
 sys.path.insert(0, os.path.join(VERIFY, '..', 'contract'))
 sys.path.insert(0, VERIFY)
 import cas       # noqa: E402
