@@ -552,3 +552,10 @@ After the first frame:
   - Full-runtime decltype check on pin 56a4d09c: 4640 members, 48756 symbols. 314 members have no section (assembly, to be checked by the language field). 4300 are equal and 26 unequal: (a) a std::terminate reference from EH cleanup with no line; (b) lines for local anonymous-namespace dtors.
   - DECLTYPE-REF (on plugins-cand3) scans the identifier table for referenced names, and locals are never a line. A non-`_Z` name with no builtin_info entry becomes an error, not "builtin".
   - The cand3 batch is DECLTYPE-REF, PINKEY and S29, in one rebuild after cand2 merges.
+- 2026-11-15 21:05Z: Owner order "the compiler key cannot be wrong" (integ 49db7687b). PINKEY becomes COMPILER-STAGE (w3 with L1, cand3).
+  - Stage 1 (compiler: prefix plus b-gcc) and stage 2 (plugins and runtime) are sandbox.py recipe stages keyed by exactly what they mount. The hand input lists are deleted.
+  - The recipe takes the compiler by stage key from GATE_CACHE; no pin is handed over.
+  - Proof: an unmounted read fails, a plugin byte change rebuilds stage 2 only, the archives equal 56a4d09c, and the stage times are measured.
+  - PINSPLIT proof (farm): a plugin byte change gives K1 reused, 344 s against 787 s from scratch, all 36 libraries equal. The farm is stopped with its queue empty.
+  - Per-module exefacts for the crossing universe belong to L1 (contract), as w12 was told.
+- bottleneck: cand2 verdict and merge (L1). cand3 waits on COMPILER-STAGE (w3+L1). Workers: w2 (S29, guest_compiler fields), w3.
