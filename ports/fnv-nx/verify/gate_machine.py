@@ -26,7 +26,7 @@ import gate_imports  # noqa: E402
 import hive  # noqa: E402
 import recipe  # noqa: E402
 
-IN_KEYS = {"format", "external", "sites", "declared", "seed", "seed_unit"}
+IN_KEYS = {"format", "sites", "declared", "seed", "seed_unit"}
 
 
 def refs_of(res):
@@ -37,12 +37,12 @@ def refs_of(res):
     return out
 
 
-def root_items(root, rec, res, decl, ext, repo, cache):
+def root_items(root, rec, res, decl, repo, cache):
     if set(decl) != IN_KEYS or decl["format"] != "fnvnx-registry-in/1":
         raise ValueError("%s/registry.in.json: need exactly the keys %s and format fnvnx-registry-in/1" % (root, sorted(IN_KEYS)))
-    sites = gate_imports.read(os.path.join(ext, decl["sites"]))
-    declared = gate_imports.read(os.path.join(repo, root, decl["declared"]))
-    seed = gate_imports.read(os.path.join(repo, root, decl["seed"]))
+    def rp(ref):
+        return recipe.resolve_input(root, ref, repo, cache, rec)[0]
+    sites, declared, seed = (gate_imports.read(rp(decl[k])) for k in ("sites", "declared", "seed"))
     return hive.judge(sites, declared, seed, refs_of(res), decl["seed_unit"])
 
 
@@ -61,7 +61,7 @@ def judge_root(root, repo, cache, admit, bad):
         if built["status"] == "red":
             raise ValueError("build red at stage %s" % built["failure"]["stage"])
         rec = recipe.load_recipe(repo, admit, root)
-        items = root_items(root, rec, built, decl, gate_imports.ext_tree(rec, decl["external"], cache), repo, cache)
+        items = root_items(root, rec, built, decl, repo, cache)
     except recipe.RecipeError as e:
         return 1, 0, [root + ":recipe"], "recipe invalid: %s" % "; ".join(e.errors)[:200]
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError, cas.CasError) as e:

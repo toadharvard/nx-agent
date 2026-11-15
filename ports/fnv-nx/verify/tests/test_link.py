@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -112,7 +113,7 @@ def main():
     W = {"toy/w.c": 'extern void wf(void) __attribute__((weak));\nvoid f_w(void) { if (wf) wf(); }\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rw = build(mk("weak", main_rec(), W), SS)
     check("weak undefined reference: red at ldcheck:<root>, naming it", rw["status"] == "red" and rw["failure"]["stage"] == "ldcheck:" + ROOT
-          and any("weak:wf" in x for x in rw["failure"]["stderr"]) and rw["elf"] is None, err_text(rw))
+          and any("weak-undefined:wf" in x for x in rw["failure"]["stderr"]) and rw["elf"] is None, err_text(rw))
     # (c) an R_AARCH64_P32_ABS32 in .rodata of a position independent link
     A = {"toy/r.c": '__asm__(".section .rodata\\n.balign 4\\n.word f_b\\n.text\\n");\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rr = build(mk("abs32", main_rec(), A), SS)
@@ -174,9 +175,28 @@ def main():
         r["link"] = dict({"output": "x.exe" if kind == "exe" else "x.so", "kind": kind, "flags": ["-m", "aarch64linux"]}, **kw)
         return r
     NONE = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None}
-    re_ = build(mk("exe", host_rec("exe"), dict(NONE, **{"toy/e.c": "void _start(void) { for (;;) ; }\n"})), SS)
-    check("kind exe: a host executable (ELF64, no script, entry set) links green; no crt0 header rule", re_["status"] == "green"
+    re_ = build(mk("exe", host_rec("exe"), dict(NONE, **{"toy/e.c": "int main(void) { return 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n"})), SS)
+    check("kind exe: a host executable links green with the start files, end files and dynamic linker of the pinned driver's -### (no recipe path); entry _start comes from its crt", re_["status"] == "green"
+          and "_start" in syms(re_["elf"]["path"]) and (os.stat(re_["elf"]["path"]).st_mode & 0o111)
           and TR.elf_class(re_["elf"]["path"]) == 64 and json.load(open(re_["ld_gate"]["ld.json"]["path"]))["status"] == "green", err_text(re_))
+    # a host exe's start files, dirs and default libraries are the driver's answer: a recipe that declares them is red
+    try:
+        build(mk("exe-crt", host_rec("exe", libs={"startfiles": ["crt1.o"], "endfiles": [], "dirs": [], "names": [], "external": "x"}), dict(NONE, **{"toy/e.c": "int main(void) { return 0; }\n"})), SS)
+        ex_ = []
+    except recipe.RecipeError as e:
+        ex_ = [str(x) for x in e.args]
+    check("link.libs of an exe naming start files is red: they are the pinned driver's -### answer", any("an exe's start and end files" in e for e in ex_), ex_)
+    def interp(path):
+        d = open(path, "rb").read()
+        ph, es, n = struct.unpack_from("<Q", d, 32)[0], struct.unpack_from("<H", d, 54)[0], struct.unpack_from("<H", d, 56)[0]
+        for i in range(n):
+            t, _, off, _, _, fsz = struct.unpack_from("<IIQQQQ", d, ph + i * es)[:6]
+            if t == 3:
+                return d[off:off + fsz].rstrip(b"\0").decode()
+    drv = subprocess.run([CC, "-pie", "-###", "-x", "c", "/dev/null", "-o", "/dev/null"], capture_output=True, text=True).stderr.replace('"', "").split()
+    want = drv[drv.index("-dynamic-linker") + 1] if "-dynamic-linker" in drv else None
+    check("kind exe: PT_INTERP equals the dynamic linker of the pinned driver's -### (not a recipe or linker default)",
+          re_["status"] == "green" and want is not None and interp(re_["elf"]["path"]) == want, (want, re_["status"]))
     SH = {"toy/s.c": "int f_a(void) { return 1; }\nint f_hidden(void) { return 2; }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"}
     rs = build(mk("shared", host_rec("shared", version_script="exp.map"), dict(NONE, **SH)), SS)
     d = syms(rs["elf"]["path"]) if rs["status"] == "green" else {}
@@ -188,11 +208,24 @@ def main():
     rs3 = build(mk("shared-und", host_rec("shared", version_script="exp.map"), UND), SS)
     check("kind shared: an undefined symbol no library defines is red at ldcheck:<root>", rs3["status"] == "red" and rs3["failure"]["stage"] == "ldcheck:" + ROOT
           and any("so_fn" in x for x in rs3["failure"]["stderr"]), err_text(rs3))
+    # link.libs.system: any file of a package env.json pins (libstdc++6-arm64-cross here), nothing else
+    LIBC = "/usr/aarch64-linux-gnu/lib/libstdc++.so.6"   # libstdc++6-arm64-cross, a package env.json pins
+    PIN = dict(NONE, **{"toy/s.c": "void *_Znwm(unsigned long);\nint f_a(void) { return _Znwm(8) != 0; }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"})
+    rs4 = build(mk("shared-lib", host_rec("shared", version_script="exp.map", libs={"system": [LIBC]}), PIN), SS)
+    check("kind shared: link.libs.system names a library of a pinned package (libstdc++6-arm64-cross) that defines the name through its .dynsym: green", rs4["status"] == "green", err_text(rs4))
     so = BASE + "/libtoyso.so"
     open(BASE + "/so.c", "w").write("int so_fn(void) { return 5; }\n")
     subprocess.run([CC, "-shared", "-nostdlib", "-fPIC", "-o", so, BASE + "/so.c"], check=True)
-    rs4 = build(mk("shared-lib", host_rec("shared", version_script="exp.map", libs={"system": [so]}), UND), SS)
-    check("kind shared: link.libs.system defines the name through its .dynsym: green", rs4["status"] == "green", err_text(rs4))
+    rs4b = build(mk("shared-unpinned", host_rec("shared", version_script="exp.map", libs={"system": [so]}), UND), SS)
+    check("kind shared: a system library no pinned package owns is red at ld:<root>, naming it", rs4b["status"] == "red" and rs4b["failure"]["stage"] == "ld:" + ROOT
+          and any(so in x and "no package that env.json pins" in x for x in rs4b["failure"]["stderr"]), err_text(rs4b))
+    # link.loader: the defined set of the declared loader root may stay undefined in a shared image
+    LDR = T + "loader"
+    rs5 = build(mk("shared-loader", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (LIB_REC, {"l.c": "int so_fn(void) { return 5; }\n"}))]), SS)
+    check("kind shared: a name the declared loader root defines may stay undefined: green", rs5["status"] == "green", err_text(rs5))
+    rs6 = build(mk("shared-loader-other", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (LIB_REC, {"l.c": "int other_fn(void) { return 5; }\n"}))]), SS)
+    check("kind shared: a loader that does not define the name leaves it red at ldcheck:<root>", rs6["status"] == "red" and rs6["failure"]["stage"] == "ldcheck:" + ROOT
+          and any("so_fn" in x for x in rs6["failure"]["stderr"]), err_text(rs6))
     e7 = errs(host_rec("shared"), [], "novs")
     check("kind shared needs a version_script, a pie needs a script, a pie takes aarch64linux32 only", any("version_script" in e for e in e7)
           and any("a pie" in e or "pie" in e for e in errs(main_rec(flags=["-m", "aarch64linux"]), [], "piemu")), e7)
