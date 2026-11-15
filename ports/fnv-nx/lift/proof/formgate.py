@@ -6,20 +6,20 @@ ONE copy of this gate. No argument and no other environment variable is read: ev
 recipe.fetch_externals, by exact commit with tree_sha256 checked, into GATE_CACHE/{store,external}; without GATE_CACHE the cache is
 GATE_OUT/forms-cache). The loader is imported from ports/fnv-nx/verify (sibling of lift/) the way verify/gate_contract.py imports its own (plain imports: a checkout
 without verify/ cannot run the gate, no result file, so the verdict is red).
-Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); certs = `certs/<path>` (certs.tsv); model_sha256 = the pinned model.
+Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); certs = `certs/<path>` (certs.tsv); the external `x86ir` pins the model (x86_proof.ir); its sha256 is derived from that file.
 
 Universe: the ENCODING SHAPES of the lifted pack, whole: the rows `shape_key<TAB>family<TAB>count` of shapes.tsv (sorted by key, unique, family in
 int x87 simd sys) inside the external `liftpack`; the generate driver of the pack writes it with proof/shape.py:shape_key. The gate has no decoder
 of the exe and no census of its own. A shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result obligations undef_flags def0_witness def0_free nonflag_free) has a row with
 the same shape key, the dsl_sha that the CURRENT code gives (symform.shape_sha(key): sha256 of the symbolic Form, immediate / displacement /
 relative-target fields as variables; the same function the prover writes the field with; none when the shape has no symbolic Form: then the shape
-is uncertified), the pinned model_sha256 and result == proved. The hash binds the certificate to the builder code (forms*.py, dsl.py, symform.py)
+is uncertified), the sha256 of the pinned x86_proof.ir (derived from the external) and result == proved. The hash binds the certificate to the builder code (forms*.py, dsl.py, symform.py)
 and to the object that was proved. The gate imports no SMT solver (the DSL imports z3 only inside to_smt / post).
 
-Pinned model: formgate_inputs.json model_sha256 must equal the `x86_proof.ir` pin of proof/sail_pins.txt (red otherwise): one pin, two readers.
+Pinned model: the external `x86ir` is the one place x86_proof.ir is pinned (commit + tree_sha256); every reader derives the sha256 from its file.
 
 RED with the reason (item `inputs`, universe 1, certified 0), never skipped: no inputs file; not JSON; wrong format or keys; a path key naming an
-external that is not declared (`inputs: external NAME not declared`); model_sha256 differing from sail_pins.txt; an external
+external that is not declared (`inputs: external NAME not declared`); a missing `x86ir` external; an external
 that does not fetch or whose tree does not match its hash; shapes.tsv or certs.tsv absent from its external or malformed. Otherwise the items are the
 shapes; uncertified = shapes without a certificate (first 50, sorted); detail keeps the certified/universe count per family.
 
@@ -27,6 +27,7 @@ TODAY (no pack with shapes.tsv is published): the committed file declares only `
 To make it live add ONE entry to "external" in formgate_inputs.json:
   {"name": "liftpack", "repo": "fnv-nx-build", "ref": <branch of the pack>, "commit": <40 hex>, "tree_sha256": <cas tree hash of that commit's checkout>, "at": "/ext/liftpack"}
 (tree_sha256 = what recipe.fetch_externals reports for it)."""
+import hashlib
 import hashlib
 import json
 import os
@@ -46,10 +47,10 @@ import recipe  # noqa: E402
 
 NAME = "forms"
 INPUTS = os.path.join(HERE, "formgate_inputs.json")
-PINS = os.path.join(HERE, "sail_pins.txt")
 FORMAT = "fnvnx-forms-inputs/1"
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}      # = recipe.EXT_KEYS (a test asserts it)
-KEYS = {"format", "external", "shapes", "certs", "model_sha256"}
+KEYS = {"format", "external", "shapes", "certs"}
+IR_EXT = "x86ir"      # the external that pins x86_proof.ir: the one place the model is pinned; its sha256 is derived from the file
 REFERENCES = ("sail", "fpsmt", "k", "sdm", "table")
 FAMILIES = ("int", "x87", "simd", "sys")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -67,16 +68,7 @@ def rows(path):
                 yield ln.split("\t")
 
 
-def model_pin(pins=PINS):
-    """the `x86_proof.ir` sha256 of proof/sail_pins.txt"""
-    with open(pins) as fh:
-        got = [r for r in (ln.split() for ln in fh if ln[0] != "#" and ln.strip()) if r[0] == "x86_proof.ir"]
-    if len(got) != 1 or len(got[0]) != 4 or not HEX64.match(got[0][3]):
-        raise Red("inputs: %s has no single x86_proof.ir pin" % os.path.basename(pins))
-    return got[0][3]
-
-
-def load_inputs(path=INPUTS, pins=PINS):
+def load_inputs(path=INPUTS):
     """-> the inputs document; raises Red naming the problem"""
     if not os.path.isfile(path):
         raise Red("inputs: no %s: the pack's shapes.tsv and certs.tsv are not declared as content-pinned externals of fnv-nx-build" % os.path.basename(path))
@@ -107,10 +99,8 @@ def load_inputs(path=INPUTS, pins=PINS):
             raise Red("inputs: %s must be NAME/path inside a declared external" % k)
         if v.split("/", 1)[0] not in names:
             raise Red("inputs: external %s not declared" % v.split("/", 1)[0])
-    if not isinstance(doc["model_sha256"], str) or not HEX64.match(doc["model_sha256"]):
-        raise Red("inputs: model_sha256 is not a SHA-256")
-    if doc["model_sha256"] != model_pin(pins):
-        raise Red("inputs: model_sha256 %s differs from the x86_proof.ir pin of sail_pins.txt" % doc["model_sha256"])
+    if IR_EXT not in names:
+        raise Red("inputs: external %s (the pinned x86_proof.ir) not declared" % IR_EXT)
     return doc
 
 
@@ -124,6 +114,11 @@ def fetch(doc, cache):
     except recipe.BuildRed as e:
         f = e.args[0]
         raise Red("inputs: external does not fetch or match its hash: stage %s: %s" % (f["stage"], " | ".join(f["stderr"][-3:])[:300]))
+
+
+def file_sha(p):
+    with open(p, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
 
 
 def path_in(ext, v, what):
@@ -224,12 +219,12 @@ def analyse(shapes_path, certs_path, model_sha):
     return fam, cert, nobuilder
 
 
-def judge(cache, inputs=INPUTS, pins=PINS):
+def judge(cache, inputs=INPUTS):
     """-> (universe, certified, uncertified ids, detail); never raises for an input problem"""
     try:
-        doc = load_inputs(inputs, pins)
+        doc = load_inputs(inputs)
         ext = fetch(doc, cache)
-        fam, cert, nobuilder = analyse(path_in(ext, doc["shapes"], "shapes"), path_in(ext, doc["certs"], "certs"), doc["model_sha256"])
+        fam, cert, nobuilder = analyse(path_in(ext, doc["shapes"], "shapes"), path_in(ext, doc["certs"], "certs"), file_sha(path_in(ext, IR_EXT + "/ir/x86_proof.ir", "x86_proof.ir")))
     except Red as e:
         return 1, 0, ["inputs"], str(e)[:600]
     except (OSError, ValueError) as e:

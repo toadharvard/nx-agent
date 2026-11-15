@@ -59,7 +59,8 @@ if [ ! -x "$ISLA" ] || [ ! -f "$WORKDIR/sail/x86_proof.ir" ]; then
 fi
 bash "$FARM/sail_build.sh" > "$W/sail_build_$K.log" 2>&1 || { echo "sail_build.sh failed (see $W/sail_build_$K.log): the toolchain / IR is not the pinned one" >&2; exit 1; }
 SHA=$(sha256sum "${SAIL_IR:-$WORKDIR/sail/x86_proof.ir}" | cut -d' ' -f1)
-grep -q "^x86_proof.ir .* $SHA\$" "$HERE/sail_pins.txt" || { echo "IR sha256 $SHA is not the pin in sail_pins.txt" >&2; exit 1; }
+PINSHA=$(env -u SAIL_IR python3 -I "$HERE/certs_build.py" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
+[ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of formgate_inputs.json)" >&2; exit 1; }
 
 if [ -n "$PINQ" ]; then
     # 2. the pinned queue: its header names the IR and the queue id; the rows must hash to it

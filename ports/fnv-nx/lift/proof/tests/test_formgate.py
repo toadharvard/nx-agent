@@ -1,6 +1,7 @@
 """Tests of proof/formgate.py: the inputs contract (externals fetched by the trunk's loader from local bare repos, no network), every red reason,
 the certification rule on synthetic encodings (byte strings written here, nothing derived from game data)."""
 import itertools
+import hashlib
 import json
 import os
 import shutil
@@ -40,7 +41,8 @@ def skip_cache(d, names):
 
 
 MD = shape.decoder()
-MODEL = '7c3074644653d2976cbb101ae993e94f2a09c9b7a3b574d3c74f6a80278d079c'
+IR_TEXT = 'fixture: the x86_proof.ir of the external x86ir\n'
+MODEL = hashlib.sha256(IR_TEXT.encode()).hexdigest()      # derived from the file, as formgate derives it
 # encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fld st(1))
 GOOD = ['01c8', '31c0', '8b4510', '6a05', 'c3', '90']
 NOBUILD = ['d9c1']
@@ -53,8 +55,8 @@ def key_of(h):
 
 
 class Fixture:
-    """one fake artifacts repo with externals liftpack (shapes.tsv) and certs (certs.tsv), the inputs file and a sail_pins file"""
-    def __init__(self, td, encs, certs_for=None, dsl_override=None, model=MODEL, result='proved', pin=MODEL, shapes_text=None, declare=('liftpack', 'certs'),
+    """one fake artifacts repo with externals liftpack (shapes.tsv) and certs (certs.tsv), the inputs file (and the fake IR as the external x86ir)"""
+    def __init__(self, td, encs, certs_for=None, dsl_override=None, model=MODEL, result='proved', shapes_text=None, declare=('liftpack', 'certs', 'x86ir'),
                  shapes_file='shapes.tsv', cert_rows=None):
         self.td = td
         self.keys = sorted(set(key_of(h) for h in encs))
@@ -68,25 +70,23 @@ class Fixture:
         os.makedirs(os.path.join(td, 'art'), exist_ok=True)
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
         self.ext = {'liftpack': self.art.publish('liftpack', {shapes_file: shapes, 'README': 'pack\n'}),
-                    'certs': self.art.publish('certs', {'certs.tsv': ''.join(cert_rows if cert_rows is not None else rows)})}
+                    'certs': self.art.publish('certs', {'certs.tsv': ''.join(cert_rows if cert_rows is not None else rows)}),
+                    'x86ir': self.art.publish('x86ir', {'ir/x86_proof.ir': IR_TEXT})}
         self.inputs = os.path.join(td, 'inputs.json')
-        self.pins = os.path.join(td, 'sail_pins.txt')
-        self.write(pin=pin, declare=declare)
+        self.write(declare=declare)
         self.cache = os.path.join(td, 'cache')
         os.makedirs(self.cache)
 
-    def write(self, pin=MODEL, declare=('liftpack', 'certs'), **over):
+    def write(self, declare=('liftpack', 'certs', 'x86ir'), **over):
         doc = {'format': 'fnvnx-forms-inputs/1', 'external': [self.ext[n] for n in declare], 'shapes': 'liftpack/shapes.tsv',
-               'certs': 'certs/certs.tsv', 'model_sha256': MODEL}
+               'certs': 'certs/certs.tsv'}
         doc.update(over)
         with open(self.inputs, 'w') as fh:
             json.dump(doc, fh)
-        with open(self.pins, 'w') as fh:
-            fh.write('# pins\nz3-solver  -  5  %s\nx86_proof.ir  -  -  %s\n' % ('0' * 64, pin))
 
     def judge(self):
         with fakeext.use_artifacts(self.art):
-            return formgate.judge(self.cache, self.inputs, self.pins)
+            return formgate.judge(self.cache, self.inputs)
 
 
 class Green(unittest.TestCase):
@@ -205,7 +205,7 @@ class InputsRed(unittest.TestCase):
 
     def test_external_not_declared(self):
         with workdir() as td:
-            f = Fixture(td, GOOD, declare=('certs',))
+            f = Fixture(td, GOOD, declare=('certs', 'x86ir'))
             self.red(f, 'inputs: external liftpack not declared')
 
     def test_bad_external_entry_and_path(self):
@@ -213,19 +213,19 @@ class InputsRed(unittest.TestCase):
             f = Fixture(td, GOOD)
             f.write(shapes='liftpack/../x')
             self.red(f, 'NAME/path')
-            f.write(external=[dict(f.ext['liftpack'], commit='abc'), f.ext['certs']])
+            f.write(external=[dict(f.ext['liftpack'], commit='abc'), f.ext['certs'], f.ext['x86ir']])
             self.red(f, 'bad name, repo, commit')
 
     def test_hash_mismatch(self):
         with workdir() as td:
             f = Fixture(td, GOOD)
-            f.write(external=[dict(f.ext['liftpack'], tree_sha256='0' * 64), f.ext['certs']])
+            f.write(external=[dict(f.ext['liftpack'], tree_sha256='0' * 64), f.ext['certs'], f.ext['x86ir']])
             self.red(f, 'tree_sha256 is')
 
     def test_external_does_not_fetch(self):
         with workdir() as td:
             f = Fixture(td, GOOD)
-            f.write(external=[dict(f.ext['liftpack'], commit='1' * 40), f.ext['certs']])
+            f.write(external=[dict(f.ext['liftpack'], commit='1' * 40), f.ext['certs'], f.ext['x86ir']])
             self.red(f, 'does not fetch')
 
     def test_shapes_tsv_missing(self):
@@ -239,16 +239,16 @@ class InputsRed(unittest.TestCase):
             f.write(certs='certs/none.tsv')
             self.red(f, 'certs: none.tsv is missing')
 
-    def test_model_pin_differs_from_sail_pins(self):
+    def test_the_ir_external_is_required(self):
         with workdir() as td:
-            f = Fixture(td, GOOD, pin='a' * 64)
-            self.red(f, 'differs from the x86_proof.ir pin')
+            f = Fixture(td, GOOD, declare=('liftpack', 'certs'))
+            self.red(f, 'external x86ir (the pinned x86_proof.ir) not declared')
 
-    def test_model_sha_not_a_sha(self):
+    def test_a_certificate_of_another_ir_is_not_a_certificate(self):      # the model sha is derived from the file of the external, not typed anywhere
         with workdir() as td:
-            f = Fixture(td, GOOD)
-            f.write(model_sha256='zz')
-            self.red(f, 'not a SHA-256')
+            f = Fixture(td, GOOD, model='a' * 64)
+            u, c, ids, detail = f.judge()
+            self.assertEqual((u, c), (len(GOOD), 0))
 
     def test_shapes_malformed(self):
         a, b = key_of(GOOD[0]), key_of(GOOD[1])
@@ -263,10 +263,10 @@ class InputsRed(unittest.TestCase):
             self.red(Fixture(td, GOOD, cert_rows=['a\tb\n']), 'certs.tsv: bad row')
 
     def test_committed_inputs_are_valid_and_red_for_the_pack(self):
-        """the committed file: loads against the real sail_pins.txt up to the missing liftpack; certs external is the pinned one"""
+        """the committed file: loads up to the missing liftpack; certs external is the pinned one"""
         with open(formgate.INPUTS) as fh:
             doc = json.load(fh)
-        self.assertEqual(doc['model_sha256'], formgate.model_pin())
+        self.assertNotIn('model_sha256', doc)      # the IR is pinned in one place: the x86ir external
         self.assertEqual([e['name'] for e in doc['external']], ['certs', 'x86ir'])
         with workdir() as td:
             u, c, ids, detail = formgate.judge(td)
@@ -282,7 +282,6 @@ class Cli(unittest.TestCase):
         os.symlink(os.path.abspath(fakeext.VERIFY), os.path.join(co, 'ports', 'fnv-nx', 'verify'))
         os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'contract')), os.path.join(co, 'ports', 'fnv-nx', 'contract'))
         shutil.copyfile(f.inputs, os.path.join(co, 'ports', 'fnv-nx', 'lift', 'proof', 'formgate_inputs.json'))
-        shutil.copyfile(f.pins, os.path.join(co, 'ports', 'fnv-nx', 'lift', 'proof', 'sail_pins.txt'))
         out = os.path.join(td, 'out')
         os.makedirs(out)
         env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'ARTIFACTS_URL': f.art.url, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
@@ -299,7 +298,7 @@ class Cli(unittest.TestCase):
 
     def test_missing_pack_is_red_with_reason(self):
         with workdir() as td:
-            f = Fixture(td, GOOD, declare=('certs',))
+            f = Fixture(td, GOOD, declare=('certs', 'x86ir'))
             r, out = self.run_gate(td, f)
             self.assertEqual(r.returncode, 2)
             with open(os.path.join(out, 'forms.json')) as fh:
@@ -320,7 +319,7 @@ class DeclaredOutputs(unittest.TestCase):
         self.assertTrue(formgate.declared_ok('eax:cpuid0,edx:cpuid3@' + sha))
         self.assertFalse(formgate.declared_ok('eax:cpuid0@' + '0' * 64))               # the platform source changed
         self.assertFalse(formgate.declared_ok('esi:cpuid0@' + sha))                    # an output the contract does not allow
-        self.assertFalse(formgate.declared_ok('eax:rdtsc@' + sha))                     # a function that is not in declared.json
+        self.assertFalse(formgate.declared_ok('eax:rdpmc@' + sha))                     # a function that is not in declared.json
         self.assertFalse(formgate.declared_ok('garbage'))
 
 

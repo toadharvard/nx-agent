@@ -22,7 +22,7 @@ WORK = os.environ.get('SAIL_WORK', '/home/user/l3work/proof')
 
 def ir_file():
     """the pinned x86_proof.ir: SAIL_IR (a farm build of the series) or the declared external `x86ir` of formgate_inputs.json, fetched by the loader of the trunk
-    (recipe.fetch_externals, commit + tree_sha256) and checked against the x86_proof.ir pin of sail_pins.txt"""
+    (recipe.fetch_externals, commit + tree_sha256): the one place the IR is pinned; its sha256 is derived (ir_sha)"""
     global _ir
     if _ir is None:
         _ir = os.environ.get('SAIL_IR') or _from_loader()
@@ -39,7 +39,7 @@ def _from_loader():
     cache = os.environ.get('GATE_CACHE') or os.path.join(WORK, 'ir-cache')
     os.makedirs(cache, exist_ok=True)
     ext = formgate.fetch({'external': [e for e in doc['external'] if e['name'] == 'x86ir']}, cache)
-    return formgate.path_in(ext, 'x86ir/x86_proof.ir', 'x86_proof.ir')
+    return formgate.path_in(ext, 'x86ir/ir/x86_proof.ir', 'x86_proof.ir')
 CFG = os.path.join(HERE, 'x86.toml')
 ISLA = os.environ.get('ISLA_EXEC', '/home/user/rems-project/isla/target/release/isla-execute-function')
 Z3LIB = os.environ.get('Z3LIB', '/usr/local/lib/python3.13/site-packages/z3/lib')
