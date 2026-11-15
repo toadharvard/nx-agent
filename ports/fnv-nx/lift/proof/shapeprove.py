@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sharded prover of ENCODING SHAPES (rule R2): one obligation per shape, immediate / displacement / relative-target bytes (and eip) symbolic.
-  shapeprove.py --shapes FILE --shard K/N --out DIR [--timeout SEC] [--eip sym|fixed] [--slice STRIDE] [--only SUBSTR]
+  shapeprove.py --shapes FILE --shard K/N --out DIR [--timeout SEC] [--eip sym|fixed] [--slice STRIDE] [--only SUBSTR] --sail-work DIR --sail-ir FILE --isla EXE
 FILE: shapes.tsv (first column = shape key; '#' lines ignored; the output of proof/census.py); a key is re-derived by shape.shape_key from
 its representative bytes, so the canonical key (shape.py) is the unit whatever the census format.  Integer family only (shape.family == 'int'); the other
 families have their own provers.  Order: sorted canonical keys; shard K/N (K = 1..N) takes the shapes whose position is = K-1 mod N.  --slice STRIDE keeps
@@ -86,7 +86,8 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=False, default=None); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
     ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--eip', choices=('sym', 'fixed'), default='sym'); ap.add_argument('--slice', type=int, default=1)
     ap.add_argument('--only'); ap.add_argument('--migrate', metavar='JSONL', help='K: copy the records of JSONL (a shard of this model) to the shard file, adding model_fns / closure_sha to the proved ones'); ap.add_argument('--limit', type=int)
-    a = ap.parse_args(); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
+    ap.add_argument('--sail-work', required=True); ap.add_argument('--sail-ir', required=True); ap.add_argument('--isla', required=True)
+    a = ap.parse_args(); model_sail.configure(a.sail_work, a.sail_ir, a.isla); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
     if a.migrate:
         with open(a.migrate) as fi, open(path, 'a') as out:

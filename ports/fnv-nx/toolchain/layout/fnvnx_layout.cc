@@ -4,7 +4,7 @@
  * One text line per complete record type (class, struct, union) the unit lays out, in the object's own section
  * .fnvnx.layout (not loaded):
  *
- *     key <TAB> size <TAB> align <TAB> fields <TAB> bases <TAB> flags <TAB> itanium
+ *     key <TAB> size <TAB> align <TAB> fields <TAB> bases <TAB> flags <TAB> itanium <TAB> linkage
  *
  *   key      MSVC's decorated type name as cl writes it into CodeView as the "unique name" of the record
  *            (`UP@@` for struct P, `VB@@` for class B, `T...@@` for a union, `UIn@Q@@` for Q::In, `U?$TT@H@@` for
@@ -26,6 +26,41 @@
  *            alignment the source asked for), altered (the record's alignment is not the natural one: pack, packed,
  *            alignas / __declspec(align) on it or on a member)
  *   itanium  the Itanium type string (the key of the `types` column of .fnvnx.n3)
+ *   linkage  `none` | `internal` | `external` | `c`: the linkage of the record type, C++ [basic.link], decided by GCC 13.3's own predicates
+ *            (linkage_of below), not by names:
+ *              none      cp/tree.cc no_linkage_check(t, false) names a type: a local class, an unnamed class without a typedef name for
+ *                        linkage at namespace scope, a lambda without mangling scope, a class nested in those (the offending type
+ *                        is the record itself or a type it is a member of)
+ *              internal  not none, and the type's declaration is not public: cp/tree.cc decl_anon_ns_mem_p (a member of an unnamed
+ *                        namespace, however deeply, also through an enclosing class) or TREE_PUBLIC cleared by the front end's
+ *                        determine_visibility / constrain_visibility_for_template (cp/decl2.cc: a template instantiation with an
+ *                        argument of internal linkage)
+ *              external  everything else
+ *            An unnamed class with a typedef name for linkage purposes is named for the front end (TYPE_UNNAMED_P is false) and takes
+ *            the linkage of that name's scope.       c         every record of a C unit (cc1), whatever its scope: C11 6.2.2p6 gives an identifier that is not an object or a function
+ *                        (a struct, union or enum tag, a typedef name) no linkage, and C has no ODR for tags; agreement across units is
+ *                        the compatibility (6.2.7) of the declarations of external objects and functions, not the tag's name. So none of
+ *                        the C++ predicates applies and the value says so.
+ *
+ * Declared types (section .fnvnx.decltype, every unit: the external symbols of a C unit, the C-linkage symbols of a C++ unit; not loaded): see the block comment before emit_decltype: one line `symbol <TAB> type` per
+ * external symbol the unit declares or defines, in the grammar of link/ctypes_compat.py (C11 6.2.7p2).
+ *
+ * Boundary-forbidden types (section .fnvnx.crossing, every unit, not loaded): written by the names plugin (the block comment before cross_holds in toolchain/names/fnvnx_names.cc): one line
+ * `symbol <TAB> terms` per external function the unit defines or references, the terms being ids of DATAMODEL.json crossing_forbidden.
+ *
+ * Objects (section .fnvnx.objects, not loaded): one line per variable definition with static storage the unit
+ * makes (a global, a file-scope static, a static data member, a function-local static; not a declaration alone):
+ *
+ *     asm <TAB> size <TAB> align <TAB> elem <TAB> itanium <TAB> flags
+ *
+ *   asm      the assembler name of the object (the symbol of the object file)
+ *   size     TYPE_SIZE_UNIT of the declared type (an array's size is its element size times its extent, from its type)
+ *   align    TYPE_ALIGN_UNIT of the declared type (the optimiser may align the object more; that is not the type's)
+ *   elem     the record key (as in the layout lines) of the innermost element type when that is a class, struct or
+ *            union, else `-`; the layout and abi gates certify that record, the data-model gate certifies a scalar
+ *   itanium  the Itanium type string of the declared type
+ *   flags    `,`-separated: internal (not external linkage), local (function-local static)
+ *  A type without a constant size (an incomplete array, a dependent type) gets no line.
  *
  * Which types: every record type the unit completes by a definition (PLUGIN_FINISH_TYPE), every record type that
  * occurs in a declaration or in the body of a function of the unit (instantiated templates, local classes), and
@@ -36,6 +71,7 @@
 #include "../names/fnvnx_names.cc"
 #undef plugin_init
 #undef plugin_is_GPL_compatible
+#include "../names/plugsym.inc"   /* RULE DECLTYPE-PLUGINSYM: the registry of the symbols plugins write as text; this plugin is its reader */
 
 #include "stor-layout.h"
 #include "cgraph.h"
@@ -44,6 +80,20 @@
 #include "tree-inline.h"
 
 int plugin_is_GPL_compatible;
+
+FNVNX_CXX_ONLY(no_linkage_check);
+FNVNX_CXX_ONLY(decl_anon_ns_mem_p);
+
+/* the linkage column of a layout line, by the front end's own predicates (see the header comment) */
+static const char *linkage_of(tree t)
+{
+  t = TYPE_MAIN_VARIANT(t);
+  if (!is_cxx()) return "c";   /* C11 6.2.2p6, 6.2.7: see the header comment */
+  if (no_linkage_check(t, false)) return "none";
+  tree d = TYPE_MAIN_DECL(t);
+  if (!TREE_PUBLIC(d) || decl_anon_ns_mem_p(d)) return "internal";
+  return "external";
+}
 
 static std::vector<tree> found;
 static std::set<tree> found_set;
@@ -81,9 +131,38 @@ static void add_type(tree t)
 
 static void finish_type_cb(void *gcc_data, void *) { add_type((tree)gcc_data); }
 
+/* variable definitions with static storage, chained from the GC root `keep_vars` until FINISH_UNIT */
+static std::vector<tree> vars;
+static std::set<tree> vars_set;
+static tree keep_vars = NULL_TREE;
+static const struct ggc_root_tab keep_vars_roots[] = {
+  { &keep_vars, 1, sizeof(keep_vars), &gt_ggc_mx_lang_tree_node, NULL },
+  LAST_GGC_ROOT_TAB
+};
+
+static void add_var(tree d)
+{
+  if (!d || TREE_CODE(d) != VAR_DECL || !TREE_STATIC(d) || DECL_EXTERNAL(d)) return;
+  if (DECL_HARD_REGISTER(d)) return;   /* a global register variable is no memory: no extent */
+  if (is_cxx() && (processing_template_decl || uses_template_parms(TREE_TYPE(d)))) return;   /* (cc1: no templates) */
+  if (vars_set.insert(d).second) { vars.push_back(d); keep_vars = tree_cons(NULL_TREE, d, keep_vars); }
+}
+
+/* RULE SYMSET (names.cc sym_emitted), the assembler-label case: a declaration with `__asm__("x")` has the assembler name `*x`, and varasm.cc assemble_name marks a symbol
+ * referenced on the identifier `x` only when that identifier already exists (maybe_get_identifier). Interning it when the declaration is finished makes GCC's own
+ * bookkeeping record the reference, so that TREE_SYMBOL_REFERENCED of `x` is the fact for the symbol of the object, whatever the spelling of the declaration. */
+static void intern_label_name(tree d)
+{
+  if (!d || !DECL_P(d) || !VAR_OR_FUNCTION_DECL_P(d) || !DECL_ASSEMBLER_NAME_SET_P(d)) return;
+  const char *an = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+  if (an[0] == '*' && an[1]) get_identifier(an + 1);
+}
+
 static void finish_decl_cb(void *gcc_data, void *)
 {
   tree d = (tree)gcc_data;
+  intern_label_name(d);
+  add_var(d);
   /* a compiler-made object (typeinfo, vtable, guard) carries compiler-made record types: not the source's */
   if (d && DECL_P(d) && !DECL_ARTIFICIAL(d)) add_type(TREE_TYPE(d));
   if (d) { finish_decl(gcc_data, NULL); }
@@ -234,6 +313,151 @@ static void close_over(tree t)
   }
 }
 
+/* the .fnvnx.objects lines: one per variable definition with static storage and a constant size */
+static void emit_objects()
+{
+  std::set<std::string> seen;
+  std::vector<std::string> lines;
+  for (tree d : vars) {
+    tree type = TREE_TYPE(d);
+    if (!type || !COMPLETE_TYPE_P(type) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(type))) continue;
+    if (!DECL_ASSEMBLER_NAME_SET_P(d) && !DECL_NAME(d)) continue;
+    std::string name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+    if (name.empty() || !seen.insert(name).second) continue;
+    tree e = type;
+    while (TREE_CODE(e) == ARRAY_TYPE) e = TREE_TYPE(e);
+    std::string elem = "-";
+    if (RECORD_OR_UNION_TYPE_P(e) && (!is_cxx() || CLASS_TYPE_P(e) || TREE_CODE(e) == UNION_TYPE) && COMPLETE_TYPE_P(e)) {
+      std::string why;
+      elem = key_of(TYPE_MAIN_VARIANT(e), why);
+    }
+    std::vector<std::string> fl;
+    if (!TREE_PUBLIC(d)) fl.push_back("internal");
+    if (decl_function_context(d)) fl.push_back("local");
+    lines.push_back(name + "\t" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(type))) + "\t" + std::to_string(TYPE_ALIGN_UNIT(type)) + "\t"
+                    + elem + "\t" + itanium(type) + "\t" + join(fl, ','));
+  }
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.objects,\"\",%%progbits\n");
+  for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(lines[i]).c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
+
+/* ---- Declared types of the external symbols of a C unit (section .fnvnx.decltype) ----------------------------------------------------------
+ * C records have no linkage, so C's cross-unit rule is C11 6.2.7p2: every declaration of one object or function with external linkage has a
+ * compatible type. One line per external symbol the unit declares or defines (every VAR_DECL and FUNCTION_DECL of the unit with TREE_PUBLIC that
+ * the front end finished, or that the symbol table holds: an implicitly declared function is in the second set only):  symbol <TAB> type.
+ * Grammar (link/ctypes_compat.py, which parses it): `int`, `unsigned_int` (a scalar is the front end's name of the type with `_` for blanks);
+ * `*T`; `[N]T` / `[]T` (an array of known / unknown extent; a variable-length array is `[]`: 6.7.6.2p6 makes it compatible with any extent);
+ * `(P,P,...)R` with `...` for varargs, `(?)R` without a prototype; `struct:TAG{m:T;m:T:W}` complete, `struct:TAG` incomplete or already under
+ * expansion (a recursive type is written by its tag, not unrolled), `-` for an unnamed tag or member, `union:` likewise; `enum:TAG=T`
+ * (T the enumeration's compatible integer type); qualifiers are a prefix `const:` `volatile:` `restrict:` in that order. Typedef names are
+ * looked through (a typedef is not a type); the top-level qualifiers of a parameter are dropped (6.7.6.3p15).
+ * A type outside this grammar (an atomic qualifier, a complex type, an incomplete enumeration) is an error of the compilation, and
+ * so is a symbol declared with two different spellings in one unit (every declaration of it is compatible with the others, but the gate that
+ * reads this section needs one spelling to be the symbol's type in the unit). */
+#include "rtl.h"
+#include "decltype_spell.inc"   /* dl_type: the spelling of .fnvnx.decltype, shared with fnvnx_dispatch */
+
+/* RULE DECLTYPE-COMPLETE (1): the names of the library functions the back end called (see emit_decltype). */
+static std::set<std::string> libcalls;
+static void (*orig_external_libcall)(rtx);
+static void libcall_seen(rtx fun)
+{
+  if (fun && GET_CODE(fun) == SYMBOL_REF) { const char *nm = XSTR(fun, 0); if (*nm == '*') nm++; libcalls.insert(nm); }
+  if (orig_external_libcall) orig_external_libcall(fun);
+}
+
+static void emit_decltype()
+{
+  /* RULE SYMSET (names.cc sym_emitted) + RULE DECLTYPE-COMPLETE: every symbol the object has (defined or referenced) has exactly one line: the row spelled from the
+   * symbol table's own declaration, which is the declaration the front end composed from all of the unit's declarations of it (C11 6.2.7p3), or `-reason` (the closed
+   * set FNVNX_DECLTYPE_REASONS). The universe is the one of .fnvnx.sympair: the symbol table's emitted symbols and the SDD2 slot functions. A declaration the headers
+   * bring in whose symbol the object does not have is not a line: the gate compares symbols across objects, so it would add nothing but size. */
+  std::vector<tree> decls;
+  symtab_node *sn;
+  FOR_EACH_SYMBOL(sn) {
+    bool def;
+    if (sym_emitted(sn, def)) decls.push_back(sn->decl);
+  }
+  for (tree f : sdd_slot_decls()) decls.push_back(f);
+  std::map<std::string, std::string> rows;
+  /* RULE DECLTYPE-PLUGINSYM (weakref): the ELF symbol of `static T a __attribute__((weakref("t")))` is its TARGET `t` (GCC assemble_weakref: `.weak t`, no symbol `a`), so the
+   * line is written under `t` with the spelling of the weakref's own declaration (libgcc's __gthrw: `__typeof(t)`, the type of the target). When a declaration of `t` is also
+   * in the unit its row must be the same spelling (checked below, as for any symbol with two declarations). Only a weakref whose target the object names (the identifier is
+   * TREE_SYMBOL_REFERENCED once the back end output a reference) is a symbol. */
+  std::vector<std::pair<std::string, tree>> weakrefs;
+  FOR_EACH_SYMBOL(sn) {
+    if (!sn->weakref || !sn->alias_target) continue;
+    const char *tn = TREE_CODE(sn->alias_target) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(sn->alias_target)
+                     : DECL_P(sn->alias_target) ? IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(sn->alias_target)) : nullptr;
+    if (!tn) continue;
+    tree id = maybe_get_identifier(tn);
+    if (!id || !TREE_SYMBOL_REFERENCED(id)) continue;
+    weakrefs.push_back({tn, sn->decl});
+  }
+  for (tree d : decls) {
+    const std::string nms = asmname(d);   /* the object's symbol: an assembler-label declaration has the assembler name `*x` */
+    const char *nm = nms.c_str();
+    /* RULE (DECLTYPE-MANGLED): decided on the assembler name, the string sym_emitted uses, not on the source spelling: an extern "C" declaration of a mangled name
+     * (libstdc++'s cow-stdexcept.cc declares the std::string constructors so) is in it too. Its cross-object comparison is .fnvnx.sympair / .fnvnx.odrdef, which cover
+     * mangled names. RULE (DECLTYPE-LANG): the symbols of a C unit and the symbols with C language linkage of a C++ unit (extern "C": the names C code can declare). */
+    const char *why = nullptr;
+    if (nm[0] == '_' && nm[1] == 'Z') why = "mangled";
+    else if (DECL_IS_UNDECLARED_BUILTIN(d)) why = "builtin";
+    else if (!DECL_NAME(d)) why = "noname";
+    else if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) why = "cxx";
+    std::string ty;
+    if (why) ty = std::string("-") + why;
+    else { std::vector<tree> stk; ty = dl_type(TREE_TYPE(d), stk); }
+    auto it = rows.find(nm);
+    if (it == rows.end()) rows[nm] = ty;
+    /* the front end's own declaration of a library function (`-builtin`) and the unit's declaration or definition of the same symbol (ffsll in newlib) are one symbol:
+     * the declaration of the unit's text is the row, the builtin one is only the implicit declaration of that libc function (GCC internals, "Builtins") */
+    else if (it->second == "-builtin" && ty != "-builtin") it->second = ty;
+    else if (ty == "-builtin") {}
+    else if (it->second != ty) dl_error("one symbol is declared with two spellings in one unit", std::string(nm) + ": " + it->second + " / " + ty);
+  }
+  for (auto &w : weakrefs) {
+    tree d = w.second;
+    std::string ty;
+    if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) ty = "-cxx";
+    else { std::vector<tree> stk; ty = dl_type(TREE_TYPE(d), stk); }
+    auto it = rows.find(w.first);
+    if (it == rows.end()) rows[w.first] = ty;
+    else if (it->second != ty) dl_error("a weakref and its target are declared with two spellings", w.first + ": " + it->second + " / " + ty);
+  }
+  /* The symbols the object has that no symbol table node names: the references the back end makes itself. (1) The library functions it calls implicitly: every one is
+   * announced through targetm.asm_out.external_libcall (varasm.cc assemble_external_libcall, called once per SYMBOL_REF the first time it is used: the one place a
+   * libcall is emitted, whatever table made its SYMBOL_REF), which the plugin wraps (libcall_seen). (2) The explicit built-in functions it lowers to calls after the
+   * symbol table was built (_Unwind_Resume of a resx: the decl is in builtin_info, and its assembler name is TREE_SYMBOL_REFERENCED when a call to it was output). They
+   * have no declaration of the unit's text: `-libcall` / `-builtin`. */
+  for (auto &nm : libcalls) if (!rows.count(nm)) rows[nm] = "-libcall";
+  for (int i = 0; i < (int)END_BUILTINS; i++) {
+    tree d = builtin_info[i].decl;
+    if (!d || !TREE_PUBLIC(d) || !DECL_ASSEMBLER_NAME_SET_P(d)) continue;
+    tree an = DECL_ASSEMBLER_NAME(d);
+    if (!TREE_SYMBOL_REFERENCED(an)) continue;
+    if (!rows.count(IDENTIFIER_POINTER(an))) rows[IDENTIFIER_POINTER(an)] = "-builtin";
+  }
+  /* RULE DECLTYPE-PLUGINSYM: the symbols the plugins wrote as text (names/plugsym.inc): the row the writer spelled, else `-mangled` for a `_Z` name, else `-plugin`.
+   * A symbol that a declaration also gave (weakref targets, a called function the unit declares) keeps that row; a writer's spelling that differs from it is an error. */
+  for (auto &pr : fnvnx_plugsym().syms) {
+    const std::string &nm = pr.first;
+    std::string ty = !pr.second.empty() ? pr.second : (nm[0] == '_' && nm[1] == 'Z') ? "-mangled" : "-plugin";
+    auto it = rows.find(nm);
+    if (it == rows.end()) rows[nm] = ty;
+    /* a plugin's own artificial declaration (no source location) reads as the front end's `-builtin` (DECL_IS_UNDECLARED_BUILTIN is location 0); its writer's spelling is the row */
+    else if (!pr.second.empty() && it->second == "-builtin") it->second = ty;
+    else if (!pr.second.empty() && it->second != ty && it->second[0] != '-') dl_error("a plugin's symbol is declared with another spelling", nm + ": " + it->second + " / " + ty);
+  }
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.decltype,\"\",%%progbits\n");
+  for (auto &r : rows) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(r.first + "\t" + r.second).c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
+/* `.fnvnx.crossing` is written by the names plugin, from the rows of `.fnvnx.sympair` (toolchain/names/fnvnx_names.cc): one universe. */
+
 static void finish_unit_cb(void *, void *)
 {
   std::vector<std::string> lines;
@@ -245,6 +469,9 @@ static void finish_unit_cb(void *, void *)
     if (!tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) continue;
     std::string why;
     std::string key = key_of(t, why);
+    /* a lambda's closure type has no name in cl's key grammar (cl: <lambda_hash>): its key `U<unnamed-tag>@..@` is shared by every
+       unnamed class of the scope, so it is not a key. Named by its Itanium string instead, and `nokey` (as a local lambda already is). */
+    if (is_cxx() && LAMBDA_TYPE_P(t) && why.empty()) { key = "!" + itanium(t); why = "lambda closure type"; }
     std::set<std::string> flags;
     if (!why.empty()) flags.insert("nokey:" + why);
     if (TYPE_PACKED(t)) flags.insert("packed");
@@ -282,11 +509,13 @@ static void finish_unit_cb(void *, void *)
     }
     std::vector<std::string> fl(flags.begin(), flags.end());
     lines.push_back(key + "\t" + std::to_string(tree_to_uhwi(TYPE_SIZE_UNIT(t))) + "\t" + std::to_string(TYPE_ALIGN_UNIT(t)) + "\t"
-                    + join(fields, ',') + "\t" + join(bases, ',') + "\t" + join(fl, ',') + "\t" + itanium(t));
+                    + join(fields, ',') + "\t" + join(bases, ',') + "\t" + join(fl, ',') + "\t" + itanium(t) + "\t" + linkage_of(t));
   }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.layout,\"\",%%progbits\n");
   for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(lines[i]).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
+  emit_objects();
+  plugsym_reader_ready(emit_decltype);   /* RULE DECLTYPE-PLUGINSYM: written when every writer plugin has finished its unit */
 }
 
 extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)
@@ -299,15 +528,19 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
     error("%<fnvnx_layout%>: unknown plugin argument %qs", info->argv[0].key);
     return 1;
   }
+  fnvnx_plugsym().reader = true;
+  orig_external_libcall = targetm.asm_out.external_libcall;
+  targetm.asm_out.external_libcall = libcall_seen;
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
+  register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_vars_roots);
   if (is_cxx()) {
     register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl_cb, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, (plugin_callback_func)+[](void *d, void *u) { finish_type(d, u); finish_type_cb(d, u); }, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize_cb, NULL);
   } else {   /* cc1: records come from the types the front end finishes and the declarations it finishes */
-    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { intern_label_name((tree)d); add_var((tree)d); if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type_cb, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit_cb, NULL);

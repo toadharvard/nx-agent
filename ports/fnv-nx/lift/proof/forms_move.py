@@ -106,6 +106,7 @@ def string(c):
     if any(isvec(o) for o in c.ops):             # the SSE forms of movsd / cmpsd share the mnemonic with the string ops
         from proof import forms_simd
         if c.m == 'movsd': return forms_simd.movsd_sse(c)
+        if c.m == 'cmpsd': from proof import forms_ssefp; return forms_ssefp.cmp_imm(c, 64, False)
         raise KeyError(c.m)
     """ONE iteration step.  Without a prefix: the body.  With rep/repe/repne: if ecx == 0 nothing happens (eip = next); otherwise the body, ecx - 1,
     and eip stays on the instruction (the step repeats) unless ecx - 1 == 0 or (repe: ZF == 0 / repne: ZF == 1) after the body."""

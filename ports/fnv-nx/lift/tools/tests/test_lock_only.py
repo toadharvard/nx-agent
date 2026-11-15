@@ -8,7 +8,12 @@ import os, re, shutil, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
 import plugbuild as pb
+import prelude
 import fnvlift as L
+from fnvlift.tests import _inputs
+_inputs.configure()
+if len(sys.argv) != 2: sys.exit('usage: %s GEN   (GEN: the GEN output of the lift/rt root, a declared input of the test root)' % os.path.basename(__file__))
+GEN = sys.argv[1]
 from fnvlift import core, dsl
 from proof import lift_dsl as f_dsl
 from fnvlift.core import Unsupported
@@ -26,7 +31,7 @@ PLUG = [pb.build(n, WORK) for n in ('sdd', 'names', 'dispatch')]
 
 def compiles(body):
     src, obj = os.path.join(WORK, 't.cc'), os.path.join(WORK, 't.o')
-    open(src, 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + body)
+    open(src, 'w').write(prelude.text('fnvl_prelude.h', [os.path.join(LIFT, 'rt'), os.path.join(LIFT, '..', 'platform', 'include'), GEN]) + body)
     return pb.compile(src, obj, PLUG)
 
 
@@ -48,9 +53,9 @@ def raises(fn):
 
 for hexs, name in CASES:
     code = bytes.fromhex(hexs) + b'\xc3'
-    for emit in ('', 'dsl'):
+    for emit in ('dsl',):
         t = lift_bytes(code, emit)
-        assert 'lk_commit(' in t and not GUEST_ACCESS.search(t[t.index('LK_BEGIN'):t.index('lk_commit(')]), (name, emit)
+        assert 'lk_commit<' in t and not GUEST_ACCESS.search(t[t.index('LK_BEGIN'):t.index('lk_commit<')]), (name, emit)
         r = compiles(t)
         assert r.returncode == 0, (name, emit, r.stderr[-600:])
 

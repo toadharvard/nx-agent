@@ -10,38 +10,66 @@ THE TABLE. Required feature of a form = the union of
   2. MNEMONIC_FEATURE: forms that capstone leaves without an SSE3.. group although the SDM gates them (x87 FISTTP is SSE3: capstone tags it `fpu`; POPCNT).
 Completeness argument: a feature is checked iff it is a key of FEATURES; every FEATURES key outside the model (MODEL) is in the "absent" set, and `missing(ins)` is non-empty exactly when a
 group or mnemonic of the form maps to an absent feature. test/cpufeat_check.py proves (a) FEATURES' bits agree with the numbers that rt/cpumodel.c really returns (the C file is compiled and
-called), (b) every form of the instest corpus that is implemented by an x87/SSE/MMX handler has required ⊆ MODEL or lifts to #UD, (c) tools/fpstate.py reports, per module, every instruction that `missing` flags and which handler would otherwise have run.
+called), (b) every form of the the retired one-instruction harness corpus that is implemented by an x87/SSE/MMX handler has required ⊆ MODEL or lifts to #UD, (c) tools/fpstate.py reports, per module, every instruction that `missing` flags and which handler would otherwise have run.
 Assumption ASM-203: capstone's group tags are a correct classification of the instruction-set extension of a form (they come from LLVM's X86 instruction tables); where they are known to be
 missing (item 2) the table adds the SDM's feature. A tag that is too wide on a feature the model HAS is harmless (the model has it); too wide on an absent feature would raise a wrong #UD:
 test/cpufeat_check.py lists, over every instruction of every module, the forms whose group maps to an absent feature (the A3 table of tools/fpstate.py)."""
 
-# feature -> (CPUID leaf, register, bit), SDM Vol 2 CPUID tables 3-8 / 3-10 and Vol 1 Ch.12
-FEATURES = {
-    'FPU': (1, 'EDX', 0), 'TSC': (1, 'EDX', 4), 'CX8': (1, 'EDX', 8), 'CMOV': (1, 'EDX', 15), 'MMX': (1, 'EDX', 23), 'FXSR': (1, 'EDX', 24), 'SSE': (1, 'EDX', 25), 'SSE2': (1, 'EDX', 26),
-    'SSE3': (1, 'ECX', 0), 'PCLMULQDQ': (1, 'ECX', 1), 'SSSE3': (1, 'ECX', 9), 'FMA': (1, 'ECX', 12), 'SSE4.1': (1, 'ECX', 19), 'SSE4.2': (1, 'ECX', 20), 'MOVBE': (1, 'ECX', 22),
-    'POPCNT': (1, 'ECX', 23), 'AES': (1, 'ECX', 25), 'AVX': (1, 'ECX', 28), 'F16C': (1, 'ECX', 29), 'RDRAND': (1, 'ECX', 30),
-    'BMI1': (7, 'EBX', 3), 'AVX2': (7, 'EBX', 5), 'BMI2': (7, 'EBX', 8), 'ADX': (7, 'EBX', 19), 'SHA': (7, 'EBX', 29),
-    '3DNOW': (0x80000001, 'EDX', 31), '3DNOWEXT': (0x80000001, 'EDX', 30), 'SSE4A': (0x80000001, 'ECX', 6), 'XOP': (0x80000001, 'ECX', 11), 'FMA4': (0x80000001, 'ECX', 16),
-}
-# the model's answer, READ from the sources of the reference CPU (rt/fnvl_abi.h FNVL_CPUID1_ECX/EDX; rt/cpumodel.c E1 = leaf 0x80000001 {EAX, EBX, ECX, EDX}); leaf 7 is above the
-# model's max basic leaf (FNVL_MAX_BASIC), so every leaf-7 feature is absent. No hand-copied constant: a change of the reference CPU changes the gate.
-def _model_bits():
-    import os, re
-    rt = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')
-    abi = open(os.path.join(rt, 'fnvl_abi.h')).read(); cm = open(os.path.join(rt, 'cpumodel.c')).read()
-    d = {k: int(re.search(r'#define FNVL_CPUID1_%s\s+(0x[0-9a-fA-F]+)u' % k, abi).group(1), 16) for k in ('ECX', 'EDX')}
-    e1 = [int(x, 0) for x in re.search(r'E1\[4\]\s*=\s*\{([^}]*)\}', cm).group(1).split(',')]
-    return {(1, 'EDX'): d['EDX'], (1, 'ECX'): d['ECX'], (0x80000001, 'EDX'): e1[3], (0x80000001, 'ECX'): e1[2]}
-MODEL_BITS = _model_bits()
-MODEL = frozenset(f for f, (leaf, reg, bit) in FEATURES.items() if MODEL_BITS.get((leaf, reg), 0) >> bit & 1)
-ABSENT = frozenset(FEATURES) - MODEL
+# feature -> (CPUID leaf, register, bit): DERIVED from the generated table (input 'cpufeat', L3b cpuid_feature_bits.tsv format /2, one row per (leaf, sub, reg, bit)), never written here.
+# The feature's name is the table's `canonical` column (SDM name, else APM name); a name that the table spells at several places is `NAME@leaf.sub.reg[bit]`, and the part before `@` is the feature.
+# Rule: a feature's gate is its row in a CPUID feature-flag leaf (1, 7, 0x80000001); the same register and bit in two flag leaves (the AMD alias of a leaf 1 bit) counts as one row (lowest
+# leaf, the declared CPU answers both identically); several flag rows that differ in register or bit, or no row, is an error at load (never a silent default).
+FLAG_LEAVES = (1, 7, 0x80000001)
+FORMAT = '# fnvnx-cpuid-feature-bits/2'
 
-# capstone group name -> feature
-GROUP_FEATURE = {'mmx': 'MMX', 'sse1': 'SSE', 'sse2': 'SSE2', 'sse3': 'SSE3', 'ssse3': 'SSSE3', 'sse41': 'SSE4.1', 'sse42': 'SSE4.2', 'sse4a': 'SSE4A', 'avx': 'AVX', 'avx2': 'AVX2',
-                 'fma': 'FMA', 'fma4': 'FMA4', 'bmi': 'BMI1', 'bmi2': 'BMI2', 'aes': 'AES', 'pclmul': 'PCLMULQDQ', '3dnow': '3DNOW', 'adx': 'ADX', 'sha': 'SHA', 'xop': 'XOP', 'f16c': 'F16C',
+
+def _load_table(want):
+    from . import inputs
+    rows = {}
+    with open(inputs.get('cpufeat')) as fh:
+        if not fh.readline().startswith(FORMAT):
+            raise ValueError('cpufeat: %s is not a %s table' % (inputs.get('cpufeat'), FORMAT))
+        for l in fh:
+            if not l.strip() or l[0] == '#':
+                continue
+            c = l.rstrip('\n').split('\t')
+            canon, leaf, sub, reg, bit = c[:5]
+            if c[9] != '':
+                continue                    # a mirror row (the APM's "Same as CPUID ..."): its canonical address is the row without mirror_of
+            f = canon.split('@')[0]
+            if f in want and int(leaf, 16) in FLAG_LEAVES:
+                if f in rows:
+                    raise ValueError('cpufeat: feature %s has several flag rows %s and %s' % (f, rows[f], (int(leaf, 16), reg, int(bit))))
+                rows[f] = (int(leaf, 16), reg, int(bit))
+    return rows
+
+
+# the model's answer, DERIVED from verify/cpuid_model.json by cpumodel_bits.model_words (the one derivation, shared with tools/gen_cpuref.py); leaf 7 is above the
+# model's max basic leaf (verify/cpuid_model.json max_basic), so every leaf-7 feature is absent. No hand-copied constant: a change of the reference CPU changes the gate.
+def _model_bits():
+    import json, os
+    from .cpumodel_bits import model_words
+    here = os.path.dirname(os.path.abspath(__file__)); rel = 'ports/fnv-nx/verify/cpuid_model.json'
+    path = next(p for p in (os.path.join('/in', rel), os.path.join(here, '..', '..', 'verify', 'cpuid_model.json')) if os.path.exists(p))
+    w = model_words(json.load(open(path)))
+    return {(1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
+MODEL_BITS = _model_bits()
+
+# capstone group name -> feature (the table's own feature names: no translation exists)
+GROUP_FEATURE = {'mmx': 'MMX', 'sse1': 'SSE', 'sse2': 'SSE2', 'sse3': 'SSE3', 'ssse3': 'SSSE3', 'sse41': 'SSE4_1', 'sse42': 'SSE4_2', 'sse4a': 'SSE4A', 'avx': 'AVX', 'avx2': 'AVX2',
+                 'fma': 'FMA', 'fma4': 'FMA4', 'bmi': 'BMI1', 'bmi2': 'BMI2', 'aes': 'AESNI', 'pclmul': 'PCLMULQDQ', '3dnow': '3DNow', 'adx': 'ADX', 'sha': 'SHA', 'xop': 'XOP', 'f16c': 'F16C',
                  'rdrand': 'RDRAND', 'cmov': 'CMOV'}
 # forms capstone does not tag with the extension that the SDM gates them with
 MNEMONIC_FEATURE = {'fisttp': 'SSE3', 'popcnt': 'POPCNT', 'movbe': 'MOVBE'}
+
+# FEATURES: every feature a form can need (the values of the two tables above) -> (leaf, register, bit), from the generated table; a feature without a row is an error
+_T = _load_table(set(GROUP_FEATURE.values()) | set(MNEMONIC_FEATURE.values()))
+_no_row = sorted((set(GROUP_FEATURE.values()) | set(MNEMONIC_FEATURE.values())) - set(_T))
+if _no_row:
+    raise ValueError('cpufeat: the table has no flag row for %s' % ', '.join(_no_row))
+FEATURES = dict(_T)
+MODEL = frozenset(f for f, (leaf, reg, bit) in FEATURES.items() if MODEL_BITS.get((leaf, reg), 0) >> bit & 1)
+ABSENT = frozenset(FEATURES) - MODEL
 
 
 # forms that the SDM defines as ANOTHER legal instruction on a CPU without the feature (so the absent feature is not #UD): TZCNT F3 0F BC executes as BSF and LZCNT F3 0F BD as BSR (SDM Vol 2

@@ -229,7 +229,68 @@ def case(name, ok, detail=""):
     print(("PASS " if ok else "FAIL ") + name + (" - " + detail if detail and not ok else ""))
 
 
+def frame_cases():
+    """Icount.mark_frame / frames() on a synthetic run (no emulator: the block hook's work is c[0] += n on the current counters)"""
+    ic = icount.Icount()
+    def run(n):
+        ic.cur[0] += n
+    ic.thread(1)
+    run(100)                               # start .. m1 (a milestone mark inside frame 1)
+    ic.mark("m1")
+    ic.thread(2, "worker")
+    run(30)
+    ic.thread(1)
+    run(7)
+    ic.mark_frame(1, 1000, {"sha256": "aa"})   # frame 1 = everything since the start of the run
+    run(11)
+    ic.thread(2)
+    run(5)
+    ic.thread(3)                           # a thread without a name given: t3; it runs in frame 2 only
+    run(2)
+    ic.mark("m2")                          # a milestone inside frame 2 does not cut it
+    ic.thread(1)
+    run(1)
+    ic.mark_frame(2, 2500)
+    ic.thread(1)
+    ic.mark_frame(3, 2600)                 # an empty frame: no instruction at all
+    run(4)
+    ic.stop("limit")
+    ic.mark_frame(4, 9999)                 # after the stop: no record
+    fr = ic.frames()
+    case("frames: n, t_ns, extra and per-thread instructions of frame 1 (start of the run up to its present, a milestone inside it does not cut it)",
+         fr[0] == {"n": 1, "t_ns": 1000, "per_tid": {"main": 107, "worker": 30}, "sha256": "aa"}, str(fr[0]))
+    case("frames: frame 2 starts after frame 1, threads named as the report names them", fr[1] == {"n": 2, "t_ns": 2500, "per_tid": {"main": 12, "worker": 5, "t3": 2}}, str(fr[1]))
+    case("frames: an empty frame is a record with an empty per_tid; nothing after stop", fr[2] == {"n": 3, "t_ns": 2600, "per_tid": {}} and len(fr) == 3, str(fr))
+    rep = ic.report()
+    case("frames: a frame is not an icount interval (the intervals are the milestones' only), and the frames add up to the totals but what follows the last frame",
+         [iv["to"] for iv in rep["intervals"]] == ["m1", "m2", "stop"]
+         and sum(sum(f["per_tid"].values()) for f in fr) + 4 == rep["totals"]["all"]["total"], str(rep["intervals"]))
+    case("frames: a run without a present has no records", icount.Icount().frames() == [])
+    # the record grows linearly and a mark is O(1): 20000 frames of 3 threads, the cost per frame does not grow with the frame count
+    import time
+    def many(k):
+        x = icount.Icount()
+        t0 = time.time()
+        for i in range(1, k + 1):
+            for t in (1, 2, 3):
+                x.thread(t)
+                x.cur[0] += 1000
+            if i % 100 == 0:
+                x.mark("m%d" % i)
+            x.mark_frame(i, i * 16666667)
+        t1 = time.time()
+        out = x.frames()
+        return t1 - t0, len(json.dumps(x.report()) + json.dumps(out)), out
+    a, ba, oa = many(2000)
+    b, bb, ob = many(20000)
+    case("frames: 20000 frames x 3 threads: every frame holds 3000 instructions, size per frame stays within 5 % of the 2000-frame run (linear), time per frame within 3x",
+         all(f["per_tid"] == {"main": 1000, "t2": 1000, "t3": 1000} for f in ob) and len(ob) == 20000
+         and abs(bb / 20000 - ba / 2000) < 0.05 * ba / 2000 and b / 20000 < 3 * a / 2000 + 2e-5, "%.3fs/%.3fs %d/%d bytes" % (a, b, ba, bb))
+    print("info frames: %.0f bytes per frame in OUT.json (frames + report, a milestone every 100 frames), %.1f us per frame" % (bb / 20000, 1e6 * b / 20000))
+
+
 def main():
+    frame_cases()
     with tempfile.TemporaryDirectory() as d:
         elf, secs, syms = build(d)
         out1, out2 = os.path.join(d, "o1.json"), os.path.join(d, "o2.json")

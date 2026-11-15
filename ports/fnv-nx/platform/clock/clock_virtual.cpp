@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if FNVNX_VCLOCK   /* the virtual build; the real build has clock_real.cpp instead (fnvnx_vtime.h) */
+
 static const uint64_t Q = 100;                                       /* ns */
 static const int64_t EPOCH_FT = 129383136000000000ll;                /* 2011-01-01T00:00:00Z */
 static const int64_t FT_UNIX_EPOCH = 116444736000000000ll;           /* 1970-01-01T00:00:00Z */
@@ -37,6 +39,7 @@ static __thread int t_scoped;
 static __thread int t_in_sync;
 
 /* ---- pumps */
+namespace {   // TU-local type: internal linkage (the other clock backend defines its own clk_pump)
 struct clk_pump {
     clk_pump *next;
     clk_pump_fn render, after;
@@ -44,6 +47,7 @@ struct clk_pump {
     uint32_t rate, period;
     uint64_t t0, n_done;
 };
+}   // namespace
 static os_lock_t g_dev_lock;       /* one device period at a time, in the order of their instants */
 static clk_pump *g_pumps;
 
@@ -185,7 +189,7 @@ int64_t clk_peek_filetime(void) { return EPOCH_FT + (int64_t)(t_now / Q); }
 
 /* The zone is not a property of the clock: it is the host's (TZ_AT; the emulator's host answers UTC, the posix test backend the scripted
  * zone). One source for the real and the virtual clock, no literal here. */
-int32_t clk_tz_offset_minutes(void) { return os_tz_offset_minutes(); }
+int32_t clk_zone_offset_minutes(void) { return os_zone_offset_minutes(); }
 int clk_tz_rule(clk_tzrule_t *r)
 {
     os_tzrule_t o;
@@ -350,17 +354,6 @@ void clk_file_moved(const char *from, const char *to)
     free(kt);
 }
 
-void clk_reset(void)
-{
-    t_now = 0;
-    t_scoped = 0;
-    os_lock(&g_ft_lock);
-    for (size_t i = 0; i < g_ft_n; i++)
-        free(g_ft[i].key);
-    g_ft_n = 0;
-    os_unlock(&g_ft_lock);
-}
-
 void clk_file_removed(const char *host)
 {
     char *k = fold(host);
@@ -387,3 +380,5 @@ int clk_file_times(const char *host, int64_t ft[3])
 }
 
 }
+
+#endif   /* FNVNX_VCLOCK */

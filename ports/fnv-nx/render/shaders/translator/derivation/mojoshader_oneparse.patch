@@ -1,0 +1,593 @@
+diff --git a/mojoshader.c b/mojoshader.c
+--- a/mojoshader.c
++++ b/mojoshader.c
+@@ -17,6 +17,9 @@
+ 
+ #define __MOJOSHADER_INTERNAL__ 1
+ #include "profiles/mojoshader_profile.h"
++#if SUPPORT_PROFILE_GLSLDK
++#include "fnvnx_dk_layout.h"
++#endif
+ 
+ // Deal with register lists...  !!! FIXME: I sort of hate this.
+ 
+@@ -3244,11 +3247,7 @@
+ 
+     if (profile != NULL)
+     {
+-        int profileid = find_profile_id(profile);
+-#if SUPPORT_PROFILE_GLSLDK
+-        if ((dk == NULL) && (strcmp(profile, MOJOSHADER_PROFILE_GLSLDK) == 0))
+-            profileid = -1;  // the glsldk profile is reachable only through MOJOSHADER_parseGlsldk (its configuration is an argument)
+-#endif
++        const int profileid = find_profile_id(profile);
+         ctx->dk = dk;
+         ctx->profileid = profileid;
+         if (profileid >= 0)
+@@ -3802,6 +3801,105 @@
+     return retval;
+ } // build_parsedata
+ 
++#if SUPPORT_PROFILE_GLSLDK
++// fnv-nx: the locations of the glsldk profile, computed ONCE at the start of the definitions phase, when every instruction is parsed and the
++//  register lists are complete (see mojoshader.h, MOJOSHADER_glsldkConfig). Rule: fnvnx_dk_assign() over the DECLARED set: the context's own
++//  attribute list (inputs: every non-output register; outputs: RASTOUT / ATTROUT / TEXCRDOUT (= vs_3_0 o#) / COLOROUT / DEPTHOUT) plus the link set.
++//  A register is classified by its type, never by its name. An illegal declaration (usage / index outside the D3D9 range, duplicates, more
++//  pairs than slots) is a rejection of the program.
++static int dk_is_output_reg(RegisterType t)
++{
++    return (t == REG_TYPE_RASTOUT) || (t == REG_TYPE_ATTROUT) || (t == REG_TYPE_TEXCRDOUT) || (t == REG_TYPE_COLOROUT) || (t == REG_TYPE_DEPTHOUT);
++} // dk_is_output_reg
++
++static void dk_locate(Context *ctx)
++{
++    const MOJOSHADER_glsldkConfig *dk = ctx->dk;
++    const int is_vs = shader_is_vertex(ctx);
++    unsigned char set[224];
++    signed char loc[224];
++    int n = 0, i;
++    const RegisterList *r;
++    unsigned int k;
++
++    memset(dk->attrib, -1, 224);
++    memset(dk->varying, -1, 224);
++    memset(dk->copy, 0, 224);
++
++    #define DK_ADD(pr) do { int dup_ = 0; for (int q_ = 0; q_ < n; q_++) if (set[q_] == (pr)) dup_ = 1; if (!dup_) set[n++] = (unsigned char)(pr); } while (0)
++    for (r = ctx->attributes.next; r != NULL; r = r->next)  // inputs: a VS's are attributes, a PS's are varyings
++    {
++        const int usage = (int) r->usage;
++        if (dk_is_output_reg(r->regtype))
++            continue;
++        if (!is_vs && (usage < 0))
++            continue;  // vPos / vFace: not interpolants
++        if ((usage < 0) || (usage > 13) || (r->index < 0) || (r->index > 15))
++        {
++            failf(ctx, "glsldk: input usage %d index %d outside the D3D9 range", usage, r->index);
++            return;
++        } // if
++        DK_ADD(FNVNX_DK_PAIR(usage, r->index));
++    } // for
++    if (is_vs)
++    {
++        if (fnvnx_dk_assign(FNVNX_DK_KIND_ATTRIB, set, n, loc))
++        {
++            fail(ctx, "glsldk: the vertex inputs are not a legal declaration set (duplicate or more than 16)");
++            return;
++        } // if
++        for (i = 0; i < n; i++)
++            dk->attrib[set[i]] = loc[i];
++        n = 0;
++    } // if
++    else
++    {
++        for (r = ctx->attributes.next; r != NULL; r = r->next)
++            if (!dk_is_output_reg(r->regtype) && ((int) r->usage >= 0))
++                DK_ADD(FNVNX_DK_PAIR((int) r->usage, r->index));
++    } // else
++    if (is_vs)
++    {
++        for (r = ctx->attributes.next; r != NULL; r = r->next)  // outputs (index of a vs < 3.0 oFog / oPts: 0, the one fog / point size per vertex)
++        {
++            if (!dk_is_output_reg(r->regtype))
++                continue;
++            const int usage = (int) r->usage;
++            const int idx = ((ctx->major_ver < 3) && ((usage == MOJOSHADER_USAGE_FOG) || (usage == MOJOSHADER_USAGE_POINTSIZE))) ? 0 : r->index;
++            if ((usage < 0) || (usage > 13) || (idx < 0) || (idx > 15))
++            {
++                failf(ctx, "glsldk: output usage %d index %d outside the D3D9 range", usage, r->index);
++                return;
++            } // if
++            if ((idx == 0) && ((usage == MOJOSHADER_USAGE_POSITION) || (usage == MOJOSHADER_USAGE_POINTSIZE)))
++                continue;  // built-ins gl_Position / gl_PointSize
++            DK_ADD(FNVNX_DK_PAIR(usage, idx));
++        } // for
++    } // if
++    for (k = 0; k < dk->nlink; k++)
++    {
++        if (dk->link[k] / 16 > 13)
++        {
++            failf(ctx, "glsldk: link pair %u outside the D3D9 range", (unsigned int) dk->link[k]);
++            return;
++        } // if
++        if (n < 224)
++            DK_ADD(dk->link[k]);
++    } // for
++    #undef DK_ADD
++    if (fnvnx_dk_assign(FNVNX_DK_KIND_VARYING, set, n, loc))
++    {
++        fail(ctx, "glsldk: the varyings are not a legal declaration set (duplicate or more than 31)");
++        return;
++    } // if
++    for (i = 0; i < n; i++)
++        dk->varying[set[i]] = loc[i];
++    for (k = 0; k < dk->nlink; k++)
++        if ((dk->link[k] == FNVNX_DK_PAIR(MOJOSHADER_USAGE_POSITION, 0)) || (dk->link[k] == FNVNX_DK_PAIR(MOJOSHADER_USAGE_POINTSIZE, 0)))
++            dk->copy[dk->link[k]] = 1;
++} // dk_locate
++#endif
++
+ static void process_definitions(Context *ctx)
+ {
+     // !!! FIXME: apparently, pre ps_3_0, sampler registers don't need to be
+@@ -3990,6 +4088,13 @@
+                                       item->misc != 0);
+     } // for
+ 
++#if SUPPORT_PROFILE_GLSLDK
++    // fnv-nx: every instruction is parsed and the register lists are complete: the locations are computed here, once.
++    dk_locate(ctx);
++    if (isfail(ctx))
++        return;
++#endif
++
+     // ...and attributes...
+     for (item = ctx->attributes.next; item != NULL; item = item->next)
+     {
+@@ -4133,20 +4238,6 @@
+     return retval;
+ } // parse_impl
+ 
+-const MOJOSHADER_parseData *MOJOSHADER_parse(const char *profile,
+-                                             const char *mainfn,
+-                                             const unsigned char *tokenbuf,
+-                                             const unsigned int bufsize,
+-                                             const MOJOSHADER_swizzle *swiz,
+-                                             const unsigned int swizcount,
+-                                             const MOJOSHADER_samplerMap *smap,
+-                                             const unsigned int smapcount,
+-                                             MOJOSHADER_malloc m,
+-                                             MOJOSHADER_free f, void *d)
+-{
+-    return parse_impl(NULL, profile, mainfn, tokenbuf, bufsize, swiz, swizcount, smap, smapcount, m, f, d);
+-} // MOJOSHADER_parse
+-
+ #if SUPPORT_PROFILE_GLSLDK
+ const MOJOSHADER_parseData *MOJOSHADER_parseGlsldk(const MOJOSHADER_glsldkConfig *dk,
+                                                    const char *mainfn,
+diff --git a/mojoshader.h b/mojoshader.h
+--- a/mojoshader.h
++++ b/mojoshader.h
+@@ -725,21 +725,25 @@
+ 
+ /*
+  * glsldk configuration of ONE parse (fnv-nx). The per-call inputs of the translator are arguments, never global or thread-local state.
+- *  attrib / varying: 224 entries indexed usage*16+index, -1 = not declared. They hold the DECLARED set: every pair the parse asks a location
+- *  for (a DCL, or the fixed t#/v# pairs of ps_1_x) is in it, placed by fnvnx_dk_assign() in render/shaders/translator/include/fnvnx_dk_layout.h
+- *  (the ONE rule, computed by the caller). copy: 224 entries, nonzero = the vertex shader also writes a varying copy of POSITION0 / PSIZE0 at
+- *  that pair's varying location. complete (vertex shaders): nonzero = also write every varying slot 0..30 the shader and the link set leave
+- *  unwritten (README "Varying completion"); 0 writes only the completion the base rule needs. flat: nonzero = every varying of usage COLOR
+- *  (oD0/oD1, v0/v1, SM3 COLOR registers) is declared `flat`, the provoking (first) vertex value, D3DRS_SHADEMODE = D3DSHADE_FLAT
+- *  (Wine 9.0 state_shademode); all other varyings stay interpolated. The tables are borrowed for the duration of the call.
++ *  link / nlink: the pairs (usage * 16 + index) the draw's other stage reads or writes (the link set L of fnvnx_dk_layout.h).
++ *  complete (vertex shaders): nonzero = also write every varying slot 0..30 the shader and the link set leave unwritten (README "Varying
++ *  completion"); 0 writes only the completion the base rule needs. flat: nonzero = every varying of usage COLOR (oD0/oD1, v0/v1, SM3 COLOR
++ *  registers) is declared `flat`, the provoking (first) vertex value, D3DRS_SHADEMODE = D3DSHADE_FLAT (Wine 9.0 state_shademode).
++ *  attrib / varying / copy: three caller-owned arrays of 224 entries indexed usage*16+index, OUTPUTS of the parse. The parse computes the
++ *  locations ONCE, at the start of the definitions phase (process_definitions), when the context's register lists are complete (every
++ *  instruction is parsed), by the ONE rule fnvnx_dk_assign() of render/shaders/translator/include/fnvnx_dk_layout.h over the DECLARED set (the
++ *  register lists' own attributes / outputs, the fixed t#/v# pairs of ps_1_x included, and L): attrib / varying = -1 for an undeclared pair,
++ *  copy nonzero = the vertex shader also writes a varying copy of POSITION0 / PSIZE0 (they are in L). Nothing in the instruction phase reads them.
+  */
+ typedef struct MOJOSHADER_glsldkConfig
+ {
+-    const signed char *attrib;
+-    const signed char *varying;
+-    const unsigned char *copy;
++    const unsigned char *link;
++    unsigned int nlink;
+     int complete;
+     int flat;
++    signed char *attrib;
++    signed char *varying;
++    unsigned char *copy;
+ } MOJOSHADER_glsldkConfig;
+ 
+ 
+@@ -847,8 +851,8 @@
+  *  to parse several shaders on separate CPU cores at the same time.
+  */
+ /*
+- * MOJOSHADER_parse() for the "glsldk" profile (the profile is reachable only through this entry; MOJOSHADER_parse() answers "unknown or
+- *  unsupported" for it). Same arguments, with the configuration of the translation first.
++ * The parse entry of this tree: the "glsldk" profile only (the generic MOJOSHADER_parse() with a profile name is deleted: its configuration is an
++ *  argument, never global state). Same arguments as MOJOSHADER_parse() of upstream MojoShader, with the configuration of the translation first.
+  */
+ DECLSPEC const MOJOSHADER_parseData *MOJOSHADER_parseGlsldk(const MOJOSHADER_glsldkConfig *dk,
+                                                             const char *mainfn,
+@@ -862,19 +866,6 @@
+                                                             MOJOSHADER_free f,
+                                                             void *d) __attribute__((nonnull (1)));
+ 
+-DECLSPEC const MOJOSHADER_parseData *MOJOSHADER_parse(const char *profile,
+-                                                      const char *mainfn,
+-                                                      const unsigned char *tokenbuf,
+-                                                      const unsigned int bufsize,
+-                                                      const MOJOSHADER_swizzle *swiz,
+-                                                      const unsigned int swizcount,
+-                                                      const MOJOSHADER_samplerMap *smap,
+-                                                      const unsigned int smapcount,
+-                                                      MOJOSHADER_malloc m,
+-                                                      MOJOSHADER_free f,
+-                                                      void *d);
+-
+-
+ /*
+  * Call this to dispose of parsing results when you are done with them.
+  *  This will call the MOJOSHADER_free function you provided to
+diff --git a/profiles/mojoshader_profile_bytecode.c b/profiles/mojoshader_profile_bytecode.c
+--- a/profiles/mojoshader_profile_bytecode.c
++++ b/profiles/mojoshader_profile_bytecode.c
+@@ -1,152 +0,0 @@
+-/**
+- * MojoShader; generate shader programs from bytecode of compiled
+- *  Direct3D shaders.
+- *
+- * Please see the file LICENSE.txt in the source's root directory.
+- *
+- *  This file written by Ryan C. Gordon.
+- */
+-
+-#define __MOJOSHADER_INTERNAL__ 1
+-#include "mojoshader_profile.h"
+-
+-#pragma GCC visibility push(hidden)
+-
+-#if SUPPORT_PROFILE_BYTECODE
+-
+-void emit_BYTECODE_start(Context *ctx, const char *profilestr)
+-{
+-    ctx->ignores_ctab = 1;
+-} // emit_BYTECODE_start
+-
+-void emit_BYTECODE_finalize(Context *ctx)
+-{
+-    // just copy the whole token stream and make all other emitters no-ops.
+-    if (set_output(ctx, &ctx->mainline))
+-    {
+-        const size_t len = ((size_t) (ctx->tokens - ctx->orig_tokens)) * sizeof (uint32);
+-        buffer_append(ctx->mainline, (const char *) ctx->orig_tokens, len);
+-    } // if
+-} // emit_BYTECODE_finalize
+-
+-void emit_BYTECODE_end(Context *ctx) {}
+-void emit_BYTECODE_phase(Context *ctx) {}
+-void emit_BYTECODE_global(Context *ctx, RegisterType t, int n) {}
+-void emit_BYTECODE_array(Context *ctx, VariableList *var) {}
+-void emit_BYTECODE_sampler(Context *c, int s, TextureType t, int tb) {}
+-void emit_BYTECODE_const_array(Context *ctx, const ConstantsList *c,
+-                               int base, int size) {}
+-void emit_BYTECODE_uniform(Context *ctx, RegisterType t, int n,
+-                           const VariableList *var) {}
+-void emit_BYTECODE_attribute(Context *ctx, RegisterType t, int n,
+-                             MOJOSHADER_usage u, int i, int w,
+-                             int f) {}
+-
+-const char *get_BYTECODE_varname(Context *ctx, RegisterType rt, int regnum)
+-{
+-    char regnum_str[16];
+-    const char *regtype_str = get_D3D_register_string(ctx, rt, regnum,
+-                                              regnum_str, sizeof (regnum_str));
+-    char buf[64];
+-    snprintf(buf, sizeof (buf), "%s%s", regtype_str, regnum_str);
+-    return StrDup(ctx, buf);
+-} // get_BYTECODE_varname
+-
+-const char *get_BYTECODE_const_array_varname(Context *ctx, int base, int size)
+-{
+-    char buf[64];
+-    snprintf(buf, sizeof (buf), "c_array_%d_%d", base, size);
+-    return StrDup(ctx, buf);
+-} // get_BYTECODE_const_array_varname
+-
+-#define EMIT_BYTECODE_OPCODE_FUNC(op) \
+-    void emit_BYTECODE_##op(Context *ctx) {}
+-
+-EMIT_BYTECODE_OPCODE_FUNC(RESERVED)
+-EMIT_BYTECODE_OPCODE_FUNC(NOP)
+-EMIT_BYTECODE_OPCODE_FUNC(MOV)
+-EMIT_BYTECODE_OPCODE_FUNC(ADD)
+-EMIT_BYTECODE_OPCODE_FUNC(SUB)
+-EMIT_BYTECODE_OPCODE_FUNC(MAD)
+-EMIT_BYTECODE_OPCODE_FUNC(MUL)
+-EMIT_BYTECODE_OPCODE_FUNC(RCP)
+-EMIT_BYTECODE_OPCODE_FUNC(RSQ)
+-EMIT_BYTECODE_OPCODE_FUNC(DP3)
+-EMIT_BYTECODE_OPCODE_FUNC(DP4)
+-EMIT_BYTECODE_OPCODE_FUNC(MIN)
+-EMIT_BYTECODE_OPCODE_FUNC(MAX)
+-EMIT_BYTECODE_OPCODE_FUNC(SLT)
+-EMIT_BYTECODE_OPCODE_FUNC(SGE)
+-EMIT_BYTECODE_OPCODE_FUNC(EXP)
+-EMIT_BYTECODE_OPCODE_FUNC(LOG)
+-EMIT_BYTECODE_OPCODE_FUNC(LIT)
+-EMIT_BYTECODE_OPCODE_FUNC(DST)
+-EMIT_BYTECODE_OPCODE_FUNC(LRP)
+-EMIT_BYTECODE_OPCODE_FUNC(FRC)
+-EMIT_BYTECODE_OPCODE_FUNC(M4X4)
+-EMIT_BYTECODE_OPCODE_FUNC(M4X3)
+-EMIT_BYTECODE_OPCODE_FUNC(M3X4)
+-EMIT_BYTECODE_OPCODE_FUNC(M3X3)
+-EMIT_BYTECODE_OPCODE_FUNC(M3X2)
+-EMIT_BYTECODE_OPCODE_FUNC(CALL)
+-EMIT_BYTECODE_OPCODE_FUNC(CALLNZ)
+-EMIT_BYTECODE_OPCODE_FUNC(LOOP)
+-EMIT_BYTECODE_OPCODE_FUNC(RET)
+-EMIT_BYTECODE_OPCODE_FUNC(ENDLOOP)
+-EMIT_BYTECODE_OPCODE_FUNC(LABEL)
+-EMIT_BYTECODE_OPCODE_FUNC(POW)
+-EMIT_BYTECODE_OPCODE_FUNC(CRS)
+-EMIT_BYTECODE_OPCODE_FUNC(SGN)
+-EMIT_BYTECODE_OPCODE_FUNC(ABS)
+-EMIT_BYTECODE_OPCODE_FUNC(NRM)
+-EMIT_BYTECODE_OPCODE_FUNC(SINCOS)
+-EMIT_BYTECODE_OPCODE_FUNC(REP)
+-EMIT_BYTECODE_OPCODE_FUNC(ENDREP)
+-EMIT_BYTECODE_OPCODE_FUNC(IF)
+-EMIT_BYTECODE_OPCODE_FUNC(ELSE)
+-EMIT_BYTECODE_OPCODE_FUNC(ENDIF)
+-EMIT_BYTECODE_OPCODE_FUNC(BREAK)
+-EMIT_BYTECODE_OPCODE_FUNC(MOVA)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXKILL)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXBEM)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXBEML)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXREG2AR)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXREG2GB)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXM3X2PAD)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXM3X2TEX)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXM3X3PAD)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXM3X3TEX)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXM3X3SPEC)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXM3X3VSPEC)
+-EMIT_BYTECODE_OPCODE_FUNC(EXPP)
+-EMIT_BYTECODE_OPCODE_FUNC(LOGP)
+-EMIT_BYTECODE_OPCODE_FUNC(CND)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXREG2RGB)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXDP3TEX)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXM3X2DEPTH)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXDP3)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXM3X3)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXDEPTH)
+-EMIT_BYTECODE_OPCODE_FUNC(CMP)
+-EMIT_BYTECODE_OPCODE_FUNC(BEM)
+-EMIT_BYTECODE_OPCODE_FUNC(DP2ADD)
+-EMIT_BYTECODE_OPCODE_FUNC(DSX)
+-EMIT_BYTECODE_OPCODE_FUNC(DSY)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXLDD)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXLDL)
+-EMIT_BYTECODE_OPCODE_FUNC(BREAKP)
+-EMIT_BYTECODE_OPCODE_FUNC(BREAKC)
+-EMIT_BYTECODE_OPCODE_FUNC(IFC)
+-EMIT_BYTECODE_OPCODE_FUNC(SETP)
+-EMIT_BYTECODE_OPCODE_FUNC(DEF)
+-EMIT_BYTECODE_OPCODE_FUNC(DEFI)
+-EMIT_BYTECODE_OPCODE_FUNC(DEFB)
+-EMIT_BYTECODE_OPCODE_FUNC(DCL)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXCRD)
+-EMIT_BYTECODE_OPCODE_FUNC(TEXLD)
+-
+-#undef EMIT_BYTECODE_OPCODE_FUNC
+-
+-#endif  // SUPPORT_PROFILE_BYTECODE
+-
+-#pragma GCC visibility pop
+diff --git a/profiles/mojoshader_profile_glsl.c b/profiles/mojoshader_profile_glsl.c
+--- a/profiles/mojoshader_profile_glsl.c
++++ b/profiles/mojoshader_profile_glsl.c
+@@ -24,51 +24,40 @@
+ } // get_GLSL_register_string
+ 
+ #if SUPPORT_PROFILE_GLSLDK
++#include "fnvnx_dk_layout.h"
+ // fnv-nx deko3d profile: fixed locations so separately compiled stages and
+ //  the D3D9 front end (vertex declarations) agree without linking.
+ //  Keep in sync with render/shaders/translator/include/fnvnx_dk_layout.h.
+ // The location of a declared vertex input: the front end's declared set, placed by fnvnx_dk_assign (the ONE rule, fnvnx_dk_layout.h).
+ //  The parser asks only for registers it declares (a DCL, or the fixed t#/v# pairs of ps_1_x, which fnvnx_dk_assign adds to the declared set
+ //  by the same rule), so every lookup is a member of the set; a register read without a declaration is rejected by the validator before this runs.
+-static int dk_attrib_location(Context *ctx, MOJOSHADER_usage usage, int index)
++// Every read of the glsldk configuration goes through this one function (never inlined), so the call graph of the object shows exactly who
++//  reads the locations: only the definitions phase (emit_GLSL_attribute, emit_GLSL_finalize) may; the instruction emitters must not (checked on
++//  the objects by render/total/translator_census/reach_census.py).
++static __attribute__((noinline)) const MOJOSHADER_glsldkConfig *dk_cfg(const Context *ctx)
+ {
+-    return ctx->dk->attrib[(int) usage * 16 + index];
+-} // dk_attrib_location
++    return ctx->dk;
++} // dk_cfg
+ 
+-// The canonical varying slot of a pair (fnvnx_dk_varying_location), -1 if it has none. Bijective onto 0..30.
+-static int dk_canonical_varying(int usage, int index)
++static __attribute__((noinline)) int dk_attrib_location(Context *ctx, MOJOSHADER_usage usage, int index)
+ {
+-    switch (usage)
+-    {
+-        case MOJOSHADER_USAGE_COLOR:        if (index < 2) return index; break;
+-        case MOJOSHADER_USAGE_TEXCOORD:     if (index < 16) return 2 + index; break;
+-        case MOJOSHADER_USAGE_FOG:          if (index == 0) return 18; break;
+-        case MOJOSHADER_USAGE_NORMAL:       if (index < 2) return 19 + index; break;
+-        case MOJOSHADER_USAGE_TANGENT:      if (index == 0) return 21; break;
+-        case MOJOSHADER_USAGE_BINORMAL:     if (index == 0) return 22; break;
+-        case MOJOSHADER_USAGE_BLENDWEIGHT:  if (index == 0) return 23; break;
+-        case MOJOSHADER_USAGE_BLENDINDICES: if (index == 0) return 24; break;
+-        case MOJOSHADER_USAGE_POSITION:     if (index >= 1 && index < 4) return 24 + index; break;
+-        case MOJOSHADER_USAGE_DEPTH:        if (index == 0) return 28; break;
+-        case MOJOSHADER_USAGE_POINTSIZE:    if (index >= 1 && index < 3) return 28 + index; break;
+-        default: break;
+-    } // switch
+-    return -1;
+-} // dk_canonical_varying
++    return dk_cfg(ctx)->attrib[(int) usage * 16 + index];
++} // dk_attrib_location
+ 
+-static int dk_varying_location(Context *ctx, MOJOSHADER_usage usage, int index)
++
++static __attribute__((noinline)) int dk_varying_location(Context *ctx, MOJOSHADER_usage usage, int index)
+ {
+-    return ctx->dk->varying[(int) usage * 16 + index];
++    return dk_cfg(ctx)->varying[(int) usage * 16 + index];
+ } // dk_varying_location
+ 
+-static void dk_layout(Context *ctx, char *buf, size_t len, int is_attrib,
++static __attribute__((noinline)) void dk_layout(Context *ctx, char *buf, size_t len, int is_attrib,
+                       MOJOSHADER_usage usage, int index)
+ {
+     if (!support_glsldk(ctx)) { buf[0] = '\0'; return; }
+     const int loc = is_attrib ? dk_attrib_location(ctx, usage, index)
+                               : dk_varying_location(ctx, usage, index);
+     // D3DSHADE_FLAT: the COLOR varyings (never the vertex attributes) take the provoking vertex (Wine 9.0 state_shademode: GL_FLAT shades the colours only).
+-    const int flat = !is_attrib && ctx->dk->flat && (usage == MOJOSHADER_USAGE_COLOR);
++    const int flat = !is_attrib && dk_cfg(ctx)->flat && (usage == MOJOSHADER_USAGE_COLOR);
+     snprintf(buf, len, "layout(location = %d) %s", loc, flat ? "flat " : "");
+ } // dk_layout
+ #endif
+@@ -773,7 +762,7 @@
+ // The pairs the vertex shader declares (mask & 0x10) and the components it writes (mask & 0xF), indexed usage*16+index; the built-ins
+ //  POSITION0 / PSIZE0 included as PSIZE0 only when the shader writes oPts. At this point (end of the token stream) the DCLs are in
+ //  ctx->attributes (vs_3_0 outputs), the implicit vs < 3.0 outputs only in ctx->used_registers (with the union of their write masks).
+-static void dk_gather_outputs(Context *ctx, int *mask)
++static __attribute__((noinline)) void dk_gather_outputs(Context *ctx, int *mask)
+ {
+     const RegisterList *r;
+     int p;
+@@ -827,9 +816,9 @@
+ //     there, fnvnx_dk_layout.h FNVNX_DK_FOG_VARYING; its other components are never read).
+ //   - with the config's complete (FNVNX_SHADER_VS_COMPLETE, a Create-time variant): every slot of 0..30 that is not yet written, with the default of the
+ //     pair whose canonical slot it is, and the other components of FOG0. The slots 0..30 are exactly the canonical slots
+-//     (dk_canonical_varying is a bijection), so no pixel stage whose inputs are canonical (or in L) can read an unwritten slot.
++//     (fnvnx_dk_varying_location is a bijection onto them), so no pixel stage whose inputs are canonical (or in L) can read an unwritten slot.
+ //  The device picks the variant by the static rule fnvnx_dk_vs_needs_complete() (fnvnx_dk_layout.h); no run-time decision in the shader.
+-static void dk_pad_varyings(Context *ctx)
++static __attribute__((noinline)) void dk_pad_varyings(Context *ctx)
+ {
+     int owner[31];
+     int mask[224];
+@@ -841,7 +830,7 @@
+ 
+     for (p = 0; p < 224; p++)  // the slot owners: the declaration set (+ L)
+     {
+-        const int loc = ctx->dk->varying[p];
++        const int loc = dk_cfg(ctx)->varying[p];
+         if ((loc >= 0) && (loc < 31))
+             owner[loc] = p;
+     } // for
+@@ -853,14 +842,14 @@
+         if (q < 0)  // no pair owns the slot: the pair whose canonical slot it is
+         {
+             for (k = 0; k < 224; k++)
+-                if (dk_canonical_varying(k / 16, k % 16) == s) { q = k; break; }
++                if (fnvnx_dk_varying_location(k / 16, k % 16) == s) { q = k; break; }
+         } // if
+-        else if (ctx->dk->copy && ctx->dk->copy[q])
++        else if (dk_cfg(ctx)->copy[q])
+             continue;  // a PS-read POSITION0 / PSIZE0: dk_cp_ below
+         if (q < 0)
+             continue;  // unreachable: the canonical map is onto 0..30
+         m = mask[q] & 0xF;
+-        if (!(mask[q] & 0x10) && (owner[s] < 0) && !ctx->dk->complete && (q != MOJOSHADER_USAGE_FOG * 16))
++        if (!(mask[q] & 0x10) && (owner[s] < 0) && !dk_cfg(ctx)->complete && (q != MOJOSHADER_USAGE_FOG * 16))
+             continue;  // an unowned slot: only FOG0 without it
+         if (m == 0xF)
+             continue;
+@@ -871,7 +860,7 @@
+         {
+             snprintf(lhs, sizeof (lhs), "dk_pad_%d", s);
+             push_output(ctx, &ctx->globals);
+-            output_line(ctx, "layout(location = %d) %sout highp vec4 %s;", s, (ctx->dk->flat && (q / 16 == MOJOSHADER_USAGE_COLOR)) ? "flat " : "", lhs);
++            output_line(ctx, "layout(location = %d) %sout highp vec4 %s;", s, (dk_cfg(ctx)->flat && (q / 16 == MOJOSHADER_USAGE_COLOR)) ? "flat " : "", lhs);
+             pop_output(ctx);
+         } // else
+         {
+@@ -890,7 +879,11 @@
+     } // for
+ } // dk_pad_varyings
+ 
+-static void dk_epilogue(Context *ctx)
++// The epilogue is the function `void dk_epilogue()`, DEFINED in the definitions phase (emit_GLSL_finalize: every register is known by then, also
++//  those a subroutine after main's RET writes) and CALLED at main's RET (emit_GLSL_RET). Everything here depends on the complete register set and on the
++//  locations of the config; none of it is emitted in the instruction phase (GLSL 4.50 sec. 6.1: the function is defined before the call, in the
++//  helpers buffer, which precedes the subroutines and main).
++static __attribute__((noinline)) void dk_epilogue_body(Context *ctx)
+ {
+     if (shader_is_vertex(ctx))
+     {
+@@ -950,7 +943,7 @@
+             dk_gather_outputs(ctx, dm);
+             for (i = 0; i < STATICARRAYLEN(cp); i++)
+             {
+-                if (!ctx->dk->copy[cp[i].usage * 16])
++                if (!dk_cfg(ctx)->copy[cp[i].usage * 16])
+                     continue;
+                 char lay[32];
+                 dk_layout(ctx, lay, sizeof (lay), 0, (MOJOSHADER_usage) cp[i].usage, 0);
+@@ -1017,7 +1010,20 @@
+             output_line(ctx, "#endif");
+         } // if
+     } // else if
+-} // dk_epilogue
++} // dk_epilogue_body
++
++static __attribute__((noinline)) void dk_epilogue_define(Context *ctx)
++{
++    push_output(ctx, &ctx->helpers);
++    output_line(ctx, "void dk_epilogue()");
++    output_line(ctx, "{");
++    ctx->indent++;
++    dk_epilogue_body(ctx);
++    ctx->indent--;
++    output_line(ctx, "}");
++    output_blank_line(ctx);
++    pop_output(ctx);
++} // dk_epilogue_define
+ #endif
+ 
+ void emit_GLSL_RET(Context *ctx);
+@@ -1176,7 +1182,10 @@
+     //vec4 blah_array[BIGGEST_ARRAY];
+ #if SUPPORT_PROFILE_GLSLDK
+     if (support_glsldk(ctx))
++    {
+         dk_finalize_relative(ctx);
++        dk_epilogue_define(ctx);
++    }
+     else
+ #endif
+     if (ctx->have_relative_input_registers) // !!! FIXME
+@@ -1837,7 +1846,7 @@
+             //  sampling as a "centroid in" declaration, but Mesa's GL linker
+             //  (25.x, the V6n parity target) rejects some explicit-location
+             //  centroid inputs as having "no matching output".
+-            dk_centroid = !(ctx->dk->flat && (usage == MOJOSHADER_USAGE_COLOR));  // a flat input has one value: centroid is moot (and interpolateAtCentroid needs an interpolated input)
++            dk_centroid = !(dk_cfg(ctx)->flat && (usage == MOJOSHADER_USAGE_COLOR));  // a flat input has one value: centroid is moot (and interpolateAtCentroid needs an interpolated input)
+         } // if
+         else if (flags & MOD_CENTROID)  // !!! FIXME
+         {
+@@ -2618,7 +2627,7 @@
+     //  a high-level function.
+ #if SUPPORT_PROFILE_GLSLDK
+     if (support_glsldk(ctx) && (ctx->output == ctx->mainline))
+-        dk_epilogue(ctx);
++        output_line(ctx, "dk_epilogue();");
+ #endif
+     ctx->indent--;
+     output_line(ctx, "}");

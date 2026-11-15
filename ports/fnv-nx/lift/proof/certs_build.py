@@ -240,8 +240,18 @@ def main(argv):
     ap.add_argument('--queue')
     ap.add_argument('--report')
     ap.add_argument('--coverage')
+    ap.add_argument('--sail-work'); ap.add_argument('--sail-ir'); ap.add_argument('--isla')      # the toolchain (model_sail.configure): all three, or none when the caller configured model_sail itself
     ap.add_argument('--ir', action='append', default=[], help='an IR file (hashed to its sha) that a record of another model_sha was proved against')
     a = ap.parse_args(argv)
+    if a.sail_work or a.sail_ir or a.isla: model_sail.configure(a.sail_work, a.sail_ir, a.isla)
+    try:
+        return _run(a)
+    except model_sail.ArgError as e:
+        sys.stderr.write('certs_build: %s\n' % e)
+        return 2
+
+
+def _run(a):
     for f in a.ir: add_ir(f)
     if a.model_sha:
         sys.stdout.write(pinned_model() + '\n')

@@ -1,0 +1,1 @@
+{ global: nxgl4_shim_set; nxgl4_guest_ptr; nxgl4_on_present; fnvnx_reach_violation; local: *; };

@@ -107,16 +107,22 @@ class SymOp:
     def imm(s): return s._imm if s._imm is not None else s._o.imm
 class SymIns:
     """a capstone instruction with symbolic operands; the other members forms*.py reads (bytes, size, mnemonic, reg_name) are the decoder's"""
-    def __init__(s, ins, ops): s._i, s.operands = ins, ops
+    def __init__(s, ins, ops, mnemonic=None): s._i, s.operands, s._m = ins, ops, mnemonic
     @property
     def bytes(s): return s._i.bytes
     @property
     def size(s): return s._i.size
     @property
-    def mnemonic(s): return s._i.mnemonic
+    def mnemonic(s): return s._m or s._i.mnemonic
     def reg_name(s, r): return s._i.reg_name(r)
 
 # ------------------------------------------------------------------------------------------------ derivation of the adapter from the decoder
+class PredImm:
+    """the imm8 operand that the decoder folds into the mnemonic: capstone prints CMPPS/CMPPD/CMPSS/CMPSD with imm8 0..7 as cmp<predicate><ps|pd|ss|sd> with no immediate operand
+    (the predicate of SDM Vol 2 CMPPS table).  A shape over that imm8 is the generic mnemonic with the immediate field as its third operand."""
+    type, size, reg = X.X86_OP_IMM, 1, None
+    def __init__(s, imm): s.imm = imm
+_CMPALIAS = {'cmp' + p + sx: 'cmp' + sx for p in dsl.CMPPRED for sx in ('ps', 'pd', 'ss', 'sd')}
 _md = shp.decoder()
 def decode(raw, addr):
     l = list(_md.disasm(raw, addr))
@@ -179,14 +185,19 @@ def symins(key):
     """the ADAPTER instruction of a shape (symbuild's input) and its field data: -> (SymIns, fields, widths, imm, disp).  One function: symbuild builds the Form from it,
     and a spec checker (simdcheck.py) reads the operands' effective addresses from the same operands."""
     rep, fields = parse_key(key); ins = decode(rep, 0)
-    imm, disp = derive(rep, fields); size = ins.size; widths = {n: 8 * f[1] for n, f in fields.items() if f}
+    alias = _CMPALIAS.get(ins.mnemonic) if fields['imm'] and not any(o.type == X.X86_OP_IMM for o in ins.operands) else None
+    imm, disp = ({}, derive(rep, dict(fields, imm=None))[1]) if alias else derive(rep, fields)
+    size = ins.size; widths = {n: 8 * f[1] for n, f in fields.items() if f}
     ops = []
     for j, o in enumerate(ins.operands):
         so = SymOp(o)
         if j in imm: so = SymOp(o, imm=SV(imm[j].node(widths['imm'], size), '%s operand %d (imm)' % (ins.mnemonic, j)))
         if j in disp: so = SymOp(o, mem=SymMem(o.mem, SV(disp[j].node(widths['disp'], size), '%s operand %d (disp)' % (ins.mnemonic, j))))
         ops.append(so)
-    return SymIns(ins, ops), fields, widths, imm, disp, ins
+    if alias:
+        assert fields['imm'][1] == 1, 'cmp imm8 field is not one byte'
+        ops.append(PredImm(SV(dsl.zext(F('imm', 8), 32), '%s operand 2 (imm)' % alias)))
+    return SymIns(ins, ops, alias), fields, widths, imm, disp, ins
 
 
 def symbuild(key):
@@ -260,7 +271,8 @@ class Subst:
         elif n.op in ('const', 'var', 'fld'): r = n
         else:
             a = [s(c) for c in n.a]
-            r = C(_ev(n, [c.x for c in a]), n.w) if n.op != 'load' and all(c.op == 'const' for c in a) else mk(n.op, n.w, a, n.x)
+            if n.op == 'ite' and a[0].op == 'const': r = a[1] if a[0].x else a[2]      # a selector (the symbolic immediate bits of a shape) that is a constant picks its arm: the DSL's own ite semantics
+            else: r = C(_ev(n, [c.x for c in a]), n.w) if n.op != 'load' and all(c.op == 'const' for c in a) else mk(n.op, n.w, a, n.x)
         s.memo[n.u] = r; return r
 
 def normalize(form, env=None):
@@ -270,7 +282,8 @@ def normalize(form, env=None):
     for k, v in (env or {}).items(): e[('var' if k == 'eip' else 'fld', k)] = v
     S = Subst(e); g = copy.copy(form)
     g.regs = [(r, S(v), None if w is None else S(w)) for r, v, w in form.regs]; g.flags = [(f, S(v), None if w is None else S(w)) for f, v, w in form.flags]
-    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, S(c)) for k, c in form.faults]; g.undef = dict(form.undef)
+    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, S(c)) for k, c in form.faults]; g.undef = dict(form.undef); g.uwhen = {f: S(w) for f, w in form.uwhen.items()}      # the `when` of an undefined flag (DEF0) and the x87 / SIMD effects hold nodes too
+    g.xs = [(k, i, tuple(S(x) for x in e) if k == 'fptr' else S(e)) for k, i, e in form.xs]; g.mmw = []
     g.eip = S(form.eip); g.flo = None if form.flo is None else S(form.flo); g.pend = {}
     if isinstance(form.addr, N):
         a = S(form.addr); g.addr = a.x if a.op == 'const' else a

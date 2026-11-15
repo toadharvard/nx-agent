@@ -23,10 +23,14 @@ Result: universe = items, certified = items without a violation, uncertified = t
 """
 import ast
 import collections
+import hashlib
 import json
 import os
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gate_build  # noqa: E402
 
 TREE = "ports/fnv-nx"
 SINK_NAMES = {"open", "Path", "PurePath", "system", "popen", "fromfile", "memmap", "mmap"}
@@ -87,29 +91,37 @@ class Flow:
             for n in ast.walk(t):
                 if isinstance(n, ast.FunctionDef) and not any(n is d for l in self.defs.values() for _, d, _ in l):
                     self.defs[n.name].append((p, n, 0))
+        self.stem = {os.path.splitext(os.path.basename(q))[0]: q for q in trees}    # file stem -> path (read once)
+        self.rcache = {}                                # (path, id(call node)) -> resolved defs: resolution reads only the syntax, which does not change
         self.tp = collections.defaultdict(set)          # id(FunctionDef) -> tainted parameter names
         self.tret = set()                               # callee names whose return is tainted
 
     def resolve(self, p, node):
         """the tracked defs a call can reach: `mod.f` -> f of the file mod.py; `f` -> f of this file, else of any file;
         `obj.f` -> every method f (a superset)"""
+        key = (p, id(node))
+        if key in self.rcache:
+            return self.rcache[key]
         name, base = callee(node)
         ds = self.defs.get(name, [])
-        stem = {os.path.splitext(os.path.basename(q))[0]: q for q in self.trees}
-        if base in stem:
-            return [d for d in ds if d[0] == stem[base]]
-        if isinstance(node.func, ast.Name):
+        if base in self.stem:
+            r = [d for d in ds if d[0] == self.stem[base]]
+        elif isinstance(node.func, ast.Name):
             same = [d for d in ds if d[0] == p]
-            return same or ds
-        return [d for d in ds if d[2]]
+            r = same or ds
+        else:
+            r = [d for d in ds if d[2]]
+        self.rcache[key] = r
+        return r
 
     def _t(self, p, e, tl):
         if isinstance(e, ast.Call):
             name, _ = callee(e)
             if name == CUT:
                 return False
-            if self.resolve(p, e):          # a tracked function: its result is tainted only if its `return` is
-                return any(d.name in self.tret for _, d, _ in self.resolve(p, e)) or (
+            rs = self.resolve(p, e)
+            if rs:                          # a tracked function: its result is tainted only if its `return` is
+                return any(d.name in self.tret for _, d, _ in rs) or (
                     callee(e)[0] in self.tret)
             return any(self._t(p, c, tl) for c in ast.iter_child_nodes(e))
         if isinstance(e, ast.Attribute) and e.attr == "exe" and self.opt[p] and isinstance(e.ctx, ast.Load):
@@ -234,7 +246,9 @@ def main():
     for f in files:
         with open(f, encoding="utf-8") as fh:
             sources[f] = fh.read()
-    bad, errors = judge(sources)
+    # judge is a pure function of the sources of the universe: its result is an item of the verdict's store keyed by their content and this tool
+    key = {"gate": "exepin", "sources": sorted((p, hashlib.sha256(t.encode("utf-8")).hexdigest()) for p, t in sources.items()), "tool": gate_build.tool_digest(__file__)}
+    (bad, errors), _ = gate_build.memo(os.environ.get("GATE_CACHE"), "exepin", key, lambda: list(judge(sources)))
     red = bool(bad or errors)
     uncert = ["%s:%s" % (p, bad[p]) for p in sorted(bad)][:50]
     detail = "; ".join(errors)[:400] if errors else (

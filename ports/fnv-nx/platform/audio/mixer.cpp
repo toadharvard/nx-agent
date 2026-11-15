@@ -135,7 +135,7 @@ void mixer_voice_destroy(mix_voice *v)
     if (!v)
         return;
     mx_lock();
-    for (uint32_t i = 0; i < v->nnotify; i++) clk_device_watch(v->notify[i].event, 0);
+    for (uint32_t i = 0; i < v->nnotify; i++) VT_DEVICE_WATCH(v->notify[i].event, 0);
     if (v->prev) v->prev->next = v->next; else g_voices = v->next;
     if (v->next) v->next->prev = v->prev;
     mx_unlock();
@@ -258,8 +258,8 @@ void mixer_voice_set_notify(mix_voice *v, const mix_notify *n, uint32_t count, m
     }
     mx_lock();
     mix_notify *old = v->notify;
-    for (uint32_t i = 0; i < v->nnotify; i++) clk_device_watch(old[i].event, 0);   /* a wait on these events runs the device (clock) */
-    for (uint32_t i = 0; i < count; i++) clk_device_watch(copy[i].event, 1);
+    for (uint32_t i = 0; i < v->nnotify; i++) VT_DEVICE_WATCH(old[i].event, 0);   /* a wait on these events runs the device (clock) */
+    for (uint32_t i = 0; i < count; i++) VT_DEVICE_WATCH(copy[i].event, 1);
     v->notify = copy;
     v->nnotify = count;
     v->notify_fn = fn;

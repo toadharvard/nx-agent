@@ -7,13 +7,11 @@ switches and the environment that removes the documented ambient inputs.
     python3 -I toolflags.py policy                                                 print the policy table (toolflags_policy.py)
 
 Input: stage documents "fnvnx-stage/1" (sandbox.py) plus "tool", the DECLARED kind (never guessed from a file name): gcc as
-ld ar objcopy python msvc-cl msvc-link msvc-lib wine; sh/make: `tool-unanalysable` (child commands are not visible in argv);
-others `tool-unlisted`; none `tool-undeclared`. wine needs "wine_tool" (an msvc-* kind) applied to the argv after wine.
+ld ar objcopy readelf python; sh/make: `tool-unanalysable` (child commands are not visible in argv);
+others `tool-unlisted`; none `tool-undeclared`.
 GNU response files `@F`: F under a declared input, read from ROOT + F (--root), expanded before the rules run (no --root,
 unreadable or a cycle: `response-file-unreadable`). Output `STAGE: RULE detail [citation]`, summary, JSON "fnvnx-toolflags/1".
-Declared dependencies, NOT checked here: "no_date_time_macros": {"checked_by": NAME} names the stage/gate proving the sources
-use no __DATE__/__TIME__ (VC9 has no switch); "coff_normalize"/"pe_normalize": the consumer normalizes time stamps
-(verify/coffnorm.py); a python script must itself pass puregate.
+A python script must itself pass puregate (not checked here).
 ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds (ASM-038)
 documentation; the gate enforces the invocation, it does not prove the tool.
 """
@@ -24,7 +22,7 @@ import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from toolflags_policy import (FIXED, FORBID_ENV, GNU, KINDS, MSVC, POLICY, PYENV_OK)  # noqa: E402
+from toolflags_policy import (FIXED, FORBID_ENV, GNU, KINDS, POLICY, PYENV_OK)  # noqa: E402
 
 FORMAT = "fnvnx-toolflags/1"
 
@@ -113,9 +111,6 @@ def pyparse(a):
         i += 1
     return flags, None, bad
 
-def opts(a, lower):
-    return [(t[1:].lower() if lower else t[1:]) for t in a if t[:1] in ("/", "-") and len(t) > 1]
-
 def chk_gcc(c, a):
     def has(p):
         return any(t.startswith(p) and len(t) > len(p) for t in a)
@@ -167,6 +162,15 @@ def chk_objcopy(c, a):
         if t in ("--preserve-dates", "--disable-deterministic-archives") or short(t, "p") or short(t, "U"):
             c.v("flag-forbidden", t, "objcopy.D")
 
+def chk_readelf(c, a):
+    c.need("-W" in a, "-W", "readelf.args")
+    for t in a:
+        if t.startswith("-"):
+            if t not in ("-W", "-h", "-S", "-r", "-s"):
+                c.v("flag-forbidden", t, "readelf.args")
+        else:
+            c.need_under(t, "readelf input", "readelf.args")
+
 def chk_python(c, a):
     flags, si, bad = pyparse(a)
     for b in bad + ["-" + f for f in "IE" if f in flags]:
@@ -180,34 +184,6 @@ def chk_python(c, a):
     elif not bad:
         c.v("flag-missing", "script path", "python.script")
 
-def chk_msvc(c, kind, a):
-    o = opts(a, kind != "msvc-cl")
-    d = c.doc
-    brepro = d.get("msvc_brepro") is True
-    norm = d.get("coff_normalize") is True or (kind != "msvc-cl" and d.get("pe_normalize") is True)
-    if brepro == norm:
-        c.v("decl-conflict" if brepro else "decl-missing", "exactly one of msvc_brepro / coff_normalize"
-            + ("" if kind == "msvc-cl" else " / pe_normalize"), "msvc.decl")
-    elif brepro and "brepro" not in [x.lower() for x in o]:
-        c.v("flag-missing", "/Brepro (msvc_brepro declared)", "msvc.decl")
-    if any(t.startswith("@") for t in a):
-        c.v("response-file-unsupported", "@file in an msvc argv", "resp")
-    if kind == "msvc-cl":
-        nd = d.get("no_date_time_macros")
-        if not (isinstance(nd, dict) and isinstance(nd.get("checked_by"), str) and nd["checked_by"].strip()):
-            c.v("decl-missing", 'no_date_time_macros {"checked_by": NAME}', "cl.nodate")
-        for x in o:
-            if x in ("Zi", "ZI") or x.startswith("Fd") or re.fullmatch("MP[0-9]*", x):
-                c.v("flag-forbidden", "/" + x, "cl.forbid")
-        return
-    if kind == "msvc-link":
-        c.need("incremental:no" in o, "/INCREMENTAL:NO", "link.incr")
-    for x in o:
-        if x in ("ltcg:pginstrument", "ltcg:pgoptimize", "ltcg:pgupdate"):
-            c.v("flag-forbidden", "/" + x, "msvc.ltcg")
-        elif kind == "msvc-link" and x.startswith("incremental") and x != "incremental:no":
-            c.v("flag-forbidden", "/" + x, "link.incr")
-
 def check_doc(doc, root=None):
     """Violations [(rule, detail, citation)] of one stage document, in a fixed order."""
     c = Ctx(doc, root)
@@ -215,17 +191,6 @@ def check_doc(doc, root=None):
     kind, argv = doc.get("tool"), doc["argv"]
     if "jobs" in doc and (not isinstance(doc["jobs"], int) or isinstance(doc["jobs"], bool)):
         c.v("jobs-invalid", "jobs must be an integer", "args.jobs")
-    if kind == "wine":
-        e = doc["env"]
-        for k, ok in (("WINEDEBUG", e.get("WINEDEBUG") == "-all"), ("WINEPREFIX", under(e.get("WINEPREFIX"), c.ins + c.outs))):
-            if k not in e:
-                c.v("env-missing", k, "wine.env")
-            elif not ok:
-                c.v("env-value", "%s=%s: want -all / a path under a declared input or output" % (k, e[k]), "wine.env")
-        kind, argv = doc.get("wine_tool"), argv[1:]
-        if kind not in MSVC:
-            c.v("tool-undeclared" if kind is None else "tool-unlisted", "wine_tool %s" % kind, "wine.env")
-            return c.out
     if kind not in KINDS:
         c.v({None: "tool-undeclared", "sh": "tool-unanalysable", "make": "tool-unanalysable"}.get(kind, "tool-unlisted"),
             str(kind), "tool.kind")
@@ -234,10 +199,7 @@ def check_doc(doc, root=None):
     for t in (a[:pyparse(a)[1] or 0] if kind == "python" else a):
         if re.fullmatch("-j[0-9]*", t) and kind != "objcopy" or t == "--jobs" or t.startswith("--jobs="):
             c.v("jobs-in-argv", t, "args.jobs")
-    if kind in MSVC:
-        chk_msvc(c, kind, a)
-    else:
-        {"gcc": chk_gcc, "as": chk_as, "ld": chk_ld, "ar": chk_ar, "objcopy": chk_objcopy, "python": chk_python}[kind](c, a)
+    {"gcc": chk_gcc, "as": chk_as, "ld": chk_ld, "ar": chk_ar, "objcopy": chk_objcopy, "readelf": chk_readelf, "python": chk_python}[kind](c, a)
     return c.out
 
 def load(path):

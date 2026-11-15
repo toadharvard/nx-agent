@@ -1,7 +1,7 @@
 /* boundary_guest.cpp - the product's implementation of shim/include/fnvnx_boundary.h (AArch64 ILP32): the game is
  * the lifted x86 code of lead L3a's runtime, the images and threads come from the loader of lead L1 (its headers,
- * loader/include, are included as they are). Host builds use tests/s4/host_boundary.cpp instead; this file is
- * compiled by platform/build_guest.sh only.
+ * loader/include, are included as they are). The platform root (platform/build.json, built by verify/recipe.py)
+ * compiles it; there is no second implementation.
  *
  * Preconditions of the loader contract this file relies on (fnvnx_start.h): the process record fnvnx_start_proc()
  * returns is the one fnvnx_start_prepare filled; the thread blocks are made and freed on it; guest memory is at its

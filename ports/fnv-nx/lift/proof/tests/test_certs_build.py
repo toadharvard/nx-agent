@@ -3,13 +3,16 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import certbasis, certs_build, prove, shape, symform
+from proof import certbasis, certs_build, model_sail, prove, shape, symform
 
-WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')
+model_sail.configure(os.environ['FNVNX_SAIL_WORK'], os.environ['FNVNX_SAIL_IR'], os.environ['FNVNX_ISLA'])   # the declared inputs of this test (the same three as test_model_patches); no default
+
+WORK = tempfile.mkdtemp()    # this test's own scratch directory
 MD = shape.decoder()
 
 

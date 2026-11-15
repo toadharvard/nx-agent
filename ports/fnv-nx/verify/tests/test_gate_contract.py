@@ -58,7 +58,7 @@ check("root_results needs the three result names", "root_results" in (raises(dic
 check("root key is gone (the universe is admit.json)", "keys must be" in (raises(dict(good, root="r")) or ""))
 check("images key is gone (derived, no hand list)", "keys must be" in (raises(dict(good, images=[])) or ""))
 check("ranges shape", "ranges needs" in (raises(dict(good, ranges={"exe": "x/r"})) or "") and "ranges needs" in (raises(dict(good, ranges={"exe": "x/r", "module": "x/r"})) or ""))
-check("optional keys accepted", raises(dict(good, root_results=dict(RR, entries="e"))) is None)
+check("optional keys accepted", raises(dict(good, root_results=dict(RR, disp_rows="e", native_disp_rows="e2"))) is None)
 
 # the shared universe convention (gate_build.quantify)
 import gate_build as gb  # noqa: E402
@@ -138,9 +138,9 @@ for g in gc.GATES:
     keyed = g in ("disp", "reach", "reachlink", "gpa")           # these name their missing shared key first
     check("%s: root without units/addrmap/aliases -> red naming them, owner L1 link stage" % g,
           r[:3] == (1, 0, ["ports/fnv-nx/p:inputs"]) and (keyed or ("units.json" in r[3] and "addrmap.tsv" in r[3] and "L1 link stage" in r[3])), r)
-open(repo + "/ports/fnv-nx/verify/contract_inputs.json", "w").write(json.dumps(dict(good, root_results=dict(RR, entries="entries.tsv"))))
+open(repo + "/ports/fnv-nx/verify/contract_inputs.json", "w").write(json.dumps(dict(good, root_results=dict(RR, disp_rows="disp_rows.tsv", native_disp_rows="native_disp_rows.tsv"))))
 r = gc.judge_root("disp", repo, outd, "ports/fnv-nx/p")
-check("disp: entries.tsv named when missing", r[1] == 0 and "entries.tsv" in r[3], r)
+check("disp: disp_rows.tsv named when missing", r[1] == 0 and "disp_rows.tsv" in r[3], r)
 p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_contract.py"), "--gate", "zz"], capture_output=True, text=True)
 check("unknown gate rejected", p.returncode == 1)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")

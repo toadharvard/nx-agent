@@ -28,15 +28,21 @@ CALLEE = ('ebx', 'esi', 'edi', 'ebp')
 SETMAX = 8
 
 
+KEYS = None      # the path of L1's keys.tsv, set once by the program through configure_keys()
+
+
+def configure_keys(path):
+    global KEYS
+    KEYS = path
+
+
 def load_keys():
-    """{'dll!name': (convention, argument types)} of L1's keys.tsv (env FNVNX_KEYS, else keys.tsv beside the directory of FNVNX_MODULES)"""
-    import os
-    p = os.environ.get('FNVNX_KEYS') or os.path.join(os.path.dirname(os.path.dirname(os.environ.get('FNVNX_MODULES', ''))), 'keys.tsv')
+    """{'dll!name': (convention, argument types)} of L1's keys.tsv, the file passed to configure_keys() (universe.py --keys); an unset or unreadable file is an error"""
+    if KEYS is None: raise RuntimeError('ehflow: keys.tsv was not configured (universe.py --keys FILE)')
     out = {}
-    if os.path.isfile(p):
-        for ln in open(p):
-            f = ln.rstrip('\n').split('\t')
-            if len(f) >= 7 and not ln.startswith('#') and not f[1].startswith('!'): out['%s!%s' % (f[1].lower(), f[2].lower())] = (f[4], f[6])
+    for ln in open(KEYS):
+        f = ln.rstrip('\n').split('\t')
+        if len(f) >= 7 and not ln.startswith('#') and not f[1].startswith('!'): out['%s!%s' % (f[1].lower(), f[2].lower())] = (f[4], f[6])
     return out
 
 

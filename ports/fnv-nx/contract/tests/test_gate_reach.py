@@ -10,6 +10,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 import argflow
+import imagerec
 import gate_reach
 import gpa_names
 
@@ -52,6 +53,14 @@ class Asm:
     def ret(self):            self.raw(0xc3)
 
 
+
+def reloc_size(b):
+    """The exact size of a base relocation table that is followed by zero padding."""
+    pos = 0
+    while pos + 8 <= len(b) and struct.unpack_from('<I', b, pos + 4)[0] >= 8:
+        pos += struct.unpack_from('<I', b, pos + 4)[0]
+    return pos
+
 def pe_of(fill):
     a = Asm()
     fill(a)
@@ -85,7 +94,7 @@ def pe_of(fill):
     struct.pack_into('<II', hdr, o + 56, 0x5000, 0x200)
     struct.pack_into('<I', hdr, o + 92, 16)
     struct.pack_into('<II', hdr, o + 96 + 8, RD + 0x40, 40)
-    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, len(reloc))
+    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, reloc_size(reloc))
     sh = o + 224
     out, fo = bytearray(hdr), 0x200
     for i, (nm, rva, body, ch) in enumerate(secs):
@@ -115,7 +124,7 @@ def image(fill, name):
     data, a = pe_of(fill)
     ranges = {s: [(s, e)] for s, e in a.funcs.values()}
     rtxt = ''.join('%x\t%x-%x\n' % (s, s, e) for s, (s, e) in sorted((s, (s, e)) for s, e in a.funcs.values()))
-    img = argflow.Image(data, name, ranges)
+    img = argflow.Image(imagerec.ImageRec(data, name, ranges))
     img.import_stack = gpa_names.import_stacks(BRIDGE)
     return img, dict(name=name, pe=gate_reach.sha(data), ranges=gate_reach.sha(rtxt))
 
@@ -396,12 +405,10 @@ else:
 SRC_OK = ''.join('%s\tclosed\n' % x for x in gate_reach.CLOSURE_SOURCES)
 CK = ('REACH_CLOSURE_KEY_LIFTED', '-', 'fnvl_dispatch', '0', 'closure_key', 'dispatcher=lifted', 'n')
 CK2 = ('REACH_CLOSURE_KEY_NATIVE', '-', 'fnvnx_dispatch', '0', 'closure_key', 'dispatcher=native', 'n')
-LL_OK = 'module\tsite\tcalls\tapi\tstatus\tnames\tbreaks\nexe\t401000\t1\tLoadLibraryA\tclosed\tx.dll\t-\n'
-LL_OPEN = LL_OK + 'exe\t402000\t1\tLoadLibraryA\topen\t-\tx\n'
 
 
-def ck(entries, closure, sources=SRC_OK, loadlib=LL_OK, rows=(CK,)):
-    ctx = {'dispatchers': {'lifted': (entries, closure, sources), 'native': (entries, closure, sources)}, 'loadlib': loadlib}
+def ck(entries, closure, sources=SRC_OK, rows=(CK,)):
+    ctx = {'dispatchers': {'lifted': (entries, closure, sources), 'native': (entries, closure, sources)}}
     rs = reqs(*rows)
     facts, certs, g = gate_reach.run(rs, {}, [], [], ctx)
     return rs, facts, certs
@@ -421,17 +428,10 @@ rs, facts, certs = ck(ENT, '00401000\n', sources=SRC_OK.replace('eh\tclosed', 'e
 check('closure_key: an open source of the closure is red', (certs, sorted(facts[0].reasons)), ({}, [('source-open', 'lifted', 'eh')]))
 rs, facts, certs = ck(ENT, '00401000\n', sources=SRC_OK.replace('tls\tclosed\n', ''))
 check('closure_key: an absent source is red', sorted(facts[0].reasons), [('source-open', 'lifted', 'tls')])
-rs, facts, certs = ck(ENT, '00401000\n', loadlib=LL_OPEN)
-check('closure_key: an open LoadLibrary site is measurement, never valid', (certs, sorted({r[0] for r in facts[0].reasons}),
-      gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5]), ({}, ['loadlib-open'], 'measurement'))
-rs, facts, certs = ck(ENT, '00401020\n', loadlib=LL_OPEN)
-check('closure_key: a missing key with open loads stays red (uncertified), not measurement', gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5], 'uncertified')
-rs, facts, certs = ck(ENT, '00401000\n', loadlib=None)
-check('closure_key: no loadlib.tsv is open', sorted({r[0] for r in facts[0].reasons}), ['loadlib-open'])
 rs, facts, certs = ck(ENT, '00401000\n', rows=(CK2,))
 check('closure_key: one id per dispatcher, names bound by --dispatcher', (len(certs), rs[0]['spec']), (1, {'dispatcher': 'native', 'fallthrough': False}))
 rs = reqs(CK, CK2)
-facts, certs, g = gate_reach.run(rs, {}, [], [], {'dispatchers': {'native': (ENT, '00401000\n', SRC_OK)}, 'loadlib': LL_OK})
+facts, certs, g = gate_reach.run(rs, {}, [], [], {'dispatchers': {'native': (ENT, '00401000\n', SRC_OK)}})
 check('closure_key: a dispatcher without inputs is red', (sorted(certs), [sorted(f.reasons)[0][0] for f in facts if f.reasons]), ([2], ['dispatcher-missing']))
 h = gate_reach.header(rs)
 check('closure_key: FNVNX_REACH_* macros, one id per dispatcher, each defined once', (h.count('#define FNVNX_REACH_CLOSURE_KEY_LIFTED 1 '), h.count('#define FNVNX_REACH_CLOSURE_KEY_NATIVE 2 '),
@@ -442,6 +442,89 @@ for bad in (('X', 'k.dll', 'f', '0', 'closure_key', 'dispatcher=a', ''), ('X', '
         check('closure_key: malformed row is an error %r' % (bad[1:],), 'parsed', 'error')
     except gate_reach.FormatError:
         pass
+
+# reachreq.py (the request table and the one header emitter): its CLI writes the header that gate_reach.header builds from the same table,
+# through the function the full mode uses (write_facts_h); gate_reach re-exports the emitter, so there is one
+tdir = tempfile.mkdtemp(prefix='reach-h-')
+RR = os.path.join(HERE, '..', 'reachreq.py')
+import reachreq
+check('gate_reach uses the one emitter and parser of reachreq', (gate_reach.header is reachreq.header, gate_reach.parse_requests is reachreq.parse_requests,
+      gate_reach.write_facts_h is reachreq.write_facts_h), (True, True, True))
+for nm, rows_ in (('one', (CK,)), ('two', (CK, CK2)), ('cfm', (R_H, R_P, R_W))):
+    tsv = os.path.join(tdir, nm + '.tsv')
+    open(tsv, 'w').write('\t'.join(gate_reach.COLUMNS) + '\n' + ''.join('\t'.join(r) + '\n' for r in rows_))
+    outh = os.path.join(tdir, 'sub', nm + '.h')
+    os.makedirs(os.path.dirname(outh), exist_ok=True)   # the stage launcher creates the parent of a declared output; the generator does not
+    rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', tsv, '--facts-h', outh], capture_output=True).returncode
+    check('reachreq CLI %s: exit 0 and the header equals gate_reach.header(parse_requests(table))' % nm,
+          (rc_, open(outh).read()), (0, gate_reach.header(gate_reach.parse_requests(open(tsv).read()))))
+rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.path.join(tdir, 'nope.tsv'), '--facts-h', outh], capture_output=True).returncode
+check('reachreq CLI on a missing table is an error', rc_ != 0, True)
+open(os.path.join(tdir, 'bad.tsv'), 'w').write('request\tx\n')
+rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.path.join(tdir, 'bad.tsv'), '--facts-h', outh], capture_output=True).returncode
+check('reachreq CLI on a malformed table exits 2', rc_, 2)
+shutil.rmtree(tdir, ignore_errors=True)
+
+# ---- gate_cert=<gate>: the producers of the argument of a native site are in the universe of a green gate
+import json
+import runpy
+GC = runpy.run_path(os.path.join(HERE, 'test_gatecert.py'))
+GCR = ('REACH_GL_SHADER_SOURCE', '-', 'glsrc', '0', 'gate_cert', 'gate_cert=sm_link', 'n')
+UNI = sorted([dict(kind='glsl_table', id='progs', sha256='aa'), dict(kind='glsl_table', id='ffp_blob', sha256='bb'), dict(kind='bytecode', id='vs0', sha256='cc')],
+             key=lambda u: (u['kind'], u['id'], u['sha256']))
+VID = 'verdict-1'
+
+
+def summary(**kw):
+    d = dict(gate='sm_link', verdict=VID, universe=UNI, universe_hash=gate_reach.universe_hash(UNI), producers=GC['PRODUCERS'])
+    d.update(kw)
+    return json.dumps(d)
+
+
+GREEN = json.dumps(dict(name='sm_link', status='green', universe=3, certified=3))
+RED = json.dumps(dict(name='sm_link', status='red', universe=3, certified=2))
+
+
+def gc(funcs=None, summ=None, res=GREEN, objd=True, gates=True, verdict=VID, gpa=None, site_row=GCR):
+    ctx = {'gates': {'sm_link': (summ or summary(), res)} if gates else {}, 'verdict': verdict,
+           'prog': gate_reach.gatecert.parse_objdump(GC['obj']('a.o', funcs or GC['base'](), GC['SYMS'])) if objd else None}
+    rs = reqs(site_row)
+    facts, certs, g = gate_reach.run(rs, {}, [], gpa or [], ctx)
+    return facts, certs
+
+
+facts, certs = gc()
+check('gate_cert: green gate, covered callers, certified', (len(certs), sorted(facts[0].reasons)), (1, []))
+check('gate_cert: certificate carries the hash of the universe, the callers and the values',
+      (facts[0].sites[0]['universe_hash'], len(facts[0].sites[0]['callers']), facts[0].sites[0]['values']),
+      (gate_reach.universe_hash(UNI), 4, ['addr:ffp_blob', 'data:progs', 'prod:translate']))
+f2, c2 = gc()
+check('gate_cert: the certificate is a function of its inputs', c2, certs)
+facts, certs = gc(res=RED)
+check('gate_cert: a red gate', (certs, [r[0] for r in sorted(facts[0].reasons)]), ({}, ['gate-not-green']))
+facts, certs = gc(gates=False)
+check('gate_cert: the gate named is not given', (certs, [r[0] for r in facts[0].reasons]), ({}, ['gate-missing']))
+facts, certs = gc(summ=summary(verdict='verdict-2'))
+check('gate_cert: a summary of another verdict', (certs, [r[0] for r in facts[0].reasons]), ({}, ['summary-other-verdict']))
+facts, certs = gc(verdict=None)
+check('gate_cert: no verdict id is red', certs, {})
+facts, certs = gc(summ=summary(universe_hash='0' * 64))
+check('gate_cert: universe hash that does not match', (certs, [r[0] for r in facts[0].reasons]), ({}, ['universe-hash']))
+facts, certs = gc(summ=summary(universe=UNI[:2]))
+check('gate_cert: a producer data symbol not in the universe', sorted(r[0] for r in facts[0].reasons), ['producer-not-in-universe', 'universe-hash'])
+facts, certs = gc(summ=summary(producers=[]))
+check('gate_cert: no producers', (certs, [r[0] for r in facts[0].reasons]), ({}, ['summary-format']))
+facts, certs = gc(objd=False)
+check('gate_cert: no objects', (certs, [r[0] for r in facts[0].reasons]), ({}, ['objects-missing']))
+facts, certs = gc(funcs=GC['base']() + [('rogue_c', [GC['SAVE'], ('adrp\tx0, 0 <r>', (GC['PG'], 'rogue')), ('add\tx0, x0, #0x0', (GC['ADD'], 'rogue')),
+                                                       ('bl\t0 <from_glsl>', (GC['CALL'], 'from_glsl')), GC['REST'], GC['RET']])])
+check('gate_cert: a caller outside the universe', (certs, [r[0] for r in facts[0].reasons]), ({}, ['not-producer']))
+facts, certs = gc(gpa=[])
+gpa_open = [('gpa-open', 'x.dll', '0x1000')]
+ctx = {'gates': {'sm_link': (summary(), GREEN)}, 'verdict': VID, 'prog': gate_reach.gatecert.parse_objdump(GC['obj']('a.o', GC['base'](), GC['SYMS']))}
+f3 = gate_reach.check_request(reqs(GCR)[0], {}, gpa_open, [], ctx)
+check('gate_cert: an open GetProcAddress is measurement, as for closure_key', ([r[0] for r in sorted(f3.reasons)], gate_reach.MEASUREMENT.__contains__('gpa-open')), (['gpa-open'], True))
+check('gate_cert: request kind in the header', 'FNVNX_REACH_GL_SHADER_SOURCE' in gate_reach.header(reqs(GCR)), True)
 
 if fails:
     print('FAIL\n' + '\n'.join(fails))

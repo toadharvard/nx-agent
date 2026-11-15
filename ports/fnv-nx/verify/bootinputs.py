@@ -349,10 +349,11 @@ def milestone_table(milestones_text, run_text, entries_id=None, stage_text=None,
             out += ["first-present any call 0x%x" % key for key in present]
         else:
             out.append("%s any call 0x%x" % item)
+    out.append("first-frame any host present")   # the GL backend's first present (boot.py header): always generated, a stage `first-frame` is an error
     if stage_text is not None:
         if man is None:
             raise InputError("a stage table needs entries.tsv (--entries)")
-        taken = {item[0] for item in body if item} | {"first-present"} | {"start-%02d" % i for i in range(1, len(lines) + 1)}
+        taken = {item[0] for item in body if item} | {"first-present", "first-frame"} | {"start-%02d" % i for i in range(1, len(lines) + 1)}
         out += stage_check(stage_text, man, taken)
     return "\n".join(out) + "\n"
 

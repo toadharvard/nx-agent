@@ -6,9 +6,7 @@ class Image:
     def __init__(self, path, base=None):
         """base: None = the image as stored (preferred base). Otherwise the image as the Windows loader maps it at `base`: sections at the new
         addresses and delta = base - preferred added to the dword of every HIGHLOW relocation site (u32/bytes/taken/rset/relocs speak `base` addresses).
-        base None and env FNVNX_BASE (hex) set: base = FNVNX_BASE (tools that construct Image(path) pick the module's assigned base from the environment)."""
-        if base is None and os.environ.get('FNVNX_BASE'):        # the one resolver: the image as mapped at the load base the loader assigned (default: the preferred base)
-            base = int(os.environ['FNVNX_BASE'], 16)
+        The caller passes the base the loader assigned (modlift: the module's row of modules.tsv); there is no environment variable."""
         d = self.d = open(path, 'rb').read()
         pe = struct.unpack_from('<I', d, 0x3c)[0]
         n = struct.unpack_from('<H', d, pe + 6)[0]

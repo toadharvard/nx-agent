@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "tlsmodel",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_tlsmodel.py"
+ ],
+ "result": "tlsmodel.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "linked"
+ ]
+}

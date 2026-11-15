@@ -118,7 +118,7 @@ unsigned init()
     if (g_init_state == 0) {
         g_init_state = 1;
         gen_init();
-        unsigned missing = 0;
+        unsigned missing = cxx_init();
         for (unsigned i = 0; i < g_tables.niface; i++) {
             const Iface &f = g_tables.ifaces[i];
             if (f.hidden) continue;

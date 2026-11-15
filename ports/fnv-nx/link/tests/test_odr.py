@@ -12,11 +12,11 @@ tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of t
 atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]
+sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract'), os.path.join(HERE, '..', '..', 'toolchain', 'tests')]
 import abi_gaterun
 import odr
+import plugbuild as pb
 
-CXX = ['aarch64-linux-gnu-g++-13', '-mabi=ilp32', '-c', '-O0', '-ffreestanding', '-fno-exceptions', '-fno-rtti', '-fno-asynchronous-unwind-tables']
 fails = []
 d = tempfile.mkdtemp()
 
@@ -30,7 +30,7 @@ def cc(name, src, opt='-O0'):
     s = os.path.join(d, name + '.cc')
     o = os.path.join(d, name + '.o')
     open(s, 'w').write(src)
-    r = subprocess.run(CXX + [opt, s, '-o', o], capture_output=True, text=True)
+    r = pb.compile(s, o, [], args=[opt], native=True)   # the recipe: pinned guest compiler, product flags, the full plugin set
     if r.returncode:
         fails.append('compile %s: %s' % (name, r.stderr))
     return o
@@ -62,7 +62,7 @@ check('same string in different objects', rc, 0)
 rc, r = gate(cc('s3', STR % ('hello', 'A'), '-Os'), cc('s4', STR % ('world', 'B'), '-Os'))
 check('different string is red', (rc, 'relocations differ' in r['uncertified'][0]), (1, True))
 rc, r = gate(cc('o1', STR % ('hello', 'A')), cc('o2', STR % ('hello', 'B')))
-check('string in a plain section is opaque, uncertified even when equal', (rc, 'not delimited' in r['uncertified'][0]), (1, True))
+check('string in a plain section with no symbol at its offset: identity-undecidable, even when equal', (rc, 'identity-undecidable' in r['uncertified'][0]), (1, True))
 
 INL = 'struct W { virtual int f() { return %d; } };\nint mk%s() { W w; return w.f(); }\n'
 w1 = cc('w1', INL % (1, 'A'))

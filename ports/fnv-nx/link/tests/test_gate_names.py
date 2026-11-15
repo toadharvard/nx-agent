@@ -40,9 +40,9 @@ def gcc_obj(rows, vt=b'', is64=False, symbols=None, sections=None):
 
 ROWS = sympair(('_Z1fv', '?f@@YAXXZ', 'func', 'def'), ('_Z1gv', '?g@@YAXXZ', 'func', 'def'), ('_Z1hv', '?h@@YAXXZ', 'func', 'def'),
                ('_Z1iv', '?i@@YAXXZ', 'func', 'def'), ('_Z1jv', '?j@@YAXXZ', 'func', 'ref'), ('_ZTV1A', '', 'vtable', 'def'),
-               ('_Z1kv', '', 'unnamed:no rule', 'def'), ('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'def'),
+               ('_Z1kv', '', 'nodecor:no rule', 'def'), ('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'def'),
                ('_ZN1AC2Ev', '??0A@@QAE@XZ', 'ctor.c2', 'def'), ('gdata', '?gdata@@3HA', 'data', 'def'))
-VT = b'_ZTV1A\t8\t??_7A@@6B@\t0\n_ZTV1B\t8\tunnamed:no rule\t0\n'
+VT = b'_ZTV1A\t8\t??_7A@@6B@\t0\n_ZTV1B\t8\tnodecor:no rule\t0\n'
 
 
 def cl_obj(defined=('?f@@YAXXZ', '??0A@@QAE@XZ'), data=('?gdata@@3HA',), undef=('?g@@YAXXZ',)):
