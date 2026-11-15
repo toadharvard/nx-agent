@@ -156,3 +156,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - w7 task M done (w7-k 672cdc632), accepted. S5 uses tls_slot and align_bytes directly; bootstart's own derivations are deleted; repeated or missing slots are fact fails. test_bootstart 99, oracle 83, bootinputs 75 PASS. Fix asked: read the columns by name, not position. The tls.tsv row and slot counts on the real exe are not measured (no gamedata in the worker containers); that waits for a farm.
 - L1 w12h 26135240 has landed (verdict running). It holds the trees fix for bootrt and the w12 chain for 4.1 (link/guest.json, guestlink gate, weak-undefined red, libs.system, link.loader). w6 (doing): merge it into w6-r with w15c and L5 99c9fedc0; build bootrt and run its tests; move bootguest to link/guest.json and try the 4.1 link, reporting the exact unresolved and weak-undefined set. L5 step 2 (lib set) is still open.
 - w7 task M fix (w7-k d727971c6), accepted. tls.tsv is read by header name; a missing or repeated name, a short row, or 13 fields with no header is an error; extra columns are ignored. test_bootstart 105 PASS. w7 holds for the cand1 merge branch.
+- w6-r 6bee99e48:
+  - 15bebb59d merges L1 w12h 26135240 with w15c 1cac05621 (manual 3-way recipe.py; the both-sides spots sent to L1 for cand1).
+  - hostabi, manifest, lib/sha256 and rt/ from L5 a7b52eb38.
+  - bootrt recipe build GREEN (cold 4 stages; warm 0 run, 4 hits). test_bootrt 8/8. Recipe check valid for hostabi, sha256, platform, bootrt, bootguest and @m60.
+  - 4.1 link red before ldcheck: this tree's platform/ (L1 lineage) still uses the removed cpu_count slot and FNVNX_ROLE_AUDIO. Decision: take L5 a7b52eb38's platform/, shim/ and loader/ as one unit (w6 doing).
