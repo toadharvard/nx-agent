@@ -555,6 +555,12 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
 - A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
   to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
 - Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.
+- **Where the Microsoft page is narrower (orchestrator, 2026-11-15 13:45Z; it applies to D3D9 and its shader models as well).**
+  - Microsoft does not list a case, but Wine 9.0 accepts it. That case is a silence, not a contradiction, so source 2
+    fills it and the accepted set is the union.
+  - Each such case is a cited conflict row: the Microsoft page and section, and the Wine 9.0 file and line. Examples are
+    `ps_3_0:vFace_src`, `ps:47` and `vs_3_0:v[a0.x]`.
+  - Where Microsoft states the opposite, Microsoft holds.
 
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
