@@ -665,10 +665,3 @@ class EH(Flow):
         L.append('cross-check: .rdata/.data magic scan %d, walk %d, scan-only %d: %s' % (len(scan), len(s.fi), len(miss), ' '.join('%x%s' % (a, '(EXCEPTION_RECORD template)' if a in tmpl else '(unreferenced)') for a in miss[:5])))
         if miss: L.append('  gap: scan-only hits are the ExceptionInformation[0] magic of EXCEPTION_RECORD templates (copied by the thrower / used by the filter), not FuncInfo; no stub points at them')
         return L
-
-if __name__ == '__main__':
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import cli
-    cli.parse('usage: ehtables.py [--module NAME]   exception-handling facts of the exe or module (runs tools/universe.py, same environment)', sys.argv[1:], (0, 0), {'--module': True})
-    import universe
-

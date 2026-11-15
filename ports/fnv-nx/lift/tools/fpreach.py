@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reachability of sticky-bit READERS after an import returns (item 29 (d)) and after a native body exits (native_fpflags), by a call-graph reachability over the image, no clear in between.
 
-    fpreach.py <pe image> <facts dir> [--native <file of function addresses>]       (run fpstate.py scan on the same image + facts dir first: it writes fpstate/readers.tsv)
+    fpreach.py <pe image> <facts dir> <base hex> [--native <file of function addresses>]       (run fpstate.py scan on the same image + facts dir first: it writes fpstate/readers.tsv)
 
 Graph (context-insensitive, an over-approximation of the control flow):
   * every instruction of every entry's decoded range (x86flow.decode: intra-function successors, jump tables, tails to other entries);
@@ -16,8 +16,6 @@ Output (<facts dir>/fpstate/): reach_imports.tsv (reader, shortest witness path 
 import os, sys, bisect
 from collections import defaultdict, deque
 HERE = os.path.dirname(os.path.abspath(__file__))
-if __name__ == '__main__':
-    os.environ['FNVNX_FACTS'] = os.path.abspath(sys.argv[2])
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
 from multiprocessing import Pool
 import x86flow as W
@@ -98,11 +96,11 @@ def work(args):
 
 
 def main():
-    exe, facts = sys.argv[1], sys.argv[2]
+    exe, facts, base = sys.argv[1], sys.argv[2], int(sys.argv[3], 16); W.configure(facts)
     nat = []
     if '--native' in sys.argv:
         nat = [int(l.split()[0], 16) for l in open(sys.argv[sys.argv.index('--native') + 1]) if l.strip() and not l.startswith('#')]
-    raw, rows = load_universe(exe)
+    raw, rows = load_universe(exe, base)
     W.parse_imports()
     for l in open(os.path.join(facts, 'fpstate', 'readers.tsv')):
         f = l.rstrip('\n').split('\t')
