@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/verify/env.json ports/fnv-nx/verify/guest_compiler.json ports/fnv-nx/toolchain @admitted-recipes
+# reads: ports/fnv-nx/verify ports/fnv-nx/toolchain @admitted-recipes
 """recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", contract in RECIPE.md) on the stage machinery:
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
