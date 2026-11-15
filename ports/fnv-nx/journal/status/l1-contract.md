@@ -1390,3 +1390,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - bootgpu shim gcc, farm unpinned apt, icount Unicorn: L4;
     - lift/descs stock gcc: L3a.
   - Copies: profile (w12), targets.json (w22), admit by class (w24).
+- w22 193c6641c: gate_datamodel's universe is the rows of DATAMODEL.json (the hand set is deleted); each row's case compiles with the pinned driver; tests 7/7.
+  - Red on cand1 until L2 w3's table merges (S09 long double is expected red until the repin).
+  - L2 to generate the tm.texi type-macro rows: SIZE_TYPE, PTRDIFF_TYPE and the rest.
+- c4544e18b confirmed to L3a as the final facts head.
