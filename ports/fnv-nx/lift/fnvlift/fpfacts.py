@@ -17,7 +17,7 @@ from .core import Unsupported
 # loads whose value is not proven (exe 55, libvorbis 15, libvorbisfile 2, binkw32 1, d3dx9_31 43, d3dx9_38 51). The full semantics (thread flag + exact slow path raising #MF/#XM) is
 # deferred work, not dropped: a body that relies on the assumption records 'ASM-204' in its kinds, so every such site is counted in the pack.
 OWNER_ASSUMED = {'ASM-204': 'ASM-204'}
-ASSUME = set()          # test harness only (test/instest.py): states drawn with every exception masked, so the invariant holds by construction of the test states
+ASSUME = set()          # test harness only (tools/tests/instest.py): states drawn with every exception masked, so the invariant holds by construction of the test states
 _CACHE = {}
 
 

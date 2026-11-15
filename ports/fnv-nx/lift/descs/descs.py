@@ -7,7 +7,8 @@ Input: every ELF object under OBJS_DIR (`<root with / as __>/<unit>.o`, the obje
 The section `.fnvnx.disp` of an object is the fact toolchain/dispatch/fnvnx_dispatch.cc writes: ASCII, LF-terminated, sorted, unique, one descriptor
 per line, `conv:ret:args`:
     conv  this | fast | stack
-    ret   v | i | q | f | d | a<N>[h<elt>][x] | m<N>
+    ret   v | i | q | f | d | a<N><X><Y>   X = R | H (the x86 side: registers / hidden pointer), Y = g | m | h<elt> (the native side: general registers /
+          memory through x8 / a homogeneous aggregate); BNF in toolchain/dispatch/fnvnx_dispatch.cc
     args  a comma list, possibly empty, of  i | q | f | d | s<N>g | s<N>h<elt> | s<N>r
     elt   f d q h v8 v16
 An object without the section has no indirect calls.
@@ -25,7 +26,7 @@ import sys
 SECTION = ".fnvnx.disp"
 N = r"[0-9]+"
 ELT = r"(?:f|d|q|h|v8|v16)"
-RET = r"(?:v|i|q|f|d|a%s(?:h%s)?x?|m%s)" % (N, ELT, N)
+RET = r"(?:v|i|q|f|d|a%s[RH](?:g|m|h%s))" % (N, ELT)
 ARG = r"(?:i|q|f|d|s%sg|s%sh%s|s%sr)" % (N, N, ELT, N)
 LINE = re.compile(r"(?:this|fast|stack):%s:(?:%s(?:,%s)*)?" % (RET, ARG, ARG))
 

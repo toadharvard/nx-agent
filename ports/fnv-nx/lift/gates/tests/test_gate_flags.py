@@ -63,6 +63,11 @@ CASES = {
     'pf_pop_mov_xor_and': ('21d8 9c 58 89c1 3500002000 31c8 2500002000 31c9 c3', []),        # cpuid id-bit idiom
     'pf_popf_pushf_pop':  ('21d8 9c 9d 9c 58 2500002000 31c0 c3', []),                   # push, popf, push again, pop, mask: the mask moves through popf
     'pf_popf_jz':         ('21d8 9c 9d 7400 c3', []),                                    # popf of a masked word masks AF only; jz reads ZF
+    # the product-program proof (invariance.py) for what the taint walk cannot show unobserved: both runs reach identical observable states
+    'pf_prove_idiom':     ('21d8 53 9c 58 89c3 3500002000 50 9d 9c 58 53 9d 39d8 7407 b801000000 31db 31c0 5b c3', []),    # cpuid ID-bit probe shape: the bit cancels in cmp, ebx is restored
+    'pf_prove_ret_eax':   ('21d8 53 9c 58 89c3 3500002000 50 9d 9c 58 53 9d 39d8 7402 31db 5b c3', [('af', 4, 'pushf')]),   # eax still holds the bit at the ret
+    'pf_prove_dead_slot': ('21d8 9c 83c404 c3', []),                                                                  # the pushed word lies below ESP again: dead
+    'pf_prove_shift':     ('21d8 9c 58 c1e804 83e001 c3', [('af', 4, 'pushf')]),                                        # shr moves the bit to bit 0: observed
     'cmc_at_entry':       ('f5 c3', [('cf', 1, 'other')]),
     'cmc_after_clc':      ('f8 f5 c3', []),
     'adc_at_entry':       ('11c0 c3', [('cf', 1, 'carry')]),
@@ -89,11 +94,54 @@ CASES = {
     'inc_keeps_cf':       ('40 7200 c3', [('cf', 1, 'jcc')]),                           # inc does not write CF
     'inc_zf_defined':     ('40 7400 c3', []),
     'rol_of_undefined':   ('f8 c1c003 7000 c3', [('of', 4, 'jcc')]),
-    'daa_no_form':        ('01c0 27 c3', [('-', 0, 'no-form')]),                        # daa has no Form yet (item 23)
 }
 
 
+def uncovered_encoding():
+    """DERIVED from the real Form set, never picked: the first decodable instruction, in the order of the opcode space (one-byte opcodes, then 0f xx, each with
+    ModRM and immediates of zero bytes), whose shape has no certified Form (gate_flags.effect is None). None when the Form set has no gap."""
+    for pre in (b'', b'\x0f'):
+        for op in range(256):
+            code = pre + bytes([op]) + bytes(8)
+            for i in g._md.disasm(code, A):
+                if g.effect(i) is None and i.mnemonic and i.id not in (g.X.X86_INS_RET,) and i.size <= len(pre) + 1 + 7: return bytes(i.bytes)
+                break
+    return None
+
+
+UNCOVERED = uncovered_encoding()
+if UNCOVERED is not None:
+    CASES['no_form_row'] = ('01c0 %s c3' % UNCOVERED.hex(), [('-', 0, 'no-form')])                            # an instruction with no Form is a red row, never covered by a guess
+    CASES['pf_prove_no_form'] = ('21d8 9c 58 89c1 %s c3' % UNCOVERED.hex(), [('af', 4, 'pushf'), ('-', 0, 'no-form')])   # the proof stops at it: no Form, red
+
+
 class T(unittest.TestCase):
+    def test_def0_defpior_emission(self):
+        """DEF0 / DEFPRIOR (def_check.py): the lines the real emitter produces for the Forms of every opcode-space instruction that has a Form satisfy the rules, and
+        the read-back is not vacuous: it reports a free flag that is not 0 and a free register that is written unconditionally"""
+        import def_check as dc
+        n = free = 0
+        for pre in (b'', b'\x0f'):
+            for op in range(256):
+                for modrm in (0x00, 0xc0, 0xc8, 0x40):
+                    code = pre + bytes([op, modrm]) + bytes(8)
+                    for i in list(g._md.disasm(code, A))[:1]:
+                        if g.effect(i) is None: continue
+                        fl, rg, bad = dc.check_form(g.forms.build(i, A))
+                        self.assertEqual(bad, [], i.mnemonic + ' ' + i.op_str)
+                        n += 1; free += bool(fl or rg)
+        self.assertGreater(n, 100)
+        self.assertGreater(free, 0)
+        r = dc.run({('k', None): [next(g._md.disasm(bytes.fromhex('f7e1'), A)), 7]})        # mul ecx: flags with free outputs
+        self.assertGreater(r['uncertified'], 0); self.assertEqual(r['status'], 'red'); self.assertEqual(r['cert_owner'], 'L3b')
+        self.assertEqual(dc.read_back(['cf = 1;'], ['cf'], []), ['flag cf is not 0 where free: cf = 1;'])
+        self.assertEqual(dc.read_back(['cf = 0;', 'eax = x;'], ['cf'], ['eax']), ['register eax is written unconditionally although free'])
+        self.assertEqual(dc.read_back(['cf = (n1) ? n2 : 0;', 'if (n3) eax = n4;'], ['cf'], ['eax']), [])
+
+    def test_form_set_gap(self):
+        """the no-Form cases above exist only while the Form set has a gap; when it has none, no decodable encoding is uncovered"""
+        self.assertEqual(UNCOVERED is None, all(g.effect(i) is not None for pre in (b'', b'\\x0f') for op in range(256) for i in list(g._md.disasm(pre + bytes([op]) + bytes(8), A))[:1] if i.mnemonic))
+
     def test_cases(self):
         bad = []
         for name, (hx, exp) in sorted(CASES.items()):
@@ -172,9 +220,57 @@ class T(unittest.TestCase):
         self.assertEqual(red, [(A + 0x200, [('zf', 4, 'jcc')])])
         inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x100: 'e8fb000000 7400 c3'}, {A: ('export', ['-']), A + 0x100: ('call', ['-'])})
         self.assertEqual(red, [(A + 0x100, [('zf', 2, 'jcc')])])
+        # the call transfer is the callee's summary: a callee that defines every flag (cmp) before its ret gives the caller defined flags
+        X = {A: ('export', ['-']), A + 0x100: ('call', ['-'])}
+        inst, red = solve({A: 'e8fb000000 7400 c3', A + 0x100: '39c0 c3'}, X)
+        self.assertEqual(red, [])
+        # a callee that leaves the flags alone passes the caller's state through: the cmp before the call is still the definition
+        inst, red = solve({A: '39c0 e8f9000000 7400 c3', A + 0x100: '90 c3'}, X)
+        self.assertEqual(red, [])
+        # the same pass-through with no definition before the call: the caller's own entry state (E) comes out of the call
+        inst, red = solve({A: 'e8fb000000 7400 c3', A + 0x100: '90 c3'}, X)
+        self.assertEqual(red, [(A, [('zf', 1, 'jcc')])])
+        # a callee with one path that defines and one that does not: the join keeps the caller's state on the second path
+        inst, red = solve({A: '39c0 e8f9000000 7400 c3', A + 0x100: '85c9 7402 39c0 c3'}, X)
+        self.assertEqual(red, [])
+        # a callee that leaves ZF undefined (mul) hands that to the caller; the callee's own ret reads nothing
+        inst, red = solve({A: '39c0 e8f9000000 7400 c3', A + 0x100: 'f7e1 c3'}, X)
+        self.assertEqual(red, [(A, [('zf', 4, 'jcc')])])
+        # an indirect call is the calling convention: every flag undefined (C)
+        inst, red = solve({A: '39c0 ffd0 7400 c3'}, X)
+        self.assertEqual(red, [(A, [('zf', 2, 'jcc')])])
+        # a tail jmp takes the tail entry's summary: A jmp B, B = cmp; ret, and a caller C calls A
+        inst, red = solve({A: 'e9fb000000', A + 0x100: '39c0 c3', A + 0x200: 'e8fbfdffff 7400 c3'},
+                          {A: ('call', ['-']), A + 0x100: ('tail', ['-']), A + 0x200: ('export', ['-'])})
+        self.assertEqual(red, [])
+        # recursion is the least fixpoint: the callee calls itself and defines the flags on its base path
+        inst, red = solve({A: 'e8fb000000 7400 c3', A + 0x100: '85c9 7405 e8f6ffffff 39c0 c3'}, X)
+        self.assertEqual(red, [])
+        # a callee that never returns (jmp $) is no exit: its call's fall-through keeps the calling convention (C), judged and not dropped
+        inst, red = solve({A: '39c0 e8f9000000 7400 c3', A + 0x100: 'ebfe'}, X)
+        self.assertEqual(red, [(A, [('zf', 2, 'jcc')])])
         # an entry with no direct predecessor is an unknown predecessor itself
         inst, red = solve({A: '7400 c3'}, {A: ('call', ['-'])})
         self.assertEqual(red, [(A, [('zf', 1, 'jcc')])])
+
+
+class UndefWhen(unittest.TestCase):
+    """class rule: a flag the SDM table leaves undefined only under a condition is declared with Form.undefined(when=cond) and emitted as `cond ? 0 : prior`
+    (AF of shl/shr/sar/shld/shrd: undefined for a non-zero count, unchanged for count 0); an unconditional one stays `f = 0;`"""
+    def test_emission(self):
+        import capstone
+        from proof import forms
+        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
+
+        def lines(hx):
+            F = forms.build(next(md.disasm(bytes.fromhex(hx), 0x1000)), 0x1000)
+            return F, F.to_c_inline(lambda n: n, lambda k, c, r: '', lambda v: 'flo=%s;' % v)[0]
+        for hx in ('d3e0', 'd3e8', 'd3f8', '0fa5c8', '0fadc8', 'c1e003'):
+            F, L = lines(hx)
+            self.assertEqual(list(F.uwhen), ['af'], hx)
+            self.assertTrue(all(' ? 0 : in_af;' in l for l in L if l.startswith('af = ')), hx)
+        F, L = lines('21d8')                      # and: AF undefined for every operand value
+        self.assertEqual(F.uwhen, {}); self.assertIn('af = 0;', L)
 
 
 class Agree(unittest.TestCase):
