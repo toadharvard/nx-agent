@@ -1161,3 +1161,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Certificate kind "jtab-guard" goes in FACTS; L3b certifies the kind and L1's gate reads it.
   - w13 also implements B and the precise escapes.
   - Sites without a guard and the 18 go to the orchestrator after the real-tool run.
+- 23:32 w13 jtab: claude/fnv-l3a-lift-w13-jtab @ 4b0961d2c accepted. R-B, plus R-A(i) precise escapes (8-byte SEH record per winnt.h; /GS xor; the prologue). 29 cases, 5 new positives.
+  - Next: the (ii) switch and the jtab-guard certificate emitter to L3b's 5 conditions.
+  - The real counts over 1005 sites wait on w7's memory fix.
