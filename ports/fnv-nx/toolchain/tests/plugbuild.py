@@ -53,10 +53,11 @@ def _w(repo, rel, text):
         f.write(text)
 
 
-def _plugin(name, args):
-    p = {'name': name, 'source': source_of(name), 'args': dict(args)}
-    if name in recipe.PLUGIN_INPUTS:
-        p['inputs'] = recipe.PLUGIN_INPUTS[name]
+def _plugin(name, args, fixed):
+    """a root entry names only the plugin (source, inputs and arguments are fixed by recipe.py); `args` is written only when it differs from the fixed ones, so that the recipe's own refusal can be tested"""
+    p = {'name': name}
+    if args != fixed.get(name):
+        p['args'] = dict(args)
     return p
 
 
@@ -106,7 +107,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     if not native:
         rec['generated'] = [{'tool': T + 'gen/lift.py', 'args': [], 'inputs': [], 'outputs': ['gen/' + k for k in fixtures]}]
     if plugins:
-        rec['plugins'] = [_plugin(n, a) for n, a in plugins]
+        rec['plugins'] = [_plugin(n, a, recipe.plugin_args('native' if native else {'lifted_by': T + 'gen/lift.py', 'pack': 'pack'})) for n, a in plugins]
     _w(repo, ROOT + '/build.json', json.dumps(rec))
     _w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
     _w(repo, T + 'verify/admit.json', json.dumps({'format': 'fnvnx-admit/1', 'roots': [
@@ -183,9 +184,9 @@ def cc_files(res):
 
 def argument_refused(r, plugin):
     """True iff R (a compile() result) is the recipe's own refusal of an extra argument of the plugin: the recipe fixes every plugin's arguments by the root's origin
-    (recipe.plugin_args) and refuses any other (`plugin fnvnx_<name>: arguments must be <fixed>, are <given>`). One helper for every plugin test; a test never
+    (recipe.plugin_args) and refuses any other (`plugin fnvnx_<name>: args is fixed by recipe.py (PLUGIN_ARGS)`). One helper for every plugin test; a test never
     carries its own expected text."""
-    return r.returncode != 0 and 'plugin fnvnx_%s: arguments must be ' % plugin in r.stderr
+    return r.returncode != 0 and 'plugin fnvnx_%s: args is fixed by recipe.py' % plugin in r.stderr
 
 
 def missing_plugin_refused(missing):
