@@ -269,10 +269,6 @@ static bool uninit_use(tree op)
    their order there is the one the order plugin makes GCC use. Every such site, readable or not, puts the
    function outside Π (`argorder`): a static rule, no site is skipped; the rows are only a measurement for the gate. */
 static std::vector<std::string> arg_sites;
-/* the sites of an in-charge constructor or destructor, by its name, without the function name: its clones (C1/C2, D0/D1/D2) are copies of its body made
-   after the order plugin has rewritten the call arguments, so a clone's own walk does not see the source's argument forms; the rows of an emitted clone are
-   these, written under the clone's name in finish_unit */
-static std::map<std::string, std::vector<std::string> > incharge_sites;
 /* per function, while it is walked: how many calls of each callee were met so far (source order), and the sites
    found, each with the number its call has among the calls of its callee */
 static std::map<std::string, int> call_count;
@@ -501,6 +497,16 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
   return NULL_TREE;
 }
 
+/* The argorder sites of an in-charge constructor or destructor, by its DECL_UID: its clones C1/C2 and D1/D2 are made by
+   clone_body (cp/optimize.cc maybe_clone_body, called from expand_or_defer_fn after the original passed cp_genericize),
+   so their bodies are copies of the GENERICIZED original: the right-to-left argument order is already written into
+   them (SAVE_EXPR and COMPOUND_EXPR around the arguments, cp-gimplify.cc), and the call count and the shape of an
+   argument differ from the source's. A clone with such a body gets the original's sites under its own name; walking
+   its copy would read what the order rewrite made and drop the row. The deleting destructor D0 is built by
+   build_delete_destructor_body, never copied: its body is its own and is walked. */
+struct cdtor_sites { std::vector<site_row> sites; std::map<std::string, int> counts; std::string name; };
+static std::map<unsigned, cdtor_sites> cdtor_origin;
+
 static void pre_genericize(void *gcc_data, void *)
 {
   tree fn = (tree)gcc_data;
@@ -508,17 +514,29 @@ static void pre_genericize(void *gcc_data, void *)
   summarize(fn);
   std::string name = asmname(fn);
   call_count.clear(); fn_sites.clear();
-  fnvnx_walk(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
+  if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_CLONED_FUNCTION_P(fn) && !DECL_DELETING_DESTRUCTOR_P(fn)) {
+    /* an alias of another clone (create_same_body_alias, optimize.cc) has no body and no symbol of its own to write */
+    symtab_node *sn = symtab_node::get(fn);
+    if (sn && sn->alias) return;
+    std::map<unsigned, cdtor_sites>::iterator o = cdtor_origin.find(DECL_UID(DECL_CLONED_FUNCTION(fn)));
+    if (o == cdtor_origin.end()) { error("N3: the clone %qD has no original read before it", fn); return; }
+    for (size_t i = 0; i < o->second.sites.size(); i++) {
+      site_row r = o->second.sites[i];
+      r.head = name + r.head.substr(o->second.name.size());
+      fn_sites.push_back(r);
+    }
+    call_count = o->second.counts;
+    if (arg_unreadable.count(o->second.name)) arg_unreadable.insert(name);
+  } else
+    fnvnx_walk(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
   /* the in-charge form of a constructor or destructor is never emitted: its clones (C1/C2, D0/D1/D2) are, and each
      clone with a body of its own comes here itself. The form is still walked: the verdict of its clones is looked
-     up by its name (source_name). */
+     up by its name (source_name), and its sites are what the copies take (cdtor_origin). */
   if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) {
-    std::vector<std::string> &v = incharge_sites[name];
-    for (size_t i = 0; i < fn_sites.size(); i++)
-      v.push_back(fn_sites[i].head.substr(name.size()) + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
+    cdtor_sites &c = cdtor_origin[DECL_UID(fn)];
+    c.sites = fn_sites; c.counts = call_count; c.name = name;
     return;
   }
-  if (DECL_CLONED_FUNCTION_P(fn)) return;   /* a clone: its rows come from its in-charge form */
   for (size_t i = 0; i < fn_sites.size(); i++)
     arg_sites.push_back(fn_sites[i].head + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
 }
@@ -658,7 +676,24 @@ struct early_pass : gimple_opt_pass {
   unsigned int execute(function *fun) override
   {
     std::map<std::string, facts>::iterator e = early.find(asmname(fun->decl));
-    if (e == early.end()) { error("N3: function %qD reached SSA but was never read after the CFG", fun->decl); return 0; }
+    if (e == early.end()) {
+      /* RULE: a body that reaches SSA without passing the post-CFG read point is a body the compiler built itself, already
+         in SSA form, and its record is made where it is created. Every creation point of GCC 13.3.0 (gcc/):
+           symtab-thunks.cc:463  expand_thunk -> init_lowered_empty_function(in_ssa=true): this-adjusting, covariant and
+                                 virtual-offset thunks (called from cgraph_node::analyze, cgraphunit.cc:651, before the
+                                 early local passes, so "cfg" never runs on them). Covered here: DECL_THUNK_P, row in late_pass.
+           symtab-thunks.cc      the same function when output_mi_thunk is usable (aarch64): an asm thunk, no body at all, so no
+                                 pass runs; ipa_start lists it in all_thunks and finish_unit writes its row.
+           cgraphunit.cc         cgraph_node::create_wrapper (ipa-icf): the wrapper keeps the record of the replaced function.
+           ipa-inline-transform / ipa-cp / ipa-sra / ipa-split / ipa-param-manipulation: clones, found by origin (by_origin).
+           omp-expand, omp-low, omp-oacc-kernels, omp-simd-clone, tree-parloops (outlined bodies) and vtable-verify build
+                                 bodies the front end never read: start_unit makes each of their options an error, so none arises.
+           ifunc resolvers are functions the source defines (attribute ifunc names one): read like any function.
+         Any other SSA body without a record stays an error: it is a creation point this rule does not know. */
+      if (is_cxx() && DECL_LANG_SPECIFIC(fun->decl) && DECL_THUNK_P(fun->decl)) return 0;
+      error("N3: function %qD reached SSA but was never read after the CFG", fun->decl);
+      return 0;
+    }
     if (!e->second.verdict.empty()) return 0;
     bool r_uninit = false;
     basic_block bb;
@@ -750,6 +785,9 @@ struct late_pass : gimple_opt_pass {
 static void start_unit(void *, void *)
 {
   symtab->add_cgraph_removal_hook(inline_clone_removed, NULL);
+  /* the options whose passes build function bodies this file never reads (see early_pass): not product options */
+  if (flag_openmp || flag_openmp_simd || flag_openacc || flag_vtable_verify || flag_tree_parallelize_loops > 1)
+    error("N3: -fopenmp, -fopenmp-simd, -fopenacc, -fvtable-verify and -ftree-parallelize-loops build function bodies the N3 record cannot cover");
 }
 
 static void ipa_start(void *, void *)
@@ -831,17 +869,6 @@ static void finish_unit(void *, void *)
       fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t\\tinline\\t%s\\n\"\n", e->first.c_str(), e->second.verdict.c_str(),
               join(e->second.types).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
-  {
-    std::set<std::string> cl;
-    cgraph_node *c;
-    FOR_EACH_FUNCTION(c)
-      if (c->definition && !c->alias && !c->thunk && DECL_CLONED_FUNCTION_P(c->decl)) {
-        std::map<std::string, std::vector<std::string> >::iterator o = incharge_sites.find(asmname(DECL_CLONED_FUNCTION(c->decl)));
-        if (o != incharge_sites.end())
-          for (size_t i = 0; i < o->second.size(); i++) cl.insert(std::string(asmname(c->decl)) + o->second[i]);
-      }
-    arg_sites.insert(arg_sites.end(), cl.begin(), cl.end());
-  }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.argorder,\"\",%%progbits\n");
   for (size_t i = 0; i < arg_sites.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", arg_sites[i].c_str());
   fprintf(asm_out_file, "\t.popsection\n");
