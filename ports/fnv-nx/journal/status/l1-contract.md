@@ -1403,3 +1403,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w23 D2 (fenced library calls) dd614961 accepted.
   - Scope rule: every bl whose definer (from the link record) is outside the product roots is a D2 item.
   - It is certified by fences + a record, or by the callee's own objects having no non-frame access. A bare bl memcpy is red.
+- New worker w25 (session_01KmtZKRwXAfNMivHq9RHMrd, claude/fnv-l1-contract-w25, base w12h d7bd67694 + pluginfix):
+  1. link.script/version_script from generated outputs (L6A libnxgl4.map), plus a linker-script lexer for the assumptions gate;
+  2. ELF facts in every link record: sections, symbols, the definer per reference (for L4 icount and w23 D2);
+  3. the profile and delta variants, after targets.json.
