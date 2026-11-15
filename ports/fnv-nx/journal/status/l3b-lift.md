@@ -286,3 +286,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 18:10Z v3 shards 47 (proved 336, gap 9) and 48 (proved 337, gap 8) done (farm 12), failed 0. Complete: 21/54.
 - 18:30Z v3 shard 2/54 done (farm 05): proved 337, gap 9, failed 0. Complete: 22/54. Farm 05 K=3 proving on the fixed script; K=4 started beside it (two-shard lock test).
 - 18:35Z v3 shard 21/54 done (farm 07): proved 339, gap 5, declared model-defect 1 (to defectspec), failed 0. Complete: 23/54.
+- 19:10Z v3 shard 3/54 done (farm 05): proved 335, gap 11, failed 0. Complete: 24/54. Lock fix verified: K=4 got past the lock and published while K=3 ran on the same machine (76cf2acca).
