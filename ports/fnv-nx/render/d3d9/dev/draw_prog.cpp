@@ -36,6 +36,15 @@ int nx_link_set(const uint8_t* vs_out, uint32_t nv, const uint8_t* ps_in, uint32
     for (uint32_t i = 1; i < m; i++) { uint8_t v = d[i]; uint32_t q = i; while (q > 0 && d[q - 1] > v) { d[q] = d[q - 1]; q--; } d[q] = v; }
     memcpy(l, d, m); *nl = m; return 0;
 }
+int nx_pair_variant(const uint8_t* vs_pairs, uint32_t nv, uint8_t ps_major, const uint8_t* ps_pairs, uint32_t np, uint32_t flat, uint32_t* vs_variant, uint32_t* ps_variant, uint8_t* l, uint32_t* nl) {
+    uint8_t vw[225], pr[225]; uint32_t nvw = 0, npr = 0;
+    for (uint32_t i = 0; i < nv; i++) if (vs_pairs[i] != FNVNX_DK_PAIR(FNVNX_USAGE_POSITION, 0) && vs_pairs[i] != FNVNX_DK_PAIR(FNVNX_USAGE_PSIZE, 0)) vw[nvw++] = vs_pairs[i];
+    bool fog = false; for (uint32_t i = 0; i < nvw; i++) fog |= vw[i] == FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); if (!fog) vw[nvw++] = FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0);
+    memcpy(pr, ps_pairs, np); npr = np;
+    if (ps_major < 3) { fog = false; for (uint32_t i = 0; i < npr; i++) fog |= pr[i] == FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); if (!fog) pr[npr++] = FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); }
+    *vs_variant = (uint32_t)fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr) | flat << 1; *ps_variant = flat << 1;
+    return nx_link_set(vs_pairs, nv, ps_pairs, np, l, nl);
+}
 static uint32_t shader_prog(NxShaderCore* s, uint32_t stage, uint32_t variant, const uint8_t* l, uint32_t nl, HRESULT* hr) {
     for (uint32_t i = 0; i < s->nprogs; i++) { const NxShaderProg& p = s->progs[i]; if (p.variant == variant && p.n_l == nl && !memcmp(p.l, l, nl)) return p.id; }
     if (s->nprogs == s->cprogs) {   // room for the entry first: a shader made by the backend is never left without its record
@@ -59,30 +68,28 @@ static NxShaderCore* shader_of(IUnknown* o) { return static_cast<NxShaderCore*>(
 HRESULT nx_prog_resolve(NxDeviceCore* d, NxProg* p) {
     const NxDeviceState& s = d->cur; memset((void*)p, 0, sizeof *p);
     NxShaderCore* vsc = s.vs[0] ? shader_of(s.vs[0]) : nullptr; NxShaderCore* psc = s.ps[0] ? shader_of(s.ps[0]) : nullptr;
-    uint8_t vout[224], pin[224], l[FNVNX_DK_VARYING_SLOTS], vw[225], pr[225]; uint32_t nvo = 0, npi = 0, nvw = 0, npr = 0, nl = 0;
+    uint8_t vout[224], pin[224], l[FNVNX_DK_VARYING_SLOTS]; uint32_t nvo = 0, npi = 0, nl = 0;
     if (vsc) {
         p->vi = &vsc->iface; if (!nx_vs_sig(vsc->iface, &p->sig)) return D3DERR_DRIVERINTERNALERROR;
         nvo = nx_sm_pairs(&vsc->iface, vout);
-        for (uint32_t i = 0; i < nvo; i++) if (vout[i] != FNVNX_DK_PAIR(FNVNX_USAGE_POSITION, 0) && vout[i] != FNVNX_DK_PAIR(FNVNX_USAGE_PSIZE, 0)) vw[nvw++] = vout[i];
-        bool fog = false; for (uint32_t i = 0; i < nvw; i++) fog |= vw[i] == FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); if (!fog) vw[nvw++] = FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0);
     } else {
         p->vs = nx_ffp_vs_program(d, &p->fv); if (!p->vs) return D3DERR_DRIVERINTERNALERROR;
         p->sig.n = p->fv.n_in > 16 ? 16 : p->fv.n_in; memcpy(p->sig.pair, p->fv.in_pair, p->sig.n); memcpy(p->sig.loc, p->fv.in_loc, p->sig.n);
     }
     if (psc) {
         p->pi = &psc->iface; p->ps_version = psc->iface.major << 8 | psc->iface.minor;
-        npi = nx_sm_pairs(&psc->iface, pin); memcpy(pr, pin, npi); npr = npi;
-        if (psc->iface.major < 3) { bool fog = false; for (uint32_t i = 0; i < npr; i++) fog |= pr[i] == FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); if (!fog) pr[npr++] = FNVNX_DK_PAIR(FNVNX_USAGE_FOG, 0); }
+        npi = nx_sm_pairs(&psc->iface, pin);
     } else {
         p->ps = nx_ffp_ps_program(d, &p->fp); if (!p->ps) return D3DERR_DRIVERINTERNALERROR;
-        npi = npr = p->fp.n_in > 31 ? 31 : p->fp.n_in; memcpy(pin, p->fp.in_pair, npi); memcpy(pr, p->fp.in_pair, npr);
+        npi = p->fp.n_in > 31 ? 31 : p->fp.n_in; memcpy(pin, p->fp.in_pair, npi);
     }
-    if (nx_link_set(vout, nvo, pin, npi, l, &nl)) return D3DERR_DRIVERINTERNALERROR;
     HRESULT hr = D3D_OK;
     // D3DRS_SHADEMODE FLAT (Wine 9.0 state_shademode): both translated stages take the same variant bit 1 (the COLOR varyings are `flat`), from the one latch rule of the FFP
     // programs (nx_ffp_flat), so the two stages of a pair, and a translated stage against an FFP one, always agree on the qualifier.
     uint32_t flat = 0; if ((vsc || psc) && !nx_ffp_flat(d, &flat)) return D3DERR_OUTOFVIDEOMEMORY;
-    if (vsc) { p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr) | flat << 1, l, nl, &hr); if (!p->vs) return hr; }
-    if (psc) { p->ps = shader_prog(psc, 1, flat << 1, l, nl, &hr); if (!p->ps) return hr; }
+    uint32_t vvar, pvar;   // the pair's selection, one pure function (nx_pair_variant): the link set, the VS variant and the PS variant
+    if (nx_pair_variant(vout, nvo, psc ? psc->iface.major : 3, pin, npi, flat, &vvar, &pvar, l, &nl)) return D3DERR_DRIVERINTERNALERROR;
+    if (vsc) { p->vs = shader_prog(vsc, 0, vvar, l, nl, &hr); if (!p->vs) return hr; }
+    if (psc) { p->ps = shader_prog(psc, 1, pvar, l, nl, &hr); if (!p->ps) return hr; }
     return D3D_OK;
 }
