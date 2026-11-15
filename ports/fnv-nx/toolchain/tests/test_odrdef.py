@@ -52,7 +52,10 @@ def main():
         S = 'struct S {};\n'
         ta = build_unit(td, so, 'ta', S + 'int g(S);\n' + TMPL + 'int u(S s) { return t(s); }\nint (*tp)(S) = t<S>;\n', O2)
         tb = build_unit(td, so, 'tb', S + 'int g(const S &);\n' + TMPL + 'int u(S s) { return t(s); }\nint (*tp)(S) = t<S>;\n', O2)
-        if not all((a, b, c, d, ta, tb)):
+        PK = ('template <class... A> int pk(A... a) { return sizeof...(A); }\ntemplate <int... N> int pn() { return sizeof...(N); }\n'
+              'int (*p1)(int, double) = pk<int, double>;\nint (*p2)() = pn<1, 2, 3>;\nint (*p4)() = pn<>;\n')
+        pk = build_unit(td, so, 'pk', PK, O2)   # an argument pack is a template argument that no mangling accepts: it is the I...E of its elements
+        if not all((a, b, c, d, ta, tb, pk)):
             return check.done()
         ra, rb, rc, rd, rta, rtb = map(rows, (a, b, c, d, ta, tb))
         F = '_Z1fi'
@@ -65,6 +68,9 @@ def main():
         check('an instantiation: the template argument is mangled', rta[T][2] == '1S', rta[T])
         check('an instantiation: the template definition\'s hash is equal in both units', rta[T][1] == rtb[T][1], (rta[T], rtb[T]))
         check('a dependent call resolved to a different declaration at instantiation: different rows', rta[T][3] != rtb[T][3], (rta[T], rtb[T]))
+        rpk = rows(pk)
+        targs = sorted(r[2] for r in rpk.values())
+        check('argument packs: pk<int, double> is IidE, pn<1, 2, 3> is ILi1ELi2ELi3EE, pn<> is IE', targs == ['ILi1ELi2ELi3EE', 'IE', 'IidE'], targs)
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
