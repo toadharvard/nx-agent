@@ -1180,3 +1180,13 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - b3c is slow in GCC's own passes (FRE, RTL dataflow at 6 GB). It is measured on the idle farm with -ftime-report.
   - w12 back on the 6 FTOI units at base3 a964e90b3.
 - 23:45 L3b moves rcpcert.c and rcpgen.c into host recipe roots, deleting the direct gcc calls; w8 merges it.
+
+## 2026-11-15 00:00
+- base3 b39f131e4 (w8): accepted. It holds the hostc af133dc17 merge, and lift/rt/rcptab.c is restored to its certified bytes d2a3920e. L3b was asked not to edit it without a re-cert, and to run the rcpgen output byte-equality check, which has not run yet.
+- RED: `recipe.py check lift/liftsrc` gives 3,060 gen:foreign-import lines (L1 cand3 8fc4c58b9). The cause is that liftgen.py's import closure includes lift/fnvlift, lift/proof and verify/recipe.
+  - Rule: the shard tool imports no verify/* code; the build.json writer is a separate tool. The lifter's packages become declared inputs of every liftsrc stage.
+  - Declaration form: asked of the L1 lead.
+  - Owner: w8 (doing), blocked on L1's answer about the form.
+  - Check: every root is valid, and one shard is byte-identical to 80832d8b5's.
+- Open: w7 (memo fix and pcsrc), w13 (jtab), w12 (FTOI and the b3c farm brief), L1 w15 (cand3 head to w8).
+- bottleneck: the liftsrc root is red on gen:foreign-import (L3a w8 + L1), then the relift at the w7 memo fix.
