@@ -626,6 +626,7 @@ map|Table A-6 Group 1|82 A0 00	int	defined-by-opcode-map	-	none	-	Table A-6 Grou
 map|Table A-6 Group 1|82 A4 01	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /4 = AND	n=1	1
 map|Table A-6 Group 1|82 E2 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /4 = AND	n=1	1
 map|Table A-6 Group 1|82 FA 00	int	defined-by-opcode-map	-	none	-	Table A-6 Group 1	-	SDM Vol. 2 Appendix A, Table A-6 (PDF page index 3005): 82 /7 = CMP	n=1	1
+undefined|-|0F 0E	simd	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	258
 undefined|-|C0 32 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	1
 undefined|-|C0 72 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	6
 undefined|-|C0 73 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	4
@@ -664,5 +665,4 @@ undefined|-|F6 48 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables 
 undefined|-|F6 49 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	2
 undefined|-|F6 4C 4E	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	2
 undefined|-|F6 CE 00	int	undefined	-	none	-	-	-	no row in the SDM opcode tables for this opcode form (undefined opcode: #UD, SDM Vol. 2 ch. 3 "Interrupt 6 - Invalid Opcode")	n=1	1
-vendor|-|0F 0E	simd	defined-by-vendor-map	3DNow!	absent	-	-	-	APM Vol. 3 Appendix A two-byte opcode map (PDF page index 374): 0F 0E cell = "FEMMS" (feature from Table D-1)	n=1	258
-vendor|-|0F 0F	simd	defined-by-vendor-map	3DNow!	absent	-	-	-	APM Vol. 3 Appendix A two-byte opcode map (PDF page index 374): 0F 0F cell = "3DNow!"	n=329	4890
+vendor|-|0F 0F	simd	defined-by-vendor-map	3DNow	absent	-	-	-	APM Vol. 3 Appendix A two-byte opcode map (PDF page index 569): 0F 0F cell = "3DNow!" (feature from Table D-1)	n=329	4890

@@ -304,7 +304,7 @@
   "test_vendormap.py": {
    "references": [
     {
-     "anchor": "L1-L402",
+     "anchor": "L1-L379",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/proof/tests/vendor_cells.tsv"
     }

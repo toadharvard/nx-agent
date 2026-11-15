@@ -23,10 +23,10 @@
    "owner": "L3b",
    "repo": "fnv-nx-build",
    "ref": "tools/amd-apm",
-   "commit": "aa490c484c899d0097689845af971a2ff6712394",
+   "commit": "cdd079761116ab55c71ddeb26775e10954d5f2ea",
    "file": "amd64-apm-vol3.pdf",
-   "sha256": "cc08e3b58bb6d5026aa8737d41ddf35ef687adfaea5aeb1eed77e2e68f56c6e3",
-   "edition": "AMD64 Architecture Programmer's Manual Vol. 3, publication 24594 rev 3.14, September 2007"
+   "sha256": "b598514b19f204d973040d9867a7ffc48c949009a8b3dc86b20c9188e721ee45",
+   "edition": "AMD64 Architecture Programmer's Manual Vol. 3, publication 24594 rev 3.39, October 2026"
   }
  ]
 }

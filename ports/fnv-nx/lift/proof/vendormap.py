@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """vendormap: the vendor (AMD) opcode map cells that name a CPUID feature, and the feature -> CPUID bit table, both read from the pinned AMD64 APM Vol. 3 (fnv-nx-build tools/amd-apm, pins.json "external").
-    features(pdf, txt)          -> [(mnemonic, leaf, reg, bit, citation)]   APM Vol. 3 Table 3-1 "Instruction Support Indicated by CPUID Feature Bits" (cells of the PDF table)
+    cpuid_rows(txt)             -> [(name, leaf, sub, reg, bit, citation)]  every one-bit field of the CPUID function tables of APM Vol. 3 Appendix E (the one source of the feature -> bit rows)
+    table31(txt)                -> {flag: {(reg, bit)}}                      APM Vol. 3 Table 3-1 "Instruction Support Indicated by CPUID Feature Bits": which features gate instructions
     subsets(pdf, txt, feats)    -> {mnemonic: (feature, cite)}       Appendix D Table D-1
     mapcells(pdf, txt, names)   -> {(opcode, prefix): (feature, citation)}  cells of the two-byte opcode maps (Tables A-3, A-4) whose first line is a feature mnemonic of Table 3-1
-    table(sdm_lines, apm)       -> {name: [(leaf, sub, reg, bit)]}          sdmfeat.flag_table  U  the APM features (one table that the partition reads)
-The rule that a cell belongs to a feature is only: its first line, trademark signs removed, equals a feature mnemonic of Table 3-1. No feature name is written here."""
+    table(flags, rows)          -> {name: [(leaf, sub, reg, bit)]}          sdmfeat.flag_table  U  the APM Appendix E rows (one table that the partition reads)
+The rule that a cell belongs to a feature is only: its first line, trademark signs removed, equals a feature mnemonic of Table 3-1 that Appendix E defines (gating). No feature name is written here."""
 import re
 import sys
 
@@ -12,7 +13,7 @@ LEAF = re.compile(r'([0-9A-F]{4})_([0-9A-F]{4})h')
 
 
 def norm(s):
-    return ' '.join((s or '').replace('™', '').replace('®', '').split())
+    return ' '.join((s or '').replace('™', '').replace('®', '').replace('“', '').replace('”', '').split())
 
 
 def page_of(txt_path, pat, also=None):
@@ -20,47 +21,68 @@ def page_of(txt_path, pat, also=None):
     return [i for i, p in enumerate(pages) if re.search(pat, p) and (also is None or also in p)]
 
 
-def features(pdf, txt):
-    """-> [(mnemonic, leaf, reg, bit, citation)]; a row's blank cells continue the row above (Table 3-1 prints several features under one instruction)"""
-    out = []; leaf = None
-    for pi in page_of(txt, r'Table 3-1\.\s+Instruction Support Indicated by CPUID Feature Bits', 'CMPXCHG8B'):
-        for t in pdf.pages[pi].find_tables():
-            rows = t.extract()
-            if [norm(c) for c in rows[0]] != ['Instruction', 'Register[Bit]', 'Feature Mnemonic', 'CPUID Function(s)']:
+CPUID_HEAD = re.compile(r'^CPUID Fn([0-9A-F]{4})_([0-9A-F]{4})_(E[ABCD]X)(_x[0-9A-F]+)?(?=\s|$)')
+CPUID_BITS = re.compile(r'^ {0,6}(\d{1,2})(:\d{1,2})?\s{2,}(\w[\w\.\-]*)')
+
+
+def cpuid_rows(txt):
+    """-> [(name, leaf, sub, reg, bit, citation)]: every one-bit named field of the CPUID function tables of APM Vol. 3 Appendix E ("Obtaining Processor Information Via the CPUID Instruction"; a section `CPUID FnXXXX_XXXX_REG[_xS] title`,
+    its table rows `bit  FieldName  description`).  One rule over the whole appendix: a row is a feature bit iff its bit column is a single bit, its name is not the reserved dash, and its function has a fixed leaf and sub-leaf (`_xN` of a literal N; `_x[N:0]` is not an address).
+    The first text line of the appendix after the table of contents is its heading; it ends at the next Appendix heading.  The citation names the PDF page index and the section."""
+    pages = open(txt, encoding='utf-8', errors='replace').read().split('\x0c')
+    start = [i for i, p in enumerate(pages) if re.search(r'^Appendix E Obtaining Processor Information Via\s*$', p, re.M)]
+    assert len(start) == 1, 'Appendix E heading must occur once outside the table of contents'
+    end = next((i for i in range(start[0] + 1, len(pages)) if re.search(r'^Appendix [F-Z] ', pages[i], re.M)), len(pages))
+    out = []; cur = None
+    for pi in range(start[0], end):
+        for ln in pages[pi].split('\n'):
+            if ln.startswith('CPUID Fn'):
+                m = CPUID_HEAD.match(ln)
+                cur = None if not m or (m.group(4) is None and ln[m.end():m.end() + 1] == '[') else (int(m.group(1) + m.group(2), 16), int(m.group(4)[2:], 16) if m.group(4) else 0, m.group(3), ln.strip())
                 continue
-            for r in rows[1:]:
-                if norm(r[3]):
-                    leaf = [int(a + b, 16) for a, b in LEAF.findall(norm(r[3]))]
-                m = re.fullmatch(r'(EAX|EBX|ECX|EDX)\[(\d+)\]', norm(r[1]))
-                if not m or not norm(r[2]):
-                    continue
-                name = norm(r[2])
-                for lf in leaf:
-                    out.append((name, lf, m.group(1), int(m.group(2)), 'APM Vol. 3 Table 3-1 (PDF page index %d): %s %s[%s] CPUID %08Xh' % (pi, name, m.group(1), m.group(2), lf)))
+            m = CPUID_BITS.match(ln)
+            if m and cur and not m.group(2) and m.group(3) != '\u2014':
+                out.append((m.group(3), cur[0], cur[1], cur[2], int(m.group(1)),
+                            'APM Vol. 3 Appendix E (PDF page index %d), "%s": bit %s %s' % (pi, cur[3], m.group(1), m.group(3))))
+    return out
+
+
+def table31(txt):
+    """-> {feature flag mnemonic: {(reg, bit)}}: the `Feature Flag` column of APM Vol. 3 Table 3-1 "Instruction Support Indicated by CPUID Feature Bits" (rows `... REG[bit]  FLAG`, the tail of a row's line; the first-column instruction mnemonics are the Table 3-1 rows' left cells).
+    Table 3-1 names which features gate instructions; the bit of each is defined by Appendix E (cpuid_rows)."""
+    pages = open(txt, encoding='utf-8', errors='replace').read().split('\x0c')
+    out = {}
+    for p in pages:
+        if not re.search(r'Table 3-1\.\s+Instruction Support Indicated by CPUID Feature Bits', p) or 'Feature Flag' not in p:
+            continue
+        for ln in p.split('\n'):
+            m = re.search(r'(EAX|EBX|ECX|EDX)\[(\d+)\]\s+(\S+)\s*$', ln)
+            if m:
+                out.setdefault(m.group(3), set()).add((m.group(1), int(m.group(2))))
     return out
 
 
 def subsets(pdf, txt, feats):
-    """APM Appendix D Table D-1 "Instruction Subsets and CPUID Feature Sets": {instruction mnemonic: (feature mnemonic, citation)} for every instruction whose subset cells (columns General-Purpose .. System) name exactly one
-    feature mnemonic of Table 3-1 (a cell may list several sets: `X87, CMOVcc`; names that are not a Table 3-1 mnemonic, such as X87, are subsets and name no feature)"""
-    out = {}
-    for pi in page_of(txt, r'Table D-1\.\s+Instruction Subsets and CPUID Feature Sets'):
+    """APM Appendix D Table D-1 "Feature Flags for Instruction / Instruction Subset Support": {instruction mnemonic: (feature, citation)} for every mnemonic that the `Instruction or Subset` cells of the rows of exactly one Table 3-1 feature list (the Feature Flag column is the row's feature;
+    a cell lists instructions and subsets separated by `,` `/` or lines; a piece that is one token without spaces is a mnemonic, e.g. `LZCNT`, `3DNow!`; a mnemonic listed under two features names none)"""
+    found = {}
+    for pi in page_of(txt, r'Table D-1\.\s+Feature Flags for Instruction / Instruction Subset Support'):
         for t in pdf.pages[pi].find_tables():
             for r in t.extract():
-                if len(r) < 8 or not norm(r[0]) or norm(r[0]) == 'Mnemonic':
+                if len(r) < 4 or norm(r[0]) not in feats:
                     continue
-                toks = {norm(x) for c in r[3:8] for x in re.split(r'[,\n]', c or '') if norm(x)}
-                hit = sorted(toks & feats)
-                if len(hit) == 1:
-                    out[norm(r[0])] = (hit[0], 'APM Vol. 3 Appendix D Table D-1 (PDF page index %d): %s is in the %s set' % (pi, norm(r[0]), hit[0]))
-    return out
+                for piece in re.split(r'[,/\n]', r[1] or ''):
+                    p = norm(piece)
+                    if re.fullmatch(r'[A-Za-z0-9][\w\.!]*', p):
+                        found.setdefault(p, {})[norm(r[0])] = pi
+    return {m: (next(iter(d)), 'APM Vol. 3 Appendix D Table D-1 (PDF page index %d): %s is listed under feature flag %s' % (next(iter(d.values())), m, next(iter(d)))) for m, d in found.items() if len(d) == 1}
 
 
 def mapcells(pdf, txt, names):
     """-> {(opcode byte after 0F, prefix): (feature mnemonic, citation)} for the two-byte maps of Appendix A (Tables A-3, A-4: columns are the low nibble, rows the high nibble, a prefix column beside).
     names: {cell first line: feature mnemonic}; a cell that is itself a feature mnemonic (`3DNow!`) or an instruction mnemonic whose Table D-1 row names one feature (`FEMMS`)"""
     out = {}
-    for pi in page_of(txt, r'Table A-[34]\.\s+Second Byte of Two-Byte Opcodes, Low Nibble'):
+    for pi in page_of(txt, r'Table A-[34]\.\s+Secondary Opcode Map \(Two-byte Opcodes\), Low Nibble'):
         for t in pdf.pages[pi].find_tables():
             rows = t.extract()
             hdr = [norm(c) for c in rows[0]]
@@ -80,21 +102,29 @@ def mapcells(pdf, txt, names):
     return out
 
 
-def table(flags, apm_features):
+def table(flags, apm_rows):
     out = {k: list(v) for k, v in flags.items()}
-    for name, leaf, reg, bit, _ in apm_features:
-        out.setdefault(name, []).append((leaf, 0, reg, bit))
+    for name, leaf, sub, reg, bit, _ in apm_rows:
+        out.setdefault(name, []).append((leaf, sub, reg, bit))
     return out
 
 
-def dump(feats):
-    return ''.join('%s\t%08X\t%s\t%d\t%s\n' % f for f in sorted(feats))
+def gating(txt, rows):
+    """the feature names of the vendor layer: the Table 3-1 flags that Appendix E defines as a bit under the same name (a flag that Table 3-1 prints under another spelling is not a name here; its bit is in the table by its Appendix E name)"""
+    t31 = table31(txt); known = {r[0] for r in rows}
+    return {n for n in t31 if n in known}
+
+
+def dump(rows):
+    return ''.join('%s\t%08X\t%d\t%s\t%d\t%s\n' % f for f in sorted(rows))
 
 
 if __name__ == '__main__':
     import pdfplumber
-    pdf = pdfplumber.open(sys.argv[1]); f = features(pdf, sys.argv[2])
-    sys.stdout.write(dump(f))
-    feats = {x[0] for x in f}; sub = subsets(pdf, sys.argv[2], feats)
+    pdf = pdfplumber.open(sys.argv[1]); rows = cpuid_rows(sys.argv[2])
+    sys.stdout.write(dump(rows))
+    feats = gating(sys.argv[2], rows); sub = subsets(pdf, sys.argv[2], feats)
     for k, v in sorted(mapcells(pdf, sys.argv[2], dict({x: x for x in feats}, **{m: v[0] for m, v in sub.items()})).items()):
         sys.stdout.write('cell\t0F%02X\t%s\t%s\n' % (k[0], k[1], v[0]))
+    for m, v in sorted(sub.items()):
+        sys.stdout.write('subset\t%s\t%s\n' % (m, v[0]))
