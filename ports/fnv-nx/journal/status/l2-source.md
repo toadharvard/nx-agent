@@ -548,3 +548,7 @@ After the first frame:
   - (2) K1 adds the env.json entries and the dpkg versions of the copied binutils.
   - (3) stage2.sh reads the patch paths and hashes from stamp.py; the duplicate sha constants and special cases are deleted.
   - (5) Stage 1 is stored in fnv-nx-build under a K1 ref, and K2 takes the stage-1 tree_sha256.
+- 2026-11-15 21:00Z: w3 pushed DECLTYPE-REF 47e7bc66a to the frozen plugins branch by mistake. Force-push was denied, so the revert ea9d0f0c8 restores it (toolchain tree 1b2b42da = pin; stamp equal). The cand3 merge must revert that revert.
+  - Full-runtime decltype check on pin 56a4d09c: 4640 members, 48756 symbols. 314 members have no section (assembly, to be checked by the language field). 4300 are equal and 26 unequal: (a) a std::terminate reference from EH cleanup with no line; (b) lines for local anonymous-namespace dtors.
+  - DECLTYPE-REF (on plugins-cand3) scans the identifier table for referenced names, and locals are never a line. A non-`_Z` name with no builtin_info entry becomes an error, not "builtin".
+  - The cand3 batch is DECLTYPE-REF, PINKEY and S29, in one rebuild after cand2 merges.
