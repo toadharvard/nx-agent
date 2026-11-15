@@ -1239,3 +1239,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - Next for w23: send the 500 split to L2. Then REQUIRED_TEST: stub renamed objstub, doubles from w20 item 5, legal out of the per-root list (whole-tree gate). Then legal rule L1: no tracked file's sha256 in the private artifact manifest (hashes only).
 - Reported to the orchestrator for after the first frame: the legal classes "embedded content" and "VA→name pairing" have no gate.
 - L2: the address-taken class is option (b). A per-variable `escapes` fact from GCC's points-to solution goes into the frame row, conservative when no PTA ran. Escaping variables are ordered; non-escaping ones are certified by rule D. L2 w1 implements it. For the 500 nonframe accesses L2 hypothesises a placement rule; L1 noted that RTL-created accesses (cpymem/setmem, combine pairs) must be covered too.
+- Orchestrator rulings:
+  - gate_order: an access stays plain only if it is proven thread-private. The 1868 address-taken accesses are plain where GCC's points-to solution says the variable does not escape (OWNER 1); unknown or escaping means ordered. The 500 nonframe accesses are ordered by the plugin now. Target: 0 uncertified (L2).
+  - Legal: rule L1 accepted; embedded substrings and VA→name pairings are in ALL.md as open (owner L1, after the first frame).
+- w23 1eada16a: the "no definition record" relabel in gate_abi. linkstrict gets the same label (one class, one name).
