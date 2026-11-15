@@ -54,7 +54,7 @@ def _ld_binary64():
         rows = json.load(f)
     rows = rows if isinstance(rows, list) else rows['rows']
     row = next(r for r in rows if r['id'] == 'S09')
-    return 'binary64' in row['msvc']
+    return 'binary64' in row['property']
 
 
 LD_BINARY64 = _ld_binary64()
