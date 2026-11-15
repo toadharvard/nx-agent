@@ -3,7 +3,7 @@
 (docs/ORDERING.md "Lifted code", rule LOCK-SPLIT).
     python3 -I locksites.py --sites SETFILE OUT       the `sites` facts of gate_order (docs/ORDERING.md): SETFILE lines IMAGE<TAB>RANGES<TAB>BASE, one per image; OUT lines `1 HEXADDR` (locked
                                                     instruction), `2 HEXADDR mem|ax` (FSTSW FNSTENV FNSAVE); the decoder predicate is fnvlift/sites.py, the lifter's own
-    python3 -I locksites.py IMAGE RANGES [BASE]      RANGES: ranges.tsv of tools/universe.py (entry, half-open instruction ranges);
+    python3 -I locksites.py IMAGE RANGES BASE      RANGES: ranges.tsv of tools/universe.py (entry, half-open instruction ranges);
                                                     BASE (hex): the base the ranges are stated at, when not the image's preferred one
                                                     (a page multiple apart, so the alignment of a constant address is the same)
 A locked instruction: a valid LOCK prefix (fnvlift/f_sys.py lock_ok) or XCHG with a memory operand. Classes:
@@ -21,12 +21,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
-def scan(exe, ranges, base=None):
+def scan(exe, ranges, base):
     """-> [(address, site)] of every instruction of the ranges, in address order; site is fnvlift.sites.site(ins): (1,) a locked instruction, (2, 'mem'|'ax') a status-word instruction. The address is
     stated at BASE (the ranges' base). One decoder predicate for the lifter and for these facts: fnvlift/sites.py."""
     import x86flow
     from fnvlift import sites
-    img = x86flow.Image(exe, int(base, 16) if base else None)      # the image at the assigned base, through the one loader
+    img = x86flow.Image(exe, int(base, 16))      # the image at the assigned base, through the one loader
     d = 0
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
     spans = set()
@@ -48,7 +48,7 @@ def lines(found):
     return ['%d %08x%s' % (k[0], a, ' ' + k[1] if k[0] == 2 else '') for a, (ins, k) in found]
 
 
-def main(exe, ranges, base=None):
+def main(exe, ranges, base):
     from fnvlift import f_sys
     n = {}
     for a, (ins, k) in scan(exe, ranges, base):
@@ -69,7 +69,7 @@ def facts(setfile, out):
     rows = []
     for l in open(setfile):
         if l.strip() and l[0] != '#':
-            c = l.rstrip('\n').split('\t'); rows += lines(scan(c[0], c[1], c[2] if len(c) > 2 and c[2] else None))
+            c = l.rstrip('\n').split('\t'); rows += lines(scan(c[0], c[1], c[2]))
     open(out, 'w').write('\n'.join(rows) + '\n')
     print('sites: kind 1 %d, kind 2 %d (mem %d, ax %d), lines %d' % (sum(r[0] == '1' for r in rows), sum(r[0] == '2' for r in rows), sum(r.endswith(' mem') for r in rows), sum(r.endswith(' ax') for r in rows), len(rows)))
 
@@ -77,9 +77,9 @@ def facts(setfile, out):
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import cli
-    U = 'usage: locksites.py EXE RANGES [BASE]   lock-prefix census of the image\n       locksites.py --sites SETFILE OUT   the .fnvl.lk/.fnvl.fsw site facts (SETFILE lines: IMAGE<TAB>RANGES<TAB>BASE)'
+    U = 'usage: locksites.py EXE RANGES BASE   lock-prefix census of the image\n       locksites.py --sites SETFILE OUT   the .fnvl.lk/.fnvl.fsw site facts (SETFILE lines: IMAGE<TAB>RANGES<TAB>BASE)'
     pos, o = cli.parse(U, sys.argv[1:], (2, 3), {'--sites': False})
     if o and len(pos) != 2: cli.parse(U, [], (2, 2))
     if o: facts(*pos)
-    elif len(pos) < 2 or len(pos) > 3: cli.parse(U, [], (2, 3))
+    elif len(pos) != 3: cli.parse(U, [], (3, 3))
     else: main(*pos)

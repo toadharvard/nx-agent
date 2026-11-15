@@ -38,8 +38,8 @@ IATADDR = {}                   # IAT slot address -> import name
 
 
 class Image(_FImage):
-    """The one image loader is fnvlift.image.Image(path, base): the image as the Windows loader maps it at the module table's assigned base (None = the exe, whose assigned base is its preferred one)."""
-    def __init__(s, path, base=None):
+    """The one image loader is fnvlift.image.Image(path, base): the image as the Windows loader maps it at the module table's assigned base (every image has a base from its module-table row; there is no default)."""
+    def __init__(s, path, base):
         super().__init__(path, base)
         s.pe = struct.unpack_from('<I', s.d, 0x3c)[0]
 
@@ -99,7 +99,7 @@ def memslot(i, o, sz):
     return ('s', m.disp, sz) if b == 'esp' else ('b', m.disp, sz) if b == 'ebp' else ('g', m.disp & M32) if b is None else None
 
 
-def load_universe(exe, base=None):
+def load_universe(exe, base):
     global IMG
     IMG = Image(exe, base)
     raw = open(UNI, 'rb').read()
