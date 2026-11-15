@@ -782,3 +782,7 @@ Paused: w3b, w4, farm; no other work.
     - Blocked (owner L1/L2): d3d9 (1/70 objects, ffp_vs_state.c:127), translator guest and sha256 guest, all on the fnvnx_layout plugin error `vector_type outside the grammar`. Grammar row requested from L1.
     - render/pair is a C unit because of the rule gap "native C++ host roots must load the aarch64 plugins". Reported to L1.
     - gate_admit 0/1284 (tests/bootrt, contract overlaps): L1.
+- 09:58Z w5 smlink: 3 modes (stage, link, summary); reads packages with the translator's fnvnx_sdp_parse (its own parser deleted).
+    - Package 019: 815 shaders, 52,160 stage and 102,616 link certificates, 0 red; the certificate set equals the expected one.
+    - Roots sm_link_stage, sm_link_prog and sm_link_sum (8 shards each) admitted; cold run in progress.
+    - Doing: one source for the declared pairs (nx_sm_pairs to render/pair, or translator reflection; no copy); the ALL_FLAGS/KEY X-macro (taken over from w1b).
