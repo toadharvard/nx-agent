@@ -113,7 +113,7 @@ DECLTYPE = {
     'a': '[4]int', 'au': '[]int', 'f': '(int,*char)int', 'g': '(int,...)int', 'h': '(?)int', 'q': 'const:*int', 'pc': '*const:int',
     'l': 'struct:Lst{next:*struct:Lst}', 'ts': 'struct:-{m:int;n:*const:int}', 'vv': 'volatile:long_long_unsigned_int',
     'fp': '*(*()int,*const:char)int', 'u': 'union:U{i:int;f:float}', 'cs': 'const:struct:S{x:int;y:*char}',
-    'caller': '()int', 'use': '()int', 'implicit_fn': '(?)int',
+    'caller': '()int', 'use': '()int', 'implicit_fn': '(?)int', 'use2': '()int',
 }
 
 
@@ -131,7 +131,7 @@ def decltype(obj):
     check('enum E: `enum:E=` + int or unsigned_int (the compiler\'s choice of the integer type)', e in ('enum:E=int', 'enum:E=unsigned_int'), e)
     for sym, want in sorted(DECLTYPE.items()):
         check('decltype %s is %s' % (sym, want), got.get(sym) == want, got.get(sym))
-    check('exactly the external symbols (no static, no builtin), each once', set(got) == set(DECLTYPE), sorted(set(got) ^ set(DECLTYPE)))
+    check('exactly the symbols the object has (no static, no builtin, no declaration that only a header or the unit makes: never_used), each once', set(got) == set(DECLTYPE), sorted(set(got) ^ set(DECLTYPE)))
     check('every spelling round-trips: parse is total on what the plugin wrote', all(cc.parse(t) for t in got.values()))
 
 

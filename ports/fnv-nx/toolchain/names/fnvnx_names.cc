@@ -1336,16 +1336,26 @@ static void odr_emit()
   fprintf(asm_out_file, "\t.popsection\n");
 }
 
+/* THE emitted symbol set of a unit (RULE SYMSET): an external function or object has a symbol in the object exactly when the unit defines it (its body or
+ * data was written, or it is an alias) or its assembler name was referenced by what was written (TREE_SYMBOL_REFERENCED). The sections that are indexed by
+ * symbol (.fnvnx.sympair, .fnvnx.crossing, .fnvnx.decltype) take their rows from this one predicate, never from "a declaration the front end saw". */
+static bool sym_emitted(symtab_node *n, bool &def)
+{
+  tree d = n->decl;
+  def = false;
+  if (!TREE_PUBLIC(d) || !VAR_OR_FUNCTION_DECL_P(d)) return false;
+  def = n->definition && !DECL_EXTERNAL(d) && (TREE_ASM_WRITTEN(d) || n->alias);
+  return def || TREE_SYMBOL_REFERENCED(DECL_ASSEMBLER_NAME(d));
+}
+
 static void finish_unit(void *, void *)
 {
   symtab_node *n;
   std::set<std::string> emitted;
   FOR_EACH_SYMBOL(n) {
     tree d = n->decl;
-    if (!TREE_PUBLIC(d) || !VAR_OR_FUNCTION_DECL_P(d)) continue;
-    bool def = n->definition && !DECL_EXTERNAL(d) && (TREE_ASM_WRITTEN(d) || n->alias);
-    bool ref = TREE_SYMBOL_REFERENCED(DECL_ASSEMBLER_NAME(d));
-    if (!def && !ref) continue;
+    bool def;
+    if (!sym_emitted(n, def)) continue;
     auto it = early.find(uid_decl(d));
     if (it != early.end()) { rows.push_back(it->second); rows.back().def = def; }
     else name_decl(d, def);

@@ -344,31 +344,24 @@ static void emit_objects()
  * A type outside this grammar (an atomic qualifier, a complex type, an incomplete enumeration) is an error of the compilation, and
  * so is a symbol declared with two different spellings in one unit (every declaration of it is compatible with the others, but the gate that
  * reads this section needs one spelling to be the symbol's type in the unit). */
-static std::vector<tree> decls;
-static std::set<tree> decls_set;
-static tree keep_decls = NULL_TREE;
-static const struct ggc_root_tab keep_decls_roots[] = {
-  { &keep_decls, 1, sizeof(keep_decls), &gt_ggc_mx_lang_tree_node, NULL },
-  LAST_GGC_ROOT_TAB
-};
-
-static void add_decl(tree d)
-{
-  if (!d || (TREE_CODE(d) != VAR_DECL && TREE_CODE(d) != FUNCTION_DECL) || !TREE_PUBLIC(d)) return;
-  if (DECL_IS_UNDECLARED_BUILTIN(d) || !DECL_NAME(d)) return;
-  /* RULE (DECLTYPE-LANG): the symbols of a C unit and the symbols with C language linkage of a C++ unit (extern "C": the names C code can declare); a C++ name
-   * has the ODR (.fnvnx.odrdef) and the layout gates, not C's 6.2.7 */
-  if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) return;
-  if (decls_set.insert(d).second) { decls.push_back(d); keep_decls = tree_cons(NULL_TREE, d, keep_decls); }
-}
-
 #include "decltype_spell.inc"   /* dl_type: the spelling of .fnvnx.decltype, shared with fnvnx_dispatch */
 
 static void emit_decltype()
 {
-  /* the symbol table also holds the symbols the front end made without a finished declaration (an implicitly declared function) */
+  /* RULE SYMSET (names.cc sym_emitted): one row per symbol the object has (defined or referenced), spelled from the symbol table's own declaration, which is the
+   * declaration the front end composed from all of the unit's declarations of it (C11 6.2.7p3). A declaration the headers bring in whose symbol the object does
+   * not have is not a row: the gate compares symbols across objects, so it would add nothing but size. */
+  std::vector<tree> decls;
   symtab_node *sn;
-  FOR_EACH_SYMBOL(sn) add_decl(sn->decl);
+  FOR_EACH_SYMBOL(sn) {
+    bool def;
+    tree d = sn->decl;
+    if (!sym_emitted(sn, def) || DECL_IS_UNDECLARED_BUILTIN(d) || !DECL_NAME(d)) continue;
+    /* RULE (DECLTYPE-LANG): the symbols of a C unit and the symbols with C language linkage of a C++ unit (extern "C": the names C code can declare); a C++ name
+     * has the ODR (.fnvnx.odrdef) and the layout gates, not C's 6.2.7 */
+    if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) continue;
+    decls.push_back(d);
+  }
   std::map<std::string, std::string> rows;
   for (tree d : decls) {
     const char *nm = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
@@ -458,15 +451,13 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_vars_roots);
-  register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_decls_roots);
   if (is_cxx()) {
     register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl_cb, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, (plugin_callback_func)+[](void *d, void *u) { finish_type(d, u); finish_type_cb(d, u); }, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize_cb, NULL);
   } else {   /* cc1: records come from the types the front end finishes and the declarations it finishes */
-    register_callback(info->base_name, PLUGIN_FINISH_PARSE_FUNCTION, +[](void *d, void *) { add_decl((tree)d); }, NULL);
-    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { add_decl((tree)d); add_var((tree)d); if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { add_var((tree)d); if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type_cb, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit_cb, NULL);
