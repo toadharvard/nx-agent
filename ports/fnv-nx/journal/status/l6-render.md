@@ -623,3 +623,13 @@ Paused: w3b, w4, farm; no other work.
         - nxgpu4_shader.h includes fnvnx_shaders.h, lib/sha256 and fnvnx_dk_layout.h for the variant bits, the key size and the slots. No restated constants.
         - MAX code size and the link-pair count get their one home in nxgpu4_shader.h.
         - L6 reviews the diff.
+- 00:50Z w1b 802ea48fc merged into the lead branch (9b2420927): 13 files, 1912 lines deleted.
+    - Deleted: render/shaders/cache, its tests, the sm_hand twin, render/ASSUMPTIONS.md.
+- 00:50Z Doc mirrors (private fnv-nx-build).
+    - tools/msdocs-win32-d3d9 3fb42a59: MicrosoftDocs/win32 at bc82a65f, tree 1aecae82…a51ae.
+    - tools/winsdk-d3d9-headers f47e7a88: SDK.CPP 10.0.26100.1742, tree 62063383…efcc6.
+    - Pins sent to w6.
+- 00:50Z Remaining deletions move to the candidate line (w1b-del2 on w6-root 34ce66f16).
+    - gate_d3d9total's inputs come from the roots' records: MOJO_PIN from translator build.json, includes from the admitted include lists.
+    - Then delete render/backend, shaders/include, shaders/src (sdp.c to translator/src), build.sh, the patches and CMake.
+    - The dk files are confirmed to be on L6A's branch before they are deleted.
