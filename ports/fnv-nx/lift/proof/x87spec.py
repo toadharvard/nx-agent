@@ -1731,14 +1731,12 @@ def _mk():
     add("db", "reg", 6, None, "fcomi st,st(i)", None, lambda s, m, i, ef: fcomi_sti(s, i, False, True), True)
     # DB memory
     add("db", "mem", 0, None, "fild m32int", 32, lambda s, m, i, ef: fild(s, m, 32))
-    add("db", "mem", 1, None, "fisttp m32int", 32, lambda s, m, i, ef: fist(s, 32, True, True))
     add("db", "mem", 2, None, "fist m32int", 32, lambda s, m, i, ef: fist(s, 32, False))
     add("db", "mem", 3, None, "fistp m32int", 32, lambda s, m, i, ef: fist(s, 32, True))
     add("db", "mem", 5, None, "fld m80fp", 80, lambda s, m, i, ef: fld_m80(s, m))
     add("db", "mem", 7, None, "fstp m80fp", 80, lambda s, m, i, ef: fstp_m80(s))
     # DD
     add("dd", "mem", 0, None, "fld m64fp", 64, lambda s, m, i, ef: fld_m64(s, m))
-    add("dd", "mem", 1, None, "fisttp m64int", 64, lambda s, m, i, ef: fist(s, 64, True, True))
     add("dd", "mem", 2, None, "fst m64fp", 64, lambda s, m, i, ef: fst_m64(s, False))
     add("dd", "mem", 3, None, "fstp m64fp", 64, lambda s, m, i, ef: fst_m64(s, True))
     add("dd", "mem", 4, None, "frstor", SAVE_BITS, lambda s, m, i, ef: frstor(s, m))
@@ -1753,7 +1751,6 @@ def _mk():
     add("de", "reg", 3, 1, "fcompp", None, lambda s, m, i, ef: fcompp(s))
     # DF
     add("df", "mem", 0, None, "fild m16int", 16, lambda s, m, i, ef: fild(s, m, 16))
-    add("df", "mem", 1, None, "fisttp m16int", 16, lambda s, m, i, ef: fist(s, 16, True, True))
     add("df", "mem", 2, None, "fist m16int", 16, lambda s, m, i, ef: fist(s, 16, False))
     add("df", "mem", 3, None, "fistp m16int", 16, lambda s, m, i, ef: fist(s, 16, True))
     add("df", "mem", 4, None, "fbld m80bcd", 80, lambda s, m, i, ef: fbld(s, m))

@@ -109,3 +109,23 @@ The oracle's reference entry in oracle.json cites NtSetContextThread 926-1035 an
 Same machine (verify/bootmachine.py, product ELF, no doubles). Subject: the runtime's use of the tables, `msvcrt_eh.cc` (`cxx_frame_handler`, `call_catch_block`, `cxx_local_unwind`, `except3/4`) as lifted code reaches them.
 Inputs, per FuncInfo of the oracle's universe (lift/proof/ehoracle.py, 4,643 tables) and per (state, exception kind) row of its decision table (235,261 rows over 12 kinds): a guest frame whose registration carries that FuncInfo, a raised exception of that kind (a C exception, each ThrowInfo) at that state (the trylevel field set to the state), and the guest handler recording the observed decision.
 Expected: the oracle's row: catch block (i, j) or ContinueSearch, the unwind-action sequence run to the tryblock's start level, the trylevel after the catch (end_level + 1); for SEH tables the hunt chain (level, filter, handler) and the cleanup sequence. The oracle computes it from the image bytes under the pinned Wine 9.0 rules (wine_pin.json, dlls/msvcrt/except_i386.c), so the expected values never come from msvcrt_eh.cc. The rows are produced once by the oracle (report JSON, private) and replayed; the verdict is rows agreeing / rows, globally, with the commit.
+
+
+## Re-run of the field table on L3a int3 4681c963 (struct cpu 504 bytes: fsw 488, fop 492, fcs 496, fds 500; NT in eflx)
+
+Method: read of rt/seh.cc (fx_capture, fx_restore, fpux_to_fpu, fpu_to_fpux, ctx_capture/ctx_restore arms) and rt/fnvl.h, rt/fnvl_x87.h at origin/claude/fnv-l3a-lift-int3 (4681c963 is an ancestor of its head cfd208a1; seh.cc and the field macros are as at the head). Static reading only: the round-trip test on the product ELF still cannot be linked from lift/rt (step 4 above), so no "passed" count exists yet.
+
+| CONTEXT field (offset) | before | at 4681c963 | class now |
+|---|---|---|---|
+| FloatSave.StatusWord (32) and Ext.FSW (206): ES (7), B (15) | no state | `c->fsw` holds ES/B; capture writes `(c->fsw \| (flags & ~FCW & 0x3f ? 0x8080 : 0)) & 0x8080` (fx_esb); `fx_restore` stores `fsw & 0x8080`; the EXT arm keeps `& (FCW \| 0xff80)`, which keeps bits 7 and 15 | R, exact **given the L3a masked-exceptions fact** (below) |
+| FloatSave.ErrorSelector (44): FCS low 16, FOP high 16; Ext.FOP (210), Ext.FCS (216) | derived | stored `c->fcs` (16 bit), `c->fop` (11 bit, `& 0x7ff`); `fx_restore` loads them verbatim; FLDENV/FRSTOR load them, FNSTENV/FNSAVE/FXSAVE store them | R. The oracle must mask a handler-written FOP to 11 bits (SDM 1:8.1.8; FXRSTOR keeps 11) |
+| FloatSave.DataSelector (52), Ext.FDS (224) | derived | stored `c->fds` (16 bit), loaded verbatim | R |
+| EFlags (192): NT (14) | no state | `FNVL_EFL_KEEP` 0x244000 = NT, AC, ID kept in `c->eflx` by EFL_POP (`RAISE_IN`) and shown by EFL_PUSH (`RAISE_OUT`) | R |
+| EFlags (192): TF (8), RF (16) | no state | still no state in `struct cpu`; `EFL_POP` ignores them | exact **by the debug-trap fact** only (owner L3a w6); not a field of this table's R count |
+| the other 8 D fields of the first table | | all covered by the rows above (FSW, ErrorSelector, DataSelector, Ext FSW/FOP/FCS/FDS = 7, plus EFlags) | |
+
+Counts over the 62 table rows: R 56 (48 + 8 of the former D fields), D 0, W 14 unchanged, TF/RF under the fact 1 field (EFlags bits 8, 16).
+
+Fact edge (recorded as the lead asked): ES/B are exact **given the L3a masked-exceptions fact** (every fldcw, ldmxcsr, fldenv, frstor site keeps exceptions masked). Reason: capture derives ES/B from the sticky flags held at the moment the image is produced, and `c->fsw` records ES/B only as loaded by a restore. On a real CPU ES sets at the instruction that raises an unmasked flag; the model sets it when an image is produced. They agree only when no site can set an unmasked flag, which is the L3a fact. If the fact fails at a site, ES/B at a CONTEXT taken after that site is not the CPU's.
+
+Status: the 6 defects (ES/B, FOP, FCS, FDS, NT, TF) are closed in the code by reading, TF only under the debug-trap fact. The round-trip test on the product ELF is the confirmation and is still open.
