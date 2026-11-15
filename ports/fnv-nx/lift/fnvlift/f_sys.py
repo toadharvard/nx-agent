@@ -7,7 +7,7 @@ THE TOTALITY RULE (W15). The lifter executes the instruction set of the REFERENC
 flat segments), on the CPU that rt/cpumodel.c's cpuid describes (FPU VME DE PSE TSC MSR PAE MCE CX8 APIC SEP MTRR PGE MCA CMOV PAT PSE36 CLFSH MMX FXSR SSE SSE2 HTT, NX; leaf 1 ECX = 0,
 no leaf 7, no 0x80000001 ECX). Every instruction capstone decodes in 32-bit mode falls in exactly one class, and the class decides the body (proof: the classes are
 exclusive by their guards and exhaustive because the last one, UD, is the complement of everything before it):
-  1. implemented with its SDM semantics (f_int, f_string, f_flow, f_x87*, f_sse, f_simd_int and the handlers below);
+  1. implemented with its SDM semantics (f_int, f_flow, f_x87*, f_sse, f_simd_int and the handlers below);
   2. CPL-0 instruction or I/O instruction at IOPL 0 (proof/privset.py, and MOV to/from CRn/DRn): #GP(0); the status is Wine 9.0's opcode table (wine_is_privileged);
   3. instruction that loads a segment register, a far transfer, or the descriptor-table instructions: exact on the model GDT of rt/fnvl.h (fnvl_gdt_hi / fnvl_seg_ok), #GP(selector)
      -> STATUS_ACCESS_VIOLATION otherwise;
@@ -58,23 +58,8 @@ def h_int(cx, ins):
     site(cx, 'FNVL_RAISE_AV(0x%xu,0x%xu,0x%xu);' % (o['parameters'][0], o['parameters'][1], cx.a))
 
 
-@op('into')
-def h_into(cx, ins):
-    cx.nonlocal_ = True
-    cx.raises.add(cx.a)
-    cx.raises.add(cx.nxt)
-    cx.em('if(of){ SYNC_OUT; REGS(); FNVL_RAISE(FNVL_INTO,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % cx.a)
 
 
-@op('bound')
-def h_bound(cx, ins):
-    ops = cx.ops
-    s = cx.s
-    cx.nonlocal_ = True
-    cx.raises.add(cx.a)
-    ea = cx.ea(ins, ops[1])
-    cx.em('{ u32 ad=%s; s32 i=(s32)(s%d)%s; if(i<(s32)(s%d)M%d(ad)||i>(s32)(s%d)M%d(ad+%d)){ SYNC_OUT; REGS(); FNVL_RAISE(FNVL_BOUNDS,0x%xu); REGS(); SYNC_IN; goto nonlocal; } }' % (
-        ea, s, cx.rd(ins, ops[0]), s, s, s, s, s // 8, cx.a))
 
 
 # ---- class 2: CPL-0 instructions and I/O at IOPL 0 -------------------------------------------------------------------------------------------------------------------
@@ -143,51 +128,20 @@ def ud_site(cx):
     raise_code(cx, 'FNVL_UD')
 
 
-@op('cpuid')
-def h_cpuid(cx, ins):
-    cx.em('{ u32 o[4]; fnvl_cpuid(eax,ecx,o); eax=o[0]; ebx=o[1]; ecx=o[2]; edx=o[3]; }')
 
 
-@op('rdtsc')
-def h_rdtsc(cx, ins):
-    cx.em('{ u64 t=fnvl_rdtsc(); eax=(u32)t; edx=(u32)(t>>32); }')
 
 
-@op('pushal', 'pushaw')
-def h_pusha(cx, ins):
-    if cx.m == 'pushal':
-        cx.em('{ u32 t=esp; esp-=32; M32(esp+28)=eax; M32(esp+24)=ecx; M32(esp+20)=edx; M32(esp+16)=ebx; M32(esp+12)=t; M32(esp+8)=ebp; M32(esp+4)=esi; M32(esp)=edi; }')
-    else:
-        cx.em('{ u32 t=esp; esp-=16; M16(esp+14)=eax; M16(esp+12)=ecx; M16(esp+10)=edx; M16(esp+8)=ebx; M16(esp+6)=t; M16(esp+4)=ebp; M16(esp+2)=esi; M16(esp)=edi; }')
 
 
-@op('popal', 'popaw')
-def h_popa(cx, ins):
-    if cx.m == 'popal':
-        cx.em('{ u32 t=esp; edi=M32(t); esi=M32(t+4); ebp=M32(t+8); ebx=M32(t+16); edx=M32(t+20); ecx=M32(t+24); eax=M32(t+28); esp=t+32; }')
-    else:
-        cx.em('{ u32 t=esp; edi=(edi&0xffff0000u)|M16(t); esi=(esi&0xffff0000u)|M16(t+2); ebp=(ebp&0xffff0000u)|M16(t+4); ebx=(ebx&0xffff0000u)|M16(t+8); '
-              'edx=(edx&0xffff0000u)|M16(t+10); ecx=(ecx&0xffff0000u)|M16(t+12); eax=(eax&0xffff0000u)|M16(t+14); esp=t+16; }')
 
 
-@op('pushfd')
-def h_pushfd(cx, ins):
-    cx.em('{ u32 v=EFL_PUSH(); esp-=4; M32(esp)=v; }')
 
 
-@op('popfd')
-def h_popfd(cx, ins):
-    cx.em('{ u32 v=M32(esp); esp+=4; EFL_POP(v); }')
 
 
-@op('pushf')
-def h_pushf(cx, ins):
-    cx.em('{ u32 v=EFL_PUSH()&0xffffu; esp-=2; M16(esp)=(u16)v; }')
 
 
-@op('popf')       # 16-bit: only the low word is loaded: AC and ID (bits 18, 21) are untouched
-def h_popf(cx, ins):
-    cx.em('{ u32 v=M16(esp); esp+=2; u32 k=c->eflx; EFL_POP(v); c->eflx=k; }')
 
 
 def cond_jump(cx, cond, t):
@@ -205,20 +159,8 @@ def asz16(ins):
     return ins.prefix[3] == 0x67
 
 
-@op('loop', 'loope', 'loopne')
-def h_loop(cx, ins):
-    c = {'loop': '', 'loope': '&&zf', 'loopne': '&&!zf'}[cx.m]
-    if asz16(ins):      # the 0x67 prefix makes the counter CX (SDM LOOP: "the count register is CX/ECX by address-size attribute")
-        cx.em('ecx=(ecx&0xffff0000u)|((ecx-1)&0xffffu);')
-        cond_jump(cx, '(ecx&0xffffu)!=0' + c, cx.ops[0].imm & 0xffffffff)
-        return
-    cx.em('ecx--;')
-    cond_jump(cx, 'ecx!=0' + c, cx.ops[0].imm & 0xffffffff)
 
 
-@op('jcxz')         # 67 E3: jump if CX == 0 (jecxz is the unprefixed form, in f_flow)
-def h_jcxz(cx, ins):
-    cond_jump(cx, '(ecx&0xffffu)==0', cx.ops[0].imm & 0xffffffff)
 
 
 @op('repz ret', 'repnz ret', 'repe ret', 'repne ret')
@@ -265,94 +207,6 @@ def h_lxs(cx, ins):
     cx.em('{ u32 ad=%s; u32 o=M%d(ad); u32 s=M16(ad+%du); %s %s }' % (cx.ea(ins, cx.ops[1]), 8 * w, w, seg_load(cx, sg), cx.wr(ins, cx.ops[0], 'o')))
 
 
-def far_target(cx, sel):
-    """a far JMP/CALL through a code-segment selector: the only code descriptor of the model GDT is CS (flat, DPL 3, non-conforming); the transfer requires RPL <= CPL (always true at
-    CPL 3) and DPL == CPL, so it is valid exactly for the CS index (SDM Vol 3 5.8.1 / 5.8.1.2: JMP/CALL to a non-conforming code segment); anything else (a data selector, the null selector,
-    a call-gate / TSS selector, kernel segments) is #GP(selector). CS keeps the model value SEL_CS (the new CS RPL is CPL)."""
-    return gp_cond(cx, 'SELK(%s)!=SELK(SEL_CS)' % sel)
-
-
-def h_ljmp(cx, ins):
-    """JMP ptr16:16/32 (EA): both operands are immediates in capstone; far_target decides the selector, the offset is the new EIP (base 0)"""
-    cx.kinds.add('farjmp')
-    sel, off = cx.ops[0].imm & 0xffff, cx.ops[1].imm & (0xffff if osz16(ins) else 0xffffffff)
-    cx.em('{ u32 s=0x%xu; %s c->ra=0x%xu; goto nonlocal; }' % (sel, far_target(cx, 's'), off))
-    cx.term = True
-
-
-def far_call(cx, ins, sel, off):
-    """CALL far: pushes the return CS (zero-extended to the operand size) then the return EIP, transfers like a far jump; the callee's RETF pops them (h_retf)"""
-    w = 2 if osz16(ins) else 4
-    cx.kinds.add('farcall')
-    cx.callrets.append(cx.nxt)
-    cx.nonlocal_ = True
-    cx.em('{ u32 s=%s, t=%s; %s esp-=%du; M%d(esp)=SEL_CS; esp-=%du; M%d(esp)=0x%xu; SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (
-        sel, off, far_target(cx, 's'), w, 8 * w, w, 8 * w, cx.nxt, cx.nxt))
-
-
-@op('lcall')
-def h_lcall(cx, ins):
-    o = cx.ops
-    if o[0].type == X.X86_OP_MEM:       # 66 FF /3 (capstone's name for the 16-bit operand-size form): m16:16
-        far_mem(cx, ins, o[0], True)
-        return
-    far_call(cx, ins, '0x%xu' % (o[0].imm & 0xffff), '0x%xu' % (o[1].imm & (0xffff if osz16(ins) else 0xffffffff)))
-
-
-def far_mem(cx, ins, mop, call):
-    """FF /3 (call) and FF /5 (jmp) with a memory operand: m16:32, or m16:16 with the 66 prefix; the offset comes first, the selector after it"""
-    w = 2 if osz16(ins) else 4
-    ad = cx.ea(ins, mop)
-    if call:
-        far_call_mem(cx, ins, ad, w)
-        return
-    cx.kinds.add('farjmp')
-    cx.em('{ u32 ad=%s, t=M%d(ad), s=M16(ad+%du); %s c->ra=t; goto nonlocal; }' % (ad, 8 * w, w, far_target(cx, 's')))
-    cx.nonlocal_ = True
-    cx.term = True
-
-
-def far_call_mem(cx, ins, ad, w):
-    cx.kinds.add('farcall')
-    cx.callrets.append(cx.nxt)
-    cx.nonlocal_ = True
-    cx.em('{ u32 ad=%s, t=M%d(ad), s=M16(ad+%du); %s esp-=%du; M%d(esp)=SEL_CS; esp-=%du; M%d(esp)=0x%xu; SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (
-        ad, 8 * w, w, far_target(cx, 's'), w, 8 * w, w, 8 * w, cx.nxt, cx.nxt))
-
-
-def is_far_ff(ins):
-    """FF /3 and FF /5 are the far CALL / JMP through memory. capstone names them `call`/`jmp` (32-bit operand size) or `lcall`/`ljmp` (66 prefix) inconsistently, so the
-    encoding decides: opcode FF, ModRM.reg 3 or 5 (SDM Vol 2 CALL/JMP: FF /3 CALL m16:32, FF /5 JMP m16:32)."""
-    return ins.opcode[0] == 0xff and ins.modrm is not None and (ins.modrm >> 3) & 7 in (3, 5) and ins.operands and ins.operands[0].type == X.X86_OP_MEM
-
-
-_near = {n: core.OPS[n] for n in ('call', 'jmp')}
-
-
-@op('call')
-def h_call_or_far(cx, ins):
-    if is_far_ff(ins) and (ins.modrm >> 3) & 7 == 3:
-        far_mem(cx, ins, ins.operands[0], True)
-    else:
-        _near['call'](cx, ins)
-
-
-@op('jmp')
-def h_jmp_or_far(cx, ins):
-    if is_far_ff(ins) and (ins.modrm >> 3) & 7 == 5:
-        far_mem(cx, ins, ins.operands[0], False)
-    else:
-        _near['jmp'](cx, ins)
-
-
-@op('ljmp')
-def h_ljmp_any(cx, ins):
-    if cx.ops[0].type == X.X86_OP_MEM:
-        far_mem(cx, ins, cx.ops[0], False)
-    else:
-        h_ljmp(cx, ins)
-
-
 @op('retf')
 def h_retf(cx, ins):
     """RETF [imm16]: pops EIP then CS (and imm16 bytes). Same-level return only (an outer level would need RPL > CPL = 3): valid exactly when the popped CS is SEL_CS (index of CS, RPL 3);
@@ -379,11 +233,6 @@ def h_iret(cx, ins):
     cx.term = True
 
 
-@op('int1')
-def h_int1(cx, ins):
-    """INT1 / ICEBP (F1): #DB as a trap (SDM Vol 2 INT1: "not subject to IDT-gate DPL checks"). KiTrap01: STATUS_SINGLE_STEP, ExceptionAddress = Context.Eip =
-    the NEXT instruction. (`int 1`, CD 01, is the vector-1 gate with DPL 0: #GP -> access violation, INT_VECTORS default.)"""
-    raise_code(cx, 'FNVL_STEP', cx.nxt)
 
 
 def store16(cx, ins, o, val):
@@ -394,16 +243,8 @@ def store16(cx, ins, o, val):
     return cx.wr(ins, o, '(u32)(%s)' % val)
 
 
-@op('str')
-def h_str(cx, ins):
-    cx.em(store16(cx, ins, cx.ops[0], 'FNVL_TR_SEL'))
 
 
-@op('arpl')
-def h_arpl(cx, ins):
-    """ARPL r/m16, r16 (SDM Vol 2 ARPL; protected mode, legal at CPL 3): if RPL(dest) < RPL(src): ZF = 1 and dest.RPL = src.RPL, else ZF = 0"""
-    o = cx.ops
-    cx.em('{ u32 d=%s, s=%s; if((d&3u)<(s&3u)){ zf=1; %s } else zf=0; }' % (cx.rd(ins, o[0]), cx.rd(ins, o[1]), cx.wr(ins, o[0], '(d&~3u)|(s&3u)')))
 
 
 # LAR / LSL / SLDT / SMSW / SGDT / SIDT have no hand handler: they need descriptor, LDTR, CR0 or descriptor-table values that platform/declared/x86sys.json leaves undecided (or does not state);
@@ -412,10 +253,6 @@ def h_arpl(cx, ins):
 
 
 # ---- class 4/5: hints, prefix-only variants -----------------------------------------------------------------------------------------------------------------------
-@op('pause')
-def h_pause(cx, ins):
-    """PAUSE (F3 90): no architectural effect (SDM Vol 2 PAUSE: a spin-loop hint, a NOP on processors without it); the host hint keeps spin waits polite"""
-    cx.em('__asm__ volatile("yield");')
 
 
 @op('mfence', 'lfence', 'sfence')
@@ -429,21 +266,6 @@ def h_fence(cx, ins):
 def h_clflush(cx, ins):
     """CLFLUSH m8 (CLFSH = 1): no architectural effect on data; it faults like a load of the address (SDM: #PF / #GP as a read), so the address is read once"""
     cx.em('{ volatile u8 t_=M8(%s); (void)t_; }' % cx.ea(ins, cx.ops[0]))
-
-
-@op('tzcnt')
-def h_tzcnt(cx, ins):
-    """F3 0F BC: TZCNT needs BMI1 (absent in the model); a CPU without it ignores the F3 prefix and executes BSF (SDM Vol 2 TZCNT: "on processors that do not support TZCNT the instruction
-    is executed as BSF")."""
-    cx.m = 'bsf'
-    core.OPS['bsf'](cx, ins)
-
-
-@op('lzcnt')
-def h_lzcnt(cx, ins):
-    """F3 0F BD: LZCNT needs ABM/LZCNT (CPUID.80000001H:ECX.LZCNT, absent): executed as BSR (SDM Vol 2 LZCNT)."""
-    cx.m = 'bsr'
-    core.OPS['bsr'](cx, ins)
 
 
 STRIP = ('bnd ', 'notrack ', 'xacquire ', 'xrelease ', 'lock ')
