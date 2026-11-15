@@ -40,12 +40,18 @@
     "object": "msvc",
     "operator": "rtl",
     "assign": "msvc"
-   }
+   },
+   "inputs": [
+    "ports/fnv-nx/toolchain/order/fnvnx_frame.h"
+   ]
   },
   {
    "name": "fnvnx_sdd",
    "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
-   "args": {}
+   "args": {},
+   "inputs": [
+    "ports/fnv-nx/toolchain/order/fnvnx_frame.h"
+   ]
   },
   {
    "name": "fnvnx_pi",
