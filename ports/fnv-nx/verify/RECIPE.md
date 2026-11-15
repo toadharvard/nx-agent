@@ -298,6 +298,8 @@ P's own repo directories of `include`, transitively, after the consumer's own an
 in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A header root
 (class header) has no recipe and carries nothing; a header it includes from another root is named by the consumer.
 
+**Header home.** A directory of a root of class `header` is a valid `include` entry of a root of every target, guest and host alike (`recipe.header_dirs` and the include check are one rule). A product root's own tree is a home only for the targets it has a recipe for; a tool or doc root is no home. A header root's headers may read only header roots and externals.
+
 ## Outputs and uses
 `outputs: {NAME: a path in generated[].outputs of this root}` declares what other roots may take; the build result lists each as `outputs: {NAME: {path, sha256}}`, a file of the out dir (`OUT/outputs/<path>`) and its hash. `uses: [{"root": R, "output": NAME}]` (R any admitted
 root with a recipe that declares NAME) makes that output an input of this root's stages: the `generated` stages and the preprocessing stages mount it
