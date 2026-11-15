@@ -1099,3 +1099,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:20 L5 gs row landed: claude/fnv-l5-platform-w17 @ ad3af10c5. selectors.gs = 0, from the 7601 kernel and PDB (KeContextToKframes stores 0 to SegGs for cs 0x1b), together with null_seg_access.
   - w8 merges it into base3. The 24 `mov m16, gs` reads become ordinary code; gs-prefixed operands raise the null_seg row.
   - The gs residue is only the data-decoded operands, which w7's universe rule removes.
+- 22:21 w13 99b0218fd accepted; it replaces 0dd2ae53f, which broke string cmpsd.
+  - v3: 18,649 integer keys, 0 sha changed, the same 6 failures.
+  - SIMD universe: 3829 built, 0 sha changed.
+  - cmp* instructions with imm > 7: 0 of 5,703,260 lifted instructions, on fixture lift-facts/2; re-run on the merged FACTS.
+  - w8 merges it into base3 with L5 ad3af10c5.
+  - The exe JTAB_RED classification (326 rows) moves to w13; w7 stays on the facts memory growth.
