@@ -1432,3 +1432,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - **w23 a0ad1936.** gate_abi now pairs only `external` rows, and the C 6.2.7p2 gate is built (link/ctypes_compat.py).
   - Blocked on L2 w3: `.fnvnx.decltype`, which w23 requests directly with L2 cc'd.
   - The remaining order classes (238 sp-overlap, tag-D 39, tag-X 45) have one cause, fixed in fnvnx_order (L2). nonframe 372 belongs to L2 w2.
+- 01:00 **crossing_forbidden ruling (w23).**
+  - Crossing is the contract's boundary set (sympair kinds and contract facts), not every external function.
+  - L2 w3 emits `.fnvnx.crossing` for every external function: the terms, or `-` when none hold. The gate selects boundary symbols. It is red on a term, on a missing row or on an unknown id.
