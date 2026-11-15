@@ -938,7 +938,8 @@ the one source of sections and defined symbols (L4 reads no section or symbol ta
 ```text
 load(path)                      the record, its format checked (FactError)
 sections_by_name(rec)             {section name: [(address, size), ...]}
-symbol_values(rec)            {symbol name: [value, ...]}   STT_SECTION and STT_FILE rows are not symbols
+symbol_values(rec)            {symbol name: [value, ...]}   the record lists the defined symbols (L1 leaves out STT_SECTION and STT_FILE)
+entry(rec)                      header.entry of the record (FactError when absent)
 symbol(rec, name)               the one value; FactError unless the name is defined exactly once
 symbol_bytes(rec, data, name)   the st_size bytes of the symbol, read from the image DATA through its PT_LOAD program headers
                                 (bootlayout.file_bytes); FactError for a bss symbol

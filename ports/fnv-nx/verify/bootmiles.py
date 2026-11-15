@@ -257,7 +257,7 @@ def alloc_sections(rec, name):
 
 
 def symbols(rec):
-    """the link record's defined symbols (bootfacts.py) -> Symbols {name: value} (named symbols, STT_SECTION and STT_FILE rows are not symbols). Rule: a
+    """the link record's defined symbols (bootfacts.py) -> Symbols {name: value} (the named symbols of the record; its listing leaves out STT_SECTION and STT_FILE). Rule: a
     GLOBAL/WEAK name at two values is an ElfError (the linker forbids it); a name defined only by LOCAL symbols may repeat at several values (compiler
     clones such as `f.isra.0`, one per translation unit): it is AMBIGUOUS, left out of the map and listed in .ambiguous, and resolve()
     reports it only if a table row needs it; a global name wins over local symbols of the same name (as in a link).
@@ -266,7 +266,7 @@ def symbols(rec):
     out, loc, fn = {}, {}, set()
     for s in rec["symbols"]:
         name, val = s["name"], s["value"]
-        if not name or s["type"] in bootfacts.NOT_SYMBOLS:
+        if not name:
             continue
         if name in ("$x", "$d") or name[:3] in ("$x.", "$d."):
             continue

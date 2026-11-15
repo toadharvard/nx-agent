@@ -38,8 +38,8 @@ def main():
     secs = bootfacts.sections_by_name(rec)
     case("sections_by_name: every section row of the record, ranges per name", sum(len(v) for v in secs.values()) == len(rec["sections"]) and ".text" in secs, sorted(secs))
     syms = bootfacts.symbol_values(rec)
-    case("symbol_values: every named symbol that is not a FILE or SECTION row", all(n and any(r["name"] == n for r in rec["symbols"]) for n in syms)
-         and all(r["name"] in syms for r in rec["symbols"] if r["name"] and r["type"] not in ("FILE", "SECTION")))
+    case("symbol_values: every named symbol of the record, and only those", all(n and any(r["name"] == n for r in rec["symbols"]) for n in syms)
+         and all(r["name"] in syms for r in rec["symbols"] if r["name"]))
     case("symbol: the guest image's mode table symbols are each defined once", all(bootfacts.symbol(rec, n) == syms[n][0] for n in ("fnvboot_mode_count", "fnvboot_modes")))
     n, = struct.unpack("<I", bootfacts.symbol_bytes(rec, raw, "fnvboot_mode_count"))
     t = bootfacts.symbol_bytes(rec, raw, "fnvboot_modes")
@@ -49,10 +49,6 @@ def main():
     row = next(r for r in dup["symbols"] if r["name"] == "fnvboot_mode_count")
     dup["symbols"].append(dict(row, value=row["value"] + 4))
     case("symbol: defined twice (a variant of the real record) is a FactError", raises(lambda: bootfacts.symbol(dup, "fnvboot_mode_count"), "2 times"))
-    extra = copy.deepcopy(rec)
-    extra["symbols"] += [{"name": "zz_file.o", "value": 0, "size": 0, "type": "FILE", "bind": "LOCAL", "section": "ABS"},
-                         {"name": "zz_sec", "value": 0x10, "size": 0, "type": "SECTION", "bind": "LOCAL", "section": "1"}]
-    case("symbol_values: FILE and SECTION rows are not symbols", "zz_file.o" not in bootfacts.symbol_values(extra) and "zz_sec" not in bootfacts.symbol_values(extra))
     bss = copy.deepcopy(rec)
     top = max(s["address"] + s["size"] for s in rec["sections"])
     bss["symbols"].append({"name": "zz_beyond", "value": top + 0x10000, "size": 4, "type": "OBJECT", "bind": "GLOBAL", "section": "1"})

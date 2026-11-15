@@ -3,7 +3,7 @@ linked ELF, objects.json key `elf_facts`), the one source of sections and define
 
   load(path)               the record, its format checked
   sections_by_name(rec)      {section name: [(address, size), ...]}                 (every section of the final ELF, a name may repeat)
-  symbol_values(rec)     {symbol name: [value, ...]}   the defined symbols of .symtab other than STT_SECTION and STT_FILE, all bindings
+  symbol_values(rec)     {symbol name: [value, ...]}   the defined symbols of the record (L1's listing already leaves out STT_SECTION and STT_FILE), all bindings
   entry(rec)               header.entry: the entry address of the image (FactError when the record has none)
   symbol(rec, name)        the one value of the symbol NAME; FactError when it is not defined exactly once with one value
   symbol_bytes(rec, data, name)   the st_size bytes of the one defined symbol NAME, read from the image DATA through its PT_LOAD program headers
@@ -15,7 +15,6 @@ import json
 import bootlayout
 
 FORMAT = "fnvnx-elffacts/2"
-NOT_SYMBOLS = ("SECTION", "FILE")
 
 
 class FactError(ValueError):
@@ -43,7 +42,7 @@ def sections_by_name(rec):
 
 
 def _syms(rec):
-    return [s for s in rec["symbols"] if s["type"] not in NOT_SYMBOLS and s["name"]]
+    return [s for s in rec["symbols"] if s["name"]]
 
 
 def symbol_values(rec):
