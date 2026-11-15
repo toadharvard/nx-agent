@@ -105,8 +105,7 @@ from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/,
 `FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`. A missing or invalid input is RED with the reason.
 * `formgate.py` (gate `forms`): universe = the shapes of `shapes.tsv` in the external `liftpack` (`shape_key<TAB>family<TAB>count`, sorted); certificates = `certs.tsv`
   of the external `certs` (fnv-nx-build `l3b-lift/certs`). Inputs: `formgate_inputs.json` (`fnvnx-forms-inputs/1`; `model_sha256` must equal the `x86_proof.ir` pin of
-  `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. Today the file declares no `liftpack`:
-  red, `inputs: external liftpack not declared` (the docstring says what to add). Tests: `tests/test_formgate.py` (local bare repos as externals).
+  `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. The pack's shapes.tsv and instrs.tsv are read only from the PACK output of the root that admit.json's `cxx_origin.pack` names, as published in GATE_CACHE (`gate_build.published_output`); not published = red. Tests: `tests/test_formgate.py` (local bare repos as externals).
 * `gate_fpexact.py` (gate `fpexact`): per admitted product root (gate_build.quantify convention, no root = universe 0 green): the rcp/rsqrt certificate, no A64
   estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/ftoi/fnvnx_ftoi.cc` in mode `lifted`, a recipe stage; report `unit.f2i.json`, format `fnvnx-f2i/2`), and the item
   `<root>:forms` = the gate forms is green (the helpers' correctness is the form certificates'; evaluated by calling `formgate.judge`, since each gate has its own GATE_OUT).

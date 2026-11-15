@@ -18,7 +18,5 @@
    "at": "/ext/x86ir"
   }
  ],
- "shapes": "liftpack/shapes.tsv",
- "certs": "certs/certs.tsv",
- "instrs": "liftpack/instrs.tsv"
+ "certs": "certs/certs.tsv"
 }

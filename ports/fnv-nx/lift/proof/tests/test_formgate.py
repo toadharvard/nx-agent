@@ -18,10 +18,12 @@ sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext
 from proof import certbasis, formgate, prove, shape
+import gate_build
 import recipe
 
 WORK = os.environ.get('FNVNX_TEST_WORK') or __import__('tempfile').mkdtemp(prefix='fnvnx-proof-test-')     # declared input: the directory the fixtures are written below
 _SEQ = itertools.count()
+PACK_ROOT = 'ports/fnv-nx/lift/liftsrc'      # a root of admit.json's cxx_origin.pack, never a path the gate knows
 
 
 class workdir:
@@ -55,8 +57,8 @@ def key_of(h):
 
 
 class Fixture:
-    """one fake artifacts repo with externals liftpack (shapes.tsv) and certs (certs.tsv), the inputs file (and the fake IR as the external x86ir)"""
-    def __init__(self, td, encs, certs_for=None, dsl_override=None, model=MODEL, result='proved', shapes_text=None, declare=('liftpack', 'certs', 'x86ir'),
+    """one fake artifacts repo with external certs (certs.tsv), the pack published as the PACK output of its root in GATE_CACHE (shapes.tsv, instrs.tsv), the inputs file (and the fake IR as the external x86ir)"""
+    def __init__(self, td, encs, certs_for=None, dsl_override=None, model=MODEL, result='proved', shapes_text=None, declare=('certs', 'x86ir'), publish=True,
                  shapes_file='shapes.tsv', cert_rows=None, instrs_text=None):
         self.td = td
         self.keys = sorted(set(key_of(h) for h in encs))
@@ -70,24 +72,46 @@ class Fixture:
         os.makedirs(os.path.join(td, 'art'), exist_ok=True)
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
         instrs = instrs_text if instrs_text is not None else '# fixture\n' + ''.join('exe\t%08x\t%d\t%s\n' % (0x401000 + 0x10 * i, len(h) // 2, h) for i, h in enumerate(sorted(set(encs))))
-        self.ext = {'liftpack': self.art.publish('liftpack', {shapes_file: shapes, 'instrs.tsv': instrs, 'README': 'pack\n'}),
-                    'certs': self.art.publish('certs', {'certs.tsv': ''.join(cert_rows if cert_rows is not None else rows)}),
+        self.pack_files = {shapes_file: shapes, 'instrs.tsv': instrs, 'README': 'pack\n'}
+        self.ext = {'certs': self.art.publish('certs', {'certs.tsv': ''.join(cert_rows if cert_rows is not None else rows)}),
                     'x86ir': self.art.publish('x86ir', {'ir/x86_proof.ir': IR_TEXT})}
         self.inputs = os.path.join(td, 'inputs.json')
         self.write(declare=declare)
         self.cache = os.path.join(td, 'cache')
         os.makedirs(self.cache)
+        self.repo = os.path.join(td, 'repo')      # a git checkout whose admit.json names the pack root (cxx_origin.pack), as the trunk's does
+        os.makedirs(os.path.join(self.repo, 'ports', 'fnv-nx', 'verify'))
+        with open(os.path.join(self.repo, recipe.ADMIT), 'w') as fh:
+            json.dump({'roots': [{'path': 'ports/fnv-nx/lift/pack', 'cxx_origin': {'lifted_by': 'x', 'pack': PACK_ROOT}},
+                                 {'path': 'ports/fnv-nx/rt/native', 'cxx_origin': 'native'}]}, fh)
+        fakeext.git(self.repo, 'init', '-q')
+        fakeext.git(self.repo, 'add', '-A')
+        fakeext.git(self.repo, 'commit', '-q', '-m', 'admit')
+        if publish:
+            self.publish_pack(self.repo, PACK_ROOT)
 
-    def write(self, declare=('liftpack', 'certs', 'x86ir'), **over):
-        doc = {'format': 'fnvnx-forms-inputs/1', 'external': [self.ext[n] for n in declare], 'shapes': 'liftpack/shapes.tsv',
-               'certs': 'certs/certs.tsv', 'instrs': 'liftpack/instrs.tsv'}
+    def publish_pack(self, repo, root, outputs=None):
+        """what recipe.build publishes for the pack root: GATE_CACHE/objects/<tree>/<root>/objects.json with `outputs` {PACK: {path, sha256}}"""
+        pack = os.path.join(self.td, 'packout')
+        shutil.rmtree(pack, ignore_errors=True)
+        os.makedirs(pack)
+        for n, text in self.pack_files.items():
+            with open(os.path.join(pack, n), 'w') as fh:
+                fh.write(text)
+        base = os.path.join(self.cache, 'objects', gate_build.tree_of(repo), root.replace('/', '__'))
+        os.makedirs(base, exist_ok=True)
+        with open(os.path.join(base, 'objects.json'), 'w') as fh:
+            json.dump({'outputs': outputs if outputs is not None else {'PACK': {'path': pack, 'sha256': '0' * 64}}}, fh)
+
+    def write(self, declare=('certs', 'x86ir'), **over):
+        doc = {'format': 'fnvnx-forms-inputs/1', 'external': [self.ext[n] for n in declare], 'certs': 'certs/certs.tsv'}
         doc.update(over)
         with open(self.inputs, 'w') as fh:
             json.dump(doc, fh)
 
     def judge(self):
         with fakeext.use_artifacts(self.art):
-            return formgate.judge(self.cache, self.inputs)
+            return formgate.judge(self.cache, self.inputs, self.repo)
 
 
 class Green(unittest.TestCase):
@@ -212,35 +236,66 @@ class InputsRed(unittest.TestCase):
             f.write(extra=1)
             self.red(f, 'keys must be exactly')
 
-    def test_external_not_declared(self):
+    def test_pack_not_published_is_red(self):
         with workdir() as td:
-            f = Fixture(td, GOOD, declare=('certs', 'x86ir'))
-            self.red(f, 'inputs: external liftpack not declared')
+            f = Fixture(td, GOOD, publish=False)
+            self.red(f, 'output PACK of %s is not published in GATE_CACHE' % PACK_ROOT)
+
+    def test_pack_output_undeclared_or_gone_is_red(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            f.publish_pack(f.repo, PACK_ROOT, outputs={})
+            self.red(f, 'output PACK of %s is not published' % PACK_ROOT)
+            f.publish_pack(f.repo, PACK_ROOT, outputs={'PACK': {'path': os.path.join(td, 'nowhere'), 'sha256': '0' * 64}})
+            self.red(f, 'the published path')
+
+    def test_the_pack_root_is_admits_never_a_path_of_the_gate(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD, publish=False)
+            f.publish_pack(f.repo, 'ports/fnv-nx/lift/other')      # published under a root that admit.json does not name
+            self.red(f, 'output PACK of %s is not published' % PACK_ROOT)
+
+    def test_pack_without_instrs_is_red(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            del f.pack_files['instrs.tsv']
+            f.publish_pack(f.repo, PACK_ROOT)
+            self.red(f, 'instrs.tsv is missing from the published PACK')
+
+    def test_admit_with_two_pack_roots_is_red(self):
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            with open(os.path.join(f.repo, recipe.ADMIT)) as fh:
+                doc = json.load(fh)
+            doc['roots'].append({'path': 'ports/fnv-nx/lift/pack2', 'cxx_origin': {'lifted_by': 'x', 'pack': 'other'}})
+            with open(os.path.join(f.repo, recipe.ADMIT), 'w') as fh:
+                json.dump(doc, fh)
+            self.red(f, 'exactly one cxx_origin.pack root')
 
     def test_bad_external_entry_and_path(self):
         with workdir() as td:
             f = Fixture(td, GOOD)
-            f.write(shapes='liftpack/../x')
+            f.write(certs='certs/../x')
             self.red(f, 'NAME/path')
-            f.write(external=[dict(f.ext['liftpack'], commit='abc'), f.ext['certs'], f.ext['x86ir']])
+            f.write(external=[dict(f.ext['certs'], commit='abc'), f.ext['x86ir']])
             self.red(f, 'bad name, repo, commit')
 
     def test_hash_mismatch(self):
         with workdir() as td:
             f = Fixture(td, GOOD)
-            f.write(external=[dict(f.ext['liftpack'], tree_sha256='0' * 64), f.ext['certs'], f.ext['x86ir']])
+            f.write(external=[dict(f.ext['certs'], tree_sha256='0' * 64), f.ext['x86ir']])
             self.red(f, 'tree_sha256 is')
 
     def test_external_does_not_fetch(self):
         with workdir() as td:
             f = Fixture(td, GOOD)
-            f.write(external=[dict(f.ext['liftpack'], commit='1' * 40), f.ext['certs'], f.ext['x86ir']])
+            f.write(external=[dict(f.ext['certs'], commit='1' * 40), f.ext['x86ir']])
             self.red(f, 'does not fetch')
 
     def test_shapes_tsv_missing(self):
         with workdir() as td:
             f = Fixture(td, GOOD, shapes_file='other.tsv')
-            self.red(f, 'shapes: shapes.tsv is missing from external liftpack')
+            self.red(f, 'shapes: shapes.tsv is missing from the published PACK')
 
     def test_certs_tsv_missing(self):
         with workdir() as td:
@@ -250,7 +305,7 @@ class InputsRed(unittest.TestCase):
 
     def test_the_ir_external_is_required(self):
         with workdir() as td:
-            f = Fixture(td, GOOD, declare=('liftpack', 'certs'))
+            f = Fixture(td, GOOD, declare=('certs',))
             self.red(f, 'external x86ir (the pinned x86_proof.ir) not declared')
 
     def test_a_certificate_of_another_ir_is_not_a_certificate(self):      # the model sha is derived from the file of the external, not typed anywhere
@@ -271,29 +326,33 @@ class InputsRed(unittest.TestCase):
         with workdir() as td:
             self.red(Fixture(td, GOOD, cert_rows=['a\tb\n']), 'certs.tsv: bad row')
 
-    def test_committed_inputs_are_valid_and_red_for_the_pack(self):
-        """the committed file: loads up to the missing liftpack; certs external is the pinned one"""
+    def test_committed_inputs_declare_no_pack(self):
+        """the committed file: the pack is not an external of it; certs external is the pinned one"""
         with open(formgate.INPUTS) as fh:
             doc = json.load(fh)
         self.assertNotIn('model_sha256', doc)      # the IR is pinned in one place: the x86ir external
         self.assertEqual([e['name'] for e in doc['external']], ['certs', 'x86ir'])
-        with workdir() as td:
-            u, c, ids, detail = formgate.judge(td)
-        self.assertEqual((u, c, ids, detail), (1, 0, ['inputs'], 'inputs: external liftpack not declared'))
+        self.assertEqual(sorted(doc), ['certs', 'external', 'format'])
 
 
 class Cli(unittest.TestCase):
     """the gate as the verdict runs it: python -I, cwd = checkout root, GATE_OUT; the checkout is a copy of lift/ beside the overlay of verify/"""
-    def run_gate(self, td, f):
+    def run_gate(self, td, f, publish=True):
         co = os.path.join(td, 'co')
         os.makedirs(os.path.join(co, 'ports', 'fnv-nx'))
         shutil.copytree(LIFT, os.path.join(co, 'ports', 'fnv-nx', 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
         os.symlink(os.path.abspath(fakeext.VERIFY), os.path.join(co, 'ports', 'fnv-nx', 'verify'))
         os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'contract')), os.path.join(co, 'ports', 'fnv-nx', 'contract'))
         shutil.copyfile(f.inputs, os.path.join(co, 'ports', 'fnv-nx', 'lift', 'proof', 'formgate_inputs.json'))
+        fakeext.git(co, 'init', '-q')
+        fakeext.git(co, 'add', '-A')
+        fakeext.git(co, 'commit', '-q', '-m', 'co')
+        if publish:      # the PACK of the root that the real admit.json names, published in GATE_CACHE at the tree of this checkout
+            (root,) = {r['cxx_origin']['pack'] for r in recipe.load_admit(os.path.join(fakeext.VERIFY, '..', '..', '..')).values() if isinstance(r.get('cxx_origin'), dict)}
+            f.publish_pack(co, root)
         out = os.path.join(td, 'out')
         os.makedirs(out)
-        env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'ARTIFACTS_URL': f.art.url, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
+        env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'GATE_CACHE': f.cache, 'ARTIFACTS_URL': f.art.url, 'HOME': td, 'GIT_TERMINAL_PROMPT': '0'}
         r = subprocess.run([sys.executable, '-I', 'ports/fnv-nx/lift/proof/formgate.py'], cwd=co, env=env, capture_output=True, text=True)
         return r, out
 
@@ -307,12 +366,12 @@ class Cli(unittest.TestCase):
 
     def test_missing_pack_is_red_with_reason(self):
         with workdir() as td:
-            f = Fixture(td, GOOD, declare=('certs', 'x86ir'))
-            r, out = self.run_gate(td, f)
+            f = Fixture(td, GOOD)
+            r, out = self.run_gate(td, f, publish=False)
             self.assertEqual(r.returncode, 2)
             with open(os.path.join(out, 'forms.json')) as fh:
                 d = json.load(fh)
-            self.assertEqual((d['status'], d['detail'], d['uncertified']), ('red', 'inputs: external liftpack not declared', ['inputs']))
+            self.assertEqual((d['status'], d['detail'], d['uncertified']), ('red', 'inputs: output PACK of liftpack is not published in GATE_CACHE (%s)' % d['detail'].split('(', 1)[1][:-1], ['inputs']))
 
     def test_arguments_are_refused(self):
         r = subprocess.run([sys.executable, '-I', os.path.join(PROOF, 'formgate.py'), '--shapes', 'x'], capture_output=True, text=True, env={'GATE_OUT': '/'})

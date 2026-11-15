@@ -6,10 +6,14 @@ ONE copy of this gate. No argument and no other environment variable is read: ev
 recipe.fetch_externals, by exact commit with tree_sha256 checked, into GATE_CACHE/{store,external}; without GATE_CACHE the cache is
 GATE_OUT/forms-cache). The loader is imported from ports/fnv-nx/verify (sibling of lift/) the way verify/gate_contract.py imports its own (plain imports: a checkout
 without verify/ cannot run the gate, no result file, so the verdict is red).
-Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); certs = `certs/<path>` (certs.tsv); instrs = `liftpack/<path>` (instrs.tsv of the pack: the instance set of the link check, proof/symcheck.py); the external `x86ir` pins the model (x86_proof.ir); its sha256 is derived from that file.
+Keys: external; certs = `certs/<path>` (certs.tsv); the external `x86ir` pins the model (x86_proof.ir); its sha256 is derived from that file.
+
+The pack is not an external of this file. Its shape set and instance set are read only from the PACK output of the admitted pack root
+(admit.json cxx_origin.pack), as published in GATE_CACHE (gate_build.published_output; never built here, absent = red): PACK/shapes.tsv and PACK/instrs.tsv (the
+instance set of the link check, proof/symcheck.py).
 
 Universe: the ENCODING SHAPES of the lifted pack, whole: the rows `shape_key<TAB>family<TAB>count` of shapes.tsv (sorted by key, unique, family in
-int x87 simd sys) inside the external `liftpack`; the generate driver of the pack writes it with proof/shape.py:shape_key. The gate has no decoder
+int x87 simd sys) of that PACK; the generate driver of the pack writes it with proof/shape.py:shape_key. The gate has no decoder
 of the exe and no census of its own. A shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result obligations undef_flags def0_witness def0_free nonflag_free) has a row with
 the same shape key, the dsl_sha that the CURRENT code gives (symform.shape_sha(key): sha256 of the symbolic Form, immediate / displacement /
 relative-target fields as variables; the same function the prover writes the field with; none when the shape has no symbolic Form: then the shape
@@ -20,13 +24,10 @@ Pinned model: the external `x86ir` is the one place x86_proof.ir is pinned (comm
 
 RED with the reason (item `inputs`, universe 1, certified 0), never skipped: no inputs file; not JSON; wrong format or keys; a path key naming an
 external that is not declared (`inputs: external NAME not declared`); a missing `x86ir` external; an external
-that does not fetch or whose tree does not match its hash; shapes.tsv or certs.tsv absent from its external or malformed. Otherwise the items are the
+that does not fetch or whose tree does not match its hash; a PACK that is not published, or lacks shapes.tsv or instrs.tsv, or a certs.tsv absent from its external; a malformed shapes.tsv or certs.tsv. Otherwise the items are the
 shapes; uncertified = shapes without a certificate (first 50, sorted); detail keeps the certified/universe count per family.
 
-TODAY (no pack with shapes.tsv is published): the committed file declares only `certs`, so the gate is RED with `inputs: external liftpack not declared`.
-To make it live add ONE entry to "external" in formgate_inputs.json:
-  {"name": "liftpack", "repo": "fnv-nx-build", "ref": <branch of the pack>, "commit": <40 hex>, "tree_sha256": <cas tree hash of that commit's checkout>, "at": "/ext/liftpack"}
-(tree_sha256 = what recipe.fetch_externals reports for it)."""
+Without the pack root published in GATE_CACHE the gate is RED with `inputs: output PACK of <root> is not published in GATE_CACHE`."""
 import hashlib
 import hashlib
 import json
@@ -43,13 +44,14 @@ sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
 from proof import certbasis, codeuniverse, eaaudit, shape, symcheck, symform  # noqa: E402
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
+import gate_build  # noqa: E402
 import recipe  # noqa: E402
 
 NAME = "forms"
 INPUTS = os.path.join(HERE, "formgate_inputs.json")
 FORMAT = "fnvnx-forms-inputs/1"
 EXT_KEYS = recipe.EXT_KEYS
-KEYS = {"format", "external", "shapes", "certs", "instrs"}
+KEYS = {"format", "external", "certs"}
 IR_EXT = "x86ir"      # the external that pins x86_proof.ir: the one place the model is pinned; its sha256 is derived from the file
 REFERENCES = ("sail", "fpsmt", "k", "sdm", "table")
 FAMILIES = shape.FAMILIES
@@ -93,7 +95,7 @@ def load_inputs(path=INPUTS):
     names = [e["name"] for e in exts]
     if len(set(names)) != len(names):
         raise Red("inputs: external names are not unique")
-    for k in ("shapes", "certs", "instrs"):
+    for k in ("certs",):
         v = doc[k]
         if not isinstance(v, str) or "/" not in v or ".." in v.split("/"):
             raise Red("inputs: %s must be NAME/path inside a declared external" % k)
@@ -119,6 +121,27 @@ def fetch(doc, cache):
 def file_sha(p):
     with open(p, "rb") as fh:
         return hashlib.sha256(fh.read()).hexdigest()
+
+
+def pack_dir(cache, repo="."):
+    """-> the published PACK directory of the lifted pack: the root is the one `cxx_origin.pack` of admit.json (every admitted root whose cxx_origin names a
+    pack names the same root; never a path written here), its declared PACK output as published in GATE_CACHE (gate_build.published_output; it never
+    builds). An absent, undeclared or gone output is Red, never skipped. shapes.tsv and instrs.tsv are files of that directory."""
+    packs = {r["cxx_origin"]["pack"] for r in recipe.load_admit(repo).values() if isinstance(r.get("cxx_origin"), dict) and "pack" in r["cxx_origin"]}
+    if len(packs) != 1:
+        raise Red("inputs: admit.json must name exactly one cxx_origin.pack root (it names %d)" % len(packs))
+    root = packs.pop()
+    try:
+        return gate_build.published_output(cache, root, "PACK", repo)[0]
+    except LookupError as e:
+        raise Red("inputs: %s" % e)
+
+
+def pack_file(pack, name):
+    p = os.path.join(pack, name)
+    if not os.path.isfile(p):
+        raise Red("inputs: %s: %s is missing from the published PACK" % (name.split(".")[0], name))
+    return p
 
 
 def path_in(ext, v, what):
@@ -203,12 +226,13 @@ def analyse(shapes_path, certs_path, model_sha):
     return fam, cert, nobuilder
 
 
-def judge(cache, inputs=INPUTS):
+def judge(cache, inputs=INPUTS, repo="."):
     """-> (universe, certified, uncertified ids, detail); never raises for an input problem"""
     try:
         doc = load_inputs(inputs)
         ext = fetch(doc, cache)
-        fam, cert, nobuilder = analyse(path_in(ext, doc["shapes"], "shapes"), path_in(ext, doc["certs"], "certs"), file_sha(path_in(ext, IR_EXT + "/ir/x86_proof.ir", "x86_proof.ir")))
+        pack = pack_dir(cache, repo)
+        fam, cert, nobuilder = analyse(pack_file(pack, "shapes.tsv"), path_in(ext, doc["certs"], "certs"), file_sha(path_in(ext, IR_EXT + "/ir/x86_proof.ir", "x86_proof.ir")))
     except Red as e:
         return 1, 0, ["inputs"], str(e)[:600]
     except (OSError, ValueError) as e:
@@ -217,7 +241,7 @@ def judge(cache, inputs=INPUTS):
         shutil.rmtree(os.path.join(cache, "ws"), ignore_errors=True)     # the checkouts of the externals (the CAS store keeps the content)
     unc = [k for k in sorted(cert) if not cert[k]]
     try:      # the link check (symcheck.py, ASM-006): every instance of the pack's instrs.tsv builds the Form that its shape's proved symbolic Form instantiates to; MISMATCH, unlinked and seglim are red items
-        lc, lred = symcheck.link(codeuniverse.load_instrs(path_in(ext, doc["instrs"], "instrs")))
+        lc, lred = symcheck.link(codeuniverse.load_instrs(pack_file(pack, "instrs.tsv")))
     except (Red, codeuniverse.Bad) as e:
         return 1, 0, ["inputs"], str(e)[:600]
     ninst = lc["instances"] - lc["no-form"]      # the instances that are Form instances (a no-form instance has neither builder: nothing to link)
@@ -239,7 +263,7 @@ def main(argv):
         return 1
     cache = cache_dir(os.environ)
     os.makedirs(cache, exist_ok=True)
-    u, c, ids, detail = judge(cache)
+    u, c, ids, detail = judge(cache, INPUTS, ".")
     gatefile.write(NAME, u, c, ids, detail)
     st = "green" if u == c else "red"
     sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, detail[:200]))
