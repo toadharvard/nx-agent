@@ -190,3 +190,14 @@ static inline void mmx_canon(void){ for(int i=0;i<8;i++){ fv *p=&c->fx[i]; if(p-
 #define MMX_EMMS() do{ for(int i_=0;i_<8;i_++) fv_free(&c->fx[i_]); }while(0)
 #define MMR(i) (c->fx[(i)].v)
 #define MMW(i,val) do{ u64 v_=(val); c->fx[(i)].v=v_; c->fx[(i)].e=0xffffu; }while(0)
+/* DSL x87 state (fnvlift/dsl.py F.fr F.ftop F.ftag F.fsw F.fptr and the fr<i> ftop ftag fcw fsw fip fdp fop fcs fds pre-state). The state is struct cpu (the dynamic-stack, flushed state: a function that
+   keeps the x87 stack in locals flushes it before such a Form, f_x87_ctl.store); fr<i> = the PHYSICAL register i. fr: the exact 80-bit image of the carrier, an empty register's own bits included;
+   a write keeps an empty register empty and turns a valid one into an M80 carrier. ftag: the 2-bit tags of the contents (fx_tag) in physical order; a write of 11 frees the register (its bits
+   stay), any other tag makes an empty register valid with the bits it holds. fsw (without TOP): sticky flags IE..PE, SF, C1 from c->fex (plus the live FPSR flags), ES and B (fx_esb), C0 C2 C3 from
+   the function's locals; a write replaces all of them (the host FPSR flags of the x87 family are cleared, fx_flags_clear's rule). */
+static inline u128 fx_dsl_fr(u32 i){ fnvl_f80 x=fv_x(c->fx[i]); return ((u128)(x.se&0xffffu)<<64)|x.m; }
+static inline void fx_dsl_fr_set(u32 i, u128 v){ fv *p=&c->fx[i]; p->v=(u64)v; p->e=(u32)(v>>64)&0xffffu; if(p->k) p->k=FK_M80; }
+static inline u32 fx_dsl_ftag(void){ u32 t=0; for(u32 i=0;i<8;i++) t|=fx_tag(&c->fx[i])<<(2*i); return t; }
+static inline void fx_dsl_ftag_set(u32 t){ for(u32 i=0;i<8;i++){ fv *p=&c->fx[i]; if(((t>>(2*i))&3u)==3u) fv_free(p); else if(!p->k){ p->k=FK_M80; } } }
+static inline u32 fx_dsl_fsw(u32 c0,u32 c2,u32 c3){ return ((c->fex&FEX_X87)|(fx_live()&0x3fu)|fx_esb()|((c0&1u)<<8)|((c2&1u)<<10)|((c3&1u)<<14))&0xffffu; }
+#define FX_DSL_FSW_SET(V) do{ u32 v_=(V); c->fex=(c->fex&~FEX_X87)|(v_&FEX_X87); c->fsw=v_&0x8080u; if(fown()==1u) fnvl_fp_x87_clear(); c0=(v_>>8)&1u; c2=(v_>>10)&1u; c3=(v_>>14)&1u; }while(0)

@@ -383,11 +383,30 @@
    "outputs": [
     "win32/declared_os.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/declared/x86sys.json",
+    "/out/record/x86sys.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/declared/x86sys.json"
+   ],
+   "outputs": [
+    "record/x86sys.json"
+   ]
   }
  ],
  "uses": [
-  {"root": "ports/fnv-nx/bridgefacts", "output": "COM_ROWS"},
-  {"root": "ports/fnv-nx/bridgefacts", "output": "COM_WORDS"}
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "COM_ROWS"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "COM_WORDS"
+  }
  ],
  "os_layer": [],
  "link": null,
@@ -560,5 +579,8 @@
    "type": "FT_Error",
    "success": 0
   }
+ },
+ "outputs": {
+  "X86SYS": "record/x86sys.json"
  }
 }

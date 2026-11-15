@@ -38,10 +38,7 @@ static void zero(u32 p, u32 n) { for (u32 i = 0; i < n; i += 4) M32(p + i) = 0; 
 enum { CX_I386 = 0x10000, CX_CONTROL = 1, CX_INTEGER = 2, CX_SEGMENTS = 4, CX_FP = 8, CX_DEBUG = 0x10, CX_EXT = 0x20, CX_FULL = CX_CONTROL | CX_INTEGER | CX_SEGMENTS,
        CX_EXCEPTION = CX_I386 | CX_FULL | CX_DEBUG | CX_FP | CX_EXT,      /* 0x1003F: save_context / raise_exception_full_context */
        CX_CAPTURE = CX_I386 | CX_FULL };                                  /* 0x10007: RtlCaptureContext (RtlUnwind) */
-/* FXSAVE's MXCSR_MASK of the reference CPU (Intel SDM vol. 1, 11.6.6 "Guidelines for Writing to the MXCSR Register": the mask has every bit set that the CPU lets software set;
-   bit 6 DAZ is set when the CPU supports denormals-are-zeros, which every CPU with SSE2 and FXSR of the model does) -- derived from the model's cpuid leaf 1, so a change of the leaf is a build error here. */
-static_assert((FNVL_CPUID1_EDX >> 24 & 7u) == 7u, "FXSR (24), SSE (25), SSE2 (26) of cpuid leaf 1 EDX: the model has FXSAVE with MXCSR and DAZ");
-#define FNVL_MXCSR_MASK 0xffffu
+/* FXSAVE's MXCSR_MASK is FNVL_MXCSR_MASK of fnvl_cpuref.h (verify/cpuid_model.json `mxcsr_mask`: derived, the Forms have no DAZ, SDM Vol 1 11.6.6). */
 enum { C_DR = 4, C_EXT = 204, FS_SIZE = 112, XS_SIZE = 512 };           /* Dr0 Dr1 Dr2 Dr3 Dr6 Dr7 at 4; FLOATING_SAVE_AREA 112 bytes at 28; ExtendedRegisters[512] at 204 */
 enum { FS_CW = 0, FS_SW = 4, FS_TW = 8, FS_EO = 12, FS_ES = 16, FS_DO = 20, FS_DS = 24, FS_REG = 28, FS_CR0 = 108 };       /* FLOATING_SAVE_AREA */
 enum { X_FCW = 0, X_FSW = 2, X_FTW = 4, X_FOP = 6, X_FIP = 8, X_FCS = 12, X_FDP = 16, X_FDS = 20, X_MXCSR = 24, X_MXMASK = 28, X_ST = 32, X_XMM = 160 };   /* XSAVE_FORMAT (FXSAVE image) */
@@ -204,20 +201,11 @@ int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 e
 extern "C" void fnvl_raise(u32 code, u32 at) {
     u32 sp = esp, eip = at, addr = at, np = 0, nt = 0, info[3] = { 0, 0, 0 };
     switch (code) {
-    case FNVL_DE0:    nt = 0xC0000094u; break;
-    case FNVL_DEOVF:  nt = 0xC0000095u; break;
-    case FNVL_BP:     nt = 0x80000003u; np = 3; break;          /* Wine 9.0 unix/signal_i386.c trap_handler TRAP_x86_BPTFLT: ExceptionAddress = the int3 byte (Eip - 1), 3 parameters {0,0,0}; setup_raise_exception: Context.Eip-- for EXCEPTION_BREAKPOINT, so Context.Eip = the int3 byte too */
+#include "seh_faults.inc"                                  /* every fault code served by table: generated from fnvlift/faults.json (tools/gen_faults.py) */
     case FNVL_DBGSRV:                                          /* Wine 9.0 unix/signal_i386.c handle_interrupt case 0x2d */
         if (eax == 1 || eax == 3 || eax == 4 || eax == 5) { c->ra = at + 3; return; }     /* BREAKPOINT_PRINT / LOAD_SYMBOLS / UNLOAD_SYMBOLS / COMMAND_STRING: the service is done, execution continues 3 bytes on, no exception */
         nt = 0x80000003u; addr = at + 3; eip = at + 2; np = 3; info[0] = eax; info[1] = ecx; info[2] = edx;    /* Eip += 3, ExceptionAddress = Eip, then setup_raise_exception's Context.Eip-- */
         break;
-    case FNVL_UD:     nt = 0xC000001Du; break;
-    case FNVL_PRIV:   nt = 0xC0000096u; break;
-    case FNVL_BOUNDS: nt = 0xC000008Cu; break;
-    case FNVL_INTO:   nt = 0xC0000095u; eip = at + 1; break;
-    case FNVL_ASSERT: nt = 0xC0000420u; break;
-    case FNVL_STEP:   nt = 0x80000004u; break;
-    case FNVL_LOCK:   nt = 0xC000001Eu; break;
     }
     if (nt == 0) __builtin_unreachable();       /* not reached: every emitted code is a case above */
     fnvl_raise_rec(nt, 0, addr, np, info, eip, sp, CX_EXCEPTION, c->eflags);   /* hardware: EFLAGS as the lifted site flushed it (RAISE_OUT) */

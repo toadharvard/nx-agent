@@ -20,6 +20,7 @@
  },
  "include": [
   "ports/fnv-nx/lift/rt",
+  "ports/fnv-nx/lift/rt/gen",
   "ports/fnv-nx/platform/include",
   "ports/fnv-nx/hostabi/include"
  ],
@@ -60,5 +61,73 @@
    "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
    "at": "/ext/gcc"
   }
- ]
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_faults.py",
+   "args": [
+    "/out/gen"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift/faults.json"
+   ],
+   "outputs": [
+    "gen/fnvl_faults.h",
+    "gen/seh_faults.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_cpuref.py",
+   "args": [
+    "/out/gen"
+   ],
+   "inputs": [
+    "ports/fnv-nx/verify/cpuref.json",
+    "ports/fnv-nx/verify/cpuid_model.json",
+    "ports/fnv-nx/lift/fnvlift/cpumodel_bits.py"
+   ],
+   "outputs": [
+    "gen/fnvl_cpuref.h",
+    "gen/rcpref.h",
+    "gen/cpumodel_tab.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_sys.py",
+   "args": [
+    "/uses/ports/fnv-nx/platform/X86SYS",
+    "/out/gen"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/fnvl_sys.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/dispgen.py",
+   "args": [
+    "--prefix",
+    "fnvnx_native",
+    "/uses/ports/fnv-nx/contract/facts/native",
+    "/out/native_disp.S"
+   ],
+   "inputs": [],
+   "outputs": [
+    "native_disp.S"
+   ]
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "X86SYS"
+  },
+  {
+   "root": "ports/fnv-nx/contract/facts",
+   "output": "native"
+  }
+ ],
+ "outputs": {
+  "GEN": "gen"
+ }
 }
