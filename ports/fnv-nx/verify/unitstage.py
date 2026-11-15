@@ -149,7 +149,8 @@ class Build:
         for spec in [a.src_root] + a.include:
             host, sep, at = spec.rpartition("@")
             if not sep and spec is not a.src_root:   # -I of a sandbox path inside a declared input of the tool runtime (an external)
-                if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/") for i in self.rt["inputs"]):
+                if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/")
+                           or (spec.startswith("/uses/") and i["at"].startswith(spec.rstrip("/") + "/")) for i in self.rt["inputs"]):   # /uses/ROOT: the directory its outputs are mounted in
                     raise UnitError("--include %s: not HOST@/inc/N and inside no input of the tool runtime" % spec)
                 self.iargs.append("-I" + spec)
                 continue

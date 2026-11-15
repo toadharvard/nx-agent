@@ -34,20 +34,12 @@
    "at": "/ext/msdocs"
   },
   {
-   "name": "wine-sm1",
+   "name": "wine-9.0-d3d9",
    "repo": "fnv-nx-build",
-   "ref": "tools/wine-sm1",
-   "commit": "0a52e82db01433f1b0363c52cf68920ba059a1b1",
-   "tree_sha256": "70046f62058eb7c7addb664ce1e8438dacb68273abd4b23863e048e28addd530",
+   "ref": "tools/wine-9.0-d3d9",
+   "commit": "2d819f70541595fc3a7a2d05c9386cf3b5e196a7",
+   "tree_sha256": "bf43adb887c9afff8d512724e5bfd11f19e9dbbe06f1122c2859b2fcc2922c29",
    "at": "/ext/wine"
-  },
-  {
-   "name": "vkd3d",
-   "repo": "fnv-nx-build",
-   "ref": "tools/vkd3d",
-   "commit": "fd97ca35ae29a3f79b7a3467fe99d1a3b4e94643",
-   "tree_sha256": "8ea2fb820f32b38bdb360b63d87f2802e3a9705bc39403b5837441a5a87382d9",
-   "at": "/ext/vkd3d"
   }
  ],
  "generated": [
@@ -59,7 +51,7 @@
     "--wine",
     "/ext/wine",
     "--vkd3d",
-    "/ext/vkd3d",
+    "/ext/wine",
     "--recipe",
     "/in/ports/fnv-nx/render/shaders/total/build.json",
     "--out",
@@ -77,8 +69,8 @@
   }
  ],
  "outputs": {
-  "sm_table": "gen/sm_table.json",
-  "sm_illegal": "gen/sm_illegal.tsv",
-  "sm_rows": "gen/fnvnx_sm_rows.h"
+  "sm_table.json": "gen/sm_table.json",
+  "sm_illegal.tsv": "gen/sm_illegal.tsv",
+  "fnvnx_sm_rows.h": "gen/fnvnx_sm_rows.h"
  }
 }

@@ -5,10 +5,10 @@ S1 = "MS:dx9-graphics-reference-asm-"
 def ops_source(ops, f):
     import sm_cases
     return "; ".join(sorted({v["source"] for k, v in ops.items() if sm_cases.asm_op(k.split(":")[1]) == f}))[:300]
-def legacy_rows(cdir, models, ops):
+def legacy_rows(cdir, models, ops, single):
     sys.path.insert(0, os.path.abspath(cdir))
     import sm_cases
-    sm_cases.bind(ops)
+    sm_cases.bind(ops, single)
     out, conf, resolved = [], [], []
     def R(m, k, f, st, src, rule=""): out.append(dict(model=m, kind=k, feature=f, status=st, source=src, rule=rule))
     inmodel = lambda st, key, m: m in ops.get("%s:%s" % (st, key), {}).get("models", [])
@@ -17,7 +17,7 @@ def legacy_rows(cdir, models, ops):
         st = m[:2]; base = f.split("@")[0]
         if k == "opcode" and "@" not in f:
             if f in sm_cases.OPS[m]: R(m, k, f, "legal", ops_source(ops, f))
-            else: R(m, k, f, "illegal", "R4 closed world over the instruction-page version tables (%s): %s is not listed for %s" % (ops_source(ops, f), f, m), "opcode %s is not in the %s instruction set" % (f, m))
+            else: R(m, k, f, "illegal", "the instruction page version table (%s) does not list %s for %s: an opcode is in a model's instruction set exactly when its page's version table lists the model" % (ops_source(ops, f), f, m), "opcode %s is not in the %s instruction set" % (f, m))
         elif f.startswith("call@label-used"): R(m, k, f, "legal", S1 + "vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)")
         elif f in ("callnz@p0", "if@p0"): R(m, k, f, "legal", ops["%s:%s" % (st, "callnz_pred" if f[0] == "c" else "if_pred")]["source"])
         elif f in ("if@temp-written-in-branch-only", "rep@temp-written-in-loop"):
@@ -45,9 +45,9 @@ def legacy_rows(cdir, models, ops):
         elif f == "c[a0.x+n]@aL-loop": R(m, k, f, "legal", S1 + "vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)")
         elif f == "o[a0.x]": R(m, k, f, "illegal", S1 + "vs-registers-vs-3-0 (o# RelAddr aL only)", "o# relative addressing only through aL")
         elif f == "v[a0.x]":
-            R(m, k, f, "illegal", S1 + "vs-registers-vs-3-0 ('Indexing Registers': v# indexed 'using the loop counter register (aL)'; the register table's 'a0/aL' RelAddr cell is the row summary; same-page prose wins, as for o#)", "v# relative addressing only through aL in vs_3_0")
+            R(m, k, f, "illegal", S1 + "vs-3-0.md:33 (prose: 'the following register banks can be indexed, using the loop counter register (aL)') against the cell vs-registers-vs-3-0.md:24 ('a0/aL'); the prose wins (R3), as for o#", "v# relative addressing only through aL in vs_3_0")
             resolved.append(dict(kind="legacy", id="vs_3_0:v[a0.x]", rule="R3", resolution="v[a0.x] is illegal in vs_3_0 (sm_illegal.tsv); v[aL+n] stays legal",
-                                 evidence="MS vs-registers-vs-3-0: table cell 'a0/aL' vs the same page's prose 'the following register banks can be indexed, using the loop counter register (aL)': prose names the mechanism, the cell lists the column's register types (the same page gives o# 'aL' only, resolved the same way); wine decoder is unconstrained (silence)"))
+                                 evidence="MS vs-registers-vs-3-0.md:24 table cell 'a0/aL' vs dx9-graphics-reference-asm-vs-3-0.md:33 prose 'the following register banks can be indexed, using the loop counter register (aL)': prose names the mechanism, the cell lists the column's register types (the same page gives o# 'aL' only, resolved the same way); wine decoder is unconstrained (silence)"))
         elif k == "usage":
             R(m, k, f, "legal", S1 + "dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15")
         else: R(m, k, f, "unreachable-doc", "no rule found for %s/%s" % (k, f))

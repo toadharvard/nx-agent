@@ -900,8 +900,8 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     inc = rec.get("include")
     tg = entry_of(roots, root + "@" + variant if variant else root).get("target")
     for d in inc if isinstance(inc, list) else err.append("include must be a list") or []:
-        if isinstance(d, str) and any(under(d, a) for a in ats):
-            continue
+        if isinstance(d, str) and any(under(d, a) for a in ats + ["/uses/" + u["root"] for u in rec.get("uses", []) if isinstance(u, dict) and isinstance(u.get("root"), str)]):
+            continue            # inside an external, or the directory a `uses` output of another root is mounted in (/uses/ROOT)
         if not rel_ok(d) or tree_of(roots, d) is None:
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
         elif not under(d, root) and not any(under(d, r) and roots[r].get("class") == "product" and tg in targets_of(roots[r]) for r in roots):
@@ -1516,7 +1516,7 @@ class Job:
         for a directory inside an external (a declared input of the tool runtime)."""
         out, n = [], 0
         for d in self.rec["include"]:
-            if any(under(d, e["at"]) for e in self.ext.values()):
+            if any(under(d, e["at"]) for e in self.ext.values()) or any(under(d, "/uses/" + u["root"]) for u in self.rec.get("uses", [])):
                 out.append(d)
                 continue
             if under(d, self.root):
@@ -1621,10 +1621,12 @@ class Job:
             fp = os.path.join(ws, "flags-%s.json" % k)
             sem = semantics_for(self.hostpath(drv["c" if k == "asm" else k]), k, origin=self.roots[self.root].get("cxx_origin")) if guest else []   # the recipe's flags: semantics first, then the root's own
             json.dump({"argv": sem + rec["flags"][k]}, open(fp, "w"))
-            builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
+            rtu = os.path.join(ws, "toolrt-uses-%s.json" % k)     # the tool runtime plus the `uses` outputs: they are inputs of the stage (an include inside one is valid)
+            trj = json.load(open(rtp))
+            json.dump(dict(trj, inputs=trj["inputs"] + self.use_inputs(ws)), open(rtu, "w"))
+            builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtu, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
-            builds[k].rt = dict(builds[k].rt, inputs=builds[k].rt["inputs"] + self.use_inputs(ws))
             builds[k].variant = self.variant
             builds[k].hint_ns = self.root + ("@" + self.variant if self.variant else "")   # closure hints are per root (unitstage.hint_path)
             if k in pk:   # plugins are loaded by the CC stage only, never by preprocessing (guest roots: C and C++ units; host roots: C++ only)

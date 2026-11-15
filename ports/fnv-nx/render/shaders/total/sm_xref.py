@@ -24,16 +24,18 @@ def wine_ops(root):
             out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)) - int(m.group(2)), ver(m.group(4)), ver(m.group(5))))
     return out, en
 
+LINES = {}      # (stage, opnum) -> [line numbers in d3dbc.c of the entries parsed by vkd3d_ops]
 def vkd3d_ops(root):
-    s = open(os.path.join(root, "libs/vkd3d-shader/d3dbc.c")).read()
+    s = open(os.path.join(root, "libs/vkd3d/libs/vkd3d-shader/d3dbc.c")).read()
     en = _enum(s, "VKD3D_SM1_")
     out = {}
     for st, tab in (("vs", "vs_opcode_table"), ("ps", "ps_opcode_table")):
-        body = s[s.index("struct vkd3d_sm1_opcode_info %s[]" % tab):]; body = body[:body.index("};")]
-        for m in re.finditer(r"\{VKD3D_SM1_OP_(\w+),\s*(\d+),\s*(\d+),\s*\"(\w+)\",\s*\w+(?:,\s*\{(\d),\s*(\d)\})?(?:,\s*\{(\d),\s*(\d)\})?\}", body):
-            lo = (int(m.group(5)), int(m.group(6))) if m.group(5) else None
-            hi = (int(m.group(7)), int(m.group(8))) if m.group(7) else None
+        base = s.index("struct vkd3d_sm1_opcode_info %s[]" % tab); body = s[base:]; body = body[:body.index("};")]
+        for m in re.finditer(r"\{VKD3D_SM1_OP_(\w+),\s*(\d+),\s*(\d+),\s*VKD3DSIH_\w+(?:,\s*\{\s*(\d)\s*,\s*(\d)\s*\})?(?:,\s*\{\s*(?:(\d)\s*,\s*(\d)|~0u,\s*~0u)\s*\})?,?\}", body):
+            lo = (int(m.group(4)), int(m.group(5))) if m.group(4) else None
+            hi = (int(m.group(6)), int(m.group(7))) if m.group(6) else None
             out.setdefault((st, en[m.group(1)]), []).append((int(m.group(2)), int(m.group(3)), lo, hi))
+            LINES.setdefault((st, en[m.group(1)]), []).append(s.count("\n", 0, base + m.start()) + 1)
     return out, en
 
 def models_of(entries, stage):

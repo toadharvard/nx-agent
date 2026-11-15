@@ -19,9 +19,11 @@ def derive(ops):
     return ms, O, sorted({o for l in O.values() for o in l})
 
 MODELS = OPS = EXTRA = None
-def bind(ops):
+SINGLE = []
+def bind(ops, single):
     """fix the universe to the table; EXTRA[m] = the mnemonics of the universe the table does not list for m (closed world R4: illegal)"""
-    global MODELS, OPS, EXTRA
+    global MODELS, OPS, EXTRA, SINGLE
+    SINGLE = single      # vs: these ops write one component (the vs masking page)
     MODELS, OPS, uni = derive(ops)
     EXTRA = {m: [o for o in uni if o not in OPS[m]] for m in MODELS}
 def isvs(m): return m[0] == "v"
@@ -69,7 +71,7 @@ def opbody(m, op):
         if op == "dp2add": a[2] += ".x"
         if op == "cnd": a[0] = "r0.a"
         if op == "sgn": a = [s[0], "r1", "r2"] if not isvs(m) else ["v0", "r1", "r2"]
-        d = "a0" + DSTM["mova"] if op == "mova" else "r0" + DSTM.get(op, "")
+        d = "a0" + DSTM["mova"] if op == "mova" else "r0" + (".x" if isvs(m) and op in SINGLE else DSTM.get(op, ""))
         if op == "mova": return f"mova a0.xy, {a[0]}", "", ""
         return f"{op} {d}, " + ", ".join(a), "", ""
     if op == "nop": return "nop\nmov r0, c0" if ps1 else "nop", "", ""

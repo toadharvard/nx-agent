@@ -7,7 +7,7 @@ guards uncertified (red):
   enum header value / enumerator dropped (per switched enumeration E)  -> header mismatch [E], every enum value red
   front switch over E made a switch over int (per E)                    -> E insensitive, exactly enum:E:* red
   front loses one case label                                             -> front does not build, every enum value red
-  sm_table row changed, rows header not regenerated / regenerated        -> rows header not generated / translator red, every SM row red
+  sm_table generator changes an opcode value (the header follows)        -> translator red, every SM row red
   tree_sha256 of the translator recipe's mojoshader external wrong      -> every SM row red
   opcode-value / stage / comparison assertion dead in the mirror         -> exactly the OP rows / OP rows / rows with a comparison red
   PHASE token not consumed by the parser                                 -> exactly sm:ps:phase red
@@ -27,7 +27,11 @@ sys.path.insert(0, TOTAL)
 import gate_d3d9total as G  # noqa: E402
 
 SWITCHED = G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["SWITCHED"]
-OPS = json.load(open(os.path.join(PORT, "render", "shaders", "total", "sm_table.json")))["opcodes"]
+import tempfile  # noqa: E402
+_GEN = tempfile.mkdtemp(prefix="d3d9total-table-")
+_CACHE = os.path.join(os.environ["GATE_CACHE"], "external") if os.environ.get("GATE_CACHE") else os.path.join(_GEN, "external")
+os.makedirs(_CACHE, exist_ok=True)
+OPS = json.load(open(G.total_outputs(PORT, os.path.join(_GEN, "total"), _CACHE)["sm_table.json"]))["opcodes"]   # the generate stage's output: the table is not a tracked file
 SM_ALL = ["sm:" + k for k in sorted(OPS)]
 SM_OP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0]
 SM_CMP = ["sm:" + k for k in sorted(OPS) if OPS[k]["opnum"] < 0xFFF0 and "cmp" in OPS[k]]
@@ -140,12 +144,10 @@ def mut_case(base):
     open(front, "w").write(t[:m.start()] + t[m.end():])
 
 
-def mut_table(regen):
-    def f(base):
-        edit(base, "render/shaders/total/sm_table.json", lambda t: re.sub(r'("ps:add": \{[^}]*"opnum": )2\b', r"\g<1>3", t, count=1))
-        if regen:
-            subprocess.run([sys.executable, "-I", p(base, "render/shaders/total/gen_sm_rows.py")], check=True)
-    return f
+def mut_table(base):
+    """the table is generated: change the generator so that ps:add's opcode value differs (the rows header follows, the translator must go red)"""
+    old = 'opnum=enum[num.upper()] if num.upper() in enum else None'
+    edit(base, "render/shaders/total/sm_table.py", lambda t: t.replace(old, 'opnum=(3 if (st, num.upper()) == ("ps", "ADD") else enum[num.upper()] if num.upper() in enum else None)', 1) if old in t else sys.exit("mutation target gone"))
 
 
 MIRROR = {}   # filled by main(): {"ext": the recipe's mojoshader external entry, "cache": the gate cache, "tmp": scratch root}
@@ -191,8 +193,7 @@ for _e in SWITCHED:
     CASES["header-drop:" + _e] = (mut_drop(_e), ENUM_ALL, [_e])
     CASES["front-untyped:" + _e] = (mut_untyped(_e), enum_ids(_e), [])
 CASES["front-case-missing"] = (mut_case, ENUM_ALL, [])
-CASES["table-not-generated"] = (mut_table(False), SM_ALL, [])
-CASES["table-wrong-opcode"] = (mut_table(True), SM_ALL, [])
+CASES["table-wrong-opcode"] = (mut_table, SM_ALL, [])
 CASES["tree-hash-wrong"] = (lambda b: edit(b, "render/shaders/translator/build.json", lambda t: t.replace(translator_ext(b)["tree_sha256"], "0" * 64)), SM_ALL, [])
 CASES["value-assert-dead"] = (mut_patch(VALUE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
 CASES["stage-assert-dead"] = (mut_patch(STAGE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
@@ -251,7 +252,7 @@ def main():
         MIRROR.update(cache=cache, tmp=tmp)
         base = scratch(os.path.join(tmp, "base"))
         rc, res = run_gate(base, cache)      # also fills the cache before the parallel cases
-        check("base", rc == 0 and res["status"] == "green" and res["universe"] == 332 and res["certified"] == 332 and not res["uncertified"],
+        check("base", rc == 0 and res["status"] == "green" and res["universe"] == len(ENUM_ALL) + len(SM_ALL) and res["certified"] == res["universe"] and not res["uncertified"],
               "rc %d %s" % (rc, res["detail"][:300]))
         tree_hash_vs_cas(tmp, cache)
         with ThreadPoolExecutor(4) as ex:
@@ -261,7 +262,7 @@ def main():
     for f in FAIL:
         print("FAIL", f)
     survived = {n for n in CASES for f in FAIL if f.startswith(n + ": ")}
-    print("test_d3d9total: base green 332 of 332; %d mutations, %d killed; %s" % (len(CASES), len(CASES) - len(survived), "PASS" if not FAIL else "FAIL"))
+    print("test_d3d9total: base green %d of %d; %d mutations, %d killed; %s" % (len(ENUM_ALL) + len(SM_ALL), len(ENUM_ALL) + len(SM_ALL), len(CASES), len(CASES) - len(survived), "PASS" if not FAIL else "FAIL"))
     return 0 if not FAIL else 1
 
 

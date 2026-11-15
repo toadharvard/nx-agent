@@ -20,7 +20,7 @@ The gate reads only the git-tracked files of these paths (`git ls-files`). It co
 
 - `render/d3d9/front`, `render/d3d9/spec/d3d9_spec.json`
 - the roots' own records: `render/d3d9/build.json` and the directories of its `include` list (nothing restated in the gate), `render/shaders/translator/build.json`
-- `render/shaders/total/sm_table.json`, `gen_sm_rows.py`, `fnvnx_sm_rows.h`
+- `render/shaders/total` (the generator of the SM table and rows header, `build.json`: the gate runs the root's generate stage over the pinned mirrors; the table and the header are not tracked files)
 
 **External.** The MojoShader tree is the `mojoshader` external of the translator root's recipe (`render/shaders/translator/build.json`, the patched mirror fnv-nx-build `tools/mojoshader-glsldk`). Its commit and `tree_sha256` are read from that record; the gate holds no pin of its own and applies no patch.
 

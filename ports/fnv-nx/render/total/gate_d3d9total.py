@@ -4,7 +4,7 @@
 Run in the checkout root (verify/verdict.py does). Writes GATE_OUT/d3d9total.json; exit 0 iff green, 2 red.
 Universe = every (enumeration, enumerator) of the enumerations the translation consumes by switch (SWITCHED of
 render/d3d9/front/gen_enums.py, enumerators from render/d3d9/spec/d3d9_spec.json plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
-+ every row of render/shaders/total/sm_table.json (the SM1-3 commands, (stage, opcode form)), ids "sm:K".
++ every row of the table the total root generates (render/shaders/total, sm_table.json; the SM1-3 commands, (stage, opcode form)), ids "sm:K".
 
 Declared inputs (nothing else is read): the tracked files (git ls-files) of INPUTS below (the d3d9 and translator recipes and the d3d9 root's include lists), copied into GATE_OUT/d3d9total.work;
 the external "mojoshader" of the translator root's recipe (render/shaders/translator/build.json: fnv-nx-build commit + tree_sha256, fetched by exact commit from
@@ -23,7 +23,7 @@ front over E exists) and must compile without the switch flags (so that is the o
 matches for all enumerations, the front builds and E is sensitive.
 
 SM rule. The external is the translator root's own pinned MojoShader tree (the patched mirror; the pin is read from the recipe, nothing
-is applied or restated here); fnvnx_sm_rows.h (gen_sm_rows.py --check: equal to the generator's output for sm_table.json) is put next to fnvnx_sm_check.h.
+is applied or restated here); fnvnx_sm_rows.h (the total root's generate stage output, run here over the same inputs and the pinned mirrors) is put next to fnvnx_sm_check.h.
 The translator sources (mojoshader.c, the glsl profile; the profile set is the -DSUPPORT_PROFILE_* of the translator recipe) must compile: that evaluates
 the _Static_asserts every row expands to. The row of command K is located by the generator's layout (one comment line, then per K in
 sorted order its FNVNX_SM_OP or FNVNX_SM_TOKEN line, then its FNVNX_SM_CMP line if it has a comparison); each line is checked to start
@@ -40,6 +40,8 @@ PORT = os.path.normpath(os.path.join(HERE, "..", ".."))
 REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = os.path.relpath(PORT, REPO)
 D3D9_REC, TRANSLATOR_REC = "render/d3d9/build.json", "render/shaders/translator/build.json"
+TOTAL_DIR = "render/shaders/total"            # the SM table root: its recipe names the generate stage whose outputs are the table and the rows header
+TOTAL_REC = TOTAL_DIR + "/build.json"
 PORT_PFX = "ports/fnv-nx/"
 
 
@@ -51,7 +53,7 @@ def recipe_includes(path):
 # the inputs are the roots' own records: the d3d9 root's recipe and its include lists, the translator root's recipe (its mojoshader external)
 INCLUDES = recipe_includes(D3D9_REC)
 INPUTS = ["render/d3d9/front", "render/d3d9/spec/d3d9_spec.json", D3D9_REC, TRANSLATOR_REC,
-          "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h"] + INCLUDES
+          TOTAL_DIR] + INCLUDES
 GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
@@ -371,12 +373,41 @@ def sm_compile(tree, defs, extra=()):
     return ok, errs
 
 
+def total_outputs(inp, work, cache):
+    """run the total root's generate stage (the recipe's own record: tool, args and externals of TOTAL_REC) over the copied inputs and the pinned
+    mirrors -> {output file name: path}. The table and the rows header exist only as this stage's outputs."""
+    rec = json.load(open(os.path.join(inp, TOTAL_REC)))
+    (st,) = [g for g in rec["generated"] if g["tool"].endswith("/sm_table.py")]
+    exts = {e["at"]: e for e in rec["external"]}
+    gen = os.path.join(work, "gen")
+    os.makedirs(gen)
+    args = []
+    for a in st["args"]:
+        if a.startswith("/ext/"):
+            if a not in exts:
+                raise Red("%s: the generate stage names %s, which is no external of the root" % (TOTAL_REC, a))
+            tree = os.path.join(work, "ext" + a[4:].replace("/", "_"))
+            fetch_external(exts[a], cache, tree, work)
+            a = tree
+        elif a.startswith("/in/" + PORT_PFX):
+            a = os.path.join(inp, a[len("/in/" + PORT_PFX):])
+        elif a == "/out/gen":
+            a = gen
+        args.append(a)
+    r = run([sys.executable, "-I", os.path.join(inp, st["tool"][len(PORT_PFX):])] + args)
+    if r.returncode:
+        raise Red("%s: the generate stage is red: %s" % (TOTAL_REC, (r.stdout + r.stderr)[-300:]))
+    return {os.path.basename(o): os.path.join(work, o) for o in st["outputs"]}
+
+
 def sm_part(inp, work, cache):
-    ops = json.load(open(os.path.join(inp, "render", "shaders", "total", "sm_table.json")))["opcodes"]
-    universe = ["sm:" + k for k in sorted(ops)]
-    info = {"rows_header_equals_generated": False, "baseline_compiles": False, "layout": False, "killed": {}, "error": ""}
+    info = {"baseline_compiles": False, "layout": False, "killed": {}, "error": ""}
     os.makedirs(work)
+    ops, universe = {}, []
     try:
+        gen = total_outputs(inp, os.path.join(work, "total"), cache)
+        ops = json.load(open(gen["sm_table.json"]))["opcodes"]
+        universe = ["sm:" + k for k in sorted(ops)]
         exts = [x for x in json.load(open(os.path.join(inp, TRANSLATOR_REC)))["external"] if x.get("name") == "mojoshader"]
         if len(exts) != 1 or exts[0].get("repo") != "fnv-nx-build":
             raise Red("%s: exactly one external mojoshader of fnv-nx-build is required" % TRANSLATOR_REC)
@@ -384,9 +415,7 @@ def sm_part(inp, work, cache):
         tree = os.path.join(work, "ext", "mojoshader")
         info["tree_sha256"] = fetch_external(exts[0], cache, tree, work)
         info["commit"] = exts[0]["commit"]
-        gen_rows = os.path.join(inp, "render", "shaders", "total", "gen_sm_rows.py")
-        info["rows_header_equals_generated"] = run([sys.executable, "-I", gen_rows, "--check"]).returncode == 0
-        rows_text = read(os.path.join(inp, "render", "shaders", "total", ROWS))
+        rows_text = read(gen["fnvnx_sm_rows.h"])
         rows = os.path.join(tree, ROWS)
         write(rows, rows_text)
         write(os.path.join(tree, "mojoshader_version.h"), '#define MOJOSHADER_VERSION -1\n#define MOJOSHADER_CHANGESET "gate"\n')  # cmake-generated
@@ -429,8 +458,6 @@ def sm_part(inp, work, cache):
             if sorted(killed[ln]) != sorted(need[ln]):
                 ok_rows.discard(k)
                 info["killed"]["%s:%d" % (kind, ln)] = {"row": k, "killed": sorted(killed[ln]), "need": sorted(need[ln])}
-        if not info["rows_header_equals_generated"]:
-            ok_rows = set()
     except Red as x:
         info["error"] = str(x)
         ok_rows = set()
@@ -456,16 +483,16 @@ def main():
     universe, uncert = eu + su, ec + sc
     parts = {"enums": {"universe": len(eu), "certified": len(eu) - len(ec), "info": einfo},
              "sm": {"universe": len(su), "certified": len(su) - len(sc), "info": sinfo}}
-    green = not err and universe and not uncert
+    green = not err and not sinfo.get("error") and universe and not uncert
     res = {"format": "fnvnx-gate/1", "name": "d3d9total", "status": "green" if green else "red", "universe": len(universe),
            "certified": len(universe) - len(uncert), "uncertified": sorted(uncert)[:50],
            "detail": "enum values %d of %d certified (header mismatch %s, front builds %s, sensitive %d of %d enumerations); "
-                     "SM commands %d of %d certified (external mojoshader %s, rows header generated %s, translator compiles %s, "
+                     "SM commands %d of %d certified (external mojoshader %s, rows header from the generate stage, translator compiles %s, "
                      "mutations not killed %d)%s"
                      % (len(eu) - len(ec), len(eu), einfo.get("header_mismatch"), einfo.get("front_builds"),
                         sum(1 for s in einfo.get("sensitivity", {}).values() if s["located_in_front"] and s["compiles_without"]),
                         len(einfo.get("sensitivity", {})), len(su) - len(sc), len(su), sinfo.get("tree_sha256"),
-                        sinfo.get("rows_header_equals_generated"), sinfo.get("baseline_compiles"), len(sinfo.get("killed", {})),
+                        sinfo.get("baseline_compiles"), len(sinfo.get("killed", {})),
                         ("; error: " + (err or sinfo.get("error", "")))[:400] if (err or sinfo.get("error")) else ""),
            "parts": parts}
     write(os.path.join(out, "d3d9total.json"), json.dumps(res, sort_keys=True, indent=1) + "\n")
