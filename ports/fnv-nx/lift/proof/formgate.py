@@ -165,10 +165,14 @@ def load_certs(path, model_sha):
     """{shape: set of dsl_sha} of the rows that are proofs against the pinned model"""
     ok = {}
     for r in rows(path):
-        if len(r) != 11:
+        if len(r) != 12:
             raise Red("certs.tsv: bad row %r" % "\t".join(r)[:100])
-        key, _, dsl, model, ref, res, obl = r[:7]
-        if res == "proved" and model == model_sha and ref in REFERENCES and obl == ",".join(OBLIGATIONS):
+        key, _, dsl, model, ref, res, obl, decl = r[:7] + r[11:]
+        # `proved`: every output equals the model's.  `agree-except-declared`: every output equals the model's EXCEPT the registers listed in the declared column
+        # (reg:function pairs, @platform sha256), which the Form takes from a platform function (cpuid: rt/cpumodel.c); a proved row declares nothing
+        if res not in ("proved", "agree-except-declared") or (res == "proved") != (decl == "-"):
+            continue
+        if model == model_sha and ref in REFERENCES and obl == ",".join(OBLIGATIONS):
             ok.setdefault(key, set()).add(dsl)
     return ok
 

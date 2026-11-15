@@ -42,7 +42,7 @@ def main(argv):
     qid = hashlib.sha256(''.join('%s\t%s\n' % x for x in q).encode()).hexdigest()[:12]
     cu = collections.Counter(f for f, _ in fam.values()); sites = collections.Counter()
     for f, c in fam.values(): sites[f] += c
-    noform = sorted(k for k, (f, _) in fam.items() if f == 'int' and k not in forms)
+    noform = sorted(k for k, (f, _) in fam.items() if f in ('int', 'sys') and k not in forms)
     lines = ['# fnvnx-shapequeue/1 queue_id=%s' % qid,
              '# pack_commit=%s' % a.pack_commit, '# prover_commit=%s' % a.prover_commit, '# ir_sha256=%s' % pin,
              '# universe: %s' % ' '.join(h[2:] for h in hdr[:1]),
