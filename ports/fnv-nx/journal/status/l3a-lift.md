@@ -1017,3 +1017,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - L5 w15 writes it into gen_x86sys.py (claude/fnv-l5-platform-w15).
   - The lifter's three cases (gate, other, undecided) all come from the record (w8).
   - Counts requested: int 0x29, int 0x2a-0x2e (direct system calls: a non-zero count goes to L5 and the orchestrator), other int n, gs.
+- 22:58 base3 @ eb9a3c2e6: 18c2b9cde reverted (the FASTFAIL row and a stray lift/--check/ dir). check_int_vectors reads the record, and {3,4,45} equals the record. Local shard 0/95: 985 lifted, 35 missing (34 for want of jtab facts, 1 int 0x6).
+  - Counts over the census byte ranges (5,703,260 insns over 8 images): int 0x29 0; other int n 107; mov r/m16,gs 22; gs-prefixed 3,960, mostly in d3dx9. This is a byte census that includes data; it is not the lifted set.
+  - Recount over UNIVERSE with the reaching edge per site. A data-as-code edge goes to w7; real code is covered by L5 w15's AV row.
+  - w8 merges w7-facts2 b9261cd85 for jtab, facts and universe.
