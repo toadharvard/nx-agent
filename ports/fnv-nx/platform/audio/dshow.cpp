@@ -433,9 +433,10 @@ struct Control final : IMediaControl_ {
     HR GetState(long ms, long *state) override;
     HR RenderFile(const WCH *) override;
     /* Wine 9.0's quartz returns S_OK from all three after a FIXME and leaves the out pointer alone */
-    HR AddSourceFilter(const WCH *, void **) override { fnvnx_wine_fixme(200); return S_OK_; }
-    HR get_FilterCollection(void **) override { fnvnx_wine_fixme(201); return S_OK_; }
-    HR get_RegFilterCollection(void **) override { fnvnx_wine_fixme(202); return S_OK_; }
+    /* the three Wine 9.0 bodies are never inlined: a body that holds a fnvnx_wine_fixme call is its own function (one class per body), not part of its callers (inv_control) */
+    __attribute__((noinline)) HR AddSourceFilter(const WCH *, void **) override { fnvnx_wine_fixme(200); return S_OK_; }
+    __attribute__((noinline)) HR get_FilterCollection(void **) override { fnvnx_wine_fixme(201); return S_OK_; }
+    __attribute__((noinline)) HR get_RegFilterCollection(void **) override { fnvnx_wine_fixme(202); return S_OK_; }
     HR StopWhenReady() override;
 };
 struct Event final : IMediaEventEx_ {
