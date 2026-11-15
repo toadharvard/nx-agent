@@ -822,3 +822,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - ret, indirect jmp, unclosed calls and dispatcher entries read all flags;
     - so does every synchronous exception point (CONTEXT EFlags), unless a rule proves no handler reads it.
 - bottleneck: pack compile volume (97 B/insn; w12 profile, w13 emit categories); the PP key defect is with L1; cand3; workers 4 (w7, w8, w12, w13).
+- 20:40 L3b w11 (claude/fnv-l3b-lift-w11 ee6b58d01618), fixes of the #UD list:
+  - The hand image lists are deleted.
+  - The opmap reads the SDM x87 escape tables. U-NOGATE 66 -> 44, all SDM-undefined encodings: 36 sal /6, 7 test /1, 1 D9 DF.
+  - U-NODEC 87 -> 0, since the site list is now our Graph's decoded instructions (5,694,413 over 8 images).
+  - Provenance of the 87: 61 outside every range, 15 mid-instruction, 4 in a range with no instruction, 7 where linear decode finds a start that the flow graph does not.
+  - These belong to udcert, which waits until after the first frame.
+- Path item found: pack 7b2faae276b2 encs.tsv bytes differ from the image as modules.tsv maps it (d3dx9_38 01721e9d: `df 88 01` against `DF 56 00`). Assigned to w7 at once: per-image mismatch counts and the cause (base, file or keying). The rule: the lifter takes the base and layout from contract/modules.py.
