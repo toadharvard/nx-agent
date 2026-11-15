@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 01:10Z w14 W1 done (libnx 68 -> 0 data-model warnings; 5 -Werror= in guest semantics, rt 1ef9f2566); heap clamp in init.c to be removed (exact by 32-bit address space fact). Pair at 1ef9f2566 on farm: measurement, no publish. W2: fnvnx_wire GIMPLE plugin + call-graph fixpoint (sound design) incl. TLS stores and our switch.h units. objstub grammar: noreturn kind (L1 w20), row 1 one source (w9).
 - 2026-11-15 01:05Z root head 310d0e97e (L1 accepted: b25ddaac7 + w20u unit_flags + w9 f24506325): 7 roots green 0 failed, assumptions 103/103. objstub input-red on the declared_machine.tsv header line form (w9 fixing; source forms come from the header, no gate change).
 - 2026-11-15 01:00Z L1 ruling: guest start/end files and libs = pinned driver -### derivation (w12h 91850075d link/guest.json, crt0.o excluded by ENTRY rule); w14 runtime.libs removed (second declaration), guest_errors onto the derivation.
 - 2026-11-15 00:58Z w14 pair farm session_01KmtZKR9PGPSxf9iUWd5Q54 at 78299544c (inputs by pin; rt branch fbeeb49ff merges L1 559f220db): measurement only, not published. Publish after W1+W2 and C9 0/0, second pair.
