@@ -1407,6 +1407,34 @@ Rules (by symbol tables and file content, never by a name's text):
       not tracked, a tool writes them from tracked inputs (they are checked through the sources and headers they are generated from).
 Universe = defined global names per image + COMDAT signatures per image + units of product roots + tracked headers. Certified = items with
 no finding. No product root: units/headers still count (clauses (c'), (c'') are about the tree), (a) and (b) are empty.
+
+## verify/gate_tlsmodel.py
+
+```text
+Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local reference of a guest object and of a linked guest output uses a
+TLS access model the loader supports, and one symbol is accessed with one model.
+    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
+Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
+objects plus the objects of the roots in its recipe's link.roots (the objects that one linked output is made of), and its linked ELF.
+Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
+NAME the ABI gives a relocation (R_AARCH64_P32_TLS..., R_AARCH64_TLS... for LP64), never a name of the program's text. A relocation is TLS when
+its type name has the family prefix TLS (after an optional P32_) or contains TPREL or DTPREL; the family is the ABI's:
+  TLSGD, TLSLD, TLSDESC (and the dynamic TLS_DTPMOD/TLS_DTPREL/TLS_TPREL/TLSDESC relocations of a linked output): dynamic TLS,
+  TLSIE: initial-exec, TLSLE (and TPREL/DTPREL link-time offsets): local-exec, any other TLS name: unclassified.
+Rules (a finding names the object, the symbol and the relocation):
+  (1) `dynamic-tls`: 0 relocations of the dynamic family, in objects and in the linked output. Loader fact (docs/RUNTIME.md, TLS): the loader gives
+      every thread a per-thread copy of the image template and has no dynamic TLS block (no __tls_get_addr, no TLS descriptors, no DTV).
+  (2) `le-outside`: a local-exec relocation names a symbol that the objects of the link group define (or a section-local symbol): an offset
+      from the thread pointer is only known for a symbol of the same linked output.
+  (3) `ie-required`: a symbol the group does not define (host TLS) must be reached by initial-exec; it is the same finding as (2) for a
+      local-exec relocation, and any other model is rule (1).
+  (4) `mixed-model`: one symbol referenced with initial-exec by one relocation and local-exec by another within a group. A declaration
+      `tls_model("initial-exec")` in a header makes every referencing unit use initial-exec; a unit that did not see it uses another model, so the
+      mixed use is exactly the defect. NOT COVERED (stated gap, owner L3a/L2): the attribute is not recorded in the ELF or in DWARF, so a symbol
+      declared initial-exec that EVERY unit references with local-exec is not seen; closing it needs the declaration as a fact (a plugin note).
+  (5) `unclassified`: a TLS relocation of a name outside the families above.
+Items: every object, every linked ELF, every TLS relocation (object, symbol, relocation name, section, offset). Certified = the items with no
+finding. Counts per relocation family over all roots are in `detail`. No guest root: universe 0, green.
 ```
 
 ## verify/gate_argorder.py
@@ -2083,10 +2111,10 @@ recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", con
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
-Link: `link` = {script, output, flags, kind pie|exe, roots}. kind pie needs target guest, exe needs host; `roots` lists distinct admitted
+Link: `link` = {script, output, flags, kind pie|exe, roots}. a guest root cannot link kind exe; `roots` lists distinct admitted
 product roots of the same target (never the root itself) whose stored objects are declared inputs of the link stage (in its key); the
-image of a product root lists base roots only, a test root any root (a variant is a product root with `variant_of` in admit.json, checked by
-gate_admit.py: a base product root of the same target, no chain). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
+image of a product root lists base roots only, a test root any root (a variant is `root@NAME`, declared in the `variants` of the root's admit.json entry, checked by
+gate_admit.py: product roots only, `{NAME: {"target"?}}`). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
 refused in every link; linkstrict judges the linked output of every product and test root (no undefined symbol of any binding).
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
@@ -2603,3 +2631,21 @@ Output: a JSON document and one summary line per number. Exit 0.
 - (c) FalloutNV.exe sha256 89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe: PE32 SizeOfStackReserve 1048576, SizeOfStackCommit 4096 (the bytes stay outside the repository). The `dwStackSize` of the CreateThread/_beginthreadex call sites is not measured (argflow over exe facts, L3).
 
 These numbers are NOT a bound of the native stack depth per thread: no such bound exists with or without the flag (4954 of 5554 functions unbounded; recursion through indirect or C++ calls is not excluded). The class "native stack depth per thread" is reported to the orchestrator as a run-time failure class without a gate.
+
+## verify/gate_guestlink.py
+
+```text
+Gate "guestlink" (fnvnx-gate/1, class A of VERDICT.md): the guest link profile link/guest.json holds exactly the values the pinned guest runtime's
+own driver derives, so a hand-picked startfile, library directory or library name is red.
+    python3 -I gate_guestlink.py [--write]    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
+    (--write first rewrites `libs` of link/guest.json from the derivation: the way the profile is made; the gate then compares it)
+Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (verify/guest_compiler.json `runtime_driver`) is run, as the hermetic recipe
+stage `drv:<root>`, with the guest semantic flags (flags.semantics.common, filtered for C++ by the pinned compiler) and `-pie -###` on a one-line C++
+file. Its last line is the link command of the multilib the flags select; recipe.parse_driver_link reads startfiles (.o before the library group),
+dirs (-L inside the external), names (-l, in order) and endfiles (.o after the group) from it. An object of startfiles/endfiles is then excluded by
+the one-definition rule only (recipe.onedef): it defines a global or weak symbol that an admitted guest product root defines (the roots' symbols are
+those of their green builds, gate_build.ensure). Nothing is excluded by a name.
+Rule: the derived libs equal `libs` of link/guest.json, key by key and in order, and `libs.external` is the pinned runtime. A difference is a finding
+naming the key, the derived values and the profile's. Items: every entry of dirs, names, startfiles and endfiles, derived or profiled. Certified =
+the entries present in both. A red guest root build, or a driver run that fails, is red with the reason.
+```

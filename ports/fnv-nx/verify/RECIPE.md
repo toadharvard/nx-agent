@@ -48,6 +48,12 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   nonzero size, and two names with different body ids never share an address.
 - `link`: the guest ELF, null = no ELF. A link is the stage `ld:<root>` and the post stage `ldcheck:<root>` of the section "Link: the guest ELF"
   below; `flags` carries the emulation only, `roots` and `libs` are optional.
+  `kind` is `pie` (the ILP32 guest image, the default) or `exe`; a root of target guest cannot link an `exe`. `roots` lists distinct admitted `product`
+  roots of the same target, never the root itself; their stored objects are declared inputs of the link stage (so their content is in its key) and a
+  listed root is built without its own link. A root of class `product` lists base roots only; a root of class `test` lists any root, variants included
+  (`root@NAME`). A variant is one concept: `variants: {NAME: {"target"?}}` in the root's admit.json entry, its flags in the recipe's `variants`,
+  addressed as `root@NAME` (a sanitizer build is a flags variant of the same root). Whatever the flags, `linkstrict` judges the linked output: no
+  undefined symbol of any binding.
 - ABIs: the recipe names the ABI in its flags, and the build reads ELF32 and ELF64 AArch64 objects alike. ILP32 (the product): `-mabi=ilp32`
   in `flags.c`, `flags.cxx` and `flags.asm`, and `-m aarch64linux32` in `link.flags` (the emulation `gcc -mabi=ilp32 -###` passes to
   `ld`; it is required: a link is the ILP32 guest ELF). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
@@ -105,7 +111,7 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
 
 ### Gate rule: every guest C and C++ unit is compiled with the full plugin set
 `admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
-`{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Missing declaration = invalid recipe = red `build`.
+`{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Alternative to `pack`: `"stage": "gen:<root>:<i>"`, a generated step of this recipe whose tool is `lifted_by` (its outputs are the root's units). Exactly one of `pack` and `stage`; the plugin set and flags are the same. Missing declaration = invalid recipe = red `build`.
 - `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
@@ -126,10 +132,14 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   GATE_CACHE/store) and its objects are link inputs AFTER this root's own units, in the order of the list, each root's objects in unit order. An input
   root must be admitted, class product, with `link` null (so a cycle is impossible; `check()` names a cycle `A -> B -> A` anyway), listed once, not the
   root itself. A red input root makes this link red: stage `ld:<root>`, stderr names the input root and its failing stage.
-- `link.libs`: `{"external": NAME, "dirs": [paths inside it], "names": [lib names], "startfiles": [...], "endfiles": [...]}`: the guest libraries of an
-  external of the recipe (a compiler external's newlib/libstdc++ ...), searched the way the gcc driver searches them for the ILP32 PIE multilib:
-  `startfiles -L<external at>/<dir>.. [objects, whole] --start-group -l<name>.. --end-group endfiles`. All paths are relative, inside the external; there
-  is no host path (the external is a declared input of the stage).
+- `link.script`, `link.libs` (guest roots): one fact for every guest link, `ports/fnv-nx/link/guest.json` = `{"script": "link/guest.ld", "libs": {"external": NAME, "dirs": [paths inside it], "names": [lib names], "startfiles": [...], "endfiles": [...]}}`.
+  Every root whose admit.json `target` is guest and that links (the product ELF and every guest test image) gets exactly this script and these libraries; the link
+  stage is `startfiles -L<external at>/<dir>.. [objects, whole] --start-group -l<name>.. --end-group endfiles`, so two guest links differ only by output and objects.
+  `libs.external` is the guest runtime external pinned in `verify/guest_compiler.json` (`runtime`: the guest's libc, libm, libstdc++), which the root declares like
+  any external; all paths are relative, inside it, there is no host path. A guest root that declares `link.script` or `link.libs` itself is red (no per-root choice, so
+  a double of the script cannot exist), a missing or invalid profile is red. The profile's content is in every guest link stage key (script mounted at /ld, libs in argv).
+  A host root declares `script` (a tracked file of the root, required for kind pie) and `libs` as before: `{"external": ..}` of an external of the recipe or `{"system": [..]}`.
+- `link.version_script`: a tracked file of the root, or of an admitted tool root's tree (by repo path).
 - Linked whole: every input OBJECT (own and of the input roots) and every archive that is an input is under `--whole-archive`; there is no `--gc-sections`:
   the set of symbols is the set of the inputs. (The toolchain's libraries of `link.libs` are the linker's to search, as the driver does: whole libc
   would be the wrong set; what they pull in is judged by the symbol tables after the link.)
@@ -137,8 +147,9 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   -z max-page-size=0x1000 -z common-page-size=0x1000`, then the emulation from `link.flags` (`-m aarch64linux32`, `-EL`, `-X` only), `-T script`.
   `--build-id=none` (not the driver's sha1) is the recipe's own rule for determinism. The refusal set R stays.
 - Post stage `ldcheck:<root>` (link/ldcheck.py, a pure python tool of the python runtime like `generated`; inputs: the linked ELF and the input objects): from
-  ELF symbol tables only it checks the rules of the former ld.py: no undefined symbol in the output; every name the inputs reference or define (weak
-  references included: the linker resolves an undefined weak to 0 and drops it) is defined in the output; no dynamic relocation but
+  ELF symbol tables only it checks the rules of the former ld.py: no undefined symbol in the output; every name the inputs reference or define is defined in the
+  output; a WEAK undefined reference (STB_WEAK, SHN_UNDEF: in the output's symbol table, or dropped by the linker, which resolves it to 0) that the output does
+  not define is red, id `weak-undefined:<name> <- <objects that reference it>`, with no exception list (a weak reference that the output defines is fine); no dynamic relocation but
   R_AARCH64_P32_RELATIVE or RELR (no REL, JMPREL, TEXTREL table); the PIE mark (DF_1_PIE); the FNXG magic at the first PT_LOAD + 8 and the entry at the
   first PT_LOAD. Then it writes the crt0 header words +16 (link address), +20 (page aligned span), +24 (bit 0: relocatable) and outputs the final ELF and the
   gate file `ld` (`ld.json`, `ld.ids`). A failed rule is a red build, stage `ldcheck:<root>`, stderr: one `ldcheck: <id>` line per finding.
@@ -150,12 +161,20 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   script required) or `shared` (`-shared -z text -z now`, `link.version_script` required and passed as `--version-script`; the output is `NAME.so`). ldcheck
   of a non-pie kind checks from ELF symbol tables: every name the inputs define or reference is defined; no undefined symbol except those a
   `link.libs.system` library defines (its `.dynsym` is read); no TEXTREL; a shared object's exported names (those the version script names) are defined and
-  global. `link.libs.system`: `[absolute paths of shared libraries of env.json packages]`, mounted as declared inputs at /syslib (their content is in the key).
+  global. `link.libs.system`: `[absolute paths of shared libraries of env.json packages]`, mounted as declared inputs at /syslib (their content is in the key). Any file of a package that env.json pins is admitted, the loader `ld-linux-x86-64.so.2` included (libc6): the link stage asks `envcheck.system_lib_errors` (dpkg's file lists under every usrmerge spelling of the path, against the pinned `packages`); a path no pinned package owns is a red `ld:<root>` stage naming it.
+  `link.loader` (kind shared only): the admitted root (product or test, with a recipe, the same target) of the image that loads this one. ldcheck then accepts
+  undefined names ⊆ (the dynamic exports of the `link.libs.system` libraries) ∪ (the global and weak names defined by the objects of the loader root and of its
+  own `link.roots`, built objects-only through the stage cache and passed to `ldcheck:<root>` as a declared input), and nothing else. The loader is an edge
+  of the root graph (cycles are red). Without `link.loader` only the libraries count.
   `link.roots` works for every kind; a root needed by several images has `link` null and is built once per (root, variant).
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
   `exe` is host only: a root of target guest links a `pie` (emulation `aarch64linux32`, the crt0 header), a guest test root included; a guest root with
-  kind `exe` is refused. A product image's `link.roots` name base roots only; a variant (`root@NAME`) is linked only by a root of class `test`.
+  kind `exe` is refused. A product image's `link.roots` name base roots only; an explicit variant (`root@NAME`) is linked only by a root of class `test`.
+  A `link.roots` entry names a root and the image links that root's recipe for the IMAGE'S OWN TARGET (`recipe.resolve_link_root`): an explicit `root@NAME` must itself
+  have the image's target, else red; a base name is the base recipe when the base's target is the image's, else the one variant of the root that admit.json declares with
+  the image's target (a host image names the guest root `lib/sha256` and links `lib/sha256@host`); no such variant, or several, is red. An object of another target is
+  red at the link in any case (class and e_machine of every input).
   The admit.json entry of a root may carry `variants`: {NAME: {"target": "guest"|"host"}} for variants the recipe declares; a variant inherits the base's
   target otherwise, the guest rules (compiler external, data model) are judged on the effective target, and a variant with its own target has it in
   every stage key (`FNVNX_TARGET`). Sources stay the base root's. Every entry point resolves a `root@NAME` spec with `split_spec` once.
@@ -242,6 +261,13 @@ a call of SYMBOL, with no output effect, the finding `trap-body`. `empty_handler
 variable) and the entry field that holds the handler; the handler of entry k is read from the data relocation at that table, by the layout from DWARF, and an
 empty or constant handler is certified only by the record rows of the entries that select it (rule H). `cover` and `syntax` must be files of an admitted root other than this one (the generated outputs of the root that produces them, e.g. render/shaders/total). A `handler` column in op_cover.tsv (a symbol, a `+` list of clones, `MISSING:S`) is a claim checked against the object: it must equal the table's function, and a missing or undefined handler is the finding `handler-missing`. A root with `empty_handlers` must declare `error_abi`
 (a recipe error otherwise). Both are checked as keys here and judged in objstub.py; the probe (error_abi and tables) is part of the objstub cache key.
+
+## Python of the generated stages
+
+A `generated` step runs in the python runtime of the sandbox (the interpreter and its loader closure, content-addressed: `runtime_id` is in the
+key). Every python module pinned in `verify/env.json` (`python.modules`) is mounted in that runtime, at the content of its installed files, and
+the key of every generated stage also names each of them as `name==version:installed_files_sha256` (envcheck.wheel_digest: the files read from the
+disk, not the RECORD's claim). Changing one module's digest changes the key of every generated stage, and nothing else's.
 
 ## Keep going
 
