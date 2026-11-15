@@ -94,3 +94,12 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
   - atomics;
   - the census by class over 114 objects;
   - the readonly record to w23.
+- 2026-11-15 00:15 w3 reconcile ed8de97a7 (w1 713aeee8b + w2 606c5e7a6 + disp2 dispatch + exitgen), per file:
+  - test_exitgen_defdisp 16/16, cc1 21/21, ftoi 29/29, sse2neon 10/10;
+  - still red: dispatch 3/26, layout 1/41, names 2/2, pi 4/4, sdd 5/26.
+  Causes:
+  - a plugin set per test (order missing);
+  - test-vs-recipe argument message;
+  - non-per-root flags (-w, -fkeep-inline-functions);
+  - an unbuildable no-names root.
+  w3 → toolchain/tests green on claude/fnv-l2-source-w3-tests: one product plugin set from the recipe, a shared refusal helper, product flags only. Status: doing.
