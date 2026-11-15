@@ -1808,3 +1808,7 @@ bottleneck: the cand2 warm verdict on w15.
 bottleneck: the cand2 warm verdict on w15.
 - 21:12 w15 cand2 at 265c4ea4a: pin 56a4d09c/cbb8843f applied; stamp 74cafda21648518e; compiler_stamp_errors=[]; fa5235a50 reverted, 34a4a4b2a picked. toolchain/ equals 17fb4961a except stamp.py, test_stamp.py and plugbuild.py, which now read the include closure (the stamp is unchanged, so the key is valid). Those 3 files go back to L2's plugins branch after the merge. Real-compiler selftests are running, then shard_merge, then the warm verdict.
 bottleneck: the cand2 warm verdict on w15.
+- 21:16 Owner order (integ 49db7687b): the compiler key cannot be wrong. The guest compiler becomes a recipe stage keyed by its mounts, with no pin handover. Lands with cand3; cand2 stays on 56a4d09c.
+  - L1 recipe side (w12, after PP keying and the objstub harness): `compiler` = a stage output, and unit keys include its stage key; base packages are keyed by mounted-tree content and checked by envcheck; compiler_stamp_errors and the guest_compiler pin are deleted; store-export/import provide the mirror; the toolchain root is admitted; toy-stage selftests.
+  - L2 defines stage 1 (gcc) and stage 2 (plugins + runtime) and agrees the interface with w12.
+bottleneck: the cand2 warm verdict on w15.
