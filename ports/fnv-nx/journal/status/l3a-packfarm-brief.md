@@ -1,20 +1,20 @@
-# L3a cold pack build: farm brief (one per shard, i = 0..7)
+# L3a cold pack build: farm brief (one per shard, i = 0..N-1, N up to 16)
 
 Sent by the L3a lead when L1 cand3 is merged and L1 has named the recipe commit with the shard rule. The build
 commit is filled from that commit (shard rule: L1 w26 ca3a256, RECIPE.md "Shards and store merge"), and nothing else is changed per farm except i.
 
-You are L3a pack farm i of 8 (Sonnet) of fnv-nx. Lead: the L3a lead, session_01KmtZKSANKhYEe4nVesF6Ho (send_message,
+You are L3a pack farm i of N (N up to 16) (Sonnet) of fnv-nx. Lead: the L3a lead, session_01KmtZKSANKhYEe4nVesF6Ho (send_message,
 one message when done or blocked, priority next). Read the root CLAUDE.md first; it is binding. No commit trailers, no PRs.
 Exe-derived artifacts (stores, logs with unit contents) go only to toadharvard/fnv-nx-build (add_repo, push access
 authorized).
 
-1. Checkout nx-agent at <BUILD_COMMIT> (the t16l head with cand3 merged and typed dispatch rebased). Install the
+1. Checkout nx-agent at <BUILD_COMMIT> (claude/fnv-l3a-lift-base3: t16l + L1 cand3 c0f504e2a, whose verify/sandbox.py and cas.py are frozen until the pack lands, plus the lift stage chain). Install the
    verdict environment only by `farm/setup_verdict_env.sh`, then `envcheck.py` must pass. No other apt, no other gcc.
 2. Build exactly one shard of the root ports/fnv-nx/lift/pack with the recipe's own shard rule:
-   `python3 -I ports/fnv-nx/verify/recipe.py build --root ports/fnv-nx/lift/pack --store STORE --out OUT --jobs 4 --shard i/8`
+   `python3 -I ports/fnv-nx/verify/recipe.py build --root ports/fnv-nx/lift/pack --store STORE --out OUT --jobs 4 --shard i/N`
    in the background (run_in_background). Externals are fetched by the recipe by exact commit; never fetch or patch them by hand.
 3. Do not edit any source, flag or key. A red unit is reported (its unit name, stage, first error line), not fixed or skipped.
-4. When it ends: publish STORE to fnv-nx-build branch `l3a-lift/packstore/<BUILD_COMMIT_SHORT>-s<i>of8`, with
+4. When it ends: publish STORE to fnv-nx-build branch `l3a-lift/packstore/<BUILD_COMMIT_SHORT>-s<i>of<N>`, with
    the recipe's result summary. Then report to the lead, with numbers from this run at <BUILD_COMMIT>:
    units in the shard, built, red; wall time; and the output of
    `python3 -I ports/fnv-nx/verify/recipe.py timing --root ports/fnv-nx/lift/pack@time --store STORE`

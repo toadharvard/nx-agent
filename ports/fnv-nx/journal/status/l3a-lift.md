@@ -862,3 +862,8 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Worker containers lack the pinned verdict env (`blocked: env`), so w7 runs farm/setup_verdict_env.sh.
 - 21:10 Farm 1 (session_01KmtZKU7i9iyCYMN5hkeoJW) archived. It was disconnected since 17:42Z, its 3b11d118 regen is superseded by the lift/facts stage, and only d3dx9_31 was reported, 2 h 40 min into pcsrc. Risk for the 04:00Z target: pcsrc on d3dx9_31 alone runs for hours, so the facts stage cost sets the schedule. w7 reports per-image stage times.
 - 21:10 Tail rows: universe.py tail_pass admits an instruction start of the global decode outside the source entry's extent. The pack, older than a0f3d8e, lacked them; by the rule the universe is right.
+- 21:15 One shared base, claude/fnv-l3a-lift-base3 (w8): t16l merged with L1 cand3 c0f504e2a. sandbox.py and cas.py are frozen there until the pack lands, since sandbox.py's hash is in every stage key. Merge rule for the 10 conflicts outside lift/:
+  - cand3 wins where t16l held only verbatim upstream takes;
+  - L3a hunks that cand3 lacks are kept and listed.
+  w7 and w13 cherry-pick onto it. w7 bea44f836: x86flow.Image is now the one relocating loader (fpmodes, fpstate and locksites had read unrelocated bytes), and every base comes from MODULES_TSV.
+- Pack farm brief: N up to 16, built at base3 plus the lift stage chain.
