@@ -45,7 +45,7 @@
  * Declared types (section .fnvnx.decltype, C units only, not loaded): see the block comment before emit_decltype: one line `symbol <TAB> type` per
  * external symbol the unit declares or defines, in the grammar of link/ctypes_compat.py (C11 6.2.7p2).
  *
- * Boundary-forbidden types (section .fnvnx.crossing, every unit, not loaded): see the block comment before emit_crossing: one line
+ * Boundary-forbidden types (section .fnvnx.crossing, every unit, not loaded): written by the names plugin (the block comment before cross_holds in toolchain/names/fnvnx_names.cc): one line
  * `symbol <TAB> terms` per external function the unit defines or references, the terms being ids of DATAMODEL.json crossing_forbidden.
  *
  * Objects (section .fnvnx.objects, not loaded): one line per variable definition with static storage the unit
@@ -514,72 +514,7 @@ static void emit_decltype()
   fprintf(asm_out_file, "\t.popsection\n");
 }
 
-/* ---- Types that must not cross the native/exe boundary (section .fnvnx.crossing) ------------------------------------------------------------
- * One line per external function of the unit (every symbol-table function with TREE_PUBLIC that the unit defines or references: the universe of
- * `.fnvnx.sympair`, which is where boundary symbols come from):  symbol <TAB> term[,term...]  or  symbol <TAB> -  when no term holds. The terms
- * are the ids of toolchain/msvcmodel/DATAMODEL.json crossing_forbidden.terms, read from crossing_terms.inc (gen_crossing.py: the ids and which GCC
- * predicate decides each come from that file; this source names none). A term HOLDS for a function iff its GCC predicate holds for the return type
- * or for a parameter type (the implicit `this` is a pointer: it holds nothing), where the predicate of a type T is true iff it is true for T itself,
- * for the element type of an array, for the type of every non-static data member, and for every base class, recursively (a pointer or reference
- * contains nothing: the object it points to is not passed):
- *   CF_BINFO_VIRTUAL    T is a class with a virtual base (CLASSTYPE_VBASECLASSES, which includes the virtual bases of its bases)
- *   CF_PTRMEM           T is a pointer to member: TYPE_PTRDATAMEM_P or TYPE_PTRMEMFUNC_P
- *   CF_VA_LIST_NODE     T is the va_list type (its main variant is va_list_type_node)
- * Terms are sorted and distinct; a symbol once per unit. */
-enum CrossFact { CF_BINFO_VIRTUAL, CF_PTRMEM, CF_VA_LIST_NODE };
-struct CrossTerm { const char *id; CrossFact fact; };
-static const CrossTerm cross_terms[] = {
-#include "crossing_terms.inc"
-};
-
-static bool cross_holds(CrossFact f, tree t, std::set<tree> &seen)
-{
-  if (!t || t == error_mark_node) return false;
-  if (TREE_CODE(t) == ARRAY_TYPE) return cross_holds(f, TREE_TYPE(t), seen);
-  if (!TYPE_P(t)) return false;
-  t = TYPE_MAIN_VARIANT(t);
-  if (f == CF_VA_LIST_NODE && va_list_type_node && t == TYPE_MAIN_VARIANT(va_list_type_node)) return true;
-  if (is_cxx() && f == CF_PTRMEM && (TYPE_PTRDATAMEM_P(t) || TYPE_PTRMEMFUNC_P(t))) return true;
-  if (!RECORD_OR_UNION_TYPE_P(t) || !COMPLETE_TYPE_P(t)) return false;
-  if (!seen.insert(t).second) return false;
-  if (is_cxx() && f == CF_BINFO_VIRTUAL && CLASS_TYPE_P(t) && CLASSTYPE_VBASECLASSES(t) && CLASSTYPE_VBASECLASSES(t)->length()) return true;
-  for (tree m = TYPE_FIELDS(t); m; m = DECL_CHAIN(m))
-    if (TREE_CODE(m) == FIELD_DECL && cross_holds(f, TREE_TYPE(m), seen)) return true;
-  if (cxx_class(t) && TYPE_BINFO(t)) {
-    tree b; int k;
-    for (k = 0; BINFO_BASE_ITERATE(TYPE_BINFO(t), k, b); k++)
-      if (cross_holds(f, BINFO_TYPE(b), seen)) return true;
-  }
-  return false;
-}
-
-static void emit_crossing()
-{
-  std::map<std::string, std::string> rows;
-  symtab_node *sn;
-  FOR_EACH_SYMBOL(sn) {
-    tree d = sn->decl;
-    if (TREE_CODE(d) != FUNCTION_DECL || !TREE_PUBLIC(d) || DECL_IS_UNDECLARED_BUILTIN(d)) continue;
-    bool def = sn->definition && !DECL_EXTERNAL(d) && (TREE_ASM_WRITTEN(d) || sn->alias);
-    if (!def && !TREE_SYMBOL_REFERENCED(DECL_ASSEMBLER_NAME(d))) continue;
-    std::vector<tree> tys;
-    tree ft = TREE_TYPE(d);
-    tys.push_back(TREE_TYPE(ft));
-    for (tree a = TYPE_ARG_TYPES(ft); a && TREE_VALUE(a) != void_type_node; a = TREE_CHAIN(a)) tys.push_back(TREE_VALUE(a));
-    std::set<std::string> held;
-    for (const CrossTerm &c : cross_terms)
-      for (tree t : tys) {
-        std::set<tree> seen;
-        if (cross_holds(c.fact, t, seen)) { held.insert(c.id); break; }
-      }
-    std::string v;
-    for (const std::string &h : held) v += (v.empty() ? "" : ",") + h;
-    rows[IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d))] = v.empty() ? "-" : v;
-  }
-  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.crossing,\"\",%%progbits\n");
-  for (auto &r : rows) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(r.first + "\t" + r.second).c_str());
-  fprintf(asm_out_file, "\t.popsection\n");
-}
+/* `.fnvnx.crossing` is written by the names plugin, from the rows of `.fnvnx.sympair` (toolchain/names/fnvnx_names.cc): one universe. */
 
 static void finish_unit_cb(void *, void *)
 {
@@ -639,7 +574,6 @@ static void finish_unit_cb(void *, void *)
   fprintf(asm_out_file, "\t.popsection\n");
   emit_objects();
   if (!is_cxx()) emit_decltype();
-  emit_crossing();
 }
 
 extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)
