@@ -83,6 +83,12 @@ check("terminators: longjmp family (<setjmp.h>) is a control transfer, an unwind
       and all("~" + n in libc_sj and n not in libc_sj for n in ("longjmp", "siglongjmp")), (cxx_sj, libc_sj))
 check("terminators: __cxa_throw is an unwinder when exceptions are enabled and a terminator under -fno-exceptions", "~__cxa_throw" in cxx_sj and "__cxa_throw" not in cxx_sj
       and "__cxa_throw" in cxx_ne and "~__cxa_throw" not in cxx_ne, (cxx_sj, cxx_ne))
+os.makedirs(os.path.join(ROOT, "fake"), exist_ok=True)
+open(os.path.join(ROOT, "fake", "setjmp.h"), "w").write("void fake_jmp(void) __attribute__((noreturn));\n")   # a same-named header that is NOT the pinned runtime's
+fk_other = objstub.derive_terminators(CC, ["-I" + os.path.join(ROOT, "fake")], ["setjmp.h"], "c", tf + ".fk1")
+fk_pinned = objstub.derive_terminators(CC, ["-I" + os.path.join(ROOT, "fake")], ["setjmp.h"], "c", tf + ".fk2", sjdirs=(os.path.join(ROOT, "fake"),))
+check("terminators: a setjmp.h outside the pinned header directories is no unwinder source (its noreturn function is a terminator); inside a pinned directory it is",
+      "fake_jmp" in fk_other and "~fake_jmp" not in fk_other and "~fake_jmp" in fk_pinned and "fake_jmp" not in fk_pinned, (fk_other, fk_pinned))
 open(os.path.join(ROOT, "infer.h"), "w").write("#include <setjmp.h>\nextern jmp_buf jb;\nvoid helper(int e);\nvoid decl_nr(void) __attribute__((noreturn));\n")
 open(os.path.join(ROOT, "infer.c"), "w").write('#include "infer.h"\njmp_buf jb;\nvoid helper(int e) { longjmp(jb, e); }\n')
 so_inf = objstub.plugin_so(CC, tempfile.mkdtemp(prefix="objstub-inf-"))[0]

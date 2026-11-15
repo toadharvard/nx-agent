@@ -54,10 +54,12 @@ def root_check(root, repo, cache, jobs, built=None):
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
     store, names, bad, rets = os.path.join(cache, "store"), set(), [], {}
+    pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned runtime external's (guest_compiler.json "runtime"); a host root's the distribution's
+    sjdirs = (pin["runtime"]["at"],) if pin and roots.get(root, {}).get("target") == "guest" else objstub.SYSTEM_SJ
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):
         us = [(k, unitstage.result_file(store, k, "unit.ii"), lang) for u, k in sorted(res["pp_keys"].items()) if u.endswith(ext)]
         if us:
-            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets)
+            ns, _, errs = objstub.unit_terminators(drv[lang], us, {"c": recipe.unit_flags(rec, roots, root, drv["c"], "c"), "c++": recipe.unit_flags(rec, roots, root, drv["c++"], "cxx")}, cache, jobs, rets, sjdirs)
             names |= set(ns)
             unit_of = {k: u for u, k in res["pp_keys"].items()}
             bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]

@@ -1851,24 +1851,30 @@ def plugin_so(cc, cache):
     return so, h
 
 
-def unit_terminators(cc, units, flags, cache, jobs, rets=None):
+SYSTEM_SJ = ("/usr/include", "/usr/aarch64-linux-gnu/include")   # the pinned distribution's libc headers (env.json: libc6-dev, libc6-dev-arm64-cross)
+
+
+def unit_terminators(cc, units, flags, cache, jobs, rets=None, sjdirs=SYSTEM_SJ):
     """Terminator set of a root = union over its C/C++ units of the noreturn declarations the compiler CC itself sees in the unit's
     preprocessed text (the plugin runs on unit.ii with the unit's flags: exactly the TU the compile stage compiles, headers included).
     UNITS [(pp_key, ii path, lang c|c++)]; FLAGS {lang: [..]}. Per unit cached CACHE/objstub/t-<key>.txt, key = pp_key (a hash of
     the compiler, flags and every input of the preprocessor stage), the plugin hash, the language and the flags.
     RETS, a dict, receives {pp_key: {function assembler name: typedef name of its return type}} of the function definitions of the unit (the plugin's
     `ret` output, the compiler's own type; only typedef-named and builtin-named return types are listed).
+    SJDIRS: the directories of the pinned headers (the guest runtime external's mount point for a guest root; the distribution's include dirs otherwise): a function
+    is an unwinder by <setjmp.h> only when DECL_SOURCE_FILE is a file named setjmp.h INSIDE one of them (a same-named header elsewhere does not count).
     -> (sorted names, sha256, failures [(pp_key, message)]): a unit the plugin cannot process is a failure of that unit, never an exception."""
     so, ph = plugin_so(cc, cache)
 
     def one(u):
         pk, ii, lang = u
-        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang]]).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps([pk, ph, lang, flags[lang], list(sjdirs)]).encode()).hexdigest()
         cp, rp = (os.path.join(cache, "objstub", "t-%s.%s" % (key, e)) for e in ("txt", "ret"))
         if not (os.path.exists(cp) and os.path.exists(rp)):
             with tempfile.TemporaryDirectory() as td:
                 r = subprocess.run([cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + td + "/o.txt",
-                                    "-fplugin-arg-objstub_plugin-ret=" + td + "/r.txt"] + flags[lang]
+                                    "-fplugin-arg-objstub_plugin-ret=" + td + "/r.txt",
+                                    "-fplugin-arg-objstub_plugin-setjmp-dirs=" + ":".join(sjdirs)] + flags[lang]
                                    + ["-x", lang, "-fpreprocessed", ii], capture_output=True, text=True)
                 if r.returncode or not os.path.exists(td + "/o.txt") or not os.path.exists(td + "/r.txt"):
                     errs = [l for l in r.stderr.splitlines() if "error" in l or "fatal" in l or "Segmentation" in l or "internal compiler" in l]
@@ -1883,7 +1889,7 @@ def unit_terminators(cc, units, flags, cache, jobs, rets=None):
     names = sorted({n for _, ns, _ in got if ns for n in ns})
     return names, hashlib.sha256("\n".join(names).encode()).hexdigest(), [(pk, e) for pk, _, e in got if e]
 
-def derive_terminators(cc, cflags, headers, lang, outp):
+def derive_terminators(cc, cflags, headers, lang, outp, sjdirs=SYSTEM_SJ):
     """Build the plugin with the host g++, compile one TU that includes the headers, write the sorted names to outp."""
     with tempfile.TemporaryDirectory() as td:
         inc = subprocess.run([cc, "-print-file-name=plugin"], capture_output=True, text=True, check=True).stdout.strip()
@@ -1891,7 +1897,7 @@ def derive_terminators(cc, cflags, headers, lang, outp):
         tu, res = os.path.join(td, "tu." + ("cc" if lang == "c++" else "c")), os.path.join(td, "out.txt")
         open(tu, "w").write("".join("#include <%s>\n" % h for h in headers))
         for cmd in (["g++", "-shared", "-fPIC", "-fno-rtti", "-O1", "-I" + inc + "/include", os.path.join(HERE, "objstub_plugin.cc"), "-o", so],
-                    [cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + res] + list(cflags) + [tu]):
+                    [cc, "-S", "-o", os.devnull, "-fplugin=" + so, "-fplugin-arg-objstub_plugin-out=" + res, "-fplugin-arg-objstub_plugin-setjmp-dirs=" + ":".join(sjdirs)] + list(cflags) + [tu]):
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode:
                 raise ValueError("%s failed: %s" % (cmd[0], r.stderr[-300:]))
