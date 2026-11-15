@@ -26,6 +26,10 @@ native code gets a sound call-graph bound, with recursion certified or rejected.
 **Legal (owner, 2026-11-15: "Защита закрытых данных. Похуй."):** no Legal gates are built or scheduled; the `legal`
 admit requirement is deleted. The practice stays: private artifacts live in fnv-nx-build only.
 
+**Speed, after the first frame (owner, 2026-11-15):** first nativization and the PERFDEBT restores. Only after them, a
+deterministic A57 cache model (L1/L2 by documented sizes) in the L4 emulator, giving misses per frame per thread beside the
+instruction counts. Owner L4.
+
 All work resumed at 2026-11-14 23:00Z on the candidate `claude/fnv-next3b` 141b07580. That is 224af83e plus L1
 w17m 4ee6cc10 plus CLAUDE.md. Its verdict v9 is running. The trunk is a5c8f427 (38 gates). The platform root is not
 on it yet. The last full verdict, v8 at 224af83e, gave 27/39 green. Numbers come from the lead status files of
