@@ -103,6 +103,14 @@ def red(o):
 P = framesec.parse_frame
 check('parse empty', P(b'', 'x'), [])
 check('parse lines', P(b'a\t\nb\tdynamic\nc\t-16:12 -4:4 0:8\n', 'x'), [('a', ()), ('b', 'dynamic'), ('c', ((-16, 12), (-4, 4), (0, 8)))])
+fr3 = P(b'a\t-4:4 unk:mem unk:reg\targs:16\nb\t\targs:0\nc\tdynamic\targs:8\nd\t4:4\n', 'x')
+check('parse 3-field rows', [(tuple(r), r.args, r.unk) for r in fr3], [(('a', 'dynamic'), 16, ('mem', 'reg')), (('b', ()), 0, ()), (('c', 'dynamic'), 8, ()), (('d', ((4, 4),)), None, ())])
+for bad in (b'a\t\targs:01\n', b'a\t\targs:-1\n', b'a\t\tx:1\n', b'a\tunk:foo\targs:0\n', b'a\tunk:reg unk:mem\targs:0\n', b'a\tunk:reg 4:4\targs:0\n', b'a\t\t\targs:0\n'):
+    try:
+        P(bad, 'x')
+        fails.append('parser accepted %r' % bad)
+    except ValueError:
+        pass
 for bad in (b'a\t', b'a', b'a\t\tb\n', b'\t\n', b'a b\t\n', b'a\t1:0\n', b'a\t01:4\n', b'a\t+1:4\n', b'a\t4:1 -4:4\n', b'a\tx\n', b'a\t1:2 \n',
             b'a\tDynamic\n', b'a\t1:2:3\n', b'\xff\t\n', b'a\t-0:4\n', b'a\t 1:2\n'):
     try:
