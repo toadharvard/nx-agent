@@ -303,3 +303,11 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   Assigned to the new worker w11 (session_01KmtZKTzdEzraX9VWyyDcG3). Workers: w4, w9, w10, w11 (4/4).
 - 20:25Z owner order (integ 5c3e8e289), no rework without progress. Checked: all open L3b items block step 2 (the pack root enters the trunk only when its forms are a subset of the certified ones): v3 integer, SIMD rerun and timeouts, sys/far, #UD list. The fpexact test blocks L1 cand3. Nothing open is polishing; no task stopped.
 - 20:30Z L3a pre-announces a pack density rule (758.9 MB C++ for 7.79 M instructions). Our position on liveness-pruned EFLAGS: (A) per (shape, live_mask), a projection lemma from the full xstate certificate (elided Form = full Form minus the dead-output assignments, checked by z3, no farm re-proof); (B) a per-function liveness certificate from the CODEMAP CFG, with boundaries and exception points as readers of all flags, which the gate re-checks. Written statement once L3a sends the concrete rule.
+- 20:40Z merged w11 ee6b58d01 (#UD list). Measured at facts 6944080, L3a udcert bd94fd02, SDM a4a62e6a:
+  - images: the 2 hand lists are deleted; imageset.py reads modules.tsv; d3dx9_31 now has 2,577 + 11 rows;
+  - opmap reads the 16 x87 escape tables (405 cells);
+  - U-NODEC 87 -> 0 by construction: factsites.py takes the sites from L3a's facts graph (5,694,413 instructions over 8 images), and packuniverse's SITES path is deleted;
+  - cleared sites 5,199 (5,192 undefined opcode, 7 SSE3);
+  - U-NOGATE 66 -> 44: Grp2 /6 'sal' 36, Grp3 /1 'test' 7, D9 DF 1, all SDM-reserved blank cells.
+- Decision on the 44: the existing declared-CPU rule applies. A reserved encoding is #UD on the declared CPU, so each site needs a reach certificate (unreachable), the same as a cleared-feature site; any that cannot be certified goes to the orchestrator. No new assumption.
+- Open: ehoracle's --modules change has not been run (pefile missing). lift/tools/udcert.py is L3a's file at bd94fd02, carried byte-identical until L3a's branch merges.
