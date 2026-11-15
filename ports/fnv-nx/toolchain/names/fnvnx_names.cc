@@ -622,7 +622,7 @@ static std::string c_name(tree d)
 
 /* ---- rows */
 
-struct Row { std::string sym, ms, kind; bool def; };
+struct Row { std::string sym, ms, kind; bool def; std::string cross; };   /* cross: the crossing terms of a function row (`-` when none), "" for data */
 static std::vector<Row> rows;
 
 static std::string asmname(tree d)
@@ -653,6 +653,64 @@ static bool cl_internal_p(tree d)
  * C++ rules read do not exist in it. */
 static bool is_cxx() { return !strncmp(lang_hooks.name, "GNU C++", 7); }
 
+static bool cross_cxx_class(tree t) { return is_cxx() && CLASS_TYPE_P(t); }
+/* ---- Types that must not cross the native/exe boundary (section .fnvnx.crossing) ------------------------------------------------------------
+ * One line per function that has a row in `.fnvnx.sympair` with an MSVC name (THE universe of the boundary: def, ref, noemit and the SDD2 slot functions
+ * alike, because the row is made where the sympair row is made, from the same decl; it is not a second walk of the symbol table):  symbol <TAB> term[,term...]  or  symbol <TAB> -  when no term holds. The terms
+ * are the ids of toolchain/msvcmodel/DATAMODEL.json crossing_forbidden.terms, read from crossing_terms.inc (gen_crossing.py: the ids and which GCC
+ * predicate decides each come from that file; this source names none). A term HOLDS for a function iff its GCC predicate holds for the return type
+ * or for a parameter type (the implicit `this` is a pointer: it holds nothing), where the predicate of a type T is true iff it is true for T itself,
+ * for the element type of an array, for the type of every non-static data member, and for every base class, recursively (a pointer or reference
+ * contains nothing: the object it points to is not passed):
+ *   CF_BINFO_VIRTUAL    T is a class with a virtual base (CLASSTYPE_VBASECLASSES, which includes the virtual bases of its bases)
+ *   CF_PTRMEM           T is a pointer to member: TYPE_PTRDATAMEM_P or TYPE_PTRMEMFUNC_P
+ *   CF_VA_LIST_NODE     T is the va_list type (its main variant is va_list_type_node)
+ * Terms are sorted and distinct; a symbol once per unit. */
+enum CrossFact { CF_BINFO_VIRTUAL, CF_PTRMEM, CF_VA_LIST_NODE };
+struct CrossTerm { const char *id; CrossFact fact; };
+static const CrossTerm cross_terms[] = {
+#include "../layout/crossing_terms.inc"
+};
+
+static bool cross_holds(CrossFact f, tree t, std::set<tree> &seen)
+{
+  if (!t || t == error_mark_node) return false;
+  if (TREE_CODE(t) == ARRAY_TYPE) return cross_holds(f, TREE_TYPE(t), seen);
+  if (!TYPE_P(t)) return false;
+  t = TYPE_MAIN_VARIANT(t);
+  if (f == CF_VA_LIST_NODE && va_list_type_node && t == TYPE_MAIN_VARIANT(va_list_type_node)) return true;
+  if (is_cxx() && f == CF_PTRMEM && (TYPE_PTRDATAMEM_P(t) || TYPE_PTRMEMFUNC_P(t))) return true;
+  if (!RECORD_OR_UNION_TYPE_P(t) || !COMPLETE_TYPE_P(t)) return false;
+  if (!seen.insert(t).second) return false;
+  if (is_cxx() && f == CF_BINFO_VIRTUAL && CLASS_TYPE_P(t) && CLASSTYPE_VBASECLASSES(t) && CLASSTYPE_VBASECLASSES(t)->length()) return true;
+  for (tree m = TYPE_FIELDS(t); m; m = DECL_CHAIN(m))
+    if (TREE_CODE(m) == FIELD_DECL && cross_holds(f, TREE_TYPE(m), seen)) return true;
+  if (cross_cxx_class(t) && TYPE_BINFO(t)) {
+    tree b; int k;
+    for (k = 0; BINFO_BASE_ITERATE(TYPE_BINFO(t), k, b); k++)
+      if (cross_holds(f, BINFO_TYPE(b), seen)) return true;
+  }
+  return false;
+}
+
+/* the crossing terms of function D: `-` or term,term (sorted, distinct) */
+static std::string cross_of(tree d)
+{
+  std::vector<tree> tys;
+  tree ft = TREE_TYPE(d);
+  tys.push_back(TREE_TYPE(ft));
+  for (tree a = TYPE_ARG_TYPES(ft); a && TREE_VALUE(a) != void_type_node; a = TREE_CHAIN(a)) tys.push_back(TREE_VALUE(a));
+  std::set<std::string> held;
+  for (const CrossTerm &c : cross_terms)
+    for (tree t : tys) {
+      std::set<tree> seen;
+      if (cross_holds(c.fact, t, seen)) { held.insert(c.id); break; }
+    }
+  std::string v;
+  for (const std::string &h : held) v += (v.empty() ? "" : ",") + h;
+  return v.empty() ? "-" : v;
+}
+
 /* RULE (C): every external symbol of a C unit has C linkage, so its name is cl's C name for the declaration, c_name (the `extern "C"` rule
  * below: `_f` cdecl, `_f@N` stdcall, `@f@N` fastcall, `_v` data; the convention is the declaration's own attribute). A C unit has no
  * classes, namespaces, templates, overloads, vtables or local classes, so nothing else of this file applies to it. */
@@ -661,6 +719,7 @@ static void name_c_decl(tree d, bool def)
   Row r; r.sym = asmname(d); r.def = def;
   if (!DECL_NAME(d)) r.kind = "unnamed:no declaration";
   else { r.ms = c_name(d); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data"; }
+  if (TREE_CODE(d) == FUNCTION_DECL) r.cross = cross_of(d);
   rows.push_back(r);
 }
 
@@ -714,6 +773,7 @@ static void name_decl(tree d, bool def)
   if (!m.why.empty()) { r.kind = "unnamed:" + m.why; m.out.clear(); }
   else if (m.internal) { r.kind = "unnamed:external symbol in an internal scope"; m.out.clear(); }
   r.ms = m.out;
+  if (TREE_CODE(d) == FUNCTION_DECL) r.cross = cross_of(d);
   rows.push_back(r);
 }
 
@@ -1271,6 +1331,16 @@ static void finish_unit(void *, void *)
   }
   if (is_cxx()) odr_emit();
   if (rows.empty() && vtrows.empty()) return;
+  {
+    /* .fnvnx.crossing: the terms of every function row that has an MSVC name, from the same rows as .fnvnx.sympair (a symbol once) */
+    std::map<std::string, std::string> cr;
+    for (auto &r : rows) if (!r.cross.empty() && !r.ms.empty()) cr[r.sym] = r.cross;
+    if (!cr.empty()) {
+      fprintf(asm_out_file, "\t.pushsection\t.fnvnx.crossing,\"\",%%progbits\n");
+      for (auto &r : cr) fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", r.first.c_str(), r.second.c_str());
+      fprintf(asm_out_file, "\t.popsection\n");
+    }
+  }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.sympair,\"\",%%progbits\n");
   for (auto &r : rows)
     fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t%s\\t%s\\n\"\n", r.sym.c_str(), r.ms.c_str(), r.kind.c_str(), r.def ? "def" : "ref");
