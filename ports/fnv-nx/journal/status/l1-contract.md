@@ -1899,3 +1899,9 @@ bottleneck: the cand3 head (w12), and the cand2 merge (w15).
   - Rule given to w12: the terminator run is the unit's own CC stage (its flags and its whole plugin set) plus the analysis plugin.
   - The loader's missing fnvnx_win32_ext.h waits on L5's hostabi header move.
 bottleneck: the cand3 head (w12: objstub terminator, L5 header move), and the cand2 merge (w15).
+- 22:52 w28 6af1a621: the liftfacts gate, with 13/13 selftests.
+  - It reads GATE_CACHE GATES only. The universe is manifest.json, and the per-image codemap and pcsrc files decide.
+  - Without a lifted root the universe is 0, which is vacuous until the pack is admitted. That is acceptable, since the pack root's own admission is the gate.
+  - The layout comes from w7's producer code at 3a5531e1 and is re-checked against w7's first real sample.
+  - Also on that branch: 520eaa33, the exe row in modules.tsv, sent to w12 and w7. Both commits are cand4.
+bottleneck: the cand3 head (w12), and the cand2 merge (w15).
