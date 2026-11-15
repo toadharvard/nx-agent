@@ -1,29 +1,6 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
-  "test_ehoracle.py": {
-   "references": [
-    {
-     "kind": "external",
-     "name": "wine-msvcrt",
-     "path": "dlls/msvcrt/except_i386.c"
-    },
-    {
-     "kind": "external",
-     "name": "wine-msvcrt",
-     "path": "dlls/msvcrt/cppexcept.h"
-    },
-    {
-     "kind": "external",
-     "name": "wine-msvcrt",
-     "path": "dlls/msvcrt/cpp.c"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/lift/proof/ehoracle.py",
-    "ports/fnv-nx/lift/proof/wine_pin.json"
- ]
- },
   "test_bsfbsr_closed_form.py": {
    "references": [
     {
@@ -103,6 +80,29 @@
     "ports/fnv-nx/lift/proof/lift_dsl.py"
    ]
   },
+  "test_ehoracle.py": {
+   "references": [
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/except_i386.c"
+    },
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/cppexcept.h"
+    },
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/cpp.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/ehoracle.py",
+    "ports/fnv-nx/lift/proof/wine_pin.json"
+   ]
+  },
   "test_formgate.py": {
    "references": [
     {
@@ -118,6 +118,18 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/formgate.py"
+   ]
+  },
+  "test_imageset.py": {
+   "references": [
+    {
+     "anchor": "L1-L45",
+     "kind": "spec",
+     "path": "ports/fnv-nx/contract/modules.py"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/imageset.py"
    ]
   },
   "test_irdeps.py": {
@@ -149,7 +161,7 @@
   "test_opmap.py": {
    "references": [
     {
-     "anchor": "L1-L579",
+     "anchor": "L1-L984",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/proof/tests/opmap_cells.tsv"
     }
@@ -161,7 +173,7 @@
   "test_opmap_sdm.py": {
    "references": [
     {
-     "anchor": "L1-L579",
+     "anchor": "L1-L984",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/proof/tests/opmap_cells.tsv"
     }
@@ -263,6 +275,19 @@
     "ports/fnv-nx/lift/proof/ssefp.py"
    ]
   },
+  "test_sysspec.py": {
+   "references": [
+    {
+     "anchor": "L1-L56",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/sdm_priv_rows.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sysspec.py",
+    "ports/fnv-nx/lift/proof/x86sys.py"
+   ]
+  },
   "test_x87spec.py": {
    "references": [
     {
@@ -279,19 +304,6 @@
    "subject": [
     "ports/fnv-nx/lift/proof/sdm_pages.tsv",
     "ports/fnv-nx/lift/proof/x87spec.py"
-   ]
-  },
-  "test_sysspec.py": {
-   "references": [
-    {
-     "anchor": "L1-L56",
-     "kind": "spec",
-     "path": "ports/fnv-nx/lift/proof/sdm_priv_rows.tsv"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/lift/proof/sysspec.py",
-    "ports/fnv-nx/lift/proof/x86sys.py"
    ]
   }
  }
