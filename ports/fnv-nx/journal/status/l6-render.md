@@ -847,3 +847,10 @@ Paused: w3b, w4, farm; no other work.
     - Rule: where the MS page is narrower than Wine 9.0 (vkd3d d3dbc.c:666-676; glsl_shader.c:2873-2880), the union holds. This is a cited conflict row, `ps_3_0:vFace_src`, the same precedent as ps:47 and vs_3_0:v[a0.x]. Global change: 1 (model, class) cell of 11 models.
     - Consequence: the five ps conflicts I decided illegal for w1b (slt, sge, dst, expp, logp) are re-decided by this same union rule when w1b resumes. There is one precedence rule, not two.
     - w5 (doing): full sm_link re-run on smscan@host from c9ddc8d7a; target 0 red.
+- 13:43Z w5 sm_link: 0 red, measured at 48048fe05 (w5-smlink).
+    - Inputs: smscan@host w6-root c9ddc8d7a, pair@host b9304fea0, gl4shim 47c284629, shaders b545961f.
+    - Shaders: 1,809 bytecodes (443 VS, 1,366 PS). 115,776 stage certificates, 0 not ok.
+    - Programs: 120,392, all linked. 0 signature disagreements, 0 L-uncovered, 0 rejected pairs, 0 scanner rejections.
+    - The program set is identical to 0b7061b06.
+    - gl4 rewrite coverage is included: the checker compiles nxgl4_shim_glsl output.
+    - Open: FFP (after cand3); hermetic re-run (after L1 w12's recipe fix); duplicate admit rows are dropped at merge, w6's rows are kept.
