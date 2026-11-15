@@ -1792,3 +1792,7 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:54 L6's 4 GL shader-failure sites are in gl4_shader.c (31, 92, 114, 120). w12 merges w27's fixed citation commit into w12L2, resolves the gate_objstub/objstub conflict, and sends the head to L6, which places the citations there.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:57 L3a found a PP over-keying defect: the include of an external subdirectory mounts the whole external, and every uses output is a PP input, so one pack change re-keys all 4096 PP stages.
+  - Rule, in cand3 (w12, after the assumptions fix): a stage's declared inputs are what its sandbox can read. PP gets its unit, the include subtrees only (subtree hash), the files its flags name, the include_uses outputs only, and the compiler, plugins and flags. Other uses outputs go only to the stage kinds that declare them.
+  - 4 re-key selftests.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d. The cold pack build waits for cand3 (PP keying, sharding).
