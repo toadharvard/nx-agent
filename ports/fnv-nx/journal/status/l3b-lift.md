@@ -328,3 +328,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 21:23Z v3 shard 12/54 (farm 18): shapes 346, proved 335, model-gap 11, failed 0, 3,736 s. 38/54 complete.
 - 21:24Z v3 shard 13/54 (farm 18): shapes 346, proved 337, model-gap 9, failed 0, 3,758 s. Shard 12's final branch is 12of54-277dcdf2ce02. 39/54 complete.
 - 21:26Z v3 shards 9 and 10 (farm 17): 346+346 shapes, proved 335+335, model-gap 11+11, failed 0. 41/54 complete.
+- 21:30Z v3 shard 41/54 (farm 20): shapes 345, proved 339, model-gap 6, failed 0, 4,067 s. 42/54 complete.
