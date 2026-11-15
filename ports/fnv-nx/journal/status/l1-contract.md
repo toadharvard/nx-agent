@@ -1722,3 +1722,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - 121394 programs, all linked;
   - FFP programs 1002/1002.
 - These wait on L1 (all cand3, w12): the run-stage cost fix, the plugin include closure (crossing_terms.inc), and the hostabi INCLUDE root.
+- 16:22 rtasm (L2 w2): the universe is the ldfacts members of the guest link plus the definer closure (lse in iff __aarch64_* is defined in the closure), taken through uses. link/rtasm.py merges into gate_rtasm/a64order and is deleted; cand3 (w12).
