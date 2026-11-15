@@ -1,5 +1,6 @@
 """Control-flow and fault forms (see forms.py): the eip effect carries the branch; the target of a relative branch is the capstone absolute target."""
 from fnvlift import x86sys
+from fnvlift.formkey import is_far_raw
 from fnvlift.dsl import C, V, eq, ite, slt, zext
 from proof.forms import AReg, cond, ea, handler, mload, rd, sload, sstore
 
@@ -11,7 +12,7 @@ def jcc(c): c.F.eip = ite(cond(c.opc & 15), target(c), c.F.eip)
 def is_far(c):
     """CALL / JMP with a far pointer: 9A and EA (ptr16:32, ptr16:16 with the 66 prefix) and FF /3, FF /5 with a memory operand (m16:32, m16:16)  (SDM Vol 2 CALL, JMP).
     The encoding decides, not capstone's mnemonic (it names FF /3 and FF /5 `call` / `jmp` or `lcall` / `ljmp` by operand size)."""
-    return c.opc in (0x9a, 0xea) or (c.opc == 0xff and c.ins.modrm is not None and (c.ins.modrm >> 3) & 7 in (3, 5) and c.ops[0].k == 'm')
+    return c.opc in (0x9a, 0xea) or is_far_raw(c.raw[c.nprefix:])
 
 def far_transfer(c):
     """SDM Vol 2 CALL / JMP far, protected mode, same privilege level, 32-bit code segment.  The selector is checked against the declared machine's descriptors (platform/declared/x86sys.json
@@ -22,7 +23,7 @@ def far_transfer(c):
     F = c.F; w = 16 if c.o16 else 32; o = c.ops[0]
     if o.k == 'i': sel, off = C(o.val & 0xffff, 16), C(c.ops[1].val & ((1 << w) - 1), w)
     else: off, sel = mload(ea(o), w), mload(ea(o, off=w // 8), 16)
-    call = c.opc == 0x9a or (c.opc == 0xff and (c.ins.modrm >> 3) & 7 == 3)
+    call = c.opc == 0x9a or (is_far_raw(c.raw[c.nprefix:]) and (c.raw[c.nprefix + 1] >> 3) & 7 == 3)
     cs = x86sys.SEL['cs']
     F.fault(7, ~eq(zext(sel, 32) & C(0xfffc, 32), C(cs & 0xfffc, 32)))
     if call:

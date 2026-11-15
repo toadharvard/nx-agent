@@ -2,6 +2,10 @@
 R8 = {'al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'}; R16 = {'ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'}
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']; SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
 PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
+def is_far_raw(b):
+    """b = the instruction bytes after the prefixes: FF /3 and FF /5 with a memory operand (ModRM.mod != 3) are the far CALL / JMP m16:32 (SDM Vol 2 CALL, JMP), a different semantics from the near FF /2, /4
+    of the same mnemonic and operand class.  THE one decision of "far FF", read from the encoding bytes (every decoded-instruction type carries them): the form key and the Form builder both call it."""
+    return len(b) > 1 and b[0] == 0xff and (b[1] >> 3) & 7 in (3, 5) and b[1] >> 6 != 3
 def form_key(ins, X):
     raw = bytes(ins.bytes); i = 0
     while i < len(raw) and raw[i] in PFX: i += 1
@@ -14,5 +18,4 @@ def form_key(ins, X):
                       else 'r8' if n in R8 else 'r16' if n in R16 else 'r32' if n in R32 else n)
         elif o.type == X.X86_OP_IMM: ks.append('imm')
         else: ks.append('m%d' % (o.size * 8) + {X.X86_REG_FS: ':fs', X.X86_REG_GS: ':gs'}.get(o.mem.segment, ''))
-    far = opc == b'\xff' and ins.modrm is not None and (ins.modrm >> 3) & 7 in (3, 5) and ins.operands and ins.operands[0].type == X.X86_OP_MEM      # FF /3, FF /5: the far CALL / JMP m16:32, a different semantics from the near FF /2, /4 of the same mnemonic and operand class
-    return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex() + ('/far' if far else '')), opc
+    return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex() + ('/far' if is_far_raw(raw[i:]) else '')), opc
