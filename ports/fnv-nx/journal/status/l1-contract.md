@@ -1913,3 +1913,5 @@ bottleneck: the cand3 head (w12: objstub terminator, then the merge of the lines
     - The 6 in lift/fnvlift (f_x87_ctl, fpfacts, universe) are L3a's.
   - w28 06db6d5c: liftfacts is on the real w7 layout, and its universe must equal the loader's MODULES_TSV. It is wired to the cand3 head.
 bottleneck: the cand3 head (w12), and the cand2 merge (w15).
+- 22:59 L6's cand4 head is b3856ec5c: d3d9total is green, 332/332, and test_gl4_cursor gives 17 PASS. Sent to w12.
+bottleneck: the cand3 head (w12), and the cand2 merge (w15).
