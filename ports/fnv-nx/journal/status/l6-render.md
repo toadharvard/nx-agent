@@ -1203,3 +1203,15 @@ Paused: w3b, w4, farm; no other work.
     - The L3a files are L3a's.
     - The sm_link farm job runs on an L6 farm: farm1 `session_01KmtZKTjTgaLFrUhruRfbSp`, at w8 89a388d2.
 - bottleneck: w6's L6 objstub findings; w8 table derivation; farm1 sm_link; L1 cand3 → trunk. 2 workers and 1 farm.
+- 21:58Z: farm1 run at w8 89a388d2.
+    - render/shaders/total: green, 1 stage run.
+    - sm_link_sum: red on two L1 recipe defects. No sm_link numbers yet.
+        - build() and exttree() use two different external-cache paths.
+        - The PT_INTERP check does not follow /lib64 through the usr-merge.
+        - Routed to w12. farm1 re-runs when they are fixed.
+    - L1 abspath gate (w28 e8caf06f): 6 findings in render/ (gen_env.py:277, res_smgen.py:7, gate_d3d9total.py:57/317). Assigned to w8.
+    - w6 ee8846386:
+        - w12L2 6135d0bed merged; 8 roots green.
+        - objstub: 2,195/2,208, 27 findings; gl4 has 0.
+        - Clear/draw incomplete-pass branch: moved to nx_wine_incomplete_pass, with 2 callers.
+        - Translator: constants rows citing the msdocs mirror; the RESERVED emitter deleted by a table-driven mirror patch. In progress.
