@@ -471,3 +471,9 @@ After the first frame:
   - One pin rebuild carries both fixes; the farm is holding for the layout commit.
   - L1: gate_abi:84 should take its universe from sym_emitted, not from a `_Z` exemption.
 - 2026-11-15 19:12Z: DECLTYPE-COMPLETE, agreed with L1 and owned by w3, goes into the same rebuild. The plugin writes exactly one `.fnvnx.decltype` line for every symtab symbol, either `<type>` or `-<reason>`, from a closed set (`-mangled`, Itanium §5.1). gate_abi (L1 w15) checks completeness against the ELF and the closed set, and does no `_Z` test of its own.
+- 2026-11-15 19:20Z: w2 at plugins 6389ddf73.
+  - (1) Pin wiring f15f1aef7, sent to L1 for cand2. guest_compiler.json now has one tree for the compiler and the runtime. The drivers are derived from the targets.json triplet, and the 11 guest roots plus the platform sample use profile "guest". The stamp equals a1ae3ba606ed766a without 689328e7f. The pin fields are updated again with the next pin.
+  - (2) test_gate_order, test_gate_addr, test_odr and test_layout now go through the recipe and the pin; the stock g++ calls are deleted. Universe: 181 test files. Before the change, 11 files (17 sites) ran a driver directly. 0 remain in L2. Seven files in other layers are routed through L1: the verify/tests files to L1/L4, test_gate_fpexact.py to L3b.
+  - (3) gate_rtasm's 150 all-member reds:
+    - 125 are the relaxed `__aarch64_have_lse_atomics` flag read. They are correct reds for an unpulled object.
+    - 25 are a gate defect: the _sync loops' trailing `dmb ish` is not modelled. Deferred until lse objects are pulled or the first frame lands. The pulled universe under -mno-outline-atomics is 0.
