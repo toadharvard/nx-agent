@@ -168,8 +168,8 @@ def build(osrec, src, mirror, wine, cpumodel, cpuref):
         if nm not in setby:
             row.update({"value": 0, "source": "Wine 9.0 never sets it on x86: %s" % zline})
         else:
-            how, wl = setby[nm]
-            wbs = "Wine 9.0 %s line %d" % (src["wine"]["files"]["wineboot"]["path"], wl)
+            how, wln = setby[nm]
+            wbs = "Wine 9.0 %s line %d" % (src["wine"]["files"]["wineboot"]["path"], wln)
             if how == "TRUE":
                 row.update({"value": 1, "source": "%s sets it unconditionally" % wbs})
             elif how == "DAZ":
@@ -194,6 +194,15 @@ def build(osrec, src, mirror, wine, cpumodel, cpuref):
                     why = "; ".join("%s line %d: CPUID %s %s[%d] = %d" % (src["wine"]["files"]["sysinfo"]["path"], l_, "leaf 1" if lf == "1" else "0x80000001", rg.upper(), b, (leaf[(lf, rg)] >> b) & 1) for lf, rg, b, l_ in hits)
                     row.update({"value": val, "source": "%s maps CPU_FEATURE_%s; %s; under the declared masks of %s (vendor %s from %s)" % (wbs, how, why, cm["path"], vendor, src["cpuref"]["path"])})
         pf[str(idx)] = row
+    wnl = pinned(os.path.join(mirror, src["files"]["winnt"]["path"]), src["files"]["winnt"], "winnt.h").split("\n")
+    nth = lambda pat, after=0: next(i + 1 for i in range(after, len(wnl)) if re.search(pat, wnl[i]))
+    cfp = nth(r"#define CONTEXT_FLOATING_POINT\s+\(CONTEXT_i386", 0)
+    fsa = nth(r"typedef struct _FLOATING_SAVE_AREA", cfp)
+    extr = nth(r"BYTE\s+ExtendedRegisters\[", fsa)
+    mf, mt = nth(r"#define STATUS_FLOAT_MULTIPLE_FAULTS"), nth(r"#define STATUS_FLOAT_MULTIPLE_TRAPS")
+    wl2 = wt.split("\n")
+    wx0 = next(i + 1 for i, l in enumerate(wl2) if "case TRAP_x86_CACHEFLT:  /* SIMD exception */" in l)
+    wx1 = next(i + 1 for i in range(wx0, len(wl2)) if "STATUS_FLOAT_MULTIPLE_TRAPS" in wl2[i])
     osfxsr = {"value": pf["6"]["value"], "source": "derived: CR4.OSFXSR = 1 iff the declared PF_XMMI_INSTRUCTIONS_AVAILABLE (row processor_features[6]) is TRUE, because MSDN IsProcessorFeaturePresent gives that value the meaning 'the SSE instruction set is available' to the calling process and Intel SDM Vol 3A 2.5 / 13.1 raises #UD for SSE instructions when CR4.OSFXSR = 0; ks386.inc CR4_FXSR = 0x%X names the bit" % kg["CR4_FXSR"]} if "value" in pf["6"] else undec("derived from processor_features[6], which is undecided")
     sanit = kg["EFLAGS_USER_SANITIZE"]
     return {
@@ -218,15 +227,15 @@ def build(osrec, src, mirror, wine, cpumodel, cpuref):
         "thread_fp_initial": {"x87_control_word": {"value": next(iter(docv["fpcsr"])), "source": cites("fpcsr")},
                               "mxcsr": {"value": next(iter(docv["mxcsr"])), "source": cites("mxcsr")},
                               "applies_to": "the initial context of every thread, the process's first thread and CreateThread threads alike: the documentation names one initial value with no per-kind difference (the INITIAL_* constants of the thread context)"},
-        "cr0": {"em": undec("no pinned source states CR0.EM of the declared machine (ks386.inc CR0_EM is a bit constant only; Wine runs on the host CPU); user mode observes CR0 only through smsw, which is itself undecided; blocker: a reach certificate that no site depends on it, or an owner decision to derive it from the CPUID record"),
-                "ts": undec("no pinned source; user mode sees TS only through smsw (undecided); Windows handles #NM transparently (lazy FPU switch), and the lazy-switch behaviour is not a pinned source"),
+        "cr0": {"em": ({"value": 0, "source": "ruling of the orchestrator (each row is what a ring-3 thread observes on the declared OS): x87 executes natively, no emulation trap is visible; derived: CR0.EM = 1 iff PF_FLOATING_POINT_EMULATED is TRUE, MSDN IsProcessorFeaturePresent gives that value the meaning 'floating-point operations are emulated using a software emulator' (WDK 7.1 winnt.h line %d), the declared value is 0 (processor_features[1]), and MSDN KeSaveFloatingPointState (learn.microsoft.com wdm/nf-wdm-kesavefloatingpointstate, read 2026-11-15) names STATUS_ILLEGAL_FLOAT_CONTEXT 'the system is configured to use floating-point emulation, rather than doing floating-point operations in the processors' as the other configuration; ks386.inc CR0_EM = 0x%X names the bit" % (pf["1"]["winnt_h_line"], kg["CR0_EM"])} if pf["1"].get("value") == 0 else undec("derived from processor_features[1], which is not 0")),
+                "ts": {"value": 0, "source": "ruling of the orchestrator (what a ring-3 thread observes): a ring-3 thread never sees #NM and its FP/SSE state is preserved across context switches; the documentation makes the x87 and SSE state part of the thread context (WDK 7.1 winnt.h line %d CONTEXT_FLOATING_POINT '387 state', FLOATING_SAVE_AREA line %d, ExtendedRegisters line %d) and no documented user-mode exception for a not-available FPU exists; MS text does not state smsw's TS bit, so this is the observable behaviour only; ks386.inc CR0_TS = 0x%X names the bit" % (cfp, fsa, extr, kg["CR0_TS"])},
                 "mp": undec("no pinned source states CR0.MP (ks386.inc CR0_MP is a bit constant only); user mode sees it only through smsw (undecided)")},
         "processor_features": {"records": pf, "others": pfdoc["others"]},
         "cr4_sse": {"osfxsr": osfxsr,
-                    "osxmmexcpt": undec("no pinned source states CR4.OSXMMEXCPT (ks386.inc CR4_XMMEXCPT = 0x400 is a bit constant only); with the initial MXCSR 0x1F80 every SIMD exception is masked, so #XM is not raised until a site unmasks it; blocker: a certificate that every ldmxcsr / fxrstor site keeps the exceptions masked (CLAUDE.md fact, not yet certified)")},
+                    "osxmmexcpt": {"value": 1, "source": "ruling of the orchestrator: an unmasked SIMD FP exception reaches the thread as the documented SEH codes, not as #UD; WDK 7.1 winnt.h line %d STATUS_FLOAT_MULTIPLE_FAULTS 0xC00002B4 and line %d STATUS_FLOAT_MULTIPLE_TRAPS 0xC00002B5 (MS-ERREF 2.3.1, read 2026-11-15: '{EXCEPTION} Multiple floating-point faults.' / '... traps.'); LEVEL 2 for the mapping from #XM to the code: Wine 9.0 dlls/ntdll/unix/signal_i386.c fpe_handler case TRAP_x86_CACHEFLT lines %d-%d raises STATUS_FLOAT_MULTIPLE_TRAPS (0xC00002B5); the MS pages name the codes but do not state which SIMD exception maps to which; ks386.inc CR4_XMMEXCPT = 0x%X names the bit" % (mf, mt, wx0, wx1, kg["CR4_XMMEXCPT"])}},
         "idtr_limit": undec("the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"),
         "sldt": undec("no pinned source states the LDTR of a process that has no LDT"),
-        "descriptors": {n: {f: undec("the %s of the GDT entry behind selector 0x%X (%s) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries" % (f, sel[n]["value"], n)) for f in ("type", "readable", "writable", "dpl", "base", "limit")} for n in ("cs", "ds", "es", "ss", "fs")},
+        "descriptors": {n: {f: undec("the %s of the GDT entry behind selector 0x%X (%s) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries" % (f, sel[n]["value"], n)) for f in ("type", "readable", "writable", "dpl", "base", "limit")} for n in ("cs", "ds", "es", "ss", "fs")},
         "lar_lsl": {n: undec("lar and lsl on selector 0x%X return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided" % sel[n]["value"]) for n in ("cs", "ds", "es", "ss", "fs", "tr")},
         "sgdt": undec("the GDT base and limit of the OS are kernel values with no documented fixed value and no pinned source"),
         "sidt_base": undec("the IDT base is a kernel address with no documented fixed value and no pinned source"),

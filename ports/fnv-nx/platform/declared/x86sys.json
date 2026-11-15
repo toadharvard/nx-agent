@@ -1,16 +1,16 @@
 {
  "cr0": {
   "em": {
-   "status": "undecided",
-   "why": "no pinned source states CR0.EM of the declared machine (ks386.inc CR0_EM is a bit constant only; Wine runs on the host CPU); user mode observes CR0 only through smsw, which is itself undecided; blocker: a reach certificate that no site depends on it, or an owner decision to derive it from the CPUID record"
+   "source": "ruling of the orchestrator (each row is what a ring-3 thread observes on the declared OS): x87 executes natively, no emulation trap is visible; derived: CR0.EM = 1 iff PF_FLOATING_POINT_EMULATED is TRUE, MSDN IsProcessorFeaturePresent gives that value the meaning 'floating-point operations are emulated using a software emulator' (WDK 7.1 winnt.h line 8718), the declared value is 0 (processor_features[1]), and MSDN KeSaveFloatingPointState (learn.microsoft.com wdm/nf-wdm-kesavefloatingpointstate, read 2026-11-15) names STATUS_ILLEGAL_FLOAT_CONTEXT 'the system is configured to use floating-point emulation, rather than doing floating-point operations in the processors' as the other configuration; ks386.inc CR0_EM = 0x4 names the bit",
+   "value": 0
   },
   "mp": {
    "status": "undecided",
    "why": "no pinned source states CR0.MP (ks386.inc CR0_MP is a bit constant only); user mode sees it only through smsw (undecided)"
   },
   "ts": {
-   "status": "undecided",
-   "why": "no pinned source; user mode sees TS only through smsw (undecided); Windows handles #NM transparently (lazy FPU switch), and the lazy-switch behaviour is not a pinned source"
+   "source": "ruling of the orchestrator (what a ring-3 thread observes): a ring-3 thread never sees #NM and its FP/SSE state is preserved across context switches; the documentation makes the x87 and SSE state part of the thread context (WDK 7.1 winnt.h line 4135 CONTEXT_FLOATING_POINT '387 state', FLOATING_SAVE_AREA line 4152, ExtendedRegisters line 4275) and no documented user-mode exception for a not-available FPU exists; MS text does not state smsw's TS bit, so this is the observable behaviour only; ks386.inc CR0_TS = 0x8 names the bit",
+   "value": 0
   }
  },
  "cr4": {
@@ -33,139 +33,139 @@
    "value": 1
   },
   "osxmmexcpt": {
-   "status": "undecided",
-   "why": "no pinned source states CR4.OSXMMEXCPT (ks386.inc CR4_XMMEXCPT = 0x400 is a bit constant only); with the initial MXCSR 0x1F80 every SIMD exception is masked, so #XM is not raised until a site unmasks it; blocker: a certificate that every ldmxcsr / fxrstor site keeps the exceptions masked (CLAUDE.md fact, not yet certified)"
+   "source": "ruling of the orchestrator: an unmasked SIMD FP exception reaches the thread as the documented SEH codes, not as #UD; WDK 7.1 winnt.h line 2030 STATUS_FLOAT_MULTIPLE_FAULTS 0xC00002B4 and line 2031 STATUS_FLOAT_MULTIPLE_TRAPS 0xC00002B5 (MS-ERREF 2.3.1, read 2026-11-15: '{EXCEPTION} Multiple floating-point faults.' / '... traps.'); LEVEL 2 for the mapping from #XM to the code: Wine 9.0 dlls/ntdll/unix/signal_i386.c fpe_handler case TRAP_x86_CACHEFLT lines 2058-2066 raises STATUS_FLOAT_MULTIPLE_TRAPS (0xC00002B5); the MS pages name the codes but do not state which SIMD exception maps to which; ks386.inc CR4_XMMEXCPT = 0x400 names the bit",
+   "value": 1
   }
  },
  "descriptors": {
   "cs": {
    "base": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the base of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "dpl": {
     "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the dpl of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "limit": {
     "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the limit of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "readable": {
     "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the readable of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the type of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "writable": {
     "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the writable of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    }
   },
   "ds": {
    "base": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the base of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "dpl": {
     "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the dpl of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "limit": {
     "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the limit of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "readable": {
     "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the readable of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the type of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "writable": {
     "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the writable of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    }
   },
   "es": {
    "base": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the base of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "dpl": {
     "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the dpl of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "limit": {
     "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the limit of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "readable": {
     "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the readable of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the type of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "writable": {
     "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the writable of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    }
   },
   "fs": {
    "base": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the base of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "dpl": {
     "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the dpl of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "limit": {
     "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the limit of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "readable": {
     "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the readable of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the type of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "writable": {
     "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the writable of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    }
   },
   "ss": {
    "base": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the base of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "dpl": {
     "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the dpl of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "limit": {
     "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the limit of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "readable": {
     "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the readable of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the type of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    },
    "writable": {
     "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the writable of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
    }
   }
  },
