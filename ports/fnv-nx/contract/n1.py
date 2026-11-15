@@ -33,7 +33,7 @@ Output (store.py kind `n1`, canonical JSON; exe- and decomp-derived: container a
   sym   {(unit, symbol) or (unit, symbol index, symbol): address}
   vt    {(unit, `??_7` symbol): address}
 """
-import argparse, collections, json, os, struct, sys
+import argparse, collections, json, os, re, struct, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gatefile, store
@@ -84,6 +84,23 @@ class Coff:
     def data(self, sec):
         rp, rs, _, _, _ = self.secs[sec - 1]
         return self.d[rp:rp + rs]
+
+
+def check_objects(msvc):
+    """Input integrity of the pristine MSVC objects: MSVC is the external ROOT (it holds meta.json and obj/u<i>.obj); `obj` must be a directory and hold exactly the
+    number of objects meta.json declares.  A wrong root or a partial copy makes every function 'no MSVC object' (a function that is LIFTED for want of its
+    pristine object is a result; a missing directory is an input fault), so it is an error here, never a pass.  ValueError names the fault."""
+    d = os.path.join(msvc, 'obj')
+    if not os.path.isdir(d):
+        raise ValueError('%s is not a directory: --msvc is the root of the pristine objects (it holds meta.json and obj/u<i>.obj)' % d)
+    try:
+        want = json.load(open(os.path.join(msvc, 'meta.json')))['objects']
+    except (OSError, ValueError, KeyError) as e:
+        raise ValueError('%s/meta.json does not declare the object count: %s' % (msvc, e))
+    have = sum(1 for f in os.listdir(d) if re.fullmatch(r'u\d+\.obj', f))
+    if have != want:
+        raise ValueError('%s holds %d objects u<i>.obj, meta.json declares %d' % (d, have, want))
+    return have
 
 
 def candidates(img, units, msvc, log):
@@ -213,6 +230,11 @@ def main():
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
     import exefacts
+    try:
+        check_objects(a.msvc)
+    except ValueError as e:
+        print('n1: ' + str(e), file=sys.stderr)
+        sys.exit(1)
     img = exefacts.Image(a.exe)
     units = json.load(open(a.units))
     fn = candidates(img, units, a.msvc, lambda s: print(s, file=sys.stderr))

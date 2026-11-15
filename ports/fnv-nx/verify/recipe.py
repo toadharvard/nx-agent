@@ -539,8 +539,10 @@ OBJECTS_OF_ORIGINS = ("native", "lifted")
 
 
 def depends_on(cand, root, roots, repo, seen=()):
-    """True iff admitted root CAND reaches ROOT through `link.roots`, the declared loader or `uses` (the base edges: root_edges without `objects_of`),
-    transitively. Read from the recipes at REPO; a root without a readable recipe has no edges."""
+    """True iff admitted root CAND reaches ROOT through any input edge (root_edges: `link.roots`, the declared loader, `uses` and `objects_of`, so a root
+    that reads the objects of a root that uses ROOT depends on it too), transitively. `objects_of` edges are taken whole (every product root they could select,
+    no selector exclusion: that is what keeps this function free of recursion), a superset. Read from the recipes at REPO; a root without a readable recipe has
+    no edges."""
     if cand == root:
         return True
     if cand in seen:
@@ -550,7 +552,7 @@ def depends_on(cand, root, roots, repo, seen=()):
         rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
     except (OSError, ValueError):
         rec = None
-    return any(depends_on(d, root, roots, repo, tuple(seen) + (cand,)) for d in root_edges(rec, cand) if d != cand) if isinstance(rec, dict) else False
+    return any(depends_on(d, root, roots, repo, tuple(seen) + (cand,)) for d in root_edges(rec, cand, roots) if d != cand) if isinstance(rec, dict) else False
 
 
 def objects_of_roots(rec, root, roots, repo=None):
@@ -935,7 +937,8 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         oo = g.get("objects_of")
         if "objects_of" in g and not (isinstance(oo, dict) and set(oo) <= OBJECTS_OF_KEYS and isinstance(oo.get("except", []), list)
                                       and all(isinstance(r, str) and r in roots and roots[r].get("class") == "product" for r in oo.get("except", []))
-                                      and oo.get("target", "guest") in GUEST_TARGETS and oo.get("origin", "native") in OBJECTS_OF_ORIGINS):
+                                      and oo.get("target", "guest") in GUEST_TARGETS and oo.get("origin", "native") in OBJECTS_OF_ORIGINS
+                                      ):
             err.append('generated[%d].objects_of must be {"except": [admitted product roots], "target": guest|host, "origin": native|lifted} (the last two optional: select by declaration)' % i)
         t, ins, outs = g["tool"], g["inputs"], g["outputs"]
         owner = next((r for r in roots if isinstance(t, str) and tree_of({r: roots[r]}, t)), None)
