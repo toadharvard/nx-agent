@@ -670,7 +670,7 @@ class EH(Flow):
         L.append('scope tables v3 %d v4 %d (empty %d), records %d: filters %d, handlers %d (finally %d); SEH helpers %s' % (sv[3], sv[4], sum(1 for sc in s.scopes.values() if not sc['recs']),
             len(recs), sum(1 for r in recs if r[1]), len(recs), sum(1 for r in recs if not r[1]), ' '.join(h(k) for k in sorted(s.helpers))))
         L.append('throwers (_CxxThrowException, by EXCEPTION_RECORD template) %s; throw sites %d (non-constant ThrowInfo %d, rethrow %d), ThrowInfo %d (pmfnUnwind %d, copyFunction %d), failed %d, thrower escapes %d; catch continuations %d' % (
-            ' '.join('%x' % x for x in s.throwers) or '-', len(tsl), sum(1 for x in tsl if x['ti'] is None), sum(1 for x in tsl if x['ti'] == h(0)), len(tinfo), sum(1 for t in tinfo.values() if t['unwind']),
+            ' '.join('%x' % x for x in s.throwers) or '-', len(tsl), sum(1 for x in tsl if x['kind'] == 'red'), sum(1 for x in tsl if x['kind'] == 'rethrow'), len(tinfo), sum(1 for t in tinfo.values() if t['unwind']),
             len({t[3] for r in tinfo.values() for t in r['types'] if t[3]}), len(tfail), len(esc), len(s.conts)))
         L.append('SEH functions %d, non-constant trylevel stores %d, scope tables with err %d; stubs live %d unreferenced %d' % (len({x for sc in s.scopes.values() for x in sc['funcs']}), sum(len(sc['nonconst']) for sc in s.scopes.values()),
             sum(1 for sc in s.scopes.values() if sc['err']), len(live), len(s.stubs) - len(live)))
