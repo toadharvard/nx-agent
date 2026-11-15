@@ -354,17 +354,6 @@ void clk_file_moved(const char *from, const char *to)
     free(kt);
 }
 
-void clk_reset(void)
-{
-    t_now = 0;
-    t_scoped = 0;
-    os_lock(&g_ft_lock);
-    for (size_t i = 0; i < g_ft_n; i++)
-        free(g_ft[i].key);
-    g_ft_n = 0;
-    os_unlock(&g_ft_lock);
-}
-
 void clk_file_removed(const char *host)
 {
     char *k = fold(host);

@@ -42,9 +42,6 @@ void clk_file_removed(const char *host);
 int clk_file_times(const char *host, int64_t ft[3]);      /* 1 and creation/access/write as FILETIME; 0: the host file system's */
 /* an event the device signals (DirectSound notification, waveOut CALLBACK_EVENT): a wait on it runs the device */
 void clk_device_watch(const void *handle, int on);
-/* a run's start: t of the calling thread becomes 0 and the file-time stamps are forgotten (a run that begins again in the same process,
- * the tests of this interface) */
-void clk_reset(void);
 #ifdef __cplusplus
 }
 #endif
