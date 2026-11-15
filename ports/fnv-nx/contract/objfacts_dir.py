@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """objfacts_dir - obj.json of a directory tree of native objects (L1 CONTRACT; the recipe stage of contract/facts).
 
-    objfacts_dir.py --objects <dir of <root>/<unit>.o> --out obj.json
+    objfacts_dir.py --objects <dir of <root>/<unit>.o> --kinds <sympair_kinds.inc> --out obj.json
 
 The same per-object code as objfacts.py / objfacts_one.py (objfacts.scan_object), over every `*.o` under the directory, in sorted path order.  The object name of
 an entry is the object's path relative to the directory (a unit path may repeat across roots; a path never does), so two roots never collide.  The objects of a
@@ -11,7 +11,7 @@ Output: store kind `obj`.  A key present twice is an error (exit 1).  The output
 import argparse, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import objfacts, store
+import l2sections, objfacts, store
 
 
 def collect(root):
@@ -33,8 +33,10 @@ def collect(root):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--objects', required=True)
+    ap.add_argument('--kinds', required=True, help='the sympair kind table: the declared output of toolchain/names')
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
+    l2sections.set_kinds(a.kinds)
     objfacts.init_disasm()
     try:
         out = collect(a.objects)

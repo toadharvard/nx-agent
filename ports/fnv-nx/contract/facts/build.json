@@ -73,7 +73,9 @@
     "--objects",
     "/objs",
     "--out",
-    "/out/obj.json"
+    "/out/obj.json",
+    "--kinds",
+    "/uses/ports/fnv-nx/toolchain/names/sympair_kinds"
    ],
    "inputs": [],
    "outputs": [
@@ -210,5 +212,11 @@
  "outputs": {
   "native": "native.tsv",
   "n1": "n1.json"
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/toolchain/names",
+   "output": "sympair_kinds"
+  }
+ ]
 }
