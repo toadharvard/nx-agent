@@ -168,7 +168,20 @@ static void address_taken_scan(function *fun, std::set<tree> &out) {
   FOR_EACH_BB_FN(bb, fun)
     for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
       gimple *st = gsi_stmt(gsi);
-      for (unsigned i = 0; i < gimple_num_ops(st); i++) scan_operand(gimple_op(st, i), out);
+      // NOESCAPE: an address passed to a builtin for an argument that GCC's own fnspec of the builtin says does not escape
+      // (the callee neither stores the pointer nor lets it outlive the call: memcpy, memset, memcmp, strlen, ...) forms no
+      // pointer another thread can hold, so it does not make its object shared (ASM-001: the compiler's builtin fnspecs).
+      gcall *bc = dyn_cast<gcall *>(st);
+      tree bfn = bc ? gimple_call_fndecl(bc) : NULL_TREE;
+      bool nb = bfn && fndecl_built_in_p(bfn, BUILT_IN_NORMAL) && gimple_call_fnspec(bc).known_p();
+      for (unsigned i = 0; i < gimple_num_ops(st); i++) {
+        if (nb && i >= 3 && i - 3 < gimple_call_num_args(bc)) {
+          attr_fnspec sp = gimple_call_fnspec(bc);
+          tree a = gimple_call_arg(bc, i - 3);
+          if (TREE_CODE(a) == ADDR_EXPR && sp.arg_specified_p(i - 3) && sp.arg_noescape_p(i - 3)) continue;
+        }
+        scan_operand(gimple_op(st, i), out);
+      }
       if (gcall *call = dyn_cast<gcall *>(st)) {
         scan_operand(gimple_call_chain(call), out);
         tree lhs = gimple_call_lhs(call);
@@ -519,6 +532,8 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
     tree a = gimple_call_arg(call, i);
     if (!POINTER_TYPE_P(TREE_TYPE(a)) || pointer_to_constant(a)) continue;
+    // the address of an unshared local (the scan above left it unshared because this argument does not escape)
+    if (TREE_CODE(a) == ADDR_EXPR && local_unshared(get_base_address(TREE_OPERAND(a, 0)))) continue;
     bool known = spec.known_p() && spec.arg_specified_p(i);
     if (!known || spec.arg_maybe_read_p(i)) rd = true;
     if (!known || spec.arg_maybe_written_p(i)) wr = true;

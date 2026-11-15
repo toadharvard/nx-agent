@@ -34,6 +34,11 @@ def main():
             fails.append('%s: plain access %s' % (fn, mem))
         if not calls:
             fails.append('%s: no call to %s: %s' % (fn, callee, ins))
+    sf = [i for k, v in fns.items() if k.startswith('_Z6slot_fv') for i in v]
+    if not sf:
+        fails.append('slot_f missing')
+    elif [m for o, m, a in sf if m in ('ldar', 'stlr') or m.startswith('dmb') or m == 'bl']:
+        fails.append('slot_f: a non-escaping builtin on locals must stay unordered and inline: %s' % sf)
     # READONLY RECORD: .fnvnx.ro names the table with its byte ranges (the whole 32 bytes for the indexed read)
     import subprocess
     sec = subprocess.run(['objdump', '-s', '-j', '.fnvnx.ro', obj], capture_output=True, text=True)
