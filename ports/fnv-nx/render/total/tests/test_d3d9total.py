@@ -72,10 +72,9 @@ def read_closure():
     res = json.loads(r.stdout.splitlines()[-1])
     tracked = {x for x in git(REPO, "ls-files", "-z").split("\0") if x}
     rel = lambda p: os.path.relpath(os.path.realpath(p), REPO) if os.path.isabs(p) else p
-    files = {rel(p) for p in res["opened"]} & tracked
-    mods = {rel(p) for p in res["modules"]} & tracked          # every module the gate imports from the repository
-    assert mods <= files, sorted(mods - files)
-    return sorted(files)
+    mods = {rel(p) for p in res["modules"] if not rel(p).startswith("..")}   # every module the gate imports from the repository (a cached .pyc is read instead of its source, so open() does not show it)
+    assert mods <= tracked, sorted(mods - tracked)      # a module of the repository that is not tracked is no input of the repository
+    return sorted(({rel(p) for p in res["opened"]} & tracked) | mods)
 
 
 CLOSURE = read_closure()
