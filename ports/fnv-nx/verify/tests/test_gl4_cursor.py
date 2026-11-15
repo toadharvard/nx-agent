@@ -29,7 +29,7 @@ def names(path, macro):
 
 
 def numbers():
-    abi, abi4 = os.path.join(ABI, "nx", "gpu_abi.h"), os.path.join(ABI, "nxgpu4.h")
+    abi, abi4 = os.path.join(ABI, "include", "nx", "gpu_abi.h"), os.path.join(ABI, "include", "nxgpu4.h")
     ops = names(abi, "NXGPU_OP_LIST_V3") + names(abi4, "NXGPU_OP_LIST_V4")
     fns = ["INFO"] + names(abi, "NXGPU_FN_LIST_V3") + ["SHUTDOWN"] + names(abi4, "NXGPU_FN_LIST_V4")
     return {n: i for i, n in enumerate(ops)}, {n: i for i, n in enumerate(fns)}
@@ -144,7 +144,8 @@ def main():
 
     def present(cur, cx, cy, cw, ch, with_cursor=True):
         upload(img, base)
-        curbuf = (ctypes.c_uint8 * (cw * ch * 4))(*[c for p in cur for c in p]) if cur else None
+        data = [c for p in cur for c in p] if cur else []
+        curbuf = (ctypes.c_uint8 * max(len(data), cw * ch * 4))(*data) if cur else None
         keep["cur"] = curbuf
         p = Present(img, 0, 0, W, H, 0, 0, W, H, 0, 0, frame[0], 0, addr(curbuf) if with_cursor and curbuf else 0, cx, cy, cw, ch)
         return call("PRESENT", addr(p))
