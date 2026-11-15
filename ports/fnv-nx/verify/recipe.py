@@ -653,6 +653,10 @@ def runtime_configure(pin):
     v = pin.get("runtime_configure") if isinstance(pin, dict) else None
     if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("--") for x in v):
         raise BuildRed("%s: runtime_configure must be a list of configure options" % GUEST_PIN)
+    cite = pin.get("runtime_configure_cite")
+    missing = [o for o in v if not isinstance(cite, dict) or not isinstance(cite.get(o), str) or not cite[o].strip()]
+    if missing:
+        raise BuildRed("%s: runtime_configure options without a cite in runtime_configure_cite: %s" % (GUEST_PIN, ", ".join(missing)))
     return list(v)
 
 
