@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -185,6 +186,17 @@ def main():
     except recipe.RecipeError as e:
         ex_ = [str(x) for x in e.args]
     check("link.libs of an exe naming start files is red: they are the pinned driver's -### answer", any("an exe's start and end files" in e for e in ex_), ex_)
+    def interp(path):
+        d = open(path, "rb").read()
+        ph, es, n = struct.unpack_from("<Q", d, 32)[0], struct.unpack_from("<H", d, 54)[0], struct.unpack_from("<H", d, 56)[0]
+        for i in range(n):
+            t, _, off, _, _, fsz = struct.unpack_from("<IIQQQQ", d, ph + i * es)[:6]
+            if t == 3:
+                return d[off:off + fsz].rstrip(b"\0").decode()
+    drv = subprocess.run([CC, "-pie", "-###", "-x", "c", "/dev/null", "-o", "/dev/null"], capture_output=True, text=True).stderr.replace('"', "").split()
+    want = drv[drv.index("-dynamic-linker") + 1] if "-dynamic-linker" in drv else None
+    check("kind exe: PT_INTERP equals the dynamic linker of the pinned driver's -### (not a recipe or linker default)",
+          re_["status"] == "green" and want is not None and interp(re_["elf"]["path"]) == want, (want, re_["status"]))
     SH = {"toy/s.c": "int f_a(void) { return 1; }\nint f_hidden(void) { return 2; }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"}
     rs = build(mk("shared", host_rec("shared", version_script="exp.map"), dict(NONE, **SH)), SS)
     d = syms(rs["elf"]["path"]) if rs["status"] == "green" else {}

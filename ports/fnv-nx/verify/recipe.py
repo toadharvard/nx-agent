@@ -317,6 +317,13 @@ def merge_inputs(base, extra, store, ws):
     return sorted(out, key=lambda i: i["at"])
 
 
+def entry_object(objs, entry):
+    """The one-process-start rule on the objects OBJS ({path: defined symbols}) of the runtime's start files: when the link's entry ENTRY is not the
+    driver's default `_start`, the object that defines `_start` is the runtime's own process start, which the link does not use (the product defines
+    the entry): the paths that define `_start`, sorted. With the default entry there is none."""
+    return sorted(p for p, d in objs.items() if "_start" in d) if entry != "_start" else []
+
+
 def onedef(objs, root_defined):
     """The one-definition rule on the objects OBJS ({path: set of defined global/weak symbols}) of the runtime that the driver names: the paths whose
     defined symbols meet ROOT_DEFINED (the symbols that the admitted guest product roots define), sorted. An object is excluded from the link iff
@@ -1588,6 +1595,7 @@ class Job:
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/tool/ldcheck.py", "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
                + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
+               + (["--script", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else [])
                + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])]
                + (["--loader-defs", "/loader/defs.txt"] if loader_defs is not None else []),
                "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
