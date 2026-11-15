@@ -14,11 +14,11 @@ tmp = tempfile.mkdtemp(prefix='abilink-')
 fails = []
 
 
-def obj(name, rows):
+def obj(name, rows, decl=None):
     s = os.path.join(tmp, name + '.s')
     o = os.path.join(tmp, name + '.o')
     lay = ''.join('\\t'.join(map(str, r)) + '\\n' for r in rows)
-    open(s, 'w').write('\t.text\n\t.section .fnvnx.sympair,"",%progbits\n\t.section .fnvnx.layout,"",%progbits\n\t.ascii "' + lay + '"\n')
+    open(s, 'w').write('\t.text\n\t.section .fnvnx.sympair,"",%progbits\n' + ('' if decl is None else '\t.section .fnvnx.decltype,"",%progbits\n\t.ascii "' + ''.join(k + '\\t' + v + '\\n' for k, v in decl.items()) + '"\n') + '\t.section .fnvnx.layout,"",%progbits\n\t.ascii "' + lay + '"\n')
     r = subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', s, '-o', o], capture_output=True, text=True)
     if r.returncode:
         fails.append('assemble ' + name + ': ' + r.stderr[-200:])
@@ -35,7 +35,8 @@ def row(key, size, linkage):
 
 
 for link, green in (('external', False), ('internal', True), ('none', True), ('c', True)):
-    n, c, ids = judge(obj('a' + link, [row('S', 4, link)]), obj('b' + link, [row('S', 8, link)]))
+    dc = {'v': 'int'} if link == 'c' else None
+    n, c, ids = judge(obj('a' + link, [row('S', 4, link)], dc), obj('b' + link, [row('S', 8, link)], dc))
     if (not ids) != green:
         fails.append('%s: differing layouts, green=%s got %r' % (link, green, ids))
 n, c, ids = judge(obj('ea', [row('S', 4, 'external')]), obj('eb', [row('S', 4, 'external')]))
@@ -44,6 +45,17 @@ if ids:
 n, c, ids = judge(obj('xa', [row('S', 4, 'external')]), obj('xb', [row('S', 8, 'internal')]))
 if ids:
     fails.append('an external record never pairs with an internal one of the same key: %r' % ids)
+# C: the tag never pairs, the declared types of an external symbol are compared by 6.2.7
+S1, S2 = 'struct:S{x:int}', 'struct:S{x:long}'
+n, c, ids = judge(obj('ca', [row('S', 4, 'c')], {'v': S1}), obj('cb', [row('S', 4, 'c')], {'v': 'struct:S'}))
+if ids:
+    fails.append('C: complete against incomplete is compatible: %r' % ids)
+n, c, ids = judge(obj('cc', [row('S', 4, 'c')], {'v': S1}), obj('cd', [row('S', 4, 'c')], {'v': S2}))
+if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
+    fails.append('C: a member type differing is red on the symbol: %r' % ids)
+n, c, ids = judge(obj('ce', [row('S', 4, 'c')], {'v': S1}), obj('cf', [row('S', 4, 'c')]))
+if not any('no .fnvnx.decltype' in i for i in ids):
+    fails.append('C: a C unit without the record is red: %r' % ids)
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

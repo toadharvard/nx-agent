@@ -9,7 +9,7 @@ of the same gate:
   layout every `.fnvnx.layout` key of external linkage (8th column `external`; `internal`, `none` and `c` records are distinct entities per unit and never pair by
          name: C's cross-unit rule is 6.2.7 compatibility of declared types, not a tag name) (without a `nokey:` flag, whose key is not unique by construction) seen in two or more objects has one layout in all of
          them (size, alignment, fields, bases, flags; `layout:<key>`): the same aggregate name is the same type in all units, which is what lets abi pass a
-         by-value aggregate by its name alone. (link/odr.py proves the COMDAT-copy fact only; this item closes the layout fact abi.py's PROOF names.)
+         by-value aggregate by its name alone. (`c` records, whose tag has no linkage, are compared through the external symbols that declare them: item `ctype:<symbol>`, C11 6.2.7p2, link/ctypes_compat.py, from `.fnvnx.decltype`; a C unit without that section is red.) (link/odr.py proves the COMDAT-copy fact only; this item closes the layout fact abi.py's PROOF names.)
 Red iff an item is uncertified, the root's build is not green, an object has no `.fnvnx.sympair` section or cannot be parsed (red item naming the object). A C++
 unit is an object of the root's recipe (recipe.CXX_EXT). No such root: universe 0, green."""
 import json
@@ -29,12 +29,13 @@ import gate_build  # noqa: E402
 import l2sections  # noqa: E402
 import objsections  # noqa: E402
 import odr  # noqa: E402
+import ctypes_compat  # noqa: E402
 import recipe  # noqa: E402
 
 
 def read_objects(objs):
-    """OBJS: [(id, path)] -> (store {(id, 'sympair'): rows}, {layout key: {id: layout tuple}}, red items {id: reason})."""
-    store, layouts, red = {}, {}, {}
+    """OBJS: [(id, path)] -> (store {(id, 'sympair'): rows}, {layout key: {id: layout tuple}}, red items {id: reason}, {id: {symbol: declared C type}})."""
+    store, layouts, red, decls = {}, {}, {}, {}
     for oid, path in objs:
         try:
             elf = elfobj.read(path)
@@ -43,17 +44,24 @@ def read_objects(objs):
                 red[oid + ":sympair"] = "the object has no .fnvnx.sympair section"
                 continue
             store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair")
-            for lay in objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout"):
+            lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
+            if any(lay.linkage == "c" for lay in lays):     # a C unit: its declared types of external symbols are compared by C11 6.2.7 (link/ctypes_compat.py)
+                dt = elf.section(".fnvnx.decltype")
+                if dt is None:
+                    red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
+                else:
+                    decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
+            for lay in lays:
                 if lay.linkage == "external" and not any(f.startswith("nokey:") for f in lay.flags):
                     layouts.setdefault(lay.key, {})[oid] = (lay.size, lay.align, lay.fields, lay.bases, lay.flags)
         except (ValueError, OSError) as e:
             red[oid + ":unreadable"] = str(e)[:300]
-    return store, layouts, red
+    return store, layouts, red, decls
 
 
 def judge_objects(objs):
     """-> (universe, certified, ids, detail) of the objects OBJS [(id, path)] of one root."""
-    store, layouts, red = read_objects(objs)
+    store, layouts, red, decls = read_objects(objs)
     uni, abi_red = abi.check(store)
     items = list(uni)
     reds = {k: v for k, v in abi_red.items()}
@@ -71,6 +79,9 @@ def judge_objects(objs):
         if any(v != vals[0][1] for _, v in vals[1:]):
             first = next(o for o, v in vals[1:] if v != vals[0][1])
             reds["layout:" + key] = "layout in %s differs from %s" % (first, vals[0][0])
+    cit, cred = ctypes_compat.check(decls)
+    items += ["ctype:" + x for x in cit]
+    reds.update({"ctype:" + x: r for x, r in cred.items()})
     items += list(red)
     reds.update(red)
     return len(items), len(items) - len(reds), ["%s [%s]" % (i, r) for i, r in sorted(reds.items())], \
