@@ -1230,6 +1230,11 @@ def flag_holds(fl, name, off, stack=()):
     return bool(sites) and every_path_calls(words, a, b, sites)
 
 
+# The 32-bit absolute data relocation of each object ABI, one table: (e_machine, ELF64?) -> type. R_AARCH64_ABS32 (258, ELF64 AArch64), R_AARCH64_P32_ABS32 (1, the
+# ILP32 ABI), R_X86_64_32 (10, the host profile). read_cites accepts exactly this one for a `.fnvnx.cite` record.
+ABS32 = {(183, True): 258, (183, False): 1, (62, True): 10}
+
+
 def read_cites(o):
     """RULE C (rule text in the module docstring). The `.fnvnx.cite` records of the object O (hostabi/include/fnvnx/cite.h): -> ({(section index, function
     offset): [id, ..]}, [(item name, detail)] of malformed records). A record is: u32 address of a function (the RELA entry at the record's offset: an
@@ -1238,7 +1243,7 @@ def read_cites(o):
     malformed: a cited function must be a body of the object, never a name that is merely mentioned."""
     at, bad = {}, []
     fn = {(s[5], s[1]) for s in o.syms if s[3] == 2 and 0 < s[5] < 0xFF00}
-    abs32 = 258 if o.w64 else 1   # R_AARCH64_ABS32 (ELF64) / R_AARCH64_P32_ABS32 (ELF32, the ILP32 ABI)
+    abs32 = ABS32[(o.machine, o.w64)]
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
         if sname != CITE_SEC:
             continue

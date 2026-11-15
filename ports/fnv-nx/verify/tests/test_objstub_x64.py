@@ -157,5 +157,14 @@ try:
 except ValueError:
     check("x64 image: a relocatable object is not an image", True)
 
+# rule C on an x86-64 object: the FNVNX_CITE record's relocation is R_X86_64_32 (10), the one ABS32 of the object's ABI (objstub.ABS32), so the record reads and no cite-malformed arises
+CITE_H = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "hostabi", "include")
+cs = os.path.join(ROOT, "cite.c")
+open(cs, "w").write('#include "fnvnx/cite.h"\nint f1(void) { return 1; }\nint f2(void) { return 2; }\nFNVNX_CITE(f1, "wf:1");\nFNVNX_CITE(f2, "od:x");\n')
+co = os.path.join(ROOT, "cite.o")
+subprocess.run(CC["x64"] + ["-O0", "-I" + CITE_H, "-c", cs, "-o", co], check=True, capture_output=True)
+at, bad = objstub.read_cites(objstub.Obj(co))
+check("x64 cite records: R_X86_64_32 is the ABS32 of the ABI, both records read", not bad and sorted(sum(at.values(), [])) == ["od:x", "wf:1"], (at, bad))
+
 print("%d failed" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)
