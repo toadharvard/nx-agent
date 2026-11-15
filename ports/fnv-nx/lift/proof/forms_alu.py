@@ -8,7 +8,7 @@ UNDEF_SHAF = 'SHL/SHR/SAR/SHLD/SHRD: "The AF flag is undefined" (for non-zero co
 UNDEF_SHCF = 'SHL/SHR: "CF ... is undefined for SHL and SHR instructions where the count is greater than or equal to the size (in bits) of the destination operand."'
 UNDEF_DIV = 'DIV/IDIV: "The CF, OF, SF, ZF, AF, and PF flags are undefined."'
 UNDEF_BT = 'BT/BTS/BTR/BTC: "The OF, SF, AF, and PF flags are undefined." (ZF is unaffected)'
-UNDEF_BS = 'BSF/BSR: "The CF, OF, SF, AF, and PF flags are undefined" (ZF = 1 iff source is 0; destination undefined then).'
+UNDEF_BS = 'BSF/BSR: "The CF, OF, SF, AF, and PF flags are undefined" (ZF = 1 iff source is 0; destination unchanged then: DEFPRIOR).'
 
 @handler('add', 'adc', 'sub', 'sbb', 'cmp', 'and', 'or', 'xor', 'test')
 def alu(c):
@@ -104,9 +104,9 @@ def bs(c):
     F, d, s = c.F, c.ops[0], c.ops[1]; w = d.w; a = rd(s); r = C(0, w)
     for i in (range(w - 1, -1, -1) if c.m == 'bsf' else range(w)): r = ite(bit(a, i), C(i, w), r)
     # a zero source (the pinned model defines it, L3b IR 7c097d301 / ca469d14, ACL2 bit.lisp 3ccb342c): the destination is unchanged (DEFPRIOR: the write has when = ~z), ZF = 1, and
-    # CF/OF/SF/AF/PF are undefined (DEF0: 0) only then; with a non-zero source they keep their prior value. Every width (16/32); tzcnt/lzcnt alias while CPUREF's BMI1/ABM bits are clear.
+    # CF/OF/SF/AF/PF are undefined (DEF0: 0) for EVERY source (SDM "Flags Affected" of BSF/BSR; ACL2 bit.lisp 3ccb342c 818-822 / 939-943 set them undefined unconditionally). Every width (16/32); tzcnt/lzcnt alias while CPUREF's BMI1/ABM bits are clear.
     z = eq(a, 0); F.flag('zf', z)
-    for f in ('cf', 'of', 'sf', 'af', 'pf'): F.undefined(f, UNDEF_BS, when=z)
+    for f in ('cf', 'of', 'sf', 'af', 'pf'): F.undefined(f, UNDEF_BS)
     wr(F, d, ite(z, rd(d), r), when=~z)
 
 @handler('xadd')
