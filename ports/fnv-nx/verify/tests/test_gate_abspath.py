@@ -61,5 +61,13 @@ r = run(["tool"], tool="import importlib\nm = importlib.import_module('helper')\
 check("a constant import_module is not dynamic", r["findings"] == [], r)
 r = run(["tool"], tool="import subprocess\nsubprocess.run(['/usr/bin/git', 'x'])\n")
 check("an absolute path in a subprocess argv is red", kinds(r) == ["literal"], r)
+r = run(["tool"], tool="import runpy, sys\ndef require_mounted(p):\n    return p\ntool = require_mounted(sys.argv[1])\nrunpy.run_path(tool, run_name='__main__')\n")
+check("a dynamic load through require_mounted (via a name) is green", r["findings"] == [], r)
+r = run(["tool"], tool="import runpy, sys\nrunpy.run_path(require_under(sys.argv[1], sys.argv[2]))\n")
+check("a dynamic load through require_under is green", r["findings"] == [], r)
+r = run(["tool"], tool="import runpy, sys\ntool = sys.argv[1]\nrunpy.run_path(tool)\n")
+check("an unguarded launch is red", [x.split(":")[1] for x in r["findings"]] == ["dynamic-import"], r)
+r = run(["tool"], tool="import runpy, sys\ntool = require_mounted(sys.argv[1])\ntool = sys.argv[2]\nrunpy.run_path(tool)\n")
+check("a name with one unguarded assignment is red", [x.split(":")[1] for x in r["findings"]] == ["dynamic-import"], r)
 if fails:
     sys.exit(1)

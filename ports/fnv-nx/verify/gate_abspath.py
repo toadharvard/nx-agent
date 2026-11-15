@@ -10,7 +10,8 @@ Universe (from the stage graph, by rule, no list of files): the Python files of
       file of that name (the importer's directory first; with none there, every tracked file of that module path: a superset), and a string constant
       naming a tracked `.py` file (relative to the file's directory or to the checkout root) is a launch edge (gate_contract.py runs bodysel.py).
       A dynamic import that cannot be resolved (importlib.import_module / __import__ / spec_from_file_location / runpy with a non-constant
-      argument) is red `abspath:dynamic-import:FILE:LINE`.
+      argument) is red `abspath:dynamic-import:FILE:LINE`, unless its target expression is the result of require_mounted(...) or require_under(...)
+      of recipe.py (a call, or a name all of whose assignments are such calls): those guards raise outside the stage's mounts or the given tree.
 A file outside the closure is not judged. Findings are read from the ast, never from the text:
   abspath:literal:FILE:LINE:VALUE   a str constant that is an absolute path ("/" then a name) and is used as a path: it is, or is inside an argument
                                     of, open, os.*, os.path.*, pathlib.Path, subprocess.*, shutil.*, glob.*, io/tarfile/zipfile open, sys.path.*, or
@@ -46,6 +47,7 @@ PYREF = re.compile(r"[\w./+-]+\.py\Z")
 SINK_PREFIX = ("os.", "shutil.", "subprocess.", "glob.", "pathlib.", "sys.path.")
 SINKS = {"open", "io.open", "tarfile.open", "zipfile.ZipFile", "pathlib.Path", "pathlib.PurePath", "pathlib.PosixPath", "fileinput.input",
          "runpy.run_path", "importlib.util.spec_from_file_location"}
+GUARDS = {"require_mounted", "require_under"}   # recipe.py: the guards a launcher loads a tool through (the target of a dynamic load must be their result)
 DYN = {"importlib.import_module", "__import__", "importlib.util.spec_from_file_location", "runpy.run_path", "runpy.run_module",
        "importlib.__import__"}
 
@@ -140,6 +142,26 @@ def own_nodes(scope):
             todo.extend(ast.iter_child_nodes(n))
 
 
+def is_guard(node):
+    """A call of the one guard of a dynamic load: require_mounted(...) or require_under(...) (recipe.py), plain or as an attribute."""
+    return isinstance(node, ast.Call) and (dotted(node.func) or "").split(".")[-1] in GUARDS
+
+
+def guarded(a, idx, flow, sc, depth=0):
+    """True iff the target expression A is the result of a guard call: the call itself, or a name every assignment of which (in its scope chain) is one."""
+    if a is None:
+        return False
+    if is_guard(a):
+        return True
+    if isinstance(a, ast.Name) and depth < 4:
+        while idx is not None:
+            vals = flow[idx].get(a.id)
+            if vals:
+                return all(guarded(v, idx, flow, sc, depth + 1) for v in vals)
+            idx = sc[idx][1]
+    return False
+
+
 def judge_file(path, src):
     """(findings [(code, line, detail)], dynamic [(line)]) of one file."""
     mod = Module(path, src)
@@ -216,13 +238,14 @@ def judge_file(path, src):
                     if isinstance(m, ast.Subscript) and isinstance(m.ctx, ast.Load) and mod.full(m.value) == "os.environ":
                         add("envdefault", m.lineno)
     dyn = []
-    for n in ast.walk(mod.tree):
-        if isinstance(n, ast.Call) and mod.full(n.func) in DYN:
-            fn = mod.full(n.func)
-            i = 1 if fn.endswith("spec_from_file_location") else 0
-            a = n.args[i] if len(n.args) > i else None
-            if not (isinstance(a, ast.Constant) and isinstance(a.value, str)):
-                dyn.append(n.lineno)
+    for idx, (scope, _) in enumerate(sc):
+        for n in own_nodes(scope):
+            if isinstance(n, ast.Call) and mod.full(n.func) in DYN:
+                fn = mod.full(n.func)
+                i = 1 if fn.endswith("spec_from_file_location") else 0
+                a = n.args[i] if len(n.args) > i else None
+                if not (isinstance(a, ast.Constant) and isinstance(a.value, str)) and not guarded(a, idx, flow, sc):
+                    dyn.append(n.lineno)
     return f, dyn
 
 

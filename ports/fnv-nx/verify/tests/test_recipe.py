@@ -349,7 +349,7 @@ def main():
         check("recipe.build on a mismatched env raises EnvBlocked naming the mismatch, before any stage", bool(raised) and any(k in l for l in raised), raised)
         check("nothing is stored by a blocked build (no stage result, red or green, in the store; no objects.json)",
               not os.path.exists(es) or not any(files for _, _, files in os.walk(es)) and not os.path.exists(BASE + "/env-out/objects.json"))
-        p = subprocess.run(PY + [VERIFY + "/recipe.py", "build", "--root", ROOT, "--store", BASE + "/env-store2", "--out", BASE + "/env-out2"],
+        p = subprocess.run(PY + [VERIFY + "/recipe.py", "build", "--root", ROOT, "--store", BASE + "/env-store2", "--out", BASE + "/env-out2", "--artifacts", BASE + "/artifacts.git"],
                            cwd=env, capture_output=True, text=True)
         check("recipe.py build on a mismatched env prints `blocked: env` and exits 4, storing nothing",
               p.returncode == 4 and p.stdout.startswith("blocked: env") and not os.path.exists(BASE + "/env-store2"), (p.returncode, p.stdout[:200], p.stderr[:200]))
