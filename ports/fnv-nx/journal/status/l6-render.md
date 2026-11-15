@@ -1169,3 +1169,9 @@ Paused: w3b, w4, farm; no other work.
         - gl4_api_mem_gpu_addr / gl4_api_wait_frame V: w6 is finding the cause.
     - Pin: L1 w15 pinned 56a4d09c (stamp 74cafda2) on cand2 @ 265c4ea4a. I've asked w12 to carry it into w12L2.
 - bottleneck: the pin in w12L2; the read_cites fix; L1 cand3 → trunk. 1 worker (w6).
+- 21:35Z: owner order (integ 4363f94e9): every gate input must be inside the recipe key.
+    - The case: sm_table.py REF=/home/user/work/l6/ref, plus the defaults in tools/gates/ready.py and difffuzz.
+    - The fix: the shader set and its table become a recipe stage over the gamedata external, and sm_link reads that stage's output.
+    - New worker w8 `session_01KmtZKQzoLfRjkzALV3LqLb` on claude/fnv-l6-render-w8-keyed. Its census covers both trees, and it prepares the farm job that re-derives sm_link.
+- 21:35Z: w12L2 2faf60c4e carries the pin (56a4d09c, stamp 74cafda2), the cite reloc table and the T2 tail-call rule. w6 is merging it for the first full guest rebuild.
+- bottleneck: the w6 guest rebuild on 2faf60c4e; L1 cand3 → trunk. 2 workers (w6, w8).
