@@ -660,3 +660,15 @@ Paused: w3b, w4, farm; no other work.
     - Scratch on w1b 819716297: 115,776 stage certs, 120,392 link certs, 0 disagreements, 0 red.
     - The (FLAT<<1)-1 mask is replaced by direct submask iteration of FNVNX_SHADER_KEY_FLAGS. No new constant.
     - w1b makes "the output depends only on flags & KEY_FLAGS" structural: masked at translate entry. A NONKEY effect on the GLSL counts as a key defect.
+- 00:56Z w1b f58bf7a8c (claude/fnv-l6-render-w1b-sm): total is a generate stage over the docs mirror.
+    - 171 opcode rows and fnvnx_sm_rows.h are identical.
+    - The 28 table differences are not accepted until each is cited to the mirror.
+    - sm_cases.py ("as remembered by the author") is a rule-1 violation on the path: next to derive from the asm reference pages.
+    - Readers (translator gen step, gate_d3d9total, tests, oracle.json) move to total's outputs; the tracked copies are then deleted (w1b).
+- 00:56Z op_cover/op_reserved*: proposed as facts of objstub's own reader (L1 w20) instead of committed files; asked L1.
+- 00:56Z Header rules (w1b):
+    - the flag X-macro generates the enum, ALL_FLAGS and KEY = ALL & ~NONKEY. Today KEY is ~NONKEY, 30 undefined bits.
+    - FNVNX_DK_USAGE_MAX comes from the pinned d3d9types.h, for L6A.
+- 00:56Z ASM-628/629 (registry on w6-root) are removed by fact.
+    - 628: cite the D3D9 page from the mirror (w6).
+    - 629: reserved ABI fields are deleted, padding is stated by static_assert (L6A W6-D1b).
