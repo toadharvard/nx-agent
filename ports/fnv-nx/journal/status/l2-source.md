@@ -381,3 +381,8 @@ After the first frame:
 - w3 doing: one L2 plugin set, claude/fnv-l2-source-plugins, on the farm base e858ede5 (layout, pi, names, dispatch), then the farm START with the stage-1 rebuild.
 - One L2 plugin set: claude/fnv-l2-source-plugins @065136142 (base farm-noneelf 33df8a792 with the runtime_configure --disable-decimal-float record). Through plugbuild: test_layout 150, pi 116, cc1 23, names 14, sdd 26, dispatch 62, defdisp_ns 7, exitgen_defdisp 16, ctypes ok, order_tags ok; the 3 pi-repro files compile. test_order_cont/fold/local are red on this base: realobj.py passes its own plugin specs, which recipe.py refuses. That is L1's realobj on the old link/; they are green on w2's branch with cand2's link/, and the fix comes with cand3. The farm START is sent.
 - lift/rt red forbid (L1 w12 / L3a w8): enter.cc's call of the dispatcher's returned entry got a `.fnvnx.disp` descriptor. Ruling ENTRY1: a type attribute `fnvnx_entry` on native-entry function-pointer types; such a call is not rewritten; conversions into or out of the type are errors (PRE_GENERICIZE). w2 doing it on claude/fnv-l2-source-plugins; w8 then switches lift/rt to the typedef.
+- ENTRY1: done, w2 @a94f2e11c (test_dispatch_entry 15). Open in the same item:
+  - static initialisers, unions and raw copies;
+  - the site word as a typed record {u32 fp; entry} with 64-bit acquire/release, so there is no u32<->entry conversion anywhere;
+  - a rerun under the pinned env (setup_verdict_env.sh, not a swapped env.json).
+  - Ruling to w8: no blessed int->entry constructor. The dispatch table becomes typed C data `fnvl_disp_entries[] = {&fn...}` (L3a generator); lift/rt takes ENTRY1 through cand3.
