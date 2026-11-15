@@ -527,9 +527,9 @@ def finish(s_in, s_out, newflags, mem=None, extra_pre=None, ou_pre=False, abort_
       * ES and B are recomputed (SDM 1:8.1.3.3).
     ou_pre adds the precondition that OE and UE are masked when this instruction raised them (the biased result
     of SDM 1:8.5.4/8.5.5 is not representable in binary64, OWNER 8).  It is not a bare assumption: it is the
-    L3a fact `x87-masked-sites` of CLAUDE.md, section Hardware exceptions in lifted code (every fldcw, fldenv, frstor and
+    one assumption ASM-204 = I-FPMASK (verify/ASSUMPTIONS.json, removed by L3a's fpstate mask census: every fldcw, fldenv, frstor and
     fxrstor site of the exe keeps the exceptions masked, so FCW.OM = FCW.UM = 1 at every x87 instruction).
-    CERTS.md, section x87 precondition facts, names it; a certificate that uses ou_pre has that fact in its K."""
+    CERTS.md, section x87 precondition facts, names it; a certificate that uses ou_pre has ASM-204 in its K."""
     fcw = s_in.fcw
     unm = ~Extract(5, 0, fcw)
     abort = (newflags & unm & (fl(IE, DE, ZE) if abort_set is None else abort_set)) != K(0, 6)

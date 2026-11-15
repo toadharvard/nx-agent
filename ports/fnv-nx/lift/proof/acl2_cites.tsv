@@ -8,6 +8,22 @@ fp/arithmetic.lisp	703	x86-sqrtpd-Op/En-RM	(dp-sse-sqrt xmm/mem1 mxcsr)
 fp/arithmetic.lisp	601	x86-sqrtps-Op/En-RM	(sp-sse-sqrt xmm/mem3 mxcsr)
 fp/arithmetic.lisp	477	x86-sqrts?-Op/En-RM	(dp-sse-sqrt xmm/mem (mxcsr x86))
 fp/arithmetic.lisp	478	x86-sqrts?-Op/En-RM	(sp-sse-sqrt xmm/mem (mxcsr x86))
+fp/convert.lisp	509	x86-cvtpd2ps-Op/En-RM	(sse-cvt-dp-to-sp xmm/mem0 mxcsr))
+fp/convert.lisp	404	x86-cvtps2pd-Op/En-RM	(sse-cvt-sp-to-dp xmm/mem0 mxcsr))
+fp/convert.lisp	316	x86-cvts?2s?-Op/En-RM	(sse-cvt-dp-to-sp xmm/mem (mxcsr x86))
+fp/convert.lisp	317	x86-cvts?2s?-Op/En-RM	(sse-cvt-sp-to-dp xmm/mem (mxcsr x86))
+fp/convert.lisp	138	x86-cvts?2si/cvtts?2si-Op/En-RM	(dp-sse-cvt-fp-to-int reg-size xmm/mem (mxcsr x86) trunc)
+fp/convert.lisp	139	x86-cvts?2si/cvtts?2si-Op/En-RM	(sp-sse-cvt-fp-to-int reg-size xmm/mem (mxcsr x86) trunc)
+fp/convert.lisp	230	x86-cvtsi2s?-Op/En-RM	(dp-sse-cvt-int-to-fp reg/mem (mxcsr x86))
+fp/convert.lisp	231	x86-cvtsi2s?-Op/En-RM	(sp-sse-cvt-int-to-fp reg/mem (mxcsr x86))
+fp/logical.lisp	421	x86-cmppd-Op/En-RMI	(dp-sse-cmp operation xmm1 xmm/mem1 mxcsr)
+fp/logical.lisp	297	x86-cmpps-Op/En-RMI	(sp-sse-cmp operation xmm3 xmm/mem3 mxcsr)
+fp/logical.lisp	144	x86-cmpss/cmpsd-Op/En-RMI	(dp-sse-cmp (n03 imm) xmm xmm/mem (mxcsr x86))
+fp/logical.lisp	145	x86-cmpss/cmpsd-Op/En-RMI	(sp-sse-cmp (n03 imm) xmm xmm/mem (mxcsr x86))
+fp/logical.lisp	513	x86-comis?/ucomis?-Op/En-RM	(dp-sse-cmp operation xmm xmm/mem (mxcsr x86))
+fp/logical.lisp	514	x86-comis?/ucomis?-Op/En-RM	(sp-sse-cmp operation xmm xmm/mem (mxcsr x86))
+fp/mxcsr.lisp	62	x86-ldmxcsr/stmxcsr-Op/En-M	0F AE /2: LDMXCSR m32
+fp/mxcsr.lisp	63	x86-ldmxcsr/stmxcsr-Op/En-M	0F AE /3: STMXCSR m32
 fp/shuffle-and-unpack.lisp	270	x86-shufpd-Op/En-RMI	(result (merge-2-u64s qword1 qword0))
 fp/shuffle-and-unpack.lisp	182	x86-shufps-Op/En-RMI	(result (merge-4-u32s dword3 dword2 dword1 dword0))
 fp/shuffle-and-unpack.lisp	409	x86-unpck?pd-Op/En-RM	66 0F 14: UNPCKLPD xmm1, xmm2/m128
@@ -57,6 +73,9 @@ move-sse.lisp	838	x86-movups/movupd/movdqu-Op/En-MR	F3 0F 7F: MOVDQU xmm2/m128, 
 move-sse.lisp	762	x86-movups/movupd/movdqu-Op/En-RM	0F 10: MOVUPS xmm1, xmm2/m128
 move-sse.lisp	763	x86-movups/movupd/movdqu-Op/En-RM	66 0F 10: MOVUPD xmm1, xmm2/m128
 move-sse.lisp	764	x86-movups/movupd/movdqu-Op/En-RM	F3 0F 6F: MOVDQU xmm1, xmm2/m128
+pack.lisp	499	x86-packssdw-mmx	(result (packss-spec 64 32 src1 src2))
+pack.lisp	417	x86-packsswb-mmx	(result (packss-spec 64 16 src1 src2))
+pack.lisp	335	x86-packuswb-mmx	(result (packus-spec 64 16 src1 src2))
 padd.lisp	261	x86-paddb/paddw/paddd/paddq-mmx	(#xd4 (simd-add-spec (* 8 operand-size) 64 src1 src2))
 padd.lisp	258	x86-paddb/paddw/paddd/paddq-mmx	(#xfc (simd-add-spec (* 8 operand-size) 08 src1 src2))
 padd.lisp	259	x86-paddb/paddw/paddd/paddq-mmx	(#xfd (simd-add-spec (* 8 operand-size) 16 src1 src2))
@@ -81,6 +100,9 @@ pcmp.lisp	473	x86-pcmpgtb/pcmpgtw/pcmpgtd-mmx	(#x66 (pcmpgt (* 8 operand-size) 3
 pcmp.lisp	560	x86-pcmpgtb/pcmpgtw/pcmpgtd-sse	(#x64 (pcmpgt (* 8 operand-size) 08 src1 src2))
 pcmp.lisp	561	x86-pcmpgtb/pcmpgtw/pcmpgtd-sse	(#x65 (pcmpgt (* 8 operand-size) 16 src1 src2))
 pcmp.lisp	562	x86-pcmpgtb/pcmpgtw/pcmpgtd-sse	(#x66 (pcmpgt (* 8 operand-size) 32 src1 src2))
+pmadd.lisp	173	x86-pmaddwd-mmx	(result (simd-muladd-spec (* 8 operand-size) 16 src1 src2))
+pmul.lisp	291	x86-pmulhw-mmx	(result (simd-mul-signed-high-spec (* 8 operand-size) 16 src1 src2))
+pmul.lisp	209	x86-pmullw-mmx	(result (simd-mul-low-spec (* 8 operand-size) 16 src1 src2))
 pshuf.lisp	135	x86-pshufd	(result (pshufd src imm))
 pshuf.lisp	291	x86-pshufhw	(pshufw (logtail 64 src) imm)))
 pshuf.lisp	212	x86-pshuflw	(result (logapp 64 (pshufw (loghead 64 src) imm)

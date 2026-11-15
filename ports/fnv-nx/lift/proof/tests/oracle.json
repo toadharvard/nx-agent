@@ -247,13 +247,20 @@
   "test_simdspec.py": {
    "references": [
     {
-     "anchor": "L1-L113",
+     "anchor": "L1-L135",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/proof/acl2_cites.tsv"
+    },
+    {
+     "anchor": "L1-L28",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/simdsdm_cites.txt"
     }
    ],
    "subject": [
-    "ports/fnv-nx/lift/proof/simdspec.py"
+    "ports/fnv-nx/lift/proof/simdsdm.py",
+    "ports/fnv-nx/lift/proof/simdspec.py",
+    "ports/fnv-nx/lift/proof/ssefp.py"
    ]
   },
   "test_x87spec.py": {
