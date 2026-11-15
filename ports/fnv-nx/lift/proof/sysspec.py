@@ -117,9 +117,8 @@ def check_far(key, fk, rec):
         return 'uncertified', 'uncertified: far transfer to a selector other than selectors.cs: descriptor rows undecided (sgdt)'      # unreachable until sgdt is decided: kept to name the rule
     except x86sys.Undecided as e:
         why = str(e)
-    if not imm: return 'uncertified', 'uncertified: far transfer through memory: the selector is data, defined by the descriptor rows: %s' % why
     import sysspec_far
-    try: cases = sysspec_far.check(key, call, rec)
+    try: cases = sysspec_far.check(key, call, rec, imm)
     except (KeyError, AttributeError, AssertionError) as e: return 'not-covered', 'no Form for the far transfer (%s)' % type(e).__name__
     bad = [c for c, r in cases if r != 'proved']
     if bad: return 'FAILED(dsl)', 'far transfer differs from the SDM in: %s' % ','.join(bad)
