@@ -520,3 +520,4 @@ After the first frame:
   - The plugin writes a `.fnvnx.cookie` fact row from the front end's tree for every array new and delete site.
   - The gate checks every row of every product unit against S29.
   - It lands with the cand3 pin, on w2's branch; the gate kind is `fact` (w15).
+- 2026-11-15 20:33Z: The cand2 and cand3 pin is built from plugins b9f6b3a69; its stamp 03eacf9d8c6932cd equals 41beb64ff's (checked). The pin goes to L1, w15 and w12. Plugins are frozen until cand2 merges.
