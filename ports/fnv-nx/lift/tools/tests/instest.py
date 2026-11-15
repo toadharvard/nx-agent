@@ -364,7 +364,7 @@ def priv_want(E):
     """the CPL-0-only instructions at CPL 3 (the lifter's class 2, f_sys.PRIV_MN): #GP(0), which Windows reports by KiTrap0D's opcode table (f_sys.trap0d_privileged: STATUS_PRIVILEGED_INSTRUCTION =
     fnvl_raise code 6, else STATUS_ACCESS_VIOLATION = fnvl_raise_av). -> the expected event ('trap6' / 'trap99') or None when the form is not of that class. Unicorn runs ring 0 and executes them."""
     f = G['L'].f_sys
-    return None if E['base'] not in f.PRIV_MN else 'trap6' if f.trap0d_privileged(E['ins'].bytes) else 'trap99'
+    return None if E['base'] not in __import__('proof.privset', fromlist=['x']).mnemonics() else 'trap6' if f.wine_is_privileged(E['ins'].bytes) else 'trap99'
 def gs_null_av(E, X):
     """a `gs:` memory access that touches memory, with the harness' GS = the null selector (fnvl_seg_init): #GP(0) -> access violation event; the Unicorn oracle has a flat GS"""
     return any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS for o in E['ins'].operands) and E['ins'].mnemonic.split(' ')[-1] not in G['L'].core.NO_ACCESS

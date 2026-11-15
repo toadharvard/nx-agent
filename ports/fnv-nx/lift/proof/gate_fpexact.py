@@ -120,10 +120,13 @@ def read_inputs(res):
     return sorted((o["unit"], o["object"]) for o in res["objects"])
 
 
+GEN_HEADER = os.path.join("gen", "rcpref.h")      # a generated file of the root (rt/build.json stage gen_cpuref), not a committed one
+
+
 def read_ref(rt):
     """the four FNVL_RCP_REF_* constants of rt/rcpref.h -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
     out = {}
-    with open(os.path.join(rt, "rcpref.h")) as fh:
+    with open(os.path.join(rt, GEN_HEADER)) as fh:
         for line in fh:
             m = re.match(r'#define FNVL_RCP_REF_([A-Z]+) ("[^"\n]*"|[0-9]+)\s*$', line)
             if m and m[1] in REF_KEYS:
@@ -131,7 +134,7 @@ def read_ref(rt):
                     raise ValueError("FNVL_RCP_REF_%s defined twice" % m[1])
                 out[m[1]] = m[2][1:-1] if m[2].startswith('"') else int(m[2])
     if sorted(out) != sorted(REF_KEYS):
-        raise ValueError("rt/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
+        raise ValueError("rt/gen/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
     return out
 
 
@@ -156,7 +159,7 @@ def check_cert(rt):
             bad.append("cpu identity %s is not the reference %s" % (json.dumps(cpu, sort_keys=True), json.dumps(want, sort_keys=True)))
         if cert["mismatches"] != 0 or isinstance(cert["mismatches"], bool):
             bad.append("mismatches is %r, not 0" % (cert["mismatches"],))
-        for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", "rcpref.h")):
+        for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", GEN_HEADER)):
             have = sha256_file(os.path.join(rt, file))
             if cert[key] != have:
                 bad.append("%s %s differs from sha256 of rt/%s (%s)" % (key, cert[key], file, have))

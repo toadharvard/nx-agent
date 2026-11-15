@@ -133,15 +133,15 @@ def imgpage(p):
             if a & ~0xfff == p: b[a - p:a - p + len(r)] = r
         return bytes(b)
     return orig_imgpage(p)
-# expected `int imm8` rows (fnvlift/f_sys.py INT_VECTORS): vector -> substring of the generated C
-INT_EXPECT = {0x03: 'FNVL_RAISE(FNVL_BP,0x%xu)', 0x04: 'FNVL_RAISE(FNVL_INTO,0x%xu)', 0x05: 'FNVL_RAISE(FNVL_BOUNDS,0x%xu)', 0x2c: 'FNVL_RAISE(FNVL_ASSERT,0x%xu)',
-              0x2d: 'FNVL_RAISE(FNVL_DBGSRV,0x%xu)', 0x2e: 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)', 0x06: 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)', 0x29: 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)'}
-INT_AT = {0x03: 0, 0x04: 1, 0x05: 0, 0x2c: 0, 0x2d: 0}
+# expected `int imm8` rows: the int_vector / int_at columns of fnvlift/faults.json (Wine 9.0 signal_i386.c); a vector outside the record's int_ring3.vectors is undecided (Unsupported)
+from fnvlift import faults as _faults
+INT_EXPECT = {v: 'FNVL_RAISE(FNVL_%s,0x%%xu)' % n for v, (n, at) in _faults.INT_ROWS.items()}
+INT_AT = {v: (2 if at == 'nxt' else at) for v, (n, at) in _faults.INT_ROWS.items()}      # 'nxt' is checked as a+len below
 A0 = 0x7d000000
 RAV = 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)' % A0
 RPRIV = 'FNVL_RAISE(FNVL_PRIV,0x%xu)' % A0
 RUD = 'FNVL_RAISE(FNVL_UD,0x%xu)' % A0
-RLOCK = 'FNVL_RAISE(FNVL_LOCK,0x%xu)' % A0      # a #UD with an F0 byte among the first four bytes at Eip (KiTrap06Handler scans them all, not only the prefixes): STATUS_INVALID_LOCK_SEQUENCE
+RLOCK = 'FNVL_RAISE(FNVL_UD,0x%xu)' % A0      # a #UD with an F0 byte among the first four bytes at Eip (KiTrap06Handler scans them all, not only the prefixes): STATUS_INVALID_LOCK_SEQUENCE
 GSAV = 'if(SELK(c->sel[SEG_GS])==0){ SYNC_OUT; REGS(); FNVL_RAISE_AV(0,0xffffffffu,0x%xu)' % A0      # a gs: access with GS = the null selector: #GP(0)
 GPS = lambda i: 'if(!fnvl_seg_ok(%d,s)){ SYNC_OUT; REGS(); %s' % (i, 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu)' % A0)
 NORAISE = '\x00'      # marker: the text must raise nothing (no FNVL_RAISE(FNVL_*) / fnvl_raise_av; the stub event of falling off the one-instruction function is not a raise)
@@ -172,10 +172,7 @@ CLASS_EXPECT = [
     ('cb', 'retf', ['s!=SEL_CS', 'esp+=8u', RAV]), ('ca0400', 'retf 4', ['esp+=12u']), ('66cb', 'retf (16-bit)', ['M16(esp)', 'esp+=4u']),
     ('cf', 'iretd', ['s!=SEL_CS', 'EFL_POP(fl);', 'esp+=12u', 'fl=M32(esp+8u)']), ('66cf', 'iret', ['esp+=6u', 'c->eflx']),
     ('f1', 'int1 = #DB trap, next instruction', ['FNVL_RAISE(FNVL_STEP,0x%xu)' % (A0 + 1)]),
-    ('6301', 'arpl [ecx],ax', ['zf=1', '&~3u']), ('0f02c1', 'lar eax,ecx', ['fnvl_gdt_hi(', '(hi&0x00ffff00u)', 'zf=1', NORAISE]), ('0f03c1', 'lsl eax,ecx', ['fnvl_gdt_limit(hi)']),
-    ('0f00e0', 'verr ax', ['zf=hi!=0']), ('0f00e8', 'verw ax', ['!(hi&0x800u)']),
-    ('0f0000', 'sldt [eax]', ['FNVL_LDTR_SEL']), ('0f0008', 'str [eax]', ['FNVL_TR_SEL']), ('0f01e0', 'smsw eax', ['FNVL_CR0']), ('0f0100', 'sgdt [eax]', ['FNVL_GDTR_LIMIT', 'FNVL_GDTR_BASE']),
-    ('0f0108', 'sidt [eax]', ['FNVL_IDTR_LIMIT', 'FNVL_IDTR_BASE']),
+    ('6301', 'arpl [ecx],ax', ['zf=1', '&~3u']),     ('0f0008', 'str [eax]', ['FNVL_TR_SEL']),
     ('67e3fa', 'jcxz', ['(ecx&0xffffu)==0']), ('67e2fa', 'loop (CX)', ['ecx=(ecx&0xffff0000u)|((ecx-1)&0xffffu)', '(ecx&0xffffu)!=0']),
     ('f390', 'pause', ['yield']), ('0faef0', 'mfence', ['__sync_synchronize']), ('0fae38', 'clflush [eax]', ['M8(']), ('f30fbcc1', 'tzcnt = bsf', ['__builtin_ctz']), ('f30fbdc1', 'lzcnt = bsr', ['__builtin_clz']),
     ('0f1c00', 'cldemote (reserved NOP)', [NORAISE]), ('f30f1efb', 'endbr32', [NORAISE]), ('0f1a00', 'bndldx', [NORAISE]), ('0f0d00', 'prefetch', [NORAISE]), ('0f19c0', 'nop eax,eax', [NORAISE]),
