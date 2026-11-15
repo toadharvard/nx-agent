@@ -110,6 +110,17 @@ MSVC_PATCH=${MSVC_PATCH:-$HERE/msvcmodel.patch}
 STAMP=$(python3 -I "$HERE/stamp.py" --patch "$MSVC_PATCH" --build "$HERE/build.sh" --patch-dir "$PATCH_DIR" --verify "$VERIFY" --targets "$TARGETS")   # the one key computation (stamp.py); verify/recipe.py compares it with the compiler tree's MANIFEST.json
 if [ -f "$W/stamp-key" ] && [ "$(cat "$W/stamp-key")" != "$STAMP" ]; then rm -rf "$W"/stamp-* "$SRC" "$NL" "$W"/b-*; fi
 echo "$STAMP" > "$W/stamp-key"
+# the CFG-LINK patch of the runtime subdirs' configure scripts: guest_compiler.json runtime_configure_patch, read through recipe
+eval "$(python3 -I - "$VERIFY" <<'EOF4'
+import json, os, shlex, sys
+sys.path.insert(0, sys.argv[1])
+import recipe
+v = recipe.runtime_configure_patch(json.load(open(os.path.join(sys.argv[1], "guest_compiler.json"))))
+print("CFG_SUBDIRS=(%s)" % " ".join(shlex.quote(d) for d in v["subdirs"]))
+print("CFG_GUEST_LD=%s CFG_PROTOCOL_SRC=%s" % (shlex.quote(v["guest_script"]), shlex.quote(v["protocol_source"])))
+EOF4
+)"
+
 : > "$CONF"
 note "# build.sh key $STAMP; gcc $V sha256 $SHA256; newlib $NLV sha256 $NLSHA256; devkitPro/buildscripts $BUILDSCRIPTS_COMMIT"
 note "# binutils: $($LD -v) (aarch64-linux-gnu-* as aarch64-none-elf-*)"
@@ -198,17 +209,6 @@ import recipe
 print("\n".join(recipe.runtime_configure(json.load(open(os.path.join(sys.argv[1], "guest_compiler.json"))))))
 EOF2
 )
-
-# the CFG-LINK patch of the runtime subdirs' configure scripts: guest_compiler.json runtime_configure_patch, read through recipe
-eval "$(python3 -I - "$VERIFY" <<'EOF4'
-import json, os, shlex, sys
-sys.path.insert(0, sys.argv[1])
-import recipe
-v = recipe.runtime_configure_patch(json.load(open(os.path.join(sys.argv[1], "guest_compiler.json"))))
-print("CFG_SUBDIRS=(%s)" % " ".join(shlex.quote(d) for d in v["subdirs"]))
-print("CFG_GUEST_LD=%s CFG_PROTOCOL_SRC=%s" % (shlex.quote(v["guest_script"]), shlex.quote(v["protocol_source"])))
-EOF4
-)"
 
 # target-library flags: the semantic flags minus the multilib selectors (the multilib adds those), per language as the driver
 # says (recipe.semantics_for), plus the plugin flags of the caller. Needs the stage-1 driver.
