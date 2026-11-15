@@ -2696,7 +2696,7 @@ class Job:
         ld, rt = self.ld_tool()
         mine = {f[len(self.root) + 1:] for f in self.files if under(f, self.root)}
         src = os.path.join(ws, "root", lk["script"]) if link_generated(lk["script"], mine, set(generated_outputs(self.rec))) else os.path.join(self.repo, link_file(lk["script"], self.root, mine, self.roots, self.files))
-        sd = os.path.join(ws, "ldscript")
+        sd = os.path.join(tempfile.mkdtemp(dir=ws), "ldscript")
         os.makedirs(sd)
         shutil.copyfile(src, os.path.join(sd, os.path.basename(lk["script"])))
         with open(os.path.join(sd, "empty.o"), "wb") as f:   # the one input ld needs: an empty object of the link's target (no symbols of its own)
@@ -2726,7 +2726,8 @@ class Job:
         lk = self.rec["link"]
         output = output or lk["output"]   # a test is linked to its own output (RECIPE.md, tests); TAG tells the links of one root apart
         ld, rt = self.ld_tool()
-        od, sd = os.path.join(ws, "objs" + tag), os.path.join(ws, "ld" + tag)
+        pv = tempfile.mkdtemp(dir=ws)   # a private scratch of this invocation: a stage is built once in its own directory, never in a name another invocation of the same ws can take
+        od, sd = os.path.join(pv, "objs"), os.path.join(pv, "ld")
         args = []
         for label, objs in groups:
             for u, p in objs:
@@ -2737,7 +2738,7 @@ class Job:
         os.makedirs(sd)
         arch_args, arch_in = [], []
         if offer is not None:
-            ad = os.path.join(ws, "arch" + tag)
+            ad = os.path.join(pv, "arch")
             os.makedirs(ad)
             self.offered = {}
             for label, objs in offer:
@@ -2759,7 +2760,7 @@ class Job:
             lb = dict(self.guest_libs(ws, rootdef, open(os.path.join(sd, os.path.basename(lk["script"]))).read())[0], external=lb["external"])
         if lb and "system" in lb:
             # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names
-            yd = os.path.join(ws, "syslib")
+            yd = os.path.join(pv, "syslib")
             os.makedirs(yd)
             bad = envcheck.system_lib_errors(lb["system"], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners())
             if bad:
@@ -2817,13 +2818,14 @@ class Job:
         dirs = sorted({os.path.realpath(posixpath.normpath(d)) for d in libs if os.path.isdir(d)})
         dirs = [d for d in dirs if crt(d)]    # the directories that hold crt objects
         mnt = []
+        pv = tempfile.mkdtemp(dir=ws)
         for i, d in enumerate(dirs):
-            v = os.path.join(ws, "crt%d" % i)
+            v = os.path.join(pv, "crt%d" % i)
             os.makedirs(v)
             for f in crt(d):
                 shutil.copyfile(os.path.join(d, f), os.path.join(v, f))
             mnt.append({"at": d, "tree": cas.ingest(v, self.store)})
-        pd = os.path.join(ws, "probe")
+        pd = os.path.join(pv, "probe")
         os.makedirs(pd)
         with open(os.path.join(pd, "x.cc"), "w") as f:
             f.write(PROBE_SRC)
@@ -2948,7 +2950,7 @@ class Job:
         drv = rt["at"] + "/" + pin_drivers()[1]
         flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
         tr = self.toolrt([drv])[1]
-        pd = os.path.join(ws, "probe")
+        pd = os.path.join(tempfile.mkdtemp(dir=ws), "probe")
         os.makedirs(pd)
         with open(os.path.join(pd, "x.cc"), "w") as f:
             f.write(PROBE_SRC)
