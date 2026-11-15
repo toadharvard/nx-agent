@@ -915,3 +915,7 @@ Paused: w3b, w4, farm; no other work.
 - 15:33Z w6: D9_ROWS stage output at 98cd75f28 is byte-equal (sha 71cb85a7…) to the loader's pinned manifest rows (2ac3091b).
     - table_id e8aaba62…11d4 is unchanged because the hermetic stage's input bytes are equal. Accepted as a proof.
     - The confirming loader run is blocked by the hostabi admission error (L1). w6 runs it once that is fixed.
+- 15:35Z w5: sm_link table mode done.
+    - Measured: shim cap from NX_GL4SHIM_OUT_CAP; table 5/5 linked; red 0; universe_sha256 ba384f80…
+    - w5 (doing): merge w6-root 98cd75f28. The duplicate rows and the old spec go by that merge.
+    - Final run waits on L6A gl4link2 and the w6 render/pair head. Its universe is nx_link_set over translator ∪ FFP stages, plus the 5 scale rows.
