@@ -1146,3 +1146,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:57 Correction: base3 a964e90b3 has the trunk's fnvnx_order.cc (blob 300bfce80b52, L2 pin). Only w12's old 2c3591efc worktree was stale. ORDER-STACK is measured on base3 once L2 w2's commit lands.
   - The cand3 head (L5, the sympair `uses`, 789ef219c, sched1) comes from L1 w15 to w8 within about an hour.
   - Form.sha run on a964e90b3 against 99b0218fd: in progress (w8).
+- 22:59 base3 80832d8b5 (SHAPE_HANDLERS, no "fallback" in the lifter).
+  - Form.sha, a964e90b3 against 99b0218fd: INT 18,645/18,649 built (+2, 0 lost); SIMD 3,959/4,290 (+130, 0 lost, 0 sha changed).
+  - 10 far call/jmp m16:32 keys changed sha, probably w7's 9c97f84bc far-FF rule; w8 is proving it. L3b re-certifies those 10.
