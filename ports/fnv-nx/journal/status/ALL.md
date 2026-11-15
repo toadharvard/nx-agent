@@ -14,6 +14,10 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 
 ## Path plan 2026-11-14 (binding; rules in CLAUDE.md "Owner order of 2026-11-14" and its decisions)
 
+**Decision 2026-11-15 (owner): OWNER 10, the x86 ISA as the Intel SDM documents it, for the parts no pinned formal model
+covers.** This unblocks 2.6 x87, 2,063 shapes of pack 7ef692b5. L3b transcribes the x87 machinery as a z3 spec with a
+citation per line; values stay IEEE under OWNER 8. L1 adds the registry record, quoting CLAUDE.md item 10.
+
 All work resumed at 2026-11-14 23:00Z on the candidate `claude/fnv-next3b` 141b07580. That is 224af83e plus L1
 w17m 4ee6cc10 plus CLAUDE.md. Its verdict v9 is running. The trunk is a5c8f427 (38 gates). The platform root is not
 on it yet. The last full verdict, v8 at 224af83e, gave 27/39 green. Numbers come from the lead status files of

@@ -35,7 +35,7 @@ interpreter on the product path, no fast path switched off for good.
    - Forbidden: stubs, no-ops, placeholders, trap paths, fallbacks, heuristics, name guesses, hand lists, sampling as
      proof, and measure-then-skip.
    - Tests and runs verify; they never decide.
-2. **Correctness is absolute.** The only exceptions are the 9 OWNER assumptions, decided in advance (verify/ASSUMPTIONS.json):
+2. **Correctness is absolute.** The only exceptions are the 10 OWNER assumptions, decided in advance (verify/ASSUMPTIONS.json):
    1. the compiler is correct;
    2. SHA-256;
    3. Win32 and D3D9 as documented;
@@ -45,6 +45,7 @@ interpreter on the product path, no fast path switched off for good.
    7. ILP32;
    8. IEEE FP;
    9. the pinned formal tools and published theorems.
+   10. the x86 ISA as the Intel SDM documents it, where no pinned formal model covers it (x87), cited per line.
 
    Every other assumption is REMOVE, with an owner and a gate. No session adds an assumption.
 3. **The trunk is always green.** Green means that what the compiler built does not fail at run time. The stub gate is
