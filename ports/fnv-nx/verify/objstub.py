@@ -1137,12 +1137,14 @@ def _target(w, o):
     return o + 4 * (i - (1 << 26) if i >> 25 else i)
 
 
-def nr_ends(words, a, b, rels, obj, fn_at):
+def nr_ends(words, a, b, rels, obj, fn_at, tails=None):
     """The shape of a function that does not return, from its code: -> sorted list of the callees the paths END in (a symbol name; "<blr>" for
     a final call through a pointer), or None when some path can return or leave: a reachable RET, BR* (not BLR), ERET, SVC, a fall-through
     past the end after a word that is not a call, or a branch out of [a,b) that is not a tail call. A path ends in a call that the compiler
     placed last (BL at the end, a tail B out of the function: it knew the callee does not return) or in BRK/UDF (a trap word, which the T
-    rules judge). FN_AT {offset: name}: the functions of the section (a call without a relocation targets one of them)."""
+    rules judge). FN_AT {offset: name}: the functions of the section (a call without a relocation targets one of them).
+    TAILS, when given, receives the ends that a tail B (a jump out of the function) names: the compiler's tail call is no knowledge that the callee does not return,
+    so such an end is a returning path unless the callee is a declared terminator (the judge, nr_tail)."""
     callee = lambda o, w: obj.syms[rels[o][0]][0] if o in rels and rels[o][1] in BRANCH[obj.w64] else fn_at.get(_target(w, o))
     ends, seen, work, last = set(), set(), [a], b - 4
     while work:
@@ -1170,6 +1172,8 @@ def nr_ends(words, a, b, rels, obj, fn_at):
                 if c is None:
                     return None
                 ends.add(c)
+                if tails is not None:
+                    tails.add(c)
         elif isblr(w):
             if o == last:
                 ends.add("<blr>")
@@ -1284,7 +1288,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
     if o.machine == 62:
         import objstub_x64
         return objstub_x64.check_obj(o, path, terms, os_layer, probe, vjson, read_cites, assume_id)
-    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "flag": None, "tabs": {}, "assume": []}
+    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "cite": {}, "terms": [], "term_def": [], "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "nr_tail": {}, "flag": None, "tabs": {}, "assume": []}
     pw = {}   # the probe (recipe error_abi kind flag): name -> (words, a, b, stores, calls) of every function
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
     stops = frozenset(t for t in terms if t[:1] != "~")   # the declared-noreturn callees (terminator candidates): a call ends the path of a mixed body
@@ -1320,6 +1324,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
                 if last[3] in extra["tb"]:
                     extra["tb"][name] = extra["tb"][last[3]]
                 extra["nr"][name] = extra["nr"].get(last[3])
+                extra["nr_tail"][name] = extra["nr_tail"].get(last[3], [])
                 if last[3] in extra["cite"]:
                     extra["cite"][name] = extra["cite"][last[3]]
                     extra["wine_nz"][name] = extra["wine_nz"].get(last[3], {})
@@ -1384,7 +1389,8 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
             ids = cites_at.get((si, a), [])
             if any(i.startswith("od:") for i in ids):
                 extra["cite"][name] = ids   # rule O reads the record before any rule branch: every finding of the body is decided by the anchor
-            nrv = nr_ends(words, a, b, rel, o, fn_at)
+            ntail = set()
+            nrv = nr_ends(words, a, b, rel, o, fn_at, ntail)
             nterm = bisect.bisect_left(tk, b) - bisect.bisect_left(tk, a)
             if not any(f[1] in ("T1", "undecodable", "uncovered") for f in fnd):
                 # a MIXED body (some path returns, some path ends in a call of a declared-noreturn function): the terminator paths end there, and the
@@ -1421,6 +1427,7 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
                     if tb is not None:
                         extra["tb"][name] = tb
             extra["nr"][name] = nrv
+            extra["nr_tail"][name] = sorted(ntail)
             if probe and probe.get("kind") == "flag" and probe["fail"] in {sy[0] for sy in o.syms if sy[3] == 2 and sy[4] != 0 and sy[5] == si}:
                 try:
                     pw[name] = (words, a, b) + flag_events(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, fn_at)
@@ -1893,7 +1900,8 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
                 # T2 only when EVERY path ends in a real terminator and the function is not itself a declared-noreturn definition (coverage rule below): a body with a
                 # returning path has a real control path, and its returning paths are judged by the V rules
                 nr = r["nr"].get(name)
-                if name in r["term_def"] or nr is None or (all(e in stops_all for e in nr) and not all(real_end(e, term_ok) for e in nr)):   # an end that is no declared terminator stays a finding: the compiler knew the callee does not return
+                # a tail call (B, jmp) into a function that is no declared terminator returns whenever the callee returns: the body has a returning path (MIXED)
+                if name in r["term_def"] or nr is None or any(e not in stops_all for e in r["nr_tail"].get(name, ())) or (all(e in stops_all for e in nr) and not all(real_end(e, term_ok) for e in nr)):   # an end that is no declared terminator stays a finding: the compiler knew the callee does not return
                     continue
             elif kind == "indirect-noreturn-tail":
                 if name in exit_ok and (name in (REACH, ASSUME) or (row and row[0] == "exit") or name in cited_term):

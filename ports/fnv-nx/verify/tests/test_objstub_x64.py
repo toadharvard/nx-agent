@@ -166,5 +166,11 @@ subprocess.run(CC["x64"] + ["-O0", "-I" + CITE_H, "-c", cs, "-o", co], check=Tru
 at, bad = objstub.read_cites(objstub.Obj(co))
 check("x64 cite records: R_X86_64_32 is the ABS32 of the ABI, both records read", not bad and sorted(sum(at.values(), [])) == ["od:x", "wf:1"], (at, bad))
 
+# a tail call (jmp rel32) into an ordinary function is a path that returns when the callee returns: the body is MIXED, no T2-noreturn-tail (also for the AArch64 `b`)
+MIXED = "void die(void) __attribute__((noreturn));\nint other(int);\nint mix(int a) { if (a) return other(a); die(); }\n"
+for isa in ("x64",) + (("a64",) if A64 else ()):
+    ko, _, fo = kinds(build(MIXED, isa), terms={"die"})
+    check("%s: a tail call into an ordinary function and a noreturn call: mixed, no T2-noreturn-tail" % isa, not any(k == "T2-noreturn-tail" for _, k in ko), fo)
+
 print("%d failed" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)
