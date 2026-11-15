@@ -288,3 +288,9 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Correction under way: rebase onto w6-r ee9d12897 and delete the hand-written facts record in favour of the icount root's own link record.
   - Task V (w7, doing): bootmiles, lockobs, test_bootgpu and test_lockobs move to bootfacts.
   - Asked L1 w25: elffacts.json published on the ELF branch.
+- 09:30:
+  - Task U rebased (w7-u 1dcc6811b). The record format is being aligned to w25 7cf4bd302.
+  - Task V (w7, doing). w7 is also admitting verify/icount_abi as a header root.
+  - The L5 platform root is at 1bdc1b91a: 7 roots green, and the loader defines fnvnx_declared_fonts. w6 is merging it into w6-r.
+  - Asked L5 to delete the manifest's mount_path, which duplicates FNVNX_SD_FONTS (rule 2).
+  - Budget: 2 workers (w6, w7), 0 farms.
