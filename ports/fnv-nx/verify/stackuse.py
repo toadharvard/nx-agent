@@ -24,7 +24,8 @@ import os
 import struct
 import sys
 
-R_CALL26, R_JUMP26 = 283, 282
+R_CALL26, R_JUMP26 = 283, 282          # ELF64
+R_P32_CALL26, R_P32_JUMP26 = 21, 20    # ELF32 (ILP32)
 STT_FUNC, STT_SECTION = 2, 3
 
 
@@ -65,26 +66,38 @@ def growth(base, flag):
 
 
 def elf_graph(data):
-    """-> (funcs {name: (section index, value, size)}, edges [(caller, callee or None, 'call'|'unresolved')], indirect {caller}) of an ELF64 AArch64 relocatable."""
-    if data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
-        raise ValueError("not an ELF64 little-endian object")
-    shoff, = struct.unpack_from("<Q", data, 0x28)
-    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
+    """-> (funcs {name: (section index, value, size)}, edges [(caller, callee or None, 'call'|'unresolved')], indirect {caller}) of an ELF64 (LP64) or ELF32 (ILP32, R_AARCH64_P32_CALL26=21, JUMP26=20) AArch64 relocatable."""
+    if data[:4] != b"\x7fELF" or data[5] != 1 or data[4] not in (1, 2):
+        raise ValueError("not an ELF little-endian object")
+    w64 = data[4] == 2   # ELF64 (LP64) or ELF32 (the ILP32 guest objects: R_AARCH64_P32_*)
+    if w64:
+        shoff, = struct.unpack_from("<Q", data, 0x28)
+        shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
+    else:
+        shoff, = struct.unpack_from("<I", data, 0x20)
+        shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x2E)
     sh = []
     for i in range(shnum):
-        name, typ, flags, addr, off, size, link, info, align, entsize = struct.unpack_from("<IIQQQQIIQQ", data, shoff + i * shentsize)
+        if w64:
+            name, typ, flags, addr, off, size, link, info, align, entsize = struct.unpack_from("<IIQQQQIIQQ", data, shoff + i * shentsize)
+        else:
+            name, typ, flags, addr, off, size, link, info, align, entsize = struct.unpack_from("<IIIIIIIIII", data, shoff + i * shentsize)
         sh.append({"name": name, "type": typ, "off": off, "size": size, "link": link, "info": info, "entsize": entsize})
     symtab = next((s for s in sh if s["type"] == 2), None)
     if symtab is None:
         raise ValueError("no symbol table")
     strtab = sh[symtab["link"]]
+    symsz, relsz = (24, 24) if w64 else (16, 12)
 
     def cstr(off):
         e = data.index(b"\0", strtab["off"] + off)
         return data[strtab["off"] + off:e].decode("latin1")
     syms = []
-    for i in range(symtab["size"] // 24):
-        name, info, other, shndx, value, size = struct.unpack_from("<IBBHQQ", data, symtab["off"] + i * 24)
+    for i in range(symtab["size"] // symsz):
+        if w64:
+            name, info, other, shndx, value, size = struct.unpack_from("<IBBHQQ", data, symtab["off"] + i * symsz)
+        else:
+            name, value, size, info, other, shndx = struct.unpack_from("<IIIBBH", data, symtab["off"] + i * symsz)
         syms.append({"name": cstr(name), "type": info & 0xf, "shndx": shndx, "value": value, "size": size})
     funcs = {s["name"]: (s["shndx"], s["value"], s["size"]) for s in syms if s["type"] == STT_FUNC and s["shndx"] and s["shndx"] < 0xff00}
     by_sec = {}
@@ -105,10 +118,14 @@ def elf_graph(data):
         if s["type"] != 4:   # SHT_RELA
             continue
         target = s["info"]
-        for i in range(s["size"] // 24):
-            off, info, addend = struct.unpack_from("<QQq", data, s["off"] + i * 24)
-            rtype, si = info & 0xffffffff, info >> 32
-            if rtype not in (R_CALL26, R_JUMP26):
+        for i in range(s["size"] // relsz):
+            if w64:
+                off, info, addend = struct.unpack_from("<QQq", data, s["off"] + i * relsz)
+                rtype, si = info & 0xffffffff, info >> 32
+            else:
+                off, info, addend = struct.unpack_from("<IIi", data, s["off"] + i * relsz)
+                rtype, si = info & 0xff, info >> 8
+            if rtype not in ((R_CALL26, R_JUMP26) if w64 else (R_P32_CALL26, R_P32_JUMP26)):
                 continue
             caller = containing(target, off)
             sym = syms[si]
