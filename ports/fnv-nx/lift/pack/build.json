@@ -4224,6 +4224,15 @@
     ]
    }
   },
+  "dump": {
+   "flags_add": {
+    "cxx": [
+     "-ftime-report",
+     "-fno-schedule-insns",
+     "-fdump-rtl-expand-details"
+    ]
+   }
+  },
   "prof2": {
    "flags_add": {
     "cxx": [
