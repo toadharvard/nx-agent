@@ -5,7 +5,7 @@
   (4) a load of a segment register (mov sreg, r/m16) sets the state the guard reads (fnvl_seg_set).
     test_null_seg.py"""
 import json, os, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; CPUFEAT = _inputs.cpufeat_arg(); _inputs.configure(CPUFEAT)
 import fnvlift as L
 from fnvlift import x86sys
 from fnvlift.core import Unsupported
@@ -23,7 +23,7 @@ def configure(**guard):
     g = {**dict(es=False, ds=False, fs=False, gs=True), **guard}
     json.dump({'format': 'fnvnx-segwrites/2', 'images': {'buf': {n: {'guard': v} for n, v in g.items()}}}, open(d + '/segwrites.json', 'w'))
     open(d + '/universe.tsv', 'w').close(); open(d + '/depth.tsv', 'w').close()
-    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, segwrites=d + '/segwrites.json', image='buf')
+    inputs.configure(universe=d + '/universe.tsv', fpstate=d, fpdepth=d + '/depth.tsv', x86sys=_inputs.X86SYS, cpufeat=CPUFEAT, segwrites=d + '/segwrites.json', image='buf')
 
 
 def lift(code):
