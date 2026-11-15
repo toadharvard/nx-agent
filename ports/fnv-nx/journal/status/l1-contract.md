@@ -1934,3 +1934,8 @@ bottleneck: the cand3 head (w12), and the cand2 merge (w15).
   - objstub 12 and pure 11 are attributed to the roots that remain.
   - plugsym.inc waits for L2 6d9f72b18.
 bottleneck: the cand2 merge (w15: gate scope, pin, warm verdict), and the cand3 head (w12).
+- 23:15 L2 pin 74c32c454 (84f0883e, build_key 6a485ab9) goes to w15 for cand2 and w12 for cand3.
+  - L4 w8: gen:contract/facts:2 crashes in the sandbox. l2sections.py reads toolchain/names/sympair_kinds.inc through /tool/.., and that file is not mounted. It blocks lift/rt and every guest link.
+  - Rule: tool data from another root comes only through `uses` of a declared output. The fix goes to w12, with the toolchain/names output from L2 if needed.
+  - Gate: w28 extends abspath. A read built from __file__ that leaves the tool's mount is red.
+bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data).
