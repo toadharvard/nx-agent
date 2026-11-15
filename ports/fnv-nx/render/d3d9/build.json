@@ -28,14 +28,17 @@
   "ports/fnv-nx/render/nxgpu",
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/lib/sha256/include",
-  "ports/fnv-nx/render/d3d9/gen"
+  "ports/fnv-nx/render/d3d9/gen",
+  "ports/fnv-nx/render/pair/include",
+  "ports/fnv-nx/render/smscan/include"
  ],
  "units": "all",
  "generated": [
   {
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_impl.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [],
    "outputs": [
@@ -47,7 +50,8 @@
   {
    "tool": "ports/fnv-nx/render/d3d9/dev/state_model.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [],
    "outputs": [
@@ -57,35 +61,24 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/render/d3d9/dev/res_smgen.py",
-   "args": [
-    "/out/gen",
-    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
-    "/tool/spec/d3d9_tables.py"
-   ],
-   "inputs": [
-    "ports/fnv-nx/render/shaders/total/sm_table.json",
-    "ports/fnv-nx/render/shaders/total/sm_illegal.tsv"
-   ],
-   "outputs": [
-    "gen/res_smtab.gen.h"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_bridge.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
+    "/in/ports/fnv-nx/bridgefacts/d3d9"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9"
+   ],
    "outputs": [
-    "gen/d9bridge.gen.cpp",
-    "gen/d9bridge_rows.tsv"
+    "gen/d9bridge.gen.cpp"
    ]
   },
   {
    "tool": "ports/fnv-nx/render/d3d9/env/gen_env.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [
     "ports/fnv-nx/shim/include/d3d9types.h"
@@ -124,7 +117,8 @@
   {
    "tool": "ports/fnv-nx/render/d3d9/front/gen_enums.py",
    "args": [
-    "/out/gen/d3d9_enums.gen.h"
+    "/out/gen/d3d9_enums.gen.h",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [],
    "outputs": [
@@ -172,5 +166,11 @@
  "outputs": {
   "ident_handheld.bin": "gen/ident_handheld.bin",
   "ident_docked.bin": "gen/ident_docked.bin"
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_SPEC"
+  }
+ ]
 }
