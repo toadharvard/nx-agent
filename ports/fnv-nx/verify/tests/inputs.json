@@ -4,5 +4,31 @@
   "test_boot_job.py": [
    "exe"
   ]
- }
+ },
+ "untraced": [
+  "test_argorder.py",
+  "test_bootmachine.py",
+  "test_bootunmap.py",
+  "test_comdat.py",
+  "test_datamodel.py",
+  "test_descs.py",
+  "test_envcheck.py",
+  "test_gate_imports.py",
+  "test_gate_machine.py",
+  "test_gates.py",
+  "test_guest.py",
+  "test_guest_link.py",
+  "test_l2gates.py",
+  "test_link.py",
+  "test_linkstrict.py",
+  "test_n3wiring.py",
+  "test_objstub.py",
+  "test_onedef.py",
+  "test_opentrace.py",
+  "test_oraclecheck.py",
+  "test_plugins.py",
+  "test_recipe.py",
+  "test_runner.py",
+  "test_uses.py"
+ ]
 }

@@ -86,5 +86,22 @@ bad = {"external": [dict(rec["external"][0], tree_sha256="0" * 64)]}
 recipe._EXT_CHECKED.clear()
 check("red: tree_sha256 mismatch", "tree_sha256" in (red(lambda: R({"external": "specs", "path": "names.tsv"}, bad)) or ""))
 
+# a tracked directory: a copy holding exactly its tracked files; an untracked file inside is not visible; editing a tracked file changes the ident
+put(repo, "r/d/t.txt", "t1\n")
+put(repo, "r/d/sub/u.txt", "u1\n")
+put(repo, "r/d/untracked.txt", "x\n")
+git(repo, "add", "r/d/t.txt", "r/d/sub/u.txt")
+pd, idd = R("d")
+check("tracked directory: the copy holds the tracked files", open(os.path.join(pd, "t.txt")).read() == "t1\n" and open(os.path.join(pd, "sub/u.txt")).read() == "u1\n", pd)
+check("tracked directory: an untracked file inside is not visible", not os.path.exists(os.path.join(pd, "untracked.txt")), os.listdir(pd))
+check("tracked directory: the copy is not the working tree", not pd.startswith(repo), pd)
+put(repo, "r/d/t.txt", "t2\n")
+git(repo, "add", "r/d/t.txt")
+pd2, idd2 = R("d")
+check("tracked directory: editing a tracked file inside changes the ident", idd2 != idd and open(os.path.join(pd2, "t.txt")).read() == "t2\n", (idd, idd2))
+check("tracked directory: same content, same ident", R("d")[1] == idd2)
+check("tracked directory: needs the cache", red(lambda: recipe.resolve_input("r", "d", repo, None, rec)) is not None)
+
+
 print("%d failed" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

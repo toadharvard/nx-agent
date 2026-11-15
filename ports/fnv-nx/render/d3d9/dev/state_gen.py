@@ -3,7 +3,6 @@ Every device method of a family is generated from the family's SHAPE (kv, kv2, o
 a model entry whose method is missing from the spec, or has a parameter list the shape does not fit, stops the generator (exit 2)."""
 import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-SPEC = os.path.join(HERE, "..", "spec", "d3d9_spec.json")
 CONSTS = [("NX_D3D_MAX_CLIP_PLANES", "6"), ("NX_D3D_MAX_STREAMS", "16"), ("NX_D3D_MAX_RTS", "4"), ("NX_VS_CONST_F", "256"), ("NX_PS_CONST_F", "224"),
           ("NX_CONST_I", "16"), ("NX_CONST_B", "16"), ("NX_RS_COUNT", "D3DRS_BLENDOPALPHA + 1"), ("NX_SAMP_SLOTS", "21"), ("NX_SAMP_TYPES", "D3DSAMP_DMAPOFFSET + 1"),
           ("NX_TSS_STAGES", "8"), ("NX_TSS_TYPES", "D3DTSS_CONSTANT + 1"), ("NX_XF_COUNT", "266")]
@@ -27,7 +26,7 @@ def dexpr(d, kind):
 
 
 def emit(M, out, specpath):
-    spec = json.load(open(specpath or SPEC)); os.makedirs(out, exist_ok=True)
+    spec = json.load(open(specpath)); os.makedirs(out, exist_ok=True)
     meth = {m["name"]: m for m in spec["methods"] if m["iface"] == "IDirect3DDevice9"}
     tabs = {"rs": parse(M.RS, "D3DRS_"), "samp": parse(M.SAMP, "D3DSAMP_"), "tss": parse(M.TSS, "D3DTSS_")}
     groups = []

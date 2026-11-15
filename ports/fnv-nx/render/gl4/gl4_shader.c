@@ -85,12 +85,12 @@ static GLenum stage_enum(uint32_t stage) {
     return 0;
 }
 
-/* GLSL (deko style, "#version 460") -> a registered GL shader of the stage. 0 and a recorded error when the table is full or the compile fails: nothing is registered then. */
+/* GLSL (deko style, "#version 460") -> a registered GL shader of the stage. 0 and a recorded error when the host allocator fails or the compile fails: nothing is registered then. */
 uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage) {
     if (!glsl || !n || !stage_enum(stage)) return 0;
     uint32_t id = 1;
-    while (id <= GL4_MAX_SHADERS && g4.sh[id].used) id++;
-    if (id > GL4_MAX_SHADERS) { gl4_err("shader: the shader table is full"); return 0; }
+    while (id < g4.nSh && g4.sh[id].used) id++;
+    if (id >= g4.nSh && !gl4_table_grow((void**)&g4.sh, &g4.nSh, sizeof *g4.sh)) { gl4_err("shader: out of memory"); return 0; }
     size_t cap = n * 2 + 256;
     char* src = (char*)malloc(cap);
     if (!src) return 0;
@@ -118,17 +118,17 @@ uint64_t gl4_api_shader_create(uint64_t a) {
     if (!d || !d->glsl || !d->glsl_size) return 0;
     const char* src = (const char*)nxgl4_guest_ptr(d->glsl, d->glsl_size);
     if (!src) return 0;
-    uint8_t k[32]; fnvnx_sha256(src, d->glsl_size, k);
-    if (memcmp(k, d->key, 32)) { gl4_err("shader_create: key is not the sha256 of the glsl"); return 0; }
+    uint8_t k[FNVNX_SHA256_DIGEST_SIZE]; fnvnx_sha256(src, d->glsl_size, k);
+    if (memcmp(k, d->key, sizeof k)) { gl4_err("shader_create: key is not the sha256 of the glsl"); return 0; }
     return gl4_shader_from_glsl(src, d->glsl_size, d->stage);
 }
 
 /* Programs are cached by (vs, ps). Destroying a shader deletes the programs built from it and bumps progEpoch: a
  * state that cached a program index re-resolves at its next bind (ids are reused, a stale hit would be wrong). */
 uint64_t gl4_api_shader_destroy(uint64_t id) {
-    if (id > GL4_MAX_SHADERS || !id || !g4.sh[id].used) { gl4_err("shader_destroy: %llu is not a live shader", (unsigned long long)id); return NXGPU_BAD_CALL; }
+    if (id >= g4.nSh || !id || !g4.sh[id].used) { gl4_err("shader_destroy: %llu is not a live shader", (unsigned long long)id); return NXGPU_BAD_CALL; }
     if (g4.sh[id].d3d && --g4.sh[id].d3d->refs) return 0;   /* made by SHADER_CREATE_D3D: one create taken back, others still hold the id */
-    for (uint32_t i = 1; i <= GL4_MAX_PROGRAMS; i++) {
+    for (uint32_t i = 1; i < g4.nProg; i++) {
         Gl4Program* p = &g4.prog[i];
         if (!p->used || (p->vs != id && p->ps != id)) continue;
         p_glDeleteProgram(p->prog);
@@ -141,15 +141,19 @@ uint64_t gl4_api_shader_destroy(uint64_t id) {
     return 0;
 }
 
-uint16_t gl4_program_for(uint16_t vs, uint16_t ps) {
+uint32_t gl4_program_for(uint32_t vs, uint32_t ps) {
     uint32_t freeSlot = 0;
-    for (uint32_t i = 1; i <= GL4_MAX_PROGRAMS; i++) {
+    for (uint32_t i = 1; i < g4.nProg; i++) {
         if (!g4.prog[i].used) { if (!freeSlot) freeSlot = i; continue; }
-        if (g4.prog[i].vs == vs && g4.prog[i].ps == ps) return (uint16_t)i;
+        if (g4.prog[i].vs == vs && g4.prog[i].ps == ps) return i;
     }
-    if (!freeSlot || !vs || vs > GL4_MAX_SHADERS || !g4.sh[vs].used || !ps || ps > GL4_MAX_SHADERS || !g4.sh[ps].used) {
+    if (!vs || vs >= g4.nSh || !g4.sh[vs].used || !ps || ps >= g4.nSh || !g4.sh[ps].used) {
         gl4_err("program: shaders %u/%u not available", vs, ps);
         return 0;
+    }
+    if (!freeSlot) {
+        freeSlot = g4.nProg ? g4.nProg : 1;
+        if (!gl4_table_grow((void**)&g4.prog, &g4.nProg, sizeof *g4.prog)) { gl4_err("program: out of memory"); return 0; }
     }
     GLuint p = p_glCreateProgram();
     p_glAttachShader(p, g4.sh[vs].sh);
@@ -165,7 +169,7 @@ uint16_t gl4_program_for(uint16_t vs, uint16_t ps) {
         return 0;
     }
     g4.prog[freeSlot].vs = vs; g4.prog[freeSlot].ps = ps; g4.prog[freeSlot].prog = p; g4.prog[freeSlot].used = 1;
-    return (uint16_t)freeSlot;
+    return freeSlot;
 }
 
 /* Internal programs (scaling, present): GLSL 4.50 core, compiled as given. 0 and a recorded error on failure. */

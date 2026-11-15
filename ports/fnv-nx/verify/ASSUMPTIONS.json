@@ -165,7 +165,6 @@
    "id": "ASM-002",
    "text": "SHA-256 is collision resistant and preimage resistant (cache keys, fact hashes).",
    "used_by": [
-    "ports/fnv-nx/lib/sha256/include/fnvnx_sha256.h",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
@@ -185,7 +184,6 @@
    "used_by": [
     "ports/fnv-nx/contract/iat.py",
     "ports/fnv-nx/contract/modules.py",
-    "ports/fnv-nx/render/d3d9/QUEUE.md",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -204,7 +202,6 @@
    "id": "ASM-004",
    "text": "The console's behaviour holds as assumed until a run on it.",
    "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/m1_stats.cpp",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
     "ports/fnv-nx/verify/gate_assumptions.py"
@@ -256,7 +253,6 @@
    "id": "ASM-007",
    "text": "The address space is 32-bit, ILP32.",
    "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/pvw_core.cpp",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [],
@@ -1279,6 +1275,36 @@
    "owner": "L2"
   },
   {
+   "id": "ASM-501",
+   "text": "The function boundaries and the forward control flow of the platform manifest passes: a function starts at a prologue pattern and ends at the next one, flow is followed forward only.",
+   "used_by": [
+    "ports/fnv-nx/manifest/funcfacts.py",
+    "ports/fnv-nx/manifest/check_funcfacts.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "fact:ports/fnv-nx/manifest/funcfacts.py",
+   "owner": "L5+L3a",
+   "note": "removed: the passes read the L3a function facts (facts.json pin); gate check_funcfacts.py keeps image bytes and code facts inside funcfacts.py. Enters the registry with the merge of the L5 manifest, the files of used_by being tracked there."
+  },
+  {
+   "id": "ASM-055",
+   "text": "The x86 ISA behaves as the Intel SDM documents it, for the parts that no pinned formal model covers (today the x87 machinery).",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "L3b:x87 reference",
+    "the x86 ISA as the Intel SDM documents it"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers"
+   }
+  },
+  {
    "id": "ASM-601",
    "text": "G-PIXEL compares frames against a \"declared tolerance\" that no rule derives.",
    "used_by": [
@@ -1630,32 +1656,6 @@
    "owner": "L6"
   },
   {
-   "id": "ASM-628",
-   "text": "The pass rule at NxDraw is stated as \"D3D9 requires it\", without a cited document.",
-   "used_by": [
-    "ports/fnv-nx/render/nxgpu/nxgpu4.h"
-   ],
-   "aliases": [
-    "L6:census#37"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: cite the D3D9 page; the rule then becomes O3.",
-   "owner": "L6"
-  },
-  {
-   "id": "ASM-629",
-   "text": "Reserved fields of the shader ABI structures must be 0.",
-   "used_by": [
-    "ports/fnv-nx/render/nxgpu/nxgpu4_shader.h"
-   ],
-   "aliases": [
-    "L6:census#38"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: the backends validate the fields and return BAD_CALL on non-zero; a test mutates each reserved field.",
-   "owner": "L6"
-  },
-  {
    "id": "ASM-630",
    "text": "The non-todo_wine rows of Wine's d3d9 tests are Windows behaviour.",
    "used_by": [
@@ -1789,7 +1789,7 @@
    "id": "ASM-640",
    "text": "The undocumented d3d9 exports have Wine's signatures.",
    "used_by": [
-    "ports/fnv-nx/render/d3d9/spec/d3d9_exports.py"
+    "ports/fnv-nx/bridgefacts/d3d9/d3d9_exports.py"
    ],
    "aliases": [
     "L6:census#70"

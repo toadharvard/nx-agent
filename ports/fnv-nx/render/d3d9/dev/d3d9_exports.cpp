@@ -1,7 +1,7 @@
 // d3d9_exports.cpp: the export surface of our d3d9.dll (the names an import slot or GetProcAddress can bind).
 // Reference: Wine 9.0 dlls/d3d9/d3d9_main.c (rule "one reference environment", render/d3d9/env/README.md).
 //
-// Rule: the set of names is the set of exports that carry a signature in the interface table (render/d3d9/spec/d3d9_exports.py);
+// Rule: the set of names is the set of exports that carry a signature in the interface table (bridgefacts/d3d9/d3d9_exports.py);
 // tests/l6/exports/test_exports.py fails when the table below and the spec differ, so a spec export cannot lack a body here.
 //
 // D3DPERF_*: the PIX event interface. Its only state is the event nesting level; every other answer is the environment fact

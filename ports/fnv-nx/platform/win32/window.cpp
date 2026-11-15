@@ -1965,88 +1965,166 @@ static LRESULT def_syscmd_msg(window *w, HWND h, WPARAM wp, LPARAM lp) { return 
 static LRESULT def_setcursor_msg(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_setcursor(w, h, wp, lp); }
 static LRESULT def_paint_msg(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_paint(w, h, wp, lp); }
 
-/* ---- THE table: message -> rule. Sorted by message number; src: where the rule comes from. */
-struct defrule { UINT msg; LRESULT (*fn)(window *, HWND, WPARAM, LPARAM); const char *src; };
-static const defrule k_defrules[] = {
-    { 0x0006, def_activate, "ref WM_ACTIVATE: an activated, not minimized window takes the keyboard focus" },
-    { 0x000B, def_setredraw, "MSDN WM_SETREDRAW; ref: WS_VISIBLE follows, the region is validated when redraw is off" },
-    { 0x000C, def_settext, "MSDN WM_SETTEXT: stored, TRUE" },
-    { 0x000D, def_gettext, "MSDN WM_GETTEXT: at most wParam - 1 characters and the terminator, the count copied" },
-    { 0x000E, def_gettextlen, "MSDN WM_GETTEXTLENGTH" },
-    { 0x000F, def_paint_msg, "MSDN WM_PAINT: BeginPaint + EndPaint validates" },
-    { 0x0010, def_close, "MSDN WM_CLOSE: DestroyWindow" },
-    { 0x0011, def_one, "MSDN WM_QUERYENDSESSION: the session may end" },
-    { 0x0013, def_one, "MSDN WM_QUERYOPEN: the icon may open" },
-    { 0x0014, def_erase_msg, "MSDN WM_ERASEBKGND: the class background brush" },
-    { 0x0018, def_showwindow, "ref WM_SHOWWINDOW: owned pop-ups follow their owner" },
-    { 0x0019, def_ctlold, "MSDN WM_CTLCOLOR (16-bit form: the control type in the high word of lParam)" },
-    { 0x001F, def_cancelmode, "MSDN WM_CANCELMODE: menu mode ends, the capture is released" },
-    { 0x0020, def_setcursor_msg, "MSDN WM_SETCURSOR: parent first, the class cursor in the client area, a sizing cursor on the border" },
-    { 0x0021, def_mouseactivate, "ref WM_MOUSEACTIVATE: parent first; MA_ACTIVATE, MA_NOACTIVATE for a caption click" },
-    { 0x0026, def_paint_msg, "MSDN WM_PAINTICON" },
-    { 0x0027, def_erase_msg, "MSDN WM_ICONERASEBKGND" },
-    { 0x002E, def_minus1, "MSDN WM_VKEYTOITEM: -1, the list box does its default" },
-    { 0x002F, def_minus1, "MSDN WM_CHARTOITEM: -1, the list box does its default" },
-    { 0x0035, def_isactiveicon, "ref WM_ISACTIVEICON: the frame is drawn active" },
-    { 0x0037, def_querydragicon, "ref WM_QUERYDRAGICON: class icon, else the application's first icon, else IDI_APPLICATION" },
-    { 0x0046, def_wpchanging, "ref WM_WINDOWPOSCHANGING: track sizes" },
-    { 0x0047, def_wpchanged, "ref WM_WINDOWPOSCHANGED: WM_SIZE and WM_MOVE" },
-    { 0x004D, def_keyf1, "ref WM_KEYF1: WM_HELP for the window" },
-    { 0x0050, def_none, "MSDN WM_INPUTLANGCHANGEREQUEST: ActivateKeyboardLayout; the environment has the one layout (ENV I4), already active" },
-    { 0x0051, def_inputlang, "ref WM_INPUTLANGCHANGE: passed on to the children" },
-    { 0x0053, def_help, "ref WM_HELP: the parent" },
-    { 0x0055, def_one, "ref WM_NOTIFYFORMAT: NFR_ANSI (an ANSI window)" },
-    { 0x007B, def_contextmenu, "ref WM_CONTEXTMENU: a child passes it on; the system menu has no menu subsystem to pop up" },
-    { 0x007D, def_stylechanged, "ref WM_STYLECHANGED: a layered window's frame change is re-framed" },
-    { 0x007F, def_geticon, "ref WM_GETICON" },
-    { 0x0080, def_seticon, "ref WM_SETICON" },
-    { 0x0081, def_nccreate, "ref WM_NCCREATE: the creation text is stored; creation goes on" },
-    { 0x0082, def_ncdestroy, "ref WM_NCDESTROY: the window text goes" },
-    { 0x0083, def_nccalcsize, "ref WM_NCCALCSIZE: the client rectangle less the non-client area" },
-    { 0x0084, def_nchittest, "MSDN WM_NCHITTEST" },
-    { 0x0085, def_ncpaint, "MSDN WM_NCPAINT: the frame has no surface of its own in the platform (client surfaces are presented): nothing is pending after it" },
-    { 0x0086, def_ncactivate, "ref WM_NCACTIVATE: the frame takes the active state; TRUE" },
-    { 0x0088, def_syncpaint, "ref WM_SYNCPAINT: RDW_ERASENOW | RDW_ERASE | RDW_ALLCHILDREN" },
-    { 0x00A0, def_none, "ref WM_NCMOUSEMOVE: only scroll-bar hot tracking (no scroll bars in the platform)" },
-    { 0x00A1, def_nclbuttondown, "ref WM_NCLBUTTONDOWN" },
-    { 0x00A3, [](window *w, HWND h, WPARAM wp, LPARAM lp) -> LRESULT { return def_dblclick(w, h, wp, lp); }, "ref WM_NCLBUTTONDBLCLK" },
-    { 0x00A4, def_ncrbuttondown, "ref WM_NCRBUTTONDOWN" },
-    { 0x00A5, def_none, "ref WM_NCRBUTTONUP: nothing" },
-    { 0x00AC, def_xbuttonup, "ref WM_NCXBUTTONUP: WM_APPCOMMAND" },
-    { 0x0100, def_keydown, "ref WM_KEYDOWN: F10 pressed" },
-    { 0x0101, def_keyup, "ref WM_KEYUP: Alt or F10 released" },
-    { 0x0104, def_sysmenu_key, "ref WM_SYSKEYDOWN: Alt+F4 closes, F10 and Alt arm the menu key" },
-    { 0x0105, def_keyup, "ref WM_SYSKEYUP" },
-    { 0x0106, def_syschar, "ref WM_SYSCHAR: the Alt+character menu key" },
-    { 0x010D, def_none, "ref WM_IME_STARTCOMPOSITION: to the default IME window; the environment has no IME (SM_IMMENABLED 0)" },
-    { 0x010E, def_none, "ref WM_IME_ENDCOMPOSITION: as above" },
-    { 0x010F, def_none, "ref WM_IME_COMPOSITION: as above" },
-    { 0x0112, def_syscmd_msg, "MSDN WM_SYSCOMMAND" },
-    { 0x0132, def_ctl0, "MSDN WM_CTLCOLORMSGBOX" },
-    { 0x0133, def_ctl1, "MSDN WM_CTLCOLOREDIT" },
-    { 0x0134, def_ctl2, "MSDN WM_CTLCOLORLISTBOX" },
-    { 0x0135, def_ctl3, "MSDN WM_CTLCOLORBTN" },
-    { 0x0136, def_ctl4, "MSDN WM_CTLCOLORDLG" },
-    { 0x0137, def_ctl5, "MSDN WM_CTLCOLORSCROLLBAR" },
-    { 0x0138, def_ctl6, "MSDN WM_CTLCOLORSTATIC" },
-    { 0x0201, def_buttondown_reset, "ref WM_LBUTTONDOWN" },
-    { 0x0203, def_lbuttondbl, "ref WM_LBUTTONDBLCLK: the client double click" },
-    { 0x0204, def_buttondown_reset, "ref WM_RBUTTONDOWN" },
-    { 0x0205, def_rbuttonup, "ref WM_RBUTTONUP: WM_CONTEXTMENU" },
-    { 0x0207, def_buttondown_reset, "ref WM_MBUTTONDOWN" },
-    { 0x020A, def_mousewheel, "ref WM_MOUSEWHEEL: a child passes it on" },
-    { 0x020C, def_xbuttonup, "ref WM_XBUTTONUP: WM_APPCOMMAND" },
-    { 0x020E, def_mousehwheel, "ref WM_MOUSEHWHEEL: a child passes it on" },
-    { 0x0218, def_one, "MSDN WM_POWERBROADCAST: a query is granted" },
-    { 0x022A, def_dropobject, "ref WM_DROPOBJECT: DRAG_FILE" },
-    { 0x022B, def_querydrop, "ref WM_QUERYDROPOBJECT: whether the window accepts files" },
-    { 0x0281, def_none, "ref WM_IME_SETCONTEXT: to the default IME window; the environment has no IME" },
-    { 0x0282, def_none, "ref WM_IME_NOTIFY: as above" },
-    { 0x02A2, def_none, "ref WM_NCMOUSELEAVE: only scroll-bar hot tracking" },
-    { 0x0313, def_none, "ref WM_POPUPSYSTEMMENU: the system menu (no menu subsystem)" },
-    { 0x0317, def_print, "ref WM_PRINT: PRF_ERASEBKGND, PRF_CLIENT" },
-    { 0x0319, def_appcommand, "ref WM_APPCOMMAND: the parent, else the shell hook" },
-};
+/* ---- the rules of DefWindowProc: one handler per message, bound by name (defwnd_WM_X) to the case label of Wine 9.0's default_window_proc
+ * (dlls/win32u/defwnd.c); the table below is generated from that function (manifest/gen_defwndproc.py): a label with no handler, or a handler
+ * with no label, is a build error. The comment of each handler says what the rule is. */
+/* ref WM_ACTIVATE: an activated, not minimized window takes the keyboard focus */
+static LRESULT defwnd_WM_ACTIVATE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_activate(w, h, wp, lp); }
+/* MSDN WM_SETREDRAW; ref: WS_VISIBLE follows, the region is validated when redraw is off */
+static LRESULT defwnd_WM_SETREDRAW(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_setredraw(w, h, wp, lp); }
+/* MSDN WM_SETTEXT: stored, TRUE */
+static LRESULT defwnd_WM_SETTEXT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_settext(w, h, wp, lp); }
+/* MSDN WM_GETTEXT: at most wParam - 1 characters and the terminator, the count copied */
+static LRESULT defwnd_WM_GETTEXT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_gettext(w, h, wp, lp); }
+/* MSDN WM_GETTEXTLENGTH */
+static LRESULT defwnd_WM_GETTEXTLENGTH(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_gettextlen(w, h, wp, lp); }
+/* MSDN WM_PAINT: BeginPaint + EndPaint validates */
+static LRESULT defwnd_WM_PAINT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_paint_msg(w, h, wp, lp); }
+/* MSDN WM_CLOSE: DestroyWindow */
+static LRESULT defwnd_WM_CLOSE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_close(w, h, wp, lp); }
+/* MSDN WM_QUERYENDSESSION: the session may end */
+static LRESULT defwnd_WM_QUERYENDSESSION(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_one(w, h, wp, lp); }
+/* MSDN WM_QUERYOPEN: the icon may open */
+static LRESULT defwnd_WM_QUERYOPEN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_one(w, h, wp, lp); }
+/* MSDN WM_ERASEBKGND: the class background brush */
+static LRESULT defwnd_WM_ERASEBKGND(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_erase_msg(w, h, wp, lp); }
+/* ref WM_SHOWWINDOW: owned pop-ups follow their owner */
+static LRESULT defwnd_WM_SHOWWINDOW(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_showwindow(w, h, wp, lp); }
+/* MSDN WM_CTLCOLOR (16-bit form: the control type in the high word of lParam) */
+static LRESULT defwnd_WM_CTLCOLOR(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ctlold(w, h, wp, lp); }
+/* MSDN WM_CANCELMODE: menu mode ends, the capture is released */
+static LRESULT defwnd_WM_CANCELMODE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_cancelmode(w, h, wp, lp); }
+/* MSDN WM_SETCURSOR: parent first, the class cursor in the client area, a sizing cursor on the border */
+static LRESULT defwnd_WM_SETCURSOR(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_setcursor_msg(w, h, wp, lp); }
+/* ref WM_MOUSEACTIVATE: parent first; MA_ACTIVATE, MA_NOACTIVATE for a caption click */
+static LRESULT defwnd_WM_MOUSEACTIVATE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_mouseactivate(w, h, wp, lp); }
+/* MSDN WM_PAINTICON */
+static LRESULT defwnd_WM_PAINTICON(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_paint_msg(w, h, wp, lp); }
+/* MSDN WM_ICONERASEBKGND */
+static LRESULT defwnd_WM_ICONERASEBKGND(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_erase_msg(w, h, wp, lp); }
+/* MSDN WM_VKEYTOITEM: -1, the list box does its default */
+static LRESULT defwnd_WM_VKEYTOITEM(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_minus1(w, h, wp, lp); }
+/* MSDN WM_CHARTOITEM: -1, the list box does its default */
+static LRESULT defwnd_WM_CHARTOITEM(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_minus1(w, h, wp, lp); }
+/* ref WM_ISACTIVEICON: the frame is drawn active */
+static LRESULT defwnd_WM_ISACTIVEICON(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_isactiveicon(w, h, wp, lp); }
+/* ref WM_QUERYDRAGICON: class icon, else the application's first icon, else IDI_APPLICATION */
+static LRESULT defwnd_WM_QUERYDRAGICON(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_querydragicon(w, h, wp, lp); }
+/* ref WM_WINDOWPOSCHANGING: track sizes */
+static LRESULT defwnd_WM_WINDOWPOSCHANGING(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_wpchanging(w, h, wp, lp); }
+/* ref WM_WINDOWPOSCHANGED: WM_SIZE and WM_MOVE */
+static LRESULT defwnd_WM_WINDOWPOSCHANGED(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_wpchanged(w, h, wp, lp); }
+/* ref WM_KEYF1: WM_HELP for the window */
+static LRESULT defwnd_WM_KEYF1(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_keyf1(w, h, wp, lp); }
+/* MSDN WM_INPUTLANGCHANGEREQUEST: ActivateKeyboardLayout; the environment has the one layout (ENV I4), already active */
+static LRESULT defwnd_WM_INPUTLANGCHANGEREQUEST(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_INPUTLANGCHANGE: passed on to the children */
+static LRESULT defwnd_WM_INPUTLANGCHANGE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_inputlang(w, h, wp, lp); }
+/* ref WM_HELP: the parent */
+static LRESULT defwnd_WM_HELP(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_help(w, h, wp, lp); }
+/* ref WM_NOTIFYFORMAT: NFR_ANSI (an ANSI window) */
+static LRESULT defwnd_WM_NOTIFYFORMAT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_one(w, h, wp, lp); }
+/* ref WM_CONTEXTMENU: a child passes it on; the system menu has no menu subsystem to pop up */
+static LRESULT defwnd_WM_CONTEXTMENU(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_contextmenu(w, h, wp, lp); }
+/* ref WM_STYLECHANGED: a layered window's frame change is re-framed */
+static LRESULT defwnd_WM_STYLECHANGED(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_stylechanged(w, h, wp, lp); }
+/* ref WM_GETICON */
+static LRESULT defwnd_WM_GETICON(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_geticon(w, h, wp, lp); }
+/* ref WM_SETICON */
+static LRESULT defwnd_WM_SETICON(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_seticon(w, h, wp, lp); }
+/* ref WM_NCCREATE: the creation text is stored; creation goes on */
+static LRESULT defwnd_WM_NCCREATE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_nccreate(w, h, wp, lp); }
+/* ref WM_NCDESTROY: the window text goes */
+static LRESULT defwnd_WM_NCDESTROY(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ncdestroy(w, h, wp, lp); }
+/* ref WM_NCCALCSIZE: the client rectangle less the non-client area */
+static LRESULT defwnd_WM_NCCALCSIZE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_nccalcsize(w, h, wp, lp); }
+/* MSDN WM_NCHITTEST */
+static LRESULT defwnd_WM_NCHITTEST(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_nchittest(w, h, wp, lp); }
+/* MSDN WM_NCPAINT: the frame has no surface of its own in the platform (client surfaces are presented): nothing is pending after it */
+static LRESULT defwnd_WM_NCPAINT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ncpaint(w, h, wp, lp); }
+/* ref WM_NCACTIVATE: the frame takes the active state; TRUE */
+static LRESULT defwnd_WM_NCACTIVATE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ncactivate(w, h, wp, lp); }
+/* ref WM_SYNCPAINT: RDW_ERASENOW | RDW_ERASE | RDW_ALLCHILDREN */
+static LRESULT defwnd_WM_SYNCPAINT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_syncpaint(w, h, wp, lp); }
+/* ref WM_NCMOUSEMOVE: only scroll-bar hot tracking (no scroll bars in the platform) */
+static LRESULT defwnd_WM_NCMOUSEMOVE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_NCLBUTTONDOWN */
+static LRESULT defwnd_WM_NCLBUTTONDOWN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_nclbuttondown(w, h, wp, lp); }
+/* ref WM_NCLBUTTONDBLCLK */
+static LRESULT defwnd_WM_NCLBUTTONDBLCLK(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_dblclick(w, h, wp, lp); }
+/* ref WM_NCRBUTTONDOWN */
+static LRESULT defwnd_WM_NCRBUTTONDOWN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ncrbuttondown(w, h, wp, lp); }
+/* ref WM_NCRBUTTONUP: nothing */
+static LRESULT defwnd_WM_NCRBUTTONUP(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_NCXBUTTONUP: WM_APPCOMMAND */
+static LRESULT defwnd_WM_NCXBUTTONUP(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_xbuttonup(w, h, wp, lp); }
+/* ref WM_KEYDOWN: F10 pressed */
+static LRESULT defwnd_WM_KEYDOWN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_keydown(w, h, wp, lp); }
+/* ref WM_KEYUP: Alt or F10 released */
+static LRESULT defwnd_WM_KEYUP(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_keyup(w, h, wp, lp); }
+/* ref WM_SYSKEYDOWN: Alt+F4 closes, F10 and Alt arm the menu key */
+static LRESULT defwnd_WM_SYSKEYDOWN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_sysmenu_key(w, h, wp, lp); }
+/* ref WM_SYSKEYUP */
+static LRESULT defwnd_WM_SYSKEYUP(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_keyup(w, h, wp, lp); }
+/* ref WM_SYSCHAR: the Alt+character menu key */
+static LRESULT defwnd_WM_SYSCHAR(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_syschar(w, h, wp, lp); }
+/* ref WM_IME_STARTCOMPOSITION: to the default IME window; the environment has no IME (SM_IMMENABLED 0) */
+static LRESULT defwnd_WM_IME_STARTCOMPOSITION(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_IME_ENDCOMPOSITION: as above */
+static LRESULT defwnd_WM_IME_ENDCOMPOSITION(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_IME_COMPOSITION: as above */
+static LRESULT defwnd_WM_IME_COMPOSITION(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* MSDN WM_SYSCOMMAND */
+static LRESULT defwnd_WM_SYSCOMMAND(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_syscmd_msg(w, h, wp, lp); }
+/* MSDN WM_CTLCOLORMSGBOX */
+static LRESULT defwnd_WM_CTLCOLORMSGBOX(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ctl0(w, h, wp, lp); }
+/* MSDN WM_CTLCOLOREDIT */
+static LRESULT defwnd_WM_CTLCOLOREDIT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ctl1(w, h, wp, lp); }
+/* MSDN WM_CTLCOLORLISTBOX */
+static LRESULT defwnd_WM_CTLCOLORLISTBOX(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ctl2(w, h, wp, lp); }
+/* MSDN WM_CTLCOLORBTN */
+static LRESULT defwnd_WM_CTLCOLORBTN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ctl3(w, h, wp, lp); }
+/* MSDN WM_CTLCOLORDLG */
+static LRESULT defwnd_WM_CTLCOLORDLG(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ctl4(w, h, wp, lp); }
+/* MSDN WM_CTLCOLORSCROLLBAR */
+static LRESULT defwnd_WM_CTLCOLORSCROLLBAR(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ctl5(w, h, wp, lp); }
+/* MSDN WM_CTLCOLORSTATIC */
+static LRESULT defwnd_WM_CTLCOLORSTATIC(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_ctl6(w, h, wp, lp); }
+/* ref WM_LBUTTONDOWN */
+static LRESULT defwnd_WM_LBUTTONDOWN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_buttondown_reset(w, h, wp, lp); }
+/* ref WM_LBUTTONDBLCLK: the client double click */
+static LRESULT defwnd_WM_LBUTTONDBLCLK(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_lbuttondbl(w, h, wp, lp); }
+/* ref WM_RBUTTONDOWN */
+static LRESULT defwnd_WM_RBUTTONDOWN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_buttondown_reset(w, h, wp, lp); }
+/* ref WM_RBUTTONUP: WM_CONTEXTMENU */
+static LRESULT defwnd_WM_RBUTTONUP(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_rbuttonup(w, h, wp, lp); }
+/* ref WM_MBUTTONDOWN */
+static LRESULT defwnd_WM_MBUTTONDOWN(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_buttondown_reset(w, h, wp, lp); }
+/* ref WM_MOUSEWHEEL: a child passes it on */
+static LRESULT defwnd_WM_MOUSEWHEEL(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_mousewheel(w, h, wp, lp); }
+/* ref WM_XBUTTONUP: WM_APPCOMMAND */
+static LRESULT defwnd_WM_XBUTTONUP(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_xbuttonup(w, h, wp, lp); }
+/* ref WM_MOUSEHWHEEL: a child passes it on */
+static LRESULT defwnd_WM_MOUSEHWHEEL(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_mousehwheel(w, h, wp, lp); }
+/* ref WM_DROPOBJECT: DRAG_FILE */
+static LRESULT defwnd_WM_DROPOBJECT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_dropobject(w, h, wp, lp); }
+/* ref WM_QUERYDROPOBJECT: whether the window accepts files */
+static LRESULT defwnd_WM_QUERYDROPOBJECT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_querydrop(w, h, wp, lp); }
+/* ref WM_IME_SETCONTEXT: to the default IME window; the environment has no IME */
+static LRESULT defwnd_WM_IME_SETCONTEXT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_IME_NOTIFY: as above */
+static LRESULT defwnd_WM_IME_NOTIFY(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_NCMOUSELEAVE: only scroll-bar hot tracking */
+static LRESULT defwnd_WM_NCMOUSELEAVE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_POPUPSYSTEMMENU: the system menu (no menu subsystem) */
+static LRESULT defwnd_WM_POPUPSYSTEMMENU(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+/* ref WM_PRINT: PRF_ERASEBKGND, PRF_CLIENT */
+static LRESULT defwnd_WM_PRINT(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_print(w, h, wp, lp); }
+/* ref WM_APPCOMMAND: the parent, else the shell hook */
+static LRESULT defwnd_WM_APPCOMMAND(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_appcommand(w, h, wp, lp); }
+/* ref WM_GETDLGCODE: break (Wine 9.0 default_window_proc), the result stays 0 */
+static LRESULT defwnd_WM_GETDLGCODE(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_none(w, h, wp, lp); }
+#include "defwndproc.gen.inc"   /* k_defrules: manifest/gen_defwndproc.py, from wine-9.0 dlls/win32u/defwnd.c:default_window_proc */
 /* the dispatch: a message with a row runs it; every other message has no documented default action and answers 0 */
 static LRESULT def_dispatch(window *w, HWND h, UINT m, WPARAM wp, LPARAM lp)
 {

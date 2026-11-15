@@ -5,8 +5,8 @@
 //  R-C2 ZBUFFER / STENCIL without a depth-stencil surface = D3DERR_INVALIDCALL; TARGET together with ZBUFFER / STENCIL and a depth-stencil surface smaller than render target 0 = D3D_OK, nothing cleared.
 //  R-C3 the clipping rectangle is the VIEWPORT (x, y, width, height), intersected with the SCISSOR rectangle iff D3DRS_SCISSORTESTENABLE (wined3d_cs_emit_clear: draw_rect). Every clear rect is intersected with
 //       it, then with each target's size; empty results clear nothing. No rects = the clipping rectangle itself. (Source: wined3d; MS says "clear the viewport rectangles": the same.)
-//  R-C4 TARGET clears render targets 0-3 (all four simultaneous targets), each in a pass of its own (every target of a backend pass must have one size; D3D9 only requires the same size of colour
-//       targets, not of the depth surface); then ZBUFFER / STENCIL in a depth-only pass. A target without storage (D3DFMT_NULL) has nothing to clear.
+//  R-C4 TARGET clears render targets 0-3 (all four simultaneous targets), each in a pass of its own, so that every target, including a depth surface larger than RT 0, is cleared over the clip rect within its
+//       own extent; then ZBUFFER / STENCIL in a depth-only pass. A target without storage (D3DFMT_NULL) has nothing to clear.
 //  R-C5 colour: D3DCOLOR 8 bit per channel -> the format's clear value (nx_d3d9_clear_rgba8: A8 writes alpha only, L8 red only, ...); under D3DRS_SRGBWRITEENABLE the colour is taken as linear and
 //       written through the sRGB view when the format has one (NxClear_Srgb). z is clamped to [0, 1] (NaN -> 0), stencil keeps its low 8 bits; a depth-only format ignores STENCIL, a format without
 //       depth ignores ZBUFFER (the flag is cut by the format's capability, not an error: wined3d only logs it).

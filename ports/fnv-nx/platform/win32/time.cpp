@@ -187,8 +187,7 @@ static BOOL ft_to_st(int64_t ft, SYSTEMTIME *st)
     return TRUE;
 }
 
-/* wine-9.0:dlls/ntdll/time.c:RtlTimeFieldsToTime, with two documented-Windows corrections (Win32 as documented, ASSUMPTIONS
- * 3): Wine indexes MonthLengths[Month == 2 || IsLeapYear(Year)], which gives February 29 days in every year, and accepts years
+/* wine-9.0:dlls/ntdll/time.c:RtlTimeFieldsToTime, with two documented-Windows corrections (Win32 as documented, ASM-003): Wine indexes MonthLengths[Month == 2 || IsLeapYear(Year)], which gives February 29 days in every year, and accepts years
  * up to 32767 with the 64-bit tick count wrapping; Windows and the SYSTEMTIME documentation reject both (the domain is
  * 1601..30827, February 29 only in a leap year), so they return FALSE + ERROR_INVALID_PARAMETER here. */
 static bool st_to_time(const SYSTEMTIME *st, int64_t *out)
@@ -238,9 +237,9 @@ extern "C" void GetSystemTimeAsFileTime(LPFILETIME ft) { w32_set_ft(ft, (ULONGLO
 extern "C" void GetSystemTime(LPSYSTEMTIME st) { ft_to_st(clk_read_filetime(), st); }
 
 /* the local time of a UTC FILETIME: wine-9.0:dlls/ntdll/time.c:RtlSystemTimeToLocalTime = utc - TimeZoneBias, the
- * bias of the declared machine's zone now (TZ_AT through clk_tz_offset_minutes: east positive, so minus the bias is
+ * bias of the declared machine's zone now (TZ_AT through clk_zone_offset_minutes: east positive, so minus the bias is
  * plus the offset); 64-bit wrapping */
-static int64_t ft_utc_to_local(int64_t utc) { return (int64_t)((uint64_t)utc + (uint64_t)((int64_t)clk_tz_offset_minutes() * 600000000ll)); }
+static int64_t ft_utc_to_local(int64_t utc) { return (int64_t)((uint64_t)utc + (uint64_t)((int64_t)clk_zone_offset_minutes() * 600000000ll)); }
 
 /* wine-9.0:dlls/kernelbase/file.c:GetLocalTime */
 extern "C" void GetLocalTime(LPSYSTEMTIME st) { ft_to_st(ft_utc_to_local(clk_read_filetime()), st); }

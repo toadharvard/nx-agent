@@ -1,3 +1,0 @@
-symbol	param	attrs	source
-ext_hook	0	nocapture,readonly	fixture
-ext_hook_ro	0	readonly	fixture

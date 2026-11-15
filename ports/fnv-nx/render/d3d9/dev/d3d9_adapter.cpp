@@ -7,6 +7,7 @@
 #include "d3d9_adapter.h"
 #include "const_fixme.h"
 #include "../gen/env_table.gen.h"
+#include "../gen/env_caps.gen.h"
 
 static const GUID G_NXENV_PROFILE = { 0x6e78656e, 0x7670, 0x4d39, { 0x90, 0x01, 0x6e, 0x78, 0x65, 0x6e, 0x76, 0x70 } };
 static int prof(NxObj* o) { uint32_t p = 0; DWORD sz = sizeof p; return SUCCEEDED(o->getPrivateData(G_NXENV_PROFILE, &p, &sz)) ? (int)p : 0; }

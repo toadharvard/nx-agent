@@ -7,7 +7,7 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 
 | dir | content |
 |---|---|
-| `render/d3d9/spec/` | RD1 table `d3d9_spec.json` + generator from the shim headers |
+| `bridgefacts/d3d9/` | RD1 table (the D9_SPEC output) + generator from the shim headers |
 | `render/d3d9/gen/` | generators: journaling wrapper, replayer, comparator, COM class skeleton |
 | `render/d3d9/dev/` | the implementation: objects, device state, state blocks, resources, draw path, copies, present |
 | `render/d3d9/ffp/` | RD5 fixed-function programs (VS, PS) + CPU references |

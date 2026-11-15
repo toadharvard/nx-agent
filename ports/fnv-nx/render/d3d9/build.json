@@ -28,14 +28,17 @@
   "ports/fnv-nx/render/nxgpu",
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/lib/sha256/include",
-  "ports/fnv-nx/render/d3d9/gen"
+  "ports/fnv-nx/render/d3d9/gen",
+  "ports/fnv-nx/render/pair/include",
+  "ports/fnv-nx/render/smscan/include"
  ],
  "units": "all",
  "generated": [
   {
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_impl.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [],
    "outputs": [
@@ -47,7 +50,8 @@
   {
    "tool": "ports/fnv-nx/render/d3d9/dev/state_model.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [],
    "outputs": [
@@ -57,40 +61,30 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/render/d3d9/dev/res_smgen.py",
-   "args": [
-    "/out/gen",
-    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
-    "/tool/spec/d3d9_tables.py"
-   ],
-   "inputs": [
-    "ports/fnv-nx/render/shaders/total/sm_table.json",
-    "ports/fnv-nx/render/shaders/total/sm_illegal.tsv"
-   ],
-   "outputs": [
-    "gen/res_smtab.gen.h"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_bridge.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
+    "/in/ports/fnv-nx/bridgefacts/d3d9"
    ],
-   "inputs": [],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/d3d9"
+   ],
    "outputs": [
-    "gen/d9bridge.gen.cpp",
-    "gen/d9bridge_rows.tsv"
+    "gen/d9bridge.gen.cpp"
    ]
   },
   {
    "tool": "ports/fnv-nx/render/d3d9/env/gen_env.py",
    "args": [
-    "/out/gen"
+    "/out/gen",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [
     "ports/fnv-nx/shim/include/d3d9types.h"
    ],
    "outputs": [
+    "gen/env_caps.gen.h",
     "gen/env_table.gen.cpp",
     "gen/env_table.gen.h",
     "gen/ident_docked.bin",
@@ -123,7 +117,8 @@
   {
    "tool": "ports/fnv-nx/render/d3d9/front/gen_enums.py",
    "args": [
-    "/out/gen/d3d9_enums.gen.h"
+    "/out/gen/d3d9_enums.gen.h",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [],
    "outputs": [
@@ -133,54 +128,28 @@
  ],
  "plugins": [
   {
-   "name": "fnvnx_ftoi",
-   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
-   "args": {
-    "mode": "native"
-   }
+   "name": "fnvnx_ftoi"
   },
   {
-   "name": "fnvnx_order",
-   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
-   "args": {
-    "args": "rtl",
-    "object": "msvc",
-    "operator": "rtl",
-    "assign": "msvc"
-   }
+   "name": "fnvnx_order"
   },
   {
-   "name": "fnvnx_sdd",
-   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
-   "args": {}
+   "name": "fnvnx_sdd"
   },
   {
-   "name": "fnvnx_pi",
-   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
-   "args": {}
+   "name": "fnvnx_pi"
   },
   {
-   "name": "fnvnx_dispatch",
-   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
-   "args": {}
+   "name": "fnvnx_dispatch"
   },
   {
-   "name": "fnvnx_addr",
-   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
-   "args": {}
+   "name": "fnvnx_addr"
   },
   {
-   "name": "fnvnx_names",
-   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
-   "args": {}
+   "name": "fnvnx_names"
   },
   {
-   "name": "fnvnx_layout",
-   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
-   "args": {},
-   "inputs": [
-    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
-   ]
+   "name": "fnvnx_layout"
   }
  ],
  "external": [
@@ -188,8 +157,8 @@
    "name": "gcc-msvcmodel",
    "repo": "fnv-nx-build",
    "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b4057704c0babd012e466cc89181132e02542289",
-   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
    "at": "/ext/gcc"
   }
  ],
@@ -197,5 +166,11 @@
  "outputs": {
   "ident_handheld.bin": "gen/ident_handheld.bin",
   "ident_docked.bin": "gen/ident_docked.bin"
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_SPEC"
+  }
+ ]
 }

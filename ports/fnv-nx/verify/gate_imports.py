@@ -7,9 +7,11 @@ A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-
   {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
    "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
    "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
-   "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
+   "name_table": the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from), "va": the va record
+   `name TAB symbol` (the exports whose native body reads the x86 stack words of the call); every path of the declaration is a resolve_input ref
+   (a tracked path of the root, {root, path} of a tool root such as bridgefacts, {external, path} or {stage, path})}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
-Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item, unless it is header-only (gate_build.unitless: no unit, no link; it holds no code, so it has no imports by construction): 0 items. Certified: rows with no class
+Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item, unless it is header-only (gate_build.unitless: no unit, no link; it holds no code, so it has no imports by construction): 0 items, or outside the class `import-provider`: the symbol table of its build defines no native symbol of the bridge table (natives_of: the table the declaring roots derive), so it has no import body: 0 items. A root that defines one enters the class and is the one red item. If no root declares imports the table is not known and the root is the one red item. Certified: rows with no class
 (contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
 external that fails its hash is red with the reason in detail. Exit 0 iff green."""
 import json
@@ -28,7 +30,7 @@ import gate_build  # noqa: E402
 import imports  # noqa: E402
 import recipe  # noqa: E402
 
-IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "name_table"}
+IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "name_table", "va"}
 
 
 def symbols(res):
@@ -46,8 +48,9 @@ def read(path):
         return f.read()
 
 
-def root_rows(root, rec, res, decl, repo, cache, others):
-    """-> [(id, class)] of one root that declares imports; every path of DECL is read through recipe.resolve_input"""
+def bridge_of(root, rec, res, decl, repo, cache):
+    """-> (rows, errors, extra_of, table, syms) of the bridge table that ROOT's declaration derives (every path of DECL read through
+    recipe.resolve_input); the one derivation of the judged rows and of the import-provider class."""
     if set(decl) != IN_KEYS or decl["format"] != "fnvnx-imports-in/1":
         raise ValueError("%s/imports.in.json: need exactly the keys %s and format fnvnx-imports-in/1" % (root, sorted(IN_KEYS)))
     def rp(ref):
@@ -57,11 +60,51 @@ def root_rows(root, rec, res, decl, repo, cache, others):
     specs = rp(decl["specs"])
     rows, errors, extra_of = bridgetable.derive(
         read(rp(decl["names"])), lambda d: read(os.path.join(specs, d + ".spec")), set(syms), table,
-        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]])
+        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]], bridgetable.read_va(read(rp(decl["va"]))))
+    return rows, errors, extra_of, table, syms
+
+
+def root_rows(root, rec, res, decl, repo, cache, others):
+    """-> [(id, class)] of one root that declares imports"""
+    rows, errors, extra_of, table, syms = bridge_of(root, rec, res, decl, repo, cache)
     if errors:
         raise ValueError("%d bridge errors, first: %s" % (len(errors), errors[0]))
     other = {k for k, i in sorted(extra_of.items()) if i >= len(decl["extra"])}
     return imports.judge(rows, syms, table, others, other)
+
+
+def natives_of(repo, cache, admit, roots):
+    """The set of native symbols of the bridge table of every root that declares imports (rows whose native symbol is `-` name none). The
+    import-provider class is a fact over it: a root belongs iff it defines one of these (see judge_root). ValueError when no root declares
+    imports: the table is then not known, and no root can be put outside the class."""
+    out, declared = set(), 0
+    for r2 in roots:
+        p = os.path.join(repo, r2, "imports.in.json")
+        if not os.path.isfile(p):
+            continue
+        declared += 1
+        with open(p) as f:
+            decl = json.load(f)
+        res = gate_build.ensure(r2, cache, repo)[0]
+        if res["status"] == "red":
+            raise ValueError("%s: build red at stage %s" % (r2, res["failure"]["stage"]))
+        rows, errors, _, _, _ = bridge_of(r2, recipe.load_recipe(repo, admit, r2), res, decl, repo, cache)
+        if errors:
+            raise ValueError("%d bridge errors, first: %s" % (len(errors), errors[0]))
+        out |= {r[6] for r in rows if r[6] != "-"}
+    if not declared:
+        raise ValueError("no root declares imports: the bridge table is not known")
+    return out
+
+
+def provider_item(root, repo, cache, admit, roots):
+    """-> (members [native symbols the root defines]) for a root with no imports.in.json: the class fact import-provider. A root that defines no
+    native symbol of the bridge table has no import body, by the symbol table of its build, so it is outside the gate's universe (0 items); one
+    that defines any enters the class and needs its declaration (the caller makes that one red item)."""
+    res = gate_build.ensure(root, cache, repo)[0]
+    if res["status"] == "red":
+        raise ValueError("build red at stage %s" % res["failure"]["stage"])
+    return sorted({d["symbol"] for d in res["defined"]} & natives_of(repo, cache, admit, roots))
 
 
 def judge_root(root, repo, cache, admit, roots, bad):
@@ -72,7 +115,13 @@ def judge_root(root, repo, cache, admit, roots, bad):
         if not os.path.isfile(p):
             if gate_build.unitless(root, cache, repo):
                 return 0, 0, [], "header-only root: no code, so no imports (by construction)"
-            return 1, 0, [root + ":imports.in.json"], "declares no imports.in.json (the root's imports are undeclared)"
+            try:
+                members = provider_item(root, repo, cache, admit, roots)
+            except (ValueError, KeyError, OSError, subprocess.CalledProcessError, cas.CasError, recipe.RecipeError) as e:
+                return 1, 0, [root + ":imports.in.json"], "declares no imports.in.json, and the class import-provider cannot be decided: %s" % (str(e)[:200] or type(e).__name__)
+            if not members:
+                return 0, 0, [], "outside the class import-provider: defines no native symbol of the bridge table"
+            return 1, 0, [root + ":imports.in.json"], "defines %d native symbols of the bridge table (%s) and declares no imports.in.json" % (len(members), ",".join(members[:3]))
         with open(p) as f:
             decl = json.load(f)
         built = {}

@@ -137,7 +137,7 @@ def main():
             return {root + "/" + o["unit"]: (set(n for n, v, s, t, b, shn in gate_linkstrict.elf_symbols(o["object"]) or [] if shn != 0), relocs(o["object"]))
                     for o in built[root]["objects"]}, built[root]
         for root in gate_build.buildable_roots(repo):
-            if admit[root].get("target") != "guest":
+            if recipe.entry_of(admit, root).get("target") != "guest":
                 continue
             objs, res = objects(root)
             rec = recipe.load_recipe(repo, admit, root)
@@ -145,7 +145,8 @@ def main():
                 objs.update(objects(r)[0])
             groups[root] = objs
             if res["elf"]:
-                linked[root + "/" + os.path.basename(res["elf"]["path"])] = relocs(res["elf"]["path"])
+                facts = json.load(open(res["elf_facts"]["path"]))   # the link record (elffacts.py): the relocations of the final ELF, read by the pinned readelf of the link stage
+                linked[root + "/" + os.path.basename(res["elf"]["path"])] = [(r[0], r[1], r[2], r[3]) for r in facts["relocations"]]
     except recipe.RecipeError as e:
         why = "invalid recipe: %s" % "; ".join(e.errors)[:300]
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as e:

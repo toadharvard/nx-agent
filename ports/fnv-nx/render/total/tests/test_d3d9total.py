@@ -72,12 +72,15 @@ def run_gate(base, cache, extra=None):
     env.update(GATE_OUT=out, GATE_CACHE=cache, **(extra or {}))
     r = subprocess.run([sys.executable, "-I", os.path.join(G.PORT_REL, "render", "total", "gate_d3d9total.py")], cwd=base, env=env,
                        capture_output=True, text=True, timeout=240)
+    if not os.path.exists(os.path.join(out, "d3d9total.json")):
+        raise AssertionError("the gate wrote no result (rc %d): %s" % (r.returncode, (r.stderr or r.stdout)[-600:]))
     res = json.load(open(os.path.join(out, "d3d9total.json")))
     return r.returncode, res
 
 
 def enum_ids(e):
-    spec = json.load(open(os.path.join(PORT, "render", "d3d9", "spec", "d3d9_spec.json")))["enums"][e]
+    spec = json.loads(subprocess.run([sys.executable, "-I", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")],
+                                     check=True, capture_output=True).stdout)["enums"][e]
     if e == "D3DFORMAT":
         spec = spec + ["D3DFMT_" + s.strip() for s in G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"),
                                                                       ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["VENDOR_FOURCC"]]

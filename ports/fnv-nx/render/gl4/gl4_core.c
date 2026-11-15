@@ -12,36 +12,39 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- the tables are total ----------------------------------------------------------------------------------------- */
-#define CNT1(a) +1
-#define CNT4(a, b, c, d) +1
-#define CNT3(a, b, c) +1
-enum { N_OPS = 0 NXGL4_OP_LIST(CNT1), N_FNS = 2 NXGL4_FN_LIST(CNT4) NXGL4_FN_EXT_LIST(CNT3) };
-_Static_assert((int)N_OPS == (int)NxOp_Count4 && (int)N_FNS == (int)NXGPU_FN_SHADER_CREATE_D3D + 1 && (int)NXGPU_FN_SHADER_CREATE_D3D == (int)NXGPU_FN_COUNT4,
-               "gl4: the op/function tables cover ABI v4 and the function of v4.1 exactly");
 #define NXGL4_VERSION NXGPU_VERSION4
 
 /* ---- memory blocks ----------------------------------------------------------------------------------------------- */
-const Gl4Mem* gl4_mem(uint32_t id) { return id && id <= GL4_MAX_MEM && g4.mem[id].used ? &g4.mem[id] : NULL; }
+int gl4_table_grow(void** tab, uint32_t* cap, size_t elem) {
+    uint32_t n = *cap ? *cap : 32;
+    if (n > UINT32_MAX / 2) return 0;
+    n *= 2;
+    char* p = (char*)realloc(*tab, (size_t)n * elem);
+    if (!p) return 0;
+    memset(p + (size_t)*cap * elem, 0, (size_t)(n - *cap) * elem);
+    *tab = p; *cap = n;
+    return 1;
+}
+
+const Gl4Mem* gl4_mem(uint32_t id) { return id && id < g4.nMem && g4.mem[id].used ? &g4.mem[id] : NULL; }
 
 uint64_t gl4_api_mem_create(uint64_t a) {
     const NxMemBlockDesc* d = (const NxMemBlockDesc*)nxgl4_guest_ptr(a, sizeof *d);
     if (!d || !d->size || !d->storage) return 0;
-    for (uint32_t id = 1; id <= GL4_MAX_MEM; id++) {
-        if (g4.mem[id].used) continue;
-        Gl4Mem* m = &g4.mem[id];
-        m->storage = d->storage; m->size = d->size; m->used = 1;
-        p_glGenBuffers(1, &m->buf);
-        p_glBindBuffer(GL_COPY_WRITE_BUFFER, m->buf);
-        p_glBufferData(GL_COPY_WRITE_BUFFER, d->size, NULL, GL_DYNAMIC_DRAW);
-        return id;
-    }
-    return 0;
+    uint32_t id = 1;
+    while (id < g4.nMem && g4.mem[id].used) id++;
+    if (id >= g4.nMem && !gl4_table_grow((void**)&g4.mem, &g4.nMem, sizeof *g4.mem)) { gl4_err("mem_create: out of memory"); return 0; }
+    Gl4Mem* m = &g4.mem[id];
+    m->storage = d->storage; m->size = d->size; m->used = 1;
+    p_glGenBuffers(1, &m->buf);
+    p_glBindBuffer(GL_COPY_WRITE_BUFFER, m->buf);
+    p_glBufferData(GL_COPY_WRITE_BUFFER, d->size, NULL, GL_DYNAMIC_DRAW);
+    return id;
 }
 uint64_t gl4_api_mem_gpu_addr(uint64_t id) { (void)id; return 0; }
 
 uint64_t gl4_api_mem_destroy(uint64_t id) {
-    if (id > GL4_MAX_MEM || !gl4_mem((uint32_t)id)) { gl4_err("mem_destroy: %llu is not a live block", (unsigned long long)id); return NXGPU_BAD_CALL; }
+    if (id >= g4.nMem || !gl4_mem((uint32_t)id)) { gl4_err("mem_destroy: %llu is not a live block", (unsigned long long)id); return NXGPU_BAD_CALL; }
     p_glDeleteBuffers(1, &g4.mem[id].buf);
     memset(&g4.mem[id], 0, sizeof g4.mem[id]);
     if (g4.idxBlock == id) g4.idxBlock = 0;
@@ -67,12 +70,11 @@ typedef uint64_t (*Fn1)(uint64_t);
 typedef uint64_t (*Fn2)(uint64_t, uint64_t);
 typedef uint64_t (*Fn3)(uint64_t, uint64_t, uint64_t);
 typedef struct { uint32_t argc; Fn1 f1; Fn2 f2; Fn3 f3; } FnEnt;   /* exactly the member of the arity is set */
-#define FNENT(id, field, impl, n) [NXGPU_FN_##id] = {n, FNSET##n(impl)},
-#define FNENT_EXT(id, impl, n) [NXGPU_FN_##id] = {n, FNSET##n(impl)},
+#define FNENT(id, name, n) [NXGPU_FN_##id] = {n, FNSET##n(gl4_api_##name)},
 #define FNSET1(f) f, 0, 0
 #define FNSET2(f) 0, f, 0
 #define FNSET3(f) 0, 0, f
-static const FnEnt k_fn[NXGPU_FN_SHADER_CREATE_D3D + 1] = { NXGL4_FN_LIST(FNENT) NXGL4_FN_EXT_LIST(FNENT_EXT) };
+static const FnEnt k_fn[NXGPU_FN_SHADER_CREATE_D3D + 1] = { NXGPU_FN_LIST_V3(FNENT) NXGPU_FN_LIST_V4(FNENT) NXGPU_FN_LIST_EXT(FNENT) };   /* total by construction: the ABI lists */
 
 uint64_t nxgl4_ext(uint32_t fn, const uint64_t* a, uint32_t n) {
     if (fn == NXGPU_FN_SHUTDOWN) return api_shutdown();
@@ -130,9 +132,12 @@ const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t
     NxGpuApi4* api = &g4.api;
     api->v3.info.magic = NXGPU_MAGIC; api->v3.info.version = NXGL4_VERSION; api->v3.info.frames_in_flight = 2;
     api->v3.info.width = width; api->v3.info.height = height; api->v3.info.backend = 2;
-#define SLOT(id, field, impl, n) api->field = (uint64_t)(uintptr_t)impl;
-    NXGL4_FN_LIST(SLOT)
-#undef SLOT
+#define SLOT3(id, name, n) api->v3.name = (uint64_t)(uintptr_t)gl4_api_##name;
+#define SLOT4(id, name, n) api->name = (uint64_t)(uintptr_t)gl4_api_##name;
+    NXGPU_FN_LIST_V3(SLOT3)
+    NXGPU_FN_LIST_V4(SLOT4)
+#undef SLOT3
+#undef SLOT4
     api->v3.shutdown = (uint64_t)(uintptr_t)api_shutdown;
     if (p_glGetError()) { if (err && errlen) snprintf(err, errlen, "GL error during init"); return NULL; }
     return api;
@@ -142,7 +147,8 @@ void nxgl4_destroy(void) {
     for (uint32_t i = 0; i < NX4_MAX_STREAMS; i++) free(g4.vtx[i].data);
     for (uint32_t i = 0; i < g4.nSlices; i++) free(g4.slices[i].ids);
     free(g4.slices);
-    for (uint32_t i = 1; i <= GL4_MAX_SHADERS; i++) gl4_d3d_free(g4.sh[i].d3d);
+    for (uint32_t i = 1; i < g4.nSh; i++) gl4_d3d_free(g4.sh[i].d3d);
+    free(g4.mem); free(g4.sh); free(g4.prog);
     if (g4.dpy) {
         eglMakeCurrent(g4.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (g4.ctx) eglDestroyContext(g4.dpy, g4.ctx);

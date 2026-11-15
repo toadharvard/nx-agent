@@ -55,14 +55,14 @@ void fnvnx_path_reset(const char *root);        /* default mounts under root (NU
 DWORD fnvnx_path_map(const char *win_path, char *host, size_t host_size);
 void fnvnx_set_command_line(int argc, char **argv);
 /* the registry's first boot (platform/win32/registry_seed.cpp): when the hive file does not exist, makes it from the declared
- * machine's rows (platform/manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
+ * machine's rows (manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
 void fnvnx_registry_first_run(void);
 void fnvnx_declared_files_first_run(void);
-/* The declared fonts: an input of the platform like the registry hive and FalloutPrefs.ini. The root that links the platform defines
- * this function (the loader: boot.cpp; the host tests: host_boundary.cpp), so a root without declared fonts does not link. The three
- * directories are the Wine 9.0 data directory (the .fon bitmap fonts and the TrueType files), the host fonts (every sfnt file
- * below it) and the registry export directory (.reg files: Fonts, FontSubstitutes, hardware-profile Fonts, CodePage\ACP). There is
- * no setter and no unset state: GDI reads them when the first font is realised. */
+/* The declared fonts: an input of the platform like the registry hive and FalloutPrefs.ini. The one definition is loader/guest/boot.c, which
+ * returns FNVNX_SD_FONTS of hostabi/include/fnvnx/sdlayout.h (the one path record; the boot machine mounts the tools/fonts-wine9 mirror there,
+ * read from the same macro), so a root that links the platform without the loader does not link. The directory holds the Wine 9.0 data
+ * files (the .fon bitmap fonts and the TrueType files); registry exports and host fonts are not read. There is no setter and no unset
+ * state: GDI reads it when the first font is realised. */
 struct fnvnx_font_dirs { const char *dir; };   /* the one declared directory: exactly the fnv-nx-build tools/fonts-wine9 mirror */
 const struct fnvnx_font_dirs *fnvnx_declared_fonts(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */

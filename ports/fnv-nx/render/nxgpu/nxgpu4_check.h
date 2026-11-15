@@ -28,7 +28,7 @@ typedef struct {
 } NxChkEnv;
 
 typedef struct { uint32_t image, sub; } NxChkTgt;                  /* sub = level | layer << 16; image 0 = none */
-typedef struct { uint32_t nColor; NxChkTgt c[4]; NxChkTgt d; } NxChkPass;
+typedef struct { uint32_t nColor; NxChkTgt c[NXGPU_MAX_COLOR_TARGETS]; NxChkTgt d; } NxChkPass;
 
 static inline uint32_t nxchk_lvl(uint32_t v, uint32_t level) { v >>= level; return v ? v : 1u; }
 
