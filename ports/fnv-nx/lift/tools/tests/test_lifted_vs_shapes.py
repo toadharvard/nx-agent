@@ -16,7 +16,7 @@ def main():
     import argparse, tempfile, liftgen
     exe = os.path.join(os.environ['FNVNX_INPUT_EXE'], 'FalloutNV.exe'); facts = os.environ['FNVNX_INPUT_FACTS']
     import fnvlift
-    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=os.environ['FNVNX_INPUT_FPSTATE'], fpdepth=os.environ['FNVNX_INPUT_FPDEPTH'], x86sys=os.environ['FNVNX_INPUT_X86SYS'])      # declared inputs (inputs.json)
+    fnvlift.inputs.configure(universe=facts + '/universe.tsv', fpstate=facts + '/fpstate', fpdepth=facts + '/fpmodes/depth.tsv', x86sys=sys.argv[1])      # the facts external holds fpstate/ and fpmodes/; argv[1] is the platform X86SYS output (a `uses` of the test root, not yet admitted)
     emit, jtab = '', None
     out = tempfile.mkdtemp(); shapes = out + '/shapes_0.tsv'
     try:
