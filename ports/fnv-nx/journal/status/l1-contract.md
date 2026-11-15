@@ -1424,3 +1424,11 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - w23: C 6.2.7, tier 2 acceptance (after the L2 ICE), D2 scope, remaining order classes, crossing predicate;
   - w24: store atomicity, gatekeys, admit by class;
   - w25: generated link scripts, ELF facts + gate_contract tools, profile.
+## 00:59 rulings
+- **w20.** The errno accessor is derived by preprocessing (w20u / w20p b478d5a1d). Two rulings:
+  - `hostabi:` is a valid source only for a property of our own defined symbol, checked against its declaration (for example, fnvnx_thread_exit noreturn). It is never a source for a Win32 value.
+  - The lasterror column is accepted.
+  - w20u goes into cand2 whole, and L5/w10 take the whole of it (their lineage lacks e93bfdc13 and c56ecabcc, and SYSTEM_SJ crashes there).
+- **w23 a0ad1936.** gate_abi now pairs only `external` rows, and the C 6.2.7p2 gate is built (link/ctypes_compat.py).
+  - Blocked on L2 w3: `.fnvnx.decltype`, which w23 requests directly with L2 cc'd.
+  - The remaining order classes (238 sp-overlap, tag-D 39, tag-X 45) have one cause, fixed in fnvnx_order (L2). nonframe 372 belongs to L2 w2.
