@@ -30,7 +30,6 @@
   }
  ],
  "link": {
-  "script": "ports/fnv-nx/link/guest.ld",
   "output": "msvcrttest.elf",
   "flags": [
    "-m",
@@ -43,27 +42,7 @@
    "ports/fnv-nx/platform",
    "ports/fnv-nx/loader",
    "ports/fnv-nx/lib/sha256"
-  ],
-  "libs": {
-   "external": "fnvnx-a64-msvcmodel",
-   "dirs": [
-    "aarch64-none-elf/lib/ilp32/pic",
-    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic"
-   ],
-   "names": [
-    "stdc++",
-    "c",
-    "m",
-    "gcc",
-    "sysbase"
-   ],
-   "startfiles": [
-    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crti.o"
-   ],
-   "endfiles": [
-    "lib/gcc/aarch64-none-elf/15.2.0/ilp32/pic/crtn.o"
-   ]
-  }
+  ]
  },
  "plugins": [
   {
@@ -137,5 +116,6 @@
    "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
    "at": "/ext/a64"
   }
- ]
+ ],
+ "errno_accessor": "__errno"
 }
