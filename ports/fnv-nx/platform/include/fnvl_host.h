@@ -34,7 +34,15 @@ typedef struct fnvnx_site {
   unsigned int fp;
   fnvnx_entry_fn entry;
 } __attribute__((aligned(8))) fnvnx_site_t;
-_Static_assert(sizeof(fnvnx_site_t) == 8 && _Alignof(fnvnx_site_t) == 8, "the site record is one 64-bit word");
+/* one spelling of the assertion for both languages: C11 `_Static_assert`/`_Alignof`, C++ `static_assert`/`alignof` (g++ rejects the C keywords) */
+#ifdef __cplusplus
+#define FNVNX_ALIGNOF(t) alignof(t)
+#define FNVNX_STATIC_ASSERT(c, m) static_assert(c, m)
+#else
+#define FNVNX_ALIGNOF(t) _Alignof(t)
+#define FNVNX_STATIC_ASSERT(c, m) _Static_assert(c, m)
+#endif
+FNVNX_STATIC_ASSERT(sizeof(fnvnx_site_t) == 8 && FNVNX_ALIGNOF(fnvnx_site_t) == 8, "the site record is one 64-bit word");
 
 fnvnx_entry_fn fnvnx_dispatch(void *fp, fnvnx_site_t *site, const void *descriptor);
 
