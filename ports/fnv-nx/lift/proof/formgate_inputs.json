@@ -19,5 +19,6 @@
   }
  ],
  "shapes": "liftpack/shapes.tsv",
- "certs": "certs/certs.tsv"
+ "certs": "certs/certs.tsv",
+ "instrs": "liftpack/instrs.tsv"
 }

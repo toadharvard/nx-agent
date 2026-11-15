@@ -57,7 +57,7 @@ def key_of(h):
 class Fixture:
     """one fake artifacts repo with externals liftpack (shapes.tsv) and certs (certs.tsv), the inputs file (and the fake IR as the external x86ir)"""
     def __init__(self, td, encs, certs_for=None, dsl_override=None, model=MODEL, result='proved', shapes_text=None, declare=('liftpack', 'certs', 'x86ir'),
-                 shapes_file='shapes.tsv', cert_rows=None):
+                 shapes_file='shapes.tsv', cert_rows=None, instrs_text=None):
         self.td = td
         self.keys = sorted(set(key_of(h) for h in encs))
         shapes = shapes_text if shapes_text is not None else '# fixture\n' + ''.join('%s\t%s\t1\n' % kf for kf in self.keys)
@@ -69,7 +69,8 @@ class Fixture:
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
         os.makedirs(os.path.join(td, 'art'), exist_ok=True)
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
-        self.ext = {'liftpack': self.art.publish('liftpack', {shapes_file: shapes, 'README': 'pack\n'}),
+        instrs = instrs_text if instrs_text is not None else '# fixture\n' + ''.join('exe\t%08x\t%d\t%s\n' % (0x401000 + 0x10 * i, len(h) // 2, h) for i, h in enumerate(sorted(set(encs))))
+        self.ext = {'liftpack': self.art.publish('liftpack', {shapes_file: shapes, 'instrs.tsv': instrs, 'README': 'pack\n'}),
                     'certs': self.art.publish('certs', {'certs.tsv': ''.join(cert_rows if cert_rows is not None else rows)}),
                     'x86ir': self.art.publish('x86ir', {'ir/x86_proof.ir': IR_TEXT})}
         self.inputs = os.path.join(td, 'inputs.json')
@@ -79,7 +80,7 @@ class Fixture:
 
     def write(self, declare=('liftpack', 'certs', 'x86ir'), **over):
         doc = {'format': 'fnvnx-forms-inputs/1', 'external': [self.ext[n] for n in declare], 'shapes': 'liftpack/shapes.tsv',
-               'certs': 'certs/certs.tsv'}
+               'certs': 'certs/certs.tsv', 'instrs': 'liftpack/instrs.tsv'}
         doc.update(over)
         with open(self.inputs, 'w') as fh:
             json.dump(doc, fh)
@@ -94,7 +95,7 @@ class Green(unittest.TestCase):
         with workdir() as td:
             f = Fixture(td, GOOD)
             u, c, ids, detail = f.judge()
-            self.assertEqual((u, c, ids), (len(GOOD), len(GOOD), []))
+            self.assertEqual((u, c, ids), (2 * len(GOOD), 2 * len(GOOD), []))
             self.assertIn('int %d/%d' % (len(GOOD), len(GOOD)), detail)
 
     def test_ext_keys_are_the_loaders(self):
@@ -131,12 +132,12 @@ class CertificationRule(unittest.TestCase):
         with workdir() as td:
             k0 = key_of(GOOD[0])[0]
             f = Fixture(td, GOOD, certs_for={key_of(h)[0] for h in GOOD[1:]})
-            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD) - 1, [k0]))
+            self.assertEqual(f.judge()[:3], (2 * len(GOOD), 2 * len(GOOD) - 1, [k0]))
 
     def test_wrong_dsl_sha_is_red(self):
         with workdir() as td:
             u, c, ids, _ = Fixture(td, GOOD, dsl_override='0' * 64).judge()
-            self.assertEqual((u, c, len(ids)), (len(GOOD), 0, len(GOOD)))
+            self.assertEqual((u, c, len(ids)), (2 * len(GOOD), len(GOOD), len(GOOD)))
 
     def test_certificate_stale_after_a_dsl_edit_is_refused(self):
         # certificates written under the current DSL; then the builder of ONE mnemonic (xor) changes: exactly the shapes of xor lose their certificate,
@@ -144,7 +145,7 @@ class CertificationRule(unittest.TestCase):
         from proof import forms
         with workdir() as td:
             f = Fixture(td, GOOD)
-            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD), []))
+            self.assertEqual(f.judge()[:3], (2 * len(GOOD), 2 * len(GOOD), []))
             orig = forms.H['xor']
 
             def edited(c):
@@ -155,22 +156,33 @@ class CertificationRule(unittest.TestCase):
                 u, c, ids, _ = f.judge()
             finally:
                 forms.H['xor'] = orig
-            self.assertEqual((u, c, ids), (len(GOOD), len(GOOD) - 1, [key_of('31c0')[0]]))
-            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD), []))
+            self.assertEqual((u, c, ids), (2 * len(GOOD), 2 * len(GOOD) - 1, [key_of('31c0')[0]]))
+            self.assertEqual(f.judge()[:3], (2 * len(GOOD), 2 * len(GOOD), []))
 
     def test_wrong_model_sha_in_the_certificates_is_red(self):
         with workdir() as td:
-            self.assertEqual(Fixture(td, GOOD, model='f' * 64).judge()[1], 0)
+            self.assertEqual(Fixture(td, GOOD, model='f' * 64).judge()[1], len(GOOD))      # the link check still passes: 0 shape certificates + the linked instances
 
     def test_result_not_proved_is_red(self):
         for res in ('failed', 'model-gap', 'PROVED'):
             with workdir() as td:
-                self.assertEqual(Fixture(td, GOOD, result=res).judge()[1], 0, res)
+                self.assertEqual(Fixture(td, GOOD, result=res).judge()[1], len(GOOD), res)      # only the linked instances count
+
+    def test_link_check_unlinked_and_mismatch_are_red(self):
+        # an instance whose shape has no symbolic Form while the concrete builder covers it: `unlinked`; an undecodable row: red; a bad instrs.tsv: red `inputs`
+        with workdir() as td:
+            f = Fixture(td, GOOD, instrs_text='exe\t00401000\t2\t01c8\nexe\t00401010\t3\tff\n')
+            u, c, ids, detail = f.judge()
+            self.assertEqual(ids, ['inputs']); self.assertIn('instrs.tsv', detail)
+        with workdir() as td:
+            f = Fixture(td, GOOD, instrs_text='exe\t00401000\t2\t01c8\nexe\t00401010\t2\tffff\n')
+            u, c, ids, detail = f.judge()
+            self.assertEqual(ids, ['link:undecodable:exe:401010'], detail)
 
     def test_shape_without_builder_is_uncertified(self):
         with workdir() as td:
             u, c, ids, detail = Fixture(td, GOOD + NOBUILD).judge()
-            self.assertEqual((u, c, ids), (len(GOOD) + 1, len(GOOD), [key_of(NOBUILD[0])[0]]))
+            self.assertEqual((u, c, ids), (2 * len(GOOD) + 1, 2 * len(GOOD), [key_of(NOBUILD[0])[0]]))
             self.assertIn('without a DSL builder: 1', detail)
 
     def test_uncertified_ids_are_sorted(self):
@@ -248,7 +260,7 @@ class InputsRed(unittest.TestCase):
         with workdir() as td:
             f = Fixture(td, GOOD, model='a' * 64)
             u, c, ids, detail = f.judge()
-            self.assertEqual((u, c), (len(GOOD), 0))
+            self.assertEqual((u, c), (2 * len(GOOD), len(GOOD)))
 
     def test_shapes_malformed(self):
         a, b = key_of(GOOD[0]), key_of(GOOD[1])
@@ -294,7 +306,7 @@ class Cli(unittest.TestCase):
                 f = Fixture(td, encs)
                 r, out = self.run_gate(td, f)
                 self.assertEqual(r.returncode, rc, r.stderr + r.stdout)
-                self.assertEqual(fakeext.accepted('forms', out, rc)[:2], (status, len(encs)))
+                self.assertEqual(fakeext.accepted('forms', out, rc)[:2], (status, len(GOOD) + len(encs)))
 
     def test_missing_pack_is_red_with_reason(self):
         with workdir() as td:

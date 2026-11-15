@@ -6,7 +6,7 @@ ONE copy of this gate. No argument and no other environment variable is read: ev
 recipe.fetch_externals, by exact commit with tree_sha256 checked, into GATE_CACHE/{store,external}; without GATE_CACHE the cache is
 GATE_OUT/forms-cache). The loader is imported from ports/fnv-nx/verify (sibling of lift/) the way verify/gate_contract.py imports its own (plain imports: a checkout
 without verify/ cannot run the gate, no result file, so the verdict is red).
-Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); certs = `certs/<path>` (certs.tsv); the external `x86ir` pins the model (x86_proof.ir); its sha256 is derived from that file.
+Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); certs = `certs/<path>` (certs.tsv); instrs = `liftpack/<path>` (instrs.tsv of the pack: the instance set of the link check, proof/symcheck.py); the external `x86ir` pins the model (x86_proof.ir); its sha256 is derived from that file.
 
 Universe: the ENCODING SHAPES of the lifted pack, whole: the rows `shape_key<TAB>family<TAB>count` of shapes.tsv (sorted by key, unique, family in
 int x87 simd sys) inside the external `liftpack`; the generate driver of the pack writes it with proof/shape.py:shape_key. The gate has no decoder
@@ -41,7 +41,7 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import eaaudit, shape, symform  # noqa: E402
+from proof import codeuniverse, eaaudit, shape, symcheck, symform  # noqa: E402
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
 
@@ -49,7 +49,7 @@ NAME = "forms"
 INPUTS = os.path.join(HERE, "formgate_inputs.json")
 FORMAT = "fnvnx-forms-inputs/1"
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}      # = recipe.EXT_KEYS (a test asserts it)
-KEYS = {"format", "external", "shapes", "certs"}
+KEYS = {"format", "external", "shapes", "certs", "instrs"}
 IR_EXT = "x86ir"      # the external that pins x86_proof.ir: the one place the model is pinned; its sha256 is derived from the file
 REFERENCES = ("sail", "fpsmt", "k", "sdm", "table")
 FAMILIES = ("int", "x87", "simd", "sys")
@@ -93,7 +93,7 @@ def load_inputs(path=INPUTS):
     names = [e["name"] for e in exts]
     if len(set(names)) != len(names):
         raise Red("inputs: external names are not unique")
-    for k in ("shapes", "certs"):
+    for k in ("shapes", "certs", "instrs"):
         v = doc[k]
         if not isinstance(v, str) or "/" not in v or ".." in v.split("/"):
             raise Red("inputs: %s must be NAME/path inside a declared external" % k)
@@ -232,10 +232,17 @@ def judge(cache, inputs=INPUTS):
     finally:
         shutil.rmtree(os.path.join(cache, "ws"), ignore_errors=True)     # the checkouts of the externals (the CAS store keeps the content)
     unc = [k for k in sorted(cert) if not cert[k]]
+    try:      # the link check (symcheck.py, ASM-006): every instance of the pack's instrs.tsv builds the Form that its shape's proved symbolic Form instantiates to; MISMATCH, unlinked and seglim are red items
+        lc, lred = symcheck.link(codeuniverse.load_instrs(path_in(ext, doc["instrs"], "instrs")))
+    except (Red, codeuniverse.Bad) as e:
+        return 1, 0, ["inputs"], str(e)[:600]
+    ninst = lc["instances"] - lc["no-form"]      # the instances that are Form instances (a no-form instance has neither builder: nothing to link)
+    link_ids = ["link:%s:%s:%x" % (c, im, va) for c, im, va, _ in lred]
     ea = eaaudit.violations(HERE)      # one uncertified item per violation of the ea-rule: every Form memory access goes through an address function (proof/eaaudit.py)
     ea_ids = ["ea-rule:%s:%d" % v[:2] for v in ea]
     byfam = ", ".join("%s %d/%d" % (f, sum(cert[k] for k in fam if fam[k] == f), sum(1 for k in fam if fam[k] == f)) for f in FAMILIES)
-    return len(cert) + len(ea_ids), len(cert) - len(unc), unc + ea_ids, "certified/universe per family: %s; shapes without a DSL builder: %d; ea-rule violations: %d%s" % (byfam, nobuilder, len(ea), "".join("; %s:%d %s" % v for v in ea[:5]))
+    return (len(cert) + len(ea_ids) + ninst, len(cert) - len(unc) + ninst - len(link_ids), unc + ea_ids + link_ids,
+            "certified/universe per family: %s; shapes without a DSL builder: %d; ea-rule violations: %d; link check over %d instances: %s%s" % (byfam, nobuilder, len(ea), lc["instances"], dict(lc), "".join("; %s:%d %s" % v for v in ea[:5])))
 
 
 def cache_dir(env):

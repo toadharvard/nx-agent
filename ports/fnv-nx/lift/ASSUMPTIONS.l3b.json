@@ -43,7 +43,7 @@
    "area": "proof",
    "file": "lift/proof/model_sail.py",
    "statement": "Pre-states where the model raises a segment-limit fault are excluded; the lifted code wraps modulo 2^32.",
-   "disposition": "owner: no wild accesses, for data; relative branch targets are checked by proof/symcheck.py (make it a gate)"
+   "disposition": "owner: no wild accesses (ASM-006), for data; relative branch targets are checked by gate forms (formgate.py -> proof/symcheck.py link(): a target outside [0, 2^32) is a red seglim item) over the pack's instrs.tsv"
   },
   {
    "id": "A-SHAPEFAMILY",

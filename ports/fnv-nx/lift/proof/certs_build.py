@@ -19,7 +19,7 @@ refused there too.
 Only proved shapes get a row (one row per proved shape: formgate counts nothing else).  The run is REFUSED (exit 2, no output file) when the records
 are contradictory: the same current (shape, shape_sha, IR sha) is `proved` in one record and FAILED(...) in another.
 Row: shape_key, family, dsl_sha (= symform.shape_sha(shape)), model_sha, `sail`, `proved`.
-(The link between the symbolic Form and the lifter's concrete Forms is proof/symcheck.py, over every instance of the image; it is not part of a certificate.)
+(The link between the symbolic Form and the lifter's concrete Forms is proof/symcheck.py, over every instance of the pack's instrs.tsv, run by gate forms; it is not part of a certificate.)
 Rows are unique and sorted; the output depends on the set of records only (not on shard order, file names or time).  Needs capstone; no z3, no clock.
 
 --queue: the shapes of SHAPES.tsv (family int, a symbolic Form exists) that have NO valid certificate in the shards, sorted; the farm proves exactly these
