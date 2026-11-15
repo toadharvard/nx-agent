@@ -122,7 +122,6 @@ from fnvlift import f_sse as _f_sse
 from proof import forms as _forms
 _cov = lambda m: m in _forms.H or (m[0] == 'j' and m[1:] in _core.CC) or (m.startswith('set') and m[3:] in _core.CC) or (m.startswith('cmov') and m[4:] in _core.CC)
 _both = sorted(m for m in set(_core.OPS) | set(_f_sse.SSE) if _cov(m))
-# the far CALL / JMP m16:32 (FF /3, /5) are the one shape the Forms do not model (lift_dsl.supported() refuses it, f_sys.far_mem emits it): the two mnemonics keep the near+far hand handler
-check('one path: hand handlers and Forms share only call / jmp (far FF /3, /5): %s' % _both, _both == ['call', 'jmp'])
+check('one path: no mnemonic has both a Form and a hand handler: %s' % _both, _both == [])
 print('cases', N[0], 'fails', len(FAILS))
 sys.exit(1 if FAILS else 0)

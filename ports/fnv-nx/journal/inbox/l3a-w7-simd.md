@@ -18,3 +18,15 @@
 - `emit=''` is gone: tools/lifted.install accepts only 'dsl'; liftgen --emit default 'dsl'. Dead runtime helpers removed from rt/fnvl.h (sse_arith, sse_sqrt, sse_min/max, sse_cmpb, sse_comi).
 - The 62 / "representative shapes" figure was a local check (41 proved shapes), not a result. The result is L3b's rerun over all 4,290 shapes at the head commit; a divss/divsd timeout is L3b's timeout class.
 - Debt (owner L3a): proof/tests/fpc_host.py compiles fnvl.h with the host compiler, outside the recipe. It moves to a recipe test root (host flags variant) when the L1 `run` stage lands.
+
+## Far-transfer Form (lead decision after 46357156)
+
+- One Form for CALL / JMP far: FF /3, FF /5 (m16:32; m16:16 with 66), 9A, EA (proof/forms_flow.py `far_transfer`, SDM Vol 2 CALL/JMP far, protected mode, same privilege).
+  The selector is checked against platform/declared/x86sys.json selectors.cs (0x1b) with the RPL stripped; any other selector is fault 7 (the AV row, as every selector fault of f_sys), raised before any effect.
+  Conforming and non-conforming code segments of the same privilege give the same transfer, so no undecided descriptor field is read; the record has no call gate or TSS, so those selectors are the same fault.
+  CALL pushes CS (zero-extended to the operand size) then the return EIP. No x86sys field is "undecided" for this Form: nothing to report.
+- Deleted: f_sys far_target / h_ljmp / far_call / h_lcall / far_mem / far_call_mem / is_far_ff / the call+jmp wrappers / h_ljmp_any; f_flow h_call / h_jmp. lift_dsl.supported() no longer refuses FF /3, /5; transfer() treats lcall / ljmp like call / jmp.
+  Intersection of hand handlers and Forms: {} (test_forms_simdclass), 335 -> 0.
+- Form key: the far FF /3, /5 shapes had the key of the near FF /2, /4 (same mnemonic, same m32 class, same opcode): they now end `ff/far` (fnvlift/formkey.py and proof/forms.py). L3b: the new far shapes are `call|m32|ff/far`, `jmp|m48|ff/far`, `lcall|m48|ff/far`, `ljmp|m48|ff/far`(as capstone names them), `lcall|imm,imm|9a`, `ljmp|imm,imm|ea`.
+- test: proof/tests/test_forms_far.py, 43 checks, 0 fail (selectors x call/jmp, pushes, 16-bit forms, 9A/EA, keys, emitter).
+- f_cpufeat read the CPUID model from committed paths that no longer exist (fnvl_abi.h defines, cpumodel.c E1): it now reads the generated fnvl_cpuref.h and cpumodel_tab.inc through fnvlift/rtgen (the recipe's own stages).

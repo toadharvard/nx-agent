@@ -14,4 +14,5 @@ def form_key(ins, X):
                       else 'r8' if n in R8 else 'r16' if n in R16 else 'r32' if n in R32 else n)
         elif o.type == X.X86_OP_IMM: ks.append('imm')
         else: ks.append('m%d' % (o.size * 8) + {X.X86_REG_FS: ':fs', X.X86_REG_GS: ':gs'}.get(o.mem.segment, ''))
-    return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex()), opc
+    far = opc == b'\xff' and ins.modrm is not None and (ins.modrm >> 3) & 7 in (3, 5) and ins.operands and ins.operands[0].type == X.X86_OP_MEM      # FF /3, FF /5: the far CALL / JMP m16:32, a different semantics from the near FF /2, /4 of the same mnemonic and operand class
+    return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex() + ('/far' if far else '')), opc

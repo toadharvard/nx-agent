@@ -37,8 +37,6 @@ def supported(ins):
     """the Form builder has a handler for the mnemonic (forms.build's own lookup: forms.H, then the jcc / setcc / cmovcc families) and every register
     operand is a general register (the string forms' mnemonics movsd/cmpsd are also SSE2 instructions)"""
     m = ins.mnemonic.split()[-1]
-    if m in ('call', 'jmp') and ins.opcode[0] == 0xff and ins.modrm is not None and (ins.modrm >> 3) & 7 in (3, 5) and ins.operands and ins.operands[0].type == forms.X.X86_OP_MEM:
-        return False        # FF /3 and FF /5 are the far CALL / JMP m16:32 (SDM Vol 2): the Forms model the near transfers only; f_sys.far_mem emits the far ones
     ok = m in forms.H or (m[0] == 'j' and m[1:] in CC) or (m.startswith('set') and m[3:] in CC) or (m.startswith('cmov') and m[4:] in CC)
     return ok and all(ins.reg_name(o.reg) in SUB or forms.isvec(forms.Op(ins, o)) for o in ins.operands if o.type == forms.X.X86_OP_REG)
 
@@ -94,25 +92,25 @@ def transfer(cx, ins, F):
     """-> (nodes whose value is needed after the writes, function(ref) -> list of C lines); sets cx.term"""
     n, nxt, m = F.eip, cx.nxt, ins.mnemonic.split()[-1]      # the bare mnemonic (cx.m keeps `repz ret`)
     if n.op == 'const':
-        if m == 'call':
+        if m in ('call', 'lcall'):
             return [], lambda ref: [f_flow.call_xfer(cx, cx.ops[0], n.x)]
         if n.x == nxt:
             return [], lambda ref: []
         cx.term = True
         return [], lambda ref: [f_flow.jump_to(cx, n.x)]
-    if n.op == 'ite' and n.a[1].op == 'const' and n.a[2].op == 'const' and n.a[2].x == nxt and m != 'call':
+    if n.op == 'ite' and n.a[1].op == 'const' and n.a[2].op == 'const' and n.a[2].x == nxt and m not in ('call', 'lcall'):
         t = n.a[1].x
 
         def cond(ref):
             st = f_flow.jump_to(cx, t)
             return ['if (%s)%s' % (ref(n.a[0]), st if st[0] == '{' else ' ' + st)]
         return [n.a[0]], cond
-    if m == 'call':
+    if m in ('call', 'lcall'):
         return [n], lambda ref: [f_flow.call_xfer(cx, cx.ops[0], ref(n))]
     if m == 'ret':
         cx.term = True
         return [n], lambda ref: [f_flow.ret_xfer(cx, ref(n))]
-    if m == 'jmp':
+    if m in ('jmp', 'ljmp'):
         cx.term = True
         return [n], lambda ref: f_flow.jmp_indirect(cx, cx.ops[0], ref(n))
     raise Unsupported('eip form of ' + m)

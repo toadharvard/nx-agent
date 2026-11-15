@@ -75,29 +75,6 @@ def ret_xfer(cx, ra):
     return 'c->ra=%s; SYNC_OUT; return;' % ra
 
 
-@op('call')
-def h_call(cx, ins):
-    o = cx.ops[0]
-    if o.type == X.X86_OP_IMM:
-        x = call_xfer(cx, o, o.imm & 0xffffffff)
-        cx.em('{ esp-=4; M32(esp)=0x%xu; %s }' % (cx.nxt, x))
-    else:
-        tv = cx.rd(ins, o)
-        x = call_xfer(cx, o, 't')
-        cx.em('{ u32 t=%s; esp-=4; M32(esp)=0x%xu; %s }' % (tv, cx.nxt, x))
-
-
-@op('jmp')
-def h_jmp(cx, ins):
-    o = cx.ops[0]
-    cx.term = True
-    if o.type == X.X86_OP_IMM:
-        cx.em(jump_to(cx, o.imm & 0xffffffff))
-    else:
-        for l in jmp_indirect(cx, o, cx.rd(ins, o)):
-            cx.em(l)
-
-
 def raise_site(cx, code, trap=True, at=None, av=False):
     """a hardware exception at this instruction (R4): fnvl_raise runs the OS dispatch on the guest state and leaves the resume address in c->ra
     (ContinueExecution) with esp restored; the loop then continues there. The instruction's own address is a label of the loop (retry)."""

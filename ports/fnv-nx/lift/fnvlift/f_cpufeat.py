@@ -23,14 +23,15 @@ FEATURES = {
     'BMI1': (7, 'EBX', 3), 'AVX2': (7, 'EBX', 5), 'BMI2': (7, 'EBX', 8), 'ADX': (7, 'EBX', 19), 'SHA': (7, 'EBX', 29),
     '3DNOW': (0x80000001, 'EDX', 31), '3DNOWEXT': (0x80000001, 'EDX', 30), 'SSE4A': (0x80000001, 'ECX', 6), 'XOP': (0x80000001, 'ECX', 11), 'FMA4': (0x80000001, 'ECX', 16),
 }
-# the model's answer, READ from the sources of the reference CPU (rt/fnvl_abi.h FNVL_CPUID1_ECX/EDX; rt/cpumodel.c E1 = leaf 0x80000001 {EAX, EBX, ECX, EDX}); leaf 7 is above the
+# the model's answer, READ from the sources of the reference CPU (generated rt/fnvl_cpuref.h FNVL_CPUID1_ECX/EDX; generated cpumodel_tab.inc E1 = leaf 0x80000001 {EAX, EBX, ECX, EDX}); leaf 7 is above the
 # model's max basic leaf (FNVL_MAX_BASIC), so every leaf-7 feature is absent. No hand-copied constant: a change of the reference CPU changes the gate.
 def _model_bits():
     import os, re
     rt = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')
-    abi = open(os.path.join(rt, 'fnvl_abi.h')).read(); cm = open(os.path.join(rt, 'cpumodel.c')).read()
+    from . import rtgen      # fnvl_cpuref.h is generated (tools/gen_cpuref.py, the recipe stage of rt/build.json), never committed: rtgen runs the same stage
+    g = rtgen.tmpdir(); abi = open(os.path.join(g, 'fnvl_cpuref.h')).read(); cm = open(os.path.join(g, 'cpumodel_tab.inc')).read()
     d = {k: int(re.search(r'#define FNVL_CPUID1_%s\s+(0x[0-9a-fA-F]+)u' % k, abi).group(1), 16) for k in ('ECX', 'EDX')}
-    e1 = [int(x, 0) for x in re.search(r'E1\[4\]\s*=\s*\{([^}]*)\}', cm).group(1).split(',')]
+    e1 = [int(x.strip().rstrip('uU'), 0) for x in re.search(r'E1\[4\]\s*=\s*\{([^}]*)\}', cm).group(1).split(',')]
     return {(1, 'EDX'): d['EDX'], (1, 'ECX'): d['ECX'], (0x80000001, 'EDX'): e1[3], (0x80000001, 'ECX'): e1[2]}
 MODEL_BITS = _model_bits()
 MODEL = frozenset(f for f, (leaf, reg, bit) in FEATURES.items() if MODEL_BITS.get((leaf, reg), 0) >> bit & 1)
