@@ -1764,3 +1764,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 20:27 L6: cand2 has no include_uses/uses. Decision: include_uses is deleted. The canonical form is outputs {INCLUDE: dir} plus uses [{root, output: INCLUDE}], on cand3 (w12L2 c58c0a4f3). cand2 stays frozen, and the render roots enter through cand4. gl4shim moves to outputs {NAME: path in generated[].outputs}. L6 measures against w12L2 plus the new pin and sends the errors to w12.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 20:29 Owner decision (integ a84ad423a): GL keeps its shader-failure branch, and the stub gate accepts it by citation. deko3d still uses reach_violation on sm_link. Rule (A) waits until after the first frame. Relayed to L6 and L6A, whose workers stop the (A) work. w27: the stub gate accepts a branch only with a marker fnvnx-owner-decision:<id> matching a CLAUDE.md record whose class and root cover it (no list in the gate); it goes into cand3 after the typed dispatch gate.
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
