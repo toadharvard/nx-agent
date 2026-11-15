@@ -2,14 +2,14 @@
  *   sm_link_check SHADER_DIR OUT_DIR
  * SHADER_DIR: the *.sdp packages of gamedata/shaders (a declared external; format: u32 magic 100, u32 count, u32 data size, then per entry a
  * 256-byte name, u32 size, the Direct3D bytecode). The stage of an entry is the version token (0xFFFE.... vertex, 0xFFFF.... pixel), never its name.
- * Universe: every unique bytecode (sha256) of every package, translated by the host translator in every variant the front end can key:
- *   VS: VS_COMPLETE x FLAT_COLOR (4);  PS: FLAT_COLOR x {runtime, EPI static none/alpha/fog/both} x NUMERICS_NINE (20).
+ * Universe: every unique bytecode (sha256) of every package, translated by the host translator in every flag set of the variant key: all subsets
+ * of FNVNX_SHADER_KEY_FLAGS within the flag bits the enum of fnvnx_shaders.h defines (SM_ALL_FLAGS below), for both stages.
  * Per stage form it compiles the GLSL on the pinned Mesa (GL 4.5 core, llvmpipe, EGL surfaceless), reads the interface signature two ways (the
  * declarations of the translator's emission grammar; the Mesa program-interface query of a separable single-stage program) and writes one
- * certificate stage/<bytecode sha256>.f<flags>.json. It then links, for every (vertex class, PS signature) with equal FLAT_COLOR, the program the draw path builds (complete variant iff the PS reads a canonical slot the base VS does not write)
+ * certificate stage/<bytecode sha256>.f<flags>.json. It then links, for every (vertex class, PS signature) with equal FLAT_COLOR, the VS variant that fnvnx_dk_vs_needs_complete (fnvnx_dk_layout.h) selects
  * and writes one certificate link/<vs sig>.<ps sig>.f<flat>.json. OUT_DIR/summary.json = {"universe", "red", "details"}. Exit 0 iff red == 0.
  * Output is a function of the inputs: sorted directory order, no times, no paths.
- * Not covered yet (rule text section 3/5): link set L and the draw path's complete bit per pair, FFP stages, the backend's own GLSL rewrite. */
+ * Not covered yet (rule text section 3/5): link set L, FFP stages, the backend's own GLSL rewrite. */
 #define _POSIX_C_SOURCE 200809L
 #include <dirent.h>
 #include <stdint.h>
@@ -19,6 +19,9 @@
 #include "fnvnx_shaders.h"
 #include "fnvnx_dk_layout.h"   /* the product header: fnvnx_dk_vs_needs_complete is called, not copied */
 #include "fnvnx_sha256.h"
+/* The flag bits the enum of fnvnx_shaders.h defines: bits 0..log2(FNVNX_SHADER_FLAT_COLOR). Relies on FLAT_COLOR being the highest bit of the enum (reported: the header should
+ * carry an all-flags macro next to KEY_FLAGS so that a new flag cannot be missed here). */
+#define SM_ALL_FLAGS ((unsigned)((FNVNX_SHADER_FLAT_COLOR << 1) - 1u))
 
 typedef void *EGLDisplay; typedef void *EGLContext; typedef void *EGLConfig; typedef void *EGLSurface; typedef int32_t EGLint; typedef unsigned EGLBoolean;
 EGLDisplay eglGetPlatformDisplay(unsigned platform, void *native, const intptr_t *attribs);
@@ -45,7 +48,7 @@ typedef struct { uint8_t sha[32]; int stage; size_t n; unsigned char *bc; } Form
 typedef struct { char dir; int loc; char name[96]; } Decl;
 typedef struct { uint8_t sig[32]; unsigned shader; int ok; } Sig;                  /* a signature class representative */
 
-static void hex(const uint8_t *b, size_t n, char *o) { static const char d[] = "0123456789abcdef"; for (size_t i = 0; i < n; i++) { o[2 * i] = d[b[i] >> 4]; o[2 * i + 1] = d[b[i] & 15]; } o[2 * n] = 0; }
+#define hex(b, n, o) fnvnx_shader_key_hex((b), (o))   /* every hashed name here is a 32-byte key (bytecode or signature) */
 static int cmp_form(const void *a, const void *b) { return memcmp(((const Form *)a)->sha, ((const Form *)b)->sha, 32); }
 static int cmp_str(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 static uint32_t rd32(const unsigned char *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
@@ -184,19 +187,16 @@ int main(int argc, char **argv) {
     Reps rv[2] = { { 0, 0 }, { 0, 0 } }, rp[2] = { { 0, 0 }, { 0, 0 } };   /* by FLAT_COLOR */
     VFulls vf[2] = { { 0, 0 }, { 0, 0 } };
     long red = 0, stage_certs = 0, link_certs = 0, nvs = 0, nps = 0, refused = 0; unsigned long long mism = 0;
-    static const unsigned pv[4] = { 0, FNVNX_SHADER_VS_COMPLETE, FNVNX_SHADER_FLAT_COLOR, FNVNX_SHADER_VS_COMPLETE | FNVNX_SHADER_FLAT_COLOR };
-    unsigned pp[20]; int npp = 0;
-    { static const unsigned epi[5] = { 0, FNVNX_SHADER_EPI_STATIC, FNVNX_SHADER_EPI_STATIC | FNVNX_SHADER_EPI_ALPHA, FNVNX_SHADER_EPI_STATIC | FNVNX_SHADER_EPI_FOG,
-                                       FNVNX_SHADER_EPI_STATIC | FNVNX_SHADER_EPI_ALPHA | FNVNX_SHADER_EPI_FOG };
-      for (int fl = 0; fl < 2; fl++) for (int e = 0; e < 5; e++) for (int nm = 0; nm < 2; nm++)
-          pp[npp++] = (fl ? FNVNX_SHADER_FLAT_COLOR : 0u) | epi[e] | (nm ? FNVNX_SHADER_NUMERICS_NINE : 0u); }
+    /* The flag sets of the variant key: every subset of the key bits (fnvnx_shaders.h: KEY_FLAGS = complement of NONKEY_FLAGS) among the bits of the enum. */
+    unsigned fsets[SM_ALL_FLAGS + 1]; int nfs = 0;
+    for (unsigned m = 0; m <= SM_ALL_FLAGS; m++) if ((m & FNVNX_SHADER_KEY_FLAGS) == m) fsets[nfs++] = m;
     for (int i = 0; i < F.n; i++) {
         Form *f = &F.forms[i]; char hs[65]; hex(f->sha, 32, hs);
         if (f->stage < 0) { red++; refused++; continue; }
         if (f->stage == 0) nvs++; else nps++;
-        int nv = f->stage == 0 ? 4 : npp; uint8_t bsig[2][32]; Pairs bw[2]; int bok[2] = { 0, 0 };
+        int nv = nfs; uint8_t bsig[SM_ALL_FLAGS + 1][32]; Pairs bw[SM_ALL_FLAGS + 1]; unsigned char bok[SM_ALL_FLAGS + 1]; memset(bok, 0, sizeof bok);
         for (int v = 0; v < nv; v++) {
-            unsigned flags = f->stage == 0 ? pv[v] : pp[v];
+            unsigned flags = fsets[v]; const int fl = (flags & FNVNX_SHADER_FLAT_COLOR) ? 1 : 0;
             fnvnx_shader_opts o; fnvnx_shader_result r; memset(&o, 0, sizeof o); memset(&r, 0, sizeof r);
             o.flags = FNVNX_SHADER_KEEP_GLSL | FNVNX_SHADER_NO_DKSH | flags;
             fnvnx_shader_translate_glsl(f->bc, f->n, &o, &r);
@@ -220,12 +220,13 @@ int main(int argc, char **argv) {
             fclose(c); stage_certs++;
             if (strcmp(status, "ok")) { red++; if (sh) glDeleteShader(sh); }
             else {
-                int fl = (flags & FNVNX_SHADER_FLAT_COLOR) ? 1 : 0; Reps *R = f->stage ? &rp[fl] : &rv[fl];
+                Reps *R = f->stage ? &rp[fl] : &rv[fl];
                 if (add_rep(R, sig, sh, i, flags, &pr)) return 2;
                 if (f->stage == 0) {
                     int cb = (flags & FNVNX_SHADER_VS_COMPLETE) ? 1 : 0;
-                    if (!cb) { memcpy(bsig[fl], sig, 32); bw[fl] = pr; bok[fl] = 1; }
-                    else if (bok[fl] && add_vfull(&vf[fl], bsig[fl], sig, &bw[fl])) return 2;
+                    const unsigned bk = flags & ~(unsigned)FNVNX_SHADER_VS_COMPLETE;   /* the complete variant pairs with the base variant of the same other bits (ascending: base first) */
+                    if (!cb) { memcpy(bsig[bk], sig, 32); bw[bk] = pr; bok[bk] = 1; }
+                    else if (bok[bk] && add_vfull(&vf[fl], bsig[bk], sig, &bw[bk])) return 2;
                 }
                 if (R->r[R->n - 1].shader != sh) glDeleteShader(sh);   /* not the class representative */
             }
