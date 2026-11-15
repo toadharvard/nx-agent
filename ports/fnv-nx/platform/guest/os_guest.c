@@ -34,6 +34,9 @@ void os_exit_process(int code) {
 }
 FNVNX_CITE(os_exit_process, "dm:6");
 
+void os_terminate_process(uint32_t code) { FNVNX_PROCESS_END(code); }
+FNVNX_CITE(os_terminate_process, "dm:12");
+
 unsigned os_cpu_count(void) { return FNVNX_NPROC; }          /* the declared processors (fnvnx/placement.h) */
 uint32_t os_cpu_mask(void) { return FNVNX_APP_CORES; }
 uint32_t os_process_id(void) { return 0x51; }   /* any stable non-zero id */

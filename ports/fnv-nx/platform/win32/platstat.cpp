@@ -84,12 +84,12 @@ extern "C" void fnvnx_wine_fixme(uint32_t id)
     fnvnx_plat_note(FNVNX_NOTE_UNIMPL, "wine-fixme", FNVNX_NOTE_RA, d);
 }
 
-/* The end of a violation: the hostapi `exit` slot, an indirect call that does not return (hostapi.h: exit "does not return"). Both violation exits of reach.h
- * end here and nowhere else: not through os_exit_process, whose body is a libc exit that runs handlers. */
+/* The end of a violation: the same body as os_terminate_process (FNVNX_PROCESS_END, hostapi.h: the `exit` slot, an indirect call that does not
+ * return), expanded here so that the definitions below end in that indirect call themselves (objstub exit_tail). Not os_exit_process: its body is a
+ * libc exit that runs handlers. */
 [[noreturn]] static inline __attribute__((always_inline)) void violation_exit(uint32_t code)
 {
-    FNVNX_HCALL1(exit, code);
-    __builtin_unreachable();
+    FNVNX_PROCESS_END(code);
 }
 
 /* The one exit of the branches the reachability gate proves unreachable (contract/include/fnvnx/reach.h has the contract). Reached only

@@ -234,7 +234,7 @@ extern "C" BOOL TerminateProcess(HANDLE h, UINT code)
 {
     if (h == W32_PSEUDO_PROCESS) {
         W32Log().s("TerminateProcess(").u((unsigned)code).s(")").emit();
-        os_exit_process((int)code);
+        os_terminate_process((uint32_t)code);   /* every thread ends at once: no handler, no DLL detach, no flush (Wine 9.0 NtTerminateProcess) */
     }
     SetLastError(ERROR_INVALID_HANDLE);   /* no other processes */
     return FALSE;
