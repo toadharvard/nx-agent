@@ -617,3 +617,9 @@ Paused: w3b, w4, farm; no other work.
 - 00:48Z w6 reports w16c1 done.
     - Next, the path item: merge w16c1 into w6-root 34ce66f16, then render/d3d9 check and build cold/warm.
     - Then audit rows #7, #13, #15-#17.
+- 00:49Z L6A census.
+    - build_guest.sh is deleted with the d3d9 root build (w6).
+    - The gl4/dk shader literals (the cause of the FLAT defect) are replaced by names.
+        - nxgpu4_shader.h includes fnvnx_shaders.h, lib/sha256 and fnvnx_dk_layout.h for the variant bits, the key size and the slots. No restated constants.
+        - MAX code size and the link-pair count get their one home in nxgpu4_shader.h.
+        - L6 reviews the diff.
