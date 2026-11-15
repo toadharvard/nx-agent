@@ -572,3 +572,4 @@ After the first frame:
   - Fixed at plugins 6d9f72b18 (toolchain tree 33fbb22b): the line is now stated as a fact, and no record was added. Across all of toolchain/, 0 assum|допущ occurrences lack an ASM id.
   - The farm rebuilds stage 2 only (K1 reused) and sends the pin to L1 and w15. plugins-cand3 takes the same fix (w3).
   - HOST1 on L5 section_guest.c:12 stays with L5.
+- 2026-11-15 21:25Z: DISPATCH1-DEF (asked for by L3a, owner w2, plugins-cand3): a shapeless definition gets a quiet descriptor only when it is static and its address is never taken, by GCC's address-taken fact. External linkage or a taken address makes it DISPATCH1. The hunk is ported from L3a 37d4e27df/b0198f906. It closes test_defdisp's 2 red cases on L3a base3 d9d208c61, with the cand3 build batch.
