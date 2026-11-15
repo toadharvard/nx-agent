@@ -57,3 +57,4 @@ def closure(products, runtime, archives, dynamic, linker_defined):
                 add(label, (d, s, w), False)
                 changed = True
     return {n: sorted(r) for n, r in sorted(refs.items()) if n not in defined}
+

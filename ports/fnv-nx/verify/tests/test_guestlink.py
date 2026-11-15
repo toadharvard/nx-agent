@@ -49,6 +49,8 @@ items, finds = G.judge({"dirs": ["d"], "names": ["c"], "startfiles": ["crti.o"],
                        {"dirs": ["d"], "names": ["c"], "startfiles": ["crti.o", "crt0.o"], "endfiles": ["e.o"]})
 check("a profile that lists crt0.o when the derivation excludes it is red (startfiles finding)", len(finds) == 1 and finds[0].startswith("startfiles:"), finds)
 
+check("outside_files: every .o of the link under the runtime external (the program's /tmp/cc*.o excepted): none", recipe.outside_files(TEXT, AT) == [], recipe.outside_files(TEXT, AT))
+check("outside_files: a start file of another place is reported", recipe.outside_files(TEXT.replace(AT + "/bin/../lib/gcc/aarch64-none-elf/15.2.0/../../../../aarch64-none-elf/lib/ilp32/pic/crt0.o", "/usr/lib/crt1.o"), AT) == ["/usr/lib/crt1.o"], "")
 ML = "ilp32/wchar16/schar/pic"
 check("in_multilib: a crtbegin in the multilib directory the flags select is accepted",
       recipe.in_multilib(["lib/gcc/aarch64-none-elf/13.3.0/ilp32/wchar16/schar/pic/crtbegin.o"], ML) == [], "")

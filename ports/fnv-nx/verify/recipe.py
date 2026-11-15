@@ -320,6 +320,14 @@ def merge_inputs(base, extra, store, ws):
     return sorted(out, key=lambda i: i["at"])
 
 
+def outside_files(text, at):
+    """The `.o` files of the driver's link command TEXT that lie outside the runtime external mounted at AT, the program's own object (the driver's
+    temporary /tmp/cc*.o) excepted: a start or end file the pinned runtime's driver names from elsewhere. Empty when every one is the runtime's."""
+    line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]
+    toks = [posixpath.normpath(t.strip('"')) for t in line.split() if t.strip('"').endswith(".o") and t.strip('"').startswith("/")]
+    return sorted(t for t in toks if not t.startswith(at + "/") and not re.fullmatch(r"/tmp/cc[^/]*\.o", t))
+
+
 def entry_object(objs, entry):
     """The one-process-start rule on the objects OBJS ({path: defined symbols}) of the runtime's start files: when the link's entry ENTRY is not the
     driver's default `_start`, the object that defines `_start` is the runtime's own process start, which the link does not use (the product defines
@@ -1571,6 +1579,10 @@ class Job:
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
                "inputs": merge_inputs(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}], sysin, self.store, ws)}
+        # the reference link (run only to read a failed link's linker-defined names): the same ld, flags, script, inputs, start files and libraries with
+        # unresolved symbols ignored; the names its output defines that no input defines are the ones the pinned ld synthesises for this link
+        self.ref_doc = dict(doc, stage="ldref:" + self.root, argv=[ld] + LD_KIND[kind] + dl + lk["flags"] + sc + vs + ["--unresolved-symbols=ignore-all", "-o", "/out/ref.elf"]
+                            + pre + search + ["--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post)
         return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
 
     def host_startfiles(self, ws, kind):
@@ -1620,8 +1632,22 @@ class Job:
         dyn = set(loader_defs or ())
         for p in f["system"]:
             dyn |= {n for n, _, _, shndx, _ in ldcheck_syms(rd(os.path.realpath(p)), 11) if shndx != 0}
-        u = undefset.closure(prod, rt, arch, dyn, undefset.script_defined(f["script"]))
+        ld_defs = undefset.script_defined(f["script"]) | self.ld_synthesised(rt, arch)
+        u = undefset.closure(prod, rt, arch, dyn, ld_defs)
         return [{"symbol": k, "referencers": v} for k, v in u.items()]
+
+    def ld_synthesised(self, rt, arch):
+        """The names the pinned ld defines itself for this link: the symbol table of the reference link's output (an empty product, same profile), minus every
+        name a start file or library member of the link defines. Read from the linker's output, never listed by hand; a reference link that fails gives
+        none (the record's finding names it)."""
+        try:
+            res = self.stage(self.ref_doc)[1]
+        except BuildRed as e:
+            self.ref_failure = e.args[0]
+            return set()
+        d = open(cas._obj(self.store, cas.manifest(res["outputs"]["/out"], self.store)["entries"]["ref.elf"]), "rb").read()
+        own = set().union(*(v[0] for v in rt.values()), *(a[1] for a in arch)) if (rt or arch) else set()
+        return {n for n, _, _, shndx, typ in ldcheck_syms(d, 2) if shndx != 0 and typ not in (3, 4)} - own
 
     def link_probe(self, ws):
         """Stage `drv:<root>`: the guest runtime's C++ driver (pin `runtime_driver`, inside the pinned runtime external) run with the guest semantic flags
@@ -1925,6 +1951,8 @@ def build(repo, root, store, out, jobs=4, ext=None, link=True):
                 try:
                     und = j.link_undefined(groups, loader_defs)
                     fu["undefined"] = und
+                    if getattr(j, "ref_failure", None):
+                        fu["findings"] = ["reference link (names ld defines itself) failed at %s: %s" % (j.ref_failure["stage"], " | ".join(j.ref_failure["stderr"])[:300])]
                     if not und and r.args[0].get("exit"):
                         fu["findings"] = ["static closure disagrees with ld: ld exit %s with an empty static undefined set (the failure is not an undefined reference the symbol tables show)" % r.args[0]["exit"]]
                 except (OSError, ValueError, struct.error) as e:

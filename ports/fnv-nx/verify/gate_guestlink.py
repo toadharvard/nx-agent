@@ -56,6 +56,9 @@ def derive(repo, cache):
     with tempfile.TemporaryDirectory(prefix="guestlink-") as ws:
         text, at = j.link_probe(ws)
         raw = recipe.parse_driver_link(text, at)
+        out = recipe.outside_files(text, at)
+        if out:
+            raise ValueError("start or end files of the driver's link outside the pinned runtime external: %s" % ", ".join(out))
         stray = recipe.in_multilib([x for k in ("startfiles", "endfiles") for x in raw[k]] + raw["dirs"][:2], j.multidir)
         if stray:
             raise ValueError("derived files outside the multilib %r that flags.semantics selects: %s" % (j.multidir, ", ".join(stray)))
