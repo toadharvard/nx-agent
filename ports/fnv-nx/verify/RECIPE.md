@@ -83,9 +83,9 @@ CC stage (`PLUGIN_OUT`); the report (`fnvnx-f2i/2`: sites, rewritten, ranged, he
 Rule: a root that uses an attribute declares the plugin that registers it (guest roots compile with `-Werror=attributes`).
 Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
 the recipe is the only way they are built). `recipe.py` is the ONLY declaration of what it fixes for a plugin: its source (`PLUGIN_SOURCES`, `<dir>/<name>.cc`, a tracked file of the tool root), its inputs
-(`PLUGIN_INPUTS`: the tracked files the source includes) and its arguments (`plugin_args(cxx_origin)`, which become `-fplugin-arg-<name>-<key>[=<value>]`). An entry of a
+(derived by `recipe.plugin_inputs`: the tracked files the source includes by `#include "..."`, transitively, inside the admitted root that holds the source; a quoted include of a tracked file of another root is a check error; there is no list) and its arguments (`plugin_args(cxx_origin)`, which become `-fplugin-arg-<name>-<key>[=<value>]`). An entry of a
 root's `plugins` is `{"name": PLUGIN}` and nothing else, in the order of `PLUGIN_SOURCES`; the stage keys and mounts take source, inputs and arguments from recipe.py
-(`recipe.plugin_decls`). An entry that carries `source`, `inputs` or `args` is an error ("plugin X: inputs are fixed by recipe.py (PLUGIN_INPUTS)"), never compared; a name outside
+(`recipe.plugin_decls`). An entry that carries `source`, `inputs` or `args` is an error ("plugin X: inputs are fixed by recipe.py (plugin_inputs, derived from the source)"), never compared; a name outside
 `PLUGIN_SOURCES` is an error. So a change of an input of a plugin (for example `f2i_builtins.inc` of `fnvnx_ftoi`) changes the key of every root that loads it and no build.json needs editing. The host driver under `/usr/bin` that builds
 them is `recipe.PLUGIN_CXX`, DERIVED from env.json (the one pinned package `g++-N-x86-64-linux-gnu` provides `x86_64-linux-gnu-g++-N`; the bare `g++-N` prints no path for `as`/`ld`), the GCC version of `compiler.cxx`. A `plugin_cxx` in a build.json is red: no hand-typed compiler name.
 - Stage `plugin:<name>` (sandbox, class build): `recipe.PLUGIN_CXX -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
@@ -118,6 +118,7 @@ without the pin file has no valid guest root. The plugins are built against this
 What an external compiler names outside its tree is declared as inputs at their own paths, from the compiler's own answers: the assembler and linker it is
 configured with (`-print-prog-name=as|ld`) and the header directories of its search list, symlink targets included (the distribution's cross binutils and
 headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
+**PP inputs are exactly what the sandbox can read** (`recipe.Job.pp_subtrees`, `pp_uses`): the compiler's external whole; any other external only by the subtree an `include` entry or a flag path names (`-I /ext/x/inc` mounts that directory, tree id over the subtree; a path equal to the external's root is the whole external; `-include FILE` the file); of the `uses` outputs only the `include_uses` ones and those a flag path names. A change outside these re-keys no PP stage, and a PP that read more fails (the path is not mounted), it never builds stale. `tests/test_ppkeys.py`.
 
 The pin file also names the guest's **runtime** (`"runtime": {EXT_KEYS}`, fnv-nx-build `tools/fnvnx-a64-msvcmodel`: gcc 15.2.0 + newlib built with the same
 msvcmodel.patch, target `aarch64-none-elf`, multilibs `.`, `pic`, `ilp32`, `ilp32/pic`; its libc, libm, libstdc++ and headers). A guest recipe may declare it
@@ -300,6 +301,14 @@ a root without variants keeps its keys), its objects are stored at `GATE_CACHE/o
 `root: "root@NAME"`. The gates that quantify over product roots (`gate_build.product_roots`)
 quantify over the pairs: build, determinism, objstub, linkstrict, argorder, contract's per-root gates.
 
+### Stage timing (`@time`, `recipe timing`)
+Every stage that executes (a miss, or a cold rerun) writes a sidecar `store/<key>.time` (`{"format": "fnvnx-stage-time/1", wall_s, cpu_s}`, the child's wait4 rusage and
+wall clock). It is a measurement: not part of the key, not in `keys/<key>/result.json`, never compared; `store-merge` copies a sidecar the destination lacks and never
+goes red on a differing one. A hit writes none. A variant `"time": {"flags_add": {"c": ["-ftime-report"], "cxx": ["-ftime-report"]}}` (a per-root flag class: it changes
+no object) makes the CC stage print GCC's pass table to stderr, kept in the record as the **TIMEREPORT** (a `-ftime-report` stage's stderr is not compared between two runs).
+`recipe.py timing --root R[@variant] --store S` builds R into a temporary directory and prints `{kinds, units, passes, untimed}`: sidecars summed per stage kind (`pp`, `cc`,
+...) and per unit, the TIMEREPORT summed per pass, and the stages that have no sidecar (hits only). Build with `@time` into a fresh store to time every pass.
+
 ## Include
 `include` is the unit's include path in order. A repo directory of it that lies in another admitted product root P (with a recipe for the unit's target) also brings
 P's own repo directories of `include`, transitively, after the consumer's own and each once (`recipe.include_closure`): a header that P ships names its dependencies once,
@@ -328,6 +337,16 @@ generated headers of another root (an `include` entry inside another root's gene
 of the declaration: a tool root with a recipe, such as `bridgefacts`, which the consumers take through `uses` (derived outputs) or by path
 (`inputs` of a generate stage, `{root, path}` in a gate's declaration file; tracked files of an admitted `tool` root). A root that consumes a
 declaration never also owns its inputs. A root cycle stays red; this rule is what removes the cycle, and a second copy of an input is deleted.
+
+### Directory outputs
+
+A `generated` step may also declare `"dirs": [PATH, ...]`: root-relative directories it writes as a whole (the lifted pack: thousands of files). The
+launcher creates each directory under `/out` (listed as `dir:PATH` in its first argument); the stage's files must be exactly the step's `outputs` plus
+files at any depth inside a declared directory, and each directory must hold at least one file (anything else is red, naming the stray or missing
+paths). The directory is ingested into the store by content and copied whole into the root's view. A directory is named like a file output by the
+consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` mounts it at `/stage/DIR`, a root's `outputs` map may name it, and another
+root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
+red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
 
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
@@ -445,3 +464,18 @@ The same rule covers every other write into `GATE_CACHE`, the directory form and
 Test: `tests/test_gate_publish.py` (two processes build one root on one cache at once: both green, one published dir, no temporary name left, the same store content as one sequential build).
 
 **Gate items are results of the same store.** `gate_build.memo(cache, gate, key_doc, make, keep)` keeps one item of a gate as `GATE_CACHE/memo/<gate>/<key>.json`, published by `cas.publish_file`; the key is the sha256 of `key_doc`, which holds everything the item reads and nothing else: the sha256 of each input file, `gate_build.tool_digest` of the tool's sources, the declared environment (env.json). A hit reads the file and runs nothing; a miss runs `make()`; a value `keep` refuses (a result that may be a transient failure: a red determinism check) is not stored. The items: `abi` (one root's C++ objects, a set: the ODR and layout joins read all of them), `fpexact` (one object: its sha256, its f2i report's sha256, unit, tool and library versions), `determinism` (one root: its stage keys, objects and ELF, the digest of the code that executes and stores stages), `exepin` (the whole-program flow over the universe: the sha256 of every source). A gate without a cache (`GATE_CACHE` unset) makes every item. Test: `tests/test_gate_memo.py`.
+
+## Guest compile hermeticity
+A guest root's compile reads the pinned runtime's own headers. The compiler's search list is derived from its own answers (`unitstage.gcc_set`); a directory of it outside every external of the recipe, by its real path too, makes the tool runtime red (`recipe.foreign_search_dirs`, stage `toolrt`) instead of being mounted. So the headers of a guest compile are the external's (`verify/guest_compiler.json`); the sandbox holds only declared mounts, so the PP depfile can list nothing else.
+
+## Shards and store merge
+
+A cold build of a large root is split over farms by one rule, with no second build path.
+- `recipe build --root R --shard i/N` (N <= 16, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
+  key is the PP stage key on the whole declared trees (`unitstage.Build.first_key`; a `.s` unit: its one stage), computed before anything runs, so every
+  shard of one checkout agrees. The recipe asserts from the unit list that the shards are disjoint and together the unit set (`shard_partition`).
+  All stages of a unit run in its shard. Root-level stages (tests, link, link tables, gates) do not run in a shard build; its `objects.json` has `shard`.
+- `recipe store-merge SRC [--store DST]` (DST defaults to `$GATE_CACHE/store`) imports the objects, trees, stage documents and key records of the store SRC
+  by content. A name in both must hold the same bytes, else red `store-merge: key <k> differs` and DST is unchanged. It is the only import path.
+- The link is the normal `recipe build --root R` on the merged store: every unit is a hit; a missing unit builds.
+Tests: `tests/test_shard.py` (partition, merge, forged record, no compiler) and the `shard_merge` scenario of `tests/test_recipe.py` (toy root of 10 units).

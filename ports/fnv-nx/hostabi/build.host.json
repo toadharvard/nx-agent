@@ -1,0 +1,26 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-Wall",
+   "-Werror"
+  ],
+  "cxx": [
+   "-Wall",
+   "-Werror"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/hostabi/include"
+ ],
+ "units": "all",
+ "link": null,
+ "outputs": {
+  "INCLUDE": "include"
+ }
+}

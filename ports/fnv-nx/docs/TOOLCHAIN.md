@@ -80,7 +80,7 @@ default.)
 `toolchain/include/fnvnx/hostapi.h`.** The ELF linker cannot mix ELF32 and ELF64 objects, so the halves are two
 modules in one process and one address space, both AArch64 with the same AAPCS64 registers and stack. The host
 passes a table of LP64 function addresses (`uint64_t`, all < 4 GiB because the space is 32-bit) and the guest
-calls them through ILP32 function pointers (`fnvnx_hcall0..3`).
+calls them through ILP32 function pointers (`FNVNX_HCALL0..5`: macros over the slot lvalue, HOST1).
 
 Rules (header comment): every argument and result is `uint64_t` (addresses zero-extended, never `void *`,
 `long` or `size_t`); shared structs have only fixed-width fields; no struct-by-value, varargs, exceptions or

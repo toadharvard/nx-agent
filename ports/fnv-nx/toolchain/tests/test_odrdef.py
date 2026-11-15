@@ -7,6 +7,7 @@ function has a row; a template instantiated in two units whose dependent call re
 No network, no game data.  Run: python3 -I <this file> from the checkout root."""
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -40,6 +41,24 @@ def rows(obj):
     return out
 
 
+def raw_unit(td, so):
+    """the unit of the farm's libstdc++ failure (a header from a -I directory), compiled raw by the pinned driver: refused naming the cause; with -save-temps: builds"""
+    drv = pb.driver()
+    inc = os.path.join(td, 'rawinc')
+    os.makedirs(inc)
+    open(os.path.join(inc, 'rh.h'), 'w').write('inline int rcmp(int a) { return a < 3; }\n')
+    src = os.path.join(td, 'raw.cc')
+    open(src, 'w').write('#include <rh.h>\nint rf(int x) { return rcmp(x); }\nint (*rp)(int) = rcmp;\n')
+    base = [drv, '-c', '-O2', '-I' + inc] + sum((['-fplugin=' + p] for p in so), []) + [src]
+    r = subprocess.run(base + ['-o', os.path.join(td, 'raw.o')], capture_output=True, text=True, cwd=td)
+    check('a raw unit is refused', r.returncode != 0, r.stderr[:600])
+    check('the refusal names the cause (not preprocessed), not "could not be lexed again"', 'not preprocessed' in r.stderr and 'lexed again' not in r.stderr, r.stderr[:600])
+    r = subprocess.run(base + ['-save-temps=obj', '-o', os.path.join(td, 'raw2.o')], capture_output=True, text=True, cwd=td)
+    check('the same unit under -save-temps builds', r.returncode == 0, r.stderr[:600])
+    row = [l for l in pb.section(os.path.join(td, 'raw2.o'), '.fnvnx.odrdef').splitlines() if l.startswith('_Z4rcmpi')]
+    check('the -save-temps object has the definition row of the header function', len(row) == 1, row)
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-odrdef-')
     try:
@@ -55,6 +74,13 @@ def main():
         PK = ('template <class... A> int pk(A... a) { return sizeof...(A); }\ntemplate <int... N> int pn() { return sizeof...(N); }\n'
               'int (*p1)(int, double) = pk<int, double>;\nint (*p2)() = pn<1, 2, 3>;\nint (*p4)() = pn<>;\n')
         pk = build_unit(td, so, 'pk', PK, O2)   # an argument pack is a template argument that no mangling accepts: it is the I...E of its elements
+        # a variably-modified type (a local array with a run-time bound: a SAVE_EXPR in its domain) has no mangled name; the farm's libstdc++ failed on `mangling save_expr`
+        # in the instance std::__floating_to_chars_precision<double>. A template with such a local array, a pointer to it, decltype of an expression, a static local array and
+        # __builtin_unreachable at the end, instantiated for two types: the unit builds and each instance has its row
+        VM = ('template <class T> int vf(int n, T v)\n{\n  T buf[n];\n  T (*pbuf)[n] = &buf;\n  decltype(v + v) w = v;\n  static const T tab[sizeof(T) * 2 + 1] = {};\n'
+              '  for (int i = 0; i < n; i++) buf[i] = tab[i % 2] + w;\n  if (n > 100) return (*pbuf)[0] == v;\n  if (n > 50) __builtin_unreachable();\n  return 1;\n}\n'
+              'int (*pv1)(int, double) = vf<double>;\nint (*pv2)(int, int) = vf<int>;\n')
+        vm = build_unit(td, so, 'vm', VM, O2)
         # default arguments are part of the call, so of the bindings: the same call with a different default expression is a different row
         DA = 'int k1(); int k2();\nint h(int = {k});\n'
         INLH = 'inline int fh() { return h(); }\nint (*ph)() = fh;\n'
@@ -67,7 +93,10 @@ def main():
               'dsh::BF *mk0() { return new dsh::Conc; }\ndsh::BF *mk1() { return new dsh::Stage; }\ndsh::BF *mk2() { return new dsh::Def; }\ndsh::BF *mk3() { return new dsh::Over; }\n'
               'void del(dsh::BF *p) { delete p; }\n')
         dt = build_unit(td, so, 'dt', DT, O0)
-        if not all((a, b, c, d, ta, tb, pk, da, db, ca, dt)):
+        # ODRDEF-PP: the farm's runtime build compiles raw sources with the driver. A raw unit (include chain and macros only parse_in holds) is refused with its
+        # cause; the same unit through the driver's two steps (-save-temps) builds, and a unit with a -I header through the recipe's PP and CC stages builds.
+        raw_unit(td, so)
+        if not all((a, b, c, d, ta, tb, pk, vm, da, db, ca, dt)):
             return check.done()
         ra, rb, rc, rd, rta, rtb = map(rows, (a, b, c, d, ta, tb))
         F = '_Z1fi'
@@ -80,6 +109,8 @@ def main():
         check('an instantiation: the template argument is mangled', rta[T][2] == '1S', rta[T])
         check('an instantiation: the template definition\'s hash is equal in both units', rta[T][1] == rtb[T][1], (rta[T], rtb[T]))
         check('a dependent call resolved to a different declaration at instantiation: different rows', rta[T][3] != rtb[T][3], (rta[T], rtb[T]))
+        rvm = [k for k in rows(vm) if k.startswith('_Z2vf')]
+        check('a variably-modified local array: both instances of the template have a definition row', len(rvm) == 2, rvm)
         rpk = rows(pk)
         targs = sorted(r[2] for r in rpk.values())
         check('argument packs: pk<int, double> is IidE, pn<1, 2, 3> is ILi1ELi2ELi3EE, pn<> is IE', targs == sorted(['ILi1ELi2ELi3EE', 'IE', 'IidE']), targs)

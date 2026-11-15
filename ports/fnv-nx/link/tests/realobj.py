@@ -72,7 +72,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     if plugins is not None:
         raise ValueError('a guest root loads the full plugin set its front end can load (RECIPE.md gate rule): a subset is not a product configuration')
     plugs = [{'name': n} for n in recipe.PLUGIN_SOURCES if n in names]   # a root entry is {"name": PLUGIN}: source, inputs and arguments are recipe.py's alone (plugin_errors refuses them in a root)
-    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
+    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': recipe.pin_drivers()[0], 'cxx': recipe.pin_drivers()[1]}, 'external': [ext],
            'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.SDD_DEFINE] + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
            'plugins': plugs}
     if not plugs:
@@ -80,7 +80,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     repo = os.path.join(base, 'repo')
     os.makedirs(repo)
     _git(repo, 'init', '-q')
-    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v] + [recipe.ANALYSIS_PLUGIN[1]]:   # the analysis (objstub) plugin is built for every root with units
+    for n in recipe.plugin_files(REAL) + [recipe.ANALYSIS_PLUGIN[1]]:   # the analysis (objstub) plugin is built for every root with units
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     store = _store()

@@ -84,7 +84,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     flags = required + [f for f in flags if f not in required]
     plugins = [('fnvnx_' + n, a) for n, a in plugins]
     names = [n for n, _ in plugins]
-    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.PLUGIN_INPUTS.get(n, [])} | {recipe.ANALYSIS_PLUGIN[1]}):   # the objstub plugin is built for every root with units
+    for rel in sorted({source_of(n) for n in names} | {i for n in names for i in recipe.plugin_inputs(source_of(n), recipe.tracked(REAL), recipe.load_admit(REAL), REAL)} | {recipe.ANALYSIS_PLUGIN[1]}):   # the objstub plugin is built for every root with units
         os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, rel), os.path.join(repo, rel))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
@@ -98,7 +98,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     gen = ('import os\nfor n, t in %r.items():\n    os.makedirs(os.path.dirname("/out/" + n), exist_ok=True)\n'
            '    open("/out/" + n, "w").write(t)\n') % {'gen/' + k: v for k, v in fixtures.items()}
     _w(repo, T + 'gen/lift.py', gen)
-    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']},
+    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': recipe.pin_drivers()[0], 'cxx': recipe.pin_drivers()[1]},
            'flags': {'c': list(flags), 'cxx': list(flags), 'asm': []}, 'include': list(EXTRA['include']), 'units': 'all', 'external': [ext] + list(EXTRA['external']),
            }
     if variant:   # the recipe's declared variant: the root's flags plus its own parameters (verify/recipe.py GCSTRESS_*), built as ROOT@VARIANT
@@ -127,6 +127,13 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
 
 def _trivial(tmp, names):
     return _recipe(tmp, [], {'t.cpp': 'int t(int x) { return x; }\n'}, PRODUCT_FLAGS)
+
+
+def driver():
+    """-> the pinned guest C++ driver of the recipe's fetched external (the compiler the stages run), for the one test of a raw unit (test_odrdef: the recipe has no raw
+    stage, every unit it builds is preprocessed first); the external is in STORE once a recipe build ran"""
+    pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
+    return os.path.join(STORE, 'external', pin['external']['commit'] + '.co', recipe.pin_drivers()[1])
 
 
 def build(name, tmp, source=None):

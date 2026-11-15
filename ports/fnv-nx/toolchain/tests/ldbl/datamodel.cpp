@@ -35,7 +35,13 @@ DM("S13", sizeof(SD) == 16 && offsetof(SD, d) == 8 && sizeof(SQ) == 16 && offset
           && alignof(SA) == 8 && sizeof(SA) == 24 && offsetof(SA, sd) == 8);
 enum E0 { E0a, E0b };
 enum E1 { E1a = -1, E1b };
-DM("S14", Same<__underlying_type(E0), int>::v && Same<__underlying_type(E1), int>::v && sizeof(E0) == 4 && Same<decltype(+E0a), int>::v && (E0)-1 < 0);
+enum E3 { E3a = 0xffff0000 };                       // outside int: the underlying type stays int, the value is the 32-bit pattern as int
+enum E4 { E4a = 0x80000000 };
+enum EN5 { EN5a = (1u << 31) | 1u, EN5b = ~0u, EN5c = 0x7fffffff + 1u };   // enumerators written as expressions
+DM("S14", Same<__underlying_type(E0), int>::v && Same<__underlying_type(E1), int>::v && sizeof(E0) == 4 && Same<decltype(+E0a), int>::v && (E0)-1 < 0
+          && Same<__underlying_type(E3), int>::v && sizeof(E3) == 4 && Same<decltype(+E3a), int>::v && E3a == -65536 && E3a < 0 && (int)E3a == -65536
+          && Same<__underlying_type(E4), int>::v && sizeof(E4) == 4 && E4a == (-2147483647 - 1) && E4a < 0
+          && Same<__underlying_type(EN5), int>::v && sizeof(EN5) == 4 && EN5a == -2147483647 && EN5b == -1 && EN5c == (-2147483647 - 1));
 enum E2 : unsigned char { E2a };
 DM("S15", sizeof(E2) == 1 && Same<__underlying_type(E2), unsigned char>::v);   // a fixed underlying type is as declared
 struct B1 { char a : 3; int b : 3; };

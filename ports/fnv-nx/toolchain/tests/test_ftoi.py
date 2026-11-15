@@ -48,6 +48,18 @@ def comp(td, name, text, native=False, plugins=()):
 NEON = open(os.path.join(HERE, 'ftoi_values', 'fixture_neon.cpp')).read()   # the class's fixture, also the boot machine's value test (ftoi_values/gen_values.py)
 
 
+def _ld_binary64():
+    """the expectation for a long double conversion comes from the declared data model (toolchain/msvcmodel/DATAMODEL.json, row S09), not from a constant"""
+    with open(os.path.join(HERE, '..', 'msvcmodel', 'DATAMODEL.json')) as f:
+        rows = json.load(f)
+    rows = rows if isinstance(rows, list) else rows['rows']
+    row = next(r for r in rows if r['id'] == 'S09')
+    return 'binary64' in row['property']
+
+
+LD_BINARY64 = _ld_binary64()
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-ftoi-')
     try:
@@ -77,6 +89,9 @@ def main():
                 ('ld', 'long long ld(long double x) { return (long long)x; }\n', ('long double', 'long long')),
                 ('i128', '__int128 w(double d) { return (__int128)d; }\n', ('double', '__int128'))):
             r, _, _ = comp(td, 'wide_' + name, text, native=True)
+            if name == 'ld' and LD_BINARY64:   # DATAMODEL S09: long double is binary64 (MLIB1), so a long double conversion is a double conversion and the rewrite covers it
+                check('native: a long double conversion is a double conversion (DATAMODEL S09: binary64) and builds', r.returncode == 0, r.stderr[-1500:])
+                continue
             check('native: a conversion the rewrite does not cover (%s) is a build error naming both types' % name,
                   r.returncode != 0 and 'FTOI' in r.stderr and all(t in r.stderr for t in tys), r.stderr[-1500:])
         # --- every float -> integer conversion C does not fully specify: x86's answer in range, the integer indefinite out of it (RULE in the plugin)

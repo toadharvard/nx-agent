@@ -17,7 +17,8 @@ int fnvnx_thread_create(struct __pthread_t **out, void *(*fn)(void *), void *arg
                         int cpu);                  /* 0 or errno; not started */
 int fnvnx_thread_start(struct __pthread_t *t);
 void *fnvnx_thread_join(struct __pthread_t *t);    /* waits, frees the record, returns fn's result */
-void fnvnx_thread_exit(void *ret) __attribute__((noreturn));
+void fnvnx_thread_exit(void *ret) __attribute__((noreturn, nothrow));
+void __syscall_thread_exit(void *value) __attribute__((noreturn, nothrow));   /* newlib's thread-exit syscall: ends in fnvnx_thread_exit */
 uint32_t fnvnx_thread_id(void);                    /* 1 = main thread */
 void fnvnx_yield(void);
 

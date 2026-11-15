@@ -1,4 +1,4 @@
-/* decltype.c - the `.fnvnx.decltype` section of a C unit: one line per external symbol; each symbol's type is spelled in the grammar of
+/* decltype.c - the `.fnvnx.decltype` section of a C unit: one line per external symbol the object has (defined or referenced: RULE SYMSET); each symbol's type is spelled in the grammar of
    link/ctypes_compat.py (the expected strings are in test_layout.py). */
 struct S { int x; char *y; };
 struct S v;
@@ -25,3 +25,6 @@ const struct S cs;
 int caller(void) { return implicit_fn(1) + g(1, 2) + h(); }   /* implicit_fn: declared by the call only */
 static int internal_only;                  /* internal linkage: no line */
 int use(void) { return internal_only; }
+int use2(void) { return au[0] + (il != 0); }       /* au, il: declared above, referenced here (a row); never_used: declared only (no symbol in the object, no row) */
+extern int never_used(int);
+extern struct S never_used_obj;

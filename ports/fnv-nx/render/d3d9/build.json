@@ -1,10 +1,6 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-linux-gnu-gcc",
-  "cxx": "bin/aarch64-linux-gnu-g++"
- },
+ "profile": "guest",
  "flags": {
   "c": [
    "-O2",
@@ -25,7 +21,7 @@
  },
  "include": [
   "ports/fnv-nx/shim/include",
-  "ports/fnv-nx/render/nxgpu",
+  "ports/fnv-nx/render/nxgpu/include",
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/render/d3d9/gen",
@@ -133,45 +129,35 @@
    ]
   }
  ],
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
-  }
- ],
- "external": [
-  {
-   "name": "gcc-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
-   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
-   "at": "/ext/gcc"
-  }
- ],
  "link": null,
  "outputs": {
   "ident_handheld.bin": "gen/ident_handheld.bin",
   "ident_docked.bin": "gen/ident_docked.bin"
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/nxgpu",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/shaders/translator",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/lib/sha256",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/pair",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/render/smscan",
+   "output": "INCLUDE"
+  }
+ ]
 }

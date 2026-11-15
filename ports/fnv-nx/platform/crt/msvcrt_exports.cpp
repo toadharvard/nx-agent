@@ -27,12 +27,12 @@
 
 #include "fnvnx_iobuf.h"
 #include "fnvnx_msvcrt.h"
+#include "fnvnx_cxx.h"
 
 extern "C" {
 struct fnvnx_ioinfo;
 extern struct fnvnx_ioinfo *__pioinfo[64];   /* iob.c */
 extern struct fnvnx_ioinfo __badioinfo;
-void ExitProcess(UINT);
 void GetLocalTime(LPSYSTEMTIME);
 }
 
@@ -46,6 +46,19 @@ extern "C" void *c_malloc(size_t n)
     if (!p)
         errno = ENOMEM;
     return p;
+}
+/* ??2@YAPAXI@Z, operator new(size_t): Wine 9.0 dlls/msvcrt/heap.c operator_new (_MSVCR_VER >= 80):
+ *   do { retval = msvcrt_heap_alloc(0, size); if (retval) return retval; } while (_callnewh(size)); throw_bad_alloc();
+ * _callnewh calls MSVCRT_new_handler, whose only writer is _set_new_handler. That function (and set_new_handler,
+ * _query_new_handler) is not in the import closure of the exe and modules (msvcrt_names.tsv), so the handler is NULL for
+ * the whole run and _callnewh returns 0: the loop is one allocation. throw_bad_alloc is cxx_bodies.cpp (Wine cpp.c, with the records of
+ * cxx_types.tsv), which ends in _CxxThrowException, the dispatch through the lifted frames (the exceptions layer, not defined here).  */
+extern "C" void *c_new(size_t n)
+{
+    void *p = malloc(n ? n : 1);   /* msvcrt_heap_alloc(0, size): one block, size 0 gives a unique non-NULL block */
+    if (p)
+        return p;
+    throw_bad_alloc();
 }
 extern "C" void *c_calloc(size_t a, size_t b)
 {
@@ -404,21 +417,21 @@ extern "C" onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end
     return f;
 }
 /* C11 7.22.4.4 exit: cannot return to its caller (abort: 7.22.4.1; _amsg_exit: Wine 9.0 dlls/msvcrt/exit.c _amsg_exit ends in _exit) */
-extern "C" [[noreturn]] void c_exit(int code)
+extern "C" void c_exit(int code)
 {
     fnvnx_doexit(code, 0, 1); /* the handlers, last registered first */
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
 }
 FNVNX_CITE(c_exit, "dm:3");
-extern "C" [[noreturn]] void c_abort(void)
+extern "C" void c_abort(void)
 {
     static const char m[] = "\nabnormal program termination\n";
     fnvnx_write(2, m, sizeof m - 1);
     ExitProcess(3);
 }
 FNVNX_CITE(c_abort, "dm:4");
-extern "C" [[noreturn]] void c_amsg_exit(int n)
+extern "C" void c_amsg_exit(int n)
 {
     const char *t;
     switch (n) {
@@ -439,6 +452,7 @@ extern "C" [[noreturn]] void c_amsg_exit(int n)
 }
 FNVNX_CITE(c_amsg_exit, "dm:5");
 extern "C" void c_purecall(void) { c_amsg_exit(25); }
+FNVNX_CITE(c_purecall, "dm:9");
 
 struct rlock { os_lock_t m; void *volatile owner; int count; };
 rlock g_locks[64];

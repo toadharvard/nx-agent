@@ -9,7 +9,7 @@ static_assert(sizeof(1.0L) == 8 && sizeof(long double _Complex) == 16, "literals
 template <class A, class B> struct Same { static const bool v = false; };
 template <class A> struct Same<A, A> { static const bool v = true; };
 static_assert(!Same<long double, double>::v, "a type of its own, apart from double");
-long double ld(long double a, double b) { return a + b; }       // cl: ?ld@@YAONON@Z
+long double ld(long double a, double b) { return a + b; }       // cl: ?ld@@YAOON@Z
 double dd(double a) { return a; }                                // cl: ?dd@@YANN@Z
 void ov(long double) {}                                          // cl: ?ov@@YAXO@Z   (an overload apart from double's)
 void ov(double) {}                                               // cl: ?ov@@YAXN@Z

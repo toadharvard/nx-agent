@@ -54,4 +54,6 @@ check("skip leaves the named entries out", treehash.tree_hash(fx, skip=("__pycac
 check("a single file hashes as its entry", treehash.tree_hash(os.path.join(fx, "a.txt")) == cas.tree_hash(os.path.join(fx, "a.txt")))
 check("imagerec uses treehash", imagerec._tree_hash(fx) == h)
 check("treehash imports only the standard library", set(l.split()[1] for l in open(treehash.__file__) if l.startswith("import ")) == {"hashlib", "json", "os", "stat"})
+import shutil
+shutil.rmtree(td)   # the fixture lives in TMPDIR and goes with the run
 print("treehash: %d checks passed" % len(OK))

@@ -16,6 +16,12 @@ import boothost  # noqa: E402
 import bootmachine  # noqa: E402
 from test_bootlayout import make_elf  # noqa: E402
 
+
+def _scratch(prefix):
+    d = tempfile.mkdtemp(prefix=prefix)
+    __import__('atexit').register(__import__('shutil').rmtree, d, True)   # a test leaves no scratch behind
+    return d
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 HDR = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "hostapi.h")
 FAILED = []
@@ -44,7 +50,7 @@ def main():
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
     plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")), quantum=QUANTUM)
+    m = bootmachine.Machine(elf, plan, boothost.Services(_scratch("bu-")), quantum=QUANTUM)
     ARGS = 0x1400000   # inside the window, scratch for the argument array
     m.map_fixed(ARGS & ~0xFFF, P, 0)
 

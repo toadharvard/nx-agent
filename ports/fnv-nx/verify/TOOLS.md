@@ -16,10 +16,10 @@ Pure functions; `unit_index` is the index of the object's unit in units.json (n1
   symbol_addresses(unit_index, sympair_rows, n1) -> ({symbol: address}, [(symbol, kind, reason)])
       address = n1['sym'][(unit_index, msvc name)], as pinned (an absolute-value pin keeps its ABSOLUTE flag bit).
       kinds thunk, vtable, gcc, internal have no exe twin by definition: unbound, reason as in NO_TWIN, not an error.
-      Other rows without an address: unbound with the kind's own `unnamed:*` text, 'no MSVC name', or 'not in N1'.
+      Other rows without an address: unbound with the kind's own `nodecor:*` text, 'no MSVC name', or 'not in N1'.
       One symbol with two different addresses or names is a ValueError.
   vtable_addresses(unit_index, vtpair_rows, n1) -> ({(_ZTV symbol, address point): vftable address}, [(ztv, point, reason)])
-      through n1['vt'][(unit_index, ??_7 name)]; an empty or unnamed:* name, or a name N1 never pinned, is unbound.
+      through n1['vt'][(unit_index, ??_7 name)]; an empty or nodecor:* name, or a name N1 never pinned, is unbound.
   n3_verdicts(unit_index, n3_rows, symbol_addresses) -> {exe address: (verdict, [inlined exe addresses])}
       the shape bodysel.decide takes as `n3`.  A row whose symbol has no exe address is not an exe function: ignored.
       An ok / ok+E row with an inlined symbol that has no exe address keeps its verdict only when every n3 row of that
@@ -93,7 +93,7 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    symbol name of Y in the pristine MSVC objects (facts['pristine'], built from the N1 certificate by `pristine_names`), and
    that name is decorated (starts with `?`).  Not provable, by rule and with no name table: no sympair section in the object;
    Y has no pristine COFF symbol; the pristine symbol is undecorated (extern "C", every asm/x87/register CRT helper such as
-   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `unnamed:*`) has the pristine name; a covering
+   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `nodecor:*`) has the pristine name; a covering
    row with an undecorated name.  Edge and row are matched by the exe address (objfacts keeps no ELF symbol of an edge): the
    rows that "cover" Y are the ref rows whose name is a pristine name of Y; all of them must be decorated and one must exist.
    Proof argument: proto.py (R5) derives cc, stack words, varargs, sret and the argument classes of a boundary only from the
@@ -148,11 +148,23 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              (argflow.result_predicate: cmp / test / inc idioms, flags not redefined; anything else is `ret-predicate` open).
   closure_key  `dispatcher=NAME`  (dll `-`, name = the dispatcher symbol, arg_index 0): every value that reaches the dispatcher NAME (native
              fnvnx_dispatch, lifted fnvl_dispatch) is a key of its table.  Inputs: --dispatcher NAME=ENTRIES,CLOSURE,SOURCES (ENTRIES: dispgen's
-             rows `addr<TAB>sym`; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
+             rows `addr<TAB>sym`; with `dispatcher=NAME;miss=fallthrough` (a miss goes on to the next dispatcher) the check (ii) is the other way: every key is a closure address; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
              of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES).  CERTIFIED iff (i) every
              source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress site is open (the gpa rows).
-             An undecided LoadLibrary* name is not open: its result is the may-load set plus NULL (gpa_names.py --mayload).
-             While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
+             A LoadLibrary* site whose name is not decided is not open: its result is the MAY-LOAD SET (gpa_names.py: every module of the declared
+             machine) plus NULL, and the GetProcAddress names derived on it are pairs over that set.  While (iii) fails the fact is `measurement`:
+             the verdict says so and it never counts as valid.
+  gate_cert  `gate_cert=<gate>`  (dll `-`, name = the site symbol, arg_index k): argument k of every call of the symbol (an object-level call site, a native
+             site of a platform backend) comes only from producers of the universe that gate <gate> declared.  Inputs: --gate-cert GATE=SUMMARY.json,RESULT.json (the
+             summary and the gate file of the SAME verdict), --verdict ID, --cert-objdump (`objdump -dr -t --no-show-raw-insn` of the root's objects, pinned binutils).
+             CERTIFIED iff (a) the gate file says green (certified == universe) and the summary is of this verdict (`gate-not-green`, `summary-other-verdict`);
+             (b) the summary declares `universe` [{kind bytecode|glsl_table, id, sha256}] sorted, `universe_hash` = sha256 of the lines `kind	id	sha256
+`
+             (recomputed here: `universe-hash`) and `producers` [{symbol, kind function|data}], each data producer an id of the universe;
+             (c) the proof of contract/gatecert.py (call graph by relocations, backward data flow of the argument register in every caller, recursion through
+             parameters, an address taken only inside a producer data symbol): a caller outside the universe, a constant, an unbounded index, an unknown call result is
+             red; (d) the certificate hashes the summary, the gate file, the universe hash, the callers and the values; (e) valid only once every GetProcAddress site is
+             resolved: until then the fact is `measurement`, as closure_key.
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -169,7 +181,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017, ASM-018, ASM-019)
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017)
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -177,7 +189,7 @@ Proof argument: (a) says that the argument at every call that can execute is in 
 all paths of the function backwards, expands own parameters to every caller, and is closed or reports a break); (b) says that no
 call can execute that is not a static use of the slot (the only way to get an import's address other than its slot is
 GetProcAddress, G1; a forwarder chain between distinct dll names is not followed, G2); therefore no execution passes a value
-outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and
+outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-018, ASM-019)
 that the facts' ranges contain every executed instruction of the images (A4).  The certificate fixes the set of images by hash
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
@@ -199,6 +211,38 @@ tables (sh_info of a SHT_RELA / SHT_REL names the section; no text).  A referenc
   - the immediate is a fact id of the table and has a certificate (`fact-not-in-table`, `fact-not-certified`).
 Red ids `member:section+offset:reason`; gate `reachlink` (universe = references, certified = green ones).
 Exe-derived: container and fnv-nx-build only.
+```
+
+## contract/gatecert.py
+
+```text
+gatecert - the proof half of the gate_reach request kind `gate_cert=<gate>` (L1 CONTRACT).
+
+    A fact `site symbol S, argument k` is certified by the green gate G when every value that can reach argument k of every call of S
+    comes from a producer in the universe G declared.  The proof is over the machine code of the linked objects, decoded by the pinned
+    binutils objdump (`objdump -dr -t --no-show-raw-insn`, ILP32 AArch64); this module reads only that text.
+
+    prove(prog, site, k, producers) -> (reasons [(reason, where, detail)], callers [str], values [str])    certified iff reasons is empty
+    parse_objdump(text) -> Prog
+
+Rule.  The set CALLERS(F) of a function F is every function holding a CALL26/JUMP26 relocation to F (a jump is a tail call: the argument
+registers are those at the jump).  F's address taken anywhere (any other relocation to F, outside debug/unwind sections) means an indirect
+caller; that is allowed only when each such relocation lies inside a producer data symbol (the producer row IS the indirect call path:
+the table slot of the declared producer); otherwise `address-taken`.  The value of argument register R of a call site is the set of
+VALUES found by a backward walk over the control-flow graph of the caller (every path; a join takes the union; a loop adds nothing new):
+  - `mov`/`orr` from a register: the value of that register before the instruction;
+  - result of a call (x0 after `bl F`): value PROD(F); any other caller-saved register after a call is clobbered (`clobbered`);
+  - `adrp` + `add :lo12:` of the same symbol, or `adrp` + `ldr :lo12:` : the address of / a load from a constant offset of symbol Y;
+  - `ldr` from a register that holds the address of Y plus a constant: load from Y at that offset; with a register index (`[b, i, lsl #s]`, uxtw/sxtw) the
+    index must be proven in [0, count), count = (st_size(Y) - offset) / elt: (a) every path to the load carries an unsigned compare-and-branch of the index (or of
+    a register it was copied/extended/masked from) against a constant <= count (cmp with b.lo/b.cc taken, b.hs/b.cs fallthrough; b.ls taken / b.hi fallthrough
+    bound c+1; cbz/tbz are not bounds), a must-analysis over the CFG (the weakest path counts); (b) a loop induction variable is the same proof: its entry edge
+    (a constant) and its back or exit edge carry the bounds, a loop back edge adds nothing by itself.  Anything else is `index-unbounded:<function>+<offset>`;
+  - the value of an x0..x7 at the function entry: PARAM(j), judged by the callers of the function (the call graph, recursively);
+  - anything else (constants, stack loads, arithmetic, an unknown call result) has no certificate (`constant`, `stack-load`, `computed`, ...).
+A value is accepted iff it is PROD(F) with F a producer of kind function, or an address of / load from Y at a constant offset < size(Y) with
+Y a producer of kind data (sizes from the symbol table), or PARAM(j) whose callers are all accepted.  A requested site with no call is
+`no-site` (a vacuous certificate is no certificate).  Assumptions: the compiler (OWNER 1) and the pinned objdump decode the objects.
 ```
 
 ## contract/gate_vcall.py
@@ -372,7 +416,7 @@ l2sections - the three non-loaded ELF sections that L2's compiler plugins put in
     read(path)                 -> {'sympair': [...], 'vtpair': [...], 'n3': [...]}; an absent section gives []
 
 Format: plain text, LF-terminated lines, TAB-separated.  sympair: exactly 4 fields, kind one of KINDS or
-`unnamed:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
+`nodecor:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
 fields, offsets decimal.  n3: 2..5 fields (the producer omits trailing empty ones), verdict not empty, inlined a
 `,`-separated list of symbols, kind one of N3_KINDS or a clone suffix (not empty, no blank), types `,`-separated
 Itanium type strings (the producer's own separator; the task brief said `;`).  Any other line is an error
@@ -662,41 +706,37 @@ certified = universe - red.  Counts on stdout.  Exit status 1 when red.
 ## link/gate_disp.py
 
 ```text
-gate_disp - the dispatcher of the lifted guest holds exactly the code entries (part of the L1 verdict).
+gate_disp - the typed dispatch tables of the lifted guest hold exactly the rows the generator declared (part of the L1 verdict).
 
-    gate_disp.py --elf guest.elf --universe universe.tsv --entries entries.tsv [--keys keys.tsv] [--missing missing.tsv]
+    gate_disp.py --elf guest.elf --rows disp_rows.tsv [--rows native_disp_rows.tsv ...] [--universe universe.tsv]
 
-The lifted code reaches every code entry of the exe through `fnvl_dispatch(a)` (lift/rt/rt.c, FNVL_PHF_REL), which looks the
-address up in the table `fnvl_disp_table` (lift/bench/phf.py `table_asm`):
-    i = ((a ^ fnvl_g[(a * K1) >> (32 - NBITS)]) * K2) >> (32 - TBITS)          (all arithmetic modulo 2^32)
-    slot i = {u32 key, s32 offset}; the entry is found iff key == a and offset != 0; the body is `(char *)fnvl_disp_table + offset`.
-A slot is OCCUPIED iff its offset is not 0 (the key of an empty slot is arbitrary).  {K1, K2, NBITS, TBITS} are the four u32 words of
-`fnvl_phf_params`, stored with the table (disp.o), the one source rt.c reads.  Sizes come from the symbols' st_size: the table has
-8 << TBITS bytes, `fnvl_g` (u16) 2 << NBITS bytes, `fnvl_phf_params` 16; a table whose size or parameters do not fit is red.
+The generator (L3a: lift/tools/dispgen.py, phf.table_c) writes, per table and in the same run, a rows file `fnvnx-disp-rows/1` (a declared output of the
+generator stage, in the store and in the keys):
+    # fnvnx-disp-rows/1
+    # table_id <hex>                                   (only when the entries file has one)
+    # hash <P>_disp_table slots=<N> empty=<E>
+    # table<TAB>index<TAB>addr<TAB>symbol<TAB>slot
+    <P>_disp_entries<TAB>index<TAB>addr (hex)<TAB>symbol<TAB>slot       one row per element of the entries array, in array order
+and the typed data of the prefix P (ILP32 image): `P_disp_table` u32[2N] pairs {key, index+1}; `P_disp_entries` fnvnx_entry_fn[max(count,1)];
+`P_g` u16[2^NBITS]; `P_phf_params` u32[4] = {K1, K2, NBITS, TBITS}.  The lookup of rt.c / dispatch.c is
+    i = ((a ^ g[(a * K1) >> (32 - NBITS)]) * K2) >> (32 - TBITS)     (arithmetic modulo 2^32)       found iff table[2i] == a: entries[table[2i+1] - 1].
 
-Inputs:  --universe  the code entries (universe.tsv: first column the address as hex, `#` lines skipped);
-         --entries   `address<TAB>symbol[<TAB>kind]` (liftall's entries.tsv), kind `code` (default) or `import`: an import row is a
-                     dispatcher key that is not a universe address (its symbol is `I_<key>` or a runtime symbol); the last
-                     line may be `# table_id <hex>`;
-         --keys      optional, the import key set of the bridge (keys.tsv: first column the key as hex, other columns ignored, `#` lines
-                     skipped); each key must be named by an entries.tsv row (the symbol of its body is never taken from this file);
-                     it may carry `# table_id <hex>`.  When both files carry a table_id the two must be equal (else the item
-                     `table_id` is red);
-         --missing   optional, `address` rows of universe addresses the lifter reports as without a body.  REPORTING only: it never
-                     certifies anything; a universe address without an entry stays `no-entry` and red.  The detail line says how
-                     the list and the entries agree.
-Rule, for EVERY key k of the universe, of the import rows and of --keys (no sampling), certified when all hold:
-  - a symbol is named for k by entries.tsv (two rows naming different symbols for k are a violation);
-  - the ELF defines that symbol, at one address (a symbol defined at two addresses is a violation);
-  - the LOOKUP: the slot i the hash computes for k is occupied, holds key k, and `table_address + stored_offset == symbol address`
-    modulo 2^32 (`hash-miss` when slot i is not k's slot, `wrong-target` when it points elsewhere);
-  - no other occupied slot holds k.
-Every occupied slot whose key is neither in the universe nor an import key is a violation (`extra-key`).
-That the parameters in the ELF are those the build chose is not this gate's business: the lookup is proven with them, for every key.
+Rule, for EVERY rows file, EVERY row and EVERY slot (no sampling).  A rows file is certified when all hold (else the item `P:<reason>`):
+  - the header is `fnvnx-disp-rows/1` with a `# hash` line naming `P_disp_table`; the four symbols are defined exactly once, in one PT_LOAD
+    (`symbol-undefined`, `symbol-ambiguous`, `table-unreadable`); `P_disp_table` has 8*N bytes, `P_phf_params` 16, `P_g` 2 << NBITS, N == 1 << TBITS,
+    `P_disp_entries` 4*max(count,1) (`table-size`, `params`); the rows name `P_disp_entries` with the indexes 0..count-1 once, distinct slots below N,
+    N - count == E (`rows-shape`, `duplicate-row`, `index-gap`, `slot-count`);
+A row (item `P_disp_entries[index]`) is certified when:
+  - its symbol is defined exactly once, and the word entries[index] is its address, covered by a load-time relocation when the image has any
+    (SHT_RELR / RELA / REL: the R_AARCH64_ABS32 of the source; `wrong-target`, `unrelocated`, `symbol-undefined`, `symbol-ambiguous`); with count 0 the one
+    element is 0 and no relocation covers it (`empty-element`);
+  - table[2*slot] == addr and table[2*slot+1] == index+1 (`wrong-slot`), and the LOOKUP with the stored parameters hashes addr to `slot` (`hash-miss`);
+A slot no row names (item `P_disp_table[slot]`) is certified when its index half is 0 and its key does not hash to it (`stray-slot`, `empty-slot-hits`).
+With --universe (the code entries: first column the address as hex) every address needs a row in some rows file (`no-entry`).
+A missing or malformed rows file, or a missing ELF, is red (`rows:no-rows`, `rows:format`, `elf:no-elf`).
 
-Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): universe = the keys of universe + import keys +
-the extra table keys (+ the item `table_id` when both files carry one), certified = those satisfying the rule, uncertified =
-`<key as 8 hex digits>:<reason>`.  Counts only on stdout.  Exit status 1 when the gate is red.
+Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): items = per rows file 1 + rows + empty slots, plus the universe addresses;
+uncertified = the ids above `:<reason>`.  Counts only on stdout.  Exit 1 when red.
 ```
 
 ## verify/a64access.cc
@@ -1770,13 +1810,16 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   TMPDIR set to a fresh directory of its own, and the gate removes that directory (and kills what is left of the file's
   process group) when the file ends, passed, failed or timed out: no test leaves anything in the temporary directory. No test needs a serial
   group: sandbox namespaces are per process and every store/work directory is per run.
---cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): a test file's result is a function of the content of the
-  directories the gate declares and of the declared environment. KEY = sha256 over: cas.tree_hash of every key dir
-  (--key-dirs, default: the DIRs scanned; whole directory content, no mtimes, __pycache__ skipped), the envcheck id of the
-  env.json next to this script, this gate's argv without --cache/--jobs, and the python version string. If DIR/<KEY>.json
-  records every file of the universe as passed, they are certified WITHOUT running (detail: `N of M pass, cached key <12 hex>`).
-  Otherwise all files run and the per-file results are stored under KEY only when the run completed. All-or-nothing per key:
-  no per-file dependency guessing; a failed file is never recorded as passed, a key with a failure re-runs everything.
+--cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): one entry per test file, keyed by its path, the envcheck id, this gate's argv
+  without --cache/--jobs, the python version and the pins of its inputs; the entry is valid while the content its run read is unchanged.
+  TRACED file: the read set recorded by strace (paths and their content hashes, listings). A failed file is never recorded.
+  UNTRACED file (its import closure reaches a module that runs strace itself, `gate_tests.TRACERS`: a test that runs the recipe): it runs on its MOUNT, a directory
+  holding its import closure and the files under the data roots it declares in `# reads: <path> ...` lines of its text; anything else of the checkout is absent, so a
+  read outside the declaration fails the test (a missing declaration is red, never a wide key). Its entry is keyed by the mount content (path and sha256 of each file).
+  Every untraced file also gets the game's compiler mounted: the external of verify/guest_compiler.json fetched once into the gate's cache (FNVNX_EXTCACHE,
+  FNVNX_INPUT_GUEST); a build in the test finds it there. Not fetchable: `blocked-env`.
+  CUT: a test file whose import closure names a root that verify/admit.json does not admit (a directory with a recipe, or ports/fnv-nx/tests/<name> of class test) belongs
+  to the cut of the branch and is outside the universe (gate oracle judges the same list); the detail lists `cut:test:<file> (root <r>)` for each.
 Result extra key "files": [{"name","seconds","status"}] (status passed|failed|cached); same list in selftests.times.json.
 ```
 
@@ -1843,7 +1886,7 @@ Gates get GATE_CACHE = VDIR/cache (content-keyed results of gates such as selfte
            other push (or fetch) failure is `blocked: push failed: <first line>`, exit 6; in both nothing local changes and the stored green
            verdict stays (keyed by tree). Without --remote only the local ref moves and the last line ends `local only`.
   Exit codes of merge: 0 merged, 2 red/blocked by verdict, 3 conflict, 4 env, 5 moved, 6 push failed (1 error).
-Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool>`; merge adds `merged <commit>` or `blocked: <reason>`.
+Both print `L1 <green|red> <tree> <seconds>s gates:<n> over_budget:<bool> vacuous:<n>` (n: green gates with an empty universe and no admitted root of the class they cover); merge adds `merged <commit>` or `blocked: <reason>`.
 ```
 
 ## verify/objstub.py
@@ -2229,6 +2272,8 @@ key = cas.stage_key(document + {"sandbox": {sandbox.py sha256, cas.py sha256}}).
 Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked from the CAS and bound read-only;
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
 stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; seccomp: getrandom -> ENOSYS (x32 ABI and foreign arch killed).
+**CPU of a stage.** `result.json` (`STORE/keys/<key>/result.json`) carries `cpu_s`: the child's user + system CPU seconds of the run that produced the result (`os.wait4` rusage of the launching fork, descendants it waited for included), rounded to ms. It is a measurement, not part of the function of the key: the cold-run comparison ignores it, and a cache hit returns the value recorded by the run that stored the result (a result stored before this field has none). The stage document (`STORE/stage-docs/<aa>/<key>.json`) stays the pure document that the key is made of. Test: tests/test_sandbox.py case 12. A change of sandbox.py changes `sandbox_id`, so every stage key.
+
 Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open_channels":
   wall_clock           clock_gettime/time/statx show real time (vDSO). PR_SET_TSC=SIGSEGV + seccomp on the clock syscalls
                        was tried: dynamic date/python/gcc/make crash at startup (SIGSEGV), coarse clocks stay readable. Dropped.
@@ -2377,7 +2422,7 @@ Certified iff the two contracts are equal; the verdict names the first differing
 result, pop, variadic, aggregate, undecoded name).  Equal contracts mean every argument and the result travel in the same place on both machines,
 so no bridge exists to be generated: where the legacy model produced `bridge` / `manual` / `x86-inconsistent`, the pair is uncertified.
 UNIVERSE.  Every row that is a ref or a non-canonical def of a symbol that has a definition row somewhere in obj.json and is a function-kind row
-(func, ctor.*, dtor.*) with an MSVC name, or an `unnamed:` row; item id `object:symbol`.  An `unnamed:` row, or a row of a symbol whose canonical
+(func, ctor.*, dtor.*) with an MSVC name, or a `nodecor:` row; item id `object:symbol`.  An `nodecor:` row, or a row of a symbol whose canonical
 definition has no MSVC name, is uncertified (no contract can be compared).  Symbols with no definition row at all are linkstrict's business (class 3).  Rows of kind
 thunk/vtable/gcc/internal/data are outside (no function contract of the exe).
 PROOF.  Parameters are placed by the calling convention as a function of the ordered class list, so equal class lists under equal conventions
@@ -2441,8 +2486,8 @@ UNIVERSE (nothing sampled, nothing skipped), per unit with a GCC object, in the 
      dtor.sdd, dtor.sdd.thunk) and that is `def` of a symbol the object defines STRONGLY: binding GLOBAL (not weak, not unique), defined
      in a section (not SHN_UNDEF/ABS/COMMON), not a section or file symbol, and the defining section is not in a COMDAT group
      (SHF_GROUP).  Item id `unit:symbol`.
-  2. every row of .fnvnx.sympair whose kind is `unnamed:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
-  3. every row of .fnvnx.vtpair whose MSVC name is `unnamed:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
+  2. every row of .fnvnx.sympair whose kind is `nodecor:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
+  3. every row of .fnvnx.vtpair whose MSVC name is `nodecor:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
   4. a GCC object that cannot be read (ELF, symbol table, a plugin section): one item `unit:error`.
 CERTIFIED: an item of class 1 whose MSVC name is `def`, `comdat` or `common` among the external symbols of at least one cl object of the
 unit (an unreadable one among them does not hide a proof in another; if none proves it, the item is red and says so).

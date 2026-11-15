@@ -12,8 +12,8 @@ UNIVERSE (nothing sampled, nothing skipped), per unit with a GCC object, in the 
      dtor.sdd, dtor.sdd.thunk) and that is `def` of a symbol the object defines STRONGLY: binding GLOBAL (not weak, not unique), defined
      in a section (not SHN_UNDEF/ABS/COMMON), not a section or file symbol, and the defining section is not in a COMDAT group
      (SHF_GROUP).  Item id `unit:symbol`.
-  2. every row of .fnvnx.sympair whose kind is `unnamed:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
-  3. every row of .fnvnx.vtpair whose MSVC name is `unnamed:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
+  2. every row of .fnvnx.sympair whose kind is `nodecor:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
+  3. every row of .fnvnx.vtpair whose MSVC name is `nodecor:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
   4. a GCC object that cannot be read (ELF, symbol table, a plugin section): one item `unit:error`.
 CERTIFIED: an item of class 1 whose MSVC name is `def`, `comdat` or `common` among the external symbols of at least one cl object of the
 unit (an unreadable one among them does not hide a proof in another; if none proves it, the item is red and says so).
@@ -80,7 +80,7 @@ def unit_rows(stem, gpath, cpaths):
     why = 'no cl object for the unit' if not cpaths else ('the cl object is unreadable: %s' % bad[0] if bad else '')
     out = []
     for sym, ms, kind, df in sp:
-        if kind.startswith('unnamed:'):
+        if kind.startswith('nodecor:'):
             out.append((stem, sym, ms, 'unnamed'))
         elif kind in NAMED and df == 'def' and sym in strong:
             if any(cl.get(ms.encode('utf-8')) in DEFINED_BY_CL for cl in cls):
@@ -90,7 +90,7 @@ def unit_rows(stem, gpath, cpaths):
             else:
                 out.append((stem, sym, ms, '%s is not a definition of the cl object' % ms + (' (a cl object of the unit is unreadable)' if bad else '')))
     for z, _ap, ms, _off in vt:
-        if ms.startswith('unnamed:'):
+        if ms.startswith('nodecor:'):
             out.append((stem, z, ms, 'vftable-unnamed'))
     return out
 
@@ -100,7 +100,7 @@ def rows(gcc_objs, cl_objs, units=None):
     of the universe.  gcc_objs / cl_objs: lists of object FILE paths (directories are accepted too, as in unitpairs.pairs); units:
     path of units.json or None.  stem: the unit (unitpairs); symbol: the GCC assembler symbol (the stem is part of the item because
     two units can define one symbol strongly); msvc_name: the plugin's name (certified when reason is ''; for a nameless item ''
-    or the `unnamed:` text); reason: '' certified, else `<name> is not a definition of the cl object[...]`, `no cl object for the
+    or the `nodecor:` text); reason: '' certified, else `<name> is not a definition of the cl object[...]`, `no cl object for the
     unit`, `the cl object is unreadable: ...`, `unnamed` (a sympair row no rule names), `vftable-unnamed` (symbol = the _ZTV
     symbol), or `error: ...` (a GCC object that cannot be read or parsed: symbol and name ''; one row for the unit).
     Raises unitpairs.GateInputError only for malformed declared inputs (missing path, bad units file, two objects of one stem)."""

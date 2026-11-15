@@ -66,7 +66,7 @@ static int64_t file_fd(uint32_t file) {
     if (dir + n + 1 > sizeof path) return -1;
     memcpy(path, FNVNX_EXE_PATH, dir);
     memcpy(path + dir, name, n + 1);
-    g_fd[file] = (int64_t)fnvnx_hcall2(fnvnx_host->fs_open, FNVNX_ADDR(path), FNVNX_O_READ);
+    g_fd[file] = (int64_t)FNVNX_HCALL2(fs_open, FNVNX_ADDR(path), FNVNX_O_READ);
     if (g_fd[file] >= 0) g_open[file] = 1;
     return g_fd[file];
 }
@@ -77,7 +77,7 @@ static int h_read(void *c, uint32_t file, uint32_t off, void *dst, uint32_t size
     (void)c;
     if (fd < 0) return -1;
     while (size) {
-        int64_t n = (int64_t)fnvnx_hcall4(fnvnx_host->fs_pread, (uint64_t)fd, FNVNX_ADDR(d), size, off);
+        int64_t n = (int64_t)FNVNX_HCALL4(fs_pread, (uint64_t)fd, FNVNX_ADDR(d), size, off);
         if (n <= 0) return -1;   /* error, or the file ends before the range does */
         d += n; off += (uint32_t)n; size -= (uint32_t)n;
     }
@@ -88,7 +88,7 @@ static int h_read(void *c, uint32_t file, uint32_t off, void *dst, uint32_t size
 static uint64_t plat(uint32_t fn, uint64_t a, uint64_t b, uint64_t prot, uint32_t nargs) {
     uint64_t args[3];
     args[0] = a; args[1] = b; args[2] = prot;
-    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(args), nargs);
+    return FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(args), nargs);
 }
 
 /* The hook contract: zero-filled RW at exactly addr, failing if any of it is in use. Zero: the source block is
@@ -109,7 +109,7 @@ static int h_map_fixed(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
     if (!(n = (mf_node *)malloc(sizeof *n))) return -1;
     if (!(blk = (uint8_t *)memalign(FNVNX_PAGE_SIZE, size + 2 * FNVNX_PAGE_SIZE))) { free(n); return -1; }
     memset(blk + FNVNX_PAGE_SIZE, 0, size);
-    if (fnvnx_hcall3(fnvnx_host->map_fixed, addr, size, FNVNX_ADDR(blk + FNVNX_PAGE_SIZE))) { free(blk); free(n); return -1; }
+    if (FNVNX_HCALL3(map_fixed, addr, size, FNVNX_ADDR(blk + FNVNX_PAGE_SIZE))) { free(blk); free(n); return -1; }
     n->addr = addr; n->size = size; n->blk = blk;
     fnvnx_lock(&g_mf_lock);
     n->next = g_mf; g_mf = n;
@@ -145,9 +145,9 @@ static void h_free(void *c, void *p) { (void)c; free(p); }
 static void h_log(void *c, const char *msg) {
     size_t n = strlen(msg);
     (void)c;
-    fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR(msg), n);
-    fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR("\n"), 1);
-    fnvnx_hcall2(fnvnx_host->output_debug_string, FNVNX_ADDR(msg), n);
+    FNVNX_HCALL2(console_write, FNVNX_ADDR(msg), n);
+    FNVNX_HCALL2(console_write, FNVNX_ADDR("\n"), 1);
+    FNVNX_HCALL2(output_debug_string, FNVNX_ADDR(msg), n);
 }
 
 /* alloc_va: the arena. One reservation of the VM service (host_vm.inc: address space only, no hint) of ARENA_SIZE;
@@ -233,10 +233,10 @@ int fnvnx_loader_main(void) {
     static fnvnx_start_cfg cfg;
     FnvnxStat st;
     int r;
-    g_fd[0] = (int64_t)fnvnx_hcall2(fnvnx_host->fs_open, FNVNX_ADDR(FNVNX_EXE_PATH), FNVNX_O_READ);
+    g_fd[0] = (int64_t)FNVNX_HCALL2(fs_open, FNVNX_ADDR(FNVNX_EXE_PATH), FNVNX_O_READ);
     if (g_fd[0] < 0) { h_log(NULL, "fnvnx-start: cannot open " FNVNX_EXE_PATH); return fail("failed", (long long)g_fd[0]); }
     g_open[0] = 1;
-    if (fnvnx_hcall2(fnvnx_host->fs_fstat, (uint64_t)g_fd[0], FNVNX_ADDR(&st)) || st.size != fnvnx_exe_size) {
+    if (FNVNX_HCALL2(fs_fstat, (uint64_t)g_fd[0], FNVNX_ADDR(&st)) || st.size != fnvnx_exe_size) {
         h_log(NULL, "fnvnx-start: identity mismatch: the exe is not the one the image was built from (size)");
         return fail("failed", FNVNX_START_E_IDENTITY);
     }

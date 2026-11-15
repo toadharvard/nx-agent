@@ -93,6 +93,22 @@ def checks(obj):
           vm == ['_ZTV1M\t8\t0\t1M\t1M\n', '_ZTV1M\t36\t8\t1M\t1M;2S2\n'], str(vm))
 
 
+def crossing(obj):
+    """.fnvnx.crossing has a row for EVERY function the unit pairs with an MSVC name in .fnvnx.sympair (one universe: the row is made where the pair is made),
+    so every destructor variant is covered whatever emits it: the complete/base/deleting ones GCC emits (dtor.d0/d1/d2, in a class with a virtual base too), the
+    vector deleting destructor ??_E the plugin writes as assembly (dtor.sdd, its this-adjusting thunk dtor.sdd.thunk), and the ones inlined everywhere (noemit)"""
+    pairs = [l.split('\t') for l in pb.section(obj, '.fnvnx.sympair').splitlines()]
+    cross = {l.split('\t')[0] for l in pb.section(obj, '.fnvnx.crossing').splitlines()}
+    boundary = [p for p in pairs if len(p) == 4 and p[1] and p[2] != 'data']
+    missing = [p[0] for p in boundary if p[0] not in cross]
+    check('crossing: every sympair row with an MSVC name has a crossing row', boundary and not missing, missing[:10])
+    kinds = {p[2] for p in boundary}
+    for k in ('dtor.d0', 'dtor.d1', 'dtor.d2', 'dtor.sdd', 'dtor.sdd.thunk', 'noemit'):
+        check('crossing: the fixture has a %s row and it has its crossing row' % k, k in kinds and all(p[0] in cross for p in boundary if p[2] == k), sorted(kinds))
+    vb = [p for p in boundary if p[2].startswith('dtor') and p[1].startswith('??_EVB@@')]
+    check('crossing: the vector deleting destructor of a class with a virtual base (VB) is paired and has its row', vb and all(p[0] in cross for p in vb), vb)
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-sdd-')
     try:
@@ -102,6 +118,19 @@ def main():
         check('compiles', r.returncode == 0, r.stderr[:3000])
         if r.returncode == 0:
             checks(out)
+            crossing(out)
+        # THE TREES KEEP THE REAL TABLE: a class with a virtual base is constructed through a VTT and a construction vtable; the accesses before
+        # an address point (vbase offset, offset-to-top, RTTI: inside the table) must neither warn (the address point's own symbol is one slot
+        # long, so GCC's bounds analysis would flag every such access) nor become a relocation with a negative addend against that symbol.
+        # The address point's symbol is written where the assembler text is made (ap_integer) and in the code after the last analysis.
+        vo = os.path.join(td, 'vb.o')
+        r = pb.compile(os.path.join(HERE, 'sdd', 'vbase_bounds.cpp'), vo, [so], args=['-Wall', '-Werror=array-bounds'])
+        check('virtual base: compiles with -Werror=array-bounds', r.returncode == 0, r.stderr[:1500])
+        if r.returncode == 0:
+            neg = [(t, n, a) for rl in pb.relocs_of(vo).values() for o, t, n, a in rl if '.fnvnx_ap' in n and a < 0]
+            check('virtual base: no relocation against an address point with a negative addend', not neg, str(neg[:3]))
+            vt = [n for rl in pb.relocs_of(vo).values() for o, t, n, a in rl if '.fnvnx_ap' in n]
+            check('virtual base: the VTT and the code name address points by their own symbols', any(n.startswith('_ZTT') or '.fnvnx_ap' in n for n in vt) and vt, str(vt[:3]))
         r = pb.compile(FIX, os.path.join(td, 'x.o'), [so], args=['-fplugin-arg-fnvnx_sdd-mode=1'])
         check('an unknown plugin argument is an error', pb.argument_refused(r, 'sdd'), r.stderr[:500])
     finally:

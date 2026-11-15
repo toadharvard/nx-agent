@@ -8,7 +8,7 @@ SYS = """int get_system_metrics( int index )
     switch (index)
     {
     case SM_CXSCREEN:
-        return 1; /* not literal-checked? it is */
+        return fn();
     case SM_CXBORDER:
     case SM_CYBORDER:
         return 1;
@@ -28,11 +28,11 @@ def run(cpp):
         open(d + "/d.cpp", "w").write(cpp)
         r = subprocess.run([sys.executable, "-I", GEN, d, d + "/d.cpp", d + "/o.inc"], capture_output=True, text=True)
         return r, (open(d + "/o.inc").read() if r.returncode == 0 else "")
-OK = ("static int sm_SM_CXSCREEN(void) { return 1; }\nstatic int sm_SM_CXBORDER(void) { return 1; }\n"
-      "static int sm_SM_CYBORDER(void) { return 1; }\nstatic int sm_SM_CMETRICS(void) { return 90; }\n")
+OK = ("static int sm_SM_CXSCREEN(void) { return fn(); }\nstatic int sm_SM_CXBORDER(void) { return 1; }\n"
+      "static const int sm_SM_CYBORDER = 1;\nstatic const int sm_SM_CMETRICS = 90;\n")
 r, o = run(OK); assert r.returncode == 0, r.stderr
-assert o.count("{ ") >= 4 and "case SM_CMETRICS (line" in o and "{ 90, sm_SM_CMETRICS" in o, o
-r, _ = run(OK.replace("SM_CMETRICS(void) { return 90; }", "SM_CMETRICS(void) { return 91; }")); assert r.returncode == 1 and "literal" in r.stderr
+assert "case SM_CMETRICS (line" in o and "{ 90, sm_SM_CMETRICS, nullptr" in o, o
+r, _ = run(OK.replace("sm_SM_CMETRICS = 90;", "sm_SM_CMETRICS = 91;")); assert r.returncode == 1 and "literal" in r.stderr
 r, _ = run(OK + "static int sm_SM_STARTER(void) { return 0; }\n"); assert r.returncode == 1 and "no `case SM_STARTER" in r.stderr
-r, _ = run(OK.replace("static int sm_SM_CYBORDER(void) { return 1; }\n", "")); assert r.returncode == 1 and "no handler sm_SM_CYBORDER" in r.stderr
+r, _ = run(OK.replace("static const int sm_SM_CYBORDER = 1;\n", "")); assert r.returncode == 1 and "no handler sm_SM_CYBORDER" in r.stderr
 print("ok")

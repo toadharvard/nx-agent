@@ -4,12 +4,12 @@
     gen_wine_cites.py <wine-9.0 tree> <out.tsv> <scanned file or directory>...
 
 A citation is the token `wine-9.0:<path>:<function>` (path: [A-Za-z0-9_./+-]+, function: a C identifier) in a scanned file; a directory
-is scanned for every regular file under it that is text. The tree is the external `wine-9.0` of the root (fnv-nx-build tools/wine-9.0,
+is scanned for every regular file under it that is text, except the test files (`test_*`: their citations are the inputs of the test, not product claims). The tree is the external `wine-9.0` of the root (fnv-nx-build tools/wine-9.0,
 pinned by commit and tree_sha256), mounted read-only. Checks, each an error (exit 1, the stage is red, the build is red):
   - the path is a regular file of the tree and does not leave it;
   - the function is DEFINED in that file: a line at column 0 that holds the name followed by `(` (Wine's definition style: the name
     starts the line, or it follows a return type on the same line), is not a statement (`;` before the name) and not inside a comment
-    block; or a `#define NAME(`. A call, a prototype and a mention in a comment are not a definition.
+    block; or a `#define NAME(`. A call, a prototype and a mention in a comment are not a definition. The finer forms are in definition(): an object-like macro, a typedef, a function a macro body defines (literal or pasted from an invocation's argument).
 Output (TSV, sorted, one row per distinct citation): citation, the file:line of the definition in the tree, the scanned files that cite it.
 The output is a pure function of the tree and the scanned files; python 3 standard library only."""
 import os
@@ -44,23 +44,79 @@ def strip_comments(text):
     return "".join(out)
 
 
-def definition(text, name):
-    """-> line number (1-based) of the first definition of NAME in TEXT, or None. A definition: NAME, after an optional return type on its line
-    (no `;`, `=`, `(`, `{`, `}` before it), followed by a balanced parameter list and then `{` (a prototype ends in `;`, a call in an operator);
-    or `#define NAME(`."""
+def _balanced(code, i):
+    """index just after the `)` that closes the `(` before position I (depth 1 at I), or -1"""
+    depth = 1
+    while i < len(code) and depth:
+        depth += {"(": 1, ")": -1}.get(code[i], 0)
+        i += 1
+    return i if depth == 0 else -1
+
+
+def _macros(code):
+    """-> [(macro name, [parameters], body, line of the #define)] of every `#define` of CODE (comments stripped); the body joins
+    the `\\` continuation lines; a body keeps its line structure by line count only"""
+    out = []
+    for m in re.finditer(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?((?:\\\n|[^\n])*)", code, re.M):
+        out.append((m.group(1), [p.strip() for p in (m.group(2) or "").split(",") if p.strip()], m.group(3).replace("\\\n", "\n"),
+                    code.count("\n", 0, m.start()) + 1))
+    return out
+
+
+def _args(code, macro):
+    """-> [[argument texts]] of every invocation `MACRO(a, b, ...)` of CODE (top-level commas)"""
+    res = []
+    for m in re.finditer(r"(?<![A-Za-z0-9_#])" + re.escape(macro) + r"[ \t]*\(", code):
+        e = _balanced(code, m.end())
+        if e < 0:
+            continue
+        parts, depth, cur = [], 0, ""
+        for ch in code[m.end():e - 1]:
+            if ch == "," and depth == 0:
+                parts.append(cur.strip()); cur = ""
+                continue
+            depth += {"(": 1, ")": -1}.get(ch, 0)
+            cur += ch
+        parts.append(cur.strip())
+        res.append(parts)
+    return res
+
+
+def definition(text, name, siblings=()):
+    """-> line number (1-based) of the first definition of NAME in TEXT, or None. A definition is one of:
+      - a function: NAME, after an optional return type on its line (no `;`, `=`, `(`, `{`, `}` before it), followed by a balanced parameter list
+        and then `{` (a prototype ends in `;`, a call in an operator);
+      - a macro: `#define NAME(` or `#define NAME` (object-like);
+      - a type: `typedef ... NAME;` at column 0;
+      - a function that a macro defines, in the macro's body: the same declarator rule, with NAME literal in the body; or pasted, `P ## SUFFIX(`
+        with P a parameter of that macro, where NAME is V + SUFFIX for the value V that P has at an invocation of the macro in TEXT or in SIBLINGS
+        (the other files of the directory, as text): the function the invocation instantiates. The line is the macro's `#define`."""
     code = strip_comments(text)
     pat = re.compile(r"^(?:[A-Za-z_][^;=(){}\n]*[ \t*])?" + re.escape(name) + r"[ \t]*\(", re.M)
-    macro = re.compile(r"^[ \t]*#[ \t]*define[ \t]+" + re.escape(name) + r"\(", re.M)
-    for m in sorted(list(pat.finditer(code)) + list(macro.finditer(code)), key=lambda x: x.start()):
-        if m.re is macro:
+    macro = re.compile(r"^[ \t]*#[ \t]*define[ \t]+" + re.escape(name) + r"(?:\(|[ \t]|\\|$)", re.M)
+    tdef = re.compile(r"^typedef\b[^;{}]*[ \t*]" + re.escape(name) + r"[ \t]*;", re.M)
+    for m in sorted(list(pat.finditer(code)) + list(macro.finditer(code)) + list(tdef.finditer(code)), key=lambda x: x.start()):
+        if m.re is not pat:
             return code.count("\n", 0, m.start()) + 1
-        depth, i = 1, m.end()
-        while i < len(code) and depth:
-            depth += {"(": 1, ")": -1}.get(code[i], 0)
-            i += 1
-        rest = code[i:i + 200].lstrip()
-        if depth == 0 and rest.startswith("{"):
+        e = _balanced(code, m.end())
+        if e >= 0 and code[e:e + 200].lstrip().startswith("{"):
             return code.count("\n", 0, m.start()) + 1
+    sib = [strip_comments(t) for t in siblings]
+    for mname, params, body, line in _macros(code):
+        lit = re.compile(r"(?<![A-Za-z0-9_#])" + re.escape(name) + r"[ \t]*\(")
+        for m in lit.finditer(body):
+            e = _balanced(body, m.end())
+            if e >= 0 and body[e:e + 200].lstrip().startswith("{") and not re.match(r"[ \t]*[A-Za-z_]", body[max(0, m.start() - 1):m.start()]):
+                return line
+        for i, p in enumerate(params):
+            for m in re.finditer(r"(?<![A-Za-z0-9_])" + re.escape(p) + r"[ \t]*##[ \t]*([A-Za-z0-9_]+)[ \t]*\(", body):
+                suffix = m.group(1)
+                e = _balanced(body, m.end())
+                if not (name.endswith(suffix) and len(name) > len(suffix) and e >= 0 and body[e:e + 200].lstrip().startswith("{")):
+                    continue
+                for src in [code] + sib:
+                    if any(len(a) > i and a[i] == name[:-len(suffix)] for a in _args(src, mname)):
+                        return line
     return None
 
 
@@ -70,7 +126,8 @@ def scanned_files(args):
             for d, ds, fs in os.walk(a):
                 ds.sort()
                 for f in sorted(fs):
-                    yield os.path.join(d, f)
+                    if not f.startswith("test_"):   # a test file holds synthetic citations as its inputs; it is not a product source
+                        yield os.path.join(d, f)
         else:
             yield a
 
@@ -94,7 +151,10 @@ def main():
             continue
         if full not in cache:
             cache[full] = open(full, encoding="utf-8", errors="replace").read()
-        line = definition(cache[full], fn)
+        d = os.path.dirname(full)
+        sibs = [open(os.path.join(d, x), encoding="utf-8", errors="replace").read() for x in sorted(os.listdir(d))
+                if x != os.path.basename(full) and x.endswith((".c", ".h")) and os.path.isfile(os.path.join(d, x))]
+        line = definition(cache[full], fn, sibs)
         if line is None:
             errors.append("wine-9.0:%s:%s: no definition of %s in %s (cited by %s)" % (p, fn, fn, p, ", ".join(sorted(users))))
             continue

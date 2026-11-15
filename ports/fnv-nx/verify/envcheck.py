@@ -37,7 +37,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 FORMAT = "fnvnx-env/1"
 PROGRAMS = ["strace", "busybox", "gcc", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-nm", "aarch64-linux-gnu-readelf",
-            "aarch64-linux-gnu-as", "aarch64-linux-gnu-ld", "aarch64-linux-gnu-objcopy", "ar", "as", "ld", "clang", "git", "ldd", "true", "g++", "llvm-config-18"]
+            "aarch64-linux-gnu-as", "aarch64-linux-gnu-ld", "aarch64-linux-gnu-objcopy", "ar", "as", "ld", "clang", "git", "ldd", "true", "g++", "llvm-config-18",
+            "x86_64-linux-gnu-objdump"]   # the x86-64 decoder of objstub_x64.py (binutils-x86-64-linux-gnu, pinned)
 UNIT_CC = "aarch64-linux-gnu-g++"  # the unit stage ingests its trees whole
 HOST_GCC_PROGS = ["cc1", "cc1plus", "collect2"]  # gcc -print-prog-name=: what the host gcc runs for the static probe / -fsyntax-only
 HOST_GCC_FILES = ["libc.a", "crt1.o", "libgcc.a", "libgcc_eh.a", "libstdc++.so"]  # gcc -print-file-name=: what `gcc -static` links
