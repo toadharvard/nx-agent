@@ -1548,3 +1548,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 09:25 **L3a regression report.** c4544e18b lost 7cece903a (the pinned python modules' sibling *.libs). As a result gmpy2 fails, and every objects_of root is red.
   - Fix: w15 cherry-picks L3a w8 29598c8e9 into cand2.
   - The bootguest native symbols are fnvnx_native_disp_table, fnvnx_native_g and fnvnx_native_phf_params (owner L3a), passed to w12.
+- 09:26 **w24 archived** at w24-gatekeys 0e00f9d38 (cand2 merged in, rtasm in REQUIRED, onedef/guest_link/uses fixed; bootmachine and bootunmap pass on cand2).
+  - Left to w15: test_gates (2 per-file-cache cases), test_objstub errno_accessor, test_rtasm (a).
+  - Off path for now: the selftests index cache, the warm timings.
