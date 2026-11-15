@@ -425,7 +425,7 @@
    "property": "size_t is unsigned int",
    "msvc": "unsigned int on x86",
    "gcc": "unsigned int (-mabi=ilp32 plus the msvcmodel SIZE_TYPE)",
-   "mechanism": "msvcmodel.patch",
+   "mechanism": "msvcmodel.patch hunk in gcc/config/aarch64/aarch64.h: SIZE_TYPE / PTRDIFF_TYPE under TARGET_ILP32",
    "kind": "patch",
    "status": "closed",
    "doc": [
@@ -441,7 +441,7 @@
    "property": "ptrdiff_t: a 4-byte signed integer; its identity (int) is cl 15.00's own typedef",
    "msvc": "long integer, 4 bytes",
    "gcc": "int (4 bytes)",
-   "mechanism": "msvcmodel.patch",
+   "mechanism": "msvcmodel.patch hunk in gcc/config/aarch64/aarch64.h: SIZE_TYPE / PTRDIFF_TYPE under TARGET_ILP32",
    "kind": "patch",
    "status": "closed",
    "doc": [
@@ -458,7 +458,7 @@
    "property": "operator new[] cookie and the sized delete[] argument",
    "msvc": "a 4-byte element count before the array when the class has a non-trivial destructor; the size passed to delete[]",
    "gcc": "as MSVC after the patch",
-   "mechanism": "msvcmodel.patch (cp/init.cc, cp/decl.cc cookie hunks)",
+   "mechanism": "msvcmodel.patch hunks in gcc/cp/init.cc, gcc/cp/call.cc, gcc/cp/class.cc and gcc/targhooks.cc",
    "kind": "patch",
    "status": "closed",
    "doc": [],
