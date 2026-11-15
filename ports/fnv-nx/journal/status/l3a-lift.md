@@ -1117,3 +1117,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Whole pack (2c3591efc tree): 4096 units, 143,100 functions, 5,523,891 sites. 657 functions have more than 1000 sites. b3c has 28,576 sites, about 85k stack vars.
   - Decision: measure rule 1, always_inline value access functions with no proxy object and the same memory order, as lift/pack@valfn. Checks: equal counts of ordering instructions and their per-function multiset, CC time, RSS, .text.
   - A per-function size bound is rejected.
+- 22:29 Revision: the root cause of the 3 stack objects per site is in fnvnx_order (L2). address_taken_scan makes every asm operand address-taken, whatever its constraint. valfn is dropped.
+  - Rule sent to L2: an operand is address-taken iff its constraint allows memory, by GCC's parse_*_constraint `allows_mem`.
+  - w12 measures a local patch through recipe.py: CC, RSS, stack vars, and the multiset of ordering instructions.
