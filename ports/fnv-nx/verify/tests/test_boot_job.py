@@ -19,15 +19,32 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 NX = os.path.dirname(VERIFY)
+REPO = os.path.dirname(os.path.dirname(NX))
 sys.path.insert(0, HERE)
 sys.path.insert(0, VERIFY)
 import boot  # noqa: E402
 import test_bootmachine as tb  # noqa: E402
 import test_bootgpu as tg  # noqa: E402
 
-JOB = os.path.join(NX, "farm", "boot_job.sh")
 SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
+
+
+def make_tree(name):
+    """A fixture tree: a temp git copy of the checkout the job runs from (envcheck reads admit.json and the recipes of the whole checkout). The
+    job reads verify/env.json and verify/boot_inputs.json only from its own tree, so a test that needs another pin or env file edits this
+    copy and runs this tree's farm/boot_job.sh. Returns the tree's ports/fnv-nx."""
+    top = os.path.join(SCRATCH, "tree-" + name)
+    shutil.copytree(REPO, top, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+    t = os.path.join(top, "ports", "fnv-nx")
+    subprocess.run(["git", "init", "-q", top], check=True)
+    subprocess.run(["git", "-C", top, "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", top, "-c", "user.name=t", "-c", "user.email=t@invalid", "commit", "-q", "-m", "fixture"], check=True)
+    return t
+
+
+TREE = make_tree("main")
+JOB = os.path.join(TREE, "farm", "boot_job.sh")
 LINE = "fnvnx-start: identity ok"
 TID = "ef" * 32
 # the contract's own formats (see verify/bootinputs.py): milestones.tsv has the exe_entry row only (the contract's row grammar); the loader console lines
@@ -47,6 +64,8 @@ def _exe():
     """the player's FalloutNV.exe: the pinned gamedata/exe input of verify/tests/inputs.json (the gate fetches it by commit + tree hash)"""
     with open(os.path.join(os.environ["FNVNX_INPUT_EXE"], "FalloutNV.exe"), "rb") as f:
         return f.read()
+PINS = os.path.join(TREE, "verify", "boot_inputs.json")   # the main fixture tree's pin file: a fixture set (not the real fonts) in the test's bare repository
+FONT_FILES = {"fonts/A.ttf": b"alpha", "fonts/Sub/B.ttf": b"bravo"}
 
 
 EXE = _exe()
@@ -60,18 +79,9 @@ def git(*args, cwd=None, check=True):
 
 
 def lifted_elf(mode):
-    """the guest of test_bootmachine.build(mode) with .text renamed to .text.fnvl (crt0 header patched as build() does)"""
-    renamed = os.path.join(SCRATCH, "g%d.fnvl.elf" % mode)
-    raw_path = tb.build(mode, tg.MODE50)[1]   # MODE 50: the renderer guest of test_bootgpu (real nxgpu calls)
-    subprocess.run(["aarch64-linux-gnu-objcopy", "--rename-section", ".text=.text.fnvl", raw_path, renamed], check=True)
-    data = bytearray(open(renamed, "rb").read())
-    phoff, phnum = struct.unpack_from("<I", data, 28)[0], struct.unpack_from("<H", data, 44)[0]
-    loads = [p for p in (struct.unpack_from("<8I", data, phoff + 32 * i) for i in range(phnum)) if p[0] == 1]
-    lo = min(p[3] for p in loads) // 4096 * 4096
-    hi = (max(p[3] + p[5] for p in loads) + 4095) // 4096 * 4096
-    first_x = next(p for p in loads if p[6] & 1)
-    struct.pack_into("<III", data, first_x[1] + 16, lo, hi - lo, 1)
-    return bytes(data)
+    """the guest image of MODE as the recipe builds it: the three fnvboot_* functions stand for lifted code and sit in the input section
+    .text.fnvl by their own source (tests/bootguest/guest.c); the crt0 header words are written by the recipe's ldcheck stage"""
+    return tb.build(mode)[0]
 
 
 def publish_branch(name, files):
@@ -80,6 +90,7 @@ def publish_branch(name, files):
     git("init", "-q", work)
     git("checkout", "-q", "--orphan", name, cwd=work)
     for fn, data in files.items():
+        os.makedirs(os.path.dirname(os.path.join(work, fn)), exist_ok=True)
         with open(os.path.join(work, fn), "wb") as f:
             f.write(data)
     git("add", "-A", cwd=work)
@@ -87,12 +98,16 @@ def publish_branch(name, files):
     git("push", "-q", BARE, "%s:refs/heads/%s" % (name, name), cwd=work)
 
 
-def run_job(args, env_extra=None, game=GAME):
-    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8"}
+QUANTUM = 20000
+
+
+def run_job(args, env_extra=None, game=GAME, tree=None):
+    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8", "GATE_CACHE": os.path.join(HOME, "gate-cache")}
     if game:
         env["GAME_DIR"] = game
     env.update(env_extra or {})
-    r = subprocess.run(["bash", JOB, *args], env=env, capture_output=True, text=True)
+    args = list(args) if "--quantum" in args else [*args, "--quantum", str(QUANTUM)]
+    r = subprocess.run(["bash", os.path.join(tree or TREE, "farm", "boot_job.sh"), *args], env=env, capture_output=True, text=True)
     return r.returncode, r.stdout, r.stderr
 
 
@@ -135,7 +150,7 @@ def main():
     rd = lambda d, n: open(os.path.join(d, n), "rb").read()  # noqa: E731
     lib, meta_j, ar, build_j = rd(gdir, "libnxgl4.so"), rd(gdir, "meta.json"), rd(bdir, "libfnvnx-d3d9.a"), rd(bdir, "build.json")
     GB, BB = tg.NXGL4["ref"], tg.BRIDGE["ref"]
-    gpu_elf = lifted_elf(50)
+    gpu_elf = lifted_elf(80)
     sha = lambda b: hashlib.sha256(b).hexdigest()  # noqa: E731
     jd = lambda d: json.dumps(d).encode()  # noqa: E731
     gman = lambda render: jd(dict({"schema": "fnvnx-elf/1", "name": "guest.elf", "size": len(gpu_elf), "sha256": sha(gpu_elf), "parts": []},
@@ -156,6 +171,16 @@ def main():
     publish_branch("gpu-othersha", {"libnxgl4.so": lib, "meta.json": jd(dict(json.loads(meta_j), sha256="0" * 64))})
     publish_branch("gpu-empty", {"README": b"no library here\n"})
     publish_branch("gpu-bad", {"libnxgl4.so": b"not an elf\n", "meta.json": jd(dict(json.loads(meta_j), sha256=sha(b"not an elf\n")))})
+    # the declared inputs: a fixture font set + its sums file at the root of a branch; the pin file names that commit
+    fsums = "".join("%s  %s\n" % (hashlib.sha256(v).hexdigest(), k) for k, v in sorted(FONT_FILES.items())).encode()
+    publish_branch("test/fonts", dict(FONT_FILES, SHA256SUMS=fsums))
+    fcommit = git("rev-parse", "refs/heads/test/fonts", cwd=BARE).strip()
+
+    def write_pins(path, sums_sha, commit=fcommit):
+        open(path, "w").write(json.dumps({"format": "fnvnx-boot-inputs/1", "inputs": [
+            {"name": "fonts", "repo": "fnv-nx-build", "ref": "test/fonts", "commit": commit, "path": "fonts", "sums": "SHA256SUMS",
+             "sums_sha256": sums_sha, "mount": "switch/fnv/fonts"}]}))
+    write_pins(PINS, hashlib.sha256(fsums).hexdigest())
     tb.case("setup: contract branches built", True)
 
     rc, out, err = run_job(["testid"])
@@ -172,9 +197,9 @@ def main():
     elf_commit = git("rev-parse", "refs/heads/l1-contract/elf/testid", cwd=BARE).strip()
     nx_commit = git("rev-parse", "HEAD", cwd=NX).strip()
     tb.case("meta.json keys and values", sorted(meta) == sorted(["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc",
-            "seconds", "limit_instructions", "profile", "host_cpu_model", "softfloat", "data_items"])
+            "seconds", "limit_instructions", "quantum", "profile", "host_cpu_model", "softfloat", "data_items"])
             and meta["elf_id"] == "testid" and meta["elf_branch_commit"] == elf_commit and meta["nx_agent_commit"] == nx_commit
-            and meta["exe_sha256"] == hashlib.sha256(EXE).hexdigest() and meta["boot_rc"] == 0 and meta["limit_instructions"] is None
+            and meta["exe_sha256"] == hashlib.sha256(EXE).hexdigest() and meta["boot_rc"] == 0 and meta["limit_instructions"] is None and meta["quantum"] == QUANTUM
             and meta["profile"] == "handheld" and meta["host_cpu_model"] and meta["softfloat"] == "absent", meta)
     tb.case("commit message is one line without a trailer", len(msg.rstrip("\n").splitlines()) == 1 and "Co-Authored-By" not in msg, msg)
     blob = b"\n".join(files.values()).decode(errors="replace") + msg
@@ -186,6 +211,16 @@ def main():
     tb.case("console file holds the guest's line", LINE in files.get("OUT.console.txt", b"").decode(), files.get("OUT.console.txt"))
     tb.case("milestones: loader console line of run.txt reached in order, then exe-entry",
             [m["name"] for m in doc.get("milestones", [])] == ["start-01", "exe-entry"] and all(m["reached"] for m in doc["milestones"]), doc.get("milestones"))
+    tb.case("OUT.json inputs.declared records {name, commit, sums_sha256, files}", doc.get("inputs", {}).get("declared") ==
+            [{"name": "fonts", "commit": fcommit, "sums_sha256": hashlib.sha256(fsums).hexdigest(), "files": 2}], doc.get("inputs"))
+    n_pub = git("rev-parse", "refs/heads/l4-verify/boot/testid", cwd=BARE).strip()
+    for what, pinfile in (("a wrong sums hash", ("w1", hashlib.sha256(fsums).hexdigest()[::-1], fcommit)),
+                          ("a commit the repository does not have", ("w2", hashlib.sha256(fsums).hexdigest(), "1" * 40))):
+        bt = make_tree(pinfile[0])
+        write_pins(os.path.join(bt, "verify", "boot_inputs.json"), pinfile[1], pinfile[2])
+        rc3, out3, err3 = run_job(["testid"], tree=bt)
+        tb.case("declared input with %s: the job ends as input-error before the boot, nothing published" % what, rc3 == 1 and "input-error" in err3
+                and out3 == "" and git("rev-parse", "refs/heads/l4-verify/boot/testid", cwd=BARE).strip() == n_pub, (rc3, out3, err3[-300:]))
     rc2, out2, err2 = run_job(["testid"])
     files2 = published("l4-verify/boot/testid")[0]
     tb.case("second run republishes byte-equal OUT.json and console", rc2 == 0 and files2.get("OUT.json") == files["OUT.json"]
@@ -245,6 +280,10 @@ def main():
     tb.case("bad profile: job fails", rc == 1 and "--profile" in err, (rc, err[-400:]))
     rc, out, err = run_job(["testid", "--limit-instructions", "0"])
     tb.case("bad limit: job fails", rc == 1 and "--limit-instructions" in err, (rc, err[-400:]))
+    rc, out, err = run_job(["testid", "--quantum", "0"])
+    tb.case("bad quantum: job fails", rc == 1 and "--quantum" in err, (rc, err[-400:]))
+    r = subprocess.run(["bash", os.path.join(TREE, "farm", "boot_job.sh"), "testid"], env={"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "GAME_DIR": GAME, "LANG": "C.UTF-8"}, capture_output=True, text=True)
+    tb.case("no quantum: job fails (no default)", r.returncode == 1 and "--quantum" in r.stderr, (r.returncode, r.stderr[-400:]))
     # --- the renderer: --gpu-branch
     genv = {}   # the host packages come from the declared environment (verify/env.json); the job requires them and installs nothing
     rc, out, err = run_job(["gpuid", "--gpu-branch", GB], genv)
@@ -254,12 +293,16 @@ def main():
     if rc == 0:
         files, msg, cm = published("l4-verify/boot/gpuid")
         fr = sorted(n for n in files if n.startswith("frames/"))
-        tb.case("published: OUT.json, console, spec, meta and the first 3 frames (.rgba + .txt) only",
+        tb.case("published: OUT.json, console, spec, meta and every distinct frame (<key>.rgba + <key>.txt)",
                 sorted(n for n in files if "/" not in n) == ["OUT.console.txt", "OUT.json", "meta.json", "spec.json"]
-                and fr == ["frames/frame_%06u.%s" % (i, e) for i in range(3) for e in ("rgba", "txt")], sorted(files))
-        tb.case("frame files hold the library's output", files["frames/frame_000001.txt"] == b"1280 720\n"
-                and len(files["frames/frame_000001.rgba"]) == 1280 * 720 * 4, files.get("frames/frame_000001.txt"))
+                and fr == sorted("frames/%s.%s" % (k, e) for k in {f["sha256"] for f in json.loads(files["OUT.json"])["frames"]} for e in ("rgba", "txt")), sorted(files))
+        k0 = json.loads(files["OUT.json"])["frames"][0]["sha256"]
+        tb.case("frame files hold the library's output, named by their key", files["frames/%s.txt" % k0] == b"1280 720\n"
+                and len(files["frames/%s.rgba" % k0]) == 1280 * 720 * 4
+                and hashlib.sha256(files["frames/%s.txt" % k0] + files["frames/%s.rgba" % k0]).hexdigest() == k0, k0)
         doc, meta = json.loads(files["OUT.json"]), json.loads(files["meta.json"])
+        tb.case("OUT.json frames: a record for every present (4), one image pair published per distinct key", [f["n"] for f in doc["frames"]] == [1, 2, 3, 4]
+                and len(fr) == 2 * len({f["sha256"] for f in doc["frames"]}), (doc.get("frames"), fr))
         tb.case("OUT.json gpu record, meta.json gpu fields", doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"]
                 and meta["gpu_branch"] == GB
                 and meta["gpu_branch_commit"] == git("rev-parse", "refs/heads/" + GB, cwd=BARE).strip(), (doc.get("gpu"), meta))
@@ -285,6 +328,19 @@ def main():
     tb.case("library that does not load: job fails", rc == 1 and "does not load" in err, (rc, err[-300:]))
     rc, out, err = run_job(["testid", "--gpu-branch", "-bad"], genv)
     tb.case("bad --gpu-branch value: job fails", rc == 1 and "--gpu-branch" in err, (rc, err[-300:]))
+    # nothing is installed: a host that does not match the declared environment ends the job as an input error before anything is
+    # fetched or published (the per-item mismatch cases are test_envcheck's; here one real envcheck mismatch, in a fixture tree)
+    et = make_tree("env")
+    ep = os.path.join(et, "verify", "env.json")
+    d = json.load(open(ep))
+    d["programs"].append("no-such-program-xyz")
+    json.dump(d, open(ep, "w"), sort_keys=True)
+    rc, out, err = run_job(["envbad"], tree=et)
+    tb.case("envcheck mismatch: input error rc 1 naming setup_verdict_env.sh, nothing fetched or published",
+            rc == 1 and "input-error" in err and "setup_verdict_env.sh" in err and "no-such-program-xyz" in err and out == ""
+            and "envbad" not in git("for-each-ref", "refs/heads", cwd=BARE), (rc, err[-400:]))
+    src = open(os.path.join(NX, "farm", "boot_job.sh")).read()
+    tb.case("job text installs nothing", not any(w in src for w in ("apt-get install", "pip install", "sudo ")), None)
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 

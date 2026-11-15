@@ -99,5 +99,102 @@ bp.fault("open", "/x", errno.ENOENT)
 bp.fault("open", "/x", errno.ENOENT)
 case("faults counted, mkdir EEXIST is none", bp.faults == {("open", "ENOENT", "/x"): 2}, bp.faults)
 
+# declared FalloutPrefs.ini: bootpath.py PORT_NAMES: port entries of sdmc:/switch/fnv stay on root
+PREFS = "sdmc:/switch/fnv/user/Documents/My Games/FalloutNV/FalloutPrefs.ini"
+
+
+def listing(d):
+    return sorted(os.path.join(a, n) for a, ds, fs in os.walk(d) for n in ds + fs)
+
+
+root, game = fresh("p1"), fresh("p1g")
+touch(game, "Data", "FalloutNV.esm")
+bp = bootpath.BootPath(root, game)
+want = os.path.join(root, "switch", "fnv", "user", "Documents", "My Games", "FalloutNV", "FalloutPrefs.ini")
+case("prefs with game: under root/switch/fnv/user (bootpath.py PORT_NAMES: port entries stay on root)",
+     bp.resolve(PREFS) == want, bp.resolve(PREFS))
+case("prefs with game: not under game", not bp.resolve(PREFS).startswith(game + os.sep))
+# a missing path keeps the given spelling, so before creation compare case-folded; after it, exactly
+case("prefs with game: any case of User stays on root (bootpath.py PORT_NAMES)",
+     all(bp.resolve(PREFS.replace("/user/", "/" + u + "/")).casefold() == want.casefold() and
+         not bp.resolve(PREFS.replace("/user/", "/" + u + "/")).startswith(game + os.sep)
+         for u in ("User", "USER", "uSeR")))
+# a file created through the resolution lands on root; game unchanged
+before = listing(game)
+h = bp.resolve(PREFS)
+os.makedirs(os.path.dirname(h), exist_ok=True)   # the platform's own mkdir of the profile dir
+bp.changed()
+with open(h, "w") as fh:
+    fh.write("[Display]\n")
+case("prefs created: lands on root (bootpath.py PORT_NAMES)", os.path.isfile(want) and bp.resolve(PREFS) == want)
+case("prefs created: game listing unchanged", listing(game) == before)
+bp.changed()
+case("prefs created: any case of User resolves to the same file",
+     all(bp.resolve(PREFS.replace("/user/", "/" + u + "/")) == want for u in ("User", "USER", "uSeR")))
+case("prefs created: other spelling finds the same file",
+     bp.resolve(PREFS.replace("FalloutPrefs.ini", "falloutprefs.INI").replace("/user/", "/User/")) == want)
+
+# no game: the same path under root/switch/fnv/user
+root = fresh("p2")
+bp = bootpath.BootPath(root)
+case("prefs without game: under root/switch/fnv/user (bootpath.py PORT_NAMES)",
+     bp.resolve(PREFS) == os.path.join(root, "switch", "fnv", "user", "Documents", "My Games", "FalloutNV",
+                                       "FalloutPrefs.ini"))
+
+# BootPath creates neither the user dir nor the file (the platform does)
+for n, g in (("p3", None), ("p4", fresh("p4g"))):
+    root = fresh(n)
+    bootpath.BootPath(root, g)
+    u = os.path.join(root, "switch", "fnv", "user")
+    case("BootPath(%s) does not create user dir or FalloutPrefs.ini" % ("root, game" if g else "root"),
+         not os.path.exists(u))
+
+# declared input: sdmc:/switch/fnv/fonts (bootpath.py PORT_NAMES, READ_ONLY): on the card's root in every mode, never in the game
+RO = ["switch/fnv/fonts"]   # the mount list of verify/boot_inputs.json (boot.py passes it)
+for tag, with_game in (("with game", True), ("without game", False)):
+    root = fresh("f1" if with_game else "f2")
+    game = fresh("f1g") if with_game else None
+    touch(root, "switch", "fnv", "fonts", "Sub", "LiberationSans-Regular.ttf")
+    if with_game:
+        touch(game, "fonts", "game-own.ttf")        # the game directory's own "fonts" must never be reached
+    bp = bootpath.BootPath(root, game, read_only=RO)
+    want = os.path.join(root, "switch", "fnv", "fonts", "Sub", "LiberationSans-Regular.ttf")
+    case("fonts %s: resolves under root/switch/fnv/fonts" % tag, bp.resolve("sdmc:/switch/fnv/fonts/Sub/LiberationSans-Regular.ttf") == want,
+         bp.resolve("sdmc:/switch/fnv/fonts/Sub/LiberationSans-Regular.ttf"))
+    case("fonts %s: case-folded FONTS/SUB/..." % tag, bp.resolve("SDMC:/Switch/FNV/FONTS/SUB/liberationsans-regular.TTF") == want,
+         bp.resolve("SDMC:/Switch/FNV/FONTS/SUB/liberationsans-regular.TTF"))
+    case("fonts %s: backslashes and .. stay on the same file" % tag, bp.resolve("sdmc:\\switch\\fnv\\x\\..\\fonts\\Sub\\LiberationSans-Regular.ttf") == want)
+    if with_game:
+        case("fonts with game: the game's own fonts/ is not reached", bp.resolve("sdmc:/switch/fnv/fonts/game-own.ttf") ==
+             os.path.join(root, "switch", "fnv", "fonts", "game-own.ttf") and not os.path.exists(bp.resolve("sdmc:/switch/fnv/fonts/game-own.ttf")))
+        case("fonts with game: the alias mount fnvnx/game/fonts is the game's", bp.resolve("sdmc:/fnvnx/game/fonts/game-own.ttf") ==
+             os.path.join(game, "fonts", "game-own.ttf"))
+    case("fonts %s: read_only for the dir, below it, any case, ..-normalised" % tag,
+         all(bp.read_only(s) for s in ("sdmc:/switch/fnv/fonts", "/switch/fnv/fonts/Sub/x.ttf", "SDMC:/SWITCH/FNV/Fonts/new", "/a/../switch/fnv/fonts/q")))
+    case("fonts %s: read_only is false elsewhere (sibling, parent, game-side alias)" % tag,
+         not any(bp.read_only(s) for s in ("/switch/fnv", "/switch/fnv/fonts2", "/switch/fnv/user/fonts", "/fnvnx/game/fonts/x", "/fonts", "/switch")))
+
+# the read-only set is the mount list given, not a fonts-only check
+bp = bootpath.BootPath(fresh("f4"), None, read_only=["switch/fnv/fonts", "Switch/FNV/other/dir"])
+case("read_only follows the mount list: two mounts, case-folded", bp.read_only("/switch/fnv/other/dir/x") and bp.read_only("/SWITCH/fnv/FONTS")
+     and not bp.read_only("/switch/fnv/other") and not bp.read_only("/switch/fnv/other/dirx"))
+case("no mounts: nothing is read-only (even fonts)", not bootpath.BootPath(fresh("f5")).read_only("/switch/fnv/fonts/a.ttf"))
+
+# casefold, not lower: resolve matches host entries by str.casefold, so a spelling equal to the mount only under casefold reaches it and must be read-only
+root = fresh("f6")
+touch(root, "switch", "fnv", "fontss", "a.ttf")
+bp = bootpath.BootPath(root, None, read_only=["switch/fnv/fontss"])
+sp = "sdmc:/switch/fnv/FONT\u00df/a.ttf"   # "ß".casefold() == "ss"; "ß".lower() == "ß"
+case("casefold-only spelling reaches the mount (resolve)", bp.resolve(sp) == os.path.join(root, "switch", "fnv", "fontss", "a.ttf"), bp.resolve(sp))
+case("casefold-only spelling of a read-only mount is read_only (ß ~ ss, final sigma)", bp.read_only(sp) and bp.read_only("/SWITCH/fnv/FONTSS")
+     and bootpath.BootPath(fresh("f7"), None, read_only=["switch/fnv/\u03c3\u03c2"]).read_only("/switch/fnv/\u03a3\u03a3/x"))
+case("a mount given in a casefold-only spelling matches too", bootpath.BootPath(fresh("f8"), None, read_only=["Switch/fnv/FONT\u00df"]).read_only("/switch/fnv/fontss/a"))
+
+# fonts alone in switch/fnv does not make it an install: no game -> the game dir stays root/fnvnx/game
+root = fresh("f3")
+touch(root, "switch", "fnv", "fonts", "a.ttf")
+bp = bootpath.BootPath(root)
+case("a card holding only fonts has no install in switch/fnv", bp.game == os.path.join(root, "fnvnx", "game"), bp.game)
+
 print("%d failed" % len(FAILED) if FAILED else "all %d passed" % N[0])
 sys.exit(1 if FAILED else 0)
