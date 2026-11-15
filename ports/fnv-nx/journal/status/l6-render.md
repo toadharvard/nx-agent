@@ -1283,3 +1283,8 @@ Paused: w3b, w4, farm; no other work.
     - objstub: 2181/2247, 78 findings; the only render one is that sm_link build-red.
     - Lead review: envq.py reads its importer's argv[4], so the argument layout is written twice. w6 (doing) replaces it with envq.load(hdr, spec), called by gen_env.
 - bottleneck: the w12 recipe store defect (merge1) for sm_link; L1 cand3 and cand4.
+- 21:48Z w6 2e97496ab: the cand4 candidate at w12, replacing 42f2c238f.
+    - envq.load(hdr, spec) is envq's one entry, with no argv; gen_env parses its arguments once.
+    - d3d9 product byte-identical; test_env_ident passes; abspath render 0; d3d9total 332/332; test 45/45.
+    - sm_link waits on w12's merge1 store fix. COM_SPEC rebase follows the cand3 head.
+- bottleneck: w12's recipe merge1 store defect (sm_link); L1 cand3 and cand4.
