@@ -1692,3 +1692,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The w6-root head is now 98cd75f28: D9_SPEC is a bridgefacts output, and gen_combridge takes it as an argument.
   - Hold w5-smlink 2d61e9fb9; L6 sends a new head after its next sm_link run.
   - hostabi becomes a header-only root for guest and host, owner L5. w12 adds its admit rows in cand3. Until then, platform is red on the header-home rule.
+- 15:22 Blocker on w12L2 52717c148: the plugin:fnvnx_names stage lacks toolchain/layout. Rule: plugin stages go PP→CC through unitstage, inputs are the depfile closure over declared roots and their uses; names declares uses on layout (a header-only root if needed). w12 sends the commit to L6A w6.
