@@ -161,3 +161,10 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - hostabi, manifest, lib/sha256 and rt/ from L5 a7b52eb38.
   - bootrt recipe build GREEN (cold 4 stages; warm 0 run, 4 hits). test_bootrt 8/8. Recipe check valid for hostabi, sha256, platform, bootrt, bootguest and @m60.
   - 4.1 link red before ldcheck: this tree's platform/ (L1 lineage) still uses the removed cpu_count slot and FNVNX_ROLE_AUDIO. Decision: take L5 a7b52eb38's platform/, shim/ and loader/ as one unit (w6 doing).
+
+## 2026-11-15 00:15 — 4.1 bootguest@m0 cross-layer inputs
+- Status: red at ld:tests/bootguest because the L5 platform root (a7b52eb38) needs two inputs this tree lacks:
+  - contract/reachreq.py (owner L1);
+  - toolchain/ftoi/f2i_builtins.inc together with gen_f2i_builtins.py and the changed fnvnx_ftoi.cc (owner L2).
+- Decision: the working line w6-r takes both from L5 a7b52eb38 unchanged. cand1 gets them from their owners; L1 has been told.
+- w6 (session_01KmtZKSWZWnNyxn2dMg6oFE): doing the step 4 ldcheck set (unresolved and weak-undefined, with owners), then step 5 (the runnable set).
