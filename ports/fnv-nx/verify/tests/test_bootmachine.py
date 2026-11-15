@@ -26,6 +26,7 @@ HOSTABI_DIR = os.path.join(REPO, recipe.include_dir(recipe.load_admit(REPO), "po
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
+import bootsock  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="bm-")
 atexit.register(shutil.rmtree, TMP, ignore_errors=True)
@@ -621,7 +622,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("no-record", plat(2, 0x7777, 1, 0, 2));
 #elif MODE == 56
     static FnvnxWireSockaddr to, lo;
-    static FnvnxWireAddrinfo recs[3];
+    static FnvnxTzAt recs[3];
     static char buf[4];
     uint32_t ec = 0x77;
     uint64_t h1 = sk(16, 3, 2, 1, 0, 0, 0), h2 = sk(16, 3, 2, 2, 17, 0, 0);
@@ -954,8 +955,8 @@ def main():
     case("limit_host_calls ends with reason limit", rl["reason"] == "limit" and rl["host_calls"] == 3, rl)
 
     n_slots = sum(1 for n in bootmachine.SLOTS if callable(getattr(boothost.Services, "h_" + n, None)))
-    case("46 slots, all resolved at construction", len(bootmachine.SLOTS) == 46 == n_slots
-        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root)).handlers) == 46)
+    case("45 slots, all resolved at construction", len(bootmachine.SLOTS) == 45 == n_slots
+        and len(bootmachine.Machine(elf0, plan0, boothost.Services(root)).handlers) == 45)
 
     class NoPad(boothost.Services):
         h_pad_read = None
@@ -1093,17 +1094,12 @@ def main():
          "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
     sw = open(os.path.join(HOSTABI_DIR, "fnvnx", "sockwire.h")).read()
     lst = lambda name: [int(v, 0) for v in re.findall(r"X\(\w+, (\w+)\)", re.search(r"#define " + name + r"\(X\)((?:[^\n]*\\\n)*[^\n]*)", sw).group(1))]
-    nums = dict(re.findall(r"#define FNVNX_(WE_\w+|WEAI_\w+) (\d+)", sw))
-    eai = dict(re.findall(r"X\(EAI_(\w+), (\d+)\)", sw))
-    case("machine's wire constants equal the fixture sockwire.h (errno numbers, AF and type lists, AI mask, EAI numbers, POLLNVAL)",
+    nums = dict(re.findall(r"#define FNVNX_(WE_\w+) (\d+)", sw))
+    case("machine's wire constants equal the fixture sockwire.h (errno numbers, AF and type lists, POLLNVAL)",
          tuple(lst("FNVNX_WIRE_AF_LIST")) == bootmachine.WIRE_AF and tuple(lst("FNVNX_WIRE_SOCKTYPE_LIST")) == bootmachine.WIRE_SOCKTYPE
-         and functools.reduce(lambda x, y: x | y, lst("FNVNX_WIRE_AI_LIST")) == bootmachine.WIRE_AI_MASK
-         and int(nums["WE_INVAL"]) == bootmachine.WE_INVAL and int(nums["WE_FAULT"]) == bootmachine.WE_FAULT
-         and int(nums["WE_OVERFLOW"]) == bootmachine.WE_OVERFLOW
-         and (int(eai["BADFLAGS"]), int(eai["NONAME"]), int(eai["FAMILY"]), int(eai["SOCKTYPE"])) == (
-             bootmachine.WEAI_BADFLAGS, bootmachine.WEAI_NONAME, bootmachine.WEAI_FAMILY, bootmachine.WEAI_SOCKTYPE)
+         and int(nums["WE_INVAL"]) == bootmachine.WE_INVAL and int(nums["WE_AGAIN"]) == bootsock.WE_AGAIN
          and "X(EBADF, 9)" in sw and "X(EAFNOSUPPORT, 97)" in sw and int(re.search(r"FNVNX_WPOLLNVAL (0x\w+)", sw).group(1), 16) == bootmachine.WPOLLNVAL,
-         (nums, eai))
+         nums)
 
     class NoMsg(boothost.Services):
         plat_message = None
@@ -1187,8 +1183,8 @@ def main():
     rows, hslots = parse_totality(os.path.join(HOSTABI_DIR, "fnvnx", "hostapi.h"))
     SERVED = list(range(1, 10)) + list(range(11, 15)) + list(range(16, 27)) + [30, 31, 34, 35, 36, 37]
     mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root))
-    case("header: 30 services of module 11 and 46 slots parsed", len(rows) == 30 and sorted(rows) == SERVED
-         and len(hslots) == 46, (len(rows), len(hslots)))
+    case("header: 30 services of module 11 and 45 slots parsed", len(rows) == 30 and sorted(rows) == SERVED
+         and len(hslots) == 45, (len(rows), len(hslots)))
     case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
          and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
     served_decl = {f for f in rows if f in mach0.plat or f in bootmachine.SOCK_SERVICES}
