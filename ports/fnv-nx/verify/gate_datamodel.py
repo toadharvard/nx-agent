@@ -11,7 +11,7 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
     with the pin's driver (the object was built by that tree, not by a name).
   data-model item `<root>:datamodel:<row id>`, one per row of DATAMODEL.json (the one table of the exe's data model; no set is written here): the pinned
     C++ driver compiles the case file the row names (its `test` field) under the root's semantic flags, syntax only; the row is certified when its
-    DM("<id>") case exists and the compiler accepted it, and, for a kind=flag row, its `site` flag is in the semantic set. A case with no row is
+    the DM("<id>") case its `check` names exists and the compiler accepted it, and, for a row with a `flag`, that flag is in the semantic set. A row whose `check` is not such a case is red (the gate judges nothing it cannot read). A case with no row is
     an item of its own (`case:<id>`). A row of status `open` pins what the compiler gives today, so its case passes by that.
   unit item, all of: a CC stage document exists for the unit; its argv holds the whole semantic set of the pin ("flags"."semantics", the one source
     recipe.SEMANTICS_FLAGS reads) for the unit's language as ONE ordered run, exactly as recipe.semantics_for derives it from the pinned driver
@@ -34,13 +34,20 @@ import recipe  # noqa: E402
 import targets  # noqa: E402
 
 ILP32 = targets.abi_flag(targets.load())   # the declared guest platform record, not a literal
-DATAMODEL = "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"   # the one table of the exe's data model (L2, fnvnx-datamodel/1); its path is the only name here
-TOOLCHAIN = "ports/fnv-nx/toolchain/"   # a row's "test" ("tests/ldbl/datamodel.cpp: DM(\"S01\")") names its case file relative to this
+DATAMODEL = targets.load()["references"]["datamodel"]   # the one table of the exe's data model (L2, fnvnx-datamodel/2): its path is a reference of the declared targets
+CASE = re.compile(r'^static_assert DM\("(\w+)"\) in (\S+\.cpp)$')   # the form of a row's `check` this gate judges: one DM case of a source file (path from ports/fnv-nx/)
+
+
+def case_of(row):
+    """-> (case file relative to ports/fnv-nx/, case id) of a row from its own `check`, or None when the check is not a static_assert case."""
+    c = row.get("check")
+    m = CASE.match(c) if isinstance(c, str) else None
+    return (m.group(2), m.group(1)) if m else None
 
 
 def case_file(row):
-    """The source file of a row's case, from the row's own `test` field (relative to the toolchain dir)."""
-    return row["test"].split(":")[0].strip()
+    c = case_of(row)
+    return c[0] if c else None
 
 
 def failing(lines):
@@ -57,14 +64,16 @@ def row_why(rows, sem, code, lines, cases):
     why = {}
     for r in rows:
         w = []
-        if r["id"] not in cases:
+        if case_of(r) is None:
+            w.append("check is not a static_assert case: %r" % (r.get("check"),))
+        elif r["id"] not in cases:
             w.append("no case in " + case_file(r))
         if r["id"] in bad:
             w.append("the compiler rejects the case")
         elif code and not bad:
             w.append("the case file does not compile: " + (lines[-1] if lines else "exit %d" % code))
-        if r["kind"] == "flag" and r["site"] not in sem:
-            w.append("flag %s is not in the semantic set" % r["site"])
+        if r.get("flag") and r["flag"] not in sem:
+            w.append("flag %s is not in the semantic set" % r["flag"])
         why[r["id"]] = w
     why.update({"case:" + c: ["a case with no row in " + DATAMODEL] for c in sorted(cases - {r["id"] for r in rows})})
     return why
@@ -122,9 +131,13 @@ def model_rows(repo, root, cxx, sem):
         return 1, [root + ":datamodel"], ["no " + DATAMODEL]
     rows = json.load(open(path))["rows"]
     bad, why = [], []
-    for f in sorted({case_file(r) for r in rows}):
+    unjudged = [r for r in rows if case_of(r) is None]
+    for r in unjudged:
+        bad.append("%s:datamodel:%s" % (root, r["id"]))
+        why.append("%s: check is not a static_assert case: %r" % (r["id"], r.get("check")))
+    for f in sorted({case_file(r) for r in rows} - {None}):
         mine = [r for r in rows if case_file(r) == f]
-        src = os.path.join(repo, TOOLCHAIN, f)
+        src = os.path.join(repo, "ports/fnv-nx", f)
         if not os.path.isfile(src):
             res = {r["id"]: ["no case file " + f] for r in mine}
         else:

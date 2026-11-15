@@ -25,10 +25,18 @@ def arch_flag(cpu):
     return "-march=" + cpu["arch"] + "".join("+" + f for f in cpu["features"])
 
 
-def semantic_prefix(t):
-    """The leading run of the guest semantic flags, from the records: ABI of the platform, architecture and tuning of the CPU, the platform's code model."""
+def semantic_prefix(t, repo=None):
+    """The leading run of the guest semantic flags, from the records: ABI of the platform, architecture and tuning of the CPU, the platform's code model,
+    then the flags of the data-model rows."""
     p, c = t["guest_platform"], t["console_cpu"]
-    return ["-mabi=" + p["abi"], arch_flag(c), "-mtune=" + c["core"].lower()] + list(p["code"])
+    return ["-mabi=" + p["abi"], arch_flag(c), "-mtune=" + c["core"].lower()] + list(p["code"]) + datamodel_flags(t, repo)
+
+
+def datamodel_flags(t, repo=None):
+    """The flags the exe's data model needs, from the rows of the DATAMODEL table the record references: each row's `flag`, in row order."""
+    repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+    with open(os.path.join(repo, t["references"]["datamodel"])) as f:
+        return [r["flag"] for r in json.load(f)["rows"] if r.get("flag")]
 
 
 def abi_flag(t):

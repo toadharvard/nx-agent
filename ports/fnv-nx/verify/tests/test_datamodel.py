@@ -87,7 +87,7 @@ def main():
     cdoc["argv"] = [a for a in cdoc["argv"] if a != "-fno-sized-deallocation"]
     check("a C document with the driver's C subset is green", gd.unit_why("a.c", cdoc, csem, pin) == [], gd.unit_why("a.c", cdoc, csem, pin))
     check("a C document that still holds the C++-only flag is red", "argv holds -fno-sized-deallocation" in gd.unit_why("a.c", doc, csem, pin))
-    rows = [dict(id="S01", kind="flag", site="-fsigned-char", test="tests/x.cpp: DM(\"S01\")"), dict(id="S02", kind="default", site=None, test="tests/x.cpp: DM(\"S02\")")]
+    rows = [dict(id="S01", flag="-fsigned-char", check='static_assert DM("S01") in toolchain/tests/x.cpp'), dict(id="S02", flag=None, check='static_assert DM("S02") in toolchain/tests/x.cpp')]
     ok = gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01", "S02"})
     check("rows with their cases, accepted by the compiler, are certified", ok == {"S01": [], "S02": []}, ok)
     bad = gd.row_why(rows, ["-fsigned-char"], 1, ["x.cpp:3:1: error: static assertion failed: S02"], {"S01", "S02"})
@@ -95,10 +95,12 @@ def main():
     check("a row with no case is red", gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01"})["S02"] != [], 0)
     check("a case with no row is an item of its own", gd.row_why(rows, ["-fsigned-char"], 0, [], {"S01", "S02", "S09"}).get("case:S09"), 0)
     check("a flag row whose site flag is not in the semantic set is red", gd.row_why(rows, [], 0, [], {"S01", "S02"})["S01"] != [], 0)
+    odd = rows + [dict(id="S29", flag=None, check="ldbl/model.cpp cases (test_ldbl model() step)")]
+    check("a row whose check is not a static_assert case is red", gd.row_why(odd, ["-fsigned-char"], 0, [], {"S01", "S02"})["S29"] != [], 0)
     check("a case file that does not compile marks every row red", all(gd.row_why(rows, ["-fsigned-char"], 1, ["x.cpp:1: error: expected ;"], {"S01", "S02"}).values()), 0)
     check("unit without a CC document is red", gd.unit_why("a.cc", None, sem, pin) == ["no CC stage document"])
     # the real compiler: green
-    g = tg.guest_repo("d4", rec, pin, files={DM_JSON: json.dumps({"rows": [dict(id="S01", kind="flag", site="-fsigned-char", test="tests/x.cpp: DM(\"S01\")"), dict(id="S05", kind="default", site=None, test="tests/x.cpp: DM(\"S05\")")]}),
+    g = tg.guest_repo("d4", rec, pin, files={DM_JSON: json.dumps({"rows": [dict(id="S01", flag="-fsigned-char", check='static_assert DM("S01") in toolchain/tests/x.cpp'), dict(id="S05", flag=None, check='static_assert DM("S05") in toolchain/tests/x.cpp')]}),
                                                      "ports/fnv-nx/toolchain/tests/x.cpp": '#define DM(id, ...) static_assert((__VA_ARGS__), id)\nDM("S01", (char)-1 < 0);\nDM("S05", sizeof(int) == 4);\n',
                                                      ROOT + "/b.cc": "int b() { return 2; }\n", ROOT + "/c.c": "int c(float f) { return (int)f; }\n",
                                                      ROOT + "/s.S": ".text\n.globl sx\nsx: ret\n"})

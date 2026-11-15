@@ -13,9 +13,7 @@
   "flags": {
     "semantics": {
       "common": [
-        "-fsigned-char",
         "-frounding-math",
-        "-fshort-wchar",
         "-mno-outline-atomics",
         "-fwrapv",
         "-fno-strict-aliasing",

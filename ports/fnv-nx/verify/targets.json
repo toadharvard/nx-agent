@@ -33,7 +33,8 @@
   }
  },
  "references": {
-  "cpuref": "ports/fnv-nx/verify/cpuref.json"
+  "cpuref": "ports/fnv-nx/verify/cpuref.json",
+  "datamodel": "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"
  },
  "docs": {
   "DDI0488H": {"external": "arm-a57-docs", "path": "DDI0488H_cortex_a57_mpcore_r1p3_trm.pdf", "sha256": "30c47dac07e432b706e1d938dbab9668a1cab461bce2340007a612df1042e8e5", "title": "ARM Cortex-A57 MPCore Processor Technical Reference Manual, Revision r1p3"},

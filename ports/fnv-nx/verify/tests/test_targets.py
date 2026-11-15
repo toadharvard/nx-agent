@@ -22,9 +22,11 @@ def check(name, ok, detail=""):
 t = targets.load()
 repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(HERE))))
 check("the record is green", targets.check(t, repo=repo) == [], targets.check(t, repo=repo))
-check("the generated prefix", targets.semantic_prefix(t) == ["-mabi=ilp32", "-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-fPIC", "-ftls-model=local-exec"],
+check("the generated prefix: platform, CPU, code model, then the flags of the data-model rows",
+      targets.semantic_prefix(t) == ["-mabi=ilp32", "-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-fPIC", "-ftls-model=local-exec", "-fsigned-char", "-fshort-wchar"],
       targets.semantic_prefix(t))
-check("recipe.SEMANTICS_FLAGS starts with it", list(recipe.SEMANTICS_FLAGS[:5]) == targets.semantic_prefix(t))
+check("recipe.SEMANTICS_FLAGS starts with it", list(recipe.SEMANTICS_FLAGS[:7]) == targets.semantic_prefix(t))
+check("the data-model flags are the table's `flag` rows, in row order", targets.datamodel_flags(t) == ["-fsigned-char", "-fshort-wchar"], targets.datamodel_flags(t))
 u = copy.deepcopy(t)
 del u["guest_platform"]["cite"]["triplet"]
 check("a field without a citation is red", any("triplet has no citation" in b for b in targets.check(u)), targets.check(u))
