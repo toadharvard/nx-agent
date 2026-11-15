@@ -31,8 +31,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_build  # noqa: E402
 import recipe  # noqa: E402
+import targets  # noqa: E402
 
-ILP32 = "-mabi=ilp32"
+ILP32 = targets.abi_flag(targets.load())   # the declared guest platform record, not a literal
 DATAMODEL = "ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json"   # the one table of the exe's data model (L2, fnvnx-datamodel/1); its path is the only name here
 TOOLCHAIN = "ports/fnv-nx/toolchain/"   # a row's "test" ("tests/ldbl/datamodel.cpp: DM(\"S01\")") names its case file relative to this
 
