@@ -695,10 +695,15 @@ def load_recipe(repo, roots, spec):
     return effective(rec, name) if not name or name in variant_names(rec) else rec
 
 
+def step_outputs(x):
+    """The declared outputs of one generate or run step X: its files (`outputs`) and its directories (`dirs`, generate steps; RECIPE.md "Directory
+    outputs"), as the root-relative names a consumer reads them by."""
+    return [o for k in ("outputs", "dirs") for o in (x.get(k) if isinstance(x.get(k), list) else []) if isinstance(o, str)]
+
+
 def generated_outputs(rec):
-    """The declared outputs of the generate and run stages of a recipe."""
-    return [o for k in ("generated", "run") for x in (rec.get(k) if isinstance(rec.get(k), list) else []) if isinstance(x, dict)
-            and isinstance(x.get("outputs"), list) for o in x["outputs"] if isinstance(o, str)]
+    """The declared outputs (files and directories) of the generate and run stages of a recipe."""
+    return [o for k in ("generated", "run") for x in (rec.get(k) if isinstance(rec.get(k), list) else []) if isinstance(x, dict) for o in step_outputs(x)]
 
 
 def all_units_of(rec, root, files):
@@ -1348,8 +1353,8 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             for n, fs in sorted(home.items()) if len(fs) > 1]
     seen = set()
     for i, g in enumerate(rec.get("generated", []) if isinstance(rec.get("generated", []), list) else err.append("generated is not a list") or []):
-        if not (isinstance(g, dict) and {"tool", "args", "inputs", "outputs"} <= set(g) <= {"tool", "args", "inputs", "outputs", "objects_of"}):
-            err.append("generated[%d] needs exactly tool, args, inputs, outputs (and optionally objects_of)" % i)
+        if not (isinstance(g, dict) and {"tool", "args", "inputs", "outputs"} <= set(g) <= {"tool", "args", "inputs", "outputs", "objects_of", "dirs"}):
+            err.append("generated[%d] needs exactly tool, args, inputs, outputs (and optionally objects_of, dirs)" % i)
             continue
         oo = g.get("objects_of")
         if "objects_of" in g and not (isinstance(oo, dict) and set(oo) <= OBJECTS_OF_KEYS
@@ -1370,7 +1375,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         for p in stg:   # the declared output of an EARLIER generator of this recipe: {"stage": "<this root>:gen:I", "path": OUTPUT}, mounted at /stage/<OUTPUT>
             m = re.fullmatch(re.escape(root) + r":gen:(\d+)", p.get("stage", "")) if set(p) == {"stage", "path"} and isinstance(p.get("stage"), str) else None
             prev = rec["generated"][int(m.group(1))] if m and int(m.group(1)) < i else None
-            if not (prev and isinstance(prev, dict) and isinstance(prev.get("outputs"), list) and p["path"] in prev["outputs"]):
+            if not (prev and isinstance(prev, dict) and p["path"] in step_outputs(prev)):
                 err.append("generated[%d].inputs: %r is not {stage: %s:gen:I, path: an output of generator I} with I before this one" % (i, p, root))
         if not (isinstance(ins, list) and all(rel_ok(p) and any(f == p or under(f, p) for f in files) for p in ins)):
             err.append("generated[%d].inputs must be tracked files or directories (repo-relative), or stage refs of earlier generators" % i)
@@ -1379,10 +1384,17 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         for p in ins if isinstance(ins, list) else []:
             if isinstance(p, str) and not any(under(p, r) for r in roots) and not tree_of(roots, p):
                 err.append("generated[%d].inputs: %s lies in no admitted root or tree" % (i, p))
-        if not (isinstance(outs, list) and outs and all(rel_ok(o) for o in outs)):
-            err.append("generated[%d].outputs must be a non-empty list of root-relative paths" % i)
+        dirs = g.get("dirs", [])
+        if not (isinstance(dirs, list) and all(rel_ok(d) for d in dirs)):
+            err.append("generated[%d].dirs must be a list of root-relative directory paths" % i)
             continue
-        for o in outs:
+        if not (isinstance(outs, list) and (outs or dirs) and all(rel_ok(o) for o in outs)):
+            err.append("generated[%d].outputs must be a non-empty list of root-relative paths (or empty with dirs)" % i)
+            continue
+        for d in dirs:   # a directory output is its own subtree: no file output and no other directory output lies in it or holds it, and no tracked file is in it
+            if any(under(o, d) or under(d, o) for o in outs) or any(x != d and (under(x, d) or under(d, x)) for x in dirs) or any(under(f[len(root) + 1:], d) for f in files if under(f, root)):
+                err.append("generated[%d].dirs: %s overlaps another output or a tracked file" % (i, d))
+        for o in outs + dirs:
             if o in mine:
                 err.append("generated output %s is also a tracked file" % o)
             if o in seen:
@@ -1757,7 +1769,7 @@ def driver_doc(stage, drv, flags, mode, tail, inputs):
             "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"], "inputs": inputs}
 
 
-MAX_SHARDS = 8
+MAX_SHARDS = 16
 
 
 def shard_of(key, n):
@@ -2201,7 +2213,7 @@ class Job:
             except BuildRed as r:   # a red generator does not stop the others: its outputs are absent, and what needs them is blocked by it
                 f = dict(r.args[0])
                 self.red.append(f)
-                for o in g["outputs"]:
+                for o in step_outputs(g):
                     self.blocked[o] = f["stage"]
 
     def run_all(self, ws):
@@ -2303,6 +2315,8 @@ class Job:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:
             if isinstance(p, dict):   # the output of an earlier generator of this recipe: already in the root's view (generate runs in list order), keyed by content
+                if p["path"] in self.blocked:   # that generator is red: this stage has no input, it is blocked by it (never run on a missing file)
+                    raise BuildRed({"stage": "gen:%s:%d" % (self.root, i), "exit": None, "stderr": ["input %s is not produced: %s is red" % (p["path"], self.blocked[p["path"]])]})
                 ins.append({"at": "/stage/" + p["path"], "tree": cas.ingest(os.path.join(ws, "root", p["path"]), self.store)})
                 continue
             sub = [f for f in self.files if f == p or under(f, p)]
@@ -2311,16 +2325,22 @@ class Job:
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
+               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"] + ["dir:" + d for d in g.get("dirs", [])]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
         res = self.stage(doc)[1]
         got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
-        if got != sorted(g["outputs"]):
-            raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs %s differ from the declared %s" % (got, sorted(g["outputs"]))]})
+        dirs = g.get("dirs", [])
+        stray = [r for r in got if r not in g["outputs"] and not any(under(r, d) for d in dirs)]
+        absent = [o for o in g["outputs"] if o not in got] + [d + "/" for d in dirs if not any(under(r, d) for r in got)]
+        if stray or absent:   # the files are exactly the declared ones plus any file inside a declared directory, each directory non-empty
+            raise BuildRed({"stage": doc["stage"], "exit": 0, "stderr": ["outputs differ from the declared %s: unexpected %s, missing %s" % (sorted(g["outputs"] + dirs), stray[:10], absent[:10])]})
         cas.materialize(res["outputs"]["/out"], self.store, os.path.join(tmp, "out"))
         for o in g["outputs"]:
             os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
             shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
+        for d in dirs:
+            os.makedirs(os.path.dirname(os.path.join(ws, "root", d)), exist_ok=True)
+            shutil.copytree(os.path.join(tmp, "out", d), os.path.join(ws, "root", d))
 
     def table_source(self, ws, groups, t, ti):
         """The source of the link-stage table T (`link.tables[ti]`): the declared tool runs over exactly the objects of this link (GROUPS: [(label, [(unit, .o)])]:
