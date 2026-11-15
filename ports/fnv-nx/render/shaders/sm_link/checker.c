@@ -195,7 +195,8 @@ static void do_stage(const Form *f, unsigned flags, StageRes *o) {
             NxSmIface ifc; uint32_t *tk = malloc(f->n + 4), nb;   /* the declared pairs: nx_sm_pairs of the scan the draw path makes (the bytecode bytes are 32-bit tokens) */
             if (tk) memcpy(tk, f->bc, f->n);
             int rc = 0; nb = 0;
-            if (!tk || !(nb = nx_sm_bytes(tk)) || (rc = nx_sm_check(tk, nb, f->stage, &ifc))) { o->status = "reflection_fail"; snprintf(o->why, sizeof o->why, "nx_sm_bytes %u nx_sm_check %d", nb, rc); }
+            if (!tk || !(nb = nx_sm_bytes(tk)) || (rc = nx_sm_check(tk, nb, f->stage, &ifc))) { o->status = "reflection_fail"; NxSmScan sc; uint32_t at = 0, tok = 0; if (tk && nb) { nx_sm_scan_begin(&sc, f->stage); nx_sm_scan_feed(&sc, tk, nb / 4); at = sc.pos; if (at < nb / 4) tok = tk[at]; }
+            snprintf(o->why, sizeof o->why, "nx_sm_bytes %u nx_sm_check %d at_token %u token 0x%08x opcode %u", nb, rc, at, tok, tok & 0xFFFFu); }
             else { o->pr.n = (int)nx_sm_pairs(&ifc, o->pr.p); o->major = ifc.major; }
             free(tk);
             o->disagree = query_read(sh, decls, o->ndecl, &o->active);

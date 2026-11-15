@@ -48,6 +48,7 @@
     "/usr/lib/x86_64-linux-gnu/libEGL.so.1",
     "/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0",
     "/usr/lib/x86_64-linux-gnu/libm.so.6",
+    "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
     "/usr/lib/x86_64-linux-gnu/libc.so.6"
    ]
   }
