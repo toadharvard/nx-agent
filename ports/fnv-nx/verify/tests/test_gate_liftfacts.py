@@ -30,9 +30,9 @@ def put(d, rel, doc):
         f.write(doc if isinstance(doc, str) else json.dumps(doc))
 
 
-def toy(images=("FalloutNV.exe", "a.dll"), cm=None, pc=None, **over):
+def toy(images=("exe", "a"), cm=None, pc=None, **over):
     d = tempfile.mkdtemp(prefix="lf-")
-    put(d, "manifest.json", {"images": [{"image": i} for i in images]})
+    put(d, "summary.tsv", "# " + "\t".join(G.SUMMARY_COLS) + "\n" + "".join("%s\tgreen\t10\t10\t0\t0\t0\t0\n" % i for i in images) + "total\tgreen\t20\t20\t0\t0\t0\t0\n")
     for i in images:
         put(d, G.image_dir(i) + "/gate_codemap.json", dict(CM, **(cm or {})))
         put(d, G.image_dir(i) + "/gate_pcsrc.json", dict(PC, **(pc or {})))
@@ -40,7 +40,7 @@ def toy(images=("FalloutNV.exe", "a.dll"), cm=None, pc=None, **over):
 
 
 u, c, bad, err = G.judge(toy())
-check("green: 2 images certified, the exe's directory is `exe`", (u, c, bad, err) == (2, 2, [], None), (u, c, bad, err))
+check("green: 2 images certified", (u, c, bad, err) == (2, 2, [], None), (u, c, bad, err))
 d = toy()
 put(d, "a/gate_codemap.json", dict(CM, uncertified=12))
 u, c, bad, err = G.judge(d)
@@ -72,11 +72,11 @@ d = toy()
 put(d, "a/gate_codemap.json", "[1]")
 check("a file that is not an object is red", "malformed" in G.judge(d)[2][0])
 d = toy()
-os.remove(os.path.join(d, "manifest.json"))
+os.remove(os.path.join(d, "summary.tsv"))
 check("no manifest is an error", G.judge(d)[3] is not None)
 d = toy(images=())
 check("an empty image list is an error", G.judge(d)[3] is not None)
 d = toy()
-put(d, "manifest.json", {"images": [{"image": "a.dll"}, {"nope": 1}]})
+put(d, "summary.tsv", {"images": [{"image": "a.dll"}, {"nope": 1}]})
 check("a malformed image row is an error", G.judge(d)[3] is not None)
 sys.exit(1 if fails else 0)

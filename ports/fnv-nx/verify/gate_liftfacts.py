@@ -3,16 +3,19 @@
 code-address source. It reads the GATES output of the lift/facts root, as published in GATE_CACHE (it never runs the producer).
     python3 -I gate_liftfacts.py        cwd = checkout root, env GATE_OUT, GATE_COMMIT, GATE_CACHE; writes GATE_OUT/liftfacts.json
 Input: GATE_CACHE/objects/<tree>/<root>/GATES/ with
-    manifest.json                    {"images": [{"image": NAME, ...}, ...]}: the facts' own image list (the producers' manifest of the facts dir)
+    summary.tsv                      tab separated, header line starts "# ": image status universe certified uncertified entries_on_data pcsrc_red
+                                     s4_violations; one row per image (exe first), then the row `total` (the assembler of the facts, tools/factsassemble.py)
     <dir>/gate_codemap.json          per image (modlift.py / universe.py): {"status", "universe", "certified", "uncertified" (bytes), "entries_on_data"}
     <dir>/gate_pcsrc.json            per image (pcsrc.py): {"status", "red", "s4_red", ...}
   <dir> is the image's lower-case name without its extension, "exe" for the one `.exe` (pcsrc.pin_of's rule).
-Universe: every image of manifest.json (never a list kept here). An item is certified iff ALL hold:
+Universe: every image row of summary.tsv (never a list kept here); when the module table (modules.tsv, the exe row and the DLL rows by the dll column)
+is given, the images of the table, `exe` and the lower-case DLL names without extension, must equal the summary's rows exactly (an image cannot drop out or
+appear). The summary rows themselves must show status green and 0 for uncertified, entries_on_data and s4_violations, and `total` green. An item is certified iff ALL hold:
   - gate_codemap.json and gate_pcsrc.json exist and parse as objects (a missing image, or a malformed file, is red, never skipped);
   - both have status "green";
   - gate_codemap.json: uncertified == 0 and entries_on_data == 0 (the key must be present: an unchecked invariant is red);
   - gate_pcsrc.json: s4_red == 0 (the key must be present).
-Red also when the root's GATES output is not in the cache (named), or manifest.json is missing or has no images. The universe is the image list; a
+Red also when the root's GATES output is not in the cache (named), or summary.tsv is missing, malformed or has no image. The universe is the image list; a
 gate whose list is empty is red (the facts root exists but names no image).
 Proof: the three conditions are the producers' own verdict files for the two ways a code address can lack an entry (an uncovered byte of the code map,
 an entry over data) and for the typed code-address sources (s4 arithmetic that reaches a control transfer); the gate adds that every image of the
@@ -31,9 +34,11 @@ ADMIT = TREE + "/verify/admit.json"
 FACTS_ROOT = TREE + "/lift/facts"
 
 
+SUMMARY_COLS = ["image", "status", "universe", "certified", "uncertified", "entries_on_data", "pcsrc_red", "s4_violations"]
+
+
 def image_dir(image):
-    n = image.lower()
-    return "exe" if n.endswith(".exe") else n.rsplit(".", 1)[0]
+    return image   # summary.tsv names the directory: `exe`, or the lower-case module name without extension
 
 
 def load_obj(path):
@@ -82,21 +87,54 @@ def judge_image(gates, image):
     return "; ".join(why)
 
 
-def judge(gates):
+def read_summary(gates):
+    """({image: row dict}, total row dict, error or None) of summary.tsv."""
+    try:
+        with open(os.path.join(gates, "summary.tsv")) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return {}, None, "summary.tsv missing"
+    hdr = [l for l in lines if l.startswith("# ")]
+    rows = [l.split("\t") for l in lines if l and not l.startswith("#")]
+    if len(hdr) != 1 or hdr[0][2:].split("\t") != SUMMARY_COLS or any(len(r) != len(SUMMARY_COLS) for r in rows):
+        return {}, None, "summary.tsv malformed"
+    byname = {r[0]: dict(zip(SUMMARY_COLS, r)) for r in rows}
+    if len(byname) != len(rows) or "total" not in byname:
+        return {}, None, "summary.tsv malformed (duplicate image or no total row)"
+    total = byname.pop("total")
+    if not byname:
+        return {}, None, "summary.tsv names no image"
+    return byname, total, None
+
+
+def table_images(modules_text):
+    """The image dirs of a modules.tsv: `exe` for the row whose dll column is 0, the lower-case name without extension for a DLL row."""
+    out = []
+    for l in modules_text.splitlines():
+        if l and not l.startswith("#"):
+            f = l.split("\t")
+            out.append("exe" if f[-1] == "0" else f[0].lower().rsplit(".", 1)[0])
+    return out
+
+
+def judge(gates, modules_text=None):
     """(universe, certified, uncertified [image: reason], error or None) of the GATES directory."""
-    m, e = load_obj(os.path.join(gates, "manifest.json"))
-    if m is None:
-        return 0, 0, [], "manifest.json %s" % e
-    ims = m.get("images")
-    names = [i.get("image") for i in ims if isinstance(i, dict) and isinstance(i.get("image"), str)] if isinstance(ims, list) else []
-    if not names or isinstance(ims, list) and len(names) != len(ims):
-        return 0, 0, [], "manifest.json names no image or a malformed image row"
+    by, total, err = read_summary(gates)
+    if err:
+        return 0, 0, [], err
+    if modules_text is not None and sorted(by) != sorted(table_images(modules_text)):
+        return len(by), 0, [], "the images of summary.tsv %s differ from the module table %s" % (sorted(by), sorted(table_images(modules_text)))
     bad = []
-    for n in sorted(names):
+    for n in sorted(by):
         w = judge_image(gates, n)
+        r = by[n]
+        if r["status"] != "green" or any(r[k] != "0" for k in ("uncertified", "entries_on_data", "s4_violations")):
+            w = (w + "; " if w else "") + "summary row %s" % "/".join(r[k] for k in SUMMARY_COLS[1:])
         if w:
             bad.append("%s: %s" % (n, w))
-    return len(names), len(names) - len(bad), bad, None
+    if total["status"] != "green" and not bad:
+        bad.append("total: status %r" % total["status"])
+    return len(by), len(by) - len([b for b in bad if not b.startswith("total:")]), bad, None
 
 
 def main():
