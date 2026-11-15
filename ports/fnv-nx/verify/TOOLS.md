@@ -662,41 +662,30 @@ certified = universe - red.  Counts on stdout.  Exit status 1 when red.
 ## link/gate_disp.py
 
 ```text
-gate_disp - the dispatcher of the lifted guest holds exactly the code entries (part of the L1 verdict).
+gate_disp - the typed dispatch tables of the lifted guest hold exactly the rows the generator declared (part of the L1 verdict).
 
-    gate_disp.py --elf guest.elf --universe universe.tsv --entries entries.tsv [--keys keys.tsv] [--missing missing.tsv]
+    gate_disp.py --elf guest.elf --rows dispatch_rows.tsv [--universe universe.tsv]
 
-The lifted code reaches every code entry of the exe through `fnvl_dispatch(a)` (lift/rt/rt.c, FNVL_PHF_REL), which looks the
-address up in the table `fnvl_disp_table` (lift/bench/phf.py `table_asm`):
-    i = ((a ^ fnvl_g[(a * K1) >> (32 - NBITS)]) * K2) >> (32 - TBITS)          (all arithmetic modulo 2^32)
-    slot i = {u32 key, s32 offset}; the entry is found iff key == a and offset != 0; the body is `(char *)fnvl_disp_table + offset`.
-A slot is OCCUPIED iff its offset is not 0 (the key of an empty slot is arbitrary).  {K1, K2, NBITS, TBITS} are the four u32 words of
-`fnvl_phf_params`, stored with the table (disp.o), the one source rt.c reads.  Sizes come from the symbols' st_size: the table has
-8 << TBITS bytes, `fnvl_g` (u16) 2 << NBITS bytes, `fnvl_phf_params` 16; a table whose size or parameters do not fit is red.
+The generator stage (L3a: phf.table_c, disp.cc, native_disp.cc) writes typed C++ arrays `fnvnx_entry_fn NAME[N]` and, as a declared output of
+the same stage (in the store and in the keys), the rows file the arrays were generated from:
+    table<TAB>index<TAB>guest_addr_hex<TAB>entry_symbol          (`#` lines skipped; the last `# table_id <hex>` line is the table id)
+`entry_symbol` is `-` for a null slot.  The ELF is a 32-bit (ILP32) AArch64 image: slot `index` of table NAME is the u32 word at NAME + 4*index.
 
-Inputs:  --universe  the code entries (universe.tsv: first column the address as hex, `#` lines skipped);
-         --entries   `address<TAB>symbol[<TAB>kind]` (liftall's entries.tsv), kind `code` (default) or `import`: an import row is a
-                     dispatcher key that is not a universe address (its symbol is `I_<key>` or a runtime symbol); the last
-                     line may be `# table_id <hex>`;
-         --keys      optional, the import key set of the bridge (keys.tsv: first column the key as hex, other columns ignored, `#` lines
-                     skipped); each key must be named by an entries.tsv row (the symbol of its body is never taken from this file);
-                     it may carry `# table_id <hex>`.  When both files carry a table_id the two must be equal (else the item
-                     `table_id` is red);
-         --missing   optional, `address` rows of universe addresses the lifter reports as without a body.  REPORTING only: it never
-                     certifies anything; a universe address without an entry stays `no-entry` and red.  The detail line says how
-                     the list and the entries agree.
-Rule, for EVERY key k of the universe, of the import rows and of --keys (no sampling), certified when all hold:
-  - a symbol is named for k by entries.tsv (two rows naming different symbols for k are a violation);
-  - the ELF defines that symbol, at one address (a symbol defined at two addresses is a violation);
-  - the LOOKUP: the slot i the hash computes for k is occupied, holds key k, and `table_address + stored_offset == symbol address`
-    modulo 2^32 (`hash-miss` when slot i is not k's slot, `wrong-target` when it points elsewhere);
-  - no other occupied slot holds k.
-Every occupied slot whose key is neither in the universe nor an import key is a violation (`extra-key`).
-That the parameters in the ELF are those the build chose is not this gate's business: the lookup is proven with them, for every key.
+Rule, for EVERY table and EVERY row (no sampling).  A row is certified when all hold:
+  - the table symbol is defined exactly once, its st_size is 4 * (number of rows of the table), its rows are the indexes 0..n-1 each once
+    (`table-undefined`, `table-ambiguous`, `table-size`, `index-gap`, `duplicate-row`), and its bytes are inside one PT_LOAD segment (`table-unreadable`);
+  - a non-null row: the entry symbol is defined exactly once (`symbol-undefined`, `symbol-ambiguous`), the slot word is that symbol's address
+    (`wrong-target`), and the slot is covered by a load-time relocation when the image has any (SHT_RELR / SHT_RELA / SHT_REL; `unrelocated`):
+    the slot is the R_AARCH64_ABS32 (P32) of the source, resolved by the link to the word and kept by the relocation;
+  - a null row: the word is 0 (`null-slot-nonzero`) and no relocation covers it (`null-slot-relocated`);
+  - one guest address names one symbol within a table (`entry-conflict`).
+With --universe (the code entries: first column the address as hex, `#` lines skipped) every address needs a non-null row in some table (`no-entry`).
+A rows file that is missing or does not parse, or a missing ELF, is red (`rows:no-rows`, `rows:format`, `elf:no-elf`) with the universe counted as the
+rows it could not read (at least 1).  An extra slot cannot exist: the size of the table equals its rows, so a slot without a row is `table-size`.
 
-Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): universe = the keys of universe + import keys +
-the extra table keys (+ the item `table_id` when both files carry one), certified = those satisfying the rule, uncertified =
-`<key as 8 hex digits>:<reason>`.  Counts only on stdout.  Exit status 1 when the gate is red.
+Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): items = every row, every table, every universe address;
+uncertified = `<table>[<index>]:<reason>` / `<table>:<reason>` / `<addr 8 hex>:no-entry` / `rows:<reason>`.  Counts only on stdout.  Exit 1 when red.
+That the lookup from a guest address to its slot index is the one the generator chose is the generator's contract; this gate proves the slots.
 ```
 
 ## verify/a64access.cc
