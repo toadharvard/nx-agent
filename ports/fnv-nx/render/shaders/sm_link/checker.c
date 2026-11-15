@@ -4,8 +4,8 @@
  *   sm_link_check link    SHADER_DIR SHARD N OUT.jsonl STAGE...   one certificate line per program (VS signature, PS signature, flat) with index % N == SHARD
  *   sm_link_check summary SHADER_DIR OUT.json STAGE... -- LINK... the totals and the completeness check of both certificate sets against the universe
  * SHADER_DIR: the *.sdp packages of gamedata/shaders (a declared external). The stage of an entry is the version token (0xFFFE.... vertex, 0xFFFF.... pixel).
- * Universe: every unique bytecode (sha256) of every package, in every flag set of the variant key (all subsets of FNVNX_SHADER_KEY_FLAGS among the bits of the
- * enum of fnvnx_shaders.h), both stages. A stage certificate is the compile of the translator's GLSL on the pinned Mesa (GL 4.5 core, llvmpipe, EGL surfaceless)
+ * Universe: every unique bytecode (sha256) of every package, in every flag set of the variant key (all submasks of FNVNX_SHADER_KEY_FLAGS, enumerated directly;
+ * the flag list of fnvnx_shaders.h), both stages. A stage certificate is the compile of the translator's GLSL on the pinned Mesa (GL 4.5 core, llvmpipe, EGL surfaceless)
  * and the interface signature read two ways (the emission grammar; the Mesa program-interface query of a separable single-stage program).
  * A link certificate is the glLinkProgram of the program the draw path builds for a (vertex class, PS class): the VS variant fnvnx_dk_vs_needs_complete selects.
  * Output is a function of the inputs: sorted order, no times, no paths. Not covered yet (rule text section 3/5): link set L, FFP stages, the backend's own GLSL rewrite. */
@@ -22,7 +22,7 @@
 #include "fnvnx_sha256.h"
 /* The flag bits the enum of fnvnx_shaders.h defines: bits 0..log2(FNVNX_SHADER_FLAT_COLOR). Relies on FLAT_COLOR being the highest bit of the enum (reported: the header should
  * carry an all-flags macro next to KEY_FLAGS so that a new flag cannot be missed here). */
-#define SM_ALL_FLAGS ((unsigned)((FNVNX_SHADER_FLAT_COLOR << 1) - 1u))
+_Static_assert(__builtin_popcount(FNVNX_SHADER_KEY_FLAGS) <= 12, "the key space is enumerated: 2^popcount(KEY) flag sets");
 
 typedef void *EGLDisplay; typedef void *EGLContext; typedef void *EGLConfig; typedef void *EGLSurface; typedef int32_t EGLint; typedef unsigned EGLBoolean;
 EGLDisplay eglGetPlatformDisplay(unsigned platform, void *native, const intptr_t *attribs);
@@ -134,9 +134,13 @@ static int read_sdp(Forms *F, const char *path, int *entries) {
 
 typedef struct { uint8_t p[225]; int n; } Pairs;   /* the declared FNVNX_DK_PAIR codes of a shader (fnvnx_shader_declared_pairs) */
 
-/* The flag sets of the variant key: every subset of the key bits (fnvnx_shaders.h: KEY_FLAGS = complement of NONKEY_FLAGS) among the bits of the enum. */
-static unsigned fsets[SM_ALL_FLAGS + 1]; static int nfs;
-static void make_fsets(void) { nfs = 0; for (unsigned m = 0; m <= SM_ALL_FLAGS; m++) if ((m & FNVNX_SHADER_KEY_FLAGS) == m) fsets[nfs++] = m; }
+/* The flag sets of the variant key: every submask of FNVNX_SHADER_KEY_FLAGS (generated from the one flag list of fnvnx_shaders.h), enumerated directly, ascending. */
+static unsigned fsets[1u << 12]; static int nfs;
+static void make_fsets(void) {
+    const unsigned K = FNVNX_SHADER_KEY_FLAGS; nfs = 0;
+    for (unsigned m = K;; m = (m - 1) & K) { fsets[nfs++] = m; if (!m) break; }
+    for (int a = 0, b = nfs - 1; a < b; a++, b--) { unsigned t = fsets[a]; fsets[a] = fsets[b]; fsets[b] = t; }
+}
 
 static const char *deb_root;   /* --deb ROOT: where the declared debs' files are mounted (the run stage's /deb); unset on a machine whose libraries are installed */
 static int gl_init(void) {

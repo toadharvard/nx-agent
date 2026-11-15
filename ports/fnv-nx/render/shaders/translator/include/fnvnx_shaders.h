@@ -24,39 +24,37 @@ typedef enum fnvnx_shader_stage {
     FNVNX_STAGE_PIXEL = 1
 } fnvnx_shader_stage;
 
-enum {
-    FNVNX_SHADER_KEEP_GLSL = 1u << 0,  /* return the intermediate GLSL in result.glsl */
-    FNVNX_SHADER_NO_DKSH   = 1u << 1,  /* stop after GLSL (no uam) */
-    /* Static D3D9 epilogue variant of a pixel shader (G1). Without EPI_STATIC the shader carries the runtime
-     * epilogue: alpha test and (ps < 3.0) fog, each behind a uniform branch on the driver UBO. With EPI_STATIC
-     * only the blocks named by EPI_ALPHA / EPI_FOG are compiled in; the runtime switches inside them stay, so a
-     * variant bound for a state it does not cover is still correct for that block. __e0 = neither, __ea = alpha
-     * test, __ef = fog; the runtime shader covers both. */
-    FNVNX_SHADER_EPI_STATIC = 1u << 2,
-    FNVNX_SHADER_EPI_ALPHA  = 1u << 3,
-    FNVNX_SHADER_EPI_FOG    = 1u << 4,
-    /* D3D9's implementation-defined numerics (rcp/rsq/log of 0, nrm of a zero vector): WineD3D's IEEE results by
-     * default (the original under Wine, the reference of the S16 sweeps); with this flag Gallium Nine's clamped
-     * ones (V6n's oracle, softpipe). The GLSL carries both behind DK_NUMERICS_NINE; the flag defines it. */
-    FNVNX_SHADER_NUMERICS_NINE = 1u << 5,
-    /* Vertex shaders: the "complete" variant (README "Varying completion"): besides the base completion (the components a declared output
-     * leaves out, the link set L, FOG0) every varying slot 0..30 that is still unwritten gets the default of its canonical pair, so any
-     * pixel stage whose inputs are canonical links. The device picks this variant of the VS iff fnvnx_dk_vs_needs_complete(). Ignored for
-     * pixel shaders. Part of the variant key. */
-    FNVNX_SHADER_VS_COMPLETE = 1u << 6,
-    /* D3DRS_SHADEMODE = D3DSHADE_FLAT (both stages of a draw take the same bit, so they agree on the qualifier): every varying of usage COLOR
-     * (oD0 / oD1 and v0 / v1 below SM3, the registers declared with COLOR usage in SM3) is declared `flat`, i.e. takes the value of the
-     * primitive's provoking (first) vertex; every other varying stays interpolated. Wine 9.0 wined3d state_shademode (state.c): glShadeModel(GL_FLAT)
-     * flat-shades exactly the colour varyings (gl_Color / gl_SecondaryColor = oD0 / oD1) of a GLSL program and nothing else; PHONG is GOURAUD.
-     * Part of the variant key. */
-    FNVNX_SHADER_FLAT_COLOR = 1u << 7
-};
+/* THE list of the option flags: X(NAME, BIT, KEY) once per flag. KEY = 1: the flag is an input of the translation and part of its key (cache/shcache.h);
+ * KEY = 0: the flag only chooses how much of the one translation is returned (the cache holds complete translations: DKSH + reflection).
+ * The enum, FNVNX_SHADER_ALL_FLAGS, FNVNX_SHADER_NONKEY_FLAGS and FNVNX_SHADER_KEY_FLAGS are all generated from this list: a flag exists only here,
+ * and a checker enumerates the key space as the submasks of FNVNX_SHADER_KEY_FLAGS (for (s = KEY;; s = (s - 1) & KEY) { ...; if (!s) break; }).
+ *   KEEP_GLSL   return the intermediate GLSL in result.glsl
+ *   NO_DKSH     stop after GLSL (no uam)
+ *   EPI_STATIC / EPI_ALPHA / EPI_FOG: static D3D9 epilogue variant of a pixel shader (G1). Without EPI_STATIC the shader carries the runtime
+ *     epilogue: alpha test and (ps < 3.0) fog, each behind a uniform branch on the driver UBO. With EPI_STATIC only the blocks named by EPI_ALPHA /
+ *     EPI_FOG are compiled in; the runtime switches inside them stay, so a variant bound for a state it does not cover is still correct for that
+ *     block. __e0 = neither, __ea = alpha test, __ef = fog; the runtime shader covers both.
+ *   NUMERICS_NINE: D3D9's implementation-defined numerics (rcp/rsq/log of 0, nrm of a zero vector): WineD3D's IEEE results by default (the original
+ *     under Wine, the reference of the S16 sweeps); with this flag Gallium Nine's clamped ones (V6n's oracle, softpipe). The GLSL carries both behind
+ *     DK_NUMERICS_NINE; the flag defines it.
+ *   VS_COMPLETE: vertex shaders, the "complete" variant (README "Varying completion"): besides the base completion (the components a declared output
+ *     leaves out, the link set L, FOG0) every varying slot 0..30 that is still unwritten gets the default of its canonical pair, so any pixel stage
+ *     whose inputs are canonical links. The device picks this variant of the VS iff fnvnx_dk_vs_needs_complete(). Ignored for pixel shaders.
+ *   FLAT_COLOR: D3DRS_SHADEMODE = D3DSHADE_FLAT (both stages of a draw take the same bit, so they agree on the qualifier): every varying of usage COLOR
+ *     (oD0 / oD1 and v0 / v1 below SM3, the registers declared with COLOR usage in SM3) is declared `flat`, i.e. takes the value of the primitive's
+ *     provoking (first) vertex; every other varying stays interpolated. Wine 9.0 wined3d state_shademode (state.c): glShadeModel(GL_FLAT) flat-shades
+ *     exactly the colour varyings (gl_Color / gl_SecondaryColor = oD0 / oD1) of a GLSL program and nothing else; PHONG is GOURAUD. */
+#define FNVNX_SHADER_FLAG_LIST(X) \
+    X(KEEP_GLSL, 0, 0) X(NO_DKSH, 1, 0) X(EPI_STATIC, 2, 1) X(EPI_ALPHA, 3, 1) X(EPI_FOG, 4, 1) \
+    X(NUMERICS_NINE, 5, 1) X(VS_COMPLETE, 6, 1) X(FLAT_COLOR, 7, 1)
 
-/* THE cache-key rule (cache/shcache.h): every bit of fnvnx_shader_opts.flags is an input of the translation and is part of its key, except the
- * bits declared here, which only choose how much of the one translation is returned (the cache holds complete translations: DKSH + reflection).
- * The key set is the COMPLEMENT of this list, so a flag added to the enum above is in every key unless it is put here on purpose. */
-#define FNVNX_SHADER_NONKEY_FLAGS ((uint32_t)(FNVNX_SHADER_KEEP_GLSL | FNVNX_SHADER_NO_DKSH))
-#define FNVNX_SHADER_KEY_FLAGS (~FNVNX_SHADER_NONKEY_FLAGS)
+#define FNVNX_SHADER_FLAG_ENUM_(n, b, k) FNVNX_SHADER_##n = 1u << (b),
+#define FNVNX_SHADER_FLAG_ALL_(n, b, k) | (1u << (b))
+#define FNVNX_SHADER_FLAG_NONKEY_(n, b, k) | ((k) ? 0u : (1u << (b)))
+enum { FNVNX_SHADER_FLAG_LIST(FNVNX_SHADER_FLAG_ENUM_) };
+#define FNVNX_SHADER_ALL_FLAGS ((uint32_t)(0u FNVNX_SHADER_FLAG_LIST(FNVNX_SHADER_FLAG_ALL_)))
+#define FNVNX_SHADER_NONKEY_FLAGS ((uint32_t)(0u FNVNX_SHADER_FLAG_LIST(FNVNX_SHADER_FLAG_NONKEY_)))
+#define FNVNX_SHADER_KEY_FLAGS ((uint32_t)(FNVNX_SHADER_ALL_FLAGS & ~FNVNX_SHADER_NONKEY_FLAGS))
 
 typedef struct fnvnx_shader_opts {
     uint32_t flags;
