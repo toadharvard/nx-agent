@@ -126,6 +126,9 @@
   }
  ],
  "outputs": {
-  "IMPORT_KEYS_H": "gen/import_keys.h"
+  "IMPORT_KEYS_H": "gen/import_keys.h",
+  "KEYS_TSV": "gen/keys.tsv",
+  "MODULES_TSV": "gen/modules.tsv",
+  "IAT_DATA_TSV": "gen/iat_data.tsv"
  }
 }
