@@ -30,7 +30,7 @@ def mnemonic(key):
 
 
 SREGS = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')
-IO = ('in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd')
+IO = {m for r in privset.rows() if r['class'] == 'iopl' and 'I/O permission' in r['sentence'] for m in r['mnemonics']}      # the SDM sentence names the TSS I/O permission bitmap: IN/INS/OUT/OUTS
 
 
 def sreg_load(ins):
@@ -61,7 +61,7 @@ def needs(key, rec):
     elif sreg_load(ins):
         rows += [('mov_to_sreg', 'undecided')]
     elif m == 'sgdt':
-        rows.append(('sgdt_base',))
+        rows.append(('sgdt',))
     elif m == 'sidt':
         rows += [('sidt_base',), ('idtr_limit',)]
     elif m == 'sldt':
@@ -100,13 +100,15 @@ def check(key):
         return 'FAILED(facts)', 'cr4.umip is set on the declared machine: UMIP semantics are not specified'
     if m not in PRIV and m not in COND and m not in CLASS_B:
         return 'not-covered', 'no spec for %s (its record rows are decided)' % m
+    if m in COND and not cond_fires(m, rec):
+        return 'not-covered', 'no spec for %s (its #GP(0) condition does not hold on the declared machine; the instruction has its ordinary effect)' % m
     f = symform.symbuild(key).form
     if f.regs or f.flags or f.stores or f.flo is not None:
         return 'FAILED(dsl)', 'a class (a)/(b) instruction changes state'
     ft = [(k, c) for k, c in f.faults]
     if m in PRIV or m in COND:
         cpl = x86sys.cpl(rec)
-        if m in IO or cpl == 0 or (m in PRIV and PRIV[m][0] == 'iopl' and cpl <= x86sys.get(rec, 'eflags', 'iopl')) or (m in COND and not cond_fires(m, rec)):
+        if (m in IO and x86sys.get(rec, 'tss_io_bitmap') != 'no port permitted') or cpl == 0 or (m in PRIV and PRIV[m][0] == 'iopl' and cpl <= x86sys.get(rec, 'eflags', 'iopl')) or (m in COND and not cond_fires(m, rec)):
             return 'not-covered', 'no spec for %s under the record (the instruction does not fault at CPL %d)' % (m, cpl)
         if len(ft) != 1 or ft[0][0] not in (K_PRIV, K_AV):
             return 'FAILED(dsl)', 'expected one #GP(0) fault (PRIV or AV), got %s' % [k for k, _ in ft]
