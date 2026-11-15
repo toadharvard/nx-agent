@@ -277,3 +277,4 @@ After the first frame:
   - Then the class rules: RO (no-SHF_WRITE section, gate-side), BYREF (pass_by_reference copy, `args:N`), and the private array with a variable index (gate-side join, L1 w15).
   - The rest are grouped after ORD-T. Doing.
 - VEC1 widened (from L1). The row is `vec:<N>:<size>:<align>:<elem>`. Every tcc_type code of the pinned GCC 13.3 tree.def gets a row, a cited proof that it cannot reach a decl, or a deliberate error, and a test derives that universe from tree.def. Also reached: render/d3d9 ffp_vs_state.c:127 (a vectorizer temporary). The handover goes to L1 w15 for the gate_abi parser.
+- HOST1, platform side: L5 w9 a7b7805fe. All 47 function slots are `fnvnx_hslot` and 215 call sites are converted to FNVNX_HCALLn. The macro is __FNVNX_HOST_ATTR__. The plugin side is with w3; recognition goes by the FIELD_DECL type.
