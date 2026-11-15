@@ -1,5 +1,5 @@
 /* fnv-nx L6 GL 4.5 backend v4: replay of the command stream. Every op of NxOp_Count4 has one handler in the table
- * k_op (built from NXGL4_OP_LIST, completeness asserted in gl4_core.c). A malformed stream (an opcode outside the
+ * k_op (built from NXGPU_OP_LIST (nxgpu), total by construction). A malformed stream (an opcode outside the
  * table, an op overrunning the stream, an op whose arguments gl4_stream_check refuses: pass targets that disagree,
  * layouts, render-state bits GL 4.5 cannot express) makes the submit return NXGPU_BAD_CALL before anything executes;
  * an op that violates its contract at run time stops the replay and the submit returns NXGPU_BAD_CALL. */
@@ -20,7 +20,7 @@ static void op_DefineState(const uint32_t* a, uint32_t argc, Ctx* c) {
     if (!a[0] || a[0] > GL4_MAX_STATES) { gl4_err("DefineState: id %u", a[0]); return; }
     Gl4State* s = &g4.st[a[0]];
     for (int i = 0; i < 4; i++) s->rs.w[i] = a[4 + 2 * i] | (uint64_t)a[5 + 2 * i] << 32;
-    s->vs = (uint16_t)a[1]; s->ps = (uint16_t)a[2]; s->layout = (uint16_t)a[3];
+    s->vs = a[1]; s->ps = a[2]; s->layout = (uint16_t)a[3];
     s->prog = gl4_program_for(s->vs, s->ps); s->epoch = g4.progEpoch;
     s->defined = 1;
 }
@@ -148,7 +148,7 @@ static void op_Blit(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_
 static void op_GenMips(const uint32_t* a, uint32_t argc, Ctx* c) { (void)c; gl4_op_genmips(a, argc); }
 
 #define OPENT(name) [NxOp_##name] = op_##name,
-static const OpFn k_op[NxOp_Count4] = { NXGL4_OP_LIST(OPENT) };
+static const OpFn k_op[NxOp_Count4] = { NXGPU_OP_LIST(OPENT) };
 
 /* An opcode outside the table (not an op of this build) or an op overrunning the stream makes the whole stream
  * malformed: it is refused before anything is executed. */

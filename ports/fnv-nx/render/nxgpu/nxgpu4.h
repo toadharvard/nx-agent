@@ -78,7 +78,8 @@ enum NxAttrType4 {
     NxAttr4_Float16_2, NxAttr4_Float16_4,
     NxAttr4_Count
 };
-enum { NX4_MAX_STREAMS = 16, NX4_MAX_ATTRS = 16 };
+enum { NXGPU_MAX_COLOR_TARGETS = 4,   /* simultaneous colour targets of a pass (NxOp_BeginPass4 colorCount 0..this; the mask/blend slots of NxRenderState) */
+       NX4_MAX_STREAMS = 16, NX4_MAX_ATTRS = 16, NX4_MAX_QUERIES = 4096 /* query ids 1..NX4_MAX_QUERIES (NxOp_QueryBegin) */ };
 typedef struct NxVtxAttr4 { uint16_t offset; uint8_t stream, type, location, pad[3]; } NxVtxAttr4;
 typedef struct NxVtxLayout4 {
     uint8_t attrCount, pad[3];
@@ -121,53 +122,64 @@ typedef struct NxVtxLayout4 {
                                    (4-31) are reserved: a DefineState that sets them makes the submit BAD_CALL */
 
 /* ---- command stream: ops 0..NxOp_Count-1 are v3 --------------------------------------------------------------- */
-enum NxOp4 {
-    NxOp_BeginPass4 = NxOp_Count,
-                        /* colorCount (0-4), then per colour target 2 words (image, level | layer << 16; image 0 =
-                           the swapchain image), then the depth target 2 words (image 0 = none). Colour targets: a
-                           2D image, a cube face (layer), a 3D slice (layer), any mip level, multisampled images;
-                           colorCount 0 with a depth target = a depth-only pass. Draw buffer i = target i; sRGB
-                           writes go through the target's sRGB view (NXRS_R_SRGB). All targets must have the same
-                           size at their level and the same sample count, layer and level must exist, colour
-                           // ASM-628 (verify/ASSUMPTIONS.json)
-                           targets must be colour images and the depth target a depth image, and there must be
-                           at least one target: else the submit is BAD_CALL before anything runs (the device
-                           guarantees it; D3D9 requires it). No clear; the pass starts as NxOp_BeginPass does
-                           (viewport (0.5, 0.5, w, h), depth range 0..1, scissor (0, 0, w, h), blend constant
-                           (1,1,1,1), depth bias 0, no state bound). NxOp_Clear clears every colour target of
-                           the pass (D3D9 Clear). */
-    NxOp_DefineLayout4, /* id (shared id space with NxOp_DefineLayout), then NxVtxLayout4 as words (50). A redefinition
-                           takes effect at the next BindState. */
-    NxOp_BindVtxN,      /* stream, memBlock, offset, size, stride: the bytes [offset, offset + size) of the block at
-                           this moment are the stream's data (a snapshot, like every bind) with `stride` bytes per
-                           element (0 = one element for every vertex / instance; at most the GL limit). memBlock 0
-                           with size 0 unbinds the stream. A draw whose layout reads an unbound stream is BAD_CALL.
-                           NxOp_BindVtx is BindVtxN(stream 0, ..., the stride of the v3 layout). */
-    NxOp_ImageUpdate,   /* image, level | layer << 16, x, y, z, w, h, d, memBlock, offset, size, rowPitch:
-                           native-format texels (BCn: 4x4 blocks) of that box; for a cube or 2D image z = 0, d = 1;
-                           layouts of the box: see the conventions at NxImageDesc4 (3D: z/d = slices, layer 0,
-                           slice pitch = rows * rowPitch) */
-    NxOp_Blit,          /* src image, src level | layer << 16, sx, sy, sw, sh, dst image (0 = swapchain), dst level
-                           | layer << 16, dx, dy, dw, dh, filter (0 point, 1 linear): colour or depth-stencil copy
-                           with scaling and format conversion; a multisampled source is resolved first.
-                           Outside any pass. Same format and size = an exact copy of any format. POINT: destination
-                           texel d of a dw-wide destination from an sw-wide source takes the source texel
-                           floor((d + 0.5) * sw / dw) = ((2 d + 1) * sw) / (2 dw), the same in y (an exact 2:1
-                           takes texel 2 d + 1); done by integer arithmetic in the backend, so the result does
-                           not depend on the GL implementation's nearest rule. Depth-stencil: identical formats
-                           only, always point. Colour: raw values (no sRGB conversion), converted to the
-                           destination format. LINEAR: bilinear at the destination texel centre (<= 1 LSB of the
-                           ideal). A compressed format only copies. */
-    NxOp_GenMips,       /* image, filter (0 point, 1 linear): levels 1.. from level 0, box filter. Outside any pass.
-                           Level l is Blit(level l - 1 -> level l, whole, filter) per layer; point follows the rule
-                           above (3D: slice z of level l takes slice floor((2 z + 1) * sd / (2 dd)) of level l - 1,
-                           sd, dd = the depths); linear 3D uses GL's own mipmap filter (open point). */
-    NxOp_QueryBegin,    /* query id (1..4096), kind (NxQueryKind): (re)defines the id; occlusion queries start
-                           counting, event and timestamp queries only declare the id. Begin again = restart. */
-    NxOp_QueryEnd,      /* query id: occlusion = stop counting; event = insert a fence; timestamp = record the GPU
+/* The v4 additions: THE definition of ops NxOp_Count.. (after the v3 list). NXGPU_OP_LIST = the whole table. */
+#define NXGPU_OP_LIST_V4(X) \
+    X(BeginPass4) \
+                        /* colorCount (0..NXGPU_MAX_COLOR_TARGETS), then per colour target 2 words (image, level | layer << 16; image 0 = \
+                           the swapchain image), then the depth target 2 words (image 0 = none). Colour targets: a \
+                           2D image, a cube face (layer), a 3D slice (layer), any mip level, multisampled images; \
+                           colorCount 0 with a depth target = a depth-only pass. Draw buffer i = target i; sRGB \
+                           writes go through the target's sRGB view (NXRS_R_SRGB). Targets may differ in size: \
+                           rendering covers the intersection (min width, min height over the bound attachments; GL 4.5 \
+                           9.4.2, and wined3d binds them in one FBO); the pass's w, h = colour target 0 at its level, or \
+                           the depth target when colorCount is 0 (SetRenderTarget Remarks: the viewport becomes the full \
+                           render-target size; MicrosoftDocs/sdk-api nf-d3d9-idirect3ddevice9-setrendertarget.md and \
+                           -setdepthstencilsurface.md Remarks, msdocs-win32-d3d9 multiple-render-targets.md:15). All \
+                           targets must have the same sample count (ASM-628, verify/ASSUMPTIONS.json), layer and \
+                           level must exist, colour \
+                           targets must be colour images and the depth target a depth image, and there must be \
+                           at least one target: else the submit is BAD_CALL before anything runs (the device \
+                           guarantees it; D3D9 requires it). No clear; the pass starts as NxOp_BeginPass does \
+                           (viewport (0.5, 0.5, w, h), depth range 0..1, scissor (0, 0, w, h), blend constant \
+                           (1,1,1,1), depth bias 0, no state bound). NxOp_Clear clears every colour target of \
+                           the pass (D3D9 Clear). */ \
+    X(DefineLayout4) /* id (shared id space with NxOp_DefineLayout), then NxVtxLayout4 as words (50). A redefinition \
+                           takes effect at the next BindState. */ \
+    X(BindVtxN)      /* stream, memBlock, offset, size, stride: the bytes [offset, offset + size) of the block at \
+                           this moment are the stream's data (a snapshot, like every bind) with `stride` bytes per \
+                           element (0 = one element for every vertex / instance; at most the GL limit). memBlock 0 \
+                           with size 0 unbinds the stream. A draw whose layout reads an unbound stream is BAD_CALL. \
+                           NxOp_BindVtx is BindVtxN(stream 0, ..., the stride of the v3 layout). */ \
+    X(ImageUpdate)   /* image, level | layer << 16, x, y, z, w, h, d, memBlock, offset, size, rowPitch: \
+                           native-format texels (BCn: 4x4 blocks) of that box; for a cube or 2D image z = 0, d = 1; \
+                           layouts of the box: see the conventions at NxImageDesc4 (3D: z/d = slices, layer 0, \
+                           slice pitch = rows * rowPitch) */ \
+    X(Blit)          /* src image, src level | layer << 16, sx, sy, sw, sh, dst image (0 = swapchain), dst level \
+                           | layer << 16, dx, dy, dw, dh, filter (0 point, 1 linear): colour or depth-stencil copy \
+                           with scaling and format conversion; a multisampled source is resolved first. \
+                           Outside any pass. Same format and size = an exact copy of any format. POINT: destination \
+                           texel d of a dw-wide destination from an sw-wide source takes the source texel \
+                           floor((d + 0.5) * sw / dw) = ((2 d + 1) * sw) / (2 dw), the same in y (an exact 2:1 \
+                           takes texel 2 d + 1); done by integer arithmetic in the backend, so the result does \
+                           not depend on the GL implementation's nearest rule. Depth-stencil: identical formats \
+                           only, always point. Colour: raw values (no sRGB conversion), converted to the \
+                           destination format. LINEAR: bilinear at the destination texel centre (<= 1 LSB of the \
+                           ideal). A compressed format only copies. */ \
+    X(GenMips)       /* image, filter (0 point, 1 linear): levels 1.. from level 0, box filter. Outside any pass. \
+                           Level l is Blit(level l - 1 -> level l, whole, filter) per layer; point follows the rule \
+                           above (3D: slice z of level l takes slice floor((2 z + 1) * sd / (2 dd)) of level l - 1, \
+                           sd, dd = the depths); linear 3D uses GL's own mipmap filter (open point). */ \
+    X(QueryBegin)    /* query id (1..4096), kind (NxQueryKind): (re)defines the id; occlusion queries start \
+                           counting, event and timestamp queries only declare the id. Begin again = restart. */ \
+    X(QueryEnd)      /* query id: occlusion = stop counting; event = insert a fence; timestamp = record the GPU \
                            time. An id that was never begun, or an occlusion query that is not active = BAD_CALL. */
+#define NXGPU_OP_LIST(X) NXGPU_OP_LIST_V3(X) NXGPU_OP_LIST_V4(X)
+enum NxOp4 {
+    NxOp_Base4_ = NxOp_Count - 1,   /* so that the first op of the list is NxOp_Count */
+    NXGPU_OP_LIST_V4(NXGPU_OP_ENUM_)
     NxOp_Count4
 };
+NX_ASSERT_((int)NxOp_BeginPass4 == (int)NxOp_Count, "the v4 ops continue the v3 ops");
 enum NxQueryKind { NxQuery_Occlusion = 0, NxQuery_Event = 1, NxQuery_TimestampNs = 2 };
 /* Results (query_result): occlusion = the number of samples that passed (= pixels on a single-sample target) of
  * the draws issued between Begin and End (overlapping queries are exact; the backend's own blits do not count);
@@ -259,12 +271,17 @@ typedef struct NxGpuApi4 {
     uint64_t wait_vblank;            /* (output) -> 0 after the next vertical blank: rule P5 at NxPresent */
 } NxGpuApi4;
 
+/* The v4 functions (numbers from NXGPU_FN_COUNT): X(id suffix, NxGpuApi4 member, argument count). */
+#define NXGPU_FN_LIST_V4(X) \
+    X(IMAGE_CREATE4, image_create4, 1) X(IMAGE_DESTROY, image_destroy, 1) X(MEM_DESTROY, mem_destroy, 1) \
+    X(SHADER_DESTROY, shader_destroy, 1) X(SAMPLER_UPDATE, sampler_update, 2) X(IMAGE_READ, image_read, 1) \
+    X(QUERY_RESULT, query_result, 3) X(PRESENT, present, 1) X(WAIT_VBLANK, wait_vblank, 1)
 enum NxGpuFn4 {
-    NXGPU_FN_IMAGE_CREATE4 = NXGPU_FN_COUNT, NXGPU_FN_IMAGE_DESTROY, NXGPU_FN_MEM_DESTROY, NXGPU_FN_SHADER_DESTROY,
-    NXGPU_FN_SAMPLER_UPDATE, NXGPU_FN_IMAGE_READ, NXGPU_FN_QUERY_RESULT, NXGPU_FN_PRESENT,
-    NXGPU_FN_WAIT_VBLANK,
+    NXGPU_FN_Base4_ = NXGPU_FN_COUNT - 1,
+    NXGPU_FN_LIST_V4(NXGPU_FN_ENUM_)
     NXGPU_FN_COUNT4
 };
+NX_ASSERT_((int)NXGPU_FN_IMAGE_CREATE4 == (int)NXGPU_FN_COUNT, "the v4 functions continue the v3 functions");
 
 #ifdef __cplusplus
 }
