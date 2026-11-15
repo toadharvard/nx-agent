@@ -144,6 +144,7 @@ def roots_of(path):
         except OSError:
             continue
         out |= set(TEST_ROOT.findall(text))
+        out |= {r for r in reads_of(f) if not os.path.exists(os.path.join(root, r))}   # a declared input (`# reads:`) this tree does not hold: the root it names was cut
         for m in ROOT_LIT.findall(text):
             for q in (m, os.path.dirname(m)):   # `<root>/build.json`, `<root>/inc`: the root is the nearest ancestor with a recipe
                 if is_recipe(os.path.join(root, q, "build.json")):

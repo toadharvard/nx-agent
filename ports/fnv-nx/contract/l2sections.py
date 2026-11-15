@@ -22,7 +22,7 @@ def _sympair_kinds():
     m = re.search(r'#define FNVNX_SYMPAIR_KINDS\(X\)(.*?)\n\n|#define FNVNX_SYMPAIR_KINDS\(X\)(.*)\Z', open(inc).read(), re.S)
     if not m:
         raise ValueError('%s: no FNVNX_SYMPAIR_KINDS' % inc)
-    return frozenset(re.findall(r'X\(([^,()\s]+),', m.group(1) or m.group(2)))
+    return frozenset(re.findall(r'X\(([^,()\s]+),', m[1] or m[2]))
 
 
 KINDS = _sympair_kinds()     # `vtable`: NAMES1 writes it for the table groups; `noemit`: a function the unit defines with no symbol in the object (the .inc)
