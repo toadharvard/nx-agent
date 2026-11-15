@@ -119,7 +119,7 @@ def datamodel(td, so):
     gdir = os.path.join(root, 'msvcmodel', 'datamodel')
     mirror = json.load(open(os.path.join(gdir, 'sources.json')))['mirror']
     ext = {k: mirror[k] for k in ('name', 'repo', 'ref', 'commit', 'tree_sha256', 'at')}
-    got = recipe.fetch_externals([ext], pb.STORE, os.path.join(pb.STORE, 'external'), os.path.join(td, 'ext-ws'))
+    got = pb.recipe.fetch_externals([ext], pb.STORE, os.path.join(pb.STORE, 'external'), os.path.join(td, 'ext-ws'))
     g = subprocess.run([sys.executable, '-I', os.path.join(gdir, 'gen.py'), '--mirror', got[ext['name']]['host'],
                         '--out', os.path.join(root, 'msvcmodel', 'DATAMODEL.json'), '--check'], capture_output=True, text=True)
     check('DATAMODEL.json and .md are what gen.py writes from the pinned mirror (--check)', g.returncode == 0, g.stdout + g.stderr)
@@ -162,7 +162,7 @@ def main():
                   not (und & tf), sorted(und & tf))
             ext = json.load(open(os.path.join(pb.REAL, pb.T + 'verify/guest_compiler.json')))
             co = os.path.join(pb.STORE, 'external', ext['external']['commit'] + '.co')
-            pd = predefines(os.path.join(co, recipe.pin_drivers()[1]))
+            pd = predefines(os.path.join(co, pb.recipe.pin_drivers()[1]))
             dbl = {k[len('__DBL_'):]: v for k, v in pd.items() if k.startswith('__DBL_')}
             ldbl = {k[len('__LDBL_'):]: v for k, v in pd.items() if k.startswith('__LDBL_')}
             check('every __LDBL_*__ predefine has its __DBL_*__ twin and the reverse (%d names)' % len(dbl), set(ldbl) == set(dbl),
@@ -172,12 +172,12 @@ def main():
                   {k: (dbl[k], ldbl[k]) for k in dbl if k in ldbl and number(ldbl[k]) != number(dbl[k])})
             # MLIB1: the compiler's defaults are the guest record. A plain compile (no flag at all) has the ILP32 data model of the exe: the ABI of
             # guest_platform (--with-abi), signed char and a 16-bit wchar_t (DATAMODEL S01, S02: the patch, not a flag), binary64 long double.
-            plain = predefines(os.path.join(co, recipe.pin_drivers()[1]))
+            plain = predefines(os.path.join(co, pb.recipe.pin_drivers()[1]))
             check('a plain compile is ILP32 (__ILP32__), with plain char signed (no __CHAR_UNSIGNED__), a 16-bit wchar_t and an 8-byte long double (MLIB1)',
                   '__ILP32__' in plain and '__CHAR_UNSIGNED__' not in plain and plain.get('__WCHAR_WIDTH__') == '16'
                   and plain.get('__SIZEOF_WCHAR_T__') == '2' and plain.get('__SIZEOF_LONG_DOUBLE__') == '8',
                   {k: plain.get(k) for k in ('__ILP32__', '__CHAR_UNSIGNED__', '__WCHAR_WIDTH__', '__SIZEOF_WCHAR_T__', '__SIZEOF_LONG_DOUBLE__')})
-            ml = subprocess.run([os.path.join(co, recipe.pin_drivers()[1]), '-print-multi-lib'], capture_output=True, text=True).stdout.split()
+            ml = subprocess.run([os.path.join(co, pb.recipe.pin_drivers()[1]), '-print-multi-lib'], capture_output=True, text=True).stdout.split()
             sel = {x for l in ml for x in l.split(';', 1)[1].replace('@', ' -').split()}
             check('-print-multi-lib lists only the guest\'s variants: the default (no selector) and the position-independent one, which selects the platform\'s code '
                   'model (-fPIC) and nothing about the ABI, wchar_t or char, which are the compiler\'s defaults (MLIB1)',

@@ -396,14 +396,26 @@ static void emit_lines(const char *section, const std::set<std::string> &lines)
  * not one, so the plugin spells it with the SAME function (layout/decltype_spell.inc, dl_type). A unit that declares fnvnx_dispatch itself (the runtime,
  * through fnvl_host.h) already has its row from the layout plugin: the two rows are one function on two decls, and the layout gate compares them. */
 #include "../layout/decltype_spell.inc"
+#include "../names/plugsym.inc"
 
 static void finish_unit(void *, void *)
 {
-  if (site_count && !fnvnx_cxx_fe() && !fe_declares_dispatch) {
-    std::set<std::string> row;
+  plugsym_writer_scope plugsym_scope;   /* RULE DECLTYPE-PLUGINSYM: reports on every way out */
+  /* RULE DECLTYPE-PLUGINSYM: fnvnx_dispatch is a symbol this plugin makes (a unit that declares it has its row from the front end's declaration). With the layout
+   * plugin loaded the registry gives it its line (a C unit: this prototype's row; a C++ unit: the reason `plugin`); without it (this plugin alone) the line is written here. */
+  if (fp_var) {   /* the thread-local word of the call sequence (an artificial declaration of this plugin) */
     std::vector<tree> stk;
-    row.insert("fnvnx_dispatch\t" + dl_type(TREE_TYPE(get_dispatch()), stk));
-    emit_lines(".fnvnx.decltype", row);
+    plugsym_note("fnvnx_call_fp", dl_type(TREE_TYPE(fp_var), stk));
+  }
+  if (site_count && !fe_declares_dispatch) {
+    std::vector<tree> stk;
+    std::string ty = fnvnx_cxx_fe() ? "" : dl_type(TREE_TYPE(get_dispatch()), stk);
+    if (fnvnx_plugsym().reader) plugsym_note("fnvnx_dispatch", ty);
+    else if (!fnvnx_cxx_fe()) {
+      std::set<std::string> row;
+      row.insert("fnvnx_dispatch\t" + ty);
+      emit_lines(".fnvnx.decltype", row);
+    }
   }
   emit_lines(".fnvnx.disp", descs);
   need_names_plugin();
@@ -1135,6 +1147,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, contp_fn, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_TYPE, entry_union, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_DECL, entry_decl, NULL);
+  plugsym_writer();
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   register_pass_info ap;
   ap.pass = new agg_pass(g);

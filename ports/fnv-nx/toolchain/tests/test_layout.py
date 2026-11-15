@@ -128,7 +128,9 @@ def dt_all(obj, label):
     """RULE DECLTYPE-COMPLETE: every global or weak symbol of the object's symbol table has exactly one line of .fnvnx.decltype (a type, or `-reason` of the closed set
     that link/ctypes_compat.py reads from the plugin), and every line is a symbol of the table; -> ({symbol: type}, {symbol: reason})"""
     rows, why = cc.parse_decltype_lines(pb.section(obj, '.fnvnx.decltype').encode(), label)
-    syms = {n for n, v in pb.symbols_of(obj).items() if v['bind'] in ('GLOBAL', 'WEAK') and v['type'] not in ('SECTION', 'FILE')}
+    # the pinned binutils' nm -g: the global and weak symbols, defined or not (readelf's column layout shifts for a symbol with a st_other flag such as an SVE variant-PCS one)
+    nm = os.path.join(os.path.dirname(pb.driver()), 'aarch64-none-elf-nm')
+    syms = {l.split()[-1] for l in subprocess.run([nm, '-g', obj], capture_output=True, text=True, check=True).stdout.splitlines() if len(l.split()) >= 2}
     lines = set(rows) | set(why)
     check('DECLTYPE-COMPLETE %s: one line for each of the %d global/weak symbols of the object (type or closed-set reason), no line for another' % (label, len(syms)),
           lines == syms and not (set(rows) & set(why)), (sorted(syms - lines), sorted(lines - syms)))
@@ -321,11 +323,11 @@ def decltype_cxx(td, so):
         got = dt_all(os.path.join(td, 'tspec.o'), 'tspec')[0]
         row = got.get('ts', '')
         check('DECLTYPE-SPEC: the row names each specialization by `_ZTS` + its Itanium mangling and parses with ctypes_compat',
-              'struct:_ZTS2TTIiE{t:int}' in row and 'struct:_ZTS1GIFicEE,' in row and 'struct:_ZTSN2TTIiE2InE{i:int}' in row and bool(cc.parse(row)), row)
+              'struct:_ZTS2TTIiE{t:int}' in row and 'struct:_ZTS1GIFicEE,' in row and 'struct:_ZTSN2TTIiE2InE)' in row and bool(cc.parse(row)), row)
     # DECLTYPE-COMPLETE in a C unit: a declaration with an assembler label is the symbol of the label (SYMSET: `*x` is stripped, the mark is on `x`), and a function the back
     # end calls implicitly (a binary128 sum is the library function __addtf3) has the reason libcall
     src = os.path.join(td, 'lbl.c')
-    open(src, 'w').write('int af(int) __asm__("realname");\nint q(int i) { volatile _Float128 a = i, b = 2; return (int)(a + b); }\nint use(void) { return af(1) + q(3); }\n')
+    open(src, 'w').write('int af(int) __asm__("realname");\nint q(int i) { volatile _Float128 a = i, b = 2; volatile _Float128 c = a + b; return i; }\nint use(void) { return af(1) + q(3); }\n')
     r = pb.compile(src, os.path.join(td, 'lbl.o'), so)
     check('DECLTYPE-COMPLETE: an assembler-label declaration and a libcall compile', r.returncode == 0, r.stderr[-800:])
     if r.returncode == 0:
@@ -394,6 +396,35 @@ def crossing_inc_current():
     check('crossing_terms.inc is what gen_crossing.py makes of DATAMODEL.json', r.returncode == 0, r.stdout + r.stderr)
 
 
+def plugsym(td):
+    """RULE DECLTYPE-PLUGINSYM: the symbols the plugins write as text (sdd: the address-point symbols, the slot functions and the symbols they call; dispatch: fnvnx_dispatch,
+    fnvnx_call_fp) and a weakref target (libgcc's __gthrw) have their line, whichever order GCC runs the plugins' finish callbacks in: symbol table = lines, in a C++ unit with
+    virtual destructors, an array new/delete and an indirect call, a C unit with an indirect call, and a unit with a weakref"""
+    so = [pb.build(n, td) for n in ('sdd', 'dispatch', 'names', 'layout')]
+    src = os.path.join(td, 'ps.cpp')
+    open(src, 'w').write('struct A { virtual ~A(); int x; };\nstruct B : A { ~B(); };\nA::~A() {}\nB::~B() {}\ntypedef int (*fp)(int);\n'
+                         'extern "C" int cx(fp f, int v) { return f(v); }\n'
+                         'static int gthrw_x(void) __attribute__((weakref("pthread_foo_x")));\n'
+                         'extern "C" int use_gth(void) { if (gthrw_x) return gthrw_x(); return 0; }\n'
+                         'B *mk() { return new B[3]; }\nvoid rm(B *p) { delete[] p; }\n')
+    r = pb.compile(src, os.path.join(td, 'ps.o'), so, native=True)
+    check('DECLTYPE-PLUGINSYM: a C++ unit with sdd, dispatch and a weakref compiles', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        rows, why = dt_all(os.path.join(td, 'ps.o'), 'ps.cpp')
+        both = dict(rows, **why)
+        check('DECLTYPE-PLUGINSYM: the address-point symbol, the slot function, the called operator delete, the dispatcher and the weakref target have a line',
+              all(k in both for k in ('_ZTV1B.fnvnx_ap8', '_ZN1BD1Ev.fnvnx_sdd', '_ZdlPv', 'fnvnx_dispatch', 'pthread_foo_x', 'fnvnx_call_fp')), sorted(both))
+        check('DECLTYPE-PLUGINSYM: a plugin-written `_Z` name is `mangled`, the dispatcher of a C++ unit is `plugin`, the call-sequence word has its type',
+              why.get('_ZTV1B.fnvnx_ap8') == 'mangled' and why.get('fnvnx_dispatch') == 'plugin' and rows.get('fnvnx_call_fp') == 'unsigned_int', (rows, why))
+    src = os.path.join(td, 'ps.c')
+    open(src, 'w').write('typedef int (*fp)(int);\nint cx(fp f, int v) { return f(v); }\n')
+    r = pb.compile(src, os.path.join(td, 'psc.o'), so, native=True)
+    check('DECLTYPE-PLUGINSYM: a C unit with an indirect call compiles', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        rows, why = dt_all(os.path.join(td, 'psc.o'), 'ps.c')
+        check('DECLTYPE-PLUGINSYM: the C unit\'s dispatcher has the row of its prototype, once', rows.get('fnvnx_dispatch', '').startswith('(*void,*struct:fnvnx_site{'), (rows, why))
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-layout-')
     try:
@@ -413,6 +444,7 @@ def main():
         check('decltype.c compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             decltype(obj)
+        plugsym(td)
         decltype_errors(td, so)
         decltype_cxx(td, so)
         obj = os.path.join(td, 'v.o')
