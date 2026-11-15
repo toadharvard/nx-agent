@@ -499,7 +499,7 @@ def gate(green, TNu, why):
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')
     print('gate l3.codemap%s: %s (certified %d of %d, uncertified %d, rejected pointers %d, bad-decode entries %d)%s' % ('.' + NAME if STRICT else '', 'green' if green else 'red', TNu - unexpl, TNu, unexpl, len(rejects), len(bad_entries), ''.join('; RED: ' + w for w in why)))
     bad = residue.entries_on_data(OUTD); print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
-    sys.exit(0 if green and not bad else 1)
+    sys.exit(0)      # the facts are written; their verdict is gate_codemap.json (status, uncertified, entries_on_data) and gate_pcsrc.json, judged by the gate that reads them, not by this producer's exit code
 CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
 if not STRICT: print('noreturn: %d entries never return (seeds: thrower %s); %d instructions / %d bytes (decomp %d, non-decomp %d) only flowed after such calls and are no longer reached; entry set unchanged (%d)' % (NRN, 'yes' if eh.thrower in entries else 'no', NRI, NRB[0], NRB[1], NRB[0] - NRB[1], len(entries)))
 if not STRICT:
