@@ -50,19 +50,13 @@ UNKNOWN_FMT = [fcc("ZZZZ"), fcc("abcd"), fcc("~!@#"), 1, 37, 255, 0x7fffffff, 0x
 FMT = None   # set by load(): every D3DFORMAT enum value of the header + the known FOURCCs + UNKNOWN_FMT
 KNOWN_FCC = None   # set by load(): the FOURCCs Wine 9.0 knows, sorted
 # DEVT, RTYPE, MSAA (and their *X / complement forms) are derived in load() from the enums of the mounted d3d9types.h (enum_domain)
-USAGE_BITS = [1 << i for i in range(32)]
-MASK = 0x103ffff0 | 3     # WINED3DUSAGE_MASK | WINED3DUSAGE_QUERY_MASK (+ RT, DS): the bits that reach wined3d_check_device_format's usage logic
-EFF = [b for b in USAGE_BITS if b & MASK]
-PAIRS = [a | b for i, a in enumerate(EFF) for b in EFF[i + 1:]]
-USAGE_ALL = [0] + USAGE_BITS
+USAGE_BITS = [1 << i for i in range(32)]   # the 32 single bits of the DWORD usage word; PAIRS, MASK and the usage domains below are derived in load()
 X8 = R5 = X1 = A2R10 = None   # D3DFMT_X8R8G8B8, R5G6B5, X1R5G5B5, A2R10G10B10: read by name from the header in load()
-RT, DS = 1, 2
-QBITS = [0x8000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000]
 # (name, [per-argument domain: list of values or a domain name])
-D = dict(FMT=None, DEVT=None, DEVTX=None, RTYPE=None, RTYPEX=None, MSAA=None, USAGE_ALL=USAGE_ALL, PAIRS=PAIRS, WIN=[0, 1],
-         A0=[0], HAL=[1], X8=None, FMT_AD=None, SMALLRT=[1, 3, 4, 5, 6], RT2=[1, 3], USM3=[0, 1, 2], UNI=[0, 1, 3, 5, 6, 7], AFLAG=[0] + [1 << i for i in range(32)] + [0xffffffff], DISP4=None,
+D = dict(FMT=None, DEVT=None, DEVTX=None, RTYPE=None, RTYPEX=None, MSAA=None, USAGE_ALL=[0] + USAGE_BITS, PAIRS=None, WIN=[0, 1],
+         A0=[0], HAL=[1], X8=None, FMT_AD=None, SMALLRT=None, RT2=None, USM3=None, AFLAG=[0] + [1 << i for i in range(32)] + [0xffffffff], DISP4=None,
          SCAN=[0, 1, 2, 3, 0x7fffffff], NZ=[0, 1, 2, 5, 0xffffffff], SZ=[0x18, 0x10, 0, 0x1c, 0xffffffff], FMT12=None,
-         USM=[0, 1, 2, 3, 0x40000 | 1, 0x20000, 0x10000, 0x200, 0x400, 0x400 | 1], FMT_SM=None,
+         USM=None, FMT_SM=None,
          OORA=[1, 2, 0x7fffffff, 0xffffffff], SDK=[0, 1, 0x1f, 0x20, 0x21, 0x80000020, 0xffffffff])
 Q = []   # (op, [domains])
 Q += [("GetAdapterCount", [])]
@@ -96,6 +90,17 @@ NARGS = {"GetAdapterCount": 0, "GetAdapterIdentifier": 2, "GetAdapterMonitor": 1
          "EnumAdapterModesEx": 4, "GetAdapterDisplayModeEx": 2, "GetAdapterLUID": 1, "Direct3DCreate9": 1, "Direct3DCreate9Ex": 1}
 
 
+def c_defines_enum(hdr, typedef):
+    """{suffix: value} of an enum of the header: the enumerator names without their D3D..._ prefix (D3DRTYPE_SURFACE -> SURFACE)"""
+    t = open(hdr).read(); t = t[t.index("typedef enum " + typedef):]; t = t[:t.index("}")]
+    return {n.split("_", 1)[1]: int(v, 0) for n, v in re.findall(r"(\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)", t)}
+
+
+def c_defines(path, prefix):
+    """{name: value} of the `#define PREFIX_NAME 0x..` lines of a header (hex or decimal, an optional L / U suffix)"""
+    return {n: int(v.rstrip("LUlu"), 0) for n, v in re.findall(r"#define (%s\w*)\s+\(?(0x[0-9A-Fa-f]+[LUlu]*|\d+[LUlu]*)\)?\s*$" % prefix, open(path).read(), re.M)}
+
+
 def known_fourcc(wine):
     """the FOURCC formats Wine 9.0 knows, derived: the names in wined3d/utils.c format_index_remap, each resolved to its WINEMAKEFOURCC of include/wine/wined3d.h.
     wine = the directory of the pinned mirror (tools/wine-9.0-d3d9-formats)."""
@@ -120,6 +125,18 @@ def load(hdr, spec, wine, d3d9h):
     X8, R5, X1, A2R10 = (FN["D3DFMT_" + n] for n in ("X8R8G8B8", "R5G6B5", "X1R5G5B5", "A2R10G10B10"))
     R = d3d_results(d3d9h); NA, INV, NOAUTOGEN = R["D3DERR_NOTAVAILABLE"], R["D3DERR_INVALIDCALL"], R["D3DOK_NOAUTOGEN"]
     D["X8"], D["FMT_AD"], D["DISP4"] = [X8], [X8, R5, X1], [X8, R5, X1, A2R10]
+    # usage: the bits that reach wined3d_check_device_format's usage logic = WINED3DUSAGE_MASK | WINED3DUSAGE_QUERY_MASK (wined3d.h, Wine 9.0) + D3DUSAGE_RENDERTARGET | DEPTHSTENCIL (they become bind flags)
+    WU = c_defines(os.path.join(wine, "include", "wine", "wined3d.h"), "WINED3DUSAGE_"); DU = c_defines(hdr, "D3DUSAGE_")
+    MASK = WU["WINED3DUSAGE_MASK"] | WU["WINED3DUSAGE_QUERY_MASK"] | DU["D3DUSAGE_RENDERTARGET"] | DU["D3DUSAGE_DEPTHSTENCIL"]
+    EFF = [b for b in USAGE_BITS if b & MASK]
+    D["PAIRS"] = [a | b for i, a in enumerate(EFF) for b in EFF[i + 1:]]
+    RTV, DSV = DU["D3DUSAGE_RENDERTARGET"], DU["D3DUSAGE_DEPTHSTENCIL"]; q = lambda n: WU["WINED3DUSAGE_QUERY_" + n]
+    D["USM3"] = [0, RTV, DSV]
+    D["USM"] = [0, RTV, DSV, RTV | DSV, q("SRGBWRITE") | RTV, q("FILTER"), q("SRGBREAD"), WU["WINED3DUSAGE_DYNAMIC"], q("GENMIPMAP"), q("GENMIPMAP") | RTV]
+    # resource-type classes (README: SURFACE, TEXTURE, CUBE, VOLUME(=VOLUMETEXTURE), BUFFER(=VB=IB)), one representative each, by name; RT2 = the two that can be render targets
+    RN = c_defines_enum(hdr, "_D3DRESOURCETYPE")
+    D["SMALLRT"] = [RN[n] for n in ("SURFACE", "TEXTURE", "VOLUMETEXTURE", "CUBETEXTURE", "VERTEXBUFFER")]
+    D["RT2"] = [RN["SURFACE"], RN["TEXTURE"]]
     # FMT12 / FMT_SM: the formats of the 12-value and 8-value probe axes, each by its name in the header (a FOURCC by its four characters; a value of the complement by UNKNOWN_FMT)
     f = lambda n: FN["D3DFMT_" + n]
     D["FMT12"] = [f("A8R8G8B8"), f("X8R8G8B8"), f("R5G6B5"), f("D24S8"), f("D16"), fcc("DXT1"), fcc("INTZ"), fcc("NULL"), f("R32F"), f("UNKNOWN"), UNKNOWN_FMT[0], f("A16B16G16R16F")]
