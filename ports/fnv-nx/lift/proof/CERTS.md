@@ -88,6 +88,23 @@ orchestrator."). The fact gives FCW.OM = FCW.UM = 1 at every x87 instruction of 
 (SDM 1:8.1.5, FINIT) and only those sites write it. A certificate that uses `ou_pre` names `x87-masked-sites` in the K
 of its record; until L3a publishes the fact, the K is not closed and the form gate does not admit the shape.
 
+## SIMD refinement (simdspec.py, simdcheck.py)
+
+The pinned Sail model has no SIMD semantics (every 0F SSE/MMX opcode is unimplemented), so a SIMD shape is certified against `simdspec.py`, the way x87 is
+against `x87spec.py` (OWNER 10 for the parts no pinned formal model covers; the SDM text and the ACL2 x86isa model are the sources).
+- Source of a row: the pinned ACL2 `acl2/acl2` 3ccb342c, `books/projects/x86isa/machine/instructions`, file and line recorded in `acl2_cites.tsv`
+  (`acl2_cite_check.py DIR` resolves every cite and fails on a stale or missing one). A row ACL2 lacks is an SDM row with the quote, as in x87spec.py.
+- Obligation (per encoding shape, `simdcheck.py`): the symbolic Form's z3 post-state (xmm0-7, fr0-7, ftop, ftag, mxcsr, the eight general registers, memory,
+  the fault kind) equals the spec's on every pre-state and every displacement/immediate value, under the declared environment. unsat is the proof; the
+  result classes are proved | FAILED (counter-model) | no-row | no-form | timeout.
+- Dependences stated, not hidden: the effective address is the Form's own (`forms.ea` of the same adapter operand): it is the integer path's certified fact.
+  The environment is `cr0_em = 0, cr0_ts = 0, cr4_osfxsr = 1` (Res.env): the rows of L5's x86sys (the user-mode machine); the spec reads them as state
+  variables, never as a constant.
+- A misaligned 16-byte memory operand of an aligned form is the access violation (SDM 2A 'Exceptions Type 1/4': #GP(0), reported by Windows as the AV code of the
+  fault table); the rule per row is `al` (ACL2 `inst-ac?`). QEMU/unicorn does not fault on it, so the emulator is not the reference for that cell.
+- The MMX rule is x87spec's (`mmx_exec_effect`, `mmx_write_effect`: TOP := 0, tags valid, a written mmN gets 0xFFFF in bits 79..64, SDM 1:9.6.2). QEMU leaves
+  bits 79..64 of the destination alone, so the emulator test compares the 64 data bits only; the exponent bits are checked against the SDM rule.
+
 ## Pinned IR 7c307464: hunks
 
 New pin: x86_proof.ir sha256 7c3074644653d2976cbb101ae993e94f2a09c9b7a3b574d3c74f6a80278d079c (BUMP now defaults to 1 in farm/sail_build.sh; BUMP=0 rebuilds the superseded IR).
