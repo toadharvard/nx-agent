@@ -32,7 +32,10 @@
    "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
    "args": {
     "mode": "native"
-   }
+   },
+   "inputs": [
+    "ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc"
+   ]
   },
   {
    "name": "fnvnx_order",
@@ -74,7 +77,8 @@
    "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
    "args": {},
    "inputs": [
-    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+    "ports/fnv-nx/toolchain/layout/crossing_terms.inc"
    ]
   }
  ],
