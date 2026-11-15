@@ -82,7 +82,8 @@ def _check(repo, commit, vdir, budget, gates, td, env_id):
     return json.load(open(outp))
 
 def cmd_verdict(a):
-    o = _opts(a, ("--commit",))
+    o = _opts(a, ("--commit", "--artifacts"))
+    os.environ["ARTIFACTS_URL"] = o["--artifacts"]   # the artifacts repository: a required argument, read by the gates through the environment of the run
     env_id, bad = _env(o["--repo"], o["--commit"])
     if bad:
         return _blocked_env(bad)
@@ -92,7 +93,8 @@ def cmd_verdict(a):
     return 0 if v["verdict"] == "green" else 2
 
 def cmd_merge(a):
-    o = _opts(a, ("--into", "--from"), ("--remote",))
+    o = _opts(a, ("--into", "--from", "--artifacts"), ("--remote",))
+    os.environ["ARTIFACTS_URL"] = o["--artifacts"]
     o.setdefault("--remote", None)
     repo, vdir, remote, bname = o["--repo"], o["--verdicts"], o["--remote"], o["--into"]
     if remote:

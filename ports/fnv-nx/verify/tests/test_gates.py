@@ -211,7 +211,7 @@ check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"p
 
 # ---- l1
 def l1(*a):
-    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "l1.py")] + list(a), capture_output=True, text=True, env=ENV)
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "l1.py"), a[0], "--artifacts", ENV.get("ARTIFACTS_URL", "file:///none")] + list(a[1:]), capture_output=True, text=True, env=ENV)
     lines = [x for x in p.stdout.splitlines() if x.startswith("L1 ")]
     return p.returncode, lines[-1] if lines else "", p.stdout, p.stderr
 

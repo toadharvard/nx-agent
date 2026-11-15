@@ -22,6 +22,7 @@ import argparse
 import csv
 import ctypes
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -49,7 +50,9 @@ PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keys
               "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
 RUN_LAYOUT_DEB = "base-files"   # the machine's root layout (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin): every `run` stage of recipe.py mounts its symlink members
-RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
+import hostprofile  # noqa: E402
+HOST = hostprofile.HOST
+RENDER_FILES = HOST["egl_vendor_files"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
     """Every file of the plugin directory of compiler GCC (`gcc -print-file-name=plugin`: the gcc-N-plugin-dev package of a distro compiler)."""
     d = subprocess.run([gcc, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
@@ -63,7 +66,7 @@ def env_id(doc):
 def file_owners():
     """{path: {dpkg package names}} from /var/lib/dpkg/info/*.list (arch qualifier dropped); a path owned by several packages has all of them."""
     own = {}
-    info = "/var/lib/dpkg/info"
+    info = HOST["dpkg_info"]
     for f in os.listdir(info):
         if f.endswith(".list"):
             pk = f[:-5].split(":")[0]
@@ -116,7 +119,7 @@ def tree_digest(d, pinned=None, owners=None):
     return h.hexdigest()
 
 def _os():
-    osr = dict(ln.rstrip("\n").split("=", 1) for ln in open("/etc/os-release") if "=" in ln)
+    osr = dict(ln.rstrip("\n").split("=", 1) for ln in open(HOST["os_release"]) if "=" in ln)
     return {"id": osr.get("ID", "").strip('"'), "version_id": osr.get("VERSION_ID", "").strip('"')}
 
 def _dpkg(pkg):
@@ -129,7 +132,7 @@ def dep_closure(names):
     that package, so the result is exactly the set of installed packages that the declared ones rely on. A name that is not installed
     is left out (check reports it as a missing package). Rule, not a list: this is what dpkg -i of the pins needs to be complete."""
     recs, prov = {}, {}
-    for blk in open("/var/lib/dpkg/status", encoding="utf-8", errors="replace").read().split("\n\n"):
+    for blk in open(HOST["dpkg_status"], encoding="utf-8", errors="replace").read().split("\n\n"):
         d, k = {}, None
         for ln in blk.split("\n"):
             m = re.match(r"^([A-Za-z0-9-]+):\s?(.*)$", ln)
@@ -164,7 +167,7 @@ def dep_closure(names):
 
 def _owners():
     """{real path: {package}} from dpkg's own file lists (merged-/usr names resolved)."""
-    out, d = {}, "/var/lib/dpkg/info"
+    out, d = {}, HOST["dpkg_info"]
     for f in os.listdir(d):
         if f.endswith(".list"):
             pkg = f[:-5].removesuffix(":amd64")
@@ -444,7 +447,7 @@ def snapshot(prev=None):
     def loads(roots, trees=()):
         for at in runtime.closure(sorted(roots), list(trees)):
             add(at)
-    py, mods = os.path.realpath(sys.executable), [os.path.dirname(__import__(PY_MODULES[m]).__file__) for m in sorted(PY_MODULES)]
+    py, mods = os.path.realpath(sys.executable), [os.path.dirname(importlib.util.find_spec(PY_MODULES[m]).origin) for m in sorted(PY_MODULES)]
     dyn = sysconfig.get_config_var("DESTSHARED")
     roots = [py] + [f for d in [dyn] + mods for f in runtime.elf_files(d, runtime.ident(py))]
     loads(roots, [os.path.dirname(os.__file__), os.path.dirname(os.path.dirname(py))] + mods)
@@ -490,7 +493,7 @@ def snapshot(prev=None):
             add(subprocess.run([gcc, flag + n], capture_output=True, text=True).stdout.strip())
     for p in HOST_GCC_PLUGIN_DIRS(gcc):   # objstub builds its terminator plugin against the plugin headers of the root compiler (host roots: the distro gcc)
         add(p)
-    ld = subprocess.run(["/sbin/ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
+    ld = subprocess.run([HOST["ldconfig"], "-p"], capture_output=True, text=True, check=True).stdout
     for n in RENDER_LIBS:   # the renderer's host libraries (verify/bootgpu.py loads libnxgl4.so; test_bootgpu, test_boot_job, boot_job.sh)
         hit = [l.split("=>")[1].strip() for l in ld.splitlines() if l.strip().startswith(n + " ") and "x86-64" in l]
         if not hit:
@@ -507,7 +510,7 @@ def snapshot(prev=None):
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
                        "installed_files_sha256": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
                        "wheel_sha256": wheel_pins(prev)[0], "wheel_files": wheel_pins(prev)[1]},
-            "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
+            "programs": sorted(PROGRAMS), "host": hostprofile.load(), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
 
 def main(argv):
     ap = argparse.ArgumentParser(prog="envcheck.py")

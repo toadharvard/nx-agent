@@ -56,7 +56,8 @@ import sandbox  # noqa: E402
 FORMAT = "fnvnx-runtime/1"
 ENV = {"PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"}
 X86_64 = (2, 1, 62)  # EI_CLASS ELFCLASS64, EI_DATA ELFDATA2LSB, EM_X86_64
-DEFAULT_DIRS = ["/lib", "/usr/lib", "/lib64", "/usr/lib64"]
+import hostprofile  # noqa: E402
+DEFAULT_DIRS = hostprofile.HOST["libdirs"]   # the host profile of env.json
 INFO = ("import sys,os,json,sysconfig,importlib.util\n"
         "import site,sysconfig as sc\n"
         "P=sc.get_paths()\n"
