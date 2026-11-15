@@ -917,6 +917,215 @@
      "ident": "flag_modulo_sched"
     }
    }
+  },
+  {
+   "pass": "pass_stack_ptr_mod",
+   "class": "no-mem",
+   "reason": "execute only scans the insns with note_stores to set crtl->sp_is_unchanging and updates the exit-block uses; it emits, changes and deletes no insn",
+   "files": {
+    "stack-ptr-mod.cc": "af4a53091fa8ea9cf54248bca235367974b4991a8d00251000cb55457140537d"
+   },
+   "cites": [
+    {
+     "file": "stack-ptr-mod.cc",
+     "line": 86,
+     "ident": "sp_is_unchanging"
+    },
+    {
+     "file": "stack-ptr-mod.cc",
+     "line": 94,
+     "ident": "note_stores"
+    }
+   ]
+  },
+  {
+   "pass": "pass_instantiate_virtual_regs",
+   "class": "preserves",
+   "reason": "instantiate_virtual_regs replaces the virtual registers inside the insns' operands by the frame, stack or argument register plus a constant (an address changes, the MEM rtx and its flags do not); it recognizes the result with volatile_ok = 1 (init_recog, function.cc:1968), so a volatile MEM stays a valid, volatile operand",
+   "files": {
+    "function.cc": "2fb1d79514e2b7fa06dc6edc397a9bac1cbd0bc457bbc710e260e16cc566ceed"
+   },
+   "cites": [
+    {
+     "file": "function.cc",
+     "line": 1968,
+     "ident": "init_recog"
+    },
+    {
+     "file": "function.cc",
+     "line": 1972,
+     "ident": "INSN_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_into_cfg_layout_mode",
+   "class": "preserves",
+   "reason": "cfg_layout_initialize records each block's header and footer (non-insn notes) and runs cleanup_cfg (CLEANUP_CFGLAYOUT | 0) (cfgrtl.cc:4553): neither CLEANUP_THREADING nor CLEANUP_CROSSJUMP is set, so jump threading (cfgcleanup.cc:486) and cross-jumping (2938) are not entered; what remains moves or deletes whole blocks and dead jumps",
+   "files": {
+    "cfgrtl.cc": "8a2a734476807fc4958d4dced2346e1cbf098b7e4c6b09c588810b272139602a",
+    "cfgcleanup.cc": "1a44800de9cfc473a07de54c56fc65931798f36b93c002160218ba0870ec6e98"
+   },
+   "cites": [
+    {
+     "file": "cfgrtl.cc",
+     "line": 4544,
+     "ident": "record_effective_endpoints"
+    },
+    {
+     "file": "cfgrtl.cc",
+     "line": 4553,
+     "ident": "cleanup_cfg"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 486,
+     "ident": "CLEANUP_THREADING"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 2938,
+     "ident": "CLEANUP_CROSSJUMP"
+    }
+   ]
+  },
+  {
+   "pass": "pass_outof_cfg_layout_mode",
+   "class": "preserves",
+   "reason": "cfg_layout_finalize (cfgrtl.cc:3773) calls fixup_reorder_chain, which rechains the blocks in bb->aux order by splicing each block's BB_HEAD..BB_END as a unit (cfgrtl.cc:3896, 3900); the insns inside a block are not touched, only jumps and labels are added at block ends",
+   "files": {
+    "cfgrtl.cc": "8a2a734476807fc4958d4dced2346e1cbf098b7e4c6b09c588810b272139602a"
+   },
+   "cites": [
+    {
+     "file": "cfgrtl.cc",
+     "line": 3773,
+     "ident": "cfg_layout_finalize"
+    },
+    {
+     "file": "cfgrtl.cc",
+     "line": 4592,
+     "ident": "fixup_reorder_chain"
+    },
+    {
+     "file": "cfgrtl.cc",
+     "line": 3896,
+     "ident": "BB_HEAD"
+    },
+    {
+     "file": "cfgrtl.cc",
+     "line": 3900,
+     "ident": "BB_END"
+    }
+   ]
+  },
+  {
+   "pass": "pass_reorder_blocks",
+   "class": "preserves",
+   "reason": "execute is cfg_layout_initialize (CLEANUP_EXPENSIVE), reorder_basic_blocks (block order only), cleanup_cfg (CLEANUP_EXPENSIVE | CLEANUP_NO_PARTITIONING) and cfg_layout_finalize (bb-reorder.cc:2675-2683). Neither cleanup_cfg mode has CLEANUP_THREADING or CLEANUP_CROSSJUMP; CLEANUP_EXPENSIVE adds: merging two blocks by moving one whole (cfgcleanup.cc:763), simplifying a branch over a branch (2909) and delete_trivially_dead_insns (3161), which keeps an insn with side effects (cse.cc:6793, rtlanal.cc:3069/3075)",
+   "files": {
+    "bb-reorder.cc": "2ea1b4f1fb4a6302dfb3f0a8e23c93ab77b2b01266699c57d62bdd9322c940a0",
+    "cfgcleanup.cc": "1a44800de9cfc473a07de54c56fc65931798f36b93c002160218ba0870ec6e98",
+    "cse.cc": "0fa170751662249a448bebfb26c94970ae9bcc5e56783a409139266144787f8b",
+    "rtlanal.cc": "2029aeaa389a3b25e979528e4b6c6328bf7612c26fc05ddb4504d543b1f02de4"
+   },
+   "cites": [
+    {
+     "file": "bb-reorder.cc",
+     "line": 2675,
+     "ident": "cfg_layout_initialize"
+    },
+    {
+     "file": "bb-reorder.cc",
+     "line": 2678,
+     "ident": "cleanup_cfg"
+    },
+    {
+     "file": "bb-reorder.cc",
+     "line": 2683,
+     "ident": "cfg_layout_finalize"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 763,
+     "ident": "CLEANUP_EXPENSIVE"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 2909,
+     "ident": "CLEANUP_EXPENSIVE"
+    },
+    {
+     "file": "cfgcleanup.cc",
+     "line": 3161,
+     "ident": "delete_trivially_dead_insns"
+    },
+    {
+     "file": "cse.cc",
+     "line": 6793,
+     "ident": "side_effects_p"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3069,
+     "ident": "UNSPEC_VOLATILE"
+    },
+    {
+     "file": "rtlanal.cc",
+     "line": 3075,
+     "ident": "MEM_VOLATILE_P"
+    }
+   ]
+  },
+  {
+   "pass": "pass_duplicate_computed_gotos",
+   "class": "preserves",
+   "reason": "duplicate_computed_gotos copies a whole block that ends in a computed jump (bb-reorder.cc:2780) into each predecessor, then cleanup_cfg (0) removes unreachable blocks (2785); every path still runs the copied insns once, in the same order, so the program order of a volatile access on a path is unchanged",
+   "files": {
+    "bb-reorder.cc": "2ea1b4f1fb4a6302dfb3f0a8e23c93ab77b2b01266699c57d62bdd9322c940a0"
+   },
+   "cites": [
+    {
+     "file": "bb-reorder.cc",
+     "line": 2780,
+     "ident": "computed_jump_p"
+    },
+    {
+     "file": "bb-reorder.cc",
+     "line": 2781,
+     "ident": "maybe_duplicate_computed_goto"
+    },
+    {
+     "file": "bb-reorder.cc",
+     "line": 2785,
+     "ident": "cleanup_cfg"
+    }
+   ]
+  },
+  {
+   "pass": "pass_free_cfg",
+   "class": "no-mem",
+   "reason": "execute is free_bb_for_insn, which clears BLOCK_FOR_INSN of every insn (cfgrtl.cc:457-459), and, under DELAY_SLOTS (0 on aarch64), df_analyze; insert_section_boundary_note adds a note; no real insn is touched",
+   "files": {
+    "cfgrtl.cc": "8a2a734476807fc4958d4dced2346e1cbf098b7e4c6b09c588810b272139602a"
+   },
+   "cites": [
+    {
+     "file": "cfgrtl.cc",
+     "line": 459,
+     "ident": "BLOCK_FOR_INSN"
+    },
+    {
+     "file": "cfgrtl.cc",
+     "line": 502,
+     "ident": "insert_section_boundary_note"
+    },
+    {
+     "file": "cfgrtl.cc",
+     "line": 504,
+     "ident": "free_bb_for_insn"
+    }
+   ]
   }
  ]
 }
