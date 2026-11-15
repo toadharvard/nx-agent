@@ -46,7 +46,7 @@ def recipe(facts, modules, per_shard=PER_SHARD, exts=EXTERNALS):
     for name, mod in images(modules):
         u = os.path.join(facts, 'universe.tsv' if mod is None else name + '/universe.tsv')
         n = max(1, -(-universe_size(u) // per_shard))
-        where = ['--exe', '/ext/exe/' + EXE, '--universe', '/ext/facts/universe.tsv'] if mod is None else \
+        where = ['--exe', '/ext/exe/' + EXE, '--universe', '/ext/facts/universe.tsv', '--jtab', '/ext/facts/ehtables.json'] if mod is None else \
                 ['--module', mod, '--modules', MOD, '--moddirs', '/ext/exe:/ext/redist', '--facts-out', '/ext/facts']
         for k in range(n):
             outs = ['%s/%s_%d.%s' % (name, f, k, x) for f, x in (('texts', 'txt'), ('missing', 'tsv'), ('forms', 'tsv'), ('encs', 'tsv'), ('shapes', 'tsv'), ('inputs', 'json'))]

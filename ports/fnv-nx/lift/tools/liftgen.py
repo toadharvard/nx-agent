@@ -303,7 +303,9 @@ def module_inputs(a):
     path, row = pemod.locate(a.module, a.modules, a.moddirs.split(':'))
     u = '%s/%s/universe.tsv' % (a.facts_out, os.path.splitext(row.name)[0])
     if not os.path.exists(u): sys.exit('--module %s: no universe %s (tools/universe.py --module)' % (a.module, u))
-    a.exe, a.base, a.universe = path, row.base, u
+    j = '%s/%s/ehtables.json' % (a.facts_out, os.path.splitext(row.name)[0])
+    if not os.path.exists(j): sys.exit('--module %s: no jump-table facts %s (tools/ehtables.py)' % (a.module, j))
+    a.exe, a.base, a.universe, a.jtab = path, row.base, u, j
 
 
 def main():
