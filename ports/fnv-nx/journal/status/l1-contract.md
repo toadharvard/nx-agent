@@ -1802,3 +1802,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 21:06 w12 1ef71ed33: crossing.py --facts also checks that every import of a bridged dll has a bridge row. The CROSSING stage moves out of cand3 and enters with L3a's pack root (dispatch rows); the per-image facts carrier goes to L2. cand3 remaining: PP keying, the test_objstub harness, the pin.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 21:08 FARM pin landed: noneelf 56a4d09c37, tree cbb8843f, build_key 74cafda21648518e, toolchain_tree_git 1b2b42da6e (toolchain at 04007ded = 41beb64ff + PINSPLIT, so stamp is K2). Sent to w15 for cand2 (toolchain/ from 04007ded; stamp.py must print 74cafda2) and to w12.
+bottleneck: the cand2 warm verdict on w15.
