@@ -30,6 +30,17 @@ void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, uns
 
 unsigned long fnvnx_path_map(const char *win, char *host, size_t n); /* win32/path.cpp */
 
+/* kernel32 (platform/win32), the objects a descriptor holds: HANDLE = void * (ILP32) */
+typedef void *HANDLE;
+int ReadFile(HANDLE h, void *buf, unsigned n, unsigned *got, void *overlapped);
+int WriteFile(HANDLE h, const void *buf, unsigned n, unsigned *put, void *overlapped);
+int SetFilePointerEx(HANDLE h, long long dist, long long *newpos, unsigned method);
+unsigned GetFileType(HANDLE h);
+unsigned GetLastError(void);
+#define MSVCRT_NO_CONSOLE_FD (-2)
+#define MSVCRT_NO_CONSOLE ((HANDLE)MSVCRT_NO_CONSOLE_FD)
+#define INVALID_HANDLE ((HANDLE)(intptr_t)-1)
+
 #if defined(__ILP32__) || __SIZEOF_POINTER__ == 4
 _Static_assert(sizeof(struct _iobuf) == 32 && offsetof(struct _iobuf, _file) == 16, "MSVC FILE layout");
 _Static_assert(sizeof(fnvnx_ctypevec) == 16, "_Ctypevec");
@@ -42,27 +53,16 @@ _Static_assert(sizeof(fnvnx_ctypevec) == 16, "_Ctypevec");
 #define CTRLZ 0x1A
 #define STREAM_MAGIC 0x494f4246u /* "FBOI" */
 
-/* ---- lowio descriptors */
-enum { FD_OPEN = 1, FD_TEXT = 2, FD_CTRLZ = 4, FD_APPEND = 8, FD_DEV = 16, FD_READ = 32, FD_WRITE = 64 };
-struct fdent {
-    int flags;
-    int os;        /* os_file descriptor (not for FD_DEV) */
-    char *tmpname; /* _O_TEMPORARY / 'D': host path removed on close */
-    os_lock_t lock;
-};
-static struct fdent g_fd[MAX_FD] = {
-    { FD_OPEN | FD_TEXT | FD_DEV | FD_READ, -1, NULL, OS_LOCK_INIT },
-    { FD_OPEN | FD_TEXT | FD_DEV | FD_WRITE, -1, NULL, OS_LOCK_INIT },
-    { FD_OPEN | FD_TEXT | FD_DEV | FD_WRITE, -1, NULL, OS_LOCK_INIT },
-};
-
+/* ---- lowio descriptors: the table below (Wine 9.0 ioinfo) is the only descriptor state. A descriptor holds the kernel32 HANDLE of its object
+ * (Wine file.c msvcrt_alloc_fd / msvcrt_set_fd); every read, write and seek is ReadFile / WriteFile / SetFilePointerEx on that handle, so the
+ * kernel32 handle table is the one source of truth for what a descriptor refers to, its access and its position. */
+static os_lock_t g_fdlock[MAX_FD]; /* per descriptor; zero is the unlocked state (OS_LOCK_INIT) */
 /* The lowio table, as Wine 9.0 dlls/msvcrt/file.c defines it for the exe's CRT (_MSVCR_VER >= 80: MSVCRT_MAX_FILES 2048,
  * MSVCRT_FD_BLOCK_SIZE 32, `ioinfo` with handle, wxflag, lookahead[3], exflag, crit, textmode/unicode, pipech2, startpos,
  * utf8translations, dbcsBuffer, dbcsBufferUsed; __badioinfo = { INVALID_HANDLE_VALUE, WX_TEXT }; __pioinfo = the array of
  * MAX_FILES / BLOCK_SIZE block pointers). The offsets are those of the i386 build of that struct. wxflag bits are Wine's WX_*
  * (0x01 OPEN, 0x02 ATEOF, 0x20 APPEND, 0x40 TTY, 0x80 TEXT); lookahead[0..2] start as '\n' (file.c msvcrt_set_fd). The
- * descriptor table is the one table: every change of a descriptor's state goes through ioinfo_sync. handle is the os descriptor
- * for an open file and the descriptor number for a standard device (no Win32 HANDLE exists for a CRT descriptor in this layer). */
+ * handle is the Win32 HANDLE of the descriptor (INVALID_HANDLE_VALUE when free, MSVCRT_NO_CONSOLE for a standard stream without a console). */
 #define MSVCRT_MAX_FILES 2048
 #define MSVCRT_FD_BLOCK_SIZE 32
 struct fnvnx_ioinfo {
@@ -70,7 +70,7 @@ struct fnvnx_ioinfo {
     uint8_t wxflag;
     char lookahead[3];
     int exflag;
-    uint32_t crit[6]; /* RTL_CRITICAL_SECTION, 32-bit: unused here, descriptors lock through fdent.lock */
+    uint32_t crit[6]; /* RTL_CRITICAL_SECTION, 32-bit: unused here, descriptors lock through g_fdlock */
     char textmode : 7;
     char unicode : 1;
     char pipech2[2];
@@ -89,10 +89,14 @@ _Static_assert(offsetof(struct fnvnx_ioinfo, wxflag) == 4 && offsetof(struct fnv
 #define WX_APPEND 0x20
 #define WX_TTY 0x40
 #define WX_TEXT 0x80
+/* Initial state = the result of Wine 9.0 msvcrt_init_io on the declared machine: no startup lpReserved2 descriptors, and the standard handles
+ * are NULL (crt_kernel32.cpp g_std) whose GetFileType is FILE_TYPE_UNKNOWN, so descriptors 0-2 are WX_OPEN | WX_TEXT | WX_TTY with
+ * MSVCRT_NO_CONSOLE (file.c msvcrt_init_io); every other descriptor is free (handle INVALID_HANDLE_VALUE, as get_ioinfo_alloc_block sets it). */
+#define IOINFO_STD { 0xFFFFFFFEu, WX_OPEN | WX_TTY | WX_TEXT, { '\n', '\n', '\n' }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 }
+#define IOINFO_FREE { 0xFFFFFFFFu, 0, { 0 }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 }
 static struct fnvnx_ioinfo g_info[MSVCRT_MAX_FILES] = {
-    { 0, WX_OPEN | WX_TTY | WX_TEXT, { '\n', '\n', '\n' }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 },
-    { 1, WX_OPEN | WX_TTY | WX_TEXT, { '\n', '\n', '\n' }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 },
-    { 2, WX_OPEN | WX_TTY | WX_TEXT, { '\n', '\n', '\n' }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 },
+    [0] = IOINFO_STD, [1] = IOINFO_STD, [2] = IOINFO_STD,
+    [3 ... MSVCRT_MAX_FILES - 1] = IOINFO_FREE,
 };
 struct fnvnx_ioinfo *__pioinfo[MSVCRT_MAX_FILES / MSVCRT_FD_BLOCK_SIZE] = {   /* every block exists: MAX_FD == MSVCRT_MAX_FILES */
     g_info + 0, g_info + 32, g_info + 64, g_info + 96,
@@ -114,17 +118,33 @@ struct fnvnx_ioinfo *__pioinfo[MSVCRT_MAX_FILES / MSVCRT_FD_BLOCK_SIZE] = {   /*
 };
 _Static_assert(MAX_FD == MSVCRT_MAX_FILES, "one block pointer per MSVCRT_FD_BLOCK_SIZE descriptors");
 struct fnvnx_ioinfo __badioinfo = { 0xFFFFFFFFu, WX_TEXT, { 0 }, 0, { 0 }, 0, 0, { 0 }, { 0 }, 0, { 0 }, 0 };
-static void ioinfo_sync(struct fdent *d)
+/* Wine 9.0 dlls/msvcrt/errno.c msvcrt_set_errno: the CRT errno of a Win32 error (the cases of that switch, grouped as its fallthroughs group them) */
+static int win_errno(unsigned err)
 {
-    struct fnvnx_ioinfo *i = &g_info[d - g_fd];
-    int f = d->flags;
-    i->wxflag = (uint8_t)((f & FD_OPEN ? WX_OPEN : 0) | (f & FD_CTRLZ ? WX_ATEOF : 0) | (f & FD_APPEND ? WX_APPEND : 0) |
-                          (f & FD_DEV ? WX_TTY : 0) | (f & FD_TEXT ? WX_TEXT : 0));
-    i->handle = (f & FD_OPEN) ? (f & FD_DEV ? (uint32_t)(d - g_fd) : (uint32_t)d->os) : 0;
+    switch (err) {
+    case 5: case 65: case 82: case 132: case 167: case 83: case 16: case 108: case 158: case 12: case 32: case 33: return EACCES;
+    case 2: case 18: case 161: case 53: case 15: case 67: case 206: case 3: return ENOENT;
+    case 1117: return EIO;
+    case 11: return ENOEXEC;
+    case 6: return EBADF;
+    case 14: case 9: case 1816: case 7: return ENOMEM;
+    case 170: return EBUSY;
+    case 183: case 80: return EEXIST;
+    case 1200: return ENODEV;
+    case 4: return EMFILE;
+    case 112: return ENOSPC;
+    case 109: return EPIPE;
+    case 1131: return EDEADLK;
+    case 145: return ENOTEMPTY;
+    case 10: return E2BIG;
+    case 128: case 129: return ECHILD;
+    case 89: case 164: case 215: return EAGAIN;
+    default: return EINVAL;
+    }
 }
 
-/* _isatty: the descriptor is a character device (the standard streams) */
-int fnvnx_isatty(int fd) { return fd >= 0 && fd < MAX_FD && (g_fd[fd].flags & (FD_OPEN | FD_DEV)) == (FD_OPEN | FD_DEV); }
+/* _isatty (file.c): the descriptor is open and its wxflag says a character device */
+int fnvnx_isatty(int fd) { return fd >= 0 && fd < MAX_FD && (g_info[fd].wxflag & (WX_OPEN | WX_TTY)) == (WX_OPEN | WX_TTY); }
 
 static int fail(int e)
 {
@@ -132,53 +152,93 @@ static int fail(int e)
     return -1;
 }
 
-static int os_errno(int64_t neg)
+/* the open descriptor, or NULL with errno EBADF (file.c: get_ioinfo / handle == INVALID_HANDLE_VALUE) */
+static struct fnvnx_ioinfo *fd_get(int fd)
 {
-    switch ((int)-neg) {
-    case OS_ENOENT: return ENOENT;
-    case OS_EACCES: return EACCES;
-    case OS_EEXIST: return EEXIST;
-    case OS_ENOTDIR: return ENOENT;
-    case OS_EISDIR: return EACCES;
-    case OS_ENOSPC: return ENOSPC;
-    case OS_EINVAL: return EINVAL;
-    case OS_ENOMEM: return ENOMEM;
-    default: return EIO;
-    }
-}
-
-static struct fdent *fd_get(int fd)
-{
-    if (fd < 0 || fd >= MAX_FD || !(g_fd[fd].flags & FD_OPEN)) {
+    if (fd < 0 || fd >= MAX_FD || !(g_info[fd].wxflag & WX_OPEN) || (HANDLE)(uintptr_t)g_info[fd].handle == INVALID_HANDLE) {
         errno = EBADF;
         return NULL;
     }
-    return &g_fd[fd];
+    return &g_info[fd];
+}
+static inline HANDLE fd_handle(const struct fnvnx_ioinfo *d) { return (HANDLE)(uintptr_t)d->handle; }
+static inline os_lock_t *fd_lock(const struct fnvnx_ioinfo *d) { return &g_fdlock[d - g_info]; }
+
+/* msvcrt_alloc_fd / msvcrt_set_fd (file.c 553-584): the lowest free descriptor from 3 takes the handle; -1 (errno EMFILE) when the table is full.
+ * The table lock is the lock of the descriptor being claimed: claiming goes through one compare-and-swap on handle. */
+static int alloc_fd(HANDLE h, unsigned flag)
+{
+    for (int fd = 3; fd < MAX_FD; fd++) {
+        uint32_t expect = 0xFFFFFFFFu;
+        if (__atomic_compare_exchange_n(&g_info[fd].handle, &expect, (uint32_t)(uintptr_t)h, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+            struct fnvnx_ioinfo *i = &g_info[fd];
+            i->lookahead[0] = i->lookahead[1] = i->lookahead[2] = '\n';
+            i->textmode = 0;
+            i->unicode = 0;
+            __atomic_store_n(&i->wxflag, (uint8_t)(WX_OPEN | (flag & (WX_APPEND | WX_TEXT | WX_TTY))), __ATOMIC_SEQ_CST);
+            return fd;
+        }
+    }
+    errno = EMFILE;
+    return -1;
 }
 
-
-
-
-/* raw write of the whole buffer (append mode: at the end); devices go to the host's stdout/stderr */
-static int64_t raw_write(struct fdent *d, int fd, const void *p, size_t n)
+/* _get_osfhandle (Wine 9.0 file.c 2082): the descriptor's HANDLE; INVALID_HANDLE_VALUE with EBADF when it has none */
+intptr_t fnvnx_get_osfhandle(int fd)
 {
-    if (d->flags & FD_DEV) {
-        FILE *h = fd == 2 ? stderr : stdout;
-        size_t w = fwrite(p, 1, n, h);
-        fflush(h);
-        return (int64_t)w;
+    if (fd < 0 || fd >= MAX_FD) {
+        errno = EBADF;
+        return -1;
     }
-    if (d->flags & FD_APPEND)
-        os_file_seek(d->os, 0, OS_SEEK_END);
+    HANDLE h = fd_handle(&g_info[fd]);
+    if (h == INVALID_HANDLE)
+        errno = EBADF;
+    return (intptr_t)h;
+}
+
+/* _open_osfhandle (Wine 9.0 file.c 2660): oflags _O_TEXT 0x4000, _O_APPEND 0x8, _O_BINARY 0x8000 select the mode; no mode means binary */
+#define MSVCRT_O_APPEND 0x0008
+#define MSVCRT_O_TEXT 0x4000
+#define MSVCRT_O_BINARY 0x8000
+#define FILE_TYPE_UNKNOWN 0
+#define FILE_TYPE_CHAR 2
+int fnvnx_open_osfhandle(intptr_t handle, int oflags)
+{
+    if (!(oflags & (MSVCRT_O_BINARY | MSVCRT_O_TEXT)))
+        oflags |= MSVCRT_O_BINARY;
+    unsigned type = GetFileType((HANDLE)handle);
+    if (type == FILE_TYPE_UNKNOWN && GetLastError() != 0)
+        return fail(win_errno(GetLastError()));
+    unsigned flags = type == FILE_TYPE_CHAR ? WX_TTY : 0;
+    if (oflags & MSVCRT_O_APPEND)
+        flags |= WX_APPEND;
+    if (oflags & MSVCRT_O_TEXT)
+        flags |= WX_TEXT;
+    return alloc_fd((HANDLE)handle, flags);
+}
+
+/* raw write of the whole buffer (append mode: at the end): WriteFile on the descriptor's handle; the Win32 error is left in the return as -err */
+static int64_t raw_write(struct fnvnx_ioinfo *d, const void *p, size_t n)
+{
+    HANDLE h = fd_handle(d);
+    if (d->wxflag & WX_APPEND) {
+        long long np;
+        SetFilePointerEx(h, 0, &np, 2 /* FILE_END */);
+    }
     size_t done = 0;
     while (done < n) {
-        int64_t w = os_file_write(d->os, (const char *)p + done, n - done);
-        if (w <= 0)
-            return w < 0 ? w : -OS_ENOSPC;
-        done += (size_t)w;
+        unsigned w = 0;
+        if (!WriteFile(h, (const char *)p + done, (unsigned)(n - done), &w, NULL))
+            return -(int64_t)GetLastError();
+        if (!w)
+            return -(int64_t)112; /* ERROR_DISK_FULL */
+        done += w;
     }
     return (int64_t)done;
 }
+
+/* errno of a failed write (Wine file.c _write: ERROR_ACCESS_DENIED is EBADF there, every other error msvcrt_set_errno) */
+static int write_errno(int64_t neg) { return neg == -5 ? EBADF : win_errno((unsigned)-neg); }
 
 /* translates LF -> CR LF into out (2n bytes); returns the output length */
 static size_t lf_to_crlf(const unsigned char *in, size_t n, unsigned char *out)
@@ -198,54 +258,47 @@ static size_t lf_to_crlf(const unsigned char *in, size_t n, unsigned char *out)
 
 int fnvnx_write(int fd, const void *buf, unsigned int n)
 {
-    struct fdent *d = fd_get(fd);
+    struct fnvnx_ioinfo *d = fd_get(fd);
     if (!d)
         return -1;
     if (!buf && n)
         return fail(EINVAL);
-    if (!(d->flags & FD_WRITE))
-        return fail(EBADF);
-    os_lock(&d->lock);
+    os_lock(fd_lock(d));
     int64_t r = 0;
-    if (!(d->flags & FD_TEXT) || (d->flags & FD_DEV)) {
-        r = raw_write(d, fd, buf, n);
+    if (!(d->wxflag & WX_TEXT) || (d->wxflag & WX_TTY)) {
+        r = raw_write(d, buf, n);
     } else {
         const unsigned char *in = (const unsigned char *)buf;
         unsigned char tmp[2048];
         for (size_t i = 0; i < n && r >= 0;) {
             size_t chunk = n - i < sizeof tmp / 2 ? n - i : sizeof tmp / 2;
             size_t l = lf_to_crlf(in + i, chunk, tmp);
-            r = raw_write(d, fd, tmp, l);
+            r = raw_write(d, tmp, l);
             i += chunk;
         }
     }
-    os_unlock(&d->lock);
+    os_unlock(fd_lock(d));
     if (r < 0)
-        return fail(os_errno(r));
+        return fail(write_errno(r));
     return (int)n;
 }
 
 long long fnvnx_lseeki64(int fd, long long off, int whence)
 {
-    struct fdent *d = fd_get(fd);
+    struct fnvnx_ioinfo *d = fd_get(fd);
     if (!d)
         return -1;
-    if (whence < 0 || whence > 2 || (d->flags & FD_DEV))
+    if (whence < 0 || whence > 2)
         return fail(EINVAL);
-    os_lock(&d->lock);
-    int64_t r = os_file_seek(d->os, off, whence);
-    if (r >= 0)
-        d->flags &= ~FD_CTRLZ, ioinfo_sync(d);
-    os_unlock(&d->lock);
-    return r < 0 ? fail(EINVAL) : r;
+    os_lock(fd_lock(d));
+    long long pos = 0;
+    int ok = SetFilePointerEx(fd_handle(d), off, &pos, (unsigned)whence);   /* FILE_BEGIN / CURRENT / END are 0 / 1 / 2 */
+    unsigned err = ok ? 0 : GetLastError();
+    if (ok)
+        d->wxflag &= (uint8_t)~WX_ATEOF;
+    os_unlock(fd_lock(d));
+    return ok ? pos : fail(win_errno(err));
 }
-
-
-
-
-
-
-
 
 /* ---- streams */
 enum { LAST_NONE, LAST_READ, LAST_WRITE };
@@ -268,9 +321,10 @@ struct stream {
 };
 
 struct _iobuf fnvnx_iob[FNVNX_IOB_COUNT] = {
-    { NULL, 0, NULL, FNVNX_IOREAD, 0, 0, 0, NULL },
-    { NULL, 0, NULL, FNVNX_IOWRT, 1, 0, 0, NULL },
-    { NULL, 0, NULL, FNVNX_IOWRT, 2, 0, 0, NULL },
+    /* _file = MSVCRT_NO_CONSOLE_FD: file.c msvcrt_init_io sets it for a standard stream whose handle is MSVCRT_NO_CONSOLE (descriptors 0-2 above) */
+    { NULL, 0, NULL, FNVNX_IOREAD, MSVCRT_NO_CONSOLE_FD, 0, 0, NULL },
+    { NULL, 0, NULL, FNVNX_IOWRT, MSVCRT_NO_CONSOLE_FD, 0, 0, NULL },
+    { NULL, 0, NULL, FNVNX_IOWRT, MSVCRT_NO_CONSOLE_FD, 0, 0, NULL },
 };
 static struct sext g_stdx[3] = { { 0, 0, NULL, 0, 0, NULL, 0, { 0 }, 0, OS_LOCK_INIT },
                                  { 1, 0, NULL, 0, 0, NULL, 0, { 0 }, 0, OS_LOCK_INIT },
@@ -317,30 +371,30 @@ static int wflush(struct _iobuf *f, struct sext *x)
 {
     if (!x->wlen)
         return 0;
-    struct fdent *d = fd_get(x->fd);
-    int64_t r = d ? raw_write(d, x->fd, x->wbuf, x->wlen) : -OS_EINVAL;
+    struct fnvnx_ioinfo *d = fd_get(x->fd);
+    int64_t r = d ? raw_write(d, x->wbuf, x->wlen) : -6 /* ERROR_INVALID_HANDLE */;
     x->wlen = 0;
     if (r < 0) {
         set_err(f);
-        errno = d ? os_errno(r) : EBADF;
+        errno = d ? write_errno(r) : EBADF;
         return -1;
     }
     return 0;
 }
 
 /* drops read-ahead (and pushed-back characters), moving the descriptor back to the logical position */
-static void rdrop(struct sext *x, struct fdent *d)
+static void rdrop(struct sext *x, struct fnvnx_ioinfo *d)
 {
-    if (x->rlen > x->rpos && d && !(d->flags & FD_DEV))
-        os_file_seek(d->os, -(int64_t)(x->rlen - x->rpos), OS_SEEK_CUR);
+    if (x->rlen > x->rpos && d && !(d->wxflag & WX_TTY))
+        SetFilePointerEx(fd_handle(d), -(long long)(x->rlen - x->rpos), NULL, 1 /* FILE_CURRENT */);
     x->rpos = x->rlen = 0;
     x->nungot = 0;
 }
 
-static int begin_read(struct _iobuf *f, struct sext *x, struct fdent **pd)
+static int begin_read(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo **pd)
 {
-    struct fdent *d = fd_get(x->fd);
-    if (!d || !(d->flags & FD_READ)) {
+    struct fnvnx_ioinfo *d = fd_get(x->fd);
+    if (!d) {
         set_err(f);
         errno = EBADF;
         return -1;
@@ -352,10 +406,10 @@ static int begin_read(struct _iobuf *f, struct sext *x, struct fdent **pd)
     return 0;
 }
 
-static int begin_write(struct _iobuf *f, struct sext *x, struct fdent **pd)
+static int begin_write(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo **pd)
 {
-    struct fdent *d = fd_get(x->fd);
-    if (!d || !(d->flags & FD_WRITE)) {
+    struct fnvnx_ioinfo *d = fd_get(x->fd);
+    if (!d) {
         set_err(f);
         errno = EBADF;
         return -1;
@@ -368,32 +422,34 @@ static int begin_write(struct _iobuf *f, struct sext *x, struct fdent **pd)
 }
 
 /* refills the raw buffer; 1 data, 0 end of file, -1 error */
-static int rfill(struct _iobuf *f, struct sext *x, struct fdent *d)
+static int rfill(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d)
 {
-    if (d->flags & FD_DEV)
+    if (d->wxflag & WX_TTY) /* a character device (the standard streams) has no data to refill from */
         return 0;
     if (!x->rbuf && !(x->rbuf = (unsigned char *)malloc(BUFSZ))) {
         set_err(f);
         errno = ENOMEM;
         return -1;
     }
-    int64_t r = os_file_read(d->os, x->rbuf, BUFSZ);
+    unsigned got = 0;
+    int ok = ReadFile(fd_handle(d), x->rbuf, BUFSZ, &got, NULL);
+    unsigned err = ok ? 0 : GetLastError();
     x->rpos = 0;
-    x->rlen = r > 0 ? (size_t)r : 0;
-    if (r < 0) {
+    x->rlen = ok ? got : 0;
+    if (!ok && err != 109 /* ERROR_BROKEN_PIPE: end of file */) {
         set_err(f);
-        errno = os_errno(r);
+        errno = err == 5 ? EBADF : win_errno(err);   /* file.c _read: ERROR_ACCESS_DENIED is EBADF */
         return -1;
     }
-    return r > 0;
+    return ok && got > 0;
 }
 
 /* one logical character, or EOF (end of file / Ctrl-Z / error) */
-static int getch(struct _iobuf *f, struct sext *x, struct fdent *d)
+static int getch(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d)
 {
     if (x->nungot)
         return x->ungot[--x->nungot];
-    if (d->flags & FD_CTRLZ)
+    if (d->wxflag & WX_ATEOF)
         goto eof;
     if (x->rpos == x->rlen) {
         int r = rfill(f, x, d);
@@ -404,12 +460,12 @@ static int getch(struct _iobuf *f, struct sext *x, struct fdent *d)
         }
     }
     int c = x->rbuf[x->rpos];
-    if (!(d->flags & FD_TEXT)) {
+    if (!(d->wxflag & WX_TEXT)) {
         x->rpos++;
         return c;
     }
     if (c == CTRLZ) { /* rpos stays on the Ctrl-Z, so ftell reports its offset */
-        d->flags |= FD_CTRLZ, ioinfo_sync(d);
+        d->wxflag |= WX_ATEOF;
         goto eof;
     }
     x->rpos++;
@@ -428,12 +484,12 @@ eof:
 }
 
 /* reads up to n logical bytes; returns the count */
-static size_t sread(struct _iobuf *f, struct sext *x, struct fdent *d, unsigned char *out, size_t n)
+static size_t sread(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d, unsigned char *out, size_t n)
 {
     size_t o = 0;
     while (o < n && x->nungot)
         out[o++] = x->ungot[--x->nungot];
-    if (!(d->flags & FD_TEXT)) {
+    if (!(d->wxflag & WX_TEXT)) {
         while (o < n) {
             if (x->rpos < x->rlen) {
                 size_t k = x->rlen - x->rpos < n - o ? x->rlen - x->rpos : n - o;
@@ -442,11 +498,14 @@ static size_t sread(struct _iobuf *f, struct sext *x, struct fdent *d, unsigned 
                 o += k;
                 continue;
             }
-            if (n - o >= BUFSZ && !(d->flags & FD_DEV)) { /* large binary read: straight from the file */
-                int64_t r = os_file_read(d->os, out + o, n - o);
+            if (n - o >= BUFSZ && !(d->wxflag & WX_TTY)) { /* large binary read: straight from the file */
+                unsigned got = 0;
+                int ok = ReadFile(fd_handle(d), out + o, (unsigned)(n - o), &got, NULL);
+                unsigned err = ok ? 0 : GetLastError();
+                int64_t r = ok ? (int64_t)got : (err == 109 ? 0 : -1);
                 if (r < 0) {
                     set_err(f);
-                    errno = os_errno(r);
+                    errno = err == 5 ? EBADF : win_errno(err);
                     break;
                 }
                 if (r == 0) {
@@ -467,7 +526,7 @@ static size_t sread(struct _iobuf *f, struct sext *x, struct fdent *d, unsigned 
     }
     while (o < n) {
         /* copy a run without CR / Ctrl-Z, then handle one character */
-        if (x->rpos < x->rlen && !(d->flags & FD_CTRLZ)) {
+        if (x->rpos < x->rlen && !(d->wxflag & WX_ATEOF)) {
             size_t k = 0, lim = x->rlen - x->rpos < n - o ? x->rlen - x->rpos : n - o;
             const unsigned char *p = x->rbuf + x->rpos;
             while (k < lim && p[k] != '\r' && p[k] != CTRLZ)
@@ -486,11 +545,13 @@ static size_t sread(struct _iobuf *f, struct sext *x, struct fdent *d, unsigned 
     return o;
 }
 
-static int put_raw(struct _iobuf *f, struct sext *x, struct fdent *d, const unsigned char *p, size_t n)
+static int put_raw(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d, const unsigned char *p, size_t n)
 {
-    if (d->flags & FD_DEV) { /* the host console: unbuffered here, unchanged */
-        if (raw_write(d, x->fd, p, n) != (int64_t)n) {
+    if (d->wxflag & WX_TTY) { /* a character device: unbuffered, unchanged */
+        int64_t w = raw_write(d, p, n);
+        if (w != (int64_t)n) {
             set_err(f);
+            errno = w < 0 ? write_errno(w) : ENOSPC;
             return -1;
         }
         return 0;
@@ -512,9 +573,9 @@ static int put_raw(struct _iobuf *f, struct sext *x, struct fdent *d, const unsi
     return 0;
 }
 
-static int swrite(struct _iobuf *f, struct sext *x, struct fdent *d, const unsigned char *p, size_t n)
+static int swrite(struct _iobuf *f, struct sext *x, struct fnvnx_ioinfo *d, const unsigned char *p, size_t n)
 {
-    if (!(d->flags & FD_TEXT) || (d->flags & FD_DEV))
+    if (!(d->wxflag & WX_TEXT) || (d->wxflag & WX_TTY))
         return put_raw(f, x, d, p, n);
     while (n) {
         const unsigned char *nl = (const unsigned char *)memchr(p, '\n', n);
@@ -553,7 +614,7 @@ size_t fnvnx_iob_fread(void *buf, size_t size, size_t count, struct _iobuf *f)
     struct sext *x = lock_stream(f);
     if (!x)
         return 0;
-    struct fdent *d;
+    struct fnvnx_ioinfo *d;
     size_t got = 0;
     if (begin_read(f, x, &d) == 0)
         got = sread(f, x, d, (unsigned char *)buf, size * count);
@@ -572,7 +633,7 @@ size_t fnvnx_iob_fwrite(const void *buf, size_t size, size_t count, struct _iobu
     struct sext *x = lock_stream(f);
     if (!x)
         return 0;
-    struct fdent *d;
+    struct fnvnx_ioinfo *d;
     size_t r = 0;
     if (begin_write(f, x, &d) == 0 && swrite(f, x, d, (const unsigned char *)buf, size * count) == 0)
         r = count;
