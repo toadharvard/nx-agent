@@ -1254,3 +1254,7 @@ Paused: w3b, w4, farm; no other work.
     - The 8 translator V findings L4 reported at cand3 41a8855d4 are closed at 717e82995. cand3 has no translator root.
     - w6 next: a standalone gate_d3d9total result line, test_gl4_cursor, sm_link on farm1 once the w12 fixes land, then the COM_SPEC rebase.
 - bottleneck: L1 cand3 and cand4 (the trunk is at a5c8f427); the w12 recipe defects for sm_link. 2 of 4 workers busy (w6, farm1); w8 archived.
+- 21:21Z w6 b3856ec5c (a02e400ba + a test-only fix):
+    - gate_d3d9total standalone at a02e400ba: rc 0, d3d9total.json green, universe 332, certified 332, uncertified []. Enum values 161/161, SM commands 171/171, mutations not killed 0, mojoshader tree bc0ea3c1.
+    - test_gl4_cursor.py: 17 PASS against the store-built libnxgl4.so. Two test defects fixed in the test only: the ABI header path (render/nxgpu/include), and the ctypes buffer for the invalid-size cases. No assertion was weakened.
+    - w6 waits for the w12 recipe fixes (sm_link) and the cand3 head (COM_SPEC rebase).
