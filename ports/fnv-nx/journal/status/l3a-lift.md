@@ -998,3 +998,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Sent to w7. First establish how facts 6944080 handled these sites. If it was green, the merge lost something and is fixed until the exe reproduces 6944080. Otherwise this is a gap in the jump-table rule: the classes are reported and a class rule proposed, with no site list.
   - The farm waits for the fixed commit.
 - bottleneck: the exe jump-table red (w7); the d3dx9 farms; lift/bridges l2sections (L1 w12).
+- 22:38 liftsrc cold build (base3 1b1abc42c): all 154 shard stages ran and all are red. faults.check_int_vectors expects [3,4,41,45] (faults.json) and gets [3,4,45] from platform X86SYS, whose record still cites ReactOS and drops int 0x29.
+  - Decision: take 28bbec363 (x86sys.json on WDK, SDM and Wine 9.0; vectors from Wine 9.0 handle_interrupt) into base3 as its own commit, and send it to L5 for its head.
+  - An undecided field (gs, other vectors) that makes a consumer red is reported, not filled in.
+  - w8's shard stages now declare lift/proof/{__init__,shape}.py as inputs.
