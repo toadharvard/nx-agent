@@ -148,6 +148,24 @@
    "aliases": [
     "L6:census#38"
    ]
+  },
+  {
+   "id": "ASM-614",
+   "aliases": [
+    "L6:census#19"
+   ]
+  },
+  {
+   "id": "ASM-633",
+   "aliases": [
+    "L6:census#58"
+   ]
+  },
+  {
+   "id": "ASM-641",
+   "aliases": [
+    "L6:QUEUE-ABI-frontbuffer"
+   ]
   }
  ],
  "entries": [
@@ -1434,19 +1452,6 @@
    "owner": "L6"
   },
   {
-   "id": "ASM-614",
-   "text": "The 16 vendor FOURCC formats are a hand list in gen_enums.py copied from Wine's table.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/front/gen_enums.py"
-   ],
-   "aliases": [
-    "L6:census#19"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: derive the list from env_<profile>.tsv (the FOURCC rows the env accepts), so that no list is written by hand.",
-   "owner": "L6"
-  },
-  {
    "id": "ASM-615",
    "text": "StretchRect into an MSAA destination and compressed <-> uncompressed StretchRect answer INVALIDCALL where Windows accepts.",
    "used_by": [
@@ -1590,19 +1595,6 @@
    "owner": "L6"
   },
   {
-   "id": "ASM-633",
-   "text": "D3DDECL_END is found at index ≤ 126, from Wine's 128-element loop.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/res_decl.cpp"
-   ],
-   "aliases": [
-    "L6:census#58"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: derive the bound from MAXD3DDECLLENGTH in the documented d3d9types.h (O3), not from Wine's loop.",
-   "owner": "L6"
-  },
-  {
    "id": "ASM-634",
    "text": "Vertex count arithmetic wraps as UINT, as in Wine.",
    "used_by": [
@@ -1692,19 +1684,6 @@
    "status": "REMOVE",
    "removed_by": "planned: an import fact from the exe and modules. Any export that nothing imports gets a reach-violation certificate; the others need a source.",
    "owner": "L6+L1"
-  },
-  {
-   "id": "ASM-641",
-   "text": "nxd3d_frontbuffer_read relies on NxImageRead with image 0 = the swapchain image, which nxgpu4.h does not state.",
-   "used_by": [
-    "ports/fnv-nx/render/d3d9/dev/glue_present.cpp"
-   ],
-   "aliases": [
-    "L6:QUEUE-ABI-frontbuffer"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: nxgpu4.h states NxImageRead image 0 = the swapchain image and gl4 implements it, or the function is added to the ABI",
-   "owner": "L6+L6A"
   }
  ]
 }
