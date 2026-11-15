@@ -1612,3 +1612,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - bootguest waits for the lift/rt root (L3a).
   - Assumptions reds are routed: ASM-601..641 to L6, ORCHESTRATION.md to the orchestrator.
 - 09:52 **lib/sha256 host variant (L5).** Rule: a root has a variant for target T only if an admitted root of T consumes it. Owner: w15. cand2 also takes w12L2 a924103e0.
+- 09:55 **w12 c22da059f.** Loader outputs (IMPORT_KEYS_H, KEYS_TSV, MODULES_TSV, IAT_DATA_TSV) and milestones.py are in.
+  - The bridge cycle (platform objects → bridge.tsv → keys → platform) is broken by a split:
+    - A: rows from the specs plus the platform's emitted extra rows, including the data-row symbols. table_id = sha256(A), and the keys depend on A only.
+    - B: binding, a gate-side judgement against the link record.
+  - Owner: w12. Next: a boot consumer root for milestones.
