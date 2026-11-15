@@ -310,6 +310,9 @@ def dwarf_layout(obj, inc):
     return out
 
 
+DATA_MODEL_WARNINGS = ('-Wpointer-to-int-cast', '-Wint-to-pointer-cast', '-Wshift-count-overflow', '-Woverflow', '-Wincompatible-pointer-types')
+
+
 def c9(prefix, s2, libnx_inc=None, warn_log=None):
     """The data-model class of libnx (written for LP64, built ILP32). Reports, never decides: (1) the libnx compile's warnings by -W option, every
     -Wint-to-pointer-cast, -Wpointer-to-int-cast, -Wint-conversion, -Wincompatible-pointer-types, -Wshift-count-overflow and -Woverflow as file:line
@@ -350,6 +353,10 @@ def c9(prefix, s2, libnx_inc=None, warn_log=None):
     LIBNX_INFO['data_model'] = res
     print('C9: libnx warnings by option %s; %d findings; %d struct/union types of switch.h compared, %d differ between ILP32 and LP64'
           % (json.dumps(res['warnings'], sort_keys=True), sum(len(v) for v in res['findings'].values()), res['layout']['types'], len(diff)))
+    # the five data-model classes must be empty (they are also -Werror= of the guest semantics set, so the libnx compile itself stops on one)
+    bad = {o: n for o, n in res['warnings'].items() if o in DATA_MODEL_WARNINGS and n}
+    if bad:
+        fail('C9 libnx compiles with data-model warnings: %s' % json.dumps(bad, sort_keys=True))
 
 
 

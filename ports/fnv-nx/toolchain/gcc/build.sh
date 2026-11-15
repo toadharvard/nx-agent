@@ -53,10 +53,13 @@ GUEST_FLAGS_DIR=${GUEST_FLAGS_DIR:?GUEST_FLAGS_DIR: directory with flags-c.json 
 GUEST_FLAGS_COMMIT=${GUEST_FLAGS_COMMIT:?GUEST_FLAGS_COMMIT: commit of verify/guest_flags.py}
 sem() { python3 - "$GUEST_FLAGS_DIR/flags-$1.json" <<'PY'
 import json, sys
-print(" ".join(x for x in json.load(open(sys.argv[1])) if x not in ("-mabi=ilp32", "-fPIC", "-fshort-wchar", "-fsigned-char")))
+print(" ".join(x for x in json.load(open(sys.argv[1])) if x not in ("-mabi=ilp32", "-fPIC", "-fshort-wchar", "-fsigned-char") and not x.startswith("-Werror=")))
 PY
 }
 SEM_C=$(sem c); SEM_CXX=$(sem c++)
+# the -Werror= options of the guest semantics set (the data-model classes of libnx, C9) apply to libnx, the one upstream source we patch for them;
+# newlib, libgcc and libstdc++ keep their upstream warning policy
+WERR=$(python3 -c 'import json,sys; print(" ".join(x for x in json.load(open(sys.argv[1])) if x.startswith("-Werror=")))' "$GUEST_FLAGS_DIR/flags-c.json")
 TFLAGS="-O2 -ffunction-sections -fdata-sections $MAPS"
 S2CFLAGS="$TFLAGS $SEM_C"; S2CXXFLAGS="$TFLAGS $SEM_CXX"
 export PATH=$PREFIX/bin:$PATH
@@ -292,7 +295,7 @@ if ! step libnx; then
 	ar_objs=""
 	for d in $SRCS; do for f in $d/*.c $d/*.s; do
 		[ -e "$f" ] || continue; o=$OBJ/$(echo "$f" | tr / _).o
-		case $f in *.c) lxgcc $LXF $SEM_C -std=gnu11 -c "$f" -o "$o";; *.s) lxgcc $LXF -x assembler-with-cpp -c "$f" -o "$o";; esac
+		case $f in *.c) lxgcc $LXF $SEM_C $WERR -std=gnu11 -c "$f" -o "$o";; *.s) lxgcc $LXF -x assembler-with-cpp -c "$f" -o "$o";; esac
 		ar_objs="$ar_objs $o"; done; done
 	for f in "$OBJ"/*.s; do o=$f.o; lxgcc $LXF -c "$f" -o "$o"; ar_objs="$ar_objs $o"; done
 	D=$PREFIX/$TARGET/lib/ilp32/wchar16/schar/pic; rm -f "$D/libnx.a"
