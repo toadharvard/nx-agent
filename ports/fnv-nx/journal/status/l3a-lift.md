@@ -1045,3 +1045,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - (A) a declared-machine decision gs = 0, giving SDM #GP(0) and L5's null_seg_access row; recommended;
     - (B) certified unreachability, which is off the path.
   - blocked: pack completeness on the gs decision (orchestrator).
+- 23:25 L3b: 123 SIMD shapes have no Form at 9c97f84bc (w7-simd). symbuild gives TypeError on 122 and KeyError on 1 (fnv-nx-build c18ff53a nonfp_noform_norow.tsv). They block certification and so the pack root's trunk admission. Given to w13 while FACTS waits: a fix by class in the Form builder, then 0 shapes without a Form, and the others byte-identical.
