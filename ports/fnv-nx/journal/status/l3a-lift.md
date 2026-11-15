@@ -1074,3 +1074,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:13 w13 cmp class: 0dd2ae53f accepted. The predicate immediate is selected exactly over 0..7; per the SDM, imm8 bits 7:3 are reserved, so there is no Form above 7.
   - Built 3731 → 3829 (+98) on base3, 0 shas changed. The 330 3DNow shapes and vpavgw are ud-class by f_cpufeat (L3b).
   - Open: the count of concrete cmp* instructions with imm > 7 in the lifted set, and L3b's v3 integer-universe check (18,649 keys). That check gates the merge into base3.
+- 22:15 w8 GSCERTS in base3 f5e8bc692 (lift/facts gen stage tools/gscerts.py; edge-cut dominance; roots = non-call/tail entries).
+  - Facts 6944080: 6 certs and 262 sites. No cert for the exe (no load config) or binkw32 (no load config); d3dx9_31 has 1 cert with 0 sites (data-decoded universe, re-measured after w7).
+  - Of the 24 `mov m16, gs`, 5 are in /GS failure regions. The other 19 (CONTEXT captures and the exe) read the initial gs and are closed by L5's kernel-derived gs row, not by a certificate.
+  - L1 gate contract/gsfail.py is not pushed yet (w28 asked).
