@@ -354,3 +354,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 11:45: the boot-loop order is withdrawn (integration 4674ce3e9; owner: "Нет. Опять затычки"). B1 and B2 are stopped, with no classification and no measurement ELF.
   - Back on the path: bootguest and icount link from admitted roots on L1 cand3 (Header home, the descs universe rule).
   - The product ELF boots only when the recipe links it by rule.
+- 11:50: w6-r f287aeaa3 (L1 bootbase daeffada8):
+  - bootguest is red at forbid: the .fnvnx.disp of a bridges consumer.
+  - icount, on rt/guest alone, is undefined on fnvnx_call_fp and fnvnx_dispatch.
+  - With the platform in, the loader's store fails on the freetype gen include.
+  - Sent to L1 as three rules: the dispatch table per image at link; generated includes as `uses`; link.roots derived from the definer closure.
