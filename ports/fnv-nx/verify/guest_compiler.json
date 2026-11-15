@@ -46,6 +46,7 @@
         "-fno-builtin",
         "-fno-stack-protector",
         "-fno-stack-clash-protection",
+        "-fstack-reuse=none",
         "-U_FORTIFY_SOURCE",
         "-fno-math-errno",
         "-fno-reorder-blocks-and-partition"

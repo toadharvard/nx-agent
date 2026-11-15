@@ -283,3 +283,9 @@ terminator set}, `units`, `defined` [{symbol, bind GLOBAL|WEAK|UNIQUE, type, obj
 ## What the lead does
 1. Put the recipe in the root, name it in `admit.json`. 2. `python3 -I verify/recipe.py check --root R` (validation). 3.
 `python3 -I verify/recipe.py build --root R --store S --out O` builds; run it twice with fresh stores to see the determinism gate's view.
+
+## Stack-usage report (measurement)
+`recipe.py build --root R --store S --out O --stack-usage 1` adds `-fstack-usage` to the CC stage of every unit (AUX_FLAGS in recipe.py; it is part of the stage key, so
+the stages are their own cache entries and the code generated is the same). Each `objects.json` row then carries `su`: the path of `obj/<unit>.su`, the compiler's own
+report, one line per function `file:line:col:name TAB bytes TAB static|dynamic|dynamic,bounded`. Any other option is refused. It is a measurement of a build
+(`stackuse.py`), never an input of a gate that certifies a product.
