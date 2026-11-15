@@ -104,10 +104,10 @@ def datamodel(td, so):
     for r in rows.values():
         check('%s has a doc quotation or an exe_source, a mechanism and a status' % r['id'],
               (r['citations'] or r.get('exe_source')) and r['mechanism'] and r['status'] in ('closed', 'open'), r)
-    gc = open(os.path.join(root, '..', 'verify', 'guest_compiler.json')).read()
+    sem = set(pb.recipe.semantics_set(None))   # the one derivation: the data-model rows' flags and guest_compiler.json's common flags (L1, fa6bed977)
     for r in rows.values():
         if r.get('flag'):
-            check('%s: flag %s is a semantic flag of guest_compiler.json' % (r['id'], r['flag']), r['flag'] in gc, r['flag'])
+            check('%s: flag %s is in the recipe\'s semantic flag set' % (r['id'], r['flag']), r['flag'] in sem, r['flag'])
     bad = [t['entry'] for t in doc['tm'] if ('fact' in t and t['fact'] not in rows) or ('fact' not in t and not t.get('not_layout'))]
     check('every tm.texi entry (%d) maps to a row or states why it is not a layout fact' % len(doc['tm']), not bad, bad)
     used = {t['fact'] for t in doc['tm'] if 'fact' in t}
@@ -179,8 +179,9 @@ def main():
                   {k: plain.get(k) for k in ('__ILP32__', '__CHAR_UNSIGNED__', '__WCHAR_WIDTH__', '__SIZEOF_WCHAR_T__', '__SIZEOF_LONG_DOUBLE__')})
             ml = subprocess.run([os.path.join(co, ext['cxx']), '-print-multi-lib'], capture_output=True, text=True).stdout.split()
             sel = {x for l in ml for x in l.split(';', 1)[1].replace('@', ' -').split()}
-            check('-print-multi-lib lists only the guest\'s variants: every one selects the platform\'s code model (-fPIC) and nothing about the ABI, '
-                  'wchar_t or char, which are the compiler\'s defaults (MLIB1)', ml and sel == {'-fPIC'} and all(';@fPIC' in l for l in ml), ml)
+            check('-print-multi-lib lists only the guest\'s variants: the default (no selector) and the position-independent one, which selects the platform\'s code '
+                  'model (-fPIC) and nothing about the ABI, wchar_t or char, which are the compiler\'s defaults (MLIB1)',
+                  ml and sel == {'-fPIC'} and all(l == '.;' or l.endswith(';@fPIC') for l in ml) and any(l.endswith(';@fPIC') for l in ml), ml)
         model(td, so)
         datamodel(td, so)
     finally:

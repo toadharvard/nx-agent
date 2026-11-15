@@ -2,8 +2,8 @@
  "format": "fnvnx-recipe/1",
  "compiler": {
   "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-linux-gnu-gcc",
-  "cxx": "bin/aarch64-linux-gnu-g++"
+  "cc": "bin/aarch64-none-elf-gcc",
+  "cxx": "bin/aarch64-none-elf-g++"
  },
  "flags": {
   "c": [

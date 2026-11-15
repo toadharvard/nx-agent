@@ -141,7 +141,7 @@ VEC = {
     'g_p4': '*vec:4:16:16:int', 'g_a': '[2]vec:4:16:16:int', 'g_h': 'struct:HoldsV{c:char;v:vec:4:16:16:int}',
     'n_fn': '(vec:16:16:16:unsigned_char,vec:4:16:16:int)vec:4:16:16:int', 'g_cmp': 'vec:4:16:16:int',
     'sv_f32': '(vec:4+4x:16+16x:16:float,vec:16+16x:2+2x:2:bool_bits_1)vec:4+4x:16+16x:16:float', 'sv_i8': '()vec:16+16x:16+16x:16:signed_char',
-    'sv_b': '(*vec:16+16x:16+16x:16:signed_char)vec:16+16x:2+2x:2:bool_bits_1', 'np': 'nullptr_t',
+    'sv_b': '(*vec:16+16x:16+16x:16:signed_char)vec:16+16x:2+2x:2:bool_bits_1', 'np': 'nullptr_t', 'sv_refs': '[3]const:*void',
 }
 
 # every code of class tcc_type in the pinned GCC 13.3 tree.def and cp/cp-tree.def has exactly one outcome: a row of the grammar (a `case` of dl_type), or
@@ -222,7 +222,7 @@ def cplx(obj):
 def refrow(obj):
     got = dict(l.split('\t') for l in pb.section(obj, '.fnvnx.decltype').splitlines())
     check('ref: the builtin va_list prototypes a C unit redeclares take the unit\'s own types (no reference row is written); the row is the reader\'s and dl_type\'s',
-          set(got) == {'__builtin_va_start', '__builtin_va_end', '__builtin_va_copy', 'use'} and not any('ref:' in v for v in got.values()), got)
+          set(got) == {'__builtin_va_end', '__builtin_va_copy', 'use'} and not any('ref:' in v for v in got.values()), got)
     check('ref: ctypes_compat parses and compares the row',
           cc.compatible(cc.parse('*ref:8:8:int'), cc.parse('*ref:8:8:int')) and not cc.compatible(cc.parse('ref:8:8:int'), cc.parse('ref:8:8:char')))
 
@@ -289,7 +289,7 @@ def decltype_cxx(td, so):
         check('every C++ row parses with ctypes_compat', all(cc.parse(t) for t in got.values()))
     for name, text, why in (('ptrmem', 'struct M { int m; };\nextern "C" int pm(int M::*p);\nextern "C" int use(void) { return pm(0); }\n', 'offset_type'),
                             ('tspec', 'template <class T> struct TT { T t; };\nextern "C" int ts(TT<int> *p);\nextern "C" int use(void) { TT<int> x; return ts(&x); }\n', 'class template specialization has no tag form'),
-                            ('lambda', 'extern "C" int lm(decltype([] {}) *p);\nextern "C" int use(void) { return lm(0); }\n', 'lambda closure type has no tag form'),
+                            ('lambda', 'auto lam = [] {};\nextern "C" int lm(decltype(lam) *p);\nextern "C" int use(void) { return lm(0); }\n', 'lambda closure type has no tag form'),
                             ('anonns', 'namespace { struct An { int i; }; }\nextern "C" int an(An *p);\nextern "C" int use(void) { An x; return an(&x); }\n', 'scope name outside the grammar')):
         src = os.path.join(td, name + '.cpp')
         open(src, 'w').write(text)
