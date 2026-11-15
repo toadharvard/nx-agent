@@ -19,7 +19,7 @@ from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_rep
 
 
 def guest_rec(ext, **kw):
-    r = mut(compiler={"external": "gcc-msvcmodel", "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext], **kw)
+    r = mut(compiler={"external": "gcc-msvcmodel", "cc": "bin/aarch64-none-elf-gcc", "cxx": "bin/aarch64-none-elf-g++"}, external=[ext], **kw)
     if "flags" not in kw:   # every guest root carries -Werror=attributes in flags.c and flags.cxx
         # a guest build.json holds only per-root flags (recipe.PER_ROOT); every semantic flag comes from the pin and is appended by the recipe
         r["flags"] = {"c": ["-O2", recipe.WERROR_ATTR], "cxx": ["-O2", recipe.SDD_DEFINE, recipe.WERROR_ATTR], "asm": []}
@@ -45,8 +45,8 @@ def guest_repo(name, rec, pin, target="guest", files=None):
 
 def main():
     pin_real = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
-    ext = {"name": "gcc-msvcmodel", "repo": "fnv-nx-build", "ref": "tools/gcc-ilp32-msvcmodel", "commit": "a" * 40, "tree_sha256": "b" * 64, "at": "/ext/gcc"}
-    pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}
+    ext = {"name": "gcc-msvcmodel", "repo": "fnv-nx-build", "ref": "tools/gcc-ilp32-msvcmodel-noneelf", "commit": "a" * 40, "tree_sha256": "b" * 64, "at": "/ext/gcc"}
+    pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": "bin/aarch64-none-elf-gcc", "cxx": "bin/aarch64-none-elf-g++"}
     rec = guest_rec(ext)
     # --- the rule, validation only (no compiler needed)
     g = guest_repo("g1", rec, pin)
@@ -119,7 +119,7 @@ def main():
             ok["flags"][k] = ok["flags"][k] + [f]
             check("guest root with %s in flags.%s is accepted (per-root class)" % (f, k), not [x for x in errs(gr, ok) if "per-root" in x], errs(gr, ok))
     # the recipe's semantic set per language is the driver's own answer: C drops what the driver says is C++-only; C++ and asm keep all
-    drv = lambda n: os.path.join(prefix, "bin/aarch64-linux-gnu-" + n)  # noqa: E731
+    drv = lambda n: os.path.join(prefix, "bin/aarch64-none-elf-" + n)  # noqa: E731
     sc, sx, sa = (recipe.semantics_for(drv(d), k) for d, k in (("gcc", "c"), ("g++", "cxx"), ("gcc", "asm")))
     check("semantics_for: C++ and asm keep the whole set, C drops only what the driver says does not apply", sx == list(recipe.SEMANTICS_FLAGS) and sa == sx
           and sc == [f for f in sx if f != "-fno-sized-deallocation"], (len(sc), len(sx), len(sa), set(sx) - set(sc)))
@@ -191,7 +191,7 @@ def main():
     check("msvcmodel data model: size_t is unsigned int (mangled j)", "_Z2szj" in syms, syms)
     check("volatile is ldar/stlr and float -> int is _ftol on the external compiler", "ldar" in disasm(ra, "_Z2rdv") and "stlr" in disasm(ra, "_Z2wri")
           and "#0x80000000" in disasm(ra, "_Z3f2if"))
-    # the sample root builds a unit that includes the guest's libstdc++ and newlib headers (compiler 13.3 reads gcc 15.2 headers: -std=gnu++20)
+    # the sample root builds a unit that includes the guest's libstdc++ and newlib headers (compiler and headers are GCC 13.3)
     hdr = "#include <vector>\n#include <string>\n#include <cstdio>\nint hv(int n) { std::vector<int> v(n); std::string s(\"x\"); std::printf(\"%d\", (int)v.size()); return (int)s.size(); }\n"
     gp = guest_repo("gp", sample, pin_real, files={ROOT + "/h.cc": hdr})
     rp, tpb = build(gp, "GP")

@@ -26,8 +26,8 @@ def flags_for(lang, cache, origin="native"):
     os.makedirs(os.path.join(cache, "store"), exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="gflags-") as ws:   # the checkout is scratch: nothing is left behind
         got = recipe.fetch_externals([ext], os.path.join(cache, "store"), os.path.join(cache, "external"), ws)
-        pre = got[ext["name"]]["host"] + "/bin/aarch64-linux-gnu-"
-        return recipe.semantics_for(pre + ("g++" if lang == "c++" else "gcc"), KIND[lang], origin=origin)
+        drv = got[ext["name"]]["host"] + "/" + pin["cxx" if lang == "c++" else "cc"]   # the driver paths are the pin's own (no spelling of a triplet here)
+        return recipe.semantics_for(drv, KIND[lang], origin=origin)
 
 
 def main(argv=None):

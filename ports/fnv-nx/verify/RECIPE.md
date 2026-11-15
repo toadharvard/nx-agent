@@ -109,7 +109,7 @@ keep in sync). `-DFNVNX_SDD=1` is per root (a native C++ root must hold it).
 Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
 compiler, for C and C++ alike, is the external compiler pinned in `verify/guest_compiler.json`
 (`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx", "flags": {"semantics": {"common": [flag], "lifted_extra": [flag]}}}`; `flags.semantics` is the one source of `recipe.SEMANTICS_FLAGS` (`common`) and `recipe.SEMANTICS_LIFTED` (`common` + `lifted_extra`: `-ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables`, what lifted code is built under). `-fno-exceptions` removes host C++ EH from lifted units only. The exe's MSVC C++ EH and SEH stay implemented by the lifter through the exe's own EH tables (owner order of 2026-11-10). Nothing in the lifted flag set changes that.; `recipe.semantics_set(cxx_origin)` picks the set of a root by its declared origin, `recipe.semantics_for(driver, language, origin=)` derives the per-language set from it; `verify/guest_flags.py --lang L --origin native|lifted` prints it): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
-(`tools/gcc-ilp32-msvcmodel`). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
+(`tools/gcc-ilp32-msvcmodel-noneelf`: the compiler and the guest runtime are this one tree, `runtime` = `external` in the pin). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
 tree_sha256, at) with the pinned driver paths. The distribution g++-13 is the base the compiler is built from, never the compiler of guest code. A tree
 without the pin file has no valid guest root. The plugins are built against this compiler's own plugin headers (the plugin stage reads
 `<cxx> -print-file-name=plugin`, inside the external).
@@ -117,12 +117,12 @@ What an external compiler names outside its tree is declared as inputs at their 
 configured with (`-print-prog-name=as|ld`) and the header directories of its search list, symlink targets included (the distribution's cross binutils and
 headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
 
-The pin file also names the guest's **runtime** (`"runtime": {EXT_KEYS}`, fnv-nx-build `tools/fnvnx-a64-msvcmodel`: gcc 15.2.0 + newlib built with the same
-msvcmodel.patch, target `aarch64-none-elf`, multilibs `.`, `pic`, `ilp32`, `ilp32/pic`; its libc, libm, libstdc++ and headers). A guest recipe may declare it
-as an `external` entry (it is only a PP input of the units, never mounted in the CC stage); if it does, the entry must equal the pinned one exactly (red
-otherwise). `verify/samples/platform.build.json` is the sample recipe of the platform root (compiler + runtime externals, the eight plugins, the semantics
-flags, `include` = the runtime's `c++/15.2.0`, its ilp32 target directory and `include`); `test_guest.py` checks it with `recipe.py check` and builds a unit
-that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15.2's libstdc++ headers only with `-std=gnu++20` (the sample's `flags.cxx`).
+The pin file also names the guest's **runtime** (`"runtime": {EXT_KEYS}`). It is the SAME external as the compiler: fnv-nx-build `tools/gcc-ilp32-msvcmodel-noneelf` is one
+tree with the compiler (GCC 13.3.0 + msvcmodel.patch, target `aarch64-none-elf`, multilibs `.`, `pic`) and the runtime built by it (newlib, libm, libgcc,
+GCC 13.3.0's own libstdc++, their headers). A guest recipe declares that external once; the entry must equal the pinned one exactly (red otherwise), and the
+profile does not repeat it. `verify/samples/platform.build.json` is the sample recipe of the platform root (the one external, the eight plugins, the
+semantics flags, `include` = the mirror's `c++/13.3.0`, its target directory and `include`); `test_guest.py` checks it with `recipe.py check` and builds a unit
+that includes `<vector>`, `<string>`, `<cstdio>`.
 
 ### Gate rule: every guest C and C++ unit is compiled with the full plugin set
 `admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or

@@ -494,7 +494,7 @@ def profile_fields(profile, pin):
         return None, ["profile guest: %s is missing or has no external and runtime" % GUEST_PIN]
     ex = pin["external"]
     return {"compiler": {"external": ex["name"], "cc": pin["cc"], "cxx": pin["cxx"]}, "plugins": [{"name": n} for n in PLUGIN_SOURCES],
-            "external": [dict(ex), dict(pin["runtime"])]}, []
+            "external": [dict(ex)] + ([dict(pin["runtime"])] if pin["runtime"] != ex else [])}, []   # one mirror holds the compiler and the runtime: then the runtime is the compiler's external, declared once
 
 
 COMPILE_KEYS = ("compiler", "flags", "include", "units", "link", "profile", "variants")
@@ -2019,7 +2019,7 @@ class Job:
         pin = load_pin(self.repo) if guest and cc else None
         if pin:
             bad = []
-            for n in [cc] + [pin["runtime"]["name"]] * (isinstance(pin.get("runtime"), dict) and pin["runtime"]["name"] in self.ext):
+            for n in dict.fromkeys([cc] + [pin["runtime"]["name"]] * (isinstance(pin.get("runtime"), dict) and pin["runtime"]["name"] in self.ext)):
                 bad += compiler_stamp_errors(RECIPE_TREE, self.ext[n]["host"], n)
             if bad:
                 self.red.append({"stage": "external:" + cc, "exit": None, "stderr": bad})
@@ -2294,7 +2294,7 @@ class Job:
         -> (stderr text, the runtime external's mount point): the link command of the multilib the flags select."""
         pin = load_pin(self.repo)
         rt = pin["runtime"]
-        self.ext.update(fetch_externals([pin["external"], rt], self.store, self.extcache, ws))
+        self.ext.update(fetch_externals([pin["external"]] + ([rt] if rt != pin["external"] else []), self.store, self.extcache, ws))
         drv = rt["at"] + "/" + pin["runtime_driver"]
         flags = semantics_for(self.hostpath(self.drivers()[1]), "cxx", SEMANTICS_FLAGS)
         tr = self.toolrt([drv])[1]

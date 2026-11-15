@@ -2,8 +2,8 @@
  "format": "fnvnx-recipe/1",
  "compiler": {
   "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-linux-gnu-gcc",
-  "cxx": "bin/aarch64-linux-gnu-g++"
+  "cc": "bin/aarch64-none-elf-gcc",
+  "cxx": "bin/aarch64-none-elf-g++"
  },
  "flags": {
   "c": [
@@ -162,9 +162,9 @@
   {
    "name": "gcc-msvcmodel",
    "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
-   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
+   "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
+   "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
+   "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
    "at": "/ext/gcc"
   }
  ],

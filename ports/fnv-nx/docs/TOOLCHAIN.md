@@ -14,7 +14,7 @@ buildscripts `master` (2026-11-03); file references are relative to those trees.
 | libnx | Stays LP64 and unmodified. The game is a separate ILP32 module; they talk through a 64-bit-clean table (`FnvnxHostApi`) |
 | Guest | ILP32 ELF32, **relocatable** (PIE linked at `0x30000000`, self-relocating, placed by the host after the S10 reservation; section 9) or fixed (`guest.specs`, claimed by S10), packed as `guest.nso` |
 | Reserved | `0x00400000..0x02100000`: original image (S2: no native code/data there) incl. the data window `0x00fdf000..0x02100000` (S3) |
-| Compiler | `fnvnx-a64`: devkitA64's binutils/gcc/newlib + devkitPro patches, plus ILP32 multilibs, built from source |
+| Compiler | the guest compiler: GCC 13.3.0 + msvcmodel.patch, target aarch64-none-elf, one mirror with the runtime (`tools/gcc-ilp32-msvcmodel-noneelf`, section 3) |
 | Packers | Python: `elf2nso.py` (ELF32 and ELF64), `npdmtool.py`, `build_pfs0.py`, `bin2s` |
 
 ```
@@ -115,49 +115,15 @@ The breakage is structural (libnx encodes LP64 in its kernel and IPC ABI), and t
 or the S6 renderer, Mesa) have the same issue. A narrow shim keeps all of them upstream-unmodified and
 confines the 64/32 conversions to one header and one host file.
 
-## 3. Toolchain: fnvnx-a64
+## 3. Toolchain: the guest compiler and runtime (one none-elf mirror)
 
-devkitPro's package hosts are not reachable from the dev container (`pkg.devkitpro.org` 403, also behind
-`downloads.devkitpro.org`'s redirect; GitHub release assets and the devkitPro API 403). The GNU/sourceware
-mirrors and `git clone` from GitHub work, and devkitPro publishes its recipe and patches
-(`devkitPro/buildscripts`), so the toolchain is rebuilt from the same sources:
-
-| Component | Version | Patch |
-|---|---|---|
-| binutils | 2.45.1 | `buildscripts/patches/binutils-2.45.1-2.patch` |
-| gcc | 15.2.0 | `gcc-15.2.0-7.patch` (`-mtp=soft`, `__DEVKITA64__`, multilibs) |
-| newlib | 4.6.0.20260123 | `newlib-4.6.0.20260123-4.patch` (libsysbase, `sys/iosupport.h`, locks) |
-| make rules | `devkitPro/devkita64-rules` | `base_rules`, `base_tools` |
-
-Our changes on top (`toolchain/gcc/build.sh`):
-
-* multilibs `{default (lp64), fPIC, mabi=ilp32, mabi=ilp32/fPIC}` instead of devkitA64's
-  `{default, mcmodel=large, fPIC}` (large is unsupported with ILP32 and unused by libnx). The ILP32 multilibs
-  give the game libgcc, newlib + libsysbase, libstdc++/libsupc++. The script checks every multilib has them.
-* the `-mabi=ilp32 is deprecated` warning is removed: GCC 15 emits it under `-Wdeprecated` and libgcc builds
-  with `-Werror`, so the ILP32 multilib does not build otherwise. GCC 16.1 still supports ILP32 (still
-  deprecated); upstream removal would freeze us on the last release that has it, the main long-term risk of D1.
-* gcc's `limits.h` is regenerated after newlib is installed (stage 1 made one that does not chain to newlib's,
-  so `PATH_MAX`, needed by libnx, was missing).
-
-Build (measured: binutils 4 min, gcc stage 1 19 min, newlib 4 min, target libraries 15 min, on 4 cores):
-
-```sh
-git clone https://github.com/devkitPro/buildscripts ext/buildscripts
-git clone https://github.com/devkitPro/devkita64-rules ext/devkita64-rules
-# into dl/: https://ftp.gnu.org/gnu/binutils/binutils-2.45.1.tar.xz
-#           https://ftp.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz
-#           https://sourceware.org/pub/newlib/newlib-4.6.0.20260123.tar.gz
-apt install libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex
-toolchain/gcc/build.sh dl build/tc /opt/fnvnx-a64 ext/buildscripts
-toolchain/devkita64/setup.sh /opt/fnvnx-a64 ext/libnx ext/devkita64-rules /opt/fnvnx-dkp   # DEVKITPRO + libnx
-```
-
-The pipeline does the same from pinned sources (`tools/pipeline/build.py` toolchain stage, `TC_DL=auto`):
-`toolchain/sources.sh <dl> <src>` fetches the three tarballs (SHA-256 checked) and checks out buildscripts and
-devkita64-rules at fixed commits. The AArch64 Linux cross compiler the decomp units are compiled with (GCC 13.3.0 of
-Ubuntu 24.04, `-mabi=ilp32 -c`, glibc headers) is unpacked from pinned Ubuntu packages by `toolchain/cross/setup.sh
-<prefix>` (`toolchain/cross/packages.tsv`; no root) when the host's is not that build.
+The guest compiler and the guest runtime are ONE tree, the fnv-nx-build mirror `tools/gcc-ilp32-msvcmodel-noneelf`, pinned in
+`verify/guest_compiler.json` (`external` and `runtime` are the same entry; `at` = `/ext/gcc`). It is GCC 13.3.0 with
+`toolchain/msvcmodel/msvcmodel.patch` for target `aarch64-none-elf` (ILP32 by default; multilibs `.` and `pic`), with the guest's newlib, libm, libgcc
+and libstdc++ (GCC 13.3.0's own) built by that compiler, and the `fnvnx_*` plugins. It is built by `toolchain/msvcmodel/build.sh` (the farm's none-elf
+build) and described by its `MANIFEST.json` (`fnvnx-runtime-manifest/1`: `compiler.build_key`, `compiler.msvcmodel_patch_sha256`, flags, multilib, libraries,
+plugins). `recipe.py` refuses to compile a unit with a tree whose `compiler.build_key` is not `toolchain/msvcmodel/stamp.py` over this checkout.
+There is no second compiler build and no second runtime: the devkitPro gcc 15 `fnvnx-a64` build and its script are gone.
 
 `setup.sh` makes a `DEVKITPRO`-shaped tree (`devkitA64/` -> the prefix, `tools/bin/` with the Python packers and
 `bin2s`) and builds stock libnx into it with its own Makefile (`-Werror`, clean), so `switch.specs`/`switch.ld`
@@ -167,7 +133,6 @@ are used unchanged for the host.
 
 | Path | What |
 |---|---|
-| `gcc/build.sh` | Builds fnvnx-a64 (binutils, gcc stage 1, newlib for all multilibs, gcc stage 2). |
 | `devkita64/setup.sh`, `devkita64/bin2s` | DEVKITPRO tree + libnx build; bin2s stand-in. |
 | `include/fnvnx/hostapi.h` | The host/guest ABI (compiles in both data models; layout asserted). |
 | `host/host.c` | LP64 host: heap cap/split, process layout report, guest loader (read NSO, LZ4, SHA-256, map at link address with `svcMapProcessCodeMemory` + per-segment permissions, own process handle obtained like nx-hbloader), host API, calls the guest. Logs to the console and `sdmc:/fnvnx/host.log`. |

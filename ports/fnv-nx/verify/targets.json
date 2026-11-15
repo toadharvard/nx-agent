@@ -6,11 +6,6 @@
    "ref": "tools/libnx",
    "commit": "518bf11ad6a52149e43fbd0fa83b0087a430f446"
   },
-  "a64-runtime": {
-   "repo": "fnv-nx-build",
-   "ref": "tools/fnvnx-a64-msvcmodel",
-   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436"
-  },
   "arm-a57-docs": {
    "repo": "fnv-nx-build",
    "ref": "tools/arm-a57-docs",
@@ -20,6 +15,11 @@
    "repo": "fnv-nx-build",
    "ref": "tools/khronos-glxml",
    "commit": "f4894d73bf8e40c85a20a61408179c9898ec3340"
+  },
+  "guest-runtime": {
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
+   "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f"
   }
  },
  "guest_platform": {
@@ -46,24 +46,24 @@
    ],
    "libc": [
     {
-     "external": "a64-runtime",
-     "path": "README.md",
+     "external": "guest-runtime",
+     "path": "CONFIGURE.txt",
      "line": 1,
-     "quote": "fnvnx-a64"
+     "quote": "gcc 13.3.0"
     },
     {
-     "external": "a64-runtime",
-     "path": "README.md",
-     "line": 10,
+     "external": "guest-runtime",
+     "path": "CONFIGURE.txt",
+     "line": 1,
      "quote": "newlib"
     }
    ],
    "triplet": [
     {
-     "external": "a64-runtime",
-     "path": "README.md",
-     "line": 4,
-     "quote": "Target `aarch64-none-elf`"
+     "external": "guest-runtime",
+     "path": "CONFIGURE.txt",
+     "line": 2,
+     "quote": "aarch64-none-elf"
     }
    ],
    "process": [
@@ -82,9 +82,9 @@
    ],
    "abi": [
     {
-     "external": "a64-runtime",
-     "path": "README.md",
-     "line": 4,
+     "external": "guest-runtime",
+     "path": "CONFIGURE.txt",
+     "line": 3,
      "quote": "ilp32"
     },
     {

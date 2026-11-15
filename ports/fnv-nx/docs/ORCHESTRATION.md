@@ -93,7 +93,7 @@ interpreter on the product path, no fast path switched off for good.
 | L3a | Лифт | the lifter and its facts (dispatch, EH tables, flags, DEF0/DEFPRIOR, control-state value analysis); the packs; lift/rt; the bridges; the product ELF root |
 | L3b | Проверка лифта | shape/form certificates against the Sail model (the pack's own universe); SEH/EH conformance; full CONTEXT restore; lift tests with no doubles |
 | L4 | Эмулятор | the boot machine (the shared kernel/GPU model below every test); boot milestones; instructions per frame; frames stored by content |
-| L5 | Платформа | Win32/CRT for the declared machine; the guest runtime msvcmodel13; rt/guest (`main`, threads); registry, FalloutPrefs, fonts, Galaxy, network-down; later the Switch host root |
+| L5 | Платформа | Win32/CRT for the declared machine; the guest runtime (the none-elf mirror `tools/gcc-ilp32-msvcmodel-noneelf`, with the compiler); rt/guest (`main`, threads); registry, FalloutPrefs, fonts, Galaxy, network-down; later the Switch host root |
 | L6 | Рендер D3D9 | the D3D9 front end to the nxgpu stream; the shader translator; sm_link at 0 failures |
 | L6A | Бэкенды GL и deko3d | gl4 (the reference, recipe-built, the boot machine's GL); deko3d after the first frame, checked against GL |
 
@@ -109,7 +109,7 @@ interpreter on the product path, no fast path switched off for good.
 
 ## 6. Standing decisions that shape the remaining work (2026-11-14)
 
-- The platform root enters the trunk only built on msvcmodel13, never on gcc 15 headers.
+- The platform root enters the trunk only built on the none-elf mirror (compiler and runtime, GCC 13.3.0), never on gcc 15 headers.
 - L3b certifies exactly the shapes the product pack uses, and does not wait for the pack root.
 - **Hardware exceptions.**
   - Under OWNER 6 there is no asynchronous fault recovery.

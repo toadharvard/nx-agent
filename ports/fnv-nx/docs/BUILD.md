@@ -151,7 +151,7 @@ made from pinned sources by the pipeline:
 |---|---|---|
 | decomp, sse2neon, libnx checkouts | `tools/fetch.sh` (fetch stage, without `EXT`) | commits in `tools/fetch.sh` |
 | AArch64 cross tools (S2c's `s2c/xtc`: Ubuntu's `g++-13-aarch64-linux-gnu` unpacked by hand, the rest from the installed packages) | `toolchain/cross/setup.sh` (toolchain stage, `CROSS=auto` when the host's are not the pinned build) | `toolchain/cross/packages.tsv`: package, version, pool path, SHA-256 (archive.ubuntu.com, or a snapshot.ubuntu.com date) |
-| fnvnx-a64 + DEVKITPRO with libnx | `toolchain/sources.sh`, `toolchain/gcc/build.sh`, `toolchain/devkita64/setup.sh` (toolchain stage, `TC_DL=auto`) | tarball SHA-256s and devkitPro commits in `toolchain/sources.sh` |
+| guest compiler + runtime (one none-elf mirror) and DEVKITPRO with libnx | `toolchain/msvcmodel/build.sh` (farm none-elf build), `toolchain/sources.sh`, `toolchain/devkita64/setup.sh` (toolchain stage, `TC_DL=auto`) | tarball SHA-256s and devkitPro commits in `toolchain/sources.sh` |
 | Ogg Vorbis | `toolchain/vorbis/build.sh` (`VORBIS=auto`) | git tags and commits in the script |
 | the extern-text list (S4's `addr_ids.txt`) | `tools/pipeline/extern_text.py` (link stage, `EXTERN_TEXT=auto`) | the tree's `units.json`; byte-identical to S4's file for the f11/f12 tree and for the pristine decomp |
 | boot data image | S14's `loader/synth/synth_image.py` (boot stage, `BOOT_IMAGE=auto`) when `PRISTINE_OBJS` is given, else the all-zero image | the pristine decomp's `units.json` + S11's MSVC objects |

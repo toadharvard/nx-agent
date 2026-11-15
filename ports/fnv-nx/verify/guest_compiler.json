@@ -3,13 +3,13 @@
  "external": {
   "name": "gcc-msvcmodel",
   "repo": "fnv-nx-build",
-  "ref": "tools/gcc-ilp32-msvcmodel",
-  "commit": "b274ec067a2f965807a359853f456e31c67a49af",
-  "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
+  "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
+  "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
+  "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
   "at": "/ext/gcc"
  },
- "cc": "bin/aarch64-linux-gnu-gcc",
- "cxx": "bin/aarch64-linux-gnu-g++",
+ "cc": "bin/aarch64-none-elf-gcc",
+ "cxx": "bin/aarch64-none-elf-g++",
  "flags": {
   "semantics": {
    "common": [
@@ -56,19 +56,18 @@
   "gcc_tarball": "gcc-13.3.0.tar.xz",
   "gcc_tarball_sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083",
   "patch": "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",
-  "patch_sha256": "08c9569a8e7b42ae529c202adc549474954a7f60b73cd4b50a4f111e3f0459d3",
-  "src_commit": "7ac84bda81732cad1c9f78deb23911e2d0dddebb",
+  "patch_sha256": "f2deee23ba24fced15e4cb1522ecce56f95fdee2ded988b37da19f425bb2c0b2",
   "build": "ports/fnv-nx/toolchain/msvcmodel/build.sh",
   "distribution_packages": "ports/fnv-nx/verify/env.json (cross packages g++-13-aarch64-linux-gnu, binutils-aarch64-linux-gnu, libc6-dev-arm64-cross, libstdc++-13-dev-arm64-cross, gcc-13-plugin-dev-aarch64-linux-gnu; versions are not copied)",
-  "runtime": "README.md of the runtime external: binutils 2.45.1, gcc 15.2.0 + newlib 4.6.0.20260123 (devkitPro patches) + toolchain/msvcmodel/msvcmodel.patch, target aarch64-none-elf, multilibs ., pic, ilp32, ilp32/pic (the guest's libc, libm, libstdc++ and headers)"
+  "runtime": "the same external as the compiler (one none-elf mirror, built by toolchain/msvcmodel/build.sh): its MANIFEST.json (fnvnx-runtime-manifest/1) records compiler.msvcmodel_patch_sha256, compiler.build_key, flags, multilib and the libraries (the guest's libc, libm, libstdc++, libgcc and headers; GCC 13.3.0 with msvcmodel.patch, target aarch64-none-elf, multilibs ., pic)"
  },
  "runtime": {
-  "name": "fnvnx-a64-msvcmodel",
+  "name": "gcc-msvcmodel",
   "repo": "fnv-nx-build",
-  "ref": "tools/fnvnx-a64-msvcmodel",
-  "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
-  "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
-  "at": "/ext/a64"
+  "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
+  "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f",
+  "tree_sha256": "6ed4c54a30a1314fcf47e9df53fce873e6664a2a27534458244fc28c2f47e142",
+  "at": "/ext/gcc"
  },
  "runtime_driver": "bin/aarch64-none-elf-g++",
  "runtime_cflags": [
