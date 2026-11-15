@@ -1021,3 +1021,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Counts over the census byte ranges (5,703,260 insns over 8 images): int 0x29 0; other int n 107; mov r/m16,gs 22; gs-prefixed 3,960, mostly in d3dx9. This is a byte census that includes data; it is not the lifted set.
   - Recount over UNIVERSE with the reaching edge per site. A data-as-code edge goes to w7; real code is covered by L5 w15's AV row.
   - w8 merges w7-facts2 b9261cd85 for jtab, facts and universe.
+- 23:01 base3 @ 909e0452f = eb9a3c2e6 + w7-facts2 b9261cd85.
+  - liftsrc branch fa8075b5c takes FACTS (universe, ehtables with jtab_tables, per-module dirs), MODULES_TSV and X86SYS through `uses`. The 6944080c external is deleted. The FP inputs stay a fixture until w13 lands.
+  - int 0x29–0x2e: 0 sites.
+  - Shard rule: a fixed N per image (exe 64, d3dx9 16 each, small images 1), and shard j takes bucket(entry) % N == j, with no stage set derived from facts. finish requires the union of the shards to equal UNIVERSE.
