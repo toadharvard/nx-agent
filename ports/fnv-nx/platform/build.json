@@ -281,6 +281,20 @@
    ]
   },
   {
+   "tool": "ports/fnv-nx/manifest/gen_defwndproc.py",
+   "args": [
+    "/ext/wine-9.0",
+    "/in/ports/fnv-nx/platform/win32/window.cpp",
+    "/out/win32/defwndproc.gen.inc"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/win32/window.cpp"
+   ],
+   "outputs": [
+    "win32/defwndproc.gen.inc"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/manifest/gen_registry_seed.py",
    "args": [
     "/ext/manifest/manifest/regsites.tsv",
