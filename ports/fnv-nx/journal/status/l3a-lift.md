@@ -913,3 +913,13 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - liftsrc chain: the recipe is valid on w8's local branch, and a cold build is running to measure the shard time.
 - 21:17 L2 decision (a): the shapeless-definition rule (static and never address-taken, by GCC's own fact, is quiet; anything else is DISPATCH1) goes into the dispatch plugin on cand3's line. L2 w2 (session_01KmtZKUiDYYhRvaS8TJ2kGu) ports 37d4e27df/b0198f906 onto plugins-cand3. test_defdisp stays unchanged and turns green when that lands.
 - 21:20 Revised: cand3 already closes the shapeless-definition class with L2's DEFDISP-NS (065136142). Under it, a shapeless definition gets a `<asm> -<reason>` row, exitgen is red for a JOINED `-` row, and call sites stay errors. It decides reachability by the join with the exe, not by linkage, so it is stronger than our 37d4e27df rule. Request (a) is withdrawn, and the plugin is unchanged. w8 changes test_defdisp to follow DEFDISP-NS: rc==0 with a `-` row, plus a joined `-` row that is red through exitgen.
+
+## 21:25 Blockers on base3 d9d208c61
+- **Platform red on cand3 itself.** Stage platform gen:12 (gen_combridge.py) does `import spec_extract`, which L1 8968eaa30 moved into bridgefacts/com/.
+  - It blocks lift/rt (X86SYS), liftsrc and the pack: 28 stages ran with 1064 hits, then the stop.
+  - Rule: a generator takes another root's product only as a declared output through `uses`, never by importing its code.
+  - Routed to L1 (cand3) and L5 (the owner of gen_combridge). There is no fixture workaround.
+- **Loader red.** pp:guest/boot.c cannot find fnvnx_win32_ext.h, because the loader does not take platform INCLUDE through `uses` (reported by L4). w8 fixes it on base3, and the hunk goes to L1 w12 for cand3.
+- **lift/descs objects_of red, which makes lift/bridges red.** w8 finds the cause.
+- test_defdisp is rewritten to DEFDISP-NS (w8).
+- bottleneck: cand3 platform gen:12 (L1/L5); then liftsrc cold (w8); facts on d9d208c61 (w7); fpfacts (w13).
