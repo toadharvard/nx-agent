@@ -78,10 +78,11 @@ def git(*args, cwd=None, check=True):
     return r.stdout
 
 
-def lifted_elf(mode):
-    """the guest image as the recipe builds it (one image, its mode word set): the three fnvboot_* functions stand for lifted code and sit in the input section
-    .text.fnvl by their own source (tests/bootguest/guest.c); the crt0 header words are written by the recipe's ldcheck stage"""
-    return tb.with_mode(tb.build()[0], mode)
+def lifted_elf():
+    """the guest image as the recipe builds it, byte for byte: the three fnvboot_* functions stand for lifted code and sit in the input section
+    .text.fnvl by their own source (tests/bootguest/guest.c); the crt0 header words are written by the recipe's ldcheck stage. Its mode is not in it: a
+    contract branch carries the run's mode as the file `mode` (tb.mode_bytes), which boot_job.sh puts at sdmc:/mode"""
+    return tb.build()[0]
 
 
 def publish_branch(name, files):
@@ -129,10 +130,11 @@ def main():
     git("config", "uploadpack.allowFilter", "true", cwd=BARE)
     contract = {"entries.tsv": MANIFEST.encode(), "modules.tsv": MODULES.encode(), "keys.tsv": KEYS_TSV.encode(),
                 "milestones.tsv": MILESTONES.encode(), "run.txt": RUN.encode()}
-    ok_elf, fault_elf = lifted_elf(6), lifted_elf(3)
-    publish_branch("l1-contract/elf/testid", dict(contract, **{"guest.elf": ok_elf}))
-    publish_branch("l1-contract/elf/faultid", dict(contract, **{"guest.elf": fault_elf}))
-    publish_branch("l1-contract/elf/softid", dict(contract, **{"guest.elf": ok_elf, "softfloat.tsv": b"fnvboot_b\n"}))
+    ok_elf = fault_elf = gpu_elf = lifted_elf()
+    M6, M3, M80 = tb.mode_bytes(6), tb.mode_bytes(3), tb.mode_bytes(80)
+    publish_branch("l1-contract/elf/testid", dict(contract, **{"mode": M6, "guest.elf": ok_elf}))
+    publish_branch("l1-contract/elf/faultid", dict(contract, **{"mode": M3, "guest.elf": fault_elf}))
+    publish_branch("l1-contract/elf/softid", dict(contract, **{"mode": M6, "guest.elf": ok_elf, "softfloat.tsv": b"fnvboot_b\n"}))
     # the guest in three parts + manifest.json (joined and verified by the job); a corrupt part must fail the job
     cut = [0, len(ok_elf) // 3, 2 * len(ok_elf) // 3, len(ok_elf)]
     pieces = {"part.%03d" % i: ok_elf[cut[i]:cut[i + 1]] for i in range(3)}
@@ -141,27 +143,26 @@ def main():
     publish_branch("l1-contract/elf/partsid", dict(contract, **pieces, **{"manifest.json": json.dumps(man).encode()}))
     bad = dict(pieces, **{"part.001": b"X" + pieces["part.001"][1:]})
     publish_branch("l1-contract/elf/badpartid", dict(contract, **bad, **{"manifest.json": json.dumps(man).encode()}))
-    publish_branch("l1-contract/elf/badrowid", dict(contract, **{"guest.elf": ok_elf, "keys.tsv": KEYS_TSV.encode() + b"junk\n"}))
+    publish_branch("l1-contract/elf/badrowid", dict(contract, **{"mode": M6, "guest.elf": ok_elf, "keys.tsv": KEYS_TSV.encode() + b"junk\n"}))
     noent = {k: v for k, v in contract.items() if k != "entries.tsv"}
-    publish_branch("l1-contract/elf/noentries", dict(noent, **{"guest.elf": ok_elf}))
+    publish_branch("l1-contract/elf/noentries", dict(noent, **{"mode": M6, "guest.elf": ok_elf}))
     # the REAL renderer files: the pinned nxgl4 and bridge branch commits of the artifacts repository (test_bootgpu.fetch_renderer), published
     # unchanged into the test's bare repository under their real branch names; the broken-chain cases below are mutations of these inputs
     gdir, bdir = tg.fetch_renderer(SCRATCH)
     rd = lambda d, n: open(os.path.join(d, n), "rb").read()  # noqa: E731
     lib, meta_j, ar, build_j = rd(gdir, "libnxgl4.so"), rd(gdir, "meta.json"), rd(bdir, "libfnvnx-d3d9.a"), rd(bdir, "build.json")
     GB, BB = tg.NXGL4["ref"], tg.BRIDGE["ref"]
-    gpu_elf = lifted_elf(80)
     sha = lambda b: hashlib.sha256(b).hexdigest()  # noqa: E731
     jd = lambda d: json.dumps(d).encode()  # noqa: E731
     gman = lambda render: jd(dict({"schema": "fnvnx-elf/1", "name": "guest.elf", "size": len(gpu_elf), "sha256": sha(gpu_elf), "parts": []},
                                   **({"render": render} if render is not None else {})))
     render = {"branch": BB, "archive_sha256": json.loads(build_j)["archive_sha256"]}
-    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(render)}))
-    publish_branch("l1-contract/elf/gpunoman", dict(contract, **{"guest.elf": gpu_elf}))
-    publish_branch("l1-contract/elf/gpunorender", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(None)}))
-    publish_branch("l1-contract/elf/gpuothersha", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, archive_sha256="0" * 64))}))
-    publish_branch("l1-contract/elf/gpuoldbridge", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="bridge-h2"))}))
-    publish_branch("l1-contract/elf/gpunocommit", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="bridge-nocommit"))}))
+    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(render)}))
+    publish_branch("l1-contract/elf/gpunoman", dict(contract, **{"mode": M80, "guest.elf": gpu_elf}))
+    publish_branch("l1-contract/elf/gpunorender", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(None)}))
+    publish_branch("l1-contract/elf/gpuothersha", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(dict(render, archive_sha256="0" * 64))}))
+    publish_branch("l1-contract/elf/gpuoldbridge", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="bridge-h2"))}))
+    publish_branch("l1-contract/elf/gpunocommit", dict(contract, **{"mode": M80, "guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="bridge-nocommit"))}))
     publish_branch(BB, {"build.json": build_j, "libfnvnx-d3d9.a": ar})
     bj = json.loads(build_j)
     publish_branch("bridge-h2", {"build.json": jd(dict(bj, nx_agent_commit="2" * 40)), "libfnvnx-d3d9.a": ar})

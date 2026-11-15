@@ -51,13 +51,13 @@ def sh(cmd):
     return r.stdout
 
 
-MODE_SYMBOL = "fnvboot_mode"   # tests/bootguest/guest.c: the run's mode, a 32-bit word of the image's data that the machine sets before the first instruction
+MODE_FILE = "mode"   # tests/bootguest/guest.c: the run's mode is the 4-byte little-endian file sdmc:/mode of the declared card
 
 
 def build():
     """the guest image -> (ELF bytes, ELF path); importable: test_boot.py, test_bootgpu.py, test_boot_job.py, test_lockobs.py use it. ONE image for every
     mode: the output of verify/recipe.py for the root tests/bootguest, built through gate_build.ensure in GATE_CACHE (the verdict's own store; a standalone run
-    without GATE_CACHE builds cold into the scratch directory). The mode of a run is an input word of the image (with_mode), never of the build."""
+    without GATE_CACHE builds cold into the scratch directory). The mode of a run is the file `mode` on its card (write_mode), never of the build or of the image."""
     res, out = gate_build.ensure(GUEST_ROOT, GATE_CACHE, REPO)
     if res["status"] != "green":
         raise RuntimeError("guest image: recipe %s: %s" % (res["status"], res.get("failure")))
@@ -74,9 +74,16 @@ def modes_of(elf_bytes):
     return [struct.unpack_from("<I", t, 8 * i)[0] for i in range(n)]
 
 
-def with_mode(elf_bytes, mode):
-    """the image with the word fnvboot_mode set to MODE: the run input that picks one of the image's modes (bootlayout.with_data_word); no build is involved"""
-    return bootlayout.with_data_word(elf_bytes, MODE_SYMBOL, mode)
+def mode_bytes(mode):
+    """the content of the file `mode`: the id as 4 bytes, little endian"""
+    return struct.pack("<I", mode)
+
+
+def write_mode(root, mode):
+    """the run input that picks one of the image's modes: the 4-byte little-endian file `mode` at the root of the declared card (sdmc:/mode), which the guest's
+    main reads through the product fs path before any mode code (tests/bootguest/guest.c). The image is the recipe's product, byte for byte."""
+    with open(os.path.join(root, MODE_FILE), "wb") as f:
+        f.write(mode_bytes(mode))
 
 
 def symbol(elf, name):
@@ -96,8 +103,8 @@ def make_plan(elf_bytes):
 
 
 def run(elf_bytes, root, mode, watch=None, svc=None, **kw):
+    write_mode(root, mode)
     svc = svc or boothost.Services(root)
-    elf_bytes = with_mode(elf_bytes, mode)
     m = bootmachine.Machine(elf_bytes, make_plan(elf_bytes), svc, **kw, quantum=QUANTUM)
     lines, tids = [], []
     m.on_console(lines.append)
@@ -169,8 +176,27 @@ def main():
     case("nothing runs after the src fault", "after the fault" not in lines4 and "map=0" in lines4, lines4)
     case("run() carries the whole console text", r1["console"] == "\n".join(lines1) + "\n", r1["console"][:80])
 
+    # the mode input (sdmc:/mode): read and closed by main through the product fs path before fnvboot_mode_start; red cases of its own
+    start = base + symbol(path0, "fnvboot_mode_start")
+    seen = {}
+
+    def at_start(m):
+        m.watch_pc(start, lambda tid, pc: seen.setdefault("calls", m.calls))
+    run(elf0, root, 0, watch=at_start)
+    case("mode input: the start mark is reached once, after the mode file's open, read and close (host calls counted from the mark, never from the start)",
+         seen.get("calls", 0) >= 3, seen)
+    no_file = os.path.join(TMP, "sd-nomode")
+    os.makedirs(no_file)
+    mm = bootmachine.Machine(elf0, plan0, boothost.Services(no_file), quantum=QUANTUM)
+    rn = mm.run()
+    case("mode input: no file `mode` on the card exits 0xE0000002, nothing of a mode runs", rn["reason"] == "exit" and rn["exit_code"] == 0xE0000002 and "hello from the guest" not in rn["console"], rn)
+    unknown = max(MODES) + 1
+    ru = run(elf0, root, unknown)[0]
+    case("mode input: an id that is no row of fnvboot_modes exits 0xE0000001 (no default mode)", ru["reason"] == "exit" and ru["exit_code"] == 0xE0000001, ru)
+
     # instruction bound: one block hook, deterministic stop, reuse of the Icount total
     def limited(limit, with_ic):
+        write_mode(root, 0)
         svc = boothost.Services(root)
         m = bootmachine.Machine(elf0, plan0, svc, limit_instructions=limit, quantum=QUANTUM)
         ic = m.attach_icount(None, base) if with_ic else None

@@ -75,7 +75,7 @@ def main():
     lib = fetch_nxgl4(scratch)
     tb.case("setup: the pinned libnxgl4.so fetched, tree_sha256 and sha256 verified", os.path.isfile(lib))
     elfg = tb.build()[0]   # one image; the renderer guests are its modes 80 and 81
-    elf50, elf51 = tb.with_mode(elfg, 80), tb.with_mode(elfg, 81)
+    elf50 = elf51 = elfg   # modes 80 and 81 of it: the file `mode` of the card, written before each run
     root = os.path.join(d, "sd")
     os.makedirs(root)
     frames = os.path.join(d, "frames")
@@ -84,6 +84,7 @@ def main():
     os.environ.update(boot.GPU_ENV)
     os.environ["NXGL4_FRAMES"] = frames
     os.makedirs(frames)
+    tb.write_mode(root, 80)
     m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     seen = []
     g = bootgpu.Gpu(lib, m, "docked", on_present=seen.append)
@@ -112,6 +113,7 @@ def main():
     g.close()
 
     # --- without a library: module 10 is not registered
+    tb.write_mode(root, 80)
     m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     lines = []
     m.on_console(lines.append)
@@ -119,6 +121,7 @@ def main():
     tb.case("without --gpu: module 10 answers NO_MODULE", parse(lines)["infoRc"] == bootmachine.EXT_NO_MODULE, lines)
 
     # --- host_ptr
+    tb.write_mode(root, 81)
     m = bootmachine.Machine(elf51, tb.make_plan(elf51), boothost.Services(root), quantum=tb.QUANTUM)
     lines = []
     m.on_console(lines.append)
@@ -149,6 +152,8 @@ def main():
     elf = os.path.join(d, "h50.elf")
     open(elf, "wb").write(elf50)
     table = w("t.txt", "first any host gpu-first-call\npres any host present\n")
+
+    tb.write_mode(root, 80)
 
     def args(out, fr, *extra):
         return ["run", "--elf", elf, "--reserved", w("res.tsv", "exe\t400000\t2100000\nmod2\t4000000\t4200000\n"), "--keys", "f0000:200000",

@@ -151,19 +151,14 @@ def main():
         secs, syms = bootlayout.section_ranges(raw), bootlayout.defined_symbols(raw)
         case("readers: sections of the file by name, defined symbols with values", {".text", ".data", ".bss"} <= set(secs) and len(syms["tab"]) == 1
              and syms["_start"] == [secs[".text"][0][0]], (sorted(secs), sorted(syms)))
-        e = bootlayout.with_data_word(raw, "fnvboot_mode", 92)
-        case("with_data_word: one word of the file changes, the symbol reads it back", len(e) == len(raw) and sum(a != b for a, b in zip(raw, e)) == 1
-             and bootlayout.data_symbol(e, "fnvboot_mode") == struct.pack("<I", 92) and bootlayout.data_symbol(e, "tab") == struct.pack("<4I", 5, 0, 6, 0))
         bad = []
-        for what, fn in (("a .bss word", lambda: bootlayout.with_data_word(raw, "zz", 1)), ("a symbol that is not 4 bytes", lambda: bootlayout.with_data_word(raw, "tab", 1)),
-                         ("an unknown symbol", lambda: bootlayout.with_data_word(raw, "nope", 1)), ("a value over 32 bits", lambda: bootlayout.with_data_word(raw, "fnvboot_mode", 1 << 32)),
-                         ("bss contents", lambda: bootlayout.data_symbol(raw, "zz"))):
-            try:
-                fn()
-                bad.append(what)
-            except bootlayout.LayoutError:
-                pass
-        case("with_data_word / data_symbol: refusals (bss, size, unknown, range)", not bad, bad)
+        try:
+            bootlayout.data_symbol(raw, "zz")
+            bad.append("bss contents")
+        except bootlayout.LayoutError:
+            pass
+        case("data_symbol: initialised contents read back, a .bss symbol is refused", bootlayout.data_symbol(raw, "tab") == struct.pack("<4I", 5, 0, 6, 0)
+             and bootlayout.data_symbol(raw, "fnvboot_mode") == struct.pack("<I", 0) and not bad, bad)
     print("%d failed" % len(FAILED) if FAILED else "all %d passed" % N[0])
     return 1 if FAILED else 0
 

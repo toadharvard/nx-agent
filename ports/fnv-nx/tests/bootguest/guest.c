@@ -1,5 +1,5 @@
 /* Guest image of the boot machine's tests (class test, ILP32 PIE FNXG): ONE image for every mode. The modes are the rows of fnvboot_modes below, the only list;
-   the mode of a run is the input word fnvboot_mode of the image's data (a test sets it in the image file before the run: bootlayout.with_data_word).
+   the mode of a run is the declared input sdmc:/mode (main reads it first).
    The renderer guest of test_bootgpu is mode 80/81. */
 #include <stdint.h>
 #include "fnvnx/hostapi.h"
@@ -1048,11 +1048,22 @@ const FnvbootMode fnvboot_modes[] = {
     {92, mode_92},
 };
 const uint32_t fnvboot_mode_count = sizeof fnvboot_modes / sizeof fnvboot_modes[0];
-__attribute__((section(".data"))) volatile uint32_t fnvboot_mode = 0;   /* the run's mode: an initialised word of the image's data (a test sets it in the image file before the run, bootlayout.with_data_word); 0, the base run, when it is not set */
-#define FNVBOOT_EXIT_NO_MODE 0xE0000001u   /* the exit code of a run whose mode is not a row of fnvboot_modes */
+#define FNVBOOT_EXIT_NO_MODE 0xE0000001u        /* exit code: the mode in sdmc:/mode is not a row of fnvboot_modes */
+#define FNVBOOT_EXIT_NO_MODE_FILE 0xE0000002u   /* exit code: sdmc:/mode is missing or shorter than 4 bytes */
+/* The mode of a run is the declared input sdmc:/mode on the machine's fs root: 4 bytes, little endian. It is read through the product fs path before any mode code runs,
+   then closed; fnvboot_mode_start marks the end of the start-up (a test measures the interval a mode's own code occupies from here). */
+__attribute__((noinline)) void fnvboot_mode_start(void) { __asm__ volatile("" ::: "memory"); }
+static uint32_t read_mode(void) {
+    uint64_t fd = fnvnx_hcall2(H->fs_open, FNVNX_ADDR("sdmc:/mode"), FNVNX_O_READ);
+    uint32_t mode = 0;
+    if ((int64_t)fd < 0 || fnvnx_hcall4(H->fs_pread, fd, FNVNX_ADDR(&mode), 4, 0) != 4) fnvnx_hcall1(H->exit, FNVBOOT_EXIT_NO_MODE_FILE);
+    fnvnx_hcall1(H->fs_close, fd);
+    return mode;
+}
 int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are set up before main */
+    uint32_t mode = read_mode();
+    fnvboot_mode_start();
     say(MSG[0]); say(MSG[1]);
-    uint32_t mode = fnvboot_mode;
     for (uint32_t i = 0; i < fnvboot_mode_count; i++)
         if (fnvboot_modes[i].id == mode) { fnvboot_modes[i].fn(mode); fnvnx_hcall1(H->exit, 7); return 0; }
     fnvnx_hcall1(H->exit, FNVBOOT_EXIT_NO_MODE);   /* an input error, not a default mode */

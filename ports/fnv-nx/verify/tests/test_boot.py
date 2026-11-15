@@ -48,13 +48,17 @@ def main():
     table, manifest = w("t.txt", TABLE), w("m.tsv", MANIFEST)
     root = os.path.join(d, "sd")
     os.makedirs(root, exist_ok=True)
+    modes = {}   # image path -> the mode of its runs: written as the file `mode` of the card before each run (tb.write_mode)
+
     def patched(n, mode):
         """the guest image (crt0 header patched by the recipe) as a file, unstripped: the reader skips the mapping symbols itself; with the mode of its run"""
-        open(os.path.join(d, n), "wb").write(tb.with_mode(tb.build()[0], mode))
+        open(os.path.join(d, n), "wb").write(tb.build()[0])
+        modes[os.path.join(d, n)] = mode
         return os.path.join(d, n)
     elf6, elf3, elf35 = patched("h6.elf", 6), patched("h3.elf", 3), patched("h35.elf", 35)
 
     def args(elf, out, tbl=table, man=manifest, *extra):
+        tb.write_mode(root, modes[elf])
         return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", 
                 "--root", root, "--quantum", str(tb.QUANTUM), "--milestones", tbl, "--manifest", man, "--out", os.path.join(d, out), *extra]
 
@@ -315,6 +319,7 @@ def main():
 
     # the guest-visible side: writes under the mounted tree fail with EACCES through the real file handlers (bootpath.READ_ONLY)
     svc = boothost.Services(root, read_only=[p["mount"] for p in real])
+    tb.write_mode(root, modes[elf6])
     mach = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc, quantum=tb.QUANTUM)
     page = tb.make_plan(open(elf6, "rb").read())["regions"]["host_page"]["lo"]
 

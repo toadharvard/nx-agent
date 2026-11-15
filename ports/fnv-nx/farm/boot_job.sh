@@ -129,6 +129,8 @@ for f in softfloat.syms softfloat.tsv; do
   if grep -qxF "$f" "$WORK/branch-files.txt"; then want+=("$f"); SOFT=present; SOFTFILE=$f; break; fi
 done
 HAVE_RUN=0; if grep -qxF run.txt "$WORK/branch-files.txt"; then want+=(run.txt); HAVE_RUN=1; fi
+# an optional declared card input of the run, the file `mode` (4 bytes): it is placed at sdmc:/mode and its sha256 is recorded in meta.json (mode_input); the test guests read their mode from it
+HAVE_MODE=0; if grep -qxF mode "$WORK/branch-files.txt"; then want+=(mode); HAVE_MODE=1; fi
 extract() { rm -rf "$IN"; mkdir -p "$IN"; GITA archive "$ELF_COMMIT" "${want[@]}" | tar -x -C "$IN"; }
 retry extract || die "cannot extract ${want[*]} from $IN_BRANCH@${ELF_COMMIT:0:12}"
 BI=(python3 -s -B "$NX/verify/bootinputs.py")
@@ -185,6 +187,8 @@ fi
 EXE_SHA=$(sha256sum "$GAME_DIR/FalloutNV.exe" | cut -c1-64)
 log "game $GAME_DIR: FalloutNV.exe sha256 $EXE_SHA"
 SD=$WORK/sd; chmod -R u+w "$SD" 2> /dev/null || true; rm -rf "$SD"; mkdir -p "$SD"
+MODE_SHA=""; if [ $HAVE_MODE = 1 ]; then cp "$IN/mode" "$SD/mode"; MODE_SHA=$(sha256sum "$IN/mode" | cut -c1-64); fi
+export MODE_SHA
 # the declared port inputs (verify/boot_inputs.json: the font set): the pinned commit is fetched through the same artifacts clone, then
 # verify/bootdecl.py verifies (early, the job's input-error; boot.py --declared-inputs verifies again and mounts) sha256(sums file) == the pin, the file set against the sums list (an extra or a missing file is an error)
 # and every file, and boot.py mounts it read-only under the card (--declared-inputs). Any mismatch ends the job as input-error before the boot.
@@ -259,13 +263,14 @@ fi
 CPU=$(lscpu 2> /dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -1)
 [ -n "$CPU" ] || CPU=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -1)
 [ -n "$CPU" ] || die "the host cpu model is in neither lscpu nor /proc/cpuinfo"
-python3 -I -c 'import json, sys
+python3 -I -c 'import json, os, sys
 k = ["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc", "seconds", "limit_instructions", "quantum", "profile", "host_cpu_model", "softfloat", "data_items"]
 v = sys.argv[1:]
 d = dict(zip(k, v))
 d["boot_rc"], d["seconds"] = int(d["boot_rc"]), int(d["seconds"])
 d["limit_instructions"] = int(d["limit_instructions"], 0) if d["limit_instructions"] else None
 d["quantum"] = int(d["quantum"], 0)
+d["mode_input"] = os.environ.get("MODE_SHA") or None
 d["data_items"] = d["data_items"][len("fetched:"):].split() if d["data_items"] else None
 if v[len(k):]:
     d["gpu_branch"], d["gpu_branch_commit"], d["bridge_branch"], d["bridge_branch_commit"], d["render_head"] = v[len(k):]
