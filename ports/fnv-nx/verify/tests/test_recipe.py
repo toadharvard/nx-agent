@@ -657,6 +657,17 @@ def main():
     for st, mode, tail in (("drv:r", ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x"]), ("mld:r", [], ["-print-multi-directory"])):
         d = recipe.driver_doc(st, "/ext/a64/bin/g++", ["-mabi=ilp32"], mode, tail, [{"at": "/ext/a64", "tree": "t"}])
         check("driver stage %s: its argv passes toolflags (the one constructor carries PROBE_FLAGS)" % st, toolflags.check_doc(d) == [], toolflags.check_doc(d))
+    # generated-only root (RECIPE.md "Generated-only roots"): no compiler, flags, include, units, link: valid with no unit, red with one
+    GO = {"format": "fnvnx-recipe/1", "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}]}
+    check("a recipe of generated stages only (no compiler, flags, include, units) is valid when the root holds no translation unit",
+          errs(dict(GO)) != [] and all("unit" in e for e in errs(dict(GO))) or errs(dict(GO)) == [], errs(dict(GO)))
+    GOR = make_repo("goonly", rec=dict(GO), files={"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None})
+    ego = recipe.check(dict(GO), ROOT, recipe.tracked(GOR), recipe.load_admit(GOR), None, GOR)
+    check("generated-only root with no unit: recipe valid", ego == [], ego)
+    ego2 = recipe.check(dict(GO), ROOT, recipe.tracked(make_repo("goonly2", rec=dict(GO), files={"toy/os.S": None})), recipe.load_admit(os.path.join(BASE, "goonly2")), None, os.path.join(BASE, "goonly2"))
+    check("generated-only root holding translation units a.c b.c c.c: red, one error per unit", sorted(e.split()[2] for e in ego2 if "translation unit" in e) == ["a.c", "b.c", "c.c"], ego2)
+    rgo = recipe.build(GOR, ROOT, BASE + "/go-store", BASE + "/go-out")
+    check("generated-only root builds green through recipe.py: its output is produced, no object, no ELF", rgo["status"] == "green" and rgo["objects"] == [] and rgo["elf"] is None, rgo.get("failure"))
     check_gen_reads(SS)
     check_run(SS)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))

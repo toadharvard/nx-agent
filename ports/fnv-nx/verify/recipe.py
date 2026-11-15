@@ -494,13 +494,30 @@ def profile_fields(profile, pin):
             "external": [dict(ex), dict(pin["runtime"])]}, []
 
 
+COMPILE_KEYS = ("compiler", "flags", "include", "units", "link", "profile", "variants")
+
+
+def generated_only(rec):
+    """A recipe of generated stages only (RECIPE.md "Generated-only roots"): `generated` is a non-empty list and none of the keys that compile or link
+    (COMPILE_KEYS) is written. Such a root has no unit (check refuses a translation unit in it), so it needs no compiler and no flags."""
+    return isinstance(rec, dict) and bool(rec.get("generated")) and not any(k in rec for k in COMPILE_KEYS)
+
+
+def fill_generated_only(rec):
+    """REC of a generated-only root with the fields every reader expects, empty: no unit is compiled, so the compiler named (the host profile's) is
+    never run and no flag is ever passed. Any other recipe: REC unchanged."""
+    if not generated_only(rec):
+        return rec
+    return dict(rec, units="all", include=[], flags={"c": [], "cxx": [], "asm": []}, compiler=profile_fields("host", None)[0]["compiler"])
+
+
 def expand_profile(rec, pin):
     """REC with its `profile` expanded: the profile's fields (profile_fields) in place of the keys the root does not write. A root that names a
     profile writes none of `compiler` and `plugins` (restating a profile field is red); its `external` lists only the externals the profile does not
     carry, which follow the profile's own in the expanded list. The expanded recipe has no `profile` key, so expansion is idempotent and every stage key is a
     function of the expanded values alone. -> (recipe, errors)."""
     if not isinstance(rec, dict) or "profile" not in rec:
-        return rec, []
+        return fill_generated_only(rec), []
     fields, err = profile_fields(rec["profile"], pin)
     if fields is None:
         return rec, err
@@ -1016,6 +1033,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if not isinstance(rec, dict):
         return ["recipe is not a JSON object"]
     err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
+    gonly = generated_only(rec)
     if "profile" in rec:
         ent0 = roots.get(root, {})
         want = (entry_of(roots, root + "@" + variant) if variant else ent0).get("target")
@@ -1057,6 +1075,9 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err.append('units must be "all" (no tracked source file can be left out)')
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     gen = generated_outputs(rec)
+    if gonly:   # no compiler and no flags are written: the root compiles nothing
+        err += ["generated-only root: %s is a translation unit (a root with units writes compiler, flags, include and units)" % u
+                for u in sorted(mine | set(gen)) if u.endswith(CC_EXT + CXX_EXT + ASM_EXT)]
     comp, exts, ats = rec.get("compiler"), rec.get("external", []), []
     if not isinstance(exts, list):
         err.append("external must be a list")
