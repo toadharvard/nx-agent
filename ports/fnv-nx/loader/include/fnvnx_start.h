@@ -39,7 +39,7 @@ typedef uint32_t (*fnvnx_start_resolve)(void *ctx, const char *dll, const char *
 
 typedef struct fnvnx_start_cfg {
     uint32_t file_size;            /* size of the exe file behind os->read */
-    uint8_t  sha256[32];           /* expected SHA-256 of the whole file (S1) */
+    uint8_t  sha256[FNVNX_SHA256_DIGEST_SIZE];           /* expected SHA-256 of the whole file (S1) */
     fnvnx_start_resolve resolve;   /* S4: platform dlls */
     void    *resolve_ctx;
     const fnvnx_module_desc *modules;   /* the lifted PE modules, in init order (fnvnx_modules); may be NULL when 0 */

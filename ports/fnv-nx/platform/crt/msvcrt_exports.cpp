@@ -1,7 +1,12 @@
 /* msvcrt_exports.cpp - the msvcrt.dll imports of the lifted D3DX DLLs, provided by name (fnvnx_msvcrt_lookup, called
  * by fnvnx_win32_lookup_export for dll "msvcrt"). Each function follows MSVCRT.DLL (the Windows system C runtime,
- * not a C99 libc): the table at the end says which come from the libc and which from the other platform/crt files. Provider and
- * status of every name: MSVCRT_EXPORTS.tsv. The exception / FPU runtime (provider L3) is deliberately absent.
+ * not a C99 libc): the table at the end says which come from the libc and which from the other platform/crt files. The names served
+ * are msvcrt_names.tsv (name, provider symbol, kind), the one list: the lookup table is generated from it and the gate `imports` finds
+ * each provider in the symbol tables. The exception / FPU runtime (provider L3: __CxxFrameHandler, _CxxThrowException,
+ * _except_handler3, _setjmp3, longjmp, _XcptFilter, ?terminate@@YAXXZ, ??1type_info@@UAE@XZ, _CI*, _adjust_fdiv, _clearfp, _controlfp,
+ * _fpclass, _finite, _isnan) is deliberately absent. Known limits of two bodies (reported to the lead, not rules): ??2@YAPAXI@Z
+ * (operator new) is malloc: no new-handler loop (_set_new_handler/_callnewh are not provided), NULL with errno ENOMEM when the heap is
+ * exhausted; __pioinfo (iob.c) holds blocks 0..7 (256 descriptors) with the osfile bits FOPEN FEOFLAG FAPPEND FDEV FTEXT only.
  *
  * Rules (each closes its class): numbers are parsed by a grammar scanner and converted by the libc's correctly
  * rounded strtod (glibc and newlib's gdtoa round exactly, to nearest even); qsort is an in-place heapsort whose

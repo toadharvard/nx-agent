@@ -272,6 +272,65 @@
    ]
   },
   {
+   "tool": "ports/fnv-nx/manifest/gen_wine_cites.py",
+   "args": [
+    "/ext/wine-9.0",
+    "/out/win32/wine_cites.tsv",
+    "/in/ports/fnv-nx/platform",
+    "/in/ports/fnv-nx/verify/declared_machine.tsv",
+    "/in/ports/fnv-nx/verify/wine_fixme.tsv",
+    "/in/ports/fnv-nx/manifest/env_const.tsv"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform",
+    "ports/fnv-nx/verify/declared_machine.tsv",
+    "ports/fnv-nx/verify/wine_fixme.tsv",
+    "ports/fnv-nx/manifest/env_const.tsv"
+   ],
+   "outputs": [
+    "win32/wine_cites.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/manifest/gen_defwndproc.py",
+   "args": [
+    "/ext/wine-9.0",
+    "/in/ports/fnv-nx/platform/win32/window.cpp",
+    "/out/win32/defwndproc.gen.inc"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/win32/window.cpp"
+   ],
+   "outputs": [
+    "win32/defwndproc.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/manifest/gen_sysmetrics.py",
+   "args": [
+    "/ext/wine-9.0",
+    "/in/ports/fnv-nx/platform/win32/display.cpp",
+    "/out/win32/sysmetrics.gen.inc"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/win32/display.cpp"
+   ],
+   "outputs": [
+    "win32/sysmetrics.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/manifest/gen_wine_colors.py",
+   "args": [
+    "/ext/wine-9.0",
+    "/out/win32/wine_colors.gen.inc"
+   ],
+   "inputs": [],
+   "outputs": [
+    "win32/wine_colors.gen.inc"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/manifest/gen_registry_seed.py",
    "args": [
     "/ext/manifest/manifest/regsites.tsv",
@@ -319,63 +378,49 @@
     "freetype/gen/src/truetype/truetype.c",
     "freetype/gen/src/truetype/ttgxvar.fnvnx.inc"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/declared/gen_osrec.py",
+   "args": [
+    "--os",
+    "/in/ports/fnv-nx/platform/declared/os.json",
+    "--header",
+    "/out/win32/declared_os.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/declared/os.json"
+   ],
+   "outputs": [
+    "win32/declared_os.h"
+   ]
   }
  ],
  "os_layer": [],
  "link": null,
  "plugins": [
   {
-   "name": "fnvnx_ftoi",
-   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
-   "args": {
-    "mode": "native"
-   },
-   "inputs": [
-    "ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc"
-   ]
+   "name": "fnvnx_ftoi"
   },
   {
-   "name": "fnvnx_order",
-   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
-   "args": {
-    "args": "rtl",
-    "object": "msvc",
-    "operator": "rtl",
-    "assign": "msvc"
-   }
+   "name": "fnvnx_order"
   },
   {
-   "name": "fnvnx_sdd",
-   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
-   "args": {}
+   "name": "fnvnx_sdd"
   },
   {
-   "name": "fnvnx_pi",
-   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
-   "args": {}
+   "name": "fnvnx_pi"
   },
   {
-   "name": "fnvnx_dispatch",
-   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
-   "args": {}
+   "name": "fnvnx_dispatch"
   },
   {
-   "name": "fnvnx_addr",
-   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
-   "args": {}
+   "name": "fnvnx_addr"
   },
   {
-   "name": "fnvnx_names",
-   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
-   "args": {}
+   "name": "fnvnx_names"
   },
   {
-   "name": "fnvnx_layout",
-   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
-   "args": {},
-   "inputs": [
-    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
-   ]
+   "name": "fnvnx_layout"
   }
  ],
  "external": [
@@ -434,6 +479,14 @@
    "commit": "9e4166eade58b561d3f4f16616e90326ea9f74fb",
    "tree_sha256": "bfbbcea77548e59932f655968af8f943232787fe12ae0dd4a23f68654080bc6d",
    "at": "/ext/manifest"
+  },
+  {
+   "name": "wine-9.0",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-9.0",
+   "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+   "tree_sha256": "3ac9a4a08e2692795769c34c62071796084c642ccca4e611684b1e79fe8b4e84",
+   "at": "/ext/wine-9.0"
   },
   {
    "name": "wine-specs",

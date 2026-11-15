@@ -48,9 +48,6 @@ typedef IUnknown *LPUNKNOWN;
 #ifndef S_FALSE
 #define S_FALSE ((HRESULT)1)
 #endif
-#ifndef MAX_PATH
-#define MAX_PATH 260
-#endif
 #ifndef CLASS_E_NOAGGREGATION
 #define CLASS_E_NOAGGREGATION ((HRESULT)(int)0x80040110u)
 #endif
