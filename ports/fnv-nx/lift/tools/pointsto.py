@@ -29,11 +29,17 @@ U = frozenset([UNK]); TOPSET = frozenset([TOP])
 R32 = pcsrc.R32
 
 
+class NS(frozenset):
+    """a token set in canonical (normalised) form: norm() of it is itself. A set is canonical or it is small (at most min(WIDTH, OBJW) tokens, which norm leaves alone)."""
+    __slots__ = ()
+
+
 def norm(ts):
-    """widen a token set: per object more than WIDTH offsets -> ANY; more than WIDTH integer constants -> the arbitrary integer; TOP absorbs nothing (kept as a token).
-    No memo table: a memo keyed by the wide input sets held 1.3 GB at 3M joins on binkw32 (78 thousand distinct inputs); the result is a pure function computed in one pass."""
-    if len(ts) <= WIDTH: return ts
-    return _norm(ts)
+    """the canonical form of a token set: per object more than WIDTH offsets -> ANY; more than WIDTH integer constants -> the arbitrary integer; more than OBJW frame or heap objects of a kind -> the kind's summary object;
+    TOP absorbs nothing (kept as a token). norm(norm(x)) == norm(x), and x is contained in norm(x) as a set of concrete values. No memo table (a memo keyed by the wide input sets held 1.3 GB at 3M joins on binkw32).
+    Canonical forms are what makes the fixpoint terminate: two sets with the same meaning compare equal, so a join that adds nothing is seen as unchanged."""
+    if type(ts) is NS or len(ts) <= min(WIDTH, OBJW): return ts
+    return NS(_norm(ts))
 
 
 def _norm(ts):
@@ -58,9 +64,11 @@ def _norm(ts):
 
 
 def join(a, b):
-    if a is None: return b
-    if b is None or a is b or b <= a: return a
-    if a <= b: return b
+    """the canonical union; every result is canonical (norm), also when one side contains the other: returning the raw wider side would give the same meaning two forms and the dataflow of a loop would alternate between them"""
+    if a is None: return norm(b) if b is not None else None
+    if b is None or a is b: return norm(a)
+    if b <= a: return norm(a)
+    if a <= b: return norm(b)
     return norm(a | b)
 
 
