@@ -125,3 +125,7 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
 - 2026-11-15 00:48 odrdef: L1 accepts it. Bindings come from the instantiated body (two-phase lookup); passed to w3.
 - 2026-11-15 00:50 w3 test_ldbl: done, 9b6e20f1d. Checks: DFmode from d-register arithmetic; every __LDBL_*__ equals its __DBL_*__; no reference to the 34 TF symbols, generated from the pinned libgcc; mangling e/O. It is red until the farm's compiler is pinned. Queued for w3 after odrdef: test_msvcmodel.py ($CXX directly, a second build path) moved onto recipe roots, then deleted.
 - 2026-11-15 00:52 L5 ask: the gen_values.py docstring (gate_assumptions mention-no-id) is fixed as 98c4eee7d on w1-ftoivec-final.
+- 2026-11-15 00:56 w1 pithunk: done, f092a268e. Thunk records come from expand_thunk and asm thunks through all_thunks, and copied cdtor clones take the in-charge form's sites. OMP/OACC/vtv/parloops options are errors at start_unit. Results: test_pi 119/0, L3a test_defdisp 0 failed. Sent to L3a w8.
+- 2026-11-15 00:56 gate_order on w1's frame rows (w23 @fef875ab): 2,368 of 178,206 uncertified (was 17,371); dynamic, g, f, b and c are 0. Left:
+  - (1) 1,714 escaping address-taken locals. Rule (b): the `escapes` fact from GCC PTA, and order orders escaping variables. w1 → claude/fnv-l2-source-w1-escape. Status: doing.
+  - (2) 500 non-frame plain accesses (minimp3 L3_imdct12 etc.). Waiting for w23's split. Hypothesis: accesses created after order, so the rule would be about pass placement.
