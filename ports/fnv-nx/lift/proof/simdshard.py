@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
 import simdcheck  # noqa: E402
-from proof import symform  # noqa: E402
+from proof import symform, treeid  # noqa: E402
 
 
 def main():
@@ -30,13 +30,7 @@ def main():
     mine = [r for i, r in enumerate(rows) if i % n == k - 1][:a.limit]
     ud = set()
     if a.cleared: ud = {l.split('\t')[1] for l in open(a.cleared) if l.strip() and not l.startswith('#')}
-    done = set()
-    if os.path.exists(path):                       # a kill can leave one partial last line: drop it (that shape is checked again), keep every complete record
-        good = []
-        for l in open(path).read().split('\n'):
-            try: done.add(json.loads(l)['shape']); good.append(l)
-            except (ValueError, KeyError): pass
-        open(path, 'w').write(''.join(l + '\n' for l in good))
+    tree = treeid.current(); done = treeid.resume(path, tree)
     print('shard %d/%d: %d shapes, %d already done' % (k, n, len(mine), len(done)), flush=True)
     with open(path, 'a') as out:
         for key, sha in mine:
@@ -51,7 +45,7 @@ def main():
             except Exception as e:                 # an exception on a shape is a record (error + the traceback hash), never a missing one
                 tb = traceback.format_exc(); print(tb, file=sys.stderr, flush=True)
                 rec = {'shape': key, 'result': 'error', 'note': ('%s: %s' % (type(e).__name__, e))[:300], 'traceback_sha': hashlib.sha256(tb.encode()).hexdigest()[:16], 'shape_sha': sha}
-            rec['seconds'] = round(time.time() - t0, 2)
+            rec['seconds'] = round(time.time() - t0, 2); rec['tree'] = tree
             out.write(json.dumps(rec, sort_keys=True) + '\n'); out.flush()
     rs = [json.loads(l) for l in open(path)]
     c = {}

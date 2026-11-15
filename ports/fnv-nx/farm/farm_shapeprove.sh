@@ -27,6 +27,7 @@ if [ "${1:-}" = "--queue" ]; then PINQ=${2:?usage: farm_shapeprove.sh [--queue F
 K=${1:?usage: farm_shapeprove.sh [--queue FILE] K N}; N=${2:?usage: farm_shapeprove.sh [--queue FILE] K N}
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd)
 B=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build)}; W=${FNVNX_WORK:-${GATE_CACHE:?GATE_CACHE not set}/farm-shapeprove}
+GL="$B/.git/farm.lock"; gl() { flock "$GL" "$@"; }      # every command that changes the shared clone $B (fetch, FETCH_HEAD, worktree add, refs) runs under this one lock, so concurrent shards on a machine cannot race (shallow file, FETCH_HEAD)
 PREFIX=${BRANCH_PREFIX:-l3b-lift/shapeprove}; PUBLISH=${PUBLISH:-1}
 SAILBASE="${GATE_CACHE:?GATE_CACHE (the verdict cache) is not set}/sail/$(sha256sum "$HERE/sail_pins.txt" | cut -c1-12)"      # the toolchain and its caches live in the verdict cache, keyed by the pins (proof/sail_pins.txt)
 WORKDIR=${WORK:-$SAILBASE/work}
@@ -35,7 +36,7 @@ mkdir -p "$W/in"
 T0=$(date +%s)
 fetch_branch() {   # fetch_branch <branch> <dir>: a worktree of the branch head in <dir> (reused when present)
     local d=$2
-    if [ ! -d "$d" ]; then git -C "$B" fetch -q --depth 1 origin "$1"; git -C "$B" worktree add -f "$d" FETCH_HEAD >/dev/null; fi
+    if [ ! -d "$d" ]; then gl bash -c 'git -C "$1" fetch -q --depth 1 origin "$2" && git -C "$1" worktree add -f "$3" FETCH_HEAD >/dev/null' _ "$B" "$1" "$d"; fi
 }
 
 # 0. python dependencies of the prover: capstone (shape.py, the decoder) and keystone-engine (enc_table.py, imported by prove.py), ONLY from the mirror branch
@@ -102,8 +103,7 @@ if [ "$PUBLISH" = 1 ] || [ -n "${FETCH_PUBLISHED:-}" ]; then
     REFS=$(git -C "$B" ls-remote origin "refs/heads/$PREFIX/*" | awk '{print $2}')
     if [ -n "$REFS" ]; then
         SPECS=(); i=0; for r in $REFS; do i=$((i+1)); SPECS+=("+$r:refs/farm-pub/$i"); done
-        git -C "$B" fetch -q --depth 1 origin "${SPECS[@]}"
-        for j in $(seq 1 $i); do mkdir -p "$PUBD/$j"; git -C "$B" archive "refs/farm-pub/$j" | tar -x -C "$PUBD/$j"; git -C "$B" update-ref -d "refs/farm-pub/$j"; done
+        gl bash -c 'set -e; B=$1; P=$2; n=$3; shift 3; git -C "$B" fetch -q --depth 1 origin "$@"; for j in $(seq 1 "$n"); do mkdir -p "$P/$j"; git -C "$B" archive "refs/farm-pub/$j" | tar -x -C "$P/$j"; git -C "$B" update-ref -d "refs/farm-pub/$j"; done' _ "$B" "$PUBD" "$i" "${SPECS[@]}"
     fi
 fi
 QUEUE="$W/queue.tsv"
@@ -133,8 +133,7 @@ publish() {   # an orphan commit holding the jsonl only, on a NEW branch named b
 if [ "$PUBLISH" = 1 ] && [ ! -s "$J" ]; then
     BEST=0
     for r in $(git -C "$B" ls-remote origin "refs/heads/$PREFIX/$ID/${K}of${N}-*" | awk '{print $2}'); do
-        git -C "$B" fetch -q --depth 1 origin "$r" || continue
-        git -C "$B" show FETCH_HEAD:"shapeprove_${K}_of_$N.jsonl" > "$J.try" 2>/dev/null || continue
+        gl bash -c 'git -C "$1" fetch -q --depth 1 origin "$2" && git -C "$1" show FETCH_HEAD:"$3"' _ "$B" "$r" "shapeprove_${K}_of_$N.jsonl" > "$J.try" 2>/dev/null || continue
         c=$(wc -l < "$J.try"); if [ "$c" -gt "$BEST" ]; then BEST=$c; mv "$J.try" "$J"; fi
     done
     rm -f "$J.try"
