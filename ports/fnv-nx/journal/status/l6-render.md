@@ -765,3 +765,4 @@ Paused: w3b, w4, farm; no other work.
     - Cause: the cand2 merge took cand2's whole verify/ASSUMPTIONS.json and dropped the L6 records ASM-601..641 (from 532f139f1).
     - Fix (w6, doing): union of the records by id from cand2 and 532f139f1, minus 628/629; then the gate re-run.
     - Merge rule "registry is union-by-id" sent to L1 w15.
+- 09:42Z Message discipline (integ 933d7dc5f): send a message only when the receiver must act, one per finished item, with priority "later". It goes into each worker's next brief.
