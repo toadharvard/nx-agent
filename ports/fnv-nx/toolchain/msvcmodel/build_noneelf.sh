@@ -27,7 +27,7 @@ set -euo pipefail
 W=$(mkdir -p "$1" && cd "$1" && pwd)
 P=$(mkdir -p "$2" && cd "$2" && pwd)
 HERE=$(cd "$(dirname "$0")" && pwd)
-VERIFY=$HERE/../../verify
+VERIFY=${VERIFY:-$HERE/../../verify}   # guest_compiler.json, targets.json, recipe.py
 PATCH_DIR=${PATCH_DIR:-$HERE/../gcc}
 STAGE=${STAGE:-all}
 JOBS=${JOBS:-$(nproc)}
@@ -152,7 +152,7 @@ GCC_CONF=(--target=$T --prefix="$P" --enable-languages=c,c++ --with-newlib=yes -
   --enable-multilib --enable-plugin --disable-nls --enable-checking=release --disable-werror
   --with-system-zlib --enable-threads=posix --disable-libssp --disable-libgomp --disable-libsanitizer --disable-libatomic
   --disable-libquadmath --disable-libmudflap --disable-libstdcxx-pch --disable-libstdcxx-verbose --enable-libstdcxx-time=yes
-  --enable-cxx-flags=-ffunction-sections --disable-win32-registry --disable-debug --disable-tm-clone-registry --disable-__cxa_atexit
+  --disable-win32-registry --disable-debug --disable-tm-clone-registry --disable-__cxa_atexit
   --with-gnu-as --with-gnu-ld --enable-poison-system-directories --with-bugurl=none
   --with-native-system-header-dir=/include --with-sysroot="$P/$T" --with-local-prefix="$P/no-local"
   --with-as="$P/bin/$T-as" --with-ld="$P/bin/$T-ld" --with-arch="$CPUARCH" --with-pkgversion="fnv-nx msvcmodel $STAMP")
@@ -167,7 +167,7 @@ import recipe
 pin = json.load(open(os.path.join(sys.argv[1], "guest_compiler.json")))
 sel = ["-mabi=ilp32", "-fshort-wchar", "-fsigned-char", "-fPIC"]
 c = [f for f in pin["flags"]["semantics"]["common"] if f not in sel]
-print(" ".join(recipe.semantics_for(sys.argv[2], sys.argv[3], flags=sel + c)[len(sel):]))
+print(" ".join(recipe.semantics_for(sys.argv[2], sys.argv[3], flags=sel + c)[len(sel):] + recipe.runtime_cflags(pin)))   # runtime_cflags: the guest_compiler.json field (newlib's -DPREFER_SIZE_OVER_SPEED), never spelled here
 EOF
 }
 
@@ -184,8 +184,8 @@ fi
 PLUG_C=""; PLUG_CXX=""
 [ -n "${FNVNX_TL_PLUGIN_FLAGS_C:-}" ] && PLUG_C=$(cat "$FNVNX_TL_PLUGIN_FLAGS_C")
 [ -n "${FNVNX_TL_PLUGIN_FLAGS_CXX:-}" ] && PLUG_CXX=$(cat "$FNVNX_TL_PLUGIN_FLAGS_CXX")
-TLC="-O2 -ffunction-sections -fdata-sections $(tlflags c) $PLUG_C"
-TLCXX="-O2 -ffunction-sections -fdata-sections $(tlflags cxx) $PLUG_CXX"
+TLC="-O2 $(tlflags c) $PLUG_C"   # no -ffunction-sections/-fdata-sections: rtasm reads whole objects with their .fnvnx* sections
+TLCXX="-O2 $(tlflags cxx) $PLUG_CXX"
 note "CFLAGS_FOR_TARGET=$TLC"
 note "CXXFLAGS_FOR_TARGET=$TLCXX"
 
