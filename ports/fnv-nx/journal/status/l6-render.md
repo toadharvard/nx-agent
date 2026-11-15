@@ -773,3 +773,12 @@ Paused: w3b, w4, farm; no other work.
 - 09:50Z w6 38335c989: registry union done (cand2's 82 records + 39 L6 records, 0 deletions).
     - Assumptions gate 116/124. The 10 remaining findings: 5 orchestrator, 5 L1, 0 L6. Forwarded.
     - Next: the d523d1367 merge, then the builds and gates.
+- 09:55Z w6 b9304fea0 (cand2 d523d1367 merged; registry union, 121 records)
+    - Green:
+        - assumptions gate 117/121; the 4 open are L1's 5 findings;
+        - d3d9total 332/332;
+        - builds: pair g/h, translator@host, nxgpu g/h, sha256@host;
+        - onedef: nx_pair_variant is defined only in pair.c.o.
+    - Blocked (owner L1/L2): d3d9 (1/70 objects, ffp_vs_state.c:127), translator guest and sha256 guest, all on the fnvnx_layout plugin error `vector_type outside the grammar`. Grammar row requested from L1.
+    - render/pair is a C unit because of the rule gap "native C++ host roots must load the aarch64 plugins". Reported to L1.
+    - gate_admit 0/1284 (tests/bootrt, contract overlaps): L1.
