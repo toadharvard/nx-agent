@@ -18,6 +18,9 @@
 extern "C" {
 #endif
 
+/* The marker of the library's exports (gen_exports.py reads it: the linker version script is generated from the declarations that carry it). */
+#define NXGL4_EXPORT __attribute__((visibility("default")))
+
 /* ---- public ------------------------------------------------------------------------------------------------- */
 /* The embedder maps a guest address range [addr, addr + size) to a host pointer (the test provides identity). */
 /* Contract of the embedder: a host pointer to [addr, addr + size) when the whole range lies in ONE guest mapping the guest may read and write,
@@ -26,17 +29,17 @@ extern "C" {
 void* nxgl4_guest_ptr(uint64_t addr, uint64_t size);
 /* Creates the surfaceless GL 4.5 core context (current on the calling thread; every later call comes from that
  * thread) and the swapchain image (image 0 names it) of width x height (none when 0). NULL on failure (err). */
-const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t errlen);
-void nxgl4_destroy(void);
+NXGL4_EXPORT const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t errlen);
+NXGL4_EXPORT void nxgl4_destroy(void);
 /* ext_call dispatch for fn 0..NXGPU_FN_SHADER_CREATE_D3D (= NXGPU_FN_COUNT4) over the table the backend created; arguments as in NxGpuApi4. */
-uint64_t nxgl4_ext(uint32_t fn, const uint64_t* args, uint32_t nargs);
-const char* nxgl4_last_error(void);
+NXGL4_EXPORT uint64_t nxgl4_ext(uint32_t fn, const uint64_t* args, uint32_t nargs);
+NXGL4_EXPORT const char* nxgl4_last_error(void);
 /* The embedder's present hook, called by the present call (gl4_present.c) after the frame file (below) is written.
  * The embedder paces the frame there (the surfaceless context has no vblank: NxPresent.interval has no effect on
  * the image). When the environment variable NXGL4_FRAMES names a directory the present call writes the presented
  * swapchain image as <dir>/frame_%06u.rgba (RGBA8, top row first) and <dir>/frame_%06u.txt ("width height\n"). */
 void nxgl4_on_present(uint32_t frame);
-size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size_t cap);
+NXGL4_EXPORT size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size_t cap);
 
 /* ---- internal ----------------------------------------------------------------------------------------------- */
 #define GL4_MAX_STATES   NXCHK_MAX_STATES
