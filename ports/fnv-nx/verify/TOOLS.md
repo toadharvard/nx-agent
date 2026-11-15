@@ -148,11 +148,23 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              (argflow.result_predicate: cmp / test / inc idioms, flags not redefined; anything else is `ret-predicate` open).
   closure_key  `dispatcher=NAME`  (dll `-`, name = the dispatcher symbol, arg_index 0): every value that reaches the dispatcher NAME (native
              fnvnx_dispatch, lifted fnvl_dispatch) is a key of its table.  Inputs: --dispatcher NAME=ENTRIES,CLOSURE,SOURCES (ENTRIES: dispgen's
-             rows `addr<TAB>sym`; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
+             rows `addr<TAB>sym`; with `dispatcher=NAME;miss=fallthrough` (a miss goes on to the next dispatcher) the check (ii) is the other way: every key is a closure address; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
              of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES).  CERTIFIED iff (i) every
              source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress site is open (the gpa rows).
-             An undecided LoadLibrary* name is not open: its result is the may-load set plus NULL (gpa_names.py --mayload).
-             While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
+             A LoadLibrary* site whose name is not decided is not open: its result is the MAY-LOAD SET (gpa_names.py: every module of the declared
+             machine) plus NULL, and the GetProcAddress names derived on it are pairs over that set.  While (iii) fails the fact is `measurement`:
+             the verdict says so and it never counts as valid.
+  gate_cert  `gate_cert=<gate>`  (dll `-`, name = the site symbol, arg_index k): argument k of every call of the symbol (an object-level call site, a native
+             site of a platform backend) comes only from producers of the universe that gate <gate> declared.  Inputs: --gate-cert GATE=SUMMARY.json,RESULT.json (the
+             summary and the gate file of the SAME verdict), --verdict ID, --cert-objdump (`objdump -dr -t --no-show-raw-insn` of the root's objects, pinned binutils).
+             CERTIFIED iff (a) the gate file says green (certified == universe) and the summary is of this verdict (`gate-not-green`, `summary-other-verdict`);
+             (b) the summary declares `universe` [{kind bytecode|glsl_table|glsl_blob, id, sha256}] sorted, `universe_hash` = sha256 of the lines `kind	id	sha256
+`
+             (recomputed here: `universe-hash`) and `producers` [{symbol, kind function|data}], each data producer an id of the universe;
+             (c) the proof of contract/gatecert.py (call graph by relocations, backward data flow of the argument register in every caller, recursion through
+             parameters, an address taken only inside a producer data symbol): a caller outside the universe, a constant, an unbounded index, an unknown call result is
+             red; (d) the certificate hashes the summary, the gate file, the universe hash, the callers and the values; (e) valid only once every GetProcAddress site is
+             resolved: until then the fact is `measurement`, as closure_key.
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -169,7 +181,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017, ASM-018, ASM-019)
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017)
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -177,7 +189,7 @@ Proof argument: (a) says that the argument at every call that can execute is in 
 all paths of the function backwards, expands own parameters to every caller, and is closed or reports a break); (b) says that no
 call can execute that is not a static use of the slot (the only way to get an import's address other than its slot is
 GetProcAddress, G1; a forwarder chain between distinct dll names is not followed, G2); therefore no execution passes a value
-outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and
+outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-018, ASM-019)
 that the facts' ranges contain every executed instruction of the images (A4).  The certificate fixes the set of images by hash
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
@@ -199,6 +211,34 @@ tables (sh_info of a SHT_RELA / SHT_REL names the section; no text).  A referenc
   - the immediate is a fact id of the table and has a certificate (`fact-not-in-table`, `fact-not-certified`).
 Red ids `member:section+offset:reason`; gate `reachlink` (universe = references, certified = green ones).
 Exe-derived: container and fnv-nx-build only.
+```
+
+## contract/gatecert.py
+
+```text
+gatecert - the proof half of the gate_reach request kind `gate_cert=<gate>` (L1 CONTRACT).
+
+    A fact `site symbol S, argument k` is certified by the green gate G when every value that can reach argument k of every call of S
+    comes from a producer in the universe G declared.  The proof is over the machine code of the linked objects, decoded by the pinned
+    binutils objdump (`objdump -dr -t --no-show-raw-insn`, ILP32 AArch64); this module reads only that text.
+
+    prove(prog, site, k, producers) -> (reasons [(reason, where, detail)], callers [str], values [str])    certified iff reasons is empty
+    parse_objdump(text) -> Prog
+
+Rule.  The set CALLERS(F) of a function F is every function holding a CALL26/JUMP26 relocation to F (a jump is a tail call: the argument
+registers are those at the jump).  F's address taken anywhere (any other relocation to F, outside debug/unwind sections) means an indirect
+caller; that is allowed only when each such relocation lies inside a producer data symbol (the producer row IS the indirect call path:
+the table slot of the declared producer); otherwise `address-taken`.  The value of argument register R of a call site is the set of
+VALUES found by a backward walk over the control-flow graph of the caller (every path; a join takes the union; a loop adds nothing new):
+  - `mov`/`orr` from a register: the value of that register before the instruction;
+  - result of a call (x0 after `bl F`): value PROD(F); any other caller-saved register after a call is clobbered (`clobbered`);
+  - `adrp` + `add :lo12:` of the same symbol, or `adrp` + `ldr :lo12:` : the address of / a load from a constant offset of symbol Y;
+  - `ldr` from a register that holds the address of Y plus a constant: load from Y at that offset; a register index is `index-unbounded`;
+  - the value of an x0..x7 at the function entry: PARAM(j), judged by the callers of the function (the call graph, recursively);
+  - anything else (constants, stack loads, arithmetic, an unknown call result) has no certificate (`constant`, `stack-load`, `computed`, ...).
+A value is accepted iff it is PROD(F) with F a producer of kind function, or an address of / load from Y at a constant offset < size(Y) with
+Y a producer of kind data (sizes from the symbol table), or PARAM(j) whose callers are all accepted.  A requested site with no call is
+`no-site` (a vacuous certificate is no certificate).  Assumptions: the compiler (OWNER 1) and the pinned objdump decode the objects.
 ```
 
 ## contract/gate_vcall.py

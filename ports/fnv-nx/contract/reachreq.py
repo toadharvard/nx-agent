@@ -21,7 +21,7 @@ import iat
 COLUMNS = ['request', 'dll', 'name', 'arg_index', 'kind', 'values', 'note']
 
 
-KINDS = {'imm_set': 'imm_set', 'imm_mask': 'imm_mask', 'result_of': 'result_of', 'handle_origin': 'result_of', 'closure_key': 'closure_key'}
+KINDS = {'imm_set': 'imm_set', 'imm_mask': 'imm_mask', 'result_of': 'result_of', 'handle_origin': 'result_of', 'closure_key': 'closure_key', 'gate_cert': 'gate_cert'}
 
 
 M32 = 0xffffffff
@@ -69,6 +69,10 @@ def parse_values(kind, text):
         if not head.startswith('dispatcher=') or not head[11:].strip().isidentifier() or tail.strip() not in ('', 'miss=fallthrough'):
             raise FormatError('closure_key values must be `dispatcher=NAME` or `dispatcher=NAME;miss=fallthrough`')
         return {'dispatcher': head[11:].strip(), 'fallthrough': bool(tail.strip())}
+    if kind == 'gate_cert':
+        if not text.startswith('gate_cert=') or not text[10:].strip().isidentifier():
+            raise FormatError('gate_cert values must be `gate_cert=<gate>`')
+        return {'gate': text[10:].strip()}
     parts = [p.strip() for p in text.split(';') if p.strip()]
     if not parts or not parts[0].startswith('callee='):
         raise FormatError('result_of values must start with callee=')
@@ -105,9 +109,9 @@ def parse_requests(text):
         if f[4] not in KINDS:
             raise FormatError('unknown kind %r' % f[4])
         kind = KINDS[f[4]]
-        if kind == 'closure_key' and f[1] != '-':
-            raise FormatError('closure_key rows have dll `-`')
-        out.append(dict(request=f[0], dll=f[1] if kind == 'closure_key' else iat.norm_dll(f[1]), name=f[2], k=int(f[3], 10), kind=kind,
+        if kind in ('closure_key', 'gate_cert') and f[1] != '-':
+            raise FormatError('%s rows have dll `-`' % kind)
+        out.append(dict(request=f[0], dll=f[1] if kind in ('closure_key', 'gate_cert') else iat.norm_dll(f[1]), name=f[2], k=int(f[3], 10), kind=kind,
                         spec=parse_values(kind, f[5]), note=f[6] if len(f) > 6 else ''))
     out.sort(key=lambda r: (r['dll'], r['name'], r['k'], r['kind'], canon(r['spec'])))
     for i in range(1, len(out)):
@@ -150,6 +154,10 @@ def header(reqs):
             own = 'FNVNX_' + macro_part(r['request'] if r['request'].startswith('REACH_') else 'REACH_' + r['request'])
             if own != 'FNVNX_REACH_CLOSURE_KEY_' + macro_part(r['spec']['dispatcher']).upper():
                 lines.append('#define %s %d' % (own, r['id']))
+            continue
+        if r['kind'] == 'gate_cert':
+            lines.append('#define FNVNX_%s %d   /* %s: argument %d of every call of %s comes from the universe of gate %s */' % (
+                macro_part(r['request'] if r['request'].startswith('REACH_') else 'REACH_' + r['request']), r['id'], r['request'], r['k'], r['name'], r['spec']['gate']))
             continue
         key = (r['dll'], r['name'])
         seq[key] = seq.get(key, 0) + 1
