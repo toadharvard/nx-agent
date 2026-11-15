@@ -191,3 +191,16 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Farm 11 published 3 empty branches (…/7c3074644653-f3eb5096ad36/{13,14,15}of24) through SAIL_IR; it is deleting them.
 - Merged w9 into the lead branch (d920f6633). w9 693a75a9: ou_pre names the L3a fact x87-masked-sites (asked of L3a); FBLD digits above 9 are nd.fbld.img; 45 tests.
 - gate_oracle: 113/116. The 3 missing tests are L3a w1's (test_census, test_dsl_xsimd, test_forms_simd), asked of L3a.
+
+## 2026-11-15 09:50Z
+- w4 8d6e362c8+, the queue v3 blockers fixed:
+  - one IR pin, through the external x86ir and certs_build --model-sha;
+  - incremental publish every 600 s and on signal, with resume from the published file;
+  - prove.py has the `xstate` obligation, so integer Forms prove again; x87/SIMD Forms are a model-gap until the spec path covers them.
+- Rate: about 45 s per shape over a spread sample, so 777 shapes per shard is about 9 h. That explains why every v2 shard hit the 2 h limit. Queue v3 gets its shard count from proof/shardcount.py (ceil of rows × p95 / 90 min). Not published yet.
+- sysspec on x86sys 3646ebab3, over the 129 system-family shapes: proved 74, uncertified 42, not covered 13, failed 0.
+  - The uncertified ones wait on the descriptor readable bit, int other_vectors, sgdt and sldt. The descriptor, TR and lar/lsl rows are asked of L5 w14.
+  - Not covered (13): iretd, str, rdtsc, cpuid, lar, mov. These go to w4 after v3.
+- The 3 empty branches …/7c3074644653-f3eb5096ad36/{13,14,15}of24 cannot be deleted, because the proxy refuses deletes (403). Resume from the published file makes them harmless.
+- SIMD split: w9 owns the spec path (ACL2/SDM specs; Sail has none), w4 owns prove.py.
+- w9 7d4c17d6: the x87 spec is complete over the registry (47 tests), merged at 32654c699. (D), the seh CONTEXT test, waits for L3a's lift/rt recipe root.
