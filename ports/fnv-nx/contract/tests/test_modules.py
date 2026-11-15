@@ -149,12 +149,14 @@ with tempfile.TemporaryDirectory() as tmp:
     exepin.load_exe.__defaults__ = (pin,)
     try:
         mc, kc = os.path.join(tmp, "modules.c"), os.path.join(tmp, "import_keys.c")
-        modules.run(exe, bridge, [os.path.join(tmp, "dir")], os.path.join(tmp, "o"), declared, mc, kc)
+        modules.run(exe, bridge, [os.path.join(tmp, "dir")], os.path.join(tmp, "o"), declared, mc, kc, os.path.join(tmp, "keys.tsv"), os.path.join(tmp, "iat_data.tsv"))
     finally:
         exepin.load_exe.__defaults__ = old
     mt, kt = open(mc).read(), open(kc).read()
     check("c_out: the module table of an exe with no module has the count 0 and the table symbols", "fnvnx_modules[]" in mt and "fnvnx_module_count = 0u" in mt, mt)
     check("keys_c_out: the import table has the row of the exe's import, the counts and the by-key index",
           '"kernel32.dll", "ExitProcess"' in kt and "fnvnx_import_row_count = 1;" in kt and "fnvnx_import_key_count = 1;" in kt and "fnvnx_import_by_key_idx[]" in kt, kt)
+    kv, dv = open(os.path.join(tmp, "keys.tsv")).read(), open(os.path.join(tmp, "iat_data.tsv")).read()
+    check("keys_tsv_out: keys.tsv has the row of the exe's import and data_out: iat_data.tsv has the table_id line", "ExitProcess" in kv and dv.startswith("# table_id "), (kv, dv))
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

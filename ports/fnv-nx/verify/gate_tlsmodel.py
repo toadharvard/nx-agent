@@ -137,7 +137,7 @@ def main():
             return {root + "/" + o["unit"]: (set(n for n, v, s, t, b, shn in gate_linkstrict.elf_symbols(o["object"]) or [] if shn != 0), relocs(o["object"]))
                     for o in built[root]["objects"]}, built[root]
         for root in gate_build.buildable_roots(repo):
-            if admit[root].get("target") != "guest":
+            if recipe.entry_of(admit, root).get("target") != "guest":
                 continue
             objs, res = objects(root)
             rec = recipe.load_recipe(repo, admit, root)

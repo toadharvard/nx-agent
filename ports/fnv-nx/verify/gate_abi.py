@@ -77,12 +77,11 @@ def read_objects(objs):
                 continue
             store[(oid, "sympair")] = l2sections.parse_sympair(sp, oid + ":.fnvnx.sympair")
             lays = objsections.parse_layout(objsections.section(elf, ".fnvnx.layout"), oid + ":.fnvnx.layout")
-            if any(lay.linkage == "c" for lay in lays):     # a C unit: its declared types of external symbols are compared by C11 6.2.7 (link/ctypes_compat.py)
-                dt = elf.section(".fnvnx.decltype")
-                if dt is None:
-                    red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
-                else:
-                    decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
+            dt = elf.section(".fnvnx.decltype")     # a C unit's declared types of external symbols, compared by C11 6.2.7 (link/ctypes_compat.py): the section's presence is the fact, whatever the linkage of the layout rows
+            if dt is not None:
+                decls[oid] = ctypes_compat.parse_decltype(dt, oid + ":.fnvnx.decltype")
+            elif any(lay.linkage == "c" for lay in lays):     # a unit of `c` records without its declared types: nothing to compare them with
+                red[oid + ":decltype"] = "a C unit has no .fnvnx.decltype section"
             cr = elf.section(".fnvnx.crossing")
             if cr is not None:
                 cross[oid] = parse_crossing(cr, oid + ":.fnvnx.crossing")

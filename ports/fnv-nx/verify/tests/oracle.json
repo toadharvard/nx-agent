@@ -86,6 +86,25 @@
     "ports/fnv-nx/verify/boot.py"
    ]
   },
+  "test_bootcores.py": {
+   "references": [
+    {
+     "anchor": "## verify/bootmachine.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/boot.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootmachine.py",
+    "ports/fnv-nx/verify/boothost.py",
+    "ports/fnv-nx/verify/boot.py"
+   ]
+  },
   "test_bootgpu.py": {
    "references": [
     {
@@ -208,25 +227,6 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/bootsock.py"
-   ]
-  },
-  "test_bootcores.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootmachine.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boot.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootmachine.py",
-    "ports/fnv-nx/verify/boothost.py",
-    "ports/fnv-nx/verify/boot.py"
    ]
   },
   "test_bootstart.py": {
@@ -942,6 +942,19 @@
     "ports/fnv-nx/verify/unitstage.py",
     "ports/fnv-nx/verify/gate_determinism.py",
     "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
+  "test_record.py": {
+   "references": [
+    {
+     "anchor": "## Python of the generated stages",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/envcheck.py",
+    "ports/fnv-nx/verify/runtime.py"
    ]
   },
   "test_resolve_input.py": {
