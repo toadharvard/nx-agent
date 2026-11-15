@@ -1472,3 +1472,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - **jmp_buf facts** come from preprocessing the pinned <setjmp.h> (w20's probe stage).
   - **Before-threads** is a call-graph fixpoint from the ENTRY symbol, cut at sites that reach the CreateThread svc (its number from the pinned libnx header). It needs w25's per-site call edges.
   - rtasm goes into the guest product class set (w24) and REQUIRED_PRODUCT (w15).
+- 01:10 **w25 547405ab.** Done, but unverified: w25's container has no pinned env, and add_repo was denied.
+  - Item 1: link scripts from generated outputs, plus the ld lexer for the assumptions gate.
+  - Item 2: the ldfacts stage (sections, symbols, definer per reference via --cref) with the pinned readelf.
+  - Verification: the build tests go to the L1 farm.
+  - Next: a relocations field to convert tlsmodel and pcrel_abs; L4 converts icount; one object-facts stage proposed for the object readers; item 3 after L2 w3's DATAMODEL merge.
