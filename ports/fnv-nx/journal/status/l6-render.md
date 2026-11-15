@@ -1276,3 +1276,10 @@ Paused: w3b, w4, farm; no other work.
     - Also: the gen_env:73 fallback becomes a required argument, and envq's __main__ is removed or given required arguments.
     - Then send the head to w12.
 - bottleneck: that w6 head (cand4), then L1 cand3 and cand4.
+- 21:45Z w6 42f2c238f: the cand4 candidate, sent to w12. It merges w28 9d1124891.
+    - abspath: render 0; global 8 findings in 5 of 183 files.
+    - d3d9 generated outputs byte-identical; d3d9total 332/332; test 45/45; gl4 green.
+    - sm_link is red only in a new recipe store defect ("dest exists …/merge1"), reported to w12.
+    - objstub: 2181/2247, 78 findings; the only render one is that sm_link build-red.
+    - Lead review: envq.py reads its importer's argv[4], so the argument layout is written twice. w6 (doing) replaces it with envq.load(hdr, spec), called by gen_env.
+- bottleneck: the w12 recipe store defect (merge1) for sm_link; L1 cand3 and cand4.
