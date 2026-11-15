@@ -250,3 +250,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - Group 2 (one binary) is in progress by w6.
   - Told L1 that gate_contract.py:72 hardcodes the nm/readelf paths.
   - w7: sdlayout.h and hostvm.h into hostabirec (string macros, A8), then the fonts mount.
+- 01:22: R group 2 is converted in source, w6-r 448d07fa3 (compile-checked only; the link waits on L3a and the loader stages).
+  - bootguest is one build: 36 mode functions, one fnvboot_modes[] table read from the ELF; 1253 → 124 lines; no mode needs its own build.
+  - Found and fixed: m56 used the removed FnvnxWireAddrinfo.
+  - Rejected: setting the mode by patching a .data word of the linked image (the run would not be the recipe product). The channel is the declared mode file on the run's fs root, and expected handle ids are derived from the machine's allocation rule.
