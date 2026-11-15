@@ -842,3 +842,8 @@ Paused: w3b, w4, farm; no other work.
     - The program set is identical to the previous run.
     - FINDING (red): PS e92b2db2…40cc is rejected by nx_sm_check with SRC_REG; the translator and Mesa accept it. That is 64/115,776 stage cells.
     - w6 (doing): decide it by the msdocs page and the Wine 9.0 parser; fix the class in the res_smgen table rows.
+- 13:35Z w6 c9ddc8d7a (w6-root): SRC_REG closed by class, accepted.
+    - Cause: the res_smgen table rows omitted vFace from ps_3_0 src_cls, so no vFace source was accepted anywhere, not even the documented setp/if/break uses.
+    - Rule: where the MS page is narrower than Wine 9.0 (vkd3d d3dbc.c:666-676; glsl_shader.c:2873-2880), the union holds. This is a cited conflict row, `ps_3_0:vFace_src`, the same precedent as ps:47 and vs_3_0:v[a0.x]. Global change: 1 (model, class) cell of 11 models.
+    - Consequence: the five ps conflicts I decided illegal for w1b (slt, sge, dst, expp, logp) are re-decided by this same union rule when w1b resumes. There is one precedence rule, not two.
+    - w5 (doing): full sm_link re-run on smscan@host from c9ddc8d7a; target 0 red.
