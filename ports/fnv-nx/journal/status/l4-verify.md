@@ -427,3 +427,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 22:35: w8 took render/ from L6A decb62ead. recipe.check is 0 on boot, bootguest, icount, gl4, gl4shim, nxgpu and d3d9.
   - render/gl4 builds green: 17 objects, libnxgl4.so sha 7da199c1…d4ba, equal to L6A's. L4 files have 0 references to the old 9-slot nxgpu ABI.
   - The icount link is still red at the loader include (L3a w8 is fixing it on base3). The cand3 platform gen:12 import red is routed to L1 and L5.
+- 22:40: done: the bootrt objstub fix is w9 bdc9c9d4 on cand3 41a8855d4. objstub has 0 findings for tests/bootrt; test_bootrt is 7 cases, 0 failed. Sent to L1 for cand4, and w9 is archived.
+  - The whole-tree objstub is red, 25 findings, none in L4 (8 in mojoshader, 17 unattributed).
+- bottleneck: waiting on L3a w8 (loader and descs includes on base3), on L1 w12 (link.entry, archive closure, the bootguest admit row) and on L1/L5 (platform gen:12) | 1 worker (w8)
