@@ -644,3 +644,11 @@ Paused: w3b, w4, farm; no other work.
     - The gl4/dk mapping is deleted (L6A). nx_pair_variant and draw_prog produce the flags (w6).
     - The two land together on L6A's ABI commit. sm_link follows.
     - nxgpu4_shader.h includes fnvnx_shaders.h and the sha256 size; its only new constants are MAX code size and the link-pair count.
+- 00:52Z 3.6 render/d3d9 builds green through the recipe: w6 43c73bc92 on claude/fnv-l6-render-w6-root.
+    - Contents: next3b + L6A a262c8ae + w1b 708d3638 + L1 w16c1 15c11ecd8 + nx_pair_variant.
+    - Recipe check valid for d3d9 and the translator.
+    - Cold: 70 objects, 155 stages, 36.0 s. Warm: 155/155 hit, 4.6 s. 0 red.
+    - du: 2,367 defined and 696 undefined symbols.
+    - Fixes in 43c73bc92: 7 Wine-cited fixme rows carried over; the NxTarget compare is one memcmp with a no-padding static_assert (ADDR32).
+    - No build_guest.sh is tracked on w6-root.
+    - Next: merge w1b 5bc689044 and del2, then one candidate verdict (L1) over d3d9, translator, sha256, nxgpu.
