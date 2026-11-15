@@ -124,6 +124,11 @@ def sections(td, so):
         check('pattern (instantiated: %s): no unnamed row' % inst, not bad, bad)
         outside = [x[0] for x in rows if x[0] not in st]
         check('pattern (instantiated: %s): every row is a symbol of the object' % inst, not outside or all(x[2] == 'noemit' for x in rows if x[0] in outside), outside)
+        got = {x[1] for x in rows}
+        check('pattern (instantiated: %s): types and operators cl 15.00 has no name for get the later MSVC ABI\'s (clang MicrosoftMangle.cpp llvmorg-18.1.8): '
+              '__m128, a generic vector, __m64, char16_t, char32_t, nullptr_t, __int128, unsigned __int128; a literal operator `?__K`' % inst,
+              {'?tv@@YAXT__m128@@T?$__vector@H$03@__clang@@T__m64@@_S_U$$T_L_M@Z', '??__K_u@@YA_K_K@Z'} <= got
+              and (not inst or '??$?__K_t@$0DB@$0DC@@@YAHXZ' in got), sorted(got))
         if inst:
             check('pattern instantiated: its instantiations are named', {x[1] for x in rows} >= {'??$count@HN@@YAHHN@Z', '??$?BH@C@@QBEHXZ', '??$n@HH@C@@QBEHHH@Z', '??$both@H@?$Pack@HD@@SAHH@Z'}, rows)
 
