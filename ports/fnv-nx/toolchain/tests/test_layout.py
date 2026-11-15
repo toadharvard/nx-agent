@@ -113,7 +113,7 @@ DECLTYPE = {
     'a': '[4]int', 'au': '[]int', 'f': '(int,*char)int', 'g': '(int,...)int', 'h': '(?)int', 'q': 'const:*int', 'pc': '*const:int',
     'l': 'struct:Lst{next:*struct:Lst}', 'ts': 'struct:-{m:int;n:*const:int}', 'vv': 'volatile:long_long_unsigned_int',
     'fp': '*(*()int,*const:char)int', 'u': 'union:U{i:int;f:float}', 'cs': 'const:struct:S{x:int;y:*char}',
-    'caller': '()int', 'use': '()int', 'implicit_fn': '(?)int',
+    'caller': '()int', 'use': '()int', 'implicit_fn': '(?)int', 'use2': '()int',
 }
 
 
@@ -131,7 +131,7 @@ def decltype(obj):
     check('enum E: `enum:E=` + int or unsigned_int (the compiler\'s choice of the integer type)', e in ('enum:E=int', 'enum:E=unsigned_int'), e)
     for sym, want in sorted(DECLTYPE.items()):
         check('decltype %s is %s' % (sym, want), got.get(sym) == want, got.get(sym))
-    check('exactly the external symbols (no static, no builtin), each once', set(got) == set(DECLTYPE), sorted(set(got) ^ set(DECLTYPE)))
+    check('exactly the symbols the object has (no static, no builtin, no declaration that only a header or the unit makes: never_used), each once', set(got) == set(DECLTYPE), sorted(set(got) ^ set(DECLTYPE)))
     check('every spelling round-trips: parse is total on what the plugin wrote', all(cc.parse(t) for t in got.values()))
 
 
@@ -164,7 +164,7 @@ TCC_TYPE_ERROR = {
     'LANG_TYPE': GCC + 'tree.def:252; no make_node (LANG_TYPE) and no make_lang_type in c/, c-family/ or the middle end (grep of the pinned tree); the C++ front end '
                        'makes them (cp/decl.cc:4756,4767,4798), the section is written only for C units',
     **{c: GCC + 'cp/cp-tree.def: a code of the C++ front end only (templates, dependent and pack types); the section is written only for C units '
-          '(fnvnx_layout.cc: `if (!is_cxx()) emit_decltype()`)'
+          '(fnvnx_layout.cc: the C++ rows are the C-linkage symbols, whose types are never these codes)'
        for c in ('BASES', 'BOUND_TEMPLATE_TEMPLATE_PARM', 'DECLTYPE_TYPE', 'DEPENDENT_OPERATOR_TYPE', 'TEMPLATE_TEMPLATE_PARM', 'TEMPLATE_TYPE_PARM',
                  'TRAIT_TYPE', 'TYPENAME_TYPE', 'TYPEOF_TYPE', 'TYPE_ARGUMENT_PACK', 'TYPE_PACK_EXPANSION', 'UNBOUND_CLASS_TEMPLATE')},
 }
@@ -244,6 +244,68 @@ def decltype_errors(td, so):
         check('decltype: declarations of one symbol compose to one line (%s)' % name, got == want, (got, r.stderr[-300:]))
 
 
+# DECLTYPE-LANG: the same declarations in a C unit and, inside extern "C", in a C++ unit give the same rows; a declaration of a C++ unit with C++ linkage gives none
+PAIR = ('struct S { int x; char *y; };\nstruct S v;\nstruct L;\nextern struct L *il;\nint a[4];\nint f(int i, char *s) { return i + s[0]; }\n'
+        'int g(int i, ...);\nint h(void);\nconst int *pc;\nstruct Lst { struct Lst *next; } l;\nenum E { E0, E1 } e;\n'
+        'int (*fp)(int (*cb)(void), const char *const name);\nvolatile unsigned long long vv;\n'
+        'int use(void) { return f(1, 0) + g(1, 2) + h() + (il != 0); }\n')
+CXX_ONLY = ('struct P { int a; };\nstruct Q : P { int b; };\nstruct V { virtual void f(); int c; };\nnamespace ns { struct N { int n; }; }\n'
+            'enum class EC : short { A };\nstruct Top { struct In { int i; }; };\n'
+            'extern "C" {\nint r1(P &p, const Q &q);\nint r2(V *v, ns::N n, EC e, Top::In *t);\nint r3(decltype(nullptr) n);\nextern Q gq;\nQ gq2 = {};\n'
+            'int r4(int x) { return x; }\nint use(void) { return r1(gq, gq) + r4(2) + gq2.b + r2(0, ns::N(), EC::A, 0) + r3(nullptr); }\n}\n'
+            'int cxxfn(int);\nint cxxuse() { return cxxfn(1); }\n')
+CXX_ONLY_ROWS = {
+    'r1': '(ref:4:4:struct:P{a:int},ref:4:4:const:struct:Q{-:struct:P{a:int};b:int})int',
+    'r2': '(*struct:V{-:**(?)int;c:int},struct:ns__N{n:int},enum:EC=short_int,*struct:Top__In{i:int})int',
+    'r3': '(nullptr_t)int', 'gq': 'struct:Q{-:struct:P{a:int};b:int}', 'gq2': 'struct:Q{-:struct:P{a:int};b:int}', 'r4': '(int)int', 'use': '()int'}
+
+
+def decltype_cxx(td, so):
+    cs, cp = os.path.join(td, 'pair.c'), os.path.join(td, 'pair.cpp')
+    open(cs, 'w').write(PAIR)
+    open(cp, 'w').write('extern "C" {\n' + PAIR + '}\n')
+    rows = {}
+    for src, o in ((cs, 'pair_c.o'), (cp, 'pair_cxx.o')):
+        r = pb.compile(src, os.path.join(td, o), so)
+        check('decltype pair: %s compiles' % os.path.basename(src), r.returncode == 0, r.stderr[-800:])
+        if r.returncode:
+            return
+        rows[o] = dict(l.split('\t') for l in pb.section(os.path.join(td, o), '.fnvnx.decltype').splitlines())
+    check('extern "C" declarations and definitions of a C++ unit give the same rows as the same text in a C unit (%d symbols)' % len(rows['pair_c.o']),
+          rows['pair_c.o'] == rows['pair_cxx.o'] and len(rows['pair_c.o']) >= 12, (sorted(set(rows['pair_c.o'].items()) ^ set(rows['pair_cxx.o'].items()))))
+    src = os.path.join(td, 'cxxonly.cpp')
+    open(src, 'w').write(CXX_ONLY)
+    r = pb.compile(src, os.path.join(td, 'cxxonly.o'), so)
+    check('decltype C++-only types compile', r.returncode == 0, r.stderr[-800:])
+    if r.returncode == 0:
+        got = dict(l.split('\t') for l in pb.section(os.path.join(td, 'cxxonly.o'), '.fnvnx.decltype').splitlines())
+        check('a C++ unit: references, classes with bases and a vptr, scoped names, enum class, nullptr_t, in the existing grammar (ILP32 reference size 4)',
+              all(got.get(k) == v for k, v in CXX_ONLY_ROWS.items()), {k: (got.get(k), v) for k, v in CXX_ONLY_ROWS.items() if got.get(k) != v})
+        check('a C++ unit: exactly its C-linkage symbols (cxxfn, cxxuse have C++ linkage: no row)', set(got) == set(CXX_ONLY_ROWS), sorted(set(got) ^ set(CXX_ONLY_ROWS)))
+        check('every C++ row parses with ctypes_compat', all(cc.parse(t) for t in got.values()))
+    for name, text, why in (('ptrmem', 'struct M { int m; };\nextern "C" int pm(int M::*p);\nextern "C" int use(void) { return pm(0); }\n', 'offset_type'),
+                            ('tspec', 'template <class T> struct TT { T t; };\nextern "C" int ts(TT<int> *p);\nextern "C" int use(void) { TT<int> x; return ts(&x); }\n', 'no tag form'),
+                            ('anonns', 'namespace { struct An { int i; }; }\nextern "C" int an(An *p);\nextern "C" int use(void) { An x; return an(&x); }\n', 'scope name outside the grammar')):
+        src = os.path.join(td, name + '.cpp')
+        open(src, 'w').write(text)
+        r = pb.compile(src, os.path.join(td, name + '.o'), so)
+        check('decltype: %s in an extern "C" declaration is an error naming the cause (%s)' % (name, why), r.returncode != 0 and why in r.stderr, (r.returncode, r.stderr[-400:]))
+    # a C/C++ pair with an incompatible parameter is red in the gate that reads the sections (link/ctypes_compat.check)
+    for name, text in (('pc.c', 'int pf(int x);\nint use(void) { return pf(1); }\n'), ('pcx.cpp', 'extern "C" int pf(long long x);\nextern "C" int use2(void) { return pf(1); }\n')):
+        src = os.path.join(td, name)
+        open(src, 'w').write(text)
+        r = pb.compile(src, os.path.join(td, name + '.o'), so)
+        check('incompatible pair: %s compiles' % name, r.returncode == 0, r.stderr[-400:])
+        if r.returncode:
+            return
+    per = {n: cc.parse_decltype(pb.section(os.path.join(td, n + '.o'), '.fnvnx.decltype').encode(), n) for n in ('pc.c', 'pcx.cpp')}
+    items, red = cc.check(per)
+    check('a C declaration and an extern "C" declaration of one symbol with an incompatible parameter: ctypes_compat is red', 'pf' in red and 'pf' in items, (items, red))
+    per2 = {'pair_c': rows['pair_c.o'], 'pair_cxx': rows['pair_cxx.o']}
+    items, red = cc.check(per2)
+    check('the same declarations in a C unit and a C++ unit are compatible (%d symbols compared)' % len(items), not red and len(items) >= 12, (items, red))
+
+
 CROSSING = {
     '_Z10none_plain5Plain8PlainDeriPv': (), '_Z10vb_derived2DD': ('virtual_base',), '_Z11pm_in_class2PM': ('pointer_to_member',),
     '_Z2vaiSt9__va_list': ('va_list',), '_Z4both2DVM5Plaini': ('pointer_to_member', 'virtual_base'), '_Z4usesv': (), '_Z6pm_ptrP2PM': (),
@@ -295,6 +357,7 @@ def main():
         if r.returncode == 0:
             decltype(obj)
         decltype_errors(td, so)
+        decltype_cxx(td, so)
         obj = os.path.join(td, 'v.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'vec.c'), obj, so, args=['-std=gnu2x'])
         check('vec.c compiles', r.returncode == 0, r.stderr[:2000])

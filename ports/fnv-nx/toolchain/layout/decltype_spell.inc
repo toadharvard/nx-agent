@@ -8,11 +8,38 @@ static void dl_error(const char *what, const std::string &name)
   dl_failed = true;
 }
 
+/* RULE (DECLTYPE-LANG): one spelling for a C and a C++ unit. In a C++ unit the tag of a class is its name qualified by its scopes (namespaces and enclosing
+ * classes, outermost first, joined by `__`, a name the C++ standard reserves in user code, so two scopes never collide), a global class is its bare name, exactly
+ * as in C. A class template specialization (its arguments are part of the type, a tag cannot carry them), or a name outside [A-Za-z0-9_] (an anonymous namespace, a lambda) has no row form: an error with the name, never a
+ * skip. The members of a class are the FIELD_DECLs the front end makes (base-class subobjects and the vptr are artificial fields, spelled `-`: the layout the
+ * C view sees); member functions and static members are not part of the object. A C unit's rows are unchanged (its TYPE_CONTEXT is not read). */
+static bool dl_cxx() { return !strncmp(lang_hooks.name, "GNU C++", 7); }
+static bool dl_ident(const char *s)
+{
+  if (!*s) return false;
+  for (; *s; s++) if (!ISALNUM(*s) && *s != '_') return false;
+  return true;
+}
+
 static std::string dl_tag(tree t)
 {
   tree n = TYPE_NAME(t);
   if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_ARTIFICIAL(n) ? DECL_NAME(n) : NULL_TREE;   /* a typedef name is not a tag */
-  return n && TREE_CODE(n) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(n) : "-";
+  if (!n || TREE_CODE(n) != IDENTIFIER_NODE) return "-";
+  std::string tag = IDENTIFIER_POINTER(n);
+  if (!dl_cxx()) return tag;
+  if (!dl_ident(tag.c_str()) || (CLASS_TYPE_P(t) && CLASSTYPE_TEMPLATE_INFO(t))) { dl_error("a class template specialization or a lambda has no tag form", tag); return "?"; }
+  for (tree c = TYPE_CONTEXT(t); c; ) {
+    tree id, up;
+    if (TYPE_P(c) && CLASS_TYPE_P(c) && CLASSTYPE_TEMPLATE_INFO(c)) { dl_error("a class nested in a class template specialization has no tag form", tag); return "?"; }
+    if (TYPE_P(c)) { id = TYPE_NAME(c); id = id && TREE_CODE(id) == TYPE_DECL ? DECL_NAME(id) : NULL_TREE; up = TYPE_CONTEXT(c); }
+    else if (TREE_CODE(c) == NAMESPACE_DECL) { if (!DECL_CONTEXT(c)) break; id = DECL_NAME(c); up = DECL_CONTEXT(c); }   /* the global namespace has no context */
+    else break;
+    if (!id || TREE_CODE(id) != IDENTIFIER_NODE || !dl_ident(IDENTIFIER_POINTER(id))) { dl_error("a scope name outside the grammar (an anonymous or template scope)", tag); return "?"; }
+    tag = std::string(IDENTIFIER_POINTER(id)) + "__" + tag;
+    c = up;
+  }
+  return tag;
 }
 
 static std::string dl_word(const std::string &s)
@@ -84,7 +111,9 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f)) {
       if (TREE_CODE(f) != FIELD_DECL) continue;
       bool bf = DECL_C_BIT_FIELD(f);
-      std::string m = std::string(DECL_NAME(f) ? IDENTIFIER_POINTER(DECL_NAME(f)) : "-") + ":"
+      const char *mn = DECL_NAME(f) && !(dl_cxx() && DECL_ARTIFICIAL(f)) ? IDENTIFIER_POINTER(DECL_NAME(f)) : "-";   /* a base subobject or the vptr has no source name */
+      if (dl_cxx() && strcmp(mn, "-") && !dl_ident(mn)) { dl_error("a member name outside the grammar", mn); return "?"; }
+      std::string m = std::string(mn) + ":"
                     + dl_type(bf && DECL_BIT_FIELD_TYPE(f) ? DECL_BIT_FIELD_TYPE(f) : TREE_TYPE(f), stk);
       if (bf) m += ":" + std::to_string(tree_to_uhwi(DECL_SIZE(f)));
       ms += (ms.empty() ? "" : ";") + m;
