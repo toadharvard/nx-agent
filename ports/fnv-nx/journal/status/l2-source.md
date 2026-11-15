@@ -559,3 +559,6 @@ After the first frame:
   - PINSPLIT proof (farm): a plugin byte change gives K1 reused, 344 s against 787 s from scratch, all 36 libraries equal. The farm is stopped with its queue empty.
   - Per-module exefacts for the crossing universe belong to L1 (contract), as w12 was told.
 - bottleneck: cand2 verdict and merge (L1). cand3 waits on COMPILER-STAGE (w3+L1). Workers: w2 (S29, guest_compiler fields), w3.
+- 2026-11-15 21:08Z: The cand2 pin is wired at plugins 01893a2a6 (w2; toolchain tree 1b2b42da = pin). Six tests are green on the recipe path and the commit went to L1 w15. claude/fnv-l2-s29-case is rebased (fef634315).
+  - COMPILER-STAGE interface: the L1 recipe side is w12 (compiler by stage output, keys from mounts, pin and stamp_errors deleted, store-export/import). L2 (w3) defines the toolchain product root with the two stages.
+  - w15's 3 cand2 toolchain files go into plugins-cand3 after cand2 merges.
