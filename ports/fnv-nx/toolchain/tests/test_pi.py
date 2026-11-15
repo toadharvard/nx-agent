@@ -171,23 +171,37 @@ def effect(obj):
     check('effect: argorder rows', ao == EFFECT_ROWS, ao)
 
 
+def thunks(obj):
+    rows = n3_rows(obj)
+    names = sorted(k[0] for k in rows if k[1] == 'thunk')
+    kinds = set(re.match(r'_ZT([a-z])', n).group(1) for n in names if re.match(r'_ZT[a-z]', n))
+    for kind, what in (('c', 'covariant'), ('h', 'this-adjusting'), ('v', 'virtual-offset')):
+        check('thunk rows: a %s thunk has a row' % what, kind in kinds, str(names))
+    check('thunk rows: every row of a thunk is ok', all(rows[(n, 'thunk')][1] == 'ok' for n in names))
+
+
 def main():
     td = tempfile.mkdtemp(prefix='test-pi-')
     try:
         so = pb.build('pi', td)
         obj = os.path.join(td, 'pi.o')
-        r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), obj, [so], args=['-w'])
+        r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), obj, [so], args=[])
         check('pi.cpp compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             legacy(obj)
+        obj = os.path.join(td, 'thunk.o')
+        r = pb.compile(os.path.join(HERE, 'pi', 'thunk.cpp'), obj, [so], args=[])
+        check('thunk.cpp compiles (no N3 error for a compiler-made body)', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            thunks(obj)
         obj = os.path.join(td, 'effect.o')
-        r = pb.compile(os.path.join(HERE, 'pi', 'effect.cpp'), obj, [so], args=['-w'])
+        r = pb.compile(os.path.join(HERE, 'pi', 'effect.cpp'), obj, [so], args=[])
         check('effect.cpp compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             effect(obj)
         for arg in ('mode=1', 'fpfast'):
-            r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), os.path.join(td, 'x.o'), [so], args=['-w', '-fplugin-arg-fnvnx_pi-' + arg])
-            check('unknown plugin argument %s is an error' % arg, r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+            r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), os.path.join(td, 'x.o'), [so], args=['-fplugin-arg-fnvnx_pi-' + arg])
+            check('unknown plugin argument %s is an error' % arg, r.returncode != 0 and ('unknown plugin argument' in r.stderr or 'arguments must be' in r.stderr), r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
