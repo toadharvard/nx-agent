@@ -1222,3 +1222,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 ### 2026-11-15 01:25 — base-files layout; w12h+w15c union
 - w6: base-files_13ubuntu10.5 ships ./bin, ./lib, ./lib64 and ./sbin as usr symlink members, so it is the declared machine layout. One re-snapshot through setup_verdict_env.sh, coordinated with w12's deb needs. PT_INTERP stays the driver's `-###` value.
 - L4 w6 15bebb59d: the three-way merge of w12h 26135240 and w15c, valid for hostabi, sha256, platform, bootrt, bootguest and @m60; bootrt green with test_bootrt 8/8. w15 merges w12h into cand1 with that recipe.py as the reference.
+- L5 root 6edd2fd98: gate_objstub passes raw flags without -mabi=ilp32, so crt/iob.c's static assertion fails. Fixed by w20u unit_flags, which conflicts with the root in 4 files (resolve_input lineage). L5 w10 merges on claude/fnv-l5-platform-root-w20u; L1 reviews against b25ddaac7's resolve_input and w20's may-load 34c9f0826.
