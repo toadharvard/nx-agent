@@ -560,7 +560,7 @@ def compute(pool, rows):
         pend[a] = 0 if isinstance(r, tuple) else r
     ret, thunk, alloca = {}, {}, []
     for a, r, th, al in res:
-        if r != 'x':
+        if pend[a] != 'x':      # an entry whose decode failed ('x'), or a tail chain that ends in one, has no row
             ret[a] = pend[a]
         if th is not None:
             thunk[a] = th
