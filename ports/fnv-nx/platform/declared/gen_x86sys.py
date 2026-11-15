@@ -180,7 +180,7 @@ def build(osrec, src, mirror, wine, cpumodel, cpuref, sdm_pdf):
                 else:
                     sse2 = (leaf[("1", "edx")] >> 26) & 1
                     fxsr = (leaf[("1", "edx")] >> 24) & 1
-                    row.update({"value": int(bool(sse2 and fxsr and (int(mm, 16) >> 6) & 1)), "source": "%s: CPU_FEATURE_DAZ = SSE2 && FXSR && MXCSR_MASK bit 6 (system.c line %d), MXCSR_MASK of cpuid_model.json" % (wbs, daz_line)})
+                    row.update({"value": int(bool(sse2 and fxsr and (int(mm, 16) >> 6) & 1)), "source": "%s: CPU_FEATURE_DAZ = SSE2 && FXSR && MXCSR_MASK bit 6 (system.c line %d), MXCSR_MASK = %s from %s @ %s (file sha256 %s; mxcsr_mask is a CPUREF field, not an x86sys row)" % (wbs, daz_line, mm, cm["path"], cm["commit"][:12], cm["sha256"][:12] + "...")})
             else:
                 hits = bits.get(how, [])
                 if not hits:

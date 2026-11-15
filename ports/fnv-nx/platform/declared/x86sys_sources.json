@@ -55,9 +55,9 @@
  },
  "cpumodel": {
   "path": "ports/fnv-nx/verify/cpuid_model.json",
-  "commit": "a3217cd2c6041b8cf455f8ef269e99747620e18f",
+  "commit": "47b68e51c4a32511ef553289c638c08e948141bc",
   "branch": "claude/fnv-l3a-lift-int3",
-  "sha256": "91f9b38f04a89fc967c9121d3bdeb8342034e91cd1fe87b8c194cea9061aec3c",
+  "sha256": "fbb63bfffd3505806c67805181689b318d8a33deceefb978eb99ddbab11f1800",
   "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source"
  },
  "precedence": [

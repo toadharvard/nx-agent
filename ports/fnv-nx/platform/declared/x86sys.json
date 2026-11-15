@@ -28,7 +28,7 @@
    "value": 0
   },
   "umip": {
-   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/verify/cpuid_model.json max_basic @ a3217cd2c604), below 7, so there is no leaf 7 and CR4.UMIP is 0",
+   "source": "Intel SDM Vol 3A 2.5 CR4.UMIP: the bit is reserved (setting it is #GP) unless CPUID.(EAX=07H,ECX=0):ECX[2] is enumerated; the declared CPU's max basic leaf is 4 (ports/fnv-nx/verify/cpuid_model.json max_basic @ 47b68e51c4a3), below 7, so there is no leaf 7 and CR4.UMIP is 0",
    "value": 0
   }
  },
@@ -456,8 +456,8 @@
    },
    "11": {
     "name": "PF_SSE_DAZ_MODE_AVAILABLE",
-    "status": "undecided",
-    "why": "Wine 9.0 computes it as SSE2 && FXSAVE && MXCSR_MASK bit 6 (dlls/ntdll/unix/system.c line 386, have_sse_daz_mode, fxsave); verify/cpuid_model.json lacks mxcsr_mask; blocker: the owner of cpuid_model.json (L3a) must add the reference CPU's MXCSR_MASK, which the lifted FXSAVE needs too",
+    "source": "Wine 9.0 programs/wineboot/wineboot.c line 421: CPU_FEATURE_DAZ = SSE2 && FXSR && MXCSR_MASK bit 6 (system.c line 386), MXCSR_MASK = 0x0000ffbf from ports/fnv-nx/verify/cpuid_model.json @ 47b68e51c4a3 (file sha256 fbb63bfffd35...; mxcsr_mask is a CPUREF field, not an x86sys row)",
+    "value": 0,
     "winnt_h_line": 8728
    },
    "12": {
@@ -611,10 +611,10 @@
  "sources": {
   "cpumodel": {
    "branch": "claude/fnv-l3a-lift-int3",
-   "commit": "a3217cd2c6041b8cf455f8ef269e99747620e18f",
+   "commit": "47b68e51c4a32511ef553289c638c08e948141bc",
    "origin": "the declared CPU's cpuid as data (CPUREF: verify/cpuref.json + verify/cpuid_model.json); lift/rt/cpumodel.c is generated from it, not a source",
    "path": "ports/fnv-nx/verify/cpuid_model.json",
-   "sha256": "91f9b38f04a89fc967c9121d3bdeb8342034e91cd1fe87b8c194cea9061aec3c"
+   "sha256": "fbb63bfffd3505806c67805181689b318d8a33deceefb978eb99ddbab11f1800"
   },
   "ks386": {
    "origin": "Windows Driver Kit 7.1.0 (7600.16385.1), ks386.inc",

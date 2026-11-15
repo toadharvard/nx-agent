@@ -19,7 +19,7 @@ checks = [("x86sys.json is the generator's output", ok), ("precedence is in the 
           ("initial MXCSR 0x1F80 / x87 CW 0x27F", (fp["mxcsr"]["value"], fp["x87_control_word"]["value"]) == (0x1f80, 0x27f)),
           ("0x29 is not a ring-3 vector", 0x29 not in rec["int_ring3"]["vectors"]), ("no opcode list in tss_io_bitmap", "opcodes" not in rec["tss_io_bitmap"]),
           ("cr0.mp is undecided with a why; cr0.em and cr0.ts are 0, cr4.osxmmexcpt is 1, each with a source", rec["cr0"]["mp"].get("status") == "undecided" and bool(rec["cr0"]["mp"].get("why")) and (rec["cr0"]["em"].get("value"), rec["cr0"]["ts"].get("value"), rec["cr4_sse"]["osxmmexcpt"].get("value")) == (0, 0, 1) and all(v.get("source") for v in (rec["cr0"]["em"], rec["cr0"]["ts"], rec["cr4_sse"]["osxmmexcpt"]))),
-          ("no mxcsr_mask row in x86sys.json", "mxcsr_mask" not in json.dumps({k: v for k, v in rec.items() if k != "processor_features"}) and "mxcsr_mask" not in "".join(r.get("source", "") for r in rec["processor_features"]["records"].values())),
+          ("no mxcsr_mask key in x86sys.json (it is a CPUREF field)", '"mxcsr_mask":' not in json.dumps(rec)),
           ("cr4.osfxsr is derived from processor_features[6]", rec["cr4_sse"]["osfxsr"]["value"] == rec["processor_features"]["records"]["6"]["value"] and "processor_features[6]" in rec["cr4_sse"]["osfxsr"]["source"]),
           ("every PF row has a value with its source, or is undecided with a why", all(("value" in r and r["source"]) != (r.get("status") == "undecided" and bool(r.get("why"))) for r in rec["processor_features"]["records"].values())),
           ("SSE/SSE2/MMX/CX8/TSC rows come from the CPUID record and are 1", [rec["processor_features"]["records"][str(i)].get("value") for i in (2, 3, 6, 8, 10)] == [1] * 5),
@@ -31,7 +31,7 @@ R = rec["processor_features"]["records"]
 checks += [("rows Wine 9.0 never sets (0,1,4,5,15,16) are 0 and cite the zero-initialised section", all(R[str(i)].get("value") == 0 and "zero-filled" in R[str(i)]["source"] for i in (0, 1, 4, 5, 15, 16))),
            ("3DNOW is 0 because only the other vendor's branch sets it", R["7"].get("value") == 0 and "another vendor" in R["7"]["source"]),
            ("PAE and NX come from CPUID bits under the masks", (R["9"].get("value"), R["12"].get("value")) == (1, 1)),
-           ("DAZ is undecided while cpuid_model.json lacks mxcsr_mask", R["11"].get("status") == "undecided" and "mxcsr_mask" in R["11"]["why"] and "mxcsr_mask" not in json.load(open(cpum))),
+           ("DAZ is 0 from the CPUREF mxcsr_mask (bit 6 clear) and cites the file and its sha", R["11"].get("value") == 0 and "0x0000ffbf" in R["11"]["source"] and "mxcsr_mask" in json.load(open(cpum))),
            ("every decided PF row cites a Wine 9.0 file and line", all(("line" in r["source"]) for r in R.values() if "value" in r))]
 D = rec["descriptors"]
 checks += [("cs/ds/es/ss: base 0, limit 4 GiB, G=1, D/B=1, DPL=3 decided with sources", all((D[n]["base"]["value"], D[n]["limit"]["value"], D[n]["g"]["value"], D[n]["d_b"]["value"], D[n]["dpl"]["value"]) == (0, 0xFFFFFFFF, 1, 1, 3) and all("source" in D[n][f] for f in ("base", "limit", "g", "d_b", "dpl")) for n in ("cs", "ds", "es", "ss"))),
@@ -39,6 +39,19 @@ checks += [("cs/ds/es/ss: base 0, limit 4 GiB, G=1, D/B=1, DPL=3 decided with so
            ("lar/lsl/verr/verw are undecided and name the missing field", all(v.get("status") == "undecided" and v.get("why") for n in ("cs", "ds", "es", "ss", "fs") for v in rec["lar_lsl"][n].values())),
            ("the SDM is pinned with its order number", rec["sources"]["sdm"]["order_number"] == "253668-093US" and len(rec["sources"]["sdm"]["sha256"]) == 64)]
 checks.append(("cpuid_faulting is 0 with a source naming the sources searched", rec["cpuid_faulting"]["value"] == 0 and "is_privileged_instr" in rec["cpuid_faulting"]["source"] and "__cpuid" in rec["cpuid_faulting"]["source"]))
+# the state of a cpuid_model.json without mxcsr_mask: row 11 undecided and gen_pfh red (a derived pin keeps the sha check honest)
+import hashlib
+w = tempfile.mkdtemp()
+cm2 = json.load(open(cpum)); cm2.pop("mxcsr_mask"); cm2.pop("mxcsr_mask_doc", None)
+cpum2 = os.path.join(w, "cpuid_model.json"); json.dump(cm2, open(cpum2, "w"), indent=1)
+s2 = json.load(open(os.path.join(H, "x86sys_sources.json"))); s2["cpumodel"]["sha256"] = hashlib.sha256(open(cpum2, "rb").read()).hexdigest()
+s2p = os.path.join(w, "sources.json"); json.dump(s2, open(s2p, "w"))
+out2 = os.path.join(w, "x86sys.json")
+subprocess.run([sys.executable, "-I", os.path.join(H, "gen_x86sys.py"), "--os", os.path.join(H, "os.json"), "--sources", s2p, "--mirror", mirror, "--wine", wine, "--cpumodel", cpum2, "--cpuref", cpuref, "--sdm", sdm, "--out", out2], check=True)
+r2 = json.load(open(out2))["processor_features"]["records"]["11"]
+g2 = subprocess.run([sys.executable, "-I", os.path.join(H, "gen_pfh.py"), "--x86sys", out2, "--header", out2 + ".h"], capture_output=True, text=True)
+checks.append(("without mxcsr_mask in cpuid_model.json row 11 is undecided, naming the field, and gen_pfh is red", r2.get("status") == "undecided" and "mxcsr_mask" in r2["why"] and g2.returncode != 0 and not os.path.exists(out2 + ".h")))
+checks.append(("with mxcsr_mask gen_pfh is green and writes the table", g.returncode == 0 and os.path.exists(out + ".h")))
 for n, c in checks:
     print(("PASS " if c else "FAIL ") + n)
 sys.exit(0 if all(c for _, c in checks) else 1)
