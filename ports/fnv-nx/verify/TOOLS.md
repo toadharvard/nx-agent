@@ -766,6 +766,17 @@ Watch log: --watch-log SYMS (text file, one ELF symbol per line, # starts a comm
 first instruction: OUT.json "watch_log" = [{"seq", "tid", "sym", "pc" (guest-relative), "sp"}], seq from 0 in machine order, no
 sampling, no cap, two names at one address in file order. A name that is absent or not STT_FUNC is an input error naming it.
 Without the option the key is absent.
+Memory at a watched call: a line `NAME [ret] [mem SPEC... [until REG=VALUE]]`, SPEC = `REG(->OFF)*(+DELTA)?:LEN` (REG x0..x7 as a 32-bit address; each `->OFF` loads the
+32-bit word at address+OFF and takes it as the address; DELTA (default 0) is added; LEN 1..65536 bytes are read there, protection ignored; a longer object is several specs with growing DELTA). A name with `mem` records
+also "args" = [w0, w1, w2, w3] and "mem" = {SPEC: hex | null (a page on the way unmapped)}; other records keep their keys.
+`until REG=VALUE` (REG x0..x7): the first call whose REG equals VALUE is the last one recorded with "mem"; later calls of the name carry "args" only.
+State snapshot: --state-at SYM --state-request JSON ({"hash": [{name, lo, hi}], "dump": [{name, addr, len}]}): when SYM is first entered OUT.json
+"start_state" = {at, t_ns, regs (x0..x28 as w, x30 guest-relative, sp), runs ([lo, hi, prot] of the guest page table, adjacent equal runs
+merged, prot 1 R 2 W 4 X), pages ({name: {lo, sha256: per page, null unmapped}}), dump ({name: {addr, hex | null}})}; null when SYM was
+never entered. Both options exist for bootstart.py (the loader's start rules S1..S8).
+
+Cores: the machine is the declared N-core machine (bootmachine.py rule 3). --quantum N (required, no default) is the instructions per slice of a core's
+thread; OUT.json "machine" = {app_cores, cores, quantum, unicorn} and run.cores = per-core {slices, instructions, switches, pairs}.
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
@@ -1124,6 +1135,43 @@ Served per service (everything else listed here as NOT answered):
              the result is 0. NOT answered: an open socket that has a local peer or could get one: a recorded peer, a bound or a listening
              socket (a local sender could produce traffic; the model never produces it, so the case is left to the OS).
 
+```
+
+## verify/bootstart.py
+
+```text
+The loader's start rules S1..S8 (loader/include/fnvnx_start.h) as assertions over the boot machine's trace of the REAL image.
+
+  bootstart.py request --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv [--tls tls.tsv] --watch-out W.txt --state-out S.json
+      the two observation requests the exe's own PE and the contract's iat.tsv imply: the --watch-log file (fnvnx_lift_enter with the
+      memory it needs) and the --state-request file (hashes of every page of the image range, dumps of the import slots and the TLS
+      index word); run boot.py with  --watch-log W.txt --state-at fnvnx_start_enter --state-request S.json
+  bootstart.py check --out OUT.json --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv --sha256 HEX [--tls tls.tsv] [--iat-data iat_data.tsv --elf GUEST.elf]
+                     [--json VERDICT.json]
+      --tls is required when the exe or a module has a TLS directory, --iat-data and --elf when iat.tsv has data slots (exit 1 otherwise)
+      one verdict per rule; exit 0 iff every rule is "pass"
+
+A verdict is pass, fail or undecided. fail: the trace contradicts the rule. undecided: the rule's value is not in the supplied facts
+(named); it is never turned into a guess, and it is not a pass. Every verdict lists the trace facts it read.
+
+RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by the machine from the image's own execution):
+  S1 identity        console "fnvnx-start: identity ok" before "image mapped", no "identity mismatch"; sha256 of --exe = --sha256     E console.txt
+  S2 PE headers      no "fnvnx-start: PE headers" line, "image mapped" present; the PE parses (sections in rva order inside SizeOfImage) E console.txt
+  S3 map             every page of [ImageBase, +SizeOfImage): sha256 = headers / section bytes / zero (min(raw,virt) bytes, rest 0),
+                     except the import slots and the TLS index word (S4, S5); every page mapped                                    N start_state.pages, runs
+  S4 imports         every slot of iat.tsv holds its value (key or module export); data slots: the ELF address of the native_symbol of iat_data.tsv (table_id = the ELF's); slot set = the PE's  N start_state.dump
+  S5 TLS             per image of tls.tsv (slot = its tls_slot column: the exe 0, static images 1, 2, ...): index word = the slot, main thread vec[slot] = block, block =
+                     sha-checked template + zero fill at the alignment; the exe's callbacks and entry
+                     in executable sections                                                                       N start_state.dump, watch_log mem
+  S6 protection      every page of the image range: headers R, section R/W by its characteristics, never X, claimed gaps none           N start_state.runs
+  S7 thread block    TEB +0 -1, +4 stack base, +8 limit, +0x18 self, +0x2c vector; guard page none, stack RW of SizeOfStackReserve; the
+                     TEB, vector, stack outside the reserved set (exe, module rows, [0xf0000, 0x200000))   N watch_log args, mem; start_state.runs
+  S8 enter           the first exe-range fnvnx_lift_enter calls on one thread: the TLS callbacks (image_base, 1, 0) in list order, then
+                     the entry (0, 0, 0); esp = (stack_base - 16) & ~15 holding the sentinel; console "enter <entry>"       N watch_log args, mem
+Rules no observation can decide are listed in the verdicts as undecided, with the reason.
+S5 details: slot and alignment are read from the tls_slot and align_bytes columns (contract/modules.py: the loader's own numbers), never derived here; an image
+of tls.tsv without a tls_slot (loaded on demand) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
+whole block is compared, never a prefix. A repeated tls_slot, a static image without one and an on-demand image with one are fact failures.
 ```
 
 ## verify/cas.py
