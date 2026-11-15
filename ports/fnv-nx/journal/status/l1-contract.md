@@ -1576,3 +1576,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Only the product root declares main, so tests have their own entry and no double.
   - Root objects are linked as archive members except crt0, so fnvnx_dispatch is pulled only when referenced.
   - Owner: w12, after PT_INTERP.
+  - Correction: no archive linking, because it would drop static constructors. fnvnx_dispatch is L3a's generated table over the image's lifted set. An empty set gives an empty table, whose misses go to fnvnx_reach_violation under the certificate "no lifted code".
