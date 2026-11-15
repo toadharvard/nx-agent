@@ -3,10 +3,11 @@ fnvlift/dsl.py fp: SDM Vol 1 4.8.3, 4.9.1, 10.2.3, 11.5) on the source type; the
 flag set and its MXCSR mask bit 7-12 clear) is ONE fault, XM (Wine 9.0 fpe_handler: a SIMD exception is STATUS_FLOAT_MULTIPLE_TRAPS, never a per-flag status); on it the exception flags are set in MXCSR and the destination
 is unchanged (SDM Vol 1 11.5.2, Vol 3 6.15: dsl Form.fault_xm).  Aligned 128-bit memory operands fault with kind 7 when misaligned (forms_simd.align)."""
 from fnvlift import dsl
+from fnvlift import dsl
 from fnvlift.dsl import C, V, bit, concat, extract, fp, fp_flags, fp_val, zext
 from fnvlift.faults import BYNAME
 from proof.forms import handler, rd, wr
-from proof.forms_simd import align, join, lanes
+from proof.forms_simd import align, join, lanes, selidx
 
 def _unmasked(flags32, mx):
     """some exception flag i (MXCSR bits 0-5) is set whose mask bit i + 7 is clear (SDM Vol 1 11.5.1)"""
@@ -15,17 +16,29 @@ def _unmasked(flags32, mx):
     return r
 OPS = {'add': 'add', 'sub': 'sub', 'mul': 'mul', 'div': 'div', 'sqrt': 'sqrt', 'min': 'min', 'max': 'max'}
 def arith(c, op, w, packed, pred=None):
-    c.aligned = True; d, s = c.ops; mx = V('mxcsr', 32); a = rd(d); n = d.w
+    c.aligned = True; d, s = c.ops[:2]; mx = V('mxcsr', 32); a = rd(d); n = d.w
     if packed: align(c, s) if s.k == 'm' else None
     b = rd(s)
     if packed: A, B = lanes(a, w), lanes(b, w)
     else: A, B = [extract(a, w - 1, 0)], [rd(s, w)]
     if op == 'sqrt': A = B                        # sqrt reads only the source operand
-    nodes = [fp(op, w, x, y, mx) for x, y in zip(A, B)]   # op: arithmetic, min/max, or 'cmp'+predicate (a lane of all ones / zeros)
-    flags = nodes and fp_flags(nodes[0])
-    for nd in nodes[1:]: flags = flags | fp_flags(nd)
-    flags32 = zext(flags, 32)
-    vals = [fp_val(nd) for nd in nodes]
+    if op == 'cmp':
+        # CMPPS/CMPPD/CMPSS/CMPSD with the predicate in imm8 (SDM Vol 2 CMPPS: bits 2:0 define the comparison of the non-VEX encoding, bits 7:3 are reserved).  pred is an int 0..7
+        # (a concrete instruction) or the DSL node of the immediate of a SHAPE: the Form is the exact mux over the eight defined predicates, each arm built by the very code of the named-predicate instruction
+        per = [[fp('cmp' + P, w, x, y, mx) for x, y in zip(A, B)] for P in dsl.CMPPRED]
+        fl = []
+        for nodes in per:
+            f = fp_flags(nodes[0])
+            for nd in nodes[1:]: f = f | fp_flags(nd)
+            fl.append(f)
+        flags32 = zext(selidx(fl, pred), 32)
+        vals = [selidx([fp_val(per[k][l]) for k in range(8)], pred) for l in range(len(per[0]))]
+    else:
+        nodes = [fp(op, w, x, y, mx) for x, y in zip(A, B)]   # op: arithmetic, min/max, or 'cmp'+predicate (a lane of all ones / zeros)
+        flags = nodes and fp_flags(nodes[0])
+        for nd in nodes[1:]: flags = flags | fp_flags(nd)
+        flags32 = zext(flags, 32)
+        vals = [fp_val(nd) for nd in nodes]
     r = join(vals) if packed else concat(extract(a, 127, w), vals[0])
     c.F.fault_xm(_unmasked(flags32, mx))
     c.F.mxcsr(mx | flags32); wr(c.F, d, r)
@@ -35,6 +48,13 @@ for _op in OPS:
 for _p in dsl.CMPPRED:
     for _sfx, _w, _pk in (('ss', 32, False), ('sd', 64, False), ('ps', 32, True), ('pd', 64, True)):
         handler('cmp' + _p + _sfx)(lambda c, op='cmp' + _p, w=_w, p=_pk: arith(c, op, w, p))
+def cmp_imm(c, w, packed):
+    """the predicate-in-imm8 form of CMPPS/CMPPD/CMPSS/CMPSD: an int imm8 above 7 is reserved by the SDM and has no Form (KeyError, as before)"""
+    p = c.ops[2].val & 0xff
+    if isinstance(p, int) and p > 7: raise KeyError('%s imm8 %d: reserved (SDM Vol 2 CMPPS: bits 7:3 of the immediate are reserved)' % (c.m, p))
+    arith(c, 'cmp', w, packed, p)
+for _sfx, _w, _pk in (('ss', 32, False), ('sd', 64, False), ('ps', 32, True), ('pd', 64, True)):
+    handler('cmp' + _sfx)(lambda c, w=_w, p=_pk: cmp_imm(c, w, p))
 def comi(c, op, w):
     """COMISS/UCOMISS/COMISD/UCOMISD: ZF PF CF = unordered / equal / less (SDM Vol 2); OF SF AF = 0; IE (QNaN operands only for ucomi) and DE go to MXCSR."""
     c.aligned = False; d, s = c.ops; mx = V('mxcsr', 32); nd = fp(op, w, extract(rd(d), w - 1, 0), rd(s, w), mx)

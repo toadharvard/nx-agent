@@ -107,16 +107,22 @@ class SymOp:
     def imm(s): return s._imm if s._imm is not None else s._o.imm
 class SymIns:
     """a capstone instruction with symbolic operands; the other members forms*.py reads (bytes, size, mnemonic, reg_name) are the decoder's"""
-    def __init__(s, ins, ops): s._i, s.operands = ins, ops
+    def __init__(s, ins, ops, mnemonic=None): s._i, s.operands, s._m = ins, ops, mnemonic
     @property
     def bytes(s): return s._i.bytes
     @property
     def size(s): return s._i.size
     @property
-    def mnemonic(s): return s._i.mnemonic
+    def mnemonic(s): return s._m or s._i.mnemonic
     def reg_name(s, r): return s._i.reg_name(r)
 
 # ------------------------------------------------------------------------------------------------ derivation of the adapter from the decoder
+class PredImm:
+    """the imm8 operand that the decoder folds into the mnemonic: capstone prints CMPPS/CMPPD/CMPSS/CMPSD with imm8 0..7 as cmp<predicate><ps|pd|ss|sd> with no immediate operand
+    (the predicate of SDM Vol 2 CMPPS table).  A shape over that imm8 is the generic mnemonic with the immediate field as its third operand."""
+    type, size, reg = X.X86_OP_IMM, 1, None
+    def __init__(s, imm): s.imm = imm
+_CMPALIAS = {'cmp' + p + sx: 'cmp' + sx for p in dsl.CMPPRED for sx in ('ps', 'pd', 'ss', 'sd')}
 _md = shp.decoder()
 def decode(raw, addr):
     l = list(_md.disasm(raw, addr))
@@ -178,14 +184,19 @@ def derive(rep, fields):
 def symbuild(key):
     """SymForm of a shape.  Raises KeyError (no DSL builder for the mnemonic), FieldDecodeError, SymbolicBranch, AssertionError (builder precondition)"""
     rep, fields = parse_key(key); ins = decode(rep, 0)
-    imm, disp = derive(rep, fields); size = ins.size; widths = {n: 8 * f[1] for n, f in fields.items() if f}
+    alias = _CMPALIAS.get(ins.mnemonic) if fields['imm'] and not any(o.type == X.X86_OP_IMM for o in ins.operands) else None
+    imm, disp = ({}, derive(rep, dict(fields, imm=None))[1]) if alias else derive(rep, fields)
+    size = ins.size; widths = {n: 8 * f[1] for n, f in fields.items() if f}
     ops = []
     for j, o in enumerate(ins.operands):
         so = SymOp(o)
         if j in imm: so = SymOp(o, imm=SV(imm[j].node(widths['imm'], size), '%s operand %d (imm)' % (ins.mnemonic, j)))
         if j in disp: so = SymOp(o, mem=SymMem(o.mem, SV(disp[j].node(widths['disp'], size), '%s operand %d (disp)' % (ins.mnemonic, j))))
         ops.append(so)
-    sins = SymIns(ins, ops)
+    if alias:
+        assert fields['imm'][1] == 1, 'cmp imm8 field is not one byte'
+        ops.append(PredImm(SV(dsl.zext(F('imm', 8), 32), '%s operand 2 (imm)' % alias)))
+    sins = SymIns(ins, ops, alias)
     try: f = forms.build(sins, eip())
     except SymbolicBranch as e:
         tb = [t for t in traceback.extract_tb(sys.exc_info()[2]) if os.path.basename(t.filename).startswith('forms')]

@@ -5,6 +5,9 @@ test_forms_immsel.py  (exit 0 = all pass)"""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os
+from fnvlift import inputs
+inputs.configure(x86sys=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'platform', 'declared', 'x86sys.json'))
 from proof import symform, shape as shp
 PRE = ['0fc6c0', '660fc6c0', '0f70c0', '660f70c0', 'f20f70c0', 'f30f70c0', '660fc5c0', '0fc5c0', '660fc4c0', '0fc4c0', '660f73f8', '660f73d8', '660fc4c1', '660fc4c7']
 bad = n = 0
