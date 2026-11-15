@@ -1834,3 +1834,5 @@ bottleneck: the cand2 warm verdict on w15.
 bottleneck: the cand2 verdict on w15.
 - 21:32 w27 archived while waiting. Typed dispatch gate aec29d556 (rows fnvnx-disp-rows/1, gate_contract wiring) is in w12L2 for cand4. Per-image facts stage b8607ef76 (loader:gen:3, gen/imgfacts.json) waits on w12's cand3 generator interface; it gets adapted when that lands. Workers 3/4: w15, w12, w28.
 bottleneck: the cand2 verdict on w15.
+- 21:35 L6 at 18973a7f2 (w12L2 acf66e78b): 8 render roots green cold and warm; a warm run executes 0 stages, 3-9 s per root. Objstub over the universe: 2194/2208 certified, 28 findings. Non-L6 findings: loader guest/boot.c is missing fnvnx_win32_ext.h (L1, cand4 for w12); platform gen:12 traceback and rt/guest HOST1 (L5, routed); tests/bootrt reach_violation (L1, cand4); dm:1..12 uncited (L5 or bootrt).
+bottleneck: the cand2 verdict on w15.
