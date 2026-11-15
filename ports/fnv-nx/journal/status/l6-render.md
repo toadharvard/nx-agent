@@ -1262,3 +1262,9 @@ Paused: w3b, w4, farm; no other work.
     - w6 (doing): merge w28 632a45447 and fix them by rule (mount prefix or require_mounted; toolchain external or hostprofile).
     - Then re-run abspath, d3d9total and the test, and send the new head to L1 w12 as the cand4 candidate, replacing b3856ec5c.
 - bottleneck: the render abspath literals under the new gate (w6), then L1 cand3 and cand4.
+- 21:35Z w6 48c5208b9: the cand4 candidate, a merge of w28 632a45447, sent to L1 w12.
+    - abspath with w28's gate: 0 in render/; the 6 findings are in lift/fnvlift. L1's 6 render rows do not reproduce, so no render code changed; the exact rows were asked of L1.
+    - d3d9total 332/332; test 45/45.
+    - render/gl4 and sm_link are red only in the recipe store stage: EEXIST on /tmp/recipe-*/syslib at recipe.py:2762, a w28 defect routed to L1. Every object of both roots builds.
+    - objstub: 2059/2126, 79 findings, 0 render apart from those two build-reds.
+- bottleneck: L1's recipe syslib EEXIST (w28), then cand3 and cand4.
