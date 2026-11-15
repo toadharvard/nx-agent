@@ -28,7 +28,7 @@ M32 = 0xffffffff
 
 _INSMEMO = {}; _RESMEMO = {}
 def _run(arg, cfg, XEX, REF=frozenset()):
-    """cfg: modules (the module table), moddirs (list), facts_out, exports_dir (per-module export lists), exe_mnemonics (the exe universe's mnemonic counts): declared inputs, passed by universe.py"""
+    """cfg: modules (the module table), moddirs (list), facts_out: declared inputs, passed by universe.py"""
     path, mrow = pemod.locate(arg, cfg.modules, cfg.moddirs)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = cfg.facts_out + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
@@ -414,9 +414,7 @@ def _run(arg, cfg, XEX, REF=frozenset()):
                 if i.disp_size == 4 and a + i.disp_offset == r and i.mnemonic not in ('lea', 'call', 'jmp') and any(o.type == X.X86_OP_MEM for o in i.operands): dread.add(v)
                 break
     na = sum(1 for v in pt if v in proven); nb = sum(1 for v in pt if v not in proven and (pe[v - T0] or v in dread)); nc = len(pt) - na - nb
-    exe_mn = {}
-    for ln in open(cfg.exe_mnemonics): k, n = ln.split(); exe_mn[k] = int(n)
-    mp = Counter(dec[a][1] for a in pset); new_mn = sorted(((k, n) for k, n in mp.items() if k not in exe_mn), key=lambda kv: (-kv[1], kv[0]))[:60]
+    mp = Counter(dec[a][1] for a in pset)
     fi = eh.finish(ent)
     import dic
     DR = dic.jtab_ranges(outd); dic.write(outd, hd, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
@@ -426,17 +424,11 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     PS = dic.protect_sites(md, text, T0, {(a, dec[a][0]) for e in E for a in exts[e]}, imports); open(outd + '/protect_sites.tsv', 'w').write(hd.rstrip() + '; columns: site, api, via; call sites of VirtualProtect/WriteProcessMemory/FlushInstructionCache in reached code: OPEN until the points-to (ASM-234)\n' + ''.join('%08x\t%s\t%s\n' % x for x in PS))
     print('protect sites (ASM-234, open until the points-to): %d' % len(PS))
     exs = [n for n, a, z, ro in M.xs]; green = not why
-        # ---- exports against L1's list, imports by DLL, delay imports
-    l1 = {}; l1f = os.path.join(cfg.exports_dir, mrow.name + '.tsv')
-    for ln in (open(l1f) if os.path.exists(l1f) else ()):
-        f = ln.rstrip('\n').split('\t')
-        if len(f) > 1 and not f[2]: l1[f[0]] = int(f[1], 16)
-    xl = set(l1.values()); xp = set(XC) | set(XD)
-    xdiff = (sorted(xp - xl), sorted(xl - xp)) if os.path.exists(l1f) else None
+        # ---- imports by DLL, delay imports
     dl = Counter(n.split('!')[0] for n in imports.values()); dd = pemod.delay_imports(M)
     open(outd + '/imports.tsv', 'w').write('# dll, imported name or #ordinal, IAT slot VA (delay imports: slot -)\n' + ''.join('%s\t%s\t%08x\n' % (n.split('!')[0], n.split('!', 1)[1], v) for v, n in sorted(imports.items())) + ''.join('%s\t%s\t-\n' % x for x in dd))
-    print('exports: PE code %d, PE data %d (not code: no entry), forwarders %d; every code export is an entry: %s; L1 exports.tsv %s; entry point %08x is an entry: %s; TLS callbacks %d' % (
-        len(XC), len(XD), XFW, all(a in ent for a in XC), 'ABSENT' if xdiff is None else 'differs: PE-only %d L1-only %d' % (len(xdiff[0]), len(xdiff[1])), M.base + M.entry, (M.base + M.entry) in ent if M.entry else 'n/a', sum(1 for ks in ent.values() if 'tls' in ks)))
+    print('exports: PE code %d, PE data %d (not code: no entry), forwarders %d; every code export is an entry: %s; entry point %08x is an entry: %s; TLS callbacks %d' % (
+        len(XC), len(XD), XFW, all(a in ent for a in XC), M.base + M.entry, (M.base + M.entry) in ent if M.entry else 'n/a', sum(1 for ks in ent.values() if 'tls' in ks)))
     print('imports %d by DLL: %s; delay imports %d' % (len(imports), ' '.join('%s=%d' % kv for kv in sorted(dl.items())), len(dd)))
     print('%s: sections %d (executable %d: %s), reloc %s (%d fixups), imports %d, exports code %d (data %d) forwarders %d, entry rva %x' % (os.path.basename(path), len(M.secs), len(exs), ' '.join(exs[:4]) + (' ...' if len(exs) > 4 else ''), 'yes' if RL is not None else 'NO', len(relocs), len(imports), len(XC), len(XD), XFW, M.entry))
     print('\n'.join(fi[:3]))
@@ -468,7 +460,6 @@ def _run(arg, cfg, XEX, REF=frozenset()):
     print('pointer targets %d: (a) proven code %d, (b) data-read or PE-directory %d, (c) other %d; direct targets leaving spans: proven %d, candidate %d (in image %d)' % (len(pt), na, nb, nc, len(lvp), len(lv) - len(lvp), sum(1 for a, t in lv if img(t))))
     cm = {k: n for k, n in mcand.items() if k not in mp}
     print('mnemonics only in candidate-only code: %d mnemonics, %d instructions (of %d candidate-only); top 30: %s' % (len(cm), sum(cm.values()), cand_only, ' '.join('%s=%d' % kv for kv in sorted(cm.items(), key=lambda kv: (-kv[1], kv[0]))[:30])))
-    print('mnemonics in proven code not in the exe universe (%d%s): %s' % (len([k for k in mp if k not in exe_mn]), '' if exe_mn else ', exe list missing', ' '.join('%s=%d' % kv for kv in new_mn)))
     open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': TN - cc[7], 'certified': TN - cc[7] - nunx, 'uncertified': nunx, 'targets': len(targets), 'targets_certified': cert}) + '\n')
     print('gate %s red=%d sources=%d rows=%d' % (pcsrc_res['name'], pcsrc_red, pcsrc_res['sources'], pcsrc_res['rows']))
     print('gate l3.codemap.%s: %s (bytes %d, unexplained %d; targets %d, certified %d)%s' % (name, 'green' if green else 'red', TN - cc[7], nunx, len(targets), cert, ''.join('; RED: ' + w for w in why)))

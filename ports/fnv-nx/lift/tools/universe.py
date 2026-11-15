@@ -11,12 +11,12 @@ from array import array
 from collections import Counter, deque
 from capstone import x86 as X
 import cli
-USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...] --exports-dir DIR --exe-mnemonics FILE) --keys keys.tsv [--theirs DIR]
-  code universe of the exe (--exe, with the decomp function starts --funcs) or of the module NAME (a name or file of modules.tsv; the module table, the directories
-  that hold the module files, the exports directory and the exe's mnemonic list are declared inputs). --keys: the import conventions (keys.tsv). --theirs (optional): with --exe, the directory that holds
+USAGE = '''usage: universe.py --out OUTDIR (--exe FILE --funcs FILE [--refused FILE] | --module NAME --modules modules.tsv --moddirs DIR[:DIR...]) --keys keys.tsv [--theirs DIR]
+  code universe of the exe (--exe, with the decomp function starts --funcs) or of the module NAME (a name or file of modules.tsv; the module table and the directories
+  that hold the module files are declared inputs). --keys: the import conventions (keys.tsv). --theirs (optional): with --exe, the directory that holds
   L1's facts.pkl and eh.pkl, for the entry-set comparison (reconcile.py). --refused FILE: one round of the exe's reloc-consistency fixed point (the refusals of the earlier rounds); without it the exe run drives
   the rounds itself. Every path is an explicit argument: no environment variable, no default.'''
-_OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--exports-dir': True, '--exe-mnemonics': True, '--keys': True, '--theirs': True, '--refused': True}
+_OPTS = {'--out': True, '--exe': True, '--funcs': True, '--module': True, '--modules': True, '--moddirs': True, '--keys': True, '--theirs': True, '--refused': True}
 if __name__ == '__main__': _POS, _O = cli.parse(USAGE, sys.argv[1:], (0, 0), _OPTS)
 else: _O = {}
 def _need(*ks):
@@ -25,8 +25,8 @@ def _need(*ks):
 MOD = _O.get('--module'); STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
 _need('--out', '--keys'); import ehflow; ehflow.configure_keys(_O['--keys'])
 if STRICT:      # separate engine (every relocated pointer into executable bytes is an entry)
-    _need('--modules', '--moddirs', '--exports-dir', '--exe-mnemonics')
-    import modlift; sys.exit(modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'], exports_dir=_O['--exports-dir'], exe_mnemonics=_O['--exe-mnemonics'])))
+    _need('--modules', '--moddirs')
+    import modlift; sys.exit(modlift.run(MOD, SimpleNamespace(modules=_O['--modules'], moddirs=_O['--moddirs'].split(':'), facts_out=_O['--out'])))
 _need('--exe', '--funcs')
 EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
 OUTD = _O['--out']; OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
@@ -528,7 +528,6 @@ if not STRICT:
     pts = sorted({v for r, v in rvals}); ne = [v for v in pts if v not in entries]; dfr = [(x[1], x[1] + x[3]) for x in datarec]
     print('relocated pointer targets in .text: %d, entries %d, NOT entries %d: %s' % (len(pts), len(pts) - len(ne), len(ne), dict(sorted(Counter(
         'didataformat-blob' if any(x <= v < y for x, y in dfr) else ('data-by-reloc@object-start' if not tbl[v - T0 - 1] else 'data-by-reloc@object-interior') if tbl[v - T0] else 'inside-other-insn' if cov[v - T0] == 2 else 'insn-start-not-entry' if cov[v - T0] == 1 else 'unreached' for v in ne).items()))))
-    open(OUTD + '/exe_mnemonics.tsv', 'w').write(''.join('%s\t%d\n' % kv for kv in sorted(Counter(v[1] for v in insns.values()).items())))
     gate(not unexpl and not bad_entries and not rejects and not rbad and not sum(LOX.values()) and not PMFX and not DW, TN, [])
 # ---- module report
 midf = 0; why = []; TNu = TN - cc[7]; exs = [n for n, a, z, ro in M.xs]
