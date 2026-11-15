@@ -1,0 +1,63 @@
+# Reference rows for tests/test_x87spec.py: values read from the Intel SDM (Vol. 1 and 2A, the combined edition),
+# independent of proof/x87spec.py. Row format:  kind | fields... | citation.  Blank and '#' lines are comments.
+# Compare (Table 8-6): fields  relation | C3 C2 C0
+cmp | gt        | 0 0 0 | SDM 1:T8-6 "ST(0) > Source Operand 0 0 0"
+cmp | lt        | 0 0 1 | SDM 1:T8-6 "ST(0) < Source Operand 0 0 1"
+cmp | eq        | 1 0 0 | SDM 1:T8-6 "ST(0) = Source Operand 1 0 0"
+cmp | unordered | 1 1 1 | SDM 1:T8-6 "Unordered 1 1 1"
+# EFLAGS of FCOMI/FUCOMI (Table 8-7): fields  relation | ZF PF CF
+eflags | gt        | 0 0 0 | SDM 1:T8-7 "ST0 > ST(i) 0 0 0"
+eflags | lt        | 0 0 1 | SDM 1:T8-7 "ST0 < ST(i) 0 0 1"
+eflags | eq        | 1 0 0 | SDM 1:T8-7 "ST0 = ST(i) 1 0 0"
+eflags | unordered | 1 1 1 | SDM 1:T8-7 "Unordered 1 1 1"
+# FXAM (SDM 2A:FXAM Table 3-?? "FXAM Results"): fields  class | C3 C2 C0
+fxam | nan      | 0 0 1 | SDM 2A:FXAM table "NaN 0 0 1"
+fxam | normal   | 0 1 0 | SDM 2A:FXAM table "Normal finite number 0 1 0"
+fxam | infinity | 0 1 1 | SDM 2A:FXAM table "Infinity 0 1 1"
+fxam | zero     | 1 0 0 | SDM 2A:FXAM table "Zero 1 0 0"
+fxam | empty    | 1 0 1 | SDM 2A:FXAM table "Empty 1 0 1"
+fxam | denormal | 1 1 0 | SDM 2A:FXAM table "Denormal number 1 1 0"
+fxam_c1 | sign | SDM 2A:FXAM "The C1 flag is set to the sign of the value in ST(0), regardless of whether the register is empty or full."
+# Tag word (SDM 1:8.1.7): value | 2-bit tag
+tag | valid   | 00 | SDM 1:8.1.7 tag word "00 Valid"
+tag | zero    | 01 | SDM 1:8.1.7 tag word "01 Zero"
+tag | special | 10 | SDM 1:8.1.7 tag word "10 Special: invalid (NaN, unsupported), infinity, or denormal"
+tag | empty   | 11 | SDM 1:8.1.7 tag word "11 Empty"
+# Initialised state (SDM 1:8.1.5, 8.1.6, 8.1.7 and 2A:FINIT Op, also FNSAVE): register | hex
+init | fcw | 037F | SDM 1:8.1.5 (sdm.txt line 12141) "the x87 FPU control word is set to 037FH, which masks all floating-point exceptions, sets rounding to nearest, and sets the x87 FPU precision to 64 bits"
+init | fsw | 0000 | SDM 2A:FINIT Op (FPUStatusWord initialised to 0); SDM 1:T8-1 row FINIT/FNINIT: C0..C3 = 0 0 0 0, sdm.txt line 12035
+init | ftw | FFFF | SDM 1:8.1.7 "the x87 FPU tag word is set to FFFFH, which marks all the x87 FPU data registers as empty"
+init | fip | 00000000 | SDM 1:8.1.8 (sdm.txt line 12273) "FINIT/FNINIT. Each instruction clears FIP, FCS, FDP, and FDS."
+# Double-extended encodings (SDM 1:T4-3, 1:4.2.2 biasing constant 16,383): name | 80-bit hex (sign+exp 16 bits, significand 64 bits)
+m80 | +0                | 00000000000000000000 | SDM 1:T4-3 "+Zero 0 00..00 0 00..00"
+m80 | -0                | 80000000000000000000 | SDM 1:T4-3 "-Zero 1 00..00 0 00..00"
+m80 | +inf              | 7FFF8000000000000000 | SDM 1:T4-3 "+inf 0 11..11 1 00..00"
+m80 | -inf              | FFFF8000000000000000 | SDM 1:T4-3 "-inf 1 11..11 1 00..00"
+m80 | +1.0              | 3FFF8000000000000000 | SDM 1:T4-3 "+Normals ... 00..01 1 00..00", biasing constant 16,383 = 3FFFH
+m80 | -2.0              | C0008000000000000000 | SDM 1:T4-3, biased exponent 16384 = 4000H, sign 1
+m80 | qnan_indefinite   | FFFFC000000000000000 | SDM 1:T4-3 "QNaN Floating-Point Indefinite 1 11..11 1 10..00"
+m80 | bcd_indefinite    | FFFFC000000000000000 | SDM 1:4.7 (sdm.txt line 5748) "The packed BCD integer indefinite encoding (FFFFC000000000000000H) is stored by the FBSTP instruction"
+# Integer indefinite (SDM 1:4.2.1.1 / 2A:FIST "integer indefinite"): width | hex
+intindef | 16 | 8000 | SDM 1:T4-1 signed integer indefinite, word format: 8000H (sdm.txt line 5281 introduces the integer indefinite)
+intindef | 32 | 80000000 | SDM 1:T4-1 signed integer indefinite, doubleword format: 80000000H
+intindef | 64 | 8000000000000000 | SDM 1:T4-1 signed integer indefinite, quadword format: 8000000000000000H
+# Status word layout (SDM 1:8.1.3, Figure 8-4): field | bit position
+fsw | IE | 0  | SDM 1:8.1.3 Figure 8-4: IE bit 0
+fsw | DE | 1  | SDM 1:8.1.3 Figure 8-4: DE bit 1
+fsw | ZE | 2  | SDM 1:8.1.3 Figure 8-4: ZE bit 2
+fsw | OE | 3  | SDM 1:8.1.3 Figure 8-4: OE bit 3
+fsw | UE | 4  | SDM 1:8.1.3 Figure 8-4: UE bit 4
+fsw | PE | 5  | SDM 1:8.1.3 Figure 8-4: PE bit 5
+fsw | SF | 6  | SDM 1:8.1.3 Figure 8-4: SF bit 6
+fsw | ES | 7  | SDM 1:8.1.3 Figure 8-4: ES bit 7
+fsw | C0 | 8  | SDM 1:8.1.3 Figure 8-4: C0 bit 8
+fsw | C1 | 9  | SDM 1:8.1.3 Figure 8-4: C1 bit 9
+fsw | C2 | 10 | SDM 1:8.1.3 Figure 8-4: C2 bit 10
+fsw | TOP | 11 | SDM 1:8.1.3 Figure 8-4: TOP bits 11-13
+fsw | C3 | 14 | SDM 1:8.1.3 Figure 8-4: C3 bit 14
+fsw | B | 15 | SDM 1:8.1.3 Figure 8-4: B bit 15
+# Control word layout (SDM 1:8.1.5, Figure 8-6): field | bit position
+fcw | IM | 0 | SDM 1:8.1.5 Figure 8-6: IM bit 0
+fcw | PM | 5 | SDM 1:8.1.5 Figure 8-6: PM bit 5
+fcw | PC | 8 | SDM 1:8.1.5 Figure 8-6: PC bits 8-9
+fcw | RC | 10 | SDM 1:8.1.5 Figure 8-6: RC bits 10-11
