@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 00:41Z w14 286e6fce6 libnx stage 3 accepted (184 .c + 5 .s, 190 members, x19..x27 C8 0 violations, mm.c pointee fix). Open before publish: C9 data-model check of libnx under ILP32 (warning classes + struct layout diff ILP32 vs LP64 over switch.h closure; svc/IPC/shmem wire types must match), w14 doing.
 - 2026-11-15 00:38Z L2 msvcmodel compiler with binary64 long double published: tools/gcc-ilp32-msvcmodel b274ec067, tree a1eeb84d. w14 go: repin, rebuild_pair (runtime + libnx C8) on farm, publish msvcmodel13, repin guest_compiler.json.
 - 2026-11-15 00:36Z w9 f24506325 accepted: os_text_entry(init,out) over fixed struct fnvnx_text, BADINPUT check gone from the guest; host service 36 ABI unchanged (host-side checks stay as the service contract). L2 compiler fbc1cb989 (long double 64) building on farm session_01KmtZKVByegDXmdVwtmHRWU.
 - 2026-11-15 00:33Z w9 76859b6e7: declared_input_broken deleted (gdifont sites on Wine 9.0 paths), swkbd applet failure -> no text. Contract branch of os_text_entry: closed by type (fixed-size fnvnx_text, BADINPUT check deleted) instead of a reach request (w9 doing). noreturn set: process-end 5, thread-end 2, reach class 2 (+2 local wrappers).
