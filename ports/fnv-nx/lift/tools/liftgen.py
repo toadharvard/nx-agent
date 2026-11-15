@@ -195,7 +195,7 @@ def finish(a):
     for i in range(NBUCKET):
         with open('%s/u/%03x.cpp' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
     open(pk + '/inc/fnvl_prelude.h', 'w', newline='').write('#ifndef FNVL_PRELUDE_H\n#define FNVL_PRELUDE_H\n' + L.prelude(os.path.join(LIFT, 'rt')) + '\n#endif\n')
-    open(pk + '/inc/imp.h', 'w', newline='').write(L.inline(os.path.join(LIFT, 'rt'), 'imp.h'))
+    open(pk + "/inc/imp.h", "w", newline="").write(L.inline(os.path.join(LIFT, "rt"), "imp.h", L._GEN[0]))
     syms = {x: 'L_%08x' % x for x in texts}; code = set(syms)
     imp, blocked, hit, absent = impgen.generate(a.bridge, pk, a.need, a.l3, None)
     if hit or absent: sys.exit('finish: an import row a loaded image needs has no entry (imp_blocked.tsv)')
@@ -264,7 +264,7 @@ def module_env(name):
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--shard'); A('--finish', action='store_true'); A('--recipe', nargs=3, metavar=('REF', 'COMMIT', 'TREE_SHA256')); A('--out', default='/home/user/l3work/liftgen'); A('--jobs', type=int, default=3)
-    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module'); A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
+    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module'); A('--emit', default='dsl', choices=['dsl'], help='dsl: instructions from the proven DSL forms (proof/lift_dsl.py) before the hand handlers of the mnemonics no Form covers')
     A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None); A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)

@@ -38,10 +38,7 @@ static void zero(u32 p, u32 n) { for (u32 i = 0; i < n; i += 4) M32(p + i) = 0; 
 enum { CX_I386 = 0x10000, CX_CONTROL = 1, CX_INTEGER = 2, CX_SEGMENTS = 4, CX_FP = 8, CX_DEBUG = 0x10, CX_EXT = 0x20, CX_FULL = CX_CONTROL | CX_INTEGER | CX_SEGMENTS,
        CX_EXCEPTION = CX_I386 | CX_FULL | CX_DEBUG | CX_FP | CX_EXT,      /* 0x1003F: save_context / raise_exception_full_context */
        CX_CAPTURE = CX_I386 | CX_FULL };                                  /* 0x10007: RtlCaptureContext (RtlUnwind) */
-/* FXSAVE's MXCSR_MASK of the reference CPU (Intel SDM vol. 1, 11.6.6 "Guidelines for Writing to the MXCSR Register": the mask has every bit set that the CPU lets software set;
-   bit 6 DAZ is set when the CPU supports denormals-are-zeros, which every CPU with SSE2 and FXSR of the model does) -- derived from the model's cpuid leaf 1, so a change of the leaf is a build error here. */
-static_assert((FNVL_CPUID1_EDX >> 24 & 7u) == 7u, "FXSR (24), SSE (25), SSE2 (26) of cpuid leaf 1 EDX: the model has FXSAVE with MXCSR and DAZ");
-#define FNVL_MXCSR_MASK 0xffffu
+/* FXSAVE's MXCSR_MASK is FNVL_MXCSR_MASK of fnvl_cpuref.h (verify/cpuid_model.json `mxcsr_mask`: derived, the Forms have no DAZ, SDM Vol 1 11.6.6). */
 enum { C_DR = 4, C_EXT = 204, FS_SIZE = 112, XS_SIZE = 512 };           /* Dr0 Dr1 Dr2 Dr3 Dr6 Dr7 at 4; FLOATING_SAVE_AREA 112 bytes at 28; ExtendedRegisters[512] at 204 */
 enum { FS_CW = 0, FS_SW = 4, FS_TW = 8, FS_EO = 12, FS_ES = 16, FS_DO = 20, FS_DS = 24, FS_REG = 28, FS_CR0 = 108 };       /* FLOATING_SAVE_AREA */
 enum { X_FCW = 0, X_FSW = 2, X_FTW = 4, X_FOP = 6, X_FIP = 8, X_FCS = 12, X_FDP = 16, X_FDS = 20, X_MXCSR = 24, X_MXMASK = 28, X_ST = 32, X_XMM = 160 };   /* XSAVE_FORMAT (FXSAVE image) */

@@ -271,6 +271,19 @@
     "freetype/gen/src/truetype/truetype.c",
     "freetype/gen/src/truetype/ttgxvar.fnvnx.inc"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/declared/x86sys.json",
+    "/out/declared/x86sys.json"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/declared/x86sys.json"
+   ],
+   "outputs": [
+    "declared/x86sys.json"
+   ]
   }
  ],
  "os_layer": [],
@@ -417,5 +430,8 @@
    "at": "/ext/freetype-debian"
   }
  ],
- "sources": "freetype/units.list"
+ "sources": "freetype/units.list",
+ "outputs": {
+  "X86SYS": "declared/x86sys.json"
+ }
 }
