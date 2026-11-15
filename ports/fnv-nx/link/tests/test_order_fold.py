@@ -69,6 +69,8 @@ def main():
         ms = mn(pre)
         if ms.count('ldar') != nl or ms.count('stlr') != nl or (pre == '_Z7copybig' and not [m for m in ms if m.startswith('b.')]):
             fails.append('%s: want %d ldar + %d stlr and no plain access: %s' % (pre, nl, nl, {m: ms.count(m) for m in set(ms)}))
+    if mn('_Z7ld_privPK3Bigi').count('ldar') != 2 or mn('_Z7ld_privPK3Bigi').count('stlr'):
+        fails.append('ld_priv: a shared aggregate into an unshared local is ordered loads (loop body + last unit) and no ordered store: %s' % mn('_Z7ld_privPK3Bigi'))
     if mn('_Z4retgv').count('ldar') != 3 or mn('_Z6passesPK3T12').count('ldar') != 3:
         fails.append('retg/passes: the shared source of a by-value copy is read with 3 ldar')
     for pre in ('_Z3rmwPi', '_Z3casPiS_'):
