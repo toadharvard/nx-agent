@@ -466,7 +466,7 @@
    "kind": "patch",
    "status": "closed",
    "doc": [],
-   "check": "ldbl/model.cpp cases (test_ldbl model() step)",
+   "check": {"kind": "test", "file": "toolchain/tests/test_ldbl.py", "id": "model"},
    "exe_source": "pinned cl 15.00 output recorded in ldbl/model.cpp comments (Microsoft does not document the cookie)"
   },
   {
@@ -948,7 +948,8 @@
     "rows": [
      "S25"
     ],
-    "reason": "Visual C++ keeps a vbptr and a vbtable, GCC (Itanium) a vtable with virtual-base offsets: sizes can agree, layouts do not; no msvcmodel patch"
+    "reason": "Visual C++ keeps a vbptr and a vbtable, GCC (Itanium) a vtable with virtual-base offsets: sizes can agree, layouts do not; no msvcmodel patch",
+    "tree_fact": "binfo_virtual"
    },
    {
     "id": "pointer_to_member",
@@ -957,7 +958,8 @@
      "S11",
      "S12"
     ],
-    "reason": "a function pointer to member is 8 bytes under GCC and 4 bytes (single inheritance) in MSVC, and the representation depends on the inheritance model; a data member pointer is 4 bytes on both (a 4-byte offset) but its representation of the null value is not documented by Microsoft, so it is forbidden too"
+    "reason": "a function pointer to member is 8 bytes under GCC and 4 bytes (single inheritance) in MSVC, and the representation depends on the inheritance model; a data member pointer is 4 bytes on both (a 4-byte offset) but its representation of the null value is not documented by Microsoft, so it is forbidden too",
+    "tree_fact": "ptrmem"
    },
    {
     "id": "va_list",
@@ -965,7 +967,8 @@
     "rows": [
      "S26"
     ],
-    "reason": "the exe's va_list is a char * into guest stack memory (cl); GCC's is the AAPCS64 structure. Native code never receives an x86 va_list as a va_list: a bridge that takes one walks it as guest memory by the x86 rules (4-byte-rounded slots)"
+    "reason": "the exe's va_list is a char * into guest stack memory (cl); GCC's is the AAPCS64 structure. Native code never receives an x86 va_list as a va_list: a bridge that takes one walks it as guest memory by the x86 rules (4-byte-rounded slots)",
+    "tree_fact": "va_list_node"
    }
   ]
  }

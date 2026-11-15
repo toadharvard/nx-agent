@@ -543,3 +543,15 @@ a stale tree. The rules below make that class impossible. Adding checks on top o
   - where the exe's own CRT routine uses `rep movs`/`stos`, SDM §8.2.4 fast-string semantics (fenced at entry and
     exit, unordered inside);
   - elsewhere, ordering per x86 store, by size path.
+
+## Orchestrator decision of 2026-11-15: sources of the declared machine (binding for L3a, L3b, L5)
+
+- Every row of the declared-machine records (`platform/declared/os.json`, `x86sys.json`) takes its value from these
+  sources, in order:
+  1. Microsoft documentation and the WDK 7.1 headers for Windows 7;
+  2. Wine 9.0's code, only where it contradicts neither source 1 nor the declared OS version (Windows 7). For example,
+     vector 0x29 (`__fastfail`, Windows 8 and later) is not in the set.
+- No other source counts; ReactOS is not one. A row with no source stays undecided and names its blocker.
+- A site in the exe or a module whose answer depends on an undecided row gets a call-graph reach certificate and goes
+  to `fnvnx_reach_violation`. Without the certificate the build is red, and the row is reported to the orchestrator.
+- Other code reads these records and never restates them (rule 2). seh.cc's trap rows are an example.

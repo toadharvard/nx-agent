@@ -1085,6 +1085,19 @@ static bool odr_hash_range(location_t start, location_t end, std::string &hex, s
 
 static bool odr_targ(tree a, std::string &out, std::string &why)
 {
+  /* an argument pack (a variadic template's arguments; TYPE_P is true for a TYPE_ARGUMENT_PACK, which no mangling accepts) is the
+     I...E of its elements, each the argument it holds; an empty pack is IE */
+  if (ARGUMENT_PACK_P(a)) {
+    out = "I";
+    tree v = ARGUMENT_PACK_ARGS(a);
+    for (int k = 0; k < TREE_VEC_LENGTH(v); k++) {
+      std::string e;
+      if (!odr_targ(TREE_VEC_ELT(v, k), e, why)) return false;
+      out += e;
+    }
+    out += "E";
+    return true;
+  }
   if (TYPE_P(a)) { out = odr_type_name(a); return true; }
   if (TREE_CODE(a) == INTEGER_CST) {
     out = "L" + odr_type_name(TREE_TYPE(a)) + (tree_fits_shwi_p(a) ? std::to_string(tree_to_shwi(a)) : std::to_string(tree_to_uhwi(a))) + "E";
