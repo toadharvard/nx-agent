@@ -276,3 +276,4 @@ After the first frame:
   - ORD-T: after the rewrite, every GIMPLE access is either ordered or plain with exactly one reason from a closed set; a plain access with no reason is a compile error, and the record holds counts per reason.
   - Then the class rules: RO (no-SHF_WRITE section, gate-side), BYREF (pass_by_reference copy, `args:N`), and the private array with a variable index (gate-side join, L1 w15).
   - The rest are grouped after ORD-T. Doing.
+- VEC1 widened (from L1). The row is `vec:<N>:<size>:<align>:<elem>`. Every tcc_type code of the pinned GCC 13.3 tree.def gets a row, a cited proof that it cannot reach a decl, or a deliberate error, and a test derives that universe from tree.def. Also reached: render/d3d9 ffp_vs_state.c:127 (a vectorizer temporary). The handover goes to L1 w15 for the gate_abi parser.
