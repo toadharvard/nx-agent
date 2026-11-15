@@ -12,14 +12,26 @@
 #include <libgen.h>
 #include <cstring>
 #include <set>
+#include <vector>
 #include <string>
 #include <cstdio>
 int plugin_is_GPL_compatible;
-static std::set<tree> decls;
-static std::string outpath;
+static std::set<tree> decls, defs, declared_noreturn;   // declared_noreturn: noreturn as the source DECLARES it (read while parsing)
+static std::string outpath, retpath;
+static std::vector<std::string> sjdirs;   // directories of the PINNED libc/runtime headers: only a <setjmp.h> inside one of them is ISO C 7.13's
 static void on_decl(void *gcc_data, void *) {
   tree d = (tree)gcc_data;
-  if (d && TREE_CODE(d) == FUNCTION_DECL) decls.insert(d);
+  if (d && TREE_CODE(d) == FUNCTION_DECL) {
+    decls.insert(d);
+    if (TREE_THIS_VOLATILE(d)) declared_noreturn.insert(d);
+  }
+}
+static void on_def(void *gcc_data, void *) {
+  tree d = (tree)gcc_data;   // PLUGIN_FINISH_PARSE_FUNCTION: a function definition has been parsed
+  if (d && TREE_CODE(d) == FUNCTION_DECL) {
+    defs.insert(d);
+    if (TREE_THIS_VOLATILE(d)) declared_noreturn.insert(d);
+  }
 }
 static void on_unit(void *, void *) {
   // Terminators: noreturn functions that END THE PROCESS. Unwinders (printed as "~name"): calls that continue the propagation of an
@@ -36,24 +48,49 @@ static void on_unit(void *, void *) {
     if (d && DECL_NAME(d)) unw.insert(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)));
   }
   for (tree d : decls)
-    if (TREE_THIS_VOLATILE(d) && DECL_NAME(d)) {
+    if (declared_noreturn.count(d) && DECL_NAME(d)) {   // DECLARED noreturn: the flag GCC's own inference sets later (pure-const) is not a declaration
       std::string n = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
       const char *src = DECL_SOURCE_FILE(d);
-      std::string base = src ? std::string(src).substr(std::string(src).find_last_of('/') + 1) : "";
-      ((cxx && !TREE_NOTHROW(d)) || base == "setjmp.h" ? unw : term).insert(n);
+      std::string path = src ? src : "", base = path.substr(path.find_last_of('/') + 1);
+      bool sj = false;   // declared by the pinned <setjmp.h>: the file is named setjmp.h AND lies inside a pinned header directory
+      if (base == "setjmp.h")
+        for (auto &dir : sjdirs) if (path.compare(0, dir.size() + 1, dir + "/") == 0) sj = true;
+      ((cxx && !TREE_NOTHROW(d)) || sj ? unw : term).insert(n);
     }
   FILE *f = fopen(outpath.c_str(), "w");
   if (!f) return;
   for (auto &n : term) fprintf(f, "%s\n", n.c_str());
   for (auto &n : unw) if (!term.count(n)) fprintf(f, "~%s\n", n.c_str());
   fclose(f);
+  if (!retpath.empty()) {
+    // The typedef name of the return type of every function DEFINITION (`FT_Error f(...) {..}`: TYPE_NAME of the return type is a TYPE_DECL), one
+    // `assembler-name<TAB>typedef` line, sorted. It is the compiler's own type, not a text match; the error convention of a library
+    // (recipe external_errors) is read against it.
+    std::set<std::string> rows;
+    for (tree d : defs)
+      if (DECL_NAME(d) && DECL_ASSEMBLER_NAME_SET_P(d)) {   // a template pattern has no assembler name (mangling it would be wrong): only emitted definitions
+        tree t = TREE_TYPE(TREE_TYPE(d)), n = t ? TYPE_NAME(t) : NULL_TREE;
+        if (n && TREE_CODE(n) == TYPE_DECL && DECL_NAME(n))
+          rows.insert(std::string(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d))) + "\t" + IDENTIFIER_POINTER(DECL_NAME(n)));
+      }
+    FILE *g = fopen(retpath.c_str(), "w");
+    if (!g) return;
+    for (auto &r : rows) fprintf(g, "%s\n", r.c_str());
+    fclose(g);
+  }
 }
 int plugin_init(plugin_name_args *a, plugin_gcc_version *v) {
   if (!plugin_default_version_check(v, &gcc_version)) return 1;
   for (int i = 0; i < a->argc; i++)
     if (std::string(a->argv[i].key) == "out") outpath = a->argv[i].value;
+    else if (std::string(a->argv[i].key) == "ret") retpath = a->argv[i].value;
+    else if (std::string(a->argv[i].key) == "setjmp-dirs") {
+      std::string v = a->argv[i].value;
+      for (size_t p = 0, q; p <= v.size(); p = q + 1) { q = v.find(':', p); if (q == std::string::npos) q = v.size(); if (q > p) sjdirs.push_back(v.substr(p, q - p)); }
+    }
   if (outpath.empty()) return 1;
   register_callback(a->base_name, PLUGIN_FINISH_DECL, on_decl, NULL);
+  register_callback(a->base_name, PLUGIN_FINISH_PARSE_FUNCTION, on_def, NULL);
   register_callback(a->base_name, PLUGIN_FINISH_UNIT, on_unit, NULL);
   return 0;
 }

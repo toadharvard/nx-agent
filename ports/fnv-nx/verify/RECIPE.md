@@ -11,7 +11,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
  "include": ["ports/fnv-nx/X/inc", "ports/fnv-nx/X/gen", "/ext/ft/include"],
  "units": "all",
  "generated": [{"tool": "ports/fnv-nx/contract/gen.py", "args": ["/out/gen/t.h"], "inputs": ["ports/fnv-nx/X/table.tsv"], "outputs": ["gen/t.h"]}],
- "os_layer": ["os.S"], "constants": "constants.tsv", "contract_names": "contract.tsv",
+ "os_layer": ["os.S"], "tests": [{"name": "t1", "units": ["tests/t1.cc"]}], "constants": "constants.tsv", "contract_names": "contract.tsv",
  "link": {"script": "link.ld", "output": "x.elf", "flags": ["-m", "aarch64linux32"], "roots": ["ports/fnv-nx/other"],
           "libs": {"external": "tc", "dirs": ["lib"], "names": ["c"], "startfiles": ["lib/crt1.o"], "endfiles": ["lib/crtn.o"]}},
  "plugins": [{"name": "fnvnx_order", "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc", "args": {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}},
@@ -28,6 +28,13 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
   compiled. A file that must not be compiled does not belong in the root; there is no `exclude`.
 - `run`: see "Run stages" below.
+- `tests`: the declared test binaries of the root, `[{"name": N, "units": [root-relative sources]}]` (no double in tests, CLAUDE.md of 2026-11-11 night).
+  Every source of the root is a PRODUCT unit or a unit of exactly one test (a unit in two tests, or not a source of the root, is an error).
+  A test is linked by the recipe as `test-N.elf` from ALL product units of the root plus its own units, with the root's `link` script and flags
+  (so `tests` needs `link`); it never replaces a product file. A test unit is not in `objects`/`defined`/`units` of the result: the result has
+  `tests` [{name, units, objects, linked, defined, elf}]. The stub gate (`objstub`, doubles.py) is red when a test defines a symbol that any
+  product root defines (global, weak or unique; no allow-list), when `linked` lacks a product unit, or when two product objects of one root define
+  the same GLOBAL symbol.
 - `generated`: python generators run as sandbox stages before compilation, in list order. `tool` is a tracked `.py` of an admitted tool or product
   root (the whole root is mounted at `/tool`, the script at `/tool/<path in its root>`), `inputs` are tracked files or directories (repo-relative;
   mounted at `/in/<repo path>`; they may not nest), the generator writes ONLY `/out/<output>` (the set of produced files must equal `outputs`).
@@ -118,6 +125,11 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
   re-derives the set and reads it back from the CC stage documents; a unit lacking a loadable plugin .so is red, no name list, no exception list.
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root. (ASM-101)
 Check: `lifted_by` must be a tracked `.py` of an admitted root of class `tool` (recipe.py check, `cxx_origin.lifted_by ... is not a tracked .py of an admitted tool root` otherwise), and the gate proves that no hand-written C++ sits in a lifted root: every C++ unit is an output of a step of that tool. When the single lifter `liftall.py` is on the trunk, `lifted_by` must equal its path (one constant `LIFTER` of recipe.py); until then the check is the one stated here.
+
+### The analysis plugin (`objstub_plugin`)
+`ANALYSIS_PLUGIN` (verify/objstub_plugin.cc) is the plugin of the gate `objstub`: the recipe builds it, as the same hermetic stage `plugin:<name>` as every other plugin, for the target compiler of every root that has C/C++ units
+(the plugin headers of that compiler, the host driver `PLUGIN_CXX`). No `build.json` declares it and no CC stage loads it; the gate loads it over the preprocessed text of the units. The result holds
+`analysis_plugin: {name, sha256, path}` (the file `plugins/objstub_plugin.so` beside the objects). There is no other build of it: the gate has no compiler call of its own for it.
 
 ## Link: the guest ELF
 There is one way to link: the recipe key `link` (no other path runs a linker; link/ has no subprocess call). Every key below is validated by
@@ -232,6 +244,9 @@ is listed in the `except` of lift/descs' recipe in the commit that admits it, an
 ### errno (objstub, derived, no recipe key)
 How the root's libc reaches `errno` is derived per root: objstub compiles `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler and unit flags and reads the object (`errno_probe`): a call relocation to a symbol X is the accessor, a TLS relocation to Y is the thread-local form. The final ELF is then judged (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image). A body that cannot be judged (a data island, a word LLVM rejects, an odd size) is the finding `unjudged`; the TLS form is `unjudged` for the root. Nothing is skipped.
 
+### `external_errors` (objstub)
+`external_errors: {EXTERNAL: {"type": TYPEDEF, "success": INT}}` declares once per library the error convention of an external whose units enter through `sources` (FreeType: `{"freetype": {"type": "FT_Error", "success": 0}}`). A unit `<external>/<path>` is a copy of that external's pinned file, so its V bodies (no effect, constant result) are the library's own code and are real, with one exception: a body whose return type (the compiler's own typedef name of the definition, from the objstub plugin) is the declared error type and that returns a constant other than `success` is the finding `external-error-constant`: an error answer where the library does work.
+
 ### `error_abi` and `empty_handlers` (objstub)
 `error_abi` declares the root's one failure function and how its definition signals failure: `{"fail": SYMBOL, "kind": "noreturn"}` (the definition does
 not return) or `{"fail": SYMBOL, "kind": "flag", "flag": FIELD}` (the definition stores a nonzero constant to the member FIELD of the structure its first
@@ -274,7 +289,7 @@ inputs); a library that cannot be resolved is a red build naming the object and 
 it is passed as `-I<that path>` (the external is a declared input of every stage, so keys stay content-addressed).
 
 ## Result (`objects.json`, "fnvnx-objects/1")
-`objects` [{unit, object, sha256, os_layer}], `elf` {path, sha256}|null, `constants`, `contract_names` (paths of the copies or null),
+`objects` [{unit, object, sha256, os_layer}] (product units), `tests`, `elf` {path, sha256}|null, `constants`, `contract_names` (paths of the copies or null),
 `pp_keys` {unit: stage key of its preprocessor stage; its result `unit.ii` is in the store GATE_CACHE/store, read by objstub to derive the
 terminator set}, `units`, `defined` [{symbol, bind GLOBAL|WEAK|UNIQUE, type, object}] and
 `undefined` [symbol] from the ELF `.symtab` of every object, `stage_keys`, `stages` {run, hit}, `status`; red adds `failure` {stage, exit, stderr
