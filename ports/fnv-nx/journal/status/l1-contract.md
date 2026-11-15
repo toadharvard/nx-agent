@@ -1798,3 +1798,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d. The cold pack build waits for cand3 (PP keying, sharding).
 - 20:59 w12 179158f99: stage timing is done. Wall/CPU go to a sidecar <key>.time that store-merge does not compare; the @time variant gives TIMEREPORT, read by `recipe timing`; test_timing passes; L4 has it. fa5f145c0 fixes test_bridgefacts. Queue: assumptions ids, then the citation merge for L6 (w27 de9996915), then PP keying, then CROSSING.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
+- 21:03 w12 d90e5e45d: the assumptions gate shows 0 mention-no-id over 1103 files (9cfa6ee57). Precision fix asked: objdump falls under ASM-001 (pinned binutils), not ASM-043 (LLVM/capstone). The citation rule O is merged (a889bf949 + de9996915; x86-64 gatecert left out); test_objstub_owner passes; L6 has the head. test_objstub's 20 failures predate this (toy root has no declared_sources.json). crossing.py reads exefacts through --facts (L2).
+bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
