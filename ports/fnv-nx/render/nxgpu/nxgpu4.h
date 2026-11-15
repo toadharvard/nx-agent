@@ -211,19 +211,19 @@ typedef struct NxImageRead {         /* waits for all submitted work */
  * memory immediately. The device never uses NxSubmit.present and never calls WAIT_FRAME for a present: frames in
  * flight are bounded by the stream ring of the glue (glue_stream.h R4).
  *
- * The software cursor (rule P2). D3D9 draws the software cursor over the PRESENTED image, never into the back
- * buffer (Wine 9.0 wined3d/swapchain.c swapchain_gl_present, cursor_texture: drawn onto the drawable after the back
- * buffer was blitted into it, recalled, the Wine source is not in this tree; the back buffer is not touched, so a later GetBackBuffer / lock reads what the application
- * drew). NxOp_Blit cannot express it (a Blit copies raw values, no blending, and is a stream op that runs before the
- * present), so the cursor is part of the present: when cursor != 0, after the destination rect has been written
- * (gamma included) and before the frame file / hook / display, the cursor image is alpha blended onto the swapchain
- * image. `cursor` = address of cw x ch pixels, D3DFMT_A8R8G8B8 (bytes B, G, R, A in memory), rows cw * 4 bytes
- * apart, top row first; (cx, cy) = the top-left corner in swapchain pixels (may be negative or outside: the part
- * outside the swapchain image is dropped; entirely outside = no change). 1 <= cw, ch <= 4096, else BAD_CALL (no hook
- * runs). Blend, exactly: a = pixel alpha (0-255); for each colour channel c with cursor value v (the gamma ramp,
- * when the present has one, is applied to v first: v = ramp[c][v] >> 8, as the display's ramp acts on the whole
- * output) and swapchain value d: out = (v * a + d * (255 - a) + 127) / 255 (integer division); the swapchain
- * alpha is unchanged. cursor = 0: no cursor.
+ * The software cursor (rule P2), as Wine 9.0 draws it: wined3d/cs.c wined3d_cs_exec_present (649-700) blits the cursor texture into
+ * the back buffer (back_buffers[0]) before swapchain_present, with WINED3D_BLT_ALPHA_TEST and the POINT filter, clipped by
+ * wined3d_clip_blit; the glsl blitter (glsl_shader.c glsl_blitter_blit 13232-13279 and shader_glsl_generate_colour_key_test 7534)
+ * turns that op into a colour-key test with low = 0 and high = ~(alpha mask), which discards a texel whose alpha is 0 and
+ * copies every other texel unchanged (blending is off). So the cursor is part of the source image: when cursor != 0, BEFORE
+ * the present blit the cursor texels whose alpha is not 0 replace the texels of the source image (`image`, every colour
+ * format, multisampled included: all samples of a covered pixel) at (cx, cy); texels with alpha 0 leave the image as it is;
+ * the part outside the image is dropped (entirely outside = no change). The present blit and the gamma ramp then act on the
+ * image with the cursor in it, so the ramp applies to the cursor too, and the image keeps the cursor afterwards (a later
+ * GetBackBuffer or lock reads it). `cursor` = address of cw x ch pixels, D3DFMT_A8R8G8B8 (bytes B, G, R, A in memory), rows
+ * cw * 4 bytes apart, top row first; (cx, cy) = the top-left corner in pixels of the source image (back-buffer pixels).
+ * 1 <= cw, ch <= 4096, else BAD_CALL (no hook runs). The value written into a texel is the cursor's R, G, B, A converted to
+ * the image's format as an ordinary colour write. cursor = 0: no cursor.
  *
  * Swapchain image contents (rule P3): RGBA8, row 0 = top; the backend creates it all zero (RGBA 0, 0, 0, 0);
  * afterwards it holds what was last written to it (presents; v3 passes / blits that target image 0).
@@ -247,7 +247,7 @@ typedef struct NxPresent {
     uint64_t gamma;                  /* 0 or the address of 3 x 256 u16 (D3DGAMMARAMP) applied by the present blit */
     uint32_t frame, pad;
     uint64_t cursor;                 /* 0 or the address of cw x ch BGRA pixels (rule P2) */
-    int32_t cx, cy;                  /* top-left corner of the cursor in swapchain pixels */
+    int32_t cx, cy;                  /* top-left corner of the cursor in pixels of the source image (rule P2) */
     uint32_t cw, ch;
 } NxPresent;
 NX_ASSERT_(sizeof(NxPresent) == 80, "NxPresent");

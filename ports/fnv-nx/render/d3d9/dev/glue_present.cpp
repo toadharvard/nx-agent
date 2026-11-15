@@ -3,8 +3,8 @@
 // names, through glue_stream.h (flush rule R1-R4, exhaustion rules E1-E3 there). The rules P1-P5 of the backend side are written at NxPresent in nxgpu4.h.
 //  present      R2d: the pending stream is submitted (nxs_flush), then NXGPU_FN_PRESENT(NxPresent). P1: the call is ordered after every submitted stream and consumes all its memory before it returns, so no
 //               NXGPU_FN_WAIT_FRAME is needed (the ring bounds the frames in flight, R4) and nothing outlives the call. The NxPresent is copied into the scratch (E2) with the gamma ramp behind it
-//               (the chain's ramp is CPU memory: the backend reads only nxd3d_gpu_alloc memory); the software cursor pixels (P2: the cursor is blended onto the PRESENTED image by the backend, the back
-//               buffer is never touched, so no stream op can express it) are copied into a block that lives for this call only. Exhaustion: that block is the one allocation a present makes, and only
+//               (the chain's ramp is CPU memory: the backend reads only nxd3d_gpu_alloc memory); the software cursor pixels (P2: the backend stamps the cursor into the back buffer before the present blit, as Wine does,
+//               which no stream op can express) are copied into a block that lives for this call only. Exhaustion: that block is the one allocation a present makes, and only
 //               while a cursor is visible; null = NXD3D_HOOK_NOMEM before anything was done (D3DERR_OUTOFVIDEOMEMORY at the device); the ring and the scratch exist because the back buffer's creation reserved them (E1).
 //  wait_idle    nxs_finish: flush and wait for every submitted frame.
 //  frontbuffer  R3: flush, NXGPU_FN_INFO for the swapchain size (an image the size of the window's client area), NXGPU_FN_IMAGE_READ with src.image 0 (P4) of the part of the w x h rectangle that lies inside

@@ -173,6 +173,7 @@ void gl4_query_pause(void);          /* internal draws (scale blits) must not co
 void gl4_query_resume(void);
 /* gl4_scale.c: point-filtered scaling by rule (source texel floor((d + 0.5) * sw / dw)), texelFetch shaders */
 void gl4_scale_point(const Gl4Sub* s, const Gl4Sub* d, const uint16_t* ramp);   /* ramp: 3 x 256 u16 or NULL */
+int gl4_cursor_stamp(const Gl4Image* im, int32_t cx, int32_t cy, uint32_t cw, uint32_t ch, const uint8_t* bgra);   /* nxgpu4.h P2 (gl4_scale.c) */
 /* gl4_present.c */
 uint64_t gl4_api_present(uint64_t desc);
 uint64_t gl4_api_wait_vblank(uint64_t output);
