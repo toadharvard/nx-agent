@@ -285,7 +285,7 @@ if plug:
     esc = dis.split('<_Z3escv>:')[1].split('\n\n')[0]
     check('plugin: the writes to the escaped local are stlr', 'stlr\twzr' in esc and 'stlr\tw0' in esc, True)
     retf = dis.split('<_Z3retv>:')[1].split('\n\n')[0]
-    check('plugin: the return slot store is preceded by dmb ish', retf.index('dmb\tish\n') < retf.index('stp\tx2, x3, [x8]'), True)
+    check('plugin: the return slot aggregate is stored unit-wise, 5 stlr and no plain store of it', (retf.count('stlr'), 'stp\tx2, x3, [x8]' in retf), (5, False))
     r, j = gate(po)
     check('gate on plugin object is red for the two documented functions', (r.returncode, j['status']), (2, 'red'))
     r, j = gate(plain)
