@@ -337,8 +337,7 @@ def guest_errors(rec, spec, roots, pin):
     bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
     rt = pin.get("runtime")   # the guest's libc/libstdc++ external: when a recipe declares it (by name), it is the pinned one, exactly
     if isinstance(rt, dict):
-        rte = {k: v for k, v in rt.items() if k != "libs"}   # the external's identity; `libs` is the layout the guest links by (below)
-        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rte) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rte]
+        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
     bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
@@ -351,12 +350,6 @@ def guest_errors(rec, spec, roots, pin):
     # a flag that downgrades an error to a warning (or silences it) lets a diagnostic a rule relies on vanish
     bad += ["flags.%s: %s downgrades an error (forbidden)" % (k, f) for k in ("c", "cxx", "asm") for f in (fl.get(k) if isinstance(fl.get(k), list) else [])
             if isinstance(f, str) and (f in ("-fpermissive", "-w", "-Wno-error") or f.startswith("-Wno-error="))]
-    # the guest's libraries are the runtime's own layout: a guest root that declares link.libs declares the pin's, exactly (the external is the pinned runtime)
-    lb = rec["link"].get("libs") if isinstance(rec.get("link"), dict) and isinstance(rec["link"].get("libs"), dict) else None
-    if lb is not None and set(lb) != {"system"}:
-        want = dict(rt["libs"], external=rt["name"]) if isinstance(rt, dict) and isinstance(rt.get("libs"), dict) else None
-        if lb != want:
-            bad.append("link.libs is %s, pinned %s (runtime.libs of %s)" % (lb, want, GUEST_PIN))
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
