@@ -1013,3 +1013,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - 34 of the 35 are jump tables with no jtab facts: the old facts external 6944080c has no jtab_tables. liftsrc takes UNIVERSE, FACTS and JTAB from w7-facts2 b9261cd85, and FPSTATE, FPDEPTH and RETN from w13 (once rebased onto e7b12ab35), all through `uses`; the 6944080c external is deleted.
   - 1 missing: int 0x6 in the exe, where the vector is undecided. L5 is asked to decide every non-gate vector by its precedence, from Wine 9.0's #GP path in signal_i386.c segv_handler, with lines cited, as one row with no list.
   - The consumer rule (int n semantics from the record) is done by w8 now.
+- 22:55 L5 decided other_vectors by precedence (2), from Wine 9.0 signal_i386.c @ c8373ee49fb6 (segv_handler PROTFLT L1925-1940, handle_interrupt default L1804, setup_exception_record L1449). Result: AV 0xC0000005 with info [0, 0xffffffff] at the int instruction, continuable. Vector 41 stays undecided.
+  - L5 w15 writes it into gen_x86sys.py (claude/fnv-l5-platform-w15).
+  - The lifter's three cases (gate, other, undecided) all come from the record (w8).
+  - Counts requested: int 0x29, int 0x2a-0x2e (direct system calls: a non-zero count goes to L5 and the orchestrator), other int n, gs.
