@@ -1296,3 +1296,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w20u cbf20c9cd: the doubles gate, stage 1 (recipe `tests` key, doubles.py in objstub). The FNVNX_IMAGE_ENTRY exception (from PP) and the global doubles count are pending.
 - L5 w10 310d0e97e accepted (resolve_input: a tracked directory is a blob copy from ls-files -s, the ident is a (path, blob) sha, a symlink is red). 7 roots green on its head. For cand2.
 - L2 w3 ccd19e8a7: .fnvnx.odrdef landed. w23 implements tier 2 in gate_abi/linkstrict; the acceptance case is the 6 std::string instantiations.
+- declared_machine.tsv grammar ruling (w20 implements, w10 reruns on L5 16438f911):
+  - kind `noreturn` is the T2 citation row, valid only with noreturn on the pinned or hostabi declaration (from PP);
+  - `|`-joined sources are allowed when each token matches the grammar, sorted and unique.
