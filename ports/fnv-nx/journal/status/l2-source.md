@@ -366,3 +366,6 @@ After the first frame:
 - Layout complex: done, w3 claude/fnv-l2-source-w3-complex @11046f749. Rows `complex:`, the `atomic:` qualifier, and `ref:` (being added). The ctypes_compat reader now parses vec/host/complex/atomic; before it, the VEC1 and HOST1 rows were unparseable to gate_abi. The 20 error arms were re-checked with GCC 13.3 citations. Spec sent to L1 w15. The farm has its START from w3.
 - S23: UNION1 @2b5c9c358 (w3-union1), names fnvnx_key @9e2bab014 (w3-unionkey), test_names 14/14. PARKED (decomp C++ is off the path until the first frame): the farm prepare (14.5 min) and the 896-unit run wait. The rule 4 plan is that the shim's declared names come from a recipe unit's own decltype and names records; DECL2 and sdk_only_names read them.
 - w3: waiting for the none-elf pin (cached test reruns).
+- Runtime asm check: w2 link/rtasm.py @c5ebcf238, test 16 checks. Measured on msvcmodel13, partial: 148 assembled objects, 862 accesses, 439 violations; over the linked set 13 objects and 206 violations (libc string .S, libgcc lse and SME).
+  - Rulings: the universe is objects without our plugin records, judged over the linked members. BT is computed on the link's call graph. lse ordering comes from lse.S. jmp_buf comes from decltype. libnx must be covered. RO is accepted, by relocation.
+  - w2 doing these now, then the full numbers on the none-elf pin.
