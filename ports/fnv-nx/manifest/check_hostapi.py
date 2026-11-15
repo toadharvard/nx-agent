@@ -20,8 +20,8 @@ Checks (exit 1 with one line per violation):
   C. no scanned file defines a name the header defines;
   D. the host's served set equals the declared set: judged by verify/gate_hostapi.py served_ids (the one home; the hosts and their service tables
      are declared in verify/admit.json "serves"). Every declared service that the header counts has exactly one server with the header's count; a served
-     name the header does not declare, or a declared (counted) service with no server, fails. A host file never serves by a numeric range
-     (FNVNX_PLAT_SOCK_FIRST / _LAST): every number outside the declared set answers NO_SERVICE by the table's own default.
+     name the header does not declare, or a declared (counted) service with no server, fails. A host file never serves by a numeric range:
+     every number outside the declared set answers NO_SERVICE by the table's own default.
   E. the identifiers FNVNX_PLAT_* appear only in hostapi.h's own defines and in unit files (.c, .cpp, and the .inc files a unit includes):
      no other header (.h, .hpp, .hh anywhere under the root but build/out directories) mentions one, comments included. A header
      reaches a service only through a function of a unit.
@@ -69,8 +69,6 @@ def parse_header(text, errs):
     svc, mod = {}, {}
     for m in re.finditer(r"^[ \t]*#define[ \t]+FNVNX_PLAT_([A-Z0-9_]+)[ \t]+(0[xX][0-9a-fA-F]+|\d+)[uU]?\b", code, re.M):
         name, num = m.group(1), int(m.group(2), 0)
-        if name in ("SOCK_FIRST", "SOCK_LAST"):
-            continue
         if name in svc:
             errs.append("%s: service name %s defined twice" % (HDR, name))
         svc[name] = num
