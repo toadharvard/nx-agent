@@ -41,6 +41,14 @@ check('a root that merely shares a prefix is outside', kinds('ports/fnv-nx/rende
 check('uncited body keeps its finding', kinds(IN, {}) == ['V'])
 check('two records for one body', kinds(IN, {'f': ['od:gl-shader-failure', 'dm:31']}) == ['cite-mismatch'])
 
+# path independence: a cited body that an earlier branch flags (the fnvnx_wine_fixme path, a terminator path, a real body) is decided by the anchor alone
+for kind in ('WINE-V', 'wine-fixme-in-real-body', 'T2', 'CITED', 'trap-body', 'fallthrough'):
+    for oid, cite, want in ((IN, ['od:gl-shader-failure'], []), (OUT, ['od:gl-shader-failure'], ['owner-decision-wrong-root']), (IN, ['od:no-such'], ['owner-decision-unknown-id'])):
+        r = res({'f': cite})
+        r['finds'] = [('f', kind, 'x', None)]
+        r['wine_id'] = {'f': 5}
+        items, finds = objstub.judge({oid: r}, {}, None, wine={5: ('f', 'wine-9.0:a:b', 'void', '')}, owners=OWN)
+        check('finding %s on a cited body: %s' % (kind, want), sorted(k for _, _, k, _ in finds) == want, finds)
 d = tempfile.mkdtemp(prefix='objstub-owner-')
 p = os.path.join(d, 'CLAUDE.md')
 check('missing CLAUDE.md: no anchors', objstub.read_owner_decisions(p) == {})

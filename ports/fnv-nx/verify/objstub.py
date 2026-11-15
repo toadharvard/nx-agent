@@ -1377,6 +1377,8 @@ def check_obj(path, terms, os_layer, probe=None, machine=None):
             elif lk not in ("b", "end"):
                 fnd.append((name, "fallthrough", "last instruction %s can run into the next function" % lm, None))
             ids = cites_at.get((si, a), [])
+            if any(i.startswith("od:") for i in ids):
+                extra["cite"][name] = ids   # rule O reads the record before any rule branch: every finding of the body is decided by the anchor
             nrv = nr_ends(words, a, b, rel, o, fn_at)
             nterm = bisect.bisect_left(tk, b) - bisect.bisect_left(tk, a)
             if not any(f[1] in ("T1", "undecodable", "uncovered") for f in fnd):
