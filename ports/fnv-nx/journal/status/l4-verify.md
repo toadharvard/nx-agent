@@ -320,3 +320,9 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
     - entries.tsv is written by liftgen.py outside any stage. Sent to L3a.
     - softfloat.syms/.tsv has no generator; after the first frame.
   - w7-u reloc_census and its tests are deleted (de2080ab3); test_bootlayout 27.
+- 10:45:
+  - Task X (w7-u 6992c1c3c):
+    - boot_job takes keys.tsv and modules.tsv from the loader's declared outputs through stage-output; the branch copies are deleted.
+    - The boot root ports/fnv-nx/boot is admitted (L1 7f96612fa) and committed. Its recipe has one error: lift/pack declares no ENTRIES, waiting on L3a w8.
+    - Tests: test_bootinputs 81 green.
+  - Entry rule (L1 a924103e0): w6 is renaming the test entries and relinking bootguest.
