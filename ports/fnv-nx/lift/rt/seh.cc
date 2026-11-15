@@ -18,6 +18,7 @@
    CONTEXT_EXTENDED_REGISTERS takes it back through fpu_to_fpux (same file); with CONTEXT_EXTENDED_REGISTERS the image is restored with StatusWord &= ControlWord | 0xff80 (dlls/ntdll/unix/signal_i386.c, the CONTEXT_EXTENDED_REGISTERS arm of the CONTEXT restore: "reset the current interrupt status"). */
 #include "fnvl.h"
 #include "imp.h"
+extern "C" int TerminateProcess(void *process, unsigned code);
 extern "C" {
 u32 fnvl_os_unhandled(u32 record, u32 context);
 void fnvl_raise(u32 code, u32 at);
@@ -202,6 +203,8 @@ extern "C" void fnvl_raise(u32 code, u32 at) {
     u32 sp = esp, eip = at, addr = at, np = 0, nt = 0, info[3] = { 0, 0, 0 };
     switch (code) {
 #include "seh_faults.inc"                                  /* every fault code served by table: generated from fnvlift/faults.json (tools/gen_faults.py) */
+    case FNVL_FASTFAIL:                                        /* `int 0x29` (__fastfail, faults.json row FASTFAIL): the process ends at once with 0xC0000409, no handler of any kind runs (docs; Wine 9.0 differs, see the row) */
+        for (;;) TerminateProcess((void *)0xffffffffu, 0xC0000409u);      /* the self-termination entry of the platform: pseudo handle of the current process, does not return */
     case FNVL_DBGSRV:                                          /* Wine 9.0 unix/signal_i386.c handle_interrupt case 0x2d */
         if (eax == 1 || eax == 3 || eax == 4 || eax == 5) { c->ra = at + 3; return; }     /* BREAKPOINT_PRINT / LOAD_SYMBOLS / UNLOAD_SYMBOLS / COMMAND_STRING: the service is done, execution continues 3 bytes on, no exception */
         nt = 0x80000003u; addr = at + 3; eip = at + 2; np = 3; info[0] = eax; info[1] = ecx; info[2] = edx;    /* Eip += 3, ExceptionAddress = Eip, then setup_raise_exception's Context.Eip-- */
