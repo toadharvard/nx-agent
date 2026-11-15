@@ -42,7 +42,7 @@
  *                        the compatibility (6.2.7) of the declarations of external objects and functions, not the tag's name. So none of
  *                        the C++ predicates applies and the value says so.
  *
- * Declared types (section .fnvnx.decltype, C units only, not loaded): see the block comment before emit_decltype: one line `symbol <TAB> type` per
+ * Declared types (section .fnvnx.decltype, every unit: the external symbols of a C unit, the C-linkage symbols of a C++ unit; not loaded): see the block comment before emit_decltype: one line `symbol <TAB> type` per
  * external symbol the unit declares or defines, in the grammar of link/ctypes_compat.py (C11 6.2.7p2).
  *
  * Boundary-forbidden types (section .fnvnx.crossing, every unit, not loaded): written by the names plugin (the block comment before cross_holds in toolchain/names/fnvnx_names.cc): one line
@@ -356,6 +356,9 @@ static void add_decl(tree d)
 {
   if (!d || (TREE_CODE(d) != VAR_DECL && TREE_CODE(d) != FUNCTION_DECL) || !TREE_PUBLIC(d)) return;
   if (DECL_IS_UNDECLARED_BUILTIN(d) || !DECL_NAME(d)) return;
+  /* RULE (DECLTYPE-LANG): the symbols of a C unit and the symbols with C language linkage of a C++ unit (extern "C": the names C code can declare); a C++ name
+   * has the ODR (.fnvnx.odrdef) and the layout gates, not C's 6.2.7 */
+  if (is_cxx() && !(DECL_LANG_SPECIFIC(d) && DECL_EXTERN_C_P(d))) return;
   if (decls_set.insert(d).second) { decls.push_back(d); keep_decls = tree_cons(NULL_TREE, d, keep_decls); }
 }
 
@@ -439,7 +442,7 @@ static void finish_unit_cb(void *, void *)
   for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(lines[i]).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
   emit_objects();
-  if (!is_cxx()) emit_decltype();
+  emit_decltype();
 }
 
 extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *version)
