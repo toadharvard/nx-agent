@@ -23,6 +23,7 @@ from collections import Counter, defaultdict
 
 M32 = 0xffffffff
 WIDTH = 8
+STKW = 256                       # stack slots of a callee's frame above this byte offset are one slot (DEEP): bounds the table forwarded around a call cycle (a recursion adds a slot per pass otherwise)
 OBJW = int(os.environ.get("PTOBJW", "8"))
 UNK = (None, None); TOP = ('TOP', None)
 U = frozenset([UNK]); TOPSET = frozenset([TOP])
@@ -233,6 +234,13 @@ class PT:
             def rdmem(op):
                 if op.type == X.X86_OP_MEM:
                     ad = addr_of(op); v = self.read(ad)
+                    for o_, c_ in ad:                                  # incoming slots (and pushed ones) of this frame: the values the caller passed (feed), joined to the cells
+                        if o_ == fr:
+                            if c_ is None:
+                                for sv in st.values(): v = join(v, sv)
+                            else:
+                                sv = st.get(min(c_, STKW) if c_ >= 0 else c_)
+                                if sv is not None: v = join(v, sv)
                     if op.size and op.size != 4: v = U if not any(t[0] == 'TOP' for t in v) else TOPSET
                     return v
                 return None
@@ -391,7 +399,9 @@ class PT:
         if esp is not None:
             base = esp if tail else esp - 4
             for k, v in st.items():
-                if k >= (esp if tail else esp): s[k - base] = join(s.get(k - base), v)
+                if k >= esp:
+                    kk = min(k - base, STKW) if k - base >= 0 else k - base      # offsets from the callee's entry esp; at STKW and above one slot (DEEP): a join, sound
+                    s[kk] = join(s.get(kk), v)
         new = (r, s)
         if new != old: self.inp[t] = new; self.changed = True
 
