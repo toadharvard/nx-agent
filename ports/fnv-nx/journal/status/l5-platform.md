@@ -5,6 +5,7 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 2026-11-15 21:24: w9 and w10 archived (done, waiting on cand3). On cand3 landing a new worker reruns objstub + datamodel on the L5 roots. bottleneck: w12 cand3 merge; L1/L2 terminator plugin set; workers 0.
 - 2026-11-15 21:23: single L5 head for cand3 = w9 adba10d8e (4cfca085d + platform/build.json outputs INCLUDE/X86SYS, same lines as base3 d9d208c61); recipe builds green: platform 113 objects, loader 12, rt/guest 6. bottleneck: w12 cand3 merge; L1/L2 objstub terminator plugin set (fnvnx_host/fnvnx_entry registration) gates dm 12/12; workers 2 (w9, w10 idle until cand3).
 - 2026-11-15 22:00Z L4: platform on the L5 line lacks the INCLUDE output that L3a base3 d9d208c61 declares and lift/bridges uses, so the recipe is invalid and bridges plus every guest link are blocked. w9 adds outputs INCLUDE (as in base3) on 4cfca085d.
 - 2026-11-15 21:55Z single L5 head for cand3: claude/fnv-l5-platform-w9-paths 4cfca085d (f128f4efb + loader iface a9cefdbec + the fontmachine test commits). platform 113, loader 12, rt/guest 6, all green. Sent to w12. bottleneck: waiting on w12 to merge into cand3 and on the L1/L2 objstub terminator plugin set; workers 2 (both idle until cand3).
