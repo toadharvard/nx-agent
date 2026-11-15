@@ -294,3 +294,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - The L5 platform root is at 1bdc1b91a: 7 roots green, and the loader defines fnvnx_declared_fonts. w6 is merging it into w6-r.
   - Asked L5 to delete the manifest's mount_path, which duplicates FNVNX_SD_FONTS (rule 2).
   - Budget: 2 workers (w6, w7), 0 farms.
+- 09:40:
+  - Tasks U+V done (w7-u eb4cbb44d): every L4 ELF read goes through bootfacts and L1 w25's record (format /2, 7cf4bd302). No hand-written records are left. Pending: entry from header.entry, and the redundant filter deleted.
+  - L1 w12's two recipe rules are in (409f79837) and merged at w6-r 5c98d9225. w6 is running the icount root and the bootguest link.
+  - Blocked on L1: an admit rule for target-neutral header roots. It covers hostabi/include for bootrt (host, needed by 4.3 gl4) and verify/icount_abi for the icount root (guest).
+  - L6A: bootrt is admitted on w6-r; its base for the L4 files is w6-r.
