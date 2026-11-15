@@ -72,7 +72,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     if plugins is not None:
         raise ValueError('a guest root loads the full plugin set its front end can load (RECIPE.md gate rule): a subset is not a product configuration')
     plugs = [dict({'name': n, 'source': recipe.PLUGIN_SOURCES[n], 'args': dict(recipe.PLUGIN_ARGS[n])},
-                  **({'inputs': recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES if n in names]
+                  **{}) for n in recipe.PLUGIN_SOURCES if n in names]
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
            'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.SDD_DEFINE] + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
            'plugins': plugs}
@@ -81,7 +81,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     repo = os.path.join(base, 'repo')
     os.makedirs(repo)
     _git(repo, 'init', '-q')
-    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:
+    for n in recipe.plugin_files(REAL):
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     store = _store()
