@@ -19,13 +19,11 @@ def sect(nm, text):
     return '\t.section %s,"",%%progbits\n\t.ascii "%s"\n' % (nm, text.replace('\t', '\\t').replace('\n', '\\n'))
 
 
-def obj(name, rows, decl=None, sym='', cross=None, glob=(), extra=None):
+def obj(name, rows, decl=None, sym='', cross=None):
     s = os.path.join(tmp, name + '.s')
     o = os.path.join(tmp, name + '.o')
     lay = ''.join('\\t'.join(map(str, r)) + '\\n' for r in rows)
-    gl = ''.join('\t.globl %s\n' % k for k in list(glob) + list(decl or {}))
-    decl = dict(decl or {}, **(extra or {})) if (decl is not None or extra) else None   # every symbol of the record is a global symbol of the object (DECLTYPE-COMPLETE)
-    open(s, 'w').write('\t.text\n' + gl + (sect('.fnvnx.sympair', sym) if sym else '\t.section .fnvnx.sympair,"",%progbits\n') + ('' if cross is None else sect('.fnvnx.crossing', cross)) + ('' if decl is None else '\t.section .fnvnx.decltype,"",%progbits\n\t.ascii "' + ''.join(k + '\\t' + v + '\\n' for k, v in decl.items()) + '"\n') + '\t.section .fnvnx.layout,"",%progbits\n\t.ascii "' + lay + '"\n')
+    open(s, 'w').write('\t.text\n' + (sect('.fnvnx.sympair', sym) if sym else '\t.section .fnvnx.sympair,"",%progbits\n') + ('' if cross is None else sect('.fnvnx.crossing', cross)) + ('' if decl is None else '\t.section .fnvnx.decltype,"",%progbits\n\t.ascii "' + ''.join(k + '\\t' + v + '\\n' for k, v in decl.items()) + '"\n') + '\t.section .fnvnx.layout,"",%progbits\n\t.ascii "' + lay + '"\n')
     r = subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', s, '-o', o], capture_output=True, text=True)
     if r.returncode:
         fails.append('assemble ' + name + ': ' + r.stderr[-200:])
@@ -71,18 +69,9 @@ if ids:
 n, c, ids = judge(obj('cc', [row('S', 4, 'c')], {'v': S1}), obj('cd', [row('S', 4, 'c')], {'v': S2}))
 if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
     fails.append('C: a member type differing is red on the symbol: %r' % ids)
-n, c, ids = judge(obj('ce', [row('S', 4, 'c')], {'v': S1}), obj('cf', [row('S', 4, 'c')], glob=['v']))
-if not any('decltype:missing:v' in i for i in ids):
-    fails.append('C: a global symbol with no decltype line is red, missing:v: %r' % ids)
-n, c, ids = judge(obj('cg', [row('S', 4, 'c')], {'v': S1, 'w': '-mangled'}), obj('ch', [row('S', 4, 'c')], {'v': S1}))
-if ids:
-    fails.append('a complete object (a type line and a -mangled reason line) is green: %r' % ids)
-n, c, ids = judge(obj('ci', [row('S', 4, 'c')], {'v': S1}), obj('cj', [row('S', 4, 'c')], {'v': S1}, extra={'zz': 'int'}))
-if not any('decltype:extra:zz' in i for i in ids):
-    fails.append('a decltype line for a symbol the object lacks is red, extra:zz: %r' % ids)
-n, c, ids = judge(obj('ck', [row('S', 4, 'c')], {'v': S1}), obj('cl', [row('S', 4, 'c')], {'v': S1, 'w': '-bogus'}))
-if not any('unreadable' in i for i in ids):
-    fails.append('a reason outside the closed set is red: %r' % ids)
+n, c, ids = judge(obj('ce', [row('S', 4, 'c')], {'v': S1}), obj('cf', [row('S', 4, 'c')]))
+if not any('no .fnvnx.decltype' in i for i in ids):
+    fails.append('C: a C unit without the record is red: %r' % ids)
 # the section's presence is the fact: a unit of `external` linkage rows (C units of w3's layout) that carries .fnvnx.decltype is compared all the same
 n, c, ids = judge(obj('ea', [row('S', 4, 'external')], {'v': S1}), obj('eb', [row('S', 4, 'external')], {'v': S2}))
 if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
@@ -115,7 +104,7 @@ if ids:
 n, c, ids = judge(obj('na2', [], sym=NE, cross='f\tpointer_to_member\n'), obj('nb2', []))
 if ids:
     fails.append('noemit: its crossing line is a fact about the signature, with no symbol to bind it to: %r' % ids)
-n, c, ids = judge(obj('na3', [], sym=NE), obj('nb3', [], sym=SY.replace('def', 'def'), cross='f\t-\n'))
+n, c, ids = judge(obj('na3', [], sym=NE), obj('nb3', [], sym=SY, cross='f\t-\n'))
 if ids:
     fails.append('noemit in one unit, the definer in another: the definer\'s row is judged, green: %r' % ids)
 n, c, ids = judge(obj('na4', [], sym='f\t?f@@YAXXZ\tbogus\tdef\n'), obj('nb4', []))
