@@ -168,3 +168,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - toolchain/ftoi/f2i_builtins.inc together with gen_f2i_builtins.py and the changed fnvnx_ftoi.cc (owner L2).
 - Decision: the working line w6-r takes both from L5 a7b52eb38 unchanged. cand1 gets them from their owners; L1 has been told.
 - w6 (session_01KmtZKSWZWnNyxn2dMg6oFE): doing the step 4 ldcheck set (unresolved and weak-undefined, with owners), then step 5 (the runnable set).
+- 00:14: L1 confirms cand1 gets contract/reachreq.py (679eb04c8) and L2's fnvnx_ftoi 713aeee8b (f2i_builtins.inc and its PLUGIN_INPUTS entry) through L5 head a44acb71f. Nothing more needs routing. L2 lead: session_01KmtZKRi5XRMhd5qzRaEyxC. w6 adds the PLUGIN_INPUTS entry on w6-r, then runs the ldcheck.
