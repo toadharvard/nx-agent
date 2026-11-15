@@ -1525,7 +1525,8 @@ class Job:
         argv = ["/art/" + aout] + g["args"]
         interp = elf_interp(r["elf"]["path"])
         if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
-            home = [(d, interp) for d in g["debs"] if os.path.isfile(os.path.join(tmp, "deb-" + d + interp))]
+            spell = [interp] + (["/usr" + interp] if interp.split("/")[1] in ("lib", "lib32", "lib64", "libx32", "bin", "sbin") else [])   # usr-merged spelling: dpkg -L lists /usr/lib64/x, the PT_INTERP names /lib64/x
+            home = [(d, p) for d in g["debs"] for p in spell if os.path.isfile(os.path.join(tmp, "deb-" + d + p))]
             if not home:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": [
                     "%s has PT_INTERP %s: no declared deb provides that file" % (g["artifact"], interp)]})

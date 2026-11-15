@@ -59,28 +59,6 @@ KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", 
 def env_id(doc):
     return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
-def wheel_files(dist):
-    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes (no .pyc, no installer-written files), read from
-    the disk: a file that differs from its RECORD entry makes the digest differ (the entry is not trusted, the content is hashed)."""
-    import base64
-    import csv
-    d, out = metadata.distribution(dist), {}
-    for row in csv.reader(d.read_text("RECORD").splitlines()):
-        path, h = row[0], row[1] if len(row) > 1 else ""
-        if not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/"):
-            continue
-        f = d.locate_file(path)
-        have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
-        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
-        out[path] = have if have == want else "differs-from-record:" + have
-    return out
-
-
-def wheel_digest(dist):
-    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
-    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
-
-
 def file_owners():
     """{path: {dpkg package names}} from /var/lib/dpkg/info/*.list (arch qualifier dropped); a path owned by several packages has all of them."""
     own = {}
