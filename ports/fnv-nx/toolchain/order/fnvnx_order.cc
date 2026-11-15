@@ -353,6 +353,7 @@ static void raise_atomic_orders(gcall *call, built_in_function code) {
 
 static void order_single(gimple_stmt_iterator *gsi);
 
+static std::set<gimple *> generated_stmts;   // the last unit of a loop copy, which stays in the original block's tail: already ordered or plain by rule
 static std::set<basic_block> generated_bbs;   // blocks this pass created: their accesses are already ordered, never revisited
 
 // CAS EXPECTED. `__atomic_compare_exchange(ptr, expected, desired, ...)` reads `*expected` and, on failure only, writes the observed value
@@ -469,6 +470,7 @@ static void store_after(gimple_stmt_iterator *gsi, gimple *stmt, gimple *store) 
 }
 
 static void order_stmt(gimple_stmt_iterator *gsi) {
+  if (generated_stmts.count(gsi_stmt(*gsi))) return;
   gimple *stmt = gsi_stmt(*gsi);
   switch (gimple_code(stmt)) {
     case GIMPLE_ASSIGN:
@@ -544,6 +546,24 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
 // moves (padding included, as a memcpy-style aggregate copy does); the order is the program order of the loads and stores of
 // the copy, ascending: x86 TSO orders loads with loads and stores with stores, and ldar/stlr give that order on Arm.
 // Up to 16 units the copy is straight-line code (2 statements per unit); beyond that it is a loop over the units.
+
+// Replace the statement at GSI by S (the last unit of a copy). gsi_replace requires an assignment to keep its lhs; when the new unit is an
+// assignment to another reference (an unshared destination) the original assignment is rewritten in place, which also keeps its virtual
+// definition. A call (the ordered store) has no lhs and replaces it as is.
+static void replace_with(gimple_stmt_iterator *gsi, gimple *s) {
+  gimple *o = gsi_stmt(*gsi);
+  gassign *oa = dyn_cast<gassign *>(o), *sa = dyn_cast<gassign *>(s);
+  if (oa && sa && gimple_assign_lhs(oa) != gimple_assign_lhs(sa)) {
+    gimple_assign_set_lhs(oa, gimple_assign_lhs(sa));
+    gimple_assign_set_rhs_from_tree(gsi, gimple_assign_rhs1(sa));
+    gimple_set_location(gsi_stmt(*gsi), gimple_location(s));
+    update_stmt(gsi_stmt(*gsi));
+    generated_stmts.insert(gsi_stmt(*gsi));
+    return;
+  }
+  gsi_replace(gsi, s, true);
+  generated_stmts.insert(gsi_stmt(*gsi));
+}
 
 static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bool ld) {
   counts &c = *cur;
@@ -645,7 +665,7 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
     // the last unit's store takes the original statement's place (SSA: it inherits the statement's virtual definition); a
     // register destination gets its value from the memory temporary afterwards
     if (fin) { gsi_insert_before(gsi, last, GSI_SAME_STMT); gsi_replace(gsi, gimple_build_assign(fin, dst), true); }
-    else gsi_replace(gsi, last, true);
+    else replace_with(gsi, last);
     return;
   }
   // more than STRAIGHT units: a loop over units 0..n-2 (do { dst[i] = src[i]; i += unit; } while (i < (n-1)*unit)), then the
@@ -698,9 +718,9 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   gimple_stmt_iterator ts = gsi_for_stmt(stmt);
   gsi_insert_seq_before(&ts, ls, GSI_SAME_STMT);
   gimple *fin_stmt = last;
-  if (fin) { gsi_insert_before(&ts, last, GSI_SAME_STMT); fin_stmt = gimple_build_assign(fin, dst); }
-  gsi_replace(&ts, fin_stmt, true);
-  *gsi = gsi_for_stmt(fin_stmt);
+  if (fin) { gsi_insert_before(&ts, last, GSI_SAME_STMT); generated_stmts.insert(last); fin_stmt = gimple_build_assign(fin, dst); }
+  replace_with(&ts, fin_stmt);
+  *gsi = ts;
 }
 
 static void order_single(gimple_stmt_iterator *gsi) {
@@ -873,6 +893,7 @@ struct order_pass : gimple_opt_pass {
     cur = NULL;
     shared_locals = NULL;
     generated_bbs.clear();
+    generated_stmts.clear();
     return 0;
   }
 };

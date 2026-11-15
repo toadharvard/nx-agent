@@ -38,3 +38,5 @@ unsigned bf_get(const BF *p) { return p->b; }
 int bf_gets(const BF *p) { return p->c; }
 void bf_set(BF *p, unsigned v) { p->b = v; }
 void bf_copy(BF *d, const BF *s) { d->b = s->b; }
+// a shared aggregate copied into an unshared local (the destination is no ordered side: the last unit replaces the assignment in place)
+int ld_priv(const Big *s, int i) { Big l = *s; return l.v[i]; }
