@@ -662,3 +662,4 @@ Workers are capped at 3. Assignment by plan item:
 - w1: the bsf/bsr zero-source Form (L3b w4 IR: dest unchanged, ZF=1) comes first, then the x87/SIMD state.
 - 01:05 UNBLOCKED: contract/facts (L1 w22 b3cc6f3b9) is green. Output native: 0 rows, derived (no admitted decomp unit binds a native symbol), byte-equal to the hand chain. w8 writes the lift/rt uses + dispgen stage.
 - 01:10 w8: t16l 8569a4dc0 is on the L1/L2 recipe line; 14 roots are recipe-valid. run8 is a cold build in GATE_CACHE (keys changed). Blocked: the cycle lift/rt→facts→bridges→descs→lift/rt. Owner: L1 w22. Rule: transitive exclusion plus a check that excluded roots bind no exe address. recipe.origin_class fix sent to L1 to take.
+- 01:15 facts cycle cleared (w22 c13ffa61b, transitive exclusion). Excluded roots bind no exe address: a downstream L1 gate, red on any bound symbol (proposed to L1). It cannot be checked in-stage without a cycle. Accepted.
