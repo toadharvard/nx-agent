@@ -20,6 +20,7 @@
  * data never overflows: an edge is released only while every acquired keyboard device with a buffer has a free slot, and
  * it makes at most one event per device. With no acquired keyboard device, or a game that never reads, the edges stay
  * queued: nothing is dropped and nothing times out. */
+#include <stdio.h>
 #include "input.h"
 #include "../os/os.h"
 
@@ -125,9 +126,11 @@ extern "C" int fnvnx_swkbd_enter(void)
     for (;;) {   /* the text is ours to validate: a refused one is shown again, until it has strokes or the player cancels (a rule, not a count) */
         int r = os_text_entry(FNVNX_SWKBD_MAX_LEN, init, init_n, text, &n);
         if (r == 0) return 0;
-        if (r < 0) {   /* the applet could not run (or the contract was broken): loud, with the code; there is no other path to the text */
-            os_debug_print("swkbd: the system keyboard failed");
-            os_exit_process(-r);
+        if (r < 0) {   /* an applet failure (a libnx swkbdShow Result, -r) is a documented console result: the guest sees no text, as when the player cancels; no keystroke is invented */
+            char l[64];
+            snprintf(l, sizeof l, "swkbd: the system keyboard failed, result 0x%x", (unsigned)-r);
+            os_debug_print(l);
+            return 0;
         }
         if (!refused(text, n)) break;
         memcpy(keep, text, n * 2);   /* init must not alias out */
