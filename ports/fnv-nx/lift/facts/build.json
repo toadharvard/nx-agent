@@ -22,7 +22,7 @@
    "repo": "fnv-nx-build",
    "ref": "tools/fnv_decomp",
    "commit": "d79b1949cf6aaf6841f8477329280e863287663f",
-   "tree_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "tree_sha256": "8aab0f0c963fb188ddb3b152c716580f0fced8ecab93f61ff1a5851e1530f278",
    "at": "/ext/decomp"
   }
  ],
