@@ -40,4 +40,12 @@ r = run('66b82300 e8 00000000 8ed8 c3')      # a call between: a barrier
 assert st(r, 'ds')[2] is True, r['ds']
 r = run('0f a9 c3')                          # pop gs: gs starts null, so it is guarded whatever is written
 assert r['gs']['guard'] is True and r['gs']['initial_null'] is True
+r = run('50 58 8ed8 c3')                    # push eax; pop eax; mov ds,ax: the value is unknown (eax at entry): possibly null
+assert st(r, 'ds') == (0, 1, True), r['ds']
+r = run('6a23 58 8ed8 c3')                   # push 0x23; pop eax; mov ds,ax: proven through the stack
+assert st(r, 'ds') == (1, 0, False), r['ds']
+r = run('8b03 8bd0 8eda c3')                 # mov eax,[ebx]; mov edx,eax; mov ds,dx: the register move carries the unknown load
+assert st(r, 'ds') == (0, 1, True), r['ds']
+r = run('b823000000 8bd0 8eda c3')           # mov eax,0x23; mov edx,eax; mov ds,dx
+assert st(r, 'ds') == (1, 0, False), r['ds']
 print('segwrites: ok')

@@ -13,6 +13,10 @@ SOURCE of a write, found by a backward walk (at most DEPTH instructions) along t
   * every other source (a memory operand, a call/int/sysenter or any instruction between that may write the register, a walk that ends, lds/les/lfs/lgs: a far pointer from memory) is POSSIBLY NULL.
 S' NON-NULL IN THE IMAGE (greatest fixpoint): S' starts non-null iff its initial selector (x86sys selectors) is non-null (ds es fs); S' stays non-null iff every write of S' is proven non-null given the
 S'' that are non-null. cs and ss are always non-null.
+PROOF ARGUMENT (soundness): a write is non-null only when the walk reaches a defining instruction that is a nonzero immediate, a read of a segment register that is itself non-null (fixpoint), a register move
+whose source register is recursively proven by the same walk, or a pop whose matching push is proven by the same walk. `mov r, r2` and `pop r` carry no value of their own. Every way the walk can stop short
+(the DEPTH bound, a join, an entry, a barrier, an unknown instruction, a memory operand) returns possibly-null, so the bound and the cut-offs cost precision and never soundness; a "guard" flag is only ever
+cleared by a proof.
 The lifter (core.gs_guard) guards an access through the effective segment S iff S is not non-null in the image (its initial selector is null, or some write of S is possibly null).
 Context restores (SetThreadContext, exception continuation) load the selectors a context holds, which are the captured ones: the platform's rule, not this tool's."""
 import argparse, json, os, sys
