@@ -1279,3 +1279,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - weak undefined is accepted only from pinned toolchain runtime objects;
   - guest start/end files come only from guest_compiler.json runtime.libs (no crt0), host exe from -###, with one-entry over both;
   - test_link's aborting fixture gets fixed.
+- L2 w1 73a645c65: the escapes fact as `OFF:SIZE:n` frame ranges; 28 more certified (935 of 191669 uncertified, L2's measure). D1 generalised (accepted): an access is certified when no escape of the address (store, call argument, ret, unclassified use) lies on any path from entry to it. The gate computes it on the A64 code, under OWNER 6 for dead frames. w23 implements both.
