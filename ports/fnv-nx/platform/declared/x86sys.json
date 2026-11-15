@@ -39,133 +39,193 @@
  },
  "descriptors": {
   "cs": {
-   "base": {
+   "accessed": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"
+   },
+   "base": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 0
+   },
+   "d_b": {
+    "source": "SDM Vol 3A 3.4.5 line 6061: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')",
+    "value": 1
    },
    "dpl": {
-    "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "source": "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3",
+    "value": 3
+   },
+   "g": {
+    "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line 6010, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 1
    },
    "limit": {
-    "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'; the limit is 4 GBytes = 0xFFFFFFFF bytes",
+    "value": 4294967295
    },
-   "readable": {
-    "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   "present": {
+    "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread",
+    "value": 1
+   },
+   "s": {
+    "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)",
+    "value": 1
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
-   },
-   "writable": {
-    "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x1B (cs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type"
    }
   },
   "ds": {
-   "base": {
+   "accessed": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"
+   },
+   "base": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 0
+   },
+   "d_b": {
+    "source": "SDM Vol 3A 3.4.5 line 6061: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')",
+    "value": 1
    },
    "dpl": {
-    "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "source": "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3",
+    "value": 3
+   },
+   "g": {
+    "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line 6010, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 1
    },
    "limit": {
-    "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'; the limit is 4 GBytes = 0xFFFFFFFF bytes",
+    "value": 4294967295
    },
-   "readable": {
-    "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   "present": {
+    "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread",
+    "value": 1
+   },
+   "s": {
+    "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)",
+    "value": 1
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
-   },
-   "writable": {
-    "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x23 (ds) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type"
    }
   },
   "es": {
-   "base": {
+   "accessed": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"
+   },
+   "base": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 0
+   },
+   "d_b": {
+    "source": "SDM Vol 3A 3.4.5 line 6061: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')",
+    "value": 1
    },
    "dpl": {
-    "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "source": "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3",
+    "value": 3
+   },
+   "g": {
+    "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line 6010, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 1
    },
    "limit": {
-    "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'; the limit is 4 GBytes = 0xFFFFFFFF bytes",
+    "value": 4294967295
    },
-   "readable": {
-    "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   "present": {
+    "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread",
+    "value": 1
+   },
+   "s": {
+    "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)",
+    "value": 1
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
-   },
-   "writable": {
-    "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x23 (es) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type"
    }
   },
   "fs": {
+   "accessed": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
    "base": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "d_b": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
    },
    "dpl": {
     "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "g": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
    },
    "limit": {
     "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
    },
-   "readable": {
+   "present": {
     "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+   },
+   "s": {
+    "status": "undecided",
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
-   },
-   "writable": {
-    "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x3B (fs) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
    }
   },
   "ss": {
-   "base": {
+   "accessed": {
     "status": "undecided",
-    "why": "the base of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"
+   },
+   "base": {
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 0
+   },
+   "d_b": {
+    "source": "SDM Vol 3A 3.4.5 line 6061: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')",
+    "value": 1
    },
    "dpl": {
-    "status": "undecided",
-    "why": "the dpl of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "source": "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3",
+    "value": 3
+   },
+   "g": {
+    "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line 6010, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'",
+    "value": 1
    },
    "limit": {
-    "status": "undecided",
-    "why": "the limit of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "source": "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (ASM-055) that is the model of Intel SDM Vol 3A 3.2.1 (253668-093US September 2026, extracted text line 5579): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'; the limit is 4 GBytes = 0xFFFFFFFF bytes",
+    "value": 4294967295
    },
-   "readable": {
-    "status": "undecided",
-    "why": "the readable of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+   "present": {
+    "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread",
+    "value": 1
+   },
+   "s": {
+    "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)",
+    "value": 1
    },
    "type": {
     "status": "undecided",
-    "why": "the type of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
-   },
-   "writable": {
-    "status": "undecided",
-    "why": "the writable of the GDT entry behind selector 0x23 (ss) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries"
+    "why": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type"
    }
   }
  },
@@ -208,28 +268,98 @@
  },
  "lar_lsl": {
   "cs": {
-   "status": "undecided",
-   "why": "lar and lsl on selector 0x1B return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
   },
   "ds": {
-   "status": "undecided",
-   "why": "lar and lsl on selector 0x23 return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
   },
   "es": {
-   "status": "undecided",
-   "why": "lar and lsl on selector 0x23 return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
   },
   "fs": {
-   "status": "undecided",
-   "why": "lar and lsl on selector 0x3B return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed, base/limit-dependent bits (fs descriptor undecided)"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "limit of the fs descriptor is undecided"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
   },
   "ss": {
-   "status": "undecided",
-   "why": "lar and lsl on selector 0x23 return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+   "lar": {
+    "status": "undecided",
+    "why": "lar returns the access-rights word, which holds the type and accessed fields; undecided fields: type, accessed"
+   },
+   "lsl": {
+    "status": "undecided",
+    "why": "lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B"
+   },
+   "verr": {
+    "status": "undecided",
+    "why": "verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"
+   },
+   "verw": {
+    "status": "undecided",
+    "why": "verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)"
+   }
   },
   "tr": {
    "status": "undecided",
-   "why": "lar and lsl on selector 0x28 return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided"
+   "why": "lar/lsl on the TSS selector 0x28: the TSS descriptor (type, limit) is a kernel value with no pinned source"
   }
  },
  "mov_to_sreg": {
@@ -491,6 +621,14 @@
    "ref": "tools/wdk71-headers",
    "repo": "fnv-nx-build",
    "tree_sha256": "301fc827dd66a386a425a67cdf586bdd81fac68168c114bc6d8e2b833e302770"
+  },
+  "sdm": {
+   "date": "September 2026",
+   "order_number": "253668-093US",
+   "sha256": "310c6a64513e8095abfc32b6a158539560f499d53444050343022f7dda240211",
+   "terms": "ASM-055 (OWNER 10, per the orchestrator): an MS term such as '32-bit flat mode' means what SDM vol. 3A 3.2.1 defines; ASM-055 was not present in verify/ASSUMPTIONS.json on claude/fnv-nx-clean or claude/port-nsw-un6t9s when read (2026-11-15), so the citation names it as the ruling and the registry entry is owed by the orchestrator",
+   "title": "Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A: System Programming Guide, Part 1",
+   "url": "https://cdrdv2-public.intel.com/929359/253668-093-sdm-vol-3a.pdf"
   },
   "wine": {
    "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",

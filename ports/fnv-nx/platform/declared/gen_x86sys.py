@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 
@@ -42,7 +43,7 @@ def ks386_equ(text):
     return {m.group(1): int(m.group(2), 16) for m in re.finditer(r"^(\w+)\s+equ\s+([0-9A-Fa-f]+)H\s*$", text, re.M)}
 
 
-def build(osrec, src, mirror, wine, cpumodel, cpuref):
+def build(osrec, src, mirror, wine, cpumodel, cpuref, sdm_pdf):
     undec = lambda why: {"status": "undecided", "why": why}
     fl = osrec["fields"]
     if fl["native_arch"]["value"] != 0 or fl["process_wow64"]["value"] != 0:
@@ -205,11 +206,41 @@ def build(osrec, src, mirror, wine, cpumodel, cpuref):
     wx1 = next(i + 1 for i in range(wx0, len(wl2)) if "STATUS_FLOAT_MULTIPLE_TRAPS" in wl2[i])
     osfxsr = {"value": pf["6"]["value"], "source": "derived: CR4.OSFXSR = 1 iff the declared PF_XMMI_INSTRUCTIONS_AVAILABLE (row processor_features[6]) is TRUE, because MSDN IsProcessorFeaturePresent gives that value the meaning 'the SSE instruction set is available' to the calling process and Intel SDM Vol 3A 2.5 / 13.1 raises #UD for SSE instructions when CR4.OSFXSR = 0; ks386.inc CR4_FXSR = 0x%X names the bit" % kg["CR4_FXSR"]} if "value" in pf["6"] else undec("derived from processor_features[6], which is undecided")
     sanit = kg["EFLAGS_USER_SANITIZE"]
+    sdm = src["sdm"]
+    if sha(sdm_pdf) != sdm["sha256"]:
+        raise SystemExit("gen_x86sys: the SDM pdf is not the pinned one")
+    sx = subprocess.run(["pdftotext", "-layout", sdm_pdf, "-"], capture_output=True, text=True, check=True).stdout.split("\n")
+    def sdm_line(pat, after=0):
+        return next(i + 1 for i in range(after, len(sx)) if pat in re.sub(r"\s+", " ", sx[i]))
+    flat = sdm_line("both segment descriptors have", sdm_line("3.2.1 Basic Flat Model", 400))
+    flat2 = sdm_line("the same base address value of 0 and the same segment limit of 4 GBytes", flat - 1)
+    gl = sdm_line("If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes", flat2)
+    dbl = sdm_line("(This flag should always be set to 1", gl)
+    ms_flat = "MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15): 'Microsoft Win32 uses the x86 processor in 32-bit flat mode'; by the term rule (%s) that is the model of Intel SDM Vol 3A 3.2.1 (%s %s, extracted text line %d): 'both segment descriptors have the same base address value of 0 and the same segment limit of 4 GBytes'" % (sdm["terms"].split(" (")[0], sdm["order_number"], sdm["date"], flat2)
+    rpl = lambda n: "the MS sample register display shows %s=%04x, RPL 3, and a ring-3 (user mode) thread runs at CPL 3" % (n, sel[n]["value"] if n != "fs" else 0x38)
+    ud = lambda f, why: undec("%s of %s: %s" % (f, why[0], why[1]))
+    DPL3 = "DPL = 3: a ring-3 thread loads the selector with RPL 3 and the SDM's privilege check (Vol 3A 6.5 Privilege Levels, extracted text lines 10549-10580: the DPL is compared to the CPL and the selector's RPL, the numerically greater of CPL and RPL applies) admits a ring-3 access only when the DPL is 3; MS sample display shows the selector with RPL 3"
+    flatval = {"base": {"value": 0, "source": ms_flat}, "limit": {"value": 0xFFFFFFFF, "source": ms_flat + "; the limit is 4 GBytes = 0xFFFFFFFF bytes"},
+               "g": {"value": 1, "source": "a 4 GByte limit is expressible only with G = 1: SDM Vol 3A 3.4.5 line %d, 'If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes' (G = 0 ends at 1 MByte); with " % gl + ms_flat},
+               "d_b": {"value": 1, "source": "SDM Vol 3A 3.4.5 line %d: 'This flag should always be set to 1 for 32-bit code and data segments'; Win32 is 32-bit (MS 'x86 Architecture': eax..edi are 32-bit registers, 'Win32 uses ... 32-bit flat mode')" % dbl},
+               "s": {"value": 1, "source": "SDM Vol 3A 3.4.5 (S flag): set for a code or data segment descriptor; the selector is a code or data segment (MS sample display cs/ss/ds/es)"},
+               "dpl": {"value": 3, "source": DPL3},
+               "present": {"value": 1, "source": "a selector that loads without #NP names a present segment; the MS sample display shows the selectors loaded in a running thread"}}
+    miss = {"type": "SDM Vol 3A 3.2.1 / 3.4.5.1 give the flat model's base and limit but state no type (read/write, execute/read, conforming, expand-down) for it; blocker: a source that states the Windows 7 SP1 user descriptor type",
+            "accessed": "the accessed bit is set by the processor on first load (SDM 3.4.5.1) and the OS's initial value is not stated; blocker: a source for the descriptor's initial A bit"}
+    desc = {n: dict(flatval, type=undec(miss["type"]), accessed=undec(miss["accessed"])) for n in ("cs", "ds", "es", "ss")}
+    fsw = "the descriptor behind fs (KGDT_R3_TEB 0x38) is the per-thread TEB segment: its base is the thread's TEB address and its limit is a Windows kernel value; MS 'x86 Architecture' says only 'flat mode' and shows fs=0038; blocker: a source for the TEB segment's base, limit and type"
+    desc["fs"] = {f: undec(fsw) for f in ("type", "accessed", "base", "limit", "g", "d_b", "s", "dpl", "present")}
+    lar = {n: {"lar": undec("lar returns the access-rights word, which holds the type and accessed fields; undecided fields: %s" % ("type, accessed" if n != "fs" else "type, accessed, base/limit-dependent bits (fs descriptor undecided)")),
+               "lsl": undec("lsl returns the limit, which is decided for this selector, but the instruction's ZF semantics (SDM Vol 2 LSL) are not a pinned source; blocker: pin SDM Vol 2A/2B") if n != "fs" else undec("limit of the fs descriptor is undecided"),
+               "verr": undec("verr's ZF depends on the descriptor type's readable bit, which is undecided (field: type)"),
+               "verw": undec("verw's ZF depends on the descriptor type's writable bit, which is undecided (field: type)")} for n in ("cs", "ds", "es", "ss", "fs")}
+    lar["tr"] = undec("lar/lsl on the TSS selector 0x28: the TSS descriptor (type, limit) is a kernel value with no pinned source")
     return {
         "format": "fnvnx-x86sys/2",
         "precedence": src["precedence"],
         "os": {"sha256": None, "build": fl["build"]["value"]},
-        "sources": {"mirror": src["mirror"], "ks386": kf, "wine": {"commit": src["wine"]["commit"], "file": wf}, "cpumodel": cm},
+        "sources": {"sdm": {k: src["sdm"][k] for k in ("title", "order_number", "date", "url", "sha256", "terms")}, "mirror": src["mirror"], "ks386": kf, "wine": {"commit": src["wine"]["commit"], "file": wf}, "cpumodel": cm},
         "selectors": sel,
         "mov_to_sreg": mov,
         "int_ring3": {"vectors": vec, "other_vectors": undec("no pinned source says whether Windows 7 has a ring-3 gate at any other vector; Wine 9.0 handles only these"),
@@ -235,8 +266,8 @@ def build(osrec, src, mirror, wine, cpumodel, cpuref):
                     "osxmmexcpt": {"value": 1, "source": "ruling of the orchestrator: an unmasked SIMD FP exception reaches the thread as the documented SEH codes, not as #UD; WDK 7.1 winnt.h line %d STATUS_FLOAT_MULTIPLE_FAULTS 0xC00002B4 and line %d STATUS_FLOAT_MULTIPLE_TRAPS 0xC00002B5 (MS-ERREF 2.3.1, read 2026-11-15: '{EXCEPTION} Multiple floating-point faults.' / '... traps.'); LEVEL 2 for the mapping from #XM to the code: Wine 9.0 dlls/ntdll/unix/signal_i386.c fpe_handler case TRAP_x86_CACHEFLT lines %d-%d raises STATUS_FLOAT_MULTIPLE_TRAPS (0xC00002B5); the MS pages name the codes but do not state which SIMD exception maps to which; ks386.inc CR4_XMMEXCPT = 0x%X names the bit" % (mf, mt, wx0, wx1, kg["CR4_XMMEXCPT"])}},
         "idtr_limit": undec("the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"),
         "sldt": undec("no pinned source states the LDTR of a process that has no LDT"),
-        "descriptors": {n: {f: undec("the %s of the GDT entry behind selector 0x%X (%s) is a kernel table value; the pinned WDK 7.1 headers name the selector (KGDT_*) but give no descriptor contents, and Wine 9.0 uses host selectors and LDT entries, which contradicts the declared OS; searched: MS Learn 'x86 Architecture' (debugger/x86-architecture, read 2026-11-15) says only that Win32 uses the x86 in 32-bit flat mode and shows cs=001b ss=0023 ds=0023 es=0023 fs=0038 in a sample; it states no type, DPL, base or limit and what 'flat' fixes is defined by the Intel SDM, which is not pinned; blocker: a documented source for the Windows 7 SP1 x86 GDT entries" % (f, sel[n]["value"], n)) for f in ("type", "readable", "writable", "dpl", "base", "limit")} for n in ("cs", "ds", "es", "ss", "fs")},
-        "lar_lsl": {n: undec("lar and lsl on selector 0x%X return the access rights and limit of the descriptor above, which is undecided; ZF is therefore undecided" % sel[n]["value"]) for n in ("cs", "ds", "es", "ss", "fs", "tr")},
+        "descriptors": desc,
+        "lar_lsl": lar,
         "sgdt": undec("the GDT base and limit of the OS are kernel values with no documented fixed value and no pinned source"),
         "sidt_base": undec("the IDT base is a kernel address with no documented fixed value and no pinned source"),
     }
@@ -250,10 +281,11 @@ def main(argv):
     ap.add_argument("--wine", required=True, help="checkout of fnv-nx-build tools/wine-9.0")
     ap.add_argument("--cpuref", required=True, help="verify/cpuref.json of the sources record")
     ap.add_argument("--cpumodel", required=True, help="verify/cpuid_model.json of the sources record")
+    ap.add_argument("--sdm", required=True, help="the pinned SDM Vol 3A pdf of the sources record")
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     raw = open(a.os, "rb").read()
-    rec = build(json.loads(raw), json.load(open(a.sources)), a.mirror, a.wine, a.cpumodel, a.cpuref)
+    rec = build(json.loads(raw), json.load(open(a.sources)), a.mirror, a.wine, a.cpumodel, a.cpuref, a.sdm)
     rec["os"]["sha256"] = hashlib.sha256(raw).hexdigest()
     with open(a.out, "w") as f:
         json.dump(rec, f, indent=1, sort_keys=True)

@@ -79,5 +79,15 @@
   "branch": "claude/fnv-l3a-lift-int3",
   "sha256": "cd69ad7b76253a974b6df776ad95235929fd27cf02c0b81ebf1aca13a3c8a156",
   "origin": "the declared CPU's identity (vendor_id GenuineIntel), CPUREF"
+ },
+ "sdm": {
+  "title": "Intel 64 and IA-32 Architectures Software Developer's Manual, Volume 3A: System Programming Guide, Part 1",
+  "order_number": "253668-093US",
+  "date": "September 2026",
+  "url": "https://cdrdv2-public.intel.com/929359/253668-093-sdm-vol-3a.pdf",
+  "sha256": "310c6a64513e8095abfc32b6a158539560f499d53444050343022f7dda240211",
+  "pages": 528,
+  "extract": "pdftotext -layout",
+  "terms": "ASM-055 (OWNER 10, per the orchestrator): an MS term such as '32-bit flat mode' means what SDM vol. 3A 3.2.1 defines; ASM-055 was not present in verify/ASSUMPTIONS.json on claude/fnv-nx-clean or claude/port-nsw-un6t9s when read (2026-11-15), so the citation names it as the ruling and the registry entry is owed by the orchestrator"
  }
 }

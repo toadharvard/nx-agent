@@ -1,6 +1,6 @@
 #!/usr/bin/env python3 -I
 """test_gen_x86sys: x86sys.json is exactly what gen_x86sys.py gives from os.json and the pinned sources (a pure function), and the rows carry
-their sources. Usage: test_gen_x86sys.py MIRROR_DIR WINE_DIR CPUID_MODEL_JSON CPUREF_JSON"""
+their sources. Usage: test_gen_x86sys.py MIRROR_DIR WINE_DIR CPUID_MODEL_JSON CPUREF_JSON SDM_PDF"""
 import json
 import os
 import subprocess
@@ -8,10 +8,10 @@ import sys
 import tempfile
 
 H = os.path.dirname(os.path.abspath(__file__))
-mirror, wine, cpum, cpuref = sys.argv[1:5]
+mirror, wine, cpum, cpuref, sdm = sys.argv[1:6]
 out = os.path.join(tempfile.mkdtemp(), "x86sys.json")
 subprocess.run([sys.executable, "-I", os.path.join(H, "gen_x86sys.py"), "--os", os.path.join(H, "os.json"), "--sources", os.path.join(H, "x86sys_sources.json"),
-                "--mirror", mirror, "--wine", wine, "--cpumodel", cpum, "--cpuref", cpuref, "--out", out], check=True)
+                "--mirror", mirror, "--wine", wine, "--cpumodel", cpum, "--cpuref", cpuref, "--sdm", sdm, "--out", out], check=True)
 ok = open(out).read() == open(os.path.join(H, "x86sys.json")).read()
 rec = json.load(open(out))
 fp = rec["thread_fp_initial"]
@@ -33,6 +33,11 @@ checks += [("rows Wine 9.0 never sets (0,1,4,5,15,16) are 0 and cite the zero-in
            ("PAE and NX come from CPUID bits under the masks", (R["9"].get("value"), R["12"].get("value")) == (1, 1)),
            ("DAZ is undecided while cpuid_model.json lacks mxcsr_mask", R["11"].get("status") == "undecided" and "mxcsr_mask" in R["11"]["why"] and "mxcsr_mask" not in json.load(open(cpum))),
            ("every decided PF row cites a Wine 9.0 file and line", all(("line" in r["source"]) for r in R.values() if "value" in r))]
+D = rec["descriptors"]
+checks += [("cs/ds/es/ss: base 0, limit 4 GiB, G=1, D/B=1, DPL=3 decided with sources", all((D[n]["base"]["value"], D[n]["limit"]["value"], D[n]["g"]["value"], D[n]["d_b"]["value"], D[n]["dpl"]["value"]) == (0, 0xFFFFFFFF, 1, 1, 3) and all("source" in D[n][f] for f in ("base", "limit", "g", "d_b", "dpl")) for n in ("cs", "ds", "es", "ss"))),
+           ("type and accessed are undecided with a blocker; fs is wholly undecided", all(D[n][f].get("status") == "undecided" and D[n][f].get("why") for n in ("cs", "ds", "es", "ss") for f in ("type", "accessed")) and all(v.get("status") == "undecided" for v in D["fs"].values())),
+           ("lar/lsl/verr/verw are undecided and name the missing field", all(v.get("status") == "undecided" and v.get("why") for n in ("cs", "ds", "es", "ss", "fs") for v in rec["lar_lsl"][n].values())),
+           ("the SDM is pinned with its order number", rec["sources"]["sdm"]["order_number"] == "253668-093US" and len(rec["sources"]["sdm"]["sha256"]) == 64)]
 for n, c in checks:
     print(("PASS " if c else "FAIL ") + n)
 sys.exit(0 if all(c for _, c in checks) else 1)
