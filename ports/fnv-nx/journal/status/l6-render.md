@@ -885,3 +885,6 @@ Paused: w3b, w4, farm; no other work.
     - 0 scanner rejections for every code, NX_SM_E_DSTMASK included. The program set equals 0b7061b06.
     - Handed to L1 for the candidate after cand3: w6-root de39fc7b0, then w5-smlink 2d61e9fb9. At the merge, w6's admit rows and w6's gen_sm_rows.py are kept.
     - Waiting: the hermetic chain re-run (L1 w12), FFP and the guest rebuilds (cand3).
+- 15:12Z L6A asked for FNVNX_DK_USAGE_MAX. Answer: no new constant. render/backend uses (D3DMAXDECLUSAGE + 1) from the one record, shim/include/d3d9types.h:228; the alternative is an nxgpu ABI enum owned by L6A.
+    - L1 merge note: take w6-root's deletion of render/d3d9/spec/ when merging w5-smlink.
+    - Cause found: bridgefacts/d3d9/d3d9_spec.json restates the header enums (D3DDECLUSAGE at :14). w6 (doing): d3d9_spec.py reads the enums from the headers; the JSON lists are removed.
