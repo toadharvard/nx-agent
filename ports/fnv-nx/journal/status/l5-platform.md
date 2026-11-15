@@ -5,6 +5,14 @@ Lead: Opus 5.5, session_01KmtZKTGM2tLun8zgoE6X44 (from 2026-11-11 22:35; replace
 Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-platform-w<N>.
 
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
+- 11-15 03:25Z w9 batch 1 88e3ec45c (not built; no toolchain at w9):
+  - FreeType module rule in gen_units: 4 units out, 489 rows cleared by deletion.
+  - reach and assume end through the host exit slot; filemap and VirtualProtect fact ids are literal.
+  - dshow Wine bodies split out.
+  - FNVNX_CITE in hostabi cite.h; fnvnx_declared_machine deleted.
+  - Constants table not done: needs an L1 post-compile probe stage, asked.
+  - FreeType gc scope asked of L1.
+  w10 builds all roots on 9c60d5817 and gates objstub.
 - 11-15 03:20Z Root head 9c60d5817: clock backend selection in, clk_reset deleted; platform 115/115 and platform@vclock 115/115 green. w9 batch 1 rebases onto it; then the one verdict.
 - 11-15 03:15Z w10 clock 47e35dd1f: one define FNVNX_VCLOCK selects the backend at the files and the 42 call sites in 9 files. 13 real-backend hooks deleted; platform 115/115 real and 115/115 vclock. clk_reset (no caller) deleted. Into the root next; the verdict waits for w9 batch 1.
 - 11-15 03:10Z Root a7b52eb38 (w6 test_bootmachine 128/128, check_hostapi 0). w9 triage rev2 c98937cfb: a 105, b 6, c 96, d 489, e 4, f 68. otvalid and gxvalid are unreachable (only via ftotval/ftgxval; no root or image reference), so the FreeType module rule goes into gen_units.py: base components, or entry API referenced. Terminators get noreturn where their documentation says they do not return. w9 implements batch 1; w10 clock hooks (w10-clock 47e35dd1f, building).
