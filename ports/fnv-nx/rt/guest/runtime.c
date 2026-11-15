@@ -107,7 +107,7 @@ static EARLY int self_relocate(uintptr_t base, uint32_t link_base, const Elf32_D
 
 static ssize_t con_write(struct _reent *r, void *fd, const char *ptr, size_t len) {
     (void)r; (void)fd;
-    return (ssize_t)fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR(ptr), len);
+    return (ssize_t)FNVNX_HCALL2(console_write, FNVNX_ADDR(ptr), len);
 }
 
 static const devoptab_t dotab_hostcon = {
@@ -115,13 +115,13 @@ static const devoptab_t dotab_hostcon = {
 };
 
 void __syscall_exit(int rc) {
-    fnvnx_hcall1(fnvnx_host->exit, (uint64_t)(int64_t)rc);
+    FNVNX_HCALL1(exit, (uint64_t)(int64_t)rc);
     for (;;) {}
 }
 
 int __syscall_nanosleep(const struct timespec *req, struct timespec *rem) {
     if (!req || req->tv_nsec < 0 || req->tv_nsec >= 1000000000) { errno = EINVAL; return -1; }
-    fnvnx_hcall1(fnvnx_host->sleep_ns, (uint64_t)req->tv_sec * 1000000000ull + (uint64_t)req->tv_nsec);
+    FNVNX_HCALL1(sleep_ns, (uint64_t)req->tv_sec * 1000000000ull + (uint64_t)req->tv_nsec);
     if (rem) { rem->tv_sec = 0; rem->tv_nsec = 0; }
     return 0;
 }
@@ -129,13 +129,13 @@ int __syscall_nanosleep(const struct timespec *req, struct timespec *rem) {
 int __syscall_clock_gettime(clockid_t clock_id, struct timespec *tp) {
     if (!tp) { errno = EINVAL; return -1; }
     if (clock_id == CLOCK_REALTIME) {
-        int64_t us = (int64_t)fnvnx_hcall0(fnvnx_host->wall_time_us);
+        int64_t us = (int64_t)FNVNX_HCALL0(wall_time_us);
         tp->tv_sec = (time_t)(us / 1000000);
         tp->tv_nsec = (long)(us % 1000000) * 1000;
         return 0;
     }
     if (clock_id != CLOCK_MONOTONIC) { errno = EINVAL; return -1; }
-    uint64_t t = fnvnx_hcall0(fnvnx_host->system_tick), f = fnvnx_hcall0(fnvnx_host->system_tick_freq);
+    uint64_t t = FNVNX_HCALL0(system_tick), f = FNVNX_HCALL0(system_tick_freq);
     tp->tv_sec = (time_t)(t / f);
     tp->tv_nsec = (long)((t % f) * 1000000000ull / f);
     return 0;
@@ -179,8 +179,8 @@ const char __libc_fini = 1;
  * the host console and the process ends through the host's exit. */
 void __cxa_pure_virtual(void) {
     static const char msg[] = "pure virtual method called\n";
-    fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR(msg), sizeof msg - 1);
-    fnvnx_hcall1(fnvnx_host->exit, 0xFB);
+    FNVNX_HCALL2(console_write, FNVNX_ADDR(msg), sizeof msg - 1);
+    FNVNX_HCALL1(exit, 0xFB);
     for (;;) {}   /* the host's exit does not return */
 }
 
@@ -193,7 +193,7 @@ int __syscall_clock_getres(clockid_t clock_id, struct timespec *res) {
         res->tv_sec = 0;
         if (clock_id == CLOCK_REALTIME) res->tv_nsec = 1000;
         else {
-            uint64_t f = fnvnx_hcall0(fnvnx_host->system_tick_freq);
+            uint64_t f = FNVNX_HCALL0(system_tick_freq);
             res->tv_nsec = (long)((1000000000ull + f - 1) / f);
         }
     }
@@ -211,9 +211,9 @@ int __syscall_clock_settime(clockid_t clock_id, const struct timespec *tp) {
 static int api_ok(const FnvnxHostApi *a, uintptr_t base) {
     if (a->magic != FNVNX_HOSTAPI_MAGIC || a->version != FNVNX_HOSTAPI_VERSION || a->size < sizeof(*a)) return 0;
     if (a->guest_base != base) return 0;
-    const uint64_t *slot = &a->guest_base, *end = (const uint64_t *)(a + 1);
-    for (; slot < end; slot++)
-        if (*slot >> 32) return 0; /* a 32-bit address space keeps every address below 4 GiB */
+    /* The non-slot fields, by name: the guest image and the heap window lie inside the 32-bit address space (the function slots are
+     * non-null host addresses by the host contract, hostapi.h, and are not read here). */
+    if (a->guest_base + a->guest_size > ((uint64_t)1 << 32)) return 0;
     /* The heap window is part of the contract (hostapi.h heap_base/heap_size): non-empty, inside the 32-bit address space, and disjoint
      * from the guest image [guest_base, guest_base + guest_size).  A table that breaks it is an invalid table: GUEST_ERR_API. */
     if (a->heap_size == 0 || a->heap_base + a->heap_size > ((uint64_t)1 << 32)) return 0;

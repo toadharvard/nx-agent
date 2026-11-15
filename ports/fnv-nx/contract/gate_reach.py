@@ -27,9 +27,11 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
   closure_key  `dispatcher=NAME`  (dll `-`, name = the dispatcher symbol, arg_index 0): every value that reaches the dispatcher NAME (native
              fnvnx_dispatch, lifted fnvl_dispatch) is a key of its table.  Inputs: --dispatcher NAME=ENTRIES,CLOSURE,SOURCES (ENTRIES: dispgen's
              rows `addr<TAB>sym`; with `dispatcher=NAME;miss=fallthrough` (a miss goes on to the next dispatcher) the check (ii) is the other way: every key is a closure address; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
-             of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES) and --loadlib loadlib.tsv.  CERTIFIED iff (i) every
-             source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress / LoadLibrary site is open (the gpa
-             rows and loadlib.tsv).  While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
+             of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES).  CERTIFIED iff (i) every
+             source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress site is open (the gpa rows).
+             A LoadLibrary* site whose name is not decided is not open: its result is the MAY-LOAD SET (gpa_names.py: every module of the declared
+             machine) plus NULL, and the GetProcAddress names derived on it are pairs over that set.  While (iii) fails the fact is `measurement`:
+             the verdict says so and it never counts as valid.
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -101,7 +103,7 @@ from reachreq import (COLUMNS, KINDS, M32, FormatError, num, parse_clause, parse
 BASE_ASSUMPTIONS = ('A1', 'A2', 'A3', 'A4', 'A5', 'A6')
 BLOCKING = ('A7',)
 CLOSURE_SOURCES = ('r3_reloc', 'pcsrc', 'export', 'tls', 'entry', 'eh', 'no_s4_arith')  # the sources of a code address (the lift's item 22)
-MEASUREMENT = ('gpa-open', 'gpa-uncovered', 'gpa-ordinal-import', 'loadlib-open')  # reasons that only say `not valid yet`
+MEASUREMENT = ('gpa-open', 'gpa-uncovered', 'gpa-ordinal-import')  # reasons that only say `not valid yet`
 SYMBOL = 'fnvnx_reach_violation'
 
 
@@ -302,15 +304,8 @@ def check_closure_key(f, gpa_global, ctx):
         miss = []
     for a in sorted(set(miss)):
         f.fail('closure-missing', name, '0x%x' % a, 'closure address has no key')
-    if ctx.get('loadlib') is None:
-        f.fail('loadlib-open', name, '-', 'no --loadlib: the open dynamic loads are unknown')
-    else:
-        for r in read_rows(ctx['loadlib']):
-            if r[0] != 'module' and len(r) > 4 and r[4] != 'closed':
-                f.fail('loadlib-open', r[0], r[1], 'site is %s' % r[4])
     f.examined = n
-    f.sites.append(dict(dispatcher=name, entries=sha(entries), closure=sha(closure), sources=sha(sources), keys=len(keys), closure_n=n,
-                        loadlib=sha(ctx['loadlib']) if ctx.get('loadlib') is not None else None))
+    f.sites.append(dict(dispatcher=name, entries=sha(entries), closure=sha(closure), sources=sha(sources), keys=len(keys), closure_n=n))
     for reason, nm, addr in gpa_global:
         f.fail(reason, nm, addr)
 
@@ -587,7 +582,6 @@ def main(argv=None):
     ap.add_argument('--facts-h')
     ap.add_argument('--facts-tsv')
     ap.add_argument('--dispatcher', action='append', default=[], help='NAME=entries.tsv,closure.tsv,sources.tsv (closure_key)')
-    ap.add_argument('--loadlib', help='loadlib.tsv (closure_key: its open sites)')
     ap.add_argument('--objects')
     ap.add_argument('--certified')
     a = ap.parse_args(argv)
@@ -617,12 +611,10 @@ def main(argv=None):
     images, meta = load_images(imagerec.load_images(a.image, a.facts, a.facts_tree), stacks, info)
     with open(a.gpa) as fh:
         rows = read_gpa(fh.read())
-    ctx = {'dispatchers': {}, 'loadlib': None}
+    ctx = {'dispatchers': {}}
     for dsp in a.dispatcher:
         nm, rest = dsp.split('=', 1)
         ctx['dispatchers'][nm] = tuple(open(p).read() for p in rest.split(','))
-    if a.loadlib:
-        ctx['loadlib'] = open(a.loadlib).read()
     facts, certs, g = run(reqs, images, meta, rows, ctx)
     if a.out:
         write(a.out, report_tsv(facts, certs))

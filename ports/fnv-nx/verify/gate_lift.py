@@ -298,7 +298,7 @@ def main(argv):
     cache = os.environ.get("GATE_CACHE") or tmp
     try:
         admit = recipe.load_admit(repo)
-        roots = [(r, kind_of(admit[r])) for r in gate_build.product_roots(repo)]
+        roots = [(r, kind_of(recipe.entry_of(admit, r))) for r in gate_build.product_roots(repo)]
         roots = [(r, k) for r, k in roots if k]
         u = c = 0
         ids, why = [], []

@@ -21,6 +21,7 @@ HDR = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "host
 FAILED = []
 N = [0]
 P = 0x1000
+QUANTUM = 20000   # instructions per slice (bootmachine.py rule 3): a declared parameter of these runs
 
 
 def case(name, cond, extra=""):
@@ -43,7 +44,7 @@ def main():
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
     plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")))
+    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")), quantum=QUANTUM)
     ARGS = 0x1400000   # inside the window, scratch for the argument array
     m.map_fixed(ARGS & ~0xFFF, P, 0)
 
@@ -87,7 +88,7 @@ def main():
     case("range crossing the upper edge -> RANGE", call(FN, HI - P, 2 * P) == RNG)
     case("range crossing the lower edge -> RANGE", call(FN, LO - P, 2 * P) == RNG)
     case("a long range over the whole mapped run", m.map_fixed(0x1000000, 64 * P, 0) == 0 and call(FN, 0x1000000, 64 * P) == 0)
-    case("fn 38 -> NO_SERVICE", call(38, 0, 0) == NOSVC and NOSVC is not None, (NOSVC,))
+    case("fn 39 -> NO_SERVICE (38 is THREAD_CPU)", call(39, 0, 0) == NOSVC and NOSVC is not None, (NOSVC,))
     print("%d cases, %d failed" % (N[0], len(FAILED)))
     return 1 if FAILED else 0
 

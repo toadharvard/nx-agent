@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -38,7 +39,7 @@ def mk(name, rec, files=None, libs=(), classes=None):
     repo = TR.make_repo(name, rec=rec, files=dict(BASE_FILES, **(files or {})))
     admit = json.load(open(repo + "/" + TR.T + "verify/admit.json"))
     for path, (r, fs) in dict(libs).items():
-        admit["roots"].append({"path": path, "class": "product", "target": "host", "gates": [], "recipe": path + "/build.json"})
+        admit["roots"].append({"path": path, "class": "product", "target": "host", "recipe": path + "/build.json"})
         TR.w(repo, path[len(T):] + "/build.json", json.dumps(r))
         for f, text in fs.items():
             TR.w(repo, path[len(T):] + "/" + f, text)
@@ -55,6 +56,26 @@ def syms(elf):
     """{name: address} of the ELF symbol table, by binutils' nm."""
     out = subprocess.run([NM, "-n", elf], capture_output=True, text=True, check=True).stdout
     return {l.split()[2]: int(l.split()[0], 16) for l in out.splitlines() if len(l.split()) == 3}
+
+
+def elf32_sections_symbols(path):
+    """([(name, address, size)] of the sections, {name: (value, size)} of the defined .symtab symbols) of an ELF32 little-endian file, read with struct
+    (the independent reader the ELF facts of the link record are compared with)."""
+    d = open(path, "rb").read()
+    shoff, = struct.unpack_from("<I", d, 0x20)
+    esz, num, stri = struct.unpack_from("<HHH", d, 0x2e)
+    sh = [struct.unpack_from("<IIIIIIIIII", d, shoff + i * esz) for i in range(num)]
+    names = d[sh[stri][4]:sh[stri][4] + sh[stri][5]]
+    nm = lambda o, t=names: t[o:t.index(b"\0", o)].decode()  # noqa: E731
+    secs = [(nm(x[0]), x[3], x[5]) for x in sh[1:]]
+    sy = next(x for x in sh if x[1] == 2)
+    stt = d[sh[sy[6]][4]:sh[sy[6]][4] + sh[sy[6]][5]]
+    out = {}
+    for k in range(sy[5] // 16):
+        n, val, size, info, other, shndx = struct.unpack_from("<IIIBBH", d, sy[4] + 16 * k)
+        if shndx != 0 and n:
+            out[nm(n, stt)] = (val, size)
+    return secs, out
 
 
 def words(path):
@@ -94,6 +115,17 @@ def main():
     w = words(r["elf"]["path"])
     check("crt0 header words written: +8 FNXG, +16 link base 0, +20 page aligned span, +24 flags 1 (PIE)",
           w[2] == 0x47584e46 and w[4] == 0 and w[5] and w[5] % 0x1000 == 0 and w[6] == 1, w)
+    ef = json.load(open(r["elf_facts"]["path"]))
+    secs, esy = elf32_sections_symbols(r["elf"]["path"])
+    check("elf facts: the link record carries the sections (name, address, size) as the ELF's own section header table has them",
+          ef["format"] == "fnvnx-elffacts/1" and [(x["name"], x["address"], x["size"]) for x in ef["sections"]] == secs, (ef["sections"][:3], secs[:3]))
+    check("elf facts: every defined symbol with its value and size, and its type and binding as readelf prints them (f_a FUNC GLOBAL)",
+          {x["name"]: (x["value"], x["size"]) for x in ef["symbols"] if x["name"] in esy and x["section"] != "ABS"} == {n: v for n, v in esy.items() if n in {x["name"] for x in ef["symbols"] if x["section"] != "ABS"}}
+          and any(x["name"] == "f_a" and x["type"] == "FUNC" and x["bind"] == "GLOBAL" for x in ef["symbols"]), ef["symbols"][:3])
+    check("elf facts: the definer of an undefined reference of a product object is the defining input (f_b of a.c: the object of the input root; f_a of nothing else)",
+          {"symbol": "f_b", "definer": "/objs/01-ports__fnv-nx__lib/l.c.o"} in ef["references"]["00-own:a.c"], ef["references"])
+    r_ef = build(repo, SS, BASE + "/o-two3")
+    check("elf facts: cached with the stage (a second build runs no stage) and the same record", r_ef["stages"]["run"] == 0 and json.load(open(r_ef["elf_facts"]["path"])) == ef)
     ids = r["link_roots"]
     check("objects.json lists the input root with the digest of its objects.json content and its linked objects (kept beside the result)",
           len(ids) == 1 and ids[0]["root"] == LIB and re.fullmatch("[0-9a-f]{64}", ids[0]["sha256"]) and r["objects"][0]["unit"] == "a.c"
@@ -112,7 +144,7 @@ def main():
     W = {"toy/w.c": 'extern void wf(void) __attribute__((weak));\nvoid f_w(void) { if (wf) wf(); }\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rw = build(mk("weak", main_rec(), W), SS)
     check("weak undefined reference: red at ldcheck:<root>, naming it", rw["status"] == "red" and rw["failure"]["stage"] == "ldcheck:" + ROOT
-          and any("weak:wf" in x for x in rw["failure"]["stderr"]) and rw["elf"] is None, err_text(rw))
+          and any("weak-undefined:wf" in x for x in rw["failure"]["stderr"]) and rw["elf"] is None, err_text(rw))
     # (c) an R_AARCH64_P32_ABS32 in .rodata of a position independent link
     A = {"toy/r.c": '__asm__(".section .rodata\\n.balign 4\\n.word f_b\\n.text\\n");\n', "toy/b.c": "int f_b(void) { return 1; }\n"}
     rr = build(mk("abs32", main_rec(), A), SS)
@@ -160,10 +192,21 @@ def main():
     rl = build(mk("libs", dict(main_rec(libs=libs), external=[ex]), L), SS)
     check("link.libs: a member of a guest library of an external is linked where an input needs it", rl["status"] == "green"
           and "lib_fn" in syms(rl["elf"]["path"]), err_text(rl))
+    lf = json.load(open(rl["elf_facts"]["path"]))
+    check("elf facts: the definer of lib_fn (an undefined reference of a.c) is the archive member /ext/gl/lib/libtoy.a(t.o), ld's own name for it",
+          {"symbol": "lib_fn", "definer": "/ext/gl/lib/libtoy.a(t.o)"} in lf["references"]["00-own:a.c"], lf["references"])
     rl2 = build(mk("libs-miss", dict(main_rec(libs=dict(libs, names=["nope"])), external=[ex]), L), SS)
     check("link.libs: a library that is not there is a red ld:<root>", rl2["status"] == "red" and rl2["failure"]["stage"] == "ld:" + ROOT, err_text(rl2))
     rl3 = build(mk("libs-none", main_rec(), L), SS)
     check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] == "ld:" + ROOT, err_text(rl3))
+    L2 = {"toy/a.c": TR.HDR + '#include "toy.h"\nint lib_fn(void);\nextern char _GLOBAL_OFFSET_TABLE_[];\nint f_a(void) { return lib_fn() + TOY + (int)(long)_GLOBAL_OFFSET_TABLE_; }\n'}
+    rl4 = build(mk("libs-none-got", main_rec(), L2), SS)
+    fu4 = (rl4.get("failed_units") or [{}])[0]
+    check("the static undefined set omits a name the pinned ld defines itself (_GLOBAL_OFFSET_TABLE_, read from a reference link of an empty product), and keeps the owned one",
+          [u["symbol"] for u in fu4.get("undefined", [])] == ["lib_fn"], (fu4.get("undefined"), fu4.get("findings")))
+    fu = (rl3.get("failed_units") or [{}])[0]
+    check("a red link record carries the full static undefined set, each symbol with its referencing objects (never from ld's text)",
+          [u["symbol"] for u in fu.get("undefined", [])] == ["lib_fn"] and "a.c" in fu["undefined"][0]["referencers"][0], fu.get("undefined"))
 
 
     # (k) kinds: exe and shared host images (LP64), and the target of the link
@@ -174,9 +217,28 @@ def main():
         r["link"] = dict({"output": "x.exe" if kind == "exe" else "x.so", "kind": kind, "flags": ["-m", "aarch64linux"]}, **kw)
         return r
     NONE = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None}
-    re_ = build(mk("exe", host_rec("exe"), dict(NONE, **{"toy/e.c": "void _start(void) { for (;;) ; }\n"})), SS)
-    check("kind exe: a host executable (ELF64, no script, entry set) links green; no crt0 header rule", re_["status"] == "green"
+    re_ = build(mk("exe", host_rec("exe"), dict(NONE, **{"toy/e.c": "int main(void) { return 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n"})), SS)
+    check("kind exe: a host executable links green with the start files, end files and dynamic linker of the pinned driver's -### (no recipe path); entry _start comes from its crt", re_["status"] == "green"
+          and "_start" in syms(re_["elf"]["path"]) and (os.stat(re_["elf"]["path"]).st_mode & 0o111)
           and TR.elf_class(re_["elf"]["path"]) == 64 and json.load(open(re_["ld_gate"]["ld.json"]["path"]))["status"] == "green", err_text(re_))
+    # a host exe's start files, dirs and default libraries are the driver's answer: a recipe that declares them is red
+    try:
+        build(mk("exe-crt", host_rec("exe", libs={"startfiles": ["crt1.o"], "endfiles": [], "dirs": [], "names": [], "external": "x"}), dict(NONE, **{"toy/e.c": "int main(void) { return 0; }\n"})), SS)
+        ex_ = []
+    except recipe.RecipeError as e:
+        ex_ = [str(x) for x in e.args]
+    check("link.libs of an exe naming start files is red: they are the pinned driver's -### answer", any("an exe's start and end files" in e for e in ex_), ex_)
+    def interp(path):
+        d = open(path, "rb").read()
+        ph, es, n = struct.unpack_from("<Q", d, 32)[0], struct.unpack_from("<H", d, 54)[0], struct.unpack_from("<H", d, 56)[0]
+        for i in range(n):
+            t, _, off, _, _, fsz = struct.unpack_from("<IIQQQQ", d, ph + i * es)[:6]
+            if t == 3:
+                return d[off:off + fsz].rstrip(b"\0").decode()
+    drv = subprocess.run([CC, "-pie", "-###", "-x", "c", "/dev/null", "-o", "/dev/null"], capture_output=True, text=True).stderr.replace('"', "").split()
+    want = drv[drv.index("-dynamic-linker") + 1] if "-dynamic-linker" in drv else None
+    check("kind exe: PT_INTERP equals the dynamic linker of the pinned driver's -### (not a recipe or linker default)",
+          re_["status"] == "green" and want is not None and interp(re_["elf"]["path"]) == want, (want, re_["status"]))
     SH = {"toy/s.c": "int f_a(void) { return 1; }\nint f_hidden(void) { return 2; }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"}
     rs = build(mk("shared", host_rec("shared", version_script="exp.map"), dict(NONE, **SH)), SS)
     d = syms(rs["elf"]["path"]) if rs["status"] == "green" else {}
@@ -188,11 +250,24 @@ def main():
     rs3 = build(mk("shared-und", host_rec("shared", version_script="exp.map"), UND), SS)
     check("kind shared: an undefined symbol no library defines is red at ldcheck:<root>", rs3["status"] == "red" and rs3["failure"]["stage"] == "ldcheck:" + ROOT
           and any("so_fn" in x for x in rs3["failure"]["stderr"]), err_text(rs3))
+    # link.libs.system: any file of a package env.json pins (libstdc++6-arm64-cross here), nothing else
+    LIBC = "/usr/aarch64-linux-gnu/lib/libstdc++.so.6"   # libstdc++6-arm64-cross, a package env.json pins
+    PIN = dict(NONE, **{"toy/s.c": "void *_Znwm(unsigned long);\nint f_a(void) { return _Znwm(8) != 0; }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"})
+    rs4 = build(mk("shared-lib", host_rec("shared", version_script="exp.map", libs={"system": [LIBC]}), PIN), SS)
+    check("kind shared: link.libs.system names a library of a pinned package (libstdc++6-arm64-cross) that defines the name through its .dynsym: green", rs4["status"] == "green", err_text(rs4))
     so = BASE + "/libtoyso.so"
     open(BASE + "/so.c", "w").write("int so_fn(void) { return 5; }\n")
     subprocess.run([CC, "-shared", "-nostdlib", "-fPIC", "-o", so, BASE + "/so.c"], check=True)
-    rs4 = build(mk("shared-lib", host_rec("shared", version_script="exp.map", libs={"system": [so]}), UND), SS)
-    check("kind shared: link.libs.system defines the name through its .dynsym: green", rs4["status"] == "green", err_text(rs4))
+    rs4b = build(mk("shared-unpinned", host_rec("shared", version_script="exp.map", libs={"system": [so]}), UND), SS)
+    check("kind shared: a system library no pinned package owns is red at ld:<root>, naming it", rs4b["status"] == "red" and rs4b["failure"]["stage"] == "ld:" + ROOT
+          and any(so in x and "no package that env.json pins" in x for x in rs4b["failure"]["stderr"]), err_text(rs4b))
+    # link.loader: the defined set of the declared loader root may stay undefined in a shared image
+    LDR = T + "loader"
+    rs5 = build(mk("shared-loader", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (LIB_REC, {"l.c": "int so_fn(void) { return 5; }\n"}))]), SS)
+    check("kind shared: a name the declared loader root defines may stay undefined: green", rs5["status"] == "green", err_text(rs5))
+    rs6 = build(mk("shared-loader-other", host_rec("shared", version_script="exp.map", loader=LDR), UND, libs=[(LDR, (LIB_REC, {"l.c": "int other_fn(void) { return 5; }\n"}))]), SS)
+    check("kind shared: a loader that does not define the name leaves it red at ldcheck:<root>", rs6["status"] == "red" and rs6["failure"]["stage"] == "ldcheck:" + ROOT
+          and any("so_fn" in x for x in rs6["failure"]["stderr"]), err_text(rs6))
     e7 = errs(host_rec("shared"), [], "novs")
     check("kind shared needs a version_script, a pie needs a script, a pie takes aarch64linux32 only", any("version_script" in e for e in e7)
           and any("a pie" in e or "pie" in e for e in errs(main_rec(flags=["-m", "aarch64linux"]), [], "piemu")), e7)
@@ -263,7 +338,7 @@ def main():
             r["compiler"] = cc
         return r
     IMG = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None,
-           "toy/e.c": "int f_b(void);\nvoid _start(void) { f_b(); for (;;) ; }\n"}
+           "toy/e.c": "int f_b(void);\nint main(void) { f_b(); return 0; }\nint __libc_start_main(void *m) { return ((int (*)(void))m)(); }\nvoid abort(void) { for (;;) ; }\n"}
     IB, IC = T + "imgx", T + "imgbad"
     vrepo = mk("variants", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG,
               libs=[(VROOT, (vlib, VF)), (IB, (dict(image("imgx", "elf_x86_64", [VROOT + "@x86"], X86), flags={"c": FL, "cxx": [], "asm": []}, include=[]), {"e.c": IMG["toy/e.c"]})),
@@ -323,10 +398,14 @@ def main():
     # the variant rule: a product image links base roots only; a variant is linked by a test root (class test) only
     ep = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo2 := mk("varprod", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))])),
                       recipe.load_admit(repo2), None, repo2)
-    check("variants: a product root linking root@NAME is red (only a test root links a variant)", any("is a variant" in e and "class test" in e for e in ep), ep)
+    check("variants: a product root linking a flags variant root@NAME is red (only a test root links one)", any("is a flags variant" in e and "class test" in e for e in ep), ep)
+    adm_pt = recipe.load_admit(repo2)
+    adm_pt[VROOT] = dict(adm_pt[VROOT], variants={"lp64": {"target": adm_pt[ROOT]["target"], "recipe": adm_pt[VROOT]["recipe"]}})   # a per-target variant (admit.json recipe {guest, host}) of the image's own target
+    ept = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo2), adm_pt, None, repo2)
+    check("variants: a product image links the per-target variant of its own target (green)", not any("variant" in e for e in ept), ept)
     repo3 = mk("vartest", image("toy", "aarch64linux", [VROOT + "@lp64"]), IMG, libs=[(VROOT, (vlib, VF))], classes={ROOT: "test"})
     et = recipe.check(image("toy", "aarch64linux", [VROOT + "@lp64"]), ROOT, recipe.tracked(repo3), recipe.load_admit(repo3), None, repo3)
-    check("variants: a test root linking root@NAME is green", not any("is a variant" in e for e in et), et)
+    check("variants: a test root linking root@NAME is green", not any("flags variant" in e for e in et), et)
     # a guest root links a pie: kind exe is host only
     TR.w(repo3, "verify/admit.json", json.dumps(dict(json.load(open(repo3 + "/" + T + "verify/admit.json")),
          roots=[dict(x, target="guest") if x["path"] == ROOT else x for x in json.load(open(repo3 + "/" + T + "verify/admit.json"))["roots"]])))

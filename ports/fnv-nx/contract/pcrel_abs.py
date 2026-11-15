@@ -12,6 +12,7 @@ site (object, section offset, type, symbol). A second stdout line, "pc-relative 
 every relocation of those kinds in all objects, whether or not its symbol is absolute. Exit status 0 either way; build.sh pins the guest when N > 0."""
 import argparse
 import collections
+import json
 import subprocess
 import sys
 
@@ -19,9 +20,12 @@ PCREL = ("ADR_PREL_PG_HI21", "ADR_PREL_PG_HI21_NC", "ADR_PREL_LO21", "LD_PREL_LO
          "CONDBR19", "TSTBR14")
 
 
-def absolute_symbols(nm, elf):
-    out = subprocess.run([nm, elf], capture_output=True, text=True, check=True).stdout
-    return {f[2] for f in (l.split() for l in out.splitlines()) if len(f) == 3 and f[1] in "Aa"}
+def absolute_symbols(facts):
+    """The names of the absolute symbols of the linked ELF: the symbols of Ndx ABS in the link record (verify/elffacts.py, written by the link stage with the
+    pinned readelf), without the FILE and SECTION symbols, which no symbol listing names. No nm is run here."""
+    with open(facts) as fh:
+        rec = json.load(fh)
+    return {x["name"] for x in rec["symbols"] if x["section"] == "ABS" and x["type"] not in ("FILE", "SECTION") and x["name"]}
 
 
 def objects(args):
@@ -37,13 +41,12 @@ def objects(args):
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument("elf")
+    ap.add_argument("facts", help="the link record (elffacts.json) of the linked ELF")
     ap.add_argument("readelf")
-    ap.add_argument("nm")
     ap.add_argument("objects", nargs="+")
     ap.add_argument("--out")
     a = ap.parse_args(argv)
-    absyms = absolute_symbols(a.nm, a.elf)
+    absyms = absolute_symbols(a.facts)
     objs = list(objects(a.objects))
     sites, per_obj, syms, examined = [], collections.Counter(), set(), 0
     for i in range(0, len(objs), 200):

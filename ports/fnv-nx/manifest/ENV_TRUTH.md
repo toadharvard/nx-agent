@@ -70,7 +70,7 @@
 | P1 | Процессоров 3 (ядра 0-2), архитектура x86, страница 4 КиБ, гранулярность 64 КиБ, адреса 0x00010000-0x7FFEFFFF | `GetSystemInfo`, `SetThreadIdealProcessor` | честное число; идеальный процессор 0-2 | Р |
 | P2 | Физическая память = измеренный бюджет приложения Switch; виртуальная 2 ГиБ | `GlobalMemoryStatus(Ex)`, `VirtualAlloc`, `Heap*` | исчерпание → `NULL`, `ERROR_NOT_ENOUGH_MEMORY` | Р |
 | P3 | Отладчика нет | `IsDebuggerPresent`, `OutputDebugStringA`, `DebugBreak` | `FALSE`; строка никому не доставляется (это и есть контракт без отладчика); `DebugBreak` → исключение `EXCEPTION_BREAKPOINT` через R4 | Р |
-| P4 | Версия Windows — 6.1.7601 SP1 (Windows 7), платформа NT | `GetVersionExA` (Bink, Vorbis) | по контракту | Р |
+| P4 | Версия и архитектура объявленной ОС: запись `platform/declared/os.json` (значения и источники только там; заголовок `declared_os.h` порождает `platform/declared/gen_osrec.py`) | `GetVersionExA` (Bink, Vorbis), `GetVersion`, `GetSystemInfo` | по записи | Р |
 | P5 | Системный каталог `C:\Windows\system32`, каталог Windows `C:\Windows` (существуют, пустые) | `GetSystemDirectoryA`, `GetWindowsDirectoryA` | по контракту | Р |
 | P6 | Начальное состояние FP нового гостевого потока: FCW = 0x027F (исключения замаскированы, точность 53 бита, округление к ближайшему), MXCSR = 0x1F80, стек x87 пуст (TW = 0xFFFF), FSW = 0. Источник: начальный CONTEXT потока 32-битного процесса; эталон Wine 9.0 `dlls/ntdll/unix/signal_i386.c:2496-2498` (`ControlWord = 0x27f`, `MxCsr = 0x1f80`). Внесено по указанию оркестратора (строка от L3b, 2026-11-11) | вход потока лифтера (`rt/enter.c`), `CreateThread` | по контракту | Р |
 

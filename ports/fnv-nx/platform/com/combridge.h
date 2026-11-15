@@ -22,7 +22,7 @@
  *                   (face.refs++); a proxy goes back as the game's own pointer.
  *   from_game(gp)   a borrowed pointer (an argument): the C++ object, or the proxy of the game object (no reference moves);
  *   adopt_game(gp)  a pointer the game returned with its reference (an out parameter of a game method): the platform now owns it.
- * Faces and proxies are never freed (combridge.cpp says why). The table of interfaces, IIDs and key slots is generated (combridge.gen.cpp) from com_spec.json. */
+ * Faces and proxies are never freed (combridge.cpp says why). The table of interfaces, IIDs and key slots is generated (combridge.gen.cpp), derived by spec_extract.py from the interface declarations. */
 #ifndef FNVNX_COMBRIDGE_H
 #define FNVNX_COMBRIDGE_H
 #include <stddef.h>
@@ -61,6 +61,7 @@ struct Tables {
 extern const Tables g_tables;   /* generated */
 unsigned nxcom_iface_count();
 void gen_init();               /* generated: the IID table from the C++ constants */
+unsigned cxx_init();           /* generated (gen_cxx.py): the keys of the CRT C++ records (vtables, ThrowInfo, CatchableType); the number of functions with no bridge row (0) */
 unsigned selfcheck();          /* generated: the number of methods whose vtable slot differs from the spec (0) */
 
 struct Face {

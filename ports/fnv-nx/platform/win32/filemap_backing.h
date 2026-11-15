@@ -6,12 +6,13 @@
  *                        test builds (tests/s4, tests/s7) link it.
  *   filemap_private.cpp  the product (guest) build: a view is private pages holding the section's bytes where views
  *                        never need to alias, and a view of a host section object (the host's section services,
- *                        hostapi.h SECTION_* services) where they do; build_guest.sh links it. What the section
+ *                        hostapi.h SECTION_* services) where they do; the platform root (platform/build.json) builds it. What the section
  *                        services cannot express is a branch the reachability gate proves unreachable: the two
  *                        fm_*_reach predicates name its fact (see its header comment).
  * A section is created with fm_backing_create; a view of it is one fm_view_map ... fm_view_unmap pair. */
 #ifndef FNVNX_FILEMAP_BACKING_H
 #define FNVNX_FILEMAP_BACKING_H
+#include "w32_reach.h"
 #include "w32.h"
 
 struct fm_backing;
@@ -33,10 +34,10 @@ struct fm_spec {
 /* filled by the backend into zeroed memory of the section's size, before the section exists (SEC_IMAGE: the layout) */
 typedef DWORD (*fm_fill_fn)(void *mem, void *ctx);
 
-/* 0 when the backend creates the section described by sp, else the reach fact (reach_facts.h, generated from manifest/reach_requests.tsv by contract/gate_reach.py) of the proven-unreachable
- * branch the section belongs to: the caller (CreateFileMappingA) has released what it holds and ends in w32_reach(fact).
+/* 0 when the backend creates the section described by sp, else the reach reason (w32_reach.h: the fact of reach_facts.h, generated from manifest/reach_requests.tsv by contract/gate_reach.py, of the proven-unreachable
+ * branch the section belongs to): the caller (CreateFileMappingA) has released what it holds and ends in w32_reach_if(reason).
  * The backend whose contract is the full one (filemap_shared.cpp) always answers 0. */
-uint32_t fm_backing_reach(const struct fm_spec *sp);
+enum w32_reach_kind fm_backing_reach(const struct fm_spec *sp);
 
 /* NULL with *err set when the section cannot be created (a spec that fm_backing_reach answered 0 for) */
 struct fm_backing *fm_backing_create(const struct fm_spec *sp, fm_fill_fn fill, void *ctx, DWORD *err);
@@ -49,8 +50,8 @@ enum { FM_ALIAS_NONE = 0, FM_ALIAS_PAGEFILE = 1, FM_ALIAS_FILE = 2 };
 int fm_backing_alias(const struct fm_backing *b);
 
 /* 0 when the backing gives the view MapViewOfFile asks for (os_prot: OS_VM_* bits; priv: copy-on-write pages), else the
- * reach fact of the request it cannot express (the caller ends in w32_reach(fact)); no state changes */
-uint32_t fm_view_reach(const struct fm_backing *b, int os_prot, int priv);
+ * reach reason of the request it cannot express (the caller ends in w32_reach_if(reason)); no state changes */
+enum w32_reach_kind fm_view_reach(const struct fm_backing *b, int os_prot, int priv);
 
 /* makes the content of [off, off + len) of the section ready for views; 0 or the Win32 error */
 DWORD fm_view_prepare(struct fm_backing *b, uint64_t off, uint64_t len);

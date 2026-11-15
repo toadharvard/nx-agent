@@ -13,8 +13,8 @@ lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`,
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
 gcc's HOST_GCC_PROGS/HOST_GCC_FILES and every file of its plugin directory (HOST_GCC_PLUGIN_DIRS: the plugin headers of the host-root compiler); (4) the renderer's host libraries: RENDER_LIBS (loader cache names, with their loader closure) and RENDER_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
-tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
-aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
+tests/test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
+aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
 and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
@@ -59,28 +59,6 @@ KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", 
 def env_id(doc):
     return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
-def wheel_files(dist):
-    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes (no .pyc, no installer-written files), read from
-    the disk: a file that differs from its RECORD entry makes the digest differ (the entry is not trusted, the content is hashed)."""
-    import base64
-    import csv
-    d, out = metadata.distribution(dist), {}
-    for row in csv.reader(d.read_text("RECORD").splitlines()):
-        path, h = row[0], row[1] if len(row) > 1 else ""
-        if not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/"):
-            continue
-        f = d.locate_file(path)
-        have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
-        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
-        out[path] = have if have == want else "differs-from-record:" + have
-    return out
-
-
-def wheel_digest(dist):
-    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
-    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
-
-
 def file_owners():
     """{path: {dpkg package names}} from /var/lib/dpkg/info/*.list (arch qualifier dropped); a path owned by several packages has all of them."""
     own = {}
@@ -91,6 +69,25 @@ def file_owners():
             for ln in open(os.path.join(info, f), encoding="utf-8", errors="replace"):
                 own.setdefault(ln.rstrip("\n"), set()).add(pk)
     return own
+
+def spellings(p, real=os.path.realpath):
+    """The names under which the dpkg file lists may spell file P: P, its resolved path, and each of those with /usr merged in or out (usrmerge: /lib,
+    /lib64, /bin and /sbin are /usr/... on disk, while a package that predates the merge lists the unmerged name). A function of P and the disk."""
+    out = []
+    for q in (p, real(p)):
+        for r in (q, q[4:] if q.startswith("/usr/") else "/usr" + q):
+            if r not in out:
+                out.append(r)
+    return out
+
+def system_lib_errors(paths, packages, owners, real=os.path.realpath, isfile=os.path.isfile):
+    """The link.libs.system rule (RECIPE.md, Link): a system library of a link is a file of a package that env.json pins (PACKAGES, a dict or list
+    of the pinned package names; their dependency closure is env.json's own `packages`, derived). One error per path in PATHS that is no file, or that
+    no pinned package owns by any spelling of spellings(); OWNERS is file_owners(). The loader (ld-linux-x86-64.so.2) is a library like another: pinned
+    by libc6."""
+    pk = set(packages)
+    return ["%s: %s" % (p, "not a file of this machine" if not isfile(p) else "owned by no package that env.json pins")
+            for p in paths if not isfile(p) or not any(owners.get(s_, set()) & pk for s_ in spellings(p, real))]
 
 def pinned_set(names):
     """The packages an environment owns: NAMES and their dependency closure."""
@@ -205,29 +202,71 @@ PROBES = {KERNEL[0]: lambda: os.geteuid() == 0 and _children(_unshare), KERNEL[1
 # files the installer writes into .dist-info (not the wheel's content: they name the installer and how it was asked)
 INSTALLER_FILES = ("INSTALLER", "REQUESTED", "direct_url.json")
 
-def wheel_files(dist):
-    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes, hashed from the DISK (a file that differs
-    from its RECORD entry shows as `differs-from-record:<hash>`, a missing one as `missing`): the RECORD entry is the wheel's own hash,
-    the content is what is verified. Not content, so not listed: .pyc and __pycache__, the files pip/uv write themselves (INSTALLER,
-    REQUESTED, direct_url.json, RECORD) and rows outside the site directory (`../`: console scripts, whose shebang the installer
-    rewrites). The digest is the same for pip, uv, --no-compile, --target."""
+def _record_rows(dist):
+    """[(path, sha256 hex | None)] of the RECORD of distribution DIST, whose paths are relative to the site directory that holds the
+    distribution; RecordError if the distribution has no RECORD."""
     import base64
-    d, out = metadata.distribution(dist), {}
-    for line in d.read_text("RECORD").splitlines():
+    d = metadata.distribution(dist)
+    text = d.read_text("RECORD")
+    if text is None:
+        raise RecordError("%s: the distribution has no RECORD" % dist)
+    out = []
+    for line in text.splitlines():
         row = next(csv.reader([line]), [])
-        path, h = row[0], row[1] if len(row) > 1 else ""
-        if (not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/") or path.startswith("../")
-                or path.rsplit("/", 1)[-1] in INSTALLER_FILES + ("RECORD",)):
+        if not row:
+            continue
+        h = row[1] if len(row) > 1 else ""
+        out.append((row[0], base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex() if h.startswith("sha256=") else None))
+    return d, out
+
+class RecordError(ValueError):
+    """A pinned module's installed files are not what its RECORD lists."""
+
+def _content(path):
+    """Is PATH wheel content (not .pyc / __pycache__, not a file pip or uv writes itself, not the RECORD, not a console script row `../`)?"""
+    return not (path.endswith(".pyc") or "__pycache__" in path.split("/") or path.startswith("../")
+                or path.rsplit("/", 1)[-1] in INSTALLER_FILES + ("RECORD",))
+
+def record_files(dist):
+    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes, hashed from the DISK: a file that differs from its
+    RECORD entry shows as `differs-from-record:<hash>`, a missing one as `missing`. The RECORD entry is the wheel's own hash, the content is
+    what is verified. This is THE set of files of a pinned python module: the wheel's whole installed content (the package, the sibling
+    *.libs directory, top-level .so and .pth files, the dist-info), never "the package directory". Three things use it: the sandbox mount of
+    a stage that declares the module (recipe.pinned_modules, runtime.build), the stage key (the digest below) and envcheck's check. The digest
+    is the same for pip, uv, --no-compile, --target."""
+    d, rows = _record_rows(dist)
+    out = {}
+    for path, want in rows:
+        if want is None or not _content(path):
             continue
         f = d.locate_file(path)
         have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
-        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
-        out[path] = have if have == want else "differs-from-record:" + have
+        out[path] = have if have in (want, "missing") else "differs-from-record:" + have
     return out
 
+def record_tops(dist):
+    """Sorted top-level site-relative paths (a directory or a file) of record_files(DIST): what is mounted for the module."""
+    return sorted({p.split("/", 1)[0] for p in record_files(dist)})
+
+def record_problems(dist):
+    """[line] for a module whose installed files are not exactly its RECORD: a RECORD entry that is missing on disk or whose hash differs, and a
+    file under one of the module's top-level paths that the RECORD does not list (a file the wheel did not ship). Empty = the module is the wheel."""
+    d = metadata.distribution(dist)
+    bad = ["%s: RECORD entry %s is %s" % (dist, p, "missing" if h == "missing" else "different from its RECORD hash") for p, h in sorted(record_files(dist).items()) if len(h) != 64 or h.startswith("differs") or h == "missing"]
+    listed = {p for p, _ in _record_rows(dist)[1]}
+    for top in record_tops(dist):
+        root = str(d.locate_file(top))
+        for r, ds, fs in os.walk(root) if os.path.isdir(root) else [(os.path.dirname(root), [], [os.path.basename(root)])]:
+            ds[:] = [x for x in ds if x != "__pycache__"]
+            for f in fs:
+                rel = os.path.relpath(os.path.join(r, f), str(d.locate_file(".")))
+                if _content(rel) and rel not in listed:
+                    bad.append("%s: %s is installed but not listed in the RECORD" % (dist, rel))
+    return bad
+
 def wheel_digest(dist):
-    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
-    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
+    """sha256 over the sorted (path, content hash) lines of record_files(DIST): names the installed wheel by its content."""
+    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(record_files(dist).items())).encode()).hexdigest()
 
 def _root_compilers(repo=None):
     """Driver names of the distribution compilers (no external) of the admitted product roots of the checkout, from admit.json and the recipes."""
@@ -246,6 +285,45 @@ def _root_compilers(repo=None):
                 out |= {c[k] for k in ("cc", "cxx") if isinstance(c.get(k), str)}
     return sorted(out)
 
+
+READROOTS = os.path.join(HERE, "readroots.json")
+
+def read_roots(repo):
+    """[(root name, cwd, [system header path read], error or None)] for every root of verify/readroots.json whose cwd exists in REPO:
+    `gcc -M` of the root's flags and sources (globs expanded in its cwd); a root whose sources are not all in the checkout is skipped. The headers are the dependencies under
+    /usr (what the preprocessor read); an error is the first lines of gcc's diagnostics (a header that is not installed)."""
+    import glob
+    try:
+        roots = json.load(open(READROOTS))["roots"]
+    except (OSError, ValueError, KeyError):
+        return []
+    out = []
+    for r in roots:
+        cwd = os.path.join(repo, r["cwd"])
+        if not os.path.isdir(cwd):
+            continue
+        srcs = [sorted(glob.glob(os.path.join(cwd, g))) for g in r["sources"]]
+        if not all(srcs):   # the root's sources are not in this checkout (its branch has not landed): nothing to read
+            continue
+        args = r["flags"] + [os.path.relpath(x, cwd) for g in srcs for x in g]
+        p = subprocess.run(["gcc", "-M"] + args, cwd=cwd, capture_output=True, text=True)
+        if p.returncode != 0:
+            out.append((r["name"], cwd, [], p.stderr.strip().splitlines()[0] if p.stderr.strip() else "gcc -M failed"))
+            continue
+        toks = [t for t in p.stdout.replace("\\\n", " ").split() if not t.endswith(":")]
+        out.append((r["name"], cwd, sorted({os.path.realpath(os.path.join(cwd, t)) for t in toks if os.path.realpath(os.path.join(cwd, t)).startswith("/usr/")}), None))
+    return out
+
+def read_owner_packages(repo):
+    """The packages that own the system headers the read roots read (what snapshot pins): for each header its owners, the first by name
+    when several; headers of packages already chosen cost nothing."""
+    own, pk = _owners(), set()
+    for _, _, hs, _ in read_roots(repo):
+        for h in hs:
+            o = own.get(h, set())
+            if o and not (o & pk):
+                pk.add(sorted(o)[0])
+    return pk
 
 def check(doc, repo=None):
     """List of mismatch lines (empty = the machine is the declared environment)."""
@@ -300,6 +378,12 @@ def check(doc, repo=None):
         files = HOST_GCC_PLUGIN_DIRS(shutil.which(drv) or drv)
         miss = sorted({p for f in files for p in [sorted(own.get(os.path.realpath(f), {"no package"}))[0]] if p not in doc["packages"]})
         cmp("plugin headers of " + drv, "owned by listed packages", "no plugin headers" if not files else ("owned by %s" % miss if miss else "owned by listed packages"))
+    pinned, own = pinned_set(doc["packages"]), own
+    for name, cwd, hs, err in read_roots(repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):
+        if err:
+            bad.append("env: read root %s: %s" % (name, err))
+        foreign = sorted({(h, sorted(own.get(h, {"no package"}))[0]) for h in hs if not (own.get(h, set()) & pinned)})
+        bad += ["env: read root %s reads %s, owned by %s (not a package of env.json)" % (name, h, o) for h, o in foreign]
     for need in doc["kernel"]["needs"]:
         ok = need in PROBES and PROBES[need]()
         cmp("kernel " + need, "available", "available" if ok else ("unavailable" if need in PROBES else "unknown capability"))
@@ -363,6 +447,11 @@ def snapshot(prev=None):
     dyn = sysconfig.get_config_var("DESTSHARED")
     roots = [py] + [f for d in [dyn] + mods for f in runtime.elf_files(d, runtime.ident(py))]
     loads(roots, [os.path.dirname(os.__file__), os.path.dirname(os.path.dirname(py))] + mods)
+    for name, _cwd, hs, err in read_roots(os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):   # the system headers that the host roots read (readroots.json)
+        if err:
+            raise SystemExit("envcheck: read root %s: %s" % (name, err))
+        for h in hs:
+            add(h)
     for prog in PROGRAMS:
         real = os.path.realpath(shutil.which(prog) or sys.exit("envcheck: program %s not in PATH" % prog))
         add(real)

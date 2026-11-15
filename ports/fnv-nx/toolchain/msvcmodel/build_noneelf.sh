@@ -14,13 +14,14 @@
 #        PATCH_DIR (x19-x27.patch, libstdcxx-nosized.patch; default ../gcc, L5's directory),
 #        FNVNX_TL_PLUGIN_FLAGS_C / _CXX (files with the -fplugin=... flags every target library compile of that language carries).
 #
-# Multilib: the ILP32 variants of L5's table (ilp32/wchar16/schar and .../pic). The options are the flags of
-# verify/guest_compiler.json flags.semantics.common that select a variant (-mabi=*, -fshort-wchar, -fsigned-char, -fPIC): read from
-# there, and the script stops if one is missing. No lp64 variant. A compile without all of them selects no variant and fails to link.
-# The other semantic flags of that list reach the target libraries through CFLAGS_FOR_TARGET/CXXFLAGS_FOR_TARGET, per language
-# as recipe.semantics_for decides (the driver names the flags that do not apply to a language).
-# The triplet (guest_platform.triplet) and the CPU (console_cpu: arch+features, the driver's default --with-arch) come from
-# verify/targets.json ($TARGETS); nothing of the target is written in this script.
+# The compiler's defaults are the guest record (MLIB1): --with-abi is guest_platform.abi, --with-arch the console CPU, and msvcmodel.patch makes
+# ILP32 mean signed char and a 16-bit wchar_t (DATAMODEL S01, S02). So the multilib set has only the variants the guest uses: the one
+# selector left is the platform's code model (guest_platform.code: -fPIC, cited to libnx's Makefile), and the only required variant is the
+# one built with it (no `.` variant: GCC builds the default multilib with the compiler's defaults, and the guest never links it; as t-aarch64-rtems).
+# A compile without -fPIC selects no variant and fails to link. The other semantic flags reach the target libraries through
+# CFLAGS_FOR_TARGET/CXXFLAGS_FOR_TARGET, per language as recipe.semantics_for decides (the driver names the flags that do not apply to a language).
+# The triplet, the ABI and the code model (guest_platform) and the CPU (console_cpu: arch+features) come from verify/targets.json ($TARGETS);
+# nothing of the target is written in this script.
 # Binutils: the env.json 2.42 package (its ld lists aarch64elf32, checked below), copied in as aarch64-none-elf-*.
 # Every stage's configure line goes to <prefix>/CONFIGURE.txt.
 set -euo pipefail
@@ -44,10 +45,10 @@ NLGUEST_PATCH_SHA256=7a9b0a614e0f41e3fba22262da0b0eb177265eea816597499a76b6c9c3c
 AUTOCONF_SHA256=64ebcec9f8ac5b2487125a86a7760d2591ac9e1d3dbd59489633f9de62a57684
 AUTOMAKE_SHA256=af6ba39142220687c500f79b4aa2f181d9b24e4f8d8ec497cea4ba26c64bedaf
 TARGETS=${TARGETS:-$VERIFY/targets.json}   # L1's declared-target records: the triplet and the console CPU are read from there, not written here
-read -r T CPUARCH < <(python3 -I - "$TARGETS" <<'EOF0'
+read -r T CPUARCH ABI < <(python3 -I - "$TARGETS" <<'EOF0'
 import json, sys
 d = json.load(open(sys.argv[1]))
-print(d["guest_platform"]["triplet"], d["console_cpu"]["arch"] + "".join("+" + f for f in d["console_cpu"]["features"]))
+print(d["guest_platform"]["triplet"], d["console_cpu"]["arch"] + "".join("+" + f for f in d["console_cpu"]["features"]), d["guest_platform"]["abi"])
 EOF0
 )
 SRC=$W/gcc-$V; NL=$W/newlib-$NLV   # the names the L5 patches (-p0) carry
@@ -66,14 +67,12 @@ for t in as ld ld.bfd ar ranlib nm objcopy objdump strip readelf size strings ad
 done
 export PATH=$P/bin:$PATH
 
-# the multilib selectors, read from guest_compiler.json flags.semantics.common (the stop is the check that each is there)
-read -r MLFLAGS < <(python3 -I - "$VERIFY/guest_compiler.json" <<'EOF'
+# the multilib selector: the platform's code model (guest_platform.code holds -fPIC; the stop is the check)
+read -r MLFLAGS < <(python3 -I - "$TARGETS" <<'EOF'
 import json, sys
-c = json.load(open(sys.argv[1]))["flags"]["semantics"]["common"]
-need = ["-mabi=ilp32", "-fshort-wchar", "-fsigned-char", "-fPIC"]
-for f in need:
-    assert f in c, "guest_compiler.json semantics.common has no " + f
-print(" ".join(need))
+code = json.load(open(sys.argv[1]))["guest_platform"]["code"]
+assert "-fPIC" in code, "targets.json guest_platform.code has no -fPIC"
+print("-fPIC")
 EOF
 )
 CONF=$P/CONFIGURE.txt
@@ -160,14 +159,13 @@ s2, n = re.subn(r'(aarch64\*-\*-elf \| [^\n]*\n(?:[^\n]*\n){0,3}?\ttm_file="\$\{
 assert n == 1, "aarch64 newlib-stdint.h line not found"
 open(p, "w").write(s2)
 EOF2
-  # The multilib table: only the ILP32 variants (with and without -fPIC); the option names are MLFLAGS, the directory names L5's layout.
+  # The multilib table: the one variant the guest uses, built with the code model's selector (MLIB1: the defaults of the compiler are the guest record).
   python3 -I - "$SRC/gcc/config/aarch64/t-aarch64" "$MLFLAGS" <<'EOF3'
 import re, sys
-p, fl = sys.argv[1], [f[1:] for f in sys.argv[2].split()]   # mabi=ilp32 fshort-wchar fsigned-char fPIC
-names = {"mabi=ilp32": "ilp32", "fshort-wchar": "wchar16", "fsigned-char": "schar", "fPIC": "pic"}
-req = "/".join(fl[:-1])
-new = ("MULTILIB_OPTIONS    = %s\nMULTILIB_DIRNAMES   = %s\nMULTILIB_REQUIRED   = %s %s/%s\nMULTILIB_MATCHES    = fPIC=fpic fPIC=fpie fPIC=fPIE\n"
-       % (" ".join(fl), " ".join(names[f] for f in fl), req, req, fl[-1]))
+p, fl = sys.argv[1], [f[1:] for f in sys.argv[2].split()]   # fPIC
+names = {"fPIC": "pic"}
+new = ("MULTILIB_OPTIONS    = %s\nMULTILIB_DIRNAMES   = %s\nMULTILIB_REQUIRED   = %s\nMULTILIB_MATCHES    = fPIC=fpic fPIC=fpie fPIC=fPIE\n"
+       % (" ".join(fl), " ".join(names[f] for f in fl), "/".join(fl)))
 s = open(p).read()
 s2, n = re.subn(r"MULTILIB_OPTIONS    = [^\n]*\nMULTILIB_DIRNAMES   = [^\n]*\n", lambda m: new, s)
 assert n == 1, "aarch64 multilib block not found"
@@ -183,7 +181,7 @@ GCC_CONF=(--target=$T --prefix="$P" --enable-languages=c,c++ --with-newlib=yes -
   --disable-win32-registry --disable-debug --disable-tm-clone-registry --disable-__cxa_atexit
   --with-gnu-as --with-gnu-ld --enable-poison-system-directories --with-bugurl=none
   --with-native-system-header-dir=/include --with-sysroot="$P/$T" --with-local-prefix="$P/no-local"
-  --with-as="$P/bin/$T-as" --with-ld="$P/bin/$T-ld" --with-arch="$CPUARCH" --with-pkgversion="fnv-nx msvcmodel $STAMP")
+  --with-as="$P/bin/$T-as" --with-ld="$P/bin/$T-ld" --with-arch="$CPUARCH" --with-abi="$ABI" --with-pkgversion="fnv-nx msvcmodel $STAMP")
 
 # target-library flags: the semantic flags minus the multilib selectors (the multilib adds those), per language as the driver
 # says (recipe.semantics_for), plus the plugin flags of the caller. Needs the stage-1 driver.
@@ -193,9 +191,9 @@ import json, os, sys
 sys.path.insert(0, sys.argv[1])
 import recipe
 pin = json.load(open(os.path.join(sys.argv[1], "guest_compiler.json")))
-sel = ["-mabi=ilp32", "-fshort-wchar", "-fsigned-char", "-fPIC"]
-c = [f for f in pin["flags"]["semantics"]["common"] if f not in sel]
-print(" ".join(recipe.semantics_for(sys.argv[2], sys.argv[3], flags=sel + c)[len(sel):] + recipe.runtime_cflags(pin)))   # runtime_cflags: the guest_compiler.json field (newlib's -DPREFER_SIZE_OVER_SPEED), never spelled here
+sel = ["-fPIC"]   # the multilib adds the code model's selector
+c = [f for f in recipe.semantics_set(None) if f not in sel]
+print(" ".join(recipe.semantics_for(sys.argv[2], sys.argv[3], flags=c) + recipe.runtime_cflags(pin)))   # runtime_cflags: the guest_compiler.json field (newlib's -DPREFER_SIZE_OVER_SPEED), never spelled here
 EOF
 }
 

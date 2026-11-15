@@ -39,12 +39,12 @@ def mkrepo(name, libs, extra=None, img=IMG):
     repo = TR.make_repo(name, rec=img, files=dict(NONE, **{"toy/e.c": START}))
     adm = json.load(open(repo + "/" + T + "verify/admit.json"))
     for path, (r, fs) in libs.items():
-        adm["roots"].append({"path": path, "class": "product", "target": "host", "gates": [], "recipe": path + "/build.json"})
+        adm["roots"].append({"path": path, "class": "product", "target": "host", "recipe": path + "/build.json"})
         TR.w(repo, path[len(T):] + "/build.json", json.dumps(r))
         for f, text in fs.items():
             TR.w(repo, path[len(T):] + "/" + f, text)
     if any(p.startswith(T + "hdr") for p in (extra or {})) or any(T + "hdr" in r["include"] for r, _ in libs.values()):
-        adm["roots"].append({"path": T + "hdr", "class": "product", "target": "host", "gates": [], "recipe": T + "hdr/build.json"})   # a header home is a product root
+        adm["roots"].append({"path": T + "hdr", "class": "product", "target": "host", "recipe": T + "hdr/build.json"})   # a header home is a product root
         TR.w(repo, "hdr/build.json", json.dumps(dict(LIB_REC, include=[])))
     for f, text in (extra or {}).items():
         TR.w(repo, f[len(T):], text)

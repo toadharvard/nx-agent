@@ -110,7 +110,7 @@ shutil.rmtree(_repo, ignore_errors=True)
 ML, SF = "main" + "_loop", "SOCK" + "_FIRST"   # spelled in parts: this file is itself scanned
 _repo = tempfile.mkdtemp(prefix="gh-stale-")
 _t = "ports/fnv-nx"
-for rel, txt in {_t + "/verify/admit.json": json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": _t + "/verify", "class": "tool", "gates": []}, {"path": _t + "/journal", "class": "doc", "gates": []}]}),
+for rel, txt in {_t + "/verify/admit.json": json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": _t + "/verify", "class": "tool"}, {"path": _t + "/journal", "class": "doc"}]}),
                  _t + "/verify/hostapi_holes.json": json.dumps({"names": [ML, SF]}), _t + "/verify/a.py": "x = 1  # h_" + ML + "\n",
                  _t + "/verify/b.py": SF + "X = 1\nmainloop = 2\n", _t + "/journal/h.md": ML + " was deleted\n"}.items():
     os.makedirs(os.path.dirname(os.path.join(_repo, rel)), exist_ok=True)
@@ -160,7 +160,7 @@ def served_repo(serves, files):
     os.makedirs(d + "/ports/fnv-nx/verify")
     for k, v in files.items():
         open(os.path.join(d, k), "w").write(v)
-    row = {"path": "ports/fnv-nx/verify", "class": "tool", "gates": []}
+    row = {"path": "ports/fnv-nx/verify", "class": "tool"}
     if serves is not None:
         row["serves"] = serves
     json.dump({"format": "fnvnx-admit/1", "roots": [row]}, open(d + "/ports/fnv-nx/verify/admit.json", "w"))

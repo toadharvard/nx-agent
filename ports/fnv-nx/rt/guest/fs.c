@@ -26,25 +26,25 @@ static int open_r(struct _reent *r, void *fo, const char *path, int flags, int m
     if (flags & O_EXCL) f |= FNVNX_O_EXCL;
     if (flags & O_TRUNC) f |= FNVNX_O_TRUNC;
     if (flags & O_APPEND) f |= FNVNX_O_APPEND;
-    int64_t fd = h(fnvnx_hcall2(fnvnx_host->fs_open, FNVNX_ADDR(path), (uint64_t)f));
+    int64_t fd = h(FNVNX_HCALL2(fs_open, FNVNX_ADDR(path), (uint64_t)f));
     if (fd < 0) return err(r, fd);
     ((FileObj *)fo)->fd = (int)fd;
     return 0;
 }
 static int close_r(struct _reent *r, void *fo) {
-    int64_t v = h(fnvnx_hcall1(fnvnx_host->fs_close, (uint64_t)((FileObj *)fo)->fd));
+    int64_t v = h(FNVNX_HCALL1(fs_close, (uint64_t)((FileObj *)fo)->fd));
     return v < 0 ? err(r, v) : 0;
 }
 static ssize_t write_r(struct _reent *r, void *fo, const char *p, size_t n) {
-    int64_t v = h(fnvnx_hcall3(fnvnx_host->fs_write, (uint64_t)((FileObj *)fo)->fd, FNVNX_ADDR(p), n));
+    int64_t v = h(FNVNX_HCALL3(fs_write, (uint64_t)((FileObj *)fo)->fd, FNVNX_ADDR(p), n));
     return v < 0 ? err(r, v) : (ssize_t)v;
 }
 static ssize_t read_r(struct _reent *r, void *fo, char *p, size_t n) {
-    int64_t v = h(fnvnx_hcall3(fnvnx_host->fs_read, (uint64_t)((FileObj *)fo)->fd, FNVNX_ADDR(p), n));
+    int64_t v = h(FNVNX_HCALL3(fs_read, (uint64_t)((FileObj *)fo)->fd, FNVNX_ADDR(p), n));
     return v < 0 ? err(r, v) : (ssize_t)v;
 }
 static off_t seek_r(struct _reent *r, void *fo, off_t pos, int dir) {
-    int64_t v = h(fnvnx_hcall3(fnvnx_host->fs_seek, (uint64_t)((FileObj *)fo)->fd, (uint64_t)(int64_t)pos,
+    int64_t v = h(FNVNX_HCALL3(fs_seek, (uint64_t)((FileObj *)fo)->fd, (uint64_t)(int64_t)pos,
                                (uint64_t)dir));
     return v < 0 ? err(r, v) : (off_t)v;
 }
@@ -59,53 +59,51 @@ static void to_stat(const FnvnxStat *s, struct stat *st) {
 }
 static int fstat_r(struct _reent *r, void *fo, struct stat *st) {
     FnvnxStat s;
-    int64_t v = h(fnvnx_hcall2(fnvnx_host->fs_fstat, (uint64_t)((FileObj *)fo)->fd, FNVNX_ADDR(&s)));
+    int64_t v = h(FNVNX_HCALL2(fs_fstat, (uint64_t)((FileObj *)fo)->fd, FNVNX_ADDR(&s)));
     if (v < 0) return err(r, v);
     to_stat(&s, st);
     return 0;
 }
 static int stat_r(struct _reent *r, const char *path, struct stat *st) {
     FnvnxStat s;
-    int64_t v = h(fnvnx_hcall2(fnvnx_host->fs_stat, FNVNX_ADDR(path), FNVNX_ADDR(&s)));
+    int64_t v = h(FNVNX_HCALL2(fs_stat, FNVNX_ADDR(path), FNVNX_ADDR(&s)));
     if (v < 0) return err(r, v);
     to_stat(&s, st);
     return 0;
 }
-static int path1(struct _reent *r, uint64_t fn, const char *p) {
-    int64_t v = h(fnvnx_hcall1(fn, FNVNX_ADDR(p)));
-    return v < 0 ? err(r, v) : 0;
-}
-static int unlink_r(struct _reent *r, const char *p) { return path1(r, fnvnx_host->fs_remove, p); }
-static int rmdir_r(struct _reent *r, const char *p) { return path1(r, fnvnx_host->fs_rmdir, p); }
-static int mkdir_r(struct _reent *r, const char *p, int mode) { (void)mode; return path1(r, fnvnx_host->fs_mkdir, p); }
+/* the one-path services: the slot is named at the use, never passed as a value (HOST1) */
+#define PATH1(r, slot, p) ({ int64_t v_ = h(FNVNX_HCALL1(slot, FNVNX_ADDR(p))); v_ < 0 ? err(r, v_) : 0; })
+static int unlink_r(struct _reent *r, const char *p) { return PATH1(r, fs_remove, p); }
+static int rmdir_r(struct _reent *r, const char *p) { return PATH1(r, fs_rmdir, p); }
+static int mkdir_r(struct _reent *r, const char *p, int mode) { (void)mode; return PATH1(r, fs_mkdir, p); }
 static int rename_r(struct _reent *r, const char *a, const char *b) {
-    int64_t v = h(fnvnx_hcall2(fnvnx_host->fs_rename, FNVNX_ADDR(a), FNVNX_ADDR(b)));
+    int64_t v = h(FNVNX_HCALL2(fs_rename, FNVNX_ADDR(a), FNVNX_ADDR(b)));
     return v < 0 ? err(r, v) : 0;
 }
 static int ftruncate_r(struct _reent *r, void *fo, off_t len) {
-    int64_t v = h(fnvnx_hcall2(fnvnx_host->fs_truncate, (uint64_t)((FileObj *)fo)->fd, (uint64_t)len));
+    int64_t v = h(FNVNX_HCALL2(fs_truncate, (uint64_t)((FileObj *)fo)->fd, (uint64_t)len));
     return v < 0 ? err(r, v) : 0;
 }
 static int fsync_r(struct _reent *r, void *fo) {
-    int64_t v = h(fnvnx_hcall1(fnvnx_host->fs_sync, (uint64_t)((FileObj *)fo)->fd));
+    int64_t v = h(FNVNX_HCALL1(fs_sync, (uint64_t)((FileObj *)fo)->fd));
     return v < 0 ? err(r, v) : 0;
 }
 static DIR_ITER *diropen_r(struct _reent *r, DIR_ITER *ds, const char *path) {
-    uint64_t d = fnvnx_hcall1(fnvnx_host->fs_dir_open, FNVNX_ADDR(path));
+    uint64_t d = FNVNX_HCALL1(fs_dir_open, FNVNX_ADDR(path));
     if (!d) { r->_errno = ENOENT; return NULL; }
     ((DirObj *)ds->dirStruct)->dir = d;
     return ds;
 }
 static int dirreset_r(struct _reent *r, DIR_ITER *ds) { (void)ds; r->_errno = ENOSYS; return -1; }
 static int dirnext_r(struct _reent *r, DIR_ITER *ds, char *name, struct stat *st) {
-    uint64_t n = fnvnx_hcall3(fnvnx_host->fs_dir_next, ((DirObj *)ds->dirStruct)->dir, FNVNX_ADDR(name), NAME_MAX);
+    uint64_t n = FNVNX_HCALL3(fs_dir_next, ((DirObj *)ds->dirStruct)->dir, FNVNX_ADDR(name), NAME_MAX);
     if (!n) { r->_errno = ENOENT; return -1; }   /* end */
     if (st) memset(st, 0, sizeof *st);
     return 0;
 }
 static int dirclose_r(struct _reent *r, DIR_ITER *ds) {
     (void)r;
-    fnvnx_hcall1(fnvnx_host->fs_dir_close, ((DirObj *)ds->dirStruct)->dir);
+    FNVNX_HCALL1(fs_dir_close, ((DirObj *)ds->dirStruct)->dir);
     return 0;
 }
 
