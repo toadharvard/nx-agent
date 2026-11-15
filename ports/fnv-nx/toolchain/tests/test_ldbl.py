@@ -105,6 +105,16 @@ def datamodel(td, so):
     used = {t['fact'] for t in doc['tm'] if 'fact' in t}
     cf = [x for term in doc['crossing_forbidden']['terms'] for x in term['rows']]
     check('crossing_forbidden cites existing rows', all(c in rows for c in cf), cf)
+    # regeneration: the pinned mirror (fnv-nx-build tools/cpp-docs, tree_sha256 checked by the recipe's own fetch) -> gen.py --check
+    import subprocess
+    import recipe
+    gdir = os.path.join(root, 'msvcmodel', 'datamodel')
+    mirror = json.load(open(os.path.join(gdir, 'sources.json')))['mirror']
+    ext = {k: mirror[k] for k in ('name', 'repo', 'ref', 'commit', 'tree_sha256', 'at')}
+    got = recipe.fetch_externals([ext], pb.STORE, os.path.join(pb.STORE, 'external'), os.path.join(td, 'ext-ws'))
+    g = subprocess.run([sys.executable, '-I', os.path.join(gdir, 'gen.py'), '--mirror', got[ext['name']]['host'],
+                        '--out', os.path.join(root, 'msvcmodel', 'DATAMODEL.json'), '--check'], capture_output=True, text=True)
+    check('DATAMODEL.json and .md are what gen.py writes from the pinned mirror (--check)', g.returncode == 0, g.stdout + g.stderr)
     obj = os.path.join(td, 'datamodel.o')
     r = pb.compile(os.path.join(HERE, 'ldbl', 'datamodel.cpp'), obj, so, native=True)
     errs = '\n'.join(l for l in r.stderr.splitlines() if 'error' in l)
