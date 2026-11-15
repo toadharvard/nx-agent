@@ -1,0 +1,1 @@
+{ global: fnvl_rcp32; fnvl_rsqrt32; local: *; };
