@@ -2,6 +2,7 @@
 """UNMAP_RANGE (module 11, fn 37) in the boot machine, against hostapi.h. A Machine is built on the synthetic ELF of test_bootlayout and no
 guest code runs: the service is called through ext_call, as the guest's host call reaches it. Exit 0 on pass."""
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -13,9 +14,10 @@ sys.path.insert(0, HERE)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
-import hostabirec  # noqa: E402
 from test_bootlayout import make_elf  # noqa: E402
 
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
+HDR = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "hostapi.h")
 FAILED = []
 N = [0]
 P = 0x1000
@@ -28,13 +30,20 @@ def case(name, cond, extra=""):
         FAILED.append(name)
 
 
+def define(src, name):
+    m = re.search(r"#define\s+%s\s+(0x[0-9A-Fa-f]+|\d+)(?:ull|u)?\b" % name, src)
+    return int(m.group(1), 0) if m else None
+
+
 def main():
-    D = hostabirec.record().define
-    FN, BAD, RNG, NOSVC = D("FNVNX_PLAT_UNMAP_RANGE"), D("FNVNX_HE_BADINPUT"), D("FNVNX_HE_RANGE"), D("FNVNX_EXT_NO_SERVICE")
+    src = open(HDR).read()
+    FN, BAD, RNG = (define(src, n) for n in ("FNVNX_PLAT_UNMAP_RANGE", "FNVNX_HE_BADINPUT", "FNVNX_HE_RANGE"))
+    NOSVC = define(src, "FNVNX_EXT_NO_SERVICE")
+    case("header: UNMAP_RANGE is 37, BADINPUT 0x1759, RANGE 0xD401", (FN, BAD, RNG) == (37, 0x1759, 0xD401), (FN, BAD, RNG))
     elf = make_elf()
     rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
     plan = bootlayout.plan(bootlayout.parse_elf(elf), rows, 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")), quantum=20000)
+    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="bu-")))
     ARGS = 0x1400000   # inside the window, scratch for the argument array
     m.map_fixed(ARGS & ~0xFFF, P, 0)
 
@@ -48,7 +57,7 @@ def main():
     LO, HI = bootmachine.WINDOW
     case("window is as the header lists it", (LO, HI) == (0x400000, 0x2100000), (LO, HI))
     A = 0x800000
-    case("UNMAP_RANGE is served", FN in m.plat)
+    case("fn 37 is served", 37 in m.plat and FN in m.plat)
     case("size 0 -> BADINPUT", call(FN, A, 0) == BAD)
     case("addr+size wraps -> BADINPUT", call(FN, (1 << 64) - P, 2 * P) == BAD)
     case("addr unaligned -> BADINPUT", call(FN, A + 1, P) == BAD)

@@ -252,6 +252,18 @@
     "ports/fnv-nx/contract/store.py",
     "ports/fnv-nx/contract/gatefile.py"
    ]
+  },
+  "test_modules.py": {
+   "references": [
+    {
+     "anchor": "## contract/modules.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/modules.py"
+   ]
   }
  }
 }

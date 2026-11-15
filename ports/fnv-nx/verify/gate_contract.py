@@ -22,7 +22,7 @@ entries.tsv (liftall's entries, gate disp only). A file the root's recipe/link d
 Inputs shared by every root (verify/contract_inputs.json, "fnvnx-contract-inputs/1"; no other source, nothing comes from an argument):
   external     content-pinned inputs of fnv-nx-build, the same keys and the same fetch as a recipe's externals (recipe.fetch_externals:
                exact commit, tree_sha256 checked): the exe-derived private facts never enter this repository
-  exe msvc universe   `NAME/path` inside an external: FalloutNV.exe, the pristine MSVC objects (dir of u<i>.obj), L3's universe.tsv
+  exe msvc universe   `NAME/path` inside an external: FalloutNV.exe, L3's universe.tsv; `msvc` is the bare NAME of the pristine-objects external (its ROOT: meta.json and obj/u<i>.obj; n1 appends obj)
   root_results {units, addrmap, aliases[, entries]} file names in the root's out dir
   ranges       {exe: NAME/path, module: NAME/path with %s = the dll's stem}: where an image's range facts are in an external
   The image set of gpa/reach/reachlink is not an input: contract/images.py derives it (transitive closure of the normal and delay-load import
@@ -103,7 +103,7 @@ def load_inputs(path):
             err.append("external names are not unique")
         for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge", "ehfacts", "sites") if k in doc):
             v = doc.get(k)
-            if not isinstance(v, str) or ("/" not in v and k != "ehfacts") or v.split("/", 1)[0] not in names or ".." in v.split("/"):
+            if not isinstance(v, str) or ("/" not in v and k not in ("ehfacts", "msvc")) or v.split("/", 1)[0] not in names or ".." in v.split("/"):
                 err.append("%s must be NAME/path inside a declared external" % k)
     rg = doc.get("ranges")
     if not (isinstance(rg, dict) and set(rg) == {"exe", "module"} and all(isinstance(v, str) and "/" in v and ".." not in v.split("/")
@@ -150,8 +150,9 @@ def assemble(link, res, game, out, rr):
 
 
 def P2(ext, v):
-    n, rel = v.split("/", 1)
-    return os.path.join(ext[n]["host"], rel)
+    """NAME[/path]: the path inside the external NAME, or the external's root for a bare NAME."""
+    n, _, rel = v.partition("/")
+    return os.path.join(ext[n]["host"], rel) if rel else ext[n]["host"]
 
 
 def py(script, *args):
@@ -188,7 +189,9 @@ def stages(w, doc, ext, rp, only=None):
     imgs = []
     if only is None or only in IMAGE_GATES:
         for name, pe, rg in images_of(doc, ext)[0]:
-            imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
+            imgs += ["--image", "%s=%s" % (name, pe)]
+        fx = ext[doc["ranges"]["exe"].split("/", 1)[0]]     # the facts external: contract/imagerec.py checks its tree_sha256 and the images' sha256
+        imgs += ["--facts", fx["host"], "--facts-tree", fx["tree"]]
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {
