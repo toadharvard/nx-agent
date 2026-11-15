@@ -752,18 +752,98 @@ static const pass_data order_data = {
 static std::map<std::string, fnvnx_frame_row> frame_lines;
 static std::map<tree, std::vector<tree> > frame_vars;   // the local variables at the last GIMPLE point (expand frees the list)
 
+// ESCAPES (per variable of the frame row). Rule: an address-taken local has escapes=0 only when GCC's own points-to solution of the
+// final GIMPLE says no other thread can hold its address; every other variable has escapes=1. The solution is recomputed at this pass
+// (TODO_rebuild_alias before it runs: execute_function_todo, passes.cc, calls compute_may_aliases, tree-ssa-structalias.cc, i.e.
+// compute_points_to_sets / find_what_var_points_to), so it describes exactly the code that is compiled, not a state left by an earlier
+// pass. escapes=1 when ANY of:
+//   (1) the function has no points-to solution: flag_tree_pta is off (-O0, -fno-tree-pta) or the body is not in SSA form;
+//   (2) the decl is in the ESCAPED solution, local or IPA (pt_solution_includes on a solution with `escaped`/`ipa_escaped` set:
+//       pt_solution_includes_1 asks cfun->gimple_df->escaped and ipa_escaped_pt by DECL_PT_UID). ESCAPED is the closure of what a call
+//       argument (handle_rhs_call, make_escape_constraint), a store into non-local memory, a return (compute_points_to_sets: escapes
+//       through returns) and an asm operand make reachable;
+//   (3) the decl is in the points-to set (pt_solution_includes on the SSA name's own pi->pt) of a pointer that this function passes as a
+//       call argument or static chain, returns, stores to non-local memory (a global, or through a pointer whose set is not only local),
+//       or names ADDR_EXPR in such a position or in an asm operand; a pointer without points-to info points anywhere;
+// (3) restates (2) from the statements, so a solution that missed a use cannot make a variable private. Pointers carried in integers are
+// covered by (2) only (the PTA models the conversion). ASM-001: the compiler's GIMPLE and points-to semantics.
+static std::map<tree, std::set<tree> > frame_private;   // per function: the address-taken locals with escapes=0
+
 struct frame_vars_pass : gimple_opt_pass {
   frame_vars_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
+
+  static bool only_local(struct pt_solution *pt) {
+    return !(pt->anything || pt->nonlocal || pt->escaped || pt->ipa_escaped || pt->vars_contains_escaped || pt->vars_contains_escaped_heap);
+  }
+  static bool store_nonlocal(tree lhs) {
+    tree b = get_base_address(lhs);
+    if (!b) return true;
+    if (DECL_P(b)) return is_global_var(b) || DECL_EXTERNAL(b);
+    if (TREE_CODE(b) == MEM_REF || TREE_CODE(b) == TARGET_MEM_REF) {
+      tree ptr = TREE_OPERAND(b, 0);
+      if (TREE_CODE(ptr) == ADDR_EXPR) return store_nonlocal(TREE_OPERAND(ptr, 0));
+      if (TREE_CODE(ptr) != SSA_NAME || !SSA_NAME_PTR_INFO(ptr)) return true;
+      return !only_local(&SSA_NAME_PTR_INFO(ptr)->pt);
+    }
+    return true;
+  }
+
   unsigned int execute(function *fun) final override {
     unsigned ix;
     tree d;
     std::vector<tree> &v = frame_vars[fun->decl];
     FOR_EACH_LOCAL_DECL(fun, ix, d) v.push_back(d);
+    std::vector<tree> cand = v;
+    for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) cand.push_back(p);
+    std::set<tree> &priv = frame_private[fun->decl];
+    if (!flag_tree_pta || !gimple_in_ssa_p(fun) || !fun->gimple_df) return 0;          // (1): nothing is private
+    std::set<tree> esc;
+    bool all = false;
+    struct pt_solution q;
+    memset(&q, 0, sizeof q);
+    q.escaped = 1;
+    q.ipa_escaped = fun->gimple_df->ipa_pta;   // ipa_escaped_pt starts as `anything`: it is a solution only when IPA PTA ran (compute_may_aliases returns early then)
+    for (tree c : cand) if (pt_solution_includes(&q, c)) esc.insert(c);                // (2)
+    auto note = [&](tree val) {                                                        // (3)
+      if (!val) return;
+      if (TREE_CODE(val) == ADDR_EXPR) {
+        tree b = get_base_address(TREE_OPERAND(val, 0));
+        if (b && DECL_P(b)) esc.insert(b);
+        return;
+      }
+      if (TREE_CODE(val) != SSA_NAME || !POINTER_TYPE_P(TREE_TYPE(val))) return;
+      struct ptr_info_def *pi = SSA_NAME_PTR_INFO(val);
+      if (!pi) { all = true; return; }
+      for (tree c : cand) if (pt_solution_includes(&pi->pt, c)) esc.insert(c);
+    };
+    basic_block bb;
+    FOR_EACH_BB_FN(bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
+        gimple *st = gsi_stmt(gsi);
+        if (gcall *call = dyn_cast<gcall *>(st)) {
+          for (unsigned i = 0; i < gimple_call_num_args(call); i++) note(gimple_call_arg(call, i));
+          note(gimple_call_chain(call));
+        } else if (greturn *r = dyn_cast<greturn *>(st)) {
+          note(gimple_return_retval(r));
+        } else if (gasm *as = dyn_cast<gasm *>(st)) {
+          for (unsigned i = 0; i < gimple_asm_ninputs(as); i++) note(TREE_VALUE(gimple_asm_input_op(as, i)));
+          for (unsigned i = 0; i < gimple_asm_noutputs(as); i++) {
+            tree o = TREE_VALUE(gimple_asm_output_op(as, i));
+            tree b = get_base_address(o);
+            if (b && DECL_P(b)) esc.insert(b);
+          }
+        } else if (gassign *a = dyn_cast<gassign *>(st)) {
+          if (gimple_assign_single_p(a) && !is_gimple_reg(gimple_assign_lhs(a)) && store_nonlocal(gimple_assign_lhs(a)))
+            note(gimple_assign_rhs1(a));
+        }
+      }
+    if (all) return 0;
+    for (tree c : cand) if (!esc.count(c)) priv.insert(c);
     return 0;
   }
 };
 static const pass_data frame_vars_data = {
-    GIMPLE_PASS, "fnvnx_frame_vars", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0,
+    GIMPLE_PASS, "fnvnx_frame_vars", OPTGROUP_NONE, TV_NONE, PROP_ssa, 0, 0, TODO_rebuild_alias, 0,
 };
 
 struct frame_pass : rtl_opt_pass {
@@ -810,8 +890,9 @@ struct frame_pass : rtl_opt_pass {
     // alloca has `OFFSET:SIZE` ranges, and an address-taken variable that has no constant frame slot is its own `unk:CAUSE` token, never a
     // reason to give up the whole function.
     bool dynamic = fun->calls_alloca;
-    std::vector<std::pair<long, long> > rs;
+    std::map<std::pair<long, long>, bool> rs;           // (offset, size) -> every variable in the slot has escapes=0
     std::set<std::string> unk;
+    std::set<tree> &priv = frame_private[fun->decl];
     auto one = [&](tree v) {
       if (!VAR_P(v) && TREE_CODE(v) != PARM_DECL) return;
       if (TREE_STATIC(v) || DECL_EXTERNAL(v) || !TREE_ADDRESSABLE(v)) return;
@@ -822,15 +903,18 @@ struct frame_pass : rtl_opt_pass {
       tree sz = DECL_SIZE_UNIT(v);
       if (!sz || !tree_fits_uhwi_p(sz)) { unk.insert("size"); return; }
       if (!slot_offset(XEXP(m, 0), fun->decl, &off)) { unk.insert("mem"); return; }   // through a pseudo: not a slot of this frame
-      rs.push_back(std::make_pair(off, (long)tree_to_uhwi(sz)));
+      std::pair<long, long> k = std::make_pair(off, (long)tree_to_uhwi(sz));
+      bool pv = priv.count(v) != 0;
+      std::map<std::pair<long, long>, bool>::iterator it = rs.find(k);
+      if (it == rs.end()) rs[k] = pv; else it->second = it->second && pv;   // a slot shared by variables: escaping wins
     };
     for (tree v : frame_vars[fun->decl]) one(v);
     for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) one(p);
     fnvnx_frame_row row;
     if (dynamic) row.ranges = "dynamic";
     else {
-      std::sort(rs.begin(), rs.end());
-      for (auto &r : rs) row.ranges += (row.ranges.empty() ? "" : " ") + std::to_string(r.first) + ":" + std::to_string(r.second);
+      for (auto &r : rs)
+        row.ranges += (row.ranges.empty() ? "" : " ") + std::to_string(r.first.first) + ":" + std::to_string(r.first.second) + (r.second ? ":n" : "");
       for (auto &u : unk) row.ranges += (row.ranges.empty() ? "" : " ") + ("unk:" + u);
     }
     poly_int64 as = crtl->args.size;

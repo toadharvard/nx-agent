@@ -3,9 +3,11 @@
 // in verify/recipe.py PLUGIN_INPUTS; no plugin writes a row any other way.
 //
 // Row (link/framesec.py): SYMBOL TAB RANGES TAB args:N, LF-terminated.
-//   RANGES  empty | `dynamic` | OFFSET:SIZE pairs (sorted), then `unk:CAUSE` tokens (sorted, each once), one blank between tokens;
+//   RANGES  empty | `dynamic` | pairs OFFSET:SIZE or OFFSET:SIZE:n (sorted), then `unk:CAUSE` tokens (sorted, each once), one blank between tokens;
 //   args:N  N = crtl->args.size: the bytes of incoming stack arguments at [CFA, CFA+N), decimal, no sign, no leading zeros.
-// OFFSET is relative to the CFA (the stack pointer at function entry). `unk:CAUSE` records an address-taken variable whose slot is not a
+// A pair without `:n` is a variable with escapes=1 (another thread may hold its address: every access to it is ordered); `:n` is escapes=0 (GCC's points-to
+// solution of the final GIMPLE says the address stays in this thread: see frame_vars_pass in fnvnx_order.cc for the rule). A slot shared by variables is `:n` only
+// when every one of them is. OFFSET is relative to the CFA (the stack pointer at function entry). `unk:CAUSE` records an address-taken variable whose slot is not a
 // constant offset of this frame (reg: DECL_RTL is a register; mem: a MEM through a pseudo; size: no constant size).
 #ifndef FNVNX_FRAME_H
 #define FNVNX_FRAME_H
