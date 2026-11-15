@@ -1218,3 +1218,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - Rejected: explicit instantiation by hand, and -fno-inline (it switches off a fast path).
 - The 6 are re-labelled "undecidable: no definition record". The record was requested from L2; w23 wires tier 2.
 - 7fdec4e identity after rule E: 327 signatures, 187 multi-copy, 6 undecidable, 0 other undecidable.
+
+### 2026-11-15 01:25 — base-files layout; w12h+w15c union
+- w6: base-files_13ubuntu10.5 ships ./bin, ./lib, ./lib64 and ./sbin as usr symlink members, so it is the declared machine layout. One re-snapshot through setup_verdict_env.sh, coordinated with w12's deb needs. PT_INTERP stays the driver's `-###` value.
+- L4 w6 15bebb59d: the three-way merge of w12h 26135240 and w15c, valid for hostabi, sha256, platform, bootrt, bootguest and @m60; bootrt green with test_bootrt 8/8. w15 merges w12h into cand1 with that recipe.py as the reference.
