@@ -62,7 +62,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   below; `flags` carries the emulation only, `roots` and `libs` are optional.
   `kind` is `pie` (the ILP32 guest image, the default) or `exe`; a root of target guest cannot link an `exe`. `roots` lists distinct admitted `product`
   roots of the same target, never the root itself; their stored objects are declared inputs of the link stage (so their content is in its key) and a
-  listed root is built without its own link. A root of class `product` lists base roots only; a root of class `test` lists any root, variants included
+  listed root is built without its own link. A root of class `product` lists base roots and the per-target variant of its own target; a root of class `test` lists any root, variants included
   (`root@NAME`). A variant is one concept: `variants: {NAME: {"target"?}}` in the root's admit.json entry, its flags in the recipe's `variants`,
   addressed as `root@NAME` (a sanitizer build is a flags variant of the same root). Whatever the flags, `linkstrict` judges the linked output: no
   undefined symbol of any binding.
@@ -194,7 +194,7 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
   `exe` is host only: a root of target guest links a `pie` (emulation `aarch64linux32`, the crt0 header), a guest test root included; a guest root with
-  kind `exe` is refused. A product image's `link.roots` name base roots only; an explicit variant (`root@NAME`) is linked only by a root of class `test`.
+  kind `exe` is refused. A product image's `link.roots` name base roots, or the per-target variant of the image's own target (a variant that admit.json declares with its own `recipe`, the dict spelling `{guest, host}`: it is the same units compiled for the image's target, a product of the root). A flags variant (a sanitizer build or any variant declared in the recipe's `variants`) is test-only: an explicit `root@NAME` of one is linked only by a root of class `test`, and a product image naming one is red.
   A `link.roots` entry names a root and the image links that root's recipe for the IMAGE'S OWN TARGET (`recipe.resolve_link_root`): an explicit `root@NAME` must itself
   have the image's target, else red; a base name is the base recipe when the base's target is the image's, else the one variant of the root that admit.json declares with
   the image's target (a host image names the guest root `lib/sha256` and links `lib/sha256@host`); no such variant, or several, is red. An object of another target is

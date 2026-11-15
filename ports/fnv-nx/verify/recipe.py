@@ -432,7 +432,7 @@ def with_guest_link(rec, root, roots, repo):
     """The recipe a guest root is BUILT with: its `link` gets script (by repo path, a tool-tree file) and libs from the guest link profile.
     A host root, a root without link, or a checkout without a profile: REC unchanged."""
     lk, prof = rec.get("link"), load_guest_link(repo)
-    if not (isinstance(lk, dict) and prof and roots.get(root, {}).get("target") == "guest"):
+    if not (isinstance(lk, dict) and prof and entry_of(roots, root).get("target") == "guest"):
         return rec
     return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["runtime"]["name"], "derive": True}))
 
@@ -870,8 +870,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
                 err.append("link.roots: %s has no variant %r (the one of target %r that admit.json declares)" % (dr, split_spec(rs)[1], rent.get("target")))
             elif dv and dv not in variant_names(drec, ent):
                 err.append("link.roots: %s has no variant %r" % (dr, dv))
-            elif dv and rent.get("class") != "test":
-                err.append("link.roots: %s is a variant: only a test root (class test) links a variant; a product image links base roots" % d)
+            elif dv and rent.get("class") != "test" and dv not in own_recipes(ent):
+                err.append("link.roots: %s is a flags variant (sanitizer or the like): only a test root (class test) links one; a product image links base roots "
+                           "and the per-target variant of its own target (admit.json recipe {guest, host})" % d)
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
     if "loader" in lk:
