@@ -98,7 +98,7 @@ typedef struct Gl4 {
     Gl4Vtx vtx[NX4_MAX_STREAMS];
     Gl4Query qry[GL4_MAX_QUERIES + 1];
     Gl4Slice* slices; uint32_t nSlices, capSlices; GLuint occCur;
-    GLuint nearestSmp, rampTex, scaleProg[6];
+    GLuint nearestSmp, rampTex, scaleProg[NX_GL4SHIM_PROG_COUNT];
     GLint maxVtxStride, maxAttrOffset;
     NxRenderState applied;
     GLint scissor[4];
@@ -189,7 +189,7 @@ void gl4_d3d_free(Gl4D3d* d);
 uint32_t gl4_program_for(uint32_t vs, uint32_t ps);
 /* Id tables: the id is the slot index (ids 1.., no bound in the ABI). Doubles *cap (at least 64 slots) and zeroes the new slots; 0 only when the host allocator fails (the table is unchanged). */
 int gl4_table_grow(void** tab, uint32_t* cap, size_t elem);
-GLuint gl4_compile_program(const char* vs, const char* fs);   /* internal programs: 0 and an error when they fail */
+GLuint gl4_compile_program(enum nx_gl4shim_prog_id id);   /* internal programs: a row of nx_gl4shim_progs; 0 and an error when it fails */
 /* gl4_core.c */
 void gl4_upload_range(uint32_t block, uint32_t off, uint32_t size);
 const Gl4Mem* gl4_mem(uint32_t id);
