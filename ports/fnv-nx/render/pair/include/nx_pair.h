@@ -12,8 +12,8 @@ extern "C" {
 int nx_link_set(const uint8_t* vs_out, uint32_t nv, const uint8_t* ps_in, uint32_t np, uint8_t* l, uint32_t* nl);   // shcache_link_set (render/shaders/cache/shcache_key.c) over FNVNX_DK_PAIR codes
 // The fixed-function stage that stands for a null VS or a null PS: the one row of gl4shim's stage list for the draw's D3DRS_SHADEMODE (FLAT: flat = true,
 // GOURAUD / PHONG: false; the latch of nx_ffp_flat keeps the previous mode for any other value). One function per stage, so the stage is named by the caller and no value is outside the domain.
-enum nx_gl4shim_stage_id nx_pair_ffp_vs_row(bool flat);
-enum nx_gl4shim_stage_id nx_pair_ffp_ps_row(bool flat);
+enum nx_gl4shim_shader_id nx_pair_ffp_vs_row(bool flat);
+enum nx_gl4shim_shader_id nx_pair_ffp_ps_row(bool flat);
 // The varyings the fixed-function programs declare, as FNVNX_DK_PAIR codes (ascending): the VS writes (ffp.vert.glsl `out`), the PS reads (ffp.frag.glsl `in`), generated from the GLSL, so they are exactly what the program
 // links against. They enter nx_pair_variant like any translated stage's sets. Return the count (<= 31).
 uint32_t nx_pair_ffp_vs_writes(uint8_t out[31]);

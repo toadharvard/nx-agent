@@ -26,8 +26,7 @@ enum { P_C2D = NX_GL4SHIM_PAIR_SCALE_C2D, P_CARR = NX_GL4SHIM_PAIR_SCALE_CARR, P
        P_DEPTH = NX_GL4SHIM_PAIR_SCALE_DEPTH, P_STENCIL = NX_GL4SHIM_PAIR_SCALE_STENCIL, P_CURSOR = NX_GL4SHIM_PAIR_CURSOR_STAMP };
 
 static GLuint program(int kind) {
-    if (!g4.scaleProg[kind]) g4.scaleProg[kind] = gl4_compile_program((enum nx_gl4shim_pair_id)kind);
-    return g4.scaleProg[kind];
+    return g4.scaleProg[kind];   /* made at creation, one generated call per row (nxgl4_create) */
 }
 
 static void ensure_objects(void) {
