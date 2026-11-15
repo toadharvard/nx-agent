@@ -3,9 +3,9 @@
 only by verify/recipe.py from the product root lift/pack (build.json), whose `generated` stage copies the units out of the published pack tree.
     liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shapes_K.tsv
     liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...]
-        merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, entries.tsv (lifted and runtime rows), inc/fnvl_prelude.h, inc/imp.h,
+        merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, entries.tsv (lifted and runtime rows),
         forms.tsv, encs.tsv, shapes.tsv, gate_liftgen.json. Nothing derived from the loader's bridge table is written (imp.cpp, disp.cc, the import rows and
-        the table_id are the generated stages of lift/pack).
+        the table_id, inc/fnvl_prelude.h and inc/imp.h are the generated stages of lift/pack: the runtime's headers are never in the pack).
     liftgen.py --recipe REF COMMIT TREE_SHA256    write lift/pack/build.json for the published pack tree (fnv-nx-build branch, commit, cas.py ingest hash)
     liftgen.py --module NAME ...                  (shard mode) a module of modules.tsv, lifted at its assigned base with its universe
 RULE units: entry A lives in unit u/<(A >> 4) & 0xfff as 3 hex digits>.cpp, for every image. The 4096 unit names are fixed, so the recipe's
@@ -174,7 +174,7 @@ def image(d, ent):
 def finish(a):
     import fnvlift as L
     out = a.out; pk = out + '/pack'
-    for d in (pk + '/u', pk + '/inc'): os.makedirs(d, exist_ok=True)
+    os.makedirs(pk + '/u', exist_ok=True)
     images = [(out, L.universe.load(a.universe)[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
     texts, forms, encs, shapes, shape_fam = {}, collections.defaultdict(lambda: [0, 'none']), {}, collections.Counter(), {}
     for d, ent in images:
@@ -197,8 +197,6 @@ def finish(a):
     for x in sorted(texts): units[bucket(x)].append(texts[x])
     for i in range(NBUCKET):
         with open('%s/u/%03x.cpp' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
-    open(pk + '/inc/fnvl_prelude.h', 'w', newline='').write('#ifndef FNVL_PRELUDE_H\n#define FNVL_PRELUDE_H\n' + L.prelude(os.path.join(LIFT, 'rt'), a.gen) + '\n#endif\n')
-    open(pk + "/inc/imp.h", "w", newline="").write(L.inline(os.path.join(LIFT, "rt"), "imp.h", L._GEN[0]))
     syms = {x: 'L_%08x' % x for x in texts}
     kind = {x: 'code' for x in syms}                      # the kind of an entry is the producer set its key came from: the keys of texts, EH_KEYS (the import rows are the pack's impgen stage)
     for k, sy in EH_KEYS:
@@ -221,6 +219,24 @@ def finish(a):
 GEN_USE = {'root': 'ports/fnv-nx/lift/rt', 'output': 'GEN'}      # the generated rt headers (fnvl_cpuref.h, fnvl_faults.h, fnvl_sys.h): included, not copied
 
 
+INC_DIRS = ['ports/fnv-nx/lift/rt', 'ports/fnv-nx/platform/include']      # where the runtime's headers are, in `#include "x"` search order (the rt root's GEN output is searched last)
+
+
+def inc_stages():
+    """the `generated` steps of the pack's own header directory inc/ (fnvl_prelude.h, imp.h): the runtime's headers of the CURRENT tree, inlined by tools/prelude.py. The
+    inputs of each step are the files of the closure of its source over INC_DIRS (prelude.closure: a pure function of the headers' include lines), so a change of
+    one of those headers re-keys the step and, through the include directory, every unit; any other file of rt/ does not."""
+    import prelude
+    repo = os.path.join(LIFT, '..', '..', '..')
+    dirs = [os.path.join(repo, d) for d in INC_DIRS]
+    out = []
+    for name, (src, _) in sorted(prelude.INC.items()):
+        files = sorted(os.path.relpath(os.path.join(d, n), repo) for d, n in prelude.closure(dirs, src).values())
+        out.append({'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['inc', name, '/out/inc/' + name] + ['/in/' + d for d in INC_DIRS] + ['/uses/ports/fnv-nx/lift/rt/GEN'],
+                    'inputs': files, 'outputs': ['inc/' + name]})
+    return out
+
+
 def recipe(ref, commit, tree, dest=None):
     """lift/pack/build.json. The recipe is the one definition of the semantic flags (verify/guest_compiler.json flags.semantics, appended to every guest compile stage), so
     the build.json holds only the per-root classes (PACK_ROOT_FLAGS; recipe.PER_ROOT: -O, -W, -D, -std ...), and the plugins are the full set of recipe.PLUGIN_SOURCES in
@@ -234,7 +250,7 @@ def recipe(ref, commit, tree, dest=None):
         plugins.append({'name': n})      # source, args and inputs are fixed by recipe.py (PLUGIN_SOURCES/ARGS/INPUTS): a root names the plugin only
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
-           'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
+           'include': ['ports/fnv-nx/lift/pack/inc'], 'units': 'all', 'plugins': plugins,
            'uses': [{'root': 'ports/fnv-nx/loader', 'output': 'BRIDGE_TSV'}, {'root': 'ports/fnv-nx/loader', 'output': 'IMPORTED_TSV'}, GEN_USE],
            'include_uses': [GEN_USE],
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['copy', '/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()},
@@ -243,7 +259,7 @@ def recipe(ref, commit, tree, dest=None):
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '/out/entries.tsv'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:1', 'path': 'imp_entries.tsv'}], 'outputs': ['entries.tsv']},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '--rows', '/out/disp_rows.tsv', '/stage/entries.tsv', '/out/disp.cc'],
-                          'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.cc', 'disp_rows.tsv']}],
+                          'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.cc', 'disp_rows.tsv']}] + inc_stages(),
            'outputs': {'ENTRIES': 'entries.tsv', 'DISP_ROWS': 'disp_rows.tsv'},
            'link': None,
            'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
@@ -270,7 +286,7 @@ def main():
     A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
     A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--l3', default=None)
     A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
-    A('--gen', help='the GEN output of the lift/rt root (generated headers of the prelude)'); A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
+    A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
     A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)

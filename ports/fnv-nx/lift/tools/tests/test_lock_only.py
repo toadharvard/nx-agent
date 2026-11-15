@@ -8,6 +8,7 @@ import os, re, shutil, sys, tempfile
 LIFT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, os.path.join(LIFT, '..', 'toolchain', 'tests'))
 import plugbuild as pb
+import prelude
 import fnvlift as L
 from fnvlift.tests import _inputs
 _inputs.configure()
@@ -30,7 +31,7 @@ PLUG = [pb.build(n, WORK) for n in ('sdd', 'names', 'dispatch')]
 
 def compiles(body):
     src, obj = os.path.join(WORK, 't.cc'), os.path.join(WORK, 't.o')
-    open(src, 'w').write(L.prelude(os.path.join(LIFT, 'rt'), GEN) + body)
+    open(src, 'w').write(prelude.text('fnvl_prelude.h', [os.path.join(LIFT, 'rt'), os.path.join(LIFT, '..', 'platform', 'include'), GEN]) + body)
     return pb.compile(src, obj, PLUG)
 
 
