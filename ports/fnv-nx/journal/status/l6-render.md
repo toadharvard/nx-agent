@@ -927,3 +927,7 @@ Paused: w3b, w4, farm; no other work.
 - 15:42Z w5 50a239be9: merged w6-root 98cd75f28. The duplicates are gone, table mode is 5/5 with byte-identical output, and the checker is green.
     - Found: the L1 elffacts ldfacts stage rejects maps with no archive members. w5 fixed it in elffacts.py; sent to L1 for review.
     - Final run waits on the w6 render/pair head.
+- 15:46Z w5 a350858b4: the elffacts tightening is done (L1 rule, 3 selftests, test_elffacts 0 failures). It enters cand4.
+    - w6 3f2fec0be: accepted. render/pair exports nx_pair_ffp_row, ffp_prog.cpp's copy is deleted, host builds green.
+    - w6 (doing): merge L6A 1ca99e8bd (NxShaderDesc {row}), and make the -1 sentinel inexpressible (an enum switch with no default). Then w5's final run, then construction rows 15/16.
+    - ffp_prog.cpp is changed by L6 w6 only.
