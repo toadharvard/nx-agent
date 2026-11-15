@@ -1,22 +1,23 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "cc": "aarch64-linux-gnu-gcc-13",
-  "cxx": "aarch64-linux-gnu-g++-13"
- },
- "flags": {
-  "c": [
-   "-mabi=ilp32"
-  ],
-  "cxx": [
-   "-mabi=ilp32"
-  ],
-  "asm": [
-   "-mabi=ilp32"
-  ]
- },
- "include": [],
- "units": "all",
+ "external": [
+  {
+   "name": "manifest",
+   "repo": "fnv-nx-build",
+   "ref": "l5-platform/manifest",
+   "commit": "9e4166eade58b561d3f4f16616e90326ea9f74fb",
+   "tree_sha256": "bfbbcea77548e59932f655968af8f943232787fe12ae0dd4a23f68654080bc6d",
+   "at": "/ext/manifest"
+  },
+  {
+   "name": "wine-specs",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-specs",
+   "commit": "678c780eb7cd295e714fd01a3d35623f4d76d840",
+   "tree_sha256": "d21bd71296e96a391fcf9349cb63205d58a830422cdc9e42bd0bc3fde4b9d796",
+   "at": "/ext/wine-specs"
+  }
+ ],
  "generated": [
   {
    "tool": "ports/fnv-nx/bridgefacts/com/comrows.py",
@@ -45,11 +46,46 @@
    "outputs": [
     "d9bridge_rows.tsv"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/contract/bridgegen.py",
+   "args": [
+    "--names",
+    "/ext/manifest/manifest/sys_names.tsv",
+    "--specs",
+    "/ext/wine-specs/specs",
+    "--name-table",
+    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
+    "--va",
+    "/in/ports/fnv-nx/bridgefacts/crt/msvcrt_va.tsv",
+    "--extra",
+    "/stage/com_rows.tsv",
+    "--extra",
+    "/stage/d9bridge_rows.tsv",
+    "--out",
+    "/out/bridge.tsv"
+   ],
+   "inputs": [
+    "ports/fnv-nx/bridgefacts/crt/msvcrt_names.tsv",
+    "ports/fnv-nx/bridgefacts/crt/msvcrt_va.tsv",
+    {
+     "stage": "ports/fnv-nx/bridgefacts:gen:0",
+     "path": "com_rows.tsv"
+    },
+    {
+     "stage": "ports/fnv-nx/bridgefacts:gen:1",
+     "path": "d9bridge_rows.tsv"
+    }
+   ],
+   "outputs": [
+    "bridge.tsv"
+   ]
   }
  ],
  "outputs": {
   "COM_ROWS": "com_rows.tsv",
   "COM_WORDS": "com_words.tsv",
-  "D9_ROWS": "d9bridge_rows.tsv"
+  "D9_ROWS": "d9bridge_rows.tsv",
+  "BRIDGE": "bridge.tsv"
  }
 }

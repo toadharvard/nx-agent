@@ -40,14 +40,6 @@
    "at": "/ext/redist"
   },
   {
-   "name": "manifest",
-   "repo": "fnv-nx-build",
-   "ref": "l5-manifest",
-   "commit": "2ac3091b7095598d04dce6091b2012f7cfa14bc7",
-   "tree_sha256": "4708f3d8d2dfa1adeab65fa4eeb4f994ad806372d49da392d22b4f93d2f169bb",
-   "at": "/ext/manifest"
-  },
-  {
    "name": "wine",
    "repo": "fnv-nx-build",
    "ref": "tools/wine-specs",
@@ -76,7 +68,7 @@
     "--exe",
     "/ext/exe/FalloutNV.exe",
     "--bridge",
-    "/ext/manifest/manifest/bridge.tsv",
+    "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
     "--dir",
     "/ext/exe",
     "--dir",
@@ -87,6 +79,8 @@
     "/out/gen/modules.c",
     "--keys-c-out",
     "/out/gen/import_keys.c",
+    "--modules-tsv-out",
+    "/out/gen/modules.tsv",
     "--keys-h-out",
     "/out/gen/import_keys.h",
     "--keys-tsv-out",
@@ -105,7 +99,8 @@
     "gen/import_keys.c",
     "gen/import_keys.h",
     "gen/keys.tsv",
-    "gen/iat_data.tsv"
+    "gen/iat_data.tsv",
+    "gen/modules.tsv"
    ]
   },
   {
@@ -123,7 +118,11 @@
   }
  ],
  "outputs": {
-  "INCLUDE": "include"
+  "INCLUDE": "include",
+  "IMPORT_KEYS_H": "gen/import_keys.h",
+  "KEYS_TSV": "gen/keys.tsv",
+  "MODULES_TSV": "gen/modules.tsv",
+  "IAT_DATA_TSV": "gen/iat_data.tsv"
  },
  "uses": [
   {
@@ -133,6 +132,10 @@
   {
    "root": "ports/fnv-nx/lib/sha256",
    "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "BRIDGE"
   }
  ]
 }
