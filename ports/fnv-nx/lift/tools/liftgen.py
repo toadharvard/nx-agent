@@ -17,9 +17,11 @@ not define is an undefined symbol of the link, which the linkstrict gate refuses
 Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs: explicit arguments only (--exe, --universe, --certs, ...); outputs only under --out
 (exe-derived: they go to the private fnv-nx-build repository, never into this one)."""
 import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
-for p in ('tools', ''):
-    sys.path.insert(0, os.path.join(LIFT, p))
+HERE = os.path.dirname(os.path.abspath(__file__))
+LIFT = os.path.dirname(HERE)      # the lift/ directory (fnvlift/, rt/); under a recipe stage the tool root is /tool and lift/ is a declared input: --lift DIR
+if '--lift' in sys.argv: LIFT = sys.argv[sys.argv.index('--lift') + 1]
+for p in (HERE, LIFT):
+    sys.path.insert(0, p)
 BATCH = 60
 ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of the retired one-instruction harness
 NBUCKET = 4096
@@ -137,9 +139,10 @@ def sha(path):
 
 def lifter_tree():
     """sha256 over (path, content) of every file the generated text is a function of: the lifter package, the runtime headers it inlines and the generator tools"""
-    fs = sorted(glob.glob(LIFT + '/fnvlift/*.py') + glob.glob(LIFT + '/fnvlift/*/*.py') + glob.glob(LIFT + '/rt/*.h') + [LIFT + '/tools/' + n + '.py' for n in ('liftgen', 'impgen', 'dispgen', 'formcert')])
+    fs = [(os.path.relpath(f, LIFT), f) for f in glob.glob(LIFT + '/fnvlift/*.py') + glob.glob(LIFT + '/fnvlift/*/*.py') + glob.glob(LIFT + '/rt/*.h')]
+    fs += [('tools/%s.py' % n, '%s/%s.py' % (HERE, n)) for n in ('liftgen', 'impgen', 'dispgen', 'formcert')]      # names, not paths: the same under a stage (/tool) and in a checkout
     h = hashlib.sha256()
-    for f in fs: h.update(os.path.relpath(f, LIFT).encode() + b'\0' + hashlib.sha256(open(f, 'rb').read()).digest())
+    for k, f in sorted(fs): h.update(k.encode() + b'\0' + hashlib.sha256(open(f, 'rb').read()).digest())
     return h.hexdigest()
 
 
@@ -281,6 +284,7 @@ def main():
     A('--module'); A('--modules', help='modules.tsv (the loader module table)'); A('--moddirs', help='DIR[:DIR...] that hold the module files'); A('--facts-out', help='where tools/universe.py --module wrote the module facts')
     A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
     A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--l3', default=None)
+    A('--lift', help='the lift/ directory (fnvlift/, rt/) when it is not the parent of this tool (a recipe stage mounts it as a declared input)')
     A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
     A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
     A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
