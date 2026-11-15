@@ -237,3 +237,9 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - L1's register (bootgpu gcc, boot_job apt, icount Unicorn) read an old tree. On w6-r the first two are closed and icount is the boot machine's own counter; L1 has been asked to update its register. w7 carries b037565f1 to cand1.
   - 4.3: the gl4 root is render/gl4 (L6A claude/fnv-l6a-deko-w6-gl4w15c a975efdc; compile valid, 17/17). Its link waits on L1's link rules; its loader root is verify/bootrt.
   - A8 closes with L5 w9's hostvm.h 18610d204, which w6 adds to group 4. Several of those values (the section and fixed-map limits) had L4's model as their only source; L5 is to make its host code read the header. The VM no-go window is to be derived from the exe facts (A10).
+- 01:14:
+  - R group 4 is done, w6-r 979ba70ba. verify/hostabirec.py derives from hostapi.h, placement.h, reach.h and sockwire*.h at import; every hand copy and 6 compare-only cases are deleted.
+  - Real drift caught: the hand SLOTS had 46 entries (cpu_count at slot 19), so every offset after slot 18 was wrong; fixed.
+  - Tests: bootsock 6, bootthreadcpu 31, bootcores and bootunmap 27 are green.
+  - Next: hostvm.h joins (A8); group 3 interim (ELF facts output asked of L1); group 2 (one binary).
+  - cand2 delivery is f795cd487.
