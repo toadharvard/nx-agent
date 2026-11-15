@@ -109,6 +109,22 @@
 "int_at": 0
 },
 {
+"name": "FASTFAIL",
+"code": 22,
+"form": false,
+"custom": true,
+"dispatch": "none",
+"status": "0xC0000409",
+"at": "a",
+"trap": false,
+"np": 0,
+"eip": 0,
+"param": "ECX",
+"src": "Microsoft docs first (learn.microsoft.com, the __fastfail intrinsic page): `int 0x29` terminates the process immediately with STATUS_STACK_BUFFER_OVERRUN (0xC0000409), ECX is the fail code, and no exception handler (SEH, vectored, unhandled filter) runs. Wine 9.0 dlls/ntdll/unix/signal_i386.c handle_interrupt case 0x29 raises a noncontinuable 0xC0000409 through NtRaiseException with ExceptionInformation[0] = ECX; that dispatches to user handlers and contradicts the documentation, so the documentation wins (platform/declared/x86sys.json precedence: documented Win32 first, Wine 9.0 where it contradicts neither). Not a SEH raise: dispatch none; rt/seh.cc ends the process through the platform's own self-termination entry, TerminateProcess(GetCurrentProcess(), 0xC0000409) (platform/win32/crt_kernel32.cpp: os_exit_process, no module detach, like the immediate kernel termination); the fail code in ECX is not part of the exit status",
+"int_vector": 41,
+"int_at": 0
+},
+{
 "name": "FLT_IE",
 "code": 12,
 "form": true,
