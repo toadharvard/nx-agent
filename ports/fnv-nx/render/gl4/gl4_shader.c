@@ -118,8 +118,8 @@ uint64_t gl4_api_shader_create(uint64_t a) {
     if (!d || !d->glsl || !d->glsl_size) return 0;
     const char* src = (const char*)nxgl4_guest_ptr(d->glsl, d->glsl_size);
     if (!src) return 0;
-    uint8_t k[32]; fnvnx_sha256(src, d->glsl_size, k);
-    if (memcmp(k, d->key, 32)) { gl4_err("shader_create: key is not the sha256 of the glsl"); return 0; }
+    uint8_t k[FNVNX_SHA256_DIGEST_SIZE]; fnvnx_sha256(src, d->glsl_size, k);
+    if (memcmp(k, d->key, sizeof k)) { gl4_err("shader_create: key is not the sha256 of the glsl"); return 0; }
     return gl4_shader_from_glsl(src, d->glsl_size, d->stage);
 }
 

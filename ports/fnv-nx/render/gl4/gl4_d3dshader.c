@@ -2,7 +2,7 @@
  * the path of the v3 shader_create (gl4_shader_from_glsl: the nxgl v3 shim, compile, register).
  *  D1 every byte the call reads comes from nxgl4_guest_ptr over exactly the ranges the descriptor names (descriptor 40 bytes, bytecode `size` bytes, link set n_link_pairs bytes); the bytecode is copied
  *     before anything looks at it, so the guest cannot change it under the translator. Nothing beyond `size` is read.
- *  D2 the call is total: every violation of the ABI text (stage, variant, reserved fields, size, hash, L, stage of the version token) and every failure of the translator or of the GL compile
+ *  D2 the call is total: every violation of the ABI text (stage, variant, size, hash, L, stage of the version token) and every failure of the translator or of the GL compile
  *     returns 0 with the reason in nxgl4_last_error and registers nothing.
  *  D3 memo: the key is the bytecode itself (memcmp, so a hash collision cannot alias two codes) + stage + variant + L. A repeated key returns the id again and counts one more owner; SHADER_DESTROY takes
  *     one owner back (gl4_shader.c), the last one releases the id. Distinct variants / link sets are distinct ids.
@@ -33,7 +33,6 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     const NxShaderD3D d = *dp;
     if (d.stage > NxStage_Fragment) return refuse("stage is neither vertex (0) nor pixel (1)");
     if ((d.variant & ~(uint32_t)FNVNX_SHADER_KEY_FLAGS) || (d.stage != NxStage_Vertex && (d.variant & FNVNX_SHADER_VS_COMPLETE))) return refuse("variant: translator key flags only, VS_COMPLETE on the vertex stage only");
-    if (d.pad[0] || d.pad[1] || d.pad2) return refuse("reserved fields are not 0");
     if (!d.size || (d.size & 3) || d.size > NXGPU_SHADER_MAX_CODE) return refuse("bytecode size is 0, not a multiple of 4 or above NXGPU_SHADER_MAX_CODE");
     if (d.n_link_pairs > FNVNX_DK_VARYING_SLOTS) return refuse("more than FNVNX_DK_VARYING_SLOTS link pairs");
     const uint8_t* bc = (const uint8_t*)nxgl4_guest_ptr(d.bytecode, d.size);
@@ -48,7 +47,7 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     uint8_t* code = (uint8_t*)malloc(d.size);
     if (!code) return refuse("out of memory");
     memcpy(code, bc, d.size);
-    uint8_t k[32]; fnvnx_sha256(code, d.size, k); if (memcmp(k, d.key, 32)) { free(code); return refuse("key is not the sha256 of the bytecode"); }
+    uint8_t k[FNVNX_SHA256_DIGEST_SIZE]; fnvnx_sha256(code, d.size, k); if (memcmp(k, d.key, sizeof k)) { free(code); return refuse("key is not the sha256 of the bytecode"); }
     uint32_t id = memo_find(&key, code);
     if (id) { free(code); g4.sh[id].d3d->refs++; return id; }
     fnvnx_shader_opts o; memset(&o, 0, sizeof o);

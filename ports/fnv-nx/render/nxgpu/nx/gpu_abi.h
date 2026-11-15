@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "state.h"
+#include "fnvnx_sha256.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,7 +66,7 @@ typedef struct NxShaderDesc {
     uint32_t stage;        /* NxStage */
     uint32_t glsl_size;
     uint64_t glsl;         /* GLSL 4.60 source in the deko3d flavour (the GL backend rewrites version + bindings) */
-    uint8_t key[32];       /* sha256 of the glsl_size bytes at glsl */
+    uint8_t key[FNVNX_SHA256_DIGEST_SIZE]; /* sha256 of the glsl_size bytes at glsl */
 } NxShaderDesc;
 /* Resource bindings in the GLSL: UBO and sampler `binding = n` are deko3d per-stage slots; the GL backend maps
  * them to GL binding stage * 16 + n. */
