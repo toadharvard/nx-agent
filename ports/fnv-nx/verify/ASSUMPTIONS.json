@@ -1286,6 +1286,22 @@
    "removed_by": "fact:ports/fnv-nx/manifest/funcfacts.py",
    "owner": "L5+L3a",
    "note": "removed: the passes read the L3a function facts (facts.json pin); gate check_funcfacts.py keeps image bytes and code facts inside funcfacts.py. Enters the registry with the merge of the L5 manifest, the files of used_by being tracked there."
+  },
+  {
+   "id": "ASM-055",
+   "text": "The x86 ISA behaves as the Intel SDM documents it, for the parts that no pinned formal model covers (today the x87 machinery).",
+   "used_by": [
+    "ports/fnv-nx/docs/ORCHESTRATION.md"
+   ],
+   "aliases": [
+    "L3b:x87 reference",
+    "the x86 ISA as the Intel SDM documents it"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers"
+   }
   }
  ]
 }
