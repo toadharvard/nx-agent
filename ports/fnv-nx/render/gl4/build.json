@@ -19,7 +19,8 @@
  "include": [
   "ports/fnv-nx/render/nxgpu",
   "ports/fnv-nx/render/shaders/translator/include",
-  "ports/fnv-nx/lib/sha256/include"
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/render/gl4shim/include"
  ],
  "units": "all",
  "link": {
@@ -33,7 +34,8 @@
   "roots": [
    "ports/fnv-nx/render/nxgpu",
    "ports/fnv-nx/render/shaders/translator",
-   "ports/fnv-nx/lib/sha256"
+   "ports/fnv-nx/lib/sha256",
+   "ports/fnv-nx/render/gl4shim"
   ],
   "libs": {
    "system": [
