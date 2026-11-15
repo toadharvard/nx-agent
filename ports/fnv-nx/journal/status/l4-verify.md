@@ -348,3 +348,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
     1. A header-root include is still refused (RECIPE.md "Header home").
     2. A link.roots cycle bridges → descs → bridges; rule asked: a fact's universe excludes its consumers via the uses graph.
   - The 9 link-free L4 tests are green. 8 link-dependent tests wait on these blockers.
+- 11:35: BOOT LOOP is the first item (CLAUDE.md integ 76e450faf); everything else is paused.
+  - B1 (w7, doing): ELF 509809b3b809's stop. Last boot 40d7672: after "init d3dx9_38.dll", UnhandledExceptionFilter → ExitProcess(0xC000001D), 1075895420 instructions, start-17. Wanted: pc, image, bytes, host pc and class.
+  - B2 (w6, doing): link the newest ELF from the leads' heads as a measurement build, boot it, and route its first stop.
