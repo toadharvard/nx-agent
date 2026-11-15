@@ -28,6 +28,8 @@ check('sympair', L.parse_sympair(SP, 'o.o'), [('_Z1fv', '?f@@YAXXZ', 'func', 'de
                                               ('_ZN1AC1Ev', '??0A@@QAE@XZ', 'ctor.c1', 'ref'), ('_Z3gccv', '', 'unnamed:local scope number', 'def')])
 check('sympair empty', L.parse_sympair(b'', 'o.o'), [])
 err('sympair 3 fields', L.parse_sympair, SP + b'a\tb\tfunc\n', 'line 5')
+check('sympair noemit', L.parse_sympair(b'_Z1gv\t?g@@YAXXZ\tnoemit\tref\n', 'o.o'), [('_Z1gv', '?g@@YAXXZ', 'noemit', 'ref')])
+err('sympair noemit no name', L.parse_sympair, b'_Z1gv\t\tnoemit\tref\n', 'without an MSVC name')
 err('sympair kind', L.parse_sympair, b'a\tb\tfunx\tdef\n', 'unknown kind')
 err('sympair unnamed no reason', L.parse_sympair, b'a\t\tunnamed:\tdef\n', 'unknown kind')
 err('sympair defref', L.parse_sympair, b'a\tb\tfunc\tdefx\n', 'neither def nor ref')

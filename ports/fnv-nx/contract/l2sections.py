@@ -17,7 +17,8 @@ Pure: bytes in, tuples out (rows keep the section's order).
 import os, sys
 
 KINDS = frozenset(('func', 'data', 'ctor.c1', 'ctor.c2', 'dtor.d2', 'dtor.d1', 'dtor.d0', 'dtor.sdd', 'dtor.sdd.thunk',
-                   'thunk', 'vtable', 'gcc', 'internal'))     # `vtable`: NAMES1 writes it for the table groups
+                   'thunk', 'vtable', 'gcc', 'internal',
+                   'noemit'))     # `vtable`: NAMES1 writes it for the table groups; `noemit`: a function GCC wrote nowhere (inlined at every use), a named `ref` row with no symbol in the object
 NAMELESS = frozenset(('thunk', 'vtable', 'gcc', 'internal'))
 N3_KINDS = frozenset(('', 'thunk', 'inline', 'sdd', 'alias'))
 
