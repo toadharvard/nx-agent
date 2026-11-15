@@ -42,6 +42,7 @@
  *
  * Anything this plugin sees and cannot place is a compile error; a D0 found in a table is one (the hook was missed).
  */
+#include "../order/fnvnx_frame.h"
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
@@ -541,6 +542,8 @@ static void finish_unit(void *, void *)
             f.vdel.c_str(), nm, nm);
     /* its N3 line (toolchain/pi): written by rule, with the vector branch, so `ok+E` */
     fprintf(asm_out_file, "\t.pushsection\t.fnvnx.n3,\"\",%%progbits\n\t.ascii\t\"%s\\tok+E\\t\\tsdd\\t\\n\"\n\t.popsection\n", nm);
+    /* its frame row (R1), by the writer of fnvnx_order (fnvnx_frame.h): the thunk holds no address-taken variable and takes no stack argument */
+    { std::map<std::string, fnvnx_frame_row> fr; fr[nm] = fnvnx_frame_row{"", 0}; fnvnx_emit_frame_rows(asm_out_file, fr); }
   }
 }
 
