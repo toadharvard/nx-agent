@@ -13,6 +13,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from proof import privset, shape, symform, x86sys  # noqa: E402
+sys.path.insert(0, HERE)
 from fnvlift import dsl  # noqa: E402
 
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
@@ -21,6 +22,9 @@ K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
 PRIV = privset.citations()
 CONDROW = {'rdpmc': ('cr4', 'pce'), 'sgdt': ('cr4', 'umip'), 'sidt': ('cr4', 'umip'), 'sldt': ('cr4', 'umip'), 'smsw': ('cr4', 'umip'), 'str': ('cr4', 'umip')}      # the record row that decides the #GP(0) condition of a `cond` SDM row
 COND = {m for r in privset.rows() if r['class'] == 'cond' for m in r['mnemonics'] if m in CONDROW}      # a #GP(0) that needs another condition (the SDM sentence names CR4.PCE / CR4.UMIP): its row of the record decides
+DECL = ('rdtsc', 'cpuid')      # instructions whose result is the declared machine's function (rt/cpumodel.c, declared.json): the SDM Operation line of the row's basis gives the registers
+FAULTROW = {'rdtsc': ('cr4', 'tsd'), 'cpuid': ('cpuid_faulting',)}      # the record row that decides whether the instruction can fault at CPL 3 (SDM RDTSC: CR4.TSD; SDM CPUID: CPUID faulting, MSR_PLATFORM_INFO / MSR_MISC_FEATURES_ENABLES)
+LARFAM = ('lar', 'lsl', 'verr', 'verw')      # the result depends on the descriptor of the selector in the register: the record's lar_lsl rows
 CLASS_B = {'int3': (K_BP, None), 'int1': (K_STEP, None), 'into': (K_INTO, 'of')}
 
 
@@ -56,6 +60,10 @@ def needs(key, rec):
             rows.append(('eflags', 'iopl'))                              # SDM: #GP(0) if CPL > IOPL
         if m in IO:
             rows.append(('tss_io_bitmap',))                              # SDM IN/OUT/INS/OUTS: then the I/O permission bitmap of the TSS decides
+    if m in FAULTROW:
+        rows.append(FAULTROW[m])
+    if m in LARFAM:
+        rows += [('lar_lsl', sr, m) for sr in rec.get('lar_lsl', {}) or [None]]
     if m == 'int':
         rows += [('int_ring3', 'vectors'), ('int_ring3', 'other_vectors')]
     elif sreg_load(ins):
@@ -82,10 +90,51 @@ def needs(key, rec):
     return None
 
 
+STR_TEXT = {'effects': 'str: expected one store only (memory form), no register, flag or fault effect', 'nstores': 'str: not exactly one store, the SDM has one', 'width': 'str: the store is not 16 bits wide (SDM: 16-bit quantity regardless of operand size)',
+            'value': 'the stored value differs from TR.SegmentSelector of the record'}
+
+
+def check_str(key, rec):
+    """the STR spec is proof/sysspec_str.py (every SDM quote of it is checked by sdm_cite_check.py against sysspec_pages.tsv)"""
+    import sysspec_str
+    r = sysspec_str.check(key, rec)
+    return ('proved', 'SDM STR: DEST := TR(SegmentSelector), the record selectors.tr') if r == 'ok' else ('FAILED(dsl)', STR_TEXT[r])
+
+
+def decl_spec(m):
+    """the SDM semantics of a DECL instruction as {register: z3 term} over the declared function of declared.json (the uninterpreted function named by the row's ufs): RDTSC `EDX:EAX := TimeStampCounter` (high:low in the basis text),
+    CPUID `(EAX, EBX, ECX, EDX) := CPUID_INFO(EAX, ECX)` (the i-th function is the i-th register of the tuple)"""
+    import json, re, z3
+    rows = {r['function']: r for r in json.load(open(os.path.join(HERE, 'declared.json')))['rows']}
+    r = rows[m]; bv = lambda n, w: z3.BitVec(n, w)
+    if m == 'rdtsc':
+        hi, lo = re.search(r'(E[A-D]X):(E[A-D]X) := TimeStampCounter', r['basis']).groups(); t = bv('uf_' + r['ufs'][0], 64)
+        return {lo.lower(): z3.Extract(31, 0, t), hi.lower(): z3.Extract(63, 32, t)}
+    return {reg: z3.Function('uf_' + u, z3.BitVecSort(32), z3.BitVecSort(32), z3.BitVecSort(32))(bv('eax', 32), bv('ecx', 32)) for reg, u in zip(r['outputs'], r['ufs'])}
+
+
+def check_decl(key, m, rec):
+    import z3
+    f = symform.symbuild(key).form
+    if f.flags or f.stores or f.flo is not None or f.faults:
+        return 'FAILED(dsl)', '%s: expected register results only, no flag, store or fault' % m
+    if x86sys.get(rec, *FAULTROW[m]) != 0:
+        return 'not-covered', 'no spec for %s (the record says it can fault at CPL %d)' % (m, x86sys.cpl(rec))
+    spec = decl_spec(m); got = {r: dsl.to_smt(v) for r, v, _ in f.regs}
+    if set(got) != set(spec): return 'FAILED(dsl)', '%s writes %s, the SDM tuple is %s' % (m, sorted(got), sorted(spec))
+    for r in sorted(spec):
+        s = z3.Solver(); s.add(got[r] != spec[r])
+        if s.check() != z3.unsat: return 'FAILED(dsl)', '%s: register %s differs from the SDM Operation' % (m, r)
+    return 'proved', 'SDM %s over the declared function of declared.json (%s)' % (m.upper(), rec_name(m))
+
+
+def rec_name(m): return 'no fault row: ' + '.'.join(FAULTROW[m])
+
+
 def check(key):
     import z3
     m = mnemonic(key)
-    if m not in PRIV and m not in COND and m not in CLASS_B and not needs_any(m):
+    if m not in PRIV and m not in COND and m not in CLASS_B and m not in DECL and m not in LARFAM and not needs_any(m):
         return 'not-covered', 'no spec for %s' % m
     if m in CLASS_B:
         return class_b(symform.symbuild(key).form, m)                                              # no row of the record is involved: the SDM condition alone
@@ -96,10 +145,14 @@ def check(key):
     why = needs(key, rec)
     if why:
         return 'uncertified', 'uncertified: %s' % why
+    if m in DECL:
+        return check_decl(key, m, rec)
     if x86sys.get(rec, 'cr4', 'umip') != 0:
         return 'FAILED(facts)', 'cr4.umip is set on the declared machine: UMIP semantics are not specified'
     if m not in PRIV and m not in COND and m not in CLASS_B:
         return 'not-covered', 'no spec for %s (its record rows are decided)' % m
+    if m == 'str' and not cond_fires(m, rec):
+        return check_str(key, rec)
     if m in COND and not cond_fires(m, rec):
         return 'not-covered', 'no spec for %s (its #GP(0) condition does not hold on the declared machine; the instruction has its ordinary effect)' % m
     f = symform.symbuild(key).form
