@@ -15,6 +15,11 @@ def u32v(a): return TAB if a else 0
 def tab(*v): return b''.join(u32(x) for x in v)
 def jmp_tab(disp, reg=0x85): return b'\xff\x24' + bytes([reg]) + u32(disp)
 
+class earlier:
+    '''FRAME_ESCAPE_OTHER = True: the earlier rule, a frame-address form that is not proved benign turns the cells off for the cone'''
+    def __enter__(s): jtab.FRAME_ESCAPE_OTHER = True
+    def __exit__(s, *a): jtab.FRAME_ESCAPE_OTHER = False
+
 def run(code, table=b'', ro=b'', rw=b'', relocs=()):
     mem = {}
     for i, b in enumerate(code): mem[FN + i] = b
@@ -99,7 +104,7 @@ class P(unittest.TestCase):
         s.red(code, tab(*OUT[:5]), relocs=[FN + 21] + [TAB + 4 * i for i in range(5)])
     def test_escaping_frame_address_drops_cells(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
-        s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + [TAB + 4 * i for i in range(5)])
+        with earlier(): s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + [TAB + 4 * i for i in range(5)])
 class F(unittest.TestCase):
     """R-B (a join kills only esp cells; flag records of one (kind, loc, imm) join their intervals) and R-A(i) (precise frame-address escapes)"""
     def rel(s, code_prefix, tail_at):
@@ -128,21 +133,39 @@ class F(unittest.TestCase):
         s.red(s.seh(0xf8), tab(*OUT[:5]), relocs=[FN + 26] + s.R5)
     def test_seh_address_used_elsewhere_stays_whole_cone(s):
         code = b'\x8d\x45\xf4\x64\xa3\x00\x00\x00\x00\x89\xc1\x89\xd0' + b'\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
-        s.red(code, tab(*OUT[:5]), relocs=[FN + 28] + s.R5)
+        with earlier(): s.red(code, tab(*OUT[:5]), relocs=[FN + 28] + s.R5)
     def cookie(s, load):
         return load + b'\x31\xe8\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
     def test_cookie_xor_escapes_nothing(s):
         s.ok(OUT[:5], s.cookie(b'\xa1' + u32(RW)), tab(*OUT[:5]), relocs=[FN + 22] + s.R5)
     def test_xor_with_a_pointer_loaded_value_stays_whole_cone(s):
-        s.red(s.cookie(b'\x8b\x03\x90\x90\x90'), tab(*OUT[:5]), relocs=[FN + 22] + s.R5)
+        with earlier(): s.red(s.cookie(b'\x8b\x03\x90\x90\x90'), tab(*OUT[:5]), relocs=[FN + 22] + s.R5)
     def test_other_frame_address_forms_stay_whole_cone(s):
         code = b'\x89\xe9\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
-        s.red(code, tab(*OUT[:5]), relocs=[FN + 17] + s.R5)
-    def test_switch_owner6_on_the_table_index(s):
+        with earlier(): s.red(code, tab(*OUT[:5]), relocs=[FN + 17] + s.R5)
+    def cert(s, code, **k):
+        t, why = run(code, tab(*OUT[:5]), **k); s.assertIsNone(why); return t.cert
+    def test_owner6_certificate_for_an_escaped_frame_address(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
-        jtab.FRAME_ESCAPE_OTHER = False
-        try: s.ok(OUT[:5], code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5)
-        finally: jtab.FRAME_ESCAPE_OTHER = True
+        c = s.cert(code, relocs=[FN + 18] + s.R5)
+        s.assertEqual((c['kind'], c['site_va'], c['guard_va'], c['cell'], c['jcc'], c['edge'], c['N'], c['extent'], c['B'], c['assumption']),
+                      ('jtab-guard', FN + 15, FN + 10, -0x14, 'ja', 'not-taken', 4, 5, None, 'OWNER 6'))
+        with earlier(): s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5)
+    def test_certificate_through_a_byte_table(s):
+        code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x03\x77\x11\x8b\x45\xec' + b'\x0f\xb6\x88' + u32(RO) + jmp_tab(TAB, 0x8d) + b'\xc3'
+        t, why = run(code, b'\x90' * 4 + tab(OUT[0], OUT[1]), ro=bytes([1, 2, 2, 1]), relocs=[FN + 25, TAB + 4, TAB + 8])
+        s.assertIsNone(why); c = t.cert
+        s.assertEqual((c['B'], c['b_extent'], c['extent'], c['steps']), (RO, 4, 2, (('byte', RO),)))
+    def test_no_guard_on_the_cell_has_no_certificate(s):
+        code = b'\x8d\x4d\xec\x89\x55\xec\x83\xfa\x04\x77\x0b\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'     # the guard is on edx, the reload is of the cell
+        s.red(code, tab(*OUT[:5]), relocs=[FN + 17] + s.R5)
+    def test_store_to_the_cell_after_the_guard_drops_the_certificate(s):
+        code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x11\xc7\x45\xec\x09\x00\x00\x00\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
+        t, why = run(code, tab(*OUT[:10]), relocs=[FN + 25] + [TAB + 4 * i for i in range(10)])
+        s.assertTrue(t is None or t.cert is None or t.cert['extent'] == 1)
+    def test_signed_guard_has_no_certificate(s):
+        code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x7f\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
+        s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5)
 class E(unittest.TestCase):
     def test_second_reference_into_the_table_keeps_targets_seeded(s):
         code = b'\x83\xf8\x03\x77\x0a' + jmp_tab(TAB) + b'\xcc\xcc\xcc\xc3'
