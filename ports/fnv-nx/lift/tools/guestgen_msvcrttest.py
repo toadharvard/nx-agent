@@ -306,7 +306,7 @@ def main():
     img = Fake(P.code); starts = {P.addr[n] for n in P.order} | {l for _, l in labels}; img.entries = set(starts)
     # every label a non-local transfer can land on is also an entry of the universe (the exe's EH tables make them `eh-cont` / `seh-handler` entries)
     texts = [L.lift(img, P.addr[n], SLOT, owns=P.owns[n])[0] for n in P.order] + [L.lift(img, a, SLOT, start=l, owns=[l])[0] for a, l in labels]
-    work = tempfile.mkdtemp()
+    work = tempfile.mkdtemp(dir='/dev/shm')
     open(work + '/bridge.tsv', 'w').write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n' + ''.join('%s\t%s\t\t%s\t%s\t%s\t%s\t%s\n' % r for r in BRIDGE))
     open(work + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOTS[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE))
     ent, blocked, hit, absent = impgen.generate(work + '/bridge.tsv', work, [work + '/need.tsv'], None)      # a bind-l3 row without a body in the runtime is an undefined symbol at the link
