@@ -994,3 +994,12 @@ Paused: w3b, w4, farm; no other work.
         - Rulings: the Wine source is wined3d shader_sm1.c, not vkd3d; an unbounded entry means Wine accepts every model; the 501 derived opcode rows stay; R3 sees a contradiction only on exclusion words; v[a0.x] is legal.
         - Next: the per-row diff, with flips decided by me.
 - bottleneck: waiting on L1 and L2 for the guest compile (no L6 guest code compiles; 2 plugin defects) and on L1 cand3 for the trunk. 3 of 4 workers busy.
+
+## 2026-11-15 20:10Z
+- **The guest compile defects are resolved by rule. Their cause was found and closed.**
+    - fnvnx_names (L1): w5's hand-listed PLUGIN_INPUTS commit is dropped. It is replaced by L1 w12's 34a4a4b2a, `recipe.plugin_inputs` include closure.
+    - The duplicate case labels in fnvnx_layout.cc (L2 diagnosis): w5-fbo and w6-root carried fa0f48e4f, an intermediate plugin copy merged over the later one. That merge was a second path.
+        - Rule: an L6 branch takes toolchain/ and verify/guest_compiler.json whole from L2's pinned commit, today a42ad8875 (pin 05082bde, key 9f0d5729908efe09), and never edits them.
+        - The lead branch does not contain fa0f48e4f.
+    - w5 and w6 are applying both fixes. The verify step is a background guest compile through recipe.py.
+- bottleneck: the guest compile result after the fixes, and L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
