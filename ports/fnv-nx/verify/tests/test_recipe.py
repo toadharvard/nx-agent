@@ -103,6 +103,7 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     w(repo, "gen/gen.py", GEN.replace("@IMPORT@", imp).replace("@EXTRA@", ex or "0"))
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
     w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), recipe.ENV_JSON)).read())   # the declared environment
+    w(repo, "verify/declared_sources.json", open(os.path.join(VERIFY, "declared_sources.json")).read())   # the pinned documents of the declared-machine table: the tree's own record, as every root has it
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
         {"path": ROOT, "class": "product", "target": "host", "recipe": ROOT + "/build.json"},
         {"path": T + "gen", "class": "tool"}, {"path": T + "verify", "class": "tool"},
@@ -134,6 +135,11 @@ def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), im
     for r in ad["roots"]:
         if r["path"] == ROOT:
             r["target"] = "guest"
+    real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
+    have = {r["path"] for r in ad["roots"]}
+    for r in json.load(open(os.path.join(VERIFY, "admit.json")))["roots"]:   # the admitted root of every plugin file, as the tree under test admits it (a plugin source lies in an admitted root)
+        if r["path"] not in have and any(n == r["path"] or n.startswith(r["path"] + "/") for n in recipe.plugin_files(real)):
+            ad["roots"].append(r)
     w(repo, "verify/admit.json", json.dumps(ad))
     w(repo, "verify/guest_compiler.json", open(os.path.join(VERIFY, "guest_compiler.json")).read())
     if image:   # the guest link profile (script and libraries of every guest link) and the script it names
