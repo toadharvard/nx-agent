@@ -271,7 +271,7 @@ def main():
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root with fnvnx_ftoi in mode lifted is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
     check("lifted root without fnvnx_ftoi is red", any("does not load plugin fnvnx_ftoi" in x for x in errs(lrepo, dict(lrec, plugins=[]))))
-    check("a lifted root's ftoi mode is the origin's: plugin_decls gives mode lifted", recipe.plugin_decls([P["fnvnx_ftoi"]], {"lifted_by": "x.py", "pack": "p"})[0]["args"]["mode"] == "lifted")
+    check("a lifted root's ftoi mode is the origin's: plugin_decls gives mode lifted", recipe.plugin_decls([P["fnvnx_ftoi"]], {"lifted_by": "x.py", "pack": "p"}, recipe.tracked(REAL), recipe.load_admit(REAL), REAL)[0]["args"]["mode"] == "lifted")
     os.environ["ARTIFACTS_URL"] = ext
     rl, _ = build(lrepo, "L")
     check("lifted root builds green with only fnvnx_ftoi (lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == ["fnvnx_ftoi"], rl.get("failure"))
