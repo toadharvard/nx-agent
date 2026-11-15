@@ -32,7 +32,9 @@ EXE = _O['--exe']; FUNCS = _O['--funcs']; NAME = ''
 OUTD = _O['--out']; OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
 if '--refused' not in _O:       # driver: reloc-consistency refusals to their fixed point (each round is a whole run; R_{k+1} = R_k + the pointer-only entries with a misfit; refusals only shrink the flow, so R grows monotonically)
     import subprocess; _rf = OUTD + '/refused.tsv'; _R = set()
-    for _k in range(12):
+    _k = -1
+    while True:      # terminates: R only grows (R_{k+1} = R_k + _nx, and the loop ends when _nx adds nothing) and the pointer-only entries are finite; there is no round cap
+        _k += 1
         open(_rf, 'w').write(''.join('%08x\n' % a for a in sorted(_R)))
         _p = subprocess.run([sys.executable, '-I', os.path.abspath(__file__)] + sys.argv[1:] + ['--refused', _rf], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         _nx = set(int(l.split()[0], 16) for l in open(OUTD + '/refused_next.tsv') if l.strip()) if os.path.exists(OUTD + '/refused_next.tsv') else set()
@@ -40,7 +42,6 @@ if '--refused' not in _O:       # driver: reloc-consistency refusals to their fi
             sys.stdout.write(_p.stdout); print('reloc-consistency fixed point after %d rounds: %d entries refused' % (_k + 1, len(_R)))
             open(_rf, 'w').write('# columns: entry; unproven pointer-only entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\n' % a for a in sorted(_R))); sys.exit(_p.returncode)
         _R |= _nx
-    raise RuntimeError('reloc-consistency: no fixed point in 12 rounds')
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 M = pemod.load(EXE); d, pe, base, secs, loc, off, sec, u32, dirent = M.d, M.pe, M.base, M.secs, M.loc, M.off, M.sec, M.u32, M.dirent
 RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)

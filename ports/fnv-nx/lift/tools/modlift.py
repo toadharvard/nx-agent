@@ -471,11 +471,12 @@ def _run(arg, cfg, XEX, REF=frozenset()):
 def run(arg, cfg):
     """R3 refined, to its fixed point: X = {relocation sites that are only the displacement of a non-lea memory operand of an instruction of the flow} (residue.disp_only); the flow depends on the entries,
     the entries on the value sites (not in X). Round k runs the whole producer with X_k excluded and yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k: every excluded site is a
-    displacement inside the final flow and every entry is justified by a value site or a root. A cycle or no fixed point in 12 rounds is an error (never a result)."""
+    displacement inside the final flow and every entry is justified by a value site or a root. A cycle is an error (never a result); the rounds are not capped (R grows, the states are finite)."""
     import io, contextlib
     X = frozenset(); R = frozenset(); seen = []; refinfo = {}
-    for k in range(12):
-        buf = io.StringIO()
+    k = -1
+    while True:      # terminates: R only grows and the states (X, R) are finite; a state seen twice is a cycle, which is an error (below); there is no round cap
+        k += 1; buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             code, Xo, Ro, PMF, nE, nC, nh = _run(arg, cfg, X, R)
         refinfo.update(Ro); print('round %d: X %d R %d (+%d refused, %d displacement-only sites)' % (k, len(X), len(R), len(set(Ro) - R), len(Xo)), file=sys.stderr, flush=True)
@@ -489,4 +490,3 @@ def run(arg, cfg):
         seen.append((X, R)); X = frozenset(Xo); R = R | frozenset(Ro)          # a refusal is intrinsic to the bytes (the misfit) and the proven set only shrinks with the universe: R grows monotonically
         if (X, R) in seen:
             raise RuntimeError('R3 refinement does not converge (cycle at round %d)' % k)
-    raise RuntimeError('R3 refinement: no fixed point in 12 rounds')
