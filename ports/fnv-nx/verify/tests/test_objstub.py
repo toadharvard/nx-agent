@@ -212,6 +212,21 @@ for abi in ("ilp32", "lp64"):
     cs = [a - sec[3] for a in cs]
     check(T("LLVM (a64access) decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
 
+# --- the target profile of a root decides how its objects are judged (gate_objstub.profile_findings)
+import gate_objstub
+def hdr(cls, machine):
+    pth = tempfile.mkstemp(dir=ROOT, suffix=".o")[1]
+    open(pth, "wb").write(b"\x7fELF" + bytes([cls, 1, 1]) + bytes(9) + (1).to_bytes(2, "little") + machine.to_bytes(2, "little") + bytes(40))
+    return pth
+g32, g64, x64 = hdr(1, 183), hdr(2, 183), hdr(2, 62)
+check("profile: a guest root with ELF32 AArch64 objects has no finding (its bodies are analysed)", gate_objstub.profile_findings("r", "guest", [("a", g32)]) == [])
+check("profile: a host root is red as a root, one finding, no abort (no body analyzer for profile host)",
+      gate_objstub.profile_findings("r", "host", [("a", x64), ("b", g64)]) == [("r", "objstub", "no-body-analyzer", "objstub: no body analyzer for profile host")])
+f = gate_objstub.profile_findings("r", "guest", [("a", g32), ("b", x64)])
+check("profile: an object whose e_machine is not the guest profile's is red, named by its id", [x[:3] for x in f] == [("b", "e_machine", "target-mismatch")], f)
+f = gate_objstub.profile_findings("r", "host", [("a", g32)])
+check("profile: a host root with an ELF32 object is a mismatch (the host profile is ELF64)", [x[:3] for x in f] == [("a", "e_machine", "target-mismatch")], f)
+
 # determinism, CLI, gate wrapper, verdict acceptance
 o1 = build("void f(void){__builtin_trap();}\nint r(int a){return a+1;}", "lp64")
 cmd = [sys.executable, "-I", os.path.join(VERIFY, "objstub.py"), "check", "--terminators", tf, o1]

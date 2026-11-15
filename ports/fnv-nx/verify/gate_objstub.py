@@ -34,6 +34,19 @@ import recipe  # noqa: E402
 import unitstage  # noqa: E402
 
 
+def profile_findings(root, target, objs):
+    """The root's target profile, from its record, decides what an object may be and which analysis judges its bodies (the one declaration: recipe.TARGETS / KIND_EMU).
+    OBJS [(id, path)] -> findings [(id, name, kind, detail)]: an object whose (ELF class, e_machine) is not one of the profile's is red; a guest root with matching
+    objects has none (its bodies get the AArch64 analysis); a host root has no body analyzer yet, so it is red as a root (one finding), never an abort. The doubles
+    check (doubles.py) reads symbol tables and judges every root of either profile."""
+    allowed = {recipe.TARGETS[e] for k in (("pie",) if target == "guest" else ("exe", "shared")) for e in recipe.KIND_EMU[k]}
+    mis = [(oid, "e_machine", "target-mismatch", "object has (ELF class, e_machine) %s, the %s profile allows %s" % (recipe.object_target(path), target, sorted(allowed)))
+           for oid, path in objs if recipe.object_target(path) not in allowed]
+    if mis:
+        return mis
+    return [] if target == "guest" else [(root, "objstub", "no-body-analyzer", "objstub: no body analyzer for profile %s" % target)]
+
+
 def root_check(root, repo, cache, jobs, built=None):
     """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, ids of the objects of generated units, root-level findings [(id, name, kind, detail)],
     the root's `error_abi` (recipe) or None, the root's handler records (recipe empty_handlers) or None, image, ext); BUILT, when given, receives {root: build result} of a green build (doubles.py)"""
@@ -52,6 +65,9 @@ def root_check(root, repo, cache, jobs, built=None):
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
+    finds = profile_findings(root, recipe.entry_of(roots, root).get("target"), objs)
+    if finds:
+        return {}, {}, set(), finds, None, None, {}, {}
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
     store, names, bad, rets = os.path.join(cache, "store"), set(), [], {}
     pin = recipe.load_pin(repo)   # a guest root's libc headers are the pinned runtime external's (guest_compiler.json "runtime"); a host root's the distribution's
