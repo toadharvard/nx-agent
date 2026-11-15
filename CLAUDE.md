@@ -587,3 +587,41 @@ of those turns did nothing. Each turn re-reads the whole context, 200-300k token
   reports to its lead once per item, not per step.
 - Send with `priority: "later"`, unless it unblocks the receiver now.
 - Farm prompts do not tell the farm to read CLAUDE.md: it is loaded automatically.
+
+## Orchestrator decision of 2026-11-15 10:20Z: a candidate is frozen (binding for L1 and its workers)
+
+- The trunk last moved on 2026-11-12. The candidate cand2 is 620 commits ahead of it, and every new item resets its
+  verdict, so nothing merges. That is the cause.
+- Rule:
+  - A candidate's scope is frozen when its verdict starts.
+  - It takes only fixes for the reds of its own verdict.
+  - Every new item goes to the next candidate (cand3), which opens from the trunk right after the merge.
+  - Small candidates, merged often: at least one trunk merge a day while anything is open.
+
+## Orchestrator decision of 2026-11-15 10:30Z: call economy (binding for every session)
+
+Measured by the research session: spend = API calls × the whole context, because every tool call re-reads the full
+context. Mail made up 89 % of L1's calls; re-reading sources made up about 38 % of the workers' calls. So make fewer
+calls, not smaller ones.
+
+- **Calls:**
+  - Run independent tool calls in parallel, in one response.
+  - Chain dependent shell steps in one Bash call (`a && b`).
+  - Read a file once, in full, and re-read only a range that changed. To find a symbol, use one `rg -n` with context,
+    not a series of `sed -n` slices.
+  - Put a script you run more than once in a file instead of retyping it.
+- **Mail:**
+  - Send a message only when the receiver must act or decide, or when a stage is finished. Blockers go at once.
+  - One message per stage: collect the points and send them together.
+  - Read all queued notifications in one ReadNotifications call. Decide, then send every reply in one response, as
+    parallel send_message calls. Never send an acknowledgement.
+  - Use priority "next", unless the receiver must stop what it is doing.
+  - To learn a worker's state, read its status file or call list_sessions with children: true. Do not ask the worker.
+  - Commit the status file once per stage, not after each message.
+- **Code reading goes to a subagent (workers and leads).**
+  - Use the Agent tool, type Explore, when an answer needs more than 3 read or search calls: tracing a function,
+    comparing files, finding every user of a symbol.
+  - The brief gives the question, the paths, what you already know and the output you want: file:line references and
+    identifiers quoted verbatim, under 300 words.
+  - Check every hash, address or id it returns with one targeted command before you commit or send it.
+  - When you know the file and the place, do the one read or grep yourself.
