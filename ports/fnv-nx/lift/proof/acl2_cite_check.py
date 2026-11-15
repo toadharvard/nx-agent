@@ -13,7 +13,9 @@ TSV = os.path.join(HERE, 'acl2_cites.tsv')
 
 def cites():
     out = {}
-    for (name, fn, cs, form, mw, al) in S.ROWS.values():
+    for r in S.ROWS.values():
+        cs = r.cites
+        name = r.name
         for c in cs: out[c] = None
     for c in getattr(S, 'EXTRA_CITES', ()): out[c] = None
     return sorted(out)

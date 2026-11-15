@@ -64,7 +64,7 @@ class Enc:
         assert code[i] == 0x0F, code.hex()
         s.op = code[i + 1]; s.modrm = code[i + 2]; s.mod, s.reg, s.rm = s.modrm >> 6, (s.modrm >> 3) & 7, s.modrm & 7
         s.mem = s.mod != 3
-        s.imm = code[-1] if (s.op in (0x70, 0x71, 0x72, 0x73, 0xC2, 0xC4, 0xC5, 0xC6)) else None
+        s.imm = None              # run() sets the immediate operand (a BV8, symbolic in a shape)
 
 
 def xmm(d, n): return d['xmm%d' % n]
@@ -85,11 +85,15 @@ def with_fault(r, f):
 ROWS = {}                           # (pfx, op, mod3 or None) -> (name, fn, cites)
 
 
-def row(pfx, op, name, cites, mod3=None, form='rm', mw=None, al=None):
+import collections
+Row = collections.namedtuple('Row', 'name fn cites form mw al imm')
+
+
+def row(pfx, op, name, cites, mod3=None, form='rm', mw=None, al=None, imm=False):
     """form: which ModRM forms the SDM defines for the row: 'rm' both, 'm' memory only, 'r' register only (the other is #UD: the spec has no row, run() raises)"""
     def deco(fn):
         for p in (pfx if isinstance(pfx, tuple) else (pfx,)):
-            ROWS[(p, op, mod3)] = (name, fn, cites, form, mw, (mw == 128) if al is None else al)
+            ROWS[(p, op, mod3)] = Row(name, fn, cites, form, mw, (mw == 128) if al is None else al, imm)
         return fn
     return deco
 
@@ -323,26 +327,109 @@ row('', 0x50, 'movmskps', [cite('move-sse.lisp', 'x86-movmskps-sse', 'NP 0F 50 /
 row('66', 0x50, 'movmskpd', [cite('move-sse.lisp', 'x86-movmskpd-sse', '66 0F 50 /r   MOVMSKPD reg, xmm')], form='r', mw=None)(_movmsk(64, True, True))
 
 
+# ==== shuffles, unpacks, interleaves (ACL2 fp/shuffle-and-unpack.lisp, punpck.lisp, pshuf.lisp) =========================================================
+def _interleave(e_bits, hi, wide):
+    """PUNPCK{L,H}{BW,WD,DQ,QDQ}: the low (high) half of the destination and of the source interleaved, destination element first (SDM 2B:PUNPCKHBW..PUNPCKLQDQ;
+    ACL2 punpckl: a-element, then b-element).  MMX: the 32 bits of each half; SSE: the 64 bits"""
+    def f(e, d, m, a, g):
+        w = 128 if wide else 64
+        def go(x, y):
+            h = w // 2
+            xa = Extract(w - 1, h, x) if hi else Extract(h - 1, 0, x); ya = Extract(w - 1, h, y) if hi else Extract(h - 1, 0, y)
+            return join([z for p, q in zip(lanes(xa, e_bits), lanes(ya, e_bits)) for z in (p, q)])
+        return _w(e, a, m, d, wide, go)
+    return f
+
+
+for k, eb, lo_op, hi_op in (('bw', 8, 0x60, 0x68), ('wd', 16, 0x61, 0x69), ('dq', 32, 0x62, 0x6A)):
+    row('', lo_op, 'punpckl' + k, [cite('punpck.lisp', 'x86-punpckl-mmx', '(#x%02X (punpckl (* 8 operand-size) %02d src1 src2))' % (lo_op, eb))], mw=64)(_interleave(eb, False, False))
+    row('66', lo_op, 'punpckl' + k, [cite('punpck.lisp', 'x86-punpckl-sse', '(#x%02X (punpckl (* 8 operand-size) %02d src1 src2))' % (lo_op, eb))], mw=128)(_interleave(eb, False, True))
+    row('', hi_op, 'punpckh' + k, [cite('punpck.lisp', 'x86-punpckh-mmx', '(#x%02X (punpckl (* 8 operand-size) %02d src1 src2))' % (hi_op, eb))], mw=64)(_interleave(eb, True, False))
+    row('66', hi_op, 'punpckh' + k, [cite('punpck.lisp', 'x86-punpckh-sse', '(#x%02X (punpckl (* 8 operand-size) %02d src1 src2))' % (hi_op, eb))], mw=128)(_interleave(eb, True, True))
+row('66', 0x6C, 'punpcklqdq', [cite('punpck.lisp', 'x86-punpckl-sse', '(#x6C (punpckl (* 8 operand-size) 64 src1 src2))')], mw=128)(_interleave(64, False, True))
+row('66', 0x6D, 'punpckhqdq', [cite('punpck.lisp', 'x86-punpckh-sse', '(#x6D (punpckl (* 8 operand-size) 64 src1 src2))')], mw=128)(_interleave(64, True, True))
+# UNPCKLPS / UNPCKHPS are the doubleword interleave of the xmm halves, UNPCKLPD / UNPCKHPD the quadword one (ACL2 fp/shuffle-and-unpack.lisp: the dword0..3 / qword0..1 selections)
+row('', 0x14, 'unpcklps', [cite('fp/shuffle-and-unpack.lisp', 'x86-unpck?ps-Op/En-RM', '0F 14: UNPCKLPS xmm1, xmm2/m128')], mw=128)(_interleave(32, False, True))
+row('', 0x15, 'unpckhps', [cite('fp/shuffle-and-unpack.lisp', 'x86-unpck?ps-Op/En-RM', '0F 15: UNPCKHPS xmm1, xmm2/m128')], mw=128)(_interleave(32, True, True))
+row('66', 0x14, 'unpcklpd', [cite('fp/shuffle-and-unpack.lisp', 'x86-unpck?pd-Op/En-RM', '66 0F 14: UNPCKLPD xmm1, xmm2/m128')], mw=128)(_interleave(64, False, True))
+row('66', 0x15, 'unpckhpd', [cite('fp/shuffle-and-unpack.lisp', 'x86-unpck?pd-Op/En-RM', '66 0F 15: UNPCKHPD xmm1, xmm2/m128')], mw=128)(_interleave(64, True, True))
+
+
+def _sel(v, e, idx):
+    """the lane idx (a BV) of v, lane width e: the lanes are the SDM's 'DEST[..]' fields indexed by the immediate bits"""
+    ls = lanes(v, e); r = ls[0]
+    for i in range(1, len(ls)): r = If(idx == K(i, idx.size()), ls[i], r)
+    return r
+
+
+def _shufps(e, d, m, a, g):
+    dst, src = xmm(d, e.reg), (m if e.mem else xmm(d, e.rm)); im = e.imm
+    two = lambda hi, lo: Extract(hi, lo, im)
+    r = Res(put_xmm(d, e.reg, Concat(_sel(src, 32, two(7, 6)), _sel(src, 32, two(5, 4)), _sel(dst, 32, two(3, 2)), _sel(dst, 32, two(1, 0)))))
+    if e.mem: r.fault = misaligned(a)
+    return r
+
+
+def _shufpd(e, d, m, a, g):
+    dst, src = xmm(d, e.reg), (m if e.mem else xmm(d, e.rm)); im = e.imm
+    r = Res(put_xmm(d, e.reg, Concat(_sel(src, 64, Extract(1, 1, im)), _sel(dst, 64, Extract(0, 0, im)))))
+    if e.mem: r.fault = misaligned(a)
+    return r
+
+
+row('', 0xC6, 'shufps', [cite('fp/shuffle-and-unpack.lisp', 'x86-shufps-Op/En-RMI', '(result (merge-4-u32s dword3 dword2 dword1 dword0))')], mw=128, imm=True)(_shufps)
+row('66', 0xC6, 'shufpd', [cite('fp/shuffle-and-unpack.lisp', 'x86-shufpd-Op/En-RMI', '(result (merge-2-u64s qword1 qword0))')], mw=128, imm=True)(_shufpd)
+
+
+def _pshuf(kind):
+    """PSHUFD (66 0F 70): dword i := src dword imm[2i+1:2i]; PSHUFLW (F2): the low four words likewise, the high quadword copied; PSHUFHW (F3): the high four words likewise,
+    the low quadword copied; PSHUFW (0F 70, mm): the four words of the mm source.  The immediate is the full byte (2 bits per destination lane), never masked wider"""
+    def f(e, d, m, a, g):
+        src = m if e.mem else (mm(d, e.rm) if kind == 'w' else xmm(d, e.rm)); im = e.imm; sel = lambda i: Extract(2 * i + 1, 2 * i, im)
+        if kind == 'd': out = Concat(*[_sel(src, 32, sel(i)) for i in (3, 2, 1, 0)])
+        elif kind == 'lw': out = Concat(Extract(127, 64, src), *[_sel(Extract(63, 0, src), 16, sel(i)) for i in (3, 2, 1, 0)])
+        elif kind == 'hw': out = Concat(*[_sel(Extract(127, 64, src), 16, sel(i)) for i in (3, 2, 1, 0)], Extract(63, 0, src))
+        else: out = Concat(*[_sel(src, 16, sel(i)) for i in (3, 2, 1, 0)])
+        if kind == 'w': return Res(put_mm(d, e.reg, out))
+        r = Res(put_xmm(d, e.reg, out))
+        if e.mem: r.fault = misaligned(a)
+        return r
+    return f
+
+
+row('66', 0x70, 'pshufd', [cite('pshuf.lisp', 'x86-pshufd', '(result (pshufd src imm))')], mw=128, imm=True)(_pshuf('d'))
+row('F2', 0x70, 'pshuflw', [cite('pshuf.lisp', 'x86-pshuflw', '(result (logapp 64 (pshufw (loghead 64 src) imm)')], mw=128, imm=True)(_pshuf('lw'))
+row('F3', 0x70, 'pshufhw', [cite('pshuf.lisp', 'x86-pshufhw', '(pshufw (logtail 64 src) imm)))')], mw=128, imm=True)(_pshuf('hw'))
+
+
 # ==== execution ===============================================================================================================================================
-def run(code, d, m=None, a=None, gpr=None):
+def run(code, d, m=None, a=None, gpr=None, imm=None):
     """the spec of one encoding (bytes) on the state d: Res"""
     e = Enc(code)
     k = (e.pfx, e.op, e.mod == 3) if (e.pfx, e.op, e.mod == 3) in ROWS else (e.pfx, e.op, None)
     if k not in ROWS: raise KeyError('no row for %s' % code.hex())
-    form = ROWS[k][3]
+    form = ROWS[k].form
     if (form == 'm' and not e.mem) or (form == 'r' and e.mem): raise KeyError('form not defined for %s' % code.hex())
-    return ROWS[k][1](e, d, m, a, gpr)
+    e.imm = imm
+    return ROWS[k].fn(e, d, m, a, gpr)
 
 
 def mem_width(code):
     """the width in bits of the memory operand of an encoding (None for a row without one)"""
     e = Enc(code)
     k = (e.pfx, e.op, e.mod == 3) if (e.pfx, e.op, e.mod == 3) in ROWS else (e.pfx, e.op, None)
-    return ROWS[k][4]
+    return ROWS[k].mw
 
 
 def mem_aligned(code):
     """True when a misaligned memory operand of the encoding raises the access violation (the row's alignment rule: ACL2 inst-ac? / SDM 'Exceptions Type 1/4')"""
     e = Enc(code)
     k = (e.pfx, e.op, e.mod == 3) if (e.pfx, e.op, e.mod == 3) in ROWS else (e.pfx, e.op, None)
-    return ROWS[k][5]
+    return ROWS[k].al
+
+
+def mem_imm(code):
+    """True when the encoding ends in an imm8 operand (the row's `imm`)"""
+    e = Enc(code)
+    k = (e.pfx, e.op, e.mod == 3) if (e.pfx, e.op, e.mod == 3) in ROWS else (e.pfx, e.op, None)
+    return ROWS[k].imm

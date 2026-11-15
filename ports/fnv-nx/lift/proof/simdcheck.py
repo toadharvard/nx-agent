@@ -12,31 +12,25 @@ import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..')); sys.path.insert(0, HERE)
 import z3
 from fnvlift import dsl
-from proof import forms, symform, simdspec as S
+from proof import forms, shape, symform, simdspec as S
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
-def check(key, timeout=60000):
-    rep = symform.parse_key(key)[0]
-    try: e = S.Enc(rep)
-    except (AssertionError, IndexError): return 'no-row', None
-    try: S.mem_width(rep)
-    except KeyError: return 'no-row', None
-    try: sf = symform.symbuild(key)
-    except KeyError: return 'no-form', None
-    sins = symform.symins(key)[0]
-    P = sf.form.post()
+def _obligation(rep, F, sins_ops, imm, timeout):
+    """refinement query of one Form F (symbolic or concrete) against the spec on the encoding rep; sins_ops: the instruction whose operands give the memory operand"""
+    e = S.Enc(rep)
+    P = F.post()
     M0 = dsl.mem_array()
     d = {'xmm%d' % i: z3.BitVec('xmm%d' % i, 128) for i in range(8)}; d.update({'fr%d' % i: z3.BitVec('fr%d' % i, 80) for i in range(8)})
     d['ftop'] = z3.BitVec('ftop', 3); d['ftag'] = z3.BitVec('ftag', 16); d['mxcsr'] = z3.BitVec('mxcsr', 32)
     gpr = {i: z3.BitVec(r, 32) for i, r in enumerate(REG)}
     a = m = None
     if e.mem:
-        j = next(i for i, o in enumerate(sins.operands) if o.type == 3 or getattr(o, 'mem', None) is not None and o.type == 3)
-        op = forms.Op(sins, sins.operands[j]); a = dsl.to_smt(forms.ea(op))
+        j = next(i for i, o in enumerate(sins_ops.operands) if o.type == 3)
+        op = forms.Op(sins_ops, sins_ops.operands[j]); a = dsl.to_smt(forms.ea(op))
         w = S.mem_width(rep)
         m = z3.Concat(*[z3.Select(M0, a + i) for i in reversed(range(w // 8))])
-    try: r = S.run(rep, d, m, a, gpr)
+    try: r = S.run(rep, d, m, a, gpr, imm)
     except KeyError: return 'no-row', None
     nf = P['fault'] == 0
     spec_fault = z3.If(r.fault, z3.BitVecVal(S.AV, 8), z3.BitVecVal(0, 8))
@@ -60,6 +54,35 @@ def check(key, timeout=60000):
     if res == z3.unsat: return 'proved', None
     if res == z3.sat: return 'FAILED', str(s.model())[:400]
     return 'timeout', None
+
+
+def check(key, timeout=60000):
+    """-> (result, info).  proved: the symbolic Form of the shape refines the spec.  proved-by-cases: the builder branches on the immediate (symform.SymbolicBranch or a
+    Python index by it: the Form of the shape cannot be made symbolic), so every one of the 256 immediates was checked with its concrete Form (a complete case split of a
+    finite field; the shape's certificate needs L3a to make the builder symbolic in the immediate, or the case split as the certificate's `split`)."""
+    rep = symform.parse_key(key)[0]
+    try: S.Enc(rep)
+    except (AssertionError, IndexError): return 'no-row', None
+    try: S.mem_width(rep)
+    except KeyError: return 'no-row', None
+    imm = z3.BitVec('fld_imm', 8) if S.mem_imm(rep) else None
+    try: sf = symform.symbuild(key)
+    except KeyError: return 'no-form', None
+    except (symform.SymbolicBranch, TypeError, AssertionError) as ex:
+        if imm is None: return 'builder-branches-on-field', str(ex)[:120]
+        return _by_cases(key, rep, timeout)
+    return _obligation(rep, sf.form, symform.symins(key)[0], imm, timeout)
+
+
+def _by_cases(key, rep, timeout):
+    md = shape.decoder()
+    for v in range(256):
+        code = rep[:-1] + bytes([v]); ins = list(md.disasm(code, 0))[0]
+        try: F = forms.build(ins, 0)
+        except KeyError: return 'no-form', None
+        r, info = _obligation(code, F, ins, z3.BitVecVal(v, 8), timeout)
+        if r != 'proved': return r, 'imm=%d %s' % (v, info)
+    return 'proved-by-cases', None
 
 
 def main(a):

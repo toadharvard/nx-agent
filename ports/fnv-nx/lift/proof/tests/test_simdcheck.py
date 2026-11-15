@@ -21,13 +21,13 @@ class Check(unittest.TestCase):
         finally: S.ROWS[key] = old
 
     def test_wrong_lane_op_is_refuted(self):
-        self.assertEqual(self.mutate(('', 0xEF, None), lambda t: (t[0], lambda e, d, m, a, g: S._w(e, a, m, d, False, lambda x, y: x | y), *t[2:]), KEYS['pxor']), 'FAILED')
+        self.assertEqual(self.mutate(('', 0xEF, None), lambda t: t._replace(fn=lambda e, d, m, a, g: S._w(e, a, m, d, False, lambda x, y: x | y)), KEYS['pxor']), 'FAILED')
 
     def test_missing_alignment_fault_is_refuted(self):
-        self.assertEqual(self.mutate(('', 0x28, None), lambda t: (t[0], S._mov_load128(False), *t[2:]), KEYS['movaps_m']), 'FAILED')
+        self.assertEqual(self.mutate(('', 0x28, None), lambda t: t._replace(fn=S._mov_load128(False)), KEYS['movaps_m']), 'FAILED')
 
     def test_wrong_register_write_is_refuted(self):
-        self.assertEqual(self.mutate(('', 0x6E, None), lambda t: (t[0], lambda e, d, m, a, g: S.Res(S.put_mm(d, e.reg, S.ZeroExt(32, g[3]))), *t[2:]), KEYS['movd_g']), 'FAILED')
+        self.assertEqual(self.mutate(('', 0x6E, None), lambda t: t._replace(fn=lambda e, d, m, a, g: S.Res(S.put_mm(d, e.reg, S.ZeroExt(32, g[3])))), KEYS['movd_g']), 'FAILED')
 
     def test_no_row_is_reported(self):
         self.assertEqual(C.check('0f0e/0.0.0.0')[0], 'no-row')                      # femms (3DNow): no spec row

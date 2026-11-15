@@ -53,15 +53,18 @@ def rnd(rng, kind):
 class Rows(unittest.TestCase):
     def test_rows_against_unicorn(self):
         rng = random.Random(7); fails = []; ncase = 0
-        for (pfx, op, m3), (name, fn, cites, form, mw, al) in sorted(S.ROWS.items(), key=lambda kv: (kv[0][0], kv[0][1], str(kv[0][2]))):
+        for (pfx, op, m3), R in sorted(S.ROWS.items(), key=lambda kv: (kv[0][0], kv[0][1], str(kv[0][2]))):
+            name, form = R.name, R.form
             forms = [f for f in ('r', 'm') if f in form or form == 'rm']
             if m3 is True: forms = ['r']
             for f in forms:
                 code = enc_of(pfx, op, m3, True)[f]
-                if f == 'r' and (pfx, op, True) not in S.ROWS and (pfx, op, None) in S.ROWS and S.ROWS[(pfx, op, None)][3] == 'm': continue
+                immv = None; base = code
+                if f == 'r' and (pfx, op, True) not in S.ROWS and (pfx, op, None) in S.ROWS and S.ROWS[(pfx, op, None)].form == 'm': continue
                 for n in range(N):
                     for aligned in ((True, False) if f == 'm' else (True,)):
                         st = rnd(rng, 0); mem = rng.randbytes(16)
+                        if R.imm: immv = rng.choice([0, 255, rng.getrandbits(8), rng.getrandbits(8)]); code = base + bytes([immv])
                         want = emu(code, st, mem, aligned)
                         d = {k: K(v, 128 if k.startswith('xmm') else 80) for k, v in st.items() if k[0] in 'xf'}
                         d['ftop'] = K(0, 3); d['ftag'] = K(0, 16)
@@ -70,7 +73,7 @@ class Rows(unittest.TestCase):
                         if f == 'm':
                             w = S.mem_width(code); m = K(int.from_bytes(mem[:w // 8], 'little'), w)
                         a = K(0x10000 if aligned else 0x10001, 32)
-                        try: r = S.run(code, d, m, a, gpr)
+                        try: r = S.run(code, d, m, a, gpr, K(immv, 8) if R.imm else None)
                         except KeyError: continue
                         ncase += 1
                         fault = val(r.fault)
