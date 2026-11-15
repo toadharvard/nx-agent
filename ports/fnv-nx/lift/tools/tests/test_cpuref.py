@@ -12,7 +12,7 @@ class T(unittest.TestCase):
     def test_identity(self):
         pin = json.loads((R / "verify/cpuref.json").read_text())
         self.assertEqual(set(pin), {"vendor_id", "family", "model", "stepping", "microcode", "model_name"})
-        t = (R / "lift/rt/fnvl_abi.h").read_text()
+        t = (R / "lift/rt/fnvl_cpuref.h").read_text()
         eax = macro(t, "FNVL_CPUID1_EAX")
         fam = (eax >> 8 & 15) + ((eax >> 20 & 255) if (eax >> 8 & 15) == 15 else 0)
         mod = (eax >> 4 & 15) | ((eax >> 16 & 15) << 4 if (eax >> 8 & 15) in (6, 15) else 0)
