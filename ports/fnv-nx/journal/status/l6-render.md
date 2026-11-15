@@ -1095,3 +1095,12 @@ Paused: w3b, w4, farm; no other work.
     - w5, translator (claude/fnv-l6-render-w5-total): instructions[] masks generated from gen/productions.json, and emit checks for the 50 widened rows;
     - w1b: the production generator, the coverage gate and the validator site.
 - bottleneck: L1 cand2 with include_uses and the fc2cda076 pin (no L6 guest code builds until then); L1 cand3 for the trunk (a5c8f427). 4 of 4 workers busy.
+- 20:48Z: L1 decision. cand2 is frozen, and the render roots enter through cand4 on top of cand3.
+    - cand3 is claude/fnv-l1-contract-w12L2, c58c0a4f3 or later.
+    - The canonical forms:
+        - include_uses is deleted;
+        - a header-only root declares `outputs: {INCLUDE: <dir>}`, and its consumers declare `uses: [{root, output}]`;
+        - generated outputs are `{NAME: path}`.
+    - Pin: the farm is building it from L2 b9f6b3a69 (stamp 03eacf9d8c6932cd).
+    - w6 merges w12L2 and migrates every render root (measurement until the pin lands). w5-fbo follows later.
+- bottleneck: the w6 migration onto w12L2, then the farm pin 03eacf9d; L1 cand3 → trunk. 4 of 4 workers busy.
