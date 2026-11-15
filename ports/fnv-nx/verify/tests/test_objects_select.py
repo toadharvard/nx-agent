@@ -33,8 +33,8 @@ ROOTS = {
 }
 RECS = {
     "consumer": {"uses": [{"root": P + "facts", "output": "native"}]},
-    "viaconsumer": {"link": {"roots": [P + "consumer"]}},          # reaches facts through the consumer, transitively
-    "linker": {"link": {"roots": [P + "nat"]}},                     # depends on a native root, not on facts: stays in
+    "viaconsumer": {"uses": [{"root": P + "consumer", "output": "o"}]},          # reaches facts through the consumer, transitively
+    "linker": {},                     # depends on nothing: stays in
     "descs": {"generated": [{"tool": P + "t.py", "args": [], "inputs": [], "outputs": ["d"], "objects_of": {"except": [P + "bridges"]}}]},
     "bridges": {"uses": [{"root": P + "descs", "output": "descs"}]},
 }
@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as repo:
     check("target host", recipe.objects_of_roots(gen(target="host"), F, ROOTS, repo), [P + "hosted"])
     check("a root's own origin class is read from the declaration, never from its name",
           [recipe.origin_class(ROOTS[r].get("cxx_origin")) for r in (P + "nat", P + "nat_undeclared", P + "lifted")], ["native", "native", "lifted"])
-    check("depends_on is transitive over link.roots and uses", [recipe.depends_on(P + r, F, ROOTS, repo) for r in ("consumer", "viaconsumer", "linker", "nat")],
+    check("depends_on is transitive over uses", [recipe.depends_on(P + r, F, ROOTS, repo) for r in ("consumer", "viaconsumer", "linker", "nat")],
           [True, True, False, False])
     check("without a repo the selecting stage cannot read recipes: no consumer exclusion (the build always passes the repo)",
           recipe.objects_of_roots(gen(target="guest", origin="native"), F, ROOTS), sorted(want + [P + "consumer", P + "viaconsumer", P + "bridges"]))

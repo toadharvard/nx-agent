@@ -582,6 +582,61 @@ def resolve_link_root(roots, d, target):
     return None, "%s has target %r and %s variant of target %r for the image" % (d, ent.get("target"), "no" if not hit else "several (%s)" % ", ".join(hit), target)
 
 
+def link_candidates(roots, root, target, repo):
+    """The specs an image ROOT of TARGET may link: every admitted product root with a recipe other than ROOT itself, in the recipe it has for TARGET
+    (resolve_link_root), that links nothing itself (an input root has no link). Sorted. A rule over admit.json: a new root is a candidate by being admitted."""
+    out = []
+    for r, e in sorted(roots.items()):
+        if r == root or e.get("class") != "product" or not e.get("recipe"):
+            continue
+        spec, _ = resolve_link_root(roots, r, target)
+        if spec is None:
+            continue
+        try:
+            if load_recipe(repo, roots, spec).get("link") is not None:
+                continue
+        except (OSError, ValueError, KeyError, AttributeError, RecipeError):
+            continue
+        out.append(spec)
+    return out
+
+
+def definer_closure(defined, undefined, index):
+    """The link members of an image: the definer closure of its undefined symbols. DEFINED, UNDEFINED are the image's own symbol sets; INDEX is
+    {spec: {"defined": [{symbol, bind}], "undefined": [symbol]}} of every candidate root (link_candidates). Start from the own undefined set minus the own
+    definitions; each symbol goes to the one candidate that defines it (a global definition; a weak one only when no candidate has a global one); that root's
+    own undefined symbols join the set; iterate to the fixed point. -> (sorted specs, {symbol: [specs]} of the symbols several candidates define,
+    {symbol: [referencers]} of the symbols no candidate defines). The several-definers rule is onedef's: a name is defined by one root. Nothing is listed by name:
+    the members follow from the symbols."""
+    strong, weak = {}, {}
+    for spec, x in index.items():
+        for d in x["defined"]:
+            (strong if d["bind"] == "global" else weak).setdefault(d["symbol"], set()).add(spec)
+    have, members, why, ambiguous, missing = set(defined), set(), {s: ["(own)"] for s in undefined}, {}, {}
+    todo = sorted(set(undefined) - have)
+    while todo:
+        sym = todo.pop()
+        if sym in have:
+            continue
+        who = sorted(strong.get(sym) or weak.get(sym) or ())
+        if len(who) > 1:
+            ambiguous[sym] = who
+            continue
+        if not who:
+            missing[sym] = sorted(why.get(sym, []))
+            continue
+        spec = who[0]
+        if spec in members:
+            continue
+        members.add(spec)
+        have |= {d["symbol"] for d in index[spec]["defined"]}
+        for u in index[spec]["undefined"]:
+            if u not in have:
+                why.setdefault(u, []).append(spec)
+                todo.append(u)
+    return sorted(members), ambiguous, missing
+
+
 def variant_names(rec, ent=None):
     """The variants of a recipe REC, and of the admit entry ENT: its per-target recipes."""
     v = rec.get("variants") if isinstance(rec, dict) else None
@@ -786,11 +841,10 @@ def fact_sections(root, roots, repo):
 
 
 def root_edges(rec, root=None, roots=None, repo=None):
-    """The roots a recipe depends on besides its own files: `link.roots` (objects), `uses` (outputs) and, with ROOTS, the roots `objects_of`
+    """The roots a recipe depends on besides its own files: the declared loader, `uses` (outputs) and, with ROOTS, the roots `objects_of`
     reads, variants cut off."""
     lk = rec.get("link") if isinstance(rec, dict) else None
-    ds = [split_spec(d)[0] for d in (lk.get("roots", []) if isinstance(lk, dict) and isinstance(lk.get("roots"), list) else []) if isinstance(d, str)]
-    ds += [split_spec(lk["loader"])[0]] if isinstance(lk, dict) and isinstance(lk.get("loader"), str) else []   # the declared loader: its defined names are inputs of the link check
+    ds = [split_spec(lk["loader"])[0]] if isinstance(lk, dict) and isinstance(lk.get("loader"), str) else []   # the declared loader: its defined names are inputs of the link check
     us = rec.get("uses") if isinstance(rec, dict) else None
     return ds + [u["root"] for u in (us if isinstance(us, list) else []) if isinstance(u, dict) and isinstance(u.get("root"), str)] + (
         objects_of_roots(rec, root, roots, repo) if isinstance(rec, dict) and roots else [])
@@ -906,40 +960,8 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
             err.append("link.entry: a guest image declares the symbol its runtime calls as its entry (a C identifier other than %s)" % IMAGE_ENTRY)
     elif "entry" in lk:
         err.append("link.entry is the entry of a guest image; a %s root has none" % (rent.get("target") or "host"))
-    deps = lk.get("roots", [])
-    if not (isinstance(deps, list) and all(isinstance(d, str) for d in deps)):
-        err.append("link.roots must be a list of repo paths of admitted product roots")
-        deps = []
-    for i, d in enumerate(deps):
-        if d in deps[:i]:
-            err.append("link.roots: %s is listed twice" % d)
-        dr, dv = split_spec(d)
-        ent = roots.get(dr)
-        rs, why = resolve_link_root(roots, d, rent.get("target")) if ent else (None, "")
-        if dr == root:
-            err.append("link.roots: %s is the root itself" % d)
-        elif ent and ent.get("class") != "product":
-            err.append("link.roots: %s is a %s root: a root reached through link.roots runs at its target, so it is a product root (a tool root's outputs run at build time only)" % (d, ent.get("class")))
-        elif not ent:
-            err.append("link.roots: %s is not an admitted product root" % d)
-        elif rs is None:
-            err.append("link.roots: %s (the linking image has target %r)" % (why, rent.get("target")))
-        else:
-            try:
-                drec = read_recipe(repo, ent["recipe"])
-                dl = drec.get("link")
-            except (OSError, ValueError, KeyError, AttributeError):
-                err.append("link.roots: the recipe of %s is unreadable" % d)
-                continue
-            if rs and split_spec(rs)[1] and split_spec(rs)[1] not in variant_names(drec, ent):
-                err.append("link.roots: %s has no variant %r (the one of target %r that admit.json declares)" % (dr, split_spec(rs)[1], rent.get("target")))
-            elif dv and dv not in variant_names(drec, ent):
-                err.append("link.roots: %s has no variant %r" % (dr, dv))
-            elif dv and rent.get("class") != "test" and dv not in own_recipes(ent):
-                err.append("link.roots: %s is a flags variant (sanitizer or the like): only a test root (class test) links one; a product image links base roots "
-                           "and the per-target variant of its own target (admit.json recipe {guest, host})" % d)
-            if dl is not None:
-                err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
+    if "roots" in lk:
+        err.append("link.roots is derived, not written: the image links the definer closure of its undefined symbols over the admitted product roots (recipe.link_closure); remove it")
     if "loader" in lk:
         ld = lk["loader"]
         lent = roots.get(split_spec(ld)[0]) if isinstance(ld, str) else None
@@ -951,9 +973,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
             err.append("link.loader: %s is the root itself" % ld)
         elif entry_of(roots, ld).get("target") != rent.get("target"):
             err.append("link.loader: %s has target %r, the loaded image %r" % (ld, entry_of(roots, ld).get("target"), rent.get("target")))
-    cyc = link_roots_cycle(root, roots, repo) if (deps or isinstance(lk.get("loader"), str)) else None
-    if cyc and any(d in cyc for d in [split_spec(x)[0] for x in deps + ([lk["loader"]] if isinstance(lk.get("loader"), str) else [])]):
-        err.append("link.roots: cycle %s" % " -> ".join(cyc))
+    cyc = link_roots_cycle(root, roots, repo) if isinstance(lk.get("loader"), str) else None
+    if cyc and split_spec(lk["loader"])[0] in cyc:
+        err.append("link.loader: cycle %s" % " -> ".join(cyc))
     lb = lk.get("libs")
     if guest:
         pass     # guest_errors reports a declared script or libs and checks the profile
@@ -2379,8 +2401,7 @@ class Job:
 
 
 def loader_defined(repo, loader, store, jobs, extcache, ws, stage):
-    """The names the declared loader root LOADER defines: the global and weak definitions of its objects and of the objects of its own link.roots (the
-    image it makes), each root built objects-only through the stage cache. -> (the set, the build results: their stage keys and counts belong to the
+    """The names the declared loader root LOADER defines: the global and weak definitions of its objects, built objects-only through the stage cache. -> (the set, the build results: their stage keys and counts belong to the
     caller's); raises BuildRed(stage STAGE) when one of them is invalid or red."""
     ent = load_admit(repo)[split_spec(loader)[0]]
     try:
@@ -2388,7 +2409,7 @@ def loader_defined(repo, loader, store, jobs, extcache, ws, stage):
     except (OSError, ValueError) as x:
         raise BuildRed({"stage": stage, "exit": None, "stderr": ["loader root %s: unreadable recipe: %s" % (loader, x)]})
     names, rs = set(), []
-    for n, d in enumerate([loader] + list((rec.get("link") or {}).get("roots", []))):
+    for n, d in enumerate([loader]):
         try:
             r = build(repo, d, store, os.path.join(ws, "%d" % n), jobs, extcache, link=False)
         except RecipeError as x:
@@ -2823,8 +2844,8 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
               name = lk["output"]
               groups = [("00-own", [(u, o["object"]) for u, o in zip(units, res["objects"])])]
               res["link_roots"], defs = [], {}
-              for n, d in enumerate(lk.get("roots", [])):
-                  d = resolve_link_root(j.roots, d, entry_of(j.roots, spec).get("target"))[0]    # the root's recipe for the image's own target (check made it valid)
+              built_in = {}     # every candidate root, built objects-only through the stage cache: the symbol index of the definer closure
+              for d in link_candidates(j.roots, root, entry_of(j.roots, spec).get("target"), repo):
                   try:
                       r = build(repo, d, store, os.path.join(ws, "in", d.replace("/", "__")), jobs, j.extcache, link=False)   # its objects only: its own link (if any) is not built here
                   except RecipeError as x:
@@ -2834,6 +2855,12 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
                   if r["status"] == "red":
                       f = r["failure"]
                       raise BuildRed({"stage": "ld:" + root, "exit": f["exit"], "stderr": ["input root %s is red: stage %s" % (d, f["stage"])] + f["stderr"][-18:]})
+                  built_in[d] = r
+              members, ambiguous, _missing = definer_closure({x["symbol"] for x in res["defined"]}, und, {d: {"defined": r["defined"], "undefined": r["undefined"]} for d, r in built_in.items()})
+              if ambiguous:     # a name defined by several admitted roots: onedef's rule, found here at the closure
+                  raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["%s is defined by several admitted roots (%s): one definition per name" % (sym, ", ".join(w)) for sym, w in sorted(ambiguous.items())][:20]})
+              for n, d in enumerate(members):
+                  r = built_in[d]
                   kept = []     # the input root's objects stay beside this root's result (its own build directory is scratch)
                   for o in r["objects"]:
                       dest = os.path.join(out, "link_roots", d.replace("/", "__"), o["unit"] + ".o")

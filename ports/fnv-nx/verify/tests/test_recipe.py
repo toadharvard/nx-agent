@@ -368,7 +368,7 @@ def main():
         librec["include"] = []
         a_c = "int f_lib(void);\nint f_a(void) { return f_lib(); }\n"
         lr = make_repo("lr", rec=dict(RECIPE, generated=[], constants=None, include=[], units="all",
-                                      link=dict(RECIPE["link"], roots=[LIB])),
+                                      link=dict(RECIPE["link"])),
                        files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
                               "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
         ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
@@ -377,7 +377,7 @@ def main():
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib")
         x1 = recipe.build(lr, ROOT, LRS, BASE + "/lr1")
-        check("link roots: the image links the objects of the listed root (f_lib resolves)", x1["status"] == "green" and x1["elf"]
+        check("link roots: the image links the objects of the root that defines its undefined f_lib (the definer closure, no list)", x1["status"] == "green" and x1["elf"]
               and [r["root"] for r in x1.get("link_roots", [])] == [LIB], x1.get("failure"))
         w(lr, "lib/l.c", "int f_lib(void) { return 2; }\n")
         git(lr, "add", "-A")
@@ -386,14 +386,15 @@ def main():
         check("link roots: a change in the listed root changes the link key and the ELF", x2["status"] == "green"
               and x2["elf"]["sha256"] != x1["elf"]["sha256"] and set(x2["stage_keys"]) != set(x1["stage_keys"]), (x1["stage_keys"], x2["stage_keys"]))
         nolink = dict(json.load(open(os.path.join(lr, ROOT, "build.json"))))
-        nolink["link"] = dict(nolink["link"], roots=[])
-        w(lr, "toy/build.json", json.dumps(nolink))
+        ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
+        ad["roots"] = [r for r in ad["roots"] if r["path"] != LIB]       # no admitted root defines f_lib any more
+        w(lr, "verify/admit.json", json.dumps(ad))
         git(lr, "add", "-A")
-        git(lr, "commit", "-q", "-m", "no roots")
+        git(lr, "commit", "-q", "-m", "lib no longer admitted")
         x3 = recipe.build(lr, ROOT, LRS, BASE + "/lr3")
         check("link roots: without the root f_lib has no body and the link is red, never a silent zero", x3["status"] == "red", x3.get("failure"))
         ig = dict(nolink)
-        ig["link"] = dict(nolink["link"], roots=[LIB], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
+        ig["link"] = dict(nolink["link"], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
         w(lr, "toy/build.json", json.dumps(ig))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "ignore-all")
@@ -407,16 +408,14 @@ def main():
     later(link_roots)
 
     def host_in_guest_link():
-        """the plugin set is the target profile's (RECIPE.md "Plugins"): a host-profile object never enters a guest image, so a guest link.roots naming a host root is red"""
+        """a host-profile object never enters a guest image: a root of the host profile is no candidate of the definer closure of a guest image; and link.roots is a check error"""
         hp = make_repo("hg")
         roots = dict(recipe.load_admit(hp))
         roots[ROOT] = dict(roots[ROOT], target="guest")
         roots[LIB] = {"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"}
+        check("target profile: a root of the host profile is no link candidate of a guest image", LIB not in recipe.link_candidates(roots, ROOT, "guest", hp), recipe.link_candidates(roots, ROOT, "guest", hp))
         e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
-        check("target profile: a guest image whose link.roots names a root of the host profile is red", any("link.roots" in x and "'host'" in x for x in e), e)
-        roots[ROOT] = dict(roots[ROOT], target="host")
-        e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
-        check("target profile: the same link of a host image has no target error", not any("link.roots" in x and "'host'" in x and "has target" in x for x in e), e)
+        check("link.roots is a check error: the members are derived", any("link.roots is derived" in x for x in e), e)
     later(host_in_guest_link)
 
     def declared_outputs():
