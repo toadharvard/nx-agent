@@ -17,14 +17,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, HERE)
 import simdcheck  # noqa: E402
-from proof import symform, treeid  # noqa: E402
+from proof import symform, treeid, x86sys  # noqa: E402
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--shapes', required=True); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)
     ap.add_argument('--timeout', type=float, default=600); ap.add_argument('--slice', type=int, default=1); ap.add_argument('--limit', type=int); ap.add_argument('--cleared'); ap.add_argument('--cache', required=True)
-    a = ap.parse_args(); simdcheck.S.F.configure(a.cache); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
+    x86sys.add_arg(ap)
+    a = ap.parse_args(); xsha = x86sys.configure(a.x86sys); simdcheck.S.F.configure(a.cache); k, n = [int(x) for x in a.shard.split('/')]; assert 1 <= k <= n
     os.makedirs(a.out, exist_ok=True); path = os.path.join(a.out, 'shapeprove_%d_of_%d.jsonl' % (k, n))
     rows = [l.rstrip('\n').split('\t') for l in open(a.shapes) if l.strip() and l[0] != '#'][::a.slice]
     mine = [r for i, r in enumerate(rows) if i % n == k - 1][:a.limit]
@@ -45,7 +46,7 @@ def main():
             except Exception as e:                 # an exception on a shape is a record (error + the traceback hash), never a missing one
                 tb = traceback.format_exc(); print(tb, file=sys.stderr, flush=True)
                 rec = {'shape': key, 'result': 'error', 'note': ('%s: %s' % (type(e).__name__, e))[:300], 'traceback_sha': hashlib.sha256(tb.encode()).hexdigest()[:16], 'shape_sha': sha}
-            rec['seconds'] = round(time.time() - t0, 2); rec['tree'] = tree
+            rec['seconds'] = round(time.time() - t0, 2); rec['tree'] = tree; rec['x86sys_sha256'] = xsha
             out.write(json.dumps(rec, sort_keys=True) + '\n'); out.flush()
     rs = [json.loads(l) for l in open(path)]
     c = {}

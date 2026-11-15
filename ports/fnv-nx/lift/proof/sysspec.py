@@ -224,7 +224,10 @@ def needs_any(m):
 
 def main(argv):
     global CERTS
-    argv = list(argv); far_only = '--far-only' in argv
+    argv = list(argv)
+    if '--x86sys' not in argv: sys.stderr.write('sysspec: --x86sys PATH is required (the declared x86 system record; no default, no environment)\n'); return 2
+    i = argv.index('--x86sys'); x86sys.configure(argv[i + 1]); del argv[i:i + 2]
+    far_only = '--far-only' in argv
     if far_only: argv.remove('--far-only')
     if '--certs' in argv:
         i = argv.index('--certs'); CERTS = {ln.split('\t')[0].strip() for ln in open(argv[i + 1]) if ln.strip() and ln[0] != '#'}; del argv[i:i + 2]
