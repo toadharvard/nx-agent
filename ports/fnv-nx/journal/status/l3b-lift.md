@@ -370,3 +370,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - Feature table: fnv-nx-build l3b-lift/cpuid-feature-bits/964510be8, 764 rows.
   - The capstone pin was met: wheel 5.0.9, digest matches env.json; 5.0.7 was the library's own version string.
   Merges after v3 54/54, last in the order above. L3a w12 takes this table commit.
+- 22:40Z v3 shard 54/54 (farm 20): shapes 345, proved 335, model-gap 10, failed 0, 3,905 s. 52/54 complete. Still running: 25 (farm 07), 53 (farm 20).
