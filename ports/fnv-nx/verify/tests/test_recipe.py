@@ -664,6 +664,14 @@ def main():
     check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
     check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
     check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # header home (class header): valid from every target, one rule (header_dirs and the include check)
+    hr = dict(rr, **{T + "hdr_hdr": {"path": T + "hdr_hdr", "class": "header"}})
+    hf = rfiles + [T + "hdr_hdr/h2.h"]
+    for tgt in ("guest", "host"):
+        ent = dict(hr[ROOT], target=tgt)
+        er = [e for e in recipe.check(mut(include=RECIPE["include"] + [T + "hdr_hdr"]), ROOT, hf, dict(hr, **{ROOT: ent}), None, rk) if "lies in no admitted header root" in e]
+        check("include dir in a header-class root accepted from a %s includer" % tgt, not er, er)
+        check("header_dirs of a %s root holds the header root" % tgt, T + "hdr_hdr" in recipe.header_dirs(mut(), ROOT, dict(hr, **{ROOT: ent}), rk))
     # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
     rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
     rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]
