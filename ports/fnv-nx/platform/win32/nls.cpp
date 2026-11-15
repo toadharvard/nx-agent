@@ -611,7 +611,7 @@ static const uint16_t *loc_rec(LCID lcid)
                ? klocale_us : NULL;
 }
 
-enum { LRN = 0x20000000, LGEN = 0x10000000, LNOUSER = 0x80000000u, LACP = 0x40000000 };
+enum : uint32_t { LRN = 0x20000000, LGEN = 0x10000000, LNOUSER = 0x80000000u, LACP = 0x40000000 };
 static int lr_data(const uint16_t *d, int datalen, DWORD type, WCHAR *buf, int len)
 {
     if (type & LRN)
