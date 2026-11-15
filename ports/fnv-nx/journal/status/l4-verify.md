@@ -430,3 +430,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 22:40: done: the bootrt objstub fix is w9 bdc9c9d4 on cand3 41a8855d4. objstub has 0 findings for tests/bootrt; test_bootrt is 7 cases, 0 failed. Sent to L1 for cand4, and w9 is archived.
   - The whole-tree objstub is red, 25 findings, none in L4 (8 in mojoshader, 17 unattributed).
 - bottleneck: waiting on L3a w8 (loader and descs includes on base3), on L1 w12 (link.entry, archive closure, the bootguest admit row) and on L1/L5 (platform gen:12) | 1 worker (w8)
+- 22:50: w8 took L5 a9cefdbec (loader, platform, hostabi), which closes the loader include. The icount link is now red at lift/bridges's recipe: a9cefdbec's platform dropped the INCLUDE output that base3's bridges uses. Owner L5, told. Checks: boot, bootguest, icount and gl4 all 0.
