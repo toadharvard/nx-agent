@@ -12,6 +12,12 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-15 11:10Z (orchestrator).** Trunk a5c8f427 (unchanged since 2026-11-12, 0 product roots). cand2 frozen at 62a24a5ec
+(CLAUDE.md 2cb25d1b4): reds only, head e11706a09, then `l1.py merge`. cand3 (L1 w12): Header home 98c497a6e + fact universe
+d1f625e98, then guest hermeticity (-nostdinc + runtime sysroot from verify/guest_compiler.json; until then every guest object
+is a measurement), L2's none-elf pin when phase B lands. Boot-loop order 76e450faf withdrawn (owner: "Опять затычки").
+Call economy CLAUDE.md 0e4c31db2.
+
 ## Path plan 2026-11-14 (binding; rules in CLAUDE.md "Owner order of 2026-11-14" and its decisions)
 
 **Decision 2026-11-15 (owner): OWNER 10, the x86 ISA as the Intel SDM documents it, for the parts no pinned formal model
