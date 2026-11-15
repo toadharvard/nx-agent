@@ -1,0 +1,9 @@
+# image	PE file	facts directory (universe.tsv, ranges.tsv)   -- the lifted images: exe, and the modules of lift/facts (Galaxy is not lifted)
+exe	/ext/exe/FalloutNV.exe	/ext/facts
+atimgpud	/ext/exe/atimgpud.dll	/ext/facts/atimgpud
+binkw32	/ext/exe/binkw32.dll	/ext/facts/binkw32
+d3dx9_31	/ext/redist/d3dx9_31.dll	/ext/facts/d3dx9_31
+d3dx9_38	/ext/redist/d3dx9_38.dll	/ext/facts/d3dx9_38
+gdffalloutnv	/ext/exe/GDFFalloutNV.dll	/ext/facts/gdffalloutnv
+libvorbis	/ext/exe/libvorbis.dll	/ext/facts/libvorbis
+libvorbisfile	/ext/exe/libvorbisfile.dll	/ext/facts/libvorbisfile

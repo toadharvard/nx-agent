@@ -29,76 +29,14 @@ from multiprocessing import Pool
 import x86flow as W
 import fpmodes as FP
 from x86flow import X, M32, mn, Fn, load_universe
+from ctlloads import control_loads, IMP_CTL, crt_to_x87, crt_mask_x87, crt_to_mx, crt_to_cw, push_consts, effects
 from fnvlift import f_cpufeat, f_sys, f_sse, core
 
 FCW_START, MXCSR_START = 0x027F, 0x1F80
 FCW_FIELDS = (('masks', 0x003F), ('PC', 0x0300), ('RC', 0x0C00), ('IC', 0x1000))
 MX_FIELDS = (('masks', 0x1F80), ('RC', 0x6000), ('FTZ', 0x8000), ('DAZ', 0x0040))
-IMP_CTL = ('_controlfp', '_control87', '_fpreset')
 IMP_STAT = ('_clearfp', '_statusfp', '_status87')
 WSTORE_NAMES = ('fnstsw', 'fstsw')
-
-
-# ---- the MSVC CRT encoding of _controlfp(new, mask) as a transform of the x87 word / MXCSR ----
-def crt_to_x87(v):
-    r = 0
-    for crt, x in ((0x10, 1), (0x80000, 2), (0x08, 4), (0x04, 8), (0x02, 16), (0x01, 32)):
-        r |= x if v & crt else 0
-    return r | ((v >> 8) & 3) << 10 | {2: 0, 1: 2, 0: 3, 3: 1}[(v >> 16) & 3] << 8 | (0x1000 if v & 0x40000 else 0)
-
-
-def crt_mask_x87(m):
-    r = crt_to_x87(m) & 0x1c3f
-    r |= 0x0300 if m & 0x30000 else 0
-    return r
-
-
-def crt_to_mx(v, m):
-    """(A, O) for MXCSR: EM -> mask bits 7-12 (same order as x87 0-5), RC -> 13-14, DN (0x03000000) -> FTZ / DAZ"""
-    xm, xv = crt_mask_x87(m) & 0x3f, crt_to_x87(v) & 0x3f
-    am = ~((xm << 7) | ((m >> 8 & 3) << 13) | (0x8040 if m & 0x03000000 else 0)) & M32
-    om = (xv & xm) << 7 | ((v >> 8) & 3 & (m >> 8 & 3)) << 13 | (0x8040 if (m & 0x03000000 and v & 0x03000000) else 0)
-    return am, om
-
-
-def crt_to_cw(v, m):
-    xm = crt_mask_x87(m)
-    return (~xm) & M32, crt_to_x87(v) & xm
-
-
-# ---- per entry ----
-def push_consts(F, x, n):
-    """constants pushed for the call at x, top of stack first (a pred walk through single-predecessor straight-line code; None = not a constant)"""
-    out, pos = [], x
-    while len(out) < n:
-        ps = F.preds.get(pos, [])
-        if len(ps) != 1:
-            break
-        q = F.ins[ps[0]]
-        if mn(q) == 'push':
-            v = FP.srcval(F, ps[0], q, q.operands[0], 0)
-            out.append(next(iter(v))[1] if len(v) == 1 and next(iter(v))[0] == 'c' else None)
-        elif FP.espd(q) != 0 or mn(q) == 'call':
-            break
-        pos = ps[0]
-    return (out + [None] * n)[:n]
-
-
-def effects(vs):
-    """value set of fpmodes.val -> list of ('c', v) | ('t', A, O) | ('u', reason)"""
-    r = []
-    for v in sorted(vs, key=repr):
-        if v[0] == 'c':
-            r.append(('c', v[1]))
-        elif v[0] == 't':
-            r.append(('t', v[1], v[2]))
-        elif v[0] == 'arg':
-            r.append(('u', 'arg'))
-        elif v[0] == 'glob':
-            r.append(('u', 'global'))
-        else:
-            r.append(('u', v[1] if len(v) > 1 else '?'))
-    return r
 
 
 def a3_tags(ins, m):
@@ -136,35 +74,11 @@ def scan1(args):
         i = F.ins[x]; m = mn(i); o = i.operands
         for t in a3_tags(i, m):
             r['a3'].append((x, t))
-        if m in ('fldcw', 'ldmxcsr'):
-            mx = m == 'ldmxcsr'; F.w = 4 if mx else 2
-            l = FP.memslot(i, o[0], F.w)
-            if l is None:
-                eff = [('u', 'ptr')]
-            elif l[0] == 'g':
-                eff = [('u', 'global:%08x' % l[1])]
-            else:
-                eff = effects(FP.val(F, x, l))
-            r['mx' if mx else 'fcw'].append((x, m, eff))
-        elif m in ('fninit', 'finit'):
-            r['fcw'].append((x, m, [('c', 0x37f)]))
-        elif m in ('frstor', 'fldenv', 'fxrstor'):
-            r['mx' if m == 'fxrstor' else 'fcw'].append((x, m, [('u', 'env-load')]))
-            if m == 'fxrstor':
-                r['fcw'].append((x, m, [('u', 'env-load')]))
-        elif m == 'call' and o[0].type == X.X86_OP_MEM and not o[0].mem.base and not o[0].mem.index and not o[0].mem.segment:
-            nm = W.IATADDR.get(o[0].mem.disp & M32)
-            if nm in IMP_CTL:
-                a1, a2 = push_consts(F, x, 2)
-                if nm == '_fpreset':
-                    e1 = e2 = [('u', 'import:_fpreset')]
-                elif a1 is None or a2 is None:
-                    e1 = e2 = [('u', 'import:%s:arg' % nm)]
-                else:
-                    e1, e2 = [('t',) + crt_to_cw(a1, a2)], [('t',) + crt_to_mx(a1, a2)]
-                r['fcw'].append((x, 'imp:' + nm, e1)); r['mx'].append((x, 'imp:' + nm, e2))
-            elif nm in IMP_STAT:
-                r['rd'].append((x, 'imp:' + nm, 'escapes', 'import-result'))
+        f_, m_ = control_loads(F, x)
+        if f_ or m_:
+            r['fcw'] += f_; r['mx'] += m_
+        elif m == 'call' and o[0].type == X.X86_OP_MEM and not o[0].mem.base and not o[0].mem.index and not o[0].mem.segment and W.IATADDR.get(o[0].mem.disp & M32) in IMP_STAT:
+            r['rd'].append((x, 'imp:' + W.IATADDR.get(o[0].mem.disp & M32), 'escapes', 'import-result'))
         elif m in ('fnstsw', 'fstsw'):
             r['rd'].append((x, m, 'pending', ''))
         elif m in ('fnstenv', 'fstenv', 'fnsave', 'fsave', 'fxsave', 'stmxcsr', 'fnclex', 'fclex'):
