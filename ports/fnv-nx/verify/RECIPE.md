@@ -141,8 +141,9 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   `libs.external` is the guest runtime external pinned in `verify/guest_compiler.json` (`runtime`: the guest's libc, libm, libstdc++), which the root declares like
   any external; all paths are relative, inside it, there is no host path. A guest root that declares `link.script` or `link.libs` itself is red (no per-root choice, so
   a double of the script cannot exist), a missing or invalid profile is red. The profile's content is in every guest link stage key (script mounted at /ld, libs in argv).
-  A host root declares `script` (a tracked file of the root, required for kind pie) and `libs` as before: `{"external": ..}` of an external of the recipe or `{"system": [..]}`.
-- `link.version_script`: a tracked file of the root, or of an admitted tool root's tree (by repo path).
+  A host root declares `script` (a tracked file of the root or a generated output of it, required for kind pie) and `libs` as before: `{"external": ..}` of an external of the recipe or `{"system": [..]}`.
+- `link.version_script`: a tracked file of the root, a generated output of the root (an output of its `generated` or `run` stages, the way `constants` and `contract_names` are), or a tracked file of an admitted tool root's tree (by repo path).
+  `link.script` takes the same three forms. A generated script or version script is mounted at `/ld` by the ld stage from the root's build view, so its content is in the stage key: changing the generator's input changes the script and the key; an input change that leaves the script equal leaves the link key.
 - Linked whole: every input OBJECT (own and of the input roots) and every archive that is an input is under `--whole-archive`; there is no `--gc-sections`:
   the set of symbols is the set of the inputs. (The toolchain's libraries of `link.libs` are the linker's to search, as the driver does: whole libc
   would be the wrong set; what they pull in is judged by the symbol tables after the link.)

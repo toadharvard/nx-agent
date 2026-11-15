@@ -34,6 +34,11 @@ n = len([l for l in open("/in/ports/fnv-nx/toy/constants.tsv") if l.strip()])
 os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
 '''
+GENLD = '''import os
+n = len([l for l in open("/in/ports/fnv-nx/toy/ldin.tsv") if l.strip()])
+os.makedirs("/out/gen")
+open("/out/gen/link.ld", "w").write(open("/in/ports/fnv-nx/link/guest.ld").read() + "\\n/* generated for %d rows */\\n" % n)
+'''
 # The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld and
 # the product's own crt0 (rt/guest/crt0.s, read from the tree like guest.ld, so the fixture can never drift from the link contract): the
 # FNXG header at the first segment + 8, MOD0 behind it, the entry at the first segment. crt0 branches to __fnvnx_guest_entry, the entry every
@@ -391,6 +396,33 @@ def main():
         check("link roots: a test-style link with --unresolved-symbols=ignore-all is refused before any stage", raised and "refusal set R" in raised, raised)
 
     later(link_roots)
+    LGS = BASE + "/ss-lg"
+
+    def link_generated():
+        """link.script from a generator of the root: the ld stage mounts the generated output, so a change of the generator's input changes the link key"""
+        rec = dict(RECIPE, generated=RECIPE["generated"] + [{"tool": T + "gen/linkgen.py", "args": [], "inputs": [ROOT + "/ldin.tsv", T + "link/guest.ld"], "outputs": ["gen/link.ld"]}],
+                   link=dict(RECIPE["link"], script="gen/link.ld"))
+        lg = make_repo("lg", rec=rec, files={"toy/ldin.tsv": "a\n", "gen/linkgen.py": GENLD, "link/guest.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(), "toy/link.ld": None})
+        y1 = recipe.build(lg, ROOT, LGS, BASE + "/lg1")
+        check("generated link.script: a root whose script is generated links", y1["status"] == "green" and y1["elf"], y1.get("failure"))
+        w(lg, "toy/ldin.tsv", "a\nb\n")
+        git(lg, "add", "-A")
+        git(lg, "commit", "-q", "-m", "ldin changed")
+        y2 = recipe.build(lg, ROOT, LGS, BASE + "/lg2")
+        k1, k2 = set(y1["stage_keys"]), set(y2["stage_keys"])
+        # the output of the generator changed (one more row): its own stage and every stage that mounts it (ld, ldcheck) have new keys
+        w(lg, "toy/ldin.tsv", "a\nb\n\n")
+        git(lg, "add", "-A")
+        git(lg, "commit", "-q", "-m", "ldin: a blank line, the same generated script")
+        y3 = recipe.build(lg, ROOT, LGS, BASE + "/lg3")
+        k3 = set(y3["stage_keys"])
+        # an input change that leaves the generated output equal moves the generator's key only: the link stage is keyed by the content it mounts
+        check("generated link.script: a change of the generator input that changes the script changes the link key", y2["status"] == "green" and len(k2 - k1) > 1
+             , (len(k2 - k1), y2.get("failure")))
+        check("generated link.script: an input change with an equal script leaves the link key (the stage keys differ by the generator's alone)",
+              y3["status"] == "green" and len(k3 - k2) == 1, (len(k3 - k2), y3.get("failure")))
+
+    later(link_generated)
 
     print("INFO +%.1f s: toy builds done" % (time.time() - t_start))
     tcc, tct = tc_fut.result()
@@ -506,6 +538,23 @@ def main():
     mo["link"]["script"] = T + "other/x.ld"
     e5 = tree_errs("tr5", True, mo)
     check("link.script outside every tree and the root: red", any("link must be" in e for e in e5), e5)
+
+    # --- link.script and link.version_script: also a generated output of the same root (`seen`, as constants and contract_names)
+    glr = mut(generated=RECIPE["generated"] + [{"tool": T + "gen/linkgen.py", "args": [], "inputs": [ROOT + "/ldin.tsv", T + "link/guest.ld"], "outputs": ["gen/link.ld"]}])
+    glr["link"] = dict(RECIPE["link"], script="gen/link.ld")
+    gfiles = {"toy/ldin.tsv": "a\n", "gen/linkgen.py": GENLD, "link/guest.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read()}
+    gr = make_repo("gl", rec=glr, files=gfiles)
+    ge = recipe.check(glr, ROOT, recipe.tracked(gr), recipe.load_admit(gr), None, gr)
+    check("link.script a generated output of the root: green at check", not [e for e in ge if "link" in e and "must be" in e], ge)
+    gn = json.loads(json.dumps(glr))
+    gn["link"]["script"] = "gen/never.ld"
+    ge2 = recipe.check(gn, ROOT, recipe.tracked(gr), recipe.load_admit(gr), None, gr)
+    check("link.script that no generator produces and no file holds: red", any("link must be" in e for e in ge2), ge2)
+    gv = json.loads(json.dumps(glr))
+    gv["link"] = dict(gv["link"], kind="shared", version_script="gen/link.ld")
+    ge3 = recipe.check(gv, ROOT, recipe.tracked(gr), recipe.load_admit(gr), None, gr)
+    check("link.version_script a generated output of the root: accepted by the link rule", not [e for e in ge3 if "link must be" in e], ge3)
+    check("link_generated: a tracked file is not a generated output, a produced name is", not recipe.link_generated("link.ld", {"link.ld"}, {"link.ld"}) and recipe.link_generated("gen/link.ld", set(), {"gen/link.ld"}))
 
     # --- validation
     check("unknown key 'exclude' is a RecipeError", any("unknown key 'exclude'" in e for e in errs(mut(exclude=["a.c"]))))
