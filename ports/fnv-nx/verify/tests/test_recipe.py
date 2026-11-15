@@ -54,7 +54,7 @@ FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
     "toy/c.c": '#include "toy.h"\nint f_c(int x) { return x + TOY; }\n',
-    "toy/os.S": CRT0 + OS_NOLINK,
+    "toy/os.S": CRT0 + ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
     "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
@@ -86,10 +86,7 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    fs = dict(FILES, **(files or {}))
-    if (rec or RECIPE).get("link") is None and "toy/os.S" not in (files or {}):
-        fs["toy/os.S"] = OS_NOLINK   # crt0 is the entry of a link (guest.ld): a root that links no ELF carries no crt0
-    for k, v in fs.items():
+    for k, v in dict(FILES, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     for f in LINK_TOOLS:
@@ -470,7 +467,7 @@ def main():
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
     # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
-    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64"), files={"toy/os.S": FILES["toy/os.S"]}), ROOT, SS, BASE + "/out64")
+    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64")), ROOT, SS, BASE + "/out64")
     print("INFO toy LP64 build %.1f s, stages %s" % (time.time() - t0, r64.get("stages")))
     check("toy root builds green: ILP32 objects and ELF are ELF32, the LP64 objects are ELF64 (and no ELF)",
           r64["status"] == "green" and len(r64["objects"]) == 4 and r64["elf"] is None
