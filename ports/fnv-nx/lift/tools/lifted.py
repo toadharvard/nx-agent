@@ -9,7 +9,7 @@ per lifted body instruction, entries in address order, instructions in address o
 exactly what liftgen counts (shapes.tsv). Nothing is decided here: no class list. The codemap (tools/codemap.py) is a DERIVED view of the facts and is
 never consulted; the universe is the one fnvlift.universe loads (FNVNX_UNIVERSE), and `facts` must be that file.
 
-The lifting mode and the jump-table facts are inputs of the result (`emit`: '' hand handlers, 'dsl' proven DSL forms first; `jtab`: the ehtables.json path or None), as in liftgen --emit / --jtab; there is no default."""
+The lifting mode and the jump-table facts are inputs of the result (`emit`: 'dsl', the proven DSL forms first, then the hand handlers of the mnemonics no Form covers; `jtab`: the ehtables.json path or None), as in liftgen --emit / --jtab; there is no default."""
 import json
 import os
 import sys
@@ -23,12 +23,9 @@ S = {}          # the capture of the last explore() result, and the memo of lift
 def install(img, emit, jtab):
     """the state of a lifting process: the emit mode, the jump-table facts (ehtables.json of the module: the only source of jump-table extents) and the capture wrapper around core.explore (once per process)"""
     import fnvlift as L, fnvlift.core as core
-    if emit not in ('', 'dsl'): raise ValueError('emit %r' % (emit,))
-    if emit == 'dsl':
-        from proof import lift_dsl
-        core.set_emit(lift_dsl.emit_form)
-    else:
-        core.set_emit(None)
+    if emit != 'dsl': raise ValueError('emit %r (the proven DSL forms are the only path for the mnemonics they cover)' % (emit,))
+    from proof import lift_dsl
+    core.set_emit(lift_dsl.emit_form)
     core.set_jtab(json.load(open(jtab)) if jtab else None)
     S['cap'] = []
     if 'orig_explore' not in S:

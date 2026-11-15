@@ -4,7 +4,7 @@ import os
 from .image import Image
 from .core import lift, Unsupported
 from . import universe
-from . import f_int, f_string, f_flow, f_sys, f_x87, f_sse, f_simd_int  # noqa: F401  (f_x87 before f_sse: fallback order)
+from . import f_int, f_flow, f_sys, f_x87, f_sse, f_simd_int  # noqa: F401  (f_x87 before f_sse: fallback order)
 
 
 def inline(rt_dir, name, gen_dir=None):

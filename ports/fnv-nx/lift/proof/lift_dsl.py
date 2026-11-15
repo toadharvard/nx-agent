@@ -37,6 +37,8 @@ def supported(ins):
     """the Form builder has a handler for the mnemonic (forms.build's own lookup: forms.H, then the jcc / setcc / cmovcc families) and every register
     operand is a general register (the string forms' mnemonics movsd/cmpsd are also SSE2 instructions)"""
     m = ins.mnemonic.split()[-1]
+    if m in ('call', 'jmp') and ins.opcode[0] == 0xff and ins.modrm is not None and (ins.modrm >> 3) & 7 in (3, 5) and ins.operands and ins.operands[0].type == forms.X.X86_OP_MEM:
+        return False        # FF /3 and FF /5 are the far CALL / JMP m16:32 (SDM Vol 2): the Forms model the near transfers only; f_sys.far_mem emits the far ones
     ok = m in forms.H or (m[0] == 'j' and m[1:] in CC) or (m.startswith('set') and m[3:] in CC) or (m.startswith('cmov') and m[4:] in CC)
     return ok and all(ins.reg_name(o.reg) in SUB or forms.isvec(forms.Op(ins, o)) for o in ins.operands if o.type == forms.X.X86_OP_REG)
 

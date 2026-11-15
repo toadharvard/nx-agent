@@ -5,3 +5,16 @@
 3. Forms (proof/forms_ssefp.py): cvtsi2ss/sd, cvtdq2ps/pd, cvtpi2ps (the MMX rule), cvt(t)ss2si, cvt(t)sd2si, cvt(t)ps2dq, cvt(t)pd2dq, rcpss/ps, rsqrtss/ps, ldmxcsr (#GP(0) = fault kind 7 on bits outside `mxcsr_mask` of verify/cpuid_model.json), stmxcsr, movntps/pd/dq (16-byte aligned store, align fault), prefetchnta/t0/t1/t2 (no effect, no fault), pause (no effect), emms (all tags empty, Form.mmx(emms=True)). lift_dsl.supported() routes them to the DSL emitter ahead of the hand handlers of f_sse.py; those hand handlers are now reachable only with emit='' (the legacy mode of tools/lifted.py) and were not deleted.
 4. Tests: proof/tests/fpc_host.py (C helpers vs the z3 model: fp, cvt, tab; 307,420 cases at d90205d3 with 0 disagreements before the Forms), proof/tests/test_forms_simdclass.py (98 checks, 0 fails: SDM-derived directed cases through forms.build and to_c_inline).
 5. L3b spec side: prefetchnta/t0/t1/t2 has no row in simdspec.py (and simdcheck.py indexes `m` by `mem_width` even when it is None / 8 bits). In my scratch overlay a row `row('', 0x18, 'prefetchh', [], form='m', mw=None, al=False)(lambda e, d, m, a, g: Res(dict(d)))` (SDM 2B:PREFETCHh, hint, no architectural effect) and `m = None if w is None else (Select(M0, a) if w == 8 else Concat(...))` made prefetch/emms/pause prove. L3b owns both files; the rerun needs them.
+
+## One path (lead correction 1, rule 3) and the numbers (correction 2)
+
+- Hand handlers of every mnemonic a Form covers are deleted from all fnvlift modules (f_sse, f_int, f_flow, f_sys, f_simd_int; f_string is gone: its five mnemonics are Forms).
+  Global: hand-handler mnemonics that were also Form mnemonics were 335 (f_sse 121, f_int 89, f_simd_int 67, f_sys 23, f_flow 20, f_string 15); now the set intersection is {call, jmp}.
+  test_forms_simdclass.py asserts it, read from the registries (99 checks, 0 fail).
+- call / jmp: FF /3 and FF /5 (far CALL / JMP m16:32) are a shape the Forms do not model. lift_dsl.supported() refused none of them before, so a far call through memory
+  was built as a near call (a latent defect, closed here: supported() now refuses FF /3 /5, f_sys.far_mem emits them). The two mnemonics keep their handler for that shape.
+  The clean fix is a far-transfer Form (selector check + CS push); an owner decision for L3a/L3b, reported to the lead.
+- tzcnt / lzcnt: the alias to BSF / BSR (no BMI1 / ABM in CPUREF) moved from the hand handlers into the Form (forms_alu `bs`).
+- `emit=''` is gone: tools/lifted.install accepts only 'dsl'; liftgen --emit default 'dsl'. Dead runtime helpers removed from rt/fnvl.h (sse_arith, sse_sqrt, sse_min/max, sse_cmpb, sse_comi).
+- The 62 / "representative shapes" figure was a local check (41 proved shapes), not a result. The result is L3b's rerun over all 4,290 shapes at the head commit; a divss/divsd timeout is L3b's timeout class.
+- Debt (owner L3a): proof/tests/fpc_host.py compiles fnvl.h with the host compiler, outside the recipe. It moves to a recipe test root (host flags variant) when the L1 `run` stage lands.

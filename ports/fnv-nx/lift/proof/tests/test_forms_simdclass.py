@@ -116,5 +116,13 @@ for code in (b'\xf3\x0f\x2a\xc1', b'\xf2\x0f\x2a\xc1', b'\x0f\x5b\xc1', b'\xf3\x
         check('emitter: %s calls only shipped helpers' % F.key, all(re.search(r'static inline [\w ]+ %s\(' % h, HDR) for h in used))
         want = {'cvtsi2ss|xmm,r32|0f2a': 'fx_dsl_cvt', 'cvtdq2ps|xmm,xmm|0f5b': 'fx_dsl_cvt', 'cvtsd2si|r32,xmm|0f2d': 'fx_dsl_cvt', 'rcpps|xmm,xmm|0f53': 'fnvl_tab_rcp', 'rsqrtss|xmm,xmm|0f52': 'fnvl_tab_rsqrt', 'divss|xmm,xmm|0f5e': 'fx_dsl_fp'}.get(F.key)
         check('emitter: %s uses %s' % (F.key, want), want is None or want in used)
+# ---- ONE PATH (rule 3): no mnemonic has both a DSL Form and a hand handler.  The sets are read from the registries themselves, not from a list.
+import fnvlift.core as _core
+from fnvlift import f_sse as _f_sse
+from proof import forms as _forms
+_cov = lambda m: m in _forms.H or (m[0] == 'j' and m[1:] in _core.CC) or (m.startswith('set') and m[3:] in _core.CC) or (m.startswith('cmov') and m[4:] in _core.CC)
+_both = sorted(m for m in set(_core.OPS) | set(_f_sse.SSE) if _cov(m))
+# the far CALL / JMP m16:32 (FF /3, /5) are the one shape the Forms do not model (lift_dsl.supported() refuses it, f_sys.far_mem emits it): the two mnemonics keep the near+far hand handler
+check('one path: hand handlers and Forms share only call / jmp (far FF /3, /5): %s' % _both, _both == ['call', 'jmp'])
 print('cases', N[0], 'fails', len(FAILS))
 sys.exit(1 if FAILS else 0)

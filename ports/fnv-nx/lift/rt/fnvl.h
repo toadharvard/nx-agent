@@ -212,20 +212,6 @@ template<class T> static inline T sse_qnan(T v){ return fxval<T>(fxbits(v)|FX<T>
 /* x86 NaN rule: the first operand's NaN wins (quieted), else the second's; invalid operation on numbers gives the negative default NaN */
 template<class T> static inline T sse_nan2(T a,T b){ return a!=a?sse_qnan(a):sse_qnan(b); }
 template<class T> static inline T sse_dnan(){ return fxval<T>(FX<T>::S|FX<T>::E|FX<T>::Q); }
-template<int OP,class T> static inline T sse_arith(T a,T b,u32 mx){
-  a=sse_daz(a,mx); b=sse_daz(b,mx); T r=OP==0?a+b:OP==1?a-b:OP==2?a*b:a/b;
-  if(__builtin_expect(r!=r,0)) return (a!=a||b!=b)?sse_nan2(a,b):sse_dnan<T>();
-  return sse_ftz(r,mx); }
-static inline float sse_sqrtv(float a){ return __builtin_sqrtf(a); }
-static inline double sse_sqrtv(double a){ return __builtin_sqrt(a); }
-template<class T> static inline T sse_sqrt(T a,u32 mx){ a=sse_daz(a,mx); T r=sse_sqrtv(a); if(__builtin_expect(r!=r,0)) return a!=a?sse_qnan(a):sse_dnan<T>(); return sse_ftz(r,mx); }
-/* min/max: the second operand is returned when either is NaN or both are zero; the returned operand is not quieted or flushed */
-template<class T> static inline T sse_min(T a,T b,u32 mx){ return sse_daz(a,mx)<sse_daz(b,mx)?a:b; }
-template<class T> static inline T sse_max(T a,T b,u32 mx){ return sse_daz(a,mx)>sse_daz(b,mx)?a:b; }
-template<int P,class T> static inline bool sse_cmpb(T a,T b,u32 mx){ a=sse_daz(a,mx); b=sse_daz(b,mx);
-  return P==0?a==b:P==1?a<b:P==2?a<=b:P==3?(a!=a||b!=b):P==4?!(a==b):P==5?!(a<b):P==6?!(a<=b):(a==a&&b==b); }
-/* comis/ucomis -> EFLAGS bits (ZF 0x40, PF 4, CF 1) */
-template<class T> static inline u32 sse_comi(T a,T b,u32 mx){ a=sse_daz(a,mx); b=sse_daz(b,mx); return (a!=a||b!=b)?0x45u:a==b?0x40u:a<b?1u:0u; }
 FNVL_F2I static inline u32 sse_f2i(double v,u32 rc){ double r=rc==0?__builtin_roundeven(v):rc==1?__builtin_floor(v):rc==2?__builtin_ceil(v):__builtin_trunc(v);
   if(!(r>=-2147483648.0&&r<=2147483647.0)) return 0x80000000u; return (u32)(s32)r; }
 static inline double sse_f2d(float v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u32 b=fxbits(v); return fxval<double>((u64)(b&0x80000000u)<<32|0x7ffull<<52|(u64)(b&0x7fffffu)<<29|1ull<<51); } return (double)v; }

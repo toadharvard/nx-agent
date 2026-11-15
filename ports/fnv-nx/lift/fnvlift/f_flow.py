@@ -98,32 +98,6 @@ def h_jmp(cx, ins):
             cx.em(l)
 
 
-@op(*['j' + c for c in CC])
-def h_jcc(cx, ins):
-    t = cx.ops[0].imm & 0xffffffff
-    c = CC[cx.m[1:]]
-    st = jump_to(cx, t)
-    cx.em('if(%s)%s' % (c, st if st[0] == '{' else ' ' + st))
-
-
-@op('jecxz')
-def h_jecxz(cx, ins):
-    t = cx.ops[0].imm & 0xffffffff
-    if cx.lo <= t < cx.hi:
-        cx.em('if(!ecx) goto %s;' % cx.lab(t))
-    else:
-        jump_out(cx, t, '!ecx')
-
-
-@op('ret')
-def h_ret(cx, ins):
-    n = cx.ops[0].imm if cx.ops else 0
-    if n:
-        cx.kinds.add('retn')
-    cx.em('{ u32 ra=M32(esp); esp+=%du; c->ra=ra; SYNC_OUT; return; }' % (4 + n))
-    cx.term = True
-
-
 def raise_site(cx, code, trap=True, at=None, av=False):
     """a hardware exception at this instruction (R4): fnvl_raise runs the OS dispatch on the guest state and leaves the resume address in c->ra
     (ContinueExecution) with esp restored; the loop then continues there. The instruction's own address is a label of the loop (retry)."""
@@ -137,13 +111,5 @@ def raise_site(cx, code, trap=True, at=None, av=False):
     return 'SYNC_OUT; REGS(); %s REGS(); SYNC_IN; goto nonlocal;' % call
 
 
-@op('int3')
-def h_int3(cx, ins):
-    cx.em(raise_site(cx, 'FNVL_BP'))
-    cx.term = True
 
 
-@op('ud2')
-def h_ud2(cx, ins):
-    cx.em(raise_site(cx, 'FNVL_UD'))
-    cx.term = True

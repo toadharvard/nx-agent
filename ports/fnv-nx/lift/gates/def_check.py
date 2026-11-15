@@ -105,7 +105,7 @@ def lifted_by(ins):
     """which builder of the lifter takes an instruction that has no Form: the mnemonic handler (OPS, by its module) or the first FALLBACK whose predicate holds
     (the order of fnvlift.core.dispatch), else 'none' (a lift gap). The probe context carries what the predicates read."""
     import types
-    from fnvlift import core, f_cpufeat, f_sys, f_sse, f_x87, f_int, f_string, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
+    from fnvlift import core, f_cpufeat, f_sys, f_sse, f_x87, f_int, f_flow, f_simd_int, f_x87_ctl     # noqa: F401  (register their handlers)
     m = ins.mnemonic.split()[-1]
     cx = types.SimpleNamespace(m=m, ops=list(ins.operands), b0=ins.opcode[0], modrm=ins.modrm, pfx='')
     try:
