@@ -91,6 +91,7 @@
    "ports/fnv-nx/lift/rt",
    "ports/fnv-nx/lib/sha256",
    "ports/fnv-nx/platform"
-  ]
+  ],
+  "entry": "bootguest_entry"
  }
 }
