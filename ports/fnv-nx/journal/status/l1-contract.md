@@ -1842,3 +1842,5 @@ bottleneck: the cand2 verdict on w15.
 bottleneck: the cand2 verdict on w15.
 - 21:43 cand3 pushed: claude/fnv-l1-contract-cand3 4952b11b3 (cand2 + shards N ≤ 16, cpu_s/timing/store-export, generator dirs outputs; test_genchain 11/11 with env bypass). Next for w12: a cross-root dirs toy case, then assemble cand4 (PP keying, compiler stage, bootrt, boot.c header, typed dispatch, rule O and the objstub fixes, assumption ids, abspath). w15: verify and merge cand3 after cand2. Orchestrator updated.
 bottleneck: the cand2 verdict on w15.
+- 21:46 bootrt rt.c: 4 symbols. The 3 nxgl4_* are the boot machine's embedder boundary. The red is the inline syscalls and the exit(1) fallback. Rule (from w12): a mandatory exit callback through nxgl4_shim_set, reach_violation exits through it, no syscalls and no fallback. Owner L4 (rt.c, bootgpu.py, boot.py), sent; w12 takes it into cand4.
+bottleneck: the cand2 verdict on w15.
