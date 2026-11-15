@@ -8,7 +8,7 @@ one message when done or blocked, priority next). Read the root CLAUDE.md first;
 Exe-derived artifacts (stores, logs with unit contents) go only to toadharvard/fnv-nx-build (add_repo, push access
 authorized).
 
-1. Checkout nx-agent at <BUILD_COMMIT> (claude/fnv-l3a-lift-base3: t16l + L1 cand3 41a8855d4 (sandbox.py/cas.py = c0f504e2a), whose verify/sandbox.py and cas.py are frozen until the pack lands, plus the lift stage chain). Install the
+1. Checkout nx-agent at <BUILD_COMMIT> (claude/fnv-l3a-lift-base3, first head 49848fd9e: t16l + L1 cand3 41a8855d4 (sandbox.py/cas.py = c0f504e2a), whose verify/sandbox.py and cas.py are frozen until the pack lands, plus the lift stage chain). Install the
    verdict environment only by `farm/setup_verdict_env.sh`, then `envcheck.py` must pass. No other apt, no other gcc.
 2. Build exactly one shard of the root ports/fnv-nx/lift/pack with the recipe's own shard rule:
    `python3 -I ports/fnv-nx/verify/recipe.py build --root ports/fnv-nx/lift/pack --store STORE --out OUT --jobs 4 --shard i/N`

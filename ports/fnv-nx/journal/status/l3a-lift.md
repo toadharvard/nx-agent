@@ -868,3 +868,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   w7 and w13 cherry-pick onto it. w7 bea44f836: x86flow.Image is now the one relocating loader (fpmodes, fpstate and locksites had read unrelocated bytes), and every base comes from MODULES_TSV.
 - Pack farm brief: N up to 16, built at base3 plus the lift stage chain.
 - 21:25 L1 cand3 is claude/fnv-l1-contract-cand3 41a8855d4: the w12L2 line (include_uses, link.tables, derived link.roots, PP keying b3a4dad01, shard-16, cpu_s), generator dirs, and sandbox.py/cas.py = c0f504e2a. c0f504e2a alone lacked the w12L2 line; L1 confirmed. base3 (w8) is built from 41a8855d4. w7 merges the jtab facts rules (dic.py, reloc-consistency, 3b11d118) onto it, keeping t16l's inputs.py form (L1 abspath gate at 0 in lift/).
+- 21:30 base3 = claude/fnv-l3a-lift-base3 49848fd9e (w8): t16l 2c3591efc + cand3 41a8855d4. sandbox.py and cas.py equal c0f504e2a.
+  - Taken from cand3: link/ctypes_compat, gate_disp, the link tests, the dispatch/layout plugins, plugbuild, platform/build.json.
+  - Kept L3a hunks: loader IMPORTED_TSV and its shim include; platform INCLUDE output.
+  - Dropped: the L3a dispatch-plugin shape_quiet hunk (an L2 file). It becomes a request to L2 if the native build needs it.
+  - Adopted from cand3: "profile":"guest" in the lift roots; lift/pack uses bridgefacts BRIDGE.
+  - recipe.py check: 24 of 30 roots valid. The 6 red are the lift/tests/guest roots, which include lift/rt outside `uses`; the fix is moving the rt headers into lift/rt/include (w8, next).
+  - The lift tool tests run in the background. w7 and w13 build on base3.
