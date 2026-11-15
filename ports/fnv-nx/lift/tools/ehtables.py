@@ -30,6 +30,33 @@ RE_PUSHH = re.compile(rb'(?=\x68(.{4})\x64(?:\xa1|\xff\x35)\x00\x00\x00\x00)', r
 h = lambda a: '0x%08x' % a
 def le(b): return int.from_bytes(b, 'little')
 
+class _Mem:
+    __slots__ = ('base', 'index', 'scale', 'disp', 'segment')
+class _Op:
+    __slots__ = ('type', 'size', 'access', 'reg', 'imm', 'mem')
+class Insn:
+    """the fields of a decoded instruction that EH and ehflow read, as plain slots: the memo of 3.3M instructions must not hold capstone's CsInsn, each of which owns a native cs_insn + cs_detail copy
+    (about 2-3 KB); decoding is a pure function of (bytes, address), so the record is exactly what the CsInsn says for these fields"""
+    __slots__ = ('address', 'size', 'mnemonic', 'operands', 'disp_offset', 'disp_size', 'imm_offset', 'imm_size', 'raw', 'cs')
+    def reg_name(s, r): return s.cs.reg_name(r)
+    def regs_access(s):
+        return next(s.cs.disasm(s.raw, s.address, 1)).regs_access()      # lazy: only the few callers pay for it; the same bytes decode to the same instruction
+def compact(g, cs):
+    """the Insn record of capstone instruction g"""
+    r = Insn(); r.address = g.address; r.size = g.size; r.mnemonic = g.mnemonic; r.cs = cs
+    r.disp_offset = g.disp_offset; r.disp_size = g.disp_size; r.imm_offset = g.imm_offset; r.imm_size = g.imm_size
+    ops = []
+    for o in g.operands:
+        q = _Op(); q.type = o.type; q.size = o.size; q.access = o.access
+        q.reg = o.reg if o.type == cx.X86_OP_REG else 0; q.imm = o.imm if o.type == cx.X86_OP_IMM else 0
+        if o.type == cx.X86_OP_MEM:
+            m = _Mem(); m.base = o.mem.base; m.index = o.mem.index; m.scale = o.mem.scale; m.disp = o.mem.disp; m.segment = o.mem.segment; q.mem = m
+        else: q.mem = None
+        ops.append(q)
+    r.operands = tuple(ops)
+    r.raw = bytes(g.bytes)
+    return r
+
 class EH(Flow):
     def __init__(s, X):
         s.X = X; s.fi = {}; s.stubs = {}; s.noise = Counter(); s.sites = {}; s.scopes = {}; s.helpers = {}; s.seenh = set()
@@ -215,7 +242,7 @@ class EH(Flow):
     def dis(s, a):
         r = s.dc.get(a)
         if r is None:
-            o = a - s.X.T0; r = s.dc[a] = next(s.cs.disasm(s.X.text[o:o + 15], a, 1), False)
+            o = a - s.X.T0; g = next(s.cs.disasm(s.X.text[o:o + 15], a, 1), None); r = s.dc[a] = compact(g, s.cs) if g is not None else False
         return r or None
 
     def sync(s):
