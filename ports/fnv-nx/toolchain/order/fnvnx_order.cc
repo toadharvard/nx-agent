@@ -1014,10 +1014,15 @@ static void pin_private_slots(function *fun) {
   unsigned ix;
   tree d;
   FOR_EACH_LOCAL_DECL(fun, ix, d)
-    if (VAR_P(d) && TREE_ADDRESSABLE(d) && priv.count(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d) && !hard_register(d)) ts.push_back(d);
+    // every private variable that lives in memory: not a shared local (shared_locals) and not a gimple register. An addressable one that
+    // the escapes fact proves private, and an aggregate that is no gimple register and has no address in the IL (no pointer to it can
+    // exist, whatever the escapes fact says of the others); both are `:n` in the frame record and own their slot
+    if (VAR_P(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d) && !hard_register(d) && !is_gimple_reg(d) && !(shared_locals && shared_locals->count(d))) ts.push_back(d);
   if (ts.empty()) return;
   gimple_stmt_iterator gi = gsi_after_labels(single_succ(ENTRY_BLOCK_PTR_FOR_FN(fun)));
   for (tree t : ts) {
+    if (!TREE_ADDRESSABLE(t)) force_addressable(t);   // a memory aggregate without an address: gets a (private) frame row too
+    priv.insert(t);
     vec<tree, va_gc> *in = NULL;
     vec_safe_push(in, build_tree_list(build_tree_list(NULL_TREE, build_string(2, "m")), t));
     gasm *a = gimple_build_asm_vec("", in, NULL, NULL, NULL);
