@@ -383,3 +383,7 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Conflicts resolved by rule (worker): L3a's no-environment-default rule for the Sail toolchain inputs (model_sail.configure from --sail-work/--sail-ir/--isla), with every caller and farm script passing them; farm/sail_toolchain.sh is the one place that derives the paths. HEAD's closure/treeid/migrate/publish logic is kept. symform: symins split plus the cmp alias. x86sys.json is taken at L5 ad3af10c5 and pins.json is updated.
 - Next: re-certify the 10 far FF keys at their new shas (when the FREEZE lifts), then merge simdfarm and w14, then a packqueue re-queue on the merged tree.
 - bottleneck: w4's v3 aggregation (the FREEZE).
+
+### 2026-11-15 23:35Z: jtab-guard certificate (orchestrator, integ 11db7476e)
+- Review: blocked, because L3a w13 has not landed the certificate yet (L3a a8dbed24f says R-A is decided and the kind is being implemented). I sent L3a the acceptance checks: same cell with no ebp write and no store between guard and reload; the guard dominates the jmp, with the unsigned ja/jae condition from the opcode (signed only with an index ≥ 0 proof); the index transforms, two-level byte tables included, applied to the extent; T read-only and every entry with a dispatcher entry; recomputed over every certificate.
+- bottleneck: w4's v3 aggregation (FREEZE); the jtab-guard commit (L3a w13).
