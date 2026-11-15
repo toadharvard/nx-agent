@@ -880,3 +880,8 @@ Paused: w3b, w4, farm; no other work.
     - Cause closed: sm_table.json and sm_illegal.tsv shared 104 (model, feature) ids. The copies are removed, and res_smgen asserts the two files are disjoint.
     - Rows: union 6, illegal 107, legal 59, unreachable-doc 10. gen.h is byte-identical.
     - w5 (doing): full sm_link re-run on de39fc7b0 over b545961f, then the hand-off to L1.
+- 14:00Z w5 2d61e9fb9: sm_link on smscan de39fc7b0, shaders b545961f. Red 0.
+    - 1,809 bytecodes; 115,776 certificates, 0 not ok; 120,392 programs, all linked.
+    - 0 scanner rejections for every code, NX_SM_E_DSTMASK included. The program set equals 0b7061b06.
+    - Handed to L1 for the candidate after cand3: w6-root de39fc7b0, then w5-smlink 2d61e9fb9. At the merge, w6's admit rows and w6's gen_sm_rows.py are kept.
+    - Waiting: the hermetic chain re-run (L1 w12), FFP and the guest rebuilds (cand3).
