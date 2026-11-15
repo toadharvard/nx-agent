@@ -933,7 +933,7 @@ Rules (each with its argument):
 
 ## verify/bootfacts.py
 
-The L4 views of the ELF facts of a linked output: lookups in the link record (L1's "fnvnx-elffacts/1", `elffacts.json` beside the linked ELF), which is
+The L4 views of the ELF facts of a linked output: lookups in the link record (L1's "fnvnx-elffacts/2", `elffacts.json` beside the linked ELF), which is
 the one source of sections and defined symbols (L4 reads no section or symbol table of an ELF, and runs no readelf or nm on one).
 
 ```text

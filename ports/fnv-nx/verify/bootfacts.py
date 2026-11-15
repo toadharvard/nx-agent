@@ -1,4 +1,4 @@
-"""bootfacts.py - the L4 views of the ELF facts of a linked output: lookups in the link record (L1's "fnvnx-elffacts/1", `elffacts.json` beside the
+"""bootfacts.py - the L4 views of the ELF facts of a linked output: lookups in the link record (L1's "fnvnx-elffacts/2", `elffacts.json` beside the
 linked ELF, objects.json key `elf_facts`), the one source of sections and defined symbols (rule 2: L4 reads no section or symbol table of an ELF).
 
   load(path)               the record, its format checked
@@ -13,7 +13,7 @@ import json
 
 import bootlayout
 
-FORMAT = "fnvnx-elffacts/1"
+FORMAT = "fnvnx-elffacts/2"
 NOT_SYMBOLS = ("SECTION", "FILE")
 
 
