@@ -47,6 +47,11 @@
         "-fno-stack-protector",
         "-fno-stack-clash-protection",
         "-fstack-reuse=none",
+        "-Werror=pointer-to-int-cast",
+        "-Werror=int-to-pointer-cast",
+        "-Werror=shift-count-overflow",
+        "-Werror=overflow",
+        "-Werror=incompatible-pointer-types",
         "-U_FORTIFY_SOURCE",
         "-fno-math-errno",
         "-fno-reorder-blocks-and-partition"
