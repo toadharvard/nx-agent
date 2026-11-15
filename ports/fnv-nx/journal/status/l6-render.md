@@ -574,3 +574,9 @@ Paused: w3b, w4, farm; no other work.
     - Rule-A (c): the RESERVED body calls fnvnx_reach_violation from <fnvnx/reach.h> (hostabi). Its fact is request class `shader_opcode` from op_reserved.tsv, which L1 w20 implements in gate_reach.
     - Blocked on w20, owner L1.
 - 00:01Z w1b 5bc689044: op_reserved_values.tsv has 16 rows (opnum 49..63 and 75), from the same table read; --check byte-equal. Sent to L1 w20. The RESERVED body waits on w20's shader_opcode fact.
+- 00:08Z w5: the shader pin was sent to L1 w20.
+    - gamedata/shaders b545961fad52, tree a19fc6e6…4e6f.
+    - Unique key: sha256 of the bytecode.
+- 00:08Z sm_link test root aa157d726 (claude/fnv-l6-render-w5-smlink) builds green.
+    - The run waits on L1 w12 (link.roots by target, exe startfiles); the run stage is w6 1f912ad30.
+    - Meanwhile a scratch run (a measurement) on w1b 819716297 covers all 24 variants.
