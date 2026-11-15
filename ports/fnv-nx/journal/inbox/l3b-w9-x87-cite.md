@@ -6,8 +6,8 @@ Pinned SDM: fnv-nx-build `tools/intel-sdm` 0768b0baf29a, PDF sha256 a4a62e6a...f
 
 1. Mechanical, all 286 `SDM <vol>:<id>` citations: every key resolves to a PDF page inside its own volume (`sdm_pages.py`, 0 unresolved; `test_page_is_in_the_keys_volume`).
 2. Mechanical, every quoted fragment of the spec (48): `lift/proof/sdm_cite_check.py SDM.txt` attributes each quote to the nearest preceding key and finds it on that page or the next two. Result: 48 OK, 0 MISS, 0 NOKEY (the SDM text is not in the repo, so this is a tool run, not a unit test).
-3. Semantic, by table: FSCALE Table 1-30 (49 cells) is a test (`SpecialTables`, rows in `x87_sdm_rows.txt`): the spec equals the SDM in every cell. Earlier tests cover FCOM/FUCOM/FTST/FCOMI/FUCOMI codes (Tables 8-6, 8-7), FXAM, the tag word, FINIT, the m80 and integer-indefinite encodings, FPREM and the trig special operands.
-4. NOT done yet: the semantic reading of the transcendental special-value tables other than FSCALE (F2XM1 1-12, FYL2X 1-44, FYL2XP1, FPATAN 1-26, FPTAN 1-29, FSIN 1-31, FSINCOS 1-32, FPREM 1-27/1-28), of the NaN rule against Table 4-8, and of the load/store/BCD paths against the SDM operations. Those are the next items, in the lead's order. Nothing below claims them.
+3. Semantic, by table: FSCALE Table 1-30 (49 cells), FPATAN Table 1-26 (32 concrete cells; the 4 range cells are symbolic) and FYL2X Table 1-44 (59 runs; 4 finite-by-finite cells are symbolic) are tests (`SpecialTables`, rows in `x87_sdm_rows.txt`): the spec equals the SDM in every checked cell, after the FYL2X fix below. Earlier tests cover FCOM/FUCOM/FTST/FCOMI/FUCOMI codes (Tables 8-6, 8-7), FXAM, the tag word, FINIT, the m80 and integer-indefinite encodings, FPREM and the trig special operands.
+4. NOT done yet: the semantic reading of the remaining transcendental special-value tables (F2XM1 1-12, FPTAN 1-29, FSIN 1-31, FSINCOS 1-32, FPREM 1-27/1-28; the trig and FPREM special operands have earlier tests, not yet checked cell by cell against the tables), of the NaN rule against Table 4-8, and of the load/store/BCD paths against the SDM operations. Those are the next items, in the lead's order. Nothing below claims them.
 
 ## Mismatches found (rule 8: cause) and fixed
 
@@ -25,6 +25,10 @@ Pinned SDM: fnv-nx-build `tools/intel-sdm` 0768b0baf29a, PDF sha256 a4a62e6a...f
 | 10 | `SDM 1:T4-3 'QNaN Floating-Point Indefinite'`; `SDM 1:4.8.3.5 'an SNaN is converted ...'` | the quoted title is section 4.8.3.7; the 4.8.3.5 sentence reads `When an SNaN is converted to a QNaN, the conversion is handled by setting the most-significant fraction bit of the SNaN to 1` (PDF 107) | wrong key / paraphrase | corrected |
 | 11 | FPREM: `the SDM's 'implementation-dependent number ...'`; ST(i): `'ST(i) ... i-th register ...'` | PDF 1071: `An implementation-dependent number between 32 and 63`; 1:8.1.2: `to specify the ith register from TOP in the stack` | paraphrase | corrected |
 | 12 | four quotes that were not SDM text at all (internal Bool names) | - | quote marks used for my own terms | quote marks removed |
+
+| 13 | **spec defect, not a citation:** FYL2X with ST(1) = +-inf and ST(0) finite, positive, not 1 | Table 1-44, PDF 1126: -inf row, 0<x<1 -> +inf, x>1 -> -inf; +inf row the opposite; no exception | result bits and OE/UE/PE came from `fpToReal(+-inf) * LOG2(x)` (the real of an infinity is an unspecified z3 value), so the result and flags were unconstrained | the result is an exact infinity (sign of ST(1), flipped when x < 1), no flags; every cell of Table 1-44 is now a test |
+
+Registry scope, no change: the registry has the instructions the pack uses (`x87_keys.tsv`, 118 + 2 cleared). FYL2XP1 (D9 F9), FXTRACT, FDECSTP, FINCSTP, FLDL2T, FLDL2E-class others that the pack never uses are not in it; a new shape would be added from the SDM page by the same rules.
 
 Also recorded, no change needed: FNSTSW/FNSTCW/FLDCW/FNCLEX undefine C0..C3 in the spec (`UNDEF_C0123`): PDF 1096 "The C0, C1, C2, and C3 are undefined." matches.
 
