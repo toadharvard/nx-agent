@@ -1125,3 +1125,17 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w24 1c01d56ba/7df0d175c oracle dangling keys: 2/97 over 7 files (lift/proof test_formgate.py, test_fpexact.py; L3b). Loader verdict at 36713265: RED 858.8 s gates:40 over_budget (fixes since are in the candidate). Next: tls_slot and align_bytes columns for L4 S5, then -fstack-reuse.
 - w20 34c9f0826 may-load superset accepted (farm run on a0f3d8ea requested from orchestrator); ba85582e3 objstub decode linear: platform 114 objects 57.9 → 49.3 s, max 16.2 → 8.9 s. shader_opcode: go, with values from L6 op_reserved_values.tsv, set from w5's pin, D3D9 token grammar (OWNER 3).
 - OWNER 10 (x86 ISA per Intel SDM where no pinned formal model covers, x87): record into ASSUMPTIONS.json in cand1 (w15), with CLAUDE.md/ORCHESTRATION.md/ALL.md from integration 140d23355. CLAUDE.md merged into this branch.
+
+### 2026-11-15 00:10 — batch answers
+- w24 74588fbb8 accepted.
+  - tls_slot is set by the loader's load_index (start.c:301, modules.c:273-278).
+  - align_bytes follows tls.c:38.
+  - It was sent to L4 and w15.
+  - Next for w24: -fstack-reuse=none. Number (c), the exe stack reserve, is read from private fnv-nx-build gamedata/exe outside the public repo. PD-STACK-REUSE lands in the same commit. L2 owns the restoring rule after the first frame.
+- w20 GPA certificates: no farm (orchestrator). w20 attaches fnv-nx-build itself and runs gpa_names --mayload + gate_reach on a0f3d8ea / e15d385f. The counts go to L1 and the orchestrator.
+- L3a host roots:
+  - target `host` + g++-13-x86-64-linux-gnu + link.kind exe/elf_x86_64 already exist on w15, so rcptest/rcpgen/rothost/bthost/fmathtest become host roots now.
+  - Missing, assigned to L6 w6's `run` series:
+    - the `run` stage + `{stage}` ref;
+    - `host_cpu: CPUREF`: the key takes the reference host identity, and the stage is red on any other host;
+    - libubsan1 through setup_verdict_env.sh for the `root@ubsan` variant used by proof/backends.py.
