@@ -15,7 +15,7 @@ def u32v(a): return TAB if a else 0
 def tab(*v): return b''.join(u32(x) for x in v)
 def jmp_tab(disp, reg=0x85): return b'\xff\x24' + bytes([reg]) + u32(disp)
 
-jtab.RO = lambda lo, hi: BASE <= lo and hi <= RW and RO <= lo or (FN <= lo and hi <= RO)          # the code and read-only data are read-only, the RW page is not
+jtab.RO = lambda lo, hi: ('.text', 0x60000020) if FN <= lo and hi <= RO else (('.rdata', 0x40000040) if RO <= lo and hi <= RW else (('.data', 0xc0000040) if RW <= lo and hi <= RW + 0x1000 else None))
 
 class earlier:
     '''FRAME_ESCAPE_OTHER = True: the earlier rule, a frame-address form that is not proved benign turns the cells off for the cone'''
@@ -153,6 +153,19 @@ class F(unittest.TestCase):
         s.assertEqual((c['kind'], c['jmp_va'], c['guard_va'], c['reload_va'], c['cell'], c['jcc'], c['jcc_bytes'], c['edge'], c['N'], c['extent_rule'], c['guard_extent'], c['extent'], c['B'], c['assumption']),
                       ('jtab-guard', FN + 15, FN + 10, FN + 12, {'base': 'ebp', 'disp': -0x14, 'width': 4}, 'ja', '770a', 'not-taken', 4, 'N+1 inclusive bound', 5, 5, None, 'ASM-006'))
         with earlier(): s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5)
+    def test_certificate_names_its_sections_and_is_written_with_a_dispatcher_check(s):
+        import tempfile, json
+        code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
+        t, why = run(code, tab(*OUT[:5]), relocs=[FN + 18] + s.R5); c = t.cert
+        s.assertEqual(c['table_section'], {'name': '.text', 'flags': 0x60000020})
+        d = tempfile.mkdtemp(); ok = {FN + 15: t}
+        s.assertEqual(jtab.write_certs(d, 'exe', 'x' * 64, ok, {}, set(OUT)), (1, 0))
+        s.assertEqual(json.load(open(d + '/jtabcert.json'))['certificates'][0]['entries_dispatch'], 5)
+        s.assertEqual(jtab.write_certs(d, 'exe', 'x' * 64, ok, {}, set(OUT[:4])), (0, 1))          # one entry without a dispatcher entry: residue, no certificate
+    def test_store_into_another_cell_after_the_guard_is_residue(s):
+        code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x10\x8b\x45\xec\x89\x45\xe8\x8b\x45\xe8' + jmp_tab(TAB) + b'\xc3'
+        t, why = run(code, tab(*OUT[:5]), relocs=[FN + 24] + s.R5)
+        s.assertTrue(t is None or t.cert is None)
     def test_certificate_through_a_byte_table(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x03\x77\x11\x8b\x45\xec' + b'\x0f\xb6\x88' + u32(RO) + jmp_tab(TAB, 0x8d) + b'\xc3'
         t, why = run(code, b'\x90' * 4 + tab(OUT[0], OUT[1]), ro=bytes([1, 2, 2, 1]), relocs=[FN + 25, TAB + 4, TAB + 8])

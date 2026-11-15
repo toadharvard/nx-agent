@@ -224,7 +224,7 @@ def step(ins, st, u8, cells=True):
             for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple) and k[1] == c[1] and k != c and abs(k[2] - c[2]) < 4]: st.r.pop(k, None); st.al.pop(k, None); st.nz.pop(k, None); st.gt.pop(k, None)
             if src.type == X.X86_OP_REG and src.size == 4:
                 copy(st, c, FULL.get(ins.reg_name(src.reg)))
-                if c in st.gt: st.gt[c] = (st.gt[c][0], st.gt[c][1] + ((ins.address, 'store', 0),))
+                st.gt.pop(c, None)         # a copy of a guarded index into another cell is not followed: a store after the guard makes the site residue (C1)
             else: setr(st, c, (src.imm & M32, 0) if src.type == X.X86_OP_IMM else TOP)
             return
         b = FULL.get(ins.reg_name(m.base)) if m.base else None
@@ -451,7 +451,7 @@ def benign_form(ins, x, ins_c, preds, dec):
     return False
 
 
-RO = None                      # read_only(lo, hi) of the image being resolved (pemod.M.read_only); set by the caller before resolving
+RO = None                      # section_of(lo, hi) of the image being resolved (pemod.M.section_of: (name, flags) of the one section holding [lo, hi), or None); set by the caller before resolving
 STATS = {'calls': 0, 'secs': 0.0, 'cone_sum': 0, 'cone_max': 0, 'slow': []}      # cost accounting of resolve (printed by the callers): calls, total seconds, backward-cone sizes
 def owner6_id():
     """the id of OWNER 6 (the exe makes no wild accesses) in verify/ASSUMPTIONS.json, found by the owner's quoted decision"""
@@ -484,13 +484,15 @@ def _cert(st, ireg, v, T, words, ins, site, u8):
     if q != v: return None, 'C3: the guard alone gives %s after the steps, the resolution %s' % (q, v)
     ilo = v[0] if v[0] < N // 2 else v[0] - N
     if RO is None: return None, 'C4: the image has no read-only predicate'
-    if not RO((T + 4 * ilo) % N, (T + 4 * (ilo + v[1] + 1)) % N if ilo + v[1] + 1 > 0 else T + 4 * (ilo + v[1] + 1)): return None, 'C4: the table extent is not inside one read-only section'
-    if b is not None and not RO((b + blo) % N, (b + blo + bext) % N): return None, 'C4: the byte table is not inside one read-only section'
+    ts = RO((T + 4 * ilo) % N, (T + 4 * (ilo + v[1] + 1)) % N if ilo + v[1] + 1 > 0 else T + 4 * (ilo + v[1] + 1))
+    if ts is None or ts[1] & 0x80000000: return None, 'C4: the table extent is not inside one read-only section'
+    bs = RO((b + blo) % N, (b + blo + bext) % N) if b is not None else None
+    if b is not None and (bs is None or bs[1] & 0x80000000): return None, 'C4: the byte table is not inside one read-only section'
     loads = [x for x in steps if x[1] == 'load']
     return {'kind': 'jtab-guard', 'site_va': site, 'jmp_va': site, 'guard_va': gva, 'reload_va': loads[0][0] if loads else None,
             'cell': {'base': 'ebp', 'disp': loc[2], 'width': 4}, 'guard_width': 4, 'reload_width': 4, 'jcc': jcc, 'jcc_bytes': jbytes, 'edge': 'taken' if taken else 'not-taken', 'N': imm,
             'extent_rule': 'N+1 inclusive bound' if rule == 'inclusive' else 'N exclusive bound', 'guard_extent': bound + 1, 'extent': v[1] + 1, 'index_lo': v[0] if v[0] < N // 2 else v[0] - N,
-            'T': T, 'scale': 4, 'steps': tuple(st2), 'B': b, 'b_lo': blo, 'b_extent': bext, 'b_entries_sha': bsha,
+            'T': T, 'scale': 4, 'steps': tuple(st2), 'table_section': {'name': ts[0], 'flags': ts[1]}, 'b_section': ({'name': bs[0], 'flags': bs[1]} if bs else None), 'B': b, 'b_lo': blo, 'b_extent': bext, 'b_entries_sha': bsha,
             'entries_sha': hashlib.sha256(b''.join(w.to_bytes(4, 'little') for w in words)).hexdigest(), 'assumption': owner6_id()}, None
 
 
@@ -602,12 +604,17 @@ import atexit
 atexit.register(lambda: STATS['calls'] and sys.stderr.write('jtab resolve cost: %d calls, %.0f s, cone sum %d, cone max %d, slow(>5s) %d\n' % (STATS['calls'], STATS['secs'], STATS['cone_sum'], STATS['cone_max'], len(STATS['slow']))))
 
 
-def write_certs(outd, image, image_sha256, jt_ok, jt_red, facts_commit=None):
+def write_certs(outd, image, image_sha256, jt_ok, jt_red, dispatch, facts_commit=None):
     """JTABCERT of one image: the certificates of the resolved sites that need OWNER 6, and the residue (the red sites whose cone formed a frame address and had no valid certificate, with the reason).
     Written to outd/jtabcert.json; factsassemble copies it to JTABCERT/<image>.json."""
     import json
-    certs = [dict(t.cert, image=image, image_sha256=image_sha256, facts_commit=facts_commit) for a, t in sorted(jt_ok.items()) if getattr(t, 'cert', None)]
-    why = dict(STATS.get('guard_residue', ()))
+    certs = []; why = dict(STATS.get('guard_residue', ())); jt_red = dict(jt_red)
+    for a, t in sorted(jt_ok.items()):
+        c = getattr(t, 'cert', None)
+        if not c: continue
+        miss = [w for w in t if w not in dispatch]                # C4: every entry of the table has a dispatcher entry
+        if miss: why[a] = 'C4: %d table entries without a dispatcher entry (first %08x)' % (len(miss), miss[0]); jt_red[a] = why[a]; continue
+        certs.append(dict(c, image=image, image_sha256=image_sha256, facts_commit=facts_commit, entries_dispatch=len(t)))
     res = [{'site_va': a, 'reason': why[a]} for a in sorted(jt_red) if a in why]
     json.dump({'format': 'fnvnx-jtabcert/1', 'image': image, 'image_sha256': image_sha256, 'certificates': certs, 'residue': res}, open(os.path.join(outd, 'jtabcert.json'), 'w'), indent=1, sort_keys=True)
     return len(certs), len(res)

@@ -51,10 +51,10 @@ def load(path, newbase=None):
             nm, va, vs, ro, rs = secs[order[i]]
             if a < va + vs and a - va < rs: return nm, ro + a - va
     M.loc = loc
-    def read_only(lo, hi):
-        """[lo, hi) lies inside one section of the image whose characteristics do not include IMAGE_SCN_MEM_WRITE"""
-        return any(va <= lo and hi <= va + z and not fl & 0x80000000 for nm, va, z, fl in secfl)
-    M.read_only = read_only
+    def section_of(lo, hi):
+        """(name, characteristics) of the one section of the image that holds [lo, hi), else None"""
+        return next(((nm, fl) for nm, va, z, fl in secfl if va <= lo and hi <= va + z), None)
+    M.section_of = section_of
     M.off = lambda a: (loc(a) or (0, None))[1]
     M.sec = lambda a: (loc(a) or (None,))[0]
     def u32(a):

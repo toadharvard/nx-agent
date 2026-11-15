@@ -185,7 +185,7 @@ def jt_pass():
         if any(v <= a < v + z for v, z in M.wr): return None           # a byte table is read only from a read-only section (a writable one is not a fact)
         try: return u32(a) & 0xff
         except Exception: return None
-    JT.RO = M.read_only
+    JT.RO = M.section_of
     ex = JT.exclusive(jt_ok, svals)
     def seeded(x):
         if x in callers: return True
@@ -511,7 +511,7 @@ if not STRICT:
     print('\n'.join(eh.finish(entries)))
     import dic
     import hashlib
-    nj = JT.write_certs(OUTD, 'exe', hashlib.sha256(M.d).hexdigest(), jt_ok, jt_red)
+    nj = JT.write_certs(OUTD, 'exe', hashlib.sha256(M.d).hexdigest(), jt_ok, jt_red, set(entries))
     print('JTABCERT certificates %d, residue %d' % nj)
     DR = dic.jtab_ranges(OUTD); dic.write(OUTD, HD, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
     DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a_, (scx[e_] if e_ in scx else insns)[a_][0]) for e_ in entries for a_ in (sorted(scx[e_]) if e_ in scx else extent_insns(e_))}, DR)
