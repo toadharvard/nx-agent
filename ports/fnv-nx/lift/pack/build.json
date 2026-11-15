@@ -22,63 +22,51 @@
  "units": "all",
  "plugins": [
   {
-   "name": "fnvnx_ftoi",
-   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
-   "inputs": [
-    "ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc"
-   ],
-   "args": {
-    "mode": "lifted"
-   }
+   "name": "fnvnx_ftoi"
   },
   {
-   "name": "fnvnx_order",
-   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
-   "args": {
-    "args": "rtl",
-    "object": "msvc",
-    "operator": "rtl",
-    "assign": "msvc"
-   }
+   "name": "fnvnx_order"
   },
   {
-   "name": "fnvnx_sdd",
-   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
-   "args": {}
+   "name": "fnvnx_sdd"
   },
   {
-   "name": "fnvnx_pi",
-   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
-   "args": {}
+   "name": "fnvnx_pi"
   },
   {
-   "name": "fnvnx_dispatch",
-   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
-   "args": {}
+   "name": "fnvnx_dispatch"
   },
   {
-   "name": "fnvnx_addr",
-   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
-   "args": {}
+   "name": "fnvnx_addr"
   },
   {
-   "name": "fnvnx_names",
-   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
-   "args": {}
+   "name": "fnvnx_names"
   },
   {
-   "name": "fnvnx_layout",
-   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
-   "args": {},
-   "inputs": [
-    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
-   ]
+   "name": "fnvnx_layout"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/loader",
+   "output": "BRIDGE_TSV"
+  },
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
   }
  ],
  "generated": [
   {
-   "tool": "ports/fnv-nx/lift/tools/packcopy.py",
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
    "args": [
+    "copy",
     "/ext/liftpack",
     "/out"
    ],
@@ -4179,28 +4167,85 @@
     "u/ffc.cpp",
     "u/ffd.cpp",
     "u/ffe.cpp",
-    "u/fff.cpp",
-    "disp.S",
-    "imp.cpp"
+    "u/fff.cpp"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "imp",
+    "--bridge",
+    "/uses/ports/fnv-nx/loader/BRIDGE_TSV",
+    "--need",
+    "/ext/liftpack/need.tsv",
+    "--prelude",
+    "fnvl_prelude.h",
+    "--out",
+    "/out"
+   ],
+   "inputs": [],
+   "outputs": [
+    "imp.cpp",
+    "imp_entries.tsv",
+    "imp_blocked.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "entries",
+    "/ext/liftpack/entries.tsv",
+    "/stage/imp_entries.tsv",
+    "/uses/ports/fnv-nx/loader/BRIDGE_TSV",
+    "/out/entries.tsv"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/lift/pack:gen:1",
+     "path": "imp_entries.tsv"
+    }
+   ],
+   "outputs": [
+    "entries.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/packstage.py",
+   "args": [
+    "disp",
+    "/stage/entries.tsv",
+    "/out/disp.S"
+   ],
+   "inputs": [
+    {
+     "stage": "ports/fnv-nx/lift/pack:gen:2",
+     "path": "entries.tsv"
+    }
+   ],
+   "outputs": [
+    "disp.S"
    ]
   }
  ],
+ "outputs": {
+  "ENTRIES": "entries.tsv"
+ },
  "link": null,
  "external": [
   {
    "name": "liftpack",
    "repo": "fnv-nx-build",
-   "ref": "l3a-lift/pack/7b2faae276b2",
-   "commit": "7ef692b5b8532e22e66d4a70fd5cb75fc06722f3",
-   "tree_sha256": "728f43035dbcc949d05aa17e76a35298b01d2d41e9467a50d288f9ae29e6d59c",
+   "ref": "l3a-lift/pack/7b2faae276b2-notable",
+   "commit": "632538cd327ea220fc756dc372e6c3773110a2c7",
+   "tree_sha256": "ffaca41534283856141fd43e967d437d52da5d83e9422fee3ed4492e1b753ae2",
    "at": "/ext/liftpack"
   },
   {
    "name": "gcc-msvcmodel",
    "repo": "fnv-nx-build",
    "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b4057704c0babd012e466cc89181132e02542289",
-   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
    "at": "/ext/gcc"
   }
  ]
