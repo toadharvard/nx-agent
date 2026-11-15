@@ -2,9 +2,9 @@
 # Idempotent rebuild of everything model_sail.py needs, from the LOCAL trees (nothing is downloaded except by the optional
 # first block, which only runs when a tool is missing).  Each step is skipped when its output exists.  Run: bash proof/sail_build.sh
 # Layout (override with env vars):
-#   REMS   /home/user/rems-project            isla/ (isla + isla-sail) and sail-x86-from-acl2/ (model/*.sail, test-generation-patches/)
-#   TOOLS  /home/user/l3tools                 opam binary + opam-root with the switch "sail" (Sail 0.20.3)
-#   WORK   /home/user/l3work/proof            scratch: sail/x86_proof.ir (the IR used by model_sail.py), sail_cache/ (isla outputs)
+#   REMS   $GATE_CACHE/sail/<pins>/rems-project           isla/ (isla + isla-sail) and sail-x86-from-acl2/ (model/*.sail, test-generation-patches/)
+#   TOOLS  $GATE_CACHE/sail/<pins>/tools                opam binary + opam-root with the switch "sail" (Sail 0.20.3)
+#   WORK   $GATE_CACHE/sail/<pins>/work           scratch: sail/x86_proof.ir (the IR used by model_sail.py), sail_cache/ (isla outputs)
 # The toolchain itself (opam switch "sail" with Sail 0.20.3, isla, z3) is created from clean by proof/sail_setup.sh, which pins every
 # version and then calls this script.  Steps this script does when an output is missing (they are not repeated otherwise):
 #   make -C isla/isla-sail ; cargo build --release --locked (in isla/, z3 from the pip package z3-solver) ; make x86.ir (stock IR)
@@ -14,8 +14,9 @@
 # Options: --stock builds the UNPATCHED model IR (x86_proof_stock.ir); default builds x86_proof.ir with the local fixes of sail_patches/.
 STOCK=0; [ "${1:-}" = "--stock" ] && STOCK=1
 set -euo pipefail
-REMS=${REMS:-/home/user/rems-project}; TOOLS=${TOOLS:-/home/user/l3tools}; WORK=${WORK:-/home/user/l3work/proof}
 FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd)
+SAILBASE="${GATE_CACHE:?GATE_CACHE (the verdict cache) is not set}/sail/$(sha256sum "$HERE/sail_pins.txt" | cut -c1-12)"      # the toolchain and its caches live in the verdict cache, keyed by the pins (proof/sail_pins.txt)
+REMS=${REMS:-$SAILBASE/rems-project}; TOOLS=${TOOLS:-$SAILBASE/tools}; WORK=${WORK:-$SAILBASE/work}
 Z3=${Z3:-$(python3 -c 'import z3,os;print(os.path.dirname(z3.__file__))')}; CARGO=${CARGO:-cargo}
 MODEL=$REMS/sail-x86-from-acl2/model
 export OPAMROOT=$TOOLS/opam-root
