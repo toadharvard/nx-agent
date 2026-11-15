@@ -510,3 +510,4 @@ After the first frame:
   - GCC's finish_unit order is not controlled, so the last writer to finish emits; the writer count must be derived from registration.
   - On fixtures, symtab = lines for 22/22.
   - The farm holds the rebuild until w2 decides whether S29 needs a plugin change, so that one rebuild carries both.
+- 2026-11-15 20:20Z: L1 reported a build blocker: duplicate NULLPTR_TYPE/VECTOR_TYPE cases in fnvnx_layout.cc on L6 w5-fbo ff208d525. The cause is L6's stale merge of an intermediate plugin copy (fa0f48e4f). The L2 head has each case once, in decltype_spell.inc. Fix sent to L6: take toolchain/ and guest_compiler.json whole from plugins a42ad8875 (= the pin 05082bde inputs). Class rule (L1, cand3): toolchain/ on a root branch is byte-equal to the plugins commit of its pin.
