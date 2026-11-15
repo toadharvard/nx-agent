@@ -723,3 +723,9 @@ Paused: w3b, w4, farm; no other work.
     - D3D9 Clear emits depth-only passes (copy_clear.cpp:31), so colorCount 0 stays.
     - NxOp_Clear clears exactly its rect (R-C3, wined3d). gl4 must scissor the clear to the op's rect (GL 4.5 §17.4.3); L6A checks it.
     - w6 base is now dfe4b6a9; it rewrites ASM-628 and the R-C4 comment.
+- 09:12Z Resume after the limit (orchestrator, integ d65489ae9). Heads:
+    - w6-root f3167f5f5, w1b-root 61d4e879a, w1b-sm 8fffec3d0, w5 ff906c02e, L6A dfe4b6a94.
+- Workers resumed:
+    - w6 (doing): merge w1b-root; L6A ABI dfe4b6a94 with the ASM-629 delete, ASM-628 rewrite, sha256 include and env_caps.gen.h; rebase onto the candidate with tlsmodel; builds and gates; 4 admit entries to L1.
+    - w1b (doing): Wine 9.0 table (ASM-628 rest); sm_cases derivation; reader conversion and deletes; header items.
+    - w5 (doing): sm_link on the current translator, nx_pair_variant, gates.d/sm_link.json with a hermetic sharded stage.
