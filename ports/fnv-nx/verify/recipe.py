@@ -1285,7 +1285,7 @@ class Job:
 
     def manifest_errors(self, sos, drv):
         """runtime_manifest_errors of the pinned runtime for this build: its plugins as built, the flags of a guest C / C++ unit (semantics_for, the
-        pin's runtime build_flags field, the plugin argv) and the semantics' -mabi. [] when the recipe has no pinned runtime external."""
+        pin's runtime_cflags, the plugin argv) and the semantics' -mabi. [] when the recipe has no pinned runtime external."""
         pin = load_pin(self.repo)
         rtn = pin["runtime"]["name"] if isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) else None
         cc = self.rec["compiler"].get("external")
