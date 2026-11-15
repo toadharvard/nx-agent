@@ -12,6 +12,7 @@
 #include "nxgpu4_check.h"
 #include "nxgpu4_shader.h"
 #include "gl4_funcs.h"
+#include "nx_gl4shim.h"
 #include "fnvnx_dk_layout.h"
 
 #ifdef __cplusplus
@@ -39,7 +40,6 @@ NXGL4_EXPORT const char* nxgl4_last_error(void);
  * the image). When the environment variable NXGL4_FRAMES names a directory the present call writes the presented
  * swapchain image as <dir>/frame_%06u.rgba (RGBA8, top row first) and <dir>/frame_%06u.txt ("width height\n"). */
 void nxgl4_on_present(uint32_t frame);
-NXGL4_EXPORT size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, size_t cap);
 
 /* ---- internal ----------------------------------------------------------------------------------------------- */
 #define GL4_MAX_STATES   NXCHK_MAX_STATES
