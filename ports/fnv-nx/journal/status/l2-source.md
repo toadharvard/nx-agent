@@ -250,3 +250,4 @@ After the first frame:
   - Selected: 7,965 variants of 7,681 classes in 896 units; 4,897 have an empty base at a nonzero offset.
   - BCD join, 430 variants: 13 equal, 52 offset differs, 361 chain differs. Every difference is decomp-vs-exe (stub classes lacking the exe's polymorphic bases), not cl-vs-GCC. This is a decomp finding for after the first frame.
   - Part (b), GCC vs cl on the same 896 units with the patched cc1plus, is on the farm. S23 is proven at 0 differs.
+- w3 600a33ec4: S29's check is now the structured test record (toolchain/tests/test_ldbl.py, id "model"), validated by gen.py rule C1; DATAMODEL.json regenerated. The DM cases S09, S13, S14, S16, S23 and S31 need the built cc1plus, and the farm's phase A runs them. The /Z7 pin is msvc/z7/8f324ecde2a7, with no gap. S23 (b) has gone to the farm: doing.
