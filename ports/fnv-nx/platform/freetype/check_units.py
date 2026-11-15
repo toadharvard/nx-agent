@@ -9,7 +9,7 @@ Runs gen_units.py on TREE and DEB and requires, exit 1 listing each difference:
   (2) `sources` names the stage's units.list;
   (3) the unit set (units.list plus the generated units, <gen>/src/<dir>/<name>.c) equals units.txt, the committed record of the derivation;
   (4) the `include` list holds, in this order, the generated include directory, the external's include and one /ext/freetype/src/<dir> per unit directory of that set;
-  (5) the stage's arguments are the two externals' mount points and /out/freetype, and it has no tracked input beyond its tool."""
+  (5) the stage's arguments are the two externals' mount points and /out/freetype, and its one tracked input is the root's sources (the reference proof of unreferenced.. service modules)."""
 import json
 import os
 import subprocess
@@ -29,13 +29,13 @@ def main(a):
         print("check_units: %d gen_units.py stages" % len(stages))
         return 1
     g = stages[0]
-    want_args = ["/ext/freetype", "/ext/freetype-debian/debian", "/out/freetype"]
+    want_args = ["/ext/freetype", "/ext/freetype-debian/debian", "/out/freetype", "/in/ports/fnv-nx/platform"]
     if g["args"] != want_args:
         red.append("args %r != %r" % (g["args"], want_args))
-    if g["inputs"] != []:
+    if g["inputs"] != ["ports/fnv-nx/platform"]:
         red.append("inputs %r" % g["inputs"])
     with tempfile.TemporaryDirectory() as out:
-        subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen_units.py"), tree, a[1], out], check=True)
+        subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen_units.py"), tree, a[1], out, os.path.join(HERE, "..")], check=True)
         made = sorted("freetype/" + os.path.relpath(os.path.join(d, f), out) for d, _, fs in os.walk(out) for f in fs)
         listed = [l.split(":", 1)[1] for l in open(os.path.join(out, "units.list")).read().split()]
     if sorted(g["outputs"]) != made:

@@ -44,6 +44,9 @@
     {
       "name": "fnvnx_ftoi",
       "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+      "inputs": [
+      "ports/fnv-nx/toolchain/ftoi/f2i_builtins.inc"
+      ],
       "args": {
         "mode": "native"
       }
