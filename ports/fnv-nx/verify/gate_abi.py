@@ -111,7 +111,7 @@ def asm_findings(objs):
     return red
 
 
-def judge_objects(objs, asm=()):
+def judge_objects(objs, asm=(), universe=None, va_forwarders=frozenset()):
     """-> (universe, certified, ids, detail) of the objects OBJS [(id, path)] of one root."""
     store, layouts, red, decls, cross = read_objects(objs)
     uni, abi_red = abi.check(store)
@@ -152,6 +152,8 @@ def judge_objects(objs, asm=()):
                 if ms and k not in ("data", "noemit"):     # noemit: the unit defines it, GCC wrote it nowhere (sympair_kinds.inc): no symbol of the object crosses
                     boundary.setdefault(sym, []).append(oid)
     for sym, oids in sorted(boundary.items()):
+        if universe is not None and sym not in universe:
+            continue        # not in the crossing universe (IAT bindings, called exports, dispatch descriptors): the symbol never crosses the boundary, so no term of it is judged
         items.append("crossing:" + sym)
         got = [cross[o][sym] for o in oids if sym in cross.get(o, {})]
         if known is None:
@@ -160,6 +162,12 @@ def judge_objects(objs, asm=()):
             reds["crossing:" + sym] = "no .fnvnx.crossing row in any unit that declares it (%s)" % ", ".join(sorted(oids))[:200]
             continue
         terms = {t for g in got for t in g}
+        if terms == {"va_list"} and sym in va_forwarders:
+            continue        # a va_list crossing is allowed iff it is a msvcrt_va forwarder (bridgefacts crt/msvcrt_va.tsv): it walks the x86 va_list as guest memory
+        if "va_list" in terms and terms - known == set() and sym not in va_forwarders:
+            items.append("abi:va:" + sym)
+            reds["abi:va:" + sym] = "a va_list crossing symbol with no msvcrt_va forwarder record"
+            continue
         if terms - known:
             reds["crossing:" + sym] = "unknown term %s (the table has %s)" % (sorted(terms - known), sorted(known))
         elif terms:

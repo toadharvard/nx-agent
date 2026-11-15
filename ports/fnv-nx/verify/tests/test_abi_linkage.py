@@ -95,6 +95,18 @@ if not any('asm_with:decltype:asm' in i for i in ids):
 n, c, ids, _d = gate_abi.judge_objects([obj('mc', [row('S', 4, 'c')], {'v': S1}), obj('md', [row('S', 4, 'c')], {'v': S1})], [ob])
 if ids:
     fails.append('an assembly unit without a decltype section is green: %r' % ids)
+# crossing universe and the va forwarders
+VA = 'f\t?f@@YAXXZ\tfunc\tdef\n'
+def jx(name, cross, uni, va=()):
+    return gate_abi.judge_objects([obj(name + 'a', [], sym=VA, cross=cross), obj(name + 'b', [])], (), uni, frozenset(va))[2]
+if jx('u1', 'f\tva_list\n', {'f'}, ['f']):
+    fails.append('an in-universe va crossing with its msvcrt_va record is green')
+if not any('abi:va:f' in i for i in jx('u2', 'f\tva_list\n', {'f'})):
+    fails.append('an in-universe va crossing without its record is red abi:va:f')
+if jx('u3', 'f\tpointer_to_member,va_list\n', {'g'}):
+    fails.append('an out-of-universe symbol with S-terms is not judged')
+if not jx('u4', 'f\tpointer_to_member\n', {'f'}):
+    fails.append('an in-universe symbol with a ptrmem term is red')
 # crossing_forbidden: a boundary symbol has a row and no term
 SY = 'f\t?f@@YAXXZ\tfunc\tdef\n'
 n, c, ids = judge(obj('xa1', [], sym=SY, cross='f\t-\n'), obj('xb1', []))
