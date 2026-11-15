@@ -51,12 +51,58 @@ def _obligation(rep, F, sins_ops, imm, timeout):
         sa, sv, sb = r.store
         for k in range(sb // 8): mem = z3.Store(mem, sa + k, z3.Extract(8 * k + 7, 8 * k, sv))
     eq.append(P['mem'] == mem)
-    s = z3.Solver(); s.set('timeout', timeout)
-    s.add(r.env, z3.Not(z3.And(*goals, z3.Implies(nf, z3.And(*eq)))))
-    res = s.check()
-    if res == z3.unsat: return 'proved', None
-    if res == z3.sat: return 'FAILED', str(s.model())[:400]
-    return 'timeout', None
+    return _discharge(r.env, nf, goals, eq, timeout, r.fpl, d['mxcsr'])
+
+
+def _components(e):
+    """one equality `lhs == rhs` as the list of (equality, chunk) that together are equivalent to it (a complete partition of the bits: 32-bit chunks of a 64..128-bit value): the lanes of a packed
+    operation do not depend on each other's bits of the DESTINATION, so each chunk is its own, smaller, query.  An equality of another sort stays whole (chunk None)."""
+    lhs, rhs = e.arg(0), e.arg(1)
+    if not z3.is_bv(lhs): return [(e, None)]
+    w = lhs.size()
+    if 64 <= w <= 128: return [(z3.Extract(32 * k + 31, 32 * k, lhs) == z3.Extract(32 * k + 31, 32 * k, rhs), k) for k in range(w // 32)]
+    return [(e, None)]
+
+
+_EXP = {32: (8, 23), 64: (11, 52)}
+
+
+def _classes(x, w):
+    """the five classes of a binary w operand, a complete and disjoint partition of its bit patterns: exponent all zeros / all ones / other  x  fraction zero / nonzero"""
+    eb, fb = _EXP[w]; ex = z3.Extract(w - 2, fb, x); fr = z3.Extract(fb - 1, 0, x)
+    z, ones = z3.BitVecVal(0, eb), z3.BitVecVal((1 << eb) - 1, eb); fz = fr == z3.BitVecVal(0, fb)
+    return [z3.And(ex == z, fz), z3.And(ex == z, z3.Not(fz)), z3.And(ex == ones, fz), z3.And(ex == ones, z3.Not(fz)), z3.And(z3.Not(ex == z), z3.Not(ex == ones))]
+
+
+def _case_partition(fpl, chunk, mx):
+    """the case split of an FP row, with its completeness stated: MXCSR.RC (bits 14:13: 4 values) x MXCSR.FTZ (bit 15: 2 values) x the class of every operand of the lanes the part depends on (5 classes each,
+    _classes).  Each factor is a complete, disjoint partition of its variable, so the product is one: the union of the cases is every state, and the part holds iff it holds in each case.  A part that depends
+    on more than two operands (the MXCSR flags of a packed operation) is split by RC and FTZ only."""
+    facs = [[z3.Extract(14, 13, mx) == z3.BitVecVal(v, 2) for v in range(4)], [z3.Extract(15, 15, mx) == z3.BitVecVal(v, 1) for v in range(2)]]
+    ops = [(w, x) for k, (w, xs) in enumerate(fpl) if chunk is None or k == (chunk if w == 32 else chunk // 2) for x in xs]
+    if len(ops) <= 2: facs += [_classes(x, w) for w, x in ops]
+    cases = [[]]
+    for f in facs: cases = [c + [g] for c in cases for g in f]
+    return cases
+
+
+def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):
+    """proved iff every part of every goal is unsat under env (and nf for the state parts), in every case of its case partition (FP rows: _case_partition; others: one case).  Parts that simplify to true
+    (a register the instruction does not touch) are not asked."""
+    parts = [(g, False, None) for g in goals] + [(c, True, k) for e in eq for c, k in _components(e)]
+    unknown = False
+    for g, state, chunk in parts:
+        g = z3.simplify(g)
+        if z3.is_true(g): continue
+        cases = _case_partition(fpl, chunk, mx) if fpl else [[]]
+        for cs in cases:
+            s = z3.Solver(); s.set('timeout', timeout)
+            s.add(env, *cs, z3.And(nf, z3.Not(g)) if state else z3.Not(g))
+            import time; t0 = time.time(); res = s.check()
+            if os.environ.get('SIMD_TRACE') and (res != z3.unsat or time.time() - t0 > 2): print('  part', str(g)[:70].replace('\n', ' '), res, round(time.time() - t0, 1), flush=True)
+            if res == z3.sat: return 'FAILED', str(s.model())[:400]
+            if res != z3.unsat: unknown = True
+    return ('timeout', None) if unknown else ('proved', None)
 
 
 def check(key, timeout=60000):

@@ -34,6 +34,7 @@ AV = X._faults.BYNAME['AV']['code']
 class Res:
     def __init__(s, d, store=None, gpr=None, fault=None):
         s.d, s.store, s.gpr = d, store, gpr
+        s.fpl = []                  # the FP lane operands (width, [operand BVs]) of the row: simdcheck's case partition (operand classes) reads them
         s.fault = z3.BoolVal(False) if fault is None else fault
         s.flags = None                  # {'cf','pf','zf','of','sf','af': BV1} the instruction writes; the other status flags keep their value
         s.env = And(K(0, 1) == z3.BitVec('cr0_em', 1), K(0, 1) == z3.BitVec('cr0_ts', 1), K(1, 1) == z3.BitVec('cr4_osfxsr', 1))
@@ -433,7 +434,7 @@ def _fparith(name, w, scalar):
             o, fg = _fp_lane(name, x, y, mx, w); outs.append(o); fl = fl | fg
         res = join(outs)
         out = Concat(Extract(127, w, dst), res) if scalar else res
-        r = Res(put_xmm(d, e.reg, out))
+        r = Res(put_xmm(d, e.reg, out)); r.fpl = [(w, [y] if name == 'sqrt' else [x, y]) for x, y in zip(dl, sl)]
         r.d['mxcsr'] = mx | ZeroExt(26, fl)
         r.env = And(r.env, F.masks_set(mx), F.mxcsr_in_mask(mx))
         if e.mem and not scalar: r.fault = misaligned(a)
@@ -463,7 +464,7 @@ def _fpcmp(w, scalar):
         for x, y in zip(dl, sl):
             o, fg = F.cmp_lane(pred, x, y, mx, w); outs.append(o); fl = fl | fg
         res = join(outs); out = Concat(Extract(127, w, dst), res) if scalar else res
-        r = Res(put_xmm(d, e.reg, out)); r.d['mxcsr'] = mx | ZeroExt(26, fl)
+        r = Res(put_xmm(d, e.reg, out)); r.d['mxcsr'] = mx | ZeroExt(26, fl); r.fpl = [(w, [x, y]) for x, y in zip(dl, sl)]
         r.env = And(r.env, F.masks_set(mx), F.mxcsr_in_mask(mx))
         if e.mem and not scalar: r.fault = misaligned(a)
         return r
@@ -474,7 +475,7 @@ def _fpcomis(w, ordered):
     def f(e, d, m, a, g):
         src = m if e.mem else Extract(w - 1, 0, xmm(d, e.rm)); dst = Extract(w - 1, 0, xmm(d, e.reg)); mx = d['mxcsr']
         (zf, pf, cf), fl = F.comis(dst, src, mx, w, ordered)
-        r = Res(dict(d)); r.d['mxcsr'] = mx | ZeroExt(26, fl)
+        r = Res(dict(d)); r.d['mxcsr'] = mx | ZeroExt(26, fl); r.fpl = [(w, [dst, src])]
         r.flags = {'zf': zf, 'pf': pf, 'cf': cf, 'of': K(0, 1), 'sf': K(0, 1), 'af': K(0, 1)}
         r.env = And(r.env, F.masks_set(mx), F.mxcsr_in_mask(mx))
         return r
