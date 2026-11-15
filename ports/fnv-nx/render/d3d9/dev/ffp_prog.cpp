@@ -52,7 +52,7 @@ uint32_t nx_ffp_ps_program(NxDeviceCore* d, NxFfpPsBind* out) {
     if (!f->ps[flat]) { uint32_t id = nx_ffp_make_program(f, nx_pair_ffp_ps_row(flat)); if (!id) return 0; f->ps[flat] = id; }
     uint8_t tt[8]; nx_ffp_tex_types(d, tt);
     nx_ffp_ps_block(d, tt, &f->psb);
-    out->tex_mask = nx_ffp_stage_mask(d->cur.tss, tt); out->n_in = nx_ffp_ps_pairs(out->tex_mask, out->in_pair);
+    out->tex_mask = nx_ffp_stage_mask(d->cur.tss, tt); out->n_in = nx_pair_ffp_ps_reads(out->in_pair);
     out->n_ubo = 1; out->ubo[0] = {NX_FFP_UBO_BINDING, sizeof f->psb, &f->psb};
     d->dirty &= ~NX_G_TEXFACTOR;
     return f->ps[flat];

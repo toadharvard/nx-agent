@@ -14,6 +14,10 @@ int nx_link_set(const uint8_t* vs_out, uint32_t nv, const uint8_t* ps_in, uint32
 // GOURAUD / PHONG: false; the latch of nx_ffp_flat keeps the previous mode for any other value). One function per stage, so the stage is named by the caller and no value is outside the domain.
 enum nx_gl4shim_stage_id nx_pair_ffp_vs_row(bool flat);
 enum nx_gl4shim_stage_id nx_pair_ffp_ps_row(bool flat);
+// The varyings the fixed-function programs declare, as FNVNX_DK_PAIR codes (ascending): the VS writes (ffp.vert.glsl `out`), the PS reads (ffp.frag.glsl `in`), generated from the GLSL, so they are exactly what the program
+// links against. They enter nx_pair_variant like any translated stage's sets. Return the count (<= 31).
+uint32_t nx_pair_ffp_vs_writes(uint8_t out[31]);
+uint32_t nx_pair_ffp_ps_reads(uint8_t out[31]);
 // One pure function of the pair: the VS variant (translator key flags of fnvnx_shaders.h: FNVNX_SHADER_VS_COMPLETE iff fnvnx_dk_vs_needs_complete(VS written + FOG0, PS read), FNVNX_SHADER_FLAT_COLOR iff flat) and the PS variant (FNVNX_SHADER_FLAT_COLOR iff flat). Returns nx_link_set's result (-1: a pair outside the link slots).
 int nx_pair_variant(const uint8_t* vs_pairs, uint32_t nv, uint8_t ps_major, const uint8_t* ps_pairs, uint32_t np, uint32_t flat, uint32_t* vs_variant, uint32_t* ps_variant, uint8_t* l, uint32_t* nl);
 
