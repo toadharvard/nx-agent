@@ -264,8 +264,8 @@ def lift(img, addr, size, popn=None, start=None, owns=None, strict=True, x87=Non
     """-> (C text, meta). Raises Unsupported(reason).
     [addr, addr+size) is the code range of the function (for a funclet: of its parent); `start` (default addr) the entry the body is the descent
     from, named L_<start>; `owns` the other universe entries with this range as parent: they are explored and are labels of the nonlocal loop;
-    strict=False (instest only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error.
-    x87 (instest only): None = the pre-pass decides (f_x87_ctl.py), 'dyn' = dynamic x87 stack, an int = static stack with that entry depth."""
+    strict=False (the retired one-instruction harness only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error.
+    x87 (the retired one-instruction harness only): None = the pre-pass decides (f_x87_ctl.py), 'dyn' = dynamic x87 stack, an int = static stack with that entry depth."""
     from . import universe
     if start is None and owns is None:
         ua = universe.entry_args(addr)

@@ -7,7 +7,7 @@ assigns it.  Inputs (inputs.json): the exe and the facts of fnv-nx-build; the sh
     test_dsl_emit.py [--pairs]"""
 import argparse, multiprocessing as mp, os, re, subprocess, sys, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
-LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools', 'tests'))   # instest: the shared harness of tools/tests
+LIFT = os.path.dirname(os.path.dirname(HERE)); sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools', 'tests'))   # the retired one-instruction harness: the shared harness of tools/tests
 import capstone
 from capstone import x86 as X
 import fnvlift

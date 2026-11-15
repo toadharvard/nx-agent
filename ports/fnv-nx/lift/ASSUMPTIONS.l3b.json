@@ -91,7 +91,7 @@
    "id": "A-FPSTICKY",
    "area": "fp",
    "file": "lift/fnvlift/fpfacts.py",
-   "statement": "Test harness only: sticky flags not observed (I-FPSTICKY set in instest ASSUME).",
+   "statement": "Test harness only: sticky flags not observed (I-FPSTICKY set in the retired one-instruction harness ASSUME).",
    "disposition": "fact: test-only; product path maintains the flags"
   },
   {

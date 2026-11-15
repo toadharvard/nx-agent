@@ -1083,7 +1083,7 @@
   },
   {
    "id": "ASM-205",
-   "text": "The product keeps the x87 sticky flags (rt/fnvl_x87.h:32-37); the test harness injected them as not observed (I-FPSTICKY set in instest ASSUME).",
+   "text": "The product keeps the x87 sticky flags (rt/fnvl_x87.h:32-37); the test harness injected them as not observed (I-FPSTICKY set in the retired one-instruction harness ASSUME).",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
     "ports/fnv-nx/lift/fnvlift/fpfacts.py",
@@ -1167,8 +1167,7 @@
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
     "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/tools/tests/instest_extra.py"
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
    ],
    "aliases": [
     "L3b:A-EMPTY"

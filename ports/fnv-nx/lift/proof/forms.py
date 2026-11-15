@@ -15,7 +15,7 @@ SEGPFX = {0x64: 'fs', 0x65: 'gs', 0x2e: 'cs', 0x26: None, 0x36: None, 0x3e: None
 PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
 SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
 def form_key(ins):
-    """same as form_key in tools/tests/instest.py (prove.py checks the two agree when instest imports)"""
+    """same as form_key in the retired one-instruction harness (prove.py checks the two agree when the retired one-instruction harness imports)"""
     raw = bytes(ins.bytes); i = 0
     while i < len(raw) and raw[i] in PFX: i += 1
     opc = raw[i:i + (3 if raw[i] == 0x0f and raw[i + 1] in (0x38, 0x3a) else 2 if raw[i] == 0x0f else 1)]

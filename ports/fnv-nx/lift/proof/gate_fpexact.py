@@ -41,7 +41,7 @@ assumption: ASM-043 (capstone decodes an instruction to its architectural id; se
 Check 3, float -> integer exactness (item `f2i:<root>/<unit>`). The x86 rule (cvt*2si, cvtt*, fist, fistp, fisttp): rounding by MXCSR.RC /
 FCW.RC (truncation for the cvtt* and fisttp forms); NaN and out-of-range give the integer indefinite (0x80000000, 0x8000,
 0x8000000000000000). The A64 FCVT{Z,N,M,P,A}{S,U} and FJCVTZS saturate instead (NaN gives 0), so a bare conversion is wrong. Measured
-(compile probes with the flags of lift/tools/tests/instest.py): the helpers (sse_f2i, fv_i) are inlined, and GCC hoists, duplicates and
+(compile probes with the flags of the retired one-instruction harness): the helpers (sse_f2i, fv_i) are inlined, and GCC hoists, duplicates and
 if-converts the conversion around their range guard (the FCVTZS may sit above a later compare, its result chosen by a select, shared
 by two guards), so a per-instruction object-level property ("this FCVT is guarded") is only a path-sensitive interval analysis of
 compiler-chosen code, not decidable per instruction from operands. The rule is therefore at source level, before inlining, plus an

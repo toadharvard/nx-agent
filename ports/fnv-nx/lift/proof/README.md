@@ -7,7 +7,7 @@ below); the VEX second model was cancelled and `model_vex.py` was never finished
   defined for every count, sign extension is written with xor/sub on unsigned values, no signed type appears).
 * `forms.py`: the slice (add adc sub sbb cmp and or xor test inc dec neg not shl shr sar rol ror imul mul movzx movsx setcc
   cmovcc lea bswap cdq xchg push pop, plus mov and one memory form each way) built from a capstone decode; form keys are the
-  ones of `test/instest.py` (`form_key` copied; prove.py does not import instest, which needs numpy/elftools/unicorn).
+  ones of the retired one-instruction harness (`form_key` copied; prove.py does not import the retired one-instruction harness, which needs numpy/elftools/unicorn).
 * `enc_table.py`: 393 concrete encodings (keystone + a few raw hex), 270 form keys.
 * `prove.py --model MODULE`: the proof gate, model-agnostic; the plug-in interface is in the docstring of prove.py.
   Plumbing was checked only with a reference equal to the DSL (proves nothing) and with a deliberately broken copy of

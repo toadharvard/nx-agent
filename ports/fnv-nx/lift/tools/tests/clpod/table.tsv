@@ -111,6 +111,8 @@
 #   zlib1g 1:1.3.dfsg-3.1ubuntu2.3 i386
 # rule: HIDDEN iff the nearest `push R` before `call f` has R = `lea` of a local (f has no declared argument); post = where the result is stored after the call; they must agree
 # columns: feature depth size sizeof(S) result post flag
+# provenance: written by gen.py at commit 88eec8fe853ecec2a41fac90a74675c346fecdff, run 2026-11-15T00:04:18Z (commit date of the table)
+# status: a measured reference without a pinned producer; closes when cl.exe is mirrored to fnv-nx-build tools/ and gen.py becomes a recipe stage (owner L3a, after the first frame)
 PLAIN	d0	1	1	REGS	REGS	
 PLAIN	d0	2	2	REGS	REGS	
 PLAIN	d0	4	4	REGS	REGS	

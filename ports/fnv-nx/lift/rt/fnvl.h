@@ -26,7 +26,7 @@ static_assert(__builtin_offsetof(struct cpu, fex) == 252 && __builtin_offsetof(s
 /* New x87 state (appended): fsw = the ES (bit 7) and B (bit 15) bits of the FSW, loaded verbatim by FRSTOR / FLDENV / a CONTEXT restore and cleared by FNINIT / FNCLEX; the FSW image the program or a CONTEXT sees is
    TOP | C0..C3 | the sticky bits | (fsw | ES/B derived from the flags and FCW), where ES = B = ((flags & ~FCW & 0x3f) != 0) (SDM Vol 1 8.5: ES is set when an unmasked exception flag is set). fop (FOP, 11 bits), fcs (FCS),
    fds (FDS) are the last-instruction opcode and the selectors, written by the same x87 entry as fip / fdp (fnvlift/f_x87.py ptrs) and loaded by FLDENV / FRSTOR / a CONTEXT restore. */
-/* FNVL_FLAGS_IO (test/instest.py): the arithmetic flags, DF and the x87 condition bits also travel in c->fl / c->fc.
+/* FNVL_FLAGS_IO (the retired one-instruction harness): the arithmetic flags, DF and the x87 condition bits also travel in c->fl / c->fc.
    fl: the EFLAGS bit positions (CF 0, PF 2, AF 4, ZF 6, SF 7, DF 10, OF 11); fc: C0 bit 8, C2 bit 10, C3 bit 14. */
 #ifdef FNVL_FLAGS_IO
 #define FL_IN do{ u32 f_=c->fl; cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c0=(c->fc>>8)&1; c2=(c->fc>>10)&1; c3=(c->fc>>14)&1; }while(0)
@@ -45,7 +45,7 @@ register u32 esp asm("x23"); register u32 ebp asm("x24"); register u32 esi asm("
 register struct cpu *c asm("x27");
 #define REGS() __asm__ volatile("" : "+r"(eax),"+r"(ecx),"+r"(edx),"+r"(ebx),"+r"(esp),"+r"(ebp),"+r"(esi),"+r"(edi))
 /* Control transfer (README): a lifted function is `void L_<addr>(void)`. A direct call or tail to another entry is a C call of its
-   L_ function (CALLX); the one-instruction tests (test/instest.py) redefine CALLX after the prelude in their own sources. */
+   L_ function (CALLX); the one-instruction tests (the retired one-instruction harness) redefine CALLX after the prelude in their own sources. */
 #include "fnvl_faults.h"      /* the FNVL_* fault codes: generated from fnvlift/faults.json, the one CPU fault table (tools/gen_faults.py) */
 /* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.cc maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
 extern "C" { void (*fnvl_dispatch(u32 image_addr))(void);
@@ -171,7 +171,7 @@ template<class T> static inline __attribute__((always_inline)) bool lk_commit(LK
 #define PAR(x) (!(__builtin_popcount((x)&0xffu)&1))
 #define DECL u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,df=0; u32 c0=0,c2=0,c3=0; xmm_t x0,x1,x2,x3,x4,x5,x6,x7; (void)af;(void)pf;(void)df;(void)c2
 #define SYNC_IN do{ FL_IN; }while(0)
-#define SYNC_OUT do{ FL_OUT; }while(0)   /* the general registers need no sync; flags (instest), x87 (per site, f_x87_ctl.py) and xmm state are appended by the lifter */
+#define SYNC_OUT do{ FL_OUT; }while(0)   /* the general registers need no sync; flags (the retired one-instruction harness), x87 (per site, f_x87_ctl.py) and xmm state are appended by the lifter */
 #define SYNC_X_IN do{ x0=c->x[0];x1=c->x[1];x2=c->x[2];x3=c->x[3];x4=c->x[4];x5=c->x[5];x6=c->x[6];x7=c->x[7]; }while(0)
 #define SYNC_X_OUT do{ c->x[0]=x0;c->x[1]=x1;c->x[2]=x2;c->x[3]=x3;c->x[4]=x4;c->x[5]=x5;c->x[6]=x6;c->x[7]=x7; }while(0)
 /* `.fnvl.fsw` (the same 12-byte layout), an x87 status instruction (FSTSW, FNSTENV, FNSAVE): the range is the store of the status word, one instruction, and nothing else. FSW_ST16 / FSW_ST32 store it as `dmb ishst; str`
