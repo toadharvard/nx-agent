@@ -1,4 +1,4 @@
-// NxVertexShader9 / NxPixelShader9: bytecode copy, validation (res_smcheck.cpp), content key, parsed interface (NxSmIface), GetFunction.
+// NxVertexShader9 / NxPixelShader9: bytecode copy, validation (render/smscan: smscan.c), content key, parsed interface (NxSmIface), GetFunction.
 // Sources: Wine 9.0 d3d9 shader.c (vertexshader_init / pixelshader_init: byte_code_size = ~0, wined3d does the parse), wined3d shader.c (shader_init: NULL byte code and every parse failure =
 // WINED3DERR_INVALIDCALL; wined3d_shader_get_byte_code: pData null -> size query; *size too small -> D3DERR_INVALIDCALL (MSDN says MOREDATA, Wine's comment: not actually true); copy leaves *size).
 // Create*Shader: null byte_code / out pointer, no walkable END (spec sm_bytes), wrong stage word (a pixel blob to CreateVertexShader), any validator error (res_smcheck.cpp rules R1-R9) = D3DERR_INVALIDCALL.

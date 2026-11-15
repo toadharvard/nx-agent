@@ -29,7 +29,8 @@
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/render/d3d9/gen",
-  "ports/fnv-nx/render/pair/include"
+  "ports/fnv-nx/render/pair/include",
+  "ports/fnv-nx/render/smscan/include"
  ],
  "units": "all",
  "generated": [
@@ -55,21 +56,6 @@
     "gen/state.gen.cpp",
     "gen/state.gen.h",
     "gen/state_methods.txt"
-   ]
-  },
-  {
-   "tool": "ports/fnv-nx/render/d3d9/dev/res_smgen.py",
-   "args": [
-    "/out/gen",
-    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
-    "/tool/spec/d3d9_tables.py"
-   ],
-   "inputs": [
-    "ports/fnv-nx/render/shaders/total/sm_table.json",
-    "ports/fnv-nx/render/shaders/total/sm_illegal.tsv"
-   ],
-   "outputs": [
-    "gen/res_smtab.gen.h"
    ]
   },
   {

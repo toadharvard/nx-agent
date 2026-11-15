@@ -1,0 +1,43 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-Wall",
+   "-Werror",
+   "-O2",
+   "-std=gnu11",
+   "-fPIC"
+  ],
+  "cxx": [],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/render/smscan/include",
+  "ports/fnv-nx/render/smscan/gen"
+ ],
+ "units": "all",
+ "link": null,
+ "plugins": [],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/smscan/res_smgen.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
+    "/in/ports/fnv-nx/render/d3d9/spec/d3d9_tables.py"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/shaders/total/sm_table.json",
+    "ports/fnv-nx/render/shaders/total/sm_illegal.tsv",
+    "ports/fnv-nx/render/d3d9/spec/d3d9_tables.py"
+   ],
+   "outputs": [
+    "gen/res_smtab.gen.h"
+   ]
+  }
+ ]
+}
