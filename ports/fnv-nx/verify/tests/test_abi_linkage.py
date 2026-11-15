@@ -87,6 +87,14 @@ if not any('unreadable' in i for i in ids):
 n, c, ids = judge(obj('ea', [row('S', 4, 'external')], {'v': S1}), obj('eb', [row('S', 4, 'external')], {'v': S2}))
 if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
     fails.append('a decltype section on external-linkage rows is parsed and compared: %r' % ids)
+# an assembly unit carries no .fnvnx.decltype section
+oa, ob = obj('asm_with', [row('S', 4, 'c')], {'v': S1}), obj('asm_without', [])
+n, c, ids, _d = gate_abi.judge_objects([obj('ma', [row('S', 4, 'c')], {'v': S1}), obj('mb', [row('S', 4, 'c')], {'v': S1})], [oa])
+if not any('asm_with:decltype:asm' in i for i in ids):
+    fails.append('an assembly unit with a decltype section is red: %r' % ids)
+n, c, ids, _d = gate_abi.judge_objects([obj('mc', [row('S', 4, 'c')], {'v': S1}), obj('md', [row('S', 4, 'c')], {'v': S1})], [ob])
+if ids:
+    fails.append('an assembly unit without a decltype section is green: %r' % ids)
 # crossing_forbidden: a boundary symbol has a row and no term
 SY = 'f\t?f@@YAXXZ\tfunc\tdef\n'
 n, c, ids = judge(obj('xa1', [], sym=SY, cross='f\t-\n'), obj('xb1', []))
