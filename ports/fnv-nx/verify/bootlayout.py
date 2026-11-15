@@ -190,6 +190,62 @@ def defined_symbols(data):
     return out
 
 
+def data_symbol(data, name):
+    """the bytes of the one defined symbol NAME of the file's symbol table (st_size bytes at its address, read from the file-backed section that holds it);
+    LayoutError when the symbol is not defined exactly once or is not in file-backed contents. The file's own facts: a table in the image is read from the image."""
+    w = data[4] == 2
+    secs = _sections(data)
+    found = []
+    for _n, typ, _a, size, off, link in secs:
+        if typ != 2:
+            continue
+        stroff = secs[link - 1][4]
+        for i in range(1, size // (24 if w else 16)):
+            if w:
+                nm, info, _o, shndx, value, sz = _unpack("<IBBHQQ", data, off + 24 * i, "symbol %d" % i)
+            else:
+                nm, value, sz, info, _o, shndx = _unpack("<IIIBBH", data, off + 16 * i, "symbol %d" % i)
+            if shndx and nm and data[stroff + nm:data.index(b"\0", stroff + nm)].decode() == name and info & 15 not in (3, 4):
+                found.append((value, sz))
+    if len(found) != 1:
+        raise LayoutError("symbol %s: defined %d times, need exactly once" % (name, len(found)))
+    value, sz = found[0]
+    for _n, typ, addr, size, off, _l in secs:
+        if typ != 8 and addr <= value and value + sz <= addr + size and addr:   # not SHT_NOBITS: the contents are in the file
+            return bytes(data[off + value - addr:off + value - addr + sz])
+    raise LayoutError("symbol %s: 0x%x..0x%x is in no file-backed section" % (name, value, value + sz))
+
+
+def with_data_word(data, name, value):
+    """a copy of the ELF file DATA in which the 32-bit word of the one defined symbol NAME holds VALUE: the symbol must be 4 bytes in file-backed contents
+    (an initialised .data word). The run input of an image whose behaviour is chosen by a word of its data (tests/bootguest fnvboot_mode)."""
+    if not isinstance(value, int) or not 0 <= value < 1 << 32:
+        raise LayoutError("%s: %r is not a 32-bit value" % (name, value))
+    w = data[4] == 2
+    secs = _sections(data)
+    hits = []
+    for _n, typ, _a, size, off, link in secs:
+        if typ != 2:
+            continue
+        stroff = secs[link - 1][4]
+        for i in range(1, size // (24 if w else 16)):
+            if w:
+                nm, info, _o, shndx, v, sz = _unpack("<IBBHQQ", data, off + 24 * i, "symbol %d" % i)
+            else:
+                nm, v, sz, info, _o, shndx = _unpack("<IIIBBH", data, off + 16 * i, "symbol %d" % i)
+            if shndx and nm and info & 15 not in (3, 4) and data[stroff + nm:data.index(b"\0", stroff + nm)].decode() == name:
+                hits.append((v, sz))
+    if len(hits) != 1 or hits[0][1] != 4:
+        raise LayoutError("%s: need exactly one defined symbol of 4 bytes (found %r)" % (name, hits))
+    v = hits[0][0]
+    for _n, typ, addr, size, off, _l in secs:
+        if typ != 8 and addr and addr <= v and v + 4 <= addr + size:
+            out = bytearray(data)
+            struct.pack_into("<I", out, off + v - addr, value)
+            return bytes(out)
+    raise LayoutError("%s: not in a file-backed section" % name)
+
+
 def normalize_reserved(rows):
     """rows: (name, lo, hi) in ascending lo order; returns the page-aligned-outward rows as tuples."""
     out, names, prev = [], set(), None   # prev = the previous raw row

@@ -1,5 +1,6 @@
-/* Guest images of the boot machine's tests (class test, ILP32 PIE FNXG). One source, one image per MODE (variant m<N> of build.json).
-   The renderer guest of test_bootgpu is MODE 80/81 here (it was 50/51 there, which the base guest below already uses). */
+/* Guest image of the boot machine's tests (class test, ILP32 PIE FNXG): ONE image for every mode. The modes are the rows of fnvboot_modes below, the only list;
+   the mode of a run is the input word fnvboot_mode of the image's data (a test sets it in the image file before the run: bootlayout.with_data_word).
+   The renderer guest of test_bootgpu is mode 80/81. */
 #include <stdint.h>
 #include "fnvnx/hostapi.h"
 #include "fnvnx/placement.h"
@@ -125,7 +126,6 @@ static void padr(const char *name, uint64_t i) {
     b[q - b - 1] = 'X'; num(b, (uint32_t)p.rx);
     b[q - b - 1] = 'Y'; num(b, (uint32_t)p.ry);
 }
-#if MODE == 92
 /* R-LOCKOBS guest (MODE 92): its own small lock functions with non-product names (t_acquire / t_try / t_release: the product's os_lock family is the platform's, and a test
    never defines a product symbol); the record mechanism is generic in the watched symbol names, lockobs.py takes the names as arguments, case-runner functions, and code standing for game code in .text.fnvl by section attribute.
    The lock functions are counters: they have no waiting, the observation is the runner's. */
@@ -184,10 +184,9 @@ __attribute__((noinline)) void case_unwind_outer(void) {
     t_release(&LA);
     sink += game_b(1);
 }
-#endif
-int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are set up before main */
-    say(MSG[0]); say(MSG[1]);
-#if MODE == 70
+/* modes 70 (was `#if MODE == 70`) */
+static void mode_70(uint32_t mode) {
+    (void)mode;
     /* watch-log guest: fnvwl_f(n) recurses once per n, fnvwl_g is a leaf; each records its SP at its first instruction */
     __asm__(".pushsection .bss\n.balign 4\nwl_sp: .space 64\nwl_n: .space 4\n.popsection\n"
             ".macro WLREC\n adrp x9, wl_n\n add x9, x9, :lo12:wl_n\n ldr w10, [x9]\n add w11, w10, #1\n str w11, [x9]\n"
@@ -204,7 +203,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
         for (uint32_t i = 0; i < 4; i++) num("wlsp", wl_sp[i]);
     }
     fnvnx_hcall1(H->exit, 0);
-#elif MODE == 80
+}
+/* modes 80 (was `#if MODE == 80`) */
+static void mode_80(uint32_t mode) {
+    (void)mode;
     uint8_t *A = (uint8_t *)(uintptr_t)(H->heap_base + 0x60000);
     uint8_t *D = A + 0x100, *I = A + 0x200, *B = A + 0x300, *R = A + 0x400, *P = A + 0x500;
     uint64_t *w = (uint64_t *)(A + 0x600);
@@ -240,14 +242,20 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("straddle", EC(10, 17, FNVNX_ADDR(w), 1));
     num("badfn", EC(10, 99, FNVNX_ADDR(w), 1));
     fnvnx_hcall1(H->exit, 0);
-#elif MODE == 81
+}
+/* modes 81 (was `#if MODE == 81`) */
+static void mode_81(uint32_t mode) {
+    (void)mode;
     num("mf", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x2000, H->heap_base + 0x20000));
     uint64_t A = plat(4, 0, 0x8000000, 0, 2);
     num("A", A);
     plat(5, A, 0x1000, 0, 2); plat(5, A + 0x1000, 0x1000, 0, 2); plat(5, A + 0x10000, 0x1000, 0, 2);
     plat(8, A + 0x10000, 0x1000, 1, 3);
     fnvnx_hcall1(H->exit, 0);
-#elif MODE == 90
+}
+/* modes 90 (was `#if MODE == 90`) */
+static void mode_90(uint32_t mode) {
+    (void)mode;
     /* input_poll / pad_read / DISPLAY_DOCKED over the declared states; the scenario of test_bootmachine fixes the states, this fixes the read times */
     until_ms(60);  padr("a-pad0", 0); poll("a-e60", 16); num("a-d60", plat(9, 0, 0, 0, 0));
     until_ms(150); padr("b-pad0", 0); padr("b-pad1", 1); padr("b-pad3", 3); padr("b-pad4", 4); poll("b-e150", 16); poll("b-e151", 16);
@@ -262,7 +270,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     until_ms(950); num("k-d950", plat(9, 0, 0, 0, 0));
     until_ms(1050); num("k-d1050", plat(9, 0, 0, 0, 0));
     fnvnx_hcall1(H->exit, 0);
-#elif MODE == 91
+}
+/* modes 91 (was `#if MODE == 91`) */
+static void mode_91(uint32_t mode) {
+    (void)mode;
     /* pad_vibrate: an event only for a connected pad (index <= 3); index > 3 records nothing; every call returns 0 */
     until_ms(60);  num("v1pre", fnvnx_hcall3(H->pad_vibrate, 1, 0x3f000000, 0x3f000000));
     until_ms(100); num("v0", fnvnx_hcall3(H->pad_vibrate, 0, 0xdead00003f000000ull, 0xbeef000000000000ull));
@@ -273,30 +284,45 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("v3", fnvnx_hcall3(H->pad_vibrate, 3, 0x80000000, 0x7fc00000));
     until_ms(400); num("v3off", fnvnx_hcall3(H->pad_vibrate, 3, 0x3f800000, 0x3f800000));
     fnvnx_hcall1(H->exit, 0);
-#elif MODE == 92
+}
+/* modes 92 (was `#if MODE == 92`) */
+static void mode_92(uint32_t mode) {
+    (void)mode;
     case_pair(); case_try(); case_nested(); case_multi(); case_foreign(); case_held(); case_free();
     case_leak(); t_release(&LC);
     case_unwind_outer();
     fnvnx_hcall1(H->exit, 0);
-#elif MODE == 6 || MODE == 61   /* 61: the same run, plus one create under the declared input sdmc:/switch/fnv/fonts (a refused write: boot.py's declared_input_faults) */
-#if MODE == 61
+}
+/* modes 6, 61 (was `#if MODE == 6 || MODE == 61`) */
+static void mode_6(uint32_t mode) {
+    (void)mode;
+    if (mode == 61) {
     num("write-fonts", fnvnx_hcall2(H->fs_open, FNVNX_ADDR("sdmc:/switch/fnv/fonts/New.ttf"), FNVNX_O_WRITE | FNVNX_O_CREATE));
-#endif
+    }
     uint32_t acc = fnvboot_a(3);
     acc += fnvboot_b(acc);
     say("fnvnx-start: identity ok\n");
     acc += fnvboot_c(acc);
     fnvnx_hcall1(H->exit, acc - 1);
-#elif MODE == 1
+}
+/* modes 1 (was `#if MODE == 1`) */
+static void mode_1(uint32_t mode) {
+    (void)mode;
     uint64_t a3[3] = {0x500000, 0x1000, 1};   /* a 3-argument call to module 9: not registered */
     fnvnx_hcall4(H->ext_call, 9, 99, FNVNX_ADDR(a3), 3);
-#elif MODE == 2
+}
+/* modes 2 (was `#if MODE == 2`) */
+static void mode_2(uint32_t mode) {
+    (void)mode;
     fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 0, ~0ull);   /* nobody wakes it, no deadline */
-#elif MODE >= 7 && MODE <= 11
+}
+/* modes 7, 8, 9, 10, 11 (was `#if MODE >= 7 && MODE <= 11`) */
+static void mode_7(uint32_t mode) {
+    (void)mode;
     uint64_t A = plat(4, 0, 0x8000000, 0, 2);
     volatile uint32_t *pa = (volatile uint32_t *)(uintptr_t)A;
     num("resA", A);
-#if MODE == 7
+    if (mode == 7) {
     num("resB", plat(4, 0, 0x10000, 0, 2));
     num("commit", plat(5, A, 0x2000, 0, 2));
     pa[0] = 0x11; pa[0x400] = 0x22;
@@ -356,27 +382,30 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     fnvnx_hcall1(H->thread_join, id);
     num("boost", plat(1, 1, 0, 0, 1));
     num("message", plat(3, FNVNX_ADDR("cap"), FNVNX_ADDR("body"), 0, 2));
-#elif MODE == 8
+    } else if (mode == 8) {
     plat(5, A, 0x1000, 0, 2);
     pa[0] = 1;
     num("committed-ok", pa[0]);
     num("touch-uncommitted", pa[0x400]);   /* reserved, not committed: the run must end here */
     say("after the fault\n");
-#elif MODE == 9
+    } else if (mode == 9) {
     plat(5, A, 0x1000, 0, 2);
     plat(8, A, 0x1000, 1, 3);
     pa[0] = 1;   /* write to a read-only committed page */
     say("after the fault\n");
-#elif MODE == 10
+    } else if (mode == 10) {
     plat(5, A, 0x1000, 0, 2);
     pa[0] = 1;
     plat(6, A, 0x1000, 0, 2);
     num("touch-decommitted", pa[0]);
     say("after the fault\n");
-#else
+    } else {
     sk(16, 3, 2, 3, 0, 0, 0);   /* a RAW socket: whether the host allows it is the OS's decision, the header does not say */
-#endif
-#elif MODE == 30
+    }
+}
+/* modes 30 (was `#if MODE == 30`) */
+static void mode_30(uint32_t mode) {
+    (void)mode;
     uint64_t R = plat(4, 0, 0x10000, 0, 2);
     num("resv", R != 0);
     num("c0", SC(0)); num("c-unal", SC(0x800)); num("c-big", SC(0x80001000ull));
@@ -424,7 +453,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("release-R", plat(7, R, 0, 0, 1));
     uint64_t s2 = SC(0x1000), B2 = SM(s2, 0, 0, 0x1000);
     num("B2-lowest", B2 == R); num("s2-id", s2);
-#elif MODE == 31
+}
+/* modes 31 (was `#if MODE == 31`) */
+static void mode_31(uint32_t mode) {
+    (void)mode;
     uint64_t s = SC(0x2000), A = SM(s, 0, 0, 0x2000), B = SM(s, 0, 0, 0x2000);
     W32(A) = 7; num("A-addr", A); num("B-addr", B);
     num("unmap-A", SU(A, 0x2000));
@@ -432,7 +464,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     W32(B + 4) = 9; num("B-writes", W32(B + 4));
     num("touch-A", W32(A));   /* the unmapped view: the run must end here */
     say("after the fault\n");
-#elif MODE == 32
+}
+/* modes 32 (was `#if MODE == 32`) */
+static void mode_32(uint32_t mode) {
+    (void)mode;
     uint64_t s = SC(0x2000);
     g_v1 = SM(s, 0, 0, 0x2000); g_v2 = SM(s, 0, 0, 0x2000);
     W32(g_v1) = 0xA5A5;
@@ -443,7 +478,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
         fnvnx_hcall1(H->thread_join, id);
     }
     num("thread-read", W32(g_v1 + 4)); num("thread-write", W32(g_v1 + 8));
-#elif MODE == 34
+}
+/* modes 34 (was `#if MODE == 34`) */
+static void mode_34(uint32_t mode) {
+    (void)mode;
     uint64_t first = SC(0x1000), n = 1, last = first, r;
     for (; n < 128 && (r = SC(0x1000)) < 0x80000000ull; n++) last = r;
     num("sections-ok", n); num("last-id", last);
@@ -460,7 +498,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("views-ok", cnt); num("views-ascending", asc);
     num("v-full", SM(id129, 0, 0, 0x1000));
     num("unmap-one", SU(prev, 0x1000)); num("v-after", SM(id129, 0, 0, 0x1000) == prev);
-#elif MODE == 40
+}
+/* modes 40 (was `#if MODE == 40`) */
+static void mode_40(uint32_t mode) {
+    (void)mode;
     /* ext_call and module 11 totality */
     uint64_t v[4] = {1, 2, 3, 4};
     num("mod64", EC(64, 1, FNVNX_ADDR(v), 1));
@@ -494,14 +535,20 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("tz-null", EC(11, 34, 0, 2));
     num("reserve-above-4g", plat(4, 0, 0x100000001ull, 0, 2));
     num("reserve-4g", plat(4, 0, 0x100000000ull, 0, 2));
-#elif MODE == 41
+}
+/* modes 41 (was `#if MODE == 41`) */
+static void mode_41(uint32_t mode) {
+    (void)mode;
     uint64_t v[4] = {1, 2, 3, 4};
     num("m9-fn1", EC(9, 1, FNVNX_ADDR(v), 3));
     num("m9-fn-huge", EC(9, 0x100000001ull, FNVNX_ADDR(v), 1));
     num("m9-nargs0", EC(9, 2, 0, 0));
     num("m9-missing", EC(9, 99, FNVNX_ADDR(v), 1));
     say("after the missing service\n");
-#elif MODE == 44
+}
+/* modes 44 (was `#if MODE == 44`) */
+static void mode_44(uint32_t mode) {
+    (void)mode;
     /* VM_PROTECT: check order, spans, windows */
 #define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
     uint64_t R = plat(4, 0, 0x10000, 0, 2);
@@ -542,7 +589,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("mf", MF(dst, 0x2000, src));
     W32(dst) = 0xAAAA; W32(dst + 0x1004) = 0xBBBB;
     plat(8, dst, 0x1000, 1, 3); plat(8, dst + 0x1000, 0x1000, 0, 3);
-#elif MODE == 45
+}
+/* modes 45 (was `#if MODE == 45`) */
+static void mode_45(uint32_t mode) {
+    (void)mode;
     /* map_fixed: check order, the window, the 512 limit */
 #define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
     volatile uint32_t *w = (volatile uint32_t *)0x500000;
@@ -574,7 +624,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("live", n);
     num("limit", MF(0x4200000, 0x1000, src));
     num("limit-occupied", MF(0x4000000, 0x1000, src));
-#elif MODE == 46
+}
+/* modes 46 (was `#if MODE == 46`) */
+static void mode_46(uint32_t mode) {
+    (void)mode;
     /* thread and directory ids, wait/wake */
 #define THR(f, a) fnvnx_hcall1(H->f, a)
     uint64_t h1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, CPU_MAIN);
@@ -629,7 +682,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("thread-when-full", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, CPU_MAIN));
     num("close-one", THR(fs_dir_close, last));
     num("thread-after-close", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, CPU_MAIN) != 0);
-#elif MODE == 47
+}
+/* modes 47 (was `#if MODE == 47`) */
+static void mode_47(uint32_t mode) {
+    (void)mode;
     uint64_t b[8];
     for (int i = 0; i < 8; i++) b[i] = 0xABABABABABABABABull;
     num("a-submit-closed", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 480));
@@ -645,10 +701,16 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("pad-untouched", b[0] == 0xABABABABABABABABull && b[3] == 0xABABABABABABABABull);
     num("pad0", fnvnx_hcall2(H->pad_read, 0, FNVNX_ADDR(b))); num("pad0-zeroed", b[0] | b[1] | b[2] | b[3]);
     num("sleep-max", fnvnx_hcall1(H->sleep_ns, ~0ull));
-#elif MODE == 48
+}
+/* modes 48 (was `#if MODE == 48`) */
+static void mode_48(uint32_t mode) {
+    (void)mode;
     uint64_t v[1] = {0};
     fnvnx_hcall1(H->exit, plat(9, 0, 0, 0, 0) + v[0]);   /* DISPLAY_DOCKED: the exit code is the answer */
-#elif MODE == 49
+}
+/* modes 49 (was `#if MODE == 49`) */
+static void mode_49(uint32_t mode) {
+    (void)mode;
     /* sockets 16..33 with no network (every result the arguments alone fix), TZ_AT, the tz slot */
     num("sock-afnosupport", sk(16, 3, 1, 1, 0, 0, 0));
     num("sock-af-wide", sk(16, 3, 0x100000002ull, 1, 0, 0, 0));
@@ -695,7 +757,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("tz-u64max", plat(34, ~0ull, FNVNX_ADDR(zw), 0, 2));
     num("tz-negative-main", plat(34, 0x8000000000000000ull, FNVNX_ADDR(zw), 0, 2));
     num("tz-null-out", plat(34, 5, 0, 0, 2));
-#elif MODE == 50
+}
+/* modes 50 (was `#if MODE == 50`) */
+static void mode_50(uint32_t mode) {
+    (void)mode;
     /* THREAD_SELF and the thread_start / thread_join / thread_activity edge cases */
     uint64_t s1 = plat(35, 0, 0, 0, 0), s2 = plat(35, 0, 0, 0, 0);
     num("self-id", s1 != 0); num("self-distinct", s1 != s2);
@@ -720,25 +785,40 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("start-finished", fnvnx_hcall1(H->thread_start, c));
     num("act-finished", plat(2, c, 1, 0, 2));
     num("count", tcount);   /* the entry ran once: 100 + 1 */
-#elif MODE == 51
+}
+/* modes 51 (was `#if MODE == 51`) */
+static void mode_51(uint32_t mode) {
+    (void)mode;
     FnvnxWirePollfd pf = {-1, 1, 0};
     sk(26, 3, FNVNX_ADDR(&pf), 1, ~0ull, 0, 0);   /* nothing can become ready and the timeout is forever */
     say("after the poll\n");
-#elif MODE == 52
+}
+/* modes 52 (was `#if MODE == 52`) */
+static void mode_52(uint32_t mode) {
+    (void)mode;
     /* the numbers that hostapi.h does not declare (10, 15, SHUTDOWN, GETSOCKNAME, GETPEERNAME, GAI_OPEN, GAI_FETCH) answer NO_SERVICE for any nargs */
     num("fn10", plat(10, 0, 0, 0, 2)); num("fn15", plat(15, 0, 0, 0, 3));
     num("fn27", plat(27, 0, 0, 0, 2)); num("fn28", plat(28, 0, 0, 0, 2)); num("fn29", plat(29, 0, 0, 0, 0));
     num("fn32", plat(32, 0, 0, 0, 4)); num("fn33", plat(33, 0, 0, 0, 3));
-#elif MODE == 53
+}
+/* modes 53 (was `#if MODE == 53`) */
+static void mode_53(uint32_t mode) {
+    (void)mode;
     uint32_t zo[4];
     num("tz-below", plat(34, 0x7FFFFFFFFFFFFFFFull, FNVNX_ADDR(zo), 0, 2));
     num("tz-above", plat(34, 1ull << 63, FNVNX_ADDR(zo), 0, 2));
-#elif MODE == 54
+}
+/* modes 54 (was `#if MODE == 54`) */
+static void mode_54(uint32_t mode) {
+    (void)mode;
     uint64_t me = plat(35, 0, 0, 0, 0);
     num("self-pause", plat(2, me, 1, 0, 2));   /* the kernel: a thread is not paused through its own handle */
     num("self-resume", plat(2, me, 0, 0, 2));
     say("after the pause\n");
-#elif MODE == 55
+}
+/* modes 55 (was `#if MODE == 55`) */
+static void mode_55(uint32_t mode) {
+    (void)mode;
     uint64_t me = plat(35, 0, 0, 0, 0);
     uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(rec_worker), 0, 0x10000, 0, CPU_MAIN);
     uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, CPU_MAIN);
@@ -759,9 +839,12 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("rec-finished", plat(2, wrec, 1, 0, 2));      /* the record of a thread that has ended */
     num("rec-finished-resume", plat(2, wrec, 0, 0, 2));
     num("no-record", plat(2, 0x7777, 1, 0, 2));
-#elif MODE == 56
+}
+/* modes 56 (was `#if MODE == 56`) */
+static void mode_56(uint32_t mode) {
+    (void)mode;
     static FnvnxWireSockaddr to, lo;
-    static FnvnxWireAddrinfo recs[3];
+    static FnvnxTzAt recs[3];
     static char buf[4];
     uint32_t ec = 0x77;
     uint64_t h1 = sk(16, 3, 2, 1, 0, 0, 0), h2 = sk(16, 3, 2, 2, 17, 0, 0);
@@ -781,11 +864,20 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("close3", sk(17, 1, h3, 0, 0, 0, 0));
     num("closed-getfl", sk(30, 1, h3, 0, 0, 0, 0));
     num("tz-last", plat(34, 4133980799ull, FNVNX_ADDR(recs), 0, 2));
-#elif MODE == 35
+}
+/* modes 35 (was `#if MODE == 35`) */
+static void mode_35(uint32_t mode) {
+    (void)mode;
     fnvnx_hcall1(H->exit, 0x5200002A);   /* fnvnx_reach_violation(42) */
-#elif MODE == 36
+}
+/* modes 36 (was `#if MODE == 36`) */
+static void mode_36(uint32_t mode) {
+    (void)mode;
     fnvnx_hcall1(H->exit, 0x5100002A);   /* an ordinary non-zero code */
-#elif MODE == 57
+}
+/* modes 57 (was `#if MODE == 57`) */
+static void mode_57(uint32_t mode) {
+    (void)mode;
     /* TEXT_ENTRY (36): argument checks, entered, entered with init, cancelled (scenario texts: "Ab" + U+1F600, "x", then none) */
     static uint16_t ou[8]; static uint32_t nn;
     for (int i = 0; i < 8; i++) ou[i] = 0x7777;
@@ -810,17 +902,26 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("te-cancel", sk(36, 5, 8, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
     num("te-cancel-untouched", ou[0] == 0x7777 && nn == 0x55555555);
     num("te-cancel-again", sk(36, 5, 8, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
-#elif MODE == 58
+}
+/* modes 58 (was `#if MODE == 58`) */
+static void mode_58(uint32_t mode) {
+    (void)mode;
     /* TEXT_ENTRY: one call, max_len 3; the scenario text is longer (4 units): a scenario error */
     static uint16_t ou[8]; static uint32_t nn;
     num("te-long", sk(36, 5, 3, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
     num("te-after-long", 1);
-#elif MODE == 59
+}
+/* modes 59 (was `#if MODE == 59`) */
+static void mode_59(uint32_t mode) {
+    (void)mode;
     /* TEXT_ENTRY: a text of exactly max_len units fits (2 units: one scalar above U+FFFF), out has room for max_len + 1 */
     static uint16_t ou[3] = {0x7777, 0x7777, 0x7777}; static uint32_t nn;
     num("te-fit", sk(36, 5, 2, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
     num("te-fit-n", nn); num("te-fit-u0", ou[0]); num("te-fit-u1", ou[1]); num("te-fit-nul", ou[2]);
-#elif MODE == 60
+}
+/* modes 60 (was `#if MODE == 60`) */
+static void mode_60(uint32_t mode) {
+    (void)mode;
     /* THREAD_CPU and the placement contract: the main thread starts at FNVNX_DEFAULT_CORE; refused creates give id 0; set_cpu */
     num("cpu-main", plat(38, 0, 0, 0, 0));
     num("create-plain-core", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, 1));
@@ -831,7 +932,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("set-core5", fnvnx_hcall2(H->thread_set_cpu, 0, 5)); num("cpu-unchanged", plat(38, 0, 0, 0, 0));
     num("set-keep", fnvnx_hcall2(H->thread_set_cpu, 0, FNVNX_CPU_SPEC(FNVNX_CPU_KEEP, 0))); num("cpu-kept", plat(38, 0, 0, 0, 0));
     num("fn39", plat(39, 0, 0, 0, 0));
-#else
+}
+/* modes 0, 3, 4, 5, 42 (was `#else`) */
+static void mode_0(uint32_t mode) {
+    (void)mode;
     num("marker", marker(41));
     volatile uint32_t *hp = (volatile uint32_t *)(uintptr_t)H->heap_base;
     hp[0] = 0xabcd0001; hp[0x3FFF] = 0xabcd0002;
@@ -839,10 +943,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     volatile uint32_t *p = (volatile uint32_t *)0x4000000;
     num("carried", p[0] ^ p[0x3FFF]);
     num("zeroed-rest", p[1] | p[0x3FFE]);
-#if MODE == 4
+    if (mode == 4) {
     num("touch-src", hp[0]);   /* the given-away block: the run must end here */
     say("after the fault\n");
-#endif
+    }
     p[0] = 0x1234; p[0x3FFF] = 0x5678;
     num("readback", p[0] + p[0x3FFF]);
     num("overlap", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x1000, H->heap_base + 0x20000));
@@ -861,10 +965,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("protect-given-src", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hg), 3));
     uint64_t hp0[3] = {H->heap_base + 0x30000, 0x1000, 0}, hp1[3] = {H->heap_base + 0x30000, 0x1000, 3};
     num("protect-heap-none", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hp0), 3));
-#if MODE == 5
+    if (mode == 5) {
     num("touch-guard", *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000));
     say("after the fault\n");
-#endif
+    }
     num("protect-heap-rw", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hp1), 3));
     *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000) = 5;
     num("heap-rw-works", *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000));
@@ -872,10 +976,10 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("protect-bad-size", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hu), 3));
     hu[0]++; hu[1] = 0x1000;
     num("protect-bad-addr", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hu), 3));
-#if MODE == 3
+    if (mode == 3) {
     p[0] = 9;   /* a write to the read-only page: the run must end here */
     say("after the fault\n");
-#endif
+    }
     uint64_t w[3] = {0x4000000, 0x10000, 3};
     num("unprotect", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(w), 3));
     p[0] = 9;
@@ -894,7 +998,62 @@ int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are s
     num("pread", n); say(buf); say("\n");
     fnvnx_hcall1(H->fs_close, fd);
     num("rand-calls-equal", fnvnx_hcall0(H->random64) != fnvnx_hcall0(H->random64));
-#endif
+}
+typedef struct { uint32_t id; void (*fn)(uint32_t mode); } FnvbootMode;
+const FnvbootMode fnvboot_modes[] = {
+    {0, mode_0},
+    {1, mode_1},
+    {2, mode_2},
+    {3, mode_0},
+    {4, mode_0},
+    {5, mode_0},
+    {6, mode_6},
+    {7, mode_7},
+    {8, mode_7},
+    {9, mode_7},
+    {10, mode_7},
+    {11, mode_7},
+    {30, mode_30},
+    {31, mode_31},
+    {32, mode_32},
+    {34, mode_34},
+    {35, mode_35},
+    {36, mode_36},
+    {40, mode_40},
+    {41, mode_41},
+    {42, mode_0},
+    {44, mode_44},
+    {45, mode_45},
+    {46, mode_46},
+    {47, mode_47},
+    {48, mode_48},
+    {49, mode_49},
+    {50, mode_50},
+    {51, mode_51},
+    {52, mode_52},
+    {53, mode_53},
+    {54, mode_54},
+    {55, mode_55},
+    {56, mode_56},
+    {57, mode_57},
+    {58, mode_58},
+    {59, mode_59},
+    {60, mode_60},
+    {61, mode_6},
+    {70, mode_70},
+    {80, mode_80},
+    {81, mode_81},
+    {90, mode_90},
+    {91, mode_91},
+    {92, mode_92},
+};
+const uint32_t fnvboot_mode_count = sizeof fnvboot_modes / sizeof fnvboot_modes[0];
+__attribute__((section(".data"))) volatile uint32_t fnvboot_mode = 0;   /* the run's mode: an initialised word of the image's data (a test sets it in the image file before the run, bootlayout.with_data_word); 0, the base run, when it is not set */
+int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are set up before main */
+    say(MSG[0]); say(MSG[1]);
+    uint32_t mode = fnvboot_mode;
+    for (uint32_t i = 0; i < fnvboot_mode_count; i++)
+        if (fnvboot_modes[i].id == mode) { fnvboot_modes[i].fn(mode); break; }
     fnvnx_hcall1(H->exit, 7);
     return 0;
 }

@@ -79,9 +79,9 @@ def git(*args, cwd=None, check=True):
 
 
 def lifted_elf(mode):
-    """the guest image of MODE as the recipe builds it: the three fnvboot_* functions stand for lifted code and sit in the input section
+    """the guest image as the recipe builds it (one image, its mode word set): the three fnvboot_* functions stand for lifted code and sit in the input section
     .text.fnvl by their own source (tests/bootguest/guest.c); the crt0 header words are written by the recipe's ldcheck stage"""
-    return tb.build(mode)[0]
+    return tb.with_mode(tb.build()[0], mode)
 
 
 def publish_branch(name, files):

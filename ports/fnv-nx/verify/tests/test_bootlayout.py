@@ -140,6 +140,30 @@ def main():
                              capture_output=True, text=True)
         case("cli: --keys mandatory", pr2.returncode == 2, pr2.stderr)
         case("cli: LayoutError exits 1", pr.returncode == 1 and "heap" in pr.stderr, pr.stderr)
+    # symbol and section readers of the file itself (an assembled and linked fixture: the assembler's own symbol table is the reference)
+    with tempfile.TemporaryDirectory() as d:
+        open(d + "/a.s", "w").write(".data\n.global fnvboot_mode\n.type fnvboot_mode,%object\n.size fnvboot_mode,4\nfnvboot_mode: .word 0\n"
+                                    ".global tab\n.type tab,%object\n.size tab,16\ntab: .word 5,0,6,0\n.bss\n.global zz\n.type zz,%object\n.size zz,4\nzz: .space 4\n"
+                                    ".text\n.global _start\n_start: ret\n")
+        subprocess.run(["aarch64-linux-gnu-as", d + "/a.s", "-o", d + "/a.o"], check=True)
+        subprocess.run(["aarch64-linux-gnu-ld", d + "/a.o", "-o", d + "/a.elf"], check=True)
+        raw = open(d + "/a.elf", "rb").read()
+        secs, syms = bootlayout.section_ranges(raw), bootlayout.defined_symbols(raw)
+        case("readers: sections of the file by name, defined symbols with values", {".text", ".data", ".bss"} <= set(secs) and len(syms["tab"]) == 1
+             and syms["_start"] == [secs[".text"][0][0]], (sorted(secs), sorted(syms)))
+        e = bootlayout.with_data_word(raw, "fnvboot_mode", 92)
+        case("with_data_word: one word of the file changes, the symbol reads it back", len(e) == len(raw) and sum(a != b for a, b in zip(raw, e)) == 1
+             and bootlayout.data_symbol(e, "fnvboot_mode") == struct.pack("<I", 92) and bootlayout.data_symbol(e, "tab") == struct.pack("<4I", 5, 0, 6, 0))
+        bad = []
+        for what, fn in (("a .bss word", lambda: bootlayout.with_data_word(raw, "zz", 1)), ("a symbol that is not 4 bytes", lambda: bootlayout.with_data_word(raw, "tab", 1)),
+                         ("an unknown symbol", lambda: bootlayout.with_data_word(raw, "nope", 1)), ("a value over 32 bits", lambda: bootlayout.with_data_word(raw, "fnvboot_mode", 1 << 32)),
+                         ("bss contents", lambda: bootlayout.data_symbol(raw, "zz"))):
+            try:
+                fn()
+                bad.append(what)
+            except bootlayout.LayoutError:
+                pass
+        case("with_data_word / data_symbol: refusals (bss, size, unknown, range)", not bad, bad)
     print("%d failed" % len(FAILED) if FAILED else "all %d passed" % N[0])
     return 1 if FAILED else 0
 

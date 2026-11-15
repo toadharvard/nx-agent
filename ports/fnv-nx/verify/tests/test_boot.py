@@ -49,8 +49,8 @@ def main():
     root = os.path.join(d, "sd")
     os.makedirs(root, exist_ok=True)
     def patched(n, mode):
-        """the patched ELF bytes (crt0 header) as a file, unstripped: the reader skips the mapping symbols itself"""
-        open(os.path.join(d, n), "wb").write(tb.build(mode)[0])
+        """the guest image (crt0 header patched by the recipe) as a file, unstripped: the reader skips the mapping symbols itself; with the mode of its run"""
+        open(os.path.join(d, n), "wb").write(tb.with_mode(tb.build()[0], mode))
         return os.path.join(d, n)
     elf6, elf3, elf35 = patched("h6.elf", 6), patched("h3.elf", 3), patched("h35.elf", 35)
 
@@ -195,8 +195,7 @@ def main():
     tb.case("--scenario with --watch-log: one input-read event per device read (4 pad_read + 15 polls x 3 devices + 4 docked)",
             rc == 2 and len(rd) == 4 + 45 + 4 and rd[0]["dev"] == "pad" and rd[0]["t_ns"] > 0, (rc, len(rd)))
     # --watch-log: the guest MODE 70 calls f(1) (recursing once into f(0)), g, f(0); the guest prints the SP of each entry
-    elfw = os.path.join(d, "hw.elf")
-    open(elfw, "wb").write(tb.build(70)[0])
+    elfw = patched("hw.elf", 70)
     rc, o, e = cli(args(elfw, "w0.json"))
     w0 = json.load(open(os.path.join(d, "w0.json")))
     tb.case("without --watch-log the key is absent", rc == 0 and "watch_log" not in w0, (rc, e, list(w0)))

@@ -37,7 +37,7 @@ def main():
     root = os.path.join(d, "sd")
     os.makedirs(root, exist_ok=True)
     elf = os.path.join(d, "h92.elf")
-    open(elf, "wb").write(tb.build(92)[0])
+    open(elf, "wb").write(tb.with_mode(tb.build()[0], 92))
     syms = w("syms.txt", "t_acquire\nt_try ret\nt_release\n" + "".join("%s ret\n" % r for r in RUNNERS))
 
     def boot_args(out, *extra):

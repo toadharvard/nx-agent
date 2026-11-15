@@ -74,7 +74,8 @@ def main():
     atexit.register(shutil.rmtree, scratch, ignore_errors=True)
     lib = fetch_nxgl4(scratch)
     tb.case("setup: the pinned libnxgl4.so fetched, tree_sha256 and sha256 verified", os.path.isfile(lib))
-    elf50, elf51 = tb.build(80)[0], tb.build(81)[0]
+    elfg = tb.build()[0]   # one image; the renderer guests are its modes 80 and 81
+    elf50, elf51 = tb.with_mode(elfg, 80), tb.with_mode(elfg, 81)
     root = os.path.join(d, "sd")
     os.makedirs(root)
     frames = os.path.join(d, "frames")

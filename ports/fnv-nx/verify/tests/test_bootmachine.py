@@ -51,16 +51,32 @@ def sh(cmd):
     return r.stdout
 
 
-def build(mode):
-    """the guest image of MODE -> (ELF bytes, ELF path); importable: test_boot.py, test_bootgpu.py, test_boot_job.py use it. The image is the
-    output of verify/recipe.py for the root tests/bootguest, variant m<MODE> (RECIPE.md "Variants"), built through gate_build.ensure in
-    GATE_CACHE (the verdict's own store; a standalone run without GATE_CACHE builds cold into the scratch directory). The crt0 header
-    words (+16 link address, +20 span, +24 relocatable) are written by the recipe's ldcheck stage."""
-    res, out = gate_build.ensure("%s@m%d" % (GUEST_ROOT, mode), GATE_CACHE, REPO)
+MODE_SYMBOL = "fnvboot_mode"   # tests/bootguest/guest.c: the run's mode, a 32-bit word of the image's data that the machine sets before the first instruction
+
+
+def build():
+    """the guest image -> (ELF bytes, ELF path); importable: test_boot.py, test_bootgpu.py, test_boot_job.py, test_lockobs.py use it. ONE image for every
+    mode: the output of verify/recipe.py for the root tests/bootguest, built through gate_build.ensure in GATE_CACHE (the verdict's own store; a standalone run
+    without GATE_CACHE builds cold into the scratch directory). The mode of a run is an input word of the image (with_mode), never of the build."""
+    res, out = gate_build.ensure(GUEST_ROOT, GATE_CACHE, REPO)
     if res["status"] != "green":
-        raise RuntimeError("guest image of MODE %d: recipe %s: %s" % (mode, res["status"], res.get("failure")))
+        raise RuntimeError("guest image: recipe %s: %s" % (res["status"], res.get("failure")))
     path = res["elf"]["path"]
     return open(path, "rb").read(), path
+
+
+def modes_of(elf_bytes):
+    """the ids of the modes the image has: the rows of its table fnvboot_modes (count fnvboot_mode_count), read from the ELF itself"""
+    n, = struct.unpack("<I", bootlayout.data_symbol(elf_bytes, "fnvboot_mode_count"))
+    t = bootlayout.data_symbol(elf_bytes, "fnvboot_modes")
+    if len(t) != 8 * n:
+        raise RuntimeError("fnvboot_modes is %d bytes for %d rows" % (len(t), n))
+    return [struct.unpack_from("<I", t, 8 * i)[0] for i in range(n)]
+
+
+def with_mode(elf_bytes, mode):
+    """the image with the word fnvboot_mode set to MODE: the run input that picks one of the image's modes (bootlayout.with_data_word); no build is involved"""
+    return bootlayout.with_data_word(elf_bytes, MODE_SYMBOL, mode)
 
 
 def symbol(elf, name):
@@ -79,8 +95,9 @@ def make_plan(elf_bytes):
     return plan
 
 
-def run(elf_bytes, root, watch=None, svc=None, **kw):
+def run(elf_bytes, root, mode, watch=None, svc=None, **kw):
     svc = svc or boothost.Services(root)
+    elf_bytes = with_mode(elf_bytes, mode)
     m = bootmachine.Machine(elf_bytes, make_plan(elf_bytes), svc, **kw, quantum=QUANTUM)
     lines, tids = [], []
     m.on_console(lines.append)
@@ -95,8 +112,9 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(30, 42), 44, 45, 46, 47, 48, *range(49, 58), 58, 59, 60, 90, 91)}   # MODE 6 (boot CLI guest) is built by test_boot.py
-    elf0, path0 = built[0]
+    elf0, path0 = build()
+    MODES = modes_of(elf0)
+    case("the image's mode table is read from the ELF: %d modes, ids unique" % len(MODES), len(MODES) == len(set(MODES)) and 0 in MODES, MODES)
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
     hits = {"pc": [], "ret": [], "store": []}
@@ -108,7 +126,7 @@ def main():
         m.watch_ret(marker, lambda tid, x0: hits["ret"].append((tid, x0)))
         m.watch_store(flag, lambda tid, a, s, v: hits["store"].append((tid, a, s, v)))
 
-    r1, lines1, tids1, svc1 = run(elf0, root, watch=watchers)
+    r1, lines1, tids1, svc1 = run(elf0, root, 0, watch=watchers)
     text = "\n".join(lines1)
     case("exit code 7, reason exit", r1["reason"] == "exit" and r1["exit_code"] == 7, r1)
     case("console: self-relocated string pointers", lines1[:2] == ["hello from the guest", "second line"], lines1[:3])
@@ -127,22 +145,22 @@ def main():
     case("watch_pc fired once, main thread", hits["pc"] == [(1, marker)], hits["pc"])
     case("watch_ret fired once with x0=42", hits["ret"] == [(1, 42)], hits["ret"])
     case("watch_store saw the worker's store", any(h[0] == 2 and h[3] == 77 for h in hits["store"]), hits["store"])
-    r2, lines2, tids2, _ = run(elf0, root)
+    r2, lines2, tids2, _ = run(elf0, root, 0)
     case("deterministic: identical run() dicts", r1 == r2, (r1, r2))
     case("deterministic: identical on_thread sequences", tids1 == tids2 and len(tids1) > 3, (tids1, tids2))
     case("virtual time moved by sleep (5 ms)", r1["virtual_ns"] >= 5_000_000, r1["virtual_ns"])
 
-    rf, linesf, _, _ = run(*[built[3][0], root])
+    rf, linesf, _, _ = run(elf0, root, 3)
     f = rf.get("fault", {})
     case("write to a read-only page ends the run: fault", rf["reason"] == "fault" and rf["exit_code"] is None, rf)
     case("fault record", f.get("kind") == "write-protected" and f.get("addr") == 0x4000000 and f.get("tid") == 1
         and f.get("size") == 4 and set(f) == {"kind", "addr", "size", "pc", "lr", "tid"}, f)
     case("nothing runs after the fault", "after the fault" not in linesf, linesf)
 
-    rf4, lines4 = run(built[4][0], root)[:2]
+    rf4, lines4 = run(elf0, root, 4)[:2]
     case("touching the given-away src block ends the run: fault", rf4["reason"] == "fault"
         and rf4["fault"]["kind"] == "read-unmapped" and rf4["fault"]["addr"] == plan0["regions"]["heap"]["lo"], rf4)
-    rg, linesg = run(built[5][0], root)[:2]
+    rg, linesg = run(elf0, root, 5)[:2]
     case("protected-none heap page: read faults at that address", rg["reason"] == "fault"
         and rg["fault"]["kind"] == "read-protected" and rg["fault"]["addr"] == plan0["regions"]["heap"]["lo"] + 0x30000
         and "after the fault" not in linesg, rg)
@@ -184,13 +202,13 @@ def main():
                 raise bootmachine.ExtMissing(9, fn)
             return 1000 * fn + 10 * len(a) + (a[0] if a else 0)
 
-    re_, _, _, _ = run(built[1][0], root, svc=Ext9(root))
+    re_, _, _, _ = run(elf0, root, 1, svc=Ext9(root))
     case("a registered ext module whose handler raises ExtMissing ends the run", re_["reason"] == "ext-module-missing"
         and re_["ext"] == {"module": 9, "fn": 99}, re_)
-    rd, _, _, _ = run(built[2][0], root)
+    rd, _, _, _ = run(elf0, root, 2)
     case("no ready thread, no deadline: deadlock with a wait report", rd["reason"] == "deadlock"
         and rd["waits"][0]["tid"] == 1 and rd["waits"][0]["wait"][0] == "addr", rd)
-    rl, _, _, _ = run(elf0, root, limit_host_calls=3)
+    rl, _, _, _ = run(elf0, root, 0, limit_host_calls=3)
     case("limit_host_calls ends with reason limit", rl["reason"] == "limit" and rl["host_calls"] == 3, rl)
 
     n_slots = sum(1 for n in bootmachine.SLOTS if callable(getattr(boothost.Services, "h_" + n, None)))
@@ -209,7 +227,7 @@ def main():
 
     # platform service (module 11): the VM service and thread activity
     heap_lo, image_hi = plan0["regions"]["heap"]["lo"], plan0["regions"]["image"]["hi"]
-    rv, linesv, _, svcv = run(built[7][0], root)
+    rv, linesv, _, svcv = run(elf0, root, 7)
     vals = {l.split("=")[0]: int(l.split("=")[1], 16) for l in linesv if "=" in l and l.split("=")[1].isalnum()}
     A, B, A2 = vals.get("resA", 0), vals.get("resB", 0), vals.get("resA2", 0)
     textv = "\n".join(linesv)
@@ -261,25 +279,25 @@ def main():
          and vals.get("resumed-flag") == 0x4d, textv)
     case("platform: cpu_boost and message are the services'", svcv.boosts == [1] and svcv.messages == [("cap", "body")]
          and vals.get("boost") == 0 and vals.get("message") == 0, (svcv.boosts, svcv.messages))
-    rv2 = run(built[7][0], root)[0]
+    rv2 = run(elf0, root, 7)[0]
     case("vm: two identical runs give identical run() dicts", rv == rv2, (rv, rv2))
-    rf8, lines8 = run(built[8][0], root)[:2]
+    rf8, lines8 = run(elf0, root, 8)[:2]
     case("vm: access to a reserved, uncommitted page: fault record", rf8["reason"] == "fault"
          and rf8["fault"]["kind"] == "read-unmapped" and rf8["fault"]["addr"] == int(lines8[2].split("=")[1], 16) + 0x1000
          and "committed-ok=1" in lines8 and "after the fault" not in lines8, (rf8, lines8))
-    rf9, lines9 = run(built[9][0], root)[:2]
+    rf9, lines9 = run(elf0, root, 9)[:2]
     case("vm: write to a VM_PROTECT read-only committed page: fault", rf9["reason"] == "fault"
          and rf9["fault"]["kind"] == "write-protected" and "after the fault" not in lines9, (rf9, lines9))
-    rf10, lines10 = run(built[10][0], root)[:2]
+    rf10, lines10 = run(elf0, root, 10)[:2]
     case("vm: access to a wholly decommitted extent: fault", rf10["reason"] == "fault" and rf10["fault"]["kind"] == "read-unmapped"
          and "after the fault" not in lines10, (rf10, lines10))
-    rf11 = run(built[11][0], root)[0]
+    rf11 = run(elf0, root, 11)[0]
     case("platform: a socket service with its exact nargs (no result in this environment) ends the run as ext-module-missing",
          rf11["reason"] == "ext-module-missing" and rf11["ext"] == {"module": 11, "fn": 16}, rf11)
     def kv(lines):
         return {l.split("=")[0]: l.split("=")[1] for l in lines if "=" in l}
 
-    r49, l49 = run(built[49][0], root)[:2]
+    r49, l49 = run(elf0, root, 49)[:2]
     k49 = kv(l49)
     M = bootmachine.U64 + 1
     ne = lambda e: "%x" % (M - e)
@@ -296,7 +314,7 @@ def main():
     case("sockets and TZ_AT (guest): every result the arguments fix with no socket open: errno classes, -EBADF for each handle-first service, "
          "POLL waits its timeout in virtual time and answers POLLNVAL (%d values)" % len(want49), r49["reason"] == "exit" and not bad49
          and "ebadf-bad" not in k49, (bad49, r49))
-    r50, l50 = run(built[50][0], root)[:2]
+    r50, l50 = run(elf0, root, 50)[:2]
     k50 = kv(l50)
     BI, NF = "1759", "1359"
     want50 = {"self-id": "1", "self-distinct": "1", "self-start": BI, "self-join": BI, "self-prio": "0", "self-resume": "f401",
@@ -306,26 +324,26 @@ def main():
     case("THREAD_SELF (guest): a started record (start/join BadInput), distinct ids, free ends only the record, a paused-woken main thread "
          "stays off until resumed; start of a started or finished thread BadInput with state kept, activity of a new or finished thread BadInput",
          r50["reason"] == "exit" and not bad50, (bad50, r50))
-    r51 = run(built[51][0], root)[:2]
+    r51 = run(elf0, root, 51)[:2]
     case("POLL with nothing to wait for and timeout -1: the run ends as deadlock, never returns", r51[0]["reason"] == "deadlock"
          and "after the poll" not in r51[1], r51[0])
-    r52, l52 = run(built[52][0], root)[:2]
+    r52, l52 = run(elf0, root, 52)[:2]
     case("the numbers 10, 15, 27..29, 32 and 33, which hostapi.h does not declare, answer NO_SERVICE (guest, any nargs)",
          r52["reason"] == "exit" and kv(l52) == {n: "ffffffffffffff02" for n in ("fn10", "fn15", "fn27", "fn28", "fn29", "fn32", "fn33")}, (r52, l52))
-    r53, l53 = run(built[53][0], root)[:2]
+    r53, l53 = run(elf0, root, 53)[:2]
     case("TZ_AT at INT64_MAX and INT64_MIN: the fixed UTC zone answers every instant", r53["reason"] == "exit"
          and kv(l53) == {"tz-below": "0", "tz-above": "0"}, (r53, l53))
-    r54, l54 = run(built[54][0], root)[:2]
+    r54, l54 = run(elf0, root, 54)[:2]
     case("THREAD_ACTIVITY on the calling thread's own THREAD_SELF record: ResultBusy 0xF401 for pause and resume, the run goes on",
          r54["reason"] == "exit" and kv(l54) == {"self-pause": "f401", "self-resume": "f401"} and "after the pause" in l54, (r54, l54))
-    r55, l55 = run(built[55][0], root)[:2]
+    r55, l55 = run(elf0, root, 55)[:2]
     k55 = kv(l55)
     want55 = {"not-started-pause": "1759", "resume-running": "fa01", "pause": "0", "pause-paused": "fa01", "resume": "0", "resume-again": "fa01",
               "finished": "1759", "me-pause": "f401", "me-resume": "f401", "me-zero": "1759", "rec-finished": "1759", "rec-finished-resume": "1759",
               "no-record": "1359"}
     case("THREAD_ACTIVITY: new / finished thread or record BadInput, resume of a running and pause of a paused thread 0xFA01, own record 0xF401, "
          "unknown id NotFound (%d values)" % len(want55), r55["reason"] == "exit" and k55 == want55, (k55, r55))
-    r56, l56 = run(built[56][0], root)[:2]
+    r56, l56 = run(elf0, root, 56)[:2]
     k56 = kv(l56)
     want56 = {"h1": "3", "h2": "4", "close1": "0", "h3": "3", "getfl": "2", "setfl": "0", "getfl-nb": "802", "connect-ext": ne(101),
               "sendto-ext": ne(101), "recv-nb": ne(11), "bind-lo": "0", "close3": "0", "closed-getfl": ne(9), "tz-last": "0"}
@@ -355,7 +373,7 @@ def main():
     def E(c):
         return "%x" % (-c & ((1 << 64) - 1))
 
-    r30, l30 = run(built[30][0], root)[:2]
+    r30, l30 = run(elf0, root, 30)[:2]
     k = kv(l30)
     case("section: run exits", r30["reason"] == "exit" and r30["exit_code"] == 7, (r30, l30))
     ok_vals = {"resv": "1", "c0": E(0xCA01), "c-unal": E(0xCA01), "c-big": E(0xCA01), "id": "1", "A": "1", "B-own": "1", "C": "1",
@@ -382,17 +400,17 @@ def main():
          + [("vm_decommit-refused", 0xD401)] * 2 + [("vm_protect-refused", 0xD401)] * 2 + [("vm_release-refused", 0xD401)]
          and tail.count(("map_fixed-refused", 0xF59)) == 2 and tail.count(("section_unmap-refused", 0xD401)) == 4
          and tail.count(("section_free-refused", 0xE401)) == 2 and ("section_map-refused", 0xE401) in tail, tail)
-    r31, l31 = run(built[31][0], root)[:2]
+    r31, l31 = run(elf0, root, 31)[:2]
     k = kv(l31)
     case("section: unmapped view faults, the other view still works and writes",
          r31["reason"] == "fault" and r31["fault"]["kind"] == "read-unmapped" and r31["fault"]["addr"] == int(k["A-addr"], 16)
          and k["unmap-A"] == "0" and k["B-works"] == "7" and k["B-writes"] == "9" and k["A-addr"] != k["B-addr"]
          and "after the fault" not in l31, (r31, l31))
-    r32, l32 = run(built[32][0], root)[:2]
+    r32, l32 = run(elf0, root, 32)[:2]
     k = kv(l32)
     case("section: threads share views (B reads A's write, main reads the thread's write)",
          r32["reason"] == "exit" and r32["threads"] == 3 and k.get("thread-read") == "a5a6" and k.get("thread-write") == "77", (r32, l32))
-    r34, l34 = run(built[34][0], root)[:2]
+    r34, l34 = run(elf0, root, 34)[:2]
     k = kv(l34)
     case("section: table limits (128 sections incl. deferred ones, 512 views, ids never reused)",
          r34["reason"] == "exit" and k.get("sections-ok") == "80" and k.get("last-id") == "80" and k.get("c-full") == E(0xCE01)
@@ -400,10 +418,10 @@ def main():
          and k.get("id129") == "81" and k.get("free-last") == "0" and k.get("id130") == "82" and k.get("views-ok") == "200"
          and k.get("views-ascending") == "1" and k.get("v-full") == E(0xCE01) and k.get("unmap-one") == "0" and k.get("v-after") == "1",
          (r34, l34))
-    case("section: two identical runs give identical run() dicts", r30 == run(built[30][0], root)[0]
-         and r32 == run(built[32][0], root)[0] and r34 == run(built[34][0], root)[0], r30)
-    r35 = run(built[35][0], root)[0]
-    r36 = run(built[36][0], root)[0]
+    case("section: two identical runs give identical run() dicts", r30 == run(elf0, root, 30)[0]
+         and r32 == run(elf0, root, 32)[0] and r34 == run(elf0, root, 34)[0], r30)
+    r35 = run(elf0, root, 35)[0]
+    r36 = run(elf0, root, 36)[0]
     case("exit code 0x52000000|fact_id is reason reach-violation with fact_id", r35["reason"] == "reach-violation"
          and r35["fact_id"] == 42 and r35["exit_code"] == 0x5200002A, r35)
     case("other non-zero exit codes stay ordinary exits (no fact_id)", r36["reason"] == "exit" and "fact_id" not in r36
@@ -453,7 +471,7 @@ def main():
         ok = True
     case("profile: anything but handheld / docked is a construction error", ok)
 
-    r40, l40 = run(built[40][0], root)[:2]
+    r40, l40 = run(elf0, root, 40)[:2]
     k = kv(l40)
     NOMOD, NOSVC, BADN, EINVAL = "ffffffffffffff01", "ffffffffffffff02", "ffffffffffffff03", "ffffffffffffffea"
     want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn39": NOSVC, "te-n4": BADN, "te-null-array": BADN, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
@@ -466,7 +484,7 @@ def main():
     case("ext_call (guest): NO_MODULE / NO_SERVICE / BAD_NARGS are returned to the guest, nargs above UINT32_MAX counts as UINT32_MAX, "
          "extra arguments ignored, sockets dispatch first: -EINVAL on wrong nargs (null array or not), BAD_NARGS on the exact count with a null array (%d values)" % len(want40), r40["reason"] == "exit" and not bad, (bad, r40))
     # TEXT_ENTRY (36): scenario texts, in order; none left -> cancelled; a text longer than max_len is a scenario error (not truncated)
-    r57, l57, _, _ = run(built[57][0], root, text_entries=["Ab\U0001F600", "x"])
+    r57, l57, _, _ = run(elf0, root, 57, text_entries=["Ab\U0001F600", "x"])
     k = kv(l57)
     want57 = {"te-max0": "1", "te-max501": "1", "te-maxhuge": "1", "te-out-null": "1", "te-n-null": "1", "te-bad-untouched": "1",
               "te-entered": "1", "te-n": "4", "te-u0": "41", "te-u1": "62", "te-u2": "d83d", "te-u3": "de00", "te-nul": "0", "te-rest": "7777",
@@ -477,18 +495,18 @@ def main():
          "with a NUL and *n; none left -> 0 with out and *n untouched", r57["reason"] == "exit" and not bad, (bad, r57["reason"]))
     ev = [(e["kind"], e["result"]) for e in r57["events"] if e["kind"] == "text-entry"]
     case("TEXT_ENTRY: one host event per call with its signed result (5 refused calls -0x1759, then 1, 1, 0, 0)", ev == [("text-entry", -0x1759)] * 5 + [("text-entry", 1)] * 2 + [("text-entry", 0)] * 2, ev)
-    r57b = run(built[57][0], root)[0]
+    r57b = run(elf0, root, 57)[0]
     case("TEXT_ENTRY with no scenario: every well-formed call is 0 (cancelled)", r57b["reason"] == "exit"
          and [e["result"] for e in r57b["events"] if e["kind"] == "text-entry"] == [-0x1759] * 5 + [0] * 4, r57b["reason"])
-    r58, l58 = run(built[58][0], root, text_entries=["abcd"])[:2]
+    r58, l58 = run(elf0, root, 58, text_entries=["abcd"])[:2]
     case("TEXT_ENTRY: a scenario text longer than max_len ends the run as scenario-error (never truncated, the guest gets no result)",
          r58["reason"] == "scenario-error" and "te-long" not in kv(l58) and "max_len 3" in r58["scenario"] and "4 UTF-16 units" in r58["scenario"], (r58["reason"], r58.get("scenario")))
-    r59, l59 = run(built[59][0], root, text_entries=["\U0001F600"])[:2]
+    r59, l59 = run(elf0, root, 59, text_entries=["\U0001F600"])[:2]
     k = kv(l59)
     case("TEXT_ENTRY: a text of exactly max_len units fits", r59["reason"] == "exit" and k == {"te-fit": "1", "te-fit-n": "2", "te-fit-u0": "d83d", "te-fit-u1": "de00", "te-fit-nul": "0"}, (r59["reason"], k))
     # THREAD_CPU and the placement contract (MODE 60). Expected values by hand from hostapi.h / placement.h; the default core is read by name
     DC = str(hostabirec.record().define("FNVNX_DEFAULT_CORE"))
-    r60, l60 = run(built[60][0], root)[:2]
+    r60, l60 = run(elf0, root, 60)[:2]
     k = kv(l60)
     want60 = {"cpu-main": DC, "create-plain-core": "0", "create-minus1": "0", "create-ideal-not-in-mask": "0", "create-spec": "1", "set-core2": "0",
               "cpu-after-set": "2", "set-core5": "1759", "cpu-unchanged": "2", "set-keep": "0", "cpu-kept": "2", "fn39": "ffffffffffffff02"}
@@ -504,16 +522,16 @@ def main():
         case("TEXT_ENTRY: a scenario that is not a list of strings of Unicode scalars is a construction error: %r" % (bad_scn,), ok)
     # DISPLAY_DOCKED: the profile
     for prof, want in (("handheld", "0"), ("docked", "1")):
-        rp, lp = run(built[40][0], root, profile=prof)[:2]
+        rp, lp = run(elf0, root, 40, profile=prof)[:2]
         k = kv(lp)
         case("DISPLAY_DOCKED is %s for profile %s (any nargs, null array only with nargs 0)" % (want, prof),
              k.get("docked-n0-null") == want and k.get("docked-n3") == want and k.get("docked-ncap") == want
              and k.get("docked-n1-null") == BADN, (prof, k))
-        re48 = run(built[48][0], root, profile=prof)[0]
+        re48 = run(elf0, root, 48, profile=prof)[0]
         case("DISPLAY_DOCKED through the exit code, profile %s" % prof, re48["reason"] == "exit" and re48["exit_code"] == int(want), re48)
     svc41 = Ext9(root)
     Ext9.calls = []
-    r41, l41 = run(built[41][0], root, svc=svc41)[:2]
+    r41, l41 = run(elf0, root, 41, svc=svc41)[:2]
     k = kv(l41)
     case("ext_call (guest): a registered module is called with its args; fn > UINT32_MAX is NO_SERVICE without calling it; nargs 0 gives []; "
          "a handler raising ExtMissing ends the run", k.get("m9-fn1") == "407" and k.get("m9-fn-huge") == NOSVC and k.get("m9-nargs0") == "7d0"
@@ -521,7 +539,7 @@ def main():
          and Ext9.calls == [(1, [1, 2, 3]), (2, []), (99, [1])], (r41, l41, Ext9.calls))
 
     # VM_PROTECT order and spans; windows
-    r44, l44 = run(built[44][0], root)[:2]
+    r44, l44 = run(elf0, root, 44)[:2]
     k = kv(l44)
     want44 = {"p-addr-unal": "cc01", "p-addr-unal-size0": "cc01", "p-size0": "ca01", "p-size-unal": "ca01", "p-wrap": "d401",
               "p-wrap-beats-perm": "d401", "p-wo": "d801", "p-x": "d801", "p-7": "d801", "p-big": "d801", "p-perm-beats-owned": "d801",
@@ -532,7 +550,7 @@ def main():
     case("VM_PROTECT: header check order, write-only 2 -> 0xD801, a span of two extents, the host window; DECOMMIT of R / no-access "
          "extents (%d values)" % len(want44), r44["reason"] == "exit" and not bad, (bad, r44))
 
-    r45, l45 = run(built[45][0], root)[:2]
+    r45, l45 = run(elf0, root, 45)[:2]
     k = kv(l45)
     want45 = {"size0": "1759", "wrap": "1759", "addr-unal": "1759", "size-unal": "1759", "size0-in-window": "1759", "past-4g": "da01",
               "src0": "1759", "src-unal": "1759", "outside-region": "da01", "keys": "da01", "src-not-heap": "d401",
@@ -544,7 +562,7 @@ def main():
          "alias region 0xDA01, src not heap 0xD401 (%d values)" % len(want45),
          r45["reason"] == "exit" and not bad, (bad, r45))
 
-    r46, l46 = run(built[46][0], root)[:2]
+    r46, l46 = run(elf0, root, 46)[:2]
     k = kv(l46)
     NF, BI, CC, RG = "1359", "1759", "cc01", "d401"
     want46 = {"h1-id": "1", "h-distinct": "1", "start-unknown": NF, "start-zero": NF, "join-unknown": NF, "join-never-started": BI,
@@ -561,10 +579,10 @@ def main():
     case("ids: thread and directory ids are table handles (unknown / freed -> NotFound, never started -> BadInput, 1024 live together, "
          "a freed id never names anything again); dir_next cap 0 / cut; wait / wake alignment and readability; wake count above "
          "0x7FFFFFFF wakes all (%d values)" % len(want46), r46["reason"] == "exit" and not bad, (bad, r46))
-    case("ids: thread_set_cpu with a negative spec changes nothing", run(built[46][0], root)[3].placement.get(1) == {"ideal": 2, "mask": 4, "prio": 3},
+    case("ids: thread_set_cpu with a negative spec changes nothing", run(elf0, root, 46)[3].placement.get(1) == {"ideal": 2, "mask": 4, "prio": 3},
          "")
 
-    r47, l47 = run(built[47][0], root)[:2]
+    r47, l47 = run(elf0, root, 47)[:2]
     k = kv(l47)
     M1 = "ffffffffffffffff"
     want47 = {"a-submit-closed": M1, "a-rate": M1, "a-period0": M1, "a-period-big": M1, "a-open": "0", "a-open-again": "0",
@@ -573,8 +591,8 @@ def main():
     bad = {n: (k.get(n), v) for n, v in want47.items() if k.get(n) != v}
     case("audio_open / audio_submit / audio_close and pad_read index > 3 as the header states; sleep_ns above INT64_MAX sleeps INT64_MAX ns",
          r47["reason"] == "exit" and not bad and (1 << 63) - 1 <= r47["virtual_ns"] <= (1 << 63) - 1 + 10**9, (bad, r47))
-    case("new modes: two identical runs give identical run() dicts", r44 == run(built[44][0], root)[0]
-         and r45 == run(built[45][0], root)[0] and r46 == run(built[46][0], root)[0] and r40 == run(built[40][0], root)[0], "")
+    case("new modes: two identical runs give identical run() dicts", r44 == run(elf0, root, 44)[0]
+         and r45 == run(elf0, root, 45)[0] and r46 == run(elf0, root, 46)[0] and r40 == run(elf0, root, 40)[0], "")
 
     # R-INPUT (journal/inbox/l4-verify-011.md): the declared device states, read as host_v3.inc does (expected values derived by hand from it)
     ms = lambda n: n * 1_000_000   # noqa: E731
@@ -593,7 +611,7 @@ def main():
         {"t_ns": ms(900), "dev": "docked", "value": 1},
         {"t_ns": ms(1000), "dev": "docked", "value": 0}]}
     sc1 = bootinput.Scenario(json.dumps(S1))
-    r90, l90 = run(built[90][0], root, svc=boothost.Services(root, None, sc1))[:2]
+    r90, l90 = run(elf0, root, 90, svc=boothost.Services(root, None, sc1))[:2]
     k = kv(l90)
     Z = {"c": "0", "p": "0", "l": "0", "h": "0", "x": "0", "y": "0", "X": "0", "Y": "0"}
     A = {f: "aaaaaaaa" for f in Z}
@@ -635,18 +653,18 @@ def main():
     case("R-INPUT DISPLAY_DOCKED follows state(docked, T): 0 before, 1 after 900 ms, 0 after 1000 ms",
          not [n for n in bad if n[:2] in ("j-", "k-") and "-d" in n], {n: x for n, x in bad.items() if "-d" in n})
     case("R-INPUT run: all %d values of the scenario guest as derived from host_v3.inc" % len(want), r90["reason"] == "exit" and not bad, bad)
-    r90b = run(built[90][0], root, svc=boothost.Services(root, None, sc1))[0]
+    r90b = run(elf0, root, 90, svc=boothost.Services(root, None, sc1))[0]
     case("R-INPUT run: two identical runs give identical run() dicts", r90 == r90b, "")
-    rp = run(built[90][0], root, profile="docked", svc=boothost.Services(root, None, sc1))[1]
+    rp = run(elf0, root, 90, profile="docked", svc=boothost.Services(root, None, sc1))[1]
     case("R-INPUT docked default is the profile until the scenario declares it (--profile docked: 1 before, 0 after 1000 ms)",
          kv(rp).get("a-d60") == "1" and kv(rp).get("j-d850") == "1" and kv(rp).get("k-d1050") == "0", kv(rp))
-    rn = run(built[90][0], root)[1]
+    rn = run(elf0, root, 90)[1]
     kn = kv(rn)
     case("R-INPUT no scenario: nothing attached on every read (the declared machine's default), as before",
          kn.get("b-pad0") == "0" and kn.get("e-e450") == "1" and kn.get("g-e650") == "1" and kn.get("j-e850") == "1" and kn.get("k-d950") == "0", kn)
     # watch reads
     sw = boothost.Services(root, None, sc1, watch_reads=True)
-    rw = run(built[90][0], root, svc=sw)[0]
+    rw = run(elf0, root, 90, svc=sw)[0]
     rd = [e for e in rw["events"] if e["kind"] == "input-read"]
     case("R-INPUT input-read events only under the watch switch: one per device read (pad 1 per pad_read, kbd/mouse/touch per poll, docked)",
          not [e for e in r90["events"] if e["kind"] == "input-read"] and len(rd) > 0
@@ -656,7 +674,7 @@ def main():
     # pad_vibrate
     pd = lambda t, i, c: {"t_ns": ms(t), "dev": "pad", "index": i, "connected": c}   # noqa: E731
     SV = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "states": [pd(50, 0, 1), pd(120, 1, 1), pd(150, 2, 1), pd(250, 3, 1), pd(350, 3, 0)]}))
-    r91, l91 = run(built[91][0], root, svc=boothost.Services(root, None, SV))[:2]
+    r91, l91 = run(elf0, root, 91, svc=boothost.Services(root, None, SV))[:2]
     k = kv(l91)
     vib = [e for e in r91["events"] if e["kind"] == "pad-vibrate"]
     case("R-INPUT pad_vibrate returns 0 for every call; the event is what a connected pad received: float bits as the low 32 bits given",
@@ -667,7 +685,7 @@ def main():
          "disconnected at 350 ms: none (index 3 at 400 ms)", len(vib) == 4 and [e["index"] for e in vib] == [0, 1, 2, 3], vib)
     case("R-INPUT pad_vibrate events carry tid and the virtual time of the call",
          all(e["tid"] == 1 for e in vib) and [ms(t) <= e["t_ns"] < ms(t + 1) for e, t in zip(vib, (100, 130, 200, 300))] == [True] * 4, vib)
-    rv0 = run(built[91][0], root)[0]
+    rv0 = run(elf0, root, 91)[0]
     case("R-INPUT pad_vibrate with no scenario (no pad attached): no event, returns 0", not [e for e in rv0["events"] if e["kind"] == "pad-vibrate"]
          and rv0["reason"] == "exit", rv0["events"])
     exs = lambda ev: bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": ev}))   # noqa: E731

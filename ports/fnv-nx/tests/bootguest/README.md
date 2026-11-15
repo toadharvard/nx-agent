@@ -1,8 +1,8 @@
 # tests/bootguest
 
-Guest images of the boot machine's tests (class `test`, one variant `m<MODE>` per MODE, built by verify/recipe.py).
+One guest image for the boot machine's tests (class `test`, built by verify/recipe.py, no variants). Its modes are the rows of `fnvboot_modes` in guest.c, the only list; a test reads the ids from the linked ELF (test_bootmachine.modes_of) and picks a mode by setting the image's data word `fnvboot_mode` before the run (bootlayout.with_data_word).
 
-No product symbol is defined here: a test never defines a symbol that a product root defines (the doubles rule). MODE 92 (R-LOCKOBS record
+No product symbol is defined here: a test never defines a symbol that a product root defines (the doubles rule). Mode 92 (R-LOCKOBS record
 mechanism) therefore has its own lock functions under non-product names (`t_acquire`, `t_try`, `t_release`) and verify/lockobs.py takes the
 three watched names as arguments; its defaults are the os.h API (`os_lock`, `os_trylock`, `os_unlock`, trylock success = 1, os.h:42).
 
