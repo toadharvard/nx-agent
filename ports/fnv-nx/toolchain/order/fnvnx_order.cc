@@ -950,8 +950,13 @@ static bool ordt_visit(gimple *stmt, tree, tree op, void *data) {
   } else if (base && TREE_CODE(base) == STRING_CST) why = 1;
   if (why < 0) {
     // the statement as GCC prints it, then the diagnostic (diagnostic output only)
-    fprintf(stderr, "ORD-T stmt, block %d: ", gimple_bb(stmt)->index);
-    print_gimple_stmt(stderr, stmt, 0, TDF_VOPS | TDF_SLIM);
+    {
+      // up to 6 statements before it, then it: the context GCC would show in a dump (a tail of 20 lines survives the build log)
+      std::vector<gimple *> pre;
+      for (gimple_stmt_iterator g = gsi_for_stmt(stmt); !gsi_end_p(g) && pre.size() < 7; gsi_prev(&g)) if (!is_gimple_debug(gsi_stmt(g))) pre.push_back(gsi_stmt(g));
+      fprintf(stderr, "ORD-T block %d:\n", gimple_bb(stmt)->index);
+      for (size_t k = pre.size(); k-- > 0;) print_gimple_stmt(stderr, pre[k], 1, TDF_SLIM);
+    }
     error_at(gimple_location(stmt), "%<fnvnx_order%>: ORD-T: a plain memory access with no reason (%s)", get_tree_code_name(TREE_CODE(op)));
     return false;
   }
