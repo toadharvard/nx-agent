@@ -987,11 +987,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
         err.append('error_abi must be {"fail": SYM, "kind": "noreturn"} or {"fail": SYM, "kind": "flag", "flag": FIELD}: the root\'s one failure function and how its '
                    'definition signals failure (objstub checks the definition)')
-    ea_sym = rec.get("errno_accessor")
-    if ea_sym is not None and not ident(ea_sym):
-        err.append("errno_accessor must be a symbol: the function the root's libc errno macro calls (objstub reads the final image through it)")
-    if rec.get("link") and ea_sym is None:
-        err.append("a root with a link stage must declare errno_accessor (the function that returns the address of errno: objstub judges every function body of the image)")
     eh = rec.get("empty_handlers")
     if eh is not None:
         tb = eh.get("tables") if isinstance(eh, dict) else None
@@ -1529,7 +1524,7 @@ class Job:
                "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
         argv = ["/art/" + aout] + g["args"]
         interp = elf_interp(r["elf"]["path"])
-        if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is assumed)
+        if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
             home = [(d, interp) for d in g["debs"] if os.path.isfile(os.path.join(tmp, "deb-" + d + interp))]
             if not home:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": [
@@ -2031,7 +2026,7 @@ def owner_root(path, roots, root):
 
 def resolve_foreign(root, ref, repo=".", cache=None, rec=None):
     """resolve_input for the fact file REF of ROOT's recipe: a repository path is read through resolve_input as a file of its owning root (owner_root), an
-    {external, path} through ROOT's own externals. -> what resolve_input returns: (host path, ident, files)."""
+    {external, path} through ROOT's own externals. -> what resolve_input returns: (host path, ident)."""
     if isinstance(ref, str):
         own = owner_root(ref, load_admit(repo), root)
         if own is None:
@@ -2045,7 +2040,7 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
     REF is a bare string (a tracked file or directory of ROOT) or {"external": NAME, "path": P}: NAME must be an `external` of ROOT's recipe,
     its tree is mounted from the pinned commit and checked against its tree_sha256. Red (ValueError) for: an undeclared external, a path that
     is absolute or leaves the tree (.. or a symlink), a missing path, an untracked path, a tree_sha256 mismatch.
-    -> (host path, ident, files); FILES is None for a file or an external path, and for a bare directory the sorted repo-relative TRACKED files under it (a gate reads only those); IDENT is "tree_sha256:path" of an external, "root/path" of a tracked file: the gate key takes it."""
+    -> (host path, ident); IDENT is "tree_sha256:path" of an external, "root/path" of a tracked file: the gate key takes it."""
     if isinstance(ref, str):
         base, p, kind = os.path.join(repo, root), ref, None
     elif isinstance(ref, dict) and set(ref) == {"external", "path"} and all(isinstance(v, str) for v in ref.values()):
@@ -2075,14 +2070,49 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
         raise ValueError("%s: input path %r does not exist" % (root, p))
     if kind is None:
         rel = posixpath.join(root, p)
-        out = subprocess.run(["git", "-C", repo, "ls-files", "-z", "--", rel], capture_output=True)
-        tracked = sorted(x for x in out.stdout.decode().split("\0") if x)
-        if out.returncode != 0 or not tracked:
-            raise ValueError("%s: input path %r is not tracked (a directory needs at least one tracked file)" % (root, p))
-        if os.path.isdir(full):   # a tracked directory is its tracked files only: an untracked file inside is an undeclared input
-            return full, rel, tracked
-        return full, rel, None
-    return full, "%s:%s" % (e["tree_sha256"], p), None
+        if not subprocess.run(["git", "-C", repo, "ls-files", "--error-unmatch", "--", rel], capture_output=True).returncode == 0:
+            raise ValueError("%s: input path %r is not tracked" % (root, p))
+        if os.path.isdir(full):
+            return _tracked_dir(repo, rel, cache)
+        return full, rel
+    return full, "%s:%s" % (e["tree_sha256"], p)
+
+
+def _tracked_dir(repo, rel, cache):
+    """A tracked directory REF: a materialised copy in CACHE holding exactly `git ls-files` under REL (an untracked file inside is not in the copy,
+    so it is never read), written from the blobs. -> (copy path, ident); the ident carries sha256 over (path, blob sha) of those files, so editing
+    a tracked file inside changes it. The one rule of the reader; the generator-input mount calls resolve_input too."""
+    if cache is None:
+        raise ValueError("input directory %r needs the gate cache to materialise its tracked files" % rel)
+    out = subprocess.run(["git", "-C", repo, "ls-files", "-s", "-z", "--", rel], capture_output=True, check=True).stdout.decode()
+    files = []
+    for ent in filter(None, out.split("\0")):
+        meta, _, path = ent.partition("\t")
+        mode, sha, _stage = meta.split()
+        if mode == "120000":
+            raise ValueError("input directory %r holds the symlink %r" % (rel, path))
+        files.append((path, sha, mode))
+    h = hashlib.sha256()
+    for path, sha, _ in files:
+        h.update(path.encode() + b"\0" + sha.encode() + b"\n")
+    d = h.hexdigest()
+    dest = os.path.join(cache, "dirs", d, rel)
+    if not os.path.isdir(dest):
+        tmp = os.path.join(cache, "dirs", d + ".tmp%d" % os.getpid())
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.makedirs(os.path.join(tmp, rel))
+        for path, sha, mode in files:
+            q = os.path.join(tmp, path)
+            os.makedirs(os.path.dirname(q), exist_ok=True)
+            with open(q, "wb") as fh:
+                fh.write(subprocess.run(["git", "-C", repo, "cat-file", "blob", sha], capture_output=True, check=True).stdout)
+            if mode == "100755":
+                os.chmod(q, 0o755)
+        try:
+            os.rename(tmp, os.path.join(cache, "dirs", d))
+        except OSError:   # another process materialised the same content first
+            shutil.rmtree(tmp, ignore_errors=True)
+    return dest, "%s@%s" % (rel, d)
 
 
 CPU_FIELDS = {"vendor_id": "vendor_id", "family": "cpu family", "model": "model", "stepping": "stepping", "microcode": "microcode", "model_name": "model name"}
@@ -2134,7 +2164,7 @@ def elf_interp(path):
 def stage_output(root, ref, repo, cache):
     """{"stage": "ROOT:gen:I" | "ROOT:run:NAME", "path": P}: the declared output P of a generate (I = index in `generated`) or run stage of an admitted
     root, produced by that stage (cached by its key in CACHE/store) and written to CACHE/stageout/<sha256>/P. Red (ValueError) for an unknown root or
-    stage, an output the stage does not declare, a red stage. -> (host path, "stage:ROOT:NAME:P:sha256", None)."""
+    stage, an output the stage does not declare, a red stage. -> (host path, "stage:ROOT:NAME:P:sha256")."""
     if cache is None:
         raise ValueError("%s: input %r needs the gate cache" % (root, ref))
     sroot, _, name = ref["stage"].partition(":")
@@ -2168,7 +2198,7 @@ def stage_output(root, ref, repo, cache):
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with open(dest, "wb") as f:
         f.write(data)
-    return dest, "stage:%s:%s:%s:%s" % (sroot, name, ref["path"], h), None
+    return dest, "stage:%s:%s:%s:%s" % (sroot, name, ref["path"], h)
 
 
 def host_compilers(rec, cache):

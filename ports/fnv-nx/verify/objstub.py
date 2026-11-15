@@ -29,8 +29,10 @@ class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = nor
 EH-resume routines are the explicit builtins GCC's RESX lowering emits (`builtin_decl_explicit` of BUILT_IN_UNWIND_RESUME and
 BUILT_IN_CXA_END_CLEANUP: `_Unwind_Resume` on AArch64, whatever the target uses); (2) in a C++ TU a noreturn function that is not
 nothrow may raise an exception by the language (`__cxa_throw`, `__cxa_rethrow`, the `std::__throw_*` helpers), so it is not process
-end; in a C TU every noreturn function is a terminator (C has no exceptions). Terminators = the remaining noreturn functions
-(`abort`, `exit`, `_Exit`, `quick_exit`, `std::terminate`, `longjmp`, a noreturn nothrow user function; a C user function declared
+end; in a C TU, and in a C++ TU compiled with -fno-exceptions (GCC's flag_exceptions is 0: no handler exists, so a throw ends the process),
+every noreturn function is a terminator. A function declared by <setjmp.h> (ISO C 7.13: longjmp, siglongjmp, _longjmp) is a control
+transfer to the caller of a setjmp, not process end: an unwinder. Terminators = the remaining noreturn functions
+(`abort`, `exit`, `_Exit`, `quick_exit`, `std::terminate`, a noreturn nothrow user function; a C user function declared
 noreturn). The others are UNWINDERS, written to the set as `~name`: a call of one is no T2, and a direct BL of one at the end of a
 function is no `T2-noreturn-tail` (a landing pad ends in `bl _Unwind_Resume`; a `throw` ends in `bl __cxa_throw`). NOT EXACT (stated):
 the headers declare `__cxa_pure_virtual`, `__cxa_deleted_virtual` and `pthread_exit` noreturn but not nothrow, and the compiler's flags
@@ -126,6 +128,12 @@ in the root and none a V body: another non-empty emitter carries the semantics);
 empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a certificate); none and own justify nothing. Otherwise the
 finding V with the reason. The gate result holds "handler_justified": {a: n, b: n}. The records carry no handler name: a name copied from source text
 would need its own proof, the layout of the object is the proof.
+
+COST. Decoding: one decoder run per section (per function for the image), and a run is fed only the bytes of its ranges, so the decode cost of an
+object is linear in its code size (an earlier version fed the whole object to every run: quadratic in sections). The per-function analyses
+are independent of each other and of the object size; each is a worklist fixed point over the function's own words (liveness: a 32-bit mask per
+word, monotone OR). No object and no function is skipped by size or by -g: the work is the same rule on every object. Measured at eba704601 +
+this change, platform root, 114 objects, warm cache: total 49 s, maximum 8.9 s (com/combridge.gen.cpp, 2.8 MB, 1011 sections).
 
 (I) IMAGE. For a root with a link stage the gate also reads the FINAL ELF (image_check): every STT_FUNC symbol with a size in an executable section of the image
 is a body, so a weak definition that a strong one replaced is not in the image and is not judged, and the archive members the linker pulled are judged as
@@ -236,8 +244,13 @@ class Obj:
         return next((("sec", s[5], s[1]) for s in self.syms if s[0] == name and 0 < s[5] < 0xFF00 and s[3] != 3), (name, 0))
 
 def decode(data, ranges):
-    """{byte offset in data: info} for every word of the ranges [(start, end)]; info = None for a word LLVM rejects, else
-    {"op", "R", "W", "MEM", "KIND"} as printed by a64access."""
+    """{byte offset in the file: info} for every word of the ranges [(start, end)] (file offsets); info = None for a word LLVM rejects, else
+    {"op", "R", "W", "MEM", "KIND"} as printed by a64access.  Only the bytes from min(start) to max(end) are given to the decoder (the cost
+    of a call is linear in what it decodes, never in the size of the object: one call per section or function must not copy the whole file)."""
+    if ranges:
+        lo, hi = min(r[0] for r in ranges), max(r[1] for r in ranges)
+        if lo or hi < len(data):
+            return {k + lo: x for k, x in decode(data[lo:hi], [(a - lo, b - lo) for a, b in ranges]).items()}
     args = [x for r in ranges for x in map(str, r)]
     if not args:
         return {}
@@ -901,16 +914,55 @@ class Image:
         return self.data[off + n:self.data.index(b"\0", off + n)].decode("latin-1")
 
 
-def image_check(path, errno_fn):
-    """The functions of the final image that are FIXED-FAILURE bodies -> (number of bodies, [(name, detail)]). Every STT_FUNC symbol of an executable section of
-    the image with a size is a body (a symbol the linker did not keep, a weak definition replaced by a strong one, is not in the image and is not judged);
-    equal ranges are one body, every name judged. A body is FIXED-FAILURE iff, by the vanalyse rules with the errno accessor ERRNO_FN transparent: it reads no
-    memory but the own frame, its only stores outside the frame are stores of constants through the pointer that a call of ERRNO_FN returned (at least one),
-    and every path returns the same constant. Its whole effect is `errno = K1; return K2`: it does what no implementation does. Stated limits: a
-    constant return with no errno store is the V class (a constants row), not this class; an errno kept in a thread register (no accessor call) is not seen;
-    a function with a data island or a call other than ERRNO_FN is not judged here (cfg has no result)."""
-    im = Image(path, errno_fn)
+AARCH64_TLS = frozenset(range(512, 576)) | frozenset(range(80, 127))   # AAELF64: R_AARCH64_TLSGD/TLSLD/TLSIE/TLSLE/TLSDESC (512-575) and their P32 forms (80-126)
+
+
+def errno_probe(cc, flags, cache):
+    """How the root's libc reaches errno, DERIVED by compiling `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler CC and
+    unit flags FLAGS and reading the object: -> ("call", SYMBOL) when the body calls SYMBOL (a call relocation, the accessor that returns the address of
+    errno), ("tls", SYMBOL) when it reaches a thread-local symbol (a TLS relocation). Anything else (no call and no TLS relocation, several targets)
+    raises ValueError: the way errno is reached is not known, nothing is guessed. Cached CACHE/objstub/e-<key>, key = compiler, flags, source."""
+    src = "#include <errno.h>\nint f(void){return errno;}\n"
+    key = hashlib.sha256(json.dumps([cc, subprocess.run([cc, "--version"], capture_output=True, text=True).stdout, list(flags), src]).encode()).hexdigest()
+    cp = os.path.join(cache, "objstub", "e-%s.txt" % key)
+    if not os.path.exists(cp):
+        with tempfile.TemporaryDirectory() as td:
+            open(td + "/p.c", "w").write(src)
+            r = subprocess.run([cc, "-c", "-O1", "-o", td + "/p.o"] + list(flags) + ["-x", "c", td + "/p.c"], capture_output=True, text=True)
+            if r.returncode:
+                raise ValueError("errno probe does not compile: %s" % r.stderr[-300:])
+            o = Obj(td + "/p.o")
+            tgt = set()
+            for si, rel in o.rela.items():
+                if o.secs[si][2] & 4:
+                    for _, (sy, ty, _) in rel.items():
+                        name = o.syms[sy][0]
+                        if ty in (283, 21):                       # R_AARCH64_CALL26 / R_AARCH64_P32_CALL26
+                            tgt.add(("call", name))
+                        elif ty in AARCH64_TLS:
+                            tgt.add(("tls", name))
+            if len(tgt) != 1:
+                raise ValueError("errno probe: the object of `return errno;` has %d call/TLS targets (%s): how errno is reached is not known" % (len(tgt), sorted(tgt)))
+            _atomic(cp, ("%s %s\n" % sorted(tgt)[0]).encode())
+    k, n = open(cp).read().split()
+    return k, n
+
+
+def image_check(path, errno):
+    """The functions of the final image -> (number of bodies, [(name, kind, detail)]). ERRNO = (form, SYMBOL) of errno_probe. Every STT_FUNC symbol of an
+    executable section of the image with a size is a body (a symbol the linker did not keep is not in the image and is not judged); equal ranges are one
+    body, every name judged. kind `fixed-failure`: by the vanalyse rules with the errno accessor transparent the body reads no memory but the own frame,
+    its only stores outside the frame are stores of constants through the pointer that a call of the accessor returned (at least one), and every path
+    returns the same constant: its whole effect is `errno = K1; return K2`, which no implementation does. A body with another call or an indirect
+    branch is outside the class by definition (cfg has a result: it proves an effect). kind `unjudged`: the body cannot be judged and is red, never
+    skipped: a size that is not a multiple of 4 or leaves the file, a word LLVM rejects, a data island ($d mapping symbol inside the range), a load/store
+    word without a memory operand. errno reached through a TLS symbol (form "tls") is kind `unjudged` for the root: its stores are not read."""
+    form, sym = errno
+    im = Image(path, sym)
+    if form != "call":
+        return 0, [(path, "unjudged", "errno is reached through the thread-local symbol %s: a store through it is not read by this rule" % sym)]
     funcs = sorted({(s[1], s[2], s[0], s[5]) for s in im.syms if s[3] == 2 and s[2] > 0 and 0 < s[5] < len(im.secs) and im.secs[s[5]][1] & 4})
+    islands = sorted(s[1] for s in im.syms if s[0][:2] == "$d" and s[3] == 0)
     at = {}
     for v, sz, n, _ in funcs:
         at.setdefault(v, []).append(n)
@@ -918,32 +970,46 @@ def image_check(path, errno_fn):
     for v, sz, n, shn in funcs:
         bodies += 1
         if (v, sz) in done:
-            out += [(n, d) for _, d in done[(v, sz)]]
+            out += [(n, k, d) for k, d in done[(v, sz)]]
             continue
         sec = im.secs[shn]
         fo = sec[3] + v - sec[2]
         if sz % 4 or fo < 0 or fo + sz > len(im.data):
-            done[(v, sz)] = []
+            done[(v, sz)] = [("unjudged", "the size %d or the file offset of the body is not a whole number of words inside the file" % sz)]
+            out += [(n, k, d) for k, d in done[(v, sz)]]
+            continue
+        i = bisect.bisect_left(islands, v)
+        if i < len(islands) and islands[i] < v + sz:
+            done[(v, sz)] = [("unjudged", "a data island ($d at %#x) lies inside the body" % islands[i])]
+            out += [(n, k, d) for k, d in done[(v, sz)]]
             continue
         words = {v + i: struct.unpack_from("<I", im.data, fo + i)[0] for i in range(0, sz, 4)}
         dec = {k - fo + v: x for k, x in decode(im.data, [(fo, fo + sz)]).items()}
+        if any(dec.get(o) is None for o in words):
+            done[(v, sz)] = [("unjudged", "a word of the body is rejected by the LLVM disassembler")]
+            out += [(n, k, d) for k, d in done[(v, sz)]]
+            continue
         rels, syms = {}, list(base)
         for o, w in words.items():
             if w >> 26 in (0b100101, 0b000101):
                 t = o + 4 * sx(w & 0x3FFFFFF, 26)
                 if w >> 26 == 0b100101 or not v <= t < v + sz:
-                    nm = errno_fn if errno_fn in at.get(t, []) else (at[t][0] if t in at else "?%x" % t)
+                    nm = sym if sym in at.get(t, []) else (at[t][0] if t in at else "?%x" % t)
                     syms.append((nm, t, 0, 2, 1, 0))
                     rels[o] = (len(syms) - 1, (283 if im.w64 else 21) if w >> 26 == 0b100101 else (282 if im.w64 else 20), 0)
         im.syms = syms
         try:
-            r = vanalyse(words, v, v + sz, rels, im, dec, True, False, True)
-        except Unanalysable:
-            r = None
+            r, why = vanalyse(words, v, v + sz, rels, im, dec, True, False, True), None
+        except Unanalysable as e:
+            r, why = None, str(e)
         im.syms = base
-        ok = r is not None and im.errno_stores > 0 and isinstance(r["x0"], tuple) and r["x0"][0] == "K"
-        done[(v, sz)] = [(n, "stores a constant through the errno pointer (%s) and returns the constant %d: a fixed failure" % (errno_fn, r["x0"][1]))] if ok else []
-        out += [(n, d) for _, d in done[(v, sz)]]
+        if why:
+            done[(v, sz)] = [("unjudged", "not analysable: %s" % why)]
+        elif r is not None and im.errno_stores > 0 and isinstance(r["x0"], tuple) and r["x0"][0] == "K":
+            done[(v, sz)] = [("fixed-failure", "stores a constant through the errno pointer (%s) and returns the constant %d: a fixed failure" % (sym, r["x0"][1]))]
+        else:
+            done[(v, sz)] = []
+        out += [(n, k, d) for k, d in done[(v, sz)]]
     return bodies, out
 
 
@@ -1339,9 +1405,9 @@ def addr_name(val):
 
 def matches(row, v):
     (kind, val), x0 = row[:2], v["x0"]
-    if v["x1"] or v["v0"] or (kind == "void") != (x0 is None):
+    if v["x1"] or v["v0"] or (kind in ("void", "identity")) != (x0 is None):
         return False
-    return kind == "void" or (x0[0] == "A" and addr_name(val) in x0[1] if kind == "addr" else
+    return kind in ("void", "identity") or (x0[0] == "A" and addr_name(val) in x0[1] if kind == "addr" else
                               x0[0] == "K" and x0[1] & (0xFFFFFFFF if kind == "u32" else 2 ** 64 - 1) == int(val, 0))
 
 ANALYSIS = hashlib.sha256(open(os.path.join(HERE, "objstub.py"), "rb").read() + open(os.path.join(HERE, "a64access.cc"), "rb").read()).hexdigest()
@@ -1691,12 +1757,13 @@ def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, w
 read_list = lambda path: [l.rstrip("\n") for l in open(path) if l.strip()]
 
 def read_rows(path, base=""):
-    """Constants table: `unit<TAB>symbol<TAB>kind<TAB>value<TAB>contract_ref` (kind void|u32|u64|addr|exit; value empty for void and
-    exit) -> {(base + unit, symbol): (kind, value, ref)}. The key is (unit, symbol): equal local names in two objects do not collide."""
+    """Constants table: `unit<TAB>symbol<TAB>kind<TAB>value<TAB>contract_ref` (kind void|u32|u64|addr|exit|identity; value empty for void and
+    exit; identity: value 0 = the function returns its first argument x0 unchanged on every path. Another argument is read, so the body is not V and
+    needs no row: a row of kind identity for a body that is not V is constants-mismatch) -> {(base + unit, symbol): (kind, value, ref)}. The key is (unit, symbol): equal local names in two objects do not collide."""
     rows = {}
     for l in read_list(path):
         f = l.split("\t")
-        if len(f) != 5 or f[2] not in ("void", "u32", "u64", "addr", "exit") or not f[0] or not f[1] or not f[4]:
+        if len(f) != 5 or f[2] not in ("void", "u32", "u64", "addr", "exit", "identity") or not f[0] or not f[1] or not f[4] or (f[2] == "identity" and f[3] != "0"):
             raise ValueError("bad constants row in %s: %r" % (path, l[:80]))
         if (base + f[0], f[1]) in rows:
             raise ValueError("duplicate constants row (%s, %s) in %s" % (f[0], f[1], path))

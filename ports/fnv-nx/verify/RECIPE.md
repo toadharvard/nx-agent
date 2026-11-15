@@ -198,7 +198,7 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   `{stage, path}`, read by resolve_input) at `/in/1`, `/in/2`, ... in list order; the installed files of each declared deb at `/deb/<name>/<absolute path>`; its `/out`.
   The root is read-only, `/tmp` and `/work` are not writable. `debs` are names of `env.json` `debs.packages`; an undeclared name is red (check).
 - An artifact with a PT_INTERP is started through the file at that path inside a declared deb (`/deb/<name>/<PT_INTERP>`, the deb's own symlinks
-  followed; no alias such as the usr-merge links is assumed: a PT_INTERP reachable only through one is red until a pinned deb ships them), with `--library-path` over the declared debs'
+  followed; no alias such as the usr-merge links is relied on: a PT_INTERP reachable only through one is red until a pinned deb ships them), with `--library-path` over the declared debs'
   `lib/x86_64-linux-gnu` and `usr/lib/x86_64-linux-gnu`. A PT_INTERP that no declared deb provides is red; no loader path is hard-coded.
 - `"host_cpu": "cpuref"` (optional): the pin `verify/cpuref.json` {vendor_id, family, model, stepping, microcode, model_name} (the /proc/cpuinfo fields,
   ints as numbers; a null value means the field is ABSENT from /proc/cpuinfo (a VM has no microcode line), never a wildcard) is in the stage key. Before a stage that is not a cache hit runs, every processor of /proc/cpuinfo must equal the pin, else the stage
@@ -250,8 +250,8 @@ LF-terminated, ASCII; an absent section is no indirect call) into the sorted uni
 generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`),
 is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
 
-### `errno_accessor` (objstub)
-`errno_accessor: SYMBOL` is required of every root with a link stage: the function that the libc `errno` macro calls (it returns the address of errno). objstub reads the final ELF through it (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image).
+### errno (objstub, derived, no recipe key)
+How the root's libc reaches `errno` is derived per root: objstub compiles `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler and unit flags and reads the object (`errno_probe`): a call relocation to a symbol X is the accessor, a TLS relocation to Y is the thread-local form. The final ELF is then judged (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image). A body that cannot be judged (a data island, a word LLVM rejects, an odd size) is the finding `unjudged`; the TLS form is `unjudged` for the root. Nothing is skipped.
 
 ### `error_abi` and `empty_handlers` (objstub)
 `error_abi` declares the root's one failure function and how its definition signals failure: `{"fail": SYMBOL, "kind": "noreturn"}` (the definition does

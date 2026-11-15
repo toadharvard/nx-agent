@@ -138,7 +138,7 @@ static void file_destroy(struct w32_obj *o)
     if (f->fd >= 0)
         os_file_close(f->fd);
     if (f->dirty)
-        clk_file_stamp(f->se.host, CLK_FS_WRITE);
+        VT_FILE_STAMP(f->se.host, CLK_FS_WRITE);
     if (!f->linked)
         return;
     os_lock(&g_flock);
@@ -155,7 +155,7 @@ static void file_destroy(struct w32_obj *o)
                 os_rmdir(f->se.host);
             else
                 os_remove(f->se.host);
-            clk_file_removed(f->se.host);
+            VT_FILE_REMOVED(f->se.host);
             ro_clear(f->se.key);
         }
     }
@@ -399,9 +399,9 @@ static HANDLE create_core(LPCSTR name, DWORD access, DWORD share, DWORD disp, DW
     f->linked = 1;
     ent_link(&f->se);
     if (!isdir && !exists)
-        clk_file_stamp(host, CLK_FS_CREATE);                                  /* a new file: created now */
+        VT_FILE_STAMP(host, CLK_FS_CREATE);                                  /* a new file: created now */
     else if (!isdir && (disp == CREATE_ALWAYS || disp == TRUNCATE_EXISTING))
-        clk_file_stamp(host, CLK_FS_WRITE);                                   /* replaced or truncated: written now */
+        VT_FILE_STAMP(host, CLK_FS_WRITE);                                   /* replaced or truncated: written now */
     if (!exists || disp == CREATE_ALWAYS) { /* a created or replaced file takes the attributes of this call */
         ro_clear(key);
         if (flags & FILE_ATTRIBUTE_READONLY)
@@ -574,7 +574,7 @@ extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAP
         *put = (DWORD)done;
     if (!f->dev && done > 0) {
         f->dirty = 1;
-        clk_file_stamp(f->se.host, CLK_FS_WRITE);
+        VT_FILE_STAMP(f->se.host, CLK_FS_WRITE);
     }
     if (f->wt && !f->dev)
         os_file_sync(f->fd);                                    /* WRITE_THROUGH: on the medium before return */
@@ -713,7 +713,7 @@ extern "C" BOOL SetEndOfFile(HANDLE h)
         return FALSE;
     }
     f->dirty = 1;
-    clk_file_stamp(f->se.host, CLK_FS_WRITE);
+    VT_FILE_STAMP(f->se.host, CLK_FS_WRITE);
     return TRUE;
 }
 
@@ -728,7 +728,7 @@ extern "C" BOOL GetFileTime(HANDLE h, LPFILETIME c, LPFILETIME a, LPFILETIME w)
     if (!f || os_file_fstat(f->fd, &st))
         return FALSE;
     int64_t ft[3];
-    if (clk_file_times(f->se.host, ft)) {   /* the verification mode's stamps */
+    if (VT_FILE_TIMES(f->se.host, ft)) {   /* the verification mode's stamps */
         if (c) w32_set_ft(c, (ULONGLONG)ft[0]);
         if (a) w32_set_ft(a, (ULONGLONG)ft[1]);
         if (w) w32_set_ft(w, (ULONGLONG)ft[2]);
@@ -774,7 +774,7 @@ static BOOL delete_core(LPCSTR name, int utf8)
         else {
             ent_retire(key);
             ro_clear(key);
-            clk_file_removed(host);
+            VT_FILE_REMOVED(host);
             ok = TRUE;
         }
     }
@@ -806,7 +806,7 @@ extern "C" BOOL CreateDirectoryA(LPCSTR name, void *sa)
             SetLastError(ERROR_PATH_NOT_FOUND);
         return FALSE;
     }
-    clk_file_stamp(host, CLK_FS_CREATE);
+    VT_FILE_STAMP(host, CLK_FS_CREATE);
     return TRUE;
 }
 
@@ -820,7 +820,7 @@ extern "C" BOOL RemoveDirectoryA(LPCSTR name)
         fail_os(r, host);
         return FALSE;
     }
-    clk_file_removed(host);
+    VT_FILE_REMOVED(host);
     return TRUE;
 }
 
@@ -854,7 +854,7 @@ static BOOL move_core(LPCSTR from, LPCSTR to, int utf8)
             ent_rekey(ka, b, kb);
             if (ro)
                 ro_set(kb);
-            clk_file_moved(a, b);
+            VT_FILE_MOVED(a, b);
             ok = TRUE;
         }
     }
@@ -946,7 +946,7 @@ extern "C" BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists)
     if (ok && src_ro)
         ro_set(sb.key);
     if (ok)
-        clk_file_stamp(b, CLK_FS_CREATE);   /* the copy is a file written now */
+        VT_FILE_STAMP(b, CLK_FS_CREATE);   /* the copy is a file written now */
     os_unlock(&g_flock);
     return ok;
 }
@@ -1023,7 +1023,7 @@ static BOOL find_fill(struct w32_find *f, LPWIN32_FIND_DATAA fd)
         fd->dwFileAttributes = attrs_locked(p, &st);
         os_unlock(&g_flock);
         int64_t cft[3];
-        if (clk_file_times(p, cft)) {   /* the verification mode's stamps */
+        if (VT_FILE_TIMES(p, cft)) {   /* the verification mode's stamps */
             w32_set_ft(&fd->ftCreationTime, (ULONGLONG)cft[0]);
             w32_set_ft(&fd->ftLastAccessTime, (ULONGLONG)cft[1]);
             w32_set_ft(&fd->ftLastWriteTime, (ULONGLONG)cft[2]);

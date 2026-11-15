@@ -274,7 +274,7 @@ DWORD GetCurrentProcessId(void);
 void Sleep(DWORD);
 DWORD SleepEx(DWORD, BOOL);
 BOOL SwitchToThread(void);
-void ExitProcess(UINT);
+void ExitProcess(UINT) __attribute__((noreturn));   /* MSDN ExitProcess: "does not return" */
 DWORD TlsAlloc(void);
 LPVOID TlsGetValue(DWORD);
 BOOL TlsSetValue(DWORD, LPVOID);

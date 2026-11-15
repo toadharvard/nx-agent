@@ -8,6 +8,8 @@
 #include "plugin-version.h"
 #include "langhooks.h"
 #include "builtins.h"
+#include "options.h"
+#include <libgen.h>
 #include <cstring>
 #include <set>
 #include <string>
@@ -24,8 +26,10 @@ static void on_unit(void *, void *) {
   // exception: (1) the EH-resume routines GCC itself emits for a RESX (the explicit builtins __builtin_unwind_resume and
   // __builtin_cxa_end_cleanup: whatever symbol the target's EH lowering uses), (2) in a C++ TU a noreturn function the compiler does not
   // flag nothrow: the language lets it raise an exception, so its call is a transfer of control (EH class), not process end.
-  // In a C TU every noreturn function is a terminator (C has no exceptions). TREE_NOTHROW/TREE_THIS_VOLATILE are GCC's own flags.
-  bool cxx = strncmp(lang_hooks.name, "GNU C++", 7) == 0;
+  // In a C TU, and in a C++ TU compiled with -fno-exceptions (flag_exceptions == 0: no handler exists, a throw ends the process), every noreturn
+  // function is a terminator. TREE_NOTHROW/TREE_THIS_VOLATILE and flag_exceptions are GCC's own flags.
+  // (3) A function declared by <setjmp.h> (ISO C 7.13: longjmp, siglongjmp, _longjmp) is a control transfer to the caller of a setjmp, not process end.
+  bool cxx = strncmp(lang_hooks.name, "GNU C++", 7) == 0 && flag_exceptions;
   std::set<std::string> term, unw;
   for (int b : {(int)BUILT_IN_UNWIND_RESUME, (int)BUILT_IN_CXA_END_CLEANUP}) {
     tree d = builtin_decl_explicit((built_in_function)b);
@@ -34,7 +38,9 @@ static void on_unit(void *, void *) {
   for (tree d : decls)
     if (TREE_THIS_VOLATILE(d) && DECL_NAME(d)) {
       std::string n = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
-      (cxx && !TREE_NOTHROW(d) ? unw : term).insert(n);
+      const char *src = DECL_SOURCE_FILE(d);
+      std::string base = src ? std::string(src).substr(std::string(src).find_last_of('/') + 1) : "";
+      ((cxx && !TREE_NOTHROW(d)) || base == "setjmp.h" ? unw : term).insert(n);
     }
   FILE *f = fopen(outpath.c_str(), "w");
   if (!f) return;
