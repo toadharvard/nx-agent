@@ -38,14 +38,14 @@ import unitstage  # noqa: E402
 def profile_findings(root, target, objs):
     """The root's target profile, from its record, decides what an object may be and which analysis judges its bodies (the one declaration: recipe.TARGETS / KIND_EMU).
     OBJS [(id, path)] -> findings [(id, name, kind, detail)]: an object whose (ELF class, e_machine) is not one of the profile's is red; a guest root with matching
-    objects has none (its bodies get the AArch64 analysis); a host root has no body analyzer yet, so it is red as a root (one finding), never an abort. The doubles
+    objects has none (its bodies get the AArch64 analysis), and so has a host root with x86-64 objects (its bodies get the x86-64 analysis, objstub_x64.py: one rule set, one judge). The doubles
     check (doubles.py) reads symbol tables and judges every root of either profile."""
     allowed = {recipe.TARGETS[e] for k in (("pie",) if target == "guest" else ("exe", "shared")) for e in recipe.KIND_EMU[k]}
     mis = [(oid, "e_machine", "target-mismatch", "object has (ELF class, e_machine) %s, the %s profile allows %s" % (recipe.object_target(path), target, sorted(allowed)))
            for oid, path in objs if recipe.object_target(path) not in allowed]
     if mis:
         return mis
-    return [] if target == "guest" else [(root, "objstub", "no-body-analyzer", "objstub: no body analyzer for profile %s" % target)]
+    return []
 
 
 def root_check(root, repo, cache, jobs, built=None):
@@ -105,7 +105,7 @@ def root_check(root, repo, cache, jobs, built=None):
         conv = (rec.get("external_errors") or {}).get(u.split("/", 1)[0]) if "/" in u else None
         if conv and rec.get("sources"):   # a unit `<external>/<path>` is a copy of that external's file (recipe `sources`)
             ext[base + u] = (conv["type"], conv["success"], rets.get(k, {}))
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, gen, finds, abi, records, image, ext
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe, 183 if recipe.entry_of(roots, root).get("target") == "guest" else 62), rows, gen, finds, abi, records, image, ext
 
 
 def declared_pins(repo, cache):

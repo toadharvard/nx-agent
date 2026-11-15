@@ -132,5 +132,30 @@ r1 = objstub.analyse_all([(o1, o1)], set(), set(), cdir, 1, None, 62)
 r2 = objstub.analyse_all([(o1, o1)], set(), set(), cdir, 1, None, 62)
 check("x64: a second run is served from the cache with the same result", r1 == r2 and os.listdir(os.path.join(cdir, "objstub")), r1)
 
+# image_check on a linked x86-64 image (the host profile's elf output): the same fixed-failure rule, errno reached through a call
+IMG = ("#include <errno.h>\n#include <unistd.h>\n"
+       "int fixedfail(void) { errno = 22; return -1; }\n"
+       "int realone(int fd) { errno = 22; return (int)write(fd, \"x\", 1); }\n"
+       "int noerrno(void) { return -1; }\n"
+       "int twice(void) { errno = 5; errno = 6; return 0; }\n"
+       "int main(void) { return fixedfail() + realone(1) + noerrno() + twice(); }\n")
+src_ = os.path.join(ROOT, "img.c")
+open(src_, "w").write(IMG)
+for tag, extra in (("dynamic", []), ("static", ["-static"])):
+    exe = os.path.join(ROOT, "img-" + tag)
+    subprocess.run(CC["x64"] + ["-O2", "-no-pie"] + extra + [src_, "-o", exe], check=True, capture_output=True)
+    n, out = objstub.image_check(exe, ("call", "__errno_location"))
+    got = {(nm, k) for nm, k, _ in out}
+    check("x64 image (%s): errno=K; return K is fixed-failure" % tag, ("fixedfail", "fixed-failure") in got and ("twice", "fixed-failure") in got, out)
+    check("x64 image (%s): a body that also calls write, or has no errno store, is not judged a fixed failure" % tag, not {"realone", "noerrno", "main"} & {nm for nm, _ in got}, out)
+    check("x64 image (%s): every function body of the image is counted" % tag, n >= 5, n)
+n, out = objstub.image_check(os.path.join(ROOT, "img-dynamic"), ("tls", "errno"))
+check("x64 image: errno through a thread-local symbol is unjudged (red, never skipped)", [k for _, k, _ in out] == ["unjudged"], out)
+try:
+    objstub.image_check(os.path.join(ROOT, "o1.o"), ("call", "__errno_location"))
+    check("x64 image: a relocatable object is not an image", False)
+except ValueError:
+    check("x64 image: a relocatable object is not an image", True)
+
 print("%d failed" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

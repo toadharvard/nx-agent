@@ -987,6 +987,9 @@ def image_check(path, errno):
     branch is outside the class by definition (cfg has a result: it proves an effect). kind `unjudged`: the body cannot be judged and is red, never
     skipped: a size that is not a multiple of 4 or leaves the file, a word LLVM rejects, a data island ($d mapping symbol inside the range), a load/store
     word without a memory operand. errno reached through a TLS symbol (form "tls") is kind `unjudged` for the root: its stores are not read."""
+    if open(path, "rb").read(20)[18:20] == (62).to_bytes(2, "little"):   # the host profile's image: the same rule over x86-64 (objstub_x64.image_check)
+        import objstub_x64
+        return objstub_x64.image_check(path, errno)
     form, sym = errno
     im = Image(path, sym)
     if form != "call":

@@ -220,8 +220,8 @@ def hdr(cls, machine):
     return pth
 g32, g64, x64 = hdr(1, 183), hdr(2, 183), hdr(2, 62)
 check("profile: a guest root with ELF32 AArch64 objects has no finding (its bodies are analysed)", gate_objstub.profile_findings("r", "guest", [("a", g32)]) == [])
-check("profile: a host root is red as a root, one finding, no abort (no body analyzer for profile host)",
-      gate_objstub.profile_findings("r", "host", [("a", x64), ("b", g64)]) == [("r", "objstub", "no-body-analyzer", "objstub: no body analyzer for profile host")])
+check("profile: a host root with an x86-64 object has no finding (its bodies get the x86-64 analysis)", gate_objstub.profile_findings("r", "host", [("a", x64)]) == [])
+
 f = gate_objstub.profile_findings("r", "guest", [("a", g32), ("b", x64)])
 check("profile: an object whose e_machine is not the guest profile's is red, named by its id", [x[:3] for x in f] == [("b", "e_machine", "target-mismatch")], f)
 f = gate_objstub.profile_findings("r", "host", [("a", g32)])
