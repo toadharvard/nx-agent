@@ -16,6 +16,13 @@ from proof import forms, shape, symform, simdspec as S
 REG = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 
 
+def _load(M0, a, w):
+    """the memory operand of width w bits at a (little endian): None when the row reads no memory (mw None: an address-only operand), a single byte for w = 8, else the concatenation (a rule over mem_width)"""
+    if w is None: return None
+    bs = [z3.Select(M0, a + i) for i in reversed(range(w // 8))]
+    return bs[0] if len(bs) == 1 else z3.Concat(*bs)
+
+
 def _obligation(rep, F, sins_ops, imm, timeout):
     """refinement query of one Form F (symbolic or concrete) against the spec on the encoding rep; sins_ops: the instruction whose operands give the memory operand"""
     e = S.Enc(rep)
@@ -29,7 +36,7 @@ def _obligation(rep, F, sins_ops, imm, timeout):
         j = next(i for i, o in enumerate(sins_ops.operands) if o.type == 3)
         op = forms.Op(sins_ops, sins_ops.operands[j]); a = dsl.to_smt(forms.ea(op))
         w = S.mem_width(rep)
-        m = z3.Concat(*[z3.Select(M0, a + i) for i in reversed(range(w // 8))])
+        m = _load(M0, a, w)
     try: r = S.run(rep, d, m, a, gpr, imm)
     except S.F.Uncertified as ex: return 'uncertified', 'uncertified: ' + str(ex)
     except KeyError: return 'no-row', None
@@ -51,12 +58,117 @@ def _obligation(rep, F, sins_ops, imm, timeout):
         sa, sv, sb = r.store
         for k in range(sb // 8): mem = z3.Store(mem, sa + k, z3.Extract(8 * k + 7, 8 * k, sv))
     eq.append(P['mem'] == mem)
-    s = z3.Solver(); s.set('timeout', timeout)
-    s.add(r.env, z3.Not(z3.And(*goals, z3.Implies(nf, z3.And(*eq)))))
-    res = s.check()
-    if res == z3.unsat: return 'proved', None
-    if res == z3.sat: return 'FAILED', str(s.model())[:400]
-    return 'timeout', None
+    return _discharge(r.env, nf, goals, eq, timeout, r.fpl, d['mxcsr'])
+
+
+def _components(e, bits=False):
+    """one equality `lhs == rhs` as the list of (equality, chunk) that together are equivalent to it (a complete partition of the bits: 32-bit chunks of a 64..128-bit value; with `bits`, every bit of a 32-bit value: the six exception flags of MXCSR are independent bits): the lanes of a packed
+    operation do not depend on each other's bits of the DESTINATION, so each chunk is its own, smaller, query.  An equality of another sort stays whole (chunk None)."""
+    lhs, rhs = e.arg(0), e.arg(1)
+    if not z3.is_bv(lhs): return [(e, None)]
+    w = lhs.size()
+    if w == 32 and bits: return [(z3.Extract(k, k, lhs) == z3.Extract(k, k, rhs), None) for k in range(32)]
+    if 64 <= w <= 128: return [(z3.Extract(32 * k + 31, 32 * k, lhs) == z3.Extract(32 * k + 31, 32 * k, rhs), k) for k in range(w // 32)]
+    return [(e, None)]
+
+
+_EXP = {32: (8, 23), 64: (11, 52)}
+_TAC = z3.Then('simplify', 'propagate-values', 'solve-eqs', 'fpa2bv', 'simplify', 'bit-blast', 'sat')
+
+
+def _classes(x, w):
+    """the five classes of a binary w operand, a complete and disjoint partition of its bit patterns: exponent all zeros / all ones / other  x  fraction zero / nonzero"""
+    eb, fb = _EXP[w]; ex = z3.Extract(w - 2, fb, x); fr = z3.Extract(fb - 1, 0, x)
+    z, ones = z3.BitVecVal(0, eb), z3.BitVecVal((1 << eb) - 1, eb); fz = fr == z3.BitVecVal(0, fb)
+    return [z3.And(ex == z, fz), z3.And(ex == z, z3.Not(fz)), z3.And(ex == ones, fz), z3.And(ex == ones, z3.Not(fz)), z3.And(z3.Not(ex == z), z3.Not(ex == ones))]
+
+
+def _case_partition(fpl, chunk, mx):
+    """the case split of an FP row, with its completeness stated: MXCSR.RC (bits 14:13: 4 values) x MXCSR.FTZ (bit 15: 2 values) x the class of every operand of the lanes the part depends on (5 classes each,
+    _classes).  Each factor is a complete, disjoint partition of its variable, so the product is one: the union of the cases is every state, and the part holds iff it holds in each case.  A part that depends
+    on more than two operands (the MXCSR flags of a packed operation) is split by RC and FTZ only."""
+    facs = [[z3.Extract(14, 13, mx) == z3.BitVecVal(v, 2) for v in range(4)], [z3.Extract(15, 15, mx) == z3.BitVecVal(v, 1) for v in range(2)]]
+    ops = [(w, x) for k, (w, xs) in enumerate(fpl) if chunk is None or k == (chunk if w == 32 else chunk // 2) for x in xs]
+    if len(ops) <= 2: facs += [_classes(x, w) for w, x in ops]
+    cases = [[]]
+    for f in facs: cases = [c + [g] for c in cases for g in f]
+    return cases
+
+
+def _consts(e):
+    """names of the uninterpreted constants (state variables, arrays) of a term"""
+    acc, seen, st = set(), set(), [e]
+    while st:
+        x = st.pop()
+        if x.get_id() in seen: continue
+        seen.add(x.get_id())
+        if z3.is_const(x) and x.decl().kind() == z3.Z3_OP_UNINTERPRETED: acc.add(x.decl().name())
+        st.extend(x.children())
+    return acc
+
+
+_BUDGET = [0, 0.0]                  # [seconds per shape (0: none), deadline of the shape being checked]
+_QC = {}                              # canonical query -> proved (unsat): sha256 of the SMT-LIB text of the canonical assertions
+_QCFILE = os.environ.get('SIMD_QCACHE')
+
+
+def _qc_load():
+    if _QCFILE and os.path.exists(_QCFILE) and not _QC:
+        for ln in open(_QCFILE): _QC[ln.strip()] = True
+
+
+def _canonical(g, cs, env, fpl, mx):
+    """the lane function with its operands abstracted: every FP lane operand of the row (fpl) is replaced by a fresh variable (the same term on both sides of the equality, so this is a substitution of equal
+    terms, not an assumption), and only the hypotheses on MXCSR and those operands are kept (weaker hypotheses: a proof is still a proof).  -> (assertions, ok); ok is False when the part still depends on
+    any other state (a preserved register, memory): it is then not a pure lane function and is asked whole."""
+    ops, seen = [], set()
+    for w, xs in fpl:
+        for x in xs:
+            if x.get_id() not in seen: seen.add(x.get_id()); ops.append((w, x))
+    pairs = [(x, z3.BitVec('opv%d' % i, w)) for i, (w, x) in enumerate(ops)]
+    sub = lambda t: z3.substitute(t, *pairs)
+    allowed = {'mxcsr'} | {v.decl().name() for _, v in pairs}
+    g2 = z3.simplify(sub(g)); cs2 = [sub(c) for c in cs]
+    keep = [sub(c) for c in (env.children() if z3.is_and(env) else [env])]
+    keep = [c for c in keep if _consts(c) <= allowed]
+    if not _consts(g2) <= allowed: return None
+    return keep + cs2 + [z3.Not(g2)]
+
+
+def _ask(asserts, timeout):
+    s = _TAC.solver(); s.set('timeout', timeout); s.add(*asserts)
+    return s
+
+
+def _discharge(env, nf, goals, eq, timeout, fpl=(), mx=None):
+    """proved iff every part of every goal is unsat under env (and nf for the state parts), in every case of its case partition (FP rows: _case_partition; others: one case).  Parts that simplify to true
+    (a register the instruction does not touch) are not asked.  An FP part that is a pure function of its lane operands and MXCSR is asked in its canonical form (_canonical), and a proved canonical query
+    is remembered (the same lane function of the builder is proved once, whatever register or address the shape names); anything the canonical query does not prove is asked whole."""
+    import hashlib, time
+    _qc_load()
+    parts = [(g, False, None) for g in goals] + [(c, True, k) for e in eq for c, k in _components(e, bool(fpl))]
+    unknown = False
+    for g0, state, chunk in parts:
+        g = z3.simplify(g0)
+        if z3.is_true(g): continue
+        cases = _case_partition(fpl, chunk, mx) if fpl else [[]]
+        for cs in cases:
+            if _BUDGET[0] and time.time() > _BUDGET[1]: unknown = True; break          # the shape's wall-clock budget is spent: the rest is not decided (timeout)
+            if fpl and state:
+                can = _canonical(g0, cs, env, fpl, mx)
+                if can is not None:
+                    key = hashlib.sha256(z3.And(*can).sexpr().encode()).hexdigest()
+                    if key in _QC: continue
+                    if _ask(can, timeout).check() == z3.unsat:
+                        _QC[key] = True
+                        if _QCFILE: open(_QCFILE, 'a').write(key + '\n')
+                        continue
+            s = _ask([env, *cs, z3.And(nf, z3.Not(g)) if state else z3.Not(g)], timeout)          # FP terms are bit-blasted (fpa2bv) and decided by the SAT core
+            t0 = time.time(); res = s.check()
+            if os.environ.get('SIMD_TRACE') and (res != z3.unsat or time.time() - t0 > 2): print('  part', str(g)[:70].replace('\n', ' '), res, round(time.time() - t0, 1), flush=True)
+            if res == z3.sat: return 'FAILED', str(s.model())[:400]
+            if res != z3.unsat: unknown = True
+    return ('timeout', None) if unknown else ('proved', None)
 
 
 def check(key, timeout=60000):
@@ -108,6 +220,7 @@ def main(a):
     cnt = {}
     for k in keys:
         if only not in k: continue
+        if '--budget' in a: import time; _BUDGET[0] = int(a[a.index('--budget') + 1]); _BUDGET[1] = time.time() + _BUDGET[0]
         r, info = check(k, int(a[a.index('--timeout') + 1]) if '--timeout' in a else 60000)
         if r == 'no-row' and k in ud: r = 'ud-class'                  # no spec row by rule: the opmap's cleared class (Form.fault(UD) is its own certificate), not a SIMD row
         cnt[r] = cnt.get(r, 0) + 1
