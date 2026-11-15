@@ -284,3 +284,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 18:05Z v3 shard 1/54 done (farm 05): proved 337, gap 9, failed 0. Complete: 17/54. Farm 05 K=3 started on the fixed script (76cf2acca).
 - 18:10Z v3 shards 34 (proved 336, gap 9) and 35 (proved 334, gap 11) done (farm 11), failed 0. Complete: 19/54.
 - 18:10Z v3 shards 47 (proved 336, gap 9) and 48 (proved 337, gap 8) done (farm 12), failed 0. Complete: 21/54.
+- 18:30Z v3 shard 2/54 done (farm 05): proved 337, gap 9, failed 0. Complete: 22/54. Farm 05 K=3 proving on the fixed script; K=4 started beside it (two-shard lock test).
