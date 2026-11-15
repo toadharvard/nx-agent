@@ -20,7 +20,7 @@ Certificate field `assumptions` (ids):
               (non-wrapping) address leaves [0, 2^32) (model_sail.FAULT_OK); symcheck.py checks it for every relative target of the exe
 Split record: always 'none' (no field is case-split: isla runs on the symbolic bytes without forking on them in a way that needs it; the paths it forks
 into are exhaustive with their path conditions in the merge)."""
-import argparse, collections, json, os, sys
+import argparse, collections, json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
 from proof import shape as shp, symform, prove, model_sail
@@ -108,7 +108,8 @@ def main():
     with open(path, 'a') as out:
         for key in mine:
             if key in done: continue
-            out.write(json.dumps(one(key, a), sort_keys=True) + '\n'); out.flush()
+            t0 = time.time(); rec = one(key, a); rec['seconds'] = round(time.time() - t0, 2)           # the wall time of the shape (not part of the certificate): the shard count is derived from its distribution
+            out.write(json.dumps(rec, sort_keys=True) + '\n'); out.flush()
     rs = [json.loads(l) for l in open(path)]; c = collections.Counter(r['result'] for r in rs)
     print('shard %d/%d done: %d shapes  ' % (k, n, len(rs)) + ' '.join('%s=%d' % x for x in sorted(c.items())))
     return 0
