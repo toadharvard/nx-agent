@@ -1307,3 +1307,9 @@ Paused: w3b, w4, farm; no other work.
     - Every render root was cut with platform (no linking root yet); they return with cand3 or cand4. ASM-601..641 were retired with them.
     - w6 (doing): claude/fnv-l6-render-w6-cand4 = 88eb3fde6 rebased onto fb9dd044f. It restores exactly the ASM-6NN ids that render cites, deleting the citations of any assumption already removed, and runs the assumptions gate with render at 0. It is rebased onto the cand3 head when that is published, then goes to w12.
 - bottleneck: L1 cand3 (platform plus a linking root), then cand4 (render); L1's merge1 store fix (sm_link).
+- 22:38Z w6 claude/fnv-l6-render-w6-cand4 85b4893fc: trunk fb9dd044f plus render/ of 88eb3fde6.
+    - A rebase was impossible: the trunk has no render history.
+    - Restores exactly the 28 ASM-6NN ids render cites (all REMOVE); the assumptions gate is 127/127, render 0.
+    - Render cannot build on the cut trunk. Asked of L1 for cand3: admit entries, the host record or hostprofile, and gate_abspath in gates.d.
+    - w6 (doing): remove ASM-614 (one FOURCC reader with envq), ASM-633 (MAXD3DDECLLENGTH), ASM-637 (make_env host check) and ASM-641 (nxgpu4.h states image 0 = swapchain; L6A told) by landing what each record asks.
+- bottleneck: L1 cand3 (admit, host record, platform, linking root), then cand4.
