@@ -4,18 +4,27 @@ both envprobe2.c (mingw, real D3D9) and hostenv.cpp (our NxDirect3D9) include, s
 Domains are COMPLETE finite sets: every D3DFORMAT enum value of d3d9types.h + the FOURCC list + unknown values; every D3DDEVTYPE/D3DRESOURCETYPE/
 D3DMULTISAMPLE_TYPE enum value + invalid ones; every single usage bit of the 32-bit word + all pairs of the bits that are not masked by Wine
 (see render/d3d9/env/README.md for why single bits + pairs cover the usage function)."""
-import os, re, sys
+import json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
 fcc = lambda s: sum(ord(c) << (8 * i) for i, c in enumerate(s))
 
 
+def enum_items(hdr, typedef):
+    """[(name, value)] of `typedef enum TYPEDEF { .. }` of the header, in order; an enumerator without `=` takes the previous value + 1 (C rule)"""
+    t = open(hdr).read(); t = t[t.index("typedef enum " + typedef):]; t = t[t.index("{") + 1:t.index("}")]
+    t = re.sub(r"/\*.*?\*/|//[^\n]*", "", t, flags=re.S); out = []; v = -1
+    for item in t.split(","):
+        m = re.fullmatch(r"\s*(\w+)\s*(?:=\s*(0x[0-9A-Fa-f]+|\d+))?\s*", item)
+        if not m: continue
+        v = int(m.group(2), 0) if m.group(2) else v + 1; out.append((m.group(1), v))
+    return out
+
+
 def enum_domain(hdr, typedef, force):
-    """(members, complement) of a header enum: members = every enumerator value but the FORCE_DWORD one; complement = representatives of every other 32-bit
-    value: min - 1 (when min > 0), max + 1 and 0x7fffffff (the largest signed 32-bit value; the probe rows of the table were taken with it). The representatives stand for the whole complement only where the closing rule of the
-    enum (proved at its use in load()) shows that Wine's code treats every value outside the enum alike."""
-    t = open(hdr).read(); t = t[t.index("typedef enum " + typedef):]; t = t[:t.index("} " + force[0] + ";")]
-    vals = {n: int(v, 0) for n, v in re.findall(r"(\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)", t)}
-    vals.pop(force[1]); mem = sorted(vals.values())
+    """(members, complement) of a header enum: members = every enumerator value but the FORCE_DWORD one (force = (typename, enumerator) or None); complement = representatives of every other
+    32-bit value: min - 1 (when min > 0), max + 1 and 0x7fffffff (the largest signed 32-bit value; the probe rows of the table were taken with it). The representatives stand for the whole
+    complement only where the closing rule of the enum (proved at its use in load()) shows that Wine's code treats every value outside the enum alike."""
+    mem = sorted(v for n, v in enum_items(hdr, typedef) if not (force and n == force[1]))
     return mem, ([mem[0] - 1] if mem[0] > 0 else []) + [mem[-1] + 1, 0x7fffffff]
 
 
@@ -48,17 +57,17 @@ def switch_formats(wine, fmtn):
 #  - any other value goes through the switch of wined3dformat_from_d3dformat (device.c:115) whose `default:` is WINED3DFMT_UNKNOWN: one behaviour for every unmapped number (1, 37, 255, 0x7fffffff, 0x41420143).
 UNKNOWN_FMT = [fcc("ZZZZ"), fcc("abcd"), fcc("~!@#"), 1, 37, 255, 0x7fffffff, 0x41420143]
 FMT = None   # set by load(): every D3DFORMAT enum value of the header + the known FOURCCs + UNKNOWN_FMT
-WU = DU = MSAA_MAX = None   # set by load(): WINED3DUSAGE_* (wined3d.h) and D3DUSAGE_* (d3d9types.h) by name; the largest D3DMULTISAMPLE_TYPE enumerator
+CAPS = WU = DU = MSAA_MAX = None   # set by load(): WINED3DUSAGE_* (wined3d.h) and D3DUSAGE_* (d3d9types.h) by name; the largest D3DMULTISAMPLE_TYPE enumerator
 KNOWN_FCC = None   # set by load(): the FOURCCs Wine 9.0 knows, sorted
 # DEVT, RTYPE, MSAA (and their *X / complement forms) are derived in load() from the enums of the mounted d3d9types.h (enum_domain)
 USAGE_BITS = [1 << i for i in range(32)]   # the 32 single bits of the DWORD usage word; PAIRS, MASK and the usage domains below are derived in load()
 X8 = R5 = X1 = A2R10 = None   # D3DFMT_X8R8G8B8, R5G6B5, X1R5G5B5, A2R10G10B10: read by name from the header in load()
 # (name, [per-argument domain: list of values or a domain name])
-D = dict(FMT=None, DEVT=None, DEVTX=None, RTYPE=None, RTYPEX=None, MSAA=None, USAGE_ALL=[0] + USAGE_BITS, PAIRS=None, WIN=[0, 1],
-         A0=[0], HAL=[1], X8=None, FMT_AD=None, SMALLRT=None, RT2=None, USM3=None, AFLAG=[0] + [1 << i for i in range(32)] + [0xffffffff], DISP4=None,
-         SCAN=[0, 1, 2, 3, 0x7fffffff], NZ=[0, 1, 2, 5, 0xffffffff], SZ=[0x18, 0x10, 0, 0x1c, 0xffffffff], FMT12=None,
+D = dict(FMT=None, DEVT=None, DEVTX=None, RTYPE=None, RTYPEX=None, MSAA=None, USAGE_ALL=[0] + USAGE_BITS, PAIRS=None, WIN=None,
+         A0=None, HAL=None, X8=None, FMT_AD=None, SMALLRT=None, RT2=None, USM3=None, AFLAG=None, DISP4=None,
+         SCAN=None, NZ=None, SZ=None, FMT12=None,
          USM=None, FMT_SM=None,
-         OORA=[1, 2, 0x7fffffff, 0xffffffff], SDK=[0, 1, 0x1f, 0x20, 0x21, 0x80000020, 0xffffffff])
+         OORA=None, SDK=None)
 Q = []   # (op, [domains])
 Q += [("GetAdapterCount", [])]
 Q += [("GetAdapterIdentifier", [["A0"], ["AFLAG"]]), ("GetAdapterMonitor", [["A0"]]), ("GetAdapterDisplayMode", [["A0"]]), ("GetAdapterModeCount", [["A0"], ["FMT"]]),
@@ -93,8 +102,7 @@ NARGS = {"GetAdapterCount": 0, "GetAdapterIdentifier": 2, "GetAdapterMonitor": 1
 
 def c_defines_enum(hdr, typedef):
     """{suffix: value} of an enum of the header: the enumerator names without their D3D..._ prefix (D3DRTYPE_SURFACE -> SURFACE)"""
-    t = open(hdr).read(); t = t[t.index("typedef enum " + typedef):]; t = t[:t.index("}")]
-    return {n.split("_", 1)[1]: int(v, 0) for n, v in re.findall(r"(\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)", t)}
+    return {n.split("_", 1)[1]: v for n, v in enum_items(hdr, typedef)}
 
 
 def c_defines(path, prefix):
@@ -115,10 +123,10 @@ def known_fourcc(wine):
     return out
 
 
-def load(hdr, spec, wine, d3d9h):
+def load(hdr, spec, wine, d3d9h, caps):
     """the one entry: hdr = d3d9types.h, spec = the interface table (D9_SPEC), wine = the pinned Wine mirror directory; all are the caller's arguments (no default, no path of this file).
     Builds FMT (and its domain D["FMT"]) and sets SPEC; nothing of this module is valid before it is called."""
-    global WU, DU, MSAA_MAX, FMT, SPEC, X8, R5, X1, A2R10, SWITCH, NA, INV, NOAUTOGEN
+    global CAPS, WU, DU, MSAA_MAX, FMT, SPEC, X8, R5, X1, A2R10, SWITCH, NA, INV, NOAUTOGEN
     global KNOWN_FCC
     FN = d3dformat_enum(hdr)
     KNOWN_FCC = sorted(known_fourcc(wine))
@@ -126,6 +134,35 @@ def load(hdr, spec, wine, d3d9h):
     X8, R5, X1, A2R10 = (FN["D3DFMT_" + n] for n in ("X8R8G8B8", "R5G6B5", "X1R5G5B5", "A2R10G10B10"))
     R = d3d_results(d3d9h); NA, INV, NOAUTOGEN = R["D3DERR_NOTAVAILABLE"], R["D3DERR_INVALIDCALL"], R["D3DOK_NOAUTOGEN"]
     D["X8"], D["FMT_AD"], D["DISP4"] = [X8], [X8, R5, X1], [X8, R5, X1, A2R10]
+    CAPS = c_defines(caps, "D3D")   # D3DDEVCAPS_*, D3DPTFILTERCAPS_*: the cap bits, by name (gen_env's masks)
+    # ordinals / counts of the declared machine: one adapter (D3DADAPTER_DEFAULT), one mode per accepted format (README: Modes); gen_env asserts both on the rows
+    AD = c_defines(d3d9h, "D3DADAPTER_DEFAULT")["D3DADAPTER_DEFAULT"]; ADAPTERS = MODES = 1
+    D["A0"] = [AD]
+    D["HAL"] = [c_defines_enum(hdr, "_D3DDEVTYPE")["HAL"]]
+    D["WIN"] = [0, 1]   # BOOL Windowed: FALSE, TRUE (Wine passes it as `!!windowed` through wined3d_check_device_type)
+    # OORA: adapter ordinals past the last adapter. Closing proof (Wine 9.0 dlls/d3d9/directx.c:130 and the first statement of every d3d9_* method): `output_idx >= wined3d_output_count` returns
+    #   D3DERR_INVALIDCALL (GetAdapterModeCount(Ex): 0, GetAdapterMonitor: NULL) before anything else is read: one behaviour for every ordinal >= the adapter count. Representatives: the count,
+    #   the count + 1 and the two largest values of the 32-bit word.
+    D["OORA"] = [ADAPTERS, ADAPTERS + 1, 0x7fffffff, 0xffffffff]
+    # NZ: the mode index of EnumAdapterModes(Ex). Valid: 0 .. MODES - 1. Proof: wined3d/directx.c:1365 returns the mode only for `match_idx++ == mode_idx` over the matching modes, otherwise
+    #   WINED3DERR_INVALIDCALL: one behaviour for every index >= the mode count. Representatives: the count, the count + 1, 5 and the largest value.
+    D["NZ"] = [0, MODES, MODES + 1, 5, 0xffffffff]
+    # SCAN: the D3DSCANLINEORDERING filter of the Ex mode calls: members of the enum + representatives of its complement. Proof: wined3d_scanline_ordering_from_d3d is a cast (d3d9_private.h:414) and
+    #   mode_matches_filter (wined3d/directx.c:1290-1293) rejects the mode iff `filter != UNKNOWN && mode != UNKNOWN && filter != mode`: for every value other than UNKNOWN the answer is `filter == the
+    #   mode's ordering`, so every value outside the enum behaves as INTERLACED (the mode is PROGRESSIVE).
+    so, sbad = enum_domain(hdr, "D3DSCANLINEORDERING", None); D["SCAN"] = so + sbad
+    # SZ: D3DDISPLAYMODEEX.Size of GetAdapterDisplayModeEx. Proof: directx.c:582 `mode->Size != sizeof(*mode)` returns D3DERR_INVALIDCALL before anything is read: one behaviour for every value but
+    #   sizeof(D3DDISPLAYMODEEX). Representatives: that size, sizeof(D3DDISPLAYMODE), 0, size + 4, the largest value.
+    ST = json.load(open(spec))["structs"]; sz = ST["D3DDISPLAYMODEEX"]["size"]
+    D["SZ"] = [sz, ST["D3DDISPLAYMODE"]["size"], 0, sz + 4, 0xffffffff]
+    # SDK: Direct3DCreate9(Ex)(sdk_version). Proof: d3d9_main.c:35-52 only TRACEs sdk_version: one behaviour for every value. Representatives: D3D_SDK_VERSION - 1, itself, + 1, with the high bit,
+    #   0, 1 and the largest value.
+    V = c_defines(d3d9h, "D3D_SDK_VERSION")["D3D_SDK_VERSION"]
+    D["SDK"] = [0, 1, V - 1, V, V + 1, V | 0x80000000, 0xffffffff]
+    # AFLAG: the Flags word of GetAdapterIdentifier: every single bit of the 32-bit word and all ones. Proof: directx.c:157 and wined3d_get_adapter_identifier read `flags & D3DENUM_WHQL_LEVEL` only,
+    #   so the single bits cover the function (D3DENUM_WHQL_LEVEL, d3d9.h, must be one of them).
+    D["AFLAG"] = [0] + USAGE_BITS + [0xffffffff]
+    if c_defines(d3d9h, "D3DENUM_WHQL_LEVEL")["D3DENUM_WHQL_LEVEL"] not in D["AFLAG"]: raise SystemExit("envq: D3DENUM_WHQL_LEVEL is not a single bit")
     # usage: the bits that reach wined3d_check_device_format's usage logic = WINED3DUSAGE_MASK | WINED3DUSAGE_QUERY_MASK (wined3d.h, Wine 9.0) + D3DUSAGE_RENDERTARGET | DEPTHSTENCIL (they become bind flags)
     WU = c_defines(os.path.join(wine, "include", "wine", "wined3d.h"), "WINED3DUSAGE_"); DU = c_defines(hdr, "D3DUSAGE_")
     MASK = WU["WINED3DUSAGE_MASK"] | WU["WINED3DUSAGE_QUERY_MASK"] | DU["D3DUSAGE_RENDERTARGET"] | DU["D3DUSAGE_DEPTHSTENCIL"]

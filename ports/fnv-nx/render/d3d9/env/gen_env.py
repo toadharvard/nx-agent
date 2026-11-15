@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""gen_env.py OUTDIR SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
+"""gen_env.py OUTDIR SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H: env_handheld.tsv + env_docked.tsv (tests/l6/env/make_env.py: our measurement of Wine 9.0 + Mesa llvmpipe) -> env_table.gen.h/.cpp (not checked in).
 Every table cell is DERIVED from rows through the closing rules of README.md, and every rule's premise is asserted on all rows it covers (a violated rule stops the generator,
 exit 2, naming it): devtype / adapter-format independence, format classes, usage-bit conjunction, struct writes iff success. The lookup functions are in env_rules.cpp.in.
 Profiles differ only where reported by the `profile differences` line."""
 import os, re, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
 sys.path.insert(0, HERE); import envq  # noqa: E402
-# OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H: the one place that parses the arguments (no default)
-envq.load(sys.argv[4], sys.argv[2], sys.argv[5], sys.argv[6])
+# OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H: the one place that parses the arguments (no default)
+envq.load(sys.argv[4], sys.argv[2], sys.argv[5], sys.argv[6], sys.argv[7])
 TSV_DIR = sys.argv[3]
 PROFILES = ["handheld", "docked"]; X8, R5, X1, A2R10 = envq.X8, envq.R5, envq.X1, envq.A2R10; HRC = [0, envq.NA, envq.INV, envq.NOAUTOGEN];  # all by name from d3d9types.h / d3d9.h
 HRN = {v: i for i, v in enumerate(HRC)}
@@ -74,6 +74,7 @@ def image(st, out, size):
 
 import json  # noqa: E402
 ST = json.load(open(envq.SPEC))["structs"]
+IDENT = ST["D3DADAPTER_IDENTIFIER9"]; IDENT_SIZE = IDENT["size"]; WHQL_OFF = next(f["off"] for f in IDENT["fields"] if f["name"] == "WHQLLevel")   # sizeof / offsetof of the spec
 
 
 def derive(R, DEV):
@@ -125,11 +126,11 @@ def derive(R, DEV):
     r, o = get("GetAdapterLUID", 0); f = fields(o); T["LUID"] = (int(f["LowPart"], 16), int(f["HighPart"], 16))
     if r or any(get("GetAdapterLUID", a) != (INV, "-") for a in oor): die("LUID")
     # identifier: one image, WHQLLevel = (flags & 2) != 0
-    base = image("D3DADAPTER_IDENTIFIER9", get("GetAdapterIdentifier", 0, 0)[1], 1100); T["IDENT"] = base
+    base = image("D3DADAPTER_IDENTIFIER9", get("GetAdapterIdentifier", 0, 0)[1], IDENT_SIZE); T["IDENT"] = base
     for (n, a), (r, o) in R.items():
         if n == "GetAdapterIdentifier":
             if a[0] == 0:
-                im = bytearray(image("D3DADAPTER_IDENTIFIER9", o, 1100)); im[1096:1100] = bytes(4); exp = bytearray(base); exp[1096:1100] = bytes(4)
+                im = bytearray(image("D3DADAPTER_IDENTIFIER9", o, IDENT_SIZE)); im[WHQL_OFF:WHQL_OFF + 4] = bytes(4); exp = bytearray(base); exp[WHQL_OFF:WHQL_OFF + 4] = bytes(4)
                 if r != 0 or im != exp or int(fields(o)["WHQLLevel"], 16) != (1 if a[1] & 2 else 0): die(f"GetAdapterIdentifier {a}")
             elif (r, o) != (INV, "-"): die(f"GetAdapterIdentifier {a} oor")
     # caps: image per device-type class (HAL / other), DeviceType field = 1 or 2
@@ -146,8 +147,8 @@ def derive(R, DEV):
     leaf = {n: (off, sz) for n, off, sz, k in envq.leaves(ST, "D3DCAPS9")}; capw = lambda img, n: int.from_bytes(img[leaf[n][0]:leaf[n][0] + leaf[n][1]], "little")
     T["DECLTYPES"] = capw(T["CAPS"][0], "DeclTypes")
     if capw(T["CAPS"][1], "DeclTypes") != T["DECLTYPES"]: die("DeclTypes is the same for every device type (nx_env_decltype_supported has no device argument)")
-    if capw(T["CAPS"][0], "DevCaps") & 0x01C00000: die("DevCaps has no RTPATCHES / RTPATCHHANDLEZERO / NPATCHES: the device promises no higher-order surfaces, so the bodies of dev/copy_misc.cpp are Wine 9.0's (dlls/d3d9/device.c d3d9_device_DrawRectPatch / d3d9_device_DrawTriPatch: FIXME + D3D_OK, d3d9_device_DeletePatch: FIXME + D3DERR_INVALIDCALL; rows 48-50 of verify/wine_fixme.tsv) and a recording that reports patch caps needs a real implementation instead")
-    if capw(T["CAPS"][0], "StretchRectFilterCaps") & ~0x03000300: die("StretchRectFilterCaps holds only MIN/MAG POINT/LINEAR bits (nxenv_stretch_filter)")
+    if capw(T["CAPS"][0], "DevCaps") & (envq.CAPS["D3DDEVCAPS_RTPATCHES"] | envq.CAPS["D3DDEVCAPS_RTPATCHHANDLEZERO"] | envq.CAPS["D3DDEVCAPS_NPATCHES"]): die("DevCaps has no RTPATCHES / RTPATCHHANDLEZERO / NPATCHES: the device promises no higher-order surfaces, so the bodies of dev/copy_misc.cpp are Wine 9.0's (dlls/d3d9/device.c d3d9_device_DrawRectPatch / d3d9_device_DrawTriPatch: FIXME + D3D_OK, d3d9_device_DeletePatch: FIXME + D3DERR_INVALIDCALL; rows 48-50 of verify/wine_fixme.tsv) and a recording that reports patch caps needs a real implementation instead")
+    if capw(T["CAPS"][0], "StretchRectFilterCaps") & ~(envq.CAPS["D3DPTFILTERCAPS_MINFPOINT"] | envq.CAPS["D3DPTFILTERCAPS_MINFLINEAR"] | envq.CAPS["D3DPTFILTERCAPS_MAGFPOINT"] | envq.CAPS["D3DPTFILTERCAPS_MAGFLINEAR"]): die("StretchRectFilterCaps holds only MIN/MAG POINT/LINEAR bits (nxenv_stretch_filter)")
     T["STRETCHCAPS"] = capw(T["CAPS"][0], "StretchRectFilterCaps")
     T["QMASK"] = QMASK
     # formats: classes
