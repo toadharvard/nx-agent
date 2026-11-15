@@ -63,6 +63,21 @@ def check(paths):
     return universe, red
 
 
+def by_class(red):
+    """{class: count} of the red rows: `differ` (copies of different identity: a real ODR violation), `undecidable: <reason>` (one count per reason),
+    `name-not-unique`"""
+    out = {}
+    for r in red.values():
+        if r.startswith('identity-undecidable'):
+            k = 'undecidable: ' + r.rsplit(': ', 1)[-1].replace(' ', '_')
+        elif r.startswith('name-resolved'):
+            k = 'name-not-unique'
+        else:
+            k = 'differ'
+        out[k] = out.get(k, 0) + 1
+    return dict(sorted(out.items()))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('objs', nargs='+')
@@ -73,7 +88,7 @@ def main(argv=None):
         print('odr: %s' % e, file=sys.stderr)
         return 2
     gatefile.write(NAME, len(uni), len(uni) - len(red), ['%s [%s]' % (i, r) for i, r in sorted(red.items())],
-                   'COMDAT signatures present in two or more of %d objects' % len(a.objs))
+                   'COMDAT signatures present in two or more of %d objects; red by class %s' % (len(a.objs), by_class(red)))
     print('odr: %d signatures, %d differ' % (len(uni), len(red)))
     return 1 if red else 0
 
