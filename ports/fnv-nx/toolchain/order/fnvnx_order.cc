@@ -1013,6 +1013,9 @@ static void order_single(gimple_stmt_iterator *gsi) {
   unit_copy(gsi, lhs, rhs, st, ld);
 }
 
+static void frame_escapes_compute(function *fun);
+static std::map<tree, std::set<tree> > frame_private;
+
 struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
@@ -1024,7 +1027,18 @@ struct order_pass : gimple_opt_pass {
     // returns in memory, asm operands) are the shared locals; they are made addressable before any access is classified, so no
     // earlier statement keeps a plain access to them.  Every other local is unshared (local_unshared).
     std::set<tree> taken;
-    address_taken_scan(fun, taken);
+    if (gimple_in_ssa_p(fun)) {
+      // Late position (SSA, after every pass that creates address forms): the shared locals are the frame variables that GCC's points-to
+      // solution of THIS body, taken before this pass adds a single atomic, does not prove private (frame_escapes_compute). The same fact
+      // is the `:n` of the frame record, so a plain access to a recorded variable without `:n` cannot arise.
+      frame_escapes_compute(fun);
+      std::set<tree> &priv = frame_private[fun->decl];
+      unsigned ix;
+      tree d;
+      FOR_EACH_LOCAL_DECL(fun, ix, d) if (TREE_ADDRESSABLE(d) && !priv.count(d)) taken.insert(d);
+      for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) if (TREE_ADDRESSABLE(p) && !priv.count(p)) taken.insert(p);
+    } else
+      address_taken_scan(fun, taken);
     // PARAMETER COPY.  A by-value parameter whose address is taken is a shared object, but the inliner (after this pass)
     // initializes the callee's parameter variable with a plain store when it inlines the body, an access this pass cannot
     // order. So the body works on a local copy instead: `copy = parm` at entry, every use of the parameter (the address
@@ -1110,7 +1124,7 @@ static std::map<tree, std::vector<tree> > frame_vars;   // the local variables a
 //       or names ADDR_EXPR in such a position or in an asm operand; a pointer without points-to info points anywhere;
 // (3) restates (2) from the statements, so a solution that missed a use cannot make a variable private. Pointers carried in integers are
 // covered by (2) only (the PTA models the conversion). ASM-001: the compiler's GIMPLE and points-to semantics.
-static std::map<tree, std::set<tree> > frame_private;   // per function: the address-taken locals with escapes=0
+static std::set<tree> frame_private_done;   // functions whose escapes fact is already computed: it is computed ONCE, by whichever pass first needs it (order's rewrite, before it adds its atomics), and never recomputed on the rewritten body   // per function: the address-taken locals with escapes=0
 
 struct frame_vars_pass : gimple_opt_pass {
   frame_vars_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
@@ -1131,15 +1145,18 @@ struct frame_vars_pass : gimple_opt_pass {
     return true;
   }
 
-  unsigned int execute(function *fun) final override {
+  static void compute(function *fun) {
     unsigned ix;
     tree d;
+    if (frame_private_done.count(fun->decl)) return;
     std::vector<tree> &v = frame_vars[fun->decl];
     FOR_EACH_LOCAL_DECL(fun, ix, d) v.push_back(d);
     std::vector<tree> cand = v;
     for (tree p = DECL_ARGUMENTS(fun->decl); p; p = DECL_CHAIN(p)) cand.push_back(p);
     std::set<tree> &priv = frame_private[fun->decl];
-    if (!flag_tree_pta || !gimple_in_ssa_p(fun) || !fun->gimple_df) return 0;          // (1): nothing is private
+    if (!flag_tree_pta || !gimple_in_ssa_p(fun) || !fun->gimple_df) return;          // (1): nothing is private
+    frame_private_done.insert(fun->decl);
+    compute_may_aliases();   // the solution of THIS body now, whichever pass calls (TODO_rebuild_alias is only the frame_vars pass's own request)
     std::set<tree> esc;
     bool all = false;
     struct pt_solution q;
@@ -1180,11 +1197,25 @@ struct frame_vars_pass : gimple_opt_pass {
             note(gimple_assign_rhs1(a));
         }
       }
-    if (all) return 0;
+    if (all) return;
     for (tree c : cand) if (!esc.count(c)) priv.insert(c);
+    return;
+  }
+  unsigned int execute(function *fun) final override {
+    compute(fun);
+    // the frame row lists every local at the LAST GIMPLE point: also the ones a pass after the escapes fact created (order's copies of
+    // by-value parameters, its temporaries); they are not in `priv`, so they are recorded as escaping
+    if (frame_private_done.count(fun->decl)) {
+      std::vector<tree> &v = frame_vars[fun->decl];
+      v.clear();
+      unsigned ix;
+      tree d;
+      FOR_EACH_LOCAL_DECL(fun, ix, d) v.push_back(d);
+    }
     return 0;
   }
 };
+static void frame_escapes_compute(function *fun) { frame_vars_pass::compute(fun); }
 static const pass_data frame_vars_data = {
     GIMPLE_PASS, "fnvnx_frame_vars", OPTGROUP_NONE, TV_NONE, PROP_ssa, 0, 0, TODO_rebuild_alias, 0,
 };
