@@ -79,6 +79,13 @@ def main():
     case("keys error: key not an import row", good(raises(bi.key_range, ent, kt.replace("00100000", "00100010"))))
     case("keys error: 7 columns", good(raises(bi.key_range, ent, kt.replace("\tsym", ""))))
     case("keys error: unaligned key", good(raises(bi.key_range, ent.replace("00100000", "00100004"), kt)))
+    # stage-output: the generator is found by the output it declares (exactly one)
+    gr = {"generated": [{"outputs": ["gen/a.tsv"]}, {"outputs": ["gen/m.c", "gen/keys.tsv"]}]}
+    case("stage-output: the one generator declaring the output", bi.generator_index(gr, "gen/keys.tsv") == 1)
+    case("stage-output error: no generator declares it", good(raises(bi.generator_index, gr, "gen/x.tsv")))
+    case("stage-output error: two generators declare it", good(raises(bi.generator_index, {"generated": [{"outputs": ["o"]}, {"outputs": ["o"]}]}, "o")))
+    case("stage-output error: a recipe without generated", good(raises(bi.generator_index, {}, "o")))
+    case("stage-output error: an unadmitted root", good(raises(bi.stage_output_table, os.path.join(HERE, "..", "..", ".."), "ports/fnv-nx/nonexistent", "gen/keys.tsv", "/nonexistent")))
     # milestones
     ROW = lambda name, kind, v, src, extra=None: "\t".join([name, kind, v, src] + ([extra] if extra is not None else [])) + "\n"
     EXE = ROW("exe_entry", "exe_entry", "00ecc4db", "exe PE ImageBase+AddressOfEntryPoint")

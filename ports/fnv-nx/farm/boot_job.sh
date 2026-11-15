@@ -11,7 +11,7 @@
 #    them, and fails on any row or line it does not understand): elffacts.json (the link record of the ELF: its sections and defined symbols), guest.elf, or manifest.json + part.NNN (joined in manifest
 #    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
 #    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
-#    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
+#    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); the loader root's gen/keys.tsv (a generate-stage output taken through the recipe, not a branch file; the key range is
 #    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present; the table always gains first-frame = the GL backend's first present host event) + the loader's
 #    console lines of run.txt (when present) -> the bootmiles table; optional softfloat.syms or softfloat.tsv (one symbol
 #    per line). Every missing required file is listed and fails the job
@@ -114,8 +114,8 @@ retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$IN_BRANCH:refs/remotes/boot-j
 ELF_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/$IN_BRANCH^{commit}") || die "no commit for $IN_BRANCH after fetch"
 GITA ls-tree --name-only "$ELF_COMMIT" > "$WORK/branch-files.txt" || die "cannot list the tree of $IN_BRANCH@${ELF_COMMIT:0:12}"
 MISSING=""
-for f in entries.tsv modules.tsv keys.tsv milestones.tsv elffacts.json; do grep -qxF "$f" "$WORK/branch-files.txt" || MISSING="$MISSING $f"; done
-want=(entries.tsv modules.tsv keys.tsv milestones.tsv elffacts.json)   # elffacts.json: the link record of the ELF (L1; the one source of its sections and symbols)
+for f in entries.tsv modules.tsv milestones.tsv elffacts.json; do grep -qxF "$f" "$WORK/branch-files.txt" || MISSING="$MISSING $f"; done
+want=(entries.tsv modules.tsv milestones.tsv elffacts.json)   # elffacts.json: the link record of the ELF (L1; the one source of its sections and symbols)
 if grep -qxF guest.elf "$WORK/branch-files.txt"; then want+=(guest.elf)
 elif grep -qxF manifest.json "$WORK/branch-files.txt"; then want+=(manifest.json $(grep -E '^part\.[0-9]+$' "$WORK/branch-files.txt"))
 else MISSING="$MISSING guest.elf-or-manifest.json"; fi
@@ -198,6 +198,8 @@ PINS=$NX/manifest/fonts_mirror.json
 # the contract's files in the forms boot.py takes (each converter fails on any row it does not understand)
 conv() { "$@" 2> "$WORK/conv.err" || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"; }
 conv "${BI[@]}" reserved --modules "$IN/modules.tsv" --exe "$GAME_DIR/FalloutNV.exe" -o "$IN/reserved.tsv"
+# keys.tsv is the loader root's generate-stage output gen/keys.tsv (the one source of the generated loader tables), taken through the recipe from the tree the job runs from
+conv "${BI[@]}" stage-output --repo "$(git -C "$NX" rev-parse --show-toplevel)" --root ports/fnv-nx/loader --output gen/keys.tsv --cache "$GATE_CACHE" -o "$IN/keys.tsv"
 KEYS=$("${BI[@]}" keys --entries "$IN/entries.tsv" --keys "$IN/keys.tsv" 2> "$WORK/conv.err") || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"
 RUN_ARGS=(); [ $HAVE_RUN = 0 ] || RUN_ARGS=(--run "$IN/run.txt")
 # the stage table (milestones after the exe entry: WinMain .. first frame): branch $BOOT_STAGE_TABLE_BRANCH, file stage.milestones,

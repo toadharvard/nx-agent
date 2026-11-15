@@ -55,7 +55,6 @@ RUN = "emulator run: header\n   %s\n   [fnvnx] not a loader line\n" % LINE
 MANIFEST = "00001000\tfnvboot_a\tcode\n00002000\tfnvboot_b\tcode\n00003000\tfnvboot_c\tcode\n000ff000\tI_rt\timport\n# table_id %s\n" % TID
 MODULES = ("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n"
            "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\n" % ("a" * 64))
-KEYS_TSV = "# table_id %s\n000ff000\tm.dll\tf\t1\tstdcall\ti\ti\tI_rt\n" % TID
 FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+) main=(\d+) threads=(\d+) seconds=(\d+) "
                    r"published=(\S+)@([0-9a-f]{12})( presents=\d+)? stage_table=(\S+)$")
 HOME = os.path.join(SCRATCH, "home")
@@ -129,7 +128,7 @@ def main():
         f.write(EXE)
     git("init", "-q", "--bare", BARE)
     git("config", "uploadpack.allowFilter", "true", cwd=BARE)
-    contract = {"elffacts.json": open(tb.facts_path(), "rb").read(), "entries.tsv": MANIFEST.encode(), "modules.tsv": MODULES.encode(), "keys.tsv": KEYS_TSV.encode(),
+    contract = {"elffacts.json": open(tb.facts_path(), "rb").read(), "entries.tsv": MANIFEST.encode(), "modules.tsv": MODULES.encode(),
                 "milestones.tsv": MILESTONES.encode(), "run.txt": RUN.encode()}
     ok_elf = fault_elf = gpu_elf = lifted_elf()
     M6, M3, M80 = tb.mode_bytes(6), tb.mode_bytes(3), tb.mode_bytes(80)
@@ -144,7 +143,6 @@ def main():
     publish_branch("l1-contract/elf/partsid", dict(contract, **pieces, **{"manifest.json": json.dumps(man).encode()}))
     bad = dict(pieces, **{"part.001": b"X" + pieces["part.001"][1:]})
     publish_branch("l1-contract/elf/badpartid", dict(contract, **bad, **{"manifest.json": json.dumps(man).encode()}))
-    publish_branch("l1-contract/elf/badrowid", dict(contract, **{"mode": M6, "guest.elf": ok_elf, "keys.tsv": KEYS_TSV.encode() + b"junk\n"}))
     noent = {k: v for k, v in contract.items() if k != "entries.tsv"}
     nofacts = {k: v for k, v in contract.items() if k != "elffacts.json"}
     publish_branch("l1-contract/elf/nofactsid", dict(nofacts, **{"mode": M6, "guest.elf": ok_elf}))
@@ -259,8 +257,6 @@ def main():
     rc, out, err = run_job(["badpartid"])
     tb.case("corrupt part: job fails naming the part, nothing published", rc == 1 and "part.001" in err
             and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/badpartid"], cwd=BARE).returncode != 0, (rc, err[-400:]))
-    rc, out, err = run_job(["badrowid"])
-    tb.case("a keys.tsv row that is not understood fails the job", rc == 1 and "keys.tsv" in err, (rc, err[-400:]))
     rc, out, err = run_job(["noentries"])
     tb.case("missing entries.tsv: job fails naming the file, nothing published", rc == 1 and "entries.tsv" in err and "lacks" in err
             and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/noentries"], cwd=BARE).returncode != 0, (rc, err[-400:]))

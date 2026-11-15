@@ -20,6 +20,12 @@ row or line a converter does not understand is an InputError carrying the file l
                                       prints LO:HI = the import-key range: lowest import key of entries.tsv .. highest + 0x10 (every
                                       key 16-byte aligned); every key of keys.tsv (`key module name ordinal conv ret args symbol`)
                                       must be an import key of entries.tsv and the two table ids must be equal
+  stage-output --repo R --root ROOT --output P --cache C -o F
+                                      the generated table P (a path in `generated[].outputs`, e.g. gen/keys.tsv) of the admitted product root
+                                      ROOT (e.g. ports/fnv-nx/loader), taken from that root's generate stage through recipe.stage_output (the
+                                      verdict's own store C = GATE_CACHE): the one source of a generated loader table; no branch copy of it
+                                      exists. The stage is found by rule: the one generator of the recipe that declares P (none or several is
+                                      an error, so a rename or a second producer is red, never a guess); an unknown root, a red stage is an error
   milestones --table milestones.tsv --run run.txt [--entries entries.tsv] [--stage-table FILE] -o table.txt
                                       milestones.tsv + the loader's console lines of the contract's run.txt (every line that is exactly
                                       three spaces + `fnvnx-start: ...`, in file order, each distinct) -> a bootmiles table.
@@ -407,6 +413,30 @@ def stage_table(old_text, source="4b1a7bb"):
     return "\n".join(out + dropped + lost) + "\n"
 
 
+def generator_index(rec, output):
+    """The index in rec["generated"] of the one generator that declares OUTPUT. InputError for none or several."""
+    gens = rec.get("generated") if isinstance(rec.get("generated"), list) else []
+    hit = [i for i, g in enumerate(gens) if isinstance(g, dict) and output in (g.get("outputs") or [])]
+    if len(hit) != 1:
+        raise InputError("%s is declared by %d generators of the recipe (exactly one is required)" % (output, len(hit)))
+    return hit[0]
+
+
+def stage_output_table(repo, root, output, cache):
+    """The bytes of the generated table OUTPUT of product root ROOT of the tree REPO (recipe.stage_output, cached in CACHE)."""
+    import recipe   # the verdict's recipe (the one build); imported only here, the other converters stay pure
+    try:
+        rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
+    except (recipe.RecipeError, KeyError, OSError, ValueError) as e:
+        raise InputError("root %s: %s" % (root, "; ".join(getattr(e, "errors", None) or [str(e)])[:300]))
+    i = generator_index(rec, output)
+    try:
+        path, _ = recipe.stage_output(root, {"stage": "%s:gen:%d" % (root, i), "path": output}, repo, cache)
+    except ValueError as e:
+        raise InputError(str(e)[:400])
+    return open(path, "rb").read()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -420,6 +450,12 @@ def main(argv=None):
     k = sub.add_parser("keys")
     k.add_argument("--entries", required=True)
     k.add_argument("--keys", required=True)
+    so = sub.add_parser("stage-output")
+    so.add_argument("--repo", required=True)
+    so.add_argument("--root", required=True)
+    so.add_argument("--output", required=True)
+    so.add_argument("--cache", required=True)
+    so.add_argument("-o", required=True)
     m = sub.add_parser("milestones")
     m.add_argument("--table", required=True)
     m.add_argument("--run")
@@ -448,6 +484,8 @@ def main(argv=None):
         elif a.cmd == "keys":
             lo, hi = key_range(rd(a.entries), rd(a.keys))
             print("%x:%x" % (lo, hi))
+        elif a.cmd == "stage-output":
+            open(a.o, "wb").write(stage_output_table(a.repo, a.root, a.output, a.cache))
         elif a.cmd == "render-branch":
             print("%s %s" % render_branch(rd(a.manifest)))
         elif a.cmd == "pair":
@@ -460,7 +498,7 @@ def main(argv=None):
             open(a.o, "w").write(milestone_table(rd(a.table), rd(a.run) if a.run else "", man.table_id if man else None,
                                                  rd(a.stage_table) if a.stage_table else None, man))
     except (InputError, bootmiles.ManifestError, OSError, exepin.ExePinError) as e:
-        src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "milestones": "milestones.tsv", "stage-table": "old table",
+        src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "stage-output": "the generate stage", "milestones": "milestones.tsv", "stage-table": "old table",
                "render-branch": "manifest.json", "pair": "manifest.json/build.json/meta.json"}[a.cmd]
         print(f"bootinputs {a.cmd} ({src}/entries.tsv/run.txt): {e}", file=sys.stderr)
         return 1
