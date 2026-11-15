@@ -770,9 +770,13 @@ static void check_records()
   std::set<std::string> inside(inl_dead.begin(), inl_dead.end());
   inside.insert(inl_gone.begin(), inl_gone.end());
   cgraph_node *fn;
-  FOR_EACH_FUNCTION(fn)
-    if (!fn->inlined_to && DECL_ASSEMBLER_NAME_SET_P(fn->decl) && !TREE_ASM_WRITTEN((fn->alias ? fn->ultimate_alias_target() : fn)->decl))
+  FOR_EACH_FUNCTION(fn) {
+    /* an alias whose target the symbol table does not resolve (a weakref to a symbol this unit does not define: libgcc's __gthrw_*) names no
+       body: ultimate_alias_target () is then NULL, and the alias writes no code */
+    symtab_node *body = fn->alias ? fn->ultimate_alias_target() : fn;
+    if (!fn->inlined_to && DECL_ASSEMBLER_NAME_SET_P(fn->decl) && (!body || !TREE_ASM_WRITTEN(body->decl)))
       inside.insert(asmname(fn->decl));
+  }
   std::vector<std::string> work(inside.begin(), inside.end());
   while (!work.empty()) {
     std::string f = work.back(); work.pop_back();
@@ -800,7 +804,10 @@ static void finish_unit(void *, void *)
      bases is its base-object one): the body's line again, under the alias */
   cgraph_node *n;
   FOR_EACH_FUNCTION(n)
-    if (n->alias && n->get_alias_target()) {
+    /* symtab_node::get_alias_target () dereferences the alias's first reference, which an unanalyzed alias (a weakref to a symbol this unit does not
+       define: libgcc's __gthrw_*) has not got (cgraph.h/symtab.cc, GCC 13: no check without checking enabled); ultimate_alias_target () reads it only when
+       the alias is analyzed, and returns the alias itself otherwise, which no body row names */
+    if (n->alias && n->ultimate_alias_target()) {
       std::map<std::string, std::string>::iterator r = emitted_rest.find(asmname(n->ultimate_alias_target()->decl));
       if (r != emitted_rest.end())
         fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\n\"\n", asmname(n->decl), r->second.c_str());

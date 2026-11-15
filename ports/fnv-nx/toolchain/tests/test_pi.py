@@ -185,6 +185,11 @@ def main():
         check('effect.cpp compiles', r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             effect(obj)
+        obj = os.path.join(td, 'weakref.o')
+        r = pb.compile(os.path.join(HERE, 'pi', 'weakref.c'), obj, [so], args=['-O2'])
+        check('weakref.c (an unanalyzed alias node, a C unit) compiles with the plugin loaded', r.returncode == 0, r.stderr[-600:])
+        if r.returncode == 0:
+            check('weakref.c: the section .fnvnx.n3 is written', pb.section(obj, '.fnvnx.n3') is not None)
         for arg in ('mode=1', 'fpfast'):
             r = pb.compile(os.path.join(HERE, 'pi', 'pi.cpp'), os.path.join(td, 'x.o'), [so], args=['-fplugin-arg-fnvnx_pi-' + arg])
             check('unknown plugin argument %s is an error' % arg, pb.argument_refused(r, 'pi'), r.stderr[:500])
