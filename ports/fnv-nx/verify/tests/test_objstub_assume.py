@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the assume_violation rule of verify/objstub.py (gate objstub). Plain script: one PASS/FAIL line per case, exit 0 on pass.
+"""Tests for the `assume_violation` rule of verify/objstub.py (gate objstub). Plain script: one PASS/FAIL line per case, exit 0 on pass.
 Compiles with aarch64-linux-gnu-gcc (ilp32 and lp64); scratch under tempfile.mkdtemp. The generated unit is the object whose id is in the
 set of generated units (what gate_objstub derives from recipe.generated_outputs); the generator's own code is what the cases model."""
 import os

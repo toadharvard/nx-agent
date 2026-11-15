@@ -80,6 +80,15 @@ check("the same name undefined in the output is red: a linker-defined name is on
 ids = L.symbol_ids(objs(a=[("f", G, True), ("g", G, True)]), {"f"}, elf([("f", G, True)]))
 check("an input definition the output lacks is red (cover)", ids == ["cover:g"], ids)
 
+# ---- one entry: the entry symbol is defined by exactly one object of the product
+check("script_entry: ENTRY(sym) of the script", L.script_entry("/* ENTRY(no) */\nENTRY(__fnvnx_guest_start)\nSECTIONS {}") == "__fnvnx_guest_start", "")
+check("script_entry: no ENTRY is the linker default _start", L.script_entry("SECTIONS {}") == "_start", "")
+check("entry: one product object defines it: green", L.entry_ids(objs(a=[("e", G, True)], b=[("f", G, True)]), "e") == [], "")
+ids = L.entry_ids(objs(a=[("f", G, True)]), "e")
+check("entry: no product object defines it (a startfile or library does, or none): red", ids == ["entry-none:e"], ids)
+ids = L.entry_ids(objs(a=[("e", G, True)], b=[("e", W, True)]), "e")
+check("entry: two product objects define it: red, naming both", ids == ["entry-duplicate:e <- a.o, b.o"], ids)
+
 # ---- host images: the declared loader (link.loader) --------------------------------------------------------------------------------------
 import argparse  # noqa: E402
 import contextlib  # noqa: E402

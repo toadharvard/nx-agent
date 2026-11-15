@@ -7,6 +7,7 @@
  * rounded strtod (glibc and newlib's gdtoa round exactly, to nearest even); qsort is an in-place heapsort whose
  * indices stay below n whatever the comparator answers; character classes come from the layer's own NLS tables
  * (GetStringTypeW / LCMapStringW) for every code page the layer supports ("C" = identity below 128, 1252). */
+#include <fnvnx/cite.h>
 #include "../win32/w32.h"
 
 #include <cmath>
@@ -397,21 +398,22 @@ extern "C" onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end
     *begin = t, *end = t + len;
     return f;
 }
-extern "C" void c_exit(int code)
+/* C11 7.22.4.4 exit: cannot return to its caller (abort: 7.22.4.1; _amsg_exit: Wine 9.0 dlls/msvcrt/exit.c _amsg_exit ends in _exit) */
+extern "C" [[noreturn]] void c_exit(int code)
 {
     fnvnx_doexit(code, 0, 1); /* the handlers, last registered first */
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
-    os_exit_process(code);
 }
-extern "C" void c_abort(void)
+FNVNX_CITE(c_exit, "dm:3");
+extern "C" [[noreturn]] void c_abort(void)
 {
     static const char m[] = "\nabnormal program termination\n";
     fnvnx_write(2, m, sizeof m - 1);
     ExitProcess(3);
-    os_exit_process(3);
 }
-extern "C" void c_amsg_exit(int n)
+FNVNX_CITE(c_abort, "dm:4");
+extern "C" [[noreturn]] void c_amsg_exit(int n)
 {
     const char *t;
     switch (n) {
@@ -429,8 +431,8 @@ extern "C" void c_amsg_exit(int n)
     int l = snprintf(m, sizeof m, "\nR60%02d\n- %s\n", n, t);
     fnvnx_write(2, m, (unsigned)l);
     ExitProcess(255);
-    os_exit_process(255);
 }
+FNVNX_CITE(c_amsg_exit, "dm:5");
 extern "C" void c_purecall(void) { c_amsg_exit(25); }
 
 struct rlock { os_lock_t m; void *volatile owner; int count; };

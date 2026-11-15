@@ -105,3 +105,5 @@ os_default_root	C	const char *	void	"sdmc:/switch/fnv"	ENV:F1 the root of drive 
 os_fs_case_insensitive	C	int	void	1	ENV:F1 the SD card is FAT32/exFAT: names fold case		../platform_host/os/os_horizon.c
 os_tick_freq	C	uint64_t	void	10000000ull	ENV:L3 the platform timer runs at 10 MHz (os_ticks = monotonic ns / 100)		../platform_host/os/os_posix.c
 os_fs_case_insensitive	C	int	void	0	ENV:F1 the host file system makes no case-folding promise: the path mapper scans directories		../platform_host/os/os_posix.c
+LockResource	C	void *	void *h	identity:0	MSDN:LockResource a flat resource handle is the pointer: LockResource returns hRes unchanged (wine-9.0:dlls/kernelbase/loader.c:LockResource does the same)		win32/env_const.cpp
+SetHandleCount	C	UINT	UINT n	identity:0	MSDN:SetHandleCount obsolete, returns uNumber unchanged on 32-bit Windows (wine-9.0:dlls/kernel32/file.c:SetHandleCount returns uNumber)		win32/env_const.cpp

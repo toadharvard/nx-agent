@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if FNVNX_VCLOCK   /* the virtual build; the real build has clock_real.cpp instead (fnvnx_vtime.h) */
+
 static const uint64_t Q = 100;                                       /* ns */
 static const int64_t EPOCH_FT = 129383136000000000ll;                /* 2011-01-01T00:00:00Z */
 static const int64_t FT_UNIX_EPOCH = 116444736000000000ll;           /* 1970-01-01T00:00:00Z */
@@ -352,17 +354,6 @@ void clk_file_moved(const char *from, const char *to)
     free(kt);
 }
 
-void clk_reset(void)
-{
-    t_now = 0;
-    t_scoped = 0;
-    os_lock(&g_ft_lock);
-    for (size_t i = 0; i < g_ft_n; i++)
-        free(g_ft[i].key);
-    g_ft_n = 0;
-    os_unlock(&g_ft_lock);
-}
-
 void clk_file_removed(const char *host)
 {
     char *k = fold(host);
@@ -389,3 +380,5 @@ int clk_file_times(const char *host, int64_t ft[3])
 }
 
 }
+
+#endif   /* FNVNX_VCLOCK */

@@ -49,12 +49,12 @@ RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-
           "include": [ROOT + "/inc", ROOT + "/gen"], "units": "all",
           "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}],
           "os_layer": ["os.S"], "constants": "constants.tsv",
-          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-m", "aarch64linux32"]}, "errno_accessor": "__errno"}
+          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-m", "aarch64linux32"]}}
 FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
     "toy/c.c": '#include "toy.h"\nint f_c(int x) { return x + TOY; }\n',
-    "toy/os.S": CRT0 + OS_NOLINK,
+    "toy/os.S": CRT0 + ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
     "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
@@ -86,10 +86,7 @@ def make_repo(name, gen_extra="", rec=None, files=None, extra_roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    fs = dict(FILES, **(files or {}))
-    if (rec or RECIPE).get("link") is None and "toy/os.S" not in (files or {}):
-        fs["toy/os.S"] = OS_NOLINK   # crt0 is the entry of a link (guest.ld): a root that links no ELF carries no crt0
-    for k, v in fs.items():
+    for k, v in dict(FILES, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
     for f in LINK_TOOLS:
@@ -208,6 +205,7 @@ def main():
     erec = mut(external=[ex], include=RECIPE["include"] + ["/ext/tiny/inc"])
     ef = {"toy/b.c": '#include "toy.h"\n#include "ext.h"\nint f_b(void) { return TOY * 2 + EXTV; }\n'}
     futs = []
+    deferred = []   # scenarios that patch a module global: run after every concurrent scenario has joined
 
     def later(fn, *a):
         futs.append(pool.submit(fn, *a))
@@ -248,19 +246,18 @@ def main():
         check("every module pinned in env.json is listed with its installed-files digest and top-level names",
               [m for m, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
               and all(len(d) == 64 and tops for _, _, d, tops in pm), pm)
-        base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
-        # The mutated digest is visible to THIS thread only: the other cases of this file build concurrently (later()), and a process-wide patch
-        # would leak into their generated-stage keys (a second build of an unchanged root then misses, with FNVNX_PYMODS the only difference).
-        real, tl = recipe.envcheck.wheel_digest, threading.local()
-        recipe.envcheck.wheel_digest = lambda dist: real(dist) + ("x" if dist == getattr(tl, "target", None) else "")
-        for target in [m for m, _, _, _ in pm]:
-            tl.target = target
-            try:
-                alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
-            finally:
-                tl.target = None
-            d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
-            check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
+        def pm_keys():   # patches a module global: runs after every concurrent scenario has joined, never beside their builds
+            base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
+            real = recipe.envcheck.wheel_digest
+            for target in [m for m, _, _, _ in pm]:
+                recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
+                try:
+                    alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
+                finally:
+                    recipe.envcheck.wheel_digest = real
+                d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
+                check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
+        deferred.append(pm_keys)
         # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
         # built, the ELF is blocked, and the root is red naming the red stage.
         kg = make_repo("kg", rec=dict(RECIPE, os_layer=[], generated=RECIPE["generated"] + [
@@ -486,7 +483,7 @@ def main():
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
     # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
-    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64"), files={"toy/os.S": FILES["toy/os.S"]}), ROOT, SS, BASE + "/out64")
+    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64")), ROOT, SS, BASE + "/out64")
     print("INFO toy LP64 build %.1f s, stages %s" % (time.time() - t0, r64.get("stages")))
     check("toy root builds green: ILP32 objects and ELF are ELF32, the LP64 objects are ELF64 (and no ELF)",
           r64["status"] == "green" and len(r64["objects"]) == 4 and r64["elf"] is None
@@ -594,6 +591,8 @@ def main():
     for f in futs:
         f.result()
     pool.shutdown()
+    for fn in deferred:
+        fn()
     print("INFO times: toy cold %.1f s, cached %.1f s; whole file %.1f s" % (cold, warm, time.time() - t_start))
     print("%d FAILED" % len(FAILED) if FAILED else "all passed")
     return 1 if FAILED else 0
@@ -654,15 +653,15 @@ static long sc3(long n, long a, long b, long c) { long r; __asm__ volatile("sysc
 static int eq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static void put(const char *path, const char *s, long n) { long fd = sc3(2, (long)path, 0x241, 0644); sc3(1, fd, (long)s, n); sc3(3, fd, 0, 0); }
 static void copy(const char *from, const char *to) { char b[512]; long fd = sc3(2, (long)from, 0, 0); long n = fd < 0 ? 0 : sc3(0, fd, (long)b, 512); put(to, b, n < 0 ? 0 : n); }
-void cmain(long *sp) {
-  long argc = sp[0]; char **argv = (char **)(sp + 1); const char *m = argc > 1 ? argv[1] : "ok";
+int main(int argc, char **argv) {
+  const char *m = argc > 1 ? argv[1] : "ok";
   if (eq(m, "ok")) put("/out/o.txt", "hello\n", 6);
   else if (eq(m, "copy")) copy(argv[2], "/out/o.txt");
   else if (eq(m, "bad")) sc3(231, 1, 0, 0);
   else if (eq(m, "extra")) { put("/out/o.txt", "a\n", 2); put("/out/x.txt", "b\n", 2); }
   sc3(231, 0, 0, 0);
+  return 0;
 }
-__asm__(".globl _start\n_start:\n mov %rsp, %rdi\n and $-16, %rsp\n call cmain\n");
 """
 
 
@@ -671,7 +670,7 @@ def check_run(SS):
     and /out; outputs are declared paths. A nonzero exit, an undeclared and a missing output are red; {stage, path} refs read a declared output."""
     HX, OTH = T + "hx", T + "other"
     hrec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "gcc-13", "cxx": "g++-13"}, "flags": {"c": ["-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
-            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"]}, "errno_accessor": "__errno"}
+            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"], "libs": {"system": ["/lib/x86_64-linux-gnu/libc.so.6"]}}, "errno_accessor": "__errno"}
     ex = [{"path": HX, "class": "product", "target": "host", "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc"}]
 
     def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
@@ -726,7 +725,7 @@ def check_run(SS):
     os.makedirs(cache + "/store", exist_ok=True)
     ref = {"stage": "%s:run:r" % ROOT, "path": "o.txt"}
     try:
-        host, ident, _ = recipe.resolve_input(ROOT, ref, good, cache)
+        host, ident = recipe.resolve_input(ROOT, ref, good, cache)
         got = open(host).read()
     except ValueError as e:
         host, ident, got = None, None, str(e)

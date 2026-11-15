@@ -83,7 +83,6 @@ void fnvnx_touch_frame(const fnvnx_touch_point *pts, unsigned count, uint64_t ti
  * observed the previous one (swkbd.cpp: no time in the rule), through fnvnx_swkbd_inject, the single point that feeds
  * every keyboard channel of the platform. */
 #define FNVNX_SWKBD_COMBO (FNVNX_NPAD_STICKL | FNVNX_NPAD_STICKR)   /* both stick clicks held together */
-#define FNVNX_SWKBD_MAX_LEN 64                                      /* units per entry */
 void fnvnx_swkbd_filter(uint64_t *buttons);          /* pad path: consumes the combination, may run the applet */
 int fnvnx_swkbd_enter(void);                         /* runs the applet now; strokes queued, 0 cancelled, <0 error */
 void fnvnx_swkbd_pump(void);                         /* releases the next key edge if the previous one was observed */

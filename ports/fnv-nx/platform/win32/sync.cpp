@@ -403,7 +403,7 @@ extern "C" HANDLE CreateSemaphoreA(void *sa, LONG initial, LONG max, LPCSTR name
 
 void w32_obj_signal_locked(struct w32_obj *o)
 {
-    o->clk_t = clk_stamp();
+    o->clk_t = VT_STAMP();
     for (struct w32_link *l = o->waiters.next; l != &o->waiters; l = l->next)
         os_cond_signal(&l->t->waiter.cond);
 }
@@ -621,7 +621,7 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
         if (!idled) {   /* about to block: virtual time may have work for this wait (the audio device), outside the lock */
             idled = 1;
             os_unlock(&w32_wait_lock);
-            int worked = clk_wait_idle((const void *const *)hs, n, ms == INFINITE ? UINT64_MAX : (uint64_t)ms * 1000000ull);
+            int worked = VT_WAIT_IDLE((const void *const *)hs, n, ms == INFINITE ? UINT64_MAX : (uint64_t)ms * 1000000ull);
             os_lock(&w32_wait_lock);
             if (worked) idled = 0;
             continue;
@@ -650,9 +650,9 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
     for (DWORD i = 0; i < n; i++)
         w32_obj_unref(objs[i]);
     if (res == WAIT_TIMEOUT)
-        clk_wait_timeout(ms == INFINITE ? 0 : (uint64_t)ms * 1000000ull);   /* the thread's time passes by the timeout */
+        VT_WAIT_TIMEOUT(ms == INFINITE ? 0 : (uint64_t)ms * 1000000ull);   /* the thread's time passes by the timeout */
     else
-        clk_merge(sig_t);                                                    /* a success takes the signaller's time */
+        VT_MERGE(sig_t);                                                    /* a success takes the signaller's time */
     return res;
 }
 

@@ -218,18 +218,17 @@ bool read_file(const std::string &p, std::vector<uint8_t> &out)
 }
 
 /* one font file -> faces (new_ft_face / unix_face_create / add_gdi_face) */
-/* A declared input that is absent or unreadable is a broken build invariant, not a machine without it: the process ends once, through
- * the host exit slot (os_exit_process), naming the input. An empty directory that is present stays a valid (empty) machine. */
-[[noreturn]] void declared_input_broken(const char *what, const std::string &path)
+/* A run-time read or allocation failure on a declared input takes the path of Wine 9.0's own function that reads it, with one log line per call
+ * (the presence of the declared font set is a static packaging fact, not decided here). Citations are unchecked: no Wine 9.0 source is in fnv-nx-build yet. */
+void input_failed(const char *what, const std::string &path)
 {
-    std::string m = std::string("fnvnx: declared input broken: ") + what + ": " + path;
+    std::string m = std::string("fnvnx: font input: ") + what + ": " + path;
     os_debug_print(m.c_str());
-    os_exit_process(78);
 }
 void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /* listed: the directory scan returned it, so it must be readable */
 {
     std::vector<uint8_t> data;
-    if (!read_file(path, data)) { if (listed) declared_input_broken("font file listed by its directory is unreadable", path); return; }   /* a registry-named file the set lacks: Wine 9.0 load_registry_fonts skips it */
+    if (!read_file(path, data)) { if (listed) input_failed("font file listed by its directory is unreadable", path); return; }   /* Wine 9.0 dlls/win32u/freetype.c add_font_file / load_registry_fonts (unchecked): the open fails, the file is skipped and no face is added */
     if (data.empty()) return;
     for (FT_Long idx = 0, count = 1; idx < count; idx++) {
         FT_Face ft;
@@ -304,7 +303,7 @@ std::vector<std::string> list_dir(const std::string &d)
 {
     std::vector<std::string> v;
     os_dir *dir = os_dir_open(d.c_str());
-    if (!dir) declared_input_broken("declared directory missing or unreadable", d);
+    if (!dir) { input_failed("declared directory missing or unreadable", d); return v; }   /* Wine 9.0 load_directory_fonts / load_fontconfig_fonts (unchecked): opendir fails, return */
     while (const char *n = os_dir_next(dir)) v.push_back(n);
     os_dir_close(dir);
     std::sort(v.begin(), v.end());
@@ -332,7 +331,7 @@ void load_all()
     g_loaded = true;
     const fnvnx_font_dirs *d = fnvnx_declared_fonts();   /* a declared input of the root: no setter, no unset state */
     g_wine_dir = d->dir;
-    if (!g_lib && FT_Init_FreeType(&g_lib)) declared_input_broken("FreeType does not start (FT_Init_FreeType: out of memory)", "libfreetype");
+    if (!g_lib && FT_Init_FreeType(&g_lib)) { input_failed("FreeType does not start (FT_Init_FreeType)", "libfreetype"); return; }   /* Wine 9.0 init_freetype (unchecked) returns FALSE: no FreeType font funcs, no faces, and every later call answers for an empty face set */
     declare_machine();
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\CodePage")) if (kv.first == "ACP") g_acp = atoi(kv.second.c_str());
     auto sys = reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts");
@@ -558,7 +557,7 @@ RF *realize(LF lf, bool bitmap_ok = true)
         f->scale_y = scale;
     }
     f->data = new std::vector<uint8_t>;
-    if (!read_file(face->file, *f->data)) declared_input_broken("font file of a listed face is unreadable", face->file);
+    if (!read_file(face->file, *f->data)) { input_failed("font file of a listed face is unreadable", face->file); delete f->data; delete f; return nullptr; }   /* Wine 9.0 freetype.c get_glyph_outline / freetype_load_font (unchecked): the file does not open, the font is not created */
     if (FT_New_Memory_Face(g_lib, f->data->data(), (FT_Long)f->data->size(), face->index, &f->ft)) { delete f->data; delete f; return nullptr; }
     FT_UInt w = 0, h = 0;
     if (f->scalable) {

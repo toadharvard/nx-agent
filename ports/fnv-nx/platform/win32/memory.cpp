@@ -551,7 +551,7 @@ int w32_vm_probe(const void *p, size_t n, int access)
  * and only when the call is otherwise valid (every error of the contract above it keeps its answer). */
 static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
 {
-    uint32_t reach = 0;
+    enum w32_reach_kind reach = W32R_NONE;
     uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
     DWORD err = 0;
     os_lock(&g_vm_lock);
@@ -566,9 +566,9 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
             err = ERROR_INVALID_PARAMETER;   /* beyond what the section / view grants */
         for (size_t i = f; i <= l && !err && !reach; i++)
             if (g_pg[i].flags & F_ALIAS_FILE)
-                reach = FNVNX_REACH_KERNEL32_CreateFileMappingA_PROT;
+                reach = W32R_CFM_PROT;
             else if (g_pg[i].flags & F_ALIAS_PF)
-                reach = FNVNX_REACH_KERNEL32_CreateFileMappingA_HFILE;
+                reach = W32R_CFM_HFILE;
         if (!err && !reach && !(g_pg[f].flags & F_WATCH) && os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(prot)))
             err = ERROR_INVALID_PARAMETER;
         if (!err && !reach) {
@@ -583,7 +583,7 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)
     }
     os_unlock(&g_vm_lock);
     if (reach)
-        w32_reach(reach);
+        w32_reach_if(reach);
     return err;
 }
 
