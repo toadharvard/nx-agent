@@ -196,3 +196,7 @@ After the first frame:
 - 2026-11-15 00:54 msvcmodel candidate 630df00f5 (w3): ldbl, MS bitfields, enum=int, empty-base placement (S23; matches every pinned cpp-docs example). Now in the farm's trial loop.
   - S23's undocumented cases (vptr, nested, after a virtual base): exe RTTI BCD facts requested from L3a via the orchestrator.
   - Open DATAMODEL fixes: WINT/SIG_ATOMIC as facts, the stdint native-only rule, CHAR16/32/8 universe membership, cpp-docs mirror plus recipe stage.
+- 2026-11-15 00:56 S23 proof, by the orchestrator's ruling (w3).
+  - Compare: GCC's layout records (patched cc1plus) against MSVC's CodeView from the pristine /Z7 objects, for every class with an empty base subobject at any depth, by rule.
+  - Cross-check against w7's full BCD set.
+  - Numbers to report: selected, checked, mismatches (target 0), with commits.
