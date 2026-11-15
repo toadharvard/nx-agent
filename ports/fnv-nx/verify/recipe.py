@@ -963,6 +963,35 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
     return sorted(dirs)
 
 
+def include_closure(inc, root, roots, repo, tg, variant_rec=None):
+    """The include path of a unit of ROOT (RECIPE.md "Include"): the recipe's `include` list, then, for every repo directory D of it that lies in another admitted
+    product root P with a recipe for the target TG, the repo directories of P's own `include`, transitively and in that order, each once. A header that P's
+    headers include is found by every consumer of P's headers (a header names its own dependencies once, in the recipe of the root that ships it); the entries
+    of a root's `include` that lie in an external are the root's private toolchain and are not carried. -> [dir]"""
+    out, seen = list(inc), set(inc)
+    todo = [d for d in inc if isinstance(d, str) and not d.startswith("/")]
+    while todo:
+        d = todo.pop(0)
+        for p, r in roots.items():
+            if p == root or r.get("class") != "product" or tg not in targets_of(r) or not under(d, p):
+                continue
+            paths = [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]
+            for path in paths:
+                if not isinstance(path, str):
+                    continue
+                try:
+                    with open(os.path.join(repo, path)) as f:
+                        more = json.load(f).get("include") or []
+                except (OSError, ValueError, AttributeError):
+                    continue
+                for m in more:
+                    if isinstance(m, str) and not m.startswith("/") and m not in seen:
+                        seen.add(m)
+                        out.append(m)
+                        todo.append(m)
+    return out
+
+
 def run_errors(rec, root, files, roots, mine, seen, repo):
     """The `run` stages (RECIPE.md "Run stages"): {name, artifact "ROOT:OUTPUT", args, inputs [ref], debs [env.json package], outputs [path]}."""
     rs, err = rec.get("run", []), []
@@ -1842,7 +1871,8 @@ class Job:
         """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
         for a directory inside an external (a declared input of the tool runtime)."""
         out, n = [], 0
-        for d in self.rec["include"]:
+        tg = entry_of(self.roots, self.root + ("@" + self.variant if self.variant else "")).get("target")
+        for d in include_closure(self.rec["include"], self.root, self.roots, self.repo, tg):
             if any(under(d, e["at"]) for e in self.ext.values()):
                 out.append(d)
                 continue
@@ -2641,7 +2671,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
     res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
-           "link_archives": [], "stage_keys": [], "status": "green"}
+           "link_archives": [], "stage_keys": [], "outputs": {}, "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
     all_units = units
@@ -2671,6 +2701,15 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copyfile(cas._obj(store, ent), dest)
             res["plugins"].append({"name": n, "sha256": ent["h"], "path": os.path.abspath(dest)})
+        res["outputs"] = {}   # the root's declared outputs (`outputs: {NAME: path}`), each a file of `out` with its sha256: a consumer compares the hash, never the path
+        for nm, rel in sorted((j.rec.get("outputs") or {}).items()):
+            src = os.path.join(ws, "root", rel)
+            if os.path.isfile(src):
+                dest = os.path.join(out, "outputs", rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(src, dest)
+                with open(dest, "rb") as fh:
+                    res["outputs"][nm] = {"path": os.path.abspath(dest), "sha256": hashlib.sha256(fh.read()).hexdigest()}
         if j.analysis:   # the plugin of the gate objstub (a file of the store, kept beside the root's own plugins)
             ent = cas.manifest(j.analysis, store)["entries"][ANALYSIS_PLUGIN[0] + ".so"]
             dest = os.path.join(out, "plugins", ANALYSIS_PLUGIN[0] + ".so")

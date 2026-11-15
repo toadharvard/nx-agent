@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for verify/recipe.py, gate_build.py, gate_determinism.py on a toy product root in a temp git repo. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gcc-13/g++-13. Scratch: mkdtemp, removed at exit."""
+import hashlib
 import json
 import os
 import shutil
@@ -404,6 +405,34 @@ def main():
         check("link roots: a test-style link with --unresolved-symbols=ignore-all is refused before any stage", raised and "refusal set R" in raised, raised)
 
     later(link_roots)
+
+    def declared_outputs():
+        """the build result lists each declared output as {path, sha256}: the file is in the out dir and its hash is the file's"""
+        orec = mut(outputs={"genh": RECIPE["generated"][0]["outputs"][0]})
+        orp = make_repo("do", rec=orec)
+        r = recipe.build(orp, ROOT, BASE + "/ss-do", BASE + "/do1")
+        o = r.get("outputs", {}).get("genh")
+        check("result outputs: a declared output is {path, sha256} of a file in the out dir", r["status"] == "green" and o and os.path.isfile(o["path"])
+              and hashlib.sha256(open(o["path"], "rb").read()).hexdigest() == o["sha256"] and o["path"].startswith(os.path.abspath(BASE + "/do1")), r.get("outputs"))
+        check("result outputs: a root declaring none has an empty map", recipe.build(make_repo("do0"), ROOT, BASE + "/ss-do", BASE + "/do2").get("outputs") == {})
+    later(declared_outputs)
+
+    def include_rule():
+        """RECIPE.md "Include": root C includes B's header dir, B's recipe includes A's: C's unit include path holds A's dir without C naming it"""
+        d = tempfile.mkdtemp(prefix="inc-", dir=BASE)
+        os.makedirs(d + "/b")
+        json.dump({"include": [T + "a/include", "/ext/private/include"]}, open(d + "/b/build.json", "w"))
+        os.makedirs(d + "/b2")
+        json.dump({"include": [T + "b2/include", T + "a2/include"]}, open(d + "/b2/build.json", "w"))
+        roots = {T + "c": {"class": "product", "target": "guest"}, T + "b": {"class": "product", "target": "guest", "recipe": "b/build.json"},
+                 T + "b2": {"class": "product", "target": "guest", "recipe": "b2/build.json"}, T + "a": {"class": "header"}}
+        inc = recipe.include_closure([T + "b/include"], T + "c", roots, d, "guest")
+        check("include closure: the include dirs of the root that ships the header are carried, repo dirs only, after the consumer's own", inc == [T + "b/include", T + "a/include"], inc)
+        inc = recipe.include_closure([T + "b2/include"], T + "c", roots, d, "guest")
+        check("include closure: a dir already named is not added twice, and the order is the recipe's", inc == [T + "b2/include", T + "a2/include"], inc)
+        check("include closure: a root's own include is not widened by itself", recipe.include_closure([T + "b/include"], T + "b", roots, d, "guest") == [T + "b/include"])
+        check("include closure: a root with no recipe for the unit's target carries nothing", recipe.include_closure([T + "b/include"], T + "c", roots, d, "host") == [T + "b/include"])
+    later(include_rule)
     LGS = BASE + "/ss-lg"
 
     def link_generated():

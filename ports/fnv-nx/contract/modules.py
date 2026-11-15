@@ -52,7 +52,6 @@ import hashlib
 import os
 import struct
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import declareddlls
@@ -426,6 +425,13 @@ def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
+def emit(out, *args):
+    """The table file OUT/<parts...> with the text args[-1]; with out None (tables-only mode) nothing is written: a generator keeps no scratch of its own (its only
+    writable place is its declared outputs)."""
+    if out:
+        tsv(os.path.join(out, *args[:-1]), args[-1])
+
+
 def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=None, keys_tsv_out=None, data_out=None, keys_h_out=None):
     exe = PE(exepin.load_exe(exe_path), exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
@@ -438,15 +444,17 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
     declared_mods = {n: m for n, m in mods.items() if n not in image}   # found, no bridge row, the declared machine cannot load them
     order = closure(exe, system, {n: m for n, m in mods.items() if n in image}, set(declared_mods))
     end = assign_bases(exe, order)
-    os.makedirs(os.path.join(out, 'exports'), exist_ok=True)
-    os.makedirs(os.path.join(out, 'imports'), exist_ok=True)
+    if out:
+        os.makedirs(os.path.join(out, 'exports'), exist_ok=True)
+        os.makedirs(os.path.join(out, 'imports'), exist_ok=True)
     load_index = {m.name: i for i, m in enumerate(m for m in order if m.static)}
-    tsv(os.path.join(out, 'modules.tsv'), '# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n' +
+    emit(out, 'modules.tsv', '# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n' +
         ''.join('%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\t%d\t%s\n' % (
             m.name, m.sha256, m.size, m.pe.base, m.base, m.pe.size_of_image, 1 if m.pe.dirs[9][1] else 0, m.pe.entry_rva,
             int(m.static), load_index.get(m.name, '')) for m in sorted(order, key=lambda m: m.name)))
-    write_tls(out, tls_rows(exe, order, load_index))
-    tsv(os.path.join(out, 'modules.c'), c_source(order))
+    if out:
+        write_tls(out, tls_rows(exe, order, load_index))
+    emit(out, 'modules.c', c_source(order))
     bridged = []                  # bridge dlls that have a file: the platform serves them, nothing of the file is lifted
     for n in sorted(system):
         p = find_file(dirs, n)
@@ -457,16 +465,17 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
     dec = bridged + [(n, 'unloadable', m.sha256, m.size, ','.join(sorted('%s:%s' % (x, 'wine' if x in wine else 'absent') for x in dict.fromkeys(iat.norm_dll(d) for d, _ in m.imports
                                                                     if iat.norm_dll(d) not in system and iat.norm_dll(d) not in image))))
                      for n, m in sorted(declared_mods.items())]
-    tsv(os.path.join(out, 'modules_declared.tsv'), '# name\tkind\tsha256\tsize\tmissing_imports\n' + ''.join('%s\t%s\t%s\t%d\t%s\n' % r for r in sorted(dec)))
+    emit(out, 'modules_declared.tsv', '# name\tkind\tsha256\tsize\tmissing_imports\n' + ''.join('%s\t%s\t%s\t%d\t%s\n' % r for r in sorted(dec)))
     raw = {}
     for m in order:
         rows = m.pe.exports()
         raw[m.name] = [(k, None if r is None else m.base + r, f, o) for k, r, f, o in rows]
-        tsv(os.path.join(out, 'exports', m.name + '.tsv'), ''.join(
+        emit(out, 'exports', m.name + '.tsv', ''.join(
             '%s\t%s\t%s\t%d\n' % (k, '' if a is None else '%08x' % a, f or '', o) for k, a, f, o in raw[m.name]))
     values = iat.resolve_exports(raw, bridge)
     rows, bad = iat.table(exe_slots(exe), bridge, values)
-    iat.write_table(os.path.join(out, 'iat.tsv'), rows)
+    if out:
+        iat.write_table(os.path.join(out, 'iat.tsv'), rows)
     gatefile.write('iat', len(rows) + len(bad), len(rows), ['%08x %s!%s: %s' % b for b in bad],
                    '%d slots, %d without a value' % (len(rows) + len(bad), len(bad)))
     summary = ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
@@ -480,8 +489,9 @@ def run(exe_path, bridge_path, dirs, out, declared_path, c_out=None, keys_out=No
     for m in order:
         slots = {m.base + slot: (dll, name) for dll, items in m.imports for slot, name in items}
         mrows, mbad = iat.table(slots, bridge, values)
-        iat.write_table(os.path.join(out, 'imports', m.name + '.tsv'), sorted(
-            mrows + [(s, d, n, 'none', None) for s, d, n, _ in mbad]))
+        if out:
+            iat.write_table(os.path.join(out, 'imports', m.name + '.tsv'), sorted(
+                mrows + [(s, d, n, 'none', None) for s, d, n, _ in mbad]))
         k = mkinds.setdefault(m.name, {'system': 0, 'module': 0, 'none': 0})
         for r in mrows:
             k['module' if r[3] == 'module' else 'system'] += 1
@@ -518,8 +528,7 @@ def main():
     if not (a.out_dir or a.c_out or a.keys_c_out or a.keys_tsv_out or a.data_out or a.keys_h_out):
         ap.error('one of --out-dir, --c-out, --keys-c-out, --keys-tsv-out, --data-out, --keys-h-out is required')
     try:
-        with tempfile.TemporaryDirectory() as tmp:
-            text, bad = run(a.exe, a.bridge, a.dir, a.out_dir or tmp, a.declared, a.c_out, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out)
+        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared, a.c_out, a.keys_c_out, a.keys_tsv_out, a.data_out, a.keys_h_out)
         if not a.out_dir:   # tables-only mode: a slot without a provider is the `iat` gate's finding (it needs the tables), not a failure of the generator
             bad = False
     except (StageError, ValueError, OSError, exepin.ExePinError) as e:
