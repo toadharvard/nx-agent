@@ -1951,3 +1951,12 @@ bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data)
   - Change asked of w28: a path that is not constant is red unless it goes through require_under.
   - The 6 render rows were cand3's older render copy; L6's tree has 0.
 bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data).
+- 23:48 Orchestrator decision integ 81864b90b (gs on 7601): the call-graph gate gets certificate kind `gs-fail` (the /GS failure branch is unreachable under OWNER 6) for cand4. Given to w28.
+  - Each certificate is checked statically from the PE bytes and the facts:
+    1. the load-config SecurityCookie VA;
+    2. the compare reads it;
+    3. the failure edge;
+    4. the edge dominates every site;
+    5. the OWNER 6 id is cited.
+  - L3a defines the certificate fields.
+bottleneck: the cand2 merge (w15), and cand3 (w12).
