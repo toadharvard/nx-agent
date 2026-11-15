@@ -655,6 +655,24 @@ The owner's words: "Что ещё так проебано? Перепровер�
 - **The cold pack build** of the relifted pack runs on up to 16 farms (orchestrator, 2026-11-15 21:00Z, for this one
   build). It is sharded by the recipe, with N up to 16, and the shards' stores are merged by key.
 
+## Orchestrator decision of 2026-11-15 23:30Z: jump-table index bound under OWNER 6 (binding for L3a, L3b, L1)
+
+- **The case.** MSVC /Od switches keep the index in a frame slot: `cmp [ebp-k],N; ja D; mov r,[ebp-k]; ...; jmp [r*4+T]`.
+  Between the guard and the reload there is no call and no unknown store, so only another thread, through an escaped
+  frame address, could change the slot. At w7 facts2 b9261cd85, 326 of 1005 sites are red this way.
+- **The rule.**
+  - The table read `[r*4+T]` is an array access. Under OWNER 6 its index is in the bounds of T.
+  - T's extent is the N+1 entries fixed by the guard `cmp [ebp-k],N` / `ja` on the same cell. The cell is the same
+    expression, with no redefinition of ebp between, and the guard dominates the jmp.
+  - So the target is one of T's N+1 entries, read statically. Each has a dispatcher entry.
+  - A racing in-range write still lands in T. An out-of-range one is a wild access, which OWNER 6 excludes.
+- **Status.** This is OWNER 6 applied to the table index. It is not a new assumption. The certificate cites OWNER 6, the
+  guard address and the table extent.
+- **The cell defects stay defects.** A join of different esp depths must not kill ebp cells (fix B), and precise escapes
+  are needed (SEH record, the /GS cookie value).
+- **Residue.** A site that this rule does not close, for example with no dominating guard on the same cell, is traced and
+  reported to the orchestrator with its address. Nothing is chosen for it.
+
 ## Orchestrator decision of 2026-11-15 09:20Z: weekly budget (binding for every session)
 
 - The owner's usage page reads: weekly 29 % used, reset on Saturday 2026-11-21 18:00Z. At the pace so far the limit ends
