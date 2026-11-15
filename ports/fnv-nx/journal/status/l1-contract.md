@@ -1804,3 +1804,5 @@ bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 bottleneck: the cand2 merge waits for the farm pin 03eacf9d.
 - 21:08 FARM pin landed: noneelf 56a4d09c37, tree cbb8843f, build_key 74cafda21648518e, toolchain_tree_git 1b2b42da6e (toolchain at 04007ded = 41beb64ff + PINSPLIT, so stamp is K2). Sent to w15 for cand2 (toolchain/ from 04007ded; stamp.py must print 74cafda2) and to w12.
 bottleneck: the cand2 warm verdict on w15.
+- 21:10 L2: the cand2 toolchain/ and targets.json come whole from claude/fnv-l2-source-plugins 17fb4961a (tree 1b2b42da = pin; stamp 74cafda2, stages K1 79be858a / K2 74cafda2). Sent to w15. The cold pin build takes 787 s (gcc 396, plugins 160, runtime 231); a plugin-only change will skip gcc once the farm proves the restore path.
+bottleneck: the cand2 warm verdict on w15.
