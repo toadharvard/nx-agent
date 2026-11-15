@@ -967,6 +967,13 @@ def dir_output(p, gen):
     return any(o != p and under(o, p) for o in gen)
 
 
+def foreign_search_dirs(dirs, ext_hosts):
+    """The directories DIRS of a compiler's own search list (its answers, unitstage.gcc_set) that lie outside every external tree EXT_HOSTS (host paths), by their
+    real path too: the headers a guest compile reads are the pinned runtime's own, never a distribution directory of the machine."""
+    under_ext = lambda p: any(under(p, e) for e in ext_hosts)  # noqa: E731
+    return sorted({t for t in dirs if not under_ext(t) or not under_ext(os.path.realpath(t))})
+
+
 def include_home(d, rec, roots, repo, files):
     """D (a repo directory) lies in a directory output of tracked files (a `srcdir`) of a root that REC `uses`."""
     for u in rec.get("uses") or []:
@@ -1834,6 +1841,11 @@ class Job:
                 xs, ts = unitstage.gcc_set(host)
                 q = lambda n: subprocess.run([host, "-print-prog-name=" + n], capture_output=True, text=True).stdout.strip()  # noqa: E731
                 out = lambda p: not any(under(p, e["host"]) for e in self.ext.values())  # noqa: E731
+                if entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("target") == "guest":
+                    bad = foreign_search_dirs(ts, [e["host"] for e in self.ext.values()])
+                    if bad:   # a guest compile reads the pinned runtime's headers only: a search directory of the machine is no input of it
+                        raise BuildRed({"stage": "toolrt", "exit": None, "stderr": ["guest compiler %s searches %s outside the externals of the recipe: the runtime headers of a guest "
+                                                                                       "are the pinned external's own (verify/guest_compiler.json)" % (c["cxx"], ", ".join(bad))]})
                 q = lambda n, _q=q: unitstage.prog(_q(n))  # noqa: E731
                 exes += [p for p in xs[1:] + [q("ld")] if os.path.isabs(p) and out(p)]
                 trees += sorted({r for t in ts for r in (t, os.path.realpath(t)) if out(r) and os.path.isdir(r)})

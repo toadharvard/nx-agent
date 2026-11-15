@@ -60,6 +60,13 @@ with tempfile.TemporaryDirectory() as repo:
     check("include_home: no uses, no home", recipe.include_home(T + "h/include", {"include": [T + "h/include"]}, roots, repo, files), False)
     check("output_kind: srcdir", recipe.output_kind("include", T + "h", [], files), "srcdir")
     check("output_kind: nothing there", recipe.output_kind("nope", T + "h", [], files), None)
+# hermeticity of a guest compile: the compiler's search list lies inside the pinned externals
+with tempfile.TemporaryDirectory() as d:
+    e = os.path.join(d, "ext"); os.makedirs(e + "/inc"); os.makedirs(d + "/usr/include"); os.symlink(d + "/usr/include", e + "/link")
+    check("foreign_search_dirs: a directory of the external is fine", recipe.foreign_search_dirs([e + "/inc"], [e]), [])
+    check("foreign_search_dirs: a distribution directory is foreign", recipe.foreign_search_dirs([e + "/inc", d + "/usr/include"], [e]), [d + "/usr/include"])
+    check("foreign_search_dirs: a link out of the external is foreign by its real path", recipe.foreign_search_dirs([e + "/link"], [e]), [e + "/link"])
+    check("foreign_search_dirs: no external, every directory is foreign", recipe.foreign_search_dirs([e + "/inc"], []), [e + "/inc"])
 # unitstage: an include of a mounted `include_uses` directory is accepted, one that no input names is refused
 import argparse, unitstage
 with tempfile.TemporaryDirectory() as d:
