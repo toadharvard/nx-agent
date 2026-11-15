@@ -378,3 +378,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - test_runner: the cause is the test, which still passes ARTIFACTS=art after Y. w7 is fixing the test to use its own bare repo for FNVNX_BUILD.
   - Side effect: w7's run pushed l4-verify/after-merge/f9ffbd055e14 (L4 reports only) to fnv-nx-build. Our delete was refused by the permission layer, so the branch stays until the owner removes it.
 - 14:52: render/gl4 comes from L6A gl4link2 3b360ffd2 (no link.roots; L1 recipe w12 52717c148). L6A measured libnxgl4.so sha256 6f9480f4…2fe00 in 2 fresh stores, and that replaces the 116b… expectation. w7 is taking it and rerunning.
+- 14:56: w7-u e31807e02. test_runner: 15 PASS, 0 FAIL (the test uses its own bare repo). ensure(render/gl4) is green, sha 6f9480f4…, equal to L6A's.
+  - test_bootgpu: red at ld:tests/bootguest, because lib/sha256 is red at cc:sha256.c (fnvnx_layout .fnvnx.decltype: vector_type outside the grammar). Blocked: owner L1/L2, reported.
+  - Commits for owners: 3f37422c9 (gl4 link.roots, superseded by L6A 3b360ffd2) and 974297f47 (lift/tests link.roots, L3a).
