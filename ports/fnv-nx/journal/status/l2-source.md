@@ -315,3 +315,11 @@ After the first frame:
   - Rulings:
     - B: the frame record's flag comes from the one GIMPLE escapes fact, and the RTL pass's address-formation marking is deleted. What remains of B must be stack-sharing overlaps (PD-STACK-REUSE). w2 is doing it.
     - A and C are gate-side, sent to L1 w15 as RO-IDX, RO-PTR, G-IDX and SPILL.
+- Farm phase A at 637bc13a (claude/fnv-l2-source-farm-noneelf).
+  - NL-LDBL is in: patch sha ab92ae1e, autotools 2.69/1.15.1 pinned, and the regeneration is byte-identical on the pristine tarball.
+  - The ILP32 newlib builds with all 8 plugins and 0 errors. libc.a has 664 members: 648 C, all with .fnvnx; the only real assembly is setjmp (D1). libm.a has 374 members.
+  - Blocker: GCC's default `.` multilib (LP64, 128-bit long double) fails the plugins.
+    - Rule MLIB1 (w3): `--with-abi=ilp32`, with signed char and 16-bit wchar as ILP32 defaults in the patch. S01 and S02 move from flags to patch rows, and the guest_compiler.json lines are dropped (L1).
+    - newlib's own -ffunction-sections and -fdata-sections are removed (one flag record).
+    - The *l subset check now comes from math.h's declarations.
+  - libgcc, libstdc++ and the smoke test wait on MLIB1.
