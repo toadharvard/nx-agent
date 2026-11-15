@@ -1,22 +1,5 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "cc": "aarch64-linux-gnu-gcc-13",
-  "cxx": "aarch64-linux-gnu-g++-13"
- },
- "flags": {
-  "c": [
-   "-mabi=ilp32"
-  ],
-  "cxx": [
-   "-mabi=ilp32"
-  ],
-  "asm": [
-   "-mabi=ilp32"
-  ]
- },
- "include": [],
- "units": "all",
  "external": [
   {
    "name": "units",
@@ -47,7 +30,6 @@
     "obj.json"
    ],
    "objects_of": {
-    "except": [],
     "target": "guest",
     "origin": "native",
     "dependents_of": "ports/fnv-nx/contract/facts"

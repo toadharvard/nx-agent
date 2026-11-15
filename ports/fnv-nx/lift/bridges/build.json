@@ -44,14 +44,15 @@
   {
    "root": "ports/fnv-nx/lift/descs",
    "output": "descs"
+  },
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
   }
  ],
  "outputs": {
   "bridges.tsv": "gen/bridges.tsv"
  },
- "forbid_sections": [
-  ".fnvnx.disp"
- ],
  "link": null,
  "plugins": [
   {
@@ -87,6 +88,12 @@
    "commit": "b274ec067a2f965807a359853f456e31c67a49af",
    "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
    "at": "/ext/gcc"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
   }
  ]
 }

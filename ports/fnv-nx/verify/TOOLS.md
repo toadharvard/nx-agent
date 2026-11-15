@@ -614,7 +614,7 @@ Kinds exe and shared (host images, RECIPE.md "Link") are judged by host mode: ru
 of a shared object defined and global, undefined names only if a --lib shared library defines them (its .dynsym); no crt0 header words.
 
 verify/recipe.py links the guest ELF as the stage `ld:<root>` (fixed options, RECIPE.md "Link"): the root's objects and the objects of
-its `link.roots` whole, the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
+its derived link members whole (recipe.definer_closure), the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
 from ELF symbol tables only (no linker message, no map file, no name or text pattern), the rules of the former link/ld.py:
   1. no undefined symbol in the output's `.symtab`;
   2. every name the input objects reference or define (the symbol tables of every `*.o` below --objs, weak references included) is defined in the output;
@@ -729,6 +729,17 @@ Watch log: --watch-log SYMS (text file, one ELF symbol per line, # starts a comm
 first instruction: OUT.json "watch_log" = [{"seq", "tid", "sym", "pc" (guest-relative), "sp"}], seq from 0 in machine order, no
 sampling, no cap, two names at one address in file order. A name that is absent or not STT_FUNC is an input error naming it.
 Without the option the key is absent.
+Memory at a watched call: a line `NAME [ret] [mem SPEC... [until REG=VALUE]]`, SPEC = `REG(->OFF)*(+DELTA)?:LEN` (REG x0..x7 as a 32-bit address; each `->OFF` loads the
+32-bit word at address+OFF and takes it as the address; DELTA (default 0) is added; LEN 1..65536 bytes are read there, protection ignored; a longer object is several specs with growing DELTA). A name with `mem` records
+also "args" = [w0, w1, w2, w3] and "mem" = {SPEC: hex | null (a page on the way unmapped)}; other records keep their keys.
+`until REG=VALUE` (REG x0..x7): the first call whose REG equals VALUE is the last one recorded with "mem"; later calls of the name carry "args" only.
+State snapshot: --state-at SYM --state-request JSON ({"hash": [{name, lo, hi}], "dump": [{name, addr, len}]}): when SYM is first entered OUT.json
+"start_state" = {at, t_ns, regs (x0..x28 as w, x30 guest-relative, sp), runs ([lo, hi, prot] of the guest page table, adjacent equal runs
+merged, prot 1 R 2 W 4 X), pages ({name: {lo, sha256: per page, null unmapped}}), dump ({name: {addr, hex | null}})}; null when SYM was
+never entered. Both options exist for bootstart.py (the loader's start rules S1..S8).
+
+Cores: the machine is the declared N-core machine (bootmachine.py rule 3). --quantum N (required, no default) is the instructions per slice of a core's
+thread; OUT.json "machine" = {app_cores, cores, quantum, unicorn} and run.cores = per-core {slices, instructions, switches, pairs}.
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
@@ -1089,6 +1100,43 @@ Served per service (everything else listed here as NOT answered):
 
 ```
 
+## verify/bootstart.py
+
+```text
+The loader's start rules S1..S8 (loader/include/fnvnx_start.h) as assertions over the boot machine's trace of the REAL image.
+
+  bootstart.py request --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv [--tls tls.tsv] --watch-out W.txt --state-out S.json
+      the two observation requests the exe's own PE and the contract's iat.tsv imply: the --watch-log file (fnvnx_lift_enter with the
+      memory it needs) and the --state-request file (hashes of every page of the image range, dumps of the import slots and the TLS
+      index word); run boot.py with  --watch-log W.txt --state-at fnvnx_start_enter --state-request S.json
+  bootstart.py check --out OUT.json --exe FalloutNV.exe --iat iat.tsv --modules modules.tsv --sha256 HEX [--tls tls.tsv] [--iat-data iat_data.tsv --elf GUEST.elf]
+                     [--json VERDICT.json]
+      --tls is required when the exe or a module has a TLS directory, --iat-data and --elf when iat.tsv has data slots (exit 1 otherwise)
+      one verdict per rule; exit 0 iff every rule is "pass"
+
+A verdict is pass, fail or undecided. fail: the trace contradicts the rule. undecided: the rule's value is not in the supplied facts
+(named); it is never turned into a guess, and it is not a pass. Every verdict lists the trace facts it read.
+
+RULE -> OBSERVATION -> FIELD (E existing, N new; all N fields are recorded by the machine from the image's own execution):
+  S1 identity        console "fnvnx-start: identity ok" before "image mapped", no "identity mismatch"; sha256 of --exe = --sha256     E console.txt
+  S2 PE headers      no "fnvnx-start: PE headers" line, "image mapped" present; the PE parses (sections in rva order inside SizeOfImage) E console.txt
+  S3 map             every page of [ImageBase, +SizeOfImage): sha256 = headers / section bytes / zero (min(raw,virt) bytes, rest 0),
+                     except the import slots and the TLS index word (S4, S5); every page mapped                                    N start_state.pages, runs
+  S4 imports         every slot of iat.tsv holds its value (key or module export); data slots: the ELF address of the native_symbol of iat_data.tsv (table_id = the ELF's); slot set = the PE's  N start_state.dump
+  S5 TLS             per image of tls.tsv (slot = its tls_slot column: the exe 0, static images 1, 2, ...): index word = the slot, main thread vec[slot] = block, block =
+                     sha-checked template + zero fill at the alignment; the exe's callbacks and entry
+                     in executable sections                                                                       N start_state.dump, watch_log mem
+  S6 protection      every page of the image range: headers R, section R/W by its characteristics, never X, claimed gaps none           N start_state.runs
+  S7 thread block    TEB +0 -1, +4 stack base, +8 limit, +0x18 self, +0x2c vector; guard page none, stack RW of SizeOfStackReserve; the
+                     TEB, vector, stack outside the reserved set (exe, module rows, [0xf0000, 0x200000))   N watch_log args, mem; start_state.runs
+  S8 enter           the first exe-range fnvnx_lift_enter calls on one thread: the TLS callbacks (image_base, 1, 0) in list order, then
+                     the entry (0, 0, 0); esp = (stack_base - 16) & ~15 holding the sentinel; console "enter <entry>"       N watch_log args, mem
+Rules no observation can decide are listed in the verdicts as undecided, with the reason.
+S5 details: slot and alignment are read from the tls_slot and align_bytes columns (contract/modules.py: the loader's own numbers), never derived here; an image
+of tls.tsv without a tls_slot (loaded on demand) has no start state and is only fact-checked (sha256 of its template). The watch log captures a long block in chunks of boot.py MEM_MAX bytes (spec +DELTA), so the
+whole block is compared, never a prefix. A repeated tls_slot, a static image without one and an on-demand image with one are fact failures.
+```
+
 ## verify/cas.py
 
 ```text
@@ -1410,7 +1458,7 @@ Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local refere
 TLS access model the loader supports, and one symbol is accessed with one model.
     python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
 Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
-objects plus the objects of the roots in its recipe's link.roots (the objects that one linked output is made of), and its linked ELF.
+objects plus the objects of its derived link members (recipe.definer_closure) (the objects that one linked output is made of), and its linked ELF.
 Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
 NAME the ABI gives a relocation (R_AARCH64_P32_TLS..., R_AARCH64_TLS... for LP64), never a name of the program's text. A relocation is TLS when
 its type name has the family prefix TLS (after an optional P32_) or contains TPREL or DTPREL; the family is the ABI's:
@@ -1436,7 +1484,7 @@ finding. Counts per relocation family over all roots are in `detail`. No guest r
 Gate "onedef" (fnvnx-gate/1): one definition, one source. A name, a COMDAT group, a source file and a header each come from ONE place.
     python3 -I gate_onedef.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/onedef.json
 Rules (by symbol tables and file content, never by a name's text):
-  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its `link.roots`): a GLOBAL or WEAK
+  (a) Per linked image (a root with a `link`; its objects are those of the root itself and of every root of its derived link members): a GLOBAL or WEAK
       definition outside every COMDAT group comes from exactly ONE root. Two roots defining one name is `dup-def`, whatever the binding (strong, weak):
       the linker's choice between them would pick a body by link order.
   (b) COMDAT groups of an image. The instances of one signature that come from different roots must be one definition: one digest of the group's
@@ -2097,10 +2145,9 @@ recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", con
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
-Link: `link` = {script, output, flags, kind pie|exe, roots}. a guest root cannot link kind exe; `roots` lists distinct admitted
-product roots of the same target (never the root itself) whose stored objects are declared inputs of the link stage (in its key); the
-image of a product root lists base roots only, a test root any root (a variant is `root@NAME`, declared in the `variants` of the root's admit.json entry, checked by
-gate_admit.py: product roots only, `{NAME: {"target"?}}`). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
+Link: `link` = {script, output, flags, kind pie|exe}. a guest root cannot link kind exe; the image's members are derived (recipe.definer_closure over the admitted product roots; a written `roots` is a check
+error) and their stored objects are declared inputs of the link stage (in its key); a variant is `root@NAME`, declared in the `variants` of the root's admit.json entry, checked by
+gate_admit.py: product roots only, `{NAME: {"target"?}}`. Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
 refused in every link; linkstrict judges the linked output of every product and test root (no undefined symbol of any binding).
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
@@ -2644,7 +2691,7 @@ compile-failure test's mutation), crt/msvcrt_names.tsv (name, provider symbol, f
 stage, com/comrows.py SPEC ROWS WORDS, the one derivation of the signature of every COM thunk, and declares the outputs COM_ROWS (the bridge rows of
 the COM methods and exports, the `extra` rows of bridgegen) and COM_WORDS (`Interface Method words` for every method, hidden interfaces too).
 The platform's C++ half (platform/com/gen_combridge.py SPEC ROWS WORDS OUTDIR) reads them through `uses` and never recomputes a signature; the
-loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({stage, path} for the rows,
+loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({root, output} for the rows,
 {root, path} for the records; recipe.resolve_input reads a tracked file of an admitted tool root). Ownership is unchanged: L5 owns the COM and msvcrt
 files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
 Test: verify/tests/test_bridgefacts.py.

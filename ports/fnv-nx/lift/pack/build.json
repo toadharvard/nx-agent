@@ -50,6 +50,16 @@
   {
    "root": "ports/fnv-nx/loader",
    "output": "BRIDGE_TSV"
+  },
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
   }
  ],
  "generated": [

@@ -126,5 +126,8 @@
    "root": "ports/fnv-nx/contract/facts",
    "output": "native"
   }
- ]
+ ],
+ "outputs": {
+  "GEN": "gen"
+ }
 }

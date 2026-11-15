@@ -229,6 +229,9 @@ def finish(a):
         len(images), len(texts), len(imp), NBUCKET + 2, res['text_bytes'], max(sum(map(len, u)) for u in units.values()), len(forms), nc, len(h['slots']), h['attempts']))
 
 
+GEN_USE = {'root': 'ports/fnv-nx/lift/rt', 'output': 'GEN'}      # the generated rt headers (fnvl_cpuref.h, fnvl_faults.h, fnvl_sys.h): included, not copied
+
+
 def recipe(ref, commit, tree, dest=None):
     """lift/pack/build.json. The recipe is the one definition of the semantic flags (verify/guest_compiler.json flags.semantics, appended to every guest compile stage), so
     the build.json holds only the per-root classes (PACK_ROOT_FLAGS; recipe.PER_ROOT: -O, -W, -D, -std ...), and the plugins are the full set of recipe.PLUGIN_SOURCES in
@@ -243,7 +246,8 @@ def recipe(ref, commit, tree, dest=None):
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
            'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
-           'uses': [{'root': 'ports/fnv-nx/loader', 'output': 'BRIDGE_TSV'}],
+           'uses': [{'root': 'ports/fnv-nx/loader', 'output': 'BRIDGE_TSV'}, GEN_USE],
+           'include_uses': [GEN_USE],
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()},
                          {'tool': 'ports/fnv-nx/lift/tools/packentries.py', 'args': ['/ext/liftpack/entries.tsv', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '/out/entries.tsv'], 'inputs': [], 'outputs': ['entries.tsv']}],
            'outputs': {'ENTRIES': 'entries.tsv'},

@@ -27,6 +27,10 @@
   {
    "root": "ports/fnv-nx/lift/tests/guest/citest/lifted",
    "output": "cases.inc"
+  },
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
   }
  ],
  "link": {
@@ -34,14 +38,6 @@
   "flags": [
    "-m",
    "aarch64linux32"
-  ],
-  "roots": [
-   "ports/fnv-nx/lift/tests/guest/citest/lifted",
-   "ports/fnv-nx/lift/rt",
-   "ports/fnv-nx/rt/guest",
-   "ports/fnv-nx/platform",
-   "ports/fnv-nx/loader",
-   "ports/fnv-nx/lib/sha256"
   ],
   "entry": "fnvl_citest_entry"
  },
@@ -87,6 +83,12 @@
    "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
    "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
    "at": "/ext/a64"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
   }
  ]
 }

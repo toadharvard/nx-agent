@@ -18,6 +18,7 @@
  "include": [
   "ports/fnv-nx/loader/include",
   "ports/fnv-nx/hostabi/include",
+  "ports/fnv-nx/platform/include",
   "/ext/a64/aarch64-none-elf/include",
   "ports/fnv-nx/lib/sha256/include",
   "ports/fnv-nx/platform/include",
@@ -86,7 +87,7 @@
     "--extra",
     "/uses/ports/fnv-nx/bridgefacts/COM_ROWS",
     "--extra",
-    "/ext/manifest/manifest/d9bridge_rows.tsv",
+    "/uses/ports/fnv-nx/bridgefacts/D9_ROWS",
     "--out",
     "/out/gen/bridge.tsv"
    ],
@@ -168,6 +169,10 @@
   {
    "root": "ports/fnv-nx/bridgefacts",
    "output": "COM_ROWS"
+  },
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_ROWS"
   }
  ]
 }

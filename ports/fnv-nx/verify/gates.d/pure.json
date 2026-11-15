@@ -9,6 +9,11 @@
  "result": "pure.json",
  "covers": [
   "tool",
-  "ref"
+  "ref",
+  "header",
+  "test",
+  "product-guest",
+  "lifted",
+  "host-product"
  ]
 }

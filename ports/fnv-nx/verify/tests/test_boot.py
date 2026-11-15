@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Tests of verify/boot.py (the boot stage CLI). Plain script: exit 0 on pass. The guests are built by
 test_bootmachine.build (MODE 6: three functions called in order and a console line; MODE 3: a fault)."""
+import atexit
+import hashlib
 import io
 import contextlib
 import json
 import os
+import stat
 import sys
 import time
 
@@ -12,6 +15,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import boot  # noqa: E402
+import bootdecl  # noqa: E402
+import bootmachine  # noqa: E402
+import boothost  # noqa: E402
 import test_bootmachine as tb  # noqa: E402
 
 LINE = "fnvnx-start: identity ok"
@@ -25,27 +31,6 @@ all3  all:g ret     0x3000
 all3  all:g call    0x3000
 """ % boot.console_part(LINE)
 MANIFEST = "1000\tfnvboot_a\n2000\tfnvboot_b\n3000\tfnvboot_c\n"
-
-
-WL_GUEST = r'''
-#if MODE == 70
-    /* watch-log guest: fnvwl_f(n) recurses once per n, fnvwl_g is a leaf; each records its SP at its first instruction */
-    __asm__(".pushsection .bss\n.balign 4\nwl_sp: .space 64\nwl_n: .space 4\n.popsection\n"
-            ".macro WLREC\n adrp x9, wl_n\n add x9, x9, :lo12:wl_n\n ldr w10, [x9]\n add w11, w10, #1\n str w11, [x9]\n"
-            " adrp x12, wl_sp\n add x12, x12, :lo12:wl_sp\n mov x13, sp\n str w13, [x12, x10, lsl #2]\n.endm\n"
-            ".pushsection .text.wl,\"ax\",%progbits\n"
-            ".globl fnvwl_f\n.type fnvwl_f,%function\nfnvwl_f:\n WLREC\n cbz x0, 1f\n stp x29, x30, [sp, #-16]!\n"
-            " sub x0, x0, #1\n bl fnvwl_f\n ldp x29, x30, [sp], #16\n1: ret\n.size fnvwl_f, .-fnvwl_f\n"
-            ".globl fnvwl_g\n.type fnvwl_g,%function\nfnvwl_g:\n WLREC\n ret\n.size fnvwl_g, .-fnvwl_g\n"
-            ".popsection\n");
-    {
-        extern void fnvwl_f(uint32_t), fnvwl_g(void);
-        extern uint32_t wl_sp[];
-        fnvwl_f(1); fnvwl_g(); fnvwl_f(0);
-        for (uint32_t i = 0; i < 4; i++) num("wlsp", wl_sp[i]);
-    }
-    fnvnx_hcall1(H->exit, 0);
-#elif'''
 
 
 def cli(argv):
@@ -70,8 +55,8 @@ def main():
     elf6, elf3, elf35 = patched("h6.elf", 6), patched("h3.elf", 3), patched("h35.elf", 35)
 
     def args(elf, out, tbl=table, man=manifest, *extra):
-        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000",
-                "--root", root, "--milestones", tbl, "--manifest", man, "--out", os.path.join(d, out), *extra]
+        return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000", 
+                "--root", root, "--quantum", str(tb.QUANTUM), "--milestones", tbl, "--manifest", man, "--out", os.path.join(d, out), *extra]
 
     rc, o, e = cli(args(elf6, "a.json"))
     assert rc == 0, (rc, o, e)
@@ -125,8 +110,8 @@ def main():
     tb.case("--limit-instructions: exit 0, reason limit, same total twice", stops[0] == stops[1]
             and stops[0][:2] == (0, "limit") and stops[0][2] >= 40, stops)
 
-    rc, o, e = cli(args(elf6, "r1.json", table, manifest, "--hc-slice", "3"))
-    rc2, o2, e2 = cli(args(elf6, "r2.json", table, manifest, "--hc-slice", "3"))
+    rc, o, e = cli(args(elf6, "r1.json", table, manifest, "--quantum", "3"))
+    rc2, o2, e2 = cli(args(elf6, "r2.json", table, manifest, "--quantum", "3"))
     b1, b2 = (open(os.path.join(d, n), "rb").read() for n in ("r1.json", "r2.json"))
     tb.case("two full runs: byte-identical OUT.json and console", rc == rc2 == 0 and b1 == b2
             and open(os.path.join(d, "r1.console.txt"), "rb").read() == open(os.path.join(d, "r2.console.txt"), "rb").read(), (rc, rc2))
@@ -161,9 +146,57 @@ def main():
     rc, o, e = cli(args(elf59, "t3.json", table, manifest, "--text-entry", "x", "--text-entry", "yz"))
     td = json.load(open(os.path.join(d, "t3.json")))
     tb.case("--text-entry repeated: order kept", td["inputs"] == {"text_entry": ["x", "yz"]}, td["inputs"])
+    # --scenario (rule R-INPUT, bootinput.py): device states over virtual time, expect_events, scenario-error
+    elf91, elf90 = patched("h91.elf", 91), patched("h90.elf", 90)
+    sj = lambda n, doc: w(n, doc if isinstance(doc, str) else json.dumps(doc))   # noqa: E731
+    VIB = [{"kind": "pad-vibrate", "index": 0, "lo": "0x3f000000", "hi": "0x0"}, {"kind": "pad-vibrate", "index": 1},
+           {"kind": "pad-vibrate", "index": 2, "lo": "0x3f800000"}, {"kind": "pad-vibrate", "index": 3}]
+    PADS = [{"t_ns": t * 1_000_000, "dev": "pad", "index": i, "connected": c} for t, i, c in ((50, 0, 1), (120, 1, 1), (150, 2, 1), (250, 3, 1), (350, 3, 0))]
+    sc_ok = sj("s_ok.json", {"schema": "fnvnx-scenario/1", "states": PADS, "expect_events": VIB})
+    rc, o, e = cli(args(elf91, "s1.json", table, manifest, "--scenario", sc_ok))
+    sd = json.load(open(os.path.join(d, "s1.json")))
+    tb.case("--scenario: expect_events equal to the recorded pad-vibrate events: exit 0, inputs hold the sha256 and the content",
+            rc == 0 and sd["run"]["reason"] == "exit" and sd["inputs"]["expect_events"] == {"diff": [], "ok": True}
+            and sd["inputs"]["scenario"]["content"] == open(sc_ok).read()
+            and sd["inputs"]["scenario"]["sha256"] == __import__("hashlib").sha256(open(sc_ok, "rb").read()).hexdigest()
+            and sd["inputs"]["text_entry"] == [], (rc, o, sd["inputs"]))
+    sc_bad = sj("s_bad.json", {"schema": "fnvnx-scenario/1", "states": PADS, "expect_events": VIB[:3] + [{"kind": "pad-vibrate", "index": 1}]})
+    rc, o, e = cli(args(elf91, "s2.json", table, manifest, "--scenario", sc_bad))
+    sd = json.load(open(os.path.join(d, "s2.json")))
+    tb.case("--scenario: an expect_events difference fails the run (exit 2, the difference in OUT.json and on stdout)",
+            rc == 2 and sd["run"]["reason"] == "exit" and sd["inputs"]["expect_events"]["ok"] is False
+            and sd["inputs"]["expect_events"]["diff"] == ["event 3: index expected 1, recorded 3"] and "expect_events differ" in o, (rc, o, sd["inputs"]))
+    sc_rng = sj("s_rng.json", {"schema": "fnvnx-scenario/1", "states": [{"t_ns": 0, "dev": "pad", "index": 4}]})
+    rc, o, e = cli(args(elf91, "s3.json", table, manifest, "--scenario", sc_rng))
+    sd = json.load(open(os.path.join(d, "s3.json")))
+    tb.case("--scenario: an out-of-range value ends the run as scenario-error (exit 2), the guest never runs", rc == 2
+            and sd["run"]["reason"] == "scenario-error" and "outside 0..3" in sd["run"]["scenario"]
+            and not os.path.exists(os.path.join(d, "s3.console.txt")), (rc, sd["run"]))
+    sc_te = sj("s_te.json", {"schema": "fnvnx-scenario/1", "text_entries": ["\U0001F600"]})
+    rc, o, e = cli(args(elf59, "s4.json", table, manifest, "--scenario", sc_te))
+    sd = json.load(open(os.path.join(d, "s4.json")))
+    tb.case("--scenario text_entries: the guest gets the text as with --text-entry, recorded in inputs",
+            sd["run"]["reason"] == "exit" and sd["inputs"]["text_entry"] == ["\U0001F600"] and [x["result"] for x in sd["run"]["events"] if x["kind"] == "text-entry"] == [1], (rc, sd["inputs"]))
+    rc, o, e = cli(args(elf59, "s5.json", table, manifest, "--scenario", sc_te, "--text-entry", "x"))
+    sd = json.load(open(os.path.join(d, "s5.json")))
+    tb.case("--scenario text_entries together with --text-entry: scenario-error (exit 2)", rc == 2 and sd["run"]["reason"] == "scenario-error"
+            and "--text-entry" in sd["run"]["scenario"], (rc, sd["run"]))
+    rc, o, e = cli(args(elf90, "s6.json", table, manifest, "--scenario", sj("s_dock.json", {"schema": "fnvnx-scenario/1", "states": [
+        {"t_ns": 900_000_000, "dev": "docked", "value": 1}]}), "--profile", "handheld"))
+    sd = json.load(open(os.path.join(d, "s6.json")))
+    con = open(os.path.join(d, "s6.console.txt")).read()
+    tb.case("--scenario docked: DISPLAY_DOCKED 0 (the profile) before 900 ms and 1 after; no input-read events without --watch-log",
+            rc == 0 and "a-d60=0\n" in con and "k-d950=1\n" in con and "k-d1050=1\n" in con
+            and not [x for x in sd["run"]["events"] if x["kind"] == "input-read"], (rc, con[-200:]))
+    syms2 = w("syms2.txt", "marker\n")
+    rc, o, e = cli(args(elf90, "s7.json", table, manifest, "--scenario", sc_ok, "--watch-log", syms2))
+    sd = json.load(open(os.path.join(d, "s7.json")))
+    rd = [x for x in sd["run"]["events"] if x["kind"] == "input-read"]
+    tb.case("--scenario with --watch-log: one input-read event per device read (4 pad_read + 15 polls x 3 devices + 4 docked)",
+            rc == 2 and len(rd) == 4 + 45 + 4 and rd[0]["dev"] == "pad" and rd[0]["t_ns"] > 0, (rc, len(rd)))
     # --watch-log: the guest MODE 70 calls f(1) (recursing once into f(0)), g, f(0); the guest prints the SP of each entry
     elfw = os.path.join(d, "hw.elf")
-    open(elfw, "wb").write(tb.build(70, WL_GUEST)[0])
+    open(elfw, "wb").write(tb.build(70)[0])
     rc, o, e = cli(args(elfw, "w0.json"))
     w0 = json.load(open(os.path.join(d, "w0.json")))
     tb.case("without --watch-log the key is absent", rc == 0 and "watch_log" not in w0, (rc, e, list(w0)))
@@ -172,8 +205,9 @@ def main():
     w1 = json.load(open(os.path.join(d, "w1.json")))
     wl = w1.get("watch_log", [])
     guest_sp = [int(x.split("=")[1], 16) for x in open(os.path.join(d, "w1.console.txt")).read().split("\n") if x.startswith("wlsp=")]
-    tb.case("watch_log: f, f, g, f in machine order, seq from 0", rc == 0 and [x["sym"] for x in wl] == ["fnvwl_f", "fnvwl_f", "fnvwl_g", "fnvwl_f"]
-            and [x["seq"] for x in wl] == [0, 1, 2, 3] and all(set(x) == {"seq", "tid", "sym", "pc", "sp"} for x in wl), (rc, e, wl))
+    tb.case("watch_log (fnvnx-watch/2, a superset of /1: seq, tid, sym, pc, sp kept, t_ns, kind, x0, x30 added): f, f, g, f in machine order, seq from 0", rc == 0 and [x["sym"] for x in wl] == ["fnvwl_f", "fnvwl_f", "fnvwl_g", "fnvwl_f"]
+            and [x["seq"] for x in wl] == [0, 1, 2, 3] and all(set(x) == {"seq", "tid", "sym", "pc", "sp", "t_ns", "kind", "x0", "x30"} and x["kind"] == "call" for x in wl)
+            and w1["watch_schema"] == "fnvnx-watch/2", (rc, e, wl))
     tb.case("watch_log: sp equals what the guest printed at each entry; the recursive entry is 16 below", len(guest_sp) == 4
             and [x["sp"] for x in wl] == guest_sp and guest_sp[1] == guest_sp[0] - 16 and guest_sp[2] == guest_sp[0], (guest_sp, wl))
     pcs = {x["sym"]: x["pc"] for x in wl}
@@ -189,6 +223,166 @@ def main():
             and not os.path.exists(os.path.join(d, "w3.json")), (rc, e))
     rc, o, e = cli(args(elfw, "w4.json", table, manifest, "--watch-log", w("syms4.txt", "wl_n\n")))
     tb.case("watch_log: a non-function symbol (data) fails, naming it", rc == 1 and "wl_n" in e, (rc, e))
+
+    # `until`: the mem capture ends after the call whose register equals the value; args stay on every record
+    rc, o, e = cli(args(elfw, "u1.json", table, manifest, "--watch-log", w("syms_u.txt", "fnvwl_f mem x0:4 until x0=0\n")))
+    u1 = json.load(open(os.path.join(d, "u1.json"))).get("watch_log", [])
+    tb.case("watch_log mem ... until x0=0: records up to and including the first f(0) carry mem, the later f(0) carries args only",
+            rc == 0 and [x["args"][0] for x in u1] == [1, 0, 0] and ["mem" in x for x in u1] == [True, True, False]
+            and all(len(x["args"]) == 4 for x in u1), (rc, e, u1))
+    # --state-at: the observer's snapshot at the first entry of a function (bootstart.py's start_state)
+    gsp = wl[2]["sp"]   # the sp at the entry of fnvwl_g in the run above
+    req = w("req.json", json.dumps({"hash": [{"name": "stack", "lo": gsp & ~4095, "hi": (gsp & ~4095) + 4096}], "dump": [{"name": "top", "addr": gsp, "len": 16}]}))
+    rc, o, e = cli(args(elfw, "st1.json", table, manifest, "--state-at", "fnvwl_g", "--state-request", req))
+    st1 = json.load(open(os.path.join(d, "st1.json"))).get("start_state") or {}
+    runs = st1.get("runs", [])
+    tb.case("--state-at: start_state at the first entry of the function: sp, sorted merged runs, page hash and dump of the stack page",
+            rc == 0 and st1.get("at") == "fnvwl_g" and st1["regs"]["sp"] == gsp
+            and all(a[1] <= b[0] and (a[1] < b[0] or a[2] != b[2]) for a, b in zip(runs, runs[1:])) and all(0 <= r[2] <= 7 and r[0] < r[1] for r in runs)
+            and len(st1["pages"]["stack"]["sha256"]) == 1 and st1["pages"]["stack"]["sha256"][0] is not None
+            and len(st1["dump"]["top"]["hex"]) == 32 and any(r[0] <= gsp < r[1] and r[2] & 3 == 3 for r in runs), (rc, e, st1))
+    rc, o, e = cli(args(elfw, "st2.json", table, manifest, "--state-at", "fnvwl_g"))
+    tb.case("--state-at without --state-request fails before the run", rc == 1 and "go together" in e and not os.path.exists(os.path.join(d, "st2.json")), (rc, e))
+    rc, o, e = cli(args(elfw, "st3.json", table, manifest, "--state-at", "no_such_fn", "--state-request", req))
+    tb.case("--state-at: not a function symbol fails, naming it", rc == 1 and "no_such_fn" in e, (rc, e))
+
+    # -- declared inputs (bootdecl.py, --declared-inputs): a small fixture set made here (not real fonts), pinned like boot_inputs.json
+    def unlock(top):
+        for dp, dn, fn in os.walk(top):
+            os.chmod(dp, 0o755)
+    atexit.register(lambda: unlock(os.path.join(d, "decl")))   # runs before tb's rmtree of the scratch directory (LIFO)
+
+    def fixture(name, files, extra_sums=()):
+        """a source tree with fonts/<files> and SHA256SUMS (the fixture's own list, plus extra_sums lines for names outside fonts/)"""
+        src = os.path.join(d, "decl", name)
+        for f, data in files.items():
+            os.makedirs(os.path.dirname(os.path.join(src, "fonts", f)), exist_ok=True)
+            open(os.path.join(src, "fonts", f), "wb").write(data)
+        sums = "".join("%s  fonts/%s\n" % (hashlib.sha256(v).hexdigest(), k) for k, v in sorted(files.items())) + "".join(extra_sums)
+        open(os.path.join(src, "SHA256SUMS"), "w").write(sums)
+        return src, hashlib.sha256(sums.encode()).hexdigest()
+
+    def pins(name, sums_sha):
+        pin = {"name": "fonts", "repo": "fnv-nx-build", "ref": "tools/fonts-wine9", "commit": "0" * 39 + "1", "path": "fonts", "sums": "SHA256SUMS",
+               "sums_sha256": sums_sha, "mount": "switch/fnv/fonts"}
+        return w(name, json.dumps({"format": "fnvnx-boot-inputs/1", "inputs": [pin]}))
+
+    good = {"A.ttf": b"alpha", "Sub/B.ttf": b"bravo"}
+    src, sha = fixture("ok", good, extra_sums=("%s  inputs/doc.txt\n" % ("1" * 64),))   # an entry outside fonts/ is not mounted and not read
+    droot = os.path.join(d, "sd-decl")
+    os.makedirs(droot)
+    rc, o, e = cli(args(elf6, "d0.json", table, manifest, "--declared-inputs", pins("p0.json", sha), "--declared-src", "fonts=" + src))
+    # args() has --root fixed; use a fresh root for the declared runs
+    mounted = os.path.join(root, "switch", "fnv", "fonts")
+    dd = json.load(open(os.path.join(d, "d0.json"))) if rc in (0, 2) else {}
+    tb.case("declared inputs: a verified set is mounted and the run proceeds", rc == 0 and dd.get("run", {}).get("reason") == "exit", (rc, o, e))
+    tb.case("declared inputs: OUT.json inputs.declared = {name, commit, sums_sha256, files}",
+            dd.get("inputs", {}).get("declared") == [{"name": "fonts", "commit": "0" * 39 + "1", "sums_sha256": sha, "files": 2}], dd.get("inputs"))
+    tb.case("declared inputs: the mounted files are the fixture's bytes, nothing else",
+            sorted(os.path.relpath(os.path.join(a, f), mounted) for a, _, fs in os.walk(mounted) for f in fs) == ["A.ttf", "Sub/B.ttf"]
+            and open(os.path.join(mounted, "Sub", "B.ttf"), "rb").read() == b"bravo")
+    tb.case("declared inputs: files are 0444 and directories 0555",
+            all(stat.S_IMODE(os.stat(os.path.join(a, f)).st_mode) == 0o444 for a, _, fs in os.walk(mounted) for f in fs)
+            and all(stat.S_IMODE(os.stat(a).st_mode) == 0o555 for a, _, _ in os.walk(mounted)))
+    rc, o, e = cli(args(elf6, "d0b.json", table, manifest, "--declared-inputs", pins("p0b.json", sha), "--declared-src", "fonts=" + src))
+    tb.case("declared inputs: a second run on the same root remounts the same bytes (read-only tree replaced)", rc == 0 and
+            open(os.path.join(mounted, "A.ttf"), "rb").read() == b"alpha", (rc, e))
+
+    def refused(name, src, sha, needle):
+        out = "d_%s.json" % name
+        rc, o, e = cli(args(elf6, out, table, manifest, "--declared-inputs", pins("p_%s.json" % name, sha), "--declared-src", "fonts=" + src))
+        tb.case("declared inputs: %s is an input error (exit 1) naming it; nothing runs" % name,
+                rc == 1 and needle in e and not os.path.exists(os.path.join(d, out)), (rc, e))
+    refused("a bad sums hash", src, "f" * 64, "sha256(SHA256SUMS)")
+    s2, h2 = fixture("extra", good)
+    open(os.path.join(s2, "fonts", "Extra.ttf"), "wb").write(b"x")
+    refused("an extra file", s2, h2, "Extra.ttf")
+    s3, h3 = fixture("missing", good)
+    os.remove(os.path.join(s3, "fonts", "A.ttf"))
+    refused("a missing file", s3, h3, "A.ttf")
+    s4, h4 = fixture("changed", good)
+    open(os.path.join(s4, "fonts", "Sub", "B.ttf"), "wb").write(b"bravp")
+    refused("a changed byte", s4, h4, "B.ttf")
+    try:
+        rc, o, e = cli(args(elf6, "d_nosrc.json", table, manifest, "--declared-src", "fonts=" + src))
+    except SystemExit as x:   # argparse's usage error
+        rc = x.code
+    tb.case("declared inputs: --declared-src without --declared-inputs is a usage error (exit 2)", rc == 2, rc)
+    real = bootdecl.load_pins(os.path.join(os.path.dirname(HERE), "boot_inputs.json"))
+    tb.case("boot_inputs.json: one input, fonts, the pinned commit and checksum list, mounted at switch/fnv/fonts",
+            len(real) == 1 and real[0]["name"] == "fonts" and real[0]["mount"] == "switch/fnv/fonts" and real[0]["path"] == "fonts"
+            and real[0]["commit"] == "099942c35ee21a2ff7ac50e4d13fed12cc173ad3"
+            and real[0]["sums_sha256"] == "0a9b00c5904737b42fee3d81e220d1b646dd012c1aef96d132bf0231369cd077", real)
+
+    # the guest-visible side: writes under the mounted tree fail with EACCES through the real file handlers (bootpath.READ_ONLY)
+    svc = boothost.Services(root, read_only=[p["mount"] for p in real])
+    mach = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc, quantum=tb.QUANTUM)
+    page = tb.make_plan(open(elf6, "rb").read())["regions"]["host_page"]["lo"]
+
+    def sd(path):
+        mach.uc.mem_write(page, path.encode() + b"\0")
+        return page
+    def sd2(a, b):
+        mach.uc.mem_write(page, a.encode() + b"\0" + b.encode() + b"\0")
+        return page, page + len(a) + 1
+    neg = lambda e: (-e) & (2 ** 64 - 1)   # noqa: E731
+    import errno as errno_
+    EACCES = neg(errno_.EACCES)   # the platform maps OS_EACCES (13) to ERROR_ACCESS_DENIED: platform/win32/handles.cpp:208 w32_os_error
+    O_READ, O_WRITE, O_RW, O_CREAT, O_TRUNC = 1, 2, 3, 4, 0x10
+    for path in ("sdmc:/switch/fnv/fonts/A.ttf", "SDMC:/SWITCH/FNV/FONTS/a.TTF", "sdmc:/switch/fnv/fonts/new.ttf"):
+        tb.case("EACCES: open for write / create / truncate under fonts, %s" % path,
+                all(svc.h_fs_open(sd(path), f) == EACCES for f in (O_WRITE, O_RW, O_WRITE | O_CREAT, O_RW | O_TRUNC)))
+    tb.case("EACCES: mkdir, rmdir, remove under fonts",
+            svc.h_fs_mkdir(sd("sdmc:/switch/fnv/fonts/newdir")) == EACCES and svc.h_fs_rmdir(sd("sdmc:/switch/fnv/fonts/Sub")) == EACCES
+            and svc.h_fs_remove(sd("sdmc:/switch/fnv/fonts/A.ttf")) == EACCES)
+    tb.case("EACCES: rename out of, into and inside fonts", svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/A2.ttf")) == EACCES
+            and svc.h_fs_rename(*sd2("sdmc:/Data/x", "sdmc:/switch/fnv/fonts/x")) == EACCES
+            and svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/switch/fnv/fonts/Z.ttf")) == EACCES)
+    # a spelling equal to the mount only under casefold ("ß" ~ "ss") is refused: the mount "fontss" of a second card
+    root2 = os.path.join(d, "sd-cf")
+    os.makedirs(os.path.join(root2, "switch", "fnv", "fontss"))
+    open(os.path.join(root2, "switch", "fnv", "fontss", "a.ttf"), "w").close()
+    svc2 = boothost.Services(root2, read_only=["switch/fnv/fontss"])
+    mach2 = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc2, quantum=tb.QUANTUM)
+    mach2.uc.mem_write(page, "sdmc:/switch/fnv/FONT\u00df/a.ttf".encode() + b"\0")
+    tb.case("casefold-only spelling of a mount: open for write is EACCES with a declared-input-write fault, the file is unchanged",
+            svc2.h_fs_open(page, O_WRITE | O_TRUNC) == EACCES and [(f["kind"], f["call"]) for f in svc2.declared_faults] == [("declared-input-write", "open")]
+            and os.path.getsize(os.path.join(root2, "switch", "fnv", "fontss", "a.ttf")) == 0, svc2.declared_faults)
+    fd = svc.h_fs_open(sd("sdmc:/switch/fnv/fonts/A.ttf"), O_READ)
+    tb.case("read-only open of a font works", fd < 2 ** 31, fd)
+    svc.h_fs_close(fd)
+    tb.case("EACCES calls are counted as faults and the files are unchanged",
+            sum(v for (c, er, s), v in svc.dp.faults.items() if er == "EACCES") >= 14 and len(svc.declared_faults) >= 14 and open(os.path.join(mounted, "A.ttf"), "rb").read() == b"alpha"
+            and not os.path.exists(os.path.join(mounted, "new.ttf")), svc.dp.faults)
+    f0 = svc.declared_faults[0]
+    tb.case("declared_faults record {kind, call, sd, t_ns, tid}", sorted(f0) == ["call", "kind", "sd", "t_ns", "tid"] and f0["kind"] == "declared-input-write"
+            and f0["call"] == "open" and f0["sd"] == "sdmc:/switch/fnv/fonts/A.ttf" and isinstance(f0["t_ns"], int) and isinstance(f0["tid"], int), f0)
+    # an fd opened below the mount (read-only) never writes: write, pwrite and truncate on it are refused too
+    fd = svc.h_fs_open(sd("sdmc:/switch/fnv/fonts/A.ttf"), O_READ)
+    n0 = len(svc.declared_faults)
+    tb.case("write, pwrite, truncate on an fd opened under a declared input: EACCES, three faults",
+            svc.h_fs_write(fd, page, 1) == EACCES and svc.h_fs_pwrite(fd, page, 1, 0) == EACCES and svc.h_fs_truncate(fd, 0) == EACCES
+            and [x["call"] for x in svc.declared_faults[n0:]] == ["write", "pwrite", "truncate"], svc.declared_faults[n0:])
+    svc.h_fs_close(fd)
+    nf = len(svc.declared_faults)
+    fd = svc.h_fs_open(sd("sdmc:/scratch.bin"), O_WRITE | O_CREAT)
+    tb.case("a write outside fonts is not refused and records no fault", fd < 2 ** 31 and svc.h_fs_write(fd, page, 1) == 1 and len(svc.declared_faults) == nf, fd)
+    svc.h_fs_close(fd)
+
+    # boot.py: a real guest (variant m61 = the CLI guest plus one create under sdmc:/switch/fnv/fonts) with the declared set mounted: the refused call
+    # is a fault in OUT.json and the verdict is failed (exit 2) although the guest carried on and exited cleanly
+    elf61 = patched("h61.elf", 61)
+    rc, o, e = cli(args(elf61, "d61.json", table, manifest, "--declared-inputs", pins("p61.json", sha), "--declared-src", "fonts=" + src))
+    d61 = json.load(open(os.path.join(d, "d61.json"))) if rc in (0, 2) else {}
+    console61 = open(os.path.join(d, "d61.console.txt")).read() if rc in (0, 2) else ""
+    f61 = d61.get("declared_input_faults", [])
+    tb.case("declared-input write: the run still ends exit 0 by itself, the guest saw EACCES (-13)", d61.get("run", {}).get("reason") == "exit"
+            and d61["run"].get("exit_code") == 0 and "write-fonts" in console61 and "write-fonts=fffffffffffffff3" in console61, (d61.get("run"), console61))
+    tb.case("declared-input write: fault {kind, call, sd, t_ns, tid} in OUT.json, run.verdict failed, exit 2",
+            rc == 2 and len(f61) == 1 and f61[0]["kind"] == "declared-input-write" and f61[0]["call"] == "open"
+            and f61[0]["sd"] == "sdmc:/switch/fnv/fonts/New.ttf" and f61[0]["tid"] == 1 and f61[0]["t_ns"] > 0 and d61["run"].get("verdict") == "failed"
+            and "declared_input_faults=1" in o and not os.path.exists(os.path.join(mounted, "New.ttf")), (rc, f61, o))
+    tb.case("without a declared fault the key and the verdict field are absent", "declared_input_faults" not in dd and "verdict" not in dd["run"], list(dd))
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 
