@@ -1894,3 +1894,8 @@ bottleneck: the cand3 platform fix (w12), and the cand2 merge (w15).
 bottleneck: the cand3 head (w12: L5 commits, the cycle fix, nxgpu, lineage, closure), and the cand2 merge (w15).
 - 22:45 L3a asked for a gate on lift/facts GATES (example: libvorbis has 6,499 uncertified bytes, and nothing in the verdict reads it yet). Gate `liftfacts` goes to w28 for cand4, after the exe row. It is red when any image is not green, when uncertified bytes, entries_on_data or s4 rows are above 0, or when an image is missing. w7 sends the format to w28.
 bottleneck: the cand3 head (w12), and the cand2 merge (w15).
+- 22:50 w10 f128f4efb is the one L5 commit for cand3: platform, @vclock, rt/guest, guest_main and hostabi/product are green.
+  - objstub at that head: 64 terminator-red findings (platform 60, rt/guest 4), which also cause 12 dm-uncited. The terminator run recompiles without the dispatch plugin, so -Werror=attributes fails on fnvnx_host and fnvnx_entry.
+  - Rule given to w12: the terminator run is the unit's own CC stage (its flags and its whole plugin set) plus the analysis plugin.
+  - The loader's missing fnvnx_win32_ext.h waits on L5's hostabi header move.
+bottleneck: the cand3 head (w12: objstub terminator, L5 header move), and the cand2 merge (w15).
