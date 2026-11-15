@@ -282,3 +282,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 17:35Z merged w4 2d6fe094d: the farm lock defect's cause was flock -u inside the non-queue else branch, so with --queue the lock was held to shard exit. Fix: staging is a { flock 9 ...; } 9>lock group, so no child holds fd 9. Farm 05 moves to it for K>=3.
 - 17:35Z v3 shard 19/54 done (farm 07): proved 342, gap 4, failed 0. Complete: 16/54.
 - 18:05Z v3 shard 1/54 done (farm 05): proved 337, gap 9, failed 0. Complete: 17/54. Farm 05 K=3 started on the fixed script (76cf2acca).
+- 18:10Z v3 shards 34 (proved 336, gap 9) and 35 (proved 334, gap 11) done (farm 11), failed 0. Complete: 19/54.
