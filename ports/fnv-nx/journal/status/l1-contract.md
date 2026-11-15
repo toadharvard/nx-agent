@@ -1253,3 +1253,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - L4: parallel builds race on external extraction (ENOTEMPTY). Rule: extract to a temporary sibling, verify, atomic rename; the loser discards. Assigned to w24 after the pin bump.
 - Compiler repin (b274ec067a2f / a1eeb84d) confirmed by the orchestrator and L2. w24 does it.
 - L2 w3 14be98130: `linkage` on every .fnvnx.layout row (8 fields), decided by GCC's own predicates. Accepted for C++. For C, records get a fourth value `c` (L2 proposal, accepted; C11 6.2.2p6, 6.2.7). w23 wires the rule that internal and none never pair, and reports whether gate_abi pairs C records by tag name.
+
+### 2026-11-15 02:00 — CRITICAL PATH: contract/facts producer
+- Blocker reported by L3a: bootguest needs lift/rt, which needs fnvnx_native_disp_table from native.tsv. native.tsv has no recipe source; it comes only from verdict.py outside the recipe.
+- Assigned to w22 (session_01KmtZKQg3UUv7uNveDucFNR, released from hold), branch claude/fnv-l1-contract-w22-facts. It is a tool root, contract/facts:
+  - externals: the exe facts and the pristine MSVC pack (fnv-nx-build, commit + tree);
+  - stages: exefacts, n1, bind, bodysel, nativerows;
+  - obj over the native roots derived from admit.json, through a new implicit `objects` output;
+  - `outputs: {native: native.tsv}`, consumed by L3a w8's lift/rt `uses` + dispgen.
+  - Acceptance: byte-equal to verdict.py's output. The derived data stays in GATE_CACHE only.
+- w22's fpexact candidate stays parked.
