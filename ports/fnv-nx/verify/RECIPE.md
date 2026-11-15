@@ -62,7 +62,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   below; `flags` carries the emulation only, `roots` and `libs` are optional.
   `kind` is `pie` (the ILP32 guest image, the default) or `exe`; a root of target guest cannot link an `exe`. `roots` lists distinct admitted `product`
   roots of the same target, never the root itself; their stored objects are declared inputs of the link stage (so their content is in its key) and a
-  listed root is built without its own link. A root of class `product` lists base roots and the per-target variant of its own target; a root of class `test` lists any root, variants included
+  listed root is built without its own link. A root of class `product` lists base roots only; a root of class `test` lists any root, variants included
   (`root@NAME`). A variant is one concept: `variants: {NAME: {"target"?}}` in the root's admit.json entry, its flags in the recipe's `variants`,
   addressed as `root@NAME` (a sanitizer build is a flags variant of the same root). Whatever the flags, `linkstrict` judges the linked output: no
   undefined symbol of any binding.
@@ -200,7 +200,7 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
   `exe` is host only: a root of target guest links a `pie` (emulation `aarch64linux32`, the crt0 header), a guest test root included; a guest root with
-  kind `exe` is refused. A product image's `link.roots` name base roots, or the per-target variant of the image's own target (a variant that admit.json declares with its own `recipe`, the dict spelling `{guest, host}`: it is the same units compiled for the image's target, a product of the root). A flags variant (a sanitizer build or any variant declared in the recipe's `variants`) is test-only: an explicit `root@NAME` of one is linked only by a root of class `test`, and a product image naming one is red.
+  kind `exe` is refused. A product image's `link.roots` name base roots only; an explicit variant (`root@NAME`) is linked only by a root of class `test`.
   A `link.roots` entry names a root and the image links that root's recipe for the IMAGE'S OWN TARGET (`recipe.resolve_link_root`): an explicit `root@NAME` must itself
   have the image's target, else red; a base name is the base recipe when the base's target is the image's, else the one variant of the root that admit.json declares with
   the image's target (a host image names the guest root `lib/sha256` and links `lib/sha256@host`); no such variant, or several, is red. An object of another target is
@@ -252,7 +252,7 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
 `"run": [{"name", "artifact", "args", "inputs", "debs", "outputs"}]` executes a declared artifact in the sandbox, after the generators.
 - `artifact` is `ROOT:OUTPUT`: the linked `link.output` of another admitted **host** product root (it is built first, by this same recipe machinery).
 - The stage sees only: the artifact at `/art/OUTPUT`; the declared `inputs` (a repo-relative tracked file or directory of an admitted root, git ls-files only, like a generator input; or `{external, path}` /
-  `{stage, path}`, read by resolve_input) at `/in/1`, `/in/2`, ... in list order; the installed files of each declared deb at `/deb/<name>/<absolute path>`; its `/out`.
+  `{stage, path}`, read by resolve_input) at `/in/1`, `/in/2`, ... in list order; the union of the installed files of the declared debs at `/deb/<absolute path>` (`base-files`, the machine's root layout, is implicit in every run stage; two debs shipping one path with different content are red); its `/out`.
   The root is read-only, `/tmp` and `/work` are not writable. `debs` are names of `env.json` `debs.packages`; an undeclared name is red (check).
 - An artifact with a PT_INTERP is started through the file at that path inside a declared deb (`/deb/<name>/<PT_INTERP>`, the deb's own symlinks
   followed across the union of the declared debs by `deb_resolve`: the usr-merge links are a fact of the declared system, shipped by `base-files`, so a run stage lists `base-files` in `debs`; without it a PT_INTERP such as `/lib64/ld-linux-x86-64.so.2` is red), with `--library-path` over the declared debs'
@@ -306,6 +306,11 @@ is ingested; the consumer's stage key holds the file's content hash, not a path 
 byte-identical changes no consumer key. Red (check errors): an output the root does not declare; a root that is not admitted; a cycle in `uses` plus
 `link.roots` between distinct roots; a `generated` input that is a file of another root (class other than tool) by path, which must go through `uses`.
 Objects of another root enter only through `link.roots`.
+
+**Inputs live below their consumers.** The inputs that a declaration derives from (specs, name tables, row generators) live in a root below every consumer
+of the declaration: a tool root with a recipe, such as `bridgefacts`, which the consumers take through `uses` (derived outputs) or by path
+(`inputs` of a generate stage, `{root, path}` in a gate's declaration file; tracked files of an admitted `tool` root). A root that consumes a
+declaration never also owns its inputs. A root cycle stays red; this rule is what removes the cycle, and a second copy of an input is deleted.
 
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root

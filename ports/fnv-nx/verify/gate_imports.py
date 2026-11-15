@@ -7,7 +7,9 @@ A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-
   {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
    "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
    "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
-   "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
+   "name_table": the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from), "va": the va record
+   `name TAB symbol` (the exports whose native body reads the x86 stack words of the call); every path of the declaration is a resolve_input ref
+   (a tracked path of the root, {root, path} of a tool root such as bridgefacts, {root, output} of a root the recipe `uses`, {external, path} or {stage, path})}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
 Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item, unless it is header-only (gate_build.unitless: no unit, no link; it holds no code, so it has no imports by construction): 0 items, or outside the class `import-provider`: the symbol table of its build defines no native symbol of the bridge table (natives_of: the table the declaring roots derive), so it has no import body: 0 items. A root that defines one enters the class and is the one red item. If no root declares imports the table is not known and the root is the one red item. Certified: rows with no class
 (contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
@@ -28,7 +30,7 @@ import gate_build  # noqa: E402
 import imports  # noqa: E402
 import recipe  # noqa: E402
 
-IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "name_table"}
+IN_KEYS = {"format", "names", "specs", "extra", "extra_other", "name_table", "va"}
 
 
 def symbols(res):
@@ -58,7 +60,7 @@ def bridge_of(root, rec, res, decl, repo, cache):
     specs = rp(decl["specs"])
     rows, errors, extra_of = bridgetable.derive(
         read(rp(decl["names"])), lambda d: read(os.path.join(specs, d + ".spec")), set(syms), table,
-        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]])
+        [read(rp(p)) for p in decl["extra"] + decl["extra_other"]], bridgetable.read_va(read(rp(decl["va"]))))
     return rows, errors, extra_of, table, syms
 
 

@@ -3,7 +3,7 @@
     GATE_OUT=<dir> [GATE_CACHE=<dir>] [ARTIFACTS_URL=<git url>] python3 -I ports/fnv-nx/render/total/gate_d3d9total.py
 Run in the checkout root (verify/verdict.py does). Writes GATE_OUT/d3d9total.json; exit 0 iff green, 2 red.
 Universe = every (enumeration, enumerator) of the enumerations the translation consumes by switch (SWITCHED of
-render/d3d9/front/gen_enums.py, enumerators from render/d3d9/spec/d3d9_spec.json plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
+render/d3d9/front/gen_enums.py, enumerators from bridgefacts/d3d9/d3d9_spec.json plus VENDOR_FOURCC for D3DFORMAT), ids "enum:E:N",
 + every row of render/shaders/total/sm_table.json (the SM1-3 commands, (stage, opcode form)), ids "sm:K".
 
 Declared inputs (nothing else is read): the tracked files (git ls-files) of INPUTS below (the d3d9 and translator recipes and the d3d9 root's include lists), copied into GATE_OUT/d3d9total.work;
@@ -52,7 +52,7 @@ def recipe_includes(path):
 INCLUDES = recipe_includes(D3D9_REC)
 TR_GEN = {os.path.dirname(os.path.dirname(TRANSLATOR_REC) + "/" + o) for g in json.load(open(os.path.join(PORT, TRANSLATOR_REC))).get("generated", []) for o in g["outputs"]}   # build outputs: no tracked files
 TR_INCLUDES = [i for i in recipe_includes(TRANSLATOR_REC) if i not in TR_GEN]   # the translator's own tracked include dirs (the patched MojoShader includes fnvnx_dk_layout.h from them)
-INPUTS = ["render/d3d9/front", "render/d3d9/spec/d3d9_spec.json", D3D9_REC, TRANSLATOR_REC,
+INPUTS = ["render/d3d9/front", "bridgefacts/d3d9/d3d9_spec.json", D3D9_REC, TRANSLATOR_REC,
           "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h", "contract/treehash.py"] + INCLUDES + [i for i in TR_INCLUDES if i not in INCLUDES]
 GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
@@ -224,7 +224,7 @@ def front_build(front, incs, flags):
 def enum_part(inp, work):
     front, backend = os.path.join(inp, "render", "d3d9", "front"), [os.path.join(inp, i) for i in INCLUDES]
     gen = module_lists(os.path.join(front, "gen_enums.py"), ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])
-    spec = json.load(open(os.path.join(inp, "render", "d3d9", "spec", "d3d9_spec.json")))["enums"]
+    spec = json.load(open(os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.json")))["enums"]
     names = gen["SWITCHED"] + gen["INDEXED"]
     want_names = {e: list(spec[e]) for e in names}
     want_names["D3DFORMAT"] = want_names["D3DFORMAT"] + ["D3DFMT_" + s.strip() for s in gen["VENDOR_FOURCC"]]
@@ -233,7 +233,7 @@ def enum_part(inp, work):
     gdir = os.path.join(work, "gen")
     os.makedirs(gdir)
     hpath = os.path.join(gdir, "d3d9_enums.gen.h")
-    if run([sys.executable, "-I", os.path.join(front, "gen_enums.py"), hpath]).returncode:
+    if run([sys.executable, "-I", os.path.join(front, "gen_enums.py"), hpath, os.path.join(inp, "bridgefacts", "d3d9", "d3d9_spec.json")]).returncode:
         raise Red("gen_enums.py failed")
     inc = ["-m32", "-ffreestanding", "-I", gdir, "-I", os.path.join(inp, "shim", "include")]
     ginc = [gdir, os.path.join(inp, "shim", "include")]

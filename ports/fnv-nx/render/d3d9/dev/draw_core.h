@@ -10,6 +10,7 @@
 #include "nxgpu4_shader.h"
 #include "../front/d3d9_state.h"
 #include "fnvnx_dk_layout.h"
+#include "nx_pair.h"
 #include <string.h>
 
 enum : uint32_t { NXD_STREAM_INDEXED = D3DSTREAMSOURCE_INDEXEDDATA, NXD_STREAM_INSTANCE = D3DSTREAMSOURCE_INSTANCEDATA, NXD_FREQ_MASK = 0x7FFFFFu };
@@ -43,11 +44,6 @@ struct NxProg {
     NxVsSig sig;
 };
 bool nx_vs_sig(const NxSmIface& i, NxVsSig* out);                                        // false: not a legal declaration set (duplicate pair / more than 16)
-int nx_link_set(const uint8_t* vs_out, uint32_t nv, const uint8_t* ps_in, uint32_t np, uint8_t* l, uint32_t* nl);   // shcache_link_set (render/shaders/cache/shcache_key.c) over FNVNX_DK_PAIR codes
-// The pure selection of a (VS, PS) pair, no device and no state: VS_PAIRS/NV the declared output pairs of the VS (FNVNX_DK_PAIR codes, with POSITION0/PSIZE0), PS_PAIRS/NP the declared input pairs of the PS,
-// PS_MAJOR its shader model major (< 3 reads FOG0 as well; an FFP pixel program passes 3: its inputs are exact), FLAT the shade-mode latch (nx_ffp_flat). Out: the link set L/NL (empty when every pair is canonical),
-// the VS variant (translator key flags of fnvnx_shaders.h: FNVNX_SHADER_VS_COMPLETE iff fnvnx_dk_vs_needs_complete(VS written + FOG0, PS read), FNVNX_SHADER_FLAT_COLOR iff flat) and the PS variant (FNVNX_SHADER_FLAT_COLOR iff flat). Returns nx_link_set's result (-1: a pair outside the link slots). nx_prog_resolve calls it.
-int nx_pair_variant(const uint8_t* vs_pairs, uint32_t nv, uint8_t ps_major, const uint8_t* ps_pairs, uint32_t np, uint32_t flat, uint32_t* vs_variant, uint32_t* ps_variant, uint8_t* l, uint32_t* nl);
 HRESULT nx_prog_resolve(NxDeviceCore* d, NxProg* p);
 
 // ---- draw_layout.cpp
