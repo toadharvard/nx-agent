@@ -440,3 +440,13 @@ of guest accesses stays every access of every object. `.fnvl.fsw` (FSTSW, FNSTEN
   site needs its field made volatile or keyed (a `field Class::member` line in a key file passed as ORDER_KEYS).
 * **W-UNINIT** in memory locals above 64 bytes: a buffer read before it is written keeps whatever the stack held.
   GCC does not scalarize such a buffer, so it does not fold its loads as undefined.
+
+## NO-MIX (private variables never share a stack slot)
+
+The frame record (`.fnvnx.frame`) has one flag per stack slot; a slot shared by two variables is escaping if either escapes. A private
+variable (`:n`; order's own temporaries are private) that GCC places in the slot of a shared variable would make each plain access to it
+an access to a recorded-escaping range. GCC shares slots only between variables that do not conflict (cfgexpand.cc `add_scope_conflicts`:
+live from the first mention until the death clobber). Rule: every private memory variable is mentioned by the first statement of the
+entry block (an empty `asm volatile("" :: "m"(v))`, no instruction) and order creates no clobber for it, so it is live in every block and
+conflicts with every other variable. Cost: private variables keep their own slot (frame size), PD-STACK-REUSE. `DECL_NONSHAREABLE` does
+not do this for variables outside a BLOCK (measured: object bytes unchanged). Test: link/tests/test_order_fold.py (nomix2, nomix3).

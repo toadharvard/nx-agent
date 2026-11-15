@@ -999,6 +999,33 @@ static void ordt_check(function *fun) {
   ordt_lines[IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl))] = x.c;
 }
 
+
+// NO-MIX (private variables never share a stack slot). The frame record has one flag per stack slot and a slot shared by two variables is
+// escaping if either escapes, so a private variable that GCC gives the slot of a shared one would make every plain access to it a plain
+// access to a recorded-escaping range. GCC shares slots only between variables that do not conflict, and cfgexpand.cc add_scope_conflicts
+// derives the conflicts from the first mention of a variable (until its death clobber): a variable that has no clobber and is mentioned by
+// the first statement of the entry block is live in every block, so every other variable, mentioned later, conflicts with it. This pass
+// creates no clobber for its temporaries and a user variable's clobbers are death points after its last use, so the mention is placed in
+// the first statement of the entry block, as an empty asm with the variable as a memory input: no instruction, no memory effect other
+// than that read. Cost: private variables keep their own slot (frame size), PD-STACK-REUSE.
+static void pin_private_slots(function *fun) {
+  std::set<tree> &priv = frame_private[fun->decl];
+  std::vector<tree> ts;
+  unsigned ix;
+  tree d;
+  FOR_EACH_LOCAL_DECL(fun, ix, d)
+    if (VAR_P(d) && TREE_ADDRESSABLE(d) && priv.count(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d) && !hard_register(d)) ts.push_back(d);
+  if (ts.empty()) return;
+  gimple_stmt_iterator gi = gsi_after_labels(single_succ(ENTRY_BLOCK_PTR_FOR_FN(fun)));
+  for (tree t : ts) {
+    vec<tree, va_gc> *in = NULL;
+    vec_safe_push(in, build_tree_list(build_tree_list(NULL_TREE, build_string(2, "m")), t));
+    gasm *a = gimple_build_asm_vec("", in, NULL, NULL, NULL);
+    gimple_asm_set_volatile(a, true);
+    gsi_insert_before(&gi, a, GSI_SAME_STMT);
+  }
+}
+
 struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
@@ -1029,6 +1056,7 @@ struct order_pass : gimple_opt_pass {
       if (!generated_bbs.count(bb))
         for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
     ordt_check(fun);
+    pin_private_slots(fun);
     if (!generated_bbs.empty() && current_loops) loops_state_set(LOOPS_NEED_FIXUP);
     // the statements this pass created carry virtual operands that are not yet in SSA form (TODO_update_ssa renames them)
     mark_virtual_operands_for_renaming(fun);
