@@ -17,7 +17,7 @@ fails = []
 def judge(name, body):
     s, o = os.path.join(tmp, name + '.S'), os.path.join(tmp, name + '.o')
     open(s, 'w').write('\t.text\n\t.global f\n\t.type f,%function\nf:\n' + ''.join('\t' + l + '\n' for l in body) + '\t.size f,.-f\n')
-    r = subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', '-march=armv8.1-a', s, '-o', o], capture_output=True, text=True)
+    r = subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', '-march=armv8.1-a', '-g', s, '-o', o], capture_output=True, text=True)
     if r.returncode:
         fails.append('assemble %s: %s' % (name, r.stderr[-200:]))
         return None
@@ -46,15 +46,23 @@ want('(c) kernel call: svc and moves only', judge('c1', ['mov x8, x0', 'mov x0, 
 want('a plain load through an argument register is red', judge('r1', ['ldr x0, [x1]', 'ret']), False, 1)
 want('a plain store through an argument register is red', judge('r2', ['str x0, [x1, #8]', 'ret']), False, 1)
 want('a pair copy loop (a memcpy body) is red', judge('r3', ['ldp x2, x3, [x1], #16', 'stp x2, x3, [x0], #16', 'ret']), False, 2)
-# the universe is the objects without plugin record sections; the recipe's suffix fact must agree
+# the universe: assembled objects by their DWARF origin; the recipe's suffix fact wins for recipe units
 o = judge('u1', ['ret'])[3]
-if gate_rtasm.judge_objects([('u1', o)], {'u1': True})[:2] != (0, 0) or gate_rtasm.judge_objects([('u1', o)], {'u1': False})[2] != ['u1:class [recipe suffix says C/C++, the object has no plugin record sections]']:
-    fails.append('suffix cross-check')
-s2 = os.path.join(tmp, 'rec.s')
-open(s2, 'w').write('\t.text\n\t.global f\nf:\n\tldr x0, [x1]\n\tret\n\t.section .fnvnx.frame,"",%progbits\n\t.ascii "f\\t\\n"\n')
-subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', s2, '-o', os.path.join(tmp, 'rec.o')], check=True)
-if gate_rtasm.judge_objects([('rec', os.path.join(tmp, 'rec.o'))])[:2] != (0, 0):
-    fails.append('an object with a record section is not an assembly object')
+if gate_rtasm.origin(o) != 'asm':
+    fails.append('origin of a -g assembled object is asm: %r' % gate_rtasm.origin(o))
+s2 = os.path.join(tmp, 'ng.s')
+open(s2, 'w').write('\t.text\n\t.global f\nf:\n\tldr x0, [x1]\n\tret\n')
+subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', s2, '-o', os.path.join(tmp, 'ng.o')], check=True)
+r = gate_rtasm.judge_objects([('ng', os.path.join(tmp, 'ng.o'))])
+if r[0] != 1 or r[1] != 0 or 'origin unknown' not in r[2][0]:
+    fails.append('no DWARF: red origin unknown: %r' % (r,))
+if gate_rtasm.judge_objects([('ng', os.path.join(tmp, 'ng.o'))], {'ng': True})[:2] != (1, 0):
+    fails.append('a recipe .S unit without -g is judged by the recipe suffix (its access is red)')
+c = os.path.join(tmp, 'c.c')
+open(c, 'w').write('int g(int *p){return *p;}\n')
+subprocess.run(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-g', '-c', c, '-o', os.path.join(tmp, 'c.o')], check=True)
+if gate_rtasm.judge_objects([('c', os.path.join(tmp, 'c.o'))])[:2] != (0, 0):
+    fails.append('a compiled C object is not an assembly object')
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

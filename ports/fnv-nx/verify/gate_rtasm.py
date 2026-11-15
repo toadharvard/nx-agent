@@ -8,11 +8,12 @@ The remaining assembly is closed here: every memory access of an assembled objec
   (d) atomic: an ordered form (ldar, stlr, ldaxr, stlxr, LSE acquire-release forms: rule O), whose ordering is the documented one of the instruction (Arm ARM).
   (c) kernel call: `svc` and its argument moves are no memory accesses; they are no item, and a routine made of them only has none.
   Not yet closed (reported red, the input is not in the record): (b) runs before threads (the link record's call graph), and a jmp_buf parameter register (the declared prototype).
-UNIVERSE.  Every object of every admitted product root with "target": "guest" that carries no plugin record section (no section whose name starts `.fnvnx`): every C or
-C++ unit built by the game's compiler carries them (the plugins write them for every unit), an assembled one never does, so the complement is exactly the assembly
-objects, one rule over the objects themselves (it needs no -g and no name list; it applies to the objects of an external's archive members as to recipe units).
-Cross-check, a red item `<object>:class` where it fails: for a recipe unit, "has an assembly suffix (recipe.ASM_EXT: .s, .S)" and "carries no record section" agree.  Items: one per memory-access instruction (`<object>:<symbol>+0xOFF`), one per object that cannot be
-parsed.  Red iff an item is uncertified or a root's build is not green.  No assembly object: universe 0, green.
+UNIVERSE.  (1) The product's own assembly units: the objects of every admitted product root with "target": "guest" whose recipe unit has an assembly suffix
+(recipe.ASM_EXT: .s, .S).  (2) The objects of the runtime external (newlib, libstdc++, libgcc, libnx: archive members from tools/fnvnx-a64-msvcmodel13, which are no recipe
+units) that were assembled, read from the object itself: the DWARF compile unit's DW_AT_language is DW_LANG_Mips_Assembler (GNU as sets it with its "GNU AS" producer); an
+object with no DWARF compile unit is red `<object>:origin [origin unknown]` (the runtime build keeps -g).  The member set is the closure of the guest link (the
+archive members the link pulls in, from the link record), not the whole archive.  Items: one per memory-access instruction (`<object>:<symbol>+0xOFF`), one per object
+that cannot be parsed or whose origin is unknown.  Red iff an item is uncertified or a root's build is not green.  No assembly object: universe 0, green.
 """
 import json
 import os
@@ -25,26 +26,49 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "link"))
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import a64order  # noqa: E402
-import elfobj  # noqa: E402
 import gate_build  # noqa: E402
 import recipe  # noqa: E402
 
 
-def is_asm_object(path):
-    """True iff the ELF object has no section named `.fnvnx*`: the assembly objects of the runtime (see UNIVERSE)"""
-    return not any(n.startswith(".fnvnx") for n in elfobj.read(path).names)
+DW_LANG_MIPS_ASSEMBLER = 0x8001
+
+
+def origin(path):
+    """'asm' | 'other' | 'unknown' of the object, from its first DWARF compile unit: DW_AT_language == DW_LANG_Mips_Assembler is assembly; any other compile unit is 'other'; no compile unit (no -g) is 'unknown'"""
+    from elftools.elf.elffile import ELFFile
+    with open(path, "rb") as f:
+        elf = ELFFile(f)
+        if not elf.has_dwarf_info():
+            return "unknown"
+        for cu in elf.get_dwarf_info(relocate_dwarf_sections=False).iter_CUs():
+            top = cu.get_top_DIE()
+            lang = top.attributes.get("DW_AT_language")
+            # the relocatable's DW_AT_producer is a .debug_str offset resolved by a relocation (ILP32 types pyelftools does not apply), so the language,
+            # a constant form, decides; GNU as writes DW_LANG_Mips_Assembler together with its `GNU AS` producer into every compile unit it makes
+            return "asm" if lang is not None and lang.value == DW_LANG_MIPS_ASSEMBLER else "other"
+    return "unknown"
 
 
 def judge_objects(objs, suffix_asm=None):
-    """OBJS [(id, path)] -> (universe, certified, uncertified item ids, detail).  SUFFIX_ASM {id: bool} the recipe's suffix fact where there is one: it must agree
-    with is_asm_object; the objects that are not assembly are not in the universe."""
+    """OBJS [(id, path)] -> (universe, certified, uncertified item ids, detail).  SUFFIX_ASM {id: bool}: the objects that are recipe units, with the recipe's suffix fact
+    (assembly or not); every other object is a member of the runtime external, whose origin is read from its DWARF."""
+    suffix_asm = suffix_asm or {}
     items, bad, n_asm = 0, [], 0
     for oid, path in objs:
-        asm = is_asm_object(path)
-        if suffix_asm is not None and oid in suffix_asm and suffix_asm[oid] != asm:
-            items += 1
-            bad.append("%s:class [recipe suffix says %s, the object %s plugin record sections]" % (oid, "assembly" if suffix_asm[oid] else "C/C++", "has no" if asm else "carries"))
-            continue
+        if oid in suffix_asm:
+            asm = suffix_asm[oid]
+        else:
+            try:
+                o = origin(path)
+            except Exception as e:      # a file that is no ELF object or whose DWARF is malformed is red, never passed
+                items += 1
+                bad.append("%s:origin [unreadable: %s]" % (oid, str(e)[:100]))
+                continue
+            if o == "unknown":
+                items += 1
+                bad.append("%s:origin [origin unknown: no DWARF compile unit]" % oid)
+                continue
+            asm = o == "asm"
         if not asm:
             continue
         n_asm += 1
