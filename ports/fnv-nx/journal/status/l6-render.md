@@ -919,3 +919,8 @@ Paused: w3b, w4, farm; no other work.
     - Measured: shim cap from NX_GL4SHIM_OUT_CAP; table 5/5 linked; red 0; universe_sha256 ba384f80…
     - w5 (doing): merge w6-root 98cd75f28. The duplicate rows and the old spec go by that merge.
     - Final run waits on L6A gl4link2 and the w6 render/pair head. Its universe is nx_link_set over translator ∪ FFP stages, plus the 5 scale rows.
+- 15:40Z L6A gl4link2 1592b3c8c: reviewed and accepted.
+    - FFP rows are in nx_gl4shim.h; gen_glsl.py is in gl4shim/ffp; ffp_prog.cpp sends {stage, row}; no gen_glsl reference is left in d3d9.
+    - w6 (doing): merge it. Then render/pair owns the one (stage, shademode) → row function, and ffp_prog.cpp's copy is deleted.
+    - Then construction rows 15/16: gen_glsl.py emits the UBO and sampler bindings from ffp_state.h and fnvnx_dk_layout.h.
+    - Found: the plugin fnvnx_names mount gap (crossing_terms.inc) on the guest build; sent to L1.
