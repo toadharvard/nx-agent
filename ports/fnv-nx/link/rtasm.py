@@ -3,13 +3,12 @@
 ordering of runtime calls"; docs/ORDERING.md).
 
     judge(objs, ...)  ->  Report        every memory-access instruction of every assembled object of the runtime, in exactly one class
-    python3 rtasm.py --ext DIR --dirs D.. --names N.. [--startfiles F..] [--endfiles F..] --jmpbuf-bytes N [--out report.json]
+    python3 rtasm.py --ext DIR --dirs D.. --names N.. [--startfiles F..] [--endfiles F..] --jmpbuf-probe OBJ --lse-source lse.S [--out report.json]
 
 UNIVERSE (one rule over the runtime, never a file list): every member of every archive of the runtime (the `link.libs` of the recipe: the
-archives `lib<name>.a` found in `dirs`, first dir wins, as the gcc driver searches them) and every start/end file. ASSEMBLED = the object
-has no `.comment` section. The compiler writes `.comment` (the `.ident` directive of every translation unit it compiles) and the assembler
-never does; an object that carries no producer string was not produced by a compiler front end, so it is assembly (.S or .s). Objects that
-carry it are compiled code: the plugins order them, this check does not look at them.
+archives `lib<name>.a` found in `dirs`, first dir wins, as the gcc driver searches them) and every start/end file. ASSEMBLED = the object carries no `.fnvnx.ordt`, the record fnvnx_order writes into every object it compiled. That is the positive fact the
+decision relies on ("a C/C++ body orders its own accesses because the plugin ran"); every other object, including a compiled one built without the
+plugins, is judged as assembly (and fails on its plain accesses). Objects that carry it are ordered by the plugin: this check does not look at them.
 
 CLASSES. Every memory-access instruction of an assembled object (a64order.Func: capstone decode, the frame dataflow, the ordered forms) is in
 exactly one class; anything else is a violation, with object, function, offset and instruction. There is no allow-list.
@@ -53,8 +52,8 @@ from capstone import arm64_const as K  # noqa: E402
 
 JB_BASE = 1 << 20          # the synthetic frame offset that x0 of a jmp_buf routine holds at entry (far above any real frame)
 SVC_OUT = frozenset(range(1, 8))   # x1..x7: the registers a Horizon svc returns its outputs in (libnx svc.h, one wrapper per call)
-MODELS = {'relax': (False, False), 'acq': (True, False), 'rel': (False, True), 'acq_rel': (True, True), 'sync': (True, True)}
-MODEL_RE = re.compile(r'_(relax|acq_rel|acq|rel|sync)$')
+ORDT = '.fnvnx.ordt'      # the record fnvnx_order writes into every object it compiled: the positive fact "a C/C++ body that orders its own accesses"
+LSE_NAME = re.compile(r'^__aarch64_([a-z]+)\d+_([a-z_]+)$')   # libgcc lse.S: NAME(BASE) = __aarch64_ BASE SIZE SUFF  (lse.S:149)
 RMW_RE = re.compile(r'^(CASP?|SWP|LD(?:ADD|CLR|EOR|SET|SMAX|SMIN|UMAX|UMIN))(A?)(L?)([BH]?)$')
 ST_RMW_RE = re.compile(r'^ST(?:ADD|CLR|EOR|SET|SMAX|SMIN|UMAX|UMIN)(L?)([BH]?)$')
 CLASSES = ('D1', 'BT', 'KC', 'AT', 'RO')
@@ -67,6 +66,51 @@ def jmpbuf_routines(header_text):
     """the routines a setjmp.h declares with a jmp_buf (or sigjmp_buf) first parameter: `name (jmp_buf ...)` / `name (sigjmp_buf ...)`. Read from the
     runtime's own header, never listed here."""
     return sorted(set(re.findall(r'\b([A-Za-z_]\w*)\s*\(\s*(?:jmp_buf|sigjmp_buf)\b', header_text)))
+
+
+def lse_models(text):
+    """{suffix: {'swp': (acquire, release), 'other': (acquire, release)}} read from libgcc's own lse.S (the pinned source, a stage input): the `# define SUFF`
+    blocks of its MODEL ladder define A (`a`: acquire) and L (`l`: release), the mnemonic fragments LDXR/STXR/SWP/CAS/LD<op> are built from
+    (lse.S:152-156, 197, 249, 270ff).  The `_sync` block differs for swp (`#ifdef L_swp`: acquire only); the rest of the ladder holds for every op."""
+    out, cur, cond = {}, None, None
+    for ln in text.split('\n'):
+        t = ln.strip()
+        m = re.match(r'#\s*define\s+SUFF\s+_(\w+)', t)
+        if m:
+            cur, cond = m.group(1), None
+            out[cur] = {'swp': [False, False], 'other': [False, False]}
+            continue
+        if cur is None:
+            continue
+        if re.match(r'#\s*ifdef\s+L_swp', t):
+            cond = 'swp'
+        elif re.match(r'#\s*else', t) and cond == 'swp':
+            cond = 'other'
+        elif re.match(r'#\s*endif', t) and cond is not None:
+            cond = None
+        elif re.match(r'#\s*(elif|else)\b', t) or re.match(r'#\s*endif', t):
+            cur = None if re.match(r'#\s*endif', t) else cur
+        m = re.match(r'#\s*define\s+([AL])(?:\s+(\w+))?\s*$', t)
+        if m:
+            k, v = m.group(1), bool(m.group(2))
+            for c in ((cond,) if cond else ('swp', 'other')):
+                out[cur][c][0 if k == 'A' else 1] = v
+    return {k: {c: tuple(v) for c, v in d.items()} for k, d in out.items()}
+
+
+def jmpbuf_size(decl_row, sizes=None):
+    """sizeof(jmp_buf) from the `.fnvnx.decltype` row (`symbol<TAB>type`, grammar of ctypes_compat) of a probe object that declares one jmp_buf, in a unit that
+    includes the runtime's setjmp.h: an array `[N]T` of a scalar T (ILP32, OWNER 7).  Any other shape is an error."""
+    t = decl_row.split('\t', 1)[1].strip()
+    m = re.match(r'^\[(\d+)\](\w+)$', t)
+    sz = dict(ILP32_SCALAR, **(sizes or {}))
+    if not m or m.group(2) not in sz:
+        raise ValueError('jmp_buf type %r is not an array of a known scalar' % t)
+    return int(m.group(1)) * sz[m.group(2)]
+
+
+ILP32_SCALAR = {'char': 1, 'signed_char': 1, 'unsigned_char': 1, 'short': 2, 'unsigned_short': 2, 'int': 4, 'unsigned_int': 4, 'long': 4, 'unsigned_long': 4,
+                'long_long': 8, 'unsigned_long_long': 8, 'float': 4, 'double': 8}
 
 
 def exclusive_ordering(i):
@@ -149,7 +193,7 @@ class Obj:
             self.o = a64obj.read(p)
         finally:
             os.unlink(p)
-        self.assembled = not any(s.name == '.comment' for s in self.o.sections)
+        self.assembled = not any(s.name == ORDT for s in self.o.sections)
 
 
 def universe(blobs):
@@ -316,7 +360,7 @@ def call_edges(ob, f, names):
     return out
 
 
-def judge(objs, jb_names=(), jb_bytes=0, linked=None):
+def judge(objs, jb_names=(), jb_bytes=0, linked=None, lse=None):
     """-> Report dict: {'objects': n, 'assembled': [labels], 'accesses': [Access], 'violations': [Access], 'counts': {class: n}, 'premises': [...]}"""
     rep = {'objects': len(objs), 'assembled': [], 'accesses': [], 'violations': [], 'counts': collections.Counter(), 'premises': [], 'bt_nodes': []}
     # -- function table of the whole universe: (label, section, start) -> node; global names -> node
@@ -464,7 +508,12 @@ def judge(objs, jb_names=(), jb_bytes=0, linked=None):
             rep['assembled'].append(ob.label)
         res = f.judge()
         taint = svc_taint(f) if any(i.id == K.ARM64_INS_SVC for i in f.ins) else None
-        model = next((MODELS[m.group(1)] for m in (MODEL_RE.search(n) for n in names) if m), None)
+        model = None
+        for n in names:
+            m = LSE_NAME.match(n)
+            if m and lse and m.group(2) in lse:
+                model = lse[m.group(2)]['swp' if m.group(1) == 'swp' else 'other']
+                break
         name = names[0]
         for off, (what, rule) in sorted(res.items()):
             k = f.pos[off]
@@ -495,7 +544,7 @@ def judge(objs, jb_names=(), jb_bytes=0, linked=None):
                 else:
                     ok = (acq, rel) == (want_acq, want_rel)
                 if ok:
-                    cls, det = 'AT', 'documented %s' % MODEL_RE.search(next(n for n in names if MODEL_RE.search(n))).group(1)
+                    cls, det = 'AT', 'documented by lse.S'
             if cls is None and taint is not None and A.mem_kind(i) == 'store' and taint[k] is not None:
                 data = [A.REG[o.reg] for o in i.ops if o.type == K.ARM64_OP_REG and o.reg in A.REG]
                 if data and set(data) <= taint[k] and i.mem is not None and A.REG.get(i.mem.base) not in data:
@@ -532,7 +581,8 @@ def main():
     ap.add_argument('--startfiles', nargs='*', default=[])
     ap.add_argument('--endfiles', nargs='*', default=[])
     ap.add_argument('--setjmp-header', default=None, help='path (inside --ext) of the runtime setjmp.h the jmp_buf routines are read from')
-    ap.add_argument('--jmpbuf-bytes', type=int, default=0)
+    ap.add_argument('--jmpbuf-probe', default=None, help='object of a unit that declares one jmp_buf (includes setjmp.h): its .fnvnx.decltype row gives sizeof(jmp_buf)')
+    ap.add_argument('--lse-source', default=None, help='libgcc/config/aarch64/lse.S of the pinned libgcc source: the documented ordering of the outline atomics')
     ap.add_argument('--product', nargs='*', default=[], help='the product objects (.o): the linked set is what a linker would pull for them')
     ap.add_argument('--out', default=None)
     a = ap.parse_args()
@@ -546,7 +596,13 @@ def main():
             d |= {y.name for y in o.symbols if y.shndx is not None and y.bind in ('STB_GLOBAL', 'STB_WEAK') and y.name}
             u |= {y.name for y in o.symbols if y.shndx is None and y.name and y.bind in ('STB_GLOBAL', 'STB_WEAK')}
         linked = pulled(objs, (d, u))
-    rep = judge(objs, jb, a.jmpbuf_bytes, linked)
+    jbn = 0
+    if a.jmpbuf_probe:
+        o = a64obj.read(a.jmpbuf_probe)
+        sec = next(x for x in o.sections if x.name == '.fnvnx.decltype')
+        jbn = jmpbuf_size(next(r for r in sec.data.decode().split('\n') if r))
+    lse = lse_models(open(a.lse_source).read()) if a.lse_source else None
+    rep = judge(objs, jb, jbn, linked, lse)
     j = to_json(rep)
     if a.out:
         json.dump(j, open(a.out, 'w'), indent=1)

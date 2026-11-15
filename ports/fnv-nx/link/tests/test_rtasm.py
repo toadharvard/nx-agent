@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test of link/rtasm.py (the memory-ordering class check of the runtime's assembly, CLAUDE.md "memory ordering of runtime calls"): one fixture per
 class and violating fixtures, assembled by the one build (realobj: the guest compiler pin and the full plugin set) as .S units of a toy guest root,
-beside a compiled C++ unit (it carries `.comment`, so it is not assembly and not judged).  Classes: D1 (frame, jmp_buf), BT (before threads, the
+beside a compiled C++ unit (it carries the plugin record `.fnvnx.ordt`, so it is not assembly and not judged; a `.ident` in an assembly source adds `.comment` and changes nothing).  Classes: D1 (frame, jmp_buf), BT (before threads, the
 call-graph proof), KC (kernel call result), AT (atomic with its documented ordering), RO.  Run: python3 -I <this file> (needs the pinned compiler)."""
 import os
 import sys
@@ -14,6 +14,7 @@ import rtasm  # noqa: E402
 
 SRC = {
     'd1.S': '''
+.ident "a .ident in an assembly source writes .comment: not a compiled object"
 .text
 .global f_d1
 .type f_d1,%function
@@ -103,6 +104,20 @@ __aarch64_ldadd4_acq:
     ldadd w0, w0, [x1]                    // documented acq, instruction relaxed: a violation
     ret
 .size __aarch64_ldadd4_acq, .-__aarch64_ldadd4_acq
+.global __aarch64_swp4_sync
+.type __aarch64_swp4_sync,%function
+__aarch64_swp4_sync:                      // lse.S: swp _sync is acquire only (then dmb ish)
+    swpa w0, w0, [x1]
+    dmb ish
+    ret
+.size __aarch64_swp4_sync, .-__aarch64_swp4_sync
+.global __aarch64_ldadd4_sync
+.type __aarch64_ldadd4_sync,%function
+__aarch64_ldadd4_sync:                    // every other _sync op is acq_rel: acquire only is a violation
+    ldadda w0, w0, [x1]
+    dmb ish
+    ret
+.size __aarch64_ldadd4_sync, .-__aarch64_ldadd4_sync
 .global ordered_pair
 .type ordered_pair,%function
 ordered_pair:
@@ -156,6 +171,37 @@ tab: .word tab_data
 ''',
     'c.cc': 'int cc_f(int *p) { return *p; }\n',
 }
+LSE = '''
+#if MODEL == 1
+# define SUFF  _relax
+# define A
+# define L
+#elif MODEL == 2
+# define SUFF  _acq
+# define A     a
+# define L
+#elif MODEL == 3
+# define SUFF  _rel
+# define A
+# define L     l
+#elif MODEL == 4
+# define SUFF  _acq_rel
+# define A     a
+# define L     l
+#elif MODEL == 5
+# define SUFF  _sync
+#ifdef L_swp
+#  define A    a
+#  define L
+#else
+#  define A    a
+#  define L    l
+#endif
+# define BARRIER dmb ish
+#else
+# error
+#endif
+'''
 fails = []
 
 
@@ -173,8 +219,8 @@ def main():
     obj = {os.path.basename(o['unit']): open(o['object'], 'rb').read() for o in res['objects']}
     order = ['start.S', 'd1.S', 'jb.S', 'kc.S', 'at.S', 'init.S', 'c.cc']
     objs = rtasm.universe([(n, obj[n], n == 'start.S') for n in order])
-    rep = rtasm.judge(objs, jb_names=['setjmp', 'longjmp'], jb_bytes=176)
-    check('assembled = the .S objects only (the compiled unit carries .comment)', sorted(rep['assembled']) == sorted(n for n in order if n.endswith('.S')), rep['assembled'])
+    rep = rtasm.judge(objs, jb_names=['setjmp', 'longjmp'], jb_bytes=176, lse=rtasm.lse_models(LSE))
+    check('assembled = the .S objects only (the compiled unit carries .fnvnx.ordt; the .S with .ident is still assembly)', sorted(rep['assembled']) == sorted(n for n in order if n.endswith('.S')), rep['assembled'])
     by = {}
     for a in rep['accesses']:
         by.setdefault((a.func, a.cls), []).append(a)
@@ -190,6 +236,9 @@ def main():
     check('KC violated: a store of a register that is no svc output', 'svc_bad' in viol, viol.get('svc_bad'))
     check('AT: acquire-release form and the documented relax/ordered forms', len(by.get(('__aarch64_swp4_acq_rel', 'AT'), [])) == 1 and len(
         by.get(('__aarch64_ldadd4_relax', 'AT'), [])) == 1 and len(by.get(('ordered_pair', 'AT'), [])) == 2, {k: len(v) for k, v in by.items() if k[1] == 'AT'})
+    check('AT: swp _sync is acquire only (lse.S #ifdef L_swp), acq_rel for every other op', len(by.get(('__aarch64_swp4_sync', 'AT'), [])) == 1 and '__aarch64_ldadd4_sync' in viol and '__aarch64_swp4_sync' not in viol, (viol.get('__aarch64_swp4_sync'), viol.get('__aarch64_ldadd4_sync')))
+    check('lse_models is read from the lse.S text', rtasm.lse_models(LSE)['sync'] == {'swp': (True, False), 'other': (True, True)}, rtasm.lse_models(LSE))
+    check('jmp_buf size from the .fnvnx.decltype row', rtasm.jmpbuf_size('jb\t[22]long') == 88 and rtasm.jmpbuf_size('jb\t[22]long_long') == 176, '')
     check('AT violated: the instruction ordering differs from the routine name\'s documented one', '__aarch64_ldadd4_acq' in viol, viol.get('__aarch64_ldadd4_acq'))
     check('BT: init_data (called by the entry before the thread-possible call)', len(by.get(('init_data', 'BT'), [])) == 1, by.get(('init_data', 'BT')))
     check('BT violated: late_data (called after the call to main_ext)', 'late_data' in viol, viol.get('late_data'))
