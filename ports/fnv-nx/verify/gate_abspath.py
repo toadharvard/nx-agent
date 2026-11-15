@@ -20,6 +20,11 @@ A file outside the closure is not judged. Findings are read from the ast, never 
                                     constant, followed by "/" or the end) is a path inside the stage's own mount namespace and is green.
   abspath:envdefault:FILE:LINE      os.environ.get(k, default) / os.getenv(k, default) with a default other than None, os.environ.setdefault, or an
                                     os.environ[k] read inside a try block that has a handler (a fallback). A missing input must be an argument error.
+  abspath:escape:FILE:LINE:PATH     a file read (open, Path.read_*, os.listdir, glob, np.load, shutil.copy*) in a stage tool whose path is built from
+                                    __file__, __path__ or sys.argv[0] (through names, os.path.dirname/join/abspath, pathlib `/` and .parent) and
+                                    resolves outside the tree the stage mounts for that tool (the owner tree of the file: recipe.tree_of, all of its
+                                    files are mounted at /tool): any `..` that leaves it. Inside the tree it is a mounted file (green); through
+                                    require_mounted/require_under it is guarded (green).
   abspath:home:FILE:LINE            `~` paths, os.path.expanduser, Path.home().
 Report: the global count of findings per file with the commit; red iff there is any finding or any dynamic import.
 Proof: a stage opens only what its key mounts; a literal absolute path outside the mount prefixes, an environment default, or a home path names
@@ -171,8 +176,127 @@ def guarded(a, idx, flow, sc, depth=0):
     return False
 
 
-def judge_file(path, src):
-    """(findings [(code, line, detail)], dynamic [(line)]) of one file."""
+READ_FUNCS = {"open", "io.open", "fileinput.input", "numpy.load", "numpy.loadtxt", "numpy.genfromtxt", "numpy.fromfile", "os.listdir", "os.scandir",
+              "os.walk", "glob.glob", "glob.iglob", "shutil.copy", "shutil.copyfile", "shutil.copy2", "shutil.copytree"}
+READ_METHODS = {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir"}
+NORM = {"os.path.abspath", "os.path.realpath", "os.path.normpath", "os.path.expanduser", "posixpath.normpath", "pathlib.Path", "pathlib.PurePath",
+        "pathlib.PosixPath", "pathlib.PurePosixPath"}
+
+
+def segs_join(a, b):
+    """Join of two segment lists as os.path.join does: an absolute right part resets the base (and is no longer derived from __file__)."""
+    return b if b and b[0] == "" else a + b
+
+
+def pathval(node, idx, flow, sc, selfpath, mod, depth=0):
+    """(segments, derived) of the path expression NODE, or None when it is not a statically known path expression. Segments are repo-relative
+    names; "?" is a part that is not a constant. DERIVED: the value is built from __file__, __path__ or sys.argv[0] (the file's own location)."""
+    if depth > 8:
+        return None
+    me = selfpath.split("/")
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return me, True
+        if node.id == "__path__":
+            return me[:-1], True
+        i = idx
+        while i is not None:
+            vals = flow[i].get(node.id)
+            if vals:
+                got = [pathval(v, i, flow, sc, selfpath, mod, depth + 1) for v in vals]
+                return got[0] if all(g is not None for g in got) else None
+            i = sc[i][1]
+        return None
+    if isinstance(node, ast.Subscript):
+        if mod.full(node.value) == "sys.argv" and isinstance(node.slice, ast.Constant) and node.slice.value == 0:
+            return me, True
+        if isinstance(node.value, ast.Attribute) and node.value.attr == "parents" and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
+            b = pathval(node.value.value, idx, flow, sc, selfpath, mod, depth + 1)
+            return (b[0][:-(node.slice.value + 1)] if b else None, b[1]) if b else None
+        return None
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value.split("/"), False
+    if isinstance(node, ast.JoinedStr):
+        parts = [pathval(v.value, idx, flow, sc, selfpath, mod, depth + 1) if isinstance(v, ast.FormattedValue) else (v.value.split("/"), False) for v in node.values]
+        segs, der = [], False
+        for p in parts:
+            if p is None:
+                segs += ["?"]
+            else:
+                segs = segs + p[0] if not segs else segs[:-1] + [segs[-1] + p[0][0]] + p[0][1:]
+                der = der or p[1]
+        return segs, der
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
+        a, b = (pathval(x, idx, flow, sc, selfpath, mod, depth + 1) for x in (node.left, node.right))
+        if a is None and b is None:
+            return None
+        a, b = a or (["?"], False), b or (["?"], False)
+        if isinstance(node.op, ast.Add):
+            return a[0][:-1] + [a[0][-1] + b[0][0]] + b[0][1:], a[1] or b[1]
+        return segs_join(a[0], b[0]), (a[1] or b[1]) and not (b[0] and b[0][0] == "")
+    if isinstance(node, ast.Call):
+        fn = mod.full(node.func) or ""
+        if fn in ("os.path.dirname", "posixpath.dirname") and node.args:
+            b = pathval(node.args[0], idx, flow, sc, selfpath, mod, depth + 1)
+            return (b[0][:-1], b[1]) if b else None
+        if fn in NORM and node.args:
+            return pathval(node.args[0], idx, flow, sc, selfpath, mod, depth + 1)
+        if fn in ("os.path.join", "posixpath.join"):
+            vals = [pathval(a, idx, flow, sc, selfpath, mod, depth + 1) or (["?"], False) for a in node.args]
+            if not vals:
+                return None
+            acc, der = vals[0]
+            for v, _ in [(x[0], x[1]) for x in vals[1:]]:
+                acc = segs_join(acc, v)
+            return acc, any(x[1] for x in vals) and acc[:1] != [""]
+        if isinstance(node.func, ast.Attribute) and node.func.attr in ("resolve", "absolute", "expanduser"):
+            return pathval(node.func.value, idx, flow, sc, selfpath, mod, depth + 1)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "joinpath":
+            b = pathval(node.func.value, idx, flow, sc, selfpath, mod, depth + 1)
+            if b is None:
+                return None
+            for a in node.args:
+                v = pathval(a, idx, flow, sc, selfpath, mod, depth + 1) or (["?"], False)
+                b = (segs_join(b[0], v[0]), b[1])
+            return b
+        return None
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        b = pathval(node.value, idx, flow, sc, selfpath, mod, depth + 1)
+        return (b[0][:-1], b[1]) if b else None
+    return None
+
+
+def leaves(segs, owner):
+    """True iff the segment list leaves the tree OWNER (a repo path): a `..` above the repo root, or a normalized path outside OWNER (a "?" part inside the
+    owner prefix is unknown, so not equal)."""
+    out = []
+    for g in segs:
+        if g in ("", "."):
+            continue
+        if g == "..":
+            if out and out[-1] != "..":
+                out.pop()
+            else:
+                out.append("..")
+        else:
+            out.append(g)
+    o = owner.split("/")
+    return out[:len(o)] != o, "/".join(out)
+
+
+def read_target(n, mod):
+    """The path expression a file-read call reads: the first argument of open-like functions, the object of a path method; else None."""
+    fn = mod.full(n.func) or ""
+    if fn in READ_FUNCS and n.args:
+        return n.args[0]
+    if isinstance(n.func, ast.Attribute) and n.func.attr in READ_METHODS and fn not in READ_FUNCS:
+        return n.func.value
+    return None
+
+
+def judge_file(path, src, owner=None):
+    """(findings [(code, line, detail)], dynamic [(line)]) of one file. OWNER: the admitted root tree the stage mounts this file's tool from (None: the
+    file is not a stage tool, so the escape rule does not apply)."""
     mod = Module(path, src)
     sc = scopes(mod.tree)
     f, seen = [], set()
@@ -246,6 +370,19 @@ def judge_file(path, src):
                 for m in ast.walk(b):
                     if isinstance(m, ast.Subscript) and isinstance(m.ctx, ast.Load) and mod.full(m.value) == "os.environ":
                         add("envdefault", m.lineno)
+    if owner:
+        for idx, (scope, _) in enumerate(sc):
+            for n in own_nodes(scope):
+                if not isinstance(n, ast.Call):
+                    continue
+                t = read_target(n, mod)
+                if t is None or guarded(t, idx, flow, sc):
+                    continue
+                v = pathval(t, idx, flow, sc, path, mod)
+                if v is not None and v[1]:
+                    out, res = leaves(v[0], owner)
+                    if out:
+                        add("escape", n.lineno, res)
     dyn = []
     for idx, (scope, _) in enumerate(sc):
         for n in own_nodes(scope):
@@ -315,12 +452,13 @@ def closure(files, seeds):
     return seen
 
 
-def judge(files, seeds, commit=""):
+def judge(files, seeds, commit="", owner=None, tool_seeds=None):
     """(result dict, per-file count) over the closure of SEEDS in FILES {path: source}."""
     cl = closure(files, seeds)
+    tools = closure(files, tool_seeds) if tool_seeds is not None else cl   # the escape rule judges stage tools only: a gate runs from the checkout root, not under /tool
     per, rows, bad = {}, [], []
     for p in sorted(cl):
-        f, dyn = judge_file(p, files[p])
+        f, dyn = judge_file(p, files[p], owner(p) if owner and p in tools else None)
         n = len(f) + len(dyn)
         if n:
             per[p] = n
@@ -351,12 +489,13 @@ def seeds_of(files_all, git_show):
     seeds.add(HERE_REL + "/unitstage.py")
     for p in (recipe.LD_TOOLS[0] + "/ldcheck.py", recipe.LD_TOOLS[0] + "/gateids.py", recipe.LD_TOOLS[1] + "/gatefile.py"):
         seeds.add(p)
+    tools = set(seeds)
     for p in sorted(files_all):
         if p.startswith(GATES_D + "/") and p.endswith(".json"):
             for a in json.loads(git_show(p)).get("argv", []):
                 if isinstance(a, str) and a.endswith(".py"):
                     seeds.add(a)
-    return seeds
+    return seeds, tools
 
 
 HERE_REL = TREE + "/verify"
@@ -380,9 +519,10 @@ def main():
         commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     names, show = read_tree(commit)
     files = {p: show(p) for p in names if p.endswith(".py")}
-    seeds = seeds_of(set(names), show)
+    seeds, tool_seeds = seeds_of(set(names), show)
     missing = sorted(s for s in seeds if s not in files)
-    res = judge(files, seeds, commit)
+    roots = {r["path"]: r for r in json.loads(show(ADMIT)).get("roots", []) if isinstance(r, dict) and "path" in r}
+    res = judge(files, seeds, commit, lambda p: recipe.tree_of(roots, p), tool_seeds)
     rows = res["findings"] + ["abspath:missing-tool:%s" % s for s in missing]
     status = "green" if not rows else "red"
     for p, n in sorted(res["per_file"].items()):
