@@ -50,3 +50,30 @@ int esc_use2(Big *);
 int use3(Gd);
 int nomix2(int c, const Gd *s) { { Big e; e.v[0] = c; esc_use2(&e); } return use3(*s); }
 int nomix3(int c, const Gd *s, const Gd *t) { { Big e; e.v[0] = c; esc_use2(&e); } Gd l = *s; if (c) l = *t; return use3(l); }
+
+// va_list builtins on the guest ABI (aarch64: va_list is a record): va_copy is an ordered aggregate copy, va_start/va_end touch only the object
+#include <stdarg.h>
+int va_sock(int);
+int va_fcntl(int fd, int cmd, ...) {
+    if (!va_sock(fd)) return -1;
+    va_list ap; va_start(ap, cmd); int arg = va_arg(ap, int); va_end(ap);
+    return arg + cmd;
+}
+int va_cp(const char *f, va_list ap) { va_list ap2; va_copy(ap2, ap); int r = va_sock(va_arg(ap2, int)); va_end(ap2); return r; }
+
+// an aggregate array element copied between a shared object and a private local array (freetype ttgload.c shape): the private units are
+// MEM[&decl + offset], not a MEM_REF over the address of an array reference (that form crashed RTL expansion)
+struct TV { long x, y; };
+struct TL { TV pp1, pp2, pp3, pp4; int linear, vadvance; };
+int tt_load(TL *, unsigned, int);
+int tt_sub(TL *loader, unsigned *flags, int num, int rec) {
+  int error = 0;
+  for (int n = 0; n < num; n++) {
+    TV pp[4]; int la = loader->linear, va = loader->vadvance;
+    pp[0] = loader->pp1; pp[1] = loader->pp2; pp[2] = loader->pp3; pp[3] = loader->pp4;
+    error = tt_load(loader, flags[n], rec + 1);
+    if (error) return error;
+    if (!(flags[n] & 4)) { loader->pp1 = pp[0]; loader->pp2 = pp[1]; loader->pp3 = pp[2]; loader->pp4 = pp[3]; loader->linear = la; loader->vadvance = va; }
+  }
+  return error;
+}

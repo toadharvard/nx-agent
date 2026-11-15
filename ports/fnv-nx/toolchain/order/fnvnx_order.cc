@@ -434,16 +434,43 @@ static void cas_expected(gimple_stmt_iterator *gsi, gcall *call, built_in_functi
 // is no GIMPLE operand. GCC's own fnspec of the callee says which pointer arguments it may read or write (unknown spec:
 // all, both ways). Pointer arguments that cannot be shared memory (the address of a constant, of an unshared local) are
 // out of scope.
+static void store_after(gimple_stmt_iterator *gsi, gimple *stmt, gimple *store);
 static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
   tree fn = gimple_call_fndecl(call);
   if (!fn || !fndecl_built_in_p(fn, BUILT_IN_NORMAL)) return;
   built_in_function code = DECL_FUNCTION_CODE(fn);
+  // GCC's own fallback: the three `_eq` builtins are expanded inline by pieces and otherwise changed into the call of the library
+  // function (builtins.cc expand_builtin: MEMCMP_EQ -> BUILT_IN_MEMCMP; STRCMP_EQ, STRNCMP_EQ likewise). They are that library call here:
+  // the pieces would be plain accesses
+  switch (code) {
+    case BUILT_IN_MEMCMP_EQ: fn = builtin_decl_explicit(BUILT_IN_MEMCMP); break;
+    case BUILT_IN_STRCMP_EQ: fn = builtin_decl_explicit(BUILT_IN_STRCMP); break;
+    case BUILT_IN_STRNCMP_EQ: fn = builtin_decl_explicit(BUILT_IN_STRNCMP); break;
+    default: break;
+  }
   if (code >= BUILT_IN_SYNC_FETCH_AND_ADD_N && code <= BUILT_IN_ATOMIC_FERAISEEXCEPT) {
     raise_atomic_orders(call, code);
     if (code >= BUILT_IN_ATOMIC_COMPARE_EXCHANGE && code <= BUILT_IN_ATOMIC_COMPARE_EXCHANGE_16) cas_expected(gsi, call, code);
     return;
   }
   if (gimple_call_flags(call) & ECF_CONST) return;
+  // THE va_list BUILTINS. va_end expands to nothing but its operand's side effects (builtins.cc expand_builtin_va_end): no access. va_start
+  // fills the va_list object it is given (builtins.cc expand_builtin_va_start: plain stores into it, expanded at RTL); when that object
+  // may be shared it fills a private temporary, which is then copied into it as any ordered aggregate copy. The temporary is private by
+  // construction (force_addressable) and its address goes to this one call, which keeps no pointer (GCC's own description of the builtin)
+  if (code == BUILT_IN_VA_END) return;
+  if (code == BUILT_IN_VA_START && gimple_call_num_args(call) >= 1) {
+    tree a = gimple_call_arg(call, 0);
+    if (POINTER_TYPE_P(TREE_TYPE(a)) && !(TREE_CODE(a) == ADDR_EXPR && local_unshared(ref_base(TREE_OPERAND(a, 0))))) {
+      tree vt = TREE_TYPE(TREE_TYPE(a));
+      tree t = make_tmp(vt, "order_va");
+      force_addressable(t);
+      gimple_call_set_arg(call, 0, fold_convert(TREE_TYPE(a), build_fold_addr_expr(t)));
+      update_stmt(call);
+      store_after(gsi, call, gimple_build_assign(build_simple_mem_ref(a), t));
+    }
+    return;
+  }
   attr_fnspec spec = gimple_call_fnspec(call);
   bool rd = false, wr = false;
   for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
@@ -523,6 +550,20 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
               if ((e.mask & (1u << i)) && TREE_CODE(gimple_call_arg(stmt, i)) == INTEGER_CST)
                 gimple_call_set_arg(stmt, i, build_int_cst(TREE_TYPE(gimple_call_arg(stmt, i)), MEMMODEL_SEQ_CST));
         return;
+      }
+      // __builtin_va_copy: GCC expands it as the assignment of the two va_list objects (builtins.cc expand_builtin_va_copy: MODIFY_EXPR dst,
+      // src), a plain access through its pointer operand. It is lowered to that assignment here, and ordered as any aggregate copy.
+      if (tree vf = gimple_call_fndecl(stmt)) {
+        // (the destination is the address of the va_list object; the source is the va_list value, or its address when va_list is an array)
+        if (fndecl_built_in_p(vf, BUILT_IN_VA_COPY) && gimple_call_num_args(stmt) == 2 && POINTER_TYPE_P(TREE_TYPE(gimple_call_arg(stmt, 0))) &&
+            TREE_CODE(TREE_TYPE(TREE_TYPE(gimple_call_arg(stmt, 0)))) == RECORD_TYPE &&
+            TREE_TYPE(gimple_call_arg(stmt, 1)) == TREE_TYPE(TREE_TYPE(gimple_call_arg(stmt, 0)))) {
+          gimple *as = gimple_build_assign(build_simple_mem_ref(gimple_call_arg(stmt, 0)), gimple_call_arg(stmt, 1));
+          gimple_set_location(as, gimple_location(stmt));
+          gsi_replace(gsi, as, true);
+          order_single(gsi);
+          return;
+        }
       }
       order_builtin_call(gsi, as_a<gcall *>(stmt));
       // `ref = f()` storing into an ordered object: route the result through a temporary, and order that store
@@ -637,10 +678,17 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   auto direct = [&](tree obj, unsigned HOST_WIDE_INT k) -> tree {
     tree base = ref_base(obj);
     if (!base || !DECL_P(base)) return NULL_TREE;
-    tree a = build_fold_addr_expr(obj);
-    if (!is_gimple_mem_ref_addr(a)) return NULL_TREE;
+    // CANONICAL FORM (what GCC's own build_ref_for_offset makes): the unit is MEM[&decl + (offset of obj in decl + k)], never a MEM_REF
+    // over the address of a component or array reference (RTL expansion of that form is not supported: it crashes on an array element)
+    poly_int64 bsz, bpos;
+    tree voff;
+    machine_mode mm;
+    int uns, rev, vol;
+    tree inner = get_inner_reference(obj, &bsz, &bpos, &voff, &mm, &uns, &rev, &vol);
+    HOST_WIDE_INT bp;
+    if (inner != base || voff || !bpos.is_constant(&bp) || bp % BITS_PER_UNIT) return NULL_TREE;
     force_addressable(base);
-    return build2(MEM_REF, aty, a, build_int_cst(ptr_type_node, k));
+    return build2(MEM_REF, aty, build_fold_addr_expr(base), build_int_cst(ptr_type_node, bp / BITS_PER_UNIT + (HOST_WIDE_INT)k));
   };
   // one unit: the load into v, then the store; the store is returned. dpp/spp: a pointer for a shared side, the unit's memory reference
   // for an unshared one
