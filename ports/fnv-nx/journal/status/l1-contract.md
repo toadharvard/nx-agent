@@ -1268,3 +1268,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Commits: errno probe derived (d7279a965); setjmp unwinders and -fno-exceptions terminators (eb12553de); declared-noreturn-only terminators (ccee83277); identity (c08edcb90); external_errors (c56ecabcc).
   - setjmp must be the pinned runtime header. TLS errno stays unjudged.
   - Next: .fnvnx.cite citations plus exemptions, then the probe stage, then the gc'd-image universe, then doubles, then shader_opcode.
+- L4/L5: bootguest fails -z text because of the devkit crt0.o in link/guest.json `pre` (4 P32_ABS32 in .text; two process entries). Assigned to w12 as the next w12h commit:
+  - startfiles and endfiles come from guest_compiler.json runtime.libs (crti, crtbegin / crtend, crtn), with no crt0;
+  - ldcheck "one entry": the entry is defined exactly once, in a product-root object.
+- w20: declared_machine sources accept c11:<clause>:<fn> and posix-2017:<page>:<fn>.
