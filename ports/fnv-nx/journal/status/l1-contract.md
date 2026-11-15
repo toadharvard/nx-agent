@@ -1560,3 +1560,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - modules.py writes keys.tsv and iat_data.tsv, and the iat.py CLI is deleted.
   - boot_job.sh is to take keys.tsv from the stage output.
   - The PT_INTERP/base-files item comes first.
+- 09:32 **L4 admit gap.** A header-only root is bound to one target, which blocks bootrt including hostabi/include (4.3).
+  - Rule: a root with no units is class `header`, has no target, and can be included from every target. Header roots get the source gates only.
+  - Owner: w15, in cand2.
