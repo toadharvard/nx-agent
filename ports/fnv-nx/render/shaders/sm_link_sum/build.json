@@ -51,7 +51,9 @@
     "/in/14",
     "/in/15",
     "/in/16",
-    "/in/17"
+    "/in/17",
+    "--",
+    "/in/18"
    ],
    "inputs": [
     {
@@ -121,6 +123,10 @@
     {
      "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:link-7",
      "path": "link-7.jsonl"
+    },
+    {
+     "stage": "ports/fnv-nx/render/shaders/sm_link_prog:run:table",
+     "path": "table.jsonl"
     }
    ],
    "debs": [

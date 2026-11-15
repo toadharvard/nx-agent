@@ -873,6 +873,64 @@
    "outputs": [
     "link-7.jsonl"
    ]
+  },
+  {
+   "name": "table",
+   "artifact": "ports/fnv-nx/render/shaders/sm_link:sm_link_check.exe",
+   "args": [
+    "--deb",
+    "/deb",
+    "table",
+    "/out/table.jsonl"
+   ],
+   "inputs": [],
+   "debs": [
+    "libc6",
+    "libegl1",
+    "libegl-mesa0",
+    "mesa-libgallium",
+    "libgbm1",
+    "libglvnd0",
+    "libdrm2",
+    "libllvm20",
+    "libexpat1",
+    "libffi8",
+    "libzstd1",
+    "zlib1g",
+    "libstdc++6",
+    "libgcc-s1",
+    "libelf1t64",
+    "libsensors5",
+    "libx11-xcb1",
+    "libx11-6",
+    "libxcb1",
+    "libxcb-dri3-0",
+    "libxcb-present0",
+    "libxcb-randr0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-shm0",
+    "libxcb-glx0",
+    "libxshmfence1",
+    "libwayland-client0",
+    "libxau6",
+    "libxdmcp6",
+    "libxext6",
+    "libxxf86vm1",
+    "libbsd0",
+    "libmd0",
+    "libpciaccess0",
+    "libdrm-amdgpu1",
+    "libdrm-intel1",
+    "libedit2",
+    "libtinfo6",
+    "libxml2",
+    "liblzma5",
+    "libicu74"
+   ],
+   "outputs": [
+    "table.jsonl"
+   ]
   }
  ]
 }
