@@ -223,3 +223,11 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Freeze until v3 finishes: no edit to prove.py, model_sail.py, symform.py or certbasis.py (they are in prover_sha).
 - w4 next: the 13 not-covered sysspec shapes, then aggregating v3 into certs.tsv (shardok branches only).
 - w9 next: the SIMD remainder; a rerun of the subject on L3a 0bfa4a518 (the SSE FP class); MXCSR_MASK from CPUREF (0xFFBF, no DAZ); and removing the Unicorn and host comparison from the tests.
+
+## 2026-11-15 10:10Z
+- sysspec (w4 609381591, merged), on x86sys 1625dfd84, over the 129 system shapes:
+  - proved 79, uncertified 43, not covered 7, FAILED 0;
+  - rdtsc, str and cpuid are proved;
+  - not covered: iretd 6 (no Form; L3a w1 queue, the SDM IRET same-privilege rule) and 1 mov.
+- Shard count: the final timing sample (132/132) gives N=59, but the farms keep N=54; resume covers any overrun.
+- No v3 shard has been published yet.
