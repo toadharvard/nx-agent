@@ -31,8 +31,7 @@
   {"path": "ports/fnv-nx/hostabi", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/hostabi/build.json"},
   {"path": "ports/fnv-nx/loader", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/loader/build.json"},
   {"path": "ports/fnv-nx/lib/sha256", "class": "product", "target": "guest", "recipe": {"guest": "ports/fnv-nx/lib/sha256/build.json", "host": "ports/fnv-nx/lib/sha256/build.host.json"}},
-  {"path": "ports/fnv-nx/contract/facts", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/contract/facts/build.json"},
-  {"path": "ports/fnv-nx/contract/factscheck", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/contract/factscheck/build.json"},
+  {"path": "ports/fnv-nx/bridgefacts", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/bridgefacts/build.json"},
   {"path": "ports/fnv-nx/verify/bootrt", "class": "test", "target": "host", "recipe": "ports/fnv-nx/verify/bootrt/build.json"},
   {"path": "ports/fnv-nx/tests/bootguest", "class": "test", "target": "guest", "recipe": "ports/fnv-nx/tests/bootguest/build.json"},
   {"path": "ports/fnv-nx/lift/pack", "class": "product", "recipe": "ports/fnv-nx/lift/pack/build.json", "target": "guest", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/tools/packcopy.py", "pack": "liftpack"}},
@@ -44,6 +43,9 @@
   {"path": "ports/fnv-nx/lift/tests/guest/imptest/native", "class": "test", "target": "guest", "recipe": "ports/fnv-nx/lift/tests/guest/imptest/native/build.json", "cxx_origin": "native"},
   {"path": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted/build.json", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/tools/guestgen_msvcrttest.py", "stage": "gen:ports/fnv-nx/lift/tests/guest/msvcrttest/lifted:0"}},
   {"path": "ports/fnv-nx/lift/tests/guest/msvcrttest/native", "class": "test", "target": "guest", "recipe": "ports/fnv-nx/lift/tests/guest/msvcrttest/native/build.json", "cxx_origin": "native"},
-  {"path": "ports/fnv-nx/verify/tests/icount", "class": "test", "target": "guest", "recipe": "ports/fnv-nx/verify/tests/icount/build.json"}
+  {"path": "ports/fnv-nx/verify/tests/icount", "class": "test", "target": "guest", "recipe": "ports/fnv-nx/verify/tests/icount/build.json"},
+  {"path": "ports/fnv-nx/boot", "class": "test", "target": "host", "recipe": "ports/fnv-nx/boot/build.json"},
+  {"path": "ports/fnv-nx/contract/facts", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/contract/facts/build.json"},
+  {"path": "ports/fnv-nx/contract/factscheck", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/contract/factscheck/build.json"}
  ]
 }
