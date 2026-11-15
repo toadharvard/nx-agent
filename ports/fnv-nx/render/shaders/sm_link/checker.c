@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "fnvnx_shaders.h"
+#include "fnvnx_sdp.h"
 #include "fnvnx_dk_layout.h"   /* the product header: fnvnx_dk_vs_needs_complete is called, not copied */
 #include "fnvnx_sha256.h"
 /* The flag bits the enum of fnvnx_shaders.h defines: bits 0..log2(FNVNX_SHADER_FLAT_COLOR). Relies on FLAT_COLOR being the highest bit of the enum (reported: the header should
@@ -124,17 +125,11 @@ static int add_form(Forms *F, const unsigned char *bc, size_t n) {
 static int read_sdp(Forms *F, const char *path, int *entries) {
     FILE *fp = fopen(path, "rb"); if (!fp) return -1;
     fseek(fp, 0, SEEK_END); long sz = ftell(fp); rewind(fp);
-    unsigned char *b = malloc((size_t)sz); if (!b || fread(b, 1, (size_t)sz, fp) != (size_t)sz) { fclose(fp); return -1; } fclose(fp);
-    if (sz < 12 || rd32(b) != 100u || (long)rd32(b + 8) != sz - 12) { free(b); return -1; }
-    uint32_t cnt = rd32(b + 4); long off = 12;
-    for (uint32_t i = 0; i < cnt; i++) {
-        if (off + 260 > sz) { free(b); return -1; }
-        uint32_t s = rd32(b + off + 256); off += 260;
-        if (off + (long)s > sz) { free(b); return -1; }
-        if (add_form(F, b + off, s)) { free(b); return -1; }
-        off += (long)s; (*entries)++;
-    }
-    free(b); return 0;
+    unsigned char *b = malloc((size_t)sz + 1); if (!b || fread(b, 1, (size_t)sz, fp) != (size_t)sz) { fclose(fp); free(b); return -1; } fclose(fp);
+    fnvnx_sdp p; char err[200];
+    if (fnvnx_sdp_parse(b, (size_t)sz, &p, err, sizeof err)) { fprintf(stderr, "sm_link: %s: %s\n", path, err); free(b); return -1; }   /* the translator's strict package reader */
+    for (uint32_t i = 0; i < p.count; i++) { if (add_form(F, p.entries[i].data, p.entries[i].size)) { fnvnx_sdp_free(&p); free(b); return -1; } (*entries)++; }
+    fnvnx_sdp_free(&p); free(b); return 0;
 }
 
 typedef struct { uint8_t p[225]; int n; } Pairs;   /* FNVNX_DK_PAIR codes of the translator's reflection ("varyings_written" of a VS, "varyings_read" of a PS) */

@@ -1,0 +1,14 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "guestlink",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_guestlink.py"
+ ],
+ "result": "guestlink.json",
+ "covers": [
+  "product-guest",
+  "linked"
+ ]
+}
