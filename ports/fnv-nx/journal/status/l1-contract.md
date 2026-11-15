@@ -1707,3 +1707,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The old fixtures (descs, uses, onedef, linkstrict, gate_publish, gate_lift, recipe) are cand2 red fixes.
 - abi decoder: `$$C` and `??$?0` done.
 - C prototypes: 1607 of 2737 C-decorated boundary symbols have no type check (extern "C" in C++ units). Sent to L2 (layout plugin decltype rows) and to the orchestrator as a class without a gate; cand3.
+- 15:41 L2 w3 81984319d DECLTYPE-LANG (decltype rows for C-linkage symbols in C++ units), to cand3 (w12) after the pin: fix gate_abi:84, measure covered/2737 and the hard errors by cause.
