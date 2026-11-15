@@ -288,3 +288,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 18:35Z v3 shard 21/54 done (farm 07): proved 339, gap 5, declared model-defect 1 (to defectspec), failed 0. Complete: 23/54.
 - 19:10Z v3 shard 3/54 done (farm 05): proved 335, gap 11, failed 0. Complete: 24/54. Lock fix verified: K=4 got past the lock and published while K=3 ran on the same machine (76cf2acca).
 - 19:20Z orchestrator: test_gate_fpexact.py (on claude/fnv-l2-source-plugins, 3b15d1138) calls aarch64-linux-gnu-gcc directly (rule 3, second compiler path). Assigned to w4: compile through verify/recipe.py (pinned external + plugins); commit to L1 (session_01KmtZKUn5UJpiHYPtNRT6p9). Must land before L1 cand3 adds its compiler-execve check.
+- 19:25Z merged w4 1c445868e: test_gate_fpexact gets its object from the recipe's toy root via gate_build.ensure, with no compiler execve. Not yet run (the recipe env check fails on w4's machine); L1 runs it in cand3.
