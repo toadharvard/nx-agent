@@ -13,6 +13,7 @@ Rows:
   selectors      cs ds es ss fs: KGDT_R3_CODE / KGDT_R3_DATA / KGDT_R3_TEB of ks386.inc | RPL_MASK, by the role the WDK names (code segment -> cs, data segment
                  -> ds es ss, the TEB's segment -> fs); gs: undecided (no WDK role); tr = KGDT_TSS.
   mov_to_sreg    the selectors a `mov sreg, r` can load at CPL 3: null for es/ds/fs/gs; the ring-3 data selectors for every register; the code selector: undecided.
+  null_seg_access  a memory operand through a null segment register (es/ds/fs/gs, as mov_to_sreg lets them hold null): #GP(0) at the instruction, delivered as Wine 9.0 does (privileged-opcode check, else access violation).
   int_ring3      the vectors Wine 9.0 handles, minus those a documented gate excludes at build 7601 (0x29: MSDN __fastfail, Windows 8+; undecided in `excluded`) for a user-mode `int n` (handle_interrupt cases) and the traps it maps to #BP / #OF (vectors 3, 4); every other
                  vector except the excluded ones: other_vectors, the SDM #GP(n*8+2) delivered as Wine 9.0 does (access violation, precedence 2).
   cr4            tsd 0 (Wine: rdtsc is not intercepted); umip 0 (SDM CR4.UMIP is reserved unless CPUID.07H:ECX[2], and the declared CPU's max basic leaf is below 7);
@@ -113,6 +114,33 @@ def build(osrec, src, mirror, wine, cpumodel):
                        "setup_exception_record line %d: ExceptionAddress = EIP_sig, context Eip not advanced; segv_handler line %d: rec = { 0 } so ExceptionFlags 0 (continuable). Precedence (2): MSDN and the WDK state nothing for these vectors; vector 0x29 stays in `excluded`"
                        % (wsrc, wline(segv.start() + pf.start()), wline(segv.start() + pf.end() - 1), wline(hi.start() + hi.group(0).index("    default:")), wline(cg.start()),
                           wline(ser.start() + ser.group(0).index("rec->ExceptionAddress")), wline(segv.start() + segv.group(0).index("EXCEPTION_RECORD rec")))}
+    # null_seg_access: a memory operand through a segment register that holds the null selector (reachable: mov_to_sreg lets es/ds/fs/gs load null). SDM Vol 3 3.4.2 and Wine 9.0 TRAP_x86_PROTFLT with err == 0.
+    fnt = fn.group(0)
+    pre = fnt.split("/* instruction prefixes */", 1)[1].split("case 0x0f:", 1)[0]
+    pre_ops = sorted(int(x, 16) for x in re.findall(r"case (0x[0-9a-fA-F]+):", pre))
+    prv_ops = sorted(int(x, 16) for x in re.findall(r"case (0x[0-9a-fA-F]+):", "case 0x6c:" + tail))
+    if "if (++prefix_count >= 15) return EXCEPTION_ILLEGAL_INSTRUCTION;" not in pre or "return EXCEPTION_PRIV_INSTRUCTION;" not in tail or "if (i == len - 1) return 0;" not in fnt or "default:\n        return 0;" not in fnt:
+        raise SystemExit("gen_x86sys: is_privileged_instr is not the prefix-skipping, opcode-set function the row null_seg_access needs")
+    if pre_ops != sorted([0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0x66, 0x67, 0xf0, 0xf2, 0xf3]) or sorted(ext_ops) != [0x20, 0x21, 0x22, 0x23]:
+        raise SystemExit("gen_x86sys: the prefix set or the 0F privileged set of is_privileged_instr changed")
+    cgt = cg.group(0)
+    if "if (virtual_is_valid_code_address( instr, 1 )) return FALSE;" not in cgt or "if (context->SegGs == system_gs) return FALSE;" not in cgt:
+        raise SystemExit("gen_x86sys: check_invalid_gs does not return FALSE at a valid code address")
+    if "if ((err & 7) == 4 && !ldt_is_system( err | 7 )) rec.ExceptionInformation[1] = err & ~7;" not in pft or "rec.ExceptionInformation[1] = 0xffffffff;" not in pft:
+        raise SystemExit("gen_x86sys: segv_handler PROTFLT does not give ExceptionInformation[1] = 0xffffffff for an error code of 0")
+    null_regs = sorted(r for r, v in mov.items() if isinstance(v, dict) and v.get("null"))
+    null_row = {"fault": "#GP", "error_code": 0, "applies_to": null_regs,
+                "faults": "an instruction with a memory operand whose segment register (default or by prefix) holds the null selector; lea, and a prefixed instruction without a memory operand, do not fault",
+                "privileged_check_first": {"prefix_skip": [hex(o) for o in pre_ops], "prefix_limit": 15, "at_limit": "EXCEPTION_ILLEGAL_INSTRUCTION",
+                                           "priv_instruction_opcodes": [hex(o) for o in prv_ops], "priv_instruction_0f_second_bytes": [hex(o) for o in ext_ops],
+                                           "result": "EXCEPTION_PRIV_INSTRUCTION", "otherwise": "the access violation below"},
+                "exception_code": 0xC0000005, "flags": 0, "parameters": [0, 0xffffffff], "address": "the faulting instruction", "eip_advance": 0,
+                "source": "Intel SDM Vol 3 3.4.2 (a memory reference through a segment register that holds the null selector is #GP(0) at that instruction); "
+                          "%s: segv_handler TRAP_x86_PROTFLT lines %d-%d (err == 0 runs is_privileged_instr first, lines %d-%d: prefixes skipped, 15 prefixes give EXCEPTION_ILLEGAL_INSTRUCTION, then the opcode set above gives EXCEPTION_PRIV_INSTRUCTION; "
+                          "otherwise EXCEPTION_ACCESS_VIOLATION, NumberParameters 2, ExceptionInformation[0] = 0, [1] = 0xffffffff because err & 7 != 4); check_invalid_gs line %d returns FALSE at a valid code address; "
+                          "setup_exception_record line %d: ExceptionAddress = EIP_sig, Eip not advanced; segv_handler line %d: rec = { 0 } so ExceptionFlags 0. Precedence (2): MSDN and the WDK state nothing for this case"
+                          % (wsrc, wline(segv.start() + pf.start()), wline(segv.start() + pf.end() - 1), wline(fn.start()), wline(fn.end() - 1), wline(cg.start() + cgt.index("virtual_is_valid_code_address")),
+                             wline(ser.start() + ser.group(0).index("rec->ExceptionAddress")), wline(segv.start() + segv.group(0).index("EXCEPTION_RECORD rec")))}
     if io_ops != [0x6c, 0x6d, 0x6e, 0x6f, 0xe4, 0xe5, 0xe6, 0xe7, 0xec, 0xed, 0xee, 0xef] or "return EXCEPTION_PRIV_INSTRUCTION" not in tail:
         raise SystemExit("gen_x86sys: is_privileged_instr does not treat in/out/ins/outs as privileged the way the row tss_io_bitmap needs")
     fp = {}
@@ -152,6 +180,7 @@ def build(osrec, src, mirror, wine, cpumodel):
         "sources": {"mirror": src["mirror"], "ks386": kf, "wine": {"commit": src["wine"]["commit"], "file": wf}, "cpumodel": cm},
         "selectors": sel,
         "mov_to_sreg": mov,
+        "null_seg_access": null_row,
         "int_ring3": {"vectors": vec, "other_vectors": other,
                       "source": "%s: handle_interrupt cases %s; segv_handler / trap_handler map %s to #OF / #BP" % (wsrc, [hex(i) for i in ints], sorted(traps)),
                       "excluded": {str(v): {"status": "undecided", "why": gates[v]["source"]} for v in gated}},
