@@ -655,3 +655,6 @@ Workers are capped at 3. Assignment by plan item:
 - t16k 4e66f6436: pi thunk fix f092a268e on int3 5e894bd3a; run7 restarted from scratch (the pi .so is in every key).
 - 00:45 BLOCKED: fnvnx_native_disp_table needs native.tsv. Its inputs (obj/bind/bodysel from the exe facts and the pristine MSVC objects) have no recipe source. Owner: L1, proposed tool root contract/facts with output native. w8 writes the lift/rt dispgen stage when it exists. No placeholder table.
 - 00:47 The native.tsv producer is assigned by L1 to L1 w22 (claude/fnv-l1-contract-w22-facts): the tool root contract/facts, output native. The objects come from native roots derived from admit.json (no cycle). Acceptance: byte-equal to verdict.py. ETA: today.
+- 00:55 L3b asks (blocks sys/SIMD certification):
+  (1) raise in a Form: answered. F.fault(kind, cond) exists; NTSTATUS/Eip per kind come from the one table in seh.cc (sehcodes.py).
+  (2) x87/MMX/SSE Form state: the interface is frozen (fr0-7, ftop, ftag, fcw, fsw, pointers, xmm0-7, mxcsr; MMX aliasing by SDM 9.5.1). Assigned to w1, doing: the dsl bump in parallel with the relift, before the pack pin. Then the sse/x87 fallback shapes (3,894 + 2,034) become Forms class by class.
