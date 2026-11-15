@@ -824,3 +824,5 @@ Paused: w3b, w4, farm; no other work.
     - A stop that L4 routes to L6 comes before every other L6 item; it is closed by its class rule and the commit goes to L4.
     - The render head that L4 links is w6-root 644d66b36 (d3d9, translator and sha256 guest builds green; a measurement build because of the glibc header defect).
     - The first stop, 0xC000001D after `init d3dx9_38.dll`, is being classified by L4; it is not L6's yet.
+- 10:40Z Boot-loop order withdrawn (integ 4674ce3e9; the owner rejected it). No stops come from measurement runs.
+    - L6 path items stand: w5 on sm_link; w6 rebuilds the guest roots on cand3.
