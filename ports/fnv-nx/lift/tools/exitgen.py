@@ -85,6 +85,7 @@ def parse_rows(lines, defdisp):
         if not ds: bad.append('%08x %s: no .fnvnx.defdisp row for the symbol' % (a, f[1])); continue
         if len(ds) > 1: bad.append('%08x %s: %d differing .fnvnx.defdisp rows: %s' % (a, f[1], len(ds), ' | '.join(sorted(ds)))); continue
         desc = next(iter(ds))
+        if desc.startswith('-'): bad.append('%08x %s: the definition has no x86 shape (.fnvnx.defdisp row `%s`): no x86 caller can reach it, and this address names one' % (a, f[1], desc)); continue
         if len(f) == 4 and f[2] != desc: bad.append('%08x %s: the row says descriptor %r, the .fnvnx.defdisp row says %r' % (a, f[1], f[2], desc)); continue
         try: conv, ret, args, reg_ret = bridgegen.parse(desc)
         except ValueError as e: bad.append('%08x %s: descriptor %r: %s' % (a, f[1], desc, e)); continue

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """C4a: whole-program facts about the x87 / MMX / SSE control state, and the invariants that certify the lifter's no-effect bodies.
 
-    fpstate.py scan    <pe image> <facts dir>             one module: writes <facts dir>/fpstate/{fcw_loads,mxcsr_loads,readers,a3,scan}.tsv, prints counts only
+    fpstate.py scan    <pe image> <facts dir> <retn.tsv>           one module: writes <facts dir>/fpstate/{fcw_loads,mxcsr_loads,readers,a3,scan}.tsv, prints counts only
     fpstate.py combine <facts dir> [<facts dir> ...]      the PROGRAM invariants = AND over the modules; writes <facts dir>/fpstate/invariants.tsv into every directory
 
 Deterministic: a pure function of the PE image and <facts dir>/universe.tsv (every iteration order is sorted, no clocks). Exe-derived outputs live only under the facts directories.
@@ -22,7 +22,7 @@ import os, sys, hashlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cli
-FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR | fpstate.py combine DIR...'
+FPUSAGE = 'usage: fpstate.py scan IMAGE FACTSDIR RETN.tsv | fpstate.py combine DIR...'
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
 from collections import Counter, defaultdict
 from multiprocessing import Pool
@@ -225,12 +225,11 @@ def analyse(sites, start, fl, entries_of, kinds):
     return dict(cls=cls, consts=sorted(consts), trans=sorted(trans), unk=sorted(set(unk)), R=R, fields=fields(R, start, fl))
 
 
-def do_scan(exe, facts):
+def do_scan(exe, facts, retn):
     raw, rows = load_universe(exe)
     out = os.path.join(facts, 'fpstate')
     os.makedirs(out, exist_ok=True)
-    with Pool(2) as p0:
-        W.prepare(p0, rows)
+    W.load_retn(retn)
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
     with Pool(2) as pool:
@@ -344,8 +343,8 @@ def do_combine(dirs):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) >= 4 and sys.argv[1] == 'scan':
-        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 5 and sys.argv[1] == 'scan':
+        W.configure(sys.argv[3]); do_scan(sys.argv[2], sys.argv[3], sys.argv[4])
     elif len(sys.argv) >= 3 and sys.argv[1] == 'combine':
         do_combine(sys.argv[2:])
     else:

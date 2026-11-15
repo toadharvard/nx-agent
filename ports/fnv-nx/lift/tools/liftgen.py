@@ -228,25 +228,21 @@ def recipe(ref, commit, tree, dest=None):
     sys.path.insert(0, os.path.join(LIFT, '..', 'verify'))
     import recipe as R
     keep = lambda fl: [f for f in fl if R.PER_ROOT.fullmatch(f)]
-    gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
-    plugins = []
-    for n, src in R.PLUGIN_SOURCES.items():
-        plugins.append({'name': n})      # source, args and inputs are fixed by recipe.py (PLUGIN_SOURCES/ARGS/INPUTS): a root names the plugin only
-    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
+    rec = {'format': 'fnvnx-recipe/1', 'profile': 'guest',      # the game's compiler, its runtime and the full plugin set come from the profile (verify/guest_compiler.json, recipe.py): a root names only its own flags
            'flags': {k: keep(v) for k, v in PACK_ROOT_FLAGS.items()},
-           'include': ['/ext/liftpack/inc'], 'units': 'all', 'plugins': plugins,
-           'uses': [{'root': 'ports/fnv-nx/loader', 'output': 'BRIDGE_TSV'}, {'root': 'ports/fnv-nx/loader', 'output': 'IMPORTED_TSV'}, GEN_USE],
+           'include': ['/ext/liftpack/inc'], 'units': 'all',
+           'uses': [{'root': 'ports/fnv-nx/bridgefacts', 'output': 'BRIDGE'}, {'root': 'ports/fnv-nx/loader', 'output': 'IMPORTED_TSV'}, GEN_USE],
            'include_uses': [GEN_USE],
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['copy', '/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()},
-                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['imp', '--bridge', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '--imported', '/uses/ports/fnv-nx/loader/IMPORTED_TSV', '--prelude', 'fnvl_prelude.h', '--out', '/out'],
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['imp', '--bridge', '/uses/ports/fnv-nx/bridgefacts/BRIDGE', '--imported', '/uses/ports/fnv-nx/loader/IMPORTED_TSV', '--prelude', 'fnvl_prelude.h', '--out', '/out'],
                           'inputs': [], 'outputs': ['imp.cpp', 'imp_entries.tsv', 'imp_blocked.tsv']},
-                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/loader/BRIDGE_TSV', '/out/entries.tsv'],
+                         {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['entries', '/ext/liftpack/entries.tsv', '/stage/imp_entries.tsv', '/uses/ports/fnv-nx/bridgefacts/BRIDGE', '/out/entries.tsv'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:1', 'path': 'imp_entries.tsv'}], 'outputs': ['entries.tsv']},
                          {'tool': 'ports/fnv-nx/lift/tools/packstage.py', 'args': ['disp', '/stage/entries.tsv', '/out/disp.S'],
                           'inputs': [{'stage': 'ports/fnv-nx/lift/pack:gen:2', 'path': 'entries.tsv'}], 'outputs': ['disp.S']}],
            'outputs': {'ENTRIES': 'entries.tsv'},
            'link': None,
-           'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
+           'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}]}
     dest = dest or os.path.join(LIFT, 'pack', 'build.json')
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with open(dest, 'w') as f:

@@ -1,10 +1,6 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-linux-gnu-gcc",
-  "cxx": "bin/aarch64-linux-gnu-g++"
- },
+ "profile": "guest",
  "flags": {
   "c": [
    "-O2",
@@ -26,42 +22,7 @@
  ],
  "units": "all",
  "link": null,
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
-  }
- ],
- "external": [
-  {
-   "name": "gcc-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
-   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
-   "at": "/ext/gcc"
-  }
- ],
+ "external": [],
  "generated": [
   {
    "tool": "ports/fnv-nx/lift/tools/gen_faults.py",
@@ -115,6 +76,97 @@
    "outputs": [
     "native_disp.S"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fmath.h",
+    "/out/gen/fmath.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fmath.h"
+   ],
+   "outputs": [
+    "gen/fmath.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl.h",
+    "/out/gen/fnvl.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl.h"
+   ],
+   "outputs": [
+    "gen/fnvl.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_abi.h",
+    "/out/gen/fnvl_abi.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_abi.h"
+   ],
+   "outputs": [
+    "gen/fnvl_abi.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "/out/gen/fnvl_x87.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "outputs": [
+    "gen/fnvl_x87.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/imp.h",
+    "/out/gen/imp.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/imp.h"
+   ],
+   "outputs": [
+    "gen/imp.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/msvcrt.h",
+    "/out/gen/msvcrt.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/msvcrt.h"
+   ],
+   "outputs": [
+    "gen/msvcrt.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/x87.h",
+    "/out/gen/x87.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/x87.h"
+   ],
+   "outputs": [
+    "gen/x87.h"
+   ]
   }
  ],
  "uses": [
@@ -125,6 +177,14 @@
   {
    "root": "ports/fnv-nx/contract/facts",
    "output": "native"
+  },
+  {
+   "root": "ports/fnv-nx/platform",
+   "output": "INCLUDE"
+  },
+  {
+   "root": "ports/fnv-nx/hostabi",
+   "output": "INCLUDE"
   }
  ],
  "outputs": {
