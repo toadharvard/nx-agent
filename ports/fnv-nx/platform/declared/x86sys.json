@@ -29,8 +29,8 @@
  },
  "cr4_sse": {
   "osfxsr": {
-   "status": "undecided",
-   "why": "no pinned source states CR4.OSFXSR (ks386.inc CR4_FXSR = 0x200 is a bit constant only); the declared CPU's cpuid (verify/cpuid_model.json leaf 1 EDX) advertises FXSR/SSE/SSE2, but whether the OS enabled them is not a pinned fact; blocker: an owner/L3b decision to take OS support from the CPUID record, or a reach certificate"
+   "source": "derived: CR4.OSFXSR = 1 iff the declared PF_XMMI_INSTRUCTIONS_AVAILABLE (row processor_features[6]) is TRUE, because MSDN IsProcessorFeaturePresent gives that value the meaning 'the SSE instruction set is available' to the calling process and Intel SDM Vol 3A 2.5 / 13.1 raises #UD for SSE instructions when CR4.OSFXSR = 0; ks386.inc CR4_FXSR = 0x200 names the bit",
+   "value": 1
   },
   "osxmmexcpt": {
    "status": "undecided",
@@ -131,6 +131,158 @@
   "(2) Wine 9.0, only where it contradicts neither (1) nor the declared OS",
   "(3) nothing else (ReactOS is not a source)"
  ],
+ "processor_features": {
+  "others": {
+   "source": "MSDN IsProcessorFeaturePresent, return value: zero when the feature is not supported; the WDK 7.1 winnt.h defines indices 0..17 only",
+   "value": 0
+  },
+  "records": {
+   "0": {
+    "meaning": "On a Pentium, a floating-point precision error can occur in rare circumstances",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_FLOATING_POINT_PRECISION_ERRATA",
+    "status": "undecided",
+    "why": "an erratum of one CPU stepping; no pinned source gives the declared CPU's errata (the CPUID record holds no stepping errata)",
+    "winnt_h_line": 8717
+   },
+   "1": {
+    "meaning": "Floating-point operations are emulated using a software emulator",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_FLOATING_POINT_EMULATED",
+    "status": "undecided",
+    "why": "operating-system state (CR0.EM and the emulator of the kernel); no WDK 7.1 or MSDN source states it for the declared machine (cr0.em is undecided in the same record)",
+    "winnt_h_line": 8718
+   },
+   "10": {
+    "meaning": "The SSE2 instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_XMMI64_INSTRUCTIONS_AVAILABLE",
+    "source": "Intel SDM Vol 2A CPUID feature flag SSE2 (leaf 1 EDX[26]) = 1 in ports/fnv-nx/verify/cpuid_model.json leaf 1 (masks of the declared machine: EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep)",
+    "value": 1,
+    "winnt_h_line": 8727
+   },
+   "11": {
+    "meaning": "PF_SSE_DAZ_MODE_AVAILABLE (the SSE denormals-are-zero mode is available)",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_SSE_DAZ_MODE_AVAILABLE",
+    "status": "undecided",
+    "why": "DAZ support is MXCSR_MASK bit 6 (SDM Vol 1 11.6.4), not a CPUID bit; the declared MXCSR_MASK is not in a pinned source",
+    "winnt_h_line": 8728
+   },
+   "12": {
+    "meaning": "Data execution prevention is enabled",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_NX_ENABLED",
+    "status": "undecided",
+    "why": "operating-system state (the DEP policy of the install, boot.ini/BCD nx); no WDK 7.1 or MSDN source states it for the declared machine",
+    "winnt_h_line": 8729
+   },
+   "13": {
+    "meaning": "The SSE3 instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_SSE3_INSTRUCTIONS_AVAILABLE",
+    "source": "Intel SDM Vol 2A CPUID feature flag SSE3 (leaf 1 ECX[0]) = 0 in ports/fnv-nx/verify/cpuid_model.json leaf 1 (masks of the declared machine: EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep)",
+    "value": 0,
+    "winnt_h_line": 8730
+   },
+   "14": {
+    "meaning": "The atomic compare and exchange 128-bit operation (cmpxchg16b) is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_COMPARE_EXCHANGE128",
+    "source": "Intel SDM Vol 2A CPUID feature flag CX16 (leaf 1 ECX[13]) = 0 in ports/fnv-nx/verify/cpuid_model.json leaf 1 (masks of the declared machine: EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep)",
+    "value": 0,
+    "winnt_h_line": 8731
+   },
+   "15": {
+    "meaning": "PF_COMPARE64_EXCHANGE128",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_COMPARE64_EXCHANGE128",
+    "status": "undecided",
+    "why": "the MSDN text for this index is not pinned and the name does not decide between cmpxchg8b and cmpxchg16b semantics",
+    "winnt_h_line": 8732
+   },
+   "16": {
+    "meaning": "PF_CHANNELS_ENABLED",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_CHANNELS_ENABLED",
+    "status": "undecided",
+    "why": "operating-system state with no pinned MSDN text",
+    "winnt_h_line": 8733
+   },
+   "17": {
+    "meaning": "The processor implements the XSAVE and XRSTOR instructions",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_XSAVE_ENABLED",
+    "source": "the documented meaning needs the hardware feature; Intel SDM Vol 2A CPUID feature flag XSAVE (leaf 1 ECX[26]) = 0 in ports/fnv-nx/verify/cpuid_model.json leaf 1 (masks of the declared machine: EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep)",
+    "value": 0,
+    "winnt_h_line": 8734
+   },
+   "2": {
+    "meaning": "The atomic compare and exchange operation (cmpxchg8b) is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_COMPARE_EXCHANGE_DOUBLE",
+    "source": "Intel SDM Vol 2A CPUID feature flag CX8 (leaf 1 EDX[8]) = 1 in ports/fnv-nx/verify/cpuid_model.json leaf 1 (masks of the declared machine: EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep)",
+    "value": 1,
+    "winnt_h_line": 8719
+   },
+   "3": {
+    "meaning": "The MMX instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_MMX_INSTRUCTIONS_AVAILABLE",
+    "source": "Intel SDM Vol 2A CPUID feature flag MMX (leaf 1 EDX[23]) = 1 in ports/fnv-nx/verify/cpuid_model.json leaf 1 (masks of the declared machine: EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep)",
+    "value": 1,
+    "winnt_h_line": 8720
+   },
+   "4": {
+    "meaning": "The PowerPC 64-bit move instruction is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_PPC_MOVEMEM_64BIT_OK",
+    "status": "undecided",
+    "why": "the meaning is a PowerPC feature; whether Windows 7 x86 answers it by the architecture is not stated by a pinned source",
+    "winnt_h_line": 8721
+   },
+   "5": {
+    "meaning": "The Alpha byte instructions are available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_ALPHA_BYTE_INSTRUCTIONS",
+    "status": "undecided",
+    "why": "the meaning is an Alpha feature; whether Windows 7 x86 answers it by the architecture is not stated by a pinned source",
+    "winnt_h_line": 8722
+   },
+   "6": {
+    "meaning": "The SSE instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_XMMI_INSTRUCTIONS_AVAILABLE",
+    "source": "Intel SDM Vol 2A CPUID feature flag SSE (leaf 1 EDX[25]) = 1 in ports/fnv-nx/verify/cpuid_model.json leaf 1 (masks of the declared machine: EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep)",
+    "value": 1,
+    "winnt_h_line": 8723
+   },
+   "7": {
+    "meaning": "The 3D-Now instruction set is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_3DNOW_INSTRUCTIONS_AVAILABLE",
+    "status": "undecided",
+    "why": "the 3DNow bit (CPUID 0x80000001 EDX[31]) is defined by the AMD APM, which is not a pinned source; the Intel SDM does not define it",
+    "winnt_h_line": 8724
+   },
+   "8": {
+    "meaning": "The RDTSC instruction is available",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_RDTSC_INSTRUCTION_AVAILABLE",
+    "source": "Intel SDM Vol 2A CPUID feature flag TSC (leaf 1 EDX[4]) = 1 in ports/fnv-nx/verify/cpuid_model.json leaf 1 (masks of the declared machine: EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep)",
+    "value": 1,
+    "winnt_h_line": 8725
+   },
+   "9": {
+    "meaning": "The processor is PAE-enabled",
+    "meaning_source": "MSDN, IsProcessorFeaturePresent function (Windows 7 / Windows Server 2008 R2 documentation)",
+    "name": "PF_PAE_ENABLED",
+    "status": "undecided",
+    "why": "operating-system boot state (PAE follows the DEP/NX boot policy of the install); no WDK 7.1 or MSDN source states it for the declared machine",
+    "winnt_h_line": 8726
+   }
+  }
+ },
  "selectors": {
   "cs": {
    "source": "WDK 7.1.0 ks386.inc (headers/_ks386.inc_00858): KGDT_R3_CODE = 0x18 (the ring-3 code segment) | RPL_MASK 3",

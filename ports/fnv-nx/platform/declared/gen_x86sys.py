@@ -49,7 +49,7 @@ def build(osrec, src, mirror, wine, cpumodel):
         raise SystemExit("gen_x86sys: the sources describe a native 32-bit x86 machine; this record is not one")
     kf = src["files"]["ks386"]
     kg = ks386_equ(pinned(os.path.join(mirror, kf["path"]), kf, kf["path"]))
-    need = ["TssIoMapBase", "PrIopmOffset", "KGDT_R3_CODE", "KGDT_R3_DATA", "KGDT_R3_TEB", "KGDT_TSS", "RPL_MASK", "EFLAGS_USER_SANITIZE"]
+    need = ["TssIoMapBase", "PrIopmOffset", "KGDT_R3_CODE", "KGDT_R3_DATA", "KGDT_R3_TEB", "KGDT_TSS", "RPL_MASK", "EFLAGS_USER_SANITIZE", "CR4_FXSR"]
     if any(n not in kg for n in need):
         raise SystemExit("gen_x86sys: ks386.inc lacks " + ", ".join(n for n in need if n not in kg))
     rpl = kg["RPL_MASK"]
@@ -114,6 +114,33 @@ def build(osrec, src, mirror, wine, cpumodel):
     if not isinstance(max_basic, int):
         raise SystemExit("gen_x86sys: cpuid_model.json has no max_basic")
     umip = 0 if max_basic < 7 else None
+    cpu = json.loads(ct)
+    regs = {("1", "edx"): int(cpu["leaf1_edx_raw"], 16) & ~int(cpu["leaf1_edx_clear"], 16), ("1", "ecx"): int(cpu["leaf1_ecx_raw"], 16) & int(cpu["leaf1_ecx_keep"], 16)}   # the declared masks of cpuid_model.json (masks_doc)
+    pfdoc = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pf.json")))
+    wn = pinned(os.path.join(mirror, src["files"]["winnt"]["path"]), src["files"]["winnt"], "winnt.h").split("\n")
+    pfn = {int(m.group(2)): (m.group(1), i + 1) for i, l in enumerate(wn) for m in [re.match(r"#define (PF_[A-Z0-9_]+)\s+(\d+)\s*$", l)] if m}
+    if sorted(pfn) != list(range(max(pfn) + 1)) or sorted(map(int, pfdoc["records"])) != sorted(pfn):
+        raise SystemExit("gen_x86sys: pf.json does not have exactly one record per PF_* index of winnt.h")
+    pf, cpuid_src = {}, "%s %s (masks of the declared machine: %s)" % (cm["path"], "leaf 1", "EDX = raw & ~leaf1_edx_clear, ECX = raw & leaf1_ecx_keep")
+    for idx in sorted(pfn):
+        nm, ln = pfn[idx]
+        r = pfdoc["records"][str(idx)]
+        b = r["basis"]
+        row = {"name": nm, "meaning": r["meaning"], "meaning_source": pfdoc["meaning_source"], "winnt_h_line": ln}
+        c = b.get("cpuid") or b.get("absent_if_cpuid_clear")
+        if "undecided" in b:
+            row.update(undec(b["undecided"]))
+        elif c:
+            bit = (regs[(str(c["leaf"]), c["reg"])] >> c["bit"]) & 1
+            how = "Intel SDM Vol 2A CPUID feature flag %s (leaf %d %s[%d])" % (c["name"], c["leaf"], c["reg"].upper(), c["bit"])
+            if "cpuid" in b:
+                row.update({"value": bit, "source": "%s = %d in %s" % (how, bit, cpuid_src)})
+            elif bit == 0:
+                row.update({"value": 0, "source": "the documented meaning needs the hardware feature; %s = 0 in %s" % (how, cpuid_src)})
+            else:
+                row.update(undec(b["present_otherwise"]["undecided"]))
+        pf[str(idx)] = row
+    osfxsr = {"value": pf["6"]["value"], "source": "derived: CR4.OSFXSR = 1 iff the declared PF_XMMI_INSTRUCTIONS_AVAILABLE (row processor_features[6]) is TRUE, because MSDN IsProcessorFeaturePresent gives that value the meaning 'the SSE instruction set is available' to the calling process and Intel SDM Vol 3A 2.5 / 13.1 raises #UD for SSE instructions when CR4.OSFXSR = 0; ks386.inc CR4_FXSR = 0x%X names the bit" % kg["CR4_FXSR"]} if "value" in pf["6"] else undec("derived from processor_features[6], which is undecided")
     eflags0 = int(m.group(1), 16)
     sanit = kg["EFLAGS_USER_SANITIZE"]
     return {
@@ -141,7 +168,8 @@ def build(osrec, src, mirror, wine, cpumodel):
         "cr0": {"em": undec("no pinned source states CR0.EM of the declared machine (ks386.inc CR0_EM is a bit constant only; Wine runs on the host CPU); user mode observes CR0 only through smsw, which is itself undecided; blocker: a reach certificate that no site depends on it, or an owner decision to derive it from the CPUID record"),
                 "ts": undec("no pinned source; user mode sees TS only through smsw (undecided); Windows handles #NM transparently (lazy FPU switch), and the lazy-switch behaviour is not a pinned source"),
                 "mp": undec("no pinned source states CR0.MP (ks386.inc CR0_MP is a bit constant only); user mode sees it only through smsw (undecided)")},
-        "cr4_sse": {"osfxsr": undec("no pinned source states CR4.OSFXSR (ks386.inc CR4_FXSR = 0x200 is a bit constant only); the declared CPU's cpuid (verify/cpuid_model.json leaf 1 EDX) advertises FXSR/SSE/SSE2, but whether the OS enabled them is not a pinned fact; blocker: an owner/L3b decision to take OS support from the CPUID record, or a reach certificate"),
+        "processor_features": {"records": pf, "others": pfdoc["others"]},
+        "cr4_sse": {"osfxsr": osfxsr,
                     "osxmmexcpt": undec("no pinned source states CR4.OSXMMEXCPT (ks386.inc CR4_XMMEXCPT = 0x400 is a bit constant only); with the initial MXCSR 0x1F80 every SIMD exception is masked, so #XM is not raised until a site unmasks it; blocker: a certificate that every ldmxcsr / fxrstor site keeps the exceptions masked (CLAUDE.md fact, not yet certified)")},
         "idtr_limit": undec("the number of gates of the OS's IDT is not stated by a pinned source (the SDM allows 256 entries at most)"),
         "sldt": undec("no pinned source states the LDTR of a process that has no LDT"),

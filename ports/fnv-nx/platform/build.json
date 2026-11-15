@@ -323,6 +323,21 @@
    "outputs": [
     "win32/declared_os.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/declared/gen_pfh.py",
+   "args": [
+    "--x86sys",
+    "/in/ports/fnv-nx/platform/declared/x86sys.json",
+    "--header",
+    "/out/win32/declared_pf.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/declared/x86sys.json"
+   ],
+   "outputs": [
+    "win32/declared_pf.h"
+   ]
   }
  ],
  "os_layer": [],
