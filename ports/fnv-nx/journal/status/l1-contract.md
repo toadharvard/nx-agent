@@ -1883,3 +1883,5 @@ bottleneck: the cand2 merge (cut, the stage-2 pin, a warm verdict).
   - New static check gen:foreign-import over all admitted roots.
   - w12 lands it first, before the other cand3 items if needed.
 bottleneck: the cand3 platform fix (w12), which blocks the relift, and the cand2 merge (w15).
+- 22:30 L5 w10: HOST1 fix b7bda281f (presence checks deleted in rt/guest; rt/guest and guest_main green) goes into cand3. gen_combridge fix 0608004f5: w12 takes it if it follows the uses rule, plus the foreign-import check. Platform's gdifont -Wnarrowing stays with L5.
+bottleneck: the cand3 platform fix (w12), and the cand2 merge (w15).
