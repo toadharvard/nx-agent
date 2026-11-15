@@ -23,6 +23,7 @@ from collections import Counter, defaultdict
 
 M32 = 0xffffffff
 WIDTH = 8
+OBJW = 8
 UNK = (None, None); TOP = ('TOP', None)
 U = frozenset([UNK]); TOPSET = frozenset([TOP])
 R32 = pcsrc.R32
@@ -49,6 +50,15 @@ def _norm(ts):
         elif o == 'TOP': out.add(TOP)
         elif len(cs) <= WIDTH: out |= {(o, c) for c in cs}
         else: out.add((o, None))
+    # more than OBJW distinct objects of one kind (frames F, heap H): the set becomes the ANY-offset pointer of the kind's SUMMARY object (kind, '*'), which stands for every object of the kind
+    # (a write through it is seen by a read of any of them: PT.read / PT.write / PT.objall). The representation of a set stays bounded by (static sections) + OBJW x kinds + the integer constants.
+    kinds = defaultdict(set)
+    for o, c in out:
+        if o is not None and o != 'TOP' and o[0] in ('F', 'H') and o[1] != '*': kinds[o[0]].add(o)
+    for k, objs in kinds.items():
+        if len(objs) > OBJW:
+            out = {(o, c) for o, c in out if not (o is not None and o != 'TOP' and o[0] == k and o[1] != '*')}
+            out.add(((k, '*'), None))
     return frozenset(out)
 
 
@@ -123,6 +133,10 @@ class PT:
             v = join(v, iv)
         return join(v, self.anyw[o]) or U
 
+    def summ_of(self, o):
+        """the summary object (kind, '*') of a frame or heap object, else None"""
+        return (o[0], '*') if o[0] in ('F', 'H') and o[1] != '*' else None
+
     def read(self, toks):
         out = None
         for o, c in toks:
@@ -138,6 +152,8 @@ class PT:
                     v = join(v, self.init_cell(o, c))
                 out = join(out, v)
             out = join(out, self.anyw[o])
+            so = self.summ_of(o) if o != 'TOP' else None
+            if so is not None: out = join(out, self.anyw.get(so))       # a write through the kind's summary pointer reaches every object of the kind
         return out if out is not None else U
 
     def write(self, toks, val, site, kind='store'):
@@ -146,6 +162,8 @@ class PT:
             if o is None: self.int_stores += 1; continue
             if o == 'TOP': top = True; continue
             wrote.append((o, c))
+            so = self.summ_of(o)
+            if so is not None: self.agg[so] = join(self.agg.get(so), val)       # the summary object holds the union of every object of its kind
             if c is None:
                 old = self.anyw[o]; new = join(old, val)
                 if new != old: self.anyw[o] = new; self.agg[o] = join(self.agg.get(o), val); self.changed = True; self.ver += 1
