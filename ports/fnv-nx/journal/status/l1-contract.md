@@ -1846,3 +1846,5 @@ bottleneck: the cand2 verdict on w15.
 bottleneck: the cand2 verdict on w15.
 - 21:49 The cand3 head moves to c0f504e2a: sandbox links/scratch/unkeyed{env,timeout}, test_sandbox 13. Done now so that the sandbox hash, which is in every key, does not change after the pack build starts. sandbox.py and cas.py are frozen until the pack lands. w15, L3a and L4 told.
 bottleneck: the cand2 verdict on w15.
+- 21:51 w7 (L3a facts) asked for an exe row in MODULES_TSV. Not for this relift: it uses the loader's own function on the PE header, the same rule. The exe row goes into cand4 (modules.py, L1), after which the lift stages read all bases from the table.
+bottleneck: the cand2 verdict on w15.
