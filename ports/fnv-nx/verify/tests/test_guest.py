@@ -18,9 +18,6 @@ from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_rep
 
 
 
-PIN = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))   # the drivers are the pin's: no test types them
-
-
 def guest_rec(ext, **kw):
     r = mut(compiler={"external": "gcc-msvcmodel", "cc": recipe.pin_drivers()[0], "cxx": recipe.pin_drivers()[1]}, external=[ext], **kw)
     if "flags" not in kw:   # every guest root carries -Werror=attributes in flags.c and flags.cxx
