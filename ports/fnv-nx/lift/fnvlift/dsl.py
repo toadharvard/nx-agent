@@ -301,7 +301,7 @@ template<class T> static inline T ashr_(T a, T c, unsigned w, T m) { T s = (a >>
 SEGS = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # the segment registers in rt/fnvl.h SEG_* order
 XIN = ('df', 'flo', 'fs_base', 'gs_base') + tuple('sel_' + s for s in SEGS)          # other pre-state: DF (1 bit), the other EFLAGS bits (32, masked), segment bases, the six segment selectors (16 bits, = c->sel[SEG_*])
 SIG = ','.join('[[maybe_unused]] u32& ' + r for r in REGS + FLAGS + XIN) + ',u32& eip'
-from fnvlift.faults import FAULTS, FLT_STATUS      # the one fault table (fnvlift/faults.json); kind = runtime code
+from fnvlift.faults import FAULTS, FLT_STATUS, BYNAME as _FBY      # the one fault table (fnvlift/faults.json); kind = runtime code
 INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32, **{'sel_' + s: 16 for s in SEGS}}
 
 def xc_lines(kind, i, x, ref):
@@ -327,6 +327,7 @@ class Form:
         s.swhen = {}      # index in stores -> 1-bit node: the store happens only when it holds (absent = unconditional)     # addr: int, or a node (V('eip', 32)) for a form of a whole shape
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
         s.mmw = []        # MMX register writes of a builder, (N, 64-bit value): proof/forms.build hands them to mmx() once the handler is done
+        s.fxm = False     # fault_xm(): on the SIMD floating-point exception fault the Form's MXCSR effect (the exception flags) still happens, every other effect does not (SDM Vol 1 11.5.2, Vol 3 6.15)
         s.xs = []         # x87 / MMX / SSE state effects, in order: (kind, index or None, node, ...); the later effect on one target wins (kinds: fr ftop ftag fsw fptr xmm mxcsr)
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
@@ -352,6 +353,10 @@ class Form:
         if when is not None: assert when.w == 1; s.swhen[len(s.stores)] = when
         s.stores.append((addr, v))
     def fault(s, code, cond): assert cond.w == 1; s.faults.append((code, cond))
+    def fault_xm(s, cond):
+        """the SIMD floating-point exception (#XM, fault kind XM; Wine 9.0 fpe_handler STATUS_FLOAT_MULTIPLE_TRAPS) when `cond` (an exception flag set whose MXCSR mask bit is clear).
+        SDM Vol 1 11.5.2 / Vol 3 6.15: the exception flags are set in MXCSR and the destination is left unchanged; so on this fault the Form's mxcsr effect (xs kind mxcsr) is applied and nothing else"""
+        s.fault(_FBY['XM']['code'], cond); s.fxm = True
     def model_gap(s, text): s.gaps.append(text)
     # ---- x87 / MMX / SSE state effects (the whole new value of the target; every expression reads the pre-state)
     def fr(s, i, e): assert 0 <= i < 8 and e.w == 80; s.xs.append(('fr', i, e))
@@ -393,6 +398,7 @@ class Form:
         for f in sorted(s.undef): out.append('undef ' + f + (' when n%d' % go(s.uwhen[f]) if f in s.uwhen else ''))
         for i, (a, v) in enumerate(s.stores): out.append('store n%d n%d' % (go(a), go(v)) + (' when n%d' % go(s.swhen[i]) if i in s.swhen else ''))
         for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
+        if s.fxm: out.append('fault_xm')
         if s.flo is not None: out.append('flo n%d' % go(s.flo))
         for k, i, e in s.xs: out.append('x %s %s %s' % (k, '-' if i is None else i, ' '.join('n%d' % go(x) for x in (e if k == 'fptr' else (e,)))))
         out.append('eip n%d @%s' % (go(s.eip), '%x' % s.addr if isinstance(s.addr, int) else 'n%d' % go(s.addr)))
@@ -435,7 +441,7 @@ class Form:
             regs = {r: g(regs[r], z3.BitVec(r, 32)) for r in regs}; flags = {f: g(flags[f], z3.BitVec(f, 1)) for f in flags}
             flo = g(flo, z3.BitVec('flo', 32)); mem = g(mem, mem_array())
             fr_ = [g(a, b) for a, b in zip(fr_, pre_x[0])]; xm_ = [g(a, b) for a, b in zip(xm_, pre_x[1])]
-            x = {k: (tuple(g(a, b) for a, b in zip(v, pre_x[2][k])) if k == 'fptr' else g(v, pre_x[2][k])) for k, v in x.items()}
+            x = {k: (tuple(g(a, b) for a, b in zip(v, pre_x[2][k])) if k == 'fptr' else z3.If(nf, v, z3.If(ft == _FBY['XM']['code'], v, pre_x[2][k])) if k == 'mxcsr' and s.fxm else g(v, pre_x[2][k])) for k, v in x.items()}
             eip = g(eip, z3.BitVecVal(s.addr, 32) if isinstance(s.addr, int) else to_smt(s.addr))
         return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft,
                 'fr': fr_, 'xmm': xm_, 'ftop': x['ftop'], 'ftag': x['ftag'], 'fsw': x['fsw'], 'fptr': x['fptr'], 'mxcsr': x['mxcsr']}
@@ -450,7 +456,11 @@ class Form:
         for u in sorted(e.used): L.append('const %s in_%s = %s;' % (T(XW.get(u, 32)), u, varc(u)))
         for n in e.order:
             if n.u in e.names: L.append('const %s %s = %s;' % (T(n.w), e.names[n.u], e.ex(n)))
-        for k, c in s.faults: L.append(fault_fn(k, c, e.ref))
+        xm = _FBY['XM']['code']
+        for k, c in s.faults:
+            if k == xm and s.fxm:      # fault_xm: MXCSR takes the Form's effect just before this fault is raised (an earlier fault of the Form raises first and leaves MXCSR alone)
+                L.append('if (%s) { %s }' % (e.ref(c), ' '.join(xc_lines('mxcsr', None, [x for kk, i, x in s.xs if kk == 'mxcsr'][-1], e.ref))))
+            L.append(fault_fn(k, c, e.ref))
         cw = lambda w: '' if w is None else 'if (%s) ' % e.ref(w)
         for r, v, w in s.regs: L.append('%s%s = %s;' % (cw(w), r, e.ref(v)))
         for f, v, w in s.flags: L.append(s.flag_line(f, v, w, e.ref))        # DEF0: a flag the model leaves free is the constant 0

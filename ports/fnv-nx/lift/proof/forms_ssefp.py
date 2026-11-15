@@ -1,14 +1,18 @@
 """SSE / SSE2 floating-point arithmetic forms: add sub mul div sqrt, scalar (ss, sd) and packed (ps, pd), SDM Vol 2 per mnemonic.  Each lane is one dsl.fp node (the one rule set,
 fnvlift/dsl.py fp: SDM Vol 1 4.8.3, 4.9.1, 10.2.3, 11.5) on the source type; the status flags of the lanes are ORed into the sticky MXCSR flags (bits 0-5).  An UNMASKED exception (the new
-flag set and its MXCSR mask bit 7-12 clear) is a fault of one kind per NTSTATUS in Wine 9.0 get_fpu_code's order (IE, DE, ZE, OE, UE, PE; fnvlift/faults.json FLT_*), and a fault leaves the whole
-state, MXCSR included, unchanged.  Aligned 128-bit memory operands fault with kind 7 when misaligned (forms_simd.align)."""
+flag set and its MXCSR mask bit 7-12 clear) is ONE fault, XM (Wine 9.0 fpe_handler: a SIMD exception is STATUS_FLOAT_MULTIPLE_TRAPS, never a per-flag status); on it the exception flags are set in MXCSR and the destination
+is unchanged (SDM Vol 1 11.5.2, Vol 3 6.15: dsl Form.fault_xm).  Aligned 128-bit memory operands fault with kind 7 when misaligned (forms_simd.align)."""
 from fnvlift import dsl
 from fnvlift.dsl import C, V, bit, concat, extract, fp, fp_flags, fp_val, zext
 from fnvlift.faults import BYNAME
 from proof.forms import handler, rd, wr
 from proof.forms_simd import align, join, lanes
 
-_FLT = [BYNAME[n]['code'] for n in ('FLT_IE', 'FLT_DE', 'FLT_ZE', 'FLT_OE', 'FLT_UE', 'FLT_PE')]       # flag bit i of MXCSR 0-5, mask bit i + 7
+def _unmasked(flags32, mx):
+    """some exception flag i (MXCSR bits 0-5) is set whose mask bit i + 7 is clear (SDM Vol 1 11.5.1)"""
+    r = bit(flags32, 0) & ~bit(mx, 7)
+    for i in range(1, 6): r = r | (bit(flags32, i) & ~bit(mx, 7 + i))
+    return r
 OPS = {'add': 'add', 'sub': 'sub', 'mul': 'mul', 'div': 'div', 'sqrt': 'sqrt', 'min': 'min', 'max': 'max'}
 def arith(c, op, w, packed, pred=None):
     c.aligned = True; d, s = c.ops; mx = V('mxcsr', 32); a = rd(d); n = d.w
@@ -23,7 +27,7 @@ def arith(c, op, w, packed, pred=None):
     flags32 = zext(flags, 32)
     vals = [fp_val(nd) for nd in nodes]
     r = join(vals) if packed else concat(extract(a, 127, w), vals[0])
-    for i, k in enumerate(_FLT): c.F.fault(k, bit(flags32, i) & ~bit(mx, 7 + i))
+    c.F.fault_xm(_unmasked(flags32, mx))
     c.F.mxcsr(mx | flags32); wr(c.F, d, r)
 for _op in OPS:
     for _sfx, _w, _p in (('ss', 32, False), ('sd', 64, False), ('ps', 32, True), ('pd', 64, True)):
@@ -35,7 +39,7 @@ def comi(c, op, w):
     """COMISS/UCOMISS/COMISD/UCOMISD: ZF PF CF = unordered / equal / less (SDM Vol 2); OF SF AF = 0; IE (QNaN operands only for ucomi) and DE go to MXCSR."""
     c.aligned = False; d, s = c.ops; mx = V('mxcsr', 32); nd = fp(op, w, extract(rd(d), w - 1, 0), rd(s, w), mx)
     v = fp_val(nd); flags32 = zext(fp_flags(nd), 32)
-    for i, k in enumerate(_FLT): c.F.fault(k, bit(flags32, i) & ~bit(mx, 7 + i))
+    c.F.fault_xm(_unmasked(flags32, mx))
     c.F.mxcsr(mx | flags32)
     c.F.flag('zf', bit(v, 2)); c.F.flag('pf', bit(v, 1)); c.F.flag('cf', bit(v, 0))
     for f in ('of', 'sf', 'af'): c.F.flag(f, C(0, 1))

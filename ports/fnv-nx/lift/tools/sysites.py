@@ -13,7 +13,7 @@ from capstone import x86 as X
 def classes(g, vecs):
     m = g.mnemonic; o = g.operands; out = []
     if m == 'int' and o[0].imm & 0xff not in vecs: out.append('int_other')
-    if m in ('sgdt', 'sidt', 'sldt'): out.append(m)
+    if m in ('sgdt', 'sidt', 'sldt', 'smsw', 'lar', 'lsl', 'verr', 'verw'): out.append(m)      # the CR0 / descriptor-word / table fields the record leaves undecided
     sreg = lambda op: op.type == X.X86_OP_REG and g.reg_name(op.reg) in ('es', 'ds', 'fs', 'gs', 'ss')
     if m == 'mov' and sreg(o[0]) or m == 'pop' and sreg(o[0]) or m in ('lds', 'les', 'lfs', 'lgs', 'lss'): out.append('sreg_load')
     if m == 'mov' and len(o) == 2 and sreg(o[1]) and g.reg_name(o[1].reg) == 'gs' or m == 'push' and sreg(o[0]) and g.reg_name(o[0].reg) == 'gs': out.append('gs_read')
