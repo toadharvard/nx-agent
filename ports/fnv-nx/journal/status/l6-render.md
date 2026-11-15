@@ -757,3 +757,7 @@ Paused: w3b, w4, farm; no other work.
     - ASM-628 had no record, so the reference at nxgpu4.h:138 made the assumptions gate red. Fix: the sdk-api citation replaces it.
     - dev/ facts: a sample-count mismatch between colour targets, or between colour and depth, reaches the backend unchecked (draw_state.cpp:42). Rule D and Wine (f) close it; they are deferred by the budget order.
     - Quality levels are 1 in all 7562 rows of both env tsvs.
+- 09:33Z L1 accepted the 945dcc5a0 rows into cand2 (w15). Admit rows are now path + class.
+    - w6 (doing):
+        - the nxgpu4.h:138 citation as its own commit, sent to w15 and to L6A (taken byte-equal into gl4link);
+        - new root render/pair: nx_pair_variant and nx_link_set moved out of draw_prog.cpp, linked by d3d9 via link.roots. This lets the sm_link checker link the product function.
