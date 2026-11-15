@@ -364,3 +364,9 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 22:35Z v3 shard 11/54 (farm 17): shapes 346, proved 334, model-gap 12, failed 0. Farm 17 is done and archived. 51/54 complete. Still running: 25 (farm 07), 53, 54 (farm 20).
 - 22:37Z w14 d55c2367e: the cpuid bit table now comes from APM vol 3 rev 3.39 Appendix E (fnv-nx-build tools/amd-apm cdd079761116). Table 66d8109dfc33 has 764 rows and the 4 missing features. FXSR's cause: a vendor typo in rev 3.14 Table 3-1. Partition: FEMMS (258 sites) moved to reserved-encoding, because rev 3.39 Table D-1 drops it. Decision: pin APM vol 5 and take the union of AMD volumes. Not merged yet: that run used capstone 5.0.7 against the pinned 5.0.9, so it is a measurement; rerun with the pin. The generated-include item is still open.
 - 22:38Z w14 4816a5615: sdmfeat compiles cpumodel.c with -I rtgen.cpuref_dir(), and test_generated_readers now covers compiled includes. The branch carries simdfarm 04d2aaaad, i.e. w7's line with its symform change, so it merges after v3 54/54, in this order: L3a line (w7, w13 99b0218fd, w12) → simdfarm → w14. Still open with w14: the APM vol 5 union for FEMMS, and a rerun with the pinned capstone.
+- 22:39Z w14 964510be8 done.
+  - APM vol 5 rev 3.16 pinned (tools/amd-apm bd63d66d5cc8); vendormap takes the union over every pinned volume, and a conflict between volumes is an error.
+  - Partition over 8 images (facts 6944080, 5,704,065 sites, 665 forms, 0 problems): cleared-feature 5,205 (0F 0F 4,890 + FEMMS 258 + SSE3 57), reserved-encoding 92.
+  - Feature table: fnv-nx-build l3b-lift/cpuid-feature-bits/964510be8, 764 rows.
+  - The capstone pin was met: wheel 5.0.9, digest matches env.json; 5.0.7 was the library's own version string.
+  Merges after v3 54/54, last in the order above. L3a w12 takes this table commit.
