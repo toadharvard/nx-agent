@@ -145,3 +145,9 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - The pack universe (25,233 shapes) holds 0 bs shapes.
 - sysspec readers done (w4 8ed832c07). IN/OUT/INS/OUTS are uncertified until L5 adds the tss_io_bitmap row (asked of w14).
 - L5 w14 2895b30fe: 0x29 is in int_ring3.excluded as undecided; vectors 3, 4 and 0x2d come from Wine 9.0. w3 counts the dependent sites at this head.
+
+## 2026-11-15 09:20Z — the weekly budget binds (integ 9ea2d5403)
+- Workers kept: w4 (queue v3, the 2.6 certs, sysspec) and w9 (the x87 carrier). w3 finishes its dependent-site count, then it is archived; its audit rows #7, #9-#12, #14 and #15 wait until after the first frame.
+- Farms kept: 05, 07, 11 and 12. Archived: 13, 14, 15 and 16. Their branches stay.
+- tss_io_bitmap: L5 w14 3646ebab3 holds "no port permitted" with no opcode copy. The I/O instruction set stays in sdm_priv_rows.tsv.
+- L3a takes the tzcnt/lzcnt class into img.dec: a feature-dependent encoding is decoded under CPUREF (tzcnt→bsf, popcnt→#UD, pause→nop).
