@@ -4,6 +4,7 @@ MANIFEST.json as compiler.build_key) and by verify/recipe.py (which refuses a pi
 The key is a function of the CONTENT of the inputs of the compiler build alone, each under its tree-relative name (a path outside the tree does not enter it),
 so the same files give the same key in any checkout. The inputs are what build.sh READS:
   - the five files msvcmodel.patch, build.sh and the three guest patches (INPUTS), by content;
+  - every plugin file the runtime is compiled with (plugin_inputs: the recipe's PLUGIN_SOURCES and PLUGIN_INPUTS, read from the recipe, no second list), by content;
   - the VALUES build.sh takes from records, through the same functions it calls (build_values): the declared target (targets.json guest_platform
     triplet/abi/code and console_cpu arch/features, which give the multilib selector, --with-arch and --with-abi), recipe.runtime_configure and
     recipe.runtime_cflags of guest_compiler.json, and recipe.semantics_set(None) (the semantic flag set: targets, the DATAMODEL rows' flags and
@@ -38,6 +39,18 @@ def build_values(root=None, verify=None, targets=None, recipe=None):
             "semantics": list(recipe.semantics_set(None))}
 
 
+def plugin_inputs(root=None, recipe=None):
+    """-> [tree-relative path]: every file the plugins are built from, read from the recipe's own declaration (PLUGIN_SOURCES and PLUGIN_INPUTS, the one list;
+    the runtime is compiled with all of the plugins, so a change to any of these is another plugin ABI in the pinned runtime)."""
+    if recipe is None:
+        sys.path.insert(0, os.path.join(root or TREE, "verify"))
+        import recipe
+    files = set(recipe.PLUGIN_SOURCES.values())
+    for v in recipe.PLUGIN_INPUTS.values():
+        files.update(v)
+    return sorted(os.path.relpath(f, recipe.TREE) for f in files)
+
+
 def stamp(root=None, patch=None, build=None, patch_dir=None, verify=None, targets=None, recipe=None):
     """-> the 16-hex key over the inputs under ROOT (a tree: ports/fnv-nx of a checkout); PATCH, BUILD and PATCH_DIR name other files for the first,
     second and the three last inputs (build.sh's MSVC_PATCH and PATCH_DIR overrides); VERIFY, TARGETS and RECIPE as in build_values."""
@@ -45,6 +58,7 @@ def stamp(root=None, patch=None, build=None, patch_dir=None, verify=None, target
     paths = [patch or os.path.join(root, INPUTS[0]), build or os.path.join(root, INPUTS[1])]
     paths += [os.path.join(patch_dir, os.path.basename(i)) if patch_dir else os.path.join(root, i) for i in INPUTS[2:]]
     lines = "".join("%s  %s\n" % (hashlib.sha256(open(p, "rb").read()).hexdigest(), n) for p, n in zip(paths, INPUTS))
+    lines += "".join("%s  %s\n" % (hashlib.sha256(open(os.path.join(root, n), "rb").read()).hexdigest(), n) for n in plugin_inputs(root, recipe))
     lines += "values  " + json.dumps(build_values(root, verify, targets, recipe), sort_keys=True, separators=(",", ":")) + "\n"
     return hashlib.sha256(lines.encode()).hexdigest()[:16]
 
