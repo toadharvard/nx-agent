@@ -222,3 +222,10 @@ After the first frame:
   - Farm: newlib -DPREFER_SIZE_OVER_SPEED (field from w22), plus the runtime asm-set check (derived; classes D1, pre-thread, svc, documented atomic; otherwise red).
   - L1 w23 drops the fenced-bl rule.
   - Open for L2: the restoring rule for the string routines, an aarch64 body proven equal to the x86 semantics of the exe CRT's routine (rep movs/stos fast-string, or per-store ordering by size path).
+- 2026-11-15 01:14 rtasm (L1 w23): an asm object is one with no .fnvnx section.
+  - Precondition defect: names writes no section for empty units. Fix, w3: a `.fnvnx.unit` section always emitted.
+  - Farm keeps the sections (no strip or gc).
+  - Proposed to w23:
+    - the jmp_buf base register is derived from the callers' .fnvnx.decltype plus AAPCS64 x0;
+    - "before threads" is a link-time call-graph fact (the e_entry prefix before thread creation; not reachable from main, thread entries or address-taken functions), owned by L1.
+- MANIFEST schema fnvnx-runtime-manifest/1 fixed and sent to w14 and the farm; no data-model copy in it.
