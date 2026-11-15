@@ -1746,3 +1746,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - 20:06 Plugin include home: toolchain/layout lies inside the admitted root ports/fnv-nx/toolchain (34a4a4b2a, in c58c0a4f3); an include outside the plugin's root is a check error, with a selftest. Closed.
 - 20:07 L6 d3d9 guest blocked: (1) the names plugin input, replaced by w12 34a4a4b2a (not w5's hand PLUGIN_INPUTS edit); (2) duplicate case labels in fnvnx_layout.cc, routed to L2.
 - 20:08 The layout duplicates are L6's stale merge (fa0f48e4f); the L2 head is clean; L6 takes toolchain/ from a42ad8875. cand3 (w12): toolchain/ tree hash must equal the pin MANIFEST's source tree, else red.
+- 20:09 cand2 @4ba22e772 (w15): noemit read from sympair_kinds.inc (L2 83822426d), the pin step done, the datamodel fix sent to w9. Blocked: the stamp key is fc2cda07, not the pin's 9f0d5729. Asked L2 for one pin from its head (83822426d, the registry if ready, and the toolchain tree hash in MANIFEST). Then plugins freeze for cand2.
+- bottleneck: waiting on L2/farm for the pin rebuild (stamp key mismatch); then one warm verdict. workers 4/4.
