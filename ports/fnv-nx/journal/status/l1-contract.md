@@ -1741,3 +1741,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - w26 session_01KmtZKTeJ8ehtTJioqEQdfM (new): objstub x86-64 analyzer, the lasterror column, the std: index. Doing.
 - w27 session_01KmtZKTZrENKeH1CT5X794x (new): typed dispatch gates, gate_cert reach kind. Doing.
 - bottleneck: cand2 waits for one warm verdict on the final pin (the last cold run took 1316 s against a 300 s budget, 966 s of it selftests from failing files that re-run); cand3 is then bounded by w12's recipe items; workers 4/4.
+- 20:03 w27 answers: the rows TSV is accepted (gate built on toys until L3a names). gate_cert engine is object level with pinned objdump: callers by CALL26/JUMP26 plus an address-taken rule, and local argument provenance (producer call result, or a relocated load from a universe symbol within its size). The sm_link summary form (universe, universe_hash, producers) goes to L6 for cand4.
