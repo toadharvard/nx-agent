@@ -2,7 +2,7 @@
 KiTrap0D / Wine 9.0), the machine constants are rt/fnvl.h's.  Fault kinds (dsl.FAULTS): a Form that raises says which exception the process observes; the C text of each kind is f_dsl.FAULT_ROWS.
   ARPL          protected-mode RPL adjust: ZF = RPL(dest) < RPL(src); dest.RPL = src.RPL only then (a memory destination is written only then: Form.store `when`)
   BOUND         #BR as FNVL_BOUNDS when the signed index is outside [lo, hi]
-  privileged    CPL-0 instructions and I/O at IOPL 0 (f_sys.PRIV_MN, MOV CRn/DRn): #GP(0), reported by KiTrap0D's opcode table: PRIV (STATUS_PRIVILEGED_INSTRUCTION) or AV {0, 0xFFFFFFFF}
+  privileged    CPL-0 instructions and I/O at IOPL 0 (proof/privset.py: the SDM rows of sdmpriv.py; MOV CRn/DRn): #GP(0), reported by KiTrap0D's opcode table: PRIV (STATUS_PRIVILEGED_INSTRUCTION) or AV {0, 0xFFFFFFFF}
   INT n / INTO / INT1   the vector table of f_sys.INT_VECTORS
   SLDT STR SMSW SGDT SIDT   the model's constants
   CPUID RDTSC   the reference CPU's fixed answer / the platform timer: uf nodes (dsl.uf)"""
@@ -11,7 +11,7 @@ from proof.forms import Op, ea, handler, rd, store_op, wr
 
 # the reference machine and the fault kinds: READ, never typed (faults.py = the integer macros of rt/fnvl.h; dsl.FAULTS = the DSL's kind table; f_sys.INT_VECTORS = the vector table)
 from fnvlift.f_sys import INT_VECTORS
-from proof import faults
+from proof import faults, privset
 GDTR_BASE, GDTR_LIMIT, IDTR_BASE, IDTR_LIMIT, LDTR_SEL, TR_SEL, CR0 = (faults.D['FNVL_' + n] for n in ('GDTR_BASE', 'GDTR_LIMIT', 'IDTR_BASE', 'IDTR_LIMIT', 'LDTR_SEL', 'TR_SEL', 'CR0'))
 KIND = faults.KIND
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP, K_ASSERT, K_DBGSRV, K_INTO_AT1 = (KIND[n] for n in ('BP', 'UD', 'BOUNDS', 'INTO', 'PRIV', 'AV', 'STEP', 'ASSERT', 'DBGSRV', 'INTO_AT1'))
@@ -28,8 +28,7 @@ def _int_kind():
 
 
 INT_KIND = _int_kind()
-PRIV_MN = ('cli', 'sti', 'hlt', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd', 'rdmsr', 'wrmsr', 'invd', 'wbinvd', 'wbnoinvd', 'clts', 'lgdt', 'lidt', 'lldt', 'ltr',
-           'lmsw', 'invlpg', 'rdpmc', 'sysexit')      # = f_sys.PRIV_MN (test/dsl_int_classes_test.py checks the equality)
+
 
 @handler('arpl')
 def arpl(c):
@@ -42,7 +41,7 @@ def arpl(c):
 def privileged(c):
     from fnvlift.f_sys import trap0d_privileged
     c.F.fault(K_PRIV if trap0d_privileged(c.raw) else K_AV, C(1, 1))
-handler(*PRIV_MN)(privileged)
+handler(*privset.mnemonics())(privileged)
 
 @handler('int')
 def int_(c): c.F.fault(INT_KIND.get(c.ops[0].val & 0xff, K_AV), C(1, 1))

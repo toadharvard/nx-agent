@@ -118,6 +118,19 @@
     "ports/fnv-nx/lift/rt/build.json"
    ]
   },
+  "test_sdmpriv.py": {
+   "references": [
+    {
+     "anchor": "L2-L10",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/sdm_priv_sentences.tsv"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sdmpriv.py",
+    "ports/fnv-nx/lift/proof/privset.py"
+   ]
+  },
   "test_shape.py": {
    "references": [
     {

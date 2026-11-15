@@ -13,7 +13,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from proof import shape, symform  # noqa: E402
+from proof import privset, shape, symform  # noqa: E402
 from fnvlift import dsl  # noqa: E402
 
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
@@ -29,9 +29,8 @@ def umip_clear():
     return not (c[(0, 'EAX')] >= 7 and (c[(7, 'ECX')] >> 2) & 1)
 
 
-# mnemonic -> (SDM page, #GP(0) at CPL 3 under the declared facts?)
-PRIV = {m: 'SDM Vol. 2 %s: Protected Mode Exceptions: #GP(0) if the CPL is greater than %s' % (m.upper(), 'IOPL (CLI/STI) / and no I/O bitmap grant (IN/OUT/INS/OUTS)' if m in ('cli', 'sti', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd') else '0')
-        for m in ('cli', 'sti', 'hlt', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd', 'lldt', 'ltr', 'lgdt', 'lidt', 'rdmsr', 'wrmsr', 'invd', 'wbinvd', 'clts', 'lmsw', 'invlpg', 'rdpmc')}
+# mnemonic -> (class, SDM citation, sentence): the privileged set read from the SDM rows (sdmpriv.py via privset.py)
+PRIV = privset.citations()
 CLASS_B = {'int3': (K_BP, None), 'int1': (K_STEP, None), 'into': (K_INTO, 'of')}
 
 
