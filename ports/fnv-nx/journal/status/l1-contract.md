@@ -1364,3 +1364,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - L6 w6 15c11ecd8 (claude/fnv-l1-contract-w16c1-gl) accepted for cand2.
   - Contents: the run series + base-files + GL read-root rule (only d4ccfe509/67391a3b5 of w5), env.json over the union mirror 6b910213, env_id ceb3a2c4…. test_recipe 136/136, test_envcheck 44/44.
   - The rest of w5 is unreviewed and NOT taken: factcache (a possible second cache, rule 3), importclosure, build profiles. If w22's construction pass meets a w5 file, it lists it.
+- Rule 5: there is no guest-platform or console-CPU record on cand1. Proposed to the orchestrator: verify/targets.json (L1); owner assignment pending.
+- errno_accessor per root is a rule-5 defect, raised by L4. It goes to w20's probe stage: derived from the declared libc header, and the root field is deleted.
+- cand2 additions: L4 c0b42b63f; admit rows for bootguest/bootrt (and lift/rt 68814726d if valid); w15c hostabi host recipe.
