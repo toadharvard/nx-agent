@@ -309,6 +309,17 @@
    ]
   },
   {
+   "tool": "ports/fnv-nx/manifest/gen_wine_colors.py",
+   "args": [
+    "/ext/wine-9.0",
+    "/out/win32/wine_colors.gen.inc"
+   ],
+   "inputs": [],
+   "outputs": [
+    "win32/wine_colors.gen.inc"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/manifest/gen_registry_seed.py",
    "args": [
     "/ext/manifest/manifest/regsites.tsv",
