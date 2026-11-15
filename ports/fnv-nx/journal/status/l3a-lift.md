@@ -1150,3 +1150,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Form.sha, a964e90b3 against 99b0218fd: INT 18,645/18,649 built (+2, 0 lost); SIMD 3,959/4,290 (+130, 0 lost, 0 sha changed).
   - 10 far call/jmp m16:32 keys changed sha, probably w7's 9c97f84bc far-FF rule; w8 is proving it. L3b re-certifies those 10.
 - 23:00 The 10 far FF sha changes are proven to be w7's intended rule, 9c97f84bc (at 9c97f84bc they equal the head; at its parent none of the 10 builds). L3b merges base3 80832d8b5 and re-certifies those 10.
+- 23:28 w13 JTAB analysis of the exe (326 red of 1005 sites, w7 facts2 b9261cd85). There is one cause: the MSVC /Od switch on a frame slot whose guard does not reach the jmp.
+  - (B) A join with different esp depth kills ebp cells. This is a defect; the fix is sound and is being implemented.
+  - (A) Cells are off for the whole cone whenever a frame address forms: the /GS cookie, the SEH record, &local.
+  - Replica: 320 → 31 red with A off + B, 18 of them truly unexplained.
+  - Sent to the orchestrator for a decision on A: (i) precise escapes only, or (ii) OWNER 6 applied to the table index. My recommendation is (ii).
+  - w13 implements B + A(i) now. The real-tool run over 1005 sites waits on w7's memory fix (the run OOMs at 13.9 GB).
+  - bottleneck: the exe facts memory growth (w7); the orchestrator's R-A decision.
