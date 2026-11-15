@@ -585,3 +585,7 @@ Paused: w3b, w4, farm; no other work.
     - Correction: the checker must call draw_prog's own complete/flat/L selection (the real product function), not a copy.
     - The run stage is content-keyed and sharded by class.
     - Not yet covered: L, FFP, gl4 rewrite, EPI/NUMERICS.
+- 00:43Z Owner order 2026-11-15 ("defects impossible by construction") merged into this branch (CLAUDE.md 0bc1ebd18).
+    - The L6 pass is one bounded inventory by w1b: hand-written sets, second copies and second paths over L6's roots, each with its pinned source, its replacement and on-path/after (doing).
+    - Pure deletions of unread second copies/paths go in the reporting commit.
+    - The order of the path conversions is decided here.
