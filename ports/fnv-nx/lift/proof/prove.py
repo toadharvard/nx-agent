@@ -28,8 +28,10 @@ SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RF
 OBLIGATIONS = ('def0',)      # what a record of this prover certifies beyond the field equalities; certs_build refuses a record without it (stale-obligations)
 SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
 
-MODEL_FAULT = {1: r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
-               7: r':NON-WRITABLE-SEGMENT$'}                                # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
+MODEL_FAULT_BY_NAME = {'DE': r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
+                       'AV': r':NON-WRITABLE-SEGMENT$'}                     # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
+from fnvlift import dsl as _dsl
+MODEL_FAULT = {k: MODEL_FAULT_BY_NAME[n] for k, n in _dsl.FAULTS.items() if n in MODEL_FAULT_BY_NAME}      # the kind numbers are the DSL's (dsl.FAULTS), the model's messages are keyed by kind name
 class Perm(set):                      # tolerated model faults of a form: exactly the messages of the fault codes that the form declares (a fault the DSL does not declare stays a model-gap)
     declared = True
     def __init__(self, base, codes): super().__init__(base); self.rx = '|'.join(MODEL_FAULT.get(c, r'(?!)') for c in sorted(codes))

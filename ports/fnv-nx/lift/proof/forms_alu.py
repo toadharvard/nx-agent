@@ -1,6 +1,7 @@
 """Arithmetic / logic / shift / bit / multiply / divide families (see forms.py)."""
 from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
 from proof.forms import Op, addoff, af, ea, handler, mload, pzs, rd, store_op, undef, wr
+from proof import faults
 
 UNDEF_LOGIC = 'AND/OR/XOR/TEST: "The state of the AF flag is undefined."'
 UNDEF_MUL = 'MUL/IMUL: "The SF, ZF, AF, and PF flags are undefined."'
@@ -151,7 +152,7 @@ def div(c):
         qu, ru = udiv(an, ad), urem(an, ad); q = ite(sn ^ sd, -qu, qu); r = ite(sn, -ru, ru)
         ovf = ~eq(q, sext(trunc(q, w), W))
     else: q, r = udiv(N, D), urem(N, D); ovf = ~eq(extract(q, W - 1, w), 0)
-    F.fault(1, eq(D, 0) | ovf)                                  # SDM: #DE when the divisor is 0 or the quotient overflows
+    F.fault(faults.KIND['DE'], eq(D, 0) | ovf)                                  # SDM: #DE when the divisor is 0 or the quotient overflows
     qd, rm = trunc(q, w), trunc(r, w)
     if w == 8: F.reg('eax', concat(extract(F.cur('eax'), 31, 16), concat(rm, qd)))
     elif w == 16: F.reg('eax', concat(extract(F.cur('eax'), 31, 16), qd)); F.reg('edx', concat(extract(F.cur('edx'), 31, 16), rm))

@@ -9,10 +9,25 @@ KiTrap0D / Wine 9.0), the machine constants are rt/fnvl.h's.  Fault kinds (dsl.F
 from fnvlift.dsl import C, V, extract, ite, slt, uf, ult, zext
 from proof.forms import Op, ea, handler, rd, store_op, wr
 
-# the reference machine (rt/fnvl.h; test/dsl_int_classes_test.py checks these against the header)
-GDTR_BASE, GDTR_LIMIT, IDTR_BASE, IDTR_LIMIT, LDTR_SEL, TR_SEL, CR0 = 0x80b95000, 0x03ff, 0x80b95400, 0x07ff, 0, 0x28, 0x80010033
-K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP, K_ASSERT, K_DBGSRV, K_INTO_AT1 = 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
-INT_KIND = {3: K_BP, 4: K_INTO_AT1, 5: K_BOUNDS, 0x2c: K_ASSERT, 0x2d: K_DBGSRV}      # f_sys.INT_VECTORS; every other vector is #GP -> AV
+# the reference machine and the fault kinds: READ, never typed (faults.py = the integer macros of rt/fnvl.h; dsl.FAULTS = the DSL's kind table; f_sys.INT_VECTORS = the vector table)
+from fnvlift.f_sys import INT_VECTORS
+from proof import faults
+GDTR_BASE, GDTR_LIMIT, IDTR_BASE, IDTR_LIMIT, LDTR_SEL, TR_SEL, CR0 = (faults.D['FNVL_' + n] for n in ('GDTR_BASE', 'GDTR_LIMIT', 'IDTR_BASE', 'IDTR_LIMIT', 'LDTR_SEL', 'TR_SEL', 'CR0'))
+KIND = faults.KIND
+K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP, K_ASSERT, K_DBGSRV, K_INTO_AT1 = (KIND[n] for n in ('BP', 'UD', 'BOUNDS', 'INTO', 'PRIV', 'AV', 'STEP', 'ASSERT', 'DBGSRV', 'INTO_AT1'))
+
+
+def _int_kind():
+    """vector -> fault kind, from f_sys.INT_VECTORS rows (FNVL_<NAME>, at offset): kind <NAME>, or <NAME>_AT1 when the row reports the address after the opcode byte; every other vector is #GP -> AV"""
+    out = {}
+    for vec, (c, off) in INT_VECTORS.items():
+        name = c[len('FNVL_'):] + ('_AT%d' % off if off else '')
+        out[vec] = KIND[name]
+        faults.code(c[len('FNVL_'):])      # the header has the code
+    return out
+
+
+INT_KIND = _int_kind()
 PRIV_MN = ('cli', 'sti', 'hlt', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd', 'rdmsr', 'wrmsr', 'invd', 'wbinvd', 'wbnoinvd', 'clts', 'lgdt', 'lidt', 'lldt', 'ltr',
            'lmsw', 'invlpg', 'rdpmc', 'sysexit')      # = f_sys.PRIV_MN (test/dsl_int_classes_test.py checks the equality)
 

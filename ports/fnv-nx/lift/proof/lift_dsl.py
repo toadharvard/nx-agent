@@ -22,9 +22,8 @@ from fnvlift.core import CC, SKIP, SUB, Unsupported
 from fnvlift import f_flow
 from fnvlift import dsl
 
-from proof import forms, forms_alu, forms_flow, forms_move             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
+from proof import faults, forms, forms_alu, forms_flow, forms_move             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
-FAULT = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BR'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
 SIXFLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 
@@ -67,7 +66,9 @@ def de_code(n, ref):
 
 def fault_fn(cx):
     def f(code, n, ref):
-        c = {1: lambda: de_code(n, ref), 2: lambda: 'FNVL_BP', 3: lambda: 'FNVL_UD', 4: lambda: 'FNVL_BOUNDS'}[code]()
+        if code not in (1, 2, 3, 4): raise KeyError(code)      # the kinds this emitter has C text for (the others are the hand handlers' of f_sys.py); unchanged
+        c = de_code(n, ref) if code == 1 else 'FNVL_%s' % dsl.FAULTS[code]      # the kind's name is the header's macro name; faults.code raises when rt/fnvl.h has none
+        if code != 1: faults.code(dsl.FAULTS[code])
         st = f_flow.raise_site(cx, c, trap=code not in (1, 4))      # #DE and #BR are faults (Eip = the instruction); #BP / #UD report the address after it
         if n.op == 'const' and n.x == 1:
             cx.term = True
