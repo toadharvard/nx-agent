@@ -298,7 +298,6 @@ class Gen:
 def main():
     spec_path, out = sys.argv[1], sys.argv[2]
     spec = json.load(open(spec_path))
-    os.makedirs(out, exist_ok=True)
     g = Gen(spec)
     rows, cpp, hdr, exp = [], [], [], []
     hdr.append(HEAD)

@@ -14,12 +14,12 @@ import test_link as TL  # noqa: E402
 
 recipe, T, ROOT, BASE, check = TR.recipe, TR.T, TR.ROOT, TR.BASE, TR.check
 P = T + "prod"
-MK = ("import os, sys\nos.makedirs('/out/gen', exist_ok=True)\n"
+MK = ("import os, sys\n"
       "for n in ('handheld', 'docked'):\n    open('/out/gen/ident_%s.bin' % n, 'wb').write((sys.argv[1] + n).encode())\n#PAD\n")
-USE = ("import hashlib, os, sys\nos.makedirs('/out/gen', exist_ok=True)\n"
+USE = ("import hashlib, os, sys\n"
        "n = sum(len(open('/uses/%s/%s' % (sys.argv[1], k), 'rb').read()) for k in ('handheld', 'docked'))\n"
        "open('/out/gen/used.c', 'w').write('const int used_len_%d = 1;\\n' % n)\n")
-LST = "import os, sys\nos.makedirs('/out/gen', exist_ok=True)\nopen('/out/gen/srcs.txt', 'w').write('\\n'.join(sys.argv[1:]) + '\\n')\n"
+LST = "import os, sys\nopen('/out/gen/srcs.txt', 'w').write('\\n'.join(sys.argv[1:]) + '\\n')\n"
 PREC = dict(TL.LIB_REC, generated=[{"tool": P + "/mk.py", "args": ["alpha"], "inputs": [],
                                     "outputs": ["gen/ident_handheld.bin", "gen/ident_docked.bin"]}],
             outputs={"handheld": "gen/ident_handheld.bin", "docked": "gen/ident_docked.bin"})

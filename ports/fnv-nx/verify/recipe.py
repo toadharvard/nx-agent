@@ -296,6 +296,7 @@ def link_file(rec_file, root, mine, roots, files):
 
 
 PROBE_SRC = "int main(void) { return 0; }\n"
+GEN_LAUNCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "genlaunch.py")   # the launcher of every generated stage: creates the parent directory of each declared output (verify/genlaunch.py)
 PROBE_FLAGS = ["-frandom-seed=guestlink", "-ffile-prefix-map=/probe=.", "-Werror=date-time"]   # the reproducibility flags every gcc stage carries (toolflags)
 
 
@@ -1397,6 +1398,13 @@ def unit_flags(rec, roots, spec, driver, kind):
     return sem + rec["flags"][kind]
 
 
+def driver_doc(stage, drv, flags, mode, tail, inputs):
+    """The one constructor of the stage doc of every compiler-driver probe (drv:, mld:): argv = driver + semantic FLAGS + PROBE_FLAGS (the reproducibility
+    flags toolflags demands of every gcc stage) + MODE + TAIL, the hermetic environment, one declared input set."""
+    return {"format": "fnvnx-stage/1", "stage": stage, "argv": [drv] + list(flags) + PROBE_FLAGS + list(mode) + list(tail), "cwd": "/", "class": "build", "tool": "gcc",
+            "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"], "inputs": inputs}
+
+
 class Job:
     def __init__(self, repo, spec, store, jobs, ext):
         root, self.variant = split_spec(spec)
@@ -1701,7 +1709,8 @@ class Job:
     def generate_one(self, ws, i, g, py, xin):
         owner = tree_of(self.roots, g["tool"])
         tmp = tempfile.mkdtemp(dir=ws)
-        ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin + self.use_inputs(ws)
+        ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)},
+               {"at": "/launch/genlaunch.py", "tree": cas.ingest(GEN_LAUNCH, self.store)}] + xin + self.use_inputs(ws)
         if "objects_of" in g:
             ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
         for p in g["inputs"]:
@@ -1714,7 +1723,7 @@ class Job:
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
+               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
         res = self.stage(doc)[1]
         got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
@@ -1832,6 +1841,8 @@ class Job:
             self.red.append(dict(r.args[0]))
             self.blocked.update({u: r.args[0]["stage"] for u in units})
             return {}
+        guest = entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("target") == "guest"
+        pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
         try:
             self.built = self.plugins(ws) if any(k in pk for k in kinds.values()) else []
         except BuildRed as r:
@@ -1996,13 +2007,14 @@ class Job:
         with open(os.path.join(pd, "x.cc"), "w") as f:
             f.write(PROBE_SRC)
         tr = self.toolrt([cxx])[1]
-        argv = [cxx] + PROBE_FLAGS + (["-pie"] if kind == "exe" else ["-shared"]) + ["-###", "/probe/x.cc", "-o", "/out/x"]
-        doc = {"format": "fnvnx-stage/1", "stage": "drv:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(unitstage.ENV, PATH=os.path.dirname(cxx)), "outputs": ["/out"],
-               "inputs": merge_inputs(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], mnt, self.store, ws)}
-        res = self.stage(doc)[1]
+        res = self.driver_stage("drv:" + self.root, cxx, [], ["-pie"] if kind == "exe" else ["-shared"], ["-###", "/probe/x.cc", "-o", "/out/x"],
+                                merge_inputs(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], mnt, self.store, ws))
         text = open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
         return parse_host_link(text, dirs), mnt
+
+    def driver_stage(self, stage, drv, flags, mode, tail, inputs):
+        """The one place a compiler-driver probe stage (drv:, mld:) runs: driver_doc, hermetic. -> the stage result."""
+        return self.stage(driver_doc(stage, drv, flags, mode, tail, inputs))[1]
 
     def link_undefined(self, groups, loader_defs=None):
         """The full static undefined set of the link just attempted (undefset.closure over the symbol tables of its inputs): the objects of the product
@@ -2073,12 +2085,9 @@ class Job:
         os.makedirs(pd)
         with open(os.path.join(pd, "x.cc"), "w") as f:
             f.write(PROBE_SRC)
-        argv = [drv] + list(flags) + PROBE_FLAGS + ["-pie", "-###", "/probe/x.cc", "-o", "/out/x.elf"]
-        doc = {"format": "fnvnx-stage/1", "stage": "drv:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(unitstage.ENV, PATH=os.path.dirname(drv)), "outputs": ["/out"],
-               "inputs": sorted(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], key=lambda i: i["at"])}
-        res = self.stage(doc)[1]
-        md = self.stage(dict(doc, argv=[drv] + list(flags) + ["-print-multi-directory"], stage="mld:" + self.root))[1]   # the multilib directory the same flags select
+        ins = sorted(tr["inputs"] + [{"at": "/probe", "tree": cas.ingest(pd, self.store)}], key=lambda i: i["at"])
+        res = self.driver_stage("drv:" + self.root, drv, flags, ["-pie"], ["-###", "/probe/x.cc", "-o", "/out/x.elf"], ins)
+        md = self.driver_stage("mld:" + self.root, drv, flags, [], ["-print-multi-directory"], ins)   # the multilib directory the same flags select
         self.multidir = open(cas._obj(self.store, cas.manifest(md["stdout"], self.store)), errors="replace").read().strip()
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read(), rt["at"]
 

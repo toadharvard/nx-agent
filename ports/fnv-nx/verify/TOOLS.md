@@ -473,7 +473,14 @@ load_index order, loader/src/modules.c:273-278; empty for an image loaded on dem
 1 << (align - 1)).  tls/<name>.bin holds the template bytes as the mapped image has them (file bytes,
 then zeros).  Red, never clamped: a directory shorter than 24 bytes or outside the image, end < start, a template outside the image, a callback
 array with no null terminator inside the image, a callback outside the image.  Written to OUT only: nothing game-derived enters the repository.
-Test: contract/tests/test_modules.py on synthetic PE images built by the test.
+Loader tables (generated stages of loader/build.json over the pinned exe; no checked-in copy): `--c-out F` writes the module table (`fnvnx_modules`,
+`fnvnx_module_count`) and `--keys-c-out F` the import table (`fnvnx_import_rows`, `fnvnx_import_row_count`, `fnvnx_import_key_count`,
+`fnvnx_import_by_key_idx`: iat.c_source over the bridge rows and every import of the exe and of every image of the module order, computed in the
+same run, because the module set is data of the run and a generator stage declares its outputs by name). Without `--out-dir` only these files are
+written and a slot without a provider does not fail the stage: that is the finding of the `iat` gate, which needs the tables. `contract/mkidentity.py`
+writes `fnvnx_exe_sha256` and `fnvnx_exe_size` over the same exe external. The exe, redist, manifest and wine externals of the loader recipe are
+the pins of contract_inputs.json (test_loader_tables.py); the declared dlls are the generator stage `declareddlls.py` over the wine external.
+Test: contract/tests/test_modules.py on synthetic PE images built by the test; verify/tests/test_loader_tables.py (the loader recipe).
 ```
 
 ## contract/objfacts_merge.py
