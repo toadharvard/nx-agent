@@ -325,3 +325,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - 21:16Z the 787 → 665 drop is explained: the 124 3DNow 'undefined' forms (5,148 sites) became 2 vendor rows (0F 0F 4,890, 0F 0E 258). Shapes stay 24,179 and sites 5,704,065, and no site lost its class (mapping in journal/inbox/l3b-w11-form-mapping.tsv at edc5c550e). The w11 #UD-list item is done; w11 archived.
 - 21:22Z v3 shard 7/54 (farm 05): shapes 346, proved 336, model-gap 10, failed 0, 3,892 s. 35/54 complete.
 - 21:23Z v3 shards 38 and 39 (farm 11): 345+345 shapes, proved 334+336, model-gap 10+8. Each has 1 declared model defect, rep-prefix-ignored: f3aa rep stosb and f3ab rep stosd, both stringspec's class, so neither is a pass until stringspec certifies it. Farm 11 is done and archived. 37/54 complete.
+- 21:23Z v3 shard 12/54 (farm 18): shapes 346, proved 335, model-gap 11, failed 0, 3,736 s. 38/54 complete.
