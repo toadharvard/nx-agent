@@ -12,6 +12,8 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-15 20:15Z (orchestrator).** Owner: up to 4 workers per lead (dd27cfdb1). Bottleneck lines from the 8 leads: the chain waits on cand3 (L3a, L4, L5, L6, L6A); cand2 waits on one more pin rebuild (stamp key mismatch, ~50 min per plugin change; split compiler/runtime stages asked of L2); the L3b proof queue is 25/54 shards (4-farm cap, about 4 h); the cold pack build is ~10 h on one farm. Decided (c25091f47): up to 8 farms for the L3b queue and for the pack build, sharded by the recipe's own rule into the one store; recipe shard item to L1.
+
 **2026-11-15 19:10Z (orchestrator).** Trunk a5c8f427; cand2 02d97431d. The none-elf pin is held for one rebuild carrying three fixes: DECLTYPE-SPEC 689328e7f (template specialization in an extern "C" signature), a real msvcmodel defect (empty-base hunk leaves offset_align stale; test_layout 2/169 red, w3 fixing via GCC's layout bookkeeping), DECLTYPE-COMPLETE (one decltype line per symtab symbol, closed reason set; L2 c2af898fd). L5 d8023503f waits for that pin.
 
 **2026-11-15 18:10Z (orchestrator).** Trunk a5c8f427; cand2 02d97431d (exepin memoized). L2: build 2 of the none-elf pin was only a reproducibility check (off the path), dropped; the pin is taken from build 1 and goes to L1 directly; open: tzdb ICE fixed, pi array-bounds (5a8ebd57b). L3a and L4 wait on cand3 for the pack build and the relink.
