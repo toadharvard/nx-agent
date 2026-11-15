@@ -76,6 +76,10 @@ def checks(obj):
     missing = want - got
     check('the cl names that have no row are exactly as many as the rows the plugin marks unnamed', len(missing) == len(unnamed),
           {'cl names without a row': sorted(missing), 'unnamed rows': [(r[0], r[2]) for r in unnamed]})
+    # a function the unit defines that GCC wrote nowhere (inlined at every use) has a row of kind noemit, no symbol in the object, and is a cl name
+    noemit = [r for r in rows if r[2] == 'noemit']
+    check('every noemit row is a function with no symbol in the object and a name cl has', noemit and all(r[0] not in st and r[1] in expect for r in noemit),
+          [(r[0], r[1]) for r in noemit if r[0] in st or r[1] not in expect] or 'no noemit row')
     extra = {ms for sym, ms, kind, df in rows if ms and kind not in ('thunk',)} - set(expect)
     # the names GCC's object has and cl's has not, by the class of the row: the deleting destructor (cl writes ??_G only where its own code needs it)
     # and the global operator new[]/delete[] (undefined references from the ??_E bodies)

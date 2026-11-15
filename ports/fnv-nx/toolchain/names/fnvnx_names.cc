@@ -849,6 +849,23 @@ static void name_vtable(tree vt)
 /* ---- the unit */
 
 static std::map<UidKey, Row> early;     /* by decl uid: named while parameters and bodies are still there */
+static std::set<UidKey> early_body;     /* the functions among them that the unit defines (a body in the TU), before IPA removes the inlined ones */
+
+/* every function body the front end finishes is named when it is finished: the early inliner removes a function inlined everywhere (an implicit
+   member, an inline function) before ipa_start, and its cl name must still be accounted for (NOEMIT, finish_unit). The in-charge form of a
+   constructor or destructor is never emitted, its clones are, and each comes here itself. */
+static void name_body(void *gcc_data, void *)
+{
+  tree d = (tree)gcc_data;
+  if (!d || TREE_CODE(d) != FUNCTION_DECL || !DECL_SAVED_TREE(d) || !TREE_PUBLIC(d)) return;
+  if (DECL_LANG_SPECIFIC(d) && DECL_MAYBE_IN_CHARGE_CDTOR_P(d) && !DECL_CLONED_FUNCTION_P(d)) return;
+  if (early.count(uid_decl(d))) { early_body.insert(uid_decl(d)); return; }
+  size_t before = rows.size();
+  name_decl(d, false);
+  early[uid_decl(d)] = rows.back();
+  early_body.insert(uid_decl(d));
+  rows.resize(before);
+}
 
 static void ipa_start(void *, void *)
 {
@@ -859,6 +876,7 @@ static void ipa_start(void *, void *)
     size_t before = rows.size();
     name_decl(d, false);
     early[uid_decl(d)] = rows.back();
+    if (TREE_CODE(d) == FUNCTION_DECL && n->definition) early_body.insert(uid_decl(d));
     rows.resize(before);
     if (VAR_P(d) && DECL_VTABLE_OR_VTT_P(d) && asmname(d).compare(0, 4, "_ZTV") == 0) name_vtable(d);
   }
@@ -1213,6 +1231,14 @@ static void finish_unit(void *, void *)
     else name_decl(d, def);
     emitted.insert(rows.back().sym);
   }
+  /* NOEMIT: a function the unit defines whose body GCC wrote nowhere in the object (inlined at every use, or never used out of line) has a cl name
+   * and no symbol. The row says so (kind noemit, ref; a function the rules gave no name keeps its unnamed kind), so every cl name without a
+   * symbol is accounted for: an unnamed row or a noemit one. */
+  for (auto &e : early)
+    if (early_body.count(e.first) && !emitted.count(e.second.sym) && (!e.second.ms.empty() || e.second.kind.compare(0, 8, "unnamed:") == 0)) {
+      Row r = e.second; if (!r.ms.empty()) r.kind = "noemit"; r.def = false;
+      rows.push_back(r); emitted.insert(r.sym);
+    }
   /* the SDD2 slot functions: that plugin writes them as assembly in the object that defines the table, and they
    * are named only by the table's entries */
   varpool_node *v;
@@ -1325,6 +1351,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
     register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type, NULL);
     register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
     register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, odr_pre_genericize, NULL);
+    register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, name_body, NULL);
     register_callback(info->base_name, PLUGIN_FINISH_PARSE_FUNCTION, odr_finish_function, NULL);
   }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
