@@ -976,3 +976,11 @@ Paused: w3b, w4, farm; no other work.
     - Handed to L1 for cand4: w6-root 68521ef8f (contains L6A 1ca99e8bd), then w5-smlink ed6a8f41e.
     - Waiting on L1: the hermetic chain, the plugin fnvnx_names mount (ffp_prog.cpp is compiled nowhere until then), hostabi admission.
     - Waiting on cand3: the w6 COM_SPEC rebase.
+- 20:05Z Owner order (CLAUDE.md integ dd27cfdb1): up to 4 workers per lead, on path items only.
+    - Archived (done or idle): farm-env SSTwzATW, w2b UrHj7PAAv, w4 UN17roaVo, w3 Sg7yny8K.
+    - Workers (3):
+        - w1b PYqkKJ24 (doing): sm tables generated only, by the CLAUDE.md 10ce6e2df precedence rule; equality with w6 68521ef8f row by row; one include mechanism.
+        - w5 S7moRHaz (doing): Rule D and item (f), the draw's FBO attachment set from Wine 9.0 context_gl.c 654-672, on branch w5-fbo.
+        - w6 QbpDKvc9 (doing): delete the stale render/d3d9/QUEUE.md and the stale numbers in render docs; then the COM_SPEC rebase on cand3.
+    - cand4 (handed to L1): w6-root 68521ef8f, then w5-smlink ed6a8f41e. sm_link red 0, 121,394 programs.
+- bottleneck: waiting on L1 for cand3, the trunk merge (a5c8f427 since 08:58Z). The guest builds of pair and d3d9 are red only on the L1 plugin fnvnx_names mount (crossing_terms.inc), and platform and loader on hostabi admission; ffp_prog.cpp is compiled nowhere until then. The hermetic sm_link chain is blocked by L1 w12's run-stage cost (> 2 h per cold run). 3 of 4 workers busy.
