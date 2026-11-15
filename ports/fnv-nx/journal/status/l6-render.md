@@ -854,3 +854,8 @@ Paused: w3b, w4, farm; no other work.
     - The program set is identical to 0b7061b06.
     - gl4 rewrite coverage is included: the checker compiles nxgl4_shim_glsl output.
     - Open: FFP (after cand3); hermetic re-run (after L1 w12's recipe fix); duplicate admit rows are dropped at merge, w6's rows are kept.
+- 13:47Z orchestrator accepted sm_link 0 red. The precedence rule is now written in CLAUDE.md (integ 21cdbb560, "Where the Microsoft page is narrower").
+    - w6 (doing): cite the rule in every union row of sm_table.json (vFace_src, ps:47, vs_3_0:v[a0.x]).
+    - Next: hand w6-root (new head) and then w5-smlink 48048fe05 to L1 for the candidate after cand3, keeping w6's admit rows.
+    - Under this rule, an instruction page's model list that omits ps is a silence. So the five ps conflicts for w1b (slt, sge, dst, expp, logp) become union rows once Wine 9.0 accepts them, each with a citation.
+    - Note: the vFace page says "can only be used as condition…", which reads as an explicit restriction. The rule names vFace as a silence by decision, and the rule is followed.
