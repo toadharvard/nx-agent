@@ -3,7 +3,7 @@
 MANIFEST.json as compiler.build_key) and by verify/recipe.py (which refuses a pinned compiler tree whose build_key is not the key of the checkout it builds).
 The key is a function of the CONTENT of the inputs of the compiler build alone, each under its tree-relative name (a path outside the tree does not enter it),
 so the same files give the same key in any checkout. The inputs are what build.sh READS:
-  - the five files msvcmodel.patch, build.sh and the three guest patches (INPUTS), by content;
+  - the six files msvcmodel.patch, build.sh, the three guest patches and cfg_link.py (INPUTS), by content;
   - every plugin file the runtime is compiled with (plugin_inputs: the recipe's PLUGIN_SOURCES and PLUGIN_INPUTS, read from the recipe, no second list), by content;
   - the VALUES build.sh takes from records, through the same functions it calls (build_values): the declared target (targets.json guest_platform
     triplet/abi/code and console_cpu arch/features, which give the multilib selector, --with-arch and --with-abi), recipe.runtime_configure and
@@ -21,7 +21,7 @@ TREE = os.path.normpath(os.path.join(HERE, "..", ".."))   # ports/fnv-nx
 
 # the inputs of the compiler build, as paths relative to the tree (ports/fnv-nx): the one list
 INPUTS = ("toolchain/msvcmodel/msvcmodel.patch", "toolchain/msvcmodel/build.sh",
-          "toolchain/gcc/x19-x27.patch", "toolchain/gcc/libstdcxx-nosized.patch", "toolchain/gcc/newlib-guest.patch")
+          "toolchain/gcc/x19-x27.patch", "toolchain/gcc/libstdcxx-nosized.patch", "toolchain/gcc/newlib-guest.patch", "toolchain/gcc/cfg_link.py")
 
 
 def build_values(root=None, verify=None, targets=None, recipe=None):
@@ -35,7 +35,7 @@ def build_values(root=None, verify=None, targets=None, recipe=None):
     pin = json.load(open(os.path.join(verify, "guest_compiler.json")))
     return {"triplet": t["guest_platform"]["triplet"], "abi": t["guest_platform"]["abi"], "code": t["guest_platform"]["code"],
             "cpu_arch": t["console_cpu"]["arch"], "cpu_features": t["console_cpu"]["features"],
-            "runtime_configure": recipe.runtime_configure(pin), "runtime_cflags": recipe.runtime_cflags(pin),
+            "runtime_configure": recipe.runtime_configure(pin), "runtime_configure_patch": recipe.runtime_configure_patch(pin), "runtime_cflags": recipe.runtime_cflags(pin),
             "semantics": list(recipe.semantics_set(None))}
 
 

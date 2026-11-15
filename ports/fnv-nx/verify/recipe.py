@@ -663,6 +663,16 @@ def runtime_configure(pin):
     return list(v)
 
 
+def runtime_configure_patch(pin):
+    """The patch of the runtime subdirs' generated configure scripts (rule CFG-LINK): the `runtime_configure_patch` of the one guest compiler record.
+    The build reads the script, the subdirs and its two fact sources here; no build script spells them."""
+    v = pin.get("runtime_configure_patch") if isinstance(pin, dict) else None
+    keys = ("script", "subdirs", "protocol_source", "guest_script", "cite")
+    if not isinstance(v, dict) or any(k not in v for k in keys) or not isinstance(v["subdirs"], list) or not all(isinstance(v[k], str) and v[k].strip() for k in keys if k != "subdirs"):
+        raise BuildRed("%s: runtime_configure_patch needs %s (cite non-empty)" % (GUEST_PIN, ", ".join(keys)))
+    return dict(v)
+
+
 def guest_link_part(rec, root, pin, prof, files, roots):
     """The link of a guest root (part of guest_errors): script and libs are the profile's (link/guest.json), one fact for every guest link."""
     lk = rec.get("link")

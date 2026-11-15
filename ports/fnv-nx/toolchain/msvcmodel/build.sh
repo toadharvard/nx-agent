@@ -110,6 +110,17 @@ MSVC_PATCH=${MSVC_PATCH:-$HERE/msvcmodel.patch}
 STAMP=$(python3 -I "$HERE/stamp.py" --patch "$MSVC_PATCH" --build "$HERE/build.sh" --patch-dir "$PATCH_DIR" --verify "$VERIFY" --targets "$TARGETS")   # the one key computation (stamp.py); verify/recipe.py compares it with the compiler tree's MANIFEST.json
 if [ -f "$W/stamp-key" ] && [ "$(cat "$W/stamp-key")" != "$STAMP" ]; then rm -rf "$W"/stamp-* "$SRC" "$NL" "$W"/b-*; fi
 echo "$STAMP" > "$W/stamp-key"
+# the CFG-LINK patch of the runtime subdirs' configure scripts: guest_compiler.json runtime_configure_patch, read through recipe
+eval "$(python3 -I - "$VERIFY" <<'EOF4'
+import json, os, shlex, sys
+sys.path.insert(0, sys.argv[1])
+import recipe
+v = recipe.runtime_configure_patch(json.load(open(os.path.join(sys.argv[1], "guest_compiler.json"))))
+print("CFG_SUBDIRS=(%s)" % " ".join(shlex.quote(d) for d in v["subdirs"]))
+print("CFG_GUEST_LD=%s CFG_PROTOCOL_SRC=%s" % (shlex.quote(v["guest_script"]), shlex.quote(v["protocol_source"])))
+EOF4
+)"
+
 : > "$CONF"
 note "# build.sh key $STAMP; gcc $V sha256 $SHA256; newlib $NLV sha256 $NLSHA256; devkitPro/buildscripts $BUILDSCRIPTS_COMMIT"
 note "# binutils: $($LD -v) (aarch64-linux-gnu-* as aarch64-none-elf-*)"
@@ -135,6 +146,8 @@ if ! step unpack; then
   patch -s -d "$NL" -p1 < "$BS/patches/newlib-$NLV-4.patch"
   apply_p0 "$PATCH_DIR/x19-x27.patch"
   apply_p0 "$PATCH_DIR/libstdcxx-nosized.patch"
+  # CFG-LINK: every runtime subdir's generated configure answers its link tests by a static link (see the libs step)
+  for d in "${CFG_SUBDIRS[@]}"; do python3 -I "$PATCH_DIR/cfg_link.py" patch "$SRC/$d/configure"; done
   # NL-LDBL (newlib-guest.patch): configure and Makefile.in are regenerated with the autotools the tarball's files state. Proof that
   # the tooling is the right one: on the pristine tarball tree the regeneration reproduces its configure and Makefile.in byte for byte.
   AT=$W/autotools
@@ -267,58 +280,57 @@ if ! step limits; then
 fi
 
 if ! step libs; then
-  # Rule CFG-FUNC. libstdc++'s configure answers `AC_CHECK_FUNC(f)` by linking a program, which cannot succeed before the product link
-  # brings the dispatch protocol (fnvnx_dispatch, fnvnx_call_fp are the lifted runtime's). The answer it computes is "is f defined in the
-  # runtime the target link uses", so it is taken from the objects themselves:
-  #   universe  every ac_cv_func_<name> that the pinned libstdc++-v3/configure tests (parsed from it),
-  #   answer    yes iff <name> is a defined global function symbol (nm, type T or W) of libc.a, libsysbase.a, libm.a or libgcc.a of the
-  #             default and the -fPIC multilib; the two multilibs must agree.
-  # The answers go to configure as a config.site, and with the defining archive member to $P/CFG-FUNC.json (the MANIFEST carries them).
-  note "target libraries: make -C b-gcc all-target-libgcc (the runtime archives CFG-FUNC reads)"
-  make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" all-target-libgcc > make-libgcc.log 2>&1
-  python3 -I - "$SRC/libstdc++-v3/configure" "$P/$T/lib" "$W/b-gcc/$T" "$P/bin/$T-nm" "$W/config.site" "$P/CFG-FUNC.json" <<'EOF3'
-import json, re, subprocess, sys
-conf, libdir, gccdir, nm, site, out = sys.argv[1:7]
-names = sorted(set(re.findall(r'ac_fn_c(?:xx)?_check_func "\$LINENO" "(\w+)" "ac_cv_func_\1"', open(conf).read())))
-assert names, "no ac_cv_func_ checks found in " + conf
-def defined(variant):  # name -> "archive:member" of the first definition
-    d = {}
-    dirs = (libdir, gccdir + "/libgcc") if not variant else (libdir + "/" + variant, gccdir + "/" + variant + "/libgcc")
-    for base, lib in ((dirs[0], "libc.a"), (dirs[0], "libsysbase.a"), (dirs[0], "libm.a"), (dirs[1], "libgcc.a")):
-        for line in subprocess.run([nm, "-A", "--defined-only", base + "/" + lib], capture_output=True, text=True, check=True).stdout.splitlines():
-            f = line.split()
-            if len(f) == 3 and f[1] in ("T", "W"):
-                arch, member = line.split(":")[0], line.split(":")[1]
-                d.setdefault(f[2], lib + "(" + member + ")")
-    return d
-a, b = defined(""), defined("pic")
-rows = []
-for n in names:
-    assert (n in a) == (n in b), "multilibs disagree on %s" % n
-    rows.append({"name": n, "answer": "yes" if n in a else "no", "member": a.get(n)})
-open(site, "w").write("".join("ac_cv_func_%s=%s\n" % (r["name"], r["answer"]) for r in rows))
-json.dump({"rule": "CFG-FUNC", "configure": "libstdc++-v3/configure", "funcs": rows}, open(out, "w"), indent=1)
-print("CFG-FUNC: %d functions, %d yes" % (len(rows), sum(r["answer"] == "yes" for r in rows)))
-EOF3
-  # The top Makefile runs every target configure with CONFIG_SITE=no-such-file, so the answers go in as the cache variables of the
-  # environment, which configure honours as presets (autoconf "Cache variables": a set ac_cv_* is not re-tested).
-  set -a; . "$W/config.site"; set +a
-  note "target libraries: configure answers ac_cv_func_* from the built runtime (environment presets, $P/CFG-FUNC.json)"
+  # Rule CFG-LINK (toolchain/gcc/cfg_link.py, recorded as guest_compiler.json runtime_configure_patch). The configure scripts of the runtime
+  # subdirs (patched in the unpack step) answer every link test by a static link: the test compiles, and the linker's own archive closure
+  # (ld -r over the driver's -### link line) leaves only linker-script and product-protocol symbols undefined.
+  export PYTHON_CFG_LINK="python3 -I $PATCH_DIR/cfg_link.py"
+  export FNVNX_CFG_NM=$P/bin/$T-nm FNVNX_CFG_LD=$P/bin/$T-ld FNVNX_CFG_EMUL=aarch64elf${ABI#ilp}
+  export FNVNX_CFG_GUEST_LD=$VERIFY/../$CFG_GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$VERIFY/../$CFG_PROTOCOL_SRC FNVNX_CFG_CACHE=$W/cfg-cache
   note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC' CXXFLAGS_FOR_TARGET='$TLCXX'"
   make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > make-libs.log 2>&1
   make -C b-gcc install CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > install-libs.log 2>&1
+  # The record of what the configure computed under CFG-LINK: the ac_cv_func_* / ac_cv_search_* values of each multilib's config.log (the
+  # cache-variable section). The multilibs must agree; the MANIFEST carries it as cfg_func.
+  python3 -I - "$W/b-gcc/$T" "$P/CFG-FUNC.json" <<'EOF5'
+import json, re, sys
+base, out = sys.argv[1:3]
+def cache(path):
+    d = {}
+    for line in open(path, errors="replace"):
+        m = re.match(r"^(ac_cv_(?:func|search)_\w+)=(.*)$", line.rstrip("\n"))
+        if m:
+            d[m.group(1)] = m.group(2).strip("'")
+    return d
+a, b = cache(base + "/libstdc++-v3/config.log"), cache(base + "/pic/libstdc++-v3/config.log")
+assert a and a == b, "CFG-LINK answers of the multilibs differ or are empty: %s" % sorted(set(a.items()) ^ set(b.items()))[:6]
+json.dump({"rule": "CFG-LINK", "source": "libstdc++-v3 config.log cache variables", "answers": dict(sorted(a.items()))}, open(out, "w"), indent=1)
+print("CFG-LINK: %d answers, %d yes" % (len(a), sum(v == "yes" for v in a.values())))
+EOF5
   rm -f "$P/lib/gcc/$T/$V/specs"
   done_ libs
 fi
 note "multilibs: $("$P/bin/$T-gcc" -print-multi-lib | tr '\n' ' ')"
-for lib in libgcc.a libgcc_eh.a libstdc++.a libsupc++.a libc.a libm.a libsysbase.a; do
-  f=$("$P/bin/$T-gcc" $MLFLAGS -print-file-name=$lib)
-  [ -f "$f" ] || { echo "build.sh: missing $lib for the multilib ($f)" >&2; exit 4; }
+# every library the g++ driver names on a C++ link line exists in each multilib (the names are the driver's own: -### of a C++ link;
+# libsupc++ is part of libstdc++'s convenience set and is checked with it)
+echo 'int main() {}' > "$W/probe.cc"
+for ml in "" $MLFLAGS; do
+  for lib in $("$P/bin/$T-g++" -mabi=$ABI $ml -### "$W/probe.cc" -o "$W/probe" 2>&1 | grep collect2 | tr ' ' '\n' | tr -d '"' | sed -n 's/^-l//p' | sort -u) supc++; do
+    f=$("$P/bin/$T-g++" -mabi=$ABI $ml -print-file-name=lib$lib.a)
+    [ -f "$f" ] || { echo "build.sh: missing lib$lib.a for the multilib '$ml' ($f)" >&2; exit 4; }
+  done
 done
 # MANIFEST.json (fnvnx-runtime-manifest/1): what the recipe compares against the compiler before any unit runs. The compiler's own
 # repo/ref/commit/tree_sha256 are not in it (the manifest is inside the tree that hash covers): they are the pin in guest_compiler.json.
 # Plugins come from the recipe's objects.json (FNVNX_PLUGINS_JSON: name, sha256, stage_key) in recipe.PLUGIN_SOURCES order, argv from the flag files.
 if [ -n "${FNVNX_PLUGINS_JSON:-}" ]; then
+  # The prefix is self-contained real files (a tree_sha256 of it must not depend on link targets): every symlink (libtool's .so version
+  # chain of libcc1 and the plugin libraries) becomes a copy of the regular file it resolves to inside the prefix; any other kind is an error.
+  while IFS= read -r l; do
+    t=$(readlink -f "$l")
+    case "$t" in "$P"/*) [ -f "$t" ] || { echo "build.sh: symlink $l does not resolve to a file ($t)" >&2; exit 5; } ;;
+      *) echo "build.sh: symlink $l resolves outside the prefix ($t)" >&2; exit 5 ;; esac
+    cp --remove-destination "$t" "$l"
+  done < <(find "$P" -type l)
   [ -z "$(find "$P" -type l)" ] || { echo "build.sh: the prefix holds symlinks:" >&2; find "$P" -type l | head >&2; exit 5; }
   python3 -I - "$P" "$T" "$V" "$SHA256" "$STAMP" "$MSVC_PATCH" "$MLFLAGS" "$PLUG_C" "$PLUG_CXX" "$TLC" "$TLCXX" "$CONF" "$FNVNX_PLUGINS_JSON" "$VERIFY" "$P/bin/$T-gcc" <<'EOF'
 import sys, os, json, hashlib, subprocess
@@ -343,7 +355,12 @@ m = {"format": "fnvnx-runtime-manifest/1",
      "flags": {"c": TLC.split(), "cxx": TLCXX.split()},
      "multilib": {"select": ML.split(), "dir": ml},
      "libraries": libs,
-     "cfg_func": json.load(open(os.path.join(P, "CFG-FUNC.json")))}
+     "cfg_func": json.load(open(os.path.join(P, "CFG-FUNC.json"))),
+     "notes": [{"id": "ld-2.42-tls-reloc-segv",
+                "text": "binutils 2.42 ld (elfnn-aarch64.c:5308 assertion, then SIGSEGV) on an error path: a final link of any guest object that reaches "
+                        "libc's __call_atexit.o without the product link fails first on the undefined thread-local fnvnx_call_fp and then crashes while "
+                        "reporting it. Reproduce: aarch64-none-elf-g++ -mabi=ilp32 hello.cc (std::string, std::vector, exception, new/delete). "
+                        "The undefined symbols fnvnx_dispatch and fnvnx_call_fp are the product link's protocol (dispatch plugin); not a defect of this tree."}]}
 open(os.path.join(P, "MANIFEST.json"), "w").write(json.dumps(m, indent=1, sort_keys=True) + "\n")
 print("MANIFEST.json: %d plugins, %d libraries" % (len(plugins), len(libs)))
 EOF
