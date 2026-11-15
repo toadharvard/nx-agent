@@ -56,6 +56,10 @@
    "output": "IMPORTED_TSV"
   },
   {
+   "root": "ports/fnv-nx/loader",
+   "output": "MODULES_TSV"
+  },
+  {
    "root": "ports/fnv-nx/lift/rt",
    "output": "GEN"
   }
@@ -4201,6 +4205,7 @@
     "/ext/liftpack/entries.tsv",
     "/stage/imp_entries.tsv",
     "/uses/ports/fnv-nx/loader/BRIDGE_TSV",
+    "/uses/ports/fnv-nx/loader/MODULES_TSV",
     "/out/entries.tsv"
    ],
    "inputs": [
