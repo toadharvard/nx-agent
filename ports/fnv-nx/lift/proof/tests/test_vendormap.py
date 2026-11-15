@@ -43,11 +43,21 @@ class Synthetic(unittest.TestCase):
         with self.assertRaises(SystemExit):
             S.unify([('A', 1, 0, 'ECX', 1, 's'), ('B', 1, 0, 'ECX', 1, 's')], [])
 
-    def test_reused_name_is_address_qualified_except_the_mirror(self):
-        recs = S.unify([], [('FPU', 1, 0, 'EDX', 0, 'a'), ('FPU', 0x80000001, 0, 'EDX', 0, 'a'), ('X', 1, 0, 'EAX', 3, 'a'), ('X', 0xD, 0, 'EAX', 3, 'a')])
+    def test_reused_name_is_address_qualified_except_the_apm_stated_mirror(self):
+        rows = [('FPU', 1, 0, 'EDX', 0, 'a'), ('FPU', 0x80000001, 0, 'EDX', 0, 'a'), ('X', 1, 0, 'EAX', 3, 'a'), ('X', 0xD, 0, 'EAX', 3, 'a')]
+        recs = S.unify([], rows, [(0x80000001, 0, 'EDX', 0, 1, 0, 'EDX', 'FPU')])      # the APM text says Fn8000_0001_EDX[FPU] is the bit of Fn0000_0001_EDX[FPU]
         names = sorted(r['canonical'] for r in recs)
-        self.assertEqual(names.count('FPU'), 2)                                   # mirror pair: one feature, two addresses
+        self.assertEqual(names.count('FPU'), 2)                                   # one fact, two addresses
         self.assertTrue(all(n.startswith('X@') for n in names if n.startswith('X')))
+        bare = sorted(r['canonical'] for r in S.unify([], rows))                  # equal names alone are not a mirror: two facts, two qualified names
+        self.assertTrue(all('@' in n for n in bare))
+
+    def test_mirror_statement_must_match_the_rows(self):
+        with self.assertRaises(SystemExit):
+            S.unify([], [('A', 1, 0, 'EDX', 0, 'a'), ('A', 0x80000001, 0, 'EDX', 0, 'a')], [(0x80000001, 0, 'EDX', 0, 1, 0, 'EDX', 'B')])
+
+    def test_mirror_statement_text(self):
+        self.assertTrue(V.MIRROR.search('FXSAVE and FXRSTOR instructions. Same as CPUID Fn0000_0001_EDX[FXSR].'))
 
 
 SAMPLE = """Table of contents
@@ -107,9 +117,9 @@ class Pinned(unittest.TestCase):
                 vols.append((pdf, pdf[:-4] + '.txt'))
             f, cells = V.layer(vols)
             txt = vols[0][1]; p = pdfplumber.open(vols[0][0]); t31 = V.table31(txt); fn = V.gating(txt, f); sub = V.subsets(p, txt, fn)
+            S.Table(S.unify([], f, sorted({m for _, tx in vols for m in V.cpuid_mirrors(tx)})))     # the APM rows alone: address -> canonical a function, canonical -> address one-to-one (Table() raises otherwise)
             got = V.dump(f) + ''.join('cell\t0F%02X\t%s\t%s\n' % (k[0], k[1], v[0]) for k, v in sorted(cells.items())) + ''.join('subset\t%s\t%s\n' % (m, v[0]) for m, v in sorted(sub.items()))
         self.assertEqual(got, open(os.path.join(HERE, 'vendor_cells.tsv')).read())
-        S.Table(S.unify([], f))                                                  # the APM rows alone: address -> canonical a function, canonical -> address one-to-one (Table() raises otherwise)
         self.assertEqual({k[0] for k, v in cells.items() if v[0] == '3DNow'}, {0x0e, 0x0f})            # 0F 0F from Vol. 3 Appendix A (map cell), 0F 0E FEMMS from Vol. 5 (instruction reference); no hand entry
         self.assertIn(('3DNow', 0x80000001, 0, 'EDX', 31), {x[:5] for x in f})
         # one bit, one feature; every row's leaf and register are those of the table that the row was read under (the citation names the section)

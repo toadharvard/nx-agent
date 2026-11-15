@@ -76,42 +76,47 @@ def flag_rows(lines):
     return out
 
 
-def unify(sdm_rows, apm_rows):
-    """-> [record]: ONE record per CPUID address (leaf, sub, reg, bit), {canonical, leaf, sub, reg, bit, sdm_name, apm_name, sdm_cite, apm_cite}.
-    The canonical name is the Intel SDM's name where the SDM defines the bit, the APM's otherwise (the precedence of the opcode maps).  A vendor that gives one address two names is an error.  A name that labels several addresses of one vendor is the same feature only where
-    the APM itself defines it twice at one register and bit of Fn0000_0001 and Fn8000_0001 (the mirrored feature bits: Table D-1 footnote 1, `both`: the same flag in the same bit of both functions); every other address of a reused name (an XCR0 or XSS state bit that
-    shares a feature's name, a bit repeated in another leaf) is a different CPUID fact and gets the canonical `NAME@LEAF.SUB.REG[bit]`.  Whether two vendors mean the same by one address is the architecture's own definition (the address); a spelling difference is not a disagreement."""
+def unify(sdm_rows, apm_rows, mirrors=()):
+    """-> [record]: ONE record per CPUID address (leaf, sub, reg, bit), {canonical, leaf, sub, reg, bit, sdm_name, apm_name, sdm_cite, apm_cite, mirror_of}.
+    The canonical name is the Intel SDM's name where the SDM defines the bit, the APM's otherwise (the precedence of the opcode maps).  A vendor that gives one address two names is an error.
+    `mirrors` are the APM's own statements (vendormap.cpuid_mirrors: the description `Same as CPUID FnXXXX_XXXX_REG[NAME]`) that a bit is the very bit of another function: the mirroring record takes the canonical name of its target and records `mirror_of`; the statement must
+    name the target's APM name and the same bit, else it is an error.  Any other name that labels several addresses is a different CPUID fact (an XCR0 or XSS state bit that shares a feature's name, a bit repeated in another leaf) and gets the canonical `NAME@LEAF.SUB.REG[bit]`.
+    Whether two vendors mean the same by one address is the architecture's own definition (the address); a spelling difference is not a disagreement."""
     by = collections.defaultdict(lambda: {'sdm': {}, 'apm': {}})
     for src, rows in (('sdm', sdm_rows), ('apm', apm_rows)):
         for n, l, s_, r, b, c in rows:
             d = by[(l, s_, r, b)][src]
             d.setdefault(n, c)
-    recs = []
+    recs = {}
     for (l, s_, r, b), v in sorted(by.items()):
         for src in ('sdm', 'apm'):
             if len(v[src]) > 1:
                 raise SystemExit('%s defines two names at %08X.%d %s[%d]: %s' % (src.upper(), l, s_, r, b, sorted(v[src])))
         sn, sc = next(iter(v['sdm'].items()), ('', ''))
         an, ac = next(iter(v['apm'].items()), ('', ''))
-        recs.append({'canonical': sn or an, 'leaf': l, 'sub': s_, 'reg': r, 'bit': b, 'sdm_name': sn, 'apm_name': an, 'sdm_cite': sc, 'apm_cite': ac})
-    labels = collections.defaultdict(list)
-    for rec in recs:
-        labels[rec['canonical']].append(rec)
-    for name, rs in labels.items():
-        if len(rs) == 1:
-            continue
-        mirror = len(rs) == 2 and {x['leaf'] for x in rs} == {1, 0x80000001} and len({(x['sub'], x['reg'], x['bit']) for x in rs}) == 1 and all(x['apm_name'] == name for x in rs)
-        if not mirror:
-            for x in rs:
-                x['canonical'] = '%s@%08X.%d.%s[%d]' % (name, x['leaf'], x['sub'], x['reg'], x['bit'])
-    return recs
+        recs[(l, s_, r, b)] = {'canonical': sn or an, 'leaf': l, 'sub': s_, 'reg': r, 'bit': b, 'sdm_name': sn, 'apm_name': an, 'sdm_cite': sc, 'apm_cite': ac, 'mirror_of': ''}
+    root = {}
+    for l, s_, r, b, tl, ts, tr, tn in mirrors:
+        a, t = recs.get((l, s_, r, b)), recs.get((tl, ts, tr, b))
+        if not a or not t or t['apm_name'] != tn or a['apm_name'] != tn:
+            raise SystemExit('APM mirror statement %08X.%d %s[%d] -> %08X.%d %s[%s] does not match the Appendix E rows' % (l, s_, r, b, tl, ts, tr, tn))
+        a['mirror_of'] = '%08X.%d.%s[%d]' % (tl, ts, tr, b); a['canonical'] = t['canonical']
+        root[(l, s_, r, b)] = (tl, ts, tr, b)
+    labels = collections.defaultdict(set)
+    for k, rec in recs.items():
+        labels[rec['canonical']].add(root.get(k, k))                            # a mirror is the same fact as its target
+    for k, rec in recs.items():
+        g = root.get(k, k)
+        if len(labels[rec['canonical']]) > 1:
+            rec['canonical'] = '%s@%08X.%d.%s[%d]' % ((rec['canonical'],) + g[:3] + g[3:])
+    return list(recs.values())
 
 
 class Table:
     """the feature table the partition reads: records of unify(); every lookup goes through the canonical name.  `canonicals(spelling)` is the set of canonical names that a vendor spelling (the SDM's, the APM's or the canonical itself) stands for"""
     def __init__(self, records):
         self.records = list(records)
-        a2c = {}
+        a2c = {}; by_addr = {(r['leaf'], r['sub'], r['reg'], r['bit']): r for r in self.records}
         for r in self.records:
             k = (r['leaf'], r['sub'], r['reg'], r['bit'])
             if a2c.setdefault(k, r['canonical']) != r['canonical']:
@@ -119,8 +124,8 @@ class Table:
         c2a = collections.defaultdict(set)
         for k, c in a2c.items():
             c2a[c].add(k)
-        for c, ks in c2a.items():                                                        # canonical -> address is one-to-one; the only many-address names are the mirrored Fn0000_0001 / Fn8000_0001 bits
-            if len(ks) > 1 and not (len(ks) == 2 and {k[0] for k in ks} == {1, 0x80000001} and len({k[1:] for k in ks}) == 1):
+        for c, ks in c2a.items():                                                        # canonical -> address is one-to-one; the only extra addresses of a name are the APM's own `Same as CPUID ...` mirrors
+            if len([k for k in ks if not by_addr[k]['mirror_of']]) > 1:
                 raise SystemExit('canonical %s labels several addresses %s' % (c, sorted(ks)))
         self.alias = collections.defaultdict(set); self.addr = collections.defaultdict(list)
         for r in self.records:
@@ -143,14 +148,14 @@ def cmd_features(sdm, apm, out):
     """the feature -> CPUID bit table of the partition: Intel SDM Vol. 1 ch. 21 leaf tables U AMD APM Vol. 3 Appendix E CPUID function tables, ONE row per address (leaf, sub, reg, bit) with the canonical name, both vendor names and both citations"""
     from proof import vendormap
     apm = apm if isinstance(apm, list) else [apm]
-    arows = []
+    arows = []; mirrors = []
     for a in apm:
-        arows += vendormap.cpuid_rows(a.replace('.pdf', '.txt'))
-    recs = unify(flag_rows(load(sdm)), arows)
+        arows += vendormap.cpuid_rows(a.replace('.pdf', '.txt')); mirrors += vendormap.cpuid_mirrors(a.replace('.pdf', '.txt'))
+    recs = unify(flag_rows(load(sdm)), arows, mirrors)
     with open(out, 'w', newline='\n') as fh:
-        fh.write('# fnvnx-cpuid-feature-bits/2 sdm_sha256=%s apm_sha256=%s\n# canonical\tleaf\tsub\treg\tbit\tsdm_name\tapm_name\tsdm_citation\tapm_citation\n' % (sha_file(sdm.replace('.txt', '.pdf')), ','.join(sha_file(a) for a in apm)))
+        fh.write('# fnvnx-cpuid-feature-bits/2 sdm_sha256=%s apm_sha256=%s\n# canonical\tleaf\tsub\treg\tbit\tsdm_name\tapm_name\tsdm_citation\tapm_citation\tmirror_of\n' % (sha_file(sdm.replace('.txt', '.pdf')), ','.join(sha_file(a) for a in apm)))
         for r in recs:
-            fh.write('%s\t%08X\t%d\t%s\t%d\t%s\t%s\t%s\t%s\n' % (r['canonical'], r['leaf'], r['sub'], r['reg'], r['bit'], r['sdm_name'], r['apm_name'], r['sdm_cite'], r['apm_cite']))
+            fh.write('%s\t%08X\t%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n' % (r['canonical'], r['leaf'], r['sub'], r['reg'], r['bit'], r['sdm_name'], r['apm_name'], r['sdm_cite'], r['apm_cite'], r['mirror_of']))
     sys.stdout.write('features %d rows\n' % len(recs))
     return 0
 
@@ -513,7 +518,8 @@ def cmd_rows(sdm, sites, out, public=None, apm=()):
     from proof import shape, vendormap
     lines = load(sdm); cpu = declared_cpu()
     afeat, vcells = vendormap.layer([(a, a.replace('.pdf', '.txt')) for a in apm])   # every pinned AMD volume: the Appendix E bit rows and the vendor map cells that name a feature (Appendix A maps with Tables 3-1 / D-1, instruction references)
-    table = Table(unify(flag_rows(lines), afeat))                             # Intel SDM CPUID tables U AMD APM Appendix E: one row per address, canonical name
+    mirrors = sorted({m for a in apm for m in vendormap.cpuid_mirrors(a.replace('.pdf', '.txt'))})
+    table = Table(unify(flag_rows(lines), afeat, mirrors))                             # Intel SDM CPUID tables U AMD APM Appendix E: one row per address, canonical name
     from proof import opmap
     maps = opmap.load(sdm.replace('.txt', '.pdf'), sdm)                       # Appendix A, from the PDF's table cells
     allrows = sdm_rows(lines, table)

@@ -24,10 +24,9 @@ CPUID_HEAD = re.compile(r'^CPUID Fn([0-9A-F]{4})_([0-9A-F]{4})_(E[ABCD]X)(_x[0-9
 CPUID_BITS = re.compile(r'^ {0,6}(\d{1,2})(:\d{1,2})?\s{2,}(\w[\w\.\-]*)')
 
 
-def cpuid_rows(txt):
-    """-> [(name, leaf, sub, reg, bit, citation)]: every one-bit named field of the CPUID function tables of APM Vol. 3 Appendix E ("Obtaining Processor Information Via the CPUID Instruction"; a section `CPUID FnXXXX_XXXX_REG[_xS] title`,
-    its table rows `bit  FieldName  description`).  One rule over the whole appendix: a row is a feature bit iff its bit column is a single bit, its name is not the reserved dash, and its function has a fixed leaf and sub-leaf (`_xN` of a literal N; `_x[N:0]` is not an address).
-    The first text line of the appendix after the table of contents is its heading; it ends at the next Appendix heading.  The citation names the PDF page index and the section."""
+def _cpuid_scan(txt):
+    """-> [(name, leaf, sub, reg, bit, citation, text)]: the rows of cpuid_rows, each with `text`, the description lines of its Appendix E table row: the lines the row's own line shares with its neighbours' descriptions are attributed to the row whose line is nearest
+    (a description wrapped over several lines sits around its row line); blank lines and page breaks end a block"""
     pages = open(txt, encoding='utf-8', errors='replace').read().split('\x0c')
     start = [i for i, p in enumerate(pages) if re.search(r'^Appendix E Obtaining Processor Information Via\s*$', p, re.M)]
     if not start:
@@ -36,15 +35,46 @@ def cpuid_rows(txt):
     end = next((i for i in range(start[0] + 1, len(pages)) if re.search(r'^Appendix [F-Z] ', pages[i], re.M)), len(pages))
     out = []; cur = None
     for pi in range(start[0], end):
-        for ln in pages[pi].split('\n'):
+        lines = pages[pi].split('\n'); rows = []        # rows of this page: (line index, row)
+        for j, ln in enumerate(lines):
             if ln.startswith('CPUID Fn'):
                 m = CPUID_HEAD.match(ln)
                 cur = None if not m or (m.group(4) is None and ln[m.end():m.end() + 1] == '[') else (int(m.group(1) + m.group(2), 16), int(m.group(4)[2:], 16) if m.group(4) else 0, m.group(3), ln.strip())
                 continue
             m = CPUID_BITS.match(ln)
             if m and cur and not m.group(2) and m.group(3) != '\u2014':
-                out.append((m.group(3), cur[0], cur[1], cur[2], int(m.group(1)),
-                            'APM Vol. 3 Appendix E (PDF page index %d), "%s": bit %s %s' % (pi, cur[3], m.group(1), m.group(3))))
+                rows.append((j, m, cur, pi))
+        for k, (j, m, c, p) in enumerate(rows):
+            text = [lines[j][m.end():].strip()]
+            for d in (-1, 1):                                   # a neighbouring description line belongs to the nearest row line
+                t = j + d
+                while 0 <= t < len(lines) and lines[t].strip() and not CPUID_BITS.match(lines[t]) and not lines[t].startswith(('CPUID Fn', 'Bits ')) and re.match(r'^ {10,}', lines[t]):
+                    others = [abs(t - jj) for jj, *_ in rows if jj != j]
+                    if others and min(others) < abs(t - j):
+                        break
+                    (text.insert(0, lines[t].strip()) if d < 0 else text.append(lines[t].strip()))
+                    t += d
+            out.append((m.group(3), c[0], c[1], c[2], int(m.group(1)),
+                        'APM Vol. 3 Appendix E (PDF page index %d), "%s": bit %s %s' % (p, c[3], m.group(1), m.group(3)), ' '.join(text)))
+    return out
+
+
+def cpuid_rows(txt):
+    """-> [(name, leaf, sub, reg, bit, citation)]: every one-bit named field of the CPUID function tables of APM Vol. 3 Appendix E ("Obtaining Processor Information Via the CPUID Instruction"; a section `CPUID FnXXXX_XXXX_REG[_xS] title`,
+    its table rows `bit  FieldName  description`).  One rule over the whole appendix: a row is a feature bit iff its bit column is a single bit, its name is not the reserved dash, and its function has a fixed leaf and sub-leaf (`_xN` of a literal N; `_x[N:0]` is not an address).
+    The first text line of the appendix after the table of contents is its heading; it ends at the next Appendix heading.  The citation names the PDF page index and the section."""
+    return [r[:6] for r in _cpuid_scan(txt)]
+
+
+MIRROR = re.compile(r'Same as CPUID\s+Fn([0-9A-F]{4})_([0-9A-F]{4})_(E[ABCD]X)(?:_x([0-9A-F]+))?\[(\w[\w\.\-]*)\]')
+
+
+def cpuid_mirrors(txt):
+    """-> [(leaf, sub, reg, bit, target_leaf, target_sub, target_reg, target_name)]: the rows whose description the APM words `Same as CPUID FnXXXX_XXXX_REG[NAME]`: the feature bit is the very bit of the target function.  Read from the description text of each Appendix E row, nothing else"""
+    out = []
+    for name, leaf, sub, reg, bit, cite, text in _cpuid_scan(txt):
+        for m in MIRROR.finditer(text):
+            out.append((leaf, sub, reg, bit, int(m.group(1) + m.group(2), 16), int(m.group(4), 16) if m.group(4) else 0, m.group(3), m.group(5)))
     return out
 
 
