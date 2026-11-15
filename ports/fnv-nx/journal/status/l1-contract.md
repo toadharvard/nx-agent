@@ -1589,3 +1589,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - recipe check is valid. Cold builds take 4-50 s per root; warm builds 3-6 s with 0 stages. admit is 1192/1192; d3d9total is 332/332.
   - Merge: the variant fix is unified with w22's, and the rows become path plus class.
   - Pending: the ASM-628 citation fix.
+- 09:47 **w12 a924103e0** (cand2 b15845afe merged).
+  - Scratch rule: tools write only their declared outputs, and /tmp is read-only.
+  - Entry rule:
+    - link.entry is required on guest pie roots and passed via --defsym=__fnvnx_image_entry;
+    - crt0 calls it;
+    - the FNVNX_IMAGE_ENTRY token is deleted;
+    - test_guest_link passes.
+  - Open:
+    - L4 renames the test images' main and sets link.entry;
+    - the empty dispatch table waits for L3a;
+    - test_link's "Archive member included" failure is a cand2 baseline.
+  - cand2 head 83816c91e already has deb_resolve and the L6 roots. Next for w12: bridge.tsv as a generated stage.
