@@ -17,6 +17,7 @@
 #ifndef FNVNX_HOSTAPI_H
 #define FNVNX_HOSTAPI_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include "fnvnx/sockwire.h"
 
@@ -531,6 +532,9 @@ typedef uint64_t (*fnvnx_hfn5)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t)
 
 /* Set by the guest runtime before main() runs. */
 extern const FnvnxHostApi *fnvnx_host;
+/* FNVNX_HOST_HAS(slot): the host's table is big enough to hold the slot (a table of an older host ends before it). The fact comes from the table's
+ * size field (sizeof(FnvnxHostApi) as the host built it); no slot value is read or compared (HOST1: a slot is only called). */
+#define FNVNX_HOST_HAS(slot) (fnvnx_host->size >= offsetof(FnvnxHostApi, slot) + sizeof(fnvnx_hslot))
 #define FNVNX_HCALL0(slot) FNVNX_HCALL0_ON(fnvnx_host, slot)
 #define FNVNX_HCALL1(slot, a) FNVNX_HCALL1_ON(fnvnx_host, slot, a)
 #define FNVNX_HCALL2(slot, a, b) FNVNX_HCALL2_ON(fnvnx_host, slot, a, b)
