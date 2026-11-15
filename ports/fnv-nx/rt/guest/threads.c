@@ -144,7 +144,7 @@ int sched_yield(void) { fnvnx_yield(); return 0; }
  * svcGetCurrentProcessorNumber).  libsysbase's weak sched_getcpu is an unconditional ENOSYS and is replaced.  A host without the service
  * answers a negative ext_call code: -1 with ENOSYS, POSIX's "not supported" for sched_getcpu, a result of the host's capability. */
 int sched_getcpu(void) {
-    if (!fnvnx_host->ext_call) { errno = ENOSYS; return -1; }
+    if (!FNVNX_HOST_HAS(ext_call)) { errno = ENOSYS; return -1; }
     uint64_t none[1] = {0};
     int64_t r = (int64_t)FNVNX_HCALL4(ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_CPU, FNVNX_ADDR(none), 0);
     if (r < 0) { errno = ENOSYS; return -1; }

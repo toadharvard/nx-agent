@@ -29,7 +29,9 @@ extern "C" {
 
 /* ---- process */
 void os_debug_print(const char *s);         /* one line to the debug log (stderr / svcOutputDebugString) */
-void os_exit_process(int code) __attribute__((noreturn, nothrow));
+void os_exit_process(int code) __attribute__((noreturn, nothrow));   /* the end that runs handlers: libc exit (ExitProcess) */
+/* the end that runs nothing: every thread stops at once, no handler, no flush, no DLL detach (Windows TerminateProcess; Wine 9.0 NtTerminateProcess) */
+void os_terminate_process(uint32_t code) __attribute__((noreturn, nothrow));
 unsigned os_cpu_count(void);                /* the declared processor count (FNVNX_NPROC) */
 uint32_t os_cpu_mask(void);                 /* the declared affinity mask (FNVNX_APP_CORES) */
 uint32_t os_process_id(void);
