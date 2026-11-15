@@ -115,7 +115,7 @@
   "test_ice_poly_byvalue.py": {
    "references": [
     {
-     "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
+     "anchor": "## Resumption points, register objects, one-thread objects (ONE FORM, HARDREG, LOCAL)",
      "kind": "spec",
      "path": "ports/fnv-nx/docs/ORDERING.md"
     }
@@ -139,7 +139,7 @@
   "test_order_cont.py": {
    "references": [
     {
-     "anchor": "## Resumption points, register objects, one-thread objects (ORDER-CONT, HARDREG, LOCAL, FENCE-MERGE)",
+     "anchor": "## Resumption points, register objects, one-thread objects (ONE FORM, HARDREG, LOCAL)",
      "kind": "spec",
      "path": "ports/fnv-nx/docs/ORDERING.md"
     }

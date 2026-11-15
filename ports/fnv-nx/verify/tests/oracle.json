@@ -38,72 +38,6 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
-  "test_boot.py": {
-   "references": [
-    {
-     "anchor": "## verify/boot.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/boot.py"
-   ]
-  },
-  "test_boot_job.py": {
-   "references": [
-    {
-     "anchor": "## farm/boot_job.sh",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/bootinputs.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boot.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/farm/boot_job.sh",
-    "ports/fnv-nx/verify/bootinputs.py",
-    "ports/fnv-nx/verify/boot.py"
-   ]
-  },
-  "test_bootgpu.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootgpu.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boot.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boothost.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/bootmachine.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootgpu.py",
-    "ports/fnv-nx/verify/boot.py",
-    "ports/fnv-nx/verify/boothost.py",
-    "ports/fnv-nx/verify/bootmachine.py"
-   ]
-  },
   "test_bootinputs.py": {
    "references": [
     {
@@ -131,34 +65,6 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/verify/bootlayout.py"
-   ]
-  },
-  "test_bootmachine.py": {
-   "references": [
-    {
-     "kind": "contract",
-     "path": "ports/fnv-nx/hostabi/include/fnvnx/hostapi.h"
-    },
-    {
-     "anchor": "## verify/bootmachine.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boothost.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/bootlayout.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootmachine.py",
-    "ports/fnv-nx/verify/boothost.py",
     "ports/fnv-nx/verify/bootlayout.py"
    ]
   },
