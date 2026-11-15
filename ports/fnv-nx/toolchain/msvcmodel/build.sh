@@ -268,42 +268,76 @@ if ! step libs; then
   # brings the dispatch protocol (fnvnx_dispatch, fnvnx_call_fp are the lifted runtime's). The answer it computes is "is f defined in the
   # runtime the target link uses", so it is taken from the objects themselves:
   #   universe  every ac_cv_func_<name> that the pinned libstdc++-v3/configure tests (parsed from it),
-  #   answer    yes iff <name> is a defined global function symbol (nm, type T or W) of libc.a, libsysbase.a, libm.a or libgcc.a of the
-  #             default and the -fPIC multilib; the two multilibs must agree.
+  #   answer    yes iff <name> is a defined global function symbol (nm, type T or W) of the archives the stage-1 driver's own link line adds
+  #             (read from gcc -###, an autoconf link has an empty $LIBS), in the default and the -fPIC multilib; the two must agree.
   # The answers go to configure as a config.site, and with the defining archive member to $P/CFG-FUNC.json (the MANIFEST carries them).
   note "target libraries: make -C b-gcc all-target-libgcc (the runtime archives CFG-FUNC reads)"
   make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" all-target-libgcc > make-libgcc.log 2>&1
-  python3 -I - "$SRC/libstdc++-v3/configure" "$P/$T/lib" "$W/b-gcc/$T" "$P/bin/$T-nm" "$W/config.site" "$P/CFG-FUNC.json" <<'EOF3'
-import json, re, subprocess, sys
-conf, libdir, gccdir, nm, site, out = sys.argv[1:7]
-names = sorted(set(re.findall(r'ac_fn_c(?:xx)?_check_func "\$LINENO" "(\w+)" "ac_cv_func_\1"', open(conf).read())))
-assert names, "no ac_cv_func_ checks found in " + conf
-def defined(variant):  # name -> "archive:member" of the first definition
+  python3 -I - "$SRC/libstdc++-v3/configure" "$P/$T/lib" "$W/b-gcc/$T" "$P/bin/$T-nm" "$P/bin/$T-gcc" "$ABI" "$W/config.site" "$P/CFG-FUNC.json" <<'EOF3'
+import json, os, re, subprocess, sys
+conf, libdir, gccdir, nm, gcc, abi, site, out = sys.argv[1:9]
+text = open(conf).read()
+# An autoconf link test links with an empty $LIBS, so the archives are those the driver itself adds: read from its link line.
+def default_libs(variant):
+    cmd = [gcc, "-###", "-mabi=" + abi] + (["-" + variant] if variant else []) + ["-x", "c", "/dev/null", "-o", "/dev/null"]
+    err = subprocess.run(cmd, capture_output=True, text=True, check=True).stderr
+    line = [l for l in err.splitlines() if "collect2" in l or l.strip().split(" ")[0].endswith("/ld")][-1]
+    libs = re.findall(r'(?:^| )-l(\w+)(?= |$)', line.replace('"', ''))
+    assert libs, "driver link line has no -l: " + line
+    return libs
+def dirs(variant):
+    return (gccdir + "/" + variant + "/libgcc", libdir + "/" + variant) if variant else (gccdir + "/libgcc", libdir)
+def archive(variant, lib):
+    for d in dirs(variant):
+        if os.path.exists("%s/lib%s.a" % (d, lib)):
+            return "%s/lib%s.a" % (d, lib)
+def defined(variant, libs):  # name -> "libX.a(member)" of the first definition, in link order
     d = {}
-    dirs = (libdir, gccdir + "/libgcc") if not variant else (libdir + "/" + variant, gccdir + "/" + variant + "/libgcc")
-    for base, lib in ((dirs[0], "libc.a"), (dirs[0], "libsysbase.a"), (dirs[0], "libm.a"), (dirs[1], "libgcc.a")):
-        for line in subprocess.run([nm, "-A", "--defined-only", base + "/" + lib], capture_output=True, text=True, check=True).stdout.splitlines():
+    for lib in libs:
+        a = archive(variant, lib)
+        assert a, "no lib%s.a for %s" % (lib, variant or "default")
+        for line in subprocess.run([nm, "-A", "--defined-only", a], capture_output=True, text=True, check=True).stdout.splitlines():
             f = line.split()
             if len(f) == 3 and f[1] in ("T", "W"):
-                arch, member = line.split(":")[0], line.split(":")[1]
-                d.setdefault(f[2], lib + "(" + member + ")")
+                d.setdefault(f[2], "lib%s.a(%s)" % (lib, line.split(":")[1]))
     return d
-a, b = defined(""), defined("pic")
-rows = []
-for n in names:
-    assert (n in a) == (n in b), "multilibs disagree on %s" % n
-    rows.append({"name": n, "answer": "yes" if n in a else "no", "member": a.get(n)})
-# AC_SEARCH_LIBS(f, libs) asks the same question ("does the link find f, and which -l is needed"): a symbol the runtime archives
-# define needs no library, one they do not define stays unresolved ("no").
-snames = sorted(set(re.findall(r"\bac_cv_search_(\w+)", open(conf).read())))
+dl = {v: default_libs(v) for v in ("", "fPIC")}
+# The configure itself adds libraries to $LIBS: its math checks run after AC_CHECK_LIB(m, sin) set libm="-lm" and LIBS="$LIBS $libm"
+# (configure lines with `libm="-lm"` / `LIBS="$LIBS $libm"`). A -l the configure puts in LIBS and that the multilib holds is part of
+# what its later links see, so it joins the archive set (parsed, not listed; read from the ac_cv_lib_<x>_ universe, kept if lib<x>.a exists).
+if re.search(r'libm="-lm"', text) and re.search(r'LIBS="\$LIBS \$libm"', text) and "ac_cv_lib_m_sin" in text:
+    for v in dl:
+        dl[v] = dl[v] + ["m"]
+vn = {"": "", "fPIC": "pic"}
+DEF = {v: defined(vn[v], dl[v]) for v in dl}
+def same(n):
+    assert (n in DEF[""]) == (n in DEF["fPIC"]), "multilibs disagree on %s" % n
+    return DEF[""].get(n)
+fnames = sorted(set(re.findall(r'ac_fn_c(?:xx)?_check_func "\$LINENO" "(\w+)" "ac_cv_func_\1"', text)))
+assert fnames, "no ac_cv_func_ checks in " + conf
+rows = [{"name": n, "answer": "yes" if same(n) else "no", "member": same(n)} for n in fnames]
+# AC_SEARCH_LIBS(f, libs): "none required" iff f is in the default archives, else -l<x> for the first listed library that is in the
+# multilib directory and defines f, else "no".
+want = {}
+for m in re.finditer(r"if \$\{ac_cv_search_(\w+)\+:\} false; then :(?:(?!if \$\{ac_cv_search_).)*?for ac_lib in '' ([^;]*); do", text, re.S):
+    assert want.setdefault(m.group(1), m.group(2).split()) == m.group(2).split(), "libs of %s differ between sites" % m.group(1)
 srows = []
-for n in snames:
-    assert (n in a) == (n in b), "multilibs disagree on %s" % n
-    srows.append({"name": n, "answer": "none required" if n in a else "no", "member": a.get(n)})
+for n, cands in sorted(want.items()):
+    ans, mem = "no", None
+    if same(n):
+        ans, mem = "none required", same(n)
+    else:
+        for c in cands:
+            a = archive("", c)
+            if a and n in defined("", [c]) and (not archive("pic", c) or n in defined("pic", [c])):
+                ans, mem = "-l" + c, defined("", [c])[n]
+                break
+    srows.append({"name": n, "answer": ans, "member": mem, "candidates": cands})
+assert len(srows) == len(set(re.findall(r"\bac_cv_search_(\w+)\+:", text))), "ac_cv_search_ universe not fully parsed"
 open(site, "w").write("".join("ac_cv_func_%s=%s\n" % (r["name"], r["answer"]) for r in rows)
                       + "".join("ac_cv_search_%s='%s'\n" % (r["name"], r["answer"]) for r in srows))
-json.dump({"rule": "CFG-FUNC", "configure": "libstdc++-v3/configure", "funcs": rows, "searches": srows}, open(out, "w"), indent=1)
-print("CFG-FUNC: %d functions, %d yes; %d searches, %d none required" % (len(rows), sum(r["answer"] == "yes" for r in rows), len(srows), sum(r["answer"] != "no" for r in srows)))
+json.dump({"rule": "CFG-FUNC", "configure": "libstdc++-v3/configure", "default_libs": dl, "funcs": rows, "searches": srows}, open(out, "w"), indent=1)
+print("CFG-FUNC: libs %s; %d functions, %d yes; %d searches: %s" % (dl[""], len(rows), sum(r["answer"] == "yes" for r in rows), len(srows), {r["name"]: r["answer"] for r in srows}))
 EOF3
   # The top Makefile runs every target configure with CONFIG_SITE=no-such-file, so the answers go in as the cache variables of the
   # environment, which configure honours as presets (autoconf "Cache variables": a set ac_cv_* is not re-tested).
