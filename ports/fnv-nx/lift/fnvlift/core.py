@@ -316,13 +316,25 @@ def gs_guard(cx, ins):
         # wine-9.0: err == 0 and not is_privileged_instr -> rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION, NumberParameters = 2, ExceptionInformation[0] = 0, [1] = 0xffffffff); the same row as f_sys.gp_cond. Nothing was modified yet.
         cx.em(f_sys.gp_cond(cx, '1'))
         return
-    g = [o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS]
+    # the null_seg_access row of x86sys (L5): a memory operand whose segment register (ds/es/fs/gs, by prefix) holds the null selector raises the row at this instruction; PRIV vs AV by the row's opcode set.
+    # lea and the NO_ACCESS mnemonics have no access (returned above); a prefixed instruction without a memory operand has no operand here. Default-segment operands (no prefix) are not guarded here: see the lead's note.
+    from . import x86sys
+    SEGI = {X.X86_REG_ES: 0, X.X86_REG_DS: 3, X.X86_REG_FS: 4, X.X86_REG_GS: 5}
+    g = sorted({SEGI[o.mem.segment] for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.segment in SEGI})
     if not g:
         return
-    cond = 'SELK(c->sel[SEG_GS])==0'
-    if any(o.access & capstone.CS_AC_WRITE for o in g):
-        cond += '||SELK(c->sel[SEG_GS])==SELK(SEL_CS)'
-    cx.em(f_sys.gp_cond(cx, cond))
+    r = x86sys.NULL_SEG
+    cond = '||'.join('SELK(c->sel[%d])==0' % i for i in g)
+    if f_sys.row_privileged(ins.bytes, r):
+        cx.nonlocal_ = True
+        cx.raises.add(cx.a)
+        cx.em('if(%s){ SYNC_OUT; REGS(); FNVL_RAISE(FNVL_PRIV,0x%xu); REGS(); SYNC_IN; goto nonlocal; }' % (cond, cx.a))
+    else:
+        if not (r['exception_code'] == 0xC0000005 and r['parameters'] == [0, 0xffffffff] and r['flags'] == 0 and r['eip_advance'] == 0 and r['address'] == 'the faulting instruction'):
+            raise Unsupported('null_seg_access row is not the access violation the runtime raises')
+        cx.em(f_sys.gp_cond(cx, cond))
+    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+        cx.em(f_sys.gp_cond(cx, 'SELK(c->sel[SEG_GS])==SELK(SEL_CS)'))
 
 
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):

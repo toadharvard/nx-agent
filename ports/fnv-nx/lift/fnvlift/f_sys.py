@@ -100,6 +100,22 @@ def wine_is_privileged(b):
     return o in WINE_PRIV_OPC or (o == 0x0f and b[i + 1] in WINE_PRIV_0F)
 
 
+def row_privileged(b, row):
+    """the null_seg_access row's privileged_check_first over the instruction bytes b: True -> EXCEPTION_PRIV_INSTRUCTION, False -> the row's access violation. A decoded instruction has fewer than
+    prefix_limit prefixes (x86 length <= 15 with an opcode byte), so the row's at_limit case cannot occur; checked here, not assumed."""
+    p = row['privileged_check_first']
+    skip = {int(x, 16) for x in p['prefix_skip']}
+    pri = {int(x, 16) for x in p['priv_instruction_opcodes']}
+    pri0f = {int(x, 16) for x in p['priv_instruction_0f_second_bytes']}
+    b = bytes(b) + b'\0' * 2
+    i = 0
+    while b[i] in skip:
+        i += 1
+    if i >= p['prefix_limit']:
+        raise Unsupported('null_seg_access: prefix count reaches the row limit')
+    return b[i] in pri or (b[i] == 0x0f and b[i + 1] in pri0f)
+
+
 def gp_av(cx):
     """an unconditional ring-3 #GP that Windows reports as an access violation {0, 0xFFFFFFFF} (a fault: Eip = the instruction)"""
     site(cx, 'FNVL_RAISE_AV(0,0xffffffffu,0x%xu);' % cx.a)

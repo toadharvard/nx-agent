@@ -10,6 +10,9 @@ SEG_STATE = True       # struct cpu holds the six selector values: `mov r, Sreg`
 
 
 def segread(sg):
+    from . import x86sys
+    if sg == 'gs' and 'gs' not in x86sys.SEL:     # the initial gs is undecided in the record (a later load sets the state, but the read cannot tell which): no body until L5's row decides it
+        raise Unsupported('read of gs: the initial gs is undecided in x86sys selectors')
     return 'fnvl_seg_get(c,%d)' % {'es': 0, 'cs': 1, 'ss': 2, 'ds': 3, 'fs': 4, 'gs': 5}[sg] if SEG_STATE else SEGSEL[sg]
 
 
