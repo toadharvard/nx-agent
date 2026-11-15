@@ -1,10 +1,6 @@
 {
  "format": "fnvnx-recipe/1",
- "compiler": {
-  "external": "gcc-msvcmodel",
-  "cc": "bin/aarch64-linux-gnu-gcc",
-  "cxx": "bin/aarch64-linux-gnu-g++"
- },
+ "profile": "guest",
  "flags": {
   "c": [
    "-Werror=attributes"
@@ -20,36 +16,10 @@
   "/ext/liftpack/inc"
  ],
  "units": "all",
- "plugins": [
-  {
-   "name": "fnvnx_ftoi"
-  },
-  {
-   "name": "fnvnx_order"
-  },
-  {
-   "name": "fnvnx_sdd"
-  },
-  {
-   "name": "fnvnx_pi"
-  },
-  {
-   "name": "fnvnx_dispatch"
-  },
-  {
-   "name": "fnvnx_addr"
-  },
-  {
-   "name": "fnvnx_names"
-  },
-  {
-   "name": "fnvnx_layout"
-  }
- ],
  "uses": [
   {
-   "root": "ports/fnv-nx/loader",
-   "output": "BRIDGE_TSV"
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "BRIDGE"
   },
   {
    "root": "ports/fnv-nx/loader",
@@ -4179,7 +4149,7 @@
    "args": [
     "imp",
     "--bridge",
-    "/uses/ports/fnv-nx/loader/BRIDGE_TSV",
+    "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
     "--imported",
     "/uses/ports/fnv-nx/loader/IMPORTED_TSV",
     "--prelude",
@@ -4200,7 +4170,7 @@
     "entries",
     "/ext/liftpack/entries.tsv",
     "/stage/imp_entries.tsv",
-    "/uses/ports/fnv-nx/loader/BRIDGE_TSV",
+    "/uses/ports/fnv-nx/bridgefacts/BRIDGE",
     "/out/entries.tsv"
    ],
    "inputs": [
@@ -4243,14 +4213,6 @@
    "commit": "db2aaf6d4a08d96f9c91d25980170578b983bfe0",
    "tree_sha256": "c7367e301ed27aabc548eb2a0f0fa9e081ac97d60911a914d7f4f021b777cb05",
    "at": "/ext/liftpack"
-  },
-  {
-   "name": "gcc-msvcmodel",
-   "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel",
-   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
-   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
-   "at": "/ext/gcc"
   }
  ]
 }
