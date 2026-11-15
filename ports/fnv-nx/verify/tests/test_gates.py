@@ -199,7 +199,7 @@ check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"p
       and byname["datamodel"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_datamodel.py"] and byname["datamodel"]["result"] == "datamodel.json"
       and byname["d3d9total"]["argv"] == ["python3", "-I", "ports/fnv-nx/render/total/gate_d3d9total.py"] and byname["d3d9total"]["result"] == "d3d9total.json"
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
-      and dirs_pure == [] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift", "gates", "total"]
+      and dirs_pure == [] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift", "gates", "total", "manifest"]
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_lift.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in ("order", "addr32", "eh"))
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
       and byname["selftests"]["argv"][:5] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "3"], spec)
@@ -220,6 +220,8 @@ def small_repo(gates=None, link=None):
     for g in (gates or two_gates())["gates"]:
         put(r, "ports/fnv-nx/verify/gates.d/%s.json" % g["name"], json.dumps(dict(g, format="fnvnx-gatefile/1")))
     shutil.copy(os.path.join(VERIFY, "env.json"), os.path.join(r, "ports/fnv-nx/verify/env.json"))
+    os.makedirs(os.path.join(r, "ports/fnv-nx/contract"), exist_ok=True)   # cas.py reads the tree-hash rule from ../contract
+    shutil.copy(os.path.join(VERIFY, "..", "contract", "treehash.py"), os.path.join(r, "ports/fnv-nx/contract/treehash.py"))
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
     put(r, V + "link/stage.py", CLEAN)  # one stage entry point: a pure gate over an empty universe is vacuous (verdict.py)
     put(r, V + "verify/admit.json", adm("stage.py", *[k.rsplit("/", 1)[-1] for k in (link or {}) if k.endswith("/bad.py")]))
@@ -454,6 +456,8 @@ d2 = tmp("tests-cache-env")
 mk(d2, test_a="pass\n")
 for n in ("gate_tests.py", "cas.py", "envcheck.py"):
     shutil.copy(os.path.join(VERIFY, n), os.path.join(d2, n))
+os.makedirs(os.path.join(d2, "..", "contract"), exist_ok=True)   # cas.py reads the tree-hash rule from ../contract (its one home)
+shutil.copy(os.path.join(VERIFY, "..", "contract", "treehash.py"), os.path.join(d2, "..", "contract", "treehash.py"))
 def gate_in(dirpath, cache):
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
     subprocess.run([sys.executable, "-I", os.path.join(dirpath, "gate_tests.py"), "--cache", cache, "verify"], cwd=d2,
