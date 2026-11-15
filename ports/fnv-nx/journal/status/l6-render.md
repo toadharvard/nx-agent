@@ -888,3 +888,6 @@ Paused: w3b, w4, farm; no other work.
 - 15:12Z L6A asked for FNVNX_DK_USAGE_MAX. Answer: no new constant. render/backend uses (D3DMAXDECLUSAGE + 1) from the one record, shim/include/d3d9types.h:228; the alternative is an nxgpu ABI enum owned by L6A.
     - L1 merge note: take w6-root's deletion of render/d3d9/spec/ when merging w5-smlink.
     - Cause found: bridgefacts/d3d9/d3d9_spec.json restates the header enums (D3DDECLUSAGE at :14). w6 (doing): d3d9_spec.py reads the enums from the headers; the JSON lists are removed.
+- 15:15Z L6A 4.6, second half: gl4's own GLSL (scaling and present) moves into the gl4shim table `nx_gl4shim_progs[]`, with its cap exported once from nx_gl4shim.h.
+    - Agreed: the sm_link universe = the gamedata set ∪ the table rows, in one gate.
+    - Waiting: L6A w6 head with the table. Then w5 extends the checker for it.
