@@ -399,3 +399,7 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 21:00: w6 (w6-r 2d5de27b6, bootbase revert done) and w7 (w7-u 463f783dd) are archived while they wait on L1 cand3, per the orchestrator's order. On cand3, new workers take the branches: one for the bootguest/icount relink, one for merging w6-r and w7-u into the lead branch (a trial merge conflicts in unitstage.py, toolflags_policy.py, tests/bootguest and RECIPE.md, which cand3 rewrites anyway). A third runs test_bootgpu on the seeded post-cand3 pack store.
 - bottleneck: waiting on L1 for cand3 (sandbox_id re-key, link.tables, derived link.roots), then on L3a for the post-cand3 cold pack build (about 4096 units; measured at about 13 stages/min on 4 cores, roughly 10 h cold) | 0 active workers
 - 21:15: L1 w26 ca3a256 (going into cand3) adds recipe sharding: `build --shard i/N` (N≤8), then `store-merge` per farm store. With it, the post-cand3 pack build splits over up to 8 farms, so the 10 h cold estimate is no longer the bound.
+- 21:55: L1 cand3 head 4952b11b3 (shard ≤16, cpu_s per stage, dir outputs).
+  - w8 session_01KmtZKS8Qkj4RxpvezPAmzP, branch claude/fnv-l4-verify-w8: doing. It merges cand3, w7-u and w6-r into one L4 branch, runs recipe.check on boot, bootguest, icount and gl4, and links icount.
+  - bootguest and test_bootgpu wait for L3a's sharded post-cand3 pack store.
+- bottleneck: waiting on L3a for the post-cand3 pack store (sharded, ≤16 farms) | 1 worker
