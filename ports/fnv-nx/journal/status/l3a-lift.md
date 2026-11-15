@@ -1046,3 +1046,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - (B) certified unreachability, which is off the path.
   - blocked: pack completeness on the gs decision (orchestrator).
 - 23:25 L3b: 123 SIMD shapes have no Form at 9c97f84bc (w7-simd). symbuild gives TypeError on 122 and KeyError on 1 (fnv-nx-build c18ff53a nonfp_noform_norow.tsv). They block certification and so the pack root's trunk admission. Given to w13 while FACTS waits: a fix by class in the Form builder, then 0 shapes without a Form, and the others byte-identical.
+- 23:30 Orchestrator decision (integ CLAUDE.md 81864b90b), gs on 7601:
+  - (1) The /GS failure branch is unreachable under OWNER 6. It is found from the load-config SecurityCookie VA, and the sites reached only through it go to fnvnx_reach_violation.
+  - (2) Bytes reached from no entry get the call-graph certificate.
+  - (3) Fallthrough into data is a universe defect, fixed in this relift's facts (w7).
+  - w7 first proposes the class rule: which entry kinds admit data (ptr, tail, slot span), and which facts prove code or data. The residue (sites neither rule closes) is reported with the relift.
+  - The facts farms keep running on e7b12ab35 as measurement; the universe change will re-key them.
