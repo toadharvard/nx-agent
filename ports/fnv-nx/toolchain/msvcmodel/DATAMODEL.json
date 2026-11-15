@@ -27,11 +27,11 @@
    "property": "char is signed (/J off)",
    "msvc": "char is signed (/J off); a type of its own",
    "gcc": "signed char; a type of its own",
-   "mechanism": "equal under the recipe flag",
-   "kind": "flag",
+   "mechanism": "msvcmodel.patch: DEFAULT_SIGNED_CHAR under the ILP32 ABI the compiler is configured for (aarch64.h; read where the option structure is initialised), so no flag",
+   "kind": "patch",
    "status": "closed",
    "check": "static_assert DM(\"S01\") in toolchain/tests/ldbl/datamodel.cpp",
-   "flag": "-fsigned-char",
+   "flag": null,
    "citations": [
     {
      "page": "docs/cpp/fundamental-types-cpp.md",
@@ -45,11 +45,11 @@
    "property": "wchar_t is a native 2-byte unsigned type (/Zc:wchar_t, default on in C++)",
    "msvc": "wchar_t is a native 2-byte unsigned type (/Zc:wchar_t, on by default in C++)",
    "gcc": "unsigned 2 bytes; a type of its own",
-   "mechanism": "equal under the recipe flag",
-   "kind": "flag",
+   "mechanism": "msvcmodel.patch: WCHAR_TYPE (\"short unsigned int\") and WCHAR_TYPE_SIZE (16) under TARGET_ILP32 (aarch64.h, as WINT_TYPE), so no flag",
+   "kind": "patch",
    "status": "closed",
    "check": "static_assert DM(\"S02\") in toolchain/tests/ldbl/datamodel.cpp",
-   "flag": "-fshort-wchar",
+   "flag": null,
    "citations": [
     {
      "page": "docs/build/reference/zc-wchar-t-wchar-t-is-native-type.md",

@@ -6,8 +6,8 @@ Target: Microsoft Visual C++ 2008 (cl 15.00), x86, /Zc:wchar_t, /J off, /Zp8. Pi
 
 | id | MSVC | msvcmodel | mechanism | status | source |
 |---|---|---|---|---|---|
-| S01 | char is signed (/J off); a type of its own | signed char; a type of its own | equal under the recipe flag | closed | docs/cpp/fundamental-types-cpp.md:34 |
-| S02 | wchar_t is a native 2-byte unsigned type (/Zc:wchar_t, on by default in C++) | unsigned 2 bytes; a type of its own | equal under the recipe flag | closed | docs/build/reference/zc-wchar-t-wchar-t-is-native-type.md:25 |
+| S01 | char is signed (/J off); a type of its own | signed char; a type of its own | msvcmodel.patch: DEFAULT_SIGNED_CHAR under the ILP32 ABI the compiler is configured for (aarch64.h; read where the option structure is initialised), so no flag | closed | docs/cpp/fundamental-types-cpp.md:34 |
+| S02 | wchar_t is a native 2-byte unsigned type (/Zc:wchar_t, on by default in C++) | unsigned 2 bytes; a type of its own | msvcmodel.patch: WCHAR_TYPE ("short unsigned int") and WCHAR_TYPE_SIZE (16) under TARGET_ILP32 (aarch64.h, as WINT_TYPE), so no flag | closed | docs/build/reference/zc-wchar-t-wchar-t-is-native-type.md:25 |
 | S03 | bool, char: 1 byte, alignment 1 | 1/1 | equal | closed | docs/cpp/fundamental-types-cpp.md:100 |
 | S04 | short: 2 bytes, alignment 2 | 2/2 | equal | closed | docs/cpp/fundamental-types-cpp.md:101 |
 | S05 | int and long: 4 bytes, alignment 4, distinct types | 4/4 | equal | closed | docs/cpp/fundamental-types-cpp.md:102 |
