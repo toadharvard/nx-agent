@@ -948,3 +948,8 @@ Paused: w3b, w4, farm; no other work.
     - Found: the FFP GLSL says `#version 460`, but the backend is GL 4.5. w6 (doing): the version comes from one shim record.
     - w6 (doing): the vs/ps row split and the stale twin references in the README.
     - w5: the final run waits on that head.
+- 16:05Z w6 350ff4309 and 7588eef86: done.
+    - nx_pair_ffp_vs_row and nx_pair_ffp_ps_row(bool flat): no switch, no unreachable; every call site names its stage statically.
+    - The GLSL version is one record, NX_GL4SHIM_GLSL_VERSION "#version 450 core". The FFP sources carry none, and gen_glsl.py rejects one.
+    - Stale twin and size prose deleted. gl4shim and pair@host green; d3d9total 332/332.
+    - w5 (doing): final sm_link on 7588eef86.
