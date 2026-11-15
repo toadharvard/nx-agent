@@ -12,6 +12,8 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-15 23:10Z (orchestrator).** Trunk fb9dd044f. gs is closed: L5 w17 ad3af10c5 has selectors.gs=0, derived by the generator from both pinned 7601 kernels and their PDBs (fnv-nx-build tools/win7sp1-x86-kernel cc8376f55; KeContextToKframes stores 0 to KTRAP_FRAME.SegGs on SegCs==0x1b, cross-checked with PspCreateUserContext). null_seg_access is 766ddb401. L3a consumes them in the relift. cand3 is being rebased on fb9dd044f (head 8fc4c58b9).
+
 **2026-11-15 22:35Z (orchestrator).** TRUNK MOVED: cand2 merged as fb9dd044f.
 - Verdict: L1 green, 198.5 s warm, 42 gates, of which 31 are vacuous 0/0.
 - In: the guest compiler pin 84f0883e (L2 74c32c454) and the tooling; the roots left are shim, hostabi/product and bridgefacts.
