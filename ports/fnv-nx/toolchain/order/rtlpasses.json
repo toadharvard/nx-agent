@@ -863,6 +863,60 @@
      "ident": "MEM_VOLATILE_P"
     }
    ]
+  },
+  {
+   "pass": "pass_sms",
+   "class": "inactive",
+   "reason": "the pass gate is optimize > 0 && flag_modulo_sched (modulo-sched.cc:3343); flag_modulo_sched is -fmodulo-sched, Init 0, enabled by no -O level and set by no aarch64 file, and neither the guest compiler's flags nor a per-root flag can carry it: the pass never transforms under the declared flag set",
+   "files": {
+    "modulo-sched.cc": "52fe9f4f57cecb001ab4d1d75b61091413c04a2f476c40aac7ea39868fcc7c0f"
+   },
+   "cites": [
+    {
+     "file": "modulo-sched.cc",
+     "line": 3343,
+     "ident": "flag_modulo_sched"
+    }
+   ],
+   "gated_off": {
+    "flag_var": "flag_modulo_sched",
+    "option": "fmodulo-sched",
+    "gate": {
+     "file": "modulo-sched.cc",
+     "line": 3343,
+     "ident": "flag_modulo_sched"
+    }
+   }
+  },
+  {
+   "pass": "pass_rtl_doloop",
+   "class": "inactive",
+   "reason": "the pass gate is flag_branch_on_count_reg && targetm.have_doloop_end () (loop-init.cc:637); aarch64 defines the doloop_end expander only under optimize > 0 && flag_modulo_sched (aarch64.md:7499), so have_doloop_end is false under the declared flag set (flag_modulo_sched: Init 0, enabled by no -O level, set by no aarch64 file, in no semantic or per-root flag)",
+   "files": {
+    "loop-init.cc": "516ee34c099914578262999e288933234b8fe119a5df35a3079a58c7125f151e",
+    "config/aarch64/aarch64.md": "7544c856731bf169a85ad9820af520b9b316e6d8f23b93576bc7045668b3564c"
+   },
+   "cites": [
+    {
+     "file": "loop-init.cc",
+     "line": 637,
+     "ident": "have_doloop_end"
+    },
+    {
+     "file": "config/aarch64/aarch64.md",
+     "line": 7499,
+     "ident": "flag_modulo_sched"
+    }
+   ],
+   "gated_off": {
+    "flag_var": "flag_modulo_sched",
+    "option": "fmodulo-sched",
+    "gate": {
+     "file": "config/aarch64/aarch64.md",
+     "line": 7499,
+     "ident": "flag_modulo_sched"
+    }
+   }
   }
  ]
 }

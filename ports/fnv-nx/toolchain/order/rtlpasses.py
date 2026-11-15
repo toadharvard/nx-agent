@@ -18,11 +18,14 @@ Read by a reviewer, recorded in rtlpasses.json (keyed by the pass and the sha256
                           moves a MEM (the reason says why)
              "preserves": the pass may merge or duplicate insns, and the cited lines prove that it keeps every insn's order and count on
                           each path (the reason gives the proof)
+             "inactive" : the condition that lets the pass transform anything (its gate, or the condition of the pattern it needs) is false under
+                          the one declared flag set; the row has a gated_off record and that record is machine-checked (below), so it is a
+                          sufficient reason alone
              "expand"   : pass_expand, the pass that creates the MEMs
   gated_off  an optional field of a row: the pass is not run under any flag the recipe allows. The gate line holds the flag variable; the
-             option's record in common.opt has no Init other than 0; neither opts.cc (the -O level tables) nor config/aarch64 names the flag
-             variable or its OPT_ enumerator; the flag string is not in the semantic flags of verify/guest_compiler.json and is not matched by
-             verify/recipe.py PER_ROOT. It is an additional reason of the row, never its only one.
+             option's record in common.opt has no Init other than 0; neither opts.cc (the -O level tables) nor config/aarch64 sets the flag (its OPT_ enumerator, or an assignment to the
+             variable); the flag string is not in the semantic flags of verify/guest_compiler.json and is not matched by
+             verify/recipe.py PER_ROOT. Together with class "inactive" it is the whole reason of a row; on another class it is an additional reason.
 Errors (exit 1): a pass of the universe without a row, a row without a pass of the universe, a pass whose make_pass cannot be found, a
 file whose sha256 differs from the row's key, a cited line that does not hold the cited identifier."""
 import hashlib, io, json, os, re, sys, tarfile
@@ -120,9 +123,11 @@ def check_gated_off(p, r, files):
     for f, raw in files.items():
         if f == "opts.cc" or f.startswith("config/aarch64/"):
             t = raw.decode("utf-8", "replace")
-            for needle in (var, enum):
-                if re.search(r"\b%s\b" % needle, t):
-                    errs.append("%s: %s names %s" % (p, f, needle))
+            # a SETTING of the flag: its option enumerator (opts.cc's default_options_table, the target's option tables) or an assignment to
+            # the variable; a use in a condition (the gate itself) is not a setting
+            for pat, what in ((r"\b%s\b" % enum, enum), (r"\b%s\s*(?:=(?!=)|\+\+|--|\|=|&=)" % var, var + " assignment"), (r"(?:\+\+|--)\s*%s\b" % var, var + " update")):
+                if re.search(pat, t):
+                    errs.append("%s: %s has %s" % (p, f, what))
     sys.path.insert(0, os.path.join(HERE, "..", "..", "verify"))
     import recipe
     flag = "-" + opt
@@ -165,7 +170,7 @@ def main():
             errors.append("%s (%s:%d): no classification row" % (p, fn, ln))
             table.append((p, fn, ln, len(cand), "UNCLASSIFIED", ""))
             continue
-        if r["class"] not in ("refuses", "no-mem", "preserves", "expand"):
+        if r["class"] not in ("refuses", "no-mem", "preserves", "inactive", "expand"):
             errors.append("%s: unknown class %s" % (p, r["class"]))
         for f, sha in r["files"].items():
             if f not in files:
@@ -174,6 +179,8 @@ def main():
                 errors.append("%s: file %s has sha256 %s, the row is keyed by %s" % (p, f, hashlib.sha256(files[f]).hexdigest(), sha))
         if not r["cites"]:
             errors.append("%s: a row without a cited line" % p)
+        if r["class"] == "inactive" and not r.get("gated_off"):
+            errors.append("%s: class inactive needs a gated_off record" % p)
         errors.extend(check_gated_off(p, r, files))
         cites = []
         for c in r["cites"]:
