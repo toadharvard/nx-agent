@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 from proof import privset, shape, symform, x86sys  # noqa: E402
 sys.path.insert(0, HERE)
 from fnvlift import dsl  # noqa: E402
+import sysspec_far  # noqa: E402
 
 K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP = 2, 3, 4, 5, 6, 7, 8
 
@@ -25,6 +26,7 @@ COND = {m for r in privset.rows() if r['class'] == 'cond' for m in r['mnemonics'
 DECL = ('rdtsc', 'cpuid')      # instructions whose result is the declared machine's function (rt/cpumodel.c, declared.json): the SDM Operation line of the row's basis gives the registers
 FAULTROW = {'rdtsc': ('cr4', 'tsd'), 'cpuid': ('cpuid_faulting',)}      # the record row that decides whether the instruction can fault at CPL 3 (SDM RDTSC: CR4.TSD; SDM CPUID: CPUID faulting, MSR_PLATFORM_INFO / MSR_MISC_FEATURES_ENABLES)
 LARFAM = ('lar', 'lsl', 'verr', 'verw')      # the result depends on the descriptor of the selector in the register: the record's lar_lsl rows
+CERTS = None      # the proved shape keys of a certs.tsv (set by main --certs): the basis of a composed spec must be among them
 CLASS_B = {'int3': (K_BP, None), 'int1': (K_STEP, None), 'into': (K_INTO, 'of')}
 
 
@@ -118,6 +120,10 @@ def check_far(key, fk, rec):
     except x86sys.Undecided as e:
         why = str(e)
     import sysspec_far
+    if not imm:      # composition of certificates: the effective address is the PUSH r/m32 Form's, valid only if that shape has a proved certificate (CERTS = the proved shape keys of certs.tsv)
+        bk = sysspec_far.basis_key(key)
+        if CERTS is None or bk not in CERTS: return 'uncertified', 'uncertified: ea-basis %s not certified' % bk
+        if call and sysspec_far.esp_based(key): return 'uncertified', 'uncertified: esp-based effective address of a far CALL: the SDM states the pre-instruction ESP for PUSH (Vol. 2B 4-523) and the near CALL (Vol. 2A 3-122), not for the far CALL'
     try: cases = sysspec_far.check(key, call, rec, imm)
     except (KeyError, AttributeError, AssertionError) as e: return 'not-covered', 'no Form for the far transfer (%s)' % type(e).__name__
     bad = [c for c, r in cases if r != 'proved']
@@ -217,11 +223,18 @@ def needs_any(m):
 
 
 def main(argv):
+    global CERTS
+    argv = list(argv); far_only = '--far-only' in argv
+    if far_only: argv.remove('--far-only')
+    if '--certs' in argv:
+        i = argv.index('--certs'); CERTS = {ln.split('\t')[0].strip() for ln in open(argv[i + 1]) if ln.strip() and ln[0] != '#'}; del argv[i:i + 2]
     keys = [ln.split()[0] for ln in open(argv[0]) if ln.strip() and ln[0] != '#'] if argv else []
+    if far_only: keys = [k for k in keys if mnemonic(k) in ('call', 'jmp', 'lcall', 'ljmp') and far_kind(k) is not None]
     bad = 0
     for k in keys:
         r, n = check(k); bad += r.startswith('FAILED')
-        print('%s\t%s\t%s\t%s' % (k, mnemonic(k), r, n))
+        fk = far_kind(k) if mnemonic(k) in ('call', 'jmp', 'lcall', 'ljmp') else None
+        print('%s\t%s\t%s\t%s\t%s' % (k, mnemonic(k), r, n, sysspec_far.basis_key(k) if fk is not None and not fk[1] else '-'))
     return 1 if bad else 0
 
 

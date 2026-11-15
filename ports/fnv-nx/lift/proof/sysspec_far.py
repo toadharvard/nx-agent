@@ -28,17 +28,38 @@ PREFIX = (0x66, 0x67, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65, 0xf0, 0xf2, 0xf3)
 PUSH_RM = 6      # the ModRM reg field of FF /6 (PUSH r/m32)
 
 
+def basis_key(key):
+    """the shape of PUSH r/m32 with the same ModRM byte, SIB and displacement as the far memory form `key` (the reg field becomes 6); the repeat prefixes F2 / F3 take no part in an effective address and are dropped, every other prefix is kept"""
+    b = bytearray(shape.rep_bytes(key)); i = next(j for j, x in enumerate(b) if x not in PREFIX); b[i + 1] = (b[i + 1] & ~0x38) | (PUSH_RM << 3)
+    suffix = key.split('/', 1)[1]; keep = [x for x in b[:i] if x not in (0xf2, 0xf3)]; d = len(b[:i]) - len(keep)
+    if d:      # the layout offsets (immediate / displacement byte offsets of the key) shift by the dropped prefixes
+        f = [int(x) for x in suffix.split('.')]; suffix = '.'.join(str(f[j] - d if f[j] else 0) if j in (0, 2) else str(f[j]) for j in range(4))
+    return bytes(keep + list(b[i:])).hex() + '/' + suffix
+
+
 def operand(key, imm):
     """-> (selector, offset) of the ptr16:32 operand as z3 terms.  An immediate form: the 48-bit field (selector bits 47:32, offset bits 31:0).  A memory form (m16:32: offset at the effective address, selector 4 bytes above, SDM CALL / JMP):
     the effective address is the one the certified Form of PUSH r/m32 computes for the SAME ModRM byte with the reg field 6 (the Sail model implements PUSH, not the far transfers: the address computation is the model-proved one, the
     far instruction only differs in the reg field)."""
     if imm:
         f = z3.BitVec('fld_imm', 48); return z3.Extract(47, 32, f), z3.Extract(31, 0, f)
-    b = bytearray(shape.rep_bytes(key)); i = next(j for j, x in enumerate(b) if x not in PREFIX); b[i + 1] = (b[i + 1] & ~0x38) | (PUSH_RM << 3)
-    st = symform.symbuild(bytes(b).hex() + '/' + key.split('/', 1)[1]).form.stores
+    st = symform.symbuild(basis_key(key)).form.stores
     v = dsl.to_smt(st[0][1]); lo = v.children()[-1]; a = lo.children()[1]      # the value is Concat(mem[a+3], ..., mem[a]): the last operand is the byte at the effective address a
     mem = lo.children()[0]; ld = lambda k, n: z3.Concat(*[mem[a + (k + j)] for j in reversed(range(n))])
     return ld(4, 2), ld(0, 4)
+
+
+def esp_based(key):
+    """the effective address of the far memory form has ESP as a base or index (a free variable of the EA term of the basis Form)"""
+    st = symform.symbuild(basis_key(key)).form.stores; v = dsl.to_smt(st[0][1]); a = v.children()[-1].children()[1]
+    seen, todo = set(), [a]
+    while todo:
+        n = todo.pop()
+        if n.get_id() in seen: continue
+        seen.add(n.get_id())
+        if z3.is_const(n) and n.decl().kind() == z3.Z3_OP_UNINTERPRETED and n.decl().name() == 'esp': return True
+        todo += n.children()
+    return False
 
 
 def check(key, call, rec, imm=True):
