@@ -1,0 +1,94 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "external": "gcc-msvcmodel",
+  "cc": "bin/aarch64-linux-gnu-gcc",
+  "cxx": "bin/aarch64-linux-gnu-g++"
+ },
+ "flags": {
+  "c": [
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-std=gnu++17",
+   "-O2",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/lift/rt",
+  "ports/fnv-nx/shim/include"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tools/guestgen_citest.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/lift"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
+   ],
+   "outputs": [
+    "gen/cases.inc",
+    "gen/labels.txt"
+   ]
+  }
+ ],
+ "outputs": {
+  "cases.inc": "gen/cases.inc",
+  "labels.txt": "gen/labels.txt"
+ },
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi"
+  },
+  {
+   "name": "fnvnx_order"
+  },
+  {
+   "name": "fnvnx_sdd"
+  },
+  {
+   "name": "fnvnx_pi"
+  },
+  {
+   "name": "fnvnx_dispatch"
+  },
+  {
+   "name": "fnvnx_addr"
+  },
+  {
+   "name": "fnvnx_names"
+  },
+  {
+   "name": "fnvnx_layout"
+  }
+ ],
+ "external": [
+  {
+   "name": "gcc-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-ilp32-msvcmodel",
+   "commit": "b274ec067a2f965807a359853f456e31c67a49af",
+   "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
+   "at": "/ext/gcc"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ],
+ "include_uses": [
+  {
+   "root": "ports/fnv-nx/lift/rt",
+   "output": "GEN"
+  }
+ ]
+}

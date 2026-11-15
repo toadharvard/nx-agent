@@ -1,0 +1,46 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "aarch64-linux-gnu-gcc-13",
+  "cxx": "aarch64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [],
+  "cxx": [],
+  "asm": []
+ },
+ "include": [],
+ "units": "all",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  }
+ ],
+ "uses": [
+  {"root": "ports/fnv-nx/loader", "output": "KEYS_TSV"},
+  {"root": "ports/fnv-nx/loader", "output": "MODULES_TSV"},
+  {"root": "ports/fnv-nx/contract/facts", "output": "n1"},
+  {"root": "ports/fnv-nx/lift/pack", "output": "ENTRIES"}
+ ],
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/link/milestones.py",
+   "args": [
+    "--exe", "/ext/exe/FalloutNV.exe",
+    "--modules", "/uses/ports/fnv-nx/loader/MODULES_TSV",
+    "--n1", "/uses/ports/fnv-nx/contract/facts/n1",
+    "--keys", "/uses/ports/fnv-nx/loader/KEYS_TSV",
+    "--entries", "/uses/ports/fnv-nx/lift/pack/ENTRIES",
+    "--out", "/out/gen/milestones.tsv"
+   ],
+   "inputs": [],
+   "outputs": ["gen/milestones.tsv"]
+  }
+ ],
+ "outputs": {"MILESTONES_TSV": "gen/milestones.tsv"}
+}

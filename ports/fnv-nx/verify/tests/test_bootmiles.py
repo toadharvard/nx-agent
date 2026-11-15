@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Tests of verify/bootmiles.py: boot milestone table -> watch points, and progress tracking. Plain script, exit 0 on pass.
 
-Pure cases (table parsing, resolve, Progress) run on strings and dicts; the CLI case builds a tiny ELF32 with a .symtab
-using struct (no cross compiler) and runs the tool twice.
+Pure cases (table parsing, resolve, Progress) run on strings and dicts. Every case that reads the ELF's facts uses the link record of the icount test root's own
+build (verify/tests/icount, through gate_build.ensure in GATE_CACHE; its labels are the global symbols icfx_* of icfix.s): no record is written by hand. The
+symbol-rule cases (local names, ambiguity) use variants of that record (rows added), and the CLI case writes a table and a manifest naming those labels and runs the
+tool twice.
 """
+import copy
 import json
 import os
-import struct
 import subprocess
 import sys
 import tempfile
@@ -14,7 +16,12 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
+sys.path.insert(0, HERE)
+import bootfacts  # noqa: E402
 import bootmiles as bm  # noqa: E402
+import test_bootmachine as tb  # noqa: E402
+
+FIX_ROOT = "ports/fnv-nx/verify/tests/icount"   # the recipe root of the real record (admit.json, class test, target guest)
 
 FAILS = []
 
@@ -172,52 +179,42 @@ def progress_cases():
     case("11 unknown part id is an error", raises(KeyError, pr.event, "nope", 1) is not None)
 
 
-def build_elf(path, syms, local=()):
-    names = b"\0"
-    ents = [b"\0" * 16]
-    for n, a in local:   # STB_LOCAL symbols (info 0x02): the same name may repeat at other values (compiler clones .isra.0)
-        ents.append(struct.pack("<IIIBBH", len(names), a, 4, 0x02, 0, 1))
-        names += n.encode() + b"\0"
-    for n, a in syms.items():
-        ents.append(struct.pack("<IIIBBH", len(names), a, 4, 0x12, 0, 1))
-        names += n.encode() + b"\0"
-    symtab = b"".join(ents)
-    off_sym = 52
-    off_str = off_sym + len(symtab)
-    off_sh = (off_str + len(names) + 3) & ~3
-    ehdr = b"\x7fELF" + bytes([1, 1, 1, 0]) + b"\0" * 8 + struct.pack("<HHIIIIIHHHHHH", 2, 40, 1, 0, 0, off_sh, 0, 52, 0, 0, 40, 3, 0)
-
-    def sh(typ, off, size, link, entsize):
-        return struct.pack("<IIIIIIIIII", 0, typ, 0, 0, off, size, link, 0, 4, entsize)
-    shs = b"\0" * 40 + sh(2, off_sym, len(symtab), 2, 16) + sh(3, off_str, len(names), 0, 0)
-    data = ehdr + symtab + names
-    data += b"\0" * (off_sh - len(data)) + shs
-    with open(path, "wb") as f:
-        f.write(data)
+def real_record():
+    """the link record of the icount test root's own build (gate_build.ensure): the path and the loaded record"""
+    import gate_build
+    res, _out = gate_build.ensure(FIX_ROOT, tb.GATE_CACHE, tb.REPO)
+    if res["status"] != "green" or "elf_facts" not in res:
+        raise RuntimeError("icount root: recipe %s, link record %s: %s" % (res["status"], "elf_facts" in res, res.get("failure")))
+    return res["elf_facts"]["path"], bootfacts.load(res["elf_facts"]["path"])
 
 
 def cli_cases():
+    fpath, rec = real_record()
+    v = lambda n: bootfacts.symbol(rec, n)  # noqa: E731
     with tempfile.TemporaryDirectory() as d:
         P = lambda n: os.path.join(d, n)  # noqa: E731
-        open(P("t.txt"), "w").write(TABLE)
-        open(P("m.tsv"), "w").write(MANIFEST)
-        build_elf(P("g.elf"), SYMS)
-        run = lambda out, *x: subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "bootmiles.py"), "resolve", "--table", P("t.txt"),  # noqa: E731
-                                              "--manifest", P("m.tsv"), "--elf", P("g.elf"), "-o", P(out)] + list(x),
-                                             capture_output=True, text=True)
+        open(P("t.txt"), "w").write("winmain any call 0x401000\nmenu all:a call 0x402000\nmenu all:a ret 0x403000 main-thread\nframe seq:s sym icfx_bench\n"
+                                    "frame seq:s store 0x500000\ndata any host ini-read\nz any retzero 0x404000\ny any rettrue 0x405000\nx any ret 0x406000\n")
+        open(P("m.tsv"), "w").write("401000\ticfx_p1\n0x402000\ticfx_p2\n403000\ticfx_p3\n404000\ticfx_funca2\n405000\ticfx_funcb\n406000\ticfx_end\n")
+        run = lambda out, *x, t="t.txt", m="m.tsv", f=fpath: subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "bootmiles.py"), "resolve", "--table", P(t),  # noqa: E731
+                                                                              "--manifest", P(m), "--facts", f, "-o", P(out)] + list(x), capture_output=True, text=True)
         a, b = run("w1.json", "--bias", "256"), run("w2.json", "--bias", "256")
         w1, w2 = open(P("w1.json"), "rb").read(), open(P("w2.json"), "rb").read()
         doc = json.loads(w1)
-        case("12 CLI: exit 0, two runs byte-identical, format and biased pc",
+        case("12 CLI: exit 0, two runs byte-identical, format and biased pc (symbol values from the record)",
              a.returncode == 0 and b.returncode == 0 and w1 == w2 and doc["format"] == "fnvnx-bootmiles/1"
-             and "0x1100" in doc["pc"] and "0x500000" in doc["store"] and "ini-read" in doc["host"], (a.stderr, w1[:200]))
+             and "0x%x" % (v("icfx_p1") + 256) in doc["pc"] and "0x%x" % (v("icfx_bench") + 256) in doc["pc"] and "0x500000" in doc["store"] and "ini-read" in doc["host"], (a.stderr, w1[:200]))
         case("12 CLI: sorted keys", w1.decode() == json.dumps(doc, sort_keys=True, indent=1) + "\n")
-        build_elf(P("g.elf"), {"L_401000": 1})
-        c = run("w3.json")
+        open(P("t3.txt"), "w").write("a any call 0x402000\nb any sym icfx_no_such_label\n")
+        open(P("m3.tsv"), "w").write("402000\ticfx_no_such_entry\n")
+        c = run("w3.json", t="t3.txt", m="m3.tsv")
         case("13 CLI: unresolved items -> exit 1 with the message, no output file",
-             c.returncode == 1 and "0x402000" in c.stderr and "render_present" in c.stderr and not os.path.exists(P("w3.json")), c.stderr)
+             c.returncode == 1 and "0x402000" in c.stderr and "icfx_no_such_label" in c.stderr and not os.path.exists(P("w3.json")), c.stderr)
         h = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "bootmiles.py"), "-h"], capture_output=True, text=True)
         case("14 CLI -h", h.returncode == 0 and "resolve" in h.stdout)
+        json.dump(dict(rec, format="x/1"), open(P("bad.json"), "w"))
+        bad = run("w5.json", f=P("bad.json"))
+        case("15 CLI: a file that is not a link record is an error, exit 1, no output", bad.returncode == 1 and "bad.json" in bad.stderr and not os.path.exists(P("w5.json")), bad.stderr)
 
 
 def entries_cases():
@@ -239,21 +236,41 @@ def entries_cases():
 
 
 def local_cases():
-    with tempfile.TemporaryDirectory() as d:
-        p = os.path.join(d, "l.elf")
-        build_elf(p, {"L_1": 0x100}, local=[("f.isra.0", 0x10), ("f.isra.0", 0x20), ("only", 0x30), ("only", 0x30)])
-        s = bm.read_symtab(p)
-        case("L1 read_symtab: local names at two values are ambiguous, a repeated local at one value is kept",
-             dict(s) == {"L_1": 0x100, "only": 0x30} and s.ambiguous == {"f.isra.0": [0x10, 0x20]}, (dict(s), s.ambiguous))
-        build_elf(p, {"L_1": 0x100}, local=[("L_1", 0x10)])
-        case("L2 a global symbol wins over a local of the same name", dict(bm.read_symtab(p)) == {"L_1": 0x100})
-        build_elf(p, {"L_1": 0x100}, local=[("f.isra.0", 0x10), ("f.isra.0", 0x20)])
-        msg = raises(bm.ResolveError, bm.resolve, bm.load_table("k any sym f.isra.0\n"), {}, bm.read_symtab(p), 0)
-        case("L3 a table row that needs an ambiguous name is reported as ambiguous with the values", msg is not None and "ambiguous" in msg and "0x20" in msg, msg)
+    _, rec = real_record()
+
+    def variant(local):
+        r = copy.deepcopy(rec)
+        r["symbols"] += [{"name": n, "value": a, "size": 4, "type": "NOTYPE", "bind": "LOCAL", "section": "1"} for n, a in local]
+        return r
+    real = {n: bootfacts.symbol(rec, n) for n in ("icfx_p1", "icfx_bench", "icfx_end")}
+    s = bm.symbols(variant([("f.isra.0", 0x10), ("f.isra.0", 0x20), ("only", 0x30), ("only", 0x30)]))
+    case("L1 symbols: local names at two values are ambiguous, a repeated local at one value is kept, the record's globals are untouched",
+         s.ambiguous == {"f.isra.0": [0x10, 0x20]} and s["only"] == 0x30 and all(s[n] == a for n, a in real.items()) and "f.isra.0" not in s, (s.ambiguous, dict(s).get("only")))
+    s2 = bm.symbols(variant([("icfx_p1", 0x10)]))
+    case("L2 a global symbol wins over a local of the same name", s2["icfx_p1"] == real["icfx_p1"] and "icfx_p1" not in s2.ambiguous)
+    s3 = bm.symbols(variant([("f.isra.0", 0x10), ("f.isra.0", 0x20)]))
+    msg = raises(bm.ResolveError, bm.resolve, bm.load_table("k any sym f.isra.0\n"), {}, s3, 0)
+    case("L3 a table row that needs an ambiguous name is reported as ambiguous with the values", msg is not None and "ambiguous" in msg and "0x20" in msg, msg)
+    dup = variant([])
+    row = next(r for r in dup["symbols"] if r["name"] == "icfx_p1")
+    dup["symbols"].append(dict(row, value=row["value"] + 4))
+    case("L4 a global name at two values is an ElfError", raises(bm.ElfError, bm.symbols, dup) is not None)
+    fn = {r["name"] for r in rec["symbols"] if r["type"] == "FUNC"}
+    case("L5 funcs are the record's FUNC symbols", bm.symbols(rec).funcs == fn - {n for n in fn if n.startswith(("$x", "$d"))}, sorted(fn)[:5])
+
+
+def section_cases():
+    _, rec = real_record()
+    got = bm.alloc_sections(rec, ".text")
+    want = [(x["address"], x["size"]) for x in rec["sections"] if x["name"] == ".text" and "A" in x["flags"]]
+    case("S1 alloc_sections: every allocated section called .text of the record, in order; an unknown name is []", got == want and bm.alloc_sections(rec, ".nosuch") == [], got)
+    un = copy.deepcopy(rec)
+    un["sections"].append({"index": 99, "name": ".text", "type": "PROGBITS", "address": 0, "size": 9, "flags": ""})
+    case("S2 a section without the A flag is left out", bm.alloc_sections(un, ".text") == want)
 
 
 def main():
-    for f in (table_cases, resolve_cases, progress_cases, cli_cases, entries_cases, local_cases):
+    for f in (table_cases, resolve_cases, progress_cases, entries_cases, section_cases, cli_cases, local_cases):
         f()
     print(f"{'FAIL' if FAILS else 'PASS'}: {len(FAILS)} failed")
     return 1 if FAILS else 0

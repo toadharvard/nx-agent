@@ -4,6 +4,7 @@ Dispatch order per instruction (same as the PoC): mnemonic handler (@op); a hand
 through; then the fallbacks in registration order (@fallback(pred): x87 by opcode byte, SSE by xmm operand);
 then Unsupported('insn ...')."""
 import bisect
+import re
 import capstone
 from capstone import x86 as X
 
@@ -112,6 +113,18 @@ class Ctx:
             off = '((%s)&0xffffu)' % off
         return '(u32)(' + '+'.join(([seg] if seg else []) + ([off] if off else [])) + ')'
 
+    def static_ea(self, ins, op):
+        """The address of a memory operand that is a displacement alone (no base, index or FS/GS segment), else None. Such an access takes the K form of rt/fnvl.h (MK*, the address a template parameter)."""
+        m = op.mem
+        if self.macc != 'M' or m.base or m.index or m.segment in (X.X86_REG_FS, X.X86_REG_GS):
+            return None
+        return m.disp & 0xffffffff
+
+    def macc_(self, ins, op, w):
+        """the accessor text of a memory operand of w bits: MK<w>(address) when the address is static, else M<w>(expression)"""
+        k = self.static_ea(ins, op)
+        return 'MK%d(0x%xu)' % (w, k) if k is not None else '%s%d(%s)' % (self.macc, w, self.ea(ins, op))
+
     def rd(self, ins, op, size=None):
         s = (size or op.size) * 8
         if op.type == X.X86_OP_IMM:
@@ -119,7 +132,7 @@ class Ctx:
         if op.type == X.X86_OP_REG:
             b, sh, bits = reg(ins.reg_name(op.reg))
             return b if bits == 32 else ('((%s>>%d)&%s)' % (b, sh, MASK[bits]))
-        return '%s%d(%s)' % (self.macc, s, self.ea(ins, op))
+        return self.macc_(ins, op, s)
 
     def wr(self, ins, op, v):
         if op.type == X.X86_OP_REG:
@@ -128,7 +141,7 @@ class Ctx:
                 return '%s=(%s);' % (b, v)
             mk = (1 << bits) - 1
             return '%s=(%s&~0x%xu)|(((u32)(%s)&0x%xu)<<%d);' % (b, b, mk << sh, v, mk, sh)
-        return '%s%d(%s)=(%s);' % (self.macc, op.size * 8, self.ea(ins, op), v)
+        return '%s=(%s);' % (self.macc_(ins, op, op.size * 8), v)
 
     def zsp(self, s):
         return 'zf=(r&%s)==0; sf=(r>>%d)&1; pf=PAR(r);' % (MASK[s], s - 1)
@@ -140,7 +153,10 @@ class Ctx:
         return 'x' + n[3:]
 
     def fmem(self, ins, op):
-        return ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
+        if self.macc != 'M':
+            raise Unsupported('locked instruction at %x: a float memory access outside LKA<T>' % self.a)
+        k = self.static_ea(ins, op)
+        return ('MKF%d(0x%xu)' % (op.size * 8, k)) if k is not None else ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
 
 
 def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
@@ -199,38 +215,44 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     return insns, tables, taken, bad
 
 
-EMIT = ''      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment)
+EMIT = None   # the emitter of integer instructions from the proven DSL forms (proof/lift_dsl.py emit_form(cx, ins) -> None | SKIP), called before the hand handlers; None = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment); fnvlift imports nothing from proof
 
 
-def set_emit(mode):
+def set_emit(fn):
     global EMIT
-    if mode not in ('', 'dsl'):
-        raise ValueError('emit mode %r (want "dsl" or "")' % (mode,))
-    EMIT = mode
+    if fn is not None and not callable(fn):
+        raise ValueError('emit %r (want a function or None)' % (fn,))
+    EMIT = fn
 
 
-TAB_BIAS = 16     # assumption ASM-221: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)
+JTAB = None      # facts of tools/jtab.py: {site: (lo, hi, targets)} from the `jtab_tables` records of ehtables.json; set by set_jtab()
+JTAB_RED = None  # sites tools/jtab.py could not prove an extent for: {site: why}
+
+
+def set_jtab(facts):
+    """facts: the parsed ehtables.json (a dict) of the module being lifted, or None. The only source of jump-table extents: this module never analyses a table itself."""
+    global JTAB, JTAB_RED
+    if facts is None:
+        JTAB = JTAB_RED = None
+        return
+    JTAB = {int(r['site'], 16): (r['lo'], r['hi'], tuple(int(w, 16) for w in r['targets'])) for r in facts['jtab_tables']}
+    JTAB_RED = {int(r['site'], 16): r['why'] for r in facts.get('jtab_red', ())}
 
 
 def tab_tails(img, insns, lo, hi):
-    """Relocated code pointers a `jmp [reloc disp + idx*4]` can hand to the dispatcher (rule R3): the whole run of consecutive .reloc'd dwords from
-    the table address (the first relocated dword at or above the displacement, within TAB_BIAS dwords) (a run ends at the first dword that is not relocated, or at an instruction of this function), outside [lo, hi)."""
+    """Code pointers a `jmp [reloc disp + idx*4]` can hand to the dispatcher (rule R3): the proved slot values of the site's table (the `jtab_tables` record of
+    its address, extent proved by tools/jtab.py), outside [lo, hi). A site with no record (no proved extent) is Unsupported."""
     out = set()
     for a, ins in insns.items():
         if ins.mnemonic.split(' ')[-1] != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
             continue
         m = ins.operands[0].mem
         if m.scale == 4 and m.index and (a + ins.size - 4) in img.rset:
-            t = m.disp & 0xffffffff
-            for _ in range(TAB_BIAS):       # the index may start above 0 (case range k..n: disp = table - 4*k)
-                if t in img.rset:
-                    break
-                t += 4
-            while t in img.rset and t not in insns:
-                v = img.u32(t)
-                if not lo <= v < hi:
-                    out.add(v)
-                t += 4
+            if JTAB is None:
+                raise Unsupported('jump table at %x: no jtab facts loaded' % a)
+            if a not in JTAB:
+                raise Unsupported('jump table at %x: no proved extent (%s)' % (a, (JTAB_RED or {}).get(a, 'no jtab record')))
+            out.update(v for v in JTAB[a][2] if not lo <= v < hi)
     return sorted(out)
 
 
@@ -239,10 +261,8 @@ def dispatch(cx, ins):
     if f_cpufeat.missing(ins):         # CPUID-UD rule (f_cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
         f_sys.ud_site(cx)
         return
-    if EMIT == 'dsl':
-        from . import f_dsl
-        if f_dsl.emit_form(cx, ins) is not SKIP:
-            return
+    if EMIT is not None and EMIT(cx, ins) is not SKIP:
+        return
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
         return
@@ -257,8 +277,8 @@ def lift(img, addr, size, popn=None, start=None, owns=None, strict=True, x87=Non
     """-> (C text, meta). Raises Unsupported(reason).
     [addr, addr+size) is the code range of the function (for a funclet: of its parent); `start` (default addr) the entry the body is the descent
     from, named L_<start>; `owns` the other universe entries with this range as parent: they are explored and are labels of the nonlocal loop;
-    strict=False (instest only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error.
-    x87 (instest only): None = the pre-pass decides (f_x87_ctl.py), 'dyn' = dynamic x87 stack, an int = static stack with that entry depth."""
+    strict=False (the retired one-instruction harness only) turns falling off the decoded code into the stub event fnvl_raise(2, at) instead of a lift-time error.
+    x87 (the retired one-instruction harness only): None = the pre-pass decides (f_x87_ctl.py), 'dyn' = dynamic x87 stack, an int = static stack with that entry depth."""
     from . import universe
     if start is None and owns is None:
         ua = universe.entry_args(addr)
@@ -286,8 +306,18 @@ def gs_guard(cx, ins):
     """the #GP of a `gs:` access (SDM Vol 3 5.3 / 3.4.2): one guard at the start of the instruction, whichever handler uses the operand (ea adds the base). With GS holding the null selector any
     access is #GP(0); a write through a code segment (GS loaded with CS: readable code, not writable) is #GP(0) too. #GP(0) is STATUS_ACCESS_VIOLATION {0, 0xFFFFFFFF} (f_sys.gp_cond)."""
     from . import f_sys
+    if ins.mnemonic.split(' ')[-1] in NO_ACCESS:
+        return
+    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_CS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+        # CS-store: CS is a readable, executable, not writable code segment, so a store through it is #GP(0) (SDM Vol 3 5.3.1 "Limit and Type Checking": writing to a code segment); a load through CS is legal.
+        # TRANSITIONAL: "is a store" is taken from capstone's operand access here (hand path); on the DSL path it comes from the certified Form (an explicit AV fault that L3b's builder emits for a store with effective segment CS) once
+        # item 23 moves the shape there, and this check then goes away.
+        # Windows reports a ring-3 #GP with error code 0 as STATUS_ACCESS_VIOLATION {0, 0xFFFFFFFF} at the instruction: Wine 9.0 dlls/ntdll/unix/signal_i386.c, segv_handler, `case TRAP_x86_PROTFLT:` (lines 1925-1937 at tag
+        # wine-9.0: err == 0 and not is_privileged_instr -> rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION, NumberParameters = 2, ExceptionInformation[0] = 0, [1] = 0xffffffff); the same row as f_sys.gp_cond. Nothing was modified yet.
+        cx.em(f_sys.gp_cond(cx, '1'))
+        return
     g = [o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS]
-    if not g or ins.mnemonic.split(' ')[-1] in NO_ACCESS:
+    if not g:
         return
     cond = 'SELK(c->sel[SEG_GS])==0'
     if any(o.access & capstone.CS_AC_WRITE for o in g):
@@ -306,21 +336,12 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             raise Unsupported('entry %x decodes but lies outside its range' % start)
         bad = set(bad) | {start}
     order = sorted(insns)
-    def head4(a):
-        """the first four bytes at `a` (what KiTrap06Handler scans for F0): from `code`, beyond it from the image (none when the image has no byte there)"""
-        t = code[a - lo:a - lo + 4]
-        if len(t) < 4:
-            try:
-                t = img.bytes(a, 4)
-            except (TypeError, ValueError, IndexError):
-                pass
-        return t
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
     em = cx.em
     kinds = cx.kinds
-    from . import universe
+    from . import universe, sites
     uent = getattr(img, 'entries', None)          # a synthetic image of the unit tests names its entries itself
     uent = universe.load()[0] if uent is None else uent
     cx.uent = uent
@@ -334,16 +355,10 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             em('TRACE(0x%xu);' % a)        # every pass over an entry address is a trace event (bench), wherever the function was entered
         pfx = ''
         if m.startswith('rep ') or m.startswith('repe ') or m.startswith('repne '):
-            pfx, m = m.split(' ', 1)
-        bad_lock = False
-        locked = False
-        w = m.split(' ')
-        if 'lock' in w[:-1] and all(x + ' ' in f_sys.STRIP for x in w[:-1]):      # LOCK among the leading prefix words (capstone: `lock add`, `xacquire lock add`): SDM Vol 2 "LOCK"
-            m = w[-1]
-            bad_lock = not f_sys.lock_ok(ins, m)
-            if not bad_lock:
-                kinds.add('lock')
-                locked = True
+            pfx = m.split(' ', 1)[0]
+        m, bad_lock, locked = sites.lock_state(ins)     # the one predicate of the lock sites (fnvlift/sites.py)
+        if locked:
+            kinds.add('lock')
         cx.a, cx.nxt, cx.m, cx.pfx, cx.ops = a, nxt, m, pfx, ops
         cx.s = ops[0].size * 8 if ops else 32
         cx.term = False
@@ -360,12 +375,10 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             em('{ LK_BEGIN(%d); lk_%x: ;' % (f_sys.lock_size(ins), a))
             dispatch(cx, ins)
             cx.macc = 'M'
-            em('if(!lk_commit(lk_)){ LK_RESTORE; goto lk_%x; } }' % a)
+            em('if(!lk_commit<0x%xu>(lk_)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
         else:
             gs_guard(cx, ins)
             dispatch(cx, ins)
-        if any('FNVL_RAISE(FNVL_UD,' in t for t in cx.L[n0:]) and 0xf0 in head4(a):      # KiTrap06Handler: a #UD with an F0 byte among the first four bytes at Eip is STATUS_INVALID_LOCK_SEQUENCE
-            cx.L[n0:] = [t.replace('FNVL_RAISE(FNVL_UD,', 'FNVL_RAISE(FNVL_LOCK,') for t in cx.L[n0:]]
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
                 em('goto %s;' % cx.lab(nxt))
@@ -378,7 +391,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
-        em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_LOCK' if 0xf0 in head4(a) else 'FNVL_UD', a))
+        em('%s: ; SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_UD', a))
     if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:

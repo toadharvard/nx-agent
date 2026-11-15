@@ -265,7 +265,7 @@
   "test_descs.py": {
    "references": [
     {
-     "anchor": "### Objects of every admitted product root (`objects_of`) and `forbid_sections`",
+     "anchor": "### Objects of every admitted product root (`objects_of`): the fact universe",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }
@@ -581,6 +581,15 @@
     "ports/fnv-nx/verify/icount.py"
    ]
   },
+  "test_includeuses.py": {
+   "references": [
+    {
+     "anchor": "## Outputs and uses",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ]
+  },
   "test_l2gates.py": {
    "references": [
     {
@@ -826,6 +835,18 @@
     "ports/fnv-nx/verify/oraclecheck.py"
    ]
   },
+  "test_pathrules.py": {
+   "references": [
+    {
+     "anchor": "## Include",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_plugins.py": {
    "references": [
     {
@@ -906,6 +927,15 @@
     "ports/fnv-nx/verify/unitstage.py",
     "ports/fnv-nx/verify/gate_determinism.py",
     "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
+  "test_resolve_dot.py": {
+   "references": [
+    {
+     "anchor": "## Outputs and uses",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
    ]
   },
   "test_resolve_input.py": {

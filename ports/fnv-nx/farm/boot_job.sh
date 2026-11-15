@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 #
-#   [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
-#                                [--gpu-branch <artifacts branch>]
+#   FNVNX_BUILD=<clone of fnv-nx-build> [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked]
+#                                [--gpu]
 #
 # Steps:
 #  1 setup: nothing is installed. verify/envcheck.py check (the verdict farms' own check of verify/env.json) runs first;
 #    a mismatch is an input error (rc 1, "set the host up with farm/setup_verdict_env.sh") before anything is fetched or published
 #  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
-#    them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
+#    them, and fails on any row or line it does not understand): elffacts.json (the link record of the ELF: its sections and defined symbols), guest.elf, or manifest.json + part.NNN (joined in manifest
 #    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
-#    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
-#    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
-#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present; the table always gains first-frame = the GL backend's first present host event) + the loader's
+#    code|import, `# table_id` trailer); modules.tsv (the loader root's MODULES_TSV output, taken through the recipe, not a branch file; name sha256 size preferred_base assigned_base size_of_image ...; reserved
+#    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); the loader root's KEYS_TSV output (a generate-stage output taken through the recipe, not a branch file; the key range is
+#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (the boot root's MILESTONES_TSV output, taken through the recipe, not a branch file; the contract's rows: exe_entry, module_entry:*, WinMain, import:*!Present; the table always gains first-frame = the GL backend's first present host event) + the loader's
 #    console lines of run.txt (when present) -> the bootmiles table; optional softfloat.syms or softfloat.tsv (one symbol
 #    per line). Every missing required file is listed and fails the job
 #  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
@@ -22,34 +22,30 @@
 #    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
 #    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
 #    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
-#    The declared port inputs (verify/boot_inputs.json; now the font set, fnv-nx-build tools/fonts-wine9 at a pinned commit) are fetched by that
-#    commit, verified (sha256 of the sums file, the file set equal to the sums entries under the input's path, every file) and mounted
-#    read-only on the card (sdmc:/switch/fnv/fonts, verify/bootdecl.py, boot.py --declared-inputs); a write the guest makes there is a fault
-#    (OUT.json declared_input_faults) and fails the run (exit 2, verdict failed); any mismatch ends the job "input-error" before the boot, and
-#    OUT.json inputs.declared records {name, commit, sums_sha256, files}
+#    The declared port input (manifest/fonts_mirror.json: the font mirror, fnv-nx-build tools/fonts-wine9 at a pinned commit and tree_sha256) is fetched
+#    by boot.py --declared-inputs through the recipe's external mechanism (recipe.fetch_externals; commit and tree hash verified) and mounted read-only
+#    at FNVNX_SD_FONTS (verify/bootdecl.py); a write the guest makes there is a fault (OUT.json declared_input_faults) and fails the run (exit 2,
+#    verdict failed); any mismatch ends the job "input-error" before the boot; OUT.json inputs.declared and meta.json declared_inputs record
+#    {name, commit, tree_sha256}
 #  5 verify/boot.py run, heap size 0x40000000. Exit 0 or 2 (the guest stopped with a fault, a deadlock, a missing
 #    module or a nonzero exit) is a RESULT; 1 is an input error and fails the job
 #  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
 #  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
-# --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-#    Mesa llvmpipe). The job fetches it, requires the host to match the declared environment (verify/env.json, checked by verify/envcheck.py above, installed by farm/setup_verdict_env.sh, never by this job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. EVERY
+# --gpu: the renderer. The renderer's host library libnxgl4.so (GL 4.5 on Mesa llvmpipe) is the recipe product of render/gl4, taken only from
+#    gate_build.ensure in GATE_CACHE (no prebuilt library, no branch, no pin of one; boot.py --gpu, verify/bootgpu.py). The job requires the host to
+#    match the declared environment (verify/env.json, checked by verify/envcheck.py above, installed by farm/setup_verdict_env.sh, never by this job), and checks that the
 #    presented frame is published, losslessly, by content (no cap, no sampling): boot.py stores each distinct frame once as <key>.rgba + <key>.txt
 #    in the frames directory (key = sha256 of the .txt bytes followed by the .rgba bytes; a repeated identical frame, such as a static menu, is the
 #    same file), and the job publishes every file there under frames/ with the result. OUT.json "frames" has a record for every frame (n, t_ns,
 #    per_tid, sha256 = its key), so n frames with d distinct images are n records and d file pairs. Size: one distinct frame is width x height x 4
 #    bytes (1280x720 handheld = 3.7 MB, 1920x1080 docked = 8.3 MB) plus a few bytes of .txt; a publish over a store limit is reported to L4, not
-#    trimmed. meta.json gains gpu_branch and
-#    gpu_branch_commit, the final line gains presents=<n>.
-#    The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
-#    the bridge it was linked with (render: {branch, archive_sha256}); that branch's build.json archive_sha256 and its libfnvnx-d3d9.a
-#    bytes equal it; B's meta.json sha256 equals the libnxgl4.so bytes; bridge build.json nx_agent_commit == B's meta.json
-#    nx_agent_commit (bridge head == nxgl4 head). meta.json gains bridge_branch, bridge_branch_commit and render_head.
+#    trimmed. The final line gains presents=<n>; OUT.json "gpu" records the library's sha256.
 # Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
 #    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
-# The declared inputs (verify/env.json, verify/boot_inputs.json) are read only from the tree the job runs from; no variable redirects them.
-# Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
-# when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
+# The declared inputs (verify/env.json, manifest/fonts_mirror.json) are read only from the tree the job runs from; no variable redirects them.
+# Env: FNVNX_BUILD (required, no default: a clone of the artifacts repository fnv-nx-build; no job clones its own), ARTIFACTS_URL (default: the
+# origin of that clone), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 # --quantum N (required, no default): instructions per slice of a core's thread in the N-core machine (bootmachine.py rule 3); passed to boot.py
@@ -61,15 +57,15 @@ log() { echo "boot_job: $*" >&2; }
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 NX=$(cd "$SELF_DIR/.." && pwd)                     # ports/fnv-nx of the checkout this script lives in
-ELF_ID=${1:?usage: boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked] [--gpu-branch B]}; shift
+ELF_ID=${1:?usage: boot_job.sh <elf_id> --quantum N [--limit-instructions N] [--profile handheld|docked] [--gpu]}; shift
 case $ELF_ID in ''|*[!A-Za-z0-9._-]*|.*) die "elf_id '$ELF_ID' must be letters, digits, '.', '_' or '-' and not start with '.'" ;; esac
-LIMIT=""; PROFILE=handheld; GPU_BRANCH=; QUANTUM=
+LIMIT=""; PROFILE=handheld; GPU_ON=; QUANTUM=
 while [ $# -gt 0 ]; do
   case $1 in
     --limit-instructions) [ $# -ge 2 ] || die "--limit-instructions needs a value"; LIMIT=$2; shift 2 ;;
     --quantum) [ $# -ge 2 ] || die "--quantum needs a value"; QUANTUM=$2; shift 2 ;;
     --profile) [ $# -ge 2 ] || die "--profile needs a value"; PROFILE=$2; shift 2 ;;
-    --gpu-branch) [ $# -ge 2 ] || die "--gpu-branch needs a value"; GPU_BRANCH=$2; shift 2 ;;
+    --gpu) GPU_ON=1; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
@@ -80,11 +76,11 @@ if [ -n "$LIMIT" ]; then
 fi
 case $PROFILE in handheld|docked) ;; *) die "--profile '$PROFILE' is neither handheld nor docked" ;; esac
 export FNVNX_PROFILE=$PROFILE
-case $GPU_BRANCH in *[!A-Za-z0-9._/-]*|-*) die "--gpu-branch '$GPU_BRANCH' is not a branch name" ;; esac
 
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
-ARTIFACTS=${ARTIFACTS:-$FARM_HOME/artifacts}
-ARTIFACTS_URL=${ARTIFACTS_URL:-https://github.com/toadharvard/fnv-nx-build}
+ARTIFACTS=${FNVNX_BUILD:?FNVNX_BUILD (clone of fnv-nx-build) is required}
+{ [ -d "$ARTIFACTS/.git" ] || [ -f "$ARTIFACTS/HEAD" ]; } || die "FNVNX_BUILD $ARTIFACTS is not a git clone"
+ARTIFACTS_URL=${ARTIFACTS_URL:-$(git -C "$ARTIFACTS" remote get-url origin)} || die "$ARTIFACTS has no origin"
 WORK=${WORK:-$FARM_HOME/boot/$ELF_ID}
 IN_BRANCH=l1-contract/elf/$ELF_ID; OUT_BRANCH=l4-verify/boot/$ELF_ID
 GIT_ID=(-c user.name=fnv-nx-farm -c user.email=farm@invalid)
@@ -95,18 +91,14 @@ mkdir -p "$FARM_HOME" "$WORK"
 NX_COMMIT=$(git -C "$SELF_DIR" rev-parse HEAD) || die "$SELF_DIR is not inside a git checkout (meta.json records its commit)"
 
 # 1. setup
-ENVF=$NX/verify/env.json   # the declared inputs are read only from the tree the job runs from: verify/env.json, verify/boot_inputs.json (no variable redirects them)
-# GATE_CACHE (required input, no default): the verdict's own store (VDIR/cache). boot.py --gpu loads the recipe-built host runtime tests/bootrt from it
+ENVF=$NX/verify/env.json   # the declared inputs are read only from the tree the job runs from: verify/env.json, manifest/fonts_mirror.json (no variable redirects them)
+# GATE_CACHE (required input, no default): the verdict's own store (VDIR/cache). boot.py --gpu loads the recipe-built host runtime tests/bootrt and the renderer render/gl4 from it
 # (bootgpu.py); nothing is compiled here and no other cache exists.
 [ -n "${GATE_CACHE:-}" ] || die "input-error: GATE_CACHE is not set (the verdict's cache; the host runtime tests/bootrt is built in it by recipe.py)"
 export GATE_CACHE
 python3 -I "$NX/verify/envcheck.py" check --env "$ENVF" > "$WORK/envcheck.txt" 2>&1 || { sed 's/^/boot_job: /' "$WORK/envcheck.txt" >&2; die "input-error: the host does not match the declared environment ($ENVF); set the host up with farm/setup_verdict_env.sh"; }
 
 # 2. the guest branch
-if [ ! -d "$ARTIFACTS/.git" ] && [ ! -f "$ARTIFACTS/HEAD" ]; then
-  mkdir -p "$(dirname "$ARTIFACTS")"
-  retry git clone -q --filter=blob:none --no-checkout "$ARTIFACTS_URL" "$ARTIFACTS" || die "git clone of $ARTIFACTS_URL failed"
-fi
 LS=$WORK/ls-remote.txt
 retry git -C "$ARTIFACTS" ls-remote "$ARTIFACTS_URL" "refs/heads/$IN_BRANCH" > "$LS" || die "ls-remote of $ARTIFACTS_URL failed"
 [ -s "$LS" ] || die "$ARTIFACTS_URL has no branch $IN_BRANCH"
@@ -114,21 +106,19 @@ retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$IN_BRANCH:refs/remotes/boot-j
 ELF_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/$IN_BRANCH^{commit}") || die "no commit for $IN_BRANCH after fetch"
 GITA ls-tree --name-only "$ELF_COMMIT" > "$WORK/branch-files.txt" || die "cannot list the tree of $IN_BRANCH@${ELF_COMMIT:0:12}"
 MISSING=""
-for f in entries.tsv modules.tsv keys.tsv milestones.tsv; do grep -qxF "$f" "$WORK/branch-files.txt" || MISSING="$MISSING $f"; done
-want=(entries.tsv modules.tsv keys.tsv milestones.tsv)
+for f in entries.tsv elffacts.json; do grep -qxF "$f" "$WORK/branch-files.txt" || MISSING="$MISSING $f"; done
+want=(entries.tsv elffacts.json)   # elffacts.json: the link record of the ELF (L1; the one source of its sections and symbols)
 if grep -qxF guest.elf "$WORK/branch-files.txt"; then want+=(guest.elf)
 elif grep -qxF manifest.json "$WORK/branch-files.txt"; then want+=(manifest.json $(grep -E '^part\.[0-9]+$' "$WORK/branch-files.txt"))
 else MISSING="$MISSING guest.elf-or-manifest.json"; fi
-if [ -n "$GPU_BRANCH" ]; then   # the renderer pair rule reads manifest.json
-  if grep -qxF manifest.json "$WORK/branch-files.txt"; then case " ${want[*]} " in *" manifest.json "*) ;; *) want+=(manifest.json) ;; esac
-  else MISSING="$MISSING manifest.json"; fi
-fi
 [ -z "$MISSING" ] || die "branch $IN_BRANCH@${ELF_COMMIT:0:12} lacks the required file(s):$MISSING"
 IN=$WORK/in; SOFT=absent; SOFTFILE=
 for f in softfloat.syms softfloat.tsv; do
   if grep -qxF "$f" "$WORK/branch-files.txt"; then want+=("$f"); SOFT=present; SOFTFILE=$f; break; fi
 done
 HAVE_RUN=0; if grep -qxF run.txt "$WORK/branch-files.txt"; then want+=(run.txt); HAVE_RUN=1; fi
+# an optional declared card input of the run, the file `mode` (4 bytes): it is placed at sdmc:/mode and its sha256 is recorded in meta.json (mode_input); the test guests read their mode from it
+HAVE_MODE=0; if grep -qxF mode "$WORK/branch-files.txt"; then want+=(mode); HAVE_MODE=1; fi
 extract() { rm -rf "$IN"; mkdir -p "$IN"; GITA archive "$ELF_COMMIT" "${want[@]}" | tar -x -C "$IN"; }
 retry extract || die "cannot extract ${want[*]} from $IN_BRANCH@${ELF_COMMIT:0:12}"
 BI=(python3 -s -B "$NX/verify/bootinputs.py")
@@ -137,38 +127,14 @@ if [ ! -f "$IN/guest.elf" ]; then
   log "guest.elf joined from the manifest's parts and verified"
 fi
 
-# 2b. the renderer library
-GPU_LIB=""; GPU_COMMIT=""
-if [ -n "$GPU_BRANCH" ]; then
-  retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$GPU_BRANCH:refs/remotes/boot-job/gpu/$GPU_BRANCH" || die "fetch of renderer branch $GPU_BRANCH failed"
-  GPU_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/gpu/$GPU_BRANCH^{commit}") || die "no commit for $GPU_BRANCH after fetch"
-  for f in libnxgl4.so meta.json; do
-    GITA ls-tree --name-only "$GPU_COMMIT" | grep -qxF "$f" || die "renderer branch $GPU_BRANCH@${GPU_COMMIT:0:12} lacks $f"
-  done
-  GPU_DIR=$WORK/gpu; rm -rf "$GPU_DIR"; mkdir -p "$GPU_DIR"
-  gpu_extract() { GITA archive "$GPU_COMMIT" libnxgl4.so meta.json | tar -x -C "$GPU_DIR"; }
-  retry gpu_extract || die "cannot extract libnxgl4.so and meta.json from $GPU_BRANCH"
-  # the renderer pair rule: the bridge linked into the ELF and this library are of one head
-  RB=$("${BI[@]}" render-branch --manifest "$IN/manifest.json" 2> "$WORK/pair.err") || die "$(tail -1 "$WORK/pair.err" | cut -c1-400)"
-  BRIDGE_BRANCH=${RB%% *}
-  retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$BRIDGE_BRANCH:refs/remotes/boot-job/bridge/$BRIDGE_BRANCH" || die "fetch of bridge branch $BRIDGE_BRANCH failed"
-  BRIDGE_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/bridge/$BRIDGE_BRANCH^{commit}") || die "no commit for $BRIDGE_BRANCH after fetch"
-  for f in build.json libfnvnx-d3d9.a; do
-    GITA ls-tree --name-only "$BRIDGE_COMMIT" | grep -qxF "$f" || die "bridge branch $BRIDGE_BRANCH@${BRIDGE_COMMIT:0:12} lacks $f"
-  done
-  BRIDGE_DIR=$WORK/bridge; rm -rf "$BRIDGE_DIR"; mkdir -p "$BRIDGE_DIR"
-  bridge_extract() { GITA archive "$BRIDGE_COMMIT" build.json libfnvnx-d3d9.a | tar -x -C "$BRIDGE_DIR"; }
-  retry bridge_extract || die "cannot extract build.json and libfnvnx-d3d9.a from $BRIDGE_BRANCH"
-  RENDER_HEAD=$("${BI[@]}" pair --manifest "$IN/manifest.json" --bridge "$BRIDGE_DIR" --gpu "$GPU_DIR" 2> "$WORK/pair.err") \
-    || die "renderer pair: $(tail -1 "$WORK/pair.err" | cut -c1-500)"
-  log "renderer pair of one head $RENDER_HEAD: $BRIDGE_BRANCH@${BRIDGE_COMMIT:0:12} + $GPU_BRANCH@${GPU_COMMIT:0:12}"
-  GPU_LIB=$GPU_DIR/libnxgl4.so
-  python3 -s -B "$NX/verify/bootgpu.py" "$GPU_LIB" > /dev/null 2> "$WORK/gpu.err" || die "libnxgl4.so does not load: $(tail -1 "$WORK/gpu.err" | cut -c1-300)"
-  log "renderer library $GPU_BRANCH@${GPU_COMMIT:0:12} loads"
+# 2b. the renderer library: the recipe product of render/gl4 (bootgpu.py: gate_build.ensure in GATE_CACHE); it must load with the embedder library
+if [ -n "$GPU_ON" ]; then
+  python3 -s -B "$NX/verify/bootgpu.py" > "$WORK/gpu.out" 2> "$WORK/gpu.err" || die "libnxgl4.so (render/gl4) does not load: $(tail -1 "$WORK/gpu.err" | cut -c1-300)"
+  log "$(cat "$WORK/gpu.out")"
 fi
 
 # 3. icount spec
-SPEC_ARGS=(--elf "$IN/guest.elf" --range lifted=section:.text.fnvl -o "$WORK/spec.json")
+SPEC_ARGS=(--facts "$IN/elffacts.json" --range lifted=section:.text.fnvl -o "$WORK/spec.json")
 [ $SOFT = absent ] || SPEC_ARGS+=(--entries "softfloat=symfile:$IN/$SOFTFILE")
 python3 -I "$NX/verify/icount.py" spec "${SPEC_ARGS[@]}" 2> "$WORK/spec.err" || die "icount.py spec failed: $(tail -1 "$WORK/spec.err" | cut -c1-300)"
 log "icount spec: lifted=section:.text.fnvl softfloat=$SOFT"
@@ -185,29 +151,23 @@ fi
 EXE_SHA=$(sha256sum "$GAME_DIR/FalloutNV.exe" | cut -c1-64)
 log "game $GAME_DIR: FalloutNV.exe sha256 $EXE_SHA"
 SD=$WORK/sd; chmod -R u+w "$SD" 2> /dev/null || true; rm -rf "$SD"; mkdir -p "$SD"
-# the declared port inputs (verify/boot_inputs.json: the font set): the pinned commit is fetched through the same artifacts clone, then
-# verify/bootdecl.py verifies (early, the job's input-error; boot.py --declared-inputs verifies again and mounts) sha256(sums file) == the pin, the file set against the sums list (an extra or a missing file is an error)
-# and every file, and boot.py mounts it read-only under the card (--declared-inputs). Any mismatch ends the job as input-error before the boot.
-PINS=$NX/verify/boot_inputs.json
-DECL=$WORK/declared; rm -rf "$DECL"; mkdir -p "$DECL"
-DSRC=(); DECL_SRC=(); DERR=$WORK/declared.err
-while IFS=$'\t' read -r dname dcommit dpath dsums; do
-  [ -n "$dname" ] || continue
-  retry GITA fetch -q "$ARTIFACTS_URL" "$dcommit" || die "input-error: fetch of declared input $dname@${dcommit:0:12} failed"
-  [ "$(GITA rev-parse FETCH_HEAD^{commit})" = "$dcommit" ] || die "input-error: declared input $dname: fetched commit is not $dcommit"
-  mkdir -p "$DECL/$dname"
-  dextract() { GITA archive "$dcommit" "$dpath" "$dsums" | tar -x -C "$DECL/$dname"; }
-  retry dextract || die "input-error: cannot extract $dpath and $dsums of declared input $dname@${dcommit:0:12}"
-  DSRC+=(--src "$dname=$DECL/$dname"); DECL_SRC+=(--declared-src "$dname=$DECL/$dname")
-done < <(python3 -s -B -c 'import json, sys
-for p in json.load(open(sys.argv[1]))["inputs"]:
-    print("\t".join(p[k] for k in ("name", "commit", "path", "sums")))' "$PINS" 2> "$DERR" || echo "pins unreadable" > "$DERR")
-[ ! -s "$DERR" ] || die "input-error: $PINS: $(tail -1 "$DERR" | cut -c1-300)"
-python3 -s -B "$NX/verify/bootdecl.py" verify --pins "$PINS" "${DSRC[@]}" > "$WORK/declared.log" 2> "$DERR" \
-  || die "input-error: $(tail -1 "$DERR" | cut -c1-400)"
-log "declared inputs: $(tr '\n' ' ' < "$WORK/declared.log")"
+MODE_SHA=""; if [ $HAVE_MODE = 1 ]; then cp "$IN/mode" "$SD/mode"; MODE_SHA=$(sha256sum "$IN/mode" | cut -c1-64); fi
+export MODE_SHA
+# the declared port input (manifest/fonts_mirror.json: the font mirror, fnv-nx-build tools/fonts-wine9 at a pinned commit and tree_sha256): boot.py
+# --declared-inputs fetches it through the recipe's external mechanism (verify/recipe.py fetch_externals, the cache $GATE_CACHE), checks the tree hash and
+# mounts it read-only at FNVNX_SD_FONTS. Any mismatch ends the job as input-error before the boot (boot.py exit 1). The pin file is read only from the
+# tree the job runs from; it also goes into meta.json (declared_inputs: name, commit, tree_sha256).
+PINS=$NX/manifest/fonts_mirror.json
+[ -s "$PINS" ] || die "input-error: $PINS is missing"
 # the contract's files in the forms boot.py takes (each converter fails on any row it does not understand)
 conv() { "$@" 2> "$WORK/conv.err" || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"; }
+# keys.tsv and modules.tsv are the loader root's declared outputs KEYS_TSV and MODULES_TSV (the one source of the generated loader tables), taken through the recipe from the tree the job runs from
+REPO_TOP=$(git -C "$NX" rev-parse --show-toplevel)
+for t in KEYS_TSV:keys.tsv MODULES_TSV:modules.tsv; do
+  conv "${BI[@]}" stage-output --repo "$REPO_TOP" --root ports/fnv-nx/loader --output "${t%%:*}" --cache "$GATE_CACHE" -o "$IN/${t##*:}"
+done
+# milestones.tsv is the boot root's declared output MILESTONES_TSV (the contract's rows, generated by link/milestones.py from the exe, modules, n1, keys and the pack's ENTRIES), taken through the recipe; there is no branch file for it
+conv "${BI[@]}" stage-output --repo "$REPO_TOP" --root ports/fnv-nx/boot --output MILESTONES_TSV --cache "$GATE_CACHE" -o "$IN/milestones.tsv"
 conv "${BI[@]}" reserved --modules "$IN/modules.tsv" --exe "$GAME_DIR/FalloutNV.exe" -o "$IN/reserved.tsv"
 KEYS=$("${BI[@]}" keys --entries "$IN/entries.tsv" --keys "$IN/keys.tsv" 2> "$WORK/conv.err") || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"
 RUN_ARGS=(); [ $HAVE_RUN = 0 ] || RUN_ARGS=(--run "$IN/run.txt")
@@ -232,12 +192,12 @@ conv "${BI[@]}" milestones --table "$IN/milestones.tsv" --entries "$IN/entries.t
 
 # 5. boot
 OUT=$WORK/OUT.json; rm -f "$OUT" "$WORK/OUT.console.txt"
-BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --reserved "$IN/reserved.tsv" --keys "$KEYS" --heap-size 0x40000000
-      --profile "$PROFILE" --root "$SD" --game "$GAME_DIR" --declared-inputs "$PINS" "${DECL_SRC[@]}" --milestones "$IN/table.txt" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
+BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --facts "$IN/elffacts.json" --reserved "$IN/reserved.tsv" --keys "$KEYS" --heap-size 0x40000000
+      --profile "$PROFILE" --root "$SD" --game "$GAME_DIR" --declared-inputs "$PINS" --milestones "$IN/table.txt" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
 BOOT+=(--quantum "$QUANTUM")
 [ -z "$LIMIT" ] || BOOT+=(--limit-instructions "$LIMIT")
 FRAMES=$WORK/frames; rm -rf "$FRAMES"
-[ -z "$GPU_LIB" ] || BOOT+=(--gpu "$GPU_LIB" --frames "$FRAMES")
+[ -z "$GPU_ON" ] || BOOT+=(--gpu --frames "$FRAMES")
 BOOT+=(--out "$OUT")
 log "${BOOT[*]}"
 T0=$(date +%s)
@@ -251,7 +211,7 @@ for v in REASON LAST INSTR MAIN THREADS; do [ -n "${!v}" ] || die "summary line 
 [ -f "$OUT" ] && [ -f "$WORK/OUT.console.txt" ] || die "boot.py exit $RC but OUT.json or OUT.console.txt is missing"
 
 PRESENTS=""
-if [ -n "$GPU_LIB" ]; then
+if [ -n "$GPU_ON" ]; then
   PRESENTS=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["gpu"]["presents"])' "$OUT") || die "OUT.json has no gpu record"
 fi
 
@@ -259,23 +219,24 @@ fi
 CPU=$(lscpu 2> /dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -1)
 [ -n "$CPU" ] || CPU=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -1)
 [ -n "$CPU" ] || die "the host cpu model is in neither lscpu nor /proc/cpuinfo"
-python3 -I -c 'import json, sys
+PIN_FILE="$PINS" python3 -I -c 'import json, os, sys
 k = ["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc", "seconds", "limit_instructions", "quantum", "profile", "host_cpu_model", "softfloat", "data_items"]
 v = sys.argv[1:]
 d = dict(zip(k, v))
 d["boot_rc"], d["seconds"] = int(d["boot_rc"]), int(d["seconds"])
 d["limit_instructions"] = int(d["limit_instructions"], 0) if d["limit_instructions"] else None
 d["quantum"] = int(d["quantum"], 0)
+d["mode_input"] = os.environ.get("MODE_SHA") or None
 d["data_items"] = d["data_items"][len("fetched:"):].split() if d["data_items"] else None
-if v[len(k):]:
-    d["gpu_branch"], d["gpu_branch_commit"], d["bridge_branch"], d["bridge_branch_commit"], d["render_head"] = v[len(k):]
-print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$QUANTUM" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" ${GPU_BRANCH:+"$GPU_BRANCH" "$GPU_COMMIT" "$BRIDGE_BRANCH" "$BRIDGE_COMMIT" "$RENDER_HEAD"} > "$WORK/meta.json" \
+pin = json.load(open(os.environ["PIN_FILE"]))
+d["declared_inputs"] = [{k: pin[k] for k in ("name", "commit", "tree_sha256")}]
+print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$QUANTUM" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" > "$WORK/meta.json" \
   || die "meta.json could not be written"
 IDX=$(mktemp -u "$WORK/index.XXXXXX")
 for f in OUT.json OUT.console.txt spec.json meta.json; do
   GIT_INDEX_FILE=$IDX GITA update-index --add --cacheinfo "100644,$(GITA hash-object -w "$WORK/$f"),$f" || die "cannot stage $f"
 done
-if [ -n "$GPU_LIB" ]; then   # EVERY distinct frame the renderer dumped (<key>.rgba + <key>.txt, boot.py store_frame), staged in one batch
+if [ -n "$GPU_ON" ]; then   # EVERY distinct frame the renderer dumped (<key>.rgba + <key>.txt, boot.py store_frame), staged in one batch
   (cd "$FRAMES" && ls *.rgba 2> /dev/null | sort) > "$WORK/frames.lst" || true
   while read -r r; do [ -f "$FRAMES/${r%.rgba}.txt" ] || die "frame file ${r%.rgba}.txt is missing next to $r"; done < "$WORK/frames.lst"
   if [ -s "$WORK/frames.lst" ]; then
@@ -296,4 +257,4 @@ retry GITA push -q -f "$ARTIFACTS_URL" "$COMMIT:refs/heads/$OUT_BRANCH" || die "
 [ "$(git ls-remote "$ARTIFACTS_URL" "refs/heads/$OUT_BRANCH" | cut -f1)" = "$COMMIT" ] || die "$OUT_BRANCH on the remote is not the pushed commit $COMMIT"
 
 # 7. result
-echo "BOOT elf=$ELF_ID rc=$RC reason=$REASON last=$LAST instr=$INSTR main=$MAIN threads=$THREADS seconds=$SECONDS_RUN published=$OUT_BRANCH@${COMMIT:0:12}${GPU_LIB:+ presents=$PRESENTS} stage_table=$STAGE"
+echo "BOOT elf=$ELF_ID rc=$RC reason=$REASON last=$LAST instr=$INSTR main=$MAIN threads=$THREADS seconds=$SECONDS_RUN published=$OUT_BRANCH@${COMMIT:0:12}${GPU_ON:+ presents=$PRESENTS} stage_table=$STAGE"

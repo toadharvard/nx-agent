@@ -1,18 +1,10 @@
 #!/usr/bin/env python3
-# reads: ports/fnv-nx/contract ports/fnv-nx/hostabi/include/fnvnx ports/fnv-nx/hostabi/product/build.json ports/fnv-nx/lib/sha256/build.host.json
-# reads: ports/fnv-nx/lib/sha256/build.json ports/fnv-nx/link ports/fnv-nx/loader/build.json ports/fnv-nx/platform/build.json
-# reads: ports/fnv-nx/render/d3d9/build.json ports/fnv-nx/render/gl4/build.json ports/fnv-nx/render/nxgpu/build.json
-# reads: ports/fnv-nx/render/pair/build.host.json ports/fnv-nx/render/pair/build.json ports/fnv-nx/render/shaders/translator/build.host.json
-# reads: ports/fnv-nx/render/shaders/translator/build.json ports/fnv-nx/render/smscan/build.host.json ports/fnv-nx/render/smscan/build.json
-# reads: ports/fnv-nx/rt/guest/build.json ports/fnv-nx/rt/guest_main/build.json ports/fnv-nx/shim/build.json ports/fnv-nx/tests/bootrt/build.json
-# reads: ports/fnv-nx/tests/bootrt/exports.ver ports/fnv-nx/tests/bootrt/rt.c ports/fnv-nx/toolchain/msvcmodel/DATAMODEL.json ports/fnv-nx/verify
 """bootrt (tests/bootrt, recipe root of target host): the embedder symbols of the boot machine's host objects and the proven-unreachable
 assertion fnvnx_reach_violation of hostabi/include/fnvnx/reach.h. The library is the recipe product in GATE_CACHE (gate_build.ensure, the verdict's own store). A violation
 ends the process, so each case runs in a child python: it loads the library through bootgpu, registers an exit callback that writes the code it
 receives to a file, and calls the violation. Exit 0 on pass."""
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -25,22 +17,14 @@ import bootgpu  # noqa: E402
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
+import hostabirec  # noqa: E402
 import gate_build  # noqa: E402
-from test_bootlayout import make_elf  # noqa: E402
+from test_bootlayout import ENTRY, make_elf  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
-RT_H = os.path.join(REPO, "ports", "fnv-nx", "hostabi", "include", "fnvnx", "reach.h")
 TMP = tempfile.mkdtemp(prefix="brt-")
-__import__('atexit').register(__import__('shutil').rmtree, TMP, True)   # a test leaves no scratch behind
 GATE_CACHE = os.environ.get("GATE_CACHE") or os.path.join(TMP, "gate-cache")
 FAILED, N = [], [0]
-
-
-def _scratch(prefix):
-    d = tempfile.mkdtemp(prefix=prefix)
-    __import__('atexit').register(__import__('shutil').rmtree, d, True)   # a test leaves no scratch behind
-    return d
-
 
 CHILD = r"""
 import ctypes, json, os, sys
@@ -65,14 +49,8 @@ def case(name, cond, extra=""):
         FAILED.append(name)
 
 
-def define(name):
-    m = re.search(r"#define\s+%s\s+(0x[0-9A-Fa-f]+)u?\b" % name, open(RT_H).read())
-    return int(m.group(1), 16)
-
-
 def main():
-    REACH = define("FNVNX_REACH_EXIT")
-    case("machine constant equals reach.h (top byte)", bootmachine.REACH_VIOLATION == REACH >> 24)
+    REACH = hostabirec.record().define("FNVNX_REACH_EXIT")
     res, _ = gate_build.ensure(bootgpu.BOOTRT_ROOT, GATE_CACHE, REPO)
     case("bootrt builds green through recipe.py", res.get("status") == "green" and res.get("elf"), res.get("failure"))
     if res.get("status") != "green":
@@ -102,8 +80,8 @@ def main():
 
     # the machine's side: the run record of a host-object exit, full width, as run() would classify a guest's exit
     elf = make_elf()
-    plan = bootlayout.plan(bootlayout.parse_elf(elf), [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)], 4 << 20)
-    m = bootmachine.Machine(elf, plan, boothost.Services(_scratch("brt-m-")), app_cores=bootmachine.FNVNX_APP_CORES)
+    plan = bootlayout.plan(bootlayout.parse_elf(elf), [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000)], 4 << 20, entry=ENTRY)
+    m = bootmachine.Machine(elf, plan, boothost.Services(tempfile.mkdtemp(prefix="brt-m-")), app_cores=bootmachine.FNVNX_APP_CORES)
     r = m.host_exit(REACH | 0xABCDEF)
     case("host_exit reach: reason reach-violation, fact_id, exit_code in full", r["reason"] == "reach-violation" and r["fact_id"] == 0xABCDEF
          and r["exit_code"] == REACH | 0xABCDEF, r)

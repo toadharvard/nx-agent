@@ -80,7 +80,6 @@
     "obj.json"
    ],
    "objects_of": {
-    "except": [],
     "target": "guest",
     "origin": "native"
    }
