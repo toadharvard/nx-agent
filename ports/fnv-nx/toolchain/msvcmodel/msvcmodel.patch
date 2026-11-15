@@ -13,7 +13,7 @@
  
  /* This value is the amount of bytes a caller is allowed to drop the stack
     before probing has to be done for stack clash protection.  */
-@@ -149,9 +153,13 @@
+@@ -149,9 +153,17 @@
  /* Using long long breaks -ansi and -std=c90, so these will need to be
     made conditional for an LLP64 ABI.  */
  
@@ -26,6 +26,10 @@
  
 -#define PTRDIFF_TYPE	"long int"
 +#define PTRDIFF_TYPE	(TARGET_ILP32 ? "int" : "long int")
++
++/* fnv-nx msvcmodel: wint_t is unsigned short in the 32-bit Windows program
++   (cpp-docs c-runtime-library/is-isw-routines.md); GCC would give unsigned int.  */
++#define WINT_TYPE	(TARGET_ILP32 ? "short unsigned int" : "unsigned int")
  
  #define PCC_BITFIELD_TYPE_MATTERS	1
  
@@ -43,7 +47,45 @@
  			   original_size, errval);
 --- a/gcc/cp/class.cc
 +++ b/gcc/cp/class.cc
-@@ -5856,6 +5856,13 @@
+@@ -4525,6 +4525,27 @@
+   /* This is an empty base class.  We first try to put it at offset
+      zero.  */
+   tree offset = size_zero_node;
++  /* fnv-nx msvcmodel: Visual C++ places an empty base class at the running
++     offset of the class (after the bases and the vptr placed so far), and
++     adds one byte of padding between two consecutive empty bases (the
++     second one is placed one byte after the first, and the class then
++     continues from there), so that an empty base lands past the end of a
++     preceding non-empty base (cpp/empty-bases.md, "the default class
++     layout": Derived3 is 2 bytes, Derived4 is 8, Struct2 has its empty
++     base at offset 1).  An empty member is a one-byte member, never an
++     overlapped one, so only bases take this path.  */
++  if (TARGET_ILP32 && binfo && TREE_CODE (rli->t) != UNION_TYPE)
++    {
++      offset = eoc;
++      if (splay_tree_lookup (offsets, (splay_tree_key) offset))
++	{
++	  offset = size_binop (PLUS_EXPR, offset, size_one_node);
++	  rli->offset = size_binop (PLUS_EXPR, rli->offset,
++				    size_diffop (offset,
++						 rli_size_unit_so_far (rli)));
++	}
++      atend = !integer_zerop (offset);
++    }
+   if (TREE_CODE (rli->t) != UNION_TYPE
+       && layout_conflict_p (type,
+ 			    offset,
+@@ -4534,7 +4555,8 @@
+       /* That didn't work.  Now, we move forward from the next
+ 	 available spot in the class.  */
+       atend = true;
+-      offset = eoc;
++      if (!(TARGET_ILP32 && binfo))
++	offset = eoc;
+       while (1)
+ 	{
+ 	  if (!layout_conflict_p (type,
+@@ -5856,6 +5878,13 @@
    if (TYPE_HAS_NONTRIVIAL_DESTRUCTOR (type))
      return true;
  
@@ -99,7 +141,7 @@
      cookie_size = sizetype_size;
 --- a/gcc/config/aarch64/aarch64.cc
 +++ b/gcc/config/aarch64/aarch64.cc
-@@ -26736,7 +26736,11 @@
+@@ -26736,11 +26736,25 @@
    if (DECIMAL_FLOAT_MODE_P (mode))
      return default_decimal_float_supported_p ();
  
@@ -112,3 +154,83 @@
  	  ? true
  	  : default_scalar_mode_supported_p (mode));
  }
+ 
++/* fnv-nx MSVCMODEL1: under -mabi=ilp32 (the guest, the exe's 32-bit Visual C++ 2008 data model) bit-fields follow the Microsoft rules (MS docs "Padding and
++   Alignment of Structure Members": adjacent bit-fields share an allocation unit only if their integral types are the same size and the next one fits without
++   crossing the unit's boundary; "C Bit Fields": a bit-field does not straddle a storage unit, an unnamed zero-width field aligns to its base type).  The
++   generic implementation is stor-layout.cc place_field under targetm.ms_bitfield_layout_p, the same one i386 -mms-bitfields uses.  LP64 is untouched.  */
++static bool
++aarch64_ms_bitfield_layout_p (const_tree)
++{
++  return TARGET_ILP32;
++}
++
+ /* Set the value of FLT_EVAL_METHOD.
+    ISO/IEC TS 18661-3 defines two values that we'd like to make use of:
+ 
+@@ -27902,6 +27916,9 @@
+ #undef TARGET_RTX_COSTS
+ #define TARGET_RTX_COSTS aarch64_rtx_costs_wrapper
+ 
++#undef TARGET_MS_BITFIELD_LAYOUT_P
++#define TARGET_MS_BITFIELD_LAYOUT_P aarch64_ms_bitfield_layout_p
++
+ #undef TARGET_SCALAR_MODE_SUPPORTED_P
+ #define TARGET_SCALAR_MODE_SUPPORTED_P aarch64_scalar_mode_supported_p
+ 
+--- a/gcc/cp/decl.cc
++++ b/gcc/cp/decl.cc
+@@ -16714,7 +16714,20 @@
+ 	 enumeration.  We must do this before the type of MINNODE and
+ 	 MAXNODE are transformed, since tree_int_cst_min_precision relies
+ 	 on the TREE_TYPE of the value it is passed.  */
+-      signop sgn = tree_int_cst_sgn (minnode) >= 0 ? UNSIGNED : SIGNED;
++      /* fnv-nx MSVCMODEL1: under -mabi=ilp32 the underlying type of an enumeration without a fixed type is int, whatever the enumerators are
++	 (MS docs, /Zc:enumTypes: "Previously, such enumeration types always had an underlying type of int in the Microsoft compiler, regardless of
++	 enumerator values"; "C enumeration declarations": enumerator values have type int).  A value outside the range of int is an error, not a wider type.  */
++      bool msvc_enum = TARGET_ILP32;
++      if (msvc_enum
++	  && (tree_int_cst_lt (minnode, TYPE_MIN_VALUE (integer_type_node))
++	      || tree_int_cst_lt (TYPE_MAX_VALUE (integer_type_node), maxnode)))
++	{
++	  error ("enumerator value of %qT is outside the range of int, the "
++		 "underlying type of an enumeration in the target data model",
++		 enumtype);
++	  minnode = maxnode = integer_zero_node;
++	}
++      signop sgn = (msvc_enum || tree_int_cst_sgn (minnode) < 0) ? SIGNED : UNSIGNED;
+       int lowprec = tree_int_cst_min_precision (minnode, sgn);
+       int highprec = tree_int_cst_min_precision (maxnode, sgn);
+       int precision = MAX (lowprec, highprec);
+--- a/gcc/c/c-decl.cc
++++ b/gcc/c/c-decl.cc
+@@ -9657,14 +9657,25 @@
+      as one of the integral types - the narrowest one that fits, except
+      that normally we only go as narrow as int - and signed iff any of
+      the values are negative.  */
+-  sign = (tree_int_cst_sgn (minnode) >= 0) ? UNSIGNED : SIGNED;
+-  precision = MAX (tree_int_cst_min_precision (minnode, sign),
+-		   tree_int_cst_min_precision (maxnode, sign));
+-
+   bool wider_than_int =
+     (tree_int_cst_lt (minnode, TYPE_MIN_VALUE (integer_type_node))
+      || tree_int_cst_lt (TYPE_MAX_VALUE (integer_type_node), maxnode));
+ 
++  /* fnv-nx MSVCMODEL1: under -mabi=ilp32 the type of an enumeration without a fixed type is int, whatever the enumerators are (MS docs, /Zc:enumTypes:
++     "always had an underlying type of int in the Microsoft compiler, regardless of enumerator values"; "C enumeration declarations": enumerator values
++     have type int).  A value outside the range of int is an error, not a wider type.  */
++  bool msvc_enum = TARGET_ILP32 && !ENUM_FIXED_UNDERLYING_TYPE_P (enumtype);
++  if (msvc_enum && wider_than_int)
++    {
++      error ("enumerator value of %qT is outside the range of int, the "
++	     "type of an enumeration in the target data model", enumtype);
++      minnode = maxnode = integer_zero_node;
++      wider_than_int = false;
++    }
++  sign = (!msvc_enum && tree_int_cst_sgn (minnode) >= 0) ? UNSIGNED : SIGNED;
++  precision = MAX (tree_int_cst_min_precision (minnode, sign),
++		   tree_int_cst_min_precision (maxnode, sign));
++
+ 
+   if (!ENUM_FIXED_UNDERLYING_TYPE_P (enumtype))
+     {
