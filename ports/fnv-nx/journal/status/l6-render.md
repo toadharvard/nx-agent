@@ -908,3 +908,7 @@ Paused: w3b, w4, farm; no other work.
 - 15:28Z L6A revision: the FFP stages are per-stage rows (FFP_VS and FFP_PS × smooth and flat), and SHADER_CREATE takes {stage, row id}. The scale programs stay as linked rows.
     - Pairing rule (L6): one source, render/pair. A null VS or PS maps to the FFP row for the draw's SHADEMODE. sm_link enumerates nx_link_set over translator ∪ FFP stages.
     - w6 (next, after L6A's head): extend render/pair. Then w5 runs once.
+- 15:31Z w6 98cd75f28: done. d3d9_spec.json is the bridgefacts stage output D9_SPEC, and the committed file is deleted. bridgefacts and d3d9 green; d3d9total 332/332, self-test 45/45; D9_ROWS 514 (71cb85a7…).
+    - Open: w6 re-checks table_id from the stage output.
+    - Found: the platform root is red because the hostabi include is not admitted for guest. Unrelated to the spec; sent to L1.
+    - The L1 hand-off for w6-root is now 98cd75f28. The w5 head follows the next sm_link run.
