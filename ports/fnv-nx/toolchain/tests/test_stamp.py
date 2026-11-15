@@ -29,7 +29,7 @@ check = pb.Checks('test_stamp')
 
 def main():
     build_sh = open(os.path.join(TREE, 'toolchain', 'msvcmodel', 'build.sh')).read()
-    check('build.sh takes the key from stamp.py', re.search(r'^STAMP=\$\(python3 -I "\$HERE/stamp\.py"', build_sh, re.M) is not None)
+    check('build.sh takes the keys from stamp.py', re.search(r'^read -r K1 STAMP < <\(python3 -I "\$HERE/stamp\.py" --stages', build_sh, re.M) is not None)
     check('build.sh has no second computation of the key (no sha256sum of the input list)', not re.search(r'sha256sum\s+"\$MSVC_PATCH"', build_sh))
     k = stamp.stamp()
     cli = subprocess.run([sys.executable, '-I', os.path.join(TREE, 'toolchain', 'msvcmodel', 'stamp.py'),
@@ -48,15 +48,21 @@ def main():
             os.makedirs(os.path.dirname(os.path.join(other, i)), exist_ok=True)
             shutil.copyfile(os.path.join(TREE, i), os.path.join(other, i))
         check('the key depends on content only (the inputs copied to another directory give the same key)', stamp.stamp(other, recipe=recipe, verify=os.path.join(TREE, "verify")) == k)
+        k1, k2 = stamp.stages(other, recipe=recipe, verify=os.path.join(TREE, "verify"))
+        check('the two keys: K2 is the build key', k2 == k and k1 != k2)
         for i in stamp.INPUTS:
             with open(os.path.join(other, i), 'a') as f:
                 f.write('\n')
-            check('a changed input (%s) changes the key' % i, stamp.stamp(other, recipe=recipe, verify=os.path.join(TREE, "verify")) != k)
+            n1, n2 = stamp.stages(other, recipe=recipe, verify=os.path.join(TREE, "verify"))
+            check('a changed input (%s) changes the key' % i, n2 != k)
+            check('a changed %s input (%s) changes K1 exactly when it is a stage-1 input' % ('stage-1' if i in stamp.STAGE1_INPUTS else 'stage-2', i),
+                  (n1 != k1) == (i in stamp.STAGE1_INPUTS))
             shutil.copyfile(os.path.join(TREE, i), os.path.join(other, i))
         for i in plug:
             with open(os.path.join(other, i), 'a') as f:
                 f.write('\n')
-            check('a changed plugin file (%s) changes the key' % i, stamp.stamp(other, recipe=recipe, verify=os.path.join(TREE, "verify")) != k)
+            n1, n2 = stamp.stages(other, recipe=recipe, verify=os.path.join(TREE, "verify"))
+            check('a changed plugin file (%s) changes K2 and not K1 (the compiler is not rebuilt)' % i, n2 != k and n1 == k1)
             shutil.copyfile(os.path.join(TREE, i), os.path.join(other, i))
         # the values build.sh reads from the records: a changed runtime_configure / runtime_cflags / target / semantic flag changes the key
         vd = os.path.join(td, 'verify')
