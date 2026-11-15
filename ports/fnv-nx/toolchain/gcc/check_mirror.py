@@ -160,14 +160,19 @@ def c5(prefix, s2, gcc13, here, flags_dir=None, flags_commit=''):
         open(t + '/p.c', 'w').write(
             '#include <stddef.h>\nconst unsigned char fnvnx_probe[] = {sizeof(wchar_t), _Alignof(wchar_t), sizeof(size_t), '
             '_Alignof(size_t), sizeof(long), _Alignof(long), sizeof(long double), _Alignof(long double), sizeof(void *), '
-            '_Alignof(void *)};\n')
+            '_Alignof(void *)};\n'
+            '#include <float.h>\n#include <sys/config.h>\n'
+            'const unsigned char fnvnx_probe2[] = {LDBL_MANT_DIG, DBL_MANT_DIG,\n'
+            '#ifdef _LDBL_EQ_DBL\n1\n#else\n0\n#endif\n};\n')
         r = run([gcc] + FLAGS + ['-O0', '-c', t + '/p.c', '-o', t + '/p.o'])
         if r.returncode != 0:
             fail('C5 probe does not compile: ' + r.stderr.strip()[-300:])
             return
         dump = run([prefix + '/bin/%s-objdump' % TARGET, '-s', '-j', '.rodata', t + '/p.o']).stdout
-        hexs = ''.join(re.findall(r'^ [0-9a-f]{4} ((?:[0-9a-f]{2,8} ?)+)', dump, re.M)).replace(' ', '')[:20]
-        vals = [int(hexs[i:i + 2], 16) for i in range(0, 20, 2)]
+        hexs = ''.join(re.findall(r'^ [0-9a-f]{4} ((?:[0-9a-f]{2,8} ?)+)', dump, re.M)).replace(' ', '')
+        vals = [int(hexs[i:i + 2], 16) for i in range(0, 26, 2)]   # 10 data-model bytes, then LDBL_MANT_DIG, DBL_MANT_DIG, newlib's _LDBL_EQ_DBL
+    ldbl_mant, dbl_mant, newlib_eq = vals[10:13]
+    vals = vals[:10]
     names = ['wchar_t', 'size_t', 'long', 'long double', 'pointer']
     man = {
         'compiler': 'gcc %s' % run([gcc, '-dumpfullversion']).stdout.strip(),
@@ -178,6 +183,11 @@ def c5(prefix, s2, gcc13, here, flags_dir=None, flags_commit=''):
         'sizeof': {n: vals[2 * i] for i, n in enumerate(names)},
         'alignof': {n: vals[2 * i + 1] for i, n in enumerate(names)},
     }
+    # long double of the exe's compiler (VC++ 2008) is binary64: the runtime's size and mantissa are the compiler's own answers (the recipe compares them
+    # with the pinned compiler's before any unit runs), and newlib derives _LDBL_EQ_DBL from them: it is defined exactly when the mantissas are equal.
+    man['ldbl_mant_dig'], man['dbl_mant_dig'], man['newlib_ldbl_eq_dbl'] = ldbl_mant, dbl_mant, newlib_eq
+    if bool(newlib_eq) != (ldbl_mant == dbl_mant):
+        fail('C5 newlib _LDBL_EQ_DBL=%d but LDBL_MANT_DIG=%d, DBL_MANT_DIG=%d (it must follow from the compiler)' % (newlib_eq, ldbl_mant, dbl_mant))
     if man['compiler'] != 'gcc ' + gcc13:
         fail('C5 the game compiler is %s, not gcc %s' % (man['compiler'], gcc13))
     if man['sizeof']['wchar_t'] != 2 or man['sizeof']['size_t'] != 4 or man['sizeof']['pointer'] != 4:
