@@ -1370,3 +1370,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - Orchestrator: verify/targets.json (guest_platform, console_cpu) is L1's. w22 builds it after the listing pass; the restated fields are generated from it or deleted; L2's none-elf triplet reads it; PD-LOADER-SHA256-ISA reads console_cpu.
 - L6 defect (a concurrent external fetch raced, SM 0/171): the cause is closed by w24 98deaec70 publish_dir. w24 extends it to every store write, with a concurrent-build test.
 - w20u 3ee8cf755 accepted: objstub rule C (cite rows, noreturn kind, `|` sources, mixed bodies, noreturn-uncited).
+- w12h 01d2c125c accepted: guestlink reds derived files outside the runtime external and the multilib; ldref:<root> keyed stage for the linker-defined names.
+  - Open: guest.json = script only.
+  - Queue: loader generated tables, then the guest/host profile (L5's rule-2 census: compiler, runtime, plugins and flags restated 5-14 times across L5 roots); the profile is generated from targets.json + DATAMODEL + pins.
+- L2 crossing classes S12 PMF / S25 virtual base / S26 va_list go to w23, read from the DATAMODEL table.
