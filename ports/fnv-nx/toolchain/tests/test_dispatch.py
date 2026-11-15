@@ -102,6 +102,18 @@ def host(td, so):
         open(src, 'w').write(PRE + fn + '\n')
         r = pb.compile(src, os.path.join(td, 'form.o'), so)
         check('containment: %s is the error "HOST1: %s"' % (name, err), r.returncode != 0 and 'HOST1: ' + err in r.stderr, r.stderr[:800])
+    # HOST1: the macro is defined by the plugin and by nothing else; a slot whose type is named through another typedef is still a host slot
+    src = os.path.join(td, 'mac.cpp')
+    open(src, 'w').write('#ifndef __FNVNX_HOST_ATTR__\n#error "no host attribute macro"\n#endif\nint mac_ok(void) { return __FNVNX_HOST_ATTR__; }\n')
+    r = pb.compile(src, os.path.join(td, 'mac.o'), so)
+    check('__FNVNX_HOST_ATTR__ is defined by the semantic flags of a guest root (guest_compiler.json: plugins load in the CC stage, after preprocessing)', r.returncode == 0, r.stderr[:500])
+    src = os.path.join(td, 'alias.cpp')
+    open(src, 'w').write(PRE.replace('hslot open;', 'hslot2 open;').replace('typedef unsigned long long (*hfn1)',
+                         'typedef hslot hslot2;\ntypedef unsigned long long (*hfn1)') + 'unsigned long long a1(unsigned long long a) { return HCALL1(open, a); }\n')
+    r = pb.compile(src, os.path.join(td, 'alias.o'), so)
+    dis = pb.objdump(os.path.join(td, 'alias.o')) if r.returncode == 0 else ''
+    check('a slot typed through a second typedef is a host slot (no dispatch, plain blr)',
+          r.returncode == 0 and calls(body(dis, '_Z2a1y')) == 0 and re.search(r'\b(?:blr|br) x\d+', body(dis, '_Z2a1y')), r.stderr[:500] or body(dis, '_Z2a1y'))
     src = os.path.join(td, 'bad.cpp')
     open(src, 'w').write('typedef int __attribute__((fnvnx_host)) bad;\n')
     r = pb.compile(src, os.path.join(td, 'bad.o'), so)

@@ -203,9 +203,18 @@ static tree handle_host(tree *node, tree name, tree args, int, bool *no_add_attr
 static struct attribute_spec host_attr = { "fnvnx_host", 0, 0, false, true, false, false, handle_host, NULL };
 static void register_attrs(void *, void *) { register_attribute(&host_attr); }
 
-static bool host_type(tree t)
+
+/* HOST1: the attribute is on the type itself or on the typedef that names it (`typedef unsigned long long __attribute__((fnvnx_host)) hslot`: GCC
+ * keeps the typedef's own variant in DECL_ORIGINAL_TYPE of the TYPE_NAME, and the variant a field gets can be either of the two) */
+static bool host_attr_on(tree t)
 {
   return t && TYPE_P(t) && lookup_attribute("fnvnx_host", TYPE_ATTRIBUTES(t));
+}
+static bool host_type(tree t)
+{
+  if (host_attr_on(t)) return true;
+  tree n = t && TYPE_P(t) ? TYPE_NAME(t) : NULL_TREE;
+  return n && TREE_CODE(n) == TYPE_DECL && host_attr_on(DECL_ORIGINAL_TYPE(n));
 }
 
 /* a slot, or an array of slots (the array field's elements are slots) */
