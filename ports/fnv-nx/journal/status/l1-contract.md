@@ -1139,3 +1139,14 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - the `run` stage + `{stage}` ref;
     - `host_cpu: CPUREF`: the key takes the reference host identity, and the stage is red on any other host;
     - libubsan1 through setup_verdict_env.sh for the `root@ubsan` variant used by proof/backends.py.
+
+### 2026-11-15 00:20 — w6 run stage, ASM-213/214
+- w6 (session_01KmtZKQbpDKvc9qzXT9bLHX):
+  - done: claude/fnv-l1-contract-w16c1-run 1f912ad30. It adds the generator-read rule with ro_root, stage kind `run` and the {stage} resolve_input ref. test_recipe.py 100/100 at 2a9a95b4a; the verdict on 2c7e65a4a is pending. It goes to w15 cand1, after w15d.
+  - Ruled: a run exe starts through its PT_INTERP inside the declared debs, with no hard-coded path. The build-machine /lib/ld64.so.1 is w12h item 1's defect (driver `-###`).
+  - Doing: host_cpu via verify/cpuref.json (the /proc/cpuinfo fields; mismatch red). Values from L3a.
+  - Doing: libubsan1 14.2.0-4ubuntu2~24.04.1 via setup_verdict_env.sh, for `root@ubsan`.
+- L3a 4681c9634 FOP/FCS/FDS as guest state. The mechanism is accepted. Removal of ASM-213/214 waits on one commit with three parts:
+  - the stale comment text;
+  - static_assert FNVL_MAX_BASIC < 7: the declared CPU has no leaf 7, so EBX[6]/[13] are 0 and SDM 8.1.8 stores the pointers per instruction;
+  - the retired records plus the l3b aliases.
