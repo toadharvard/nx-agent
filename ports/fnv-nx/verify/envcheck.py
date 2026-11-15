@@ -48,6 +48,7 @@ M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n" 
 PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
               "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
+RUN_LAYOUT_DEB = "base-files"   # the machine's root layout (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin): every `run` stage of recipe.py mounts its symlink members
 RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
     """Every file of the plugin directory of compiler GCC (`gcc -print-file-name=plugin`: the gcc-N-plugin-dev package of a distro compiler)."""
@@ -244,6 +245,45 @@ def _root_compilers(repo=None):
     return sorted(out)
 
 
+READROOTS = os.path.join(HERE, "readroots.json")
+
+def read_roots(repo):
+    """[(root name, cwd, [system header path read], error or None)] for every root of verify/readroots.json whose cwd exists in REPO:
+    `gcc -M` of the root's flags and sources (globs expanded in its cwd); a root whose sources are not all in the checkout is skipped. The headers are the dependencies under
+    /usr (what the preprocessor read); an error is the first lines of gcc's diagnostics (a header that is not installed)."""
+    import glob
+    try:
+        roots = json.load(open(READROOTS))["roots"]
+    except (OSError, ValueError, KeyError):
+        return []
+    out = []
+    for r in roots:
+        cwd = os.path.join(repo, r["cwd"])
+        if not os.path.isdir(cwd):
+            continue
+        srcs = [sorted(glob.glob(os.path.join(cwd, g))) for g in r["sources"]]
+        if not all(srcs):   # the root's sources are not in this checkout (its branch has not landed): nothing to read
+            continue
+        args = r["flags"] + [os.path.relpath(x, cwd) for g in srcs for x in g]
+        p = subprocess.run(["gcc", "-M"] + args, cwd=cwd, capture_output=True, text=True)
+        if p.returncode != 0:
+            out.append((r["name"], cwd, [], p.stderr.strip().splitlines()[0] if p.stderr.strip() else "gcc -M failed"))
+            continue
+        toks = [t for t in p.stdout.replace("\\\n", " ").split() if not t.endswith(":")]
+        out.append((r["name"], cwd, sorted({os.path.realpath(os.path.join(cwd, t)) for t in toks if os.path.realpath(os.path.join(cwd, t)).startswith("/usr/")}), None))
+    return out
+
+def read_owner_packages(repo):
+    """The packages that own the system headers the read roots read (what snapshot pins): for each header its owners, the first by name
+    when several; headers of packages already chosen cost nothing."""
+    own, pk = _owners(), set()
+    for _, _, hs, _ in read_roots(repo):
+        for h in hs:
+            o = own.get(h, set())
+            if o and not (o & pk):
+                pk.add(sorted(o)[0])
+    return pk
+
 def check(doc, repo=None):
     """List of mismatch lines (empty = the machine is the declared environment)."""
     bad = []
@@ -297,6 +337,12 @@ def check(doc, repo=None):
         files = HOST_GCC_PLUGIN_DIRS(shutil.which(drv) or drv)
         miss = sorted({p for f in files for p in [sorted(own.get(os.path.realpath(f), {"no package"}))[0]] if p not in doc["packages"]})
         cmp("plugin headers of " + drv, "owned by listed packages", "no plugin headers" if not files else ("owned by %s" % miss if miss else "owned by listed packages"))
+    pinned, own = pinned_set(doc["packages"]), own
+    for name, cwd, hs, err in read_roots(repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):
+        if err:
+            bad.append("env: read root %s: %s" % (name, err))
+        foreign = sorted({(h, sorted(own.get(h, {"no package"}))[0]) for h in hs if not (own.get(h, set()) & pinned)})
+        bad += ["env: read root %s reads %s, owned by %s (not a package of env.json)" % (name, h, o) for h, o in foreign]
     for need in doc["kernel"]["needs"]:
         ok = need in PROBES and PROBES[need]()
         cmp("kernel " + need, "available", "available" if ok else ("unavailable" if need in PROBES else "unknown capability"))
@@ -360,6 +406,11 @@ def snapshot(prev=None):
     dyn = sysconfig.get_config_var("DESTSHARED")
     roots = [py] + [f for d in [dyn] + mods for f in runtime.elf_files(d, runtime.ident(py))]
     loads(roots, [os.path.dirname(os.__file__), os.path.dirname(os.path.dirname(py))] + mods)
+    for name, _cwd, hs, err in read_roots(os.path.dirname(os.path.dirname(os.path.dirname(HERE)))):   # the system headers that the host roots read (readroots.json)
+        if err:
+            raise SystemExit("envcheck: read root %s: %s" % (name, err))
+        for h in hs:
+            add(h)
     for prog in PROGRAMS:
         real = os.path.realpath(shutil.which(prog) or sys.exit("envcheck: program %s not in PATH" % prog))
         add(real)
@@ -406,6 +457,9 @@ def snapshot(prev=None):
         loads([os.path.realpath(hit[0])])
     for f in RENDER_FILES:
         add(f)
+    if _dpkg(RUN_LAYOUT_DEB) is None:   # the run stage's root layout (recipe.MACHINE_LAYOUT_DEB): its files are read by every run stage
+        raise SystemExit("envcheck: %s is not installed" % RUN_LAYOUT_DEB)
+    pk.add(RUN_LAYOUT_DEB)
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t, pinned_set(pk), file_owners()) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
