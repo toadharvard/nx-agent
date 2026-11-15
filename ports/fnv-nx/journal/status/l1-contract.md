@@ -1922,3 +1922,8 @@ bottleneck: the cand3 head (w12), and the cand2 merge (w15).
     - store-merge, export and import require --store, which fixes recipe.py:3468 and :3472.
   - Tests: test_gate_abspath 21 PASS, test_gate_liftfacts 0 FAIL. Not yet run through the verdict on a farm.
 bottleneck: the cand3 head (w12), and the cand2 merge (w15).
+- 23:03 abspath at w28 632a45447 has 0 findings in verify/, and 12 in 6 other files:
+  - L3a: lift/fnvlift, 3 files;
+  - L6: gen_env.py, res_smgen.py, and gate_d3d9total.py (4 literals, including the host probes of clang, gcc and git).
+  Sent to L6 for its cand4 head.
+bottleneck: the cand3 head (w12), and the cand2 merge (w15).
