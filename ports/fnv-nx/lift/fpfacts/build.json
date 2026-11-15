@@ -64,7 +64,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "fpstate/exe/fcw_loads.tsv",
@@ -85,7 +86,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "fpstate/atimgpud/fcw_loads.tsv",
@@ -106,7 +108,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "fpstate/binkw32/fcw_loads.tsv",
@@ -127,7 +130,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "fpstate/d3dx9_31/fcw_loads.tsv",
@@ -148,7 +152,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "fpstate/d3dx9_38/fcw_loads.tsv",
@@ -169,7 +174,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "fpstate/gdffalloutnv/fcw_loads.tsv",
@@ -190,7 +196,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "fpstate/libvorbis/fcw_loads.tsv",
@@ -211,7 +218,8 @@
     "/in/ports/fnv-nx/lift"
    ],
    "inputs": [
-    "ports/fnv-nx/lift/fnvlift"
+    "ports/fnv-nx/lift/fnvlift",
+    "ports/fnv-nx/verify/cpuid_model.json"
    ],
    "outputs": [
     "fpstate/libvorbisfile/fcw_loads.tsv",
