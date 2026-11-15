@@ -17,10 +17,10 @@ test/cpufeat_check.py lists, over every instruction of every module, the forms w
 
 # feature -> (CPUID leaf, register, bit): DERIVED from the generated table (inputs 'cpufeat', L3b cpuid_feature_bits.tsv), never written here.
 # Rule: a feature's gate is its row in a CPUID feature-flag leaf (1, 7, 0x80000001); where the table cites both Intel SDM and AMD APM for one feature, the Intel row decides (the declared
-# machine's CPU is Intel-documented, source order of CLAUDE.md); several distinct remaining rows, or no row, is an error at load (never a silent default).
+# machine's CPU is Intel-documented, source order of CLAUDE.md); several remaining rows that differ in register or bit, or no row, is an error at load; the same register and bit in two flag leaves counts as one row (lowest leaf) (never a silent default).
 FLAG_LEAVES = (1, 7, 0x80000001)
 # the name of a feature in this file -> its name in the table (the table's own spelling, Intel SDM / APM)
-TABLE_NAME = {'CX8': 'CMPXCHG8B', 'SSE4.1': 'SSE4_1', 'SSE4.2': 'SSE4_2', 'AES': 'AESNI', '3DNOW': '3DNow!', '3DNOWEXT': '3DNowExt'}
+TABLE_NAME = {'CX8': 'CMPXCHG8B', 'SSE4.1': 'SSE4_1', 'SSE4.2': 'SSE4_2', 'AES': 'AESNI', '3DNOW': '3DNow', '3DNOWEXT': '3DNowExt'}
 
 
 def _load_table(want):
@@ -35,8 +35,9 @@ def _load_table(want):
     out = {}
     for f, rs in rows.items():
         pick = [r for r, intel in rs if intel] or [r for r, intel in rs]
-        if len(set(pick)) != 1:
+        if len({(reg, bit) for leaf, reg, bit in pick}) != 1:
             raise ValueError('cpufeat: feature %s has several flag rows %s' % (f, sorted(set(pick))))
+        pick = [min(pick)]      # the same register and bit in leaf 1 and in 0x80000001 (AMD alias): the basic leaf is the gate, as the declared CPU answers both identically
         out[f] = pick[0]
     return out
 

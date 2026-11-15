@@ -271,16 +271,16 @@ def main():
     A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--l3', default=None)
     A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
     A('--gen', help='the GEN output of the lift/rt root (generated headers of the prelude)'); A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
-    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
+    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--cpufeat', help='the CPUID feature-bit table (L3b cpuid_feature_bits.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)
-    need = ['out'] + (['universe', 'gen'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
+    need = ['out'] + (['universe', 'gen'] if a.finish else ['fpstate', 'fpdepth', 'x86sys', 'cpufeat', 'certs'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']))      # --finish merges texts and reads no lifter input but the universe files
     miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
     if miss: ap.error('missing %s' % ' '.join(miss))
     a.base = None
     if a.module: module_inputs(a)
     import fnvlift
-    fnvlift.inputs.configure(**({'universe': a.universe} if a.finish else dict(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys)))
+    fnvlift.inputs.configure(**({'universe': a.universe} if a.finish else dict(universe=a.universe, fpstate=a.fpstate, fpdepth=a.fpdepth, x86sys=a.x86sys, cpufeat=a.cpufeat)))
     os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)
     elif a.shard: shard(a)
