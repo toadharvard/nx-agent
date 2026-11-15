@@ -364,6 +364,57 @@ class TableCells(unittest.TestCase):
     def test_fprem_table_1_27(self): self.prem('fprem', ('d9', 'reg', 7, 0), False)
     def test_fprem1_table_1_28(self): self.prem('fprem1', ('d9', 'reg', 6, 5), True)
 
+class StoresBcd(unittest.TestCase):
+    """SDM 2A:FBSTP Table 1-15 and the FBLD/FILD/FIST/FST value paths, cell by cell (exact class on the image)"""
+    FBSTP = ('df', 'mem', 6, None)
+    def st(self, v, key, fcw=0x037F):
+        o = run(key, state([v], fcw=fcw)); return val(o.mem), val(o.raised)
+    def test_fbstp_table_1_15(self):
+        bcd = lambda sign, n: (sign << 79) | int(str(n), 16)                                        # packed BCD digits of n
+        ind = 0xFFFFC000000000000000
+        cases = [(float('-inf'), ind, 1), (float('inf'), ind, 1), (NAN, ind, 1), (1e18, ind, 1), (-1e18, ind, 1),          # '*': -inf, +inf, NaN, too large
+                 (-5.0, bcd(1, 5), 0), (5.0, bcd(0, 5), 0), (-0.0, bcd(1, 0), 0), (0.0, bcd(0, 0), 0),                      # F <= -1: -D; +-0 keep the sign
+                 (-0.25, bcd(1, 0), 0x20), (0.25, bcd(0, 0), 0x20),                                                          # '**': +-0 or +-1 by rounding, with #P
+                 (999999999999999999.0, ind, 1)]                                                                             # 10^18 - 1 is not a binary64 value: it rounds to 10^18, too large
+        for v, want, fl in cases:
+            got, raised = self.st(v, self.FBSTP)
+            self.assertEqual(got, want, v); self.assertEqual(raised & 0x21, fl & 0x21, v)
+        for rcv, want in ((0, bcd(1, 0)), (1, bcd(1, 1)), (2, bcd(1, 0)), (3, bcd(1, 0))):                                    # -0.25 under RC nearest, down, up, zero
+            self.assertEqual(self.st(-0.25, self.FBSTP, 0x037F | rcv << 10)[0], want, rcv)
+        for rcv, want in ((0, bcd(0, 0)), (1, bcd(0, 0)), (2, bcd(0, 1)), (3, bcd(0, 0))):                                    # +0.25
+            self.assertEqual(self.st(0.25, self.FBSTP, 0x037F | rcv << 10)[0], want, rcv)
+    def test_fbstp_unsupported_and_empty(self):
+        o = run(self.FBSTP, state([('img', 0xFFFF0000000000000001)]))                                                         # an MMX write: unsupported
+        self.assertEqual((val(o.mem), val(o.raised) & 1), (0xFFFFC000000000000000, 1))
+    def test_fbld_roundtrip(self):
+        for img_digits, want in ((0x123456789012345678, 123456789012345678), (0x80000000000000000045, -45)):
+            o = X.execute(('df', 'mem', 4, None), state([]), K(img_digits, 80), None, None)
+            r = val(z3.Select(o.s.R, K(7, 3)))
+            sign, e, sig = r >> 79, (r >> 64) & 0x7FFF, r & (2**64 - 1)
+            mag = Fraction(sig) * Fraction(2) ** (e - 16383 - 63)
+            self.assertEqual((-1 if sign else 1) * mag, want)                                                                      # exact
+            self.assertEqual(val(o.raised), 0)                                                                                  # FBLD raises nothing for decimal digits
+    def test_fist_ranges(self):
+        for n, key in ((16, ('df', 'mem', 2, None)), (32, ('db', 'mem', 2, None))):
+            hi, lo = 2 ** (n - 1) - 1, -(2 ** (n - 1))
+            for v, want, ie in ((float(hi), hi, 0), (float(lo), lo, 0), (hi + 0.5, 1 << (n - 1), 1), (lo - 0.75, 1 << (n - 1), 1), (float(hi + 1), 1 << (n - 1), 1),
+                                (-0.5, 0, 0), (0.5, 0, 0), (1.5, 2, 0), (2.5, 2, 0)):                                         # RNE: ties to even
+                got, raised = self.st(v, key)
+                self.assertEqual((got & ((1 << n) - 1), raised & 1), (want & ((1 << n) - 1), ie), (n, v))
+    def test_fst_m32_m64_cells(self):
+        f32 = lambda f: struct.unpack('<I', struct.pack('<f', f))[0]
+        big80 = ('img', 0x7FFE8000000000000000)                                                                              # about 2^16383: overflows both
+        for v, w32 in ((1.5, f32(1.5)), (-0.0, 0x80000000), (float('inf'), 0x7F800000)):
+            self.assertEqual(self.st(v, ('d9', 'mem', 2, None))[0], w32, v)
+        got, raised = self.st(big80, ('d9', 'mem', 2, None)); self.assertEqual((got, raised & 0x28), (0x7F800000, 0x28))      # OE and PE, infinity under RNE
+        got, raised = self.st(big80, ('dd', 'mem', 2, None)); self.assertEqual((got, raised & 0x28), (0x7FF0000000000000, 0x28))
+        for rcv, want in ((3, 0x7F7FFFFF), (1, 0x7F7FFFFF), (2, 0x7F800000)):                                                # positive overflow under RC zero, down, up
+            self.assertEqual(self.st(big80, ('d9', 'mem', 2, None), 0x037F | rcv << 10)[0], want, rcv)
+        got, raised = self.st(('img', 0x7FFFA000000000000000), ('dd', 'mem', 2, None))                                          # an SNaN image: IE and the quieted NaN
+        self.assertEqual((got >> 51 & 0x1FFF, raised & 1), (0xFFF, 1))
+        got, raised = self.st(('img', 0x00000000000000000001), ('dd', 'mem', 2, None))                                          # 80-bit denormal: zero with #U and #P
+        self.assertEqual((got, raised & 0x30), (0, 0x30))
+
 class NanRule(unittest.TestCase):
     """SDM 1:T4-8, x87 column, every row, through FADD ST(0), ST(1): (ST(0), ST(1)) -> result"""
     QA, QB = 0x7FF8000000000005, 0x7FF8000000000007         # QNaNs, B has the larger significand

@@ -108,3 +108,13 @@ The quote is on the key's PDF page or one of the next two (an instruction's Oper
 | 1906 | 251 | 1:9.6.2 | `writes ... to the exponent part ... (bits 64 through 79)` |
 | 1930 | 250 | 1:9.4.8 | `setting the tags in x87 FPU tag word to 11B` |
 | 1931 | 250 | 1:9.5.1 | `The EMMS instruction ... sets the entire x87 FPU tag word to empty (11B).` |
+
+## Update: carrier revision, table cells, NaN rule, stores and BCD (branch claude/fnv-l3b-lift-w9, tests/test_x87spec.py 44 tests OK)
+- Carrier: the spec register is the exact 80-bit image (x87spec.py header). Exact class on the image: FLD m80, FLD ST(i), FXCH, FCMOV, FST ST(i), FSTP m80, FCHS, FABS, FXAM, the FCOM family, FTST, FICOM, FRNDINT, FIST, FBSTP, FST m32/m64, FILD, FBLD, the constant loads (a 64-bit significand under RC, SDM 1:8.3.4), FSAVE, FRSTOR, FNSTENV. Binary64 class (OWNER 8): arithmetic and transcendentals read `view64(image, FCW.RC)` and write `to_m80(result)`. `dsl_pre`, `supported_m80`, `from_m80` and `tag_of_value` are deleted.
+- An unsupported encoding (an MMX write can leave one) is the invalid operation. Arithmetic: IE without SF, indefinite, C1 = 0. Compare: IE and 111. FST m32/m64, FIST, FBSTP, FRNDINT: IE and the indefinite. FXAM: class 000.
+- Table cells now tested (SDM Vol. 2A): FSIN 1-31, FPTAN 1-29, FSINCOS 1-32, F2XM1 1-12, FPREM 1-27, FPREM1 1-28, plus FBSTP 1-15. No spec defect was found by these cells (the failures during the work were test-side: the image carrier, a `|` separator inside a row, FPTAN's push).
+- Table 4-8 (x87 column), all 8 rows as tests (class NanRule). One gap in the SDM: two NaNs of equal significand and different sign. The result is the admissible choice `nd.nan.tie`, in CERTS.md. The larger significand is read on the binary64 view (OWNER 8).
+- Admissible choices added: `nd.f2xm1.out` (F2XM1 outside -1..+1, the SDM says undefined) and `nd.nan.tie`. The `extra_pre` of F2XM1 is deleted.
+- Deviations from the SDM kept (OWNER 8): arithmetic operands are read rounded to binary64, so FCW.PC = 10B and 11B behave alike; #D of an arithmetic operand is by the binary64 view; a binary64-subnormal result is a normal in the image (tag valid, not special).
+- Preconditions that remain: FBLD digits above 9 (SDM: undefined result) and unmasked OE/UE of an arithmetic-class result (`ou_pre`, the lifter's fact that FLDCW/FLDENV/FRSTOR/FXRSTOR sites keep exceptions masked).
+- fault_kind reads fnvlift/faults.py (the codes of faults.json); the local numbers 12..18 are deleted.
