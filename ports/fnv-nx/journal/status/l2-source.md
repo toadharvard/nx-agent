@@ -131,3 +131,8 @@ Orchestrator decision: -fstack-reuse=none in the guest semantic flag set (L1 fla
   - (2) 500 non-frame plain accesses (minimp3 L3_imdct12 etc.). Waiting for w23's split. Hypothesis: accesses created after order, so the rule would be about pass placement.
 - 2026-11-15 00:58 gate_order: all 2,368 uncertified accesses fall in two classes, (1) escaping locals 1,868 (w1 escape) and (2) non-frame plain accesses 500 (waiting for w23's split). Nothing else is open in the gate.
 - 2026-11-15 01:00 L1 accepts the escape rule (b). Class (2) must also cover accesses created at RTL (cpymem/setmem, store merging, combine/ldp). Candidate: possibly-shared accesses leave GIMPLE as atomic or volatile MEMs, and each RTL pass is shown from source to refuse them; any pass that doesn't gets a final RTL check that is a hard error. Decided with w23's split.
+- 2026-11-15 01:03 gate_order class (2), 500 accesses (w23's split): scalar loads 201, scalar stores 201, vector 37, FP 28, ldxr/stxr 23, pairs 10. Decided with L1, assigned to w2:
+  - the placement rule: order's rewrite is the last GIMPLE pass (cited from passes.def), possibly-shared accesses become atomic or volatile MEMs;
+  - the RTL passes' refusals cited file:line in toolchain/order/README.md, with a hard-error final RTL check for any pass without one;
+  - atomics to the x86 mapping.
+  Status: doing.
