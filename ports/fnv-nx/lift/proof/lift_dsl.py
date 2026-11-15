@@ -11,8 +11,7 @@ Mapping of the Form's state to the lifter's:  eax..edi, cf pf af zf sf of df = t
 fs_base = `fsb`; flo (the other EFLAGS bits) = c->eflx | IF (EFL_PUSH/EFL_POP keep AC and ID there; user mode has IF set);
 memory = M8/M16/M32 (core's macros).  DEF0: a flag a form declares undefined is assigned 0, and a flag write with `when` w is `w ? v : 0`; DEFPRIOR: a register write with `when` is conditional, so a register the model leaves free keeps its prior value.
 
-Faults (Form.faults) raise through f_flow.raise_site like int3/ud2 and the hand div: code 1 (#DE) is FNVL_DE0 when the failing disjunct is the
-divisor-zero test `eq(x, 0)` and FNVL_DEOVF otherwise (the quotient overflow); every other kind's runtime code is the same number, a row of fnvlift/faults.json.
+Faults (Form.faults) raise through f_flow.raise_site like int3/ud2 and the hand div: code 1 (#DE) is FNVL_DE0, the one row for every #DE; every other kind's runtime code is the same number, a row of fnvlift/faults.json.
 
 Control transfer is derived from the Form's eip node by structure: constant == next address -> falls through; another constant -> `call` pushes
 (the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,
@@ -57,19 +56,8 @@ def varc(cx):
 
 
 def de_code(n, ref):
-    """C expression of the hardware code of a #DE whose condition node is n: the disjuncts are tried in order, a divisor-zero test `x == 0` is FNVL_DE0"""
-    ds, st = [], [n]
-    while st:
-        d = st.pop()
-        if d.op == 'or':
-            st.extend(reversed(d.a))
-        else:
-            ds.append(d)
-    k = ['FNVL_DE0' if d.op == 'eq' and d.a[1].op == 'const' and d.a[1].x == 0 else 'FNVL_DEOVF' for d in ds]
-    e = k[-1]
-    for d, c in zip(reversed(ds[:-1]), reversed(k[:-1])):
-        e = '%s ? %s : %s' % (ref(d), c, e)
-    return e
+    """C expression of the hardware code of a #DE: the one row FNVL_DE0 (Wine 9.0 fpe_handler TRAP_x86_DIVIDE reports every #DE, the quotient overflow too, as STATUS_INTEGER_DIVIDE_BY_ZERO)"""
+    return 'FNVL_DE0'
 
 
 # The fault map: every fault code a Form can raise (dsl.FAULTS, the enum) -> (runtime code of rt/fnvl.h, the address the runtime is given relative to the instruction, trap).

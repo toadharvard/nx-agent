@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Generate the reference-CPU facts of the lift runtime from the ONE record (verify/cpuref.json: the identity) and the pinned cpuid data (verify/cpuid_model.json):
-  rt/fnvl_cpuref.h   FNVL_CPUREF_FAMILY/MODEL/STEPPING, FNVL_CPUID1_EAX (SDM Vol 2A cpuid leaf 1 encoding of the identity), FNVL_CPUID1_ECX/EDX, FNVL_MAX_BASIC (included by rt/fnvl_abi.h)
-  rt/rcpref.h        FNVL_RCP_REF_VENDOR/FAMILY/MODEL/STEPPING (proof/gate_fpexact.py reads exactly these four defines)
-  rt/cpumodel_tab.inc  the vendor, leaf 2/4, 0x80000001 and brand tables of rt/cpumodel.c
-Deterministic.   gen_cpuref.py [--check]"""
+  fnvl_cpuref.h   FNVL_CPUREF_FAMILY/MODEL/STEPPING, FNVL_CPUID1_EAX (SDM Vol 2A cpuid leaf 1 encoding of the identity), FNVL_CPUID1_ECX/EDX, FNVL_MAX_BASIC (included by rt/fnvl_abi.h)
+  rcpref.h           FNVL_RCP_REF_VENDOR/FAMILY/MODEL/STEPPING (proof/gate_fpexact.py reads exactly these four defines)
+  cpumodel_tab.inc  the vendor, leaf 2/4, 0x80000001 and brand tables of rt/cpumodel.c
+Deterministic, standalone (reads only the two records).   gen_cpuref.py OUTDIR  (recipe stage: inputs the two records of verify/; outputs gen/<the three files>)"""
 import json, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE); VER = os.path.join(os.path.dirname(LIFT), 'verify')
-ref = json.load(open(os.path.join(VER, 'cpuref.json'))); mod = json.load(open(os.path.join(VER, 'cpuid_model.json')))
+def record(name):
+    """a tracked record of verify/: from the recipe stage's input mount /in when it exists, else from the tree of this file"""
+    rel = 'ports/fnv-nx/verify/' + name
+    for root in ('/in', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', '..')):
+        if os.path.exists(os.path.join(root, rel)): return json.load(open(os.path.join(root, rel)))
+    raise SystemExit(name + ' not found')
+ref = record('cpuref.json'); mod = record('cpuid_model.json')
 I = lambda x: int(x, 0) if isinstance(x, str) else x
 def le32(s): return int.from_bytes(s.encode().ljust(((len(s) + 3) // 4) * 4, b'\0'), 'little')
 def words(s, n):
@@ -42,13 +47,8 @@ def tab():
     o.append('static const u32 E1[4] = { %s };' % ', '.join(hx(x) for x in E1))
     o.append('static const u32 BRAND[3][4] = { %s };      /* "%s" */' % (', '.join('{ ' + ', '.join(hx(x) for x in b[4 * i:4 * i + 4]) + ' }' for i in range(3)), ref['model_name']))
     return '\n'.join(o) + '\n'
-FILES = {os.path.join(LIFT, 'rt', 'fnvl_cpuref.h'): abi, os.path.join(LIFT, 'rt', 'rcpref.h'): rcp, os.path.join(LIFT, 'rt', 'cpumodel_tab.inc'): tab}
-def main():
-    bad = 0
-    for p, f in FILES.items():
-        t = f()
-        if '--check' in sys.argv:
-            if not os.path.exists(p) or open(p).read() != t: print('STALE', p); bad = 1
-        else: w(p, t)
-    return bad
-if __name__ == '__main__': sys.exit(main())
+FILES = {'fnvl_cpuref.h': abi, 'rcpref.h': rcp, 'cpumodel_tab.inc': tab}
+def main(a):
+    os.makedirs(a[0], exist_ok=True)
+    for n, f in FILES.items(): w(os.path.join(a[0], n), f())
+if __name__ == '__main__': main(sys.argv[1:])
