@@ -386,3 +386,5 @@ After the first frame:
   - the site word as a typed record {u32 fp; entry} with 64-bit acquire/release, so there is no u32<->entry conversion anywhere;
   - a rerun under the pinned env (setup_verdict_env.sh, not a swapped env.json).
   - Ruling to w8: no blessed int->entry constructor. The dispatch table becomes typed C data `fnvl_disp_entries[] = {&fn...}` (L3a generator); lift/rt takes ENTRY1 through cand3.
+- ENTRY1 paths closed: w2 @c3a2c9c35, test_dispatch_entry 24, under the pinned env. The typed site record is pending.
+- Plugin branch @c004aaf84 (w3): realobj rule-2 fix; order_cont, local and tags pass. Toolchain set, global over the branch's tests: 11 ok; test_ftoi 1/30 and test_ldbl 6/67 red, and test_order_fold red on long double access counts. All three wait for the MLIB1 pin; their expectations move to DATAMODEL's long double row (w3 ftoi, w2 order_fold). w8's plugbuild commit 9e10eb367 is not taken (it writes `{}` args into every entry).
