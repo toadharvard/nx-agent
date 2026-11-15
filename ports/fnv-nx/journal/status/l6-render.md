@@ -685,3 +685,15 @@ Paused: w3b, w4, farm; no other work.
     - d3d9total 332/332 before and after; mutations not killed: 0.
     - gate_admit on w6-root is red, 0/1101 (the L1 tlsmodel gate is not named). The candidate rebase fixes it.
     - w6: merge del2, then w1b 819716297/5bc689044, then rebase onto cand2.
+- 01:02Z w1b
+    - del2 self-test 45/45 killed, PASS.
+    - 61d4e879a: the KEY reduction at the translate entry. No NONKEY bit reaches the GLSL (grep of every use). sdp.c is in translator/src; the guest root has 8 objects. Open: delete the old copy.
+    - BeginPass4 citations (msdocs 3fb42a59):
+        - equal to D3D9: 1a, 2, 4a;
+        - silent: 1b, 3, 4b, 5;
+        - looser: MRT bit depth (cap set) and MSAA MRT.
+    - Next: mirror MicrosoftDocs/sdk-api d3d9 → tools/msdocs-sdkapi-d3d9, to settle 1b (ASM-628).
+- 01:02Z w6
+    - caps: env_*.tsv is the single source (PrimitiveMiscCaps 0x2ecff2, MRTINDEPENDENTBITDEPTHS set; NumSimultaneousRTs 4).
+    - Next: gen/env_caps.gen.h plus a static_assert against the nxgpu4 maximum.
+    - #7: d3d9_enums.gen.h generated; d3d9total 332/332.
