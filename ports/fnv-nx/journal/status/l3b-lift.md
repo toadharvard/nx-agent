@@ -313,3 +313,4 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Open: ehoracle's --modules change has not been run (pefile missing). lift/tools/udcert.py is L3a's file at bd94fd02, carried byte-identical until L3a's branch merges.
 - 20:45Z correction: the 44 reserved-encoding sites get no assumed #UD. L3a points out, rightly, that the declared-CPU rule clears features, not reserved encodings, and that real parts execute Grp2 /6 as SHL and Grp3 /1 as TEST. They stay their own class with no semantics; the source will be the Sail model's decode (OWNER 9). L3a and L3b decide it after the first frame (udcert is parked under the owner order of integ 5c3e8e289).
 - 20:45Z v3 shard 6/54 done (farm 05): proved 333, gap 13, failed 0. Complete: 30/54.
+- 20:45Z v3 shard 22/54 done (farm 07): proved 339, gap 6, failed 0. Complete: 31/54.
