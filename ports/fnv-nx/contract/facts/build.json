@@ -75,7 +75,7 @@
     "--units",
     "/ext/units/units.json",
     "--msvc",
-    "/ext/msvc/obj",
+    "/ext/msvc",
     "--out",
     "/out/n1.json"
    ],
