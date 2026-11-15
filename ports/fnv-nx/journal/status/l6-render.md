@@ -786,3 +786,7 @@ Paused: w3b, w4, farm; no other work.
     - Package 019: 815 shaders, 52,160 stage and 102,616 link certificates, 0 red; the certificate set equals the expected one.
     - Roots sm_link_stage, sm_link_prog and sm_link_sum (8 shards each) admitted; cold run in progress.
     - Doing: one source for the declared pairs (nx_sm_pairs to render/pair, or translator reflection; no copy); the ALL_FLAGS/KEY X-macro (taken over from w1b).
+- 10:03Z Declared pairs, one source (rule 2). The single function is d3d9's C++ scanner (nx_sm_check → nx_sm_pairs).
+    - Decision: w6 converts it to C as root render/smscan (guest and host, fixed-width interface, size static_asserts); d3d9 and the sm_link checker link it.
+    - Rejected: a translator reflection copy (a second source) and an equality gate.
+    - w5: ALL_FLAGS X-macro and L design meanwhile.
