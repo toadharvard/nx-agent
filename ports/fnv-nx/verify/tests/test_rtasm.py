@@ -22,12 +22,13 @@ def judge(name, body):
         fails.append('assemble %s: %s' % (name, r.stderr[-200:]))
         return None
     n, c, bad, _ = gate_rtasm.judge_objects([(name, o)])
-    return n, c, bad
+    return n, c, bad, o
 
 
 def want(what, got, green, n=None):
     if got is None:
         return
+    got = got[:3]
     ok = (not got[2]) if green else bool(got[2])
     if n is not None and got[0] != n:
         ok = False
@@ -45,6 +46,15 @@ want('(c) kernel call: svc and moves only', judge('c1', ['mov x8, x0', 'mov x0, 
 want('a plain load through an argument register is red', judge('r1', ['ldr x0, [x1]', 'ret']), False, 1)
 want('a plain store through an argument register is red', judge('r2', ['str x0, [x1, #8]', 'ret']), False, 1)
 want('a pair copy loop (a memcpy body) is red', judge('r3', ['ldp x2, x3, [x1], #16', 'stp x2, x3, [x0], #16', 'ret']), False, 2)
+# the universe is the objects without plugin record sections; the recipe's suffix fact must agree
+o = judge('u1', ['ret'])[3]
+if gate_rtasm.judge_objects([('u1', o)], {'u1': True})[:2] != (0, 0) or gate_rtasm.judge_objects([('u1', o)], {'u1': False})[2] != ['u1:class [recipe suffix says C/C++, the object has no plugin record sections]']:
+    fails.append('suffix cross-check')
+s2 = os.path.join(tmp, 'rec.s')
+open(s2, 'w').write('\t.text\n\t.global f\nf:\n\tldr x0, [x1]\n\tret\n\t.section .fnvnx.frame,"",%progbits\n\t.ascii "f\\t\\n"\n')
+subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', s2, '-o', os.path.join(tmp, 'rec.o')], check=True)
+if gate_rtasm.judge_objects([('rec', os.path.join(tmp, 'rec.o'))])[:2] != (0, 0):
+    fails.append('an object with a record section is not an assembly object')
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

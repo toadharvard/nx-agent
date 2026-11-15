@@ -9,7 +9,7 @@ of the same gate:
   crossing every symbol the contract pairs across the x86/native boundary (a `.fnvnx.sympair` row with an MSVC name and a kind other than `data`) has a row in `.fnvnx.crossing`
          (written for every external function of a unit: `symbol<TAB>term,...` or `symbol<TAB>-`) in some unit that declares it, and no term (ids of crossing_forbidden in
          toolchain/msvcmodel/DATAMODEL.json; an unknown id is red): item `crossing:<symbol>`.
-  layout every `.fnvnx.layout` key of external linkage (8th column `external`; `internal`, `none` and `c` records are distinct entities per unit and never pair by
+  layout every `.fnvnx.layout` key of external linkage (8th column `external`, paired by the key AND the Itanium column, so two unnamed member classes that share one key are two entities; `internal`, `none` and `c` records are distinct entities per unit and never pair by
          name: C's cross-unit rule is 6.2.7 compatibility of declared types, not a tag name) (without a `nokey:` flag, whose key is not unique by construction) seen in two or more objects has one layout in all of
          them (size, alignment, fields, bases, flags; `layout:<key>`): the same aggregate name is the same type in all units, which is what lets abi pass a
          by-value aggregate by its name alone. (`c` records, whose tag has no linkage, are compared through the external symbols that declare them: item `ctype:<symbol>`, C11 6.2.7p2, link/ctypes_compat.py, from `.fnvnx.decltype`; a C unit without that section is red.) (link/odr.py proves the COMDAT-copy fact only; this item closes the layout fact abi.py's PROOF names.)
@@ -85,7 +85,7 @@ def read_objects(objs):
                 cross[oid] = parse_crossing(cr, oid + ":.fnvnx.crossing")
             for lay in lays:
                 if lay.linkage == "external" and not any(f.startswith("nokey:") for f in lay.flags):
-                    layouts.setdefault(lay.key, {})[oid] = (lay.size, lay.align, lay.fields, lay.bases, lay.flags)
+                    layouts.setdefault(lay.key + ("  [" + lay.itanium + "]" if lay.itanium else ""), {})[oid] = (lay.size, lay.align, lay.fields, lay.bases, lay.flags)
         except (ValueError, OSError) as e:
             red[oid + ":unreadable"] = str(e)[:300]
     return store, layouts, red, decls, cross

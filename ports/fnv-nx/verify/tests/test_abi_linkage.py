@@ -49,6 +49,17 @@ if ids:
 n, c, ids = judge(obj('xa', [row('S', 4, 'external')]), obj('xb', [row('S', 8, 'internal')]))
 if ids:
     fails.append('an external record never pairs with an internal one of the same key: %r' % ids)
+# one key shared by two entities with different Itanium names (two unnamed member classes of one class): not paired by the key alone
+def rowi(key, size, it):
+    return (key, size, 4, 'a:0:4', '', '', it, 'external')
+
+
+n, c, ids = judge(obj('ia', [rowi('U<unnamed-tag>@H@@', 4, 'N1HUt_E')]), obj('ib', [rowi('U<unnamed-tag>@H@@', 8, 'N1HUt0_E')]))
+if ids:
+    fails.append('same key, different Itanium names are two entities: %r' % ids)
+n, c, ids = judge(obj('ic', [rowi('U<unnamed-tag>@H@@', 4, 'N1HUt_E')]), obj('id', [rowi('U<unnamed-tag>@H@@', 8, 'N1HUt_E')]))
+if not ids:
+    fails.append('same key and Itanium name with different layouts is red')
 # C: the tag never pairs, the declared types of an external symbol are compared by 6.2.7
 S1, S2 = 'struct:S{x:int}', 'struct:S{x:long}'
 n, c, ids = judge(obj('ca', [row('S', 4, 'c')], {'v': S1}), obj('cb', [row('S', 4, 'c')], {'v': 'struct:S'}))
