@@ -14,11 +14,15 @@ tmp = tempfile.mkdtemp(prefix='abilink-')
 fails = []
 
 
-def obj(name, rows, decl=None):
+def sect(nm, text):
+    return '\t.section %s,"",%%progbits\n\t.ascii "%s"\n' % (nm, text.replace('\t', '\\t').replace('\n', '\\n'))
+
+
+def obj(name, rows, decl=None, sym='', cross=None):
     s = os.path.join(tmp, name + '.s')
     o = os.path.join(tmp, name + '.o')
     lay = ''.join('\\t'.join(map(str, r)) + '\\n' for r in rows)
-    open(s, 'w').write('\t.text\n\t.section .fnvnx.sympair,"",%progbits\n' + ('' if decl is None else '\t.section .fnvnx.decltype,"",%progbits\n\t.ascii "' + ''.join(k + '\\t' + v + '\\n' for k, v in decl.items()) + '"\n') + '\t.section .fnvnx.layout,"",%progbits\n\t.ascii "' + lay + '"\n')
+    open(s, 'w').write('\t.text\n' + (sect('.fnvnx.sympair', sym) if sym else '\t.section .fnvnx.sympair,"",%progbits\n') + ('' if cross is None else sect('.fnvnx.crossing', cross)) + ('' if decl is None else '\t.section .fnvnx.decltype,"",%progbits\n\t.ascii "' + ''.join(k + '\\t' + v + '\\n' for k, v in decl.items()) + '"\n') + '\t.section .fnvnx.layout,"",%progbits\n\t.ascii "' + lay + '"\n')
     r = subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', s, '-o', o], capture_output=True, text=True)
     if r.returncode:
         fails.append('assemble ' + name + ': ' + r.stderr[-200:])
@@ -56,6 +60,26 @@ if not (len(ids) == 1 and ids[0].startswith('ctype:v')):
 n, c, ids = judge(obj('ce', [row('S', 4, 'c')], {'v': S1}), obj('cf', [row('S', 4, 'c')]))
 if not any('no .fnvnx.decltype' in i for i in ids):
     fails.append('C: a C unit without the record is red: %r' % ids)
+# crossing_forbidden: a boundary symbol has a row and no term
+SY = 'f\t?f@@YAXXZ\tfunc\tdef\n'
+n, c, ids = judge(obj('xa1', [], sym=SY, cross='f\t-\n'), obj('xb1', []))
+if ids:
+    fails.append('crossing: a boundary symbol with a clean row is green: %r' % ids)
+n, c, ids = judge(obj('xa2', [], sym=SY, cross='f\tpointer_to_member\n'), obj('xb2', []))
+if not any(i.startswith('crossing:f') and 'pointer_to_member' in i for i in ids):
+    fails.append('crossing: a term is red: %r' % ids)
+n, c, ids = judge(obj('xa3', [], sym=SY), obj('xb3', []))
+if not any(i.startswith('crossing:f') and 'no .fnvnx.crossing row' in i for i in ids):
+    fails.append('crossing: a boundary symbol without a row is red: %r' % ids)
+n, c, ids = judge(obj('xa4', [], sym=SY, cross='f\tmadeup\n'), obj('xb4', []))
+if not any(i.startswith('crossing:f') and 'unknown term' in i for i in ids):
+    fails.append('crossing: an unknown term id is red: %r' % ids)
+n, c, ids = judge(obj('xa5', [], sym='d\t?d@@3HA\tdata\tdef\n'), obj('xb5', []))
+if ids:
+    fails.append('crossing: data is not a boundary function: %r' % ids)
+n, c, ids = judge(obj('xa6', [], sym=SY, cross='f\t-\n'), obj('xb6', [], sym='f\t?f@@YAXXZ\tfunc\tref\n'))
+if ids:
+    fails.append('crossing: one row in a unit that declares it suffices: %r' % ids)
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)
