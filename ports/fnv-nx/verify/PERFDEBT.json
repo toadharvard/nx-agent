@@ -5,6 +5,12 @@
    "id": "PD-LOADER-SHA256-ISA",
    "owner": "L1",
    "rule": "lib/sha256 selects the ISA body by the declared reference CPU's features (one home)"
+  },
+  {
+   "fast_path": "stack-slot sharing between private and shared variables (fnvnx_order NO-MIX)",
+   "id": "PD-STACK-REUSE",
+   "owner": "L2",
+   "rule": "frame rows scoped by lifetime: a row carries the decl's live pc ranges and the gate certifies a plain access iff the private decl owning the slot is live at the access pc (a dead escaping object has no legitimate accessor, OWNER 6); the entry and NO-MIX are deleted together"
   }
  ],
  "first_frame": false,
