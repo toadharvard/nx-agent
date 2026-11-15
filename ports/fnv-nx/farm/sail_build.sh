@@ -56,6 +56,20 @@ if [ ! -f "$OUT.ir" ] || [ "$newest" -nt "$OUT.ir" ]; then
   echo "built $OUT.ir ($(stat -c %s "$OUT.ir") bytes)"
 else echo "$OUT.ir is up to date"; fi
 sha256sum "$OUT.ir" "$HERE/x86.toml"
+# PUBLISH_IR=1: publish the IR once as the external tools/sail-ir-<sha 12 hex> of the artifacts repository (every consumer fetches it by sha: farm_shapeprove.sh)
+if [ "${PUBLISH_IR:-0}" = 1 ]; then
+    SHA=$(sha256sum "$OUT.ir" | cut -d' ' -f1); BR=tools/sail-ir-${SHA:0:12}; PB=${FNVNX_BUILD:-/home/user/fnv-nx-build}; T=$(mktemp -d)
+    mkdir -p "$T/ir"; cp "$OUT.ir" "$T/ir/x86_proof.ir"
+    python3 - "$T" "$SHA" "$(git -C "$HERE" rev-parse HEAD)" <<'PY'
+import hashlib, json, sys
+t, sha, commit = sys.argv[1:]
+tree = hashlib.sha256(('ir/x86_proof.ir\0' + sha + '\n').encode()).hexdigest()
+json.dump({'format': 'fnvnx-tool-mirror/1', 'what': 'x86_proof.ir built by farm/sail_build.sh at nx-agent commit ' + commit, 'ir_sha256': sha, 'tree_sha256': tree,
+           'tree_rule': 'sha256 over sorted lines "<relpath>\\0<sha256 of content>\\n"', 'pin': 'ports/fnv-nx/lift/proof/sail_pins.txt'}, open(t + '/MANIFEST.json', 'w'), indent=1)
+PY
+    ( cd "$PB" && git checkout -q --orphan "$BR" && git rm -rqf . >/dev/null 2>&1; cp -r "$T/ir" "$T/MANIFEST.json" . && git add ir MANIFEST.json && git commit -qm "tools/sail-ir: x86_proof.ir $SHA" && git push -q origin "$BR" )
+    echo "published $BR"
+fi
 # smoke test: add eax, ebx  (01 d8) must give paths ending in (_ unit)
 export LD_LIBRARY_PATH=$Z3/lib SAIL_IR=$OUT.ir SAIL_WORK=$WORK Z3LIB=$Z3/lib ISLA_EXEC=$REMS/isla/target/release/isla-execute-function
 python3 -c "

@@ -51,13 +51,20 @@ if ! python3 -c 'import capstone, keystone' 2>/dev/null; then
     python3 -m pip install -q --break-system-packages --no-index --no-deps --require-hashes --find-links "$W/in/pywheels" -r "$REQ"
 fi
 
-# 1. toolchain: the installed one, else built from the mirror branch (sail_setup.sh prints the IR sha256 and exits 1 unless it equals the pin)
+# 1. toolchain: the installed isla binary, else built from the mirror branch (sail_setup.sh).  The proof IR is NOT built here: it is fetched by its sha (the pin of
+#    sail_pins.txt) from the external tools/sail-ir-<sha 12 hex> of the artifacts repository, which farm/sail_build.sh produced and published once (PUBLISH_IR=1)
 ISLA=${ISLA_EXEC:-/home/user/rems-project/isla/target/release/isla-execute-function}
-if [ ! -x "$ISLA" ] || [ ! -f "$WORKDIR/sail/x86_proof.ir" ]; then
+if [ ! -x "$ISLA" ]; then
     fetch_branch tools/sail-mirror "$W/in/sail-mirror"
     MIRROR="$W/in/sail-mirror" bash "$FARM/sail_setup.sh" > "$W/sail_setup_$K.log" 2>&1 || { echo "sail_setup.sh failed (see $W/sail_setup_$K.log)" >&2; exit 1; }
 fi
-bash "$FARM/sail_build.sh" > "$W/sail_build_$K.log" 2>&1 || { echo "sail_build.sh failed (see $W/sail_build_$K.log): the toolchain / IR is not the pinned one" >&2; exit 1; }
+PIN=$(awk '$1=="x86_proof.ir"{print $NF}' "$HERE/sail_pins.txt")
+mkdir -p "$WORKDIR/sail"
+if [ -z "${SAIL_IR:-}" ] && [ "$(sha256sum "$WORKDIR/sail/x86_proof.ir" 2>/dev/null | cut -d' ' -f1)" != "$PIN" ]; then
+    fetch_branch "tools/sail-ir-${PIN:0:12}" "$W/in/sail-ir"
+    [ "$(sha256sum "$W/in/sail-ir/ir/x86_proof.ir" | cut -d' ' -f1)" = "$PIN" ] || { echo "the external tools/sail-ir-${PIN:0:12} does not hold the pinned IR $PIN" >&2; exit 1; }
+    cp "$W/in/sail-ir/ir/x86_proof.ir" "$WORKDIR/sail/x86_proof.ir"
+fi
 SHA=$(sha256sum "${SAIL_IR:-$WORKDIR/sail/x86_proof.ir}" | cut -d' ' -f1)
 PINSHA=$(env -u SAIL_IR python3 -I "$HERE/certs_build.py" --model-sha) || { echo "the pinned IR (external x86ir of formgate_inputs.json) does not load" >&2; exit 1; }
 [ "$SHA" = "$PINSHA" ] || { echo "IR sha256 $SHA is not the pinned IR $PINSHA (external x86ir of formgate_inputs.json)" >&2; exit 1; }
