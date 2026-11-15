@@ -74,6 +74,13 @@ def main():
         PK = ('template <class... A> int pk(A... a) { return sizeof...(A); }\ntemplate <int... N> int pn() { return sizeof...(N); }\n'
               'int (*p1)(int, double) = pk<int, double>;\nint (*p2)() = pn<1, 2, 3>;\nint (*p4)() = pn<>;\n')
         pk = build_unit(td, so, 'pk', PK, O2)   # an argument pack is a template argument that no mangling accepts: it is the I...E of its elements
+        # a variably-modified type (a local array with a run-time bound: a SAVE_EXPR in its domain) has no mangled name; the farm's libstdc++ failed on `mangling save_expr`
+        # in the instance std::__floating_to_chars_precision<double>. A template with such a local array, a pointer to it, decltype of an expression, a static local array and
+        # __builtin_unreachable at the end, instantiated for two types: the unit builds and each instance has its row
+        VM = ('template <class T> int vf(int n, T v)\n{\n  T buf[n];\n  T (*pbuf)[n] = &buf;\n  decltype(v + v) w = v;\n  static const T tab[sizeof(T) * 2 + 1] = {};\n'
+              '  for (int i = 0; i < n; i++) buf[i] = tab[i % 2] + w;\n  if (n > 100) return (*pbuf)[0] == v;\n  if (n > 50) __builtin_unreachable();\n  return 1;\n}\n'
+              'int (*pv1)(int, double) = vf<double>;\nint (*pv2)(int, int) = vf<int>;\n')
+        vm = build_unit(td, so, 'vm', VM, O2)
         # default arguments are part of the call, so of the bindings: the same call with a different default expression is a different row
         DA = 'int k1(); int k2();\nint h(int = {k});\n'
         INLH = 'inline int fh() { return h(); }\nint (*ph)() = fh;\n'
@@ -89,7 +96,7 @@ def main():
         # ODRDEF-PP: the farm's runtime build compiles raw sources with the driver. A raw unit (include chain and macros only parse_in holds) is refused with its
         # cause; the same unit through the driver's two steps (-save-temps) builds, and a unit with a -I header through the recipe's PP and CC stages builds.
         raw_unit(td, so)
-        if not all((a, b, c, d, ta, tb, pk, da, db, ca, dt)):
+        if not all((a, b, c, d, ta, tb, pk, vm, da, db, ca, dt)):
             return check.done()
         ra, rb, rc, rd, rta, rtb = map(rows, (a, b, c, d, ta, tb))
         F = '_Z1fi'
@@ -102,6 +109,8 @@ def main():
         check('an instantiation: the template argument is mangled', rta[T][2] == '1S', rta[T])
         check('an instantiation: the template definition\'s hash is equal in both units', rta[T][1] == rtb[T][1], (rta[T], rtb[T]))
         check('a dependent call resolved to a different declaration at instantiation: different rows', rta[T][3] != rtb[T][3], (rta[T], rtb[T]))
+        rvm = [k for k in rows(vm) if k.startswith('_Z2vf')]
+        check('a variably-modified local array: both instances of the template have a definition row', len(rvm) == 2, rvm)
         rpk = rows(pk)
         targs = sorted(r[2] for r in rpk.values())
         check('argument packs: pk<int, double> is IidE, pn<1, 2, 3> is ILi1ELi2ELi3EE, pn<> is IE', targs == sorted(['ILi1ELi2ELi3EE', 'IE', 'IidE']), targs)
