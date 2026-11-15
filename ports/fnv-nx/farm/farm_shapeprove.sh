@@ -4,6 +4,7 @@
 # --queue FILE: the PINNED queue of a pack (fnv-nx-build branch l3b-lift/queue/<pack12>-<prover12>, file queue.tsv, proof/packqueue.py): the rows `shape_key<TAB>shape_sha`
 #   are the work, split by position mod N; nothing is fetched or scanned (steps 2 and 2b are skipped), so every farm of one run has the same queue.  The header's ir_sha256 must be
 #   the IR of this machine and the rows must hash to the header's queue_id, else exit 1.  Output branch id = <IR id>-<queue_id>.  Every record carries model_fns / closure_sha (K).
+# Mode: a queue whose header has `# mode=simd` is checked by simdshard.py (simdcheck.check per shape, wall-clock budget TIMEOUT s, default 60) instead of shapeprove.py; same shards, records, branches, resume.  `# qcache=<branch>:<file>` seeds simdcheck's proved-query cache.
 # Inputs (private / exe-derived, fetched from the artifacts repository fnv-nx-build, never stored in this repository):
 #   branch l3b-lift/shapes        KEYS.tsv + <module>/shapes.tsv (output of proof/census.py); every shapes.tsv is checked against KEYS.tsv
 #   branch tools/sail-mirror      the pinned downloads of the Sail/isla toolchain; used by farm/sail_setup.sh (MIRROR=...) only when the toolchain
@@ -142,7 +143,15 @@ if [ "$PUBLISH" = 1 ] && [ ! -s "$J" ]; then
 fi
 # 4. prove; the results are published every PUBLISH_EVERY seconds (default 600) while it runs, and at the end or on SIGTERM/SIGINT
 ulimit -v "${VMEM_KB:-6000000}"
+# the prover is selected by the queue header (`# mode=simd`: simdcheck over the queue's SIMD shapes, its proved-query cache seeded from the header's `# qcache=<branch>:<file>`); no other difference
+MODE=$(sed -n 's/^# mode=//p' "$QUEUE" | head -1)
+if [ "$MODE" = simd ]; then
+    QCS=$(sed -n 's/^# qcache=//p' "$QUEUE" | head -1)
+    if [ -n "$QCS" ]; then fetch_branch "${QCS%%:*}" "$W/in/simdqc-$K"; cp "$W/in/simdqc-$K/${QCS#*:}" "$W/qcache-$K.txt"; export SIMD_QCACHE="$W/qcache-$K.txt"; fi
+    python3 -I "$HERE/simdshard.py" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-60}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+else
 python3 -I "$HERE/shapeprove.py" --shapes "$QUEUE" --shard "$K/$N" --out "$OUT" --timeout "${TIMEOUT:-600}" --eip "${EIP:-sym}" --slice "${SLICE:-1}" ${LIMIT:+--limit "$LIMIT"} >> "$OUT/shapeprove_${K}_of_$N.log" 2>&1 &
+fi
 PP=$!
 trap 'kill $PP 2>/dev/null; wait $PP 2>/dev/null; publish; exit 143' TERM INT
 LASTP=$(date +%s)
