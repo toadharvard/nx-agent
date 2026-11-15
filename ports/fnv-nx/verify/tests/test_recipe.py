@@ -635,15 +635,17 @@ static long sc3(long n, long a, long b, long c) { long r; __asm__ volatile("sysc
 static int eq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
 static void put(const char *path, const char *s, long n) { long fd = sc3(2, (long)path, 0x241, 0644); sc3(1, fd, (long)s, n); sc3(3, fd, 0, 0); }
 static void copy(const char *from, const char *to) { char b[512]; long fd = sc3(2, (long)from, 0, 0); long n = fd < 0 ? 0 : sc3(0, fd, (long)b, 512); put(to, b, n < 0 ? 0 : n); }
-void cmain(long *sp) {
-  long argc = sp[0]; char **argv = (char **)(sp + 1); const char *m = argc > 1 ? argv[1] : "ok";
+static void cmain(long argc, char **argv) {
+  const char *m = argc > 1 ? argv[1] : "ok";
   if (eq(m, "ok")) put("/out/o.txt", "hello\n", 6);
   else if (eq(m, "copy")) copy(argv[2], "/out/o.txt");
   else if (eq(m, "bad")) sc3(231, 1, 0, 0);
   else if (eq(m, "extra")) { put("/out/o.txt", "a\n", 2); put("/out/x.txt", "b\n", 2); }
   sc3(231, 0, 0, 0);
 }
-__asm__(".globl _start\n_start:\n mov %rsp, %rdi\n and $-16, %rsp\n call cmain\n");
+int main(void) { return 0; }
+int __libc_start_main(void *m, long argc, char **argv) { cmain(argc, argv); return 0; }
+void abort(void) { for (;;) ; }
 """
 
 
