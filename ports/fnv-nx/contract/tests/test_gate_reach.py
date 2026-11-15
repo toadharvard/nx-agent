@@ -526,6 +526,14 @@ f3 = gate_reach.check_request(reqs(GCR)[0], {}, gpa_open, [], ctx)
 check('gate_cert: an open GetProcAddress is measurement, as for closure_key', ([r[0] for r in sorted(f3.reasons)], gate_reach.MEASUREMENT.__contains__('gpa-open')), (['gpa-open'], True))
 check('gate_cert: request kind in the header', 'FNVNX_REACH_GL_SHADER_SOURCE' in gate_reach.header(reqs(GCR)), True)
 
+# two ISAs: an x64 image that holds the same site is proven by the same rules; an image without the site adds nothing; no image with it is `no-site`
+XPROG = gate_reach.gatecert.parse_objdump(GC['obj']('x.o', [('xf', [('ret', None)])], []).replace('elf32-littleaarch64', 'elf64-x86-64'), 'x64')
+for nm, extra, want in (('an image without the site', [XPROG], []), ('only an image without the site', None, ['no-site'])):
+    base = gate_reach.gatecert.parse_objdump(GC['obj']('a.o', GC['base']() if extra else [('f', [('ret', None)])], GC['SYMS']))
+    ctx = {'gates': {'sm_link': (summary(), GREEN)}, 'verdict': VID, 'progs': [base] + (extra or [])}
+    f4 = gate_reach.check_request(reqs(GCR)[0], {}, [], [], ctx)
+    check('gate_cert: progs, ' + nm, sorted(r[0] for r in f4.reasons), want)
+
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

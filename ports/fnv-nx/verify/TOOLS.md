@@ -220,29 +220,34 @@ gatecert - the proof half of the gate_reach request kind `gate_cert=<gate>` (L1 
 
     A fact `site symbol S, argument k` is certified by the green gate G when every value that can reach argument k of every call of S
     comes from a producer in the universe G declared.  The proof is over the machine code of the linked objects, decoded by the pinned
-    binutils objdump (`objdump -dr -t --no-show-raw-insn`, ILP32 AArch64); this module reads only that text.
+    binutils objdump (`objdump -dr -t --no-show-raw-insn`; x86-64 with `-M intel`); this module reads only that text.  ONE rule set, two ISAs: a lowerer per
+    ISA (a64: ILP32 AArch64, x64: x86-64 SysV) turns each instruction into one op of a small IR, and the rules below run on the IR.
 
-    prove(prog, site, k, producers) -> (reasons [(reason, where, detail)], callers [str], values [str])    certified iff reasons is empty
-    parse_objdump(text) -> Prog
+    parse_objdump(text, isa='a64'|'x64') -> Prog        prove(prog, site, k, producers) -> (reasons [(reason, where, detail)], callers [str], values [str])
 
-Rule.  The set CALLERS(F) of a function F is every function holding a CALL26/JUMP26 relocation to F (a jump is a tail call: the argument
-registers are those at the jump).  F's address taken anywhere (any other relocation to F, outside debug/unwind sections) means an indirect
-caller; that is allowed only when each such relocation lies inside a producer data symbol (the producer row IS the indirect call path:
-the table slot of the declared producer); otherwise `address-taken`.  The value of argument register R of a call site is the set of
-VALUES found by a backward walk over the control-flow graph of the caller (every path; a join takes the union; a loop adds nothing new):
-  - `mov`/`orr` from a register: the value of that register before the instruction;
-  - result of a call (x0 after `bl F`): value PROD(F); any other caller-saved register after a call is clobbered (`clobbered`);
-  - `adrp` + `add :lo12:` of the same symbol, or `adrp` + `ldr :lo12:` : the address of / a load from a constant offset of symbol Y;
-  - `ldr` from a register that holds the address of Y plus a constant: load from Y at that offset; with a register index (`[b, i, lsl #s]`, uxtw/sxtw) the
-    index must be proven in [0, count), count = (st_size(Y) - offset) / elt: (a) every path to the load carries an unsigned compare-and-branch of the index (or of
-    a register it was copied/extended/masked from) against a constant <= count (cmp with b.lo/b.cc taken, b.hs/b.cs fallthrough; b.ls taken / b.hi fallthrough
-    bound c+1; cbz/tbz are not bounds), a must-analysis over the CFG (the weakest path counts); (b) a loop induction variable is the same proof: its entry edge
-    (a constant) and its back or exit edge carry the bounds, a loop back edge adds nothing by itself.  Anything else is `index-unbounded:<function>+<offset>`;
-  - the value of an x0..x7 at the function entry: PARAM(j), judged by the callers of the function (the call graph, recursively);
+Rule.  The set CALLERS(F) of a function F is every function holding a call (or tail jump) relocation to F (a jump passes the argument registers as they are).
+F's address taken anywhere (any other relocation to F, outside debug/unwind sections) means an indirect caller; that is allowed only when each such
+relocation lies inside a producer data symbol (the producer row IS the indirect call path: the table slot of the declared producer); otherwise
+`address-taken`.  The value of argument register R of a call site is the set of VALUES found by a backward walk over the control-flow graph of the caller
+(every path; a join takes the union; a loop adds nothing new):
+  - a register copy: the value of the source register before the instruction;
+  - the result of a call (the return register after a call of F): value PROD(F); any other caller-saved register after a call is clobbered (`clobbered`);
+  - the address of symbol Y (a64: adrp + add :lo12:; x64: rip-relative lea or a GOT load), or a load from Y at a constant offset;
+  - a load from the address of Y + constant offset, or with a register index (`[b, i, lsl #s]`, `[b + i*s]`): the index must be proven in [0, count),
+    count = (st_size(Y) - offset) / elt: (a) every path to the load carries an unsigned compare-and-branch of the index (or of a register it was copied,
+    extended or masked from) against a constant <= count (a64 cmp + b.lo/b.hs/b.ls/b.hi, x64 cmp + jb/jae/jbe/ja; cbz/tbz are not bounds), a must-analysis over the
+    CFG (the weakest path counts); (b) a loop induction variable is the same proof: its entry edge and its back or exit edge carry the bounds, a loop back
+    edge adds nothing by itself.  Anything else is `index-unbounded:<function>+<offset>`;
+  - THE OUT-PARAMETER SHAPE: a load from a stack slot S is the output of a producer call iff (1) the address of S (any address of the frame at or below S) flows
+    only into the declared out argument of a producer call (a copy is followed; any other read of it is an escape: `out-escape`), (2) on every path from entry
+    to the load the last access to S is that producer call: no other store to S in between (`out-store`), no path without the call (`out-uninit`), and (3) the
+    offset and size lie within the producer's declared out type (`out-type`), `"out": [{"arg": j, "size": n}]` in the producer row.  The frame must have a
+    constant stack-pointer offset at every instruction (`sp-unstable`);
+  - the value of an argument register at the function entry: PARAM(j), judged by the callers of the function (the call graph, recursively);
   - anything else (constants, stack loads, arithmetic, an unknown call result) has no certificate (`constant`, `stack-load`, `computed`, ...).
-A value is accepted iff it is PROD(F) with F a producer of kind function, or an address of / load from Y at a constant offset < size(Y) with
-Y a producer of kind data (sizes from the symbol table), or PARAM(j) whose callers are all accepted.  A requested site with no call is
-`no-site` (a vacuous certificate is no certificate).  Assumptions: the compiler (OWNER 1) and the pinned objdump decode the objects.
+A value is accepted iff it is PROD(F) with F a producer of kind function, or an address of / load from Y at a constant offset < size(Y) with Y a
+producer of kind data (sizes from the symbol table), or PARAM(j) whose callers are all accepted.  A requested site with no call is `no-site` (a vacuous
+certificate is no certificate).  Assumptions: the compiler (OWNER 1) and the pinned objdump decode the objects.
 ```
 
 ## contract/gate_vcall.py

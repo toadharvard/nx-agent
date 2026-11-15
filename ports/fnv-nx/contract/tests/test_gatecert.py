@@ -188,6 +188,113 @@ body = ADRP19 + SITE + [('add\tw20, w20, #0x1', None), ('cmp\tw20, #0x5', None),
 r, _, _ = run(idxfn('c9', body))
 check('(b) a loop from an unknown start (the entry path is unbounded)', codes(r), ['index-unbounded'])
 
+# ---------------------------------------------------------------- the out-parameter shape (a64) and x86-64 (one rule set, two ISAs)
+OUTP = [dict(symbol='translate', kind='function'), dict(symbol='progs', kind='data'), dict(symbol='produce', kind='function', out=[dict(arg=1, size=8)])]
+OSYMS = SYMS + [('produce', '*UND*', 0, True), ('other', '*UND*', 0, True)]
+BLS, BLP = ('bl\t0 <glsrc>', (CALL, 'glsrc')), ('bl\t0 <produce>', (CALL, 'produce'))
+PRO, EPI = ('stp\tx29, x30, [sp, #-32]!', None), ('ldp\tx29, x30, [sp], #32', None)
+
+
+def arun(body, producers=OUTP):
+    return gatecert.prove(gatecert.parse_objdump(obj('a.o', [('use', body)], OSYMS)), 'glsrc', 0, producers)
+
+
+G = [PRO, ('add\tx1, sp, #0x10', None), BLP, ('ldr\tx0, [sp, #16]', None), BLS, EPI, RET]
+r, _, v = arun(G)
+check('a64 out-param green', (codes(r), v), ([], ['prod:produce']))
+r, _, _ = arun([PRO, ('add\tx1, sp, #0x10', None), BLP, ('str\tx2, [sp, #16]', None), ('ldr\tx0, [sp, #16]', None), BLS, EPI, RET])
+check('a64 intervening store', codes(r), ['out-store'])
+r, _, _ = arun([PRO, ('add\tx0, sp, #0x10', None), ('add\tx1, sp, #0x10', None), BLP, ('ldr\tx0, [sp, #16]', None), BLS, EPI, RET])
+check('a64 escaped slot address (into a non-out argument)', codes(r), ['out-escape'])
+r, _, _ = arun([PRO, ('add\tx1, sp, #0x10', None), ('str\tx1, [sp, #24]', None), BLP, ('ldr\tx0, [sp, #16]', None), BLS, EPI, RET])
+check('a64 escaped slot address (stored)', codes(r), ['out-escape'])
+r, _, _ = arun([PRO, ('add\tx1, sp, #0x10', None), ('cbz\tw3, 10 <use+0x10>', None), BLP, ('ldr\tx0, [sp, #16]', None), BLS, EPI, RET])
+check('a64 a path without the producer call', codes(r), ['out-uninit'])
+r, _, _ = arun([PRO, ('add\tx1, sp, #0x10', None), BLP, ('ldr\tx0, [sp, #20]', None), BLS, EPI, RET])
+check('a64 offset past the declared out type', sorted(set(codes(r))), ['out-type', 'out-uninit'])
+r, _, _ = arun([PRO, ('add\tx1, sp, #0x10', None), ('stlr\tw2, [sp, #16]', None), BLP, ('ldr\tx0, [sp, #16]', None), BLS, EPI, RET])
+check('a64 an ordered store before the call is overwritten by the call: green', codes(r), [])
+r, _, _ = arun([PRO, ('add\tx1, sp, #0x10', None), BLP, ('stlr\tw2, [sp, #16]', None), ('ldr\tx0, [sp, #16]', None), BLS, EPI, RET])
+check('a64 an stlr store after the call', codes(r), ['out-store'])
+r, _, _ = arun([PRO, ('add\tx1, sp, #0x10', None), BLP, ('ldr\tx0, [sp, #16]', None), BLS, EPI, RET], producers=[dict(symbol='produce', kind='function')])
+check('a64 a producer without a declared out type', 'out-uninit' in codes(r) or 'out-type' in codes(r), True)
+
+
+def xfn(name, insns, start=0):
+    out = ['', '%016x <%s>:' % (start, name)]
+    for i, (text, rel) in enumerate(insns):
+        out.append('  %x:\t%s' % (start + 4 * i, text))
+        if rel:
+            out.append('\t\t\t%x: %s\t%s' % (start + 4 * i, rel[0], rel[1]))
+    return out
+
+
+def xobj(funcs, syms, data=()):
+    out = ['', 'x.o:     file format elf64-x86-64', '', 'SYMBOL TABLE:']
+    for n, sec, size, g in syms:
+        out.append('0000000000000000 %s %s\t%016x %s' % (('g     O' if g else 'l     O') if sec != '*UND*' else '       ', sec, size, n))
+    for n, _ in funcs:
+        out.append('0000000000000000 g     F .text\t0000000000000040 %s' % n)
+    out += ['', 'Disassembly of section .text:']
+    a = 0
+    for n, insns in funcs:
+        out += xfn(n, insns, a)
+        a += 4 * len(insns) + 0x10
+    return '\n'.join(out) + '\n'
+
+
+PLT, PC32 = 'R_X86_64_PLT32', 'R_X86_64_PC32'
+XCG, XCP = ('call\t0 <glsrc>', (PLT, 'glsrc-0x4')), ('call\t0 <produce>', (PLT, 'produce-0x4'))
+XCT = ('call\t0 <translate>', (PLT, 'translate-0x4'))
+
+
+def xrun(body, producers=OUTP, site='glsrc'):
+    return gatecert.prove(gatecert.parse_objdump(xobj([('use', body)], OSYMS), 'x64'), site, 0, producers)
+
+
+XRET = ('ret', None)
+r, _, v = xrun([('sub\trsp,0x18', None), XCT, ('mov\trdi,rax', None), XCG, ('add\trsp,0x18', None), XRET])
+check('x64 call result', (codes(r), v), ([], ['prod:translate']))
+r, _, v = xrun([('sub\trsp,0x18', None), ('lea\trsi,[rsp+0x8]', None), XCP, ('mov\trdi,QWORD PTR [rsp+0x8]', None), XCG, ('add\trsp,0x18', None), XRET])
+check('x64 out-param green', (codes(r), v), ([], ['prod:produce']))
+r, _, _ = xrun([('sub\trsp,0x18', None), ('lea\trsi,[rsp+0x8]', None), XCP, ('mov\tQWORD PTR [rsp+0x8],rdx', None), ('mov\trdi,QWORD PTR [rsp+0x8]', None), XCG,
+                ('add\trsp,0x18', None), XRET])
+check('x64 intervening store', codes(r), ['out-store'])
+r, _, _ = xrun([('sub\trsp,0x18', None), ('lea\trsi,[rsp+0x8]', None), XCP, ('movaps\tXMMWORD PTR [rsp+0x8],xmm0', None), ('mov\trdi,QWORD PTR [rsp+0x8]', None), XCG,
+                ('add\trsp,0x18', None), XRET])
+check('x64 intervening store of an unknown form', codes(r), ['out-store'])
+r, _, _ = xrun([('sub\trsp,0x18', None), ('lea\trdi,[rsp+0x8]', None), ('lea\trsi,[rsp+0x8]', None), XCP, ('mov\trdi,QWORD PTR [rsp+0x8]', None), XCG,
+                ('add\trsp,0x18', None), XRET])
+check('x64 escaped slot address', codes(r), ['out-escape'])
+r, _, _ = xrun([('sub\trsp,0x18', None), ('lea\trsi,[rsp+0x8]', None), ('mov\trbx,rsi', None), ('mov\tQWORD PTR [rsp+0x10],rbx', None), XCP,
+                ('mov\trdi,QWORD PTR [rsp+0x8]', None), XCG, ('add\trsp,0x18', None), XRET])
+check('x64 escaped through a copy stored to memory', codes(r), ['out-escape'])
+r, _, _ = xrun([('sub\trsp,0x18', None), ('lea\trsi,[rsp+0x8]', None), ('test\tedx,edx', None), ('je\t14 <use+0x14>', None), XCP, ('mov\trdi,QWORD PTR [rsp+0x8]', None),
+                XCG, ('add\trsp,0x18', None), XRET])
+check('x64 a path without the producer call', codes(r), ['out-uninit'])
+
+
+def xidx(n):
+    return [('cmp\tedi,0x%x' % n, None), ('ja\t18 <use+0x18>', None), ('mov\teax,edi', None), ('lea\trdx,[rip+0x0]', (PC32, 'progs-0x4')),
+            ('mov\tedi,DWORD PTR [rdx+rax*4]', None), XCG, XRET, XRET]
+
+
+for n, want in ((3, []), (4, []), (5, ['index-unbounded'])):
+    r, _, v = xrun(xidx(n))
+    check('x64 index bound %d over 5 elements (ja: index <= n)' % n, codes(r), want)
+r, _, _ = xrun([('lea\trdx,[rip+0x0]', (PC32, 'progs-0x4')), ('mov\tedi,DWORD PTR [rdx+rax*4]', None), XCG, XRET])
+check('x64 no compare', codes(r), ['index-unbounded'])
+r, _, v = xrun([('lea\trdi,[rip+0x0]', (PC32, 'progs-0x4')), XCG, XRET])
+check('x64 address of a producer table', (codes(r), v), ([], ['addr:progs']))
+r, _, _ = xrun([('mov\tedi,0x0', None), XCG, XRET])
+check('x64 constant', codes(r), ['constant'])
+r, _, _ = xrun([XCT, XCT, ('mov\trdi,rax', None), XCG, XRET])
+check('x64 a call result used after another call is the last call', codes(r), [])
+r, _, _ = xrun([XCT, ('mov\trbx,rax', None), XCP, ('mov\trdi,rbx', None), XCG, XRET])
+check('x64 callee-saved copy of an earlier result', codes(r), [])
+r, _, _ = xrun([XCT, ('mov\trdi,rax', None), ('call\t0 <other>', (PLT, 'other-0x4')), XCG, XRET])
+check('x64 clobbered argument register', codes(r), ['clobbered'])
+
 if fails:
     print('\n'.join(fails))
     sys.exit(1)

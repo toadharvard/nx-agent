@@ -34,7 +34,7 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              the verdict says so and it never counts as valid.
   gate_cert  `gate_cert=<gate>`  (dll `-`, name = the site symbol, arg_index k): argument k of every call of the symbol (an object-level call site, a native
              site of a platform backend) comes only from producers of the universe that gate <gate> declared.  Inputs: --gate-cert GATE=SUMMARY.json,RESULT.json (the
-             summary and the gate file of the SAME verdict), --verdict ID, --cert-objdump (`objdump -dr -t --no-show-raw-insn` of the root's objects, pinned binutils).
+             summary and the gate file of the SAME verdict), --verdict ID, --cert-objdump (`objdump -dr -t --no-show-raw-insn` of the root's objects, pinned binutils), --cert-objdump-x64 (`-M intel` text of the host objects).
              CERTIFIED iff (a) the gate file says green (certified == universe) and the summary is of this verdict (`gate-not-green`, `summary-other-verdict`);
              (b) the summary declares `universe` [{kind bytecode|glsl_table, id, sha256}] sorted, `universe_hash` = sha256 of the lines `kind\tid\tsha256\n`
              (recomputed here: `universe-hash`) and `producers` [{symbol, kind function|data}], each data producer an id of the universe;
@@ -361,16 +361,26 @@ def check_gate_cert(f, gpa_global, ctx):
     for p in prods:
         if p['kind'] == 'data' and p['symbol'] not in ids:
             f.fail('producer-not-in-universe', gate, p['symbol'])
-    prog = ctx.get('prog')
-    if prog is None:
+    progs = ctx.get('progs') or ([ctx['prog']] if ctx.get('prog') is not None else [])
+    if not progs:
         f.fail('objects-missing', gate, '-', 'no --cert-objdump')
         return
-    reasons, callers, values = gatecert.Prover(prog, prods).prove(site, f.req['k'])
-    for r, where, det in reasons:
+    # one rule set, two ISAs: every image (a64 guest objects, x64 host objects) that holds a call of the site is proven; `no-site` only when none does
+    reasons, callers, values, held = set(), set(), set(), False
+    for prog in progs:
+        rs, cs, vs = gatecert.Prover(prog, prods).prove(site, f.req['k'])
+        if cs or any(r[0] != 'no-site' for r in rs):
+            held = True
+            reasons |= {r for r in rs if r[0] != 'no-site'}
+            callers |= set(cs)
+            values |= set(vs)
+    if not held:
+        reasons.add(('no-site', site, '-'))
+    for r, where, det in sorted(reasons):
         f.fail(r, where, site, det)
     f.examined = len(callers)
-    f.sites.append(dict(gate=gate, summary=sha(summary_text), result=sha(result_text), universe_hash=summ.get('universe_hash'), callers=callers, values=values,
-                        site=site, arg=f.req['k'], objects=sha(canon(sorted(prog.funcs)))))
+    f.sites.append(dict(gate=gate, summary=sha(summary_text), result=sha(result_text), universe_hash=summ.get('universe_hash'), callers=sorted(callers),
+                        values=sorted(values), site=site, arg=f.req['k'], objects=sha(canon([sorted(pr.funcs) for pr in progs]))))
     for reason, nm, addr in gpa_global:
         f.fail(reason, nm, addr)
 
@@ -654,6 +664,7 @@ def main(argv=None):
     ap.add_argument('--certified')
     ap.add_argument('--gate-cert', action='append', default=[], help='GATE=SUMMARY.json,RESULT.json (gate_cert: the gate summary and its gate file of THIS verdict)')
     ap.add_argument('--cert-objdump', help='`objdump -dr -t --no-show-raw-insn` text of the root objects, by the pinned binutils (gate_cert)')
+    ap.add_argument('--cert-objdump-x64', help='the same for the host (x86-64) objects, `objdump -M intel -dr -t --no-show-raw-insn` (gate_cert; one rule set, two ISAs)')
     ap.add_argument('--verdict', help='the id of this verdict (the tree and store keys); a gate summary of another verdict is not accepted (gate_cert)')
     a = ap.parse_args(argv)
     try:
@@ -692,8 +703,8 @@ def main(argv=None):
         sp, rp = rest.split(',')
         ctx['gates'][nm] = (open(sp).read(), open(rp).read())
     ctx['verdict'] = a.verdict
-    if a.cert_objdump:
-        ctx['prog'] = gatecert.parse_objdump(open(a.cert_objdump).read())
+    ctx['progs'] = ([gatecert.parse_objdump(open(a.cert_objdump).read(), 'a64')] if a.cert_objdump else []) + \
+                   ([gatecert.parse_objdump(open(a.cert_objdump_x64).read(), 'x64')] if a.cert_objdump_x64 else [])
     facts, certs, g = run(reqs, images, meta, rows, ctx)
     if a.out:
         write(a.out, report_tsv(facts, certs))
