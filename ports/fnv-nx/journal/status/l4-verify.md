@@ -359,3 +359,4 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - icount, on rt/guest alone, is undefined on fnvnx_call_fp and fnvnx_dispatch.
   - With the platform in, the loader's store fails on the freetype gen include.
   - Sent to L1 as three rules: the dispatch table per image at link; generated includes as `uses`; link.roots derived from the definer closure.
+- 11:55: L1 bootbase daeffada8 is withdrawn; w6 reverts its merge on w6-r. The bootguest and icount links run on L1 cand3 (Header home and fact universe from w12L2 d1f625e98; the freetype gen include from w15).
