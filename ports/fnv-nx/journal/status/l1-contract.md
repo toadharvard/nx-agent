@@ -1858,3 +1858,7 @@ bottleneck: the merged cand3 (w12) for the relift base, and the cand2 verdict (w
 bottleneck: the merged cand3 (w12), and the cand2 verdict (w15).
 - 22:05 cand3 rebuilt: claude/fnv-l1-contract-cand3 41a8855d4 = the w12L2 line (8 commits plus PP keying) + shards 16/cpu_s/timing/export + generator dirs (one form, consumed as outputs NAME:dir) + sandbox. sandbox and cas equal c0f504e2a; toolchain equals cand2; static 20/20; genchain, shard, ppkeys and sandbox tests pass. Orchestrator, L3a, L4 and w15 have it. w12 next: assemble cand4.
 bottleneck: the cand2 verdict on w15, then cand3.
+- 22:09 L4: cand3 41a8855d4 still lacks the L1 lineage on L3a's line (022c5d5f2 → t16l 18c2b9cde): link.entry, and the loader IMPORTED_TSV/BRIDGE_TSV outputs.
+  - w12 merges every L1-file commit from that line, checked by a diff of verify/contract/loader against t16l.
+  - Closure rule (L4's proposal, accepted): the link.roots seed = undefined symbols of the objects ∪ the symbols the link script references, taken from the pinned ld on the script alone. crt0 then enters by rule (the icount image's __fnvnx_guest_hdr).
+bottleneck: the complete cand3 (w12), and the cand2 verdict (w15).
