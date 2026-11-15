@@ -949,10 +949,10 @@ static bool ordt_visit(gimple *stmt, tree, tree op, void *data) {
       why = 2;
   } else if (base && TREE_CODE(base) == STRING_CST) why = 1;
   if (why < 0) {
+    // the statement as GCC prints it, then the diagnostic (diagnostic output only)
+    fprintf(stderr, "ORD-T stmt, block %d: ", gimple_bb(stmt)->index);
+    print_gimple_stmt(stderr, stmt, 0, TDF_VOPS | TDF_SLIM);
     error_at(gimple_location(stmt), "%<fnvnx_order%>: ORD-T: a plain memory access with no reason (%s)", get_tree_code_name(TREE_CODE(op)));
-    print_gimple_stmt(stderr, stmt, 0, TDF_VOPS);   // the statement, and its block, as GCC prints them, next to the diagnostic
-    fprintf(stderr, "-- block %d:\n", gimple_bb(stmt)->index);
-    for (gimple_stmt_iterator g = gsi_start_bb(gimple_bb(stmt)); !gsi_end_p(g); gsi_next(&g)) print_gimple_stmt(stderr, gsi_stmt(g), 2, TDF_VOPS);
     return false;
   }
   x->c.reason[why]++;
