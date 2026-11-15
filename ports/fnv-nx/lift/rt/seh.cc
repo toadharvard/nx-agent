@@ -4,7 +4,7 @@
      fnvl_raise(code, at)            hardware fault of the instruction at guest address `at` (code: the FNVL_* list of fnvl.h, a total switch) -- called by lifted code
      fnvl_raise_av(access, addr, at) access violation (access 0 read, 1 write, 8 execute); the host fault handler calls it with the guest eip
      fnvl_os_RtlUnwind, fnvl_os_RaiseException   guest entries of the two kernel32 services (stdcall: arguments on the guest stack, `ret 16`)
-   Contract after return: ContinueExecution -> the guest state that the CONTEXT's ContextFlags name is loaded from it (ctx_restore: the exact inverse of ctx_capture, field for field) and c->ra = Context.Eip; a handler that left by a
+   Contract after return: ContinueExecution -> the guest state that the CONTEXT's ContextFlags name is loaded from it (ctx_restore: the inverse of ctx_capture for 48 of the 70 CONTEXT fields, the 14 that Wine's restore ignores too are not read; the 8 fields FOP, FCS, FDS, FSW bits ES/B and EFlags TF/NT/RF have no state in struct cpu: journal/inbox/l3b-w9-ctx.md) and c->ra = Context.Eip; a handler that left by a
    non-local transfer (the exe's __except_handler3/4 jump to their except block) -> registers and c->ra exactly as the handler left them. The
    lifted raise site then runs the non-local loop, which serves Eip when it is a label of the faulting function (the faulting instruction, an
    except/catch continuation) or an entry; it cannot serve any other address (documented limit). Unhandled: fnvl_os_unhandled(record, context)

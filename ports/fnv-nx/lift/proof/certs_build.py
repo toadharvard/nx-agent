@@ -33,7 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import irdeps, model_sail, prove, shape, symform  # noqa: E402
+from proof import certbasis, irdeps, model_sail, prove, shape, symform  # noqa: E402
 
 HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\tobligations\tundef_flags\tdef0_witness\tdef0_free\tnonflag_free\tdeclared\n'
 
@@ -134,10 +134,10 @@ def scan(files):
         if not model_valid(r, model):
             counts['stale-model'] = counts.get('stale-model', 0) + 1
             continue
-        if r.get('prover_sha') != prove.prover_sha():          # proved by other prover semantics (prove.py, model_sail.py, symform.py, certbasis.py)
+        if r.get('prover_sha') != certbasis.prover_sha():          # proved by other prover semantics (prove.py, model_sail.py, symform.py, certbasis.py)
             counts['stale-prover'] = counts.get('stale-prover', 0) + 1
             continue
-        if r.get('obligations') != list(prove.OBLIGATIONS):          # a record of a prover that did not check DEF0 (every undefined flag = 0) certifies less than this one
+        if r.get('obligations') != list(certbasis.OBLIGATIONS):          # a record of a prover that did not check DEF0 (every undefined flag = 0) certifies less than this one
             counts['stale-obligations'] = counts.get('stale-obligations', 0) + 1
             continue
         d0r = r.get('def0') or {}
@@ -150,7 +150,7 @@ def scan(files):
         counts[res] = counts.get(res, 0) + 1
         k3 = (key, r['dsl_sha'], model)
         ok = res in ('proved', 'agree-except-declared')
-        if res == 'agree-except-declared' and r.get('platform_sha256') != prove.platform_sha(r.get('declared') or {}):
+        if res == 'agree-except-declared' and r.get('platform_sha256') != certbasis.platform_sha((r.get('declared') or {}).values()):
             counts['stale-platform'] = counts.get('stale-platform', 0) + 1
             continue
         if res.startswith('FAILED') and status.get(k3) in ('proved', 'agree-except-declared') or ok and status.get(k3, '').startswith('FAILED'):

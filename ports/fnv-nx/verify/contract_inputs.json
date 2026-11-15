@@ -48,6 +48,14 @@
    "commit": "678c780eb7cd295e714fd01a3d35623f4d76d840",
    "tree_sha256": "d21bd71296e96a391fcf9349cb63205d58a830422cdc9e42bd0bc3fde4b9d796",
    "at": "/ext/wine"
+  },
+  {
+   "name": "wine-msvcrt",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-9.0-msvcrt",
+   "commit": "f3e6148c46ab9d1899a0bd54510ff3c33329eb68",
+   "tree_sha256": "c229dfa72bf2b2bcebca83235fa4e1e1b369f9cc917e797e3bac254d1d38ffaf",
+   "at": "/ext/wine-msvcrt"
   }
  ],
  "ehfacts": "facts",

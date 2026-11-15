@@ -1,5 +1,5 @@
 // PATCH (vi): sar_spec_8/16/32/64 for a masked count >= the operand size: CF = the most significant bit of the destination, and CF is no longer an undefined flag (G1).  TRANSCRIPTION, ACL2
-// books/projects/x86isa/machine/instructions/shifts-spec.lisp at acl2 master 3ccb342c88bd3b815856f4bbc336382287934405 (ASM-009), define sar-spec-gen, lines 797-852 (the `otherwise` arm):
+// books/projects/x86isa/machine/instructions/shifts-spec.lisp at acl2 master (sail_pins.txt row acl2) (ASM-009), define sar-spec-gen, lines 797-852 (the `otherwise` arm):
 //   (cf (if (<= ,size src) (mbe :logic (part-select dst :low ,size-1 :width 1) ...) (mbe :logic (part-select dst :low (1- src) :width 1) ...)))   then pf zf sf from the result, AF and OF undefined
 // The pinned ACL2 8.5 translation had a separate `(if (<= ,size src)` arm (acl2-85 shifts-spec.lisp 791-851) that left CF undefined and unchanged.  Only the `_ =>` arm changes; the count 0 and 1 arms
 // and everything before the match are the pinned translation's own (they are not in the master diff).

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cpuid_dispatch.py MODEL_DIR OUT: the splice that makes two_byte_opcode_execute dispatch opcode 0F A2 to x86_cpuid.  TRANSCRIPTION of the dispatch change of ACL2 master 3ccb342c88bd3b815856f4bbc336382287934405
+"""cpuid_dispatch.py MODEL_DIR OUT: the splice that makes two_byte_opcode_execute dispatch opcode 0F A2 to x86_cpuid.  TRANSCRIPTION of the dispatch change of ACL2 master (sail_pins.txt row acl2)
 inst-listing.lisp:9985-9987 (`(INST "CPUID" (OP :OP #xFA2) NIL '(X86-CPUID) '((:UD (UD-LOCK-USED))))`; the ACL2 8.5 listing has no entry there and the translation's arm for 162 is `Opcode Unimplemented`).  The splice is the
 translation's own two_byte_opcode_execute (model/two_byte_opcodes_dispatch.sail) with exactly the one statement of arm 162 replaced; the replaced text must occur exactly once (else this script fails)."""
 import re

@@ -41,18 +41,18 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import codeuniverse, eaaudit, shape, symcheck, symform  # noqa: E402
+from proof import certbasis, codeuniverse, eaaudit, shape, symcheck, symform  # noqa: E402
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
 
 NAME = "forms"
 INPUTS = os.path.join(HERE, "formgate_inputs.json")
 FORMAT = "fnvnx-forms-inputs/1"
-EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}      # = recipe.EXT_KEYS (a test asserts it)
+EXT_KEYS = recipe.EXT_KEYS
 KEYS = {"format", "external", "shapes", "certs", "instrs"}
 IR_EXT = "x86ir"      # the external that pins x86_proof.ir: the one place the model is pinned; its sha256 is derived from the file
 REFERENCES = ("sail", "fpsmt", "k", "sdm", "table")
-FAMILIES = ("int", "x87", "simd", "sys")
+FAMILIES = shape.FAMILIES
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -154,35 +154,19 @@ def load_shapes(path):
     return out
 
 
-OBLIGATIONS = ("def0", "xstate")      # = prove.OBLIGATIONS (test_formgate checks it; this module imports no SMT solver): a row certifies only what the current prover checks
-
-
-def declared_table():
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "declared.json")) as fh:
-        return json.load(fh)
-
-
-def platform_sha(fns, root=None):
-    """= prove.platform_sha (test_formgate checks they agree; this module imports no SMT solver): sha256 over (relative path, content) of the declared.json sources of the functions, hashed from the lift tree this gate runs from"""
-    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    rows = {u: r for r in declared_table()["rows"] for u in r["ufs"]}
-    h = hashlib.sha256()
-    for src in sorted({rows[f]["source"] for f in fns}):
-        h.update(src.encode()); h.update(open(os.path.join(root, src), "rb").read())
-    return h.hexdigest()
 
 
 def declared_ok(decl, root=None):
     """`reg:fn,...@sha256`: every pair is allowed by declared.json (function, output), and the sha is that of the platform sources in this tree"""
     try:
         pairs, sha = decl.rsplit("@", 1)
-        rows = {u: r for r in declared_table()["rows"] for u in r["ufs"]}
+        rows = {u: r for r in certbasis.declared_table()["rows"] for u in r["ufs"]}
         fns = []
         for p in pairs.split(","):
             reg, fn = p.split(":")
             if fn not in rows or reg not in rows[fn]["outputs"]: return False
             fns.append(fn)
-        return sha == platform_sha(fns, root)
+        return sha == certbasis.platform_sha(fns, root)
     except (ValueError, KeyError, OSError):
         return False
 
@@ -201,7 +185,7 @@ def load_certs(path, model_sha):
             continue
         if decl != "-" and not declared_ok(decl):
             continue                                                # a declared output outside declared.json, or a platform source that is not the one of this tree: stale
-        if model == model_sha and ref in REFERENCES and obl == ",".join(OBLIGATIONS):
+        if model == model_sha and ref in REFERENCES and obl == ",".join(certbasis.OBLIGATIONS):
             ok.setdefault(key, set()).add(dsl)
     return ok
 

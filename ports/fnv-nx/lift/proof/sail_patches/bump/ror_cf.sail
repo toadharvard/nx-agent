@@ -1,4 +1,4 @@
-// PATCH (i): ror_spec_8/16/32/64.  Two hunks, both now TRANSCRIPTIONS of ACL2 books/projects/x86isa/machine/instructions/rotates-spec.lisp at acl2 master 3ccb342c88bd3b815856f4bbc336382287934405 (ASM-009):
+// PATCH (i): ror_spec_8/16/32/64.  Two hunks, both now TRANSCRIPTIONS of ACL2 books/projects/x86isa/machine/instructions/rotates-spec.lisp at acl2 master (sail_pins.txt row acl2) (ASM-009):
 //   (a) masked count 0: no flag affected, none undefined (G1; master rotates-spec.lisp:662-665 `(0 ;; No flags are affected when the masked count is 0 ... (mv input-rflags 0))`; the pinned
 //       ACL2 8.5 translation returned the undefined flag OF here);
 //   (b) the `_ =>` arm: CF = MSB of the result (master :709-717 `(cf ;; CF = MSB of the result. (mbe :logic (logbit ,size-1 result) ...))`; the pinned translation had result[0 .. 0]).

@@ -17,7 +17,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(LIFT, "..", "verify"))     # cas, recipe: the trunk loader the gate itself uses (-I drops PYTHONPATH)
 import fakeext
-from proof import formgate, prove, shape
+from proof import certbasis, formgate, prove, shape
 import recipe
 
 WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')     # declared input: the directory the fixtures are written below
@@ -97,9 +97,6 @@ class Green(unittest.TestCase):
             u, c, ids, detail = f.judge()
             self.assertEqual((u, c, ids), (2 * len(GOOD), 2 * len(GOOD), []))
             self.assertIn('int %d/%d' % (len(GOOD), len(GOOD)), detail)
-
-    def test_ext_keys_are_the_loaders(self):
-        self.assertEqual(formgate.EXT_KEYS, recipe.EXT_KEYS)
 
     def test_result_file_accepted_by_the_trunk_reader(self):
         for encs, status in ((GOOD, 'green'), (GOOD + NOBUILD, 'red')):
@@ -323,23 +320,15 @@ class Cli(unittest.TestCase):
 
 
 class DeclaredOutputs(unittest.TestCase):
-    def test_platform_sha_agrees_with_the_prover(self):
-        self.assertEqual(formgate.platform_sha(['cpuid0', 'cpuid3']), prove.platform_sha({'eax': 'cpuid0', 'edx': 'cpuid3'}))
-
     def test_declared_column_is_checked_against_the_contract_and_the_tree(self):
-        sha = formgate.platform_sha(['cpuid0'])
+        sha = certbasis.platform_sha(['cpuid0'])
         self.assertTrue(formgate.declared_ok('eax:cpuid0,edx:cpuid3@' + sha))
         self.assertFalse(formgate.declared_ok('eax:cpuid0@' + '0' * 64))               # the platform source changed
         self.assertFalse(formgate.declared_ok('esi:cpuid0@' + sha))                    # an output the contract does not allow
-        self.assertTrue(formgate.declared_ok('eax:rdtsc,edx:rdtsc@' + formgate.platform_sha(['rdtsc'])))      # rdtsc is declared (rt/cpumodel.c)
+        self.assertTrue(formgate.declared_ok('eax:rdtsc,edx:rdtsc@' + certbasis.platform_sha(['rdtsc'])))      # rdtsc is declared (rt/cpumodel.c)
         self.assertFalse(formgate.declared_ok('eax:nosuchfn@' + sha))                  # a function that is not in declared.json
         self.assertFalse(formgate.declared_ok('garbage'))
 
-
-class ObligationsPin(unittest.TestCase):
-    def test_formgate_obligations_are_the_provers(self):
-        from proof import prove
-        self.assertEqual(formgate.OBLIGATIONS, prove.OBLIGATIONS)
 
 
 class EaRule(unittest.TestCase):

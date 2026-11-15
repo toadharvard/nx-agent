@@ -1,5 +1,5 @@
 // PATCH (v): rol_spec_8/16/32/64 for the masked count 0: no flag is affected and none is undefined.  TRANSCRIPTION, ACL2 books/projects/x86isa/machine/instructions/rotates-spec.lisp at acl2 master
-// 3ccb342c88bd3b815856f4bbc336382287934405 (ASM-009), define rol-spec-gen, lines 285-288:  (0 ;; No flags are affected when the masked count is 0 (per Intel SDM ...) (mv input-rflags 0)).
+// (sail_pins.txt row acl2) (ASM-009), define rol-spec-gen, lines 285-288:  (0 ;; No flags are affected when the masked count is 0 (per Intel SDM ...) (mv input-rflags 0)).
 // The pinned translation (ACL2 8.5, rotates-spec.lisp 286-289 of acl2-85) returned input-rflags with undefined flags = {OF} ("No flags, except OF, affected. OF is undefined.").  Only that arm changes (G1);
 // every other line is the pinned translation's own (the arms of count 1 and >= 2 are not changed by master's rotates-spec.lisp for rol).
 val rol_spec_8 : (bits(8), bits(6), rflagsbits) -> (bits(8), rflagsbits, rflagsbits)

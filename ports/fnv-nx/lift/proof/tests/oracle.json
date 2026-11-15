@@ -1,6 +1,29 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_ehoracle.py": {
+   "references": [
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/except_i386.c"
+    },
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/cppexcept.h"
+    },
+    {
+     "kind": "external",
+     "name": "wine-msvcrt",
+     "path": "dlls/msvcrt/cpp.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/ehoracle.py",
+    "ports/fnv-nx/lift/proof/wine_pin.json"
+ ]
+ },
   "test_bsfbsr_closed_form.py": {
    "references": [
     {
@@ -207,6 +230,24 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/shape.py"
+   ]
+  },
+  "test_x87spec.py": {
+   "references": [
+    {
+     "anchor": "L1-L142",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/tests/x87_sdm_rows.txt"
+    },
+    {
+     "anchor": "L1-L131",
+     "kind": "spec",
+     "path": "ports/fnv-nx/journal/inbox/l3b-w9-x87-list.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/sdm_pages.tsv",
+    "ports/fnv-nx/lift/proof/x87spec.py"
    ]
   },
   "test_sysspec.py": {

@@ -161,3 +161,46 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
   - Resume rule: a shard killed at the 2 h limit is rerun with the same command; the appended jsonl skips shapes already proved.
 - w4 merged the lead branch (cdd9ce1b1): one IR fetch path. Next: the oracle.json entries, then SIMD slice 1 (prover state for xmm/mm/mxcsr/fr/fptr).
 - Sent to L3a w1: the pinsrw/pextrw/pshufw lane index must be an ite over the masked immediate.
+
+## 2026-11-15 09:30Z
+- Undecided x86sys rows, dependent sites (w3 330074b8a, proof/undecided_sites.py).
+  - Inputs: pack 7b2faae276b2 @ 7ef692b5b, L5 x86sys 3646ebab3. The universe is 5,007,758 pack addresses, all decoded.
+  - Full site list: fnv-nx-build l3b-lift/undecided-sites @ 10f8792.
+  - Sites (markers) per row:
+    - cr4.pce 0
+    - idtr_limit 156
+    - int other vectors 154
+    - int 0x29 0
+    - selectors.gs 5,305 (3,015 addresses, 2,988 of them in d3dx9_38)
+    - sgdt 5
+    - sidt_base 0
+    - sldt 35
+  - These counts are an upper bound: almost all the gs and int sites are data decoded as code. The cut is L3a's code-range facts (CODEMAP, w7); after it, each remaining site needs a reach certificate or a decided row.
+- w3 1d42a4550 (#12): certbasis.py is the one source of OBLIGATIONS and platform_sha. Merged at 29939d7b4. w3 is archived (budget).
+- Queue v3 is BLOCKED on the 4 farms.
+  - Cause (rule 3): farm_shapeprove.sh still read the IR pin from sail_pins.txt after #13 moved it to the external x86ir.
+  - w4 fixes it: the IR comes only through the external, and the sha comes from certs_build --model-sha.
+- w9: the x87 tables, Table 4-8 and loads/stores/BCD are done (d826016e, d0a72b87; 44 tests). The merge into the lead branch waits for w9 to resolve the CERTS.md/oracle conflicts.
+- w4 SIMD: Sail has no SIMD semantics, so the reference comes from ACL2 transcriptions, with SDM specs under OWNER 10 where ACL2 has no instruction. The cr0/cr4 OSFXSR and MXCSR rows are asked of L5.
+
+## 2026-11-15 09:35Z
+- Queue v3 is blocked by 3 defects, all given to w4 as one commit:
+  1. The farm read the IR pin from sail_pins.txt (rule 3; the fix is the external x86ir only).
+  2. prove.py post_of fails on w1's Form.post() lists/tuples (fr/xmm/fptr), so 0 integer shapes are provable. The fix is the prover state extension in prove.py, by the d935ecda widths.
+  3. Fake success: a shard whose shapes all crashed published an empty jsonl with "shapes=0". The fix: a crash is an error record; a shard with missing or error records exits 1 and publishes nothing; "already published" requires a full record count.
+- Farm 11 published 3 empty branches (…/7c3074644653-f3eb5096ad36/{13,14,15}of24) through SAIL_IR; it is deleting them.
+- Merged w9 into the lead branch (d920f6633). w9 693a75a9: ou_pre names the L3a fact x87-masked-sites (asked of L3a); FBLD digits above 9 are nd.fbld.img; 45 tests.
+- gate_oracle: 113/116. The 3 missing tests are L3a w1's (test_census, test_dsl_xsimd, test_forms_simd), asked of L3a.
+
+## 2026-11-15 09:50Z
+- w4 8d6e362c8+, the queue v3 blockers fixed:
+  - one IR pin, through the external x86ir and certs_build --model-sha;
+  - incremental publish every 600 s and on signal, with resume from the published file;
+  - prove.py has the `xstate` obligation, so integer Forms prove again; x87/SIMD Forms are a model-gap until the spec path covers them.
+- Rate: about 45 s per shape over a spread sample, so 777 shapes per shard is about 9 h. That explains why every v2 shard hit the 2 h limit. Queue v3 gets its shard count from proof/shardcount.py (ceil of rows × p95 / 90 min). Not published yet.
+- sysspec on x86sys 3646ebab3, over the 129 system-family shapes: proved 74, uncertified 42, not covered 13, failed 0.
+  - The uncertified ones wait on the descriptor readable bit, int other_vectors, sgdt and sldt. The descriptor, TR and lar/lsl rows are asked of L5 w14.
+  - Not covered (13): iretd, str, rdtsc, cpuid, lar, mov. These go to w4 after v3.
+- The 3 empty branches …/7c3074644653-f3eb5096ad36/{13,14,15}of24 cannot be deleted, because the proxy refuses deletes (403). Resume from the published file makes them harmless.
+- SIMD split: w9 owns the spec path (ACL2/SDM specs; Sail has none), w4 owns prove.py.
+- w9 7d4c17d6: the x87 spec is complete over the registry (47 tests), merged at 32654c699. (D), the seh CONTEXT test, waits for L3a's lift/rt recipe root.

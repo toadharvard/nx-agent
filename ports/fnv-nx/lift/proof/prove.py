@@ -16,21 +16,13 @@ Unobserved: the model interface returns neither DF nor the other EFLAGS bits; a 
 import hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import defects, rewrite, forms, model_sail
+from proof import certbasis, defects, rewrite, forms, model_sail
 MODELS = {'model_sail': model_sail}      # the reference models --model can name
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 RFO = z3.BitVec('rflags_other', 32)
 SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RFO & 0xFFFFF328)]    # DSL inputs df / flo = bits of the model's free rflags_other
-PROVER_FILES = ('prove.py', 'model_sail.py', 'symform.py', 'certbasis.py')      # the files that define what a proof compares; a record is valid only under the same bytes of them (a prover fix invalidates by rule, an unrelated edit does not)
-def prover_sha():
-    import hashlib
-    h = hashlib.sha256(); d = os.path.dirname(os.path.abspath(__file__))
-    for f in PROVER_FILES:
-        q = os.path.join(d, f)
-        if os.path.exists(q): h.update(f.encode() + b'\0' + open(q, 'rb').read() + b'\0')
-    return h.hexdigest()
-OBLIGATIONS = ('def0', 'xstate')      # what a record of this prover certifies beyond the field equalities; certs_build refuses a record without it (stale-obligations)
+OBLIGATIONS = certbasis.OBLIGATIONS      # what a record of this prover certifies beyond the field equalities (proof/certbasis.py)
 SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
 
 MODEL_FAULT_BY_NAME = {'DE': r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
@@ -174,8 +166,7 @@ def users_of(users, names):
 def users_all(users):
     return {o for u in users.values() for o in u}
 
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'declared.json')) as _fh:
-    DECLARED = json.load(_fh)                                   # the contract of the declared outputs: function -> platform source, SDM / OWNER basis, the outputs it may define
+DECLARED = certbasis.declared_table()                                   # the contract of the declared outputs: function -> platform source, SDM / OWNER basis, the outputs it may define
 UFROW = {u: row for row in DECLARED['rows'] for u in row['ufs']}
 RT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the lift tree: sources are relative to it
 
@@ -196,13 +187,6 @@ def declared_findings(F):
     for name, v, when in F.regs:
         if any(n.op == 'uf' for n in _nodes([v])) and name not in d: bad.append((name, sorted({n.x for n in _nodes([v]) if n.op == 'uf'})))
     return bad
-
-def platform_sha(declared, root=RT):
-    """sha256 over the source files of the declared.json rows the functions belong to (relative path + content): part of the certificate; formgate recomputes it from the tree it runs in"""
-    h = hashlib.sha256()
-    for src in sorted({UFROW[f]['source'] for f in declared.values()}):
-        h.update(src.encode()); h.update(open(os.path.join(root, src), 'rb').read())
-    return h.hexdigest()
 
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
@@ -230,7 +214,7 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     dm, mm = z3.Select(D['mem'], probe), z3.Select(M['mem'], probe)
     diffs += [('mem', dm, mm, dm != mm), ('eip', D['eip'], M['eip'], D['eip'] != M['eip'])]
     extra = {'model_sha256': hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest(), 'fault_checks': ''}
-    if extra_declared: extra['declared'] = extra_declared; extra['platform_sha256'] = platform_sha(extra_declared)
+    if extra_declared: extra['declared'] = extra_declared; extra['platform_sha256'] = certbasis.platform_sha(extra_declared.values())
     if not complete:                                             # every model path faults (a declared fault, prove.Perm): nothing to compare, but the DSL must fault in every pre-state of the domain
         r0, _ = check([D['fault'] == 0], domain, args); extra['fault_checks'] = 'model never completes => DSL faults in every state: %s' % r0
         return ('proved', '', extra) if r0 == z3.unsat else ('timeout', '', extra) if r0 != z3.sat else ('FAILED(dsl)', 'the model faults on every path, the DSL does not: ' + extra['fault_checks'], extra)

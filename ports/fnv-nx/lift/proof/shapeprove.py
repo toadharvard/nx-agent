@@ -23,7 +23,7 @@ into are exhaustive with their path conditions in the merge)."""
 import argparse, collections, json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
-from proof import shape as shp, symform, prove, model_sail
+from proof import shape as shp, symform, prove, model_sail, certbasis
 
 def load_shapes(path):
     """canonical integer-family shape keys, sorted"""
@@ -70,7 +70,7 @@ def one(key, args):
     if model_sail.LAST.get('fault_paths'): asm.append('A-SEGLIM')
     ids = res[len('FAILED(model-defect:'):-1].split(',') if res.startswith('FAILED(model-defect:') else []
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
-               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), prover_sha=prove.prover_sha(), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
+               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), declared=extra.get('declared'), platform_sha256=extra.get('platform_sha256'), obligations=list(prove.OBLIGATIONS), prover_sha=certbasis.prover_sha(), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'), **fns_fields())
 
 def migrate(rec, args):
     """K migration of a record of this model (model_sha = the pinned IR) made before the closure key: rerun ONLY the isla model run of its shape (deterministic: same IR, config, inputs; the run is cached by the

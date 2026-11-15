@@ -10,7 +10,9 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/lift/gates/gate_eh.py"
+    "ports/fnv-nx/lift/gates/gate_eh.py",
+    "ports/fnv-nx/lift/proof/ehoracle.py",
+    "ports/fnv-nx/lift/proof/wine_pin.json"
    ]
   },
   "test_gate_flags.py": {
