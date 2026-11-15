@@ -437,18 +437,20 @@ static void emit_decltype()
    * cleanup: terminate_fn). One rule over the identifier table, not a list of such functions. Local labels (`.L...`) and the unit's own local symbols are not in the
    * symbol table of the universe (global and weak symbols). The reason is the predicate's: `mangled` for a `_Z` name, else the front end's own reference (`builtin`). */
   struct RefScan {
-    std::map<std::string, std::string> *rows; std::set<std::string> *local;
+    std::map<std::string, std::string> *rows; std::set<std::string> *local; std::set<std::string> *pending;   /* pending: referenced, not `_Z`, no line yet */
     static int cb(struct cpp_reader *, hashnode hn, const void *u) {
       RefScan *r = (RefScan *)u;
       tree id = HT_IDENT_TO_GCC_IDENT(hn);
       if (!TREE_SYMBOL_REFERENCED(id)) return 1;
       std::string nm = IDENTIFIER_POINTER(id);
       if (nm.empty() || nm[0] == '.' || nm[0] == '*' || r->rows->count(nm) || r->local->count(nm)) return 1;
-      (*r->rows)[nm] = (nm[0] == '_' && nm[1] == 'Z') ? "-mangled" : "-builtin";
+      if (nm[0] == '_' && nm[1] == 'Z') (*r->rows)[nm] = "-mangled";
+      else r->pending->insert(nm);   /* a line only from a declaration, builtin_info, a libcall or a plugin's writer: checked below */
       return 1;
     }
   };
-  { RefScan rs{&rows, &local_names}; ht_forall(ident_hash, RefScan::cb, &rs); }
+  std::set<std::string> pending_refs;
+  { RefScan rs{&rows, &local_names, &pending_refs}; ht_forall(ident_hash, RefScan::cb, &rs); }
   /* The symbols the object has that no symbol table node names: the references the back end makes itself. (1) The library functions it calls implicitly: every one is
    * announced through targetm.asm_out.external_libcall (varasm.cc assemble_external_libcall, called once per SYMBOL_REF the first time it is used: the one place a
    * libcall is emitted, whatever table made its SYMBOL_REF), which the plugin wraps (libcall_seen). (2) The explicit built-in functions it lowers to calls after the
@@ -474,6 +476,9 @@ static void emit_decltype()
     else if (!pr.second.empty() && it->second == "-builtin") it->second = ty;
     else if (!pr.second.empty() && it->second != ty && it->second[0] != '-') dl_error("a plugin's symbol is declared with another spelling", nm + ": " + it->second + " / " + ty);
   }
+  /* RULE DECLTYPE-REF: a referenced identifier that is not `_Z` has a line from exactly one of the sources above (a declaration of the unit, builtin_info's names, a libcall,
+   * a plugin writer). `builtin` is only what builtin_info names; any other is an error (no default reason: that would be a guess). */
+  for (auto &nm : pending_refs) if (!rows.count(nm)) dl_error("a referenced symbol has no declaration line (no declaration, builtin_info entry, libcall or plugin writer names it)", nm);
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.decltype,\"\",%%progbits\n");
   for (auto &r : rows) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", escape(r.first + "\t" + r.second).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
