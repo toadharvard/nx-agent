@@ -71,6 +71,8 @@ LINKAGE = {
     '10ExtTypedef': 'external',                                 # ... by a typedef of the global namespace
     '4TmplI3ExtE': 'external', '4TmplIN3pub1PEE': 'external',   # specializations with external arguments
     '4TmplIN12_GLOBAL__N_16AnonNsEE': 'internal',               # a specialization with an argument of internal linkage
+    '8._anon_4': 'none',                                        # an unnamed union at namespace scope
+    '8ExtUnion': 'external',                                    # a union named for linkage by a typedef
     '8._anon_2': 'none',                                        # an unnamed class at namespace scope without a typedef name for linkage
     'N6HolderUt_E': 'external',                                 # an unnamed class that is a member of an external class (core issue 966)
     '6Holder': 'external',
@@ -90,6 +92,11 @@ def linkage(obj):
     for it, want in sorted(LINKAGE.items()):
         check('linkage %s is %s' % (it, want), got.get(it) == want, got.get(it))
     check('no record of linkage.cpp without a case', set(got) == set(LINKAGE), sorted(set(got) ^ set(LINKAGE)))
+    lam = [r for r in rows if len(r) == 8 and r[6] == 'N3lamMUliE_E']
+    check('a lambda closure type is not keyed by the shared `<unnamed-tag>` name: key `!`+Itanium and a nokey flag',
+          len(lam) == 1 and lam[0][0] == '!N3lamMUliE_E' and 'nokey:lambda closure type' in lam[0][5].split(','), lam)
+    keys = [r[0] for r in rows if len(r) == 8]
+    check('no two records of linkage.cpp share a key', len(keys) == len(set(keys)), sorted(k for k in set(keys) if keys.count(k) > 1))
     check('all three values occur', set(got.values()) == {'none', 'internal', 'external'}, sorted(set(got.values())))
 
 

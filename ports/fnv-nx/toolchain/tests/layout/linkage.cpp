@@ -18,6 +18,9 @@ AnonTypedef t_anon_typedef;
 ExtTypedef t_ext_typedef;
 struct { int u; } unnamed_var;                            // none: an unnamed class without a typedef name for linkage, at namespace scope
 struct Holder { struct { int z; } member; int k; };       // Holder external; the unnamed member class is nested in an external class
+union { int u1; float u2; } unnamed_union_var;            // none: an unnamed union at namespace scope
+typedef union { int w1; float w2; } ExtUnion;             // external: a union named for linkage by a typedef
+ExtUnion ext_union_var;
 int f()
 {
   struct Local { int a; };                                // none: a local class

@@ -333,6 +333,9 @@ static void finish_unit_cb(void *, void *)
     if (!tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) continue;
     std::string why;
     std::string key = key_of(t, why);
+    /* a lambda's closure type has no name in cl's key grammar (cl: <lambda_hash>): its key `U<unnamed-tag>@..@` is shared by every
+       unnamed class of the scope, so it is not a key. Named by its Itanium string instead, and `nokey` (as a local lambda already is). */
+    if (is_cxx() && LAMBDA_TYPE_P(t) && why.empty()) { key = "!" + itanium(t); why = "lambda closure type"; }
     std::set<std::string> flags;
     if (!why.empty()) flags.insert("nokey:" + why);
     if (TYPE_PACKED(t)) flags.insert("packed");
