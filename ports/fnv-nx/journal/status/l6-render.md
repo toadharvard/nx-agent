@@ -1104,3 +1104,18 @@ Paused: w3b, w4, farm; no other work.
     - Pin: the farm is building it from L2 b9f6b3a69 (stamp 03eacf9d8c6932cd).
     - w6 merges w12L2 and migrates every render root (measurement until the pin lands). w5-fbo follows later.
 - bottleneck: the w6 migration onto w12L2, then the farm pin 03eacf9d; L1 cand3 → trunk. 4 of 4 workers busy.
+
+## 2026-11-15 20:52Z
+- **Owner decision (integ a84ad423a): GL keeps its shader compile/link failure branch ("Оставь").**
+    - Rule (A), translator totality, waits until after the first frame. sm_link over the gamedata set stays the gate. deko3d stays on reach_violation with the sm_link certificate.
+    - Stopped:
+        - w7 (`session_01KmtZKStjm4QXqUuVJfag29`), archived;
+        - w1b, which pushes its state and is then archived. claude/fnv-l6-render-w1b-sm is not merged until after the first frame;
+        - w5-total.
+- **w6 621fecc5d:** w5 6b1549bd7 merged; L6A A3 8a23b3609 merged.
+    - nx_pair_ffp_{vs,ps}_row return the generated enum nx_gl4shim_shader_id.
+    - ffp_dev.cpp's destructor (SHADER_DESTROY) is deleted.
+    - Builds: gl4shim green; gl4, d3d9 and pair red.
+        - Cause: the cand2 recipe.py and the a42ad8875 guest_compiler.json do not match.
+        - Fix: the w12L2 (cand3) merge plus the uses/INCLUDE migration (w6, next), then sm_link merged into w6-root.
+- bottleneck: the w6 cand3 migration, then the farm pin 03eacf9d; L1 cand3 → trunk. 2 of 4 workers busy (w5, w6).
