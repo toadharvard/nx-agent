@@ -318,23 +318,21 @@ PROBE_FLAGS = ["-frandom-seed=guestlink", "-ffile-prefix-map=/probe=.", "-Werror
 def parse_driver_link(text, at):
     """The link command of a driver's `-###` output TEXT (its last command line: the link) as the profile's libs: {dirs, names, startfiles, endfiles}, every path
     inside the external mounted at AT, normalised and relative to it (the driver names them through its own bin/..). startfiles: the .o files before the
-    library group; endfiles: the .o files after it; dirs: the -L directories inside the external, in order, each once; names: the -l libraries in order of
+    libraries; endfiles: the .o files after the last `-l` library (the none-elf driver prints no `--end-group`); dirs: the -L directories inside the external, in order, each once; names: the -l libraries in order of
     appearance (the group's included). A `-L` or `.o` outside the external is not a guest runtime file and is not taken."""
     line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]   # each command of -### follows its COLLECT_GCC_OPTIONS line
     toks = [t.strip('"') for t in line.split()]
     rel = lambda t: posixpath.normpath(t)[len(at) + 1:] if posixpath.normpath(t).startswith(at + "/") else None  # noqa: E731
     out = {"dirs": [], "names": [], "startfiles": [], "endfiles": []}
-    seen_end = False
-    for t in toks:
+    last_l = max((i for i, t in enumerate(toks) if t.startswith("-l") and len(t) > 2), default=-1)
+    for i, t in enumerate(toks):
         if t.startswith("-L") and rel(t[2:]):
             if rel(t[2:]) not in out["dirs"]:
                 out["dirs"].append(rel(t[2:]))
         elif t.startswith("-l") and len(t) > 2:
             out["names"].append(t[2:])
-        elif t == "--end-group":
-            seen_end = True
         elif t.endswith(".o") and rel(t):
-            out["endfiles" if seen_end else "startfiles"].append(rel(t))
+            out["endfiles" if i > last_l else "startfiles"].append(rel(t))
     return out
 
 

@@ -6,11 +6,6 @@
    "ref": "tools/libnx",
    "commit": "518bf11ad6a52149e43fbd0fa83b0087a430f446"
   },
-  "a64-runtime": {
-   "repo": "fnv-nx-build",
-   "ref": "tools/gcc-ilp32-msvcmodel-noneelf",
-   "commit": "b36df9302cd1a27c11a606274b5d9bcfc6221f5f"
-  },
   "arm-a57-docs": {
    "repo": "fnv-nx-build",
    "ref": "tools/arm-a57-docs",
@@ -46,24 +41,24 @@
    ],
    "libc": [
     {
-     "external": "a64-runtime",
-     "path": "README.md",
-     "line": 1,
-     "quote": "fnvnx-a64"
+     "external": "gcc-msvcmodel",
+     "path": "MANIFEST.json",
+     "line": 14,
+     "quote": "newlib 4.6.0"
     },
     {
-     "external": "a64-runtime",
-     "path": "README.md",
-     "line": 10,
-     "quote": "newlib"
+     "external": "gcc-msvcmodel",
+     "path": "MANIFEST.json",
+     "line": 18,
+     "quote": "--disable-newlib-supplied-syscalls"
     }
    ],
    "triplet": [
     {
-     "external": "a64-runtime",
-     "path": "README.md",
-     "line": 4,
-     "quote": "Target `aarch64-none-elf`"
+     "external": "gcc-msvcmodel",
+     "path": "MANIFEST.json",
+     "line": 18,
+     "quote": "--target=aarch64-none-elf"
     }
    ],
    "process": [
@@ -82,10 +77,10 @@
    ],
    "abi": [
     {
-     "external": "a64-runtime",
-     "path": "README.md",
-     "line": 4,
-     "quote": "ilp32"
+     "external": "gcc-msvcmodel",
+     "path": "MANIFEST.json",
+     "line": 30,
+     "quote": "-mabi=ilp32"
     },
     {
      "assumption": "ASM-007"

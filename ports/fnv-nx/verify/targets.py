@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """verify/targets.json: the declared targets, one record each (owner order 2026-11-15, rule 5): guest_platform (a Horizon process over newlib) and
-console_cpu (the Cortex-A57 feature set). Every field is cited: to a file and line of a pinned external (libnx, the a64 runtime), to a section of a
+console_cpu (the Cortex-A57 feature set). Every field is cited: to a file and line of a pinned external (libnx, the game compiler tree of guest_compiler.json), to a section of a
 pinned vendor document (the Arm TRM, pinned by sha256 in the arm-a57-docs external), or to an OWNER record id of verify/ASSUMPTIONS.json (ASM-004 for the console).
 Whatever follows from a record is generated here and never written a second time: `semantic_prefix` is the leading run of the guest semantic flags
 (recipe.SEMANTICS_FLAGS).
@@ -52,6 +52,7 @@ def abi_flag(t):
 def check(t, ext=None, assumptions=None, repo=None):
     """-> [problems]. EXT: {external name: checked-out directory}; with it every external citation (file, line, quote) is resolved."""
     bad = []
+    known_ext = set(t["externals"]) | {json.load(open(os.path.join(HERE, "guest_compiler.json")))["external"]["name"]}   # the game's compiler tree is declared once, in the guest compiler pin
     if t.get("format") != "fnvnx-targets/1":
         bad.append("format")
     known = {i["id"] for i in json.load(open(assumptions or ASSUMPTIONS))["entries"]}
@@ -73,7 +74,7 @@ def check(t, ext=None, assumptions=None, repo=None):
                     if c["doc"] not in t["docs"] or not c.get("section"):
                         bad.append("%s: doc citation needs a pinned doc and a section" % where)
                 elif "external" in c:
-                    if c["external"] not in t["externals"]:
+                    if c["external"] not in known_ext:
                         bad.append("%s: unknown external %s" % (where, c["external"]))
                     elif ext and c["external"] in ext:
                         p = os.path.join(ext[c["external"]], c["path"])
