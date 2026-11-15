@@ -15,27 +15,28 @@ The spec has two parts.
             formats (m32fp, m64fp, m80fp, m16int, m32int, m64int, packed BCD) and the register format.
   Part (ii) One function per distinct instruction (the REGISTRY at the end of the file).
 
-Register format (OWNER 8, the only deviation from the SDM).
-  A data register holds an IEEE 754 binary64 BIT PATTERN (64-bit vector), not the 80-bit double
-  extended format.  Arithmetic is binary64 arithmetic, rounded as FCW.RC says; with FCW.PC = 00B the
-  result is first rounded to binary32 (SDM 1:8.1.5.2), which is exact for + - * / sqrt because
-  53 >= 2*24+2 (a double rounding with the same directed mode is a single rounding).  Bit patterns
-  are used because z3's FP sort has one NaN only, so a z3 FP term cannot carry the sign, quiet bit or
+Carrier: the exact 80-bit image (SDM 1:8.1.2, 1:T4-3).
+  The state of a data register is its 80-bit image (St.R, Array BV3 -> BV80), exactly as FSAVE stores it and as the MMX instructions leave it
+  (SDM 1:9.6.2: an MMX write sets bits 64..79 to ones).  No register value is ever rounded on its way into the state: an image that is an unnormal
+  or pseudo-NaN (an 'unsupported' encoding, SDM 1:T8-3, which an MMX write can leave behind) is a state like any other.  The tag of a register
+  follows its image (tag_of_img: 01 zero; 10 NaN, infinity, denormal or unsupported; 00 otherwise; SDM 1:8.1.7).
+  Every instruction has one class, read off the SDM page (Vol 1 8.3 by section, then its Operation):
+    * exact on the image: data transfer (FLD, FST, FSTP, FXCH, FCMOV, FILD, FBLD, FIST, FBSTP, FSAVE/FRSTOR, FNSTENV), sign operations (FCHS, FABS),
+      classification and comparison (FXAM, FCOM family, FTST, FICOM), FRNDINT, and the constant loads (the constant rounded to a 64-bit significand
+      by RC, SDM 1:8.3.4).  They work on the image (and z3's FPSort(15,64), the double extended format, where a value is needed) with no deviation.
+    * binary64 (OWNER 8: the CLAUDE.md rule that floating point is plain IEEE): arithmetic and transcendentals.  Such an instruction reads each
+      operand as view64(image, FCW) = the image rounded to binary64 by FCW.RC (NaN payload kept, overflow by RC), computes in binary64 (with FCW.PC = 00B
+      the result is first rounded to binary32, SDM 1:8.1.5.2: exact for + - * / sqrt because 53 >= 2*24+2), and writes to_m80(result), the exact widening.
+      The deviations from the SDM's 80-bit operation are therefore: the 64-bit significand and 15-bit exponent of an operand are rounded to 53 and 11
+      bits on the read, the result has 53 bits, FCW.PC = 10B and 11B behave alike, and a denormal operand (#D) is a binary64 subnormal of the view.
+  An unsupported operand of an arithmetic-class instruction is the invalid operation: IE (without SF), the QNaN indefinite under the mask (SDM 1:T8-10,
+  and the '#IA ... unsupported format' line of each instruction page); of a comparison, IE and the unordered condition codes; of FST m32/m64, FIST,
+  FBSTP, FRNDINT: IE and the indefinite; of FXAM: class 000.  The m80 moves FLD m80, FSTP m80, FLD ST(i), FST ST(i), FXCH are exempt (SDM 2A:FLD Exc).
+  Bit patterns are used for binary64 values because z3's FP sort has one NaN only, so a z3 FP term cannot carry the sign, quiet bit or
   payload that SDM 1:T4-8 and 1:4.8.3.4 make observable.  z3 FP terms are used only on non-NaN values.
-  The m80fp memory format is kept bit exact where it is representable in binary64:
-    * m80 -> register: round to binary64, round-to-nearest-even (ties to even), the deviation of OWNER 8
-      (no SDM flag is raised by FLD m80, SDM 2A:FLD Exc: only #IS / #IA(SNaN not for m80)).  NaN: sign,
-      quiet bit (bit 62 of the m80 fraction) and the 51 payload bits below it are kept; if the kept
-      fraction would be zero (an SNaN whose set payload bits are all in the dropped part) bit 0 of the
-      binary64 fraction is set so the value stays a NaN (SDM 1:T4-3: SNaN fraction is non-zero).
-    * register -> m80: exact widening (SDM 1:T4-3 encodings, biases 1023 and 16383 from SDM 1:4.2.2);
-      binary64 subnormals are normalised (integer bit 1), as the double extended format has the range.
-  Tag word: classification of the register-format value (SDM 1:8.1.7): zero 01, NaN/infinity/denormal
-  10, other 00, empty 11.  A binary64 subnormal is "denormal" of SDM 1:T4-3 in this register format.
-  Unmasked OE/UE of a register result stores the biased result of SDM 1:8.5.4/8.5.5, which is not
-  representable in binary64; every function that can raise OE or UE returns the precondition that the
-  corresponding mask bit is set (Out.pre).  The lifter's fact is that every FLDCW/FLDENV/FRSTOR/FXRSTOR
-  site keeps the exceptions masked (CLAUDE.md, owner order 2026-11-14, hardware exceptions).
+  Unmasked OE/UE of a register result stores the biased result of SDM 1:8.5.4/8.5.5, which is not representable in binary64; every function that
+  can raise OE or UE of an arithmetic-class result returns the precondition that the corresponding mask bit is set (Out.pre).  The lifter's fact is
+  that every FLDCW/FLDENV/FRSTOR/FXRSTOR site keeps the exceptions masked (CLAUDE.md, owner order 2026-11-14, hardware exceptions).
 
 Return convention.  Every instruction function is  f(s, m=None) -> Out  where s is the machine state
 (St), m the memory operand bit-vector for memory forms.  Out.s is the new state, Out.mem the value
@@ -163,8 +164,8 @@ NOFLAGS = K(0, 6)
 
 # --- machine state ---------------------------------------------------------------------------
 class St:
-    """x87 state: R physical register file (Array BV3 -> BV64, SDM 1:8.1.2: eight 80-bit registers,
-    here the register format), tag (SDM 1:8.1.7), fsw, fcw, and the pointers of SDM 1:8.1.8, 8.1.9."""
+    """x87 state: R physical register file (Array BV3 -> BV80: the exact 80-bit image of each of the eight
+    registers, SDM 1:8.1.2 and 1:T4-3 layout), tag (SDM 1:8.1.7), fsw, fcw, and the pointers of SDM 1:8.1.8, 8.1.9."""
     FIELDS = ("R", "tag", "fsw", "fcw", "fip", "fcs", "fdp", "fds", "fop")
 
     TRANSIENT = ("sfr",)      # not architectural: this instruction raised a stack fault (SF newly reported); finish() moves it to Out.sf_raised
@@ -176,7 +177,7 @@ class St:
 
     @staticmethod
     def fresh(name):
-        return St(R=z3.Array(name + ".R", z3.BitVecSort(3), z3.BitVecSort(64)),
+        return St(R=z3.Array(name + ".R", z3.BitVecSort(3), z3.BitVecSort(80)),
                   tag=z3.BitVec(name + ".tag", 16), fsw=z3.BitVec(name + ".fsw", 16),
                   fcw=z3.BitVec(name + ".fcw", 16), fip=z3.BitVec(name + ".fip", 32),
                   fcs=z3.BitVec(name + ".fcs", 16), fdp=z3.BitVec(name + ".fdp", 32),
@@ -207,8 +208,14 @@ def phys(s, i):
     return (top(s) + K(i, 3)) if isinstance(i, int) else (top(s) + i)
 
 
-def st(s, i):
+def st80(s, i):
+    """The exact 80-bit image of ST(i) (the exact class: data transfer, sign, classification, stores)."""
     return z3.Select(s.R, phys(s, i))
+
+
+def st(s, i):
+    """ST(i) as an arithmetic operand (the arithmetic class, OWNER 8): the image read as binary64, rounded by FCW.RC."""
+    return view64(st80(s, i), s.fcw)
 
 
 def set_st(s, i, v):
@@ -232,18 +239,22 @@ def is_empty(s, i):
     return tag_at(s, phys(s, i)) == K(TAG_EMPTY, 2)
 
 
-def tag_of_value(b):
-    """Tag the register-format value b gets (SDM 1:8.1.7: 01 zero; 10 special = NaN, infinity, denormal;
-    00 valid).  Deviation of OWNER 8: the register format is binary64, so 'denormal' is the binary64
-    subnormal."""
-    return If(is_zero(b), K(TAG_ZERO, 2), If(Or(is_nan(b), is_inf(b), is_sub(b)), K(TAG_SPECIAL, 2), K(TAG_VALID, 2)))
+def tag_of_img(m):
+    """The tag the 80-bit image m gets when loaded (SDM 1:8.1.7: 01 zero; 10 special = 'invalid (NaN, unsupported),
+    infinity, or denormal'; 00 valid)."""
+    return If(is_zero80(m), K(TAG_ZERO, 2), If(Or(is_unsup80(m), is_nan80(m), is_inf80(m), is_den80(m)), K(TAG_SPECIAL, 2), K(TAG_VALID, 2)))
+
+
+def write_img(s, i, img):
+    """Write the image to ST(i) and tag it from the image (SDM 2A:FLD Op: 'ST(0) <- ...' loads tag the register non-empty)."""
+    p = phys(s, i)
+    s2 = s.copy(R=z3.Store(s.R, p, img))
+    return set_tag_at(s2, p, tag_of_img(img))
 
 
 def write_reg(s, i, v):
-    """Write ST(i) and tag it from the value (SDM 2A:FLD Op: 'ST(0) <- ...' loads tag the register non-empty)."""
-    p = phys(s, i)
-    s2 = s.copy(R=z3.Store(s.R, p, v))
-    return set_tag_at(s2, p, tag_of_value(v))
+    """Arithmetic-class write (OWNER 8): the binary64 result v widened exactly to its image (to_m80) into ST(i)."""
+    return write_img(s, i, to_m80(v))
 
 
 def push_target_nonempty(s):
@@ -252,16 +263,110 @@ def push_target_nonempty(s):
     return tag_at(s, top(s) - K(1, 3)) != K(TAG_EMPTY, 2)
 
 
-def do_push(s, v):
-    """TOP <- TOP-1; ST(0) <- v (SDM 2A:FLD Op: 'TOP <- TOP-1; ST(0) <- ...').  Caller checks overflow."""
+def do_push_img(s, img):
+    """TOP <- TOP-1; ST(0) <- img (SDM 2A:FLD Op: 'TOP <- TOP-1; ST(0) <- ...').  Caller checks overflow."""
     s2 = s.copy(fsw=with_top(s.fsw, top(s) - K(1, 3)))
-    return write_reg(s2, 0, v)
+    return write_img(s2, 0, img)
+
+
+def do_push(s, v):
+    return do_push_img(s, to_m80(v))
 
 
 def do_pop(s):
     """Mark ST(0) empty and TOP <- TOP+1 (SDM 2A:FSTP Op: 'ST(0) <- ... ; pop'; SDM 1:8.1.7 empty tag 11)."""
     s2 = set_tag_at(s, top(s), K(TAG_EMPTY, 2))
     return s2.copy(fsw=with_top(s2.fsw, top(s2) + K(1, 3)))
+
+
+# --- the 80-bit image: classes, SDM 1:T4-3, 1:8.2.2, 1:T8-3 (layout: sign 79, exponent 78..64, integer bit 63, fraction 62..0) -------
+F80 = z3.FPSort(15, 64)       # the double extended format as a z3 FP sort: 15 exponent bits, 64 significand bits (integer bit included), SDM 1:T4-2
+INDEF80 = 0xFFFFC000000000000000   # SDM 1:T4-3 'QNaN Floating-Point Indefinite': sign 1, exponent 7FFFH, integer bit 1, fraction 10..0
+
+
+def i_sgn(m):
+    return Extract(79, 79, m)
+
+
+def i_exp(m):
+    return Extract(78, 64, m)
+
+
+def i_int(m):
+    return Extract(63, 63, m)
+
+
+def i_frac(m):
+    return Extract(62, 0, m)
+
+
+def is_unsup80(m):
+    """SDM 1:T8-3 / 1:8.2.2: an unsupported encoding is a non-zero biased exponent with integer bit 0 (an unnormal, or for exponent 7FFFH a
+    pseudo-NaN / pseudo-infinity).  Exponent 0 with integer bit 1 is a pseudo-denormal, which SDM 1:8.2.2 gives as 'they are treated as denormals'."""
+    return And(i_exp(m) != K(0, 15), i_int(m) == K(0, 1))
+
+
+def is_nan80(m):
+    return And(i_exp(m) == K(0x7FFF, 15), i_int(m) == K(1, 1), i_frac(m) != K(0, 63))
+
+
+def is_snan80(m):
+    return And(is_nan80(m), Extract(62, 62, m) == K(0, 1))        # SDM 1:T4-3: SNaN fraction MSB 0
+
+
+def is_inf80(m):
+    return And(i_exp(m) == K(0x7FFF, 15), i_int(m) == K(1, 1), i_frac(m) == K(0, 63))
+
+
+def is_zero80(m):
+    return And(i_exp(m) == K(0, 15), Extract(63, 0, m) == K(0, 64))
+
+
+def is_den80(m):
+    """SDM 1:T4-3 denormal: exponent 0, non-zero significand (the integer bit may be 1, a pseudo-denormal)."""
+    return And(i_exp(m) == K(0, 15), Extract(63, 0, m) != K(0, 64))
+
+
+def fp80(m):
+    """The z3 FPSort(15,64) value of a supported non-NaN image (meaningful for those only): a pseudo-denormal has the value of the normal of the
+    smallest exponent with the same fraction (SDM 1:8.2.2: the denormal biased exponent 0 means 1 - 16383)."""
+    e = If(And(i_exp(m) == K(0, 15), i_int(m) == K(1, 1)), K(1, 15), i_exp(m))
+    return z3.fpFP(i_sgn(m), e, i_frac(m))
+
+
+def img80(f):
+    """The image of an FPSort(15,64) value that is not a NaN."""
+    b = z3.fpToIEEEBV(f)
+    e = Extract(77, 63, b)
+    return Concat(Extract(78, 78, b), e, If(e != K(0, 15), K(1, 1), K(0, 1)), Extract(62, 0, b))
+
+
+def view64(m, fcw):
+    """The arithmetic-class read of an image (OWNER 8: the CLAUDE.md rule that floating point is plain IEEE): the value rounded to binary64 by
+    FCW.RC (z3 does the overflow value, the denormal path and the directed modes), as a bit pattern.  NaN: sign, quiet bit and the 51 payload bits
+    below it are kept; if the kept fraction would be zero (an SNaN whose set payload bits are all in the dropped part) bit 0 of the binary64 fraction
+    is set so the value stays a NaN (SDM 1:T4-3: SNaN fraction is non-zero).  Infinity keeps its sign.  An unsupported encoding reads as junk: every
+    arithmetic-class instruction treats it before it uses the value (is_unsup80)."""
+    top52 = Extract(62, 11, m)
+    nan64 = Concat(i_sgn(m), K(0x7FF, 11), If(top52 == K(0, 52), K(1, 52), top52))
+    inf64 = Concat(i_sgn(m), K(0x7FF, 11), K(0, 52))
+    fin = bits(z3.fpToFP(rm_of(fcw), fp80(m), F64))
+    return If(is_nan80(m), nan64, If(is_inf80(m), inf64, fin))
+
+
+def _mag_to_img(sign, mag):
+    """Image of the integer (-1)^sign * mag (mag: 64-bit unsigned), exactly: the leading one at bit 63 of the significand, exponent 16383 + 63 - lz."""
+    lz = clz(mag, 64)
+    e = K(16383 + 63, 16) - Extract(15, 0, lz)
+    return If(mag == K(0, 64), Concat(sign, K(0, 79)), Concat(sign, Extract(14, 0, e), mag << lz))
+
+
+def int_to_img(m, n):
+    """m (n-bit two's complement) -> image, exact (SDM 2A:FILD Op 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)': every n <= 64 bit integer has
+    a 64-bit significand).  Integer zero is +0."""
+    sign = Extract(n - 1, n - 1, m)
+    mag = If(sign == K(1, 1), -m, m)
+    return _mag_to_img(sign, ZeroExt(64 - n, mag))
 
 
 # --- the register format: classes, SDM 1:T4-3 (binary64 layout: 1 + 11 + 52) -----------------
@@ -465,18 +570,20 @@ def stack_fault_state(s, overflow):
 
 # --- the fcom/fcomi condition codes -----------------------------------------------------------
 def compare(a, b, ordered):
-    """Compare register-format values a (ST(0)) and b.  Returns (c3, c2, c0, ie_raised, de_raised).
+    """Compare the images a (ST(0)) and b (exact class: the 80-bit values themselves).  Returns (c3, c2, c0, ie_raised, de_raised).
     SDM 1:T8-6: ST(0) > src 000, ST(0) < src 001, equal 100, unordered 111 (C3, C2, C0).  SDM 1:T8-10 /
-    2A:FCOM Exc: IE for an SNaN; for ordered compares (FCOM, FICOM, FTST, FCOMI) also for a QNaN
-    (SDM 1:8.5.1.2 last paragraph); DE for a denormal operand (SDM 1:8.5.2)."""
-    unordered = Or(is_nan(a), is_nan(b))
-    lt = z3.fpLT(fp(a), fp(b))
-    eq = z3.fpEQ(fp(a), fp(b))       # +0 == -0 (IEEE), SDM 2A:FCOM Op 'ST(0) = SRC'
+    2A:FCOM Exc: IE for an SNaN or an unsupported format; for ordered compares (FCOM, FICOM, FTST, FCOMI) also for a QNaN
+    (SDM 1:8.5.1.2 last paragraph); DE for a denormal operand (SDM 1:8.5.2).  An unsupported operand is unordered (the masked response
+    of SDM 1:T8-10 is the condition code 111)."""
+    ua, ub = is_unsup80(a), is_unsup80(b)
+    unordered = Or(is_nan80(a), is_nan80(b), ua, ub)
+    lt = z3.fpLT(fp80(a), fp80(b))
+    eq = z3.fpEQ(fp80(a), fp80(b))       # +0 == -0 (IEEE), SDM 2A:FCOM Op 'ST(0) = SRC'
     c3 = Or(unordered, eq)
     c2 = unordered
     c0 = Or(unordered, And(Not(unordered), lt))
-    ie = Or(is_snan(a), is_snan(b)) if not ordered else unordered
-    de = And(Not(unordered), Or(is_sub(a), is_sub(b)))
+    ie = Or(is_snan80(a), is_snan80(b), ua, ub) if not ordered else unordered
+    de = And(Not(unordered), Or(is_den80(a), is_den80(b)))
     return c3, c2, c0, ie, de
 
 
@@ -505,32 +612,31 @@ def from_m64(m):
     return m, is_sub(m), is_snan(m)
 
 
-def to_m32(b, rm):
-    """register format -> m32fp, SDM 2A:FST Op 'DEST <- ST(0)' with conversion to single precision.
-    Returns (bits32, ie, oe, ue, pe, roundup).  NaN: SNaN -> IE and the QNaN (SDM 1:T4-8); the fraction is
-    the top 23 bits of the 52 (SDM 1:T4-3 layout); infinity and zero keep their class."""
-    nan = is_nan(b)
-    q = quieten(b)
-    nan32 = Concat(sgn(b), K(0xFF, 8), Extract(51, 29, q))
-    exact = real(b)
-    r32 = z3.fpToFP(rm, fp(b), F32)
-    r32b = bits(r32)
-    rr = z3.fpToReal(r32)
-    finite = Not(Or(nan, is_inf(b)))
-    inexact = And(finite, Not(z3.fpIsInf(r32)), rr != exact)
-    oe = And(finite, z3.fpIsInf(r32))
-    ub = z3.fpToReal(z3.fpToFP(rm, fp(b), z3.FPSort(30, 24)))
-    tiny = And(finite, ub != 0, abs_real(ub) < z3.RealVal(1) / z3.RealVal(2 ** 126))
+def to_mem_fp(m, rm, nbits):
+    """image -> m32fp (nbits = 32) or m64fp (nbits = 64), SDM 2A:FST Op 'DEST <- ST(0)' with the conversion to the destination format, rounded by rm
+    (exact class: the 80-bit value is rounded once).  Returns (bits, ie, oe, ue, pe, roundup).  NaN: the sign and the top fraction bits, quieted
+    (SDM 1:4.8.3.5), IE for an SNaN (SDM 2A:FST Exc '#IA If destination result is an SNaN value or unsupported format'); an unsupported
+    encoding: IE and the QNaN indefinite of the format; infinity and zero keep their class."""
+    eb, sb = (8, 24) if nbits == 32 else (11, 53)
+    FS = z3.FPSort(eb, sb)
+    nan, uns = is_nan80(m), is_unsup80(m)
+    q = m | K(1 << 62, 80)
+    nanb = Concat(i_sgn(m), K((1 << eb) - 1, eb), Extract(62, 62 - (sb - 2), q))
+    indef = K(0xFFC00000, 32) if nbits == 32 else K(QNAN_INDEF, 64)
+    f = fp80(m)
+    r = z3.fpToFP(rm, f, FS)
+    finite = Not(Or(nan, is_inf80(m), uns))
+    exact = z3.fpToReal(f)
+    rr = z3.fpToReal(r)
+    inexact = And(finite, Not(z3.fpIsInf(r)), rr != exact)
+    oe = And(finite, z3.fpIsInf(r))
+    ub = z3.fpToReal(z3.fpToFP(rm, f, z3.FPSort(30, sb)))
+    minn = z3.RealVal(1) / z3.RealVal(2 ** (126 if nbits == 32 else 1022))
+    tiny = And(finite, ub != 0, abs_real(ub) < minn)                  # SDM 1:4.9.1.5: non-zero and tiny
     ue = And(tiny, inexact)
-    roundup = And(finite, Not(z3.fpIsInf(r32)), abs_real(rr) > abs_real(exact))
-    out = If(nan, nan32, r32b)
-    return out, is_snan(b), oe, ue, Or(inexact, oe), roundup
-
-
-def to_m64(b):
-    """register format -> m64fp: identical pattern (OWNER 8); an SNaN is stored as the QNaN with IE
-    (SDM 2A:FST Exc '#IA If destination result is an SNaN value or unsupported format, except when the destination format is in double extended-precision floating-point format.'; SDM 1:T4-8)."""
-    return If(is_snan(b), quieten(b), b), is_snan(b)
+    roundup = And(finite, Not(z3.fpIsInf(r)), abs_real(rr) > abs_real(exact))
+    out = If(uns, indef, If(nan, nanb, z3.fpToIEEEBV(r)))
+    return out, Or(is_snan80(m), uns), oe, ue, Or(inexact, oe), roundup
 
 
 def clz(x, n):
@@ -570,100 +676,41 @@ def to_m80(b):
     return If(is_zero(b), zero, If(Or(is_inf(b), is_nan(b)), spec, If(is_sub(b), sub, norm)))
 
 
-def from_m80(m):
-    """m80fp -> register format (binary64), round-to-nearest-even; see the module docstring (OWNER 8).
-    Layout: bits 79 sign, 78..64 exponent, 63 integer bit, 62..0 fraction (SDM 1:T4-3).  Returns the
-    pattern.  Unsupported encodings (SDM 1:T8-3) are the caller's concern (precondition supported_m80)."""
-    s = Extract(79, 79, m)
-    e = Extract(78, 64, m)
-    sig = Extract(63, 0, m)
-    frac63 = Extract(62, 0, m)
-    # NaN / infinity: exponent 0x7FFF
-    inf64 = Concat(s, K(0x7FF, 11), K(0, 52))
-    nanf = Extract(62, 11, m)
-    nanf = If(nanf == K(0, 52), K(1, 52), nanf)       # keep the value a NaN (module docstring)
-    nan64 = Concat(s, K(0x7FF, 11), nanf)
-    spec = If(frac63 == K(0, 63), inf64, nan64)
-    # finite: effective exponent (SDM 1:8.2.2: denormal biased exponent 0 means 1 - 16383)
-    e_eff = If(e == K(0, 15), K(1, 15), e)
-    nz = sig != K(0, 64)
-    lz = clz(sig, 64)
-    sig_n = sig << lz
-    # value = sig_n * 2^(e_eff - 16383 - 63 - lz) = 1.x * 2^u with u = e_eff - 16383 - lz
-    u = ZeroExt(1, e_eff) - K(16383, 16) - Extract(15, 0, lz)         # 16-bit signed
-    top53 = Extract(63, 11, sig_n)
-    rem = Extract(10, 0, sig_n)
-    up = Or(UGT(rem, K(0x400, 11)), And(rem == K(0x400, 11), Extract(0, 0, top53) == K(1, 1)))
-    pat_norm = (ZeroExt(53, Extract(10, 0, u + K(1023, 16))) << K(52, 64)) + ZeroExt(12, Extract(51, 0, top53)) \
-        + If(up, K(1, 64), K(0, 64))
-    # u > 1023 -> overflow to infinity under round-to-nearest (SDM 1:T4-11, row To nearest: +-infinity for both signs)
-    ovf = u > K(1023, 16)
-    # subnormal binary64 result: u < -1022
-    sh = K(-1022, 16) - u                                              # >= 1
-    sh_big = UGT(sh, K(60, 16))
-    v = ZeroExt(64, sig_n)                                             # 128-bit
-    tot = ZeroExt(112, sh) + K(11, 128)                                # right shift count
-    n_part = LShR(v, tot)
-    lost_mask = (K(1, 128) << tot) - K(1, 128)
-    lost = v & lost_mask
-    halfb = K(1, 128) << (tot - K(1, 128))
-    up_s = Or(UGT(lost, halfb), And(lost == halfb, Extract(0, 0, n_part) == K(1, 1)))
-    n_sub = Extract(63, 0, n_part + If(up_s, K(1, 128), K(0, 128)))
-    pat_sub = If(sh_big, K(0, 64), n_sub)
-    fin = If(Not(nz), Concat(s, K(0, 63)),
-             If(ovf, inf64, If(u < K(-1022, 16), Concat(s, K(0, 63)) | pat_sub, Concat(s, K(0, 63)) | pat_norm)))
-    # the sign bit of pat_norm / pat_sub is zero; OR above puts s on top
-    return If(e == K(0x7FFF, 15), spec, fin)
-
-
-def supported_m80(m):
-    """SDM 1:8.2.2 / 1:T8-3: an m80 encoding is supported when it is a zero, denormal, normal, infinity or
-    QNaN/SNaN of SDM 1:T4-3: for a non-zero biased exponent other than 0x7FFF the integer bit must be 1;
-    for exponent 0x7FFF the integer bit must be 1; for exponent 0 the integer bit 1 is a pseudo-denormal
-    (handled as a denormal, SDM 1:8.2.2) so it is supported too."""
-    e = Extract(78, 64, m)
-    ib = Extract(63, 63, m) == K(1, 1)
-    return If(e == K(0, 15), z3.BoolVal(True), ib)
-
-
 def int_to_reg(m, n, rm):
     """m (n-bit two's complement) -> register format.  SDM 2A:FILD Op: 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)'.
     16 and 32 bit values are exactly representable in binary64; 64 bit values are rounded by rm (OWNER 8)."""
     return bits(z3.fpSignedToFP(rm, m, F64))
 
 
-def reg_to_int(b, n, rm, truncate=False):
-    """register format -> n-bit signed integer for FIST/FISTP/FISTTP.  Returns (value, ie, pe, roundup).
+def reg_to_int(m, n, rm, truncate=False):
+    """image -> n-bit signed integer for FIST/FISTP/FISTTP (exact class).  Returns (value, ie, pe, roundup).
     SDM 2A:FIST Op 'DEST := Integer(ST(0))' rounded by RC; SDM 2A:FISTTP Op uses truncation.  Out of range,
-    NaN or infinity: integer indefinite 10..0 with IE (SDM 1:T8-10, 1:8.2.1, SDM 1:T4-1).  PE when the
+    NaN, infinity or an unsupported format: integer indefinite 10..0 with IE (SDM 1:T8-10, 1:8.2.1, SDM 1:T4-1).  PE when the
     rounding lost a fraction; C1 = rounded up (SDM 1:8.1.3.2)."""
     rmu = z3.RTZ() if truncate else rm
-    ri = z3.fpRoundToIntegral(rmu, fp(b))
+    f = fp80(m)
+    ri = z3.fpRoundToIntegral(rmu, f)
     lo = -(2 ** (n - 1))
     hi = 2 ** (n - 1) - 1
     rr = z3.fpToReal(ri)
-    special = Or(is_nan(b), is_inf(b))
+    special = Or(is_nan80(m), is_inf80(m), is_unsup80(m))
     inrange = And(Not(special), rr >= lo, rr <= hi)
     val = z3.fpToSBV(z3.RTZ(), ri, z3.BitVecSort(n))
     indef = K(1 << (n - 1), n)
-    exact = real(b)
+    exact = z3.fpToReal(f)
     pe = And(inrange, rr != exact)
     roundup = And(inrange, abs_real(rr) > abs_real(exact))
     return If(inrange, val, indef), Not(inrange), pe, roundup
 
 
-def bcd_to_reg(m, rm):
-    """m80 packed BCD (SDM 1:4.7: 18 digits in bytes 0..8, sign bit 79, bits 72..78 ignored) -> register
-    format (SDM 2A:FBLD Op).  Digit d_i = bits 4i+3..4i.  The integer < 10^18 < 2^60; rounded with rm into
-    binary64 (OWNER 8 deviation, all 18 digit values are exact in the double extended format)."""
+def bcd_to_img(m):
+    """m80 packed BCD (SDM 1:4.7: 18 digits in bytes 0..8, sign bit 79, bits 72..78 ignored) -> image, exact (SDM 2A:FBLD Op).  Digit d_i = bits
+    4i+3..4i.  The integer is below 10^18 < 2^60."""
     v = K(0, 64)
     for i in range(17, -1, -1):
         d = ZeroExt(60, Extract(4 * i + 3, 4 * i, m))
         v = v * K(10, 64) + d
-    f = z3.fpSignedToFP(rm, v, F64)
-    mag = bits(f)
-    # SDM 2A:FBLD Op: sign from bit 79, '-0' keeps the sign
-    return Concat(Extract(79, 79, m), Extract(62, 0, mag))
+    return _mag_to_img(Extract(79, 79, m), v)          # SDM 2A:FBLD Op: sign from bit 79, '-0' keeps the sign
 
 
 def bcd_digits_ok(m):
@@ -676,13 +723,14 @@ def bcd_digits_ok(m):
 BCD_INDEFINITE = 0xFFFFC000000000000000   # SDM 1:T4-5, 'FFFFC000000000000000H'
 
 
-def reg_to_bcd(b, rm):
-    """register format -> packed BCD for FBSTP (SDM 2A:FBSTP Op 'DEST := BCD(ST(0))').  Returns
-    (m80 pattern, ie, pe, roundup).  Value not representable in 18 digits, NaN or infinity: the BCD
+def reg_to_bcd(m, rm):
+    """image -> packed BCD for FBSTP (SDM 2A:FBSTP Op 'DEST := BCD(ST(0))'; exact class).  Returns
+    (m80 pattern, ie, pe, roundup).  Value not representable in 18 digits, NaN, infinity or an unsupported format: the BCD
     indefinite and IE (SDM 1:T8-10)."""
-    ri = z3.fpRoundToIntegral(rm, fp(b))
+    f = fp80(m)
+    ri = z3.fpRoundToIntegral(rm, f)
     rr = z3.fpToReal(ri)
-    special = Or(is_nan(b), is_inf(b))
+    special = Or(is_nan80(m), is_inf80(m), is_unsup80(m))
     limit = 10 ** 18 - 1
     ok = And(Not(special), rr >= -limit, rr <= limit)
     mag_i = z3.fpToSBV(z3.RTZ(), z3.fpAbs(ri), z3.BitVecSort(64))
@@ -692,10 +740,9 @@ def reg_to_bcd(b, rm):
         dig.append(Extract(3, 0, z3.URem(x, K(10, 64))))
         x = z3.UDiv(x, K(10, 64))
     body = Concat(*[dig[i] for i in range(17, -1, -1)])                 # 72 bits, digit 17 first
-    sign = Extract(63, 63, b)
-    enc = Concat(sign, K(0, 7), body)                                    # 1 + 7 + 72 = 80
+    enc = Concat(i_sgn(m), K(0, 7), body)                               # 1 + 7 + 72 = 80
     indef = K(BCD_INDEFINITE, 80)
-    exact = real(b)
+    exact = z3.fpToReal(f)
     return If(ok, enc, indef), Not(ok), And(ok, rr != exact), And(ok, abs_real(rr) > abs_real(exact))
 
 
@@ -730,14 +777,14 @@ def _uf_state(s, dst_idx, pop):
 
 
 # --- loads -------------------------------------------------------------------------------
-def _push(s, v, flags=NOFLAGS, uf=FALSE):
-    """Push v (TOP <- TOP-1; ST(0) <- v, SDM 2A:FLD Op).  Stack overflow (SDM 1:8.5.1.1: push onto a non-empty
+def _push(s, img, flags=NOFLAGS, uf=FALSE):
+    """Push the image img (TOP <- TOP-1; ST(0) <- img, SDM 2A:FLD Op).  Stack overflow (SDM 1:8.5.1.1: push onto a non-empty
     register) or, for FLD ST(i), underflow of the source: IE, SF, C1 = overflow; the masked response pushes
     the QNaN indefinite.  Both at once is not specified by the SDM (precondition)."""
     ov = push_target_nonempty(s)
     fault = Or(ov, uf)
-    s_f = do_push(stack_fault_state(s, ov), K(QNAN_INDEF, 64))
-    s_n = _c1(do_push(s, v), FALSE)
+    s_f = do_push_img(stack_fault_state(s, ov), K(INDEF80, 80))
+    s_n = _c1(do_push_img(s, img), FALSE)
     o = finish(s, St.ite(fault, s_f, s_n), If(fault, fl(IE), flags), extra_pre=Not(And(ov, uf)))
     o.undef = UNDEF_C023
     return o
@@ -747,32 +794,36 @@ def fld_m32(s, m):
     """SDM 2A:FLD Op (memory operand), single precision.  #IA for an SNaN (converted to QNaN, SDM 1:T4-8),
     #D for a denormal (SDM 2A:FLD Exc)."""
     v, de, snan = from_m32(m)
-    return _push(s, If(snan, quieten(v), v), fv(ie=snan, de=de))
+    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de))
 
 
 def fld_m64(s, m):
     """SDM 2A:FLD Op (memory operand), double precision (the register format, OWNER 8)."""
     v, de, snan = from_m64(m)
-    return _push(s, If(snan, quieten(v), v), fv(ie=snan, de=de))
+    return _push(s, to_m80(If(snan, quieten(v), v)), fv(ie=snan, de=de))
 
 
 def fld_m80(s, m):
-    """SDM 2A:FLD Op (memory operand), double extended; no #IA, no #D (SDM 2A:FLD Exc).  Precondition:
-    a supported encoding (SDM 1:8.2.2)."""
-    o = _push(s, from_m80(m))
-    o.pre = And(o.pre, supported_m80(m))
-    return o
+    """SDM 2A:FLD Op (memory operand), double extended: the image is copied bit for bit (exact class); no #IA, no #D (SDM 2A:FLD Exc:
+    '#IA Source operand is an SNaN value or unsupported format. Does not occur if the source operand is in double extended-precision
+    floating-point format (FLD m80fp or FLD ST(i)).'), any encoding."""
+    return _push(s, m)
 
 
 def fld_sti(s, i):
     """SDM 2A:FLD Op: 'temp := ST(i)', 'TOP := TOP - 1', 'ST(0) := temp'; #IS when ST(i) is empty."""
-    return _push(s, st(s, i), uf=is_empty(s, i))
+    return _push(s, st80(s, i), uf=is_empty(s, i))
 
 
-def _const(s, num_den_or_real):
-    rm = rm_of(s.fcw)
-    r = z3.fpRealToFP(rm, num_den_or_real, F64)
-    return _push(s, bits(r))
+def _const(s, lo, nu, e):
+    """Push the constant whose 64-bit significand rounds to lo (floor) or lo + 1 (nu: nearest is the upper one), with unbiased exponent e.
+    SDM 1:8.3.4 'The constant values have full double extended precision floating-point precision (64 bits)... When loading the constant, the x87 FPU
+    rounds the more precise internal constant according to the RC (rounding control) field of the x87 FPU control word. The inexact-result exception
+    (#P) is not generated as a result of this rounding, nor is the C1 flag set'.  The class is therefore exact on the image: the constant rounded
+    to a 64-bit significand under RC (no binary64 step, no OWNER 8 deviation)."""
+    rc = rc_of(s.fcw)
+    sig = If(rc == K(RC_NEAREST, 2), K(lo + nu, 64), If(rc == K(RC_UP, 2), K(lo + 1, 64), K(lo, 64)))   # RC_DOWN and RC_ZERO: the floor (the constant is positive)
+    return _push(s, Concat(K(0, 1), K(e + 16383, 15), sig))
 
 
 # Mathematical constants (SDM 2A:FLDL2T/FLDL2E/FLDPI/FLDLG2/FLDLN2 Description: log2 10, log2 e, pi, log10 2, loge 2) as rationals with
@@ -824,45 +875,54 @@ def _rat(name):
 L2T, L2E, PI_, LG2, LN2 = _rat("log2_10"), _rat("log2e"), _rat("pi"), _rat("lg2"), _rat("ln2")
 
 
+def _sig64(name, e):
+    """(lo, nu): the 64-bit significand floor of the constant name (value in [2^e, 2^(e+1))) and whether the nearest significand is lo + 1.
+    The constant is CONST_INT / 10^120 with error below 10^-118; tests/test_x87spec.py checks that its distance to a rounding boundary exceeds that."""
+    num, den = CONST_INT[name] * 2 ** (63 - e), 10 ** _DIG
+    lo = num // den
+    assert 2 ** 63 <= lo < 2 ** 64 and 2 * (num - lo * den) != den
+    return lo, int(2 * (num - lo * den) > den)
+
+
 def fld1(s):
     """SDM 2A:FLD1: push +1.0 (D9 E8)."""
-    return _const(s, z3.RealVal(1))
+    return _push(s, K(0x3FFF8000000000000000, 80))
 
 
 def fldl2e(s):
     """SDM 2A:FLDL2E: push log2 e (D9 EA); the constant is rounded by FCW.RC, no #P, no C1 (SDM 2A:FLD1 Description)."""
-    return _const(s, L2E)
+    return _const(s, *_sig64("log2e", 0), 0)
 
 
 def fldpi(s):
     """SDM 2A:FLDPI: push pi (D9 EB), rounding as FLDL2E."""
-    return _const(s, PI_)
+    return _const(s, *_sig64("pi", 1), 1)
 
 
 def fldlg2(s):
     """SDM 2A:FLDLG2: push log10 2 (D9 EC), rounding as FLDL2E."""
-    return _const(s, LG2)
+    return _const(s, *_sig64("lg2", -2), -2)
 
 
 def fldln2(s):
     """SDM 2A:FLDLN2: push loge 2 (D9 ED), rounding as FLDL2E."""
-    return _const(s, LN2)
+    return _const(s, *_sig64("ln2", -1), -1)
 
 
 def fldz(s):
     """SDM 2A:FLDZ: push +0.0 (D9 EE)."""
-    return _push(s, K(0, 64))
+    return _push(s, K(0, 80))
 
 
 def fild(s, m, n):
     """SDM 2A:FILD Op: 'TOP := TOP - 1', 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)', n = 16, 32, 64."""
-    return _push(s, int_to_reg(m, n, rm_of(s.fcw)))
+    return _push(s, int_to_img(m, n))
 
 
 def fbld(s, m):
     """SDM 2A:FBLD Op: 'TOP := TOP - 1', 'ST(0) := ConvertToDoubleExtendedPrecisionFP(SRC)'.  The digits are
     assumed decimal (SDM 2A:FBLD Description): precondition."""
-    o = _push(s, bcd_to_reg(m, rm_of(s.fcw)))
+    o = _push(s, bcd_to_img(m))
     o.pre = And(o.pre, bcd_digits_ok(m))
     return o
 
@@ -884,28 +944,28 @@ def _store(s, val, indef, flags, up, pop, abort_set):
 def fst_m32(s, pop):
     """SDM 2A:FST/FSTP Op 'DEST := ST(0)' to m32fp (D9 /2, /3).  #IA SNaN, #O, #U, #P (SDM 2A:FST Exc);
     unmasked IE/OE/UE with a memory destination store nothing (SDM 1:8.5.4, 8.5.5)."""
-    val, ie, oe, ue, pe, up = to_m32(st(s, 0), rm_of(s.fcw))
+    val, ie, oe, ue, pe, up = to_mem_fp(st80(s, 0), rm_of(s.fcw), 32)
     return _store(s, val, K(0xFFC00000, 32), fv(ie=ie, oe=oe, ue=ue, pe=pe), up, pop, fl(IE, OE, UE))
 
 
 def fst_m64(s, pop):
-    """SDM 2A:FST/FSTP Op to m64fp (DD /2, /3): the register format is binary64, so only #IA remains."""
-    val, ie = to_m64(st(s, 0))
-    return _store(s, val, K(QNAN_INDEF, 64), fv(ie=ie), FALSE, pop, fl(IE, OE, UE))
+    """SDM 2A:FST/FSTP Op to m64fp (DD /2, /3): the 80-bit value rounded once to binary64 by RC (exact class): #IA, #O, #U, #P as for m32fp."""
+    val, ie, oe, ue, pe, up = to_mem_fp(st80(s, 0), rm_of(s.fcw), 64)
+    return _store(s, val, K(QNAN_INDEF, 64), fv(ie=ie, oe=oe, ue=ue, pe=pe), up, pop, fl(IE, OE, UE))
 
 
 def fstp_m80(s):
     """SDM 2A:FSTP Op to m80fp (DB /7): no exceptions other than #IS (SDM 2A:FST Exc: '#IA If destination result is an SNaN value or unsupported format, except when the destination format is in double extended-precision floating-point format.')."""
-    return _store(s, to_m80(st(s, 0)), to_m80(K(QNAN_INDEF, 64)), NOFLAGS, FALSE, True, fl(IE, OE, UE))
+    return _store(s, st80(s, 0), K(INDEF80, 80), NOFLAGS, FALSE, True, fl(IE, OE, UE))
 
 
 def fst_sti(s, i, pop):
     """SDM 2A:FST/FSTP Op 'DEST := ST(0)' to ST(i) (DD D0+i, DD D8+i); non-arithmetic (SDM 1:T8-9), so no #IA.
     Stack underflow when ST(0) is empty; the masked response writes the indefinite to ST(i)."""
     uf = is_empty(s, 0)
-    s_ok = _c1(write_reg(s, i, st(s, 0)), FALSE)
+    s_ok = _c1(write_img(s, i, st80(s, 0)), FALSE)
     s_ok = do_pop(s_ok) if pop else s_ok
-    s_uf = write_reg(stack_fault_state(s, False), i, K(QNAN_INDEF, 64))
+    s_uf = write_img(stack_fault_state(s, False), i, K(INDEF80, 80))
     s_uf = do_pop(s_uf) if pop else s_uf
     o = finish(s, St.ite(uf, s_uf, s_ok), If(uf, fl(IE), NOFLAGS))
     o.undef = UNDEF_C023
@@ -915,13 +975,13 @@ def fst_sti(s, i, pop):
 def fist(s, n, pop, truncate=False):
     """SDM 2A:FIST/FISTP Op 'DEST := Integer(ST(0))' (RC rounding) and SDM 2A:FISTTP Op (truncation), to an
     n-bit signed integer.  Out of range, NaN, infinity: the integer indefinite and #IA (SDM 1:T8-10)."""
-    val, ie, pe, up = reg_to_int(st(s, 0), n, rm_of(s.fcw), truncate)
+    val, ie, pe, up = reg_to_int(st80(s, 0), n, rm_of(s.fcw), truncate)
     return _store(s, val, K(1 << (n - 1), n), fv(ie=ie, pe=pe), up, pop, fl(IE))
 
 
 def fbstp(s):
     """SDM 2A:FBSTP Op 'DEST := BCD(ST(0)); PopRegisterStack'."""
-    val, ie, pe, up = reg_to_bcd(st(s, 0), rm_of(s.fcw))
+    val, ie, pe, up = reg_to_bcd(st80(s, 0), rm_of(s.fcw))
     return _store(s, val, K(BCD_INDEFINITE, 80), fv(ie=ie, pe=pe), up, True, fl(IE))
 
 
@@ -929,12 +989,12 @@ def fbstp(s):
 def fxch(s, i):
     """SDM 2A:FXCH Op: 'temp := ST(0); ST(0) := SRC; SRC := temp'.  One or both registers empty: they are
     loaded with the QNaN indefinite first, then exchanged (SDM 1:T8-10 row FXCH); #IS, C1 = 0."""
-    a0, ai = st(s, 0), st(s, i)
+    a0, ai = st80(s, 0), st80(s, i)
     e0, ei = is_empty(s, 0), is_empty(s, i)
     uf = Or(e0, ei)
-    a0 = If(e0, K(QNAN_INDEF, 64), a0)
-    ai = If(ei, K(QNAN_INDEF, 64), ai)
-    s2 = write_reg(write_reg(s, 0, ai), i, a0)
+    a0 = If(e0, K(INDEF80, 80), a0)
+    ai = If(ei, K(INDEF80, 80), ai)
+    s2 = write_img(write_img(s, 0, ai), i, a0)
     s2 = _c1(s2, FALSE)
     s2 = St.ite(uf, stack_fault_state(s2, False), s2)
     o = finish(s, s2, If(uf, fl(IE), NOFLAGS))
@@ -945,8 +1005,8 @@ def fxch(s, i):
 def _unary_nonarith(s, fn):
     """FCHS / FABS: non-arithmetic (SDM 1:T8-9), ST(0) := fn(ST(0)), C1 = 0, #IS only."""
     uf = is_empty(s, 0)
-    s_ok = _c1(write_reg(s, 0, fn(st(s, 0))), FALSE)
-    s_uf = write_reg(stack_fault_state(s, False), 0, K(QNAN_INDEF, 64))
+    s_ok = _c1(write_img(s, 0, fn(st80(s, 0))), FALSE)
+    s_uf = write_img(stack_fault_state(s, False), 0, K(INDEF80, 80))
     o = finish(s, St.ite(uf, s_uf, s_ok), If(uf, fl(IE), NOFLAGS))
     o.undef = UNDEF_C023
     return o
@@ -954,12 +1014,12 @@ def _unary_nonarith(s, fn):
 
 def fchs(s):
     """SDM 2A:FCHS Op 'SignBit(ST(0)) := NOT (SignBit(ST(0)))' (D9 E0)."""
-    return _unary_nonarith(s, lambda b: b ^ K(1 << 63, 64))
+    return _unary_nonarith(s, lambda b: b ^ K(1 << 79, 80))
 
 
 def fabs_(s):
     """SDM 2A:FABS Op 'ST(0) := |ST(0)|' (D9 E1)."""
-    return _unary_nonarith(s, lambda b: b & K((1 << 63) - 1, 64))
+    return _unary_nonarith(s, lambda b: b & K((1 << 79) - 1, 80))
 
 
 def ffree(s, i):
@@ -976,7 +1036,7 @@ def _compare(s, b, src_empty, ordered, pops, de_extra=FALSE, ie_extra=FALSE, efl
     (or ZF, PF, CF of SDM 1:T8-7) from compare(); C1 = 0 (SDM 2A:FCOM Flags); stack underflow (ST(0) or the
     source empty): IE, SF, C1 = 0 and C3/C2/C0 (or the status flags) are left undefined (SDM 2A:FCOM Flags
     lists them without a masked-underflow value)."""
-    a = st(s, 0)
+    a = st80(s, 0)
     uf = Or(is_empty(s, 0), src_empty)
     c3, c2, c0, ie, de = compare(a, b, ordered)
     ie = Or(ie, ie_extra)
@@ -1000,66 +1060,64 @@ def _compare(s, b, src_empty, ordered, pops, de_extra=FALSE, ie_extra=FALSE, efl
 def fcom_m32(s, m, pop):
     """SDM 2A:FCOM/FCOMP Op, m32fp (D8 /2, /3): ordered compare."""
     v, de, snan = from_m32(m)
-    return _compare(s, v, FALSE, True, 1 if pop else 0, de_extra=de)
+    return _compare(s, to_m80(v), FALSE, True, 1 if pop else 0, de_extra=de)
 
 
 def fcom_m64(s, m, pop):
     """SDM 2A:FCOM/FCOMP Op, m64fp (DC /2, /3)."""
     v, de, snan = from_m64(m)
-    return _compare(s, v, FALSE, True, 1 if pop else 0, de_extra=de)
+    return _compare(s, to_m80(v), FALSE, True, 1 if pop else 0, de_extra=de)
 
 
 def fcom_sti(s, i, pop):
     """SDM 2A:FCOM/FCOMP Op, ST(i) (D8 D0+i, D8 D8+i)."""
-    return _compare(s, st(s, i), is_empty(s, i), True, 1 if pop else 0)
+    return _compare(s, st80(s, i), is_empty(s, i), True, 1 if pop else 0)
 
 
 def fcompp(s):
     """SDM 2A:FCOMPP Op (DE D9): compare ST(0) with ST(1), pop twice."""
-    return _compare(s, st(s, 1), is_empty(s, 1), True, 2)
+    return _compare(s, st80(s, 1), is_empty(s, 1), True, 2)
 
 
 def fucom_sti(s, i, pop):
     """SDM 2A:FUCOM/FUCOMP Op (DD E0+i, DD E8+i): unordered compare, #IA only for SNaN."""
-    return _compare(s, st(s, i), is_empty(s, i), False, 1 if pop else 0)
+    return _compare(s, st80(s, i), is_empty(s, i), False, 1 if pop else 0)
 
 
 def fucompp(s):
     """SDM 2A:FUCOMPP Op (DA E9): unordered compare ST(0), ST(1), pop twice."""
-    return _compare(s, st(s, 1), is_empty(s, 1), False, 2)
+    return _compare(s, st80(s, 1), is_empty(s, 1), False, 2)
 
 
 def fcomi_sti(s, i, pop, ordered):
     """SDM 2A:FCOMI/FCOMIP/FUCOMI/FUCOMIP Op (DB F0+i, DF F0+i, DB E8+i, DF E8+i): ZF, PF, CF <- SDM 1:T8-7;
     OF, SF, AF cleared (SDM 2A:FCOMI Description); C1 = 0."""
-    return _compare(s, st(s, i), is_empty(s, i), ordered, 1 if pop else 0, eflags=True)
+    return _compare(s, st80(s, i), is_empty(s, i), ordered, 1 if pop else 0, eflags=True)
 
 
 def ficom(s, m, n, pop):
     """SDM 2A:FICOM/FICOMP Op (DA /2, /3 m32int; DE /2, /3 m16int): ST(0) compared with the integer converted
     to the register format (exact for 16 and 32 bits); ordered compare."""
-    v = int_to_reg(m, n, rm_of(s.fcw))
-    return _compare(s, v, FALSE, True, 1 if pop else 0)
+    return _compare(s, int_to_img(m, n), FALSE, True, 1 if pop else 0)
 
 
 def ftst(s):
     """SDM 2A:FTST Op (D9 E4): compare ST(0) with +0.0, ordered (SDM 1:T8-8 'TEST' constants)."""
-    return _compare(s, K(0, 64), FALSE, True, 0)
+    return _compare(s, K(0, 80), FALSE, True, 0)
 
 
 def fxam(s):
     """SDM 2A:FXAM Op: 'C1 := sign bit of ST; CASE class: Unsupported 000, NaN 001, Normal 010, Infinity 011,
     Zero 100, Empty 101, Denormal 110 (C3, C2, C0)'.  The class of an empty register is Empty, whatever it
-    holds.  Unsupported is not a class of the register format (OWNER 8: binary64 has no unsupported
-    encodings).  No exceptions."""
-    v = st(s, 0)
+    holds.  Classified on the 80-bit image (exact class).  No exceptions."""
+    v = st80(s, 0)
     e = is_empty(s, 0)
-    cls = If(e, K(0b101, 3), If(is_nan(v), K(0b001, 3), If(is_inf(v), K(0b011, 3), If(is_zero(v), K(0b100, 3),
-                                                              If(is_sub(v), K(0b110, 3), K(0b010, 3))))))
+    cls = If(e, K(0b101, 3), If(is_unsup80(v), K(0b000, 3), If(is_nan80(v), K(0b001, 3), If(is_inf80(v), K(0b011, 3),
+         If(is_zero80(v), K(0b100, 3), If(is_den80(v), K(0b110, 3), K(0b010, 3)))))))
     c3 = Extract(2, 2, cls) == K(1, 1)
     c2 = Extract(1, 1, cls) == K(1, 1)
     c0 = Extract(0, 0, cls) == K(1, 1)
-    c1 = sgn(v) == K(1, 1)
+    c1 = i_sgn(v) == K(1, 1)
     o = Out(s.copy(fsw=cc(s.fsw, c0=c0, c1=c1, c2=c2, c3=c3)))
     return o
 
@@ -1076,8 +1134,8 @@ def fcmov(s, i, cond):
     an underflow in the Operation (it is written)."""
     nd_uf = z3.Bool("nd.fcmov.uf_false")
     uf = And(is_empty(s, i), Or(cond, nd_uf))
-    s_ok = _c1(St.ite(cond, write_reg(s, 0, st(s, i)), s), FALSE)
-    s_uf = St.ite(cond, write_reg(stack_fault_state(s, False), 0, K(QNAN_INDEF, 64)), stack_fault_state(s, False))
+    s_ok = _c1(St.ite(cond, write_img(s, 0, st80(s, i)), s), FALSE)
+    s_uf = St.ite(cond, write_img(stack_fault_state(s, False), 0, K(INDEF80, 80)), stack_fault_state(s, False))
     o = finish(s, St.ite(uf, s_uf, s_ok), If(uf, fl(IE), NOFLAGS))
     o.undef = UNDEF_C023
     o.nd = [nd_uf]
@@ -1097,7 +1155,7 @@ def _finite(b):
     return Not(Or(is_nan(b), is_inf(b)))
 
 
-def arith2(x, y, op, fcw):
+def arith2(x, y, op, fcw, u=FALSE):
     """x op y on register-format patterns, op in add, sub, mul, div (SDM 2A:FADD/FSUB/FMUL/FDIV Op), with the
     rounding of FCW.RC and FCW.PC.  Returns (result, flags6, roundup).
       NaN operand: SDM 1:T4-8 (x87 column), #IA for an SNaN;
@@ -1106,14 +1164,16 @@ def arith2(x, y, op, fcw):
       #D: a denormal operand (SDM 1:8.5.2), not reported together with #IA;
       #O, #U, #P: SDM 1:8.5.4-8.5.6 with the thresholds of the result precision (SDM 1:4.9.1.4, 4.9.1.5).
     Exact zero sums: +0, or -0 under round toward -inf (SDM 2A:FADD Description), which is IEEE and what z3
-    gives."""
+    gives.
+    u: an operand image is an unsupported encoding (SDM 1:T8-3): the invalid operation, IE and the QNaN indefinite under the mask
+    (SDM 2A:FADD Exc '#IA Operand is an SNaN value or unsupported format', SDM 1:T8-10); the junk value read from such an image is not used."""
     pc, rm = pc_of(fcw), rm_of(fcw)
     A, B = fp(x), fp(y)
     fn = {"add": z3.fpAdd, "sub": z3.fpSub, "mul": z3.fpMul, "div": z3.fpDiv}[op]
     nat = fn(rm, A, B)
     nat32 = z3.fpToFP(z3.RNE(), z3.fpToFP(rm, nat, F32), F64)      # PC = 00B: 24-bit significand, SDM 1:8.1.5.2
     xb = bits(If(pc == K(PC_SINGLE, 2), nat32, nat))
-    nan_any = Or(is_nan(x), is_nan(y))
+    nan_any = And(Or(is_nan(x), is_nan(y)), Not(u))
     nres, _ = nan_result2(x, y)
     if op == "add":
         inv = And(is_inf(x), is_inf(y), sgn(x) != sgn(y))
@@ -1123,9 +1183,10 @@ def arith2(x, y, op, fcw):
         inv = Or(And(is_inf(x), is_zero(y)), And(is_zero(x), is_inf(y)))
     else:
         inv = Or(And(is_inf(x), is_inf(y)), And(is_zero(x), is_zero(y)))
+    inv = Or(inv, u)
     ie = Or(Or(is_snan(x), is_snan(y)), And(Not(nan_any), inv))
     de = And(Not(ie), Or(is_sub(x), is_sub(y)))
-    ze = And(Not(nan_any), op == "div", _finite(x), Not(is_zero(x)), is_zero(y)) if op == "div" else FALSE
+    ze = And(Not(nan_any), Not(u), op == "div", _finite(x), Not(is_zero(x)), is_zero(y)) if op == "div" else FALSE
     rx, ry = real(x), real(y)
     exact = {"add": rx + ry, "sub": rx - ry, "mul": rx * ry, "div": If(ry == 0, z3.RealVal(0), rx / ry)}[op]
     arith_ok = And(Not(nan_any), Not(inv), _finite(x), _finite(y), Not(ze))
@@ -1142,12 +1203,12 @@ def arith2(x, y, op, fcw):
     return res, fv(ie=ie, de=de, ze=ze, oe=oe, ue=ue, pe=Or(inexact, oe)), roundup
 
 
-def _arith(s, op, dst, src, src_empty, pop, rev, de_extra=FALSE):
+def _arith(s, op, dst, src, src_empty, pop, rev, de_extra=FALSE, src_u=FALSE):
     """Arithmetic with destination ST(dst) and source value src: dest := dest op src (rev: src op dest).
     Stack underflow: the destination or a register source is empty (SDM 1:8.5.1.1)."""
     d = st(s, dst)
     x, y = (src, d) if rev else (d, src)
-    r, f, up = arith2(x, y, op, s.fcw)
+    r, f, up = arith2(x, y, op, s.fcw, Or(is_unsup80(st80(s, dst)), src_u))
     uf = Or(is_empty(s, dst), src_empty)
     s_ok = _c1(write_reg(s, dst, r), up)
     s_ok = do_pop(s_ok) if pop else s_ok
@@ -1177,13 +1238,13 @@ def arith_int(s, m, n, op, rev):
 
 def arith_st0_sti(s, i, op, rev):
     """SDM 2A:FADD etc. ST(0), ST(i) (D8 C0+i ...): ST(0) := ST(0) op ST(i)."""
-    return _arith(s, op, 0, st(s, i), is_empty(s, i), False, rev)
+    return _arith(s, op, 0, st(s, i), is_empty(s, i), False, rev, src_u=is_unsup80(st80(s, i)))
 
 
 def arith_sti_st0(s, i, op, rev, pop):
     """SDM 2A:FADD etc. ST(i), ST(0) (DC C0+i ...) and the P forms (DE C0+i ...): ST(i) := ST(i) op ST(0),
     then PopRegisterStack for FADDP, FSUBP, FSUBRP, FMULP, FDIVP, FDIVRP."""
-    return _arith(s, op, i, st(s, 0), is_empty(s, 0), pop, rev)
+    return _arith(s, op, i, st(s, 0), is_empty(s, 0), pop, rev, src_u=is_unsup80(st80(s, 0)))
 
 
 def fsqrt(s):
@@ -1195,11 +1256,12 @@ def fsqrt(s):
     nat32 = z3.fpToFP(z3.RNE(), z3.fpToFP(rm, nat, F32), F64)
     r = If(pc == K(PC_SINGLE, 2), nat32, nat)
     rb = bits(r)
+    u = is_unsup80(st80(s, 0))               # an unsupported encoding: IE and the indefinite (SDM 2A:FSQRT Exc '#IA Source operand is an SNaN value or unsupported format.'; the negative operand: SDM 1:T8-10)
     neg = And(sgn(b) == K(1, 1), Not(is_zero(b)), Not(is_nan(b)))
-    ie = Or(is_snan(b), neg)
-    res = If(is_nan(b), quieten(b), If(neg, K(QNAN_INDEF, 64), rb))
+    ie = Or(is_snan(b), neg, u)
+    res = If(u, K(QNAN_INDEF, 64), If(is_nan(b), quieten(b), If(neg, K(QNAN_INDEF, 64), rb)))
     de = And(Not(ie), is_sub(b))
-    ok = And(Not(is_nan(b)), Not(neg), _finite(b))
+    ok = And(Not(is_nan(b)), Not(neg), _finite(b), Not(u))
     rr = z3.fpToReal(r)
     xr = real(b)
     inexact = And(ok, rr * rr != xr)
@@ -1213,20 +1275,24 @@ def fsqrt(s):
 
 
 def frndint(s):
-    """SDM 2A:FRNDINT Op 'ST(0) := RoundToIntegralValue(ST(0))' (D9 FC): RC rounding; infinity unchanged;
-    #P when the value was not integral; C1 = round-up."""
-    b = st(s, 0)
+    """SDM 2A:FRNDINT Op 'ST(0) := RoundToIntegralValue(ST(0))' (D9 FC), exact class: the 80-bit value is rounded to an integer by RC; infinity
+    unchanged; a NaN is quieted ('#IA Source operand is an SNaN value or unsupported format', an unsupported format gives the indefinite);
+    #D 'Source operand is a denormal value'; #P when the value was not integral (SDM 2A:FRNDINT Exc); C1 = round-up."""
+    m = st80(s, 0)
     rm = rm_of(s.fcw)
-    ri = z3.fpRoundToIntegral(rm, fp(b))
-    ok = _finite(b)
-    r = If(is_nan(b), quieten(b), If(is_inf(b), b, bits(ri)))
-    rr, xr = z3.fpToReal(ri), real(b)
+    f = fp80(m)
+    ri = z3.fpRoundToIntegral(rm, f)
+    uns, nan, inf = is_unsup80(m), is_nan80(m), is_inf80(m)
+    ok = Not(Or(uns, nan, inf))
+    r = If(uns, K(INDEF80, 80), If(nan, m | K(1 << 62, 80), If(inf, m, img80(ri))))
+    rr, xr = z3.fpToReal(ri), z3.fpToReal(f)
     pe = And(ok, rr != xr)
     up = And(ok, abs_real(rr) > abs_real(xr))
+    ie = Or(is_snan80(m), uns)
     uf = is_empty(s, 0)
-    s_ok = _c1(write_reg(s, 0, r), up)
+    s_ok = _c1(write_img(s, 0, r), up)
     o = finish(s, St.ite(uf, _uf_state(s, 0, False), s_ok),
-               If(uf, fl(IE), fv(ie=is_snan(b), de=And(Not(is_snan(b)), is_sub(b)), pe=pe)))
+               If(uf, fl(IE), fv(ie=ie, de=And(Not(ie), is_den80(m)), pe=pe)))
     o.undef = UNDEF_C023
     return o
 
@@ -1246,10 +1312,11 @@ def fscale(s):
     non-zero binary64, SDM 1:8.5.4/8.5.5 'massive overflow')."""
     a, b = st(s, 0), st(s, 1)
     rm, pc = rm_of(s.fcw), pc_of(s.fcw)
-    nan_any = Or(is_nan(a), is_nan(b))
+    u = Or(is_unsup80(st80(s, 0)), is_unsup80(st80(s, 1)))
+    nan_any = And(Or(is_nan(a), is_nan(b)), Not(u))
     nres, _ = nan_result2(a, b)
     # Table 1-30: columns ST(1) = -inf/+inf; rows ST(0) = +-0/+-inf
-    inv = Or(And(is_inf(a), sgn(b) == K(1, 1), is_inf(b)), And(is_zero(a), is_inf(b), sgn(b) == K(0, 1)))
+    inv = Or(And(is_inf(a), sgn(b) == K(1, 1), is_inf(b)), And(is_zero(a), is_inf(b), sgn(b) == K(0, 1)), u)
     inf_res = And(is_inf(a), Not(inv))                      # +-inf scaled by finite or +inf: unchanged
     zero_res = And(is_zero(a), Not(inv))                    # +-0 scaled by -inf or finite: unchanged
     b_posinf = And(is_inf(b), sgn(b) == K(0, 1))
@@ -1307,9 +1374,10 @@ def _prem(s, nearest):
     assigned by the Operation when D >= 64, so they are listed undefined.  Result exact (SDM 2A:FPREM Description: no #P, RC no effect).
     Special values: SDM 2A:FPREM Table 1-27, 2A:FPREM1 Table 1-28.  Zero result takes the sign of the dividend."""
     a, b = st(s, 0), st(s, 1)
-    nan_any = Or(is_nan(a), is_nan(b))
+    u = Or(is_unsup80(st80(s, 0)), is_unsup80(st80(s, 1)))
+    nan_any = And(Or(is_nan(a), is_nan(b)), Not(u))
     nres, _ = nan_result2(a, b)
-    inv = Or(is_inf(a), is_zero(b))                       # dividend infinite or modulus zero
+    inv = Or(is_inf(a), is_zero(b), u)                    # dividend infinite or modulus zero, or an unsupported operand (SDM 2A:FPREM Exc '#IA Source operand is an SNaN value, modulus is 0, dividend is ∞, or unsupported format.')
     ie = Or(is_snan(a), is_snan(b), And(Not(nan_any), inv))
     de = And(Not(ie), Or(is_sub(a), is_sub(b)))
     passthru = And(Not(nan_any), Not(inv), Or(is_zero(a), is_inf(b)))     # result = ST(0)
@@ -1422,15 +1490,16 @@ def _trig(s, kind):
     rm = rm_of(s.fcw)
     x = real(b)
     pushes = kind in ("tan", "sincos")
-    nanb, inf_in = is_nan(b), is_inf(b)
-    special = Or(nanb, inf_in)
+    u = is_unsup80(st80(s, 0))                           # unsupported encoding: IE and the indefinite, like an infinity (SDM 2A:FPTAN Exc '#IA Source operand is an SNaN value, ∞, or unsupported format.')
+    nanb, inf_in = And(is_nan(b), Not(u)), is_inf(b)
+    special = Or(nanb, inf_in, u)
     big = And(_finite(b), abs_real(x) >= TWO63)
     zero_in = is_zero(b)
     f_main = {"sin": SIN(x), "cos": COS(x), "tan": TAN(x), "sincos": SIN(x)}[kind]
     mb, _, ue_m, pe_m, up_m = _tr_flags(rm, f_main)
     zero_val = {"sin": b, "cos": ONE64, "tan": b, "sincos": b}[kind]
-    r0 = If(nanb, quieten(b), If(inf_in, K(QNAN_INDEF, 64), If(big, b, If(zero_in, zero_val, mb))))
-    ie = Or(is_snan(b), And(Not(nanb), inf_in))
+    r0 = If(u, K(QNAN_INDEF, 64), If(nanb, quieten(b), If(inf_in, K(QNAN_INDEF, 64), If(big, b, If(zero_in, zero_val, mb)))))
+    ie = Or(is_snan(b), u, And(Not(nanb), inf_in))
     de = And(Not(ie), is_sub(b))
     in_range = And(Not(special), Not(big))
     pe = And(in_range, Not(zero_in), pe_m)
@@ -1483,23 +1552,28 @@ def fsincos(s):
 def f2xm1(s):
     """SDM 2A:F2XM1 Op 'ST(0) := (2^ST(0) - 1)' (D9 F0), SDM 2A:F2XM1 Table 1-12 (-1..-0 -> -0.5..-0, -0 -> -0,
     +0 -> +0, +0..+1 -> +0..+1).  Outside -1..+1 the SDM says the result is undefined (SDM 2A:F2XM1
-    Description): precondition.  NaN: SDM 1:T4-8."""
+    Description): the admissible choice nd.f2xm1.out, any 80-bit image, with the flags and exceptions the SDM gives for that operand (no
+    precondition).  NaN: SDM 1:T4-8."""
     b = st(s, 0)
     rm = rm_of(s.fcw)
     x = real(b)
     inr = And(_finite(b), x >= -1, x <= 1)
     mb, _, ue_m, pe_m, up_m = _tr_flags(rm, EXP2M1(x))
     zb = is_zero(b)
-    r0 = If(is_nan(b), quieten(b), If(zb, b, mb))
-    ie = is_snan(b)
+    u = is_unsup80(st80(s, 0))
+    r0 = If(u, K(QNAN_INDEF, 64), If(is_nan(b), quieten(b), If(zb, b, mb)))
+    ie = Or(is_snan(b), u)
     de = And(Not(ie), is_sub(b))
-    ok = And(inr, Not(zb))
+    ok = And(_finite(b), Not(zb), Not(u))
+    outr = And(Not(is_nan(b)), Not(inr), Not(u))     # an infinity is outside -1..+1 too
+    nd_out = z3.BitVec("nd.f2xm1.out", 80)       # SDM 2A:F2XM1 Description: outside -1..+1 'the result is undefined': any 80-bit image (CERTS.md 'x87 admissible choices')
     uf = is_empty(s, 0)
-    s_ok = _c1(write_reg(s, 0, r0), And(ok, up_m))
+    s_ok = _c1(write_img(s, 0, If(outr, nd_out, to_m80(r0))), And(ok, up_m))
     o = finish(s, St.ite(uf, _uf_state(s, 0, False), s_ok),
                If(uf, fl(IE), fv(ie=ie, de=de, ue=And(ok, ue_m), pe=And(ok, pe_m))), ou_pre=True,
-               extra_pre=Or(is_nan(b), inr))
+               )
     o.undef = UNDEF_C023
+    o.nd = [nd_out]
     return o
 
 
@@ -1511,7 +1585,8 @@ def fyl2x(s):
     (0 * inf is invalid) and IEEE signs."""
     x, y = st(s, 0), st(s, 1)
     rm = rm_of(s.fcw)
-    nan_any = Or(is_nan(x), is_nan(y))
+    u = Or(is_unsup80(st80(s, 0)), is_unsup80(st80(s, 1)))
+    nan_any = And(Or(is_nan(x), is_nan(y)), Not(u))
     nres, _ = nan_result2(x, y)
     xr, yr = real(x), real(y)
     x_neg = And(sgn(x) == K(1, 1), Not(is_zero(x)), Not(is_nan(x)))
@@ -1523,8 +1598,8 @@ def fyl2x(s):
     prod = z3.fpMul(z3.RNE(), fp(y), lsp)
     special = Or(is_zero(x), x_posinf, x_one)
     inv_sp = And(special, Not(nan_any), z3.fpIsNaN(prod))
-    ze = And(Not(nan_any), is_zero(x), _finite(y), Not(is_zero(y)))
-    generic = And(Not(nan_any), Not(x_neg), Not(special))
+    ze = And(Not(nan_any), Not(u), is_zero(x), _finite(y), Not(is_zero(y)))
+    generic = And(Not(nan_any), Not(u), Not(x_neg), Not(special))
     exact = yr * LOG2(xr)
     gb, goe, gue, gpe, gup = _tr_flags(rm, exact)
     x_lt1 = xr < 1
@@ -1534,9 +1609,9 @@ def fyl2x(s):
     yinf = is_inf(y)
     ginf = Concat(sgn(y), K(0x7FF, 11), K(0, 52)) ^ If(x_lt1, K(1 << 63, 64), K(0, 64))
     gres = If(is_zero(y), gzero, If(yinf, ginf, gb))
-    res = If(nan_any, nres, If(x_neg, K(QNAN_INDEF, 64), If(inv_sp, K(QNAN_INDEF, 64),
-          If(special, bits(prod), gres))))
-    ie = Or(is_snan(x), is_snan(y), And(Not(nan_any), Or(x_neg, inv_sp)))
+    res = If(u, K(QNAN_INDEF, 64), If(nan_any, nres, If(x_neg, K(QNAN_INDEF, 64), If(inv_sp, K(QNAN_INDEF, 64),
+          If(special, bits(prod), gres)))))
+    ie = Or(is_snan(x), is_snan(y), u, And(Not(nan_any), Or(x_neg, inv_sp)))
     de = And(Not(ie), Or(is_sub(x), is_sub(y)))
     gen_nz = And(generic, Not(is_zero(y)), Not(yinf))
     uf = Or(is_empty(s, 0), is_empty(s, 1))
@@ -1556,7 +1631,8 @@ def fpatan(s):
     The constants are the exact pi multiples, rounded by RC."""
     x, y = st(s, 0), st(s, 1)
     rm = rm_of(s.fcw)
-    nan_any = Or(is_nan(x), is_nan(y))
+    u = Or(is_unsup80(st80(s, 0)), is_unsup80(st80(s, 1)))
+    nan_any = And(Or(is_nan(x), is_nan(y)), Not(u))
     nres, _ = nan_result2(x, y)
     sy = If(sgn(y) == K(1, 1), z3.RealVal(-1), z3.RealVal(1))
     xneg = sgn(x) == K(1, 1)
@@ -1569,10 +1645,10 @@ def fpatan(s):
     generic = And(_finite(x), Not(x_zero), _finite(y), Not(y_zero))
     exact = If(generic, ATAN2(real(y), real(x)), sy * uns)
     rb, oe_, ue_, pe_, up_ = _tr_flags(rm, exact)
-    res = If(nan_any, nres, If(zero_case, Concat(sgn(y), K(0, 63)), rb))
-    ie = Or(is_snan(x), is_snan(y))
+    res = If(u, K(QNAN_INDEF, 64), If(nan_any, nres, If(zero_case, Concat(sgn(y), K(0, 63)), rb)))
+    ie = Or(is_snan(x), is_snan(y), u)
     de = And(Not(ie), Or(is_sub(x), is_sub(y)))
-    live = And(Not(nan_any), Not(zero_case))
+    live = And(Not(nan_any), Not(u), Not(zero_case))
     uf = Or(is_empty(s, 0), is_empty(s, 1))
     s_ok = do_pop(_c1(write_reg(s, 1, res), And(live, up_)))
     s_f = do_pop(_uf_state(s, 1, False))
@@ -1643,7 +1719,7 @@ def _tagword_image(s):
     parts = []
     for p in range(7, -1, -1):
         t = tag_at(s, K(p, 3))
-        cls = tag_of_value(z3.Select(s.R, K(p, 3)))
+        cls = tag_of_img(z3.Select(s.R, K(p, 3)))
         parts.append(If(t == K(TAG_EMPTY, 2), K(TAG_EMPTY, 2), cls))
     return Concat(*parts)
 
@@ -1671,7 +1747,7 @@ def _load_env(s, m, regs=None):
     tag = K(0, 16)
     for p in range(8):
         t = Extract(2 * p + 1, 2 * p, f["tagimg"])
-        cls = tag_of_value(z3.Select(s2.R, K(p, 3)))
+        cls = tag_of_img(z3.Select(s2.R, K(p, 3)))
         tag = tag | (ZeroExt(14, If(t == K(TAG_EMPTY, 2), K(TAG_EMPTY, 2), cls)) << K(2 * p, 16))
     s2 = s2.copy(tag=tag)
     return s2.copy(fsw=sync_es(s2.fsw, s2.fcw))
@@ -1701,7 +1777,7 @@ def fnsave(s):
     cleared."""
     img = ZeroExt(SAVE_BITS - ENV_BITS, env_image(s))
     for i in range(8):
-        img = img | (ZeroExt(SAVE_BITS - 80, to_m80(st(s, i))) << K(ENV_BITS + 80 * i, SAVE_BITS))
+        img = img | (ZeroExt(SAVE_BITS - 80, st80(s, i)) << K(ENV_BITS + 80 * i, SAVE_BITS))
     o = Out(St.after_finit(s.R), mem=img, wr=TRUE,
             mem_undef=K(ENV_RESERVED, SAVE_BITS))
     return o
@@ -1709,18 +1785,13 @@ def fnsave(s):
 
 def frstor(s, m):
     """SDM 2A:FRSTOR Op (DD /4): the environment, then ST(0)..ST(7) from the 80-byte area following the 28-byte
-    image (physical register of ST(i) from the TOP of the restored status word).  Precondition: supported
-    m80 encodings (SDM 1:8.2.2)."""
+    image (physical register of ST(i) from the TOP of the restored status word), each image bit for bit (exact class, any encoding)."""
     f = _env_fields(m)
     top_new = top_of(f["fsw"])
     r = s.R
-    pre = TRUE
     for i in range(8):
-        reg80 = Extract(ENV_BITS + 80 * i + 79, ENV_BITS + 80 * i, m)
-        r = z3.Store(r, top_new + K(i, 3), from_m80(reg80))
-        pre = And(pre, supported_m80(reg80))
-    o = Out(_load_env(s, Extract(ENV_BITS - 1, 0, m), regs=r), pre=pre)
-    return o
+        r = z3.Store(r, top_new + K(i, 3), Extract(ENV_BITS + 80 * i + 79, ENV_BITS + 80 * i, m))
+    return Out(_load_env(s, Extract(ENV_BITS - 1, 0, m), regs=r))
 
 
 # --------------------------------------------------------------------------------------------
@@ -1859,7 +1930,7 @@ CLEARED_UD = {("d9", "reg", 3, None): "D9 D8+i (FSTP1; no SDM page)",
 # Part (iii).  The L3a DSL view of the state and of the faults (fnvlift/dsl.py XW, FAULTS; L3a int3 d935ecda), so that a Form is checked
 # against the spec without a renaming layer.
 #   DSL name        width   spec state
-#   fr0..fr7        80      physical register i: to_m80(R[i]) (exact widening of the register format); from_m80 in the other direction
+#   fr0..fr7        80      physical register i: the image R[i] itself
 #   ftop            3       TOP, bits 11..13 of the status word
 #   ftag            16      the tag word, 2 bits per PHYSICAL register (00 valid 01 zero 10 special 11 empty)
 #   fcw             16      the control word
@@ -1867,8 +1938,8 @@ CLEARED_UD = {("d9", "reg", 3, None): "D9 D8+i (FSTP1; no SDM page)",
 #   fip fdp         32      FIP, FDP
 #   fop             11      FOP
 #   fcs fds         16      FCS, FDS
-# The register values are binary64 patterns here (OWNER 8: m80 loads round to binary64, stores widen exactly); an 80-bit DSL register is related
-# to the spec register only where it is a binary64 value: dsl_pre.
+# The spec register is the DSL register: every 80-bit pattern is a state (no precondition on the registers).  The DSL fsw has no TOP bits: from_dsl
+# replaces bits 11..13 of the status word by ftop.
 # --------------------------------------------------------------------------------------------
 DSL_WIDTH = {**{"fr%d" % i: 80 for i in range(8)}, "ftop": 3, "ftag": 16, "fcw": 16, "fsw": 16, "fip": 32, "fdp": 32, "fop": 11,
              "fcs": 16, "fds": 16}
@@ -1876,31 +1947,20 @@ TOP_FIELD_MASK = 7 << TOP_LO
 
 
 def from_dsl(d):
-    """St from the DSL pre-state d (dict by the names above).  Physical register i holds from_m80(fr<i>)."""
-    r = z3.K(z3.BitVecSort(3), K(0, 64))
+    """St from the DSL pre-state d (dict by the names above).  Physical register i holds the image fr<i> itself."""
+    r = z3.K(z3.BitVecSort(3), K(0, 80))
     for i in range(8):
-        r = z3.Store(r, K(i, 3), from_m80(d["fr%d" % i]))
+        r = z3.Store(r, K(i, 3), d["fr%d" % i])
     fsw = (d["fsw"] & K(~TOP_FIELD_MASK & 0xFFFF, 16)) | (ZeroExt(13, d["ftop"]) << K(TOP_LO, 16))
     return St(R=r, tag=d["ftag"], fsw=fsw, fcw=d["fcw"], fip=d["fip"], fcs=d["fcs"], fdp=d["fdp"], fds=d["fds"], fop=d["fop"])
 
 
 def to_dsl(s):
     """The DSL post-state of St s: dict by the names above."""
-    d = {"fr%d" % i: to_m80(z3.Select(s.R, K(i, 3))) for i in range(8)}
+    d = {"fr%d" % i: z3.Select(s.R, K(i, 3)) for i in range(8)}
     d.update(ftop=top(s), ftag=s.tag, fcw=s.fcw, fsw=s.fsw & K(~TOP_FIELD_MASK & 0xFFFF, 16), fip=s.fip, fdp=s.fdp, fop=s.fop,
              fcs=s.fcs, fds=s.fds)
     return d
-
-
-def dsl_pre(d):
-    """Bool: the DSL pre-state is one the spec relates to: every non-empty register is a supported m80 encoding (SDM 1:8.2.2) that is a binary64
-    value (to_m80(from_m80(fr)) == fr; an empty register keeps whatever bits it holds and is not constrained), and fsw has no TOP bits."""
-    c = Extract(TOP_HI, TOP_LO, d["fsw"]) == K(0, 3)
-    for i in range(8):
-        reg = d["fr%d" % i]
-        empty = Extract(2 * i + 1, 2 * i, d["ftag"]) == K(TAG_EMPTY, 2)
-        c = And(c, Or(empty, And(supported_m80(reg), to_m80(from_m80(reg)) == reg)))
-    return c
 
 
 # MMX aliases the x87 state (SDM 1:9.5: "The MMX state is aliased to the x87 FPU state").  One copy of the effect, here, on the DSL state names
@@ -1938,9 +1998,13 @@ def emms_effect(d):
     return r
 
 
-# DSL fault kinds (fnvlift/dsl.py FAULTS 12..18): one kind per NTSTATUS, in the order of Wine 9.0 get_fpu_code (dlls/ntdll/unix/signal_i386.c):
-# IE (with SF: STACK_CHECK), then DE, ZE, OE, UE, PE; a fault is raised for the first UNMASKED one.
-FLT_IE, FLT_DE, FLT_ZE, FLT_OE, FLT_UE, FLT_PE, FLT_SF = 12, 13, 14, 15, 16, 17, 18
+# DSL fault kinds: the one source is L3a's fault table fnvlift/faults.json (read through fnvlift/faults.py: FAULTS, BYNAME); the order of the unmasked
+# checks is that of Wine 9.0 get_fpu_code (dlls/ntdll/unix/signal_i386.c): IE (with SF: STACK_CHECK), then DE, ZE, OE, UE, PE.
+import importlib.util as _ilu, os as _os
+_spec = _ilu.spec_from_file_location("fnvlift_faults", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "fnvlift", "faults.py"))
+_faults = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_faults)
+FLT = {n: _faults.BYNAME[n]["code"] for n in ("FLT_IE", "FLT_DE", "FLT_ZE", "FLT_OE", "FLT_UE", "FLT_PE", "FLT_SF")}
 
 
 def fault_kind(o):
@@ -1951,8 +2015,8 @@ def fault_kind(o):
     that case is the trap's, not this kind's."""
     u = o.raised & ~Extract(5, 0, o.fcw_in)
     def has(b): return Extract(b, b, u) == K(1, 1)
-    return If(has(IE), If(o.sf_raised, K(FLT_SF, 8), K(FLT_IE, 8)), If(has(DE), K(FLT_DE, 8), If(has(ZE), K(FLT_ZE, 8),
-           If(has(OE), K(FLT_OE, 8), If(has(UE), K(FLT_UE, 8), If(has(PE), K(FLT_PE, 8), K(0, 8)))))))
+    return If(has(IE), If(o.sf_raised, K(FLT["FLT_SF"], 8), K(FLT["FLT_IE"], 8)), If(has(DE), K(FLT["FLT_DE"], 8), If(has(ZE), K(FLT["FLT_ZE"], 8),
+           If(has(OE), K(FLT["FLT_OE"], 8), If(has(UE), K(FLT["FLT_UE"], 8), If(has(PE), K(FLT["FLT_PE"], 8), K(0, 8)))))))
 
 
 def execute(key, s, m=None, i=None, ef=None):

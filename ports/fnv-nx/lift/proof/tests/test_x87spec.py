@@ -29,13 +29,18 @@ def f2b(f): return struct.unpack('<Q', struct.pack('<d', f))[0]
 
 def state(vals, fcw=0x037F):
     """TOP = 8 - len(vals), ST(0) first; tags from the SDM 1:8.1.7 classes of the binary64 bit patterns"""
-    R = z3.K(z3.BitVecSort(3), K(0, 64)); top = (8 - len(vals)) & 7; tag = 0xFFFF
+    R = z3.K(z3.BitVecSort(3), K(0, 80)); top = (8 - len(vals)) & 7; tag = 0xFFFF
     for i, v in enumerate(vals):
-        b = f2b(v) if isinstance(v, float) else v; p = (top + i) & 7
-        R = z3.Store(R, K(p, 3), K(b, 64)); e = (b >> 52) & 0x7ff
-        c = 1 if b & (2**63 - 1) == 0 else (2 if e in (0, 0x7ff) else 0)
-        tag = (tag & ~(3 << 2 * p)) | (c << 2 * p)
+        if isinstance(v, tuple): img = v[1]                                   # ('img', n): a raw 80-bit image
+        else: img = val(X.to_m80(K(f2b(v) if isinstance(v, float) else v, 64)))
+        p = (top + i) & 7
+        R = z3.Store(R, K(p, 3), K(img, 80))
+        tag = (tag & ~(3 << 2 * p)) | (val(X.tag_of_img(K(img, 80))) << 2 * p)
     return X.St(R=R, tag=K(tag, 16), fsw=K(top << 11, 16), fcw=K(fcw, 16), fip=K(0, 32), fcs=K(0, 16), fdp=K(0, 32), fds=K(0, 16), fop=K(0, 11))
+
+def rd(s, p):
+    """physical register p of s read as binary64 (the arithmetic-class view under the default control word)"""
+    return val(X.view64(z3.Select(s.R, K(p, 3)), K(0x037F, 16)))
 
 def run(key, s, i=None): return X.execute(key, s, None, i, None)
 def ccs(fsw):
@@ -52,10 +57,13 @@ class Layout(unittest.TestCase):
     def test_tags(self):
         enc = {'valid': X.TAG_VALID, 'zero': X.TAG_ZERO, 'special': X.TAG_SPECIAL, 'empty': X.TAG_EMPTY}
         for name, bits, _ in rows('tag'): self.assertEqual(enc[name], int(bits, 2), name)
-    def test_tag_of_value(self):
-        for v, name in ((1.0, 'valid'), (0.0, 'zero'), (float('inf'), 'special'), (NAN, 'special'), (1, 'special')):   # 1 = smallest binary64 subnormal (OWNER 8: the denormal class)
-            b = f2b(v) if isinstance(v, float) else v
-            self.assertEqual(val(X.tag_of_value(K(b, 64))), {'valid': 0, 'zero': 1, 'special': 2}[name])
+    def test_tag_of_img(self):
+        # SDM 1:8.1.7 classes of the 80-bit image: zero 01; NaN, infinity, denormal, unsupported 10; the rest 00
+        for img, name in ((0x3FFF8000000000000000, 'valid'), (0, 'zero'), (0x80000000000000000000, 'zero'), (0x7FFF8000000000000000, 'special'),
+                          (0x7FFFC000000000000000, 'special'), (1, 'special'), (0x00008000000000000000, 'special'),     # denormal, pseudo-denormal
+                          (0x3FFF0000000000000001, 'special'), (0x7FFF0000000000000000, 'special'),                      # unnormal, pseudo-infinity
+                          (0xFFFF0000000000000000 | 5, 'special')):                                                      # pseudo-NaN (the MMX ones in the exponent)
+            self.assertEqual(val(X.tag_of_img(K(img, 80))), {'valid': 0, 'zero': 1, 'special': 2}[name], hex(img))
     def test_finit_state(self):
         want = {r[0]: int(r[1], 16) for r in rows('init')}
         s = X.St.after_finit(z3.K(z3.BitVecSort(3), K(0, 64)))
@@ -83,7 +91,7 @@ class Compare(unittest.TestCase):
                 o = run(key, state([a, b]), i=1)
                 self.assertEqual([int(val(x)) for x in o.eflags[:3]], [int(zf), int(pf), int(cf)], (rel, key))
 class Fxam(unittest.TestCase):
-    ST = {'nan': NAN, 'normal': 1.5, 'infinity': float('inf'), 'zero': 0.0, 'denormal': 1}
+    ST = {'nan': NAN, 'normal': 1.5, 'infinity': float('inf'), 'zero': 0.0, 'denormal': ('img', 1), 'unsupported': ('img', 0xFFFF0000000000000001)}   # 80-bit denormal; an MMX write of 1 (exponent 7FFF, integer bit 0)
     def test_classes(self):
         for cls, c3, c2, c0, _ in rows('fxam'):
             s = state([]) if cls == 'empty' else state([self.ST[cls]])
@@ -91,7 +99,7 @@ class Fxam(unittest.TestCase):
     def test_c1_is_sign_even_when_empty(self):
         for v, sign in ((-1.5, 1), (1.5, 0), (-0.0, 1)):
             self.assertEqual((val(run(('d9', 'reg', 4, 5), state([v])).s.fsw) >> X.C1) & 1, sign)
-        s = state([]); s = s.copy(R=z3.Store(s.R, K(0, 3), K(f2b(-1.0), 64)))                    # empty register that holds a negative pattern: C1 = sign (SDM 2A:FXAM)
+        s = state([]); s = s.copy(R=z3.Store(s.R, K(0, 3), K(val(X.to_m80(K(f2b(-1.0), 64))), 80)))                    # empty register that holds a negative pattern: C1 = sign (SDM 2A:FXAM)
         self.assertEqual((val(run(('d9', 'reg', 4, 5), s).s.fsw) >> X.C1) & 1, 1)
 class Formats(unittest.TestCase):
     EXACT = {'+0': 0.0, '-0': -0.0, '+inf': float('inf'), '-inf': float('-inf'), '+1.0': 1.0, '-2.0': -2.0}
@@ -100,10 +108,10 @@ class Formats(unittest.TestCase):
             if name in self.EXACT:
                 b = K(f2b(self.EXACT[name]), 64)
                 self.assertEqual(val(X.to_m80(b)), int(hexv, 16), name)
-                self.assertEqual(val(X.from_m80(K(int(hexv, 16), 80))), f2b(self.EXACT[name]), name)
+                self.assertEqual(val(X.view64(K(int(hexv, 16), 80), K(0x037F, 16))), f2b(self.EXACT[name]), name)
             if name == 'qnan_indefinite':
                 self.assertEqual(val(X.to_m80(K(X.QNAN_INDEF, 64))), int(hexv, 16))
-                self.assertEqual(val(X.from_m80(K(int(hexv, 16), 80))), X.QNAN_INDEF)
+                self.assertEqual(val(X.view64(K(int(hexv, 16), 80), K(0x037F, 16))), X.QNAN_INDEF)
             if name == 'bcd_indefinite': self.assertEqual(X.BCD_INDEFINITE, int(hexv, 16))
     def test_int_indefinite(self):
         # FIST/FISTP masked, out of range: the integer indefinite (SDM 1:4.2.1.1); keys: DF /2 m16, DB /2 m32 (FIST), DF /7 m64 (FISTP)
@@ -142,7 +150,7 @@ def snap(o, nd, n=2):
     """(TOP, FSW, ST(0..n-1) patterns) of the spec result with the nondeterministic variables set: nd = [(var, value)]"""
     s = o.s
     for v, x in nd: s = X.St(**{f: z3.substitute(getattr(s, f), (v, x)) for f in X.St.FIELDS})
-    top = val(X.top(s)); out = [val(z3.Select(s.R, K((top + i) & 7, 3))) for i in range(n)]
+    top = val(X.top(s)); out = [rd(s, (top + i) & 7) for i in range(n)]
     return top, val(s.fsw), out
 INDEF = X.QNAN_INDEF
 class Nondeterminism(unittest.TestCase):
@@ -220,7 +228,7 @@ class SpecialTables(unittest.TestCase):
             for c, want in zip(cols, r[1].split()):
                 o = run(('d9', 'reg', 7, 5), state([self.VAL[r[0]], self.COL[c]]))
                 s = o.s; top = val(X.top(s))
-                self.assertEqual(self.cls(val(z3.Select(s.R, K(top, 3)))), want, 'ST(0)=%s ST(1)=%s' % (r[0], c))
+                self.assertEqual(self.cls(rd(s, top)), want, 'ST(0)=%s ST(1)=%s' % (r[0], c))
     def test_fpatan_table_1_26(self):
         """every concrete cell of the table (angles that are multiples of pi, signed zeros); a 'range' cell is symbolic in the spec (ATAN2) and is skipped"""
         V = {'-inf': float('-inf'), '-F': -1.0, '-0': -0.0, '+0': 0.0, '+F': 1.0, '+inf': float('inf')}
@@ -229,7 +237,7 @@ class SpecialTables(unittest.TestCase):
             for c, want in zip(cols, r[1].split()):
                 if want == 'range': continue
                 o = run(('d9', 'reg', 6, 3), state([V[c], V[r[0]]]))                     # ST(0) = X, ST(1) = Y
-                top = val(X.top(o.s)); got = struct.unpack('<d', struct.pack('<Q', val(z3.Select(o.s.R, K(top, 3)))))[0]
+                top = val(X.top(o.s)); got = struct.unpack('<d', struct.pack('<Q', rd(o.s, top)))[0]
                 w = float(Fraction(want.lstrip('-+')) * Fraction(math.pi)) if want.lstrip('-+') not in ('0',) else 0.0
                 w = -w if want.startswith('-') else w
                 self.assertEqual(math.copysign(1, got), math.copysign(1, w), 'Y=%s X=%s' % (r[0], c))
@@ -249,7 +257,7 @@ class SpecialTables(unittest.TestCase):
                 want = cells[ci]
                 o = run(('d9', 'reg', 6, 1), state([xv, r1[r[0]]]))
                 top = val(X.top(o.s)); raised = z3.simplify(o.raised)
-                try: b = val(z3.Select(o.s.R, K(top, 3)))
+                try: b = rd(o.s, top)
                 except AssertionError: self.assertIn(want, ('+F', '-F')); continue          # symbolic finite result
                 fl = val(raised)
                 if want == '*': self.assertEqual((self.cls(b), fl & 1), ('NaN', 1), (r[0], cn))
@@ -284,6 +292,32 @@ class MmxAlias(unittest.TestCase):
         for m in range(8): self.prove(e["fr%d" % m] == d["fr%d" % m])
 
 
+class MmxThenX87(unittest.TestCase):
+    """x87 after MMX without EMMS: an MMX write leaves fr<n> = 0xFFFF:v64 (SDM 1:9.6.2) with tags 00 and TOP = 0; that image has integer bit
+    v64[63] and may be an unsupported encoding (exponent 7FFFH with integer bit 0).  The spec takes it as a state, no precondition."""
+    def mmx_state(self, v64, n=0):
+        d = X.mmx_write_effect({"fr%d" % i: K(0, 80) for i in range(8)} | {"ftop": K(5, 3), "ftag": K(0xFFFF, 16), "fcw": K(0x037F, 16), "fsw": K(0, 16),
+                                "fip": K(0, 32), "fdp": K(0, 32), "fop": K(0, 11), "fcs": K(0, 16), "fds": K(0, 16)}, n, K(v64, 64))
+        return X.from_dsl(d)
+    def test_fadd_of_mmx_data_with_integer_bit_clear_is_invalid(self):
+        s = self.mmx_state(0x0000000000000001)                                    # fr0 = FFFF:0000000000000001: exponent 7FFF, integer bit 0, unsupported
+        self.assertEqual(val(X.tag_at(s, K(0, 3))), 0)                           # the MMX write left the tag valid (SDM 1:9.5.1) ...
+        o = run(('d8', 'reg', 0, None), s.copy(tag=K(0, 16)), i=0)                # FADD ST(0), ST(0)
+        self.assertEqual(val(o.s.fsw) & 1, 1)                                     # ... and the operation is an invalid operation (SDM 2A:FADD Exc '#IA')
+        self.assertEqual(val(z3.Select(o.s.R, K(0, 3))), X.INDEF80)               # masked response: the QNaN indefinite
+        self.assertEqual((val(o.s.fsw) >> X.SF) & 1, 0)                           # not a stack fault
+    def test_fadd_of_mmx_data_with_integer_bit_set_is_a_number(self):
+        s = self.mmx_state(0x8000000000000000)                                    # FFFF:8000000000000000: a QNaN-class image (exponent 7FFF, integer 1, fraction 0 = infinity)
+        o = run(('d8', 'reg', 0, None), s, i=0)
+        self.assertEqual(val(o.s.fsw) & 1, 0)                                     # +inf + +inf... sign bit is the exponent's bit 15 = 1: -inf + -inf = -inf, no exception
+        self.assertEqual(val(z3.Select(o.s.R, K(0, 3))), 0xFFFF8000000000000000)
+    def test_fstp_m80_copies_the_image(self):
+        for v in (0x0000000000000001, 0x8000000000000000, 0xC000000000000000):
+            s = self.mmx_state(v)
+            o = run(('db', 'mem', 7, None), s)                                    # FSTP m80fp: no exception for any encoding (SDM 2A:FST Exc)
+            self.assertEqual(val(o.mem), 0xFFFF0000000000000000 | v, hex(v))
+            self.assertEqual(val(o.s.fsw) & 0x3F, 0)
+
 class DslView(unittest.TestCase):
     """the L3a DSL names and widths (fnvlift/dsl.py XW) and fault kinds (dsl.FAULTS 12..18, Wine 9.0 get_fpu_code order IE/SF, DE, ZE, OE, UE, PE)"""
     def test_widths(self):
@@ -295,20 +329,18 @@ class DslView(unittest.TestCase):
         for f in X.St.FIELDS:
             if f != 'R': self.assertEqual(val(getattr(s, f)), val(getattr(s2, f)), f)
         for i in range(8): self.assertEqual(val(z3.Select(s.R, K(i, 3))), val(z3.Select(s2.R, K(i, 3))), i)
-        self.assertTrue(val(X.dsl_pre(d)))
         self.assertEqual(val(d['fsw'] & K(7 << 11, 16)), 0)                                      # fsw carries no TOP
         self.assertEqual(val(d['ftop']), 5)
-    def test_pre_rejects_non_binary64(self):
-        d = X.to_dsl(state([1.0])); d['fr%d' % 7] = K(0x3FFF8000000000000001, 80)                  # 1 + 2^-63: not a binary64 value, register 7 is ST(0)
-        self.assertFalse(val(X.dsl_pre(d)))
-        d['ftag'] = d['ftag'] | K(3 << 14, 16)                                                      # an empty register is unconstrained
-        self.assertTrue(val(X.dsl_pre(d)))
+    def test_every_image_is_a_state(self):
+        # no precondition on the registers: a 80-bit pattern that is not a binary64 value survives the round trip bit for bit
+        d = X.to_dsl(state([1.0])); d['fr7'] = K(0x3FFF8000000000000001, 80)                       # 1 + 2^-63 (register 7 is ST(0))
+        self.assertEqual(val(X.to_dsl(X.from_dsl(d))['fr7']), 0x3FFF8000000000000001)
     def test_fault_kinds(self):
-        self.assertEqual((X.FLT_IE, X.FLT_DE, X.FLT_ZE, X.FLT_OE, X.FLT_UE, X.FLT_PE, X.FLT_SF), (12, 13, 14, 15, 16, 17, 18))
+        self.assertEqual(tuple(X.FLT[n] for n in ('FLT_IE', 'FLT_DE', 'FLT_ZE', 'FLT_OE', 'FLT_UE', 'FLT_PE', 'FLT_SF')), (12, 13, 14, 15, 16, 17, 18))   # read from fnvlift/faults.json
         fdiv_st0 = ('d8', 'reg', 6, None)                                                            # FDIV ST(0), ST(i)
-        self.assertEqual(val(X.fault_kind(run(fdiv_st0, state([1.0, 0.0], fcw=0x037B), i=1))), X.FLT_ZE)    # 1/0, ZE unmasked (SDM 1:8.5.3)
+        self.assertEqual(val(X.fault_kind(run(fdiv_st0, state([1.0, 0.0], fcw=0x037B), i=1))), X.FLT["FLT_ZE"])    # 1/0, ZE unmasked (SDM 1:8.5.3)
         self.assertEqual(val(X.fault_kind(run(fdiv_st0, state([1.0, 0.0], fcw=0x037F), i=1))), 0)           # masked
-        self.assertEqual(val(X.fault_kind(run(('d8', 'reg', 0, None), state([], fcw=0x037E), i=1))), X.FLT_SF)   # FADD on an empty stack: IE with SF
-        self.assertEqual(val(X.fault_kind(run(fdiv_st0, state([0.0, 0.0], fcw=0x037A), i=1))), X.FLT_IE)       # 0/0: IE wins over ZE (Wine order), a pure IE
+        self.assertEqual(val(X.fault_kind(run(('d8', 'reg', 0, None), state([], fcw=0x037E), i=1))), X.FLT["FLT_SF"])   # FADD on an empty stack: IE with SF
+        self.assertEqual(val(X.fault_kind(run(fdiv_st0, state([0.0, 0.0], fcw=0x037A), i=1))), X.FLT["FLT_IE"])       # 0/0: IE wins over ZE (Wine order), a pure IE
 if __name__ == '__main__':
     unittest.main()

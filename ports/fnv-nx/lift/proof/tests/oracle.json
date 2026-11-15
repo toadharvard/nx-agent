@@ -156,7 +156,7 @@
   "test_x87spec.py": {
    "references": [
     {
-     "anchor": "L1-L96",
+     "anchor": "L1-L97",
      "kind": "spec",
      "path": "ports/fnv-nx/lift/proof/tests/x87_sdm_rows.txt"
     },

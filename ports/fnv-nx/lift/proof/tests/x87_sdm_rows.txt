@@ -17,6 +17,7 @@ fxam | infinity | 0 1 1 | SDM 2A:FXAM table "Infinity 0 1 1"
 fxam | zero     | 1 0 0 | SDM 2A:FXAM table "Zero 1 0 0"
 fxam | empty    | 1 0 1 | SDM 2A:FXAM table "Empty 1 0 1"
 fxam | denormal | 1 1 0 | SDM 2A:FXAM table "Denormal number 1 1 0"
+fxam | unsupported | 0 0 0 | SDM 2A:FXAM Op "Unsupported:C3, C2, C0 := 000;"
 fxam_c1 | sign | SDM 2A:FXAM "The C1 flag is set to the sign of the value in ST(0), regardless of whether the register is empty or full."
 # Tag word (SDM 1:8.1.7): value | 2-bit tag
 tag | valid   | 00 | SDM 1:8.1.7 tag word "00 Valid"
