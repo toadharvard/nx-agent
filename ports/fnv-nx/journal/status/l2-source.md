@@ -329,3 +329,7 @@ After the first frame:
   - `opaque:` is removed, with a proof from the GCC 13.3 source: the front end's compatibility check ignores TYPE_VECTOR_OPAQUE, and dl_type takes the main variant.
   - The totality reasons now cite pinned-source lines. REFERENCE_TYPE in C is the deliberate error arm.
   - Note: the SVE types came from glibc's math-vector.h. That means the translator unit was built against the current linux-gnu msvcmodel mirror (b4057704). The none-elf repin removes glibc from guest units; that is the runtime path already in progress.
+- HOST1 CONT-P: w3 1bc959329, test_dispatch passes 58 checks.
+  - Harness: one source, no flag lists. test_layout 41 and test_ftoi 29 pass. test_names, test_pi and test_sdd are red; all three are L2's (a per-root flag, -w, and GOT relocs under -fPIC).
+  - The platform build was still on a7b7805fe: 4 null-test sites, 0 CONT-P errors.
+  - Order for w3: rebase onto L5 w10 05e6e23fa and measure reach-not-exit, then MLIB1, then the three tests, then the S23 root.
