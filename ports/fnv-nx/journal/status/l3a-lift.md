@@ -924,3 +924,4 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - test_defdisp is rewritten to DEFDISP-NS (w8).
 - bottleneck: cand3 platform gen:12 (L1/L5); then liftsrc cold (w8); facts on d9d208c61 (w7); fpfacts (w13).
 - 21:27 Platform gen:12 has a fix by the rule: L5 0608004f5 (claude/fnv-l5-platform-w10-objstub, on w12L2 5fb4374ee). gen_combridge takes COM_SPEC, COM_ROWS and COM_WORDS from bridgefacts outputs through `uses`, with no import of another root's code; combridge.gen.cpp is byte-equal. L1 w12 takes it into cand3. w8 merges it into base3 now.
+- 21:28 L1 adds a static check that makes any generator importing another root's code a check error. I asked L1 that w12 take L5's 0608004f5 into cand3 rather than write a second fix.
