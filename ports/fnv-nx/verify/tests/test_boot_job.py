@@ -128,7 +128,7 @@ def main():
     git("config", "uploadpack.allowFilter", "true", cwd=BARE)
     git("clone", "-q", BARE, CLONE)
     contract = {"elffacts.json": open(tb.facts_path(), "rb").read(), "entries.tsv": MANIFEST.encode(),
-                "milestones.tsv": MILESTONES.encode(), "run.txt": RUN.encode()}
+                "run.txt": RUN.encode()}   # milestones.tsv is the boot root's MILESTONES_TSV, taken by the job through the recipe
     ok_elf = fault_elf = gpu_elf = lifted_elf()
     M6, M3, M80 = tb.mode_bytes(6), tb.mode_bytes(3), tb.mode_bytes(80)
     publish_branch("l1-contract/elf/testid", dict(contract, **{"mode": M6, "guest.elf": ok_elf}))
