@@ -1123,3 +1123,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:30 w8 selector value rule accepted: base3 b5fda5e65 (segwrites/2).
   - pop and mov sources are proven by the same walk. Every cut-off gives possibly-null, so it is sound, with the argument in the docstring and 4 new tests.
   - On 6944080, the exe's 3 possibly-null writes are data decoded as code (00ee6f84, 00ee7104, 00ee77f4), so they are removed by w7's universe rule.
+- 22:34 w12's prof/prof2/dump units were built with a stale fnvnx_order (blob 017758d563ca at 2c3591efc), not with L2's pin 84f0883e. The expand-vars cause is re-measured at 84f0883e by L2 w2 (ORDER-STACK).
+  - Second candidate: the guest semantic flag -fstack-reuse=none. If it is a correctness switch-off, it needs a PERFDEBT entry and a class rule; sent to L2.
+  - base3 takes the current toolchain through L1 cand3 (w8).
+  - The L3b cpuid table with the AMD rows is at fnv-nx-build 66d8109dfc33; w12 finishes N2 on it.
