@@ -2,19 +2,22 @@
 status: legal | illegal | conflict | unreachable-doc.  Illegal rows carry the documented validator rule (-> sm_illegal.tsv)."""
 import os, sys
 S1 = "MS:dx9-graphics-reference-asm-"
+def ops_source(ops, f):
+    import sm_cases
+    return "; ".join(sorted({v["source"] for k, v in ops.items() if sm_cases.asm_op(k.split(":")[1]) == f}))[:300]
 def legacy_rows(cdir, models, ops):
     sys.path.insert(0, os.path.abspath(cdir))
     import sm_cases
+    sm_cases.bind(ops)
     out, conf, resolved = [], [], []
     def R(m, k, f, st, src, rule=""): out.append(dict(model=m, kind=k, feature=f, status=st, source=src, rule=rule))
     inmodel = lambda st, key, m: m in ops.get("%s:%s" % (st, key), {}).get("models", [])
     for m, k, f, text, lg in sm_cases.cases():
         if lg != "?": continue
         st = m[:2]; base = f.split("@")[0]
-        if k == "opcode" and f in ("lit", "dst", "expp", "logp", "sgn", "m4x4", "m4x3", "m3x4", "m3x3", "m3x2"):
-            if inmodel(st, f, m): R(m, k, f, "legal", ops["%s:%s" % (st, f)]["source"])
-            else: R(m, k, f, "illegal", S1 + "ps-instructions-ps-%s (no %s in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)" % (m[5:], f), "CreatePixelShader: opcode %s not in the %s instruction set" % (f, m))
-        elif f == "breakc": R(m, k, f, "legal", ops["vs:break_gt"]["source"] + " (breakc = break_comp)")
+        if k == "opcode" and "@" not in f:
+            if f in sm_cases.OPS[m]: R(m, k, f, "legal", ops_source(ops, f))
+            else: R(m, k, f, "illegal", "R4 closed world over the instruction-page version tables (%s): %s is not listed for %s" % (ops_source(ops, f), f, m), "opcode %s is not in the %s instruction set" % (f, m))
         elif f.startswith("call@label-used"): R(m, k, f, "legal", S1 + "vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)")
         elif f in ("callnz@p0", "if@p0"): R(m, k, f, "legal", ops["%s:%s" % (st, "callnz_pred" if f[0] == "c" else "if_pred")]["source"])
         elif f in ("if@temp-written-in-branch-only", "rep@temp-written-in-loop"):

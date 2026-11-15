@@ -1,26 +1,33 @@
 """sm_cases.py - the SM1-3 universe U: yields (model, kind, feature, asm_text, legal) rows ('y' or '?').
-Legality is the D3D9 SDK instruction/register tables as remembered by the author; every pair that is not certain is '?'."""
-MODELS = ["vs_1_1", "vs_2_0", "vs_2_x", "vs_3_0", "ps_1_1", "ps_1_2", "ps_1_3", "ps_1_4", "ps_2_0", "ps_2_x", "ps_3_0"]
+The opcode universe is derived from the generated opcode table (bind); every (model, mnemonic) pair the table does not list is '?', resolved illegal by R4. Form rows (modifiers, registers) follow below."""
+import re
+def asm_op(name):
+    """the asm mnemonic form a table opcode id (st:name) is exercised through: one rule - drop the operand-class suffix (_bool/_pred),
+    fold the comparison variants onto the _gt representative (same syntax, only the comparison differs), dcl_* and texld14 are dcl/texld"""
+    if name.startswith("dcl_"): return "dcl"
+    if name == "texld14": return "texld"
+    for suf in ("_bool", "_pred"):
+        if name.endswith(suf): return name[:-len(suf)]
+    m = re.match(r"(break|if|setp)_(eq|ge|gt|le|lt|ne)$", name)
+    return m.group(1) + "_gt" if m else name
+
+def derive(ops):
+    """(MODELS, OPS, UNIVERSE) from the generated opcode table `ops` ({'vs:mov': {'models': [...]}}): nothing is listed by hand.
+    MODELS: the models the table names, vs before ps, by version. OPS[m]: the mnemonics the table lists for m. UNIVERSE: every mnemonic of any model."""
+    ms = sorted({m for v in ops.values() for m in v["models"]}, key=lambda m: (m[0] != "v", m[3], m[5].replace("x", "~")))
+    O = {m: sorted({asm_op(k.split(":")[1]) for k, v in ops.items() if m in v["models"] and k[:2] == m[:2]}) for m in ms}
+    return ms, O, sorted({o for l in O.values() for o in l})
+
+MODELS = OPS = EXTRA = None
+def bind(ops):
+    """fix the universe to the table; EXTRA[m] = the mnemonics of the universe the table does not list for m (closed world R4: illegal)"""
+    global MODELS, OPS, EXTRA
+    MODELS, OPS, uni = derive(ops)
+    EXTRA = {m: [o for o in uni if o not in OPS[m]] for m in MODELS}
 def isvs(m): return m[0] == "v"
 def ver(m): return (int(m[3]), m[5])          # ("1","1") ...
 def ge(m, v): return (m[3] + m[5].replace("x", "1")) >= v and m[:2] == m[:2]
 
-VS11 = "mov add sub mad mul rcp rsq dp3 dp4 min max slt sge exp log lit dst frc m4x4 m4x3 m3x4 m3x3 m3x2 expp logp nop def dcl".split()
-VS20 = VS11 + "abs crs lrp nrm pow sincos sgn mova call callnz loop endloop rep endrep if else endif label ret defb defi".split()
-VS2X = VS20 + "break break_gt breakp setp_gt if_gt".split()
-VS30 = VS2X + ["texldl"]
-PS11 = "add sub mad mul lrp mov dp3 cnd nop tex texcoord texkill texbem texbeml texreg2ar texreg2gb texm3x2pad texm3x2tex texm3x3pad texm3x3tex texm3x3spec texm3x3vspec def".split()
-PS12 = PS11 + "cmp dp4 texreg2rgb texdp3 texdp3tex texm3x3".split()
-PS13 = PS12 + ["texm3x2depth"]
-PS14 = "add sub mad mul lrp mov dp3 dp4 cmp cnd nop def phase texcrd texld texkill texdepth bem".split()
-PS20 = "abs add cmp crs dp2add dp3 dp4 exp frc log lrp mad max min mov mul nop nrm pow rcp rsq sincos sub texkill texld texldp texldb dcl def".split()
-PS2X = PS20 + "dsx dsy texldd setp_gt breakp break break_gt call callnz else endif endloop endrep if if_gt label loop rep ret defb defi".split()
-PS30 = PS2X + ["texldl"]
-OPS = {"vs_1_1": VS11, "vs_2_0": VS20, "vs_2_x": VS2X, "vs_3_0": VS30, "ps_1_1": PS11, "ps_1_2": PS12, "ps_1_3": PS13,
-       "ps_1_4": PS14, "ps_2_0": PS20, "ps_2_x": PS2X, "ps_3_0": PS30}
-# ops MojoShader's table allows but the SDK tables list for the other stage / lower models only: included, legal=?
-EXTRA = {"ps_2_0": "lit dst expp logp sgn m4x4 m4x3 m3x4 m3x3 m3x2".split(), "ps_2_x": "lit dst expp logp sgn m4x4 m4x3 m3x4 m3x3 m3x2".split(),
-         "ps_3_0": "lit dst expp logp sgn m4x4 m4x3 m3x4 m3x3 m3x2".split(), "vs_2_x": ["breakc"]}
 SC = {"rcp": 1, "rsq": 1, "exp": 1, "log": 1, "expp": 1, "logp": 1}
 NS = dict(mov=1, add=2, sub=2, mad=3, mul=2, rcp=1, rsq=1, dp3=2, dp4=2, min=2, max=2, slt=2, sge=2, exp=1, log=1, lit=1, dst=2, frc=1,
           expp=1, logp=1, abs=1, crs=2, lrp=3, nrm=1, pow=2, sgn=3, dp2add=3, cmp=3, cnd=3, dsx=1, dsy=1, mova=1, nop=0)
@@ -109,6 +116,7 @@ def opbody(m, op):
          "texm3x3spec": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3spec t3, t0, c0",
          "texm3x3vspec": "tex t0\ntexm3x3pad t1, t0\ntexm3x3pad t2, t0\ntexm3x3vspec t3, t0"}
     if op in T: return T[op] + "\nmov r0, t3" if "t3" in T[op] else T[op] + "\nmov r0, t2" if "t2" in T[op] else T[op] + "\nmov r0, t1", "", ""
+    if op in ("texldp", "texldb"): return f"{op} r0, t0, s0", "", ""      # ps_1_x: the op is outside the model; the text is the SM2 form on t# / s#
     raise KeyError(op)
 
 def cases():
