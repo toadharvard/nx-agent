@@ -392,39 +392,17 @@ static void emit_lines(const char *section, const std::set<std::string> &lines)
 
 /* .fnvnx.defdisp: `<asm name> <descriptor>\n` per emitted definition (any linkage, clones under their own asm name), sorted, unique.
  * The exe address is not here: exitgen joins by asm name with .fnvnx.sympair and the bound exe VA. */
-/* The row of the dispatcher's own prototype in `.fnvnx.decltype` (C units, grammar of link/ctypes_compat.py): the plugin's fact about its types.
- * The layout plugin spells what the front end declares, and this decl is not one; a unit that declares fnvnx_dispatch itself (the runtime, through
- * fnvl_host.h) already has its row, so the layout gate compares this row, in the units whose calls were rewritten, with that header's row. */
-static std::string spell(tree t)
-{
-  switch (TREE_CODE(t)) {
-  case POINTER_TYPE:
-    return std::string(lookup_attribute("fnvnx_entry", TYPE_ATTRIBUTES(t)) ? "entry:" : "") + "*" + spell(TREE_TYPE(t));
-  case FUNCTION_TYPE: {
-    std::string ps;
-    for (tree a = TYPE_ARG_TYPES(t); a && TREE_VALUE(a) != void_type_node; a = TREE_CHAIN(a))
-      ps += (ps.empty() ? "" : ",") + spell(TREE_VALUE(a));
-    return "(" + ps + ")" + spell(TREE_TYPE(t));
-  }
-  case RECORD_TYPE: {
-    std::string ms;
-    for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
-      ms += (ms.empty() ? "" : ";") + std::string(IDENTIFIER_POINTER(DECL_NAME(f))) + ":" + spell(TREE_TYPE(f));
-    return std::string("struct:") + IDENTIFIER_POINTER(TYPE_NAME(t)) + "{" + ms + "}";
-  }
-  case VOID_TYPE: return std::string(TYPE_READONLY(t) ? "const:" : "") + "void";
-  default:
-    if (TREE_CODE(t) == INTEGER_TYPE && TYPE_UNSIGNED(t) && TYPE_PRECISION(t) == 32) return "unsigned_int";
-    error("fnvnx_dispatch: no decltype spelling for a type of the site record");
-    return "?";
-  }
-}
+/* The row of the dispatcher's own prototype in `.fnvnx.decltype` (C units): the layout plugin spells what the front end declares, and this decl is
+ * not one, so the plugin spells it with the SAME function (layout/decltype_spell.inc, dl_type). A unit that declares fnvnx_dispatch itself (the runtime,
+ * through fnvl_host.h) already has its row from the layout plugin: the two rows are one function on two decls, and the layout gate compares them. */
+#include "../layout/decltype_spell.inc"
 
 static void finish_unit(void *, void *)
 {
   if (site_count && !fnvnx_cxx_fe() && !fe_declares_dispatch) {
     std::set<std::string> row;
-    row.insert("fnvnx_dispatch\t" + spell(TREE_TYPE(get_dispatch())));
+    std::vector<tree> stk;
+    row.insert("fnvnx_dispatch\t" + dl_type(TREE_TYPE(get_dispatch()), stk));
     emit_lines(".fnvnx.decltype", row);
   }
   emit_lines(".fnvnx.disp", descs);

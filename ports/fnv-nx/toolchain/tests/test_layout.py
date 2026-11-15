@@ -192,8 +192,8 @@ def vec(obj, td):
           got['n_s32'] == got['g_s4'] and got['g_s4'] != got['g_u4'] and got['g_s4'] != got['g_s2'] and got['g_s4'] != got['g_d2'], got)
     codes = tcc_type_codes()
     check('tcc_type universe is read from the pinned headers (32 codes at GCC 13.3)', len(codes) == 32, sorted(codes))
-    src = open(os.path.join(HERE, '..', 'layout', 'fnvnx_layout.cc')).read()
-    body = src[src.index('static std::string dl_type('):src.index('static void emit_decltype')]
+    body = open(os.path.join(HERE, '..', 'layout', 'decltype_spell.inc')).read()   # dl_type, the one spelling function (shared with fnvnx_dispatch)
+    body = body[body.index('static std::string dl_type('):]
     cases = set(re.findall(r'case (\w+):', body))
     check('every tcc_type code has one outcome (row or error)', codes == TCC_TYPE_ROW | set(TCC_TYPE_ERROR), sorted(codes ^ (TCC_TYPE_ROW | set(TCC_TYPE_ERROR))))
     check('the row codes are exactly the cases of dl_type', {c for c in cases if c.endswith('_TYPE')} == TCC_TYPE_ROW, sorted(cases))
