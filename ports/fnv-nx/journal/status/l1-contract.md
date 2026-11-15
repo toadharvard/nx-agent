@@ -1687,3 +1687,4 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Certified iff the named gate is green in the same verdict, with its universe hash, and a call-graph proof that every caller of the site's entry gets its input only from producers in that universe.
   - Product only after every dynamic GetProcAddress site is resolved.
   - The sm_link row in reach_requests.tsv goes in cand4. w6 (L6A) wires the gl4_shader.c sites.
+  - gl4 universe tie (L6A w6 census 8e94c389a): translator path, gl4shim progs (5 rows), and SHADER_CREATE from the 4 ffp_glsl.gen.h blobs. The tie is derived by data flow; the census is the selftest's expected answer. Given to w12.
