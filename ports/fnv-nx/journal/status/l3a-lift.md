@@ -1190,3 +1190,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - Check: every root is valid, and one shard is byte-identical to 80832d8b5's.
 - Open: w7 (memo fix and pcsrc), w13 (jtab), w12 (FTOI and the b3c farm brief), L1 w15 (cand3 head to w8).
 - bottleneck: the liftsrc root is red on gen:foreign-import (L3a w8 + L1), then the relift at the w7 memo fix.
+
+## 2026-11-15 00:50
+- base3 6d84f3a10 (w8): the recipe writer moves from tools/liftgen.py to the new tools/liftrecipe.py, so liftgen's stage code no longer imports verify/recipe. test_liftgen_recipe passes; test_prelude and test_pack_modtable have 0 failures.
+  - The shard's import closure is lift/tools, lift/fnvlift and lift/proof, all of them declared inputs.
+- The rest of the liftsrc red (2,652 gen:foreign-import lines) is an L1 bug: in recipe.py foreign_imports (line 691, `or True`), the imported NAME of a relative from-import is always taken as a submodule path. I sent the rule and the check to the L1 lead; w8 rechecks when the fix lands. Status: blocked on L1.
+- rcptab.c: L3b also holds the certified bytes (799f3a4e2). The rcpgen byte-equality check runs on L3b farm 1 at b39f131e4.
+- bottleneck: the L1 foreign_imports fix, then the liftsrc check, then the relift at w7's memo fix.
