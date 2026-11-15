@@ -1730,8 +1730,47 @@ def resolve_input(root, ref, repo=".", cache=None, rec=None):
         rel = posixpath.join(root, p)
         if not subprocess.run(["git", "-C", repo, "ls-files", "--error-unmatch", "--", rel], capture_output=True).returncode == 0:
             raise ValueError("%s: input path %r is not tracked" % (root, p))
+        if os.path.isdir(full):
+            return _tracked_dir(repo, rel, cache)
         return full, rel
     return full, "%s:%s" % (e["tree_sha256"], p)
+
+
+def _tracked_dir(repo, rel, cache):
+    """A tracked directory REF: a materialised copy in CACHE holding exactly `git ls-files` under REL (an untracked file inside is not in the copy,
+    so it is never read), written from the blobs. -> (copy path, ident); the ident carries sha256 over (path, blob sha) of those files, so editing
+    a tracked file inside changes it. The one rule of the reader; the generator-input mount calls resolve_input too."""
+    if cache is None:
+        raise ValueError("input directory %r needs the gate cache to materialise its tracked files" % rel)
+    out = subprocess.run(["git", "-C", repo, "ls-files", "-s", "-z", "--", rel], capture_output=True, check=True).stdout.decode()
+    files = []
+    for ent in filter(None, out.split("\0")):
+        meta, _, path = ent.partition("\t")
+        mode, sha, _stage = meta.split()
+        if mode == "120000":
+            raise ValueError("input directory %r holds the symlink %r" % (rel, path))
+        files.append((path, sha, mode))
+    h = hashlib.sha256()
+    for path, sha, _ in files:
+        h.update(path.encode() + b"\0" + sha.encode() + b"\n")
+    d = h.hexdigest()
+    dest = os.path.join(cache, "dirs", d, rel)
+    if not os.path.isdir(dest):
+        tmp = os.path.join(cache, "dirs", d + ".tmp%d" % os.getpid())
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.makedirs(os.path.join(tmp, rel))
+        for path, sha, mode in files:
+            q = os.path.join(tmp, path)
+            os.makedirs(os.path.dirname(q), exist_ok=True)
+            with open(q, "wb") as fh:
+                fh.write(subprocess.run(["git", "-C", repo, "cat-file", "blob", sha], capture_output=True, check=True).stdout)
+            if mode == "100755":
+                os.chmod(q, 0o755)
+        try:
+            os.rename(tmp, os.path.join(cache, "dirs", d))
+        except OSError:   # another process materialised the same content first
+            shutil.rmtree(tmp, ignore_errors=True)
+    return dest, "%s@%s" % (rel, d)
 
 
 CPU_FIELDS = {"vendor_id": "vendor_id", "family": "cpu family", "model": "model", "stepping": "stepping", "microcode": "microcode", "model_name": "model name"}
