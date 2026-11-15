@@ -406,6 +406,19 @@ def main():
 
     later(link_roots)
 
+    def host_in_guest_link():
+        """the plugin set is the target profile's (RECIPE.md "Plugins"): a host-profile object never enters a guest image, so a guest link.roots naming a host root is red"""
+        hp = make_repo("hg")
+        roots = dict(recipe.load_admit(hp))
+        roots[ROOT] = dict(roots[ROOT], target="guest")
+        roots[LIB] = {"path": LIB, "class": "product", "target": "host", "recipe": LIB + "/build.json"}
+        e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
+        check("target profile: a guest image whose link.roots names a root of the host profile is red", any("link.roots" in x and "'host'" in x for x in e), e)
+        roots[ROOT] = dict(roots[ROOT], target="host")
+        e = recipe.check(mut(link=dict(RECIPE["link"], roots=[LIB])), ROOT, recipe.tracked(hp), roots, None, hp)
+        check("target profile: the same link of a host image has no target error", not any("link.roots" in x and "'host'" in x and "has target" in x for x in e), e)
+    later(host_in_guest_link)
+
     def declared_outputs():
         """the build result lists each declared output as {path, sha256}: the file is in the out dir and its hash is the file's"""
         orec = mut(outputs={"genh": RECIPE["generated"][0]["outputs"][0]})
