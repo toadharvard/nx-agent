@@ -254,3 +254,8 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - bootguest is one build: 36 mode functions, one fnvboot_modes[] table read from the ELF; 1253 → 124 lines; no mode needs its own build.
   - Found and fixed: m56 used the removed FnvnxWireAddrinfo.
   - Rejected: setting the mode by patching a .data word of the linked image (the run would not be the recipe product). The channel is the declared mode file on the run's fs root, and expected handle ids are derived from the machine's allocation rule.
+- 01:28:
+  - Task S is done, w7-s 99480e0d4. hostabirec reads string macros (sdlayout.h, hostvm.h; A8 closed). The fonts mount comes from fonts_mirror.json via recipe.fetch_externals and is mounted at FNVNX_SD_FONTS. bootdecl's own git fetch, SHA256SUMS and boot_inputs.json are deleted (C3 closed).
+  - Tests: test_hostabirec 12, bootpath 54, bootinputs 75, oracle 83 are green.
+  - Open: the "fnvnx/game" alias (L5 header name); m61 literal (w6).
+  - Loader tables are generated stages (L1 w12L2 a7c657f56); w6 merges them and relinks with the private externals from the cache.
