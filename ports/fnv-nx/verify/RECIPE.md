@@ -74,6 +74,11 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `plugins`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
+**The plugin set belongs to the target profile, not to the language.** The guest profile requires the full set (`PLUGIN_SOURCES`, in load order), for C and C++ alike. The host
+profile (`"profile": "host"`) has the empty set, and a host root is required to load none: the plugins enforce guest-ABI semantics (msvcmodel, x86 TSO as `ldar`/`stlr`, MSVC
+argument order, `_ftol` conversion, layout records) that a host object does not have, and they are built against the aarch64 compiler's plugin headers. The set cannot leak
+across targets because a host object never enters a guest image: `link.roots` of a guest image that names a root of another target is red (`resolve_link_root`), so every object in
+a guest link closure was compiled with the full set. (Selftests: tests/test_plugins.py, tests/test_recipe.py "target profile".)
 `fnvnx_ftoi` is one plugin, class C (float -> integer), two modes chosen by the root's `cxx_origin` and never declared freely: `recipe.plugin_args(cxx_origin)` gives `mode=native`
 (the MSVC `_ftol` rewrite, skipped inside functions with `__attribute__((fnvnx_f2i))`, which the plugin registers), `mode=lifted` for a lifted origin (no rewrite; a
 conversion, conversion builtin or float-reading asm outside an `fnvnx_f2i` function is an error). The recipe adds `-fplugin-arg-fnvnx_ftoi-out=/out/unit.f2i.json` to every
@@ -249,9 +254,9 @@ Readers of the record: gate_tlsmodel (the relocations of the linked ELF), contra
 - The stage sees only: the artifact at `/art/OUTPUT`; the declared `inputs` (a repo-relative tracked file or directory of an admitted root, git ls-files only, like a generator input; or `{external, path}` /
   `{stage, path}`, read by resolve_input) at `/in/1`, `/in/2`, ... in list order; the union of the installed files of the declared debs at `/deb/<absolute path>` (`base-files`, the machine's root layout, is implicit in every run stage; two debs shipping one path with different content are red); its `/out`.
   The root is read-only, `/tmp` and `/work` are not writable. `debs` are names of `env.json` `debs.packages`; an undeclared name is red (check).
-- An artifact with a PT_INTERP is started through the file at that path in the union (`/deb/<PT_INTERP>`, the symlink members of the debs
-  followed; the usr-merge links come from base-files' own symlink members, nothing is listed by hand; a PT_INTERP no declared deb provides is red), with `--library-path` over the declared debs'
-  `lib/x86_64-linux-gnu` and `usr/lib/x86_64-linux-gnu`. A PT_INTERP that no declared deb provides is red; no loader path is hard-coded.
+- An artifact with a PT_INTERP is started through the file at that path inside a declared deb (`/deb/<name>/<PT_INTERP>`, the deb's own symlinks
+  followed across the union of the declared debs by `deb_resolve`: the usr-merge links are a fact of the declared system, shipped by `base-files`, so a run stage lists `base-files` in `debs`; without it a PT_INTERP such as `/lib64/ld-linux-x86-64.so.2` is red), with `--library-path` over the declared debs'
+  `lib/x86_64-linux-gnu` and `usr/lib/x86_64-linux-gnu`. A PT_INTERP that the declared debs do not provide is red; no loader path is hard-coded.
 - `"host_cpu": "cpuref"` (optional): the pin `verify/cpuref.json` {vendor_id, family, model, stepping, microcode, model_name} (the /proc/cpuinfo fields,
   ints as numbers; a null value means the field is ABSENT from /proc/cpuinfo (a VM has no microcode line), never a wildcard) is in the stage key. Before a stage that is not a cache hit runs, every processor of /proc/cpuinfo must equal the pin, else the stage
   is red (no fallback); a cache hit is served on any host.
@@ -287,8 +292,16 @@ a root without variants keeps its keys), its objects are stored at `GATE_CACHE/o
 `root: "root@NAME"`. `link.roots` entries may be `root@NAME` (the variant must exist). The gates that quantify over product roots (`gate_build.product_roots`)
 quantify over the pairs: build, determinism, objstub, linkstrict, argorder, contract's per-root gates.
 
+## Include
+`include` is the unit's include path in order. A repo directory of it that lies in another admitted product root P (with a recipe for the unit's target) also brings
+P's own repo directories of `include`, transitively, after the consumer's own and each once (`recipe.include_closure`): a header that P ships names its dependencies once,
+in the recipe of P, and every consumer finds them. The entries of P's `include` that lie in an external are P's toolchain and are not carried. A header root
+(class header) has no recipe and carries nothing; a header it includes from another root is named by the consumer.
+
+**Header home.** A directory of a root of class `header` is a valid `include` entry of a root of every target, guest and host alike (`recipe.header_dirs` and the include check are one rule). A product root's own tree is a home only for the targets it has a recipe for; a tool or doc root is no home. A header root's headers may read only header roots and externals.
+
 ## Outputs and uses
-`outputs: {NAME: a path in generated[].outputs of this root}` declares what other roots may take. `uses: [{"root": R, "output": NAME}]` (R any admitted
+`outputs: {NAME: a path in generated[].outputs of this root}` declares what other roots may take; the build result lists each as `outputs: {NAME: {path, sha256}}`, a file of the out dir (`OUT/outputs/<path>`) and its hash. `uses: [{"root": R, "output": NAME}]` (R any admitted
 root with a recipe that declares NAME) makes that output an input of this root's stages: the `generated` stages and the preprocessing stages mount it
 read-only at `/uses/<R>/<NAME>` (the compile stage mounts nothing of it). The producer's generate stages run (content-keyed, cache hits) and the output file
 is ingested; the consumer's stage key holds the file's content hash, not a path and not the producer's keys: a producer change that leaves the output
@@ -309,7 +322,7 @@ not declare, a path that is no file inside the external (`..` included), a `.` p
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
 
 ### Objects selected by declaration (`objects_of` with `target`, `origin`)
-`objects_of: {"except": [R...], "target": "guest"|"host", "origin": "native"|"lifted"}`: `target` and `origin` (both optional) select the admitted product roots by their
+`objects_of: {"target": "guest"|"host", "origin": "native"|"lifted"}`: `target` and `origin` (both optional) select the admitted product roots by their
 admit.json declaration: `target` equals the entry's `target`, `origin` is `origin_class(cxx_origin)` (native = `"native"` or undeclared, lifted = `{lifted_by, pack}`). A selecting stage
 also leaves out every root that depends on the producing root through `link.roots`, the declared loader or `uses`, transitively (`depends_on`), so the consumer of the
 stage's output is never in its input set: no `except` list and no cycle. `contract/facts` selects `{"target": "guest", "origin": "native"}` (the native roots' objects, whose
@@ -320,17 +333,19 @@ stage's output is never in its input set: no `except` list and no cycle. `contra
 `{target: guest, origin: native, dependents_of: contract/facts}` and proves (`nobinding.py`: bind over those objects with facts' `n1` output, red on any bound symbol)
 that the roots facts leaves out contribute no row to `native.tsv`; it cannot be a stage of facts itself (those roots' builds need `native`: a cycle).
 
-### Objects of every admitted product root (`objects_of`) and `forbid_sections`
-A generate stage may carry `objects_of: {"except": [R...]}` (every R an admitted product root). Its inputs then hold, at `/objs/<root with / as __>/<unit>.o`,
-the objects of every admitted product root with a recipe except the root itself and the R listed: the set is read from admit.json at the commit, so a
-newly admitted root enters the next build and no list names it. Each such root is built as a product root and must be green (else red, stage
-`objects_of:<root>`); the stage key holds the objects' content. A root that takes such a fact through `uses` is in the producer's reading set, so it must be
-in `except` (else the cycle check is red), and it must carry `forbid_sections: [".name", ...]`: an object of the root with a named section is red (stage
-`forbid:<root>`). The exception then loses nothing: the excepted root cannot hold what the fact collects.
+### Objects of every admitted product root (`objects_of`): the fact universe
+A generate stage may carry `objects_of: {...}` (every key optional: `target`, `origin`, `dependents_of`, `section`). Its inputs then hold, at `/objs/<root with / as __>/<unit>.o`,
+the objects of the stage's **fact universe**: every admitted product root with a recipe except the root itself and every root that depends on it (`depends_on`:
+`link.roots`, the declared loader, `uses` and `objects_of`, transitively), the consumers of the fact. The universe is a rule over admit.json and the uses graph at
+the commit: a newly admitted root enters the next build, and no recipe excludes a root by name (a key `except` is a check error). Each universe root is built as a
+product root and must be green (else red, stage `objects_of:<root>`); the stage key holds the objects' content.
+`section` (not with `dependents_of`) names the fact section the stage collects. The build appends `--section NAME` to the tool's arguments: the recipe is the one place the
+name is written. A root that depends on the producer is outside its universe, so its objects can contribute nothing to the fact; therefore the build requires that none of
+its objects holds the section, red stage `forbid:<root>` (`recipe.fact_sections`, derived from the admitted recipes: no recipe names the section for the consumer).
 `lift/descs` is this rule's first use: its tool collects the `.fnvnx.disp` sections (one `conv:ret:args` descriptor per line, sorted, unique per object,
 LF-terminated, ASCII; an absent section is no indirect call) into the sorted union `descs.tsv`, output `descs`. A malformed section is red at the
-generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`),
-is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
+generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`);
+it is outside the universe because it uses descs, and the build forbids `.fnvnx.disp` in its objects.
 
 ### errno (objstub, derived, no recipe key)
 How the root's libc reaches `errno` is derived per root: objstub compiles `#include <errno.h>` / `int f(void){return errno;}` with the root's own C compiler and unit flags and reads the object (`errno_probe`): a call relocation to a symbol X is the accessor, a TLS relocation to Y is the thread-local form. The final ELF is then judged (rule I, `image_check`): a function body of the image whose whole effect is `errno = constant; return constant` is the finding `fixed-failure`, whether it is ours or comes from an archive member (a weak fallback a strong definition replaced is not in the image). A body that cannot be judged (a data island, a word LLVM rejects, an odd size) is the finding `unjudged`; the TLS form is `unjudged` for the root. Nothing is skipped.

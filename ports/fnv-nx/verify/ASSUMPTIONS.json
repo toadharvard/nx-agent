@@ -136,6 +136,18 @@
   {
    "id": "ASM-800",
    "aliases": []
+  },
+  {
+   "id": "ASM-628",
+   "aliases": [
+    "L6:census#37"
+   ]
+  },
+  {
+   "id": "ASM-629",
+   "aliases": [
+    "L6:census#38"
+   ]
   }
  ],
  "entries": [

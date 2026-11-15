@@ -68,7 +68,7 @@ def _plugin_cxx():
 
 PLUGIN_CXX = _plugin_cxx()
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "variants", "profile", "outputs", "uses", "sources", "forbid_sections", "error_abi", "empty_handlers", "external_errors", "tests", "run"}
+        "plugins", "variants", "profile", "outputs", "uses", "sources", "error_abi", "empty_handlers", "external_errors", "tests", "run"}
 VARIANT_KEYS = {"compiler", "flags", "link", "flags_add", "defines_add"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system) and its two deltas
 VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of the root (RECIPE.md, "Profiles")
 PROFILES = ("guest", "host")
@@ -105,9 +105,9 @@ def plugin_decls(names, origin):
 
 
 def origin_class(origin):
-    """"lifted" iff the declared `cxx_origin` ORIGIN is a lifted declaration ({"lifted_by", "pack"}), else "native" (also for no origin): the one
+    """"lifted" iff the declared `cxx_origin` ORIGIN is a lifted declaration (lifted_origin: {"lifted_by", "pack"} or {"lifted_by", "stage"}), else "native" (also for no origin): the one
     place the origin's class is read (the class name "lifted" itself is accepted, for the CLI); plugin_args and semantics_set are functions of it."""
-    return "lifted" if origin == "lifted" or (isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}) else "native"
+    return "lifted" if origin == "lifted" or lifted_origin(origin) else "native"
 
 
 def semantics_set(origin):
@@ -135,7 +135,6 @@ import targets as _targets  # noqa: E402  (the declared targets: verify/targets.
 SEMANTICS_FLAGS = tuple(_targets.semantic_prefix(_targets.load())) + tuple(_sem["common"])   # every guest root (native, decomp, lifted)
 SEMANTICS_LIFTED = SEMANTICS_FLAGS + tuple(_sem["lifted_extra"])   # a root whose cxx_origin is a lifted declaration: the common set plus what the lifter's code is built under
 SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
-SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
 # What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
@@ -432,7 +431,7 @@ def with_guest_link(rec, root, roots, repo):
     """The recipe a guest root is BUILT with: its `link` gets script (by repo path, a tool-tree file) and libs from the guest link profile.
     A host root, a root without link, or a checkout without a profile: REC unchanged."""
     lk, prof = rec.get("link"), load_guest_link(repo)
-    if not (isinstance(lk, dict) and prof and roots.get(root, {}).get("target") == "guest"):
+    if not (isinstance(lk, dict) and prof and entry_of(roots, root).get("target") == "guest"):
         return rec
     return dict(rec, link=dict(lk, script=TREE + "/" + prof["script"], libs={"external": load_pin(repo)["runtime"]["name"], "derive": True}))
 
@@ -494,13 +493,30 @@ def profile_fields(profile, pin):
             "external": [dict(ex), dict(pin["runtime"])]}, []
 
 
+COMPILE_KEYS = ("compiler", "flags", "include", "units", "link", "profile", "variants")
+
+
+def generated_only(rec):
+    """A recipe of generated stages only (RECIPE.md "Generated-only roots"): `generated` is a non-empty list and none of the keys that compile or link
+    (COMPILE_KEYS) is written. Such a root has no unit (check refuses a translation unit in it), so it needs no compiler and no flags."""
+    return isinstance(rec, dict) and bool(rec.get("generated")) and not any(k in rec for k in COMPILE_KEYS)
+
+
+def fill_generated_only(rec):
+    """REC of a generated-only root with the fields every reader expects, empty: no unit is compiled, so the compiler named (the host profile's) is
+    never run and no flag is ever passed. Any other recipe: REC unchanged."""
+    if not generated_only(rec):
+        return rec
+    return dict(rec, units="all", include=[], flags={"c": [], "cxx": [], "asm": []}, compiler=profile_fields("host", None)[0]["compiler"])
+
+
 def expand_profile(rec, pin):
     """REC with its `profile` expanded: the profile's fields (profile_fields) in place of the keys the root does not write. A root that names a
     profile writes none of `compiler` and `plugins` (restating a profile field is red); its `external` lists only the externals the profile does not
     carry, which follow the profile's own in the expanded list. The expanded recipe has no `profile` key, so expansion is idempotent and every stage key is a
     function of the expanded values alone. -> (recipe, errors)."""
     if not isinstance(rec, dict) or "profile" not in rec:
-        return rec, []
+        return fill_generated_only(rec), []
     fields, err = profile_fields(rec["profile"], pin)
     if fields is None:
         return rec, err
@@ -710,7 +726,7 @@ def emulation_flags(toks, kind="pie"):
     return err
 
 
-OBJECTS_OF_KEYS = {"except", "target", "origin", "dependents_of"}
+OBJECTS_OF_KEYS = {"target", "origin", "dependents_of", "section"}
 OBJECTS_OF_ORIGINS = ("native", "lifted")
 
 
@@ -732,22 +748,40 @@ def depends_on(cand, root, roots, repo, seen=()):
 
 
 def objects_of_roots(rec, root, roots, repo=None):
-    """The roots whose objects the generate stages of REC read (`objects_of`): every admitted product root with a recipe, except ROOT itself and
-    the roots a stage's `except` names. Sorted. A rule over the admitted set, not a list: a new product root is read by the next build.
-    A stage with `target` and/or `origin` selects by the admit.json declaration, never by a name: `target` equals the root's `target`, `origin` is
-    the class of its `cxx_origin` (origin_class: "native" = native or undeclared, "lifted" = {lifted_by, pack}). A selecting stage also leaves out
-    every root that depends on ROOT (depends_on: `link.roots`, `uses`, the loader), so the consumer of this root's output is never in its input set
-    and there is no cycle; that needs REPO (the recipes are read from it)."""
+    """The roots whose objects the generate stages of REC read (`objects_of`): the FACT UNIVERSE of the stage, every admitted product root with a recipe
+    except ROOT itself and every root that depends on ROOT (depends_on), the consumers of the fact. Sorted. A rule over the admitted set and the uses graph,
+    not a list: a new product root is read by the next build, and no name is excluded.
+    A stage with `target` and/or `origin` narrows the universe by the admit.json declaration, never by a name: `target` equals the root's `target`, `origin` is
+    the class of its `cxx_origin` (origin_class: "native" = native or undeclared, "lifted" = {lifted_by, pack}). The consumers of ROOT (depends_on:
+    `link.roots`, `uses`, the loader, `objects_of`) are never in the universe, so there is no cycle; that needs REPO (the recipes are read from it)."""
     out = set()
     for g in rec.get("generated", []) if isinstance(rec.get("generated"), list) else []:
         oo = g.get("objects_of") if isinstance(g, dict) else None
         if isinstance(oo, dict):
-            ex = set(oo.get("except", [])) if isinstance(oo.get("except"), list) else set()
             sel = [k for k in ("target", "origin") if k in oo]
             dep = oo.get("dependents_of")   # the complement of a producer's selection: only the roots that depend on DEP (the checker of what the producer left out)
-            out |= {r for r, e in roots.items() if e.get("class") == "product" and e.get("recipe") and r != root and r not in ex
+            out |= {r for r, e in roots.items() if e.get("class") == "product" and e.get("recipe") and r != root
                     and all((e.get("target") == oo["target"]) if k == "target" else (origin_class(e.get("cxx_origin")) == oo["origin"]) for k in sel)
-                    and (repo is None or (depends_on(r, dep, roots, repo) if dep else not (sel and depends_on(r, root, roots, repo))))}
+                    and (repo is None or (depends_on(r, dep, roots, repo) if dep else not depends_on(r, root, roots, repo)))}
+    return sorted(out)
+
+
+def fact_sections(root, roots, repo):
+    """The sections ROOT's objects must not hold: the `objects_of.section` of every admitted root P with a recipe that ROOT depends on (depends_on: P's fact
+    is an input of ROOT, so ROOT is outside P's universe and its objects can contribute nothing to the fact). Derived from the admitted recipes and the uses
+    graph at REPO; no recipe names a root or a section for this (rule 2)."""
+    out = set()
+    for p, e in roots.items():
+        if p == root or not e.get("recipe") or not depends_on(root, p, roots, repo):
+            continue
+        try:
+            rec = json.load(open(os.path.join(repo, e["recipe"])))
+        except (OSError, ValueError):
+            continue
+        for g in rec.get("generated", []) if isinstance(rec, dict) and isinstance(rec.get("generated"), list) else []:
+            oo = g.get("objects_of") if isinstance(g, dict) else None
+            if isinstance(oo, dict) and isinstance(oo.get("section"), str):
+                out.add(oo["section"])
     return sorted(out)
 
 
@@ -877,8 +911,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo, files=(), variant="", se
                 err.append("link.roots: %s has no variant %r (the one of target %r that admit.json declares)" % (dr, split_spec(rs)[1], rent.get("target")))
             elif dv and dv not in variant_names(drec, ent):
                 err.append("link.roots: %s has no variant %r" % (dr, dv))
-            elif dv and rent.get("class") != "test":
-                err.append("link.roots: %s is a variant: only a test root (class test) links a variant; a product image links base roots" % d)
+            elif dv and rent.get("class") != "test" and dv not in own_recipes(ent):
+                err.append("link.roots: %s is a flags variant (sanitizer or the like): only a test root (class test) links one; a product image links base roots "
+                           "and the per-target variant of its own target (admit.json recipe {guest, host})" % d)
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
     if "loader" in lk:
@@ -939,6 +974,8 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
         dirs.update(d for d in inc if isinstance(d, str) and not d.startswith("/"))
     add(rec.get("include") if isinstance(rec.get("include"), list) else [])
     for p, r in roots.items():
+        if r.get("class") == "header":
+            dirs.add(p)   # a header root is a home for every target
         if r.get("class") == "product" and tg in targets_of(r):
             dirs.add(include_dir(roots, p))
             for path in [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]:
@@ -948,6 +985,35 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
                 except (OSError, ValueError, KeyError, TypeError, AttributeError):
                     pass
     return sorted(dirs)
+
+
+def include_closure(inc, root, roots, repo, tg, variant_rec=None):
+    """The include path of a unit of ROOT (RECIPE.md "Include"): the recipe's `include` list, then, for every repo directory D of it that lies in another admitted
+    product root P with a recipe for the target TG, the repo directories of P's own `include`, transitively and in that order, each once. A header that P's
+    headers include is found by every consumer of P's headers (a header names its own dependencies once, in the recipe of the root that ships it); the entries
+    of a root's `include` that lie in an external are the root's private toolchain and are not carried. -> [dir]"""
+    out, seen = list(inc), set(inc)
+    todo = [d for d in inc if isinstance(d, str) and not d.startswith("/")]
+    while todo:
+        d = todo.pop(0)
+        for p, r in roots.items():
+            if p == root or r.get("class") != "product" or tg not in targets_of(r) or not under(d, p):
+                continue
+            paths = [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]
+            for path in paths:
+                if not isinstance(path, str):
+                    continue
+                try:
+                    with open(os.path.join(repo, path)) as f:
+                        more = json.load(f).get("include") or []
+                except (OSError, ValueError, AttributeError):
+                    continue
+                for m in more:
+                    if isinstance(m, str) and not m.startswith("/") and m not in seen:
+                        seen.add(m)
+                        out.append(m)
+                        todo.append(m)
+    return out
 
 
 def run_errors(rec, root, files, roots, mine, seen, repo):
@@ -1020,6 +1086,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     if not isinstance(rec, dict):
         return ["recipe is not a JSON object"]
     err = ["unknown key %r" % k for k in sorted(set(rec) - KEYS)]
+    gonly = generated_only(rec)
     if "profile" in rec:
         ent0 = roots.get(root, {})
         want = (entry_of(roots, root + "@" + variant) if variant else ent0).get("target")
@@ -1061,6 +1128,9 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err.append('units must be "all" (no tracked source file can be left out)')
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     gen = generated_outputs(rec)
+    if gonly:   # no compiler and no flags are written: the root compiles nothing
+        err += ["generated-only root: %s is a translation unit (a root with units writes compiler, flags, include and units)" % u
+                for u in sorted(mine | set(gen)) if u.endswith(CC_EXT + CXX_EXT + ASM_EXT)]
     comp, exts, ats = rec.get("compiler"), rec.get("external", []), []
     if not isinstance(exts, list):
         err.append("external must be a list")
@@ -1105,10 +1175,10 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             continue
         if not rel_ok(d) or tree_of(roots, d) is None:
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
-        elif not under(d, root) and not any(under(d, r) and roots[r].get("class") == "product" and tg in targets_of(roots[r]) for r in roots):
+        elif not under(d, root) and not any(under(d, r) and (roots[r].get("class") == "header" or roots[r].get("class") == "product" and tg in targets_of(roots[r])) for r in roots):
             # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
             # the units that read them), never in a doc or tool root or a root of the other target
-            err.append("include %r lies in no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
+            err.append("include %r lies in no admitted header root and no product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
                        % (d, tg))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
@@ -1128,12 +1198,13 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err.append("generated[%d] needs exactly tool, args, inputs, outputs (and optionally objects_of)" % i)
             continue
         oo = g.get("objects_of")
-        if "objects_of" in g and not (isinstance(oo, dict) and set(oo) <= OBJECTS_OF_KEYS and isinstance(oo.get("except", []), list)
-                                      and all(isinstance(r, str) and r in roots and roots[r].get("class") == "product" for r in oo.get("except", []))
+        if "objects_of" in g and not (isinstance(oo, dict) and set(oo) <= OBJECTS_OF_KEYS
+                                      and (oo.get("section") is None or (isinstance(oo["section"], str) and re.fullmatch(r"\.[A-Za-z0-9._-]+", oo["section"]) and "dependents_of" not in oo))
                                       and oo.get("target", "guest") in GUEST_TARGETS and oo.get("origin", "native") in OBJECTS_OF_ORIGINS
                                       and ("dependents_of" not in oo or (oo["dependents_of"] in roots and oo["dependents_of"] != root))):
-            err.append('generated[%d].objects_of must be {"except": [admitted product roots], "target": guest|host, "origin": native|lifted, "dependents_of": another admitted root} '
-                       '(the rest optional: select by declaration; dependents_of takes only the roots that depend on that root)' % i)
+            err.append('generated[%d].objects_of must be {"target": guest|host, "origin": native|lifted, "dependents_of": another admitted root, "section": ".name"} '
+                       '(all optional: the universe is every product root but the consumers of this root; target and origin narrow it by declaration, dependents_of takes only the '
+                       'roots that depend on that root, section names the fact section the consumers must not hold; no root is excluded by name)' % i)
         t, ins, outs = g["tool"], g["inputs"], g["outputs"]
         owner = next((r for r in roots if isinstance(t, str) and tree_of({r: roots[r]}, t)), None)
         if not (isinstance(t, str) and t in files and t.endswith(".py") and owner and roots[owner]["class"] in ("tool", "product")):
@@ -1165,9 +1236,6 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             seen.add(o)
     err += run_errors(rec, root, files, roots, mine, seen, repo)
     err += uses_errors(rec, root, roots, repo)
-    fs = rec.get("forbid_sections")
-    if fs is not None and not (isinstance(fs, list) and fs and all(isinstance(n, str) and re.fullmatch(r"\.[A-Za-z0-9._-]+", n) for n in fs)):
-        err.append("forbid_sections must be a non-empty list of section names (.name)")
     ea, ident = rec.get("error_abi"), lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x)
     if ea is not None and not (isinstance(ea, dict) and ident(ea.get("fail")) and (
             (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
@@ -1291,7 +1359,9 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
-    if origin == "native":
+    if origin == "native" and ent.get("target") != "guest":
+        pass   # the plugin set belongs to the TARGET PROFILE, not to the language (RECIPE.md "Plugins"): the host profile has the empty set (the plugins enforce guest-ABI semantics a host object does not have), so nothing is required of it
+    elif origin == "native":
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))
@@ -1299,7 +1369,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
         # fnvnx_sdd needs the define and -fno-devirtualize; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root
-        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
+        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_DEFINE,) if f not in fl]
     elif lifted_origin(origin):
         tool, pack, stage = origin["lifted_by"], origin.get("pack"), origin.get("stage")
         for n in ("fnvnx_ftoi",):   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
@@ -1716,7 +1786,7 @@ class Job:
 
     def run_one(self, ws, i, g):
         """Stage `run:<root>:<name>`: executes the artifact (the linked output of an admitted root) in the sandbox. It sees the artifact at /art/<output>,
-        the declared inputs at /in/<ident>, the union of the declared debs' installed files (base-files implicit) at /deb/<absolute path>, and writes /out. Key = artifact
+        the declared inputs at /in/<ident>, each declared deb's installed files at /deb/<name>/<absolute path>, and writes /out. Key = artifact
         content + input contents + deb sha256 (env.json) + argv. A nonzero exit, an undeclared or a missing output is red."""
         aroot, aout = g["artifact"].split(":", 1)
         tmp = tempfile.mkdtemp(dir=ws)
@@ -1736,24 +1806,21 @@ class Job:
                 ins.append({"at": at, "tree": cas.ingest(host, self.store)})
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")) as f:
             pk = json.load(f)["debs"]["packages"]
-        decl = [MACHINE_LAYOUT_DEB] + [d for d in g["debs"] if d != MACHINE_LAYOUT_DEB]   # base-files is the machine's root layout: implicit in every run stage
-        for d in decl:
+        for d in g["debs"]:
             if d not in pk:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": ["deb %s is not declared in env.json debs.packages" % d]})
-        union = os.path.join(tmp, "deb")
-        for d in decl:
-            self._deb_into(union, d, pk[d])
-        ins.append({"at": "/deb", "tree": cas.ingest(union, self.store)})
-        env = {"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "PATH": "/deb/usr/bin",
-               "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(decl))}   # the deb sha256s are in the key
+            ins.append({"at": "/deb/" + d, "tree": self._deb_tree(tmp, d, pk[d])})
+        env = {"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "PATH": "/deb",
+               "FNVNX_DEBS": ";".join("%s=%s" % (d, pk[d]["sha256"]) for d in sorted(g["debs"]))}   # the deb sha256s are in the key
         argv = ["/art/" + aout] + g["args"]
         interp = elf_interp(r["elf"]["path"])
-        if interp:   # started through the file at its PT_INTERP path in the union of the declared debs, their symlink members followed (kernel and host alike)
-            if not resolves_in(union, interp):
+        if interp:   # started through the file at its PT_INTERP path inside a declared deb (the deb's own symlinks followed; no alias is relied on)
+            home = deb_resolve(interp, tmp, g["debs"])
+            if not home:
                 raise BuildRed({"stage": "run:%s:%s" % (self.root, g["name"]), "exit": None, "stderr": [
-                    "%s has PT_INTERP %s: no declared deb provides that file (declared: %s)" % (g["artifact"], interp, ", ".join(decl))]})
-            lp = ["/deb/lib/x86_64-linux-gnu", "/deb/usr/lib/x86_64-linux-gnu"]
-            argv = ["/deb" + interp, "--library-path", ":".join(lp)] + argv
+                    "%s has PT_INTERP %s: the declared debs %s do not provide that file (followed through the symlinks they ship)" % (g["artifact"], interp, sorted(g["debs"]))]})
+            lp = [os.path.join("/deb", d, "lib", "x86_64-linux-gnu") for d in g["debs"]] + [os.path.join("/deb", d, "usr", "lib", "x86_64-linux-gnu") for d in g["debs"]]
+            argv = ["/deb/" + home[0] + home[1], "--library-path", ":".join(lp)] + argv
         if g.get("host_cpu"):   # the reference host's identity is in the key; it must be this host unless the stage is a cache hit
             pin = json.load(open(os.path.join(self.repo, TREE, "verify", "cpuref.json")))
             env["FNVNX_HOST_CPU"] = json.dumps(pin, sort_keys=True)
@@ -1779,30 +1846,22 @@ class Job:
         os.chmod(os.path.join(d, base), 0o755)
         return cas.ingest(d, self.store)
 
-    def _deb_into(self, dest, name, pin):
-        """Copy the installed files of the env.json package NAME (dpkg -L: regular files and symlinks) into DEST/<absolute path>. The package is the
-        pinned one (version checked; its deb sha256 is in the stage key). An absolute symlink target is made relative to DEST: it must resolve inside the
-        union mounted at /deb. A path that two packages ship with different content is red."""
+    def _deb_tree(self, tmp, name, pin):
+        """The installed files of the env.json package NAME (dpkg -L: regular files and symlinks) under <tmp>/deb-<name>/<absolute path>. The package
+        is the pinned one (envcheck checks version and the deb's sha256 pin: debs.packages.<name>.sha256, which is also in the stage key by `env`)."""
         v = subprocess.run(["dpkg-query", "-W", "-f=${Version}", name], capture_output=True, text=True).stdout
         if v != pin["version"]:
             raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["package %s is installed at %r, env.json pins %s" % (name, v, pin["version"])]})
+        dest = os.path.join(tmp, "deb-" + name)
         for p in subprocess.run(["dpkg-query", "-L", name], capture_output=True, text=True).stdout.splitlines():
-            if not (os.path.isfile(p) or os.path.islink(p)):
-                continue
-            q = dest + p
-            os.makedirs(os.path.dirname(q), exist_ok=True)
-            if os.path.islink(p):
-                t = os.readlink(p)
-                t = os.path.relpath(t, os.path.dirname(p)) if t.startswith("/") else t
-                if os.path.lexists(q) and not (os.path.islink(q) and os.readlink(q) == t):
-                    raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["%s is shipped with another content by two declared debs" % p]})
-                if not os.path.lexists(q):
-                    os.symlink(t, q)
-            else:
-                if os.path.lexists(q) and not (os.path.isfile(q) and not os.path.islink(q) and open(q, "rb").read() == open(p, "rb").read()):
-                    raise BuildRed({"stage": "deb:" + name, "exit": None, "stderr": ["%s is shipped with another content by two declared debs" % p]})
-                if not os.path.lexists(q):
-                    shutil.copy2(p, q)
+            if os.path.isfile(p) or os.path.islink(p):
+                os.makedirs(os.path.dirname(dest + p), exist_ok=True)
+                if os.path.islink(p):   # an absolute target is made relative to the package tree: it must resolve inside /deb/<name>
+                    t = os.readlink(p)
+                    os.symlink(os.path.relpath(t, os.path.dirname(p)) if t.startswith("/") else t, dest + p)
+                else:
+                    shutil.copy2(p, dest + p)
+        return cas.ingest(dest, self.store)
 
     def generate_one(self, ws, i, g, py, xin):
         owner = tree_of(self.roots, g["tool"])
@@ -1821,7 +1880,7 @@ class Job:
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
+               "argv": [py["python"], "-s", "-B", "/launch/genlaunch.py", "\n".join(g["outputs"]), "/tool/" + g["tool"][len(owner) + 1:]] + g["args"] + (["--section", g["objects_of"]["section"]] if isinstance(g.get("objects_of"), dict) and g["objects_of"].get("section") else []), "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"], "ro_root": True}   # a generator writes only /out
         res = self.stage(doc)[1]
         got = sorted(r for r, e in cas.listing(res["outputs"]["/out"], self.store) if e["t"] != "d")
@@ -1836,7 +1895,8 @@ class Job:
         """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
         for a directory inside an external (a declared input of the tool runtime)."""
         out, n = [], 0
-        for d in self.rec["include"]:
+        tg = entry_of(self.roots, self.root + ("@" + self.variant if self.variant else "")).get("target")
+        for d in include_closure(self.rec["include"], self.root, self.roots, self.repo, tg):
             if any(under(d, e["at"]) for e in self.ext.values()):
                 out.append(d)
                 continue
@@ -2141,13 +2201,14 @@ class Job:
         """The ELF facts of the linked output (elffacts.py, RECIPE.md "ELF facts of a linked output"): stage `ldfacts:<root>` runs the PINNED readelf of
         env.json (the one beside the linker the compiler names, `-W -S -s`) on the final ELF, and its stdout is cached with the stage; the definer of
         every resolved undefined reference of a product object comes from ld's own cross reference table (`--cref`, in the map of the link stage).
-        -> the record (elffacts.record). BuildRed(stage ldfacts:<root>) if the pinned readelf is not a file of a pinned package, or a layout does not fit."""
+        -> the record (elffacts.record). BuildRed(stage ldfacts:<root>) if the pinned readelf is not a file of a pinned package or of a declared external tree, or a layout does not fit."""
         lk, stage = self.rec["link"], "ldfacts:" + self.root
         name = lk["output"]
         pn = subprocess.run([self.hostpath(self.drivers()[0]), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         d, b = posixpath.split(posixpath.normpath(unitstage.prog(pn)))
         rd = posixpath.join(d, b[:-2] + "readelf") if b.endswith("ld") else ""
-        bad = envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
+        in_ext = bool(rd) and any(under(rd, e["host"]) or under(rd, e["at"]) for e in self.ext.values())   # a file of a declared external tree is pinned by its commit and tree_sha256
+        bad = [] if in_ext else envcheck.system_lib_errors([rd], json.load(open(os.path.join(self.repo, ENV_JSON)))["packages"], envcheck.file_owners()) if rd else ["the linker %r has no readelf beside it" % b]
         if bad:
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["the pinned readelf beside the linker: %s" % x for x in bad]})
         rt = self.cached_rt("tool-readelf-" + hashlib.sha256(repr((rd, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16],
@@ -2547,30 +2608,31 @@ def cpu_mismatch(pin, text=None):
     return bad[:6] if procs else ["/proc/cpuinfo lists no processor"]
 
 
-MACHINE_LAYOUT_DEB = envcheck.RUN_LAYOUT_DEB   # base-files: ships the usr-merge links (./lib -> usr/lib, ./lib64 -> usr/lib64, ./bin, ./sbin); read from the deb, never listed here
-
-
-def resolves_in(root, path):
-    """True if PATH (absolute) resolves to a regular file inside the tree ROOT, following the symlinks of the tree (never leaving it)."""
-    cur, todo, hops = root, [c for c in path.split("/") if c], 0
-    while todo:
-        c = todo.pop(0)
-        if c == "..":
-            cur = os.path.dirname(cur) if cur != root else cur
+def deb_resolve(path, tmp, debs, limit=40):
+    """(deb, real path) of the file the absolute PATH names in the root made by the union of the installed files of DEBS (<tmp>/deb-<name>/<path>,
+    from _deb_tree), following every symlink component the debs ship, such as base-files' /lib64 -> usr/lib64; None when a component is missing, a
+    link loop or the final path is not a file. The union is the stage's whole root: no alias and no hand list of usr-merged names is relied on."""
+    def find(p):
+        return [d for d in debs if os.path.lexists(os.path.join(tmp, "deb-" + d + p))]
+    parts, cur = [x for x in path.split("/") if x], "/"
+    for _ in range(limit * 8):
+        if not parts:
+            break
+        nxt = os.path.join(cur, parts[0])
+        link = [d for d in find(nxt) if os.path.islink(os.path.join(tmp, "deb-" + d + nxt))]
+        if link:
+            limit -= 1
+            if limit < 0:
+                return None
+            t = os.readlink(os.path.join(tmp, "deb-" + link[0] + nxt))
+            full = os.path.normpath(os.path.join(cur, t))
+            parts, cur = [x for x in full.split("/") if x] + parts[1:], "/"
             continue
-        nxt = os.path.join(cur, c)
-        if os.path.islink(nxt):
-            hops += 1
-            t = os.readlink(nxt)
-            if hops > 40 or t.startswith("/"):
-                return False
-            todo = [x for x in t.split("/") if x] + todo
-            continue
-        if not os.path.exists(nxt):
-            return False
-        cur = nxt
-    return os.path.isfile(cur)
-
+        if not find(nxt):
+            return None
+        cur, parts = nxt, parts[1:]
+    home = [d for d in find(cur) if os.path.isfile(os.path.join(tmp, "deb-" + d + cur))]
+    return (home[0], cur) if home else None
 
 def elf_interp(path):
     """The PT_INTERP path of an ELF64 file, or None (read from the program headers)."""
@@ -2655,7 +2717,7 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
     res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "tests": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
-           "link_archives": [], "stage_keys": [], "status": "green"}
+           "link_archives": [], "stage_keys": [], "outputs": {}, "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
     all_units = units
@@ -2685,6 +2747,15 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copyfile(cas._obj(store, ent), dest)
             res["plugins"].append({"name": n, "sha256": ent["h"], "path": os.path.abspath(dest)})
+        res["outputs"] = {}   # the root's declared outputs (`outputs: {NAME: path}`), each a file of `out` with its sha256: a consumer compares the hash, never the path
+        for nm, rel in sorted((j.rec.get("outputs") or {}).items()):
+            src = os.path.join(ws, "root", rel)
+            if os.path.isfile(src):
+                dest = os.path.join(out, "outputs", rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(src, dest)
+                with open(dest, "rb") as fh:
+                    res["outputs"][nm] = {"path": os.path.abspath(dest), "sha256": hashlib.sha256(fh.read()).hexdigest()}
         if j.analysis:   # the plugin of the gate objstub (a file of the store, kept beside the root's own plugins)
             ent = cas.manifest(j.analysis, store)["entries"][ANALYSIS_PLUGIN[0] + ".so"]
             dest = os.path.join(out, "plugins", ANALYSIS_PLUGIN[0] + ".so")
@@ -2711,9 +2782,9 @@ def build(repo, root, store, out, jobs=4, ext=None, aux=None, link=True):
                 shutil.copyfile(cas._obj(store, su), sd)
                 row["su"] = os.path.abspath(sd)
             res["objects"].append(row)
-            bad = sorted(set(section_names(dest)) & set(j.rec.get("forbid_sections", [])))
+            bad = sorted(set(section_names(dest)) & set(fact_sections(split_spec(root)[0], j.roots, j.repo)))
             if bad:
-                raise BuildRed({"stage": "forbid:" + root, "exit": None, "stderr": ["object %s has the forbidden section(s) %s (recipe forbid_sections)" % (u, bad)]})
+                raise BuildRed({"stage": "forbid:" + root, "exit": None, "stderr": ["object %s has the forbidden section(s) %s (a fact section of a root this root depends on: its universe is the other roots, recipe.fact_sections)" % (u, bad)]})
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
         if j.rec.get("link") and link and (j.red or j.blocked or j.failed):
             j.blocked[j.rec["link"]["output"]] = (j.red or j.failed)[0]["stage"]
