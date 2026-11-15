@@ -1,27 +1,27 @@
-"""The entry universe (tools/universe.py output, FNVNX_UNIVERSE, default /home/user/l3facts/universe.tsv): entry -> (kind, extent, parent).
+"""The entry universe (tools/universe.py output, the explicit input `universe` of fnvlift/inputs.py): entry -> (kind, extent, parent).
 lift() consults it for the defaults: an entry with a parent is lifted from its label inside the parent's range, a function gets all its own labels."""
-import collections, os
+import collections
+from . import inputs
 
 _U = {}
 
 
 def load(path=None):
-    path = path or os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv')
+    path = path or inputs.get('universe')
     if path not in _U:
         ent, kids = {}, collections.defaultdict(list)
-        if os.path.exists(path):
-            for l in open(path):
-                if l[0] == '#':
-                    continue
-                a, kind, ext, fl = l.rstrip('\n').split('\t')
-                par = None
-                for f in fl.split(','):
-                    if f.startswith('parent='):
-                        par = int(f[7:], 16)
-                ent[int(a, 16)] = (kind, int(ext), par)
-            for a, (k, e, p) in ent.items():
-                if p is not None:
-                    kids[p].append(a)
+        for l in open(path):      # a missing file is an error; an empty universe is an empty file, read by this same code
+            if l[0] == '#':
+                continue
+            a, kind, ext, fl = l.rstrip('\n').split('\t')
+            par = None
+            for f in fl.split(','):
+                if f.startswith('parent='):
+                    par = int(f[7:], 16)
+            ent[int(a, 16)] = (kind, int(ext), par)
+        for a, (k, e, p) in ent.items():
+            if p is not None:
+                kids[p].append(a)
         _U[path] = (ent, dict(kids))
     return _U[path]
 

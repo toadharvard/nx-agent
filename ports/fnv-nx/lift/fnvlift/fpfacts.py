@@ -2,7 +2,7 @@
 fact file of the module being lifted, never assumed (ASM-204).
 
     <facts>/fpstate/invariants.tsv     lines `ASM-204 <holds|unproven> <per-module detail>` (written by `fpstate.py combine`: the PROGRAM invariant = AND over all modules)
-    <facts> = $FNVNX_FPSTATE_DIR, else $FNVNX_FACTS/fpstate, else /home/user/l3facts/fpstate
+    <facts> = the explicit input `fpstate` of fnvlift/inputs.py
 
 ASM-204    no x87 or SSE exception is ever unmasked at any instruction of any module: every load of the x87 control word / MXCSR (fldcw, ldmxcsr, fninit, frstor, fldenv, fxrstor, the _controlfp family)
             is a constant or a transform that cannot clear a mask bit, starting from FCW 0x027F / MXCSR 0x1F80 (thread start, rt/enter.cc). Consequence: `fwait` never raises #MF, and x87/SSE arithmetic
@@ -10,6 +10,7 @@ ASM-204    no x87 or SSE exception is ever unmasked at any instruction of any mo
 ASM-205  no instruction of any module can observe the sticky exception flags (FSW bits 0-7, 15; MXCSR bits 0-5), so they need not be maintained.
 A lifter body that needs an invariant calls require(); if the fact file says `unproven` (or is missing) the form is Unsupported with the reason: a missing semantics is a lift error, never a no-op."""
 import os
+from . import inputs
 from .core import Unsupported
 
 # Recorded assumptions of the owner (not proofs). ASM-204, owner word of 2026-11-11 (CLAUDE.md of the integration branch, 0c6667f5): until the first frame,
@@ -17,15 +18,12 @@ from .core import Unsupported
 # loads whose value is not proven (exe 55, libvorbis 15, libvorbisfile 2, binkw32 1, d3dx9_31 43, d3dx9_38 51). The full semantics (thread flag + exact slow path raising #MF/#XM) is
 # deferred work, not dropped: a body that relies on the assumption records 'ASM-204' in its kinds, so every such site is counted in the pack.
 OWNER_ASSUMED = {'ASM-204': 'ASM-204'}
-ASSUME = set()          # test harness only (tools/tests/instest.py): states drawn with every exception masked, so the invariant holds by construction of the test states
+ASSUME = set()          # test harness only (the retired one-instruction harness): states drawn with every exception masked, so the invariant holds by construction of the test states
 _CACHE = {}
 
 
 def _path():
-    d = os.environ.get('FNVNX_FPSTATE_DIR')
-    if d is None:
-        d = os.path.join(os.environ.get('FNVNX_FACTS', '/home/user/l3facts'), 'fpstate')
-    return os.path.join(d, 'invariants.tsv')
+    return os.path.join(inputs.get('fpstate'), 'invariants.tsv')
 
 
 def status(name):

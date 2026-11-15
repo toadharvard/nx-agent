@@ -10,12 +10,11 @@ What lives where:
 |---|---|
 | `fnvlift/` | the lifter: `image.py` (PE, .reloc), `core.py` (descent, emit loop, handler registry), one module per instruction family (`f_int`, `f_flow`, `f_string`, `f_x87`, `f_sse`, `f_sys`) |
 | `rt/` | the runtime: `fnvl.h` (state and inline semantics every lifted file includes), `x87.c` (exact 80-bit arithmetic), `rt.c` (dispatch, bridges' helpers, host calls) |
-| `test/` | `golden.py` (output digest of a lifter over all functions), `instest.py` (every instruction form against Unicorn), unit tests of the runtime |
+| `test/` | the retired one-instruction harness (every instruction form against Unicorn), unit tests of the runtime |
 | `tools/` | `universe.py` (every entry the exe needs a body for), `census.py`, `cache.py`, `bridges.py`, `report.py` |
 
 The tools are ours. Their **output is exe-derived** (lifted C, entry lists, per-function tables, objects) and is
-written only outside this repository: `fnv-nx-build` branches `l3-lift/...` and the containers (`FNVNX_FACTS`,
-default `/home/user/l3facts`).
+written only outside this repository: `fnv-nx-build` branches `l3-lift/...` and the containers (a facts directory passed to each tool as an argument).
 
 ## Contract of a lifted body
 
@@ -24,7 +23,7 @@ default `/home/user/l3facts`).
 - `struct cpu` is per thread: eight general registers, the x87 stack (eight exact 80-bit values, top, tags, control
   and status words), eight xmm registers, mxcsr, the `fs` base (the thread's TEB image), the direction flag.
   Arithmetic flags live in locals of the lifted function: the x86 calling conventions keep none of them across a
-  call or return. `instest` compiles with `FNVL_FLAGS_IO`, which also carries them in `*c`.
+  call or return. the retired one-instruction harness compiles with `FNVL_FLAGS_IO`, which also carries them in `*c`.
 - The guest stack is ordinary guest memory; `esp` points into a per-thread region inside the 32-bit space.
 - Falling into bytes the descent did not decode is a build error, not a run-time trap.
 
@@ -99,7 +98,7 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
     where that is possible.
   - `table`: `rcp*`/`rsqrt*`: the 2^32 table of the reference CPU is the specification.
   Recorded as ASM-003 (A-FLAT): memory forms are proven for pre-states where the model raises no segment-limit fault; on the
-  flat 4 GiB segments of the real process an address wraps modulo 2^32, which is what the lifted code does. `instest` (Unicorn) verifies; it
+  flat 4 GiB segments of the real process an address wraps modulo 2^32, which is what the lifted code does. the retired one-instruction harness (Unicorn) verifies; it
   prove nothing.
 - **R3, code map.** Every byte of `.text` of every lifted module is an instruction of an entry, alignment, or a
   table named by a relocation (`tools/universe.py`); anything else is a build error. There are no trap codes.
@@ -195,5 +194,4 @@ A lifted object is keyed by (function bytes, relocation mask inside them, lifter
 | gate | command | number |
 |---|---|---|
 | coverage | `tools/census.py` | entries lifted / entries, failure reasons |
-| golden (refactors) | `test/golden.py <dir>` | sha256 of all outputs |
-| instruction | `test/instest.py` | forms tested, cases equal / different, per mnemonic |
+| instruction | the retired one-instruction harness | forms tested, cases equal / different, per mnemonic |

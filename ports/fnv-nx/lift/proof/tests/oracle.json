@@ -1,19 +1,31 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
-  "test_formgate.py": {
+  "test_dsl_xsimd.py": {
    "references": [
     {
      "anchor": "## Classes of run-time failure and their gates",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/fnvlift/dsl.py"
+   ]
+  },
+  "test_formgate_real.py": {
+   "references": [
+    {
+     "kind": "external",
+     "name": "certs",
+     "path": "certs/certs.tsv"
     }
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/formgate.py"
    ]
   },
-  "test_fpexact.py": {
+  "test_gate_fpexact.py": {
    "references": [
     {
      "anchor": "## Classes of run-time failure and their gates",
@@ -22,7 +34,9 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/unitstage.py"
    ]
   }
  }

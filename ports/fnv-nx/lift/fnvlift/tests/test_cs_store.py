@@ -5,6 +5,7 @@ dlls/ntdll/signal_i386.c segv_handler, case TRAP_x86_PROTFLT); a load through CS
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import capstone
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import _inputs; _inputs.configure()
 from fnvlift import core
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 A0, FAILS = 0x400000, []

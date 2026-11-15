@@ -1,7 +1,7 @@
 """Moves, conversions, stack, EFLAGS and string families (see forms.py)."""
 from fnvlift import dsl
 from fnvlift.dsl import REGS, C, V, ashr, bit, concat, eq, extract, ite, msb, sext, trunc, ult, zext
-from proof.forms import AReg, Op, cond, dsa, ea, esa, handler, mload, mstore, pzs, rd, sload, sstore, store_op, wr
+from proof.forms import AReg, Op, isvec, cond, dsa, ea, esa, handler, mload, mstore, pzs, rd, sload, sstore, store_op, wr
 
 LAHF_SDM = 'LAHF/SAHF: AH = SF:ZF:0:AF:0:PF:1:CF'
 MODIFIABLE = 0x00240100 | 0x4000      # EFLAGS bits (besides the six, DF) POPFD may change in user mode: TF, NT, AC, ID (IF/IOPL need privilege)
@@ -103,6 +103,10 @@ def std(c): c.F.flag('df', C(1, 1))
 
 @handler('movsb', 'movsw', 'movsd', 'stosb', 'stosw', 'stosd', 'lodsb', 'lodsw', 'lodsd', 'scasb', 'scasw', 'scasd', 'cmpsb', 'cmpsw', 'cmpsd')
 def string(c):
+    if any(isvec(o) for o in c.ops):             # the SSE forms of movsd / cmpsd share the mnemonic with the string ops
+        from proof import forms_simd
+        if c.m == 'movsd': return forms_simd.movsd_sse(c)
+        raise KeyError(c.m)
     """ONE iteration step.  Without a prefix: the body.  With rep/repe/repne: if ecx == 0 nothing happens (eip = next); otherwise the body, ecx - 1,
     and eip stays on the instruction (the step repeats) unless ecx - 1 == 0 or (repe: ZF == 0 / repne: ZF == 1) after the body."""
     F = c.F; op, sz = c.m[:4], {'b': 1, 'w': 2, 'd': 4}[c.m[4]]; w = 8 * sz

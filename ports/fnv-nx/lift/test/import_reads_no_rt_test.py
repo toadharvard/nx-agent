@@ -20,7 +20,7 @@ sys.addaudithook(hook)
 import fnvlift, fnvlift.dsl
 assert not hasattr(fnvlift, 'PRELUDE')
 try:
-    fnvlift.prelude(RT)
+    fnvlift.prelude(RT, '/nonexistent-gen')       # the first read, rt/fnvl.h, is the one the hook reports
 except RuntimeError:
     print('prelude-reads-rt')
 else:

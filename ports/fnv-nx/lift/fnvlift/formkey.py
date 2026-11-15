@@ -1,4 +1,4 @@
-"""The form key of a decoded instruction: `mnemonic|operand classes|opcode bytes` (R2). One definition, used by the lifter tools (tools/formcert.py) and the tests (tools/tests/instest.py)."""
+"""The form key of a decoded instruction: `mnemonic|operand classes|opcode bytes` (R2). One definition, used by the lifter tools (tools/formcert.py) and the tests (the retired one-instruction harness)."""
 R8 = {'al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'}; R16 = {'ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'}
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']; SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
 PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}

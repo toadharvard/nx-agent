@@ -3,7 +3,7 @@
 only by code we wrote and certified. Four checks, each total over its universe.
     python3 -I ports/fnv-nx/lift/proof/gate_fpexact.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/fpexact.json
 No argument is read. Universe convention of the object-level gates (gate_build.quantify, as gate_objstub / gate_linkstrict): the admitted product
-roots of verify/admit.json; each root is built or taken from the cache by gate_build.ensure (GATE_CACHE, else GATE_OUT/fpexact-cache) and its
+roots of verify/admit.json; each root is built or taken from the cache by gate_build.ensure (GATE_CACHE: the verdict's one store, always set by l1.py) and its
 objects (objects.json "objects") are judged; no product root: universe 0, green. The loader modules (gate_build, recipe) are imported from
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
 All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]), `read_f2i_paths` (objects.json -> {unit: the plugin's file of
@@ -41,7 +41,7 @@ assumption: ASM-043 (capstone decodes an instruction to its architectural id; se
 Check 3, float -> integer exactness (item `f2i:<root>/<unit>`). The x86 rule (cvt*2si, cvtt*, fist, fistp, fisttp): rounding by MXCSR.RC /
 FCW.RC (truncation for the cvtt* and fisttp forms); NaN and out-of-range give the integer indefinite (0x80000000, 0x8000,
 0x8000000000000000). The A64 FCVT{Z,N,M,P,A}{S,U} and FJCVTZS saturate instead (NaN gives 0), so a bare conversion is wrong. Measured
-(compile probes with the flags of lift/test/instest.py): the helpers (sse_f2i, fv_i) are inlined, and GCC hoists, duplicates and
+(compile probes with the flags of the retired one-instruction harness): the helpers (sse_f2i, fv_i) are inlined, and GCC hoists, duplicates and
 if-converts the conversion around their range guard (the FCVTZS may sit above a later compare, its result chosen by a select, shared
 by two guards), so a per-instruction object-level property ("this FCVT is guarded") is only a path-sensitive interval analysis of
 compiler-chosen code, not decidable per instruction from operands. The rule is therefore at source level, before inlining, plus an
@@ -128,10 +128,13 @@ def read_f2i_paths(res):
     return {o["unit"]: o.get("f2i") for o in res["objects"]}
 
 
+GEN_HEADER = os.path.join("gen", "rcpref.h")      # a generated file of the root (rt/build.json stage gen_cpuref), not a committed one
+
+
 def read_ref(rt):
     """the four FNVL_RCP_REF_* constants of rt/rcpref.h -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
     out = {}
-    with open(os.path.join(rt, "rcpref.h")) as fh:
+    with open(os.path.join(rt, GEN_HEADER)) as fh:
         for line in fh:
             m = re.match(r'#define FNVL_RCP_REF_([A-Z]+) ("[^"\n]*"|[0-9]+)\s*$', line)
             if m and m[1] in REF_KEYS:
@@ -139,7 +142,7 @@ def read_ref(rt):
                     raise ValueError("FNVL_RCP_REF_%s defined twice" % m[1])
                 out[m[1]] = m[2][1:-1] if m[2].startswith('"') else int(m[2])
     if sorted(out) != sorted(REF_KEYS):
-        raise ValueError("rt/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
+        raise ValueError("rt/gen/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
     return out
 
 
@@ -164,7 +167,7 @@ def check_cert(rt):
             bad.append("cpu identity %s is not the reference %s" % (json.dumps(cpu, sort_keys=True), json.dumps(want, sort_keys=True)))
         if cert["mismatches"] != 0 or isinstance(cert["mismatches"], bool):
             bad.append("mismatches is %r, not 0" % (cert["mismatches"],))
-        for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", "rcpref.h")):
+        for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", GEN_HEADER)):
             have = sha256_file(os.path.join(rt, file))
             if cert[key] != have:
                 bad.append("%s %s differs from sha256 of rt/%s (%s)" % (key, cert[key], file, have))
@@ -500,7 +503,7 @@ def main(argv):
     if argv or "GATE_OUT" not in os.environ:
         sys.stderr.write("usage: gate_fpexact.py   (no arguments; env GATE_OUT, optional GATE_CACHE; cwd = checkout root)\n")
         return 1
-    cache = os.environ.get("GATE_CACHE") or os.path.join(os.environ["GATE_OUT"], "fpexact-cache")
+    cache = os.environ["GATE_CACHE"]      # the verdict's one store (l1.py always sets it): no cache of this gate's own
     os.makedirs(cache, exist_ok=True)
     memo = []
 

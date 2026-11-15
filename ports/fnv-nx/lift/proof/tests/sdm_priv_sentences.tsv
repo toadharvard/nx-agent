@@ -1,0 +1,10 @@
+# Verbatim #GP(0) sentences of the Protected Mode Exceptions blocks of the Intel SDM (combined volumes, PDF sha256 a4a62e6a..., tools/intel-sdm 0768b0ba) and the class the rule of sdmpriv.py gives them.
+# sentence	class	SDM section and page
+If the current privilege level is not 0.	cpl0	CLTS Vol. 2A 3-152 Protected Mode Exceptions
+If CPL ≠ 0.	cpl0	SYSEXIT
+If CPL > 0 or (EAX AND NOT IA32_HRESET_ENABLE) ≠0.	cpl0	HRESET
+If CPL is greater than IOPL and PVI mode is not active.	iopl	CLI
+If the CPL is greater than (has less privilege) the I/O privilege level (IOPL) and any of the corresponding I/O permission bits in TSS for the I/O port being accessed is 1.	iopl	IN
+If the current privilege level is not 0 and the PCE flag in the CR4 register is clear.	cond	RDPMC
+If the TSD flag in register CR4 is set and the CPL is greater than 0.	cond	RDTSC
+If a memory operand effective address is outside the CS, DS, ES, FS, or GS segment limit.	-	any memory-operand instruction

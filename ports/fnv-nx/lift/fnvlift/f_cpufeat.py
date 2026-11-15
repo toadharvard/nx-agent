@@ -10,7 +10,7 @@ THE TABLE. Required feature of a form = the union of
   2. MNEMONIC_FEATURE: forms that capstone leaves without an SSE3.. group although the SDM gates them (x87 FISTTP is SSE3: capstone tags it `fpu`; POPCNT).
 Completeness argument: a feature is checked iff it is a key of FEATURES; every FEATURES key outside the model (MODEL) is in the "absent" set, and `missing(ins)` is non-empty exactly when a
 group or mnemonic of the form maps to an absent feature. test/cpufeat_check.py proves (a) FEATURES' bits agree with the numbers that rt/cpumodel.c really returns (the C file is compiled and
-called), (b) every form of the instest corpus that is implemented by an x87/SSE/MMX handler has required ⊆ MODEL or lifts to #UD, (c) tools/fpstate.py reports, per module, every instruction that `missing` flags and which handler would otherwise have run.
+called), (b) every form of the the retired one-instruction harness corpus that is implemented by an x87/SSE/MMX handler has required ⊆ MODEL or lifts to #UD, (c) tools/fpstate.py reports, per module, every instruction that `missing` flags and which handler would otherwise have run.
 Assumption ASM-203: capstone's group tags are a correct classification of the instruction-set extension of a form (they come from LLVM's X86 instruction tables); where they are known to be
 missing (item 2) the table adds the SDM's feature. A tag that is too wide on a feature the model HAS is harmless (the model has it); too wide on an absent feature would raise a wrong #UD:
 test/cpufeat_check.py lists, over every instruction of every module, the forms whose group maps to an absent feature (the A3 table of tools/fpstate.py)."""
@@ -23,15 +23,15 @@ FEATURES = {
     'BMI1': (7, 'EBX', 3), 'AVX2': (7, 'EBX', 5), 'BMI2': (7, 'EBX', 8), 'ADX': (7, 'EBX', 19), 'SHA': (7, 'EBX', 29),
     '3DNOW': (0x80000001, 'EDX', 31), '3DNOWEXT': (0x80000001, 'EDX', 30), 'SSE4A': (0x80000001, 'ECX', 6), 'XOP': (0x80000001, 'ECX', 11), 'FMA4': (0x80000001, 'ECX', 16),
 }
-# the model's answer, READ from the sources of the reference CPU (rt/fnvl_abi.h FNVL_CPUID1_ECX/EDX; rt/cpumodel.c E1 = leaf 0x80000001 {EAX, EBX, ECX, EDX}); leaf 7 is above the
-# model's max basic leaf (FNVL_MAX_BASIC), so every leaf-7 feature is absent. No hand-copied constant: a change of the reference CPU changes the gate.
+# the model's answer, DERIVED from verify/cpuid_model.json by cpumodel_bits.model_words (the one derivation, shared with tools/gen_cpuref.py); leaf 7 is above the
+# model's max basic leaf (verify/cpuid_model.json max_basic), so every leaf-7 feature is absent. No hand-copied constant: a change of the reference CPU changes the gate.
 def _model_bits():
-    import os, re
-    rt = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')
-    abi = open(os.path.join(rt, 'fnvl_abi.h')).read(); cm = open(os.path.join(rt, 'cpumodel.c')).read()
-    d = {k: int(re.search(r'#define FNVL_CPUID1_%s\s+(0x[0-9a-fA-F]+)u' % k, abi).group(1), 16) for k in ('ECX', 'EDX')}
-    e1 = [int(x, 0) for x in re.search(r'E1\[4\]\s*=\s*\{([^}]*)\}', cm).group(1).split(',')]
-    return {(1, 'EDX'): d['EDX'], (1, 'ECX'): d['ECX'], (0x80000001, 'EDX'): e1[3], (0x80000001, 'ECX'): e1[2]}
+    import json, os
+    from .cpumodel_bits import model_words
+    here = os.path.dirname(os.path.abspath(__file__)); rel = 'ports/fnv-nx/verify/cpuid_model.json'
+    path = next(p for p in (os.path.join('/in', rel), os.path.join(here, '..', '..', 'verify', 'cpuid_model.json')) if os.path.exists(p))
+    w = model_words(json.load(open(path)))
+    return {(1, 'EDX'): w['leaf1_edx'], (1, 'ECX'): w['leaf1_ecx'], (0x80000001, 'EDX'): w['ext1_edx'], (0x80000001, 'ECX'): w['ext1_ecx']}
 MODEL_BITS = _model_bits()
 MODEL = frozenset(f for f, (leaf, reg, bit) in FEATURES.items() if MODEL_BITS.get((leaf, reg), 0) >> bit & 1)
 ABSENT = frozenset(FEATURES) - MODEL
