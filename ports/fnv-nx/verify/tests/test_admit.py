@@ -107,6 +107,7 @@ for u in ("/inc/x/c.c", "/inc/x/d.cc", "/inc/x/e.S", "/inc/build.json"):
     bad, err = ga.judge(hf + [T + u], adm(tool, doc, hroot), yes)
     check("a header root with %s is refused (it has a unit: a product or test root)" % u, bad and any("unit" in e for e in err))
 # the gate set of a root is derived from gates.d covers, never from a table of the gate
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))   # gatesdir reads the tree from the checkout root
 covers = {g["name"]: set(g.get("covers", [])) for g in gatesdir.load_dir().get("gates", [])}
 check("every gate of gates.d declares the classes it covers", all(covers.values()))
 check("gate pure covers the classes that hold source (tool, ref, header, test, every product class)",
