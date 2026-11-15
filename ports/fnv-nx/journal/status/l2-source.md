@@ -369,3 +369,5 @@ After the first frame:
 - Runtime asm check: w2 link/rtasm.py @c5ebcf238, test 16 checks. Measured on msvcmodel13, partial: 148 assembled objects, 862 accesses, 439 violations; over the linked set 13 objects and 206 violations (libc string .S, libgcc lse and SME).
   - Rulings: the universe is objects without our plugin records, judged over the linked members. BT is computed on the link's call graph. lse ordering comes from lse.S. jmp_buf comes from decltype. libnx must be covered. RO is accepted, by relocation.
   - w2 doing these now, then the full numbers on the none-elf pin.
+- L3a w8 blocker (lib/sha256 vector_type): its branch had the pre-VEC1 plugin copy from L1 pluginfix b707cd5c4. Pointed w8 and w15 to the one layout + reader copy, claude/fnv-l2-source-w3-complex @8f7217f4d, for cand3.
+- w2 rtasm @658a4d0f5: the universe is defined by plugin record; lse orderings are parsed from lse.S 13.3. Corrections given: runtime_cflags via recipe.runtime_cflags, sizes from DATAMODEL.json, a no-plugin fixture.
