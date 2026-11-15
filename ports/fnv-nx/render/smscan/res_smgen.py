@@ -28,7 +28,7 @@ for m in order:
     # writable registers of the table (rw W / ".x only") are destinations too (vs_1_1 `mov a0.x`: dst_regs omits a0); the table's `undetermined`
     # ids vs_a0_src / vs_bi_alu (a0, b#, i# as ALU sources of a vertex shader: MS silent, wine allows) are accepted (superset)
     wr = [c for c in r if c in CLS and ("W" in r[c]["rw"] or r[c]["rw"].startswith(".x"))]
-    und = [c for c in ("a0", "b", "i") if c in r and m[0] == "v"]
+    und = [c for c in ("a0", "b", "i") if c in r and m[0] == "v"] + [c for c in ("vFace",) if c in r and m[0] == "p"]   # ps_3_0:vFace_src (conflicts): MS allows vFace only as a setp/if/break condition, wine (vkd3d d3dbc.c:666-676, glsl_shader.c:2873-2880) as any source; the universe is the union
     DST = list(M["dst_regs"]) + wr; SRC = list(M["src_regs"]) + und
     pm = {x for k, v in T["caps"].items() if k.endswith("Predication") for x in v["models"]}
     pred = int("p0" in r or m in pm)    # predication: the model has p0, or caps PS20Caps / VS20Caps.Predication names it (ENV decides: superset)

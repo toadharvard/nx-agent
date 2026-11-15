@@ -208,6 +208,11 @@
    "note": "MS sgn---vs syntax has 3 sources in all versions; vkd3d d3dbc.c: sgn has 1 source in 3_0; universe has both forms"
   },
   {
+   "id": "ps_3_0:vFace_src",
+   "kind": "legacy",
+   "note": "MS ps_3_0 register page (dx9-graphics-reference-asm-ps-registers-ps-3-0.md:30): vFace only as a condition of setp_comp, if_comp or break_comp; wine 9.0 (vkd3d d3dbc.c:666-676 parses MISCTYPE 1 as VFACE with no instruction restriction, glsl_shader.c:2873-2880 reads it as any source) accepts it as a source of every instruction, and the shipped PS e92b2db2 (cmp r0.x, vFace, c1.x, c1.y) uses it so; universe uses the UNION"
+  },
+  {
    "id": "vs_3_0:v[a0.x]",
    "kind": "legacy",
    "note": "MS table says a0/aL, MS prose says aL only; wine allows any (reladdr flag)"
