@@ -111,13 +111,10 @@
     "/stage/obj.json",
     "--n1",
     "/stage/n1.json",
-    "--link",
-    "/in/ports/fnv-nx/contract/facts/link",
     "--out",
     "/out/gates"
    ],
    "inputs": [
-    "ports/fnv-nx/contract/facts/link",
     {
      "stage": "ports/fnv-nx/contract/facts:gen:0",
      "path": "facts.json"
@@ -229,6 +226,7 @@
   }
  ],
  "outputs": {
-  "native": "native.tsv"
+  "native": "native.tsv",
+  "n1": "n1.json"
  }
 }
