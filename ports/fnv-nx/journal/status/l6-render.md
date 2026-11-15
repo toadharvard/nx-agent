@@ -1032,3 +1032,18 @@ Paused: w3b, w4, farm; no other work.
     - The variant (nx_pair_variant) and the link set (the full cross product) are already closed by sm_link.
     - The fact was requested from L1, and the gap was reported to the orchestrator as a failure class with no gate. The owner is not yet decided.
 - bottleneck: the guest compile after the plugin-set fixes (w5, w6); the Create*Shader source fact (owner L1 or L3a, not yet decided); L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
+- 20:26Z: shader universe class. L1 offered two rules: (A) translator totality, owner L6, or (B) an exe data-flow fact, for which no class rule is known. L6 prefers (A) and has told the orchestrator it owns it. The ruling is pending.
+    - (A) has four parts:
+        - the generated SM 1-3 legality table is the universe;
+        - Create*Shader runs the validator and returns D3DERR_INVALIDCALL;
+        - a gate checks that every legal row has an emit rule (legal rows minus rows with an emit rule = ∅);
+        - link: VS completion, and the model's bounds against the GL 4.5 minimum limits.
+    - sm_link over the 1,809 records stays as evidence.
+- 20:26Z: w5 6b1549bd7 (fbo):
+    - the hand list is reverted;
+    - 34a4a4b2a is cherry-picked;
+    - toolchain/ is taken whole from a42ad8875;
+    - render/d3d9 and render/pair are on "profile": "guest".
+    - The guest compile is still red: our verify/ is an older vintage than the new pin.
+    - Rule: an L6 branch merges L1's pinned commit for verify/, never piecemeal. I've asked L1 for the commit.
+- bottleneck: the L1 verify/ commit for pin 05082bde, then the guest compile; the orchestrator's ruling on (A); L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
