@@ -1507,3 +1507,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - (b) Gap: combridge rows are not checked against bridge.tsv. Class fix, assigned to w12: a generated key header from the iat stage, and the run-time resolver is deleted.
   - (c) objstub constant-error bodies. The universe is the sections kept by the --gc-sections link. A kept body is red unless it cites the library's documentation under the declared config.
 - 09:15 **w22.** The bridgetable hand lists (register rows 256-259) are moved up next. The va_ forwarder mapping comes from a platform-emitted record, not a name prefix.
+- 09:17 **w22 f3da67873.**
+  - Done:
+    - runtime_cflags (-DPREFER_SIZE_OVER_SPEED, -g) and PD-RT-STRING-ORDERED;
+    - coffnorm deleted;
+    - PD-LOADER-SHA256-ISA closed (the body is selected by __ARM_FEATURE_SHA2 from console_cpu.features);
+    - a host variant of a guest root gets host semantics.
+  - Correction: the "ftoi inputs restored" change is reverted. w22 merges pluginfix b707cd5c4, after which plugin entries name only the plugin.
