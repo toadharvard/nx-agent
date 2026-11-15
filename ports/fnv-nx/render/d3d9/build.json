@@ -38,11 +38,9 @@
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_impl.py",
    "args": [
     "/out/gen",
-    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
-   "inputs": [
-    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
-   ],
+   "inputs": [],
    "outputs": [
     "gen/d9impl.gen.h",
     "gen/d9impl_methods.txt",
@@ -53,11 +51,9 @@
    "tool": "ports/fnv-nx/render/d3d9/dev/state_model.py",
    "args": [
     "/out/gen",
-    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
-   "inputs": [
-    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
-   ],
+   "inputs": [],
    "outputs": [
     "gen/state.gen.cpp",
     "gen/state.gen.h",
@@ -68,7 +64,7 @@
    "tool": "ports/fnv-nx/render/d3d9/gen/gen_bridge.py",
    "args": [
     "/out/gen",
-    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json",
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC",
     "/in/ports/fnv-nx/bridgefacts/d3d9"
    ],
    "inputs": [
@@ -82,10 +78,9 @@
    "tool": "ports/fnv-nx/render/d3d9/env/gen_env.py",
    "args": [
     "/out/gen",
-    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
    "inputs": [
-    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json",
     "ports/fnv-nx/shim/include/d3d9types.h"
    ],
    "outputs": [
@@ -123,11 +118,9 @@
    "tool": "ports/fnv-nx/render/d3d9/front/gen_enums.py",
    "args": [
     "/out/gen/d3d9_enums.gen.h",
-    "/in/ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
+    "/uses/ports/fnv-nx/bridgefacts/D9_SPEC"
    ],
-   "inputs": [
-    "ports/fnv-nx/bridgefacts/d3d9/d3d9_spec.json"
-   ],
+   "inputs": [],
    "outputs": [
     "gen/d3d9_enums.gen.h"
    ]
@@ -173,5 +166,11 @@
  "outputs": {
   "ident_handheld.bin": "gen/ident_handheld.bin",
   "ident_docked.bin": "gen/ident_docked.bin"
- }
+ },
+ "uses": [
+  {
+   "root": "ports/fnv-nx/bridgefacts",
+   "output": "D9_SPEC"
+  }
+ ]
 }

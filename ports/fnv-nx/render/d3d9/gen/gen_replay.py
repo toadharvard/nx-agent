@@ -92,8 +92,8 @@ def generate(spec, raw, outdir):
 
 
 def main():
-    if len(sys.argv) < 2: sys.exit("usage: gen_replay.py OUTDIR [d3d9_spec.json]")
-    raw = open(sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "..", "..", "..", "bridgefacts", "d3d9", "d3d9_spec.json"), "rb").read()
+    if len(sys.argv) < 3: sys.exit("usage: gen_replay.py OUTDIR d3d9_spec.json")
+    raw = open(sys.argv[2], "rb").read()
     try: n = generate(json.loads(raw), raw, sys.argv[1])
     except GenError as ex: print(f"gen_replay: FAIL: {ex}", file=sys.stderr); sys.exit(2)
     print(f"gen_replay: wrote {n} lines to {sys.argv[1]}")

@@ -79,7 +79,8 @@ def run_gate(base, cache, extra=None):
 
 
 def enum_ids(e):
-    spec = json.load(open(os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.json")))["enums"][e]
+    spec = json.loads(subprocess.run([sys.executable, "-I", os.path.join(PORT, "bridgefacts", "d3d9", "d3d9_spec.py"), "--stdout", os.path.join(PORT, "shim", "include")],
+                                     check=True, capture_output=True).stdout)["enums"][e]
     if e == "D3DFORMAT":
         spec = spec + ["D3DFMT_" + s.strip() for s in G.module_lists(os.path.join(PORT, "render", "d3d9", "front", "gen_enums.py"),
                                                                       ["SWITCHED", "INDEXED", "VENDOR_FOURCC"])["VENDOR_FOURCC"]]
