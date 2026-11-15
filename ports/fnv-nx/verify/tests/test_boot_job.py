@@ -129,7 +129,7 @@ def main():
         f.write(EXE)
     git("init", "-q", "--bare", BARE)
     git("config", "uploadpack.allowFilter", "true", cwd=BARE)
-    contract = {"entries.tsv": MANIFEST.encode(), "modules.tsv": MODULES.encode(), "keys.tsv": KEYS_TSV.encode(),
+    contract = {"elffacts.json": open(tb.facts_path(), "rb").read(), "entries.tsv": MANIFEST.encode(), "modules.tsv": MODULES.encode(), "keys.tsv": KEYS_TSV.encode(),
                 "milestones.tsv": MILESTONES.encode(), "run.txt": RUN.encode()}
     ok_elf = fault_elf = gpu_elf = lifted_elf()
     M6, M3, M80 = tb.mode_bytes(6), tb.mode_bytes(3), tb.mode_bytes(80)
@@ -146,6 +146,8 @@ def main():
     publish_branch("l1-contract/elf/badpartid", dict(contract, **bad, **{"manifest.json": json.dumps(man).encode()}))
     publish_branch("l1-contract/elf/badrowid", dict(contract, **{"mode": M6, "guest.elf": ok_elf, "keys.tsv": KEYS_TSV.encode() + b"junk\n"}))
     noent = {k: v for k, v in contract.items() if k != "entries.tsv"}
+    nofacts = {k: v for k, v in contract.items() if k != "elffacts.json"}
+    publish_branch("l1-contract/elf/nofactsid", dict(nofacts, **{"mode": M6, "guest.elf": ok_elf}))
     publish_branch("l1-contract/elf/noentries", dict(noent, **{"mode": M6, "guest.elf": ok_elf}))
     # the REAL renderer files: the pinned nxgl4 and bridge branch commits of the artifacts repository (test_bootgpu.fetch_renderer), published
     # unchanged into the test's bare repository under their real branch names; the broken-chain cases below are mutations of these inputs
@@ -262,6 +264,9 @@ def main():
     rc, out, err = run_job(["noentries"])
     tb.case("missing entries.tsv: job fails naming the file, nothing published", rc == 1 and "entries.tsv" in err and "lacks" in err
             and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/noentries"], cwd=BARE).returncode != 0, (rc, err[-400:]))
+    rc, out, err = run_job(["nofactsid"])
+    tb.case("missing elffacts.json (the link record): job fails naming the file, nothing published", rc == 1 and "elffacts.json" in err and "lacks" in err
+            and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/nofactsid"], cwd=BARE).returncode != 0, (rc, err[-400:]))
     tb.case("no stage branch: final line says stage_table=absent", m is not None and m.group(12) == "absent", last)
     publish_branch("test-stage", {"stage.milestones": b"late any call 0x2000\n"})
     publish_branch("test-stage-bad", {"stage.milestones": b"late any call 0x7000\n"})

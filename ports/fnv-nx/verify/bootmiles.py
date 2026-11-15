@@ -26,7 +26,7 @@ code map first, then in the import map, so a milestone on an import key is possi
 
 resolve() turns the table into {"pc", "ret", "store", "host"}: name -> part ids in table order (guest addresses are the
 ELF symbol value + bias; call and sym parts go to "pc", the three return kinds to "ret"). Every exe address missing from
-the manifest and every symbol missing from the ELF is collected and reported together in one ResolveError.
+the manifest and every symbol missing from the ELF (its link record, bootfacts.py) is collected and reported together in one ResolveError.
 
 Progress rule: a milestone is REACHED only if every earlier milestone (table order) is already reached. A hit earlier is
 reported with out_of_order=True, is not reached and is not credited later; only a new complete hit after the prerequisites
@@ -38,8 +38,11 @@ part id is a KeyError. first_event_index is the index of the event that reached 
 """
 import argparse
 import json
-import struct
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # run as `python3 -I bootmiles.py`
+import bootfacts  # noqa: E402
 
 FORMAT = "fnvnx-bootmiles/1"
 KINDS = ("call", "ret", "retzero", "rettrue", "sym", "store", "host")
@@ -248,58 +251,31 @@ class Progress:
         return names[-1] if names else None
 
 
-def read_section(path, name):
-    """ELF32 little-endian section headers -> [(addr, size)] of every allocated section called NAME (a name no section has: [])"""
-    with open(path, "rb") as f:
-        d = f.read()
-    if d[:4] != b"\x7fELF" or len(d) < 52 or d[4] != 1 or d[5] != 1:
-        raise ElfError(f"{path}: not a little-endian ELF32 file")
-    shoff, = struct.unpack_from("<I", d, 32)
-    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", d, 46)
-    secs = [struct.unpack_from("<10I", d, shoff + i * shentsize) for i in range(shnum)]
-    stroff = secs[shstrndx][4]
-    out = []
-    for nm, _ty, flags, addr, _off, size, *_ in secs:
-        e = d.index(b"\0", stroff + nm)
-        if d[stroff + nm:e].decode("ascii") == name and flags & 2:   # SHF_ALLOC
-            out.append((addr, size))
-    return out
+def alloc_sections(rec, name):
+    """the link record's sections (bootfacts.py) -> [(addr, size)] of every allocated section (flag A) called NAME (a name no section has: [])"""
+    return [(s["address"], s["size"]) for s in rec["sections"] if s["name"] == name and "A" in s["flags"]]
 
 
-def read_symtab(path):
-    """ELF32 little-endian .symtab -> Symbols {name: value} (defined, named symbols). Rule: a GLOBAL/WEAK name at two values is
-    an ElfError (the linker forbids it); a name defined only by STB_LOCAL symbols may repeat at several values (compiler clones
-    such as `f.isra.0`, one per translation unit): it is AMBIGUOUS, left out of the map and listed in .ambiguous, and resolve()
+def symbols(rec):
+    """the link record's defined symbols (bootfacts.py) -> Symbols {name: value} (named symbols, STT_SECTION and STT_FILE rows are not symbols). Rule: a
+    GLOBAL/WEAK name at two values is an ElfError (the linker forbids it); a name defined only by LOCAL symbols may repeat at several values (compiler
+    clones such as `f.isra.0`, one per translation unit): it is AMBIGUOUS, left out of the map and listed in .ambiguous, and resolve()
     reports it only if a table row needs it; a global name wins over local symbols of the same name (as in a link).
     AArch64 mapping symbols ($x, $d, $x.<any>, $d.<any>: AAELF64 "Mapping symbols") mark code/data runs, name nothing
     and repeat by design: they are left out."""
-    with open(path, "rb") as f:
-        d = f.read()
-    if d[:4] != b"\x7fELF" or len(d) < 52 or d[4] != 1 or d[5] != 1:
-        raise ElfError(f"{path}: not a little-endian ELF32 file")
-    shoff, = struct.unpack_from("<I", d, 32)
-    shentsize, shnum = struct.unpack_from("<HH", d, 46)
-    secs = [struct.unpack_from("<10I", d, shoff + i * shentsize) for i in range(shnum)]
-    tabs = [s for s in secs if s[1] == 2]
-    if len(tabs) != 1:
-        raise ElfError(f"{path}: expected exactly one .symtab section, found {len(tabs)}")
-    _, _, _, _, off, size, link, _, _, ent = tabs[0]
-    stroff, strsize = secs[link][4], secs[link][5]
     out, loc, fn = {}, {}, set()
-    for o in range(off, off + size, ent or 16):
-        nm, val, _, info, _, shndx = struct.unpack_from("<IIIBBH", d, o)
-        if nm == 0 or shndx == 0:
+    for s in rec["symbols"]:
+        name, val = s["name"], s["value"]
+        if not name or s["type"] in bootfacts.NOT_SYMBOLS:
             continue
-        e = d.index(b"\0", stroff + nm, stroff + strsize)
-        name = d[stroff + nm:e].decode("ascii")
         if name in ("$x", "$d") or name[:3] in ("$x.", "$d."):
             continue
-        if info & 15 == 2:
+        if s["type"] == "FUNC":
             fn.add(name)
-        if info >> 4 == 0:
+        if s["bind"] == "LOCAL":
             loc.setdefault(name, set()).add(val)
         elif out.setdefault(name, val) != val:
-            raise ElfError(f"{path}: symbol {name} defined at two values (0x{out[name]:x}, 0x{val:x})")
+            raise ElfError(f"symbol {name} defined at two values (0x{out[name]:x}, 0x{val:x})")
     res = Symbols(out)
     res.funcs = fn
     for name, vals in loc.items():
@@ -317,7 +293,7 @@ def main(argv):
     sp = sub.add_parser("resolve", help="resolve the milestone table to guest watch points (WATCH.json, fnvnx-bootmiles/1)")
     sp.add_argument("--table", required=True, help="milestone table text file")
     sp.add_argument("--manifest", required=True, help="entry manifest TSV: exe_addr_hex<TAB>symbol")
-    sp.add_argument("--elf", required=True, help="guest ELF32 with a .symtab")
+    sp.add_argument("--facts", required=True, help="the link record elffacts.json of the guest ELF")
     sp.add_argument("--bias", type=lambda s: int(s, 0), default=0, help="added to every symbol address (default 0)")
     sp.add_argument("-o", required=True, help="output WATCH.json")
     a = ap.parse_args(argv)
@@ -326,7 +302,7 @@ def main(argv):
             table = load_table(f.read())
         with open(a.manifest) as f:
             manifest = load_manifest(f.read())
-        w = resolve(table, manifest, read_symtab(a.elf), a.bias)
+        w = resolve(table, manifest, symbols(bootfacts.load(a.facts)), a.bias)
         doc = {"format": FORMAT, "bias": a.bias, "manifest_id": manifest.table_id,
                "milestones": [{"name": m["name"], "parts": [{k: (f"0x{p[k]:x}" if k == "target" and isinstance(p[k], int) else p[k])
                                                               for k in ("id", "group", "kind", "target", "main")}

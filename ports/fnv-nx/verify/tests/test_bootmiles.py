@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Tests of verify/bootmiles.py: boot milestone table -> watch points, and progress tracking. Plain script, exit 0 on pass.
 
-Pure cases (table parsing, resolve, Progress) run on strings and dicts; the CLI case builds a tiny ELF32 with a .symtab
-using struct (no cross compiler) and runs the tool twice.
+Pure cases (table parsing, resolve, Progress, the symbol rules) run on strings and dicts, the link record included (a dict of the "fnvnx-elffacts/1" format:
+the subject is the parser, not a build); the CLI case writes such a record file and runs the tool twice. Tests that run the product on a real image take the
+record of that image's own build (test_bootmachine.facts_path).
 """
 import json
 import os
@@ -14,6 +15,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
+import bootfacts  # noqa: E402
 import bootmiles as bm  # noqa: E402
 
 FAILS = []
@@ -173,27 +175,13 @@ def progress_cases():
 
 
 def build_elf(path, syms, local=()):
-    names = b"\0"
-    ents = [b"\0" * 16]
-    for n, a in local:   # STB_LOCAL symbols (info 0x02): the same name may repeat at other values (compiler clones .isra.0)
-        ents.append(struct.pack("<IIIBBH", len(names), a, 4, 0x02, 0, 1))
-        names += n.encode() + b"\0"
-    for n, a in syms.items():
-        ents.append(struct.pack("<IIIBBH", len(names), a, 4, 0x12, 0, 1))
-        names += n.encode() + b"\0"
-    symtab = b"".join(ents)
-    off_sym = 52
-    off_str = off_sym + len(symtab)
-    off_sh = (off_str + len(names) + 3) & ~3
-    ehdr = b"\x7fELF" + bytes([1, 1, 1, 0]) + b"\0" * 8 + struct.pack("<HHIIIIIHHHHHH", 2, 40, 1, 0, 0, off_sh, 0, 52, 0, 0, 40, 3, 0)
-
-    def sh(typ, off, size, link, entsize):
-        return struct.pack("<IIIIIIIIII", 0, typ, 0, 0, off, size, link, 0, 4, entsize)
-    shs = b"\0" * 40 + sh(2, off_sym, len(symtab), 2, 16) + sh(3, off_str, len(names), 0, 0)
-    data = ehdr + symtab + names
-    data += b"\0" * (off_sh - len(data)) + shs
-    with open(path, "wb") as f:
-        f.write(data)
+    """the link record (the format of "fnvnx-elffacts/1", bootfacts.py) of an image with these symbols, as the input of the pure resolve cases and of the CLI:
+    PATH gets the record; LOCAL symbols are STB_LOCAL (the same name may repeat at other values: compiler clones .isra.0), SYMS global functions"""
+    rows = [{"name": n, "value": a, "size": 4, "type": "NOTYPE", "bind": "LOCAL", "section": "1"} for n, a in local]
+    rows += [{"name": n, "value": a, "size": 4, "type": "FUNC", "bind": "GLOBAL", "section": "1"} for n, a in syms.items()]
+    rows += [{"name": "g.o", "value": 0, "size": 0, "type": "FILE", "bind": "LOCAL", "section": "ABS"}]   # not a symbol
+    with open(path, "w") as f:
+        json.dump({"format": "fnvnx-elffacts/1", "elf": "g.elf", "sections": [], "symbols": rows, "references": {}}, f)
 
 
 def cli_cases():
@@ -203,7 +191,7 @@ def cli_cases():
         open(P("m.tsv"), "w").write(MANIFEST)
         build_elf(P("g.elf"), SYMS)
         run = lambda out, *x: subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "bootmiles.py"), "resolve", "--table", P("t.txt"),  # noqa: E731
-                                              "--manifest", P("m.tsv"), "--elf", P("g.elf"), "-o", P(out)] + list(x),
+                                              "--manifest", P("m.tsv"), "--facts", P("g.elf"), "-o", P(out)] + list(x),
                                              capture_output=True, text=True)
         a, b = run("w1.json", "--bias", "256"), run("w2.json", "--bias", "256")
         w1, w2 = open(P("w1.json"), "rb").read(), open(P("w2.json"), "rb").read()
@@ -242,18 +230,25 @@ def local_cases():
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "l.elf")
         build_elf(p, {"L_1": 0x100}, local=[("f.isra.0", 0x10), ("f.isra.0", 0x20), ("only", 0x30), ("only", 0x30)])
-        s = bm.read_symtab(p)
-        case("L1 read_symtab: local names at two values are ambiguous, a repeated local at one value is kept",
+        s = bm.symbols(bootfacts.load(p))
+        case("L1 symbols: local names at two values are ambiguous, a repeated local at one value is kept",
              dict(s) == {"L_1": 0x100, "only": 0x30} and s.ambiguous == {"f.isra.0": [0x10, 0x20]}, (dict(s), s.ambiguous))
         build_elf(p, {"L_1": 0x100}, local=[("L_1", 0x10)])
-        case("L2 a global symbol wins over a local of the same name", dict(bm.read_symtab(p)) == {"L_1": 0x100})
+        case("L2 a global symbol wins over a local of the same name", dict(bm.symbols(bootfacts.load(p))) == {"L_1": 0x100})
         build_elf(p, {"L_1": 0x100}, local=[("f.isra.0", 0x10), ("f.isra.0", 0x20)])
-        msg = raises(bm.ResolveError, bm.resolve, bm.load_table("k any sym f.isra.0\n"), {}, bm.read_symtab(p), 0)
+        msg = raises(bm.ResolveError, bm.resolve, bm.load_table("k any sym f.isra.0\n"), {}, bm.symbols(bootfacts.load(p)), 0)
         case("L3 a table row that needs an ambiguous name is reported as ambiguous with the values", msg is not None and "ambiguous" in msg and "0x20" in msg, msg)
 
 
+def section_cases():
+    rec = {"sections": [{"name": ".text", "address": 0x1000, "size": 0x20, "flags": "AX"}, {"name": ".text", "address": 0x3000, "size": 8, "flags": "AX"},
+                        {"name": ".text", "address": 0, "size": 9, "flags": ""}, {"name": ".data", "address": 0x5000, "size": 4, "flags": "WA"}]}
+    case("S1 alloc_sections: every allocated section of the name, the unallocated one left out, an unknown name is []",
+         bm.alloc_sections(rec, ".text") == [(0x1000, 0x20), (0x3000, 8)] and bm.alloc_sections(rec, ".nosuch") == [])
+
+
 def main():
-    for f in (table_cases, resolve_cases, progress_cases, cli_cases, entries_cases, local_cases):
+    for f in (section_cases, table_cases, resolve_cases, progress_cases, cli_cases, entries_cases, local_cases):
         f()
     print(f"{'FAIL' if FAILS else 'PASS'}: {len(FAILS)} failed")
     return 1 if FAILS else 0

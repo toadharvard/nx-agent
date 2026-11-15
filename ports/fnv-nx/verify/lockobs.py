@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Runner of rule R-LOCKOBS (journal/inbox/l4-verify-012.md): the platform-lock observation of a boot-machine run.
-    python3 lockobs.py --out OUT.json --elf ELF --cases CASES.json [--report REPORT.json]
+    python3 lockobs.py --out OUT.json --facts elffacts.json --cases CASES.json [--report REPORT.json]
 The three lock function names default to the os.h API (os_lock, os_trylock, os_unlock) and are arguments (analyze(names=), --lock-syms): the runner is a
 pure function of (OUT.json, ELF symbols, cases, names). Input: OUT.json of `boot.py run --watch-log SYMS` (watch_schema fnvnx-watch/2; SYMS lists os_lock, os_trylock ret, os_unlock, and every case runner
 as `NAME ret`), the ELF (symbols, to map addresses), and the case expectations {"cases": [{"runner_sym": NAME, "violations": [{"dst": SYM|ADDR}
@@ -23,6 +23,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import bootfacts  # noqa: E402
 import bootmiles  # noqa: E402
 
 DEFAULT_NAMES = ("os_lock", "os_trylock", "os_unlock")   # the os.h API; the CLI keeps them as the defaults
@@ -35,8 +36,8 @@ class InputError(Exception):
 
 
 class Symtab:
-    def __init__(self, elf):
-        syms = bootmiles.read_symtab(elf)
+    def __init__(self, facts):
+        syms = bootmiles.symbols(bootfacts.load(facts))
         self.addr = {n: syms[n] for n in syms.funcs if n in syms}
         pairs = sorted((a, n) for n, a in self.addr.items())
         self.starts, self.names = [a for a, _ in pairs], [n for _, n in pairs]
@@ -128,7 +129,7 @@ def analyze(doc, cases, syms, names=DEFAULT_NAMES):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", required=True)
-    ap.add_argument("--elf", required=True)
+    ap.add_argument("--facts", required=True, help="the link record elffacts.json of the guest ELF")
     ap.add_argument("--cases", required=True)
     ap.add_argument("--report")
     ap.add_argument("--lock-syms", default=",".join(DEFAULT_NAMES), metavar="LOCK,TRYLOCK,UNLOCK",
@@ -142,7 +143,7 @@ def main(argv=None):
         names = tuple(a.lock_syms.split(","))
         if len(names) != 3:
             raise InputError("--lock-syms wants three names")
-        rep = analyze(doc, cases, Symtab(a.elf), names)
+        rep = analyze(doc, cases, Symtab(a.facts), names)
     except (InputError, OSError, ValueError, KeyError, bootmiles.ElfError) as e:
         print("lockobs: input error: %s" % e, file=sys.stderr)
         return 1

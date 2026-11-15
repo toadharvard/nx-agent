@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions.
 
-  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
+  boot.py run --elf GUEST.elf --facts elffacts.json --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
               --quantum N [--declared-inputs PIN] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
@@ -64,6 +64,7 @@ from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0, UC_ARM64_REG_X
 
 import bootinput
 import bootdecl
+import bootfacts
 import bootgpu
 import bootlayout
 import bootmachine
@@ -75,7 +76,7 @@ HOST_PREFIX = "console."
 HOST_EVENTS = ("present", "gpu-first-call")
 GPU_ENV = {"LIBGL_ALWAYS_SOFTWARE": "1", "GALLIUM_DRIVER": "llvmpipe", "EGL_PLATFORM": "surfaceless"}
 INPUT_ERRORS = (bootdecl.InputError, bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
-                bootmiles.ElfError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
+                bootmiles.ElfError, bootfacts.FactError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
 
 
 def store_frame(directory, frame):
@@ -262,7 +263,8 @@ def run(a):
         table = bootmiles.load_table(f.read())
     with open(a.manifest) as f:
         manifest = bootmiles.load_manifest(f.read())
-    syms = bootmiles.read_symtab(a.elf)
+    facts = bootfacts.load(a.facts)   # the link record of the ELF: the one source of its sections and symbols
+    syms = bootmiles.symbols(facts)
     watch = bootmiles.resolve(table, manifest, syms, base)
     host = _host_lines(watch["host"])
     wl, wl_ret, wl_mem, wl_until = _watch_names(a.watch_log, syms) if a.watch_log else (None, set(), {}, {})
@@ -359,7 +361,7 @@ def run(a):
                     rets_hooked.add(x30)
                     m.watch_pc(x30, lambda tid_, pc_, x30=x30: returned(x30))
         m.watch_pc(syms[name] + base, logged)
-    fnvl = bootmiles.read_section(a.elf, ".text.fnvl") if wl is not None else []
+    fnvl = bootmiles.alloc_sections(facts, ".text.fnvl") if wl is not None else []
     for lo, size in fnvl:   # game entry: a call from outside the lifted section into it (the section's own range, no list of functions)
         def entered(tid, src, dst):
             unwind(tid)
@@ -451,7 +453,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("run", help="run the guest and write OUT.json (format %s)" % FORMAT)
-    for opt in ("--elf", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
+    for opt in ("--elf", "--facts", "--reserved", "--keys", "--root", "--milestones", "--manifest", "--out"):
         sp.add_argument(opt, required=True)
     sp.add_argument("--heap-size", required=True, type=lambda s: int(s, 0))
     sp.add_argument("--game")

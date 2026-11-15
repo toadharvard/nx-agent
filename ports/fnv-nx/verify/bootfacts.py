@@ -17,7 +17,7 @@ FORMAT = "fnvnx-elffacts/1"
 NOT_SYMBOLS = ("SECTION", "FILE")
 
 
-class FactError(Exception):
+class FactError(ValueError):
     pass
 
 

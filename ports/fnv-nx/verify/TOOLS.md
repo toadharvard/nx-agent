@@ -754,7 +754,7 @@ Register ids are normalised through MCRegisterInfo super-register chains to the 
 ```text
 The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions.
 
-  boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
+  boot.py run --elf GUEST.elf --facts elffacts.json --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
               --quantum N [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
@@ -944,7 +944,8 @@ symbol(rec, name)               the one value; FactError unless the name is defi
 symbol_bytes(rec, data, name)   the st_size bytes of the symbol, read from the image DATA through its PT_LOAD program headers
                                 (bootlayout.file_bytes); FactError for a bss symbol
 ```
-Consumers: icount.py spec (`--facts`), tests/test_bootmachine.py (modes_of, symbol). Tests: tests/test_bootfacts.py.
+Consumers: icount.py spec, boot.py run, bootmiles.py resolve and lockobs.py (all take `--facts elffacts.json`; boot.py reads the image itself from `--elf` for its program headers only), tests/test_bootmachine.py
+(modes_of, symbol, facts_path). bootmiles.symbols / alloc_sections apply the symbol rules (global vs local, mapping symbols) to the record. Tests: tests/test_bootfacts.py (the guest image's own record).
 
 ## verify/bootmachine.py
 

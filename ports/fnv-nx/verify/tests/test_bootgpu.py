@@ -156,7 +156,7 @@ def main():
     tb.write_mode(root, 80)
 
     def args(out, fr, *extra):
-        return ["run", "--elf", elf, "--reserved", w("res.tsv", "exe\t400000\t2100000\nmod2\t4000000\t4200000\n"), "--keys", "f0000:200000",
+        return ["run", "--elf", elf, "--facts", tb.facts_path(), "--reserved", w("res.tsv", "exe\t400000\t2100000\nmod2\t4000000\t4200000\n"), "--keys", "f0000:200000",
                 "--heap-size", "0x100000", "--root", root, "--quantum", str(tb.QUANTUM), "--milestones", table, "--manifest", w("m.tsv", "1000\tmarker\n"),
                 "--out", os.path.join(d, out), "--gpu", lib, "--frames", os.path.join(d, fr), *extra]
 

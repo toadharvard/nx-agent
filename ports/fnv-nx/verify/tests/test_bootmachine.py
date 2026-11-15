@@ -66,12 +66,16 @@ def build():
     return open(path, "rb").read(), path
 
 
-def facts():
-    """the link record of the guest image (elffacts.json of the same build: the one source of its sections and defined symbols, bootfacts.py)"""
+def facts_path():
+    """the path of the link record of the guest image (elffacts.json of the same build: the one source of its sections and defined symbols, bootfacts.py)"""
     res, out = gate_build.ensure(GUEST_ROOT, GATE_CACHE, REPO)
     if res["status"] != "green" or "elf_facts" not in res:
         raise RuntimeError("guest image: the link record is missing (%s)" % res["status"])
-    return bootfacts.load(res["elf_facts"]["path"])
+    return res["elf_facts"]["path"]
+
+
+def facts():
+    return bootfacts.load(facts_path())
 
 
 def modes_of(elf_bytes):

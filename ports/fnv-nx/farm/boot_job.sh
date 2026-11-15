@@ -221,7 +221,7 @@ conv "${BI[@]}" milestones --table "$IN/milestones.tsv" --entries "$IN/entries.t
 
 # 5. boot
 OUT=$WORK/OUT.json; rm -f "$OUT" "$WORK/OUT.console.txt"
-BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --reserved "$IN/reserved.tsv" --keys "$KEYS" --heap-size 0x40000000
+BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --facts "$IN/elffacts.json" --reserved "$IN/reserved.tsv" --keys "$KEYS" --heap-size 0x40000000
       --profile "$PROFILE" --root "$SD" --game "$GAME_DIR" --declared-inputs "$PINS" --milestones "$IN/table.txt" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
 BOOT+=(--quantum "$QUANTUM")
 [ -z "$LIMIT" ] || BOOT+=(--limit-instructions "$LIMIT")
