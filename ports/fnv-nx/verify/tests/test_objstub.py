@@ -83,6 +83,12 @@ check("terminators: longjmp family (<setjmp.h>) is a control transfer, an unwind
       and all("~" + n in libc_sj and n not in libc_sj for n in ("longjmp", "siglongjmp")), (cxx_sj, libc_sj))
 check("terminators: __cxa_throw is an unwinder when exceptions are enabled and a terminator under -fno-exceptions", "~__cxa_throw" in cxx_sj and "__cxa_throw" not in cxx_sj
       and "__cxa_throw" in cxx_ne and "~__cxa_throw" not in cxx_ne, (cxx_sj, cxx_ne))
+open(os.path.join(ROOT, "infer.h"), "w").write("#include <setjmp.h>\nextern jmp_buf jb;\nvoid helper(int e);\nvoid decl_nr(void) __attribute__((noreturn));\n")
+open(os.path.join(ROOT, "infer.c"), "w").write('#include "infer.h"\njmp_buf jb;\nvoid helper(int e) { longjmp(jb, e); }\n')
+so_inf = objstub.plugin_so(CC, tempfile.mkdtemp(prefix="objstub-inf-"))[0]
+subprocess.run([CC, "-O2", "-I" + ROOT, "-S", "-o", os.devnull, "-fplugin=" + so_inf, "-fplugin-arg-objstub_plugin-out=" + tf + ".inf", "-fplugin-arg-objstub_plugin-ret=" + tf + ".infr", os.path.join(ROOT, "infer.c")], check=True)
+inf_names = objstub.read_list(tf + ".inf")
+check("terminators: a function GCC infers to never return (ends in longjmp) is not declared noreturn and is no terminator; a declared one is", "decl_nr" in inf_names and "helper" not in inf_names, inf_names)
 print("INFO libc set size %d, c++ set size %d" % (len(libc), len(cxx)))
 
 for abi in ("ilp32", "lp64"):

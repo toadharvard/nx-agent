@@ -15,15 +15,21 @@
 #include <string>
 #include <cstdio>
 int plugin_is_GPL_compatible;
-static std::set<tree> decls, defs;
+static std::set<tree> decls, defs, declared_noreturn;   // declared_noreturn: noreturn as the source DECLARES it (read while parsing)
 static std::string outpath, retpath;
 static void on_decl(void *gcc_data, void *) {
   tree d = (tree)gcc_data;
-  if (d && TREE_CODE(d) == FUNCTION_DECL) decls.insert(d);
+  if (d && TREE_CODE(d) == FUNCTION_DECL) {
+    decls.insert(d);
+    if (TREE_THIS_VOLATILE(d)) declared_noreturn.insert(d);
+  }
 }
 static void on_def(void *gcc_data, void *) {
   tree d = (tree)gcc_data;   // PLUGIN_FINISH_PARSE_FUNCTION: a function definition has been parsed
-  if (d && TREE_CODE(d) == FUNCTION_DECL) defs.insert(d);
+  if (d && TREE_CODE(d) == FUNCTION_DECL) {
+    defs.insert(d);
+    if (TREE_THIS_VOLATILE(d)) declared_noreturn.insert(d);
+  }
 }
 static void on_unit(void *, void *) {
   // Terminators: noreturn functions that END THE PROCESS. Unwinders (printed as "~name"): calls that continue the propagation of an
@@ -40,7 +46,7 @@ static void on_unit(void *, void *) {
     if (d && DECL_NAME(d)) unw.insert(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)));
   }
   for (tree d : decls)
-    if (TREE_THIS_VOLATILE(d) && DECL_NAME(d)) {
+    if (declared_noreturn.count(d) && DECL_NAME(d)) {   // DECLARED noreturn: the flag GCC's own inference sets later (pure-const) is not a declaration
       std::string n = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
       const char *src = DECL_SOURCE_FILE(d);
       std::string base = src ? std::string(src).substr(std::string(src).find_last_of('/') + 1) : "";
@@ -57,7 +63,7 @@ static void on_unit(void *, void *) {
     // (recipe external_errors) is read against it.
     std::set<std::string> rows;
     for (tree d : defs)
-      if (DECL_NAME(d)) {
+      if (DECL_NAME(d) && DECL_ASSEMBLER_NAME_SET_P(d)) {   // a template pattern has no assembler name (mangling it would be wrong): only emitted definitions
         tree t = TREE_TYPE(TREE_TYPE(d)), n = t ? TYPE_NAME(t) : NULL_TREE;
         if (n && TREE_CODE(n) == TYPE_DECL && DECL_NAME(n))
           rows.insert(std::string(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d))) + "\t" + IDENTIFIER_POINTER(DECL_NAME(n)));

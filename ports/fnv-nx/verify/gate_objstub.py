@@ -56,7 +56,7 @@ def root_check(root, repo, cache, jobs):
             unit_of = {k: u for u, k in res["pp_keys"].items()}
             bad += [(base + unit_of[k], unit_of[k], "terminator-red", "root %s: %s" % (root, e)[:300]) for k, e in errs]
     if bad:   # the terminator set of the root is incomplete: its objects cannot be judged, each failing unit is a finding
-        return {}, {}, set(), bad, None, None, {}, {}, {}
+        return {}, {}, set(), bad, None, None, {}, {}
     os_ids = {base + o["unit"] for o in res["objects"] if o["os_layer"]}
     rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
     eh = rec.get("empty_handlers")

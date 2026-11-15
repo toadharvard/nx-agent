@@ -25,7 +25,7 @@ runs off the end after a call the compiler knew not to return), except a BL of `
 a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
-class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
+class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, read while the unit is parsed: the DECLARED noreturn; a function that GCC's pure-const pass later finds to never return, because it ends in a longjmp or an exit, is not declared noreturn and is not a terminator; TREE_NOTHROW) and its own EH lowering: (1) the
 EH-resume routines are the explicit builtins GCC's RESX lowering emits (`builtin_decl_explicit` of BUILT_IN_UNWIND_RESUME and
 BUILT_IN_CXA_END_CLEANUP: `_Unwind_Resume` on AArch64, whatever the target uses); (2) in a C++ TU a noreturn function that is not
 nothrow may raise an exception by the language (`__cxa_throw`, `__cxa_rethrow`, the `std::__throw_*` helpers), so it is not process
