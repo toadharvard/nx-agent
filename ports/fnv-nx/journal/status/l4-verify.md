@@ -382,3 +382,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - test_bootgpu: red at ld:tests/bootguest, because lib/sha256 is red at cc:sha256.c (fnvnx_layout .fnvnx.decltype: vector_type outside the grammar). Blocked: owner L1/L2, reported.
   - Commits for owners: 3f37422c9 (gl4 link.roots, superseded by L6A 3b360ffd2) and 974297f47 (lift/tests link.roots, L3a).
 - 14:58: The sha256 decltype red is closed upstream: L2 VEC1 adds a vector grammar row, and L1 cand2 a26a94f84 builds green. w7 is taking cand2's plugin pins and rerunning test_bootgpu.
+- 15:05: w7-u 923860c2b. lib/sha256 is green (cand2 VEC1 plugins), and gl4 sha 6f9480f4… is unchanged.
+  - test_bootgpu: red at ld:tests/bootguest via lift/bridges → uses lift/descs, a C compile error in d3d9types.h:1579 (file-scope static_assert under C).
+  - w7 is moving lift/ whole to L3a t16l 18c2b9cde and checking whether it persists (owner L3a descs / L6 header).
