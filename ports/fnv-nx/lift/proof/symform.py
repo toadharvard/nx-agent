@@ -200,7 +200,7 @@ def shape_sha(key):
 def eip_dependence(sf):
     """'none' | 'target' (the eip effect is not eip + constant: a relative transfer) | 'data' (eip is read by a register / flag / store / fault effect: a
     return address).  By the structure of the Form, not by mnemonic."""
-    f = sf.form; data = [v for _, v, _ in f.regs] + [w for _, _, w in f.regs if w is not None] + [v for _, v, _ in f.flags] + [x for st in f.stores for x in st] + \
+    f = sf.form; data = [v for _, v, _ in f.regs] + [w for _, _, w in f.regs if w is not None] + [v for _, v, _ in f.flags] + [x for st in f.stores for x in st] + [f.swhen[i] for i in sorted(f.swhen)] + \
         [c for _, c in f.faults] + ([f.flo] if f.flo is not None else [])
     def reach(roots):
         seen, st = set(), list(roots)
@@ -264,7 +264,7 @@ def normalize(form, env=None):
     for k, v in (env or {}).items(): e[('var' if k == 'eip' else 'fld', k)] = v
     S = Subst(e); g = copy.copy(form)
     g.regs = [(r, S(v), None if w is None else S(w)) for r, v, w in form.regs]; g.flags = [(f, S(v), None if w is None else S(w)) for f, v, w in form.flags]
-    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.faults = [(k, S(c)) for k, c in form.faults]; g.undef = dict(form.undef)
+    g.stores = [(S(a), S(v)) for a, v in form.stores]; g.swhen = {i: S(w) for i, w in form.swhen.items()}; g.faults = [(k, S(c)) for k, c in form.faults]; g.undef = dict(form.undef)
     g.eip = S(form.eip); g.flo = None if form.flo is None else S(form.flo); g.pend = {}
     if isinstance(form.addr, N):
         a = S(form.addr); g.addr = a.x if a.op == 'const' else a

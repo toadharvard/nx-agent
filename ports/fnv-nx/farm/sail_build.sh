@@ -11,7 +11,7 @@
 # What this script adds: the proof IR x86_proof.ir = the stock model + two extra splices that move instruction fetch into a register
 # window (x86_code_regs.sail declares code_base/code_bytes and is compiled first; x86_fetch.sail replaces `rb`).  The stock x86.ir
 # cannot be used because isla-execute-function has no memory initialisation: fetching from symbolic memory forks on every opcode.
-# Options: --stock builds the UNPATCHED model IR (x86_proof_stock.ir); default builds x86_proof.ir with the three local fixes of sail_patches/.
+# Options: --stock builds the UNPATCHED model IR (x86_proof_stock.ir); default builds x86_proof.ir with the local fixes of sail_patches/.
 STOCK=0; [ "${1:-}" = "--stock" ] && STOCK=1
 set -euo pipefail
 REMS=${REMS:-/home/user/rems-project}; TOOLS=${TOOLS:-/home/user/l3tools}; WORK=${WORK:-/home/user/l3work/proof}
@@ -30,8 +30,14 @@ eval "$($TOOLS/opam env --switch=sail)"; export PATH=$REMS/isla/isla-sail:$PATH
 [ -f "$MODEL/x86.ir" ] || make -C "$MODEL" x86.ir
 
 # proof IR: same file list as the model Makefile (PRELUDE_SAILS MODEL_SAILS MAIN_SAIL), plus the window registers first
-OUT=$WORK/sail/x86_proof; PATCHES="$HERE/sail_patches/rotate_count.sail $HERE/sail_patches/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail"
+OUT=$WORK/sail/x86_proof; PATCHES="$HERE/sail_patches/rotate_count.sail $HERE/sail_patches/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail"
 [ $STOCK = 1 ] && { OUT=${OUT}_stock; PATCHES=""; }
+# The pinned IR (BUMP defaults to 1; BUMP=0 rebuilds the superseded IR 70c8dc39...): the stock model + transcriptions of ACL2 master hunks in sail_patches/bump/ (cmps, rol/ror count 0, ror CF, sar count >= size, cpuid, bsf/bsr, + their dispatch arms)
+if [ "${BUMP:-1}" = 1 ] && [ $STOCK != 1 ]; then
+    B=$HERE/sail_patches/bump; mkdir -p "$WORK/sail/gen"; python3 "$B/cpuid_dispatch.py" "$MODEL" "$WORK/sail/gen/cpuid_dispatch0.sail" \
+      && python3 "$B/bsf_bsr_dispatch.py" "$WORK/sail/gen/cpuid_dispatch0.sail" "$WORK/sail/gen/cpuid_dispatch.sail"
+    PATCHES="$HERE/sail_patches/rotate_count.sail $B/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail $B/cmps.sail $B/rol_count0.sail $B/sar_bigcount.sail $B/cpuid.sail $B/bit_bsf_bsr.sail $WORK/sail/gen/cpuid_dispatch.sail"
+fi
 FILES="prelude.sail register_types.sail registers.sail register_accessors.sail opcode_ext.sail memory_accessors.sail init.sail config.sail logging.sail step.sail main.sail"
 newest=$(ls -t $PATCHES "$HERE/x86_fetch.sail" "$HERE/x86_code_regs.sail" $(for f in $FILES; do echo "$MODEL/$f"; done) "$MODEL"/../test-generation-patches/*.sail | head -1)
 if [ ! -f "$OUT.ir" ] || [ "$newest" -nt "$OUT.ir" ]; then

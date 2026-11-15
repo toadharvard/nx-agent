@@ -10,7 +10,7 @@ Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); cert
 
 Universe: the ENCODING SHAPES of the lifted pack, whole: the rows `shape_key<TAB>family<TAB>count` of shapes.tsv (sorted by key, unique, family in
 int x87 simd sys) inside the external `liftpack`; the generate driver of the pack writes it with proof/shape.py:shape_key. The gate has no decoder
-of the exe and no census of its own. A shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result) has a row with
+of the exe and no census of its own. A shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result obligations undef_flags def0_witness def0_free nonflag_free) has a row with
 the same shape key, the dsl_sha that the CURRENT code gives (symform.shape_sha(key): sha256 of the symbolic Form, immediate / displacement /
 relative-target fields as variables; the same function the prover writes the field with; none when the shape has no symbolic Form: then the shape
 is uncertified), the pinned model_sha256 and result == proved. The hash binds the certificate to the builder code (forms*.py, dsl.py, symform.py)
@@ -27,6 +27,7 @@ TODAY (no pack with shapes.tsv is published): the committed file declares only `
 To make it live add ONE entry to "external" in formgate_inputs.json:
   {"name": "liftpack", "repo": "fnv-nx-build", "ref": <branch of the pack>, "commit": <40 hex>, "tree_sha256": <cas tree hash of that commit's checkout>, "at": "/ext/liftpack"}
 (tree_sha256 = what recipe.fetch_externals reports for it)."""
+import hashlib
 import json
 import os
 import re
@@ -158,14 +159,54 @@ def load_shapes(path):
     return out
 
 
+OBLIGATIONS = ("def0",)      # = prove.OBLIGATIONS (test_formgate checks it; this module imports no SMT solver): a row certifies only what the current prover checks
+
+
+def declared_table():
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "declared.json")) as fh:
+        return json.load(fh)
+
+
+def platform_sha(fns, root=None):
+    """= prove.platform_sha (test_formgate checks they agree; this module imports no SMT solver): sha256 over (relative path, content) of the declared.json sources of the functions, hashed from the lift tree this gate runs from"""
+    root = root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    rows = {u: r for r in declared_table()["rows"] for u in r["ufs"]}
+    h = hashlib.sha256()
+    for src in sorted({rows[f]["source"] for f in fns}):
+        h.update(src.encode()); h.update(open(os.path.join(root, src), "rb").read())
+    return h.hexdigest()
+
+
+def declared_ok(decl, root=None):
+    """`reg:fn,...@sha256`: every pair is allowed by declared.json (function, output), and the sha is that of the platform sources in this tree"""
+    try:
+        pairs, sha = decl.rsplit("@", 1)
+        rows = {u: r for r in declared_table()["rows"] for u in r["ufs"]}
+        fns = []
+        for p in pairs.split(","):
+            reg, fn = p.split(":")
+            if fn not in rows or reg not in rows[fn]["outputs"]: return False
+            fns.append(fn)
+        return sha == platform_sha(fns, root)
+    except (ValueError, KeyError, OSError):
+        return False
+
+
+
 def load_certs(path, model_sha):
     """{shape: set of dsl_sha} of the rows that are proofs against the pinned model"""
     ok = {}
     for r in rows(path):
-        if len(r) != 6:
+        if len(r) != 12:
             raise Red("certs.tsv: bad row %r" % "\t".join(r)[:100])
-        key, _, dsl, model, ref, res = r
-        if res == "proved" and model == model_sha and ref in REFERENCES:
+        key, _, dsl, model, ref, res, obl, decl = r[:7] + r[11:]
+        # `proved`: every output equals the model's.  `agree-except-declared`: every output equals the model's EXCEPT the registers listed in the declared column
+        # (reg:function pairs, @platform sha256), which the Form takes from a platform function (cpuid: rt/cpumodel.c); a proved row declares nothing
+        if res not in ("proved", "agree-except-declared") or (res == "proved") != (decl == "-"):
+            continue
+        if decl != "-" and not declared_ok(decl):
+            continue                                                # a declared output outside declared.json, or a platform source that is not the one of this tree: stale
+        if model == model_sha and ref in REFERENCES and obl == ",".join(OBLIGATIONS):
             ok.setdefault(key, set()).add(dsl)
     return ok
 

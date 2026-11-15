@@ -1,0 +1,272 @@
+# l3b w4: per-form certificate keys, 0x67, push/pop r16, bound, mirror run
+
+Branch claude/fnv-l3b-lift-w4. Commits: 18a2e8b5 (cert key + farm queue), 86c3d193 (0x67), 7b2dd605 (push/pop 16, bound), then two farm-script commits
+(empty queue; python dependencies). Raw prover records: fnv-nx-build branch `l3b-lift/w4-results` @054c686.
+
+## 1. Certificate key (18a2e8b5)
+Rule: a record is a certificate of a shape iff (shape key, symform.shape_sha(key) of the CURRENT DSL, IR sha256) all match and result == proved.
+No run id, no DSL source hash. certs_build.py ignores non-matching records (stale-dsl / stale-model counted, never refused; contradictions proved vs FAILED
+on the same current triple still refuse). `certs_build.py --queue SHAPES --shards ...` lists the int shapes with a Form and no valid certificate; the farm
+(farm_shapeprove.sh) fetches all published shards under the prefix, proves only the queue, branch = <IR id>-<queue id>/<K>of<N>; empty queue = exit 0.
+formgate.py already compared per encoding with symform.shape_sha; unchanged.
+Tests: test_certs_build (stale ignored; DSL edit re-queues exactly the changed forms; failed/timeout stay queued), test_formgate
+(test_certificate_stale_after_a_dsl_edit_is_refused). 59 tests in proof/tests run; 1 error = test_fpexact, `elftools` missing in this container.
+Real shapes (l3b-lift/shapes @7752455, 26,500 shapes): 19,416 int shapes had a Form before my forms; queue of the empty-shard state now 19,494.
+Editing ONE mnemonic's builder changes shape_sha of: xor 598, add 2,660, mov 4,746, push 185 shapes (measured by an edit that adds an undefined flag);
+every other certificate stays valid.
+
+## 2. Prefix 0x67: MODELLED (86c3d193)
+fnvlift translates 0x67 (core.py ea, f_string.py, f_sys.py), so the DSL models it. forms.py `ea`: 16-bit sum base+index*scale+disp mod 2^16, zero-extended,
+segment base added after (SDM Vol.2 2.1.5 Table 2-1, Vol.1 3.7.5). New `AReg` for SI/DI/CX/BX of string, loop, jcxz, xlat (low word written, upper half kept).
+Prover on all 295 int shapes with 0x67 that have a Form: proved 270, model-gap 14, FAILED(dsl) 11.
+FAILED(dsl) 11 (all three shards, records in l3b-lift/w4-results):
+ * CORRECTION (w4, after the first report): the push/pop failures are NOT a model stack-size defect. `6751` (push ecx, 0x67) proves; `6451`, `6551`, `656751`, `676451`
+   fail, i.e. exactly the encodings with a 0x64/0x65 byte. Cause: the prover DRIVER (model_sail._post / run_path) added a free fs_base / gs_base to EVERY memory access of an
+   instruction that carries a 0x64/0x65 byte (isla can initialise seg_hidden_bases with one value for all six segments, not per segment), including the implicit SS stack
+   access and ES:EDI. Fixed as a class, in the model: sail_patches/segment_bases.sail (FS / GS base = two symbolic registers, each access carries its own segment's base) and the
+   driver's blanket addition and prove.py's "forced to 0" workaround are deleted. The 2 segment-prefix cases (6765206400, 67652e0a00) are the same cause.
+
+## 3. push/pop 16-bit, bound (7b2dd605)
+forms_move push/pop: width 16 under 0x66 (ESP+-2, 16-bit store/load, reg write keeps the upper half). Of the 8 int shapes with push/pop + 0x66: proved 6;
+the 2 FAILED(dsl) are those that also carry 0x67 (see above).
+bound: forms_flow `bound`: fault code 4 (#BR) = slt(index, lower) | slt(upper, index), state unchanged; f_dsl.py maps code 4 to FNVL_BOUNDS as a fault (trap=False,
+same as the hand handler f_sys.h_bound). 75 int shapes got a Form; prover: all 75 model-gap, "Opcode Unimplemented in x86isa!" (the Sail model does not
+implement BOUND). So bound stays uncertified by the model: needs another reference (SDM table, a host test) or a model extension: L3b decision.
+Int shapes with a Form: 19,416 -> 19,494 (+78: bound 75, pop r16 3). Still no builder (int family, counted at the time of the run): arpl 157, sal 43, les 42, lds 23, daa/das/aas/aaa/aad/aam, salc,
+popaw/pushaw, retf, lcall/ljmp, mov sreg, enter (symbolic branch).
+
+## 4. :NON-WRITABLE-SEGMENT (model clause, not patched)
+sail-x86-from-acl2 model/memory_accessors.sail, `store_bytes_to_ea`, lines 100-103:
+`if not_bool(in_64bit_mode(proc_mode)) & (seg_reg == 1 | seg_attrs[w] == 0b0) then x86_fault(":NON-WRITABLE-SEGMENT")`.
+seg_reg == 1 is CS: a store through a CS override (0x2e, or last-wins 2e) always faults in the model (matches hardware: CS is not writable, #GP).
+model_sail.FAULT_OK = {:SEGMENT-LIMIT-FAIL, :OUT-OF-SEGMENT-INSTRUCTION-POINTER} lacks it, so those shapes are model-gap. DSL and lifter (core.ea) ignore the CS
+override and store: a lifter gap for the CS-store class (Windows: STATUS_ACCESS_VIOLATION). In this run: 10 of the 295 0x67 shapes, 1 of 40 farm shapes.
+The rule that closes the class is a DSL fault for any store with seg == cs (needs a #GP fault code and the lifter's raise), not an exemption of the model fault.
+
+## 5. Mirror run (the path the farms use)
+Clean /home/user/l3work, toolchain built from tools/sail-mirror @33c9badb (verified head), `PUBLISH=0 LIMIT=40 bash farm/farm_shapeprove.sh 1 400`.
+ * Machine: 4 cores, 15 GB RAM (free 15 GB idle), 252 GB disk.
+ * Toolchain from the mirror (apt, opam switch, isla cargo, IR): about 25 min wall (opam 422 s). IR sha256 equalled the pin (the script's check passed).
+ * First attempt FAILED after the toolchain: prove.py -> enc_table.py imports `keystone`; the mirror path installs neither capstone nor keystone. Fixed in
+   farm_shapeprove.sh (pip install capstone==5.0.9 keystone-engine==0.9.2, versions as measured, from PyPI, not hash-pinned; mirror them if the farm has no PyPI).
+ * Second run (toolchain warm): shard 1/400 of the 19,494-shape queue, 40 shapes: proved 39, model-gap 1 (2e006900: :NON-WRITABLE-SEGMENT), wall 446 s
+   including ~17 s of queue computation = 11.1 s/encoding (the handoff estimate 11.5 s held).
+ * Targeted run (same prover, 3 processes in parallel on the 4 cores, 373 shapes, 0x67 + bound + push/pop16): shards proved 93+91+92 = 276, FAILED(dsl) 11,
+   model-gap 86; wall time of that run was not timed separately (the three shards finished within the monitor window, ~12 s/encoding/process by the 40-shape rate).
+ * Whole queue estimate: 19,494 x 11.1 s = 60 CPU-hours (before re-runs of timeouts). Memory: each process runs under ulimit -v 6,000,000 KB; I did not measure
+   the RSS peak, so shards-in-parallel within VMEM_KB = 6 GB per process: 15 GB / 6 GB = 2 by address-space budget, 3 ran side by side here without trouble
+   (4 cores bound it at 4). That is a bound by arithmetic, not by a measurement of peak RSS.
+Not done: no publication run (PUBLISH=1) was made; no certs.tsv was rebuilt from these records (certs_build --shards on them is the next step; the
+formgate pin of certs.tsv must be updated then).
+
+## 6. The shape queue: scope and superset argument (w4, f46bf37d + this note)
+Source: fnv-nx-build branch l3b-lift/shapes @77524556d0ce5d10f22451870350caa2f66dd724. KEYS.tsv pins, per module, image_sha256, ranges_sha256, tool_sha256 (= sha256(proof/shape.py + proof/census.py))
+and the sha256 of its shapes.tsv; farm_shapeprove.sh refuses a mismatch. Modules (7 images): FalloutNV, atimgpud, binkw32, d3dx9_31, d3dx9_38, libvorbis, libvorbisfile. Each shapes.tsv = proof/census.py
+output: ONE row per shape key = proof/shape.py shape_key(instruction) over EVERY instruction of the recursive code ranges (ranges.tsv of the module facts), each distinct range decoded from its start.
+Union of the 7 modules (distinct shape keys, global): int 19 817, x87 2 175, simd 4 369, sys 139 = 26 500.
+Queue of farm_shapeprove.sh = the INT family only (shapeprove.py: "Integer family only (shape.family == 'int'); the other families have their own provers") that has a DSL Form and no valid cert:
+19 494 of the 19 817 int shapes at this commit (the other 323 have no builder yet or a builder precondition: no-form / builder-branches-on-field / field-decode, printed per class by shapeprove). x87 (2 175),
+simd (4 369) and sys (139) shapes are NOT in this queue: x87/simd have no run of the x86isa integer model (their own provers / the FP exactness gate), sys has the forms_sys builders of stage 2. Nothing of them is certified by the 19 494 run.
+Superset argument: every instruction the lifter emits is decoded from the same code ranges of the same images (the lifter's input is the ranges, the census decodes the ranges); a shape key is a function of the
+instruction's bytes (prefix, opcode, ModRM, SIB bytes kept; immediate, displacement and relative-target bytes masked), so the shape of every emitted instruction is a row of that module's shapes.tsv, hence in the
+union, by construction. It holds only while (1) the lifter's ranges = the census ranges (same ranges_sha256), (2) every range decodes: FalloutNV has `# undecodable 00e7c100-00e7c1d9 stopped_at=00e7c11c`, i.e. the
+shapes of instructions after 00e7c11c in that range are NOT in the universe (census exit status 1) - the ranges owner must resolve it or exclude the range from the lifter; I did not check whether the lift pack
+ranges contain it; (3) 'the family is a function of the shape' (census.py docstring Assumption, checked per shape by re-decoding the representative, not proved; no ASM id for it yet).
+Not certifiable yet (not failed): 75 bound shapes + 67ac (lodsb with 0x67) = model-gap 'Opcode Unimplemented in x86isa!' (model fact, case (b)); 671e (push ds) FAILED(dsl) = the sreg operand has no source variable (stage 2).
+
+## 7. BOUND census (w4; measured at l3b-lift/shapes @77524556, shape rows of proof/census.py; global over the 7 images)
+BOUND (opcode 62, ModRM mod != 11, form_key bound|r32,m64|62, + prefixed variants): 75 distinct shapes, 1 272 sites (an instruction address counted once per shape). Per module: FalloutNV 12 shapes / 30 sites,
+d3dx9_31 42 / 312, d3dx9_38 66 / 930 (shapes are shared between modules, so 75 is the union, not the sum), atimgpud, binkw32, libvorbis, libvorbisfile 0 / 0. Largest: 626500 (be\0) 263 sites d3dx9_38 / 102 d3dx9_31;
+626100 75 / 12; 626900 90 / 28; 626c6500 111 / 44; 6200 46 (d3dx9_38), 18 (FalloutNV). Indicator ONLY (not a rule): 105 of the 117 module-shape rows (FalloutNV 5 of 12, d3dx9_31 39 of 42, d3dx9_38 61 of 66) are made of printable-ASCII or
+NUL bytes only (62 65 00 = "be\0", 62 6c 65 00 = "ble\0"): the byte pattern of text decoded as code inside the census ranges. Reachability of each site is NOT decided here: that is the closure / call-graph rule's (sites per module are
+in the census rows: first_address is in shapes.tsv, the full site list needs census.py with the facts, which are private). Model fact: x86isa does not implement BOUND ('Opcode Unimplemented in x86isa!'), so no certificate is possible; DSL builder: forms_flow `bound`
+(fault kind 4, state unchanged otherwise), certificate-free until the orchestrator decides. Same class: 67ac (lodsb under 16-bit addressing) 1 shape: model 'Opcode Unimplemented'.
+
+## 8. forms_sys intake (w4, from L3a's e9124b30; measured at shapes @77524556)
+Taken byte for byte from L3a's commit: fnvlift/dsl.py (uf, swhen, FAULTS 1..11), fnvlift/f_sys.py (trap0d_privileged), proof/forms_sys.py. Hooks applied by hand (same hunks as bab6030): forms.build imports forms_sys,
+forms_move.mov routes CRn/DRn to forms_sys.privileged, symform.eip_dependence and normalize carry swhen. Builders: 11 handler functions in forms_sys (arpl, privileged [25 mnemonics + mov cr/dr], int, into, int1, sldt, str, smsw,
+sgdt/sidt, cpuid, rdtsc): 11 taken, 0 rewritten; bound stays mine, in forms_flow.
+shape_sha over the 19,817 int keys (before = 20422a8d, after = this tree): 19,494 same, 166 error in both, 157 new Form (arpl, keys 63xx), 0 changed. The sys-family shapes (139) are not in the int key list and had no Form before.
+Model answer, one representative encoding per class (27 encodings, prove_one on the 70c8dc39 IR): ALL 27 are model-gap. 'Opcode Unimplemented in x86isa!': arpl, int n, into, int1, cli, sti, in, out, ins, cpuid, rdtsc.
+'(:GP)' (the model dispatches these as a #GP fault): sldt, str, sgdt, sidt, smsw, mov cr, hlt, lldt/lgdt-class (0f00d0, 0f0130). So nothing in forms_sys is certifiable against the pinned model; the uf nodes
+(cpuid, rdtsc) have no model counterpart at all (the model does not implement either), so "uf matched to the model" has no answer: the declared machine's cpuid / platform timer are not a model fact.
+Fault kinds 4-11 in the model-faults table (prove.MODEL_FAULT): none. Kinds 4,5,6,8,9,10,11 correspond to no model message; kind 7 = :NON-WRITABLE-SEGMENT (CS store) only; 1 = DE. The Windows reporting of
+kinds 2-11 is the platform's (KiTrap0D / Wine 9.0), not the model's. A certificate for them needs another reference: L3b/orchestrator decision (no hand-written model hunk).
+
+## 9. Farm questions (w4, answers)
+PUBLISH=0 rerun: PUBLISH=0 proves and writes DIR/shapeprove_K_of_N.jsonl in the work dir, publishes nothing, and does not read the published shards. A later run without PUBLISH=0 publishes the same rows ONLY IF the queue id is
+unchanged (the same OUT dir <IR id>-<queue id>, shapeprove.py resumes: rows already in the jsonl are skipped). The queue id is a function of the published shards (a shape with a valid certificate leaves the queue), so as soon as any
+farm publishes, a rerun has another id, another OUT dir, and proves again. The rows themselves stay valid (key, shape_sha, IR sha): publish by the farm path or by certs_build --shards of the jsonl, not by id.
+Queue id vs KEYS.tsv: the farm script fetches the HEAD of the branch l3b-lift/shapes (not a commit). A re-pinned census pushed to that branch changes the shape union and so the queue id of every farm that starts afterwards.
+Rule: the re-pinned census goes to ANOTHER branch (farm_shapeprove.sh now has SHAPES_BRANCH, default l3b-lift/shapes); l3b-lift/shapes @77524556 is never moved.
+Selector hunk e2975877: dsl.XIN += sel_es/cs/ss/ds/fs/gs (16 bit, SEG_* order); push sreg Form = 16-bit store (pinned model x86-push-segment-register: 'a 16-bit move, leaving the upper portion of the stack location unmodified'; so the
+32-bit slot keeps its upper half, the Form is written from the model); prover: a Form that reads sel_* runs isla without the uniform seg_visibles literal (the six selectors are free, isla prints (_ vec v0..v5), element i = SEG_* i). No IR change
+(IR sha 70c8dc39 unchanged, existing certificates untouched). Proved: 06 0e 16 1e 0fa0 0fa8 661e. pop sreg / mov sreg are NOT in it: they write a selector (and, for FS, the base); the Form has no selector output slot (needs an output
+in dsl.Form and f_dsl: L3a's side) and the model does not implement them.
+
+## 10. F2, G1, G3 (w4, 2026-11-12)
+
+**F2 (cb32e9e4 on claude/fnv-l3b-lift-w4-l3a, 95089468 on claude/fnv-l3b-lift-w4).** Every Form memory access goes through one of the
+address functions of forms.py: `ea` (explicit operand: effective segment = last prefix, a16), `addoff`, `ssa` (stack), `esa` (string destination,
+ES flat), `dsa` (string source, XLAT: DS default, override gives the fs/gs base). `mload`/`mstore` refuse an address made by none of them;
+tests/test_forms_mem.py also checks by AST that no forms_*.py except forms.py calls `load` or `.store`. shape_sha over all 19,817 int keys:
+77 changed (bound 72, arpl 2, fs/gs string/xlat 3), 19,740 identical.
+
+**G3 (cmpsb a6, cmpsd a7).** Class: operand order of the model. ACL2 8.5 `x86-cmps` calls `(gpr-arith/logic-spec size OP-SUB dst src)` with
+dst = ES:EDI, so the flags are those of [edi] - [esi]; master (string.lisp:443) calls it with src1 src2 = [esi] - [edi], the SDM order and ours.
+Swapping the Form proves both, so the Form is right. Fix class: a transcription patch of the master hunk (ASM-009), IR-changing.
+
+**G1 (rol|m32,imm|c1, rol|m8,r8|d2, sar|m8,r8|d2 x2, sar|m8,imm|c0 x2).** Not memory-specific: the register forms of the same encodings give the same
+FAILED(model-defect) (c1c000, d2c0, c0c000 reproduce it). The disagreement lies in the declared regions of defects.py: `rot-of-count0` (rol/ror at masked count 0:
+the 8.5 model leaves OF undefined, the SDM and the Form leave all flags unchanged) and `sar-cf-big-count` (CF at count >= size). Master fixes rol/ror
+(rotates-spec.lisp:284-288 and :660-664, count 0 -> input flags). So the class is a model defect whose fix is a transcription patch of master's
+rotates-spec.lisp; the Form is not touched. These shapes carry FAILED(model-defect), not a certificate, until that patch is in the IR.
+
+## 11. (D) The ACL2 table of the model-gap classes (w4, read-only; no patch)
+
+Sources: ACL2 8.5 (acl2-85 checkout, the line numbers of the pinned model's family) and master 3ccb342c. Column "dispatch" = the function in
+machine/inst-listing.lisp (NIL = Opcode Unimplemented, which is what the pinned IR returns for every row below).
+
+| class | opcodes | 8.5 | master dispatch (inst-listing.lisp) | master defun (machine/instructions/...) | modes | descriptor load |
+|---|---|---|---|---|---|---|
+| pop sreg | 17, 1f, 07, 0f a1, 0f a9 | NIL (the defun is commented out, push-and-pop.lisp:617) | x86-pop-segment-register (:171, :214) | push-and-pop.lisp:581 | 32-bit (I64 = legacy) and 64 | yes: `get-segment-descriptor` (:642) then `load-segment-reg` (:670) |
+| les/lds/lfs/lgs/lss | c4, c5, 0f b2, b4, b5 | NIL | x86-load-far-pointer (:1417, :1426) | segmentation.lisp:693 | legacy | see its body (segment load) |
+| mov to/from sreg | 8c, 8e | NIL | x86-mov-Op/En-MR / -RM (:1055, :1064) | data-transfer family | all | to be read: the shared mov defuns |
+| far jmp indirect | ff /5 | NIL | x86-far-jmp-Op/En-D | jump-and-loop.lisp:375 (8.5: :390) | all | yes |
+| far jmp direct ea, far call 9a, far call ff /3 | ea, 9a, ff /3 | NIL | NIL (also in master: `'NIL`) | none | - | - |
+| retf | ca, cb | NIL | cb: x86-ret (:1481); ca: NIL | subroutine.lisp:337 | all | not for far (only the near path) |
+| enter | c8 | NIL | x86-enter (:1469) | subroutine.lisp:704 | all | no |
+| aaa aas aam aad daa das | 37, 3f, d4, d5, 27, 2f | NIL | x86-aaa/aas/aam/aad/daa/das (:326, :363, :1725, :1734, :252, :289) | bcd.lisp:53, :95, :141, :203, :262, :312 | legacy (I64) | no |
+| salc | d6 | #UD | not in the table | - | - | - |
+| system class (sldt, str, sgdt, sidt, smsw, mov cr, hlt, lgdt, lldt) | 0f 00, 0f 01, 0f 20.., f4 | `(:GP)` in this build | segmentation.lisp / system-level: sgdt :239, lgdt :123, lldt :448, ltr :56, lidt :331 | | | |
+
+Consequences: enter and the six BCD instructions are defined in master and take no descriptors: each is a transcription candidate like `segment_bases`
+(covered by ASM-009), each an IR-changing hunk. pop sreg and les/lds are defined in master only with the descriptor load (GDT read, hidden base) -- the
+model's flat-segment setting (A-FLAT) would need the same selectors-as-inputs treatment as push sreg; far call, ljmp ea, retf ca, salc are undefined in
+master too and stay escalated. mov sreg needs a read of the master mov defuns (not done). Not done in this note: mode coverage of the system rows and the
+exact master lines of load-far-pointer's descriptor path.
+
+## 12. (K) Design note: key a certificate by the closure of the IR, not the whole IR sha (w4)
+
+Today the certificate key is (shape key, shape_sha, IR sha256). Any model hunk (cmps order, rol count 0, ...) changes the IR sha and invalidates all
+~19,500 certificates, although a hunk in `x86-cmps` cannot change the semantics of `add`. The proposal: replace the IR sha by `closure_sha(enc)`,
+computed from the IR text only (no isla traces), and keep the IR sha as a coarse field of the record.
+
+**Rule.** For an encoding (its bytes, with prefix and modrm/sib structure fixed by the shape key):
+1. Parse the pinned IR (the Sail-to-IR output) into its top-level items: function definitions, `val` declarations, enum/struct/union types,
+   register declarations, let-bound constants.
+2. The dispatcher (`x86_fetch_decode_execute` and the opcode tables generated from inst-listing.lisp) is a decision tree over the opcode bytes. Fold it
+   on the encoding's literal prefix/opcode/modrm.reg bytes (the bytes the shape key fixes; the shape's field bytes stay symbolic and are never
+   inspected by the dispatcher by construction of the shape key, which is why they are fields). The result is the set `E` of execute-function entries
+   reachable under the encoding. This is constant folding on the IR dispatcher, not an execution.
+3. `C(enc)` = the least set containing `E`, the decode functions the folded path calls (prefix, modrm, sib, effective address, operand-size selection,
+   segment selection), closed under: calls (the IR has no indirect calls), reads of registers and globals (named registers; global lets), type definitions
+   used, and the undefined-value / flag helpers they call.
+4. `closure_sha(enc)` = sha256 of the concatenation, in name order, of the normalized text of every member of `C(enc)` (source line numbers and comments
+   stripped: the IR embeds locations, which a splice that keeps line counts would otherwise not hide) plus the model configuration that is in every key
+   today: isla version pin, the `-C` config, the `-I` initial constraints, `SEG`/`SEG_FREE`, `FAULT_OK`, segment_bases splice contents.
+5. The certificate key becomes (shape key, shape_sha, closure_sha). A hunk invalidates exactly the shapes whose `C(enc)` contains a changed definition.
+
+**Soundness (why nothing outside `C(enc)` can change the result).** The model post-state of the encoding is a function of the IR program
+restricted to what the dispatcher folds to and everything that program can reach. In Sail/IR there are four channels from one function to another:
+(a) calls: static names, so reachability is complete; (b) registers: a function reads or writes only registers it names, and a name is a static token,
+so the read/write set of `C(enc)` is the union of its members' names; a register changed by another function only matters through a write that is
+itself in `C(enc)`, or through the initial state, which is the configuration hashed above; (c) global lets and types: referenced by name; (d) the
+undefined-flag oracle: in isla `undefined` is a fresh symbolic value per occurrence, so it is a property of the function text, not of other functions;
+the `model_terms_sha` already covers the isla side. Decoder tables: the opcode tables are part of the dispatcher, which step 2 folds, so a change in the
+table entry of another opcode changes the dispatcher text but not the folded result for this encoding. The claim needs the folded result, not the
+dispatcher text, in the key; the key contains `E` and the decode functions the fold touches, and not the whole dispatcher.
+
+**What would break it.**
+- If step 2 is a heuristic (a regex on names) instead of a constant-folding of the dispatcher semantics: a wrongly small `C` silently keeps stale
+  certificates. It must be a fold with an explicit "unfoldable -> keep the whole dispatcher in C(enc)" fallback, which is a rule (over-approximation), not a skip.
+- Any indirect or dynamic reference (a name built at run time, a function in a table of values): none in the IR today; a checker must assert that no
+  function value escapes (static, from the IR).
+- Isla-side changes (version, config, loop unrolling, the SEG splice) that alter the result without changing IR text: they are in the key (step 4).
+- Source-position-dependent output: strip locations in the normalization or the key changes on harmless splices.
+- Soundness of the rule itself is a proof obligation, so test it as a differential, not a decision: for each real hunk, the set of shapes whose
+  isla-trace `model_terms_sha` changed must be a subset of the shapes the closure rule invalidates (the converse is allowed: over-invalidation).
+  A shape that changed but whose closure_sha did not is a rule bug and makes the build red.
+- A new ASSUMPTIONS id would be needed only if the closure rule is not a theorem about the IR; as above it is a static program-slicing argument over the pinned
+  IR, so it adds no assumption beyond ASM-009 (the IR is the model).
+
+Cost: parsing the IR once (the IR sha already needs it), a dispatcher fold per distinct opcode/modrm.reg, and one hash per distinct closure; the closure
+shas are shared by the many shapes with one execute function.
+
+## 13. Open queue at the pause (w4, 2026-11-12), in the lead's order
+1. G2: imul|r32,m32,imm|69 timeouts (shapes 69050000000000000000, 69247200000000, 690c5600000000; 690000000000 proves with the default solver). Decide by a uniform solver rule, not a per-shape timeout.
+2. Census correction: pin = w7's next facts commit, universe from tools/lifted.py (b7b04616), DATA_CLASSES dropped; new branch l3b-lift/shapes-2.
+3. (B) selector output slot + pop/mov sreg Forms.
+4. (E) pinned queue artifact (QUEUE_REF).
+5. (K) closure-keyed certificates (§12), implement.
+6. Batched model-hunk IR bump: cmps order (G3), rol/ror count 0 and sar big-count CF (G1), enter + BCD six (D).
+Also open: G4 (shard 14/48, 27 keys fewer), (C) reached-site counts.
+
+## 14. Certificate input of gate_flags for DEF0 (w4, 2026-11-14)
+
+Until now certs.tsv carried six columns and no DEF0 data (def0 lived only in the shard jsonl records). It now carries 11, tab separated, one row per proved shape:
+
+| # | column | content |
+|---|---|---|
+| 1 | shape_key | shape key |
+| 2 | family | `int` |
+| 3 | dsl_sha | `symform.shape_sha(shape)` |
+| 4 | model_sha | pinned IR sha256 (ASM-009; from K on: closure_sha, §12) |
+| 5 | reference | `sail` |
+| 6 | result | `proved` (only proved rows are written) |
+| 7 | obligations | comma list of what the record certifies beyond the field equalities = `prove.OBLIGATIONS` = `def0` today. certs_build drops a record without it (`stale-obligations`); formgate treats a row whose list differs as uncertified |
+| 8 | undef_flags | flags the Form declares architecturally undefined (comma list, `-` if none). DEF0 certifies, for exactly these flags, that model[free := 0] == the constant 0 the lifter writes |
+| 9 | def0_witness | `0`: the value given to every free (undefined) model constant of the flag outputs |
+| 10 | def0_free | number of free model constants of the run (all outputs and side constraint) |
+| 11 | nonflag_free | non-flag outputs (register names, `mem`, `eip`) whose model term mentions a free value (comma list, `-` if none). Today a list only: DEFPRIOR (next item) turns it into "proved under DEFPRIOR" or FAILED |
+
+Rule for gate_flags: an output flag f of a site whose shape row has `f` in undef_flags is certified DEF0 (the lifted 0 refines the model); a flag in the Form's defined set is certified by the field equality, not by DEF0; a shape not in certs.tsv is uncertified. A non-empty nonflag_free is not certified by this record until DEFPRIOR lands. Per-record shard form (shapeprove_*.jsonl): `def0 = {undef_flags, witness, free, nonflag_free}`, `obligations = ["def0"]`.
+
+## 15. DEFPRIOR, isla's poison, and a Form class that DEF0 exposed (w4, 2026-11-14)
+
+**DEFPRIOR** (prove.def0). Every free (undefined) model constant gets exactly one witness by the outputs it feeds: flag outputs only -> 0 (DEF0); exactly one output, a register of at most 32 bits, no flag -> the low bits of that register's pre-state value (DEFPRIOR); anything else (feeds several outputs, mem, eip, an address, a boolean or wider constant) -> no witness, its own class `{class: multi|mem|eip|sort, outputs, free}` in `def0.classes`, never chosen for. Obligation: model[witness] == the lifted value, a forall query, for each such register; a disagreement is FAILED(def0). certs.tsv column 11 (nonflag_free) now lists only the non-flag outputs that mention a free value and are NOT proved under DEFPRIOR; the record also carries `defprior` (registers proved) and `classes`. A pre-DEFPRIOR record with a non-empty nonflag_free counts `stale-defprior` and is requeued; records with an empty nonflag_free stay valid (no mass invalidation). Tests: DefPrior (4: proved, wrong lifted value FAILED, two outputs = class, register+flag = class), test_certs_build.
+No real encoding with a non-flag free value was found among 17 probed (shifts, shld/shrd, mul/imul/div, bt, cmpxchg, xadd, bsf/bsr); the only expected case is bsf/bsr, below.
+
+**bsf/bsr "(_ poison)"**: isla's own definition is isla-lib/src/executor.rs:1450-1456 (pin e9b5d945, Cargo.lock sha matches sail_pins): `Instr::Arbitrary` — "Arbitrary means return any value. It is used in the Sail->C compilation for exceptional control flow paths ... The value should never be used, so we return Val::Poison here"; the value is returned at executor.rs:1472/1475, printed as `(_ poison)` by ir.rs:414. So poison is the placeholder of an exceptional/unreachable Sail path, not an unspecified value of the sort. By the rule it is NOT treated as a free value: bsf/bsr stay `model-gap` (0fbc / 0fbd: bsr is "Opcode Unimplemented in x86isa" anyway). No reinterpretation.
+
+**Finding (Form class, mine, DEF0 exposed it)**: variable-count shifts and double shifts (d2e0 shl al,cl; d3e0; 0fa5/0fad shld/shrd cl) now fail DEF0: `FAILED(def0) af`, CE eax=0 ecx=0 af=1: at count 0 the model leaves AF unchanged (the SDM text in UNDEF_SHAF says "for non-zero counts"), but forms_alu declares AF unconditionally undefined (`F.undefined('af')`), so the lifter's DEF0 writes 0 at count 0 where the hardware keeps AF. The DSL has only unconditional `undefined(name, sdm)`; the class is "undefined only under a condition". Class-closing fix: `F.undefined(name, sdm, when=cond)` in fnvlift/dsl.py (w7's file; I need the lead's authorization for that hunk): defined = not cond; value under cond = 0 (DEF0), else the Form's value (here the pre-state AF); the prover generalizes DEF0 to forall state: cond => model[witness] == 0, not cond => the normal field equality. The same class: CF of shl/shr at count >= size, OF of rotates by count != 1 (already conditional through `when`), imul/mul none. Until then these encodings stay FAILED(def0) rather than certified with a wrong 0.
+
+## 16. K implemented: the key is the EXECUTED function set, not a static call-graph closure (w4, 2026-11-14) — supersedes §12's static proposal
+
+**Deviation, and why.** The lead asked for the closure computed from the IR. A static walk of the call graph starting from the 95 functions that 85c0 executes already reaches 594 of the 668 IR functions (measured: the walk followed every function name in a text), and from the dispatcher it is no smaller, so it invalidates everything on any hunk; folding the dispatcher on the instruction bytes statically would reimplement isla's symbolic fetch (rip and code_base are symbolic). The key therefore uses the call events of the isla run itself (`--probe-all`, "Calling NAME(" lines; 87..101 functions per encoding), which is still a function of the IR and the inputs, not a measurement-then-skip decision: it is a theorem about the run, argued in irdeps.py's docstring (induction over the run's steps; what would break it is listed there and each item is in the key).
+**Key** = closure_sha: sha256 over the normalized text (positions stripped) of the executed functions and of every register / struct / enum / union / extern val their text names, transitively through types; function names found in a text are NOT followed (an uncalled function is not part of the run); plus the isla builtin names, plus `env` = model_sail.run_env_sha() (x86.toml, the sail_pins rows isla / isla-cargo-lock, SEG, SEG_FREE, LINEARIZE, EIP_LIMIT, ADDR, the source of sym_constraint, cache version). The record carries `model_fns` and `closure_sha`. A record is valid for the pinned IR iff `model_sha` equals it (proved against it) or closure_sha over the SAME fns on the pinned IR file is unchanged (certs_build.model_valid; the pinned IR file must hash to the pin, else REFUSED). certs.tsv col 4 stays the pinned IR sha (formgate unchanged).
+**Differential** (tests/test_irdeps, 5 tests, real IR + a real run of 85c0): an edit of a function in model_fns changes the key (6 of them); an edit of a function the run did not call keeps it (6); position annotations do not matter; the environment does. tests/test_certs_build: a record proved against another IR sha stays valid through an unchanged closure, a changed closure or a record without one is stale.
+**Run machinery**: model_sail.run_isla runs `--probe-all` (the cache key is unchanged, so the .out/.err of old runs stay valid but a run without the new `.fns` file is rerun), stores a filtered .err (the 4 MB probe log is dropped; the error-function calls and non-probe lines are kept, so isla_errors and the bad-path count are unchanged) and `.fns`.
+**Migration of the 2 409 published records**: `shapeprove.py --migrate OLD.jsonl --out DIR` reruns only the cached isla model run of each proved record at the pinned IR and adds model_fns / closure_sha (the proof is not redone). Checked on 01c8, 31c0, 85c0: the migrated records are byte-identical to the records a fresh shapeprove writes. I have not run it on the 2 409: the records are on the farms' branches (fnv-nx-build l3b-lift/shapeprove/*), not in this container; farms 05/07 write K fields natively from this commit. Cost ~1-3 s per record.
+
+## 17. (E) pinned queue of pack 7b2faae276b2 (pack commit 7ef692b5), packuniverse.py / packqueue.py
+- Universe = the pack's own labels (u/*.cpp, `L_<addr>:`), each decoded from its image AS THE LOADER MAPS IT at the pack's load base (pemod.load: HIGHLOW fixups applied; needed for data words in .text that the lifter decodes as code: 25 addresses in d3dx9_38, jump tables at 0x183c6d5..) and keyed with shape.shape_key (no form-name matching).
+  Pack load bases: FalloutNV 0x400000, binkw32 0x1440000, d3dx9_38 0x1720000, libvorbis 0x2130000, libvorbisfile 0x2270000 (the pack moved the last two by +0x450000 against facts).
+  Raise-only labels (`fnvl_raise(FNVL_UD|FNVL_LOCK,..)`, 900 addresses: UD=751, LOCK=149) are no lifted instructions and are counted in the header; every other label decodes (0 undecodable, 0 outside an image).
+  Result at pack 7ef692b5: 5,007,758 label addresses, 25,233 shapes: int 18,750, simd 4,291, x87 2,063, sys 129.
+- Old shards (6 files, 2,409 records, all model_sha = pinned IR) are all `stale-obligations` under the current gate (no def0).  The queue excludes the 2,139 universe shapes proved there at the same shape_sha (they must be MIGRATED WITH DEF0, not only with K: shapeprove --migrate must run the def0 obligation on the cached model run; to be done before the migration job).
+- Queue 16,445 int shapes (18,584 int shapes have a Form; 166 int shapes / 2,279 addresses have none).  x87/simd/sys: no prover states them (2,063 / 4,291 / 129 shapes).
+- formgate CLI tests: test_green_and_red_without_cache_and_without_z3 -> ModuleNotFoundError: No module named 'gatefile'; test_missing_pack_is_red_with_reason -> AssertionError 1 != 2 (returncode).  Both also fail without my change; cause: no trunk checkout in my container (verify/ missing); run them on a farm once.
+- Every record of the new prover stores obligations (OBLIGATIONS = ["def0"]) also when undef_flags is '-'.
+
+## 18. queue v2 (lead decision): requeue in full
+No migration: the 6 old shards are superseded. Queue v2 = all 18,584 int shapes with a Form (queue_id 29f53c484d24, branch l3b-lift/queue/7b2faae276b2-99d6300abd64-v2, noform.tsv = the 166 int shapes without a Form). The --migrate DEF0 extension was dropped again (prove_one def0_only removed).
+
+## 19. IR bump built (BUMP=1): x86_proof_bump.ir sha256 fdb8ad9877ffea2d5809ef4d0848e0c57e8f1f9bbfdb75d2717341f2fea22e72 (10,382,755 bytes; smoke test ok); NOT pinned yet
+- Finding: the IR text of EVERY function with a unit parameter differs between two IR builds (30 functions: the parameter id `z3zE<counter>` shifts with every line a patch adds before it), so closure_sha was NOT stable across IRs. Fix (irdeps.alpha): rename those bound ids by first occurrence inside the item (bijection inside one item; each id occurs in exactly one function, checked on both IRs); run_env_sha tag v1 -> v2. Records of the farms (commit 99d6300ab) carry closure_sha v1: `shapeprove.py --migrate FILE --out DIR` recomputes closure_sha from the recorded model_fns (pure recomputation, no isla; model_sha must be the pin).
+- Changed items pinned IR -> bump IR (after alpha): fns zrol_spec_8/16/32/64, zror_spec_8/16/32/64, zsar_spec_8/16/32/64, ztwo_byte_opcode_execute (cpuid arm), zx86_cmps, zx86_cpuid (new fn); val zx86_cpuid; type tuple bv32x4.
+- Records affected = shapes whose executed set meets these. Upper bound by opcode class (static): 2,159 of the 18,584 queue shapes (0F-opcode 1,739 [two_byte_opcode_execute], group-2 shift/rotate c0/c1/d0-d3 413, cmps 7); exact count comes from model_fns of the v2 farm records (certs_build, closure check against the bump IR).
+
+## 20. cpuid certificate: `agree-except-declared`, and sys shapes with a Form enter the prover
+- Rule (prove.declared_outputs): a register the Form writes with EXACTLY a platform-function result (a `uf` node, or extract/zext of one, unconditional) is a DECLARED output; the model is not its reference. Every other output (other registers, flags, mem, eip, faults) is compared strictly. A value mixing a platform result with other state is not declared.
+- Result `agree-except-declared`; the record carries declared {reg: function} and platform_sha256 = sha256 over the platform sources the functions name (cpuidN -> rt/cpumodel.c, basename + content). certs_build: stale-platform when it differs from the current file. certs.tsv now has 12 columns: the last is `declared` (`reg:fn,...@platform_sha256`, `-` for proved); formgate accepts `proved` only with `-` and `agree-except-declared` only with a declared list; formgate does NOT yet compare the platform sha to the pack's cpumodel.c (needs a pin in formgate_inputs.json: lead decision).
+- Measured: 0fa2/0.0.0.0 on the bump IR fdb8ad98...: agree-except-declared (eax,ebx,ecx,edx declared; 3 isla paths); on the pinned IR: model-gap (`Opcode Unimplemented in x86isa`), so the cert exists only after the bump pin.
+- shapeprove / certs_build / packqueue now take families int AND sys (sys shapes that have a Form). The pinned queue v2 (int only) is unchanged.
+
+## 21. declared outputs by contract; validity by computed closure (lead decisions)
+- lift/proof/declared.json: the contract table (function -> platform source, basis, allowed outputs). Today one row: cpuid0..3 -> rt/cpumodel.c, eax..edx (CLAUDE.md "The declared CPU"). prove.declared_outputs: only a bare `uf` of a listed function written to an allowed output; prove.declared_findings lists every other uf in a Form's outputs (e.g. rdtsc: reported, not declared). platform_sha = sha256 over (relative path, content) of the rows' sources.
+- formgate.declared_ok: every reg:fn pair allowed by declared.json and the platform sha equal to the hash of the source in the tree the gate runs from (lift/rt); otherwise the row is not a certificate (stale). Test: prove.platform_sha == formgate.platform_sha.
+- certs_build K: validity is COMPUTED: closure(model_fns, IR of record.model_sha) == closure(model_fns, pinned IR). IR files are given with `--ir PATH` (each is hashed; fetched by sha from tools/x86-proof-ir*), a missing one is REFUSED. The stored closure_sha is informational. No --migrate re-key is needed (the --migrate K path remains in shapeprove only as an unused tool).
+
+## 22. SIMD partition by the declared CPU (MMX, SSE, SSE2)
+Shapes (4,291, pack 7ef692b5): proved-class 3,960 (MMX 997, SSE1 2,297, SSE2 640, plus 26 with no decoder group: pextrw 14, pinsrw 10, cvtsd2si 2: SDM names SSE/SSE2) ; cleared 331 (3DNow! 330, AVX 1). Sites (99,643 simd-family addresses): allowed 97,067 (incl. the 95 of the 26), cleared 2,575 (3DNow! 2,574 in d3dx9_38; AVX 1 in FalloutNV). Feature = the capstone instruction group (decoder table, same trust as shape.family). Files in the queue branch l3b-lift/queue/7b2faae276b2-99d6300abd64-v2: simd_partition.tsv, cleared_sites.tsv (module:address, shape, feature). packuniverse.py takes an optional 4th argument (SITES.tsv).

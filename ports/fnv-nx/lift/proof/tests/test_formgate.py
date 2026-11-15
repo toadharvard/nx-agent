@@ -14,7 +14,7 @@ LIFT = os.path.join(PROOF, '..')
 sys.path.insert(0, HERE)
 sys.path.insert(0, LIFT)
 import fakeext
-from proof import formgate, shape
+from proof import formgate, prove, shape
 import recipe
 
 WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')     # declared input: the directory the fixtures are written below
@@ -38,7 +38,7 @@ def skip_cache(d, names):
 
 
 MD = shape.decoder()
-MODEL = 'e436ee6f79856a7ac9543400b7973dd1f0057410426f08b1e456c1d1c43e654a'
+MODEL = '7c3074644653d2976cbb101ae993e94f2a09c9b7a3b574d3c74f6a80278d079c'
 # encodings with a DSL builder (add / xor / mov / push / ret / nop) and one without (x87 fld st(1))
 GOOD = ['01c8', '31c0', '8b4510', '6a05', 'c3', '90']
 NOBUILD = ['d9c1']
@@ -61,7 +61,7 @@ class Fixture:
         for k, f in self.keys:
             if certs_for is not None and k not in certs_for:
                 continue
-            rows.append('%s\t%s\t%s\t%s\tsail\t%s\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result))
+            rows.append('%s\t%s\t%s\t%s\tsail\t%s\tdef0\t-\t0\t0\t-\t-\n' % (k, f, dsl_override or formgate.dsl_sha(k, MD) or 'none', model, result))
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
         os.makedirs(os.path.join(td, 'art'), exist_ok=True)
         self.art = fakeext.Artifacts(os.path.join(td, 'art'))
@@ -135,6 +135,26 @@ class CertificationRule(unittest.TestCase):
         with workdir() as td:
             u, c, ids, _ = Fixture(td, GOOD, dsl_override='0' * 64).judge()
             self.assertEqual((u, c, len(ids)), (len(GOOD), 0, len(GOOD)))
+
+    def test_certificate_stale_after_a_dsl_edit_is_refused(self):
+        # certificates written under the current DSL; then the builder of ONE mnemonic (xor) changes: exactly the shapes of xor lose their certificate,
+        # the others (their Form did not change) stay certified.  The key of a certificate is (shape, shape_sha of the CURRENT Form, IR sha), nothing else.
+        from proof import forms
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD), []))
+            orig = forms.H['xor']
+
+            def edited(c):
+                orig(c)
+                c.F.undefined('df', 'edited')
+            forms.H['xor'] = edited
+            try:
+                u, c, ids, _ = f.judge()
+            finally:
+                forms.H['xor'] = orig
+            self.assertEqual((u, c, ids), (len(GOOD), len(GOOD) - 1, [key_of('31c0')[0]]))
+            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD), []))
 
     def test_wrong_model_sha_in_the_certificates_is_red(self):
         with workdir() as td:
@@ -287,6 +307,25 @@ class Cli(unittest.TestCase):
     def test_arguments_are_refused(self):
         r = subprocess.run([sys.executable, '-I', os.path.join(PROOF, 'formgate.py'), '--shapes', 'x'], capture_output=True, text=True, env={'GATE_OUT': '/'})
         self.assertEqual(r.returncode, 1)
+
+
+class DeclaredOutputs(unittest.TestCase):
+    def test_platform_sha_agrees_with_the_prover(self):
+        self.assertEqual(formgate.platform_sha(['cpuid0', 'cpuid3']), prove.platform_sha({'eax': 'cpuid0', 'edx': 'cpuid3'}))
+
+    def test_declared_column_is_checked_against_the_contract_and_the_tree(self):
+        sha = formgate.platform_sha(['cpuid0'])
+        self.assertTrue(formgate.declared_ok('eax:cpuid0,edx:cpuid3@' + sha))
+        self.assertFalse(formgate.declared_ok('eax:cpuid0@' + '0' * 64))               # the platform source changed
+        self.assertFalse(formgate.declared_ok('esi:cpuid0@' + sha))                    # an output the contract does not allow
+        self.assertFalse(formgate.declared_ok('eax:rdtsc@' + sha))                     # a function that is not in declared.json
+        self.assertFalse(formgate.declared_ok('garbage'))
+
+
+class ObligationsPin(unittest.TestCase):
+    def test_formgate_obligations_are_the_provers(self):
+        from proof import prove
+        self.assertEqual(formgate.OBLIGATIONS, prove.OBLIGATIONS)
 
 
 if __name__ == '__main__':

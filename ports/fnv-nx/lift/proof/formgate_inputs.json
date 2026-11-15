@@ -12,5 +12,5 @@
  ],
  "shapes": "liftpack/shapes.tsv",
  "certs": "certs/certs.tsv",
- "model_sha256": "e436ee6f79856a7ac9543400b7973dd1f0057410426f08b1e456c1d1c43e654a"
+ "model_sha256": "7c3074644653d2976cbb101ae993e94f2a09c9b7a3b574d3c74f6a80278d079c"
 }

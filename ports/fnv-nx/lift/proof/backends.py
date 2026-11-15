@@ -5,7 +5,7 @@ import os, subprocess
 import z3
 from fnvlift import dsl
 from proof.detrand import Rng
-REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of'); XIN = ('df', 'flo', 'fs_base', 'gs_base')
+REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of'); XIN = ('df', 'flo', 'fs_base', 'gs_base') + tuple('sel_' + s for s in dsl.SEGS)
 NIN = len(REGS) + len(FLAGS) + len(XIN)
 HARN = r'''#include <cstdio>
 #include <map>
@@ -53,7 +53,7 @@ def run(args, forms, items, post_of):
     for i in range(len(sel)):
         for _ in range(args.n):
             pick = lambda: rng.choice(SPECIAL) if rng.getrandbits(1) else rng.getrandbits(32)
-            vals = [pick() for _ in range(8)] + [rng.getrandbits(1) for _ in range(6)] + [rng.getrandbits(1), pick(), pick(), pick()]
+            vals = [pick() for _ in range(8)] + [rng.getrandbits(1) for _ in range(6)] + [rng.getrandbits(1), pick(), pick(), pick()] + [rng.getrandbits(16) for _ in dsl.SEGS]
             cases.append((i, vals)); lines.append('%d %s' % (i, ' '.join('%x' % x for x in vals)))
     rr = subprocess.run([wd + '/gen'], input='\n'.join(lines) + '\n', capture_output=True, text=True)
     out = rr.stdout.strip().split('\n') if rr.stdout.strip() else []
@@ -62,7 +62,7 @@ def run(args, forms, items, post_of):
         print('RUNTIME FAILURE (ubsan/abort) in form %s\n%s' % (bad, rr.stderr[:600])); return 1
     K = z3.BitVecVal(0x9E3779B1, 32); a = z3.BitVec('lam_a', 32); lam = z3.Lambda([a], z3.Extract(31, 24, a * K)); mem = z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8))
     PR = [z3.BitVec('probe%d' % k, 32) for k in range(4)]; bad = ci = 0
-    invars = [z3.BitVec(r, 32) for r in REGS] + [z3.BitVec(f, 1) for f in FLAGS] + [z3.BitVec('df', 1), z3.BitVec('flo', 32), z3.BitVec('fs_base', 32), z3.BitVec('gs_base', 32)]
+    invars = [z3.BitVec(r, 32) for r in REGS] + [z3.BitVec(f, 1) for f in FLAGS] + [z3.BitVec('df', 1), z3.BitVec('flo', 32), z3.BitVec('fs_base', 32), z3.BitVec('gs_base', 32)] + [z3.BitVec('sel_' + s, 16) for s in dsl.SEGS]
     for i, (F, b, w) in enumerate(sel):
         D = F.post(); outs = [D['regs'][r] for r in REGS] + [D['flags'][f] for f in FLAGS] + [D['flags']['df'], D['flo']] + [z3.BitVecVal(0, 32)] * 2 + \
             [D['eip'], z3.ZeroExt(24, D['fault'])] + [z3.Select(D['mem'], p) for p in PR]
