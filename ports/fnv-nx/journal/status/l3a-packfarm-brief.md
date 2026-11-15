@@ -18,8 +18,9 @@ authorized).
    the recipe's result summary. Then report to the lead, with numbers from this run at <BUILD_COMMIT>:
    units in the shard, built, red; wall time; and the output of
    `python3 -I ports/fnv-nx/verify/recipe.py timing --root ports/fnv-nx/lift/pack@time --store STORE`
-   (cand3 179158f99, RECIPE.md "Stage timing"): per-kind, per-unit and per-pass sums, the top 20 units. Shard 0
-   builds the @time variant; the others build the plain root.
+   (cand3 179158f99, RECIPE.md "Stage timing"): per-kind, per-unit and per-pass sums, the top 20 units. Every shard
+   builds the plain root (so the merged store serves the product build). Shard 0 also runs the timing command
+   after its plain build; if @time is a separately keyed variant, it is built in addition and is never merged.
 5. The lead (or the farm it names) runs `recipe.py store-merge <farm store>` once per shard store into one store, then
    `recipe.py build --root ports/fnv-nx/lift/pack` there: every unit must be a hit (0 compiles), and the link and gates run.
    That store is published for L4. This is the only store L4 uses.
