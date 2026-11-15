@@ -11,7 +11,8 @@ from proof.forms import Op, ea, handler, rd, store_op, wr
 
 # the reference machine (rt/fnvl.h; fnvlift/tests/dsl_int_classes_test.py checks these against the header)
 GDTR_BASE, GDTR_LIMIT, IDTR_BASE, IDTR_LIMIT, LDTR_SEL, TR_SEL, CR0 = 0x80b95000, 0x03ff, 0x80b95400, 0x07ff, 0, 0x28, 0x80010033
-K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP, K_ASSERT, K_DBGSRV, K_INTO_AT1 = 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+from fnvlift.faults import BYNAME as _FT
+K_BP, K_UD, K_BOUNDS, K_INTO, K_PRIV, K_AV, K_STEP, K_ASSERT, K_DBGSRV, K_INTO_AT1 = (_FT[n]['code'] for n in ('BP', 'UD', 'BOUNDS', 'INTO', 'PRIV', 'AV', 'STEP', 'ASSERT', 'DBGSRV', 'INTO_AT1'))      # the one fault table, fnvlift/faults.json
 INT_KIND = {3: K_BP, 4: K_INTO_AT1, 5: K_BOUNDS, 0x2c: K_ASSERT, 0x2d: K_DBGSRV}      # f_sys.INT_VECTORS; every other vector is #GP -> AV
 PRIV_MN = ('cli', 'sti', 'hlt', 'in', 'out', 'insb', 'insw', 'insd', 'outsb', 'outsw', 'outsd', 'rdmsr', 'wrmsr', 'invd', 'wbinvd', 'wbnoinvd', 'clts', 'lgdt', 'lidt', 'lldt', 'ltr',
            'lmsw', 'invlpg', 'rdpmc', 'sysexit')      # = f_sys.PRIV_MN (fnvlift/tests/dsl_int_classes_test.py checks the equality)

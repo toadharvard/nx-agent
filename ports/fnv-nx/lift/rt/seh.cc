@@ -204,27 +204,11 @@ int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 e
 extern "C" void fnvl_raise(u32 code, u32 at) {
     u32 sp = esp, eip = at, addr = at, np = 0, nt = 0, info[3] = { 0, 0, 0 };
     switch (code) {
-    case FNVL_DE0:    nt = 0xC0000094u; break;
-    case FNVL_DEOVF:  nt = 0xC0000095u; break;
-    case FNVL_BP:     nt = 0x80000003u; np = 3; break;          /* Wine 9.0 unix/signal_i386.c trap_handler TRAP_x86_BPTFLT: ExceptionAddress = the int3 byte (Eip - 1), 3 parameters {0,0,0}; setup_raise_exception: Context.Eip-- for EXCEPTION_BREAKPOINT, so Context.Eip = the int3 byte too */
+#include "seh_faults.inc"                                  /* every fault code served by table: generated from fnvlift/faults.json (tools/gen_faults.py) */
     case FNVL_DBGSRV:                                          /* Wine 9.0 unix/signal_i386.c handle_interrupt case 0x2d */
         if (eax == 1 || eax == 3 || eax == 4 || eax == 5) { c->ra = at + 3; return; }     /* BREAKPOINT_PRINT / LOAD_SYMBOLS / UNLOAD_SYMBOLS / COMMAND_STRING: the service is done, execution continues 3 bytes on, no exception */
         nt = 0x80000003u; addr = at + 3; eip = at + 2; np = 3; info[0] = eax; info[1] = ecx; info[2] = edx;    /* Eip += 3, ExceptionAddress = Eip, then setup_raise_exception's Context.Eip-- */
         break;
-    case FNVL_UD:     nt = 0xC000001Du; break;
-    case FNVL_PRIV:   nt = 0xC0000096u; break;
-    case FNVL_BOUNDS: nt = 0xC000008Cu; break;
-    case FNVL_INTO:   nt = 0xC0000095u; eip = at + 1; break;
-    case FNVL_ASSERT: nt = 0xC0000420u; break;
-    case FNVL_STEP:   nt = 0x80000004u; break;
-    case FNVL_LOCK:   nt = 0xC000001Eu; break;
-    case FNVL_FLT_IE: nt = 0xC0000090u; break;     /* STATUS_FLOAT_INVALID_OPERATION; the seven rows follow Wine 9.0 get_fpu_code (the status of a floating-point trap), a fault at the instruction */
-    case FNVL_FLT_DE: nt = 0xC000008Du; break;     /* STATUS_FLOAT_DENORMAL_OPERAND */
-    case FNVL_FLT_ZE: nt = 0xC000008Eu; break;     /* STATUS_FLOAT_DIVIDE_BY_ZERO */
-    case FNVL_FLT_OE: nt = 0xC0000091u; break;     /* STATUS_FLOAT_OVERFLOW */
-    case FNVL_FLT_UE: nt = 0xC0000093u; break;     /* STATUS_FLOAT_UNDERFLOW */
-    case FNVL_FLT_PE: nt = 0xC000008Fu; break;     /* STATUS_FLOAT_INEXACT_RESULT */
-    case FNVL_FLT_SF: nt = 0xC0000092u; break;     /* STATUS_FLOAT_STACK_CHECK */
     }
     if (nt == 0) __builtin_unreachable();       /* not reached: every emitted code is a case above */
     fnvl_raise_rec(nt, 0, addr, np, info, eip, sp, CX_EXCEPTION, c->eflags);   /* hardware: EFLAGS as the lifted site flushed it (RAISE_OUT) */

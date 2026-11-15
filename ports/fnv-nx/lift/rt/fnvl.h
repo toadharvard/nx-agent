@@ -46,11 +46,8 @@ register struct cpu *c asm("x27");
 #define REGS() __asm__ volatile("" : "+r"(eax),"+r"(ecx),"+r"(edx),"+r"(ebx),"+r"(esp),"+r"(ebp),"+r"(esi),"+r"(edi))
 /* Control transfer (README): a lifted function is `void L_<addr>(void)`. A direct call or tail to another entry is a C call of its
    L_ function (CALLX); the one-instruction tests (test/instest.py) redefine CALLX after the prelude in their own sources. */
+#include "fnvl_faults.h"      /* the FNVL_* fault codes: generated from fnvlift/faults.json, the one CPU fault table (tools/gen_faults.py) */
 /* hardware exception codes passed to fnvl_raise(code, at) (rt/seh.cc maps them to NTSTATUS): divide by zero / quotient overflow, #BP, #UD */
-#define FNVL_DE0 1
-#define FNVL_DEOVF 5
-#define FNVL_BP 3
-#define FNVL_UD 4
 extern "C" { void (*fnvl_dispatch(u32 image_addr))(void);
              void fnvl_trace(u32 entry, u32 esp); }
 #define CALLX(h) L_##h()
@@ -285,17 +282,8 @@ static inline int sse_sat(int v,int lo,int hi){ return v<lo?lo:v>hi?hi:v; }
 static inline u64 sse_sad(const u8*a,const u8*b){ u32 s=0; for(int i=0;i<8;i++) s+=a[i]>b[i]?a[i]-b[i]:b[i]-a[i]; return s; }
 static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=(u32)(s.b[i]>>7)<<i; return r; }
 /* ---- Integer / system helpers (W14). ---- */
-/* more hardware exception codes for fnvl_raise(code, at); rt/seh.cc maps them (the case in its status mapping is the runtime owner's):
-   FNVL_PRIV 6  STATUS_PRIVILEGED_INSTRUCTION 0xC0000096, a fault: ExceptionAddress = Context.Eip = at
-   FNVL_BOUNDS 7  STATUS_ARRAY_BOUNDS_EXCEEDED 0xC000008C (bound, `int 5`), a fault: Eip = at
-   FNVL_INTO 8  STATUS_INTEGER_OVERFLOW 0xC0000095 (into, `int 4`), a trap: ExceptionAddress = at, Context.Eip = at+1
-   FNVL_ASSERT 9  STATUS_ASSERTION_FAILURE 0xC0000420 (`int 0x2c`): ExceptionAddress = Context.Eip = at
-   `int 3` / `int 0x2d` use FNVL_BP with at = the address of the byte after the opcode byte (see f_sys.py). A #GP from a software interrupt whose gate has DPL 0
-   is fnvl_raise_av(0, 0xFFFFFFFF, at). */
-#define FNVL_PRIV 6
-#define FNVL_BOUNDS 7
-#define FNVL_INTO 8
-#define FNVL_ASSERT 9
+/* The hardware exception codes (FNVL_*) are one table, fnvlift/faults.json (status, trap/fault, address rule, source per row): fnvl_faults.h and the cases of rt/seh.cc are generated from it.
+   `int 3` / `int 0x2d` use FNVL_BP with at = the address of the byte after the opcode byte (see f_sys.py). A #GP from a software interrupt whose gate has DPL 0 is fnvl_raise_av(0, 0xFFFFFFFF, at). */
 extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void); }
 /* The hardware-raise entries of the runtime (rt/seh.cc) are declared ONLY here, inside namespace fnvl_rt, and only FNVL_RAISE / FNVL_RAISE_AV below name them: a lifted unit that calls the raw
    fnvl_raise or fnvl_raise_av (no EFLAGS / C0 C2 C3 flush) does not find the name and is a compile error. They are the same C-linkage functions as the definitions in seh.cc. */
@@ -317,25 +305,7 @@ namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_ra
 #define SEL_CS 0x1bu
 #define SEL_DS 0x23u
 #define SEL_FS 0x3bu
-/* ---- W15: class rules of the system / rare-instruction family (fnvlift/f_sys.py, f_int.py). Appended; nothing above changed. ----
-   More hardware exception codes for fnvl_raise(code, at) (the mapping lines for rt/seh.cc are in the W15 report):
-   FNVL_STEP 10  STATUS_SINGLE_STEP 0x80000004 (`int1` / icebp, F1: a debug TRAP): ExceptionAddress = Context.Eip = at, which is the address of the NEXT instruction
-   (KiTrap01: KiDispatchException0Args(STATUS_SINGLE_STEP, TrapFrame->Eip), no parameters). */
-#define FNVL_STEP 10
-/* FNVL_LOCK 11  STATUS_INVALID_LOCK_SEQUENCE 0xC000001E: #UD of an instruction that has an F0 prefix among its bytes (KiTrap06Handler); at = the instruction, a fault. */
-#define FNVL_LOCK 11
-/* FNVL_DBGSRV 12  `int 0x2d` (the debug service), at = the instruction; the rule of Wine 9.0 handle_interrupt, rt/seh.cc fnvl_raise. */
-#define FNVL_DBGSRV 12
-/* An UNMASKED x87 (#MF) or SIMD (#XM) floating-point exception raised by a Form (dsl.FAULTS 12..18, one code per NTSTATUS, Wine 9.0 get_fpu_code's order), a fault: ExceptionAddress = Context.Eip = at.
-   FNVL_FLT_IE 13 STATUS_FLOAT_INVALID_OPERATION 0xC0000090, _DE 14 STATUS_FLOAT_DENORMAL_OPERAND 0xC000008D, _ZE 15 STATUS_FLOAT_DIVIDE_BY_ZERO 0xC000008E, _OE 16 STATUS_FLOAT_OVERFLOW 0xC0000091,
-   _UE 17 STATUS_FLOAT_UNDERFLOW 0xC0000093, _PE 18 STATUS_FLOAT_INEXACT_RESULT 0xC000008F, _SF 19 STATUS_FLOAT_STACK_CHECK 0xC0000092 (rt/seh.cc). */
-#define FNVL_FLT_IE 13
-#define FNVL_FLT_DE 14
-#define FNVL_FLT_ZE 15
-#define FNVL_FLT_OE 16
-#define FNVL_FLT_UE 17
-#define FNVL_FLT_PE 18
-#define FNVL_FLT_SF 19
+/* ---- W15: class rules of the system / rare-instruction family (fnvlift/f_sys.py, f_int.py). The fault codes they raise (STEP, LOCK, DBGSRV, FLT_*) are rows of fnvlift/faults.json. ---- */
 /* Segment registers of the process model (rt/seh.cc CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
    (base = TEB, limit 0xFFF); the only descriptors a ring-3 load can reach are the three of the model GDT below, plus the null selector for ES/DS/FS/GS.
    SELK strips the RPL: it keeps the descriptor index and the TI bit (a TI=1 selector names the LDT, which a Win32 process has none of: always invalid). */

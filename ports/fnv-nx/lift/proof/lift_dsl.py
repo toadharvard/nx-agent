@@ -12,7 +12,7 @@ fs_base = `fsb`; flo (the other EFLAGS bits) = c->eflx | IF (EFL_PUSH/EFL_POP ke
 memory = M8/M16/M32 (core's macros).  DEF0: a flag a form declares undefined is assigned 0, and a flag write with `when` w is `w ? v : 0`; DEFPRIOR: a register write with `when` is conditional, so a register the model leaves free keeps its prior value.
 
 Faults (Form.faults) raise through f_flow.raise_site like int3/ud2 and the hand div: code 1 (#DE) is FNVL_DE0 when the failing disjunct is the
-divisor-zero test `eq(x, 0)` and FNVL_DEOVF otherwise (the quotient overflow); 2 = FNVL_BP, 3 = FNVL_UD, 4 = FNVL_BOUNDS (#BR, bound; a fault like #DE).
+divisor-zero test `eq(x, 0)` and FNVL_DEOVF otherwise (the quotient overflow); every other kind's runtime code is the same number, a row of fnvlift/faults.json.
 
 Control transfer is derived from the Form's eip node by structure: constant == next address -> falls through; another constant -> `call` pushes
 (the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,
@@ -20,7 +20,7 @@ loop*, and the step repeat of rep string forms, whose eip is `ite(more, this add
 expression (indirect jmp / call, ret) -> f_flow.jmp_indirect / call_xfer / ret_xfer with the C text of the node, the kind chosen by the mnemonic."""
 from fnvlift.core import CC, SKIP, SUB, Unsupported
 from fnvlift import f_flow
-from fnvlift import dsl
+from fnvlift import dsl, faults
 
 from proof import forms, forms_alu, forms_flow, forms_move, forms_simd             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
@@ -77,9 +77,7 @@ def de_code(n, ref):
 # (segv_handler / trap handlers: TRAP_x86_DIVIDE -> STATUS_INTEGER_DIVIDE_BY_ZERO, TRAP_x86_BPTFLT -> STATUS_BREAKPOINT, TRAP_x86_OPNOEXT/ILLEGAL -> STATUS_ILLEGAL_INSTRUCTION,
 # TRAP_x86_BOUND -> STATUS_ARRAY_BOUNDS_EXCEEDED, TRAP_x86_OFLOW -> STATUS_INTEGER_OVERFLOW, privileged instruction (#GP from CLI/HLT/...) -> STATUS_PRIVILEGED_INSTRUCTION,
 # TRAP_x86_PROTFLT -> STATUS_ACCESS_VIOLATION, TRAP_x86_TRCTRAP -> STATUS_SINGLE_STEP). at: 'a' the instruction, 'nxt' the next instruction, 'a+1' the imm8 byte of a 2-byte int.
-FAULT_MAP = {2: ('FNVL_BP', 'a', True), 3: ('FNVL_UD', 'a', True), 4: ('FNVL_BOUNDS', 'a', False), 5: ('FNVL_INTO', 'a', True), 6: ('FNVL_PRIV', 'a', False),
-             7: ('AV', 'a', False), 8: ('FNVL_STEP', 'nxt', True), 9: ('FNVL_ASSERT', 'a', False), 10: ('FNVL_DBGSRV', 'a', False), 11: ('FNVL_INTO', 'a+1', True),
-             **{k: ('FNVL_FLT_' + dsl.FAULTS[k][4:], 'a', False) for k in dsl.FLT_STATUS}}
+FAULT_MAP = faults.fault_map()      # generated from the one fault table (fnvlift/faults.json): kind -> (FNVL_* name or AV, at, trap)
 DE = 1        # #DE: the status (divide by zero or overflow) is chosen by the condition (de_code), a fault
 assert set(FAULT_MAP) | {DE} == set(dsl.FAULTS), 'a fault code of dsl.FAULTS has no row in FAULT_MAP: %s' % sorted(set(dsl.FAULTS) - set(FAULT_MAP) - {DE})
 

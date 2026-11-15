@@ -278,11 +278,7 @@ template<class T> static inline T ashr_(T a, T c, unsigned w, T m) { T s = (a >>
 SEGS = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # the segment registers in rt/fnvl.h SEG_* order
 XIN = ('df', 'flo', 'fs_base', 'gs_base') + tuple('sel_' + s for s in SEGS)          # other pre-state: DF (1 bit), the other EFLAGS bits (32, masked), segment bases, the six segment selectors (16 bits, = c->sel[SEG_*])
 SIG = ','.join('[[maybe_unused]] u32& ' + r for r in REGS + FLAGS + XIN) + ',u32& eip'
-FAULTS = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BOUNDS', 5: 'INTO', 6: 'PRIV', 7: 'AV', 8: 'STEP', 9: 'ASSERT', 10: 'DBGSRV', 11: 'INTO_AT1',
-          # an UNMASKED x87 (#MF) or SIMD (#XM) floating-point exception: one kind per NTSTATUS, in Wine 9.0 get_fpu_code's order (IE, with SF -> STACK_CHECK, then DE, ZE, OE, UE, PE); a Form lists its
-          # fault(kind, cond) rows in that priority order (the first true condition wins: fault_term). cond = the new sticky flag AND NOT its mask bit (FCW for x87, MXCSR bits 7-12 for SIMD).
-          12: 'FLT_IE', 13: 'FLT_DE', 14: 'FLT_ZE', 15: 'FLT_OE', 16: 'FLT_UE', 17: 'FLT_PE', 18: 'FLT_SF'}
-FLT_STATUS = {12: 0xC0000090, 13: 0xC000008D, 14: 0xC000008E, 15: 0xC0000091, 16: 0xC0000093, 17: 0xC000008F, 18: 0xC0000092}     # STATUS_FLOAT_*: INVALID_OPERATION DENORMAL_OPERAND DIVIDE_BY_ZERO OVERFLOW UNDERFLOW INEXACT_RESULT STACK_CHECK
+from fnvlift.faults import FAULTS, FLT_STATUS      # the one fault table (fnvlift/faults.json); kind = runtime code
 INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32, **{'sel_' + s: 16 for s in SEGS}}
 
 def xc_lines(kind, i, x, ref):
