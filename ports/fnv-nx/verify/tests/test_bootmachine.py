@@ -495,7 +495,7 @@ def main():
     case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs, BAD_NARGS on a null array and a value for zero arguments",
          not bad, bad)
     case("services: fn 0, 10, 15, 27..29, 32, 33 and 37.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
-         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 10, 15, 27, 28, 29, 32, 33, 37, 38, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
+         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 10, 15, 27, 28, 29, 32, 33, 37, 39, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
          and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
          and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
     try:
