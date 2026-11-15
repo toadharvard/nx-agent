@@ -25,6 +25,10 @@ changed. Every fact comes from its own code or from op_syntax.tsv (gen_opsyntax.
              lines of the test, the return, the only emitter call site) go to OUT_RESERVED_TSV as the input of L1's certificate; the body is not edited.
   none       no class applies: a red row. Nothing falls back.
 
+It also writes op_reserved_values.tsv next to OUT_RESERVED_TSV (or at --values=PATH): columns `opnum name`, one row per instruction-table row whose
+opcode_string is 0, opnum = the row's index = the token value, from the same table read that writes the class c facts (the value set of L1's `shader_opcode` reach
+certificate: no shader of the static set may contain an opcode token in it).
+
 OUT_COVER_TSV columns: slot key opnum op class covering evidence.  slot is `emit` (the opcode's emitter) or `args` (parse_args_NULL), id is the d3d9total gate's id
 `sm:<stage:form>` (one row per sm_table opcode entry) or, for a table row without a sm_table entry, `table:<OP>`. Rows are sorted; two runs over
 the same inputs are byte-equal.
@@ -193,6 +197,7 @@ def main(argv):
     ok_order = bool(emit_call) and t < ret < emit_call[0] and "}" in pit[t:ret].split("return")[0] + "}" and \
         re.search(r"if\s*\(\s*instruction->opcode_string\s*==\s*NULL\s*\)\s*\{[^}]*return", pit) is not None
     res_rows = [r for r in table if r[1] == "0"]
+    vtext = "opnum\tname\n" + "".join("%d\t%s\n" % (i, r[0]) for i, r in enumerate(table) if r[1] == "0")
     res_ops = sorted({r[0] for r in res_rows})
     base = pit_line
     reserved.append(("function", "parse_instruction_token", "mojoshader.c:%d" % pit_line))
@@ -222,11 +227,12 @@ def main(argv):
             for c in cs: co[c] = co.get(c, 0) + 1
         return cf, co
     red = [r for r in rows if r[5] == "none" or "MISSING:" in r[4] or "MISSING:" in r[6]]
+    outv = next((x[9:] for x in argv if x.startswith("--values=")), os.path.join(os.path.dirname(os.path.abspath(outr)), "op_reserved_values.tsv"))
     if check:
-        same = os.path.isfile(outc) and open(outc).read() == text and os.path.isfile(outr) and open(outr).read() == rtext
+        same = os.path.isfile(outc) and open(outc).read() == text and os.path.isfile(outr) and open(outr).read() == rtext and os.path.isfile(outv) and open(outv).read() == vtext
         print("op_cover: %s" % ("byte-equal" if same else "DIFFERS"))
         return 0 if same and not red and ok_order else 2
-    open(outc, "w").write(text); open(outr, "w").write(rtext)
+    open(outc, "w").write(text); open(outr, "w").write(rtext); open(outv, "w").write(vtext)
     for slot in ("emit", "args"):
         cf, co = counts(slot)
         print("slot %-4s forms by class %s ; table ops by class %s" % (slot, dict(sorted(cf.items())), dict(sorted(co.items()))))
