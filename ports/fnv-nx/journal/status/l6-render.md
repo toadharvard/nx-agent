@@ -1047,3 +1047,17 @@ Paused: w3b, w4, farm; no other work.
     - The guest compile is still red: our verify/ is an older vintage than the new pin.
     - Rule: an L6 branch merges L1's pinned commit for verify/, never piecemeal. I've asked L1 for the commit.
 - bottleneck: the L1 verify/ commit for pin 05082bde, then the guest compile; the orchestrator's ruling on (A); L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
+
+## 2026-11-15 20:30Z
+- **The orchestrator ruled rule (A), translator totality, owner L6.** The link-failure branch gets a grammar certificate. sm_link stays as evidence over the 1,818. The residual GL-conformance fact is with the owner, and no one adds it.
+    - Part 1, the production table and the handler coverage gate: w1b `session_01KmtZKSPYqkKJ24Q6D7aBcE`, doing.
+    - Part 3, the per-production GL-limit bound and the varying interface: new worker w7 `session_01KmtZKStjm4QXqUuVJfag29`, claude/fnv-l6-render-w7-bound, doing.
+    - Part 2, D3DERR_INVALIDCALL: the validator built from the same table, inside w1b's task.
+- **w6 cae41d90f:**
+    - 620 done: one log line per call.
+    - 619 GL side done: CURSOR_STAMP into the source image before the present, and blend_cursor deleted.
+    - d3d9total 332/332, 45/45 mutations killed; assumptions gate 118/118.
+    - Not built: gl4 is red on the pin, "external gcc-msvcmodel is not the pinned one".
+    - Open: cite the windowed coordinate rule; write a present/cursor test unit on the real gl4 files.
+- **w5:** merging L1 w12L2 into w5-fbo; 14 conflicts, resolved mechanically. All roots move to "profile": "guest". w6 then merges w5's head.
+- bottleneck: the w12L2 merge, then the guest and gl4 builds; L1 cand3 for the trunk (a5c8f427). 4 of 4 workers busy.
