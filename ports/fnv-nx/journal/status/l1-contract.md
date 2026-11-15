@@ -1962,3 +1962,7 @@ bottleneck: the cand2 merge (w15), and cand3 (w12: the contract/facts tool data)
 bottleneck: the cand2 merge (w15), and cand3 (w12).
 - 23:50 The gs-fail certificate is withdrawn by the orchestrator: gs comes from the pinned 7601 kernel (integ 1b0541249). w28 is cancelled on it.
 bottleneck: the cand2 merge (w15), and cand3 (w12).
+- 00:00 L3a reports two items that block the pack build. Both go to w12 for cand3.
+  - contract/objfacts.py rejects the sympair kind 'noemit' (L2 66353d9ea). Rule: one table, toolchain/names/sympair_kinds.inc, through `uses`; the copy is deleted.
+  - -f(no-)schedule-insns becomes a PER_ROOT flag class (L3a bb4256c9e): pack CC ×0.145, .text +1.5%, sched2 still runs. Accepted.
+bottleneck: the cand2 merge (w15), and cand3 (w12: the sympair table and mount, sched1).
