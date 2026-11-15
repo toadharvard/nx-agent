@@ -9,6 +9,16 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = Tru
 fcc = lambda s: sum(ord(c) << (8 * i) for i, c in enumerate(s))
 
 
+def enum_domain(hdr, typedef, force):
+    """(members, complement) of a header enum: members = every enumerator value but the FORCE_DWORD one; complement = representatives of every other 32-bit
+    value: min - 1 (when min > 0), max + 1 and 0x7fffffff (the largest signed 32-bit value; the probe rows of the table were taken with it). The representatives stand for the whole complement only where the closing rule of the
+    enum (proved at its use in load()) shows that Wine's code treats every value outside the enum alike."""
+    t = open(hdr).read(); t = t[t.index("typedef enum " + typedef):]; t = t[:t.index("} " + force[0] + ";")]
+    vals = {n: int(v, 0) for n, v in re.findall(r"(\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)", t)}
+    vals.pop(force[1]); mem = sorted(vals.values())
+    return mem, ([mem[0] - 1] if mem[0] > 0 else []) + [mem[-1] + 1, 0x7fffffff]
+
+
 def d3dformat_enum(hdr):
     t = open(hdr).read(); t = t[t.index("typedef enum _D3DFORMAT"):]; t = t[:t.index("} D3DFORMAT;")]; out = []
     for m in re.finditer(r"D3DFMT_\w+\s*=\s*(?:MAKEFOURCC\('(.)',\s*'(.)',\s*'(.)',\s*'(.)'\)|(0x[0-9A-Fa-f]+|\d+))", t):
@@ -20,9 +30,7 @@ FOURCC_LIST = ["DXT1", "DXT2", "DXT3", "DXT4", "DXT5", "ATI1", "ATI2", "INTZ", "
                "YUY2", "UYVY", "GRGB", "RGBG", "MET1", "NV12", "YV12", "AYUV", "NVHU", "NVHS", " R16", "AL16"]   # D3DFMT_G8R8_G8B8 = 'GRGB', R8G8_B8G8 = 'RGBG', MULTI2_ARGB8 = 'MET1'
 UNKNOWN_FMT = [fcc("ZZZZ"), fcc("abcd"), fcc("~!@#"), 1, 37, 255, 0x7fffffff, 0x41420143]
 FMT = None   # set by load(): every D3DFORMAT enum value of the header + FOURCC_LIST + UNKNOWN_FMT
-DEVT = [1, 2, 3, 4]; DEVT_BAD = [0, 5, 0x7fffffff]
-RTYPE = [1, 2, 3, 4, 5, 6, 7]; RTYPE_BAD = [0, 8, 11, 0x7fffffff]
-MSAA = list(range(0, 17)) + [17, 0x7fffffff]
+# DEVT, RTYPE, MSAA (and their *X / complement forms) are derived in load() from the enums of the mounted d3d9types.h (enum_domain)
 USAGE_BITS = [1 << i for i in range(32)]
 MASK = 0x103ffff0 | 3     # WINED3DUSAGE_MASK | WINED3DUSAGE_QUERY_MASK (+ RT, DS): the bits that reach wined3d_check_device_format's usage logic
 EFF = [b for b in USAGE_BITS if b & MASK]
@@ -33,7 +41,7 @@ RT, DS = 1, 2
 QBITS = [0x8000, 0x10000, 0x20000, 0x40000, 0x80000, 0x100000, 0x200000]
 ADP_ADAPTER_FMT_SMALL = [X8, R5, X1]
 # (name, [per-argument domain: list of values or a domain name])
-D = dict(FMT=FMT, DEVT=DEVT, DEVTX=DEVT + DEVT_BAD, RTYPE=RTYPE, RTYPEX=RTYPE + RTYPE_BAD, MSAA=MSAA, USAGE_ALL=USAGE_ALL, PAIRS=PAIRS, WIN=[0, 1],
+D = dict(FMT=None, DEVT=None, DEVTX=None, RTYPE=None, RTYPEX=None, MSAA=None, USAGE_ALL=USAGE_ALL, PAIRS=PAIRS, WIN=[0, 1],
          A0=[0], HAL=[1], X8=[X8], FMT_AD=[X8, R5, X1], SMALLRT=[1, 3, 4, 5, 6], RT2=[1, 3], USM3=[0, 1, 2], UNI=[0, 1, 3, 5, 6, 7], AFLAG=[0] + [1 << i for i in range(32)] + [0xffffffff], DISP4=[X8, R5, X1, 35],
          SCAN=[0, 1, 2, 3, 0x7fffffff], NZ=[0, 1, 2, 5, 0xffffffff], SZ=[0x18, 0x10, 0, 0x1c, 0xffffffff], FMT12=[21, 22, 23, 75, 80, fcc("DXT1"), fcc("INTZ"), fcc("NULL"), 114, 0, fcc("ZZZZ"), 113],
          USM=[0, 1, 2, 3, 0x40000 | 1, 0x20000, 0x10000, 0x200, 0x400, 0x400 | 1], FMT_SM=[0, 21, 22, 23, 75, 80, fcc("DXT1"), 0x7fffffff],
@@ -76,6 +84,16 @@ def load(hdr, spec):
     global FMT, SPEC
     FMT = sorted(set(d3dformat_enum(hdr)) | {fcc(s) for s in FOURCC_LIST} | set(UNKNOWN_FMT))
     D["FMT"] = FMT
+    # D3DDEVTYPE: Wine 9.0 (tools/wine-9.0 c8373ee4) never reads the value except in dlls/wined3d/directx.c:2320 (wined3d_get_device_caps: DeviceType = HAL ? HAL : REF,
+    #   the result is the same for every value other than HAL) and passes it through by cast (dlls/d3d9/d3d9_private.h:409); so every value outside the enum behaves as REF.
+    DEVT, devt_bad = enum_domain(hdr, "_D3DDEVTYPE", ("D3DDEVTYPE", "D3DDEVTYPE_FORCE_DWORD"))
+    # D3DRESOURCETYPE: dlls/d3d9/directx.c:301-326 d3d9_CheckDeviceFormat: the switch names the 7 values, `default:` returns WINED3DERR_INVALIDCALL: uniform for every other value.
+    RTYPE, rtype_bad = enum_domain(hdr, "_D3DRESOURCETYPE", ("D3DRESOURCETYPE", "D3DRTYPE_FORCE_DWORD"))
+    # D3DMULTISAMPLE_TYPE: dlls/d3d9/directx.c:363 d3d9_CheckDeviceMultiSampleType: `type > D3DMULTISAMPLE_16_SAMPLES` returns D3DERR_INVALIDCALL: uniform for every value above the enum.
+    MSAA, msaa_bad = enum_domain(hdr, "_D3DMULTISAMPLE_TYPE", ("D3DMULTISAMPLE_TYPE", "D3DMULTISAMPLE_FORCE_DWORD"))
+    D["DEVT"], D["DEVTX"] = DEVT, DEVT + devt_bad
+    D["RTYPE"], D["RTYPEX"] = RTYPE, RTYPE + rtype_bad
+    D["MSAA"] = MSAA + msaa_bad
     SPEC = spec
 
 
