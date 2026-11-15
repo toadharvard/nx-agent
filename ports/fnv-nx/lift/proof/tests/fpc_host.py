@@ -11,7 +11,7 @@ from fnvlift import dsl
 from fnvlift.dsl import V, fp, fp_val, fp_flags, to_smt
 
 src = open(os.path.join(LIFT, 'rt', 'fnvl.h')).read()
-i = src.index('template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t'); j = src.index('static inline int sse_sat(')
+i = src.index('/* tininess AFTER rounding of a mul / div'); j = src.index('static inline int sse_sat(')
 body = src[i:j].replace('"+w"', '"+x"')
 SHIM = r'''
 #include <fenv.h>
@@ -42,7 +42,13 @@ def main():
     nodes = {(op, w): fp(op, w, V('a', w), V('b', w), V('mxcsr', 32)) for op in dsl.FPOPS for w in (32, 64)}
     smt = {k: (to_smt(fp_val(n)), to_smt(fp_flags(n))) for k, n in nodes.items()}
     for (op, w), (vv, ff) in sorted(smt.items()):
-        cases = [(a, b) for a in SP[w] for b in SP[w]] + [(rng.getrandbits(w), rng.getrandbits(w)) for _ in range(N)]
+        fb, eb, bias = (23, 8, 127) if w == 32 else (52, 11, 1023)
+        def near():       # operands whose exact product / quotient lies within a few exponents of the smallest normal, with mantissas near all-ones / all-zeros: the tininess-after-rounding boundary
+            def mant(): return rng.choice([(1 << fb) - 1 - rng.getrandbits(3), rng.getrandbits(3), rng.getrandbits(fb), (1 << fb) - 1 - rng.getrandbits(fb // 2)])
+            if op == 'mul': e1 = rng.randrange(1, 2 * bias); e2 = 1 - bias - (e1 - bias) + bias + rng.choice([-1, 0, 1, 2]); e2 = min(max(e2, 0), 2 * bias)
+            else: e1 = rng.randrange(1, 2 * bias); e2 = e1 + bias - 1 + rng.choice([-1, 0, 1, 2]); e2 = min(max(e2, 1), 2 * bias)
+            sg = rng.getrandbits(2); return ((sg & 1) << (w - 1) | e1 << fb | mant(), (sg >> 1) << (w - 1) | e2 << fb | mant())
+        cases = [(a, b) for a in SP[w] for b in SP[w]] + [(rng.getrandbits(w), rng.getrandbits(w)) for _ in range(N)] + ([near() for _ in range(N * 6)] if op in ('mul', 'div') else [])
         for a, b in cases:
             for rc in range(4):
                 for daz in (0, 1):

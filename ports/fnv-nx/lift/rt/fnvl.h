@@ -240,8 +240,27 @@ static inline u32 fx_dsl_mxcsr(void){ return c->mxcsr|sse_live(); }
 static inline void fx_dsl_mxcsr_set(u32 v){ FOWN_SSE(); fnvl_fp_x87_clear(); c->mxcsr=v; sse_fpcr(v); }
 /* dsl.fp (fnvlift/dsl.py `fp`, the rules are in its docstring and in _fp_smt): scalar binary32 / binary64 add sub mul div sqrt (op 0..4) of the bit patterns a, b under the MXCSR value mx -> the result's
    bit pattern in the low w bits and THIS operation's flags IE DE ZE OE UE PE (MXCSR bits 0-5) in bits w..w+5. The host does the IEEE operation in the guest's rounding mode (FPCR RC from mx, sse_fpcr);
-   its sticky IOC / DZC / OFC / IXC flags are IE / ZE / OE / PE; NaN operands, DAZ, DE, tininess BEFORE rounding (UE: the round-toward-zero result below the smallest normal, the host's UFC is after
-   rounding and is not used) and FTZ are computed here on the bit patterns. The live host flags of the SSE family are folded into c->mxcsr first (the family's sticky set is c->mxcsr | live), so none is lost. */
+   its sticky IOC / DZC / OFC / IXC flags are IE / ZE / OE / PE; NaN operands, DAZ, DE, tininess AFTER rounding (UE: the result rounded to the destination precision with unbounded exponent range is nonzero and below the smallest normal, SoftFloat 8086-SSE specialize.h;
+   the host's UFC is before rounding and is not used) and FTZ are computed here on the bit patterns. The live host flags of the SSE family are folded into c->mxcsr first (the family's sticky set is c->mxcsr | live), so none is lost. */
+/* tininess AFTER rounding of a mul / div (SDM / SoftFloat 8086-SSE): the exact result V * 2^E (V an integer, a sticky bit for a division's remainder) rounded to P significant bits in the guest's rounding mode rc
+   with unbounded exponent range is below the smallest normal 2^(1-BIAS). Integers only: the host's own rounding is at the subnormal grid and cannot answer this. a, b: finite operands after DAZ. */
+template<class UT, int FB> static inline bool fx_tiny_after(bool div, UT a, UT b, u32 rc){
+  const int W=sizeof(UT)*8, P=FB+1, BIAS=(1<<(W-FB-2))-1; const UT FM=((UT)1<<FB)-1; const bool neg=(((a^b)>>(W-1))&1)!=0;
+  auto dec=[&](UT x, u128& m, int& e){ UT ef=(x>>FB)&((((UT)1)<<(W-FB-1))-1), f=x&FM; if(ef==0){ m=f; e=1-BIAS-FB; } else { m=f|((UT)1<<FB); e=(int)ef-BIAS-FB; } };
+  const UT EXM=(UT)((((UT)1<<(W-1))-1)&~FM); if((a&EXM)==EXM||(b&EXM)==EXM) return false;      /* an infinite operand: the result is an exact zero or an infinity */
+  u128 ma, mb; int ea, eb; dec(a,ma,ea); dec(b,mb,eb);
+  if(ma==0||mb==0) return false;                                    /* an exact zero is not tiny */
+  while(!(ma>>FB)){ ma<<=1; ea--; } while(!(mb>>FB)){ mb<<=1; eb--; }
+  u128 V; int E; bool st=false;
+  if(!div){ V=ma*mb; E=ea+eb; }
+  else { const int S=P+3; const u128 num=ma<<S; u128 q=0, r=0; for(int i=P+S-1;i>=0;i--){ r=(r<<1)|((num>>i)&1); q<<=1; if(r>=mb){ r-=mb; q|=1; } } st=r!=0; V=q; E=ea-eb-S; }
+  int L=0; for(u128 t=V;t;t>>=1) L++;
+  int top;
+  if(L>P){ const int d=L-P; const u128 low=V&(((u128)1<<d)-1), half=(u128)1<<(d-1), R=V>>d; const bool inex=low!=0||st, g=(low&half)!=0, rest=(low&(half-1))!=0||st;
+    bool up=false; if(rc==0) up=g&&(rest||(R&1)); else if(rc==1) up=neg&&inex; else if(rc==2) up=!neg&&inex;
+    top=E+d+P-1; if(up && R+1==((u128)1<<P)) top++; }
+  else top=E+L-1;
+  return top < 1-BIAS; }
 template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a, UT b, u32 mx){
   const int W=sizeof(UT)*8; const UT SGN=(UT)1<<(W-1), FM=((UT)1<<FB)-1, EX=(UT)((((UT)1<<(W-1))-1)&~FM), QB=(UT)1<<(FB-1), MINN=(UT)1<<FB;
   const bool daz=(mx>>6)&1, um=(mx>>11)&1, ftz=(mx>>15)&1;
@@ -267,11 +286,9 @@ template<class FT, class UT, int FB> static inline u128 fx_dsl_fp_t(u32 op, UT a
   if(ie){ sse_fpcr(mx); return ((u128)1u<<W)|indef; }
   const bool de=!daz && (issub(ao)||issub(bo));
   bool tiny=false;
-  if((UT)(val&~SGN)<=MINN){                                         /* the result may be tiny: the round-toward-zero result decides (tininess before rounding) */
-    sse_fpcr((mx&~(3u<<13))|(3u<<13)); FT z; fnvl_fp_x87_clear();
-    switch(op){ case 0: z=x+y; break; case 1: z=x-y; break; case 2: z=x*y; break; case 3: z=x/y; break; default: z=__builtin_sqrt(x); }
-    __asm__ volatile("" : "+w"(z)); fnvl_fp_x87_clear();
-    UT zb; __builtin_memcpy(&zb,&z,sizeof zb); zb&=~SGN; tiny=zb<MINN && (zb!=0 || pe); sse_fpcr(mx); }
+  if((UT)(val&~SGN)<=MINN){                                         /* a tiny-after-rounding result is at most the smallest normal: add / sub there are exact (a multiple of the subnormal step), mul / div decide exactly in integers, sqrt is never tiny */
+    if(op<=1) tiny=(UT)(val&~SGN)!=0 && (UT)(val&~SGN)<MINN;
+    else if(op<=3) tiny=fx_tiny_after<UT,FB>(op==3,a,b,(mx>>13)&3u); }
   bool ue=tiny&&(pe||!um), pe2=pe||oe;
   if(ftz&&um&&tiny){ val&=SGN; ue=true; pe2=true; }
   fl=(de?2u:0u)|(ze?4u:0u)|(oe?8u:0u)|(ue?16u:0u)|(pe2?32u:0u);

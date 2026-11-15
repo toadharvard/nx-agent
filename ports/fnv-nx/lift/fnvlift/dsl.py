@@ -96,10 +96,10 @@ FPOPS = ('add', 'sub', 'mul', 'div', 'sqrt')
 def fp(op, w, a, b, mx):
     """SSE scalar floating point at the SOURCE type (w = 32: binary32, 64: binary64) on the bit patterns a, b (w bits; sqrt ignores b) under the MXCSR value mx (32 bits).
     One node of width w + 6: the low w bits are the result's bit pattern, bits w..w+5 the status flags (IE DE ZE OE UE PE, MXCSR bits 0-5) THIS operation raises; use fp_val / fp_flags.
-    Rules (SDM Vol 1 4.8.3, 4.9.1, 10.2.3, 11.5; x86 uses tininess BEFORE rounding, the SoftFloat 8086-SSE specialisation): rounding from mx.RC (bits 13-14: 0 nearest-even, 1 down, 2 up, 3 zero);
+    Rules (SDM Vol 1 4.8.3, 4.9.1, 10.2.3, 11.5; x86 SSE detects tininess AFTER rounding: Berkeley SoftFloat 3e source/8086-SSE/specialize.h line 48 `softfloat_tininessAfterRounding`; the SDM sentence is pending (L3b w4: the Sail model has no SSE FP)): rounding from mx.RC (bits 13-14: 0 nearest-even, 1 down, 2 up, 3 zero);
     DAZ (mx bit 6) reads a denormal operand as a zero of its sign (no DE); a NaN operand gives that operand quieted (the first source if both), an invalid operation without a NaN operand gives the
     negative quiet NaN (the default QNaN); IE: a signalling NaN operand or an invalid operation; DE: a denormal operand (DAZ clear) and no IE and no NaN operand (a NaN operand is returned quieted and nothing else is checked); ZE: finite non-zero / 0; OE: a finite exact result that
-    rounds to infinity (the result is the infinity or the largest finite number as the mode says; PE too); UE: tiny before rounding and (inexact, or UM = mx bit 11 clear); PE: inexact;
+    rounds to infinity (the result is the infinity or the largest finite number as the mode says; PE too); UE: tiny after rounding (the result rounded to the destination precision with UNBOUNDED exponent range is nonzero and below the smallest normal) and (inexact, or UM = mx bit 11 clear); PE: inexact;
     FTZ (mx bit 15) with UM set: a tiny result is the zero of its sign and UE and PE are set.  Flags are those of this operation alone; the caller ORs them into MXCSR (sticky)."""
     assert op in FPOPS and w in (32, 64) and a.w == w and mx.w == 32 and (op == 'sqrt' or b.w == w)
     return mk('fp', w + 6, (a, a if op == 'sqrt' else b, mx), (op, w))
@@ -181,7 +181,8 @@ def _fp_smt(op, w, a, b, mx):
     fin = z3.And(exact_in, z3.Not(z3.fpIsNaN(r)))       # the exact result is representable iff rounding down and up agree (an infinite exact result: both are that infinity)
     inexact = z3.Or(oe, z3.And(fin, z3.fpNEQ(rd_, ru_)))
     rzb = z3.fpToIEEEBV(rz_)
-    tiny = z3.And(exact_in, z3.Not(z3.fpIsNaN(r)), z3.Or(issub(rzb), z3.And(z3.fpIsZero(rz_), inexact)))
+    minn = ex(z3.fpBVToFP(BV(1 << fb, w), S))      # the smallest normal in the wide format: tiny AFTER rounding = the unbounded-exponent rounded result (rw) is nonzero and below it
+    tiny = z3.And(exact_in, z3.Not(z3.fpIsNaN(r)), z3.Not(z3.fpIsZero(rw)), z3.fpLT(z3.fpAbs(rw), minn))
     de = z3.And(z3.Not(daz), z3.Not(invalid), exact_in, z3.Or(issub(a), (issub(b) if op != 'sqrt' else z3.BoolVal(False))))
     ue = z3.And(tiny, z3.Or(inexact, z3.Not(um)))
     ftz_ = z3.And(ftz, um, tiny)
