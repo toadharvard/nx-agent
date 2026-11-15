@@ -34,7 +34,11 @@ typedef uint64_t fnvnx_hslot;
 #endif
 
 /* Function slots: host addresses of LP64 functions with the signature given in the comment
- * (all parameters uint64_t, result uint64_t). */
+ * (all parameters uint64_t, result uint64_t).
+ * CONTRACT (host side, by construction): every fnvnx_hslot is a non-null LP64 host function address below 4 GiB; a host whose table has
+ * size >= sizeof(FnvnxHostApi) fills every slot. A service the host lacks is expressed only through ext_call's total result
+ * (FNVNX_EXT_NO_MODULE / NO_SERVICE), never through a null slot. Fill sites: verify/boothost.py (the slot list, checked against this header
+ * by tests/test_bootmachine.py) and the platform host's table (toolchain/host/host.c). The guest therefore tests no slot for null. */
 typedef struct FnvnxHostApi {
     uint32_t magic;                /* FNVNX_HOSTAPI_MAGIC */
     uint32_t version;              /* FNVNX_HOSTAPI_VERSION */
