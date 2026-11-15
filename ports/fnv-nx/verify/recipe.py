@@ -412,12 +412,15 @@ def merge_inputs(base, extra, store, ws):
     return sorted(out, key=lambda i: i["at"])
 
 
-def outside_files(text, at):
+SANDBOX_TMP = "/tmp"   # the tmpfs every hermetic stage mounts (sandbox.py): the temporary directory of a driver run in a stage
+
+
+def outside_files(text, at, tmp=SANDBOX_TMP):
     """The `.o` files of the driver's link command TEXT that lie outside the runtime external mounted at AT, the program's own object (the driver's
-    temporary $TMPDIR/cc*.o) excepted: a start or end file the pinned runtime's driver names from elsewhere. Empty when every one is the runtime's."""
+    temporary TMP/cc*.o; TMP is the temporary directory of the process that ran the driver: the stage's tmpfs by default) excepted: a start or end file the pinned runtime's driver names from elsewhere. Empty when every one is the runtime's."""
     line = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("COLLECT_GCC_OPTIONS=")][-1]
     toks = [posixpath.normpath(t.strip('"')) for t in line.split() if t.strip('"').endswith(".o") and t.strip('"').startswith("/")]
-    tmp = posixpath.normpath(tempfile.gettempdir())   # the driver's temporary directory is the process's own TMPDIR
+    tmp = posixpath.normpath(tmp)
     return sorted(t for t in toks if not t.startswith(at + "/") and not re.fullmatch(re.escape(tmp) + r"/cc[^/]*\.o", t))
 
 
