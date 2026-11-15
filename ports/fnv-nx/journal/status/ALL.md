@@ -49,7 +49,7 @@ verdict.
 | 1.1 | L1 | w23 comdat_identity (linkstrict 4888/5783, abi odr, onedef) | identity modulo normalised relocations; undecidable is red |
 | 1.2 | L1 | w20u: the namegate/r7/objstub universe from admit covers. w20: objstub exit 2 | universe 0 with an admitted root is red; a gate crash is a finding |
 | 1.3 | L1 | w22f2: the fpexact reader | expected 113 clean + 1 (mp3, see 1.6) |
-| 1.4 | L5 | w10: assumptions, hostapi, abi layout, imports/machine inputs, boot selftests' HOSTABI from the recipe | gates green on 141b07580 |
+| 1.4 | L5 | w10: `assumptions`, hostapi, abi layout, imports/machine inputs, boot selftests' HOSTABI from the recipe | gates green on 141b07580 |
 | 1.5 | L5 | w14: publish tools/fnvnx-a64-msvcmodel13 (farm). L1 w4 checks the MANIFEST. Rebuild the platform root on it; revert source changes made only for gcc 15 (ini.cpp std::map, unless a rule names it) | root built on msvcmodel13 |
 | 1.6 | L2 | w1: MINIMP3_NO_SIMD unconditional | native code holds no explicit target float→int intrinsic; global builtin findings over the platform root = 0 |
 | 1.7 | L1 | w19: warm verdict ≤ 300 s on the trunk | the build is always fast |
@@ -61,7 +61,7 @@ verdict.
 | 2.1 | L3a | w8 t16k: build lift/pack, lift/rt, bridges and the 7 test roots; run the 6 guest tests against references | recipe store only |
 | 2.2 | L3a | w6: break the fnvlift↔proof cycle and gate that the root graph is acyclic; independent references for the 21 moved tests (rows with none go to L1); the 8 build-path defects onto recipe.py with declared externals | 0 stock-g++ runs, 0 undeclared inputs |
 | 2.3 | L3a | w1: the product relift of all 7 images (shapes.tsv, the SEH batch, DEF0/DEFPRIOR, origin flags). Publish its shape-key list to L3b at once | one pack, every image |
-| 2.4 | L3a | w7: the facts commit (jtab, ranges, reloc consistency, data_in_code) | removes ASM-233 |
+| 2.4 | L3a | w7: the facts commit (jtab, ranges, reloc consistency, data_in_code) | removes L3a's code-range REMOVE record |
 | 2.5 | L3a | synchronous x86 exceptions emitted at their instruction; the masked-exceptions fact over every fldcw/ldmxcsr/fldenv/frstor/fxrstor site | decision "Hardware exceptions" |
 | 2.6 | L3b | certify the pack's shape set: the remaining int shapes on farms; certified builders for x87, SIMD and sys; w4 cpuid and DEF0 in the prover | pack forms ⊆ certified (2,370 / 19,494 int at 2026-11-12) |
 | 2.7 | L2 | plugin census over the relift pack (global finding count); review of the dispatch/defdisp plugin for the bridges; top-level asm bracketed as recorded ranges | 0 findings |
@@ -76,7 +76,7 @@ verdict.
 | 3.3 | L2 | w2 .fnvnx.tls (L1 tlsmodel); w3 extents. Open sites: GetProcAddress 0 of 135 and LoadLibrary 2 of 36 (exe 0xda284a, d3dx9_38 0x56b717), at facts a0f3d8ea / manifest e15d385f, measured 2026-11-14. Rule: a dominating index compare bounds the indexed store | reach certificates count once every dynamic site is resolved |
 | 3.4 | L3a | the product ELF root, with a worker; bridges → `fnvnx_dispatch`; exitgen | undefined closure = ∅ |
 | 3.5 | L5 | rt/guest: `main` process entry; pthread mutexes over real threads (libgcc unwind) | 3 native test roots link |
-| 3.6 | L6 | w1b translator root; w6 render/d3d9 root (after 3.1 w16c); doubles 26/88 and the 22 ignore-all link commands → 0; render/ASSUMPTIONS.md into the registry | stub/doubles gates 0 |
+| 3.6 | L6 | w1b translator root; w6 render/d3d9 root (after 3.1 w16c); doubles 26/88 and the 22 ignore-all link commands → 0; `render/ASSUMPTIONS.md` into the registry | stub/doubles gates 0 |
 | 3.7 | L6A | w6 gl4 root (after w15c, with lib/sha256 57051038, eb482552, b83b7309) | recipe-built libnxgl4 |
 | 3.8 | L5 | tests onto the recipe with 0 doubles (5 files/87 symbols); delete s4/s7 Makefiles and build_guest.sh | one build |
 
@@ -129,7 +129,7 @@ The first product root is L5 w10's platform root (6516d0d is red: 58 of 74 units
 | L1 | session_01KmtZKUn5UJpiHYPtNRT6p9 | MERGER queue; w15 link + onedef; w17 flags.semantics; w19 warm speed | trunk 28 gates, 0 roots (8cfbcdbf); LoadLibrary 20/23 closed, dynamic GPA 12 open |
 | L2 | session_01KmtZKRi5XRMhd5qzRaEyxC | 4 green heads at MERGER; w5 rebase; all 8 plugins load for C and C++ | CRT name bindings 0 (84fb9bc7); shim/include 517 names, 2 duplicate declarations being removed |
 | L3a | session_01KmtZKSANKhYEe4nVesF6Ho | lift-gates at MERGER; pack as product root; dispatch (w8, 26/26) | flags gate 16,787 red reads (5b308371, being recounted on the 6-image set and split by cause); unent 0 on all 6 images |
-| L3b | session_01KmtZKSQpF5Su9oG96Kbe4A | w2g + registry merge unit; forms queue 19,494 int shapes (~60 CPU-h) after the Sail hunks | assumption registry 77 entries: L3b 11, L3a 17, L2 1 live (326f2c8e); mirror shard 39/40 proved |
+| L3b | session_01KmtZKSQpF5Su9oG96Kbe4A | w2g + registry merge unit; forms queue 19,494 int shapes (~60 CPU-h) after the Sail hunks | `ASSUMPTIONS.json` 77 entries: L3b 11, L3a 17, L2 1 live (326f2c8e); mirror shard 39/40 proved |
 | L4 | session_01KmtZKUcrakBqKb1mC8iXp4 | item 11 guest test image (w6, on L1 w16); item 14 lib/sha256 intake | lib/sha256: 233 NIST vectors, 0 mismatches (782e8872) |
 | L5 | session_01KmtZKTGM2tLun8zgoE6X44 | platform root to the trunk (w10); crt0 split via L1 w20 c7f3b9d2; doubles -> 0 | s4 485 tests / 404,818 checks / 0 failed, s7 89 / 3,412 / 0; doubles 6 files / 88 symbols (3950cd01); registry sites 20/20 static; file sites 396 (75 static) |
 | L6 | session_01KmtZKRq7TGNHj6H8m8jpAZ | sha256 shader keys (8 sites); b# census + link-failed reference farm | env dumps reproducible, 4/4 byte-equal runs per profile (tools/envprobe-bin d2b6916c); fmadd in C 7 -> 0 |
