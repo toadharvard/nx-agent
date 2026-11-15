@@ -546,8 +546,8 @@ def phase0(args):
     return a, (rets[0] if len(rets) == 1 else None) if rets else (('t', tl[0]) if len(tl) == 1 else 0), th, al
 
 
-def prepare(pool, rows):
-    """fills RETN / THUNK / ALLOCA / IATADDR. A pure function of the exe and the universe, recomputed in every run (no memo file)."""
+def compute(pool, rows):
+    """retn / thunk / alloca of every entry of the universe: -> (RETN {entry: popped bytes | None}, THUNK {entry: IAT slot}, ALLOCA [entries]); a pure function of the image and the universe rows"""
     parse_imports()
     res = [(a, r, th, al) for a, r, th, al in pmap(pool, phase0, [(a, e, k) for a, e, k in rows], 300)]
     res = [(a, ('t', r[1]) if isinstance(r, tuple) else r, th, al) for a, r, th, al in res]
@@ -558,11 +558,42 @@ def prepare(pool, rows):
             if isinstance(r, tuple):
                 r = pend.get(r[1], 0)
         pend[a] = 0 if isinstance(r, tuple) else r
-    res = [(a, pend[a], th, al) for a, r, th, al in res]
+    ret, thunk, alloca = {}, {}, []
     for a, r, th, al in res:
         if r != 'x':
-            RETN[a] = r
+            ret[a] = pend[a]
         if th is not None:
-            THUNK[a] = th
+            thunk[a] = th
         if al:
-            ALLOCA.append(a)
+            alloca.append(a)
+    return ret, thunk, sorted(alloca)
+
+
+RETN_FORMAT = 'fnvnx-retn/1'
+
+
+def retn_text(ret, thunk, alloca):
+    """the canonical text of the three tables (tools/retnfacts.py writes it, load_retn reads it): sorted rows `R addr N|none`, `T addr slot`, `A addr`"""
+    o = ['# %s' % RETN_FORMAT]
+    o += ['R\t%x\t%s' % (a, 'none' if ret[a] is None else ret[a]) for a in sorted(ret)]
+    o += ['T\t%x\t%x' % (a, thunk[a]) for a in sorted(thunk)]
+    o += ['A\t%x' % a for a in sorted(alloca)]
+    return '\n'.join(o) + '\n'
+
+
+def load_retn(path):
+    """fills RETN / THUNK / ALLOCA from the facts-stage output (tools/retnfacts.py) and IATADDR from the image: the one path, nothing is recomputed"""
+    parse_imports()
+    lines = open(path).read().splitlines()
+    if not lines or lines[0] != '# ' + RETN_FORMAT:
+        raise SystemExit('%s: not a %s table' % (path, RETN_FORMAT))
+    for ln in lines[1:]:
+        f = ln.split('\t')
+        if f[0] == 'R':
+            RETN[int(f[1], 16)] = None if f[2] == 'none' else int(f[2])
+        elif f[0] == 'T':
+            THUNK[int(f[1], 16)] = int(f[2], 16)
+        elif f[0] == 'A':
+            ALLOCA.append(int(f[1], 16))
+        else:
+            raise SystemExit('%s: unknown row %r' % (path, ln))

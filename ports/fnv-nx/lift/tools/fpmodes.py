@@ -434,8 +434,7 @@ def main():
     print('fpmodes: exe sha256 %s  universe.tsv md5 %s  entries %d' % (hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:12], hashlib.md5(raw).hexdigest()[:12], len(rows)))
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
-    with Pool(2) as p0:
-        W.prepare(p0, rows)
+    W.load_retn(RETN)
     with Pool(2) as pool:
         for a, r in pool.imap(work, [(a, e, k, 'all') for a, e, k in rows], chunksize=200):
             res[a] = r
@@ -575,8 +574,8 @@ def main():
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import cli
-    _U = 'usage: fpmodes.py --exe FILE --facts DIR --out DIR   x87/SSE control-mode facts of the exe: the exe, the facts directory (universe.tsv, ehtables.json) and the output directory are explicit inputs'
-    _o = cli.parse(_U, sys.argv[1:], (0, 0), {'--exe': True, '--facts': True, '--out': True})[1]
-    if len(_o) != 3: sys.exit(_U)
-    EXE, OUT = _o['--exe'], _o['--out']; W.configure(_o['--facts'])
+    _U = 'usage: fpmodes.py --exe FILE --facts DIR --retn RETN.tsv --out DIR   x87/SSE control-mode facts of the exe: the exe, the facts directory (universe.tsv, ehtables.json) and the output directory are explicit inputs'
+    _o = cli.parse(_U, sys.argv[1:], (0, 0), {'--exe': True, '--facts': True, '--out': True, '--retn': True})[1]
+    if len(_o) != 4: sys.exit(_U)
+    EXE, OUT, RETN = _o['--exe'], _o['--out'], _o['--retn']; W.configure(_o['--facts'])
     main()

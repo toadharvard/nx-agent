@@ -36,6 +36,7 @@
   {"path": "ports/fnv-nx/bridgefacts", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/bridgefacts/build.json"},
   {"path": "ports/fnv-nx/contract/facts", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/contract/facts/build.json"},
   {"path": "ports/fnv-nx/contract/factscheck", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/contract/factscheck/build.json"},
+  {"path": "ports/fnv-nx/lift/retn", "class": "tool", "target": "host", "entry": [], "recipe": "ports/fnv-nx/lift/retn/build.json"},
   {"path": "ports/fnv-nx/lift/pack", "class": "product", "gates": ["objstub", "linkstrict", "determinism", "oracle", "n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel", "abs", "disp", "reach", "reachlink", "gpa", "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi", "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine"], "recipe": "ports/fnv-nx/lift/pack/build.json", "target": "guest", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/tools/packstage.py", "pack": "liftpack"}},
   {"path": "ports/fnv-nx/lift/rt", "class": "product", "target": "guest", "cxx_origin": "native", "recipe": "ports/fnv-nx/lift/rt/build.json", "gates": []},
   {"path": "ports/fnv-nx/lift/bridges", "class": "product", "target": "guest", "cxx_origin": "native", "gates": [], "recipe": "ports/fnv-nx/lift/bridges/build.json"},
