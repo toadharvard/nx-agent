@@ -543,3 +543,8 @@ After the first frame:
     - w3: review the farm's PINSPLIT, then the full-runtime decltype check.
   - Plugins are frozen until cand2 merges.
 - bottleneck: waiting on L1 for the cand2 verdict and merge (plugins frozen). The pin rebuild is now 13 min from scratch; a plugin-only change should take ~6.5 min once the restore path is proven. Workers: 2 + farm.
+- 2026-11-15 20:55Z: w3's PINSPLIT review at 17fb4961a found the keys too narrow. The cand2 pin content is correct, since it was a scratch build. PINKEY (w3, branch, cand3 pin with S29) fixes it:
+  - (1) K2 adds the plugin argv per language, the load order and the plugin stage's own inputs; the caller env flags are deleted.
+  - (2) K1 adds the env.json entries and the dpkg versions of the copied binutils.
+  - (3) stage2.sh reads the patch paths and hashes from stamp.py; the duplicate sha constants and special cases are deleted.
+  - (5) Stage 1 is stored in fnv-nx-build under a K1 ref, and K2 takes the stage-1 tree_sha256.
