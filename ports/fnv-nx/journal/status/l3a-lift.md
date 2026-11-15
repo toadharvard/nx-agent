@@ -799,3 +799,10 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - w13 (session_01KmtZKT9VGwj9Youb1vJwUR): incrementality census. Units changed between the relifts 7b2faae276b2 / 632538cd3 / db2aaf6d4a08; the function-to-unit assignment rule and its stability (file:line); the inputs common to every CC key. Status: doing.
   - The unit-size rule (item 2) and the stable-boundary rule (item 3) follow from these two.
 - bottleneck: pack compile time (owner priority, w12/w13 measuring); L1 cand3 for typed dispatch; workers 4 (w7, w8, w12, w13).
+- 20:30 Pack timing records (w8, store only, no new run). The killed pid 643 build (4 cores, jobs 4, about 46 min) finished 66 of 4096 CC stages (1.77% of the bytes) and 555 PP stages. The records hold no timing and no cpu_s. Six samples took 291-1,220 s per unit; CPU tracks unit bytes at r=0.89 over 25 units. The orchestrator estimates about 1.6 CPU-s per KB, so the cold pack is a few hundred CPU-hours. The cause is volume: 97 B of C++ per x86 instruction.
+- 20:30 Orchestrator, owner priority, added:
+  1. bytes by emit category;
+  2. one density rule for the largest category (needs L3b's written certificate coverage; no -O drop without a PERFDEBT entry);
+  3. a B/insn and CPU-hours target;
+  4. stable unit boundaries.
+  Assigned: (1) to w13 as stage 2, by the emitter's own provenance tag (off by default; output byte-identical with it off), relift in the background. (4) is w13 stage 1. L3b was told the density rule is coming.
