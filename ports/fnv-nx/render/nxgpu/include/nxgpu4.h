@@ -186,6 +186,8 @@ enum NxQueryKind { NxQuery_Occlusion = 0, NxQuery_Event = 1, NxQuery_TimestampNs
  * event = 1 once all work before QueryEnd has completed; timestamp = GPU time in nanoseconds at QueryEnd. */
 
 /* ---- functions (ext_call numbers continue after v3's NXGPU_FN_COUNT) ------------------------------------------ */
+/* NxImageRead: reads a box of an image back, native-format bytes. src.image == 0 is the swapchain image (contract of every backend, GL and deko3d: rule P4 below, the front
+ * buffer read; level 0, layer 0, z = 0, d = 1, RGBA8 top row first; all zero before the first write; no swapchain = BAD_CALL). */
 typedef struct NxImageRead {         /* waits for all submitted work */
     NxTarget src;
     uint32_t x, y, z, w, h, d;

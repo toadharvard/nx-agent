@@ -3,7 +3,7 @@
 Every table cell is DERIVED from rows through the closing rules of README.md, and every rule's premise is asserted on all rows it covers (a violated rule stops the generator,
 exit 2, naming it): devtype / adapter-format independence, format classes, usage-bit conjunction, struct writes iff success. The lookup functions are in env_rules.cpp.in.
 Profiles differ only where reported by the `profile differences` line."""
-import os, re, struct, sys
+import hashlib, os, re, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
 sys.path.insert(0, HERE); import envq  # noqa: E402
 # OUT SPEC TSV_DIR D3DTYPES_H WINE_DIR D3D9_H D3D9CAPS_H: the one place that parses the arguments (no default)
@@ -44,6 +44,10 @@ def die(msg): sys.stderr.write("gen_env: RULE VIOLATED: " + msg + "\n"); sys.exi
 
 
 def load(path):
+    """the rows of one recorded profile. Pin: the sha256 of the file is the one ENV_PIN.txt records for it (the rows are exactly the recording made in the pinned environment, host CPU included;
+    an edited or re-recorded file stops the generator)"""
+    pin = re.findall(r"%s sha256 ([0-9a-f]{64})" % re.escape(os.path.basename(path)), open(os.path.join(HERE, "ENV_PIN.txt")).read())
+    if len(pin) != 1 or pin[0] != hashlib.sha256(open(path, "rb").read()).hexdigest(): die(f"{os.path.basename(path)}: its sha256 is not the one ENV_PIN.txt records")
     R, DEV = {}, []
     for l in open(path):
         if l.startswith("#"): continue
