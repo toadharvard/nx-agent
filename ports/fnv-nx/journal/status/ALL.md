@@ -18,6 +18,11 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 covers.** This unblocks 2.6 x87, 2,063 shapes of pack 7ef692b5. L3b transcribes the x87 machinery as a z3 spec with a
 citation per line; values stay IEEE under OWNER 8. L1 adds the registry record, quoting CLAUDE.md item 10.
 
+**Open run-time class with no gate yet (2026-11-15): native stack overflow per thread** (reported by L1, w24 at 8dc852415:
+5554 functions, 600 bounded). Owner L1 with facts from L3a (argflow, frame facts, indirect targets) and L5 (stack placement).
+Rule: the lifted depth is bounded by the guest stack (dwStackSize or the PE reserve) times the static A64/x86 frame ratio; the
+native code gets a sound call-graph bound, with recursion certified or rejected. Scheduled after the first frame, before Switch.
+
 All work resumed at 2026-11-14 23:00Z on the candidate `claude/fnv-next3b` 141b07580. That is 224af83e plus L1
 w17m 4ee6cc10 plus CLAUDE.md. Its verdict v9 is running. The trunk is a5c8f427 (38 gates). The platform root is not
 on it yet. The last full verdict, v8 at 224af83e, gave 27/39 green. Numbers come from the lead status files of
