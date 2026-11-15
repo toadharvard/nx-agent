@@ -145,18 +145,6 @@
     "ports/fnv-nx/lift/proof/model_sail.py"
    ]
   },
-  "test_l3a_pins.py": {
-   "references": [
-    {
-     "anchor": "L1-L8",
-     "kind": "spec",
-     "path": "ports/fnv-nx/lift/proof/l3a_pins.json"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/lift/tools/udcert.py"
-   ]
-  },
   "test_model_patches.py": {
    "references": [
     {
@@ -192,6 +180,19 @@
    ],
    "subject": [
     "ports/fnv-nx/lift/proof/opmap.py"
+   ]
+  },
+  "test_pins.py": {
+   "references": [
+    {
+     "anchor": "L1-L8",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/proof/pins.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/tools/udcert.py",
+    "ports/fnv-nx/platform/declared/x86sys.json"
    ]
   },
   "test_rewrite.py": {
