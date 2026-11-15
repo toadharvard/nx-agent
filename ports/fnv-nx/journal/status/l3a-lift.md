@@ -962,3 +962,9 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 22:00 base3 @ f86299a57 = cand3 41a8855d4 + L3a hunks + 0608004f5 + a9cefdbec. 30 of 30 roots valid. The loader is green (12 objects); gen:12 and the loader cycle are gone.
   - lift/descs and lift/bridges are red from render/nxgpu: pp:nxgpu4_check.c cannot find nxgpu4_check.h. c58c0a4f3 moved the headers into render/nxgpu/include, and build.json still includes the root dir. This is in cand3 too.
   - w8 makes the one-line include fix in its own commit and sends it to L6 and L1 w12, then resumes the liftsrc cold build.
+- 22:02 w12 profile done: nx-agent claude/fnv-l3a-lift-w12-prof b242fd21654a; data in fnv-nx-build l3a-lift/prof/b242fd21654a.
+  - Selection: the 20 units with the largest maximum function plus the 10 nearest the median 491. It reproduces p50 491, p99 3646 and max 39600.
+  - 22 units compiled. CC took 5,664 s usr, and scheduling is 86 % of it (68–92 % per unit). Plugins cost under 1 % and PP 0.15–0.58 s per unit.
+  - Fit: CC ~ max_insns^1.24 and ~ bytes^1.95. At 4.5k insns the time varies by a factor of 18 (65–1,195 s), so the region size after CFG drives the cost, not the function size.
+  - b3c (39,600 insns) was stopped after 38 min at 5.2 GB RSS, and ec2 (9,081) after 24 min: the largest units are the compile-time and memory problem.
+  - Next, as ordered at 21:40: @prof2 with -fno-schedule-insns (a recipe flag class, declared in the inbox), after checking the semantic flags and the order of the ldar/stlr plugin; then the 6 FTOI units against the generated prelude.
