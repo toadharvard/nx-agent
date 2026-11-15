@@ -1049,11 +1049,12 @@ const FnvbootMode fnvboot_modes[] = {
 };
 const uint32_t fnvboot_mode_count = sizeof fnvboot_modes / sizeof fnvboot_modes[0];
 __attribute__((section(".data"))) volatile uint32_t fnvboot_mode = 0;   /* the run's mode: an initialised word of the image's data (a test sets it in the image file before the run, bootlayout.with_data_word); 0, the base run, when it is not set */
+#define FNVBOOT_EXIT_NO_MODE 0xE0000001u   /* the exit code of a run whose mode is not a row of fnvboot_modes */
 int main(void) {   /* rt/guest: relocation, host API table, TLS and newlib are set up before main */
     say(MSG[0]); say(MSG[1]);
     uint32_t mode = fnvboot_mode;
     for (uint32_t i = 0; i < fnvboot_mode_count; i++)
-        if (fnvboot_modes[i].id == mode) { fnvboot_modes[i].fn(mode); break; }
-    fnvnx_hcall1(H->exit, 7);
+        if (fnvboot_modes[i].id == mode) { fnvboot_modes[i].fn(mode); fnvnx_hcall1(H->exit, 7); return 0; }
+    fnvnx_hcall1(H->exit, FNVBOOT_EXIT_NO_MODE);   /* an input error, not a default mode */
     return 0;
 }
