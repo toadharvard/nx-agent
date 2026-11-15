@@ -82,6 +82,7 @@ extern bool mark_used(tree, tsubst_flags_t) __attribute__((weak));   /* spelled 
 #include "target.h"
 #include "memmodel.h"
 #include "builtins.h"
+#include "rtl.h"
 #include <map>
 #include <set>
 #include <string>
@@ -206,8 +207,34 @@ static bool key_method_hook(void)
    the element's alignment, so the block of such an array would start 8 bytes before it, not 4. */
 static tree cookie_size_hook(tree) { return size_in_bytes(sizetype); }
 
+/* ADDRESS POINTS IN DATA (VTSYM1). A word of an initializer that is `&table + off` (a VTT entry, a constant-initialized object's vptr) is
+   written with the address point's own symbol, `<table>.fnvnx_ap<off>`, at the point where the assembler text is made, not in the trees. The
+   rule is on the emitted word, so it covers every initializer by class. Why not earlier: GCC folds a load of a constant VTT entry into the code,
+   and an address point named in the trees would be the object GCC's bounds analysis sees for the accesses before the address point (the
+   vbase-offset, offset-to-top and RTTI slots, which lie inside the table): its extent would be one slot, and every such access a warning. The trees
+   keep `&table + off`, the real object, up to this point; the code is rewritten after the last analysis (ap_pass) */
+static bool (*orig_asm_integer)(rtx, unsigned int, int);
+
+static bool ap_integer(rtx x, unsigned int size, int aligned_p)
+{
+  rtx e = x;
+  if (GET_CODE(e) == CONST) e = XEXP(e, 0);
+  rtx sym = e;
+  HOST_WIDE_INT off = -1;
+  if (GET_CODE(e) == PLUS && CONST_INT_P(XEXP(e, 1))) { sym = XEXP(e, 0); off = INTVAL(XEXP(e, 1)); }
+  if (GET_CODE(sym) == SYMBOL_REF && SYMBOL_REF_DECL(sym) && is_table(SYMBOL_REF_DECL(sym))) {
+    if (off < 0) { error("SDD2: an initializer holds the base of table %qD, not an address point", SYMBOL_REF_DECL(sym)); return false; }
+    tree vt = SYMBOL_REF_DECL(sym);
+    std::string n = std::string(asmname(vt)) + ".fnvnx_ap" + std::to_string((long long)off);
+    x = gen_rtx_SYMBOL_REF(GET_MODE(sym), ggc_strdup(n.c_str()));
+  }
+  return orig_asm_integer(x, size, aligned_p);
+}
+
 static void start_unit(void *, void *)
 {
+  orig_asm_integer = targetm.asm_out.integer;
+  targetm.asm_out.integer = ap_integer;
   orig_key_method_may_be_inline = targetm.cxx.key_method_may_be_inline;
   targetm.cxx.key_method_may_be_inline = key_method_hook;
   targetm.cxx.get_cookie_size = cookie_size_hook;
@@ -284,7 +311,8 @@ static void retarget_table(tree vt)
   }
 }
 
-/* VTT entries: `&table + off` -> `&table.fnvnx_ap<off>` */
+/* VTT entries: each is `&table + off` of a table that stays in the unit (the table is no longer named by anything else once the
+   entry is written as its address point's symbol, ap_integer: keep it written out where it is defined). The trees are not changed */
 static void retarget_vtt(tree vtt)
 {
   tree init = DECL_INITIAL(vtt);
@@ -294,7 +322,8 @@ static void retarget_vtt(tree vtt)
     HOST_WIDE_INT off;
     tree vt = table_ref(ce->value, &off);
     if (!vt || off < 0) { error("SDD2: VTT %qD entry %d is not a table address point", vtt, (int)ix); continue; }
-    ce->value = fold_convert(TREE_TYPE(ce->value), build_fold_addr_expr(ap_decl(vt, off)));
+    mark_decl_referenced(vt);
+    if (varpool_node *n2 = varpool_node::get(vt)) n2->force_output = 1;
   }
 }
 
