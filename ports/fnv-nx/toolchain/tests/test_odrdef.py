@@ -61,7 +61,13 @@ def main():
         da = build_unit(td, so, 'da', DA.format(k='k1()') + INLH, O2)
         db = build_unit(td, so, 'db', DA.format(k='k2()') + INLH, O2)
         ca = build_unit(td, so, 'ca', 'struct W { int m; W(int v) : m(v) {} int get() const { return m; } };\nint (W::*pg)() const = &W::get;\nW mk(int v) { return W(v); }\n', O0)
-        if not all((a, b, c, d, ta, tb, pk, da, db, ca)):
+        # the three destructors (D0 deleting, D1 complete, D2 base) of a class whose destructor the compiler defines
+        DT = ('namespace dsh { struct BF { virtual ~BF() {} virtual void f() = 0; };\n struct Stage : BF { void f() {} };\n struct AbsStage : BF { using BF::BF; virtual int in(int) = 0; }; struct Conc : AbsStage { Conc() : AbsStage() {} int in(int x) { return x; } void f() {} };\n'
+              ' struct Def : BF { ~Def() = default; void f() {} };\n struct Over : BF { ~Over() override; void f() {} }; inline Over::~Over() {} }\n'
+              'dsh::BF *mk0() { return new dsh::Conc; }\ndsh::BF *mk1() { return new dsh::Stage; }\ndsh::BF *mk2() { return new dsh::Def; }\ndsh::BF *mk3() { return new dsh::Over; }\n'
+              'void del(dsh::BF *p) { delete p; }\n')
+        dt = build_unit(td, so, 'dt', DT, O0)
+        if not all((a, b, c, d, ta, tb, pk, da, db, ca, dt)):
             return check.done()
         ra, rb, rc, rd, rta, rtb = map(rows, (a, b, c, d, ta, tb))
         F = '_Z1fi'
@@ -83,6 +89,11 @@ def main():
         EMPTY = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
         check('a written member has tokens (a ctor with an initializer, a const member); no row has an empty-token hash unless the compiler defined it',
               rca['_ZN1WC1Ei'][1] != EMPTY and rca['_ZNK1W3getEv'][1] != EMPTY and rca['_ZN1WC1Ei'][1] != rca['_ZNK1W3getEv'][1], rca)
+        rdt = rows(dt)
+        want = {'_ZN3dsh5StageD%dEv' % k for k in (0, 1, 2)} | {'_ZN3dsh8AbsStageD%dEv' % k for k in (0, 1, 2)} | {'_ZN3dsh3DefD%dEv' % k for k in (0, 1, 2)} | {'_ZN3dsh4OverD%dEv' % k for k in (0, 1, 2)}
+        have = {k for k in rdt if k in want}
+        check('destructors D0/D1/D2 of an implicit, a defaulted and an out-of-line class: a row each, the compiler-defined ones with the empty token sequence',
+              have >= {'_ZN3dsh5StageD1Ev', '_ZN3dsh8AbsStageD0Ev', '_ZN3dsh3DefD1Ev', '_ZN3dsh4OverD1Ev'} and all(rdt[k][1] == EMPTY for k in have if 'Over' not in k), (sorted(rdt), have))
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
