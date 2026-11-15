@@ -1113,3 +1113,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
     - d3dx9_38: es 146, ds 42;
     - the other 6 images: 0.
   - The guard rule is refined to a selector value rule (a write is non-null iff its source is a proven non-null selector) so the exe's default accesses are not guarded without proof.
+- 22:27 w12 cause of "expand vars": 3 address-taken stack objects per memory-access site (the GM<T> proxy `a_`, a temporary, and fnvnx_order's `order_p`). expand_used_vars is superlinear in that count.
+  - Whole pack (2c3591efc tree): 4096 units, 143,100 functions, 5,523,891 sites. 657 functions have more than 1000 sites. b3c has 28,576 sites, about 85k stack vars.
+  - Decision: measure rule 1, always_inline value access functions with no proxy object and the same memory order, as lift/pack@valfn. Checks: equal counts of ordering instructions and their per-function multiset, CC time, RSS, .text.
+  - A per-function size bound is rejected.
