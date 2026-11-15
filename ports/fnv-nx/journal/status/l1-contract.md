@@ -1493,3 +1493,12 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - w23: abi ctype measurement on L2 w3 8259179e.
 - w20 e6d3b415f is accepted: the objstub plugin is a recipe analysis stage, and the hostabi source rule holds (noreturn only).
 - Open: L5's generated-stage manifest feature (item 12) belongs to L1 and is not assigned yet.
+- 09:13 **w24 bd6646a1a (gatekeys).** Accepted.
+  - The generated-stage miss was a test race: a process-wide patch, now thread-local.
+  - named_ext: a stage mounts and keys only the externals it names.
+  - Store atomicity and admit-by-class are done (30 rows).
+  - abi, fpexact, determinism and exepin are memoized per item.
+  - Selftests: the second cache format goes, replaced by an index entry in the one store (a recorded read set, depfile semantics).
+  - Cold timings: build 118.9 s, fpexact 273 s, determinism 277 s, selftests about 410 s. Warm timings come after the rebase onto cand2.
+  - 9 selftest files fail; they are being triaged by owner after the rebase.
+- 09:13 **MERGER.** L1's merge will be cand2 alone, after its green verdict. w15 merges trunk a5c8f427 into it.
