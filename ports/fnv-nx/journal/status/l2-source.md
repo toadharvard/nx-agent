@@ -516,3 +516,7 @@ After the first frame:
   - (1) The toy root named no external, so under L1's named_ext rule no stage mounts it, which is correct. The root now names /ext/pack in PP.
   - (2) The admit message wording changed to "no admitted header root and no product root of target"; the test is parameterised on the target.
   Nothing for L1.
+- 2026-11-15 20:30Z: S29 is decided. w2's `codegen` kind (reading the cookie from emitted code in one case) is refused: it pattern-matches assembly and checks only a sample. The rule instead:
+  - The plugin writes a `.fnvnx.cookie` fact row from the front end's tree for every array new and delete site.
+  - The gate checks every row of every product unit against S29.
+  - It lands with the cand3 pin, on w2's branch; the gate kind is `fact` (w15).
