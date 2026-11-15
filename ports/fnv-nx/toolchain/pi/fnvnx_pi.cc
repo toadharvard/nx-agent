@@ -269,6 +269,10 @@ static bool uninit_use(tree op)
    their order there is the one the order plugin makes GCC use. Every such site, readable or not, puts the
    function outside Π (`argorder`): a static rule, no site is skipped; the rows are only a measurement for the gate. */
 static std::vector<std::string> arg_sites;
+/* the sites of an in-charge constructor or destructor, by its name, without the function name: its clones (C1/C2, D0/D1/D2) are copies of its body made
+   after the order plugin has rewritten the call arguments, so a clone's own walk does not see the source's argument forms; the rows of an emitted clone are
+   these, written under the clone's name in finish_unit */
+static std::map<std::string, std::vector<std::string> > incharge_sites;
 /* per function, while it is walked: how many calls of each callee were met so far (source order), and the sites
    found, each with the number its call has among the calls of its callee */
 static std::map<std::string, int> call_count;
@@ -508,7 +512,13 @@ static void pre_genericize(void *gcc_data, void *)
   /* the in-charge form of a constructor or destructor is never emitted: its clones (C1/C2, D0/D1/D2) are, and each
      clone with a body of its own comes here itself. The form is still walked: the verdict of its clones is looked
      up by its name (source_name). */
-  if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) return;
+  if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) {
+    std::vector<std::string> &v = incharge_sites[name];
+    for (size_t i = 0; i < fn_sites.size(); i++)
+      v.push_back(fn_sites[i].head.substr(name.size()) + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
+    return;
+  }
+  if (DECL_CLONED_FUNCTION_P(fn)) return;   /* a clone: its rows come from its in-charge form */
   for (size_t i = 0; i < fn_sites.size(); i++)
     arg_sites.push_back(fn_sites[i].head + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
 }
@@ -814,6 +824,17 @@ static void finish_unit(void *, void *)
       fprintf(asm_out_file, "\t.ascii\t\"%s\\t%s\\t\\tinline\\t%s\\n\"\n", e->first.c_str(), e->second.verdict.c_str(),
               join(e->second.types).c_str());
   fprintf(asm_out_file, "\t.popsection\n");
+  {
+    std::set<std::string> cl;
+    cgraph_node *c;
+    FOR_EACH_FUNCTION(c)
+      if (c->definition && !c->alias && !c->thunk && DECL_CLONED_FUNCTION_P(c->decl)) {
+        std::map<std::string, std::vector<std::string> >::iterator o = incharge_sites.find(asmname(DECL_CLONED_FUNCTION(c->decl)));
+        if (o != incharge_sites.end())
+          for (size_t i = 0; i < o->second.size(); i++) cl.insert(std::string(asmname(c->decl)) + o->second[i]);
+      }
+    arg_sites.insert(arg_sites.end(), cl.begin(), cl.end());
+  }
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.argorder,\"\",%%progbits\n");
   for (size_t i = 0; i < arg_sites.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", arg_sites[i].c_str());
   fprintf(asm_out_file, "\t.popsection\n");
