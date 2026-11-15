@@ -62,12 +62,10 @@ def main():
     # the table of native bodies (rt/dispatch.c): the same generator under another prefix, and an empty list is a table that every lookup misses
     nasm, nh = dispgen.table(ROWS[:3], 'fnvnx_native')
     check('prefix: the symbols and the section carry the prefix, none of the lifted names remain', all(x in nasm for x in ('fnvnx_native_disp_table:', 'fnvnx_native_g:', 'fnvnx_native_phf_params:', '.rodata.fnvnx_native_disp')) and 'fnvl_' not in nasm)
-    easm, eh = dispgen.table([], 'fnvnx_native', True)
-    check('empty list with allow_empty: 8 empty slots, every key misses', easm.count(', 0\n') == 8 and all(phf.lookup(eh, k) is None for k in (0, 1, 0x401000, 0xffffffff)))
-    try: dispgen.table([], 'fnvnx_native'); ok = False
-    except SystemExit: ok = True
-    check('empty list without allow_empty exits', ok)
-    for name, rows in (('a duplicate address exits', ROWS + ['401000\tX\n']), ('a row without a symbol exits', ['401000\n']), ('an empty list exits', ['# x\n']), ('a non-hex address exits', ['zz\tX\n'])):
+    easm, eh = dispgen.table([], 'fnvnx_native')
+    check('empty list: 8 empty slots, every key misses', easm.count(', 0\n') == 8 and all(phf.lookup(eh, k) is None for k in (0, 1, 0x401000, 0xffffffff)))
+    check('empty list, lifted prefix: the same generator, every lookup misses', all(phf.lookup(dispgen.table([])[1], k) is None for k in (0, 0x401000)))
+    for name, rows in (('a duplicate address exits', ROWS + ['401000\tX\n']), ('a row without a symbol exits', ['401000\n']), ('a non-hex address exits', ['zz\tX\n'])):
         try: dispgen.table(rows); ok = False
         except SystemExit: ok = True
         check(name, ok)

@@ -107,7 +107,6 @@
    "args": [
     "--prefix",
     "fnvnx_native",
-    "--allow-empty",
     "/uses/ports/fnv-nx/contract/facts/native",
     "/out/native_disp.S"
    ],
