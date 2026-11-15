@@ -7,13 +7,14 @@ from collections import defaultdict
 import capstone
 from capstone import x86 as X
 
+M32 = 0xffffffff
 FACTS = UNI = EHJ = None      # set by configure(): the facts root of the image under analysis, passed explicitly by the program (no environment variable, no default)
 
 
 def configure(facts):
     """facts: the directory that holds universe.tsv and ehtables.json of the image"""
     global FACTS, UNI, EHJ
-    FACTS = os.path.abspath(facts); UNI = FACTS + '/universe.tsv'; EHJ = FACTS + '/ehtables.json'; M32 = 0xffffffff
+    FACTS = os.path.abspath(facts); UNI = FACTS + '/universe.tsv'; EHJ = FACTS + '/ehtables.json'
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
