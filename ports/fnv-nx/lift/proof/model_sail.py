@@ -62,8 +62,10 @@ FLAGBIT = {'cf': 0, 'pf': 2, 'af': 4, 'zf': 6, 'sf': 7, 'of': 11}
 # functions made branch-free (isla -L) so that flag helpers do not fork; the list is part of the cache key
 LINEARIZE = ['bool_to_bits', 'bits_to_bool', 'zf_spec']
 # functions whose calls are printed (-D p) so that a model exception can be reported with its message
-ERRFNS = ['x86_fault<b>', 'x86_fault<u>', 'x86_model_error<B128>', 'x86_model_error<B16>', 'x86_model_error<B32>',
-          'x86_model_error<B48>', 'x86_model_error<B64>', 'x86_model_error<B80>', 'x86_model_error<u>']
+def errfns():
+    """the functions whose calls are printed (-D p) so that a model exception can be reported with its message: every function of the IR named x86_fault<..> or x86_model_error<..> (derived from the IR, sorted)"""
+    from proof import irdeps
+    return sorted(n for n in (irdeps.decode(z) for z in irdeps.load(ir_file()).fns) if re.fullmatch(r'x86_(?:fault|model_error)<[A-Za-z0-9]+>', n))      # the instances over a plain type; the four tuple instances (x86_model_error<z8..z9>) need isla's probe spelling: not probed, as before (reported)
 SEG = ('-I', 'msrs=[#x0000000000000000; 7]', '-I', 'ctrs=[#x0000000000000000; 17]', '-I', 'seg_visibles=[#x002b; 6]', '-I', 'seg_hidden_attrs=[#x0c9a; 6]',
        '-I', 'seg_hidden_bases=[#x0000000000000000; 6]', '-I', 'seg_hidden_limits=[#xffffffff; 6]', '-I', 'ms_reg=false', '-I', 'fault_reg=false',
        '-I', 'app_view=true', '-I', 'marking_view=false', '-I', 'log_register_writes=false')
@@ -123,7 +125,7 @@ CALLING = re.compile(r'\]: Calling (\S+?)\(', re.M)
 def run_isla(code, timeout=600, sym=None):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
     if not os.path.exists(ir_file()): raise RuntimeError('missing %s: run ports/fnv-nx/farm/sail_build.sh' % ir_file())
-    args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])     # the cache key (kept: old outputs stay valid); the run itself probes every call, see below
+    args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in errfns()], []) + sum([['-L', f] for f in LINEARIZE], [])     # the cache key (kept: old outputs stay valid); the run itself probes every call, see below
     cons = sym_constraint(code, *sym) if sym else ''
     key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []) + ([cons] if sym else []))).encode()).hexdigest()
     CACHE = cache_dir(); os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)

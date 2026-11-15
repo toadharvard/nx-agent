@@ -42,6 +42,11 @@ def encode(name):
     """Sail name (as isla prints it in a call event) -> IR name: z + name with z -> zz, < -> zI, > -> zK (sail_lib z-encoding of the characters that occur)"""
     return 'z' + ''.join({'z': 'zz', '<': 'zI', '>': 'zK'}.get(c, c) for c in name)
 
+def decode(zname):
+    """IR name -> Sail name: the inverse of encode"""
+    assert zname[:1] == 'z'
+    return re.sub(r'zz|zI|zK|z8|z9|zC', lambda m: {'zz': 'z', 'zI': '<', 'zK': '>', 'z8': '(', 'z9': ')', 'zC': ','}[m.group(0)], zname[1:])
+
 class IR:
     """the items of an IR text: fns (name -> text), vals, regs, types (struct / enum / union), each normalized"""
     def __init__(self, text):
