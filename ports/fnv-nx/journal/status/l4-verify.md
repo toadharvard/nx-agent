@@ -421,3 +421,6 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
   - bootrt fix is now w9 9e457ca on 41a8855d4. At that head render/nxgpu is red (nxgpu4_check.h missing; owner L1/L6, told).
 - 22:25: L3a base3 d9d208c61 (t16l plus cand3 41a8855d4): all 30 admitted roots valid, lift/bridges included. L6A gl4link2 decb62ead on cand3: gl4, gl4shim, nxgpu, translator and d3d9 checks 0, libnxgl4.so sha 7da199c1…d4ba, NxGpuApi 8 slots.
   - w8 is taking both; w9 is taking render/ to re-measure bootrt.
+- 22:30: w8 merged base3. Checks: boot 0, bootguest 0, icount 0, gl4 2 (render/ from decb62ead still to be taken).
+  - icount link red: the loader pp fails (boot.c: fnvnx_win32_ext.h not found, because the loader doesn't use platform INCLUDE), and lift/descs objects_of is red. Owner L3a (base3), told.
+  - The root-level closure still pulls loader, bridges and descs into icount until w12's archive-member rule lands.
