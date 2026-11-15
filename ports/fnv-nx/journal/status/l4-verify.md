@@ -391,3 +391,5 @@ Workers: 2 (cap). w3b archived 2026-11-14 23:25Z (branch claude/fnv-l4-verify-w3
 - 16:00: w7-u f70211d54: lift/ is whole from 18c2b9cde, and the d3d9types red is closed. test_bootgpu's setup case passes; the cold lift/pack build (about 4096 units, 4 cores) passed 3300 s without failing.
   - Decision: resume on w7's warm GATE_CACHE rather than on a farm, because a farm would start cold and repay the whole build. The rerun is in the background.
 - 18:00: test_bootgpu at w7-u f70211d54 is still building cold, not red. 4547 stage keys are in the store, at about 13 stages/min on 4 cores, so roughly 7 h remain. w7 keeps resuming. I asked L3a for an existing pack store to seed from fnv-nx-build.
+- 18:05: The cold pack build on w7 is stopped. cand3's sandbox_id change and L3a's next rt prelude (ENTRY1, fnvl_host.h) re-key every pack unit, so pre-cand3 stores are not reused.
+  - The pack store comes from L3a's one post-cand3 farm build, published to fnv-nx-build. test_bootgpu reruns from it.
