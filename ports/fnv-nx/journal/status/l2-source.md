@@ -388,3 +388,7 @@ After the first frame:
   - Ruling to w8: no blessed int->entry constructor. The dispatch table becomes typed C data `fnvl_disp_entries[] = {&fn...}` (L3a generator); lift/rt takes ENTRY1 through cand3.
 - ENTRY1 paths closed: w2 @c3a2c9c35, test_dispatch_entry 24, under the pinned env. The typed site record is pending.
 - Plugin branch @c004aaf84 (w3): realobj rule-2 fix; order_cont, local and tags pass. Toolchain set, global over the branch's tests: 11 ok; test_ftoi 1/30 and test_ldbl 6/67 red, and test_order_fold red on long double access counts. All three wait for the MLIB1 pin; their expectations move to DATAMODEL's long double row (w3 ftoi, w2 order_fold). w8's plugbuild commit 9e10eb367 is not taken (it writes `{}` args into every entry).
+- Farm: stage 1 rebuilt with --disable-decimal-float from the record. newlib and libgcc build with all 8 plugins (065136142).
+  - libstdc++ configure is blocked: link tests can't resolve fnvnx_dispatch/fnvnx_call_fp (TLS) until the product link.
+  - Rejected: a configure-only provider (a stub) and a plugin-free newlib (a second path).
+  - Rule: gcc_no_link=yes is correct by construction, and libstdc++ takes GCC's with_newlib table. The farm is finding the one unguarded AC_LINK check (macro and file:line) and whether one of our options enables it.
