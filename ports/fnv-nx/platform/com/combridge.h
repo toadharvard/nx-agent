@@ -22,7 +22,7 @@
  *                   (face.refs++); a proxy goes back as the game's own pointer.
  *   from_game(gp)   a borrowed pointer (an argument): the C++ object, or the proxy of the game object (no reference moves);
  *   adopt_game(gp)  a pointer the game returned with its reference (an out parameter of a game method): the platform now owns it.
- * Faces and proxies are never freed (combridge.cpp says why). The table of interfaces, IIDs and key slots is generated (combridge.gen.cpp) from com_spec.json. */
+ * Faces and proxies are never freed (combridge.cpp says why). The table of interfaces, IIDs and key slots is generated (combridge.gen.cpp), derived by spec_extract.py from the interface declarations. */
 #ifndef FNVNX_COMBRIDGE_H
 #define FNVNX_COMBRIDGE_H
 #include <stddef.h>
