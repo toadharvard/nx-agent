@@ -62,6 +62,9 @@ class Enc:
         while code[i] in (0x66, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65, 0x67):    # legacy prefixes; the last of 66/F2/F3 is the mandatory prefix (SDM 2A:2.1.1)
             if code[i] in (0x66, 0xF2, 0xF3): s.pfx = '%02X' % code[i]
             i += 1
+        if code[i] == 0x90 and s.pfx == 'F3':             # PAUSE = F3 90 (one byte opcode, no ModRM): SDM 2B:PAUSE
+            s.op, s.modrm, s.mod, s.reg, s.rm, s.mem, s.imm = 0x190, 0xC0, 3, 0, 0, False, None
+            return
         assert code[i] == 0x0F, code.hex()
         s.op = code[i + 1]; s.modrm = code[i + 2] if len(code) > i + 2 else 0xC0;      # EMMS (0F 77) has no ModRM byte
         s.modrm = s.modrm; s.mod, s.reg, s.rm = s.modrm >> 6, (s.modrm >> 3) & 7, s.modrm & 7
@@ -570,6 +573,44 @@ for _p, _w2 in (('F3', 32), ('F2', 64)):
     row(_p, 0x2A, 'cvtsi2s' + _s, [cite(_CV, 'x86-cvtsi2s?-Op/En-RM', '(%sp-sse-cvt-int-to-fp reg/mem (mxcsr x86))' % _s)], mw=32)(_cvtsi2s(_w2))
     row(_p, 0x2D, 'cvts%s2si' % _s, [cite(_CV, 'x86-cvts?2si/cvtts?2si-Op/En-RM', '(%sp-sse-cvt-fp-to-int reg-size xmm/mem (mxcsr x86) trunc)' % _s)], mw=_w2)(_cvts2si(_w2, False))
     row(_p, 0x2C, 'cvtts%s2si' % _s, [cite(_CV, 'x86-cvts?2si/cvtts?2si-Op/En-RM', '(%sp-sse-cvt-fp-to-int reg-size xmm/mem (mxcsr x86) trunc)' % _s)], mw=_w2)(_cvts2si(_w2, True))
+
+
+# PAUSE (F3 90): SDM 2B:PAUSE "behaves as NOP for architectural state": no register, flag or memory changes (the hint is the only effect)
+row('F3', 0x190, 'pause', [], form='r', mw=None, al=False)(lambda e, d, m, a, g: Res(dict(d)))
+
+
+# MMX-register conversions: an MMX instruction, so the MMX rule of x87spec applies (TOP := 0, tags valid, SDM 1:9.6.2), through _mmx_state / put_mm
+def _cvt_pi2ps(e, d, m, a, g):
+    mx = d['mxcsr']; dst = xmm(d, e.reg); src = m if e.mem else mm(d, e.rm)
+    outs, fl = [], K(0, 6)
+    for x in lanes(src, 32)[:2]:
+        o, fg = F.i2f(x, mx, 32); outs.append(o); fl = fl | fg
+    r = Res(put_xmm(_mmx_state(d), e.reg, Concat(Extract(127, 64, dst), join(outs))))
+    return _cvt_fin(r, d, mx, fl, e, a)
+
+
+def _cvt_pi2pd(e, d, m, a, g):
+    mx = d['mxcsr']; src = m if e.mem else mm(d, e.rm)
+    outs, fl = [], K(0, 6)
+    for x in lanes(src, 32)[:2]:
+        o, fg = F.i2f(x, mx, 64); outs.append(o); fl = fl | fg
+    return _cvt_fin(Res(put_xmm(_mmx_state(d), e.reg, join(outs))), d, mx, fl, e, a)
+
+
+def _cvt_2pi(w, trunc):
+    def f(e, d, m, a, g):
+        mx = d['mxcsr']; src = m if e.mem else Extract(w * 2 - 1, 0, xmm(d, e.rm))
+        outs, fl = [], K(0, 6)
+        for x in lanes(src, w)[:2]:
+            o, fg = F.f2i(x, mx, w, trunc); outs.append(o); fl = fl | fg
+        return _cvt_fin(Res(put_mm(d, e.reg, join(outs))), d, mx, fl, e, a, fault128=(w == 64))
+    return f
+
+
+row('', 0x2A, 'cvtpi2ps', [], mw=64)(_cvt_pi2ps)
+row('66', 0x2A, 'cvtpi2pd', [], mw=64)(_cvt_pi2pd)
+row('', 0x2D, 'cvtps2pi', [], mw=64)(_cvt_2pi(32, False)); row('', 0x2C, 'cvttps2pi', [], mw=64)(_cvt_2pi(32, True))
+row('66', 0x2D, 'cvtpd2pi', [], mw=128)(_cvt_2pi(64, False)); row('66', 0x2C, 'cvttpd2pi', [], mw=128)(_cvt_2pi(64, True))
 
 
 def _rcprow(fn, scalar):
