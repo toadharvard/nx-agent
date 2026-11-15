@@ -20,7 +20,7 @@
 #include "fnvnx/guest.h"
 #include "fnvnx/hostapi.h"
 #include "fnvnx/sdlayout.h"
-#include "fnvnx_importkey.h"
+#include "fnvnx/import_key.h"
 #include "fnvnx_start.h"
 
 #ifndef FNVNX_EXE_PATH
