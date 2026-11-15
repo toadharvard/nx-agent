@@ -678,3 +678,4 @@ Paused: w3b, w4, farm; no other work.
 - 00:57Z ASM-628 check: BeginPass4 requires equal size including depth. D3D9 allows depth >= RT (SetDepthStencilSurface), so this may be stricter than D3D9.
     - w1b cites each condition from the docs mirror.
     - Where D3D9 is weaker, the ABI follows D3D9.
+- 00:57Z L1 decided: op_cover/op_reserved are computed by gate_reach shader_opcode from the object (w20); op_reserved_values is a generated stage over the MojoShader mirror. w1b deletes gen_opcover.py and the 3 .tsv files when w20 lands.
