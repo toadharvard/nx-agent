@@ -216,3 +216,10 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 - Orchestrator ruling: an x86sys row is the ring-3 observable. So cr0.ts=0, cr0.em=0, osfxsr=1 and osxmmexcpt=1.
   - mxcsr_mask is CPUREF's (L3a).
   - The GDT descriptor contents stay undecided. Their 37 sites wait for CODEMAP, then get reach certificates.
+
+## 2026-11-15 10:05Z — queue v3 STARTED (2.6)
+- The lead branch holds w4 cbcc5a545 at b2300680f: certbasis is the one source of OBLIGATIONS (def0, xstate) and of prover_sha.
+- The farms run on lead b2300680f with N=54, queue f3eb5096ad36 (18,649 rows, IR 7c307464). Shards: 05 K=1-14, 07 15-28, 11 29-41, 12 42-54. Each farm runs P = min(nproc, mem/6 GB) at once, with resume at the time limit.
+- Freeze until v3 finishes: no edit to prove.py, model_sail.py, symform.py or certbasis.py (they are in prover_sha).
+- w4 next: the 13 not-covered sysspec shapes, then aggregating v3 into certs.tsv (shardok branches only).
+- w9 next: the SIMD remainder; a rerun of the subject on L3a 0bfa4a518 (the SSE FP class); MXCSR_MASK from CPUREF (0xFFBF, no DAZ); and removing the Unicorn and host comparison from the tests.
