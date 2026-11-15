@@ -541,6 +541,7 @@
   }
  },
  "outputs": {
+  "INCLUDE": "include",
   "X86SYS": "declared/x86sys.export.json"
  },
  "uses": [
