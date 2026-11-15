@@ -22,7 +22,9 @@
  *       vtable                a GCC table group; its address points are named in .fnvnx.vtpair
  *       gcc                   an Itanium ABI object with no counterpart in the exe (VTT, construction table,
  *                             typeinfo, guard variable): the MSVC name is empty
- *       unnamed:<reason>      no rule here names it (the gate counts these; 0 is the gate)
+ *       nodecor:<reason>      a typed fact: the decoration source has no name for the symbol (localscope: cl's local scope numbering, fnparmform: the
+ *                             declared form of a function-type parameter, vtordisp: the exe's vbptr layout, or a tree code). Not a fallback: a gate
+ *                             is red only for a symbol the exe's or a module's own facts reach (the crossing join), never for a row
  *
  * .fnvnx.names: `<symbol>\t<MSVC name>` of every function and object the unit named, also those the object has no
  * symbol for (inlined everywhere): for gates that follow a call into cl's code, not for the contract.
@@ -294,12 +296,12 @@ struct M {
         ctx = CP_TYPE_CONTEXT(ctx);
       } else if (TREE_CODE(ctx) == FUNCTION_DECL) {
         auto it = scope_no.find(uid_of(entity));
-        if (it == scope_no.end()) { fail("local scope number"); return; }
+        if (it == scope_no.end()) { fail("localscope"); return; }
         out += '?'; number(it->second); out += '?';
         decl(ctx, DT_NONE);
         if (!TREE_PUBLIC(ctx)) internal = true;
         return;
-      } else { fail("scope"); return; }
+      } else { fail(std::string("scope ") + get_tree_code_name(TREE_CODE(ctx))); return; }
     }
   }
 
@@ -454,7 +456,7 @@ struct M {
         /* cl keys the back-reference on the declared type: `void g(int)` (a function) and `void (*g)(int)` (a pointer) are different keys for it, and the front
            end has adjusted the first to the second before any plugin sees it, so a repeated function-pointer parameter cannot be told which */
         if (TREE_CODE(t) == POINTER_TYPE && TREE_CODE(TREE_TYPE(t)) == FUNCTION_TYPE)
-          fail("repeated function-pointer parameter: a function type and a pointer to it are one type to GCC and two back-reference keys to cl");
+          fail("fnparmform");
         out += (char)('0' + i); return;
       }
     size_t before = out.size();
@@ -487,7 +489,7 @@ struct M {
       tree t = TREE_VALUE(p);
       /* a function type that is itself a parameter or a member has no declaration to say what each parameter was written as: `int *` and `int []` are one type to GCC,
          `PAH` and `QAH` to cl */
-      if (!d && TREE_CODE(t) == POINTER_TYPE) fail("pointer parameter of a function type: GCC has adjusted an array parameter to a pointer, cl names them apart");
+      if (!d && TREE_CODE(t) == POINTER_TYPE) fail("fnparmform");
       int q = 0; bool is_array = false;
       if (parm) {
         q = cp_type_quals(TREE_TYPE(parm));
@@ -743,7 +745,7 @@ static std::string cross_of(tree d)
 static void name_c_decl(tree d, bool def)
 {
   Row r; r.sym = asmname(d); r.def = def;
-  if (!DECL_NAME(d)) r.kind = "unnamed:no declaration";
+  if (!DECL_NAME(d)) r.kind = "nodecor:no declaration";
   else { r.ms = c_name(d); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data"; }
   if (TREE_CODE(d) == FUNCTION_DECL) r.cross = cross_of(d);
   rows.push_back(r);
@@ -768,7 +770,7 @@ static void name_decl(tree d, bool def)
     bool virt = integer_onep(TREE_VALUE(TREE_CHAIN(TREE_CHAIN(a))));
     /* the adjustment is an offset in the object: the exe's when the class is laid out as in the exe (layoutgate),
      * which a class with virtual bases never is here (the exe's has vbptrs, and vtordisp thunks of its own) */
-    if (virt || (fixed && CLASSTYPE_VBASECLASSES(DECL_CONTEXT(d1)))) r.kind = "unnamed:destructor thunk in a class with virtual bases";
+    if (virt || (fixed && CLASSTYPE_VBASECLASSES(DECL_CONTEXT(d1)))) r.kind = "nodecor:vtordisp";
     else if (fixed) { m.thunk = -fixed; m.decl(d1, DT_VECTOR); r.kind = "dtor.sdd.thunk"; }
     else { m.decl(d1, DT_VECTOR); r.kind = "dtor.sdd"; }
   } else if (TREE_CODE(d) == FUNCTION_DECL && DECL_THUNK_P(d)) {
@@ -780,14 +782,14 @@ static void name_decl(tree d, bool def)
     m.out = c_name(d); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data";
   } else if (TREE_CODE(d) == FUNCTION_DECL && DECL_CONSTRUCTOR_P(d)) {
     m.decl(d, DT_NONE);
-    r.kind = DECL_COMPLETE_CONSTRUCTOR_P(d) ? "ctor.c1" : DECL_BASE_CONSTRUCTOR_P(d) ? "ctor.c2" : "unnamed:constructor variant";
+    r.kind = DECL_COMPLETE_CONSTRUCTOR_P(d) ? "ctor.c1" : DECL_BASE_CONSTRUCTOR_P(d) ? "ctor.c2" : "nodecor:constructor variant";
   } else if (TREE_CODE(d) == FUNCTION_DECL && DECL_DESTRUCTOR_P(d)) {
     bool vb = CLASSTYPE_VBASECLASSES(DECL_CONTEXT(d)) != NULL;
     if (DECL_DELETING_DESTRUCTOR_P(d)) { m.decl(d, DT_SCALAR); r.kind = "dtor.d0"; }
     else if (DECL_COMPLETE_DESTRUCTOR_P(d)) { m.decl(d, vb ? DT_VBASE : DT_BASE); r.kind = "dtor.d1"; }
     else if (DECL_BASE_DESTRUCTOR_P(d)) { m.decl(d, DT_BASE); r.kind = "dtor.d2"; }
-    else r.kind = "unnamed:destructor variant";
-  } else if (!DECL_LANG_SPECIFIC(d) && !DECL_NAME(d)) r.kind = "unnamed:no declaration";
+    else r.kind = "nodecor:destructor variant";
+  } else if (!DECL_LANG_SPECIFIC(d) && !DECL_NAME(d)) r.kind = "nodecor:no declaration";
   else if (!DECL_LANG_SPECIFIC(d) && TREE_CODE(d) == FUNCTION_DECL && fndecl_built_in_p(d)) {
     m.out = c_name(d); r.kind = "func";          /* a C library function the compiler knows (C linkage) */
   } else if (!DECL_LANG_SPECIFIC(d) && TREE_CODE(d) == FUNCTION_DECL && DECL_ARTIFICIAL(d)) {
@@ -796,8 +798,8 @@ static void name_decl(tree d, bool def)
     m.decl(d, DT_NONE); r.kind = TREE_CODE(d) == FUNCTION_DECL ? "func" : "data";
   }
   if (r.kind == "thunk" && !m.why.empty()) m.why.clear(), m.out.clear();
-  if (!m.why.empty()) { r.kind = "unnamed:" + m.why; m.out.clear(); }
-  else if (m.internal) { r.kind = "unnamed:external symbol in an internal scope"; m.out.clear(); }
+  if (!m.why.empty()) { r.kind = "nodecor:" + m.why; m.out.clear(); }
+  else if (m.internal) { r.kind = "nodecor:external symbol in an internal scope"; m.out.clear(); }
   r.ms = m.out;
   if (TREE_CODE(d) == FUNCTION_DECL) r.cross = cross_of(d);
   rows.push_back(r);
@@ -810,7 +812,7 @@ static void name_decl(tree d, bool def)
  * non-virtual base has one it can extend, then every base's, in declaration order, a virtual base's once; paths
  * that would name two tables alike are extended by the next base on the way down). A vfptr and an address point
  * are the same table when they sit at the same offset in the object; that needs the class laid out as in the exe
- * (layoutgate's subject): a class whose vfptr offsets differ from GCC's vptr offsets gets `unnamed:` rows.
+ * (layoutgate's subject): a class whose vfptr offsets differ from GCC's vptr offsets gets `nodecor:` rows.
  */
 struct VPath { std::vector<tree> path; tree next; HOST_WIDE_INT off; std::vector<tree> vbases; HOST_WIDE_INT full; };
 static std::map<UidKey, std::vector<VPath>> vpaths_memo;
@@ -935,12 +937,12 @@ static void name_vtable(tree vt)
   for (auto &ap : aps) {
     VtRow r; r.sym = sym; r.ap = ap.first; r.off = ap.second;
     if (ps.empty()) r.ms = "";                    /* no virtual function: the exe has no vftable for it */
-    else if (!same) r.ms = "unnamed:vfptr offsets differ from the exe's rule";
+    else if (!same) r.ms = "nodecor:vfptr offsets differ from the exe's rule";
     else for (auto &p : ps) if (p.full == ap.second) {
       M m; m.out = "??_7"; m.type_name(c); m.out += "6B";
       for (tree base : p.path) m.type_name(base);
       m.out += '@';
-      r.ms = !m.why.empty() ? "unnamed:" + m.why : m.internal ? "unnamed:internal scope" : m.out;
+      r.ms = !m.why.empty() ? "nodecor:" + m.why : m.internal ? "nodecor:internal scope" : m.out;
     }
     vtrows.push_back(r);
   }
@@ -1347,10 +1349,10 @@ static void finish_unit(void *, void *)
     emitted.insert(rows.back().sym);
   }
   /* NOEMIT: a function the unit defines whose body GCC wrote nowhere in the object (inlined at every use, or never used out of line) has a cl name
-   * and no symbol. The row says so (kind noemit, ref; a function the rules gave no name keeps its unnamed kind), so every cl name without a
-   * symbol is accounted for: an unnamed row or a noemit one. */
+   * and no symbol. The row says so (kind noemit, ref; a function the rules gave no name keeps its nodecor kind), so every cl name without a
+   * symbol is accounted for: a nodecor row or a noemit one. */
   for (auto &e : early)
-    if (early_body.count(e.first) && !emitted.count(e.second.sym) && (!e.second.ms.empty() || e.second.kind.compare(0, 8, "unnamed:") == 0)) {
+    if (early_body.count(e.first) && !emitted.count(e.second.sym) && (!e.second.ms.empty() || e.second.kind.compare(0, 8, "nodecor:") == 0)) {
       Row r = e.second; if (!r.ms.empty()) r.kind = "noemit"; r.def = false;
       rows.push_back(r); emitted.insert(r.sym);
     }
@@ -1410,7 +1412,7 @@ static void finish_unit(void *, void *)
  * A static variable or a class of a function has the number of its block in the name: the function's outermost
  * block is 2 for cl (written `?1?`; test_names.expect). The number of a deeper block counts every block opened before it,
  * including those that declare nothing; the trees do not keep those, so a deeper entity has no number here
- * (`unnamed:local scope number`). The depth is read from the front end's own scope stack when the entity is
+ * (`nodecor:localscope`). The depth is read from the front end's own scope stack when the entity is
  * declared: a block directly in the function's parameter scope (a constructor or destructor has the front end's
  * own body block in between).
  */
