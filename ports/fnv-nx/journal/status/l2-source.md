@@ -193,3 +193,6 @@ After the first frame:
   - Relayed to L1 w22 and w23.
   - Next: cpp-docs mirror plus the recipe stage; S23 empty bases via the farm.
 - 2026-11-15 00:51 w1 RTL table 36a741b08: universe 87 passes, 8 classified (3 rows accepted). Calls given on store motion, fwprop/rtl-ssa and crossjump.
+- 2026-11-15 00:54 msvcmodel candidate 630df00f5 (w3): ldbl, MS bitfields, enum=int, empty-base placement (S23; matches every pinned cpp-docs example). Now in the farm's trial loop.
+  - S23's undocumented cases (vptr, nested, after a virtual base): exe RTTI BCD facts requested from L3a via the orchestrator.
+  - Open DATAMODEL fixes: WINT/SIG_ATOMIC as facts, the stdint native-only rule, CHAR16/32/8 universe membership, cpp-docs mirror plus recipe stage.
