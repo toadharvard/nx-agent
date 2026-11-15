@@ -896,7 +896,8 @@ static void order_stmt(gimple_stmt_iterator *gsi) {
 // the units tile the object exactly and no unit access is misaligned; the bytes of the object are exactly those the copy
 // moves (padding included, as a memcpy-style aggregate copy does); the order is the program order of the loads and stores of
 // the copy, ascending: x86 TSO orders loads with loads and stores with stores, and ldar/stlr give that order on Arm.
-// The copy is straight-line code, 2 statements per unit.
+// Up to 16 units the copy is straight-line code (2 statements per unit); beyond that it is a loop over the units.
+static std::set<basic_block> generated_bbs;   // blocks this pass created: their accesses are already ordered, never revisited
 
 static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bool ld) {
   counts &c = *cur;
@@ -967,7 +968,8 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
   };
   auto at = [&](gimple_seq *seq, tree base, tree off) { return gimplify_to(fold_build_pointer_plus(base, off), seq); };
   gimple *last = NULL;
-  {
+  const unsigned HOST_WIDE_INT STRAIGHT = 16;
+  if (n <= STRAIGHT) {
     for (unsigned HOST_WIDE_INT k = 0; k < n; k++) {
       tree off = size_int(k * unit);
       tree dpp = k ? at(&pre, dp, off) : dp, spp = k ? at(&pre, sp, off) : sp;
@@ -979,6 +981,48 @@ static void unit_copy(gimple_stmt_iterator *gsi, tree lhs, tree rhs, bool st, bo
     gsi_replace(gsi, fin ? gimple_build_assign(fin, dst) : gimple_build_nop(), true);
     return;
   }
+  // more than STRAIGHT units: a loop over units 0..n-2 (do { dst[i] = src[i]; i += unit; } while (i < (n-1)*unit)), then the
+  // last unit in place of the statement: the code does not grow with the object
+  tree iv = make_tmp(sizetype, "order_i");
+  gimple_seq_add_stmt(&pre, gimple_build_assign(iv, size_zero_node));
+  gsi_insert_seq_before(gsi, pre, GSI_SAME_STMT);
+  basic_block bb = gsi_bb(*gsi);
+  gimple_stmt_iterator g = *gsi;
+  gsi_prev(&g);
+  edge e = split_block(bb, gsi_stmt(g));   // the setup stays in bb, the statement starts the tail
+  basic_block tail = e->dest;
+  basic_block body = create_empty_bb(bb);
+  redirect_edge_succ(e, body);
+  gimple_seq bs = NULL;
+  tree dpp = at(&bs, dp, iv), spp = at(&bs, sp, iv);
+  one(&bs, dpp, spp, NULL);
+  gimple_seq_add_stmt(&bs, gimple_build_assign(iv, fold_build2(PLUS_EXPR, sizetype, iv, size_int(unit))));
+  gimple_seq_add_stmt(&bs, gimple_build_cond(LT_EXPR, iv, size_int((n - 1) * unit), NULL_TREE, NULL_TREE));
+  gimple_stmt_iterator bsi = gsi_start_bb(body);
+  gsi_insert_seq_after(&bsi, bs, GSI_CONTINUE_LINKING);
+  edge back = make_edge(body, body, EDGE_TRUE_VALUE), out = make_edge(body, tail, EDGE_FALSE_VALUE);
+  back->probability = profile_probability::very_likely();
+  out->probability = back->probability.invert();
+  e->probability = profile_probability::always();
+  body->count = bb->count;
+  generated_bbs.insert(body);
+  // the block joins the loop of the original block; the loop it forms itself is found by the next loop fix-up
+  if (current_loops) {
+    add_bb_to_loop(body, bb->loop_father);
+    loops_state_set(LOOPS_NEED_FIXUP);
+  }
+  free_dominance_info(CDI_DOMINATORS);
+  free_dominance_info(CDI_POST_DOMINATORS);
+  // the last unit replaces the statement, now the first one of the tail
+  gimple_seq ls = NULL;
+  tree off = size_int((n - 1) * unit);
+  one(&ls, at(&ls, dp, off), at(&ls, sp, off), &last);
+  gimple_stmt_iterator ts = gsi_for_stmt(stmt);
+  gsi_insert_seq_before(&ts, ls, GSI_SAME_STMT);
+  gsi_insert_before(&ts, last, GSI_SAME_STMT);
+  gimple *fin_stmt = fin ? gimple_build_assign(fin, dst) : gimple_build_nop();
+  gsi_replace(&ts, fin_stmt, true);
+  *gsi = gsi_for_stmt(fin_stmt);
 }
 
 static void order_single(gimple_stmt_iterator *gsi) {
@@ -1090,7 +1134,8 @@ struct order_pass : gimple_opt_pass {
       if ((VAR_P(d) || TREE_CODE(d) == PARM_DECL || TREE_CODE(d) == RESULT_DECL) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
         force_addressable(d);
     FOR_EACH_BB_FN(bb, fun)
-      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
+      if (!generated_bbs.count(bb))
+        for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
     add_resume_fences(fun);
     unit_total.ldar += c.ldar; unit_total.stlr += c.stlr;
     unit_total.fence_ld += c.fence_ld; unit_total.fence_st += c.fence_st; unit_total.fence_resume += c.fence_resume;
@@ -1099,6 +1144,7 @@ struct order_pass : gimple_opt_pass {
              c.ldar, c.stlr, c.fence_ld, c.fence_st, c.fence_resume);
     cur = NULL;
     addr_set = NULL;
+    generated_bbs.clear();
     return 0;
   }
 };
