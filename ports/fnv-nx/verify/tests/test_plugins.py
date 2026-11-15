@@ -68,7 +68,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=(), target="host"):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v] + [recipe.ANALYSIS_PLUGIN[1]]:   # the real plugin sources and the analysis plugin the build stores
+    for n in recipe.plugin_files(REAL) + [recipe.ANALYSIS_PLUGIN[1]]:   # the real plugin sources and the analysis plugin the build stores
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     for k, v in dict({ROOT + "/a.cc": SRC}, **(files or {})).items():
@@ -120,18 +120,43 @@ def main():
     check("native root without plugins is red", len([x for x in errs(repo, mut(plugins=[])) if "does not load" in x]) == len(recipe.PLUGIN_SOURCES))
     # recipe.py is the only declaration of source, inputs and arguments: an entry that carries one is red, whatever its value (never compared)
     for key, val, pin in (("args", {"args": "ltr"}, "PLUGIN_ARGS"), ("args", dict(recipe.PLUGIN_ARGS["fnvnx_order"]), "PLUGIN_ARGS"),
-                          ("source", recipe.PLUGIN_SOURCES["fnvnx_order"], "PLUGIN_SOURCES"), ("inputs", [], "PLUGIN_INPUTS"),
-                          ("inputs", list(recipe.PLUGIN_INPUTS["fnvnx_ftoi"]), "PLUGIN_INPUTS")):
+                          ("source", recipe.PLUGIN_SOURCES["fnvnx_order"], "PLUGIN_SOURCES"), ("inputs", [], "plugin_inputs, derived from the source"),
+                          ("inputs", list(recipe.plugin_inputs(recipe.PLUGIN_SOURCES["fnvnx_ftoi"], recipe.tracked(REAL), recipe.load_admit(REAL), REAL)), "plugin_inputs, derived from the source")):
         nm = "fnvnx_ftoi" if key == "inputs" else "fnvnx_order"
         e = errs(repo, mut(plugins=[dict(p, **{key: val}) if p["name"] == nm else p for p in PLUGS]))
         check("a root entry with %s=%r is red: fixed by recipe.py (%s)" % (key, val, pin), any(("plugin %s: %s %s fixed by recipe.py (%s)" % (nm, key, "are" if key == "inputs" else "is", pin)) in x for x in e), e)
     check("a plugin outside recipe.PLUGIN_SOURCES is red", any("is not a plugin of recipe.py" in x for x in errs(repo, mut(plugins=PLUGS + [{"name": "fnvnx_other"}]))))
     # the stage construction takes source, inputs and arguments from recipe.py alone
-    dec = {d["name"]: d for d in recipe.plugin_decls(PLUGS, "native")}
-    check("plugin_decls: source, inputs and arguments are recipe.py's", all(dec[n]["source"] == recipe.PLUGIN_SOURCES[n] and dec[n]["inputs"] == recipe.PLUGIN_INPUTS.get(n, [])
+    dec = {d["name"]: d for d in recipe.plugin_decls(PLUGS, "native", recipe.tracked(REAL), recipe.load_admit(REAL), REAL)}
+    check("plugin_decls: source, inputs and arguments are recipe.py's", all(dec[n]["source"] == recipe.PLUGIN_SOURCES[n] and dec[n]["inputs"] == recipe.plugin_inputs(recipe.PLUGIN_SOURCES[n], recipe.tracked(REAL), recipe.load_admit(REAL), REAL)
           and dec[n]["args"] == recipe.plugin_args("native")[n] for n in recipe.PLUGIN_SOURCES))
     check("plugin_decls: fnvnx_ftoi has f2i_builtins.inc as input, so changing it changes the key of every root that loads the plugin",
           any(i.endswith("f2i_builtins.inc") for i in dec["fnvnx_ftoi"]["inputs"]), dec["fnvnx_ftoi"]["inputs"])
+    # plugin_inputs: the include closure of a plugin source, from its #include lines (no list)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        def put(rel, text):
+            os.makedirs(os.path.dirname(os.path.join(td, rel)), exist_ok=True)
+            open(os.path.join(td, rel), "w").write(text)
+        put("T/names/n.cc", '#include <gcc-plugin.h>\n#include "../layout/c.inc"\nint x;\n')
+        put("T/layout/c.inc", '#include "d.inc"\n')
+        put("T/layout/d.inc", "int y;\n")
+        put("T/names/bad.cc", '#include "../../O/o.h"\n')
+        put("O/o.h", "int z;\n")
+        put("T/names/gone.cc", '#include "nope.h"\n')
+        fl, rt = ["T/names/n.cc", "T/layout/c.inc", "T/layout/d.inc", "T/names/bad.cc", "O/o.h", "T/names/gone.cc"], {"T": {}, "O": {}}
+        check("plugin_inputs: a quoted include of a file of the same root builds (transitively); angle includes are not inputs",
+              recipe.plugin_inputs("T/names/n.cc", fl, rt, td) == ["T/layout/c.inc", "T/layout/d.inc"], recipe.plugin_inputs("T/names/n.cc", fl, rt, td))
+        put("T/layout/d.inc", "int y2;\n")
+        check("plugin_inputs: a change of an included file leaves the set but the stage mounts its content (key changes)",
+              recipe.plugin_inputs("T/names/n.cc", fl, rt, td) == ["T/layout/c.inc", "T/layout/d.inc"])
+        check("plugin_inputs: a quoted include that names no tracked file is the compiler's (no input)", recipe.plugin_inputs("T/names/gone.cc", fl, rt, td) == [])
+        for src, want in (("T/names/bad.cc", "lies outside the root"),):
+            try:
+                recipe.plugin_inputs(src, fl, rt, td)
+                check("plugin_inputs: %s is a check error" % src, False)
+            except ValueError as e:
+                check("plugin_inputs: %s is a check error (%s)" % (src, want), want in str(e), str(e))
     check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
     check("native root without a semantics flag is red", any("lacks -fno-devirtualize" in x for x in errs(repo, mut(
         flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))

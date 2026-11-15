@@ -80,7 +80,7 @@ def build(sources, plugins=None, lifted=False, flags=()):
     repo = os.path.join(base, 'repo')
     os.makedirs(repo)
     _git(repo, 'init', '-q')
-    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v] + [recipe.ANALYSIS_PLUGIN[1]]:   # the analysis (objstub) plugin is built for every root with units
+    for n in recipe.plugin_files(REAL) + [recipe.ANALYSIS_PLUGIN[1]]:   # the analysis (objstub) plugin is built for every root with units
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     store = _store()

@@ -73,7 +73,7 @@ KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_laye
 VARIANT_KEYS = {"compiler", "flags", "link", "flags_add", "defines_add"}   # the keys a variant may replace (whole: a sanitizer variant names its own link.libs.system) and its two deltas
 VARIANT_DELTAS = {"flags_add", "defines_add"}   # appended to the base flags of the root (RECIPE.md, "Profiles")
 PROFILES = ("guest", "host")
-PLUGIN_FIXED = {"source": "PLUGIN_SOURCES", "inputs": "PLUGIN_INPUTS", "args": "PLUGIN_ARGS"}   # what recipe.py fixes for a plugin: a root entry names only the plugin
+PLUGIN_FIXED = {"source": "PLUGIN_SOURCES", "inputs": "plugin_inputs, derived from the source", "args": "PLUGIN_ARGS"}   # what recipe.py fixes for a plugin: a root entry names only the plugin
 GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
@@ -82,13 +82,11 @@ GUEST_TARGETS = ("guest", "host")
 # an error as for cl). The other values the plugins accept (ltr, first, cpp17) exist for A/B measurements and are no product.
 # The plugin fnvnx_order has no memory-ordering option: every access to shared memory is ordered (x86 TSO), whatever the arguments.
 # The set and the LOAD ORDER of compile.sh (fnv-l2-source): ftoi, order, sdd, pi, dispatch, addr, names, layout. A plugin that includes another source
-# (layout includes names' .cc) lists it in PLUGIN_INPUTS; the stage mounts the sources at their repo paths.
+# (layout includes names' .cc) is mounted with it: plugin_inputs() derives the set from the #include closure of the source.
 _T = TREE + "/toolchain/"
 PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
                   "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
-PLUGIN_INPUTS = {"fnvnx_ftoi": [_T + "ftoi/f2i_builtins.inc"], "fnvnx_layout": [_T + "names/fnvnx_names.cc", _T + "names/sympair_kinds.inc", _T + "layout/crossing_terms.inc", _T + "layout/decltype_spell.inc"],
-                 "fnvnx_dispatch": [_T + "layout/decltype_spell.inc"], "fnvnx_names": [_T + "layout/crossing_terms.inc", _T + "names/sympair_kinds.inc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 ANALYSIS_PLUGIN = ("objstub_plugin", TREE + "/verify/objstub_plugin.cc")   # the gate objstub's plugin (RECIPE.md "Plugins"): built for every root with C/C++ units, loaded by no compile stage
 PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
@@ -99,11 +97,48 @@ PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
 
 
-def plugin_decls(names, origin):
-    """[{name, source, inputs, args}] of the root's `plugins` NAMES (each entry {"name": PLUGIN}) for a root whose declared `cxx_origin` is ORIGIN: source, inputs and
-    arguments come from recipe.py alone (PLUGIN_SOURCES, PLUGIN_INPUTS, plugin_args), the one declaration. A name outside PLUGIN_SOURCES is refused by plugin_errors."""
+_QINC = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+
+
+def plugin_inputs(source, files, roots, repo="."):
+    """The tracked files that the plugin SOURCE includes by `#include "..."`, transitively, each resolved against the directory of the including file
+    (a header the plugin stage mounts at its repo path) -> sorted [repo path], SOURCE not in it. Angle includes, and quoted ones that name no tracked file beside the includer, come from the compiler's own
+    plugin headers. Rule: the closure lies inside the admitted root that holds SOURCE (a tracked file of a declared root); a quoted include that names a tracked file of another root is ValueError (a plugin reaches another root's files only by a declared `uses`, which a plugin has none of)."""
+    held, own = set(files), None
+    for r in roots:
+        if under(source, r) and (own is None or len(r) > len(own)):
+            own = r
+    if own is None:
+        raise ValueError("plugin source %s lies in no admitted root" % source)
+    out, todo = set(), [source]
+    while todo:
+        f = todo.pop()
+        with open(os.path.join(repo, f), encoding="utf-8", errors="surrogateescape") as fh:
+            text = fh.read()
+        for m in _QINC.findall(text):
+            q = posixpath.normpath(posixpath.join(posixpath.dirname(f), m))
+            if q not in held:
+                continue   # no tracked file beside the includer: found on the compiler's include path (the plugin headers), or missing, which the compile stage reports
+            if not under(q, own):
+                raise ValueError("%s includes %r: %s lies outside the root %s of the plugin" % (f, m, q, own))
+            if q != source and q not in out:
+                out.add(q)
+                todo.append(q)
+    return sorted(out)
+
+
+def plugin_files(repo="."):
+    """Every plugin source of PLUGIN_SOURCES with the files it includes (plugin_inputs), in REPO -> sorted [repo path]."""
+    files, roots = tracked(repo), load_admit(repo)
+    return sorted(set(PLUGIN_SOURCES.values()) | {i for q in PLUGIN_SOURCES.values() for i in plugin_inputs(q, files, roots, repo)})
+
+
+def plugin_decls(names, origin, files=(), roots=(), repo="."):
+    """[{name, source, inputs, args}] of the root's `plugins` NAMES (each entry {"name": PLUGIN}) for a root whose declared `cxx_origin` is ORIGIN: source and
+    arguments come from recipe.py alone (PLUGIN_SOURCES, plugin_args), the inputs are derived from the source (plugin_inputs). A name outside PLUGIN_SOURCES is
+    refused by plugin_errors."""
     want = plugin_args(origin)
-    return [{"name": p["name"], "source": PLUGIN_SOURCES[p["name"]], "inputs": list(PLUGIN_INPUTS.get(p["name"], [])), "args": want[p["name"]]} for p in names]
+    return [{"name": p["name"], "source": PLUGIN_SOURCES[p["name"]], "inputs": plugin_inputs(PLUGIN_SOURCES[p["name"]], files, roots, repo), "args": want[p["name"]]} for p in names]
 
 
 def origin_class(origin):
@@ -1280,7 +1315,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
             if not tool_file(roots, files, p)]   # the one membership function (class tool, under a tree)
     err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin, load_guest_link(repo), files)
-    err += plugin_errors(rec, root, files, roots, units, names, variant)
+    err += plugin_errors(rec, root, files, roots, units, names, variant, repo)
     return err
 
 
@@ -1290,7 +1325,7 @@ def lifted_origin(origin):
     return isinstance(origin, dict) and (set(origin) == {"lifted_by", "pack"} or set(origin) == {"lifted_by", "stage"})
 
 
-def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
+def plugin_errors(rec, root, files, roots, units, ext_names, variant="", repo="."):
     """Problems of the plugin declaration of recipe REC of ROOT, and the gate rule: a product root with native or decomp C++ loads both
     plugins of PLUGIN_SOURCES with their fixed arguments; a root whose C++ is all lifted needs none. What is lifted is declared in the
     admit.json entry of the root, "cxx_origin": "native" | {"lifted_by": TOOL.py, "pack": EXTERNAL} | {"lifted_by": TOOL.py, "stage": "gen:ROOT:I"} (exactly
@@ -1315,6 +1350,11 @@ def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
         elif n not in PLUGIN_SOURCES:
             err.append("plugin %s is not a plugin of recipe.py (PLUGIN_SOURCES: %s)" % (n, ", ".join(PLUGIN_SOURCES)))
         loaded[n] = p
+        if n in PLUGIN_SOURCES and PLUGIN_SOURCES[n] in files and os.path.isfile(os.path.join(repo, PLUGIN_SOURCES[n])):
+            try:
+                plugin_inputs(PLUGIN_SOURCES[n], files, roots, repo)
+            except ValueError as e:
+                err.append("plugin %s: %s" % (n, e))
     if "plugin_cxx" in rec:
         err.append("plugin_cxx is not declared in a build.json: the plugin compiler is recipe.PLUGIN_CXX (%s), derived from env.json" % PLUGIN_CXX)
     cxx = [u for u in units if u.endswith(CXX_EXT)]
@@ -1954,7 +1994,11 @@ class Job:
     def plugins(self, ws):
         """Build every plugin of the recipe as a hermetic stage -> [(name, tree of its /out, argv flags)]. The .so is in the store; each CC stage
         declares it as an input."""
-        pl = plugin_decls(self.rec.get("plugins", []), entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("cxx_origin"))
+        try:
+            pl = plugin_decls(self.rec.get("plugins", []), entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("cxx_origin"),
+                              self.files if self.files is not None else tracked(self.repo), self.roots, self.repo)
+        except ValueError as e:
+            raise BuildRed({"stage": "plugin", "exit": None, "stderr": [str(e)]})
         if not pl:
             return []
         env = self.plugin_env(ws)

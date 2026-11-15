@@ -145,7 +145,7 @@ def make_guest_repo(name, gen_extra="", rec=None, files=None, extra_roots=(), im
         for n in ("link/guest.json", "link/guest.ld"):
             w(repo, n, open(os.path.join(VERIFY, "..", n)).read())
     real = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout root
-    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:   # the real plugin sources and inputs: the profile's plugins are built from them
+    for n in recipe.plugin_files(real):   # the real plugin sources and inputs: the profile's plugins are built from them
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(real, n), os.path.join(repo, n))
     git(repo, "add", "-A")

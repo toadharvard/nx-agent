@@ -51,8 +51,8 @@ def main():
     try:
         other = os.path.join(td, 'other-checkout')
         plug = stamp.plugin_inputs(recipe=recipe)
-        check('the plugin file list is the recipe\'s own (every PLUGIN_SOURCES and PLUGIN_INPUTS file, nothing else)',
-              plug == sorted({os.path.relpath(f, recipe.TREE) for f in list(recipe.PLUGIN_SOURCES.values()) + [x for v in recipe.PLUGIN_INPUTS.values() for x in v]})
+        check('the plugin file list is the recipe\'s own (every PLUGIN_SOURCES file and its include closure, nothing else)',
+              plug == sorted({os.path.relpath(f, recipe.TREE) for f in recipe.plugin_files(os.path.dirname(os.path.dirname(TREE)))})
               and any(n.endswith('decltype_spell.inc') for n in plug) and any(n.endswith('crossing_terms.inc') for n in plug))
         for i in list(stamp.INPUTS) + plug:
             os.makedirs(os.path.dirname(os.path.join(other, i)), exist_ok=True)
