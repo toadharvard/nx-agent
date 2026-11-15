@@ -60,7 +60,7 @@ subprocess.run(["git", "init", "-q", "--bare", bare], check=True)
 art = os.path.join(SCRATCH, "artifacts")
 subprocess.run(["git", "clone", "-q", bare, art], check=True, capture_output=True)
 ENV = dict({k: v for k, v in os.environ.items() if not k.startswith("GATE_")}, FARM_HOME=os.path.join(SCRATCH, "farm"),
-           ARTIFACTS=art, RUNNER_JOBS="1")
+           FNVNX_BUILD=art, RUNNER_JOBS="1")
 FINAL = re.compile(r"^AFTERMERGE commit=([0-9a-f]{12}) jobs=(\d+) violated=(\S+) published=(\S+)@([0-9a-f]{12})$")
 
 
@@ -79,6 +79,10 @@ rc, out, err = run(good, "sanitize")
 check("a job outside the table: exit 1", rc == 1 and "unknown job sanitize" in err and out == "", (rc, out, err))
 rc, out, err = run(good)
 check("no job: exit 1", rc == 1 and "usage" in err, (rc, out, err))
+_p = subprocess.run(["bash", os.path.join(repo, T, "farm", "runner.sh"), good, "oraclecheck"], env={k: v for k, v in ENV.items() if k != "FNVNX_BUILD"},
+                    capture_output=True, text=True)
+check("FNVNX_BUILD unset: exit 1, one error line naming it, no default path read", _p.returncode != 0 and "FNVNX_BUILD" in _p.stderr and _p.stdout == ""
+      and len(_p.stderr.strip().splitlines()) == 1, (_p.returncode, _p.stdout, _p.stderr))
 rc, out, err = run("0" * 40, "oraclecheck")
 check("a commit the repository does not have: exit 1", rc == 1 and out == "", (rc, out, err))
 rc, out, err = run(badenv, "oraclecheck=" + CAS)
