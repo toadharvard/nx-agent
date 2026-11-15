@@ -136,6 +136,18 @@
   {
    "id": "ASM-800",
    "aliases": []
+  },
+  {
+   "id": "ASM-628",
+   "aliases": [
+    "L6:census#37"
+   ]
+  },
+  {
+   "id": "ASM-629",
+   "aliases": [
+    "L6:census#38"
+   ]
   }
  ],
  "entries": [
@@ -1303,6 +1315,513 @@
     "file": "CLAUDE.md",
     "quote": "10. the x86 ISA as documented in the Intel SDM, for the parts that no pinned formal model covers"
    }
+  },
+  {
+   "id": "ASM-601",
+   "text": "G-PIXEL compares frames against a \"declared tolerance\" that no rule derives.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#1"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a per-format tolerance derived from the format's LSB and the documented filter error bound, stored as data that the comparator reads.",
+   "owner": "L6+L4"
+  },
+  {
+   "id": "ASM-602",
+   "text": "pix outputs (occlusion counts, render-target read-back, timing) cannot be equal across GPUs, so they are masked from stream equality.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#2"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a pix-class check that bounds each masked value (count within the rasterised-coverage bound; read-back via the G-PIXEL tolerance) instead of masking it.",
+   "owner": "L6+L4"
+  },
+  {
+   "id": "ASM-603",
+   "text": "Everything a translated program depends on beyond its bytecode is DATA in the driver UBO.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#3"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a static check over translator output that every non-bytecode input of the GLSL is a field of the UBO 0/1/2 layout in fnvnx_dk_layout.h.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-604",
+   "text": "Every capability, format and mode that the llvmpipe-measured env table promises can be honoured by the deko3d backend on the console.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#5"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a fact that joins env_<profile>.tsv with dk_facts.py (format/usage/MSAA/limits per DkImageFormat). Any row the console cannot honour makes the build red.",
+   "owner": "L6+L6A"
+  },
+  {
+   "id": "ASM-605",
+   "text": "VideoMemorySize = 960 MiB is an L5 estimate that \"may be revised\".",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#6"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: with an L5 input: derive it from the NPDM/heap layout as a fact (32-bit address space minus the guest image and heaps), then a gate that compares the env row against it.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-606",
+   "text": "The original's d3d9 stream is not repeatable run to run without virtual clocks (B5): 163 927 of 1 345 369 records equal.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#7"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: virtual clocks driven by the Present count on both sides, then the two-run equality check becomes a gate.",
+   "owner": "L6+L4"
+  },
+  {
+   "id": "ASM-607",
+   "text": "A non-local unwind out of fnvnx_guest_invoke leaks one entry.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#8"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the EH-through-lifted-frames gate (MSVC EH/SEH proven against the exe's tables) must cover the invoke frame; until then this is a known leak.",
+   "owner": "L6+L1"
+  },
+  {
+   "id": "ASM-608",
+   "text": "A point filter on an exact 2:1 downscale is inconsistent on llvmpipe, so its result is left unchecked.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#10"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a documented texel-selection rule (D3D9 point sampling = floor of the texel coordinate) checked on the deko3d backend; llvmpipe cannot be the oracle here.",
+   "owner": "L6+L6A"
+  },
+  {
+   "id": "ASM-609",
+   "text": "A scaled depth Blit is exact only to Z24 ±1 LSB, and depth-stencil Blit between formats, BCn Blit with scaling and an MSAA Blit destination are open.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#11"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a rule per (src, dst) format class with an exact or bounded result. Each case that has no rule is refused by contract and gated.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-610",
+   "text": "X channels of BGRX8/RGBX8 read back as 0xFF.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#13"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: D3D9 leaves the X channel undefined, so either cite a document or make the read-back value a stated contract that tests/l6/copy enforces on both backends.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-611",
+   "text": "Invalid lock rect, lockable MSAA, Levels > 32 (NO source) and a standalone GetContainer were decided with doubt.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#15"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: one cited source per row of contract_consts.tsv. The Levels > 32 row needs a source or a rule (log2 of the 16384 maximum dimension = 15 levels).",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-612",
+   "text": "MIN/MAG filter NONE, BOTHSRCALPHA as destination and SRCCOLOR2 in an alpha slot follow Nine where Wine differs.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#16"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: follow Wine 9.0 with a citation, per the owner's Wine 9.0 decision, or a documented source.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-613",
+   "text": "Out-of-range ZFUNC/CULLMODE/FILLMODE/SHADEMODE are a latch whose START value is invented.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#17"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the start value is the device default from the D3D9 render-state defaults table (O3), stated as a rule and tested.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-614",
+   "text": "The 16 vendor FOURCC formats are a hand list in gen_enums.py copied from Wine's table.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#19"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: derive the list from env_<profile>.tsv (the FOURCC rows the env accepts), so that no list is written by hand.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-615",
+   "text": "StretchRect into an MSAA destination and compressed <-> uncompressed StretchRect answer INVALIDCALL where Windows accepts.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#21"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: implement a resolve or convert path in both backends; a gate compares the legality with the env table.",
+   "owner": "L6+L6A"
+  },
+  {
+   "id": "ASM-616",
+   "text": "Reset's back buffer count, GetLastPresentCount, Present with a NULL-format back buffer, X8R8G8B8 in GetFrontBufferData and the fullscreen rules: \"Nothing was checked against Windows.\"",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#22"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a cited Wine 9.0 or documented source per row, or a recorded Windows run (L4).",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-617",
+   "text": "vblank on GL surfaceless is a MODELLED 60 Hz clock.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#24"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: on the console it waits on the display vsync event (O4). In the emulator it must read B5's virtual clock (L4). Gate: the hook-table fact names the clock source per target.",
+   "owner": "L6+L6A"
+  },
+  {
+   "id": "ASM-618",
+   "text": "Present with a visible cursor allocates per call and can fail with OUTOFVIDEOMEMORY.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#25"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: reserve at SetCursorProperties; the oom gate (allocscan) then proves that Present does not allocate.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-619",
+   "text": "The Wine citation for the cursor blend order was written from memory.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#26"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: re-cite against the wine-9.0 source tree (a citation line checked by the stub-gate citation rule).",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-620",
+   "text": "D3DRS_LASTPIXEL = TRUE (the default) on line draws cannot be expressed on GL 4.5, and the backend makes the submit BAD_CALL.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#27"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a rule that adds the last-pixel point per segment, in the front or the backend; a gate shows that no default state yields BAD_CALL.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-621",
+   "text": "Clip-plane equations, point size, a depth surface larger than the colour targets and the flat variants are not carried to the backend.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#28"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a state-coverage gate (every D3DRENDERSTATETYPE value that has an effect reaches an NxState field), like the d3d9total switch rule.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-622",
+   "text": "PreLoad of a managed buffer bypasses the draw path's buffer hazard table.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#29"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: route PreLoad through the hazard table; tests/l6/draw adds the case.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-623",
+   "text": "posfix = (0, 0, 1, 0) because the backend viewport carries the half pixel, which contradicts the shaders README.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#30"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: reconcile the two texts into one rule, tested by drawgl with a half-pixel edge case.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-624",
+   "text": "A VS input that the declaration does not supply reads (0,0,0,0), as in Wine (Nine uses w = 1).",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#31"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: cite wine-9.0 per the owner's Wine 9.0 decision, or give a documented source.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-625",
+   "text": "An indexed draw with a NULL index buffer returns D3D_OK (the Windows row of Wine's test; Wine itself differs).",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#32"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the Windows rows of Wine's tests are not a document (row 52).",
+   "owner": "L6+L4"
+  },
+  {
+   "id": "ASM-626",
+   "text": "Because the shader cache cannot serve the GL backend, every shader is translated at first use, and that translation never fails at run time.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#33"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: extend the cache format (GLSL payload, VS_COMPLETE key), plus a gate that every (VS, PS, variant) the exe can bind is in the cache, from the SDP packages (row 81).",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-627",
+   "text": "Variants keyed by a non-canonical link set are translated at the first draw of the pair.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:census#34"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the same gate as row 33, over link sets.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-630",
+   "text": "The non-todo_wine rows of Wine's d3d9 tests are Windows behaviour.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/dev/draw_api.cpp"
+   ],
+   "aliases": [
+    "L6:census#52"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: Wine's testbot results are not a document. Either record a Windows run per row (V1 farm) or cite wine-9.0 per the owner's Wine 9.0 decision.",
+   "owner": "L6+L4"
+  },
+  {
+   "id": "ASM-631",
+   "text": "Where Microsoft's documentation is silent, Wine 9.0 and Mesa Nine are the semantic source.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/dev/copy_stretch.cpp"
+   ],
+   "aliases": [
+    "L6:census#53"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: keep Wine 9.0 only, with a per-function citation (owner's Wine 9.0 decision), and remove the Nine-derived rows.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-632",
+   "text": "The perf counter and the vblank clock share one frequency.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/dev/m1_stats.cpp"
+   ],
+   "aliases": [
+    "L6:census#55"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a fact from the platform hook table. On the console both are the system tick (O4).",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-633",
+   "text": "D3DDECL_END is found at index ≤ 126, from Wine's 128-element loop.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/dev/res_decl.cpp"
+   ],
+   "aliases": [
+    "L6:census#58"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: derive the bound from MAXD3DDECLLENGTH in the documented d3d9types.h (O3), not from Wine's loop.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-634",
+   "text": "Vertex count arithmetic wraps as UINT, as in Wine.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/dev/draw_prim.cpp"
+   ],
+   "aliases": [
+    "L6:census#59"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a cited Wine 9.0 body, or a documented validation rule; tests/l6/draw tests the wrap.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-635",
+   "text": "GetDC needs a GDI DIB.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/dev/res_surf.cpp"
+   ],
+   "aliases": [
+    "L6:census#60"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: with an L5 input: a GDI DIB implementation that the stub gate can see, or a reach-violation certificate (L1) if the exe never calls GetDC.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-636",
+   "text": "An entry point is unreachable.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/dev/d3d9_adapter.cpp"
+   ],
+   "aliases": [
+    "L6:census#61"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: replace it with fnvnx_reach_violation(fact_id) and a call-graph certificate.",
+   "owner": "L6+L1"
+  },
+  {
+   "id": "ASM-637",
+   "text": "The host CPU sets llvmpipe's vector width, so the measured env rows depend on the host.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/env/ENV_PIN.txt"
+   ],
+   "aliases": [
+    "L6:census#64"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: one pinned farm host as a fact in ENV_PIN.txt (CPU model, the same host as the rcp/rsqrt table); make_env.py checks it.",
+   "owner": "L6+L4"
+  },
+  {
+   "id": "ASM-638",
+   "text": "BC4 is decoded as Mesa util_format_rgtc does.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/front/front_conv.c"
+   ],
+   "aliases": [
+    "L6:census#65"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: test against the documented BC4 decode formula (Microsoft block-compression page, O3).",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-639",
+   "text": "Clamping follows Mesa's CLAMP macro, so NaN passes through.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/front/front_dyn.c"
+   ],
+   "aliases": [
+    "L6:census#66"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: state the NaN rule (O8 keeps NaN behaviour exact), and test NaN inputs in tests/l6/front.",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-640",
+   "text": "The undocumented d3d9 exports have Wine's signatures.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/spec/d3d9_exports.py"
+   ],
+   "aliases": [
+    "L6:census#70"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: an import fact from the exe and modules. Any export that nothing imports gets a reach-violation certificate; the others need a source.",
+   "owner": "L6+L1"
+  },
+  {
+   "id": "ASM-641",
+   "text": "nxd3d_frontbuffer_read relies on NxImageRead with image 0 = the swapchain image, which nxgpu4.h does not state.",
+   "used_by": [
+    "ports/fnv-nx/render/d3d9/QUEUE.md"
+   ],
+   "aliases": [
+    "L6:QUEUE-ABI-frontbuffer"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: nxgpu4.h states NxImageRead image 0 = the swapchain image and gl4 implements it, or the function is added to the ABI",
+   "owner": "L6+L6A"
   }
  ]
 }
