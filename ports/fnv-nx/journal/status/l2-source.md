@@ -371,3 +371,7 @@ After the first frame:
   - w2 doing these now, then the full numbers on the none-elf pin.
 - L3a w8 blocker (lib/sha256 vector_type): its branch had the pre-VEC1 plugin copy from L1 pluginfix b707cd5c4. Pointed w8 and w15 to the one layout + reader copy, claude/fnv-l2-source-w3-complex @8f7217f4d, for cand3.
 - w2 rtasm @658a4d0f5: the universe is defined by plugin record; lse orderings are parsed from lse.S 13.3. Corrections given: runtime_cflags via recipe.runtime_cflags, sizes from DATAMODEL.json, a no-plugin fixture.
+- Farm phase B: newlib green with all 8 plugins (CPLX1 11046f74). libgcc is BLOCKED on L2, 2 defects:
+  - DISPATCH1 refuses 84 files (soft-fp TF/HF 40, libbid 39, TImode 2). The cause is def_descriptor on every definition; only the exitgen join knows whether a definition gets an exit bridge. w2 doing rule DEFDISP-NS: `-<reason>` rows, exitgen red on a joined one.
+  - fnvnx_pi segfaults in finish_unit on cold clones in C units (emutls, unwind-dw2, unwind-dw2-fde). w3 doing: a cdtor-clone predicate guarded for C, split parts take their own sites.
+  - Open with the farm: libbid was built despite --disable-decimal-float (config.log check).
