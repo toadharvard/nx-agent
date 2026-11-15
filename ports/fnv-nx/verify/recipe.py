@@ -359,6 +359,35 @@ def guest_errors(rec, spec, roots, pin):
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
+def compiler_long_double(cc):
+    """(__SIZEOF_LONG_DOUBLE__, __LDBL_MANT_DIG__) as the guest compiler CC (a host path) predefines them for the ILP32 data model."""
+    d = predefined(cc, "c", ["-mabi=ilp32"])
+    return int(d["__SIZEOF_LONG_DOUBLE__"]), int(d["__LDBL_MANT_DIG__"])
+
+
+def manifest_long_double_errors(man, ld_size, ld_mant):
+    """The runtime's long double (recorded in its MANIFEST.json at build time from the compiler that built it) must be the compiler's: size and
+    mantissa equal, else red. A MANIFEST that does not record them is red too: the runtime then does not say what it was built with."""
+    sz = man.get("sizeof", {}).get("long double") if isinstance(man.get("sizeof"), dict) else None
+    mant = man.get("ldbl_mant_dig")
+    err = ["MANIFEST.json lacks %s" % k for k, v in (("sizeof[long double]", sz), ("ldbl_mant_dig", mant)) if not isinstance(v, int)]
+    if not err:
+        err = ["runtime long double is %d bytes / %d mantissa bits, the compiler's is %d / %d" % (sz, mant, ld_size, ld_mant)] if (sz, mant) != (ld_size, ld_mant) else []
+    return err
+
+
+def runtime_manifest_errors(runtime_dir, cc):
+    """Problems of RUNTIME_DIR/MANIFEST.json against the compiler CC (host paths); [] when it agrees."""
+    p = os.path.join(runtime_dir, "MANIFEST.json")
+    if not os.path.isfile(p):
+        return ["the runtime has no MANIFEST.json"]
+    try:
+        man = json.load(open(p))
+    except ValueError as e:
+        return ["MANIFEST.json is not JSON: %s" % e]
+    return manifest_long_double_errors(man, *compiler_long_double(cc))
+
+
 LINK_KEYS = {"output", "flags"}
 LINK_OPT = {"script", "kind", "version_script", "roots", "libs"}
 LIBS_KEYS = {"external", "dirs", "names", "startfiles", "endfiles"}
@@ -981,6 +1010,13 @@ class Job:
     def externals(self, ws):
         """Fetch by exact commit into the shared bare cache, check out, ingest, require tree_sha256 (BuildRed naming the external)."""
         self.ext.update(fetch_externals(self.rec.get("external", []), self.store, self.extcache, ws))
+        pin = load_pin(self.repo)
+        rtn = pin["runtime"]["name"] if isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) else None
+        if rtn in self.ext and self.rec.get("compiler", {}).get("external") in self.ext:   # a guest root with the pinned runtime: its MANIFEST is judged before any unit
+            e = self.ext[self.rec["compiler"]["external"]]
+            errs = runtime_manifest_errors(self.ext[rtn]["host"], e["host"] + "/" + self.rec["compiler"]["cc"])
+            if errs:
+                raise BuildRed({"stage": "manifest:" + rtn, "exit": None, "stderr": errs})
 
     def drivers(self):
         c = self.rec["compiler"]

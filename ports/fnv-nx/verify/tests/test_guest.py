@@ -93,6 +93,13 @@ def main():
     miss = dict(pinlibs, names=[n for n in pinlibs["names"] if n != "sysbase"])
     check("link.libs without sysbase is red", any("link.libs" in x for x in recipe.guest_errors(dict(sample, link=dict(lk, libs=miss)), ROOT, recipe.load_admit(gs), recipe.load_pin(gs))), "")
     check("a guest link without libs is not judged by the libs rule", not [x for x in recipe.guest_errors(dict(sample, link=lk), ROOT, recipe.load_admit(gs), recipe.load_pin(gs)) if "link.libs" in x], "")
+    # --- the runtime's long double is the compiler's (size and mantissa from its MANIFEST.json): the runtime of tools/fnvnx-a64-msvcmodel13 69cc10ed was
+    # built by the 128-bit-long-double compiler (sizeof 16, mantissa 113): red against a compiler that answers 8 / 53 (VC++ 2008's binary64)
+    old_rt = {"sizeof": {"long double": 16}, "ldbl_mant_dig": 113}
+    check("a runtime with long double 16/113 is red against a compiler with 8/53", any("16 bytes / 113" in x for x in recipe.manifest_long_double_errors(old_rt, 8, 53)), "")
+    check("a runtime with long double 8/53 is green against a compiler with 8/53", recipe.manifest_long_double_errors({"sizeof": {"long double": 8}, "ldbl_mant_dig": 53}, 8, 53) == [], "")
+    check("a MANIFEST without the mantissa is red", recipe.manifest_long_double_errors({"sizeof": {"long double": 8}}, 8, 53) == ["MANIFEST.json lacks ldbl_mant_dig"], "")
+    check("a runtime without MANIFEST.json is red", recipe.runtime_manifest_errors(os.path.join(BASE, "no-such-dir"), "/nonexistent") == ["the runtime has no MANIFEST.json"], "")
     no_rt = json.loads(json.dumps(sample))
     no_rt["external"] = [x for x in no_rt["external"] if x["name"] != rtp["name"]]
     no_rt["include"] = []
