@@ -1407,3 +1407,10 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   1. link.script/version_script from generated outputs (L6A libnxgl4.map), plus a linker-script lexer for the assumptions gate;
   2. ELF facts in every link record: sections, symbols, the definer per reference (for L4 icount and w23 D2);
   3. the profile and delta variants, after targets.json.
+- verify/targets.json landed: w22 50cf6f5f9.
+  - Records: guest_platform (horizon/newlib/aarch64-none-elf/ilp32, cited to libnx @518bf11a) and console_cpu (Cortex-A57 armv8-a + crc + crypto, cited to Arm TRM DDI0488H and DDI0514G, pinned in fnv-nx-build tools/arm-a57-docs @ffadc5c2).
+  - The semantic prefix is generated; flags are byte-identical.
+  - Waiting on blockers: datamodel flags (DATAMODEL), drivers and link/guest.json (none-elf mirror), host_gl (L6).
+  - Next for w22: PD-LOADER-SHA256-ISA, closed by console_cpu.features.
+- w23 tier 2 COMDAT c9c20af8 over 114 platform objects: 186 multi-object signatures, tier 1 182, tier 3 4 (the std::string ones). The acceptance case waits on the L2 w3 odrdef ICE (swkbd.cpp:166, mangle.cc:2515).
+- w25 item 3 (profile) bases on targets.json.
