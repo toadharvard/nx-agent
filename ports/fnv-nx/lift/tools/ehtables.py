@@ -468,7 +468,7 @@ class EH(Flow):
         """R1 on a path-sensitive footing, for a call whose forward state has no single esp (the paths into it have different stack roots, e.g. a catch funclet that restores esp from its frame jumps to a shared throw tail).
         The ThrowInfo is the dword at [esp+off+4] before the call. Walk the decoded predecessors backwards with the slot named by its offset d from the esp before the instruction: over an instruction whose esp change is
         known the offset moves by that change; a push whose word is the slot (d = 0) or a store `mov [esp+d], imm` is the value (a constant), anything else that writes the slot, an unknown esp change, a store through
-        ebp/esp the walk cannot place, a seeded instruction (entered from outside the decoded edges) or an instruction with no predecessor is RED. The result is the union over every path: a set of constants, each path
+        ebp/esp the walk cannot place, a call between the slot and the throw (its callee may write the slot through an escaped frame address), a store through any other base or index (not provably disjoint), a seeded instruction (entered from outside the decoded edges) or an instruction with no predecessor is RED. The result is the union over every path: a set of constants, each path
         proving its own. -> (constants or None, kind, why) as resolve."""
         X = s.X; seen = set(); vals = set(); work = [(site, off + 4)]
         while work:
@@ -488,18 +488,18 @@ class EH(Flow):
                     if ops[0].type != cx.X86_OP_IMM: return None, 'red', '%s; the slot is pushed from a non-constant at %08x' % (why0, p)
                     vals.add(ops[0].imm & M32); continue
                 dp = d + dl                      # esp_before(x) = esp_before(p) + dl, so the slot esp_before(x) + d = esp_before(p) + (d + dl)
-                if mn == 'call' and dp < 0: return None, 'red', '%s; the slot lies in the dead argument area of the call at %08x' % (why0, p)
+                if mn == 'call': return None, 'red', '%s; a call (%08x) lies between the slot and the throw: its callee may write the slot through a frame address that escaped into it, and this walk does not track escapes' % (why0, p)
                 if mn == 'pop' and ops[0].type == cx.X86_OP_MEM: return None, 'red', '%s; pop to memory at %08x' % (why0, p)
                 for o in ops:
                     if o.type == cx.X86_OP_MEM and o.access & capstone.CS_AC_WRITE and mn != 'push':
+                        if not o.mem.base and not o.mem.index and not o.mem.segment: continue       # an absolute address of the image: not the stack
                         b = ins.reg_name(o.mem.base) if o.mem.base else None
-                        if b in ('esp', 'ebp'):
-                            if b == 'esp' and not o.mem.index and mn == 'mov' and len(ops) == 2 and o.size == 4:
-                                if o.mem.disp == dp:
-                                    if ops[1].type != cx.X86_OP_IMM: return None, 'red', '%s; the slot is stored from a non-constant at %08x' % (why0, p)
-                                    vals.add(ops[1].imm & M32); break
-                                if abs(o.mem.disp - dp) >= 4: continue
-                            return None, 'red', '%s; a store at %08x the walk cannot place' % (why0, p)
+                        if b == 'esp' and not o.mem.index and not o.mem.segment and mn == 'mov' and len(ops) == 2 and o.size == 4:
+                            if o.mem.disp == dp:
+                                if ops[1].type != cx.X86_OP_IMM: return None, 'red', '%s; the slot is stored from a non-constant at %08x' % (why0, p)
+                                vals.add(ops[1].imm & M32); break
+                            if abs(o.mem.disp - dp) >= 4: continue          # an esp-based dword store of another slot: disjoint by offset
+                        return None, 'red', '%s; a store at %08x through a base or index the walk cannot prove disjoint from the slot' % (why0, p)
                 else:
                     work.append((p, dp)); continue
         if not vals: return None, 'red', why0

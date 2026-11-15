@@ -40,4 +40,8 @@ check('two paths', (r[1], sorted(r[0] or ())), ('const', [0x116cdb8, 0x117fc10])
 r = S({LO, 0xec44b5, 0xec4498}).resolve_slice(0xec449c, 0, 'x'); check('seeded', r[1], 'red')
 # the word pushed last (the object pointer: push eax) is not a constant: red
 r = S({LO, 0xec44b5}).resolve_slice(0xec449c, -4, 'x'); check('non-constant push', r[1], 'red')
-print('%d checks, %d failed' % (3, fails)); sys.exit(1 if fails else 0)
+# a call between the slot and the throw is red: the slot is searched from the call at 0xec4410's neighbour ec44a1? use the slot below the lea/push at ec448b..ec4493: walk from ec4493 with d = 4 passes the `call 0xec79c4` at ec448e
+r = S({LO, 0xec44b5}).resolve_slice(0xec4493, 4, 'x'); check('call between', (r[1], 'a call' in (r[2] or '')), ('red', True))
+# a store through a register base is red: the store `mov [ebp-0x1c], eax` at ec4470 lies on the path from the function entry to ec4473/ec4410; walk the slot at d = 0 from ec4410
+r = S({LO, 0xec44b5}).resolve_slice(0xec4410, 0, 'x'); check('store not provably disjoint', (r[1], 'through a base' in (r[2] or '')), ('red', True))
+print('%d checks, %d failed' % (5, fails)); sys.exit(1 if fails else 0)
