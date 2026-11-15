@@ -1164,3 +1164,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 23:32 w13 jtab: claude/fnv-l3a-lift-w13-jtab @ 4b0961d2c accepted. R-B, plus R-A(i) precise escapes (8-byte SEH record per winnt.h; /GS xor; the prologue). 29 cases, 5 new positives.
   - Next: the (ii) switch and the jtab-guard certificate emitter to L3b's 5 conditions.
   - The real counts over 1005 sites wait on w7's memory fix.
+- 23:35 w13 jtab-guard certificate at 07ebbe3ef: provenance tag on the cell, extended through add/sub and movzx; field shape confirmed. Next: ASM-006, the read-only and dispatcher check in the emitter, and per-image JTABCERT into FACTS.
+- 23:35 Farm d3dx9_38 at e7b12ab35, --jobs 1: the universe stage did not finish within the 2 h harness cap (no OOM, no red). It is the same growth class as the exe's R3 loop; w7's fix must bound time and RSS for all images.
+  - The farm is standing by.
+  - recipe.py defects sent to L1: an absolute --root gives KeyError, and there is no per-stage progress line.
