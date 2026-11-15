@@ -1168,3 +1168,6 @@ One bounded read-only pass over lift/. Each item gives its replacement.
 - 23:35 Farm d3dx9_38 at e7b12ab35, --jobs 1: the universe stage did not finish within the 2 h harness cap (no OOM, no red). It is the same growth class as the exe's R3 loop; w7's fix must bound time and RSS for all images.
   - The farm is standing by.
   - recipe.py defects sent to L1: an absolute --root gives KeyError, and there is no per-stage progress line.
+- 23:37 w7 memory cause: ehtables.EH.dis memoises a full capstone CsInsn, native detail included, for all ~3.3M exe instructions (about 9 GB). d3dx9_38 has the same cache (9.6 GB).
+  - Rule: memoise a compact record of the fields that are read (about 0.35 GB for the exe). The memo stays complete and deterministic, and FACTS must be byte-identical.
+  - Second cost: the pcsrc join loop, the d3dx9_38 2 h wall; w7 profiles it next.
