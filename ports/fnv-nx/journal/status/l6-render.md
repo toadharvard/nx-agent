@@ -1268,3 +1268,6 @@ Paused: w3b, w4, farm; no other work.
     - render/gl4 and sm_link are red only in the recipe store stage: EEXIST on /tmp/recipe-*/syslib at recipe.py:2762, a w28 defect routed to L1. Every object of both roots builds.
     - objstub: 2059/2126, 79 findings, 0 render apart from those two build-reds.
 - bottleneck: L1's recipe syslib EEXIST (w28), then cand3 and cand4.
+- 21:36Z L1:
+    - The syslib EEXIST is fixed at w28 0cdff83c8, with a private mkdtemp for each link. w6 (doing) merges it, re-runs gl4 and sm_link, and sends the head to w12.
+    - The 6 render abspath rows came from cand3's older copy; render is at 0, confirmed.
