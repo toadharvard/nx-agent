@@ -924,3 +924,6 @@ Paused: w3b, w4, farm; no other work.
     - w6 (doing): merge it. Then render/pair owns the one (stage, shademode) → row function, and ffp_prog.cpp's copy is deleted.
     - Then construction rows 15/16: gen_glsl.py emits the UBO and sampler bindings from ffp_state.h and fnvnx_dk_layout.h.
     - Found: the plugin fnvnx_names mount gap (crossing_terms.inc) on the guest build; sent to L1.
+- 15:42Z w5 50a239be9: merged w6-root 98cd75f28. The duplicates are gone, table mode is 5/5 with byte-identical output, and the checker is green.
+    - Found: the L1 elffacts ldfacts stage rejects maps with no archive members. w5 fixed it in elffacts.py; sent to L1 for review.
+    - Final run waits on the w6 render/pair head.
