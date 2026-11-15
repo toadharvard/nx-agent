@@ -8,7 +8,7 @@ objects (objects.json "objects") are judged; no product root: universe 0, green.
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
 All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]), `read_f2i_paths` (objects.json -> {unit: the plugin's file of
 its object}: the `f2i` field of the object's row, the single place where the recipe records the path) and `read_f2i` (that file).
-The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcpref.h, rcptab.c, rcptab.cert.json): the item
+The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcptab.c, rcptab.cert.json; rcpref.h is in the root's published GEN output, genout.gen_dir): the item
 `<image>:rcpcert` exists per linked image (a root with a link stage) iff another object of the image references a symbol that the object compiled from the unit rcptab.c defines (symbol tables of the objects: the link resolves exactly those references); no image, or no such reference: no item (universe 0 for check 1).
 
 Check 0, dependency (item `<root>:forms`): the correctness of the helpers sse_f2i / fv_i, whose conversions this gate lets through, is
@@ -19,8 +19,8 @@ result file; the same code on the same declared inputs gives the same verdict). 
 Check 1, certificate (item `<root>:rcpcert`, files of the root): rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
 rt/rcptab.cert.json (made on that CPU by farm/rcpcert.sh: CPUID identity read with the instruction, all 2^32 inputs of both functions
 executed on the hardware and compared bit for bit with the functions of rt/rcptab.c, SHA-256 of both result streams) is accepted iff
-  sha256(rt/rcptab.c) == source_sha256, sha256(rt/rcpref.h) == header_sha256, mismatches == 0 (the integer 0), and the CPU identity of the
-  certificate equals the four FNVL_RCP_REF_* constants of rt/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
+  sha256(rt/rcptab.c) == source_sha256, sha256(GEN/rcpref.h) == header_sha256, mismatches == 0 (the integer 0), and the CPU identity of the
+  certificate equals the four FNVL_RCP_REF_* constants of GEN/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
 A missing, unreadable or malformed certificate is a finding. Argument: the table functions are pure functions of 32 bits; the certificate
 states equality with the hardware on the whole domain for the exact source bytes whose hash it carries, on the reference identity; so the
 source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): ASM-320 (the certifying run was made by farm/rcpcert.sh on a CPU
@@ -94,7 +94,7 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import formgate  # noqa: E402
+from proof import formgate, genout  # noqa: E402     (genout: the one reader of the lift/rt GEN output)
 import gate_build  # noqa: E402
 import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
@@ -128,13 +128,13 @@ def read_f2i_paths(res):
     return {o["unit"]: o.get("f2i") for o in res["objects"]}
 
 
-GEN_HEADER = os.path.join("gen", "rcpref.h")      # a generated file of the root (rt/build.json stage gen_cpuref), not a committed one
+GEN_HEADER = "rcpref.h"      # a file of the root's published GEN output (rt/build.json stage gen_cpuref; genout.gen_dir), not a committed one
 
 
-def read_ref(rt):
-    """the four FNVL_RCP_REF_* constants of rt/rcpref.h -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
+def read_ref(gen):
+    """the four FNVL_RCP_REF_* constants of GEN/rcpref.h (GEN: genout.gen_dir()) -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
     out = {}
-    with open(os.path.join(rt, GEN_HEADER)) as fh:
+    with open(os.path.join(gen, GEN_HEADER)) as fh:
         for line in fh:
             m = re.match(r'#define FNVL_RCP_REF_([A-Z]+) ("[^"\n]*"|[0-9]+)\s*$', line)
             if m and m[1] in REF_KEYS:
@@ -142,14 +142,14 @@ def read_ref(rt):
                     raise ValueError("FNVL_RCP_REF_%s defined twice" % m[1])
                 out[m[1]] = m[2][1:-1] if m[2].startswith('"') else int(m[2])
     if sorted(out) != sorted(REF_KEYS):
-        raise ValueError("rt/gen/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
+        raise ValueError("GEN/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
     return out
 
 
-def check_cert(rt):
-    """check 1 -> [finding strings]"""
+def check_cert(rt, gen):
+    """check 1 -> [finding strings]; RT the directory of rcptab.c and its certificate, GEN the published generated directory (genout.gen_dir)"""
     try:
-        ref = read_ref(rt)
+        ref = read_ref(gen)
     except (OSError, ValueError) as e:
         return ["reference identity unreadable: %s" % e]
     path = os.path.join(rt, "rcptab.cert.json")
@@ -167,8 +167,8 @@ def check_cert(rt):
             bad.append("cpu identity %s is not the reference %s" % (json.dumps(cpu, sort_keys=True), json.dumps(want, sort_keys=True)))
         if cert["mismatches"] != 0 or isinstance(cert["mismatches"], bool):
             bad.append("mismatches is %r, not 0" % (cert["mismatches"],))
-        for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", GEN_HEADER)):
-            have = sha256_file(os.path.join(rt, file))
+        for key, base, file in (("source_sha256", rt, "rcptab.c"), ("header_sha256", gen, GEN_HEADER)):
+            have = sha256_file(os.path.join(base, file))
             if cert[key] != have:
                 bad.append("%s %s differs from sha256 of rt/%s (%s)" % (key, cert[key], file, have))
         for key in ("rcp_stream_sha256", "rsqrt_stream_sha256"):
@@ -389,11 +389,11 @@ def ftoi_why(doc):
 TABLE_UNIT = "rcptab.c"
 
 
-def table_item(objs, image_dir):
+def table_item(objs, image_dir, cache=None):
     """-> None (no item) or [findings] of the item `<image>:rcpcert`. IMAGE_DIR: the directory of the root that is linked into one image, or None when
     the root links nothing. The table object is the object of the unit rcptab.c of the image; the symbols it defines come from its symbol table. The image
     needs the item iff another object of the image references one of those symbols (the link resolves the reference to the table). The certificate is
-    judged on the directory that holds the unit rcptab.c (rcpref.h, rcptab.c, rcptab.cert.json there)."""
+    judged on the directory that holds the unit rcptab.c (rcptab.c, rcptab.cert.json there; rcpref.h from the published GEN)."""
     if image_dir is None:
         return None
     tabs = [(u, p) for u, p in objs if os.path.basename(u) == TABLE_UNIT]
@@ -405,7 +405,11 @@ def table_item(objs, image_dir):
     used = sorted({n for u, p in objs if os.path.basename(u) != TABLE_UNIT for n in symbols_of(p)[1] & defined})
     if not used:
         return None
-    return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
+    try:
+        gen = genout.gen_dir(cache)
+    except RuntimeError as e:
+        return ["reference identity unreadable: %s" % e]
+    return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])), gen)
 
 
 def object_result(oid, path, asm, unit, f2i_path, cache):
@@ -427,7 +431,7 @@ def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None, f2i=None, ca
     gate forms), DOCS ({unit: CC document} of a native root; None: lifted root), F2I ({unit: the `f2i` of the row}, read_f2i_paths; a unit without an entry
     has none)."""
     items = {root + ":forms": [("forms-not-green", forms_ok)] if forms_ok else []}
-    cert = table_item(objs, image_dir)
+    cert = table_item(objs, image_dir, cache)
     if cert is not None:
         items[root + ":rcpcert"] = [("rcpcert", t) for t in cert]
     for unit, path in objs:

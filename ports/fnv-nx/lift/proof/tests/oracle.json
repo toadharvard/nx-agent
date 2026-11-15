@@ -151,6 +151,18 @@
     "ports/fnv-nx/verify/unitstage.py"
    ]
   },
+  "test_generated_readers.py": {
+   "references": [
+    {
+     "anchor": "\"GEN\": \"gen\"",
+     "kind": "spec",
+     "path": "ports/fnv-nx/lift/rt/build.json"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/proof/genout.py"
+   ]
+  },
   "test_imageset.py": {
    "references": [
     {

@@ -79,11 +79,11 @@ def main():
                     bad += 1
                     if bad <= 12: print('DISAGREE cvt %s %d->%d t%d a=%x mx=%x z3=(%x,%02x) c=(%x,%02x)' % (kind, sw, rw, tr, a, mx, zv, zf, v.value, f.value))
     # dsl.tab: every entry of both tables, z3 (rcptab.c read by dsl) against the C accessors that read rcptab.c's own functions
-    from fnvlift import rtgen
-    tdir = rtgen.tmpdir(); i0 = src.index('/* dsl.tab:'); acc = src[i0:src.index('\n', src.index('static inline u32 fnvl_tab_rsqrt'))]      # the shipped accessors, cut out of rt/fnvl.h
+    sys.path.insert(0, os.path.join(LIFT, 'proof')); import genout
+    gdir = genout.gen_dir(); tdir = tempfile.mkdtemp(prefix='fpc_host_'); i0 = src.index('/* dsl.tab:'); acc = src[i0:src.index('\n', src.index('static inline u32 fnvl_tab_rsqrt'))]      # the shipped accessors, cut out of rt/fnvl.h
     tsrc = os.path.join(tdir, 't.cc')
     open(tsrc, 'w').write('typedef unsigned int u32;\nextern "C" u32 fnvl_rcp32(u32); extern "C" u32 fnvl_rsqrt32(u32);\n' + acc + '\nextern "C" u32 t_rcp(u32 i){ return fnvl_tab_rcp(i); } extern "C" u32 t_rsq(u32 i){ return fnvl_tab_rsqrt(i); }\n')
-    subprocess.check_call(['g++', '-O1', '-shared', '-fPIC', '-I', tdir, '-o', os.path.join(tdir, 't.so'), '-x', 'c++', tsrc, '-x', 'c', os.path.join(LIFT, 'rt', 'rcptab.c')])
+    subprocess.check_call(['g++', '-O1', '-shared', '-fPIC', '-I', gdir, '-o', os.path.join(tdir, 't.so'), '-x', 'c++', tsrc, '-x', 'c', os.path.join(LIFT, 'rt', 'rcptab.c')])
     tl = ctypes.CDLL(os.path.join(tdir, 't.so'))
     for nm, fn in (('rcp', tl.t_rcp), ('rsqrt', tl.t_rsq)):
         tabs = dsl._rcp_tables()[nm]; tot += 2048
