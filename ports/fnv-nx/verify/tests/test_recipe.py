@@ -475,6 +475,7 @@ def main():
     check("flags that change a stage's job rejected, all problems listed", len([e for e in errs(m)]) >= 2)
 
     check_gen_reads(SS)
+    check_run(SS)
     print("INFO +%.1f s: validation done, joining gate scenarios" % (time.time() - t_start))
     for f in futs:
         f.result()
@@ -532,6 +533,94 @@ def check_gen_reads(SS):
     ur, uf = recipe.load_admit(us), recipe.tracked(us)
     check("`uses` that names a plain (not generated) file is red",
           any("uses" in e for e in recipe.check(rec_(uses=[{"root": OTH, "output": "data.txt"}]), ROOT, uf, ur, None, us)))
+
+
+HX_C = r"""
+static long sc3(long n, long a, long b, long c) { long r; __asm__ volatile("syscall" : "=a"(r) : "a"(n), "D"(a), "S"(b), "d"(c) : "rcx", "r11", "memory"); return r; }
+static int eq(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
+static void put(const char *path, const char *s, long n) { long fd = sc3(2, (long)path, 0x241, 0644); sc3(1, fd, (long)s, n); sc3(3, fd, 0, 0); }
+static void copy(const char *from, const char *to) { char b[512]; long fd = sc3(2, (long)from, 0, 0); long n = fd < 0 ? 0 : sc3(0, fd, (long)b, 512); put(to, b, n < 0 ? 0 : n); }
+void cmain(long *sp) {
+  long argc = sp[0]; char **argv = (char **)(sp + 1); const char *m = argc > 1 ? argv[1] : "ok";
+  if (eq(m, "ok")) put("/out/o.txt", "hello\n", 6);
+  else if (eq(m, "copy")) copy(argv[2], "/out/o.txt");
+  else if (eq(m, "bad")) sc3(231, 1, 0, 0);
+  else if (eq(m, "extra")) { put("/out/o.txt", "a\n", 2); put("/out/x.txt", "b\n", 2); }
+  sc3(231, 0, 0, 0);
+}
+__asm__(".globl _start\n_start:\n mov %rsp, %rdi\n and $-16, %rsp\n call cmain\n");
+"""
+
+
+def check_run(SS):
+    """`run` stages (RECIPE.md "Run stages"): the artifact of an admitted host root is executed in the sandbox with declared inputs, declared debs
+    and /out; outputs are declared paths. A nonzero exit, an undeclared and a missing output are red; {stage, path} refs read a declared output."""
+    HX, OTH = T + "hx", T + "other"
+    hrec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "gcc-13", "cxx": "g++-13"}, "flags": {"c": ["-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
+            "include": [], "units": "all", "link": {"kind": "exe", "output": "hx.exe", "flags": ["-m", "elf_x86_64"]}}
+    ex = [{"path": HX, "class": "product", "target": "host", "gates": [], "recipe": HX + "/build.json"}, {"path": OTH, "class": "doc", "gates": []}]
+
+    def rec_(args=("ok",), ins=(), debs=(), outs=("o.txt",), art=HX + ":hx.exe"):
+        return dict(RECIPE, run=[{"name": "r", "artifact": art, "args": list(args), "inputs": list(ins), "debs": ["libc6"] + list(debs), "outputs": list(outs)}])
+
+    def mk(name, body=HX_C, data="5\n", **kw):
+        return make_repo(name, rec=rec_(**kw), files={"hx/hx.c": body, "hx/build.json": json.dumps(hrec), "other/data.txt": data}, extra_roots=ex)
+    sid = "run:%s:r" % ROOT
+
+    def build(repo, tag):
+        return recipe.build(repo, ROOT, SS, BASE + "/rn-" + tag)
+    good = mk("rn")
+    roots, files = recipe.load_admit(good), recipe.tracked(good)
+    check("run stage: check accepts a declared artifact, inputs and debs", not [e for e in recipe.check(rec_(ins=(OTH + "/data.txt",), debs=("autotools-dev",)), ROOT, files, roots, None, good) if "run" in e],
+          recipe.check(rec_(ins=(OTH + "/data.txt",), debs=("autotools-dev",)), ROOT, files, roots, None, good))
+    check("run stage: a deb that env.json does not declare is red at check", any("not declared in env.json" in e for e in recipe.check(rec_(debs=("no-such-package",)), ROOT, files, roots, None, good)))
+    check("run stage: an artifact that names no link output of an admitted root is red at check", any("artifact" in e for e in recipe.check(rec_(art=HX + ":nope.exe"), ROOT, files, roots, None, good)))
+    r1 = build(good, "1")
+    check("run stage: the artifact runs and its declared output is produced (green, the stage is in the keys)", r1["status"] == "green" and r1["stages"]["run"] > 0, r1.get("failure"))
+    cache = BASE + "/rc"
+    os.makedirs(cache + "/store", exist_ok=True)
+    ref = {"stage": "%s:run:r" % ROOT, "path": "o.txt"}
+    try:
+        host, ident = recipe.resolve_input(ROOT, ref, good, cache)
+        got = open(host).read()
+    except ValueError as e:
+        host, ident, got = None, None, str(e)
+    check("stage ref {stage, path} resolves to the declared output, content addressed", got == "hello\n" and ident and ident.startswith("stage:%s:run:r:o.txt:" % ROOT), got)
+    try:
+        recipe.resolve_input(ROOT, {"stage": ref["stage"], "path": "other.txt"}, good, cache)
+        undecl = None
+    except ValueError as e:
+        undecl = str(e)
+    check("stage ref to an output the stage does not declare is red", undecl and "does not declare" in undecl, undecl)
+    k1 = set(r1["stage_keys"])
+    r2 = build(good, "2")
+    check("same artifact, inputs and argv: every key equal, all cache hits", set(r2["stage_keys"]) == k1 and r2["stages"]["run"] == 0, r2["stages"])
+    ch = mk("rn3", body=HX_C.replace('"hello\\n", 6', '"hellO\\n", 6'))
+    r3 = build(ch, "3")
+    k3 = set(r3["stage_keys"])
+    check("changing the artifact changes the run key (exactly one key differs)", r3["status"] == "green" and len(k1 - k3) == 1 == len(k3 - k1), (len(k1 - k3), len(k3 - k1)))
+    for tag, args, outs, want in (("bad", ["bad"], ("o.txt",), "1"), ("none", ["none"], ("o.txt",), "differ"), ("extra", ["extra"], ("o.txt",), "differ")):
+        rr = build(mk("rn-" + tag, args=args, outs=outs), tag)
+        f = rr.get("failure") or (rr.get("failed_units") or [{}])[0]
+        txt = " ".join(map(str, [rr["status"], f.get("stage"), f.get("exit"), " ".join(f.get("stderr") or [])]))
+        check("run stage: %s is red naming the stage" % {"bad": "a nonzero exit", "none": "a missing declared output", "extra": "an undeclared output"}[tag],
+              rr["status"] == "red" and sid in txt and (want in txt), txt)
+    di = mk("rn-in", args=["copy", "/in/1"], ins=(OTH + "/data.txt",))
+    ri = build(di, "in")
+    ref_in = {"stage": "%s:run:r" % ROOT, "path": "o.txt"}
+    got_in = open(recipe.resolve_input(ROOT, ref_in, di, BASE + "/rc2")[0]).read() if os.makedirs(BASE + "/rc2/store", exist_ok=True) is None else None
+    check("run stage: a declared input is visible at /in/N and its content is read", ri["status"] == "green" and got_in == "5\n", (ri.get("failure"), got_in))
+    ri2 = build(mk("rn-in2", args=["copy", "/in/1"], ins=(OTH + "/data.txt",), data="6\n"), "in2")
+    check("the content of a declared input is in the run key (one byte changed: exactly one key differs)", ri2["status"] == "green" and len(set(ri["stage_keys"]) - set(ri2["stage_keys"])) == 1, ri2.get("failure"))
+    dd = mk("rn-deb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"], debs=("autotools-dev",))
+    rdb = build(dd, "deb")
+    os.makedirs(BASE + "/rc3/store", exist_ok=True)
+    got_d = open(recipe.resolve_input(ROOT, ref_in, dd, BASE + "/rc3")[0], "rb").read() if rdb["status"] == "green" else b""
+    check("run stage: a declared deb's installed files are visible at /deb/<name>/<path>", rdb["status"] == "green" and got_d == open("/usr/bin/dh_autotools-dev_restoreconfig", "rb").read()[:512], rdb.get("failure"))
+    nd = mk("rn-nodeb", args=["copy", "/deb/autotools-dev/usr/bin/dh_autotools-dev_restoreconfig"])
+    rnd = build(nd, "nodeb")
+    got_n = open(recipe.resolve_input(ROOT, ref_in, nd, BASE + "/rc4")[0], "rb").read() if os.makedirs(BASE + "/rc4/store", exist_ok=True) is None and rnd["status"] == "green" else None
+    check("run stage: a deb that is not declared is not in the sandbox (the file is not there: empty copy)", rnd["status"] == "green" and got_n == b"", (rnd["status"], got_n))
 
 
 def check_tc_gate(repo, tcc, tiny):
