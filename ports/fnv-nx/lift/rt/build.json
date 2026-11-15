@@ -76,6 +76,97 @@
    "outputs": [
     "native_disp.S"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fmath.h",
+    "/out/gen/fmath.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fmath.h"
+   ],
+   "outputs": [
+    "gen/fmath.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl.h",
+    "/out/gen/fnvl.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl.h"
+   ],
+   "outputs": [
+    "gen/fnvl.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_abi.h",
+    "/out/gen/fnvl_abi.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_abi.h"
+   ],
+   "outputs": [
+    "gen/fnvl_abi.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "/out/gen/fnvl_x87.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "outputs": [
+    "gen/fnvl_x87.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/imp.h",
+    "/out/gen/imp.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/imp.h"
+   ],
+   "outputs": [
+    "gen/imp.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/msvcrt.h",
+    "/out/gen/msvcrt.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/msvcrt.h"
+   ],
+   "outputs": [
+    "gen/msvcrt.h"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/lift/tools/gen_copy.py",
+   "args": [
+    "/in/ports/fnv-nx/lift/rt/x87.h",
+    "/out/gen/x87.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/rt/x87.h"
+   ],
+   "outputs": [
+    "gen/x87.h"
+   ]
   }
  ],
  "uses": [

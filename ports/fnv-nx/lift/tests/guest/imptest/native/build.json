@@ -15,7 +15,6 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/lift/rt",
   "ports/fnv-nx/shim/include"
  ],
  "units": "all",
@@ -27,6 +26,10 @@
   {
    "root": "ports/fnv-nx/lift/rt",
    "output": "GEN"
+  },
+  {
+   "root": "ports/fnv-nx/shim",
+   "output": "INCLUDE"
   }
  ],
  "link": {
@@ -34,8 +37,7 @@
   "flags": [
    "-m",
    "aarch64linux32"
-  ],
-  "entry": "fnvl_imptest_entry"
+  ]
  },
  "external": [
   {
