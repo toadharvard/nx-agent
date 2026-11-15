@@ -71,5 +71,7 @@
     "at": "/ext/a64"
   },
   "runtime_driver": "bin/aarch64-none-elf-g++",
-  "runtime_cflags": ["-DPREFER_SIZE_OVER_SPEED", "-g"]
+  "runtime_cflags": ["-DPREFER_SIZE_OVER_SPEED", "-g"],
+  "runtime_configure": ["--disable-decimal-float"],
+  "runtime_configure_cite": "DATAMODEL.json (toolchain/msvcmodel) has no decimal-float row: the guest compiler offers no type the data model lacks, so the gcc configure of the guest compiler and its libgcc does not build the decimal-float runtime (libbid)"
 }

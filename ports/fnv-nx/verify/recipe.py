@@ -647,6 +647,15 @@ def runtime_cflags(pin):
     return list(v)
 
 
+def runtime_configure(pin):
+    """The gcc configure options of the guest compiler build (build.sh of toolchain/msvcmodel): the `runtime_configure` of the one guest compiler record.
+    The build reads them here; no build script spells them."""
+    v = pin.get("runtime_configure") if isinstance(pin, dict) else None
+    if not isinstance(v, list) or not all(isinstance(x, str) and x.startswith("--") for x in v):
+        raise BuildRed("%s: runtime_configure must be a list of configure options" % GUEST_PIN)
+    return list(v)
+
+
 def guest_link_part(rec, root, pin, prof, files, roots):
     """The link of a guest root (part of guest_errors): script and libs are the profile's (link/guest.json), one fact for every guest link."""
     lk = rec.get("link")

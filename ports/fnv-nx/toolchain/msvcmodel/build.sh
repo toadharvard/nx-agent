@@ -182,6 +182,14 @@ GCC_CONF=(--target=$T --prefix="$P" --enable-languages=c,c++ --with-newlib=yes -
   --with-gnu-as --with-gnu-ld --enable-poison-system-directories --with-bugurl=none
   --with-native-system-header-dir=/include --with-sysroot="$P/$T" --with-local-prefix="$P/no-local"
   --with-as="$P/bin/$T-as" --with-ld="$P/bin/$T-ld" --with-arch="$CPUARCH" --with-abi="$ABI" --with-pkgversion="fnv-nx msvcmodel $STAMP")
+# the options of the guest compiler record (guest_compiler.json runtime_configure, cited there to DATAMODEL), read through recipe
+while read -r o; do GCC_CONF+=("$o"); done < <(python3 -I - "$VERIFY" <<'EOF2'
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+import recipe
+print("\n".join(recipe.runtime_configure(json.load(open(os.path.join(sys.argv[1], "guest_compiler.json"))))))
+EOF2
+)
 
 # target-library flags: the semantic flags minus the multilib selectors (the multilib adds those), per language as the driver
 # says (recipe.semantics_for), plus the plugin flags of the caller. Needs the stage-1 driver.
