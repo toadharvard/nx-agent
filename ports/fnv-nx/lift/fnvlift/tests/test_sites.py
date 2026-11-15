@@ -36,7 +36,7 @@ for b0 in range(0xd8, 0xe0):
         t = emitted(code)
         if t is None:
             continue
-        has = any(k in t for k in ('FSW_ST16(', 'FSW_AX(', 'FNSTENV(', 'FNSAVE('))
+        has = any(k in t for k in ('FSW_ST16(', 'FSW_STK16(', 'FSW_AX(', 'FNSTENV(', 'FNSAVE('))
         assert has == (form is not None), (hex(b0), hex(mr), form, has)
         assert (sites.site(ins) or (0,))[0] in ((2,) if form else (0,)) or sites.site(ins) is None or sites.site(ins)[0] == 1, (hex(b0), hex(mr))
         n['fsw' if form else 'none'] += 1
@@ -49,7 +49,7 @@ for hexs in ('f00108', 'f0ff08', '870a', '87c1', 'f00fb10a', 'f00fc10a', 'f00fc7
     t = emitted(code)
     if t is None:
         continue
-    assert ('lk_commit(' in t) == (s == (1,)), (hexs, s)
+    assert ('lk_commit<' in t) == (s == (1,)), (hexs, s)
     n['lock' if s else 'none'] += 1
 assert n['fsw'] > 0 and n['lock'] > 0
 print('sites_test ok', n)

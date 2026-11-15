@@ -10,10 +10,10 @@ import plugbuild as pb
 
 SRC = '''
 extern "C" void L_t(u32 ft0){ u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,c0=0,c2=0,c3=0;
- { LK_BEGIN(32); lk_401000: ; LK32(eax)=LK32(eax)+ecx; if(!lk_commit(lk_,0x401000u)){ LK_RESTORE; goto lk_401000; } }
+ { LK_BEGIN(32); lk_401000: ; LK32(eax)=LK32(eax)+ecx; if(!lk_commit<0x401000u>(lk_)){ LK_RESTORE; goto lk_401000; } }
  FSW_ST16(ecx,FSWV(c->ftop),0x402000u);
  FSW_AX(FSWV(c->ftop),0x402002u);
- FSW_ST16(0x500002u,FSWV(c->ftop),0x402004u);
+ FSW_STK16(0x500002u,FSWV(c->ftop),0x402004u);
  FNSTENV(edx,1,FSWV(c->ftop),0x402006u); }
 '''
 

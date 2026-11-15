@@ -54,7 +54,7 @@ for hexs, name in CASES:
     code = bytes.fromhex(hexs) + b'\xc3'
     for emit in ('', 'dsl'):
         t = lift_bytes(code, emit)
-        assert 'lk_commit(' in t and not GUEST_ACCESS.search(t[t.index('LK_BEGIN'):t.index('lk_commit(')]), (name, emit)
+        assert 'lk_commit<' in t and not GUEST_ACCESS.search(t[t.index('LK_BEGIN'):t.index('lk_commit<')]), (name, emit)
         r = compiles(t)
         assert r.returncode == 0, (name, emit, r.stderr[-600:])
 

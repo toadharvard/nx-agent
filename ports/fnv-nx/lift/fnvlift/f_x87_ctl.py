@@ -325,7 +325,8 @@ def ctl(cx, ins, b0, mr, g):
         elif b0 == 0xd9 and g == 7:
             em('M16(%s)=c->fcw;' % cx.ea(ins, cx.ops[0]))
         elif sites.fsw_form(b0, mr) == 'mem' and g == 7:       # FSTSW m16 (the site predicate is fnvlift/sites.py, shared with the `sites` facts)
-            em('FSW_ST16(%s,FSWV(%s),0x%xu);' % (cx.ea(ins, cx.ops[0]), top, cx.a))
+            k = cx.static_ea(ins, cx.ops[0])
+            em('FSW_STK16(0x%xu,FSWV(%s),0x%xu);' % (k, top, cx.a) if k is not None else 'FSW_ST16(%s,FSWV(%s),0x%xu);' % (cx.ea(ins, cx.ops[0]), top, cx.a))
         elif b0 in (0xd9, 0xdd) and g in (4, 6):            # FLDENV FRSTOR FNSTENV FNSAVE (g 6: sites.fsw_form 'mem')
             env(cx, ins, b0, g)
         else:

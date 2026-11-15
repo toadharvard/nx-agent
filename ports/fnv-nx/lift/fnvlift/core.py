@@ -113,6 +113,18 @@ class Ctx:
             off = '((%s)&0xffffu)' % off
         return '(u32)(' + '+'.join(([seg] if seg else []) + ([off] if off else [])) + ')'
 
+    def static_ea(self, ins, op):
+        """The address of a memory operand that is a displacement alone (no base, index or FS/GS segment), else None. Such an access takes the K form of rt/fnvl.h (MK*, the address a template parameter)."""
+        m = op.mem
+        if self.macc != 'M' or m.base or m.index or m.segment in (X.X86_REG_FS, X.X86_REG_GS):
+            return None
+        return m.disp & 0xffffffff
+
+    def macc_(self, ins, op, w):
+        """the accessor text of a memory operand of w bits: MK<w>(address) when the address is static, else M<w>(expression)"""
+        k = self.static_ea(ins, op)
+        return 'MK%d(0x%xu)' % (w, k) if k is not None else '%s%d(%s)' % (self.macc, w, self.ea(ins, op))
+
     def rd(self, ins, op, size=None):
         s = (size or op.size) * 8
         if op.type == X.X86_OP_IMM:
@@ -120,7 +132,7 @@ class Ctx:
         if op.type == X.X86_OP_REG:
             b, sh, bits = reg(ins.reg_name(op.reg))
             return b if bits == 32 else ('((%s>>%d)&%s)' % (b, sh, MASK[bits]))
-        return '%s%d(%s)' % (self.macc, s, self.ea(ins, op))
+        return self.macc_(ins, op, s)
 
     def wr(self, ins, op, v):
         if op.type == X.X86_OP_REG:
@@ -129,7 +141,7 @@ class Ctx:
                 return '%s=(%s);' % (b, v)
             mk = (1 << bits) - 1
             return '%s=(%s&~0x%xu)|(((u32)(%s)&0x%xu)<<%d);' % (b, b, mk << sh, v, mk, sh)
-        return '%s%d(%s)=(%s);' % (self.macc, op.size * 8, self.ea(ins, op), v)
+        return '%s=(%s);' % (self.macc_(ins, op, op.size * 8), v)
 
     def zsp(self, s):
         return 'zf=(r&%s)==0; sf=(r>>%d)&1; pf=PAR(r);' % (MASK[s], s - 1)
@@ -143,7 +155,8 @@ class Ctx:
     def fmem(self, ins, op):
         if self.macc != 'M':
             raise Unsupported('locked instruction at %x: a float memory access outside LKA<T>' % self.a)
-        return ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
+        k = self.static_ea(ins, op)
+        return ('MKF%d(0x%xu)' % (op.size * 8, k)) if k is not None else ('MF32' if op.size == 4 else 'MF64') + '(' + self.ea(ins, op) + ')'
 
 
 def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
@@ -362,7 +375,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             em('{ LK_BEGIN(%d); lk_%x: ;' % (f_sys.lock_size(ins), a))
             dispatch(cx, ins)
             cx.macc = 'M'
-            em('if(!lk_commit(lk_,0x%xu)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
+            em('if(!lk_commit<0x%xu>(lk_)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
         else:
             gs_guard(cx, ins)
             dispatch(cx, ins)
