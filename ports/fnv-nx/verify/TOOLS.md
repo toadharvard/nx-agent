@@ -2644,7 +2644,7 @@ compile-failure test's mutation), crt/msvcrt_names.tsv (name, provider symbol, f
 stage, com/comrows.py SPEC ROWS WORDS, the one derivation of the signature of every COM thunk, and declares the outputs COM_ROWS (the bridge rows of
 the COM methods and exports, the `extra` rows of bridgegen) and COM_WORDS (`Interface Method words` for every method, hidden interfaces too).
 The platform's C++ half (platform/com/gen_combridge.py SPEC ROWS WORDS OUTDIR) reads them through `uses` and never recomputes a signature; the
-loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({stage, path} for the rows,
+loader's stage A reads COM_ROWS through `uses`; the gate `imports` names the same files in platform/imports.in.json ({root, output} for the rows,
 {root, path} for the records; recipe.resolve_input reads a tracked file of an admitted tool root). Ownership is unchanged: L5 owns the COM and msvcrt
 files, L6 the d3d9 rows (still taken from the manifest external's d9bridge_rows.tsv until its generator moves here).
 Test: verify/tests/test_bridgefacts.py.

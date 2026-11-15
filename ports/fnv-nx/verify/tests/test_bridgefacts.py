@@ -43,6 +43,13 @@ for why, ref in (("a product root", {"root": "ports/fnv-nx/loader", "path": "bui
         check("resolve_input {root, path}: %s is red" % why, False)
     except ValueError:
         check("resolve_input {root, path}: %s is red" % why, True)
+# {root, output}: needs the consumer's `uses`; an undeclared output or an output not used is red (checked before any build)
+for why, ref in (("an output the consumer does not use", {"root": BF, "output": "COM_WORDS_X"}), ("another root's output without `uses`", {"root": BF, "output": "COM_WORDS"})):
+    try:
+        recipe.resolve_input("ports/fnv-nx/loader", ref, repo, "/nonexistent")
+        check("resolve_input {root, output}: %s is red" % why, False)
+    except ValueError:
+        check("resolve_input {root, output}: %s is red" % why, True)
 # comrows.py on the real spec: one row per method of every non-hidden interface and export; words for every method incl. hidden ones
 spec = json.load(open(os.path.join(repo, BF, "com/com_spec.json")))
 with tempfile.TemporaryDirectory() as td:
