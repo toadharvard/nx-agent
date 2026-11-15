@@ -4252,5 +4252,15 @@
    "tree_sha256": "a1eeb84d83a6ecfa631643575c49581dc72a48b961b6e6db31ad2a63436debec",
    "at": "/ext/gcc"
   }
- ]
+ ],
+ "variants": {
+  "prof": {
+   "flags_add": {
+    "cxx": [
+     "-ftime-report",
+     "-ftime-report-details"
+    ]
+   }
+  }
+ }
 }

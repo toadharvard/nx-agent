@@ -267,6 +267,8 @@ class Build:
         tdata = cas.canon({"format": cas.FORMAT, "entries": {"unit.ii": dict(ii, x=0)}})
         tree = hashlib.sha256(tdata).hexdigest()
         cas._put(self.store, "tree", tree + ".json", tdata)
+        if getattr(self, "pp_only", False):   # profiling (recipe.py --prof-pp-only): the PP stage's own seconds, no CC stage
+            return e
         c = self.doc("cc", rel, [("/in", tree)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], "/in/unit.ii", inc=False)
         return self.compile(e, rel, c, files)
 
