@@ -680,6 +680,42 @@ struct order_pass : gimple_opt_pass {
     // earlier statement keeps a plain access to them.  Every other local is unshared (local_unshared).
     std::set<tree> taken;
     address_taken_scan(fun, taken);
+    // PARAMETER COPY.  A by-value parameter whose address is taken is a shared object, but the inliner (after this pass)
+    // initializes the callee's parameter variable with a plain store when it inlines the body, an access this pass cannot
+    // order. So the body works on a local copy instead: `copy = parm` at entry, every use of the parameter (the address
+    // included) replaced by the copy. The parameter itself then has no address and no memory (the inliner's init store is
+    // an SSA copy), and the copy is the shared object: its entry store is created here and ordered like any other.
+    {
+      std::map<tree, tree> repl;
+      for (tree d : taken)
+        if (TREE_CODE(d) == PARM_DECL && !DECL_BY_REFERENCE(d) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))
+          repl[d] = create_tmp_var(TREE_TYPE(d), "order_p");
+      if (!repl.empty()) {
+        struct W { static tree sub(tree *tp, int *ws, void *data) {
+          std::map<tree, tree> *m = (std::map<tree, tree> *)((struct walk_stmt_info *)data)->info;
+          auto it = m->find(*tp);
+          if (it != m->end()) *tp = it->second;
+          else if (TYPE_P(*tp)) *ws = 0;
+          return NULL_TREE;
+        } };
+        basic_block bb2;
+        FOR_EACH_BB_FN(bb2, fun)
+          for (gimple_stmt_iterator g = gsi_start_bb(bb2); !gsi_end_p(g); gsi_next(&g)) {
+            struct walk_stmt_info wi;
+            memset(&wi, 0, sizeof wi);
+            wi.info = &repl;
+            walk_gimple_op(gsi_stmt(g), W::sub, &wi);
+            update_stmt(gsi_stmt(g));
+          }
+        gimple_seq init = NULL;
+        for (auto &r : repl) {
+          gimple_seq_add_stmt(&init, gimple_build_assign(r.second, r.first));
+          taken.erase(r.first);
+          taken.insert(r.second);
+        }
+        gsi_insert_seq_on_edge_immediate(single_succ_edge(ENTRY_BLOCK_PTR_FOR_FN(fun)), init);
+      }
+    }
     addr_set = &taken;
     for (tree d : taken)
       if ((VAR_P(d) || TREE_CODE(d) == PARM_DECL || TREE_CODE(d) == RESULT_DECL) && !hard_register(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d))

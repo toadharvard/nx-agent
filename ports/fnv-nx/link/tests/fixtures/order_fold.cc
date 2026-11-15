@@ -13,3 +13,7 @@ int ro_index(unsigned i) { return tbl[i & 7]; }
 template <class MP> int vslot(MP mp) { unsigned w[2]; __builtin_memcpy(w, &mp, sizeof w); return (int)w[0]; }
 struct Q { virtual void f(); };
 int slot_f() { return vslot(&Q::f); }
+// a by-value parameter whose address is taken, inlined into its caller: the inliner's parameter store must not stay plain
+extern "C" void use_ptr(const unsigned *);
+static inline int pcopy(unsigned a) { use_ptr(&a); return (int)a; }
+int pcaller(unsigned x) { return pcopy(x) + pcopy(x + 1); }

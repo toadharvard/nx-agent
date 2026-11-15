@@ -39,6 +39,11 @@ def main():
         fails.append('slot_f missing')
     elif [m for o, m, a in sf if m in ('ldar', 'stlr') or m.startswith('dmb') or m == 'bl']:
         fails.append('slot_f: a non-escaping builtin on locals must stay unordered and inline: %s' % sf)
+    pc = [i for k, v in fns.items() if k.startswith('_Z7pcalleri') or k.startswith('_Z7pcallerj') for i in v]
+    plain = [(m, a) for o, m, a in pc if re.match(r'(str|stp|ldr|ldp)', m) and not re.search(r'\[(sp|x29)\b', a)]
+    stl = [m for o, m, a in pc if m == 'stlr' or m.startswith('dmb')]   # an ordered or release-fenced store
+    if not pc or plain or len(stl) < 2:
+        fails.append('pcaller: the inlined parameter store must be ordered: plain=%s stlr=%d' % (plain, len(stl)))
     # READONLY RECORD: .fnvnx.ro names the table with its byte ranges (the whole 32 bytes for the indexed read)
     import subprocess
     sec = subprocess.run(['objdump', '-s', '-j', '.fnvnx.ro', obj], capture_output=True, text=True)
