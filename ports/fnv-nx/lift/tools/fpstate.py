@@ -229,9 +229,8 @@ def do_scan(exe, facts):
     raw, rows = load_universe(exe)
     out = os.path.join(facts, 'fpstate')
     os.makedirs(out, exist_ok=True)
-    key = hashlib.sha256(open(exe, 'rb').read()).hexdigest()[:16] + hashlib.md5(raw).hexdigest()[:16]
     with Pool(2) as p0:
-        W.prepare(p0, rows, key)
+        W.prepare(p0, rows)
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
     with Pool(2) as pool:

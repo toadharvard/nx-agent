@@ -7,12 +7,12 @@ from collections import defaultdict
 import capstone
 from capstone import x86 as X
 
-FACTS = UNI = EHJ = CACHE = None      # set by configure(): the facts root of the image under analysis, passed explicitly by the program (no environment variable, no default)
+FACTS = UNI = EHJ = None      # set by configure(): the facts root of the image under analysis, passed explicitly by the program (no environment variable, no default)
 
 
 def configure(facts):
-    """facts: the directory that holds universe.tsv and ehtables.json of the image; the flow memo (flow/retn.tsv) is written below it"""
-    global FACTS, UNI, EHJ, CACHE
+    """facts: the directory that holds universe.tsv and ehtables.json of the image"""
+    global FACTS, UNI, EHJ
     FACTS = os.path.abspath(facts); UNI = FACTS + '/universe.tsv'; EHJ = FACTS + '/ehtables.json'; M32 = 0xffffffff
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
@@ -513,7 +513,6 @@ def depth(F, tabl):
 
 # ---- whole-program prerequisites: imports, callee pops (ret N, jmp-thunk chains), alloca helpers ----
 THUNK = {}                     # entry -> IAT slot of a `jmp [iat]` stub
-CACHE = FACTS + '/flow/retn.tsv'
 
 
 def parse_imports():
@@ -546,29 +545,19 @@ def phase0(args):
     return a, (rets[0] if len(rets) == 1 else None) if rets else (('t', tl[0]) if len(tl) == 1 else 0), th, al
 
 
-def prepare(pool, rows, key):
-    """fills RETN / THUNK / ALLOCA / IATADDR; cached in CACHE (header = key = exe+universe digest)."""
+def prepare(pool, rows):
+    """fills RETN / THUNK / ALLOCA / IATADDR. A pure function of the exe and the universe, recomputed in every run (no memo file)."""
     parse_imports()
-    res = None
-    if os.path.exists(CACHE):
-        L = open(CACHE).read().splitlines()
-        if L and L[0] == key:
-            res = [(int(f[0], 16), None if f[1] == '-' else 'x' if f[1] == 'x' else int(f[1]), None if f[2] == '-' else int(f[2], 16), int(f[3]))
-                   for f in (ln.split('\t') for ln in L[1:])]
-    if res is None:
-        res = [(a, r, th, al) for a, r, th, al in pmap(pool, phase0, [(a, e, k) for a, e, k in rows], 300)]
-        res = [(a, ('t', r[1]) if isinstance(r, tuple) else r, th, al) for a, r, th, al in res]
-        pend = dict((a, r) for a, r, th, al in res)
-        for a in sorted(pend):
-            r = pend[a]
-            for _ in range(6):
-                if isinstance(r, tuple):
-                    r = pend.get(r[1], 0)
-            pend[a] = 0 if isinstance(r, tuple) else r
-        res = [(a, pend[a], th, al) for a, r, th, al in res]
-        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-        with open(CACHE, 'w') as f:
-            f.write(key + '\n' + ''.join('%08x\t%s\t%s\t%d\n' % (a, '-' if r is None else r, '-' if th is None else '%x' % th, al) for a, r, th, al in res))
+    res = [(a, r, th, al) for a, r, th, al in pmap(pool, phase0, [(a, e, k) for a, e, k in rows], 300)]
+    res = [(a, ('t', r[1]) if isinstance(r, tuple) else r, th, al) for a, r, th, al in res]
+    pend = dict((a, r) for a, r, th, al in res)
+    for a in sorted(pend):
+        r = pend[a]
+        for _ in range(6):
+            if isinstance(r, tuple):
+                r = pend.get(r[1], 0)
+        pend[a] = 0 if isinstance(r, tuple) else r
+    res = [(a, pend[a], th, al) for a, r, th, al in res]
     for a, r, th, al in res:
         if r != 'x':
             RETN[a] = r

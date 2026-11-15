@@ -435,7 +435,7 @@ def main():
     kind = {a: k for a, e, k in rows}; ext = {a: e for a, e, k in rows}
     res = {}
     with Pool(2) as p0:
-        W.prepare(p0, rows, hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:16] + hashlib.md5(raw).hexdigest()[:16])
+        W.prepare(p0, rows)
     with Pool(2) as pool:
         for a, r in pool.imap(work, [(a, e, k, 'all') for a, e, k in rows], chunksize=200):
             res[a] = r

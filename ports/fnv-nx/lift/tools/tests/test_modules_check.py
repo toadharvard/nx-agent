@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate M (module universes):  modules_check.py [MODULE.dll ...] [--no-c]     (default: the six lifted modules; --facts-out DIR = parent of the per-module dirs, the exe universe is DIR/universe.tsv;
+"""Gate M (module universes):  modules_check.py [MODULE.dll ...] [--no-c]     (default: the six lifted modules; --modules modules.tsv, --moddirs D1:D2 (module files), --facts-out DIR = parent of the per-module dirs, the exe universe is DIR/universe.tsv;
 --exe PATH the exe; --x86sys/--fpstate/--fpdepth are handed to universe_r3_check for (c); no environment variable)
 Per module (file located by name, sha256 and size checked against modules.tsv; the image is the one at the base the loader assigned there):
   - the image range [assigned_base, assigned_base + SizeOfImage) is disjoint from the exe's [0x00400000, + its SizeOfImage) and from every other module of modules.tsv;
@@ -17,6 +17,7 @@ MODS = ['d3dx9_38.dll', 'binkw32.dll', 'libvorbis.dll', 'libvorbisfile.dll', 'd3
 def opt(name):
     a = sys.argv; return a[a.index(name) + 1] if name in a else None
 FACTS = opt('--facts-out'); EXE = opt('--exe')
+MODTSV = opt('--modules'); MODDIRS = (opt('--moddirs') or '').split(':')      # the loader's modules.tsv and the directories of the module files (declared inputs)
 FWD = [x for k in ('--x86sys', '--fpstate', '--fpdepth') if opt(k) for x in (k, opt(k))]
 
 
@@ -30,7 +31,7 @@ def load_r3():
 
 
 def one(name, ent_all, noc):
-    bad = []; path, row = pemod.locate(name); nm = os.path.splitext(row.name)[0]; fd = FACTS + '/' + nm
+    bad = []; path, row = pemod.locate(name, MODTSV, MODDIRS); nm = os.path.splitext(row.name)[0]; fd = FACTS + '/' + nm
     M = pemod.load(path, row.base); import fnvlift as L; img = L.Image(path)
     print('== %s: sha256 ok, base %08x (preferred %08x), size_of_image %x, entry rva %x, tls %d; relocation sites without file bytes %d' % (row.name, row.base, row.pref, M.sizeimg, row.entry, row.tls, img.nobytes))
     if img.nobytes: bad.append('relocation sites without file bytes')
@@ -47,7 +48,7 @@ def one(name, ent_all, noc):
     if rc: bad.append('universe_r3_check (a)(b)(c) failed')
     # (d)
     XC, XFW, XN = pemod.exports(M); xcode = [a for a in XC if ix(a)]; xdata = [a for a in XC if not ix(a)]
-    l1f = os.path.join(os.path.dirname(pemod.MODULES), 'exports', row.name + '.tsv'); l1 = None
+    l1f = os.path.join(os.path.dirname(MODTSV), 'exports', row.name + '.tsv'); l1 = None
     if os.path.exists(l1f): l1 = {int(l.split('\t')[1], 16) for l in open(l1f) if l.strip() and not l.startswith('#') and not l.split('\t')[2]}
     miss = [a for a in xcode if a not in ent]; ep = M.base + M.entry if M.entry else None
     tls = M.dirent(9); cbs = []
@@ -64,9 +65,9 @@ def one(name, ent_all, noc):
 
 
 def main():
-    if not (FACTS and EXE): raise SystemExit('needs --facts-out DIR and --exe PATH')
-    a = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--facts-out', '--exe', '--x86sys', '--fpstate', '--fpdepth')]; noc = '--no-c' in sys.argv; mods = a or MODS; bad = []; ent_all = {}
-    exe = pemod.load(EXE); lo = exe.pref; ranges = [('FalloutNV.exe', lo, lo + exe.sizeimg)] + [(r.name, r.base, r.base + r.sizeimg) for r in pemod.modules().values()]
+    if not (FACTS and EXE and MODTSV): raise SystemExit('needs --facts-out DIR, --exe PATH and --modules modules.tsv [--moddirs D1:D2]')
+    a = [x for i, x in enumerate(sys.argv[1:], 1) if not x.startswith('-') and sys.argv[i - 1] not in ('--facts-out', '--exe', '--modules', '--moddirs', '--x86sys', '--fpstate', '--fpdepth')]; noc = '--no-c' in sys.argv; mods = a or MODS; bad = []; ent_all = {}
+    exe = pemod.load(EXE); lo = exe.pref; ranges = [('FalloutNV.exe', lo, lo + exe.sizeimg)] + [(r.name, r.base, r.base + r.sizeimg) for r in pemod.modules(MODTSV).values()]
     ov = [(x[0], y[0]) for i, x in enumerate(ranges) for y in ranges[i + 1:] if x[1] < y[2] and y[1] < x[2]]
     print('image ranges: exe [%08x, %08x), %d modules of modules.tsv; overlapping pairs %d %s' % (lo, lo + exe.sizeimg, len(ranges) - 1, len(ov), ov[:4]))
     if ov: bad.append('image ranges overlap')
