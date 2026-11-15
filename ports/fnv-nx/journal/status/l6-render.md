@@ -761,3 +761,7 @@ Paused: w3b, w4, farm; no other work.
     - w6 (doing):
         - the nxgpu4.h:138 citation as its own commit, sent to w15 and to L6A (taken byte-equal into gl4link);
         - new root render/pair: nx_pair_variant and nx_link_set moved out of draw_prog.cpp, linked by d3d9 via link.roots. This lets the sm_link checker link the product function.
+- 09:40Z w6 95d44249e: nxgpu4.h:138 now cites sdk-api. Assumptions gate red, 105/119.
+    - Cause: the cand2 merge took cand2's whole verify/ASSUMPTIONS.json and dropped the L6 records ASM-601..641 (from 532f139f1).
+    - Fix (w6, doing): union of the records by id from cand2 and 532f139f1, minus 628/629; then the gate re-run.
+    - Merge rule "registry is union-by-id" sent to L1 w15.
