@@ -44,7 +44,7 @@ def git(cwd, *args):
 
 # the SM language definition is a stage output of the root render/shaders/total: the scratch repository holds the recipe machinery and that root
 # (the generator, its recipe, its decision records), so the gate builds it in the shared cache as it does in the verdict
-SM_MACHINERY = ["verify", "render/shaders/total", "contract"]
+SM_MACHINERY = ["verify", "link", "toolchain/msvcmodel", "render/shaders/total", "contract"]   # verify/recipe.py imports link/ (relocs, undefset, ldcheck) and reads the data model record at import
 
 
 def scratch(base):
