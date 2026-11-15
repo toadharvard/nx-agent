@@ -1688,3 +1688,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Product only after every dynamic GetProcAddress site is resolved.
   - The sm_link row in reach_requests.tsv goes in cand4. w6 (L6A) wires the gl4_shader.c sites.
   - gl4 universe tie (L6A w6 census 8e94c389a): translator path, gl4shim progs (5 rows), and SHADER_CREATE from the 4 ffp_glsl.gen.h blobs. The tie is derived by data flow; the census is the selftest's expected answer. Given to w12.
+- 15:18 Updates for the cand4 queue.
+  - The w6-root head is now 98cd75f28: D9_SPEC is a bridgefacts output, and gen_combridge takes it as an argument.
+  - Hold w5-smlink 2d61e9fb9; L6 sends a new head after its next sm_link run.
+  - hostabi becomes a header-only root for guest and host, owner L5. w12 adds its admit rows in cand3. Until then, platform is red on the header-home rule.
