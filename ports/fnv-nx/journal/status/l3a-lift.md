@@ -611,3 +611,17 @@ Workers are capped at 3. Assignment by plan item:
 - recipe check: int3 5c89f9c5c 6/6, t16k 11dcdf688 14/14 valid. loader (9 objects) and lib/sha256 (1 object) built. descs, bridges, pack and the native roots are building.
 - test_rtroot is red on t16k (pin semantics vs the recipe flags); w8 is finding the cause.
 - #UD certificate (w6, facts 163ec389, 5 of 7 images): 2601 sites (3DNow 2574 in d3dx9_38, SSE3 26, AVX 1) over 99 entries, 86 reached only through pointers. Orchestrator rule: a cell is decided when every writer depends only on cpuid/IPFP and constants, and its contents are evaluated under CPUREF. It is built as ctlstate on w4's points-to, the same analysis as the 59 undecided exe control-word writers. The gate stays red until it lands.
+
+## 2026-11-15 00:10 int3 4681c9634 / 3f875c252 / 97fc6e77c
+- w6 4681c9634 (item 4.5):
+  - struct cpu appends fsw/fop/fcs/fds (sizeof 504, offsets static-asserted) and EFLAGS NT. Sent to L3b w9.
+  - ES/B are computed at FSW-image points; the exactness argument goes into the docstring.
+  - ASM-213/214 may be removable (asked L1).
+  - The recipe build of lift/rt goes to w8.
+- w8:
+  - 97fc6e77c: cpumodel takes FNVNX_NPROC from hostabi/placement.h.
+  - 3f875c252: L2 exitgen merged (16/16); test_exitbridge/disp/imp/msvcrt deleted with Fake.
+  - Compiler-call census: 97 files, over-counted, by owner (inbox note l3a-w8-compilecalls.md). L3a's are moving onto recipe roots.
+  - 6 x86 reference-host programs wait on L1's host-variant root.
+- w7: the facts commit now also carries the EH ThrowInfo union rule (L3b w9: 1 site, 1 missing ThrowInfo) and CODEMAP.md.
+- PERFDEBT PD-LIFT-ORDERED: accepted, scheduled after the relift.
