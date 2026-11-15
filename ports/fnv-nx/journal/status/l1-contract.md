@@ -1208,3 +1208,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - Per-class n/N: w23 builds the platform root through recipe.py with L2 w1's plugin head and runs gate_order only. This is a targeted run, not a full verdict.
 - READONLY: rule L (section flags of the object) is the proof. The `.fnvnx.ro` record stays advisory, with no cross-check now.
 - D2 waits for L2's order-plugin fields.
+
+### 2026-11-15 01:20 — ODR identity by source definition
+- w23: the 6 differing std::string / vector<string> COMDATs (4 win32 units, identical flags) differ because of TU-dependent IPA decisions, not flags.
+- Ruling: ODR identity is the source definition, not the bytes. gate_abi/linkstrict decide in three tiers:
+  1. bytes or bisimulation equal: same entity;
+  2. otherwise, L2's per-COMDAT definition record (post-PP token-range sha256, template arguments, pre-inlining binding mangled names) decides: equal is the same entity, different is red;
+  3. no record: undecidable, red.
+- Rejected: explicit instantiation by hand, and -fno-inline (it switches off a fast path).
+- The 6 are re-labelled "undecidable: no definition record". The record was requested from L2; w23 wires tier 2.
+- 7fdec4e identity after rule E: 327 signatures, 187 multi-copy, 6 undecidable, 0 other undecidable.
