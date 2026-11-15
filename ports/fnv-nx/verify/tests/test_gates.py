@@ -476,10 +476,11 @@ check("tests cache (view): a path the test saw as absent now exists -> that file
 # a test whose import closure reaches a module that runs strace is untraced (derived, no list) and keyed by whole directories
 d4 = tmp("tests-cache-untraced")
 c4 = os.path.join(d4, "cache")
-mk(d4, test_u="open('ran.log', 'a').write('u\\n')\nCHILD = \"\"\"\nimport envcheck\n\"\"\"\n", test_t="open('ran.log', 'a').write('t\\n')\n")
+LOG4 = os.path.join(d4, "ran.log")   # an untraced test runs in its own mount directory: the log is an absolute path
+mk(d4, test_u="# reads: other\nopen(%r, 'a').write('u\\n')\nCHILD = \"\"\"\nimport envcheck\n\"\"\"\n" % LOG4, test_t="open(%r, 'a').write('t\\n')\n" % LOG4)
 put(d4, "other/data.txt", "1\n")
 ran4 = lambda: open(os.path.join(d4, "ran.log")).read().split() if os.path.exists(os.path.join(d4, "ran.log")) else []
-ex4 = ("--key-dirs", "verify", "other", "--")
+ex4 = ()   # the untraced file declares its data (`# reads: other`); no key-dirs
 tests_c(d4, c4, extra=ex4)
 tests_c(d4, c4, extra=ex4)
 check("tests cache (untraced): unchanged -> both cached", sorted(ran4()) == ["t", "u"], ran4())
