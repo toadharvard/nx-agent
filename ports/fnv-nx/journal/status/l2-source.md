@@ -283,3 +283,13 @@ After the first frame:
   - Added rule CONT-P: no conversion of a pointer to a slot-holding record to another pointer, an integer or another reference type, checked at pre-genericize. It closes the case of opaque callees.
   - Open: the platform-root build at L5 a7b7805fe, with objstub reach-not-exit at 0.
 - The toolchain test harness (plugbuild.py) is out of step with the trunk's recipe (a5c8f427e: env.json, the semantic flags, all 8 plugins). It is L2's, given to w3: the toy root reads the same records as a product root. Order for w3: the harness, then VEC1, then the HOST1 build, with S23 (b) whenever it lands.
+- Farm phase A: stage 1 is rebuilt with w3's patch 282e5ac77 (predefines clean, DM fixture 0 errors), and the 8 plugins are built by the recipe.
+  - Blocked at newlib libm/ld: the fpmath.h family needs LDBL_MANT_DIG 64 or 113, and msvcmodel's long double is binary64.
+  - Ruled NL-LDBL: libm/ld and ld128 are built iff newlib_cv_ldbl_eq_dbl != yes. One pinned patch file; the *l set must be a subset of the libm/common aliases, and any difference comes to me.
+  - test_ldbl has 2 failures of 65, both test-file defects (w3's).
+- w2 split at e99b4d619, 109 objects, cand2 gate:
+  - Totals: 900 plain (382 load, 518 store), 142 frame-escape-unrecorded. (G) = 0; all 900 are plugin-side.
+  - The 900:
+    - 311 are a constant frame offset overlapping an escaping range;
+    - 589 are non-frame. Of those, 316 resolve by the walk (loaded pointer 243, symbol 55, frame pointer 14, by-reference 2, call 1) and 273 are unresolved.
+  - Next: ORD-T, using dump_file for the mapping. ORD-AGG is a hypothesis for the 311, to be confirmed in the dump first.
