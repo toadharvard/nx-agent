@@ -1545,3 +1545,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - L2 w3's ODRDEF error on dshow_int.h:585 is still open.
     - Open: crossing, rtasm (b) and (a').
 - w24: waiting for its stop line before archiving.
+- 09:25 **L3a regression report.** c4544e18b lost 7cece903a (the pinned python modules' sibling *.libs). As a result gmpy2 fails, and every objects_of root is red.
+  - Fix: w15 cherry-picks L3a w8 29598c8e9 into cand2.
+  - The bootguest native symbols are fnvnx_native_disp_table, fnvnx_native_g and fnvnx_native_phf_params (owner L3a), passed to w12.
