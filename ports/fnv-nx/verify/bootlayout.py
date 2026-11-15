@@ -137,6 +137,8 @@ def parse_elf(data):
     return elf
 
 
+# INTERIM (L4/L1 ruling): _sections, section_ranges, defined_symbols, data_symbol and with_data_word are a second copy of the ELF facts (sections, defined symbols,
+# definers) that L1 w25 adds to every green link record. When that lands, icount.build_spec reads the record and these readers are deleted.
 def _sections(data):
     """[(name, type, addr, size, offset, link)] of the section headers of a little-endian ELF file of class 32 or 64, the null section left out"""
     if len(data) < 52 or data[:4] != b"\x7fELF" or data[4] not in (1, 2) or data[5] != 1:
