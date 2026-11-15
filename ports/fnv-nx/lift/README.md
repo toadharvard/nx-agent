@@ -14,8 +14,7 @@ What lives where:
 | `tools/` | `universe.py` (every entry the exe needs a body for), `census.py`, `cache.py`, `bridges.py`, `report.py` |
 
 The tools are ours. Their **output is exe-derived** (lifted C, entry lists, per-function tables, objects) and is
-written only outside this repository: `fnv-nx-build` branches `l3-lift/...` and the containers (`FNVNX_FACTS`,
-default `/home/user/l3facts`).
+written only outside this repository: `fnv-nx-build` branches `l3-lift/...` and the containers (a facts directory passed to each tool as an argument).
 
 ## Contract of a lifted body
 

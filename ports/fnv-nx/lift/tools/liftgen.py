@@ -13,7 +13,7 @@ unit is a cache hit). A unit is `#include "fnvl_prelude.h"` + its entries in add
 RULE completeness: --finish fails unless every universe entry of every image has a text (an entry the lifter refuses is a missing row).
 Symbols the pack references in the runtime (bind-l3 import rows, the two EH handler entries) are not checked here: a symbol the runtime does
 not define is an undefined symbol of the link, which the linkstrict gate refuses.
-Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs FNVNX_EXE, FNVNX_UNIVERSE, FNVNX_PROOF; outputs only under --out
+Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs: explicit arguments only (--exe, --universe, --certs, ...); outputs only under --out
 (exe-derived: they go to the private fnv-nx-build repository, never into this one)."""
 import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
@@ -118,7 +118,7 @@ def shard(a):
     for g in got: enc_add(encs, g[3])
     shapes = collections.Counter()
     for g in got: shapes.update(g[4])
-    certs = formcert.Certs()
+    certs = formcert.Certs(a.certs)
     json.dump(inputs(a), open('%s/inputs_%d.json' % (out, K), 'w'), sort_keys=True)      # what this shard generated from (finish checks that every shard of an image agrees)
     write_texts('%s/texts_%d.txt' % (out, K), texts)
     w = lambda n, rows: open('%s/%s_%d.tsv' % (out, n, K), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
@@ -277,10 +277,10 @@ def main():
     A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--bridge'); A('--need', action='append', default=[]); A('--l3', default=None)
     A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
     A('--gen', help='the GEN output of the lift/rt root (generated headers of the prelude)'); A('--fpstate', help='directory of the fp-state facts (invariants.tsv)')
-    A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
+    A('--certs', help='the directory of the form certificates (proof/prove.py output; shard mode)'); A('--fpdepth', help='the x87 stack-depth facts (depth.tsv)'); A('--x86sys', help='the declared x86 system record (platform X86SYS output)')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)
-    need = ['out', 'fpstate', 'fpdepth', 'x86sys'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']) + (['gen', 'bridge'] if a.finish else [])
+    need = ['out', 'fpstate', 'fpdepth', 'x86sys'] + (['modules', 'moddirs', 'facts_out', 'module'] if a.module else ['exe', 'universe']) + (['gen', 'bridge'] if a.finish else ['certs'] if a.shard else [])
     miss = ['--' + k.replace('_', '-') for k in need if getattr(a, k) is None]
     if miss: ap.error('missing %s' % ' '.join(miss))
     a.base = None

@@ -24,7 +24,7 @@ from collections import Counter, defaultdict
 M32 = 0xffffffff
 WIDTH = 8
 STKW = 256                       # stack slots of a callee's frame above this byte offset are one slot (DEEP): bounds the table forwarded around a call cycle (a recursion adds a slot per pass otherwise)
-OBJW = int(os.environ.get("PTOBJW", "8"))
+OBJW = 8
 UNK = (None, None); TOP = ('TOP', None)
 U = frozenset([UNK]); TOPSET = frozenset([TOP])
 R32 = pcsrc.R32
@@ -451,7 +451,6 @@ class PT:
             self.changed = False; self.stores = []; self.gaps = Counter(); self.int_stores = 0; passes += 1
             for e in ents:
                 if e in self.inp: self.analyse(e)
-            if os.environ.get('PTV'): print('pass',passes,len(self.cells),len(self.inp),flush=True)
             if not self.changed: break
         self.passes = passes
         return self

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """modlift residual rule (item 22 b), checked on one real module: the residue is data (class 9, gate green) only when the closure is complete, i.e. every relocated in-span value is an entry (R3)
 AND pcsrc's s4 result (<facts>/<module>/pcsrc_s4.json) says 0 violations. No pcsrc file -> red 's4-unchecked' (red until pcsrc says 0); violations > 0 -> red 's4-violation'.
-    FNVNX_MODULES=.../modules.tsv FNVNX_MODDIRS=dir:dir modlift_closure_test.py [module=binkw32]       (exit 0 = all pass; needs the module's DLL, there is no skip)"""
+    modlift_closure_test.py MODULES.TSV DIR:DIR EXPORTS_DIR EXE_MNEMONICS KEYS.TSV [module=binkw32]       (exit 0 = all pass; needs the module's DLL, there is no skip)"""
 import os, subprocess, sys, tempfile, json
 HERE = os.path.dirname(os.path.abspath(__file__)); TOOL = os.path.join(os.path.dirname(HERE), 'tools', 'universe.py')
-mod = sys.argv[1] if len(sys.argv) > 1 else 'binkw32'; FAILS = []
+MODS, MODDIRS, EXPORTS, EXEMN, KEYS = sys.argv[1:6]; mod = sys.argv[6] if len(sys.argv) > 6 else 'binkw32'; FAILS = []
 
 
 def run(s4, pc=None, other=None):
@@ -16,7 +16,7 @@ def run(s4, pc=None, other=None):
     if pc is not None: json.dump({'red': pc[0], 's4_red': pc[1]}, open('%s/%s/gate_pcsrc.json' % (d, mod), 'w'))
     if other is not None:
         os.makedirs(d + '/zz'); open(d + '/zz/sources.tsv', 'w').write(other)
-    r = subprocess.run([sys.executable, TOOL, '--module', mod], env=dict(os.environ, FNVNX_FACTS_OUT=d), capture_output=True, text=True)
+    r = subprocess.run([sys.executable, TOOL, '--module', mod, '--out', d, '--modules', MODS, '--moddirs', MODDIRS, '--exports-dir', EXPORTS, '--exe-mnemonics', EXEMN, '--keys', KEYS], capture_output=True, text=True)
     return r.stdout
 
 

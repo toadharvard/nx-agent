@@ -5,7 +5,7 @@
 #          shards are numbered 0 .. N-1; last line: LIFTGEN module= first= count= published= failed= seconds=; exit 1 if any shard is unpublished
 # Inputs (exe-derived, private): fnv-nx-build branches gamedata/exe, gamedata/redist, l3a-lift/facts (universe.tsv), l1-contract/mp4 (modules.tsv); the lifter is this checkout.
 # Output: fnv-nx-build branch l3a-lift/src/<lifter sha12>[-<module>]/<K>of<N> = texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shard.txt (the count line).
-# Nothing exe-derived is written into this repository. Env: FNVNX_BUILD (clone of fnv-nx-build, default /home/user/fnv-nx-build), FNVNX_WORK (default /home/user/l3work/farm).
+# Nothing exe-derived is written into this repository. Env: X86SYS (required), FNVNX_BUILD (clone of fnv-nx-build, default /home/user/fnv-nx-build), FNVNX_WORK (default /home/user/l3work/farm).
 set -euo pipefail
 FIRST=$1; COUNT=$2; N=$3; JOBS=${4:-$(nproc)}
 HERE=$(cd "$(dirname "$0")/../lift" && pwd)
@@ -17,11 +17,13 @@ for br in gamedata/exe gamedata/redist l3a-lift/facts l1-contract/mp4; do
     d="$W/in/$(echo $br | tr / _)"
     if [ ! -d "$d" ]; then git -C "$B" fetch -q --depth 1 origin "$br"; git -C "$B" worktree add -f "$d" FETCH_HEAD >/dev/null; fi
 done
-export FNVNX_EXE="$W/in/gamedata_exe/FalloutNV.exe" FNVNX_UNIVERSE="$W/in/l3a-lift_facts/universe.tsv" PYTHONHASHSEED=0 LC_ALL=C
+export PYTHONHASHSEED=0 LC_ALL=C
+FACTS="$W/in/l3a-lift_facts"; : "${X86SYS:?env X86SYS = the platform X86SYS output (declared x86 system record)}"
+mkdir -p "$W/certs"      # no form certificates in a measurement build: the empty directory certifies nothing
+IN=(--exe "$W/in/gamedata_exe/FalloutNV.exe" --universe "$FACTS/universe.tsv" --fpstate "$FACTS/fpstate" --fpdepth "$FACTS/fpmodes/depth.tsv" --x86sys "$X86SYS" --certs "$W/certs")
 MODULE=${MODULE:-}; TAG=$SHA; MARGS=()
 if [ -n "$MODULE" ]; then
-    export FNVNX_MODULES="$W/in/l1-contract_mp4/modules/modules.tsv" FNVNX_MODDIRS="$W/in/gamedata_exe:$W/in/gamedata_redist" FNVNX_FACTS_OUT="$W/in/l3a-lift_facts"
-    TAG="$SHA-${MODULE%.dll}"; MARGS=(--module "$MODULE")
+    TAG="$SHA-${MODULE%.dll}"; MARGS=(--module "$MODULE" --modules "$W/in/l1-contract_mp4/modules/modules.tsv" --moddirs "$W/in/gamedata_exe:$W/in/gamedata_redist" --facts-out "$FACTS")
 fi
 mkdir -p "$W/$TAG"
 (cd "$W/in/gamedata_exe" && sha256sum -c FalloutNV.exe.sha256 >/dev/null)
@@ -29,7 +31,7 @@ T0=$(date +%s); PUB=0; FAIL=0
 for K in $(seq "$FIRST" $((FIRST + COUNT - 1))); do
     out="$W/$TAG/$K"; br="l3a-lift/src/$TAG/${K}of${N}"
     if git -C "$B" ls-remote --exit-code origin "refs/heads/$br" >/dev/null 2>&1; then echo "shard $K/$N: already published"; PUB=$((PUB + 1)); continue; fi
-    python3 -s -B "$HERE/tools/liftgen.py" "${MARGS[@]}" --shard "$K/$N" --out "$out" --jobs "$JOBS" > "$out.txt" 2> "$out.err" || { echo "shard $K/$N: FAILED"; tail -3 "$out.err"; FAIL=$((FAIL + 1)); continue; }
+    python3 -s -B "$HERE/tools/liftgen.py" "${IN[@]}" "${MARGS[@]}" --shard "$K/$N" --out "$out" --jobs "$JOBS" > "$out.txt" 2> "$out.err" || { echo "shard $K/$N: FAILED"; tail -3 "$out.err"; FAIL=$((FAIL + 1)); continue; }
     cp "$out.txt" "$out/shard.txt"
     p="$W/pub-$K"; rm -rf "$p"; mkdir -p "$p"; git -C "$p" init -q; git -C "$p" checkout -q --orphan pub
     cp "$out"/texts_${K}.txt "$out"/*_${K}.tsv "$out/shard.txt" "$p/"

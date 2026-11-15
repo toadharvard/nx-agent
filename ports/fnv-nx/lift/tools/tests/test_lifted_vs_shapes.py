@@ -28,7 +28,7 @@ def main():
 
 def compare(shapes, exe, emit, jtab):
     img = L.Image(exe)
-    got = lifted.lifted(img, os.environ['FNVNX_UNIVERSE'], emit, jtab)
+    got = lifted.lifted(img, facts + '/universe.tsv', emit, jtab)
     cnt = collections.Counter(); n = 0
     for va, ln in got:
         ins = next(iter(L.core.md.disasm(img.bytes(va, 16), va, 1)), None)
