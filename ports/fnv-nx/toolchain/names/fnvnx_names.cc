@@ -1052,7 +1052,10 @@ static void odr_add_type(std::set<std::string> &out, tree t, int depth = 0)
 {
   if (!t || t == error_mark_node || depth > 8) return;
   if (TREE_CODE(t) == LANG_TYPE || TREE_CODE(t) == TEMPLATE_TYPE_PARM || TREE_CODE(t) == TYPENAME_TYPE) return;   /* no mangling: an overload set, a braced list, a dependent type */
-  out.insert(odr_type_name(t));
+  /* the mangler names only types with a symbol-level name. A variably-modified type (a local array whose bound is a run-time expression: a SAVE_EXPR in its domain,
+   * as in any template instance's `T buf[n]`) has none in any ABI, and cp/mangle.cc says `sorry, unimplemented: mangling save_expr`. Its bound is an expression of the
+   * body, which the token hash of the definition holds, so the record keeps what the type is made of: its element, pointee, result and parameter types. */
+  if (!variably_modified_type_p(t, NULL_TREE)) out.insert(odr_type_name(t));
   switch (TREE_CODE(t)) {
   case POINTER_TYPE: case REFERENCE_TYPE: case ARRAY_TYPE: case VECTOR_TYPE: odr_add_type(out, TREE_TYPE(t), depth + 1); break;
   case FUNCTION_TYPE: case METHOD_TYPE:
