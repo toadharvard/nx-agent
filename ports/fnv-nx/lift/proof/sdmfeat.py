@@ -93,10 +93,12 @@ def declared_cpu():
     import ctypes
     import subprocess
     import tempfile
+    from fnvlift import rtgen
     d = tempfile.mkdtemp(); c = os.path.join(d, 'm.c'); so = os.path.join(d, 'm.so')
     with open(c, 'w') as fh:
         fh.write('#include "%s/cpumodel.c"\nunsigned long long fnvl_host_ticks_ns(void) { return 0; }\n' % RT)
-    subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-w', '-I', os.path.join(os.path.dirname(RT), '..', 'hostabi', 'include'), '-o', so, c])      # cpumodel.c includes fnvnx/placement.h (L5's declared processor count)
+    # cpumodel.c includes the generated cpumodel_tab.inc (tools/gen_cpuref.py: rtgen.cpuref_dir) and fnvnx/placement.h (L5's declared processor count)
+    subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-w', '-I', rtgen.cpuref_dir(), '-I', os.path.join(os.path.dirname(RT), '..', 'hostabi', 'include'), '-o', so, c])
     lib = ctypes.CDLL(so); out = {}
     for leaf, sub in ((0, 0), (1, 0), (7, 0), (0x80000000, 0), (0x80000001, 0)):
         o = (ctypes.c_uint32 * 4)(); lib.fnvl_cpuid(ctypes.c_uint32(leaf), ctypes.c_uint32(sub), o)
