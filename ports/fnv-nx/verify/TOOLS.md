@@ -2506,17 +2506,14 @@ TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
 ## verify/gate_guestlink.py
 
 ```text
-Gate "guestlink" (fnvnx-gate/1, class A of VERDICT.md): the guest link profile link/guest.json holds exactly the values the pinned guest runtime's
-own driver derives, so a hand-picked startfile, library directory or library name is red.
-    python3 -I gate_guestlink.py [--write]    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
-    (--write first rewrites `libs` of link/guest.json from the derivation: the way the profile is made; the gate then compares it)
+Gate "guestlink" (fnvnx-gate/1, class A of VERDICT.md): the guest link's libraries are what the pinned guest runtime's own driver derives; nothing is stored
+(link/guest.json is {script}), the link derives them itself (recipe.Job.guest_libs). The gate recomputes that derivation and is red when it does not hold.
+    python3 -I gate_guestlink.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/guestlink.json
 Derivation (RECIPE.md, Link): the C++ driver of the pinned runtime external (verify/guest_compiler.json `runtime_driver`) is run, as the hermetic recipe
-stage `drv:<root>`, with the guest semantic flags (flags.semantics.common, filtered for C++ by the pinned compiler) and `-pie -###` on a one-line C++
-file. Its last line is the link command of the multilib the flags select; recipe.parse_driver_link reads startfiles (.o before the library group),
-dirs (-L inside the external), names (-l, in order) and endfiles (.o after the group) from it. An object of startfiles/endfiles is then excluded by
-the one-definition rule only (recipe.onedef): it defines a global or weak symbol that an admitted guest product root defines (the roots' symbols are
-those of their green builds, gate_build.ensure). Nothing is excluded by a name.
-Rule: the derived libs equal `libs` of link/guest.json, key by key and in order, and `libs.external` is the pinned runtime. A difference is a finding
-naming the key, the derived values and the profile's. Items: every entry of dirs, names, startfiles and endfiles, derived or profiled. Certified =
-the entries present in both. A red guest root build, or a driver run that fails, is red with the reason.
+stage `drv:<root>`, with the guest semantic flags and `-pie -###` on a one-line C++ file; recipe.parse_driver_link reads startfiles, dirs, names and
+endfiles from its link command; an object is excluded by recipe.onedef (a symbol a green guest root defines) or recipe.entry_object (ENTRY of the script
+is another symbol than `_start`), nothing else.
+Rule (red otherwise): link/guest.json is exactly {script}; every derived start/end file lies under the pinned runtime external (recipe.outside_files) and in
+the multilib directory the flags select (stage `mld:<root>`, `-print-multi-directory`; recipe.in_multilib). Items: every derived entry; certified = all when
+the rule holds. A red guest root build or a failing driver run is red with the reason.
 ```
