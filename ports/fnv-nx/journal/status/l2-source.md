@@ -229,3 +229,8 @@ After the first frame:
     - the jmp_buf base register is derived from the callers' .fnvnx.decltype plus AAPCS64 x0;
     - "before threads" is a link-time call-graph fact (the e_entry prefix before thread creation; not reachable from main, thread entries or address-taken functions), owned by L1.
 - MANIFEST schema fnvnx-runtime-manifest/1 fixed and sent to w14 and the farm; no data-model copy in it.
+- 2026-11-15 09:12 Resumed after the usage-limit reset. CLAUDE.md merged from integration d65489ae9. All workers and the farm were resumed with their queues:
+  - w3: S23 proof, ICE proof, the grammar-copy deletion, crossing;
+  - farm: phase A with runtime_cflags, plugins and -g;
+  - w1: the 322 escaping-frame accesses, then the RTL table;
+  - w2: delete the fenced calls, the bit-field single form, the 372 nonframe accesses, the CAS bounce.
