@@ -19,6 +19,8 @@
 #include "w32.h"
 #include <fnvnx/declared.h>
 #include <fnvnx/reach.h>
+#include <fnvnx/guest.h>
+#include <fnvnx/hostapi.h>
 
 #include <stdio.h>
 
@@ -82,23 +84,23 @@ extern "C" void fnvnx_wine_fixme(uint32_t id)
     fnvnx_plat_note(FNVNX_NOTE_UNIMPL, "wine-fixme", FNVNX_NOTE_RA, d);
 }
 
-/* The citation function of the declared-machine bodies (verify/VERDICT.md "Declared-machine bodies", verify/declared_machine.tsv): a body that
- * answers from the declared machine (no network, fixed time zone, registry values, no Galaxy) calls it with the id of its row. It writes nothing
- * and returns: the gate reads the call, the body's result is the row's value. */
-extern "C" void fnvnx_declared_machine(uint32_t id)
+/* The end of a violation: the hostapi `exit` slot, an indirect call that does not return (hostapi.h: exit "does not return"). The reach and assume
+ * violations end here and nowhere else: not through os_exit_process, whose body is a libc exit that runs handlers. */
+[[noreturn]] static void violation_exit(uint32_t code)
 {
-    (void)id;
+    fnvnx_hcall1(fnvnx_host->exit, code);
+    __builtin_unreachable();
 }
 
 /* The one exit of the branches the reachability gate proves unreachable (contract/include/fnvnx/reach.h has the contract). Reached only
  * when a build invariant is violated: one log line through the same sink as the other lines, then the process ends through the
- * host's exit (os_exit_process: the hostapi `exit` slot on the console) with FNVNX_REACH_EXIT | fact_id. */
+ * host's exit slot (violation_exit) with FNVNX_REACH_EXIT | fact_id. */
 extern "C" void fnvnx_reach_violation(uint32_t fact_id)
 {
     char l[48];
     snprintf(l, sizeof l, "reach violation fact %u", (unsigned)fact_id);
     emit(l);
-    os_exit_process((int)(FNVNX_REACH_EXIT | fact_id));
+    violation_exit(FNVNX_REACH_EXIT | fact_id);
 }
 
 /* The one assertion of an OWNER assumption (ASM-001..009, reach.h): the line carries the id and the value, the exit code the id and the low 16 bits. */
@@ -107,7 +109,7 @@ extern "C" void fnvnx_assume_violation(uint32_t asm_id, uint64_t value)
     char l[64];
     snprintf(l, sizeof l, "assume violation ASM-%03u value %llu", (unsigned)asm_id, (unsigned long long)value);
     emit(l);
-    os_exit_process((int)(FNVNX_ASSUME_EXIT | (asm_id & 0xFFu) << 16 | (uint32_t)(value & 0xFFFFu)));
+    violation_exit(FNVNX_ASSUME_EXIT | (asm_id & 0xFFu) << 16 | (uint32_t)(value & 0xFFFFu));
 }
 
 extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail)

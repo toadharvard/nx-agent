@@ -1,0 +1,15 @@
+# id	contract_name	fact	source	kind	value
+# terminator rows of the platform root (objstub triage, w9): fact = terminator; value = the noreturn declaration file:line (hostabi/platform header); source = per-function documentation citation; kind exit
+term-01	os_exit_process	terminator	ISO/IEC 9899:2011 7.22.4.4 exit (the body is fflush(NULL); exit(code)), C11 7.21.5.2 fflush	exit	platform/os/os.h:31
+term-02	os_thread_exit	terminator	IEEE Std 1003.1-2017 pthread_exit (the body ends the calling thread through fnvnx_thread_exit); MSDN ExitThread	exit	platform/os/os.h:112
+term-03	ExitThread	terminator	MSDN ExitThread function (processthreadsapi.h), Remarks	exit	shim/include/fnvnx_win32.h:586
+# LISTED for L5 (no noreturn declaration or no documentation citation; no attribute added to pass):
+# ExitProcess: no noreturn on the declaration (shim/include/fnvnx_win32.h:277 `void ExitProcess(UINT);`); the body ends in os_exit_process on every path; citation MSDN ExitProcess function (processthreadsapi.h) is available. L5 decides: add noreturn at that declaration
+# TerminateProcess: returns BOOL: it ends the process only for the pseudo handle (crt_kernel32.cpp:234) and returns FALSE/ERROR_INVALID_HANDLE otherwise (MSDN TerminateProcess); not a terminator, no noreturn declaration is possible
+# fnvnx_doexit: returns when retcaller != 0 (exitlist.cpp:40, `_cexit`/`_c_exit`); its declaration (crt/fnvnx_msvcrt.h:89) is not noreturn and cannot be; ends the process only on the retcaller == 0 path via ExitProcess. Not a terminator
+# c_exit: no noreturn on the exported body (crt/msvcrt_exports.cpp:400); documented as `exit`-family: C11 7.22.4.4; every path ends in ExitProcess then os_exit_process. L5: declare noreturn and cite C11 7.22.4.4 / MSDN exit
+# c_abort: no noreturn on the exported body (crt/msvcrt_exports.cpp:407); C11 7.22.4.1 abort; ends in ExitProcess(3). L5: declare noreturn, cite C11 7.22.4.1 / MSDN abort
+# c_amsg_exit: no noreturn (crt/msvcrt_exports.cpp:414); _amsg_exit is an undocumented CRT-internal: its citation would be Wine 9.0 dlls/msvcrt/data.c:_amsg_exit (not available offline) -- L5 decides citation
+# fnvnx_swkbd_enter: returns the entry result (input/input.h:88); os_exit_process is the loud failure branch only when the applet cannot run (swkbd.cpp:130). Not a terminator; a failure path of a real body: L5/L1 rule needed for a documented error exit
+# _ZN12_GLOBAL__N_121declared_input_brokenEPKcRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE: declared [[noreturn]] (win32/gdifont.cpp:223) but the citation is an owner decision (CLAUDE.md "declared machine" broken invariant), not a documentation page: L5/L1 decide whether the proven-unreachable fnvnx_reach_violation route applies
+# reach/assume violations: fnvnx_reach_violation reach.h:21 and fnvnx_assume_violation reach.h:22 are noreturn; their authority is CLAUDE.md (owner decision 2026-11-11 option iii, 2026-11-12), class R certified by the reach gate, not a documentation citation

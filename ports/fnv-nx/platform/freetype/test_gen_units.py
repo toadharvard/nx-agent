@@ -13,7 +13,7 @@ FAILED = []
 
 def run(tree, deb):
     with tempfile.TemporaryDirectory() as out:
-        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen_units.py"), tree, deb, out], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "gen_units.py"), tree, deb, out, os.path.join(HERE, "..")], capture_output=True, text=True)
     return r.returncode, r.stderr
 
 
