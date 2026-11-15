@@ -44,10 +44,18 @@ def h_int(cx, ins):
     from . import faults, x86sys
     v = cx.ops[0].imm & 0xff
     row = faults.INT_ROWS.get(v)
-    if row is None:
+    if row is not None:                                   # a gate of the record: its trap row
+        name, at = row
+        raise_code(cx, 'FNVL_' + name, cx.nxt if at == 'nxt' else cx.a + at)
+        return
+    if v in x86sys.INT_EXCLUDED:                          # a vector the record excludes and leaves undecided: no body
         raise Unsupported('int 0x%x: undecided on the declared OS (x86sys int_ring3)' % v)
-    name, at = row
-    raise_code(cx, 'FNVL_' + name, cx.nxt if at == 'nxt' else cx.a + at)
+    o = x86sys.INT_OTHER                                  # every other vector: the record's row, raised through the AV entry with the int's own address
+    av = faults.BYNAME['AV']
+    if not (o['fault'] == '#GP' and o['exception_code'] == int(av['status'], 16) and o['flags'] == 0 and o['eip_advance'] == 0
+            and o['address'] == 'the int instruction' and o['error_code'] == 'vector*8+2' and len(o['parameters']) == av['np']):
+        raise Unsupported('int 0x%x: the other_vectors row of x86sys int_ring3 is not an access violation the runtime raises' % v)
+    site(cx, 'FNVL_RAISE_AV(0x%xu,0x%xu,0x%xu);' % (o['parameters'][0], o['parameters'][1], cx.a))
 
 
 @op('into')
