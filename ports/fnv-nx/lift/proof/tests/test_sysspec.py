@@ -73,6 +73,11 @@ class T(unittest.TestCase):
     def test_cpuid_needs_its_fault_row(self):
         r, n = sysspec.check(key('0fa2')); self.assertEqual(r, 'uncertified'); self.assertIn('cpuid_faulting', n)
 
+    def test_cpuid_proved_with_the_fault_row(self):
+        REC['cpuid_faulting'] = row(0)
+        try: open(self.f.name, 'w').write(json.dumps(REC)); self.assertEqual(sysspec.check(key('0fa2'))[0], 'proved')
+        finally: del REC['cpuid_faulting']
+
     def test_lar_is_decided_by_the_descriptor_rows(self):
         REC['lar_lsl'] = {'cs': {'lar': {'status': 'undecided', 'why': 'type blocker'}}}
         try: open(self.f.name, 'w').write(json.dumps(REC)); r, n = sysspec.check(key('0f0202')); self.assertEqual(r, 'uncertified'); self.assertIn('type blocker', n)
