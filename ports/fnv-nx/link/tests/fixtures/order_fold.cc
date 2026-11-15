@@ -40,3 +40,6 @@ void bf_set(BF *p, unsigned v) { p->b = v; }
 void bf_copy(BF *d, const BF *s) { d->b = s->b; }
 // a shared aggregate copied into an unshared local (the destination is no ordered side: the last unit replaces the assignment in place)
 int ld_priv(const Big *s, int i) { Big l = *s; return l.v[i]; }
+// a folded memcmp of two shared GUID-like members reads parts of aggregates as BIT_FIELD_REF (platform dsound.cpp guid_eq)
+struct G { unsigned d1; unsigned short d2, d3; unsigned char d4[8]; };
+bool geq(const G &a, const G &b) { return a.d1 == b.d1 && a.d2 == b.d2 && !__builtin_memcmp(a.d4, b.d4, 8); }
