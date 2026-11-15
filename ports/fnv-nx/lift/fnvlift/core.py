@@ -1,7 +1,7 @@
 """Decode, recursive descent, jump tables, emit loop, the per-function context and the handler registry.
 
 Dispatch order per instruction (same as the PoC): mnemonic handler (@op); a handler may return SKIP to fall
-through; then the fallbacks in registration order (@fallback(pred): x87 by opcode byte, SSE by xmm operand);
+through; then the shape handlers in registration order (@shape_handler(pred): x87 by opcode byte, SSE by xmm operand);
 then Unsupported('insn ...')."""
 import bisect
 import re
@@ -37,7 +37,7 @@ CC = {'o': 'of', 'no': '!of', 'b': 'cf', 'ae': '!cf', 'e': 'zf', 'ne': '!zf', 'b
 
 SKIP = object()      # a handler returns this when its extra condition fails: dispatch continues
 OPS = {}             # mnemonic -> handler(cx, ins)
-FALLBACKS = []       # (pred(cx, ins), handler(cx, ins)), tried in order when no mnemonic handler took the insn
+SHAPE_HANDLERS = []       # (pred(cx, ins), handler(cx, ins)), tried in order when no mnemonic handler took the insn
 
 
 def op(*names):
@@ -48,9 +48,9 @@ def op(*names):
     return deco
 
 
-def fallback(pred):
+def shape_handler(pred):
     def deco(fn):
-        FALLBACKS.append((pred, fn))
+        SHAPE_HANDLERS.append((pred, fn))
         return fn
     return deco
 
@@ -266,7 +266,7 @@ def dispatch(cx, ins):
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
         return
-    for pred, fn in FALLBACKS:
+    for pred, fn in SHAPE_HANDLERS:
         if pred(cx, ins):
             fn(cx, ins)
             return

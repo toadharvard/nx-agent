@@ -5,7 +5,7 @@ Vector ops are emitted as `{ [u32 mx=c->mxcsr;] xmm_t d_=DEST, s_=SOURCE, r_=d_;
 aliasing operands are safe; an mm operand is an xmm_t whose low half is the significand of the physical x87 register k (MMR / MMW, rt/fnvl_x87.h: MMX aliases the x87 file)."""
 import re
 from capstone import x86 as X
-from .core import op, fallback, Unsupported, SKIP
+from .core import op, shape_handler, Unsupported, SKIP
 from .f_x87_ctl import sse_flaggy, fown_emit
 from .f_sys import gp_cond
 
@@ -71,7 +71,7 @@ def fld(m):
     return 'f' if m.endswith(('ss', 'ps')) else 'd'
 
 
-@fallback(lambda cx, ins: cx.ops and any(isx(ins, o) or ismm(ins, o) for o in cx.ops))
+@shape_handler(lambda cx, ins: cx.ops and any(isx(ins, o) or ismm(ins, o) for o in cx.ops))
 def h_sse(cx, ins):
     if any(isx(ins, o) for o in cx.ops):
         cx.kinds.add('sse')

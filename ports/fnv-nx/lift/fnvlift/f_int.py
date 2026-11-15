@@ -1,6 +1,6 @@
 """Integer instruction family: moves, ALU, shifts, multiply/divide, stack, setcc/cmovcc, bit tests."""
 from capstone import x86 as X
-from .core import op, fallback, SKIP, Unsupported, MASK, CC, reg
+from .core import op, shape_handler, SKIP, Unsupported, MASK, CC, reg
 
 
 SEGSEL = {'cs': 'SEL_CS', 'ss': 'SEL_DS', 'ds': 'SEL_DS', 'es': 'SEL_DS', 'fs': 'SEL_FS', 'gs': 'SEL_GS'}    # initial selectors of a Win32 x86 user process (fnvl_seg_init; GS is null); the current values live in c->sel (SEG_STATE)
@@ -57,7 +57,7 @@ def _segshape(cx, ins):
     return cx.m in ('mov', 'push', 'pop') and any(o.type == X.X86_OP_REG and (segname(ins, o) or ins.reg_name(o.reg)[:2] in ('cr', 'dr')) for o in cx.ops)
 
 
-@fallback(_segshape)
+@shape_handler(_segshape)
 def h_segshapes(cx, ins):
     """the shapes no Form covers: a segment register operand (class 3, f_sys: MOV/POP Sreg load through fnvl_seg_set after the fnvl_seg_ok check; reads are the state, fnvl_seg_get) and MOV to/from CRn/DRn (class 2:
     #GP(0) at CPL 3). A class of shapes by operand kind, tried after the Forms (EMIT) and the OPS handlers and before f_sys.h_default, which would make them #UD; no OPS entry, so no mnemonic has both a Form and a hand handler."""

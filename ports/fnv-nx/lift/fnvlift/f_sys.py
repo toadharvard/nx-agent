@@ -19,7 +19,7 @@ exclusive by their guards and exhaustive because the last one, UD, is the comple
 Legal-on-the-model instructions that are NOT implemented anywhere are named in LEGAL_UNIMPLEMENTED and stay Unsupported (never silently #UD)."""
 import capstone
 from capstone import x86 as X
-from .core import op, fallback, Unsupported, SKIP
+from .core import op, shape_handler, Unsupported, SKIP
 from . import core, f_flow
 
 
@@ -241,7 +241,7 @@ def h_clflush(cx, ins):
 STRIP = ('bnd ', 'notrack ', 'xacquire ', 'xrelease ', 'lock ')
 
 
-@fallback(lambda cx, ins: cx.m.startswith(STRIP))
+@shape_handler(lambda cx, ins: cx.m.startswith(STRIP))
 def h_prefix_only(cx, ins):
     """BND (F2 on call/jmp/ret/jcc: MPX), NOTRACK (3E on an indirect call/jmp: CET), XACQUIRE/XRELEASE (F2/F3 on a LOCKed or XCHG instruction: HLE) are encoded as REPNE/REP/DS-override
     prefixes that a CPU without the extension ignores (SDM Vol 1 17.3 / Vol 2 "Instruction prefixes": BND ... ignored; Vol 1 16.2: HLE prefixes are ignored; Vol 1 CET: NOTRACK is DS
@@ -284,7 +284,7 @@ def _is_simd(cx, ins):
     return cx.ops and any(f_sse.isx(ins, o) or f_sse.ismm(ins, o) for o in cx.ops)
 
 
-@fallback(lambda cx, ins: encoding(ins)[0] in ('vex', 'evex', 'xop', 'map38', 'map3a', 'map0f') or cx.m in SSE3_SSE4A)
+@shape_handler(lambda cx, ins: encoding(ins)[0] in ('vex', 'evex', 'xop', 'map38', 'map3a', 'map0f') or cx.m in SSE3_SSE4A)
 def h_absent_ext(cx, ins):
     """UD by absent extension: VEX/EVEX/XOP encodings (AVX, AVX2, FMA, BMI, AVX-512, XOP: CPUID.1:ECX.AVX = 0 etc.), the whole of the 0F 0F map (3DNow!, AMD only: the reference CPU of rt/cpumodel.c is Intel and cpuid reports no 3DNow), the whole of the 0F 38 / 0F 3A opcode maps (SSSE3, SSE4.1/4.2, AES, PCLMUL, SHA,
     GFNI, MOVBE, CRC32, ADX, INVPCID, CET, MOVDIR: no instruction of those maps belongs to the SSE2-era ISA of the model), SSE3 and SSE4a (CPUID.1:ECX.SSE3 = 0; f_sse's lddqu is an OPS handler and wins)."""
@@ -295,7 +295,7 @@ def _default_pred(cx, ins):
     return not (0xd8 <= cx.b0 <= 0xdf) and not _is_simd(cx, ins)
 
 
-@fallback(_default_pred)
+@shape_handler(_default_pred)
 def h_default(cx, ins):
     """the complement (class 6 above): reserved-NOP space executes as NOP, the explicitly legal-but-unimplemented raise Unsupported, everything else is #UD"""
     if cx.m in LEGAL_UNIMPLEMENTED:

@@ -12,7 +12,7 @@ Each of those points computes them with the one function fx_esb() (rt/fnvl_x87.h
 check itself is part of 2.5 and does not exist yet: h_fwait refuses `fwait` unless the pinned fact ASM-204 (no unmasked exception at any instruction of any module) holds, so no waiting x87 instruction
 reads ES today; when 2.5 adds the check it must call fx_esb() (an FLDCW that unmasks a pending flag then raises #MF at the next waiting instruction)."""
 from capstone import x86 as X
-from .core import fallback, op, Unsupported, X87Dyn
+from .core import shape_handler, op, Unsupported, X87Dyn
 from .f_x87_ctl import ctl, x87_flaggy, fown_emit
 from . import fpfacts
 
@@ -83,7 +83,7 @@ def ptrs(cx, ins):
         cx.em('c->fdp=%s; c->fds=c->sel[%s];' % (a, seg))
 
 
-@fallback(lambda cx, ins: 0xd8 <= cx.b0 <= 0xdf)
+@shape_handler(lambda cx, ins: 0xd8 <= cx.b0 <= 0xdf)
 def h_x87(cx, ins):
     cx.kinds.add('x87')
     g = (cx.modrm >> 3) & 7

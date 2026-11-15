@@ -113,10 +113,10 @@ def lifted_by(ins):
     except Exception: pass
     h = core.OPS.get(m)
     if h is not None: return 'ops:' + h.__module__.split('.')[-1]
-    for pred, fn in core.FALLBACKS:
+    for pred, fn in core.SHAPE_HANDLERS:
         try: ok = pred(cx, ins)
         except Exception: return 'undetermined'
-        if ok: return 'fallback:' + fn.__module__.split('.')[-1] + '.' + fn.__name__
+        if ok: return 'shape_handler:' + fn.__module__.split('.')[-1] + '.' + fn.__name__
     return 'none'
 
 
