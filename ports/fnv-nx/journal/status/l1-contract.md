@@ -1354,3 +1354,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - cand2 takes CLAUDE.md from integ 4004c3451.
 - w23r accepted: framesec `:n` (rule F; 67e94122), generalised D1 (2e013ed9), linkage (only `external` pairs by name; e46db69a merged).
   - Pending: `c` records are compared through external symbols' declared types under C11 6.2.7p2.
+- L4: the undefset on bootguest (L4 w6-r 34d00ffda + w12h fe396a360) has 22 undefined symbols, 0 weak, and "-z text" is gone.
+  - 8 of them are loader tables (modules.py, iat.py, mkidentity.py). w12 makes them generated stages of the loader root over the single exe pin of contract_inputs.json.
+- contract/facts (w22 33e41190b) is handed to L3a native-disp.
