@@ -1477,3 +1477,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Item 2: the ldfacts stage (sections, symbols, definer per reference via --cref) with the pinned readelf.
   - Verification: the build tests go to the L1 farm.
   - Next: a relocations field to convert tlsmodel and pcrel_abs; L4 converts icount; one object-facts stage proposed for the object readers; item 3 after L2 w3's DATAMODEL merge.
+- 01:11 **L4 defect: the gen stage has no rule for output parents** (declareddlls fails on /out/gen).
+  - Rule: the recipe creates the parent directory of every declared output, and every per-generator makedirs is deleted. Assigned to w12.
+  - L4 w6 then relinks bootguest and returns the undefined set.
+- 01:11 **w23 8b6b7ed0.** The rtasm universe is read from DWARF DW_AT_language. An object with no DWARF is red. (b) and (a') wait for w25 and w20.
