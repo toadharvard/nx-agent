@@ -135,6 +135,8 @@ if ! step unpack; then
   patch -s -d "$NL" -p1 < "$BS/patches/newlib-$NLV-4.patch"
   apply_p0 "$PATCH_DIR/x19-x27.patch"
   apply_p0 "$PATCH_DIR/libstdcxx-nosized.patch"
+  # CFG-LINK: every runtime subdir's generated configure answers its link tests by a static link (see the libs step)
+  for d in "${CFG_SUBDIRS[@]}"; do python3 -I "$PATCH_DIR/cfg_link.py" patch "$SRC/$d/configure"; done
   # NL-LDBL (newlib-guest.patch): configure and Makefile.in are regenerated with the autotools the tarball's files state. Proof that
   # the tooling is the right one: on the pristine tarball tree the regeneration reproduces its configure and Makefile.in byte for byte.
   AT=$W/autotools
@@ -196,6 +198,17 @@ import recipe
 print("\n".join(recipe.runtime_configure(json.load(open(os.path.join(sys.argv[1], "guest_compiler.json"))))))
 EOF2
 )
+
+# the CFG-LINK patch of the runtime subdirs' configure scripts: guest_compiler.json runtime_configure_patch, read through recipe
+eval "$(python3 -I - "$VERIFY" <<'EOF4'
+import json, os, shlex, sys
+sys.path.insert(0, sys.argv[1])
+import recipe
+v = recipe.runtime_configure_patch(json.load(open(os.path.join(sys.argv[1], "guest_compiler.json"))))
+print("CFG_SUBDIRS=(%s)" % " ".join(shlex.quote(d) for d in v["subdirs"]))
+print("CFG_GUEST_LD=%s CFG_PROTOCOL_SRC=%s" % (shlex.quote(v["guest_script"]), shlex.quote(v["protocol_source"])))
+EOF4
+)"
 
 # target-library flags: the semantic flags minus the multilib selectors (the multilib adds those), per language as the driver
 # says (recipe.semantics_for), plus the plugin flags of the caller. Needs the stage-1 driver.
@@ -264,88 +277,32 @@ if ! step limits; then
 fi
 
 if ! step libs; then
-  # Rule CFG-FUNC. libstdc++'s configure answers `AC_CHECK_FUNC(f)` by linking a program, which cannot succeed before the product link
-  # brings the dispatch protocol (fnvnx_dispatch, fnvnx_call_fp are the lifted runtime's). The answer it computes is "is f defined in the
-  # runtime the target link uses", so it is taken from the objects themselves:
-  #   universe  every ac_cv_func_<name> that the pinned libstdc++-v3/configure tests (parsed from it),
-  #   answer    yes iff <name> is a defined global function symbol (nm, type T or W) of the archives the stage-1 driver's own link line adds
-  #             (read from gcc -###, an autoconf link has an empty $LIBS), in the default and the -fPIC multilib; the two must agree.
-  # The answers go to configure as a config.site, and with the defining archive member to $P/CFG-FUNC.json (the MANIFEST carries them).
-  note "target libraries: make -C b-gcc all-target-libgcc (the runtime archives CFG-FUNC reads)"
-  make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" all-target-libgcc > make-libgcc.log 2>&1
-  python3 -I - "$SRC/libstdc++-v3/configure" "$P/$T/lib" "$W/b-gcc/$T" "$P/bin/$T-nm" "$P/bin/$T-gcc" "$ABI" "$W/config.site" "$P/CFG-FUNC.json" <<'EOF3'
-import json, os, re, subprocess, sys
-conf, libdir, gccdir, nm, gcc, abi, site, out = sys.argv[1:9]
-text = open(conf).read()
-# An autoconf link test links with an empty $LIBS, so the archives are those the driver itself adds: read from its link line.
-def default_libs(variant):
-    cmd = [gcc, "-###", "-mabi=" + abi] + (["-" + variant] if variant else []) + ["-x", "c", "/dev/null", "-o", "/dev/null"]
-    err = subprocess.run(cmd, capture_output=True, text=True, check=True).stderr
-    line = [l for l in err.splitlines() if "collect2" in l or l.strip().split(" ")[0].endswith("/ld")][-1]
-    libs = re.findall(r'(?:^| )-l(\w+)(?= |$)', line.replace('"', ''))
-    assert libs, "driver link line has no -l: " + line
-    return libs
-def dirs(variant):
-    return (gccdir + "/" + variant + "/libgcc", libdir + "/" + variant) if variant else (gccdir + "/libgcc", libdir)
-def archive(variant, lib):
-    for d in dirs(variant):
-        if os.path.exists("%s/lib%s.a" % (d, lib)):
-            return "%s/lib%s.a" % (d, lib)
-def defined(variant, libs):  # name -> "libX.a(member)" of the first definition, in link order
-    d = {}
-    for lib in libs:
-        a = archive(variant, lib)
-        assert a, "no lib%s.a for %s" % (lib, variant or "default")
-        for line in subprocess.run([nm, "-A", "--defined-only", a], capture_output=True, text=True, check=True).stdout.splitlines():
-            f = line.split()
-            if len(f) == 3 and f[1] in ("T", "W"):
-                d.setdefault(f[2], "lib%s.a(%s)" % (lib, line.split(":")[1]))
-    return d
-dl = {v: default_libs(v) for v in ("", "fPIC")}
-# The configure itself adds libraries to $LIBS: its math checks run after AC_CHECK_LIB(m, sin) set libm="-lm" and LIBS="$LIBS $libm"
-# (configure lines with `libm="-lm"` / `LIBS="$LIBS $libm"`). A -l the configure puts in LIBS and that the multilib holds is part of
-# what its later links see, so it joins the archive set (parsed, not listed; read from the ac_cv_lib_<x>_ universe, kept if lib<x>.a exists).
-if re.search(r'libm="-lm"', text) and re.search(r'LIBS="\$LIBS \$libm"', text) and "ac_cv_lib_m_sin" in text:
-    for v in dl:
-        dl[v] = dl[v] + ["m"]
-vn = {"": "", "fPIC": "pic"}
-DEF = {v: defined(vn[v], dl[v]) for v in dl}
-def same(n):
-    assert (n in DEF[""]) == (n in DEF["fPIC"]), "multilibs disagree on %s" % n
-    return DEF[""].get(n)
-fnames = sorted(set(re.findall(r'ac_fn_c(?:xx)?_check_func "\$LINENO" "(\w+)" "ac_cv_func_\1"', text)))
-assert fnames, "no ac_cv_func_ checks in " + conf
-rows = [{"name": n, "answer": "yes" if same(n) else "no", "member": same(n)} for n in fnames]
-# AC_SEARCH_LIBS(f, libs): "none required" iff f is in the default archives, else -l<x> for the first listed library that is in the
-# multilib directory and defines f, else "no".
-want = {}
-for m in re.finditer(r"if \$\{ac_cv_search_(\w+)\+:\} false; then :(?:(?!if \$\{ac_cv_search_).)*?for ac_lib in '' ([^;]*); do", text, re.S):
-    assert want.setdefault(m.group(1), m.group(2).split()) == m.group(2).split(), "libs of %s differ between sites" % m.group(1)
-srows = []
-for n, cands in sorted(want.items()):
-    ans, mem = "no", None
-    if same(n):
-        ans, mem = "none required", same(n)
-    else:
-        for c in cands:
-            a = archive("", c)
-            if a and n in defined("", [c]) and (not archive("pic", c) or n in defined("pic", [c])):
-                ans, mem = "-l" + c, defined("", [c])[n]
-                break
-    srows.append({"name": n, "answer": ans, "member": mem, "candidates": cands})
-assert len(srows) == len(set(re.findall(r"\bac_cv_search_(\w+)\+:", text))), "ac_cv_search_ universe not fully parsed"
-open(site, "w").write("".join("ac_cv_func_%s=%s\n" % (r["name"], r["answer"]) for r in rows)
-                      + "".join("ac_cv_search_%s='%s'\n" % (r["name"], r["answer"]) for r in srows))
-json.dump({"rule": "CFG-FUNC", "configure": "libstdc++-v3/configure", "default_libs": dl, "funcs": rows, "searches": srows}, open(out, "w"), indent=1)
-print("CFG-FUNC: libs %s; %d functions, %d yes; %d searches: %s" % (dl[""], len(rows), sum(r["answer"] == "yes" for r in rows), len(srows), {r["name"]: r["answer"] for r in srows}))
-EOF3
-  # The top Makefile runs every target configure with CONFIG_SITE=no-such-file, so the answers go in as the cache variables of the
-  # environment, which configure honours as presets (autoconf "Cache variables": a set ac_cv_* is not re-tested).
-  set -a; . "$W/config.site"; set +a
-  note "target libraries: configure answers ac_cv_func_* from the built runtime (environment presets, $P/CFG-FUNC.json)"
+  # Rule CFG-LINK (toolchain/gcc/cfg_link.py, recorded as guest_compiler.json runtime_configure_patch). The configure scripts of the runtime
+  # subdirs (patched in the unpack step) answer every link test by a static link: the test compiles, and the linker's own archive closure
+  # (ld -r over the driver's -### link line) leaves only linker-script and product-protocol symbols undefined.
+  export PYTHON_CFG_LINK="python3 -I $PATCH_DIR/cfg_link.py"
+  export FNVNX_CFG_NM=$P/bin/$T-nm FNVNX_CFG_LD=$P/bin/$T-ld FNVNX_CFG_EMUL=aarch64elf${ABI#ilp}
+  export FNVNX_CFG_GUEST_LD=$VERIFY/../$CFG_GUEST_LD FNVNX_CFG_PROTOCOL_SRC=$VERIFY/../$CFG_PROTOCOL_SRC FNVNX_CFG_CACHE=$W/cfg-cache
   note "target libraries: make -C b-gcc CFLAGS_FOR_TARGET='$TLC' CXXFLAGS_FOR_TARGET='$TLCXX'"
   make -C b-gcc -j"$JOBS" CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > make-libs.log 2>&1
   make -C b-gcc install CFLAGS_FOR_TARGET="$TLC" CXXFLAGS_FOR_TARGET="$TLCXX" > install-libs.log 2>&1
+  # The record of what the configure computed under CFG-LINK: the ac_cv_func_* / ac_cv_search_* values of each multilib's config.log (the
+  # cache-variable section). The multilibs must agree; the MANIFEST carries it as cfg_func.
+  python3 -I - "$W/b-gcc/$T" "$P/CFG-FUNC.json" <<'EOF5'
+import json, re, sys
+base, out = sys.argv[1:3]
+def cache(path):
+    d = {}
+    for line in open(path, errors="replace"):
+        m = re.match(r"^(ac_cv_(?:func|search)_\w+)=(.*)$", line.rstrip("\n"))
+        if m:
+            d[m.group(1)] = m.group(2).strip("'")
+    return d
+a, b = cache(base + "/libstdc++-v3/config.log"), cache(base + "/pic/libstdc++-v3/config.log")
+assert a and a == b, "CFG-LINK answers of the multilibs differ or are empty: %s" % sorted(set(a.items()) ^ set(b.items()))[:6]
+json.dump({"rule": "CFG-LINK", "source": "libstdc++-v3 config.log cache variables", "answers": dict(sorted(a.items()))}, open(out, "w"), indent=1)
+print("CFG-LINK: %d answers, %d yes" % (len(a), sum(v == "yes" for v in a.values())))
+EOF5
   rm -f "$P/lib/gcc/$T/$V/specs"
   done_ libs
 fi
