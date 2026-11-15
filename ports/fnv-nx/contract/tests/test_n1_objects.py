@@ -41,6 +41,16 @@ with tempfile.TemporaryDirectory() as t:
     os.remove(t + '/nometa/meta.json')
     if 'meta.json' not in (err(t + '/nometa') or ''):
         fails.append('no meta.json: %r' % err(t + '/nometa'))
+fn = {1: dict(unit=0, why='no MSVC object'), 2: dict(unit=2, why='no MSVC object'), 3: dict(unit=2, why='no MSVC object'), 4: dict(unit=1, why='')}
+units = {'units': [{'source': 'a.cpp'}, {'source': 'b.cpp'}, {'source': 'c.cpp'}]}
+if n1.no_object(fn, units) != {0: dict(source='a.cpp', functions=1), 2: dict(source='c.cpp', functions=2)}:
+    fails.append('no_object fact: %r' % n1.no_object(fn, units))
+import store
+with tempfile.TemporaryDirectory() as t:
+    o = dict(fn={}, sym={}, vt={}, exe_sha256='0' * 64, no_object={2713: dict(source='s.cpp', functions=211)})
+    store.save(t + '/n.json', 'n1', o)
+    if store.load(t + '/n.json', 'n1') != o:
+        fails.append('n1 store round trip of no_object')
 if fails:
     print('\n'.join('FAIL ' + f for f in fails))
     sys.exit(1)

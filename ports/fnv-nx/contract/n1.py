@@ -103,6 +103,17 @@ def check_objects(msvc):
     return have
 
 
+def no_object(fn, units):
+    """The fact of the units without a pristine MSVC object: {unit index: {source, functions}} over the functions whose reason is 'no MSVC object'.  Their functions
+    are LIFTED by bodysel's N1 rule (lifting is the general path); this records them, it is not a fault (check_objects guards the object set itself)."""
+    out = {}
+    for F in fn.values():
+        if F['why'] == 'no MSVC object':
+            u = out.setdefault(F['unit'], dict(source=units['units'][F['unit']]['source'], functions=0))
+            u['functions'] += 1
+    return out
+
+
 def candidates(img, units, msvc, log):
     """Byte comparison: yields per function its relocation pins or the reason it is not byte-equal."""
     fn = {}
@@ -257,7 +268,7 @@ def main():
     for k, v in sorted(c.items(), key=lambda x: -x[1]):
         print('%7d  %s' % (v, k))
     print('symbols pinned: %d; (unit, vftable symbol) pairs (R6): %d -> %d addresses' % (len(sym), len(vt), len(set(vt.values()))))
-    store.save(a.out, 'n1', dict(fn=fn, sym=sym, vt=vt, exe_sha256=img.sha256))
+    store.save(a.out, 'n1', dict(fn=fn, sym=sym, vt=vt, exe_sha256=img.sha256, no_object=no_object(fn, units)))
     # gate `n1` (L4): every decomp function has a certificate (N1) or a LIFTED verdict with a reason (`why`)
     bad = ['%08x' % A for A, F in sorted(fn.items()) if not (F['n1'] or F['why'])]
     gatefile.write('n1', len(fn), len(fn) - len(bad), bad,
