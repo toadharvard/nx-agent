@@ -148,21 +148,27 @@ VEC = {
 # the error of dl_type's default arm.  Why the error arm cannot fire for a code (or is the rule) is the reason below; a code of the pinned headers
 # without an entry here fails the test, so a GCC change that adds a type code is seen.
 TCC_TYPE_ROW = {'POINTER_TYPE', 'ARRAY_TYPE', 'FUNCTION_TYPE', 'RECORD_TYPE', 'UNION_TYPE', 'ENUMERAL_TYPE', 'VOID_TYPE', 'INTEGER_TYPE', 'REAL_TYPE',
-                'BOOLEAN_TYPE', 'VECTOR_TYPE', 'NULLPTR_TYPE'}
+                'BOOLEAN_TYPE', 'VECTOR_TYPE', 'NULLPTR_TYPE', 'COMPLEX_TYPE'}
 # RULE: a code with no row is an error of the compilation (dl_type's default arm): a loud failure, never a wrong spelling. The reasons are facts of the
 # pinned GCC 13.3.0 source (gcc-13.3.0.tar.xz sha256 0845e962...) on where a code is made; they say why the error does not fire in practice.
 GCC = 'gcc-13.3.0/gcc/'
 TCC_TYPE_ERROR = {
-    'COMPLEX_TYPE': 'deliberate: _Complex has no spelling (tested: decltype_errors cplx)',
     'FIXED_POINT_TYPE': GCC + 'c/c-decl.cc:12234-12236 and 12551-12553: _Fract/_Accum is a compile error unless targetm.fixed_point_supported_p; the default is false '
                         '(targhooks.cc:638) and only config/avr makes the type (avr.cc:1638, stor-layout.cc:2726/2748 from the avr hook); tested: _Fract is a compile error',
     'QUAL_UNION_TYPE': GCC + 'ada/gcc-interface/decl.cc:10009 is the only make_node (QUAL_UNION_TYPE)',
     'OPAQUE_TYPE': GCC + 'config/rs6000/rs6000-builtin.cc:760,772 are the only make_node (OPAQUE_TYPE)',
-    'OFFSET_TYPE': GCC + 'tree.cc:7642 build_offset_type, called by no file of c/ or c-family/ (pointer to data member: cp/)',
-    'METHOD_TYPE': GCC + 'tree.cc:7579 build_method_type_directly, called by no file of c/ or c-family/',
-    'REFERENCE_TYPE': GCC + 'tree.cc:7020; C-side callers (c-family/c-attribs.cc, c-common.cc, c/c-objc-common.cc) make references only for Objective-C and attribute '
-                      'machinery, none is the declared type of an external C symbol; any that were is this error',
-    'LANG_TYPE': GCC + 'cp/decl.cc:4756,4767,4798 make the C++ front end\'s own LANG_TYPE nodes; the one C-side use is ada/ (utils.cc:494)',
+    'OFFSET_TYPE': GCC + 'tree.cc:7637 build_offset_type; callers outside cp/ and ada/ are tree.cc:7662 (its own canonical-type step) and 10067 (reconstruct_complex_type, '
+                         'which rebuilds an OFFSET_TYPE only from an OFFSET_TYPE it is given); none in c/, c-family/ or the middle end (grep of the pinned tree): C has no pointer to member',
+    'METHOD_TYPE': GCC + 'tree.cc:7569 build_method_type_directly; callers outside cp/ are tree.cc:7608, 7627 and 10059 (reconstruct_complex_type, from a METHOD_TYPE it is given); '
+                         'none in c/, c-family/ or the middle end (grep of the pinned tree): C has no member function',
+    'REFERENCE_TYPE': GCC + 'tree.cc:6982 build_reference_type_for_mode; callers outside cp/ and the other languages: c-family/c-common.cc:4709 (the type of a '
+                            'BT_VALIST_REF parameter of a builtin prototype: those decls are DECL_IS_UNDECLARED_BUILTIN, which add_decl skips, and a user declaration of '
+                            'the name composes with them only if compatible, which the C front end (no reference type) never makes it), c-family/c-attribs.cc:2164 (the mode '
+                            'attribute on a type that already is a reference), tree.cc:10039 (reconstruct_complex_type, from a reference it is given), ipa-free-lang-data.cc:255 '
+                            'and tree-inline.cc:438 (copies of an existing reference), omp-low.cc:1141 (OpenMP lowering, after the unit\'s declarations are final), '
+                            'alias.cc:1098 (alias sets). c/c-objc-common.cc:124 is Objective-C. C has no reference declarator',
+    'LANG_TYPE': GCC + 'tree.def:252; no make_node (LANG_TYPE) and no make_lang_type in c/, c-family/ or the middle end (grep of the pinned tree); the C++ front end '
+                       'makes them (cp/decl.cc:4756,4767,4798), the section is written only for C units',
     **{c: GCC + 'cp/cp-tree.def: a code of the C++ front end only (templates, dependent and pack types); the section is written only for C units '
           '(fnvnx_layout.cc: `if (!is_cxx()) emit_decltype()`)'
        for c in ('BASES', 'BOUND_TEMPLATE_TEMPLATE_PARM', 'DECLTYPE_TYPE', 'DEPENDENT_OPERATOR_TYPE', 'TEMPLATE_TEMPLATE_PARM', 'TEMPLATE_TYPE_PARM',
@@ -203,10 +209,26 @@ def vec(obj, td):
     check('_Fract is a compile error on aarch64 (FIXED_POINT_TYPE cannot reach the plugin)', r.returncode != 0, r.stderr[-300:])
 
 
+def cplx(obj):
+    got = dict(l.split('\t') for l in pb.section(obj, '.fnvnx.decltype').splitlines())
+    for k, rx in (('c_f', r'complex:8:4:float'), ('c_d', r'complex:16:8:double'), ('c_i', r'complex:8:4:int'), ('c_cd', r'const:complex:16:8:double'),
+                  ('c_p', r'\*complex:16:8:double'), ('c_a', r'\[3\]complex:8:4:float'), ('c_h', r'struct:HoldsC\{c:char;z:complex:16:8:double\}'),
+                  ('c_fn', r'\(complex:8:4:float,complex:\d+:\d+:long_double\)complex:16:8:double'), ('at_i', r'atomic:int'),
+                  ('at_cf', r'atomic:complex:8:4:float'), ('at_vl', r'volatile:atomic:long_int')):
+        check('complex %s matches %s' % (k, rx), re.fullmatch(rx, got.get(k, '')) is not None, got.get(k))
+    m = re.fullmatch(r'complex:(\d+):(\d+):long_double', got.get('c_ld', ''))
+    check('complex long double is two long doubles: size twice the alignment of the type (read off TYPE_SIZE_UNIT/TYPE_ALIGN_UNIT)', m and int(m[1]) == 2 * int(m[2]), got.get('c_ld'))
+    check('complex: exactly the external symbols', set(got) == {'c_f', 'c_d', 'c_ld', 'c_i', 'c_cd', 'c_p', 'c_a', 'c_h', 'c_fn', 'at_i', 'at_cf', 'at_vl'}, sorted(got))
+    check('complex: every spelling round-trips through ctypes_compat.parse', all(cc.parse(t) for t in got.values()))
+    check('complex: compatibility is by size, alignment and component',
+          cc.compatible(cc.parse(got['c_f']), cc.parse('complex:8:4:float')) and not cc.compatible(cc.parse(got['c_f']), cc.parse(got['c_d']))
+          and not cc.compatible(cc.parse(got['at_i']), cc.parse('int')), got)
+
+
 def decltype_errors(td, so):
     """a type outside the grammar is an error of the compilation; the declarations of one symbol that the front end composes (C11 6.2.7p3)
     give one line, with the composite type"""
-    for name, text, why in (('atomic', '_Atomic int at;\n', '_Atomic'), ('cplx', '_Complex double z;\n', 'outside the grammar')):
+    for name, text, why in (('fixed', '_Fract fr;\n', 'error'),):
         src = os.path.join(td, name + '.c')
         open(src, 'w').write(text)
         r = pb.compile(src, os.path.join(td, name + '.o'), so)
@@ -273,6 +295,11 @@ def main():
         if r.returncode == 0:
             SO[:] = so
             vec(obj, td)
+        obj = os.path.join(td, 'cx.o')
+        r = pb.compile(os.path.join(HERE, 'layout', 'complex.c'), obj, so)
+        check('complex.c compiles', r.returncode == 0, r.stderr[:2000])
+        if r.returncode == 0:
+            cplx(obj)
         obj = os.path.join(td, 'c.o')
         r = pb.compile(os.path.join(HERE, 'layout', 'linkage_c.c'), obj, so)
         check('linkage_c.c compiles', r.returncode == 0, r.stderr[:2000])

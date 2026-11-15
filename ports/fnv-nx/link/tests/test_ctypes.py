@@ -64,6 +64,11 @@ for bad in (b'f\tint', b'f\tint\nf\tint\n', b'f\t[\n'):
         fails.append('parse_decltype accepted %r' % bad)
     except ValueError:
         pass
+for a, b, want in (('complex:8:4:float', 'complex:8:4:float', True), ('complex:8:4:float', 'complex:16:8:double', False),
+                  ('complex:16:8:double', 'complex:16:16:double', False), ('vec:4:16:16:int', 'vec:4:16:16:int', True), ('vec:4:16:16:int', 'vec:2:8:8:int', False),
+                  ('atomic:int', 'int', False), ('atomic:const:int', 'const:atomic:int', True), ('host:int', 'host:int', True), ('host:int', 'int', False)):
+    if C.compatible(C.parse(a), C.parse(b)) != want:
+        fails.append('compatible %s %s != %s' % (a, b, want))
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

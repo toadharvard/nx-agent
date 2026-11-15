@@ -384,7 +384,6 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
 {
   if (!t || t == error_mark_node) { dl_error("an erroneous type", "?"); return "?"; }
   int q = TYPE_QUALS(t);
-  if (q & TYPE_QUAL_ATOMIC) { dl_error("an _Atomic type has no spelling", "?"); return "?"; }
   const int code = TREE_CODE(t);
   std::string pre;
   /* HOST1: a scalar that carries the type attribute fnvnx_host, on the type or on the original type of the typedef that names it, is spelled with the
@@ -400,6 +399,7 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     if (q & TYPE_QUAL_CONST) pre += "const:";
     if (q & TYPE_QUAL_VOLATILE) pre += "volatile:";
     if (q & TYPE_QUAL_RESTRICT) pre += "restrict:";
+    if (q & TYPE_QUAL_ATOMIC) pre += "atomic:";   /* C11 6.7.3p10: _Atomic is a qualifier of the type; 6.7.3p10 and 6.2.7p1: compatible types have equal qualifiers */
     t = TYPE_MAIN_VARIANT(t);
   }
   switch (code) {
@@ -471,6 +471,15 @@ static std::string dl_type(tree t, std::vector<tree> &stk)
     poly_uint64 size;
     if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size)) { dl_error("a vector type whose size is not a poly_int constant", "?"); return "?"; }
     return pre + "vec:" + ps(TYPE_VECTOR_SUBPARTS(t)) + ":" + ps(size) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
+  }
+  case COMPLEX_TYPE: {
+    /* CPLX1: a C99 `_Complex T` / GNU `_Complex int` is two consecutive elements of T (stor-layout.cc layout_type case COMPLEX_TYPE 2416-2423: the mode is
+     * GET_MODE_COMPLEX_MODE of the element's, TYPE_SIZE_UNIT its size; the alignment is the mode's, set by finalize_type_size).  Row `complex:<size>:<align>:` element,
+     * size and alignment in bytes read off the node (TYPE_SIZE_UNIT, TYPE_ALIGN_UNIT), not computed from a formula.  Compatibility (c/c-typeck.cc
+     * comptypes_internal: the default case compares the codes and TREE_TYPE): the same element type.  size and align are the ABI facts of that type. */
+    poly_uint64 size;
+    if (!poly_int_tree_p(TYPE_SIZE_UNIT(t), &size) || !size.is_constant()) { dl_error("a complex type whose size is not a constant", "?"); return "?"; }
+    return pre + "complex:" + std::to_string(size.to_constant()) + ":" + std::to_string(TYPE_ALIGN_UNIT(t)) + ":" + dl_type(TREE_TYPE(t), stk);
   }
   default:
     dl_error("a type outside the grammar", get_tree_code_name((enum tree_code)code));
