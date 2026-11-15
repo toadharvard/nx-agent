@@ -1022,3 +1022,7 @@ Paused: w3b, w4, farm; no other work.
     - w5 is reverting the hand-listed hunk with a new commit, then cherry-picking 34a4a4b2a and taking toolchain/ whole from a42ad8875.
 - bottleneck: the guest compile after those fixes, and L1 cand3 for the trunk (a5c8f427). 3 of 4 workers busy.
 - 20:15Z: L6A took the 619 deko3d side as an item for after the first frame. Reason: deko3d is off the path, and render/backend is not a product root yet, so no build turns red. Accepted.
+- 20:18Z: w5 faabe016b (smlink): sm_link summary format /2.
+    - The universe is 1,818 members: 1,809 bytecode + 9 glsl_table, with universe_hash 550f66a5…7327.
+    - Measured at ed6a8f41e: red 0, 115,776 stage certificates and 121,394 link certificates.
+    - Producers are derived in gate_sm_link.py from the checker root's elffacts references: 18 symbols. Sent to L1 w27. Accepted.
