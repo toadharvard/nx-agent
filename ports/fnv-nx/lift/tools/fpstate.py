@@ -321,7 +321,7 @@ def do_scan(exe, facts, retn, out):
     nobs = sum(1 for (x, m), (c, why, a) in rd.items() if c == 'escapes')
     stat_ok = nobs == 0
     with open(out + '/scan.tsv', 'w') as f:
-        f.write('module\t%s\nexe_sha256\t%s\nuniverse_md5\t%s\nI-FPMASK\t%s\tunknown_fcw=%d unknown_mxcsr=%d cleared_mask_bits=%s\nI-FPSTICKY\t%s\tobservers=%d\n' % (
+        f.write('module\t%s\nexe_sha256\t%s\nuniverse_md5\t%s\nASM-204\t%s\tunknown_fcw=%d unknown_mxcsr=%d cleared_mask_bits=%s\nASM-205\t%s\tobservers=%d\n' % (
             os.path.basename(exe), hashlib.sha256(open(exe, 'rb').read()).hexdigest(), hashlib.md5(raw).hexdigest(), 'holds' if mask_ok else 'unproven', unk_f, unk_m,
             ','.join(map(str, cleared)) or '-', 'holds' if stat_ok else 'unproven', nobs))
     L.append('module invariants: ASM-204 %s (unknown loads fcw %d mxcsr %d, mask bits clearable %s)  ASM-205 %s (observers %d)' % ('holds' if mask_ok else 'unproven', unk_f, unk_m, cleared or '-', 'holds' if stat_ok else 'unproven', nobs))
