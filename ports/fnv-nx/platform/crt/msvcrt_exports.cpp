@@ -7,6 +7,7 @@
  * rounded strtod (glibc and newlib's gdtoa round exactly, to nearest even); qsort is an in-place heapsort whose
  * indices stay below n whatever the comparator answers; character classes come from the layer's own NLS tables
  * (GetStringTypeW / LCMapStringW) for every code page the layer supports ("C" = identity below 128, 1252). */
+#include <fnvnx/cite.h>
 #include "../win32/w32.h"
 
 #include <cmath>
@@ -404,12 +405,14 @@ extern "C" [[noreturn]] void c_exit(int code)
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
 }
+FNVNX_CITE(c_exit, "dm:3");
 extern "C" [[noreturn]] void c_abort(void)
 {
     static const char m[] = "\nabnormal program termination\n";
     fnvnx_write(2, m, sizeof m - 1);
     ExitProcess(3);
 }
+FNVNX_CITE(c_abort, "dm:4");
 extern "C" [[noreturn]] void c_amsg_exit(int n)
 {
     const char *t;
@@ -429,6 +432,7 @@ extern "C" [[noreturn]] void c_amsg_exit(int n)
     fnvnx_write(2, m, (unsigned)l);
     ExitProcess(255);
 }
+FNVNX_CITE(c_amsg_exit, "dm:5");
 extern "C" void c_purecall(void) { c_amsg_exit(25); }
 
 struct rlock { os_lock_t m; void *volatile owner; int count; };

@@ -1,4 +1,5 @@
 /* module.cpp - modules, command line, process exit, debugging and small kernel32 helpers. */
+#include <fnvnx/cite.h>
 #include "w32.h"
 #include "fnvnx_boundary.h"
 
@@ -730,6 +731,7 @@ extern "C" void ExitProcess(UINT code)
     fnvnx_plat_flush();      /* the platform lane's counts and summary, when it is on */
     os_exit_process((int)code);
 }
+FNVNX_CITE(ExitProcess, "dm:2");
 
 extern "C" void OutputDebugStringA(LPCSTR s)
 {

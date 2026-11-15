@@ -14,6 +14,7 @@
 #include <malloc.h>
 
 #include "fnvnx/guest.h"
+#include "fnvnx/cite.h"
 #include "fnvnx/hostapi.h"
 #include "fnvnx/placement.h"
 #include "fnvnx/sdlayout.h"
@@ -31,6 +32,7 @@ void os_exit_process(int code) {
     fflush(NULL);
     exit(code);
 }
+FNVNX_CITE(os_exit_process, "dm:6");
 
 unsigned os_cpu_count(void) { return FNVNX_NPROC; }          /* the declared processors (fnvnx/placement.h) */
 uint32_t os_cpu_mask(void) { return FNVNX_APP_CORES; }
@@ -172,6 +174,7 @@ void os_thread_exit(void) {
     if (g_me) thread_done(g_me);
     fnvnx_thread_exit(NULL);
 }
+FNVNX_CITE(os_thread_exit, "dm:8");
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
  * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
 _Static_assert(OS_ROLE_AUDIO == FNVNX_ROLE_AUDIO, "platform/os/os.h OS_ROLE_AUDIO = hostapi.h FNVNX_ROLE_AUDIO");

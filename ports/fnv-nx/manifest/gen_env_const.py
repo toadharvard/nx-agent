@@ -28,16 +28,17 @@ import os
 import re
 import sys
 
-# One record per row in the non-alloc section .fnvnx.const (--probe): u32 row id (the line of env_const.tsv), u32 byte length, the value (the row's
-# expression evaluated by the compiler of the includer's own scope, as an object of the row's type), padded to 4 (little endian). The section name
-# carries its own flags: the compiler's `,"a"` after it falls into the trailing comment, so the section is not allocated and not loaded.
+# One record per row in the section .fnvnx.const (--probe): u32 row id (the line of env_const.tsv), u32 byte length, the value (the row's expression
+# evaluated by the compiler of the includer's own scope, as an object of the row's type), padded to 4 (little endian). The probe object is compiled by
+# the recipe's probe stage and read, never linked: its sections are plain.
 RECORD = (
-    '__attribute__((used, section(".fnvnx.const,\\"\\",%%progbits //"))) static const struct __attribute__((packed, aligned(4))) { unsigned id; unsigned len; %(ret)s v; }\n'
+    '__attribute__((section(".fnvnx.const"), used, aligned(4))) static const struct __attribute__((packed)) { unsigned id; unsigned len; %(ret)s v; }\n'
     '    fnvnx_const_%(n)d = { %(n)d, (unsigned)sizeof(%(ret)s), (%(value)s) };\n'
-    'typedef char fnvnx_const_size_%(n)d[sizeof(fnvnx_const_%(n)d) == ((8 + sizeof(%(ret)s) + 3) & ~3u) ? 1 : -1];   /* row %(n)d: header + value, padded to 4 */\n')
+    'FNVNX_SA(sizeof(fnvnx_const_%(n)d) == (8 + sizeof(%(ret)s)), "row %(n)d: the record is header + value");\n')
+SA_DEF = '#ifdef __cplusplus\n#define FNVNX_SA static_assert\n#else\n#define FNVNX_SA _Static_assert\n#endif\n\n'
 # An identity row (value `identity:<k>`): the function returns its argument k unchanged. Its probe record is in the non-alloc section .fnvnx.ident:
 # u32 row id, u32 k (little endian); the row has no .fnvnx.const record.
-IDENT_RECORD = ('__attribute__((used, section(".fnvnx.ident,\\"\\",%%progbits //"))) static const struct __attribute__((packed, aligned(4))) { unsigned id; unsigned k; }\n'
+IDENT_RECORD = ('__attribute__((section(".fnvnx.ident"), used, aligned(4))) static const struct __attribute__((packed)) { unsigned id; unsigned k; }\n'
                 '    fnvnx_ident_%(n)d = { %(n)d, %(k)d };\n')
 COLS = ["symbol", "linkage", "ret", "params", "value", "source", "quals", "file"]
 
@@ -130,7 +131,7 @@ def main(argv):
                 errors.append("line %d: %s: its declared_machine.tsv row (%s %s) differs from the constant %s" % (n, row["symbol"], dkind, dval, row["value"]))
             if row["linkage"] != "C":
                 errors.append("line %d: %s: a declared-machine row names a C-linkage symbol (the citation record names the assembler symbol)" % (n, row["symbol"]))
-            cite = 'FNVNX_CITE(%s, "%d");\n' % (row["symbol"], did)
+            cite = 'FNVNX_CITE(%s, "dm:%d");\n' % (row["symbol"], did)
             used.add(row["symbol"])
         idm = IDENT.match(row["value"].strip())
         if idm:
@@ -156,7 +157,7 @@ def main(argv):
             f.write('#include <fnvnx/cite.h>\n\n')
         f.write("\n".join(out))
         if probe:
-            f.write("\n" + "".join(consts))
+            f.write(SA_DEF + "".join(consts))
     return 0
 
 

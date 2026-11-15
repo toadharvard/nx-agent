@@ -1,5 +1,6 @@
 /* thread.cpp - threads, thread ids, last error, TlsAlloc slots, the image's implicit TLS and the fake TEB
  * behind __readfsdword. */
+#include <fnvnx/cite.h>
 #include "w32.h"
 #include "fnvnx_boundary.h"
 #include "fnvl_host.h"
@@ -497,6 +498,7 @@ extern "C" void ExitThread(DWORD code)
     }
     os_thread_exit();
 }
+FNVNX_CITE(ExitThread, "dm:7");
 
 /* priority/ideal processor of threads CreateThread did not start (per host thread) */
 static __thread int g_main_prio;
