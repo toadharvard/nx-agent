@@ -333,3 +333,4 @@ After the first frame:
   - Harness: one source, no flag lists. test_layout 41 and test_ftoi 29 pass. test_names, test_pi and test_sdd are red; all three are L2's (a per-root flag, -w, and GOT relocs under -fPIC).
   - The platform build was still on a7b7805fe: 4 null-test sites, 0 CONT-P errors.
   - Order for w3: rebase onto L5 w10 05e6e23fa and measure reach-not-exit, then MLIB1, then the three tests, then the S23 root.
+- Orchestrator: guest stages on cand2 still run the linux-gnu triplet against host glibc; L6 w6 measured it on 644d66b36. L1 cand3 adds -nostdinc and the runtime sysroot. The aarch64-none-elf mirror pin (phase B) goes straight to L1 for cand3. Until then guest objects are measurements. Phase B path: w3 MLIB1, then the farm's stage 1 and libraries, then the MANIFEST and two equal clean builds, then the pin to L1.
