@@ -192,6 +192,22 @@ def check(key, timeout=60000):
     return _obligation(rep, sf.form, symform.symins(key)[0], imm, timeout)
 
 
+def touches_fp(key):
+    """the shape's spec row has an FP lane (Res.fpl non-empty): the one rule that splits the shapes into FP (lane obligations, simdsplit) and non-FP (farm queue)"""
+    rep = symform.parse_key(key)[0]
+    try: S.Enc(rep); S.mem_width(rep)
+    except (AssertionError, IndexError, KeyError): return False
+    imm = z3.BitVec('fld_imm', 8) if S.mem_imm(rep) else None
+    d = {'xmm%d' % i: z3.BitVec('xmm%d' % i, 128) for i in range(8)}; d.update({'fr%d' % i: z3.BitVec('fr%d' % i, 80) for i in range(8)})
+    d['ftop'] = z3.BitVec('ftop', 3); d['ftag'] = z3.BitVec('ftag', 16); d['mxcsr'] = z3.BitVec('mxcsr', 32)
+    gpr = {i: z3.BitVec(r, 32) for i, r in enumerate(REG)}
+    w = S.mem_width(rep) if S.Enc(rep).mem else None
+    a = z3.BitVec('ea', 32) if w is not None or S.Enc(rep).mem else None
+    m = _load(dsl.mem_array(), a, w) if a is not None else None
+    try: return bool(S.run(rep, d, m, a, gpr, imm).fpl)
+    except (S.F.Uncertified, KeyError): return False
+
+
 def _concrete(rep, timeout):
     """a shape whose immediate byte is part of the mnemonic (the cmpeqps ... cmpnleps / cmpeqpd ... pseudo-ops: one predicate each): the immediate is the shape's fixed byte, not a field"""
     md = shape.decoder(); ins = list(md.disasm(rep, 0))[0]
