@@ -4,5 +4,11 @@
   "test_boot_job.py": [
    "exe"
   ]
- }
+ },
+ "untraced": [
+  "test_envcheck.py",
+  "test_gates.py",
+  "test_opentrace.py",
+  "test_oraclecheck.py"
+ ]
 }
