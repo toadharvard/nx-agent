@@ -3,7 +3,7 @@
 __CxxFrameHandler, _CxxThrowException, _XcptFilter, ?terminate@@YAXXZ, ??1type_info@@UAE@XZ, _setjmp3, longjmp, _controlfp, _clearfp, _fpclass, _finite, _isnan.
 Hand-assembled x86 guest functions (a synthetic image at 0x401000, MSVC-shaped frames: SEH3 registration + scope table, C++ registration + FuncInfo) are assembled by the pinned keystone and
 lifted (fnvlift, capstone); the stage writes
-  guest.cc, imp.cc, tab.S   the lifted functions, the generated import entries of the bind-l3 rows, the dispatch table
+  guest.cc, imp.cc, tab.cc   the lifted functions, the generated import entries of the bind-l3 rows, the dispatch table
   image.inc                 the image, its data page, the import table, the address of every label, and the case table (main.cc includes it)
   terminal.json             the cases that end the process (abort, ExitProcess): the boot machine checks the stop and the memory words named there
   labels.txt                case number, root, what it tests
@@ -315,7 +315,7 @@ def main():
     syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent}); syms.update(EH_KEYS)
     if {n: k for k, s, d, n, b in ent} != {r[1]: KEY[r[1]] for r in BRIDGE}: sys.exit('msvcrttest gen: the import keys differ from the key rule')
     open(w + '/guest.cc', 'w').write('#include "fnvl.h"\n' + '\n'.join(texts)); open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
-    hh = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, hh))
+    hh = phf.build(list(syms)); open(w + '/tab.cc', 'w').write(phf.table_c(syms, hh))
     A = P.addr; rows, term, lab = [], [], []
     inc = ['#define CODE_BASE 0x%xu' % BASE, '#define CODE_END 0x%xu' % CODE_END, '#define IAT_BASE 0x%xu' % IAT, '#define DATA_BASE 0x%xu' % DATA, '#define TEB_ADDR 0x%xu' % TEB,
            '#define GSTACK_ADDR 0x%xu' % GSTACK]
