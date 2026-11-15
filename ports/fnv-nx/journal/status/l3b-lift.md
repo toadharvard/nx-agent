@@ -387,3 +387,16 @@ Workers: 3 at most (w4, w3, w9), plus the cert farms 05/07.
 ### 2026-11-15 23:35Z: jtab-guard certificate (orchestrator, integ 11db7476e)
 - Review: blocked, because L3a w13 has not landed the certificate yet (L3a a8dbed24f says R-A is decided and the kind is being implemented). I sent L3a the acceptance checks: same cell with no ebp write and no store between guard and reload; the guard dominates the jmp, with the unsigned ja/jae condition from the opcode (signed only with an index ≥ 0 proof); the index transforms, two-level byte tables included, applied to the extent; T read-only and every entry with a dispatcher entry; recomputed over every certificate.
 - bottleneck: w4's v3 aggregation (FREEZE); the jtab-guard commit (L3a w13).
+
+### 2026-11-15 23:45Z: v3 done, FREEZE lifted, lead at 814542a8b
+- v3 aggregation (w4): prover tree d09b9c39f, queue 7c3074644653-f3eb5096ad36, 18,649 keys, REQUIRE_ALL=1. Published at fnv-nx-build l3b-lift/certsagg/7c3074644653-f3eb5096ad36/54-6d6b7707b04c; the 54-e192c6eb32f1 branch is a stale-prover run and is ignored.
+  - proved 18,186; model-gap 451; timeout 7 (its own class); FAILED(model-defect) 4, all certified by defectspec as rep-prefix-ignored; agree-except-declared 1.
+  - far (ea basis, 16 shapes): 14 uncertified (selector other than cs/NULL); 2 (ff5c2c00, ff5cfd00) uncertified because their basis shapes ff742c00 and ff74fd00 were never queued. Rule: every far shape's basis shapes go in the queue.
+- FREEZE on prove/model_sail/symform/certbasis is lifted.
+- Merged into the lead: L3a base3 80832d8b5 (23af7a758), simdfarm (89b6a07f5: rtgen stays deleted; the generated rt headers are read only through proof/genout.gen_dir), w14 (814542a8b: sdmfeat reads the declared CPU through cpumodel_bits.model_words, the generator's own reader; its direct gcc compile of cpumodel.c is deleted).
+- Doing:
+  - w4: post-v3 queue on 814542a8b: keys whose sha moved (the 10 far FF keys), the 7 timeouts, new keys and far-basis keys; up to 4 farms.
+  - worker: host recipe root for rt/rcptab.c, so that test_simdspec and farm/rcpcert.sh build through recipe.py and their direct gcc calls are deleted.
+  - jtab-guard: w13 emitter 159d25924 accepted in shape, with C4 (read-only section, dispatcher entries) required in the certificate. The real certificates are reviewed after w7's memory fix.
+- Open: 451 model-gap keys block the pack root (forms ⊆ certified). The class rule is still to be decided; next item. gate_oracle: 10 test files have no oracle entry (census, defectspec, forms_cmpimm, forms_far, forms_immsel, forms_simdclass, forms_ssefp, shardok, stringspec, treeid). genout reads GATE_CACHE from the environment until L1 789ef219c (published_output) is merged.
+- bottleneck: the model-gap class rule (L3b); w7's memory fix (L3a), for jtab.
