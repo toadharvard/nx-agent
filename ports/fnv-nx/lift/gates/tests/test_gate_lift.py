@@ -68,8 +68,8 @@ REC_ASM = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc
 
 def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
     """A repo with the REAL tools of lift/gates, a lifted product root (generated lifted.cc from BODY), one runtime root per text of RTS
-    (rt.S, a separate product root of the toy tree) and, when IMAGE, a link root whose recipe lists the lifted root and the runtime roots in
-    link.roots (the image: the unit the gates judge)."""
+    (rt.S, a separate product root of the toy tree) and, when IMAGE, an image root (the unit the gates judge). Its link members are derived by the definer
+    closure, so its one unit calls `f` of the lifted root and `fnvl_dispatch` of the runtime roots."""
     rec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
            "flags": {"c": ["-mabi=ilp32"], "cxx": ["-mabi=ilp32", "-O1"], "asm": ["-mabi=ilp32"]}, "include": [], "units": "all",
            "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [ROOT + "/body.s"], "outputs": ["gen/lifted.cc"]}],
@@ -82,7 +82,8 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
         files[r + "/rt.S"] = text
         files[r + "/build.json"] = json.dumps(REC_ASM)
     if image:
-        files[T + "img/build.json"] = json.dumps({"format": "fnvnx-recipe/1", "link": {"roots": [ROOT] + rtroots}})
+        files[T + "img/build.json"] = json.dumps(dict(REC_ASM, link={"output": "x.exe", "kind": "exe", "flags": ["-m", "aarch64linux"]}))
+        files[T + "img/e.c"] = "void f(void);\n%svoid _start(void) { f(); %sfor (;;) ; }\n" % (("void fnvl_dispatch(void);\n" if rtroots else ""), ("fnvl_dispatch(); " if rtroots else ""))
     extra = [{"path": T + "lift/gates", "class": "tool"}]
     extra += [{"path": r, "class": "product", "target": "host", "recipe": r + "/build.json"} for r in rtroots]
     if image:
@@ -193,7 +194,8 @@ def main():
     rc, r, o = gate(lifted_repo("l-rt", BODIES["ordered"][0], pack, efact, rts=()), "order", cache)
     check("image without a runtime definer: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
     rc, r, o = gate(lifted_repo("l-rt2", BODIES["ordered"][0], pack, efact, rts=(RT, RT)), "order", cache)
-    check("image with two runtime definers: red", rc == 2 and r.get("status") == R and "2 objects" in r["detail"], (rc, r))
+    check("image with two runtime definers: the image link is red at the definer closure (one definition per name), so the gate has no runtime member and is red",
+          rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
     rc, r, o = gate(lifted_repo("l-nosites", BODIES["ordered"][0], pack, dict(efact, sites=None)), "order", cache)
     check("lifted root, contract_inputs.json declares no sites: red, input missing", rc == 2 and r.get("status") == R and "no sites" in r["detail"], (rc, r))
     fx2 = publish("facts1", lambda d: facts_pub(d, "1 00401000\n"))

@@ -85,7 +85,7 @@ def main():
     os.makedirs(frames)
     m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root), quantum=tb.QUANTUM)
     seen = []
-    g = bootgpu.Gpu(lib, m, "docked", on_present=seen.append)
+    g = bootgpu.Gpu(lib, m, "docked", on_present=seen.append, on_exit=lambda code: os._exit(3))
     lines = []
     m.on_console(lines.append)
     r = m.run()
