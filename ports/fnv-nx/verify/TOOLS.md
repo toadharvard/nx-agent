@@ -704,28 +704,35 @@ certified = universe - red.  Counts on stdout.  Exit status 1 when red.
 ```text
 gate_disp - the typed dispatch tables of the lifted guest hold exactly the rows the generator declared (part of the L1 verdict).
 
-    gate_disp.py --elf guest.elf --rows dispatch_rows.tsv [--universe universe.tsv]
+    gate_disp.py --elf guest.elf --rows disp_rows.tsv [--rows native_disp_rows.tsv ...] [--universe universe.tsv]
 
-The generator stage (L3a: phf.table_c, disp.cc, native_disp.cc) writes typed C++ arrays `fnvnx_entry_fn NAME[N]` and, as a declared output of
-the same stage (in the store and in the keys), the rows file the arrays were generated from:
-    table<TAB>index<TAB>guest_addr_hex<TAB>entry_symbol          (`#` lines skipped; the last `# table_id <hex>` line is the table id)
-`entry_symbol` is `-` for a null slot.  The ELF is a 32-bit (ILP32) AArch64 image: slot `index` of table NAME is the u32 word at NAME + 4*index.
+The generator (L3a: lift/tools/dispgen.py, phf.table_c) writes, per table and in the same run, a rows file `fnvnx-disp-rows/1` (a declared output of the
+generator stage, in the store and in the keys):
+    # fnvnx-disp-rows/1
+    # table_id <hex>                                   (only when the entries file has one)
+    # hash <P>_disp_table slots=<N> empty=<E>
+    # table<TAB>index<TAB>addr<TAB>symbol<TAB>slot
+    <P>_disp_entries<TAB>index<TAB>addr (hex)<TAB>symbol<TAB>slot       one row per element of the entries array, in array order
+and the typed data of the prefix P (ILP32 image): `P_disp_table` u32[2N] pairs {key, index+1}; `P_disp_entries` fnvnx_entry_fn[max(count,1)];
+`P_g` u16[2^NBITS]; `P_phf_params` u32[4] = {K1, K2, NBITS, TBITS}.  The lookup of rt.c / dispatch.c is
+    i = ((a ^ g[(a * K1) >> (32 - NBITS)]) * K2) >> (32 - TBITS)     (arithmetic modulo 2^32)       found iff table[2i] == a: entries[table[2i+1] - 1].
 
-Rule, for EVERY table and EVERY row (no sampling).  A row is certified when all hold:
-  - the table symbol is defined exactly once, its st_size is 4 * (number of rows of the table), its rows are the indexes 0..n-1 each once
-    (`table-undefined`, `table-ambiguous`, `table-size`, `index-gap`, `duplicate-row`), and its bytes are inside one PT_LOAD segment (`table-unreadable`);
-  - a non-null row: the entry symbol is defined exactly once (`symbol-undefined`, `symbol-ambiguous`), the slot word is that symbol's address
-    (`wrong-target`), and the slot is covered by a load-time relocation when the image has any (SHT_RELR / SHT_RELA / SHT_REL; `unrelocated`):
-    the slot is the R_AARCH64_ABS32 (P32) of the source, resolved by the link to the word and kept by the relocation;
-  - a null row: the word is 0 (`null-slot-nonzero`) and no relocation covers it (`null-slot-relocated`);
-  - one guest address names one symbol within a table (`entry-conflict`).
-With --universe (the code entries: first column the address as hex, `#` lines skipped) every address needs a non-null row in some table (`no-entry`).
-A rows file that is missing or does not parse, or a missing ELF, is red (`rows:no-rows`, `rows:format`, `elf:no-elf`) with the universe counted as the
-rows it could not read (at least 1).  An extra slot cannot exist: the size of the table equals its rows, so a slot without a row is `table-size`.
+Rule, for EVERY rows file, EVERY row and EVERY slot (no sampling).  A rows file is certified when all hold (else the item `P:<reason>`):
+  - the header is `fnvnx-disp-rows/1` with a `# hash` line naming `P_disp_table`; the four symbols are defined exactly once, in one PT_LOAD
+    (`symbol-undefined`, `symbol-ambiguous`, `table-unreadable`); `P_disp_table` has 8*N bytes, `P_phf_params` 16, `P_g` 2 << NBITS, N == 1 << TBITS,
+    `P_disp_entries` 4*max(count,1) (`table-size`, `params`); the rows name `P_disp_entries` with the indexes 0..count-1 once, distinct slots below N,
+    N - count == E (`rows-shape`, `duplicate-row`, `index-gap`, `slot-count`);
+A row (item `P_disp_entries[index]`) is certified when:
+  - its symbol is defined exactly once, and the word entries[index] is its address, covered by a load-time relocation when the image has any
+    (SHT_RELR / RELA / REL: the R_AARCH64_ABS32 of the source; `wrong-target`, `unrelocated`, `symbol-undefined`, `symbol-ambiguous`); with count 0 the one
+    element is 0 and no relocation covers it (`empty-element`);
+  - table[2*slot] == addr and table[2*slot+1] == index+1 (`wrong-slot`), and the LOOKUP with the stored parameters hashes addr to `slot` (`hash-miss`);
+A slot no row names (item `P_disp_table[slot]`) is certified when its index half is 0 and its key does not hash to it (`stray-slot`, `empty-slot-hits`).
+With --universe (the code entries: first column the address as hex) every address needs a row in some rows file (`no-entry`).
+A missing or malformed rows file, or a missing ELF, is red (`rows:no-rows`, `rows:format`, `elf:no-elf`).
 
-Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): items = every row, every table, every universe address;
-uncertified = `<table>[<index>]:<reason>` / `<table>:<reason>` / `<addr 8 hex>:no-entry` / `rows:<reason>`.  Counts only on stdout.  Exit 1 when red.
-That the lookup from a guest address to its slot index is the one the generator chose is the generator's contract; this gate proves the slots.
+Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): items = per rows file 1 + rows + empty slots, plus the universe addresses;
+uncertified = the ids above `:<reason>`.  Counts only on stdout.  Exit 1 when red.
 ```
 
 ## verify/a64access.cc
