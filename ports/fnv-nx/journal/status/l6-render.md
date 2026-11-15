@@ -897,3 +897,6 @@ Paused: w3b, w4, farm; no other work.
 - 15:22Z L6A gl4link2 8e94c389a: gl4's internal GLSL is now nx_gl4shim_progs (5 rows) with NX_GL4SHIM_OUT_CAP.
     - w5 (doing): re-run sm_link on 8e94c389a with the table rows in the universe and the cap taken from the header. The new head replaces 2d61e9fb9 in the L1 hand-off.
     - Gap: nxgpu SHADER_CREATE (raw GLSL) lies outside the universe. Asked L6A to delete it if no product root calls it (rule 3), or else to move the caller's GLSL into the table.
+- 15:24Z L6A: the third GLSL source is NXGPU_FN_SHADER_CREATE. Its one caller is d3d9/dev/ffp_prog.cpp:42 (the ffp_glsl.gen.h blobs).
+    - The sm_link universe is the gamedata set ∪ nx_gl4shim_progs (5) ∪ the FFP programs (vs v, ps v), v ∈ {smooth, flat}.
+    - w5 (doing): one re-run on gl4shim 8e94c389a that covers all three. It closes w5's FFP item.
