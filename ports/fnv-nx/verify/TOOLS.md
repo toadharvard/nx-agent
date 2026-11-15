@@ -1033,10 +1033,10 @@ bootpath.py - the guest-path rule of the boot stage: where a guest SD path lands
 A guest path is a string, "sdmc:/a/b" (prefix case-insensitive) or "/a/b"; "\" counts as "/". Components "" and "." are
 dropped; ".." removes the previous component and stops at the card's root, so nothing outside the mounts is reachable
 (the path is refused by clamping, not by an error: "/../x" is "/x").
-Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at sdmc:/switch/fnv and at
-sdmc:/fnvnx/game: a path under either prefix (compared case-folded) continues inside `game`, except that the port's own
-entries of sdmc:/switch/fnv (PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without `game`
-it is <root>/switch/fnv when that directory holds anything besides the port's own entries, else <root>/fnvnx/game.
+Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at FNVNX_SD_DIR (sdlayout.h, read by
+name through hostabirec.py; sdmc:/switch/fnv): a path under that prefix (compared case-folded) continues inside `game`, except that
+the port's own entries of it (FNVNX_SD_PORT_NAMES: PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without
+`game` it is <root>/FNVNX_SD_DIR, always, with no inspection of the directory. The header has no other name for the game directory.
 Case. The SD card folds case. Each component is matched against the host entries: if the exact spelling exists it is
 used (os.path.lexists); else the host entries equal under str.casefold() are collected and the first in sorted order
 (code-point order, deterministic) is taken; with no match the spelling given is kept (a path to be created).

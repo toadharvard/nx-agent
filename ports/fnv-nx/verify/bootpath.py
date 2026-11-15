@@ -3,10 +3,10 @@
 A guest path is a string, "sdmc:/a/b" (prefix case-insensitive) or "/a/b"; "\\" counts as "/". Components "" and "." are
 dropped; ".." removes the previous component and stops at the card's root, so nothing outside the mounts is reachable
 (the path is refused by clamping, not by an error: "/../x" is "/x").
-Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at sdmc:/switch/fnv and at
-sdmc:/fnvnx/game: a path under either prefix (compared case-folded) continues inside `game`, except that the port's own
-entries of sdmc:/switch/fnv (PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without `game`
-it is <root>/switch/fnv when that directory holds anything besides the port's own entries, else <root>/fnvnx/game.
+Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) is mounted at FNVNX_SD_DIR (sdlayout.h, read by
+name through hostabirec.py; sdmc:/switch/fnv): a path under that prefix (compared case-folded) continues inside `game`, except that
+the port's own entries of it (FNVNX_SD_PORT_NAMES: PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without
+`game` it is <root>/FNVNX_SD_DIR, always, with no inspection of the directory. The header has no other name for the game directory.
 Read-only. The mounts of the declared inputs (manifest/fonts_mirror.json, bootdecl.py; the font set is FNVNX_SD_FONTS) are on
 `root` in every mode, never in `game` (their first component under switch/fnv is in PORT_NAMES), and read_only(sd) is true for a mount
 and everything below it (mounts compared case-folded, after the ".." clamping of resolve). The mount list is the `read_only` argument
@@ -24,7 +24,7 @@ import hostabirec
 
 _R = hostabirec.record()
 _SD = _R.string("FNVNX_SD_DIR").split(":/", 1)[1].strip("/").lower()          # sdlayout.h: the port's directory on the card, "switch/fnv"
-GAME_MOUNTS = (_SD, "fnvnx/game")   # the install is also reachable at fnvnx/game (a model path of the boot stage; the header has no name for it)
+GAME_MOUNTS = (_SD,)   # the one mount of the game install: FNVNX_SD_DIR
 _NAMES = _R.string("FNVNX_SD_PORT_NAMES").lower().split()   # sdlayout.h: the names under FNVNX_SD_DIR that belong to the port; `x*` is a prefix
 PORT_NAMES = {n for n in _NAMES if not n.endswith("*")}
 PORT_PREFIXES = tuple(n[:-1] for n in _NAMES if n.endswith("*"))
@@ -47,14 +47,9 @@ class BootPath:
     def __init__(self, root, game=None, read_only=()):
         self.ro = [[c.casefold() for c in _parts(m)] for m in read_only]   # casefold, as resolve matches host entries
         sw = os.path.join(root, *_SD.split("/"))
-        inst = os.path.isdir(sw) and any(not (n.lower() in PORT_NAMES or n.lower().startswith(PORT_PREFIXES))
-                                         for n in os.listdir(sw))
-        self.root, self.game = root, game or (sw if inst else os.path.join(root, "fnvnx", "game"))
-        if game:   # the card's own side of the mount points: the port's entries are made under them
-            for m in GAME_MOUNTS:
-                os.makedirs(os.path.join(root, *m.split("/")), exist_ok=True)
-        else:      # the device always has sdmc:/switch/fnv
-            os.makedirs(sw, exist_ok=True)
+        self.root, self.game = root, game or sw
+        for m in GAME_MOUNTS:   # the card's own side of the mount point: the device always has it, and the port's entries are made under it
+            os.makedirs(os.path.join(root, *m.split("/")), exist_ok=True)
         self.listing = {}
         self.faults = {}                 # (call, errno name, sd path) -> count
 
