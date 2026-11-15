@@ -12,6 +12,8 @@ Updated 2026-11-14 23:30Z (path plan). Older sections below are from 2026-11-12 
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
 
+**2026-11-15 15:10Z (orchestrator).** Trunk a5c8f427 unchanged. cand2 c7fde52c3 fixing its own reds (objstub target profile 939c2794d, abi decoder C forms f215e1b27/4159b2316, selftest scratch leak c7fde52c3); abi 8690/10434 after L2 w2 0a6c04811; datamodel waits on the L2 farm's none-elf pin (CFG-LINK rule for configure link tests). L6 sm_link 0 red at 2d61e9fb9 queued for cand4 behind w6-root; L6A told 4.6 is unblocked. L6A gl4 libnxgl4.so from the recipe, derived link roots, 3b360ffd2. No lead stopped on the limit.
+
 **2026-11-15 11:10Z (orchestrator).** Trunk a5c8f427 (unchanged since 2026-11-12, 0 product roots). cand2 frozen at 62a24a5ec
 (CLAUDE.md 2cb25d1b4): reds only, head e11706a09, then `l1.py merge`. cand3 (L1 w12): Header home 98c497a6e + fact universe
 d1f625e98, then guest hermeticity (-nostdinc + runtime sysroot from verify/guest_compiler.json; until then every guest object
