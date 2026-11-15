@@ -1052,3 +1052,7 @@ One bounded read-only pass over lift/. Each item gives its replacement.
   - (3) Fallthrough into data is a universe defect, fixed in this relift's facts (w7).
   - w7 first proposes the class rule: which entry kinds admit data (ptr, tail, slot span), and which facts prove code or data. The residue (sites neither rule closes) is reported with the relift.
   - The facts farms keep running on e7b12ab35 as measurement; the universe change will re-key them.
+- 23:34 L5 briefs on gs and null_seg_access handed over (WDK 7.1 ISO: 0 of 70 displays pass; Wine's gs is host state). L5 adds `null_seg_access` as an x86sys.json row.
+  - w8's consumer: the null-selector access row for ds, es, fs and gs; reads of the initial gs stay red unless certified; reach certificates produce `fnvnx_reach_violation(fact_id)`.
+  - Kind 1 (the /GS failure path, from the load-config SecurityCookie) is L1's; kind 2 is the call graph.
+  - The residue goes to the orchestrator with the relift.
