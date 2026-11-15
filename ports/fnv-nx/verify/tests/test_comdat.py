@@ -89,6 +89,21 @@ check("... linkstrict: identity-undecidable", g["status"] == "red" and "identity
 st, (uni, red), g, txt = run({"toy/x1.cc": asm(HEAD + DATA + ".Lout: .word 9\n")})
 check("... the same group in ONE object only: nothing to compare, not red", "sigB" not in uni and g["status"] == "green", (uni, red, g, txt))
 
+# 4c. rule E: a relocation to a LOCAL sized symbol outside the group (a static function, an .isra clone): the entity is compared by bisimulation, cycles identical
+HEADE = (".section .text.sigE,\"axG\",@progbits,sigE,comdat\n.weak sigE\n.type sigE,%function\nsigE:\n adrp x0, ea\n add x0, x0, :lo12:ea\n ret\n")
+LOCE = lambda eb: (".section .text.ea,\"ax\"\n.type ea,%function\nea: bl eb\n ret\n.size ea,8\n.section .text.eb,\"ax\"\n.type eb,%function\neb:" + eb + "\n.size eb,16\n")
+MUT = " bl ea\n ret\n nop\n nop"
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(HEADE + LOCE(MUT)), "toy/x2.cc": asm(HEADE + LOCE(MUT))})
+check("a mutually recursive pair of local functions, identical in both objects: green (bisimulation)", "sigE" in uni and not red and g["status"] == "green", (uni, red, g, txt))
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(HEADE + LOCE(MUT)), "toy/x2.cc": asm(HEADE + LOCE(" bl ea\n ret\n nop\n brk #1"))})
+check("... one callee body differs: red, both objects named", "x1.cc" in red.get("sigE", "") and "x2.cc" in red["sigE"], (uni, red))
+U = lambda n: '.section .text.c,"ax",@progbits,unique,%d\n' % n
+REF = lambda x: " adrp x1, %s\n add x1, x1, :lo12:%s\n ret\n" % (x, x)   # lo12 relocations are always emitted, even inside one section
+TWO = HEADE + U(1) + ".type ea,%function\nea:" + REF("eb") + ".size ea,12\n" + U(2) + ".type eb,%function\neb:" + REF("ea") + ".size eb,12\n"
+ONE = HEADE + U(1) + ".type ea,%function\nea:" + REF("ea") + ".size ea,12\n"
+st, (uni, red), g, txt = run({"toy/x1.cc": asm(TWO), "toy/x2.cc": asm(ONE)})
+check("... a cycle of two against a self-loop of the same body: bisimilar, green (greatest fixed point)", "sigE" in uni and not red, (uni, red))
+
 # 4b. the symbols a group defines are part of its identity: same bytes, another size or visibility is another definition
 SYM = lambda extra: (".section .text.sigD,\"axG\",@progbits,sigD,comdat\n.weak sigD\n" + extra + ".type sigD,%function\nsigD: ret\n")
 st, (uni, red), g, txt = run({"toy/x1.cc": asm(SYM("") + ".size sigD, 4\n"), "toy/x2.cc": asm(SYM("") + ".size sigD, 4\n")})

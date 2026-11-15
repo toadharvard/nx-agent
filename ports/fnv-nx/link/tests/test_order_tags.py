@@ -90,6 +90,24 @@ check('BR: br inside a frame scanned without an exception', 'f' in rows, True)
 # rule LP: code reached only by an unwind edge (after a call, no other edge) keeps the call's stack pointer
 rows, o = scan('lp', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'bl g', 'ldp x29, x30, [sp], #32', 'ret', 'str w0, [sp, #8]', 'ldp x29, x30, [sp], #32', 'ret'])
 check('LP: landing pad keeps sp, its frame access certified', {k: v for k, v in rows.items() if v}, {})
+# rule D (dominance): a store to an address-taken slot before any instruction forms its address is certified; a back edge from the forming instruction is a path
+rows, o = scan('dom1', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'str w0, [sp, #16]', 'add x1, sp, #16', 'ldar x2, [x1]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
+check('D: store before the address is formed is certified', rows.get('f+0x8'), '')
+rows, o = scan('dom2', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', '1: str w0, [sp, #16]', 'add x1, sp, #16', 'ldar x2, [x1]', 'cbnz x3, 1b', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
+check('D: a loop back edge makes the store shared', bool(rows.get('f+0x8')), True)
+rows, o = scan('dom3', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'add x1, sp, #16', 'ldar x2, [x1]', 'str w0, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\t-16:8\n')
+check('D: a store after the address is formed is shared', bool(rows.get('f+0x10')), True)
+# rule A: an access in the incoming stack-argument area is a frame access iff the row has args:N covering it and it overlaps no recorded range
+rows, o = scan('arg1', ['ldr w0, [sp, #8]', 'ret'], 'f\t\targs:16\n')
+check('A: in the argument area: certified', {k: v for k, v in rows.items() if v}, {})
+rows, o = scan('arg2', ['ldr w0, [sp, #16]', 'ret'], 'f\t\targs:16\n')
+check('A: past the argument area: red', bool(rows.get('f+0x0')), True)
+rows, o = scan('arg3', ['ldr w0, [sp, #8]', 'ret'], 'f\t\n')
+check('A: a row without args: red', bool(rows.get('f+0x0')), True)
+rows, o = scan('arg4', ['ldr w0, [sp, #8]', 'ret'], 'f\t8:4\targs:16\n')
+check('A: onto a recorded address-taken parameter: not F (its address is not formed: rule D certifies it, never F)', rows.get('f+0x0'), '')
+rows, o = scan('unk', ['stp x29, x30, [sp, #-32]!', 'mov x29, sp', 'str w0, [sp, #16]', 'ldp x29, x30, [sp], #32', 'ret'], 'f\tunk:mem\targs:0\n')
+check('unk token: the row is dynamic, a frame store is red', bool(rows.get('f+0x8')), True)
 # a crash of the scan is a red row naming the object, never an exception
 orig = A.scan
 A.scan = lambda p: (_ for _ in ()).throw(TypeError('can only concatenate tuple (not "int") to tuple'))

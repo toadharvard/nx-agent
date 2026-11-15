@@ -56,6 +56,23 @@ INPUT FACTS AND RULES.
          the object the address points into; this is what lets a derived frame address (tag X) be judged by its origins.
  STACK   input fact: an sp/x29-relative access with an immediate offset lies in the thread's own stack frame; the frame size is
          the CFA-relative sp that this gate computes from the instructions (FRAME FACTS above).
+ BR      rule: an indirect `br xN` at sp == CFA (the frame already popped), with N not x30 and no relocation or ADR into the function's own
+         range, leaves the function (a tail call): no edge, and x0-x8 escape as at a call. Any other `br` may go to any instruction: it gets an
+         edge to every instruction (promoted until the fixpoint is stable). Soundness: with sp == CFA the callee's frame is the caller's caller's, the
+         function has no further instruction to run; a `br` that is not provably such an exit is over-approximated by all targets.
+ LP      rule: an instruction that no edge reaches in the function is entered with the state of the call that unwinds to it (a landing pad:
+         callee-saved registers and sp as at the call). The entries are the unreached instructions and every unreached source SCC, found by Tarjan.
+         Soundness: control reaches an instruction only by an edge of the CFG or by an unwind from a call (the only transfer not shown by an
+         instruction); an unwind restores sp to the frame of the function that catches, so sp is the call's sp, and x19-x28 are callee-saved.
+ KC      rule: `movz`/`movk`/`movn`/`mov` with an immediate give a register the constant tag ('K', v); `sub|add sp, sp, xN` with xN of that tag changes sp by
+         v. Soundness: the tag is the exact value of the register on every path that reaches the instruction (a join of different values drops it); a
+         constant is not an address, so it never counts as a frame-derived value.
+ D       rule (dominance; the prologue home-slot store is its forward form): see Func.unshared. A callee cannot reach a slot whose address is not
+         formed yet except by a wild access from its own sp, which OWNER assumption ASM-006 (no wild accesses) excludes; so no call condition is needed.
+ A       rule (incoming arguments): [CFA, CFA+args) is the call's argument area, args = crtl->args.size from the third field `args:N` of the frame row;
+         an access inside it that overlaps no recorded range is a frame access. Soundness: the area holds the call's own stack arguments, written by the
+         caller before the call; an address-taken parameter in it is a recorded range, and any other slot has no name another thread could hold.
+         A row with an `unk` token (a variable whose slot is not a constant frame offset) is `dynamic` for the gate: its ranges are not complete.
  ROBND   input fact: a load through a read-only base register plus an index stays inside the object; the read-only sections and
          their objects are those of objects.json (the object's section table, flags without SHF_WRITE and PT_GNU_RELRO).
  RUN     part of rule R9 (docs/ORDERING.md, "Everything else is ordered", aggregates on the dmb fence path): the loads of one run
@@ -324,6 +341,10 @@ class Func:
         self.words = sorted([i.off for i in self.ins] + self.undec)
 
     # -- control flow
+    _forming = None
+    args = None   # the incoming stack-argument size from the frame row (bytes at [CFA, CFA+args)), None when the row has none
+    _reach = None
+
     def build(self):
         n = len(self.ins)
         succ = [set() for _ in range(n)]
@@ -691,6 +712,8 @@ class Func:
                 res[i.off] = ('ordered', 'O')
             elif self.frame_ok(i, sp, rg):
                 res[i.off] = ('frame', 'F')
+            elif self.unshared(k, i, sp, rg):
+                res[i.off] = ('unshared', 'D')
             elif mk == 'load' and reloc is not None and reloc.type in R_LINKER_LOAD:
                 res[i.off] = ('linker', 'L')
             elif mk == 'load' and reloc is not None and reloc.type in R_DIRECT_LOAD and target_ro(self.o, reloc):
@@ -720,7 +743,67 @@ class Func:
         sz = acc_size(i)
         if cs is None or sz is None:
             return False
-        return all(c + sz <= 0 and not any(c < o + s and o < c + sz for o, s in self.rec) for c in cs)
+        return all(self.in_frame(c, sz) and not any(c < o + s and o < c + sz for o, s in self.rec) for c in cs)
+
+    def in_frame(self, c, sz):
+        """[c, c+sz) lies in the function's own frame (below the CFA) or in its incoming stack-argument area [CFA, CFA+args) (rule A: the argument area
+        belongs to the call, the caller wrote it before the call and holds no other thread's name for it; its size is the plugin's crtl->args.size)"""
+        return c + sz <= 0 or (self.args is not None and c >= 0 and c + sz <= self.args)
+
+    def forming(self):
+        """{k: origins tuple, or None for an unknown origin}: the instructions after which a register holds a frame address (an `add`/`sub`/`mov` from sp, x29 or a
+        frame-derived register), by the post state of the instruction, cached"""
+        if self._forming is None:
+            self._forming = {}
+            for k, st in enumerate(self.state):
+                if st is None:
+                    continue
+                post = dict(self.transfer(k, st)[1])
+                og = set()
+                for r in self.ins[k].wr:
+                    t = post.get(r)
+                    if r != SP and is_frame(t):
+                        o = origins(t)
+                        og = None if (o is None or og is None) else og | set(o)
+                        if og is None:
+                            break
+                if og is None or og:
+                    self._forming[k] = None if og is None else tuple(sorted(og))
+        return self._forming
+
+    def reaches(self, rng):
+        """the set of instructions CFG-reachable (one or more edges, loops included) from an instruction that forms an address inside the range (o, s)
+        (end included: a one-past-the-end pointer), or from one whose origin is unknown"""
+        key = rng
+        if self._reach is None:
+            self._reach = {}
+        if key not in self._reach:
+            o, s = rng
+            seeds = [k for k, og in self.forming().items() if og is None or any(o <= c <= o + s for c in og)]
+            seen = set()
+            work = list(seeds)
+            while work:
+                k = work.pop()
+                for t in self.succ[k]:
+                    if t not in seen:
+                        seen.add(t)
+                        work.append(t)
+            self._reach[key] = seen
+        return self._reach[key]
+
+    def unshared(self, k, i, sp, rg):
+        """rule D (dominance; the forward form of it is the prologue home-slot store): a frame access that overlaps recorded variables is unshared, and so
+        needs no order, iff for every recorded range it overlaps no instruction that forms an address inside that range can reach it in the CFG.
+        Soundness: another thread can observe a frame object only through an address of it; before the first address-forming instruction on every path no
+        such address exists (the frame is the thread's own: STACK), and a loop back edge from a forming instruction to the access is a path from it."""
+        if self.rec is None or self.rec == a64frame.DYNAMIC:
+            return False
+        cs = self.frame_offsets(i, sp, rg)
+        sz = acc_size(i)
+        if cs is None or sz is None or not all(self.in_frame(c, sz) for c in cs):
+            return False
+        ov = {r for r in self.rec for c in cs if c < r[0] + r[1] and r[0] < c + sz}
+        return bool(ov) and not any(k in self.reaches(r) for r in ov)
 
     def fences(self, res, cand):
         n = len(self.ins)
@@ -814,6 +897,12 @@ def functions_of(o):
     return out, extra
 
 
+def frame_args(frows, names):
+    """the incoming stack-argument size (bytes) all names of a function agree on, or None (a 2-field row, no row, or disagreement)"""
+    a = {getattr(x, 'args', None) for n in names for x in (frows or []) if x[0] == n}
+    return next(iter(a)) if len(a) == 1 else None
+
+
 def frame_record(frows, names):
     """(ranges | 'dynamic' | None, kind): the one record all names of a function agree on; kind '' or why there is none"""
     if frows is None:
@@ -855,6 +944,8 @@ def scan(path):
             rec, why = frame_record(frows, names)
             rows.append((name, why))
         f = Func(o, si, a, b, name, o.relocs.get(si, {}), rec)
+        if kind == 'func':
+            f.args = frame_args(frows, names)
         f.build()
         f.dataflow()
         res = f.judge()
