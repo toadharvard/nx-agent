@@ -320,6 +320,16 @@ of the declaration: a tool root with a recipe, such as `bridgefacts`, which the 
 (`inputs` of a generate stage, `{root, path}` in a gate's declaration file; tracked files of an admitted `tool` root). A root that consumes a
 declaration never also owns its inputs. A root cycle stays red; this rule is what removes the cycle, and a second copy of an input is deleted.
 
+### Directory outputs
+
+A `generated` step may also declare `"dirs": [PATH, ...]`: root-relative directories it writes as a whole (the lifted pack: thousands of files). The
+launcher creates each directory under `/out` (listed as `dir:PATH` in its first argument); the stage's files must be exactly the step's `outputs` plus
+files at any depth inside a declared directory, and each directory must hold at least one file (anything else is red, naming the stray or missing
+paths). The directory is ingested into the store by content and copied whole into the root's view. A directory is named like a file output by the
+consumers: a later step's `inputs` ref `{"stage": "<root>:gen:I", "path": DIR}` mounts it at `/stage/DIR`, a root's `outputs` map may name it, and another
+root reads it through `uses`. A directory output does not overlap another output or a tracked file. A stage whose stage-ref input is an output of a
+red generator is blocked by it (never run on a missing path). Tests: `tests/test_genchain.py` (a 3-stage chain, unmounted paths fail, the re-key rule).
+
 ### Generated `sources`
 `sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
 itself (a tracked file of it). Each listed file of a declared external is copied into the unit view as the unit `<external>/<path>`, so its content is in
@@ -438,7 +448,7 @@ Test: `tests/test_gate_publish.py` (two processes build one root on one cache at
 ## Shards and store merge
 
 A cold build of a large root is split over farms by one rule, with no second build path.
-- `recipe build --root R --shard i/N` (N <= 8, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
+- `recipe build --root R --shard i/N` (N <= 16, 0 <= i < N) builds the units whose first-stage key satisfies `int(key, 16) mod N == i`. The first-stage
   key is the PP stage key on the whole declared trees (`unitstage.Build.first_key`; a `.s` unit: its one stage), computed before anything runs, so every
   shard of one checkout agrees. The recipe asserts from the unit list that the shards are disjoint and together the unit set (`shard_partition`).
   All stages of a unit run in its shard. Root-level stages (tests, link, link tables, gates) do not run in a shard build; its `objects.json` has `shard`.
